@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "target": "ES2024",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2024"],
+    "strict": true,
+    "exactOptionalPropertyTypes": true,
+    "noUncheckedIndexedAccess": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "composite": true,
+    "rootDir": ".",
+    "outDir": "dist"
+  },
+  "references": [
+    { "path": "./packages/shared" },
+    { "path": "./packages/classifier" },
+    { "path": "./packages/processor" },
+    { "path": "./packages/api" }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "name": "@ses-adapter/processor",
+  "version": "1.0.0",
+  "private": true,
+  "main": "./dist/handler.js",
+  "types": "./dist/handler.d.ts",
+  "scripts": {
+    "build": "tsc --build"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.0.0",
+    "@aws-sdk/client-dynamodb": "^3.0.0",
+    "@aws-sdk/lib-dynamodb": "^3.0.0",
+    "@ses-adapter/classifier": "*",
+    "@ses-adapter/shared": "*",
+    "mailparser": "^3.7.0"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.0",
+    "@types/mailparser": "^3.4.0"
+  }
+}
