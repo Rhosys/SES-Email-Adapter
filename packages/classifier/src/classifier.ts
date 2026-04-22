@@ -46,7 +46,11 @@ export class EmailClassifier {
     const emailContent = this.formatEmailContent(input);
     const schema = buildOutputSchema();
 
-    const response = await this.client.messages.parse({
+    // messages.parse is a structured-output extension; cast until SDK types catch up.
+    const messagesApi = this.client.messages as unknown as {
+      parse: (params: unknown) => Promise<{ parsed_output: unknown }>;
+    };
+    const response = await messagesApi.parse({
       model: "claude-opus-4-7",
       max_tokens: 2048,
       thinking: { type: "adaptive" },
@@ -110,7 +114,7 @@ export class EmailClassifier {
 
     return {
       category: raw.category,
-      categoryData: raw.categoryData as CategoryData,
+      categoryData: raw.categoryData as unknown as CategoryData,
       spamScore: raw.spamScore,
       isValid: raw.isValid,
       summary: raw.summary,

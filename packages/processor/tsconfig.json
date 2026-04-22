@@ -8,5 +8,6 @@
     { "path": "../shared" },
     { "path": "../classifier" }
   ],
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": ["src/**/*.spec.ts"]
 }

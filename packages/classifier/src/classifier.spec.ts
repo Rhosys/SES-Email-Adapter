@@ -76,23 +76,16 @@ Track package: https://amazon.com/track/1Z999AA10123456784`,
 // Mocks
 // ---------------------------------------------------------------------------
 
-vi.mock("@anthropic-ai/sdk", () => {
-  const mockParse = vi.fn();
-  return {
-    default: vi.fn().mockImplementation(() => ({
-      messages: { parse: mockParse },
-    })),
-    __mockParse: mockParse,
-  };
-});
+const mockParse = vi.fn();
 
-function getMockParse() {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  return (require("@anthropic-ai/sdk") as { __mockParse: ReturnType<typeof vi.fn> }).__mockParse;
-}
+vi.mock("@anthropic-ai/sdk", () => ({
+  default: vi.fn().mockImplementation(() => ({
+    messages: { parse: mockParse },
+  })),
+}));
 
 function mockClaudeResponse(raw: object) {
-  getMockParse().mockResolvedValueOnce({ parsed_output: raw });
+  mockParse.mockResolvedValueOnce({ parsed_output: raw });
 }
 
 // ---------------------------------------------------------------------------
@@ -362,8 +355,7 @@ describe("EmailClassifier", () => {
 
       await classifier.classify(githubOtpEmail);
 
-      const mockParse = getMockParse();
-      const callArgs = mockParse.mock.calls[0][0] as {
+      const callArgs = mockParse.mock.calls[0]![0] as {
         messages: Array<{ role: string; content: string }>;
         system: Array<{ type: string; text: string }>;
       };
@@ -393,7 +385,7 @@ describe("EmailClassifier", () => {
 
       await classifier.classify(githubOtpEmail);
 
-      const callArgs = getMockParse().mock.calls[0][0] as { model: string };
+      const callArgs = mockParse.mock.calls[0]![0] as { model: string };
       expect(callArgs.model).toBe("claude-opus-4-7");
     });
 
@@ -410,7 +402,7 @@ describe("EmailClassifier", () => {
 
       await classifier.classify(githubOtpEmail);
 
-      const callArgs = getMockParse().mock.calls[0][0] as { thinking: { type: string } };
+      const callArgs = mockParse.mock.calls[0]![0] as { thinking: { type: string } };
       expect(callArgs.thinking).toMatchObject({ type: "adaptive" });
     });
 
@@ -428,7 +420,7 @@ describe("EmailClassifier", () => {
       const longBody = "x".repeat(10_000);
       await classifier.classify({ ...githubOtpEmail, textBody: longBody });
 
-      const callArgs = getMockParse().mock.calls[0][0] as {
+      const callArgs = mockParse.mock.calls[0]![0] as {
         messages: Array<{ role: string; content: string }>;
       };
       const content = callArgs.messages[0]?.content as string;
