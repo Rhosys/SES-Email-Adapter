@@ -22,6 +22,8 @@ function makeStore(): ProcessorStore {
     getEmailAddressConfig: vi.fn().mockResolvedValue(null),
     saveEmailAddressConfig: vi.fn().mockResolvedValue(undefined),
     getAccountFilteringConfig: vi.fn().mockResolvedValue(null),
+    getGlobalReputation: vi.fn().mockResolvedValue(null),
+    updateGlobalReputation: vi.fn().mockResolvedValue(undefined),
   };
 }
 
@@ -618,6 +620,78 @@ describe("SignalProcessor", () => {
       expect(saved.category).toBe(validClassification.category);
       expect(saved.summary).toBe(validClassification.summary);
       expect(saved.spamScore).toBe(validClassification.spamScore);
+    });
+
+    it("blocks new address when allowNewAddresses is false", async () => {
+      vi.mocked(store.getAccountFilteringConfig).mockResolvedValueOnce({
+        allowNewAddresses: false,
+        defaultFilterMode: "notify_new",
+      });
+
+      await processor.process(makeSqsEvent([{}]));
+
+      expect(store.saveArc).not.toHaveBeenCalled();
+      const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
+      expect(saved.status).toBe("blocked");
+      expect(saved.blockReason).toBe("new_sender");
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Global reputation tracking
+  // -------------------------------------------------------------------------
+
+  describe("global reputation tracking", () => {
+    it("updates reputation with wasBlocked=true for blocked signals", async () => {
+      vi.mocked(store.getEmailAddressConfig).mockResolvedValueOnce(
+        makeEmailAddressConfig({ approvedSenders: [] }),
+      );
+
+      await processor.process(makeSqsEvent([{}]));
+
+      expect(store.updateGlobalReputation).toHaveBeenCalledWith(
+        "example.com",
+        expect.objectContaining({ wasBlocked: true }),
+      );
+    });
+
+    it("updates reputation with wasBlocked=false for active signals", async () => {
+      await processor.process(makeSqsEvent([{}]));
+
+      expect(store.updateGlobalReputation).toHaveBeenCalledWith(
+        "example.com",
+        expect.objectContaining({ wasBlocked: false }),
+      );
+    });
+
+    it("marks wasSpam=true when classification category is spam", async () => {
+      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        ...validClassification,
+        category: "spam",
+        spamScore: 0.97,
+        categoryData: { category: "spam", spamType: "phishing", confidence: 0.97, indicators: [] },
+      });
+
+      await processor.process(makeSqsEvent([{}]));
+
+      expect(store.updateGlobalReputation).toHaveBeenCalledWith(
+        "example.com",
+        expect.objectContaining({ wasSpam: true }),
+      );
+    });
+
+    it("does not fail processing when updateGlobalReputation throws", async () => {
+      vi.mocked(store.updateGlobalReputation).mockRejectedValueOnce(new Error("DynamoDB error"));
+
+      await processor.process(makeSqsEvent([{}]));
+
+      expect(store.saveSignal).toHaveBeenCalledOnce();
+    });
+
+    it("fetches reputation for the sender eTLD+1 during filtering", async () => {
+      await processor.process(makeSqsEvent([{}]));
+
+      expect(store.getGlobalReputation).toHaveBeenCalledWith("example.com");
     });
   });
 });
