@@ -1,9 +1,9 @@
 import { randomUUID } from "crypto";
 import type { SQSEvent } from "aws-lambda";
-import type { Signal, Arc, Rule, Category, EmailAddressConfig, AccountFilteringConfig, SignalStatus, BlockReason } from "../types/index.js";
+import type { Signal, Arc, Rule, Category, EmailAddressConfig, AccountFilteringConfig, GlobalSenderReputation } from "../types/index.js";
 import type { MimeParser } from "./mime.js";
 import type { SignalClassifier } from "../classifier/classifier.js";
-import { getETLD1, evaluateFilter, type FilterResult } from "./filter.js";
+import { getETLD1, evaluateFilter } from "./filter.js";
 
 // ---------------------------------------------------------------------------
 // Interfaces
@@ -18,6 +18,8 @@ export interface ProcessorStore {
   getEmailAddressConfig(accountId: string, address: string): Promise<EmailAddressConfig | null>;
   saveEmailAddressConfig(config: EmailAddressConfig): Promise<void>;
   getAccountFilteringConfig(accountId: string): Promise<AccountFilteringConfig | null>;
+  getGlobalReputation(domain: string): Promise<GlobalSenderReputation | null>;
+  updateGlobalReputation(domain: string, update: { wasSpam: boolean; wasBlocked: boolean }): Promise<void>;
 }
 
 export interface ArcMatcher {
@@ -116,8 +118,17 @@ export class SignalProcessor {
 
     // 5. Filtering — bypassed entirely when signal matches an existing Arc
     if (!matchedArc) {
-      const emailConfig = await this.store.getEmailAddressConfig(accountId, recipientAddress);
-      const filterResult = evaluateFilter(emailConfig, senderETLD1, classification.spamScore);
+      const [emailConfig, accountConfig, reputation] = await Promise.all([
+        this.store.getEmailAddressConfig(accountId, recipientAddress),
+        this.store.getAccountFilteringConfig(accountId),
+        this.store.getGlobalReputation(senderETLD1),
+      ]);
+
+      const filterResult = evaluateFilter(emailConfig, senderETLD1, classification.spamScore, {
+        allowNewAddresses: accountConfig?.allowNewAddresses,
+        defaultFilterMode: accountConfig?.defaultFilterMode,
+        reputation,
+      });
 
       if (!filterResult.allowed) {
         const blockedSignal = buildSignal({
@@ -140,11 +151,16 @@ export class SignalProcessor {
             console.error("Blocked notification failed:", err);
           });
         }
+
+        this.store.updateGlobalReputation(senderETLD1, {
+          wasSpam: classification.category === "spam" || classification.spamScore >= 0.9,
+          wasBlocked: true,
+        }).catch((err) => console.error("Reputation update failed:", err));
         return;
       }
 
       if (filterResult.autoApprove) {
-        await this.autoApprove(accountId, recipientAddress, senderETLD1, emailConfig);
+        await this.autoApprove(accountId, recipientAddress, senderETLD1, emailConfig, accountConfig?.defaultFilterMode);
       }
     }
 
@@ -224,6 +240,11 @@ export class SignalProcessor {
         console.error("Notification failed:", err);
       });
     }
+
+    this.store.updateGlobalReputation(senderETLD1, {
+      wasSpam: isSpam,
+      wasBlocked: false,
+    }).catch((err) => console.error("Reputation update failed:", err));
   }
 
   private async autoApprove(
@@ -231,6 +252,7 @@ export class SignalProcessor {
     address: string,
     senderETLD1: string,
     existing: EmailAddressConfig | null,
+    defaultFilterMode: AccountFilteringConfig["defaultFilterMode"] = "notify_new",
   ): Promise<void> {
     const now = new Date().toISOString();
     if (existing) {
@@ -240,12 +262,11 @@ export class SignalProcessor {
         updatedAt: now,
       });
     } else {
-      const accountConfig = await this.store.getAccountFilteringConfig(accountId);
       await this.store.saveEmailAddressConfig({
         id: randomUUID(),
         accountId,
         address,
-        filterMode: accountConfig?.defaultFilterMode ?? "notify_new",
+        filterMode: defaultFilterMode,
         approvedSenders: [senderETLD1],
         createdAt: now,
         updatedAt: now,

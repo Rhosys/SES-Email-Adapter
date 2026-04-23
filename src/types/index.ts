@@ -182,7 +182,19 @@ export type SenderFilterMode =
   | "allow_all";   // no filtering
 
 export type SignalStatus = "active" | "blocked";
-export type BlockReason = "new_sender" | "spam" | "sender_mismatch";
+export type BlockReason = "new_sender" | "spam" | "sender_mismatch" | "reputation";
+
+// Global sender reputation — aggregated across all accounts, keyed by eTLD+1
+export interface GlobalSenderReputation {
+  domain: string;             // eTLD+1
+  verdict?: "allow" | "deny"; // explicit admin override; "deny" trumps account-level approval
+  verdictReason?: string;
+  signalCount: number;        // total signals seen from this domain
+  spamCount: number;          // signals classified as spam
+  blockCount: number;         // times blocked by any account
+  lastSeenAt: string;
+  updatedAt: string;
+}
 
 // Per-recipient-address configuration
 export interface EmailAddressConfig {
@@ -198,6 +210,7 @@ export interface EmailAddressConfig {
 // Account-level filtering defaults
 export interface AccountFilteringConfig {
   defaultFilterMode: SenderFilterMode;  // Used when auto-creating a new EmailAddressConfig
+  allowNewAddresses: boolean;           // false = disable first-contact auto-allow; require explicit approval for all new addresses
 }
 
 // ---------------------------------------------------------------------------
