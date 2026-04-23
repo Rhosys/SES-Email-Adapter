@@ -2,16 +2,26 @@
   "name": "ses-email-adapter",
   "version": "1.0.0",
   "private": true,
-  "workspaces": ["packages/*"],
   "scripts": {
-    "build": "tsc --build",
-    "dev": "tsc --build --watch",
-    "lint": "eslint packages/*/src/**/*.ts",
+    "build": "tsc",
+    "dev": "tsc --watch",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"
   },
+  "dependencies": {
+    "@aws-sdk/client-bedrock-runtime": "^3.0.0",
+    "@aws-sdk/client-dynamodb": "^3.0.0",
+    "@aws-sdk/client-s3": "^3.0.0",
+    "@aws-sdk/client-ses": "^3.0.0",
+    "@aws-sdk/lib-dynamodb": "^3.0.0",
+    "@aws-sdk/s3-request-presigner": "^3.0.0",
+    "hono": "^4.0.0",
+    "mailparser": "^3.7.0"
+  },
   "devDependencies": {
+    "@types/aws-lambda": "^8.10.0",
+    "@types/mailparser": "^3.4.0",
     "@types/node": "^22.0.0",
     "@vitest/coverage-v8": "^2.0.0",
     "typescript": "^5.7.0",

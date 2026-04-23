@@ -1,5 +1,5 @@
 import { simpleParser } from "mailparser";
-import type { EmailAddress, Attachment } from "@ses-adapter/shared";
+import type { EmailAddress, Attachment } from "../types/index.js";
 
 export interface ParsedMime {
   from: EmailAddress;
@@ -15,38 +15,36 @@ export interface ParsedMime {
 }
 
 export interface MimeParser {
-  parse(rawEmail: Buffer | string): Promise<ParsedMime>;
+  parse(s3Key: string): Promise<ParsedMime>;
 }
 
-export class MailparserMimeParser implements MimeParser {
+export class MailparserMimeParser {
   async parse(rawEmail: Buffer | string): Promise<ParsedMime> {
     const parsed = await simpleParser(rawEmail);
 
-    const toAddressObject = (addr: { address?: string; name?: string }): EmailAddress => ({
+    const toAddr = (addr: { address?: string; name?: string }): EmailAddress => ({
       address: addr.address ?? "",
-      name: addr.name,
+      ...(addr.name ? { name: addr.name } : {}),
     });
 
     const from: EmailAddress = parsed.from?.value[0]
-      ? toAddressObject(parsed.from.value[0])
+      ? toAddr(parsed.from.value[0])
       : { address: "" };
 
-    const to: EmailAddress[] = (parsed.to
-      ? (Array.isArray(parsed.to) ? parsed.to : [parsed.to])
-      : []
-    ).flatMap((a) => a.value.map(toAddressObject));
+    const to: EmailAddress[] = (
+      parsed.to ? (Array.isArray(parsed.to) ? parsed.to : [parsed.to]) : []
+    ).flatMap((a) => a.value.map(toAddr));
 
-    const cc: EmailAddress[] = (parsed.cc
-      ? (Array.isArray(parsed.cc) ? parsed.cc : [parsed.cc])
-      : []
-    ).flatMap((a) => a.value.map(toAddressObject));
+    const cc: EmailAddress[] = (
+      parsed.cc ? (Array.isArray(parsed.cc) ? parsed.cc : [parsed.cc]) : []
+    ).flatMap((a) => a.value.map(toAddr));
 
     const attachments: Attachment[] = parsed.attachments.map((a) => ({
       filename: a.filename ?? "attachment",
       mimeType: a.contentType,
       sizeBytes: a.size,
-      s3Key: "",        // Filled in by processor after uploading to S3
-      contentId: a.contentId ?? undefined,
+      s3Key: "",
+      ...(a.contentId ? { contentId: a.contentId } : {}),
     }));
 
     const headers: Record<string, string> = {};
@@ -58,13 +56,13 @@ export class MailparserMimeParser implements MimeParser {
       from,
       to,
       cc,
-      replyTo: parsed.replyTo?.value[0] ? toAddressObject(parsed.replyTo.value[0]) : undefined,
+      ...(parsed.replyTo?.value[0] ? { replyTo: toAddr(parsed.replyTo.value[0]) } : {}),
       subject: parsed.subject ?? "(no subject)",
-      textBody: parsed.text ?? undefined,
+      ...(parsed.text !== undefined ? { textBody: parsed.text } : {}),
       htmlBody: parsed.html || null,
       attachments,
       headers,
-      sentAt: parsed.date?.toISOString(),
+      ...(parsed.date ? { sentAt: parsed.date.toISOString() } : {}),
     };
   }
 }
