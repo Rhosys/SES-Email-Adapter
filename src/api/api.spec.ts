@@ -82,7 +82,7 @@ function makeArc(overrides: Partial<Arc> = {}): Arc {
   return {
     id: "arc-001",
     accountId: TEST_ACCOUNT_ID,
-    category: "personal",
+    workflow: "personal",
     labels: [],
     status: "active",
     summary: "A test arc.",
@@ -107,8 +107,8 @@ function makeSignal(overrides: Partial<Signal> = {}): Signal {
     attachments: [],
     headers: {},
     recipientAddress: "user@example.com",
-    category: "personal",
-    categoryData: { category: "personal", isReply: false, sentiment: "neutral", requiresReply: false },
+    workflow: "personal",
+    workflowData: { workflow: "personal", isReply: false, sentiment: "neutral", requiresReply: false },
     spamScore: 0.02,
     summary: "A test signal.",
     classificationModelId: "us.anthropic.claude-opus-4-5-20251101-v1:0",
@@ -242,11 +242,11 @@ describe("API", () => {
       expect(body.items).toHaveLength(1);
     });
 
-    it("passes category and label filters to the store", async () => {
-      await req(app, "GET", "/arcs?category=invoice&label=billing&limit=25");
+    it("passes workflow and label filters to the store", async () => {
+      await req(app, "GET", "/arcs?workflow=invoice&label=billing&limit=25");
       expect(store.listArcs).toHaveBeenCalledWith(
         TEST_ACCOUNT_ID,
-        expect.objectContaining({ category: "invoice", label: "billing", limit: 25 }),
+        expect.objectContaining({ workflow: "invoice", label: "billing", limit: 25 }),
       );
     });
 
@@ -380,23 +380,23 @@ describe("API", () => {
       vi.mocked(store.createView).mockResolvedValueOnce(makeView({ id: "view-new" }) as never);
 
       const res = await req(app, "POST", "/views", {
-        body: { name: "Invoices", category: "invoice", sortField: "lastSignalAt", sortDirection: "desc" },
+        body: { name: "Invoices", workflow: "invoice", sortField: "lastSignalAt", sortDirection: "desc" },
       });
       expect(res.status).toBe(201);
       expect(store.createView).toHaveBeenCalledWith(
         TEST_ACCOUNT_ID,
-        expect.objectContaining({ name: "Invoices", category: "invoice" }),
+        expect.objectContaining({ name: "Invoices", workflow: "invoice" }),
       );
     });
 
     it("returns 400 when name is missing", async () => {
-      const res = await req(app, "POST", "/views", { body: { category: "invoice" } });
+      const res = await req(app, "POST", "/views", { body: { workflow: "invoice" } });
       expect(res.status).toBe(400);
     });
 
-    it("returns 400 when category is invalid", async () => {
+    it("returns 400 when workflow is invalid", async () => {
       const res = await req(app, "POST", "/views", {
-        body: { name: "Bad View", category: "not-a-category" },
+        body: { name: "Bad View", workflow: "not-a-workflow" },
       });
       expect(res.status).toBe(400);
     });
@@ -870,15 +870,15 @@ describe("API", () => {
       expect(body.id).toBe(arc.id);
     });
 
-    it("Arc inherits category and summary from the blocked signal", async () => {
+    it("Arc inherits workflow and summary from the blocked signal", async () => {
       vi.mocked(store.getSignal).mockResolvedValueOnce(
-        makeSignal({ status: "blocked", category: "invoice", summary: "Invoice from ACME" }),
+        makeSignal({ status: "blocked", workflow: "invoice", summary: "Invoice from ACME" }),
       );
 
       await req(app, "POST", "/arcs", { body: { signalId: "signal-001" } });
 
       const arc = vi.mocked(store.createArc).mock.calls[0]![0] as Arc;
-      expect(arc.category).toBe("invoice");
+      expect(arc.workflow).toBe("invoice");
       expect(arc.summary).toBe("Invoice from ACME");
     });
 

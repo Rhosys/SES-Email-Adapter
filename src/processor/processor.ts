@@ -1,6 +1,6 @@
 import { randomUUID } from "crypto";
 import type { SQSEvent } from "aws-lambda";
-import type { Signal, Arc, Rule, Category, EmailAddressConfig, AccountFilteringConfig, GlobalSenderReputation } from "../types/index.js";
+import type { Signal, Arc, Rule, Workflow, EmailAddressConfig, AccountFilteringConfig } from "../types/index.js";
 import type { MimeParser } from "./mime.js";
 import type { SignalClassifier } from "../classifier/classifier.js";
 import { getETLD1, evaluateFilter } from "./filter.js";
@@ -18,7 +18,6 @@ export interface ProcessorStore {
   getEmailAddressConfig(accountId: string, address: string): Promise<EmailAddressConfig | null>;
   saveEmailAddressConfig(config: EmailAddressConfig): Promise<void>;
   getAccountFilteringConfig(accountId: string): Promise<AccountFilteringConfig | null>;
-  getGlobalReputation(domain: string): Promise<GlobalSenderReputation | null>;
   updateGlobalReputation(domain: string, update: { wasSpam: boolean; wasBlocked: boolean }): Promise<void>;
 }
 
@@ -118,16 +117,14 @@ export class SignalProcessor {
 
     // 5. Filtering — bypassed entirely when signal matches an existing Arc
     if (!matchedArc) {
-      const [emailConfig, accountConfig, reputation] = await Promise.all([
+      const [emailConfig, accountConfig] = await Promise.all([
         this.store.getEmailAddressConfig(accountId, recipientAddress),
         this.store.getAccountFilteringConfig(accountId),
-        this.store.getGlobalReputation(senderETLD1),
       ]);
 
       const filterResult = evaluateFilter(emailConfig, senderETLD1, classification.spamScore, {
-        allowNewAddresses: accountConfig?.allowNewAddresses,
+        newAddressHandling: accountConfig?.newAddressHandling,
         defaultFilterMode: accountConfig?.defaultFilterMode,
-        reputation,
       });
 
       if (!filterResult.allowed) {
@@ -153,7 +150,7 @@ export class SignalProcessor {
         }
 
         this.store.updateGlobalReputation(senderETLD1, {
-          wasSpam: classification.category === "spam" || classification.spamScore >= 0.9,
+          wasSpam: classification.workflow === "spam" || classification.spamScore >= 0.9,
           wasBlocked: true,
         }).catch((err) => console.error("Reputation update failed:", err));
         return;
@@ -169,7 +166,7 @@ export class SignalProcessor {
     if (matchedArc) {
       arc = {
         ...matchedArc,
-        category: classification.category,
+        workflow: classification.workflow,
         summary: classification.summary,
         lastSignalAt: timestamp,
         updatedAt: now,
@@ -178,7 +175,7 @@ export class SignalProcessor {
       arc = {
         id: randomUUID(),
         accountId,
-        category: classification.category,
+        workflow: classification.workflow,
         labels: classification.labels,
         status: "active",
         summary: classification.summary,
@@ -217,8 +214,8 @@ export class SignalProcessor {
           if (!arc.labels.includes(action.value)) {
             arc.labels = [...arc.labels, action.value];
           }
-        } else if (action.type === "assign_category" && action.value) {
-          arc.category = action.value as Category;
+        } else if (action.type === "assign_workflow" && action.value) {
+          arc.workflow = action.value as Workflow;
         } else if (action.type === "archive") {
           arc.status = "archived";
         } else if (action.type === "delete") {
@@ -234,7 +231,7 @@ export class SignalProcessor {
     await this.store.saveSignal(signal);
     await this.arcMatcher.upsertEmbedding(arc.id, embedding);
 
-    const isSpam = classification.category === "spam" || classification.spamScore >= 0.9;
+    const isSpam = classification.workflow === "spam" || classification.spamScore >= 0.9;
     if (this.notifier && !isSpam) {
       await this.notifier.notify(accountId, arc, signal).catch((err) => {
         console.error("Notification failed:", err);
@@ -305,8 +302,8 @@ function buildSignal(opts: {
     attachments: parsed.attachments,
     headers: parsed.headers,
     recipientAddress,
-    category: classification.category,
-    categoryData: classification.categoryData,
+    workflow: classification.workflow,
+    workflowData: classification.workflowData,
     spamScore: classification.spamScore,
     summary: classification.summary,
     classificationModelId: classification.classificationModelId,

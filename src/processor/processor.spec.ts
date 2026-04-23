@@ -22,7 +22,6 @@ function makeStore(): ProcessorStore {
     getEmailAddressConfig: vi.fn().mockResolvedValue(null),
     saveEmailAddressConfig: vi.fn().mockResolvedValue(undefined),
     getAccountFilteringConfig: vi.fn().mockResolvedValue(null),
-    getGlobalReputation: vi.fn().mockResolvedValue(null),
     updateGlobalReputation: vi.fn().mockResolvedValue(undefined),
   };
 }
@@ -119,9 +118,9 @@ function makeSqsEvent(messages: Array<{
 }
 
 const validClassification: ClassificationOutput = {
-  category: "personal",
-  categoryData: {
-    category: "personal",
+  workflow: "personal",
+  workflowData: {
+    workflow: "personal",
     isReply: false,
     sentiment: "neutral",
     requiresReply: false,
@@ -136,7 +135,7 @@ function makeArc(overrides: Partial<Arc> = {}): Arc {
   return {
     id: "arc-existing",
     accountId: TEST_ACCOUNT_ID,
-    category: "personal",
+    workflow: "personal",
     labels: [],
     status: "active",
     summary: "Existing arc summary.",
@@ -181,7 +180,7 @@ describe("SignalProcessor", () => {
       expect(store.saveSignal).toHaveBeenCalledOnce();
       const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
       expect(saved.messageId).toBe("msg-abc");
-      expect(saved.category).toBe("personal");
+      expect(saved.workflow).toBe("personal");
       expect(saved.accountId).toBe(TEST_ACCOUNT_ID);
     });
 
@@ -216,14 +215,14 @@ describe("SignalProcessor", () => {
       expect(arcMatcher.upsertEmbedding).toHaveBeenCalledOnce();
     });
 
-    it("sets Arc category and summary from classification", async () => {
+    it("sets Arc workflow and summary from classification", async () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
         ...validClassification,
-        category: "invoice",
+        workflow: "invoice",
         summary: "Receipt from Stripe for $99.",
         labels: ["billing"],
-        categoryData: {
-          category: "invoice",
+        workflowData: {
+          workflow: "invoice",
           invoiceType: "receipt",
           vendor: "Stripe",
           amount: 99,
@@ -234,7 +233,7 @@ describe("SignalProcessor", () => {
       await processor.process(makeSqsEvent([{}]));
 
       const arc = vi.mocked(store.saveArc).mock.calls[0]![0] as Arc;
-      expect(arc.category).toBe("invoice");
+      expect(arc.workflow).toBe("invoice");
       expect(arc.summary).toBe("Receipt from Stripe for $99.");
       expect(arc.labels).toContain("billing");
     });
@@ -296,7 +295,7 @@ describe("SignalProcessor", () => {
         id: "rule-1",
         accountId: TEST_ACCOUNT_ID,
         name: "Label billing",
-        condition: '{"==": [{"var": "arc.category"}, "invoice"]}',
+        condition: '{"==": [{"var": "arc.workflow"}, "invoice"]}',
         actions: [{ type: "assign_label", value: "billing" }],
         position: 0,
         createdAt: "2024-01-01T00:00:00Z",
@@ -316,7 +315,7 @@ describe("SignalProcessor", () => {
         id: "rule-2",
         accountId: TEST_ACCOUNT_ID,
         name: "Archive newsletters",
-        condition: '{"==": [{"var": "arc.category"}, "newsletter"]}',
+        condition: '{"==": [{"var": "arc.workflow"}, "newsletter"]}',
         actions: [{ type: "archive" }],
         position: 0,
         createdAt: "2024-01-01T00:00:00Z",
@@ -436,9 +435,9 @@ describe("SignalProcessor", () => {
     it("does not call notifier for spam signals", async () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
         ...validClassification,
-        category: "spam",
+        workflow: "spam",
         spamScore: 0.97,
-        categoryData: { category: "spam", spamType: "phishing", confidence: 0.97, indicators: [] },
+        workflowData: { workflow: "spam", spamType: "phishing", confidence: 0.97, indicators: [] },
       });
 
       await processor.process(makeSqsEvent([{}]));
@@ -446,7 +445,7 @@ describe("SignalProcessor", () => {
       expect(notifier.notify).not.toHaveBeenCalled();
     });
 
-    it("does not call notifier when spamScore >= 0.9 even if category is not spam", async () => {
+    it("does not call notifier when spamScore >= 0.9 even if workflow is not spam", async () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
         ...validClassification,
         spamScore: 0.95,
@@ -556,7 +555,7 @@ describe("SignalProcessor", () => {
       const existingArc: Arc = {
         id: "existing-arc",
         accountId: TEST_ACCOUNT_ID,
-        category: "personal",
+        workflow: "personal",
         labels: [],
         status: "active",
         summary: "Existing conversation",
@@ -617,14 +616,14 @@ describe("SignalProcessor", () => {
       await processor.process(makeSqsEvent([{}]));
 
       const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
-      expect(saved.category).toBe(validClassification.category);
+      expect(saved.workflow).toBe(validClassification.workflow);
       expect(saved.summary).toBe(validClassification.summary);
       expect(saved.spamScore).toBe(validClassification.spamScore);
     });
 
-    it("blocks new address when allowNewAddresses is false", async () => {
+    it("blocks new address when newAddressHandling is block_until_approved", async () => {
       vi.mocked(store.getAccountFilteringConfig).mockResolvedValueOnce({
-        allowNewAddresses: false,
+        newAddressHandling: "block_until_approved",
         defaultFilterMode: "notify_new",
       });
 
@@ -664,12 +663,12 @@ describe("SignalProcessor", () => {
       );
     });
 
-    it("marks wasSpam=true when classification category is spam", async () => {
+    it("marks wasSpam=true when classification workflow is spam", async () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
         ...validClassification,
-        category: "spam",
+        workflow: "spam",
         spamScore: 0.97,
-        categoryData: { category: "spam", spamType: "phishing", confidence: 0.97, indicators: [] },
+        workflowData: { workflow: "spam", spamType: "phishing", confidence: 0.97, indicators: [] },
       });
 
       await processor.process(makeSqsEvent([{}]));
@@ -686,12 +685,6 @@ describe("SignalProcessor", () => {
       await processor.process(makeSqsEvent([{}]));
 
       expect(store.saveSignal).toHaveBeenCalledOnce();
-    });
-
-    it("fetches reputation for the sender eTLD+1 during filtering", async () => {
-      await processor.process(makeSqsEvent([{}]));
-
-      expect(store.getGlobalReputation).toHaveBeenCalledWith("example.com");
     });
   });
 });

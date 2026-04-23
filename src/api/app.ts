@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { randomUUID } from "crypto";
 import { getDomain } from "tldts";
-import type { Arc, Signal, View, Label, Rule, Domain, Account, Page, PageParams, ArcStatus, Category, CATEGORIES, EmailAddressConfig, SenderFilterMode } from "../types/index.js";
+import type { Arc, Signal, View, Label, Rule, Domain, Account, Page, PageParams, ArcStatus, Workflow, EmailAddressConfig, SenderFilterMode } from "../types/index.js";
 
 // ---------------------------------------------------------------------------
 // Auth
@@ -21,7 +21,7 @@ export interface AuthService {
 // ---------------------------------------------------------------------------
 
 export interface ListArcsParams extends PageParams {
-  category?: Category;
+  workflow?: Workflow;
   label?: string;
   status?: ArcStatus;
 }
@@ -33,7 +33,7 @@ export interface UpdateArcRequest {
 
 export interface CreateViewRequest {
   name: string;
-  category?: Category;
+  workflow?: Workflow;
   labels?: string[];
   sortField?: View["sortField"];
   sortDirection?: View["sortDirection"];
@@ -44,7 +44,7 @@ export interface CreateViewRequest {
 
 export interface UpdateViewRequest {
   name?: string;
-  category?: Category;
+  workflow?: Workflow;
   labels?: string[];
   sortField?: View["sortField"];
   sortDirection?: View["sortDirection"];
@@ -169,7 +169,7 @@ export function createApp({ store, auth }: AppDeps) {
     const { accountId } = c.get("auth");
     const query = c.req.query();
     const params: ListArcsParams = {
-      ...(query["category"] ? { category: query["category"] as Category } : {}),
+      ...(query["workflow"] ? { workflow: query["workflow"] as Workflow } : {}),
       ...(query["label"] ? { label: query["label"] } : {}),
       ...(query["status"] ? { status: query["status"] as ArcStatus } : {}),
       ...(query["cursor"] ? { cursor: query["cursor"] } : {}),
@@ -212,7 +212,7 @@ export function createApp({ store, auth }: AppDeps) {
     const arc: Arc = {
       id: randomUUID(),
       accountId,
-      category: signal.category,
+      workflow: signal.workflow,
       labels: [],
       status: "active",
       summary: signal.summary,
@@ -292,8 +292,8 @@ export function createApp({ store, auth }: AppDeps) {
     const { accountId } = c.get("auth");
     const body = await c.req.json() as Partial<CreateViewRequest>;
     if (!body.name) return c.json({ error: "name is required" }, 400);
-    if (body.category !== undefined && !VALID_CATEGORIES.has(body.category)) {
-      return c.json({ error: "Invalid category" }, 400);
+    if (body.workflow !== undefined && !VALID_WORKFLOWS.has(body.workflow)) {
+      return c.json({ error: "Invalid workflow" }, 400);
     }
     const result = await store.createView(accountId, body as CreateViewRequest);
     return c.json(result ?? { ok: true }, 201);
@@ -521,9 +521,8 @@ export function createApp({ store, auth }: AppDeps) {
 // Helpers
 // ---------------------------------------------------------------------------
 
-// Import CATEGORIES from types — build a Set for O(1) lookup
-import { CATEGORIES } from "../types/index.js";
-const VALID_CATEGORIES = new Set<string>(CATEGORIES);
+import { WORKFLOWS } from "../types/index.js";
+const VALID_WORKFLOWS = new Set<string>(WORKFLOWS);
 
 const DKIM_SELECTOR = "email-signals";
 
