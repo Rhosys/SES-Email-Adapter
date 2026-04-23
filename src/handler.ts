@@ -10,7 +10,7 @@ import { createApp } from "./api/app.js";
 import type { ProcessorStore, ArcMatcher, RuleEvaluator } from "./processor/processor.js";
 import type { MimeParser } from "./processor/mime.js";
 import type { ApiStore, AuthService, AuthContext } from "./api/app.js";
-import type { Signal, Arc, View, Label, Rule, Domain, Account, Page, PageParams, EmailAddressConfig, SenderFilterMode, GlobalSenderReputation, AccountFilteringConfig } from "./types/index.js";
+import type { Signal, Arc, View, Label, Rule, Domain, Account, Page, PageParams, EmailAddressConfig, SenderFilterMode, AccountFilteringConfig } from "./types/index.js";
 import type { ListArcsParams, UpdateArcRequest, CreateViewRequest, UpdateViewRequest, CreateLabelRequest, UpdateLabelRequest, CreateRuleRequest, UpdateRuleRequest } from "./api/app.js";
 
 // ---------------------------------------------------------------------------
@@ -81,7 +81,6 @@ class DynamoProcessorStore implements ProcessorStore {
   async getEmailAddressConfig(_accountId: string, _address: string): Promise<EmailAddressConfig | null> { return null; }
   async saveEmailAddressConfig(_config: EmailAddressConfig): Promise<void> {}
   async getAccountFilteringConfig(_accountId: string): Promise<AccountFilteringConfig | null> { return null; }
-  async getGlobalReputation(_domain: string): Promise<GlobalSenderReputation | null> { return null; }
   async updateGlobalReputation(_domain: string, _update: { wasSpam: boolean; wasBlocked: boolean }): Promise<void> {}
 }
 

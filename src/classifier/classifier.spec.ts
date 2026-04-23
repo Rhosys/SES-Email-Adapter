@@ -90,16 +90,16 @@ describe("SignalClassifier", () => {
   });
 
   // -------------------------------------------------------------------------
-  // classify — login / OTP
+  // classify — auth / OTP
   // -------------------------------------------------------------------------
 
   describe("login emails", () => {
     it("classifies a GitHub OTP as login with code extracted", async () => {
       mockClassifyResponse({
-        category: "login",
-        categoryData: {
-          category: "login",
-          loginType: "otp",
+        workflow: "auth",
+        workflowData: {
+          workflow: "auth",
+          authType: "otp",
           code: "483921",
           expiresInMinutes: 15,
           service: "GitHub",
@@ -111,10 +111,10 @@ describe("SignalClassifier", () => {
 
       const result = await classifier.classify(githubOtpEmail);
 
-      expect(result.category).toBe("login");
-      expect(result.categoryData).toMatchObject({
-        category: "login",
-        loginType: "otp",
+      expect(result.workflow).toBe("auth");
+      expect(result.workflowData).toMatchObject({
+        workflow: "auth",
+        authType: "otp",
         code: "483921",
         service: "GitHub",
       });
@@ -130,9 +130,9 @@ describe("SignalClassifier", () => {
   describe("invoice emails", () => {
     it("extracts amount, vendor, and invoice number from a Stripe receipt", async () => {
       mockClassifyResponse({
-        category: "invoice",
-        categoryData: {
-          category: "invoice",
+        workflow: "invoice",
+        workflowData: {
+          workflow: "invoice",
           invoiceType: "receipt",
           vendor: "Acme Corp",
           amount: 149.0,
@@ -148,8 +148,8 @@ describe("SignalClassifier", () => {
 
       const result = await classifier.classify(stripeInvoiceEmail);
 
-      expect(result.category).toBe("invoice");
-      expect(result.categoryData).toMatchObject({ vendor: "Acme Corp", amount: 149.0 });
+      expect(result.workflow).toBe("invoice");
+      expect(result.workflowData).toMatchObject({ vendor: "Acme Corp", amount: 149.0 });
       expect(result.labels).toContain("billing");
     });
   });
@@ -161,9 +161,9 @@ describe("SignalClassifier", () => {
   describe("job emails", () => {
     it("extracts company, role, and salary from recruiter outreach", async () => {
       mockClassifyResponse({
-        category: "job",
-        categoryData: {
-          category: "job",
+        workflow: "job",
+        workflowData: {
+          workflow: "job",
           jobType: "recruiter_outreach",
           company: "TechCorp",
           role: "Senior Software Engineer",
@@ -177,8 +177,8 @@ describe("SignalClassifier", () => {
 
       const result = await classifier.classify(recruiterEmail);
 
-      expect(result.category).toBe("job");
-      expect(result.categoryData).toMatchObject({ jobType: "recruiter_outreach", company: "TechCorp" });
+      expect(result.workflow).toBe("job");
+      expect(result.workflowData).toMatchObject({ jobType: "recruiter_outreach", company: "TechCorp" });
     });
   });
 
@@ -189,9 +189,9 @@ describe("SignalClassifier", () => {
   describe("spam detection", () => {
     it("flags phishing email with high spam score", async () => {
       mockClassifyResponse({
-        category: "spam",
-        categoryData: {
-          category: "spam",
+        workflow: "spam",
+        workflowData: {
+          workflow: "spam",
           spamType: "phishing",
           confidence: 0.97,
           indicators: [
@@ -208,24 +208,24 @@ describe("SignalClassifier", () => {
       const result = await classifier.classify(phishingEmail);
 
       expect(result.spamScore).toBeGreaterThan(0.9);
-      expect(result.category).toBe("spam");
-      if (result.categoryData.category === "spam") {
-        expect(result.categoryData.indicators).toContain("Sender domain paypa1.com impersonates PayPal");
+      expect(result.workflow).toBe("spam");
+      if (result.workflowData.workflow === "spam") {
+        expect(result.workflowData.indicators).toContain("Sender domain paypa1.com impersonates PayPal");
       }
     });
   });
 
   // -------------------------------------------------------------------------
-  // classify — shopping
+  // classify — order (shipping update)
   // -------------------------------------------------------------------------
 
   describe("shopping emails", () => {
     it("extracts tracking number and retailer from a shipping update", async () => {
       mockClassifyResponse({
-        category: "shopping",
-        categoryData: {
-          category: "shopping",
-          shoppingType: "shipping",
+        workflow: "order",
+        workflowData: {
+          workflow: "order",
+          orderType: "shipping",
           retailer: "Amazon",
           orderNumber: "112-3456789",
           trackingNumber: "1Z999AA10123456784",
@@ -240,9 +240,9 @@ describe("SignalClassifier", () => {
 
       const result = await classifier.classify(shippingEmail);
 
-      expect(result.category).toBe("shopping");
-      expect(result.categoryData).toMatchObject({
-        shoppingType: "shipping",
+      expect(result.workflow).toBe("order");
+      expect(result.workflowData).toMatchObject({
+        orderType: "shipping",
         retailer: "Amazon",
         trackingNumber: "1Z999AA10123456784",
       });
@@ -256,8 +256,8 @@ describe("SignalClassifier", () => {
   describe("label suggestions", () => {
     it("returns suggested labels from the classifier", async () => {
       mockClassifyResponse({
-        category: "personal",
-        categoryData: { category: "personal", isReply: false, sentiment: "neutral", requiresReply: true },
+        workflow: "personal",
+        workflowData: { workflow: "personal", isReply: false, sentiment: "neutral", requiresReply: true },
         spamScore: 0.0,
         summary: "A personal email.",
         labels: ["action-needed", "important"],
@@ -270,8 +270,8 @@ describe("SignalClassifier", () => {
 
     it("returns empty labels array when classifier suggests none", async () => {
       mockClassifyResponse({
-        category: "newsletter",
-        categoryData: { category: "newsletter", publication: "Test", topics: [] },
+        workflow: "newsletter",
+        workflowData: { workflow: "newsletter", publication: "Test", topics: [] },
         spamScore: 0.1,
         summary: "Newsletter.",
         labels: [],
@@ -290,8 +290,8 @@ describe("SignalClassifier", () => {
   describe("Bedrock call shape", () => {
     it("includes from, subject, and body in the message content", async () => {
       mockClassifyResponse({
-        category: "personal",
-        categoryData: { category: "personal", isReply: false, sentiment: "neutral", requiresReply: false },
+        workflow: "personal",
+        workflowData: { workflow: "personal", isReply: false, sentiment: "neutral", requiresReply: false },
         spamScore: 0.0,
         summary: "A personal email.",
         labels: [],
@@ -313,8 +313,8 @@ describe("SignalClassifier", () => {
 
     it("uses CLASSIFICATION_MODEL_ID", async () => {
       mockClassifyResponse({
-        category: "personal",
-        categoryData: { category: "personal", isReply: false, sentiment: "neutral", requiresReply: false },
+        workflow: "personal",
+        workflowData: { workflow: "personal", isReply: false, sentiment: "neutral", requiresReply: false },
         spamScore: 0.0,
         summary: "A personal email.",
         labels: [],
@@ -328,8 +328,8 @@ describe("SignalClassifier", () => {
 
     it("truncates long bodies to avoid token overflow", async () => {
       mockClassifyResponse({
-        category: "newsletter",
-        categoryData: { category: "newsletter", publication: "Test", topics: [] },
+        workflow: "newsletter",
+        workflowData: { workflow: "newsletter", publication: "Test", topics: [] },
         spamScore: 0.1,
         summary: "Newsletter.",
         labels: [],

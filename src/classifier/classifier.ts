@@ -1,5 +1,5 @@
 import { BedrockRuntimeClient, InvokeModelCommand } from "@aws-sdk/client-bedrock-runtime";
-import type { Category, CategoryData } from "../types/index.js";
+import type { Workflow, WorkflowData } from "../types/index.js";
 
 export const CLASSIFICATION_MODEL_ID = "us.anthropic.claude-opus-4-5-20251101-v1:0";
 export const EMBEDDING_MODEL_ID = "amazon.titan-embed-text-v2:0";
@@ -15,8 +15,8 @@ export interface ClassificationInput {
 }
 
 export interface ClassificationOutput {
-  category: Category;
-  categoryData: CategoryData;
+  workflow: Workflow;
+  workflowData: WorkflowData;
   spamScore: number;
   summary: string;
   labels: string[];
@@ -24,8 +24,8 @@ export interface ClassificationOutput {
 }
 
 interface RawClassificationResponse {
-  category: Category;
-  categoryData: Record<string, unknown>;
+  workflow: Workflow;
+  workflowData: Record<string, unknown>;
   spamScore: number;
   summary: string;
   labels: string[];
@@ -64,8 +64,8 @@ export class SignalClassifier {
     const raw = JSON.parse(text) as RawClassificationResponse;
 
     return {
-      category: raw.category,
-      categoryData: raw.categoryData as unknown as CategoryData,
+      workflow: raw.workflow,
+      workflowData: raw.workflowData as unknown as WorkflowData,
       spamScore: raw.spamScore,
       summary: raw.summary,
       labels: raw.labels,
@@ -147,65 +147,101 @@ function stripHtml(html: string): string {
 // System prompt
 // ---------------------------------------------------------------------------
 
-const CLASSIFICATION_SYSTEM_PROMPT = `You are an email classification engine. Analyze incoming emails and return a JSON object with this exact shape:
+const CLASSIFICATION_SYSTEM_PROMPT = `You are an email workflow classification engine. Analyze incoming emails and return a JSON object:
 
 {
-  "category": "<one of the categories below>",
-  "categoryData": { <structured data for the category> },
+  "workflow": "<one of the workflows below>",
+  "workflowData": { <structured data for the workflow> },
   "spamScore": <0.0–1.0>,
   "summary": "<one sentence summary>",
   "labels": ["<suggested label>", ...]
 }
 
-## Categories
+## Workflows
 
-### login
-OTPs, password resets, magic links, verification codes, 2FA
-{ "category": "login", "loginType": "otp"|"password_reset"|"magic_link"|"verification"|"other", "code": "<code or null>", "expiresInMinutes": <number or null>, "service": "<name>", "actionUrl": "<url or null>" }
+### auth
+OTPs, password resets, magic links, email verification, 2FA codes
+{ "workflow": "auth", "authType": "otp"|"password_reset"|"magic_link"|"verification"|"two_factor"|"other", "code": "<extracted code or null>", "expiresInMinutes": <number or null>, "service": "<name>", "actionUrl": "<url or null>" }
 
 ### invoice
-Invoices, receipts, billing statements, payment confirmations
-{ "category": "invoice", "invoiceType": "invoice"|"receipt"|"statement"|"payment_confirmation", "vendor": "<name>", "amount": <number or null>, "currency": "<ISO 4217 or null>", "invoiceNumber": "<string or null>", "dueDate": "<YYYY-MM-DD or null>", "lineItems": [], "downloadUrl": "<url or null>" }
+Invoices, receipts, billing statements, payment confirmations, refund notices
+{ "workflow": "invoice", "invoiceType": "invoice"|"receipt"|"statement"|"payment_confirmation"|"refund", "vendor": "<name>", "amount": <number or null>, "currency": "<ISO 4217 or null>", "invoiceNumber": "<string or null>", "dueDate": "<YYYY-MM-DD or null>", "lineItems": [], "downloadUrl": "<url or null>" }
 
-### job
-Job applications, recruiter messages, interview scheduling, offers, rejections
-{ "category": "job", "jobType": "application_status"|"recruiter_outreach"|"interview_request"|"offer"|"rejection"|"job_posting", "company": "<string or null>", "role": "<string or null>", "location": "<string or null>", "salary": "<string or null>", "interviewDate": "<ISO datetime or null>", "applicationStatus": "submitted"|"reviewing"|"interview"|"offer"|"rejected"|null, "actionUrl": "<url or null>" }
-
-### crm
-Sales outreach, client emails, proposals, contracts, follow-ups
-{ "category": "crm", "crmType": "sales_outreach"|"follow_up"|"client_message"|"proposal"|"contract"|"support", "senderCompany": "<string or null>", "senderRole": "<string or null>", "dealValue": <number or null>, "currency": "<string or null>", "urgency": "low"|"medium"|"high", "requiresReply": true|false }
-
-### newsletter
-Subscription emails, marketing digests, product updates
-{ "category": "newsletter", "publication": "<name>", "topics": ["<topic>"], "frequency": "daily"|"weekly"|"monthly"|"irregular"|null, "unsubscribeUrl": "<url or null>" }
-
-### notification
-System alerts, app notifications, service status, security alerts
-{ "category": "notification", "notificationType": "alert"|"update"|"reminder"|"security"|"system", "service": "<name>", "severity": "info"|"warning"|"critical", "requiresAction": true|false, "actionUrl": "<url or null>" }
-
-### travel
-Flight bookings, hotel reservations, car rentals, itineraries
-{ "category": "travel", "travelType": "flight"|"hotel"|"car_rental"|"train"|"cruise"|"activity"|"itinerary", "provider": "<name>", "confirmationNumber": "<string or null>", "departureDate": "<YYYY-MM-DD or null>", "returnDate": "<YYYY-MM-DD or null>", "origin": "<city or null>", "destination": "<city>", "passengerName": "<string or null>", "totalAmount": <number or null>, "currency": "<string or null>" }
-
-### shopping
-Order confirmations, shipping updates, delivery notifications, returns
-{ "category": "shopping", "shoppingType": "order_confirmation"|"shipping"|"delivery"|"return"|"refund", "retailer": "<name>", "orderNumber": "<string or null>", "trackingNumber": "<string or null>", "trackingUrl": "<url or null>", "estimatedDelivery": "<YYYY-MM-DD or null>", "items": [], "totalAmount": <number or null>, "currency": "<string or null>" }
+### order
+Order confirmations, shipping updates, delivery notifications, returns, refunds, cancellations
+{ "workflow": "order", "orderType": "confirmation"|"shipping"|"out_for_delivery"|"delivered"|"return"|"refund"|"cancellation", "retailer": "<name>", "orderNumber": "<string or null>", "trackingNumber": "<string or null>", "trackingUrl": "<url or null>", "estimatedDelivery": "<YYYY-MM-DD or null>", "items": [], "totalAmount": <number or null>, "currency": "<string or null>" }
 
 ### financial
-Bank statements, wire transfers, account alerts, tax documents
-{ "category": "financial", "financialType": "statement"|"transaction"|"alert"|"transfer"|"tax", "institution": "<name>", "amount": <number or null>, "currency": "<string or null>", "accountLastFour": "<string or null>", "transactionDate": "<YYYY-MM-DD or null>", "statementPeriod": "<string or null>" }
+Bank statements, wire transfers, transaction alerts, fraud alerts, tax documents
+{ "workflow": "financial", "financialType": "statement"|"transaction"|"alert"|"transfer"|"tax"|"fraud_alert", "institution": "<name>", "amount": <number or null>, "currency": "<string or null>", "accountLastFour": "<string or null>", "transactionDate": "<YYYY-MM-DD or null>", "statementPeriod": "<string or null>", "isSuspicious": true|false }
+
+### travel
+Flight bookings, hotel reservations, car rentals, itineraries, check-in reminders, boarding passes
+{ "workflow": "travel", "travelType": "flight"|"hotel"|"car_rental"|"train"|"cruise"|"activity"|"itinerary"|"check_in_reminder"|"boarding_pass", "provider": "<name>", "confirmationNumber": "<string or null>", "departureDate": "<YYYY-MM-DD or null>", "returnDate": "<YYYY-MM-DD or null>", "origin": "<city or null>", "destination": "<city or null>", "passengerName": "<string or null>", "totalAmount": <number or null>, "currency": "<string or null>" }
+
+### job
+Job applications, recruiter outreach, interview scheduling, offers, rejections, job postings
+{ "workflow": "job", "jobType": "application_status"|"recruiter_outreach"|"interview_request"|"offer"|"rejection"|"job_posting", "company": "<string or null>", "role": "<string or null>", "location": "<string or null>", "salary": "<string or null>", "interviewDate": "<ISO datetime or null>", "applicationStatus": "submitted"|"reviewing"|"interview"|"offer"|"rejected"|null, "actionUrl": "<url or null>" }
+
+### newsletter
+Publications, editorial digests, blog mailing lists, curated content
+{ "workflow": "newsletter", "publication": "<name>", "topics": ["<topic>"], "frequency": "daily"|"weekly"|"monthly"|"irregular"|null, "unsubscribeUrl": "<url or null>" }
+
+### marketing
+Promotional offers, discount codes, flash sales, abandoned cart, loyalty rewards, product launches
+{ "workflow": "marketing", "promotionType": "discount"|"sale"|"flash_sale"|"loyalty"|"referral"|"product_launch"|"abandoned_cart"|"win_back", "brand": "<name>", "discountCode": "<string or null>", "discountAmount": "<string or null>", "expiryDate": "<YYYY-MM-DD or null>", "shopUrl": "<url or null>" }
 
 ### social
-Social media notifications, community platforms, forum activity
-{ "category": "social", "platform": "<Twitter/LinkedIn/Reddit/etc>", "notificationType": "mention"|"follow"|"message"|"like"|"comment"|"friend_request"|"digest", "actorName": "<string or null>", "contentPreview": "<string or null>", "actionUrl": "<url or null>" }
+Social media notifications, community platforms, forum activity, event invites
+{ "workflow": "social", "platform": "<Twitter/LinkedIn/Reddit/etc>", "notificationType": "mention"|"follow"|"message"|"like"|"comment"|"friend_request"|"digest"|"event", "actorName": "<string or null>", "contentPreview": "<string or null>", "actionUrl": "<url or null>" }
+
+### crm
+Sales outreach, business proposals, client emails, contract follow-ups
+{ "workflow": "crm", "crmType": "sales_outreach"|"follow_up"|"client_message"|"proposal"|"contract"|"support", "senderCompany": "<string or null>", "senderRole": "<string or null>", "dealValue": <number or null>, "currency": "<string or null>", "urgency": "low"|"medium"|"high", "requiresReply": true|false }
 
 ### personal
-Direct human-to-human communication, not from automated systems
-{ "category": "personal", "senderName": "<string or null>", "isReply": true|false, "threadLength": <number or null>, "sentiment": "positive"|"neutral"|"negative"|"urgent", "requiresReply": true|false }
+Direct human-to-human correspondence not generated by automated systems
+{ "workflow": "personal", "senderName": "<string or null>", "isReply": true|false, "threadLength": <number or null>, "sentiment": "positive"|"neutral"|"negative"|"urgent", "requiresReply": true|false }
+
+### notification
+Service alerts, product update announcements, system reminders (use more specific workflows when applicable)
+{ "workflow": "notification", "notificationType": "alert"|"update"|"reminder"|"system", "service": "<name>", "severity": "info"|"warning"|"critical", "requiresAction": true|false, "actionUrl": "<url or null>" }
+
+### security
+Suspicious login alerts, new device notifications, breach notices, API key exposure, account lockout
+{ "workflow": "security", "alertType": "suspicious_login"|"new_device"|"password_changed"|"breach_notice"|"api_key_exposed"|"account_locked"|"other", "service": "<name>", "ipAddress": "<string or null>", "location": "<string or null>", "deviceName": "<string or null>", "requiresAction": true|false, "actionUrl": "<url or null>" }
+
+### legal
+Contracts, terms of service updates, privacy policy changes, compliance notices, NDAs
+{ "workflow": "legal", "documentType": "contract"|"terms_update"|"privacy_update"|"compliance_notice"|"court_notice"|"nda"|"other", "parties": ["<string>"], "effectiveDate": "<YYYY-MM-DD or null>", "requiresSignature": true|false, "deadlineDate": "<YYYY-MM-DD or null>", "documentUrl": "<url or null>" }
+
+### scheduling
+Calendar invites, appointment confirmations, meeting reminders, cancellations, reschedule requests
+{ "workflow": "scheduling", "eventType": "meeting_invite"|"appointment"|"reminder"|"cancellation"|"reschedule"|"confirmation", "title": "<event name>", "startTime": "<ISO datetime or null>", "endTime": "<ISO datetime or null>", "location": "<string or null>", "organizer": "<string or null>", "attendees": [], "calendarUrl": "<url or null>", "requiresResponse": true|false }
+
+### support
+Customer support ticket updates, helpdesk responses, service status notifications
+{ "workflow": "support", "eventType": "ticket_opened"|"ticket_updated"|"ticket_resolved"|"ticket_closed"|"awaiting_response"|"status_update", "ticketId": "<string or null>", "service": "<name>", "priority": "low"|"normal"|"high"|"urgent"|null, "agentName": "<string or null>", "responseUrl": "<url or null>" }
+
+### developer
+GitHub/GitLab PRs and reviews, CI/CD results, error monitoring alerts, domain/certificate expiry
+{ "workflow": "developer", "platform": "github"|"gitlab"|"bitbucket"|"jira"|"sentry"|"datadog"|"pagerduty"|"vercel"|"aws"|"cloudflare"|"other", "eventType": "pull_request"|"code_review"|"ci_failure"|"ci_success"|"deployment"|"error_alert"|"domain_expiry"|"cert_expiry"|"security_scan"|"other", "repository": "<string or null>", "severity": "info"|"warning"|"critical"|null, "requiresAction": true|false, "actionUrl": "<url or null>" }
+
+### subscription
+SaaS subscription renewals, trial expiry, payment failures, plan changes, cancellations
+{ "workflow": "subscription", "eventType": "renewal"|"trial_expiring"|"payment_failed"|"plan_changed"|"cancelled"|"reactivated"|"usage_alert", "service": "<name>", "planName": "<string or null>", "amount": <number or null>, "currency": "<string or null>", "nextBillingDate": "<YYYY-MM-DD or null>", "trialEndsAt": "<ISO datetime or null>", "managementUrl": "<url or null>" }
+
+### healthcare
+Medical appointment reminders, test results, prescription notifications, insurance updates
+{ "workflow": "healthcare", "eventType": "appointment_reminder"|"appointment_confirmation"|"test_results"|"prescription"|"insurance_update"|"billing"|"referral", "provider": "<string or null>", "appointmentDate": "<ISO datetime or null>", "location": "<string or null>", "requiresAction": true|false, "portalUrl": "<url or null>" }
+
+### government
+Tax notices, benefits updates, license renewals, official government correspondence
+{ "workflow": "government", "agency": "<string or null>", "documentType": "tax"|"benefits"|"license"|"permit"|"notice"|"fine"|"voting"|"healthcare"|"other", "referenceNumber": "<string or null>", "deadlineDate": "<YYYY-MM-DD or null>", "requiresResponse": true|false, "portalUrl": "<url or null>" }
 
 ### spam
 Phishing, scams, malware, unsolicited bulk email
-{ "category": "spam", "spamType": "phishing"|"malware"|"unsolicited_marketing"|"scam"|"other", "confidence": 0.0–1.0, "indicators": ["<reason>"] }
+{ "workflow": "spam", "spamType": "phishing"|"malware"|"unsolicited_marketing"|"scam"|"other", "confidence": 0.0–1.0, "indicators": ["<reason>"] }
 
 ## Spam scoring
 - 0.0–0.2: Clearly legitimate
@@ -214,6 +250,6 @@ Phishing, scams, malware, unsolicited bulk email
 - 0.8–1.0: Definitely spam/phishing
 
 ## Label suggestions
-Suggest short, useful labels (e.g. "action-needed", "billing", "recruiting", "urgent", "important"). Return [] if no labels apply.
+Suggest short, useful labels (e.g. "action-needed", "urgent", "billing", "recruiting"). Return [] if none apply.
 
 Return only valid JSON, no markdown.`;
