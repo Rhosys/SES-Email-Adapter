@@ -21,6 +21,7 @@ export const WORKFLOWS = [
   "subscription", // SaaS plan changes, renewal reminders, trial expiry
   "healthcare",   // Appointments, test results, prescriptions, insurance
   "government",   // Tax, benefits, official notices, license renewal
+  "notice",        // Privacy policy, ToS updates, data processor changes — auto-archived
   "spam",         // Phishing, scams, malware, unsolicited bulk email
 ] as const;
 
@@ -45,6 +46,7 @@ export type WorkflowData =
   | SubscriptionData
   | HealthcareData
   | GovernmentData
+  | NoticeData
   | SpamData;
 
 // ---------------------------------------------------------------------------
@@ -246,6 +248,14 @@ export interface GovernmentData {
   portalUrl?: string;
 }
 
+export interface NoticeData {
+  workflow: "notice";
+  noticeType: "privacy_policy" | "terms_update" | "data_processor" | "cookie_policy" | "compliance" | "other";
+  provider: string;
+  effectiveDate?: string;
+  documentUrl?: string;
+}
+
 export interface SpamData {
   workflow: "spam";
   spamType: "phishing" | "malware" | "unsolicited_marketing" | "scam" | "other";
@@ -270,6 +280,9 @@ export type SenderFilterMode =
 
 export type SignalStatus = "active" | "blocked";
 export type BlockReason = "new_sender" | "spam" | "sender_mismatch" | "reputation";
+
+// interrupt = push notification popup; ambient = badge only; silent = no push
+export type PushPriority = "interrupt" | "ambient" | "silent";
 
 // Per-recipient-address configuration
 export interface EmailAddressConfig {
@@ -348,6 +361,7 @@ export interface Signal {
   spamScore: number;
   summary: string;
   classificationModelId: string;
+  pushPriority: PushPriority;
 
   s3Key: string;
   status: SignalStatus;

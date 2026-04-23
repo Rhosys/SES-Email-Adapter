@@ -231,6 +231,10 @@ Medical appointment reminders, test results, prescription notifications, insuran
 Tax notices, benefits updates, license renewals, official government correspondence
 { "workflow": "government", "agency": "<string or null>", "documentType": "tax"|"benefits"|"license"|"permit"|"notice"|"fine"|"voting"|"healthcare"|"other", "referenceNumber": "<string or null>", "deadlineDate": "<YYYY-MM-DD or null>", "requiresResponse": true|false, "portalUrl": "<url or null>" }
 
+### notice
+Privacy policy changes, terms of service updates, data processor changes, cookie policy updates, GDPR/compliance notices — bulk regulatory emails sent by automated systems that users are not expected to read or act on
+{ "workflow": "notice", "noticeType": "privacy_policy"|"terms_update"|"data_processor"|"cookie_policy"|"compliance"|"other", "provider": "<name>", "effectiveDate": "<YYYY-MM-DD or null>", "documentUrl": "<url or null>" }
+
 ### spam
 Phishing, scams, malware, unsolicited bulk email
 { "workflow": "spam", "spamType": "phishing"|"malware"|"unsolicited_marketing"|"scam"|"other", "confidence": 0.0–1.0, "indicators": ["<reason>"] }
