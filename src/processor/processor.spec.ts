@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { SQSEvent } from "aws-lambda";
-import { SignalProcessor } from "./processor.js";
+import { SignalProcessor, deriveGroupingKey, derivePushPriority } from "./processor.js";
 import type { ProcessorStore, ArcMatcher, RuleEvaluator, Notifier } from "./processor.js";
 import type { MimeParser } from "./mime.js";
 import type { SignalClassifier, ClassificationOutput } from "../classifier/classifier.js";
@@ -17,6 +17,7 @@ function makeStore(): ProcessorStore {
     getSignalByMessageId: vi.fn().mockResolvedValue(null),
     saveSignal: vi.fn().mockResolvedValue(undefined),
     getArc: vi.fn().mockResolvedValue(null),
+    findArcByGroupingKey: vi.fn().mockResolvedValue(null),
     saveArc: vi.fn().mockResolvedValue(undefined),
     listRules: vi.fn().mockResolvedValue([]),
     getEmailAddressConfig: vi.fn().mockResolvedValue(null),
@@ -202,10 +203,11 @@ describe("SignalProcessor", () => {
       expect(signal.arcId).toBe(arc.id);
     });
 
-    it("embeds the signal content before arc matching", async () => {
+    it("embeds the signal content and runs arc matching", async () => {
       await processor.process(makeSqsEvent([{}]));
 
       expect(classifier.embed).toHaveBeenCalledOnce();
+      // personal workflow has no grouping key — falls back to vector search
       expect(arcMatcher.findMatch).toHaveBeenCalledOnce();
     });
 
@@ -685,6 +687,129 @@ describe("SignalProcessor", () => {
       await processor.process(makeSqsEvent([{}]));
 
       expect(store.saveSignal).toHaveBeenCalledOnce();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Arc grouping key
+  // -------------------------------------------------------------------------
+
+  describe("arc grouping key", () => {
+    it("uses deterministic key lookup for auth signals instead of vector search", async () => {
+      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        ...validClassification,
+        workflow: "auth",
+        workflowData: { workflow: "auth", authType: "otp", code: "123456", service: "GitHub" },
+      });
+
+      await processor.process(makeSqsEvent([{}]));
+
+      expect(store.findArcByGroupingKey).toHaveBeenCalledWith(
+        TEST_ACCOUNT_ID,
+        "user@example.com:auth:example.com",
+      );
+      expect(arcMatcher.findMatch).not.toHaveBeenCalled();
+    });
+
+    it("stores groupingKey on a newly created arc", async () => {
+      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        ...validClassification,
+        workflow: "auth",
+        workflowData: { workflow: "auth", authType: "otp", code: "123456", service: "GitHub" },
+      });
+
+      await processor.process(makeSqsEvent([{}]));
+
+      const arc = vi.mocked(store.saveArc).mock.calls[0]![0] as Arc;
+      expect(arc.groupingKey).toBe("user@example.com:auth:example.com");
+    });
+
+    it("reuses existing arc found by grouping key", async () => {
+      const existing = makeArc({ id: "auth-arc", groupingKey: "user@example.com:auth:example.com" });
+      vi.mocked(store.findArcByGroupingKey).mockResolvedValueOnce(existing);
+      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        ...validClassification,
+        workflow: "auth",
+        workflowData: { workflow: "auth", authType: "otp", code: "999999", service: "GitHub" },
+      });
+
+      await processor.process(makeSqsEvent([{}]));
+
+      const arc = vi.mocked(store.saveArc).mock.calls[0]![0] as Arc;
+      expect(arc.id).toBe("auth-arc");
+    });
+
+    it("scopes vector search by recipientAddress for workflows without a grouping key", async () => {
+      await processor.process(makeSqsEvent([{ destination: ["inbox@work.com"] }]));
+
+      expect(arcMatcher.findMatch).toHaveBeenCalledWith(
+        TEST_ACCOUNT_ID,
+        "inbox@work.com",
+        expect.any(Array),
+      );
+    });
+
+    it("uses order number as grouping key when present", async () => {
+      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        ...validClassification,
+        workflow: "order",
+        workflowData: { workflow: "order", orderType: "shipping", retailer: "Amazon", orderNumber: "112-999" },
+      });
+
+      await processor.process(makeSqsEvent([{}]));
+
+      expect(store.findArcByGroupingKey).toHaveBeenCalledWith(
+        TEST_ACCOUNT_ID,
+        "user@example.com:order:112-999",
+      );
+    });
+
+    it("falls back to vector search for order without order number", async () => {
+      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        ...validClassification,
+        workflow: "order",
+        workflowData: { workflow: "order", orderType: "shipping", retailer: "Amazon" },
+      });
+
+      await processor.process(makeSqsEvent([{}]));
+
+      expect(store.findArcByGroupingKey).not.toHaveBeenCalled();
+      expect(arcMatcher.findMatch).toHaveBeenCalledOnce();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Pure function unit tests
+  // -------------------------------------------------------------------------
+
+  describe("deriveGroupingKey", () => {
+    it("returns recipientAddress:workflow:senderETLD1 for auth", () => {
+      expect(deriveGroupingKey("auth", { workflow: "auth", authType: "otp", service: "GitHub" }, "me@example.com", "github.com"))
+        .toBe("me@example.com:auth:github.com");
+    });
+
+    it("returns null for personal (vector search workflow)", () => {
+      expect(deriveGroupingKey("personal", { workflow: "personal", isReply: false, sentiment: "neutral", requiresReply: false }, "me@example.com", "friend.com"))
+        .toBeNull();
+    });
+  });
+
+  describe("derivePushPriority", () => {
+    it("auth is always interrupt", () => {
+      expect(derivePushPriority("auth", { workflow: "auth", authType: "otp", service: "GitHub" })).toBe("interrupt");
+    });
+
+    it("financial is interrupt only when isSuspicious", () => {
+      expect(derivePushPriority("financial", { workflow: "financial", financialType: "fraud_alert", institution: "Chase", isSuspicious: true, requiresAction: false })).toBe("interrupt");
+      expect(derivePushPriority("financial", { workflow: "financial", financialType: "statement", institution: "Chase", requiresAction: false })).toBe("ambient");
+    });
+
+    it("notice is always silent", () => {
+      expect(derivePushPriority("notice", { workflow: "notice", noticeType: "privacy_policy", provider: "Google" })).toBe("silent");
+    });
+
+    it("newsletter is always silent", () => {
+      expect(derivePushPriority("newsletter", { workflow: "newsletter", publication: "TLDR", topics: [] })).toBe("silent");
     });
   });
 });
