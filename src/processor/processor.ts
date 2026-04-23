@@ -1,8 +1,9 @@
 import { randomUUID } from "crypto";
 import type { SQSEvent } from "aws-lambda";
-import type { Signal, Arc, Rule, Category } from "../types/index.js";
+import type { Signal, Arc, Rule, Category, EmailAddressConfig, AccountFilteringConfig, SignalStatus, BlockReason } from "../types/index.js";
 import type { MimeParser } from "./mime.js";
 import type { SignalClassifier } from "../classifier/classifier.js";
+import { getETLD1, evaluateFilter, type FilterResult } from "./filter.js";
 
 // ---------------------------------------------------------------------------
 // Interfaces
@@ -14,6 +15,9 @@ export interface ProcessorStore {
   getArc(id: string): Promise<Arc | null>;
   saveArc(arc: Arc): Promise<void>;
   listRules(accountId: string): Promise<Rule[]>;
+  getEmailAddressConfig(accountId: string, address: string): Promise<EmailAddressConfig | null>;
+  saveEmailAddressConfig(config: EmailAddressConfig): Promise<void>;
+  getAccountFilteringConfig(accountId: string): Promise<AccountFilteringConfig | null>;
 }
 
 export interface ArcMatcher {
@@ -27,6 +31,7 @@ export interface RuleEvaluator {
 
 export interface Notifier {
   notify(accountId: string, arc: Arc, signal: Signal): Promise<void>;
+  notifyBlocked(accountId: string, signal: Signal): Promise<void>;
 }
 
 interface InboundSignalMessage {
@@ -82,16 +87,19 @@ export class SignalProcessor {
   private async processMessage(msg: InboundSignalMessage): Promise<void> {
     const { accountId, s3Key, sesMessageId, timestamp, destination } = msg;
 
+    // 1. Dedup
     const existing = await this.store.getSignalByMessageId(sesMessageId);
     if (existing) return;
 
+    // 2. Parse MIME
     const parsed = await this.mimeParser.parse(s3Key);
 
-    // Embed for Arc matching
+    // 3. Embed + Arc matching
     const embedText = [parsed.subject, parsed.textBody ?? ""].join(" ").slice(0, 4000);
     const embedding = await this.classifier.embed(embedText);
     const matchedArc = await this.arcMatcher.findMatch(accountId, embedding);
 
+    // 4. Classify
     const classification = await this.classifier.classify({
       from: parsed.from.address,
       to: parsed.to.map((a) => a.address),
@@ -104,7 +112,43 @@ export class SignalProcessor {
 
     const now = new Date().toISOString();
     const recipientAddress = destination[0] ?? "";
+    const senderETLD1 = getETLD1(parsed.from.address);
 
+    // 5. Filtering — bypassed entirely when signal matches an existing Arc
+    if (!matchedArc) {
+      const emailConfig = await this.store.getEmailAddressConfig(accountId, recipientAddress);
+      const filterResult = evaluateFilter(emailConfig, senderETLD1, classification.spamScore);
+
+      if (!filterResult.allowed) {
+        const blockedSignal = buildSignal({
+          arcId: undefined,
+          status: "blocked",
+          blockReason: filterResult.reason,
+          accountId,
+          messageId: sesMessageId,
+          recipientAddress,
+          parsed,
+          classification,
+          s3Key,
+          receivedAt: timestamp,
+          now,
+        });
+
+        await this.store.saveSignal(blockedSignal);
+        if (this.notifier) {
+          await this.notifier.notifyBlocked(accountId, blockedSignal).catch((err) => {
+            console.error("Blocked notification failed:", err);
+          });
+        }
+        return;
+      }
+
+      if (filterResult.autoApprove) {
+        await this.autoApprove(accountId, recipientAddress, senderETLD1, emailConfig);
+      }
+    }
+
+    // 6. Build or update Arc
     let arc: Arc;
     if (matchedArc) {
       arc = {
@@ -135,10 +179,10 @@ export class SignalProcessor {
       }
     }
 
-    // Evaluate rules
-    const signalShell: Signal = buildSignal({
-      id: randomUUID(),
+    // 7. Evaluate rules
+    const signalShell = buildSignal({
       arcId: arc.id,
+      status: "active",
       accountId,
       messageId: sesMessageId,
       recipientAddress,
@@ -181,6 +225,33 @@ export class SignalProcessor {
       });
     }
   }
+
+  private async autoApprove(
+    accountId: string,
+    address: string,
+    senderETLD1: string,
+    existing: EmailAddressConfig | null,
+  ): Promise<void> {
+    const now = new Date().toISOString();
+    if (existing) {
+      await this.store.saveEmailAddressConfig({
+        ...existing,
+        approvedSenders: [...existing.approvedSenders, senderETLD1],
+        updatedAt: now,
+      });
+    } else {
+      const accountConfig = await this.store.getAccountFilteringConfig(accountId);
+      await this.store.saveEmailAddressConfig({
+        id: randomUUID(),
+        accountId,
+        address,
+        filterMode: accountConfig?.defaultFilterMode ?? "notify_new",
+        approvedSenders: [senderETLD1],
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -188,8 +259,9 @@ export class SignalProcessor {
 // ---------------------------------------------------------------------------
 
 function buildSignal(opts: {
-  id: string;
-  arcId: string;
+  arcId?: string;
+  status: Signal["status"];
+  blockReason?: Signal["blockReason"];
   accountId: string;
   messageId: string;
   recipientAddress: string;
@@ -199,10 +271,9 @@ function buildSignal(opts: {
   receivedAt: string;
   now: string;
 }): Signal {
-  const { id, arcId, accountId, messageId, recipientAddress, parsed, classification, s3Key, receivedAt, now } = opts;
+  const { arcId, status, blockReason, accountId, messageId, recipientAddress, parsed, classification, s3Key, receivedAt, now } = opts;
   const signal: Signal = {
-    id,
-    arcId,
+    id: randomUUID(),
     accountId,
     messageId,
     receivedAt,
@@ -219,9 +290,12 @@ function buildSignal(opts: {
     summary: classification.summary,
     classificationModelId: classification.classificationModelId,
     s3Key,
+    status,
     createdAt: now,
   };
 
+  if (arcId !== undefined) signal.arcId = arcId;
+  if (blockReason !== undefined) signal.blockReason = blockReason;
   if (parsed.replyTo !== undefined) signal.replyTo = parsed.replyTo;
   if (parsed.textBody !== undefined) signal.textBody = parsed.textBody;
   if (parsed.htmlBody != null) signal.htmlBody = parsed.htmlBody;

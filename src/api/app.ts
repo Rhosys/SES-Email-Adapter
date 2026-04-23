@@ -1,5 +1,7 @@
 import { Hono } from "hono";
-import type { Arc, Signal, View, Label, Rule, Domain, Account, Page, PageParams, ArcStatus, Category, CATEGORIES } from "../types/index.js";
+import { randomUUID } from "crypto";
+import { getDomain } from "tldts";
+import type { Arc, Signal, View, Label, Rule, Domain, Account, Page, PageParams, ArcStatus, Category, CATEGORIES, EmailAddressConfig, SenderFilterMode } from "../types/index.js";
 
 // ---------------------------------------------------------------------------
 // Auth
@@ -119,7 +121,17 @@ export interface ApiStore {
 
   // Account
   getAccount(accountId: string): Promise<Account | null>;
-  updateAccount(accountId: string, update: Partial<Pick<Account, "name" | "deletionRetentionDays" | "notifications">>): Promise<void>;
+  updateAccount(accountId: string, update: Partial<Pick<Account, "name" | "deletionRetentionDays" | "notifications" | "filtering">>): Promise<void>;
+
+  // Email address configs
+  listEmailConfigs(accountId: string): Promise<EmailAddressConfig[]>;
+  getEmailConfig(accountId: string, address: string): Promise<EmailAddressConfig | null>;
+  upsertEmailConfig(config: EmailAddressConfig): Promise<void>;
+  deleteEmailConfig(accountId: string, address: string): Promise<void>;
+
+  // Signal unblocking
+  unblockSignal(accountId: string, signalId: string, arcId: string): Promise<void>;
+  createArc(arc: Arc): Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -380,9 +392,113 @@ export function createApp({ store, auth }: AppDeps) {
 
   app.patch("/account", async (c) => {
     const { accountId } = c.get("auth");
-    const body = await c.req.json() as Partial<Pick<Account, "name" | "deletionRetentionDays" | "notifications">>;
+    const body = await c.req.json() as Partial<Pick<Account, "name" | "deletionRetentionDays" | "notifications" | "filtering">>;
     await store.updateAccount(accountId, body);
     return c.json({ ok: true });
+  });
+
+  // -------------------------------------------------------------------------
+  // Email address configs
+  // -------------------------------------------------------------------------
+
+  app.get("/email-configs", async (c) => {
+    const { accountId } = c.get("auth");
+    const configs = await store.listEmailConfigs(accountId);
+    return c.json(configs);
+  });
+
+  app.get("/email-configs/:address", async (c) => {
+    const { accountId } = c.get("auth");
+    const address = decodeURIComponent(c.req.param("address"));
+    const config = await store.getEmailConfig(accountId, address);
+    if (!config) return c.json({ error: "Not found" }, 404);
+    return c.json(config);
+  });
+
+  app.put("/email-configs/:address", async (c) => {
+    const { accountId } = c.get("auth");
+    const address = decodeURIComponent(c.req.param("address"));
+    const body = await c.req.json() as { filterMode: SenderFilterMode; approvedSenders: string[] };
+    const existing = await store.getEmailConfig(accountId, address);
+    const now = new Date().toISOString();
+    await store.upsertEmailConfig({
+      id: existing?.id ?? randomUUID(),
+      accountId,
+      address,
+      filterMode: body.filterMode,
+      approvedSenders: body.approvedSenders,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+    });
+    return c.json({ ok: true });
+  });
+
+  app.delete("/email-configs/:address", async (c) => {
+    const { accountId } = c.get("auth");
+    const address = decodeURIComponent(c.req.param("address"));
+    await store.deleteEmailConfig(accountId, address);
+    return c.json({ ok: true });
+  });
+
+  // -------------------------------------------------------------------------
+  // Signal unblock
+  // -------------------------------------------------------------------------
+
+  app.post("/signals/:id/unblock", async (c) => {
+    const { accountId } = c.get("auth");
+    const signalId = c.req.param("id");
+    const body = await c.req.json() as { approveSender?: boolean; updateFilterMode?: SenderFilterMode };
+
+    const signal = await store.getSignal(accountId, signalId);
+    if (!signal) return c.json({ error: "Not found" }, 404);
+    if (signal.status !== "blocked") return c.json({ error: "Signal is not blocked" }, 400);
+
+    const now = new Date().toISOString();
+    const arc: Arc = {
+      id: randomUUID(),
+      accountId,
+      category: signal.category,
+      labels: [],
+      status: "active",
+      summary: signal.summary,
+      lastSignalAt: signal.receivedAt,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    await store.createArc(arc);
+    await store.unblockSignal(accountId, signalId, arc.id);
+
+    if (body.approveSender || body.updateFilterMode) {
+      const senderDomain = signal.from.address.includes("@")
+        ? signal.from.address.split("@").pop()!
+        : signal.from.address;
+      const senderETLD1 = getDomain(senderDomain) ?? senderDomain;
+      const existing = await store.getEmailConfig(accountId, signal.recipientAddress);
+
+      const base = existing ?? {
+        id: randomUUID(),
+        accountId,
+        address: signal.recipientAddress,
+        filterMode: "notify_new" as SenderFilterMode,
+        approvedSenders: [] as string[],
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      const updatedConfig: EmailAddressConfig = {
+        ...base,
+        filterMode: body.updateFilterMode ?? base.filterMode,
+        approvedSenders: body.approveSender && !base.approvedSenders.includes(senderETLD1)
+          ? [...base.approvedSenders, senderETLD1]
+          : base.approvedSenders,
+        updatedAt: now,
+      };
+
+      await store.upsertEmailConfig(updatedConfig);
+    }
+
+    return c.json({ arc });
   });
 
   // -------------------------------------------------------------------------
