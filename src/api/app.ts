@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import type { Arc, Signal, View, Label, Rule, Domain, Page, PageParams, ArcStatus, Category, CATEGORIES } from "../types/index.js";
+import type { Arc, Signal, View, Label, Rule, Domain, Account, Page, PageParams, ArcStatus, Category, CATEGORIES } from "../types/index.js";
 
 // ---------------------------------------------------------------------------
 // Auth
@@ -116,6 +116,10 @@ export interface ApiStore {
 
   // Search
   searchArcs(accountId: string, query: string, params: PageParams): Promise<Page<Arc>>;
+
+  // Account
+  getAccount(accountId: string): Promise<Account | null>;
+  updateAccount(accountId: string, update: Partial<Pick<Account, "name" | "deletionRetentionDays" | "notifications">>): Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -361,6 +365,24 @@ export function createApp({ store, auth }: AppDeps) {
     if (domain.accountId !== accountId) return c.json({ error: "Forbidden" }, 403);
     await store.deleteDomain(accountId, domain.id);
     return new Response(null, { status: 204 });
+  });
+
+  // -------------------------------------------------------------------------
+  // Account
+  // -------------------------------------------------------------------------
+
+  app.get("/account", async (c) => {
+    const { accountId } = c.get("auth");
+    const account = await store.getAccount(accountId);
+    if (!account) return c.json({ error: "Not found" }, 404);
+    return c.json(account);
+  });
+
+  app.patch("/account", async (c) => {
+    const { accountId } = c.get("auth");
+    const body = await c.req.json() as Partial<Pick<Account, "name" | "deletionRetentionDays" | "notifications">>;
+    await store.updateAccount(accountId, body);
+    return c.json({ ok: true });
   });
 
   // -------------------------------------------------------------------------
