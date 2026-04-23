@@ -378,6 +378,7 @@ export type ArcStatus = "active" | "archived" | "deleted";
 export interface Arc {
   id: string;
   accountId: string;
+  groupingKey?: string;     // deterministic lookup key; absent = vector-matched arc
   workflow: Workflow;
   labels: string[];
   status: ArcStatus;

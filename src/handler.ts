@@ -57,6 +57,7 @@ class DynamoProcessorStore implements ProcessorStore {
       Item: { ...signal, pk: `SIGNAL#${signal.messageId}`, sk: "SIGNAL" },
     }));
   }
+  async findArcByGroupingKey(_accountId: string, _key: string): Promise<Arc | null> { return null; }
   async getArc(id: string): Promise<Arc | null> {
     const result = await dynamo.send(new GetCommand({
       TableName: TABLE,
@@ -89,7 +90,7 @@ class DynamoProcessorStore implements ProcessorStore {
 // ---------------------------------------------------------------------------
 
 class StubArcMatcher implements ArcMatcher {
-  async findMatch(_accountId: string, _embedding: number[]): Promise<Arc | null> {
+  async findMatch(_accountId: string, _recipientAddress: string, _embedding: number[]): Promise<Arc | null> {
     return null;
   }
   async upsertEmbedding(_arcId: string, _embedding: number[]): Promise<void> {}

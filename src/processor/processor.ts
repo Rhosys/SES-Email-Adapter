@@ -13,6 +13,7 @@ export interface ProcessorStore {
   getSignalByMessageId(messageId: string): Promise<Pick<Signal, "id" | "messageId"> | null>;
   saveSignal(signal: Signal): Promise<void>;
   getArc(id: string): Promise<Arc | null>;
+  findArcByGroupingKey(accountId: string, key: string): Promise<Arc | null>;
   saveArc(arc: Arc): Promise<void>;
   listRules(accountId: string): Promise<Rule[]>;
   getEmailAddressConfig(accountId: string, address: string): Promise<EmailAddressConfig | null>;
@@ -22,7 +23,8 @@ export interface ProcessorStore {
 }
 
 export interface ArcMatcher {
-  findMatch(accountId: string, embedding: number[]): Promise<Arc | null>;
+  // recipientAddress scopes the vector search — signals from different recipient addresses never match
+  findMatch(accountId: string, recipientAddress: string, embedding: number[]): Promise<Arc | null>;
   upsertEmbedding(arcId: string, embedding: number[]): Promise<void>;
 }
 
@@ -95,25 +97,31 @@ export class SignalProcessor {
     // 2. Parse MIME
     const parsed = await this.mimeParser.parse(s3Key);
 
-    // 3. Embed + Arc matching
-    const embedText = [parsed.subject, parsed.textBody ?? ""].join(" ").slice(0, 4000);
-    const embedding = await this.classifier.embed(embedText);
-    const matchedArc = await this.arcMatcher.findMatch(accountId, embedding);
-
-    // 4. Classify
-    const classification = await this.classifier.classify({
-      from: parsed.from.address,
-      to: parsed.to.map((a) => a.address),
-      subject: parsed.subject,
-      textBody: parsed.textBody,
-      htmlBody: parsed.htmlBody ?? undefined,
-      headers: parsed.headers,
-      receivedAt: timestamp,
-    });
-
-    const now = new Date().toISOString();
     const recipientAddress = destination[0] ?? "";
     const senderETLD1 = getETLD1(parsed.from.address);
+
+    // 3. Embed + classify in parallel — both needed before arc matching
+    const embedText = [parsed.subject, parsed.textBody ?? ""].join(" ").slice(0, 4000);
+    const [embedding, classification] = await Promise.all([
+      this.classifier.embed(embedText),
+      this.classifier.classify({
+        from: parsed.from.address,
+        to: parsed.to.map((a) => a.address),
+        subject: parsed.subject,
+        textBody: parsed.textBody,
+        htmlBody: parsed.htmlBody ?? undefined,
+        headers: parsed.headers,
+        receivedAt: timestamp,
+      }),
+    ]);
+
+    const now = new Date().toISOString();
+
+    // 4. Arc matching — deterministic key first, vector similarity fallback
+    const groupingKey = deriveGroupingKey(classification.workflow, classification.workflowData, recipientAddress, senderETLD1);
+    const matchedArc = groupingKey
+      ? await this.store.findArcByGroupingKey(accountId, groupingKey)
+      : await this.arcMatcher.findMatch(accountId, recipientAddress, embedding);
 
     // 5. Filtering — bypassed entirely when signal matches an existing Arc
     if (!matchedArc) {
@@ -177,6 +185,7 @@ export class SignalProcessor {
       arc = {
         id: randomUUID(),
         accountId,
+        ...(groupingKey ? { groupingKey } : {}),
         workflow: classification.workflow,
         labels: classification.labels,
         // Notices are archived on arrival
@@ -324,6 +333,36 @@ function buildSignal(opts: {
   if (parsed.sentAt !== undefined) signal.sentAt = parsed.sentAt;
 
   return signal;
+}
+
+export function deriveGroupingKey(
+  workflow: Workflow,
+  workflowData: WorkflowData,
+  recipientAddress: string,
+  senderETLD1: string,
+): string | null {
+  const base = `${recipientAddress}:${workflow}`;
+
+  switch (workflow) {
+    case "auth":
+    case "invoice":
+    case "notice":
+    case "newsletter":
+      return `${base}:${senderETLD1}`;
+
+    case "order": {
+      const { orderNumber } = workflowData as { orderNumber?: string };
+      return orderNumber ? `${base}:${orderNumber}` : null;
+    }
+
+    case "support": {
+      const { ticketId } = workflowData as { ticketId?: string };
+      return ticketId ? `${base}:${ticketId}` : null;
+    }
+
+    default:
+      return null;
+  }
 }
 
 export function derivePushPriority(workflow: Workflow, data: WorkflowData): PushPriority {
