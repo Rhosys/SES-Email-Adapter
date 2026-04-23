@@ -1,6 +1,6 @@
 import { randomUUID } from "crypto";
 import type { SQSEvent } from "aws-lambda";
-import type { Signal, Arc, Rule, Workflow, EmailAddressConfig, AccountFilteringConfig } from "../types/index.js";
+import type { Signal, Arc, Rule, Workflow, WorkflowData, PushPriority, EmailAddressConfig, AccountFilteringConfig } from "../types/index.js";
 import type { MimeParser } from "./mime.js";
 import type { SignalClassifier } from "../classifier/classifier.js";
 import { getETLD1, evaluateFilter } from "./filter.js";
@@ -162,13 +162,15 @@ export class SignalProcessor {
     }
 
     // 6. Build or update Arc
+    const isNotice = classification.workflow === "notice";
     let arc: Arc;
     if (matchedArc) {
       arc = {
         ...matchedArc,
         workflow: classification.workflow,
         summary: classification.summary,
-        lastSignalAt: timestamp,
+        // Notices stay buried — never bump lastSignalAt
+        ...(isNotice ? {} : { lastSignalAt: timestamp }),
         updatedAt: now,
       };
     } else {
@@ -177,7 +179,8 @@ export class SignalProcessor {
         accountId,
         workflow: classification.workflow,
         labels: classification.labels,
-        status: "active",
+        // Notices are archived on arrival
+        status: isNotice ? "archived" : "active",
         summary: classification.summary,
         lastSignalAt: timestamp,
         createdAt: now,
@@ -232,7 +235,7 @@ export class SignalProcessor {
     await this.arcMatcher.upsertEmbedding(arc.id, embedding);
 
     const isSpam = classification.workflow === "spam" || classification.spamScore >= 0.9;
-    if (this.notifier && !isSpam) {
+    if (this.notifier && !isSpam && !isNotice) {
       await this.notifier.notify(accountId, arc, signal).catch((err) => {
         console.error("Notification failed:", err);
       });
@@ -307,6 +310,7 @@ function buildSignal(opts: {
     spamScore: classification.spamScore,
     summary: classification.summary,
     classificationModelId: classification.classificationModelId,
+    pushPriority: derivePushPriority(classification.workflow, classification.workflowData),
     s3Key,
     status,
     createdAt: now,
@@ -320,4 +324,44 @@ function buildSignal(opts: {
   if (parsed.sentAt !== undefined) signal.sentAt = parsed.sentAt;
 
   return signal;
+}
+
+export function derivePushPriority(workflow: Workflow, data: WorkflowData): PushPriority {
+  switch (workflow) {
+    case "auth":
+      return "interrupt";
+
+    case "security":
+      return "interrupt";
+
+    case "financial":
+      return (data as { isSuspicious?: boolean }).isSuspicious ? "interrupt" : "ambient";
+
+    case "scheduling":
+    case "travel":
+    case "healthcare":
+      return "ambient";
+
+    case "developer":
+      return (data as { severity?: string; requiresAction?: boolean }).severity === "critical" &&
+        (data as { requiresAction?: boolean }).requiresAction
+        ? "interrupt"
+        : "ambient";
+
+    case "subscription":
+      return (data as { eventType?: string }).eventType === "payment_failed" ? "interrupt" : "ambient";
+
+    case "support":
+      return (data as { priority?: string }).priority === "urgent" ? "interrupt" : "ambient";
+
+    case "notice":
+    case "newsletter":
+    case "marketing":
+    case "social":
+    case "spam":
+      return "silent";
+
+    default:
+      return "ambient";
+  }
 }
