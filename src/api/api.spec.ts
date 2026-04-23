@@ -835,29 +835,29 @@ describe("API", () => {
   });
 
   // -------------------------------------------------------------------------
-  // Signal unblock
+  // POST /arcs — create Arc from a blocked signal
   // -------------------------------------------------------------------------
 
-  describe("POST /signals/:id/unblock", () => {
-    it("returns 404 for unknown signal", async () => {
-      const res = await req(app, "POST", "/signals/nonexistent/unblock", { body: {} });
+  describe("POST /arcs", () => {
+    it("returns 404 when signalId references an unknown signal", async () => {
+      const res = await req(app, "POST", "/arcs", { body: { signalId: "nonexistent" } });
       expect(res.status).toBe(404);
     });
 
-    it("returns 400 when signal is not blocked", async () => {
+    it("returns 400 when the signal is not blocked", async () => {
       vi.mocked(store.getSignal).mockResolvedValueOnce(makeSignal({ status: "active" }));
 
-      const res = await req(app, "POST", "/signals/signal-001/unblock", { body: {} });
+      const res = await req(app, "POST", "/arcs", { body: { signalId: "signal-001" } });
       expect(res.status).toBe(400);
     });
 
-    it("creates an Arc and unblocks the signal", async () => {
+    it("creates an Arc from a blocked signal and returns 201", async () => {
       vi.mocked(store.getSignal).mockResolvedValueOnce(
         makeSignal({ status: "blocked", blockReason: "new_sender" }),
       );
 
-      const res = await req(app, "POST", "/signals/signal-001/unblock", { body: {} });
-      expect(res.status).toBe(200);
+      const res = await req(app, "POST", "/arcs", { body: { signalId: "signal-001" } });
+      expect(res.status).toBe(201);
 
       expect(store.createArc).toHaveBeenCalledOnce();
       const arc = vi.mocked(store.createArc).mock.calls[0]![0] as Arc;
@@ -866,25 +866,33 @@ describe("API", () => {
 
       expect(store.unblockSignal).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "signal-001", arc.id);
 
-      const body = await res.json() as { arc: Arc };
-      expect(body.arc.id).toBe(arc.id);
+      const body = await res.json() as Arc;
+      expect(body.id).toBe(arc.id);
     });
 
-    it("approves sender and updates email config when approveSender is true", async () => {
+    it("Arc inherits category and summary from the blocked signal", async () => {
+      vi.mocked(store.getSignal).mockResolvedValueOnce(
+        makeSignal({ status: "blocked", category: "invoice", summary: "Invoice from ACME" }),
+      );
+
+      await req(app, "POST", "/arcs", { body: { signalId: "signal-001" } });
+
+      const arc = vi.mocked(store.createArc).mock.calls[0]![0] as Arc;
+      expect(arc.category).toBe("invoice");
+      expect(arc.summary).toBe("Invoice from ACME");
+    });
+
+    it("approves sender eTLD+1 when approveSender is true", async () => {
       vi.mocked(store.getSignal).mockResolvedValueOnce(
         makeSignal({
           status: "blocked",
-          blockReason: "new_sender",
           from: { address: "noreply@mail.amazon.com" },
           recipientAddress: "me@mydomain.com",
         }),
       );
 
-      await req(app, "POST", "/signals/signal-001/unblock", {
-        body: { approveSender: true },
-      });
+      await req(app, "POST", "/arcs", { body: { signalId: "signal-001", approveSender: true } });
 
-      expect(store.upsertEmailConfig).toHaveBeenCalledOnce();
       const saved = vi.mocked(store.upsertEmailConfig).mock.calls[0]![0] as EmailAddressConfig;
       expect(saved.approvedSenders).toContain("amazon.com");
       expect(saved.address).toBe("me@mydomain.com");
@@ -892,23 +900,21 @@ describe("API", () => {
 
     it("updates filter mode when updateFilterMode is provided", async () => {
       vi.mocked(store.getSignal).mockResolvedValueOnce(
-        makeSignal({ status: "blocked", blockReason: "new_sender" }),
+        makeSignal({ status: "blocked" }),
       );
 
-      await req(app, "POST", "/signals/signal-001/unblock", {
-        body: { updateFilterMode: "allow_all" },
+      await req(app, "POST", "/arcs", {
+        body: { signalId: "signal-001", updateFilterMode: "allow_all" },
       });
 
-      expect(store.upsertEmailConfig).toHaveBeenCalledOnce();
       const saved = vi.mocked(store.upsertEmailConfig).mock.calls[0]![0] as EmailAddressConfig;
       expect(saved.filterMode).toBe("allow_all");
     });
 
-    it("preserves existing approved senders when approving a new sender", async () => {
+    it("preserves existing approved senders when approving a new one", async () => {
       vi.mocked(store.getSignal).mockResolvedValueOnce(
         makeSignal({
           status: "blocked",
-          blockReason: "new_sender",
           from: { address: "support@github.com" },
           recipientAddress: "user@example.com",
         }),
@@ -917,8 +923,8 @@ describe("API", () => {
         makeEmailAddressConfig({ approvedSenders: ["amazon.com", "google.com"] }),
       );
 
-      await req(app, "POST", "/signals/signal-001/unblock", {
-        body: { approveSender: true },
+      await req(app, "POST", "/arcs", {
+        body: { signalId: "signal-001", approveSender: true },
       });
 
       const saved = vi.mocked(store.upsertEmailConfig).mock.calls[0]![0] as EmailAddressConfig;

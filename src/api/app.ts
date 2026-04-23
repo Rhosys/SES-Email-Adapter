@@ -196,6 +196,64 @@ export function createApp({ store, auth }: AppDeps) {
     return c.json({ ok: true });
   });
 
+  app.post("/arcs", async (c) => {
+    const { accountId } = c.get("auth");
+    const body = await c.req.json() as {
+      signalId: string;
+      approveSender?: boolean;
+      updateFilterMode?: SenderFilterMode;
+    };
+
+    const signal = await store.getSignal(accountId, body.signalId);
+    if (!signal) return c.json({ error: "Signal not found" }, 404);
+    if (signal.status !== "blocked") return c.json({ error: "Signal is not blocked" }, 400);
+
+    const now = new Date().toISOString();
+    const arc: Arc = {
+      id: randomUUID(),
+      accountId,
+      category: signal.category,
+      labels: [],
+      status: "active",
+      summary: signal.summary,
+      lastSignalAt: signal.receivedAt,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    await store.createArc(arc);
+    await store.unblockSignal(accountId, signal.id, arc.id);
+
+    if (body.approveSender || body.updateFilterMode) {
+      const senderDomain = signal.from.address.includes("@")
+        ? signal.from.address.split("@").pop()!
+        : signal.from.address;
+      const senderETLD1 = getDomain(senderDomain) ?? senderDomain;
+      const existing = await store.getEmailConfig(accountId, signal.recipientAddress);
+
+      const base = existing ?? {
+        id: randomUUID(),
+        accountId,
+        address: signal.recipientAddress,
+        filterMode: "notify_new" as SenderFilterMode,
+        approvedSenders: [] as string[],
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      await store.upsertEmailConfig({
+        ...base,
+        filterMode: body.updateFilterMode ?? base.filterMode,
+        approvedSenders: body.approveSender && !base.approvedSenders.includes(senderETLD1)
+          ? [...base.approvedSenders, senderETLD1]
+          : base.approvedSenders,
+        updatedAt: now,
+      });
+    }
+
+    return c.json(arc, 201);
+  });
+
   // -------------------------------------------------------------------------
   // Signals
   // -------------------------------------------------------------------------
@@ -438,67 +496,6 @@ export function createApp({ store, auth }: AppDeps) {
     const address = decodeURIComponent(c.req.param("address"));
     await store.deleteEmailConfig(accountId, address);
     return c.json({ ok: true });
-  });
-
-  // -------------------------------------------------------------------------
-  // Signal unblock
-  // -------------------------------------------------------------------------
-
-  app.post("/signals/:id/unblock", async (c) => {
-    const { accountId } = c.get("auth");
-    const signalId = c.req.param("id");
-    const body = await c.req.json() as { approveSender?: boolean; updateFilterMode?: SenderFilterMode };
-
-    const signal = await store.getSignal(accountId, signalId);
-    if (!signal) return c.json({ error: "Not found" }, 404);
-    if (signal.status !== "blocked") return c.json({ error: "Signal is not blocked" }, 400);
-
-    const now = new Date().toISOString();
-    const arc: Arc = {
-      id: randomUUID(),
-      accountId,
-      category: signal.category,
-      labels: [],
-      status: "active",
-      summary: signal.summary,
-      lastSignalAt: signal.receivedAt,
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    await store.createArc(arc);
-    await store.unblockSignal(accountId, signalId, arc.id);
-
-    if (body.approveSender || body.updateFilterMode) {
-      const senderDomain = signal.from.address.includes("@")
-        ? signal.from.address.split("@").pop()!
-        : signal.from.address;
-      const senderETLD1 = getDomain(senderDomain) ?? senderDomain;
-      const existing = await store.getEmailConfig(accountId, signal.recipientAddress);
-
-      const base = existing ?? {
-        id: randomUUID(),
-        accountId,
-        address: signal.recipientAddress,
-        filterMode: "notify_new" as SenderFilterMode,
-        approvedSenders: [] as string[],
-        createdAt: now,
-        updatedAt: now,
-      };
-
-      const updatedConfig: EmailAddressConfig = {
-        ...base,
-        filterMode: body.updateFilterMode ?? base.filterMode,
-        approvedSenders: body.approveSender && !base.approvedSenders.includes(senderETLD1)
-          ? [...base.approvedSenders, senderETLD1]
-          : base.approvedSenders,
-        updatedAt: now,
-      };
-
-      await store.upsertEmailConfig(updatedConfig);
-    }
-
-    return c.json({ arc });
   });
 
   // -------------------------------------------------------------------------
