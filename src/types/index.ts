@@ -14,9 +14,7 @@ export const WORKFLOWS = [
   "social",       // Social media notifications, mentions, community activity
   "crm",          // Sales outreach, proposals, client emails, follow-ups
   "personal",     // Human-to-human correspondence not from automated systems
-  "notification", // Service alerts, product updates, system reminders
   "security",     // Suspicious login, breach notices, new device alerts
-  "legal",        // Contracts, terms updates, compliance notices, court notices
   "scheduling",   // Calendar invites, appointment confirmations, cancellations
   "support",      // Customer support tickets, helpdesk, service status
   "developer",    // GitHub, CI/CD, error monitoring, domain/cert expiry
@@ -40,9 +38,7 @@ export type WorkflowData =
   | SocialData
   | CrmData
   | PersonalData
-  | NotificationData
   | SecurityData
-  | LegalData
   | SchedulingData
   | SupportData
   | DeveloperData
@@ -174,15 +170,6 @@ export interface PersonalData {
   requiresReply: boolean;
 }
 
-export interface NotificationData {
-  workflow: "notification";
-  notificationType: "alert" | "update" | "reminder" | "system";
-  service: string;
-  severity: "info" | "warning" | "critical";
-  requiresAction: boolean;
-  actionUrl?: string;
-}
-
 export interface SecurityData {
   workflow: "security";
   alertType: "suspicious_login" | "new_device" | "password_changed" | "breach_notice" | "api_key_exposed" | "account_locked" | "other";
@@ -192,16 +179,6 @@ export interface SecurityData {
   deviceName?: string;
   requiresAction: boolean;
   actionUrl?: string;
-}
-
-export interface LegalData {
-  workflow: "legal";
-  documentType: "contract" | "terms_update" | "privacy_update" | "compliance_notice" | "court_notice" | "nda" | "other";
-  parties?: string[];
-  effectiveDate?: string;
-  requiresSignature: boolean;
-  deadlineDate?: string;
-  documentUrl?: string;
 }
 
 export interface SchedulingData {
