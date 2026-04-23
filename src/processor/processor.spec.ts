@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { SQSEvent } from "aws-lambda";
 import { SignalProcessor } from "./processor.js";
-import type { ProcessorStore, ArcMatcher, RuleEvaluator } from "./processor.js";
+import type { ProcessorStore, ArcMatcher, RuleEvaluator, Notifier } from "./processor.js";
 import type { MimeParser } from "./mime.js";
 import type { SignalClassifier, ClassificationOutput } from "../classifier/classifier.js";
 import type { Arc, Rule, Signal } from "../types/index.js";
@@ -55,6 +55,12 @@ function makeArcMatcher(): ArcMatcher {
 function makeRuleEvaluator(): RuleEvaluator {
   return {
     evaluate: vi.fn().mockReturnValue(false),
+  };
+}
+
+function makeNotifier(): Notifier {
+  return {
+    notify: vi.fn().mockResolvedValue(undefined),
   };
 }
 
@@ -378,6 +384,78 @@ describe("SignalProcessor", () => {
       expect(store.saveSignal).toHaveBeenCalledOnce();
       const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
       expect(saved.messageId).toBe("msg-ok");
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Notifications
+  // -------------------------------------------------------------------------
+
+  describe("notifications", () => {
+    let notifier: Notifier;
+
+    beforeEach(() => {
+      notifier = makeNotifier();
+      processor = new SignalProcessor({ store, mimeParser, classifier, arcMatcher, ruleEvaluator, notifier });
+    });
+
+    it("calls notifier after saving a new Signal", async () => {
+      await processor.process(makeSqsEvent([{}]));
+
+      expect(notifier.notify).toHaveBeenCalledOnce();
+    });
+
+    it("passes accountId, arc, and signal to notifier", async () => {
+      await processor.process(makeSqsEvent([{}]));
+
+      const [accountId, arc, signal] = vi.mocked(notifier.notify).mock.calls[0]!;
+      expect(accountId).toBe(TEST_ACCOUNT_ID);
+      expect(arc.accountId).toBe(TEST_ACCOUNT_ID);
+      expect(signal.accountId).toBe(TEST_ACCOUNT_ID);
+    });
+
+    it("does not call notifier for spam signals", async () => {
+      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        ...validClassification,
+        category: "spam",
+        spamScore: 0.97,
+        categoryData: { category: "spam", spamType: "phishing", confidence: 0.97, indicators: [] },
+      });
+
+      await processor.process(makeSqsEvent([{}]));
+
+      expect(notifier.notify).not.toHaveBeenCalled();
+    });
+
+    it("does not call notifier when spamScore >= 0.9 even if category is not spam", async () => {
+      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        ...validClassification,
+        spamScore: 0.95,
+      });
+
+      await processor.process(makeSqsEvent([{}]));
+
+      expect(notifier.notify).not.toHaveBeenCalled();
+    });
+
+    it("does not fail processing when notifier throws", async () => {
+      vi.mocked(notifier.notify).mockRejectedValueOnce(new Error("SES error"));
+
+      await processor.process(makeSqsEvent([{}]));
+
+      // Signal was still saved despite notification failure
+      expect(store.saveSignal).toHaveBeenCalledOnce();
+    });
+
+    it("does not call notifier when no notifier is configured", async () => {
+      // Processor without notifier
+      const processorWithoutNotifier = new SignalProcessor({
+        store, mimeParser, classifier, arcMatcher, ruleEvaluator,
+      });
+
+      await processorWithoutNotifier.process(makeSqsEvent([{}]));
+
+      expect(notifier.notify).not.toHaveBeenCalled();
     });
   });
 });

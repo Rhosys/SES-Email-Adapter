@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { Arc, Signal, View, Label, Rule, Domain } from "../types/index.js";
+import type { Arc, Signal, View, Label, Rule, Domain, Account } from "../types/index.js";
 import { createApp } from "./app.js";
 import type { ApiStore, AuthService, AuthContext } from "./app.js";
 
@@ -43,6 +43,19 @@ function makeStore(): ApiStore {
     createDomain: vi.fn().mockResolvedValue(undefined),
     deleteDomain: vi.fn().mockResolvedValue(undefined),
     searchArcs: vi.fn().mockResolvedValue({ items: [], total: 0 }),
+    getAccount: vi.fn().mockResolvedValue(null),
+    updateAccount: vi.fn().mockResolvedValue(undefined),
+  };
+}
+
+function makeAccount(overrides: Partial<Account> = {}): Account {
+  return {
+    id: TEST_ACCOUNT_ID,
+    name: "Test Account",
+    deletionRetentionDays: 30,
+    createdAt: "2024-01-01T00:00:00Z",
+    updatedAt: "2024-01-01T00:00:00Z",
+    ...overrides,
   };
 }
 
@@ -649,6 +662,71 @@ describe("API", () => {
     it("returns 400 when query is missing", async () => {
       const res = await req(app, "GET", "/search");
       expect(res.status).toBe(400);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Account
+  // -------------------------------------------------------------------------
+
+  describe("GET /account", () => {
+    it("returns the account config", async () => {
+      vi.mocked(store.getAccount).mockResolvedValueOnce(makeAccount());
+
+      const res = await req(app, "GET", "/account");
+      expect(res.status).toBe(200);
+
+      const body = await res.json() as Account;
+      expect(body.id).toBe(TEST_ACCOUNT_ID);
+      expect(body.deletionRetentionDays).toBe(30);
+    });
+
+    it("returns 404 when account does not exist yet", async () => {
+      const res = await req(app, "GET", "/account");
+      expect(res.status).toBe(404);
+    });
+  });
+
+  describe("PATCH /account", () => {
+    it("updates notification email settings", async () => {
+      const res = await req(app, "PATCH", "/account", {
+        body: {
+          notifications: {
+            email: { enabled: true, address: "alerts@example.com", frequency: "instant" },
+          },
+        },
+      });
+      expect(res.status).toBe(200);
+      expect(store.updateAccount).toHaveBeenCalledWith(
+        TEST_ACCOUNT_ID,
+        expect.objectContaining({
+          notifications: {
+            email: { enabled: true, address: "alerts@example.com", frequency: "instant" },
+          },
+        }),
+      );
+    });
+
+    it("updates deletionRetentionDays", async () => {
+      const res = await req(app, "PATCH", "/account", {
+        body: { deletionRetentionDays: 90 },
+      });
+      expect(res.status).toBe(200);
+      expect(store.updateAccount).toHaveBeenCalledWith(
+        TEST_ACCOUNT_ID,
+        expect.objectContaining({ deletionRetentionDays: 90 }),
+      );
+    });
+
+    it("updates push notification config", async () => {
+      const res = await req(app, "PATCH", "/account", {
+        body: {
+          notifications: {
+            push: { enabled: true },
+          },
+        },
+      });
+      expect(res.status).toBe(200);
     });
   });
 });

@@ -10,7 +10,7 @@ import { createApp } from "./api/app.js";
 import type { ProcessorStore, ArcMatcher, RuleEvaluator } from "./processor/processor.js";
 import type { MimeParser } from "./processor/mime.js";
 import type { ApiStore, AuthService, AuthContext } from "./api/app.js";
-import type { Signal, Arc, View, Label, Rule, Domain, Page, PageParams } from "./types/index.js";
+import type { Signal, Arc, View, Label, Rule, Domain, Account, Page, PageParams } from "./types/index.js";
 import type { ListArcsParams, UpdateArcRequest, CreateViewRequest, UpdateViewRequest, CreateLabelRequest, UpdateLabelRequest, CreateRuleRequest, UpdateRuleRequest } from "./api/app.js";
 
 // ---------------------------------------------------------------------------
@@ -131,6 +131,8 @@ class DynamoApiStore implements ApiStore {
   async createDomain(_accountId: string, _domain: string): Promise<void> {}
   async deleteDomain(_accountId: string, _id: string): Promise<void> {}
   async searchArcs(_accountId: string, _query: string, _params: PageParams): Promise<Page<Arc>> { return { items: [], total: 0 }; }
+  async getAccount(_accountId: string): Promise<Account | null> { return null; }
+  async updateAccount(_accountId: string, _update: Partial<Pick<Account, "name" | "deletionRetentionDays" | "notifications">>): Promise<void> {}
 }
 
 // ---------------------------------------------------------------------------

@@ -301,6 +301,26 @@ export interface Rule {
 }
 
 // ---------------------------------------------------------------------------
+// Notifications
+// ---------------------------------------------------------------------------
+
+export interface EmailNotificationSettings {
+  enabled: boolean;
+  address: string;              // Address to send notifications to
+  frequency: "instant" | "hourly" | "daily";
+}
+
+export interface PushNotificationSettings {
+  enabled: boolean;
+  // Device tokens registered separately via push registration endpoint
+}
+
+export interface NotificationSettings {
+  email?: EmailNotificationSettings;
+  push?: PushNotificationSettings;
+}
+
+// ---------------------------------------------------------------------------
 // Account
 // ---------------------------------------------------------------------------
 
@@ -308,6 +328,7 @@ export interface Account {
   id: string;
   name: string;
   deletionRetentionDays: number;
+  notifications?: NotificationSettings;
   createdAt: string;
   updatedAt: string;
 }

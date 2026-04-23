@@ -25,6 +25,10 @@ export interface RuleEvaluator {
   evaluate(rule: Rule, context: { signal: Signal; arc: Arc }): boolean;
 }
 
+export interface Notifier {
+  notify(accountId: string, arc: Arc, signal: Signal): Promise<void>;
+}
+
 interface InboundSignalMessage {
   accountId: string;
   s3Bucket: string;
@@ -44,6 +48,7 @@ interface SignalProcessorOptions {
   classifier: Pick<SignalClassifier, "classify" | "embed">;
   arcMatcher: ArcMatcher;
   ruleEvaluator: RuleEvaluator;
+  notifier?: Notifier;
 }
 
 export class SignalProcessor {
@@ -52,6 +57,7 @@ export class SignalProcessor {
   private readonly classifier: Pick<SignalClassifier, "classify" | "embed">;
   private readonly arcMatcher: ArcMatcher;
   private readonly ruleEvaluator: RuleEvaluator;
+  private readonly notifier?: Notifier;
 
   constructor(opts: SignalProcessorOptions) {
     this.store = opts.store;
@@ -59,6 +65,7 @@ export class SignalProcessor {
     this.classifier = opts.classifier;
     this.arcMatcher = opts.arcMatcher;
     this.ruleEvaluator = opts.ruleEvaluator;
+    this.notifier = opts.notifier;
   }
 
   async process(event: SQSEvent): Promise<void> {
@@ -166,6 +173,13 @@ export class SignalProcessor {
     await this.store.saveArc(arc);
     await this.store.saveSignal(signal);
     await this.arcMatcher.upsertEmbedding(arc.id, embedding);
+
+    const isSpam = classification.category === "spam" || classification.spamScore >= 0.9;
+    if (this.notifier && !isSpam) {
+      await this.notifier.notify(accountId, arc, signal).catch((err) => {
+        console.error("Notification failed:", err);
+      });
+    }
   }
 }
 
