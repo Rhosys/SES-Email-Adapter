@@ -171,6 +171,36 @@ export interface SpamData {
 }
 
 // ---------------------------------------------------------------------------
+// Filtering
+// ---------------------------------------------------------------------------
+
+// How strictly an email address filters incoming signals by sender
+export type SenderFilterMode =
+  | "strict"       // sender eTLD+1 must be approved AND spam score must be low
+  | "sender_match" // sender eTLD+1 must be approved (spam score ignored)
+  | "notify_new"   // allow approved senders, block + notify on new senders (default)
+  | "allow_all";   // no filtering
+
+export type SignalStatus = "active" | "blocked";
+export type BlockReason = "new_sender" | "spam" | "sender_mismatch";
+
+// Per-recipient-address configuration
+export interface EmailAddressConfig {
+  id: string;
+  accountId: string;
+  address: string;              // The recipient address, e.g. me@mydomain.com
+  filterMode: SenderFilterMode;
+  approvedSenders: string[];    // eTLD+1 domains (e.g. "amazon.com", "google.com")
+  createdAt: string;
+  updatedAt: string;
+}
+
+// Account-level filtering defaults
+export interface AccountFilteringConfig {
+  defaultFilterMode: SenderFilterMode;  // Used when auto-creating a new EmailAddressConfig
+}
+
+// ---------------------------------------------------------------------------
 // Core email primitives
 // ---------------------------------------------------------------------------
 
@@ -193,7 +223,7 @@ export interface Attachment {
 
 export interface Signal {
   id: string;
-  arcId: string;
+  arcId?: string;        // Undefined while signal is blocked pending user action
   accountId: string;
   messageId: string;       // SES dedup key
   receivedAt: string;      // ISO datetime
@@ -220,6 +250,8 @@ export interface Signal {
   classificationModelId: string;
 
   s3Key: string;
+  status: SignalStatus;
+  blockReason?: BlockReason;
   createdAt: string;
 }
 
@@ -329,6 +361,7 @@ export interface Account {
   name: string;
   deletionRetentionDays: number;
   notifications?: NotificationSettings;
+  filtering?: AccountFilteringConfig;
   createdAt: string;
   updatedAt: string;
 }

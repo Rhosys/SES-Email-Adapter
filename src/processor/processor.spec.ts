@@ -4,7 +4,7 @@ import { SignalProcessor } from "./processor.js";
 import type { ProcessorStore, ArcMatcher, RuleEvaluator, Notifier } from "./processor.js";
 import type { MimeParser } from "./mime.js";
 import type { SignalClassifier, ClassificationOutput } from "../classifier/classifier.js";
-import type { Arc, Rule, Signal } from "../types/index.js";
+import type { Arc, Rule, Signal, EmailAddressConfig } from "../types/index.js";
 
 // ---------------------------------------------------------------------------
 // Test doubles
@@ -19,6 +19,22 @@ function makeStore(): ProcessorStore {
     getArc: vi.fn().mockResolvedValue(null),
     saveArc: vi.fn().mockResolvedValue(undefined),
     listRules: vi.fn().mockResolvedValue([]),
+    getEmailAddressConfig: vi.fn().mockResolvedValue(null),
+    saveEmailAddressConfig: vi.fn().mockResolvedValue(undefined),
+    getAccountFilteringConfig: vi.fn().mockResolvedValue(null),
+  };
+}
+
+function makeEmailAddressConfig(overrides: Partial<EmailAddressConfig> = {}): EmailAddressConfig {
+  return {
+    id: "cfg-001",
+    accountId: TEST_ACCOUNT_ID,
+    address: "user@example.com",
+    filterMode: "notify_new",
+    approvedSenders: ["example.com"],
+    createdAt: "2024-01-01T00:00:00Z",
+    updatedAt: "2024-01-01T00:00:00Z",
+    ...overrides,
   };
 }
 
@@ -61,6 +77,7 @@ function makeRuleEvaluator(): RuleEvaluator {
 function makeNotifier(): Notifier {
   return {
     notify: vi.fn().mockResolvedValue(undefined),
+    notifyBlocked: vi.fn().mockResolvedValue(undefined),
   };
 }
 
@@ -456,6 +473,151 @@ describe("SignalProcessor", () => {
       await processorWithoutNotifier.process(makeSqsEvent([{}]));
 
       expect(notifier.notify).not.toHaveBeenCalled();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Sender filtering
+  // -------------------------------------------------------------------------
+
+  describe("sender filtering", () => {
+    let notifier: Notifier;
+
+    beforeEach(() => {
+      notifier = makeNotifier();
+      processor = new SignalProcessor({ store, mimeParser, classifier, arcMatcher, ruleEvaluator, notifier });
+    });
+
+    it("allows signal on brand new address and auto-creates email config with sender approved", async () => {
+      // null config = brand new address (default from makeStore)
+      await processor.process(makeSqsEvent([{}]));
+
+      expect(store.saveSignal).toHaveBeenCalledOnce();
+      expect(store.saveArc).toHaveBeenCalledOnce();
+      expect(store.saveEmailAddressConfig).toHaveBeenCalledOnce();
+
+      const savedConfig = vi.mocked(store.saveEmailAddressConfig).mock.calls[0]![0] as EmailAddressConfig;
+      expect(savedConfig.filterMode).toBe("notify_new");
+      expect(savedConfig.approvedSenders).toContain("example.com"); // sender domain from mimeParser mock
+    });
+
+    it("allows signal from a known sender (eTLD+1 in approved list)", async () => {
+      vi.mocked(store.getEmailAddressConfig).mockResolvedValueOnce(
+        makeEmailAddressConfig({ approvedSenders: ["example.com"] }),
+      );
+
+      await processor.process(makeSqsEvent([{}]));
+
+      expect(store.saveSignal).toHaveBeenCalledOnce();
+      expect(store.saveArc).toHaveBeenCalledOnce();
+      expect(store.saveEmailAddressConfig).not.toHaveBeenCalled(); // no auto-approve needed
+    });
+
+    it("blocks signal from unknown sender", async () => {
+      vi.mocked(store.getEmailAddressConfig).mockResolvedValueOnce(
+        makeEmailAddressConfig({ approvedSenders: ["trusted.com"] }), // sender is example.com, not trusted.com
+      );
+
+      await processor.process(makeSqsEvent([{}]));
+
+      expect(store.saveArc).not.toHaveBeenCalled();
+      expect(store.saveSignal).toHaveBeenCalledOnce();
+      const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
+      expect(saved.status).toBe("blocked");
+      expect(saved.blockReason).toBe("new_sender");
+      expect(saved.arcId).toBeUndefined();
+    });
+
+    it("calls notifyBlocked when a signal is blocked", async () => {
+      vi.mocked(store.getEmailAddressConfig).mockResolvedValueOnce(
+        makeEmailAddressConfig({ approvedSenders: ["other.com"] }),
+      );
+
+      await processor.process(makeSqsEvent([{}]));
+
+      expect(notifier.notifyBlocked).toHaveBeenCalledOnce();
+      expect(notifier.notify).not.toHaveBeenCalled();
+    });
+
+    it("does not fail when notifyBlocked throws", async () => {
+      vi.mocked(store.getEmailAddressConfig).mockResolvedValueOnce(
+        makeEmailAddressConfig({ approvedSenders: [] }),
+      );
+      vi.mocked(notifier.notifyBlocked).mockRejectedValueOnce(new Error("SES error"));
+
+      await processor.process(makeSqsEvent([{}]));
+
+      expect(store.saveSignal).toHaveBeenCalledOnce();
+    });
+
+    it("bypasses filtering when signal matches an existing Arc", async () => {
+      const existingArc: Arc = {
+        id: "existing-arc",
+        accountId: TEST_ACCOUNT_ID,
+        category: "personal",
+        labels: [],
+        status: "active",
+        summary: "Existing conversation",
+        lastSignalAt: "2024-01-14T10:00:00Z",
+        createdAt: "2024-01-14T10:00:00Z",
+        updatedAt: "2024-01-14T10:00:00Z",
+      };
+      vi.mocked(arcMatcher.findMatch).mockResolvedValueOnce(existingArc);
+      // Config with no approved senders — would block if filtering ran
+      vi.mocked(store.getEmailAddressConfig).mockResolvedValueOnce(
+        makeEmailAddressConfig({ approvedSenders: [] }),
+      );
+
+      await processor.process(makeSqsEvent([{}]));
+
+      // Filtering store was NOT consulted — arc match bypasses it
+      expect(store.getEmailAddressConfig).not.toHaveBeenCalled();
+      expect(store.saveArc).toHaveBeenCalledOnce();
+      expect(store.saveSignal).toHaveBeenCalledOnce();
+      const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
+      expect(saved.status).toBe("active");
+    });
+
+    it("strict mode blocks a known sender with high spam score", async () => {
+      vi.mocked(store.getEmailAddressConfig).mockResolvedValueOnce(
+        makeEmailAddressConfig({ filterMode: "strict", approvedSenders: ["example.com"] }),
+      );
+      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        ...validClassification,
+        spamScore: 0.8,
+      });
+
+      await processor.process(makeSqsEvent([{}]));
+
+      expect(store.saveArc).not.toHaveBeenCalled();
+      const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
+      expect(saved.status).toBe("blocked");
+      expect(saved.blockReason).toBe("spam");
+    });
+
+    it("allow_all mode auto-approves new sender without blocking", async () => {
+      vi.mocked(store.getEmailAddressConfig).mockResolvedValueOnce(
+        makeEmailAddressConfig({ filterMode: "allow_all", approvedSenders: [] }),
+      );
+
+      await processor.process(makeSqsEvent([{}]));
+
+      expect(store.saveArc).toHaveBeenCalledOnce();
+      const savedConfig = vi.mocked(store.saveEmailAddressConfig).mock.calls[0]![0] as EmailAddressConfig;
+      expect(savedConfig.approvedSenders).toContain("example.com");
+    });
+
+    it("saves blocked signal with classification data for user review", async () => {
+      vi.mocked(store.getEmailAddressConfig).mockResolvedValueOnce(
+        makeEmailAddressConfig({ approvedSenders: [] }),
+      );
+
+      await processor.process(makeSqsEvent([{}]));
+
+      const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
+      expect(saved.category).toBe(validClassification.category);
+      expect(saved.summary).toBe(validClassification.summary);
+      expect(saved.spamScore).toBe(validClassification.spamScore);
     });
   });
 });

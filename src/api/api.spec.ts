@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { Arc, Signal, View, Label, Rule, Domain, Account } from "../types/index.js";
+import type { Arc, Signal, View, Label, Rule, Domain, Account, EmailAddressConfig } from "../types/index.js";
 import { createApp } from "./app.js";
 import type { ApiStore, AuthService, AuthContext } from "./app.js";
 
@@ -45,6 +45,25 @@ function makeStore(): ApiStore {
     searchArcs: vi.fn().mockResolvedValue({ items: [], total: 0 }),
     getAccount: vi.fn().mockResolvedValue(null),
     updateAccount: vi.fn().mockResolvedValue(undefined),
+    listEmailConfigs: vi.fn().mockResolvedValue([]),
+    getEmailConfig: vi.fn().mockResolvedValue(null),
+    upsertEmailConfig: vi.fn().mockResolvedValue(undefined),
+    deleteEmailConfig: vi.fn().mockResolvedValue(undefined),
+    unblockSignal: vi.fn().mockResolvedValue(undefined),
+    createArc: vi.fn().mockResolvedValue(undefined),
+  };
+}
+
+function makeEmailAddressConfig(overrides: Partial<EmailAddressConfig> = {}): EmailAddressConfig {
+  return {
+    id: "cfg-001",
+    accountId: TEST_ACCOUNT_ID,
+    address: "user@example.com",
+    filterMode: "notify_new",
+    approvedSenders: ["amazon.com", "google.com"],
+    createdAt: "2024-01-01T00:00:00Z",
+    updatedAt: "2024-01-01T00:00:00Z",
+    ...overrides,
   };
 }
 
@@ -94,6 +113,7 @@ function makeSignal(overrides: Partial<Signal> = {}): Signal {
     summary: "A test signal.",
     classificationModelId: "us.anthropic.claude-opus-4-5-20251101-v1:0",
     s3Key: "emails/msg-001",
+    status: "active",
     createdAt: "2024-01-15T10:00:00Z",
     ...overrides,
   };
@@ -727,6 +747,184 @@ describe("API", () => {
         },
       });
       expect(res.status).toBe(200);
+    });
+
+    it("updates account filtering config", async () => {
+      const res = await req(app, "PATCH", "/account", {
+        body: { filtering: { defaultFilterMode: "strict" } },
+      });
+      expect(res.status).toBe(200);
+      expect(store.updateAccount).toHaveBeenCalledWith(
+        TEST_ACCOUNT_ID,
+        expect.objectContaining({ filtering: { defaultFilterMode: "strict" } }),
+      );
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Email address configs
+  // -------------------------------------------------------------------------
+
+  describe("GET /email-configs", () => {
+    it("returns list of email address configs", async () => {
+      vi.mocked(store.listEmailConfigs).mockResolvedValueOnce([makeEmailAddressConfig()]);
+
+      const res = await req(app, "GET", "/email-configs");
+      expect(res.status).toBe(200);
+
+      const body = await res.json() as EmailAddressConfig[];
+      expect(body).toHaveLength(1);
+      expect(body[0]!.address).toBe("user@example.com");
+    });
+  });
+
+  describe("GET /email-configs/:address", () => {
+    it("returns config for the given address", async () => {
+      vi.mocked(store.getEmailConfig).mockResolvedValueOnce(makeEmailAddressConfig());
+
+      const res = await req(app, "GET", "/email-configs/user%40example.com");
+      expect(res.status).toBe(200);
+
+      const body = await res.json() as EmailAddressConfig;
+      expect(body.filterMode).toBe("notify_new");
+      expect(body.approvedSenders).toContain("amazon.com");
+    });
+
+    it("returns 404 when no config exists", async () => {
+      const res = await req(app, "GET", "/email-configs/unknown%40example.com");
+      expect(res.status).toBe(404);
+    });
+  });
+
+  describe("PUT /email-configs/:address", () => {
+    it("creates a new email config", async () => {
+      const res = await req(app, "PUT", "/email-configs/me%40mydomain.com", {
+        body: { filterMode: "strict", approvedSenders: ["amazon.com"] },
+      });
+      expect(res.status).toBe(200);
+      expect(store.upsertEmailConfig).toHaveBeenCalledWith(
+        expect.objectContaining({
+          accountId: TEST_ACCOUNT_ID,
+          address: "me@mydomain.com",
+          filterMode: "strict",
+          approvedSenders: ["amazon.com"],
+        }),
+      );
+    });
+
+    it("updates an existing config preserving id and createdAt", async () => {
+      vi.mocked(store.getEmailConfig).mockResolvedValueOnce(makeEmailAddressConfig());
+
+      const res = await req(app, "PUT", "/email-configs/user%40example.com", {
+        body: { filterMode: "allow_all", approvedSenders: [] },
+      });
+      expect(res.status).toBe(200);
+
+      const saved = vi.mocked(store.upsertEmailConfig).mock.calls[0]![0] as EmailAddressConfig;
+      expect(saved.id).toBe("cfg-001");
+      expect(saved.filterMode).toBe("allow_all");
+    });
+  });
+
+  describe("DELETE /email-configs/:address", () => {
+    it("deletes the email config", async () => {
+      const res = await req(app, "DELETE", "/email-configs/me%40mydomain.com");
+      expect(res.status).toBe(200);
+      expect(store.deleteEmailConfig).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "me@mydomain.com");
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Signal unblock
+  // -------------------------------------------------------------------------
+
+  describe("POST /signals/:id/unblock", () => {
+    it("returns 404 for unknown signal", async () => {
+      const res = await req(app, "POST", "/signals/nonexistent/unblock", { body: {} });
+      expect(res.status).toBe(404);
+    });
+
+    it("returns 400 when signal is not blocked", async () => {
+      vi.mocked(store.getSignal).mockResolvedValueOnce(makeSignal({ status: "active" }));
+
+      const res = await req(app, "POST", "/signals/signal-001/unblock", { body: {} });
+      expect(res.status).toBe(400);
+    });
+
+    it("creates an Arc and unblocks the signal", async () => {
+      vi.mocked(store.getSignal).mockResolvedValueOnce(
+        makeSignal({ status: "blocked", blockReason: "new_sender" }),
+      );
+
+      const res = await req(app, "POST", "/signals/signal-001/unblock", { body: {} });
+      expect(res.status).toBe(200);
+
+      expect(store.createArc).toHaveBeenCalledOnce();
+      const arc = vi.mocked(store.createArc).mock.calls[0]![0] as Arc;
+      expect(arc.accountId).toBe(TEST_ACCOUNT_ID);
+      expect(arc.status).toBe("active");
+
+      expect(store.unblockSignal).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "signal-001", arc.id);
+
+      const body = await res.json() as { arc: Arc };
+      expect(body.arc.id).toBe(arc.id);
+    });
+
+    it("approves sender and updates email config when approveSender is true", async () => {
+      vi.mocked(store.getSignal).mockResolvedValueOnce(
+        makeSignal({
+          status: "blocked",
+          blockReason: "new_sender",
+          from: { address: "noreply@mail.amazon.com" },
+          recipientAddress: "me@mydomain.com",
+        }),
+      );
+
+      await req(app, "POST", "/signals/signal-001/unblock", {
+        body: { approveSender: true },
+      });
+
+      expect(store.upsertEmailConfig).toHaveBeenCalledOnce();
+      const saved = vi.mocked(store.upsertEmailConfig).mock.calls[0]![0] as EmailAddressConfig;
+      expect(saved.approvedSenders).toContain("amazon.com");
+      expect(saved.address).toBe("me@mydomain.com");
+    });
+
+    it("updates filter mode when updateFilterMode is provided", async () => {
+      vi.mocked(store.getSignal).mockResolvedValueOnce(
+        makeSignal({ status: "blocked", blockReason: "new_sender" }),
+      );
+
+      await req(app, "POST", "/signals/signal-001/unblock", {
+        body: { updateFilterMode: "allow_all" },
+      });
+
+      expect(store.upsertEmailConfig).toHaveBeenCalledOnce();
+      const saved = vi.mocked(store.upsertEmailConfig).mock.calls[0]![0] as EmailAddressConfig;
+      expect(saved.filterMode).toBe("allow_all");
+    });
+
+    it("preserves existing approved senders when approving a new sender", async () => {
+      vi.mocked(store.getSignal).mockResolvedValueOnce(
+        makeSignal({
+          status: "blocked",
+          blockReason: "new_sender",
+          from: { address: "support@github.com" },
+          recipientAddress: "user@example.com",
+        }),
+      );
+      vi.mocked(store.getEmailConfig).mockResolvedValueOnce(
+        makeEmailAddressConfig({ approvedSenders: ["amazon.com", "google.com"] }),
+      );
+
+      await req(app, "POST", "/signals/signal-001/unblock", {
+        body: { approveSender: true },
+      });
+
+      const saved = vi.mocked(store.upsertEmailConfig).mock.calls[0]![0] as EmailAddressConfig;
+      expect(saved.approvedSenders).toContain("amazon.com");
+      expect(saved.approvedSenders).toContain("google.com");
+      expect(saved.approvedSenders).toContain("github.com");
     });
   });
 });

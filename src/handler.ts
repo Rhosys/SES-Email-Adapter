@@ -10,7 +10,7 @@ import { createApp } from "./api/app.js";
 import type { ProcessorStore, ArcMatcher, RuleEvaluator } from "./processor/processor.js";
 import type { MimeParser } from "./processor/mime.js";
 import type { ApiStore, AuthService, AuthContext } from "./api/app.js";
-import type { Signal, Arc, View, Label, Rule, Domain, Account, Page, PageParams } from "./types/index.js";
+import type { Signal, Arc, View, Label, Rule, Domain, Account, Page, PageParams, EmailAddressConfig, SenderFilterMode } from "./types/index.js";
 import type { ListArcsParams, UpdateArcRequest, CreateViewRequest, UpdateViewRequest, CreateLabelRequest, UpdateLabelRequest, CreateRuleRequest, UpdateRuleRequest } from "./api/app.js";
 
 // ---------------------------------------------------------------------------
@@ -132,7 +132,13 @@ class DynamoApiStore implements ApiStore {
   async deleteDomain(_accountId: string, _id: string): Promise<void> {}
   async searchArcs(_accountId: string, _query: string, _params: PageParams): Promise<Page<Arc>> { return { items: [], total: 0 }; }
   async getAccount(_accountId: string): Promise<Account | null> { return null; }
-  async updateAccount(_accountId: string, _update: Partial<Pick<Account, "name" | "deletionRetentionDays" | "notifications">>): Promise<void> {}
+  async updateAccount(_accountId: string, _update: Partial<Pick<Account, "name" | "deletionRetentionDays" | "notifications" | "filtering">>): Promise<void> {}
+  async listEmailConfigs(_accountId: string): Promise<EmailAddressConfig[]> { return []; }
+  async getEmailConfig(_accountId: string, _address: string): Promise<EmailAddressConfig | null> { return null; }
+  async upsertEmailConfig(_config: EmailAddressConfig): Promise<void> {}
+  async deleteEmailConfig(_accountId: string, _address: string): Promise<void> {}
+  async unblockSignal(_accountId: string, _signalId: string, _arcId: string): Promise<void> {}
+  async createArc(_arc: Arc): Promise<void> {}
 }
 
 // ---------------------------------------------------------------------------
