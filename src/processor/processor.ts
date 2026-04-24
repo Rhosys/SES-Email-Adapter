@@ -1,6 +1,6 @@
 import { randomUUID } from "crypto";
 import type { SQSEvent } from "aws-lambda";
-import type { Signal, Arc, Rule, Workflow, WorkflowData, PushPriority, EmailAddressConfig, AccountFilteringConfig } from "../types/index.js";
+import type { Signal, Arc, Rule, Workflow, WorkflowData, PushPriority, EmailAddressConfig, AccountFilteringConfig, SignalSource, SchedulingData } from "../types/index.js";
 import type { MimeParser } from "./mime.js";
 import type { SignalClassifier } from "../classifier/classifier.js";
 import { getETLD1, evaluateFilter } from "./filter.js";
@@ -9,18 +9,22 @@ import { getETLD1, evaluateFilter } from "./filter.js";
 // Interfaces
 // ---------------------------------------------------------------------------
 
-export interface ProcessorStore {
-  getSignalByMessageId(messageId: string): Promise<Pick<Signal, "id" | "messageId"> | null>;
+export interface ProcessorDatabase {
+  getSignalByMessageId(accountId: string, sesMessageId: string): Promise<Pick<Signal, "id"> | null>;
   saveSignal(signal: Signal): Promise<void>;
-  getArc(id: string): Promise<Arc | null>;
+  getArc(accountId: string, id: string): Promise<Arc | null>;
   findArcByGroupingKey(accountId: string, key: string): Promise<Arc | null>;
   saveArc(arc: Arc): Promise<void>;
   listRules(accountId: string): Promise<Rule[]>;
   getEmailAddressConfig(accountId: string, address: string): Promise<EmailAddressConfig | null>;
   saveEmailAddressConfig(config: EmailAddressConfig): Promise<void>;
   getAccountFilteringConfig(accountId: string): Promise<AccountFilteringConfig | null>;
+  getAccountRetentionDays(accountId: string): Promise<number>;
   updateGlobalReputation(domain: string, update: { wasSpam: boolean; wasBlocked: boolean }): Promise<void>;
 }
+
+/** @deprecated Use ProcessorDatabase */
+export type ProcessorStore = ProcessorDatabase;
 
 export interface ArcMatcher {
   // recipientAddress scopes the vector search — signals from different recipient addresses never match
@@ -51,7 +55,7 @@ interface InboundSignalMessage {
 // ---------------------------------------------------------------------------
 
 interface SignalProcessorOptions {
-  store: ProcessorStore;
+  store: ProcessorDatabase;
   mimeParser: MimeParser;
   classifier: Pick<SignalClassifier, "classify" | "embed">;
   arcMatcher: ArcMatcher;
@@ -60,12 +64,12 @@ interface SignalProcessorOptions {
 }
 
 export class SignalProcessor {
-  private readonly store: ProcessorStore;
+  private readonly store: ProcessorDatabase;
   private readonly mimeParser: MimeParser;
   private readonly classifier: Pick<SignalClassifier, "classify" | "embed">;
   private readonly arcMatcher: ArcMatcher;
   private readonly ruleEvaluator: RuleEvaluator;
-  private readonly notifier?: Notifier;
+  private readonly notifier: Notifier | undefined;
 
   constructor(opts: SignalProcessorOptions) {
     this.store = opts.store;
@@ -90,8 +94,8 @@ export class SignalProcessor {
   private async processMessage(msg: InboundSignalMessage): Promise<void> {
     const { accountId, s3Key, sesMessageId, timestamp, destination } = msg;
 
-    // 1. Dedup
-    const existing = await this.store.getSignalByMessageId(sesMessageId);
+    // 1. Dedup — Signal.id for email signals = "SES#${sesMessageId}"
+    const existing = await this.store.getSignalByMessageId(accountId, sesMessageId);
     if (existing) return;
 
     // 2. Parse MIME
@@ -117,6 +121,10 @@ export class SignalProcessor {
 
     const now = new Date().toISOString();
 
+    // 3b. Compute TTL for new items (0 = unlimited/paid, no ttl field written)
+    const retentionDays = await this.store.getAccountRetentionDays(accountId);
+    const ttl = retentionDays > 0 ? Math.floor(Date.now() / 1000) + retentionDays * 86400 : undefined;
+
     // 4. Arc matching — deterministic key first, vector similarity fallback
     const groupingKey = deriveGroupingKey(classification.workflow, classification.workflowData, recipientAddress, senderETLD1);
     const matchedArc = groupingKey
@@ -141,13 +149,14 @@ export class SignalProcessor {
           status: "blocked",
           blockReason: filterResult.reason,
           accountId,
-          messageId: sesMessageId,
+          sesMessageId,
           recipientAddress,
           parsed,
           classification,
           s3Key,
           receivedAt: timestamp,
           now,
+          ...(ttl !== undefined ? { ttl } : {}),
         });
 
         await this.store.saveSignal(blockedSignal);
@@ -194,6 +203,7 @@ export class SignalProcessor {
         lastSignalAt: timestamp,
         createdAt: now,
         updatedAt: now,
+        ...(ttl !== undefined ? { ttl } : {}),
       };
     }
 
@@ -209,13 +219,14 @@ export class SignalProcessor {
       arcId: arc.id,
       status: "active",
       accountId,
-      messageId: sesMessageId,
+      sesMessageId,
       recipientAddress,
       parsed,
       classification,
       s3Key,
       receivedAt: timestamp,
       now,
+      ...(ttl !== undefined ? { ttl } : {}),
     });
 
     const rules = await this.store.listRules(accountId);
@@ -241,6 +252,13 @@ export class SignalProcessor {
 
     await this.store.saveArc(arc);
     await this.store.saveSignal(signal);
+
+    // 8. For scheduling signals, save a synthetic system signal so the frontend can render an ICS button
+    if (classification.workflow === "scheduling") {
+      const calSignal = buildCalendarSignal(arc, signal, now, ttl);
+      await this.store.saveSignal(calSignal);
+    }
+
     await this.arcMatcher.upsertEmbedding(arc.id, embedding, accountId, recipientAddress);
 
     const isSpam = classification.workflow === "spam" || classification.spamScore >= 0.9;
@@ -293,19 +311,20 @@ function buildSignal(opts: {
   status: Signal["status"];
   blockReason?: Signal["blockReason"];
   accountId: string;
-  messageId: string;
+  sesMessageId: string;
   recipientAddress: string;
   parsed: Awaited<ReturnType<MimeParser["parse"]>>;
   classification: Awaited<ReturnType<SignalClassifier["classify"]>>;
   s3Key: string;
   receivedAt: string;
   now: string;
+  ttl?: number;
 }): Signal {
-  const { arcId, status, blockReason, accountId, messageId, recipientAddress, parsed, classification, s3Key, receivedAt, now } = opts;
+  const { arcId, status, blockReason, accountId, sesMessageId, recipientAddress, parsed, classification, s3Key, receivedAt, now, ttl } = opts;
   const signal: Signal = {
-    id: randomUUID(),
+    id: `SES#${sesMessageId}`,
     accountId,
-    messageId,
+    source: "email",
     receivedAt,
     from: parsed.from,
     to: parsed.to,
@@ -331,8 +350,38 @@ function buildSignal(opts: {
   if (parsed.textBody !== undefined) signal.textBody = parsed.textBody;
   if (parsed.htmlBody != null) signal.htmlBody = parsed.htmlBody;
   if (parsed.sentAt !== undefined) signal.sentAt = parsed.sentAt;
+  if (ttl !== undefined) signal.ttl = ttl;
 
   return signal;
+}
+
+function buildCalendarSignal(arc: Arc, emailSignal: Signal, now: string, ttl: number | undefined): Signal {
+  const data = emailSignal.workflowData as SchedulingData;
+  const calSignal: Signal = {
+    id: `SYS#${randomUUID()}`,
+    arcId: arc.id,
+    accountId: arc.accountId,
+    source: "system",
+    receivedAt: emailSignal.receivedAt,
+    from: emailSignal.from,
+    to: emailSignal.to,
+    cc: [],
+    subject: data.title,
+    attachments: [],
+    headers: {},
+    recipientAddress: emailSignal.recipientAddress,
+    workflow: "scheduling",
+    workflowData: emailSignal.workflowData,
+    spamScore: 0,
+    summary: emailSignal.summary,
+    classificationModelId: emailSignal.classificationModelId,
+    pushPriority: "silent",
+    s3Key: "",
+    status: "active",
+    createdAt: now,
+  };
+  if (ttl !== undefined) calSignal.ttl = ttl;
+  return calSignal;
 }
 
 export function deriveGroupingKey(

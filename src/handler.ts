@@ -4,10 +4,11 @@ import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 import { SignalClassifier } from "./classifier/classifier.js";
 import { SignalProcessor } from "./processor/processor.js";
 import { MailparserMimeParser } from "./processor/mime.js";
-import { DynamoProcessorStore } from "./store/dynamo-processor-store.js";
-import { DynamoApiStore } from "./store/dynamo-api-store.js";
-import { PgvectorArcMatcher } from "./store/pgvector-arc-matcher.js";
 import { JsonLogicRuleEvaluator } from "./processor/rule-evaluator.js";
+import { AccountDatabase } from "./database/account-database.js";
+import { ArcDatabase } from "./database/arc-database.js";
+import { ProcessingDatabase } from "./database/processing-database.js";
+import { ProcessorDatabaseAdapter, ApiDatabaseAdapter } from "./database/adapters.js";
 import { SesNotifier } from "./notifier/ses-notifier.js";
 import { FeedbackProcessor } from "./notifier/feedback-processor.js";
 import { AuthressAuthService } from "./api/authress-auth.js";
@@ -43,11 +44,15 @@ class S3MimeParser implements MimeParser {
 
 const classifier = new SignalClassifier(bedrock);
 
+const accountDb = new AccountDatabase();
+const arcDb = new ArcDatabase();
+const processingDb = new ProcessingDatabase();
+
 const processor = new SignalProcessor({
-  store: new DynamoProcessorStore(),
+  store: new ProcessorDatabaseAdapter(arcDb, accountDb, processingDb),
   mimeParser: new S3MimeParser(),
   classifier,
-  arcMatcher: new PgvectorArcMatcher(),
+  arcMatcher: arcDb,
   ruleEvaluator: new JsonLogicRuleEvaluator(),
   notifier: new SesNotifier(),
 });
@@ -55,7 +60,7 @@ const processor = new SignalProcessor({
 const feedbackProcessor = new FeedbackProcessor();
 
 const app = createApp({
-  store: new DynamoApiStore(),
+  store: new ApiDatabaseAdapter(arcDb, accountDb),
   auth: new AuthressAuthService(),
 });
 
