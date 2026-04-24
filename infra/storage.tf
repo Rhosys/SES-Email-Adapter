@@ -107,6 +107,42 @@ resource "aws_sqs_queue_policy" "signals_sns" {
 }
 
 # ---------------------------------------------------------------------------
+# SQS — bounce/complaint feedback processing queue
+# ---------------------------------------------------------------------------
+
+resource "aws_sqs_queue" "feedback" {
+  name                       = "${local.prefix}-feedback"
+  visibility_timeout_seconds = var.lambda_timeout_seconds * 6
+  message_retention_seconds  = 86400  # 1 day
+
+  redrive_policy = jsonencode({
+    deadLetterTargetArn = aws_sqs_queue.signals_dlq.arn
+    maxReceiveCount     = 3
+  })
+}
+
+resource "aws_sns_topic_subscription" "feedback_to_sqs" {
+  topic_arn = aws_sns_topic.ses_feedback.arn
+  protocol  = "sqs"
+  endpoint  = aws_sqs_queue.feedback.arn
+}
+
+resource "aws_sqs_queue_policy" "feedback_sns" {
+  queue_url = aws_sqs_queue.feedback.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "sns.amazonaws.com" }
+      Action    = "sqs:SendMessage"
+      Resource  = aws_sqs_queue.feedback.arn
+      Condition = { ArnEquals = { "aws:SourceArn" = aws_sns_topic.ses_feedback.arn } }
+    }]
+  })
+}
+
+# ---------------------------------------------------------------------------
 # DynamoDB Global Table
 # ---------------------------------------------------------------------------
 

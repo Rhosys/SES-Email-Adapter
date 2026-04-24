@@ -77,3 +77,30 @@ variable "notification_from_address" {
   description = "Verified SES email address used to send account notifications"
   type        = string
 }
+
+variable "aurora_db_username" {
+  description = "Database username for the Lambda application user"
+  type        = string
+  default     = "lambda"
+}
+
+variable "aurora_db_password" {
+  description = "Database password for the Lambda application user (use Secrets Manager in production)"
+  type        = string
+  sensitive   = true
+}
+
+variable "app_base_url" {
+  description = "Base URL of the frontend app, used in notification email links"
+  type        = string
+}
+
+variable "authress_domain" {
+  description = "Authress custom domain (e.g. auth.yourdomain.com)"
+  type        = string
+}
+
+variable "authress_application_id" {
+  description = "Authress application ID for JWT audience validation"
+  type        = string
+}
