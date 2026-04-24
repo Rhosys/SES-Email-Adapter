@@ -69,6 +69,17 @@ resource "aws_iam_role_policy" "lambda_permissions" {
         }
       },
       {
+        Sid    = "SESSuppression"
+        Effect = "Allow"
+        Action = [
+          "ses:PutSuppressedDestination",
+          "ses:GetSuppressedDestination",
+          "ses:ListSuppressedDestinations",
+          "ses:DeleteSuppressedDestination",
+        ]
+        Resource = "*"
+      },
+      {
         Sid    = "SecretsManager"
         Effect = "Allow"
         Action = ["secretsmanager:GetSecretValue"]
@@ -106,12 +117,18 @@ resource "aws_lambda_function" "main" {
 
   environment {
     variables = {
-      NODE_ENV              = var.env
-      DYNAMODB_TABLE        = aws_dynamodb_table.main.name
-      EMAIL_BUCKET          = aws_s3_bucket.emails.name
-      RDS_PROXY_ENDPOINT    = aws_db_proxy.aurora.endpoint
-      AURORA_DB_NAME        = var.aurora_db_name
-      NOTIFICATION_FROM     = var.notification_from_address
+      NODE_ENV                  = var.env
+      DYNAMODB_TABLE            = aws_dynamodb_table.main.name
+      EMAIL_BUCKET              = aws_s3_bucket.emails.name
+      RDS_PROXY_ENDPOINT        = aws_db_proxy.aurora.endpoint
+      AURORA_DB_NAME            = var.aurora_db_name
+      DB_USER                   = var.aurora_db_username
+      DB_PASSWORD               = var.aurora_db_password
+      NOTIFICATION_FROM         = var.notification_from_address
+      SES_CONFIGURATION_SET     = aws_sesv2_configuration_set.sending.configuration_set_name
+      APP_BASE_URL              = var.app_base_url
+      AUTHRESS_DOMAIN           = var.authress_domain
+      AUTHRESS_APPLICATION_ID   = var.authress_application_id
     }
   }
 
@@ -131,6 +148,16 @@ resource "aws_cloudwatch_log_group" "lambda" {
 
 resource "aws_lambda_event_source_mapping" "signals" {
   event_source_arn                   = aws_sqs_queue.signals.arn
+  function_name                      = aws_lambda_function.main.arn
+  batch_size                         = 10
+  maximum_batching_window_in_seconds = 5
+
+  function_response_types = ["ReportBatchItemFailures"]
+}
+
+# Bounce/complaint feedback events — processed by FeedbackProcessor
+resource "aws_lambda_event_source_mapping" "feedback" {
+  event_source_arn                   = aws_sqs_queue.feedback.arn
   function_name                      = aws_lambda_function.main.arn
   batch_size                         = 10
   maximum_batching_window_in_seconds = 5

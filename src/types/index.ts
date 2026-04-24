@@ -506,3 +506,36 @@ export interface Page<T> {
   nextCursor?: string;
   total: number;
 }
+
+// ---------------------------------------------------------------------------
+// Suppression list
+// ---------------------------------------------------------------------------
+
+export type SuppressionReason = "hard_bounce" | "soft_bounce" | "complaint" | "manual";
+
+export interface SuppressedAddress {
+  address: string;
+  reason: SuppressionReason;
+  suppressedAt: string;
+  ttl?: number;
+}
+
+// ---------------------------------------------------------------------------
+// SES feedback (bounce/complaint notifications from SNS)
+// ---------------------------------------------------------------------------
+
+export interface SesFeedback {
+  notificationType: "Bounce" | "Complaint" | "Delivery";
+  bounce?: {
+    bounceType: "Permanent" | "Transient" | "Undetermined";
+    bounceSubType: string;
+    bouncedRecipients: Array<{ emailAddress: string; status?: string; action?: string }>;
+    timestamp: string;
+  };
+  complaint?: {
+    complainedRecipients: Array<{ emailAddress: string }>;
+    complaintFeedbackType?: string;
+    timestamp: string;
+  };
+  mail: { messageId: string; source: string };
+}

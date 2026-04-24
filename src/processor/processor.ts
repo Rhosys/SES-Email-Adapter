@@ -25,7 +25,7 @@ export interface ProcessorStore {
 export interface ArcMatcher {
   // recipientAddress scopes the vector search — signals from different recipient addresses never match
   findMatch(accountId: string, recipientAddress: string, embedding: number[]): Promise<Arc | null>;
-  upsertEmbedding(arcId: string, embedding: number[]): Promise<void>;
+  upsertEmbedding(arcId: string, embedding: number[], accountId: string, recipientAddress: string): Promise<void>;
 }
 
 export interface RuleEvaluator {
@@ -241,7 +241,7 @@ export class SignalProcessor {
 
     await this.store.saveArc(arc);
     await this.store.saveSignal(signal);
-    await this.arcMatcher.upsertEmbedding(arc.id, embedding);
+    await this.arcMatcher.upsertEmbedding(arc.id, embedding, accountId, recipientAddress);
 
     const isSpam = classification.workflow === "spam" || classification.spamScore >= 0.9;
     if (this.notifier && !isSpam && !isNotice) {
