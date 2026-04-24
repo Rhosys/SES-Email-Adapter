@@ -12,6 +12,7 @@ import { ProcessorDatabaseAdapter, ApiDatabaseAdapter } from "./database/adapter
 import { SesNotifier } from "./notifier/ses-notifier.js";
 import { FeedbackProcessor } from "./notifier/feedback-processor.js";
 import { AuthressAuthService } from "./api/authress-auth.js";
+import { AuthressAccessService } from "./api/authress-access.js";
 import { createApp } from "./api/app.js";
 import type { MimeParser } from "./processor/mime.js";
 
@@ -62,6 +63,7 @@ const feedbackProcessor = new FeedbackProcessor();
 const app = createApp({
   store: new ApiDatabaseAdapter(arcDb, accountDb),
   auth: new AuthressAuthService(),
+  access: new AuthressAccessService(),
 });
 
 // ---------------------------------------------------------------------------

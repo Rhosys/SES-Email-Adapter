@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { Arc, Signal, View, Label, Rule, Domain, Account, EmailAddressConfig } from "../types/index.js";
 import { createApp } from "./app.js";
-import type { ApiDatabase, AuthService, AuthContext } from "./app.js";
+import type { ApiDatabase, AuthService, AuthContext, AccessService, AccountUser } from "./app.js";
 
 // ---------------------------------------------------------------------------
 // Test doubles
@@ -14,6 +14,16 @@ const validAuth: AuthContext = { accountId: TEST_ACCOUNT_ID, userId: TEST_USER_I
 
 function makeAuth(ctx: AuthContext = validAuth): AuthService {
   return { verify: vi.fn().mockResolvedValue(ctx) };
+}
+
+function makeAccess(): AccessService {
+  return {
+    listUsers: vi.fn().mockResolvedValue([]),
+    addUser: vi.fn().mockResolvedValue(undefined),
+    updateUserRole: vi.fn().mockResolvedValue(undefined),
+    removeUser: vi.fn().mockResolvedValue(undefined),
+    checkAccess: vi.fn().mockResolvedValue(undefined),
+  };
 }
 
 function makeStore(): ApiDatabase {
@@ -173,17 +183,18 @@ async function req(
   app: ReturnType<typeof createApp>,
   method: string,
   path: string,
-  options: { body?: unknown; token?: string } = {},
+  options: { body?: unknown; token?: string; accountId?: string } = {},
 ): Promise<Response> {
-  const { body, token = "valid-token" } = options;
+  const { body, token = "valid-token", accountId } = options;
   return app.fetch(
     new Request(`http://localhost${path}`, {
       method,
       headers: {
         "Content-Type": "application/json",
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(accountId ? { "X-Account-ID": accountId } : {}),
       },
-      body: body !== undefined ? JSON.stringify(body) : undefined,
+      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
     }),
   );
 }
@@ -195,13 +206,15 @@ async function req(
 describe("API", () => {
   let store: ApiDatabase;
   let auth: AuthService;
+  let access: AccessService;
   let app: ReturnType<typeof createApp>;
 
   beforeEach(() => {
     vi.clearAllMocks();
     store = makeStore();
     auth = makeAuth();
-    app = createApp({ store, auth });
+    access = makeAccess();
+    app = createApp({ store, auth, access });
   });
 
   // -------------------------------------------------------------------------
@@ -831,6 +844,121 @@ describe("API", () => {
       const res = await req(app, "DELETE", "/email-configs/me%40mydomain.com");
       expect(res.status).toBe(200);
       expect(store.deleteEmailConfig).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "me@mydomain.com");
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Account user management (Authress RBAC)
+  // -------------------------------------------------------------------------
+
+  describe("GET /account/users", () => {
+    it("returns list of users on the account", async () => {
+      const users: AccountUser[] = [
+        { userId: "user-1", role: "owner" },
+        { userId: "user-2", role: "member" },
+      ];
+      vi.mocked(access.listUsers).mockResolvedValueOnce(users);
+
+      const res = await req(app, "GET", "/account/users");
+      expect(res.status).toBe(200);
+
+      const body = await res.json() as AccountUser[];
+      expect(body).toHaveLength(2);
+      expect(access.listUsers).toHaveBeenCalledWith(TEST_ACCOUNT_ID);
+    });
+
+    it("returns 501 when access service is not configured", async () => {
+      app = createApp({ store, auth });
+      const res = await req(app, "GET", "/account/users");
+      expect(res.status).toBe(501);
+    });
+  });
+
+  describe("POST /account/users", () => {
+    it("adds a user with the specified role and returns 201", async () => {
+      const res = await req(app, "POST", "/account/users", {
+        body: { userId: "new-user", role: "member" },
+      });
+      expect(res.status).toBe(201);
+      expect(access.addUser).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "new-user", "member");
+    });
+
+    it("returns 400 when userId is missing", async () => {
+      const res = await req(app, "POST", "/account/users", { body: { role: "member" } });
+      expect(res.status).toBe(400);
+    });
+
+    it("returns 400 when role is invalid", async () => {
+      const res = await req(app, "POST", "/account/users", {
+        body: { userId: "u1", role: "superadmin" },
+      });
+      expect(res.status).toBe(400);
+    });
+
+    it("returns 501 when access service is not configured", async () => {
+      app = createApp({ store, auth });
+      const res = await req(app, "POST", "/account/users", { body: { userId: "u1", role: "member" } });
+      expect(res.status).toBe(501);
+    });
+  });
+
+  describe("PATCH /account/users/:userId", () => {
+    it("updates a user's role", async () => {
+      const res = await req(app, "PATCH", "/account/users/user-2", { body: { role: "admin" } });
+      expect(res.status).toBe(200);
+      expect(access.updateUserRole).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "user-2", "admin");
+    });
+
+    it("returns 400 when role is invalid", async () => {
+      const res = await req(app, "PATCH", "/account/users/user-2", { body: { role: "unknown" } });
+      expect(res.status).toBe(400);
+    });
+
+    it("returns 501 when access service is not configured", async () => {
+      app = createApp({ store, auth });
+      const res = await req(app, "PATCH", "/account/users/user-2", { body: { role: "admin" } });
+      expect(res.status).toBe(501);
+    });
+  });
+
+  describe("DELETE /account/users/:userId", () => {
+    it("removes a user from the account and returns 204", async () => {
+      const res = await req(app, "DELETE", "/account/users/user-2");
+      expect(res.status).toBe(204);
+      expect(access.removeUser).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "user-2");
+    });
+
+    it("returns 501 when access service is not configured", async () => {
+      app = createApp({ store, auth });
+      const res = await req(app, "DELETE", "/account/users/user-2");
+      expect(res.status).toBe(501);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // X-Account-ID header (multi-user account access)
+  // -------------------------------------------------------------------------
+
+  describe("X-Account-ID header", () => {
+    it("uses the requested accountId after verifying access", async () => {
+      const OTHER_ACCOUNT = "acct-other-001";
+      const res = await req(app, "GET", "/arcs", { accountId: OTHER_ACCOUNT });
+      expect(res.status).toBe(200);
+      expect(access.checkAccess).toHaveBeenCalledWith(TEST_USER_ID, OTHER_ACCOUNT, "account:read");
+      expect(store.listArcs).toHaveBeenCalledWith(OTHER_ACCOUNT, expect.any(Object));
+    });
+
+    it("returns 401 when access check fails for the requested account", async () => {
+      vi.mocked(access.checkAccess).mockRejectedValueOnce(new Error("Forbidden"));
+      const res = await req(app, "GET", "/arcs", { accountId: "acct-forbidden" });
+      expect(res.status).toBe(401);
+    });
+
+    it("falls back to token accountId when no X-Account-ID header is sent", async () => {
+      const res = await req(app, "GET", "/arcs");
+      expect(res.status).toBe(200);
+      expect(access.checkAccess).not.toHaveBeenCalled();
+      expect(store.listArcs).toHaveBeenCalledWith(TEST_ACCOUNT_ID, expect.any(Object));
     });
   });
 
