@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { Arc, Signal, View, Label, Rule, Domain, Account, EmailAddressConfig } from "../types/index.js";
 import { createApp } from "./app.js";
-import type { ApiStore, AuthService, AuthContext } from "./app.js";
+import type { ApiDatabase, AuthService, AuthContext } from "./app.js";
 
 // ---------------------------------------------------------------------------
 // Test doubles
@@ -16,7 +16,7 @@ function makeAuth(ctx: AuthContext = validAuth): AuthService {
   return { verify: vi.fn().mockResolvedValue(ctx) };
 }
 
-function makeStore(): ApiStore {
+function makeStore(): ApiDatabase {
   return {
     listArcs: vi.fn().mockResolvedValue({ items: [], total: 0 }),
     getArc: vi.fn().mockResolvedValue(null),
@@ -95,10 +95,10 @@ function makeArc(overrides: Partial<Arc> = {}): Arc {
 
 function makeSignal(overrides: Partial<Signal> = {}): Signal {
   return {
-    id: "signal-001",
+    id: "SES#msg-001",
     arcId: "arc-001",
     accountId: TEST_ACCOUNT_ID,
-    messageId: "msg-001",
+    source: "email" as const,
     receivedAt: "2024-01-15T10:00:00Z",
     from: { address: "sender@example.com", name: "Sender" },
     to: [{ address: "user@example.com" }],
@@ -193,7 +193,7 @@ async function req(
 // ---------------------------------------------------------------------------
 
 describe("API", () => {
-  let store: ApiStore;
+  let store: ApiDatabase;
   let auth: AuthService;
   let app: ReturnType<typeof createApp>;
 
@@ -343,7 +343,7 @@ describe("API", () => {
       expect(res.status).toBe(200);
 
       const body = await res.json() as Signal;
-      expect(body.id).toBe("signal-001");
+      expect(body.id).toBe("SES#msg-001");
       expect(body.textBody).toBe("Hello world");
     });
 
@@ -847,7 +847,7 @@ describe("API", () => {
     it("returns 400 when the signal is not blocked", async () => {
       vi.mocked(store.getSignal).mockResolvedValueOnce(makeSignal({ status: "active" }));
 
-      const res = await req(app, "POST", "/arcs", { body: { signalId: "signal-001" } });
+      const res = await req(app, "POST", "/arcs", { body: { signalId: "SES#msg-001" } });
       expect(res.status).toBe(400);
     });
 
@@ -856,7 +856,7 @@ describe("API", () => {
         makeSignal({ status: "blocked", blockReason: "new_sender" }),
       );
 
-      const res = await req(app, "POST", "/arcs", { body: { signalId: "signal-001" } });
+      const res = await req(app, "POST", "/arcs", { body: { signalId: "SES#msg-001" } });
       expect(res.status).toBe(201);
 
       expect(store.createArc).toHaveBeenCalledOnce();
@@ -864,7 +864,7 @@ describe("API", () => {
       expect(arc.accountId).toBe(TEST_ACCOUNT_ID);
       expect(arc.status).toBe("active");
 
-      expect(store.unblockSignal).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "signal-001", arc.id);
+      expect(store.unblockSignal).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "SES#msg-001", arc.id);
 
       const body = await res.json() as Arc;
       expect(body.id).toBe(arc.id);
@@ -875,7 +875,7 @@ describe("API", () => {
         makeSignal({ status: "blocked", workflow: "invoice", summary: "Invoice from ACME" }),
       );
 
-      await req(app, "POST", "/arcs", { body: { signalId: "signal-001" } });
+      await req(app, "POST", "/arcs", { body: { signalId: "SES#msg-001" } });
 
       const arc = vi.mocked(store.createArc).mock.calls[0]![0] as Arc;
       expect(arc.workflow).toBe("invoice");
@@ -891,7 +891,7 @@ describe("API", () => {
         }),
       );
 
-      await req(app, "POST", "/arcs", { body: { signalId: "signal-001", approveSender: true } });
+      await req(app, "POST", "/arcs", { body: { signalId: "SES#msg-001", approveSender: true } });
 
       const saved = vi.mocked(store.upsertEmailConfig).mock.calls[0]![0] as EmailAddressConfig;
       expect(saved.approvedSenders).toContain("amazon.com");
@@ -904,7 +904,7 @@ describe("API", () => {
       );
 
       await req(app, "POST", "/arcs", {
-        body: { signalId: "signal-001", updateFilterMode: "allow_all" },
+        body: { signalId: "SES#msg-001", updateFilterMode: "allow_all" },
       });
 
       const saved = vi.mocked(store.upsertEmailConfig).mock.calls[0]![0] as EmailAddressConfig;
@@ -924,7 +924,7 @@ describe("API", () => {
       );
 
       await req(app, "POST", "/arcs", {
-        body: { signalId: "signal-001", approveSender: true },
+        body: { signalId: "SES#msg-001", approveSender: true },
       });
 
       const saved = vi.mocked(store.upsertEmailConfig).mock.calls[0]![0] as EmailAddressConfig;

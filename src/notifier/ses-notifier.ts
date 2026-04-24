@@ -4,7 +4,8 @@ import { DynamoDBDocumentClient, GetCommand } from "@aws-sdk/lib-dynamodb";
 import type { Notifier } from "../processor/processor.js";
 import type { Arc, Signal, Account } from "../types/index.js";
 
-const TABLE = process.env["DYNAMODB_TABLE"] ?? "ses-signals";
+const ACCOUNTS_TABLE = process.env["ACCOUNTS_TABLE"] ?? "ses-accounts";
+const PROCESSING_TABLE = process.env["PROCESSING_TABLE"] ?? "ses-processing";
 const FROM_ADDRESS = process.env["NOTIFICATION_FROM"] ?? "";
 const CONFIG_SET = process.env["SES_CONFIGURATION_SET"] ?? "";
 const APP_BASE_URL = process.env["APP_BASE_URL"] ?? "https://app.example.com";
@@ -98,15 +99,15 @@ export class SesNotifier implements Notifier {
 
   private async getAccount(accountId: string): Promise<Account | null> {
     const result = await dynamo.send(new GetCommand({
-      TableName: TABLE,
-      Key: { pk: `ACCT#${accountId}`, sk: "ACCOUNT" },
+      TableName: ACCOUNTS_TABLE,
+      Key: { pk: `ACCT#${accountId}`, sk: "META" },
     }));
     return result.Item ? (result.Item as Account) : null;
   }
 
   private async isAddressSuppressed(address: string): Promise<boolean> {
     const result = await dynamo.send(new GetCommand({
-      TableName: TABLE,
+      TableName: PROCESSING_TABLE,
       Key: { pk: `SUPPRESS#${address}`, sk: "SUPPRESS" },
       ProjectionExpression: "address",
     }));

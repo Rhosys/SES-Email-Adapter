@@ -1,7 +1,9 @@
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
 
-export const TABLE = process.env["DYNAMODB_TABLE"] ?? "ses-signals";
+export const ACCOUNTS_TABLE = process.env["ACCOUNTS_TABLE"] ?? "ses-accounts";
+export const SIGNALS_TABLE = process.env["SIGNALS_TABLE"] ?? "ses-signals";
+export const PROCESSING_TABLE = process.env["PROCESSING_TABLE"] ?? "ses-processing";
 
 export const dynamo = DynamoDBDocumentClient.from(new DynamoDBClient({}), {
   marshallOptions: { removeUndefinedValues: true },

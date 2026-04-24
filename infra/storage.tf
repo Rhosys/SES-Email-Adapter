@@ -143,31 +143,34 @@ resource "aws_sqs_queue_policy" "feedback_sns" {
 }
 
 # ---------------------------------------------------------------------------
-# DynamoDB Global Table
+# DynamoDB — three tables: accounts, signals, processing
 # ---------------------------------------------------------------------------
 
-resource "aws_dynamodb_table" "main" {
-  name         = "${local.prefix}-main"
+resource "aws_dynamodb_table" "accounts" {
+  name         = "${local.prefix}-accounts"
   billing_mode = "PAY_PER_REQUEST"
   hash_key     = "pk"
   range_key    = "sk"
 
-  attribute {
-    name = "pk"
-    type = "S"
-  }
-  attribute {
-    name = "sk"
-    type = "S"
-  }
-  attribute {
-    name = "gsi1pk"
-    type = "S"
-  }
-  attribute {
-    name = "gsi1sk"
-    type = "S"
-  }
+  attribute { name = "pk"; type = "S" }
+  attribute { name = "sk"; type = "S" }
+
+  point_in_time_recovery { enabled = true }
+
+  stream_enabled   = true
+  stream_view_type = "NEW_AND_OLD_IMAGES"
+}
+
+resource "aws_dynamodb_table" "signals" {
+  name         = "${local.prefix}-signals"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "pk"
+  range_key    = "sk"
+
+  attribute { name = "pk"; type = "S" }
+  attribute { name = "sk"; type = "S" }
+  attribute { name = "gsi1pk"; type = "S" }
+  attribute { name = "gsi1sk"; type = "S" }
 
   global_secondary_index {
     name            = "gsi1"
@@ -181,13 +184,23 @@ resource "aws_dynamodb_table" "main" {
     enabled        = true
   }
 
-  point_in_time_recovery {
-    enabled = true
-  }
+  point_in_time_recovery { enabled = true }
 
   stream_enabled   = true
   stream_view_type = "NEW_AND_OLD_IMAGES"
+}
 
-  # Global table replicas added via aws_dynamodb_global_table or replica blocks
-  # when multi-region is needed
+resource "aws_dynamodb_table" "processing" {
+  name         = "${local.prefix}-processing"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "pk"
+  range_key    = "sk"
+
+  attribute { name = "pk"; type = "S" }
+  attribute { name = "sk"; type = "S" }
+
+  ttl {
+    attribute_name = "ttl"
+    enabled        = true
+  }
 }

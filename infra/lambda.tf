@@ -40,8 +40,12 @@ resource "aws_iam_role_policy" "lambda_permissions" {
           "dynamodb:DeleteItem", "dynamodb:Query", "dynamodb:BatchWriteItem"
         ]
         Resource = [
-          aws_dynamodb_table.main.arn,
-          "${aws_dynamodb_table.main.arn}/index/*"
+          aws_dynamodb_table.accounts.arn,
+          "${aws_dynamodb_table.accounts.arn}/index/*",
+          aws_dynamodb_table.signals.arn,
+          "${aws_dynamodb_table.signals.arn}/index/*",
+          aws_dynamodb_table.processing.arn,
+          "${aws_dynamodb_table.processing.arn}/index/*",
         ]
       },
       {
@@ -118,7 +122,9 @@ resource "aws_lambda_function" "main" {
   environment {
     variables = {
       NODE_ENV                  = var.env
-      DYNAMODB_TABLE            = aws_dynamodb_table.main.name
+      ACCOUNTS_TABLE            = aws_dynamodb_table.accounts.name
+      SIGNALS_TABLE             = aws_dynamodb_table.signals.name
+      PROCESSING_TABLE          = aws_dynamodb_table.processing.name
       EMAIL_BUCKET              = aws_s3_bucket.emails.name
       RDS_PROXY_ENDPOINT        = aws_db_proxy.aurora.endpoint
       AURORA_DB_NAME            = var.aurora_db_name

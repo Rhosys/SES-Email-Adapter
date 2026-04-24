@@ -79,7 +79,7 @@ export interface UpdateRuleRequest {
   position?: number;
 }
 
-export interface ApiStore {
+export interface ApiDatabase {
   // Arcs
   listArcs(accountId: string, params: ListArcsParams): Promise<Page<Arc>>;
   getArc(accountId: string, id: string): Promise<Arc | null>;
@@ -139,7 +139,7 @@ export interface ApiStore {
 // ---------------------------------------------------------------------------
 
 interface AppDeps {
-  store: ApiStore;
+  store: ApiDatabase;
   auth: AuthService;
 }
 

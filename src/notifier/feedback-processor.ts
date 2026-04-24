@@ -3,7 +3,7 @@ import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, PutCommand } from "@aws-sdk/lib-dynamodb";
 import type { SesFeedback, SuppressedAddress } from "../types/index.js";
 
-const TABLE = process.env["DYNAMODB_TABLE"] ?? "ses-signals";
+const TABLE = process.env["PROCESSING_TABLE"] ?? "ses-processing";
 const dynamo = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 
 // 72 hours in seconds — soft bounces expire and can retry

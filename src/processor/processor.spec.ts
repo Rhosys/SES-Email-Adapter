@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { SQSEvent } from "aws-lambda";
 import { SignalProcessor, deriveGroupingKey, derivePushPriority } from "./processor.js";
-import type { ProcessorStore, ArcMatcher, RuleEvaluator, Notifier } from "./processor.js";
+import type { ProcessorDatabase, ArcMatcher, RuleEvaluator, Notifier } from "./processor.js";
 import type { MimeParser } from "./mime.js";
 import type { SignalClassifier, ClassificationOutput } from "../classifier/classifier.js";
 import type { Arc, Rule, Signal, EmailAddressConfig } from "../types/index.js";
@@ -12,7 +12,7 @@ import type { Arc, Rule, Signal, EmailAddressConfig } from "../types/index.js";
 
 const TEST_ACCOUNT_ID = "acct-001";
 
-function makeStore(): ProcessorStore {
+function makeStore(): ProcessorDatabase {
   return {
     getSignalByMessageId: vi.fn().mockResolvedValue(null),
     saveSignal: vi.fn().mockResolvedValue(undefined),
@@ -23,6 +23,7 @@ function makeStore(): ProcessorStore {
     getEmailAddressConfig: vi.fn().mockResolvedValue(null),
     saveEmailAddressConfig: vi.fn().mockResolvedValue(undefined),
     getAccountFilteringConfig: vi.fn().mockResolvedValue(null),
+    getAccountRetentionDays: vi.fn().mockResolvedValue(0),
     updateGlobalReputation: vi.fn().mockResolvedValue(undefined),
   };
 }
@@ -152,7 +153,7 @@ function makeArc(overrides: Partial<Arc> = {}): Arc {
 // ---------------------------------------------------------------------------
 
 describe("SignalProcessor", () => {
-  let store: ProcessorStore;
+  let store: ProcessorDatabase;
   let mimeParser: MimeParser;
   let classifier: Pick<SignalClassifier, "classify" | "embed">;
   let arcMatcher: ArcMatcher;
@@ -180,7 +181,8 @@ describe("SignalProcessor", () => {
 
       expect(store.saveSignal).toHaveBeenCalledOnce();
       const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
-      expect(saved.messageId).toBe("msg-abc");
+      expect(saved.id).toBe("SES#msg-abc");
+      expect(saved.source).toBe("email");
       expect(saved.workflow).toBe("personal");
       expect(saved.accountId).toBe(TEST_ACCOUNT_ID);
     });
@@ -360,8 +362,7 @@ describe("SignalProcessor", () => {
   describe("deduplication", () => {
     it("skips processing if Signal with same messageId already exists", async () => {
       vi.mocked(store.getSignalByMessageId).mockResolvedValueOnce({
-        id: "existing-signal",
-        messageId: "msg-123",
+        id: "SES#msg-123",
       } as never);
 
       await processor.process(makeSqsEvent([{ sesMessageId: "msg-123" }]));
@@ -403,7 +404,8 @@ describe("SignalProcessor", () => {
 
       expect(store.saveSignal).toHaveBeenCalledOnce();
       const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
-      expect(saved.messageId).toBe("msg-ok");
+      expect(saved.id).toBe("SES#msg-ok");
+      expect(saved.source).toBe("email");
     });
   });
 

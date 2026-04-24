@@ -279,6 +279,9 @@ export type SenderFilterMode =
   | "allow_all";   // no filtering
 
 export type SignalStatus = "active" | "blocked";
+
+// "email" = inbound SES email; "system" = processor-created (e.g. extracted calendar event); "user" = user-created
+export type SignalSource = "email" | "system" | "user";
 export type BlockReason = "new_sender" | "spam" | "sender_mismatch" | "reputation";
 
 // interrupt = push notification popup; ambient = badge only; silent = no push
@@ -335,10 +338,11 @@ export interface Attachment {
 // ---------------------------------------------------------------------------
 
 export interface Signal {
+  // Discriminated ID encoding origin: "SES#${sesMessageId}" | "SYS#${uuid}" | "USR#${uuid}"
   id: string;
   arcId?: string;        // Undefined while signal is blocked pending user action
   accountId: string;
-  messageId: string;       // SES dedup key
+  source: SignalSource;
   receivedAt: string;      // ISO datetime
 
   from: EmailAddress;
@@ -367,6 +371,7 @@ export interface Signal {
   status: SignalStatus;
   blockReason?: BlockReason;
   createdAt: string;
+  ttl?: number;   // Unix seconds; absent = never expire
 }
 
 // ---------------------------------------------------------------------------
@@ -388,6 +393,7 @@ export interface Arc {
   deletedAt?: string;
   createdAt: string;
   updatedAt: string;
+  ttl?: number;   // Unix seconds; absent = never expire
 }
 
 // ---------------------------------------------------------------------------
@@ -477,6 +483,7 @@ export interface Account {
   deletionRetentionDays: number;
   notifications?: NotificationSettings;
   filtering?: AccountFilteringConfig;
+  emailConfigs?: Record<string, EmailAddressConfig>;  // keyed by address
   createdAt: string;
   updatedAt: string;
 }
