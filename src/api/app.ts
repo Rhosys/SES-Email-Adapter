@@ -17,6 +17,25 @@ export interface AuthService {
 }
 
 // ---------------------------------------------------------------------------
+// Access (Authress RBAC)
+// ---------------------------------------------------------------------------
+
+export type AccountRole = "owner" | "admin" | "member" | "viewer";
+
+export interface AccountUser {
+  userId: string;
+  role: AccountRole;
+}
+
+export interface AccessService {
+  listUsers(accountId: string): Promise<AccountUser[]>;
+  addUser(accountId: string, userId: string, role: AccountRole): Promise<void>;
+  updateUserRole(accountId: string, userId: string, role: AccountRole): Promise<void>;
+  removeUser(accountId: string, userId: string): Promise<void>;
+  checkAccess(userId: string, accountId: string, permission: string): Promise<void>;
+}
+
+// ---------------------------------------------------------------------------
 // Store
 // ---------------------------------------------------------------------------
 
@@ -141,11 +160,12 @@ export interface ApiDatabase {
 interface AppDeps {
   store: ApiDatabase;
   auth: AuthService;
+  access?: AccessService;
 }
 
 type AppEnv = { Variables: { auth: AuthContext } };
 
-export function createApp({ store, auth }: AppDeps) {
+export function createApp({ store, auth, access }: AppDeps) {
   const app = new Hono<AppEnv>();
 
   // Auth middleware
@@ -154,7 +174,13 @@ export function createApp({ store, auth }: AppDeps) {
     if (!header?.startsWith("Bearer ")) return c.json({ error: "Unauthorized" }, 401);
     try {
       const ctx = await auth.verify(header.slice(7));
-      c.set("auth", ctx);
+      const requestedAccountId = c.req.header("X-Account-ID");
+      if (requestedAccountId && access) {
+        await access.checkAccess(ctx.userId, requestedAccountId, "account:read");
+        c.set("auth", { accountId: requestedAccountId, userId: ctx.userId });
+      } else {
+        c.set("auth", ctx);
+      }
       await next();
     } catch {
       return c.json({ error: "Unauthorized" }, 401);
@@ -455,6 +481,38 @@ export function createApp({ store, auth }: AppDeps) {
     return c.json({ ok: true });
   });
 
+  app.get("/account/users", async (c) => {
+    if (!access) return c.json({ error: "Not implemented" }, 501);
+    const { accountId } = c.get("auth");
+    return c.json(await access.listUsers(accountId));
+  });
+
+  app.post("/account/users", async (c) => {
+    if (!access) return c.json({ error: "Not implemented" }, 501);
+    const { accountId } = c.get("auth");
+    const body = await c.req.json() as { userId?: string; role?: string };
+    if (!body.userId) return c.json({ error: "userId is required" }, 400);
+    if (!body.role || !VALID_ROLES.has(body.role as AccountRole)) return c.json({ error: "Invalid role" }, 400);
+    await access.addUser(accountId, body.userId, body.role as AccountRole);
+    return c.json({ ok: true }, 201);
+  });
+
+  app.patch("/account/users/:userId", async (c) => {
+    if (!access) return c.json({ error: "Not implemented" }, 501);
+    const { accountId } = c.get("auth");
+    const body = await c.req.json() as { role?: string };
+    if (!body.role || !VALID_ROLES.has(body.role as AccountRole)) return c.json({ error: "Invalid role" }, 400);
+    await access.updateUserRole(accountId, c.req.param("userId"), body.role as AccountRole);
+    return c.json({ ok: true });
+  });
+
+  app.delete("/account/users/:userId", async (c) => {
+    if (!access) return c.json({ error: "Not implemented" }, 501);
+    const { accountId } = c.get("auth");
+    await access.removeUser(accountId, c.req.param("userId"));
+    return new Response(null, { status: 204 });
+  });
+
   // -------------------------------------------------------------------------
   // Email address configs
   // -------------------------------------------------------------------------
@@ -523,6 +581,7 @@ export function createApp({ store, auth }: AppDeps) {
 
 import { WORKFLOWS } from "../types/index.js";
 const VALID_WORKFLOWS = new Set<string>(WORKFLOWS);
+const VALID_ROLES = new Set<AccountRole>(["owner", "admin", "member", "viewer"]);
 
 const DKIM_SELECTOR = "email-signals";
 

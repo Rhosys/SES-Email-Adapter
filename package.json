@@ -10,13 +10,13 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
+    "@authress/sdk": "^3.2.266",
     "@aws-sdk/client-bedrock-runtime": "^3.0.0",
     "@aws-sdk/client-dynamodb": "^3.0.0",
     "@aws-sdk/client-s3": "^3.0.0",
     "@aws-sdk/client-sesv2": "^3.0.0",
     "@aws-sdk/lib-dynamodb": "^3.0.0",
     "@aws-sdk/s3-request-presigner": "^3.0.0",
-    "@authress/sdk": "^3.0.0",
     "hono": "^4.0.0",
     "json-logic-js": "^2.0.0",
     "mailparser": "^3.7.0",
