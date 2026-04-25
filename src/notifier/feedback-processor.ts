@@ -44,13 +44,17 @@ export class FeedbackProcessor {
         }),
       );
 
-      // On permanent bounce, check if this was a forwarded email and disable the responsible rules
-      if (isPermanent && feedback.mail.messageId) {
-        const trace = await this.processingDb.getForwardTrace(feedback.mail.messageId);
-        if (trace) {
-          await this.accountDb.disableForwardActions(trace.accountId, trace.toAddress).catch((err) => {
-            console.error("Failed to disable forward actions after bounce:", err);
-          });
+      // On permanent bounce, disable forward rules if this was a forwarded email (identified by SES EmailTags)
+      if (isPermanent) {
+        const accountId = feedback.mail.tags?.["accountId"];
+        if (accountId && feedback.mail.tags?.["type"] === "forward") {
+          await Promise.all(
+            feedback.bounce!.bouncedRecipients.map((r) =>
+              this.accountDb.disableForwardActions(accountId, r.emailAddress).catch((err) => {
+                console.error("Failed to disable forward actions after bounce:", err);
+              }),
+            ),
+          );
         }
       }
     } else if (feedback.notificationType === "Complaint" && feedback.complaint) {

@@ -9,6 +9,12 @@ import { getETLD1, evaluateFilter } from "./filter.js";
 // Interfaces
 // ---------------------------------------------------------------------------
 
+export interface ProcessorAccountContext {
+  retentionDays: number;
+  filtering: AccountFilteringConfig | null;
+  emailConfig: EmailAddressConfig | null;
+}
+
 export interface ProcessorDatabase {
   getSignalByMessageId(accountId: string, sesMessageId: string): Promise<Pick<Signal, "id"> | null>;
   saveSignal(signal: Signal): Promise<void>;
@@ -16,10 +22,8 @@ export interface ProcessorDatabase {
   findArcByGroupingKey(accountId: string, key: string): Promise<Arc | null>;
   saveArc(arc: Arc): Promise<void>;
   listRules(accountId: string): Promise<Rule[]>;
-  getEmailAddressConfig(accountId: string, address: string): Promise<EmailAddressConfig | null>;
+  getProcessorAccountContext(accountId: string, recipientAddress: string): Promise<ProcessorAccountContext>;
   saveEmailAddressConfig(config: EmailAddressConfig): Promise<void>;
-  getAccountFilteringConfig(accountId: string): Promise<AccountFilteringConfig | null>;
-  getAccountRetentionDays(accountId: string): Promise<number>;
   updateGlobalReputation(domain: string, update: { wasSpam: boolean; wasBlocked: boolean }): Promise<void>;
 }
 
@@ -128,9 +132,11 @@ export class SignalProcessor {
 
     const now = new Date().toISOString();
 
-    // 3b. Compute TTL for new items (0 = unlimited/paid, no ttl field written)
-    const retentionDays = await this.store.getAccountRetentionDays(accountId);
-    const ttl = retentionDays > 0 ? Math.floor(Date.now() / 1000) + retentionDays * 86400 : undefined;
+    // 3b. Fetch account context in one read (retentionDays + filtering + emailConfig)
+    const accountCtx = await this.store.getProcessorAccountContext(accountId, recipientAddress);
+    const ttl = accountCtx.retentionDays > 0
+      ? Math.floor(Date.now() / 1000) + accountCtx.retentionDays * 86400
+      : undefined;
 
     // 4. Arc matching — deterministic key first, vector similarity fallback
     const groupingKey = deriveGroupingKey(classification.workflow, classification.workflowData, recipientAddress, senderETLD1);
@@ -140,10 +146,8 @@ export class SignalProcessor {
 
     // 5. Filtering — bypassed entirely when signal matches an existing Arc
     if (!matchedArc) {
-      const [emailConfig, accountConfig] = await Promise.all([
-        this.store.getEmailAddressConfig(accountId, recipientAddress),
-        this.store.getAccountFilteringConfig(accountId),
-      ]);
+      const emailConfig = accountCtx.emailConfig;
+      const accountConfig = accountCtx.filtering;
 
       // Onboarding block: checked before sender-filter so it applies even for known senders
       if (classification.workflow === "onboarding") {

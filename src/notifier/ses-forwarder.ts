@@ -1,20 +1,17 @@
-import { SESClient, SendRawEmailCommand } from "@aws-sdk/client-ses";
+import { SESv2Client, SendEmailCommand } from "@aws-sdk/client-sesv2";
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 import type { Forwarder } from "../processor/processor.js";
-import type { ProcessingDatabase } from "../database/processing-database.js";
 
 const FROM_ADDRESS = process.env["NOTIFICATION_FROM"] ?? "";
 const EMAIL_BUCKET = process.env["EMAIL_BUCKET"] ?? "";
 const CONFIG_SET = process.env["SES_CONFIGURATION_SET"] ?? "";
 
 export class SesForwarder implements Forwarder {
-  private readonly ses: SESClient;
+  private readonly sesv2: SESv2Client;
   private readonly s3: S3Client;
-  private readonly db: ProcessingDatabase;
 
-  constructor(db: ProcessingDatabase, ses?: SESClient, s3?: S3Client) {
-    this.db = db;
-    this.ses = ses ?? new SESClient({});
+  constructor(sesv2?: SESv2Client, s3?: S3Client) {
+    this.sesv2 = sesv2 ?? new SESv2Client({});
     this.s3 = s3 ?? new S3Client({});
   }
 
@@ -22,18 +19,15 @@ export class SesForwarder implements Forwarder {
     const res = await this.s3.send(new GetObjectCommand({ Bucket: EMAIL_BUCKET, Key: s3Key }));
     const rawBytes = await res.Body!.transformToByteArray();
 
-    const result = await this.ses.send(new SendRawEmailCommand({
-      Source: FROM_ADDRESS,
-      Destinations: [toAddress],
-      RawMessage: { Data: rawBytes },
+    await this.sesv2.send(new SendEmailCommand({
+      FromEmailAddress: FROM_ADDRESS,
+      Destination: { ToAddresses: [toAddress] },
+      Content: { Raw: { Data: rawBytes } },
       ...(CONFIG_SET ? { ConfigurationSetName: CONFIG_SET } : {}),
+      EmailTags: [
+        { Name: "accountId", Value: accountId },
+        { Name: "type", Value: "forward" },
+      ],
     }));
-
-    // Store trace so bounce notifications can correlate back to the account + target
-    if (result.MessageId) {
-      await this.db.saveForwardTrace(result.MessageId, accountId, toAddress).catch((err) => {
-        console.error("Failed to save forward trace:", err);
-      });
-    }
   }
 }

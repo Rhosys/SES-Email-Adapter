@@ -12,6 +12,8 @@ import type { Arc, Rule, Signal, EmailAddressConfig, AccountFilteringConfig } fr
 
 const TEST_ACCOUNT_ID = "acct-001";
 
+const DEFAULT_CTX = { retentionDays: 0, filtering: null, emailConfig: null };
+
 function makeStore(): ProcessorDatabase {
   return {
     getSignalByMessageId: vi.fn().mockResolvedValue(null),
@@ -20,10 +22,8 @@ function makeStore(): ProcessorDatabase {
     findArcByGroupingKey: vi.fn().mockResolvedValue(null),
     saveArc: vi.fn().mockResolvedValue(undefined),
     listRules: vi.fn().mockResolvedValue([]),
-    getEmailAddressConfig: vi.fn().mockResolvedValue(null),
+    getProcessorAccountContext: vi.fn().mockResolvedValue(DEFAULT_CTX),
     saveEmailAddressConfig: vi.fn().mockResolvedValue(undefined),
-    getAccountFilteringConfig: vi.fn().mockResolvedValue(null),
-    getAccountRetentionDays: vi.fn().mockResolvedValue(0),
     updateGlobalReputation: vi.fn().mockResolvedValue(undefined),
   };
 }
@@ -667,8 +667,8 @@ describe("SignalProcessor", () => {
     });
 
     it("allows signal from a known sender (eTLD+1 in approved list)", async () => {
-      vi.mocked(store.getEmailAddressConfig).mockResolvedValueOnce(
-        makeEmailAddressConfig({ approvedSenders: ["example.com"] }),
+      vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce(
+        { ...DEFAULT_CTX, emailConfig: makeEmailAddressConfig({ approvedSenders: ["example.com"] }) },
       );
 
       await processor.process(makeSqsEvent([{}]));
@@ -679,8 +679,8 @@ describe("SignalProcessor", () => {
     });
 
     it("quarantines signal from unknown sender by default (notify user for review)", async () => {
-      vi.mocked(store.getEmailAddressConfig).mockResolvedValueOnce(
-        makeEmailAddressConfig({ approvedSenders: ["trusted.com"] }), // sender is example.com, not trusted.com
+      vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce(
+        { ...DEFAULT_CTX, emailConfig: makeEmailAddressConfig({ approvedSenders: ["trusted.com"] }) }, // sender is example.com, not trusted.com
       );
 
       await processor.process(makeSqsEvent([{}]));
@@ -694,13 +694,10 @@ describe("SignalProcessor", () => {
     });
 
     it("silently blocks signal when blockDisposition.new_sender is 'block'", async () => {
-      vi.mocked(store.getEmailAddressConfig).mockResolvedValueOnce(
-        makeEmailAddressConfig({ approvedSenders: ["trusted.com"] }),
-      );
-      vi.mocked(store.getAccountFilteringConfig).mockResolvedValueOnce({
-        defaultFilterMode: "notify_new",
-        newAddressHandling: "auto_allow",
-        blockDisposition: { new_sender: "block" },
+      vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce({
+        retentionDays: 0,
+        emailConfig: makeEmailAddressConfig({ approvedSenders: ["trusted.com"] }),
+        filtering: { defaultFilterMode: "notify_new", newAddressHandling: "auto_allow", blockDisposition: { new_sender: "block" } },
       });
 
       await processor.process(makeSqsEvent([{}]));
@@ -711,8 +708,8 @@ describe("SignalProcessor", () => {
     });
 
     it("calls notifyBlocked when a signal is quarantined", async () => {
-      vi.mocked(store.getEmailAddressConfig).mockResolvedValueOnce(
-        makeEmailAddressConfig({ approvedSenders: ["other.com"] }),
+      vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce(
+        { ...DEFAULT_CTX, emailConfig: makeEmailAddressConfig({ approvedSenders: ["other.com"] }) },
       );
 
       await processor.process(makeSqsEvent([{}]));
@@ -722,13 +719,10 @@ describe("SignalProcessor", () => {
     });
 
     it("does NOT call notifyBlocked when a signal is silently blocked", async () => {
-      vi.mocked(store.getEmailAddressConfig).mockResolvedValueOnce(
-        makeEmailAddressConfig({ approvedSenders: ["other.com"] }),
-      );
-      vi.mocked(store.getAccountFilteringConfig).mockResolvedValueOnce({
-        defaultFilterMode: "notify_new",
-        newAddressHandling: "auto_allow",
-        blockDisposition: { new_sender: "block" },
+      vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce({
+        retentionDays: 0,
+        emailConfig: makeEmailAddressConfig({ approvedSenders: ["other.com"] }),
+        filtering: { defaultFilterMode: "notify_new", newAddressHandling: "auto_allow", blockDisposition: { new_sender: "block" } },
       });
 
       await processor.process(makeSqsEvent([{}]));
@@ -739,8 +733,8 @@ describe("SignalProcessor", () => {
     });
 
     it("does not fail when notifyBlocked throws", async () => {
-      vi.mocked(store.getEmailAddressConfig).mockResolvedValueOnce(
-        makeEmailAddressConfig({ approvedSenders: [] }),
+      vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce(
+        { ...DEFAULT_CTX, emailConfig: makeEmailAddressConfig({ approvedSenders: [] }) },
       );
       vi.mocked(notifier.notifyBlocked).mockRejectedValueOnce(new Error("SES error"));
 
@@ -762,15 +756,10 @@ describe("SignalProcessor", () => {
         updatedAt: "2024-01-14T10:00:00Z",
       };
       vi.mocked(arcMatcher.findMatch).mockResolvedValueOnce(existingArc);
-      // Config with no approved senders — would block if filtering ran
-      vi.mocked(store.getEmailAddressConfig).mockResolvedValueOnce(
-        makeEmailAddressConfig({ approvedSenders: [] }),
-      );
 
       await processor.process(makeSqsEvent([{}]));
 
-      // Filtering store was NOT consulted — arc match bypasses it
-      expect(store.getEmailAddressConfig).not.toHaveBeenCalled();
+      // Filtering logic was bypassed — signal is active despite restrictive default config
       expect(store.saveArc).toHaveBeenCalledOnce();
       expect(store.saveSignal).toHaveBeenCalledOnce();
       const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
@@ -778,8 +767,8 @@ describe("SignalProcessor", () => {
     });
 
     it("strict mode quarantines a known sender with high spam score (default disposition)", async () => {
-      vi.mocked(store.getEmailAddressConfig).mockResolvedValueOnce(
-        makeEmailAddressConfig({ filterMode: "strict", approvedSenders: ["example.com"] }),
+      vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce(
+        { ...DEFAULT_CTX, emailConfig: makeEmailAddressConfig({ filterMode: "strict", approvedSenders: ["example.com"] }) },
       );
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
         ...validClassification,
@@ -795,8 +784,8 @@ describe("SignalProcessor", () => {
     });
 
     it("allow_all mode auto-approves new sender without blocking", async () => {
-      vi.mocked(store.getEmailAddressConfig).mockResolvedValueOnce(
-        makeEmailAddressConfig({ filterMode: "allow_all", approvedSenders: [] }),
+      vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce(
+        { ...DEFAULT_CTX, emailConfig: makeEmailAddressConfig({ filterMode: "allow_all", approvedSenders: [] }) },
       );
 
       await processor.process(makeSqsEvent([{}]));
@@ -807,8 +796,8 @@ describe("SignalProcessor", () => {
     });
 
     it("saves blocked signal with classification data for user review", async () => {
-      vi.mocked(store.getEmailAddressConfig).mockResolvedValueOnce(
-        makeEmailAddressConfig({ approvedSenders: [] }),
+      vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce(
+        { ...DEFAULT_CTX, emailConfig: makeEmailAddressConfig({ approvedSenders: [] }) },
       );
 
       await processor.process(makeSqsEvent([{}]));
@@ -820,9 +809,10 @@ describe("SignalProcessor", () => {
     });
 
     it("quarantines new address when newAddressHandling is block_until_approved (default disposition)", async () => {
-      vi.mocked(store.getAccountFilteringConfig).mockResolvedValueOnce({
-        newAddressHandling: "block_until_approved",
-        defaultFilterMode: "notify_new",
+      vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce({
+        retentionDays: 0,
+        filtering: { newAddressHandling: "block_until_approved", defaultFilterMode: "notify_new" },
+        emailConfig: null,
       });
 
       await processor.process(makeSqsEvent([{}]));
@@ -840,8 +830,8 @@ describe("SignalProcessor", () => {
 
   describe("global reputation tracking", () => {
     it("updates reputation with wasBlocked=true for blocked signals", async () => {
-      vi.mocked(store.getEmailAddressConfig).mockResolvedValueOnce(
-        makeEmailAddressConfig({ approvedSenders: [] }),
+      vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce(
+        { ...DEFAULT_CTX, emailConfig: makeEmailAddressConfig({ approvedSenders: [] }) },
       );
 
       await processor.process(makeSqsEvent([{}]));
@@ -1072,10 +1062,10 @@ describe("SignalProcessor", () => {
 
     it("quarantines onboarding emails when global blockOnboardingEmails is true (default disposition)", async () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(onboardingClassification);
-      vi.mocked(store.getAccountFilteringConfig).mockResolvedValueOnce({
-        defaultFilterMode: "notify_new",
-        newAddressHandling: "auto_allow",
-        blockOnboardingEmails: true,
+      vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce({
+        retentionDays: 0,
+        filtering: { defaultFilterMode: "notify_new", newAddressHandling: "auto_allow", blockOnboardingEmails: true },
+        emailConfig: null,
       });
 
       const notifier = makeNotifier();
@@ -1091,11 +1081,10 @@ describe("SignalProcessor", () => {
 
     it("silently blocks onboarding emails when global blockDisposition.onboarding is 'block'", async () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(onboardingClassification);
-      vi.mocked(store.getAccountFilteringConfig).mockResolvedValueOnce({
-        defaultFilterMode: "notify_new",
-        newAddressHandling: "auto_allow",
-        blockOnboardingEmails: true,
-        blockDisposition: { onboarding: "block" },
+      vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce({
+        retentionDays: 0,
+        filtering: { defaultFilterMode: "notify_new", newAddressHandling: "auto_allow", blockOnboardingEmails: true, blockDisposition: { onboarding: "block" } },
+        emailConfig: null,
       });
 
       const notifier = makeNotifier();
@@ -1109,8 +1098,8 @@ describe("SignalProcessor", () => {
 
     it("quarantines onboarding when per-address onboardingEmailHandling is 'quarantine'", async () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(onboardingClassification);
-      vi.mocked(store.getEmailAddressConfig).mockResolvedValueOnce(
-        makeEmailAddressConfig({ onboardingEmailHandling: "quarantine" }),
+      vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce(
+        { ...DEFAULT_CTX, emailConfig: makeEmailAddressConfig({ onboardingEmailHandling: "quarantine" }) },
       );
 
       const notifier = makeNotifier();
@@ -1125,8 +1114,8 @@ describe("SignalProcessor", () => {
 
     it("silently blocks onboarding when per-address onboardingEmailHandling is 'block'", async () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(onboardingClassification);
-      vi.mocked(store.getEmailAddressConfig).mockResolvedValueOnce(
-        makeEmailAddressConfig({ onboardingEmailHandling: "block" }),
+      vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce(
+        { ...DEFAULT_CTX, emailConfig: makeEmailAddressConfig({ onboardingEmailHandling: "block" }) },
       );
 
       const notifier = makeNotifier();
@@ -1140,13 +1129,10 @@ describe("SignalProcessor", () => {
 
     it("allows onboarding when per-address onboardingEmailHandling is 'allow', even if global blocks", async () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(onboardingClassification);
-      vi.mocked(store.getEmailAddressConfig).mockResolvedValueOnce(
-        makeEmailAddressConfig({ onboardingEmailHandling: "allow" }),
-      );
-      vi.mocked(store.getAccountFilteringConfig).mockResolvedValueOnce({
-        defaultFilterMode: "notify_new",
-        newAddressHandling: "auto_allow",
-        blockOnboardingEmails: true,
+      vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce({
+        retentionDays: 0,
+        emailConfig: makeEmailAddressConfig({ onboardingEmailHandling: "allow" }),
+        filtering: { defaultFilterMode: "notify_new", newAddressHandling: "auto_allow", blockOnboardingEmails: true },
       });
 
       await processor.process(makeSqsEvent([{}]));
