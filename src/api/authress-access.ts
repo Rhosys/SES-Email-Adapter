@@ -2,7 +2,8 @@ import { AuthressClient } from "@authress/sdk";
 import type { AccessRecord } from "@authress/sdk";
 import type { AccessService, AccountUser, AccountRole } from "./app.js";
 
-const AUTHRESS_DOMAIN = process.env["AUTHRESS_DOMAIN"] ?? "";
+const AUTHRESS_API_URL = "https://login.rhosys.cloud";
+export const AUTHRESS_APP_ID = "app_2EAWGEdtzaeCj7b45DsDtt";
 const AUTHRESS_SERVICE_CLIENT_ACCESS_KEY = process.env["AUTHRESS_SERVICE_CLIENT_ACCESS_KEY"] ?? "";
 
 const ACCOUNT_ROLES: AccountRole[] = ["owner", "admin", "member", "viewer"];
@@ -11,7 +12,7 @@ let _client: AuthressClient | null = null;
 
 function getClient(): AuthressClient {
   if (!_client) {
-    _client = new AuthressClient({ authressApiUrl: AUTHRESS_DOMAIN }, AUTHRESS_SERVICE_CLIENT_ACCESS_KEY);
+    _client = new AuthressClient({ authressApiUrl: AUTHRESS_API_URL }, AUTHRESS_SERVICE_CLIENT_ACCESS_KEY);
   }
   return _client;
 }
@@ -39,6 +40,10 @@ function parseUsers(record: AccessRecord): AccountUser[] {
   return users;
 }
 
+function recordId(accountId: string): string {
+  return `email:account-${accountId}`;
+}
+
 export class AuthressAccessService implements AccessService {
   private get client() {
     return getClient();
@@ -46,7 +51,7 @@ export class AuthressAccessService implements AccessService {
 
   async listUsers(accountId: string): Promise<AccountUser[]> {
     try {
-      const response = await this.client.accessRecords.getRecord(`account-${accountId}`);
+      const response = await this.client.accessRecords.getRecord(recordId(accountId));
       return parseUsers(response.data);
     } catch {
       return [];
@@ -62,10 +67,10 @@ export class AuthressAccessService implements AccessService {
   }
 
   async removeUser(accountId: string, userId: string): Promise<void> {
-    const recordId = `account-${accountId}`;
+    const rid = recordId(accountId);
     let record: AccessRecord;
     try {
-      const response = await this.client.accessRecords.getRecord(recordId);
+      const response = await this.client.accessRecords.getRecord(rid);
       record = response.data;
     } catch {
       return;
@@ -75,7 +80,7 @@ export class AuthressAccessService implements AccessService {
       .map((stmt) => ({ ...stmt, users: (stmt.users ?? []).filter((u) => u.userId !== userId) }))
       .filter((stmt) => (stmt.users ?? []).length > 0);
 
-    await this.client.accessRecords.updateRecord(recordId, { ...record, statements });
+    await this.client.accessRecords.updateRecord(rid, { ...record, statements });
   }
 
   async checkAccess(userId: string, accountId: string, permission: string): Promise<void> {
@@ -83,19 +88,19 @@ export class AuthressAccessService implements AccessService {
   }
 
   private async _upsertUser(accountId: string, userId: string, role: AccountRole): Promise<void> {
-    const recordId = `account-${accountId}`;
+    const rid = recordId(accountId);
     const resourceUri = `accounts/${accountId}`;
     const roleId = roleToRoleId(role);
 
     let existing: AccessRecord | null = null;
     try {
-      const response = await this.client.accessRecords.getRecord(recordId);
+      const response = await this.client.accessRecords.getRecord(rid);
       existing = response.data;
     } catch { /* record doesn't exist yet — will create */ }
 
     if (!existing) {
       await this.client.accessRecords.createRecord({
-        recordId,
+        recordId: rid,
         name: `Account ${accountId}`,
         statements: [{ roles: [roleId], resources: [{ resourceUri }], users: [{ userId }] }],
       });
@@ -114,6 +119,6 @@ export class AuthressAccessService implements AccessService {
       statements.push({ roles: [roleId], resources: [{ resourceUri }], users: [{ userId }] });
     }
 
-    await this.client.accessRecords.updateRecord(recordId, { ...existing, statements });
+    await this.client.accessRecords.updateRecord(rid, { ...existing, statements });
   }
 }

@@ -10,7 +10,8 @@ export const WORKFLOWS = [
   "travel",       // Flights, hotels, car rentals, itineraries, boarding passes
   "job",          // Applications, recruiter outreach, interviews, offers, rejections
   "newsletter",   // Publications, content digests, blogs, editorial content
-  "marketing",    // Promotions, discount codes, flash sales, abandoned cart
+  "promotions",   // Discount codes, flash sales, abandoned cart, loyalty rewards
+  "onboarding",   // Welcome, account setup, getting-started, feature tours
   "social",       // Social media notifications, mentions, community activity
   "crm",          // Sales outreach, proposals, client emails, follow-ups
   "personal",     // Human-to-human correspondence not from automated systems
@@ -35,7 +36,8 @@ export type WorkflowData =
   | TravelData
   | JobData
   | NewsletterData
-  | MarketingData
+  | PromotionsData
+  | OnboardingData
   | SocialData
   | CrmData
   | PersonalData
@@ -133,14 +135,23 @@ export interface NewsletterData {
   unsubscribeUrl?: string;
 }
 
-export interface MarketingData {
-  workflow: "marketing";
+export interface PromotionsData {
+  workflow: "promotions";
   promotionType: "discount" | "sale" | "flash_sale" | "loyalty" | "referral" | "product_launch" | "abandoned_cart" | "win_back";
   brand: string;
   discountCode?: string;
   discountAmount?: string;
   expiryDate?: string;
   shopUrl?: string;
+}
+
+export interface OnboardingData {
+  workflow: "onboarding";
+  service: string;
+  onboardingType: "welcome" | "setup_guide" | "feature_tour" | "tip" | "check_in" | "re_engagement";
+  stepNumber?: number;
+  totalSteps?: number;
+  actionUrl?: string;
 }
 
 export interface SocialData {
@@ -282,7 +293,7 @@ export type SignalStatus = "active" | "blocked";
 
 // "email" = inbound SES email; "system" = processor-created (e.g. extracted calendar event); "user" = user-created
 export type SignalSource = "email" | "system" | "user";
-export type BlockReason = "new_sender" | "spam" | "sender_mismatch" | "reputation";
+export type BlockReason = "new_sender" | "spam" | "sender_mismatch" | "reputation" | "onboarding";
 
 // interrupt = push notification popup; ambient = badge only; silent = no push
 export type PushPriority = "interrupt" | "ambient" | "silent";
@@ -294,6 +305,8 @@ export interface EmailAddressConfig {
   address: string;              // The recipient address, e.g. me@mydomain.com
   filterMode: SenderFilterMode;
   approvedSenders: string[];    // eTLD+1 domains (e.g. "amazon.com", "google.com")
+  // Per-address onboarding override; "inherit" defers to blockOnboardingEmails global setting
+  onboardingEmailHandling?: "block" | "allow" | "inherit";
   createdAt: string;
   updatedAt: string;
 }
@@ -302,6 +315,7 @@ export interface EmailAddressConfig {
 export interface AccountFilteringConfig {
   defaultFilterMode: SenderFilterMode;
   newAddressHandling: NewAddressHandling;
+  blockOnboardingEmails?: boolean;  // Block all onboarding emails by default
 }
 
 // Global sender reputation — aggregated across all accounts, keyed by eTLD+1
