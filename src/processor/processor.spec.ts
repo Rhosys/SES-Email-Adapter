@@ -86,36 +86,49 @@ function makeNotifier(): Notifier {
 
 function makeSqsEvent(messages: Array<{
   accountId?: string;
-  s3Bucket?: string;
   s3Key?: string;
   sesMessageId?: string;
   timestamp?: string;
   destination?: string[];
+  dkimVerdict?: "PASS" | "FAIL" | "GRAY" | "PROCESSING_FAILED";
+  dmarcVerdict?: "PASS" | "FAIL" | "GRAY" | "PROCESSING_FAILED";
 }>): SQSEvent {
   return {
-    Records: messages.map((msg, i) => ({
-      messageId: `sqs-${i}`,
-      receiptHandle: "handle",
-      body: JSON.stringify({
+    Records: messages.map((msg, i) => {
+      const sesMessageId = msg.sesMessageId ?? "msg-123";
+      const notification = {
         accountId: msg.accountId ?? TEST_ACCOUNT_ID,
-        s3Bucket: msg.s3Bucket ?? "test-bucket",
-        s3Key: msg.s3Key ?? `emails/${msg.sesMessageId ?? "msg-123"}`,
-        sesMessageId: msg.sesMessageId ?? "msg-123",
-        timestamp: msg.timestamp ?? "2024-01-15T10:00:00Z",
-        destination: msg.destination ?? ["user@example.com"],
-      }),
-      attributes: {
-        ApproximateReceiveCount: "1",
-        SentTimestamp: "1234567890",
-        SenderId: "sender",
-        ApproximateFirstReceiveTimestamp: "1234567890",
-      },
-      messageAttributes: {},
-      md5OfBody: "",
-      eventSource: "aws:sqs",
-      eventSourceARN: "arn:aws:sqs:us-east-1:123:queue",
-      awsRegion: "us-east-1",
-    })),
+        mail: {
+          messageId: sesMessageId,
+          timestamp: msg.timestamp ?? "2024-01-15T10:00:00Z",
+          destination: msg.destination ?? ["user@example.com"],
+        },
+        receipt: {
+          dkimVerdict: { status: msg.dkimVerdict ?? "PASS" },
+          dmarcVerdict: { status: msg.dmarcVerdict ?? "PASS" },
+          action: {
+            bucketName: "test-bucket",
+            objectKey: msg.s3Key ?? `emails/${sesMessageId}`,
+          },
+        },
+      };
+      return {
+        messageId: `sqs-${i}`,
+        receiptHandle: "handle",
+        body: JSON.stringify({ Message: JSON.stringify(notification) }),
+        attributes: {
+          ApproximateReceiveCount: "1",
+          SentTimestamp: "1234567890",
+          SenderId: "sender",
+          ApproximateFirstReceiveTimestamp: "1234567890",
+        },
+        messageAttributes: {},
+        md5OfBody: "",
+        eventSource: "aws:sqs",
+        eventSourceARN: "arn:aws:sqs:us-east-1:123:queue",
+        awsRegion: "us-east-1",
+      };
+    }),
   };
 }
 
@@ -426,7 +439,8 @@ describe("SignalProcessor", () => {
       expect(forwarder.forward).toHaveBeenCalledOnce();
       expect(forwarder.forward).toHaveBeenCalledWith("emails/msg-123", "backup@personal.com", TEST_ACCOUNT_ID, {
         senderDomain: "example.com",
-        authenticationResults: "spf=pass dkim=pass",
+        dkimPass: true,
+        dmarcPass: true,
       });
     });
 
@@ -449,7 +463,7 @@ describe("SignalProcessor", () => {
 
       await processor.process(makeSqsEvent([{}]));
 
-      const expectedOpts: ForwardOptions = { senderDomain: "example.com", authenticationResults: "spf=pass dkim=pass" };
+      const expectedOpts: ForwardOptions = { senderDomain: "example.com", dkimPass: true, dmarcPass: true };
       expect(forwarder.forward).toHaveBeenCalledTimes(2);
       expect(forwarder.forward).toHaveBeenCalledWith(expect.any(String), "first@example.com", TEST_ACCOUNT_ID, expectedOpts);
       expect(forwarder.forward).toHaveBeenCalledWith(expect.any(String), "second@example.com", TEST_ACCOUNT_ID, expectedOpts);

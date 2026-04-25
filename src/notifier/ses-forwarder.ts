@@ -1,4 +1,3 @@
-import { promises as dns } from "dns";
 import { SESv2Client, SendEmailCommand } from "@aws-sdk/client-sesv2";
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 import type { Forwarder, ForwardOptions } from "../processor/processor.js";
@@ -17,13 +16,12 @@ export class SesForwarder implements Forwarder {
   }
 
   async forward(s3Key: string, toAddress: string, accountId: string, opts: ForwardOptions): Promise<void> {
-    if (!hasDkimPass(opts.authenticationResults)) {
+    if (!opts.dkimPass) {
       console.warn(`Forward skipped (no DKIM pass): ${opts.senderDomain} -> ${toAddress}`);
       return;
     }
-
-    if (!await hasDmarcRecord(opts.senderDomain)) {
-      console.warn(`Forward skipped (no DMARC): ${opts.senderDomain} -> ${toAddress}`);
+    if (!opts.dmarcPass) {
+      console.warn(`Forward skipped (no DMARC pass): ${opts.senderDomain} -> ${toAddress}`);
       return;
     }
 
@@ -40,18 +38,5 @@ export class SesForwarder implements Forwarder {
         { Name: "type", Value: "forward" },
       ],
     }));
-  }
-}
-
-function hasDkimPass(authenticationResults: string): boolean {
-  return /\bdkim=pass\b/i.test(authenticationResults);
-}
-
-async function hasDmarcRecord(domain: string): Promise<boolean> {
-  try {
-    const records = await dns.resolveTxt(`_dmarc.${domain}`);
-    return records.some((r) => r.join("").toLowerCase().startsWith("v=dmarc1"));
-  } catch {
-    return false;
   }
 }
