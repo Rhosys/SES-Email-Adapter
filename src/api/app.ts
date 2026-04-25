@@ -244,7 +244,7 @@ export function createApp({ store, auth, access }: AppDeps) {
 
     const signal = await store.getSignal(accountId, body.signalId);
     if (!signal) return c.json({ error: "Signal not found" }, 404);
-    if (signal.status !== "blocked") return c.json({ error: "Signal is not blocked" }, 400);
+    if (signal.status !== "blocked" && signal.status !== "quarantined") return c.json({ error: "Signal is not blocked or quarantined" }, 400);
 
     const now = new Date().toISOString();
     const arc: Arc = {

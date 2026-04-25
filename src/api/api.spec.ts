@@ -841,10 +841,18 @@ describe("API", () => {
       expect(res.status).toBe(404);
     });
 
-    it("returns 400 when the signal is not blocked", async () => {
+    it("returns 400 when the signal is not blocked or quarantined", async () => {
       vi.mocked(store.getSignal).mockResolvedValueOnce(makeSignal({ status: "active" }));
       const res = await req(app, "POST", `${A}/arcs`, { body: { signalId: "SES#msg-001" } });
       expect(res.status).toBe(400);
+    });
+
+    it("creates an Arc from a quarantined signal and returns 201", async () => {
+      vi.mocked(store.getSignal).mockResolvedValueOnce(makeSignal({ status: "quarantined", blockReason: "new_sender" }));
+      const res = await req(app, "POST", `${A}/arcs`, { body: { signalId: "SES#msg-001" } });
+      expect(res.status).toBe(201);
+      expect(store.createArc).toHaveBeenCalledOnce();
+      expect(store.unblockSignal).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "SES#msg-001", expect.any(String));
     });
 
     it("creates an Arc from a blocked signal and returns 201", async () => {
