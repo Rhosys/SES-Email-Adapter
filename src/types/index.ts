@@ -580,5 +580,5 @@ export interface SesFeedback {
     complaintFeedbackType?: string;
     timestamp: string;
   };
-  mail: { messageId: string; source: string };
+  mail: { messageId: string; source: string; tags?: Record<string, string> };
 }

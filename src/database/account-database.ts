@@ -99,6 +99,15 @@ export class AccountDatabase {
     return account?.deletionRetentionDays ?? 0;
   }
 
+  async getProcessorAccountContext(accountId: string, recipientAddress: string): Promise<{ retentionDays: number; filtering: AccountFilteringConfig | null; emailConfig: EmailAddressConfig | null }> {
+    const account = await this.getAccount(accountId);
+    return {
+      retentionDays: account?.deletionRetentionDays ?? 0,
+      filtering: account?.filtering ?? null,
+      emailConfig: account?.emailConfigs?.[recipientAddress] ?? null,
+    };
+  }
+
   // ---------------------------------------------------------------------------
   // Views
   // ---------------------------------------------------------------------------

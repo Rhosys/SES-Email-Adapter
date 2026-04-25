@@ -23,10 +23,8 @@ export class ProcessorDatabaseAdapter implements ProcessorDatabase {
   findArcByGroupingKey(accountId: string, key: string) { return this.arc.findArcByGroupingKey(accountId, key); }
   saveArc(arc: Arc) { return this.arc.saveArc(arc); }
   listRules(accountId: string) { return this.account.listRules(accountId); }
-  getEmailAddressConfig(accountId: string, address: string) { return this.account.getEmailAddressConfig(accountId, address); }
+  getProcessorAccountContext(accountId: string, recipientAddress: string) { return this.account.getProcessorAccountContext(accountId, recipientAddress); }
   saveEmailAddressConfig(config: EmailAddressConfig) { return this.account.saveEmailAddressConfig(config); }
-  getAccountFilteringConfig(accountId: string) { return this.account.getAccountFilteringConfig(accountId); }
-  getAccountRetentionDays(accountId: string) { return this.account.getAccountRetentionDays(accountId); }
   updateGlobalReputation(domain: string, update: { wasSpam: boolean; wasBlocked: boolean }) { return this.processing.updateGlobalReputation(domain, update); }
 }
 

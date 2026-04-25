@@ -60,7 +60,7 @@ const processor = new SignalProcessor({
   arcMatcher: arcDb,
   ruleEvaluator: new JsonLogicRuleEvaluator(),
   notifier: new SesNotifier(),
-  forwarder: new SesForwarder(processingDb, undefined, s3),
+  forwarder: new SesForwarder(sesv2, s3),
 });
 
 const feedbackProcessor = new FeedbackProcessor(processingDb, accountDb);
