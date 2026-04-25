@@ -2,6 +2,8 @@ import { GetCommand, PutCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { dynamo, PROCESSING_TABLE } from "./shared.js";
 import type { SuppressedAddress } from "../types/index.js";
 
+const FORWARD_TRACE_TTL_SECONDS = 7 * 24 * 60 * 60; // 7 days
+
 // ---------------------------------------------------------------------------
 // ProcessingDatabase
 // Owns: suppression list and global sender reputation in PROCESSING_TABLE
@@ -22,6 +24,28 @@ export class ProcessingDatabase {
       ProjectionExpression: "address",
     }));
     return result.Item !== undefined;
+  }
+
+  async saveForwardTrace(messageId: string, accountId: string, toAddress: string): Promise<void> {
+    await dynamo.send(new PutCommand({
+      TableName: PROCESSING_TABLE,
+      Item: {
+        pk: `FWDMSG#${messageId}`,
+        sk: "FWDMSG",
+        accountId,
+        toAddress,
+        ttl: Math.floor(Date.now() / 1000) + FORWARD_TRACE_TTL_SECONDS,
+      },
+    }));
+  }
+
+  async getForwardTrace(messageId: string): Promise<{ accountId: string; toAddress: string } | null> {
+    const result = await dynamo.send(new GetCommand({
+      TableName: PROCESSING_TABLE,
+      Key: { pk: `FWDMSG#${messageId}`, sk: "FWDMSG" },
+    }));
+    if (!result.Item) return null;
+    return { accountId: result.Item["accountId"] as string, toAddress: result.Item["toAddress"] as string };
   }
 
   async updateGlobalReputation(domain: string, update: { wasSpam: boolean; wasBlocked: boolean }): Promise<void> {

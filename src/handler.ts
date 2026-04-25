@@ -9,9 +9,11 @@ import { AccountDatabase } from "./database/account-database.js";
 import { ArcDatabase } from "./database/arc-database.js";
 import { ProcessingDatabase } from "./database/processing-database.js";
 import { ProcessorDatabaseAdapter, ApiDatabaseAdapter } from "./database/adapters.js";
+import { SESv2Client, SendEmailCommand } from "@aws-sdk/client-sesv2";
 import { SesNotifier } from "./notifier/ses-notifier.js";
 import { SesForwarder } from "./notifier/ses-forwarder.js";
 import { FeedbackProcessor } from "./notifier/feedback-processor.js";
+import type { VerificationMailer } from "./api/app.js";
 import { AuthressAuthService } from "./api/authress-auth.js";
 import { AuthressAccessService } from "./api/authress-access.js";
 import { createApp } from "./api/app.js";
@@ -23,6 +25,7 @@ import type { MimeParser } from "./processor/mime.js";
 
 const bedrock = new BedrockRuntimeClient({});
 const s3 = new S3Client({});
+const sesv2 = new SESv2Client({});
 
 const S3_BUCKET = process.env["EMAIL_BUCKET"] ?? "";
 
@@ -57,15 +60,42 @@ const processor = new SignalProcessor({
   arcMatcher: arcDb,
   ruleEvaluator: new JsonLogicRuleEvaluator(),
   notifier: new SesNotifier(),
-  forwarder: new SesForwarder(undefined, s3),
+  forwarder: new SesForwarder(processingDb, undefined, s3),
 });
 
-const feedbackProcessor = new FeedbackProcessor();
+const feedbackProcessor = new FeedbackProcessor(processingDb, accountDb);
+
+const NOTIFICATION_FROM = process.env["NOTIFICATION_FROM"] ?? "";
+const APP_BASE_URL = process.env["APP_BASE_URL"] ?? "";
+const CONFIG_SET = process.env["SES_CONFIGURATION_SET"] ?? "";
+
+const sesVerificationMailer: VerificationMailer = {
+  async sendForwardVerification(accountId: string, address: string, token: string): Promise<void> {
+    const verifyUrl = `${APP_BASE_URL}/accounts/${accountId}/forwarding-addresses/${encodeURIComponent(address)}/verify?token=${token}`;
+    await sesv2.send(new SendEmailCommand({
+      FromEmailAddress: NOTIFICATION_FROM,
+      Destination: { ToAddresses: [address] },
+      Content: {
+        Simple: {
+          Subject: { Data: "Verify your forwarding address", Charset: "UTF-8" },
+          Body: {
+            Text: {
+              Data: `Click the link below to verify that you want to receive forwarded emails at this address:\n\n${verifyUrl}\n\nIf you did not request this, you can ignore this email.`,
+              Charset: "UTF-8",
+            },
+          },
+        },
+      },
+      ...(CONFIG_SET ? { ConfigurationSetName: CONFIG_SET } : {}),
+    }));
+  },
+};
 
 const app = createApp({
   store: new ApiDatabaseAdapter(arcDb, accountDb),
   auth: new AuthressAuthService(),
   access: new AuthressAccessService(),
+  verificationMailer: sesVerificationMailer,
 });
 
 // ---------------------------------------------------------------------------

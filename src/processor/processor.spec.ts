@@ -354,6 +354,26 @@ describe("SignalProcessor", () => {
       expect(arc.status).toBe("active");
     });
 
+    it("skips disabled actions", async () => {
+      const rule: Rule = {
+        id: "rule-disabled",
+        accountId: TEST_ACCOUNT_ID,
+        name: "Disabled label rule",
+        condition: "true",
+        actions: [{ type: "assign_label", value: "important", disabled: true }],
+        position: 0,
+        createdAt: "2024-01-01T00:00:00Z",
+        updatedAt: "2024-01-01T00:00:00Z",
+      };
+      vi.mocked(store.listRules).mockResolvedValueOnce([rule]);
+      vi.mocked(ruleEvaluator.evaluate).mockReturnValueOnce(true);
+
+      await processor.process(makeSqsEvent([{}]));
+
+      const arc = vi.mocked(store.saveArc).mock.calls[0]![0] as Arc;
+      expect(arc.labels).not.toContain("important");
+    });
+
     it("collects forward addresses from matching rules but does not call forwarder when none configured", async () => {
       const rule: Rule = {
         id: "rule-fwd",
@@ -404,7 +424,7 @@ describe("SignalProcessor", () => {
       await processor.process(makeSqsEvent([{ s3Key: "emails/msg-123" }]));
 
       expect(forwarder.forward).toHaveBeenCalledOnce();
-      expect(forwarder.forward).toHaveBeenCalledWith("emails/msg-123", "backup@personal.com");
+      expect(forwarder.forward).toHaveBeenCalledWith("emails/msg-123", "backup@personal.com", TEST_ACCOUNT_ID);
     });
 
     it("forwards to multiple addresses when multiple forward actions match", async () => {
@@ -427,8 +447,8 @@ describe("SignalProcessor", () => {
       await processor.process(makeSqsEvent([{}]));
 
       expect(forwarder.forward).toHaveBeenCalledTimes(2);
-      expect(forwarder.forward).toHaveBeenCalledWith(expect.any(String), "first@example.com");
-      expect(forwarder.forward).toHaveBeenCalledWith(expect.any(String), "second@example.com");
+      expect(forwarder.forward).toHaveBeenCalledWith(expect.any(String), "first@example.com", TEST_ACCOUNT_ID);
+      expect(forwarder.forward).toHaveBeenCalledWith(expect.any(String), "second@example.com", TEST_ACCOUNT_ID);
     });
 
     it("does not forward when rule does not match", async () => {

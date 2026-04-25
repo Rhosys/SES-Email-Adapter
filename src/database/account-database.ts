@@ -1,7 +1,7 @@
 import { randomUUID } from "crypto";
 import { DeleteCommand, GetCommand, PutCommand, QueryCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { dynamo, ACCOUNTS_TABLE } from "./shared.js";
-import type { Account, View, Label, Rule, Domain, EmailAddressConfig, AccountFilteringConfig } from "../types/index.js";
+import type { Account, View, Label, Rule, Domain, EmailAddressConfig, AccountFilteringConfig, VerifiedForwardingAddress } from "../types/index.js";
 import type { CreateViewRequest, UpdateViewRequest, CreateLabelRequest, UpdateLabelRequest, CreateRuleRequest, UpdateRuleRequest } from "../api/app.js";
 
 // ---------------------------------------------------------------------------
@@ -328,5 +328,55 @@ export class AccountDatabase {
 
   async deleteDomain(accountId: string, id: string): Promise<void> {
     await dynamo.send(new DeleteCommand({ TableName: ACCOUNTS_TABLE, Key: { pk: pk(accountId), sk: `DOMAIN#${id}` } }));
+  }
+
+  // ---------------------------------------------------------------------------
+  // Verified forwarding addresses
+  // ---------------------------------------------------------------------------
+
+  async listVerifiedForwardingAddresses(accountId: string): Promise<VerifiedForwardingAddress[]> {
+    const res = await dynamo.send(new QueryCommand({
+      TableName: ACCOUNTS_TABLE,
+      KeyConditionExpression: "pk = :pk AND begins_with(sk, :prefix)",
+      ExpressionAttributeValues: { ":pk": pk(accountId), ":prefix": "FWDADDR#" },
+    }));
+    return (res.Items ?? []) as VerifiedForwardingAddress[];
+  }
+
+  async getVerifiedForwardingAddress(accountId: string, address: string): Promise<VerifiedForwardingAddress | null> {
+    const result = await dynamo.send(new GetCommand({
+      TableName: ACCOUNTS_TABLE,
+      Key: { pk: pk(accountId), sk: `FWDADDR#${address}` },
+    }));
+    return result.Item ? (result.Item as VerifiedForwardingAddress) : null;
+  }
+
+  async saveVerifiedForwardingAddress(addr: VerifiedForwardingAddress): Promise<void> {
+    await dynamo.send(new PutCommand({
+      TableName: ACCOUNTS_TABLE,
+      Item: { ...addr, pk: pk(addr.accountId), sk: `FWDADDR#${addr.address}` },
+    }));
+  }
+
+  async deleteVerifiedForwardingAddress(accountId: string, address: string): Promise<void> {
+    await dynamo.send(new DeleteCommand({
+      TableName: ACCOUNTS_TABLE,
+      Key: { pk: pk(accountId), sk: `FWDADDR#${address}` },
+    }));
+  }
+
+  // Disable all forward actions targeting a failed address across all account rules.
+  async disableForwardActions(accountId: string, toAddress: string): Promise<void> {
+    const rules = await this.listRules(accountId);
+    const affected = rules.filter((r) => r.actions.some((a) => a.type === "forward" && a.value === toAddress && !a.disabled));
+    await Promise.all(
+      affected.map((r) =>
+        this.updateRule(accountId, r.id, {
+          actions: r.actions.map((a) =>
+            a.type === "forward" && a.value === toAddress ? { ...a, disabled: true } : a,
+          ),
+        }),
+      ),
+    );
   }
 }
