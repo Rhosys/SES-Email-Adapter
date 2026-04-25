@@ -45,8 +45,13 @@ export interface Notifier {
   notifyBlocked(accountId: string, signal: Signal): Promise<void>;
 }
 
+export interface ForwardOptions {
+  senderDomain: string;
+  authenticationResults: string;
+}
+
 export interface Forwarder {
-  forward(s3Key: string, toAddress: string, accountId: string): Promise<void>;
+  forward(s3Key: string, toAddress: string, accountId: string, opts: ForwardOptions): Promise<void>;
 }
 
 interface InboundSignalMessage {
@@ -313,9 +318,13 @@ export class SignalProcessor {
     await this.arcMatcher.upsertEmbedding(arc.id, embedding, accountId, recipientAddress);
 
     // 9. Forward to any addresses collected from matching rules
-    if (this.forwarder) {
+    if (this.forwarder && forwardAddresses.length > 0) {
+      const forwardOpts: ForwardOptions = {
+        senderDomain: senderETLD1,
+        authenticationResults: parsed.headers["authentication-results"] ?? "",
+      };
       for (const toAddress of forwardAddresses) {
-        await this.forwarder.forward(s3Key, toAddress, accountId).catch((err) => {
+        await this.forwarder.forward(s3Key, toAddress, accountId, forwardOpts).catch((err) => {
           console.error("Forward failed:", err);
         });
       }

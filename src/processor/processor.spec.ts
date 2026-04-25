@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { SQSEvent } from "aws-lambda";
 import { SignalProcessor, deriveGroupingKey, derivePushPriority, dispositionFor } from "./processor.js";
-import type { ProcessorDatabase, ArcMatcher, RuleEvaluator, Notifier, Forwarder } from "./processor.js";
+import type { ProcessorDatabase, ArcMatcher, RuleEvaluator, Notifier, Forwarder, ForwardOptions } from "./processor.js";
 import type { MimeParser } from "./mime.js";
 import type { SignalClassifier, ClassificationOutput } from "../classifier/classifier.js";
 import type { Arc, Rule, Signal, EmailAddressConfig, AccountFilteringConfig } from "../types/index.js";
@@ -424,7 +424,10 @@ describe("SignalProcessor", () => {
       await processor.process(makeSqsEvent([{ s3Key: "emails/msg-123" }]));
 
       expect(forwarder.forward).toHaveBeenCalledOnce();
-      expect(forwarder.forward).toHaveBeenCalledWith("emails/msg-123", "backup@personal.com", TEST_ACCOUNT_ID);
+      expect(forwarder.forward).toHaveBeenCalledWith("emails/msg-123", "backup@personal.com", TEST_ACCOUNT_ID, {
+        senderDomain: "example.com",
+        authenticationResults: "spf=pass dkim=pass",
+      });
     });
 
     it("forwards to multiple addresses when multiple forward actions match", async () => {
@@ -446,9 +449,10 @@ describe("SignalProcessor", () => {
 
       await processor.process(makeSqsEvent([{}]));
 
+      const expectedOpts: ForwardOptions = { senderDomain: "example.com", authenticationResults: "spf=pass dkim=pass" };
       expect(forwarder.forward).toHaveBeenCalledTimes(2);
-      expect(forwarder.forward).toHaveBeenCalledWith(expect.any(String), "first@example.com", TEST_ACCOUNT_ID);
-      expect(forwarder.forward).toHaveBeenCalledWith(expect.any(String), "second@example.com", TEST_ACCOUNT_ID);
+      expect(forwarder.forward).toHaveBeenCalledWith(expect.any(String), "first@example.com", TEST_ACCOUNT_ID, expectedOpts);
+      expect(forwarder.forward).toHaveBeenCalledWith(expect.any(String), "second@example.com", TEST_ACCOUNT_ID, expectedOpts);
     });
 
     it("does not forward when rule does not match", async () => {
