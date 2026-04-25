@@ -10,6 +10,7 @@ import { ArcDatabase } from "./database/arc-database.js";
 import { ProcessingDatabase } from "./database/processing-database.js";
 import { ProcessorDatabaseAdapter, ApiDatabaseAdapter } from "./database/adapters.js";
 import { SesNotifier } from "./notifier/ses-notifier.js";
+import { SesForwarder } from "./notifier/ses-forwarder.js";
 import { FeedbackProcessor } from "./notifier/feedback-processor.js";
 import { AuthressAuthService } from "./api/authress-auth.js";
 import { AuthressAccessService } from "./api/authress-access.js";
@@ -56,6 +57,7 @@ const processor = new SignalProcessor({
   arcMatcher: arcDb,
   ruleEvaluator: new JsonLogicRuleEvaluator(),
   notifier: new SesNotifier(),
+  forwarder: new SesForwarder(undefined, s3),
 });
 
 const feedbackProcessor = new FeedbackProcessor();
