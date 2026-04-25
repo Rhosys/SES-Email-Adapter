@@ -456,7 +456,7 @@ export interface Label {
 // Rule (JSONLogic-based automation)
 // ---------------------------------------------------------------------------
 
-export type RuleActionType = "assign_label" | "assign_workflow" | "archive" | "delete";
+export type RuleActionType = "assign_label" | "assign_workflow" | "archive" | "delete" | "forward";
 
 export interface RuleAction {
   type: RuleActionType;

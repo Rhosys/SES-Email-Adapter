@@ -41,6 +41,10 @@ export interface Notifier {
   notifyBlocked(accountId: string, signal: Signal): Promise<void>;
 }
 
+export interface Forwarder {
+  forward(s3Key: string, toAddress: string): Promise<void>;
+}
+
 interface InboundSignalMessage {
   accountId: string;
   s3Bucket: string;
@@ -61,6 +65,7 @@ interface SignalProcessorOptions {
   arcMatcher: ArcMatcher;
   ruleEvaluator: RuleEvaluator;
   notifier?: Notifier;
+  forwarder?: Forwarder;
 }
 
 export class SignalProcessor {
@@ -70,6 +75,7 @@ export class SignalProcessor {
   private readonly arcMatcher: ArcMatcher;
   private readonly ruleEvaluator: RuleEvaluator;
   private readonly notifier: Notifier | undefined;
+  private readonly forwarder: Forwarder | undefined;
 
   constructor(opts: SignalProcessorOptions) {
     this.store = opts.store;
@@ -78,6 +84,7 @@ export class SignalProcessor {
     this.arcMatcher = opts.arcMatcher;
     this.ruleEvaluator = opts.ruleEvaluator;
     this.notifier = opts.notifier;
+    this.forwarder = opts.forwarder;
   }
 
   async process(event: SQSEvent): Promise<void> {
@@ -265,6 +272,7 @@ export class SignalProcessor {
       ...(ttl !== undefined ? { ttl } : {}),
     });
 
+    const forwardAddresses: string[] = [];
     const rules = await this.store.listRules(accountId);
     for (const rule of rules) {
       if (!this.ruleEvaluator.evaluate(rule, { signal: signalShell, arc })) continue;
@@ -280,6 +288,8 @@ export class SignalProcessor {
         } else if (action.type === "delete") {
           arc.status = "deleted";
           arc.deletedAt = now;
+        } else if (action.type === "forward" && action.value) {
+          forwardAddresses.push(action.value);
         }
       }
     }
@@ -296,6 +306,15 @@ export class SignalProcessor {
     }
 
     await this.arcMatcher.upsertEmbedding(arc.id, embedding, accountId, recipientAddress);
+
+    // 9. Forward to any addresses collected from matching rules
+    if (this.forwarder) {
+      for (const toAddress of forwardAddresses) {
+        await this.forwarder.forward(s3Key, toAddress).catch((err) => {
+          console.error("Forward failed:", err);
+        });
+      }
+    }
 
     const isSpam = classification.workflow === "spam" || classification.spamScore >= 0.9;
     if (this.notifier && !isSpam && !isNotice) {

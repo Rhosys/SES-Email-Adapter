@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { SQSEvent } from "aws-lambda";
 import { SignalProcessor, deriveGroupingKey, derivePushPriority, dispositionFor } from "./processor.js";
-import type { ProcessorDatabase, ArcMatcher, RuleEvaluator, Notifier } from "./processor.js";
+import type { ProcessorDatabase, ArcMatcher, RuleEvaluator, Notifier, Forwarder } from "./processor.js";
 import type { MimeParser } from "./mime.js";
 import type { SignalClassifier, ClassificationOutput } from "../classifier/classifier.js";
 import type { Arc, Rule, Signal, EmailAddressConfig, AccountFilteringConfig } from "../types/index.js";
@@ -352,6 +352,146 @@ describe("SignalProcessor", () => {
 
       const arc = vi.mocked(store.saveArc).mock.calls[0]![0] as Arc;
       expect(arc.status).toBe("active");
+    });
+
+    it("collects forward addresses from matching rules but does not call forwarder when none configured", async () => {
+      const rule: Rule = {
+        id: "rule-fwd",
+        accountId: TEST_ACCOUNT_ID,
+        name: "Forward personal",
+        condition: '{"==": [{"var": "arc.workflow"}, "personal"]}',
+        actions: [{ type: "forward", value: "backup@personal.com" }],
+        position: 0,
+        createdAt: "2024-01-01T00:00:00Z",
+        updatedAt: "2024-01-01T00:00:00Z",
+      };
+      vi.mocked(store.listRules).mockResolvedValueOnce([rule]);
+      vi.mocked(ruleEvaluator.evaluate).mockReturnValueOnce(true);
+
+      // No error — processor without forwarder silently skips forward actions
+      await processor.process(makeSqsEvent([{}]));
+
+      expect(store.saveSignal).toHaveBeenCalledOnce();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Forwarding
+  // -------------------------------------------------------------------------
+
+  describe("forwarding", () => {
+    let forwarder: Forwarder;
+
+    beforeEach(() => {
+      forwarder = { forward: vi.fn().mockResolvedValue(undefined) };
+      processor = new SignalProcessor({ store, mimeParser, classifier, arcMatcher, ruleEvaluator, forwarder });
+    });
+
+    it("calls forwarder with s3Key and target address when forward rule matches", async () => {
+      const rule: Rule = {
+        id: "rule-fwd",
+        accountId: TEST_ACCOUNT_ID,
+        name: "Forward to backup",
+        condition: '{"==": [{"var": "arc.workflow"}, "personal"]}',
+        actions: [{ type: "forward", value: "backup@personal.com" }],
+        position: 0,
+        createdAt: "2024-01-01T00:00:00Z",
+        updatedAt: "2024-01-01T00:00:00Z",
+      };
+      vi.mocked(store.listRules).mockResolvedValueOnce([rule]);
+      vi.mocked(ruleEvaluator.evaluate).mockReturnValueOnce(true);
+
+      await processor.process(makeSqsEvent([{ s3Key: "emails/msg-123" }]));
+
+      expect(forwarder.forward).toHaveBeenCalledOnce();
+      expect(forwarder.forward).toHaveBeenCalledWith("emails/msg-123", "backup@personal.com");
+    });
+
+    it("forwards to multiple addresses when multiple forward actions match", async () => {
+      const rule: Rule = {
+        id: "rule-multi",
+        accountId: TEST_ACCOUNT_ID,
+        name: "Forward to two addresses",
+        condition: "true",
+        actions: [
+          { type: "forward", value: "first@example.com" },
+          { type: "forward", value: "second@example.com" },
+        ],
+        position: 0,
+        createdAt: "2024-01-01T00:00:00Z",
+        updatedAt: "2024-01-01T00:00:00Z",
+      };
+      vi.mocked(store.listRules).mockResolvedValueOnce([rule]);
+      vi.mocked(ruleEvaluator.evaluate).mockReturnValueOnce(true);
+
+      await processor.process(makeSqsEvent([{}]));
+
+      expect(forwarder.forward).toHaveBeenCalledTimes(2);
+      expect(forwarder.forward).toHaveBeenCalledWith(expect.any(String), "first@example.com");
+      expect(forwarder.forward).toHaveBeenCalledWith(expect.any(String), "second@example.com");
+    });
+
+    it("does not forward when rule does not match", async () => {
+      const rule: Rule = {
+        id: "rule-no-match",
+        accountId: TEST_ACCOUNT_ID,
+        name: "Forward invoices",
+        condition: '{"==": [{"var": "arc.workflow"}, "invoice"]}',
+        actions: [{ type: "forward", value: "accountant@firm.com" }],
+        position: 0,
+        createdAt: "2024-01-01T00:00:00Z",
+        updatedAt: "2024-01-01T00:00:00Z",
+      };
+      vi.mocked(store.listRules).mockResolvedValueOnce([rule]);
+      vi.mocked(ruleEvaluator.evaluate).mockReturnValueOnce(false);
+
+      await processor.process(makeSqsEvent([{}]));
+
+      expect(forwarder.forward).not.toHaveBeenCalled();
+    });
+
+    it("forwards after arc and signal are saved", async () => {
+      const callOrder: string[] = [];
+      vi.mocked(store.saveSignal).mockImplementation(async () => { callOrder.push("saveSignal"); });
+      vi.mocked(forwarder.forward).mockImplementation(async () => { callOrder.push("forward"); });
+
+      const rule: Rule = {
+        id: "rule-fwd",
+        accountId: TEST_ACCOUNT_ID,
+        name: "Forward all",
+        condition: "true",
+        actions: [{ type: "forward", value: "copy@example.com" }],
+        position: 0,
+        createdAt: "2024-01-01T00:00:00Z",
+        updatedAt: "2024-01-01T00:00:00Z",
+      };
+      vi.mocked(store.listRules).mockResolvedValueOnce([rule]);
+      vi.mocked(ruleEvaluator.evaluate).mockReturnValueOnce(true);
+
+      await processor.process(makeSqsEvent([{}]));
+
+      expect(callOrder.indexOf("saveSignal")).toBeLessThan(callOrder.indexOf("forward"));
+    });
+
+    it("continues processing when forwarder throws", async () => {
+      vi.mocked(forwarder.forward).mockRejectedValueOnce(new Error("SES throttle"));
+      const rule: Rule = {
+        id: "rule-fwd",
+        accountId: TEST_ACCOUNT_ID,
+        name: "Forward all",
+        condition: "true",
+        actions: [{ type: "forward", value: "copy@example.com" }],
+        position: 0,
+        createdAt: "2024-01-01T00:00:00Z",
+        updatedAt: "2024-01-01T00:00:00Z",
+      };
+      vi.mocked(store.listRules).mockResolvedValueOnce([rule]);
+      vi.mocked(ruleEvaluator.evaluate).mockReturnValueOnce(true);
+
+      await processor.process(makeSqsEvent([{}]));
+
+      // Signal was still saved despite forward failure
+      expect(store.saveSignal).toHaveBeenCalledOnce();
     });
   });
 
