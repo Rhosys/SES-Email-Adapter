@@ -461,6 +461,21 @@ export type RuleActionType = "assign_label" | "assign_workflow" | "archive" | "d
 export interface RuleAction {
   type: RuleActionType;
   value?: string;
+  disabled?: boolean;  // auto-set when forward target bounces permanently
+}
+
+// ---------------------------------------------------------------------------
+// Verified forwarding addresses
+// ---------------------------------------------------------------------------
+
+export interface VerifiedForwardingAddress {
+  id: string;
+  accountId: string;
+  address: string;
+  status: "pending" | "verified";
+  token: string;       // verification token sent to the address
+  createdAt: string;
+  verifiedAt?: string;
 }
 
 export interface Rule {

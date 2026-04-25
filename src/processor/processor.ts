@@ -42,7 +42,7 @@ export interface Notifier {
 }
 
 export interface Forwarder {
-  forward(s3Key: string, toAddress: string): Promise<void>;
+  forward(s3Key: string, toAddress: string, accountId: string): Promise<void>;
 }
 
 interface InboundSignalMessage {
@@ -277,6 +277,7 @@ export class SignalProcessor {
     for (const rule of rules) {
       if (!this.ruleEvaluator.evaluate(rule, { signal: signalShell, arc })) continue;
       for (const action of rule.actions) {
+        if (action.disabled) continue;
         if (action.type === "assign_label" && action.value) {
           if (!arc.labels.includes(action.value)) {
             arc.labels = [...arc.labels, action.value];
@@ -310,7 +311,7 @@ export class SignalProcessor {
     // 9. Forward to any addresses collected from matching rules
     if (this.forwarder) {
       for (const toAddress of forwardAddresses) {
-        await this.forwarder.forward(s3Key, toAddress).catch((err) => {
+        await this.forwarder.forward(s3Key, toAddress, accountId).catch((err) => {
           console.error("Forward failed:", err);
         });
       }

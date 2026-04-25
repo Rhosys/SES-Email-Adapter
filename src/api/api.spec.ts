@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { Arc, Signal, View, Label, Rule, Domain, Account, EmailAddressConfig } from "../types/index.js";
+import type { Arc, Signal, View, Label, Rule, Domain, Account, EmailAddressConfig, VerifiedForwardingAddress } from "../types/index.js";
 import { createApp } from "./app.js";
-import type { ApiDatabase, AuthService, AuthContext, AccessService, AccountUser } from "./app.js";
+import type { ApiDatabase, AuthService, AuthContext, AccessService, AccountUser, VerificationMailer } from "./app.js";
 
 // ---------------------------------------------------------------------------
 // Test doubles
@@ -62,6 +62,22 @@ function makeStore(): ApiDatabase {
     deleteEmailConfig: vi.fn().mockResolvedValue(undefined),
     unblockSignal: vi.fn().mockResolvedValue(undefined),
     createArc: vi.fn().mockResolvedValue(undefined),
+    listVerifiedForwardingAddresses: vi.fn().mockResolvedValue([]),
+    getVerifiedForwardingAddress: vi.fn().mockResolvedValue(null),
+    saveVerifiedForwardingAddress: vi.fn().mockResolvedValue(undefined),
+    deleteVerifiedForwardingAddress: vi.fn().mockResolvedValue(undefined),
+  };
+}
+
+function makeVerifiedAddress(overrides: Partial<VerifiedForwardingAddress> = {}): VerifiedForwardingAddress {
+  return {
+    id: "fwdaddr-001",
+    accountId: TEST_ACCOUNT_ID,
+    address: "backup@personal.com",
+    status: "verified",
+    token: "tok-abc123",
+    createdAt: "2024-01-01T00:00:00Z",
+    ...overrides,
   };
 }
 
@@ -208,6 +224,7 @@ describe("API", () => {
   let store: ApiDatabase;
   let auth: AuthService;
   let access: AccessService;
+  let verificationMailer: VerificationMailer;
   let app: ReturnType<typeof createApp>;
 
   beforeEach(() => {
@@ -215,7 +232,8 @@ describe("API", () => {
     store = makeStore();
     auth = makeAuth();
     access = makeAccess();
-    app = createApp({ store, auth, access });
+    verificationMailer = { sendForwardVerification: vi.fn().mockResolvedValue(undefined) };
+    app = createApp({ store, auth, access, verificationMailer });
   });
 
   // -------------------------------------------------------------------------
@@ -909,6 +927,118 @@ describe("API", () => {
       expect(saved.approvedSenders).toContain("amazon.com");
       expect(saved.approvedSenders).toContain("google.com");
       expect(saved.approvedSenders).toContain("github.com");
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Verified forwarding addresses  —  /accounts/:accountId/forwarding-addresses
+  // -------------------------------------------------------------------------
+
+  describe("GET /accounts/:accountId/forwarding-addresses", () => {
+    it("returns list of verified forwarding addresses", async () => {
+      vi.mocked(store.listVerifiedForwardingAddresses).mockResolvedValueOnce([makeVerifiedAddress()]);
+      const res = await req(app, "GET", `${A}/forwarding-addresses`);
+      expect(res.status).toBe(200);
+      const body = await res.json() as VerifiedForwardingAddress[];
+      expect(body).toHaveLength(1);
+      expect(body[0]!.address).toBe("backup@personal.com");
+    });
+  });
+
+  describe("POST /accounts/:accountId/forwarding-addresses", () => {
+    it("returns 400 when address is missing", async () => {
+      const res = await req(app, "POST", `${A}/forwarding-addresses`, { body: {} });
+      expect(res.status).toBe(400);
+    });
+
+    it("creates a pending forwarding address and sends verification email", async () => {
+      const res = await req(app, "POST", `${A}/forwarding-addresses`, { body: { address: "backup@personal.com" } });
+      expect(res.status).toBe(201);
+      const body = await res.json() as VerifiedForwardingAddress;
+      expect(body.address).toBe("backup@personal.com");
+      expect(body.status).toBe("pending");
+      expect(body.token).toBeTruthy();
+      expect(store.saveVerifiedForwardingAddress).toHaveBeenCalledOnce();
+      expect(verificationMailer.sendForwardVerification).toHaveBeenCalledWith(
+        TEST_ACCOUNT_ID, "backup@personal.com", expect.any(String),
+      );
+    });
+
+    it("returns existing verified address without re-sending verification", async () => {
+      vi.mocked(store.getVerifiedForwardingAddress).mockResolvedValueOnce(makeVerifiedAddress({ status: "verified" }));
+      const res = await req(app, "POST", `${A}/forwarding-addresses`, { body: { address: "backup@personal.com" } });
+      expect(res.status).toBe(200);
+      expect(verificationMailer.sendForwardVerification).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("POST /accounts/:accountId/forwarding-addresses/:address/verify", () => {
+    it("returns 400 when token is missing", async () => {
+      vi.mocked(store.getVerifiedForwardingAddress).mockResolvedValueOnce(makeVerifiedAddress({ status: "pending" }));
+      const res = await req(app, "POST", `${A}/forwarding-addresses/backup%40personal.com/verify`, { body: {} });
+      expect(res.status).toBe(400);
+    });
+
+    it("returns 404 when address does not exist", async () => {
+      const res = await req(app, "POST", `${A}/forwarding-addresses/unknown%40example.com/verify`, { body: { token: "tok" } });
+      expect(res.status).toBe(404);
+    });
+
+    it("returns 400 when token is wrong", async () => {
+      vi.mocked(store.getVerifiedForwardingAddress).mockResolvedValueOnce(makeVerifiedAddress({ status: "pending", token: "correct-token" }));
+      const res = await req(app, "POST", `${A}/forwarding-addresses/backup%40personal.com/verify`, { body: { token: "wrong-token" } });
+      expect(res.status).toBe(400);
+    });
+
+    it("marks address as verified when token matches", async () => {
+      vi.mocked(store.getVerifiedForwardingAddress).mockResolvedValueOnce(makeVerifiedAddress({ status: "pending", token: "tok-abc123" }));
+      const res = await req(app, "POST", `${A}/forwarding-addresses/backup%40personal.com/verify`, { body: { token: "tok-abc123" } });
+      expect(res.status).toBe(200);
+      const body = await res.json() as VerifiedForwardingAddress;
+      expect(body.status).toBe("verified");
+      expect(body.verifiedAt).toBeTruthy();
+      const saved = vi.mocked(store.saveVerifiedForwardingAddress).mock.calls[0]![0] as VerifiedForwardingAddress;
+      expect(saved.status).toBe("verified");
+    });
+  });
+
+  describe("DELETE /accounts/:accountId/forwarding-addresses/:address", () => {
+    it("deletes the forwarding address and returns 204", async () => {
+      const res = await req(app, "DELETE", `${A}/forwarding-addresses/backup%40personal.com`);
+      expect(res.status).toBe(204);
+      expect(store.deleteVerifiedForwardingAddress).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "backup@personal.com");
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Rule forward target validation
+  // -------------------------------------------------------------------------
+
+  describe("POST /accounts/:accountId/rules — forward target validation", () => {
+    it("rejects a rule with an unverified forward target", async () => {
+      vi.mocked(store.listVerifiedForwardingAddresses).mockResolvedValueOnce([]);
+      const res = await req(app, "POST", `${A}/rules`, {
+        body: { name: "Forward rule", actions: [{ type: "forward", value: "backup@personal.com" }] },
+      });
+      expect(res.status).toBe(400);
+      const body = await res.json() as { error: string };
+      expect(body.error).toContain("backup@personal.com");
+    });
+
+    it("accepts a rule when forward target is verified", async () => {
+      vi.mocked(store.listVerifiedForwardingAddresses).mockResolvedValueOnce([makeVerifiedAddress({ status: "verified" })]);
+      const res = await req(app, "POST", `${A}/rules`, {
+        body: { name: "Forward rule", actions: [{ type: "forward", value: "backup@personal.com" }] },
+      });
+      expect(res.status).toBe(201);
+    });
+
+    it("accepts a rule with no forward actions without checking verified addresses", async () => {
+      const res = await req(app, "POST", `${A}/rules`, {
+        body: { name: "Label rule", actions: [{ type: "assign_label", value: "important" }] },
+      });
+      expect(res.status).toBe(201);
+      expect(store.listVerifiedForwardingAddresses).not.toHaveBeenCalled();
     });
   });
 });

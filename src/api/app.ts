@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { randomUUID } from "crypto";
 import { getDomain } from "tldts";
-import type { Arc, Signal, View, Label, Rule, Domain, Account, Page, PageParams, ArcStatus, Workflow, EmailAddressConfig, SenderFilterMode, AccountFilteringConfig } from "../types/index.js";
+import type { Arc, Signal, View, Label, Rule, Domain, Account, Page, PageParams, ArcStatus, Workflow, EmailAddressConfig, SenderFilterMode, AccountFilteringConfig, VerifiedForwardingAddress } from "../types/index.js";
 
 // ---------------------------------------------------------------------------
 // Auth
@@ -151,6 +151,20 @@ export interface ApiDatabase {
   // Signal unblocking
   unblockSignal(accountId: string, signalId: string, arcId: string): Promise<void>;
   createArc(arc: Arc): Promise<void>;
+
+  // Verified forwarding addresses
+  listVerifiedForwardingAddresses(accountId: string): Promise<VerifiedForwardingAddress[]>;
+  getVerifiedForwardingAddress(accountId: string, address: string): Promise<VerifiedForwardingAddress | null>;
+  saveVerifiedForwardingAddress(addr: VerifiedForwardingAddress): Promise<void>;
+  deleteVerifiedForwardingAddress(accountId: string, address: string): Promise<void>;
+}
+
+// ---------------------------------------------------------------------------
+// Verification mailer
+// ---------------------------------------------------------------------------
+
+export interface VerificationMailer {
+  sendForwardVerification(accountId: string, address: string, token: string): Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -161,11 +175,12 @@ interface AppDeps {
   store: ApiDatabase;
   auth: AuthService;
   access?: AccessService;
+  verificationMailer?: VerificationMailer;
 }
 
 type AppEnv = { Variables: { auth: AuthContext } };
 
-export function createApp({ store, auth, access }: AppDeps) {
+export function createApp({ store, auth, access, verificationMailer }: AppDeps) {
   const app = new Hono<AppEnv>();
 
   // JWT verification
@@ -418,6 +433,8 @@ export function createApp({ store, auth, access }: AppDeps) {
     const body = await c.req.json() as Partial<CreateRuleRequest>;
     if (!body.name) return c.json({ error: "name is required" }, 400);
     if (!body.actions || body.actions.length === 0) return c.json({ error: "actions must not be empty" }, 400);
+    const forwardError = await validateForwardTargets(accountId, body.actions, store);
+    if (forwardError) return c.json({ error: forwardError }, 400);
     const result = await store.createRule(accountId, body as CreateRuleRequest);
     return c.json(result ?? { ok: true }, 201);
   });
@@ -428,6 +445,10 @@ export function createApp({ store, auth, access }: AppDeps) {
     const rule = rules.find((r) => r.id === c.req.param("id"));
     if (!rule) return c.json({ error: "Not found" }, 404);
     const body = await c.req.json() as UpdateRuleRequest;
+    if (body.actions) {
+      const forwardError = await validateForwardTargets(accountId, body.actions, store);
+      if (forwardError) return c.json({ error: forwardError }, 400);
+    }
     await store.updateRule(accountId, rule.id, body);
     return c.json({ ok: true });
   });
@@ -577,6 +598,67 @@ export function createApp({ store, auth, access }: AppDeps) {
   });
 
   // -------------------------------------------------------------------------
+  // Verified forwarding addresses  —  /accounts/:accountId/forwarding-addresses
+  // -------------------------------------------------------------------------
+
+  app.get("/accounts/:accountId/forwarding-addresses", async (c) => {
+    const { accountId } = c.get("auth");
+    return c.json(await store.listVerifiedForwardingAddresses(accountId));
+  });
+
+  app.post("/accounts/:accountId/forwarding-addresses", async (c) => {
+    const { accountId } = c.get("auth");
+    const body = await c.req.json() as { address?: string };
+    if (!body.address) return c.json({ error: "address is required" }, 400);
+
+    const existing = await store.getVerifiedForwardingAddress(accountId, body.address);
+    if (existing?.status === "verified") return c.json(existing, 200);
+
+    const now = new Date().toISOString();
+    const addr: VerifiedForwardingAddress = {
+      id: existing?.id ?? randomUUID(),
+      accountId,
+      address: body.address,
+      status: "pending",
+      token: randomUUID(),
+      createdAt: existing?.createdAt ?? now,
+      ...(existing?.verifiedAt !== undefined ? { verifiedAt: existing.verifiedAt } : {}),
+    };
+    await store.saveVerifiedForwardingAddress(addr);
+
+    if (verificationMailer) {
+      await verificationMailer.sendForwardVerification(accountId, addr.address, addr.token).catch((err) => {
+        console.error("Failed to send verification email:", err);
+      });
+    }
+
+    return c.json(addr, 201);
+  });
+
+  app.post("/accounts/:accountId/forwarding-addresses/:address/verify", async (c) => {
+    const { accountId } = c.get("auth");
+    const address = decodeURIComponent(c.req.param("address"));
+    const body = await c.req.json() as { token?: string };
+    if (!body.token) return c.json({ error: "token is required" }, 400);
+
+    const existing = await store.getVerifiedForwardingAddress(accountId, address);
+    if (!existing) return c.json({ error: "Not found" }, 404);
+    if (existing.status === "verified") return c.json(existing);
+    if (existing.token !== body.token) return c.json({ error: "Invalid token" }, 400);
+
+    const verified: VerifiedForwardingAddress = { ...existing, status: "verified", verifiedAt: new Date().toISOString() };
+    await store.saveVerifiedForwardingAddress(verified);
+    return c.json(verified);
+  });
+
+  app.delete("/accounts/:accountId/forwarding-addresses/:address", async (c) => {
+    const { accountId } = c.get("auth");
+    const address = decodeURIComponent(c.req.param("address"));
+    await store.deleteVerifiedForwardingAddress(accountId, address);
+    return new Response(null, { status: 204 });
+  });
+
+  // -------------------------------------------------------------------------
   // Search  —  /accounts/:accountId/search
   // -------------------------------------------------------------------------
 
@@ -602,6 +684,21 @@ export function createApp({ store, auth, access }: AppDeps) {
 import { WORKFLOWS } from "../types/index.js";
 const VALID_WORKFLOWS = new Set<string>(WORKFLOWS);
 const VALID_ROLES = new Set<AccountRole>(["owner", "admin", "member", "viewer"]);
+
+// Validate that all forward targets in a rule's actions are verified for this account.
+// Returns an error string if invalid, null if OK.
+async function validateForwardTargets(
+  accountId: string,
+  actions: Rule["actions"],
+  store: Pick<ApiDatabase, "listVerifiedForwardingAddresses">,
+): Promise<string | null> {
+  const forwardTargets = actions.filter((a) => a.type === "forward" && a.value).map((a) => a.value!);
+  if (forwardTargets.length === 0) return null;
+  const verified = await store.listVerifiedForwardingAddresses(accountId);
+  const verifiedSet = new Set(verified.filter((v) => v.status === "verified").map((v) => v.address));
+  const unverified = forwardTargets.filter((t) => !verifiedSet.has(t));
+  return unverified.length > 0 ? `Forward targets not verified: ${unverified.join(", ")}` : null;
+}
 
 const DKIM_SELECTOR = "email-signals";
 
