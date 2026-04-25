@@ -1,6 +1,6 @@
 import { randomUUID } from "crypto";
 import type { SQSEvent } from "aws-lambda";
-import type { Signal, Arc, Rule, Workflow, WorkflowData, PushPriority, EmailAddressConfig, AccountFilteringConfig, SignalSource, SchedulingData } from "../types/index.js";
+import type { Signal, Arc, Rule, Workflow, WorkflowData, PushPriority, EmailAddressConfig, AccountFilteringConfig, SignalSource, SchedulingData, BlockReason, SignalStatus } from "../types/index.js";
 import type { MimeParser } from "./mime.js";
 import type { SignalClassifier } from "../classifier/classifier.js";
 import { getETLD1, evaluateFilter } from "./filter.js";
@@ -142,11 +142,15 @@ export class SignalProcessor {
       if (classification.workflow === "onboarding") {
         const perAddress = emailConfig?.onboardingEmailHandling;
         const globalBlock = accountConfig?.blockOnboardingEmails ?? false;
-        const shouldBlock = perAddress === "block" || (perAddress !== "allow" && globalBlock);
-        if (shouldBlock) {
-          const blockedSignal = buildSignal({
+        const shouldSuppress = perAddress === "block" || perAddress === "quarantine" || (perAddress !== "allow" && globalBlock);
+        if (shouldSuppress) {
+          const disposition = perAddress === "block" || perAddress === "quarantine"
+            ? perAddress
+            : dispositionFor("onboarding", accountConfig);
+          const status: SignalStatus = disposition === "quarantine" ? "quarantined" : "blocked";
+          const suppressedSignal = buildSignal({
             arcId: undefined,
-            status: "blocked",
+            status,
             blockReason: "onboarding",
             accountId,
             sesMessageId,
@@ -158,7 +162,12 @@ export class SignalProcessor {
             now,
             ...(ttl !== undefined ? { ttl } : {}),
           });
-          await this.store.saveSignal(blockedSignal);
+          await this.store.saveSignal(suppressedSignal);
+          if (status === "quarantined" && this.notifier) {
+            await this.notifier.notifyBlocked(accountId, suppressedSignal).catch((err) => {
+              console.error("Quarantine notification failed:", err);
+            });
+          }
           return;
         }
       }
@@ -169,9 +178,11 @@ export class SignalProcessor {
       });
 
       if (!filterResult.allowed) {
-        const blockedSignal = buildSignal({
+        const disposition = dispositionFor(filterResult.reason, accountConfig);
+        const status: SignalStatus = disposition === "quarantine" ? "quarantined" : "blocked";
+        const suppressedSignal = buildSignal({
           arcId: undefined,
-          status: "blocked",
+          status,
           blockReason: filterResult.reason,
           accountId,
           sesMessageId,
@@ -184,10 +195,10 @@ export class SignalProcessor {
           ...(ttl !== undefined ? { ttl } : {}),
         });
 
-        await this.store.saveSignal(blockedSignal);
-        if (this.notifier) {
-          await this.notifier.notifyBlocked(accountId, blockedSignal).catch((err) => {
-            console.error("Blocked notification failed:", err);
+        await this.store.saveSignal(suppressedSignal);
+        if (status === "quarantined" && this.notifier) {
+          await this.notifier.notifyBlocked(accountId, suppressedSignal).catch((err) => {
+            console.error("Quarantine notification failed:", err);
           });
         }
 
@@ -407,6 +418,12 @@ function buildCalendarSignal(arc: Arc, emailSignal: Signal, now: string, ttl: nu
   };
   if (ttl !== undefined) calSignal.ttl = ttl;
   return calSignal;
+}
+
+// Returns disposition for a given block reason. Default is "quarantine" (notify user for review).
+// Explicit "block" = silent sequester, hidden until user explicitly searches.
+export function dispositionFor(reason: BlockReason, config: AccountFilteringConfig | null | undefined): "block" | "quarantine" {
+  return config?.blockDisposition?.[reason] ?? "quarantine";
 }
 
 export function deriveGroupingKey(

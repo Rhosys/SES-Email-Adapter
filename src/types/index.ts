@@ -289,11 +289,17 @@ export type SenderFilterMode =
   | "notify_new"   // allow approved senders, block + notify on new senders (default)
   | "allow_all";   // no filtering
 
-export type SignalStatus = "active" | "blocked";
+// active = visible; quarantined = user notified + shown for review; blocked = silent, hidden until explicitly retrieved
+export type SignalStatus = "active" | "blocked" | "quarantined";
 
 // "email" = inbound SES email; "system" = processor-created (e.g. extracted calendar event); "user" = user-created
 export type SignalSource = "email" | "system" | "user";
 export type BlockReason = "new_sender" | "spam" | "sender_mismatch" | "reputation" | "onboarding";
+
+// Per-reason disposition: "quarantine" notifies user for review; "block" silently sequesters
+export type BlockDisposition = {
+  [K in BlockReason]?: "block" | "quarantine";
+};
 
 // interrupt = push notification popup; ambient = badge only; silent = no push
 export type PushPriority = "interrupt" | "ambient" | "silent";
@@ -305,8 +311,8 @@ export interface EmailAddressConfig {
   address: string;              // The recipient address, e.g. me@mydomain.com
   filterMode: SenderFilterMode;
   approvedSenders: string[];    // eTLD+1 domains (e.g. "amazon.com", "google.com")
-  // Per-address onboarding override; "inherit" defers to blockOnboardingEmails global setting
-  onboardingEmailHandling?: "block" | "allow" | "inherit";
+  // Per-address onboarding override; "inherit" defers to global blockDisposition/blockOnboardingEmails
+  onboardingEmailHandling?: "block" | "quarantine" | "allow" | "inherit";
   createdAt: string;
   updatedAt: string;
 }
@@ -315,7 +321,8 @@ export interface EmailAddressConfig {
 export interface AccountFilteringConfig {
   defaultFilterMode: SenderFilterMode;
   newAddressHandling: NewAddressHandling;
-  blockOnboardingEmails?: boolean;  // Block all onboarding emails by default
+  blockOnboardingEmails?: boolean;      // Block all onboarding emails by default
+  blockDisposition?: BlockDisposition;  // Per-reason disposition (default: "quarantine" for all)
 }
 
 // Global sender reputation — aggregated across all accounts, keyed by eTLD+1
