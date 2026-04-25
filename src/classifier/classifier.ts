@@ -187,9 +187,13 @@ Job applications, recruiter outreach, interview scheduling, offers, rejections, 
 Publications, editorial digests, blog mailing lists, curated content
 { "workflow": "newsletter", "publication": "<name>", "topics": ["<topic>"], "frequency": "daily"|"weekly"|"monthly"|"irregular"|null, "unsubscribeUrl": "<url or null>" }
 
-### marketing
-Promotional offers, discount codes, flash sales, abandoned cart, loyalty rewards, product launches
-{ "workflow": "marketing", "promotionType": "discount"|"sale"|"flash_sale"|"loyalty"|"referral"|"product_launch"|"abandoned_cart"|"win_back", "brand": "<name>", "discountCode": "<string or null>", "discountAmount": "<string or null>", "expiryDate": "<YYYY-MM-DD or null>", "shopUrl": "<url or null>" }
+### promotions
+Promotional offers, discount codes, flash sales, abandoned cart reminders, loyalty rewards, product launches — commercial emails whose primary goal is driving a purchase or re-engagement with an offer
+{ "workflow": "promotions", "promotionType": "discount"|"sale"|"flash_sale"|"loyalty"|"referral"|"product_launch"|"abandoned_cart"|"win_back", "brand": "<name>", "discountCode": "<string or null>", "discountAmount": "<string or null>", "expiryDate": "<YYYY-MM-DD or null>", "shopUrl": "<url or null>" }
+
+### onboarding
+Welcome emails, account setup guides, getting-started tutorials, feature tours, product tips, and re-engagement check-ins sent by apps or services after a user signs up. Distinct from promotions (no purchase intent) and newsletters (not editorial).
+{ "workflow": "onboarding", "service": "<app/product name>", "onboardingType": "welcome"|"setup_guide"|"feature_tour"|"tip"|"check_in"|"re_engagement", "stepNumber": <number or null>, "totalSteps": <number or null>, "actionUrl": "<url or null>" }
 
 ### social
 Social media notifications, community platforms, forum activity, event invites

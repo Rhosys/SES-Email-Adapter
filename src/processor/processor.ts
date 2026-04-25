@@ -138,6 +138,31 @@ export class SignalProcessor {
         this.store.getAccountFilteringConfig(accountId),
       ]);
 
+      // Onboarding block: checked before sender-filter so it applies even for known senders
+      if (classification.workflow === "onboarding") {
+        const perAddress = emailConfig?.onboardingEmailHandling;
+        const globalBlock = accountConfig?.blockOnboardingEmails ?? false;
+        const shouldBlock = perAddress === "block" || (perAddress !== "allow" && globalBlock);
+        if (shouldBlock) {
+          const blockedSignal = buildSignal({
+            arcId: undefined,
+            status: "blocked",
+            blockReason: "onboarding",
+            accountId,
+            sesMessageId,
+            recipientAddress,
+            parsed,
+            classification,
+            s3Key,
+            receivedAt: timestamp,
+            now,
+            ...(ttl !== undefined ? { ttl } : {}),
+          });
+          await this.store.saveSignal(blockedSignal);
+          return;
+        }
+      }
+
       const filterResult = evaluateFilter(emailConfig, senderETLD1, classification.spamScore, {
         newAddressHandling: accountConfig?.newAddressHandling,
         defaultFilterMode: accountConfig?.defaultFilterMode,
@@ -397,6 +422,7 @@ export function deriveGroupingKey(
     case "invoice":
     case "notice":
     case "newsletter":
+    case "onboarding":
       return `${base}:${senderETLD1}`;
 
     case "order": {
@@ -444,7 +470,8 @@ export function derivePushPriority(workflow: Workflow, data: WorkflowData): Push
 
     case "notice":
     case "newsletter":
-    case "marketing":
+    case "promotions":
+    case "onboarding":
     case "social":
     case "spam":
       return "silent";
