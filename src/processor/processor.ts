@@ -47,20 +47,39 @@ export interface Notifier {
 
 export interface ForwardOptions {
   senderDomain: string;
-  authenticationResults: string;
+  dkimPass: boolean;
+  dmarcPass: boolean;
 }
 
 export interface Forwarder {
   forward(s3Key: string, toAddress: string, accountId: string, opts: ForwardOptions): Promise<void>;
 }
 
+type SesVerdict = "PASS" | "FAIL" | "GRAY" | "PROCESSING_FAILED";
+
+// Shape of the notification that SES publishes to SNS on receipt
+interface SesReceiptNotification {
+  mail: {
+    messageId: string;
+    timestamp: string;
+    destination: string[];
+  };
+  receipt: {
+    recipients: string[];
+    dkimVerdict: { status: SesVerdict };
+    dmarcVerdict: { status: SesVerdict };
+    action: { bucketName: string; objectKey: string };
+  };
+}
+
 interface InboundSignalMessage {
   accountId: string;
-  s3Bucket: string;
   s3Key: string;
   sesMessageId: string;
   timestamp: string;
   destination: string[];
+  dkimVerdict: SesVerdict;
+  dmarcVerdict: SesVerdict;
 }
 
 // ---------------------------------------------------------------------------
@@ -99,7 +118,18 @@ export class SignalProcessor {
   async process(event: SQSEvent): Promise<void> {
     for (const record of event.Records) {
       try {
-        const msg = JSON.parse(record.body) as InboundSignalMessage;
+        const sns = JSON.parse(record.body) as { Message: string };
+        const notification = JSON.parse(sns.Message) as SesReceiptNotification & { accountId?: string };
+        const msg: InboundSignalMessage = {
+          // accountId comes from per-domain receipt rule metadata (set by API when registering a domain)
+          accountId: notification.accountId ?? notification.mail.destination[0]!,
+          s3Key: notification.receipt.action.objectKey,
+          sesMessageId: notification.mail.messageId,
+          timestamp: notification.mail.timestamp,
+          destination: notification.mail.destination,
+          dkimVerdict: notification.receipt.dkimVerdict.status,
+          dmarcVerdict: notification.receipt.dmarcVerdict.status,
+        };
         await this.processMessage(msg);
       } catch (err) {
         console.error("Failed to process SQS record:", err);
@@ -321,7 +351,8 @@ export class SignalProcessor {
     if (this.forwarder && forwardAddresses.length > 0) {
       const forwardOpts: ForwardOptions = {
         senderDomain: senderETLD1,
-        authenticationResults: parsed.headers["authentication-results"] ?? "",
+        dkimPass: msg.dkimVerdict === "PASS",
+        dmarcPass: msg.dmarcVerdict === "PASS",
       };
       for (const toAddress of forwardAddresses) {
         await this.forwarder.forward(s3Key, toAddress, accountId, forwardOpts).catch((err) => {
