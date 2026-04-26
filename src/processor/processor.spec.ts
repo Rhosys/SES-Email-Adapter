@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { SQSEvent } from "aws-lambda";
-import { SignalProcessor, deriveGroupingKey, derivePushPriority, dispositionFor } from "./processor.js";
+import { SignalProcessor, deriveGroupingKey, dispositionFor } from "./processor.js";
+import { baseUrgency, priorityCalculator } from "./priority.js";
 import type { ProcessorDatabase, ArcMatcher, RuleEvaluator, Notifier, Forwarder, ForwardOptions } from "./processor.js";
 import type { MimeParser } from "./mime.js";
 import type { SignalClassifier, ClassificationOutput } from "../classifier/classifier.js";
@@ -998,22 +999,42 @@ describe("SignalProcessor", () => {
     });
   });
 
-  describe("derivePushPriority", () => {
-    it("auth is always interrupt", () => {
-      expect(derivePushPriority("auth", { workflow: "auth", authType: "otp", service: "GitHub" })).toBe("interrupt");
+  describe("baseUrgency", () => {
+    it("auth is always critical", () => {
+      expect(baseUrgency("auth", { workflow: "auth", authType: "otp", service: "GitHub" })).toBe("critical");
     });
 
-    it("financial is interrupt only when isSuspicious", () => {
-      expect(derivePushPriority("financial", { workflow: "financial", financialType: "fraud_alert", institution: "Chase", isSuspicious: true, requiresAction: false })).toBe("interrupt");
-      expect(derivePushPriority("financial", { workflow: "financial", financialType: "statement", institution: "Chase", requiresAction: false })).toBe("ambient");
+    it("financial is critical only when isSuspicious", () => {
+      expect(baseUrgency("financial", { workflow: "financial", financialType: "fraud_alert", institution: "Chase", isSuspicious: true })).toBe("critical");
+      expect(baseUrgency("financial", { workflow: "financial", financialType: "statement", institution: "Chase" })).toBe("normal");
     });
 
     it("notice is always silent", () => {
-      expect(derivePushPriority("notice", { workflow: "notice", noticeType: "privacy_policy", provider: "Google" })).toBe("silent");
+      expect(baseUrgency("notice", { workflow: "notice", noticeType: "privacy_policy", provider: "Google" })).toBe("silent");
     });
 
     it("newsletter is always silent", () => {
-      expect(derivePushPriority("newsletter", { workflow: "newsletter", publication: "TLDR", topics: [] })).toBe("silent");
+      expect(baseUrgency("newsletter", { workflow: "newsletter", publication: "TLDR", topics: [] })).toBe("silent");
+    });
+  });
+
+  describe("priorityCalculator", () => {
+    it("returns base urgency when arc has no sent messages", () => {
+      const arc = makeArc({ sentMessageIds: undefined });
+      const signal = { workflow: "personal", workflowData: { workflow: "personal", isReply: false, sentiment: "neutral", requiresReply: false } } as Parameters<typeof priorityCalculator>[1];
+      expect(priorityCalculator(arc, signal)).toBe("normal");
+    });
+
+    it("promotes to at least high when arc has sent messages", () => {
+      const arc = makeArc({ sentMessageIds: ["<msg-001@example.com>"] });
+      const signal = { workflow: "newsletter", workflowData: { workflow: "newsletter", publication: "TLDR", topics: [] } } as Parameters<typeof priorityCalculator>[1];
+      expect(priorityCalculator(arc, signal)).toBe("high");
+    });
+
+    it("does not demote critical when arc has sent messages", () => {
+      const arc = makeArc({ sentMessageIds: ["<msg-001@example.com>"] });
+      const signal = { workflow: "auth", workflowData: { workflow: "auth", authType: "otp", service: "GitHub" } } as Parameters<typeof priorityCalculator>[1];
+      expect(priorityCalculator(arc, signal)).toBe("critical");
     });
   });
 

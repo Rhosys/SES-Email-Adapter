@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto";
 import type { SQSEvent } from "aws-lambda";
-import type { Signal, Arc, Rule, Workflow, WorkflowData, PushPriority, EmailAddressConfig, AccountFilteringConfig, SignalSource, SchedulingData, BlockReason, SignalStatus } from "../types/index.js";
+import type { Signal, Arc, Rule, Workflow, WorkflowData, EmailAddressConfig, AccountFilteringConfig, SignalSource, SchedulingData, BlockReason, SignalStatus } from "../types/index.js";
+import { priorityCalculator } from "./priority.js";
 import type { MimeParser } from "./mime.js";
 import type { SignalClassifier } from "../classifier/classifier.js";
 import { getETLD1, evaluateFilter } from "./filter.js";
@@ -260,10 +261,6 @@ export class SignalProcessor {
       }
     }
 
-    // 5b. Detect reply to a user-sent email — In-Reply-To matches a Message-ID we stored
-    const inReplyTo = parsed.headers["in-reply-to"];
-    const isReplyToSent = !!(inReplyTo && matchedArc?.sentMessageIds?.includes(inReplyTo.trim()));
-
     // 6. Build or update Arc
     const isNotice = classification.workflow === "notice";
     let arc: Arc;
@@ -312,7 +309,6 @@ export class SignalProcessor {
       s3Key,
       receivedAt: timestamp,
       now,
-      isReplyToSent,
       ...(ttl !== undefined ? { ttl } : {}),
     });
 
@@ -340,6 +336,8 @@ export class SignalProcessor {
     }
 
     const signal: Signal = { ...signalShell, arcId: arc.id };
+
+    arc.urgency = priorityCalculator(arc, signal);
 
     await this.store.saveArc(arc);
     await this.store.saveSignal(signal);
@@ -423,11 +421,9 @@ function buildSignal(opts: {
   s3Key: string;
   receivedAt: string;
   now: string;
-  isReplyToSent?: boolean;
   ttl?: number;
 }): Signal {
-  const { arcId, status, blockReason, accountId, sesMessageId, recipientAddress, parsed, classification, s3Key, receivedAt, now, isReplyToSent, ttl } = opts;
-  const basePriority = derivePushPriority(classification.workflow, classification.workflowData);
+  const { arcId, status, blockReason, accountId, sesMessageId, recipientAddress, parsed, classification, s3Key, receivedAt, now, ttl } = opts;
   const signal: Signal = {
     id: `SES#${sesMessageId}`,
     accountId,
@@ -445,8 +441,6 @@ function buildSignal(opts: {
     spamScore: classification.spamScore,
     summary: classification.summary,
     classificationModelId: classification.classificationModelId,
-    // Replies to user-sent emails are always interrupt-priority regardless of workflow
-    pushPriority: isReplyToSent ? "interrupt" : basePriority,
     s3Key,
     status,
     createdAt: now,
@@ -454,7 +448,6 @@ function buildSignal(opts: {
 
   if (arcId !== undefined) signal.arcId = arcId;
   if (blockReason !== undefined) signal.blockReason = blockReason;
-  if (isReplyToSent) signal.isReplyToSent = true;
   if (parsed.replyTo !== undefined) signal.replyTo = parsed.replyTo;
   if (parsed.textBody !== undefined) signal.textBody = parsed.textBody;
   if (parsed.htmlBody != null) signal.htmlBody = parsed.htmlBody;
@@ -484,7 +477,6 @@ function buildCalendarSignal(arc: Arc, emailSignal: Signal, now: string, ttl: nu
     spamScore: 0,
     summary: emailSignal.summary,
     classificationModelId: emailSignal.classificationModelId,
-    pushPriority: "silent",
     s3Key: "",
     status: "active",
     createdAt: now,
@@ -530,43 +522,3 @@ export function deriveGroupingKey(
   }
 }
 
-export function derivePushPriority(workflow: Workflow, data: WorkflowData): PushPriority {
-  switch (workflow) {
-    case "auth":
-      return "interrupt";
-
-    case "security":
-      return "interrupt";
-
-    case "financial":
-      return (data as { isSuspicious?: boolean }).isSuspicious ? "interrupt" : "ambient";
-
-    case "scheduling":
-    case "travel":
-    case "healthcare":
-      return "ambient";
-
-    case "developer":
-      return (data as { severity?: string; requiresAction?: boolean }).severity === "critical" &&
-        (data as { requiresAction?: boolean }).requiresAction
-        ? "interrupt"
-        : "ambient";
-
-    case "subscription":
-      return (data as { eventType?: string }).eventType === "payment_failed" ? "interrupt" : "ambient";
-
-    case "support":
-      return (data as { priority?: string }).priority === "urgent" ? "interrupt" : "ambient";
-
-    case "notice":
-    case "newsletter":
-    case "promotions":
-    case "onboarding":
-    case "social":
-    case "spam":
-      return "silent";
-
-    default:
-      return "ambient";
-  }
-}

@@ -304,6 +304,10 @@ export type BlockDisposition = {
 // interrupt = push notification popup; ambient = badge only; silent = no push
 export type PushPriority = "interrupt" | "ambient" | "silent";
 
+// Unified urgency level that drives all notification channels (push, digest, UI).
+// Derived by priorityCalculator — do not set manually.
+export type ArcUrgency = "critical" | "high" | "normal" | "low" | "silent";
+
 // Per-recipient-address configuration
 export interface EmailAddressConfig {
   id: string;
@@ -386,9 +390,6 @@ export interface Signal {
   spamScore: number;
   summary: string;
   classificationModelId: string;
-  pushPriority: PushPriority;
-  // True when In-Reply-To matches a message the user sent — drives "interrupt" push priority
-  isReplyToSent?: boolean;
 
   s3Key: string;
   status: SignalStatus;
@@ -417,8 +418,10 @@ export interface Arc {
   createdAt: string;
   updatedAt: string;
   ttl?: number;   // Unix seconds; absent = never expire
-  // Message-IDs of emails the user sent on this arc — used to detect replies
+  // Message-IDs of emails the user sent on this arc — checked by priorityCalculator to detect replies
   sentMessageIds?: string[];
+  // Derived by priorityCalculator; drives push, email digest section, and UI prominence
+  urgency?: ArcUrgency;
 }
 
 // ---------------------------------------------------------------------------

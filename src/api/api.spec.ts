@@ -139,7 +139,6 @@ function makeSignal(overrides: Partial<Signal> = {}): Signal {
     spamScore: 0.02,
     summary: "A test signal.",
     classificationModelId: "us.anthropic.claude-opus-4-5-20251101-v1:0",
-    pushPriority: "ambient",
     s3Key: "emails/msg-001",
     status: "active",
     createdAt: "2024-01-15T10:00:00Z",
