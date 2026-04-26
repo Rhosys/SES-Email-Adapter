@@ -156,6 +156,7 @@ resource "aws_dynamodb_table" "accounts" {
   attribute { name = "sk"; type = "S" }
 
   point_in_time_recovery { enabled = true }
+  deletion_protection_enabled = true
 
   stream_enabled   = true
   stream_view_type = "NEW_AND_OLD_IMAGES"
@@ -185,6 +186,7 @@ resource "aws_dynamodb_table" "signals" {
   }
 
   point_in_time_recovery { enabled = true }
+  deletion_protection_enabled = true
 
   stream_enabled   = true
   stream_view_type = "NEW_AND_OLD_IMAGES"
@@ -203,4 +205,6 @@ resource "aws_dynamodb_table" "processing" {
     attribute_name = "ttl"
     enabled        = true
   }
+
+  deletion_protection_enabled = true
 }
