@@ -23,6 +23,12 @@ variable "notification_from_address" {
   type        = string
 }
 
+variable "dkim_private_key" {
+  description = "Base64-encoded RSA-2048 private key for BYODKIM. Generate with: openssl genrsa 2048 | openssl pkcs8 -topk8 -nocrypt -outform DER | base64 -w0"
+  type        = string
+  sensitive   = true
+}
+
 variable "app_base_url" {
   description = "Base URL of the frontend app, used in notification email links"
   type        = string
