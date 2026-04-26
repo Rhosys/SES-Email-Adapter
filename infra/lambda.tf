@@ -27,6 +27,12 @@ resource "aws_iam_role_policy" "lambda_permissions" {
     Version = "2012-10-17"
     Statement = [
       {
+        Sid    = "CloudWatchLogs"
+        Effect = "Allow"
+        Action = ["logs:CreateLogStream", "logs:PutLogEvents"]
+        Resource = "${aws_cloudwatch_log_group.lambda.arn}:*"
+      },
+      {
         Sid    = "S3ReadEmails"
         Effect = "Allow"
         Action = ["s3:GetObject"]
@@ -64,9 +70,9 @@ resource "aws_iam_role_policy" "lambda_permissions" {
         Resource = "arn:aws:rds-db:${var.aws_region}:${data.aws_caller_identity.current.account_id}:dbuser:${aws_db_proxy.aurora.id}/*"
       },
       {
-        Sid    = "SESNotifications"
+        Sid    = "SESSend"
         Effect = "Allow"
-        Action = ["ses:SendEmail", "ses:SendRawEmail"]
+        Action = ["ses:SendEmail"]
         Resource = "*"
         Condition = {
           StringEquals = { "ses:FromAddress" = var.notification_from_address }
@@ -89,18 +95,22 @@ resource "aws_iam_role_policy" "lambda_permissions" {
         Action = ["secretsmanager:GetSecretValue"]
         Resource = "arn:aws:secretsmanager:${var.aws_region}:${data.aws_caller_identity.current.account_id}:secret:${local.prefix}/*"
       },
-      {
-        Sid    = "CloudWatchLogs"
-        Effect = "Allow"
-        Action = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"]
-        Resource = "arn:aws:logs:*:*:*"
-      }
     ]
   })
 }
 
 # ---------------------------------------------------------------------------
+# CloudWatch log group — created before the function so we control retention
+# ---------------------------------------------------------------------------
+
+resource "aws_cloudwatch_log_group" "lambda" {
+  name              = "/aws/lambda/${local.prefix}-main"
+  retention_in_days = 90
+}
+
+# ---------------------------------------------------------------------------
 # Lambda function
+# publish = true enables versioning; code and alias version are managed by CI
 # ---------------------------------------------------------------------------
 
 resource "aws_lambda_function" "main" {
@@ -110,6 +120,7 @@ resource "aws_lambda_function" "main" {
   runtime       = "nodejs22.x"
   memory_size   = var.lambda_memory_mb
   timeout       = var.lambda_timeout_seconds
+  publish       = true
 
   s3_bucket = var.lambda_s3_bucket
   s3_key    = var.lambda_s3_key
@@ -138,23 +149,45 @@ resource "aws_lambda_function" "main" {
     }
   }
 
+  logging_config {
+    log_group  = aws_cloudwatch_log_group.lambda.name
+    log_format = "Text"
+  }
+
   tracing_config {
     mode = "Active"
   }
-}
 
-resource "aws_cloudwatch_log_group" "lambda" {
-  name              = "/aws/lambda/${aws_lambda_function.main.function_name}"
-  retention_in_days = 30
+  depends_on = [aws_cloudwatch_log_group.lambda]
+
+  # s3_key is updated by CI on each deploy — tofu only manages the function skeleton
+  lifecycle {
+    ignore_changes = [s3_key, s3_bucket]
+  }
 }
 
 # ---------------------------------------------------------------------------
-# SQS → Lambda event source mapping (signal processing)
+# Lambda alias — stable ARN for API Gateway + SQS triggers
+# CI updates function_version after each deploy; tofu never touches it
+# ---------------------------------------------------------------------------
+
+resource "aws_lambda_alias" "production" {
+  name             = "production"
+  function_name    = aws_lambda_function.main.function_name
+  function_version = aws_lambda_function.main.version
+
+  lifecycle {
+    ignore_changes = [function_version]
+  }
+}
+
+# ---------------------------------------------------------------------------
+# SQS → Lambda event source mappings (both point at alias)
 # ---------------------------------------------------------------------------
 
 resource "aws_lambda_event_source_mapping" "signals" {
   event_source_arn                   = aws_sqs_queue.signals.arn
-  function_name                      = aws_lambda_function.main.arn
+  function_name                      = aws_lambda_alias.production.arn
   batch_size                         = 10
   maximum_batching_window_in_seconds = 5
 
@@ -164,7 +197,7 @@ resource "aws_lambda_event_source_mapping" "signals" {
 # Bounce/complaint feedback events — processed by FeedbackProcessor
 resource "aws_lambda_event_source_mapping" "feedback" {
   event_source_arn                   = aws_sqs_queue.feedback.arn
-  function_name                      = aws_lambda_function.main.arn
+  function_name                      = aws_lambda_alias.production.arn
   batch_size                         = 10
   maximum_batching_window_in_seconds = 5
 

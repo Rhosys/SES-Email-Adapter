@@ -4,18 +4,26 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 5.0"
+      version = "~> 6.0"
+    }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.0"
     }
   }
 
   backend "s3" {
     # Configure via -backend-config or environment:
-    # bucket, key, region, dynamodb_table (for state locking)
+    # bucket, key, region
+    # use_lockfile = true replaces dynamodb_table for state locking in provider v6+
+    use_lockfile = true
+    encrypt      = true
   }
 }
 
 provider "aws" {
-  region = var.aws_region
+  region              = var.aws_region
+  allowed_account_ids = [var.aws_account_id]
 
   default_tags {
     tags = {
@@ -27,8 +35,9 @@ provider "aws" {
 
 # CloudFront ACM certificates must live in us-east-1
 provider "aws" {
-  alias  = "us_east_1"
-  region = "us-east-1"
+  alias               = "us_east_1"
+  region              = "us-east-1"
+  allowed_account_ids = [var.aws_account_id]
 
   default_tags {
     tags = {

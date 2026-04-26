@@ -1,3 +1,8 @@
+variable "aws_account_id" {
+  description = "AWS account ID — guards against applying to the wrong account. Inject via TF_VAR_aws_account_id."
+  type        = string
+}
+
 variable "env" {
   description = "Environment (prod, staging, dev)"
   type        = string
