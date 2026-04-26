@@ -1,8 +1,8 @@
 locals {
-  azs           = ["eu-west-1a", "eu-west-1b"]
+  azs           = ["eu-west-1a", "eu-west-1b", "eu-west-1c"]
   vpc_cidr      = "10.0.0.0/16"
-  private_cidrs = ["10.0.1.0/24", "10.0.2.0/24"]
-  public_cidrs  = ["10.0.101.0/24", "10.0.102.0/24"]
+  private_cidrs = ["10.0.1.0/24", "10.0.2.0/24", "10.0.3.0/24"]
+  public_cidrs  = ["10.0.101.0/24", "10.0.102.0/24", "10.0.103.0/24"]
 }
 
 resource "aws_vpc" "main" {

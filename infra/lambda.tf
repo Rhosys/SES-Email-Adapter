@@ -95,6 +95,12 @@ resource "aws_iam_role_policy" "lambda_permissions" {
         Action   = ["secretsmanager:GetSecretValue"]
         Resource = aws_secretsmanager_secret.aurora_master.arn
       },
+      {
+        Sid    = "KMS"
+        Effect = "Allow"
+        Action = ["kms:Decrypt", "kms:GenerateDataKey*", "kms:DescribeKey"]
+        Resource = aws_kms_key.default.arn
+      },
     ]
   })
 }
