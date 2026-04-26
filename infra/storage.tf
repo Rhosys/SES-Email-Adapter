@@ -52,13 +52,12 @@ resource "aws_s3_bucket_policy" "emails" {
       Action    = "s3:PutObject"
       Resource  = "${aws_s3_bucket.emails.arn}/emails/*"
       Condition = {
-        StringEquals = { "aws:Referer" = data.aws_caller_identity.current.account_id }
+        StringEquals = { "aws:Referer" = var.aws_account_id }
       }
     }]
   })
 }
 
-data "aws_caller_identity" "current" {}
 
 # ---------------------------------------------------------------------------
 # SQS — signal processing queue

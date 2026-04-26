@@ -129,7 +129,7 @@ resource "aws_lambda_function" "main" {
   function_name    = "${local.prefix}-main"
   role             = aws_iam_role.lambda.arn
   handler          = "handler.handler"
-  runtime          = "nodejs22.x"
+  runtime          = "nodejs24.x"
   memory_size      = 1024
   timeout          = 30
   publish          = true
