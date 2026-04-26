@@ -51,6 +51,20 @@ provider "aws" {
   }
 }
 
+# DynamoDB global table replica + KMS replica key
+provider "aws" {
+  alias               = "eu_central_1"
+  region              = "eu-central-1"
+  allowed_account_ids = [var.aws_account_id]
+
+  default_tags {
+    tags = {
+      App = "ses-email-adapter"
+      Env = var.env
+    }
+  }
+}
+
 locals {
   prefix = "ses-email-adapter-${var.env}"
 }
