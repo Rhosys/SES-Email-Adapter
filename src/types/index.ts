@@ -10,7 +10,8 @@ export const WORKFLOWS = [
   "travel",       // Flights, hotels, car rentals, itineraries, boarding passes
   "job",          // Applications, recruiter outreach, interviews, offers, rejections
   "newsletter",   // Publications, content digests, blogs, editorial content
-  "marketing",    // Promotions, discount codes, flash sales, abandoned cart
+  "promotions",   // Discount codes, flash sales, abandoned cart, loyalty rewards
+  "onboarding",   // Welcome, account setup, getting-started, feature tours
   "social",       // Social media notifications, mentions, community activity
   "crm",          // Sales outreach, proposals, client emails, follow-ups
   "personal",     // Human-to-human correspondence not from automated systems
@@ -35,7 +36,8 @@ export type WorkflowData =
   | TravelData
   | JobData
   | NewsletterData
-  | MarketingData
+  | PromotionsData
+  | OnboardingData
   | SocialData
   | CrmData
   | PersonalData
@@ -133,14 +135,23 @@ export interface NewsletterData {
   unsubscribeUrl?: string;
 }
 
-export interface MarketingData {
-  workflow: "marketing";
+export interface PromotionsData {
+  workflow: "promotions";
   promotionType: "discount" | "sale" | "flash_sale" | "loyalty" | "referral" | "product_launch" | "abandoned_cart" | "win_back";
   brand: string;
   discountCode?: string;
   discountAmount?: string;
   expiryDate?: string;
   shopUrl?: string;
+}
+
+export interface OnboardingData {
+  workflow: "onboarding";
+  service: string;
+  onboardingType: "welcome" | "setup_guide" | "feature_tour" | "tip" | "check_in" | "re_engagement";
+  stepNumber?: number;
+  totalSteps?: number;
+  actionUrl?: string;
 }
 
 export interface SocialData {
@@ -278,11 +289,17 @@ export type SenderFilterMode =
   | "notify_new"   // allow approved senders, block + notify on new senders (default)
   | "allow_all";   // no filtering
 
-export type SignalStatus = "active" | "blocked";
+// active = visible; quarantined = user notified + shown for review; blocked = silent, hidden until explicitly retrieved
+export type SignalStatus = "active" | "blocked" | "quarantined";
 
 // "email" = inbound SES email; "system" = processor-created (e.g. extracted calendar event); "user" = user-created
 export type SignalSource = "email" | "system" | "user";
-export type BlockReason = "new_sender" | "spam" | "sender_mismatch" | "reputation";
+export type BlockReason = "new_sender" | "spam" | "sender_mismatch" | "reputation" | "onboarding";
+
+// Per-reason disposition: "quarantine" notifies user for review; "block" silently sequesters
+export type BlockDisposition = {
+  [K in BlockReason]?: "block" | "quarantine";
+};
 
 // interrupt = push notification popup; ambient = badge only; silent = no push
 export type PushPriority = "interrupt" | "ambient" | "silent";
@@ -294,6 +311,8 @@ export interface EmailAddressConfig {
   address: string;              // The recipient address, e.g. me@mydomain.com
   filterMode: SenderFilterMode;
   approvedSenders: string[];    // eTLD+1 domains (e.g. "amazon.com", "google.com")
+  // Per-address onboarding override; "inherit" defers to global blockDisposition/blockOnboardingEmails
+  onboardingEmailHandling?: "block" | "quarantine" | "allow" | "inherit";
   createdAt: string;
   updatedAt: string;
 }
@@ -302,6 +321,8 @@ export interface EmailAddressConfig {
 export interface AccountFilteringConfig {
   defaultFilterMode: SenderFilterMode;
   newAddressHandling: NewAddressHandling;
+  blockOnboardingEmails?: boolean;      // Block all onboarding emails by default
+  blockDisposition?: BlockDisposition;  // Per-reason disposition (default: "quarantine" for all)
 }
 
 // Global sender reputation — aggregated across all accounts, keyed by eTLD+1
@@ -435,11 +456,26 @@ export interface Label {
 // Rule (JSONLogic-based automation)
 // ---------------------------------------------------------------------------
 
-export type RuleActionType = "assign_label" | "assign_workflow" | "archive" | "delete";
+export type RuleActionType = "assign_label" | "assign_workflow" | "archive" | "delete" | "forward";
 
 export interface RuleAction {
   type: RuleActionType;
   value?: string;
+  disabled?: boolean;  // auto-set when forward target bounces permanently
+}
+
+// ---------------------------------------------------------------------------
+// Verified forwarding addresses
+// ---------------------------------------------------------------------------
+
+export interface VerifiedForwardingAddress {
+  id: string;
+  accountId: string;
+  address: string;
+  status: "pending" | "verified";
+  token: string;       // verification token sent to the address
+  createdAt: string;
+  verifiedAt?: string;
 }
 
 export interface Rule {
@@ -544,5 +580,5 @@ export interface SesFeedback {
     complaintFeedbackType?: string;
     timestamp: string;
   };
-  mail: { messageId: string; source: string };
+  mail: { messageId: string; source: string; tags?: Record<string, string> };
 }

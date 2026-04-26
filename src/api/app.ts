@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { randomUUID } from "crypto";
 import { getDomain } from "tldts";
-import type { Arc, Signal, View, Label, Rule, Domain, Account, Page, PageParams, ArcStatus, Workflow, EmailAddressConfig, SenderFilterMode } from "../types/index.js";
+import type { Arc, Signal, View, Label, Rule, Domain, Account, Page, PageParams, ArcStatus, Workflow, EmailAddressConfig, SenderFilterMode, AccountFilteringConfig, VerifiedForwardingAddress } from "../types/index.js";
 
 // ---------------------------------------------------------------------------
 // Auth
@@ -151,6 +151,20 @@ export interface ApiDatabase {
   // Signal unblocking
   unblockSignal(accountId: string, signalId: string, arcId: string): Promise<void>;
   createArc(arc: Arc): Promise<void>;
+
+  // Verified forwarding addresses
+  listVerifiedForwardingAddresses(accountId: string): Promise<VerifiedForwardingAddress[]>;
+  getVerifiedForwardingAddress(accountId: string, address: string): Promise<VerifiedForwardingAddress | null>;
+  saveVerifiedForwardingAddress(addr: VerifiedForwardingAddress): Promise<void>;
+  deleteVerifiedForwardingAddress(accountId: string, address: string): Promise<void>;
+}
+
+// ---------------------------------------------------------------------------
+// Verification mailer
+// ---------------------------------------------------------------------------
+
+export interface VerificationMailer {
+  sendForwardVerification(accountId: string, address: string, token: string): Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -161,37 +175,50 @@ interface AppDeps {
   store: ApiDatabase;
   auth: AuthService;
   access?: AccessService;
+  verificationMailer?: VerificationMailer;
 }
 
 type AppEnv = { Variables: { auth: AuthContext } };
 
-export function createApp({ store, auth, access }: AppDeps) {
+export function createApp({ store, auth, access, verificationMailer }: AppDeps) {
   const app = new Hono<AppEnv>();
 
-  // Auth middleware
+  // JWT verification
   app.use("*", async (c, next) => {
     const header = c.req.header("Authorization");
     if (!header?.startsWith("Bearer ")) return c.json({ error: "Unauthorized" }, 401);
+
+    let ctx: AuthContext;
     try {
-      const ctx = await auth.verify(header.slice(7));
-      const requestedAccountId = c.req.header("X-Account-ID");
-      if (requestedAccountId && access) {
-        await access.checkAccess(ctx.userId, requestedAccountId, "account:read");
-        c.set("auth", { accountId: requestedAccountId, userId: ctx.userId });
-      } else {
-        c.set("auth", ctx);
-      }
-      await next();
+      ctx = await auth.verify(header.slice(7));
     } catch {
       return c.json({ error: "Unauthorized" }, 401);
     }
+
+    // For /accounts/:accountId routes, extract accountId from URL and verify access
+    const accountMatch = /^\/accounts\/([^/]+)/.exec(c.req.path);
+    if (accountMatch) {
+      const accountId = accountMatch[1]!;
+      if (access) {
+        try {
+          await access.checkAccess(ctx.userId, accountId, "account:read");
+        } catch {
+          return c.json({ error: "Forbidden" }, 403);
+        }
+      }
+      c.set("auth", { accountId, userId: ctx.userId });
+    } else {
+      c.set("auth", ctx);
+    }
+
+    await next();
   });
 
   // -------------------------------------------------------------------------
-  // Arcs
+  // Arcs  —  /accounts/:accountId/arcs
   // -------------------------------------------------------------------------
 
-  app.get("/arcs", async (c) => {
+  app.get("/accounts/:accountId/arcs", async (c) => {
     const { accountId } = c.get("auth");
     const query = c.req.query();
     const params: ListArcsParams = {
@@ -204,7 +231,7 @@ export function createApp({ store, auth, access }: AppDeps) {
     return c.json(await store.listArcs(accountId, params));
   });
 
-  app.get("/arcs/:id", async (c) => {
+  app.get("/accounts/:accountId/arcs/:id", async (c) => {
     const { accountId } = c.get("auth");
     const arc = await store.getArc(accountId, c.req.param("id"));
     if (!arc) return c.json({ error: "Not found" }, 404);
@@ -212,7 +239,7 @@ export function createApp({ store, auth, access }: AppDeps) {
     return c.json(arc);
   });
 
-  app.patch("/arcs/:id", async (c) => {
+  app.patch("/accounts/:accountId/arcs/:id", async (c) => {
     const { accountId } = c.get("auth");
     const arc = await store.getArc(accountId, c.req.param("id"));
     if (!arc) return c.json({ error: "Not found" }, 404);
@@ -222,7 +249,7 @@ export function createApp({ store, auth, access }: AppDeps) {
     return c.json({ ok: true });
   });
 
-  app.post("/arcs", async (c) => {
+  app.post("/accounts/:accountId/arcs", async (c) => {
     const { accountId } = c.get("auth");
     const body = await c.req.json() as {
       signalId: string;
@@ -232,7 +259,7 @@ export function createApp({ store, auth, access }: AppDeps) {
 
     const signal = await store.getSignal(accountId, body.signalId);
     if (!signal) return c.json({ error: "Signal not found" }, 404);
-    if (signal.status !== "blocked") return c.json({ error: "Signal is not blocked" }, 400);
+    if (signal.status !== "blocked" && signal.status !== "quarantined") return c.json({ error: "Signal is not blocked or quarantined" }, 400);
 
     const now = new Date().toISOString();
     const arc: Arc = {
@@ -281,12 +308,12 @@ export function createApp({ store, auth, access }: AppDeps) {
   });
 
   // -------------------------------------------------------------------------
-  // Signals
+  // Signals  —  /accounts/:accountId/arcs/:arcId/signals  &  /signals/:id
   // -------------------------------------------------------------------------
 
-  app.get("/arcs/:id/signals", async (c) => {
+  app.get("/accounts/:accountId/arcs/:arcId/signals", async (c) => {
     const { accountId } = c.get("auth");
-    const arc = await store.getArc(accountId, c.req.param("id"));
+    const arc = await store.getArc(accountId, c.req.param("arcId"));
     if (!arc) return c.json({ error: "Not found" }, 404);
     if (arc.accountId !== accountId) return c.json({ error: "Forbidden" }, 403);
     const query = c.req.query();
@@ -297,7 +324,7 @@ export function createApp({ store, auth, access }: AppDeps) {
     return c.json(await store.listSignals(accountId, arc.id, params));
   });
 
-  app.get("/signals/:id", async (c) => {
+  app.get("/accounts/:accountId/signals/:id", async (c) => {
     const { accountId } = c.get("auth");
     const signal = await store.getSignal(accountId, c.req.param("id"));
     if (!signal) return c.json({ error: "Not found" }, 404);
@@ -306,15 +333,22 @@ export function createApp({ store, auth, access }: AppDeps) {
   });
 
   // -------------------------------------------------------------------------
-  // Views
+  // Views  —  /accounts/:accountId/views
   // -------------------------------------------------------------------------
 
-  app.get("/views", async (c) => {
+  app.get("/accounts/:accountId/views", async (c) => {
     const { accountId } = c.get("auth");
     return c.json(await store.listViews(accountId));
   });
 
-  app.post("/views", async (c) => {
+  app.post("/accounts/:accountId/views/reorder", async (c) => {
+    const { accountId } = c.get("auth");
+    const body = await c.req.json() as { orderedIds: string[] };
+    await store.reorderViews(accountId, body.orderedIds);
+    return c.json({ ok: true });
+  });
+
+  app.post("/accounts/:accountId/views", async (c) => {
     const { accountId } = c.get("auth");
     const body = await c.req.json() as Partial<CreateViewRequest>;
     if (!body.name) return c.json({ error: "name is required" }, 400);
@@ -325,14 +359,7 @@ export function createApp({ store, auth, access }: AppDeps) {
     return c.json(result ?? { ok: true }, 201);
   });
 
-  app.post("/views/reorder", async (c) => {
-    const { accountId } = c.get("auth");
-    const body = await c.req.json() as { orderedIds: string[] };
-    await store.reorderViews(accountId, body.orderedIds);
-    return c.json({ ok: true });
-  });
-
-  app.patch("/views/:id", async (c) => {
+  app.patch("/accounts/:accountId/views/:id", async (c) => {
     const { accountId } = c.get("auth");
     const view = await store.getView(accountId, c.req.param("id"));
     if (!view) return c.json({ error: "Not found" }, 404);
@@ -341,7 +368,7 @@ export function createApp({ store, auth, access }: AppDeps) {
     return c.json({ ok: true });
   });
 
-  app.delete("/views/:id", async (c) => {
+  app.delete("/accounts/:accountId/views/:id", async (c) => {
     const { accountId } = c.get("auth");
     const view = await store.getView(accountId, c.req.param("id"));
     if (!view) return c.json({ error: "Not found" }, 404);
@@ -350,15 +377,15 @@ export function createApp({ store, auth, access }: AppDeps) {
   });
 
   // -------------------------------------------------------------------------
-  // Labels
+  // Labels  —  /accounts/:accountId/labels
   // -------------------------------------------------------------------------
 
-  app.get("/labels", async (c) => {
+  app.get("/accounts/:accountId/labels", async (c) => {
     const { accountId } = c.get("auth");
     return c.json(await store.listLabels(accountId));
   });
 
-  app.post("/labels", async (c) => {
+  app.post("/accounts/:accountId/labels", async (c) => {
     const { accountId } = c.get("auth");
     const body = await c.req.json() as Partial<CreateLabelRequest>;
     if (!body.name) return c.json({ error: "name is required" }, 400);
@@ -366,7 +393,7 @@ export function createApp({ store, auth, access }: AppDeps) {
     return c.json(result ?? { ok: true }, 201);
   });
 
-  app.patch("/labels/:id", async (c) => {
+  app.patch("/accounts/:accountId/labels/:id", async (c) => {
     const { accountId } = c.get("auth");
     const labels = await store.listLabels(accountId);
     const label = labels.find((l) => l.id === c.req.param("id"));
@@ -376,7 +403,7 @@ export function createApp({ store, auth, access }: AppDeps) {
     return c.json({ ok: true });
   });
 
-  app.delete("/labels/:id", async (c) => {
+  app.delete("/accounts/:accountId/labels/:id", async (c) => {
     const { accountId } = c.get("auth");
     const labels = await store.listLabels(accountId);
     const label = labels.find((l) => l.id === c.req.param("id"));
@@ -386,41 +413,47 @@ export function createApp({ store, auth, access }: AppDeps) {
   });
 
   // -------------------------------------------------------------------------
-  // Rules
+  // Rules  —  /accounts/:accountId/rules
   // -------------------------------------------------------------------------
 
-  app.get("/rules", async (c) => {
+  app.get("/accounts/:accountId/rules", async (c) => {
     const { accountId } = c.get("auth");
     return c.json(await store.listRules(accountId));
   });
 
-  app.post("/rules", async (c) => {
-    const { accountId } = c.get("auth");
-    const body = await c.req.json() as Partial<CreateRuleRequest>;
-    if (!body.name) return c.json({ error: "name is required" }, 400);
-    if (!body.actions || body.actions.length === 0) return c.json({ error: "actions must not be empty" }, 400);
-    const result = await store.createRule(accountId, body as CreateRuleRequest);
-    return c.json(result ?? { ok: true }, 201);
-  });
-
-  app.post("/rules/reorder", async (c) => {
+  app.post("/accounts/:accountId/rules/reorder", async (c) => {
     const { accountId } = c.get("auth");
     const body = await c.req.json() as { orderedIds: string[] };
     await store.reorderRules(accountId, body.orderedIds);
     return c.json({ ok: true });
   });
 
-  app.patch("/rules/:id", async (c) => {
+  app.post("/accounts/:accountId/rules", async (c) => {
+    const { accountId } = c.get("auth");
+    const body = await c.req.json() as Partial<CreateRuleRequest>;
+    if (!body.name) return c.json({ error: "name is required" }, 400);
+    if (!body.actions || body.actions.length === 0) return c.json({ error: "actions must not be empty" }, 400);
+    const forwardError = await validateForwardTargets(accountId, body.actions, store);
+    if (forwardError) return c.json({ error: forwardError }, 400);
+    const result = await store.createRule(accountId, body as CreateRuleRequest);
+    return c.json(result ?? { ok: true }, 201);
+  });
+
+  app.patch("/accounts/:accountId/rules/:id", async (c) => {
     const { accountId } = c.get("auth");
     const rules = await store.listRules(accountId);
     const rule = rules.find((r) => r.id === c.req.param("id"));
     if (!rule) return c.json({ error: "Not found" }, 404);
     const body = await c.req.json() as UpdateRuleRequest;
+    if (body.actions) {
+      const forwardError = await validateForwardTargets(accountId, body.actions, store);
+      if (forwardError) return c.json({ error: forwardError }, 400);
+    }
     await store.updateRule(accountId, rule.id, body);
     return c.json({ ok: true });
   });
 
-  app.delete("/rules/:id", async (c) => {
+  app.delete("/accounts/:accountId/rules/:id", async (c) => {
     const { accountId } = c.get("auth");
     const rules = await store.listRules(accountId);
     const rule = rules.find((r) => r.id === c.req.param("id"));
@@ -430,15 +463,15 @@ export function createApp({ store, auth, access }: AppDeps) {
   });
 
   // -------------------------------------------------------------------------
-  // Domains
+  // Domains  —  /accounts/:accountId/domains
   // -------------------------------------------------------------------------
 
-  app.get("/domains", async (c) => {
+  app.get("/accounts/:accountId/domains", async (c) => {
     const { accountId } = c.get("auth");
     return c.json(await store.listDomains(accountId));
   });
 
-  app.post("/domains", async (c) => {
+  app.post("/accounts/:accountId/domains", async (c) => {
     const { accountId } = c.get("auth");
     const body = await c.req.json() as { domain?: string };
     if (!body.domain) return c.json({ error: "domain is required" }, 400);
@@ -446,7 +479,7 @@ export function createApp({ store, auth, access }: AppDeps) {
     return c.json(result ?? { ok: true }, 201);
   });
 
-  app.get("/domains/:id/dkim", async (c) => {
+  app.get("/accounts/:accountId/domains/:id/dkim", async (c) => {
     const { accountId } = c.get("auth");
     const domain = await store.getDomain(accountId, c.req.param("id"));
     if (!domain) return c.json({ error: "Not found" }, 404);
@@ -454,7 +487,7 @@ export function createApp({ store, auth, access }: AppDeps) {
     return c.json(buildDkimRecords(domain.domain));
   });
 
-  app.delete("/domains/:id", async (c) => {
+  app.delete("/accounts/:accountId/domains/:id", async (c) => {
     const { accountId } = c.get("auth");
     const domain = await store.getDomain(accountId, c.req.param("id"));
     if (!domain) return c.json({ error: "Not found" }, 404);
@@ -464,30 +497,34 @@ export function createApp({ store, auth, access }: AppDeps) {
   });
 
   // -------------------------------------------------------------------------
-  // Account
+  // Account  —  /accounts/:accountId
   // -------------------------------------------------------------------------
 
-  app.get("/account", async (c) => {
+  app.get("/accounts/:accountId", async (c) => {
     const { accountId } = c.get("auth");
     const account = await store.getAccount(accountId);
     if (!account) return c.json({ error: "Not found" }, 404);
     return c.json(account);
   });
 
-  app.patch("/account", async (c) => {
+  app.patch("/accounts/:accountId", async (c) => {
     const { accountId } = c.get("auth");
     const body = await c.req.json() as Partial<Pick<Account, "name" | "deletionRetentionDays" | "notifications" | "filtering">>;
     await store.updateAccount(accountId, body);
     return c.json({ ok: true });
   });
 
-  app.get("/account/users", async (c) => {
+  // -------------------------------------------------------------------------
+  // Account users  —  /accounts/:accountId/users
+  // -------------------------------------------------------------------------
+
+  app.get("/accounts/:accountId/users", async (c) => {
     if (!access) return c.json({ error: "Not implemented" }, 501);
     const { accountId } = c.get("auth");
     return c.json(await access.listUsers(accountId));
   });
 
-  app.post("/account/users", async (c) => {
+  app.post("/accounts/:accountId/users", async (c) => {
     if (!access) return c.json({ error: "Not implemented" }, 501);
     const { accountId } = c.get("auth");
     const body = await c.req.json() as { userId?: string; role?: string };
@@ -497,7 +534,7 @@ export function createApp({ store, auth, access }: AppDeps) {
     return c.json({ ok: true }, 201);
   });
 
-  app.patch("/account/users/:userId", async (c) => {
+  app.patch("/accounts/:accountId/users/:userId", async (c) => {
     if (!access) return c.json({ error: "Not implemented" }, 501);
     const { accountId } = c.get("auth");
     const body = await c.req.json() as { role?: string };
@@ -506,7 +543,7 @@ export function createApp({ store, auth, access }: AppDeps) {
     return c.json({ ok: true });
   });
 
-  app.delete("/account/users/:userId", async (c) => {
+  app.delete("/accounts/:accountId/users/:userId", async (c) => {
     if (!access) return c.json({ error: "Not implemented" }, 501);
     const { accountId } = c.get("auth");
     await access.removeUser(accountId, c.req.param("userId"));
@@ -514,16 +551,15 @@ export function createApp({ store, auth, access }: AppDeps) {
   });
 
   // -------------------------------------------------------------------------
-  // Email address configs
+  // Email address configs  —  /accounts/:accountId/email-configs
   // -------------------------------------------------------------------------
 
-  app.get("/email-configs", async (c) => {
+  app.get("/accounts/:accountId/email-configs", async (c) => {
     const { accountId } = c.get("auth");
-    const configs = await store.listEmailConfigs(accountId);
-    return c.json(configs);
+    return c.json(await store.listEmailConfigs(accountId));
   });
 
-  app.get("/email-configs/:address", async (c) => {
+  app.get("/accounts/:accountId/email-configs/:address", async (c) => {
     const { accountId } = c.get("auth");
     const address = decodeURIComponent(c.req.param("address"));
     const config = await store.getEmailConfig(accountId, address);
@@ -531,10 +567,14 @@ export function createApp({ store, auth, access }: AppDeps) {
     return c.json(config);
   });
 
-  app.put("/email-configs/:address", async (c) => {
+  app.put("/accounts/:accountId/email-configs/:address", async (c) => {
     const { accountId } = c.get("auth");
     const address = decodeURIComponent(c.req.param("address"));
-    const body = await c.req.json() as { filterMode: SenderFilterMode; approvedSenders: string[] };
+    const body = await c.req.json() as {
+      filterMode: SenderFilterMode;
+      approvedSenders: string[];
+      onboardingEmailHandling?: EmailAddressConfig["onboardingEmailHandling"];
+    };
     const existing = await store.getEmailConfig(accountId, address);
     const now = new Date().toISOString();
     await store.upsertEmailConfig({
@@ -543,13 +583,14 @@ export function createApp({ store, auth, access }: AppDeps) {
       address,
       filterMode: body.filterMode,
       approvedSenders: body.approvedSenders,
+      ...(body.onboardingEmailHandling !== undefined ? { onboardingEmailHandling: body.onboardingEmailHandling } : {}),
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
     });
     return c.json({ ok: true });
   });
 
-  app.delete("/email-configs/:address", async (c) => {
+  app.delete("/accounts/:accountId/email-configs/:address", async (c) => {
     const { accountId } = c.get("auth");
     const address = decodeURIComponent(c.req.param("address"));
     await store.deleteEmailConfig(accountId, address);
@@ -557,10 +598,71 @@ export function createApp({ store, auth, access }: AppDeps) {
   });
 
   // -------------------------------------------------------------------------
-  // Search
+  // Verified forwarding addresses  —  /accounts/:accountId/forwarding-addresses
   // -------------------------------------------------------------------------
 
-  app.get("/search", async (c) => {
+  app.get("/accounts/:accountId/forwarding-addresses", async (c) => {
+    const { accountId } = c.get("auth");
+    return c.json(await store.listVerifiedForwardingAddresses(accountId));
+  });
+
+  app.post("/accounts/:accountId/forwarding-addresses", async (c) => {
+    const { accountId } = c.get("auth");
+    const body = await c.req.json() as { address?: string };
+    if (!body.address) return c.json({ error: "address is required" }, 400);
+
+    const existing = await store.getVerifiedForwardingAddress(accountId, body.address);
+    if (existing?.status === "verified") return c.json(existing, 200);
+
+    const now = new Date().toISOString();
+    const addr: VerifiedForwardingAddress = {
+      id: existing?.id ?? randomUUID(),
+      accountId,
+      address: body.address,
+      status: "pending",
+      token: randomUUID(),
+      createdAt: existing?.createdAt ?? now,
+      ...(existing?.verifiedAt !== undefined ? { verifiedAt: existing.verifiedAt } : {}),
+    };
+    await store.saveVerifiedForwardingAddress(addr);
+
+    if (verificationMailer) {
+      await verificationMailer.sendForwardVerification(accountId, addr.address, addr.token).catch((err) => {
+        console.error("Failed to send verification email:", err);
+      });
+    }
+
+    return c.json(addr, 201);
+  });
+
+  app.post("/accounts/:accountId/forwarding-addresses/:address/verify", async (c) => {
+    const { accountId } = c.get("auth");
+    const address = decodeURIComponent(c.req.param("address"));
+    const body = await c.req.json() as { token?: string };
+    if (!body.token) return c.json({ error: "token is required" }, 400);
+
+    const existing = await store.getVerifiedForwardingAddress(accountId, address);
+    if (!existing) return c.json({ error: "Not found" }, 404);
+    if (existing.status === "verified") return c.json(existing);
+    if (existing.token !== body.token) return c.json({ error: "Invalid token" }, 400);
+
+    const verified: VerifiedForwardingAddress = { ...existing, status: "verified", verifiedAt: new Date().toISOString() };
+    await store.saveVerifiedForwardingAddress(verified);
+    return c.json(verified);
+  });
+
+  app.delete("/accounts/:accountId/forwarding-addresses/:address", async (c) => {
+    const { accountId } = c.get("auth");
+    const address = decodeURIComponent(c.req.param("address"));
+    await store.deleteVerifiedForwardingAddress(accountId, address);
+    return new Response(null, { status: 204 });
+  });
+
+  // -------------------------------------------------------------------------
+  // Search  —  /accounts/:accountId/search
+  // -------------------------------------------------------------------------
+
+  app.get("/accounts/:accountId/search", async (c) => {
     const { accountId } = c.get("auth");
     const q = c.req.query("q");
     if (!q) return c.json({ error: "q is required" }, 400);
@@ -582,6 +684,21 @@ export function createApp({ store, auth, access }: AppDeps) {
 import { WORKFLOWS } from "../types/index.js";
 const VALID_WORKFLOWS = new Set<string>(WORKFLOWS);
 const VALID_ROLES = new Set<AccountRole>(["owner", "admin", "member", "viewer"]);
+
+// Validate that all forward targets in a rule's actions are verified for this account.
+// Returns an error string if invalid, null if OK.
+async function validateForwardTargets(
+  accountId: string,
+  actions: Rule["actions"],
+  store: Pick<ApiDatabase, "listVerifiedForwardingAddresses">,
+): Promise<string | null> {
+  const forwardTargets = actions.filter((a) => a.type === "forward" && a.value).map((a) => a.value!);
+  if (forwardTargets.length === 0) return null;
+  const verified = await store.listVerifiedForwardingAddresses(accountId);
+  const verifiedSet = new Set(verified.filter((v) => v.status === "verified").map((v) => v.address));
+  const unverified = forwardTargets.filter((t) => !verifiedSet.has(t));
+  return unverified.length > 0 ? `Forward targets not verified: ${unverified.join(", ")}` : null;
+}
 
 const DKIM_SELECTOR = "email-signals";
 

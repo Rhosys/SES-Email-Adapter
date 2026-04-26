@@ -1,16 +1,18 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { SQSEvent } from "aws-lambda";
-import { SignalProcessor, deriveGroupingKey, derivePushPriority } from "./processor.js";
-import type { ProcessorDatabase, ArcMatcher, RuleEvaluator, Notifier } from "./processor.js";
+import { SignalProcessor, deriveGroupingKey, derivePushPriority, dispositionFor } from "./processor.js";
+import type { ProcessorDatabase, ArcMatcher, RuleEvaluator, Notifier, Forwarder, ForwardOptions } from "./processor.js";
 import type { MimeParser } from "./mime.js";
 import type { SignalClassifier, ClassificationOutput } from "../classifier/classifier.js";
-import type { Arc, Rule, Signal, EmailAddressConfig } from "../types/index.js";
+import type { Arc, Rule, Signal, EmailAddressConfig, AccountFilteringConfig } from "../types/index.js";
 
 // ---------------------------------------------------------------------------
 // Test doubles
 // ---------------------------------------------------------------------------
 
 const TEST_ACCOUNT_ID = "acct-001";
+
+const DEFAULT_CTX = { retentionDays: 0, filtering: null, emailConfig: null };
 
 function makeStore(): ProcessorDatabase {
   return {
@@ -20,10 +22,8 @@ function makeStore(): ProcessorDatabase {
     findArcByGroupingKey: vi.fn().mockResolvedValue(null),
     saveArc: vi.fn().mockResolvedValue(undefined),
     listRules: vi.fn().mockResolvedValue([]),
-    getEmailAddressConfig: vi.fn().mockResolvedValue(null),
+    getProcessorAccountContext: vi.fn().mockResolvedValue(DEFAULT_CTX),
     saveEmailAddressConfig: vi.fn().mockResolvedValue(undefined),
-    getAccountFilteringConfig: vi.fn().mockResolvedValue(null),
-    getAccountRetentionDays: vi.fn().mockResolvedValue(0),
     updateGlobalReputation: vi.fn().mockResolvedValue(undefined),
   };
 }
@@ -86,36 +86,49 @@ function makeNotifier(): Notifier {
 
 function makeSqsEvent(messages: Array<{
   accountId?: string;
-  s3Bucket?: string;
   s3Key?: string;
   sesMessageId?: string;
   timestamp?: string;
   destination?: string[];
+  dkimVerdict?: "PASS" | "FAIL" | "GRAY" | "PROCESSING_FAILED";
+  dmarcVerdict?: "PASS" | "FAIL" | "GRAY" | "PROCESSING_FAILED";
 }>): SQSEvent {
   return {
-    Records: messages.map((msg, i) => ({
-      messageId: `sqs-${i}`,
-      receiptHandle: "handle",
-      body: JSON.stringify({
+    Records: messages.map((msg, i) => {
+      const sesMessageId = msg.sesMessageId ?? "msg-123";
+      const notification = {
         accountId: msg.accountId ?? TEST_ACCOUNT_ID,
-        s3Bucket: msg.s3Bucket ?? "test-bucket",
-        s3Key: msg.s3Key ?? `emails/${msg.sesMessageId ?? "msg-123"}`,
-        sesMessageId: msg.sesMessageId ?? "msg-123",
-        timestamp: msg.timestamp ?? "2024-01-15T10:00:00Z",
-        destination: msg.destination ?? ["user@example.com"],
-      }),
-      attributes: {
-        ApproximateReceiveCount: "1",
-        SentTimestamp: "1234567890",
-        SenderId: "sender",
-        ApproximateFirstReceiveTimestamp: "1234567890",
-      },
-      messageAttributes: {},
-      md5OfBody: "",
-      eventSource: "aws:sqs",
-      eventSourceARN: "arn:aws:sqs:us-east-1:123:queue",
-      awsRegion: "us-east-1",
-    })),
+        mail: {
+          messageId: sesMessageId,
+          timestamp: msg.timestamp ?? "2024-01-15T10:00:00Z",
+          destination: msg.destination ?? ["user@example.com"],
+        },
+        receipt: {
+          dkimVerdict: { status: msg.dkimVerdict ?? "PASS" },
+          dmarcVerdict: { status: msg.dmarcVerdict ?? "PASS" },
+          action: {
+            bucketName: "test-bucket",
+            objectKey: msg.s3Key ?? `emails/${sesMessageId}`,
+          },
+        },
+      };
+      return {
+        messageId: `sqs-${i}`,
+        receiptHandle: "handle",
+        body: JSON.stringify({ Message: JSON.stringify(notification) }),
+        attributes: {
+          ApproximateReceiveCount: "1",
+          SentTimestamp: "1234567890",
+          SenderId: "sender",
+          ApproximateFirstReceiveTimestamp: "1234567890",
+        },
+        messageAttributes: {},
+        md5OfBody: "",
+        eventSource: "aws:sqs",
+        eventSourceARN: "arn:aws:sqs:us-east-1:123:queue",
+        awsRegion: "us-east-1",
+      };
+    }),
   };
 }
 
@@ -353,6 +366,171 @@ describe("SignalProcessor", () => {
       const arc = vi.mocked(store.saveArc).mock.calls[0]![0] as Arc;
       expect(arc.status).toBe("active");
     });
+
+    it("skips disabled actions", async () => {
+      const rule: Rule = {
+        id: "rule-disabled",
+        accountId: TEST_ACCOUNT_ID,
+        name: "Disabled label rule",
+        condition: "true",
+        actions: [{ type: "assign_label", value: "important", disabled: true }],
+        position: 0,
+        createdAt: "2024-01-01T00:00:00Z",
+        updatedAt: "2024-01-01T00:00:00Z",
+      };
+      vi.mocked(store.listRules).mockResolvedValueOnce([rule]);
+      vi.mocked(ruleEvaluator.evaluate).mockReturnValueOnce(true);
+
+      await processor.process(makeSqsEvent([{}]));
+
+      const arc = vi.mocked(store.saveArc).mock.calls[0]![0] as Arc;
+      expect(arc.labels).not.toContain("important");
+    });
+
+    it("collects forward addresses from matching rules but does not call forwarder when none configured", async () => {
+      const rule: Rule = {
+        id: "rule-fwd",
+        accountId: TEST_ACCOUNT_ID,
+        name: "Forward personal",
+        condition: '{"==": [{"var": "arc.workflow"}, "personal"]}',
+        actions: [{ type: "forward", value: "backup@personal.com" }],
+        position: 0,
+        createdAt: "2024-01-01T00:00:00Z",
+        updatedAt: "2024-01-01T00:00:00Z",
+      };
+      vi.mocked(store.listRules).mockResolvedValueOnce([rule]);
+      vi.mocked(ruleEvaluator.evaluate).mockReturnValueOnce(true);
+
+      // No error — processor without forwarder silently skips forward actions
+      await processor.process(makeSqsEvent([{}]));
+
+      expect(store.saveSignal).toHaveBeenCalledOnce();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Forwarding
+  // -------------------------------------------------------------------------
+
+  describe("forwarding", () => {
+    let forwarder: Forwarder;
+
+    beforeEach(() => {
+      forwarder = { forward: vi.fn().mockResolvedValue(undefined) };
+      processor = new SignalProcessor({ store, mimeParser, classifier, arcMatcher, ruleEvaluator, forwarder });
+    });
+
+    it("calls forwarder with s3Key and target address when forward rule matches", async () => {
+      const rule: Rule = {
+        id: "rule-fwd",
+        accountId: TEST_ACCOUNT_ID,
+        name: "Forward to backup",
+        condition: '{"==": [{"var": "arc.workflow"}, "personal"]}',
+        actions: [{ type: "forward", value: "backup@personal.com" }],
+        position: 0,
+        createdAt: "2024-01-01T00:00:00Z",
+        updatedAt: "2024-01-01T00:00:00Z",
+      };
+      vi.mocked(store.listRules).mockResolvedValueOnce([rule]);
+      vi.mocked(ruleEvaluator.evaluate).mockReturnValueOnce(true);
+
+      await processor.process(makeSqsEvent([{ s3Key: "emails/msg-123" }]));
+
+      expect(forwarder.forward).toHaveBeenCalledOnce();
+      expect(forwarder.forward).toHaveBeenCalledWith("emails/msg-123", "backup@personal.com", TEST_ACCOUNT_ID, {
+        senderDomain: "example.com",
+        dkimPass: true,
+        dmarcPass: true,
+      });
+    });
+
+    it("forwards to multiple addresses when multiple forward actions match", async () => {
+      const rule: Rule = {
+        id: "rule-multi",
+        accountId: TEST_ACCOUNT_ID,
+        name: "Forward to two addresses",
+        condition: "true",
+        actions: [
+          { type: "forward", value: "first@example.com" },
+          { type: "forward", value: "second@example.com" },
+        ],
+        position: 0,
+        createdAt: "2024-01-01T00:00:00Z",
+        updatedAt: "2024-01-01T00:00:00Z",
+      };
+      vi.mocked(store.listRules).mockResolvedValueOnce([rule]);
+      vi.mocked(ruleEvaluator.evaluate).mockReturnValueOnce(true);
+
+      await processor.process(makeSqsEvent([{}]));
+
+      const expectedOpts: ForwardOptions = { senderDomain: "example.com", dkimPass: true, dmarcPass: true };
+      expect(forwarder.forward).toHaveBeenCalledTimes(2);
+      expect(forwarder.forward).toHaveBeenCalledWith(expect.any(String), "first@example.com", TEST_ACCOUNT_ID, expectedOpts);
+      expect(forwarder.forward).toHaveBeenCalledWith(expect.any(String), "second@example.com", TEST_ACCOUNT_ID, expectedOpts);
+    });
+
+    it("does not forward when rule does not match", async () => {
+      const rule: Rule = {
+        id: "rule-no-match",
+        accountId: TEST_ACCOUNT_ID,
+        name: "Forward invoices",
+        condition: '{"==": [{"var": "arc.workflow"}, "invoice"]}',
+        actions: [{ type: "forward", value: "accountant@firm.com" }],
+        position: 0,
+        createdAt: "2024-01-01T00:00:00Z",
+        updatedAt: "2024-01-01T00:00:00Z",
+      };
+      vi.mocked(store.listRules).mockResolvedValueOnce([rule]);
+      vi.mocked(ruleEvaluator.evaluate).mockReturnValueOnce(false);
+
+      await processor.process(makeSqsEvent([{}]));
+
+      expect(forwarder.forward).not.toHaveBeenCalled();
+    });
+
+    it("forwards after arc and signal are saved", async () => {
+      const callOrder: string[] = [];
+      vi.mocked(store.saveSignal).mockImplementation(async () => { callOrder.push("saveSignal"); });
+      vi.mocked(forwarder.forward).mockImplementation(async () => { callOrder.push("forward"); });
+
+      const rule: Rule = {
+        id: "rule-fwd",
+        accountId: TEST_ACCOUNT_ID,
+        name: "Forward all",
+        condition: "true",
+        actions: [{ type: "forward", value: "copy@example.com" }],
+        position: 0,
+        createdAt: "2024-01-01T00:00:00Z",
+        updatedAt: "2024-01-01T00:00:00Z",
+      };
+      vi.mocked(store.listRules).mockResolvedValueOnce([rule]);
+      vi.mocked(ruleEvaluator.evaluate).mockReturnValueOnce(true);
+
+      await processor.process(makeSqsEvent([{}]));
+
+      expect(callOrder.indexOf("saveSignal")).toBeLessThan(callOrder.indexOf("forward"));
+    });
+
+    it("continues processing when forwarder throws", async () => {
+      vi.mocked(forwarder.forward).mockRejectedValueOnce(new Error("SES throttle"));
+      const rule: Rule = {
+        id: "rule-fwd",
+        accountId: TEST_ACCOUNT_ID,
+        name: "Forward all",
+        condition: "true",
+        actions: [{ type: "forward", value: "copy@example.com" }],
+        position: 0,
+        createdAt: "2024-01-01T00:00:00Z",
+        updatedAt: "2024-01-01T00:00:00Z",
+      };
+      vi.mocked(store.listRules).mockResolvedValueOnce([rule]);
+      vi.mocked(ruleEvaluator.evaluate).mockReturnValueOnce(true);
+
+      await processor.process(makeSqsEvent([{}]));
+
+      // Signal was still saved despite forward failure
+      expect(store.saveSignal).toHaveBeenCalledOnce();
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -507,8 +685,8 @@ describe("SignalProcessor", () => {
     });
 
     it("allows signal from a known sender (eTLD+1 in approved list)", async () => {
-      vi.mocked(store.getEmailAddressConfig).mockResolvedValueOnce(
-        makeEmailAddressConfig({ approvedSenders: ["example.com"] }),
+      vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce(
+        { ...DEFAULT_CTX, emailConfig: makeEmailAddressConfig({ approvedSenders: ["example.com"] }) },
       );
 
       await processor.process(makeSqsEvent([{}]));
@@ -518,9 +696,9 @@ describe("SignalProcessor", () => {
       expect(store.saveEmailAddressConfig).not.toHaveBeenCalled(); // no auto-approve needed
     });
 
-    it("blocks signal from unknown sender", async () => {
-      vi.mocked(store.getEmailAddressConfig).mockResolvedValueOnce(
-        makeEmailAddressConfig({ approvedSenders: ["trusted.com"] }), // sender is example.com, not trusted.com
+    it("quarantines signal from unknown sender by default (notify user for review)", async () => {
+      vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce(
+        { ...DEFAULT_CTX, emailConfig: makeEmailAddressConfig({ approvedSenders: ["trusted.com"] }) }, // sender is example.com, not trusted.com
       );
 
       await processor.process(makeSqsEvent([{}]));
@@ -528,14 +706,28 @@ describe("SignalProcessor", () => {
       expect(store.saveArc).not.toHaveBeenCalled();
       expect(store.saveSignal).toHaveBeenCalledOnce();
       const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
-      expect(saved.status).toBe("blocked");
+      expect(saved.status).toBe("quarantined");
       expect(saved.blockReason).toBe("new_sender");
       expect(saved.arcId).toBeUndefined();
     });
 
-    it("calls notifyBlocked when a signal is blocked", async () => {
-      vi.mocked(store.getEmailAddressConfig).mockResolvedValueOnce(
-        makeEmailAddressConfig({ approvedSenders: ["other.com"] }),
+    it("silently blocks signal when blockDisposition.new_sender is 'block'", async () => {
+      vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce({
+        retentionDays: 0,
+        emailConfig: makeEmailAddressConfig({ approvedSenders: ["trusted.com"] }),
+        filtering: { defaultFilterMode: "notify_new", newAddressHandling: "auto_allow", blockDisposition: { new_sender: "block" } },
+      });
+
+      await processor.process(makeSqsEvent([{}]));
+
+      const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
+      expect(saved.status).toBe("blocked");
+      expect(notifier.notifyBlocked).not.toHaveBeenCalled();
+    });
+
+    it("calls notifyBlocked when a signal is quarantined", async () => {
+      vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce(
+        { ...DEFAULT_CTX, emailConfig: makeEmailAddressConfig({ approvedSenders: ["other.com"] }) },
       );
 
       await processor.process(makeSqsEvent([{}]));
@@ -544,9 +736,23 @@ describe("SignalProcessor", () => {
       expect(notifier.notify).not.toHaveBeenCalled();
     });
 
+    it("does NOT call notifyBlocked when a signal is silently blocked", async () => {
+      vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce({
+        retentionDays: 0,
+        emailConfig: makeEmailAddressConfig({ approvedSenders: ["other.com"] }),
+        filtering: { defaultFilterMode: "notify_new", newAddressHandling: "auto_allow", blockDisposition: { new_sender: "block" } },
+      });
+
+      await processor.process(makeSqsEvent([{}]));
+
+      expect(notifier.notifyBlocked).not.toHaveBeenCalled();
+      const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
+      expect(saved.status).toBe("blocked");
+    });
+
     it("does not fail when notifyBlocked throws", async () => {
-      vi.mocked(store.getEmailAddressConfig).mockResolvedValueOnce(
-        makeEmailAddressConfig({ approvedSenders: [] }),
+      vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce(
+        { ...DEFAULT_CTX, emailConfig: makeEmailAddressConfig({ approvedSenders: [] }) },
       );
       vi.mocked(notifier.notifyBlocked).mockRejectedValueOnce(new Error("SES error"));
 
@@ -568,24 +774,19 @@ describe("SignalProcessor", () => {
         updatedAt: "2024-01-14T10:00:00Z",
       };
       vi.mocked(arcMatcher.findMatch).mockResolvedValueOnce(existingArc);
-      // Config with no approved senders — would block if filtering ran
-      vi.mocked(store.getEmailAddressConfig).mockResolvedValueOnce(
-        makeEmailAddressConfig({ approvedSenders: [] }),
-      );
 
       await processor.process(makeSqsEvent([{}]));
 
-      // Filtering store was NOT consulted — arc match bypasses it
-      expect(store.getEmailAddressConfig).not.toHaveBeenCalled();
+      // Filtering logic was bypassed — signal is active despite restrictive default config
       expect(store.saveArc).toHaveBeenCalledOnce();
       expect(store.saveSignal).toHaveBeenCalledOnce();
       const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
       expect(saved.status).toBe("active");
     });
 
-    it("strict mode blocks a known sender with high spam score", async () => {
-      vi.mocked(store.getEmailAddressConfig).mockResolvedValueOnce(
-        makeEmailAddressConfig({ filterMode: "strict", approvedSenders: ["example.com"] }),
+    it("strict mode quarantines a known sender with high spam score (default disposition)", async () => {
+      vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce(
+        { ...DEFAULT_CTX, emailConfig: makeEmailAddressConfig({ filterMode: "strict", approvedSenders: ["example.com"] }) },
       );
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
         ...validClassification,
@@ -596,13 +797,13 @@ describe("SignalProcessor", () => {
 
       expect(store.saveArc).not.toHaveBeenCalled();
       const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
-      expect(saved.status).toBe("blocked");
+      expect(saved.status).toBe("quarantined");
       expect(saved.blockReason).toBe("spam");
     });
 
     it("allow_all mode auto-approves new sender without blocking", async () => {
-      vi.mocked(store.getEmailAddressConfig).mockResolvedValueOnce(
-        makeEmailAddressConfig({ filterMode: "allow_all", approvedSenders: [] }),
+      vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce(
+        { ...DEFAULT_CTX, emailConfig: makeEmailAddressConfig({ filterMode: "allow_all", approvedSenders: [] }) },
       );
 
       await processor.process(makeSqsEvent([{}]));
@@ -613,8 +814,8 @@ describe("SignalProcessor", () => {
     });
 
     it("saves blocked signal with classification data for user review", async () => {
-      vi.mocked(store.getEmailAddressConfig).mockResolvedValueOnce(
-        makeEmailAddressConfig({ approvedSenders: [] }),
+      vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce(
+        { ...DEFAULT_CTX, emailConfig: makeEmailAddressConfig({ approvedSenders: [] }) },
       );
 
       await processor.process(makeSqsEvent([{}]));
@@ -625,17 +826,18 @@ describe("SignalProcessor", () => {
       expect(saved.spamScore).toBe(validClassification.spamScore);
     });
 
-    it("blocks new address when newAddressHandling is block_until_approved", async () => {
-      vi.mocked(store.getAccountFilteringConfig).mockResolvedValueOnce({
-        newAddressHandling: "block_until_approved",
-        defaultFilterMode: "notify_new",
+    it("quarantines new address when newAddressHandling is block_until_approved (default disposition)", async () => {
+      vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce({
+        retentionDays: 0,
+        filtering: { newAddressHandling: "block_until_approved", defaultFilterMode: "notify_new" },
+        emailConfig: null,
       });
 
       await processor.process(makeSqsEvent([{}]));
 
       expect(store.saveArc).not.toHaveBeenCalled();
       const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
-      expect(saved.status).toBe("blocked");
+      expect(saved.status).toBe("quarantined");
       expect(saved.blockReason).toBe("new_sender");
     });
   });
@@ -646,8 +848,8 @@ describe("SignalProcessor", () => {
 
   describe("global reputation tracking", () => {
     it("updates reputation with wasBlocked=true for blocked signals", async () => {
-      vi.mocked(store.getEmailAddressConfig).mockResolvedValueOnce(
-        makeEmailAddressConfig({ approvedSenders: [] }),
+      vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce(
+        { ...DEFAULT_CTX, emailConfig: makeEmailAddressConfig({ approvedSenders: [] }) },
       );
 
       await processor.process(makeSqsEvent([{}]));
@@ -812,6 +1014,149 @@ describe("SignalProcessor", () => {
 
     it("newsletter is always silent", () => {
       expect(derivePushPriority("newsletter", { workflow: "newsletter", publication: "TLDR", topics: [] })).toBe("silent");
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // dispositionFor unit tests
+  // -------------------------------------------------------------------------
+
+  describe("dispositionFor", () => {
+    it("defaults to quarantine when no config provided", () => {
+      expect(dispositionFor("new_sender", null)).toBe("quarantine");
+      expect(dispositionFor("spam", undefined)).toBe("quarantine");
+      expect(dispositionFor("onboarding", null)).toBe("quarantine");
+    });
+
+    it("returns quarantine when blockDisposition is absent from config", () => {
+      const config: AccountFilteringConfig = { defaultFilterMode: "notify_new", newAddressHandling: "auto_allow" };
+      expect(dispositionFor("new_sender", config)).toBe("quarantine");
+    });
+
+    it("returns block when explicitly configured for a reason", () => {
+      const config: AccountFilteringConfig = {
+        defaultFilterMode: "notify_new",
+        newAddressHandling: "auto_allow",
+        blockDisposition: { new_sender: "block", spam: "block" },
+      };
+      expect(dispositionFor("new_sender", config)).toBe("block");
+      expect(dispositionFor("spam", config)).toBe("block");
+    });
+
+    it("falls back to quarantine for reasons not in blockDisposition", () => {
+      const config: AccountFilteringConfig = {
+        defaultFilterMode: "notify_new",
+        newAddressHandling: "auto_allow",
+        blockDisposition: { spam: "block" },
+      };
+      expect(dispositionFor("new_sender", config)).toBe("quarantine");
+      expect(dispositionFor("onboarding", config)).toBe("quarantine");
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Onboarding filtering
+  // -------------------------------------------------------------------------
+
+  describe("onboarding filtering", () => {
+    const onboardingClassification: ClassificationOutput = {
+      workflow: "onboarding",
+      workflowData: { workflow: "onboarding", service: "Acme App", onboardingType: "welcome" },
+      spamScore: 0.02,
+      summary: "Welcome to Acme App.",
+      labels: [],
+      classificationModelId: "us.anthropic.claude-opus-4-5-20251101-v1:0",
+    };
+
+    it("allows onboarding emails when no onboarding blocking is configured", async () => {
+      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(onboardingClassification);
+
+      await processor.process(makeSqsEvent([{}]));
+
+      expect(store.saveArc).toHaveBeenCalledOnce();
+      const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
+      expect(saved.status).toBe("active");
+    });
+
+    it("quarantines onboarding emails when global blockOnboardingEmails is true (default disposition)", async () => {
+      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(onboardingClassification);
+      vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce({
+        retentionDays: 0,
+        filtering: { defaultFilterMode: "notify_new", newAddressHandling: "auto_allow", blockOnboardingEmails: true },
+        emailConfig: null,
+      });
+
+      const notifier = makeNotifier();
+      const proc = new SignalProcessor({ store, mimeParser, classifier, arcMatcher, ruleEvaluator, notifier });
+      await proc.process(makeSqsEvent([{}]));
+
+      expect(store.saveArc).not.toHaveBeenCalled();
+      const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
+      expect(saved.status).toBe("quarantined");
+      expect(saved.blockReason).toBe("onboarding");
+      expect(notifier.notifyBlocked).toHaveBeenCalledOnce();
+    });
+
+    it("silently blocks onboarding emails when global blockDisposition.onboarding is 'block'", async () => {
+      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(onboardingClassification);
+      vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce({
+        retentionDays: 0,
+        filtering: { defaultFilterMode: "notify_new", newAddressHandling: "auto_allow", blockOnboardingEmails: true, blockDisposition: { onboarding: "block" } },
+        emailConfig: null,
+      });
+
+      const notifier = makeNotifier();
+      const proc = new SignalProcessor({ store, mimeParser, classifier, arcMatcher, ruleEvaluator, notifier });
+      await proc.process(makeSqsEvent([{}]));
+
+      const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
+      expect(saved.status).toBe("blocked");
+      expect(notifier.notifyBlocked).not.toHaveBeenCalled();
+    });
+
+    it("quarantines onboarding when per-address onboardingEmailHandling is 'quarantine'", async () => {
+      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(onboardingClassification);
+      vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce(
+        { ...DEFAULT_CTX, emailConfig: makeEmailAddressConfig({ onboardingEmailHandling: "quarantine" }) },
+      );
+
+      const notifier = makeNotifier();
+      const proc = new SignalProcessor({ store, mimeParser, classifier, arcMatcher, ruleEvaluator, notifier });
+      await proc.process(makeSqsEvent([{}]));
+
+      const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
+      expect(saved.status).toBe("quarantined");
+      expect(saved.blockReason).toBe("onboarding");
+      expect(notifier.notifyBlocked).toHaveBeenCalledOnce();
+    });
+
+    it("silently blocks onboarding when per-address onboardingEmailHandling is 'block'", async () => {
+      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(onboardingClassification);
+      vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce(
+        { ...DEFAULT_CTX, emailConfig: makeEmailAddressConfig({ onboardingEmailHandling: "block" }) },
+      );
+
+      const notifier = makeNotifier();
+      const proc = new SignalProcessor({ store, mimeParser, classifier, arcMatcher, ruleEvaluator, notifier });
+      await proc.process(makeSqsEvent([{}]));
+
+      const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
+      expect(saved.status).toBe("blocked");
+      expect(notifier.notifyBlocked).not.toHaveBeenCalled();
+    });
+
+    it("allows onboarding when per-address onboardingEmailHandling is 'allow', even if global blocks", async () => {
+      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(onboardingClassification);
+      vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce({
+        retentionDays: 0,
+        emailConfig: makeEmailAddressConfig({ onboardingEmailHandling: "allow" }),
+        filtering: { defaultFilterMode: "notify_new", newAddressHandling: "auto_allow", blockOnboardingEmails: true },
+      });
+
+      await processor.process(makeSqsEvent([{}]));
+
+      const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
+      expect(saved.status).toBe("active");
     });
   });
 });
