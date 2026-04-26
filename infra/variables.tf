@@ -8,14 +8,13 @@ variable "env" {
   type        = string
 }
 
-variable "aws_region" {
-  description = "Primary AWS region"
-  type        = string
-  default     = "us-east-1"
-}
-
 variable "api_domain" {
   description = "Custom domain for the API (e.g. api.yourdomain.com)"
+  type        = string
+}
+
+variable "hosted_zone_id" {
+  description = "Route53 hosted zone ID for api_domain — used for ACM DNS validation and CloudFront alias record"
   type        = string
 }
 
