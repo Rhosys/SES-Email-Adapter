@@ -615,20 +615,7 @@ describe("SignalProcessor", () => {
       expect(signal.accountId).toBe(TEST_ACCOUNT_ID);
     });
 
-    it("does not call notifier for spam signals", async () => {
-      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-        ...validClassification,
-        workflow: "spam",
-        spamScore: 0.97,
-        workflowData: { workflow: "spam", spamType: "phishing", confidence: 0.97, indicators: [] },
-      });
-
-      await processor.process(makeSqsEvent([{}]));
-
-      expect(notifier.notify).not.toHaveBeenCalled();
-    });
-
-    it("does not call notifier when spamScore >= 0.9 even if workflow is not spam", async () => {
+    it("does not call notifier when spamScore >= 0.9", async () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
         ...validClassification,
         spamScore: 0.95,
@@ -870,12 +857,10 @@ describe("SignalProcessor", () => {
       );
     });
 
-    it("marks wasSpam=true when classification workflow is spam", async () => {
+    it("marks wasSpam=true when spamScore >= 0.9", async () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
         ...validClassification,
-        workflow: "spam",
         spamScore: 0.97,
-        workflowData: { workflow: "spam", spamType: "phishing", confidence: 0.97, indicators: [] },
       });
 
       await processor.process(makeSqsEvent([{}]));

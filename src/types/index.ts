@@ -22,8 +22,11 @@ export const WORKFLOWS = [
   "subscription", // SaaS plan changes, renewal reminders, trial expiry
   "healthcare",   // Appointments, test results, prescriptions, insurance
   "government",   // Tax, benefits, official notices, license renewal
-  "notice",        // Privacy policy, ToS updates, data processor changes — auto-archived
-  "spam",         // Phishing, scams, malware, unsolicited bulk email
+  "notice",       // Privacy policy, ToS updates, data processor changes — auto-archived
+  // NOTE: spam is NOT a workflow. It is expressed via Signal.spamScore (0–1).
+  // A phishing email pretending to be a bank login is workflow:"auth" + spamScore:0.95.
+  // The processor blocks high-spamScore signals; the workflow captures what kind of
+  // email it is (or is pretending to be), which is more actionable than just "spam".
 ] as const;
 
 export type Workflow = (typeof WORKFLOWS)[number];
@@ -48,8 +51,7 @@ export type WorkflowData =
   | SubscriptionData
   | HealthcareData
   | GovernmentData
-  | NoticeData
-  | SpamData;
+  | NoticeData;
 
 // ---------------------------------------------------------------------------
 // Workflow data shapes
@@ -265,13 +267,6 @@ export interface NoticeData {
   provider: string;
   effectiveDate?: string;
   documentUrl?: string;
-}
-
-export interface SpamData {
-  workflow: "spam";
-  spamType: "phishing" | "malware" | "unsolicited_marketing" | "scam" | "other";
-  confidence: number;
-  indicators: string[];
 }
 
 // ---------------------------------------------------------------------------

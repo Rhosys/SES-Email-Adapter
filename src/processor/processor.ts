@@ -364,7 +364,7 @@ export class SignalProcessor {
       }
     }
 
-    const isSpam = classification.workflow === "spam" || classification.spamScore >= 0.9;
+    const isSpam = classification.spamScore >= 0.9;
     if (this.notifier && !isSpam && !isNotice) {
       await this.notifier.notify(accountId, arc, signal).catch((err) => {
         console.error("Notification failed:", err);
