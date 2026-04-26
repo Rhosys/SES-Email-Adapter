@@ -260,6 +260,10 @@ export class SignalProcessor {
       }
     }
 
+    // 5b. Detect reply to a user-sent email — In-Reply-To matches a Message-ID we stored
+    const inReplyTo = parsed.headers["in-reply-to"];
+    const isReplyToSent = !!(inReplyTo && matchedArc?.sentMessageIds?.includes(inReplyTo.trim()));
+
     // 6. Build or update Arc
     const isNotice = classification.workflow === "notice";
     let arc: Arc;
@@ -308,6 +312,7 @@ export class SignalProcessor {
       s3Key,
       receivedAt: timestamp,
       now,
+      isReplyToSent,
       ...(ttl !== undefined ? { ttl } : {}),
     });
 
@@ -418,9 +423,11 @@ function buildSignal(opts: {
   s3Key: string;
   receivedAt: string;
   now: string;
+  isReplyToSent?: boolean;
   ttl?: number;
 }): Signal {
-  const { arcId, status, blockReason, accountId, sesMessageId, recipientAddress, parsed, classification, s3Key, receivedAt, now, ttl } = opts;
+  const { arcId, status, blockReason, accountId, sesMessageId, recipientAddress, parsed, classification, s3Key, receivedAt, now, isReplyToSent, ttl } = opts;
+  const basePriority = derivePushPriority(classification.workflow, classification.workflowData);
   const signal: Signal = {
     id: `SES#${sesMessageId}`,
     accountId,
@@ -438,7 +445,8 @@ function buildSignal(opts: {
     spamScore: classification.spamScore,
     summary: classification.summary,
     classificationModelId: classification.classificationModelId,
-    pushPriority: derivePushPriority(classification.workflow, classification.workflowData),
+    // Replies to user-sent emails are always interrupt-priority regardless of workflow
+    pushPriority: isReplyToSent ? "interrupt" : basePriority,
     s3Key,
     status,
     createdAt: now,
@@ -446,6 +454,7 @@ function buildSignal(opts: {
 
   if (arcId !== undefined) signal.arcId = arcId;
   if (blockReason !== undefined) signal.blockReason = blockReason;
+  if (isReplyToSent) signal.isReplyToSent = true;
   if (parsed.replyTo !== undefined) signal.replyTo = parsed.replyTo;
   if (parsed.textBody !== undefined) signal.textBody = parsed.textBody;
   if (parsed.htmlBody != null) signal.htmlBody = parsed.htmlBody;

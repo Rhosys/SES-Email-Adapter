@@ -32,39 +32,44 @@ resource "aws_ses_receipt_rule" "store_and_notify" {
 }
 
 # ---------------------------------------------------------------------------
-# Platform domain identity — Easy DKIM (AWS-managed keys)
-# Per-customer domains are registered dynamically via the API using BYODKIM.
+# Platform domain identity — BYODKIM (bring your own key)
+# Per-customer domains are registered dynamically via the API using the same key.
 # ---------------------------------------------------------------------------
 
 resource "aws_sesv2_email_identity" "main" {
   email_identity = local.mail_domain
 
   # BYODKIM: one selector + private key works identically in every region.
-  # Selector is hardcoded to "ses"; the matching public key must be published
-  # via the CNAME record below.
+  # Selector is "mail"; the matching public key is published via the CNAME below.
   dkim_signing_attributes {
-    domain_signing_selector    = "ses"
+    domain_signing_selector    = "mail"
     domain_signing_private_key = var.dkim_private_key
+  }
+
+  # Custom MAIL FROM: SPF lives on the bounce subdomain so customers only need
+  # a CNAME (bounce.{their} → bounce.{ours}) instead of adding a TXT record.
+  # DMARC relaxed alignment still passes because bounce.{their} and {their}
+  # share the same organisational domain.
+  mail_from_attributes {
+    mail_from_domain = "bounce.${local.mail_domain}"
   }
 }
 
 # Shared DKIM terminus — all customer domains CNAME here instead of directly to
 # amazonses.com. Because every customer domain is registered with the same BYODKIM
 # private key, the public key served at this endpoint is valid for all of them.
-# Customer creates: ses._domainkey.{their_domain} CNAME ses._domainkey.{mail_domain}
+# Customer creates: mail._domainkey.{their_domain} CNAME mail._domainkey.{mail_domain}
 resource "aws_route53_record" "ses_dkim" {
   provider = aws.us_east_1
   zone_id  = var.hosted_zone_id
-  name     = "ses._domainkey.${local.mail_domain}"
+  name     = "mail._domainkey.${local.mail_domain}"
   type     = "CNAME"
   ttl      = 300
-  records  = ["ses.${local.mail_domain}._domainkey.amazonses.com"]
+  records  = ["mail.${local.mail_domain}._domainkey.amazonses.com"]
 }
 
 # Branded MX hostname — customers point their MX here instead of directly to
 # the SES inbound endpoint. Customer creates: {their_domain} MX 10 mx.{mail_domain}
-# RFC 2181 prefers A records as MX targets but CNAME chains work in practice.
-# If the SES inbound address ever changes, only this record needs updating.
 # RFC 2181 prefers A records as MX targets but CNAME chains work in practice
 # with every major mail server.
 resource "aws_route53_record" "ses_mx_host" {
@@ -86,17 +91,36 @@ resource "aws_route53_record" "ses_mx" {
   records  = ["10 mx.${local.mail_domain}"]
 }
 
-# SPF — authorises SES to send on behalf of this domain
-resource "aws_route53_record" "ses_spf" {
+# ---------------------------------------------------------------------------
+# Bounce subdomain — SES custom MAIL FROM
+# SPF lives here; customers CNAME bounce.{their} → bounce.{ours}.
+# ---------------------------------------------------------------------------
+
+# SES requires an MX record on the bounce subdomain pointing to its MAIL FROM endpoint
+resource "aws_route53_record" "bounce_mx" {
   provider = aws.us_east_1
   zone_id  = var.hosted_zone_id
-  name     = local.mail_domain
+  name     = "bounce.${local.mail_domain}"
+  type     = "MX"
+  ttl      = 300
+  records  = ["10 feedback-smtp.eu-west-1.amazonses.com"]
+}
+
+# SPF on the bounce subdomain — SES is the only authorised sender
+resource "aws_route53_record" "bounce_spf" {
+  provider = aws.us_east_1
+  zone_id  = var.hosted_zone_id
+  name     = "bounce.${local.mail_domain}"
   type     = "TXT"
   ttl      = 300
   records  = ["v=spf1 include:amazonses.com ~all"]
 }
 
-# DMARC — quarantine policy; tighten to p=reject once sending is stable
+# ---------------------------------------------------------------------------
+# DMARC — shared terminus; customers CNAME _dmarc.{their} → _dmarc.{ours}
+# Resolvers follow CNAME chains for TXT queries, so no TXT record needed per customer.
+# ---------------------------------------------------------------------------
+
 resource "aws_route53_record" "dmarc" {
   provider = aws.us_east_1
   zone_id  = var.hosted_zone_id
