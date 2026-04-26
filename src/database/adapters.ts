@@ -1,6 +1,6 @@
 import type { ProcessorDatabase } from "../processor/processor.js";
 import type { ApiDatabase, ListArcsParams, UpdateArcRequest, CreateViewRequest, UpdateViewRequest, CreateLabelRequest, UpdateLabelRequest, CreateRuleRequest, UpdateRuleRequest } from "../api/app.js";
-import type { Arc, Signal, View, Label, Rule, Domain, Account, Page, PageParams, EmailAddressConfig } from "../types/index.js";
+import type { Arc, Signal, View, Label, Rule, Domain, Account, Page, PageParams, EmailAddressConfig, VerifiedForwardingAddress } from "../types/index.js";
 import type { AccountDatabase } from "./account-database.js";
 import type { ArcDatabase } from "./arc-database.js";
 import type { ProcessingDatabase } from "./processing-database.js";
@@ -23,10 +23,8 @@ export class ProcessorDatabaseAdapter implements ProcessorDatabase {
   findArcByGroupingKey(accountId: string, key: string) { return this.arc.findArcByGroupingKey(accountId, key); }
   saveArc(arc: Arc) { return this.arc.saveArc(arc); }
   listRules(accountId: string) { return this.account.listRules(accountId); }
-  getEmailAddressConfig(accountId: string, address: string) { return this.account.getEmailAddressConfig(accountId, address); }
+  getProcessorAccountContext(accountId: string, recipientAddress: string) { return this.account.getProcessorAccountContext(accountId, recipientAddress); }
   saveEmailAddressConfig(config: EmailAddressConfig) { return this.account.saveEmailAddressConfig(config); }
-  getAccountFilteringConfig(accountId: string) { return this.account.getAccountFilteringConfig(accountId); }
-  getAccountRetentionDays(accountId: string) { return this.account.getAccountRetentionDays(accountId); }
   updateGlobalReputation(domain: string, update: { wasSpam: boolean; wasBlocked: boolean }) { return this.processing.updateGlobalReputation(domain, update); }
 }
 
@@ -91,4 +89,10 @@ export class ApiDatabaseAdapter implements ApiDatabase {
   getEmailConfig(accountId: string, address: string) { return this.account.getEmailAddressConfig(accountId, address); }
   upsertEmailConfig(config: EmailAddressConfig) { return this.account.upsertEmailConfig(config); }
   deleteEmailConfig(accountId: string, address: string) { return this.account.deleteEmailConfig(accountId, address); }
+
+  // Verified forwarding addresses
+  listVerifiedForwardingAddresses(accountId: string) { return this.account.listVerifiedForwardingAddresses(accountId); }
+  getVerifiedForwardingAddress(accountId: string, address: string) { return this.account.getVerifiedForwardingAddress(accountId, address); }
+  saveVerifiedForwardingAddress(addr: VerifiedForwardingAddress) { return this.account.saveVerifiedForwardingAddress(addr); }
+  deleteVerifiedForwardingAddress(accountId: string, address: string) { return this.account.deleteVerifiedForwardingAddress(accountId, address); }
 }
