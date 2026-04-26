@@ -26,8 +26,7 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "emails" {
   bucket = aws_s3_bucket.emails.id
   rule {
     apply_server_side_encryption_by_default {
-      sse_algorithm     = "aws:kms"
-      kms_master_key_id = aws_kms_key.default.arn
+      sse_algorithm = "AES256"
     }
   }
 }
@@ -155,11 +154,6 @@ resource "aws_dynamodb_table" "accounts" {
   attribute { name = "pk"; type = "S" }
   attribute { name = "sk"; type = "S" }
 
-  server_side_encryption {
-    enabled     = true
-    kms_key_arn = aws_kms_key.default.arn
-  }
-
   point_in_time_recovery { enabled = true }
   deletion_protection_enabled = true
 
@@ -168,7 +162,6 @@ resource "aws_dynamodb_table" "accounts" {
 
   replica {
     region_name = "eu-central-1"
-    kms_key_arn = aws_kms_replica_key.eu_central_1.arn
   }
 }
 
@@ -195,11 +188,6 @@ resource "aws_dynamodb_table" "signals" {
     enabled        = true
   }
 
-  server_side_encryption {
-    enabled     = true
-    kms_key_arn = aws_kms_key.default.arn
-  }
-
   point_in_time_recovery { enabled = true }
   deletion_protection_enabled = true
 
@@ -208,7 +196,6 @@ resource "aws_dynamodb_table" "signals" {
 
   replica {
     region_name = "eu-central-1"
-    kms_key_arn = aws_kms_replica_key.eu_central_1.arn
   }
 }
 
@@ -226,11 +213,7 @@ resource "aws_dynamodb_table" "processing" {
     enabled        = true
   }
 
-  server_side_encryption {
-    enabled     = true
-    kms_key_arn = aws_kms_key.default.arn
-  }
-
+  point_in_time_recovery { enabled = true }
   deletion_protection_enabled = true
 
   stream_enabled   = true
@@ -238,6 +221,5 @@ resource "aws_dynamodb_table" "processing" {
 
   replica {
     region_name = "eu-central-1"
-    kms_key_arn = aws_kms_replica_key.eu_central_1.arn
   }
 }
