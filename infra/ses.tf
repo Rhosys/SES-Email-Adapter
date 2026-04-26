@@ -32,13 +32,58 @@ resource "aws_ses_receipt_rule" "store_and_notify" {
 }
 
 # ---------------------------------------------------------------------------
-# DKIM selector record (intermediate CNAME target)
-# User-facing DNS records point to these; they rotate DKIM keys transparently
+# Platform domain identity — Easy DKIM (AWS-managed keys)
+# Per-customer domains are registered dynamically via the API using BYODKIM.
 # ---------------------------------------------------------------------------
 
-# The DKIM signing private keys are uploaded per-domain via the API
-# using PutEmailIdentityDkimSigningAttributes (BYODKIM).
-# Selector is hardcoded to "email-signals" across all domains.
+resource "aws_sesv2_email_identity" "main" {
+  email_identity = local.mail_domain
+
+  dkim_signing_attributes {
+    next_signing_key_length = "RSA_2048_BIT"
+  }
+}
+
+# 3 DKIM CNAME records supplied by SES Easy DKIM
+resource "aws_route53_record" "ses_dkim" {
+  provider = aws.us_east_1
+  count    = 3
+  zone_id  = var.hosted_zone_id
+  name     = "${aws_sesv2_email_identity.main.dkim_signing_attributes[0].tokens[count.index]}._domainkey.${local.mail_domain}"
+  type     = "CNAME"
+  ttl      = 300
+  records  = ["${aws_sesv2_email_identity.main.dkim_signing_attributes[0].tokens[count.index]}.dkim.amazonses.com"]
+}
+
+# MX record — routes inbound email through SES
+resource "aws_route53_record" "ses_mx" {
+  provider = aws.us_east_1
+  zone_id  = var.hosted_zone_id
+  name     = local.mail_domain
+  type     = "MX"
+  ttl      = 300
+  records  = ["10 inbound-smtp.eu-west-1.amazonaws.com"]
+}
+
+# SPF — authorises SES to send on behalf of this domain
+resource "aws_route53_record" "ses_spf" {
+  provider = aws.us_east_1
+  zone_id  = var.hosted_zone_id
+  name     = local.mail_domain
+  type     = "TXT"
+  ttl      = 300
+  records  = ["v=spf1 include:amazonses.com ~all"]
+}
+
+# DMARC — quarantine policy; tighten to p=reject once sending is stable
+resource "aws_route53_record" "dmarc" {
+  provider = aws.us_east_1
+  zone_id  = var.hosted_zone_id
+  name     = "_dmarc.${local.mail_domain}"
+  type     = "TXT"
+  ttl      = 300
+  records  = ["v=DMARC1; p=quarantine; rua=mailto:postmaster@${local.mail_domain}"]
+}
 
 # ---------------------------------------------------------------------------
 # SES Production: configuration set + bounce/complaint event destinations
