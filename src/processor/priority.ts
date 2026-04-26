@@ -34,7 +34,6 @@ export function baseUrgency(workflow: Workflow, data: WorkflowData): ArcUrgency 
       return "low";
 
     case "notice":
-    case "spam":
       return "silent";
 
     default:

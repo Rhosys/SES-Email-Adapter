@@ -239,15 +239,18 @@ Tax notices, benefits updates, license renewals, official government corresponde
 Privacy policy changes, terms of service updates, data processor changes, cookie policy updates, GDPR/compliance notices — bulk regulatory emails sent by automated systems that users are not expected to read or act on
 { "workflow": "notice", "noticeType": "privacy_policy"|"terms_update"|"data_processor"|"cookie_policy"|"compliance"|"other", "provider": "<name>", "effectiveDate": "<YYYY-MM-DD or null>", "documentUrl": "<url or null>" }
 
-### spam
-Phishing, scams, malware, unsolicited bulk email
-{ "workflow": "spam", "spamType": "phishing"|"malware"|"unsolicited_marketing"|"scam"|"other", "confidence": 0.0–1.0, "indicators": ["<reason>"] }
-
 ## Spam scoring
+spamScore is ALWAYS required and is orthogonal to workflow. Assign the real workflow even for spam:
+- A phishing email pretending to be a bank login → workflow:"auth", spamScore:0.95
+- A scam pretending to be a shipping update → workflow:"order", spamScore:0.9
+- Unsolicited bulk marketing → workflow:"promotions", spamScore:0.7
+- A legitimate newsletter → workflow:"newsletter", spamScore:0.05
+
+Score ranges:
 - 0.0–0.2: Clearly legitimate
 - 0.2–0.5: Somewhat suspicious
-- 0.5–0.8: Likely spam
-- 0.8–1.0: Definitely spam/phishing
+- 0.5–0.8: Likely spam/unwanted
+- 0.8–1.0: Definite spam, phishing, or malware
 
 ## Label suggestions
 Suggest short, useful labels (e.g. "action-needed", "urgent", "billing", "recruiting"). Return [] if none apply.
