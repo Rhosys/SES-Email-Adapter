@@ -70,7 +70,7 @@ program
       bundle: true,
       minify: true,
       platform: 'node',
-      target: 'node22',
+      target: 'node24',
       // @aws-sdk/* is provided by the Lambda runtime; pg-native is optional and not used
       external: ['@aws-sdk/*', 'pg-native'],
       outfile: 'dist/handler.js',
