@@ -1013,8 +1013,8 @@ describe("SignalProcessor", () => {
       expect(baseUrgency("notice", { workflow: "notice", noticeType: "privacy_policy", provider: "Google" })).toBe("silent");
     });
 
-    it("newsletter is always silent", () => {
-      expect(baseUrgency("newsletter", { workflow: "newsletter", publication: "TLDR", topics: [] })).toBe("silent");
+    it("newsletter is low (opted-in, not urgent)", () => {
+      expect(baseUrgency("newsletter", { workflow: "newsletter", publication: "TLDR", topics: [] })).toBe("low");
     });
   });
 

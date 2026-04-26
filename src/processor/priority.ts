@@ -27,11 +27,13 @@ export function baseUrgency(workflow: Workflow, data: WorkflowData): ArcUrgency 
     case "support":
       return (data as { priority?: string }).priority === "urgent" ? "critical" : "normal";
 
-    case "notice":
     case "newsletter":
     case "promotions":
     case "onboarding":
     case "social":
+      return "low";
+
+    case "notice":
     case "spam":
       return "silent";
 
