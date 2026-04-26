@@ -7,6 +7,13 @@ locals {
   api_gateway_origin_id = "api-gateway"
 }
 
+data "aws_acm_certificate" "api" {
+  provider    = aws.us_east_1
+  domain      = var.api_domain
+  statuses    = ["ISSUED"]
+  most_recent = true
+}
+
 resource "aws_cloudfront_distribution" "api" {
   enabled         = true
   is_ipv6_enabled = true
@@ -57,7 +64,7 @@ resource "aws_cloudfront_distribution" "api" {
   }
 
   viewer_certificate {
-    acm_certificate_arn      = var.acm_certificate_arn
+    acm_certificate_arn      = data.aws_acm_certificate.api.arn
     ssl_support_method       = "sni-only"
     minimum_protocol_version = "TLSv1.2_2021"
   }
