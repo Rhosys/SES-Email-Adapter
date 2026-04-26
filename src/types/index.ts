@@ -387,6 +387,8 @@ export interface Signal {
   summary: string;
   classificationModelId: string;
   pushPriority: PushPriority;
+  // True when In-Reply-To matches a message the user sent — drives "interrupt" push priority
+  isReplyToSent?: boolean;
 
   s3Key: string;
   status: SignalStatus;
@@ -415,6 +417,8 @@ export interface Arc {
   createdAt: string;
   updatedAt: string;
   ttl?: number;   // Unix seconds; absent = never expire
+  // Message-IDs of emails the user sent on this arc — used to detect replies
+  sentMessageIds?: string[];
 }
 
 // ---------------------------------------------------------------------------
