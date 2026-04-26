@@ -12,7 +12,6 @@ locals {
 # ---------------------------------------------------------------------------
 
 resource "aws_acm_certificate" "api" {
-  provider          = aws.us_east_1
   domain_name       = var.api_domain
   validation_method = "DNS"
 
@@ -39,7 +38,6 @@ resource "aws_route53_record" "acm_validation" {
 }
 
 resource "aws_acm_certificate_validation" "api" {
-  provider                = aws.us_east_1
   certificate_arn         = aws_acm_certificate.api.arn
   validation_record_fqdns = [for record in aws_route53_record.acm_validation : record.fqdn]
 }
