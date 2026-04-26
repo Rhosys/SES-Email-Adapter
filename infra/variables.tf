@@ -30,16 +30,6 @@ variable "acm_certificate_arn" {
   type        = string
 }
 
-variable "lambda_s3_bucket" {
-  description = "S3 bucket containing the Lambda deployment package"
-  type        = string
-}
-
-variable "lambda_s3_key" {
-  description = "S3 key of the Lambda deployment zip"
-  type        = string
-}
-
 variable "lambda_memory_mb" {
   type    = number
   default = 1024
