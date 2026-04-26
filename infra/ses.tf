@@ -48,7 +48,10 @@ resource "aws_sesv2_email_identity" "main" {
   }
 }
 
-# Single DKIM CNAME — region-agnostic because the key is ours, not AWS-generated
+# Shared DKIM terminus — all customer domains CNAME here instead of directly to
+# amazonses.com. Because every customer domain is registered with the same BYODKIM
+# private key, the public key served at this endpoint is valid for all of them.
+# Customer creates: ses._domainkey.{their_domain} CNAME ses._domainkey.{mail_domain}
 resource "aws_route53_record" "ses_dkim" {
   provider = aws.us_east_1
   zone_id  = var.hosted_zone_id
@@ -58,7 +61,9 @@ resource "aws_route53_record" "ses_dkim" {
   records  = ["ses.${local.mail_domain}._domainkey.amazonses.com"]
 }
 
-# Branded MX hostname — customers point their MX here, hiding the AWS endpoint.
+# Branded MX hostname — customers point their MX here instead of directly to
+# the SES inbound endpoint. Customer creates: {their_domain} MX 10 mx.{mail_domain}
+# RFC 2181 prefers A records as MX targets but CNAME chains work in practice.
 # If the SES inbound address ever changes, only this record needs updating.
 # RFC 2181 prefers A records as MX targets but CNAME chains work in practice
 # with every major mail server.
