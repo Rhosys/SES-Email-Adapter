@@ -58,14 +58,27 @@ resource "aws_route53_record" "ses_dkim" {
   records  = ["ses.${local.mail_domain}._domainkey.amazonses.com"]
 }
 
-# MX record — routes inbound email through SES
+# Branded MX hostname — customers point their MX here, hiding the AWS endpoint.
+# If the SES inbound address ever changes, only this record needs updating.
+# RFC 2181 prefers A records as MX targets but CNAME chains work in practice
+# with every major mail server.
+resource "aws_route53_record" "ses_mx_host" {
+  provider = aws.us_east_1
+  zone_id  = var.hosted_zone_id
+  name     = "mx.${local.mail_domain}"
+  type     = "CNAME"
+  ttl      = 300
+  records  = ["inbound-smtp.eu-west-1.amazonaws.com"]
+}
+
+# Platform domain's own MX record — points to our branded hostname
 resource "aws_route53_record" "ses_mx" {
   provider = aws.us_east_1
   zone_id  = var.hosted_zone_id
   name     = local.mail_domain
   type     = "MX"
   ttl      = 300
-  records  = ["10 inbound-smtp.eu-west-1.amazonaws.com"]
+  records  = ["10 mx.${local.mail_domain}"]
 }
 
 # SPF — authorises SES to send on behalf of this domain
