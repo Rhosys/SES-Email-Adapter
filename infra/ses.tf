@@ -39,20 +39,23 @@ resource "aws_ses_receipt_rule" "store_and_notify" {
 resource "aws_sesv2_email_identity" "main" {
   email_identity = local.mail_domain
 
+  # BYODKIM: one selector + private key works identically in every region.
+  # Selector is hardcoded to "ses"; the matching public key must be published
+  # via the CNAME record below.
   dkim_signing_attributes {
-    next_signing_key_length = "RSA_2048_BIT"
+    domain_signing_selector    = "ses"
+    domain_signing_private_key = var.dkim_private_key
   }
 }
 
-# 3 DKIM CNAME records supplied by SES Easy DKIM
+# Single DKIM CNAME — region-agnostic because the key is ours, not AWS-generated
 resource "aws_route53_record" "ses_dkim" {
   provider = aws.us_east_1
-  count    = 3
   zone_id  = var.hosted_zone_id
-  name     = "${aws_sesv2_email_identity.main.dkim_signing_attributes[0].tokens[count.index]}._domainkey.${local.mail_domain}"
+  name     = "ses._domainkey.${local.mail_domain}"
   type     = "CNAME"
   ttl      = 300
-  records  = ["${aws_sesv2_email_identity.main.dkim_signing_attributes[0].tokens[count.index]}.dkim.amazonses.com"]
+  records  = ["ses.${local.mail_domain}._domainkey.amazonses.com"]
 }
 
 # MX record — routes inbound email through SES
