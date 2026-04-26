@@ -26,6 +26,20 @@ terraform {
 }
 
 provider "aws" {
+  region              = "eu-west-1"
+  allowed_account_ids = [var.aws_account_id]
+
+  default_tags {
+    tags = {
+      App = "ses-email-adapter"
+      Env = var.env
+    }
+  }
+}
+
+# ACM certificates for CloudFront must be provisioned in us-east-1
+provider "aws" {
+  alias               = "us_east_1"
   region              = "us-east-1"
   allowed_account_ids = [var.aws_account_id]
 
