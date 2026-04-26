@@ -152,12 +152,9 @@ resource "aws_lambda_function" "main" {
       RDS_PROXY_ENDPOINT        = aws_db_proxy.aurora.endpoint
       AURORA_DB_NAME            = "signals"
       DB_USER                   = "lambda"
-      DB_PASSWORD               = var.aurora_db_password
       NOTIFICATION_FROM         = var.notification_from_address
       SES_CONFIGURATION_SET     = aws_sesv2_configuration_set.sending.configuration_set_name
       APP_BASE_URL              = var.app_base_url
-      AUTHRESS_DOMAIN           = var.authress_domain
-      AUTHRESS_APPLICATION_ID   = var.authress_application_id
     }
   }
 
