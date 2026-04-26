@@ -26,7 +26,7 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "emails" {
   bucket = aws_s3_bucket.emails.id
   rule {
     apply_server_side_encryption_by_default {
-      sse_algorithm = "aws:kms"
+      sse_algorithm = "AES256"
     }
   }
 }
@@ -52,13 +52,12 @@ resource "aws_s3_bucket_policy" "emails" {
       Action    = "s3:PutObject"
       Resource  = "${aws_s3_bucket.emails.arn}/emails/*"
       Condition = {
-        StringEquals = { "aws:Referer" = data.aws_caller_identity.current.account_id }
+        StringEquals = { "aws:Referer" = var.aws_account_id }
       }
     }]
   })
 }
 
-data "aws_caller_identity" "current" {}
 
 # ---------------------------------------------------------------------------
 # SQS — signal processing queue
@@ -71,7 +70,7 @@ resource "aws_sqs_queue" "signals_dlq" {
 
 resource "aws_sqs_queue" "signals" {
   name                       = "${local.prefix}-signals"
-  visibility_timeout_seconds = var.lambda_timeout_seconds * 6  # 6x Lambda timeout
+  visibility_timeout_seconds = 180  # 6x Lambda timeout (30s * 6)  # 6x Lambda timeout
   message_retention_seconds  = 86400  # 1 day
 
   redrive_policy = jsonencode({
@@ -112,7 +111,7 @@ resource "aws_sqs_queue_policy" "signals_sns" {
 
 resource "aws_sqs_queue" "feedback" {
   name                       = "${local.prefix}-feedback"
-  visibility_timeout_seconds = var.lambda_timeout_seconds * 6
+  visibility_timeout_seconds = 180  # 6x Lambda timeout (30s * 6)
   message_retention_seconds  = 86400  # 1 day
 
   redrive_policy = jsonencode({
@@ -156,9 +155,14 @@ resource "aws_dynamodb_table" "accounts" {
   attribute { name = "sk"; type = "S" }
 
   point_in_time_recovery { enabled = true }
+  deletion_protection_enabled = true
 
   stream_enabled   = true
   stream_view_type = "NEW_AND_OLD_IMAGES"
+
+  replica {
+    region_name = "eu-central-1"
+  }
 }
 
 resource "aws_dynamodb_table" "signals" {
@@ -185,9 +189,14 @@ resource "aws_dynamodb_table" "signals" {
   }
 
   point_in_time_recovery { enabled = true }
+  deletion_protection_enabled = true
 
   stream_enabled   = true
   stream_view_type = "NEW_AND_OLD_IMAGES"
+
+  replica {
+    region_name = "eu-central-1"
+  }
 }
 
 resource "aws_dynamodb_table" "processing" {
@@ -202,5 +211,15 @@ resource "aws_dynamodb_table" "processing" {
   ttl {
     attribute_name = "ttl"
     enabled        = true
+  }
+
+  point_in_time_recovery { enabled = true }
+  deletion_protection_enabled = true
+
+  stream_enabled   = true
+  stream_view_type = "NEW_AND_OLD_IMAGES"
+
+  replica {
+    region_name = "eu-central-1"
   }
 }

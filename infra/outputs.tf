@@ -17,8 +17,16 @@ output "lambda_function_name" {
   value = aws_lambda_function.main.function_name
 }
 
-output "dynamodb_table_name" {
-  value = aws_dynamodb_table.main.name
+output "dynamodb_accounts_table" {
+  value = aws_dynamodb_table.accounts.name
+}
+
+output "dynamodb_signals_table" {
+  value = aws_dynamodb_table.signals.name
+}
+
+output "dynamodb_processing_table" {
+  value = aws_dynamodb_table.processing.name
 }
 
 output "email_bucket_name" {

@@ -1,5 +1,6 @@
 import { randomUUID } from "crypto";
 import { Pool } from "pg";
+import { Signer } from "@aws-sdk/rds-signer";
 import { DeleteCommand, GetCommand, PutCommand, QueryCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { dynamo, SIGNALS_TABLE, encodeCursor, decodeCursor } from "./shared.js";
 import type { ArcMatcher } from "../processor/processor.js";
@@ -11,17 +12,24 @@ import type { Arc, Signal, Page, PageParams } from "../types/index.js";
 // ---------------------------------------------------------------------------
 
 const SIMILARITY_THRESHOLD = 0.5;
+const RDS_HOST = process.env["RDS_PROXY_ENDPOINT"] ?? "";
+const DB_USER  = process.env["DB_USER"] ?? "lambda";
+const DB_NAME  = process.env["AURORA_DB_NAME"] ?? "signals";
+const AWS_REGION = process.env["AWS_REGION"] ?? "us-east-1";
+
+const signer = new Signer({ hostname: RDS_HOST, port: 5432, region: AWS_REGION, username: DB_USER });
+
 let _pool: Pool | null = null;
 
 function getPool(): Pool {
   if (_pool) return _pool;
   _pool = new Pool({
-    host: process.env["RDS_PROXY_ENDPOINT"],
-    database: process.env["AURORA_DB_NAME"] ?? "signals",
-    user: process.env["DB_USER"] ?? "lambda",
-    password: process.env["DB_PASSWORD"],
+    host:     RDS_HOST,
+    database: DB_NAME,
+    user:     DB_USER,
+    password: () => signer.getAuthToken(),
     port: 5432,
-    ssl: { rejectUnauthorized: false },
+    ssl: { rejectUnauthorized: true },
     max: 2,
     idleTimeoutMillis: 30_000,
     connectionTimeoutMillis: 5_000,
