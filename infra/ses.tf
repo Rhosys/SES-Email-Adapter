@@ -4,7 +4,7 @@
 # ---------------------------------------------------------------------------
 
 resource "aws_ses_receipt_rule_set" "main" {
-  rule_set_name = var.ses_rule_set_name
+  rule_set_name = "${local.prefix}-rules"
 }
 
 resource "aws_ses_active_receipt_rule_set" "main" {

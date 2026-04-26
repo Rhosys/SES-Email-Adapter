@@ -31,7 +31,7 @@ provider "aws" {
 
   default_tags {
     tags = {
-      App = var.app_name
+      App = "ses-email-adapter"
       Env = var.env
     }
   }
@@ -45,12 +45,12 @@ provider "aws" {
 
   default_tags {
     tags = {
-      App = var.app_name
+      App = "ses-email-adapter"
       Env = var.env
     }
   }
 }
 
 locals {
-  prefix = "${var.app_name}-${var.env}"
+  prefix = "ses-email-adapter-${var.env}"
 }

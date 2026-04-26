@@ -130,8 +130,8 @@ resource "aws_lambda_function" "main" {
   role             = aws_iam_role.lambda.arn
   handler          = "handler.handler"
   runtime          = "nodejs22.x"
-  memory_size      = var.lambda_memory_mb
-  timeout          = var.lambda_timeout_seconds
+  memory_size      = 1024
+  timeout          = 30
   publish          = true
 
   filename         = data.archive_file.lambda_stub.output_path
@@ -150,8 +150,8 @@ resource "aws_lambda_function" "main" {
       PROCESSING_TABLE          = aws_dynamodb_table.processing.name
       EMAIL_BUCKET              = aws_s3_bucket.emails.name
       RDS_PROXY_ENDPOINT        = aws_db_proxy.aurora.endpoint
-      AURORA_DB_NAME            = var.aurora_db_name
-      DB_USER                   = var.aurora_db_username
+      AURORA_DB_NAME            = "signals"
+      DB_USER                   = "lambda"
       DB_PASSWORD               = var.aurora_db_password
       NOTIFICATION_FROM         = var.notification_from_address
       SES_CONFIGURATION_SET     = aws_sesv2_configuration_set.sending.configuration_set_name

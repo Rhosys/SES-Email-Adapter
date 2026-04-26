@@ -71,7 +71,7 @@ resource "aws_sqs_queue" "signals_dlq" {
 
 resource "aws_sqs_queue" "signals" {
   name                       = "${local.prefix}-signals"
-  visibility_timeout_seconds = var.lambda_timeout_seconds * 6  # 6x Lambda timeout
+  visibility_timeout_seconds = 180  # 6x Lambda timeout (30s * 6)  # 6x Lambda timeout
   message_retention_seconds  = 86400  # 1 day
 
   redrive_policy = jsonencode({
@@ -112,7 +112,7 @@ resource "aws_sqs_queue_policy" "signals_sns" {
 
 resource "aws_sqs_queue" "feedback" {
   name                       = "${local.prefix}-feedback"
-  visibility_timeout_seconds = var.lambda_timeout_seconds * 6
+  visibility_timeout_seconds = 180  # 6x Lambda timeout (30s * 6)
   message_retention_seconds  = 86400  # 1 day
 
   redrive_policy = jsonencode({
