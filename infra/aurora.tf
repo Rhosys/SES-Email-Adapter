@@ -32,7 +32,7 @@ resource "aws_secretsmanager_secret" "aurora_master" {
 resource "aws_secretsmanager_secret_version" "aurora_master" {
   secret_id = aws_secretsmanager_secret.aurora_master.id
   secret_string = jsonencode({
-    username = var.aurora_master_username
+    username = "admin"
     password = random_password.aurora_master.result
   })
 }
@@ -42,8 +42,8 @@ resource "aws_rds_cluster" "aurora" {
   engine                      = "aurora-postgresql"
   engine_mode                 = "provisioned"
   engine_version              = "16.4"
-  database_name               = var.aurora_db_name
-  master_username             = var.aurora_master_username
+  database_name               = "signals"
+  master_username             = "admin"
   manage_master_user_password = false
   master_password             = random_password.aurora_master.result
   db_subnet_group_name        = aws_db_subnet_group.aurora.name
@@ -51,8 +51,8 @@ resource "aws_rds_cluster" "aurora" {
   db_cluster_parameter_group_name = aws_rds_cluster_parameter_group.aurora.name
 
   serverlessv2_scaling_configuration {
-    min_capacity = var.aurora_min_capacity
-    max_capacity = var.aurora_max_capacity
+    min_capacity = 0
+    max_capacity = 4
   }
 
   backup_retention_period   = 7

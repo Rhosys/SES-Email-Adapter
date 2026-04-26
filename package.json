@@ -7,11 +7,13 @@
     "dev": "tsc --watch",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "make": "tsx make.ts"
   },
   "dependencies": {
     "@authress/sdk": "^3.2.266",
     "@aws-sdk/client-bedrock-runtime": "^3.0.0",
+    "@aws-sdk/rds-signer": "^3.0.0",
     "@aws-sdk/client-dynamodb": "^3.0.0",
     "@aws-sdk/client-s3": "^3.0.0",
     "@aws-sdk/client-sesv2": "^3.0.0",
@@ -30,6 +32,10 @@
     "@types/node": "^22.0.0",
     "@types/pg": "^8.0.0",
     "@vitest/coverage-v8": "^2.0.0",
+    "aws-architect": "^7.0.0",
+    "commander": "^12.0.0",
+    "esbuild": "^0.24.0",
+    "tsx": "^4.0.0",
     "typescript": "^5.7.0",
     "vitest": "^2.0.0"
   }

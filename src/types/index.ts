@@ -22,8 +22,11 @@ export const WORKFLOWS = [
   "subscription", // SaaS plan changes, renewal reminders, trial expiry
   "healthcare",   // Appointments, test results, prescriptions, insurance
   "government",   // Tax, benefits, official notices, license renewal
-  "notice",        // Privacy policy, ToS updates, data processor changes — auto-archived
-  "spam",         // Phishing, scams, malware, unsolicited bulk email
+  "notice",       // Privacy policy, ToS updates, data processor changes — auto-archived
+  // NOTE: spam is NOT a workflow. It is expressed via Signal.spamScore (0–1).
+  // A phishing email pretending to be a bank login is workflow:"auth" + spamScore:0.95.
+  // The processor blocks high-spamScore signals; the workflow captures what kind of
+  // email it is (or is pretending to be), which is more actionable than just "spam".
 ] as const;
 
 export type Workflow = (typeof WORKFLOWS)[number];
@@ -48,8 +51,7 @@ export type WorkflowData =
   | SubscriptionData
   | HealthcareData
   | GovernmentData
-  | NoticeData
-  | SpamData;
+  | NoticeData;
 
 // ---------------------------------------------------------------------------
 // Workflow data shapes
@@ -267,13 +269,6 @@ export interface NoticeData {
   documentUrl?: string;
 }
 
-export interface SpamData {
-  workflow: "spam";
-  spamType: "phishing" | "malware" | "unsolicited_marketing" | "scam" | "other";
-  confidence: number;
-  indicators: string[];
-}
-
 // ---------------------------------------------------------------------------
 // Filtering
 // ---------------------------------------------------------------------------
@@ -303,6 +298,10 @@ export type BlockDisposition = {
 
 // interrupt = push notification popup; ambient = badge only; silent = no push
 export type PushPriority = "interrupt" | "ambient" | "silent";
+
+// Unified urgency level that drives all notification channels (push, digest, UI).
+// Derived by priorityCalculator — do not set manually.
+export type ArcUrgency = "critical" | "high" | "normal" | "low" | "silent";
 
 // Per-recipient-address configuration
 export interface EmailAddressConfig {
@@ -386,7 +385,6 @@ export interface Signal {
   spamScore: number;
   summary: string;
   classificationModelId: string;
-  pushPriority: PushPriority;
 
   s3Key: string;
   status: SignalStatus;
@@ -415,6 +413,10 @@ export interface Arc {
   createdAt: string;
   updatedAt: string;
   ttl?: number;   // Unix seconds; absent = never expire
+  // Message-IDs of emails the user sent on this arc — checked by priorityCalculator to detect replies
+  sentMessageIds?: string[];
+  // Derived by priorityCalculator; drives push, email digest section, and UI prominence
+  urgency?: ArcUrgency;
 }
 
 // ---------------------------------------------------------------------------

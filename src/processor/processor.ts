@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto";
 import type { SQSEvent } from "aws-lambda";
-import type { Signal, Arc, Rule, Workflow, WorkflowData, PushPriority, EmailAddressConfig, AccountFilteringConfig, SignalSource, SchedulingData, BlockReason, SignalStatus } from "../types/index.js";
+import type { Signal, Arc, Rule, Workflow, WorkflowData, EmailAddressConfig, AccountFilteringConfig, SignalSource, SchedulingData, BlockReason, SignalStatus } from "../types/index.js";
+import { priorityCalculator } from "./priority.js";
 import type { MimeParser } from "./mime.js";
 import type { SignalClassifier } from "../classifier/classifier.js";
 import { getETLD1, evaluateFilter } from "./filter.js";
@@ -336,6 +337,8 @@ export class SignalProcessor {
 
     const signal: Signal = { ...signalShell, arcId: arc.id };
 
+    arc.urgency = priorityCalculator(arc, signal);
+
     await this.store.saveArc(arc);
     await this.store.saveSignal(signal);
 
@@ -361,7 +364,7 @@ export class SignalProcessor {
       }
     }
 
-    const isSpam = classification.workflow === "spam" || classification.spamScore >= 0.9;
+    const isSpam = classification.spamScore >= 0.9;
     if (this.notifier && !isSpam && !isNotice) {
       await this.notifier.notify(accountId, arc, signal).catch((err) => {
         console.error("Notification failed:", err);
@@ -438,7 +441,6 @@ function buildSignal(opts: {
     spamScore: classification.spamScore,
     summary: classification.summary,
     classificationModelId: classification.classificationModelId,
-    pushPriority: derivePushPriority(classification.workflow, classification.workflowData),
     s3Key,
     status,
     createdAt: now,
@@ -475,7 +477,6 @@ function buildCalendarSignal(arc: Arc, emailSignal: Signal, now: string, ttl: nu
     spamScore: 0,
     summary: emailSignal.summary,
     classificationModelId: emailSignal.classificationModelId,
-    pushPriority: "silent",
     s3Key: "",
     status: "active",
     createdAt: now,
@@ -521,43 +522,3 @@ export function deriveGroupingKey(
   }
 }
 
-export function derivePushPriority(workflow: Workflow, data: WorkflowData): PushPriority {
-  switch (workflow) {
-    case "auth":
-      return "interrupt";
-
-    case "security":
-      return "interrupt";
-
-    case "financial":
-      return (data as { isSuspicious?: boolean }).isSuspicious ? "interrupt" : "ambient";
-
-    case "scheduling":
-    case "travel":
-    case "healthcare":
-      return "ambient";
-
-    case "developer":
-      return (data as { severity?: string; requiresAction?: boolean }).severity === "critical" &&
-        (data as { requiresAction?: boolean }).requiresAction
-        ? "interrupt"
-        : "ambient";
-
-    case "subscription":
-      return (data as { eventType?: string }).eventType === "payment_failed" ? "interrupt" : "ambient";
-
-    case "support":
-      return (data as { priority?: string }).priority === "urgent" ? "interrupt" : "ambient";
-
-    case "notice":
-    case "newsletter":
-    case "promotions":
-    case "onboarding":
-    case "social":
-    case "spam":
-      return "silent";
-
-    default:
-      return "ambient";
-  }
-}
