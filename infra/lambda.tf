@@ -113,17 +113,29 @@ resource "aws_cloudwatch_log_group" "lambda" {
 # publish = true enables versioning; code and alias version are managed by CI
 # ---------------------------------------------------------------------------
 
-resource "aws_lambda_function" "main" {
-  function_name = "${local.prefix}-main"
-  role          = aws_iam_role.lambda.arn
-  handler       = "handler.handler"
-  runtime       = "nodejs22.x"
-  memory_size   = var.lambda_memory_mb
-  timeout       = var.lambda_timeout_seconds
-  publish       = true
+# Stub zip so the function can be created on first `tofu apply` before CI has run.
+# CI replaces the code via aws-architect publishAndDeployStagePromise.
+data "archive_file" "lambda_stub" {
+  type        = "zip"
+  output_path = "${path.module}/.terraform/lambda-stub.zip"
 
-  s3_bucket = var.lambda_s3_bucket
-  s3_key    = var.lambda_s3_key
+  source {
+    content  = "exports.handler = async () => ({ statusCode: 200, body: 'stub' });"
+    filename = "handler.js"
+  }
+}
+
+resource "aws_lambda_function" "main" {
+  function_name    = "${local.prefix}-main"
+  role             = aws_iam_role.lambda.arn
+  handler          = "handler.handler"
+  runtime          = "nodejs22.x"
+  memory_size      = var.lambda_memory_mb
+  timeout          = var.lambda_timeout_seconds
+  publish          = true
+
+  filename         = data.archive_file.lambda_stub.output_path
+  source_code_hash = data.archive_file.lambda_stub.output_base64sha256
 
   vpc_config {
     subnet_ids         = aws_subnet.private[*].id
@@ -160,9 +172,9 @@ resource "aws_lambda_function" "main" {
 
   depends_on = [aws_cloudwatch_log_group.lambda]
 
-  # s3_key is updated by CI on each deploy — tofu only manages the function skeleton
+  # filename/source_code_hash are replaced by CI via aws-architect — tofu only manages the function skeleton
   lifecycle {
-    ignore_changes = [s3_key, s3_bucket]
+    ignore_changes = [filename, source_code_hash]
   }
 }
 
