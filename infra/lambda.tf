@@ -64,10 +64,10 @@ resource "aws_iam_role_policy" "lambda_permissions" {
         ]
       },
       {
-        Sid    = "RdsProxyConnect"
-        Effect = "Allow"
-        Action = ["rds-db:connect"]
-        Resource = "arn:aws:rds-db:${var.aws_region}:${data.aws_caller_identity.current.account_id}:dbuser:${aws_db_proxy.aurora.id}/*"
+        Sid      = "RdsProxyConnect"
+        Effect   = "Allow"
+        Action   = ["rds-db:connect"]
+        Resource = "*"
       },
       {
         Sid    = "SESSend"
@@ -90,10 +90,10 @@ resource "aws_iam_role_policy" "lambda_permissions" {
         Resource = "*"
       },
       {
-        Sid    = "SecretsManager"
-        Effect = "Allow"
-        Action = ["secretsmanager:GetSecretValue"]
-        Resource = "arn:aws:secretsmanager:${var.aws_region}:${data.aws_caller_identity.current.account_id}:secret:${local.prefix}/*"
+        Sid      = "SecretsManager"
+        Effect   = "Allow"
+        Action   = ["secretsmanager:GetSecretValue"]
+        Resource = aws_secretsmanager_secret.aurora_master.arn
       },
     ]
   })
