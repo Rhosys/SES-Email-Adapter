@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { evaluateFilter, getETLD1, SPAM_SCORE_THRESHOLD } from "./filter.js";
+import { evaluateFilter, getETLD1, DEFAULT_SPAM_SCORE_THRESHOLD } from "./filter.js";
 import type { EmailAddressConfig } from "../types/index.js";
 
 const LOW_SPAM = 0.1;
-const HIGH_SPAM = SPAM_SCORE_THRESHOLD + 0.1;
+const HIGH_SPAM = DEFAULT_SPAM_SCORE_THRESHOLD + 0.01;
 
 function makeConfig(overrides: Partial<EmailAddressConfig> = {}): EmailAddressConfig {
   return {
@@ -124,7 +124,7 @@ describe("evaluateFilter — strict mode", () => {
 
   it("blocks a known sender with spam score at or above threshold", () => {
     expect(evaluateFilter(config, "amazon.com", HIGH_SPAM)).toEqual({ allowed: false, reason: "spam" });
-    expect(evaluateFilter(config, "amazon.com", SPAM_SCORE_THRESHOLD)).toEqual({ allowed: false, reason: "spam" });
+    expect(evaluateFilter(config, "amazon.com", DEFAULT_SPAM_SCORE_THRESHOLD)).toEqual({ allowed: false, reason: "spam" });
   });
 
   it("blocks an unknown sender", () => {

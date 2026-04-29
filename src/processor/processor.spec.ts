@@ -13,7 +13,7 @@ import type { Arc, Rule, Signal, EmailAddressConfig, AccountFilteringConfig } fr
 
 const TEST_ACCOUNT_ID = "acct-001";
 
-const DEFAULT_CTX = { retentionDays: 0, filtering: null, emailConfig: null };
+const DEFAULT_CTX = { retentionDays: 0, filtering: null, emailConfig: null, registeredDomains: [], userEmails: [] };
 
 function makeStore(): ProcessorDatabase {
   return {
@@ -704,6 +704,8 @@ describe("SignalProcessor", () => {
         retentionDays: 0,
         emailConfig: makeEmailAddressConfig({ approvedSenders: ["trusted.com"] }),
         filtering: { defaultFilterMode: "notify_new", newAddressHandling: "auto_allow", blockDisposition: { new_sender: "block" } },
+        registeredDomains: [],
+        userEmails: [],
       });
 
       await processor.process(makeSqsEvent([{}]));
@@ -729,6 +731,8 @@ describe("SignalProcessor", () => {
         retentionDays: 0,
         emailConfig: makeEmailAddressConfig({ approvedSenders: ["other.com"] }),
         filtering: { defaultFilterMode: "notify_new", newAddressHandling: "auto_allow", blockDisposition: { new_sender: "block" } },
+        registeredDomains: [],
+        userEmails: [],
       });
 
       await processor.process(makeSqsEvent([{}]));
@@ -778,7 +782,7 @@ describe("SignalProcessor", () => {
       );
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
         ...validClassification,
-        spamScore: 0.8,
+        spamScore: 0.95,
       });
 
       await processor.process(makeSqsEvent([{}]));
@@ -819,6 +823,8 @@ describe("SignalProcessor", () => {
         retentionDays: 0,
         filtering: { newAddressHandling: "block_until_approved", defaultFilterMode: "notify_new" },
         emailConfig: null,
+        registeredDomains: [],
+        userEmails: [],
       });
 
       await processor.process(makeSqsEvent([{}]));
@@ -1005,14 +1011,14 @@ describe("SignalProcessor", () => {
 
   describe("priorityCalculator", () => {
     it("returns base urgency when arc has no sent messages", () => {
-      const arc = makeArc({ sentMessageIds: undefined });
+      const arc = makeArc({});
       const signal = { workflow: "personal", workflowData: { workflow: "personal", isReply: false, sentiment: "neutral", requiresReply: false } } as Parameters<typeof priorityCalculator>[1];
       expect(priorityCalculator(arc, signal)).toBe("normal");
     });
 
     it("promotes to at least high when arc has sent messages", () => {
       const arc = makeArc({ sentMessageIds: ["<msg-001@example.com>"] });
-      const signal = { workflow: "newsletter", workflowData: { workflow: "newsletter", publication: "TLDR", topics: [] } } as Parameters<typeof priorityCalculator>[1];
+      const signal = { workflow: "newsletter", workflowData: { workflow: "newsletter", publication: "TLDR", topics: [] } } as unknown as Parameters<typeof priorityCalculator>[1];
       expect(priorityCalculator(arc, signal)).toBe("high");
     });
 
@@ -1090,6 +1096,8 @@ describe("SignalProcessor", () => {
         retentionDays: 0,
         filtering: { defaultFilterMode: "notify_new", newAddressHandling: "auto_allow", blockOnboardingEmails: true },
         emailConfig: null,
+        registeredDomains: [],
+        userEmails: [],
       });
 
       const notifier = makeNotifier();
@@ -1109,6 +1117,8 @@ describe("SignalProcessor", () => {
         retentionDays: 0,
         filtering: { defaultFilterMode: "notify_new", newAddressHandling: "auto_allow", blockOnboardingEmails: true, blockDisposition: { onboarding: "block" } },
         emailConfig: null,
+        registeredDomains: [],
+        userEmails: [],
       });
 
       const notifier = makeNotifier();
@@ -1157,6 +1167,8 @@ describe("SignalProcessor", () => {
         retentionDays: 0,
         emailConfig: makeEmailAddressConfig({ onboardingEmailHandling: "allow" }),
         filtering: { defaultFilterMode: "notify_new", newAddressHandling: "auto_allow", blockOnboardingEmails: true },
+        registeredDomains: [],
+        userEmails: [],
       });
 
       await processor.process(makeSqsEvent([{}]));

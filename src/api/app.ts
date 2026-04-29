@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { randomUUID } from "crypto";
 import { getDomain } from "tldts";
-import type { Arc, Signal, View, Label, Rule, Domain, Account, Page, PageParams, ArcStatus, Workflow, EmailAddressConfig, SenderFilterMode, AccountFilteringConfig, VerifiedForwardingAddress } from "../types/index.js";
+import type { Arc, Signal, View, Label, Rule, Domain, DnsRecord, Account, Page, PageParams, ArcStatus, Workflow, EmailAddressConfig, SenderFilterMode, AccountFilteringConfig, VerifiedForwardingAddress } from "../types/index.js";
 
 // ---------------------------------------------------------------------------
 // Auth
@@ -479,12 +479,12 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
     return c.json(result ?? { ok: true }, 201);
   });
 
-  app.get("/accounts/:accountId/domains/:id/dkim", async (c) => {
+  app.get("/accounts/:accountId/domains/:id/records", async (c) => {
     const { accountId } = c.get("auth");
     const domain = await store.getDomain(accountId, c.req.param("id"));
     if (!domain) return c.json({ error: "Not found" }, 404);
     if (domain.accountId !== accountId) return c.json({ error: "Forbidden" }, 403);
-    return c.json(buildDkimRecords(domain.domain));
+    return c.json(buildDnsRecords(domain));
   });
 
   app.delete("/accounts/:accountId/domains/:id", async (c) => {
@@ -700,21 +700,51 @@ async function validateForwardTargets(
   return unverified.length > 0 ? `Forward targets not verified: ${unverified.join(", ")}` : null;
 }
 
-const DKIM_SELECTOR = "email-signals";
+const DKIM_SELECTOR = "mail";
+const MAIL_DOMAIN = process.env["MAIL_DOMAIN"] ?? "mail.ses-email-adapter.example.com";
+const SES_INBOUND_ENDPOINT = process.env["SES_INBOUND_ENDPOINT"] ?? "inbound-smtp.eu-west-1.amazonaws.com";
 
-function buildDkimRecords(domain: string): Array<{ type: string; name: string; value: string; ttl: number }> {
+// Always returns all 4 DNS records for a domain regardless of setup tier.
+// The status field on each record reflects the last health check result.
+function buildDnsRecords(domain: Domain): DnsRecord[] {
+  const d = domain.domain;
+  const failing = new Set(domain.failingRecords ?? []);
+  const checked = domain.lastCheckedAt !== undefined;
+
+  function recordStatus(name: string): DnsRecord["status"] {
+    if (!checked) return "pending";
+    return failing.has(name) ? "failing" : "verified";
+  }
+
+  const mxName = d;
+  const dkimName = `${DKIM_SELECTOR}._domainkey.${d}`;
+  const spfName = `bounce.${d}`;
+  const dmarcName = `_dmarc.${d}`;
+
   return [
     {
-      type: "CNAME",
-      name: `${DKIM_SELECTOR}._domainkey.${domain}`,
-      value: `${DKIM_SELECTOR}._domainkey.ses-email-adapter.example.com`,
-      ttl: 300,
+      name: mxName,
+      type: "MX",
+      value: `10 ${SES_INBOUND_ENDPOINT}`,
+      status: recordStatus(mxName),
     },
     {
-      type: "MX",
-      name: domain,
-      value: "10 inbound-smtp.us-east-1.amazonaws.com",
-      ttl: 300,
+      name: dkimName,
+      type: "CNAME",
+      value: `${DKIM_SELECTOR}.${MAIL_DOMAIN}._domainkey.amazonses.com`,
+      status: recordStatus(dkimName),
+    },
+    {
+      name: spfName,
+      type: "TXT",
+      value: `v=spf1 include:amazonses.com ~all`,
+      status: recordStatus(spfName),
+    },
+    {
+      name: dmarcName,
+      type: "CNAME",
+      value: `_dmarc.${MAIL_DOMAIN}`,
+      status: recordStatus(dmarcName),
     },
   ];
 }

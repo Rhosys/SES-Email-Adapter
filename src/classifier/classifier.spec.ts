@@ -187,31 +187,26 @@ describe("SignalClassifier", () => {
   // -------------------------------------------------------------------------
 
   describe("spam detection", () => {
-    it("flags phishing email with high spam score", async () => {
+    it("flags phishing email with high spam score (auth workflow, high spamScore)", async () => {
       mockClassifyResponse({
-        workflow: "spam",
+        workflow: "auth",
         workflowData: {
-          workflow: "spam",
-          spamType: "phishing",
-          confidence: 0.97,
-          indicators: [
-            "Sender domain paypa1.com impersonates PayPal",
-            "SPF and DKIM authentication failures",
-            "Suspicious redirect domain (.ru)",
-          ],
+          workflow: "auth",
+          authType: "other",
+          code: null,
+          expiresInMinutes: null,
+          service: "PayPal",
+          actionUrl: "http://paypal-restore.ru/login",
         },
         spamScore: 0.97,
-        summary: "Phishing email impersonating PayPal.",
-        labels: [],
+        summary: "Phishing email impersonating PayPal login.",
+        labels: ["phishing"],
       });
 
       const result = await classifier.classify(phishingEmail);
 
       expect(result.spamScore).toBeGreaterThan(0.9);
-      expect(result.workflow).toBe("spam");
-      if (result.workflowData.workflow === "spam") {
-        expect(result.workflowData.indicators).toContain("Sender domain paypa1.com impersonates PayPal");
-      }
+      expect(result.workflow).toBe("auth");
     });
   });
 
