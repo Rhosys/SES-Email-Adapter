@@ -16,7 +16,11 @@
   - **`TestData` interface**: minimal — `{ triggeredBy: "user" | "system" }` to distinguish user-sent tests from system-generated onboarding signals
   - **Classifier prompt**: add a `### test` section explaining the workflow and giving examples so the classifier can also detect obvious test emails independently (e.g. subject "test", body "testing 123") — the processor override handles the from-address logic, the classifier handles content-based detection
   - **Onboarding integration**: the system-generated fallback signal (fired if the user's email is slow during onboarding Step 2) is created as `workflow: "test"`, `TestData.triggeredBy: "system"`. A real email sent by the user during onboarding also classifies as `"test"` via the from-address logic and also gets the pong reply — the onboarding UI treats arrival of any `"test"` signal as success, regardless of which path triggered it.
-- [ ] Add `"set_urgency"` as a `RuleActionType` and `Arc.urgencyOverride` for user-configurable urgency overrides (deferred)
+- [ ] **`security` and `auth` workflows must bypass all filtering** — these two workflows should never be blocked, quarantined, or silenced regardless of `filterMode`, approved-sender lists, spam score, or block disposition settings. The cost of blocking a real breach notice or OTP is catastrophically higher than any false positive. Add an explicit early-return in `filter.ts`: if the classifier returns `workflow === "security" || workflow === "auth"`, skip all filter logic and deliver. Note that classification must run *before* filtering for this to work — verify the processor ordering.
+  - **How `security` is determined**: the classifier reads what the sending service explicitly says. Two cases:
+    1. *Explicit*: the service sends a distinct email type using unambiguous language ("Suspicious sign-in blocked", "Someone may have your password", "We've locked your account due to unusual activity") — classifier assigns `security` with high confidence
+    2. *Ambiguous*: informational format but alarming context ("New sign-in from an unfamiliar location", "New device added") — classifier should err toward `security`; the cost of over-classifying is a notification the user ignores; the cost of under-classifying is a missed breach
+  - Classifier prompt should reinforce: when in doubt between `security` and any other workflow, choose `security`
 - [ ] Add `DELETE /domains/:id` endpoint and handler — remove SES email identity if it exists, delete domain record from DynamoDB; inbound mail for that domain will stop routing to SES naturally
 - [ ] **Two-tier domain setup model** — receiving and sending are separate concerns:
   - **Tier 1 — Receiving** (required to start): customer adds one MX record pointing their domain at the SES inbound endpoint. This is all that's needed to receive email into arcs. Domain is usable immediately after MX propagates.
@@ -73,7 +77,7 @@ Drill-in from inbox. Shows all signals in the arc as a chronological thread.
   - `invoice` → amount, due date, invoice number, download link
   - `travel` → flight number, departure/arrival, confirmation code, boarding pass link
   - `auth` → OTP/magic link action button (copy code, open link), expiry countdown
-  - `financial` → amount, account last 4, transaction date, fraud alert flag
+  - `financial` → amount, account last 4, transaction date, `isSuspicious` flag (bank has explicitly flagged unusual/unauthorized activity — renders as a red "Fraud alert" banner on the card; drives `critical` urgency)
   - `job` → company, role, stage (applied / interview / offer), action required flag
   - `subscription` → service name, renewal date, payment failed flag, action CTA
   - `healthcare` → appointment date, provider, action required flag
