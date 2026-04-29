@@ -8,7 +8,7 @@
   - **Tier 2 — Sending** (required only to reply or forward): DKIM CNAME + SPF TXT on bounce subdomain + DMARC CNAME. These are the 3 records that CNAME to our shared sending infrastructure (set up in `infra/ses.tf`). Prompted at the moment the user first tries to reply or forward, not before.
   - Onboarding walks through **both tiers** regardless — it's easier to do all DNS at once and there's no reason to defer it. But only Tier 1 is a hard gate; Tier 2 is strongly recommended and skippable with a reminder.
   - Domain model needs: `receivingSetupComplete: boolean`, `senderSetupComplete: boolean`, and per-record status rather than a single status field
-  - API — domain registration: initially returns only the MX record. Separate `POST /domains/:id/sender-setup` initiates Tier 2 and returns the 3 sender records.
+  - API — domain endpoints always return all 4 DNS records (MX + DKIM CNAME + SPF TXT + DMARC CNAME) regardless of which tier has been completed; the UI uses the per-record verification status to decide what to emphasise, not which records to show. No split endpoint.
   - Reply and forward rule actions must gate on `senderSetupComplete`; if false, surface a modal prompting Tier 2 setup before proceeding
   - Update `infra/ses.tf` docs/comments to clarify that the BYODKIM terminus, bounce subdomain, and DMARC records are *our* infrastructure — customer Tier 2 CNAMEs point to ours
 - [ ] **Domain health monitoring** — weekly proactive DNS check across all accounts and domains:
@@ -22,7 +22,7 @@
     3. In-app notification (same content)
     4. Do not halt inbound processing immediately — SES may still route for a period; mark degraded and surface warning in UI
   - **On-demand re-check**: `POST /domains/:id/verify` runs the health check immediately — powers the UI "Re-check DNS" button so users don't wait a week after fixing records
-  - API must return full DNS record details (name, type, expected value, current status) so the UI can show per-record green/red indicators
+  - Domain API always returns all 4 records with full detail: `{ name, type, value, currentValue?, status: "verified"|"failing"|"pending" }` — UI uses this to render per-record indicators; never filter records out based on setup tier
 
 ---
 
@@ -169,7 +169,7 @@ For users who receive mail via a custom domain routed through SES.
   - `active` — all 3 records verified, can reply and forward, green
   - `degraded` — one or more records failing, amber
   - `not configured` — user hasn't gone through sender setup yet, grey with "Set up sending" CTA
-- Register new domain: wizard shows MX record first; offers to continue to sender setup immediately or skip ("You can do this later from Settings")
+- Register new domain: wizard always shows all 4 DNS records at once — MX clearly marked as required now, the 3 sender records clearly marked as recommended (same UX as onboarding Step 1)
 - DNS record table after registration — two sections:
   - **Receiving** (1 record): domain MX → SES inbound endpoint
   - **Sending** (3 records, shown once Tier 2 is initiated): `mail._domainkey.{domain}` CNAME, `bounce.{domain}` MX, `bounce.{domain}` TXT SPF, `_dmarc.{domain}` CNAME
@@ -296,19 +296,39 @@ Every action taken by any user in the account is logged and browsable.
 
 ### Onboarding / First-Run
 
-- Step 1: Register your domain
-  - Domain name input; no skip option (domain is required to receive email)
-  - Immediately show the **MX record** (Tier 1) to add — this is the only hard gate
-  - Poll DNS in the background every 10 seconds; show a live "Waiting for MX record…" indicator; auto-advance when detected
-- Step 2: Set up sending (Tier 2) — strongly recommended, clearly skippable
-  - Explain in plain language: "This lets you reply to emails and forward them. It also ensures emails you send look professional and don't land in spam."
-  - Show the 3 sender records (DKIM CNAME, SPF TXT on bounce subdomain, DMARC CNAME) all at once — easier to do all DNS in one session
-  - Per-record live status indicators; auto-advance when all 3 verified
-  - "Skip for now — I'll do this later" link; resurfaces as a banner in Settings → Domains
-- Step 3: Choose default filter mode (with plain-language descriptions of each option)
-- Step 4: Create your first view or label (or skip)
-- Progress bar at top; all steps resumable if the user closes the browser mid-flow
-- If user arrives at the app later with incomplete onboarding, surface a contextual prompt (not a blocking modal) pointing them back to the incomplete step
+Progress bar at top spanning all steps. Every step is resumable — if the user closes the browser mid-flow, they land back at the incomplete step next time they open the app. Incomplete onboarding resurfaces as a non-blocking contextual banner (not a modal) pointing to the exact step remaining.
+
+- **Step 1 — Register your domain**
+  - Single input: domain name. No skip — a domain is required to receive email.
+  - On submit, immediately show all 4 DNS records in a clean table (MX + DKIM CNAME + SPF TXT + DMARC CNAME) with copy-to-clipboard on each value. All records are shown upfront because DNS is easier to do in one sitting.
+  - Clearly mark MX as required now; the 3 sender records as "recommended — do these now, or we'll remind you later"
+  - Background DNS polling every 10 seconds with a live per-record status indicator (spinner → green check as each one propagates). Auto-advance once MX is verified; sender records can still be pending.
+  - "My DNS is propagating, come back later" escape hatch — saves progress, sends a reminder email.
+
+- **Step 2 — Send yourself an email** *(the aha moment)*
+  - Full-screen immersive step. No clutter. Large, calm UI.
+  - Headline: *"Let's make sure everything is working."*
+  - Show the user's new address (e.g. `you@yourdomain.com`) in a large, prominent pill with a one-tap copy button.
+  - Instruction: *"Open Gmail, Outlook, or any email app — and send an email to this address. We'll show it here the moment it arrives."*
+  - Below: an animated waiting state — subtle pulse or breathing animation around an empty inbox card. Not a spinner, not a loading bar. Something that feels alive and calm. Copy: *"Waiting for your email…"*
+  - The moment the signal arrives (real-time via WebSocket or long-poll): the animation resolves, the card fills in with the email — sender name, subject, the AI-generated summary, workflow classification, and urgency badge — all exactly as it will appear in their real inbox.
+  - Celebration moment: brief confetti burst or a satisfying check animation. Copy: *"It works. Your first email just arrived."*
+  - Let the user hover/read the card for a moment, then a CTA appears: *"Continue →"*
+  - Edge cases: if no email after 3 minutes, gently offer help ("Didn't arrive? Check your MX record or try sending again.") with a re-check button and a "send a test from us instead" fallback that fires a system-generated signal so they can still experience the moment even if their personal email is slow.
+
+- **Step 3 — Set up sending** (skippable with clear consequence)
+  - Shown only if the 3 sender records weren't verified in Step 1.
+  - Plain-language explanation: *"To reply to emails and forward them to other addresses, we need 3 more DNS records. This also stops your replies landing in spam."*
+  - Show the 3 records with live status indicators — same UX as Step 1.
+  - "Skip for now" link is visible but secondary. If skipped, a persistent amber banner appears in Settings → Domains with the remaining records.
+
+- **Step 4 — Choose your filter mode**
+  - Three options presented as cards with icons and plain-language descriptions (not `notify_new` / `strict` etc. — use human names like "Ask me about new senders" / "Strict — approved senders only" / "Open — let everything through")
+  - Default pre-selected; user can change later in settings.
+
+- **Step 5 — You're ready**
+  - Summary of what was set up (domain, filter mode, sender setup status)
+  - Single CTA: *"Go to my inbox →"* — lands on the arc list, where the email from Step 2 is already waiting
 
 ### Global UX Notes
 
