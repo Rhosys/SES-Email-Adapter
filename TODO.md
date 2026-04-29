@@ -1,22 +1,28 @@
 # TODO
 
 - [ ] Detect forwarded emails and auto-tag with the full source email address (e.g. `original:john@gmail.com`), where `john@gmail.com` is the original recipient address the email was sent to before being forwarded into the system. Use `X-Forwarded-To`, `X-Original-To`, or `Resent-To` headers to extract the address.
-- [ ] API must return full DNS record list when user registers a domain (4 branded CNAMEs)
 - [ ] Add `"set_urgency"` as a `RuleActionType` and `Arc.urgencyOverride` for user-configurable urgency overrides (deferred)
-- [ ] Add `DELETE /domains/:id` endpoint and handler — remove SES email identity, delete domain record from DynamoDB, reject inbound mail for that domain
-- [ ] **Domain health monitoring** — detect and handle misconfigured domains:
-  - **Detection (three layers)**:
-    1. Scheduled EventBridge rule (every 4–6 hours) calls `sesv2.getEmailIdentity(domain)` for every registered domain — SES actively verifies the DKIM CNAMEs and reports `DkimAttributes.Status` (`SUCCESS` / `FAILED` / `TEMPORARY_FAILURE`) and `VerifiedForSendingStatus`
-    2. Independent DNS resolution check at the same cadence — resolve all 4 records (`mail._domainkey.{domain}` CNAME, `bounce.{domain}` MX, `bounce.{domain}` TXT SPF, `_dmarc.{domain}` CNAME) and diff against expected values; gives granular "which record is broken" info for user-facing error messages
-    3. Bounce rate threshold — if hard-bounce rate in the SES feedback loop exceeds 5% in a rolling window, trigger an on-demand domain health check for that domain; the `feedback-processor.ts` already consumes SNS feedback events and is the natural place to add this
-  - **Domain status field**: add `status: "active" | "degraded" | "suspended"` to the domain DynamoDB record, plus `lastCheckedAt`, `lastHealthyAt`, and `failingRecords: string[]` (which specific records are wrong)
-  - **Suspension event**: listen for `AmazonSesAccountReputationNotification` SNS events — if SES suspends a domain identity, mark it `suspended` immediately
-  - **Response on detection**:
-    1. Update domain status in DynamoDB
-    2. Notify all `owner` and `admin` users via email (SES notifier) and in-app notification — include domain name, which records are failing, and the correct expected values
-    3. Do not immediately stop processing inbound (SES may still route while reputation holds), but mark `degraded` so the UI surfaces the warning
-    4. If status reaches `suspended`, stop accepting inbound and show a hard error state
-  - **Re-check on demand**: expose `POST /domains/:id/verify` endpoint that runs the health check immediately — called by the UI "Re-check DNS" button after the user claims to have fixed their records
+- [ ] Add `DELETE /domains/:id` endpoint and handler — remove SES email identity if it exists, delete domain record from DynamoDB; inbound mail for that domain will stop routing to SES naturally
+- [ ] **Two-tier domain setup model** — receiving and sending are separate concerns:
+  - **Tier 1 — Receiving** (required to start): customer adds one MX record pointing their domain at the SES inbound endpoint. This is all that's needed to receive email into arcs. Domain is usable immediately after MX propagates.
+  - **Tier 2 — Sending** (required only to reply or forward): DKIM CNAME + SPF TXT on bounce subdomain + DMARC CNAME. These are the 3 records that CNAME to our shared sending infrastructure (set up in `infra/ses.tf`). Prompted at the moment the user first tries to reply or forward, not before.
+  - Onboarding walks through **both tiers** regardless — it's easier to do all DNS at once and there's no reason to defer it. But only Tier 1 is a hard gate; Tier 2 is strongly recommended and skippable with a reminder.
+  - Domain model needs: `receivingSetupComplete: boolean`, `senderSetupComplete: boolean`, and per-record status rather than a single status field
+  - API — domain registration: initially returns only the MX record. Separate `POST /domains/:id/sender-setup` initiates Tier 2 and returns the 3 sender records.
+  - Reply and forward rule actions must gate on `senderSetupComplete`; if false, surface a modal prompting Tier 2 setup before proceeding
+  - Update `infra/ses.tf` docs/comments to clarify that the BYODKIM terminus, bounce subdomain, and DMARC records are *our* infrastructure — customer Tier 2 CNAMEs point to ours
+- [ ] **Domain health monitoring** — weekly proactive DNS check across all accounts and domains:
+  - **Primary detection — scheduled DNS resolution**: SES only gives positive signals for identities we've registered; if a customer removes their MX record, email silently stops arriving and SES never tells us. The only reliable detection is us actively resolving DNS. EventBridge weekly rule → Lambda → scan all accounts → all registered domains per account → DNS-resolve each record that belongs to the setup tier the customer has completed → write updated per-record status to DynamoDB → notify if degraded.
+  - **Secondary detection — SES bounce/complaint feedback**: `feedback-processor.ts` already consumes SNS feedback events. If hard-bounce rate exceeds 5% in a rolling window for a given domain, trigger an on-demand DNS health check for that domain. Not a substitute for the weekly scan but catches real-world delivery failures between scheduled runs.
+  - **Domain record fields to add**: `receivingHealthy: boolean`, `senderHealthy: boolean`, `failingRecords: string[]` (specific record names that failed), `lastCheckedAt`, `lastHealthyAt`
+  - **SES reputation SNS event**: listen for `AmazonSesAccountReputationNotification` — if SES suspends a sending identity, immediately mark `senderHealthy: false` and notify users
+  - **On degradation**:
+    1. Update domain record in DynamoDB
+    2. Email all `owner` and `admin` users: domain name, which records are failing, correct expected values
+    3. In-app notification (same content)
+    4. Do not halt inbound processing immediately — SES may still route for a period; mark degraded and surface warning in UI
+  - **On-demand re-check**: `POST /domains/:id/verify` runs the health check immediately — powers the UI "Re-check DNS" button so users don't wait a week after fixing records
+  - API must return full DNS record details (name, type, expected value, current status) so the UI can show per-record green/red indicators
 
 ---
 
@@ -154,23 +160,26 @@ Each recipient address the user receives mail at can be configured independently
 
 For users who receive mail via a custom domain routed through SES.
 
-- List registered domains — each row shows domain name, status badge, last checked timestamp
-- Status badges:
-  - `active` — all records verified, green
-  - `degraded` — one or more records failing, amber warning icon
-  - `suspended` — SES has paused the identity, red hard error
-  - `pending` — newly registered, awaiting first verification pass
-- Register new domain (enters domain name)
-- After registration, show the **4 DNS records** to add:
-  1. `mail._domainkey.{domain}` CNAME → DKIM verification
-  2. `bounce.{domain}` MX → SES bounce handling
-  3. `bounce.{domain}` TXT → SPF record
-  4. `_dmarc.{domain}` CNAME → DMARC policy
-- Copy-to-clipboard buttons for each record value
-- Per-record status indicators (green check / red cross) populated from `failingRecords[]`
-- **Degraded / suspended state**: inline warning banner on the domain row and on the detail view explaining which specific record is wrong, showing its expected value, and offering a **Re-check DNS** button (calls `POST /domains/:id/verify` on demand — don't make the user wait 6 hours for the next scheduled check)
-- **Re-check button**: disabled with a spinner while the check is running; shows result inline within a few seconds
-- Delete domain: confirm dialog warning that inbound email for this domain will stop immediately
+- List registered domains — each row shows: domain name, Tier 1 (receiving) status badge, Tier 2 (sending) status badge, last checked timestamp
+- **Tier 1 status badges** (MX record):
+  - `active` — MX verified, receiving email, green
+  - `degraded` — MX missing or wrong, amber — email is not being received
+  - `pending` — newly registered, awaiting first weekly check pass
+- **Tier 2 status badges** (DKIM + SPF + DMARC):
+  - `active` — all 3 records verified, can reply and forward, green
+  - `degraded` — one or more records failing, amber
+  - `not configured` — user hasn't gone through sender setup yet, grey with "Set up sending" CTA
+- Register new domain: wizard shows MX record first; offers to continue to sender setup immediately or skip ("You can do this later from Settings")
+- DNS record table after registration — two sections:
+  - **Receiving** (1 record): domain MX → SES inbound endpoint
+  - **Sending** (3 records, shown once Tier 2 is initiated): `mail._domainkey.{domain}` CNAME, `bounce.{domain}` MX, `bounce.{domain}` TXT SPF, `_dmarc.{domain}` CNAME
+- Copy-to-clipboard button on every record value
+- Per-record status indicator (green check / amber warning / red cross) from `failingRecords[]`
+- **Degraded state**: inline warning banner showing exactly which record is wrong, its current (incorrect) value if resolvable, and the correct expected value
+- **Re-check DNS button**: calls `POST /domains/:id/verify` on demand; spinner while running; shows updated per-record status inline within seconds — users should not have to wait for the weekly scheduled check after fixing a record
+- **"Set up sending" prompt**: shown on domains with Tier 1 active but Tier 2 not configured; clicking opens the sender setup wizard inline
+- **Reply/forward gate**: when a user attempts to reply or forward from a domain that has Tier 2 `not configured` or `degraded`, show a modal explaining the issue and linking to the domain's sender setup — do not silently fail
+- Delete domain: confirm dialog warns that inbound email for this domain will stop routing; requires typing the domain name to confirm
 
 ### Settings — Forwarding Addresses
 
@@ -287,11 +296,19 @@ Every action taken by any user in the account is logged and browsable.
 
 ### Onboarding / First-Run
 
-- Step 1: Register your domain (or skip if using a system address)
-- Step 2: Add DNS records (copy-paste with status polling)
-- Step 3: Choose default filter mode
-- Step 4: Create your first view or label
-- Progress indicator; can resume later
+- Step 1: Register your domain
+  - Domain name input; no skip option (domain is required to receive email)
+  - Immediately show the **MX record** (Tier 1) to add — this is the only hard gate
+  - Poll DNS in the background every 10 seconds; show a live "Waiting for MX record…" indicator; auto-advance when detected
+- Step 2: Set up sending (Tier 2) — strongly recommended, clearly skippable
+  - Explain in plain language: "This lets you reply to emails and forward them. It also ensures emails you send look professional and don't land in spam."
+  - Show the 3 sender records (DKIM CNAME, SPF TXT on bounce subdomain, DMARC CNAME) all at once — easier to do all DNS in one session
+  - Per-record live status indicators; auto-advance when all 3 verified
+  - "Skip for now — I'll do this later" link; resurfaces as a banner in Settings → Domains
+- Step 3: Choose default filter mode (with plain-language descriptions of each option)
+- Step 4: Create your first view or label (or skip)
+- Progress bar at top; all steps resumable if the user closes the browser mid-flow
+- If user arrives at the app later with incomplete onboarding, surface a contextual prompt (not a blocking modal) pointing them back to the incomplete step
 
 ### Global UX Notes
 
