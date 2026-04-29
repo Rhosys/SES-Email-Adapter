@@ -3,6 +3,20 @@
 - [ ] Detect forwarded emails and auto-tag with the full source email address (e.g. `original:john@gmail.com`), where `john@gmail.com` is the original recipient address the email was sent to before being forwarded into the system. Use `X-Forwarded-To`, `X-Original-To`, or `Resent-To` headers to extract the address.
 - [ ] API must return full DNS record list when user registers a domain (4 branded CNAMEs)
 - [ ] Add `"set_urgency"` as a `RuleActionType` and `Arc.urgencyOverride` for user-configurable urgency overrides (deferred)
+- [ ] Add `DELETE /domains/:id` endpoint and handler — remove SES email identity, delete domain record from DynamoDB, reject inbound mail for that domain
+- [ ] **Domain health monitoring** — detect and handle misconfigured domains:
+  - **Detection (three layers)**:
+    1. Scheduled EventBridge rule (every 4–6 hours) calls `sesv2.getEmailIdentity(domain)` for every registered domain — SES actively verifies the DKIM CNAMEs and reports `DkimAttributes.Status` (`SUCCESS` / `FAILED` / `TEMPORARY_FAILURE`) and `VerifiedForSendingStatus`
+    2. Independent DNS resolution check at the same cadence — resolve all 4 records (`mail._domainkey.{domain}` CNAME, `bounce.{domain}` MX, `bounce.{domain}` TXT SPF, `_dmarc.{domain}` CNAME) and diff against expected values; gives granular "which record is broken" info for user-facing error messages
+    3. Bounce rate threshold — if hard-bounce rate in the SES feedback loop exceeds 5% in a rolling window, trigger an on-demand domain health check for that domain; the `feedback-processor.ts` already consumes SNS feedback events and is the natural place to add this
+  - **Domain status field**: add `status: "active" | "degraded" | "suspended"` to the domain DynamoDB record, plus `lastCheckedAt`, `lastHealthyAt`, and `failingRecords: string[]` (which specific records are wrong)
+  - **Suspension event**: listen for `AmazonSesAccountReputationNotification` SNS events — if SES suspends a domain identity, mark it `suspended` immediately
+  - **Response on detection**:
+    1. Update domain status in DynamoDB
+    2. Notify all `owner` and `admin` users via email (SES notifier) and in-app notification — include domain name, which records are failing, and the correct expected values
+    3. Do not immediately stop processing inbound (SES may still route while reputation holds), but mark `degraded` so the UI surfaces the warning
+    4. If status reaches `suspended`, stop accepting inbound and show a hard error state
+  - **Re-check on demand**: expose `POST /domains/:id/verify` endpoint that runs the health check immediately — called by the UI "Re-check DNS" button after the user claims to have fixed their records
 
 ---
 
@@ -140,7 +154,12 @@ Each recipient address the user receives mail at can be configured independently
 
 For users who receive mail via a custom domain routed through SES.
 
-- List registered domains with status (active / pending DNS verification)
+- List registered domains — each row shows domain name, status badge, last checked timestamp
+- Status badges:
+  - `active` — all records verified, green
+  - `degraded` — one or more records failing, amber warning icon
+  - `suspended` — SES has paused the identity, red hard error
+  - `pending` — newly registered, awaiting first verification pass
 - Register new domain (enters domain name)
 - After registration, show the **4 DNS records** to add:
   1. `mail._domainkey.{domain}` CNAME → DKIM verification
@@ -148,8 +167,10 @@ For users who receive mail via a custom domain routed through SES.
   3. `bounce.{domain}` TXT → SPF record
   4. `_dmarc.{domain}` CNAME → DMARC policy
 - Copy-to-clipboard buttons for each record value
-- DNS verification status polling (check marks as records propagate)
-- Delete domain
+- Per-record status indicators (green check / red cross) populated from `failingRecords[]`
+- **Degraded / suspended state**: inline warning banner on the domain row and on the detail view explaining which specific record is wrong, showing its expected value, and offering a **Re-check DNS** button (calls `POST /domains/:id/verify` on demand — don't make the user wait 6 hours for the next scheduled check)
+- **Re-check button**: disabled with a spinner while the check is running; shows result inline within a few seconds
+- Delete domain: confirm dialog warning that inbound email for this domain will stop immediately
 
 ### Settings — Forwarding Addresses
 
