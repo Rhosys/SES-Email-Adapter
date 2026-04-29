@@ -187,31 +187,26 @@ describe("SignalClassifier", () => {
   // -------------------------------------------------------------------------
 
   describe("spam detection", () => {
-    it("flags phishing email with high spam score", async () => {
+    it("flags phishing email with high spam score (auth workflow, high spamScore)", async () => {
       mockClassifyResponse({
-        workflow: "spam",
+        workflow: "auth",
         workflowData: {
-          workflow: "spam",
-          spamType: "phishing",
-          confidence: 0.97,
-          indicators: [
-            "Sender domain paypa1.com impersonates PayPal",
-            "SPF and DKIM authentication failures",
-            "Suspicious redirect domain (.ru)",
-          ],
+          workflow: "auth",
+          authType: "other",
+          code: null,
+          expiresInMinutes: null,
+          service: "PayPal",
+          actionUrl: "http://paypal-restore.ru/login",
         },
         spamScore: 0.97,
-        summary: "Phishing email impersonating PayPal.",
-        labels: [],
+        summary: "Phishing email impersonating PayPal login.",
+        labels: ["phishing"],
       });
 
       const result = await classifier.classify(phishingEmail);
 
       expect(result.spamScore).toBeGreaterThan(0.9);
-      expect(result.workflow).toBe("spam");
-      if (result.workflowData.workflow === "spam") {
-        expect(result.workflowData.indicators).toContain("Sender domain paypa1.com impersonates PayPal");
-      }
+      expect(result.workflow).toBe("auth");
     });
   });
 
@@ -377,6 +372,327 @@ describe("SignalClassifier", () => {
       const callArgs = mockSend.mock.calls[0]![0] as { body: Uint8Array };
       const body = JSON.parse(new TextDecoder().decode(callArgs.body)) as { inputText: string };
       expect(body.inputText.length).toBe(8000);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // classify — content formatting (HTML stripping, header filtering, truncation)
+  // -------------------------------------------------------------------------
+
+  describe("content formatting", () => {
+    it("uses stripped HTML body when textBody is absent", async () => {
+      mockClassifyResponse({
+        workflow: "personal",
+        workflowData: { workflow: "personal", isReply: false, sentiment: "neutral", requiresReply: false },
+        spamScore: 0.0,
+        summary: "Email.",
+        labels: [],
+      });
+
+      await classifier.classify({
+        from: "noreply@service.com",
+        to: ["user@example.com"],
+        subject: "HTML only",
+        htmlBody: "<p><b>Important</b> content with <a href='#'>links</a> and <script>evil()</script> inline.</p>",
+        receivedAt: "2024-01-15T10:00:00Z",
+        headers: {},
+      });
+
+      const callArgs = mockSend.mock.calls[0]![0] as { body: Uint8Array };
+      const payload = JSON.parse(new TextDecoder().decode(callArgs.body)) as { messages: Array<{ content: string }> };
+      const content = payload.messages[0]!.content;
+      expect(content).toContain("Important content with links");
+      expect(content).not.toContain("<b>");
+      expect(content).not.toContain("<script>");
+      expect(content).not.toContain("evil()");
+    });
+
+    it("includes only RELEVANT_HEADERS in the Bedrock message — irrelevant headers are stripped", async () => {
+      mockClassifyResponse({
+        workflow: "personal",
+        workflowData: { workflow: "personal", isReply: false, sentiment: "neutral", requiresReply: false },
+        spamScore: 0.0,
+        summary: "Email.",
+        labels: [],
+      });
+
+      await classifier.classify({
+        from: "noreply@service.com",
+        to: ["user@example.com"],
+        subject: "Header test",
+        textBody: "body",
+        receivedAt: "2024-01-15T10:00:00Z",
+        headers: {
+          "dkim-signature": "v=1; keep_me",      // relevant
+          "authentication-results": "spf=pass",  // relevant
+          "x-custom-crm-id": "abc123",           // not relevant
+          "user-agent": "Mozilla/5.0",           // not relevant
+        },
+      });
+
+      const callArgs = mockSend.mock.calls[0]![0] as { body: Uint8Array };
+      const payload = JSON.parse(new TextDecoder().decode(callArgs.body)) as { messages: Array<{ content: string }> };
+      const content = payload.messages[0]!.content;
+      expect(content).toContain("dkim-signature");
+      expect(content).toContain("authentication-results");
+      expect(content).not.toContain("x-custom-crm-id");
+      expect(content).not.toContain("user-agent");
+    });
+
+    it("truncates body longer than 4000 characters and appends truncation marker", async () => {
+      mockClassifyResponse({
+        workflow: "newsletter",
+        workflowData: { workflow: "newsletter", publication: "Test", topics: [] },
+        spamScore: 0.1,
+        summary: "Newsletter.",
+        labels: [],
+      });
+
+      await classifier.classify({
+        from: "newsletter@service.com",
+        to: ["user@example.com"],
+        subject: "Long body",
+        textBody: "x".repeat(4001),
+        receivedAt: "2024-01-15T10:00:00Z",
+        headers: {},
+      });
+
+      const callArgs = mockSend.mock.calls[0]![0] as { body: Uint8Array };
+      const payload = JSON.parse(new TextDecoder().decode(callArgs.body)) as { messages: Array<{ content: string }> };
+      expect(payload.messages[0]!.content).toContain("[... truncated]");
+    });
+
+    it("does not truncate body of exactly 4000 characters", async () => {
+      mockClassifyResponse({
+        workflow: "newsletter",
+        workflowData: { workflow: "newsletter", publication: "Test", topics: [] },
+        spamScore: 0.0,
+        summary: "Newsletter.",
+        labels: [],
+      });
+
+      await classifier.classify({
+        from: "newsletter@service.com",
+        to: ["user@example.com"],
+        subject: "Exact length body",
+        textBody: "y".repeat(4000),
+        receivedAt: "2024-01-15T10:00:00Z",
+        headers: {},
+      });
+
+      const callArgs = mockSend.mock.calls[0]![0] as { body: Uint8Array };
+      const payload = JSON.parse(new TextDecoder().decode(callArgs.body)) as { messages: Array<{ content: string }> };
+      expect(payload.messages[0]!.content).not.toContain("[... truncated]");
+    });
+
+    it("throws when Bedrock returns non-JSON text content", async () => {
+      const malformed = new TextEncoder().encode(
+        JSON.stringify({ content: [{ type: "text", text: "not valid json {{{{" }] }),
+      );
+      mockSend.mockResolvedValueOnce({ body: malformed });
+
+      await expect(classifier.classify(githubOtpEmail)).rejects.toThrow();
+    });
+
+    it("preserves emoji and unicode characters in the Bedrock message content", async () => {
+      mockClassifyResponse({
+        workflow: "personal",
+        workflowData: { workflow: "personal", isReply: false, sentiment: "positive", requiresReply: false },
+        spamScore: 0.0,
+        summary: "Personal email.",
+        labels: [],
+      });
+
+      await classifier.classify({
+        from: "friend@example.com",
+        to: ["user@example.com"],
+        subject: "Hello 👋 from Tokyo 🗼",
+        textBody: "希望你一切都好！😊",
+        receivedAt: "2024-01-15T10:00:00Z",
+        headers: {},
+      });
+
+      const callArgs = mockSend.mock.calls[0]![0] as { body: Uint8Array };
+      const payload = JSON.parse(new TextDecoder().decode(callArgs.body)) as { messages: Array<{ content: string }> };
+      const content = payload.messages[0]!.content;
+      expect(content).toContain("Hello 👋 from Tokyo 🗼");
+      expect(content).toContain("希望你一切都好！😊");
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // classify — additional workflow coverage
+  // -------------------------------------------------------------------------
+
+  describe("financial emails", () => {
+    it("extracts institution, amount, and isSuspicious from a fraud alert", async () => {
+      mockClassifyResponse({
+        workflow: "financial",
+        workflowData: {
+          workflow: "financial",
+          financialType: "fraud_alert",
+          institution: "Chase Bank",
+          amount: 2499.99,
+          currency: "USD",
+          accountLastFour: "4242",
+          transactionDate: "2024-01-15",
+          isSuspicious: true,
+        },
+        spamScore: 0.0,
+        summary: "Fraud alert from Chase Bank for $2,499.99.",
+        labels: ["urgent", "action-needed"],
+      });
+
+      const result = await classifier.classify({
+        from: "alerts@chase.com",
+        to: ["user@example.com"],
+        subject: "Unusual activity on your Chase account",
+        textBody: "We noticed a $2,499.99 charge at an unknown merchant. If this wasn't you, call us.",
+        receivedAt: "2024-01-15T08:00:00Z",
+        headers: { "authentication-results": "spf=pass dkim=pass" },
+      });
+
+      expect(result.workflow).toBe("financial");
+      expect(result.workflowData).toMatchObject({ institution: "Chase Bank", amount: 2499.99, isSuspicious: true });
+      expect(result.labels).toContain("urgent");
+    });
+  });
+
+  describe("travel emails", () => {
+    it("extracts provider, confirmation number, and departure date from a flight booking", async () => {
+      mockClassifyResponse({
+        workflow: "travel",
+        workflowData: {
+          workflow: "travel",
+          travelType: "flight",
+          provider: "Delta Airlines",
+          confirmationNumber: "DELTA123",
+          departureDate: "2024-03-15",
+          returnDate: "2024-03-22",
+          origin: "JFK",
+          destination: "LHR",
+          passengerName: "John Doe",
+          totalAmount: 850.0,
+          currency: "USD",
+        },
+        spamScore: 0.0,
+        summary: "Delta Airlines flight JFK → LHR departing March 15. Confirmation: DELTA123.",
+        labels: [],
+      });
+
+      const result = await classifier.classify({
+        from: "confirmation@delta.com",
+        to: ["user@example.com"],
+        subject: "Your flight confirmation DELTA123",
+        textBody: "Flight JFK → LHR on March 15. Confirmation: DELTA123.",
+        receivedAt: "2024-01-15T12:00:00Z",
+        headers: { "authentication-results": "spf=pass dkim=pass" },
+      });
+
+      expect(result.workflow).toBe("travel");
+      expect(result.workflowData).toMatchObject({
+        travelType: "flight",
+        provider: "Delta Airlines",
+        confirmationNumber: "DELTA123",
+        departureDate: "2024-03-15",
+      });
+    });
+  });
+
+  describe("scheduling emails", () => {
+    it("extracts title, startTime, and requiresResponse from a meeting invite", async () => {
+      mockClassifyResponse({
+        workflow: "scheduling",
+        workflowData: {
+          workflow: "scheduling",
+          eventType: "meeting_invite",
+          title: "Q1 Planning Session",
+          startTime: "2024-02-01T14:00:00Z",
+          endTime: "2024-02-01T15:00:00Z",
+          location: "Zoom",
+          organizer: "boss@company.com",
+          attendees: ["user@example.com"],
+          requiresResponse: true,
+        },
+        spamScore: 0.0,
+        summary: "Meeting invite for Q1 Planning Session on Feb 1 at 2pm.",
+        labels: ["action-needed"],
+      });
+
+      const result = await classifier.classify({
+        from: "boss@company.com",
+        to: ["user@example.com"],
+        subject: "Invite: Q1 Planning Session @ Feb 1 2pm",
+        textBody: "You're invited to Q1 Planning Session on Feb 1 at 2pm on Zoom. Please RSVP.",
+        receivedAt: "2024-01-15T09:00:00Z",
+        headers: {},
+      });
+
+      expect(result.workflow).toBe("scheduling");
+      expect(result.workflowData).toMatchObject({
+        title: "Q1 Planning Session",
+        startTime: "2024-02-01T14:00:00Z",
+        requiresResponse: true,
+      });
+    });
+  });
+
+  describe("security emails", () => {
+    it("extracts alertType and requiresAction from a suspicious login alert", async () => {
+      mockClassifyResponse({
+        workflow: "security",
+        workflowData: {
+          workflow: "security",
+          alertType: "suspicious_login",
+          service: "GitHub",
+          ipAddress: "203.0.113.42",
+          location: "Moscow, Russia",
+          deviceName: null,
+          requiresAction: true,
+          actionUrl: "https://github.com/settings/security",
+        },
+        spamScore: 0.0,
+        summary: "GitHub detected a suspicious login from Moscow, Russia. Action required.",
+        labels: ["action-needed", "urgent"],
+      });
+
+      const result = await classifier.classify({
+        from: "security@github.com",
+        to: ["user@example.com"],
+        subject: "Suspicious sign-in attempt on your GitHub account",
+        textBody: "We detected a login from 203.0.113.42 in Moscow, Russia. Was this you?",
+        receivedAt: "2024-01-15T03:00:00Z",
+        headers: { "authentication-results": "spf=pass dkim=pass" },
+      });
+
+      expect(result.workflow).toBe("security");
+      expect(result.workflowData).toMatchObject({ alertType: "suspicious_login", requiresAction: true });
+      expect(result.spamScore).toBeLessThan(0.3); // legitimate alert from github.com
+    });
+  });
+
+  describe("test workflow", () => {
+    it("classifies unambiguous test content as the test workflow", async () => {
+      mockClassifyResponse({
+        workflow: "test",
+        workflowData: { workflow: "test", triggeredBy: "user" },
+        spamScore: 0.0,
+        summary: "User sent a test email to verify inbox delivery.",
+        labels: [],
+      });
+
+      const result = await classifier.classify({
+        from: "me@mydomain.com",
+        to: ["me@mydomain.com"],
+        subject: "test",
+        textBody: "testing 123",
+        receivedAt: "2024-01-15T10:00:00Z",
+        headers: {},
+      });
+
+      expect(result.workflow).toBe("test");
+      expect(result.workflowData).toMatchObject({ triggeredBy: "user" });
+      expect(result.spamScore).toBe(0.0);
     });
   });
 });

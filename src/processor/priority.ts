@@ -36,6 +36,10 @@ export function baseUrgency(workflow: Workflow, data: WorkflowData): ArcUrgency 
     case "notice":
       return "silent";
 
+    // test emails are high urgency — the user is actively waiting for confirmation
+    case "test":
+      return "high";
+
     default:
       return "normal";
   }

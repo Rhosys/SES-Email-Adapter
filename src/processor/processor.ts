@@ -4,7 +4,7 @@ import type { Signal, Arc, Rule, Workflow, WorkflowData, EmailAddressConfig, Acc
 import { priorityCalculator } from "./priority.js";
 import type { MimeParser } from "./mime.js";
 import type { SignalClassifier } from "../classifier/classifier.js";
-import { getETLD1, evaluateFilter } from "./filter.js";
+import { getETLD1, evaluateFilter, DEFAULT_SPAM_SCORE_THRESHOLD } from "./filter.js";
 
 // ---------------------------------------------------------------------------
 // Interfaces
@@ -14,6 +14,10 @@ export interface ProcessorAccountContext {
   retentionDays: number;
   filtering: AccountFilteringConfig | null;
   emailConfig: EmailAddressConfig | null;
+  // eTLD+1 of domains registered to this account — used for test detection
+  registeredDomains: string[];
+  // Email addresses of all users on this account — used for test detection
+  userEmails: string[];
 }
 
 export interface ProcessorDatabase {
@@ -159,8 +163,8 @@ export class SignalProcessor {
         from: parsed.from.address,
         to: parsed.to.map((a) => a.address),
         subject: parsed.subject,
-        textBody: parsed.textBody,
-        htmlBody: parsed.htmlBody ?? undefined,
+        ...(parsed.textBody != null && { textBody: parsed.textBody }),
+        ...(parsed.htmlBody != null && { htmlBody: parsed.htmlBody }),
         headers: parsed.headers,
         receivedAt: timestamp,
       }),
@@ -173,6 +177,23 @@ export class SignalProcessor {
     const ttl = accountCtx.retentionDays > 0
       ? Math.floor(Date.now() / 1000) + accountCtx.retentionDays * 86400
       : undefined;
+
+    // 3c. Test detection — override workflow when the sender is the account owner.
+    // Triggered if from-domain matches a registered account domain OR from-address matches a user email.
+    const fromDomain = getETLD1(parsed.from.address);
+    const isTestEmail =
+      accountCtx.registeredDomains.includes(fromDomain) ||
+      accountCtx.userEmails.map((e) => e.toLowerCase()).includes(parsed.from.address.toLowerCase());
+    if (isTestEmail) {
+      classification.workflow = "test";
+      classification.workflowData = { workflow: "test", triggeredBy: "user" };
+    }
+
+    // Resolved spam threshold: per-address → account → default
+    const spamScoreThreshold =
+      accountCtx.emailConfig?.spamScoreThreshold ??
+      accountCtx.filtering?.spamScoreThreshold ??
+      DEFAULT_SPAM_SCORE_THRESHOLD;
 
     // 4. Arc matching — deterministic key first, vector similarity fallback
     const groupingKey = deriveGroupingKey(classification.workflow, classification.workflowData, recipientAddress, senderETLD1);
@@ -196,7 +217,6 @@ export class SignalProcessor {
             : dispositionFor("onboarding", accountConfig);
           const status: SignalStatus = disposition === "quarantine" ? "quarantined" : "blocked";
           const suppressedSignal = buildSignal({
-            arcId: undefined,
             status,
             blockReason: "onboarding",
             accountId,
@@ -220,15 +240,15 @@ export class SignalProcessor {
       }
 
       const filterResult = evaluateFilter(emailConfig, senderETLD1, classification.spamScore, {
-        newAddressHandling: accountConfig?.newAddressHandling,
-        defaultFilterMode: accountConfig?.defaultFilterMode,
+        ...(accountConfig?.newAddressHandling && { newAddressHandling: accountConfig.newAddressHandling }),
+        ...(accountConfig?.defaultFilterMode && { defaultFilterMode: accountConfig.defaultFilterMode }),
+        spamScoreThreshold,
       });
 
       if (!filterResult.allowed) {
         const disposition = dispositionFor(filterResult.reason, accountConfig);
         const status: SignalStatus = disposition === "quarantine" ? "quarantined" : "blocked";
         const suppressedSignal = buildSignal({
-          arcId: undefined,
           status,
           blockReason: filterResult.reason,
           accountId,
@@ -250,7 +270,7 @@ export class SignalProcessor {
         }
 
         this.store.updateGlobalReputation(senderETLD1, {
-          wasSpam: classification.workflow === "spam" || classification.spamScore >= 0.9,
+          wasSpam: classification.spamScore >= spamScoreThreshold,
           wasBlocked: true,
         }).catch((err) => console.error("Reputation update failed:", err));
         return;
@@ -364,7 +384,7 @@ export class SignalProcessor {
       }
     }
 
-    const isSpam = classification.spamScore >= 0.9;
+    const isSpam = classification.spamScore >= spamScoreThreshold;
     if (this.notifier && !isSpam && !isNotice) {
       await this.notifier.notify(accountId, arc, signal).catch((err) => {
         console.error("Notification failed:", err);
@@ -372,7 +392,7 @@ export class SignalProcessor {
     }
 
     this.store.updateGlobalReputation(senderETLD1, {
-      wasSpam: isSpam,
+      wasSpam: classification.spamScore >= spamScoreThreshold,
       wasBlocked: false,
     }).catch((err) => console.error("Reputation update failed:", err));
   }
@@ -505,6 +525,7 @@ export function deriveGroupingKey(
     case "notice":
     case "newsletter":
     case "onboarding":
+    case "test":
       return `${base}:${senderETLD1}`;
 
     case "order": {
