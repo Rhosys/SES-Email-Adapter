@@ -114,15 +114,16 @@ User-defined filtered lists of arcs. Like Gmail labels but with filter logic bak
 - Drag-to-reorder (calls `POST /views/reorder`)
 - View config: workflow filter (single or all), label filters (must-have-all), sort field + direction
 - Default views to seed on first login: All, Action Needed, Finance, Travel, Receipts (mapped to relevant workflows + labels)
-- **System-level permanent nav items** — always present, cannot be deleted, renamed, or reordered by the user; user-created views sit below these:
-  1. **All** — every active arc (`Arc.status = "active"`), no filter; universal fallback for any arc no user view covers
-  2. **Quarantine** — blocked and quarantined signals that have not yet become arcs; separate from user views because views filter arcs and these signals predate arc creation
-  3. **Archive** — `Arc.status = "archived"`; arcs the user has dismissed but not deleted
-  4. **Trash** — `Arc.status = "deleted"`; retained and browsable until `deletionRetentionDays` TTL expires, then permanently removed; user can restore from here
-  - If **Snooze** is built: **Snoozed** becomes a 5th system item — arcs hidden until a future time need a permanent home to resurface and manage them
-  - If **Sent** is built: **Sent** becomes a 6th system item — outbound replies (`arcs where sentMessageIds is non-empty`) for reviewing what was sent and tracking threads awaiting a reply
-  - `test` workflow arcs are **not** a separate system view — they live in All and in user views like any arc; the collapsible "Tests" section is a display treatment within those views, not a separate destination
-- **Notifications always deep-link directly** to the specific arc or quarantined signal — the user never needs to navigate through views to find it; the notification payload must carry the arc ID or signal ID at fire time so the link resolves correctly even for pre-arc quarantined signals
+- **System-level permanent nav items** — always present, cannot be deleted or renamed; user-created views sit below these:
+  1. **Default** — the landing view when the app opens. User-configurable (workflow filter, label filter, urgency threshold, sort order) but has guaranteed base exclusions baked in regardless of configuration: archived arcs, deleted arcs, snoozed arcs (if built), stale `auth` arcs (OTPs and magic links past their validity window — auto-archived by the processor once expired), and `notice` arcs (always silent, never clutter the landing view). `test` arcs appear here. Everything else active surfaces by default.
+  2. **All** — every active arc with no filter and no exclusions. The escape hatch when Default is too narrow. Stale auth, notice, everything — it's all here.
+  3. **Quarantine** — blocked and quarantined signals that have not yet become arcs; separate from arc-based views because these signals predate arc creation.
+  4. **Archive** — `Arc.status = "archived"`.
+  5. **Trash** — `Arc.status = "deleted"`; browsable and restorable until `deletionRetentionDays` TTL, then permanently gone.
+  - If **Snooze** is built: **Snoozed** becomes a 6th system item — snoozed arcs need a permanent home; they are excluded from Default while snoozed but visible in All.
+  - No **Sent** view.
+- **`auth` arc auto-expiry**: processor or a scheduled job auto-archives `auth` arcs once the OTP/magic link validity window has passed (typically 10–30 min, extractable from `workflowData`). Keeps Default clean without requiring manual archiving of dead login requests.
+- **Notifications always deep-link directly** to the specific arc or quarantined signal — notification payload must carry the arc ID or signal ID at fire time so the link resolves correctly even for pre-arc quarantined signals.
 
 ### Labels
 
