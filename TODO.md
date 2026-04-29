@@ -114,6 +114,10 @@ User-defined filtered lists of arcs. Like Gmail labels but with filter logic bak
 - Drag-to-reorder (calls `POST /views/reorder`)
 - View config: workflow filter (single or all), label filters (must-have-all), sort field + direction
 - Default views to seed on first login: All, Action Needed, Finance, Travel, Receipts (mapped to relevant workflows + labels)
+- **Views are not the only way to reach an arc** — two system-level persistent elements always exist in the nav regardless of what views the user has configured:
+  1. **All Inbox** — shows every active arc without any filter; always present, cannot be deleted; the fallback destination for any arc that no user-created view covers
+  2. **Quarantine** — shows all blocked and quarantined signals (signals stopped before arc creation); always present, cannot be deleted; separate from user views because quarantined signals have no arc to filter by
+- **Notifications always deep-link directly** to the specific arc or quarantined signal — the user never needs to find it by navigating views; tapping a push notification or email alert lands them on the exact item regardless of their view configuration
 
 ### Labels
 
