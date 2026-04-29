@@ -1,7 +1,7 @@
 import { getDomain } from "tldts";
 import type { EmailAddressConfig, SenderFilterMode, BlockReason, NewAddressHandling } from "../types/index.js";
 
-export const SPAM_SCORE_THRESHOLD = 0.5;
+export const DEFAULT_SPAM_SCORE_THRESHOLD = 0.9;
 
 export type FilterResult =
   | { allowed: true; autoApprove: boolean }
@@ -10,6 +10,7 @@ export type FilterResult =
 export interface FilterOptions {
   newAddressHandling?: NewAddressHandling;  // default "auto_allow"
   defaultFilterMode?: SenderFilterMode;    // used when newAddressHandling is "block_until_approved"
+  spamScoreThreshold?: number;             // default DEFAULT_SPAM_SCORE_THRESHOLD
 }
 
 // Extract eTLD+1 from an email address or domain string
@@ -26,18 +27,20 @@ export function evaluateFilter(
   spamScore: number,
   opts: FilterOptions = {},
 ): FilterResult {
-  const { newAddressHandling = "auto_allow", defaultFilterMode = "notify_new" } = opts;
+  const {
+    newAddressHandling = "auto_allow",
+    defaultFilterMode = "notify_new",
+    spamScoreThreshold = emailConfig?.spamScoreThreshold ?? DEFAULT_SPAM_SCORE_THRESHOLD,
+  } = opts;
 
   if (!emailConfig) {
     if (newAddressHandling === "block_until_approved") {
-      // Treat like a known address with an empty approved-sender list.
-      return evaluateWithMode(defaultFilterMode, [], senderETLD1, spamScore);
+      return evaluateWithMode(defaultFilterMode, [], senderETLD1, spamScore, spamScoreThreshold);
     }
-    // Default: first contact always allowed; auto-approve the sender.
     return { allowed: true, autoApprove: true };
   }
 
-  return evaluateWithMode(emailConfig.filterMode, emailConfig.approvedSenders, senderETLD1, spamScore);
+  return evaluateWithMode(emailConfig.filterMode, emailConfig.approvedSenders, senderETLD1, spamScore, spamScoreThreshold);
 }
 
 function evaluateWithMode(
@@ -45,6 +48,7 @@ function evaluateWithMode(
   approvedSenders: string[],
   senderETLD1: string,
   spamScore: number,
+  spamScoreThreshold: number,
 ): FilterResult {
   const senderKnown = approvedSenders.includes(senderETLD1);
 
@@ -56,8 +60,8 @@ function evaluateWithMode(
     return { allowed: false, reason: "new_sender" };
   }
 
-  // Known sender: strict mode also enforces spam threshold.
-  if (mode === "strict" && spamScore >= SPAM_SCORE_THRESHOLD) {
+  // Known sender: strict mode also enforces the spam threshold.
+  if (mode === "strict" && spamScore >= spamScoreThreshold) {
     return { allowed: false, reason: "spam" };
   }
 

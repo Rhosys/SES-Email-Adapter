@@ -191,7 +191,10 @@ function makeDomain(overrides: Partial<Domain> = {}): Domain {
     id: "domain-001",
     accountId: TEST_ACCOUNT_ID,
     domain: "example.com",
+    receivingSetupComplete: false,
+    senderSetupComplete: false,
     createdAt: "2024-01-01T00:00:00Z",
+    updatedAt: "2024-01-01T00:00:00Z",
     ...overrides,
   };
 }
@@ -296,6 +299,25 @@ describe("API", () => {
         TEST_ACCOUNT_ID,
         expect.objectContaining({ status: "archived" }),
       );
+    });
+
+    it("passes cursor and limit pagination params to the store", async () => {
+      await req(app, "GET", `${A}/arcs?cursor=next-page-token&limit=10`);
+      expect(store.listArcs).toHaveBeenCalledWith(
+        TEST_ACCOUNT_ID,
+        expect.objectContaining({ cursor: "next-page-token", limit: 10 }),
+      );
+    });
+
+    it("returns nextCursor from the store response when present", async () => {
+      vi.mocked(store.listArcs).mockResolvedValueOnce({
+        items: [makeArc()],
+        total: 50,
+        nextCursor: "cursor-abc",
+      } as { items: Arc[]; total: number; nextCursor: string });
+      const res = await req(app, "GET", `${A}/arcs`);
+      const body = await res.json() as { nextCursor?: string };
+      expect(body.nextCursor).toBe("cursor-abc");
     });
   });
 
@@ -610,25 +632,77 @@ describe("API", () => {
     });
   });
 
-  describe("GET /accounts/:accountId/domains/:id/dkim", () => {
-    it("returns DKIM DNS records for a Domain", async () => {
+  describe("GET /accounts/:accountId/domains/:id/records", () => {
+    it("returns all DNS records for a Domain", async () => {
       vi.mocked(store.getDomain).mockResolvedValueOnce(makeDomain());
-      const res = await req(app, "GET", `${A}/domains/domain-001/dkim`);
+      const res = await req(app, "GET", `${A}/domains/domain-001/records`);
       expect(res.status).toBe(200);
-      const body = await res.json() as Array<{ type: string; name: string; value: string }>;
+      const body = await res.json() as Array<{ type: string; name: string; value: string; status: string }>;
       expect(Array.isArray(body)).toBe(true);
-      expect(body.length).toBeGreaterThan(0);
+      expect(body.length).toBe(4); // MX, DKIM, SPF, DMARC
       expect(body[0]).toHaveProperty("type");
+      expect(body[0]).toHaveProperty("status");
+    });
+
+    it("returns exactly 4 records with correct types: MX, CNAME, TXT, CNAME", async () => {
+      vi.mocked(store.getDomain).mockResolvedValueOnce(makeDomain());
+      const res = await req(app, "GET", `${A}/domains/domain-001/records`);
+      const body = await res.json() as Array<{ type: string; name: string; value: string; status: string }>;
+      expect(body.map((r) => r.type)).toEqual(["MX", "CNAME", "TXT", "CNAME"]);
+    });
+
+    it("returns status=pending for every record when domain has never been health-checked", async () => {
+      vi.mocked(store.getDomain).mockResolvedValueOnce(makeDomain()); // no lastCheckedAt
+      const res = await req(app, "GET", `${A}/domains/domain-001/records`);
+      const body = await res.json() as Array<{ status: string }>;
+      expect(body.every((r) => r.status === "pending")).toBe(true);
+    });
+
+    it("returns status=verified for all records after a clean health check", async () => {
+      vi.mocked(store.getDomain).mockResolvedValueOnce(
+        makeDomain({ lastCheckedAt: "2024-01-15T00:00:00Z", failingRecords: [] }),
+      );
+      const res = await req(app, "GET", `${A}/domains/domain-001/records`);
+      const body = await res.json() as Array<{ status: string }>;
+      expect(body.every((r) => r.status === "verified")).toBe(true);
+    });
+
+    it("shows failing status only for the records listed in failingRecords", async () => {
+      vi.mocked(store.getDomain).mockResolvedValueOnce(
+        makeDomain({
+          lastCheckedAt: "2024-01-15T00:00:00Z",
+          failingRecords: ["_dmarc.example.com"],
+        }),
+      );
+      const res = await req(app, "GET", `${A}/domains/domain-001/records`);
+      const body = await res.json() as Array<{ name: string; status: string }>;
+      const dmarc = body.find((r) => r.name === "_dmarc.example.com")!;
+      const others = body.filter((r) => r.name !== "_dmarc.example.com");
+      expect(dmarc.status).toBe("failing");
+      expect(others.every((r) => r.status === "verified")).toBe(true);
+    });
+
+    it("records include correct name patterns for the registered domain", async () => {
+      vi.mocked(store.getDomain).mockResolvedValueOnce(
+        makeDomain({ domain: "acme.io", lastCheckedAt: "2024-01-15T00:00:00Z" }),
+      );
+      const res = await req(app, "GET", `${A}/domains/domain-001/records`);
+      const body = await res.json() as Array<{ name: string; type: string }>;
+      const names = body.map((r) => r.name);
+      expect(names).toContain("acme.io");                        // MX
+      expect(names).toContain("mail._domainkey.acme.io");        // DKIM CNAME
+      expect(names).toContain("bounce.acme.io");                 // SPF TXT
+      expect(names).toContain("_dmarc.acme.io");                 // DMARC CNAME
     });
 
     it("returns 404 for unknown Domain", async () => {
-      const res = await req(app, "GET", `${A}/domains/nonexistent/dkim`);
+      const res = await req(app, "GET", `${A}/domains/nonexistent/records`);
       expect(res.status).toBe(404);
     });
 
     it("returns 403 when Domain belongs to a different account", async () => {
       vi.mocked(store.getDomain).mockResolvedValueOnce(makeDomain({ accountId: "other" }));
-      const res = await req(app, "GET", `${A}/domains/domain-001/dkim`);
+      const res = await req(app, "GET", `${A}/domains/domain-001/records`);
       expect(res.status).toBe(403);
     });
   });
@@ -709,6 +783,19 @@ describe("API", () => {
       expect(store.updateAccount).toHaveBeenCalledWith(
         TEST_ACCOUNT_ID,
         expect.objectContaining({ filtering: { defaultFilterMode: "strict", blockOnboardingEmails: true } }),
+      );
+    });
+
+    it("updates account-level spamScoreThreshold in filtering config", async () => {
+      const res = await req(app, "PATCH", `${A}`, {
+        body: { filtering: { defaultFilterMode: "notify_new", newAddressHandling: "auto_allow", spamScoreThreshold: 0.75 } },
+      });
+      expect(res.status).toBe(200);
+      expect(store.updateAccount).toHaveBeenCalledWith(
+        TEST_ACCOUNT_ID,
+        expect.objectContaining({
+          filtering: expect.objectContaining({ spamScoreThreshold: 0.75 }),
+        }),
       );
     });
   });
@@ -838,6 +925,24 @@ describe("API", () => {
       expect(saved.id).toBe("cfg-001");
       expect(saved.filterMode).toBe("allow_all");
     });
+
+    it("stores spamScoreThreshold when included in the request body", async () => {
+      const res = await req(app, "PUT", `${A}/email-configs/me%40mydomain.com`, {
+        body: { filterMode: "strict", approvedSenders: [], spamScoreThreshold: 0.7 },
+      });
+      expect(res.status).toBe(200);
+      const saved = vi.mocked(store.upsertEmailConfig).mock.calls[0]![0] as EmailAddressConfig;
+      expect(saved.spamScoreThreshold).toBe(0.7);
+    });
+
+    it("does not set spamScoreThreshold on the stored config when absent from request body", async () => {
+      const res = await req(app, "PUT", `${A}/email-configs/me%40mydomain.com`, {
+        body: { filterMode: "notify_new", approvedSenders: ["amazon.com"] },
+      });
+      expect(res.status).toBe(200);
+      const saved = vi.mocked(store.upsertEmailConfig).mock.calls[0]![0] as EmailAddressConfig;
+      expect(saved.spamScoreThreshold).toBeUndefined();
+    });
   });
 
   describe("DELETE /accounts/:accountId/email-configs/:address", () => {
@@ -926,6 +1031,35 @@ describe("API", () => {
       expect(saved.approvedSenders).toContain("amazon.com");
       expect(saved.approvedSenders).toContain("google.com");
       expect(saved.approvedSenders).toContain("github.com");
+    });
+
+    it("does not modify email config when neither approveSender nor updateFilterMode is set", async () => {
+      vi.mocked(store.getSignal).mockResolvedValueOnce(makeSignal({ status: "blocked" }));
+      await req(app, "POST", `${A}/arcs`, { body: { signalId: "SES#msg-001" } });
+      expect(store.upsertEmailConfig).not.toHaveBeenCalled();
+      expect(store.getEmailConfig).not.toHaveBeenCalled();
+    });
+
+    it("does not add sender to approvedSenders when approveSender is false and updateFilterMode is set", async () => {
+      vi.mocked(store.getSignal).mockResolvedValueOnce(
+        makeSignal({ status: "blocked", from: { address: "news@amazon.com" }, recipientAddress: "me@mydomain.com" }),
+      );
+      await req(app, "POST", `${A}/arcs`, { body: { signalId: "SES#msg-001", updateFilterMode: "allow_all" } });
+      const saved = vi.mocked(store.upsertEmailConfig).mock.calls[0]![0] as EmailAddressConfig;
+      expect(saved.filterMode).toBe("allow_all");
+      expect(saved.approvedSenders).not.toContain("amazon.com");
+    });
+
+    it("does not add duplicate sender when sender is already in approvedSenders", async () => {
+      vi.mocked(store.getSignal).mockResolvedValueOnce(
+        makeSignal({ status: "blocked", from: { address: "deals@amazon.com" }, recipientAddress: "user@example.com" }),
+      );
+      vi.mocked(store.getEmailConfig).mockResolvedValueOnce(
+        makeEmailAddressConfig({ approvedSenders: ["amazon.com", "google.com"] }), // amazon.com already approved
+      );
+      await req(app, "POST", `${A}/arcs`, { body: { signalId: "SES#msg-001", approveSender: true } });
+      const saved = vi.mocked(store.upsertEmailConfig).mock.calls[0]![0] as EmailAddressConfig;
+      expect(saved.approvedSenders.filter((s) => s === "amazon.com")).toHaveLength(1); // no duplicate
     });
   });
 
