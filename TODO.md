@@ -1,6 +1,18 @@
 # TODO
 
 - [ ] Detect forwarded emails and auto-tag with the full source email address (e.g. `original:john@gmail.com`), where `john@gmail.com` is the original recipient address the email was sent to before being forwarded into the system. Use `X-Forwarded-To`, `X-Original-To`, or `Resent-To` headers to extract the address.
+- [ ] **`"test"` workflow** — add to `WORKFLOWS` in `src/types/index.ts` and handle throughout the stack:
+  - **Detection** (either condition is sufficient):
+    1. The `signal.from` domain matches any domain registered to the account (user sending from their own domain, e.g. `me@mydomain.com` → account has `mydomain.com` registered)
+    2. The `signal.from` address matches any user's email address on the account (user sending from their personal Gmail, Outlook, etc. while being a member of the account)
+  - Detection runs in `processor.ts` post-classification as an override — if either condition matches, force `workflow: "test"` regardless of what the classifier assigned
+  - **Base urgency**: always `"low"` — test emails are never urgent; add this case to `baseUrgency()` in `priority.ts`
+  - **Auto-reply (the pong)**: after classification resolves to `"test"`, call Bedrock (Claude) with the email subject + body and ask it to write a short, funny, playful reply that riffs on whatever the user actually wrote — not a generic "pong" but something that reacts to the content. Send the reply via SES from the recipient address back to `signal.from`. This is a post-classification side effect in the processor, similar to how the notifier fires today.
+    - Bedrock prompt shape: *"A user just sent a test email to check their inbox setup. Read their email and write a short, witty, warm reply that plays on whatever they wrote. Keep it under 3 sentences. Sign off as the system."*
+    - Add the outbound message ID to `arc.sentMessageIds` so the arc correctly reflects that a reply was sent
+  - **`TestData` interface**: minimal — `{ triggeredBy: "user" | "system" }` to distinguish user-sent tests from system-generated onboarding signals
+  - **Classifier prompt**: add a `### test` section explaining the workflow and giving examples so the classifier can also detect obvious test emails independently (e.g. subject "test", body "testing 123") — the processor override handles the from-address logic, the classifier handles content-based detection
+  - **Onboarding integration**: the system-generated fallback signal (fired if the user's email is slow during onboarding Step 2) is created as `workflow: "test"`, `TestData.triggeredBy: "system"`. A real email sent by the user during onboarding also classifies as `"test"` via the from-address logic and also gets the pong reply — the onboarding UI treats arrival of any `"test"` signal as success, regardless of which path triggered it.
 - [ ] Add `"set_urgency"` as a `RuleActionType` and `Arc.urgencyOverride` for user-configurable urgency overrides (deferred)
 - [ ] Add `DELETE /domains/:id` endpoint and handler — remove SES email identity if it exists, delete domain record from DynamoDB; inbound mail for that domain will stop routing to SES naturally
 - [ ] **Two-tier domain setup model** — receiving and sending are separate concerns:
@@ -44,6 +56,7 @@ The primary view. Arcs are the browsing unit — not individual emails.
 - Inline "unread" state (client-side or via a future `Arc.readAt` field)
 - Pagination via cursor (`lastEvaluatedKey`) — infinite scroll or Load More
 - Empty states per view/filter with helpful copy
+- `test` workflow arcs are visually distinct: flask/beaker icon, muted colour palette, a small "TEST" badge — clearly not real mail but still browsable; show in the main inbox under a collapsible "Tests" section rather than hiding them entirely
 
 ### Arc Detail (Signal Thread)
 
@@ -67,6 +80,7 @@ Drill-in from inbox. Shows all signals in the arc as a chronological thread.
 - User can manually add/remove labels
 - "Reply" action (composes outbound email, adds to `sentMessageIds`)
 - Signal status badge for blocked/quarantined signals within a thread
+- For `test` workflow arcs: show a dedicated pong reply card in the thread below the original signal — displays the AI-generated reply that was auto-sent back to the sender, so the user can see what the system said. Include a playful framing: *"We replied →"* followed by the reply body.
 
 ### Quarantine / Blocked Inbox
 
@@ -314,7 +328,8 @@ Progress bar at top spanning all steps. Every step is resumable — if the user 
   - The moment the signal arrives (real-time via WebSocket or long-poll): the animation resolves, the card fills in with the email — sender name, subject, the AI-generated summary, workflow classification, and urgency badge — all exactly as it will appear in their real inbox.
   - Celebration moment: brief confetti burst or a satisfying check animation. Copy: *"It works. Your first email just arrived."*
   - Let the user hover/read the card for a moment, then a CTA appears: *"Continue →"*
-  - Edge cases: if no email after 3 minutes, gently offer help ("Didn't arrive? Check your MX record or try sending again.") with a re-check button and a "send a test from us instead" fallback that fires a system-generated signal so they can still experience the moment even if their personal email is slow.
+  - The incoming email and any further ad-hoc tests the user sends are classified as `workflow: "test"` — the system auto-replies with a Bedrock-generated pong that riffs on whatever the user wrote. During onboarding the pong reply is shown in the waiting screen itself as a second card appearing below the original, reinforcing that two-way communication is working.
+  - Edge cases: if no email after 3 minutes, gently offer help ("Didn't arrive? Check your MX record or try sending again.") with a re-check button and a "send a test from us instead" fallback that fires a system-generated `workflow: "test"` signal so they can still experience the moment even if their personal email is slow.
 
 - **Step 3 — Set up sending** (skippable with clear consequence)
   - Shown only if the 3 sender records weren't verified in Step 1.
@@ -333,7 +348,7 @@ Progress bar at top spanning all steps. Every step is resumable — if the user 
 ### Global UX Notes
 
 - **Urgency colour system** used consistently everywhere: `critical` = red, `high` = amber, `normal` = no accent, `low` = grey, `silent` = never shown
-- **Workflow icons**: each of the 19 workflows needs a distinct icon (e.g., shield for `auth`, receipt for `invoice`, plane for `travel`)
+- **Workflow icons**: each of the 20 workflows needs a distinct icon (e.g., shield for `auth`, receipt for `invoice`, plane for `travel`, flask/beaker for `test`)
 - **Signal ID prefix** (`SES#`, `SYS#`, `USR#`) indicates origin — could show a subtle badge on signals that were system- or user-created vs inbound email
 - **Spam score** should surface as a warning on signals > 0.3 and a strong warning > 0.7; never shown as a raw number to end users — use labels like "Likely spam" / "Possible spam"
 - **Arc grouping key** is deterministic per workflow (e.g. all Amazon order updates for order #123 thread together) — UI should not expose the key but should make the threading feel natural, like iMessage threads
