@@ -114,10 +114,15 @@ User-defined filtered lists of arcs. Like Gmail labels but with filter logic bak
 - Drag-to-reorder (calls `POST /views/reorder`)
 - View config: workflow filter (single or all), label filters (must-have-all), sort field + direction
 - Default views to seed on first login: All, Action Needed, Finance, Travel, Receipts (mapped to relevant workflows + labels)
-- **Views are not the only way to reach an arc** — two system-level persistent elements always exist in the nav regardless of what views the user has configured:
-  1. **All Inbox** — shows every active arc without any filter; always present, cannot be deleted; the fallback destination for any arc that no user-created view covers
-  2. **Quarantine** — shows all blocked and quarantined signals (signals stopped before arc creation); always present, cannot be deleted; separate from user views because quarantined signals have no arc to filter by
-- **Notifications always deep-link directly** to the specific arc or quarantined signal — the user never needs to find it by navigating views; tapping a push notification or email alert lands them on the exact item regardless of their view configuration
+- **System-level permanent nav items** — always present, cannot be deleted, renamed, or reordered by the user; user-created views sit below these:
+  1. **All** — every active arc (`Arc.status = "active"`), no filter; universal fallback for any arc no user view covers
+  2. **Quarantine** — blocked and quarantined signals that have not yet become arcs; separate from user views because views filter arcs and these signals predate arc creation
+  3. **Archive** — `Arc.status = "archived"`; arcs the user has dismissed but not deleted
+  4. **Trash** — `Arc.status = "deleted"`; retained and browsable until `deletionRetentionDays` TTL expires, then permanently removed; user can restore from here
+  - If **Snooze** is built: **Snoozed** becomes a 5th system item — arcs hidden until a future time need a permanent home to resurface and manage them
+  - If **Sent** is built: **Sent** becomes a 6th system item — outbound replies (`arcs where sentMessageIds is non-empty`) for reviewing what was sent and tracking threads awaiting a reply
+  - `test` workflow arcs are **not** a separate system view — they live in All and in user views like any arc; the collapsible "Tests" section is a display treatment within those views, not a separate destination
+- **Notifications always deep-link directly** to the specific arc or quarantined signal — the user never needs to navigate through views to find it; the notification payload must carry the arc ID or signal ID at fire time so the link resolves correctly even for pre-arc quarantined signals
 
 ### Labels
 
