@@ -147,3 +147,96 @@ describe("evaluateFilter — allow_all mode", () => {
     expect(evaluateFilter(config, "new.com", LOW_SPAM)).toEqual({ allowed: true, autoApprove: true });
   });
 });
+
+// ---------------------------------------------------------------------------
+// getETLD1 — additional edge cases
+// ---------------------------------------------------------------------------
+
+describe("getETLD1 — edge cases", () => {
+  it("falls back to the raw domain string for unrecognized TLDs (e.g. .internal)", () => {
+    // getDomain returns null for private/non-ICANN TLDs; getETLD1 uses the raw string
+    expect(getETLD1("service@api.internal")).toBe("api.internal");
+  });
+
+  it("extracts eTLD+1 when local part contains a dot", () => {
+    expect(getETLD1("first.last@subdomain.example.com")).toBe("example.com");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// evaluateFilter — per-address spamScoreThreshold override
+// ---------------------------------------------------------------------------
+
+describe("evaluateFilter — per-address spamScoreThreshold", () => {
+  it("blocks known sender in strict mode when score exceeds the lower per-address threshold", () => {
+    const config = makeConfig({ filterMode: "strict", spamScoreThreshold: 0.5 });
+    // 0.6 > per-address threshold (0.5), below default (0.9)
+    expect(evaluateFilter(config, "amazon.com", 0.6)).toEqual({ allowed: false, reason: "spam" });
+  });
+
+  it("allows known sender in strict mode when score is above default but below the higher per-address threshold", () => {
+    const config = makeConfig({ filterMode: "strict", spamScoreThreshold: 0.99 });
+    // 0.95 > default threshold (0.9) but < per-address threshold (0.99)
+    expect(evaluateFilter(config, "amazon.com", 0.95)).toEqual({ allowed: true, autoApprove: false });
+  });
+
+  it("opts.spamScoreThreshold takes precedence over emailConfig.spamScoreThreshold", () => {
+    const config = makeConfig({ filterMode: "strict", spamScoreThreshold: 0.5 });
+    // emailConfig says block at 0.5, but opts raises threshold to 0.8 → 0.6 passes
+    expect(evaluateFilter(config, "amazon.com", 0.6, { spamScoreThreshold: 0.8 })).toEqual({ allowed: true, autoApprove: false });
+  });
+
+  it("threshold of 0 causes strict mode to block any known sender regardless of spam score", () => {
+    const config = makeConfig({ filterMode: "strict" });
+    // score 0.0 >= threshold 0 → spam
+    expect(evaluateFilter(config, "amazon.com", 0.0, { spamScoreThreshold: 0 })).toEqual({ allowed: false, reason: "spam" });
+  });
+
+  it("threshold of 1 means no email ever reaches the spam threshold in strict mode", () => {
+    const config = makeConfig({ filterMode: "strict" });
+    // score must be >= 1.0 to trigger spam; 0.99 < 1.0 → allowed
+    expect(evaluateFilter(config, "amazon.com", 0.99, { spamScoreThreshold: 1 })).toEqual({ allowed: true, autoApprove: false });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// evaluateFilter — allow_all is immune to spam scoring
+// ---------------------------------------------------------------------------
+
+describe("evaluateFilter — allow_all ignores spam threshold", () => {
+  const config = makeConfig({ filterMode: "allow_all" });
+
+  it("allows a known sender even when spam score is well above the default threshold", () => {
+    expect(evaluateFilter(config, "amazon.com", 0.99)).toEqual({ allowed: true, autoApprove: false });
+  });
+
+  it("allows an unknown sender with above-threshold spam and still sets autoApprove", () => {
+    expect(evaluateFilter(config, "spammy.biz", 0.99)).toEqual({ allowed: true, autoApprove: true });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// evaluateFilter — notify_new with empty approvedSenders
+// ---------------------------------------------------------------------------
+
+describe("evaluateFilter — notify_new with empty approvedSenders", () => {
+  it("blocks every sender when no one has been approved yet", () => {
+    const config = makeConfig({ filterMode: "notify_new", approvedSenders: [] });
+    expect(evaluateFilter(config, "amazon.com", LOW_SPAM)).toEqual({ allowed: false, reason: "new_sender" });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// evaluateFilter — block_until_approved × strict: spam check only fires for known senders
+// ---------------------------------------------------------------------------
+
+describe("evaluateFilter — block_until_approved with strict defaultFilterMode", () => {
+  it("returns new_sender (not spam) for unknown sender even when spam score is very high", () => {
+    // In evaluateWithMode: the unknown-sender check runs before the spam check.
+    // null config means approvedSenders=[] so every sender is unknown → new_sender wins.
+    expect(evaluateFilter(null, "amazon.com", HIGH_SPAM, {
+      newAddressHandling: "block_until_approved",
+      defaultFilterMode: "strict",
+    })).toEqual({ allowed: false, reason: "new_sender" });
+  });
+});

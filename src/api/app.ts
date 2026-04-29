@@ -574,6 +574,7 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
       filterMode: SenderFilterMode;
       approvedSenders: string[];
       onboardingEmailHandling?: EmailAddressConfig["onboardingEmailHandling"];
+      spamScoreThreshold?: number;
     };
     const existing = await store.getEmailConfig(accountId, address);
     const now = new Date().toISOString();
@@ -584,6 +585,7 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
       filterMode: body.filterMode,
       approvedSenders: body.approvedSenders,
       ...(body.onboardingEmailHandling !== undefined ? { onboardingEmailHandling: body.onboardingEmailHandling } : {}),
+      ...(body.spamScoreThreshold !== undefined ? { spamScoreThreshold: body.spamScoreThreshold } : {}),
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
     });
