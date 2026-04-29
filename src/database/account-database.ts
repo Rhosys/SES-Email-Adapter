@@ -99,12 +99,18 @@ export class AccountDatabase {
     return account?.deletionRetentionDays ?? 0;
   }
 
-  async getProcessorAccountContext(accountId: string, recipientAddress: string): Promise<{ retentionDays: number; filtering: AccountFilteringConfig | null; emailConfig: EmailAddressConfig | null }> {
-    const account = await this.getAccount(accountId);
+  async getProcessorAccountContext(accountId: string, recipientAddress: string): Promise<{ retentionDays: number; filtering: AccountFilteringConfig | null; emailConfig: EmailAddressConfig | null; registeredDomains: string[]; userEmails: string[] }> {
+    const [account, domains] = await Promise.all([
+      this.getAccount(accountId),
+      this.listDomains(accountId),
+    ]);
     return {
       retentionDays: account?.deletionRetentionDays ?? 0,
       filtering: account?.filtering ?? null,
       emailConfig: account?.emailConfigs?.[recipientAddress] ?? null,
+      registeredDomains: domains.map((d) => d.domain),
+      // userEmails fetched via Authress at runtime; placeholder empty array here
+      userEmails: [],
     };
   }
 
@@ -330,7 +336,15 @@ export class AccountDatabase {
 
   async createDomain(accountId: string, domain: string): Promise<Domain> {
     const now = new Date().toISOString();
-    const item: Domain = { id: randomUUID(), accountId, domain, createdAt: now };
+    const item: Domain = {
+      id: randomUUID(),
+      accountId,
+      domain,
+      receivingSetupComplete: false,
+      senderSetupComplete: false,
+      createdAt: now,
+      updatedAt: now,
+    };
     await dynamo.send(new PutCommand({ TableName: ACCOUNTS_TABLE, Item: { ...item, pk: pk(accountId), sk: `DOMAIN#${item.id}` } }));
     return item;
   }

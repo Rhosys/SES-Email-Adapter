@@ -21,6 +21,12 @@
   - Add `spamScoreThreshold` to the per-address `EmailAddressConfig` as an optional override — same inheritance pattern as `filterMode` and `blockDisposition`: if set on the address, use it; otherwise fall through to the account default. All three filtering knobs (`filterMode`, `blockDisposition`, `spamScoreThreshold`) follow the same account → per-address override chain.
   - `blockDisposition.spam` already controls what happens when the threshold is crossed (block vs quarantine) — that pairing is correct, the threshold just needs to move out of the code and into config
   - Surface in UI: account-level in Settings → Account → Filtering; per-address in Settings → Email Addresses as an optional override (show "Using account default: 0.9" when not overridden, with an "Override" button to set a custom value)
+- [ ] **FedCM (Federated Credential Management)** — add FedCM as a supported login method via `@authress/login`. FedCM is the browser-native credential management API (replacing third-party cookie-based federation). Authress supports it; we need to wire it up in the login flow so Chrome/Edge users can sign in with their saved Google/GitHub credentials without a redirect. Track it as an auth improvement item once the Authress integration is solid.
+- [ ] **Block phishing-warning and terms-update emails by default** — these two classes of email are almost universally unwanted noise:
+  1. **Phishing-warning notices** ("Beware of phishing — we will never ask for your password") — bulk security awareness emails sent by banks and SaaS services. Already classified as `notice` or `security` workflow. Should be blocked by default; surface the `blockNoticeEmails` toggle in Account Settings → Filtering so users can re-enable if they want them.
+  2. **Terms-of-service / privacy-policy updates** — already classified as `notice` workflow. Currently silently auto-archived; upgrade default treatment to **block** (silent drop, not quarantine). Add `blockDisposition.notice: "block"` to the default account filtering config. Users can override to `"quarantine"` or `"allow"` if they want to review these.
+  - **Classifier prompt**: add examples under the `### notice` section distinguishing "bank phishing warning" from "actual phishing email" — the former is `notice`, the latter is e.g. `auth` with high spamScore. This prevents mis-classification.
+  - **AccountFilteringConfig**: add `blockNoticeEmails: boolean` (default `true`) alongside existing `blockOnboardingEmails`.
 - [ ] Add `DELETE /domains/:id` endpoint and handler — remove SES email identity if it exists, delete domain record from DynamoDB; inbound mail for that domain will stop routing to SES naturally
 - [ ] **Two-tier domain setup model** — receiving and sending are separate concerns:
   - **Tier 1 — Receiving** (required to start): customer adds one MX record pointing their domain at the SES inbound endpoint. This is all that's needed to receive email into arcs. Domain is usable immediately after MX propagates.
@@ -85,7 +91,13 @@ Drill-in from inbox. Shows all signals in the arc as a chronological thread.
 - AI-suggested labels shown with one-click accept
 - User can manually override workflow classification (dropdown)
 - User can manually add/remove labels
-- "Reply" action (composes outbound email, adds to `sentMessageIds`)
+- **Reply composer** — inline compose panel that slides up from the bottom of the arc detail:
+  - **From** field: free-text input for the sender email address (local part), with **domain as a separate dropdown** populated from the user's registered Tier-2-complete domains. Typing in the local part + choosing a domain composes the full `from` address.
+  - **Autocomplete**: as the user types the local part, suggest previously-used sender identities (full `local@domain` combos from `arc.sentMessageIds` history across the account), ordered **recommended first** (most recently used → most frequently used → everything else). Recommended entries are shown with a subtle "Recommended" chip.
+  - Domain dropdown only shows domains with `senderSetupComplete: true`; domains with Tier 2 incomplete are shown greyed out with an inline "Set up sending →" link.
+  - If the user has no Tier-2-complete domain, the From field is replaced with a banner: *"Set up sending to reply from your domain"* with a CTA to the domain sender setup wizard.
+  - Standard To/Subject/Body fields below the From selector; To pre-filled with the signal sender, Subject pre-filled with `Re: {original subject}`.
+  - Send button calls the reply API and adds the outbound message ID to `arc.sentMessageIds`.
 - Signal status badge for blocked/quarantined signals within a thread
 - For `test` workflow arcs: show a dedicated pong reply card in the thread below the original signal — displays the AI-generated reply that was auto-sent back to the sender, so the user can see what the system said. Include a playful framing: *"We replied →"* followed by the reply body.
 

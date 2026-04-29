@@ -239,6 +239,10 @@ Tax notices, benefits updates, license renewals, official government corresponde
 Privacy policy changes, terms of service updates, data processor changes, cookie policy updates, GDPR/compliance notices — bulk regulatory emails sent by automated systems that users are not expected to read or act on
 { "workflow": "notice", "noticeType": "privacy_policy"|"terms_update"|"data_processor"|"cookie_policy"|"compliance"|"other", "provider": "<name>", "effectiveDate": "<YYYY-MM-DD or null>", "documentUrl": "<url or null>" }
 
+### test
+Emails sent by a user to test that their own inbox is working. Detected by obvious test content (subject "test", "testing 123", "hello world", "is this thing on?" etc.) or by the processor overriding the workflow based on sender identity. The processor handles sender-based detection; classify here only when content makes the intent unambiguous.
+{ "workflow": "test", "triggeredBy": "user" }
+
 ## Spam scoring
 spamScore is ALWAYS required and is orthogonal to workflow. Assign the real workflow even for spam:
 - A phishing email pretending to be a bank login → workflow:"auth", spamScore:0.95

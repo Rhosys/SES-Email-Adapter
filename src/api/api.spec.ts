@@ -191,7 +191,10 @@ function makeDomain(overrides: Partial<Domain> = {}): Domain {
     id: "domain-001",
     accountId: TEST_ACCOUNT_ID,
     domain: "example.com",
+    receivingSetupComplete: false,
+    senderSetupComplete: false,
     createdAt: "2024-01-01T00:00:00Z",
+    updatedAt: "2024-01-01T00:00:00Z",
     ...overrides,
   };
 }
@@ -610,25 +613,26 @@ describe("API", () => {
     });
   });
 
-  describe("GET /accounts/:accountId/domains/:id/dkim", () => {
-    it("returns DKIM DNS records for a Domain", async () => {
+  describe("GET /accounts/:accountId/domains/:id/records", () => {
+    it("returns all DNS records for a Domain", async () => {
       vi.mocked(store.getDomain).mockResolvedValueOnce(makeDomain());
-      const res = await req(app, "GET", `${A}/domains/domain-001/dkim`);
+      const res = await req(app, "GET", `${A}/domains/domain-001/records`);
       expect(res.status).toBe(200);
-      const body = await res.json() as Array<{ type: string; name: string; value: string }>;
+      const body = await res.json() as Array<{ type: string; name: string; value: string; status: string }>;
       expect(Array.isArray(body)).toBe(true);
-      expect(body.length).toBeGreaterThan(0);
+      expect(body.length).toBe(4); // MX, DKIM, SPF, DMARC
       expect(body[0]).toHaveProperty("type");
+      expect(body[0]).toHaveProperty("status");
     });
 
     it("returns 404 for unknown Domain", async () => {
-      const res = await req(app, "GET", `${A}/domains/nonexistent/dkim`);
+      const res = await req(app, "GET", `${A}/domains/nonexistent/records`);
       expect(res.status).toBe(404);
     });
 
     it("returns 403 when Domain belongs to a different account", async () => {
       vi.mocked(store.getDomain).mockResolvedValueOnce(makeDomain({ accountId: "other" }));
-      const res = await req(app, "GET", `${A}/domains/domain-001/dkim`);
+      const res = await req(app, "GET", `${A}/domains/domain-001/records`);
       expect(res.status).toBe(403);
     });
   });
