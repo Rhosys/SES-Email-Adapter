@@ -1493,3 +1493,140 @@ Consider a dedicated **Content** view pre-seeded in the user's default view set 
 **Automatic discount code wallet:** When `discountCode` is extracted from any content arc, automatically add it to a "Discount codes" panel in the app (accessible from the main nav or as a widget on the home screen). The wallet shows all active codes: publisher, code, discount, expiry date. Expired codes are greyed out and removable. The user never has to search their inbox for a promo code before checking out — they check the wallet. This is genuinely useful and completely differentiated from any existing email client.
 
 ---
+
+## status
+
+### What this workflow is
+
+Terms-of-service updates, privacy policy changes, service notices, welcome emails, government communications, account notifications, and other administrative messages. These emails exist because a company is legally required to send them, or because their onboarding flow requires a welcome sequence.
+
+The defining characteristic: **the user almost never needs to do anything.** A ToS update email from Stripe is background noise. A welcome email from a new service is a formality. A government notice about a programme the user enrolled in last year is bureaucratic acknowledgement. These are `silent` urgency — they exist in the record but should not intrude on the user's inbox.
+
+The exception: some government communications or legal notices DO require action (respond by [date], opt out by [date], etc.). The classifier must identify these and should route them appropriately — but within `status`, `requiresAction` (if present in `effectiveDate` context) should be interpreted as "this one is worth looking at."
+
+**The system blocks phishing-warning and terms-update emails by default.** See filtering config. This means many `status` arcs never reach the inbox at all — they are silently dropped at the filter level. The arcs that do arrive in `status` are the ones that passed through (e.g., government notices, which are on the allow-list).
+
+### Data shape
+
+```ts
+interface StatusData {
+  workflow: "status";
+  statusType: "terms_update" | "privacy_policy" | "service_notice" | "welcome" | "government" | "account_notification" | "other";
+  provider: string;
+  effectiveDate?: string;    // when the change takes effect
+  referenceNumber?: string;  // for government communications
+  documentUrl?: string;      // link to the full document
+}
+```
+
+### Urgency
+
+Always `silent`. No exceptions. Status arcs are never shown in Default view. They never trigger push notifications. They are auto-archived on arrival and accessible only via the Archive view.
+
+The one case where a `status` arc should not be auto-archived immediately: `government` + `statusType` where the email has a reference number and an `effectiveDate` in the future. These may matter later (tax notices, regulatory communications). For these, set urgency to `low` (not `silent`) and place them in Archive but mark them with a `government` label for easy retrieval.
+
+---
+
+### Arc list row (Archive view only)
+
+Status arcs do not appear in Default view or any non-Archive view. When the user navigates to Archive and encounters a `status` arc:
+
+**Left:** Info circle icon. Colour: light grey — these are the quietest arcs in the system. For `government` type: a government building or official seal icon in neutral blue — distinct enough to spot in a list.
+
+**Centre:**
+- **Provider name** in regular (not bold) weight: "Stripe", "Apple", "HMRC".
+- **Status type label**: "Terms of service update", "Privacy policy update", "Service notice", "Welcome", "Government notice", "Account notification".
+- **Effective date chip** if `effectiveDate` is set: "Effective 1 Feb 2025". For past dates, show in grey; for future dates, show in muted amber.
+- **Reference number** for government communications: shown as a small chip — "Ref: UTR/2024/001847". This is searchable and often needed when dealing with government agencies.
+
+**Right:**
+- Timestamp of the email.
+- **View document** link if `documentUrl` is set — opens the full policy/document in a new tab. This is the only action most status arcs support.
+
+**No urgency badge.** No reply button. No action block. These arcs are records, not tasks.
+
+---
+
+### Arc detail (signal thread)
+
+Minimal. Status arcs should not have elaborate detail views.
+
+**Thread header:**
+- Provider + status type.
+- Effective date if present.
+- Reference number chip if present.
+- **View document** button if `documentUrl` is set.
+
+**Signal card:**
+- Render HTML in a sandboxed iframe at full width.
+- For `welcome` emails: these are often long branded onboarding sequences. Render as normal — the user may want to refer back to setup instructions.
+- For `terms_update` / `privacy_policy`: the email body typically contains a summary of what changed. Render it. Below the iframe, show a "View full terms" link to `documentUrl`.
+
+**No reply. No compose. No actions other than Archive.**
+
+---
+
+### Auto-archive behaviour
+
+- `welcome` → archive immediately on arrival. No push, no inbox appearance.
+- `terms_update` → archive immediately on arrival. (Most are also blocked at the filter level.)
+- `privacy_policy` → archive immediately on arrival.
+- `service_notice` → archive immediately.
+- `account_notification` → archive immediately.
+- `government` → archive immediately BUT:
+  - Add label `government` automatically.
+  - Set urgency to `low` (not `silent`) so it appears in Archive with visual distinction.
+  - If `effectiveDate` is in the future, add label `date:{effectiveDate}` for easy temporal search.
+  - If `referenceNumber` is present, add label `ref:{referenceNumber}` — government communications are often searched by reference number years later.
+- `other` → archive immediately.
+
+**No status arcs should remain in Default view under any circumstances.**
+
+---
+
+### Monthly quiet summary
+
+Because status arcs are completely invisible to the user in normal inbox use, offer a monthly transparency notice in the app — not a push notification, not a digest email, just an in-app card that appears once per month on the Archive view:
+
+> "Last month, 23 status emails were automatically archived:
+> 8 terms-of-service updates, 6 welcome emails, 5 service notices, 4 government notices.
+> [See them in Archive →]"
+
+This gives users confidence that the system is working correctly and nothing important was silently dropped. The card is dismissible and does not repeat until the following month.
+
+---
+
+### Notification behaviour
+
+- **No push notifications** for any `status` arc. Zero. Not even ambient.
+- **No digest inclusion** for standard status types (`terms_update`, `privacy_policy`, `welcome`, `service_notice`, `account_notification`).
+- **`government` type:** Include in the monthly digest summary only — not as individual items. The digest notes "4 government notices archived this month."
+
+---
+
+### Filtering context (important for implementation)
+
+The default account filtering config sets `blockDisposition.notice: "block"` for the two most common `status` sub-types:
+
+1. **Phishing-warning notices** — bulk security awareness emails sent by banks ("We will never ask for your password"). These classify as `status` with `statusType: "service_notice"`. Silently blocked by default.
+2. **Terms-of-service / privacy policy updates** — classifies as `status` with `statusType: "terms_update"` or `"privacy_policy"`. Silently blocked by default.
+
+This means the UI should never receive most `status` arcs at all. The ones that do arrive have bypassed the block (government notices, manual allow-list entries, notices that don't match the block patterns).
+
+The classifier prompt must include examples that distinguish:
+- "Bank phishing warning notice" (status, block) vs. "Actual phishing email impersonating a bank" (alert with high spamScore, do not block — flag and investigate)
+- "ToS update from Stripe" (status, block by default) vs. "Stripe account suspended notice" (alert, requiresAction: true, do not block)
+
+This distinction is critical. Misclassifying a real account suspension as a ToS update and silently blocking it would be a significant product failure.
+
+---
+
+### Where to innovate
+
+**Government document filing cabinet:** All `government` arcs accumulate in a searchable "Government" label view in Archive. The UI should surface this as a distinct section in Archive (below the normal archive list): "Government communications — 12 documents." Clicking it filters to all `government`-labelled arcs. Within this view, show the reference number prominently on each row, and offer search by reference number. This turns what was a pile of government emails into a structured filing system — the user can find their tax notice from 2022 in seconds.
+
+**Opt-in status email digest:** Some users actually want to track ToS updates across their services — privacy-conscious users, legal professionals, compliance teams. Offer an opt-in monthly digest: "Terms and policy changes this month: Stripe updated their ToS (effective Feb 1), Apple updated their privacy policy, Google updated their data retention policy." Links to each document. This is a power-user feature — off by default, surfaced in Settings → Notifications.
+
+**Onboarding welcome suppression:** The system-generated `welcome` email sent during onboarding (`statusType: "welcome"`, `TestData.triggeredBy: "system"`) should be handled specially — it should never appear in the user's inbox at all, even in Archive. This is a system-internal event, not a real incoming email. Treat `source: "system"` signals with `workflow: "status"` as truly internal and exclude them from all views including Archive. The onboarding UI handles the onboarding flow; these signals are just implementation artifacts.
+
+---
