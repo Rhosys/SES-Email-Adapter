@@ -1630,3 +1630,202 @@ This distinction is critical. Misclassifying a real account suspension as a ToS 
 **Onboarding welcome suppression:** The system-generated `welcome` email sent during onboarding (`statusType: "welcome"`, `TestData.triggeredBy: "system"`) should be handled specially — it should never appear in the user's inbox at all, even in Archive. This is a system-internal event, not a real incoming email. Treat `source: "system"` signals with `workflow: "status"` as truly internal and exclude them from all views including Archive. The onboarding UI handles the onboarding flow; these signals are just implementation artifacts.
 
 ---
+
+## healthcare
+
+### What this workflow is
+
+Appointment reminders and confirmations, test and lab results, prescription notifications, insurance updates, medical billing, referral letters, and patient portal messages. The user has an ongoing relationship with a healthcare provider and this email is part of managing that relationship.
+
+The defining characteristic: **high personal stakes, time sensitivity varies widely.** A test result that indicates a serious diagnosis is urgent. A routine "your appointment is confirmed" is not. An appointment reminder 24 hours before is high-urgency. The same reminder 2 weeks before is background noise. The inbox must navigate this range without being either dismissive of serious health information or over-alarming about routine admin.
+
+Healthcare data is the most personal data the inbox handles. Design decisions must reflect this — privacy in notification bodies, discreet visual treatment, no AI summaries that risk surfacing sensitive details publicly.
+
+### Data shape
+
+```ts
+interface HealthcareData {
+  workflow: "healthcare";
+  eventType: "appointment_reminder" | "appointment_confirmation" | "test_results" | "prescription" | "insurance_update" | "billing" | "referral";
+  provider?: string;
+  appointmentDate?: string;    // ISO datetime
+  location?: string;
+  requiresAction: boolean;
+  portalUrl?: string;
+}
+```
+
+### Urgency
+
+- `test_results` → `high` always. The user may have been waiting for these. They warrant immediate attention — not because they are necessarily bad news, but because they always represent something the user needs to know.
+- `appointment_reminder` with `appointmentDate` < 24 hours → `high`
+- `appointment_reminder` with `appointmentDate` < 7 days → `normal`
+- `appointment_reminder` with `appointmentDate` > 7 days → `low`
+- `appointment_confirmation` → `normal` (confirmation of a booking; no action needed, but worth seeing)
+- `prescription` + `requiresAction: true` (e.g., need to pick up, needs renewal) → `high`
+- `prescription` + `requiresAction: false` → `normal`
+- `insurance_update` → `normal` (policy changes, new coverage info)
+- `billing` → `normal` (medical billing is stressful — never downgrade to `low`)
+- `referral` → `high` (referrals often require the user to take action to book a follow-up)
+
+Dynamic urgency escalation (same pattern as `travel`): `appointment_reminder` arcs escalate as `appointmentDate` approaches. The processor runs a scheduled job to update urgency as dates close in. The UI should also compute "time until appointment" dynamically from the stored `appointmentDate`.
+
+---
+
+### Arc list row
+
+**Left:** Healthcare-specific icons per `eventType`:
+- `appointment_reminder` / `appointment_confirmation` → calendar with a cross/medical symbol
+- `test_results` → lab flask or microscope
+- `prescription` → pill/Rx icon
+- `insurance_update` → shield with a person
+- `billing` → medical bill/receipt icon (distinct from `payments` receipt — use a cross overlay)
+- `referral` → person-to-person arrow with medical cross
+
+Colour: calm blue-green (teal) — medical, trustworthy, not alarming. Never red for routine healthcare arcs; only amber for `high` urgency (imminent appointments, action-required prescriptions).
+
+**Centre:**
+- **Provider name** in regular weight: "Dr. Smith's Office", "St. Thomas Hospital", "Aetna".
+- **Event type label**: "Appointment reminder", "Test results available", "Prescription ready", "Insurance update", "Medical bill", "Referral letter".
+- **Appointment date chip** when `appointmentDate` is present — use the same time-until format as `travel` and `scheduling`:
+  - "Mon 20 Jan, 9:30am" (> 24h)
+  - "Tomorrow 9:30am" (amber)
+  - "Today 9:30am" (red)
+  - "Yesterday" (grey — appointment has passed)
+
+**Privacy-first secondary text:** Do NOT show the AI-generated summary on the arc row for `test_results` or any arc where the summary might contain sensitive health information. Instead, show only the provider name and event type label. The user must open the arc to see the content. This is a deliberate privacy design: healthcare information should not be visible to anyone glancing at the user's screen without the user intending to share it.
+
+For non-sensitive types (`appointment_reminder`, `appointment_confirmation`, `insurance_update`), showing the provider + date on the row is fine. No medical diagnosis or results data on the row.
+
+**Right:**
+- Timestamp.
+- **Book appointment / Reschedule button** for `appointment_confirmation` if a rescheduling link is available.
+- **View results button** for `test_results` — opens `portalUrl` directly. Make this available on the row. Test results waiting to be viewed are time-sensitive; the user should not have to open the arc detail to act.
+
+---
+
+### Arc detail (signal thread)
+
+**Thread header — Healthcare event card:**
+
+For `appointment_reminder`:
+```
+┌──────────────────────────────────────────────┐
+│  🏥  Dr. Smith — Appointment Reminder         │
+│                                              │
+│  Date:        Mon 20 Jan, 9:30am            │
+│  Location:    123 Medical Centre, London     │
+│  Provider:    Dr. Sarah Smith                │
+│                                              │
+│  [Add to calendar]   [Get directions]        │
+│  [Reschedule / Cancel →]                     │
+└──────────────────────────────────────────────┘
+```
+
+For `test_results`:
+```
+┌──────────────────────────────────────────────┐
+│  🔬  Test Results Available                   │
+│                                              │
+│  Provider:    St. Thomas Hospital            │
+│  Available:   Results ready as of 14 Jan     │
+│                                              │
+│  [View results in patient portal →]          │
+└──────────────────────────────────────────────┘
+```
+
+For `billing`:
+```
+┌──────────────────────────────────────────────┐
+│  🏥  Medical Bill                             │
+│                                              │
+│  Provider:    St. Thomas Hospital            │
+│  (Amounts shown in email body below)         │
+│                                              │
+│  [Manage / Pay →]   [Download]              │
+└──────────────────────────────────────────────┘
+```
+
+Note: for `billing`, do NOT extract amounts into the structured panel — medical billing is sensitive and the amounts can be confusing or alarming without full context. Render the email body as the authoritative source for billing details.
+
+**Privacy-protected notifications:** Push notification bodies for healthcare arcs must be generic:
+- "Test results available from St. Thomas Hospital" — NOT "Your blood test results are available"
+- "Appointment reminder from Dr. Smith" — NOT "Your psychiatry appointment is tomorrow"
+
+The notification title must name the provider; the body must not name the service type beyond what's on the `eventType` label. Healthcare is a protected category — what doctor you see and for what reason is private.
+
+**Email body rendering:** Render in sandboxed iframe at full width. For `test_results`, the body may contain the actual results (some portals send the results in the email). Render faithfully — the user needs to see what the email contains. The privacy protection is at the notification and row-summary level, not the detail view level (the user has explicitly navigated into the arc).
+
+**Actions:**
+- `appointment_reminder` / `appointment_confirmation` → Add to calendar, Get directions, Reschedule/Cancel via `portalUrl`.
+- `test_results` → View in portal (opens `portalUrl`). No other actions.
+- `prescription` → View in portal. No pharmacy deep-links for now (too variable).
+- `insurance_update` → View in portal / Download PDF.
+- `billing` → Pay / Manage via `portalUrl`.
+- `referral` → the referral is a document the user may need to bring to their next appointment; offer "Save to files" (downloads the email as PDF) or "Add reminder to book follow-up" (creates a `scheduling` arc manually).
+
+---
+
+### Threading behaviour
+
+Groups by `provider` + broad `eventType` category. Each category is a separate arc per provider:
+- Dr. Smith → Appointments arc (all appointment reminders + confirmations)
+- Dr. Smith → Test Results arc (all test results)
+- Aetna → Insurance arc (all insurance updates)
+- St. Thomas → Billing arc (all billing)
+
+Do NOT merge test results with appointment reminders for the same provider — they are different types of communication that require different actions.
+
+Each appointment reminder + its confirmation threads together (same appointment). Each test result is typically a single signal (the result is ready — the conversation ends there). Each referral is a single-signal arc.
+
+**After the appointment passes:** auto-archive the appointment arc (reminder + confirmation). Do NOT auto-archive test results, billing, or referral arcs — these may need to be referenced.
+
+---
+
+### Auto-archive behaviour
+
+- `appointment_reminder` / `appointment_confirmation` → auto-archive 4 hours after `appointmentDate` passes. The appointment is done. No action needed.
+- `test_results` → never auto-archive. These are permanent health records — the user may want to find them years later.
+- `prescription` → archive after 7 days (either it was picked up or the prescription has likely changed).
+- `insurance_update` → archive after 30 days (policy changes are noted; the insurance portal is the source of truth).
+- `billing` → never auto-archive until the user confirms payment (same logic as `payments` invoice).
+- `referral` → archive after 14 days or when the user manually archives.
+
+---
+
+### Default view behaviour
+
+Healthcare arcs appear in their urgency tier without special treatment in Default view. Within the `high` urgency tier, `test_results` and imminent appointments sort above non-healthcare `normal` arcs because of the personal stakes.
+
+Consider a dedicated **Health** view pre-seeded in the user's default view set — showing only `healthcare` workflow arcs sorted by `appointmentDate` ascending (upcoming appointments first). This gives the user a quick "what's coming up medically" view without navigating their general inbox.
+
+---
+
+### Notification behaviour
+
+- **`test_results`:** Interrupt push — "Test results available from St. Thomas Hospital. Tap to view." No content details in the notification body. Deep-links directly to the arc (which then links to the portal).
+- **`appointment_reminder` < 24h:** Interrupt push — "Appointment with Dr. Smith tomorrow at 9:30am." This is time-critical.
+- **`appointment_reminder` 7 days before:** Ambient push — "Appointment with Dr. Smith on Mon 20 Jan."
+- **`referral`:** Interrupt push — "Referral letter received from Dr. Smith." High personal stakes; the user needs to know.
+- **`prescription` + `requiresAction: true`:** Interrupt push — "Prescription notification from Dr. Smith — action may be required."
+- **`billing`:** Ambient push — "Medical bill received from St. Thomas Hospital."
+- **`insurance_update`:** Ambient push — "Insurance update from Aetna."
+- **Digest:** Include `test_results` and upcoming appointments (< 7 days) under "Healthcare" section.
+
+---
+
+### Where to innovate
+
+**Appointment calendar view:** All `healthcare` arcs with an `appointmentDate` should be surfaced in the calendar view (arc timeline/calendar concept in TODO). A calendar showing all upcoming medical appointments — doctor, dentist, physio, specialist — derived entirely from the inbox. No manual entry. "What do I have medically in February?" is answered in one view. This is the most immediately useful innovation for this workflow.
+
+**Medical billing simplification:** Medical bills are notoriously confusing. When a `billing` arc arrives, offer an AI-powered "Explain this bill" button that passes the email body to Bedrock and returns a plain-English summary: "This is a bill for your consultation on 10 Jan. You owe $180 after insurance. Payment is due by 15 Feb." No medical diagnosis in the explanation — just the financial breakdown. This addresses a genuine user pain point (medical bills are often incomprehensible) without overstepping.
+
+**Prescription reminder:** When a `prescription` arc arrives for a medication that appears in previous prescriptions (same provider + medication pattern in email body), offer a "Set a refill reminder" option. The user specifies when they expect to run out; the system creates a `scheduling` arc at that date: "Time to refill your prescription from Dr. Smith." This is a common forgetting pattern — patients run out of medication because they forget to order the refill.
+
+**Health summary export:** On user request, generate a PDF export of all `healthcare` arcs in a given date range — provider, event type, date, and a note about outcome (from the email body summary). Useful for:
+- Preparing for a specialist appointment ("here's my medical history as inferred from my inbox")
+- Insurance claims ("here's the appointment history for this claim")
+- Tax filing (medical expense deduction)
+This is generated by AI from arc data, saved as a PDF, and downloaded. Not stored on the server.
+
+---
