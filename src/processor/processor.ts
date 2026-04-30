@@ -1,6 +1,6 @@
 import { randomUUID } from "crypto";
 import type { SQSEvent } from "aws-lambda";
-import type { Signal, Arc, Rule, Workflow, WorkflowData, EmailAddressConfig, AccountFilteringConfig, SignalSource, SchedulingData, BlockReason, SignalStatus } from "../types/index.js";
+import type { Signal, Arc, Rule, Workflow, WorkflowData, EmailAddressConfig, AccountFilteringConfig, SignalSource, SchedulingData, BlockReason, SignalStatus, Domain } from "../types/index.js";
 import { priorityCalculator } from "./priority.js";
 import type { MimeParser } from "./mime.js";
 import type { SignalClassifier } from "../classifier/classifier.js";
@@ -30,6 +30,7 @@ export interface ProcessorDatabase {
   getProcessorAccountContext(accountId: string, recipientAddress: string): Promise<ProcessorAccountContext>;
   saveEmailAddressConfig(config: EmailAddressConfig): Promise<void>;
   updateGlobalReputation(domain: string, update: { wasSpam: boolean; wasBlocked: boolean }): Promise<void>;
+  getDomainByName(accountId: string, domainName: string): Promise<Pick<Domain, "senderSetupComplete"> | null>;
 }
 
 /** @deprecated Use ProcessorDatabase */
@@ -58,6 +59,16 @@ export interface ForwardOptions {
 
 export interface Forwarder {
   forward(s3Key: string, toAddress: string, accountId: string, opts: ForwardOptions): Promise<void>;
+}
+
+export interface TestReplier {
+  pong(opts: {
+    to: string;          // original sender — receives the pong
+    from: string;        // send from recipientAddress if Tier 2 complete, else NOTIFICATION_FROM
+    subject: string;     // original subject; implementation prefixes "Re: "
+    body: string;        // original email body text for Claude to riff on
+    inReplyTo: string;   // original SES message ID for email threading
+  }): Promise<{ messageId: string }>;
 }
 
 type SesVerdict = "PASS" | "FAIL" | "GRAY" | "PROCESSING_FAILED";
@@ -99,6 +110,7 @@ interface SignalProcessorOptions {
   ruleEvaluator: RuleEvaluator;
   notifier?: Notifier;
   forwarder?: Forwarder;
+  testReplier?: TestReplier;
 }
 
 export class SignalProcessor {
@@ -109,6 +121,7 @@ export class SignalProcessor {
   private readonly ruleEvaluator: RuleEvaluator;
   private readonly notifier: Notifier | undefined;
   private readonly forwarder: Forwarder | undefined;
+  private readonly testReplier: TestReplier | undefined;
 
   constructor(opts: SignalProcessorOptions) {
     this.store = opts.store;
@@ -118,6 +131,7 @@ export class SignalProcessor {
     this.ruleEvaluator = opts.ruleEvaluator;
     this.notifier = opts.notifier;
     this.forwarder = opts.forwarder;
+    this.testReplier = opts.testReplier;
   }
 
   async process(event: SQSEvent): Promise<void> {
@@ -206,8 +220,9 @@ export class SignalProcessor {
       const emailConfig = accountCtx.emailConfig;
       const accountConfig = accountCtx.filtering;
 
-      // Onboarding block: checked before sender-filter so it applies even for known senders
-      if (classification.workflow === "onboarding") {
+      // Welcome/onboarding block: status emails with statusType="welcome" are blocked when configured.
+      // Checked before sender-filter so it applies even for known senders.
+      if (classification.workflow === "status" && (classification.workflowData as { statusType?: string }).statusType === "welcome") {
         const perAddress = emailConfig?.onboardingEmailHandling;
         const globalBlock = accountConfig?.blockOnboardingEmails ?? false;
         const shouldSuppress = perAddress === "block" || perAddress === "quarantine" || (perAddress !== "allow" && globalBlock);
@@ -282,7 +297,7 @@ export class SignalProcessor {
     }
 
     // 6. Build or update Arc
-    const isNotice = classification.workflow === "notice";
+    const isNotice = classification.workflow === "status";
     let arc: Arc;
     if (matchedArc) {
       arc = {
@@ -356,6 +371,29 @@ export class SignalProcessor {
     }
 
     const signal: Signal = { ...signalShell, arcId: arc.id };
+
+    // Pong: send a Bedrock-generated witty auto-reply for test emails. Runs before saveArc so
+    // arc.sentMessageIds is populated on the first write rather than requiring a second update.
+    if (classification.workflow === "test" && this.testReplier) {
+      const recipientDomain = recipientAddress.split("@")[1] ?? "";
+      const domain = await this.store.getDomainByName(accountId, recipientDomain);
+      const from = domain?.senderSetupComplete
+        ? recipientAddress
+        : (process.env["NOTIFICATION_FROM"] ?? recipientAddress);
+      const pongResult = await this.testReplier.pong({
+        to: parsed.from.address,
+        from,
+        subject: parsed.subject,
+        body: parsed.textBody ?? parsed.htmlBody ?? "",
+        inReplyTo: sesMessageId,
+      }).catch((err) => {
+        console.error("Pong reply failed:", err);
+        return null;
+      });
+      if (pongResult) {
+        arc.sentMessageIds = [...(arc.sentMessageIds ?? []), pongResult.messageId];
+      }
+    }
 
     arc.urgency = priorityCalculator(arc, signal);
 
@@ -520,24 +558,28 @@ export function deriveGroupingKey(
   const base = `${recipientAddress}:${workflow}`;
 
   switch (workflow) {
+    // Deterministic by sender — one arc per sender domain per workflow
     case "auth":
-    case "invoice":
-    case "notice":
-    case "newsletter":
-    case "onboarding":
+    case "content":
+    case "status":
+    case "payments":
+    case "alert":
     case "test":
       return `${base}:${senderETLD1}`;
 
-    case "order": {
+    // Deterministic by order number when present
+    case "package": {
       const { orderNumber } = workflowData as { orderNumber?: string };
       return orderNumber ? `${base}:${orderNumber}` : null;
     }
 
+    // Deterministic by ticket ID when present
     case "support": {
       const { ticketId } = workflowData as { ticketId?: string };
       return ticketId ? `${base}:${ticketId}` : null;
     }
 
+    // Vector search: conversation, crm, travel, scheduling, healthcare, job
     default:
       return null;
   }

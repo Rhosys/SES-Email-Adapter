@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { SQSEvent } from "aws-lambda";
 import { SignalProcessor, deriveGroupingKey, dispositionFor } from "./processor.js";
 import { baseUrgency, priorityCalculator } from "./priority.js";
-import type { ProcessorDatabase, ArcMatcher, RuleEvaluator, Notifier, Forwarder, ForwardOptions } from "./processor.js";
+import type { ProcessorDatabase, ArcMatcher, RuleEvaluator, Notifier, Forwarder, ForwardOptions, TestReplier } from "./processor.js";
 import type { MimeParser } from "./mime.js";
 import type { SignalClassifier, ClassificationOutput } from "../classifier/classifier.js";
 import type { Arc, Rule, Signal, EmailAddressConfig, AccountFilteringConfig } from "../types/index.js";
@@ -26,6 +26,13 @@ function makeStore(): ProcessorDatabase {
     getProcessorAccountContext: vi.fn().mockResolvedValue(DEFAULT_CTX),
     saveEmailAddressConfig: vi.fn().mockResolvedValue(undefined),
     updateGlobalReputation: vi.fn().mockResolvedValue(undefined),
+    getDomainByName: vi.fn().mockResolvedValue(null),
+  };
+}
+
+function makeTestReplier(): TestReplier {
+  return {
+    pong: vi.fn().mockResolvedValue({ messageId: "pong-msg-001" }),
   };
 }
 
@@ -134,9 +141,9 @@ function makeSqsEvent(messages: Array<{
 }
 
 const validClassification: ClassificationOutput = {
-  workflow: "personal",
+  workflow: "conversation",
   workflowData: {
-    workflow: "personal",
+    workflow: "conversation",
     isReply: false,
     sentiment: "neutral",
     requiresReply: false,
@@ -151,7 +158,7 @@ function makeArc(overrides: Partial<Arc> = {}): Arc {
   return {
     id: "arc-existing",
     accountId: TEST_ACCOUNT_ID,
-    workflow: "personal",
+    workflow: "conversation",
     labels: [],
     status: "active",
     summary: "Existing arc summary.",
@@ -197,7 +204,7 @@ describe("SignalProcessor", () => {
       const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
       expect(saved.id).toBe("SES#msg-abc");
       expect(saved.source).toBe("email");
-      expect(saved.workflow).toBe("personal");
+      expect(saved.workflow).toBe("conversation");
       expect(saved.accountId).toBe(TEST_ACCOUNT_ID);
     });
 
@@ -236,12 +243,12 @@ describe("SignalProcessor", () => {
     it("sets Arc workflow and summary from classification", async () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
         ...validClassification,
-        workflow: "invoice",
+        workflow: "payments",
         summary: "Receipt from Stripe for $99.",
         labels: ["billing"],
         workflowData: {
-          workflow: "invoice",
-          invoiceType: "receipt",
+          workflow: "payments",
+          paymentType: "receipt",
           vendor: "Stripe",
           amount: 99,
           currency: "USD",
@@ -251,7 +258,7 @@ describe("SignalProcessor", () => {
       await processor.process(makeSqsEvent([{}]));
 
       const arc = vi.mocked(store.saveArc).mock.calls[0]![0] as Arc;
-      expect(arc.workflow).toBe("invoice");
+      expect(arc.workflow).toBe("payments");
       expect(arc.summary).toBe("Receipt from Stripe for $99.");
       expect(arc.labels).toContain("billing");
     });
@@ -757,7 +764,7 @@ describe("SignalProcessor", () => {
       const existingArc: Arc = {
         id: "existing-arc",
         accountId: TEST_ACCOUNT_ID,
-        workflow: "personal",
+        workflow: "conversation",
         labels: [],
         status: "active",
         summary: "Existing conversation",
@@ -948,23 +955,23 @@ describe("SignalProcessor", () => {
     it("uses order number as grouping key when present", async () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
         ...validClassification,
-        workflow: "order",
-        workflowData: { workflow: "order", orderType: "shipping", retailer: "Amazon", orderNumber: "112-999" },
+        workflow: "package",
+        workflowData: { workflow: "package", packageType: "shipping", retailer: "Amazon", orderNumber: "112-999" },
       });
 
       await processor.process(makeSqsEvent([{}]));
 
       expect(store.findArcByGroupingKey).toHaveBeenCalledWith(
         TEST_ACCOUNT_ID,
-        "user@example.com:order:112-999",
+        "user@example.com:package:112-999",
       );
     });
 
-    it("falls back to vector search for order without order number", async () => {
+    it("falls back to vector search for package without order number", async () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
         ...validClassification,
-        workflow: "order",
-        workflowData: { workflow: "order", orderType: "shipping", retailer: "Amazon" },
+        workflow: "package",
+        workflowData: { workflow: "package", packageType: "shipping", retailer: "Amazon" },
       });
 
       await processor.process(makeSqsEvent([{}]));
@@ -984,8 +991,8 @@ describe("SignalProcessor", () => {
         .toBe("me@example.com:auth:github.com");
     });
 
-    it("returns null for personal (vector search workflow)", () => {
-      expect(deriveGroupingKey("personal", { workflow: "personal", isReply: false, sentiment: "neutral", requiresReply: false }, "me@example.com", "friend.com"))
+    it("returns null for conversation (vector search)", () => {
+      expect(deriveGroupingKey("conversation", { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false }, "me@example.com", "friend.com"))
         .toBeNull();
     });
 
@@ -994,33 +1001,33 @@ describe("SignalProcessor", () => {
         .toBe("me@example.com:test:mydomain.com");
     });
 
-    it("uses senderETLD1 grouping for notice workflow (threads all notices from same sender)", () => {
-      expect(deriveGroupingKey("notice", { workflow: "notice", noticeType: "privacy_policy", provider: "Google" }, "me@example.com", "google.com"))
-        .toBe("me@example.com:notice:google.com");
+    it("uses senderETLD1 grouping for status workflow (threads all notices from same sender)", () => {
+      expect(deriveGroupingKey("status", { workflow: "status", statusType: "privacy_policy", provider: "Google" }, "me@example.com", "google.com"))
+        .toBe("me@example.com:status:google.com");
     });
 
-    it("uses senderETLD1 grouping for invoice workflow", () => {
-      expect(deriveGroupingKey("invoice", { workflow: "invoice", invoiceType: "receipt", vendor: "Stripe" }, "me@example.com", "stripe.com"))
-        .toBe("me@example.com:invoice:stripe.com");
+    it("uses senderETLD1 grouping for payments workflow", () => {
+      expect(deriveGroupingKey("payments", { workflow: "payments", paymentType: "receipt", vendor: "Stripe" }, "me@example.com", "stripe.com"))
+        .toBe("me@example.com:payments:stripe.com");
     });
 
-    it("uses senderETLD1 grouping for newsletter workflow", () => {
-      expect(deriveGroupingKey("newsletter", { workflow: "newsletter", publication: "TLDR", topics: [] }, "me@example.com", "tldr.tech"))
-        .toBe("me@example.com:newsletter:tldr.tech");
+    it("uses senderETLD1 grouping for content workflow", () => {
+      expect(deriveGroupingKey("content", { workflow: "content", contentType: "newsletter", publisher: "TLDR" }, "me@example.com", "tldr.tech"))
+        .toBe("me@example.com:content:tldr.tech");
     });
 
-    it("uses senderETLD1 grouping for onboarding workflow", () => {
-      expect(deriveGroupingKey("onboarding", { workflow: "onboarding", service: "Stripe", onboardingType: "welcome" }, "me@example.com", "stripe.com"))
-        .toBe("me@example.com:onboarding:stripe.com");
+    it("uses senderETLD1 grouping for alert workflow", () => {
+      expect(deriveGroupingKey("alert", { workflow: "alert", alertType: "suspicious_login", service: "GitHub", requiresAction: true }, "me@example.com", "github.com"))
+        .toBe("me@example.com:alert:github.com");
     });
 
-    it("uses orderNumber as key for order workflow when present", () => {
-      expect(deriveGroupingKey("order", { workflow: "order", orderType: "shipping", retailer: "Amazon", orderNumber: "112-999" }, "me@example.com", "amazon.com"))
-        .toBe("me@example.com:order:112-999");
+    it("uses orderNumber as key for package workflow when present", () => {
+      expect(deriveGroupingKey("package", { workflow: "package", packageType: "shipping", retailer: "Amazon", orderNumber: "112-999" }, "me@example.com", "amazon.com"))
+        .toBe("me@example.com:package:112-999");
     });
 
-    it("returns null for order without orderNumber (falls back to vector search)", () => {
-      expect(deriveGroupingKey("order", { workflow: "order", orderType: "shipping", retailer: "Amazon" }, "me@example.com", "amazon.com"))
+    it("returns null for package without orderNumber (falls back to vector search)", () => {
+      expect(deriveGroupingKey("package", { workflow: "package", packageType: "shipping", retailer: "Amazon" }, "me@example.com", "amazon.com"))
         .toBeNull();
     });
 
@@ -1045,46 +1052,29 @@ describe("SignalProcessor", () => {
       expect(baseUrgency("auth", { workflow: "auth", authType: "otp", service: "GitHub" })).toBe("critical");
     });
 
-    it("financial is critical only when isSuspicious", () => {
-      expect(baseUrgency("financial", { workflow: "financial", financialType: "fraud_alert", institution: "Chase", isSuspicious: true })).toBe("critical");
-      expect(baseUrgency("financial", { workflow: "financial", financialType: "statement", institution: "Chase" })).toBe("normal");
+    it("alert is critical when requiresAction=true", () => {
+      expect(baseUrgency("alert", { workflow: "alert", alertType: "suspicious_login", service: "GitHub", requiresAction: true })).toBe("critical");
+      expect(baseUrgency("alert", { workflow: "alert", alertType: "fraud_alert", service: "Chase", requiresAction: true })).toBe("critical");
+      expect(baseUrgency("alert", { workflow: "alert", alertType: "ci_failure", service: "GitHub Actions", requiresAction: true })).toBe("critical");
     });
 
-    it("notice is always silent", () => {
-      expect(baseUrgency("notice", { workflow: "notice", noticeType: "privacy_policy", provider: "Google" })).toBe("silent");
+    it("alert is high when requiresAction=false", () => {
+      expect(baseUrgency("alert", { workflow: "alert", alertType: "new_device", service: "GitHub", requiresAction: false })).toBe("high");
+      expect(baseUrgency("alert", { workflow: "alert", alertType: "domain_expiry", service: "Cloudflare", requiresAction: false })).toBe("high");
     });
 
-    it("newsletter is low (opted-in, not urgent)", () => {
-      expect(baseUrgency("newsletter", { workflow: "newsletter", publication: "TLDR", topics: [] })).toBe("low");
+    it("payments is critical on payment_failed", () => {
+      expect(baseUrgency("payments", { workflow: "payments", paymentType: "payment_failed", vendor: "Stripe" })).toBe("critical");
+    });
+
+    it("payments is normal for all other payment types", () => {
+      expect(baseUrgency("payments", { workflow: "payments", paymentType: "invoice", vendor: "Stripe" })).toBe("normal");
+      expect(baseUrgency("payments", { workflow: "payments", paymentType: "receipt", vendor: "AWS" })).toBe("normal");
+      expect(baseUrgency("payments", { workflow: "payments", paymentType: "subscription_renewal", vendor: "GitHub" })).toBe("normal");
     });
 
     it("test is always high (user is actively waiting for inbox confirmation)", () => {
       expect(baseUrgency("test", { workflow: "test", triggeredBy: "user" })).toBe("high");
-    });
-
-    it("security is always critical", () => {
-      expect(baseUrgency("security", { workflow: "security", alertType: "suspicious_login", service: "GitHub", requiresAction: true })).toBe("critical");
-    });
-
-    it("developer is critical when severity=critical AND requiresAction=true", () => {
-      expect(baseUrgency("developer", { workflow: "developer", platform: "sentry", eventType: "error_alert", severity: "critical", requiresAction: true })).toBe("critical");
-    });
-
-    it("developer is normal when severity=critical but requiresAction=false", () => {
-      expect(baseUrgency("developer", { workflow: "developer", platform: "github", eventType: "ci_success", severity: "critical", requiresAction: false })).toBe("normal");
-    });
-
-    it("developer is normal when severity is not critical (regardless of requiresAction)", () => {
-      expect(baseUrgency("developer", { workflow: "developer", platform: "datadog", eventType: "deployment", severity: "warning", requiresAction: true })).toBe("normal");
-    });
-
-    it("subscription is critical on payment_failed", () => {
-      expect(baseUrgency("subscription", { workflow: "subscription", eventType: "payment_failed", service: "GitHub" })).toBe("critical");
-    });
-
-    it("subscription is normal for any other event type", () => {
-      expect(baseUrgency("subscription", { workflow: "subscription", eventType: "renewal", service: "GitHub" })).toBe("normal");
-      expect(baseUrgency("subscription", { workflow: "subscription", eventType: "trial_expiring", service: "Vercel" })).toBe("normal");
     });
 
     it("support is critical only when priority=urgent", () => {
@@ -1096,37 +1086,39 @@ describe("SignalProcessor", () => {
       expect(baseUrgency("support", { workflow: "support", eventType: "ticket_resolved", service: "Zendesk", priority: "normal" })).toBe("normal");
     });
 
-    it("promotions is low", () => {
-      expect(baseUrgency("promotions", { workflow: "promotions", promotionType: "sale", brand: "Nike" })).toBe("low");
+    it("content is always low", () => {
+      expect(baseUrgency("content", { workflow: "content", contentType: "newsletter", publisher: "TLDR" })).toBe("low");
+      expect(baseUrgency("content", { workflow: "content", contentType: "promotion", publisher: "Nike" })).toBe("low");
     });
 
-    it("social is low", () => {
-      expect(baseUrgency("social", { workflow: "social", platform: "Twitter", notificationType: "mention" })).toBe("low");
-    });
-
-    it("onboarding is low", () => {
-      expect(baseUrgency("onboarding", { workflow: "onboarding", service: "Stripe", onboardingType: "welcome" })).toBe("low");
+    it("status is always silent", () => {
+      expect(baseUrgency("status", { workflow: "status", statusType: "privacy_policy", provider: "Google" })).toBe("silent");
+      expect(baseUrgency("status", { workflow: "status", statusType: "welcome", provider: "Stripe" })).toBe("silent");
     });
 
     it("travel is normal (no special urgency boost)", () => {
       expect(baseUrgency("travel", { workflow: "travel", travelType: "flight", provider: "Delta" })).toBe("normal");
     });
 
-    it("government is normal", () => {
-      expect(baseUrgency("government", { workflow: "government", documentType: "tax", requiresResponse: true })).toBe("normal");
+    it("conversation is normal", () => {
+      expect(baseUrgency("conversation", { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false })).toBe("normal");
+    });
+
+    it("crm is normal", () => {
+      expect(baseUrgency("crm", { workflow: "crm", crmType: "sales_outreach", urgency: "high", requiresReply: true })).toBe("normal");
     });
   });
 
   describe("priorityCalculator", () => {
     it("returns base urgency when arc has no sent messages", () => {
       const arc = makeArc({});
-      const signal = { workflow: "personal", workflowData: { workflow: "personal", isReply: false, sentiment: "neutral", requiresReply: false } } as Parameters<typeof priorityCalculator>[1];
+      const signal = { workflow: "conversation", workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false } } as Parameters<typeof priorityCalculator>[1];
       expect(priorityCalculator(arc, signal)).toBe("normal");
     });
 
     it("promotes to at least high when arc has sent messages", () => {
       const arc = makeArc({ sentMessageIds: ["<msg-001@example.com>"] });
-      const signal = { workflow: "newsletter", workflowData: { workflow: "newsletter", publication: "TLDR", topics: [] } } as unknown as Parameters<typeof priorityCalculator>[1];
+      const signal = { workflow: "content", workflowData: { workflow: "content", contentType: "newsletter", publisher: "TLDR" } } as unknown as Parameters<typeof priorityCalculator>[1];
       expect(priorityCalculator(arc, signal)).toBe("high");
     });
 
@@ -1180,8 +1172,8 @@ describe("SignalProcessor", () => {
 
   describe("onboarding filtering", () => {
     const onboardingClassification: ClassificationOutput = {
-      workflow: "onboarding",
-      workflowData: { workflow: "onboarding", service: "Acme App", onboardingType: "welcome" },
+      workflow: "status",
+      workflowData: { workflow: "status", statusType: "welcome", provider: "Acme App" },
       spamScore: 0.02,
       summary: "Welcome to Acme App.",
       labels: [],
@@ -1328,7 +1320,7 @@ describe("SignalProcessor", () => {
       await processor.process(makeSqsEvent([{}]));
 
       const signal = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
-      expect(signal.workflow).toBe("personal"); // unchanged from validClassification mock
+      expect(signal.workflow).toBe("conversation"); // unchanged from validClassification mock
     });
   });
 
@@ -1337,8 +1329,8 @@ describe("SignalProcessor", () => {
   // -------------------------------------------------------------------------
 
   const noticeClassification: ClassificationOutput = {
-    workflow: "notice",
-    workflowData: { workflow: "notice", noticeType: "privacy_policy", provider: "Google" },
+    workflow: "status",
+    workflowData: { workflow: "status", statusType: "privacy_policy", provider: "Google" },
     spamScore: 0.0,
     summary: "Privacy policy update from Google.",
     labels: [],
@@ -1360,7 +1352,7 @@ describe("SignalProcessor", () => {
 
       const arc = vi.mocked(store.saveArc).mock.calls[0]![0] as Arc;
       expect(arc.status).toBe("archived");
-      expect(arc.workflow).toBe("notice");
+      expect(arc.workflow).toBe("status");
     });
 
     it("does not call notifier for a notice arc even when the signal is new", async () => {
@@ -1382,6 +1374,139 @@ describe("SignalProcessor", () => {
 
       const saved = vi.mocked(store.saveArc).mock.calls[0]![0] as Arc;
       expect(saved.lastSignalAt).toBe("2024-01-10T00:00:00Z"); // unchanged
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Pong auto-reply (test workflow)
+  // -------------------------------------------------------------------------
+
+  const testClassification: ClassificationOutput = {
+    workflow: "test",
+    workflowData: { workflow: "test", triggeredBy: "user" },
+    spamScore: 0.0,
+    summary: "Test email from account owner.",
+    labels: [],
+    classificationModelId: "us.anthropic.claude-opus-4-5-20251101-v1:0",
+  };
+
+  describe("pong auto-reply", () => {
+    let testReplier: TestReplier;
+
+    beforeEach(() => {
+      testReplier = makeTestReplier();
+      processor = new SignalProcessor({ store, mimeParser, classifier, arcMatcher, ruleEvaluator, testReplier });
+    });
+
+    it("sends a pong when workflow is 'test' and testReplier is configured", async () => {
+      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(testClassification);
+
+      await processor.process(makeSqsEvent([{}]));
+
+      expect(testReplier.pong).toHaveBeenCalledOnce();
+    });
+
+    it("passes original sender as 'to', subject, and body to pong", async () => {
+      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(testClassification);
+
+      await processor.process(makeSqsEvent([{}]));
+
+      const opts = vi.mocked(testReplier.pong).mock.calls[0]![0];
+      // Default mime parser mock: from.address = "sender@example.com", subject = "Test email"
+      expect(opts.to).toBe("sender@example.com");
+      expect(opts.subject).toBe("Test email");
+      expect(opts.body).toBe("Hello world");
+    });
+
+    it("uses recipientAddress as 'from' when domain has senderSetupComplete=true", async () => {
+      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(testClassification);
+      vi.mocked(store.getDomainByName).mockResolvedValueOnce({ senderSetupComplete: true });
+
+      await processor.process(makeSqsEvent([{}]));
+
+      const opts = vi.mocked(testReplier.pong).mock.calls[0]![0];
+      // recipientAddress = destination[0] = "user@example.com" from the SQS event default
+      expect(opts.from).toBe("user@example.com");
+    });
+
+    it("falls back to NOTIFICATION_FROM when senderSetupComplete=false", async () => {
+      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(testClassification);
+      vi.mocked(store.getDomainByName).mockResolvedValueOnce({ senderSetupComplete: false });
+      process.env["NOTIFICATION_FROM"] = "noreply@system.example.com";
+
+      await processor.process(makeSqsEvent([{}]));
+
+      const opts = vi.mocked(testReplier.pong).mock.calls[0]![0];
+      expect(opts.from).toBe("noreply@system.example.com");
+
+      delete process.env["NOTIFICATION_FROM"];
+    });
+
+    it("falls back to NOTIFICATION_FROM when domain record is not found", async () => {
+      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(testClassification);
+      // getDomainByName already returns null by default from makeStore()
+      process.env["NOTIFICATION_FROM"] = "noreply@system.example.com";
+
+      await processor.process(makeSqsEvent([{}]));
+
+      const opts = vi.mocked(testReplier.pong).mock.calls[0]![0];
+      expect(opts.from).toBe("noreply@system.example.com");
+
+      delete process.env["NOTIFICATION_FROM"];
+    });
+
+    it("passes sesMessageId as inReplyTo for email threading", async () => {
+      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(testClassification);
+
+      await processor.process(makeSqsEvent([{ sesMessageId: "original-ses-123" }]));
+
+      const opts = vi.mocked(testReplier.pong).mock.calls[0]![0];
+      expect(opts.inReplyTo).toBe("original-ses-123");
+    });
+
+    it("adds the pong messageId to arc.sentMessageIds before saving", async () => {
+      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(testClassification);
+      vi.mocked(testReplier.pong).mockResolvedValueOnce({ messageId: "pong-out-001" });
+
+      await processor.process(makeSqsEvent([{}]));
+
+      const arc = vi.mocked(store.saveArc).mock.calls[0]![0] as Arc;
+      expect(arc.sentMessageIds).toContain("pong-out-001");
+    });
+
+    it("does not set sentMessageIds when pong throws", async () => {
+      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(testClassification);
+      vi.mocked(testReplier.pong).mockRejectedValueOnce(new Error("SES timeout"));
+
+      await processor.process(makeSqsEvent([{}]));
+
+      // Processing still completes and arc is saved without sentMessageIds
+      expect(store.saveArc).toHaveBeenCalledOnce();
+      const arc = vi.mocked(store.saveArc).mock.calls[0]![0] as Arc;
+      expect(arc.sentMessageIds).toBeUndefined();
+    });
+
+    it("does not call pong for non-test workflows", async () => {
+      // classifier returns personal by default (no mockResolvedValueOnce override)
+      await processor.process(makeSqsEvent([{}]));
+
+      expect(testReplier.pong).not.toHaveBeenCalled();
+    });
+
+    it("does not call pong when testReplier is not configured", async () => {
+      const processorWithoutReplier = new SignalProcessor({ store, mimeParser, classifier, arcMatcher, ruleEvaluator });
+      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(testClassification);
+
+      // Should not throw — testReplier is optional
+      await expect(processorWithoutReplier.process(makeSqsEvent([{}]))).resolves.toBeUndefined();
+    });
+
+    it("looks up domain by the domain part of the recipient address", async () => {
+      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(testClassification);
+
+      await processor.process(makeSqsEvent([{ destination: ["me@custom-domain.com"] }]));
+
+      expect(store.getDomainByName).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "custom-domain.com");
     });
   });
 
@@ -1540,9 +1665,9 @@ describe("SignalProcessor", () => {
       vi.mocked(store.listRules).mockResolvedValueOnce([{
         id: "rw-rule",
         accountId: TEST_ACCOUNT_ID,
-        name: "Reclassify as newsletter",
+        name: "Reclassify as content",
         condition: "true",
-        actions: [{ type: "assign_workflow", value: "newsletter" }],
+        actions: [{ type: "assign_workflow", value: "content" }],
         position: 0,
         createdAt: "2024-01-01T00:00:00Z",
         updatedAt: "2024-01-01T00:00:00Z",
@@ -1552,7 +1677,7 @@ describe("SignalProcessor", () => {
       await processor.process(makeSqsEvent([{}]));
 
       const arc = vi.mocked(store.saveArc).mock.calls[0]![0] as Arc;
-      expect(arc.workflow).toBe("newsletter");
+      expect(arc.workflow).toBe("content");
     });
 
     it("delete action sets arc.status=deleted and records arc.deletedAt", async () => {
