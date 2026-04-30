@@ -70,7 +70,7 @@ Drill-in from inbox. Shows all signals in the arc as a chronological thread.
 
 - Thread header: workflow, sender eTLD+1, recipient address, arc urgency, current labels
 - Each signal card shows: from, to, cc, subject, received timestamp, AI summary, spam score (if > 0.3, show warning indicator), body (text or HTML rendered in sandboxed iframe), attachments list
-- `original:john@gmail.com` label (forwarded email detection) should be surfaced prominently on the signal card, not buried in the label chip row
+- `original:john@gmail.com` label (forwarded email detection) appears in the label chips alongside all other labels
 - Workflow-specific structured data panels — each workflow has rich `workflowData` fields the UI should render as a card rather than raw JSON:
   - `order` → order number, tracking link, items list, estimated delivery, status
   - `invoice` → amount, due date, invoice number, download link
