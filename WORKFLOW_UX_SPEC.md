@@ -136,3 +136,145 @@ If multiple auth arcs are active simultaneously (user is logging into two servic
 **Repeated failed auth detection:** If three or more `auth` arcs arrive from the same `service` within 10 minutes without any of them being interacted with (code not copied, link not clicked), surface a warning: "You've received multiple login codes from GitHub. Did you request these?" with a CTA to the service's security page. This is a useful security signal — either the user is in a login loop or someone else is requesting codes.
 
 ---
+
+## conversation
+
+### What this workflow is
+
+Human-to-human email. A real person wrote this, by hand, to the user. It is not a notification, not a receipt, not a system alert — it is correspondence. The user may need to read it, think, and reply. Or they may glance and file it. The defining characteristic is that the sender expects a human response, or at minimum a human to have read it.
+
+This is the closest analogue to iMessage or a DM. The inbox should treat it accordingly: thread-first, reply-first, conversation-centric. The email body matters more here than in any other workflow — this is the one case where reading the full text is often necessary.
+
+### Data shape
+
+```ts
+interface ConversationData {
+  workflow: "conversation";
+  senderName?: string;
+  isReply: boolean;          // true if this is a reply to a prior message
+  threadLength?: number;     // total signals in the arc so far
+  sentiment: "positive" | "neutral" | "negative" | "urgent";
+  requiresReply: boolean;
+}
+```
+
+### Urgency
+
+Derived from `sentiment` and `requiresReply`:
+- `requiresReply: true` + `sentiment: "urgent"` → `high`
+- `requiresReply: true` + `sentiment: "negative"` → `high`
+- `requiresReply: true` + any other sentiment → `normal`
+- `requiresReply: false` → `normal` (or `low` if `sentiment: "positive"` and not a reply chain)
+
+If the arc has `sentMessageIds` (user has replied before), the priority calculator promotes urgency to at least `high` regardless of sentiment — any established back-and-forth is worth immediate attention.
+
+---
+
+### Arc list row
+
+**Left:** Chat bubble icon — filled bubbles to suggest dialogue, not monologue. Use a neutral colour (slate or graphite) — this is not an alarm, it is correspondence.
+
+**Centre:**
+- **Sender name** in bold. Use `senderName` from `workflowData` if present; otherwise `signal.from.name`; otherwise the email address local part. Never show the raw email address as the primary label — the name is what matters here.
+- **Subject line** as the secondary line, muted text, truncated to one line.
+- **AI summary** as the tertiary line — this is the most valuable piece. A one-sentence distillation of what the person actually wrote, e.g. "Asking about the Q3 contract renewal timeline and whether you're available for a call Friday." The summary must be specific, not generic ("You received an email from..."). Muted grey text.
+
+**Right:**
+- Timestamp: "2h ago", "Yesterday", "Mon" — relative, switching to day-of-week after 24h, then date after 7 days.
+- If `requiresReply: true`: a small "Reply needed" chip in amber. Keep it subtle — a chip outline, not a filled badge. This signals intent without being loud.
+- If `isReply: true` and this is a continuation of an existing thread: a reply-arrow indicator (↩) in the timestamp area.
+- Thread depth indicator: if `threadLength > 1`, show a small "3 messages" count in muted text — similar to Gmail's thread count. Tapping the arc opens the full thread.
+
+**Urgency badge:** Only show the urgency badge if `high` or above. `normal` conversation arcs should not carry a badge — it creates noise. The "Reply needed" chip is enough signal.
+
+**Sentiment indicator (subtle):** Consider a 2px left border colour that reflects sentiment without being alarming:
+- `urgent` → amber border
+- `negative` → light red border
+- `positive` → light green border
+- `neutral` → no border / default grey
+
+This is ambient information — it helps the user triage a list of conversations at a glance without requiring them to read summaries.
+
+---
+
+### Arc detail (signal thread)
+
+**Thread header:**
+- Sender name + email address.
+- Thread subject.
+- `requiresReply: true` → show a persistent "Reply needed" chip in the header, with a scroll-to-composer button.
+
+**Signal cards:** Each signal in the arc rendered as a sequential message card — chronological, oldest first. Layout should feel like an email thread viewer (similar to Gmail's conversation view), not a list of unrelated emails.
+
+Each card shows:
+- From / To / CC in collapsed form ("From: Alice <alice@acme.com>") — expandable.
+- Sent time (exact datetime on hover, relative by default).
+- HTML body rendered in a sandboxed iframe. For `conversation`, the body is primary — do not collapse or truncate it by default. Users are here to read.
+- If `spamScore > 0.3`: show a "Possible spam" indicator on the card — amber warning icon with tooltip "This message has a higher-than-normal spam score." Do not suppress the email, just flag it.
+
+**Reply composer:**
+Opens inline at the bottom of the thread, below all signal cards. It does not replace or overlay anything — it appends to the thread view.
+
+- **From field:** Domain dropdown (Tier-2-complete domains only) + local part input. See reply composer spec in TODO for full behaviour.
+- **To:** Pre-filled with `signal.from.address` (the person who wrote to us).
+- **Subject:** Pre-filled with `Re: {original subject}`. User can edit.
+- **Body:** Blank by default for `conversation`. Do NOT pre-fill with a quoted version of the incoming email — that is email client behaviour and creates noise. If the user wants to quote, they can copy-paste.
+- **Send:** Calls the reply API. On success: new signal card appears in the thread (with a "Sent" indicator), composer collapses. `arc.sentMessageIds` is updated — this drives urgency promotion for future signals.
+
+**No auto-archive on reply.** Conversations are ongoing; replying does not close them. The user archives manually when the conversation is done, or a rule can archive after N days of silence.
+
+---
+
+### Threading behaviour
+
+Arc grouping for `conversation` is vector-similarity-based — the processor uses embedding similarity on sender identity and subject to decide whether a new signal extends an existing arc or starts a new one.
+
+**Practical rules the UI must handle:**
+- Multiple signals in one arc appear as a thread (chronological message list).
+- `isReply: true` on a signal means it continues an existing thread — never display it as a standalone arc.
+- If the classifier gets it wrong and two unrelated conversations end up in the same arc, the user can split them via a "Move to new arc" action (future feature, but design the arc detail to accommodate it — perhaps a context menu on individual signal cards).
+
+---
+
+### "Waiting for reply" state
+
+When `arc.sentMessageIds` is non-empty (user has replied) and no new inbound signal has arrived after the last sent message:
+
+- After **3 days**: show a subtle amber dot on the arc row — not a badge, not text, just a small indicator that time has passed without response. Tooltip: "No reply in 3 days."
+- After **7 days**: amber dot becomes a "7d" chip. Still subtle. The user notices it in their normal flow.
+- After **14 days**: chip reads "2w, no reply". At this point also add the arc to the auto-generated "Waiting For" smart list (see TODO for that feature spec).
+- User can dismiss the indicator per-arc: "I don't expect a reply" — stores a `noReplyExpected: true` flag on the arc (client-side or server).
+
+**Do not send push notifications for the waiting state.** The dot/chip is enough. This is ambient information, not an alert.
+
+---
+
+### Default view behaviour
+
+`conversation` arcs appear in the default urgency-sorted order in Default view. No special pinning or elevation unless urgency is `high`. They should feel like normal inbox items — because they are.
+
+`sentiment: "urgent"` arcs do get a subtle priority boost in the sort (within the same urgency tier, more-urgent sentiment sorts higher). The exact sort key: `urgency DESC, sentiment_score DESC, lastSignalAt DESC` where `sentiment_score` maps urgent=3, negative=2, neutral=1, positive=0.
+
+---
+
+### Notification behaviour
+
+- **Push:** `high` urgency → interrupt tier. `normal` → ambient tier (badge only, no popup).
+- **Digest:** Include all `conversation` arcs with `requiresReply: true` that the user has not replied to. Group under "Needs your reply" section of the digest.
+- **In-app:** Standard unread indicator (bold text, left accent bar). No floating banner — conversations are not time-critical enough to interrupt the user mid-flow.
+
+---
+
+### Where to innovate
+
+**AI reply drafts:** When `requiresReply: true`, offer a "Draft a reply" button in the arc detail. This calls Bedrock with the full email thread and returns a draft reply in the composer body. The draft is clearly marked as "AI draft — review before sending." The user edits, personalises, and sends. This is the highest-impact feature for this workflow — the reason people want an AI inbox is to reduce the cognitive load of replying to non-trivial emails.
+
+The prompt shape: *"You are helping {userName} reply to this email thread. Write a first-person reply that is warm, professional, and directly answers any questions asked. Keep it concise. Do not start with 'I hope this email finds you well.' Here is the thread: {thread}"*
+
+The draft should appear in the composer body, not as a separate UI element. The user should feel like they're editing their own draft, not accepting an AI suggestion.
+
+**Smart reply chips (fast responses):** For short, simple emails where `requiresReply: true` and `threadLength === 1`, surface 2–3 one-tap reply options above the composer — similar to Gmail Smart Reply. Examples: "Sure, let's do it.", "I'll get back to you on this.", "Thanks, noted." These are for quick acknowledgements, not substantive replies. Never show smart chips for long threads or negative sentiment — they feel dismissive in context.
+
+**Conversation health signal:** For arc threads with `threadLength > 5` and no `sentMessageIds` (user has been receiving but never replying), show a gentle note: "You've received 6 messages in this thread without replying." This surfaces conversations where the user may have intended to respond but never did. Non-blocking, dismissible.
+
+---
