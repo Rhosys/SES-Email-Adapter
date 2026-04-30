@@ -933,3 +933,212 @@ Consider a **Today** view (or "Today" section within Default view) that surfaces
 **Smart decline suggestions:** When the user declines, offer to suggest alternative times based on their existing scheduling arc data. "You're free Thursday 4–5pm or Friday 10–11am — would you like to propose one of these?" This requires inspecting existing `scheduling` arc `startTime`/`endTime` pairs to find gaps. Simple to implement with the data already available; extremely useful in practice.
 
 ---
+
+## payments
+
+### What this workflow is
+
+Everything involving money: invoices owed to someone, receipts for purchases already made, subscription renewals, failed payment alerts, plan changes, tax documents, wire transfers, refunds, and account statements. Money flows both ways — the user either owes money, has paid money, or is owed money back.
+
+The defining characteristic: **there is often a concrete action and a deadline.** Invoices need to be paid. Subscriptions need to be renewed or cancelled. Failed payments need to be fixed. Tax documents need to be filed. The inbox must surface what is owed, when it is due, and how to pay — all without requiring the user to open the email.
+
+Receipts and statements are the passive cases — already resolved, just need to be filed. The inbox should distinguish sharply between "action needed" (invoice, failed payment) and "already done" (receipt, statement) in its visual treatment.
+
+### Data shape
+
+```ts
+interface PaymentsData {
+  workflow: "payments";
+  paymentType: "invoice" | "receipt" | "subscription_renewal" | "payment_failed" | "plan_changed" | "tax" | "wire_transfer" | "refund" | "statement" | "other";
+  vendor: string;
+  amount?: number;
+  currency?: string;
+  dueDate?: string;            // ISO date — when payment is due
+  invoiceNumber?: string;
+  accountLastFour?: string;   // last 4 digits of the card/account
+  downloadUrl?: string;       // PDF download
+  managementUrl?: string;     // vendor portal (Stripe, PayPal, etc.)
+}
+```
+
+### Urgency
+
+- `payment_failed` → `critical`. Always. Failed payments mean service disruption is imminent. This is the payments equivalent of a fraud alert.
+- `invoice` + `dueDate` within 3 days → `high`
+- `invoice` + `dueDate` within 7 days → `normal`
+- `invoice` + `dueDate` > 7 days → `low`
+- `invoice` with no `dueDate` → `normal` (unknown deadline = treat as moderate urgency)
+- `subscription_renewal` within 7 days → `normal`
+- `subscription_renewal` > 7 days → `low`
+- `receipt` → `low` (already paid; no action needed)
+- `statement` → `low` (informational)
+- `refund` → `normal` (money coming back; user wants to know)
+- `tax` → `normal` (not time-critical unless near a filing deadline)
+- `plan_changed` → `normal`
+- `wire_transfer` → `normal`
+
+---
+
+### Arc list row
+
+**Left:** Icon varies by `paymentType` and direction:
+- `invoice` → document with dollar sign (money owed out)
+- `receipt` → receipt/checkmark (money already paid)
+- `subscription_renewal` → circular arrows (recurring)
+- `payment_failed` → warning triangle with dollar sign — red, high contrast
+- `plan_changed` → gear/upgrade arrow
+- `tax` → government/form icon
+- `wire_transfer` → bank/arrows icon
+- `refund` → dollar sign with left-pointing arrow (money coming back)
+- `statement` → document stack
+
+Colour coding:
+- **Owed (invoice, subscription_renewal):** amber — attention needed
+- **Paid/resolved (receipt, statement, refund):** green tint — calm, done
+- **Failed (payment_failed):** red — critical
+- **Informational (tax, plan_changed, wire_transfer):** neutral blue
+
+**Centre:**
+- **Vendor name** in bold: "Stripe", "AWS", "Adobe", "Xero".
+- **Payment type label** in muted text: "Invoice", "Receipt", "Subscription renewal", "Payment failed", "Tax document", "Refund".
+- **Amount** — the most important piece of information. Display prominently below the type label, larger than surrounding text: **$249.99 USD**. For invoices and renewals, format as "Due: $249.99". For receipts, "Paid: $249.99". For refunds, "Refund: $249.99" in green. Never show a raw number without currency and context.
+- **Due date chip** for invoices and renewals:
+  - > 7 days: "Due Jan 30" (muted)
+  - 3–7 days: "Due in 5 days" (amber)
+  - < 3 days: "Due in 2 days" (amber, bold)
+  - Today: "Due today" (red, bold)
+  - Overdue: "Overdue since Jan 15" (red, bold, with exclamation)
+
+**Right:**
+- Timestamp of the email.
+- If `invoiceNumber` is present: show as a small copiable chip — "INV-2024-0091". Accounts payable processes often require invoice numbers; having it on the row saves the user from opening the email.
+- If `downloadUrl` is present: a "Download" icon button (cloud/arrow) that triggers the PDF download without opening the arc detail.
+
+**Urgency badge:** Always show for `payment_failed` (critical). Show for `high` invoices (< 3 days). Suppress for `low` receipts and statements — they should not carry any badge.
+
+---
+
+### Arc detail (signal thread)
+
+**Thread header — Payment card:**
+
+```
+┌──────────────────────────────────────────────┐
+│  AWS — Invoice                                │
+│  Amount:      $1,847.23 USD                  │
+│  Due:         Thu 30 Jan (in 5 days)         │
+│  Invoice:     INV-2024-0091  [Copy]          │
+│  Account:     Visa ····4821                  │
+│                                              │
+│  [Pay now]    [Download PDF]    [Manage]     │
+└──────────────────────────────────────────────┘
+```
+
+For `receipt`:
+```
+┌──────────────────────────────────────────────┐
+│  Stripe — Receipt                             │
+│  Amount:      $149.00 USD  ✓ Paid            │
+│  Date:        Tue 14 Jan                     │
+│  Invoice:     INV-2024-0088  [Copy]          │
+│  Account:     Visa ····4821                  │
+│                                              │
+│  [Download PDF]                              │
+└──────────────────────────────────────────────┘
+```
+
+For `payment_failed` — full-width red banner at the top of the detail, above the payment card:
+
+```
+⚠️  Payment failed — action required
+Your payment of $149.00 to Stripe failed on 14 Jan.
+Service may be suspended if not resolved.
+[Update payment method →]
+```
+
+**Actions:**
+- **Pay now** — deep-link to `managementUrl`. Opens in new tab. After the user taps this, mark the arc with label `payment-attempted` (client-side state — we don't know if the payment succeeded, but we know the user tried).
+- **Download PDF** — downloads from `downloadUrl` directly. No navigation.
+- **Manage** — opens the vendor's subscription/account management portal (from `managementUrl`). Distinct from "Pay now" — manages the subscription, not the individual invoice.
+- **Archive** — for `receipt` and `statement` types, make Archive the primary CTA. These are done; archive them.
+
+**Payment history panel** (below the payment card, above the email body): For vendors with multiple payment arcs, show a compact payment history inline — the last 3 invoices from this vendor:
+
+```
+Stripe payment history (this account):
+  Jan 2024    $149.00  ✓ Paid  [INV-2024-0088]
+  Dec 2023    $149.00  ✓ Paid  [INV-2023-0071]
+  Nov 2023    $149.00  ✓ Paid  [INV-2023-0054]
+```
+
+This is rendered from other `payments` arcs for the same vendor in the account's arc history. It builds trust and helps the user verify consistency (e.g., "Did the amount change?"). Only show this for vendors with ≥ 2 previous payments.
+
+---
+
+### Threading behaviour
+
+Groups by `vendor` (eTLD+1) + `paymentType` category. All invoices from AWS thread together. All receipts from AWS thread together (separate arc from invoices). This separates "owed" from "paid" which have different visual treatments.
+
+Exceptions:
+- `payment_failed` for a specific invoice threads with the original `invoice` arc if the invoice number matches — they are the same debt.
+- `refund` arcs may thread with the original `receipt` if within 30 days and same vendor.
+- `subscription_renewal` arcs from the same vendor each get their own arc (they are monthly events, not a single thread). Group only the current period's renewal-related signals (payment failure, plan change) together.
+
+**Do not merge invoices across vendors.** Stripe and AWS are always separate arcs.
+
+---
+
+### Auto-archive behaviour
+
+- `receipt` → auto-archive after the user opens it once. Receipts are informational; once seen, they belong in Archive.
+- `statement` → auto-archive 7 days after arrival. Statements are passive records.
+- `invoice` → never auto-archive. Always requires explicit user action (pay or dismiss).
+- `payment_failed` → never auto-archive until the user confirms it is resolved (either by clicking Pay or explicitly archiving).
+- `refund` → auto-archive 3 days after arrival. The money is coming; nothing to do.
+- `tax` → never auto-archive (user may need to refer back during filing period).
+
+---
+
+### Default view behaviour
+
+- `payment_failed` → top of Default view within `critical` urgency tier. Always visible until resolved.
+- Invoices with `dueDate` within 3 days → `high` tier, sorted by `dueDate` ascending (most urgent due date first within tier).
+- All other payments → sorted by `urgency` tier then `lastSignalAt`.
+- `receipt` and `statement` arcs with `low` urgency → appear near the bottom of Default; consider auto-archiving them before they even reach Default (since they require no action).
+
+---
+
+### Notification behaviour
+
+- **`payment_failed`:** Interrupt push — "AWS payment failed — update your payment method." Deep-links to arc with the "Update payment method" CTA visible immediately. The push must include enough context to act: vendor name and amount.
+- **Invoice due within 3 days:** Interrupt push — "Invoice from AWS ($1,847) due in 3 days."
+- **Invoice due today:** Interrupt push — "AWS invoice due today: $1,847."
+- **Invoice overdue (no payment signal received):** Interrupt push 24 hours after `dueDate` if arc is still open — "AWS invoice ($1,847) is overdue."
+- **`subscription_renewal` < 7 days:** Ambient push — "Adobe CC renews in 5 days ($599/year)."
+- **`receipt`:** Ambient push — "AWS charge of $1,847 processed." No interruption for confirmations.
+- **`refund`:** Ambient push — "Refund of $49.99 from Stripe is on its way."
+- **Digest:** Include all unpaid invoices sorted by due date. Group under "Upcoming payments."
+
+---
+
+### Where to innovate
+
+**Vendor spend aggregation:** In the Payments view (a pre-seeded view showing only `payments` workflow arcs), show a monthly spend summary at the top: total across all vendors, with a breakdown. E.g.:
+
+```
+January 2024 — $3,291.22 spent
+  AWS          $1,847.23
+  Stripe fees    $149.00
+  Adobe CC       $599.00
+  Other          $696.00
+```
+
+This is computed from `receipt` arcs within the current month. No data entry. No spreadsheet. The inbox becomes a passive financial dashboard.
+
+**Overdue invoice escalation:** If an `invoice` arc passes its `dueDate` by more than 3 days with no subsequent `receipt` signal (no confirmation of payment), escalate the arc to `critical` urgency and surface a "This invoice may be overdue — have you paid it?" prompt with two options: [Mark as paid] (adds `paid` label and archives) and [Pay now] (opens `managementUrl`). The "Mark as paid" path is important — the user may have paid via bank transfer and no email confirmation arrived.
+
+**Subscription calendar:** All `subscription_renewal` arcs with a future `dueDate` can be visualised as a calendar of upcoming charges. This is the "how much am I spending on subscriptions?" question that every user has but no inbox answers today. Show it as a simple list ordered by upcoming renewal date: "Adobe CC — Jan 30, $599 / AWS — Feb 1, estimated / Notion — Feb 15, $96." Surfaces subscription creep before it becomes a surprise.
+
+**One-tap pay confirmation:** After the user clicks "Pay now" and returns to the app, show a prompt: "Did you complete the payment?" with [Yes, paid] and [Not yet] options. If they confirm payment, the arc archives immediately and a `paid` label is applied. This creates a reliable "I've handled this" state without needing a webhook from the vendor — the user's confirmation is the signal.
+
+---
