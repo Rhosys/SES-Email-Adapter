@@ -780,3 +780,156 @@ Travel arcs behave differently from all others in Default view:
 **Expense extraction post-trip:** After the trip arc auto-archives, offer a one-tap "Add to expenses" action that extracts all `totalAmount` values across signals in the arc and creates an expense summary: dates, provider, amounts by category (flight/hotel/car). Exports as a CSV row or pushes to an integrated expense tool. This saves the user from digging through old emails at month-end.
 
 ---
+
+## scheduling
+
+### What this workflow is
+
+Meeting invites, appointment confirmations, calendar event updates, reschedule requests, and cancellations. The sender wants a specific block of the user's time — either requesting it (`meeting_invite`), confirming it (`appointment`, `confirmation`), reminding the user of it (`reminder`), changing it (`reschedule`), or cancelling it (`cancellation`).
+
+The defining characteristic: **there is exactly one decision to make** — does the time on the calendar match what the user wants? Accept, decline, or propose a different time. Everything else is noise. The UI should make that decision as easy as possible and then get out of the way.
+
+### Data shape
+
+```ts
+interface SchedulingData {
+  workflow: "scheduling";
+  eventType: "meeting_invite" | "appointment" | "reminder" | "cancellation" | "reschedule" | "confirmation";
+  title: string;              // event/meeting title
+  startTime?: string;         // ISO datetime
+  endTime?: string;           // ISO datetime
+  location?: string;          // physical address or video URL (Zoom, Meet, etc.)
+  organizer?: string;         // name or email of who sent the invite
+  attendees?: string[];       // list of other attendees
+  calendarUrl?: string;       // .ics download URL or CalDAV link
+  requiresResponse: boolean;
+}
+```
+
+### Urgency
+
+- `meeting_invite` or `reschedule` + `requiresResponse: true` → `high`
+- `reminder` with `startTime` < 24h → `high`
+- `reminder` with `startTime` > 24h → `normal`
+- `cancellation` → `normal` (the event is gone; no action needed, but the user should know)
+- `confirmation` or `appointment` with `requiresResponse: false` → `normal`
+- Any event with `startTime` < 1 hour → `high` regardless of type (bump all imminent events)
+
+---
+
+### Arc list row
+
+**Left:** Calendar icon. Use a dynamic icon if technically feasible — showing the day number of `startTime` inside the calendar square (like Apple's native Calendar icon). E.g., if the meeting is on Thursday the 18th, the icon shows "18". This is extremely effective for scanning a list of scheduling arcs. If dynamic icons are not feasible, use a static calendar icon with a distinct colour per `eventType`:
+- `meeting_invite` / `appointment` → blue
+- `cancellation` → grey with X overlay
+- `reminder` → amber (time-sensitive)
+- `reschedule` → purple (change)
+- `confirmation` → green checkmark overlay
+
+**Centre:**
+- **Event title** in bold: "Q3 Planning Meeting", "Dentist Appointment", "Coffee with Alice".
+- **Time** as the secondary line: "Thu 18 Jan, 2:00–3:00pm" — always show both start and end time if `endTime` is present. Duration in parentheses helps users assess calendar impact: "(1 hour)".
+- **Organizer** in muted text: "Invited by Alice Chen" or "Confirmed by Dr. Smith's office".
+- **Location hint**: if `location` contains a video URL (Zoom, Google Meet, Teams, Around), show a video camera icon + "Video call". If physical, show a map pin + abbreviated location. This lets the user know whether they need to go somewhere.
+
+**Right:**
+- **Time until** chip: same countdown logic as travel — "in 3 days", "Tomorrow 2pm", "In 45m" (amber), counting down in real time within the hour.
+- If `requiresResponse: true`: an "RSVP needed" chip in amber. More direct than "Reply needed" — scheduling has a clear response protocol (accept/decline).
+- Attendee count: if `attendees` has > 0 entries, show a small "4 attendees" count in muted text.
+
+**Urgency badge:** `high` for invites needing response. Suppress for confirmed events with no response needed — the time chip already conveys urgency.
+
+---
+
+### Arc detail (signal thread)
+
+**Thread header — Event card:** Render the event as a visual card at the top of the detail, not as an email header. This card should look like a calendar event:
+
+```
+┌──────────────────────────────────────────────┐
+│  📅  Q3 Planning Meeting                      │
+│      Thu 18 Jan, 2:00–3:00pm (1 hour)        │
+│      📍 Conference Room B / Zoom              │
+│      👤 Invited by Alice Chen                 │
+│      👥 4 attendees: Alice, Bob, Carol, +1    │
+│                                              │
+│  [Accept]    [Decline]    [Add to Calendar]  │
+└──────────────────────────────────────────────┘
+```
+
+The event card is always rendered from `workflowData` regardless of whether the email body contains the same information. Below the card, the email body renders in the sandboxed iframe (often contains the full invite with agenda — useful for context).
+
+**RSVP buttons (when `requiresResponse: true`):**
+- **Accept** — if `calendarUrl` is a `.ics` or CalDAV link, download/add to calendar + mark arc as responded. If no URL, open the reply composer pre-filled with "Yes, I'll be there." The arc is then marked "responded" and urgency drops to `normal`.
+- **Decline** — same: CalDAV decline or opens reply composer pre-filled with "Sorry, I won't be able to make it — do you have another time?" User can edit before sending.
+- **Propose new time** — opens a light date/time picker inline. Sends a reply with the proposed time. Pre-fills: "I can't make 2pm on Thursday — would 4pm work instead?"
+
+**Add to Calendar** (always visible regardless of `requiresResponse`):
+- Downloads a `.ics` file containing `title`, `startTime`, `endTime`, `location`, `organizer`, `description` (from email body if extractable).
+- On mobile: integrates with OS calendar API to add directly without file download.
+
+**For `cancellation` events:**
+- The event card renders in grey with a strikethrough on the title: `~~Q3 Planning Meeting~~`.
+- Body text: "This event has been cancelled."
+- Only action: "Remove from calendar" (attempts to delete the calendar event via `.ics` CANCEL method, or links to the calendar app).
+- Auto-archive suggestion: "Event cancelled — archive this?" with one-tap archive. The user should not have to manually clean this up.
+
+**For `reschedule` events:**
+- Show two event cards stacked: old time (strikethrough, grey) → new time (current, highlighted).
+- RSVP buttons for the new time.
+
+---
+
+### Threading behaviour
+
+Groups by `title` + `organizer` + approximate date window (±7 days). This ensures:
+- The original invite and the confirmation thread together.
+- A reschedule (same title, same organizer) extends the existing arc rather than creating a new one.
+- Weekly recurring meetings do NOT thread together — the ±7-day window prevents that. Each week's invite is a separate arc.
+
+For calendar system-generated reminders (e.g., "This is a reminder for your meeting in 1 hour"): these often have slightly different subjects. The matcher should normalise by stripping "Reminder:", "Re:", "Fwd:" prefixes and matching on the core `title`.
+
+---
+
+### Auto-archive on event passage
+
+When `startTime` passes:
+- If the event was accepted (user responded): auto-archive 2 hours after `endTime`. The meeting is done; there is nothing to act on.
+- If the event was declined or the arc has no response: auto-archive 2 hours after `startTime`. The window has passed.
+- If the event was cancelled: auto-archive immediately when the cancellation signal arrives.
+- If the user re-receives a reschedule for a past arc, create a new arc for the new time rather than resurfacing the old archived arc.
+
+This auto-archive logic ensures the user never has to manually clean up past meetings.
+
+---
+
+### Default view behaviour
+
+Scheduling arcs sort alongside other arcs by urgency + time. Within the `high` urgency tier, scheduling arcs with `requiresResponse: true` sort above those without — RSVP-needed events are more time-sensitive than confirmed events.
+
+Consider a **Today** view (or "Today" section within Default view) that surfaces only arcs with `startTime` on the current calendar day, regardless of urgency tier. This is especially useful in the morning: "You have 3 events today — 9am standup, 2pm Q3 planning, 5pm dentist." The today section is collapsible and sits at the top of Default view when populated.
+
+---
+
+### Notification behaviour
+
+- **`meeting_invite`:** Interrupt push if `requiresResponse: true` — "Alice invited you to Q3 Planning Meeting." Deep-links to the arc. If `requiresResponse: false`, ambient push.
+- **`reminder`:** Interrupt push 1 hour before `startTime`, ambient push 1 day before. Use `startTime` to schedule these, not the email arrival time. The processor should schedule deferred notifications when a `reminder` type signal arrives.
+- **`cancellation`:** Interrupt push — "Q3 Planning Meeting has been cancelled." Even though no action is needed, users need to know immediately so they can clear their calendar.
+- **`reschedule`:** Interrupt push — "Q3 Planning Meeting has been rescheduled to Friday 3pm."
+- **`confirmation`:** Ambient push — "Your dentist appointment is confirmed for Mon 20 Jan."
+- **Digest:** Include all unanswered `meeting_invite` and `reschedule` arcs. Group under "Needs your response."
+
+---
+
+### Where to innovate
+
+**Conflict detection:** When a new `meeting_invite` arrives, the inbox should check whether the user already has a scheduling arc with an overlapping `startTime`–`endTime` window. If a conflict is detected, surface it in the arc detail: "Conflict: You already have Q2 Review at 2:00–3:00pm on Thursday." This prevents double-booking without requiring the user to check their calendar manually. The check is done client-side against existing `scheduling` arcs — no calendar integration required.
+
+**One-tap accept + add-to-calendar:** The most common response to a meeting invite is "accept." Make this a single tap that simultaneously (a) sends an acceptance reply, (b) adds the event to the OS calendar, and (c) archives the arc. The user should be able to fully process a meeting invite in one tap from the arc list row, without opening the detail view.
+
+**Location intelligence:** When `location` is a physical address, offer a one-tap "Directions" link (opens in Maps app). When `location` is a video URL, offer one-tap join that opens the video conferencing app directly. These deep-links should be visible on the arc row itself (on hover/long-press) — not just in the detail view. Getting to the meeting should be zero friction.
+
+**Smart decline suggestions:** When the user declines, offer to suggest alternative times based on their existing scheduling arc data. "You're free Thursday 4–5pm or Friday 10–11am — would you like to propose one of these?" This requires inspecting existing `scheduling` arc `startTime`/`endTime` pairs to find gaps. Simple to implement with the data already available; extremely useful in practice.
+
+---
