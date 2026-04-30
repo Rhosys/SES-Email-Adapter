@@ -1348,3 +1348,148 @@ After an alert is acknowledged (user clicks "This was me" or "Mark as resolved")
 The user taps each item to mark it done. The arc archives when all items are checked. This turns a panic-inducing security alert into a structured, manageable incident response — in the inbox.
 
 ---
+
+## content
+
+### What this workflow is
+
+Newsletters, promotional emails, social digests, product updates, and announcements. The user subscribed to these (or at least consented to them at some point). They are passive, low-priority, read-when-you-have-time emails. They require no action unless the user wants to take one.
+
+The defining characteristic: **they should not intrude.** A newsletter from a favourite writer is valuable — but not urgent. A promotional email with a 20%-off code might be worth a glance — but not worth interrupting anything. The inbox should keep `content` arcs visible and accessible without letting them drown out the things that actually matter.
+
+The secondary challenge: **volume.** Users who subscribe to newsletters, product updates, and social digests can receive dozens per day. The inbox must handle this volume gracefully — grouping by publisher, surfacing what's worth reading, and making bulk-dismiss effortless.
+
+### Data shape
+
+```ts
+interface ContentData {
+  workflow: "content";
+  contentType: "newsletter" | "promotion" | "social_digest" | "product_update" | "announcement";
+  publisher: string;
+  topics?: string[];
+  discountCode?: string;
+  discountAmount?: string;
+  expiryDate?: string;       // for promotions with expiring offers
+  unsubscribeUrl?: string;
+}
+```
+
+### Urgency
+
+Always `low`. No exceptions. Content arcs never interrupt. They never carry an urgency badge. They exist in the inbox as passive reading material and should feel that way.
+
+The one exception: if `discountCode` is present and `expiryDate` is within 24 hours, bump urgency to `normal` and surface a "Expires today" chip. A discount code expiring tonight is the rare case where content warrants more than `low` visibility. It does not warrant `high` or interrupt push — just normal-tier placement and an ambient notification.
+
+---
+
+### Arc list row
+
+**Visual treatment:** Content arcs are visually muted compared to all other workflows. Reduce font weight (regular, not bold) for publisher name. Reduce opacity slightly (90%) on the secondary text. No left accent bar. No urgency badge. The visual hierarchy should make it immediately apparent that these are lower-priority reads.
+
+**Left:** Icon based on `contentType`:
+- `newsletter` → newspaper/scroll icon
+- `promotion` → tag/percent icon (with discount chip if `discountCode` present)
+- `social_digest` → network/users icon
+- `product_update` → package/version icon
+- `announcement` → megaphone icon
+
+Colour: neutral grey. Not the warm/vibrant colours used for action-required workflows. The grey communicates "when you have time."
+
+**Centre:**
+- **Publisher name** in regular (not bold) weight: "The Browser", "Stripe Press", "Substack".
+- **Content type label** in muted text: "Newsletter", "Promotion", "Product update".
+- **AI summary / headline**: for newsletters, the actual headline or summary of the main article — e.g., "Why large language models hallucinate and what to do about it." For promotions: "20% off everything — code SAVE20." For social digests: "3 new posts from people you follow." This summary drives the decision to read or skip.
+- **Discount chip** (if `discountCode` present): a prominent chip showing the code + discount amount: "SAVE20 — 20% off". This is the most valuable piece of information in a promotional email. Surface it on the row so the user can copy it without opening the email.
+
+**Right:**
+- Timestamp.
+- **Unsubscribe button** — a small secondary action on the row: "Unsub" with a minus icon. Tapping opens a single-step confirmation: "Unsubscribe from The Browser?" with [Confirm] and [Cancel]. On confirm: opens `unsubscribeUrl` in a new tab (the actual unsubscribe) AND archives the arc AND applies a label `unsubscribed:the-browser` so future arcs from this publisher can be auto-archived by a rule.
+- **Topic chips** (if `topics` is present): small grey chips showing what the content is about: "AI", "Security", "Startups". Max 2 visible, rest collapsed. Helps the user decide whether to read without opening.
+
+**No reply button.** Content arcs do not support reply from the inbox. Users who want to reply to a newsletter author do so via their email client — not via this inbox, which is a reader, not a mailer.
+
+---
+
+### Arc detail (signal thread)
+
+Content arcs often have a single signal (one newsletter issue). The thread view should feel like a reading experience, not an email client.
+
+**Thread header:**
+- Publisher name + content type.
+- AI-generated summary of the full issue: 2–3 sentences covering the main points. This is the "TL;DR" that lets the user decide in 10 seconds whether they want to read the full email.
+- Topic chips.
+- Discount code chip (if present): large, copiable. The code is the thing — make it the centrepiece.
+
+**Signal cards:**
+- Render HTML in a full-width sandboxed iframe. Remove the normal signal card chrome (from/to headers, spam score) — for content arcs, the email IS the content. Treat the iframe as the primary reading surface.
+- Give the iframe maximum available height. Do not limit it to a scroll container within a scroll container — allow the full newsletter to render in natural document flow.
+- Tracking pixel blocking: content emails often contain tracking pixels. The sandboxed iframe already prevents JavaScript execution; additionally, block image requests to known tracking domains (a maintained blocklist). Show a small "2 trackers blocked" indicator at the top of the iframe if any were blocked.
+
+**Actions:**
+- **Unsubscribe** — same as row, but shown as a full button. The primary action for content emails that the user decides isn't worth their time is to unsubscribe, not archive.
+- **Archive** — secondary. For newsletters worth keeping but not needing to read right now.
+- **Save to read later** — adds label `read-later` and moves arc to a "Read Later" view. This is the "I want to read this but not now" option.
+- **Copy discount code** — if `discountCode` is present, a sticky button at the top of the detail view: "Copy code: SAVE20". This should be impossible to miss.
+
+---
+
+### Threading behaviour
+
+Groups by `publisher` (eTLD+1 of sender domain). All issues of "The Browser" newsletter thread into one arc. The arc grows as new issues arrive — the thread shows the last N issues in reverse chronological order.
+
+**Important:** Do not thread promotional emails from large e-commerce retailers (Amazon, ASOS, etc.) together with their order confirmation / shipping emails. `content` arcs for `amazon.com` must be entirely separate from `package` arcs for `amazon.com`. The grouping key must include `workflow` in addition to `publisher`.
+
+Each week's newsletter is a separate signal in the arc — the user reads the latest one when they open the arc. Older issues are accessible by scrolling up in the thread. This is exactly analogous to an iMessage thread — the arc IS the publisher relationship, and each newsletter issue is a message in that thread.
+
+**For promotions:** Each promotional email from the same retailer threads into one arc. The arc becomes a "deals from ASOS" arc. This is helpful for users who want to check if there are any active deals before purchasing — they can open one arc and see all recent promotions.
+
+---
+
+### Bulk management
+
+Volume management is the defining UX challenge for `content`. The inbox must make it easy to deal with many content arcs at once:
+
+**Swipe actions (mobile):**
+- Swipe left → Archive (primary dismiss gesture)
+- Swipe right → Unsubscribe (surface the most powerful action for content)
+
+**Bulk select in content view:**
+- Long-press (mobile) or checkbox on hover (desktop) to select multiple arcs.
+- Bulk actions: Archive all selected / Unsubscribe all selected / Add label.
+- "Select all content" bulk action: archive or unsubscribe all `content` arcs in one tap. This is the "inbox zero for newsletters" feature — many users want to periodically nuke all content arcs and start fresh.
+
+**Auto-archive rules:**
+- In Settings → Account → Filtering, offer: "Auto-archive content emails after: Never / 7 days / 14 days / 30 days of being unread." Default: off. This lets users keep a clean content view without manual effort.
+
+---
+
+### Default view behaviour
+
+Content arcs appear at the bottom of Default view, below all other urgency tiers. Within the `low` urgency tier:
+- Sort by `lastSignalAt` descending (most recent publisher email first).
+- Cap the number of content arcs visible in Default view: show maximum 5 content arcs below the fold, with a "See all X content emails →" link that opens the full Content view. This prevents newsletters from burying important email in long sessions.
+
+Consider a dedicated **Content** view pre-seeded in the user's default view set — showing only `content` workflow arcs, sorted by recency. Users who actively read newsletters can use this as their "reading" view. Users who don't care can ignore it.
+
+---
+
+### Notification behaviour
+
+- **Standard content (`newsletter`, `social_digest`, `product_update`, `announcement`):** No push notification. No badge. No interruption. These appear in the inbox silently when the user next opens the app.
+- **Promotion with `discountCode` and no expiry:** Ambient push only — "20% off at ASOS — code SAVE20." Badge only, no popup. Users who care about deals will appreciate the badge; those who don't won't be interrupted.
+- **Promotion with `discountCode` + `expiryDate` within 24 hours:** Interrupt push — "Your ASOS discount code expires tonight: SAVE20 (20% off)." This is the rare case where a content email earns an interrupt. Keep it to truly expiring codes — not "ends soon" marketing language without a real date.
+- **Digest:** Include a brief "Content you might have missed" section at the bottom of the digest — top 3 content arcs by publisher volume. This is optional and configurable; many users will turn it off.
+
+---
+
+### Where to innovate
+
+**Reading time estimate:** For newsletter arcs, estimate the reading time from the email body word count and display it on the arc row: "7 min read." This helps the user decide whether to read now (when they have 7 minutes) or save for later. Simple to compute from HTML-stripped word count at ≈200 WPM average.
+
+**AI digest of newsletters:** Weekly (or on user request), generate an AI-written briefing across all unread newsletters from the past 7 days: "This week in your newsletters: [The Browser] covered LLM hallucination and the future of AI-assisted development. [Stratechery] wrote about Apple's antitrust situation. [TLDR] surfaced 5 developer tools worth trying." Each item deep-links to the relevant arc. This is the "morning briefing" concept applied to content — the user can consume a week of newsletters in 2 minutes. Bedrock generates this; trigger it on user request ("Summarise my newsletters") or on a weekly schedule.
+
+**Topic-based organisation:** When `topics` fields are populated, offer topic filtering in the Content view: buttons for each topic seen across all content arcs (AI, Security, Business, Design, etc.). Tapping "AI" filters to newsletters and product updates tagged with that topic. This turns the content view into a curated reading experience — the user reads by topic, not by publisher. Especially powerful when the user subscribes to many sources.
+
+**Automatic discount code wallet:** When `discountCode` is extracted from any content arc, automatically add it to a "Discount codes" panel in the app (accessible from the main nav or as a widget on the home screen). The wallet shows all active codes: publisher, code, discount, expiry date. Expired codes are greyed out and removable. The user never has to search their inbox for a promo code before checking out — they check the wallet. This is genuinely useful and completely differentiated from any existing email client.
+
+---
