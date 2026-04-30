@@ -594,3 +594,189 @@ This is not an urgency change (it stays `normal`) — it is a sort boost within 
 **One-tap return initiation:** For `delivered` arcs where the retailer supports deep-linked returns (Amazon, etc.), add a "Start return" button in the structured panel that constructs the return URL from `orderNumber` and `retailer`. The user should never have to navigate to the retailer's site, find the order, and click return — one tap from the arc detail.
 
 ---
+
+## travel
+
+### What this workflow is
+
+Flight bookings, hotel reservations, car rentals, train tickets, cruise confirmations, activity bookings, itineraries, check-in reminders, and boarding passes. The user is going somewhere and this email is part of the logistics.
+
+The defining characteristic: **the email's value is entirely time-anchored.** A boarding pass 3 weeks before departure is trivia. The same boarding pass 2 hours before the flight is critical. The inbox must understand this and surface travel information exactly when it matters — not when it arrives.
+
+Travel arcs should feel like a companion that knows your itinerary and surfaces the right information at the right moment. Not an inbox. Not a notification centre. A travel assistant.
+
+### Data shape
+
+```ts
+interface TravelData {
+  workflow: "travel";
+  travelType: "flight" | "hotel" | "car_rental" | "train" | "cruise" | "activity" | "itinerary" | "check_in_reminder" | "boarding_pass";
+  provider: string;              // e.g. "United Airlines", "Marriott", "Hertz"
+  confirmationNumber?: string;
+  departureDate?: string;        // ISO datetime
+  returnDate?: string;           // ISO datetime
+  origin?: string;               // airport code or city
+  destination?: string;          // airport code or city
+  passengerName?: string;
+  totalAmount?: number;
+  currency?: string;
+}
+```
+
+### Urgency
+
+Base urgency is `normal`. The processor applies time-based urgency escalation via a scheduled job that runs periodically across all active travel arcs:
+
+- More than 7 days before `departureDate` → `low`
+- 2–7 days before → `normal`
+- 24 hours before → `high`
+- < 4 hours before → `critical` (for `flight`, `train` — not hotel/car)
+- `check_in_reminder` or `boarding_pass` type → always `high`
+- After `departureDate` passes → urgency drops to `low` (trip is over); arc auto-archives 72 hours after return if `returnDate` is set
+
+The urgency escalation is computed dynamically — the backend job updates `arc.urgency` as time passes; the UI does not need to compute this, it reads current urgency from the arc. However, the UI should also compute a "time until departure" countdown and display it accurately regardless of when urgency was last recalculated.
+
+---
+
+### Arc list row
+
+**Left:** Workflow-specific icon based on `travelType`:
+- `flight` → airplane (angled upward for departure, angled downward for return/arrival leg)
+- `hotel` → building/bed icon
+- `car_rental` → car icon
+- `train` → train icon
+- `cruise` → ship icon
+- `activity` → ticket/star icon
+- `itinerary` → map/route icon
+- `check_in_reminder` → phone-with-QR icon (implies digital check-in)
+- `boarding_pass` → ticket icon with barcode
+
+Icons should use a travel-specific colour: warm amber or teal. Not red (reserved for urgent), not grey (that is muted/status).
+
+**Centre:**
+- **Provider name** in bold: "United Airlines", "Marriott London", "Hertz".
+- **Route or location** as secondary text: for flights/trains, "SFO → LHR"; for hotels, "London, UK"; for car rentals, "San Francisco Airport"; for activities, the activity name.
+- **Departure time chip**: the most important piece of contextual information. Format:
+  - > 7 days out: "Sat 18 Jan" (just the date)
+  - 2–7 days out: "Sat 18 Jan, 14:30" (date + time)
+  - 24 hours: "Tomorrow 14:30" in amber
+  - Today: "Today 14:30" in amber with pulse animation
+  - < 2 hours: "In 1h 45m" in red, bold — actively counting down
+  - Departed: "Departed" in grey — replaced by return date if set
+
+**Right:**
+- Confirmation number as a copiable chip — a discreet monospace code. Tapping copies to clipboard with "Copied" toast. This is the single most-retrieved piece of information at an airport or hotel desk.
+- Timestamp of the email (muted, small) — less important than the departure date.
+
+**Urgency badge:** Show for `high` and above. Do not show for `low` (week+ away). The departure chip already conveys urgency visually.
+
+---
+
+### Auto-snooze
+
+This is the most important behavioural innovation for travel. When a `travel` arc arrives (any `travelType`):
+
+- If `departureDate` is more than 48 hours away, **automatically snooze the arc** until 24 hours before departure.
+- The arc disappears from Default view.
+- It reappears exactly 24 hours before `departureDate` with urgency `high` and a push notification.
+
+The user sees no noise until the trip is actually relevant. The booking confirmation arrives, gets a push ("Flight to London confirmed — we'll remind you 24 hours before departure"), and then disappears until it matters.
+
+**Snooze can be disabled per-arc:** A small "Snooze until day before" / "Keep in inbox" toggle on the arc row and in the detail view. Some users want to see upcoming travel in their inbox — give them control, but default to snooze.
+
+**Itinerary arcs** (`travelType: "itinerary"`) are an exception: these are complex multi-leg documents the user may want to refer to for planning. Do not auto-snooze itinerary arcs — keep them visible and archive them when the user returns.
+
+---
+
+### Arc detail (signal thread)
+
+**Thread header:**
+- Large route display for flights: `SFO → LHR` in a prominent font. Hotel: city + property name. The header should feel like a travel card, not an email header.
+- Departure countdown prominently placed: "Departs in 14h 22m" updating in real time when within 24 hours.
+
+**Structured data panel:**
+
+```
+Flight:          United Airlines UA 901
+Route:           SFO → LHR
+Departure:       Sat 18 Jan, 14:30 PST  (Terminal 3, Gate G82)
+Arrival:         Sun 19 Jan, 09:45 GMT
+Confirmation:    XKRT49  [Copy]
+Passenger:       Jane Smith
+Total:           $1,249.00 USD
+```
+
+For hotels:
+```
+Hotel:           Marriott London Heathrow
+Check-in:        Sun 19 Jan (after 3pm)
+Check-out:       Wed 22 Jan (by 12pm)
+Duration:        3 nights
+Confirmation:    79284710  [Copy]
+Total:           £487.00 GBP
+```
+
+The panel extracts from `workflowData` fields. Gate information is rarely in structured data — the email body may contain it, and the UI should attempt to surface it via a quick body parse if not in `workflowData`.
+
+**Smart actions:**
+- **Add to calendar** — generates a `.ics` file from `departureDate`, `returnDate`, `destination`, `provider`, `confirmationNumber`. One tap. For flights, creates two events: departure + return leg if `returnDate` is set.
+- **Check in online** — deep-link to the airline/hotel check-in URL if extractable. For major airlines (United, Delta, BA, Southwest, etc.), the check-in URL can be constructed from `confirmationNumber` and known URL patterns. Store these patterns as a lookup table.
+- **Open boarding pass** — for `boarding_pass` type, attempt to extract a Wallet-compatible PKPass URL or render the QR code inline within the arc detail. The user should be able to show the boarding pass directly from the arc without opening the airline app.
+
+**Multiple signals in one arc:** A single trip often generates many emails — booking confirmation, payment receipt, check-in reminder, boarding pass. These all share a `confirmationNumber` and thread into one arc. The arc detail shows them chronologically. The structured panel is always generated from the most recent signal's data (which is the most complete/current).
+
+---
+
+### Threading behaviour
+
+Groups by `confirmationNumber` + `provider`. All signals for United flight XKRT49 thread together: booking → payment receipt → check-in reminder → boarding pass → (post-trip) receipt or survey.
+
+If `confirmationNumber` is absent: fall back to `provider` + `departureDate` within a ±2-hour window. This handles cases where the reminder email doesn't include the confirmation number.
+
+**Multi-leg itineraries:** A single `itinerary` email often covers multiple flights. Each leg may subsequently generate separate check-in/boarding-pass signals with different confirmation numbers. The `itinerary` arc is the parent; subsequent leg signals should attempt to match back to the itinerary by date + origin/destination + provider before creating new arcs.
+
+---
+
+### Post-trip auto-archive
+
+When `returnDate` (or `departureDate` for one-way travel) passes by 72 hours, auto-archive the arc. The trip is over; the booking details are no longer needed in the active inbox. The arc lives in Archive for the retention period (useful for expense reports, insurance, etc.).
+
+If no `returnDate` is set and no new signal has arrived within 7 days of `departureDate`, treat the arc as post-trip and auto-archive.
+
+Edge case: if the user never received a `delivered`-equivalent for travel (some trips generate no post-trip email), the 7-day rule handles cleanup automatically.
+
+---
+
+### Default view behaviour
+
+Travel arcs behave differently from all others in Default view:
+
+1. **Future trips (auto-snoozed):** Not visible until 24 hours before departure. Zero noise until they matter.
+2. **Active/upcoming (within 24h):** Surfaced at the top of Default view, above all other same-urgency arcs. Within the `high` urgency tier, sort travel arcs above non-travel arcs.
+3. **Day-of:** `check_in_reminder` and `boarding_pass` arcs are pinned to the very top of Default, above even `critical` arcs from other workflows — with one exception: `auth` arcs (you can't board a plane if you can't log in). On the day of travel, nothing is more important than getting to the gate.
+4. **Post-trip:** Auto-archived, not visible in Default.
+
+---
+
+### Notification behaviour
+
+- **Booking confirmation:** Ambient push — "Flight to London confirmed." No interruption needed; the booking is done.
+- **24 hours before departure:** Interrupt push — "Your flight to London is tomorrow at 14:30." Deep-links to the arc. This is the snooze wakeup — the moment the arc re-enters the inbox.
+- **Check-in opens (typically 24h before):** Ambient push — "Check-in is now open for your United flight." Include deep-link to the check-in URL if available.
+- **< 4 hours before departure (flights/trains only):** Interrupt push — "Your flight departs in 3h 45m. Gate: G82." Include the gate if extractable.
+- **Boarding pass received:** Interrupt push — "Your boarding pass for UA 901 is ready." High urgency; the user may be at the airport.
+- **Post-trip:** No push. The arc auto-archives silently.
+
+---
+
+### Where to innovate
+
+**Boarding pass in lock screen widget:** The boarding pass confirmation number (or QR code if extracted) should be surfaced as a lock screen widget or notification that persists on the day of travel. The user should never have to unlock their phone and navigate to the inbox to find their confirmation number at a hotel desk or gate. Build the notification payload to include the confirmation number in the persistent notification that day.
+
+**Proactive gate and delay alerts:** When the airline/hotel sends an update email (gate change, flight delay, hotel room change), it arrives as a new signal in the travel arc. When this happens, send an interrupt push regardless of the user's general notification preferences — changes to travel plans are always worth interrupting. Label the signal `change-alert` so it renders with a distinct visual treatment in the arc thread (amber border on the signal card, "Update" badge).
+
+**Multi-city trip linking:** When the user has flights and hotels with overlapping dates to the same destination, suggest linking them into a single trip view. E.g., "Your London hotel overlaps with your London flight — show them together as a Trip?" This is purely a UI grouping, not a data model change. Tap to create a `trip` label that groups related travel arcs in a collapsible "London Jan 18–22" section in Default view during the travel window.
+
+**Expense extraction post-trip:** After the trip arc auto-archives, offer a one-tap "Add to expenses" action that extracts all `totalAmount` values across signals in the arc and creates an expense summary: dates, provider, amounts by category (flight/hotel/car). Exports as a CSV row or pushes to an integrated expense tool. This saves the user from digging through old emails at month-end.
+
+---
