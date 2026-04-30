@@ -278,3 +278,139 @@ The draft should appear in the composer body, not as a separate UI element. The 
 **Conversation health signal:** For arc threads with `threadLength > 5` and no `sentMessageIds` (user has been receiving but never replying), show a gentle note: "You've received 6 messages in this thread without replying." This surfaces conversations where the user may have intended to respond but never did. Non-blocking, dismissible.
 
 ---
+
+## crm
+
+### What this workflow is
+
+Sales outreach, business proposals, client emails, follow-ups, contract discussions. The distinguishing feature: this is email sent by someone who has a commercial or professional interest in the user's response, and the user is in a decision-making or gatekeeping role. It could be a cold sales pitch, a proposal from a vendor, a follow-up from a client, or a contract to review.
+
+Unlike `conversation`, where the relationship is peer-to-peer, `crm` emails carry an inherent asymmetry — the sender wants something. The user's primary decision is: engage, dismiss, or route to someone else. The inbox should make that three-way decision as fast as possible.
+
+### Data shape
+
+```ts
+interface CrmData {
+  workflow: "crm";
+  crmType: "sales_outreach" | "follow_up" | "client_message" | "proposal" | "contract" | "support";
+  senderCompany?: string;
+  senderRole?: string;
+  dealValue?: number;
+  currency?: string;
+  urgency: "low" | "medium" | "high";
+  requiresReply: boolean;
+}
+```
+
+### Urgency
+
+Mapped from `CrmData.urgency` (note: this is the CRM-context urgency, separate from `ArcUrgency`):
+- `crmType: "contract"` or `"proposal"` → arc urgency `high` (these need a decision)
+- `urgency: "high"` → arc urgency `high`
+- `urgency: "medium"` → arc urgency `normal`
+- `urgency: "low"` → arc urgency `low`
+- Cold `sales_outreach` with `urgency: "low"` and `requiresReply: false` → arc urgency `low`
+
+The default for unsolicited outreach should be low unless the sender has previously corresponded (existing arc in `sentMessageIds`).
+
+---
+
+### Arc list row
+
+**Left:** Briefcase icon — distinct from `job` (which uses a person+briefcase combination). Use a business-neutral colour: deep teal or slate blue. The icon should feel professional and intentional.
+
+**Centre:**
+- **Sender company** (`senderCompany`) in bold as the primary label. If absent, fall back to `signal.from.name`. Company > person name for CRM — the institution matters more than the individual in most commercial contexts.
+- **Sender role** in muted text if present: "Head of Partnerships at Acme Corp". If both `senderCompany` and `senderRole` are present, show: "[Role] at [Company]".
+- **AI summary** as the third line: one sentence describing what they want or are offering. E.g., "Proposing a 6-month infrastructure contract at $48k/year, asking for a call this week." Make it concrete and specific — this is what lets the user triage without opening the email.
+
+**Right:**
+- Timestamp (same relative format as `conversation`).
+- If `dealValue` is present: a deal value chip — e.g., "$48,000" in a muted green chip. This is ambient information that helps the user decide how much attention to give before even reading the summary. Show currency alongside: "$48k USD".
+- If `requiresReply: true`: "Reply needed" chip (same amber outline as `conversation`).
+- Follow-up count: if this arc has received multiple signals from the same sender without a reply, show a small count: "4 follow-ups". This is a signal that the sender is persistent.
+
+**Urgency badge:** Show for `high` only. `low` outreach arcs should not carry any badge — they are deliberately low-priority noise.
+
+**Visual treatment for cold outreach:** `sales_outreach` + `urgency: "low"` + `requiresReply: false` arcs can be visually muted — slightly reduced opacity on the sender/subject text (85%), italic AI summary. This makes them identifiable as low-priority at a glance. Do not hide them entirely — the user may want to engage — just reduce their visual weight.
+
+---
+
+### Arc detail (signal thread)
+
+**Thread header:**
+- Company name prominently. Sender name + role below in smaller text.
+- `crmType` label: "Sales outreach", "Follow-up", "Client message", "Proposal", "Contract", "Support request".
+- Deal value chip if present.
+
+**Signal cards:** Same structure as `conversation` — chronological, oldest first. For `crm`, the body is important when it's a proposal or contract; less so for cold outreach. Default: collapse body to first 3 lines with a "Show full email" expand control. This is the one workflow where collapsing by default is justified — cold outreach emails are often long and templated.
+
+**Structured data panel:** For `proposal` and `contract` types, if `dealValue` + `currency` + `dueDate` are all present, render a compact info card above the email body:
+```
+Deal value:   $48,000 USD
+Sender:       Jane Smith, Head of Partnerships at Acme Corp
+Decision by:  [dueDate if present]
+```
+This gives the user the essential facts without reading the email.
+
+**Action bar (below signal cards, above composer):**
+Three quick actions — do not make the user scroll to a composer or menu:
+1. **Reply** — opens inline composer (same as `conversation`).
+2. **Dismiss** — archives the arc immediately. No confirmation dialog. Dismissing a sales email is a normal, expected action. If the user dismisses accidentally, the arc is in Archive and recoverable within the retention window.
+3. **Not interested** — a variant of dismiss that also applies a label `declined` and optionally blocks future signals from this eTLD+1. Requires a single confirm: "Block all future emails from acme.com? [Block] [Just dismiss]". This is the CRM equivalent of "unsubscribe" for human outreach.
+
+**Reply composer:** Same as `conversation` — inline, pre-filled To and Subject. For `crm`, optionally offer a quick tone selection above the body field: "Professional · Warm · Brief" — sets the AI draft tone if the user requests a draft.
+
+---
+
+### Threading behaviour
+
+Groups by `senderCompany` (eTLD+1 of sender domain) + account. All emails from Acme Corp thread together, regardless of which person at Acme sent them, and regardless of subject. This is relationship-centric grouping — the company is the entity, not the individual.
+
+Edge case: if `senderCompany` is absent and the sender is from a large shared domain (gmail.com, outlook.com), fall back to exact sender address + subject-based grouping. Grouping all Gmail users together would be catastrophic.
+
+The UI must handle CRM arcs that contain many signals (a long sales cycle might have 10+ emails). The thread view should paginate: show the 3 most recent signals by default with "Show 7 earlier messages" expand.
+
+---
+
+### Follow-up tracking
+
+This is the defining UX innovation for `crm`. Every time a new signal arrives from the same sender in an arc where `arc.sentMessageIds` is empty (user has not replied), the arc's follow-up count increments.
+
+Display rules:
+- 1 signal, no reply → no indicator (baseline)
+- 2–3 signals, no reply → "2 follow-ups" / "3 follow-ups" chip on the arc row in muted text
+- 4+ signals, no reply → chip turns amber: "4 follow-ups" — this is persistence that may warrant a decision
+- 6+ signals, no reply → chip turns red: "6 follow-ups" — optionally surface a gentle in-app prompt: "Acme Corp has sent 6 emails. Would you like to dismiss this thread?" with one-tap dismiss.
+
+The counter resets when the user replies. If the user replies and then receives more follow-ups, the counter starts fresh from that reply.
+
+This feature makes the follow-up cadence visible without requiring the user to open each email. It is ambient CRM intelligence.
+
+---
+
+### Default view behaviour
+
+`crm` arcs appear in Default view. Cold `sales_outreach` with `urgency: "low"` appears below all `normal` and `high` urgency items, near the bottom of the list. `proposal` and `contract` arcs with `high` urgency appear near the top.
+
+Consider a dedicated "CRM" view in the user's default view set — pre-seeded on account creation, shows only `crm` workflow arcs, sorted by urgency then `lastSignalAt`. Users who receive heavy commercial email can keep this separate from their personal correspondence.
+
+---
+
+### Notification behaviour
+
+- **Push:** `high` urgency (proposals, contracts) → interrupt. `normal` → ambient. `low` (cold outreach) → silent (no push at all). Cold sales emails should never interrupt — the user did not ask for them.
+- **Digest:** Include `crm` arcs with `requiresReply: true` and urgency ≥ `normal`. Group under "Business emails needing attention."
+- **Do not notify for follow-ups.** The follow-up counter is a UI affordance; it does not trigger new notifications. The original notification (if any) was enough.
+
+---
+
+### Where to innovate
+
+**Persistent sender profiles:** Every company that appears in `crm` arcs builds an automatic sender profile: first contact date, total emails, follow-up count, whether the user has ever replied, whether the user has dismissed them. Show this as a small "Company profile" card in the arc detail sidebar. It gives the user context like "This is the third company this week pitching infrastructure services" or "You replied to Alice last October" — without requiring any manual CRM data entry.
+
+**AI-generated decline:** When the user clicks "Not interested", offer one more step: "Send a polite decline?" with a draft reply: *"Thanks for reaching out — we're not looking at this right now, but I appreciate you thinking of us."* The user can send it with one tap or dismiss it. This closes the loop for the sender and reduces the guilt of ignoring follow-ups. Only offer this for `sales_outreach` and `proposal` — not for `client_message` or `contract` where a formal decline may have different implications.
+
+**Deal pipeline view:** For users who receive many `proposal` and `contract` arcs, offer a Kanban-style pipeline view within the CRM view: columns for "Reviewing", "In discussion", "Decided". The user drags arcs between columns. Stage is stored as a label (`crm:reviewing`, `crm:discussing`, `crm:decided`). This turns the inbox into a lightweight deal tracker without requiring a separate CRM tool.
+
+---
