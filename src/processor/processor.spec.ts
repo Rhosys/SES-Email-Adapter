@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { SQSEvent } from "aws-lambda";
 import { SignalProcessor, deriveGroupingKey, dispositionFor } from "./processor.js";
 import { baseUrgency, priorityCalculator } from "./priority.js";
-import type { ProcessorDatabase, ArcMatcher, RuleEvaluator, Notifier, Forwarder, ForwardOptions } from "./processor.js";
+import type { ProcessorDatabase, ArcMatcher, RuleEvaluator, Notifier, Forwarder, ForwardOptions, TestReplier } from "./processor.js";
 import type { MimeParser } from "./mime.js";
 import type { SignalClassifier, ClassificationOutput } from "../classifier/classifier.js";
 import type { Arc, Rule, Signal, EmailAddressConfig, AccountFilteringConfig } from "../types/index.js";
@@ -26,6 +26,13 @@ function makeStore(): ProcessorDatabase {
     getProcessorAccountContext: vi.fn().mockResolvedValue(DEFAULT_CTX),
     saveEmailAddressConfig: vi.fn().mockResolvedValue(undefined),
     updateGlobalReputation: vi.fn().mockResolvedValue(undefined),
+    getDomainByName: vi.fn().mockResolvedValue(null),
+  };
+}
+
+function makeTestReplier(): TestReplier {
+  return {
+    pong: vi.fn().mockResolvedValue({ messageId: "pong-msg-001" }),
   };
 }
 
@@ -1382,6 +1389,139 @@ describe("SignalProcessor", () => {
 
       const saved = vi.mocked(store.saveArc).mock.calls[0]![0] as Arc;
       expect(saved.lastSignalAt).toBe("2024-01-10T00:00:00Z"); // unchanged
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Pong auto-reply (test workflow)
+  // -------------------------------------------------------------------------
+
+  const testClassification: ClassificationOutput = {
+    workflow: "test",
+    workflowData: { workflow: "test", triggeredBy: "user" },
+    spamScore: 0.0,
+    summary: "Test email from account owner.",
+    labels: [],
+    classificationModelId: "us.anthropic.claude-opus-4-5-20251101-v1:0",
+  };
+
+  describe("pong auto-reply", () => {
+    let testReplier: TestReplier;
+
+    beforeEach(() => {
+      testReplier = makeTestReplier();
+      processor = new SignalProcessor({ store, mimeParser, classifier, arcMatcher, ruleEvaluator, testReplier });
+    });
+
+    it("sends a pong when workflow is 'test' and testReplier is configured", async () => {
+      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(testClassification);
+
+      await processor.process(makeSqsEvent([{}]));
+
+      expect(testReplier.pong).toHaveBeenCalledOnce();
+    });
+
+    it("passes original sender as 'to', subject, and body to pong", async () => {
+      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(testClassification);
+
+      await processor.process(makeSqsEvent([{}]));
+
+      const opts = vi.mocked(testReplier.pong).mock.calls[0]![0];
+      // Default mime parser mock: from.address = "sender@example.com", subject = "Test email"
+      expect(opts.to).toBe("sender@example.com");
+      expect(opts.subject).toBe("Test email");
+      expect(opts.body).toBe("Hello world");
+    });
+
+    it("uses recipientAddress as 'from' when domain has senderSetupComplete=true", async () => {
+      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(testClassification);
+      vi.mocked(store.getDomainByName).mockResolvedValueOnce({ senderSetupComplete: true });
+
+      await processor.process(makeSqsEvent([{}]));
+
+      const opts = vi.mocked(testReplier.pong).mock.calls[0]![0];
+      // recipientAddress = destination[0] = "user@example.com" from the SQS event default
+      expect(opts.from).toBe("user@example.com");
+    });
+
+    it("falls back to NOTIFICATION_FROM when senderSetupComplete=false", async () => {
+      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(testClassification);
+      vi.mocked(store.getDomainByName).mockResolvedValueOnce({ senderSetupComplete: false });
+      process.env["NOTIFICATION_FROM"] = "noreply@system.example.com";
+
+      await processor.process(makeSqsEvent([{}]));
+
+      const opts = vi.mocked(testReplier.pong).mock.calls[0]![0];
+      expect(opts.from).toBe("noreply@system.example.com");
+
+      delete process.env["NOTIFICATION_FROM"];
+    });
+
+    it("falls back to NOTIFICATION_FROM when domain record is not found", async () => {
+      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(testClassification);
+      // getDomainByName already returns null by default from makeStore()
+      process.env["NOTIFICATION_FROM"] = "noreply@system.example.com";
+
+      await processor.process(makeSqsEvent([{}]));
+
+      const opts = vi.mocked(testReplier.pong).mock.calls[0]![0];
+      expect(opts.from).toBe("noreply@system.example.com");
+
+      delete process.env["NOTIFICATION_FROM"];
+    });
+
+    it("passes sesMessageId as inReplyTo for email threading", async () => {
+      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(testClassification);
+
+      await processor.process(makeSqsEvent([{ sesMessageId: "original-ses-123" }]));
+
+      const opts = vi.mocked(testReplier.pong).mock.calls[0]![0];
+      expect(opts.inReplyTo).toBe("original-ses-123");
+    });
+
+    it("adds the pong messageId to arc.sentMessageIds before saving", async () => {
+      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(testClassification);
+      vi.mocked(testReplier.pong).mockResolvedValueOnce({ messageId: "pong-out-001" });
+
+      await processor.process(makeSqsEvent([{}]));
+
+      const arc = vi.mocked(store.saveArc).mock.calls[0]![0] as Arc;
+      expect(arc.sentMessageIds).toContain("pong-out-001");
+    });
+
+    it("does not set sentMessageIds when pong throws", async () => {
+      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(testClassification);
+      vi.mocked(testReplier.pong).mockRejectedValueOnce(new Error("SES timeout"));
+
+      await processor.process(makeSqsEvent([{}]));
+
+      // Processing still completes and arc is saved without sentMessageIds
+      expect(store.saveArc).toHaveBeenCalledOnce();
+      const arc = vi.mocked(store.saveArc).mock.calls[0]![0] as Arc;
+      expect(arc.sentMessageIds).toBeUndefined();
+    });
+
+    it("does not call pong for non-test workflows", async () => {
+      // classifier returns personal by default (no mockResolvedValueOnce override)
+      await processor.process(makeSqsEvent([{}]));
+
+      expect(testReplier.pong).not.toHaveBeenCalled();
+    });
+
+    it("does not call pong when testReplier is not configured", async () => {
+      const processorWithoutReplier = new SignalProcessor({ store, mimeParser, classifier, arcMatcher, ruleEvaluator });
+      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(testClassification);
+
+      // Should not throw — testReplier is optional
+      await expect(processorWithoutReplier.process(makeSqsEvent([{}]))).resolves.toBeUndefined();
+    });
+
+    it("looks up domain by the domain part of the recipient address", async () => {
+      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(testClassification);
+
+      await processor.process(makeSqsEvent([{ destination: ["me@custom-domain.com"] }]));
+
+      expect(store.getDomainByName).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "custom-domain.com");
     });
   });
 
