@@ -1,6 +1,6 @@
 # TODO
 
-- [ ] Detect forwarded emails and store the original recipient address as a structured field (`signal.forwardedFrom: string | null`), where the value is the address the email was originally sent to before being forwarded into the system (e.g. `"john@gmail.com"`). Use `X-Forwarded-To`, `X-Original-To`, or `Resent-To` headers to extract the address. **Validation required**: add a test asserting that no label record named `original:john@gmail.com` (or any `original:*` variant) is ever created — this data belongs on the signal, not in the label table.
+- [ ] Detect forwarded emails and auto-tag with a label `original:john@gmail.com`, where `john@gmail.com` is the original recipient address the email was sent to before being forwarded into the system. Use `X-Forwarded-To`, `X-Original-To`, or `Resent-To` headers to extract the address. **Validation required**: add a test asserting that the `original:*` label is correctly attached to the signal/arc and that the address is extracted accurately from the header.
 - [ ] **`"test"` workflow** — add to `WORKFLOWS` in `src/types/index.ts` and handle throughout the stack:
   - **Detection** (either condition is sufficient):
     1. The `signal.from` domain matches any domain registered to the account (user sending from their own domain, e.g. `me@mydomain.com` → account has `mydomain.com` registered)
@@ -70,7 +70,7 @@ Drill-in from inbox. Shows all signals in the arc as a chronological thread.
 
 - Thread header: workflow, sender eTLD+1, recipient address, arc urgency, current labels
 - Each signal card shows: from, to, cc, subject, received timestamp, AI summary, spam score (if > 0.3, show warning indicator), body (text or HTML rendered in sandboxed iframe), attachments list
-- `signal.forwardedFrom` (forwarded email detection) should be surfaced prominently on the signal card when present — not as a label chip, as dedicated UI
+- `original:john@gmail.com` label (forwarded email detection) should be surfaced prominently on the signal card, not buried in the label chip row
 - Workflow-specific structured data panels — each workflow has rich `workflowData` fields the UI should render as a card rather than raw JSON:
   - `order` → order number, tracking link, items list, estimated delivery, status
   - `invoice` → amount, due date, invoice number, download link
