@@ -1,6 +1,6 @@
 # TODO
 
-- [ ] Detect forwarded emails and auto-tag with the full source email address (e.g. `original:john@gmail.com`), where `john@gmail.com` is the original recipient address the email was sent to before being forwarded into the system. Use `X-Forwarded-To`, `X-Original-To`, or `Resent-To` headers to extract the address.
+- [ ] Detect forwarded emails and store the original recipient address as a structured field (`signal.forwardedFrom: string | null`), where the value is the address the email was originally sent to before being forwarded into the system (e.g. `"john@gmail.com"`). Use `X-Forwarded-To`, `X-Original-To`, or `Resent-To` headers to extract the address. **Validation required**: add a test asserting that no label record named `original:john@gmail.com` (or any `original:*` variant) is ever created — this data belongs on the signal, not in the label table.
 - [ ] **`"test"` workflow** — add to `WORKFLOWS` in `src/types/index.ts` and handle throughout the stack:
   - **Detection** (either condition is sufficient):
     1. The `signal.from` domain matches any domain registered to the account (user sending from their own domain, e.g. `me@mydomain.com` → account has `mydomain.com` registered)
@@ -22,11 +22,10 @@
   - `blockDisposition.spam` already controls what happens when the threshold is crossed (block vs quarantine) — that pairing is correct, the threshold just needs to move out of the code and into config
   - Surface in UI: account-level in Settings → Account → Filtering; per-address in Settings → Email Addresses as an optional override (show "Using account default: 0.9" when not overridden, with an "Override" button to set a custom value)
 - [ ] **FedCM (Federated Credential Management)** — add FedCM as a supported login method via `@authress/login`. FedCM is the browser-native credential management API (replacing third-party cookie-based federation). Authress supports it; we need to wire it up in the login flow so Chrome/Edge users can sign in with their saved Google/GitHub credentials without a redirect. Track it as an auth improvement item once the Authress integration is solid.
-- [ ] **Block phishing-warning and terms-update emails by default** — these two classes of email are almost universally unwanted noise:
-  1. **Phishing-warning notices** ("Beware of phishing — we will never ask for your password") — bulk security awareness emails sent by banks and SaaS services. Already classified as `notice` or `security` workflow. Should be blocked by default; surface the `blockNoticeEmails` toggle in Account Settings → Filtering so users can re-enable if they want them.
-  2. **Terms-of-service / privacy-policy updates** — already classified as `notice` workflow. Currently silently auto-archived; upgrade default treatment to **block** (silent drop, not quarantine). Add `blockDisposition.notice: "block"` to the default account filtering config. Users can override to `"quarantine"` or `"allow"` if they want to review these.
+- [ ] **Block phishing-warning and terms-update emails by default** — these two classes of email are almost universally unwanted noise. No user toggle — just block them:
+  1. **Phishing-warning notices** ("Beware of phishing — we will never ask for your password") — bulk security awareness emails sent by banks and SaaS services. Already classified as `notice` workflow. Block silently by default.
+  2. **Terms-of-service / privacy-policy updates** — already classified as `notice` workflow. Currently silently auto-archived; upgrade to **block** (silent drop, not quarantine). Set `blockDisposition.notice: "block"` in the default account filtering config.
   - **Classifier prompt**: add examples under the `### notice` section distinguishing "bank phishing warning" from "actual phishing email" — the former is `notice`, the latter is e.g. `auth` with high spamScore. This prevents mis-classification.
-  - **AccountFilteringConfig**: add `blockNoticeEmails: boolean` (default `true`) alongside existing `blockOnboardingEmails`.
 - [ ] Add `DELETE /domains/:id` endpoint and handler — remove SES email identity if it exists, delete domain record from DynamoDB; inbound mail for that domain will stop routing to SES naturally
 - [ ] **Two-tier domain setup model** — receiving and sending are separate concerns:
   - **Tier 1 — Receiving** (required to start): customer adds one MX record pointing their domain at the SES inbound endpoint. This is all that's needed to receive email into arcs. Domain is usable immediately after MX propagates.
@@ -37,17 +36,11 @@
   - Reply and forward rule actions must gate on `senderSetupComplete`; if false, surface a modal prompting Tier 2 setup before proceeding
   - Update `infra/ses.tf` docs/comments to clarify that the BYODKIM terminus, bounce subdomain, and DMARC records are *our* infrastructure — customer Tier 2 CNAMEs point to ours
 - [ ] **Domain health monitoring** — weekly proactive DNS check across all accounts and domains:
-  - **Primary detection — scheduled DNS resolution**: SES only gives positive signals for identities we've registered; if a customer removes their MX record, email silently stops arriving and SES never tells us. The only reliable detection is us actively resolving DNS. EventBridge weekly rule → Lambda → scan all accounts → all registered domains per account → DNS-resolve each record that belongs to the setup tier the customer has completed → write updated per-record status to DynamoDB → notify if degraded.
+  - **Primary detection — scheduled DNS resolution**: SES only gives positive signals for identities we've registered; if a customer removes their MX record, email silently stops arriving and SES never tells us. The only reliable detection is us actively resolving DNS. EventBridge weekly rule → Lambda → scan all accounts → all registered domains per account → DNS-resolve each record that belongs to the setup tier the customer has completed → notify if degraded. **Do not write health status back to DynamoDB** — health is computed live, not cached, to avoid stale state discrepancies.
   - **Secondary detection — SES bounce/complaint feedback**: `feedback-processor.ts` already consumes SNS feedback events. If hard-bounce rate exceeds 5% in a rolling window for a given domain, trigger an on-demand DNS health check for that domain. Not a substitute for the weekly scan but catches real-world delivery failures between scheduled runs.
-  - **Domain record fields to add**: `receivingHealthy: boolean`, `senderHealthy: boolean`, `failingRecords: string[]` (specific record names that failed), `lastCheckedAt`, `lastHealthyAt`
-  - **SES reputation SNS event**: listen for `AmazonSesAccountReputationNotification` — if SES suspends a sending identity, immediately mark `senderHealthy: false` and notify users
-  - **On degradation**:
-    1. Update domain record in DynamoDB
-    2. Email all `owner` and `admin` users: domain name, which records are failing, correct expected values
-    3. In-app notification (same content)
-    4. Do not halt inbound processing immediately — SES may still route for a period; mark degraded and surface warning in UI
-  - **On-demand re-check**: `POST /domains/:id/verify` runs the health check immediately — powers the UI "Re-check DNS" button so users don't wait a week after fixing records
-  - Domain API always returns all 4 records with full detail: `{ name, type, value, currentValue?, status: "verified"|"failing"|"pending" }` — UI uses this to render per-record indicators; never filter records out based on setup tier
+  - **SES reputation SNS event**: listen for `AmazonSesAccountReputationNotification` — if SES suspends a sending identity, notify all `owner` and `admin` users immediately.
+  - **On degradation**: email and in-app notify all `owner` and `admin` users with domain name, which records are failing, and correct expected values. Do not halt inbound processing immediately — SES may still route for a period.
+  - **On-demand re-check**: `POST /domains/:id/verify` runs a live DNS check immediately — powers the UI "Re-check DNS" button. The domain GET endpoint also resolves DNS on demand to return current per-record status: `{ name, type, value, currentValue?, status: "verified"|"failing"|"pending" }`. No stale cache, no stored health fields needed.
 
 ---
 
@@ -64,7 +57,7 @@ The primary view. Arcs are the browsing unit — not individual emails.
 - Each arc row shows: workflow icon, sender name/domain, AI-generated summary, urgency badge, last signal timestamp, label chips
 - Urgency drives visual prominence: `critical` = red/bold, `high` = orange, `normal` = default, `low` = muted, `silent` arcs are never shown
 - Arcs with `sentMessageIds` (user has replied) should show a "replied" indicator — the backend already promotes urgency to `high` on these, the UI should also visually distinguish them
-- Arc status filter tabs: **Active** / **Archived** / **Deleted** (maps to `Arc.status`)
+- Arc status filter: REST-style `?status=active|archived|snoozed|deleted` query param (four statuses: `active`, `archived`, `snoozed`, `deleted`)
 - Swipe/hover actions: archive, delete, label
 - Inline "unread" state (client-side or via a future `Arc.readAt` field)
 - Pagination via cursor (`lastEvaluatedKey`) — infinite scroll or Load More
@@ -77,7 +70,7 @@ Drill-in from inbox. Shows all signals in the arc as a chronological thread.
 
 - Thread header: workflow, sender eTLD+1, recipient address, arc urgency, current labels
 - Each signal card shows: from, to, cc, subject, received timestamp, AI summary, spam score (if > 0.3, show warning indicator), body (text or HTML rendered in sandboxed iframe), attachments list
-- `original:john@gmail.com` label (forwarded email detection) should be surfaced prominently on the signal card, not buried in label chips
+- `signal.forwardedFrom` (forwarded email detection) should be surfaced prominently on the signal card when present — not as a label chip, as dedicated UI
 - Workflow-specific structured data panels — each workflow has rich `workflowData` fields the UI should render as a card rather than raw JSON:
   - `order` → order number, tracking link, items list, estimated delivery, status
   - `invoice` → amount, due date, invoice number, download link
@@ -127,13 +120,10 @@ User-defined filtered lists of arcs. Like Gmail labels but with filter logic bak
 - View config: workflow filter (single or all), label filters (must-have-all), sort field + direction
 - Default views to seed on first login: All, Action Needed, Finance, Travel, Receipts (mapped to relevant workflows + labels)
 - **System-level permanent nav items** — always present, cannot be deleted or renamed; user-created views sit below these:
-  1. **Default** — the landing view when the app opens. **Fixed — not user-configurable for now.** Always shows: all active arcs excluding archived, deleted, snoozed (if built), stale `auth` arcs (OTPs/magic links past validity, auto-archived by processor), and `notice` arcs. `test` arcs appear here. The structural exclusions define what Default *is* — allowing users to remove them creates edge cases where things vanish unexpectedly. Users who want a custom landing experience can create a view and position it first in their sidebar. Configurability can be revisited once there is concrete user demand and clarity on which knobs are actually wanted.
-  2. **All** — every active arc with no filter and no exclusions. The escape hatch when Default is too narrow. Stale auth, notice, everything — it's all here.
+  1. **Default** — the landing view when the app opens. **Fixed — not user-configurable for now.** Always shows: all `active` arcs excluding stale `auth` arcs (OTPs/magic links past validity, auto-archived by processor) and `notice` arcs. `test` arcs appear here. The structural exclusions define what Default *is* — allowing users to remove them creates edge cases where things vanish unexpectedly. Users who want a custom landing experience can create a view and position it first in their sidebar.
+  2. **All** — every arc regardless of `status`, no filter and no exclusions. The escape hatch when Default is too narrow.
   3. **Quarantine** — blocked and quarantined signals that have not yet become arcs; separate from arc-based views because these signals predate arc creation.
-  4. **Archive** — `Arc.status = "archived"`.
-  5. **Trash** — `Arc.status = "deleted"`; browsable and restorable until `deletionRetentionDays` TTL, then permanently gone.
-  - If **Snooze** is built: **Snoozed** becomes a 6th system item — snoozed arcs need a permanent home; they are excluded from Default while snoozed but visible in All.
-  - No **Sent** view.
+  - No **Sent** view. Archived, Snoozed, and Deleted arcs are accessible via the `?status=` filter on All, not separate nav items.
 - **`auth` arc auto-expiry**: processor or a scheduled job auto-archives `auth` arcs once the OTP/magic link validity window has passed (typically 10–30 min, extractable from `workflowData`). Keeps Default clean without requiring manual archiving of dead login requests.
 - **Notifications always deep-link directly** to the specific arc or quarantined signal — notification payload must carry the arc ID or signal ID at fire time so the link resolves correctly even for pre-arc quarantined signals.
 
