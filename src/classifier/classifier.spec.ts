@@ -127,19 +127,18 @@ describe("SignalClassifier", () => {
   // classify — invoice
   // -------------------------------------------------------------------------
 
-  describe("invoice emails", () => {
+  describe("payments emails", () => {
     it("extracts amount, vendor, and invoice number from a Stripe receipt", async () => {
       mockClassifyResponse({
-        workflow: "invoice",
+        workflow: "payments",
         workflowData: {
-          workflow: "invoice",
-          invoiceType: "receipt",
+          workflow: "payments",
+          paymentType: "receipt",
           vendor: "Acme Corp",
           amount: 149.0,
           currency: "USD",
           invoiceNumber: "INV-2024-001",
           dueDate: "2024-02-01",
-          lineItems: [],
         },
         spamScore: 0.0,
         summary: "Receipt from Acme Corp for $149.00.",
@@ -148,7 +147,7 @@ describe("SignalClassifier", () => {
 
       const result = await classifier.classify(stripeInvoiceEmail);
 
-      expect(result.workflow).toBe("invoice");
+      expect(result.workflow).toBe("payments");
       expect(result.workflowData).toMatchObject({ vendor: "Acme Corp", amount: 149.0 });
       expect(result.labels).toContain("billing");
     });
@@ -214,19 +213,18 @@ describe("SignalClassifier", () => {
   // classify — order (shipping update)
   // -------------------------------------------------------------------------
 
-  describe("shopping emails", () => {
+  describe("package emails", () => {
     it("extracts tracking number and retailer from a shipping update", async () => {
       mockClassifyResponse({
-        workflow: "order",
+        workflow: "package",
         workflowData: {
-          workflow: "order",
-          orderType: "shipping",
+          workflow: "package",
+          packageType: "shipping",
           retailer: "Amazon",
           orderNumber: "112-3456789",
           trackingNumber: "1Z999AA10123456784",
           trackingUrl: "https://amazon.com/track/1Z999AA10123456784",
           estimatedDelivery: "2024-01-15",
-          items: [],
         },
         spamScore: 0.0,
         summary: "Amazon package out for delivery, tracking 1Z999AA10123456784.",
@@ -235,9 +233,9 @@ describe("SignalClassifier", () => {
 
       const result = await classifier.classify(shippingEmail);
 
-      expect(result.workflow).toBe("order");
+      expect(result.workflow).toBe("package");
       expect(result.workflowData).toMatchObject({
-        orderType: "shipping",
+        packageType: "shipping",
         retailer: "Amazon",
         trackingNumber: "1Z999AA10123456784",
       });
@@ -251,8 +249,8 @@ describe("SignalClassifier", () => {
   describe("label suggestions", () => {
     it("returns suggested labels from the classifier", async () => {
       mockClassifyResponse({
-        workflow: "personal",
-        workflowData: { workflow: "personal", isReply: false, sentiment: "neutral", requiresReply: true },
+        workflow: "conversation",
+        workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: true },
         spamScore: 0.0,
         summary: "A personal email.",
         labels: ["action-needed", "important"],
@@ -265,8 +263,8 @@ describe("SignalClassifier", () => {
 
     it("returns empty labels array when classifier suggests none", async () => {
       mockClassifyResponse({
-        workflow: "newsletter",
-        workflowData: { workflow: "newsletter", publication: "Test", topics: [] },
+        workflow: "content",
+        workflowData: { workflow: "content", publisher: "Test" },
         spamScore: 0.1,
         summary: "Newsletter.",
         labels: [],
@@ -285,8 +283,8 @@ describe("SignalClassifier", () => {
   describe("Bedrock call shape", () => {
     it("includes from, subject, and body in the message content", async () => {
       mockClassifyResponse({
-        workflow: "personal",
-        workflowData: { workflow: "personal", isReply: false, sentiment: "neutral", requiresReply: false },
+        workflow: "conversation",
+        workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
         spamScore: 0.0,
         summary: "A personal email.",
         labels: [],
@@ -308,8 +306,8 @@ describe("SignalClassifier", () => {
 
     it("uses CLASSIFICATION_MODEL_ID", async () => {
       mockClassifyResponse({
-        workflow: "personal",
-        workflowData: { workflow: "personal", isReply: false, sentiment: "neutral", requiresReply: false },
+        workflow: "conversation",
+        workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
         spamScore: 0.0,
         summary: "A personal email.",
         labels: [],
@@ -323,8 +321,8 @@ describe("SignalClassifier", () => {
 
     it("truncates long bodies to avoid token overflow", async () => {
       mockClassifyResponse({
-        workflow: "newsletter",
-        workflowData: { workflow: "newsletter", publication: "Test", topics: [] },
+        workflow: "content",
+        workflowData: { workflow: "content", publisher: "Test" },
         spamScore: 0.1,
         summary: "Newsletter.",
         labels: [],
@@ -382,8 +380,8 @@ describe("SignalClassifier", () => {
   describe("content formatting", () => {
     it("uses stripped HTML body when textBody is absent", async () => {
       mockClassifyResponse({
-        workflow: "personal",
-        workflowData: { workflow: "personal", isReply: false, sentiment: "neutral", requiresReply: false },
+        workflow: "conversation",
+        workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
         spamScore: 0.0,
         summary: "Email.",
         labels: [],
@@ -409,8 +407,8 @@ describe("SignalClassifier", () => {
 
     it("includes only RELEVANT_HEADERS in the Bedrock message — irrelevant headers are stripped", async () => {
       mockClassifyResponse({
-        workflow: "personal",
-        workflowData: { workflow: "personal", isReply: false, sentiment: "neutral", requiresReply: false },
+        workflow: "conversation",
+        workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
         spamScore: 0.0,
         summary: "Email.",
         labels: [],
@@ -441,8 +439,8 @@ describe("SignalClassifier", () => {
 
     it("truncates body longer than 4000 characters and appends truncation marker", async () => {
       mockClassifyResponse({
-        workflow: "newsletter",
-        workflowData: { workflow: "newsletter", publication: "Test", topics: [] },
+        workflow: "content",
+        workflowData: { workflow: "content", publisher: "Test" },
         spamScore: 0.1,
         summary: "Newsletter.",
         labels: [],
@@ -464,8 +462,8 @@ describe("SignalClassifier", () => {
 
     it("does not truncate body of exactly 4000 characters", async () => {
       mockClassifyResponse({
-        workflow: "newsletter",
-        workflowData: { workflow: "newsletter", publication: "Test", topics: [] },
+        workflow: "content",
+        workflowData: { workflow: "content", publisher: "Test" },
         spamScore: 0.0,
         summary: "Newsletter.",
         labels: [],
@@ -496,8 +494,8 @@ describe("SignalClassifier", () => {
 
     it("preserves emoji and unicode characters in the Bedrock message content", async () => {
       mockClassifyResponse({
-        workflow: "personal",
-        workflowData: { workflow: "personal", isReply: false, sentiment: "positive", requiresReply: false },
+        workflow: "conversation",
+        workflowData: { workflow: "conversation", isReply: false, sentiment: "positive", requiresReply: false },
         spamScore: 0.0,
         summary: "Personal email.",
         labels: [],
@@ -524,22 +522,20 @@ describe("SignalClassifier", () => {
   // classify — additional workflow coverage
   // -------------------------------------------------------------------------
 
-  describe("financial emails", () => {
-    it("extracts institution, amount, and isSuspicious from a fraud alert", async () => {
+  describe("alert emails — fraud", () => {
+    it("extracts service, amount, and alertType from a fraud alert", async () => {
       mockClassifyResponse({
-        workflow: "financial",
+        workflow: "alert",
         workflowData: {
-          workflow: "financial",
-          financialType: "fraud_alert",
-          institution: "Chase Bank",
-          amount: 2499.99,
-          currency: "USD",
+          workflow: "alert",
+          alertType: "fraud_alert",
+          service: "Chase Bank",
+          severity: "critical",
+          requiresAction: true,
           accountLastFour: "4242",
-          transactionDate: "2024-01-15",
-          isSuspicious: true,
         },
         spamScore: 0.0,
-        summary: "Fraud alert from Chase Bank for $2,499.99.",
+        summary: "Fraud alert from Chase Bank — unusual $2,499.99 charge.",
         labels: ["urgent", "action-needed"],
       });
 
@@ -552,8 +548,8 @@ describe("SignalClassifier", () => {
         headers: { "authentication-results": "spf=pass dkim=pass" },
       });
 
-      expect(result.workflow).toBe("financial");
-      expect(result.workflowData).toMatchObject({ institution: "Chase Bank", amount: 2499.99, isSuspicious: true });
+      expect(result.workflow).toBe("alert");
+      expect(result.workflowData).toMatchObject({ alertType: "fraud_alert", requiresAction: true });
       expect(result.labels).toContain("urgent");
     });
   });
@@ -640,9 +636,9 @@ describe("SignalClassifier", () => {
   describe("security emails", () => {
     it("extracts alertType and requiresAction from a suspicious login alert", async () => {
       mockClassifyResponse({
-        workflow: "security",
+        workflow: "alert",
         workflowData: {
-          workflow: "security",
+          workflow: "alert",
           alertType: "suspicious_login",
           service: "GitHub",
           ipAddress: "203.0.113.42",
@@ -665,7 +661,7 @@ describe("SignalClassifier", () => {
         headers: { "authentication-results": "spf=pass dkim=pass" },
       });
 
-      expect(result.workflow).toBe("security");
+      expect(result.workflow).toBe("alert");
       expect(result.workflowData).toMatchObject({ alertType: "suspicious_login", requiresAction: true });
       expect(result.spamScore).toBeLessThan(0.3); // legitimate alert from github.com
     });

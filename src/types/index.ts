@@ -1,29 +1,22 @@
 // ---------------------------------------------------------------------------
-// Workflows (the kind of email this is — drives display, UX, and views)
+// Workflows (the kind of email this is — drives display, UX, and actions)
 // ---------------------------------------------------------------------------
 
 export const WORKFLOWS = [
-  "auth",         // OTPs, magic links, password resets, 2FA codes
-  "invoice",      // Invoices, receipts, billing statements, payment confirmations
-  "order",        // Order confirmations, shipping, delivery, returns, refunds
-  "financial",    // Bank statements, wire transfers, transaction alerts, tax documents
-  "travel",       // Flights, hotels, car rentals, itineraries, boarding passes
-  "job",          // Applications, recruiter outreach, interviews, offers, rejections
-  "newsletter",   // Publications, content digests, blogs, editorial content
-  "promotions",   // Discount codes, flash sales, abandoned cart, loyalty rewards
-  "onboarding",   // Welcome, account setup, getting-started, feature tours
-  "social",       // Social media notifications, mentions, community activity
-  "crm",          // Sales outreach, proposals, client emails, follow-ups
-  "personal",     // Human-to-human correspondence not from automated systems
-  "security",     // Suspicious login, breach notices, new device alerts
-  "scheduling",   // Calendar invites, appointment confirmations, cancellations
-  "support",      // Customer support tickets, helpdesk, service status
-  "developer",    // GitHub, CI/CD, error monitoring, domain/cert expiry
-  "subscription", // SaaS plan changes, renewal reminders, trial expiry
-  "healthcare",   // Appointments, test results, prescriptions, insurance
-  "government",   // Tax, benefits, official notices, license renewal
-  "notice",       // Privacy policy, ToS updates, data processor changes — auto-archived
-  "test",         // Emails sent by the account owner to their own domain/address — triggers auto-reply
+  "auth",          // OTPs, magic links, password resets, 2FA codes — copy/click, expires
+  "conversation",  // Human-to-human back-and-forth — read and reply
+  "crm",           // Sales outreach, proposals, client emails, follow-ups — reply or dismiss
+  "package",       // Order confirmations, shipping, delivery tracking — track or file
+  "travel",        // Flights, hotels, itineraries, boarding passes — date-triggered actions
+  "scheduling",    // Calendar invites, appointment confirmations — accept or decline
+  "payments",      // Invoices, receipts, subscriptions, tax, bank statements — pay or file
+  "alert",         // Security events, fraud, CI failures, infra alerts — investigate now
+  "content",       // Newsletters, promotions, social digests — read or unsubscribe
+  "status",        // ToS updates, service notices, welcome emails, government — passive
+  "healthcare",    // Appointments, test results, prescriptions, insurance
+  "job",           // Applications, interviews, offers, rejections — career pipeline
+  "support",       // Helpdesk tickets with threaded conversation and ticket ID
+  "test",          // Emails sent by the account owner to their own domain — triggers pong
   // NOTE: spam is NOT a workflow. It is expressed via Signal.spamScore (0–1).
   // A phishing email pretending to be a bank login is workflow:"auth" + spamScore:0.95.
   // The processor blocks high-spamScore signals; the workflow captures what kind of
@@ -34,25 +27,18 @@ export type Workflow = (typeof WORKFLOWS)[number];
 
 export type WorkflowData =
   | AuthData
-  | InvoiceData
-  | OrderData
-  | FinancialData
-  | TravelData
-  | JobData
-  | NewsletterData
-  | PromotionsData
-  | OnboardingData
-  | SocialData
+  | ConversationData
   | CrmData
-  | PersonalData
-  | SecurityData
+  | PackageData
+  | TravelData
   | SchedulingData
-  | SupportData
-  | DeveloperData
-  | SubscriptionData
+  | PaymentsData
+  | AlertData
+  | ContentData
+  | StatusData
   | HealthcareData
-  | GovernmentData
-  | NoticeData
+  | JobData
+  | SupportData
   | TestData;
 
 // ---------------------------------------------------------------------------
@@ -68,21 +54,29 @@ export interface AuthData {
   actionUrl?: string;
 }
 
-export interface InvoiceData {
-  workflow: "invoice";
-  invoiceType: "invoice" | "receipt" | "statement" | "payment_confirmation" | "refund";
-  vendor: string;
-  amount?: number;
-  currency?: string;
-  invoiceNumber?: string;
-  dueDate?: string;
-  lineItems?: Array<{ description: string; amount: number }>;
-  downloadUrl?: string;
+export interface ConversationData {
+  workflow: "conversation";
+  senderName?: string;
+  isReply: boolean;
+  threadLength?: number;
+  sentiment: "positive" | "neutral" | "negative" | "urgent";
+  requiresReply: boolean;
 }
 
-export interface OrderData {
-  workflow: "order";
-  orderType: "confirmation" | "shipping" | "out_for_delivery" | "delivered" | "return" | "refund" | "cancellation";
+export interface CrmData {
+  workflow: "crm";
+  crmType: "sales_outreach" | "follow_up" | "client_message" | "proposal" | "contract" | "support";
+  senderCompany?: string;
+  senderRole?: string;
+  dealValue?: number;
+  currency?: string;
+  urgency: "low" | "medium" | "high";
+  requiresReply: boolean;
+}
+
+export interface PackageData {
+  workflow: "package";
+  packageType: "confirmation" | "shipping" | "out_for_delivery" | "delivered" | "return" | "refund" | "cancellation";
   retailer: string;
   orderNumber?: string;
   trackingNumber?: string;
@@ -91,18 +85,6 @@ export interface OrderData {
   items?: Array<{ name: string; quantity: number; price?: number }>;
   totalAmount?: number;
   currency?: string;
-}
-
-export interface FinancialData {
-  workflow: "financial";
-  financialType: "statement" | "transaction" | "alert" | "transfer" | "tax" | "fraud_alert";
-  institution: string;
-  amount?: number;
-  currency?: string;
-  accountLastFour?: string;
-  transactionDate?: string;
-  statementPeriod?: string;
-  isSuspicious?: boolean;
 }
 
 export interface TravelData {
@@ -119,85 +101,6 @@ export interface TravelData {
   currency?: string;
 }
 
-export interface JobData {
-  workflow: "job";
-  jobType: "application_status" | "recruiter_outreach" | "interview_request" | "offer" | "rejection" | "job_posting";
-  company?: string;
-  role?: string;
-  location?: string;
-  salary?: string;
-  interviewDate?: string;
-  applicationStatus?: "submitted" | "reviewing" | "interview" | "offer" | "rejected";
-  actionUrl?: string;
-}
-
-export interface NewsletterData {
-  workflow: "newsletter";
-  publication: string;
-  topics: string[];
-  frequency?: "daily" | "weekly" | "monthly" | "irregular";
-  unsubscribeUrl?: string;
-}
-
-export interface PromotionsData {
-  workflow: "promotions";
-  promotionType: "discount" | "sale" | "flash_sale" | "loyalty" | "referral" | "product_launch" | "abandoned_cart" | "win_back";
-  brand: string;
-  discountCode?: string;
-  discountAmount?: string;
-  expiryDate?: string;
-  shopUrl?: string;
-}
-
-export interface OnboardingData {
-  workflow: "onboarding";
-  service: string;
-  onboardingType: "welcome" | "setup_guide" | "feature_tour" | "tip" | "check_in" | "re_engagement";
-  stepNumber?: number;
-  totalSteps?: number;
-  actionUrl?: string;
-}
-
-export interface SocialData {
-  workflow: "social";
-  platform: string;
-  notificationType: "mention" | "follow" | "message" | "like" | "comment" | "friend_request" | "digest" | "event";
-  actorName?: string;
-  contentPreview?: string;
-  actionUrl?: string;
-}
-
-export interface CrmData {
-  workflow: "crm";
-  crmType: "sales_outreach" | "follow_up" | "client_message" | "proposal" | "contract" | "support";
-  senderCompany?: string;
-  senderRole?: string;
-  dealValue?: number;
-  currency?: string;
-  urgency: "low" | "medium" | "high";
-  requiresReply: boolean;
-}
-
-export interface PersonalData {
-  workflow: "personal";
-  senderName?: string;
-  isReply: boolean;
-  threadLength?: number;
-  sentiment: "positive" | "neutral" | "negative" | "urgent";
-  requiresReply: boolean;
-}
-
-export interface SecurityData {
-  workflow: "security";
-  alertType: "suspicious_login" | "new_device" | "password_changed" | "breach_notice" | "api_key_exposed" | "account_locked" | "other";
-  service: string;
-  ipAddress?: string;
-  location?: string;
-  deviceName?: string;
-  requiresAction: boolean;
-  actionUrl?: string;
-}
-
 export interface SchedulingData {
   workflow: "scheduling";
   eventType: "meeting_invite" | "appointment" | "reminder" | "cancellation" | "reschedule" | "confirmation";
@@ -211,36 +114,57 @@ export interface SchedulingData {
   requiresResponse: boolean;
 }
 
-export interface SupportData {
-  workflow: "support";
-  eventType: "ticket_opened" | "ticket_updated" | "ticket_resolved" | "ticket_closed" | "awaiting_response" | "status_update";
-  ticketId?: string;
-  service: string;
-  priority?: "low" | "normal" | "high" | "urgent";
-  agentName?: string;
-  responseUrl?: string;
+export interface PaymentsData {
+  workflow: "payments";
+  // money flows both ways: invoice = owed to someone, receipt = already paid, subscription = recurring
+  paymentType: "invoice" | "receipt" | "subscription_renewal" | "payment_failed" | "plan_changed" | "tax" | "wire_transfer" | "refund" | "statement" | "other";
+  vendor: string;
+  amount?: number;
+  currency?: string;
+  dueDate?: string;
+  invoiceNumber?: string;
+  accountLastFour?: string;
+  downloadUrl?: string;
+  managementUrl?: string;
 }
 
-export interface DeveloperData {
-  workflow: "developer";
-  platform: "github" | "gitlab" | "bitbucket" | "jira" | "sentry" | "datadog" | "pagerduty" | "vercel" | "aws" | "cloudflare" | "other";
-  eventType: "pull_request" | "code_review" | "ci_failure" | "ci_success" | "deployment" | "error_alert" | "domain_expiry" | "cert_expiry" | "security_scan" | "other";
-  repository?: string;
+export interface AlertData {
+  workflow: "alert";
+  alertType:
+    | "suspicious_login" | "new_device" | "password_changed" | "breach_notice"
+    | "api_key_exposed" | "account_locked" | "fraud_alert"
+    | "ci_failure" | "deployment_failed" | "error_spike"
+    | "domain_expiry" | "cert_expiry" | "security_scan"
+    | "other";
+  service: string;
   severity?: "info" | "warning" | "critical";
   requiresAction: boolean;
   actionUrl?: string;
+  ipAddress?: string;
+  location?: string;
+  deviceName?: string;
+  repository?: string;
+  errorMessage?: string;
 }
 
-export interface SubscriptionData {
-  workflow: "subscription";
-  eventType: "renewal" | "trial_expiring" | "payment_failed" | "plan_changed" | "cancelled" | "reactivated" | "usage_alert";
-  service: string;
-  planName?: string;
-  amount?: number;
-  currency?: string;
-  nextBillingDate?: string;
-  trialEndsAt?: string;
-  managementUrl?: string;
+export interface ContentData {
+  workflow: "content";
+  contentType: "newsletter" | "promotion" | "social_digest" | "product_update" | "announcement";
+  publisher: string;
+  topics?: string[];
+  discountCode?: string;
+  discountAmount?: string;
+  expiryDate?: string;
+  unsubscribeUrl?: string;
+}
+
+export interface StatusData {
+  workflow: "status";
+  statusType: "terms_update" | "privacy_policy" | "service_notice" | "welcome" | "government" | "account_notification" | "other";
+  provider: string;
+  effectiveDate?: string;
+  referenceNumber?: string;
+  documentUrl?: string;
 }
 
 export interface HealthcareData {
@@ -253,22 +177,26 @@ export interface HealthcareData {
   portalUrl?: string;
 }
 
-export interface GovernmentData {
-  workflow: "government";
-  agency?: string;
-  documentType: "tax" | "benefits" | "license" | "permit" | "notice" | "fine" | "voting" | "healthcare" | "other";
-  referenceNumber?: string;
-  deadlineDate?: string;
-  requiresResponse: boolean;
-  portalUrl?: string;
+export interface JobData {
+  workflow: "job";
+  jobType: "application_status" | "recruiter_outreach" | "interview_request" | "offer" | "rejection" | "job_posting";
+  company?: string;
+  role?: string;
+  location?: string;
+  salary?: string;
+  interviewDate?: string;
+  applicationStatus?: "submitted" | "reviewing" | "interview" | "offer" | "rejected";
+  actionUrl?: string;
 }
 
-export interface NoticeData {
-  workflow: "notice";
-  noticeType: "privacy_policy" | "terms_update" | "data_processor" | "cookie_policy" | "compliance" | "other";
-  provider: string;
-  effectiveDate?: string;
-  documentUrl?: string;
+export interface SupportData {
+  workflow: "support";
+  eventType: "ticket_opened" | "ticket_updated" | "ticket_resolved" | "ticket_closed" | "awaiting_response" | "status_update";
+  ticketId?: string;
+  service: string;
+  priority?: "low" | "normal" | "high" | "urgent";
+  agentName?: string;
+  responseUrl?: string;
 }
 
 export interface TestData {

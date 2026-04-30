@@ -9,34 +9,28 @@ function promote(current: ArcUrgency, floor: ArcUrgency): ArcUrgency {
 export function baseUrgency(workflow: Workflow, data: WorkflowData): ArcUrgency {
   switch (workflow) {
     case "auth":
-    case "security":
       return "critical";
 
-    case "financial":
-      return (data as { isSuspicious?: boolean }).isSuspicious ? "critical" : "normal";
+    // alerts: critical when action is required, high otherwise
+    case "alert":
+      return (data as { requiresAction?: boolean }).requiresAction ? "critical" : "high";
 
-    case "developer":
-      return (data as { severity?: string }).severity === "critical" &&
-        (data as { requiresAction?: boolean }).requiresAction
-        ? "critical"
-        : "normal";
-
-    case "subscription":
-      return (data as { eventType?: string }).eventType === "payment_failed" ? "critical" : "normal";
+    // payments: payment_failed demands immediate action
+    case "payments":
+      return (data as { paymentType?: string }).paymentType === "payment_failed" ? "critical" : "normal";
 
     case "support":
       return (data as { priority?: string }).priority === "urgent" ? "critical" : "normal";
 
-    case "newsletter":
-    case "promotions":
-    case "onboarding":
-    case "social":
+    // passive content — low noise
+    case "content":
       return "low";
 
-    case "notice":
+    // status emails (ToS, notices, welcome) are silent — never interrupt
+    case "status":
       return "silent";
 
-    // test emails are high urgency — the user is actively waiting for confirmation
+    // test emails are high — user is actively waiting for confirmation
     case "test":
       return "high";
 

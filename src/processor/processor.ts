@@ -220,8 +220,9 @@ export class SignalProcessor {
       const emailConfig = accountCtx.emailConfig;
       const accountConfig = accountCtx.filtering;
 
-      // Onboarding block: checked before sender-filter so it applies even for known senders
-      if (classification.workflow === "onboarding") {
+      // Welcome/onboarding block: status emails with statusType="welcome" are blocked when configured.
+      // Checked before sender-filter so it applies even for known senders.
+      if (classification.workflow === "status" && (classification.workflowData as { statusType?: string }).statusType === "welcome") {
         const perAddress = emailConfig?.onboardingEmailHandling;
         const globalBlock = accountConfig?.blockOnboardingEmails ?? false;
         const shouldSuppress = perAddress === "block" || perAddress === "quarantine" || (perAddress !== "allow" && globalBlock);
@@ -296,7 +297,7 @@ export class SignalProcessor {
     }
 
     // 6. Build or update Arc
-    const isNotice = classification.workflow === "notice";
+    const isNotice = classification.workflow === "status";
     let arc: Arc;
     if (matchedArc) {
       arc = {
@@ -557,24 +558,28 @@ export function deriveGroupingKey(
   const base = `${recipientAddress}:${workflow}`;
 
   switch (workflow) {
+    // Deterministic by sender — one arc per sender domain per workflow
     case "auth":
-    case "invoice":
-    case "notice":
-    case "newsletter":
-    case "onboarding":
+    case "content":
+    case "status":
+    case "payments":
+    case "alert":
     case "test":
       return `${base}:${senderETLD1}`;
 
-    case "order": {
+    // Deterministic by order number when present
+    case "package": {
       const { orderNumber } = workflowData as { orderNumber?: string };
       return orderNumber ? `${base}:${orderNumber}` : null;
     }
 
+    // Deterministic by ticket ID when present
     case "support": {
       const { ticketId } = workflowData as { ticketId?: string };
       return ticketId ? `${base}:${ticketId}` : null;
     }
 
+    // Vector search: conversation, crm, travel, scheduling, healthcare, job
     default:
       return null;
   }
