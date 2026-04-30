@@ -109,7 +109,7 @@ function makeArc(overrides: Partial<Arc> = {}): Arc {
   return {
     id: "arc-001",
     accountId: TEST_ACCOUNT_ID,
-    workflow: "personal",
+    workflow: "conversation",
     labels: [],
     status: "active",
     summary: "A test arc.",
@@ -134,8 +134,8 @@ function makeSignal(overrides: Partial<Signal> = {}): Signal {
     attachments: [],
     headers: {},
     recipientAddress: "user@example.com",
-    workflow: "personal",
-    workflowData: { workflow: "personal", isReply: false, sentiment: "neutral", requiresReply: false },
+    workflow: "conversation",
+    workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
     spamScore: 0.02,
     summary: "A test signal.",
     classificationModelId: "us.anthropic.claude-opus-4-5-20251101-v1:0",
@@ -286,10 +286,10 @@ describe("API", () => {
     });
 
     it("passes workflow and label filters to the store", async () => {
-      await req(app, "GET", `${A}/arcs?workflow=invoice&label=billing&limit=25`);
+      await req(app, "GET", `${A}/arcs?workflow=payments&label=billing&limit=25`);
       expect(store.listArcs).toHaveBeenCalledWith(
         TEST_ACCOUNT_ID,
-        expect.objectContaining({ workflow: "invoice", label: "billing", limit: 25 }),
+        expect.objectContaining({ workflow: "payments", label: "billing", limit: 25 }),
       );
     });
 
@@ -427,16 +427,16 @@ describe("API", () => {
     it("creates a View and returns 201", async () => {
       vi.mocked(store.createView).mockResolvedValueOnce(makeView({ id: "view-new" }) as never);
       const res = await req(app, "POST", `${A}/views`, {
-        body: { name: "Invoices", workflow: "invoice", sortField: "lastSignalAt", sortDirection: "desc" },
+        body: { name: "Invoices", workflow: "payments", sortField: "lastSignalAt", sortDirection: "desc" },
       });
       expect(res.status).toBe(201);
       expect(store.createView).toHaveBeenCalledWith(
-        TEST_ACCOUNT_ID, expect.objectContaining({ name: "Invoices", workflow: "invoice" }),
+        TEST_ACCOUNT_ID, expect.objectContaining({ name: "Invoices", workflow: "payments" }),
       );
     });
 
     it("returns 400 when name is missing", async () => {
-      const res = await req(app, "POST", `${A}/views`, { body: { workflow: "invoice" } });
+      const res = await req(app, "POST", `${A}/views`, { body: { workflow: "payments" } });
       expect(res.status).toBe(400);
     });
 
@@ -994,11 +994,11 @@ describe("API", () => {
 
     it("Arc inherits workflow and summary from the blocked signal", async () => {
       vi.mocked(store.getSignal).mockResolvedValueOnce(
-        makeSignal({ status: "blocked", workflow: "invoice", summary: "Invoice from ACME" }),
+        makeSignal({ status: "blocked", workflow: "payments", summary: "Invoice from ACME" }),
       );
       await req(app, "POST", `${A}/arcs`, { body: { signalId: "SES#msg-001" } });
       const arc = vi.mocked(store.createArc).mock.calls[0]![0] as Arc;
-      expect(arc.workflow).toBe("invoice");
+      expect(arc.workflow).toBe("payments");
       expect(arc.summary).toBe("Invoice from ACME");
     });
 
