@@ -1142,3 +1142,209 @@ This is computed from `receipt` arcs within the current month. No data entry. No
 **One-tap pay confirmation:** After the user clicks "Pay now" and returns to the app, show a prompt: "Did you complete the payment?" with [Yes, paid] and [Not yet] options. If they confirm payment, the arc archives immediately and a `paid` label is applied. This creates a reliable "I've handled this" state without needing a webhook from the vendor — the user's confirmation is the signal.
 
 ---
+
+## alert
+
+### What this workflow is
+
+Security events, fraud alerts, CI/CD failures, infrastructure incidents, deployment alerts, domain/certificate expiry warnings, and security scan results. These emails demand immediate attention because something has either gone wrong or is about to go wrong — a login from an unknown device, a fraudulent charge, a failing deployment, an expiring certificate.
+
+The defining characteristic: **the clock is ticking and the cost of inaction is high.** A suspicious login that goes unacknowledged may mean an account is compromised. A CI failure that goes unaddressed blocks the team. A certificate expiry that goes unnoticed takes down a service. Every design decision in this workflow must serve one goal: get the user investigating as fast as possible.
+
+`alert` is the highest-urgency non-`auth` workflow. Treat every `requiresAction: true` alert with the same seriousness as a fraud alert, because it might be one.
+
+### Data shape
+
+```ts
+interface AlertData {
+  workflow: "alert";
+  alertType:
+    | "suspicious_login" | "new_device" | "password_changed" | "breach_notice"
+    | "api_key_exposed" | "account_locked" | "fraud_alert"
+    | "ci_failure" | "deployment_failed" | "error_spike"
+    | "domain_expiry" | "cert_expiry" | "security_scan"
+    | "other";
+  service: string;
+  severity?: "info" | "warning" | "critical";
+  requiresAction: boolean;
+  actionUrl?: string;
+  ipAddress?: string;
+  location?: string;         // e.g. "Berlin, Germany"
+  deviceName?: string;
+  repository?: string;       // for CI/deployment alerts
+  errorMessage?: string;     // for error spikes, CI failures
+}
+```
+
+### Urgency
+
+- `requiresAction: true` OR `severity: "critical"` → `critical`
+- `severity: "warning"` OR `alertType` in [fraud_alert, api_key_exposed, account_locked, suspicious_login, breach_notice] → `critical` (these are always critical regardless of `requiresAction`)
+- `severity: "warning"` for non-security alert types (domain_expiry, ci_failure) → `high`
+- `severity: "info"` or `requiresAction: false` → `normal`
+
+There is no `low` urgency for `alert`. If a signal is classified as `alert`, something happened that the system or classifier deemed noteworthy. Minimum urgency is `normal`.
+
+---
+
+### Arc list row
+
+**Left:** Warning triangle icon for `critical`. Info circle for `warning`. Bell for `info`. The icon itself communicates severity before the user reads anything. Colour:
+- `critical` → red (same as the urgency system, reinforced)
+- `warning` → amber
+- `info` → neutral blue
+
+For `fraud_alert` specifically: use a distinct icon — a shield with a lightning bolt or an exclamation inside the shield. Fraud is not the same as a CI failure and should look different at a glance.
+
+**Centre — alert types and their primary display:**
+
+Security alerts (`suspicious_login`, `new_device`, `fraud_alert`, `api_key_exposed`, `account_locked`, `breach_notice`, `password_changed`):
+- **Service name** in bold: "GitHub", "Stripe", "Google".
+- **Alert summary** as secondary text — human readable, not the raw `alertType`:
+  - `suspicious_login` → "Suspicious login detected"
+  - `new_device` → "New device signed in" or "New device: {deviceName}"
+  - `fraud_alert` → "Fraud alert — unusual activity"
+  - `api_key_exposed` → "API key exposure detected"
+  - `account_locked` → "Account locked — action required"
+  - `breach_notice` → "Security breach notice"
+  - `password_changed` → "Password changed"
+- **Location + IP chip** when present: "Berlin, Germany (195.34.21.7)" — one line in muted text. This is the single most useful piece of information for evaluating a login alert. If it's Moscow at 3am and the user is in San Francisco, they know immediately.
+
+Developer/infrastructure alerts (`ci_failure`, `deployment_failed`, `error_spike`):
+- **Repository or service name** in bold: "rhosys/ses-email-adapter" or "Production API".
+- **Alert type** in muted text: "CI failed", "Deployment failed", "Error spike detected".
+- **Error snippet** in mono text: first 80 characters of `errorMessage` if present — e.g., `TypeError: Cannot read properties of undefined (reading 'length')`. This lets developers triage without opening the email.
+
+Infrastructure/expiry alerts (`domain_expiry`, `cert_expiry`, `security_scan`):
+- **Service name** in bold.
+- **Alert type**: "Domain expires in 12 days", "SSL certificate expires in 7 days", "Security scan: 3 issues found".
+- Time-to-expiry chip if extractable from `alertType` and signal data.
+
+**Right:**
+- Timestamp (relative, auto-updating).
+- **Investigate button** — a CTA directly on the arc row for `requiresAction: true` alerts. Opens `actionUrl` in new tab. Label: "Investigate →". This is the single most important affordance — get the user to the investigation page in one tap from the list.
+- Urgency badge: always show for `critical` and `high` (there should be no silent alerts).
+
+---
+
+### Fraud alert special treatment
+
+`alertType: "fraud_alert"` gets the most aggressive visual treatment in the system:
+
+- **Full-width red banner** spanning the arc row — not just an icon or badge, but the entire card background shifts to a light red tint.
+- **Bold red "Fraud Alert" label** replacing the normal workflow label.
+- Arc sorted to the absolute top of Default view, above all other arcs including `auth`.
+- Push notification: interrupt tier, maximum urgency — this notification must fire even if the user has silenced all others (implement as a separate notification category: "Security" — iOS Critical Alerts, Android high-priority channel, cannot be silenced by Do Not Disturb).
+
+Each `fraud_alert` is its own arc. **Never merge multiple fraud alerts** — each represents a distinct suspicious event. If three fraud alerts arrive from the same service within 10 minutes, there are three arcs, three notifications, three "Investigate" buttons.
+
+---
+
+### Arc detail (signal thread)
+
+**Thread header:** Large-format alert panel at the top.
+
+For security alerts:
+```
+┌──────────────────────────────────────────────┐
+│  ⚠️  CRITICAL — Suspicious login              │
+│                                              │
+│  Service:     GitHub                         │
+│  Device:      Unknown (Chrome on Windows)    │
+│  Location:    Moscow, Russia                 │
+│  IP:          91.108.4.1                     │
+│  Time:        Today 03:42 UTC                │
+│                                              │
+│  [Secure my account →]   [This was me]      │
+└──────────────────────────────────────────────┘
+```
+
+For developer alerts:
+```
+┌──────────────────────────────────────────────┐
+│  ✕  CI Failure — rhosys/ses-email-adapter    │
+│                                              │
+│  Branch:      main                           │
+│  Trigger:     Push by alice                  │
+│  Duration:    2m 14s                         │
+│  Error:       TypeError: Cannot read...      │
+│                                              │
+│  [View failed run →]                         │
+└──────────────────────────────────────────────┘
+```
+
+**"This was me" / "This wasn't me" action:**
+For `suspicious_login`, `new_device`, `password_changed` — show two resolution buttons:
+- **"This was me"** — archives the arc and marks it `acknowledged`. No further action. The alert is resolved.
+- **"This wasn't me"** — opens `actionUrl` (account security page) in new tab AND adds label `security:compromised` to the arc AND sends the user to the arc detail with an expanded help panel: "Steps to secure your account: 1. Change your password now. 2. Enable two-factor authentication. 3. Review connected apps." The arc stays open (not archived) until the user explicitly closes it after securing their account.
+
+**For CI/deployment failures:**
+- **"View failed run"** → `actionUrl` (CI dashboard).
+- No "This was me/wasn't me" — developer alerts don't have an acknowledgement pattern, they have a resolution pattern. Show instead: "Mark as resolved" (archives arc when the developer has fixed the issue).
+
+**Email body:** Below the structured panel. For security alerts, the email body often contains additional context (recent activity, list of sessions) — render in sandboxed iframe as normal. For CI failures, the body is usually just a log — render as-is.
+
+---
+
+### Repeated alert escalation
+
+This is a critical safety feature. If multiple `alert` arcs from the same `service` arrive within a short window without any acknowledgement:
+
+- **2 security alerts within 10 minutes:** Surface in-app banner: "2 security alerts from GitHub in the last 10 minutes." Push a second interrupt notification even if one was already sent.
+- **3+ security alerts within 10 minutes:** Escalate with a top-of-screen persistent warning that does not dismiss until the user taps "Dismiss" or "Investigate": "Multiple security events detected on your GitHub account. We strongly recommend checking your account now." Include a direct link to GitHub's security activity page.
+- **For CI failures:** No escalation — many CI failures in rapid succession are expected (multiple commits triggering failures). Apply a different pattern: collapse repeated CI failures from the same repo within a 5-minute window into a single arc with a count: "5 CI failures in the last 5 minutes on rhosys/ses-email-adapter" — do not create 5 separate arcs.
+
+The distinction: security alert flooding is a red flag. CI failure flooding is normal developer behaviour.
+
+---
+
+### Threading behaviour
+
+**Security alerts:** Each alert gets its own arc. Do not thread security alerts from the same service together — each is a distinct security event. Merging a suspicious login from Tuesday with another from Wednesday hides the pattern; they should be separate arcs so the user can see frequency.
+
+**Exception:** `password_changed` following a `suspicious_login` from the same service — these clearly relate to the same incident and should thread together (the user saw the suspicious login and changed their password).
+
+**CI/deployment alerts:** Group by `repository`. All CI failures on `rhosys/ses-email-adapter` thread together into one arc that shows the failure history. This is the opposite of security alerts — for CI, the pattern over time is useful, not alarming.
+
+**Infra expiry alerts:** Group by `service` + `alertType`. All cert expiry warnings for the same domain thread into one arc (since there will typically be a series: 30-day, 14-day, 7-day, 1-day warnings).
+
+---
+
+### Default view behaviour
+
+- `critical` alerts: pinned to the very top of Default view. Within `critical`, sort by arrival time descending — the most recent is the most relevant.
+- `fraud_alert`: top of `critical` tier, above all other `critical` arcs.
+- `high` alerts: normal `high` tier sort, above `normal`.
+- `ci_failure` with `severity: "warning"`: respect the urgency tier (usually `high`) but do not pin. CI failures should not dominate the inbox — the developer will handle them through the CI dashboard, not the inbox.
+
+After an alert is acknowledged (user clicks "This was me" or "Mark as resolved"), remove it from Default view immediately. Acknowledged alerts should not linger.
+
+---
+
+### Notification behaviour
+
+- **`critical` security alerts (fraud_alert, suspicious_login, api_key_exposed, account_locked, breach_notice):** Interrupt push via iOS Critical Alerts / Android high-priority channel. These bypass Do Not Disturb. Cannot be silenced by the user's notification preferences for this workflow (security alerts must always reach the user). Notification body includes: service name, alert type, location/IP if available, and a link to the secure-account action.
+- **`ci_failure` / `deployment_failed` / `error_spike`:** Interrupt push for `requiresAction: true`; ambient for `requiresAction: false`. CI failures interrupt because someone needs to fix them. Error spikes that are informational do not interrupt.
+- **`domain_expiry` / `cert_expiry`:** Ambient push. These are future events, not active crises. The push gives visibility; the arc in the inbox is where the user acts.
+- **Digest:** Include all unacknowledged `critical` alerts in the digest. Group under "Security alerts requiring attention." Include CI failures with `requiresAction: true`.
+
+---
+
+### Where to innovate
+
+**Automated threat context enrichment:** When an `alert` arrives with `ipAddress`, make an automatic call to a threat intelligence API (AbuseIPDB, IPQualityScore, or similar) to enrich the context: "IP 91.108.4.1 has been reported for suspicious activity 234 times. Country: Russia. Risk score: 97/100." Display this enriched context in the alert panel in the arc detail. This transforms a raw IP address into an actionable risk assessment — the user immediately knows whether to panic or dismiss.
+
+**Security incident timeline:** When multiple related security events arrive across a period of time (suspicious login → password changed → API key reset), link them in a visual timeline within the arc detail: "Security incident — 3 events over 2 hours." This tells a story of the incident's progression and gives the user a complete picture without navigating between separate arcs. Build this as a collapsible "Incident timeline" section in the arc detail for arcs that have received multiple `alert`-type signals.
+
+**CI failure summary:** For development teams, when a CI failure arc receives its second signal (same repo, different commit), show a brief diff in the arc detail: "Failing since: commit 4a3b2c1 by Alice at 3:42pm. Last passing: commit 7f8d2e4 at 2:15pm." This is computed from the last two signals in the arc — no CI integration needed, just parsing the email bodies. It immediately narrows down which commit broke the build.
+
+**One-tap "not me" → security playbook:** When the user taps "This wasn't me" on a suspicious login, do not just open a browser tab. Show a guided security playbook inline in the arc detail — a checklist with direct links to each step:
+1. ✅ Change your password → [GitHub password settings link]
+2. ✅ Review active sessions → [GitHub sessions link]
+3. ✅ Enable 2FA → [GitHub 2FA link]
+4. ✅ Revoke suspicious OAuth apps → [GitHub apps link]
+5. ✅ Download account activity log → [GitHub log link]
+
+The user taps each item to mark it done. The arc archives when all items are checked. This turns a panic-inducing security alert into a structured, manageable incident response — in the inbox.
+
+---
