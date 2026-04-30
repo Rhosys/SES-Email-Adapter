@@ -414,3 +414,183 @@ Consider a dedicated "CRM" view in the user's default view set — pre-seeded on
 **Deal pipeline view:** For users who receive many `proposal` and `contract` arcs, offer a Kanban-style pipeline view within the CRM view: columns for "Reviewing", "In discussion", "Decided". The user drags arcs between columns. Stage is stored as a label (`crm:reviewing`, `crm:discussing`, `crm:decided`). This turns the inbox into a lightweight deal tracker without requiring a separate CRM tool.
 
 ---
+
+## package
+
+### What this workflow is
+
+Order confirmations, shipping notifications, out-for-delivery alerts, delivered confirmations, returns, and refunds. The user bought something and is now waiting for it to arrive — or dealing with the aftermath (return, refund, cancellation).
+
+The defining characteristic: **status changes over time, not decisions.** Most package emails require no action. The user wants to know where their package is, not be interrupted about it. The inbox should surface package status passively and step aside.
+
+The one exception: `out_for_delivery` — this is the moment where knowing matters, because the user can plan to be home, buzz a delivery person, or arrange a neighbour to accept. That moment warrants a push.
+
+### Data shape
+
+```ts
+interface PackageData {
+  workflow: "package";
+  packageType: "confirmation" | "shipping" | "out_for_delivery" | "delivered" | "return" | "refund" | "cancellation";
+  retailer: string;
+  orderNumber?: string;
+  trackingNumber?: string;
+  trackingUrl?: string;
+  estimatedDelivery?: string;    // ISO date string
+  items?: Array<{ name: string; quantity: number; price?: number }>;
+  totalAmount?: number;
+  currency?: string;
+}
+```
+
+### Urgency
+
+- `out_for_delivery` → `normal` (elevated from `low`, but does not warrant `high` — it is informational, not action-required)
+- `return` or `refund` where money is involved → `normal`
+- `cancellation` → `high` (unexpected; may require action to re-order or dispute)
+- All other types → `low`
+
+The one case to elevate further: if `estimatedDelivery` has passed and no `delivered` signal has arrived, the processor or a scheduled job should bump urgency to `normal` and add label `overdue-delivery`. The UI can also compute this client-side from the date if the backend hasn't done it yet.
+
+---
+
+### Arc list row
+
+**Left:** Box/parcel icon. The icon should visually convey the current delivery status — not a static icon for all package states:
+- `confirmation` → empty box outline
+- `shipping` → box with a truck
+- `out_for_delivery` → truck (no box) — most urgent visual state
+- `delivered` → box with a checkmark, green tint
+- `return` → box with a left-pointing arrow
+- `refund` → dollar sign or coin returning
+- `cancellation` → box with an X, muted/grey
+
+This icon progression is the package lifecycle — the user learns to recognise it without reading anything.
+
+**Centre:**
+- **Retailer name** in bold: "Amazon", "ASOS", "Apple". Derived from `retailer`.
+- **Status label** in muted text: "Out for delivery", "Delivered", "Shipped", "Return requested", "Refund issued", "Order cancelled", "Order confirmed". Map directly from `packageType` — this is the current state.
+- **Delivery timeline chip** (below status): if `estimatedDelivery` is set, show:
+  - Future: "Arrives Thu 15 Jan" (day + date)
+  - Today: "Arriving today" in amber
+  - Past + no delivered signal: "Expected yesterday" in amber (possible delivery issue)
+  - `delivered` type received: replace with "Delivered Tue 14 Jan" in green
+
+If `items` is present, show the first item name below the status: "iPhone 15 Pro + 2 more items". If only one item, show its name directly.
+
+**Right:**
+- Timestamp of last update.
+- **Track button** — a small, secondary CTA on the arc row itself. Opens `trackingUrl` in a new tab. Label: "Track". Icon: right-pointing arrow. This is the primary action for most package arcs and should not require opening the detail view.
+- If `totalAmount` is present: show the order total in muted text: "$249.99".
+
+**No urgency badge** for `low` arcs (confirmation, shipping, delivered). `out_for_delivery` gets a subtle `normal` badge. `cancellation` gets a `high` badge in amber.
+
+---
+
+### Delivery status bar
+
+This is the defining UI element for the `package` workflow. Above the AI summary on the arc row (or at the top of the arc detail), render a compact 5-step progress bar:
+
+```
+[●]————[●]————[ ]————[ ]————[ ]
+ Ordered  Shipped  In transit  Out for delivery  Delivered
+```
+
+Active steps are filled/coloured. The current step pulses (subtle animation). Completed steps are solid. Future steps are hollow grey.
+
+State mapping:
+- `confirmation` → step 1 active (Ordered)
+- `shipping` → step 2 active (Shipped)
+- `out_for_delivery` → step 4 active (Out for delivery) — skip "In transit" if not explicitly signalled
+- `delivered` → step 5 active, all steps green
+- `return` → replace bar with a return-specific version: Delivered → Return requested → In transit → Refunded
+- `cancellation` → show all steps greyed out with an X on the current step
+
+This bar replaces the need to read the email at all for most users. They see the bar, understand the status, and move on.
+
+---
+
+### Arc detail (signal thread)
+
+**Thread header:**
+- Retailer name + order number (if present): "Amazon — Order #123-456-789"
+- Delivery status bar (full-width, larger version of the row bar)
+- Estimated delivery or delivered date
+
+**Structured data panel (top of detail, above email body):**
+
+```
+Order:        #123-456-789
+Retailer:     Amazon
+Status:       Out for delivery
+Arrives:      Today, Thu 15 Jan
+Tracking:     1Z999AA10123456784  [Track →]
+Items:        AirPods Pro (x1)  $249.99
+              USB-C Cable (x2)  $19.99
+Total:        $269.98 USD
+```
+
+This panel is rendered from `workflowData` fields — not extracted from the email HTML. It is always present when the data exists. The email body is below it (collapsed by default — the structured panel has already surfaced what matters).
+
+**Actions in detail:**
+- **Track package** → `trackingUrl` in new tab
+- **View order** → retailer order URL if extractable (attempt from email body links — look for `amazon.com/orders/`, `myorders.`, etc.)
+- **Start return** → retailer return URL if extractable
+- **Archive** → one tap, no confirm. Delivered packages can be archived after the user views them.
+
+---
+
+### Threading behaviour
+
+Groups by `orderNumber` + `retailer`. All signals for Amazon order #123-456-789 thread into one arc: confirmation → shipping → out for delivery → delivered → any returns. This creates a complete lifecycle view per order.
+
+If `orderNumber` is absent: fall back to `retailer` + a 7-day sliding window from the confirmation email. This handles retailers that don't include order numbers in every update.
+
+**Do not merge different orders from the same retailer.** Two Amazon orders placed the same week are two arcs. The grouping key must include `orderNumber`.
+
+For `return` and `refund` signals: even if the return is for an order the user bought months ago, if `orderNumber` matches an existing arc, extend that arc. The full lifecycle should live in one place.
+
+---
+
+### Auto-archive on delivery
+
+When a `delivered` signal arrives, the arc should be considered complete. The default behaviour:
+- Mark the arc as read automatically.
+- Do not archive immediately — give the user 48 hours to view it (they may want to confirm the delivery or start a return).
+- After 48 hours without any user interaction, auto-archive. This keeps the inbox clear of delivered packages without requiring manual cleanup.
+- If the user opens the arc or taps "Archive" before the 48-hour window, archive immediately.
+
+The 48-hour auto-archive is a default that users can configure: "Archive delivered packages automatically: immediately / after 48h / never."
+
+---
+
+### Urgency spike on out-for-delivery
+
+When `packageType: "out_for_delivery"` arrives, temporarily elevate the arc to the top of the Default view within its urgency tier — above other `normal` arcs — for the duration of that day. This is the one moment in the package lifecycle where knowing matters immediately. At midnight, the arc returns to normal sort order.
+
+This is not an urgency change (it stays `normal`) — it is a sort boost within the tier, implemented as a tiebreaker in the sort key: `urgency DESC, is_out_for_delivery_today DESC, lastSignalAt DESC`.
+
+---
+
+### Notification behaviour
+
+- **`confirmation`:** No push. This is acknowledgement, not actionable news.
+- **`shipping`:** Ambient push (badge only) — "Your Amazon order has shipped."
+- **`out_for_delivery`:** Interrupt push — "Your AirPods are out for delivery today." This is the one package state where interruption is justified — timing matters.
+- **`delivered`:** Ambient push — "Your AirPods have been delivered."
+- **`return` / `refund`:** Ambient push — "Your return has been received. Refund in 5–7 days."
+- **`cancellation`:** Interrupt push — "Your Amazon order has been cancelled." This is unexpected and may require action.
+- **Digest:** Include only open (undelivered) packages with `out_for_delivery` or `overdue-delivery` label. Delivered packages do not belong in the digest — they are resolved.
+
+---
+
+### Where to innovate
+
+**Delivery day awareness:** On days when one or more packages are `out_for_delivery`, surface a subtle banner at the top of the inbox (not a notification, just an in-app UI element): "2 packages arriving today: AirPods Pro, USB-C Cables." Tapping it filters the inbox to those two arcs. This gives the user a morning briefing for packages without being an alert.
+
+**Missed delivery detection:** If `estimatedDelivery` passes and no `delivered` signal arrives within 24 hours, add a `delayed-delivery` label and surface a "Check on your package" prompt in the arc detail with a direct link to the tracking URL. This is a common frustration — packages marked as delivered that weren't, or packages stuck in transit. The inbox catches it automatically.
+
+**Spend tracking across package arcs:** Aggregate `totalAmount` across all `package` arcs in a rolling 30-day window, grouped by `retailer`. Surface as "You've spent $847 at Amazon this month" in a subtle annotation on the package view header — not in each arc, just as a view-level metric. This is the inbox becoming a passive expense tracker without requiring the user to do anything.
+
+**One-tap return initiation:** For `delivered` arcs where the retailer supports deep-linked returns (Amazon, etc.), add a "Start return" button in the structured panel that constructs the return URL from `orderNumber` and `retailer`. The user should never have to navigate to the retailer's site, find the order, and click return — one tap from the arc detail.
+
+---
