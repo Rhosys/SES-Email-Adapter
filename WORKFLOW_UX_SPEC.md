@@ -2177,3 +2177,218 @@ Consider a dedicated **Support** view pre-seeded in the user's default view set 
 **Bulk ticket management:** For users with many open tickets (developers, SaaS power users), enable bulk actions in the Support view: select multiple resolved tickets and archive them all. "Archive all resolved" as a one-tap action at the top of the Support view. Resolved tickets pile up and need periodic cleanup — this makes it effortless.
 
 ---
+
+## test
+
+### What this workflow is
+
+Emails sent by the account owner — or by the system on the account owner's behalf — to verify that the inbox setup is working correctly. The user just wired up SES, pointed their MX record at it, and sent themselves a test email to confirm delivery. This is the "aha moment" workflow.
+
+There are two triggering paths, both resulting in `workflow: "test"`:
+
+1. **User-sent test** (`TestData.triggeredBy: "user"`): the `signal.from` address matches a domain registered to the account (e.g., `me@mydomain.com` and `mydomain.com` is registered) OR matches any user's email address on the account. The processor overrides any classifier assignment with `workflow: "test"`. This fires during and after onboarding whenever the account owner sends to their own address.
+
+2. **System-generated test** (`TestData.triggeredBy: "system"`): the processor creates a synthetic `SYS#`-prefixed signal during onboarding Step 2 if no real email arrives within 3 minutes. The onboarding UI treats arrival of any `test` arc — real or system-generated — as success.
+
+The defining characteristic: **the user is actively watching for this.** They opened their phone's mail app or Gmail, sent an email to their new address, and are now standing in front of the inbox waiting for it to appear. The latency between send and receive is what they are measuring. This is the highest-attention moment in the entire onboarding funnel — every millisecond of perceived latency matters, and the experience when it arrives must be memorable.
+
+Additionally, the system **always replies** to `test` arcs with a Bedrock-generated pong — a short, playful, witty reply that riffs on whatever the user actually wrote. This proves two-way communication is working, not just inbound.
+
+### Data shape
+
+```ts
+interface TestData {
+  workflow: "test";
+  triggeredBy: "user" | "system";
+}
+```
+
+### Urgency
+
+Always `high`. The user is actively waiting. Push priority: `interrupt`. This maps to interrupt-tier push notifications — same as a meeting invite or interview request. The user needs to know the moment it arrives.
+
+---
+
+### Onboarding step 2 — the aha moment
+
+The `test` arc's most important appearance is during onboarding Step 2. This is not a standard inbox view — it is a dedicated full-screen waiting experience. The inbox views this section of the spec as requirements for the **onboarding UI**, not the standard arc list.
+
+**Layout:** Full-screen. No nav bar. No other arcs. Minimal UI. The entire screen is focused on one thing: the moment the email arrives.
+
+**Waiting state (before the email arrives):**
+- Large, calm headline at the top: "Let's make sure everything is working."
+- Below it: the user's new address in a large monospace pill with a one-tap copy button. E.g., `you@yourdomain.com`. The copy button matters because the user needs to paste this address into their mail app.
+- Below the address: a simple instruction in regular body text: "Open Gmail, Outlook, or any email app and send an email to this address. We'll show it here the moment it arrives."
+- Below the instruction: the waiting animation. Not a spinner. Not a progress bar. Something alive and calm — a gentle pulsing ring or breathing glow around an empty inbox card. The animation says "I'm listening" without saying "I'm loading." Copy inside or below the animation: "Waiting for your email…"
+- Bottom of screen: a muted secondary link — "Didn't arrive? Troubleshoot →" — pointing to a help article about MX propagation and SES setup. Do not display this link in the first 60 seconds; it adds anxiety before the user has had time to send the email.
+
+**The moment the email arrives (real-time via WebSocket or long-poll):**
+
+This is the product's first impression. It must be executed with care.
+
+1. The waiting animation resolves — the pulse stops, the ring fills in with a satisfying completion animation (not a spinner stopping, but a completion: ring becomes a checkmark, or the empty card "fills in" with a smooth entrance).
+
+2. The arc card appears in the centre of the screen, sliding up from below or fading in. The card shows exactly what the arc list row would show in the real inbox:
+   - Flask/beaker icon on the left.
+   - The sender name (the user's own name, from their Gmail "From" display name) in bold.
+   - The subject line they wrote.
+   - The AI-generated summary (if available within the processing latency window) — or just the subject if the summary isn't ready yet. Do NOT show a blank summary; fall back to subject.
+   - A "TEST" badge on the card.
+   - The timestamp: "Just now."
+
+3. A brief celebration moment: one pass of confetti, or a satisfying chime sound (optional, respects system silent mode), or a simple green checkmark that pulses once. Do not over-animate. The moment should feel like a sigh of relief, not a party.
+
+4. Below the card, copy appears: "It works. Your first email just arrived."
+
+5. Two seconds later (give the user a moment to read), a second card slides up below the first. This is the pong reply:
+   - The pong card has a distinct visual treatment: a slightly different background colour (muted teal tint), and a header line: "We replied →"
+   - Below the header: the Bedrock-generated reply body. Short (≤3 sentences). Witty and warm — it riffs on whatever the user wrote, not a generic message.
+   - Below the body: the sender address the pong was sent from — either `signal.to` (if `senderSetupComplete: true`) or the system `NOTIFICATION_FROM` address (if not). If the pong was sent from the system address, include a small inline note: "Sent from our address — complete sender setup to reply from your domain →".
+
+6. After the user has had 3–4 seconds to read both cards, a CTA fades in below: **"Continue →"** — proceeds to Step 3 (sender setup) or Step 5 (you're ready), depending on whether sender records were already verified in Step 1.
+
+**System-generated fallback (if no real email arrives in 3 minutes):**
+
+The 3-minute timer is hidden from the user — do not show a countdown. After 3 minutes, quietly trigger the system fallback:
+- The waiting animation transitions to a slightly different state: the pulsing slows. A gentle message appears: "Still waiting… If your email is taking longer than usual, we can send you one instead."
+- A single CTA appears: "Send me a test email" — this triggers the `SYS#` signal creation server-side.
+- The system signal arrives almost immediately (< 1 second, it is generated server-side). The onboarding experience plays out identically — same card, same pong, same celebration, same "It works." copy. The user cannot tell (and does not need to know) that this was system-generated.
+- The system signal card shows sender: "System (onboarding)" with a muted visual treatment — it is visually distinct from a user-sent email but still confirms the plumbing works.
+
+---
+
+### Arc list row (post-onboarding)
+
+After onboarding, the user may continue to send test emails (checking setup after DNS changes, testing a new email address, etc.). These appear in the regular inbox.
+
+**Visual treatment:** Deliberately distinct from real mail. The user must never confuse a test arc with a real email.
+
+- **Left:** Flask/beaker icon — the same as used in onboarding. Use a muted blue-grey colour. Not the warm/vibrant colours of action-required workflows.
+- **Background tint:** Very subtle light teal or lavender wash on the arc card — not white like normal arcs. Visible but not jarring.
+- **"TEST" badge:** A small pill badge reading "TEST" in monospace, positioned top-right of the arc card. Muted colour (grey outline, no fill). This is always present — no test arc should appear without it.
+- **Centre:**
+  - Sender name in regular (not bold) weight.
+  - Subject line in muted text.
+  - AI summary, if available. For test emails the user wrote themselves ("hey testing 123"), the summary will be sparse; this is fine.
+- **Right:** Timestamp. No urgency badge (the TEST badge serves that function visually). No CTA on the row itself.
+
+**Placement in Default view:** Test arcs appear in Default view, but in a **collapsible "Tests" section** at the bottom of the Default view — below all active real arcs, regardless of urgency. The section header reads "Tests (2)" with a collapse toggle. By default expanded. When collapsed, the section header remains as a reminder that test arcs exist.
+
+Do not elevate test arcs above real mail in the Default view even though they are `high` urgency. The urgency drives push notification timing (so the user gets an interrupt when the test arrives), but it should not compete with real email for inbox prominence post-arrival. Once received, test arcs are informational, not action-required.
+
+---
+
+### Arc detail (signal thread)
+
+**Thread header:**
+- Flask icon + "Test email" label.
+- `triggeredBy` indicator: "Sent by you" (user) or "Sent by system (onboarding)" (system).
+- Timestamp of arrival.
+
+**Signal card (the original test email):**
+- Renders normally — from, to, subject, body in sandboxed iframe.
+- If the body is trivial ("testing 123"), that is fine — the important content is the pong card below it.
+
+**Pong reply card:** Always shown in the arc detail, directly below the original signal card. This is not a separate arc or a separate email — it is a visual representation of the outbound pong reply that was auto-sent.
+
+The pong card layout:
+```
+┌──────────────────────────────────────────────┐
+│  ← We replied                                │
+│                                              │
+│  From: you@yourdomain.com (or NOTIFICATION_FROM) │
+│  To:   sender@gmail.com                      │
+│  Sent: 14 Jan, 3:42pm                        │
+│                                              │
+│  [Pong reply body — the witty Bedrock reply] │
+│                                              │
+│  (If sent from system address:)              │
+│  Sent from our address. Complete sender      │
+│  setup to reply from your own domain →       │
+└──────────────────────────────────────────────┘
+```
+
+The pong card has a distinct visual treatment: light teal background tint, "← We replied" header in small muted text. It should feel like an outbound message in a two-way conversation — the design mirrors how sent messages appear in iMessage (different colour, right-aligned or visually distinct).
+
+**If the pong failed** (Bedrock error or SES send error): do not show the pong card at all. Instead, show a small muted notice below the original signal card: "Auto-reply could not be sent." Do not surface this as an error — it is a secondary feature and the test email itself was successfully received.
+
+**No reply composer for test arcs.** The user cannot reply to their own test email via the inbox — that would create an infinite loop. The reply composer must not appear for `workflow: "test"`.
+
+**No archive suggestion.** Test arcs are self-cleaning: auto-archive after 7 days (see below).
+
+---
+
+### Pong reply generation
+
+The Bedrock call is made server-side by the processor immediately after the `test` workflow is detected. It is a post-classification side effect, analogous to how the notifier fires.
+
+**Prompt shape:**
+```
+A user just sent a test email to check that their new inbox is working.
+Read their email and write a short, witty, warm reply that plays on 
+whatever they wrote. Keep it under 3 sentences. Do not be generic — 
+react to the actual content. Sign off as "the system." 
+
+Subject: {signal.subject}
+Body: {signal.textBody}
+```
+
+**Sender address logic:**
+- `domain.senderSetupComplete === true` → send pong from `signal.to` (the user's own domain address). This proves their sending setup works end-to-end.
+- `domain.senderSetupComplete === false` → send pong from `NOTIFICATION_FROM` (the platform's own address). Still sends a reply; just not from the user's domain. Include a sentence in the pong body acknowledging this: "P.S. — I replied from our address since your sending setup isn't complete yet. Finish that and I'll reply from yours."
+
+**`arc.sentMessageIds` update:** The pong message ID is added to `arc.sentMessageIds`. This is correct behaviour — a reply was sent on this arc, even though it was system-generated. The priority calculator will promote urgency on the next inbound signal, which is correct (if the user replies to their own pong, that's an active test loop that deserves attention).
+
+---
+
+### Threading behaviour
+
+Each test email creates its own arc. Do not group test arcs together. The user may send five test emails over a week (during setup, after DNS changes, after adding a new address) — each is a distinct verification event, and merging them would obscure whether each individual test succeeded.
+
+The grouping key for `test` is intentionally unique per signal: use `signal.id` as the grouping key, not a shared `senderETLD1` or subject hash.
+
+---
+
+### Auto-archive behaviour
+
+Auto-archive `test` arcs after **7 days**. Tests that happened a week ago are historical; they do not belong in the active inbox. The arc is still accessible in Archive for the retention period.
+
+If the user wants to keep a test arc (e.g., it contains useful setup confirmation information), they can pin it or label it before the 7-day window passes.
+
+---
+
+### Default view behaviour
+
+Test arcs appear in the collapsible "Tests" section at the bottom of Default view. They do not mix with real mail. The "Tests" section:
+- Header: "Tests (N)" where N is the count of active test arcs.
+- Default state: expanded.
+- Collapsed state: the header remains; arc rows are hidden.
+- If N = 0: the section is hidden entirely — do not show an empty "Tests" section header.
+- If the user has never sent a test email (no test arcs exist): the section never appears.
+
+During onboarding Step 2 only, a test arc briefly appears at the top of the full-screen waiting view. After onboarding, it moves to the Tests section.
+
+---
+
+### Notification behaviour
+
+- **Push:** Interrupt-tier — "Your test email arrived. Setup is working!" Deep-links to the arc (and during onboarding, deep-links back to Step 2 if the user had navigated away while waiting).
+- **Notification body:** Include the subject line if it is short (≤ 40 characters): "Your test email 'hey testing!' arrived." If longer, truncate: "Your test email arrived."
+- **Pong confirmation:** No separate notification when the pong is sent. The original arrival notification is sufficient. Do not send "We replied to your test email" — it creates notification noise around what is already a notification.
+- **System-generated test:** Same push notification as user-generated — "Your test email arrived." The `triggeredBy: "system"` distinction is for the onboarding UI, not for the user.
+- **Digest:** Do not include test arcs in the digest. They are ephemeral setup verification events — they do not belong in a regular summary.
+
+---
+
+### Where to innovate
+
+**Live arrival latency display:** On the arc card in onboarding Step 2, show the end-to-end latency of the email arrival: "Arrived in 4.2 seconds." This is computed as `signal.receivedAt - signal.sentAt` (both available on the signal). It is a tiny detail that has outsized impact — users who see "4.2 seconds" feel confident about the product's performance. Users who see "47 seconds" understand their DNS is slow. Showing the number is a transparency gesture that also serves as implicit performance marketing.
+
+**Test email history view:** In Settings → Domains, show a "Test history" section per domain: the last 5 test arcs, their timestamps, arrival latency, and whether the pong was sent successfully from the domain address. This gives developers and admins a quick health-check history without navigating the inbox. Especially useful after DNS changes — "did the test email after my SPF update arrive successfully?"
+
+**Named test modes:** Power users (developers, email administrators) sometimes want to run specific test scenarios: test that spam filtering is working, test that a specific address routes correctly, test that forwarding rules fire. Offer a "Send a test" action in Settings → Email Addresses that allows the user to trigger a system-generated test signal for a specific recipient address. The test goes through the full pipeline (classification, filtering, priority, pong) and the result appears in the inbox. This makes the test workflow a genuine developer tool, not just an onboarding feature.
+
+**Pong personalisation:** The Bedrock prompt for pong replies should include the account's display name so the pong feels personalised: "Sign off as 'the system' but address {userName} by name." A pong that says "Hey Alex, nice to hear from you — though I have to say, 'testing 123' is the least creative thing you could have written" is far more memorable than a generic reply. It sets the tone for the product: this is an inbox that has a personality, and that personality is warm and a little cheeky.
+
+---
+
