@@ -42,6 +42,8 @@
   - **On degradation**: email and in-app notify all `owner` and `admin` users with domain name, which records are failing, and correct expected values. Do not halt inbound processing immediately — SES may still route for a period.
   - **On-demand re-check**: `POST /domains/:id/verify` runs a live DNS check immediately — powers the UI "Re-check DNS" button. The domain GET endpoint also resolves DNS on demand to return current per-record status: `{ name, type, value, currentValue?, status: "verified"|"failing"|"pending" }`. No stale cache, no stored health fields needed.
 
+- [ ] **Submit to awesome-privacy-tools** — open a PR at https://github.com/anondotli/awesome-privacy-tools/blob/main/CONTRIBUTING.md to add this project to the list. Follow the contributing guidelines before submitting.
+
 ---
 
 ## UI APP
@@ -546,3 +548,116 @@ Allow users to bulk-import historical emails from Gmail or Outlook via OAuth, cl
 - Font size preference (small / medium / large)
 - Density toggle: compact list (more arcs visible) vs comfortable (more whitespace)
 - Colour-blind safe palette option for urgency colours (not just red/amber/grey — add patterns or icons as secondary indicator)
+
+---
+
+## PRODUCT STRATEGY
+
+Competitive analysis vs. Addy.io, SimpleLogin, ForwardEmail, Firefox Relay, Mailbox.org, Mailfence, Mailvelope, Thexyz, and others.
+
+---
+
+### Missing Features (gaps vs. competitors)
+
+**High priority:**
+- [ ] **PGP / end-to-end encryption** — Addy.io (paid), SimpleLogin, ForwardEmail, Mailvelope, and Mailfence all offer this. Privacy-conscious users treat it as table stakes. If added, must be free (see pricing strategy below).
+- [ ] **Browser extension** — Addy.io, SimpleLogin, Firefox Relay, and DuckDuckGo all have one. Alias generation at the point of signup is the core UX for alias-focused users; the extension is also a free acquisition channel.
+- [ ] **Mobile app** — Essential for the auth/OTP quick-copy workflow. Addy.io, SimpleLogin, and Firefox Relay all have apps. Without one, the OTP copy feature (our #1 differentiator) is only usable at a desktop.
+
+**Medium priority:**
+- [ ] **On-demand alias generation** — Catch-all + custom domains covers this technically, but there's no UI shortcut for generating `random123@yourdomain.com` at a click. All alias services have this as their primary action.
+- [ ] **Alias-per-site tracking** — Which company received which alias; breach detection when an alias starts receiving spam from a company that "shouldn't" have it. Addy.io and SimpleLogin both do this.
+- [ ] **Snooze / remind me later** — Already in UI IDEAS above. Differentiates from pure forwarders; HEY and Superhuman both do this.
+- [ ] **Calendar sync** (travel + scheduling workflows) — Export `.ics` or sync via CalDAV for travel/scheduling arcs. Already in UI IDEAS above.
+
+**Low priority:**
+- [ ] **Webhook outbound** — Already in UI IDEAS above. Power users and devs want to pipe signals into Zapier, Make, or custom apps. ForwardEmail offers this.
+
+---
+
+### Unique Selling Props (what no competitor does)
+
+These are genuine moats — most are already built, just not marketed.
+
+1. **AI email intelligence, not just routing** — Every competitor is a dumb pipe: email in → forward or drop. We classify into 14 semantic workflow types, extract structured data (order numbers, flight details, OTP codes, invoice amounts), generate summaries, and calculate urgency. No competitor does this. This is the most defensible moat.
+
+2. **Arc threading by semantic similarity** — Everyone else shows raw email lists. We thread semantically via pgvector — all Amazon order updates for order #123 group together even when sender addresses vary. Closer to what HEY attempted but backed by vector embeddings.
+
+3. **Smart action extraction at inbox-list level** — `workflowData` structured fields already exist. The "Smart Action Buttons" (copy OTP from inbox row, track package without opening email) is a killer UX feature no privacy or alias service offers. OTP copy is the #1 use case for alias services and nobody does it well today.
+
+4. **Configurable filtering with global sender reputation** — Cross-account global sender reputation is unique. No service aggregates reputation signals across all users to bootstrap trust for new accounts. This compounds over time — network effect on spam protection.
+
+5. **JSONLogic rule engine with per-address config** — No alias or forwarding service has real automation. Conditional rules, per-address filter mode inheritance, spam threshold overrides — this is closer to enterprise email security tooling than consumer alias services.
+
+6. **Multi-user team accounts with RBAC** — Every competitor is single-user. Owner/admin/member/viewer roles open B2B use cases no alias service serves: small teams routing domain mail through one account, shared inboxes for support@, alerts@, etc.
+
+7. **AI test-email pong** — Delightful onboarding moment. Sets tone immediately and demonstrates AI capability before the user has seen a single real email.
+
+**Recommended positioning:** *"The email inbox that understands your email — not just forwards it."* We are not an alias service and not a privacy relay — we are a new kind of inbox that happens to own your domain's email routing. Compete on "how much does your inbox understand about your life", not "how many aliases can I have".
+
+Secondary B2B pitch: *"The shared inbox for your domain, with team roles and audit logs."* No alias service goes here.
+
+---
+
+### Pricing Strategy
+
+**Core philosophy:** Charge for volume, power, and teams — not for privacy or basic utility. Give away the things that create lock-in and trust. Every competitor charges for custom domains, catch-all, and reply-from-alias. Offering these free wins acquisition and minimises churn simultaneously.
+
+#### Free tier (permanently free, no time limit)
+
+| Feature | Rationale |
+|---|---|
+| 1 custom domain | Addy.io and SimpleLogin charge for this. It's our clearest acquisition hook and the strongest lock-in mechanism. |
+| Catch-all on that domain | Competitors charge for catch-all. Core to our model — must be free. |
+| Reply from your domain (Tier 2 DNS) | Competitors charge for this. Giving it free locks in the domain. |
+| 14-workflow AI classification | This is the product. Paywalling AI makes us just another dumb forwarder. |
+| Arc threading + summaries | Same reason — the product, not an upsell. |
+| JSONLogic rules (up to 5) | Enough to get hooked; limit creates upgrade pressure. |
+| Labels (unlimited) | Zero marginal cost, high stickiness. |
+| All filter modes + spam threshold tuning | Core safety feature — charging for spam protection is tone-deaf. |
+| 1 verified forwarding address | Enough to be useful. |
+| Push + email notifications | Core feature — no paywall. |
+| 90-day arc retention | Sufficient for personal use. |
+| 30-day audit log | Free tier gets some audit; longer is a paid signal. |
+| PGP encryption (when built) | Privacy is a trust signal, not a premium feature. |
+| Browser extension (when built) | Free acquisition channel — never monetize directly. |
+
+#### Paid tier (~$6–8/mo or $60/yr)
+
+Things competitors charge for that we include, plus things only we can offer:
+
+| Feature | Why paid |
+|---|---|
+| Additional domains (up to 5) | Direct SES identity cost per domain. Competitors charge $3–9/mo for 1 extra domain. |
+| Rules (unlimited, vs 5 free) | Power users need this; casual users don't. |
+| Arc retention (2 years, vs 90 days) | Storage scales with retention. |
+| 1-year audit log | Compliance expectation for power users. |
+| Email analytics dashboard | High-value, low-urgency — good paid upsell moment. |
+| Snooze / Waiting For | Power user productivity; drives "aha" upgrade moment. |
+| Morning briefing digest | Personalization at scale. |
+| Webhook outbound | Developer/power user; compute cost per webhook. |
+| Smart action buttons (OTP copy etc.) | Premium UX polish; strong upgrade motivator. |
+| Verified forwarding (5 addresses, vs 1 free) | Volume limit to motivate upgrades. |
+| Priority support | Standard paid-tier expectation. |
+
+#### Team / Business tier (~$15–20/mo for up to 10 users, then per-seat)
+
+| Feature |
+|---|
+| Everything in Paid |
+| Up to 10 domains |
+| Unlimited team members (per-seat after 10) |
+| Shared inbox views across team |
+| Full audit log (unlimited retention, CSV export) |
+| Integrations (Slack, Linear, webhooks) |
+| Data export (async JSON/CSV) |
+| SLA / uptime commitment |
+
+#### Strategic freebies — things competitors charge for that we must NOT charge for
+
+- **PGP encryption** — if built, free. Privacy is not a premium feature.
+- **First custom domain** — our anti-churn mechanism.
+- **Catch-all** — trivially cheap at SES scale; makes us unbeatable on acquisition.
+- **AI classification** — paywalling this makes us just another forwarder.
+- **Spam threshold tuning** — charging for spam protection is a trust-breaker.
+- **Browser extension** — free acquisition channel.
