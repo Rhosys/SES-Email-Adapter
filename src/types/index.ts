@@ -250,6 +250,9 @@ export interface EmailAddressConfig {
   onboardingEmailHandling?: "block" | "quarantine" | "allow" | "inherit";
   // Spam score at which a signal is treated as spam (0–1). Overrides account default when set.
   spamScoreThreshold?: number;
+  // URL of the site/form where this address was registered (set by browser extension).
+  // Informational only — used to show "created at stripe.com" in the UI.
+  sourceUrl?: string;
   createdAt: string;
   updatedAt: string;
 }
