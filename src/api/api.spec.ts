@@ -954,6 +954,116 @@ describe("API", () => {
   });
 
   // -------------------------------------------------------------------------
+  // POST /accounts/:accountId/addresses — pre-register alias (extension)
+  // -------------------------------------------------------------------------
+
+  describe("POST /accounts/:accountId/addresses", () => {
+    it("creates a config for an address on a domain registered to the account", async () => {
+      vi.mocked(store.listDomains).mockResolvedValueOnce([makeDomain({ domain: "mydomain.com", receivingSetupComplete: true })]);
+      const res = await req(app, "POST", `${A}/addresses`, { body: { address: "alias@mydomain.com" } });
+      expect(res.status).toBe(201);
+      const body = await res.json() as EmailAddressConfig;
+      expect(body.address).toBe("alias@mydomain.com");
+      expect(body.accountId).toBe(TEST_ACCOUNT_ID);
+      expect(store.upsertEmailConfig).toHaveBeenCalledWith(expect.objectContaining({ address: "alias@mydomain.com" }));
+    });
+
+    it("stores sourceUrl when provided", async () => {
+      vi.mocked(store.listDomains).mockResolvedValueOnce([makeDomain({ domain: "mydomain.com", receivingSetupComplete: true })]);
+      const res = await req(app, "POST", `${A}/addresses`, {
+        body: { address: "stripe-abc@mydomain.com", sourceUrl: "https://stripe.com/register" },
+      });
+      expect(res.status).toBe(201);
+      const saved = vi.mocked(store.upsertEmailConfig).mock.calls[0]![0] as EmailAddressConfig;
+      expect(saved.sourceUrl).toBe("https://stripe.com/register");
+    });
+
+    it("inherits account default filterMode when none provided", async () => {
+      vi.mocked(store.listDomains).mockResolvedValueOnce([makeDomain({ domain: "mydomain.com", receivingSetupComplete: true })]);
+      vi.mocked(store.getAccount).mockResolvedValueOnce(makeAccount({ filtering: { defaultFilterMode: "strict", newAddressHandling: "auto_allow" } }));
+      const res = await req(app, "POST", `${A}/addresses`, { body: { address: "alias@mydomain.com" } });
+      expect(res.status).toBe(201);
+      const saved = vi.mocked(store.upsertEmailConfig).mock.calls[0]![0] as EmailAddressConfig;
+      expect(saved.filterMode).toBe("strict");
+    });
+
+    it("returns 422 when domain is not registered to the account", async () => {
+      vi.mocked(store.listDomains).mockResolvedValueOnce([makeDomain({ domain: "otherdomain.com" })]);
+      const res = await req(app, "POST", `${A}/addresses`, { body: { address: "alias@mydomain.com" } });
+      expect(res.status).toBe(422);
+    });
+
+    it("returns 400 when address is missing or malformed", async () => {
+      const res = await req(app, "POST", `${A}/addresses`, { body: { address: "notanemail" } });
+      expect(res.status).toBe(400);
+    });
+
+    it("returns existing config with 200 when address is already registered", async () => {
+      vi.mocked(store.listDomains).mockResolvedValueOnce([makeDomain({ domain: "mydomain.com", receivingSetupComplete: true })]);
+      vi.mocked(store.getEmailConfig).mockResolvedValueOnce(makeEmailAddressConfig({ address: "alias@mydomain.com" }));
+      const res = await req(app, "POST", `${A}/addresses`, { body: { address: "alias@mydomain.com" } });
+      expect(res.status).toBe(200);
+      expect(store.upsertEmailConfig).not.toHaveBeenCalled();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // POST /accounts/:accountId/addresses/generate — generate alias (extension)
+  // -------------------------------------------------------------------------
+
+  describe("POST /accounts/:accountId/addresses/generate", () => {
+    it("generates a random alias on the first Tier-1-complete domain", async () => {
+      vi.mocked(store.listDomains).mockResolvedValueOnce([makeDomain({ domain: "mydomain.com", receivingSetupComplete: true })]);
+      const res = await req(app, "POST", `${A}/addresses/generate`, { body: {} });
+      expect(res.status).toBe(201);
+      const body = await res.json() as EmailAddressConfig;
+      expect(body.address).toMatch(/@mydomain\.com$/);
+      expect(store.upsertEmailConfig).toHaveBeenCalled();
+    });
+
+    it("uses prefix when provided, slugified", async () => {
+      vi.mocked(store.listDomains).mockResolvedValueOnce([makeDomain({ domain: "mydomain.com", receivingSetupComplete: true })]);
+      const res = await req(app, "POST", `${A}/addresses/generate`, { body: { prefix: "Stripe Sign Up" } });
+      expect(res.status).toBe(201);
+      const body = await res.json() as EmailAddressConfig;
+      expect(body.address).toMatch(/^stripe-sign-up-[a-f0-9]+@mydomain\.com$/);
+    });
+
+    it("uses specified domain when provided", async () => {
+      vi.mocked(store.listDomains).mockResolvedValueOnce([
+        makeDomain({ domain: "first.com", receivingSetupComplete: true }),
+        makeDomain({ domain: "second.com", receivingSetupComplete: true }),
+      ]);
+      const res = await req(app, "POST", `${A}/addresses/generate`, { body: { domain: "second.com" } });
+      expect(res.status).toBe(201);
+      const body = await res.json() as EmailAddressConfig;
+      expect(body.address).toMatch(/@second\.com$/);
+    });
+
+    it("stores sourceUrl when provided", async () => {
+      vi.mocked(store.listDomains).mockResolvedValueOnce([makeDomain({ domain: "mydomain.com", receivingSetupComplete: true })]);
+      const res = await req(app, "POST", `${A}/addresses/generate`, {
+        body: { prefix: "github", sourceUrl: "https://github.com/signup" },
+      });
+      expect(res.status).toBe(201);
+      const saved = vi.mocked(store.upsertEmailConfig).mock.calls[0]![0] as EmailAddressConfig;
+      expect(saved.sourceUrl).toBe("https://github.com/signup");
+    });
+
+    it("returns 422 when no domains have receiving setup complete", async () => {
+      vi.mocked(store.listDomains).mockResolvedValueOnce([makeDomain({ receivingSetupComplete: false })]);
+      const res = await req(app, "POST", `${A}/addresses/generate`, { body: {} });
+      expect(res.status).toBe(422);
+    });
+
+    it("returns 422 when specified domain is not available", async () => {
+      vi.mocked(store.listDomains).mockResolvedValueOnce([makeDomain({ domain: "mydomain.com", receivingSetupComplete: true })]);
+      const res = await req(app, "POST", `${A}/addresses/generate`, { body: { domain: "otherdomain.com" } });
+      expect(res.status).toBe(422);
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // POST /accounts/:accountId/arcs — create Arc from blocked signal
   // -------------------------------------------------------------------------
 
