@@ -332,6 +332,15 @@ export class SignalProcessor {
       }
     }
 
+    // Forwarded email detection — attach original:* label when forwarding headers are present
+    const forwardedAddress = extractForwardedAddress(parsed.headers);
+    if (forwardedAddress) {
+      const forwardLabel = `original:${forwardedAddress}`;
+      if (!arc.labels.includes(forwardLabel)) {
+        arc.labels = [...arc.labels, forwardLabel];
+      }
+    }
+
     // 7. Evaluate rules
     const signalShell = buildSignal({
       arcId: arc.id,
@@ -547,6 +556,16 @@ function buildCalendarSignal(arc: Arc, emailSignal: Signal, now: string, ttl: nu
 // Explicit "block" = silent sequester, hidden until user explicitly searches.
 export function dispositionFor(reason: BlockReason, config: AccountFilteringConfig | null | undefined): "block" | "quarantine" {
   return config?.blockDisposition?.[reason] ?? "quarantine";
+}
+
+// Extracts the original recipient address from forwarding headers, in priority order.
+// Header values may be bare addresses or RFC 2822 "Name <addr>" form.
+export function extractForwardedAddress(headers: Record<string, string>): string | null {
+  const lower = Object.fromEntries(Object.entries(headers).map(([k, v]) => [k.toLowerCase(), v]));
+  const raw = lower["x-forwarded-to"] ?? lower["x-original-to"] ?? lower["resent-to"] ?? null;
+  if (!raw) return null;
+  const match = raw.match(/<([^>]+)>/) ?? raw.match(/([^\s,;]+@[^\s,;]+)/);
+  return match?.[1]?.trim() ?? null;
 }
 
 export function deriveGroupingKey(
