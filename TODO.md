@@ -1,6 +1,6 @@
 # TODO
 
-- [ ] Detect forwarded emails and auto-tag with a label `original:john@gmail.com`, where `john@gmail.com` is the original recipient address the email was sent to before being forwarded into the system. Use `X-Forwarded-To`, `X-Original-To`, or `Resent-To` headers to extract the address. **Validation required**: add a test asserting that the `original:*` label is correctly attached to the signal/arc and that the address is extracted accurately from the header.
+- [x] Detect forwarded emails and auto-tag with a label `original:john@gmail.com`, where `john@gmail.com` is the original recipient address the email was sent to before being forwarded into the system. Use `X-Forwarded-To`, `X-Original-To`, or `Resent-To` headers to extract the address. **Validation required**: add a test asserting that the `original:*` label is correctly attached to the signal/arc and that the address is extracted accurately from the header.
 - [ ] **`"test"` workflow** — add to `WORKFLOWS` in `src/types/index.ts` and handle throughout the stack:
   - **Detection** (either condition is sufficient):
     1. The `signal.from` domain matches any domain registered to the account (user sending from their own domain, e.g. `me@mydomain.com` → account has `mydomain.com` registered)
