@@ -954,13 +954,24 @@ describe("API", () => {
   });
 
   // -------------------------------------------------------------------------
-  // POST /accounts/:accountId/addresses — pre-register alias (extension)
+  // GET + POST /accounts/:accountId/aliases
   // -------------------------------------------------------------------------
 
-  describe("POST /accounts/:accountId/addresses", () => {
+  describe("GET /accounts/:accountId/aliases", () => {
+    it("returns all email address configs for the account", async () => {
+      vi.mocked(store.listEmailConfigs).mockResolvedValueOnce([makeEmailAddressConfig()]);
+      const res = await req(app, "GET", `${A}/aliases`);
+      expect(res.status).toBe(200);
+      const body = await res.json() as EmailAddressConfig[];
+      expect(body).toHaveLength(1);
+      expect(body[0]!.address).toBe("user@example.com");
+    });
+  });
+
+  describe("POST /accounts/:accountId/aliases", () => {
     it("creates a config for an address on a domain registered to the account", async () => {
       vi.mocked(store.listDomains).mockResolvedValueOnce([makeDomain({ domain: "mydomain.com", receivingSetupComplete: true })]);
-      const res = await req(app, "POST", `${A}/addresses`, { body: { address: "alias@mydomain.com" } });
+      const res = await req(app, "POST", `${A}/aliases`, { body: { address: "alias@mydomain.com" } });
       expect(res.status).toBe(201);
       const body = await res.json() as EmailAddressConfig;
       expect(body.address).toBe("alias@mydomain.com");
@@ -970,7 +981,7 @@ describe("API", () => {
 
     it("stores sourceUrl when provided", async () => {
       vi.mocked(store.listDomains).mockResolvedValueOnce([makeDomain({ domain: "mydomain.com", receivingSetupComplete: true })]);
-      const res = await req(app, "POST", `${A}/addresses`, {
+      const res = await req(app, "POST", `${A}/aliases`, {
         body: { address: "stripe-abc@mydomain.com", sourceUrl: "https://stripe.com/register" },
       });
       expect(res.status).toBe(201);
@@ -981,7 +992,7 @@ describe("API", () => {
     it("inherits account default filterMode when none provided", async () => {
       vi.mocked(store.listDomains).mockResolvedValueOnce([makeDomain({ domain: "mydomain.com", receivingSetupComplete: true })]);
       vi.mocked(store.getAccount).mockResolvedValueOnce(makeAccount({ filtering: { defaultFilterMode: "strict", newAddressHandling: "auto_allow" } }));
-      const res = await req(app, "POST", `${A}/addresses`, { body: { address: "alias@mydomain.com" } });
+      const res = await req(app, "POST", `${A}/aliases`, { body: { address: "alias@mydomain.com" } });
       expect(res.status).toBe(201);
       const saved = vi.mocked(store.upsertEmailConfig).mock.calls[0]![0] as EmailAddressConfig;
       expect(saved.filterMode).toBe("strict");
@@ -989,19 +1000,19 @@ describe("API", () => {
 
     it("returns 422 when domain is not registered to the account", async () => {
       vi.mocked(store.listDomains).mockResolvedValueOnce([makeDomain({ domain: "otherdomain.com" })]);
-      const res = await req(app, "POST", `${A}/addresses`, { body: { address: "alias@mydomain.com" } });
+      const res = await req(app, "POST", `${A}/aliases`, { body: { address: "alias@mydomain.com" } });
       expect(res.status).toBe(422);
     });
 
     it("returns 400 when address is missing or malformed", async () => {
-      const res = await req(app, "POST", `${A}/addresses`, { body: { address: "notanemail" } });
+      const res = await req(app, "POST", `${A}/aliases`, { body: { address: "notanemail" } });
       expect(res.status).toBe(400);
     });
 
     it("returns existing config with 200 when address is already registered", async () => {
       vi.mocked(store.listDomains).mockResolvedValueOnce([makeDomain({ domain: "mydomain.com", receivingSetupComplete: true })]);
       vi.mocked(store.getEmailConfig).mockResolvedValueOnce(makeEmailAddressConfig({ address: "alias@mydomain.com" }));
-      const res = await req(app, "POST", `${A}/addresses`, { body: { address: "alias@mydomain.com" } });
+      const res = await req(app, "POST", `${A}/aliases`, { body: { address: "alias@mydomain.com" } });
       expect(res.status).toBe(200);
       expect(store.upsertEmailConfig).not.toHaveBeenCalled();
     });

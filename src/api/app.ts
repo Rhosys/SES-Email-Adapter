@@ -559,9 +559,17 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
     return c.json(await store.listEmailConfigs(accountId));
   });
 
-  // Pre-register a specific alias before any email arrives (browser extension use case).
-  // Validates that the address domain is registered to the account.
-  app.post("/accounts/:accountId/addresses", async (c) => {
+  // -------------------------------------------------------------------------
+  // Aliases  —  /accounts/:accountId/aliases
+  // Pre-registration of email addresses before mail arrives (browser extension).
+  // -------------------------------------------------------------------------
+
+  app.get("/accounts/:accountId/aliases", async (c) => {
+    const { accountId } = c.get("auth");
+    return c.json(await store.listEmailConfigs(accountId));
+  });
+
+  app.post("/accounts/:accountId/aliases", async (c) => {
     const { accountId } = c.get("auth");
     const body = await c.req.json() as {
       address: string;
