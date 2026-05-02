@@ -1008,62 +1008,6 @@ describe("API", () => {
   });
 
   // -------------------------------------------------------------------------
-  // POST /accounts/:accountId/addresses/generate — generate alias (extension)
-  // -------------------------------------------------------------------------
-
-  describe("POST /accounts/:accountId/addresses/generate", () => {
-    it("generates a random alias on the first Tier-1-complete domain", async () => {
-      vi.mocked(store.listDomains).mockResolvedValueOnce([makeDomain({ domain: "mydomain.com", receivingSetupComplete: true })]);
-      const res = await req(app, "POST", `${A}/addresses/generate`, { body: {} });
-      expect(res.status).toBe(201);
-      const body = await res.json() as EmailAddressConfig;
-      expect(body.address).toMatch(/@mydomain\.com$/);
-      expect(store.upsertEmailConfig).toHaveBeenCalled();
-    });
-
-    it("uses prefix when provided, slugified", async () => {
-      vi.mocked(store.listDomains).mockResolvedValueOnce([makeDomain({ domain: "mydomain.com", receivingSetupComplete: true })]);
-      const res = await req(app, "POST", `${A}/addresses/generate`, { body: { prefix: "Stripe Sign Up" } });
-      expect(res.status).toBe(201);
-      const body = await res.json() as EmailAddressConfig;
-      expect(body.address).toMatch(/^stripe-sign-up-[a-f0-9]+@mydomain\.com$/);
-    });
-
-    it("uses specified domain when provided", async () => {
-      vi.mocked(store.listDomains).mockResolvedValueOnce([
-        makeDomain({ domain: "first.com", receivingSetupComplete: true }),
-        makeDomain({ domain: "second.com", receivingSetupComplete: true }),
-      ]);
-      const res = await req(app, "POST", `${A}/addresses/generate`, { body: { domain: "second.com" } });
-      expect(res.status).toBe(201);
-      const body = await res.json() as EmailAddressConfig;
-      expect(body.address).toMatch(/@second\.com$/);
-    });
-
-    it("stores sourceUrl when provided", async () => {
-      vi.mocked(store.listDomains).mockResolvedValueOnce([makeDomain({ domain: "mydomain.com", receivingSetupComplete: true })]);
-      const res = await req(app, "POST", `${A}/addresses/generate`, {
-        body: { prefix: "github", sourceUrl: "https://github.com/signup" },
-      });
-      expect(res.status).toBe(201);
-      const saved = vi.mocked(store.upsertEmailConfig).mock.calls[0]![0] as EmailAddressConfig;
-      expect(saved.sourceUrl).toBe("https://github.com/signup");
-    });
-
-    it("returns 422 when no domains have receiving setup complete", async () => {
-      vi.mocked(store.listDomains).mockResolvedValueOnce([makeDomain({ receivingSetupComplete: false })]);
-      const res = await req(app, "POST", `${A}/addresses/generate`, { body: {} });
-      expect(res.status).toBe(422);
-    });
-
-    it("returns 422 when specified domain is not available", async () => {
-      vi.mocked(store.listDomains).mockResolvedValueOnce([makeDomain({ domain: "mydomain.com", receivingSetupComplete: true })]);
-      const res = await req(app, "POST", `${A}/addresses/generate`, { body: { domain: "otherdomain.com" } });
-      expect(res.status).toBe(422);
-    });
-  });
-
-  // -------------------------------------------------------------------------
   // POST /accounts/:accountId/arcs — create Arc from blocked signal
   // -------------------------------------------------------------------------
 

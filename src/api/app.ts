@@ -601,51 +601,6 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
     return c.json(config, 201);
   });
 
-  // Generate a random alias on a registered domain (browser extension one-tap use case).
-  // Returns the pre-registered EmailAddressConfig with the generated address.
-  app.post("/accounts/:accountId/addresses/generate", async (c) => {
-    const { accountId } = c.get("auth");
-    const body = await c.req.json() as {
-      domain?: string;         // use a specific domain; if absent, picks the first Tier-1-complete domain
-      prefix?: string;         // optional human-readable prefix, e.g. "stripe" → "stripe-abc123@domain"
-      sourceUrl?: string;
-    };
-
-    const domains = await store.listDomains(accountId);
-    const candidates = domains.filter((d) => d.receivingSetupComplete);
-    if (candidates.length === 0) {
-      return c.json({ error: "No domains with receiving setup complete" }, 422);
-    }
-
-    let targetDomain: string;
-    if (body.domain) {
-      const match = candidates.find((d) => d.domain.toLowerCase() === body.domain!.toLowerCase());
-      if (!match) return c.json({ error: "Domain not available" }, 422);
-      targetDomain = match.domain;
-    } else {
-      targetDomain = candidates[0]!.domain;
-    }
-
-    const slug = body.prefix
-      ? `${body.prefix.toLowerCase().replace(/[^a-z0-9]/g, "-").replace(/-+/g, "-").slice(0, 32)}-${randomUUID().slice(0, 8)}`
-      : randomUUID().slice(0, 12);
-    const address = `${slug}@${targetDomain}`;
-
-    const account = await store.getAccount(accountId);
-    const now = new Date().toISOString();
-    const config: EmailAddressConfig = {
-      id: randomUUID(),
-      accountId,
-      address,
-      filterMode: account?.filtering?.defaultFilterMode ?? "notify_new",
-      approvedSenders: [],
-      ...(body.sourceUrl !== undefined ? { sourceUrl: body.sourceUrl } : {}),
-      createdAt: now,
-      updatedAt: now,
-    };
-    await store.upsertEmailConfig(config);
-    return c.json(config, 201);
-  });
 
   app.get("/accounts/:accountId/email-configs/:address", async (c) => {
     const { accountId } = c.get("auth");
