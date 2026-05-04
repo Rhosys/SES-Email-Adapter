@@ -176,7 +176,7 @@ export class ArcDatabase implements ArcMatcher {
     return this.saveArc(arc);
   }
 
-  async updateArc(accountId: string, id: string, update: UpdateArcRequest): Promise<void> {
+  async updateArc(accountId: string, id: string, update: UpdateArcRequest): Promise<Arc> {
     const now = new Date().toISOString();
     const setParts: string[] = ["updatedAt = :now"];
     const exprValues: Record<string, unknown> = { ":now": now };
@@ -199,6 +199,35 @@ export class ArcDatabase implements ArcMatcher {
       UpdateExpression: `SET ${setParts.join(", ")}`,
       ExpressionAttributeValues: exprValues,
       ...(Object.keys(exprNames).length ? { ExpressionAttributeNames: exprNames } : {}),
+    }));
+    return (await this.getArc(accountId, id))!;
+  }
+
+  async updateSignal(accountId: string, id: string, update: Partial<Pick<Signal, "subject" | "textBody" | "from" | "to">>): Promise<Signal> {
+    const now = new Date().toISOString();
+    const setParts: string[] = ["updatedAt = :now"];
+    const exprValues: Record<string, unknown> = { ":now": now };
+    const exprNames: Record<string, string> = {};
+
+    if (update.subject !== undefined) { setParts.push("#subject = :subject"); exprValues[":subject"] = update.subject; exprNames["#subject"] = "subject"; }
+    if (update.textBody !== undefined) { setParts.push("textBody = :textBody"); exprValues[":textBody"] = update.textBody; }
+    if (update.from !== undefined) { setParts.push("#from = :from"); exprValues[":from"] = update.from; exprNames["#from"] = "from"; }
+    if (update.to !== undefined) { setParts.push("#to = :to"); exprValues[":to"] = update.to; exprNames["#to"] = "to"; }
+
+    await dynamo.send(new UpdateCommand({
+      TableName: SIGNALS_TABLE,
+      Key: { pk: acctPk(accountId), sk: sigSk(id) },
+      UpdateExpression: `SET ${setParts.join(", ")}`,
+      ExpressionAttributeValues: exprValues,
+      ...(Object.keys(exprNames).length ? { ExpressionAttributeNames: exprNames } : {}),
+    }));
+    return (await this.getSignal(accountId, id))!;
+  }
+
+  async deleteSignal(accountId: string, id: string): Promise<void> {
+    await dynamo.send(new DeleteCommand({
+      TableName: SIGNALS_TABLE,
+      Key: { pk: acctPk(accountId), sk: sigSk(id) },
     }));
   }
 

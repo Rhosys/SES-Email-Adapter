@@ -220,8 +220,8 @@ export type SenderFilterMode =
   | "notify_new"   // allow approved senders, block + notify on new senders (default)
   | "allow_all";   // no filtering
 
-// active = visible; quarantined = user notified + shown for review; blocked = silent, hidden until explicitly retrieved
-export type SignalStatus = "active" | "blocked" | "quarantined";
+// active = visible; quarantined = user notified + shown for review; blocked = silent; draft = user-authored, unsent
+export type SignalStatus = "active" | "blocked" | "quarantined" | "draft";
 
 // "email" = inbound SES email; "system" = processor-created (e.g. extracted calendar event); "user" = user-created
 export type SignalSource = "email" | "system" | "user";
@@ -508,10 +508,22 @@ export interface PageParams {
   limit?: number;
 }
 
+// Internal DB page type — API layer maps this to named collection envelopes
 export interface Page<T> {
   items: T[];
   nextCursor?: string;
-  total: number;
+}
+
+// Pagination sub-object used in all collection response envelopes
+export interface Pagination {
+  cursor: string | null;
+}
+
+// Error body returned by all API error responses (status code is in the HTTP header)
+export interface ApiErrorBody {
+  title: string;
+  errorCode?: string;
+  details?: unknown;
 }
 
 // ---------------------------------------------------------------------------

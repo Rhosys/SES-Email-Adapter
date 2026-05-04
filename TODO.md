@@ -3,6 +3,94 @@
 - [ ] Review and complete `WORKFLOW_UX_SPEC.md` implementation
 - [ ] Wire infra (see `infra/`)
 - [ ] Set up CI (lint, typecheck, test) for backend, site, and extension independently
+- [x] **API modernization** — collection envelopes, error shapes, PUT→PATCH, consistent create/update responses. See "API Breaking Changes" section below.
+
+---
+
+## API Breaking Changes (all clients must update)
+
+These changes landed in the API modernization pass. The extension and site `src/api/client.ts` must be updated before calling real endpoints.
+
+### 1. Collection response envelope
+
+All list endpoints now return a named collection object instead of a raw array or `{ items, total }`:
+
+```json
+// Before (raw array)
+GET /views → View[]
+
+// Before (generic Page)
+GET /arcs → { "items": [...], "total": 50, "nextCursor": "..." }
+
+// After (named envelope)
+GET /arcs    → { "arcs": [...],    "pagination": { "cursor": "string | null" } }
+GET /signals → { "signals": [...], "pagination": { "cursor": "string | null" } }
+GET /views   → { "views": [...],   "pagination": { "cursor": null } }
+GET /labels  → { "labels": [...],  "pagination": { "cursor": null } }
+GET /rules   → { "rules": [...],   "pagination": { "cursor": null } }
+GET /domains → { "domains": [...], "pagination": { "cursor": null } }
+GET /aliases → { "aliases": [...], "pagination": { "cursor": null } }
+GET /users   → { "users": [...],   "pagination": { "cursor": null } }
+GET /search  → { "arcs": [...],    "pagination": { "cursor": "string | null" } }
+GET /forwarding-addresses → { "forwardingAddresses": [...], "pagination": { "cursor": null } }
+```
+
+Key changes: `total` is gone; `nextCursor` is now `pagination.cursor` (always present, `null` when no more pages).
+
+### 2. Error response shape
+
+```json
+// Before
+{ "error": "Arc not found" }
+
+// After
+{ "title": "Arc not found", "errorCode": "ARC_NOT_FOUND" }
+```
+
+`title` = human-readable message. `errorCode` = machine-readable SCREAMING_SNAKE_CASE constant. `details` = optional structured context. HTTP status code is in the response header only — never echoed in the body.
+
+### 3. PATCH/POST responses return full resource
+
+```json
+// Before: most mutations returned { "ok": true } or nothing
+// After: all mutations return the full updated resource
+
+PATCH /arcs/:id          → 200 Arc
+PATCH /views/:id         → 200 View
+PATCH /labels/:id        → 200 Label
+PATCH /rules/:id         → 200 Rule
+PATCH /aliases/:address  → 200 Alias
+PATCH /signals/:id       → 200 Signal
+PATCH /accounts/:id      → 200 Account
+
+POST /views   → 201 View
+POST /labels  → 201 Label
+POST /rules   → 201 Rule
+POST /domains → 201 Domain
+POST /aliases → 201 Alias
+```
+
+### 4. Aliases: PUT → PATCH, new POST
+
+```
+// Before
+PUT /accounts/:accountId/aliases/:address  (was upsert-or-create)
+
+// After — semantics split
+POST  /accounts/:accountId/aliases          (create; 409 if address already exists)
+PATCH /accounts/:accountId/aliases/:address (partial update / upsert)
+DELETE /accounts/:accountId/aliases/:address → 204 No Content (was 200)
+```
+
+### 5. New signal draft endpoints
+
+```
+PATCH  /accounts/:accountId/signals/:id       — update draft fields (subject, body, from, to); 400 if not draft
+POST   /accounts/:accountId/signals/:id/send  — send draft via SES, flip status → active
+DELETE /accounts/:accountId/signals/:id       — discard draft; 400 if not draft
+```
+
+---
 
 - [ ] Detect forwarded emails and auto-tag with a label `original:john@gmail.com`, where `john@gmail.com` is the original recipient address the email was sent to before being forwarded into the system. Use `X-Forwarded-To`, `X-Original-To`, or `Resent-To` headers to extract the address. **Validation required**: add a test asserting that the `original:*` label is correctly attached to the signal/arc and that the address is extracted accurately from the header.
 - [x] **`"test"` workflow** — implemented: in `WORKFLOWS`, `TestData` interface, processor pong (Bedrock auto-reply), urgency override, onboarding integration all done.
