@@ -73,7 +73,7 @@ export class SesNotifier implements Notifier {
       `Subject: ${signal.subject}`,
       `Reason: ${signal.blockReason ?? "unknown"}`,
       ``,
-      `To allow this sender, visit: ${APP_BASE_URL}/account/email-configs`,
+      `To allow this sender, visit: ${APP_BASE_URL}/account/aliases`,
     ].join("\n");
 
     await sesv2.send(new SendEmailCommand({

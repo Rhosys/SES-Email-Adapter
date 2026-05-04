@@ -239,8 +239,8 @@ export type PushPriority = "interrupt" | "ambient" | "silent";
 // Derived by priorityCalculator — do not set manually.
 export type ArcUrgency = "critical" | "high" | "normal" | "low" | "silent";
 
-// Per-recipient-address configuration
-export interface EmailAddressConfig {
+// Per-recipient-address configuration (an "alias" is any address on a custom domain routed into the system)
+export interface Alias {
   id: string;
   accountId: string;
   address: string;              // The recipient address, e.g. me@mydomain.com
@@ -250,6 +250,8 @@ export interface EmailAddressConfig {
   onboardingEmailHandling?: "block" | "quarantine" | "allow" | "inherit";
   // Spam score at which a signal is treated as spam (0–1). Overrides account default when set.
   spamScoreThreshold?: number;
+  // eTLD+1 of the site this alias was created for (set by the extension on alias generation)
+  createdForOrigin?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -462,7 +464,7 @@ export interface Account {
   deletionRetentionDays: number;
   notifications?: NotificationSettings;
   filtering?: AccountFilteringConfig;
-  emailConfigs?: Record<string, EmailAddressConfig>;  // keyed by address
+  aliases?: Record<string, Alias>;  // keyed by address
   createdAt: string;
   updatedAt: string;
 }

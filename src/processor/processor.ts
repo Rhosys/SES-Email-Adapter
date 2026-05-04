@@ -1,6 +1,6 @@
 import { randomUUID } from "crypto";
 import type { SQSEvent } from "aws-lambda";
-import type { Signal, Arc, Rule, Workflow, WorkflowData, EmailAddressConfig, AccountFilteringConfig, SignalSource, SchedulingData, BlockReason, SignalStatus, Domain } from "../types/index.js";
+import type { Signal, Arc, Rule, Workflow, WorkflowData, Alias, AccountFilteringConfig, SignalSource, SchedulingData, BlockReason, SignalStatus, Domain } from "../types/index.js";
 import { priorityCalculator } from "./priority.js";
 import type { MimeParser } from "./mime.js";
 import type { SignalClassifier } from "../classifier/classifier.js";
@@ -13,7 +13,7 @@ import { getETLD1, evaluateFilter, DEFAULT_SPAM_SCORE_THRESHOLD } from "./filter
 export interface ProcessorAccountContext {
   retentionDays: number;
   filtering: AccountFilteringConfig | null;
-  emailConfig: EmailAddressConfig | null;
+  emailConfig: Alias | null;
   // eTLD+1 of domains registered to this account — used for test detection
   registeredDomains: string[];
   // Email addresses of all users on this account — used for test detection
@@ -28,7 +28,7 @@ export interface ProcessorDatabase {
   saveArc(arc: Arc): Promise<void>;
   listRules(accountId: string): Promise<Rule[]>;
   getProcessorAccountContext(accountId: string, recipientAddress: string): Promise<ProcessorAccountContext>;
-  saveEmailAddressConfig(config: EmailAddressConfig): Promise<void>;
+  saveAlias(alias: Alias): Promise<void>;
   updateGlobalReputation(domain: string, update: { wasSpam: boolean; wasBlocked: boolean }): Promise<void>;
   getDomainByName(accountId: string, domainName: string): Promise<Pick<Domain, "senderSetupComplete"> | null>;
 }
@@ -439,18 +439,18 @@ export class SignalProcessor {
     accountId: string,
     address: string,
     senderETLD1: string,
-    existing: EmailAddressConfig | null,
+    existing: Alias | null,
     defaultFilterMode: AccountFilteringConfig["defaultFilterMode"] = "notify_new",
   ): Promise<void> {
     const now = new Date().toISOString();
     if (existing) {
-      await this.store.saveEmailAddressConfig({
+      await this.store.saveAlias({
         ...existing,
         approvedSenders: [...existing.approvedSenders, senderETLD1],
         updatedAt: now,
       });
     } else {
-      await this.store.saveEmailAddressConfig({
+      await this.store.saveAlias({
         id: randomUUID(),
         accountId,
         address,

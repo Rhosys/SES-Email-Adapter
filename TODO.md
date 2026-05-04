@@ -135,19 +135,18 @@ The extension (`extension/`) has a working implementation that assumes a `/alias
 
 ### What the backend needs to add for extension support
 
-- **`Alias` type and table** — `{ id, accountId, email, eTldPlusOne, status: "draft" | "active", createdAt, activatedAt? }`. PK `ALIAS#${accountId}` SK `${id}`. GSI by `eTldPlusOne` for the search endpoint.
-- **CRUD endpoints** for aliases (create draft, update/rename, activate, list by domain).
-- These are **free tier** per the pricing strategy — alias generation is a core acquisition hook, never paywalled.
+- [x] **`Alias` type** — renamed from `EmailAddressConfig`; now includes `createdForOrigin?: string` for alias-per-site tracking. Stored embedded in the `Account` DynamoDB record, keyed by address.
+- [ ] **`POST /accounts/:accountId/aliases`** — create a new alias (the extension calls this on signup; currently only `PUT` exists). `PUT` upserts by address, so `POST` can be a thin wrapper or the extension can switch to `PUT` directly.
+- [ ] **`GET /accounts/:accountId/aliases?domain=`** — the list endpoint returns all aliases; add a `domain` query param filter so the extension can find the alias for a specific origin without fetching everything.
+- [ ] **`PUT /aliases/:email` with `newEmail` rename** — if the user edits the generated alias before submitting, the extension sends `{ newEmail }`. Requires deleting the old map key and re-inserting — handle this in the `PUT` handler.
+- [ ] **Web Push subscription endpoint** — `POST /accounts/:accountId/push-subscriptions` to register the extension's push endpoint. Required for OTP delivery (see extension TODO).
+- [ ] **Notifier: push `auth` arcs via Web Push** — when an `auth` signal arrives, the notifier should send a Web Push payload `{ code, expiresInMinutes, originDomain }` to all registered push subscriptions for the account, in addition to (or instead of) the existing email notification.
+- These are all **free tier** per the pricing strategy.
 
 ### What the extension needs to fix
 
-- **`fetchDomains()` return type**: map the `Domain[]` response to `string[]` before storing, or consume the full object and pick `.domain`. The current code assigns the raw response directly to `string[]`.
-- **`AliasPayload.status: 'draft' | 'active'`** — already matches the planned `Alias` model, no change needed there.
-- Once the backend alias endpoints exist, the extension alias flow works as-is modulo the domain type fix above.
-
-### Extension OTP injection (not yet implemented, no backend gap)
-
-The extension's `content-core.ts` handles signup form detection only. It does not yet implement OTP auto-fill (detect login forms, fetch the latest `auth` arc for the current origin, inject `workflowData.code` into the OTP field). This is a pure extension feature — no new backend work needed, the `auth` workflow data is already complete. Track separately in the extension TODO.
+- [x] **`fetchDomains()` return type** — fixed in `src/api.ts` to map `Domain[]` → `string[]` via `d.domain`.
+- [ ] **OTP auto-fill + Web Push service worker** — tracked in detail in `extension/TODO.md`.
 
 ---
 
