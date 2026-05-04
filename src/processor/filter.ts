@@ -1,5 +1,5 @@
 import { getDomain } from "tldts";
-import type { EmailAddressConfig, SenderFilterMode, BlockReason, NewAddressHandling } from "../types/index.js";
+import type { Alias, SenderFilterMode, BlockReason, NewAddressHandling } from "../types/index.js";
 
 export const DEFAULT_SPAM_SCORE_THRESHOLD = 0.9;
 
@@ -22,7 +22,7 @@ export function getETLD1(emailOrDomain: string): string {
 }
 
 export function evaluateFilter(
-  emailConfig: EmailAddressConfig | null,
+  emailConfig: Alias | null,
   senderETLD1: string,
   spamScore: number,
   opts: FilterOptions = {},

@@ -1,11 +1,11 @@
 import { describe, it, expect } from "vitest";
 import { evaluateFilter, getETLD1, DEFAULT_SPAM_SCORE_THRESHOLD } from "./filter.js";
-import type { EmailAddressConfig } from "../types/index.js";
+import type { Alias } from "../types/index.js";
 
 const LOW_SPAM = 0.1;
 const HIGH_SPAM = DEFAULT_SPAM_SCORE_THRESHOLD + 0.01;
 
-function makeConfig(overrides: Partial<EmailAddressConfig> = {}): EmailAddressConfig {
+function makeConfig(overrides: Partial<Alias> = {}): Alias {
   return {
     id: "cfg-001",
     accountId: "acct-001",

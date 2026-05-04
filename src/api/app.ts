@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { randomUUID } from "crypto";
 import { getDomain } from "tldts";
-import type { Arc, Signal, View, Label, Rule, Domain, DnsRecord, Account, Page, PageParams, ArcStatus, Workflow, EmailAddressConfig, SenderFilterMode, AccountFilteringConfig, VerifiedForwardingAddress } from "../types/index.js";
+import type { Arc, Signal, View, Label, Rule, Domain, DnsRecord, Account, Page, PageParams, ArcStatus, Workflow, Alias, SenderFilterMode, AccountFilteringConfig, VerifiedForwardingAddress } from "../types/index.js";
 
 // ---------------------------------------------------------------------------
 // Auth
@@ -143,10 +143,10 @@ export interface ApiDatabase {
   updateAccount(accountId: string, update: Partial<Pick<Account, "name" | "deletionRetentionDays" | "notifications" | "filtering">>): Promise<void>;
 
   // Email address configs
-  listEmailConfigs(accountId: string): Promise<EmailAddressConfig[]>;
-  getEmailConfig(accountId: string, address: string): Promise<EmailAddressConfig | null>;
-  upsertEmailConfig(config: EmailAddressConfig): Promise<void>;
-  deleteEmailConfig(accountId: string, address: string): Promise<void>;
+  listAliases(accountId: string): Promise<Alias[]>;
+  getAlias(accountId: string, address: string): Promise<Alias | null>;
+  upsertAlias(alias: Alias): Promise<void>;
+  deleteAlias(accountId: string, address: string): Promise<void>;
 
   // Signal unblocking
   unblockSignal(accountId: string, signalId: string, arcId: string): Promise<void>;
@@ -282,7 +282,7 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
         ? signal.from.address.split("@").pop()!
         : signal.from.address;
       const senderETLD1 = getDomain(senderDomain) ?? senderDomain;
-      const existing = await store.getEmailConfig(accountId, signal.recipientAddress);
+      const existing = await store.getAlias(accountId, signal.recipientAddress);
 
       const base = existing ?? {
         id: randomUUID(),
@@ -294,7 +294,7 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
         updatedAt: now,
       };
 
-      await store.upsertEmailConfig({
+      await store.upsertAlias({
         ...base,
         filterMode: body.updateFilterMode ?? base.filterMode,
         approvedSenders: body.approveSender && !base.approvedSenders.includes(senderETLD1)
@@ -551,34 +551,35 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
   });
 
   // -------------------------------------------------------------------------
-  // Email address configs  —  /accounts/:accountId/email-configs
+  // Aliases  —  /accounts/:accountId/aliases
   // -------------------------------------------------------------------------
 
-  app.get("/accounts/:accountId/email-configs", async (c) => {
+  app.get("/accounts/:accountId/aliases", async (c) => {
     const { accountId } = c.get("auth");
-    return c.json(await store.listEmailConfigs(accountId));
+    return c.json(await store.listAliases(accountId));
   });
 
-  app.get("/accounts/:accountId/email-configs/:address", async (c) => {
+  app.get("/accounts/:accountId/aliases/:address", async (c) => {
     const { accountId } = c.get("auth");
     const address = decodeURIComponent(c.req.param("address"));
-    const config = await store.getEmailConfig(accountId, address);
-    if (!config) return c.json({ error: "Not found" }, 404);
-    return c.json(config);
+    const alias = await store.getAlias(accountId, address);
+    if (!alias) return c.json({ error: "Not found" }, 404);
+    return c.json(alias);
   });
 
-  app.put("/accounts/:accountId/email-configs/:address", async (c) => {
+  app.put("/accounts/:accountId/aliases/:address", async (c) => {
     const { accountId } = c.get("auth");
     const address = decodeURIComponent(c.req.param("address"));
     const body = await c.req.json() as {
       filterMode: SenderFilterMode;
       approvedSenders: string[];
-      onboardingEmailHandling?: EmailAddressConfig["onboardingEmailHandling"];
+      onboardingEmailHandling?: Alias["onboardingEmailHandling"];
       spamScoreThreshold?: number;
+      createdForOrigin?: string;
     };
-    const existing = await store.getEmailConfig(accountId, address);
+    const existing = await store.getAlias(accountId, address);
     const now = new Date().toISOString();
-    await store.upsertEmailConfig({
+    await store.upsertAlias({
       id: existing?.id ?? randomUUID(),
       accountId,
       address,
@@ -586,16 +587,17 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
       approvedSenders: body.approvedSenders,
       ...(body.onboardingEmailHandling !== undefined ? { onboardingEmailHandling: body.onboardingEmailHandling } : {}),
       ...(body.spamScoreThreshold !== undefined ? { spamScoreThreshold: body.spamScoreThreshold } : {}),
+      ...(body.createdForOrigin !== undefined ? { createdForOrigin: body.createdForOrigin } : {}),
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
     });
     return c.json({ ok: true });
   });
 
-  app.delete("/accounts/:accountId/email-configs/:address", async (c) => {
+  app.delete("/accounts/:accountId/aliases/:address", async (c) => {
     const { accountId } = c.get("auth");
     const address = decodeURIComponent(c.req.param("address"));
-    await store.deleteEmailConfig(accountId, address);
+    await store.deleteAlias(accountId, address);
     return c.json({ ok: true });
   });
 

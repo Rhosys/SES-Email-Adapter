@@ -1,7 +1,7 @@
 import { randomUUID } from "crypto";
 import { DeleteCommand, GetCommand, PutCommand, QueryCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { dynamo, ACCOUNTS_TABLE } from "./shared.js";
-import type { Account, View, Label, Rule, Domain, EmailAddressConfig, AccountFilteringConfig, VerifiedForwardingAddress } from "../types/index.js";
+import type { Account, View, Label, Rule, Domain, Alias, AccountFilteringConfig, VerifiedForwardingAddress } from "../types/index.js";
 import type { CreateViewRequest, UpdateViewRequest, CreateLabelRequest, UpdateLabelRequest, CreateRuleRequest, UpdateRuleRequest } from "../api/app.js";
 
 // ---------------------------------------------------------------------------
@@ -12,7 +12,7 @@ const pk = (accountId: string) => `ACCT#${accountId}`;
 
 // ---------------------------------------------------------------------------
 // AccountDatabase
-// Owns: Account record (with embedded emailConfigs), Views, Labels, Rules, Domains
+// Owns: Account record (with embedded aliases), Views, Labels, Rules, Domains
 // Table: ACCOUNTS_TABLE
 // ---------------------------------------------------------------------------
 
@@ -53,37 +53,37 @@ export class AccountDatabase {
   // Email address configs (embedded in Account record)
   // ---------------------------------------------------------------------------
 
-  async getEmailAddressConfig(accountId: string, address: string): Promise<EmailAddressConfig | null> {
+  async getAlias(accountId: string, address: string): Promise<Alias | null> {
     const account = await this.getAccount(accountId);
-    return account?.emailConfigs?.[address] ?? null;
+    return account?.aliases?.[address] ?? null;
   }
 
-  async saveEmailAddressConfig(config: EmailAddressConfig): Promise<void> {
+  async saveAlias(alias: Alias): Promise<void> {
     const now = new Date().toISOString();
     await dynamo.send(new UpdateCommand({
       TableName: ACCOUNTS_TABLE,
-      Key: { pk: pk(config.accountId), sk: "META" },
-      UpdateExpression: "SET emailConfigs.#addr = :config, updatedAt = :now",
-      ExpressionAttributeNames: { "#addr": config.address },
-      ExpressionAttributeValues: { ":config": config, ":now": now },
+      Key: { pk: pk(alias.accountId), sk: "META" },
+      UpdateExpression: "SET aliases.#addr = :alias, updatedAt = :now",
+      ExpressionAttributeNames: { "#addr": alias.address },
+      ExpressionAttributeValues: { ":alias": alias, ":now": now },
     }));
   }
 
-  async listEmailConfigs(accountId: string): Promise<EmailAddressConfig[]> {
+  async listAliases(accountId: string): Promise<Alias[]> {
     const account = await this.getAccount(accountId);
-    return Object.values(account?.emailConfigs ?? {});
+    return Object.values(account?.aliases ?? {});
   }
 
-  async upsertEmailConfig(config: EmailAddressConfig): Promise<void> {
-    return this.saveEmailAddressConfig(config);
+  async upsertAlias(alias: Alias): Promise<void> {
+    return this.saveAlias(alias);
   }
 
-  async deleteEmailConfig(accountId: string, address: string): Promise<void> {
+  async deleteAlias(accountId: string, address: string): Promise<void> {
     const now = new Date().toISOString();
     await dynamo.send(new UpdateCommand({
       TableName: ACCOUNTS_TABLE,
       Key: { pk: pk(accountId), sk: "META" },
-      UpdateExpression: "REMOVE emailConfigs.#addr SET updatedAt = :now",
+      UpdateExpression: "REMOVE aliases.#addr SET updatedAt = :now",
       ExpressionAttributeNames: { "#addr": address },
       ExpressionAttributeValues: { ":now": now },
     }));
@@ -99,7 +99,7 @@ export class AccountDatabase {
     return account?.deletionRetentionDays ?? 0;
   }
 
-  async getProcessorAccountContext(accountId: string, recipientAddress: string): Promise<{ retentionDays: number; filtering: AccountFilteringConfig | null; emailConfig: EmailAddressConfig | null; registeredDomains: string[]; userEmails: string[] }> {
+  async getProcessorAccountContext(accountId: string, recipientAddress: string): Promise<{ retentionDays: number; filtering: AccountFilteringConfig | null; emailConfig: Alias | null; registeredDomains: string[]; userEmails: string[] }> {
     const [account, domains] = await Promise.all([
       this.getAccount(accountId),
       this.listDomains(accountId),
@@ -107,7 +107,7 @@ export class AccountDatabase {
     return {
       retentionDays: account?.deletionRetentionDays ?? 0,
       filtering: account?.filtering ?? null,
-      emailConfig: account?.emailConfigs?.[recipientAddress] ?? null,
+      emailConfig: account?.aliases?.[recipientAddress] ?? null,
       registeredDomains: domains.map((d) => d.domain),
       // userEmails fetched via Authress at runtime; placeholder empty array here
       userEmails: [],

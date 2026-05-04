@@ -1,6 +1,6 @@
 import type { ProcessorDatabase } from "../processor/processor.js";
 import type { ApiDatabase, ListArcsParams, UpdateArcRequest, CreateViewRequest, UpdateViewRequest, CreateLabelRequest, UpdateLabelRequest, CreateRuleRequest, UpdateRuleRequest } from "../api/app.js";
-import type { Arc, Signal, View, Label, Rule, Domain, Account, Page, PageParams, EmailAddressConfig, VerifiedForwardingAddress } from "../types/index.js";
+import type { Arc, Signal, View, Label, Rule, Domain, Account, Page, PageParams, Alias, VerifiedForwardingAddress } from "../types/index.js";
 import type { AccountDatabase } from "./account-database.js";
 import type { ArcDatabase } from "./arc-database.js";
 import type { ProcessingDatabase } from "./processing-database.js";
@@ -24,7 +24,7 @@ export class ProcessorDatabaseAdapter implements ProcessorDatabase {
   saveArc(arc: Arc) { return this.arc.saveArc(arc); }
   listRules(accountId: string) { return this.account.listRules(accountId); }
   getProcessorAccountContext(accountId: string, recipientAddress: string) { return this.account.getProcessorAccountContext(accountId, recipientAddress); }
-  saveEmailAddressConfig(config: EmailAddressConfig) { return this.account.saveEmailAddressConfig(config); }
+  saveAlias(alias: Alias) { return this.account.saveAlias(alias); }
   updateGlobalReputation(domain: string, update: { wasSpam: boolean; wasBlocked: boolean }) { return this.processing.updateGlobalReputation(domain, update); }
 }
 
@@ -84,11 +84,11 @@ export class ApiDatabaseAdapter implements ApiDatabase {
   createDomain(accountId: string, domain: string) { return this.account.createDomain(accountId, domain); }
   deleteDomain(accountId: string, id: string) { return this.account.deleteDomain(accountId, id); }
 
-  // Email configs
-  listEmailConfigs(accountId: string) { return this.account.listEmailConfigs(accountId); }
-  getEmailConfig(accountId: string, address: string) { return this.account.getEmailAddressConfig(accountId, address); }
-  upsertEmailConfig(config: EmailAddressConfig) { return this.account.upsertEmailConfig(config); }
-  deleteEmailConfig(accountId: string, address: string) { return this.account.deleteEmailConfig(accountId, address); }
+  // Aliases
+  listAliases(accountId: string) { return this.account.listAliases(accountId); }
+  getAlias(accountId: string, address: string) { return this.account.getAlias(accountId, address); }
+  upsertAlias(alias: Alias) { return this.account.upsertAlias(alias); }
+  deleteAlias(accountId: string, address: string) { return this.account.deleteAlias(accountId, address); }
 
   // Verified forwarding addresses
   listVerifiedForwardingAddresses(accountId: string) { return this.account.listVerifiedForwardingAddresses(accountId); }
