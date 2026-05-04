@@ -1,40 +1,19 @@
 # TODO
 
+- [ ] Review and complete `WORKFLOW_UX_SPEC.md` implementation
+- [ ] Wire infra (see `infra/`)
+- [ ] Set up CI (lint, typecheck, test) for backend, site, and extension independently
+
 - [ ] Detect forwarded emails and auto-tag with a label `original:john@gmail.com`, where `john@gmail.com` is the original recipient address the email was sent to before being forwarded into the system. Use `X-Forwarded-To`, `X-Original-To`, or `Resent-To` headers to extract the address. **Validation required**: add a test asserting that the `original:*` label is correctly attached to the signal/arc and that the address is extracted accurately from the header.
-- [ ] **`"test"` workflow** — add to `WORKFLOWS` in `src/types/index.ts` and handle throughout the stack:
-  - **Detection** (either condition is sufficient):
-    1. The `signal.from` domain matches any domain registered to the account (user sending from their own domain, e.g. `me@mydomain.com` → account has `mydomain.com` registered)
-    2. The `signal.from` address matches any user's email address on the account (user sending from their personal Gmail, Outlook, etc. while being a member of the account)
-  - Detection runs in `processor.ts` post-classification as an override — if either condition matches, force `workflow: "test"` regardless of what the classifier assigned
-  - **Base urgency**: `"high"` — the user is actively waiting for confirmation that their setup works; they need immediate feedback. This means interrupt-tier push notifications and top-of-inbox placement. Add this case to `baseUrgency()` in `priority.ts`. (`"critical"` could be argued but `"high"` is the right call — it gets the same interrupt push without sitting in the same tier as fraud alerts and password resets.)
-  - **Auto-reply (the pong)**: after classification resolves to `"test"`, call Bedrock (Claude) with the email subject + body and ask it to write a short, funny, playful reply that riffs on whatever the user actually wrote — not a generic "pong" but something that reacts to the content. This is a post-classification side effect in the processor, similar to how the notifier fires today.
-    - **Reply sender address** — conditional on whether the recipient's domain has completed Tier 2 sender setup:
-      - If `domain.senderSetupComplete === true`: send from `signal.to` (the user's own domain address, e.g. `me@yourdomain.com`) — looks polished, proves their sending setup works end-to-end
-      - If `domain.senderSetupComplete === false`: fall back to the system `NOTIFICATION_FROM` address (our own domain) — still sends a reply, just not from their domain yet; include a note in the reply body that they can complete sender setup to reply from their own address
-    - Bedrock prompt shape: *"A user just sent a test email to check their inbox setup. Read their email and write a short, witty, warm reply that plays on whatever they wrote. Keep it under 3 sentences. Sign off as the system."*
-    - Add the outbound message ID to `arc.sentMessageIds` so the arc correctly reflects that a reply was sent
-  - **`TestData` interface**: minimal — `{ triggeredBy: "user" | "system" }` to distinguish user-sent tests from system-generated onboarding signals
-  - **Classifier prompt**: add a `### test` section explaining the workflow and giving examples so the classifier can also detect obvious test emails independently (e.g. subject "test", body "testing 123") — the processor override handles the from-address logic, the classifier handles content-based detection
-  - **Onboarding integration**: the system-generated fallback signal (fired if the user's email is slow during onboarding Step 2) is created as `workflow: "test"`, `TestData.triggeredBy: "system"`. A real email sent by the user during onboarding also classifies as `"test"` via the from-address logic and also gets the pong reply — the onboarding UI treats arrival of any `"test"` signal as success, regardless of which path triggered it.
-- [ ] **Spam score threshold must be user-configurable, not hardcoded** — currently `isSpam = classification.spamScore >= 0.9` is hardcoded in `processor.ts`. This belongs in filter config so users can tune it:
-  - Add `spamScoreThreshold: number` (0–1, default `0.9`) to the account-level filter config alongside the existing `filterMode` and `blockDisposition` settings
-  - Add `spamScoreThreshold` to the per-address `EmailAddressConfig` as an optional override — same inheritance pattern as `filterMode` and `blockDisposition`: if set on the address, use it; otherwise fall through to the account default. All three filtering knobs (`filterMode`, `blockDisposition`, `spamScoreThreshold`) follow the same account → per-address override chain.
-  - `blockDisposition.spam` already controls what happens when the threshold is crossed (block vs quarantine) — that pairing is correct, the threshold just needs to move out of the code and into config
-  - Surface in UI: account-level in Settings → Account → Filtering; per-address in Settings → Email Addresses as an optional override (show "Using account default: 0.9" when not overridden, with an "Override" button to set a custom value)
+- [x] **`"test"` workflow** — implemented: in `WORKFLOWS`, `TestData` interface, processor pong (Bedrock auto-reply), urgency override, onboarding integration all done.
+- [x] **Spam score threshold configurable** — `spamScoreThreshold` on both `AccountFilteringConfig` and `EmailAddressConfig` with account → per-address override chain.
+- [x] **Two-tier domain setup model** — `receivingSetupComplete`, `senderSetupComplete`, per-record `DnsRecord` status, all in `Domain` type and API.
 - [ ] **Become FedCM identity provider** — meaning other apps log in via our app. This means registering as a FedCM provider so other apps can log in.
 - [ ] **Block phishing-warning and terms-update emails by default** — these two classes of email are almost universally unwanted noise. No user toggle — just block them:
   1. **Phishing-warning notices** ("Beware of phishing — we will never ask for your password") — bulk security awareness emails sent by banks and SaaS services. Already classified as `notice` workflow. Block silently by default.
   2. **Terms-of-service / privacy-policy updates** — already classified as `notice` workflow. Currently silently auto-archived; upgrade to **block** (silent drop, not quarantine). Set `blockDisposition.notice: "block"` in the default account filtering config.
   - **Classifier prompt**: add examples under the `### notice` section distinguishing "bank phishing warning" from "actual phishing email" — the former is `notice`, the latter is e.g. `auth` with high spamScore. This prevents mis-classification.
 - [ ] Add `DELETE /domains/:id` endpoint and handler — remove SES email identity if it exists, delete domain record from DynamoDB; inbound mail for that domain will stop routing to SES naturally
-- [ ] **Two-tier domain setup model** — receiving and sending are separate concerns:
-  - **Tier 1 — Receiving** (required to start): customer adds one MX record pointing their domain at the SES inbound endpoint. This is all that's needed to receive email into arcs. Domain is usable immediately after MX propagates.
-  - **Tier 2 — Sending** (required only to reply or forward): DKIM CNAME + SPF TXT on bounce subdomain + DMARC CNAME. These are the 3 records that CNAME to our shared sending infrastructure (set up in `infra/ses.tf`). Prompted at the moment the user first tries to reply or forward, not before.
-  - Onboarding walks through **both tiers** regardless — it's easier to do all DNS at once and there's no reason to defer it. But only Tier 1 is a hard gate; Tier 2 is strongly recommended and skippable with a reminder.
-  - Domain model needs: `receivingSetupComplete: boolean`, `senderSetupComplete: boolean`, and per-record status rather than a single status field
-  - API — domain endpoints always return all 4 DNS records (MX + DKIM CNAME + SPF TXT + DMARC CNAME) regardless of which tier has been completed; the UI uses the per-record verification status to decide what to emphasise, not which records to show. No split endpoint.
-  - Reply and forward rule actions must gate on `senderSetupComplete`; if false, surface a modal prompting Tier 2 setup before proceeding
-  - Update `infra/ses.tf` docs/comments to clarify that the BYODKIM terminus, bounce subdomain, and DMARC records are *our* infrastructure — customer Tier 2 CNAMEs point to ours
 - [ ] **Domain health monitoring** — weekly proactive DNS check across all accounts and domains:
   - **Primary detection — scheduled DNS resolution**: SES only gives positive signals for identities we've registered; if a customer removes their MX record, email silently stops arriving and SES never tells us. The only reliable detection is us actively resolving DNS. EventBridge weekly rule → Lambda → scan all accounts → all registered domains per account → DNS-resolve each record that belongs to the setup tier the customer has completed → notify if degraded. **Do not write health status back to DynamoDB** — health is computed live, not cached, to avoid stale state discrepancies.
   - **Secondary detection — SES bounce/complaint feedback**: `feedback-processor.ts` already consumes SNS feedback events. If hard-bounce rate exceeds 5% in a rolling window for a given domain, trigger an on-demand DNS health check for that domain. Not a substitute for the weekly scan but catches real-world delivery failures between scheduled runs.
@@ -43,6 +22,132 @@
   - **On-demand re-check**: `POST /domains/:id/verify` runs a live DNS check immediately — powers the UI "Re-check DNS" button. The domain GET endpoint also resolves DNS on demand to return current per-record status: `{ name, type, value, currentValue?, status: "verified"|"failing"|"pending" }`. No stale cache, no stored health fields needed.
 
 - [ ] **Submit to awesome-privacy-tools** — open a PR at https://github.com/anondotli/awesome-privacy-tools/blob/main/CONTRIBUTING.md to add this project to the list. Follow the contributing guidelines before submitting.
+
+---
+
+## Email Templates + Auto-Reply / Auto-Draft Rule Actions
+
+Three new concepts that extend the rules engine.
+
+### `EmailTemplate` entity
+
+Account-scoped, named templates with a subject, body, and basic variable interpolation. Managed via Settings → Templates. Both `auto_reply` and `auto_draft` rule actions reference a template by ID.
+
+**Type shape** (add to `src/types/index.ts`):
+```ts
+export interface EmailTemplate {
+  id: string;
+  accountId: string;
+  name: string;           // user-facing label, e.g. "Support acknowledgement"
+  subject: string;        // supports {{signal.subject}}, {{sender.name}}, {{sender.address}}
+  body: string;           // same interpolation; plain text only for now
+  createdAt: string;
+  updatedAt: string;
+}
+```
+
+Interpolation variables available at render time: `{{sender.name}}`, `{{sender.address}}`, `{{signal.subject}}`, `{{arc.workflow}}`. Unrecognised tokens render as empty string (never throw).
+
+**API** (under `/accounts/:accountId/templates`):
+- `GET /templates` — list all templates
+- `POST /templates` — create
+- `PUT /templates/:id` — update
+- `DELETE /templates/:id` — delete (warn if referenced by active rules)
+
+**Database**: store in DynamoDB with PK `TEMPLATE#${accountId}` SK `${id}`.
+
+---
+
+### New rule action types
+
+Extend `RuleActionType` in `src/types/index.ts`:
+
+```ts
+export type RuleActionType =
+  | "assign_label"
+  | "assign_workflow"
+  | "archive"
+  | "delete"
+  | "forward"
+  | "auto_reply"   // send immediately using a template
+  | "auto_draft";  // create a held draft signal for human review
+```
+
+`RuleAction.value` for both new types = the `EmailTemplate.id` to use.
+
+---
+
+### `auto_reply` action
+
+When the rule fires, render the template against the signal context and send immediately via SES (same path as the test pong, using the Forwarder/TestReplier infrastructure). Gate on `domain.senderSetupComplete === true`; if false, skip and log a warning (do not surface an error to the user — silently no-op, same as the forward gate).
+
+Add the outbound `messageId` to `arc.sentMessageIds`.
+
+Processor implementation: collect `auto_reply` template IDs from matching rules alongside `forwardAddresses`, resolve each template, render, and send after `saveArc`/`saveSignal` (same ordering as forward dispatch today).
+
+---
+
+### `auto_draft` action + Signal draft status
+
+Draft signals are user-authored signals held for review before sending. They are `Signal` records with `source: "user"` and a new status value.
+
+**Extend `SignalStatus`** in `src/types/index.ts`:
+```ts
+export type SignalStatus = "active" | "blocked" | "quarantined" | "draft";
+```
+
+When an `auto_draft` rule fires:
+- Render the template against the signal context
+- Create a `Signal` with:
+  - `id: "USR#${uuid}"`
+  - `source: "user"`
+  - `status: "draft"`
+  - `arcId` set to the current arc
+  - `subject`, `textBody` populated from the rendered template
+  - `to` pre-filled with the inbound signal's `from`
+  - `from` pre-filled with the recipient address (or first Tier-2-complete domain address)
+- Save via `store.saveSignal()`
+
+The arc detail UI shows draft signals as an editable compose card — the user can edit and send (flip `status` to `"active"`, send via SES, add `messageId` to `arc.sentMessageIds`) or discard (delete the signal).
+
+**New API endpoints needed**:
+- `PUT /accounts/:accountId/signals/:id` — update a draft signal's subject/body/from/to before sending
+- `POST /accounts/:accountId/signals/:id/send` — send a draft: render final content, call SES, update `status → "active"`, add `messageId` to `arc.sentMessageIds`
+- `DELETE /accounts/:accountId/signals/:id` — discard a draft (only allowed when `status === "draft"`)
+
+Draft signals must be excluded from the inbox arc list aggregation — they are not inbound events and should not affect `arc.lastSignalAt` or urgency recalculation.
+
+---
+
+## Extension Audit — Gaps vs. Backend Spec
+
+The extension (`extension/`) has a working implementation that assumes a `/aliases` API that does not exist in the backend. This section tracks what needs to change on each side before they can talk to each other.
+
+### What the extension assumes that the backend doesn't have
+
+1. **`POST /accounts/:accountId/aliases`** — the extension calls this to record a draft alias when the user fills a signup form. No such endpoint exists. The backend has catch-all domain routing but no alias tracking table or API.
+
+2. **`PUT /accounts/:accountId/aliases/:email`** — called to either rename a draft alias (user edited the field) or promote it from `draft → active` (form submit). Same gap — no endpoint, no data model.
+
+3. **`GET /accounts/:accountId/aliases?domain=`** — called to check if an existing alias was created for a given eTLD+1. Same gap.
+
+4. **`GET /accounts/:accountId/domains`** — the extension calls this and expects `string[]` (array of domain name strings). The backend endpoint returns `Domain[]` (full domain objects with `receivingSetupComplete`, `senderSetupComplete`, etc.). **Type mismatch** — the extension will break on real data. Fix: extension should map `domains.map(d => d.domain)`, or the backend should add a `?names=true` query param.
+
+### What the backend needs to add for extension support
+
+- **`Alias` type and table** — `{ id, accountId, email, eTldPlusOne, status: "draft" | "active", createdAt, activatedAt? }`. PK `ALIAS#${accountId}` SK `${id}`. GSI by `eTldPlusOne` for the search endpoint.
+- **CRUD endpoints** for aliases (create draft, update/rename, activate, list by domain).
+- These are **free tier** per the pricing strategy — alias generation is a core acquisition hook, never paywalled.
+
+### What the extension needs to fix
+
+- **`fetchDomains()` return type**: map the `Domain[]` response to `string[]` before storing, or consume the full object and pick `.domain`. The current code assigns the raw response directly to `string[]`.
+- **`AliasPayload.status: 'draft' | 'active'`** — already matches the planned `Alias` model, no change needed there.
+- Once the backend alias endpoints exist, the extension alias flow works as-is modulo the domain type fix above.
+
+### Extension OTP injection (not yet implemented, no backend gap)
+
+The extension's `content-core.ts` handles signup form detection only. It does not yet implement OTP auto-fill (detect login forms, fetch the latest `auth` arc for the current origin, inject `workflowData.code` into the OTP field). This is a pure extension feature — no new backend work needed, the `auth` workflow data is already complete. Track separately in the extension TODO.
 
 ---
 
