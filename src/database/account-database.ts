@@ -29,7 +29,7 @@ export class AccountDatabase {
     return result.Item ? (result.Item as Account) : null;
   }
 
-  async updateAccount(accountId: string, update: Partial<Pick<Account, "name" | "deletionRetentionDays" | "notifications" | "filtering">>): Promise<void> {
+  async updateAccount(accountId: string, update: Partial<Pick<Account, "name" | "deletionRetentionDays" | "notifications" | "filtering">>): Promise<Account> {
     const now = new Date().toISOString();
     const setParts: string[] = ["updatedAt = :now"];
     const exprValues: Record<string, unknown> = { ":now": now };
@@ -47,6 +47,7 @@ export class AccountDatabase {
       ExpressionAttributeValues: exprValues,
       ...(Object.keys(exprNames).length ? { ExpressionAttributeNames: exprNames } : {}),
     }));
+    return (await this.getAccount(accountId))!;
   }
 
   // ---------------------------------------------------------------------------
@@ -58,7 +59,7 @@ export class AccountDatabase {
     return account?.aliases?.[address] ?? null;
   }
 
-  async saveAlias(alias: Alias): Promise<void> {
+  async saveAlias(alias: Alias): Promise<Alias> {
     const now = new Date().toISOString();
     await dynamo.send(new UpdateCommand({
       TableName: ACCOUNTS_TABLE,
@@ -67,6 +68,11 @@ export class AccountDatabase {
       ExpressionAttributeNames: { "#addr": alias.address },
       ExpressionAttributeValues: { ":alias": alias, ":now": now },
     }));
+    return alias;
+  }
+
+  async createAlias(alias: Alias): Promise<Alias> {
+    return this.saveAlias(alias);
   }
 
   async listAliases(accountId: string): Promise<Alias[]> {
@@ -74,7 +80,7 @@ export class AccountDatabase {
     return Object.values(account?.aliases ?? {});
   }
 
-  async upsertAlias(alias: Alias): Promise<void> {
+  async upsertAlias(alias: Alias): Promise<Alias> {
     return this.saveAlias(alias);
   }
 
@@ -159,7 +165,7 @@ export class AccountDatabase {
     return view;
   }
 
-  async updateView(accountId: string, id: string, data: UpdateViewRequest): Promise<void> {
+  async updateView(accountId: string, id: string, data: UpdateViewRequest): Promise<View> {
     const now = new Date().toISOString();
     const setParts: string[] = ["updatedAt = :now"];
     const exprValues: Record<string, unknown> = { ":now": now };
@@ -181,6 +187,7 @@ export class AccountDatabase {
       ExpressionAttributeValues: exprValues,
       ...(Object.keys(exprNames).length ? { ExpressionAttributeNames: exprNames } : {}),
     }));
+    return (await this.getView(accountId, id))!;
   }
 
   async deleteView(accountId: string, id: string): Promise<void> {
@@ -226,7 +233,7 @@ export class AccountDatabase {
     return label;
   }
 
-  async updateLabel(accountId: string, id: string, data: UpdateLabelRequest): Promise<void> {
+  async updateLabel(accountId: string, id: string, data: UpdateLabelRequest): Promise<Label> {
     const setParts: string[] = [];
     const exprValues: Record<string, unknown> = {};
     const exprNames: Record<string, string> = {};
@@ -235,15 +242,18 @@ export class AccountDatabase {
     if (data.color !== undefined) { setParts.push("color = :color"); exprValues[":color"] = data.color; }
     if (data.icon !== undefined) { setParts.push("icon = :icon"); exprValues[":icon"] = data.icon; }
 
-    if (setParts.length === 0) return;
+    if (setParts.length > 0) {
+      await dynamo.send(new UpdateCommand({
+        TableName: ACCOUNTS_TABLE,
+        Key: { pk: pk(accountId), sk: `LABEL#${id}` },
+        UpdateExpression: `SET ${setParts.join(", ")}`,
+        ExpressionAttributeValues: exprValues,
+        ...(Object.keys(exprNames).length ? { ExpressionAttributeNames: exprNames } : {}),
+      }));
+    }
 
-    await dynamo.send(new UpdateCommand({
-      TableName: ACCOUNTS_TABLE,
-      Key: { pk: pk(accountId), sk: `LABEL#${id}` },
-      UpdateExpression: `SET ${setParts.join(", ")}`,
-      ExpressionAttributeValues: exprValues,
-      ...(Object.keys(exprNames).length ? { ExpressionAttributeNames: exprNames } : {}),
-    }));
+    const labels = await this.listLabels(accountId);
+    return labels.find((l) => l.id === id)!;
   }
 
   async deleteLabel(accountId: string, id: string): Promise<void> {
@@ -280,7 +290,7 @@ export class AccountDatabase {
     return rule;
   }
 
-  async updateRule(accountId: string, id: string, data: UpdateRuleRequest): Promise<void> {
+  async updateRule(accountId: string, id: string, data: UpdateRuleRequest): Promise<Rule> {
     const now = new Date().toISOString();
     const setParts: string[] = ["updatedAt = :now"];
     const exprValues: Record<string, unknown> = { ":now": now };
@@ -298,6 +308,8 @@ export class AccountDatabase {
       ExpressionAttributeValues: exprValues,
       ...(Object.keys(exprNames).length ? { ExpressionAttributeNames: exprNames } : {}),
     }));
+    const rules = await this.listRules(accountId);
+    return rules.find((r) => r.id === id)!;
   }
 
   async deleteRule(accountId: string, id: string): Promise<void> {

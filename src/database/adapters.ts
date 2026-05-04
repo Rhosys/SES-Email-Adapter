@@ -48,6 +48,8 @@ export class ApiDatabaseAdapter implements ApiDatabase {
   // Signals
   listSignals(accountId: string, arcId: string, params: PageParams) { return this.arc.listSignals(accountId, arcId, params); }
   getSignal(accountId: string, id: string) { return this.arc.getSignal(accountId, id); }
+  updateSignal(accountId: string, id: string, update: Partial<Pick<Signal, "subject" | "textBody" | "from" | "to">>) { return this.arc.updateSignal(accountId, id, update); }
+  deleteSignal(accountId: string, id: string) { return this.arc.deleteSignal(accountId, id); }
   unblockSignal(accountId: string, signalId: string, arcId: string) { return this.arc.unblockSignal(accountId, signalId, arcId); }
 
   // Search
@@ -87,6 +89,7 @@ export class ApiDatabaseAdapter implements ApiDatabase {
   // Aliases
   listAliases(accountId: string) { return this.account.listAliases(accountId); }
   getAlias(accountId: string, address: string) { return this.account.getAlias(accountId, address); }
+  createAlias(alias: Alias) { return this.account.createAlias(alias); }
   upsertAlias(alias: Alias) { return this.account.upsertAlias(alias); }
   deleteAlias(accountId: string, address: string) { return this.account.deleteAlias(accountId, address); }
 
