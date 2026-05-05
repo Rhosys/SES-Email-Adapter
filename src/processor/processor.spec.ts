@@ -1270,7 +1270,7 @@ describe("SignalProcessor", () => {
       expect(notifier.notify).not.toHaveBeenCalled();
     });
 
-    it("does not bump lastSignalAt on an existing arc when the new signal is a notice", async () => {
+    it("does not bump lastSignalAt on an existing arc when a rule archives the incoming signal", async () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(noticeClassification);
       // notice uses groupingKey so findArcByGroupingKey is the match path
       vi.mocked(store.findArcByGroupingKey).mockResolvedValueOnce(
