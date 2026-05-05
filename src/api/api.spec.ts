@@ -1023,15 +1023,6 @@ describe("API", () => {
       );
     });
 
-    it("pre-registers an address with onboarding email handling", async () => {
-      await req(app, "PATCH", `${A}/aliases/me%40mydomain.com`, {
-        body: { filterMode: "notify_new", approvedSenders: [], onboardingEmailHandling: "block" },
-      });
-      expect(store.upsertAlias).toHaveBeenCalledWith(
-        expect.objectContaining({ onboardingEmailHandling: "block" }),
-      );
-    });
-
     it("preserves id and createdAt when updating existing alias", async () => {
       vi.mocked(store.getAlias).mockResolvedValueOnce(makeAlias());
       await req(app, "PATCH", `${A}/aliases/user%40example.com`, {
@@ -1084,7 +1075,7 @@ describe("API", () => {
     });
 
     it("creates an Arc from a quarantined signal and returns 201", async () => {
-      vi.mocked(store.getSignal).mockResolvedValueOnce(makeSignal({ status: "quarantined", blockReason: "new_sender" }));
+      vi.mocked(store.getSignal).mockResolvedValueOnce(makeSignal({ status: "quarantined" }));
       const res = await req(app, "POST", `${A}/arcs`, { body: { signalId: "SES#msg-001" } });
       expect(res.status).toBe(201);
       expect(store.createArc).toHaveBeenCalledOnce();
@@ -1092,7 +1083,7 @@ describe("API", () => {
     });
 
     it("creates an Arc from a blocked signal and returns 201", async () => {
-      vi.mocked(store.getSignal).mockResolvedValueOnce(makeSignal({ status: "blocked", blockReason: "new_sender" }));
+      vi.mocked(store.getSignal).mockResolvedValueOnce(makeSignal({ status: "blocked" }));
       const res = await req(app, "POST", `${A}/arcs`, { body: { signalId: "SES#msg-001" } });
       expect(res.status).toBe(201);
 
@@ -1147,7 +1138,7 @@ describe("API", () => {
       expect(saved.approvedSenders).toContain("github.com");
     });
 
-    it("does not modify email config when neither approveSender nor updateFilterMode is set", async () => {
+    it("does not modify aliases when neither approveSender nor updateFilterMode is set", async () => {
       vi.mocked(store.getSignal).mockResolvedValueOnce(makeSignal({ status: "blocked" }));
       await req(app, "POST", `${A}/arcs`, { body: { signalId: "SES#msg-001" } });
       expect(store.upsertAlias).not.toHaveBeenCalled();

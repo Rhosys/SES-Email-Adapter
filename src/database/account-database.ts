@@ -346,6 +346,11 @@ export class AccountDatabase {
     return result.Item ? (result.Item as Domain) : null;
   }
 
+  async getDomainByName(accountId: string, domainName: string): Promise<Pick<Domain, "senderSetupComplete"> | null> {
+    const domains = await this.listDomains(accountId);
+    return domains.find((d) => d.domain === domainName) ?? null;
+  }
+
   async createDomain(accountId: string, domain: string): Promise<Domain> {
     const now = new Date().toISOString();
     const item: Domain = {

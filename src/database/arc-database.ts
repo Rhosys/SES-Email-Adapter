@@ -15,7 +15,7 @@ const SIMILARITY_THRESHOLD = 0.5;
 const RDS_HOST = process.env["RDS_PROXY_ENDPOINT"] ?? "";
 const DB_USER  = process.env["DB_USER"] ?? "lambda";
 const DB_NAME  = process.env["AURORA_DB_NAME"] ?? "signals";
-const AWS_REGION = process.env["AWS_REGION"] ?? "us-east-1";
+const AWS_REGION = process.env["AWS_REGION"] ?? "eu-west-1";
 
 const signer = new Signer({ hostname: RDS_HOST, port: 5432, region: AWS_REGION, username: DB_USER });
 
@@ -107,7 +107,7 @@ export class ArcDatabase implements ArcMatcher {
     const items = (res.Items ?? []) as Signal[];
     const page = items.slice(0, limit);
     const nextKey = items.length > limit && res.LastEvaluatedKey ? encodeCursor(res.LastEvaluatedKey) : null;
-    return { items: page, total: items.length, ...(nextKey ? { nextCursor: nextKey } : {}) };
+    return { items: page, ...(nextKey ? { nextCursor: nextKey } : {}) };
   }
 
   async unblockSignal(accountId: string, signalId: string, arcId: string): Promise<void> {
@@ -250,7 +250,7 @@ export class ArcDatabase implements ArcMatcher {
 
     const page = items.slice(0, limit);
     const nextKey = items.length > limit && res.LastEvaluatedKey ? encodeCursor(res.LastEvaluatedKey) : null;
-    return { items: page, total: items.length, ...(nextKey ? { nextCursor: nextKey } : {}) };
+    return { items: page, ...(nextKey ? { nextCursor: nextKey } : {}) };
   }
 
   async searchArcs(accountId: string, query: string, params: PageParams): Promise<Page<Arc>> {
@@ -271,7 +271,7 @@ export class ArcDatabase implements ArcMatcher {
     );
     const page = items.slice(0, limit);
     const nextKey = items.length > limit && res.LastEvaluatedKey ? encodeCursor(res.LastEvaluatedKey) : null;
-    return { items: page, total: items.length, ...(nextKey ? { nextCursor: nextKey } : {}) };
+    return { items: page, ...(nextKey ? { nextCursor: nextKey } : {}) };
   }
 
   // ---------------------------------------------------------------------------
