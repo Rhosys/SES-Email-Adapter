@@ -390,7 +390,7 @@ export class SignalProcessor {
     }
 
     // 11. Apply outcome to arc
-    // Bump lastSignalAt unless this is a notice-like signal (archive outcome on existing arc)
+    // Don't bump lastSignalAt when a rule archives an incoming signal onto an existing arc — prevents status/notice emails from pushing an arc to the top of the inbox
     if (!matchedArc || !outcome.archive) arc.lastSignalAt = timestamp;
 
     for (const label of outcome.additionalLabels) {
