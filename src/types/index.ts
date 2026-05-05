@@ -489,7 +489,6 @@ export interface Account {
   deletionRetentionDays: number;
   notifications?: NotificationSettings;
   filtering?: AccountFilteringConfig;
-  aliases?: Record<string, Alias>;  // keyed by address
   createdAt: string;
   updatedAt: string;
 }

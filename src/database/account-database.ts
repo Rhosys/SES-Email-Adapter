@@ -12,7 +12,7 @@ const pk = (accountId: string) => `ACCT#${accountId}`;
 
 // ---------------------------------------------------------------------------
 // AccountDatabase
-// Owns: Account record (with embedded aliases), Views, Labels, Rules, Domains
+// Owns: Account record, Aliases, Views, Labels, Rules, Domains
 // Table: ACCOUNTS_TABLE
 // ---------------------------------------------------------------------------
 
@@ -51,22 +51,21 @@ export class AccountDatabase {
   }
 
   // ---------------------------------------------------------------------------
-  // Email address configs (embedded in Account record)
+  // Aliases (each stored as its own item: SK = ALIAS#${address})
   // ---------------------------------------------------------------------------
 
   async getAlias(accountId: string, address: string): Promise<Alias | null> {
-    const account = await this.getAccount(accountId);
-    return account?.aliases?.[address] ?? null;
+    const result = await dynamo.send(new GetCommand({
+      TableName: ACCOUNTS_TABLE,
+      Key: { pk: pk(accountId), sk: `ALIAS#${address}` },
+    }));
+    return result.Item ? (result.Item as Alias) : null;
   }
 
   async saveAlias(alias: Alias): Promise<Alias> {
-    const now = new Date().toISOString();
-    await dynamo.send(new UpdateCommand({
+    await dynamo.send(new PutCommand({
       TableName: ACCOUNTS_TABLE,
-      Key: { pk: pk(alias.accountId), sk: "META" },
-      UpdateExpression: "SET aliases.#addr = :alias, updatedAt = :now",
-      ExpressionAttributeNames: { "#addr": alias.address },
-      ExpressionAttributeValues: { ":alias": alias, ":now": now },
+      Item: { ...alias, pk: pk(alias.accountId), sk: `ALIAS#${alias.address}` },
     }));
     return alias;
   }
@@ -76,8 +75,12 @@ export class AccountDatabase {
   }
 
   async listAliases(accountId: string): Promise<Alias[]> {
-    const account = await this.getAccount(accountId);
-    return Object.values(account?.aliases ?? {});
+    const res = await dynamo.send(new QueryCommand({
+      TableName: ACCOUNTS_TABLE,
+      KeyConditionExpression: "pk = :pk AND begins_with(sk, :prefix)",
+      ExpressionAttributeValues: { ":pk": pk(accountId), ":prefix": "ALIAS#" },
+    }));
+    return (res.Items ?? []) as Alias[];
   }
 
   async upsertAlias(alias: Alias): Promise<Alias> {
@@ -85,13 +88,9 @@ export class AccountDatabase {
   }
 
   async deleteAlias(accountId: string, address: string): Promise<void> {
-    const now = new Date().toISOString();
-    await dynamo.send(new UpdateCommand({
+    await dynamo.send(new DeleteCommand({
       TableName: ACCOUNTS_TABLE,
-      Key: { pk: pk(accountId), sk: "META" },
-      UpdateExpression: "REMOVE aliases.#addr SET updatedAt = :now",
-      ExpressionAttributeNames: { "#addr": address },
-      ExpressionAttributeValues: { ":now": now },
+      Key: { pk: pk(accountId), sk: `ALIAS#${address}` },
     }));
   }
 
@@ -106,14 +105,15 @@ export class AccountDatabase {
   }
 
   async getProcessorAccountContext(accountId: string, recipientAddress: string): Promise<{ retentionDays: number; filtering: AccountFilteringConfig | null; emailConfig: Alias | null; registeredDomains: string[]; userEmails: string[] }> {
-    const [account, domains] = await Promise.all([
+    const [account, emailConfig, domains] = await Promise.all([
       this.getAccount(accountId),
+      this.getAlias(accountId, recipientAddress),
       this.listDomains(accountId),
     ]);
     return {
       retentionDays: account?.deletionRetentionDays ?? 0,
       filtering: account?.filtering ?? null,
-      emailConfig: account?.aliases?.[recipientAddress] ?? null,
+      emailConfig,
       registeredDomains: domains.map((d) => d.domain),
       // userEmails fetched via Authress at runtime; placeholder empty array here
       userEmails: [],
