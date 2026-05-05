@@ -10,7 +10,7 @@
 - [ ] Global /Search endpoint is wrong, we should always be searching something specific. And we never need a /search do that, the generic GET /whatever is already a search.
 - [ ] Digests? Does that even make sense? Basically once per month expose a digest of just list of things I think the idea would be to reuse the same ARC.
 - [ ] Use quickjs-emscripten to support custom functions execution as a rule type.
-- [ ] Create a WebSocket APIGW API, with custom domain. Update the lambda to support connections also from websocket APIGW, through HONO if possible, to send messages back to the extension and to the UI when necessary.
+- [ ] Create a WebSocket/WebPush APIGW API, with custom domain. Update the lambda to support connections also from websocket APIGW, through HONO if possible, to send messages back to the extension and to the UI when necessary.
 
 
 ---
@@ -367,6 +367,13 @@ Global full-text search on arc summaries + workflow.
 - Results show arc rows identical to inbox (workflow icon, summary, sender, date, labels)
 - Filter chips alongside results: by workflow, by label, by date range
 - No results state with suggestion to check spelling or broaden filters
+
+### WebSocket WebPush
+The extension recommends: Web Push — as it doesn't require a persistent connection and matches how the mobile app will receive OTP notifications. It suggests that the backend notifier already fires per-arc; so it is planning on adding a `pushNotify(accountId, arc, signal)` branch for `auth` workflow that sends a Web Push payload containing `{ code, expiresInMinutes, originDomain }`.
+
+### JS Function Based Rules
+
+Store the function text in the rule, limit it to 10KB in size, create a new dynamoDB audit table to keep track of all function changes as versions. At this point it should also keep track of all rule changes, account management changes, basically all configuration changes should be saved in this way. We can write to the audit table first and then write to actual resource (DO NOT USE A DYNAMODB TRANSACTION)
 
 ### Settings — Account
 
