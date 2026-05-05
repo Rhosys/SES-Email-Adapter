@@ -4,6 +4,11 @@
 - [ ] Wire infra (see `infra/`)
 - [ ] Set up CI (lint, typecheck, test) for backend, site, and extension independently
 - [x] **API modernization** — collection envelopes, error shapes, PUT→PATCH, consistent create/update responses. See "API Breaking Changes" section below.
+- [ ] Review AWS Bedrock comparison with Aurora pg vectors. I think we are looking for RAG, the question is should we store that data in aurora or is there an optimized bedrock version available for us here?
+- [ ] Use Zed/Zod or whatever validate in coming requests
+- [ ] Dynamically generate the OpenAPI Specification from the types. Build it on deployment using an npm run script, and server it on the `/` endpoint.
+- [ ] Global /Search endpoint is wrong, we should always be searching something specific. And we never need a /search do that, the generic GET /whatever is already a search.
+
 
 ---
 
@@ -430,7 +435,7 @@ Role-based access for multi-user accounts. Backed by Authress access records.
 - Role capabilities matrix shown as a comparison table in the UI:
   - `viewer`: read-only — browse arcs/signals, no mutations
   - `member`: manage labels, archive/delete arcs, apply rules manually
-  - `admin`: create/edit rules, manage domains, forwarding addresses, email configs, notification settings
+  - `admin`: create/edit rules, manage domains, forwarding addresses, aliases, notification settings
   - `owner`: invite/remove users, change roles, billing, delete account
 - Account switch button: top-level UI affordance (avatar menu or sidebar) to switch between accounts the user belongs to, without logging out — calls Authress to list memberships, then re-authenticates scoped to the selected account
 
