@@ -8,6 +8,9 @@
 - [ ] Use Zed/Zod or whatever validate in coming requests
 - [ ] Dynamically generate the OpenAPI Specification from the types. Build it on deployment using an npm run script, and server it on the `/` endpoint.
 - [ ] Global /Search endpoint is wrong, we should always be searching something specific. And we never need a /search do that, the generic GET /whatever is already a search.
+- [ ] Digests? Does that even make sense? Basically once per month expose a digest of just list of things I think the idea would be to reuse the same ARC.
+- [ ] Use quickjs-emscripten to support custom functions execution as a rule type.
+- [ ] Create a WebSocket APIGW API, with custom domain. Update the lambda to support connections also from websocket APIGW, through HONO if possible, to send messages back to the extension and to the UI when necessary.
 
 
 ---
