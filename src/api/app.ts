@@ -670,7 +670,6 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
     const body = await c.req.json() as {
       filterMode?: SenderFilterMode;
       approvedSenders?: string[];
-      onboardingEmailHandling?: Alias["onboardingEmailHandling"];
       spamScoreThreshold?: number;
       createdForOrigin?: string;
     };
@@ -682,7 +681,6 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
       address,
       filterMode: body.filterMode ?? existing?.filterMode ?? "notify_new",
       approvedSenders: body.approvedSenders ?? existing?.approvedSenders ?? [],
-      ...(body.onboardingEmailHandling !== undefined ? { onboardingEmailHandling: body.onboardingEmailHandling } : existing?.onboardingEmailHandling !== undefined ? { onboardingEmailHandling: existing.onboardingEmailHandling } : {}),
       ...(body.spamScoreThreshold !== undefined ? { spamScoreThreshold: body.spamScoreThreshold } : existing?.spamScoreThreshold !== undefined ? { spamScoreThreshold: existing.spamScoreThreshold } : {}),
       ...(body.createdForOrigin !== undefined ? { createdForOrigin: body.createdForOrigin } : existing?.createdForOrigin !== undefined ? { createdForOrigin: existing.createdForOrigin } : {}),
       createdAt: existing?.createdAt ?? now,

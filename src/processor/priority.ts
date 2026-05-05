@@ -1,6 +1,6 @@
 import type { Arc, Signal, ArcUrgency, PushPriority, Workflow, WorkflowData } from "../types/index.js";
 
-const URGENCY_RANK: Record<ArcUrgency, number> = { critical: 4, high: 3, normal: 2, low: 1, silent: 0 };
+export const URGENCY_RANK: Record<ArcUrgency, number> = { critical: 4, high: 3, normal: 2, low: 1, silent: 0 };
 
 function promote(current: ArcUrgency, floor: ArcUrgency): ArcUrgency {
   return URGENCY_RANK[current] >= URGENCY_RANK[floor] ? current : floor;
@@ -26,7 +26,8 @@ export function baseUrgency(workflow: Workflow, data: WorkflowData): ArcUrgency 
     case "content":
       return "low";
 
-    // status emails (ToS, notices, welcome) are silent — never interrupt
+    // onboarding and status emails are silent — passive, never interrupt
+    case "onboarding":
     case "status":
       return "silent";
 

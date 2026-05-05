@@ -26,6 +26,7 @@ export class ProcessorDatabaseAdapter implements ProcessorDatabase {
   getProcessorAccountContext(accountId: string, recipientAddress: string) { return this.account.getProcessorAccountContext(accountId, recipientAddress); }
   saveAlias(alias: Alias) { return this.account.saveAlias(alias); }
   updateGlobalReputation(domain: string, update: { wasSpam: boolean; wasBlocked: boolean }) { return this.processing.updateGlobalReputation(domain, update); }
+  getDomainByName(accountId: string, domainName: string) { return this.account.getDomainByName(accountId, domainName); }
 }
 
 // ---------------------------------------------------------------------------

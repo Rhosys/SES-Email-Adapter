@@ -71,7 +71,7 @@ export class SesNotifier implements Notifier {
       ``,
       `From: ${signal.from.address}`,
       `Subject: ${signal.subject}`,
-      `Reason: ${signal.blockReason ?? "unknown"}`,
+      `Reason: untrusted sender`,
       ``,
       `To allow this sender, visit: ${APP_BASE_URL}/account/aliases`,
     ].join("\n");
