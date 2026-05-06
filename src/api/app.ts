@@ -67,6 +67,7 @@ export interface ApiDatabase {
 
   // Signals
   listSignals(accountId: string, arcId: string, params: PageParams): Promise<Page<Signal>>;
+  listPreArcSignals(accountId: string, status: "blocked" | "quarantined", params: PageParams): Promise<Page<Signal>>;
   getSignal(accountId: string, id: string): Promise<Signal | null>;
   updateSignal(accountId: string, id: string, update: Partial<Pick<Signal, "subject" | "textBody" | "from" | "to">>): Promise<Signal>;
   deleteSignal(accountId: string, id: string): Promise<void>;
@@ -298,6 +299,21 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
       ...(query["limit"] ? { limit: parseInt(query["limit"], 10) } : {}),
     };
     const result = await store.listSignals(accountId, arc.id, params);
+    return c.json(page("signals", result.items, result.nextCursor));
+  });
+
+  app.get("/accounts/:accountId/signals", async (c) => {
+    const { accountId } = c.get("auth");
+    const query = c.req.query();
+    const status = query["status"];
+    if (status !== "blocked" && status !== "quarantined") {
+      return err(c, 400, "status query param must be 'blocked' or 'quarantined'", "INVALID_STATUS");
+    }
+    const params: PageParams = {
+      ...(query["cursor"] ? { cursor: query["cursor"] } : {}),
+      ...(query["limit"] ? { limit: parseInt(query["limit"], 10) } : {}),
+    };
+    const result = await store.listPreArcSignals(accountId, status, params);
     return c.json(page("signals", result.items, result.nextCursor));
   });
 

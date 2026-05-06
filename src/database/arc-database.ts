@@ -70,7 +70,14 @@ export class ArcDatabase implements ArcMatcher {
   }
 
   async saveSignal(signal: Signal): Promise<void> {
-    const gsi1pk = signal.arcId ? `ARCSIG#${signal.arcId}` : `BLOCKED#${signal.accountId}`;
+    let gsi1pk: string;
+    if (signal.arcId) {
+      gsi1pk = `ARCSIG#${signal.arcId}`;
+    } else if (signal.status === "quarantined") {
+      gsi1pk = `QUARANTINED#${signal.accountId}`;
+    } else {
+      gsi1pk = `BLOCKED#${signal.accountId}`;
+    }
     const gsi1sk = `RECV#${signal.receivedAt}#${signal.id}`;
     await dynamo.send(new PutCommand({
       TableName: SIGNALS_TABLE,
@@ -104,6 +111,24 @@ export class ArcDatabase implements ArcMatcher {
       ...(params.cursor ? { ExclusiveStartKey: decodeCursor(params.cursor) } : {}),
     }));
 
+    const items = (res.Items ?? []) as Signal[];
+    const page = items.slice(0, limit);
+    const nextKey = items.length > limit && res.LastEvaluatedKey ? encodeCursor(res.LastEvaluatedKey) : null;
+    return { items: page, ...(nextKey ? { nextCursor: nextKey } : {}) };
+  }
+
+  async listPreArcSignals(accountId: string, status: "blocked" | "quarantined", params: PageParams): Promise<Page<Signal>> {
+    const limit = Math.min(params.limit ?? 20, 100);
+    const gsi1pk = status === "quarantined" ? `QUARANTINED#${accountId}` : `BLOCKED#${accountId}`;
+    const res = await dynamo.send(new QueryCommand({
+      TableName: SIGNALS_TABLE,
+      IndexName: "gsi1",
+      KeyConditionExpression: "gsi1pk = :pk",
+      ExpressionAttributeValues: { ":pk": gsi1pk },
+      ScanIndexForward: false,
+      Limit: limit + 1,
+      ...(params.cursor ? { ExclusiveStartKey: decodeCursor(params.cursor) } : {}),
+    }));
     const items = (res.Items ?? []) as Signal[];
     const page = items.slice(0, limit);
     const nextKey = items.length > limit && res.LastEvaluatedKey ? encodeCursor(res.LastEvaluatedKey) : null;

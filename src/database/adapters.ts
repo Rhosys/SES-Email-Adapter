@@ -22,7 +22,7 @@ export class ProcessorDatabaseAdapter implements ProcessorDatabase {
   getArc(accountId: string, id: string) { return this.arc.getArc(accountId, id); }
   findArcByGroupingKey(accountId: string, key: string) { return this.arc.findArcByGroupingKey(accountId, key); }
   saveArc(arc: Arc) { return this.arc.saveArc(arc); }
-  listRules(accountId: string) { return this.account.listRules(accountId); }
+  listEnabledRules(accountId: string) { return this.account.listEnabledRules(accountId); }
   getProcessorAccountContext(accountId: string, recipientAddress: string) { return this.account.getProcessorAccountContext(accountId, recipientAddress); }
   saveAlias(alias: Alias) { return this.account.saveAlias(alias); }
   updateGlobalReputation(domain: string, update: { wasSpam: boolean; wasBlocked: boolean }) { return this.processing.updateGlobalReputation(domain, update); }
@@ -48,6 +48,7 @@ export class ApiDatabaseAdapter implements ApiDatabase {
 
   // Signals
   listSignals(accountId: string, arcId: string, params: PageParams) { return this.arc.listSignals(accountId, arcId, params); }
+  listPreArcSignals(accountId: string, status: "blocked" | "quarantined", params: PageParams) { return this.arc.listPreArcSignals(accountId, status, params); }
   getSignal(accountId: string, id: string) { return this.arc.getSignal(accountId, id); }
   updateSignal(accountId: string, id: string, update: Partial<Pick<Signal, "subject" | "textBody" | "from" | "to">>) { return this.arc.updateSignal(accountId, id, update); }
   deleteSignal(accountId: string, id: string) { return this.arc.deleteSignal(accountId, id); }
@@ -79,7 +80,6 @@ export class ApiDatabaseAdapter implements ApiDatabase {
   createRule(accountId: string, data: CreateRuleRequest) { return this.account.createRule(accountId, data); }
   updateRule(accountId: string, id: string, data: UpdateRuleRequest) { return this.account.updateRule(accountId, id, data); }
   deleteRule(accountId: string, id: string) { return this.account.deleteRule(accountId, id); }
-  reorderRules(accountId: string, orderedIds: string[]) { return this.account.reorderRules(accountId, orderedIds); }
 
   // Domains
   listDomains(accountId: string) { return this.account.listDomains(accountId); }
