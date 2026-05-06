@@ -321,7 +321,7 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
     return c.json(page("signals", result.items, result.nextCursor));
   });
 
-  app.put("/accounts/:accountId/signals/:id/status", async (c) => {
+  app.put("/accounts/:accountId/signals/:id/quarantineResponse", async (c) => {
     const { accountId } = c.get("auth");
     const signal = await store.getSignal(accountId, c.req.param("id"));
     if (!signal) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
@@ -368,27 +368,6 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
     }
 
     await store.unblockSignal(accountId, signal.id, arc.id);
-
-    if (body.approveSender || body.updateFilterMode) {
-      const existing = await store.getAlias(accountId, signal.recipientAddress);
-      const base = existing ?? {
-        id: randomUUID(),
-        accountId,
-        address: signal.recipientAddress,
-        filterMode: "notify_new" as SenderFilterMode,
-        approvedSenders: [] as string[],
-        createdAt: now,
-        updatedAt: now,
-      };
-      await store.upsertAlias({
-        ...base,
-        filterMode: body.updateFilterMode ?? base.filterMode,
-        approvedSenders: body.approveSender && !base.approvedSenders.includes(senderETLD1)
-          ? [...base.approvedSenders, senderETLD1]
-          : base.approvedSenders,
-        updatedAt: now,
-      });
-    }
 
     return c.json({ arc, signal: { ...signal, status: "active", arcId: arc.id } });
   });
