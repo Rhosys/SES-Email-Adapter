@@ -321,7 +321,7 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
     return c.json(page("signals", result.items, result.nextCursor));
   });
 
-  app.put("/accounts/:accountId/signals/:id/quarantineResponse", async (c) => {
+  app.post("/accounts/:accountId/signals/:id/quarantineResponse", async (c) => {
     const { accountId } = c.get("auth");
     const signal = await store.getSignal(accountId, c.req.param("id"));
     if (!signal) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
