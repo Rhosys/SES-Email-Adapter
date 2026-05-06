@@ -1,17 +1,8 @@
 import { getDomain } from "tldts";
-import type { EmailAddressConfig, SenderFilterMode, BlockReason, NewAddressHandling } from "../types/index.js";
+import type { Workflow, WorkflowData, SenderFilterMode, SystemLabel } from "../types/index.js";
+import { baseUrgency, URGENCY_RANK } from "./priority.js";
 
 export const DEFAULT_SPAM_SCORE_THRESHOLD = 0.9;
-
-export type FilterResult =
-  | { allowed: true; autoApprove: boolean }
-  | { allowed: false; reason: BlockReason };
-
-export interface FilterOptions {
-  newAddressHandling?: NewAddressHandling;  // default "auto_allow"
-  defaultFilterMode?: SenderFilterMode;    // used when newAddressHandling is "block_until_approved"
-  spamScoreThreshold?: number;             // default DEFAULT_SPAM_SCORE_THRESHOLD
-}
 
 // Extract eTLD+1 from an email address or domain string
 export function getETLD1(emailOrDomain: string): string {
@@ -21,49 +12,37 @@ export function getETLD1(emailOrDomain: string): string {
   return getDomain(domain) ?? domain;
 }
 
-export function evaluateFilter(
-  emailConfig: EmailAddressConfig | null,
-  senderETLD1: string,
-  spamScore: number,
-  opts: FilterOptions = {},
-): FilterResult {
-  const {
-    newAddressHandling = "auto_allow",
-    defaultFilterMode = "notify_new",
-    spamScoreThreshold = emailConfig?.spamScoreThreshold ?? DEFAULT_SPAM_SCORE_THRESHOLD,
-  } = opts;
-
-  if (!emailConfig) {
-    if (newAddressHandling === "block_until_approved") {
-      return evaluateWithMode(defaultFilterMode, [], senderETLD1, spamScore, spamScoreThreshold);
-    }
-    return { allowed: true, autoApprove: true };
-  }
-
-  return evaluateWithMode(emailConfig.filterMode, emailConfig.approvedSenders, senderETLD1, spamScore, spamScoreThreshold);
+export interface SystemLabelContext {
+  workflow: Workflow;
+  workflowData: WorkflowData;
+  spamScore: number;
+  spamScoreThreshold: number;
+  senderETLD1: string;
+  approvedSenders: string[];
+  filterMode: SenderFilterMode;
+  hasSentMessages: boolean;
 }
 
-function evaluateWithMode(
-  mode: SenderFilterMode,
-  approvedSenders: string[],
-  senderETLD1: string,
-  spamScore: number,
-  spamScoreThreshold: number,
-): FilterResult {
-  const senderKnown = approvedSenders.includes(senderETLD1);
+// DO NOT add labels here without explicitly expanding the SystemLabel union type.
+// assignSystemLabels() returns SystemLabel[] — any unlisted label is a compile-time error.
+// That type constraint is the mandatory review gate for adding new system labels.
+export function assignSystemLabels(ctx: SystemLabelContext): SystemLabel[] {
+  const labels: SystemLabel[] = [];
 
-  if (mode === "allow_all") {
-    return { allowed: true, autoApprove: !senderKnown };
-  }
+  labels.push(`system:workflow:${ctx.workflow}` as SystemLabel);
 
-  if (!senderKnown) {
-    return { allowed: false, reason: "new_sender" };
-  }
+  if (ctx.spamScore >= ctx.spamScoreThreshold) labels.push("system:spam:high");
+  else if (ctx.spamScore >= 0.4) labels.push("system:spam:medium");
 
-  // Known sender: strict mode also enforces the spam threshold.
-  if (mode === "strict" && spamScore >= spamScoreThreshold) {
-    return { allowed: false, reason: "spam" };
-  }
+  const senderApproved = ctx.approvedSenders.includes(ctx.senderETLD1) || ctx.filterMode === "allow_all";
+  if (!senderApproved) labels.push("system:sender:untrusted");
 
-  return { allowed: true, autoApprove: false };
+  let urgency = baseUrgency(ctx.workflow, ctx.workflowData);
+  if (ctx.hasSentMessages && URGENCY_RANK[urgency] < URGENCY_RANK["high"]) urgency = "high";
+  labels.push(`system:urgency:${urgency}` as SystemLabel);
+
+  if (ctx.hasSentMessages) labels.push("system:replied");
+  if (ctx.workflow === "test") labels.push("system:test");
+
+  return labels;
 }

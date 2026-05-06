@@ -1,46 +1,248 @@
 # TODO
 
+- [ ] Review and complete `WORKFLOW_UX_SPEC.md` implementation
+- [ ] Wire infra (see `infra/`)
+- [ ] Set up CI (lint, typecheck, test) for backend, site, and extension independently
+- [x] **API modernization** — collection envelopes, error shapes, PUT→PATCH, consistent create/update responses. See "API Breaking Changes" section below.
+- [ ] Review AWS Bedrock comparison with Aurora pg vectors. I think we are looking for RAG, the question is should we store that data in aurora or is there an optimized bedrock version available for us here?
+- [ ] Use Zed/Zod or whatever validate in coming requests
+- [ ] Dynamically generate the OpenAPI Specification from the types. Build it on deployment using an npm run script, and server it on the `/` endpoint.
+- [ ] Global /Search endpoint is wrong, we should always be searching something specific. And we never need a /search do that, the generic GET /whatever is already a search.
+- [ ] Digests? Does that even make sense? Basically once per month expose a digest of just list of things I think the idea would be to reuse the same ARC.
+- [ ] Use quickjs-emscripten to support custom functions execution as a rule type.
+- [ ] Create a WebSocket/WebPush APIGW API, with custom domain. Update the lambda to support connections also from websocket APIGW, through HONO if possible, to send messages back to the extension and to the UI when necessary.
+
+
+---
+
+## API Breaking Changes (all clients must update)
+
+These changes landed in the API modernization pass. The extension and site `src/api/client.ts` must be updated before calling real endpoints.
+
+### 1. Collection response envelope
+
+All list endpoints now return a named collection object instead of a raw array or `{ items, total }`:
+
+```json
+// Before (raw array)
+GET /views → View[]
+
+// Before (generic Page)
+GET /arcs → { "items": [...], "total": 50, "nextCursor": "..." }
+
+// After (named envelope)
+GET /arcs    → { "arcs": [...],    "pagination": { "cursor": "string | null" } }
+GET /signals → { "signals": [...], "pagination": { "cursor": "string | null" } }
+GET /views   → { "views": [...],   "pagination": { "cursor": null } }
+GET /labels  → { "labels": [...],  "pagination": { "cursor": null } }
+GET /rules   → { "rules": [...],   "pagination": { "cursor": null } }
+GET /domains → { "domains": [...], "pagination": { "cursor": null } }
+GET /aliases → { "aliases": [...], "pagination": { "cursor": null } }
+GET /users   → { "users": [...],   "pagination": { "cursor": null } }
+GET /search  → { "arcs": [...],    "pagination": { "cursor": "string | null" } }
+GET /forwarding-addresses → { "forwardingAddresses": [...], "pagination": { "cursor": null } }
+```
+
+Key changes: `total` is gone; `nextCursor` is now `pagination.cursor` (always present, `null` when no more pages).
+
+### 2. Error response shape
+
+```json
+// Before
+{ "error": "Arc not found" }
+
+// After
+{ "title": "Arc not found", "errorCode": "ARC_NOT_FOUND" }
+```
+
+`title` = human-readable message. `errorCode` = machine-readable SCREAMING_SNAKE_CASE constant. `details` = optional structured context. HTTP status code is in the response header only — never echoed in the body.
+
+### 3. PATCH/POST responses return full resource
+
+```json
+// Before: most mutations returned { "ok": true } or nothing
+// After: all mutations return the full updated resource
+
+PATCH /arcs/:id          → 200 Arc
+PATCH /views/:id         → 200 View
+PATCH /labels/:id        → 200 Label
+PATCH /rules/:id         → 200 Rule
+PATCH /aliases/:address  → 200 Alias
+PATCH /signals/:id       → 200 Signal
+PATCH /accounts/:id      → 200 Account
+
+POST /views   → 201 View
+POST /labels  → 201 Label
+POST /rules   → 201 Rule
+POST /domains → 201 Domain
+POST /aliases → 201 Alias
+```
+
+### 4. Aliases: PUT → PATCH, new POST
+
+```
+// Before
+PUT /accounts/:accountId/aliases/:address  (was upsert-or-create)
+
+// After — semantics split
+POST  /accounts/:accountId/aliases          (create; 409 if address already exists)
+PATCH /accounts/:accountId/aliases/:address (partial update / upsert)
+DELETE /accounts/:accountId/aliases/:address → 204 No Content (was 200)
+```
+
+### 5. New signal draft endpoints
+
+```
+PATCH  /accounts/:accountId/signals/:id       — update draft fields (subject, body, from, to); 400 if not draft
+POST   /accounts/:accountId/signals/:id/send  — send draft via SES, flip status → active
+DELETE /accounts/:accountId/signals/:id       — discard draft; 400 if not draft
+```
+
+---
+
 - [x] Detect forwarded emails and auto-tag with a label `original:john@gmail.com`, where `john@gmail.com` is the original recipient address the email was sent to before being forwarded into the system. Use `X-Forwarded-To`, `X-Original-To`, or `Resent-To` headers to extract the address. **Validation required**: add a test asserting that the `original:*` label is correctly attached to the signal/arc and that the address is extracted accurately from the header.
-- [ ] **`"test"` workflow** — add to `WORKFLOWS` in `src/types/index.ts` and handle throughout the stack:
-  - **Detection** (either condition is sufficient):
-    1. The `signal.from` domain matches any domain registered to the account (user sending from their own domain, e.g. `me@mydomain.com` → account has `mydomain.com` registered)
-    2. The `signal.from` address matches any user's email address on the account (user sending from their personal Gmail, Outlook, etc. while being a member of the account)
-  - Detection runs in `processor.ts` post-classification as an override — if either condition matches, force `workflow: "test"` regardless of what the classifier assigned
-  - **Base urgency**: `"high"` — the user is actively waiting for confirmation that their setup works; they need immediate feedback. This means interrupt-tier push notifications and top-of-inbox placement. Add this case to `baseUrgency()` in `priority.ts`. (`"critical"` could be argued but `"high"` is the right call — it gets the same interrupt push without sitting in the same tier as fraud alerts and password resets.)
-  - **Auto-reply (the pong)**: after classification resolves to `"test"`, call Bedrock (Claude) with the email subject + body and ask it to write a short, funny, playful reply that riffs on whatever the user actually wrote — not a generic "pong" but something that reacts to the content. This is a post-classification side effect in the processor, similar to how the notifier fires today.
-    - **Reply sender address** — conditional on whether the recipient's domain has completed Tier 2 sender setup:
-      - If `domain.senderSetupComplete === true`: send from `signal.to` (the user's own domain address, e.g. `me@yourdomain.com`) — looks polished, proves their sending setup works end-to-end
-      - If `domain.senderSetupComplete === false`: fall back to the system `NOTIFICATION_FROM` address (our own domain) — still sends a reply, just not from their domain yet; include a note in the reply body that they can complete sender setup to reply from their own address
-    - Bedrock prompt shape: *"A user just sent a test email to check their inbox setup. Read their email and write a short, witty, warm reply that plays on whatever they wrote. Keep it under 3 sentences. Sign off as the system."*
-    - Add the outbound message ID to `arc.sentMessageIds` so the arc correctly reflects that a reply was sent
-  - **`TestData` interface**: minimal — `{ triggeredBy: "user" | "system" }` to distinguish user-sent tests from system-generated onboarding signals
-  - **Classifier prompt**: add a `### test` section explaining the workflow and giving examples so the classifier can also detect obvious test emails independently (e.g. subject "test", body "testing 123") — the processor override handles the from-address logic, the classifier handles content-based detection
-  - **Onboarding integration**: the system-generated fallback signal (fired if the user's email is slow during onboarding Step 2) is created as `workflow: "test"`, `TestData.triggeredBy: "system"`. A real email sent by the user during onboarding also classifies as `"test"` via the from-address logic and also gets the pong reply — the onboarding UI treats arrival of any `"test"` signal as success, regardless of which path triggered it.
-- [ ] **Spam score threshold must be user-configurable, not hardcoded** — currently `isSpam = classification.spamScore >= 0.9` is hardcoded in `processor.ts`. This belongs in filter config so users can tune it:
-  - Add `spamScoreThreshold: number` (0–1, default `0.9`) to the account-level filter config alongside the existing `filterMode` and `blockDisposition` settings
-  - Add `spamScoreThreshold` to the per-address `EmailAddressConfig` as an optional override — same inheritance pattern as `filterMode` and `blockDisposition`: if set on the address, use it; otherwise fall through to the account default. All three filtering knobs (`filterMode`, `blockDisposition`, `spamScoreThreshold`) follow the same account → per-address override chain.
-  - `blockDisposition.spam` already controls what happens when the threshold is crossed (block vs quarantine) — that pairing is correct, the threshold just needs to move out of the code and into config
-  - Surface in UI: account-level in Settings → Account → Filtering; per-address in Settings → Email Addresses as an optional override (show "Using account default: 0.9" when not overridden, with an "Override" button to set a custom value)
-- [ ] **FedCM (Federated Credential Management)** — add FedCM as a supported login method via `@authress/login`. FedCM is the browser-native credential management API (replacing third-party cookie-based federation). Authress supports it; we need to wire it up in the login flow so Chrome/Edge users can sign in with their saved Google/GitHub credentials without a redirect. Track it as an auth improvement item once the Authress integration is solid.
+- [x] **`"test"` workflow** — implemented: in `WORKFLOWS`, `TestData` interface, processor pong (Bedrock auto-reply), urgency override, onboarding integration all done.
+- [x] **Spam score threshold configurable** — `spamScoreThreshold` on both `AccountFilteringConfig` and `EmailAddressConfig` with account → per-address override chain.
+- [x] **Two-tier domain setup model** — `receivingSetupComplete`, `senderSetupComplete`, per-record `DnsRecord` status, all in `Domain` type and API.
+- [ ] **Become FedCM identity provider** — meaning other apps log in via our app. This means registering as a FedCM provider so other apps can log in.
 - [ ] **Block phishing-warning and terms-update emails by default** — these two classes of email are almost universally unwanted noise. No user toggle — just block them:
   1. **Phishing-warning notices** ("Beware of phishing — we will never ask for your password") — bulk security awareness emails sent by banks and SaaS services. Already classified as `notice` workflow. Block silently by default.
   2. **Terms-of-service / privacy-policy updates** — already classified as `notice` workflow. Currently silently auto-archived; upgrade to **block** (silent drop, not quarantine). Set `blockDisposition.notice: "block"` in the default account filtering config.
   - **Classifier prompt**: add examples under the `### notice` section distinguishing "bank phishing warning" from "actual phishing email" — the former is `notice`, the latter is e.g. `auth` with high spamScore. This prevents mis-classification.
 - [ ] Add `DELETE /domains/:id` endpoint and handler — remove SES email identity if it exists, delete domain record from DynamoDB; inbound mail for that domain will stop routing to SES naturally
-- [ ] **Two-tier domain setup model** — receiving and sending are separate concerns:
-  - **Tier 1 — Receiving** (required to start): customer adds one MX record pointing their domain at the SES inbound endpoint. This is all that's needed to receive email into arcs. Domain is usable immediately after MX propagates.
-  - **Tier 2 — Sending** (required only to reply or forward): DKIM CNAME + SPF TXT on bounce subdomain + DMARC CNAME. These are the 3 records that CNAME to our shared sending infrastructure (set up in `infra/ses.tf`). Prompted at the moment the user first tries to reply or forward, not before.
-  - Onboarding walks through **both tiers** regardless — it's easier to do all DNS at once and there's no reason to defer it. But only Tier 1 is a hard gate; Tier 2 is strongly recommended and skippable with a reminder.
-  - Domain model needs: `receivingSetupComplete: boolean`, `senderSetupComplete: boolean`, and per-record status rather than a single status field
-  - API — domain endpoints always return all 4 DNS records (MX + DKIM CNAME + SPF TXT + DMARC CNAME) regardless of which tier has been completed; the UI uses the per-record verification status to decide what to emphasise, not which records to show. No split endpoint.
-  - Reply and forward rule actions must gate on `senderSetupComplete`; if false, surface a modal prompting Tier 2 setup before proceeding
-  - Update `infra/ses.tf` docs/comments to clarify that the BYODKIM terminus, bounce subdomain, and DMARC records are *our* infrastructure — customer Tier 2 CNAMEs point to ours
 - [ ] **Domain health monitoring** — weekly proactive DNS check across all accounts and domains:
   - **Primary detection — scheduled DNS resolution**: SES only gives positive signals for identities we've registered; if a customer removes their MX record, email silently stops arriving and SES never tells us. The only reliable detection is us actively resolving DNS. EventBridge weekly rule → Lambda → scan all accounts → all registered domains per account → DNS-resolve each record that belongs to the setup tier the customer has completed → notify if degraded. **Do not write health status back to DynamoDB** — health is computed live, not cached, to avoid stale state discrepancies.
   - **Secondary detection — SES bounce/complaint feedback**: `feedback-processor.ts` already consumes SNS feedback events. If hard-bounce rate exceeds 5% in a rolling window for a given domain, trigger an on-demand DNS health check for that domain. Not a substitute for the weekly scan but catches real-world delivery failures between scheduled runs.
   - **SES reputation SNS event**: listen for `AmazonSesAccountReputationNotification` — if SES suspends a sending identity, notify all `owner` and `admin` users immediately.
   - **On degradation**: email and in-app notify all `owner` and `admin` users with domain name, which records are failing, and correct expected values. Do not halt inbound processing immediately — SES may still route for a period.
   - **On-demand re-check**: `POST /domains/:id/verify` runs a live DNS check immediately — powers the UI "Re-check DNS" button. The domain GET endpoint also resolves DNS on demand to return current per-record status: `{ name, type, value, currentValue?, status: "verified"|"failing"|"pending" }`. No stale cache, no stored health fields needed.
+
+- [ ] **Submit to awesome-privacy-tools** — open a PR at https://github.com/anondotli/awesome-privacy-tools/blob/main/CONTRIBUTING.md to add this project to the list. Follow the contributing guidelines before submitting.
+
+---
+
+## Email Templates + Auto-Reply / Auto-Draft Rule Actions
+
+Three new concepts that extend the rules engine.
+
+### `EmailTemplate` entity
+
+Account-scoped, named templates with a subject, body, and basic variable interpolation. Managed via Settings → Templates. Both `auto_reply` and `auto_draft` rule actions reference a template by ID.
+
+**Type shape** (add to `src/types/index.ts`):
+```ts
+export interface EmailTemplate {
+  id: string;
+  accountId: string;
+  name: string;           // user-facing label, e.g. "Support acknowledgement"
+  subject: string;        // supports {{signal.subject}}, {{sender.name}}, {{sender.address}}
+  body: string;           // same interpolation; plain text only for now
+  createdAt: string;
+  updatedAt: string;
+}
+```
+
+Interpolation variables available at render time: `{{sender.name}}`, `{{sender.address}}`, `{{signal.subject}}`, `{{arc.workflow}}`. Unrecognised tokens render as empty string (never throw).
+
+**API** (under `/accounts/:accountId/templates`):
+- `GET /templates` — list all templates
+- `POST /templates` — create
+- `PUT /templates/:id` — update
+- `DELETE /templates/:id` — delete (warn if referenced by active rules)
+
+**Database**: store in DynamoDB with PK `TEMPLATE#${accountId}` SK `${id}`.
+
+---
+
+### New rule action types
+
+Extend `RuleActionType` in `src/types/index.ts`:
+
+```ts
+export type RuleActionType =
+  | "assign_label"
+  | "assign_workflow"
+  | "archive"
+  | "delete"
+  | "forward"
+  | "auto_reply"   // send immediately using a template
+  | "auto_draft";  // create a held draft signal for human review
+```
+
+`RuleAction.value` for both new types = the `EmailTemplate.id` to use.
+
+---
+
+### `auto_reply` action
+
+When the rule fires, render the template against the signal context and send immediately via SES (same path as the test pong, using the Forwarder/TestReplier infrastructure). Gate on `domain.senderSetupComplete === true`; if false, skip and log a warning (do not surface an error to the user — silently no-op, same as the forward gate).
+
+Add the outbound `messageId` to `arc.sentMessageIds`.
+
+Processor implementation: collect `auto_reply` template IDs from matching rules alongside `forwardAddresses`, resolve each template, render, and send after `saveArc`/`saveSignal` (same ordering as forward dispatch today).
+
+---
+
+### `auto_draft` action + Signal draft status
+
+Draft signals are user-authored signals held for review before sending. They are `Signal` records with `source: "user"` and a new status value.
+
+**Extend `SignalStatus`** in `src/types/index.ts`:
+```ts
+export type SignalStatus = "active" | "blocked" | "quarantined" | "draft";
+```
+
+When an `auto_draft` rule fires:
+- Render the template against the signal context
+- Create a `Signal` with:
+  - `id: "USR#${uuid}"`
+  - `source: "user"`
+  - `status: "draft"`
+  - `arcId` set to the current arc
+  - `subject`, `textBody` populated from the rendered template
+  - `to` pre-filled with the inbound signal's `from`
+  - `from` pre-filled with the recipient address (or first Tier-2-complete domain address)
+- Save via `store.saveSignal()`
+
+The arc detail UI shows draft signals as an editable compose card — the user can edit and send (flip `status` to `"active"`, send via SES, add `messageId` to `arc.sentMessageIds`) or discard (delete the signal).
+
+**New API endpoints needed**:
+- `PUT /accounts/:accountId/signals/:id` — update a draft signal's subject/body/from/to before sending
+- `POST /accounts/:accountId/signals/:id/send` — send a draft: render final content, call SES, update `status → "active"`, add `messageId` to `arc.sentMessageIds`
+- `DELETE /accounts/:accountId/signals/:id` — discard a draft (only allowed when `status === "draft"`)
+
+Draft signals must be excluded from the inbox arc list aggregation — they are not inbound events and should not affect `arc.lastSignalAt` or urgency recalculation.
+
+---
+
+## Extension Audit — Gaps vs. Backend Spec
+
+The extension (`extension/`) has a working implementation that assumes a `/aliases` API that does not exist in the backend. This section tracks what needs to change on each side before they can talk to each other.
+
+### What the extension assumes that the backend doesn't have
+
+1. **`POST /accounts/:accountId/aliases`** — the extension calls this to record a draft alias when the user fills a signup form. No such endpoint exists. The backend has catch-all domain routing but no alias tracking table or API.
+
+2. **`PUT /accounts/:accountId/aliases/:email`** — called to either rename a draft alias (user edited the field) or promote it from `draft → active` (form submit). Same gap — no endpoint, no data model.
+
+3. **`GET /accounts/:accountId/aliases?domain=`** — called to check if an existing alias was created for a given eTLD+1. Same gap.
+
+4. **`GET /accounts/:accountId/domains`** — the extension calls this and expects `string[]` (array of domain name strings). The backend endpoint returns `Domain[]` (full domain objects with `receivingSetupComplete`, `senderSetupComplete`, etc.). **Type mismatch** — the extension will break on real data. Fix: extension should map `domains.map(d => d.domain)`, or the backend should add a `?names=true` query param.
+
+### What the backend needs to add for extension support
+
+- [x] **`Alias` type** — renamed from `EmailAddressConfig`; now includes `createdForOrigin?: string` for alias-per-site tracking. Stored embedded in the `Account` DynamoDB record, keyed by address.
+- [ ] **`POST /accounts/:accountId/aliases`** — create a new alias (the extension calls this on signup; currently only `PUT` exists). `PUT` upserts by address, so `POST` can be a thin wrapper or the extension can switch to `PUT` directly.
+- [ ] **`GET /accounts/:accountId/aliases?domain=`** — the list endpoint returns all aliases; add a `domain` query param filter so the extension can find the alias for a specific origin without fetching everything.
+- [ ] **`PUT /aliases/:email` with `newEmail` rename** — if the user edits the generated alias before submitting, the extension sends `{ newEmail }`. Requires deleting the old map key and re-inserting — handle this in the `PUT` handler.
+- [ ] **Web Push subscription endpoint** — `POST /accounts/:accountId/push-subscriptions` to register the extension's push endpoint. Required for OTP delivery (see extension TODO).
+- [ ] **Notifier: push `auth` arcs via Web Push** — when an `auth` signal arrives, the notifier should send a Web Push payload `{ code, expiresInMinutes, originDomain }` to all registered push subscriptions for the account, in addition to (or instead of) the existing email notification.
+- These are all **free tier** per the pricing strategy.
+
+### What the extension needs to fix
+
+- [x] **`fetchDomains()` return type** — fixed in `src/api.ts` to map `Domain[]` → `string[]` via `d.domain`.
+- [ ] **OTP auto-fill + Web Push service worker** — tracked in detail in `extension/TODO.md`.
 
 ---
 
@@ -223,6 +425,13 @@ Global full-text search on arc summaries + workflow.
 - Filter chips alongside results: by workflow, by label, by date range
 - No results state with suggestion to check spelling or broaden filters
 
+### WebSocket WebPush
+The extension recommends: Web Push — as it doesn't require a persistent connection and matches how the mobile app will receive OTP notifications. It suggests that the backend notifier already fires per-arc; so it is planning on adding a `pushNotify(accountId, arc, signal)` branch for `auth` workflow that sends a Web Push payload containing `{ code, expiresInMinutes, originDomain }`.
+
+### JS Function Based Rules
+
+Store the function text in the rule, limit it to 10KB in size, create a new dynamoDB audit table to keep track of all function changes as versions. At this point it should also keep track of all rule changes, account management changes, basically all configuration changes should be saved in this way. We can write to the audit table first and then write to actual resource (DO NOT USE A DYNAMODB TRANSACTION)
+
 ### Settings — Account
 
 - Account name (editable)
@@ -293,7 +502,7 @@ Role-based access for multi-user accounts. Backed by Authress access records.
 - Role capabilities matrix shown as a comparison table in the UI:
   - `viewer`: read-only — browse arcs/signals, no mutations
   - `member`: manage labels, archive/delete arcs, apply rules manually
-  - `admin`: create/edit rules, manage domains, forwarding addresses, email configs, notification settings
+  - `admin`: create/edit rules, manage domains, forwarding addresses, aliases, notification settings
   - `owner`: invite/remove users, change roles, billing, delete account
 - Account switch button: top-level UI affordance (avatar menu or sidebar) to switch between accounts the user belongs to, without logging out — calls Authress to list memberships, then re-authenticates scoped to the selected account
 
@@ -603,3 +812,116 @@ Allow users to bulk-import historical emails from Gmail or Outlook via OAuth, cl
 - Font size preference (small / medium / large)
 - Density toggle: compact list (more arcs visible) vs comfortable (more whitespace)
 - Colour-blind safe palette option for urgency colours (not just red/amber/grey — add patterns or icons as secondary indicator)
+
+---
+
+## PRODUCT STRATEGY
+
+Competitive analysis vs. Addy.io, SimpleLogin, ForwardEmail, Firefox Relay, Mailbox.org, Mailfence, Mailvelope, Thexyz, and others.
+
+---
+
+### Missing Features (gaps vs. competitors)
+
+**High priority:**
+- [ ] **PGP / end-to-end encryption** — Addy.io (paid), SimpleLogin, ForwardEmail, Mailvelope, and Mailfence all offer this. Privacy-conscious users treat it as table stakes. If added, must be free (see pricing strategy below).
+- [ ] **Browser extension** — Addy.io, SimpleLogin, Firefox Relay, and DuckDuckGo all have one. Alias generation at the point of signup is the core UX for alias-focused users; the extension is also a free acquisition channel.
+- [ ] **Mobile app** — Essential for the auth/OTP quick-copy workflow. Addy.io, SimpleLogin, and Firefox Relay all have apps. Without one, the OTP copy feature (our #1 differentiator) is only usable at a desktop.
+
+**Medium priority:**
+- [ ] **On-demand alias generation** — Catch-all + custom domains covers this technically, but there's no UI shortcut for generating `random123@yourdomain.com` at a click. All alias services have this as their primary action.
+- [ ] **Alias-per-site tracking** — Which company received which alias; breach detection when an alias starts receiving spam from a company that "shouldn't" have it. Addy.io and SimpleLogin both do this.
+- [ ] **Snooze / remind me later** — Already in UI IDEAS above. Differentiates from pure forwarders; HEY and Superhuman both do this.
+- [ ] **Calendar sync** (travel + scheduling workflows) — Export `.ics` or sync via CalDAV for travel/scheduling arcs. Already in UI IDEAS above.
+
+**Low priority:**
+- [ ] **Webhook outbound** — Already in UI IDEAS above. Power users and devs want to pipe signals into Zapier, Make, or custom apps. ForwardEmail offers this.
+
+---
+
+### Unique Selling Props (what no competitor does)
+
+These are genuine moats — most are already built, just not marketed.
+
+1. **AI email intelligence, not just routing** — Every competitor is a dumb pipe: email in → forward or drop. We classify into 14 semantic workflow types, extract structured data (order numbers, flight details, OTP codes, invoice amounts), generate summaries, and calculate urgency. No competitor does this. This is the most defensible moat.
+
+2. **Arc threading by semantic similarity** — Everyone else shows raw email lists. We thread semantically via pgvector — all Amazon order updates for order #123 group together even when sender addresses vary. Closer to what HEY attempted but backed by vector embeddings.
+
+3. **Smart action extraction at inbox-list level** — `workflowData` structured fields already exist. The "Smart Action Buttons" (copy OTP from inbox row, track package without opening email) is a killer UX feature no privacy or alias service offers. OTP copy is the #1 use case for alias services and nobody does it well today.
+
+4. **Configurable filtering with global sender reputation** — Cross-account global sender reputation is unique. No service aggregates reputation signals across all users to bootstrap trust for new accounts. This compounds over time — network effect on spam protection.
+
+5. **JSONLogic rule engine with per-address config** — No alias or forwarding service has real automation. Conditional rules, per-address filter mode inheritance, spam threshold overrides — this is closer to enterprise email security tooling than consumer alias services.
+
+6. **Multi-user team accounts with RBAC** — Every competitor is single-user. Owner/admin/member/viewer roles open B2B use cases no alias service serves: small teams routing domain mail through one account, shared inboxes for support@, alerts@, etc.
+
+7. **AI test-email pong** — Delightful onboarding moment. Sets tone immediately and demonstrates AI capability before the user has seen a single real email.
+
+**Recommended positioning:** *"The email inbox that understands your email — not just forwards it."* We are not an alias service and not a privacy relay — we are a new kind of inbox that happens to own your domain's email routing. Compete on "how much does your inbox understand about your life", not "how many aliases can I have".
+
+Secondary B2B pitch: *"The shared inbox for your domain, with team roles and audit logs."* No alias service goes here.
+
+---
+
+### Pricing Strategy
+
+**Core philosophy:** Charge for volume, power, and teams — not for privacy or basic utility. Give away the things that create lock-in and trust. Every competitor charges for custom domains, catch-all, and reply-from-alias. Offering these free wins acquisition and minimises churn simultaneously.
+
+#### Free tier (permanently free, no time limit)
+
+| Feature | Rationale |
+|---|---|
+| 1 custom domain | Addy.io and SimpleLogin charge for this. It's our clearest acquisition hook and the strongest lock-in mechanism. |
+| Catch-all on that domain | Competitors charge for catch-all. Core to our model — must be free. |
+| Reply from your domain (Tier 2 DNS) | Competitors charge for this. Giving it free locks in the domain. |
+| 14-workflow AI classification | This is the product. Paywalling AI makes us just another dumb forwarder. |
+| Arc threading + summaries | Same reason — the product, not an upsell. |
+| JSONLogic rules (up to 5) | Enough to get hooked; limit creates upgrade pressure. |
+| Labels (unlimited) | Zero marginal cost, high stickiness. |
+| All filter modes + spam threshold tuning | Core safety feature — charging for spam protection is tone-deaf. |
+| 1 verified forwarding address | Enough to be useful. |
+| Push + email notifications | Core feature — no paywall. |
+| 90-day arc retention | Sufficient for personal use. |
+| 30-day audit log | Free tier gets some audit; longer is a paid signal. |
+| PGP encryption (when built) | Privacy is a trust signal, not a premium feature. |
+| Browser extension (when built) | Free acquisition channel — never monetize directly. |
+
+#### Paid tier (~$6–8/mo or $60/yr)
+
+Things competitors charge for that we include, plus things only we can offer:
+
+| Feature | Why paid |
+|---|---|
+| Additional domains (up to 5) | Direct SES identity cost per domain. Competitors charge $3–9/mo for 1 extra domain. |
+| Rules (unlimited, vs 5 free) | Power users need this; casual users don't. |
+| Arc retention (2 years, vs 90 days) | Storage scales with retention. |
+| 1-year audit log | Compliance expectation for power users. |
+| Email analytics dashboard | High-value, low-urgency — good paid upsell moment. |
+| Snooze / Waiting For | Power user productivity; drives "aha" upgrade moment. |
+| Morning briefing digest | Personalization at scale. |
+| Webhook outbound | Developer/power user; compute cost per webhook. |
+| Smart action buttons (OTP copy etc.) | Premium UX polish; strong upgrade motivator. |
+| Verified forwarding (5 addresses, vs 1 free) | Volume limit to motivate upgrades. |
+| Priority support | Standard paid-tier expectation. |
+
+#### Team / Business tier (~$15–20/mo for up to 10 users, then per-seat)
+
+| Feature |
+|---|
+| Everything in Paid |
+| Up to 10 domains |
+| Unlimited team members (per-seat after 10) |
+| Shared inbox views across team |
+| Full audit log (unlimited retention, CSV export) |
+| Integrations (Slack, Linear, webhooks) |
+| Data export (async JSON/CSV) |
+| SLA / uptime commitment |
+
+#### Strategic freebies — things competitors charge for that we must NOT charge for
+
+- **PGP encryption** — if built, free. Privacy is not a premium feature.
+- **First custom domain** — our anti-churn mechanism.
+- **Catch-all** — trivially cheap at SES scale; makes us unbeatable on acquisition.
+- **AI classification** — paywalling this makes us just another forwarder.
+- **Spam threshold tuning** — charging for spam protection is a trust-breaker.
+- **Browser extension** — free acquisition channel.

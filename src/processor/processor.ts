@@ -1,10 +1,10 @@
 import { randomUUID } from "crypto";
 import type { SQSEvent } from "aws-lambda";
-import type { Signal, Arc, Rule, Workflow, WorkflowData, EmailAddressConfig, AccountFilteringConfig, SignalSource, SchedulingData, BlockReason, SignalStatus, Domain } from "../types/index.js";
-import { priorityCalculator } from "./priority.js";
+import type { Signal, Arc, Rule, Workflow, WorkflowData, Alias, AccountFilteringConfig, SignalSource, SchedulingData, SignalStatus, Domain, ArcUrgency, SenderFilterMode } from "../types/index.js";
+import { baseUrgency } from "./priority.js";
 import type { MimeParser } from "./mime.js";
 import type { SignalClassifier } from "../classifier/classifier.js";
-import { getETLD1, evaluateFilter, DEFAULT_SPAM_SCORE_THRESHOLD } from "./filter.js";
+import { getETLD1, assignSystemLabels, DEFAULT_SPAM_SCORE_THRESHOLD } from "./filter.js";
 
 // ---------------------------------------------------------------------------
 // Interfaces
@@ -13,10 +13,8 @@ import { getETLD1, evaluateFilter, DEFAULT_SPAM_SCORE_THRESHOLD } from "./filter
 export interface ProcessorAccountContext {
   retentionDays: number;
   filtering: AccountFilteringConfig | null;
-  emailConfig: EmailAddressConfig | null;
-  // eTLD+1 of domains registered to this account — used for test detection
+  emailConfig: Alias | null;
   registeredDomains: string[];
-  // Email addresses of all users on this account — used for test detection
   userEmails: string[];
 }
 
@@ -28,22 +26,18 @@ export interface ProcessorDatabase {
   saveArc(arc: Arc): Promise<void>;
   listRules(accountId: string): Promise<Rule[]>;
   getProcessorAccountContext(accountId: string, recipientAddress: string): Promise<ProcessorAccountContext>;
-  saveEmailAddressConfig(config: EmailAddressConfig): Promise<void>;
+  saveAlias(alias: Alias): Promise<Alias>;
   updateGlobalReputation(domain: string, update: { wasSpam: boolean; wasBlocked: boolean }): Promise<void>;
   getDomainByName(accountId: string, domainName: string): Promise<Pick<Domain, "senderSetupComplete"> | null>;
 }
 
-/** @deprecated Use ProcessorDatabase */
-export type ProcessorStore = ProcessorDatabase;
-
 export interface ArcMatcher {
-  // recipientAddress scopes the vector search — signals from different recipient addresses never match
   findMatch(accountId: string, recipientAddress: string, embedding: number[]): Promise<Arc | null>;
   upsertEmbedding(arcId: string, embedding: number[], accountId: string, recipientAddress: string): Promise<void>;
 }
 
 export interface RuleEvaluator {
-  evaluate(rule: Rule, context: { signal: Signal; arc: Arc }): boolean;
+  evaluate(rule: Rule, context: { signal: Signal; arc: Arc; isMatchedArc: boolean }): boolean;
 }
 
 export interface Notifier {
@@ -63,17 +57,16 @@ export interface Forwarder {
 
 export interface TestReplier {
   pong(opts: {
-    to: string;          // original sender — receives the pong
-    from: string;        // send from recipientAddress if Tier 2 complete, else NOTIFICATION_FROM
-    subject: string;     // original subject; implementation prefixes "Re: "
-    body: string;        // original email body text for Claude to riff on
-    inReplyTo: string;   // original SES message ID for email threading
+    to: string;
+    from: string;
+    subject: string;
+    body: string;
+    inReplyTo: string;
   }): Promise<{ messageId: string }>;
 }
 
 type SesVerdict = "PASS" | "FAIL" | "GRAY" | "PROCESSING_FAILED";
 
-// Shape of the notification that SES publishes to SNS on receipt
 interface SesReceiptNotification {
   mail: {
     messageId: string;
@@ -97,6 +90,88 @@ interface InboundSignalMessage {
   dkimVerdict: SesVerdict;
   dmarcVerdict: SesVerdict;
 }
+
+// ---------------------------------------------------------------------------
+// Processing outcome
+// ---------------------------------------------------------------------------
+
+interface ProcessingOutcome {
+  block: boolean;
+  quarantine: boolean;
+  approveSender: boolean;
+  archive: boolean;
+  delete: boolean;
+  urgency?: ArcUrgency;
+  suppressNotification: boolean;
+  forwardAddresses: string[];
+  additionalLabels: string[];
+  doPong: boolean;
+}
+
+function emptyOutcome(): ProcessingOutcome {
+  return {
+    block: false,
+    quarantine: false,
+    approveSender: false,
+    archive: false,
+    delete: false,
+    suppressNotification: false,
+    forwardAddresses: [],
+    additionalLabels: [],
+    doPong: false,
+  };
+}
+
+function applyRules(
+  rules: Rule[],
+  context: { signal: Signal; arc: Arc; isMatchedArc: boolean },
+  evaluator: RuleEvaluator,
+  outcome: ProcessingOutcome,
+): ProcessingOutcome {
+  for (const rule of rules) {
+    if (!evaluator.evaluate(rule, context)) continue;
+    for (const action of rule.actions) {
+      if (action.disabled) continue;
+      switch (action.type) {
+        case "block":                 outcome.block = true; break;
+        case "quarantine":            outcome.quarantine = true; break;
+        case "approve_sender":        outcome.approveSender = true; break;
+        case "archive":               outcome.archive = true; break;
+        case "delete":                outcome.delete = true; break;
+        case "suppress_notification": outcome.suppressNotification = true; break;
+        case "set_urgency":           if (action.value) outcome.urgency = action.value as ArcUrgency; break;
+        case "assign_label":          if (action.value) outcome.additionalLabels.push(action.value); break;
+        case "assign_workflow":       if (action.value) context.arc.workflow = action.value as Workflow; break;
+        case "forward":               if (action.value) outcome.forwardAddresses.push(action.value); break;
+        case "pong":                  outcome.doPong = true; break;
+      }
+    }
+  }
+  return outcome;
+}
+
+// ---------------------------------------------------------------------------
+// System rules — seeded into every new account; users can disable individually
+// ---------------------------------------------------------------------------
+
+const in_ = (label: string) => ({ "in": [label, { "var": "arc.labels" }] });
+
+export const SYSTEM_RULES: Rule[] = [
+  { id: "SR-14", accountId: "SYSTEM", name: "Auto-approve sender on matched conversation", condition: JSON.stringify({ "and": [in_("system:workflow:conversation"), in_("system:sender:untrusted"), { "var": "isMatchedArc" }] }), actions: [{ type: "approve_sender" }], position: 1, createdAt: "", updatedAt: "" },
+  { id: "SR-01", accountId: "SYSTEM", name: "Block onboarding emails", condition: JSON.stringify(in_("system:workflow:onboarding")), actions: [{ type: "block" }], position: 2, createdAt: "", updatedAt: "" },
+  { id: "SR-02", accountId: "SYSTEM", name: "Quarantine untrusted senders", condition: JSON.stringify(in_("system:sender:untrusted")), actions: [{ type: "quarantine" }], position: 3, createdAt: "", updatedAt: "" },
+  { id: "SR-03", accountId: "SYSTEM", name: "Quarantine high-spam signals", condition: JSON.stringify(in_("system:spam:high")), actions: [{ type: "quarantine" }], position: 4, createdAt: "", updatedAt: "" },
+  { id: "SR-04", accountId: "SYSTEM", name: "Suppress notification for medium spam", condition: JSON.stringify(in_("system:spam:medium")), actions: [{ type: "suppress_notification" }], position: 5, createdAt: "", updatedAt: "" },
+  { id: "SR-05", accountId: "SYSTEM", name: "Auto-archive status emails", condition: JSON.stringify(in_("system:workflow:status")), actions: [{ type: "archive" }], position: 6, createdAt: "", updatedAt: "" },
+  { id: "SR-06", accountId: "SYSTEM", name: "Suppress notification for status emails", condition: JSON.stringify(in_("system:workflow:status")), actions: [{ type: "suppress_notification" }], position: 7, createdAt: "", updatedAt: "" },
+  { id: "SR-07", accountId: "SYSTEM", name: "Suppress notification for content emails", condition: JSON.stringify(in_("system:workflow:content")), actions: [{ type: "suppress_notification" }], position: 8, createdAt: "", updatedAt: "" },
+  { id: "SR-08", accountId: "SYSTEM", name: "Set urgency: critical", condition: JSON.stringify(in_("system:urgency:critical")), actions: [{ type: "set_urgency", value: "critical" }], position: 9, createdAt: "", updatedAt: "" },
+  { id: "SR-09", accountId: "SYSTEM", name: "Set urgency: high", condition: JSON.stringify(in_("system:urgency:high")), actions: [{ type: "set_urgency", value: "high" }], position: 10, createdAt: "", updatedAt: "" },
+  { id: "SR-10", accountId: "SYSTEM", name: "Set urgency: normal", condition: JSON.stringify(in_("system:urgency:normal")), actions: [{ type: "set_urgency", value: "normal" }], position: 11, createdAt: "", updatedAt: "" },
+  { id: "SR-11", accountId: "SYSTEM", name: "Set urgency: low", condition: JSON.stringify(in_("system:urgency:low")), actions: [{ type: "set_urgency", value: "low" }], position: 12, createdAt: "", updatedAt: "" },
+  { id: "SR-12", accountId: "SYSTEM", name: "Set urgency: silent", condition: JSON.stringify(in_("system:urgency:silent")), actions: [{ type: "set_urgency", value: "silent" }], position: 13, createdAt: "", updatedAt: "" },
+  { id: "SR-13", accountId: "SYSTEM", name: "Auto-reply to test emails (pong)", condition: JSON.stringify(in_("system:test")), actions: [{ type: "pong" }], position: 14, createdAt: "", updatedAt: "" },
+];
 
 // ---------------------------------------------------------------------------
 // Processor
@@ -140,7 +215,6 @@ export class SignalProcessor {
         const sns = JSON.parse(record.body) as { Message: string };
         const notification = JSON.parse(sns.Message) as SesReceiptNotification & { accountId?: string };
         const msg: InboundSignalMessage = {
-          // accountId comes from per-domain receipt rule metadata (set by API when registering a domain)
           accountId: notification.accountId ?? notification.mail.destination[0]!,
           s3Key: notification.receipt.action.objectKey,
           sesMessageId: notification.mail.messageId,
@@ -159,7 +233,7 @@ export class SignalProcessor {
   private async processMessage(msg: InboundSignalMessage): Promise<void> {
     const { accountId, s3Key, sesMessageId, timestamp, destination } = msg;
 
-    // 1. Dedup — Signal.id for email signals = "SES#${sesMessageId}"
+    // 1. Dedup
     const existing = await this.store.getSignalByMessageId(accountId, sesMessageId);
     if (existing) return;
 
@@ -169,7 +243,7 @@ export class SignalProcessor {
     const recipientAddress = destination[0] ?? "";
     const senderETLD1 = getETLD1(parsed.from.address);
 
-    // 3. Embed + classify in parallel — both needed before arc matching
+    // 3. Embed + classify in parallel
     const embedText = [parsed.subject, parsed.textBody ?? ""].join(" ").slice(0, 4000);
     const [embedding, classification] = await Promise.all([
       this.classifier.embed(embedText),
@@ -186,14 +260,13 @@ export class SignalProcessor {
 
     const now = new Date().toISOString();
 
-    // 3b. Fetch account context in one read (retentionDays + filtering + emailConfig)
+    // 4. Fetch account context
     const accountCtx = await this.store.getProcessorAccountContext(accountId, recipientAddress);
     const ttl = accountCtx.retentionDays > 0
       ? Math.floor(Date.now() / 1000) + accountCtx.retentionDays * 86400
       : undefined;
 
-    // 3c. Test detection — override workflow when the sender is the account owner.
-    // Triggered if from-domain matches a registered account domain OR from-address matches a user email.
+    // 5. Test detection override
     const fromDomain = getETLD1(parsed.from.address);
     const isTestEmail =
       accountCtx.registeredDomains.includes(fromDomain) ||
@@ -203,109 +276,26 @@ export class SignalProcessor {
       classification.workflowData = { workflow: "test", triggeredBy: "user" };
     }
 
-    // Resolved spam threshold: per-address → account → default
     const spamScoreThreshold =
       accountCtx.emailConfig?.spamScoreThreshold ??
       accountCtx.filtering?.spamScoreThreshold ??
       DEFAULT_SPAM_SCORE_THRESHOLD;
 
-    // 4. Arc matching — deterministic key first, vector similarity fallback
+    // 6. Arc matching
     const groupingKey = deriveGroupingKey(classification.workflow, classification.workflowData, recipientAddress, senderETLD1);
     const matchedArc = groupingKey
       ? await this.store.findArcByGroupingKey(accountId, groupingKey)
       : await this.arcMatcher.findMatch(accountId, recipientAddress, embedding);
 
-    // 5. Filtering — bypassed entirely when signal matches an existing Arc
-    if (!matchedArc) {
-      const emailConfig = accountCtx.emailConfig;
-      const accountConfig = accountCtx.filtering;
+    const isMatchedArc = matchedArc !== null;
 
-      // Welcome/onboarding block: status emails with statusType="welcome" are blocked when configured.
-      // Checked before sender-filter so it applies even for known senders.
-      if (classification.workflow === "status" && (classification.workflowData as { statusType?: string }).statusType === "welcome") {
-        const perAddress = emailConfig?.onboardingEmailHandling;
-        const globalBlock = accountConfig?.blockOnboardingEmails ?? false;
-        const shouldSuppress = perAddress === "block" || perAddress === "quarantine" || (perAddress !== "allow" && globalBlock);
-        if (shouldSuppress) {
-          const disposition = perAddress === "block" || perAddress === "quarantine"
-            ? perAddress
-            : dispositionFor("onboarding", accountConfig);
-          const status: SignalStatus = disposition === "quarantine" ? "quarantined" : "blocked";
-          const suppressedSignal = buildSignal({
-            status,
-            blockReason: "onboarding",
-            accountId,
-            sesMessageId,
-            recipientAddress,
-            parsed,
-            classification,
-            s3Key,
-            receivedAt: timestamp,
-            now,
-            ...(ttl !== undefined ? { ttl } : {}),
-          });
-          await this.store.saveSignal(suppressedSignal);
-          if (status === "quarantined" && this.notifier) {
-            await this.notifier.notifyBlocked(accountId, suppressedSignal).catch((err) => {
-              console.error("Quarantine notification failed:", err);
-            });
-          }
-          return;
-        }
-      }
-
-      const filterResult = evaluateFilter(emailConfig, senderETLD1, classification.spamScore, {
-        ...(accountConfig?.newAddressHandling && { newAddressHandling: accountConfig.newAddressHandling }),
-        ...(accountConfig?.defaultFilterMode && { defaultFilterMode: accountConfig.defaultFilterMode }),
-        spamScoreThreshold,
-      });
-
-      if (!filterResult.allowed) {
-        const disposition = dispositionFor(filterResult.reason, accountConfig);
-        const status: SignalStatus = disposition === "quarantine" ? "quarantined" : "blocked";
-        const suppressedSignal = buildSignal({
-          status,
-          blockReason: filterResult.reason,
-          accountId,
-          sesMessageId,
-          recipientAddress,
-          parsed,
-          classification,
-          s3Key,
-          receivedAt: timestamp,
-          now,
-          ...(ttl !== undefined ? { ttl } : {}),
-        });
-
-        await this.store.saveSignal(suppressedSignal);
-        if (status === "quarantined" && this.notifier) {
-          await this.notifier.notifyBlocked(accountId, suppressedSignal).catch((err) => {
-            console.error("Quarantine notification failed:", err);
-          });
-        }
-
-        this.store.updateGlobalReputation(senderETLD1, {
-          wasSpam: classification.spamScore >= spamScoreThreshold,
-          wasBlocked: true,
-        }).catch((err) => console.error("Reputation update failed:", err));
-        return;
-      }
-
-      if (filterResult.autoApprove) {
-        await this.autoApprove(accountId, recipientAddress, senderETLD1, emailConfig, accountConfig?.defaultFilterMode);
-      }
-    }
-
-    // 6. Build or update Arc
-    const isNotice = classification.workflow === "status";
+    // 7. Build arc shell (lastSignalAt applied after rules — archive outcome suppresses it on existing arcs)
     let arc: Arc;
     if (matchedArc) {
       arc = {
         ...matchedArc,
         workflow: classification.workflow,
         summary: classification.summary,
-        // Notices stay buried — never bump lastSignalAt
-        ...(isNotice ? {} : { lastSignalAt: timestamp }),
         updatedAt: now,
       };
     } else {
@@ -314,9 +304,8 @@ export class SignalProcessor {
         accountId,
         ...(groupingKey ? { groupingKey } : {}),
         workflow: classification.workflow,
-        labels: classification.labels,
-        // Notices are archived on arrival
-        status: isNotice ? "archived" : "active",
+        labels: [],
+        status: "active",
         summary: classification.summary,
         lastSignalAt: timestamp,
         createdAt: now,
@@ -325,11 +314,27 @@ export class SignalProcessor {
       };
     }
 
-    // Merge classifier-suggested labels
-    for (const label of classification.labels) {
-      if (!arc.labels.includes(label)) {
-        arc.labels = [...arc.labels, label];
-      }
+    // 8. Assign system labels and merge classifier labels
+    const emailConfig = accountCtx.emailConfig;
+    // Brand-new address (null emailConfig) with auto-allow account policy → treat as allow_all for label purposes
+    const effectiveFilterMode: SenderFilterMode = emailConfig
+      ? emailConfig.filterMode
+      : accountCtx.filtering?.newAddressHandling === "block_until_approved"
+        ? "notify_new"
+        : "allow_all";
+    const systemLabels = assignSystemLabels({
+      workflow: classification.workflow,
+      workflowData: classification.workflowData,
+      spamScore: classification.spamScore,
+      spamScoreThreshold,
+      senderETLD1,
+      approvedSenders: emailConfig?.approvedSenders ?? [],
+      filterMode: effectiveFilterMode,
+      hasSentMessages: (arc.sentMessageIds?.length ?? 0) > 0,
+    });
+
+    for (const label of [...systemLabels, ...classification.labels]) {
+      if (!arc.labels.includes(label)) arc.labels = [...arc.labels, label];
     }
 
     // Forwarded email detection — attach original:* label when forwarding headers are present
@@ -341,7 +346,7 @@ export class SignalProcessor {
       }
     }
 
-    // 7. Evaluate rules
+    // 9. Build signal shell
     const signalShell = buildSignal({
       arcId: arc.id,
       status: "active",
@@ -356,34 +361,60 @@ export class SignalProcessor {
       ...(ttl !== undefined ? { ttl } : {}),
     });
 
-    const forwardAddresses: string[] = [];
+    // 10. Evaluate all rules (system rules seeded at low position numbers, user rules at higher positions)
     const rules = await this.store.listRules(accountId);
-    for (const rule of rules) {
-      if (!this.ruleEvaluator.evaluate(rule, { signal: signalShell, arc })) continue;
-      for (const action of rule.actions) {
-        if (action.disabled) continue;
-        if (action.type === "assign_label" && action.value) {
-          if (!arc.labels.includes(action.value)) {
-            arc.labels = [...arc.labels, action.value];
-          }
-        } else if (action.type === "assign_workflow" && action.value) {
-          arc.workflow = action.value as Workflow;
-        } else if (action.type === "archive") {
-          arc.status = "archived";
-        } else if (action.type === "delete") {
-          arc.status = "deleted";
-          arc.deletedAt = now;
-        } else if (action.type === "forward" && action.value) {
-          forwardAddresses.push(action.value);
-        }
+    const outcome = applyRules(rules, { signal: signalShell, arc, isMatchedArc }, this.ruleEvaluator, emptyOutcome());
+
+    // Block/quarantine: approveSender overrides quarantine (SR-14 fires before SR-02)
+    if (outcome.block || (outcome.quarantine && !outcome.approveSender)) {
+      const status: SignalStatus = outcome.quarantine ? "quarantined" : "blocked";
+      const blockedSignal = buildSignal({
+        status,
+        accountId,
+        sesMessageId,
+        recipientAddress,
+        parsed,
+        classification,
+        s3Key,
+        receivedAt: timestamp,
+        now,
+        ...(ttl !== undefined ? { ttl } : {}),
+      });
+      await this.store.saveSignal(blockedSignal);
+      if (status === "quarantined" && this.notifier) {
+        await this.notifier.notifyBlocked(accountId, blockedSignal).catch((err) => {
+          console.error("Quarantine notification failed:", err);
+        });
       }
+      this.store.updateGlobalReputation(senderETLD1, {
+        wasSpam: classification.spamScore >= spamScoreThreshold,
+        wasBlocked: true,
+      }).catch((err) => console.error("Reputation update failed:", err));
+      return;
     }
+
+    // Auto-approve: sender gets added to approvedSenders when approve_sender fires, allow_all mode, or brand-new address with auto-allow policy
+    if (outcome.approveSender || effectiveFilterMode === "allow_all") {
+      await this.autoApprove(accountId, recipientAddress, senderETLD1, emailConfig, accountCtx.filtering?.defaultFilterMode);
+    }
+
+    // 11. Apply outcome to arc
+    // Don't bump lastSignalAt when a rule archives an incoming signal onto an existing arc — prevents status/notice emails from pushing an arc to the top of the inbox
+    if (!matchedArc || !outcome.archive) arc.lastSignalAt = timestamp;
+
+    for (const label of outcome.additionalLabels) {
+      if (!arc.labels.includes(label)) arc.labels = [...arc.labels, label];
+    }
+    if (outcome.archive) arc.status = "archived";
+    if (outcome.delete) { arc.status = "deleted"; arc.deletedAt = now; }
+    if (outcome.urgency) arc.urgency = outcome.urgency;
+    // Fall back to baseUrgency if no set_urgency rule fired
+    if (!arc.urgency) arc.urgency = baseUrgency(arc.workflow, classification.workflowData);
 
     const signal: Signal = { ...signalShell, arcId: arc.id };
 
-    // Pong: send a Bedrock-generated witty auto-reply for test emails. Runs before saveArc so
-    // arc.sentMessageIds is populated on the first write rather than requiring a second update.
-    if (classification.workflow === "test" && this.testReplier) {
+    // 12. Pong (driven by SR-13 rule action)
+    if (outcome.doPong && this.testReplier) {
       const recipientDomain = recipientAddress.split("@")[1] ?? "";
       const domain = await this.store.getDomainByName(accountId, recipientDomain);
       const from = domain?.senderSetupComplete
@@ -404,12 +435,10 @@ export class SignalProcessor {
       }
     }
 
-    arc.urgency = priorityCalculator(arc, signal);
-
     await this.store.saveArc(arc);
     await this.store.saveSignal(signal);
 
-    // 8. For scheduling signals, save a synthetic system signal so the frontend can render an ICS button
+    // 13. Calendar synthetic signal
     if (classification.workflow === "scheduling") {
       const calSignal = buildCalendarSignal(arc, signal, now, ttl);
       await this.store.saveSignal(calSignal);
@@ -417,22 +446,22 @@ export class SignalProcessor {
 
     await this.arcMatcher.upsertEmbedding(arc.id, embedding, accountId, recipientAddress);
 
-    // 9. Forward to any addresses collected from matching rules
-    if (this.forwarder && forwardAddresses.length > 0) {
+    // 14. Forward
+    if (this.forwarder && outcome.forwardAddresses.length > 0) {
       const forwardOpts: ForwardOptions = {
         senderDomain: senderETLD1,
         dkimPass: msg.dkimVerdict === "PASS",
         dmarcPass: msg.dmarcVerdict === "PASS",
       };
-      for (const toAddress of forwardAddresses) {
+      for (const toAddress of outcome.forwardAddresses) {
         await this.forwarder.forward(s3Key, toAddress, accountId, forwardOpts).catch((err) => {
           console.error("Forward failed:", err);
         });
       }
     }
 
-    const isSpam = classification.spamScore >= spamScoreThreshold;
-    if (this.notifier && !isSpam && !isNotice) {
+    // 15. Notify
+    if (this.notifier && !outcome.suppressNotification) {
       await this.notifier.notify(accountId, arc, signal).catch((err) => {
         console.error("Notification failed:", err);
       });
@@ -448,18 +477,18 @@ export class SignalProcessor {
     accountId: string,
     address: string,
     senderETLD1: string,
-    existing: EmailAddressConfig | null,
+    existing: Alias | null,
     defaultFilterMode: AccountFilteringConfig["defaultFilterMode"] = "notify_new",
   ): Promise<void> {
     const now = new Date().toISOString();
     if (existing) {
-      await this.store.saveEmailAddressConfig({
+      await this.store.saveAlias({
         ...existing,
         approvedSenders: [...existing.approvedSenders, senderETLD1],
         updatedAt: now,
       });
     } else {
-      await this.store.saveEmailAddressConfig({
+      await this.store.saveAlias({
         id: randomUUID(),
         accountId,
         address,
@@ -479,7 +508,6 @@ export class SignalProcessor {
 function buildSignal(opts: {
   arcId?: string;
   status: Signal["status"];
-  blockReason?: Signal["blockReason"];
   accountId: string;
   sesMessageId: string;
   recipientAddress: string;
@@ -490,7 +518,7 @@ function buildSignal(opts: {
   now: string;
   ttl?: number;
 }): Signal {
-  const { arcId, status, blockReason, accountId, sesMessageId, recipientAddress, parsed, classification, s3Key, receivedAt, now, ttl } = opts;
+  const { arcId, status, accountId, sesMessageId, recipientAddress, parsed, classification, s3Key, receivedAt, now, ttl } = opts;
   const signal: Signal = {
     id: `SES#${sesMessageId}`,
     accountId,
@@ -514,7 +542,6 @@ function buildSignal(opts: {
   };
 
   if (arcId !== undefined) signal.arcId = arcId;
-  if (blockReason !== undefined) signal.blockReason = blockReason;
   if (parsed.replyTo !== undefined) signal.replyTo = parsed.replyTo;
   if (parsed.textBody !== undefined) signal.textBody = parsed.textBody;
   if (parsed.htmlBody != null) signal.htmlBody = parsed.htmlBody;
@@ -552,12 +579,6 @@ function buildCalendarSignal(arc: Arc, emailSignal: Signal, now: string, ttl: nu
   return calSignal;
 }
 
-// Returns disposition for a given block reason. Default is "quarantine" (notify user for review).
-// Explicit "block" = silent sequester, hidden until user explicitly searches.
-export function dispositionFor(reason: BlockReason, config: AccountFilteringConfig | null | undefined): "block" | "quarantine" {
-  return config?.blockDisposition?.[reason] ?? "quarantine";
-}
-
 // Extracts the original recipient address from forwarding headers, in priority order.
 // Header values may be bare addresses or RFC 2822 "Name <addr>" form.
 export function extractForwardedAddress(headers: Record<string, string>): string | null {
@@ -568,6 +589,7 @@ export function extractForwardedAddress(headers: Record<string, string>): string
   return match?.[1]?.trim() ?? null;
 }
 
+
 export function deriveGroupingKey(
   workflow: Workflow,
   workflowData: WorkflowData,
@@ -577,30 +599,26 @@ export function deriveGroupingKey(
   const base = `${recipientAddress}:${workflow}`;
 
   switch (workflow) {
-    // Deterministic by sender — one arc per sender domain per workflow
     case "auth":
     case "content":
+    case "onboarding":
     case "status":
     case "payments":
     case "alert":
     case "test":
       return `${base}:${senderETLD1}`;
 
-    // Deterministic by order number when present
     case "package": {
       const { orderNumber } = workflowData as { orderNumber?: string };
       return orderNumber ? `${base}:${orderNumber}` : null;
     }
 
-    // Deterministic by ticket ID when present
     case "support": {
       const { ticketId } = workflowData as { ticketId?: string };
       return ticketId ? `${base}:${ticketId}` : null;
     }
 
-    // Vector search: conversation, crm, travel, scheduling, healthcare, job
     default:
       return null;
   }
 }
-
