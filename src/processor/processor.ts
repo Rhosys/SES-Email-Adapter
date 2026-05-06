@@ -1,6 +1,6 @@
 import { randomUUID } from "crypto";
 import type { SQSEvent } from "aws-lambda";
-import type { Signal, Arc, Rule, Workflow, WorkflowData, Alias, AccountFilteringConfig, SignalSource, SchedulingData, SignalStatus, Domain, ArcUrgency, SenderFilterMode } from "../types/index.js";
+import type { Signal, Arc, Rule, Workflow, WorkflowData, Alias, AccountFilteringConfig, SignalSource, SchedulingData, SignalStatus, Domain, ArcUrgency, SenderFilterMode, MatchedRuleResult } from "../types/index.js";
 import { baseUrgency } from "./priority.js";
 import type { MimeParser } from "./mime.js";
 import type { SignalClassifier } from "../classifier/classifier.js";
@@ -127,27 +127,35 @@ function applyRules(
   context: { signal: Signal; arc: Arc; isMatchedArc: boolean },
   evaluator: RuleEvaluator,
   outcome: ProcessingOutcome,
-): ProcessingOutcome {
+): { outcome: ProcessingOutcome; matchedRules: MatchedRuleResult[] } {
+  const matchedRules: MatchedRuleResult[] = [];
   for (const rule of rules) {
     if (!evaluator.evaluate(rule, context)) continue;
+    const result: MatchedRuleResult = {
+      ruleId: rule.id,
+      ruleName: rule.name,
+      actions: rule.actions.filter((a) => !a.disabled),
+      labelsAdded: [],
+    };
     for (const action of rule.actions) {
       if (action.disabled) continue;
       switch (action.type) {
-        case "block":                 outcome.block = true; break;
-        case "quarantine":            outcome.quarantine = true; break;
+        case "block":                 outcome.block = true; if (!result.statusChange) result.statusChange = "blocked"; break;
+        case "quarantine":            outcome.quarantine = true; if (!result.statusChange) result.statusChange = "quarantined"; break;
         case "approve_sender":        outcome.approveSender = true; break;
-        case "archive":               outcome.archive = true; break;
-        case "delete":                outcome.delete = true; break;
+        case "archive":               outcome.archive = true; if (!result.statusChange) result.statusChange = "archived"; break;
+        case "delete":                outcome.delete = true; if (!result.statusChange) result.statusChange = "deleted"; break;
         case "suppress_notification": outcome.suppressNotification = true; break;
         case "set_urgency":           if (action.value) outcome.urgency = action.value as ArcUrgency; break;
-        case "assign_label":          if (action.value) outcome.additionalLabels.push(action.value); break;
+        case "assign_label":          if (action.value) { outcome.additionalLabels.push(action.value); result.labelsAdded.push(action.value); } break;
         case "assign_workflow":       if (action.value) context.arc.workflow = action.value as Workflow; break;
         case "forward":               if (action.value) outcome.forwardAddresses.push(action.value); break;
         case "pong":                  outcome.doPong = true; break;
       }
     }
+    matchedRules.push(result);
   }
-  return outcome;
+  return { outcome, matchedRules };
 }
 
 // ---------------------------------------------------------------------------
@@ -354,23 +362,26 @@ export class SignalProcessor {
 
     // 10. Evaluate all rules (system rules seeded at low position numbers, user rules at higher positions)
     const rules = await this.store.listEnabledRules(accountId);
-    const outcome = applyRules(rules, { signal: signalShell, arc, isMatchedArc }, this.ruleEvaluator, emptyOutcome());
+    const { outcome, matchedRules } = applyRules(rules, { signal: signalShell, arc, isMatchedArc }, this.ruleEvaluator, emptyOutcome());
 
     // Block/quarantine: approveSender overrides quarantine (SR-14 fires before SR-02)
     if (outcome.block || (outcome.quarantine && !outcome.approveSender)) {
       const status: SignalStatus = outcome.quarantine ? "quarantined" : "blocked";
-      const blockedSignal = buildSignal({
-        status,
-        accountId,
-        sesMessageId,
-        recipientAddress,
-        parsed,
-        classification,
-        s3Key,
-        receivedAt: timestamp,
-        now,
-        ...(ttl !== undefined ? { ttl } : {}),
-      });
+      const blockedSignal: Signal = {
+        ...buildSignal({
+          status,
+          accountId,
+          sesMessageId,
+          recipientAddress,
+          parsed,
+          classification,
+          s3Key,
+          receivedAt: timestamp,
+          now,
+          ...(ttl !== undefined ? { ttl } : {}),
+        }),
+        matchedRules,
+      };
       await this.store.saveSignal(blockedSignal);
       if (status === "quarantined" && this.notifier) {
         await this.notifier.notifyBlocked(accountId, blockedSignal).catch((err) => {
@@ -402,7 +413,7 @@ export class SignalProcessor {
     // Fall back to baseUrgency if no set_urgency rule fired
     if (!arc.urgency) arc.urgency = baseUrgency(arc.workflow, classification.workflowData);
 
-    const signal: Signal = { ...signalShell, arcId: arc.id };
+    const signal: Signal = { ...signalShell, arcId: arc.id, matchedRules };
 
     // 12. Pong (driven by SR-13 rule action)
     if (outcome.doPong && this.testReplier) {
