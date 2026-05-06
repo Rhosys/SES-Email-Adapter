@@ -448,13 +448,16 @@ export interface VerifiedForwardingAddress {
   verifiedAt?: string;
 }
 
+export type RuleStatus = "enabled" | "disabled";
+
 export interface Rule {
   id: string;
   accountId: string;
   name: string;
   condition: string;     // JSONLogic expression as JSON string
   actions: RuleAction[];
-  position: number;
+  status: RuleStatus;
+  priorityOrder: number;
   createdAt: string;
   updatedAt: string;
 }

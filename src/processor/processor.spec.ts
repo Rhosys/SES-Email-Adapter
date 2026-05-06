@@ -31,7 +31,7 @@ function makeStore(): ProcessorDatabase {
     getArc: vi.fn().mockResolvedValue(null),
     findArcByGroupingKey: vi.fn().mockResolvedValue(null),
     saveArc: vi.fn().mockResolvedValue(undefined),
-    listRules: vi.fn().mockResolvedValue(SYSTEM_RULES),
+    listEnabledRules: vi.fn().mockResolvedValue(SYSTEM_RULES),
     getProcessorAccountContext: vi.fn().mockResolvedValue(DEFAULT_CTX),
     saveAlias: vi.fn().mockImplementation((a: Alias) => Promise.resolve(a)),
     updateGlobalReputation: vi.fn().mockResolvedValue(undefined),
@@ -168,7 +168,8 @@ function makeRule(overrides: Partial<Rule> = {}): Rule {
     name: "Test rule",
     condition: "true",
     actions: [],
-    position: 100,
+    status: "enabled",
+    priorityOrder: 100,
     createdAt: "2024-01-01T00:00:00Z",
     updatedAt: "2024-01-01T00:00:00Z",
     ...overrides,
@@ -343,11 +344,12 @@ describe("SignalProcessor", () => {
         name: "Label billing",
         condition: "true",
         actions: [{ type: "assign_label", value: "billing" }],
-        position: 0,
+        status: "enabled",
+        priorityOrder: 0,
         createdAt: "2024-01-01T00:00:00Z",
         updatedAt: "2024-01-01T00:00:00Z",
       };
-      vi.mocked(store.listRules).mockResolvedValueOnce([rule]);
+      vi.mocked(store.listEnabledRules).mockResolvedValueOnce([rule]);
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -362,11 +364,12 @@ describe("SignalProcessor", () => {
         name: "Archive newsletters",
         condition: "true",
         actions: [{ type: "archive" }],
-        position: 0,
+        status: "enabled",
+        priorityOrder: 0,
         createdAt: "2024-01-01T00:00:00Z",
         updatedAt: "2024-01-01T00:00:00Z",
       };
-      vi.mocked(store.listRules).mockResolvedValueOnce([rule]);
+      vi.mocked(store.listEnabledRules).mockResolvedValueOnce([rule]);
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -381,11 +384,12 @@ describe("SignalProcessor", () => {
         name: "Never matches",
         condition: '{"==": [1, 2]}',
         actions: [{ type: "archive" }],
-        position: 0,
+        status: "enabled",
+        priorityOrder: 0,
         createdAt: "2024-01-01T00:00:00Z",
         updatedAt: "2024-01-01T00:00:00Z",
       };
-      vi.mocked(store.listRules).mockResolvedValueOnce([rule]);
+      vi.mocked(store.listEnabledRules).mockResolvedValueOnce([rule]);
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -400,11 +404,12 @@ describe("SignalProcessor", () => {
         name: "Disabled label rule",
         condition: "true",
         actions: [{ type: "assign_label", value: "important", disabled: true }],
-        position: 0,
+        status: "enabled",
+        priorityOrder: 0,
         createdAt: "2024-01-01T00:00:00Z",
         updatedAt: "2024-01-01T00:00:00Z",
       };
-      vi.mocked(store.listRules).mockResolvedValueOnce([rule]);
+      vi.mocked(store.listEnabledRules).mockResolvedValueOnce([rule]);
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -419,11 +424,12 @@ describe("SignalProcessor", () => {
         name: "Forward all",
         condition: "true",
         actions: [{ type: "forward", value: "backup@personal.com" }],
-        position: 0,
+        status: "enabled",
+        priorityOrder: 0,
         createdAt: "2024-01-01T00:00:00Z",
         updatedAt: "2024-01-01T00:00:00Z",
       };
-      vi.mocked(store.listRules).mockResolvedValueOnce([rule]);
+      vi.mocked(store.listEnabledRules).mockResolvedValueOnce([rule]);
 
       // No error — processor without forwarder silently skips forward actions
       await processor.process(makeSqsEvent([{}]));
@@ -451,11 +457,12 @@ describe("SignalProcessor", () => {
         name: "Forward to backup",
         condition: "true",
         actions: [{ type: "forward", value: "backup@personal.com" }],
-        position: 0,
+        status: "enabled",
+        priorityOrder: 0,
         createdAt: "2024-01-01T00:00:00Z",
         updatedAt: "2024-01-01T00:00:00Z",
       };
-      vi.mocked(store.listRules).mockResolvedValueOnce([rule]);
+      vi.mocked(store.listEnabledRules).mockResolvedValueOnce([rule]);
 
       await processor.process(makeSqsEvent([{ s3Key: "emails/msg-123" }]));
 
@@ -477,11 +484,12 @@ describe("SignalProcessor", () => {
           { type: "forward", value: "first@example.com" },
           { type: "forward", value: "second@example.com" },
         ],
-        position: 0,
+        status: "enabled",
+        priorityOrder: 0,
         createdAt: "2024-01-01T00:00:00Z",
         updatedAt: "2024-01-01T00:00:00Z",
       };
-      vi.mocked(store.listRules).mockResolvedValueOnce([rule]);
+      vi.mocked(store.listEnabledRules).mockResolvedValueOnce([rule]);
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -498,11 +506,12 @@ describe("SignalProcessor", () => {
         name: "Forward invoices",
         condition: '{"==": [1, 2]}',
         actions: [{ type: "forward", value: "accountant@firm.com" }],
-        position: 0,
+        status: "enabled",
+        priorityOrder: 0,
         createdAt: "2024-01-01T00:00:00Z",
         updatedAt: "2024-01-01T00:00:00Z",
       };
-      vi.mocked(store.listRules).mockResolvedValueOnce([rule]);
+      vi.mocked(store.listEnabledRules).mockResolvedValueOnce([rule]);
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -520,11 +529,12 @@ describe("SignalProcessor", () => {
         name: "Forward all",
         condition: "true",
         actions: [{ type: "forward", value: "copy@example.com" }],
-        position: 0,
+        status: "enabled",
+        priorityOrder: 0,
         createdAt: "2024-01-01T00:00:00Z",
         updatedAt: "2024-01-01T00:00:00Z",
       };
-      vi.mocked(store.listRules).mockResolvedValueOnce([rule]);
+      vi.mocked(store.listEnabledRules).mockResolvedValueOnce([rule]);
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -539,11 +549,12 @@ describe("SignalProcessor", () => {
         name: "Forward all",
         condition: "true",
         actions: [{ type: "forward", value: "copy@example.com" }],
-        position: 0,
+        status: "enabled",
+        priorityOrder: 0,
         createdAt: "2024-01-01T00:00:00Z",
         updatedAt: "2024-01-01T00:00:00Z",
       };
-      vi.mocked(store.listRules).mockResolvedValueOnce([rule]);
+      vi.mocked(store.listEnabledRules).mockResolvedValueOnce([rule]);
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -733,7 +744,7 @@ describe("SignalProcessor", () => {
       vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce(
         { ...DEFAULT_CTX, emailConfig: makeAlias({ approvedSenders: ["other.com"] }) },
       );
-      vi.mocked(store.listRules).mockResolvedValueOnce([
+      vi.mocked(store.listEnabledRules).mockResolvedValueOnce([
         makeRule({ condition: JSON.stringify({ "in": ["system:sender:untrusted", { var: "arc.labels" }] }), actions: [{ type: "block" }] }),
       ]);
 
@@ -1142,7 +1153,7 @@ describe("SignalProcessor", () => {
 
     it("processes onboarding emails as active when no blocking rule is configured", async () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(onboardingClassification);
-      vi.mocked(store.listRules).mockResolvedValueOnce([]); // no system rules — SR-01 (block onboarding) is disabled
+      vi.mocked(store.listEnabledRules).mockResolvedValueOnce([]); // no system rules — SR-01 (block onboarding) is disabled
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -1154,7 +1165,7 @@ describe("SignalProcessor", () => {
 
     it("blocks onboarding emails when a block rule targeting system:workflow:onboarding is active", async () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(onboardingClassification);
-      vi.mocked(store.listRules).mockResolvedValueOnce([
+      vi.mocked(store.listEnabledRules).mockResolvedValueOnce([
         makeRule({ condition: JSON.stringify({ "in": ["system:workflow:onboarding", { var: "arc.labels" }] }), actions: [{ type: "block" }] }),
       ]);
 
@@ -1170,7 +1181,7 @@ describe("SignalProcessor", () => {
 
     it("quarantines onboarding emails when a quarantine rule is active", async () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(onboardingClassification);
-      vi.mocked(store.listRules).mockResolvedValueOnce([
+      vi.mocked(store.listEnabledRules).mockResolvedValueOnce([
         makeRule({ condition: JSON.stringify({ "in": ["system:workflow:onboarding", { var: "arc.labels" }] }), actions: [{ type: "quarantine" }] }),
       ]);
 
@@ -1524,7 +1535,8 @@ describe("SignalProcessor", () => {
         name: "Forward all",
         condition: "true",
         actions: [{ type: "forward", value: "backup@personal.com" }],
-        position: 0,
+        status: "enabled",
+        priorityOrder: 0,
         createdAt: "2024-01-01T00:00:00Z",
         updatedAt: "2024-01-01T00:00:00Z",
       };
@@ -1533,7 +1545,7 @@ describe("SignalProcessor", () => {
     it("passes dkimPass=true and dmarcPass=true when both SES verdicts are PASS", async () => {
       const forwarder: Forwarder = { forward: vi.fn().mockResolvedValue(undefined) };
       const proc = new SignalProcessor({ store, mimeParser, classifier, arcMatcher, ruleEvaluator, forwarder });
-      vi.mocked(store.listRules).mockResolvedValueOnce([makeForwardRule()]);
+      vi.mocked(store.listEnabledRules).mockResolvedValueOnce([makeForwardRule()]);
 
       await proc.process(makeSqsEvent([{ dkimVerdict: "PASS", dmarcVerdict: "PASS" }]));
 
@@ -1548,7 +1560,7 @@ describe("SignalProcessor", () => {
     it("passes dkimPass=false and dmarcPass=false when SES verdicts are FAIL and GRAY", async () => {
       const forwarder: Forwarder = { forward: vi.fn().mockResolvedValue(undefined) };
       const proc = new SignalProcessor({ store, mimeParser, classifier, arcMatcher, ruleEvaluator, forwarder });
-      vi.mocked(store.listRules).mockResolvedValueOnce([makeForwardRule()]);
+      vi.mocked(store.listEnabledRules).mockResolvedValueOnce([makeForwardRule()]);
 
       await proc.process(makeSqsEvent([{ dkimVerdict: "FAIL", dmarcVerdict: "GRAY" }]));
 
@@ -1567,7 +1579,7 @@ describe("SignalProcessor", () => {
 
   describe("rule actions — assign_workflow and delete", () => {
     it("assign_workflow action changes the arc workflow to the specified value", async () => {
-      vi.mocked(store.listRules).mockResolvedValueOnce([{
+      vi.mocked(store.listEnabledRules).mockResolvedValueOnce([{
         id: "rw-rule",
         accountId: TEST_ACCOUNT_ID,
         name: "Reclassify as content",
@@ -1585,7 +1597,7 @@ describe("SignalProcessor", () => {
     });
 
     it("delete action sets arc.status=deleted and records arc.deletedAt", async () => {
-      vi.mocked(store.listRules).mockResolvedValueOnce([{
+      vi.mocked(store.listEnabledRules).mockResolvedValueOnce([{
         id: "del-rule",
         accountId: TEST_ACCOUNT_ID,
         name: "Auto-delete promotions",
@@ -1604,7 +1616,7 @@ describe("SignalProcessor", () => {
     });
 
     it("multiple actions in one rule are all applied in order", async () => {
-      vi.mocked(store.listRules).mockResolvedValueOnce([{
+      vi.mocked(store.listEnabledRules).mockResolvedValueOnce([{
         id: "multi-rule",
         accountId: TEST_ACCOUNT_ID,
         name: "Label and archive",

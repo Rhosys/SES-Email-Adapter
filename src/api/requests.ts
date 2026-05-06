@@ -15,6 +15,7 @@ const RuleActionType = z.enum([
   "assign_label", "assign_workflow", "archive", "delete", "forward",
   "block", "quarantine", "set_urgency", "suppress_notification", "pong", "approve_sender",
 ]);
+const RuleStatus = z.enum(["enabled", "disabled"]);
 
 const EmailAddressSchema = z.object({
   address: z.string(),
@@ -101,7 +102,7 @@ export const CreateRuleRequest = z.object({
   name: z.string(),
   condition: z.string().optional(),
   actions: z.array(RuleActionSchema).min(1),
-  position: z.number().optional(),
+  priorityOrder: z.number().int().min(0).optional(),
 });
 export type CreateRuleRequest = z.infer<typeof CreateRuleRequest>;
 
@@ -109,8 +110,8 @@ export const UpdateRuleRequest = z.object({
   name: z.string().optional(),
   condition: z.string().optional(),
   actions: z.array(RuleActionSchema).optional(),
-  position: z.number().optional(),
-  enabled: z.boolean().optional(),
+  priorityOrder: z.number().int().min(0).optional(),
+  status: RuleStatus.optional(),
 });
 export type UpdateRuleRequest = z.infer<typeof UpdateRuleRequest>;
 

@@ -1,7 +1,7 @@
 import { randomUUID } from "crypto";
 import { DeleteCommand, GetCommand, PutCommand, QueryCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { dynamo, ACCOUNTS_TABLE } from "./shared.js";
-import type { Account, View, Label, Rule, Domain, Alias, AccountFilteringConfig, VerifiedForwardingAddress } from "../types/index.js";
+import type { Account, View, Label, Rule, RuleStatus, Domain, Alias, AccountFilteringConfig, VerifiedForwardingAddress } from "../types/index.js";
 import type { CreateViewRequest, UpdateViewRequest, CreateLabelRequest, UpdateLabelRequest, CreateRuleRequest, UpdateRuleRequest } from "../api/app.js";
 
 // ---------------------------------------------------------------------------
@@ -9,6 +9,11 @@ import type { CreateViewRequest, UpdateViewRequest, CreateLabelRequest, UpdateLa
 // ---------------------------------------------------------------------------
 
 const pk = (accountId: string) => `ACCT#${accountId}`;
+
+function ruleGsi1pk(accountId: string) { return `ACCT#${accountId}`; }
+function ruleGsi1sk(status: RuleStatus, priorityOrder: number, id: string) {
+  return `RULE#${status}#${String(priorityOrder).padStart(6, "0")}#${id}`;
+}
 
 // ---------------------------------------------------------------------------
 // AccountDatabase
@@ -267,39 +272,76 @@ export class AccountDatabase {
   async listRules(accountId: string): Promise<Rule[]> {
     const res = await dynamo.send(new QueryCommand({
       TableName: ACCOUNTS_TABLE,
-      KeyConditionExpression: "pk = :pk AND begins_with(sk, :prefix)",
-      ExpressionAttributeValues: { ":pk": pk(accountId), ":prefix": "RULE#" },
+      IndexName: "gsi1",
+      KeyConditionExpression: "gsi1pk = :pk AND begins_with(gsi1sk, :prefix)",
+      ExpressionAttributeValues: { ":pk": ruleGsi1pk(accountId), ":prefix": "RULE#" },
     }));
-    return ((res.Items ?? []) as Rule[]).sort((a, b) => a.position - b.position);
+    return (res.Items ?? []) as Rule[];
+  }
+
+  async listEnabledRules(accountId: string): Promise<Rule[]> {
+    const res = await dynamo.send(new QueryCommand({
+      TableName: ACCOUNTS_TABLE,
+      IndexName: "gsi1",
+      KeyConditionExpression: "gsi1pk = :pk AND begins_with(gsi1sk, :prefix)",
+      ExpressionAttributeValues: { ":pk": ruleGsi1pk(accountId), ":prefix": "RULE#enabled#" },
+    }));
+    return (res.Items ?? []) as Rule[];
   }
 
   async createRule(accountId: string, data: CreateRuleRequest): Promise<Rule> {
-    const rules = await this.listRules(accountId);
+    const allRules = await this.listRules(accountId);
+    const userRules = allRules.filter((r) => r.priorityOrder >= 100);
     const now = new Date().toISOString();
     const rule: Rule = {
       id: randomUUID(),
       accountId,
       name: data.name,
-      condition: data.condition,
+      condition: data.condition ?? "",
       actions: data.actions,
-      position: data.position ?? (rules.length > 0 ? Math.max(...rules.map((r) => r.position)) + 1 : 0),
+      status: "enabled",
+      priorityOrder: data.priorityOrder ?? (userRules.length > 0 ? Math.max(...userRules.map((r) => r.priorityOrder)) + 1 : 100),
       createdAt: now,
       updatedAt: now,
     };
-    await dynamo.send(new PutCommand({ TableName: ACCOUNTS_TABLE, Item: { ...rule, pk: pk(accountId), sk: `RULE#${rule.id}` } }));
+    await dynamo.send(new PutCommand({
+      TableName: ACCOUNTS_TABLE,
+      Item: {
+        ...rule,
+        pk: pk(accountId), sk: `RULE#${rule.id}`,
+        gsi1pk: ruleGsi1pk(accountId), gsi1sk: ruleGsi1sk(rule.status, rule.priorityOrder, rule.id),
+      },
+    }));
     return rule;
   }
 
   async updateRule(accountId: string, id: string, data: UpdateRuleRequest): Promise<Rule> {
+    const current = await dynamo.send(new GetCommand({
+      TableName: ACCOUNTS_TABLE,
+      Key: { pk: pk(accountId), sk: `RULE#${id}` },
+    }));
+    const existing = current.Item as Rule;
     const now = new Date().toISOString();
-    const setParts: string[] = ["updatedAt = :now"];
-    const exprValues: Record<string, unknown> = { ":now": now };
+    const mergedStatus = data.status ?? existing.status;
+    const mergedPriority = data.priorityOrder ?? existing.priorityOrder;
+
+    const setParts: string[] = [
+      "updatedAt = :now",
+      "gsi1pk = :g1pk",
+      "gsi1sk = :g1sk",
+    ];
+    const exprValues: Record<string, unknown> = {
+      ":now": now,
+      ":g1pk": ruleGsi1pk(accountId),
+      ":g1sk": ruleGsi1sk(mergedStatus, mergedPriority, id),
+    };
     const exprNames: Record<string, string> = {};
 
     if (data.name !== undefined) { setParts.push("#name = :name"); exprValues[":name"] = data.name; exprNames["#name"] = "name"; }
     if (data.condition !== undefined) { setParts.push("#cond = :cond"); exprValues[":cond"] = data.condition; exprNames["#cond"] = "condition"; }
     if (data.actions !== undefined) { setParts.push("actions = :actions"); exprValues[":actions"] = data.actions; }
-    if (data.position !== undefined) { setParts.push("#pos = :pos"); exprValues[":pos"] = data.position; exprNames["#pos"] = "position"; }
+    if (data.priorityOrder !== undefined) { setParts.push("#pri = :pri"); exprValues[":pri"] = data.priorityOrder; exprNames["#pri"] = "priorityOrder"; }
+    if (data.status !== undefined) { setParts.push("#status = :status"); exprValues[":status"] = data.status; exprNames["#status"] = "status"; }
 
     await dynamo.send(new UpdateCommand({
       TableName: ACCOUNTS_TABLE,
@@ -308,24 +350,16 @@ export class AccountDatabase {
       ExpressionAttributeValues: exprValues,
       ...(Object.keys(exprNames).length ? { ExpressionAttributeNames: exprNames } : {}),
     }));
-    const rules = await this.listRules(accountId);
-    return rules.find((r) => r.id === id)!;
+
+    const updated = await dynamo.send(new GetCommand({
+      TableName: ACCOUNTS_TABLE,
+      Key: { pk: pk(accountId), sk: `RULE#${id}` },
+    }));
+    return updated.Item as Rule;
   }
 
   async deleteRule(accountId: string, id: string): Promise<void> {
     await dynamo.send(new DeleteCommand({ TableName: ACCOUNTS_TABLE, Key: { pk: pk(accountId), sk: `RULE#${id}` } }));
-  }
-
-  async reorderRules(accountId: string, orderedIds: string[]): Promise<void> {
-    await Promise.all(orderedIds.map((id, position) =>
-      dynamo.send(new UpdateCommand({
-        TableName: ACCOUNTS_TABLE,
-        Key: { pk: pk(accountId), sk: `RULE#${id}` },
-        UpdateExpression: "SET #pos = :pos",
-        ExpressionAttributeNames: { "#pos": "position" },
-        ExpressionAttributeValues: { ":pos": position },
-      })),
-    ));
   }
 
   // ---------------------------------------------------------------------------
