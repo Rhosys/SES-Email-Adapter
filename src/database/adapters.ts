@@ -52,7 +52,12 @@ export class ApiDatabaseAdapter implements ApiDatabase {
   getSignal(accountId: string, id: string) { return this.arc.getSignal(accountId, id); }
   updateSignal(accountId: string, id: string, update: Partial<Pick<Signal, "subject" | "textBody" | "from" | "to">>) { return this.arc.updateSignal(accountId, id, update); }
   deleteSignal(accountId: string, id: string) { return this.arc.deleteSignal(accountId, id); }
+  blockSignal(accountId: string, signalId: string) { return this.arc.blockSignal(accountId, signalId); }
   unblockSignal(accountId: string, signalId: string, arcId: string) { return this.arc.unblockSignal(accountId, signalId, arcId); }
+
+  // Arcs (additional)
+  saveArc(arc: Arc) { return this.arc.saveArc(arc); }
+  findArcByGroupingKey(accountId: string, key: string) { return this.arc.findArcByGroupingKey(accountId, key); }
 
   // Search
   searchArcs(accountId: string, query: string, params: PageParams) { return this.arc.searchArcs(accountId, query, params); }

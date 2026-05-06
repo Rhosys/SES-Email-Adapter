@@ -1,10 +1,11 @@
 import { Hono } from "hono";
 import { randomUUID } from "crypto";
 import { getDomain } from "tldts";
-import type { Arc, Signal, View, Label, Rule, Domain, DnsRecord, Account, Page, PageParams, ArcStatus, Workflow, Alias, SenderFilterMode, VerifiedForwardingAddress, Pagination } from "../types/index.js";
+import type { Arc, Signal, View, Label, Rule, Domain, DnsRecord, Account, Page, PageParams, ArcStatus, Workflow, WorkflowData, Alias, SenderFilterMode, VerifiedForwardingAddress, Pagination } from "../types/index.js";
+import { deriveGroupingKey } from "../processor/processor.js";
 import { zParse } from "./validate.js";
 import {
-  UpdateArcRequest, CreateArcFromSignalRequest, UpdateSignalRequest,
+  UpdateArcRequest, CreateArcFromSignalRequest, UpdateSignalRequest, UpdateSignalStatusRequest,
   CreateViewRequest, UpdateViewRequest,
   CreateLabelRequest, UpdateLabelRequest,
   CreateRuleRequest, UpdateRuleRequest,
@@ -57,7 +58,7 @@ export interface ListArcsParams extends PageParams {
   status?: ArcStatus;
 }
 
-export type { UpdateArcRequest, CreateViewRequest, UpdateViewRequest, CreateLabelRequest, UpdateLabelRequest, CreateRuleRequest, UpdateRuleRequest };
+export type { UpdateArcRequest, UpdateSignalStatusRequest, CreateViewRequest, UpdateViewRequest, CreateLabelRequest, UpdateLabelRequest, CreateRuleRequest, UpdateRuleRequest };
 
 export interface ApiDatabase {
   // Arcs
@@ -111,9 +112,12 @@ export interface ApiDatabase {
   upsertAlias(alias: Alias): Promise<Alias>;
   deleteAlias(accountId: string, address: string): Promise<void>;
 
-  // Signal unblocking
+  // Signal status management
+  blockSignal(accountId: string, signalId: string): Promise<Signal>;
   unblockSignal(accountId: string, signalId: string, arcId: string): Promise<void>;
   createArc(arc: Arc): Promise<void>;
+  saveArc(arc: Arc): Promise<void>;
+  findArcByGroupingKey(accountId: string, key: string): Promise<Arc | null>;
 
   // Verified forwarding addresses
   listVerifiedForwardingAddresses(accountId: string): Promise<VerifiedForwardingAddress[]>;
@@ -315,6 +319,78 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
     };
     const result = await store.listPreArcSignals(accountId, status, params);
     return c.json(page("signals", result.items, result.nextCursor));
+  });
+
+  app.put("/accounts/:accountId/signals/:id/status", async (c) => {
+    const { accountId } = c.get("auth");
+    const signal = await store.getSignal(accountId, c.req.param("id"));
+    if (!signal) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
+    if (signal.accountId !== accountId) return err(c, 403, "Forbidden");
+    if (signal.status !== "blocked" && signal.status !== "quarantined") {
+      return err(c, 400, "Only blocked or quarantined signals can have their status updated", "SIGNAL_NOT_REVIEWABLE");
+    }
+
+    const body = await zParse(UpdateSignalStatusRequest, c.req.raw);
+
+    if (body.status === "blocked") {
+      const updated = await store.blockSignal(accountId, signal.id);
+      return c.json(updated);
+    }
+
+    // status === "active": find existing arc or create one, bypassing rule evaluation
+    const senderDomain = signal.from.address.includes("@") ? signal.from.address.split("@").pop()! : signal.from.address;
+    const senderETLD1 = getDomain(senderDomain) ?? senderDomain;
+    const groupingKey = deriveGroupingKey(signal.workflow, signal.workflowData, signal.recipientAddress, senderETLD1);
+    const matchedArc = groupingKey ? await store.findArcByGroupingKey(accountId, groupingKey) : null;
+
+    const now = new Date().toISOString();
+    let arc: Arc;
+    if (matchedArc) {
+      arc = matchedArc;
+      if (signal.receivedAt > arc.lastSignalAt) {
+        arc = { ...arc, lastSignalAt: signal.receivedAt, updatedAt: now };
+        await store.saveArc(arc);
+      }
+    } else {
+      arc = {
+        id: randomUUID(),
+        accountId,
+        workflow: signal.workflow,
+        labels: [],
+        status: "active",
+        summary: signal.summary,
+        lastSignalAt: signal.receivedAt,
+        createdAt: now,
+        updatedAt: now,
+        ...(groupingKey ? { groupingKey } : {}),
+      };
+      await store.createArc(arc);
+    }
+
+    await store.unblockSignal(accountId, signal.id, arc.id);
+
+    if (body.approveSender || body.updateFilterMode) {
+      const existing = await store.getAlias(accountId, signal.recipientAddress);
+      const base = existing ?? {
+        id: randomUUID(),
+        accountId,
+        address: signal.recipientAddress,
+        filterMode: "notify_new" as SenderFilterMode,
+        approvedSenders: [] as string[],
+        createdAt: now,
+        updatedAt: now,
+      };
+      await store.upsertAlias({
+        ...base,
+        filterMode: body.updateFilterMode ?? base.filterMode,
+        approvedSenders: body.approveSender && !base.approvedSenders.includes(senderETLD1)
+          ? [...base.approvedSenders, senderETLD1]
+          : base.approvedSenders,
+        updatedAt: now,
+      });
+    }
+
+    return c.json({ arc, signal: { ...signal, status: "active", arcId: arc.id } });
   });
 
   app.get("/accounts/:accountId/signals/:id", async (c) => {
