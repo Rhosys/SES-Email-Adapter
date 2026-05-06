@@ -126,36 +126,46 @@ function applyRules(
   rules: Rule[],
   context: { signal: Signal; arc: Arc; isMatchedArc: boolean },
   evaluator: RuleEvaluator,
-  outcome: ProcessingOutcome,
-): { outcome: ProcessingOutcome; matchedRules: MatchedRuleResult[] } {
+): MatchedRuleResult[] {
   const matchedRules: MatchedRuleResult[] = [];
   for (const rule of rules) {
     if (!evaluator.evaluate(rule, context)) continue;
-    const result: MatchedRuleResult = {
-      ruleId: rule.id,
-      ruleName: rule.name,
-      actions: rule.actions.filter((a) => !a.disabled),
-      labelsAdded: [],
-    };
-    for (const action of rule.actions) {
-      if (action.disabled) continue;
+    const actions = rule.actions.filter((a) => !a.disabled);
+    const labelsAdded = actions.filter((a) => a.type === "assign_label" && a.value).map((a) => a.value!);
+    const statusChange = (
+      actions.some((a) => a.type === "block")      ? "blocked"     :
+      actions.some((a) => a.type === "quarantine") ? "quarantined" :
+      actions.some((a) => a.type === "archive")    ? "archived"    :
+      actions.some((a) => a.type === "delete")     ? "deleted"     :
+      undefined
+    ) satisfies MatchedRuleResult["statusChange"];
+    matchedRules.push({ ruleId: rule.id, ruleName: rule.name, actions, labelsAdded, statusChange });
+    // assign_workflow mutates the arc so subsequent rules evaluate against the updated workflow
+    const workflowAction = actions.find((a) => a.type === "assign_workflow");
+    if (workflowAction?.value) context.arc.workflow = workflowAction.value as Workflow;
+  }
+  return matchedRules;
+}
+
+function deriveOutcome(matchedRules: MatchedRuleResult[]): ProcessingOutcome {
+  const outcome = emptyOutcome();
+  for (const { actions } of matchedRules) {
+    for (const action of actions) {
       switch (action.type) {
-        case "block":                 outcome.block = true; if (!result.statusChange) result.statusChange = "blocked"; break;
-        case "quarantine":            outcome.quarantine = true; if (!result.statusChange) result.statusChange = "quarantined"; break;
+        case "block":                 outcome.block = true; break;
+        case "quarantine":            outcome.quarantine = true; break;
         case "approve_sender":        outcome.approveSender = true; break;
-        case "archive":               outcome.archive = true; if (!result.statusChange) result.statusChange = "archived"; break;
-        case "delete":                outcome.delete = true; if (!result.statusChange) result.statusChange = "deleted"; break;
+        case "archive":               outcome.archive = true; break;
+        case "delete":                outcome.delete = true; break;
         case "suppress_notification": outcome.suppressNotification = true; break;
         case "set_urgency":           if (action.value) outcome.urgency = action.value as ArcUrgency; break;
-        case "assign_label":          if (action.value) { outcome.additionalLabels.push(action.value); result.labelsAdded.push(action.value); } break;
-        case "assign_workflow":       if (action.value) context.arc.workflow = action.value as Workflow; break;
+        case "assign_label":          if (action.value) outcome.additionalLabels.push(action.value); break;
         case "forward":               if (action.value) outcome.forwardAddresses.push(action.value); break;
         case "pong":                  outcome.doPong = true; break;
       }
     }
-    matchedRules.push(result);
   }
-  return { outcome, matchedRules };
+  return outcome;
 }
 
 // ---------------------------------------------------------------------------
@@ -362,7 +372,8 @@ export class SignalProcessor {
 
     // 10. Evaluate all rules (system rules seeded at low position numbers, user rules at higher positions)
     const rules = await this.store.listEnabledRules(accountId);
-    const { outcome, matchedRules } = applyRules(rules, { signal: signalShell, arc, isMatchedArc }, this.ruleEvaluator, emptyOutcome());
+    const matchedRules = applyRules(rules, { signal: signalShell, arc, isMatchedArc }, this.ruleEvaluator);
+    const outcome = deriveOutcome(matchedRules);
 
     // Block/quarantine: approveSender overrides quarantine (SR-14 fires before SR-02)
     if (outcome.block || (outcome.quarantine && !outcome.approveSender)) {
