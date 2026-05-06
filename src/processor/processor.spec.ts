@@ -439,6 +439,73 @@ describe("SignalProcessor", () => {
   });
 
   // -------------------------------------------------------------------------
+  // matchedRules
+  // -------------------------------------------------------------------------
+
+  describe("matchedRules", () => {
+    it("writes matched rule with labelsAdded to signal", async () => {
+      const rule: Rule = {
+        id: "rule-label",
+        accountId: TEST_ACCOUNT_ID,
+        name: "Tag billing",
+        condition: "true",
+        actions: [{ type: "assign_label", value: "billing" }],
+        status: "enabled",
+        priorityOrder: 100,
+        createdAt: "2024-01-01T00:00:00Z",
+        updatedAt: "2024-01-01T00:00:00Z",
+      };
+      vi.mocked(store.listEnabledRules).mockResolvedValueOnce([rule]);
+
+      await processor.process(makeSqsEvent([{}]));
+
+      const signal = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
+      expect(signal.matchedRules).toHaveLength(1);
+      expect(signal.matchedRules![0]!.ruleId).toBe("rule-label");
+      expect(signal.matchedRules![0]!.ruleName).toBe("Tag billing");
+      expect(signal.matchedRules![0]!.labelsAdded).toContain("billing");
+      expect(signal.matchedRules![0]!.statusChange).toBeUndefined();
+    });
+
+    it("writes statusChange on the matching rule for a quarantined signal", async () => {
+      const rule: Rule = {
+        id: "rule-quarantine",
+        accountId: TEST_ACCOUNT_ID,
+        name: "Quarantine unknown",
+        condition: "true",
+        actions: [{ type: "quarantine" }],
+        status: "enabled",
+        priorityOrder: 100,
+        createdAt: "2024-01-01T00:00:00Z",
+        updatedAt: "2024-01-01T00:00:00Z",
+      };
+      vi.mocked(store.listEnabledRules).mockResolvedValueOnce([rule]);
+      vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce({
+        ...DEFAULT_CTX,
+        emailConfig: { ...DEFAULT_EMAIL_CONFIG, filterMode: "allow_all" },
+      });
+
+      await processor.process(makeSqsEvent([{}]));
+
+      const signal = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
+      expect(signal.status).toBe("quarantined");
+      expect(signal.matchedRules).toHaveLength(1);
+      expect(signal.matchedRules![0]!.statusChange).toBe("quarantined");
+    });
+
+    it("does not include rules that did not match", async () => {
+      const matching: Rule = { ...makeRule({ id: "r-match", name: "Matches", condition: "true", actions: [{ type: "archive" }] }) };
+      const nonMatching: Rule = { ...makeRule({ id: "r-skip", name: "Never", condition: '{"==": [1, 2]}', actions: [{ type: "block" }] }) };
+      vi.mocked(store.listEnabledRules).mockResolvedValueOnce([matching, nonMatching]);
+
+      await processor.process(makeSqsEvent([{}]));
+
+      const signal = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
+      expect(signal.matchedRules?.map((r) => r.ruleId)).toEqual(["r-match"]);
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // Forwarding
   // -------------------------------------------------------------------------
 

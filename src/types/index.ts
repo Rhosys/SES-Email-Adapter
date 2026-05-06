@@ -296,6 +296,18 @@ export interface Attachment {
 }
 
 // ---------------------------------------------------------------------------
+// MatchedRuleResult — per-rule trace written to Signal.matchedRules
+// ---------------------------------------------------------------------------
+
+export interface MatchedRuleResult {
+  ruleId: string;
+  ruleName: string;
+  actions: RuleAction[];      // non-disabled actions from this rule
+  labelsAdded: string[];      // values from assign_label actions
+  statusChange?: "blocked" | "quarantined" | "archived" | "deleted";
+}
+
+// ---------------------------------------------------------------------------
 // Signal (immutable inbound email event)
 // ---------------------------------------------------------------------------
 
@@ -303,6 +315,7 @@ export interface Signal {
   // Discriminated ID encoding origin: "SES#${sesMessageId}" | "SYS#${uuid}" | "USR#${uuid}"
   id: string;
   arcId?: string;        // Undefined while signal is blocked pending user action
+  matchedRules?: MatchedRuleResult[];
   accountId: string;
   source: SignalSource;
   receivedAt: string;      // ISO datetime
