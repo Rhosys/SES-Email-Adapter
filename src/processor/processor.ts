@@ -180,9 +180,8 @@ export const SYSTEM_RULES: Rule[] = [
   { id: "SR-02", accountId: "SYSTEM", name: "Quarantine untrusted senders", condition: JSON.stringify(in_("system:sender:untrusted")), actions: [{ type: "quarantine" }], status: "enabled", priorityOrder: 3, createdAt: "", updatedAt: "" },
   { id: "SR-03", accountId: "SYSTEM", name: "Quarantine high-spam signals", condition: JSON.stringify(in_("system:spam:high")), actions: [{ type: "quarantine" }], status: "enabled", priorityOrder: 4, createdAt: "", updatedAt: "" },
   { id: "SR-04", accountId: "SYSTEM", name: "Suppress notification for medium spam", condition: JSON.stringify(in_("system:spam:medium")), actions: [{ type: "suppress_notification" }], status: "enabled", priorityOrder: 5, createdAt: "", updatedAt: "" },
-  { id: "SR-05", accountId: "SYSTEM", name: "Auto-archive status emails", condition: JSON.stringify(in_("system:workflow:status")), actions: [{ type: "archive" }], status: "enabled", priorityOrder: 6, createdAt: "", updatedAt: "" },
-  { id: "SR-06", accountId: "SYSTEM", name: "Suppress notification for status emails", condition: JSON.stringify(in_("system:workflow:status")), actions: [{ type: "suppress_notification" }], status: "enabled", priorityOrder: 7, createdAt: "", updatedAt: "" },
-  { id: "SR-07", accountId: "SYSTEM", name: "Suppress notification for content emails", condition: JSON.stringify(in_("system:workflow:content")), actions: [{ type: "suppress_notification" }], status: "enabled", priorityOrder: 8, createdAt: "", updatedAt: "" },
+  { id: "SR-05", accountId: "SYSTEM", name: "Block status emails", condition: JSON.stringify(in_("system:workflow:status")), actions: [{ type: "block" }], status: "enabled", priorityOrder: 6, createdAt: "", updatedAt: "" },
+  { id: "SR-07", accountId: "SYSTEM", name: "Suppress notification for content emails", condition: JSON.stringify(in_("system:workflow:content")), actions: [{ type: "suppress_notification" }], status: "enabled", priorityOrder: 7, createdAt: "", updatedAt: "" },
   { id: "SR-08", accountId: "SYSTEM", name: "Set urgency: critical", condition: JSON.stringify(in_("system:urgency:critical")), actions: [{ type: "set_urgency", value: "critical" }], status: "enabled", priorityOrder: 9, createdAt: "", updatedAt: "" },
   { id: "SR-09", accountId: "SYSTEM", name: "Set urgency: high", condition: JSON.stringify(in_("system:urgency:high")), actions: [{ type: "set_urgency", value: "high" }], status: "enabled", priorityOrder: 10, createdAt: "", updatedAt: "" },
   { id: "SR-10", accountId: "SYSTEM", name: "Set urgency: normal", condition: JSON.stringify(in_("system:urgency:normal")), actions: [{ type: "set_urgency", value: "normal" }], status: "enabled", priorityOrder: 11, createdAt: "", updatedAt: "" },
@@ -375,9 +374,9 @@ export class SignalProcessor {
     const matchedRules = applyRules(rules, { signal: signalShell, arc, isMatchedArc }, this.ruleEvaluator);
     const outcome = deriveOutcome(matchedRules);
 
-    // Block/quarantine: approveSender overrides quarantine (SR-14 fires before SR-02)
+    // Block/quarantine: block wins over quarantine; approveSender overrides quarantine (SR-14 fires before SR-02)
     if (outcome.block || (outcome.quarantine && !outcome.approveSender)) {
-      const status: SignalStatus = outcome.quarantine ? "quarantined" : "blocked";
+      const status: SignalStatus = outcome.block ? "blocked" : "quarantined";
       const blockedSignal: Signal = {
         ...buildSignal({
           status,

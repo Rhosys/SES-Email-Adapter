@@ -169,7 +169,9 @@ export interface OnboardingData {
 
 export interface StatusData {
   workflow: "status";
-  statusType: "terms_update" | "privacy_policy" | "service_notice" | "government" | "account_notification" | "other";
+  statusType:
+    | "terms_update" | "privacy_policy" | "data_processor" | "cookie_policy" | "compliance"
+    | "service_notice" | "government" | "account_notification" | "other";
   provider: string;
   effectiveDate?: string;
   referenceNumber?: string;

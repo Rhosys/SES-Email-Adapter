@@ -1329,35 +1329,24 @@ describe("SignalProcessor", () => {
       processor = new SignalProcessor({ store, mimeParser, classifier, arcMatcher, ruleEvaluator, notifier });
     });
 
-    it("creates a notice arc with status=archived (buried on arrival, never active)", async () => {
+    it("blocks status emails silently — no arc created, signal saved as blocked", async () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(noticeClassification);
 
       await processor.process(makeSqsEvent([{}]));
 
-      const arc = vi.mocked(store.saveArc).mock.calls[0]![0] as Arc;
-      expect(arc.status).toBe("archived");
-      expect(arc.workflow).toBe("status");
+      expect(store.saveArc).not.toHaveBeenCalled();
+      const signal = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
+      expect(signal.status).toBe("blocked");
+      expect(signal.workflow).toBe("status");
     });
 
-    it("does not call notifier for a notice arc even when the signal is new", async () => {
+    it("does not call notifier for a blocked status email", async () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(noticeClassification);
 
       await processor.process(makeSqsEvent([{}]));
 
       expect(notifier.notify).not.toHaveBeenCalled();
-    });
-
-    it("does not bump lastSignalAt on an existing arc when a rule archives the incoming signal", async () => {
-      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(noticeClassification);
-      // notice uses groupingKey so findArcByGroupingKey is the match path
-      vi.mocked(store.findArcByGroupingKey).mockResolvedValueOnce(
-        makeArc({ lastSignalAt: "2024-01-10T00:00:00Z" }),
-      );
-
-      await processor.process(makeSqsEvent([{}]));
-
-      const saved = vi.mocked(store.saveArc).mock.calls[0]![0] as Arc;
-      expect(saved.lastSignalAt).toBe("2024-01-10T00:00:00Z"); // unchanged
+      expect(notifier.notifyBlocked).not.toHaveBeenCalled();
     });
   });
 
