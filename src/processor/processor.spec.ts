@@ -462,7 +462,6 @@ describe("SignalProcessor", () => {
       const signal = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
       expect(signal.matchedRules).toHaveLength(1);
       expect(signal.matchedRules![0]!.ruleId).toBe("rule-label");
-      expect(signal.matchedRules![0]!.ruleName).toBe("Tag billing");
       expect(signal.matchedRules![0]!.labelsAdded).toContain("billing");
       expect(signal.matchedRules![0]!.statusChange).toBeUndefined();
     });

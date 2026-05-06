@@ -301,9 +301,8 @@ export interface Attachment {
 
 export interface MatchedRuleResult {
   ruleId: string;
-  ruleName: string;
-  actions: RuleAction[];      // non-disabled actions from this rule
-  labelsAdded: string[];      // values from assign_label actions
+  actions: Array<Pick<RuleAction, "type" | "value">>;
+  labelsAdded: string[];
   statusChange?: "blocked" | "quarantined" | "archived" | "deleted";
 }
 
