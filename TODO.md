@@ -100,7 +100,7 @@ DELETE /accounts/:accountId/signals/:id       — discard draft; 400 if not draf
 
 ---
 
-- [ ] Detect forwarded emails and auto-tag with a label `original:john@gmail.com`, where `john@gmail.com` is the original recipient address the email was sent to before being forwarded into the system. Use `X-Forwarded-To`, `X-Original-To`, or `Resent-To` headers to extract the address. **Validation required**: add a test asserting that the `original:*` label is correctly attached to the signal/arc and that the address is extracted accurately from the header.
+- [x] Detect forwarded emails and auto-tag with a label `original:john@gmail.com`, where `john@gmail.com` is the original recipient address the email was sent to before being forwarded into the system. Use `X-Forwarded-To`, `X-Original-To`, or `Resent-To` headers to extract the address. **Validation required**: add a test asserting that the `original:*` label is correctly attached to the signal/arc and that the address is extracted accurately from the header.
 - [x] **`"test"` workflow** — implemented: in `WORKFLOWS`, `TestData` interface, processor pong (Bedrock auto-reply), urgency override, onboarding integration all done.
 - [x] **Spam score threshold configurable** — `spamScoreThreshold` on both `AccountFilteringConfig` and `EmailAddressConfig` with account → per-address override chain.
 - [x] **Two-tier domain setup model** — `receivingSetupComplete`, `senderSetupComplete`, per-record `DnsRecord` status, all in `Domain` type and API.
@@ -246,7 +246,64 @@ The extension (`extension/`) has a working implementation that assumes a `/alias
 
 ---
 
-## UI APP
+## MARKETING PAGE CONTENT
+
+Novel and differentiated features to highlight. Each item here represents something genuinely novel, privacy-respecting, or technically differentiated — not table-stakes inbox features. Use this list to brief copywriters and inform the marketing site's feature sections.
+
+---
+
+### Privacy & Security — Switzerland
+
+- **Swiss-hosted infrastructure** — all email data stored and processed in Switzerland, subject to Swiss data protection law (nFADP), one of the strongest privacy frameworks globally. No US cloud jurisdiction, no FISA/PRISM exposure.
+- **No advertising, no data mining** — inbox contents are never used for profiling, ad targeting, or sold to third parties. The business model is subscriptions, not surveillance.
+- **Zero-knowledge AI classification** — classification runs against email metadata and content, but the AI model (Bedrock/Claude) processes transiently and does not retain training data from user emails.
+- **End-to-end audit log** — every action on every arc and signal is logged with before/after state. Users can export their full audit trail at any time. Transparency over opacity.
+
+---
+
+### JMAP Support
+
+- **Industry-standard JMAP protocol** (RFC 8620 + RFC 8621) — connect any standards-compliant email client (Apple Mail on iOS/macOS, Thunderbird, Mimestream, etc.) directly to the inbox without a proprietary app. The inbox becomes a protocol-level platform, not a walled garden.
+- **JMAP push** — real-time state change notifications over SSE/WebSocket. Client state always in sync without polling. Battery-efficient on mobile.
+- **EmailSubmission/set** — outbound sending through JMAP, gated on Tier 2 sender setup. Unified send/receive over one protocol.
+
+---
+
+### Unlimited Aliases
+
+- **Unlimited receive addresses** at any registered domain — `receipts@`, `newsletters@`, `orders@`, `anything@` — all routed to the same account with per-address filter configs. No per-alias charge. No artificial limits.
+- **Automatic alias creation** — the system creates a per-address config the moment the first email arrives at a new address on a registered domain. No manual setup. The alias exists as soon as mail arrives.
+- **Per-alias filter mode** — each alias has independent `filterMode`, `approvedSenders`, `spamScoreThreshold`, and `blockDisposition` settings. `newsletters@yourdomain.com` can be `allow_all`; `finance@yourdomain.com` can be `strict`. Full granularity.
+- **Alias-level labelling** — rules can fire on `recipientAddress`, so emails to `receipts@` can auto-label `receipts`, emails to `orders@` auto-label `orders`. Inbox organisation emerges from how you hand out addresses.
+
+---
+
+### Auto-Unsubscribe
+
+- **One-tap unsubscribe from any arc row** — unsubscribe link extracted from `List-Unsubscribe` and `List-Unsubscribe-Post` headers (RFC 2369/8058) and surfaced directly in the inbox UI. No digging through the email. No navigating to the sender's site.
+- **POST-based unsubscribe** — where the sender supports `List-Unsubscribe-Post` (Gmail-compatible one-click standard), the inbox fires the POST server-side without opening a browser. Instant, no confirmation page, no re-marketing flow.
+- **Post-unsubscribe auto-archive rule** — after unsubscribing, the arc is archived and a label `unsubscribed:{publisher}` is applied. A rule can be auto-created to archive future mail from that sender.
+- **Unsubscribe audit** — account-level list of all unsubscriptions: publisher, date, method (POST vs link). Exportable. Useful for compliance and for verifying that unsubscribes actually took effect.
+
+---
+
+### Search
+
+- **Full-text search across all arcs and signals** — subject, sender, body, AI summary, labels. Instant results with keyboard shortcut. No waiting for indexing — backed by DynamoDB + a dedicated search index built at signal ingestion time.
+- **Semantic search** — "find emails about my AWS bill from last quarter" finds the right arc even if those words don't appear verbatim. Backed by the same embedding vectors used for arc matching. Optional (heavier query) but powerful for power users.
+- **Filter-as-you-type** — chips for `workflow:`, `label:`, `from:`, `before:`, `after:`, `status:` compose into structured queries. The query language is learnable and scriptable for power users.
+- **Saved searches** — any search query can be saved as a View. "All unpaid invoices" becomes a persistent sidebar item, auto-updating as new signals arrive.
+
+---
+
+### Signup & Registration Integration (Browser Extension)
+
+- **Browser extension detects signup forms** — when the user registers for a new service in Chrome/Firefox/Safari, the extension offers a one-tap auto-generated alias: `stripe-{random}@yourdomain.com`. The alias is created server-side before the form is submitted, with a pre-configured filter rule to label incoming mail `service:stripe`.
+- **Extension fills the alias into the email field** — no copy-paste. The user clicks the extension icon (or the inline icon in the email field), chooses an alias, and the form is filled. Captures the site domain for labelling.
+- **Per-registration alias tracking** — the extension stores which alias was used for which site. In Settings → Email Addresses, the user sees `stripe-abc123@yourdomain.com — used at stripe.com — 4 emails received`. This is account-breach detection: if `stripe-abc123@` starts receiving phishing mail, the user knows Stripe's email list was compromised.
+- **One-click alias blocking** — if an alias starts receiving spam or the user no longer wants mail from that service, they block the alias in one tap from Settings. All future mail to that alias is silently dropped — no unsubscribe dance, no email bounced back to the sender, just silence.
+
+---
 
 Everything the backend already knows that the UI needs to expose. Organised by screen/feature area.
 
