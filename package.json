@@ -23,7 +23,8 @@
     "json-logic-js": "^2.0.0",
     "mailparser": "^3.7.0",
     "pg": "^8.0.0",
-    "tldts": "^7.0.28"
+    "tldts": "^7.0.28",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/aws-lambda": "^8.10.0",

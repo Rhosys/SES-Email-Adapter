@@ -41,7 +41,6 @@ function makeStore(): ApiDatabase {
     createView: vi.fn().mockResolvedValue(makeView()),
     updateView: vi.fn().mockResolvedValue(makeView()),
     deleteView: vi.fn().mockResolvedValue(undefined),
-    reorderViews: vi.fn().mockResolvedValue(undefined),
     listLabels: vi.fn().mockResolvedValue([]),
     createLabel: vi.fn().mockResolvedValue(makeLabel()),
     updateLabel: vi.fn().mockResolvedValue(makeLabel()),
@@ -50,7 +49,6 @@ function makeStore(): ApiDatabase {
     createRule: vi.fn().mockResolvedValue(makeRule()),
     updateRule: vi.fn().mockResolvedValue(makeRule()),
     deleteRule: vi.fn().mockResolvedValue(undefined),
-    reorderRules: vi.fn().mockResolvedValue(undefined),
     listDomains: vi.fn().mockResolvedValue([]),
     getDomain: vi.fn().mockResolvedValue(null),
     createDomain: vi.fn().mockResolvedValue(makeDomain()),
@@ -542,14 +540,6 @@ describe("API", () => {
     });
   });
 
-  describe("POST /accounts/:accountId/views/reorder", () => {
-    it("reorders Views by ID array", async () => {
-      const res = await req(app, "POST", `${A}/views/reorder`, { body: { orderedIds: ["view-002", "view-001"] } });
-      expect(res.status).toBe(200);
-      expect(store.reorderViews).toHaveBeenCalledWith(TEST_ACCOUNT_ID, ["view-002", "view-001"]);
-    });
-  });
-
   // -------------------------------------------------------------------------
   // Label routes
   // -------------------------------------------------------------------------
@@ -666,14 +656,6 @@ describe("API", () => {
       const res = await req(app, "DELETE", `${A}/rules/rule-001`);
       expect(res.status).toBe(204);
       expect(store.deleteRule).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "rule-001");
-    });
-  });
-
-  describe("POST /accounts/:accountId/rules/reorder", () => {
-    it("reorders rules by ID array", async () => {
-      const res = await req(app, "POST", `${A}/rules/reorder`, { body: { orderedIds: ["rule-002", "rule-001"] } });
-      expect(res.status).toBe(200);
-      expect(store.reorderRules).toHaveBeenCalledWith(TEST_ACCOUNT_ID, ["rule-002", "rule-001"]);
     });
   });
 
