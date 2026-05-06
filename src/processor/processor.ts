@@ -130,7 +130,7 @@ function applyRules(
   const matchedRules: MatchedRuleResult[] = [];
   for (const rule of rules) {
     if (!evaluator.evaluate(rule, context)) continue;
-    const actions = rule.actions.filter((a) => !a.disabled);
+    const actions = rule.actions.filter((a) => !a.disabled).map(({ type, value }) => ({ type, ...(value !== undefined ? { value } : {}) }));
     const labelsAdded = actions.filter((a) => a.type === "assign_label" && a.value).map((a) => a.value!);
     const statusChange = (
       actions.some((a) => a.type === "block")      ? "blocked"     :
@@ -139,7 +139,7 @@ function applyRules(
       actions.some((a) => a.type === "delete")     ? "deleted"     :
       undefined
     ) satisfies MatchedRuleResult["statusChange"];
-    matchedRules.push({ ruleId: rule.id, ruleName: rule.name, actions, labelsAdded, statusChange });
+    matchedRules.push({ ruleId: rule.id, actions, labelsAdded, statusChange });
     // assign_workflow mutates the arc so subsequent rules evaluate against the updated workflow
     const workflowAction = actions.find((a) => a.type === "assign_workflow");
     if (workflowAction?.value) context.arc.workflow = workflowAction.value as Workflow;
