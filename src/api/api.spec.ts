@@ -34,6 +34,9 @@ function makeStore(): ApiDatabase {
     updateArc: vi.fn().mockResolvedValue(makeArc()),
     listSignals: vi.fn().mockResolvedValue({ items: [] }),
     listPreArcSignals: vi.fn().mockResolvedValue({ items: [] }),
+    blockSignal: vi.fn().mockImplementation((_, id) => Promise.resolve({ id, status: "blocked" })),
+    saveArc: vi.fn().mockResolvedValue(undefined),
+    findArcByGroupingKey: vi.fn().mockResolvedValue(null),
     getSignal: vi.fn().mockResolvedValue(null),
     updateSignal: vi.fn().mockResolvedValue(makeSignal()),
     deleteSignal: vi.fn().mockResolvedValue(undefined),
@@ -416,6 +419,59 @@ describe("API", () => {
     it("returns 400 when status param is invalid", async () => {
       const res = await req(app, "GET", `${A}/signals?status=active`);
       expect(res.status).toBe(400);
+    });
+  });
+
+  describe("PUT /accounts/:accountId/signals/:id/status", () => {
+    it("blocks a quarantined signal", async () => {
+      const s = makeSignal({ status: "quarantined" });
+      vi.mocked(store.getSignal).mockResolvedValueOnce(s);
+      const res = await req(app, "PUT", `${A}/signals/SES%23msg-001/status`, { body: { status: "blocked" } });
+      expect(res.status).toBe(200);
+      expect(store.blockSignal).toHaveBeenCalledWith(TEST_ACCOUNT_ID, s.id);
+    });
+
+    it("allows a quarantined signal — creates new arc when no grouping key match", async () => {
+      const s = makeSignal({ status: "quarantined" });
+      vi.mocked(store.getSignal).mockResolvedValueOnce(s);
+      vi.mocked(store.findArcByGroupingKey).mockResolvedValueOnce(null);
+      const res = await req(app, "PUT", `${A}/signals/SES%23msg-001/status`, { body: { status: "active" } });
+      expect(res.status).toBe(200);
+      const body = await res.json() as { arc: Arc; signal: Signal };
+      expect(body.arc.workflow).toBe(s.workflow);
+      expect(body.signal.status).toBe("active");
+      expect(store.createArc).toHaveBeenCalledOnce();
+      expect(store.unblockSignal).toHaveBeenCalledWith(TEST_ACCOUNT_ID, s.id, body.arc.id);
+    });
+
+    it("allows a quarantined signal — attaches to existing arc when grouping key matches", async () => {
+      const s = makeSignal({ status: "quarantined", workflow: "auth" });
+      const existingArc = makeArc();
+      vi.mocked(store.getSignal).mockResolvedValueOnce(s);
+      vi.mocked(store.findArcByGroupingKey).mockResolvedValueOnce(existingArc);
+      const res = await req(app, "PUT", `${A}/signals/SES%23msg-001/status`, { body: { status: "active" } });
+      expect(res.status).toBe(200);
+      const body = await res.json() as { arc: Arc; signal: Signal };
+      expect(body.arc.id).toBe(existingArc.id);
+      expect(store.createArc).not.toHaveBeenCalled();
+      expect(store.unblockSignal).toHaveBeenCalledWith(TEST_ACCOUNT_ID, s.id, existingArc.id);
+    });
+
+    it("returns 400 when signal is already active", async () => {
+      vi.mocked(store.getSignal).mockResolvedValueOnce(makeSignal({ status: "active" }));
+      const res = await req(app, "PUT", `${A}/signals/SES%23msg-001/status`, { body: { status: "active" } });
+      expect(res.status).toBe(400);
+    });
+
+    it("returns 400 when body is missing status", async () => {
+      vi.mocked(store.getSignal).mockResolvedValueOnce(makeSignal({ status: "quarantined" }));
+      const res = await req(app, "PUT", `${A}/signals/SES%23msg-001/status`, { body: {} });
+      expect(res.status).toBe(400);
+    });
+
+    it("returns 404 for unknown signal", async () => {
+      const res = await req(app, "PUT", `${A}/signals/nonexistent/status`, { body: { status: "active" } });
+      expect(res.status).toBe(404);
     });
   });
 

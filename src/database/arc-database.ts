@@ -135,6 +135,20 @@ export class ArcDatabase implements ArcMatcher {
     return { items: page, ...(nextKey ? { nextCursor: nextKey } : {}) };
   }
 
+  async blockSignal(accountId: string, signalId: string): Promise<Signal> {
+    await dynamo.send(new UpdateCommand({
+      TableName: SIGNALS_TABLE,
+      Key: { pk: acctPk(accountId), sk: sigSk(signalId) },
+      UpdateExpression: "SET #status = :status, gsi1pk = :gsi1pk",
+      ExpressionAttributeNames: { "#status": "status" },
+      ExpressionAttributeValues: {
+        ":status": "blocked",
+        ":gsi1pk": `BLOCKED#${accountId}`,
+      },
+    }));
+    return (await this.getSignal(accountId, signalId))!;
+  }
+
   async unblockSignal(accountId: string, signalId: string, arcId: string): Promise<void> {
     await dynamo.send(new UpdateCommand({
       TableName: SIGNALS_TABLE,
