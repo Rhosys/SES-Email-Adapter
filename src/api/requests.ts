@@ -48,8 +48,6 @@ export type CreateArcFromSignalRequest = z.infer<typeof CreateArcFromSignalReque
 
 export const UpdateSignalStatusRequest = z.object({
   status: z.enum(["active", "blocked"]),
-  approveSender: z.boolean().optional(),
-  updateFilterMode: SenderFilterMode.optional(),
 });
 export type UpdateSignalStatusRequest = z.infer<typeof UpdateSignalStatusRequest>;
 
