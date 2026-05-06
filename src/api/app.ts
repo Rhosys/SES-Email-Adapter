@@ -1,7 +1,19 @@
 import { Hono } from "hono";
 import { randomUUID } from "crypto";
 import { getDomain } from "tldts";
-import type { Arc, Signal, View, Label, Rule, Domain, DnsRecord, Account, Page, PageParams, ArcStatus, Workflow, Alias, SenderFilterMode, AccountFilteringConfig, VerifiedForwardingAddress, Pagination } from "../types/index.js";
+import type { Arc, Signal, View, Label, Rule, Domain, DnsRecord, Account, Page, PageParams, ArcStatus, Workflow, Alias, SenderFilterMode, VerifiedForwardingAddress, Pagination } from "../types/index.js";
+import { zParse } from "./validate.js";
+import {
+  UpdateArcRequest, CreateArcFromSignalRequest, UpdateSignalRequest,
+  CreateViewRequest, UpdateViewRequest,
+  CreateLabelRequest, UpdateLabelRequest,
+  CreateRuleRequest, UpdateRuleRequest,
+  CreateDomainRequest,
+  CreateAliasRequest, UpdateAliasRequest,
+  UpdateAccountRequest,
+  CreateForwardingAddressRequest, VerifyForwardingAddressRequest,
+  InviteUserRequest, UpdateUserRequest,
+} from "./requests.js";
 
 // ---------------------------------------------------------------------------
 // Auth
@@ -45,58 +57,7 @@ export interface ListArcsParams extends PageParams {
   status?: ArcStatus;
 }
 
-export interface UpdateArcRequest {
-  status?: ArcStatus;
-  labels?: string[];
-}
-
-export interface CreateViewRequest {
-  name: string;
-  workflow?: Workflow;
-  labels?: string[];
-  sortField?: View["sortField"];
-  sortDirection?: View["sortDirection"];
-  icon?: string;
-  color?: string;
-  position?: number;
-}
-
-export interface UpdateViewRequest {
-  name?: string;
-  workflow?: Workflow;
-  labels?: string[];
-  sortField?: View["sortField"];
-  sortDirection?: View["sortDirection"];
-  icon?: string;
-  color?: string;
-  position?: number;
-}
-
-export interface CreateLabelRequest {
-  name: string;
-  color?: string;
-  icon?: string;
-}
-
-export interface UpdateLabelRequest {
-  name?: string;
-  color?: string;
-  icon?: string;
-}
-
-export interface CreateRuleRequest {
-  name: string;
-  condition: string;
-  actions: Rule["actions"];
-  position?: number;
-}
-
-export interface UpdateRuleRequest {
-  name?: string;
-  condition?: string;
-  actions?: Rule["actions"];
-  position?: number;
-}
+export type { UpdateArcRequest, CreateViewRequest, UpdateViewRequest, CreateLabelRequest, UpdateLabelRequest, CreateRuleRequest, UpdateRuleRequest };
 
 export interface ApiDatabase {
   // Arcs
@@ -116,7 +77,6 @@ export interface ApiDatabase {
   createView(accountId: string, data: CreateViewRequest): Promise<View>;
   updateView(accountId: string, id: string, data: UpdateViewRequest): Promise<View>;
   deleteView(accountId: string, id: string): Promise<void>;
-  reorderViews(accountId: string, orderedIds: string[]): Promise<void>;
 
   // Labels
   listLabels(accountId: string): Promise<Label[]>;
@@ -129,7 +89,6 @@ export interface ApiDatabase {
   createRule(accountId: string, data: CreateRuleRequest): Promise<Rule>;
   updateRule(accountId: string, id: string, data: UpdateRuleRequest): Promise<Rule>;
   deleteRule(accountId: string, id: string): Promise<void>;
-  reorderRules(accountId: string, orderedIds: string[]): Promise<void>;
 
   // Domains
   listDomains(accountId: string): Promise<Domain[]>;
@@ -186,13 +145,6 @@ type AppEnv = { Variables: { auth: AuthContext } };
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function apiError(c: Parameters<typeof Hono.prototype.get>[1] extends infer H ? never : never, status: number, title: string, errorCode?: string, details?: unknown): Response {
-  return Response.json(
-    { title, ...(errorCode ? { errorCode } : {}), ...(details !== undefined ? { details } : {}) },
-    { status },
-  );
-}
 
 function page<K extends string, T>(key: K, items: T[], nextCursor?: string): Record<K, T[]> & { pagination: Pagination } {
   return { [key]: items, pagination: { cursor: nextCursor ?? null } } as Record<K, T[]> & { pagination: Pagination };
@@ -270,18 +222,14 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
     const arc = await store.getArc(accountId, c.req.param("id"));
     if (!arc) return err(c, 404, "Arc not found", "ARC_NOT_FOUND");
     if (arc.accountId !== accountId) return err(c, 403, "Forbidden");
-    const body = await c.req.json() as UpdateArcRequest;
+    const body = await zParse(UpdateArcRequest, c.req.raw);
     const updated = await store.updateArc(accountId, arc.id, body);
     return c.json(updated);
   });
 
   app.post("/accounts/:accountId/arcs", async (c) => {
     const { accountId } = c.get("auth");
-    const body = await c.req.json() as {
-      signalId: string;
-      approveSender?: boolean;
-      updateFilterMode?: SenderFilterMode;
-    };
+    const body = await zParse(CreateArcFromSignalRequest, c.req.raw);
 
     const signal = await store.getSignal(accountId, body.signalId);
     if (!signal) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
@@ -367,7 +315,7 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
     if (!signal) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
     if (signal.accountId !== accountId) return err(c, 403, "Forbidden");
     if (signal.status !== "draft") return err(c, 400, "Only draft signals can be updated", "SIGNAL_NOT_DRAFT");
-    const body = await c.req.json() as Partial<Pick<Signal, "subject" | "textBody" | "from" | "to">>;
+    const body = await zParse(UpdateSignalRequest, c.req.raw);
     const updated = await store.updateSignal(accountId, signal.id, body);
     return c.json(updated);
   });
@@ -403,21 +351,10 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
     return c.json(page("views", views));
   });
 
-  app.post("/accounts/:accountId/views/reorder", async (c) => {
-    const { accountId } = c.get("auth");
-    const body = await c.req.json() as { orderedIds: string[] };
-    await store.reorderViews(accountId, body.orderedIds);
-    return c.json({ ok: true });
-  });
-
   app.post("/accounts/:accountId/views", async (c) => {
     const { accountId } = c.get("auth");
-    const body = await c.req.json() as Partial<CreateViewRequest>;
-    if (!body.name) return err(c, 400, "name is required", "MISSING_FIELD", { field: "name" });
-    if (body.workflow !== undefined && !VALID_WORKFLOWS.has(body.workflow)) {
-      return err(c, 400, "Invalid workflow", "INVALID_WORKFLOW", { workflow: body.workflow });
-    }
-    const view = await store.createView(accountId, body as CreateViewRequest);
+    const body = await zParse(CreateViewRequest, c.req.raw);
+    const view = await store.createView(accountId, body);
     return c.json(view, 201);
   });
 
@@ -425,7 +362,7 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
     const { accountId } = c.get("auth");
     const view = await store.getView(accountId, c.req.param("id"));
     if (!view) return err(c, 404, "View not found", "VIEW_NOT_FOUND");
-    const body = await c.req.json() as UpdateViewRequest;
+    const body = await zParse(UpdateViewRequest, c.req.raw);
     const updated = await store.updateView(accountId, view.id, body);
     return c.json(updated);
   });
@@ -450,9 +387,8 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
 
   app.post("/accounts/:accountId/labels", async (c) => {
     const { accountId } = c.get("auth");
-    const body = await c.req.json() as Partial<CreateLabelRequest>;
-    if (!body.name) return err(c, 400, "name is required", "MISSING_FIELD", { field: "name" });
-    const label = await store.createLabel(accountId, body as CreateLabelRequest);
+    const body = await zParse(CreateLabelRequest, c.req.raw);
+    const label = await store.createLabel(accountId, body);
     return c.json(label, 201);
   });
 
@@ -461,7 +397,7 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
     const labels = await store.listLabels(accountId);
     const label = labels.find((l) => l.id === c.req.param("id"));
     if (!label) return err(c, 404, "Label not found", "LABEL_NOT_FOUND");
-    const body = await c.req.json() as UpdateLabelRequest;
+    const body = await zParse(UpdateLabelRequest, c.req.raw);
     const updated = await store.updateLabel(accountId, label.id, body);
     return c.json(updated);
   });
@@ -485,23 +421,12 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
     return c.json(page("rules", rules));
   });
 
-  app.post("/accounts/:accountId/rules/reorder", async (c) => {
-    const { accountId } = c.get("auth");
-    const body = await c.req.json() as { orderedIds: string[] };
-    await store.reorderRules(accountId, body.orderedIds);
-    return c.json({ ok: true });
-  });
-
   app.post("/accounts/:accountId/rules", async (c) => {
     const { accountId } = c.get("auth");
-    const body = await c.req.json() as Partial<CreateRuleRequest>;
-    if (!body.name) return err(c, 400, "name is required", "MISSING_FIELD", { field: "name" });
-    if (!body.actions || body.actions.length === 0) {
-      return err(c, 400, "actions must not be empty", "MISSING_FIELD", { field: "actions" });
-    }
+    const body = await zParse(CreateRuleRequest, c.req.raw);
     const forwardError = await validateForwardTargets(accountId, body.actions, store);
     if (forwardError) return err(c, 400, forwardError, "UNVERIFIED_FORWARD_TARGET");
-    const rule = await store.createRule(accountId, body as CreateRuleRequest);
+    const rule = await store.createRule(accountId, body);
     return c.json(rule, 201);
   });
 
@@ -510,7 +435,7 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
     const rules = await store.listRules(accountId);
     const rule = rules.find((r) => r.id === c.req.param("id"));
     if (!rule) return err(c, 404, "Rule not found", "RULE_NOT_FOUND");
-    const body = await c.req.json() as UpdateRuleRequest;
+    const body = await zParse(UpdateRuleRequest, c.req.raw);
     if (body.actions) {
       const forwardError = await validateForwardTargets(accountId, body.actions, store);
       if (forwardError) return err(c, 400, forwardError, "UNVERIFIED_FORWARD_TARGET");
@@ -540,8 +465,7 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
 
   app.post("/accounts/:accountId/domains", async (c) => {
     const { accountId } = c.get("auth");
-    const body = await c.req.json() as { domain?: string };
-    if (!body.domain) return err(c, 400, "domain is required", "MISSING_FIELD", { field: "domain" });
+    const body = await zParse(CreateDomainRequest, c.req.raw);
     const domain = await store.createDomain(accountId, body.domain);
     return c.json(domain, 201);
   });
@@ -576,8 +500,8 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
 
   app.patch("/accounts/:accountId", async (c) => {
     const { accountId } = c.get("auth");
-    const body = await c.req.json() as Partial<Pick<Account, "name" | "deletionRetentionDays" | "notifications" | "filtering">>;
-    const updated = await store.updateAccount(accountId, body);
+    const body = await zParse(UpdateAccountRequest, c.req.raw);
+    const updated = await store.updateAccount(accountId, body as Partial<Pick<Account, "name" | "deletionRetentionDays" | "notifications" | "filtering">>);
     return c.json(updated);
   });
 
@@ -595,23 +519,16 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
   app.post("/accounts/:accountId/users", async (c) => {
     if (!access) return err(c, 501, "Not implemented");
     const { accountId } = c.get("auth");
-    const body = await c.req.json() as { userId?: string; role?: string };
-    if (!body.userId) return err(c, 400, "userId is required", "MISSING_FIELD", { field: "userId" });
-    if (!body.role || !VALID_ROLES.has(body.role as AccountRole)) {
-      return err(c, 400, "Invalid role", "INVALID_ROLE", { role: body.role });
-    }
-    await access.addUser(accountId, body.userId, body.role as AccountRole);
+    const body = await zParse(InviteUserRequest, c.req.raw);
+    await access.addUser(accountId, body.userId, body.role);
     return c.json({ userId: body.userId, role: body.role }, 201);
   });
 
   app.patch("/accounts/:accountId/users/:userId", async (c) => {
     if (!access) return err(c, 501, "Not implemented");
     const { accountId } = c.get("auth");
-    const body = await c.req.json() as { role?: string };
-    if (!body.role || !VALID_ROLES.has(body.role as AccountRole)) {
-      return err(c, 400, "Invalid role", "INVALID_ROLE", { role: body.role });
-    }
-    await access.updateUserRole(accountId, c.req.param("userId"), body.role as AccountRole);
+    const body = await zParse(UpdateUserRequest, c.req.raw);
+    await access.updateUserRole(accountId, c.req.param("userId"), body.role);
     return c.json({ userId: c.req.param("userId"), role: body.role });
   });
 
@@ -642,12 +559,7 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
 
   app.post("/accounts/:accountId/aliases", async (c) => {
     const { accountId } = c.get("auth");
-    const body = await c.req.json() as {
-      address: string;
-      filterMode?: SenderFilterMode;
-      createdForOrigin?: string;
-    };
-    if (!body.address) return err(c, 400, "address is required", "MISSING_FIELD", { field: "address" });
+    const body = await zParse(CreateAliasRequest, c.req.raw);
     const existing = await store.getAlias(accountId, body.address);
     if (existing) return err(c, 409, "Alias already exists", "ALIAS_EXISTS");
     const now = new Date().toISOString();
@@ -667,12 +579,7 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
   app.patch("/accounts/:accountId/aliases/:address", async (c) => {
     const { accountId } = c.get("auth");
     const address = decodeURIComponent(c.req.param("address"));
-    const body = await c.req.json() as {
-      filterMode?: SenderFilterMode;
-      approvedSenders?: string[];
-      spamScoreThreshold?: number;
-      createdForOrigin?: string;
-    };
+    const body = await zParse(UpdateAliasRequest, c.req.raw);
     const existing = await store.getAlias(accountId, address);
     const now = new Date().toISOString();
     const updated = await store.upsertAlias({
@@ -708,8 +615,7 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
 
   app.post("/accounts/:accountId/forwarding-addresses", async (c) => {
     const { accountId } = c.get("auth");
-    const body = await c.req.json() as { address?: string };
-    if (!body.address) return err(c, 400, "address is required", "MISSING_FIELD", { field: "address" });
+    const body = await zParse(CreateForwardingAddressRequest, c.req.raw);
 
     const existing = await store.getVerifiedForwardingAddress(accountId, body.address);
     if (existing?.status === "verified") return c.json(existing, 200);
@@ -738,8 +644,7 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
   app.post("/accounts/:accountId/forwarding-addresses/:address/verify", async (c) => {
     const { accountId } = c.get("auth");
     const address = decodeURIComponent(c.req.param("address"));
-    const body = await c.req.json() as { token?: string };
-    if (!body.token) return err(c, 400, "token is required", "MISSING_FIELD", { field: "token" });
+    const body = await zParse(VerifyForwardingAddressRequest, c.req.raw);
 
     const existing = await store.getVerifiedForwardingAddress(accountId, address);
     if (!existing) return err(c, 404, "Forwarding address not found", "FORWARDING_ADDRESS_NOT_FOUND");
@@ -781,10 +686,6 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-import { WORKFLOWS } from "../types/index.js";
-const VALID_WORKFLOWS = new Set<string>(WORKFLOWS);
-const VALID_ROLES = new Set<AccountRole>(["owner", "admin", "member", "viewer"]);
 
 // Validate that all forward targets in a rule's actions are verified for this account.
 // Returns an error string if invalid, null if OK.

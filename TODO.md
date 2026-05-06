@@ -5,7 +5,7 @@
 - [ ] Set up CI (lint, typecheck, test) for backend, site, and extension independently
 - [x] **API modernization** — collection envelopes, error shapes, PUT→PATCH, consistent create/update responses. See "API Breaking Changes" section below.
 - [ ] Review AWS Bedrock comparison with Aurora pg vectors. I think we are looking for RAG, the question is should we store that data in aurora or is there an optimized bedrock version available for us here?
-- [ ] Use Zed/Zod or whatever validate in coming requests
+- [x] Use Zod to validate incoming requests — all POST/PATCH handlers now use `zParse()` with typed schemas in `src/api/requests.ts`
 - [ ] Dynamically generate the OpenAPI Specification from the types. Build it on deployment using an npm run script, and server it on the `/` endpoint.
 - [ ] Global /Search endpoint is wrong, we should always be searching something specific. And we never need a /search do that, the generic GET /whatever is already a search.
 - [ ] Digests? Does that even make sense? Basically once per month expose a digest of just list of things I think the idea would be to reuse the same ARC.
