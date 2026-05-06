@@ -15,7 +15,7 @@ const SIMILARITY_THRESHOLD = 0.5;
 const RDS_HOST = process.env["RDS_PROXY_ENDPOINT"] ?? "";
 const DB_USER  = process.env["DB_USER"] ?? "lambda";
 const DB_NAME  = process.env["AURORA_DB_NAME"] ?? "signals";
-const AWS_REGION = process.env["AWS_REGION"] ?? "us-east-1";
+const AWS_REGION = process.env["AWS_REGION"] ?? "eu-west-1";
 
 const signer = new Signer({ hostname: RDS_HOST, port: 5432, region: AWS_REGION, username: DB_USER });
 
@@ -107,7 +107,7 @@ export class ArcDatabase implements ArcMatcher {
     const items = (res.Items ?? []) as Signal[];
     const page = items.slice(0, limit);
     const nextKey = items.length > limit && res.LastEvaluatedKey ? encodeCursor(res.LastEvaluatedKey) : null;
-    return { items: page, total: items.length, ...(nextKey ? { nextCursor: nextKey } : {}) };
+    return { items: page, ...(nextKey ? { nextCursor: nextKey } : {}) };
   }
 
   async unblockSignal(accountId: string, signalId: string, arcId: string): Promise<void> {
@@ -176,7 +176,7 @@ export class ArcDatabase implements ArcMatcher {
     return this.saveArc(arc);
   }
 
-  async updateArc(accountId: string, id: string, update: UpdateArcRequest): Promise<void> {
+  async updateArc(accountId: string, id: string, update: UpdateArcRequest): Promise<Arc> {
     const now = new Date().toISOString();
     const setParts: string[] = ["updatedAt = :now"];
     const exprValues: Record<string, unknown> = { ":now": now };
@@ -200,6 +200,35 @@ export class ArcDatabase implements ArcMatcher {
       ExpressionAttributeValues: exprValues,
       ...(Object.keys(exprNames).length ? { ExpressionAttributeNames: exprNames } : {}),
     }));
+    return (await this.getArc(accountId, id))!;
+  }
+
+  async updateSignal(accountId: string, id: string, update: Partial<Pick<Signal, "subject" | "textBody" | "from" | "to">>): Promise<Signal> {
+    const now = new Date().toISOString();
+    const setParts: string[] = ["updatedAt = :now"];
+    const exprValues: Record<string, unknown> = { ":now": now };
+    const exprNames: Record<string, string> = {};
+
+    if (update.subject !== undefined) { setParts.push("#subject = :subject"); exprValues[":subject"] = update.subject; exprNames["#subject"] = "subject"; }
+    if (update.textBody !== undefined) { setParts.push("textBody = :textBody"); exprValues[":textBody"] = update.textBody; }
+    if (update.from !== undefined) { setParts.push("#from = :from"); exprValues[":from"] = update.from; exprNames["#from"] = "from"; }
+    if (update.to !== undefined) { setParts.push("#to = :to"); exprValues[":to"] = update.to; exprNames["#to"] = "to"; }
+
+    await dynamo.send(new UpdateCommand({
+      TableName: SIGNALS_TABLE,
+      Key: { pk: acctPk(accountId), sk: sigSk(id) },
+      UpdateExpression: `SET ${setParts.join(", ")}`,
+      ExpressionAttributeValues: exprValues,
+      ...(Object.keys(exprNames).length ? { ExpressionAttributeNames: exprNames } : {}),
+    }));
+    return (await this.getSignal(accountId, id))!;
+  }
+
+  async deleteSignal(accountId: string, id: string): Promise<void> {
+    await dynamo.send(new DeleteCommand({
+      TableName: SIGNALS_TABLE,
+      Key: { pk: acctPk(accountId), sk: sigSk(id) },
+    }));
   }
 
   async listArcs(accountId: string, params: ListArcsParams): Promise<Page<Arc>> {
@@ -221,7 +250,7 @@ export class ArcDatabase implements ArcMatcher {
 
     const page = items.slice(0, limit);
     const nextKey = items.length > limit && res.LastEvaluatedKey ? encodeCursor(res.LastEvaluatedKey) : null;
-    return { items: page, total: items.length, ...(nextKey ? { nextCursor: nextKey } : {}) };
+    return { items: page, ...(nextKey ? { nextCursor: nextKey } : {}) };
   }
 
   async searchArcs(accountId: string, query: string, params: PageParams): Promise<Page<Arc>> {
@@ -242,7 +271,7 @@ export class ArcDatabase implements ArcMatcher {
     );
     const page = items.slice(0, limit);
     const nextKey = items.length > limit && res.LastEvaluatedKey ? encodeCursor(res.LastEvaluatedKey) : null;
-    return { items: page, total: items.length, ...(nextKey ? { nextCursor: nextKey } : {}) };
+    return { items: page, ...(nextKey ? { nextCursor: nextKey } : {}) };
   }
 
   // ---------------------------------------------------------------------------

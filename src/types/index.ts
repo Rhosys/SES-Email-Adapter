@@ -12,7 +12,8 @@ export const WORKFLOWS = [
   "payments",      // Invoices, receipts, subscriptions, tax, bank statements — pay or file
   "alert",         // Security events, fraud, CI failures, infra alerts — investigate now
   "content",       // Newsletters, promotions, social digests — read or unsubscribe
-  "status",        // ToS updates, service notices, welcome emails, government — passive
+  "onboarding",    // Welcome emails, account creation, getting-started — new service signup
+  "status",        // ToS updates, service notices, government notices — passive informational
   "healthcare",    // Appointments, test results, prescriptions, insurance
   "job",           // Applications, interviews, offers, rejections — career pipeline
   "support",       // Helpdesk tickets with threaded conversation and ticket ID
@@ -35,6 +36,7 @@ export type WorkflowData =
   | PaymentsData
   | AlertData
   | ContentData
+  | OnboardingData
   | StatusData
   | HealthcareData
   | JobData
@@ -158,9 +160,16 @@ export interface ContentData {
   unsubscribeUrl?: string;
 }
 
+export interface OnboardingData {
+  workflow: "onboarding";
+  onboardingType: "welcome" | "verification" | "getting_started" | "trial_started" | "other";
+  service: string;
+  actionUrl?: string;
+}
+
 export interface StatusData {
   workflow: "status";
-  statusType: "terms_update" | "privacy_policy" | "service_notice" | "welcome" | "government" | "account_notification" | "other";
+  statusType: "terms_update" | "privacy_policy" | "service_notice" | "government" | "account_notification" | "other";
   provider: string;
   effectiveDate?: string;
   referenceNumber?: string;
@@ -220,17 +229,11 @@ export type SenderFilterMode =
   | "notify_new"   // allow approved senders, block + notify on new senders (default)
   | "allow_all";   // no filtering
 
-// active = visible; quarantined = user notified + shown for review; blocked = silent, hidden until explicitly retrieved
-export type SignalStatus = "active" | "blocked" | "quarantined";
+// active = visible; quarantined = user notified + shown for review; blocked = silent; draft = user-authored, unsent
+export type SignalStatus = "active" | "blocked" | "quarantined" | "draft";
 
 // "email" = inbound SES email; "system" = processor-created (e.g. extracted calendar event); "user" = user-created
 export type SignalSource = "email" | "system" | "user";
-export type BlockReason = "new_sender" | "spam" | "sender_mismatch" | "reputation" | "onboarding";
-
-// Per-reason disposition: "quarantine" notifies user for review; "block" silently sequesters
-export type BlockDisposition = {
-  [K in BlockReason]?: "block" | "quarantine";
-};
 
 // interrupt = push notification popup; ambient = badge only; silent = no push
 export type PushPriority = "interrupt" | "ambient" | "silent";
@@ -239,20 +242,17 @@ export type PushPriority = "interrupt" | "ambient" | "silent";
 // Derived by priorityCalculator — do not set manually.
 export type ArcUrgency = "critical" | "high" | "normal" | "low" | "silent";
 
-// Per-recipient-address configuration
-export interface EmailAddressConfig {
+// Per-recipient-address configuration (an "alias" is any address on a custom domain routed into the system)
+export interface Alias {
   id: string;
   accountId: string;
   address: string;              // The recipient address, e.g. me@mydomain.com
   filterMode: SenderFilterMode;
   approvedSenders: string[];    // eTLD+1 domains (e.g. "amazon.com", "google.com")
-  // Per-address onboarding override; "inherit" defers to global blockDisposition/blockOnboardingEmails
-  onboardingEmailHandling?: "block" | "quarantine" | "allow" | "inherit";
   // Spam score at which a signal is treated as spam (0–1). Overrides account default when set.
   spamScoreThreshold?: number;
-  // URL of the site/form where this address was registered (set by browser extension).
-  // Informational only — used to show "created at stripe.com" in the UI.
-  sourceUrl?: string;
+  // eTLD+1 of the site this alias was created for (set by the extension on alias generation)
+  createdForOrigin?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -261,8 +261,6 @@ export interface EmailAddressConfig {
 export interface AccountFilteringConfig {
   defaultFilterMode: SenderFilterMode;
   newAddressHandling: NewAddressHandling;
-  blockOnboardingEmails?: boolean;      // Block all onboarding emails by default
-  blockDisposition?: BlockDisposition;  // Per-reason disposition (default: "quarantine" for all)
   // Spam score at which a signal is treated as spam (0–1). Default: 0.9.
   // Per-address config can override this. Controls both filter blocking and notification suppression.
   spamScoreThreshold?: number;
@@ -332,7 +330,6 @@ export interface Signal {
 
   s3Key: string;
   status: SignalStatus;
-  blockReason?: BlockReason;
   createdAt: string;
   ttl?: number;   // Unix seconds; absent = never expire
 }
@@ -402,7 +399,34 @@ export interface Label {
 // Rule (JSONLogic-based automation)
 // ---------------------------------------------------------------------------
 
-export type RuleActionType = "assign_label" | "assign_workflow" | "archive" | "delete" | "forward";
+export type RuleActionType =
+  | "assign_label"
+  | "assign_workflow"
+  | "archive"
+  | "delete"
+  | "forward"
+  | "block"
+  | "quarantine"
+  | "set_urgency"
+  | "suppress_notification"
+  | "pong"
+  | "approve_sender";
+
+// System-assigned labels. Return type of assignSystemLabels() — adding here requires explicit approval.
+// The compile-time gate: assignSystemLabels() returns SystemLabel[], so any unlisted label is a type error.
+export type SystemLabel =
+  | "system:workflow:auth" | "system:workflow:conversation" | "system:workflow:crm"
+  | "system:workflow:package" | "system:workflow:travel" | "system:workflow:scheduling"
+  | "system:workflow:payments" | "system:workflow:alert" | "system:workflow:content"
+  | "system:workflow:onboarding" | "system:workflow:status" | "system:workflow:healthcare"
+  | "system:workflow:job" | "system:workflow:support" | "system:workflow:test"
+  | "system:spam:high"
+  | "system:spam:medium"
+  | "system:sender:untrusted"
+  | "system:urgency:critical" | "system:urgency:high" | "system:urgency:normal"
+  | "system:urgency:low" | "system:urgency:silent"
+  | "system:replied"
+  | "system:test";
 
 export interface RuleAction {
   type: RuleActionType;
@@ -465,7 +489,6 @@ export interface Account {
   deletionRetentionDays: number;
   notifications?: NotificationSettings;
   filtering?: AccountFilteringConfig;
-  emailConfigs?: Record<string, EmailAddressConfig>;  // keyed by address
   createdAt: string;
   updatedAt: string;
 }
@@ -509,10 +532,22 @@ export interface PageParams {
   limit?: number;
 }
 
+// Internal DB page type — API layer maps this to named collection envelopes
 export interface Page<T> {
   items: T[];
   nextCursor?: string;
-  total: number;
+}
+
+// Pagination sub-object used in all collection response envelopes
+export interface Pagination {
+  cursor: string | null;
+}
+
+// Error body returned by all API error responses (status code is in the HTTP header)
+export interface ApiErrorBody {
+  title: string;
+  errorCode?: string;
+  details?: unknown;
 }
 
 // ---------------------------------------------------------------------------

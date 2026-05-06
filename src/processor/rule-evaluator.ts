@@ -3,7 +3,7 @@ import type { RuleEvaluator } from "./processor.js";
 import type { Rule, Signal, Arc } from "../types/index.js";
 
 export class JsonLogicRuleEvaluator implements RuleEvaluator {
-  evaluate(rule: Rule, context: { signal: Signal; arc: Arc }): boolean {
+  evaluate(rule: Rule, context: { signal: Signal; arc: Arc; isMatchedArc: boolean }): boolean {
     try {
       const condition = JSON.parse(rule.condition) as object;
       return Boolean(jsonLogic.apply(condition, context));
