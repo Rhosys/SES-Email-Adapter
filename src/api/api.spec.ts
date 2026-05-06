@@ -33,6 +33,7 @@ function makeStore(): ApiDatabase {
     getArc: vi.fn().mockResolvedValue(null),
     updateArc: vi.fn().mockResolvedValue(makeArc()),
     listSignals: vi.fn().mockResolvedValue({ items: [] }),
+    listPreArcSignals: vi.fn().mockResolvedValue({ items: [] }),
     getSignal: vi.fn().mockResolvedValue(null),
     updateSignal: vi.fn().mockResolvedValue(makeSignal()),
     deleteSignal: vi.fn().mockResolvedValue(undefined),
@@ -383,6 +384,38 @@ describe("API", () => {
     it("returns 404 when Arc does not exist", async () => {
       const res = await req(app, "GET", `${A}/arcs/nonexistent/signals`);
       expect(res.status).toBe(404);
+    });
+  });
+
+  describe("GET /accounts/:accountId/signals?status=", () => {
+    it("returns quarantined signals", async () => {
+      const s = makeSignal({ status: "quarantined" });
+      vi.mocked(store.listPreArcSignals).mockResolvedValueOnce({ items: [s] });
+      const res = await req(app, "GET", `${A}/signals?status=quarantined`);
+      expect(res.status).toBe(200);
+      const body = await res.json() as { signals: Signal[]; pagination: { cursor: string | null } };
+      expect(body.signals).toHaveLength(1);
+      expect(store.listPreArcSignals).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "quarantined", expect.any(Object));
+    });
+
+    it("returns blocked signals", async () => {
+      const s = makeSignal({ status: "blocked" });
+      vi.mocked(store.listPreArcSignals).mockResolvedValueOnce({ items: [s] });
+      const res = await req(app, "GET", `${A}/signals?status=blocked`);
+      expect(res.status).toBe(200);
+      const body = await res.json() as { signals: Signal[]; pagination: { cursor: string | null } };
+      expect(body.signals).toHaveLength(1);
+      expect(store.listPreArcSignals).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "blocked", expect.any(Object));
+    });
+
+    it("returns 400 when status param is missing", async () => {
+      const res = await req(app, "GET", `${A}/signals`);
+      expect(res.status).toBe(400);
+    });
+
+    it("returns 400 when status param is invalid", async () => {
+      const res = await req(app, "GET", `${A}/signals?status=active`);
+      expect(res.status).toBe(400);
     });
   });
 
