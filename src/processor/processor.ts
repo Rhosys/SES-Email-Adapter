@@ -337,6 +337,15 @@ export class SignalProcessor {
       if (!arc.labels.includes(label)) arc.labels = [...arc.labels, label];
     }
 
+    // Forwarded email detection — attach original:* label when forwarding headers are present
+    const forwardedAddress = extractForwardedAddress(parsed.headers);
+    if (forwardedAddress) {
+      const forwardLabel = `original:${forwardedAddress}`;
+      if (!arc.labels.includes(forwardLabel)) {
+        arc.labels = [...arc.labels, forwardLabel];
+      }
+    }
+
     // 9. Build signal shell
     const signalShell = buildSignal({
       arcId: arc.id,
@@ -569,6 +578,17 @@ function buildCalendarSignal(arc: Arc, emailSignal: Signal, now: string, ttl: nu
   if (ttl !== undefined) calSignal.ttl = ttl;
   return calSignal;
 }
+
+// Extracts the original recipient address from forwarding headers, in priority order.
+// Header values may be bare addresses or RFC 2822 "Name <addr>" form.
+export function extractForwardedAddress(headers: Record<string, string>): string | null {
+  const lower = Object.fromEntries(Object.entries(headers).map(([k, v]) => [k.toLowerCase(), v]));
+  const raw = lower["x-forwarded-to"] ?? lower["x-original-to"] ?? lower["resent-to"] ?? null;
+  if (!raw) return null;
+  const match = raw.match(/<([^>]+)>/) ?? raw.match(/([^\s,;]+@[^\s,;]+)/);
+  return match?.[1]?.trim() ?? null;
+}
+
 
 export function deriveGroupingKey(
   workflow: Workflow,

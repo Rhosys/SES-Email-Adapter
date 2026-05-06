@@ -1,7 +1,7 @@
 import { randomUUID } from "crypto";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { SQSEvent } from "aws-lambda";
-import { SignalProcessor, deriveGroupingKey, SYSTEM_RULES } from "./processor.js";
+import { SignalProcessor, deriveGroupingKey, SYSTEM_RULES, extractForwardedAddress } from "./processor.js";
 import { JsonLogicRuleEvaluator } from "./rule-evaluator.js";
 import { baseUrgency, priorityCalculator } from "./priority.js";
 import type { ProcessorDatabase, ArcMatcher, RuleEvaluator, Notifier, Forwarder, ForwardOptions, TestReplier } from "./processor.js";
@@ -1623,6 +1623,119 @@ describe("SignalProcessor", () => {
       const arc = vi.mocked(store.saveArc).mock.calls[0]![0] as Arc;
       expect(arc.labels).toContain("archived-auto");
       expect(arc.status).toBe("archived");
+    });
+  });
+
+  describe("forwarded email detection", () => {
+    it("attaches original:* label when X-Forwarded-To header is present", async () => {
+      vi.mocked(mimeParser.parse).mockResolvedValueOnce({
+        from: { address: "sender@example.com", name: "Sender" },
+        to: [{ address: "user@example.com" }],
+        cc: [],
+        subject: "Forwarded email",
+        textBody: "Hello",
+        attachments: [],
+        headers: { "x-forwarded-to": "john@gmail.com" },
+      });
+
+      await processor.process(makeSqsEvent([{}]));
+
+      const arc = vi.mocked(store.saveArc).mock.calls[0]![0] as Arc;
+      expect(arc.labels).toContain("original:john@gmail.com");
+    });
+
+    it("extracts address from X-Original-To header with angle brackets", async () => {
+      vi.mocked(mimeParser.parse).mockResolvedValueOnce({
+        from: { address: "sender@example.com", name: "Sender" },
+        to: [{ address: "user@example.com" }],
+        cc: [],
+        subject: "Forwarded email",
+        textBody: "Hello",
+        attachments: [],
+        headers: { "x-original-to": "<alice@example.com>" },
+      });
+
+      await processor.process(makeSqsEvent([{}]));
+
+      const arc = vi.mocked(store.saveArc).mock.calls[0]![0] as Arc;
+      expect(arc.labels).toContain("original:alice@example.com");
+    });
+
+    it("extracts address from Resent-To header with display name", async () => {
+      vi.mocked(mimeParser.parse).mockResolvedValueOnce({
+        from: { address: "sender@example.com", name: "Sender" },
+        to: [{ address: "user@example.com" }],
+        cc: [],
+        subject: "Forwarded email",
+        textBody: "Hello",
+        attachments: [],
+        headers: { "resent-to": "Bob Smith <bob@example.com>" },
+      });
+
+      await processor.process(makeSqsEvent([{}]));
+
+      const arc = vi.mocked(store.saveArc).mock.calls[0]![0] as Arc;
+      expect(arc.labels).toContain("original:bob@example.com");
+    });
+
+    it("X-Forwarded-To takes priority over X-Original-To when both are present", async () => {
+      vi.mocked(mimeParser.parse).mockResolvedValueOnce({
+        from: { address: "sender@example.com", name: "Sender" },
+        to: [{ address: "user@example.com" }],
+        cc: [],
+        subject: "Forwarded email",
+        textBody: "Hello",
+        attachments: [],
+        headers: {
+          "x-forwarded-to": "primary@gmail.com",
+          "x-original-to": "secondary@gmail.com",
+        },
+      });
+
+      await processor.process(makeSqsEvent([{}]));
+
+      const arc = vi.mocked(store.saveArc).mock.calls[0]![0] as Arc;
+      expect(arc.labels).toContain("original:primary@gmail.com");
+      expect(arc.labels).not.toContain("original:secondary@gmail.com");
+    });
+
+    it("does not attach any original:* label when no forwarding headers are present", async () => {
+      vi.mocked(mimeParser.parse).mockResolvedValueOnce({
+        from: { address: "sender@example.com", name: "Sender" },
+        to: [{ address: "user@example.com" }],
+        cc: [],
+        subject: "Regular email",
+        textBody: "Hello",
+        attachments: [],
+        headers: { "authentication-results": "spf=pass" },
+      });
+
+      await processor.process(makeSqsEvent([{}]));
+
+      const arc = vi.mocked(store.saveArc).mock.calls[0]![0] as Arc;
+      expect(arc.labels.some((l) => l.startsWith("original:"))).toBe(false);
+    });
+  });
+
+  describe("extractForwardedAddress", () => {
+    it("returns null when no forwarding headers present", () => {
+      expect(extractForwardedAddress({ "content-type": "text/plain" })).toBeNull();
+    });
+
+    it("returns bare address from X-Forwarded-To", () => {
+      expect(extractForwardedAddress({ "x-forwarded-to": "john@gmail.com" })).toBe("john@gmail.com");
+    });
+
+    it("returns address from angle-bracket form", () => {
+      expect(extractForwardedAddress({ "x-original-to": "<alice@example.com>" })).toBe("alice@example.com");
+    });
+
+    it("returns address from display-name form", () => {
+      expect(extractForwardedAddress({ "resent-to": "Bob Smith <bob@example.com>" })).toBe("bob@example.com");
+    });
+
+    it("is case-insensitive for header names", () => {
+      expect(extractForwardedAddress({ "X-Forwarded-To": "carol@example.com" })).toBe("carol@example.com");
     });
   });
 });
