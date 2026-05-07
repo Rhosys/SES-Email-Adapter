@@ -469,6 +469,7 @@ export interface Rule {
   actions: RuleAction[];
   status: RuleStatus;
   priorityOrder: number;
+  tags?: Record<string, string>;
   createdAt: string;
   updatedAt: string;
 }

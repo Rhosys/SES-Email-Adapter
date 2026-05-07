@@ -301,6 +301,7 @@ export class AccountDatabase {
       actions: data.actions,
       status: "enabled",
       priorityOrder: data.priorityOrder ?? (userRules.length > 0 ? Math.max(...userRules.map((r) => r.priorityOrder)) + 1 : 100),
+      ...(data.tags !== undefined ? { tags: data.tags } : {}),
       createdAt: now,
       updatedAt: now,
     };
@@ -342,6 +343,7 @@ export class AccountDatabase {
     if (data.actions !== undefined) { setParts.push("actions = :actions"); exprValues[":actions"] = data.actions; }
     if (data.priorityOrder !== undefined) { setParts.push("#pri = :pri"); exprValues[":pri"] = data.priorityOrder; exprNames["#pri"] = "priorityOrder"; }
     if (data.status !== undefined) { setParts.push("#status = :status"); exprValues[":status"] = data.status; exprNames["#status"] = "status"; }
+    if (data.tags !== undefined) { setParts.push("tags = :tags"); exprValues[":tags"] = data.tags; }
 
     await dynamo.send(new UpdateCommand({
       TableName: ACCOUNTS_TABLE,
