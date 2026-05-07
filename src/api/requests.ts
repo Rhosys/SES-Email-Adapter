@@ -108,6 +108,7 @@ export const CreateRuleRequest = z.object({
   condition: z.string().optional(),
   actions: z.array(RuleActionSchema).min(1),
   priorityOrder: z.number().int().min(0).optional(),
+  tags: z.record(z.string()).optional(),
 });
 export type CreateRuleRequest = z.infer<typeof CreateRuleRequest>;
 
@@ -117,6 +118,7 @@ export const UpdateRuleRequest = z.object({
   actions: z.array(RuleActionSchema).optional(),
   priorityOrder: z.number().int().min(0).optional(),
   status: RuleStatus.optional(),
+  tags: z.record(z.string()).optional(),
 });
 export type UpdateRuleRequest = z.infer<typeof UpdateRuleRequest>;
 
