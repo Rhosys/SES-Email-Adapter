@@ -1,4 +1,4 @@
-import type { APIGatewayProxyEventV2, SQSEvent, Context, APIGatewayProxyResultV2, EventBridgeEvent } from "aws-lambda";
+import type { APIGatewayProxyEventV2, SQSEvent, Context, APIGatewayProxyResultV2, EventBridgeEvent, APIGatewayProxyWebsocketEventV2 } from "aws-lambda";
 import { BedrockRuntimeClient } from "@aws-sdk/client-bedrock-runtime";
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 import { SignalClassifier } from "./classifier/classifier.js";
@@ -106,9 +106,9 @@ const app = createApp({
 // ---------------------------------------------------------------------------
 
 export async function handler(
-  event: APIGatewayProxyEventV2 | SQSEvent | EventBridgeEvent<string, { source?: string }>,
+  event: APIGatewayProxyEventV2 | APIGatewayProxyWebsocketEventV2 | SQSEvent | EventBridgeEvent<string, { source?: string }>,
   _context: Context,
-): Promise<APIGatewayProxyResultV2 | void> {
+): Promise<APIGatewayProxyResultV2 | { statusCode: number } | void> {
   if (isEventBridgeEvent(event)) {
     if ((event as EventBridgeEvent<string, { source?: string }>).detail?.source === "domain-health-job") {
       await domainHealthHandler();
@@ -123,12 +123,50 @@ export async function handler(
     }
     return;
   }
+  if (isWebSocketEvent(event)) {
+    return handleWebSocket(event as APIGatewayProxyWebsocketEventV2);
+  }
   return honoToApiGateway(app, event as APIGatewayProxyEventV2);
 }
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// WebSocket route handlers  ($connect / $disconnect / $default)
+// ---------------------------------------------------------------------------
+
+function isWebSocketEvent(event: unknown): event is APIGatewayProxyWebsocketEventV2 {
+  const ctx = (event as { requestContext?: Record<string, unknown> }).requestContext;
+  return typeof ctx === "object" && ctx !== null && "connectionId" in ctx;
+}
+
+async function handleWebSocket(event: APIGatewayProxyWebsocketEventV2): Promise<{ statusCode: number }> {
+  const { routeKey, connectionId } = event.requestContext;
+  // accountId is injected by the Lambda authorizer into requestContext.authorizer
+  const authorizer = (event.requestContext as unknown as { authorizer?: Record<string, string> }).authorizer;
+  const accountId = authorizer?.["accountId"] ?? "";
+
+  switch (routeKey) {
+    case "$connect":
+      await accountDb.saveWsConnection({
+        connectionId,
+        accountId,
+        connectedAt: new Date().toISOString(),
+        // 2-hour TTL — API Gateway closes idle connections after 10 min anyway
+        ttl: Math.floor(Date.now() / 1000) + 7200,
+      });
+      return { statusCode: 200 };
+
+    case "$disconnect":
+      if (accountId) await accountDb.deleteWsConnection(accountId, connectionId);
+      return { statusCode: 200 };
+
+    default:
+      return { statusCode: 200 };
+  }
+}
 
 function isEventBridgeEvent(event: unknown): event is EventBridgeEvent<string, unknown> {
   return typeof event === "object" && event !== null && "source" in event && "detail-type" in event;
