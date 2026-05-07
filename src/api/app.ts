@@ -194,6 +194,17 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
     );
   }
 
+  // CloudFront origin verification — reject requests that bypass CloudFront
+  const CF_ORIGIN_SECRET = process.env["CF_ORIGIN_SECRET"];
+  if (CF_ORIGIN_SECRET) {
+    app.use("*", async (c, next) => {
+      if (c.req.header("x-origin-verify") !== CF_ORIGIN_SECRET) {
+        return err(c, 403, "Forbidden");
+      }
+      await next();
+    });
+  }
+
   // JWT verification
   app.use("*", async (c, next) => {
     const header = c.req.header("Authorization");

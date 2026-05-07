@@ -171,6 +171,7 @@ resource "aws_lambda_function" "main" {
       SES_CONFIGURATION_SET     = aws_sesv2_configuration_set.sending.configuration_set_name
       APP_BASE_URL              = var.app_base_url
       WS_API_ENDPOINT           = "https://${aws_apigatewayv2_api.ws.id}.execute-api.${data.aws_region.current.name}.amazonaws.com/${aws_apigatewayv2_stage.ws.name}"
+      CF_ORIGIN_SECRET          = random_password.cf_origin_secret.result
     }
   }
 

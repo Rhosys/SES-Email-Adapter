@@ -26,10 +26,8 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "emails" {
   bucket = aws_s3_bucket.emails.id
   rule {
     apply_server_side_encryption_by_default {
-      sse_algorithm     = "aws:kms"
-      kms_master_key_id = aws_kms_key.default.arn
+      sse_algorithm = "AES256"
     }
-    bucket_key_enabled = true
   }
 }
 
@@ -68,23 +66,6 @@ resource "aws_s3_bucket_policy" "emails" {
 resource "aws_sqs_queue" "signals_dlq" {
   name                      = "${local.prefix}-signals-dlq"
   message_retention_seconds = 1209600  # 14 days
-}
-
-# Allow EventBridge to send domain-health failures to the DLQ
-resource "aws_sqs_queue_policy" "signals_dlq" {
-  queue_url = aws_sqs_queue.signals_dlq.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Sid       = "AllowEventBridgeDLQ"
-      Effect    = "Allow"
-      Principal = { Service = "events.amazonaws.com" }
-      Action    = "sqs:SendMessage"
-      Resource  = aws_sqs_queue.signals_dlq.arn
-      Condition = { ArnEquals = { "aws:SourceArn" = aws_cloudwatch_event_rule.domain_health.arn } }
-    }]
-  })
 }
 
 resource "aws_sqs_queue" "signals" {
@@ -295,10 +276,6 @@ resource "aws_cloudwatch_event_target" "domain_health" {
   arn       = aws_lambda_alias.production.arn
 
   input = jsonencode({ source = "domain-health-job" })
-
-  dead_letter_config {
-    arn = aws_sqs_queue.signals_dlq.arn
-  }
 }
 
 resource "aws_lambda_permission" "domain_health_eventbridge" {
