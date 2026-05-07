@@ -1,7 +1,7 @@
 import { randomUUID } from "crypto";
 import { DeleteCommand, GetCommand, PutCommand, QueryCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { dynamo, ACCOUNTS_TABLE } from "./shared.js";
-import type { Account, View, Label, Rule, RuleStatus, Domain, Alias, AliasSender, SenderMode, AccountFilteringConfig, VerifiedForwardingAddress, EmailTemplate, PushSubscription } from "../types/index.js";
+import type { Account, View, Label, Rule, RuleStatus, Domain, Alias, AliasSender, SenderMode, AccountFilteringConfig, VerifiedForwardingAddress, EmailTemplate, WsConnection } from "../types/index.js";
 import type { CreateViewRequest, UpdateViewRequest, CreateLabelRequest, UpdateLabelRequest, CreateRuleRequest, UpdateRuleRequest } from "../api/app.js";
 
 // ---------------------------------------------------------------------------
@@ -629,29 +629,29 @@ export class AccountDatabase {
   }
 
   // ---------------------------------------------------------------------------
-  // Push Subscriptions
+  // WebSocket Connections
   // ---------------------------------------------------------------------------
 
-  async savePushSubscription(sub: PushSubscription): Promise<void> {
+  async saveWsConnection(conn: WsConnection): Promise<void> {
     await dynamo.send(new PutCommand({
       TableName: ACCOUNTS_TABLE,
-      Item: { ...sub, pk: pk(sub.accountId), sk: `PUSH#${sub.id}` },
+      Item: { ...conn, pk: pk(conn.accountId), sk: `CONN#${conn.connectionId}` },
     }));
   }
 
-  async listPushSubscriptions(accountId: string): Promise<PushSubscription[]> {
+  async listWsConnections(accountId: string): Promise<WsConnection[]> {
     const res = await dynamo.send(new QueryCommand({
       TableName: ACCOUNTS_TABLE,
       KeyConditionExpression: "pk = :pk AND begins_with(sk, :prefix)",
-      ExpressionAttributeValues: { ":pk": pk(accountId), ":prefix": "PUSH#" },
+      ExpressionAttributeValues: { ":pk": pk(accountId), ":prefix": "CONN#" },
     }));
-    return (res.Items ?? []) as PushSubscription[];
+    return (res.Items ?? []) as WsConnection[];
   }
 
-  async deletePushSubscription(accountId: string, id: string): Promise<void> {
+  async deleteWsConnection(accountId: string, connectionId: string): Promise<void> {
     await dynamo.send(new DeleteCommand({
       TableName: ACCOUNTS_TABLE,
-      Key: { pk: pk(accountId), sk: `PUSH#${id}` },
+      Key: { pk: pk(accountId), sk: `CONN#${connectionId}` },
     }));
   }
 }

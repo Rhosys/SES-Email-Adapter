@@ -4,7 +4,7 @@ import { randomUUID } from "crypto";
 import { getDomain } from "tldts";
 import { checkDomain } from "../dns/dns-checker.js";
 import type { AuditEvent } from "../database/audit-database.js";
-import type { Arc, Signal, View, Label, Rule, Domain, DnsRecord, Account, Page, PageParams, ArcStatus, Workflow, WorkflowData, Alias, AliasSender, SenderMode, SenderFilterMode, VerifiedForwardingAddress, Pagination, EmailTemplate, PushSubscription } from "../types/index.js";
+import type { Arc, Signal, View, Label, Rule, Domain, DnsRecord, Account, Page, PageParams, ArcStatus, Workflow, WorkflowData, Alias, AliasSender, SenderMode, SenderFilterMode, VerifiedForwardingAddress, Pagination, EmailTemplate, WsConnection } from "../types/index.js";
 import { deriveGroupingKey } from "../processor/processor.js";
 import { zParse } from "./validate.js";
 import {
@@ -17,7 +17,7 @@ import {
   UpdateAccountRequest,
   CreateForwardingAddressRequest, VerifyForwardingAddressRequest,
   InviteUserRequest, UpdateUserRequest,
-  CreateSenderRequest, CreateTemplateRequest, UpdateTemplateRequest, CreatePushSubscriptionRequest,
+  CreateSenderRequest, CreateTemplateRequest, UpdateTemplateRequest,
 } from "./requests.js";
 
 // ---------------------------------------------------------------------------
@@ -130,10 +130,10 @@ export interface ApiDatabase {
   deleteTemplate(accountId: string, id: string): Promise<void>;
   listTemplates(accountId: string): Promise<EmailTemplate[]>;
 
-  // Push Subscriptions
-  savePushSubscription(sub: PushSubscription): Promise<void>;
-  listPushSubscriptions(accountId: string): Promise<PushSubscription[]>;
-  deletePushSubscription(accountId: string, id: string): Promise<void>;
+  // WebSocket connections
+  saveWsConnection(conn: WsConnection): Promise<void>;
+  listWsConnections(accountId: string): Promise<WsConnection[]>;
+  deleteWsConnection(accountId: string, connectionId: string): Promise<void>;
 
   // Signal status management
   blockSignal(accountId: string, signalId: string): Promise<Signal>;
@@ -818,25 +818,14 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
   });
 
   // -------------------------------------------------------------------------
-  // Push Subscriptions  —  /accounts/:accountId/push-subscriptions
+  // WebSocket connections  —  managed by API Gateway $connect/$disconnect routes
+  // GET exposed for debugging; connect/disconnect handled by the WS Lambda
   // -------------------------------------------------------------------------
 
-  app.post("/accounts/:accountId/push-subscriptions", async (c) => {
+  app.get("/accounts/:accountId/connections", async (c) => {
     const { accountId } = c.get("auth");
-    const body = await zParse(CreatePushSubscriptionRequest, c.req.raw);
-    const sub: PushSubscription = {
-      id: randomUUID(), accountId,
-      endpoint: body.endpoint, keys: body.keys,
-      createdAt: new Date().toISOString(),
-    };
-    await store.savePushSubscription(sub);
-    return c.json(sub, 201);
-  });
-
-  app.delete("/accounts/:accountId/push-subscriptions/:id", async (c) => {
-    const { accountId } = c.get("auth");
-    await store.deletePushSubscription(accountId, c.req.param("id"));
-    return new Response(null, { status: 204 });
+    const connections = await store.listWsConnections(accountId);
+    return c.json({ connections });
   });
 
   // -------------------------------------------------------------------------
