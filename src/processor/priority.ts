@@ -19,8 +19,33 @@ export function baseUrgency(workflow: Workflow, data: WorkflowData): ArcUrgency 
     case "payments":
       return (data as { paymentType?: string }).paymentType === "payment_failed" ? "critical" : "normal";
 
-    case "support":
-      return (data as { priority?: string }).priority === "urgent" ? "critical" : "normal";
+    case "support": {
+      const d = data as { eventType?: string; priority?: string };
+      // lifecycle states that need no action regardless of priority
+      if (d.eventType === "ticket_opened" || d.eventType === "ticket_resolved" || d.eventType === "ticket_closed") return "low";
+      // agent is waiting on the user — stalls the ticket if ignored
+      if (d.eventType === "awaiting_response") return "high";
+      if (d.priority === "urgent") return "critical";
+      if (d.priority === "high") return "high";
+      if (d.priority === "low") return "low";
+      return "normal";
+    }
+
+    case "conversation": {
+      const d = data as { requiresReply?: boolean; sentiment?: string };
+      if (d.requiresReply) {
+        return (d.sentiment === "urgent" || d.sentiment === "negative") ? "high" : "normal";
+      }
+      return d.sentiment === "positive" ? "low" : "normal";
+    }
+
+    case "crm": {
+      const d = data as { crmType?: string; urgency?: string };
+      if (d.crmType === "contract" || d.crmType === "proposal") return "high";
+      if (d.urgency === "high") return "high";
+      if (d.urgency === "medium") return "normal";
+      return "low";
+    }
 
     // passive content — low noise
     case "content":

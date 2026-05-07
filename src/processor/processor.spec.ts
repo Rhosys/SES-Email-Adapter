@@ -1147,13 +1147,17 @@ describe("SignalProcessor", () => {
       expect(baseUrgency("test", { workflow: "test", triggeredBy: "user" })).toBe("high");
     });
 
-    it("support is critical only when priority=urgent", () => {
-      expect(baseUrgency("support", { workflow: "support", eventType: "ticket_opened", service: "Zendesk", priority: "urgent" })).toBe("critical");
-    });
-
-    it("support is normal for high/normal/low priorities", () => {
-      expect(baseUrgency("support", { workflow: "support", eventType: "ticket_updated", service: "Zendesk", priority: "high" })).toBe("normal");
-      expect(baseUrgency("support", { workflow: "support", eventType: "ticket_resolved", service: "Zendesk", priority: "normal" })).toBe("normal");
+    it("support: priority drives urgency; lifecycle eventTypes override", () => {
+      // eventType overrides
+      expect(baseUrgency("support", { workflow: "support", eventType: "ticket_opened", service: "Zendesk", priority: "urgent" })).toBe("low");
+      expect(baseUrgency("support", { workflow: "support", eventType: "ticket_resolved", service: "Zendesk" })).toBe("low");
+      expect(baseUrgency("support", { workflow: "support", eventType: "ticket_closed", service: "Zendesk" })).toBe("low");
+      expect(baseUrgency("support", { workflow: "support", eventType: "awaiting_response", service: "Zendesk" })).toBe("high");
+      // priority-based (non-lifecycle eventType)
+      expect(baseUrgency("support", { workflow: "support", eventType: "ticket_updated", service: "Zendesk", priority: "urgent" })).toBe("critical");
+      expect(baseUrgency("support", { workflow: "support", eventType: "ticket_updated", service: "Zendesk", priority: "high" })).toBe("high");
+      expect(baseUrgency("support", { workflow: "support", eventType: "ticket_updated", service: "Zendesk", priority: "normal" })).toBe("normal");
+      expect(baseUrgency("support", { workflow: "support", eventType: "ticket_updated", service: "Zendesk", priority: "low" })).toBe("low");
     });
 
     it("content is always low", () => {
@@ -1174,12 +1178,25 @@ describe("SignalProcessor", () => {
       expect(baseUrgency("travel", { workflow: "travel", travelType: "flight", provider: "Delta" })).toBe("normal");
     });
 
-    it("conversation is normal", () => {
+    it("conversation: urgency driven by requiresReply + sentiment", () => {
+      // needs reply + urgent/negative → high
+      expect(baseUrgency("conversation", { workflow: "conversation", isReply: false, sentiment: "urgent", requiresReply: true })).toBe("high");
+      expect(baseUrgency("conversation", { workflow: "conversation", isReply: false, sentiment: "negative", requiresReply: true })).toBe("high");
+      // needs reply + other sentiment → normal
+      expect(baseUrgency("conversation", { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: true })).toBe("normal");
+      expect(baseUrgency("conversation", { workflow: "conversation", isReply: false, sentiment: "positive", requiresReply: true })).toBe("normal");
+      // no reply needed + positive → low
+      expect(baseUrgency("conversation", { workflow: "conversation", isReply: false, sentiment: "positive", requiresReply: false })).toBe("low");
+      // no reply needed + other → normal
       expect(baseUrgency("conversation", { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false })).toBe("normal");
     });
 
-    it("crm is normal", () => {
-      expect(baseUrgency("crm", { workflow: "crm", crmType: "sales_outreach", urgency: "high", requiresReply: true })).toBe("normal");
+    it("crm: contract/proposal → high; urgency field drives the rest", () => {
+      expect(baseUrgency("crm", { workflow: "crm", crmType: "contract", urgency: "low", requiresReply: false })).toBe("high");
+      expect(baseUrgency("crm", { workflow: "crm", crmType: "proposal", urgency: "low", requiresReply: false })).toBe("high");
+      expect(baseUrgency("crm", { workflow: "crm", crmType: "sales_outreach", urgency: "high", requiresReply: true })).toBe("high");
+      expect(baseUrgency("crm", { workflow: "crm", crmType: "follow_up", urgency: "medium", requiresReply: false })).toBe("normal");
+      expect(baseUrgency("crm", { workflow: "crm", crmType: "sales_outreach", urgency: "low", requiresReply: false })).toBe("low");
     });
   });
 
