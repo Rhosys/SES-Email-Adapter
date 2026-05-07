@@ -279,13 +279,12 @@ export interface EmailTemplate {
   updatedAt: string;
 }
 
-// Web Push subscription registered by the extension
-export interface PushSubscription {
-  id: string;
+// Active API Gateway WebSocket connection for an account
+export interface WsConnection {
+  connectionId: string;
   accountId: string;
-  endpoint: string;
-  keys: { p256dh: string; auth: string };
-  createdAt: string;
+  connectedAt: string;
+  ttl?: number;
 }
 
 // Account-level filtering defaults
