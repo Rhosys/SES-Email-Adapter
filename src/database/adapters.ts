@@ -1,6 +1,6 @@
 import type { ProcessorDatabase } from "../processor/processor.js";
 import type { ApiDatabase, ListArcsParams, UpdateArcRequest, CreateViewRequest, UpdateViewRequest, CreateLabelRequest, UpdateLabelRequest, CreateRuleRequest, UpdateRuleRequest } from "../api/app.js";
-import type { Arc, Signal, View, Label, Rule, Domain, Account, Page, PageParams, Alias, AliasSender, SenderMode, VerifiedForwardingAddress, EmailTemplate, WsConnection } from "../types/index.js";
+import type { Arc, Signal, View, Label, Rule, Domain, Account, Page, PageParams, Alias, AliasSender, SenderMode, VerifiedForwardingAddress, EmailTemplate } from "../types/index.js";
 import type { AccountDatabase } from "./account-database.js";
 import type { ArcDatabase } from "./arc-database.js";
 import type { ProcessingDatabase } from "./processing-database.js";
@@ -120,11 +120,6 @@ export class ApiDatabaseAdapter implements ApiDatabase {
   updateTemplate(accountId: string, id: string, update: Partial<Pick<EmailTemplate, "name" | "subject" | "body">>) { return this.account.updateTemplate(accountId, id, update); }
   deleteTemplate(accountId: string, id: string) { return this.account.deleteTemplate(accountId, id); }
   listTemplates(accountId: string) { return this.account.listTemplates(accountId); }
-
-  // WebSocket connections
-  saveWsConnection(conn: WsConnection) { return this.account.saveWsConnection(conn); }
-  listWsConnections(accountId: string) { return this.account.listWsConnections(accountId); }
-  deleteWsConnection(accountId: string, connectionId: string) { return this.account.deleteWsConnection(accountId, connectionId); }
 
   // Audit
   listAuditEvents(accountId: string, params: PageParams) { return this.audit.listAuditEvents(accountId, params); }

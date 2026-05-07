@@ -81,9 +81,6 @@ function makeStore(): ApiDatabase {
     updateTemplate: vi.fn().mockResolvedValue(undefined),
     deleteTemplate: vi.fn().mockResolvedValue(undefined),
     listTemplates: vi.fn().mockResolvedValue([]),
-    saveWsConnection: vi.fn().mockResolvedValue(undefined),
-    listWsConnections: vi.fn().mockResolvedValue([]),
-    deleteWsConnection: vi.fn().mockResolvedValue(undefined),
     listAuditEvents: vi.fn().mockResolvedValue({ items: [] }),
   };
 }

@@ -4,7 +4,7 @@ import { randomUUID } from "crypto";
 import { getDomain } from "tldts";
 import { checkDomain } from "../dns/dns-checker.js";
 import type { AuditEvent } from "../database/audit-database.js";
-import type { Arc, Signal, View, Label, Rule, Domain, DnsRecord, Account, Page, PageParams, ArcStatus, Workflow, WorkflowData, Alias, AliasSender, SenderMode, SenderFilterMode, VerifiedForwardingAddress, Pagination, EmailTemplate, WsConnection } from "../types/index.js";
+import type { Arc, Signal, View, Label, Rule, Domain, DnsRecord, Account, Page, PageParams, ArcStatus, Workflow, WorkflowData, Alias, AliasSender, SenderMode, SenderFilterMode, VerifiedForwardingAddress, Pagination, EmailTemplate } from "../types/index.js";
 import { deriveGroupingKey } from "../processor/processor.js";
 import { zParse } from "./validate.js";
 import {
@@ -130,10 +130,6 @@ export interface ApiDatabase {
   deleteTemplate(accountId: string, id: string): Promise<void>;
   listTemplates(accountId: string): Promise<EmailTemplate[]>;
 
-  // WebSocket connections
-  saveWsConnection(conn: WsConnection): Promise<void>;
-  listWsConnections(accountId: string): Promise<WsConnection[]>;
-  deleteWsConnection(accountId: string, connectionId: string): Promise<void>;
 
   // Signal status management
   blockSignal(accountId: string, signalId: string): Promise<Signal>;
@@ -817,16 +813,6 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
     return new Response(null, { status: 204 });
   });
 
-  // -------------------------------------------------------------------------
-  // WebSocket connections  —  managed by API Gateway $connect/$disconnect routes
-  // GET exposed for debugging; connect/disconnect handled by the WS Lambda
-  // -------------------------------------------------------------------------
-
-  app.get("/accounts/:accountId/connections", async (c) => {
-    const { accountId } = c.get("auth");
-    const connections = await store.listWsConnections(accountId);
-    return c.json({ connections });
-  });
 
   // -------------------------------------------------------------------------
   // Verified forwarding addresses  —  /accounts/:accountId/forwarding-addresses
