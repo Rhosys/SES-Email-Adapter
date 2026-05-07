@@ -199,8 +199,7 @@ export const SYSTEM_RULES: Rule[] = [
   { id: "SR-14", accountId: "SYSTEM", name: "Auto-approve sender on matched conversation", condition: JSON.stringify({ "and": [in_("system:workflow:conversation"), in_("system:sender:untrusted"), { "var": "isMatchedArc" }] }), actions: [{ type: "approve_sender" }], status: "enabled", priorityOrder: 1, createdAt: "", updatedAt: "" },
   { id: "SR-01", accountId: "SYSTEM", name: "Block onboarding emails", condition: JSON.stringify(in_("system:workflow:onboarding")), actions: [{ type: "block" }], status: "enabled", priorityOrder: 2, createdAt: "", updatedAt: "" },
   { id: "SR-05", accountId: "SYSTEM", name: "Block status emails", condition: JSON.stringify(in_("system:workflow:status")), actions: [{ type: "block" }], status: "enabled", priorityOrder: 3, createdAt: "", updatedAt: "" },
-  { id: "SR-02", accountId: "SYSTEM", name: "Quarantine untrusted senders", condition: JSON.stringify(in_("system:sender:untrusted")), actions: [{ type: "quarantine" }], status: "enabled", priorityOrder: 4, createdAt: "", updatedAt: "" },
-  { id: "SR-03", accountId: "SYSTEM", name: "Quarantine high-spam signals", condition: JSON.stringify(in_("system:spam:high")), actions: [{ type: "quarantine" }], status: "enabled", priorityOrder: 5, createdAt: "", updatedAt: "" },
+  { id: "SR-03", accountId: "SYSTEM", name: "Quarantine high-spam signals", condition: JSON.stringify(in_("system:spam:high")), actions: [{ type: "quarantine" }], status: "enabled", priorityOrder: 4, createdAt: "", updatedAt: "" },
   { id: "SR-04", accountId: "SYSTEM", name: "Suppress notification for medium spam", condition: JSON.stringify(in_("system:spam:medium")), actions: [{ type: "suppress_notification" }], status: "enabled", priorityOrder: 6, createdAt: "", updatedAt: "" },
   { id: "SR-06", accountId: "SYSTEM", name: "Suppress notification for status emails", condition: JSON.stringify(in_("system:workflow:status")), actions: [{ type: "suppress_notification" }], status: "enabled", priorityOrder: 7, createdAt: "", updatedAt: "" },
   { id: "SR-07", accountId: "SYSTEM", name: "Suppress notification for content emails", condition: JSON.stringify(in_("system:workflow:content")), actions: [{ type: "suppress_notification" }], status: "enabled", priorityOrder: 8, createdAt: "", updatedAt: "" },
@@ -368,11 +367,10 @@ export class SignalProcessor {
 
     // 8. Assign system labels and merge classifier labels
     const emailConfig = accountCtx.emailConfig;
-    // Brand-new address (null emailConfig) with auto-allow account policy → treat as allow_all for label purposes
     const effectiveFilterMode: SenderFilterMode = emailConfig
       ? emailConfig.filterMode
       : accountCtx.filtering?.newAddressHandling === "block_until_approved"
-        ? "notify_new"
+        ? "quarantine_notify"
         : "allow_all";
     // When no alias exists for the recipient, sender entries don't apply — treat as no entry
     const effectiveSenderEntry = emailConfig ? senderEntry : null;
@@ -411,6 +409,17 @@ export class SignalProcessor {
     const matchedRules = await applyRules(rules, { signal: signalShell, arc, isMatchedArc }, this.ruleEvaluator);
     const outcome = deriveOutcome(matchedRules);
 
+    // Fallback: if no rule set a status, apply filter mode for untrusted senders
+    const hasStatusOutcome = outcome.block || outcome.quarantine || outcome.archive || outcome.delete;
+    if (!hasStatusOutcome && arc.labels.includes("system:sender:untrusted")) {
+      switch (effectiveFilterMode) {
+        case "block":             outcome.block = true; break;
+        case "quarantine_silent": outcome.quarantine = true; outcome.suppressNotification = true; break;
+        case "quarantine_notify": outcome.quarantine = true; break;
+        // "allow_all": signal proceeds as active
+      }
+    }
+
     const buildArgs = { accountId, sesMessageId, recipientAddress, parsed, classification, s3Key, receivedAt: timestamp, now, ...(ttl !== undefined ? { ttl } : {}) };
 
     if (outcome.block) {
@@ -419,11 +428,11 @@ export class SignalProcessor {
       return;
     }
 
-    // approveSender overrides quarantine — SR-14 (auto-approve on matched conversation) fires before SR-02
+    // approveSender overrides quarantine — SR-14 (auto-approve on matched conversation) fires before fallback
     if (outcome.quarantine && !outcome.approveSender) {
       const quarantinedSignal: Signal = { ...buildSignal({ status: "quarantined", ...buildArgs }), matchedRules };
       await this.store.saveSignal(quarantinedSignal);
-      if (this.notifier) {
+      if (this.notifier && !outcome.suppressNotification) {
         await this.notifier.notifyBlocked(accountId, quarantinedSignal).catch((err) => {
           console.error("Quarantine notification failed:", err);
         });
@@ -585,7 +594,7 @@ export class SignalProcessor {
     address: string,
     senderETLD1: string,
     existing: Alias | null,
-    defaultFilterMode: AccountFilteringConfig["defaultFilterMode"] = "notify_new",
+    defaultFilterMode: AccountFilteringConfig["defaultFilterMode"] = "quarantine_notify",
   ): Promise<void> {
     const now = new Date().toISOString();
     if (!existing) {

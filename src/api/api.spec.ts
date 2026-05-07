@@ -105,7 +105,7 @@ function makeAlias(overrides: Partial<Alias> = {}): Alias {
     id: "cfg-001",
     accountId: TEST_ACCOUNT_ID,
     address: "user@example.com",
-    filterMode: "notify_new",
+    filterMode: "quarantine_notify",
     createdAt: "2024-01-01T00:00:00Z",
     updatedAt: "2024-01-01T00:00:00Z",
     ...overrides,
@@ -932,18 +932,18 @@ describe("API", () => {
 
     it("updates account filtering config including blockOnboardingEmails", async () => {
       const res = await req(app, "PATCH", `${A}`, {
-        body: { filtering: { defaultFilterMode: "strict", blockOnboardingEmails: true } },
+        body: { filtering: { defaultFilterMode: "block", blockOnboardingEmails: true } },
       });
       expect(res.status).toBe(200);
       expect(store.updateAccount).toHaveBeenCalledWith(
         TEST_ACCOUNT_ID,
-        expect.objectContaining({ filtering: { defaultFilterMode: "strict", blockOnboardingEmails: true } }),
+        expect.objectContaining({ filtering: { defaultFilterMode: "block", blockOnboardingEmails: true } }),
       );
     });
 
     it("updates account-level spamScoreThreshold in filtering config", async () => {
       const res = await req(app, "PATCH", `${A}`, {
-        body: { filtering: { defaultFilterMode: "notify_new", newAddressHandling: "auto_allow", spamScoreThreshold: 0.75 } },
+        body: { filtering: { defaultFilterMode: "quarantine_notify", newAddressHandling: "auto_allow", spamScoreThreshold: 0.75 } },
       });
       expect(res.status).toBe(200);
       expect(store.updateAccount).toHaveBeenCalledWith(
@@ -1042,7 +1042,7 @@ describe("API", () => {
       const res = await req(app, "GET", `${A}/aliases/user%40example.com`);
       expect(res.status).toBe(200);
       const body = await res.json() as Alias;
-      expect(body.filterMode).toBe("notify_new");
+      expect(body.filterMode).toBe("quarantine_notify");
     });
 
     it("returns 404 when no alias exists", async () => {
@@ -1055,13 +1055,13 @@ describe("API", () => {
     it("creates an alias and returns 201 + full resource", async () => {
       vi.mocked(store.createAlias).mockResolvedValueOnce(makeAlias({ address: "me@mydomain.com" }));
       const res = await req(app, "POST", `${A}/aliases`, {
-        body: { address: "me@mydomain.com", filterMode: "strict" },
+        body: { address: "me@mydomain.com", filterMode: "block" },
       });
       expect(res.status).toBe(201);
       const body = await res.json() as Alias;
       expect(body.address).toBe("me@mydomain.com");
       expect(store.createAlias).toHaveBeenCalledWith(
-        expect.objectContaining({ accountId: TEST_ACCOUNT_ID, address: "me@mydomain.com", filterMode: "strict" }),
+        expect.objectContaining({ accountId: TEST_ACCOUNT_ID, address: "me@mydomain.com", filterMode: "block" }),
       );
     });
 
@@ -1074,7 +1074,7 @@ describe("API", () => {
     });
 
     it("returns 400 when address is missing", async () => {
-      const res = await req(app, "POST", `${A}/aliases`, { body: { filterMode: "strict" } });
+      const res = await req(app, "POST", `${A}/aliases`, { body: { filterMode: "block" } });
       expect(res.status).toBe(400);
     });
 
@@ -1091,15 +1091,15 @@ describe("API", () => {
 
   describe("PATCH /accounts/:accountId/aliases/:address", () => {
     it("creates or updates an alias and returns 200 + full resource", async () => {
-      vi.mocked(store.upsertAlias).mockResolvedValueOnce(makeAlias({ filterMode: "strict" }));
+      vi.mocked(store.upsertAlias).mockResolvedValueOnce(makeAlias({ filterMode: "block" }));
       const res = await req(app, "PATCH", `${A}/aliases/me%40mydomain.com`, {
-        body: { filterMode: "strict", approvedSenders: ["amazon.com"] },
+        body: { filterMode: "block" },
       });
       expect(res.status).toBe(200);
       const body = await res.json() as Alias;
-      expect(body.filterMode).toBe("strict");
+      expect(body.filterMode).toBe("block");
       expect(store.upsertAlias).toHaveBeenCalledWith(
-        expect.objectContaining({ accountId: TEST_ACCOUNT_ID, address: "me@mydomain.com", filterMode: "strict" }),
+        expect.objectContaining({ accountId: TEST_ACCOUNT_ID, address: "me@mydomain.com", filterMode: "block" }),
       );
     });
 
@@ -1115,7 +1115,7 @@ describe("API", () => {
 
     it("stores spamScoreThreshold when included in the request body", async () => {
       await req(app, "PATCH", `${A}/aliases/me%40mydomain.com`, {
-        body: { filterMode: "strict", approvedSenders: [], spamScoreThreshold: 0.7 },
+        body: { filterMode: "block", spamScoreThreshold: 0.7 },
       });
       const saved = vi.mocked(store.upsertAlias).mock.calls[0]![0] as Alias;
       expect(saved.spamScoreThreshold).toBe(0.7);
@@ -1123,7 +1123,7 @@ describe("API", () => {
 
     it("does not set spamScoreThreshold when absent from request body", async () => {
       await req(app, "PATCH", `${A}/aliases/me%40mydomain.com`, {
-        body: { filterMode: "notify_new", approvedSenders: ["amazon.com"] },
+        body: { filterMode: "quarantine_notify" },
       });
       const saved = vi.mocked(store.upsertAlias).mock.calls[0]![0] as Alias;
       expect(saved.spamScoreThreshold).toBeUndefined();
