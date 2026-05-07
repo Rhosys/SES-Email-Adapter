@@ -360,7 +360,10 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
       ...(query["limit"] ? { limit: parseInt(query["limit"], 10) } : {}),
     };
     const result = await store.listPreArcSignals(accountId, quarantineCategory as "blocked" | "quarantined", params);
-    return c.json(page("signals", result.items, result.nextCursor));
+    const items = (status === "quarantine_visible" || status === "quarantine_hidden")
+      ? result.items.filter(s => s.status === status)
+      : result.items;
+    return c.json(page("signals", items, result.nextCursor));
   });
 
   app.post("/accounts/:accountId/signals/:id/quarantineResponse", async (c) => {
