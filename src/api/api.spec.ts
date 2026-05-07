@@ -105,7 +105,7 @@ function makeAlias(overrides: Partial<Alias> = {}): Alias {
     id: "cfg-001",
     accountId: TEST_ACCOUNT_ID,
     address: "user@example.com",
-    filterMode: "quarantine_notify",
+    filterMode: "quarantine_visible",
     createdAt: "2024-01-01T00:00:00Z",
     updatedAt: "2024-01-01T00:00:00Z",
     ...overrides,
@@ -404,8 +404,8 @@ describe("API", () => {
   });
 
   describe("GET /accounts/:accountId/signals?status=", () => {
-    it("returns quarantined signals", async () => {
-      const s = makeSignal({ status: "quarantined" });
+    it("returns quarantined signals (both visible and hidden) when status=quarantined", async () => {
+      const s = makeSignal({ status: "quarantine_visible" });
       vi.mocked(store.listPreArcSignals).mockResolvedValueOnce({ items: [s] });
       const res = await req(app, "GET", `${A}/signals?status=quarantined`);
       expect(res.status).toBe(200);
@@ -437,7 +437,7 @@ describe("API", () => {
 
   describe("PUT /accounts/:accountId/signals/:id/quarantineResponse", () => {
     it("blocks a quarantined signal", async () => {
-      const s = makeSignal({ status: "quarantined" });
+      const s = makeSignal({ status: "quarantine_visible" });
       vi.mocked(store.getSignal).mockResolvedValueOnce(s);
       const res = await req(app, "POST", `${A}/signals/SES%23msg-001/quarantineResponse`, { body: { status: "blocked" } });
       expect(res.status).toBe(200);
@@ -445,7 +445,7 @@ describe("API", () => {
     });
 
     it("allows a quarantined signal — creates new arc when no grouping key match", async () => {
-      const s = makeSignal({ status: "quarantined" });
+      const s = makeSignal({ status: "quarantine_visible" });
       vi.mocked(store.getSignal).mockResolvedValueOnce(s);
       vi.mocked(store.findArcByGroupingKey).mockResolvedValueOnce(null);
       const res = await req(app, "POST", `${A}/signals/SES%23msg-001/quarantineResponse`, { body: { status: "active" } });
@@ -458,7 +458,7 @@ describe("API", () => {
     });
 
     it("allows a quarantined signal — attaches to existing arc when grouping key matches", async () => {
-      const s = makeSignal({ status: "quarantined", workflow: "auth" });
+      const s = makeSignal({ status: "quarantine_visible", workflow: "auth" });
       const existingArc = makeArc();
       vi.mocked(store.getSignal).mockResolvedValueOnce(s);
       vi.mocked(store.findArcByGroupingKey).mockResolvedValueOnce(existingArc);
@@ -477,7 +477,7 @@ describe("API", () => {
     });
 
     it("returns 400 when body is missing status", async () => {
-      vi.mocked(store.getSignal).mockResolvedValueOnce(makeSignal({ status: "quarantined" }));
+      vi.mocked(store.getSignal).mockResolvedValueOnce(makeSignal({ status: "quarantine_visible" }));
       const res = await req(app, "POST", `${A}/signals/SES%23msg-001/quarantineResponse`, { body: {} });
       expect(res.status).toBe(400);
     });
@@ -943,7 +943,7 @@ describe("API", () => {
 
     it("updates account-level spamScoreThreshold in filtering config", async () => {
       const res = await req(app, "PATCH", `${A}`, {
-        body: { filtering: { defaultFilterMode: "quarantine_notify", newAddressHandling: "auto_allow", spamScoreThreshold: 0.75 } },
+        body: { filtering: { defaultFilterMode: "quarantine_visible", newAddressHandling: "auto_allow", spamScoreThreshold: 0.75 } },
       });
       expect(res.status).toBe(200);
       expect(store.updateAccount).toHaveBeenCalledWith(
@@ -1042,7 +1042,7 @@ describe("API", () => {
       const res = await req(app, "GET", `${A}/aliases/user%40example.com`);
       expect(res.status).toBe(200);
       const body = await res.json() as Alias;
-      expect(body.filterMode).toBe("quarantine_notify");
+      expect(body.filterMode).toBe("quarantine_visible");
     });
 
     it("returns 404 when no alias exists", async () => {
@@ -1123,7 +1123,7 @@ describe("API", () => {
 
     it("does not set spamScoreThreshold when absent from request body", async () => {
       await req(app, "PATCH", `${A}/aliases/me%40mydomain.com`, {
-        body: { filterMode: "quarantine_notify" },
+        body: { filterMode: "quarantine_visible" },
       });
       const saved = vi.mocked(store.upsertAlias).mock.calls[0]![0] as Alias;
       expect(saved.spamScoreThreshold).toBeUndefined();
@@ -1155,7 +1155,7 @@ describe("API", () => {
     });
 
     it("creates an Arc from a quarantined signal and returns 201", async () => {
-      vi.mocked(store.getSignal).mockResolvedValueOnce(makeSignal({ status: "quarantined" }));
+      vi.mocked(store.getSignal).mockResolvedValueOnce(makeSignal({ status: "quarantine_visible" }));
       const res = await req(app, "POST", `${A}/arcs`, { body: { signalId: "SES#msg-001" } });
       expect(res.status).toBe(201);
       expect(store.createArc).toHaveBeenCalledOnce();

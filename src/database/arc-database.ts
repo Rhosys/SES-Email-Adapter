@@ -73,7 +73,7 @@ export class ArcDatabase implements ArcMatcher {
     let gsi1pk: string;
     if (signal.arcId) {
       gsi1pk = `ARCSIG#${signal.arcId}`;
-    } else if (signal.status === "quarantined") {
+    } else if (signal.status === "quarantine_visible" || signal.status === "quarantine_hidden") {
       gsi1pk = `QUARANTINED#${signal.accountId}`;
     } else {
       gsi1pk = `BLOCKED#${signal.accountId}`;

@@ -100,6 +100,7 @@ interface InboundSignalMessage {
 interface ProcessingOutcome {
   block: boolean;
   quarantine: boolean;
+  quarantineHidden: boolean;  // true → quarantine_hidden status; false → quarantine_visible
   approveSender: boolean;
   archive: boolean;
   delete: boolean;
@@ -116,6 +117,7 @@ function emptyOutcome(): ProcessingOutcome {
   return {
     block: false,
     quarantine: false,
+    quarantineHidden: false,
     approveSender: false,
     archive: false,
     delete: false,
@@ -139,10 +141,11 @@ async function applyRules(
     const actions = rule.actions.filter((a) => !a.disabled).map(({ type, value }) => ({ type, ...(value !== undefined ? { value } : {}) }));
     const labelsAdded = actions.filter((a) => a.type === "assign_label" && a.value).map((a) => a.value!);
     const statusChange: MatchedRuleResult["statusChange"] = (
-      actions.some((a) => a.type === "block")      ? "blocked"     :
-      actions.some((a) => a.type === "quarantine") ? "quarantined" :
-      actions.some((a) => a.type === "archive")    ? "archived"    :
-      actions.some((a) => a.type === "delete")     ? "deleted"     :
+      actions.some((a) => a.type === "block")             ? "blocked"            :
+      actions.some((a) => a.type === "quarantine_hidden") ? "quarantine_hidden"  :
+      actions.some((a) => a.type === "quarantine")        ? "quarantine_visible" :
+      actions.some((a) => a.type === "archive")           ? "archived"           :
+      actions.some((a) => a.type === "delete")            ? "deleted"            :
       undefined
     );
     matchedRules.push({ ruleId: rule.id, actions, labelsAdded, ...(statusChange ? { statusChange } : {}) });
@@ -165,6 +168,9 @@ function deriveOutcome(matchedRules: MatchedRuleResult[]): ProcessingOutcome {
           break;
         case "quarantine":
           if (!statusSet) { outcome.quarantine = true; statusSet = true; }
+          break;
+        case "quarantine_hidden":
+          if (!statusSet) { outcome.quarantine = true; outcome.quarantineHidden = true; statusSet = true; }
           break;
         case "archive":
           if (!statusSet) { outcome.archive = true; statusSet = true; }
@@ -199,7 +205,8 @@ export const SYSTEM_RULES: Rule[] = [
   { id: "SR-14", accountId: "SYSTEM", name: "Auto-approve sender on matched conversation", condition: JSON.stringify({ "and": [in_("system:workflow:conversation"), in_("system:sender:untrusted"), { "var": "isMatchedArc" }] }), actions: [{ type: "approve_sender" }], status: "enabled", priorityOrder: 1, createdAt: "", updatedAt: "" },
   { id: "SR-01", accountId: "SYSTEM", name: "Block onboarding emails", condition: JSON.stringify(in_("system:workflow:onboarding")), actions: [{ type: "block" }], status: "enabled", priorityOrder: 2, createdAt: "", updatedAt: "" },
   { id: "SR-05", accountId: "SYSTEM", name: "Block status emails", condition: JSON.stringify(in_("system:workflow:status")), actions: [{ type: "block" }], status: "enabled", priorityOrder: 3, createdAt: "", updatedAt: "" },
-  { id: "SR-03", accountId: "SYSTEM", name: "Quarantine high-spam signals", condition: JSON.stringify(in_("system:spam:high")), actions: [{ type: "quarantine" }], status: "enabled", priorityOrder: 4, createdAt: "", updatedAt: "" },
+  { id: "SR-02", accountId: "SYSTEM", name: "Quarantine untrusted senders (hidden)", condition: JSON.stringify(in_("system:sender:untrusted")), actions: [{ type: "quarantine_hidden" }], status: "enabled", priorityOrder: 4, createdAt: "", updatedAt: "" },
+  { id: "SR-03", accountId: "SYSTEM", name: "Quarantine high-spam signals", condition: JSON.stringify(in_("system:spam:high")), actions: [{ type: "quarantine" }], status: "enabled", priorityOrder: 5, createdAt: "", updatedAt: "" },
   { id: "SR-04", accountId: "SYSTEM", name: "Suppress notification for medium spam", condition: JSON.stringify(in_("system:spam:medium")), actions: [{ type: "suppress_notification" }], status: "enabled", priorityOrder: 6, createdAt: "", updatedAt: "" },
   { id: "SR-06", accountId: "SYSTEM", name: "Suppress notification for status emails", condition: JSON.stringify(in_("system:workflow:status")), actions: [{ type: "suppress_notification" }], status: "enabled", priorityOrder: 7, createdAt: "", updatedAt: "" },
   { id: "SR-07", accountId: "SYSTEM", name: "Suppress notification for content emails", condition: JSON.stringify(in_("system:workflow:content")), actions: [{ type: "suppress_notification" }], status: "enabled", priorityOrder: 8, createdAt: "", updatedAt: "" },
@@ -370,7 +377,7 @@ export class SignalProcessor {
     const effectiveFilterMode: SenderFilterMode = emailConfig
       ? emailConfig.filterMode
       : accountCtx.filtering?.newAddressHandling === "block_until_approved"
-        ? "quarantine_notify"
+        ? "quarantine_visible"
         : "allow_all";
     // When no alias exists for the recipient, sender entries don't apply — treat as no entry
     const effectiveSenderEntry = emailConfig ? senderEntry : null;
@@ -413,9 +420,9 @@ export class SignalProcessor {
     const hasStatusOutcome = outcome.block || outcome.quarantine || outcome.archive || outcome.delete;
     if (!hasStatusOutcome && arc.labels.includes("system:sender:untrusted")) {
       switch (effectiveFilterMode) {
-        case "block":             outcome.block = true; break;
-        case "quarantine_silent": outcome.quarantine = true; outcome.suppressNotification = true; break;
-        case "quarantine_notify": outcome.quarantine = true; break;
+        case "block":              outcome.block = true; break;
+        case "quarantine_hidden":  outcome.quarantine = true; outcome.quarantineHidden = true; break;
+        case "quarantine_visible": outcome.quarantine = true; break;
         // "allow_all": signal proceeds as active
       }
     }
@@ -428,11 +435,12 @@ export class SignalProcessor {
       return;
     }
 
-    // approveSender overrides quarantine — SR-14 (auto-approve on matched conversation) fires before fallback
+    // approveSender overrides quarantine — SR-14 (auto-approve on matched conversation) fires before SR-02
     if (outcome.quarantine && !outcome.approveSender) {
-      const quarantinedSignal: Signal = { ...buildSignal({ status: "quarantined", ...buildArgs }), matchedRules };
+      const quarantineStatus = outcome.quarantineHidden ? "quarantine_hidden" : "quarantine_visible";
+      const quarantinedSignal: Signal = { ...buildSignal({ status: quarantineStatus, ...buildArgs }), matchedRules };
       await this.store.saveSignal(quarantinedSignal);
-      if (this.notifier && !outcome.suppressNotification) {
+      if (this.notifier && !outcome.quarantineHidden) {
         await this.notifier.notifyBlocked(accountId, quarantinedSignal).catch((err) => {
           console.error("Quarantine notification failed:", err);
         });
@@ -594,7 +602,7 @@ export class SignalProcessor {
     address: string,
     senderETLD1: string,
     existing: Alias | null,
-    defaultFilterMode: AccountFilteringConfig["defaultFilterMode"] = "quarantine_notify",
+    defaultFilterMode: AccountFilteringConfig["defaultFilterMode"] = "quarantine_visible",
   ): Promise<void> {
     const now = new Date().toISOString();
     if (!existing) {
