@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { SQSEvent } from "aws-lambda";
 import { SignalProcessor, deriveGroupingKey, SYSTEM_RULES, extractForwardedAddress } from "./processor.js";
 import { JsonLogicRuleEvaluator } from "./rule-evaluator.js";
-import { baseUrgency, priorityCalculator } from "./priority.js";
+import { baseUrgency } from "./priority.js";
 import type { ProcessorDatabase, ArcMatcher, RuleEvaluator, Notifier, Forwarder, ForwardOptions, TestReplier } from "./processor.js";
 import type { MimeParser } from "./mime.js";
 import type { SignalClassifier, ClassificationOutput } from "../classifier/classifier.js";
@@ -15,12 +15,17 @@ import type { Arc, Rule, Signal, Alias, AccountFilteringConfig } from "../types/
 
 const TEST_ACCOUNT_ID = "acct-001";
 
-// Default context: sender example.com is pre-approved so most tests exercise the happy path without hitting SR-02.
+// Default context: sender example.com is pre-approved so most tests exercise the happy path without triggering the filter-mode fallback.
 // Tests that specifically test sender filtering use explicit mockResolvedValueOnce overrides.
 const DEFAULT_EMAIL_CONFIG: Alias = {
   id: "cfg-default", accountId: "acct-test-001", address: "user@example.com",
-  filterMode: "notify_new", approvedSenders: ["example.com"],
+  filterMode: "quarantine_visible",
   createdAt: "2024-01-01T00:00:00Z", updatedAt: "2024-01-01T00:00:00Z",
+};
+
+// Default AliasSender: marks example.com as an allowed sender for the default alias.
+const DEFAULT_SENDER_ENTRY: import("../types/index.js").AliasSender = {
+  accountId: "acct-test-001", aliasAddress: "user@example.com", domain: "example.com", mode: "allow", addedAt: "2024-01-01T00:00:00Z",
 };
 const DEFAULT_CTX = { retentionDays: 0, filtering: null, emailConfig: DEFAULT_EMAIL_CONFIG, registeredDomains: [], userEmails: [] };
 
@@ -31,9 +36,12 @@ function makeStore(): ProcessorDatabase {
     getArc: vi.fn().mockResolvedValue(null),
     findArcByGroupingKey: vi.fn().mockResolvedValue(null),
     saveArc: vi.fn().mockResolvedValue(undefined),
-    listRules: vi.fn().mockResolvedValue(SYSTEM_RULES),
+    listEnabledRules: vi.fn().mockResolvedValue(SYSTEM_RULES),
     getProcessorAccountContext: vi.fn().mockResolvedValue(DEFAULT_CTX),
     saveAlias: vi.fn().mockImplementation((a: Alias) => Promise.resolve(a)),
+    getSender: vi.fn().mockResolvedValue(DEFAULT_SENDER_ENTRY),
+    saveSender: vi.fn().mockResolvedValue(undefined),
+    getTemplate: vi.fn().mockResolvedValue(null),
     updateGlobalReputation: vi.fn().mockResolvedValue(undefined),
     getDomainByName: vi.fn().mockResolvedValue(null),
   };
@@ -50,12 +58,16 @@ function makeAlias(overrides: Partial<Alias> = {}): Alias {
     id: "cfg-001",
     accountId: TEST_ACCOUNT_ID,
     address: "user@example.com",
-    filterMode: "notify_new",
-    approvedSenders: ["example.com"],
+    filterMode: "quarantine_visible",
     createdAt: "2024-01-01T00:00:00Z",
     updatedAt: "2024-01-01T00:00:00Z",
     ...overrides,
   };
+}
+
+// Helper to make an AliasSender entry (approved sender for a given alias+domain).
+function makeSenderEntry(domain: string, aliasAddress = "user@example.com"): import("../types/index.js").AliasSender {
+  return { accountId: TEST_ACCOUNT_ID, aliasAddress, domain, mode: "allow", addedAt: "2024-01-01T00:00:00Z" };
 }
 
 function makeMimeParser(): MimeParser {
@@ -168,7 +180,8 @@ function makeRule(overrides: Partial<Rule> = {}): Rule {
     name: "Test rule",
     condition: "true",
     actions: [],
-    position: 100,
+    status: "enabled",
+    priorityOrder: 100,
     createdAt: "2024-01-01T00:00:00Z",
     updatedAt: "2024-01-01T00:00:00Z",
     ...overrides,
@@ -343,11 +356,12 @@ describe("SignalProcessor", () => {
         name: "Label billing",
         condition: "true",
         actions: [{ type: "assign_label", value: "billing" }],
-        position: 0,
+        status: "enabled",
+        priorityOrder: 0,
         createdAt: "2024-01-01T00:00:00Z",
         updatedAt: "2024-01-01T00:00:00Z",
       };
-      vi.mocked(store.listRules).mockResolvedValueOnce([rule]);
+      vi.mocked(store.listEnabledRules).mockResolvedValueOnce([rule]);
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -362,11 +376,12 @@ describe("SignalProcessor", () => {
         name: "Archive newsletters",
         condition: "true",
         actions: [{ type: "archive" }],
-        position: 0,
+        status: "enabled",
+        priorityOrder: 0,
         createdAt: "2024-01-01T00:00:00Z",
         updatedAt: "2024-01-01T00:00:00Z",
       };
-      vi.mocked(store.listRules).mockResolvedValueOnce([rule]);
+      vi.mocked(store.listEnabledRules).mockResolvedValueOnce([rule]);
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -381,11 +396,12 @@ describe("SignalProcessor", () => {
         name: "Never matches",
         condition: '{"==": [1, 2]}',
         actions: [{ type: "archive" }],
-        position: 0,
+        status: "enabled",
+        priorityOrder: 0,
         createdAt: "2024-01-01T00:00:00Z",
         updatedAt: "2024-01-01T00:00:00Z",
       };
-      vi.mocked(store.listRules).mockResolvedValueOnce([rule]);
+      vi.mocked(store.listEnabledRules).mockResolvedValueOnce([rule]);
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -400,11 +416,12 @@ describe("SignalProcessor", () => {
         name: "Disabled label rule",
         condition: "true",
         actions: [{ type: "assign_label", value: "important", disabled: true }],
-        position: 0,
+        status: "enabled",
+        priorityOrder: 0,
         createdAt: "2024-01-01T00:00:00Z",
         updatedAt: "2024-01-01T00:00:00Z",
       };
-      vi.mocked(store.listRules).mockResolvedValueOnce([rule]);
+      vi.mocked(store.listEnabledRules).mockResolvedValueOnce([rule]);
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -419,16 +436,83 @@ describe("SignalProcessor", () => {
         name: "Forward all",
         condition: "true",
         actions: [{ type: "forward", value: "backup@personal.com" }],
-        position: 0,
+        status: "enabled",
+        priorityOrder: 0,
         createdAt: "2024-01-01T00:00:00Z",
         updatedAt: "2024-01-01T00:00:00Z",
       };
-      vi.mocked(store.listRules).mockResolvedValueOnce([rule]);
+      vi.mocked(store.listEnabledRules).mockResolvedValueOnce([rule]);
 
       // No error — processor without forwarder silently skips forward actions
       await processor.process(makeSqsEvent([{}]));
 
       expect(store.saveSignal).toHaveBeenCalledOnce();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // matchedRules
+  // -------------------------------------------------------------------------
+
+  describe("matchedRules", () => {
+    it("writes matched rule with labelsAdded to signal", async () => {
+      const rule: Rule = {
+        id: "rule-label",
+        accountId: TEST_ACCOUNT_ID,
+        name: "Tag billing",
+        condition: "true",
+        actions: [{ type: "assign_label", value: "billing" }],
+        status: "enabled",
+        priorityOrder: 100,
+        createdAt: "2024-01-01T00:00:00Z",
+        updatedAt: "2024-01-01T00:00:00Z",
+      };
+      vi.mocked(store.listEnabledRules).mockResolvedValueOnce([rule]);
+
+      await processor.process(makeSqsEvent([{}]));
+
+      const signal = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
+      expect(signal.matchedRules).toHaveLength(1);
+      expect(signal.matchedRules![0]!.ruleId).toBe("rule-label");
+      expect(signal.matchedRules![0]!.labelsAdded).toContain("billing");
+      expect(signal.matchedRules![0]!.statusChange).toBeUndefined();
+    });
+
+    it("writes statusChange on the matching rule for a quarantined signal", async () => {
+      const rule: Rule = {
+        id: "rule-quarantine",
+        accountId: TEST_ACCOUNT_ID,
+        name: "Quarantine unknown",
+        condition: "true",
+        actions: [{ type: "quarantine" }],
+        status: "enabled",
+        priorityOrder: 100,
+        createdAt: "2024-01-01T00:00:00Z",
+        updatedAt: "2024-01-01T00:00:00Z",
+      };
+      vi.mocked(store.listEnabledRules).mockResolvedValueOnce([rule]);
+      vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce({
+        ...DEFAULT_CTX,
+        emailConfig: { ...DEFAULT_EMAIL_CONFIG, filterMode: "allow_all" },
+      });
+
+      await processor.process(makeSqsEvent([{}]));
+
+      const signal = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
+      expect(signal.status).toBe("quarantine_visible");
+      expect(signal.matchedRules).toHaveLength(1);
+      expect(signal.matchedRules![0]!.statusChange).toBe("quarantine_visible");
+    });
+
+    it("does not include rules that did not match", async () => {
+      const matching: Rule = { ...makeRule({ id: "r-match", name: "Matches", condition: "true", actions: [{ type: "archive" }] }) };
+      const nonMatching: Rule = { ...makeRule({ id: "r-skip", name: "Never", condition: '{"==": [1, 2]}', actions: [{ type: "block" }] }) };
+      vi.mocked(store.listEnabledRules).mockResolvedValueOnce([matching, nonMatching]);
+
+      await processor.process(makeSqsEvent([{}]));
+
+      const signal = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
+      expect(signal.matchedRules?.map((r) => r.ruleId)).toEqual(["r-match"]);
     });
   });
 
@@ -451,11 +535,12 @@ describe("SignalProcessor", () => {
         name: "Forward to backup",
         condition: "true",
         actions: [{ type: "forward", value: "backup@personal.com" }],
-        position: 0,
+        status: "enabled",
+        priorityOrder: 0,
         createdAt: "2024-01-01T00:00:00Z",
         updatedAt: "2024-01-01T00:00:00Z",
       };
-      vi.mocked(store.listRules).mockResolvedValueOnce([rule]);
+      vi.mocked(store.listEnabledRules).mockResolvedValueOnce([rule]);
 
       await processor.process(makeSqsEvent([{ s3Key: "emails/msg-123" }]));
 
@@ -477,11 +562,12 @@ describe("SignalProcessor", () => {
           { type: "forward", value: "first@example.com" },
           { type: "forward", value: "second@example.com" },
         ],
-        position: 0,
+        status: "enabled",
+        priorityOrder: 0,
         createdAt: "2024-01-01T00:00:00Z",
         updatedAt: "2024-01-01T00:00:00Z",
       };
-      vi.mocked(store.listRules).mockResolvedValueOnce([rule]);
+      vi.mocked(store.listEnabledRules).mockResolvedValueOnce([rule]);
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -498,11 +584,12 @@ describe("SignalProcessor", () => {
         name: "Forward invoices",
         condition: '{"==": [1, 2]}',
         actions: [{ type: "forward", value: "accountant@firm.com" }],
-        position: 0,
+        status: "enabled",
+        priorityOrder: 0,
         createdAt: "2024-01-01T00:00:00Z",
         updatedAt: "2024-01-01T00:00:00Z",
       };
-      vi.mocked(store.listRules).mockResolvedValueOnce([rule]);
+      vi.mocked(store.listEnabledRules).mockResolvedValueOnce([rule]);
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -520,11 +607,12 @@ describe("SignalProcessor", () => {
         name: "Forward all",
         condition: "true",
         actions: [{ type: "forward", value: "copy@example.com" }],
-        position: 0,
+        status: "enabled",
+        priorityOrder: 0,
         createdAt: "2024-01-01T00:00:00Z",
         updatedAt: "2024-01-01T00:00:00Z",
       };
-      vi.mocked(store.listRules).mockResolvedValueOnce([rule]);
+      vi.mocked(store.listEnabledRules).mockResolvedValueOnce([rule]);
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -539,11 +627,12 @@ describe("SignalProcessor", () => {
         name: "Forward all",
         condition: "true",
         actions: [{ type: "forward", value: "copy@example.com" }],
-        position: 0,
+        status: "enabled",
+        priorityOrder: 0,
         createdAt: "2024-01-01T00:00:00Z",
         updatedAt: "2024-01-01T00:00:00Z",
       };
-      vi.mocked(store.listRules).mockResolvedValueOnce([rule]);
+      vi.mocked(store.listEnabledRules).mockResolvedValueOnce([rule]);
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -681,6 +770,8 @@ describe("SignalProcessor", () => {
       vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce(
         { ...DEFAULT_CTX, emailConfig: null },
       );
+      // No existing sender entry for a brand-new address
+      vi.mocked(store.getSender).mockResolvedValueOnce(null);
       await processor.process(makeSqsEvent([{}]));
 
       expect(store.saveSignal).toHaveBeenCalledOnce();
@@ -688,14 +779,15 @@ describe("SignalProcessor", () => {
       expect(store.saveAlias).toHaveBeenCalledOnce();
 
       const savedConfig = vi.mocked(store.saveAlias).mock.calls[0]![0] as Alias;
-      expect(savedConfig.filterMode).toBe("notify_new");
-      expect(savedConfig.approvedSenders).toContain("example.com"); // sender domain from mimeParser mock
+      expect(savedConfig.filterMode).toBe("quarantine_visible");
+      expect(store.saveSender).toHaveBeenCalledWith(TEST_ACCOUNT_ID, expect.any(String), "example.com", "allow");
     });
 
     it("allows signal from a known sender (eTLD+1 in approved list)", async () => {
       vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce(
-        { ...DEFAULT_CTX, emailConfig: makeAlias({ approvedSenders: ["example.com"] }) },
+        { ...DEFAULT_CTX, emailConfig: makeAlias() },
       );
+      // getSender returns an approved entry for example.com (default mock already does this)
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -704,24 +796,26 @@ describe("SignalProcessor", () => {
       expect(store.saveAlias).not.toHaveBeenCalled(); // no auto-approve needed
     });
 
-    it("quarantines signal from unknown sender by default (notify user for review)", async () => {
+    it("unknown sender with default filter mode → quarantine_visible (shown in review queue)", async () => {
       vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce(
-        { ...DEFAULT_CTX, emailConfig: makeAlias({ approvedSenders: ["trusted.com"] }) }, // sender is example.com, not trusted.com
+        { ...DEFAULT_CTX, emailConfig: makeAlias() }, // default filterMode: quarantine_visible
       );
+      vi.mocked(store.getSender).mockResolvedValueOnce(null);
 
       await processor.process(makeSqsEvent([{}]));
 
       expect(store.saveArc).not.toHaveBeenCalled();
       expect(store.saveSignal).toHaveBeenCalledOnce();
       const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
-      expect(saved.status).toBe("quarantined");
+      expect(saved.status).toBe("quarantine_visible");
       expect(saved.arcId).toBeUndefined();
     });
 
-    it("calls notifyBlocked when a signal is quarantined", async () => {
+    it("calls notifyBlocked when an unknown sender is quarantined (quarantine_visible fallback)", async () => {
       vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce(
-        { ...DEFAULT_CTX, emailConfig: makeAlias({ approvedSenders: ["other.com"] }) },
+        { ...DEFAULT_CTX, emailConfig: makeAlias() },
       );
+      vi.mocked(store.getSender).mockResolvedValueOnce(null);
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -729,11 +823,55 @@ describe("SignalProcessor", () => {
       expect(notifier.notify).not.toHaveBeenCalled();
     });
 
+    it("calls notifyBlocked when a signal is quarantine_visible (e.g. high-spam from approved sender)", async () => {
+      vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce(
+        { ...DEFAULT_CTX, emailConfig: makeAlias() },
+      );
+      // Approved sender → SR-03 fires on high spam → quarantine_visible
+      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        ...validClassification,
+        spamScore: 0.95,
+      });
+
+      await processor.process(makeSqsEvent([{}]));
+
+      expect(notifier.notifyBlocked).toHaveBeenCalledOnce();
+      const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
+      expect(saved.status).toBe("quarantine_visible");
+    });
+
+    it("filter mode quarantine_visible: unknown sender → quarantine_visible + notifies", async () => {
+      vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce(
+        { ...DEFAULT_CTX, emailConfig: makeAlias({ filterMode: "quarantine_visible" }) },
+      );
+      vi.mocked(store.getSender).mockResolvedValueOnce(null);
+
+      await processor.process(makeSqsEvent([{}]));
+
+      expect(notifier.notifyBlocked).toHaveBeenCalledOnce();
+      const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
+      expect(saved.status).toBe("quarantine_visible");
+    });
+
+    it("filter mode quarantine_hidden: unknown sender → quarantine_hidden + does not notify", async () => {
+      vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce(
+        { ...DEFAULT_CTX, emailConfig: makeAlias({ filterMode: "quarantine_hidden" }) },
+      );
+      vi.mocked(store.getSender).mockResolvedValueOnce(null);
+
+      await processor.process(makeSqsEvent([{}]));
+
+      expect(notifier.notifyBlocked).not.toHaveBeenCalled();
+      const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
+      expect(saved.status).toBe("quarantine_hidden");
+    });
+
     it("does NOT call notifyBlocked when a signal is silently blocked by a block rule", async () => {
       vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce(
-        { ...DEFAULT_CTX, emailConfig: makeAlias({ approvedSenders: ["other.com"] }) },
+        { ...DEFAULT_CTX, emailConfig: makeAlias() },
       );
-      vi.mocked(store.listRules).mockResolvedValueOnce([
+      vi.mocked(store.getSender).mockResolvedValueOnce(null);
+      vi.mocked(store.listEnabledRules).mockResolvedValueOnce([
         makeRule({ condition: JSON.stringify({ "in": ["system:sender:untrusted", { var: "arc.labels" }] }), actions: [{ type: "block" }] }),
       ]);
 
@@ -744,10 +882,15 @@ describe("SignalProcessor", () => {
       expect(saved.status).toBe("blocked");
     });
 
-    it("does not fail when notifyBlocked throws", async () => {
+    it("does not fail when notifyBlocked throws (quarantine_visible via SR-03)", async () => {
       vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce(
-        { ...DEFAULT_CTX, emailConfig: makeAlias({ approvedSenders: [] }) },
+        { ...DEFAULT_CTX, emailConfig: makeAlias() },
       );
+      // Approved sender + high spam → SR-03 fires → quarantine_visible → notifyBlocked called
+      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        ...validClassification,
+        spamScore: 0.95,
+      });
       vi.mocked(notifier.notifyBlocked).mockRejectedValueOnce(new Error("SES error"));
 
       await processor.process(makeSqsEvent([{}]));
@@ -771,17 +914,18 @@ describe("SignalProcessor", () => {
 
       await processor.process(makeSqsEvent([{}]));
 
-      // Filtering logic was bypassed — signal is active despite restrictive default config
+      // Filtering fallback bypassed on matched arc — signal is active despite untrusted sender
       expect(store.saveArc).toHaveBeenCalledOnce();
       expect(store.saveSignal).toHaveBeenCalledOnce();
       const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
       expect(saved.status).toBe("active");
     });
 
-    it("strict mode quarantines a known sender with high spam score (default disposition)", async () => {
+    it("quarantines a known sender with high spam score (SR-03 fires regardless of filter mode)", async () => {
       vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce(
-        { ...DEFAULT_CTX, emailConfig: makeAlias({ filterMode: "strict", approvedSenders: ["example.com"] }) },
+        { ...DEFAULT_CTX, emailConfig: makeAlias({ filterMode: "quarantine_visible" }) },
       );
+      // Sender is known/approved but spam score is too high — SR-03 quarantines independently of filter mode
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
         ...validClassification,
         spamScore: 0.95,
@@ -791,25 +935,26 @@ describe("SignalProcessor", () => {
 
       expect(store.saveArc).not.toHaveBeenCalled();
       const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
-      expect(saved.status).toBe("quarantined");
+      expect(saved.status).toBe("quarantine_visible");
     });
 
     it("allow_all mode auto-approves new sender without blocking", async () => {
       vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce(
-        { ...DEFAULT_CTX, emailConfig: makeAlias({ filterMode: "allow_all", approvedSenders: [] }) },
+        { ...DEFAULT_CTX, emailConfig: makeAlias({ filterMode: "allow_all" }) },
       );
+      vi.mocked(store.getSender).mockResolvedValueOnce(null); // sender not yet in list
 
       await processor.process(makeSqsEvent([{}]));
 
       expect(store.saveArc).toHaveBeenCalledOnce();
-      const savedConfig = vi.mocked(store.saveAlias).mock.calls[0]![0] as Alias;
-      expect(savedConfig.approvedSenders).toContain("example.com");
+      expect(store.saveSender).toHaveBeenCalledWith(TEST_ACCOUNT_ID, expect.any(String), "example.com", "allow");
     });
 
     it("saves blocked signal with classification data for user review", async () => {
       vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce(
-        { ...DEFAULT_CTX, emailConfig: makeAlias({ approvedSenders: [] }) },
+        { ...DEFAULT_CTX, emailConfig: makeAlias() },
       );
+      vi.mocked(store.getSender).mockResolvedValueOnce(null);
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -822,7 +967,7 @@ describe("SignalProcessor", () => {
     it("quarantines new address when newAddressHandling is block_until_approved (default disposition)", async () => {
       vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce({
         retentionDays: 0,
-        filtering: { newAddressHandling: "block_until_approved", defaultFilterMode: "notify_new" },
+        filtering: { newAddressHandling: "block_until_approved", defaultFilterMode: "quarantine_visible" },
         emailConfig: null,
         registeredDomains: [],
         userEmails: [],
@@ -832,7 +977,8 @@ describe("SignalProcessor", () => {
 
       expect(store.saveArc).not.toHaveBeenCalled();
       const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
-      expect(saved.status).toBe("quarantined");
+      // emailConfig is null → effectiveSenderEntry = null → system:sender:untrusted → filter mode fallback (quarantine_visible)
+      expect(saved.status).toBe("quarantine_visible");
     });
   });
 
@@ -843,8 +989,9 @@ describe("SignalProcessor", () => {
   describe("global reputation tracking", () => {
     it("updates reputation with wasBlocked=true for blocked signals", async () => {
       vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce(
-        { ...DEFAULT_CTX, emailConfig: makeAlias({ approvedSenders: [] }) },
+        { ...DEFAULT_CTX, emailConfig: makeAlias() },
       );
+      vi.mocked(store.getSender).mockResolvedValueOnce(null);
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -1070,13 +1217,10 @@ describe("SignalProcessor", () => {
       expect(baseUrgency("test", { workflow: "test", triggeredBy: "user" })).toBe("high");
     });
 
-    it("support is critical only when priority=urgent", () => {
-      expect(baseUrgency("support", { workflow: "support", eventType: "ticket_opened", service: "Zendesk", priority: "urgent" })).toBe("critical");
-    });
-
-    it("support is normal for high/normal/low priorities", () => {
-      expect(baseUrgency("support", { workflow: "support", eventType: "ticket_updated", service: "Zendesk", priority: "high" })).toBe("normal");
-      expect(baseUrgency("support", { workflow: "support", eventType: "ticket_resolved", service: "Zendesk", priority: "normal" })).toBe("normal");
+    it("support falls through to normal (urgency handled by system rules SR-20–SR-24)", () => {
+      expect(baseUrgency("support", { workflow: "support", eventType: "ticket_updated", service: "Zendesk", priority: "urgent" })).toBe("normal");
+      expect(baseUrgency("support", { workflow: "support", eventType: "awaiting_response", service: "Zendesk" })).toBe("normal");
+      expect(baseUrgency("support", { workflow: "support", eventType: "ticket_opened", service: "Zendesk" })).toBe("normal");
     });
 
     it("content is always low", () => {
@@ -1097,33 +1241,126 @@ describe("SignalProcessor", () => {
       expect(baseUrgency("travel", { workflow: "travel", travelType: "flight", provider: "Delta" })).toBe("normal");
     });
 
-    it("conversation is normal", () => {
+    it("conversation falls through to normal (urgency handled by system rules SR-15–SR-16)", () => {
+      expect(baseUrgency("conversation", { workflow: "conversation", isReply: false, sentiment: "urgent", requiresReply: true })).toBe("normal");
+      expect(baseUrgency("conversation", { workflow: "conversation", isReply: false, sentiment: "positive", requiresReply: false })).toBe("normal");
       expect(baseUrgency("conversation", { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false })).toBe("normal");
     });
 
-    it("crm is normal", () => {
+    it("crm falls through to normal (urgency handled by system rules SR-17–SR-19)", () => {
+      expect(baseUrgency("crm", { workflow: "crm", crmType: "contract", urgency: "low", requiresReply: false })).toBe("normal");
       expect(baseUrgency("crm", { workflow: "crm", crmType: "sales_outreach", urgency: "high", requiresReply: true })).toBe("normal");
+      expect(baseUrgency("crm", { workflow: "crm", crmType: "follow_up", urgency: "medium", requiresReply: false })).toBe("normal");
     });
   });
 
-  describe("priorityCalculator", () => {
-    it("returns base urgency when arc has no sent messages", () => {
-      const arc = makeArc({});
-      const signal = { workflow: "conversation", workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false } } as Parameters<typeof priorityCalculator>[1];
-      expect(priorityCalculator(arc, signal)).toBe("normal");
+  // -------------------------------------------------------------------------
+  // Workflow-specific urgency rules (SR-15–SR-24)
+  // -------------------------------------------------------------------------
+
+  describe("workflow urgency system rules", () => {
+    async function processWithWorkflow(classification: Partial<ClassificationOutput>): Promise<Arc> {
+      const full: ClassificationOutput = {
+        workflow: "conversation",
+        workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
+        spamScore: 0.05, summary: "test", labels: [],
+        classificationModelId: "us.anthropic.claude-opus-4-5-20251101-v1:0",
+        ...classification,
+      };
+      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(full);
+      await processor.process(makeSqsEvent([{ sesMessageId: randomUUID() }]));
+      return vi.mocked(store.saveArc).mock.calls.at(-1)![0] as Arc;
+    }
+
+    it("SR-15: conversation + requiresReply + urgent sentiment → high urgency", async () => {
+      const arc = await processWithWorkflow({ workflow: "conversation", workflowData: { workflow: "conversation", isReply: false, sentiment: "urgent", requiresReply: true } });
+      expect(arc.urgency).toBe("high");
     });
 
-    it("promotes to at least high when arc has sent messages", () => {
-      const arc = makeArc({ sentMessageIds: ["<msg-001@example.com>"] });
-      const signal = { workflow: "content", workflowData: { workflow: "content", contentType: "newsletter", publisher: "TLDR" } } as unknown as Parameters<typeof priorityCalculator>[1];
-      expect(priorityCalculator(arc, signal)).toBe("high");
+    it("SR-15: conversation + requiresReply + negative sentiment → high urgency", async () => {
+      const arc = await processWithWorkflow({ workflow: "conversation", workflowData: { workflow: "conversation", isReply: false, sentiment: "negative", requiresReply: true } });
+      expect(arc.urgency).toBe("high");
     });
 
-    it("does not demote critical when arc has sent messages", () => {
-      const arc = makeArc({ sentMessageIds: ["<msg-001@example.com>"] });
-      const signal = { workflow: "auth", workflowData: { workflow: "auth", authType: "otp", service: "GitHub" } } as Parameters<typeof priorityCalculator>[1];
-      expect(priorityCalculator(arc, signal)).toBe("critical");
+    it("SR-16: conversation with no prior replies → low urgency", async () => {
+      const arc = await processWithWorkflow({ workflow: "conversation", workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false } });
+      expect(arc.urgency).toBe("low");
     });
+
+    it("SR-16: conversation with prior replies (system:replied) → not low (falls back to arc urgency)", async () => {
+      vi.mocked(arcMatcher.findMatch).mockResolvedValueOnce(makeArc({
+        workflow: "conversation", labels: [], urgency: "normal",
+        sentMessageIds: ["<prior-msg@example.com>"],
+      }));
+      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        workflow: "conversation", workflowData: { workflow: "conversation", isReply: true, sentiment: "neutral", requiresReply: false },
+        spamScore: 0.05, summary: "test", labels: [], classificationModelId: "us.anthropic.claude-opus-4-5-20251101-v1:0",
+      });
+      await processor.process(makeSqsEvent([{ sesMessageId: randomUUID() }]));
+      const signal = vi.mocked(store.saveSignal).mock.calls.at(-1)![0] as Signal;
+      expect(signal.urgency).toBe("normal");
+    });
+
+    it("SR-17: crm + contract → high urgency", async () => {
+      const arc = await processWithWorkflow({ workflow: "crm", workflowData: { workflow: "crm", crmType: "contract", urgency: "low", requiresReply: false } });
+      expect(arc.urgency).toBe("high");
+    });
+
+    it("SR-17: crm + proposal → high urgency", async () => {
+      const arc = await processWithWorkflow({ workflow: "crm", workflowData: { workflow: "crm", crmType: "proposal", urgency: "low", requiresReply: false } });
+      expect(arc.urgency).toBe("high");
+    });
+
+    it("SR-18: crm + urgency:high → high urgency", async () => {
+      const arc = await processWithWorkflow({ workflow: "crm", workflowData: { workflow: "crm", crmType: "sales_outreach", urgency: "high", requiresReply: true } });
+      expect(arc.urgency).toBe("high");
+    });
+
+    it("SR-19: crm + urgency:low → low urgency", async () => {
+      const arc = await processWithWorkflow({ workflow: "crm", workflowData: { workflow: "crm", crmType: "sales_outreach", urgency: "low", requiresReply: false } });
+      expect(arc.urgency).toBe("low");
+    });
+
+    it("crm + urgency:medium → normal urgency (label fallback)", async () => {
+      const arc = await processWithWorkflow({ workflow: "crm", workflowData: { workflow: "crm", crmType: "follow_up", urgency: "medium", requiresReply: false } });
+      expect(arc.urgency).toBe("normal");
+    });
+
+    it("SR-20: support + priority:urgent → critical urgency", async () => {
+      const arc = await processWithWorkflow({ workflow: "support", workflowData: { workflow: "support", eventType: "ticket_updated", service: "Zendesk", priority: "urgent" } });
+      expect(arc.urgency).toBe("critical");
+    });
+
+    it("SR-21: support + priority:high → high urgency", async () => {
+      const arc = await processWithWorkflow({ workflow: "support", workflowData: { workflow: "support", eventType: "ticket_updated", service: "Zendesk", priority: "high" } });
+      expect(arc.urgency).toBe("high");
+    });
+
+    it("SR-22: support + awaiting_response → high urgency", async () => {
+      const arc = await processWithWorkflow({ workflow: "support", workflowData: { workflow: "support", eventType: "awaiting_response", service: "Zendesk" } });
+      expect(arc.urgency).toBe("high");
+    });
+
+    it("SR-23: support + priority:low → low urgency", async () => {
+      const arc = await processWithWorkflow({ workflow: "support", workflowData: { workflow: "support", eventType: "ticket_updated", service: "Zendesk", priority: "low" } });
+      expect(arc.urgency).toBe("low");
+    });
+
+    it("SR-24: support + ticket_opened → low urgency", async () => {
+      const arc = await processWithWorkflow({ workflow: "support", workflowData: { workflow: "support", eventType: "ticket_opened", service: "Zendesk" } });
+      expect(arc.urgency).toBe("low");
+    });
+
+    it("SR-24: support + ticket_resolved → low urgency", async () => {
+      const arc = await processWithWorkflow({ workflow: "support", workflowData: { workflow: "support", eventType: "ticket_resolved", service: "Zendesk" } });
+      expect(arc.urgency).toBe("low");
+    });
+
+    it("SR-20 wins over SR-24: support + priority:urgent + ticket_opened → critical (first-rule-wins)", async () => {
+      const arc = await processWithWorkflow({ workflow: "support", workflowData: { workflow: "support", eventType: "ticket_opened", service: "Zendesk", priority: "urgent" } });
+      expect(arc.urgency).toBe("critical");
+    });
+
   });
 
   // -------------------------------------------------------------------------
@@ -1142,7 +1379,7 @@ describe("SignalProcessor", () => {
 
     it("processes onboarding emails as active when no blocking rule is configured", async () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(onboardingClassification);
-      vi.mocked(store.listRules).mockResolvedValueOnce([]); // no system rules — SR-01 (block onboarding) is disabled
+      vi.mocked(store.listEnabledRules).mockResolvedValueOnce([]); // no system rules — SR-01 (block onboarding) is disabled
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -1154,7 +1391,7 @@ describe("SignalProcessor", () => {
 
     it("blocks onboarding emails when a block rule targeting system:workflow:onboarding is active", async () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(onboardingClassification);
-      vi.mocked(store.listRules).mockResolvedValueOnce([
+      vi.mocked(store.listEnabledRules).mockResolvedValueOnce([
         makeRule({ condition: JSON.stringify({ "in": ["system:workflow:onboarding", { var: "arc.labels" }] }), actions: [{ type: "block" }] }),
       ]);
 
@@ -1170,7 +1407,7 @@ describe("SignalProcessor", () => {
 
     it("quarantines onboarding emails when a quarantine rule is active", async () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(onboardingClassification);
-      vi.mocked(store.listRules).mockResolvedValueOnce([
+      vi.mocked(store.listEnabledRules).mockResolvedValueOnce([
         makeRule({ condition: JSON.stringify({ "in": ["system:workflow:onboarding", { var: "arc.labels" }] }), actions: [{ type: "quarantine" }] }),
       ]);
 
@@ -1180,7 +1417,8 @@ describe("SignalProcessor", () => {
 
       expect(store.saveArc).not.toHaveBeenCalled();
       const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
-      expect(saved.status).toBe("quarantined");
+      // Plain `quarantine` action → quarantine_visible (shown in review queue)
+      expect(saved.status).toBe("quarantine_visible");
       expect(notifier.notifyBlocked).toHaveBeenCalledOnce();
     });
   });
@@ -1252,35 +1490,40 @@ describe("SignalProcessor", () => {
       processor = new SignalProcessor({ store, mimeParser, classifier, arcMatcher, ruleEvaluator, notifier });
     });
 
-    it("creates a notice arc with status=archived (buried on arrival, never active)", async () => {
+    it("blocks status emails silently — no arc created, signal saved as blocked", async () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(noticeClassification);
 
       await processor.process(makeSqsEvent([{}]));
 
-      const arc = vi.mocked(store.saveArc).mock.calls[0]![0] as Arc;
-      expect(arc.status).toBe("archived");
-      expect(arc.workflow).toBe("status");
+      expect(store.saveArc).not.toHaveBeenCalled();
+      const signal = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
+      expect(signal.status).toBe("blocked");
+      expect(signal.workflow).toBe("status");
     });
 
-    it("does not call notifier for a notice arc even when the signal is new", async () => {
+    it("does not call notifier for a blocked status email", async () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(noticeClassification);
 
       await processor.process(makeSqsEvent([{}]));
 
       expect(notifier.notify).not.toHaveBeenCalled();
+      expect(notifier.notifyBlocked).not.toHaveBeenCalled();
     });
 
-    it("does not bump lastSignalAt on an existing arc when a rule archives the incoming signal", async () => {
+    it("blocks status emails from untrusted senders (SR-05 rule fires, fallback does not apply)", async () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(noticeClassification);
-      // notice uses groupingKey so findArcByGroupingKey is the match path
-      vi.mocked(store.findArcByGroupingKey).mockResolvedValueOnce(
-        makeArc({ lastSignalAt: "2024-01-10T00:00:00Z" }),
-      );
+      // Untrusted sender: no approved sender entry — filter-mode fallback would quarantine, but SR-05 fires first
+      vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce({
+        ...DEFAULT_CTX,
+        emailConfig: makeAlias(),
+      });
+      vi.mocked(store.getSender).mockResolvedValueOnce(null);
 
       await processor.process(makeSqsEvent([{}]));
 
-      const saved = vi.mocked(store.saveArc).mock.calls[0]![0] as Arc;
-      expect(saved.lastSignalAt).toBe("2024-01-10T00:00:00Z"); // unchanged
+      const signal = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
+      expect(signal.status).toBe("blocked"); // SR-05 sets status → fallback skipped (hasStatusOutcome = true)
+      expect(store.saveArc).not.toHaveBeenCalled();
     });
   });
 
@@ -1472,12 +1715,11 @@ describe("SignalProcessor", () => {
   // -------------------------------------------------------------------------
 
   describe("spam threshold override", () => {
-    it("blocks signal when per-address spamScoreThreshold is lower than default and score exceeds it", async () => {
+    it("quarantines signal when per-address spamScoreThreshold is lower than default and score exceeds it", async () => {
       vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce({
         ...DEFAULT_CTX,
         emailConfig: makeAlias({
-          filterMode: "strict",
-          approvedSenders: ["example.com"],
+          filterMode: "quarantine_visible",
           spamScoreThreshold: 0.5,
         }),
       });
@@ -1488,16 +1730,16 @@ describe("SignalProcessor", () => {
 
       await processor.process(makeSqsEvent([{}]));
 
+      // DEFAULT_SENDER_ENTRY is approved → SR-03 fires → quarantine_visible
       const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
-      expect(saved.status).toBe("quarantined");
-      expect(saved.status).toBe("quarantined");
+      expect(saved.status).toBe("quarantine_visible");
     });
 
     it("uses account-level spamScoreThreshold when no per-address override is set", async () => {
       vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce({
         ...DEFAULT_CTX,
-        emailConfig: makeAlias({ filterMode: "strict", approvedSenders: ["example.com"] }),
-        filtering: { defaultFilterMode: "notify_new", newAddressHandling: "auto_allow", spamScoreThreshold: 0.6 },
+        emailConfig: makeAlias({ filterMode: "quarantine_visible" }),
+        filtering: { defaultFilterMode: "quarantine_visible", newAddressHandling: "auto_allow", spamScoreThreshold: 0.6 },
       });
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
         ...validClassification,
@@ -1506,9 +1748,9 @@ describe("SignalProcessor", () => {
 
       await processor.process(makeSqsEvent([{}]));
 
+      // DEFAULT_SENDER_ENTRY is approved → SR-03 fires → quarantine_visible
       const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
-      expect(saved.status).toBe("quarantined");
-      expect(saved.status).toBe("quarantined");
+      expect(saved.status).toBe("quarantine_visible");
     });
   });
 
@@ -1524,7 +1766,8 @@ describe("SignalProcessor", () => {
         name: "Forward all",
         condition: "true",
         actions: [{ type: "forward", value: "backup@personal.com" }],
-        position: 0,
+        status: "enabled",
+        priorityOrder: 0,
         createdAt: "2024-01-01T00:00:00Z",
         updatedAt: "2024-01-01T00:00:00Z",
       };
@@ -1533,7 +1776,7 @@ describe("SignalProcessor", () => {
     it("passes dkimPass=true and dmarcPass=true when both SES verdicts are PASS", async () => {
       const forwarder: Forwarder = { forward: vi.fn().mockResolvedValue(undefined) };
       const proc = new SignalProcessor({ store, mimeParser, classifier, arcMatcher, ruleEvaluator, forwarder });
-      vi.mocked(store.listRules).mockResolvedValueOnce([makeForwardRule()]);
+      vi.mocked(store.listEnabledRules).mockResolvedValueOnce([makeForwardRule()]);
 
       await proc.process(makeSqsEvent([{ dkimVerdict: "PASS", dmarcVerdict: "PASS" }]));
 
@@ -1548,7 +1791,7 @@ describe("SignalProcessor", () => {
     it("passes dkimPass=false and dmarcPass=false when SES verdicts are FAIL and GRAY", async () => {
       const forwarder: Forwarder = { forward: vi.fn().mockResolvedValue(undefined) };
       const proc = new SignalProcessor({ store, mimeParser, classifier, arcMatcher, ruleEvaluator, forwarder });
-      vi.mocked(store.listRules).mockResolvedValueOnce([makeForwardRule()]);
+      vi.mocked(store.listEnabledRules).mockResolvedValueOnce([makeForwardRule()]);
 
       await proc.process(makeSqsEvent([{ dkimVerdict: "FAIL", dmarcVerdict: "GRAY" }]));
 
@@ -1567,13 +1810,14 @@ describe("SignalProcessor", () => {
 
   describe("rule actions — assign_workflow and delete", () => {
     it("assign_workflow action changes the arc workflow to the specified value", async () => {
-      vi.mocked(store.listRules).mockResolvedValueOnce([{
+      vi.mocked(store.listEnabledRules).mockResolvedValueOnce([{
         id: "rw-rule",
         accountId: TEST_ACCOUNT_ID,
         name: "Reclassify as content",
         condition: "true",
         actions: [{ type: "assign_workflow", value: "content" }],
-        position: 0,
+        status: "enabled",
+        priorityOrder: 0,
         createdAt: "2024-01-01T00:00:00Z",
         updatedAt: "2024-01-01T00:00:00Z",
       }]);
@@ -1585,13 +1829,14 @@ describe("SignalProcessor", () => {
     });
 
     it("delete action sets arc.status=deleted and records arc.deletedAt", async () => {
-      vi.mocked(store.listRules).mockResolvedValueOnce([{
+      vi.mocked(store.listEnabledRules).mockResolvedValueOnce([{
         id: "del-rule",
         accountId: TEST_ACCOUNT_ID,
         name: "Auto-delete promotions",
         condition: "true",
         actions: [{ type: "delete" }],
-        position: 0,
+        status: "enabled",
+        priorityOrder: 0,
         createdAt: "2024-01-01T00:00:00Z",
         updatedAt: "2024-01-01T00:00:00Z",
       }]);
@@ -1604,7 +1849,7 @@ describe("SignalProcessor", () => {
     });
 
     it("multiple actions in one rule are all applied in order", async () => {
-      vi.mocked(store.listRules).mockResolvedValueOnce([{
+      vi.mocked(store.listEnabledRules).mockResolvedValueOnce([{
         id: "multi-rule",
         accountId: TEST_ACCOUNT_ID,
         name: "Label and archive",
@@ -1613,7 +1858,8 @@ describe("SignalProcessor", () => {
           { type: "assign_label", value: "archived-auto" },
           { type: "archive" },
         ],
-        position: 0,
+        status: "enabled",
+        priorityOrder: 0,
         createdAt: "2024-01-01T00:00:00Z",
         updatedAt: "2024-01-01T00:00:00Z",
       }]);

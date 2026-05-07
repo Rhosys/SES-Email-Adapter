@@ -12,8 +12,8 @@ function makeCtx(overrides: Partial<SystemLabelContext> = {}): SystemLabelContex
     spamScore: LOW_SPAM,
     spamScoreThreshold: DEFAULT_SPAM_SCORE_THRESHOLD,
     senderETLD1: "amazon.com",
-    approvedSenders: ["amazon.com"],
-    filterMode: "notify_new",
+    senderEntry: { accountId: "acct-001", aliasAddress: "user@example.com", domain: "amazon.com", mode: "allow", addedAt: "2024-01-01T00:00:00Z" },
+    filterMode: "quarantine_visible",
     hasSentMessages: false,
     ...overrides,
   };
@@ -94,64 +94,23 @@ describe("assignSystemLabels — spam labels", () => {
 
 describe("assignSystemLabels — sender trust", () => {
   it("emits system:sender:untrusted when sender not in approvedSenders", () => {
-    const labels = assignSystemLabels(makeCtx({ senderETLD1: "unknown.com", approvedSenders: [] }));
+    const labels = assignSystemLabels(makeCtx({ senderETLD1: "unknown.com", senderEntry: null }));
     expect(labels).toContain("system:sender:untrusted");
   });
 
   it("does not emit system:sender:untrusted when sender is in approvedSenders", () => {
-    const labels = assignSystemLabels(makeCtx({ senderETLD1: "amazon.com", approvedSenders: ["amazon.com"] }));
+    const labels = assignSystemLabels(makeCtx({ senderETLD1: "amazon.com", senderEntry: { accountId: "acct-001", aliasAddress: "user@example.com", domain: "amazon.com", mode: "allow", addedAt: "2024-01-01T00:00:00Z" } }));
     expect(labels).not.toContain("system:sender:untrusted");
   });
 
   it("does not emit system:sender:untrusted in allow_all mode regardless of approvedSenders", () => {
-    const labels = assignSystemLabels(makeCtx({ senderETLD1: "unknown.com", approvedSenders: [], filterMode: "allow_all" }));
+    const labels = assignSystemLabels(makeCtx({ senderETLD1: "unknown.com", senderEntry: null, filterMode: "allow_all" }));
     expect(labels).not.toContain("system:sender:untrusted");
   });
 
   it("emits system:sender:untrusted for matched arc if not in approvedSenders (trust is purely from approvedSenders)", () => {
-    const labels = assignSystemLabels(makeCtx({ senderETLD1: "unknown.com", approvedSenders: [], workflow: "content", workflowData: { workflow: "content", contentType: "newsletter", publisher: "foo" } }));
+    const labels = assignSystemLabels(makeCtx({ senderETLD1: "unknown.com", senderEntry: null, workflow: "content", workflowData: { workflow: "content", contentType: "newsletter", publisher: "foo" } }));
     expect(labels).toContain("system:sender:untrusted");
-  });
-});
-
-// ---------------------------------------------------------------------------
-// assignSystemLabels — urgency labels
-// ---------------------------------------------------------------------------
-
-describe("assignSystemLabels — urgency labels", () => {
-  it("auth workflow emits system:urgency:critical", () => {
-    const labels = assignSystemLabels(makeCtx({ workflow: "auth", workflowData: { workflow: "auth", authType: "otp", service: "github.com" } }));
-    expect(labels).toContain("system:urgency:critical");
-  });
-
-  it("status workflow emits system:urgency:silent", () => {
-    const labels = assignSystemLabels(makeCtx({ workflow: "status", workflowData: { workflow: "status", statusType: "terms_update", provider: "acme" } }));
-    expect(labels).toContain("system:urgency:silent");
-  });
-
-  it("content workflow emits system:urgency:low", () => {
-    const labels = assignSystemLabels(makeCtx({ workflow: "content", workflowData: { workflow: "content", contentType: "newsletter", publisher: "foo" } }));
-    expect(labels).toContain("system:urgency:low");
-  });
-
-  it("replied arc is promoted to at least high urgency", () => {
-    const labels = assignSystemLabels(makeCtx({
-      workflow: "content",
-      workflowData: { workflow: "content", contentType: "newsletter", publisher: "foo" },
-      hasSentMessages: true,
-    }));
-    expect(labels).toContain("system:urgency:high");
-    expect(labels).not.toContain("system:urgency:low");
-  });
-
-  it("already-critical urgency is not downgraded by replied promotion", () => {
-    const labels = assignSystemLabels(makeCtx({
-      workflow: "auth",
-      workflowData: { workflow: "auth", authType: "otp", service: "github.com" },
-      hasSentMessages: true,
-    }));
-    expect(labels).toContain("system:urgency:critical");
-    expect(labels).not.toContain("system:urgency:high");
   });
 });
 

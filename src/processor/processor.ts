@@ -1,7 +1,6 @@
 import { randomUUID } from "crypto";
 import type { SQSEvent } from "aws-lambda";
-import type { Signal, Arc, Rule, Workflow, WorkflowData, Alias, AccountFilteringConfig, SignalSource, SchedulingData, SignalStatus, Domain, ArcUrgency, SenderFilterMode } from "../types/index.js";
-import { baseUrgency } from "./priority.js";
+import type { Signal, Arc, Rule, Workflow, WorkflowData, Alias, AliasSender, SenderMode, AccountFilteringConfig, SignalSource, SchedulingData, SignalStatus, Domain, ArcUrgency, SenderFilterMode, MatchedRuleResult } from "../types/index.js";
 import type { MimeParser } from "./mime.js";
 import type { SignalClassifier } from "../classifier/classifier.js";
 import { getETLD1, assignSystemLabels, DEFAULT_SPAM_SCORE_THRESHOLD } from "./filter.js";
@@ -24,9 +23,12 @@ export interface ProcessorDatabase {
   getArc(accountId: string, id: string): Promise<Arc | null>;
   findArcByGroupingKey(accountId: string, key: string): Promise<Arc | null>;
   saveArc(arc: Arc): Promise<void>;
-  listRules(accountId: string): Promise<Rule[]>;
+  listEnabledRules(accountId: string): Promise<Rule[]>;
   getProcessorAccountContext(accountId: string, recipientAddress: string): Promise<ProcessorAccountContext>;
   saveAlias(alias: Alias): Promise<Alias>;
+  getSender(accountId: string, address: string, domain: string): Promise<AliasSender | null>;
+  saveSender(accountId: string, address: string, domain: string, mode: SenderMode): Promise<void>;
+  getTemplate(accountId: string, id: string): Promise<import("../types/index.js").EmailTemplate | null>;
   updateGlobalReputation(domain: string, update: { wasSpam: boolean; wasBlocked: boolean }): Promise<void>;
   getDomainByName(accountId: string, domainName: string): Promise<Pick<Domain, "senderSetupComplete"> | null>;
 }
@@ -37,7 +39,7 @@ export interface ArcMatcher {
 }
 
 export interface RuleEvaluator {
-  evaluate(rule: Rule, context: { signal: Signal; arc: Arc; isMatchedArc: boolean }): boolean;
+  evaluate(rule: Rule, context: { signal: Signal; arc: Arc; isMatchedArc: boolean }): Promise<boolean>;
 }
 
 export interface Notifier {
@@ -98,6 +100,7 @@ interface InboundSignalMessage {
 interface ProcessingOutcome {
   block: boolean;
   quarantine: boolean;
+  quarantineHidden: boolean;  // true → quarantine_hidden status; false → quarantine_visible
   approveSender: boolean;
   archive: boolean;
   delete: boolean;
@@ -106,12 +109,15 @@ interface ProcessingOutcome {
   forwardAddresses: string[];
   additionalLabels: string[];
   doPong: boolean;
+  autoReplyTemplateIds: string[];
+  autoDraftTemplateIds: string[];
 }
 
 function emptyOutcome(): ProcessingOutcome {
   return {
     block: false,
     quarantine: false,
+    quarantineHidden: false,
     approveSender: false,
     archive: false,
     delete: false,
@@ -119,31 +125,67 @@ function emptyOutcome(): ProcessingOutcome {
     forwardAddresses: [],
     additionalLabels: [],
     doPong: false,
+    autoReplyTemplateIds: [],
+    autoDraftTemplateIds: [],
   };
 }
 
-function applyRules(
+async function applyRules(
   rules: Rule[],
   context: { signal: Signal; arc: Arc; isMatchedArc: boolean },
   evaluator: RuleEvaluator,
-  outcome: ProcessingOutcome,
-): ProcessingOutcome {
+): Promise<MatchedRuleResult[]> {
+  const matchedRules: MatchedRuleResult[] = [];
   for (const rule of rules) {
-    if (!evaluator.evaluate(rule, context)) continue;
-    for (const action of rule.actions) {
-      if (action.disabled) continue;
+    if (!await evaluator.evaluate(rule, context)) continue;
+    const actions = rule.actions.filter((a) => !a.disabled).map(({ type, value }) => ({ type, ...(value !== undefined ? { value } : {}) }));
+    const labelsAdded = actions.filter((a) => a.type === "assign_label" && a.value).map((a) => a.value!);
+    const statusChange: MatchedRuleResult["statusChange"] = (
+      actions.some((a) => a.type === "block")             ? "blocked"            :
+      actions.some((a) => a.type === "quarantine_hidden") ? "quarantine_hidden"  :
+      actions.some((a) => a.type === "quarantine")        ? "quarantine_visible" :
+      actions.some((a) => a.type === "archive")           ? "archived"           :
+      actions.some((a) => a.type === "delete")            ? "deleted"            :
+      undefined
+    );
+    matchedRules.push({ ruleId: rule.id, actions, labelsAdded, ...(statusChange ? { statusChange } : {}) });
+    // assign_workflow mutates the arc so subsequent rules evaluate against the updated workflow
+    const workflowAction = actions.find((a) => a.type === "assign_workflow");
+    if (workflowAction?.value) context.arc.workflow = workflowAction.value as Workflow;
+  }
+  return matchedRules;
+}
+
+function deriveOutcome(matchedRules: MatchedRuleResult[]): ProcessingOutcome {
+  const outcome = emptyOutcome();
+  let statusSet = false;   // first-rule-wins: the first status-changing action determines fate
+  let urgencySet = false;  // first-rule-wins: the first set_urgency action determines urgency
+  for (const { actions } of matchedRules) {
+    for (const action of actions) {
       switch (action.type) {
-        case "block":                 outcome.block = true; break;
-        case "quarantine":            outcome.quarantine = true; break;
+        case "block":
+          if (!statusSet) { outcome.block = true; statusSet = true; }
+          break;
+        case "quarantine":
+          if (!statusSet) { outcome.quarantine = true; statusSet = true; }
+          break;
+        case "quarantine_hidden":
+          if (!statusSet) { outcome.quarantine = true; outcome.quarantineHidden = true; statusSet = true; }
+          break;
+        case "archive":
+          if (!statusSet) { outcome.archive = true; statusSet = true; }
+          break;
+        case "delete":
+          if (!statusSet) { outcome.delete = true; statusSet = true; }
+          break;
         case "approve_sender":        outcome.approveSender = true; break;
-        case "archive":               outcome.archive = true; break;
-        case "delete":                outcome.delete = true; break;
         case "suppress_notification": outcome.suppressNotification = true; break;
-        case "set_urgency":           if (action.value) outcome.urgency = action.value as ArcUrgency; break;
+        case "set_urgency":           if (!urgencySet && action.value) { outcome.urgency = action.value as ArcUrgency; urgencySet = true; } break;
         case "assign_label":          if (action.value) outcome.additionalLabels.push(action.value); break;
-        case "assign_workflow":       if (action.value) context.arc.workflow = action.value as Workflow; break;
         case "forward":               if (action.value) outcome.forwardAddresses.push(action.value); break;
         case "pong":                  outcome.doPong = true; break;
+        case "auto_reply":            if (action.value) outcome.autoReplyTemplateIds.push(action.value); break;
+        case "auto_draft":            if (action.value) outcome.autoDraftTemplateIds.push(action.value); break;
       }
     }
   }
@@ -155,22 +197,34 @@ function applyRules(
 // ---------------------------------------------------------------------------
 
 const in_ = (label: string) => ({ "in": [label, { "var": "arc.labels" }] });
+const wf_ = (w: string) => ({ "==": [{ "var": "signal.workflow" }, w] });
+const wfData_ = (field: string) => ({ "var": `signal.workflowData.${field}` });
 
 export const SYSTEM_RULES: Rule[] = [
-  { id: "SR-14", accountId: "SYSTEM", name: "Auto-approve sender on matched conversation", condition: JSON.stringify({ "and": [in_("system:workflow:conversation"), in_("system:sender:untrusted"), { "var": "isMatchedArc" }] }), actions: [{ type: "approve_sender" }], position: 1, createdAt: "", updatedAt: "" },
-  { id: "SR-01", accountId: "SYSTEM", name: "Block onboarding emails", condition: JSON.stringify(in_("system:workflow:onboarding")), actions: [{ type: "block" }], position: 2, createdAt: "", updatedAt: "" },
-  { id: "SR-02", accountId: "SYSTEM", name: "Quarantine untrusted senders", condition: JSON.stringify(in_("system:sender:untrusted")), actions: [{ type: "quarantine" }], position: 3, createdAt: "", updatedAt: "" },
-  { id: "SR-03", accountId: "SYSTEM", name: "Quarantine high-spam signals", condition: JSON.stringify(in_("system:spam:high")), actions: [{ type: "quarantine" }], position: 4, createdAt: "", updatedAt: "" },
-  { id: "SR-04", accountId: "SYSTEM", name: "Suppress notification for medium spam", condition: JSON.stringify(in_("system:spam:medium")), actions: [{ type: "suppress_notification" }], position: 5, createdAt: "", updatedAt: "" },
-  { id: "SR-05", accountId: "SYSTEM", name: "Auto-archive status emails", condition: JSON.stringify(in_("system:workflow:status")), actions: [{ type: "archive" }], position: 6, createdAt: "", updatedAt: "" },
-  { id: "SR-06", accountId: "SYSTEM", name: "Suppress notification for status emails", condition: JSON.stringify(in_("system:workflow:status")), actions: [{ type: "suppress_notification" }], position: 7, createdAt: "", updatedAt: "" },
-  { id: "SR-07", accountId: "SYSTEM", name: "Suppress notification for content emails", condition: JSON.stringify(in_("system:workflow:content")), actions: [{ type: "suppress_notification" }], position: 8, createdAt: "", updatedAt: "" },
-  { id: "SR-08", accountId: "SYSTEM", name: "Set urgency: critical", condition: JSON.stringify(in_("system:urgency:critical")), actions: [{ type: "set_urgency", value: "critical" }], position: 9, createdAt: "", updatedAt: "" },
-  { id: "SR-09", accountId: "SYSTEM", name: "Set urgency: high", condition: JSON.stringify(in_("system:urgency:high")), actions: [{ type: "set_urgency", value: "high" }], position: 10, createdAt: "", updatedAt: "" },
-  { id: "SR-10", accountId: "SYSTEM", name: "Set urgency: normal", condition: JSON.stringify(in_("system:urgency:normal")), actions: [{ type: "set_urgency", value: "normal" }], position: 11, createdAt: "", updatedAt: "" },
-  { id: "SR-11", accountId: "SYSTEM", name: "Set urgency: low", condition: JSON.stringify(in_("system:urgency:low")), actions: [{ type: "set_urgency", value: "low" }], position: 12, createdAt: "", updatedAt: "" },
-  { id: "SR-12", accountId: "SYSTEM", name: "Set urgency: silent", condition: JSON.stringify(in_("system:urgency:silent")), actions: [{ type: "set_urgency", value: "silent" }], position: 13, createdAt: "", updatedAt: "" },
-  { id: "SR-13", accountId: "SYSTEM", name: "Auto-reply to test emails (pong)", condition: JSON.stringify(in_("system:test")), actions: [{ type: "pong" }], position: 14, createdAt: "", updatedAt: "" },
+  // --- Sender / content gating (1–8) ----------------------------------------
+  { id: "SR-14", accountId: "SYSTEM", name: "Auto-approve sender on matched conversation", condition: JSON.stringify({ "and": [in_("system:workflow:conversation"), in_("system:sender:untrusted"), { "var": "isMatchedArc" }] }), actions: [{ type: "approve_sender" }], status: "enabled", priorityOrder: 1, createdAt: "", updatedAt: "" },
+  { id: "SR-01", accountId: "SYSTEM", name: "Block onboarding emails", condition: JSON.stringify(in_("system:workflow:onboarding")), actions: [{ type: "block" }], status: "enabled", priorityOrder: 2, createdAt: "", updatedAt: "" },
+  { id: "SR-05", accountId: "SYSTEM", name: "Block status emails", condition: JSON.stringify(in_("system:workflow:status")), actions: [{ type: "block" }], status: "enabled", priorityOrder: 3, createdAt: "", updatedAt: "" },
+  { id: "SR-03", accountId: "SYSTEM", name: "Quarantine high-spam signals", condition: JSON.stringify(in_("system:spam:high")), actions: [{ type: "quarantine" }], status: "enabled", priorityOrder: 4, createdAt: "", updatedAt: "" },
+  { id: "SR-04", accountId: "SYSTEM", name: "Suppress notification for medium spam", condition: JSON.stringify(in_("system:spam:medium")), actions: [{ type: "suppress_notification" }], status: "enabled", priorityOrder: 6, createdAt: "", updatedAt: "" },
+  { id: "SR-06", accountId: "SYSTEM", name: "Suppress notification for status emails", condition: JSON.stringify(in_("system:workflow:status")), actions: [{ type: "suppress_notification" }], status: "enabled", priorityOrder: 7, createdAt: "", updatedAt: "" },
+  { id: "SR-07", accountId: "SYSTEM", name: "Suppress notification for content emails", condition: JSON.stringify(in_("system:workflow:content")), actions: [{ type: "suppress_notification" }], status: "enabled", priorityOrder: 8, createdAt: "", updatedAt: "" },
+  // --- Workflow-specific urgency (9–18) ----------------------------------------
+  // conversation: high when reply is needed and tone is urgent/negative
+  { id: "SR-15", accountId: "SYSTEM", name: "Conversation: high urgency when reply needed and urgent/negative", condition: JSON.stringify({ "and": [wf_("conversation"), { "==": [wfData_("requiresReply"), true] }, { "in": [wfData_("sentiment"), ["urgent", "negative"]] }] }), actions: [{ type: "set_urgency", value: "high" }], status: "enabled", priorityOrder: 9, createdAt: "", updatedAt: "" },
+  { id: "SR-16", accountId: "SYSTEM", name: "Conversation: low urgency when user has never replied", condition: JSON.stringify({ "and": [wf_("conversation"), { "!": [in_("system:replied")] }] }), actions: [{ type: "set_urgency", value: "low" }], status: "enabled", priorityOrder: 10, createdAt: "", updatedAt: "" },
+  // crm: contract/proposal always warrant a decision — treat as high regardless of urgency field
+  { id: "SR-17", accountId: "SYSTEM", name: "CRM: high urgency for contracts and proposals", condition: JSON.stringify({ "and": [wf_("crm"), { "in": [wfData_("crmType"), ["contract", "proposal"]] }] }), actions: [{ type: "set_urgency", value: "high" }], status: "enabled", priorityOrder: 11, createdAt: "", updatedAt: "" },
+  { id: "SR-18", accountId: "SYSTEM", name: "CRM: high urgency when urgency field is high", condition: JSON.stringify({ "and": [wf_("crm"), { "==": [wfData_("urgency"), "high"] }] }), actions: [{ type: "set_urgency", value: "high" }], status: "enabled", priorityOrder: 12, createdAt: "", updatedAt: "" },
+  { id: "SR-19", accountId: "SYSTEM", name: "CRM: low urgency for low-priority outreach", condition: JSON.stringify({ "and": [wf_("crm"), { "==": [wfData_("urgency"), "low"] }, { "!": [in_("system:replied")] }] }), actions: [{ type: "set_urgency", value: "low" }], status: "enabled", priorityOrder: 13, createdAt: "", updatedAt: "" },
+  // support: priority field drives urgency; urgent > priority-based > awaiting_response > lifecycle
+  { id: "SR-20", accountId: "SYSTEM", name: "Support: critical urgency for urgent-priority tickets", condition: JSON.stringify({ "and": [wf_("support"), { "==": [wfData_("priority"), "urgent"] }] }), actions: [{ type: "set_urgency", value: "critical" }], status: "enabled", priorityOrder: 14, createdAt: "", updatedAt: "" },
+  { id: "SR-21", accountId: "SYSTEM", name: "Support: high urgency for high-priority tickets", condition: JSON.stringify({ "and": [wf_("support"), { "==": [wfData_("priority"), "high"] }] }), actions: [{ type: "set_urgency", value: "high" }], status: "enabled", priorityOrder: 15, createdAt: "", updatedAt: "" },
+  { id: "SR-22", accountId: "SYSTEM", name: "Support: high urgency when agent is awaiting response", condition: JSON.stringify({ "and": [wf_("support"), { "==": [wfData_("eventType"), "awaiting_response"] }] }), actions: [{ type: "set_urgency", value: "high" }], status: "enabled", priorityOrder: 16, createdAt: "", updatedAt: "" },
+  { id: "SR-23", accountId: "SYSTEM", name: "Support: low urgency for low-priority tickets", condition: JSON.stringify({ "and": [wf_("support"), { "==": [wfData_("priority"), "low"] }, { "!": [in_("system:replied")] }] }), actions: [{ type: "set_urgency", value: "low" }], status: "enabled", priorityOrder: 17, createdAt: "", updatedAt: "" },
+  // ticket_opened/resolved/closed are passive lifecycle events — low unless urgency field says otherwise (fired after priority rules so those win)
+  { id: "SR-24", accountId: "SYSTEM", name: "Support: low urgency for passive lifecycle events", condition: JSON.stringify({ "and": [wf_("support"), { "in": [wfData_("eventType"), ["ticket_opened", "ticket_resolved", "ticket_closed"]] }, { "!": [in_("system:replied")] }] }), actions: [{ type: "set_urgency", value: "low" }], status: "enabled", priorityOrder: 18, createdAt: "", updatedAt: "" },
+  { id: "SR-13", accountId: "SYSTEM", name: "Auto-reply to test emails (pong)", condition: JSON.stringify(in_("system:test")), actions: [{ type: "pong" }], status: "enabled", priorityOrder: 19, createdAt: "", updatedAt: "" },
 ];
 
 // ---------------------------------------------------------------------------
@@ -260,8 +314,11 @@ export class SignalProcessor {
 
     const now = new Date().toISOString();
 
-    // 4. Fetch account context
-    const accountCtx = await this.store.getProcessorAccountContext(accountId, recipientAddress);
+    // 4. Fetch account context + sender entry in parallel
+    const [accountCtx, senderEntry] = await Promise.all([
+      this.store.getProcessorAccountContext(accountId, recipientAddress),
+      this.store.getSender(accountId, recipientAddress, senderETLD1),
+    ]);
     const ttl = accountCtx.retentionDays > 0
       ? Math.floor(Date.now() / 1000) + accountCtx.retentionDays * 86400
       : undefined;
@@ -316,19 +373,20 @@ export class SignalProcessor {
 
     // 8. Assign system labels and merge classifier labels
     const emailConfig = accountCtx.emailConfig;
-    // Brand-new address (null emailConfig) with auto-allow account policy → treat as allow_all for label purposes
     const effectiveFilterMode: SenderFilterMode = emailConfig
       ? emailConfig.filterMode
       : accountCtx.filtering?.newAddressHandling === "block_until_approved"
-        ? "notify_new"
+        ? "quarantine_visible"
         : "allow_all";
+    // When no alias exists for the recipient, sender entries don't apply — treat as no entry
+    const effectiveSenderEntry = emailConfig ? senderEntry : null;
     const systemLabels = assignSystemLabels({
       workflow: classification.workflow,
       workflowData: classification.workflowData,
       spamScore: classification.spamScore,
       spamScoreThreshold,
       senderETLD1,
-      approvedSenders: emailConfig?.approvedSenders ?? [],
+      senderEntry: effectiveSenderEntry,
       filterMode: effectiveFilterMode,
       hasSentMessages: (arc.sentMessageIds?.length ?? 0) > 0,
     });
@@ -362,34 +420,40 @@ export class SignalProcessor {
     });
 
     // 10. Evaluate all rules (system rules seeded at low position numbers, user rules at higher positions)
-    const rules = await this.store.listRules(accountId);
-    const outcome = applyRules(rules, { signal: signalShell, arc, isMatchedArc }, this.ruleEvaluator, emptyOutcome());
+    const rules = await this.store.listEnabledRules(accountId);
+    const matchedRules = await applyRules(rules, { signal: signalShell, arc, isMatchedArc }, this.ruleEvaluator);
+    const outcome = deriveOutcome(matchedRules);
 
-    // Block/quarantine: approveSender overrides quarantine (SR-14 fires before SR-02)
-    if (outcome.block || (outcome.quarantine && !outcome.approveSender)) {
-      const status: SignalStatus = outcome.quarantine ? "quarantined" : "blocked";
-      const blockedSignal = buildSignal({
-        status,
-        accountId,
-        sesMessageId,
-        recipientAddress,
-        parsed,
-        classification,
-        s3Key,
-        receivedAt: timestamp,
-        now,
-        ...(ttl !== undefined ? { ttl } : {}),
-      });
-      await this.store.saveSignal(blockedSignal);
-      if (status === "quarantined" && this.notifier) {
-        await this.notifier.notifyBlocked(accountId, blockedSignal).catch((err) => {
+    // Fallback: if no rule set a status, apply filter mode for untrusted senders
+    const hasStatusOutcome = outcome.block || outcome.quarantine || outcome.archive || outcome.delete;
+    if (!hasStatusOutcome && arc.labels.includes("system:sender:untrusted")) {
+      switch (effectiveFilterMode) {
+        case "block":              outcome.block = true; break;
+        case "quarantine_hidden":  outcome.quarantine = true; outcome.quarantineHidden = true; break;
+        case "quarantine_visible": outcome.quarantine = true; break;
+        // "allow_all": signal proceeds as active
+      }
+    }
+
+    const buildArgs = { accountId, sesMessageId, recipientAddress, parsed, classification, s3Key, receivedAt: timestamp, now, ...(ttl !== undefined ? { ttl } : {}) };
+
+    if (outcome.block) {
+      await this.store.saveSignal({ ...buildSignal({ status: "blocked", ...buildArgs }), matchedRules });
+      this.store.updateGlobalReputation(senderETLD1, { wasSpam: classification.spamScore >= spamScoreThreshold, wasBlocked: true }).catch((err) => console.error("Reputation update failed:", err));
+      return;
+    }
+
+    // approveSender overrides quarantine — SR-14 (auto-approve on matched conversation) fires before SR-02
+    if (outcome.quarantine && !outcome.approveSender) {
+      const quarantineStatus = outcome.quarantineHidden ? "quarantine_hidden" : "quarantine_visible";
+      const quarantinedSignal: Signal = { ...buildSignal({ status: quarantineStatus, ...buildArgs }), matchedRules };
+      await this.store.saveSignal(quarantinedSignal);
+      if (this.notifier && !outcome.quarantineHidden) {
+        await this.notifier.notifyBlocked(accountId, quarantinedSignal).catch((err) => {
           console.error("Quarantine notification failed:", err);
         });
       }
-      this.store.updateGlobalReputation(senderETLD1, {
-        wasSpam: classification.spamScore >= spamScoreThreshold,
-        wasBlocked: true,
-      }).catch((err) => console.error("Reputation update failed:", err));
+      this.store.updateGlobalReputation(senderETLD1, { wasSpam: classification.spamScore >= spamScoreThreshold, wasBlocked: true }).catch((err) => console.error("Reputation update failed:", err));
       return;
     }
 
@@ -407,11 +471,11 @@ export class SignalProcessor {
     }
     if (outcome.archive) arc.status = "archived";
     if (outcome.delete) { arc.status = "deleted"; arc.deletedAt = now; }
-    if (outcome.urgency) arc.urgency = outcome.urgency;
-    // Fall back to baseUrgency if no set_urgency rule fired
-    if (!arc.urgency) arc.urgency = baseUrgency(arc.workflow, classification.workflowData);
 
-    const signal: Signal = { ...signalShell, arcId: arc.id };
+    const signalUrgency = outcome.urgency ?? arc.urgency ?? "normal";
+    if (!matchedArc) arc.urgency = signalUrgency;
+
+    const signal: Signal = { ...signalShell, arcId: arc.id, matchedRules, urgency: signalUrgency };
 
     // 12. Pong (driven by SR-13 rule action)
     if (outcome.doPong && this.testReplier) {
@@ -460,7 +524,75 @@ export class SignalProcessor {
       }
     }
 
-    // 15. Notify
+    // 15. Auto-reply (fire-and-forget composed emails from templates)
+    if (this.testReplier && outcome.autoReplyTemplateIds.length > 0) {
+      const recipientDomain = recipientAddress.split("@")[1] ?? "";
+      const domain = await this.store.getDomainByName(accountId, recipientDomain);
+      if (domain?.senderSetupComplete) {
+        const vars = {
+          "signal.subject": parsed.subject,
+          "sender.name": parsed.from.name ?? "",
+          "sender.address": parsed.from.address,
+          "arc.workflow": classification.workflow,
+        };
+        for (const templateId of outcome.autoReplyTemplateIds) {
+          const tmpl = await this.store.getTemplate(accountId, templateId);
+          if (!tmpl) continue;
+          const replyResult = await this.testReplier.pong({
+            to: parsed.from.address,
+            from: recipientAddress,
+            subject: renderTemplate(tmpl.subject, vars),
+            body: renderTemplate(tmpl.body, vars),
+            inReplyTo: sesMessageId,
+          }).catch((err) => { console.error("Auto-reply failed:", err); return null; });
+          if (replyResult) {
+            arc.sentMessageIds = [...(arc.sentMessageIds ?? []), replyResult.messageId];
+            await this.store.saveArc(arc);
+          }
+        }
+      }
+    }
+
+    // 16. Auto-draft (create held draft signals from templates)
+    if (outcome.autoDraftTemplateIds.length > 0) {
+      const vars = {
+        "signal.subject": parsed.subject,
+        "sender.name": parsed.from.name ?? "",
+        "sender.address": parsed.from.address,
+        "arc.workflow": classification.workflow,
+      };
+      for (const templateId of outcome.autoDraftTemplateIds) {
+        const tmpl = await this.store.getTemplate(accountId, templateId);
+        if (!tmpl) continue;
+        const draft: Signal = {
+          id: `USR#${randomUUID()}`,
+          arcId: arc.id,
+          accountId,
+          source: "user",
+          status: "draft",
+          receivedAt: now,
+          from: { address: recipientAddress },
+          to: [parsed.from],
+          cc: [],
+          subject: renderTemplate(tmpl.subject, vars),
+          textBody: renderTemplate(tmpl.body, vars),
+          attachments: [],
+          headers: {},
+          recipientAddress: parsed.from.address,
+          workflow: classification.workflow,
+          workflowData: classification.workflowData,
+          spamScore: 0,
+          summary: "",
+          classificationModelId: "",
+          s3Key: "",
+          createdAt: now,
+          ...(ttl !== undefined ? { ttl } : {}),
+        };
+        await this.store.saveSignal(draft);
+      }
+    }
+
+    // 17. Notify
     if (this.notifier && !outcome.suppressNotification) {
       await this.notifier.notify(accountId, arc, signal).catch((err) => {
         console.error("Notification failed:", err);
@@ -478,32 +610,30 @@ export class SignalProcessor {
     address: string,
     senderETLD1: string,
     existing: Alias | null,
-    defaultFilterMode: AccountFilteringConfig["defaultFilterMode"] = "notify_new",
+    defaultFilterMode: AccountFilteringConfig["defaultFilterMode"] = "quarantine_visible",
   ): Promise<void> {
     const now = new Date().toISOString();
-    if (existing) {
-      await this.store.saveAlias({
-        ...existing,
-        approvedSenders: [...existing.approvedSenders, senderETLD1],
-        updatedAt: now,
-      });
-    } else {
+    if (!existing) {
       await this.store.saveAlias({
         id: randomUUID(),
         accountId,
         address,
         filterMode: defaultFilterMode,
-        approvedSenders: [senderETLD1],
         createdAt: now,
         updatedAt: now,
       });
     }
+    await this.store.saveSender(accountId, address, senderETLD1, "allow");
   }
 }
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+function renderTemplate(text: string, vars: Record<string, string>): string {
+  return text.replace(/\{\{([^}]+)\}\}/g, (_, key: string) => vars[key.trim()] ?? "");
+}
 
 function buildSignal(opts: {
   arcId?: string;

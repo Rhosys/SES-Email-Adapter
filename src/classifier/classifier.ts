@@ -163,17 +163,13 @@ const CLASSIFICATION_SYSTEM_PROMPT = `You are an email workflow classification e
 OTPs, password resets, magic links, email verification, 2FA codes
 { "workflow": "auth", "authType": "otp"|"password_reset"|"magic_link"|"verification"|"two_factor"|"other", "code": "<extracted code or null>", "expiresInMinutes": <number or null>, "service": "<name>", "actionUrl": "<url or null>" }
 
-### invoice
-Invoices, receipts, billing statements, payment confirmations, refund notices
-{ "workflow": "invoice", "invoiceType": "invoice"|"receipt"|"statement"|"payment_confirmation"|"refund", "vendor": "<name>", "amount": <number or null>, "currency": "<ISO 4217 or null>", "invoiceNumber": "<string or null>", "dueDate": "<YYYY-MM-DD or null>", "lineItems": [], "downloadUrl": "<url or null>" }
+### payments
+Invoices, receipts, billing statements, payment confirmations, refunds, bank statements, wire transfers, transaction alerts, subscription renewals, trial expiry, payment failures, plan changes, tax documents
+{ "workflow": "payments", "paymentType": "invoice"|"receipt"|"subscription_renewal"|"payment_failed"|"plan_changed"|"tax"|"wire_transfer"|"refund"|"statement"|"other", "vendor": "<name>", "amount": <number or null>, "currency": "<ISO 4217 or null>", "invoiceNumber": "<string or null>", "dueDate": "<YYYY-MM-DD or null>", "accountLastFour": "<string or null>", "downloadUrl": "<url or null>", "managementUrl": "<url or null>" }
 
-### order
+### package
 Order confirmations, shipping updates, delivery notifications, returns, refunds, cancellations
-{ "workflow": "order", "orderType": "confirmation"|"shipping"|"out_for_delivery"|"delivered"|"return"|"refund"|"cancellation", "retailer": "<name>", "orderNumber": "<string or null>", "trackingNumber": "<string or null>", "trackingUrl": "<url or null>", "estimatedDelivery": "<YYYY-MM-DD or null>", "items": [], "totalAmount": <number or null>, "currency": "<string or null>" }
-
-### financial
-Bank statements, wire transfers, transaction alerts, fraud alerts, tax documents
-{ "workflow": "financial", "financialType": "statement"|"transaction"|"alert"|"transfer"|"tax"|"fraud_alert", "institution": "<name>", "amount": <number or null>, "currency": "<string or null>", "accountLastFour": "<string or null>", "transactionDate": "<YYYY-MM-DD or null>", "statementPeriod": "<string or null>", "isSuspicious": true|false }
+{ "workflow": "package", "packageType": "confirmation"|"shipping"|"out_for_delivery"|"delivered"|"return"|"refund"|"cancellation", "retailer": "<name>", "orderNumber": "<string or null>", "trackingNumber": "<string or null>", "trackingUrl": "<url or null>", "estimatedDelivery": "<YYYY-MM-DD or null>", "items": [], "totalAmount": <number or null>, "currency": "<string or null>" }
 
 ### travel
 Flight bookings, hotel reservations, car rentals, itineraries, check-in reminders, boarding passes
@@ -183,33 +179,25 @@ Flight bookings, hotel reservations, car rentals, itineraries, check-in reminder
 Job applications, recruiter outreach, interview scheduling, offers, rejections, job postings
 { "workflow": "job", "jobType": "application_status"|"recruiter_outreach"|"interview_request"|"offer"|"rejection"|"job_posting", "company": "<string or null>", "role": "<string or null>", "location": "<string or null>", "salary": "<string or null>", "interviewDate": "<ISO datetime or null>", "applicationStatus": "submitted"|"reviewing"|"interview"|"offer"|"rejected"|null, "actionUrl": "<url or null>" }
 
-### newsletter
-Publications, editorial digests, blog mailing lists, curated content
-{ "workflow": "newsletter", "publication": "<name>", "topics": ["<topic>"], "frequency": "daily"|"weekly"|"monthly"|"irregular"|null, "unsubscribeUrl": "<url or null>" }
-
-### promotions
-Promotional offers, discount codes, flash sales, abandoned cart reminders, loyalty rewards, product launches — commercial emails whose primary goal is driving a purchase or re-engagement with an offer
-{ "workflow": "promotions", "promotionType": "discount"|"sale"|"flash_sale"|"loyalty"|"referral"|"product_launch"|"abandoned_cart"|"win_back", "brand": "<name>", "discountCode": "<string or null>", "discountAmount": "<string or null>", "expiryDate": "<YYYY-MM-DD or null>", "shopUrl": "<url or null>" }
+### content
+Publications, editorial digests, blog mailing lists, promotional offers, discount codes, flash sales, abandoned cart reminders, loyalty rewards, product launches, social media digests — commercial or editorial bulk emails
+{ "workflow": "content", "contentType": "newsletter"|"promotion"|"social_digest"|"product_update"|"announcement", "publisher": "<name>", "topics": ["<topic>"], "discountCode": "<string or null>", "discountAmount": "<string or null>", "expiryDate": "<YYYY-MM-DD or null>", "unsubscribeUrl": "<url or null>" }
 
 ### onboarding
-Welcome emails, account setup guides, getting-started tutorials, feature tours, product tips, and re-engagement check-ins sent by apps or services after a user signs up. Distinct from promotions (no purchase intent) and newsletters (not editorial).
+Welcome emails, account setup guides, getting-started tutorials, feature tours, product tips, and re-engagement check-ins sent by apps or services after a user signs up. Distinct from content (no purchase intent) and from support (no ticket).
 { "workflow": "onboarding", "service": "<app/product name>", "onboardingType": "welcome"|"setup_guide"|"feature_tour"|"tip"|"check_in"|"re_engagement", "stepNumber": <number or null>, "totalSteps": <number or null>, "actionUrl": "<url or null>" }
-
-### social
-Social media notifications, community platforms, forum activity, event invites
-{ "workflow": "social", "platform": "<Twitter/LinkedIn/Reddit/etc>", "notificationType": "mention"|"follow"|"message"|"like"|"comment"|"friend_request"|"digest"|"event", "actorName": "<string or null>", "contentPreview": "<string or null>", "actionUrl": "<url or null>" }
 
 ### crm
 Sales outreach, business proposals, client emails, contract follow-ups
 { "workflow": "crm", "crmType": "sales_outreach"|"follow_up"|"client_message"|"proposal"|"contract"|"support", "senderCompany": "<string or null>", "senderRole": "<string or null>", "dealValue": <number or null>, "currency": "<string or null>", "urgency": "low"|"medium"|"high", "requiresReply": true|false }
 
-### personal
+### conversation
 Direct human-to-human correspondence not generated by automated systems
-{ "workflow": "personal", "senderName": "<string or null>", "isReply": true|false, "threadLength": <number or null>, "sentiment": "positive"|"neutral"|"negative"|"urgent", "requiresReply": true|false }
+{ "workflow": "conversation", "senderName": "<string or null>", "isReply": true|false, "threadLength": <number or null>, "sentiment": "positive"|"neutral"|"negative"|"urgent", "requiresReply": true|false }
 
-### security
-Suspicious login alerts, new device notifications, breach notices, API key exposure, account lockout
-{ "workflow": "security", "alertType": "suspicious_login"|"new_device"|"password_changed"|"breach_notice"|"api_key_exposed"|"account_locked"|"other", "service": "<name>", "ipAddress": "<string or null>", "location": "<string or null>", "deviceName": "<string or null>", "requiresAction": true|false, "actionUrl": "<url or null>" }
+### alert
+Suspicious login alerts, new device notifications, breach notices, API key exposure, account lockout, fraud alerts, CI/CD failures, deployment failures, error monitoring alerts, domain/certificate expiry, security scan results — anything that signals a system event requiring attention
+{ "workflow": "alert", "alertType": "suspicious_login"|"new_device"|"password_changed"|"breach_notice"|"api_key_exposed"|"account_locked"|"fraud_alert"|"ci_failure"|"deployment_failed"|"error_spike"|"domain_expiry"|"cert_expiry"|"security_scan"|"other", "service": "<name>", "severity": "info"|"warning"|"critical"|null, "requiresAction": true|false, "actionUrl": "<url or null>", "ipAddress": "<string or null>", "location": "<string or null>", "deviceName": "<string or null>", "repository": "<string or null>", "errorMessage": "<string or null>" }
 
 ### scheduling
 Calendar invites, appointment confirmations, meeting reminders, cancellations, reschedule requests
@@ -219,25 +207,18 @@ Calendar invites, appointment confirmations, meeting reminders, cancellations, r
 Customer support ticket updates, helpdesk responses, service status notifications
 { "workflow": "support", "eventType": "ticket_opened"|"ticket_updated"|"ticket_resolved"|"ticket_closed"|"awaiting_response"|"status_update", "ticketId": "<string or null>", "service": "<name>", "priority": "low"|"normal"|"high"|"urgent"|null, "agentName": "<string or null>", "responseUrl": "<url or null>" }
 
-### developer
-GitHub/GitLab PRs and reviews, CI/CD results, error monitoring alerts, domain/certificate expiry
-{ "workflow": "developer", "platform": "github"|"gitlab"|"bitbucket"|"jira"|"sentry"|"datadog"|"pagerduty"|"vercel"|"aws"|"cloudflare"|"other", "eventType": "pull_request"|"code_review"|"ci_failure"|"ci_success"|"deployment"|"error_alert"|"domain_expiry"|"cert_expiry"|"security_scan"|"other", "repository": "<string or null>", "severity": "info"|"warning"|"critical"|null, "requiresAction": true|false, "actionUrl": "<url or null>" }
-
-### subscription
-SaaS subscription renewals, trial expiry, payment failures, plan changes, cancellations
-{ "workflow": "subscription", "eventType": "renewal"|"trial_expiring"|"payment_failed"|"plan_changed"|"cancelled"|"reactivated"|"usage_alert", "service": "<name>", "planName": "<string or null>", "amount": <number or null>, "currency": "<string or null>", "nextBillingDate": "<YYYY-MM-DD or null>", "trialEndsAt": "<ISO datetime or null>", "managementUrl": "<url or null>" }
-
 ### healthcare
 Medical appointment reminders, test results, prescription notifications, insurance updates
 { "workflow": "healthcare", "eventType": "appointment_reminder"|"appointment_confirmation"|"test_results"|"prescription"|"insurance_update"|"billing"|"referral", "provider": "<string or null>", "appointmentDate": "<ISO datetime or null>", "location": "<string or null>", "requiresAction": true|false, "portalUrl": "<url or null>" }
 
-### government
-Tax notices, benefits updates, license renewals, official government correspondence
-{ "workflow": "government", "agency": "<string or null>", "documentType": "tax"|"benefits"|"license"|"permit"|"notice"|"fine"|"voting"|"healthcare"|"other", "referenceNumber": "<string or null>", "deadlineDate": "<YYYY-MM-DD or null>", "requiresResponse": true|false, "portalUrl": "<url or null>" }
+### status
+Passive informational notices that users are not expected to act on: privacy policy changes, terms of service updates, data processor notices, cookie policy updates, GDPR/compliance notices, phishing-warning bulletins from banks/SaaS ("we will never ask for your password"), and official government correspondence (tax notices, benefits updates, license renewals).
 
-### notice
-Privacy policy changes, terms of service updates, data processor changes, cookie policy updates, GDPR/compliance notices — bulk regulatory emails sent by automated systems that users are not expected to read or act on
-{ "workflow": "notice", "noticeType": "privacy_policy"|"terms_update"|"data_processor"|"cookie_policy"|"compliance"|"other", "provider": "<name>", "effectiveDate": "<YYYY-MM-DD or null>", "documentUrl": "<url or null>" }
+IMPORTANT — phishing-warning notices vs actual phishing:
+- "Beware of phishing — we will never ask for your password" from a bank → workflow:"status", statusType:"compliance", spamScore:0.0–0.1
+- An email pretending to be a bank and asking you to click a suspicious link → assign the real workflow (e.g. "auth") with spamScore:0.8–1.0
+
+{ "workflow": "status", "statusType": "terms_update"|"privacy_policy"|"data_processor"|"cookie_policy"|"compliance"|"service_notice"|"government"|"account_notification"|"other", "provider": "<name>", "effectiveDate": "<YYYY-MM-DD or null>", "referenceNumber": "<string or null>", "documentUrl": "<url or null>" }
 
 ### test
 Emails sent by a user to test that their own inbox is working. Detected by obvious test content (subject "test", "testing 123", "hello world", "is this thing on?" etc.) or by the processor overriding the workflow based on sender identity. The processor handles sender-based detection; classify here only when content makes the intent unambiguous.
@@ -246,9 +227,9 @@ Emails sent by a user to test that their own inbox is working. Detected by obvio
 ## Spam scoring
 spamScore is ALWAYS required and is orthogonal to workflow. Assign the real workflow even for spam:
 - A phishing email pretending to be a bank login → workflow:"auth", spamScore:0.95
-- A scam pretending to be a shipping update → workflow:"order", spamScore:0.9
-- Unsolicited bulk marketing → workflow:"promotions", spamScore:0.7
-- A legitimate newsletter → workflow:"newsletter", spamScore:0.05
+- A scam pretending to be a shipping update → workflow:"package", spamScore:0.9
+- Unsolicited bulk marketing → workflow:"content", spamScore:0.7
+- A legitimate newsletter → workflow:"content", spamScore:0.05
 
 Score ranges:
 - 0.0–0.2: Clearly legitimate

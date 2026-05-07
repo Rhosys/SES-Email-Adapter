@@ -33,6 +33,10 @@ function makeStore(): ApiDatabase {
     getArc: vi.fn().mockResolvedValue(null),
     updateArc: vi.fn().mockResolvedValue(makeArc()),
     listSignals: vi.fn().mockResolvedValue({ items: [] }),
+    listPreArcSignals: vi.fn().mockResolvedValue({ items: [] }),
+    blockSignal: vi.fn().mockImplementation((_, id) => Promise.resolve({ id, status: "blocked" })),
+    saveArc: vi.fn().mockResolvedValue(undefined),
+    findArcByGroupingKey: vi.fn().mockResolvedValue(null),
     getSignal: vi.fn().mockResolvedValue(null),
     updateSignal: vi.fn().mockResolvedValue(makeSignal()),
     deleteSignal: vi.fn().mockResolvedValue(undefined),
@@ -41,7 +45,6 @@ function makeStore(): ApiDatabase {
     createView: vi.fn().mockResolvedValue(makeView()),
     updateView: vi.fn().mockResolvedValue(makeView()),
     deleteView: vi.fn().mockResolvedValue(undefined),
-    reorderViews: vi.fn().mockResolvedValue(undefined),
     listLabels: vi.fn().mockResolvedValue([]),
     createLabel: vi.fn().mockResolvedValue(makeLabel()),
     updateLabel: vi.fn().mockResolvedValue(makeLabel()),
@@ -50,7 +53,6 @@ function makeStore(): ApiDatabase {
     createRule: vi.fn().mockResolvedValue(makeRule()),
     updateRule: vi.fn().mockResolvedValue(makeRule()),
     deleteRule: vi.fn().mockResolvedValue(undefined),
-    reorderRules: vi.fn().mockResolvedValue(undefined),
     listDomains: vi.fn().mockResolvedValue([]),
     getDomain: vi.fn().mockResolvedValue(null),
     createDomain: vi.fn().mockResolvedValue(makeDomain()),
@@ -69,6 +71,20 @@ function makeStore(): ApiDatabase {
     getVerifiedForwardingAddress: vi.fn().mockResolvedValue(null),
     saveVerifiedForwardingAddress: vi.fn().mockResolvedValue(undefined),
     deleteVerifiedForwardingAddress: vi.fn().mockResolvedValue(undefined),
+    updateDomainHealth: vi.fn().mockResolvedValue(undefined),
+    renameAlias: vi.fn().mockResolvedValue(makeAlias()),
+    saveSender: vi.fn().mockResolvedValue(undefined),
+    removeSender: vi.fn().mockResolvedValue(undefined),
+    listSenders: vi.fn().mockResolvedValue([]),
+    createTemplate: vi.fn().mockResolvedValue(undefined),
+    getTemplate: vi.fn().mockResolvedValue(null),
+    updateTemplate: vi.fn().mockResolvedValue(undefined),
+    deleteTemplate: vi.fn().mockResolvedValue(undefined),
+    listTemplates: vi.fn().mockResolvedValue([]),
+    savePushSubscription: vi.fn().mockResolvedValue(undefined),
+    listPushSubscriptions: vi.fn().mockResolvedValue([]),
+    deletePushSubscription: vi.fn().mockResolvedValue(undefined),
+    listAuditEvents: vi.fn().mockResolvedValue({ items: [] }),
   };
 }
 
@@ -89,8 +105,7 @@ function makeAlias(overrides: Partial<Alias> = {}): Alias {
     id: "cfg-001",
     accountId: TEST_ACCOUNT_ID,
     address: "user@example.com",
-    filterMode: "notify_new",
-    approvedSenders: ["amazon.com", "google.com"],
+    filterMode: "quarantine_visible",
     createdAt: "2024-01-01T00:00:00Z",
     updatedAt: "2024-01-01T00:00:00Z",
     ...overrides,
@@ -182,7 +197,8 @@ function makeRule(overrides: Partial<Rule> = {}): Rule {
     name: "Archive newsletters",
     condition: '{"==": [{"var": "arc.category"}, "newsletter"]}',
     actions: [{ type: "archive" }],
-    position: 0,
+    status: "enabled",
+    priorityOrder: 100,
     createdAt: "2024-01-01T00:00:00Z",
     updatedAt: "2024-01-01T00:00:00Z",
     ...overrides,
@@ -387,6 +403,91 @@ describe("API", () => {
     });
   });
 
+  describe("GET /accounts/:accountId/signals?status=", () => {
+    it("returns quarantined signals (both visible and hidden) when status=quarantined", async () => {
+      const s = makeSignal({ status: "quarantine_visible" });
+      vi.mocked(store.listPreArcSignals).mockResolvedValueOnce({ items: [s] });
+      const res = await req(app, "GET", `${A}/signals?status=quarantined`);
+      expect(res.status).toBe(200);
+      const body = await res.json() as { signals: Signal[]; pagination: { cursor: string | null } };
+      expect(body.signals).toHaveLength(1);
+      expect(store.listPreArcSignals).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "quarantined", expect.any(Object));
+    });
+
+    it("returns blocked signals", async () => {
+      const s = makeSignal({ status: "blocked" });
+      vi.mocked(store.listPreArcSignals).mockResolvedValueOnce({ items: [s] });
+      const res = await req(app, "GET", `${A}/signals?status=blocked`);
+      expect(res.status).toBe(200);
+      const body = await res.json() as { signals: Signal[]; pagination: { cursor: string | null } };
+      expect(body.signals).toHaveLength(1);
+      expect(store.listPreArcSignals).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "blocked", expect.any(Object));
+    });
+
+    it("returns 400 when status param is missing", async () => {
+      const res = await req(app, "GET", `${A}/signals`);
+      expect(res.status).toBe(400);
+    });
+
+    it("returns 400 when status param is invalid", async () => {
+      const res = await req(app, "GET", `${A}/signals?status=active`);
+      expect(res.status).toBe(400);
+    });
+  });
+
+  describe("PUT /accounts/:accountId/signals/:id/quarantineResponse", () => {
+    it("blocks a quarantined signal", async () => {
+      const s = makeSignal({ status: "quarantine_visible" });
+      vi.mocked(store.getSignal).mockResolvedValueOnce(s);
+      const res = await req(app, "POST", `${A}/signals/SES%23msg-001/quarantineResponse`, { body: { status: "blocked" } });
+      expect(res.status).toBe(200);
+      expect(store.blockSignal).toHaveBeenCalledWith(TEST_ACCOUNT_ID, s.id);
+    });
+
+    it("allows a quarantined signal — creates new arc when no grouping key match", async () => {
+      const s = makeSignal({ status: "quarantine_visible" });
+      vi.mocked(store.getSignal).mockResolvedValueOnce(s);
+      vi.mocked(store.findArcByGroupingKey).mockResolvedValueOnce(null);
+      const res = await req(app, "POST", `${A}/signals/SES%23msg-001/quarantineResponse`, { body: { status: "active" } });
+      expect(res.status).toBe(200);
+      const body = await res.json() as { arc: Arc; signal: Signal };
+      expect(body.arc.workflow).toBe(s.workflow);
+      expect(body.signal.status).toBe("active");
+      expect(store.createArc).toHaveBeenCalledOnce();
+      expect(store.unblockSignal).toHaveBeenCalledWith(TEST_ACCOUNT_ID, s.id, body.arc.id);
+    });
+
+    it("allows a quarantined signal — attaches to existing arc when grouping key matches", async () => {
+      const s = makeSignal({ status: "quarantine_visible", workflow: "auth" });
+      const existingArc = makeArc();
+      vi.mocked(store.getSignal).mockResolvedValueOnce(s);
+      vi.mocked(store.findArcByGroupingKey).mockResolvedValueOnce(existingArc);
+      const res = await req(app, "POST", `${A}/signals/SES%23msg-001/quarantineResponse`, { body: { status: "active" } });
+      expect(res.status).toBe(200);
+      const body = await res.json() as { arc: Arc; signal: Signal };
+      expect(body.arc.id).toBe(existingArc.id);
+      expect(store.createArc).not.toHaveBeenCalled();
+      expect(store.unblockSignal).toHaveBeenCalledWith(TEST_ACCOUNT_ID, s.id, existingArc.id);
+    });
+
+    it("returns 400 when signal is already active", async () => {
+      vi.mocked(store.getSignal).mockResolvedValueOnce(makeSignal({ status: "active" }));
+      const res = await req(app, "POST", `${A}/signals/SES%23msg-001/quarantineResponse`, { body: { status: "active" } });
+      expect(res.status).toBe(400);
+    });
+
+    it("returns 400 when body is missing status", async () => {
+      vi.mocked(store.getSignal).mockResolvedValueOnce(makeSignal({ status: "quarantine_visible" }));
+      const res = await req(app, "POST", `${A}/signals/SES%23msg-001/quarantineResponse`, { body: {} });
+      expect(res.status).toBe(400);
+    });
+
+    it("returns 404 for unknown signal", async () => {
+      const res = await req(app, "POST", `${A}/signals/nonexistent/quarantineResponse`, { body: { status: "active" } });
+      expect(res.status).toBe(404);
+    });
+  });
+
   describe("GET /accounts/:accountId/signals/:id", () => {
     it("returns full Signal detail", async () => {
       vi.mocked(store.getSignal).mockResolvedValueOnce(makeSignal({ textBody: "Hello world" }));
@@ -542,14 +643,6 @@ describe("API", () => {
     });
   });
 
-  describe("POST /accounts/:accountId/views/reorder", () => {
-    it("reorders Views by ID array", async () => {
-      const res = await req(app, "POST", `${A}/views/reorder`, { body: { orderedIds: ["view-002", "view-001"] } });
-      expect(res.status).toBe(200);
-      expect(store.reorderViews).toHaveBeenCalledWith(TEST_ACCOUNT_ID, ["view-002", "view-001"]);
-    });
-  });
-
   // -------------------------------------------------------------------------
   // Label routes
   // -------------------------------------------------------------------------
@@ -666,14 +759,6 @@ describe("API", () => {
       const res = await req(app, "DELETE", `${A}/rules/rule-001`);
       expect(res.status).toBe(204);
       expect(store.deleteRule).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "rule-001");
-    });
-  });
-
-  describe("POST /accounts/:accountId/rules/reorder", () => {
-    it("reorders rules by ID array", async () => {
-      const res = await req(app, "POST", `${A}/rules/reorder`, { body: { orderedIds: ["rule-002", "rule-001"] } });
-      expect(res.status).toBe(200);
-      expect(store.reorderRules).toHaveBeenCalledWith(TEST_ACCOUNT_ID, ["rule-002", "rule-001"]);
     });
   });
 
@@ -794,20 +879,15 @@ describe("API", () => {
   // Search
   // -------------------------------------------------------------------------
 
-  describe("GET /accounts/:accountId/search", () => {
+  describe("GET /accounts/:accountId/arcs?q=", () => {
     it("returns Arc search results in named envelope", async () => {
       vi.mocked(store.searchArcs).mockResolvedValueOnce({ items: [makeArc()] });
-      const res = await req(app, "GET", `${A}/search?q=invoice+from+stripe`);
+      const res = await req(app, "GET", `${A}/arcs?q=invoice+from+stripe`);
       expect(res.status).toBe(200);
       const body = await res.json() as { arcs: unknown[]; pagination: { cursor: null } };
       expect(body.arcs).toHaveLength(1);
       expect(body.pagination).toEqual({ cursor: null });
       expect(store.searchArcs).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "invoice from stripe", expect.any(Object));
-    });
-
-    it("returns 400 when query is missing", async () => {
-      const res = await req(app, "GET", `${A}/search`);
-      expect(res.status).toBe(400);
     });
   });
 
@@ -852,18 +932,18 @@ describe("API", () => {
 
     it("updates account filtering config including blockOnboardingEmails", async () => {
       const res = await req(app, "PATCH", `${A}`, {
-        body: { filtering: { defaultFilterMode: "strict", blockOnboardingEmails: true } },
+        body: { filtering: { defaultFilterMode: "block", blockOnboardingEmails: true } },
       });
       expect(res.status).toBe(200);
       expect(store.updateAccount).toHaveBeenCalledWith(
         TEST_ACCOUNT_ID,
-        expect.objectContaining({ filtering: { defaultFilterMode: "strict", blockOnboardingEmails: true } }),
+        expect.objectContaining({ filtering: { defaultFilterMode: "block", blockOnboardingEmails: true } }),
       );
     });
 
     it("updates account-level spamScoreThreshold in filtering config", async () => {
       const res = await req(app, "PATCH", `${A}`, {
-        body: { filtering: { defaultFilterMode: "notify_new", newAddressHandling: "auto_allow", spamScoreThreshold: 0.75 } },
+        body: { filtering: { defaultFilterMode: "quarantine_visible", newAddressHandling: "auto_allow", spamScoreThreshold: 0.75 } },
       });
       expect(res.status).toBe(200);
       expect(store.updateAccount).toHaveBeenCalledWith(
@@ -962,7 +1042,7 @@ describe("API", () => {
       const res = await req(app, "GET", `${A}/aliases/user%40example.com`);
       expect(res.status).toBe(200);
       const body = await res.json() as Alias;
-      expect(body.filterMode).toBe("notify_new");
+      expect(body.filterMode).toBe("quarantine_visible");
     });
 
     it("returns 404 when no alias exists", async () => {
@@ -975,13 +1055,13 @@ describe("API", () => {
     it("creates an alias and returns 201 + full resource", async () => {
       vi.mocked(store.createAlias).mockResolvedValueOnce(makeAlias({ address: "me@mydomain.com" }));
       const res = await req(app, "POST", `${A}/aliases`, {
-        body: { address: "me@mydomain.com", filterMode: "strict" },
+        body: { address: "me@mydomain.com", filterMode: "block" },
       });
       expect(res.status).toBe(201);
       const body = await res.json() as Alias;
       expect(body.address).toBe("me@mydomain.com");
       expect(store.createAlias).toHaveBeenCalledWith(
-        expect.objectContaining({ accountId: TEST_ACCOUNT_ID, address: "me@mydomain.com", filterMode: "strict" }),
+        expect.objectContaining({ accountId: TEST_ACCOUNT_ID, address: "me@mydomain.com", filterMode: "block" }),
       );
     });
 
@@ -994,7 +1074,7 @@ describe("API", () => {
     });
 
     it("returns 400 when address is missing", async () => {
-      const res = await req(app, "POST", `${A}/aliases`, { body: { filterMode: "strict" } });
+      const res = await req(app, "POST", `${A}/aliases`, { body: { filterMode: "block" } });
       expect(res.status).toBe(400);
     });
 
@@ -1011,15 +1091,15 @@ describe("API", () => {
 
   describe("PATCH /accounts/:accountId/aliases/:address", () => {
     it("creates or updates an alias and returns 200 + full resource", async () => {
-      vi.mocked(store.upsertAlias).mockResolvedValueOnce(makeAlias({ filterMode: "strict" }));
+      vi.mocked(store.upsertAlias).mockResolvedValueOnce(makeAlias({ filterMode: "block" }));
       const res = await req(app, "PATCH", `${A}/aliases/me%40mydomain.com`, {
-        body: { filterMode: "strict", approvedSenders: ["amazon.com"] },
+        body: { filterMode: "block" },
       });
       expect(res.status).toBe(200);
       const body = await res.json() as Alias;
-      expect(body.filterMode).toBe("strict");
+      expect(body.filterMode).toBe("block");
       expect(store.upsertAlias).toHaveBeenCalledWith(
-        expect.objectContaining({ accountId: TEST_ACCOUNT_ID, address: "me@mydomain.com", filterMode: "strict" }),
+        expect.objectContaining({ accountId: TEST_ACCOUNT_ID, address: "me@mydomain.com", filterMode: "block" }),
       );
     });
 
@@ -1035,7 +1115,7 @@ describe("API", () => {
 
     it("stores spamScoreThreshold when included in the request body", async () => {
       await req(app, "PATCH", `${A}/aliases/me%40mydomain.com`, {
-        body: { filterMode: "strict", approvedSenders: [], spamScoreThreshold: 0.7 },
+        body: { filterMode: "block", spamScoreThreshold: 0.7 },
       });
       const saved = vi.mocked(store.upsertAlias).mock.calls[0]![0] as Alias;
       expect(saved.spamScoreThreshold).toBe(0.7);
@@ -1043,7 +1123,7 @@ describe("API", () => {
 
     it("does not set spamScoreThreshold when absent from request body", async () => {
       await req(app, "PATCH", `${A}/aliases/me%40mydomain.com`, {
-        body: { filterMode: "notify_new", approvedSenders: ["amazon.com"] },
+        body: { filterMode: "quarantine_visible" },
       });
       const saved = vi.mocked(store.upsertAlias).mock.calls[0]![0] as Alias;
       expect(saved.spamScoreThreshold).toBeUndefined();
@@ -1075,7 +1155,7 @@ describe("API", () => {
     });
 
     it("creates an Arc from a quarantined signal and returns 201", async () => {
-      vi.mocked(store.getSignal).mockResolvedValueOnce(makeSignal({ status: "quarantined" }));
+      vi.mocked(store.getSignal).mockResolvedValueOnce(makeSignal({ status: "quarantine_visible" }));
       const res = await req(app, "POST", `${A}/arcs`, { body: { signalId: "SES#msg-001" } });
       expect(res.status).toBe(201);
       expect(store.createArc).toHaveBeenCalledOnce();
@@ -1112,9 +1192,7 @@ describe("API", () => {
         makeSignal({ status: "blocked", from: { address: "noreply@mail.amazon.com" }, recipientAddress: "me@mydomain.com" }),
       );
       await req(app, "POST", `${A}/arcs`, { body: { signalId: "SES#msg-001", approveSender: true } });
-      const saved = vi.mocked(store.upsertAlias).mock.calls[0]![0] as Alias;
-      expect(saved.approvedSenders).toContain("amazon.com");
-      expect(saved.address).toBe("me@mydomain.com");
+      expect(store.saveSender).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "me@mydomain.com", "amazon.com", "allow");
     });
 
     it("updates filter mode when updateFilterMode is provided", async () => {
@@ -1124,20 +1202,6 @@ describe("API", () => {
       expect(saved.filterMode).toBe("allow_all");
     });
 
-    it("preserves existing approved senders when approving a new one", async () => {
-      vi.mocked(store.getSignal).mockResolvedValueOnce(
-        makeSignal({ status: "blocked", from: { address: "support@github.com" }, recipientAddress: "user@example.com" }),
-      );
-      vi.mocked(store.getAlias).mockResolvedValueOnce(
-        makeAlias({ approvedSenders: ["amazon.com", "google.com"] }),
-      );
-      await req(app, "POST", `${A}/arcs`, { body: { signalId: "SES#msg-001", approveSender: true } });
-      const saved = vi.mocked(store.upsertAlias).mock.calls[0]![0] as Alias;
-      expect(saved.approvedSenders).toContain("amazon.com");
-      expect(saved.approvedSenders).toContain("google.com");
-      expect(saved.approvedSenders).toContain("github.com");
-    });
-
     it("does not modify aliases when neither approveSender nor updateFilterMode is set", async () => {
       vi.mocked(store.getSignal).mockResolvedValueOnce(makeSignal({ status: "blocked" }));
       await req(app, "POST", `${A}/arcs`, { body: { signalId: "SES#msg-001" } });
@@ -1145,26 +1209,14 @@ describe("API", () => {
       expect(store.getAlias).not.toHaveBeenCalled();
     });
 
-    it("does not add sender to approvedSenders when approveSender is false and updateFilterMode is set", async () => {
+    it("does not call saveSender when approveSender is false and updateFilterMode is set", async () => {
       vi.mocked(store.getSignal).mockResolvedValueOnce(
         makeSignal({ status: "blocked", from: { address: "news@amazon.com" }, recipientAddress: "me@mydomain.com" }),
       );
       await req(app, "POST", `${A}/arcs`, { body: { signalId: "SES#msg-001", updateFilterMode: "allow_all" } });
       const saved = vi.mocked(store.upsertAlias).mock.calls[0]![0] as Alias;
       expect(saved.filterMode).toBe("allow_all");
-      expect(saved.approvedSenders).not.toContain("amazon.com");
-    });
-
-    it("does not add duplicate sender when sender is already in approvedSenders", async () => {
-      vi.mocked(store.getSignal).mockResolvedValueOnce(
-        makeSignal({ status: "blocked", from: { address: "deals@amazon.com" }, recipientAddress: "user@example.com" }),
-      );
-      vi.mocked(store.getAlias).mockResolvedValueOnce(
-        makeAlias({ approvedSenders: ["amazon.com", "google.com"] }), // amazon.com already approved
-      );
-      await req(app, "POST", `${A}/arcs`, { body: { signalId: "SES#msg-001", approveSender: true } });
-      const saved = vi.mocked(store.upsertAlias).mock.calls[0]![0] as Alias;
-      expect(saved.approvedSenders.filter((s) => s === "amazon.com")).toHaveLength(1); // no duplicate
+      expect(store.saveSender).not.toHaveBeenCalled();
     });
   });
 

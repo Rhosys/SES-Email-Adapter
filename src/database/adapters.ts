@@ -1,9 +1,10 @@
 import type { ProcessorDatabase } from "../processor/processor.js";
 import type { ApiDatabase, ListArcsParams, UpdateArcRequest, CreateViewRequest, UpdateViewRequest, CreateLabelRequest, UpdateLabelRequest, CreateRuleRequest, UpdateRuleRequest } from "../api/app.js";
-import type { Arc, Signal, View, Label, Rule, Domain, Account, Page, PageParams, Alias, VerifiedForwardingAddress } from "../types/index.js";
+import type { Arc, Signal, View, Label, Rule, Domain, Account, Page, PageParams, Alias, AliasSender, SenderMode, VerifiedForwardingAddress, EmailTemplate, PushSubscription } from "../types/index.js";
 import type { AccountDatabase } from "./account-database.js";
 import type { ArcDatabase } from "./arc-database.js";
 import type { ProcessingDatabase } from "./processing-database.js";
+import type { AuditDatabase } from "./audit-database.js";
 
 // ---------------------------------------------------------------------------
 // ProcessorDatabaseAdapter
@@ -22,9 +23,12 @@ export class ProcessorDatabaseAdapter implements ProcessorDatabase {
   getArc(accountId: string, id: string) { return this.arc.getArc(accountId, id); }
   findArcByGroupingKey(accountId: string, key: string) { return this.arc.findArcByGroupingKey(accountId, key); }
   saveArc(arc: Arc) { return this.arc.saveArc(arc); }
-  listRules(accountId: string) { return this.account.listRules(accountId); }
+  listEnabledRules(accountId: string) { return this.account.listEnabledRules(accountId); }
   getProcessorAccountContext(accountId: string, recipientAddress: string) { return this.account.getProcessorAccountContext(accountId, recipientAddress); }
   saveAlias(alias: Alias) { return this.account.saveAlias(alias); }
+  getSender(accountId: string, address: string, domain: string) { return this.account.getSender(accountId, address, domain); }
+  saveSender(accountId: string, address: string, domain: string, mode: SenderMode) { return this.account.saveSender(accountId, address, domain, mode); }
+  getTemplate(accountId: string, id: string) { return this.account.getTemplate(accountId, id); }
   updateGlobalReputation(domain: string, update: { wasSpam: boolean; wasBlocked: boolean }) { return this.processing.updateGlobalReputation(domain, update); }
   getDomainByName(accountId: string, domainName: string) { return this.account.getDomainByName(accountId, domainName); }
 }
@@ -38,6 +42,7 @@ export class ApiDatabaseAdapter implements ApiDatabase {
   constructor(
     private readonly arc: ArcDatabase,
     private readonly account: AccountDatabase,
+    private readonly audit: AuditDatabase,
   ) {}
 
   // Arcs
@@ -48,10 +53,16 @@ export class ApiDatabaseAdapter implements ApiDatabase {
 
   // Signals
   listSignals(accountId: string, arcId: string, params: PageParams) { return this.arc.listSignals(accountId, arcId, params); }
+  listPreArcSignals(accountId: string, status: "blocked" | "quarantined", params: PageParams) { return this.arc.listPreArcSignals(accountId, status, params); }
   getSignal(accountId: string, id: string) { return this.arc.getSignal(accountId, id); }
   updateSignal(accountId: string, id: string, update: Partial<Pick<Signal, "subject" | "textBody" | "from" | "to">>) { return this.arc.updateSignal(accountId, id, update); }
   deleteSignal(accountId: string, id: string) { return this.arc.deleteSignal(accountId, id); }
+  blockSignal(accountId: string, signalId: string) { return this.arc.blockSignal(accountId, signalId); }
   unblockSignal(accountId: string, signalId: string, arcId: string) { return this.arc.unblockSignal(accountId, signalId, arcId); }
+
+  // Arcs (additional)
+  saveArc(arc: Arc) { return this.arc.saveArc(arc); }
+  findArcByGroupingKey(accountId: string, key: string) { return this.arc.findArcByGroupingKey(accountId, key); }
 
   // Search
   searchArcs(accountId: string, query: string, params: PageParams) { return this.arc.searchArcs(accountId, query, params); }
@@ -79,20 +90,44 @@ export class ApiDatabaseAdapter implements ApiDatabase {
   createRule(accountId: string, data: CreateRuleRequest) { return this.account.createRule(accountId, data); }
   updateRule(accountId: string, id: string, data: UpdateRuleRequest) { return this.account.updateRule(accountId, id, data); }
   deleteRule(accountId: string, id: string) { return this.account.deleteRule(accountId, id); }
-  reorderRules(accountId: string, orderedIds: string[]) { return this.account.reorderRules(accountId, orderedIds); }
 
   // Domains
   listDomains(accountId: string) { return this.account.listDomains(accountId); }
   getDomain(accountId: string, id: string) { return this.account.getDomain(accountId, id); }
   createDomain(accountId: string, domain: string) { return this.account.createDomain(accountId, domain); }
   deleteDomain(accountId: string, id: string) { return this.account.deleteDomain(accountId, id); }
+  updateDomainHealth(accountId: string, id: string, health: { receivingHealthy: boolean; senderHealthy: boolean; failingRecords: string[]; lastCheckedAt: string; lastHealthyAt?: string }) { return this.account.updateDomainHealth(accountId, id, health); }
 
   // Aliases
   listAliases(accountId: string) { return this.account.listAliases(accountId); }
   getAlias(accountId: string, address: string) { return this.account.getAlias(accountId, address); }
   createAlias(alias: Alias) { return this.account.createAlias(alias); }
+  saveAlias(alias: Alias) { return this.account.saveAlias(alias); }
   upsertAlias(alias: Alias) { return this.account.upsertAlias(alias); }
   deleteAlias(accountId: string, address: string) { return this.account.deleteAlias(accountId, address); }
+  renameAlias(accountId: string, oldAddress: string, newAddress: string) { return this.account.renameAlias(accountId, oldAddress, newAddress); }
+
+  // Senders
+  saveSender(accountId: string, address: string, domain: string, mode: SenderMode) { return this.account.saveSender(accountId, address, domain, mode); }
+  removeSender(accountId: string, address: string, domain: string) { return this.account.removeSender(accountId, address, domain); }
+  getSender(accountId: string, address: string, domain: string) { return this.account.getSender(accountId, address, domain); }
+  listSenders(accountId: string, address: string) { return this.account.listSenders(accountId, address); }
+  listAliasesForDomain(accountId: string, domain: string) { return this.account.listAliasesForDomain(accountId, domain); }
+
+  // Templates
+  createTemplate(template: EmailTemplate) { return this.account.createTemplate(template); }
+  getTemplate(accountId: string, id: string) { return this.account.getTemplate(accountId, id); }
+  updateTemplate(accountId: string, id: string, update: Partial<Pick<EmailTemplate, "name" | "subject" | "body">>) { return this.account.updateTemplate(accountId, id, update); }
+  deleteTemplate(accountId: string, id: string) { return this.account.deleteTemplate(accountId, id); }
+  listTemplates(accountId: string) { return this.account.listTemplates(accountId); }
+
+  // Push subscriptions
+  savePushSubscription(sub: PushSubscription) { return this.account.savePushSubscription(sub); }
+  listPushSubscriptions(accountId: string) { return this.account.listPushSubscriptions(accountId); }
+  deletePushSubscription(accountId: string, id: string) { return this.account.deletePushSubscription(accountId, id); }
+
+  // Audit
+  listAuditEvents(accountId: string, params: PageParams) { return this.audit.listAuditEvents(accountId, params); }
 
   // Verified forwarding addresses
   listVerifiedForwardingAddresses(accountId: string) { return this.account.listVerifiedForwardingAddresses(accountId); }

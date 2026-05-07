@@ -169,7 +169,9 @@ export interface OnboardingData {
 
 export interface StatusData {
   workflow: "status";
-  statusType: "terms_update" | "privacy_policy" | "service_notice" | "government" | "account_notification" | "other";
+  statusType:
+    | "terms_update" | "privacy_policy" | "data_processor" | "cookie_policy" | "compliance"
+    | "service_notice" | "government" | "account_notification" | "other";
   provider: string;
   effectiveDate?: string;
   referenceNumber?: string;
@@ -222,15 +224,15 @@ export type NewAddressHandling =
   | "auto_allow"           // First contact always allowed; sender eTLD+1 auto-approved (default)
   | "block_until_approved"; // New addresses blocked until user explicitly approves via POST /arcs
 
-// How strictly an email address filters incoming signals by sender
+// Default disposition for emails from unknown senders, applied after rules run
 export type SenderFilterMode =
-  | "strict"       // sender eTLD+1 must be approved AND spam score must be low
-  | "sender_match" // sender eTLD+1 must be approved (spam score ignored)
-  | "notify_new"   // allow approved senders, block + notify on new senders (default)
-  | "allow_all";   // no filtering
+  | "allow_all"            // all senders pass through; system:sender:untrusted label suppressed
+  | "quarantine_visible"   // unknown sender → quarantine, surfaced in review queue (default)
+  | "quarantine_hidden"    // unknown sender → quarantine, hidden from review queue
+  | "block";               // unknown sender → silent block
 
-// active = visible; quarantined = user notified + shown for review; blocked = silent; draft = user-authored, unsent
-export type SignalStatus = "active" | "blocked" | "quarantined" | "draft";
+// active = visible in inbox; quarantine_visible = surfaced in review queue; quarantine_hidden = stored but not shown in queue; blocked = silent drop; draft = user-authored, unsent
+export type SignalStatus = "active" | "blocked" | "quarantine_visible" | "quarantine_hidden" | "draft";
 
 // "email" = inbound SES email; "system" = processor-created (e.g. extracted calendar event); "user" = user-created
 export type SignalSource = "email" | "system" | "user";
@@ -239,7 +241,6 @@ export type SignalSource = "email" | "system" | "user";
 export type PushPriority = "interrupt" | "ambient" | "silent";
 
 // Unified urgency level that drives all notification channels (push, digest, UI).
-// Derived by priorityCalculator — do not set manually.
 export type ArcUrgency = "critical" | "high" | "normal" | "low" | "silent";
 
 // Per-recipient-address configuration (an "alias" is any address on a custom domain routed into the system)
@@ -248,13 +249,43 @@ export interface Alias {
   accountId: string;
   address: string;              // The recipient address, e.g. me@mydomain.com
   filterMode: SenderFilterMode;
-  approvedSenders: string[];    // eTLD+1 domains (e.g. "amazon.com", "google.com")
   // Spam score at which a signal is treated as spam (0–1). Overrides account default when set.
   spamScoreThreshold?: number;
   // eTLD+1 of the site this alias was created for (set by the extension on alias generation)
   createdForOrigin?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+// Approved/blocked sender domain per alias — stored as individual DynamoDB items
+export type SenderMode = "allow" | "block";
+
+export interface AliasSender {
+  accountId: string;
+  aliasAddress: string;
+  domain: string;   // eTLD+1
+  mode: SenderMode;
+  addedAt: string;
+}
+
+// Email template for auto_reply and auto_draft rule actions
+export interface EmailTemplate {
+  id: string;
+  accountId: string;
+  name: string;
+  subject: string;   // supports {{signal.subject}}, {{sender.name}}, {{sender.address}}, {{arc.workflow}}
+  body: string;      // same interpolation; unrecognised tokens render as ""
+  createdAt: string;
+  updatedAt: string;
+}
+
+// Web Push subscription registered by the extension
+export interface PushSubscription {
+  id: string;
+  accountId: string;
+  endpoint: string;
+  keys: { p256dh: string; auth: string };
+  createdAt: string;
 }
 
 // Account-level filtering defaults
@@ -296,6 +327,17 @@ export interface Attachment {
 }
 
 // ---------------------------------------------------------------------------
+// MatchedRuleResult — per-rule trace written to Signal.matchedRules
+// ---------------------------------------------------------------------------
+
+export interface MatchedRuleResult {
+  ruleId: string;
+  actions: Array<Pick<RuleAction, "type" | "value">>;
+  labelsAdded: string[];
+  statusChange?: "blocked" | "quarantine_visible" | "quarantine_hidden" | "archived" | "deleted";
+}
+
+// ---------------------------------------------------------------------------
 // Signal (immutable inbound email event)
 // ---------------------------------------------------------------------------
 
@@ -303,6 +345,7 @@ export interface Signal {
   // Discriminated ID encoding origin: "SES#${sesMessageId}" | "SYS#${uuid}" | "USR#${uuid}"
   id: string;
   arcId?: string;        // Undefined while signal is blocked pending user action
+  matchedRules?: MatchedRuleResult[];
   accountId: string;
   source: SignalSource;
   receivedAt: string;      // ISO datetime
@@ -330,6 +373,7 @@ export interface Signal {
 
   s3Key: string;
   status: SignalStatus;
+  urgency?: ArcUrgency;
   createdAt: string;
   ttl?: number;   // Unix seconds; absent = never expire
 }
@@ -354,9 +398,8 @@ export interface Arc {
   createdAt: string;
   updatedAt: string;
   ttl?: number;   // Unix seconds; absent = never expire
-  // Message-IDs of emails the user sent on this arc — checked by priorityCalculator to detect replies
+  // Message-IDs of emails the user sent on this arc
   sentMessageIds?: string[];
-  // Derived by priorityCalculator; drives push, email digest section, and UI prominence
   urgency?: ArcUrgency;
 }
 
@@ -406,11 +449,14 @@ export type RuleActionType =
   | "delete"
   | "forward"
   | "block"
-  | "quarantine"
+  | "quarantine"          // quarantine, shown in review queue
+  | "quarantine_hidden"   // quarantine, hidden from review queue
   | "set_urgency"
   | "suppress_notification"
   | "pong"
-  | "approve_sender";
+  | "approve_sender"
+  | "auto_reply"   // send immediately using template (value = templateId)
+  | "auto_draft";  // create draft signal for human review (value = templateId)
 
 // System-assigned labels. Return type of assignSystemLabels() — adding here requires explicit approval.
 // The compile-time gate: assignSystemLabels() returns SystemLabel[], so any unlisted label is a type error.
@@ -423,8 +469,6 @@ export type SystemLabel =
   | "system:spam:high"
   | "system:spam:medium"
   | "system:sender:untrusted"
-  | "system:urgency:critical" | "system:urgency:high" | "system:urgency:normal"
-  | "system:urgency:low" | "system:urgency:silent"
   | "system:replied"
   | "system:test";
 
@@ -448,13 +492,17 @@ export interface VerifiedForwardingAddress {
   verifiedAt?: string;
 }
 
+export type RuleStatus = "enabled" | "disabled";
+
 export interface Rule {
   id: string;
   accountId: string;
   name: string;
   condition: string;     // JSONLogic expression as JSON string
   actions: RuleAction[];
-  position: number;
+  status: RuleStatus;
+  priorityOrder: number;
+  tags?: Record<string, string>;
   createdAt: string;
   updatedAt: string;
 }

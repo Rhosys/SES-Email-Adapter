@@ -151,8 +151,17 @@ resource "aws_dynamodb_table" "accounts" {
   hash_key     = "pk"
   range_key    = "sk"
 
-  attribute { name = "pk"; type = "S" }
-  attribute { name = "sk"; type = "S" }
+  attribute { name = "pk";     type = "S" }
+  attribute { name = "sk";     type = "S" }
+  attribute { name = "gsi1pk"; type = "S" }
+  attribute { name = "gsi1sk"; type = "S" }
+
+  global_secondary_index {
+    name            = "gsi1"
+    hash_key        = "gsi1pk"
+    range_key       = "gsi1sk"
+    projection_type = "ALL"
+  }
 
   point_in_time_recovery { enabled = true }
   deletion_protection_enabled = true
@@ -222,4 +231,58 @@ resource "aws_dynamodb_table" "processing" {
   replica {
     region_name = "eu-central-1"
   }
+}
+
+resource "aws_dynamodb_table" "audit" {
+  name         = "${local.prefix}-audit"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "pk"
+  range_key    = "sk"
+
+  attribute { name = "pk";     type = "S" }
+  attribute { name = "sk";     type = "S" }
+  attribute { name = "gsi1pk"; type = "S" }
+  attribute { name = "gsi1sk"; type = "S" }
+
+  global_secondary_index {
+    name            = "gsi1"
+    hash_key        = "gsi1pk"
+    range_key       = "gsi1sk"
+    projection_type = "ALL"
+  }
+
+  ttl {
+    attribute_name = "ttl"
+    enabled        = true
+  }
+
+  point_in_time_recovery { enabled = true }
+  deletion_protection_enabled = true
+}
+
+# ---------------------------------------------------------------------------
+# EventBridge — weekly domain health check
+# ---------------------------------------------------------------------------
+
+resource "aws_cloudwatch_event_rule" "domain_health" {
+  name                = "${local.prefix}-domain-health"
+  description         = "Weekly DNS health check for all registered domains"
+  schedule_expression = "cron(0 6 ? * MON *)"
+}
+
+resource "aws_cloudwatch_event_target" "domain_health" {
+  rule      = aws_cloudwatch_event_rule.domain_health.name
+  target_id = "domain-health-lambda"
+  arn       = aws_lambda_alias.production.arn
+
+  input = jsonencode({ source = "domain-health-job" })
+}
+
+resource "aws_lambda_permission" "domain_health_eventbridge" {
+  statement_id  = "AllowDomainHealthEventBridge"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.main.function_name
+  qualifier     = aws_lambda_alias.production.name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.domain_health.arn
 }

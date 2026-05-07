@@ -1,7 +1,7 @@
 import { randomUUID } from "crypto";
 import { DeleteCommand, GetCommand, PutCommand, QueryCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { dynamo, ACCOUNTS_TABLE } from "./shared.js";
-import type { Account, View, Label, Rule, Domain, Alias, AccountFilteringConfig, VerifiedForwardingAddress } from "../types/index.js";
+import type { Account, View, Label, Rule, RuleStatus, Domain, Alias, AliasSender, SenderMode, AccountFilteringConfig, VerifiedForwardingAddress, EmailTemplate, PushSubscription } from "../types/index.js";
 import type { CreateViewRequest, UpdateViewRequest, CreateLabelRequest, UpdateLabelRequest, CreateRuleRequest, UpdateRuleRequest } from "../api/app.js";
 
 // ---------------------------------------------------------------------------
@@ -9,6 +9,11 @@ import type { CreateViewRequest, UpdateViewRequest, CreateLabelRequest, UpdateLa
 // ---------------------------------------------------------------------------
 
 const pk = (accountId: string) => `ACCT#${accountId}`;
+
+function ruleGsi1pk(accountId: string) { return `ACCT#${accountId}`; }
+function ruleGsi1sk(status: RuleStatus, priorityOrder: number, id: string) {
+  return `RULE#${status}#${String(priorityOrder).padStart(6, "0")}#${id}`;
+}
 
 // ---------------------------------------------------------------------------
 // AccountDatabase
@@ -92,6 +97,73 @@ export class AccountDatabase {
       TableName: ACCOUNTS_TABLE,
       Key: { pk: pk(accountId), sk: `ALIAS#${address}` },
     }));
+  }
+
+  async renameAlias(accountId: string, oldAddress: string, newAddress: string): Promise<Alias> {
+    const [old, senders] = await Promise.all([
+      this.getAlias(accountId, oldAddress),
+      this.listSenders(accountId, oldAddress),
+    ]);
+    if (!old) throw new Error("Alias not found");
+    const renamed: Alias = { ...old, address: newAddress, updatedAt: new Date().toISOString() };
+    await this.saveAlias(renamed);
+    await Promise.all(senders.map(s => this.saveSender(accountId, newAddress, s.domain, s.mode)));
+    await this.deleteAlias(accountId, oldAddress);
+    await Promise.all(senders.map(s => this.removeSender(accountId, oldAddress, s.domain)));
+    return renamed;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Alias Senders (per-alias allowed/blocked sender domains)
+  // sk = SENDER#${address}#${domain}  — distinct prefix from alias items
+  // ---------------------------------------------------------------------------
+
+  async saveSender(accountId: string, address: string, domain: string, mode: SenderMode): Promise<void> {
+    await dynamo.send(new PutCommand({
+      TableName: ACCOUNTS_TABLE,
+      Item: {
+        pk: pk(accountId),
+        sk: `SENDER#${address}#${domain}`,
+        gsi1pk: `SENDERS#${accountId}#${domain}`,
+        gsi1sk: `ALIAS#${address}`,
+        accountId, aliasAddress: address, domain, mode,
+        addedAt: new Date().toISOString(),
+      },
+    }));
+  }
+
+  async removeSender(accountId: string, address: string, domain: string): Promise<void> {
+    await dynamo.send(new DeleteCommand({
+      TableName: ACCOUNTS_TABLE,
+      Key: { pk: pk(accountId), sk: `SENDER#${address}#${domain}` },
+    }));
+  }
+
+  async getSender(accountId: string, address: string, domain: string): Promise<AliasSender | null> {
+    const res = await dynamo.send(new GetCommand({
+      TableName: ACCOUNTS_TABLE,
+      Key: { pk: pk(accountId), sk: `SENDER#${address}#${domain}` },
+    }));
+    return res.Item ? (res.Item as AliasSender) : null;
+  }
+
+  async listSenders(accountId: string, address: string): Promise<AliasSender[]> {
+    const res = await dynamo.send(new QueryCommand({
+      TableName: ACCOUNTS_TABLE,
+      KeyConditionExpression: "pk = :pk AND begins_with(sk, :prefix)",
+      ExpressionAttributeValues: { ":pk": pk(accountId), ":prefix": `SENDER#${address}#` },
+    }));
+    return (res.Items ?? []) as AliasSender[];
+  }
+
+  async listAliasesForDomain(accountId: string, domain: string): Promise<AliasSender[]> {
+    const res = await dynamo.send(new QueryCommand({
+      TableName: ACCOUNTS_TABLE,
+      IndexName: "gsi1",
+      KeyConditionExpression: "gsi1pk = :pk",
+      ExpressionAttributeValues: { ":pk": `SENDERS#${accountId}#${domain}` },
+    }));
+    return (res.Items ?? []) as AliasSender[];
   }
 
   async getAccountFilteringConfig(accountId: string): Promise<AccountFilteringConfig | null> {
@@ -267,39 +339,78 @@ export class AccountDatabase {
   async listRules(accountId: string): Promise<Rule[]> {
     const res = await dynamo.send(new QueryCommand({
       TableName: ACCOUNTS_TABLE,
-      KeyConditionExpression: "pk = :pk AND begins_with(sk, :prefix)",
-      ExpressionAttributeValues: { ":pk": pk(accountId), ":prefix": "RULE#" },
+      IndexName: "gsi1",
+      KeyConditionExpression: "gsi1pk = :pk AND begins_with(gsi1sk, :prefix)",
+      ExpressionAttributeValues: { ":pk": ruleGsi1pk(accountId), ":prefix": "RULE#" },
     }));
-    return ((res.Items ?? []) as Rule[]).sort((a, b) => a.position - b.position);
+    return (res.Items ?? []) as Rule[];
+  }
+
+  async listEnabledRules(accountId: string): Promise<Rule[]> {
+    const res = await dynamo.send(new QueryCommand({
+      TableName: ACCOUNTS_TABLE,
+      IndexName: "gsi1",
+      KeyConditionExpression: "gsi1pk = :pk AND begins_with(gsi1sk, :prefix)",
+      ExpressionAttributeValues: { ":pk": ruleGsi1pk(accountId), ":prefix": "RULE#enabled#" },
+    }));
+    return (res.Items ?? []) as Rule[];
   }
 
   async createRule(accountId: string, data: CreateRuleRequest): Promise<Rule> {
-    const rules = await this.listRules(accountId);
+    const allRules = await this.listRules(accountId);
+    const userRules = allRules.filter((r) => r.priorityOrder >= 100);
     const now = new Date().toISOString();
     const rule: Rule = {
       id: randomUUID(),
       accountId,
       name: data.name,
-      condition: data.condition,
-      actions: data.actions,
-      position: data.position ?? (rules.length > 0 ? Math.max(...rules.map((r) => r.position)) + 1 : 0),
+      condition: data.condition ?? "",
+      actions: data.actions as Rule["actions"],
+      status: "enabled",
+      priorityOrder: data.priorityOrder ?? (userRules.length > 0 ? Math.max(...userRules.map((r) => r.priorityOrder)) + 1 : 100),
+      ...(data.tags !== undefined ? { tags: data.tags } : {}),
       createdAt: now,
       updatedAt: now,
     };
-    await dynamo.send(new PutCommand({ TableName: ACCOUNTS_TABLE, Item: { ...rule, pk: pk(accountId), sk: `RULE#${rule.id}` } }));
+    await dynamo.send(new PutCommand({
+      TableName: ACCOUNTS_TABLE,
+      Item: {
+        ...rule,
+        pk: pk(accountId), sk: `RULE#${rule.id}`,
+        gsi1pk: ruleGsi1pk(accountId), gsi1sk: ruleGsi1sk(rule.status, rule.priorityOrder, rule.id),
+      },
+    }));
     return rule;
   }
 
   async updateRule(accountId: string, id: string, data: UpdateRuleRequest): Promise<Rule> {
+    const current = await dynamo.send(new GetCommand({
+      TableName: ACCOUNTS_TABLE,
+      Key: { pk: pk(accountId), sk: `RULE#${id}` },
+    }));
+    const existing = current.Item as Rule;
     const now = new Date().toISOString();
-    const setParts: string[] = ["updatedAt = :now"];
-    const exprValues: Record<string, unknown> = { ":now": now };
+    const mergedStatus = data.status ?? existing.status;
+    const mergedPriority = data.priorityOrder ?? existing.priorityOrder;
+
+    const setParts: string[] = [
+      "updatedAt = :now",
+      "gsi1pk = :g1pk",
+      "gsi1sk = :g1sk",
+    ];
+    const exprValues: Record<string, unknown> = {
+      ":now": now,
+      ":g1pk": ruleGsi1pk(accountId),
+      ":g1sk": ruleGsi1sk(mergedStatus, mergedPriority, id),
+    };
     const exprNames: Record<string, string> = {};
 
     if (data.name !== undefined) { setParts.push("#name = :name"); exprValues[":name"] = data.name; exprNames["#name"] = "name"; }
     if (data.condition !== undefined) { setParts.push("#cond = :cond"); exprValues[":cond"] = data.condition; exprNames["#cond"] = "condition"; }
     if (data.actions !== undefined) { setParts.push("actions = :actions"); exprValues[":actions"] = data.actions; }
-    if (data.position !== undefined) { setParts.push("#pos = :pos"); exprValues[":pos"] = data.position; exprNames["#pos"] = "position"; }
+    if (data.priorityOrder !== undefined) { setParts.push("#pri = :pri"); exprValues[":pri"] = data.priorityOrder; exprNames["#pri"] = "priorityOrder"; }
+    if (data.status !== undefined) { setParts.push("#status = :status"); exprValues[":status"] = data.status; exprNames["#status"] = "status"; }
+    if (data.tags !== undefined) { setParts.push("tags = :tags"); exprValues[":tags"] = data.tags; }
 
     await dynamo.send(new UpdateCommand({
       TableName: ACCOUNTS_TABLE,
@@ -308,24 +419,16 @@ export class AccountDatabase {
       ExpressionAttributeValues: exprValues,
       ...(Object.keys(exprNames).length ? { ExpressionAttributeNames: exprNames } : {}),
     }));
-    const rules = await this.listRules(accountId);
-    return rules.find((r) => r.id === id)!;
+
+    const updated = await dynamo.send(new GetCommand({
+      TableName: ACCOUNTS_TABLE,
+      Key: { pk: pk(accountId), sk: `RULE#${id}` },
+    }));
+    return updated.Item as Rule;
   }
 
   async deleteRule(accountId: string, id: string): Promise<void> {
     await dynamo.send(new DeleteCommand({ TableName: ACCOUNTS_TABLE, Key: { pk: pk(accountId), sk: `RULE#${id}` } }));
-  }
-
-  async reorderRules(accountId: string, orderedIds: string[]): Promise<void> {
-    await Promise.all(orderedIds.map((id, position) =>
-      dynamo.send(new UpdateCommand({
-        TableName: ACCOUNTS_TABLE,
-        Key: { pk: pk(accountId), sk: `RULE#${id}` },
-        UpdateExpression: "SET #pos = :pos",
-        ExpressionAttributeNames: { "#pos": "position" },
-        ExpressionAttributeValues: { ":pos": position },
-      })),
-    ));
   }
 
   // ---------------------------------------------------------------------------
@@ -368,6 +471,57 @@ export class AccountDatabase {
 
   async deleteDomain(accountId: string, id: string): Promise<void> {
     await dynamo.send(new DeleteCommand({ TableName: ACCOUNTS_TABLE, Key: { pk: pk(accountId), sk: `DOMAIN#${id}` } }));
+  }
+
+  async updateDomainHealth(accountId: string, id: string, health: {
+    receivingHealthy: boolean;
+    senderHealthy: boolean;
+    failingRecords: string[];
+    lastCheckedAt: string;
+    lastHealthyAt?: string;
+  }): Promise<void> {
+    await dynamo.send(new UpdateCommand({
+      TableName: ACCOUNTS_TABLE,
+      Key: { pk: pk(accountId), sk: `DOMAIN#${id}` },
+      UpdateExpression: "SET receivingHealthy = :rh, senderHealthy = :sh, failingRecords = :fr, lastCheckedAt = :lc, updatedAt = :ua" +
+        (health.lastHealthyAt ? ", lastHealthyAt = :lha" : ""),
+      ExpressionAttributeValues: {
+        ":rh": health.receivingHealthy,
+        ":sh": health.senderHealthy,
+        ":fr": health.failingRecords,
+        ":lc": health.lastCheckedAt,
+        ":ua": health.lastCheckedAt,
+        ...(health.lastHealthyAt ? { ":lha": health.lastHealthyAt } : {}),
+      },
+    }));
+  }
+
+  async scanAllDomains(): Promise<Array<{ accountId: string; domains: Domain[] }>> {
+    const { ScanCommand } = await import("@aws-sdk/lib-dynamodb");
+    const results: Array<{ accountId: string; domains: Domain[] }> = [];
+    let lastKey: Record<string, unknown> | undefined;
+    const accountDomains = new Map<string, Domain[]>();
+
+    do {
+      const res = await dynamo.send(new ScanCommand({
+        TableName: ACCOUNTS_TABLE,
+        FilterExpression: "begins_with(sk, :prefix)",
+        ExpressionAttributeValues: { ":prefix": "DOMAIN#" },
+        ...(lastKey ? { ExclusiveStartKey: lastKey } : {}),
+      }));
+      for (const item of res.Items ?? []) {
+        const domain = item as Domain;
+        const list = accountDomains.get(domain.accountId) ?? [];
+        list.push(domain);
+        accountDomains.set(domain.accountId, list);
+      }
+      lastKey = res.LastEvaluatedKey as Record<string, unknown> | undefined;
+    } while (lastKey);
+
+    for (const [accountId, domains] of accountDomains) {
+      results.push({ accountId, domains });
+    }
+    return results;
   }
 
   // ---------------------------------------------------------------------------
@@ -418,5 +572,86 @@ export class AccountDatabase {
         }),
       ),
     );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Email Templates
+  // ---------------------------------------------------------------------------
+
+  async createTemplate(template: EmailTemplate): Promise<EmailTemplate> {
+    await dynamo.send(new PutCommand({
+      TableName: ACCOUNTS_TABLE,
+      Item: { ...template, pk: pk(template.accountId), sk: `TEMPLATE#${template.id}` },
+    }));
+    return template;
+  }
+
+  async getTemplate(accountId: string, id: string): Promise<EmailTemplate | null> {
+    const res = await dynamo.send(new GetCommand({
+      TableName: ACCOUNTS_TABLE,
+      Key: { pk: pk(accountId), sk: `TEMPLATE#${id}` },
+    }));
+    return res.Item ? (res.Item as EmailTemplate) : null;
+  }
+
+  async updateTemplate(accountId: string, id: string, update: Partial<Pick<EmailTemplate, "name" | "subject" | "body">>): Promise<EmailTemplate> {
+    const now = new Date().toISOString();
+    const setParts: string[] = ["updatedAt = :now"];
+    const exprValues: Record<string, unknown> = { ":now": now };
+    const exprNames: Record<string, string> = {};
+    if (update.name !== undefined) { setParts.push("#name = :name"); exprValues[":name"] = update.name; exprNames["#name"] = "name"; }
+    if (update.subject !== undefined) { setParts.push("#subject = :subject"); exprValues[":subject"] = update.subject; exprNames["#subject"] = "subject"; }
+    if (update.body !== undefined) { setParts.push("body = :body"); exprValues[":body"] = update.body; }
+    await dynamo.send(new UpdateCommand({
+      TableName: ACCOUNTS_TABLE,
+      Key: { pk: pk(accountId), sk: `TEMPLATE#${id}` },
+      UpdateExpression: `SET ${setParts.join(", ")}`,
+      ExpressionAttributeValues: exprValues,
+      ...(Object.keys(exprNames).length ? { ExpressionAttributeNames: exprNames } : {}),
+    }));
+    return (await this.getTemplate(accountId, id))!;
+  }
+
+  async deleteTemplate(accountId: string, id: string): Promise<void> {
+    await dynamo.send(new DeleteCommand({
+      TableName: ACCOUNTS_TABLE,
+      Key: { pk: pk(accountId), sk: `TEMPLATE#${id}` },
+    }));
+  }
+
+  async listTemplates(accountId: string): Promise<EmailTemplate[]> {
+    const res = await dynamo.send(new QueryCommand({
+      TableName: ACCOUNTS_TABLE,
+      KeyConditionExpression: "pk = :pk AND begins_with(sk, :prefix)",
+      ExpressionAttributeValues: { ":pk": pk(accountId), ":prefix": "TEMPLATE#" },
+    }));
+    return (res.Items ?? []) as EmailTemplate[];
+  }
+
+  // ---------------------------------------------------------------------------
+  // Push Subscriptions
+  // ---------------------------------------------------------------------------
+
+  async savePushSubscription(sub: PushSubscription): Promise<void> {
+    await dynamo.send(new PutCommand({
+      TableName: ACCOUNTS_TABLE,
+      Item: { ...sub, pk: pk(sub.accountId), sk: `PUSH#${sub.id}` },
+    }));
+  }
+
+  async listPushSubscriptions(accountId: string): Promise<PushSubscription[]> {
+    const res = await dynamo.send(new QueryCommand({
+      TableName: ACCOUNTS_TABLE,
+      KeyConditionExpression: "pk = :pk AND begins_with(sk, :prefix)",
+      ExpressionAttributeValues: { ":pk": pk(accountId), ":prefix": "PUSH#" },
+    }));
+    return (res.Items ?? []) as PushSubscription[];
+  }
+
+  async deletePushSubscription(accountId: string, id: string): Promise<void> {
+    await dynamo.send(new DeleteCommand({
+      TableName: ACCOUNTS_TABLE,
+      Key: { pk: pk(accountId), sk: `PUSH#${id}` },
+    }));
   }
 }

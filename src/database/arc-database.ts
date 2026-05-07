@@ -45,9 +45,9 @@ function getPool(): Pool {
 // Key helpers
 // ---------------------------------------------------------------------------
 
-const acctPk = (accountId: string) => `ACCT#${accountId}`;
-const arcSk = (id: string) => `ARC#${id}`;
-const sigSk = (id: string) => `SIG#${id}`;
+const arcPk  = (accountId: string, id: string) => `ACCT#${accountId}#ARC#${id}`;
+const sigPk  = (accountId: string, id: string) => `ACCT#${accountId}#SIG#${id}`;
+const ITEM_SK = "#";
 const gkeyPk = (accountId: string, key: string) => `GKEY#${accountId}#${key}`;
 
 // ---------------------------------------------------------------------------
@@ -63,21 +63,28 @@ export class ArcDatabase implements ArcMatcher {
   async getSignalByMessageId(accountId: string, sesMessageId: string): Promise<Pick<Signal, "id"> | null> {
     const result = await dynamo.send(new GetCommand({
       TableName: SIGNALS_TABLE,
-      Key: { pk: acctPk(accountId), sk: sigSk(`SES#${sesMessageId}`) },
+      Key: { pk: sigPk(accountId, `SES#${sesMessageId}`), sk: ITEM_SK },
       ProjectionExpression: "id",
     }));
     return result.Item ? (result.Item as Pick<Signal, "id">) : null;
   }
 
   async saveSignal(signal: Signal): Promise<void> {
-    const gsi1pk = signal.arcId ? `ARCSIG#${signal.arcId}` : `BLOCKED#${signal.accountId}`;
+    let gsi1pk: string;
+    if (signal.arcId) {
+      gsi1pk = `ARCSIG#${signal.arcId}`;
+    } else if (signal.status === "quarantine_visible" || signal.status === "quarantine_hidden") {
+      gsi1pk = `QUARANTINED#${signal.accountId}`;
+    } else {
+      gsi1pk = `BLOCKED#${signal.accountId}`;
+    }
     const gsi1sk = `RECV#${signal.receivedAt}#${signal.id}`;
     await dynamo.send(new PutCommand({
       TableName: SIGNALS_TABLE,
       Item: {
         ...signal,
-        pk: acctPk(signal.accountId),
-        sk: sigSk(signal.id),
+        pk: sigPk(signal.accountId, signal.id),
+        sk: ITEM_SK,
         gsi1pk,
         gsi1sk,
       },
@@ -87,7 +94,7 @@ export class ArcDatabase implements ArcMatcher {
   async getSignal(accountId: string, id: string): Promise<Signal | null> {
     const result = await dynamo.send(new GetCommand({
       TableName: SIGNALS_TABLE,
-      Key: { pk: acctPk(accountId), sk: sigSk(id) },
+      Key: { pk: sigPk(accountId, id), sk: ITEM_SK },
     }));
     return result.Item ? (result.Item as Signal) : null;
   }
@@ -110,10 +117,42 @@ export class ArcDatabase implements ArcMatcher {
     return { items: page, ...(nextKey ? { nextCursor: nextKey } : {}) };
   }
 
+  async listPreArcSignals(accountId: string, status: "blocked" | "quarantined", params: PageParams): Promise<Page<Signal>> {
+    const limit = Math.min(params.limit ?? 20, 100);
+    const gsi1pk = status === "quarantined" ? `QUARANTINED#${accountId}` : `BLOCKED#${accountId}`;
+    const res = await dynamo.send(new QueryCommand({
+      TableName: SIGNALS_TABLE,
+      IndexName: "gsi1",
+      KeyConditionExpression: "gsi1pk = :pk",
+      ExpressionAttributeValues: { ":pk": gsi1pk },
+      ScanIndexForward: false,
+      Limit: limit + 1,
+      ...(params.cursor ? { ExclusiveStartKey: decodeCursor(params.cursor) } : {}),
+    }));
+    const items = (res.Items ?? []) as Signal[];
+    const page = items.slice(0, limit);
+    const nextKey = items.length > limit && res.LastEvaluatedKey ? encodeCursor(res.LastEvaluatedKey) : null;
+    return { items: page, ...(nextKey ? { nextCursor: nextKey } : {}) };
+  }
+
+  async blockSignal(accountId: string, signalId: string): Promise<Signal> {
+    await dynamo.send(new UpdateCommand({
+      TableName: SIGNALS_TABLE,
+      Key: { pk: sigPk(accountId, signalId), sk: ITEM_SK },
+      UpdateExpression: "SET #status = :status, gsi1pk = :gsi1pk",
+      ExpressionAttributeNames: { "#status": "status" },
+      ExpressionAttributeValues: {
+        ":status": "blocked",
+        ":gsi1pk": `BLOCKED#${accountId}`,
+      },
+    }));
+    return (await this.getSignal(accountId, signalId))!;
+  }
+
   async unblockSignal(accountId: string, signalId: string, arcId: string): Promise<void> {
     await dynamo.send(new UpdateCommand({
       TableName: SIGNALS_TABLE,
-      Key: { pk: acctPk(accountId), sk: sigSk(signalId) },
+      Key: { pk: sigPk(accountId, signalId), sk: ITEM_SK },
       UpdateExpression: "SET arcId = :arcId, #status = :status, gsi1pk = :gsi1pk",
       ExpressionAttributeNames: { "#status": "status" },
       ExpressionAttributeValues: {
@@ -131,7 +170,7 @@ export class ArcDatabase implements ArcMatcher {
   async getArc(accountId: string, id: string): Promise<Arc | null> {
     const result = await dynamo.send(new GetCommand({
       TableName: SIGNALS_TABLE,
-      Key: { pk: acctPk(accountId), sk: arcSk(id) },
+      Key: { pk: arcPk(accountId, id), sk: ITEM_SK },
     }));
     return result.Item ? (result.Item as Arc) : null;
   }
@@ -154,10 +193,10 @@ export class ArcDatabase implements ArcMatcher {
         TableName: SIGNALS_TABLE,
         Item: {
           ...arc,
-          pk: acctPk(arc.accountId),
-          sk: arcSk(arc.id),
-          gsi1pk: acctPk(arc.accountId),
-          gsi1sk: `LASTACT#${arc.lastSignalAt}#${arc.id}`,
+          pk: arcPk(arc.accountId, arc.id),
+          sk: ITEM_SK,
+          gsi1pk: `ACCT#${arc.accountId}`,
+          gsi1sk: `LASTACT#${arc.status}#${arc.lastSignalAt}#${arc.id}`,
         },
       })),
     ];
@@ -187,15 +226,25 @@ export class ArcDatabase implements ArcMatcher {
       exprValues[":status"] = update.status;
       exprNames["#status"] = "status";
       if (update.status === "deleted") setParts.push("deletedAt = :now");
+      // Fetch current arc to reconstruct gsi1sk with new status
+      const current = await this.getArc(accountId, id);
+      if (current) {
+        setParts.push("gsi1sk = :gsi1sk");
+        exprValues[":gsi1sk"] = `LASTACT#${update.status}#${current.lastSignalAt}#${id}`;
+      }
     }
     if (update.labels !== undefined) {
       setParts.push("labels = :labels");
       exprValues[":labels"] = update.labels;
     }
+    if (update.urgency !== undefined) {
+      setParts.push("urgency = :urgency");
+      exprValues[":urgency"] = update.urgency;
+    }
 
     await dynamo.send(new UpdateCommand({
       TableName: SIGNALS_TABLE,
-      Key: { pk: acctPk(accountId), sk: arcSk(id) },
+      Key: { pk: arcPk(accountId, id), sk: ITEM_SK },
       UpdateExpression: `SET ${setParts.join(", ")}`,
       ExpressionAttributeValues: exprValues,
       ...(Object.keys(exprNames).length ? { ExpressionAttributeNames: exprNames } : {}),
@@ -216,7 +265,7 @@ export class ArcDatabase implements ArcMatcher {
 
     await dynamo.send(new UpdateCommand({
       TableName: SIGNALS_TABLE,
-      Key: { pk: acctPk(accountId), sk: sigSk(id) },
+      Key: { pk: sigPk(accountId, id), sk: ITEM_SK },
       UpdateExpression: `SET ${setParts.join(", ")}`,
       ExpressionAttributeValues: exprValues,
       ...(Object.keys(exprNames).length ? { ExpressionAttributeNames: exprNames } : {}),
@@ -227,29 +276,53 @@ export class ArcDatabase implements ArcMatcher {
   async deleteSignal(accountId: string, id: string): Promise<void> {
     await dynamo.send(new DeleteCommand({
       TableName: SIGNALS_TABLE,
-      Key: { pk: acctPk(accountId), sk: sigSk(id) },
+      Key: { pk: sigPk(accountId, id), sk: ITEM_SK },
     }));
   }
 
   async listArcs(accountId: string, params: ListArcsParams): Promise<Page<Arc>> {
     const limit = Math.min(params.limit ?? 20, 100);
-    const res = await dynamo.send(new QueryCommand({
-      TableName: SIGNALS_TABLE,
-      IndexName: "gsi1",
-      KeyConditionExpression: "gsi1pk = :pk AND begins_with(gsi1sk, :prefix)",
-      ExpressionAttributeValues: { ":pk": acctPk(accountId), ":prefix": "LASTACT#" },
-      ScanIndexForward: false,
-      Limit: 200,
-      ...(params.cursor ? { ExclusiveStartKey: decodeCursor(params.cursor) } : {}),
-    }));
+    const gsi1pk = `ACCT#${accountId}`;
 
-    let items = (res.Items ?? []) as Arc[];
+    let items: Arc[];
+    let lastKey: Record<string, unknown> | undefined;
+
+    if (params.status) {
+      // Single query — status is encoded in gsi1sk prefix for efficient reads
+      const res = await dynamo.send(new QueryCommand({
+        TableName: SIGNALS_TABLE,
+        IndexName: "gsi1",
+        KeyConditionExpression: "gsi1pk = :pk AND begins_with(gsi1sk, :prefix)",
+        ExpressionAttributeValues: { ":pk": gsi1pk, ":prefix": `LASTACT#${params.status}#` },
+        ScanIndexForward: false,
+        Limit: limit + 1,
+        ...(params.cursor ? { ExclusiveStartKey: decodeCursor(params.cursor) } : {}),
+      }));
+      items = (res.Items ?? []) as Arc[];
+      lastKey = res.LastEvaluatedKey;
+    } else {
+      // Multi-status view: parallel queries per status, merge by lastSignalAt
+      const statuses: Array<"active" | "archived" | "deleted"> = ["active", "archived", "deleted"];
+      const results = await Promise.all(statuses.map(s =>
+        dynamo.send(new QueryCommand({
+          TableName: SIGNALS_TABLE,
+          IndexName: "gsi1",
+          KeyConditionExpression: "gsi1pk = :pk AND begins_with(gsi1sk, :prefix)",
+          ExpressionAttributeValues: { ":pk": gsi1pk, ":prefix": `LASTACT#${s}#` },
+          ScanIndexForward: false,
+          Limit: limit + 1,
+        }))
+      ));
+      items = results.flatMap(r => (r.Items ?? []) as Arc[]);
+      items.sort((a, b) => b.lastSignalAt.localeCompare(a.lastSignalAt));
+      lastKey = undefined; // no cursor for multi-status merge
+    }
+
     if (params.workflow) items = items.filter((a) => a.workflow === params.workflow);
-    if (params.status) items = items.filter((a) => a.status === params.status);
     if (params.label) items = items.filter((a) => a.labels.includes(params.label!));
 
     const page = items.slice(0, limit);
-    const nextKey = items.length > limit && res.LastEvaluatedKey ? encodeCursor(res.LastEvaluatedKey) : null;
+    const nextKey = items.length > limit && lastKey ? encodeCursor(lastKey) : null;
     return { items: page, ...(nextKey ? { nextCursor: nextKey } : {}) };
   }
 
@@ -259,7 +332,7 @@ export class ArcDatabase implements ArcMatcher {
       TableName: SIGNALS_TABLE,
       IndexName: "gsi1",
       KeyConditionExpression: "gsi1pk = :pk AND begins_with(gsi1sk, :prefix)",
-      ExpressionAttributeValues: { ":pk": acctPk(accountId), ":prefix": "LASTACT#" },
+      ExpressionAttributeValues: { ":pk": `ACCT#${accountId}`, ":prefix": "LASTACT#active#" },
       ScanIndexForward: false,
       Limit: 500,
       ...(params.cursor ? { ExclusiveStartKey: decodeCursor(params.cursor) } : {}),

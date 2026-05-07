@@ -1,6 +1,5 @@
 import { getDomain } from "tldts";
-import type { Workflow, WorkflowData, SenderFilterMode, SystemLabel } from "../types/index.js";
-import { baseUrgency, URGENCY_RANK } from "./priority.js";
+import type { Workflow, WorkflowData, SenderFilterMode, SystemLabel, AliasSender } from "../types/index.js";
 
 export const DEFAULT_SPAM_SCORE_THRESHOLD = 0.9;
 
@@ -18,7 +17,7 @@ export interface SystemLabelContext {
   spamScore: number;
   spamScoreThreshold: number;
   senderETLD1: string;
-  approvedSenders: string[];
+  senderEntry: AliasSender | null;  // pre-fetched allow/block entry for this (alias, sender domain) pair
   filterMode: SenderFilterMode;
   hasSentMessages: boolean;
 }
@@ -34,12 +33,10 @@ export function assignSystemLabels(ctx: SystemLabelContext): SystemLabel[] {
   if (ctx.spamScore >= ctx.spamScoreThreshold) labels.push("system:spam:high");
   else if (ctx.spamScore >= 0.4) labels.push("system:spam:medium");
 
-  const senderApproved = ctx.approvedSenders.includes(ctx.senderETLD1) || ctx.filterMode === "allow_all";
-  if (!senderApproved) labels.push("system:sender:untrusted");
-
-  let urgency = baseUrgency(ctx.workflow, ctx.workflowData);
-  if (ctx.hasSentMessages && URGENCY_RANK[urgency] < URGENCY_RANK["high"]) urgency = "high";
-  labels.push(`system:urgency:${urgency}` as SystemLabel);
+  const senderTrusted =
+    ctx.senderEntry?.mode === "allow" ||
+    ctx.filterMode === "allow_all";
+  if (!senderTrusted) labels.push("system:sender:untrusted");
 
   if (ctx.hasSentMessages) labels.push("system:replied");
   if (ctx.workflow === "test") labels.push("system:test");
