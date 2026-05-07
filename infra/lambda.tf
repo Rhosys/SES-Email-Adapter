@@ -52,7 +52,15 @@ resource "aws_iam_role_policy" "lambda_permissions" {
           "${aws_dynamodb_table.signals.arn}/index/*",
           aws_dynamodb_table.processing.arn,
           "${aws_dynamodb_table.processing.arn}/index/*",
+          aws_dynamodb_table.audit.arn,
+          "${aws_dynamodb_table.audit.arn}/index/*",
         ]
+      },
+      {
+        Sid    = "WebSocketManage"
+        Effect = "Allow"
+        Action = ["execute-api:ManageConnections"]
+        Resource = "${aws_apigatewayv2_api.ws.execution_arn}/*/@connections/*"
       },
       {
         Sid    = "BedrockInvoke"
@@ -154,6 +162,7 @@ resource "aws_lambda_function" "main" {
       ACCOUNTS_TABLE            = aws_dynamodb_table.accounts.name
       SIGNALS_TABLE             = aws_dynamodb_table.signals.name
       PROCESSING_TABLE          = aws_dynamodb_table.processing.name
+      AUDIT_TABLE               = aws_dynamodb_table.audit.name
       EMAIL_BUCKET              = aws_s3_bucket.emails.name
       RDS_PROXY_ENDPOINT        = aws_db_proxy.aurora.endpoint
       AURORA_DB_NAME            = "signals"
@@ -161,6 +170,7 @@ resource "aws_lambda_function" "main" {
       NOTIFICATION_FROM         = var.notification_from_address
       SES_CONFIGURATION_SET     = aws_sesv2_configuration_set.sending.configuration_set_name
       APP_BASE_URL              = var.app_base_url
+      WS_API_ENDPOINT           = "https://${aws_apigatewayv2_api.ws.id}.execute-api.${data.aws_region.current.name}.amazonaws.com/${aws_apigatewayv2_stage.ws.name}"
     }
   }
 
