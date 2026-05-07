@@ -384,34 +384,24 @@ export class SignalProcessor {
     const matchedRules = applyRules(rules, { signal: signalShell, arc, isMatchedArc }, this.ruleEvaluator);
     const outcome = deriveOutcome(matchedRules);
 
-    // Block/quarantine: first-rule-wins makes these mutually exclusive; approveSender overrides quarantine (SR-14 fires before SR-02)
-    if (outcome.block || (outcome.quarantine && !outcome.approveSender)) {
-      const status: SignalStatus = outcome.quarantine ? "quarantined" : "blocked";
-      const blockedSignal: Signal = {
-        ...buildSignal({
-          status,
-          accountId,
-          sesMessageId,
-          recipientAddress,
-          parsed,
-          classification,
-          s3Key,
-          receivedAt: timestamp,
-          now,
-          ...(ttl !== undefined ? { ttl } : {}),
-        }),
-        matchedRules,
-      };
-      await this.store.saveSignal(blockedSignal);
-      if (status === "quarantined" && this.notifier) {
-        await this.notifier.notifyBlocked(accountId, blockedSignal).catch((err) => {
+    const buildArgs = { accountId, sesMessageId, recipientAddress, parsed, classification, s3Key, receivedAt: timestamp, now, ...(ttl !== undefined ? { ttl } : {}) };
+
+    if (outcome.block) {
+      await this.store.saveSignal({ ...buildSignal({ status: "blocked", ...buildArgs }), matchedRules });
+      this.store.updateGlobalReputation(senderETLD1, { wasSpam: classification.spamScore >= spamScoreThreshold, wasBlocked: true }).catch((err) => console.error("Reputation update failed:", err));
+      return;
+    }
+
+    // approveSender overrides quarantine — SR-14 (auto-approve on matched conversation) fires before SR-02
+    if (outcome.quarantine && !outcome.approveSender) {
+      const quarantinedSignal: Signal = { ...buildSignal({ status: "quarantined", ...buildArgs }), matchedRules };
+      await this.store.saveSignal(quarantinedSignal);
+      if (this.notifier) {
+        await this.notifier.notifyBlocked(accountId, quarantinedSignal).catch((err) => {
           console.error("Quarantine notification failed:", err);
         });
       }
-      this.store.updateGlobalReputation(senderETLD1, {
-        wasSpam: classification.spamScore >= spamScoreThreshold,
-        wasBlocked: true,
-      }).catch((err) => console.error("Reputation update failed:", err));
+      this.store.updateGlobalReputation(senderETLD1, { wasSpam: classification.spamScore >= spamScoreThreshold, wasBlocked: true }).catch((err) => console.error("Reputation update failed:", err));
       return;
     }
 
