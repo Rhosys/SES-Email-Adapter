@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { SQSEvent } from "aws-lambda";
 import { SignalProcessor, deriveGroupingKey, SYSTEM_RULES } from "./processor.js";
 import { JsonLogicRuleEvaluator } from "./rule-evaluator.js";
-import { baseUrgency, priorityCalculator } from "./priority.js";
+import { baseUrgency } from "./priority.js";
 import type { ProcessorDatabase, ArcMatcher, RuleEvaluator, Notifier, Forwarder, ForwardOptions, TestReplier } from "./processor.js";
 import type { MimeParser } from "./mime.js";
 import type { SignalClassifier, ClassificationOutput } from "../classifier/classifier.js";
@@ -1184,26 +1184,6 @@ describe("SignalProcessor", () => {
     });
   });
 
-  describe("priorityCalculator", () => {
-    it("returns base urgency when arc has no sent messages", () => {
-      const arc = makeArc({});
-      const signal = { workflow: "conversation", workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false } } as Parameters<typeof priorityCalculator>[1];
-      expect(priorityCalculator(arc, signal)).toBe("normal");
-    });
-
-    it("promotes to at least high when arc has sent messages", () => {
-      const arc = makeArc({ sentMessageIds: ["<msg-001@example.com>"] });
-      const signal = { workflow: "content", workflowData: { workflow: "content", contentType: "newsletter", publisher: "TLDR" } } as unknown as Parameters<typeof priorityCalculator>[1];
-      expect(priorityCalculator(arc, signal)).toBe("high");
-    });
-
-    it("does not demote critical when arc has sent messages", () => {
-      const arc = makeArc({ sentMessageIds: ["<msg-001@example.com>"] });
-      const signal = { workflow: "auth", workflowData: { workflow: "auth", authType: "otp", service: "GitHub" } } as Parameters<typeof priorityCalculator>[1];
-      expect(priorityCalculator(arc, signal)).toBe("critical");
-    });
-  });
-
   // -------------------------------------------------------------------------
   // Workflow-specific urgency rules (SR-15–SR-24)
   // -------------------------------------------------------------------------
@@ -1302,16 +1282,20 @@ describe("SignalProcessor", () => {
       expect(arc.urgency).toBe("critical");
     });
 
-    it("SR-16 !system:replied guard: conversation + positive + hasSentMessages → high (not low)", async () => {
-      // conversation uses vector search (no grouping key), so mock arcMatcher.findMatch
-      // arc already has a sent message → system:replied label → SR-16 guard fails → label rule SR-09 sets high
+    it("SR-16 !system:replied guard: conversation + positive + hasSentMessages → not low (falls back to arc urgency)", async () => {
+      // arc already has a sent message → system:replied label → SR-16 guard fails → no urgency rule fires
+      // signal urgency falls back to arc.urgency rather than being degraded to "low"
       vi.mocked(arcMatcher.findMatch).mockResolvedValueOnce(makeArc({
-        workflow: "conversation",
-        labels: [],
+        workflow: "conversation", labels: [], urgency: "normal",
         sentMessageIds: ["<prior-msg@example.com>"],
       }));
-      const arc = await processWithWorkflow({ workflow: "conversation", workflowData: { workflow: "conversation", isReply: false, sentiment: "positive", requiresReply: false } });
-      expect(arc.urgency).toBe("high");
+      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        workflow: "conversation", workflowData: { workflow: "conversation", isReply: false, sentiment: "positive", requiresReply: false },
+        spamScore: 0.05, summary: "test", labels: [], classificationModelId: "us.anthropic.claude-opus-4-5-20251101-v1:0",
+      });
+      await processor.process(makeSqsEvent([{ sesMessageId: randomUUID() }]));
+      const signal = vi.mocked(store.saveSignal).mock.calls.at(-1)![0] as Signal;
+      expect(signal.urgency).toBe("normal");
     });
   });
 

@@ -115,47 +115,6 @@ describe("assignSystemLabels — sender trust", () => {
 });
 
 // ---------------------------------------------------------------------------
-// assignSystemLabels — urgency labels
-// ---------------------------------------------------------------------------
-
-describe("assignSystemLabels — urgency labels", () => {
-  it("auth workflow emits system:urgency:critical", () => {
-    const labels = assignSystemLabels(makeCtx({ workflow: "auth", workflowData: { workflow: "auth", authType: "otp", service: "github.com" } }));
-    expect(labels).toContain("system:urgency:critical");
-  });
-
-  it("status workflow emits system:urgency:silent", () => {
-    const labels = assignSystemLabels(makeCtx({ workflow: "status", workflowData: { workflow: "status", statusType: "terms_update", provider: "acme" } }));
-    expect(labels).toContain("system:urgency:silent");
-  });
-
-  it("content workflow emits system:urgency:low", () => {
-    const labels = assignSystemLabels(makeCtx({ workflow: "content", workflowData: { workflow: "content", contentType: "newsletter", publisher: "foo" } }));
-    expect(labels).toContain("system:urgency:low");
-  });
-
-  it("replied arc is promoted to at least high urgency", () => {
-    const labels = assignSystemLabels(makeCtx({
-      workflow: "content",
-      workflowData: { workflow: "content", contentType: "newsletter", publisher: "foo" },
-      hasSentMessages: true,
-    }));
-    expect(labels).toContain("system:urgency:high");
-    expect(labels).not.toContain("system:urgency:low");
-  });
-
-  it("already-critical urgency is not downgraded by replied promotion", () => {
-    const labels = assignSystemLabels(makeCtx({
-      workflow: "auth",
-      workflowData: { workflow: "auth", authType: "otp", service: "github.com" },
-      hasSentMessages: true,
-    }));
-    expect(labels).toContain("system:urgency:critical");
-    expect(labels).not.toContain("system:urgency:high");
-  });
-});
-
-// ---------------------------------------------------------------------------
 // assignSystemLabels — replied and test labels
 // ---------------------------------------------------------------------------
 

@@ -241,7 +241,6 @@ export type SignalSource = "email" | "system" | "user";
 export type PushPriority = "interrupt" | "ambient" | "silent";
 
 // Unified urgency level that drives all notification channels (push, digest, UI).
-// Derived by priorityCalculator — do not set manually.
 export type ArcUrgency = "critical" | "high" | "normal" | "low" | "silent";
 
 // Per-recipient-address configuration (an "alias" is any address on a custom domain routed into the system)
@@ -344,6 +343,7 @@ export interface Signal {
 
   s3Key: string;
   status: SignalStatus;
+  urgency?: ArcUrgency;
   createdAt: string;
   ttl?: number;   // Unix seconds; absent = never expire
 }
@@ -368,9 +368,8 @@ export interface Arc {
   createdAt: string;
   updatedAt: string;
   ttl?: number;   // Unix seconds; absent = never expire
-  // Message-IDs of emails the user sent on this arc — checked by priorityCalculator to detect replies
+  // Message-IDs of emails the user sent on this arc
   sentMessageIds?: string[];
-  // Derived by priorityCalculator; drives push, email digest section, and UI prominence
   urgency?: ArcUrgency;
 }
 
@@ -437,8 +436,6 @@ export type SystemLabel =
   | "system:spam:high"
   | "system:spam:medium"
   | "system:sender:untrusted"
-  | "system:urgency:critical" | "system:urgency:high" | "system:urgency:normal"
-  | "system:urgency:low" | "system:urgency:silent"
   | "system:replied"
   | "system:test";
 
