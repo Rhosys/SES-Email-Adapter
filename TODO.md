@@ -1,6 +1,6 @@
 # TODO
 
-- [ ] Review and complete `WORKFLOW_UX_SPEC.md` implementation
+- [x] Review and complete `WORKFLOW_UX_SPEC.md` implementation — urgency mappings for conversation (sentiment+requiresReply), crm (type+urgency field), and support (lifecycle eventType overrides + priority field) now match spec.
 - [ ] Wire infra (see `infra/`)
 - [ ] Set up CI (lint, typecheck, test) for backend, site, and extension independently
 - [x] **API modernization** — collection envelopes, error shapes, PUT→PATCH, consistent create/update responses. See "API Breaking Changes" section below.
