@@ -1212,14 +1212,23 @@ describe("SignalProcessor", () => {
       expect(arc.urgency).toBe("high");
     });
 
-    it("SR-16: conversation + no reply needed + positive + !isReply → low urgency", async () => {
-      const arc = await processWithWorkflow({ workflow: "conversation", workflowData: { workflow: "conversation", isReply: false, sentiment: "positive", requiresReply: false } });
+    it("SR-16: conversation with no prior replies → low urgency", async () => {
+      const arc = await processWithWorkflow({ workflow: "conversation", workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false } });
       expect(arc.urgency).toBe("low");
     });
 
-    it("conversation + requiresReply + neutral sentiment → normal urgency (no special rule)", async () => {
-      const arc = await processWithWorkflow({ workflow: "conversation", workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: true } });
-      expect(arc.urgency).toBe("normal");
+    it("SR-16: conversation with prior replies (system:replied) → not low (falls back to arc urgency)", async () => {
+      vi.mocked(arcMatcher.findMatch).mockResolvedValueOnce(makeArc({
+        workflow: "conversation", labels: [], urgency: "normal",
+        sentMessageIds: ["<prior-msg@example.com>"],
+      }));
+      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        workflow: "conversation", workflowData: { workflow: "conversation", isReply: true, sentiment: "neutral", requiresReply: false },
+        spamScore: 0.05, summary: "test", labels: [], classificationModelId: "us.anthropic.claude-opus-4-5-20251101-v1:0",
+      });
+      await processor.process(makeSqsEvent([{ sesMessageId: randomUUID() }]));
+      const signal = vi.mocked(store.saveSignal).mock.calls.at(-1)![0] as Signal;
+      expect(signal.urgency).toBe("normal");
     });
 
     it("SR-17: crm + contract → high urgency", async () => {
@@ -1282,21 +1291,6 @@ describe("SignalProcessor", () => {
       expect(arc.urgency).toBe("critical");
     });
 
-    it("SR-16 !system:replied guard: conversation + positive + hasSentMessages → not low (falls back to arc urgency)", async () => {
-      // arc already has a sent message → system:replied label → SR-16 guard fails → no urgency rule fires
-      // signal urgency falls back to arc.urgency rather than being degraded to "low"
-      vi.mocked(arcMatcher.findMatch).mockResolvedValueOnce(makeArc({
-        workflow: "conversation", labels: [], urgency: "normal",
-        sentMessageIds: ["<prior-msg@example.com>"],
-      }));
-      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-        workflow: "conversation", workflowData: { workflow: "conversation", isReply: false, sentiment: "positive", requiresReply: false },
-        spamScore: 0.05, summary: "test", labels: [], classificationModelId: "us.anthropic.claude-opus-4-5-20251101-v1:0",
-      });
-      await processor.process(makeSqsEvent([{ sesMessageId: randomUUID() }]));
-      const signal = vi.mocked(store.saveSignal).mock.calls.at(-1)![0] as Signal;
-      expect(signal.urgency).toBe("normal");
-    });
   });
 
   // -------------------------------------------------------------------------
