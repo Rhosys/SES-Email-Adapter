@@ -796,9 +796,9 @@ describe("SignalProcessor", () => {
       expect(store.saveAlias).not.toHaveBeenCalled(); // no auto-approve needed
     });
 
-    it("unknown sender → SR-02 fires → quarantine_hidden (not surfaced in review queue)", async () => {
+    it("unknown sender with default filter mode → quarantine_visible (shown in review queue)", async () => {
       vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce(
-        { ...DEFAULT_CTX, emailConfig: makeAlias() },
+        { ...DEFAULT_CTX, emailConfig: makeAlias() }, // default filterMode: quarantine_visible
       );
       vi.mocked(store.getSender).mockResolvedValueOnce(null);
 
@@ -807,11 +807,11 @@ describe("SignalProcessor", () => {
       expect(store.saveArc).not.toHaveBeenCalled();
       expect(store.saveSignal).toHaveBeenCalledOnce();
       const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
-      expect(saved.status).toBe("quarantine_hidden");
+      expect(saved.status).toBe("quarantine_visible");
       expect(saved.arcId).toBeUndefined();
     });
 
-    it("does NOT call notifyBlocked when SR-02 quarantines an untrusted sender (quarantine_hidden)", async () => {
+    it("calls notifyBlocked when an unknown sender is quarantined (quarantine_visible fallback)", async () => {
       vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce(
         { ...DEFAULT_CTX, emailConfig: makeAlias() },
       );
@@ -819,14 +819,15 @@ describe("SignalProcessor", () => {
 
       await processor.process(makeSqsEvent([{}]));
 
-      expect(notifier.notifyBlocked).not.toHaveBeenCalled();
+      expect(notifier.notifyBlocked).toHaveBeenCalledOnce();
+      expect(notifier.notify).not.toHaveBeenCalled();
     });
 
     it("calls notifyBlocked when a signal is quarantine_visible (e.g. high-spam from approved sender)", async () => {
       vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce(
         { ...DEFAULT_CTX, emailConfig: makeAlias() },
       );
-      // DEFAULT_SENDER_ENTRY is approved → SR-02 does not fire; high spam → SR-03 fires (quarantine_visible)
+      // Approved sender → SR-03 fires on high spam → quarantine_visible
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
         ...validClassification,
         spamScore: 0.95,
@@ -835,17 +836,15 @@ describe("SignalProcessor", () => {
       await processor.process(makeSqsEvent([{}]));
 
       expect(notifier.notifyBlocked).toHaveBeenCalledOnce();
-      expect(notifier.notify).not.toHaveBeenCalled();
       const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
       expect(saved.status).toBe("quarantine_visible");
     });
 
-    it("filter mode fallback: quarantine_visible produces quarantine_visible + notifies when SR-02 is disabled", async () => {
+    it("filter mode quarantine_visible: unknown sender → quarantine_visible + notifies", async () => {
       vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce(
         { ...DEFAULT_CTX, emailConfig: makeAlias({ filterMode: "quarantine_visible" }) },
       );
       vi.mocked(store.getSender).mockResolvedValueOnce(null);
-      vi.mocked(store.listEnabledRules).mockResolvedValueOnce([]); // no rules → fallback applies
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -854,12 +853,11 @@ describe("SignalProcessor", () => {
       expect(saved.status).toBe("quarantine_visible");
     });
 
-    it("filter mode fallback: quarantine_hidden produces quarantine_hidden + does not notify when SR-02 is disabled", async () => {
+    it("filter mode quarantine_hidden: unknown sender → quarantine_hidden + does not notify", async () => {
       vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce(
         { ...DEFAULT_CTX, emailConfig: makeAlias({ filterMode: "quarantine_hidden" }) },
       );
       vi.mocked(store.getSender).mockResolvedValueOnce(null);
-      vi.mocked(store.listEnabledRules).mockResolvedValueOnce([]); // no rules → fallback applies
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -979,8 +977,8 @@ describe("SignalProcessor", () => {
 
       expect(store.saveArc).not.toHaveBeenCalled();
       const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
-      // emailConfig is null → effectiveSenderEntry = null → system:sender:untrusted applied → SR-02 fires → quarantine_hidden
-      expect(saved.status).toBe("quarantine_hidden");
+      // emailConfig is null → effectiveSenderEntry = null → system:sender:untrusted → filter mode fallback (quarantine_visible)
+      expect(saved.status).toBe("quarantine_visible");
     });
   });
 
@@ -1732,7 +1730,7 @@ describe("SignalProcessor", () => {
 
       await processor.process(makeSqsEvent([{}]));
 
-      // DEFAULT_SENDER_ENTRY is approved → SR-02 does not fire; SR-03 fires → quarantine_visible
+      // DEFAULT_SENDER_ENTRY is approved → SR-03 fires → quarantine_visible
       const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
       expect(saved.status).toBe("quarantine_visible");
     });
@@ -1750,7 +1748,7 @@ describe("SignalProcessor", () => {
 
       await processor.process(makeSqsEvent([{}]));
 
-      // DEFAULT_SENDER_ENTRY is approved → SR-02 does not fire; SR-03 fires → quarantine_visible
+      // DEFAULT_SENDER_ENTRY is approved → SR-03 fires → quarantine_visible
       const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
       expect(saved.status).toBe("quarantine_visible");
     });
