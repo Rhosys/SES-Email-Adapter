@@ -94,9 +94,11 @@ const sesVerificationMailer: VerificationMailer = {
   },
 };
 
+const authService = new AuthressAuthService();
+
 const app = createApp({
   store: new ApiDatabaseAdapter(arcDb, accountDb, auditDb),
-  auth: new AuthressAuthService(),
+  auth: authService,
   access: new AuthressAccessService(),
   verificationMailer: sesVerificationMailer,
 });
@@ -108,7 +110,7 @@ const app = createApp({
 export async function handler(
   event: APIGatewayProxyEventV2 | APIGatewayProxyWebsocketEventV2 | SQSEvent | EventBridgeEvent<string, { source?: string }>,
   _context: Context,
-): Promise<APIGatewayProxyResultV2 | { statusCode: number } | void> {
+): Promise<APIGatewayProxyResultV2 | WsAuthorizerResult | { statusCode: number } | void> {
   if (isEventBridgeEvent(event)) {
     if ((event as EventBridgeEvent<string, { source?: string }>).detail?.source === "domain-health-job") {
       await domainHealthHandler();
@@ -123,6 +125,9 @@ export async function handler(
     }
     return;
   }
+  if (isWsAuthorizerEvent(event)) {
+    return handleWsAuthorizer(event as WsAuthorizerEvent);
+  }
   if (isWebSocketEvent(event)) {
     return handleWebSocket(event as APIGatewayProxyWebsocketEventV2);
   }
@@ -132,6 +137,65 @@ export async function handler(
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// WebSocket authorizer  (fires on $connect; injects accountId into context)
+// ---------------------------------------------------------------------------
+
+type WsAuthorizerEvent = {
+  type: "REQUEST";
+  methodArn: string;
+  headers?: Record<string, string>;
+  queryStringParameters?: Record<string, string>;
+};
+
+type WsAuthorizerResult = {
+  principalId: string;
+  policyDocument: {
+    Version: string;
+    Statement: Array<{ Action: string; Effect: "Allow" | "Deny"; Resource: string }>;
+  };
+  context: Record<string, string>;
+};
+
+function isWsAuthorizerEvent(event: unknown): event is WsAuthorizerEvent {
+  const e = event as Record<string, unknown>;
+  return e["type"] === "REQUEST" && typeof e["methodArn"] === "string";
+}
+
+async function handleWsAuthorizer(event: WsAuthorizerEvent): Promise<WsAuthorizerResult> {
+  // Browsers can't set headers on WebSocket upgrades — token comes as ?token=
+  const token =
+    event.queryStringParameters?.["token"] ??
+    (event.headers?.["Authorization"] ?? event.headers?.["authorization"])?.replace(/^Bearer\s+/i, "");
+
+  if (!token) return wsDeny(event.methodArn);
+
+  try {
+    const ctx = await authService.verify(token);
+    return {
+      principalId: ctx.userId,
+      policyDocument: {
+        Version: "2012-10-17",
+        Statement: [{ Action: "execute-api:Invoke", Effect: "Allow", Resource: event.methodArn }],
+      },
+      context: { accountId: ctx.accountId, userId: ctx.userId },
+    };
+  } catch {
+    return wsDeny(event.methodArn);
+  }
+}
+
+function wsDeny(methodArn: string): WsAuthorizerResult {
+  return {
+    principalId: "anonymous",
+    policyDocument: {
+      Version: "2012-10-17",
+      Statement: [{ Action: "execute-api:Invoke", Effect: "Deny", Resource: methodArn }],
+    },
+    context: {},
+  };
+}
 
 // ---------------------------------------------------------------------------
 // WebSocket route handlers  ($connect / $disconnect / $default)
