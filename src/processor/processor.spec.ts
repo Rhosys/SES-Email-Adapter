@@ -1147,17 +1147,10 @@ describe("SignalProcessor", () => {
       expect(baseUrgency("test", { workflow: "test", triggeredBy: "user" })).toBe("high");
     });
 
-    it("support: priority drives urgency; lifecycle eventTypes override", () => {
-      // eventType overrides
-      expect(baseUrgency("support", { workflow: "support", eventType: "ticket_opened", service: "Zendesk", priority: "urgent" })).toBe("low");
-      expect(baseUrgency("support", { workflow: "support", eventType: "ticket_resolved", service: "Zendesk" })).toBe("low");
-      expect(baseUrgency("support", { workflow: "support", eventType: "ticket_closed", service: "Zendesk" })).toBe("low");
-      expect(baseUrgency("support", { workflow: "support", eventType: "awaiting_response", service: "Zendesk" })).toBe("high");
-      // priority-based (non-lifecycle eventType)
-      expect(baseUrgency("support", { workflow: "support", eventType: "ticket_updated", service: "Zendesk", priority: "urgent" })).toBe("critical");
-      expect(baseUrgency("support", { workflow: "support", eventType: "ticket_updated", service: "Zendesk", priority: "high" })).toBe("high");
-      expect(baseUrgency("support", { workflow: "support", eventType: "ticket_updated", service: "Zendesk", priority: "normal" })).toBe("normal");
-      expect(baseUrgency("support", { workflow: "support", eventType: "ticket_updated", service: "Zendesk", priority: "low" })).toBe("low");
+    it("support falls through to normal (urgency handled by system rules SR-20–SR-24)", () => {
+      expect(baseUrgency("support", { workflow: "support", eventType: "ticket_updated", service: "Zendesk", priority: "urgent" })).toBe("normal");
+      expect(baseUrgency("support", { workflow: "support", eventType: "awaiting_response", service: "Zendesk" })).toBe("normal");
+      expect(baseUrgency("support", { workflow: "support", eventType: "ticket_opened", service: "Zendesk" })).toBe("normal");
     });
 
     it("content is always low", () => {
@@ -1178,25 +1171,16 @@ describe("SignalProcessor", () => {
       expect(baseUrgency("travel", { workflow: "travel", travelType: "flight", provider: "Delta" })).toBe("normal");
     });
 
-    it("conversation: urgency driven by requiresReply + sentiment", () => {
-      // needs reply + urgent/negative → high
-      expect(baseUrgency("conversation", { workflow: "conversation", isReply: false, sentiment: "urgent", requiresReply: true })).toBe("high");
-      expect(baseUrgency("conversation", { workflow: "conversation", isReply: false, sentiment: "negative", requiresReply: true })).toBe("high");
-      // needs reply + other sentiment → normal
-      expect(baseUrgency("conversation", { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: true })).toBe("normal");
-      expect(baseUrgency("conversation", { workflow: "conversation", isReply: false, sentiment: "positive", requiresReply: true })).toBe("normal");
-      // no reply needed + positive → low
-      expect(baseUrgency("conversation", { workflow: "conversation", isReply: false, sentiment: "positive", requiresReply: false })).toBe("low");
-      // no reply needed + other → normal
+    it("conversation falls through to normal (urgency handled by system rules SR-15–SR-16)", () => {
+      expect(baseUrgency("conversation", { workflow: "conversation", isReply: false, sentiment: "urgent", requiresReply: true })).toBe("normal");
+      expect(baseUrgency("conversation", { workflow: "conversation", isReply: false, sentiment: "positive", requiresReply: false })).toBe("normal");
       expect(baseUrgency("conversation", { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false })).toBe("normal");
     });
 
-    it("crm: contract/proposal → high; urgency field drives the rest", () => {
-      expect(baseUrgency("crm", { workflow: "crm", crmType: "contract", urgency: "low", requiresReply: false })).toBe("high");
-      expect(baseUrgency("crm", { workflow: "crm", crmType: "proposal", urgency: "low", requiresReply: false })).toBe("high");
-      expect(baseUrgency("crm", { workflow: "crm", crmType: "sales_outreach", urgency: "high", requiresReply: true })).toBe("high");
+    it("crm falls through to normal (urgency handled by system rules SR-17–SR-19)", () => {
+      expect(baseUrgency("crm", { workflow: "crm", crmType: "contract", urgency: "low", requiresReply: false })).toBe("normal");
+      expect(baseUrgency("crm", { workflow: "crm", crmType: "sales_outreach", urgency: "high", requiresReply: true })).toBe("normal");
       expect(baseUrgency("crm", { workflow: "crm", crmType: "follow_up", urgency: "medium", requiresReply: false })).toBe("normal");
-      expect(baseUrgency("crm", { workflow: "crm", crmType: "sales_outreach", urgency: "low", requiresReply: false })).toBe("low");
     });
   });
 
@@ -1217,6 +1201,117 @@ describe("SignalProcessor", () => {
       const arc = makeArc({ sentMessageIds: ["<msg-001@example.com>"] });
       const signal = { workflow: "auth", workflowData: { workflow: "auth", authType: "otp", service: "GitHub" } } as Parameters<typeof priorityCalculator>[1];
       expect(priorityCalculator(arc, signal)).toBe("critical");
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Workflow-specific urgency rules (SR-15–SR-24)
+  // -------------------------------------------------------------------------
+
+  describe("workflow urgency system rules", () => {
+    async function processWithWorkflow(classification: Partial<ClassificationOutput>): Promise<Arc> {
+      const full: ClassificationOutput = {
+        workflow: "conversation",
+        workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
+        spamScore: 0.05, summary: "test", labels: [],
+        classificationModelId: "us.anthropic.claude-opus-4-5-20251101-v1:0",
+        ...classification,
+      };
+      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(full);
+      await processor.process(makeSqsEvent([{ sesMessageId: randomUUID() }]));
+      return vi.mocked(store.saveArc).mock.calls.at(-1)![0] as Arc;
+    }
+
+    it("SR-15: conversation + requiresReply + urgent sentiment → high urgency", async () => {
+      const arc = await processWithWorkflow({ workflow: "conversation", workflowData: { workflow: "conversation", isReply: false, sentiment: "urgent", requiresReply: true } });
+      expect(arc.urgency).toBe("high");
+    });
+
+    it("SR-15: conversation + requiresReply + negative sentiment → high urgency", async () => {
+      const arc = await processWithWorkflow({ workflow: "conversation", workflowData: { workflow: "conversation", isReply: false, sentiment: "negative", requiresReply: true } });
+      expect(arc.urgency).toBe("high");
+    });
+
+    it("SR-16: conversation + no reply needed + positive + !isReply → low urgency", async () => {
+      const arc = await processWithWorkflow({ workflow: "conversation", workflowData: { workflow: "conversation", isReply: false, sentiment: "positive", requiresReply: false } });
+      expect(arc.urgency).toBe("low");
+    });
+
+    it("conversation + requiresReply + neutral sentiment → normal urgency (no special rule)", async () => {
+      const arc = await processWithWorkflow({ workflow: "conversation", workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: true } });
+      expect(arc.urgency).toBe("normal");
+    });
+
+    it("SR-17: crm + contract → high urgency", async () => {
+      const arc = await processWithWorkflow({ workflow: "crm", workflowData: { workflow: "crm", crmType: "contract", urgency: "low", requiresReply: false } });
+      expect(arc.urgency).toBe("high");
+    });
+
+    it("SR-17: crm + proposal → high urgency", async () => {
+      const arc = await processWithWorkflow({ workflow: "crm", workflowData: { workflow: "crm", crmType: "proposal", urgency: "low", requiresReply: false } });
+      expect(arc.urgency).toBe("high");
+    });
+
+    it("SR-18: crm + urgency:high → high urgency", async () => {
+      const arc = await processWithWorkflow({ workflow: "crm", workflowData: { workflow: "crm", crmType: "sales_outreach", urgency: "high", requiresReply: true } });
+      expect(arc.urgency).toBe("high");
+    });
+
+    it("SR-19: crm + urgency:low → low urgency", async () => {
+      const arc = await processWithWorkflow({ workflow: "crm", workflowData: { workflow: "crm", crmType: "sales_outreach", urgency: "low", requiresReply: false } });
+      expect(arc.urgency).toBe("low");
+    });
+
+    it("crm + urgency:medium → normal urgency (label fallback)", async () => {
+      const arc = await processWithWorkflow({ workflow: "crm", workflowData: { workflow: "crm", crmType: "follow_up", urgency: "medium", requiresReply: false } });
+      expect(arc.urgency).toBe("normal");
+    });
+
+    it("SR-20: support + priority:urgent → critical urgency", async () => {
+      const arc = await processWithWorkflow({ workflow: "support", workflowData: { workflow: "support", eventType: "ticket_updated", service: "Zendesk", priority: "urgent" } });
+      expect(arc.urgency).toBe("critical");
+    });
+
+    it("SR-21: support + priority:high → high urgency", async () => {
+      const arc = await processWithWorkflow({ workflow: "support", workflowData: { workflow: "support", eventType: "ticket_updated", service: "Zendesk", priority: "high" } });
+      expect(arc.urgency).toBe("high");
+    });
+
+    it("SR-22: support + awaiting_response → high urgency", async () => {
+      const arc = await processWithWorkflow({ workflow: "support", workflowData: { workflow: "support", eventType: "awaiting_response", service: "Zendesk" } });
+      expect(arc.urgency).toBe("high");
+    });
+
+    it("SR-23: support + priority:low → low urgency", async () => {
+      const arc = await processWithWorkflow({ workflow: "support", workflowData: { workflow: "support", eventType: "ticket_updated", service: "Zendesk", priority: "low" } });
+      expect(arc.urgency).toBe("low");
+    });
+
+    it("SR-24: support + ticket_opened → low urgency", async () => {
+      const arc = await processWithWorkflow({ workflow: "support", workflowData: { workflow: "support", eventType: "ticket_opened", service: "Zendesk" } });
+      expect(arc.urgency).toBe("low");
+    });
+
+    it("SR-24: support + ticket_resolved → low urgency", async () => {
+      const arc = await processWithWorkflow({ workflow: "support", workflowData: { workflow: "support", eventType: "ticket_resolved", service: "Zendesk" } });
+      expect(arc.urgency).toBe("low");
+    });
+
+    it("SR-20 wins over SR-24: support + priority:urgent + ticket_opened → critical (first-rule-wins)", async () => {
+      const arc = await processWithWorkflow({ workflow: "support", workflowData: { workflow: "support", eventType: "ticket_opened", service: "Zendesk", priority: "urgent" } });
+      expect(arc.urgency).toBe("critical");
+    });
+
+    it("SR-16 !system:replied guard: conversation + positive + hasSentMessages → high (not low)", async () => {
+      // conversation uses vector search (no grouping key), so mock arcMatcher.findMatch
+      // arc already has a sent message → system:replied label → SR-16 guard fails → label rule SR-09 sets high
+      vi.mocked(arcMatcher.findMatch).mockResolvedValueOnce(makeArc({
+        workflow: "conversation",
+        labels: [],
+        sentMessageIds: ["<prior-msg@example.com>"],
+      }));
+      const arc = await processWithWorkflow({ workflow: "conversation", workflowData: { workflow: "conversation", isReply: false, sentiment: "positive", requiresReply: false } });
+      expect(arc.urgency).toBe("high");
     });
   });
 

@@ -149,7 +149,8 @@ function applyRules(
 
 function deriveOutcome(matchedRules: MatchedRuleResult[]): ProcessingOutcome {
   const outcome = emptyOutcome();
-  let statusSet = false; // first-rule-wins: the first status-changing action determines fate
+  let statusSet = false;   // first-rule-wins: the first status-changing action determines fate
+  let urgencySet = false;  // first-rule-wins: the first set_urgency action determines urgency
   for (const { actions } of matchedRules) {
     for (const action of actions) {
       switch (action.type) {
@@ -167,7 +168,7 @@ function deriveOutcome(matchedRules: MatchedRuleResult[]): ProcessingOutcome {
           break;
         case "approve_sender":        outcome.approveSender = true; break;
         case "suppress_notification": outcome.suppressNotification = true; break;
-        case "set_urgency":           if (action.value) outcome.urgency = action.value as ArcUrgency; break;
+        case "set_urgency":           if (!urgencySet && action.value) { outcome.urgency = action.value as ArcUrgency; urgencySet = true; } break;
         case "assign_label":          if (action.value) outcome.additionalLabels.push(action.value); break;
         case "forward":               if (action.value) outcome.forwardAddresses.push(action.value); break;
         case "pong":                  outcome.doPong = true; break;
@@ -182,8 +183,11 @@ function deriveOutcome(matchedRules: MatchedRuleResult[]): ProcessingOutcome {
 // ---------------------------------------------------------------------------
 
 const in_ = (label: string) => ({ "in": [label, { "var": "arc.labels" }] });
+const wf_ = (w: string) => ({ "==": [{ "var": "signal.workflow" }, w] });
+const wfData_ = (field: string) => ({ "var": `signal.workflowData.${field}` });
 
 export const SYSTEM_RULES: Rule[] = [
+  // --- Sender / content gating (1–8) ----------------------------------------
   { id: "SR-14", accountId: "SYSTEM", name: "Auto-approve sender on matched conversation", condition: JSON.stringify({ "and": [in_("system:workflow:conversation"), in_("system:sender:untrusted"), { "var": "isMatchedArc" }] }), actions: [{ type: "approve_sender" }], status: "enabled", priorityOrder: 1, createdAt: "", updatedAt: "" },
   { id: "SR-01", accountId: "SYSTEM", name: "Block onboarding emails", condition: JSON.stringify(in_("system:workflow:onboarding")), actions: [{ type: "block" }], status: "enabled", priorityOrder: 2, createdAt: "", updatedAt: "" },
   { id: "SR-05", accountId: "SYSTEM", name: "Block status emails", condition: JSON.stringify(in_("system:workflow:status")), actions: [{ type: "block" }], status: "enabled", priorityOrder: 3, createdAt: "", updatedAt: "" },
@@ -192,12 +196,29 @@ export const SYSTEM_RULES: Rule[] = [
   { id: "SR-04", accountId: "SYSTEM", name: "Suppress notification for medium spam", condition: JSON.stringify(in_("system:spam:medium")), actions: [{ type: "suppress_notification" }], status: "enabled", priorityOrder: 6, createdAt: "", updatedAt: "" },
   { id: "SR-06", accountId: "SYSTEM", name: "Suppress notification for status emails", condition: JSON.stringify(in_("system:workflow:status")), actions: [{ type: "suppress_notification" }], status: "enabled", priorityOrder: 7, createdAt: "", updatedAt: "" },
   { id: "SR-07", accountId: "SYSTEM", name: "Suppress notification for content emails", condition: JSON.stringify(in_("system:workflow:content")), actions: [{ type: "suppress_notification" }], status: "enabled", priorityOrder: 8, createdAt: "", updatedAt: "" },
-  { id: "SR-08", accountId: "SYSTEM", name: "Set urgency: critical", condition: JSON.stringify(in_("system:urgency:critical")), actions: [{ type: "set_urgency", value: "critical" }], status: "enabled", priorityOrder: 9, createdAt: "", updatedAt: "" },
-  { id: "SR-09", accountId: "SYSTEM", name: "Set urgency: high", condition: JSON.stringify(in_("system:urgency:high")), actions: [{ type: "set_urgency", value: "high" }], status: "enabled", priorityOrder: 10, createdAt: "", updatedAt: "" },
-  { id: "SR-10", accountId: "SYSTEM", name: "Set urgency: normal", condition: JSON.stringify(in_("system:urgency:normal")), actions: [{ type: "set_urgency", value: "normal" }], status: "enabled", priorityOrder: 11, createdAt: "", updatedAt: "" },
-  { id: "SR-11", accountId: "SYSTEM", name: "Set urgency: low", condition: JSON.stringify(in_("system:urgency:low")), actions: [{ type: "set_urgency", value: "low" }], status: "enabled", priorityOrder: 12, createdAt: "", updatedAt: "" },
-  { id: "SR-12", accountId: "SYSTEM", name: "Set urgency: silent", condition: JSON.stringify(in_("system:urgency:silent")), actions: [{ type: "set_urgency", value: "silent" }], status: "enabled", priorityOrder: 13, createdAt: "", updatedAt: "" },
-  { id: "SR-13", accountId: "SYSTEM", name: "Auto-reply to test emails (pong)", condition: JSON.stringify(in_("system:test")), actions: [{ type: "pong" }], status: "enabled", priorityOrder: 14, createdAt: "", updatedAt: "" },
+  // --- Workflow-specific urgency (9–18) ----------------------------------------
+  // conversation: high when reply is needed and tone is urgent/negative
+  { id: "SR-15", accountId: "SYSTEM", name: "Conversation: high urgency when reply needed and urgent/negative", condition: JSON.stringify({ "and": [wf_("conversation"), { "==": [wfData_("requiresReply"), true] }, { "in": [wfData_("sentiment"), ["urgent", "negative"]] }] }), actions: [{ type: "set_urgency", value: "high" }], status: "enabled", priorityOrder: 9, createdAt: "", updatedAt: "" },
+  // !system:replied guard: when user has replied before, defer to label-based high promotion instead
+  { id: "SR-16", accountId: "SYSTEM", name: "Conversation: low urgency for positive no-reply non-thread", condition: JSON.stringify({ "and": [wf_("conversation"), { "!": [wfData_("requiresReply")] }, { "==": [wfData_("sentiment"), "positive"] }, { "!": [wfData_("isReply")] }, { "!": [in_("system:replied")] }] }), actions: [{ type: "set_urgency", value: "low" }], status: "enabled", priorityOrder: 10, createdAt: "", updatedAt: "" },
+  // crm: contract/proposal always warrant a decision — treat as high regardless of urgency field
+  { id: "SR-17", accountId: "SYSTEM", name: "CRM: high urgency for contracts and proposals", condition: JSON.stringify({ "and": [wf_("crm"), { "in": [wfData_("crmType"), ["contract", "proposal"]] }] }), actions: [{ type: "set_urgency", value: "high" }], status: "enabled", priorityOrder: 11, createdAt: "", updatedAt: "" },
+  { id: "SR-18", accountId: "SYSTEM", name: "CRM: high urgency when urgency field is high", condition: JSON.stringify({ "and": [wf_("crm"), { "==": [wfData_("urgency"), "high"] }] }), actions: [{ type: "set_urgency", value: "high" }], status: "enabled", priorityOrder: 12, createdAt: "", updatedAt: "" },
+  { id: "SR-19", accountId: "SYSTEM", name: "CRM: low urgency for low-priority outreach", condition: JSON.stringify({ "and": [wf_("crm"), { "==": [wfData_("urgency"), "low"] }, { "!": [in_("system:replied")] }] }), actions: [{ type: "set_urgency", value: "low" }], status: "enabled", priorityOrder: 13, createdAt: "", updatedAt: "" },
+  // support: priority field drives urgency; urgent > priority-based > awaiting_response > lifecycle
+  { id: "SR-20", accountId: "SYSTEM", name: "Support: critical urgency for urgent-priority tickets", condition: JSON.stringify({ "and": [wf_("support"), { "==": [wfData_("priority"), "urgent"] }] }), actions: [{ type: "set_urgency", value: "critical" }], status: "enabled", priorityOrder: 14, createdAt: "", updatedAt: "" },
+  { id: "SR-21", accountId: "SYSTEM", name: "Support: high urgency for high-priority tickets", condition: JSON.stringify({ "and": [wf_("support"), { "==": [wfData_("priority"), "high"] }] }), actions: [{ type: "set_urgency", value: "high" }], status: "enabled", priorityOrder: 15, createdAt: "", updatedAt: "" },
+  { id: "SR-22", accountId: "SYSTEM", name: "Support: high urgency when agent is awaiting response", condition: JSON.stringify({ "and": [wf_("support"), { "==": [wfData_("eventType"), "awaiting_response"] }] }), actions: [{ type: "set_urgency", value: "high" }], status: "enabled", priorityOrder: 16, createdAt: "", updatedAt: "" },
+  { id: "SR-23", accountId: "SYSTEM", name: "Support: low urgency for low-priority tickets", condition: JSON.stringify({ "and": [wf_("support"), { "==": [wfData_("priority"), "low"] }, { "!": [in_("system:replied")] }] }), actions: [{ type: "set_urgency", value: "low" }], status: "enabled", priorityOrder: 17, createdAt: "", updatedAt: "" },
+  // ticket_opened/resolved/closed are passive lifecycle events — low unless urgency field says otherwise (fired after priority rules so those win)
+  { id: "SR-24", accountId: "SYSTEM", name: "Support: low urgency for passive lifecycle events", condition: JSON.stringify({ "and": [wf_("support"), { "in": [wfData_("eventType"), ["ticket_opened", "ticket_resolved", "ticket_closed"]] }, { "!": [in_("system:replied")] }] }), actions: [{ type: "set_urgency", value: "low" }], status: "enabled", priorityOrder: 18, createdAt: "", updatedAt: "" },
+  // --- Label-based urgency fallback (19–24) ------------------------------------
+  { id: "SR-08", accountId: "SYSTEM", name: "Set urgency: critical", condition: JSON.stringify(in_("system:urgency:critical")), actions: [{ type: "set_urgency", value: "critical" }], status: "enabled", priorityOrder: 19, createdAt: "", updatedAt: "" },
+  { id: "SR-09", accountId: "SYSTEM", name: "Set urgency: high", condition: JSON.stringify(in_("system:urgency:high")), actions: [{ type: "set_urgency", value: "high" }], status: "enabled", priorityOrder: 20, createdAt: "", updatedAt: "" },
+  { id: "SR-10", accountId: "SYSTEM", name: "Set urgency: normal", condition: JSON.stringify(in_("system:urgency:normal")), actions: [{ type: "set_urgency", value: "normal" }], status: "enabled", priorityOrder: 21, createdAt: "", updatedAt: "" },
+  { id: "SR-11", accountId: "SYSTEM", name: "Set urgency: low", condition: JSON.stringify(in_("system:urgency:low")), actions: [{ type: "set_urgency", value: "low" }], status: "enabled", priorityOrder: 22, createdAt: "", updatedAt: "" },
+  { id: "SR-12", accountId: "SYSTEM", name: "Set urgency: silent", condition: JSON.stringify(in_("system:urgency:silent")), actions: [{ type: "set_urgency", value: "silent" }], status: "enabled", priorityOrder: 23, createdAt: "", updatedAt: "" },
+  { id: "SR-13", accountId: "SYSTEM", name: "Auto-reply to test emails (pong)", condition: JSON.stringify(in_("system:test")), actions: [{ type: "pong" }], status: "enabled", priorityOrder: 24, createdAt: "", updatedAt: "" },
 ];
 
 // ---------------------------------------------------------------------------
