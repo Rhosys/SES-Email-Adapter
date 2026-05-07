@@ -1,7 +1,6 @@
 import { randomUUID } from "crypto";
 import type { SQSEvent } from "aws-lambda";
 import type { Signal, Arc, Rule, Workflow, WorkflowData, Alias, AccountFilteringConfig, SignalSource, SchedulingData, SignalStatus, Domain, ArcUrgency, SenderFilterMode, MatchedRuleResult } from "../types/index.js";
-import { baseUrgency } from "./priority.js";
 import type { MimeParser } from "./mime.js";
 import type { SignalClassifier } from "../classifier/classifier.js";
 import { getETLD1, assignSystemLabels, DEFAULT_SPAM_SCORE_THRESHOLD } from "./filter.js";
@@ -212,13 +211,7 @@ export const SYSTEM_RULES: Rule[] = [
   { id: "SR-23", accountId: "SYSTEM", name: "Support: low urgency for low-priority tickets", condition: JSON.stringify({ "and": [wf_("support"), { "==": [wfData_("priority"), "low"] }, { "!": [in_("system:replied")] }] }), actions: [{ type: "set_urgency", value: "low" }], status: "enabled", priorityOrder: 17, createdAt: "", updatedAt: "" },
   // ticket_opened/resolved/closed are passive lifecycle events — low unless urgency field says otherwise (fired after priority rules so those win)
   { id: "SR-24", accountId: "SYSTEM", name: "Support: low urgency for passive lifecycle events", condition: JSON.stringify({ "and": [wf_("support"), { "in": [wfData_("eventType"), ["ticket_opened", "ticket_resolved", "ticket_closed"]] }, { "!": [in_("system:replied")] }] }), actions: [{ type: "set_urgency", value: "low" }], status: "enabled", priorityOrder: 18, createdAt: "", updatedAt: "" },
-  // --- Label-based urgency fallback (19–24) ------------------------------------
-  { id: "SR-08", accountId: "SYSTEM", name: "Set urgency: critical", condition: JSON.stringify(in_("system:urgency:critical")), actions: [{ type: "set_urgency", value: "critical" }], status: "enabled", priorityOrder: 19, createdAt: "", updatedAt: "" },
-  { id: "SR-09", accountId: "SYSTEM", name: "Set urgency: high", condition: JSON.stringify(in_("system:urgency:high")), actions: [{ type: "set_urgency", value: "high" }], status: "enabled", priorityOrder: 20, createdAt: "", updatedAt: "" },
-  { id: "SR-10", accountId: "SYSTEM", name: "Set urgency: normal", condition: JSON.stringify(in_("system:urgency:normal")), actions: [{ type: "set_urgency", value: "normal" }], status: "enabled", priorityOrder: 21, createdAt: "", updatedAt: "" },
-  { id: "SR-11", accountId: "SYSTEM", name: "Set urgency: low", condition: JSON.stringify(in_("system:urgency:low")), actions: [{ type: "set_urgency", value: "low" }], status: "enabled", priorityOrder: 22, createdAt: "", updatedAt: "" },
-  { id: "SR-12", accountId: "SYSTEM", name: "Set urgency: silent", condition: JSON.stringify(in_("system:urgency:silent")), actions: [{ type: "set_urgency", value: "silent" }], status: "enabled", priorityOrder: 23, createdAt: "", updatedAt: "" },
-  { id: "SR-13", accountId: "SYSTEM", name: "Auto-reply to test emails (pong)", condition: JSON.stringify(in_("system:test")), actions: [{ type: "pong" }], status: "enabled", priorityOrder: 24, createdAt: "", updatedAt: "" },
+  { id: "SR-13", accountId: "SYSTEM", name: "Auto-reply to test emails (pong)", condition: JSON.stringify(in_("system:test")), actions: [{ type: "pong" }], status: "enabled", priorityOrder: 19, createdAt: "", updatedAt: "" },
 ];
 
 // ---------------------------------------------------------------------------
@@ -440,11 +433,11 @@ export class SignalProcessor {
     }
     if (outcome.archive) arc.status = "archived";
     if (outcome.delete) { arc.status = "deleted"; arc.deletedAt = now; }
-    if (outcome.urgency) arc.urgency = outcome.urgency;
-    // Fall back to baseUrgency if no set_urgency rule fired
-    if (!arc.urgency) arc.urgency = baseUrgency(arc.workflow, classification.workflowData);
 
-    const signal: Signal = { ...signalShell, arcId: arc.id, matchedRules };
+    const signalUrgency = outcome.urgency ?? arc.urgency ?? "normal";
+    if (!matchedArc) arc.urgency = signalUrgency;
+
+    const signal: Signal = { ...signalShell, arcId: arc.id, matchedRules, urgency: signalUrgency };
 
     // 12. Pong (driven by SR-13 rule action)
     if (outcome.doPong && this.testReplier) {
