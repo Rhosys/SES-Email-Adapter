@@ -1348,6 +1348,21 @@ describe("SignalProcessor", () => {
       expect(notifier.notify).not.toHaveBeenCalled();
       expect(notifier.notifyBlocked).not.toHaveBeenCalled();
     });
+
+    it("blocks status emails from untrusted senders (SR-05 priority beats SR-02 quarantine)", async () => {
+      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(noticeClassification);
+      // Untrusted sender: not in approvedSenders, so SR-02 would quarantine if it won
+      vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce({
+        ...DEFAULT_CTX,
+        emailConfig: makeAlias({ approvedSenders: [] }),
+      });
+
+      await processor.process(makeSqsEvent([{}]));
+
+      const signal = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
+      expect(signal.status).toBe("blocked"); // SR-05 fires first (priority 3) — not quarantined by SR-02 (priority 4)
+      expect(store.saveArc).not.toHaveBeenCalled();
+    });
   });
 
   // -------------------------------------------------------------------------
