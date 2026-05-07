@@ -280,7 +280,7 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
 
     const signal = await store.getSignal(accountId, body.signalId);
     if (!signal) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
-    if (signal.status !== "blocked" && signal.status !== "quarantined") {
+    if (signal.status !== "blocked" && signal.status !== "quarantine_visible" && signal.status !== "quarantine_hidden") {
       return err(c, 400, "Signal is not blocked or quarantined", "SIGNAL_NOT_BLOCKED");
     }
 
@@ -311,7 +311,7 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
         id: randomUUID(),
         accountId,
         address: signal.recipientAddress,
-        filterMode: "quarantine_notify" as SenderFilterMode,
+        filterMode: "quarantine_visible" as SenderFilterMode,
         createdAt: now,
         updatedAt: now,
       };
@@ -351,14 +351,15 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
     const { accountId } = c.get("auth");
     const query = c.req.query();
     const status = query["status"];
-    if (status !== "blocked" && status !== "quarantined") {
-      return err(c, 400, "status query param must be 'blocked' or 'quarantined'", "INVALID_STATUS");
+    if (status !== "blocked" && status !== "quarantined" && status !== "quarantine_visible" && status !== "quarantine_hidden") {
+      return err(c, 400, "status query param must be 'blocked', 'quarantined', 'quarantine_visible', or 'quarantine_hidden'", "INVALID_STATUS");
     }
+    const quarantineCategory = (status === "quarantined" || status === "quarantine_visible" || status === "quarantine_hidden") ? "quarantined" : "blocked";
     const params: PageParams = {
       ...(query["cursor"] ? { cursor: query["cursor"] } : {}),
       ...(query["limit"] ? { limit: parseInt(query["limit"], 10) } : {}),
     };
-    const result = await store.listPreArcSignals(accountId, status, params);
+    const result = await store.listPreArcSignals(accountId, quarantineCategory as "blocked" | "quarantined", params);
     return c.json(page("signals", result.items, result.nextCursor));
   });
 
@@ -367,7 +368,7 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
     const signal = await store.getSignal(accountId, c.req.param("id"));
     if (!signal) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
     if (signal.accountId !== accountId) return err(c, 403, "Forbidden");
-    if (signal.status !== "blocked" && signal.status !== "quarantined") {
+    if (signal.status !== "blocked" && signal.status !== "quarantine_visible" && signal.status !== "quarantine_hidden") {
       return err(c, 400, "Only blocked or quarantined signals can have their status updated", "SIGNAL_NOT_REVIEWABLE");
     }
 
@@ -710,7 +711,7 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
       id: randomUUID(),
       accountId,
       address: body.address,
-      filterMode: body.filterMode ?? "quarantine_notify",
+      filterMode: body.filterMode ?? "quarantine_visible",
       ...(body.createdForOrigin !== undefined ? { createdForOrigin: body.createdForOrigin } : {}),
       createdAt: now,
       updatedAt: now,
@@ -732,7 +733,7 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
       id: existing?.id ?? randomUUID(),
       accountId,
       address,
-      filterMode: body.filterMode ?? existing?.filterMode ?? "quarantine_notify",
+      filterMode: body.filterMode ?? existing?.filterMode ?? "quarantine_visible",
       ...(body.spamScoreThreshold !== undefined ? { spamScoreThreshold: body.spamScoreThreshold } : existing?.spamScoreThreshold !== undefined ? { spamScoreThreshold: existing.spamScoreThreshold } : {}),
       ...(body.createdForOrigin !== undefined ? { createdForOrigin: body.createdForOrigin } : existing?.createdForOrigin !== undefined ? { createdForOrigin: existing.createdForOrigin } : {}),
       createdAt: existing?.createdAt ?? now,

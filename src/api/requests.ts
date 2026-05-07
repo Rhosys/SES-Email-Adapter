@@ -3,7 +3,7 @@ import { WORKFLOWS } from "../types/index.js";
 
 // ---- Shared primitives ----
 
-const SenderFilterMode = z.enum(["allow_all", "quarantine_notify", "quarantine_silent", "block"]);
+const SenderFilterMode = z.enum(["allow_all", "quarantine_visible", "quarantine_hidden", "block"]);
 const ArcStatus = z.enum(["active", "archived", "deleted"]);
 const ArcUrgency = z.enum(["critical", "high", "normal", "low", "silent"]);
 const Workflow = z.enum(WORKFLOWS);
@@ -13,7 +13,7 @@ const NewAddressHandling = z.enum(["auto_allow", "block_until_approved"]);
 const AccountRole = z.enum(["owner", "admin", "member", "viewer"]);
 const RuleActionType = z.enum([
   "assign_label", "assign_workflow", "archive", "delete", "forward",
-  "block", "quarantine", "set_urgency", "suppress_notification", "pong", "approve_sender",
+  "block", "quarantine", "quarantine_hidden", "set_urgency", "suppress_notification", "pong", "approve_sender",
   "auto_reply", "auto_draft",
 ]);
 const RuleStatus = z.enum(["enabled", "disabled"]);

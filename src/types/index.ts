@@ -226,13 +226,13 @@ export type NewAddressHandling =
 
 // Default disposition for emails from unknown senders, applied after rules run
 export type SenderFilterMode =
-  | "allow_all"          // all senders pass through; system:sender:untrusted label suppressed
-  | "quarantine_notify"  // unknown sender → quarantine + email notification (default)
-  | "quarantine_silent"  // unknown sender → quarantine, no notification
-  | "block";             // unknown sender → silent block
+  | "allow_all"            // all senders pass through; system:sender:untrusted label suppressed
+  | "quarantine_visible"   // unknown sender → quarantine, surfaced in review queue (default)
+  | "quarantine_hidden"    // unknown sender → quarantine, hidden from review queue
+  | "block";               // unknown sender → silent block
 
-// active = visible; quarantined = user notified + shown for review; blocked = silent; draft = user-authored, unsent
-export type SignalStatus = "active" | "blocked" | "quarantined" | "draft";
+// active = visible in inbox; quarantine_visible = surfaced in review queue; quarantine_hidden = stored but not shown in queue; blocked = silent drop; draft = user-authored, unsent
+export type SignalStatus = "active" | "blocked" | "quarantine_visible" | "quarantine_hidden" | "draft";
 
 // "email" = inbound SES email; "system" = processor-created (e.g. extracted calendar event); "user" = user-created
 export type SignalSource = "email" | "system" | "user";
@@ -334,7 +334,7 @@ export interface MatchedRuleResult {
   ruleId: string;
   actions: Array<Pick<RuleAction, "type" | "value">>;
   labelsAdded: string[];
-  statusChange?: "blocked" | "quarantined" | "archived" | "deleted";
+  statusChange?: "blocked" | "quarantine_visible" | "quarantine_hidden" | "archived" | "deleted";
 }
 
 // ---------------------------------------------------------------------------
@@ -449,7 +449,8 @@ export type RuleActionType =
   | "delete"
   | "forward"
   | "block"
-  | "quarantine"
+  | "quarantine"          // quarantine, shown in review queue
+  | "quarantine_hidden"   // quarantine, hidden from review queue
   | "set_urgency"
   | "suppress_notification"
   | "pong"
