@@ -12,6 +12,7 @@
 - [ ] Dynamically generate the OpenAPI Specification from the types. Build it on deployment using an npm run script, and serve it on the `/` endpoint.
 - [ ] Remove or redesign `GET /search` — searching should always be scoped (e.g. `GET /arcs?q=`), not a standalone endpoint.
 - [ ] Digests? Does that even make sense? Basically once per month expose a digest of just list of things — the idea would be to reuse the same Arc.
+- [ ] Rules support tags — key/value pairs stored on the rule for user annotation (e.g. team, category, notes). No functional effect on rule evaluation.
 - [ ] Use quickjs-emscripten to support custom JS function execution as a rule type.
 - [ ] Create a WebSocket/WebPush APIGW API, with custom domain. Update the lambda to support connections also from websocket APIGW, through Hono if possible, to send messages back to the extension and to the UI when necessary.
 
