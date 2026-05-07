@@ -1,16 +1,19 @@
 # TODO
 
-- [x] Review and complete `WORKFLOW_UX_SPEC.md` implementation — urgency mappings for conversation (sentiment+requiresReply), crm (type+urgency field), and support (lifecycle eventType overrides + priority field) now match spec.
+- [x] Review and complete `WORKFLOW_UX_SPEC.md` implementation — urgency system rules (SR-15–SR-24) encode conversation/crm/support urgency mappings; `baseUrgency` handles remaining workflows.
+- [x] **Urgency is a first-class field** — `Signal.urgency` and `Arc.urgency` are explicit fields; no `system:urgency:*` labels; label-to-urgency conversion rules (SR-08–SR-12) removed; `priorityCalculator` removed; urgency resolves as: set_urgency rule outcome ?? arc.urgency ?? "normal"; arc.urgency set on creation only, user-settable via API after that.
+- [x] **Classifier workflow names aligned** — classifier prompt rewritten to use the 15 consolidated workflow names matching TypeScript `Workflow` type (removed: invoice, order, financial, newsletter, promotions, social, personal, security, developer, subscription, government, notice).
+- [x] **Block phishing/status emails by default** — SR-05 blocks all `status` workflow emails; first-rule-wins for status-changing actions (`statusSet` flag in `deriveOutcome`).
 - [ ] Wire infra (see `infra/`)
 - [ ] Set up CI (lint, typecheck, test) for backend, site, and extension independently
 - [x] **API modernization** — collection envelopes, error shapes, PUT→PATCH, consistent create/update responses. See "API Breaking Changes" section below.
 - [ ] Review AWS Bedrock comparison with Aurora pg vectors. I think we are looking for RAG, the question is should we store that data in aurora or is there an optimized bedrock version available for us here?
 - [x] Use Zod to validate incoming requests — all POST/PATCH handlers now use `zParse()` with typed schemas in `src/api/requests.ts`
-- [ ] Dynamically generate the OpenAPI Specification from the types. Build it on deployment using an npm run script, and server it on the `/` endpoint.
-- [ ] Global /Search endpoint is wrong, we should always be searching something specific. And we never need a /search do that, the generic GET /whatever is already a search.
-- [ ] Digests? Does that even make sense? Basically once per month expose a digest of just list of things I think the idea would be to reuse the same ARC.
-- [ ] Use quickjs-emscripten to support custom functions execution as a rule type.
-- [ ] Create a WebSocket/WebPush APIGW API, with custom domain. Update the lambda to support connections also from websocket APIGW, through HONO if possible, to send messages back to the extension and to the UI when necessary.
+- [ ] Dynamically generate the OpenAPI Specification from the types. Build it on deployment using an npm run script, and serve it on the `/` endpoint.
+- [ ] Remove or redesign `GET /search` — searching should always be scoped (e.g. `GET /arcs?q=`), not a standalone endpoint.
+- [ ] Digests? Does that even make sense? Basically once per month expose a digest of just list of things — the idea would be to reuse the same Arc.
+- [ ] Use quickjs-emscripten to support custom JS function execution as a rule type.
+- [ ] Create a WebSocket/WebPush APIGW API, with custom domain. Update the lambda to support connections also from websocket APIGW, through Hono if possible, to send messages back to the extension and to the UI when necessary.
 
 
 ---
@@ -105,7 +108,7 @@ DELETE /accounts/:accountId/signals/:id       — discard draft; 400 if not draf
 - [x] **Spam score threshold configurable** — `spamScoreThreshold` on both `AccountFilteringConfig` and `EmailAddressConfig` with account → per-address override chain.
 - [x] **Two-tier domain setup model** — `receivingSetupComplete`, `senderSetupComplete`, per-record `DnsRecord` status, all in `Domain` type and API.
 - [ ] **Become FedCM identity provider** — meaning other apps log in via our app. This means registering as a FedCM provider so other apps can log in.
-- [x] **Block phishing-warning and terms-update emails by default** — SR-05 changed from archive → block for all `status` workflow emails. Classifier prompt rewritten to use consolidated type-aligned workflow names (21 → 15 workflows). Block wins over quarantine in outcome precedence. StatusData.statusType extended with data_processor, cookie_policy, compliance subtypes.
+- [x] **Block phishing-warning and terms-update emails by default** — covered above.
 - [ ] Add `DELETE /domains/:id` endpoint and handler — remove SES email identity if it exists, delete domain record from DynamoDB; inbound mail for that domain will stop routing to SES naturally
 - [ ] **Domain health monitoring** — weekly proactive DNS check across all accounts and domains:
   - **Primary detection — scheduled DNS resolution**: SES only gives positive signals for identities we've registered; if a customer removes their MX record, email silently stops arriving and SES never tells us. The only reliable detection is us actively resolving DNS. EventBridge weekly rule → Lambda → scan all accounts → all registered domains per account → DNS-resolve each record that belongs to the setup tier the customer has completed → notify if degraded. **Do not write health status back to DynamoDB** — health is computed live, not cached, to avoid stale state discrepancies.
@@ -255,7 +258,7 @@ The primary view. Arcs are the browsing unit — not individual emails.
 
 - Each arc row shows: workflow icon, sender name/domain, AI-generated summary, urgency badge, last signal timestamp, label chips
 - Urgency drives visual prominence: `critical` = red/bold, `high` = orange, `normal` = default, `low` = muted, `silent` arcs are never shown
-- Arcs with `sentMessageIds` (user has replied) should show a "replied" indicator — the backend already promotes urgency to `high` on these, the UI should also visually distinguish them
+- Arcs with `sentMessageIds` (user has replied) should show a "replied" indicator — these carry the `system:replied` label; the UI should visually distinguish them
 - Arc status filter: REST-style `?status=active|archived|snoozed|deleted` query param (four statuses: `active`, `archived`, `snoozed`, `deleted`)
 - Swipe/hover actions: archive, delete, label
 - Inline "unread" state (client-side or via a future `Arc.readAt` field)
@@ -271,15 +274,16 @@ Drill-in from inbox. Shows all signals in the arc as a chronological thread.
 - Each signal card shows: from, to, cc, subject, received timestamp, AI summary, spam score (if > 0.3, show warning indicator), body (text or HTML rendered in sandboxed iframe), attachments list
 - `original:john@gmail.com` label (forwarded email detection) appears in the label chips alongside all other labels
 - Workflow-specific structured data panels — each workflow has rich `workflowData` fields the UI should render as a card rather than raw JSON:
-  - `order` → order number, tracking link, items list, estimated delivery, status
-  - `invoice` → amount, due date, invoice number, download link
+  - `package` → order number, tracking link, items list, estimated delivery, status
+  - `payments` → amount, due date, invoice number, download link, payment type
   - `travel` → flight number, departure/arrival, confirmation code, boarding pass link
   - `auth` → OTP/magic link action button (copy code, open link), expiry countdown
-  - `financial` → amount, account last 4, transaction date, `isSuspicious` flag (bank has explicitly flagged unusual/unauthorized activity — renders as a red "Fraud alert" banner on the card; drives `critical` urgency)
+  - `alert` → service, severity, requiresAction flag, error message snippet
   - `job` → company, role, stage (applied / interview / offer), action required flag
-  - `subscription` → service name, renewal date, payment failed flag, action CTA
   - `healthcare` → appointment date, provider, action required flag
-  - `developer` → service, severity, requiresAction flag, error message snippet
+  - `crm` → sender company, role, deal value, urgency, requiresReply flag
+  - `support` → ticket ID, service, priority, agent name, eventType status
+  - `scheduling` → event title, start/end time, location, organizer, requiresResponse
 - AI-suggested labels shown with one-click accept
 - User can manually override workflow classification (dropdown)
 - User can manually add/remove labels
@@ -577,7 +581,7 @@ Progress bar at top spanning all steps. Every step is resumable — if the user 
 - **Signal ID prefix** (`SES#`, `SYS#`, `USR#`) indicates origin — could show a subtle badge on signals that were system- or user-created vs inbound email
 - **Spam score** should surface as a warning on signals > 0.3 and a strong warning > 0.7; never shown as a raw number to end users — use labels like "Likely spam" / "Possible spam"
 - **Arc grouping key** is deterministic per workflow (e.g. all Amazon order updates for order #123 thread together) — UI should not expose the key but should make the threading feel natural, like iMessage threads
-- **`notice` workflow** arcs are `silent` urgency and auto-archived — they should not appear in the main inbox; accessible via Archive view only
+- **`status` workflow** arcs are blocked by default (SR-05) — they never reach the arc inbox; if SR-05 is disabled by the user they will be silent urgency
 - **RBAC**: hide destructive actions (delete domain, remove user, edit rules) from `viewer` and `member` roles
 
 ---
@@ -593,11 +597,11 @@ Creative feature ideas not yet committed to. Separate from the confirmed list ab
 The classifier already extracts structured `workflowData`. Extend this to surface one-tap CTAs directly on the arc row and signal card, without opening the email:
 
 - `auth` → **Copy OTP** button on the arc row (code + countdown timer inline); one tap copies to clipboard; auto-detected from `workflowData.code`
-- `order` → **Track Package** deep-link button; carrier + tracking number already in `workflowData`
-- `invoice` → **Pay Now** link if `workflowData.paymentUrl` is present
+- `package` → **Track Package** deep-link button; tracking number already in `workflowData`
+- `payments` → **Pay Now** link if `workflowData.managementUrl` is present; **Download** if `workflowData.downloadUrl` is present
 - `travel` → **Add to Calendar** (generates `.ics`); **Check In** link if within 24h of departure
 - `job` → **Stage tracker** inline (Applied → Phone Screen → Interview → Offer) — user updates stage, stored as a label or urgency override
-- `subscription` → **Renew** or **Cancel** deep-link if `workflowData.manageUrl` is present
+- `scheduling` → **Accept / Decline** if `workflowData.requiresResponse` is true; **Add to Calendar**
 
 ### Snooze / Remind Me Later
 
