@@ -54,3 +54,16 @@ output "aurora_cluster_identifier" {
 output "ses_rule_set_name" {
   value = aws_ses_receipt_rule_set.main.rule_set_name
 }
+
+output "dynamodb_audit_table" {
+  value = aws_dynamodb_table.audit.name
+}
+
+output "feedback_queue_url" {
+  value = aws_sqs_queue.feedback.url
+}
+
+output "ws_api_endpoint" {
+  description = "WebSocket API endpoint — clients connect to wss://<id>.execute-api.<region>.amazonaws.com/production"
+  value       = "wss://${aws_apigatewayv2_api.ws.id}.execute-api.${data.aws_region.current.name}.amazonaws.com/${aws_apigatewayv2_stage.ws.name}"
+}
