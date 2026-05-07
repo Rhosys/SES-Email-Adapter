@@ -5,16 +5,16 @@
 - [x] **Classifier workflow names aligned** — classifier prompt rewritten to use the 15 consolidated workflow names matching TypeScript `Workflow` type (removed: invoice, order, financial, newsletter, promotions, social, personal, security, developer, subscription, government, notice).
 - [x] **Block phishing/status emails by default** — SR-05 blocks all `status` workflow emails; first-rule-wins for status-changing actions (`statusSet` flag in `deriveOutcome`).
 - [ ] Wire infra (see `infra/`)
-- [ ] Set up CI (lint, typecheck, test) for backend, site, and extension independently
+- [x] Set up CI (lint, typecheck, test) for backend, site, and extension independently — `.github/workflows/backend.yml`, `site.yml`, `extension.yml`
 - [x] **API modernization** — collection envelopes, error shapes, PUT→PATCH, consistent create/update responses. See "API Breaking Changes" section below.
 - [ ] Review AWS Bedrock comparison with Aurora pg vectors. I think we are looking for RAG, the question is should we store that data in aurora or is there an optimized bedrock version available for us here?
 - [x] Use Zod to validate incoming requests — all POST/PATCH handlers now use `zParse()` with typed schemas in `src/api/requests.ts`
-- [ ] Dynamically generate the OpenAPI Specification from the types. Build it on deployment using an npm run script, and serve it on the `/` endpoint.
-- [ ] Remove or redesign `GET /search` — searching should always be scoped (e.g. `GET /arcs?q=`), not a standalone endpoint.
+- [x] Dynamically generate the OpenAPI Specification from the types. Build it on deployment using an npm run script, and serve it on the `/` endpoint — `scripts/openapi.ts`, `npm run openapi`, `GET /openapi.json`
+- [x] Remove or redesign `GET /search` — merged into `GET /arcs?q=`; `GET /search` endpoint removed
 - [ ] Digests? Does that even make sense? Basically once per month expose a digest of just list of things — the idea would be to reuse the same Arc.
 - [x] Rules support tags — key/value pairs stored on the rule for user annotation (e.g. team, category, notes). No functional effect on rule evaluation.
-- [ ] Use quickjs-emscripten to support custom JS function execution as a rule type.
-- [ ] Create a WebSocket/WebPush APIGW API, with custom domain. Update the lambda to support connections also from websocket APIGW, through Hono if possible, to send messages back to the extension and to the UI when necessary.
+- [x] Use quickjs-emscripten to support custom JS function execution as a rule type — `src/processor/rule-engine.ts`; conditions prefixed `js:` run in sandboxed QuickJS VM; JSONLogic still handles non-prefixed conditions
+- [x] Create a WebSocket/WebPush APIGW API. WebSocket API GW (`infra/api-gateway.tf`); Lambda handler detects WebSocket events via `event.requestContext.connectionId`; Web Push via `src/notifier/ses-notifier.ts` pushNotify for auth workflow
 
 
 ---
@@ -110,13 +110,8 @@ DELETE /accounts/:accountId/signals/:id       — discard draft; 400 if not draf
 - [x] **Two-tier domain setup model** — `receivingSetupComplete`, `senderSetupComplete`, per-record `DnsRecord` status, all in `Domain` type and API.
 - [ ] **Become FedCM identity provider** — meaning other apps log in via our app. This means registering as a FedCM provider so other apps can log in.
 - [x] **Block phishing-warning and terms-update emails by default** — covered above.
-- [ ] Add `DELETE /domains/:id` endpoint and handler — remove SES email identity if it exists, delete domain record from DynamoDB; inbound mail for that domain will stop routing to SES naturally
-- [ ] **Domain health monitoring** — weekly proactive DNS check across all accounts and domains:
-  - **Primary detection — scheduled DNS resolution**: SES only gives positive signals for identities we've registered; if a customer removes their MX record, email silently stops arriving and SES never tells us. The only reliable detection is us actively resolving DNS. EventBridge weekly rule → Lambda → scan all accounts → all registered domains per account → DNS-resolve each record that belongs to the setup tier the customer has completed → notify if degraded. **Do not write health status back to DynamoDB** — health is computed live, not cached, to avoid stale state discrepancies.
-  - **Secondary detection — SES bounce/complaint feedback**: `feedback-processor.ts` already consumes SNS feedback events. If hard-bounce rate exceeds 5% in a rolling window for a given domain, trigger an on-demand DNS health check for that domain. Not a substitute for the weekly scan but catches real-world delivery failures between scheduled runs.
-  - **SES reputation SNS event**: listen for `AmazonSesAccountReputationNotification` — if SES suspends a sending identity, notify all `owner` and `admin` users immediately.
-  - **On degradation**: email and in-app notify all `owner` and `admin` users with domain name, which records are failing, and correct expected values. Do not halt inbound processing immediately — SES may still route for a period.
-  - **On-demand re-check**: `POST /domains/:id/verify` runs a live DNS check immediately — powers the UI "Re-check DNS" button. The domain GET endpoint also resolves DNS on demand to return current per-record status: `{ name, type, value, currentValue?, status: "verified"|"failing"|"pending" }`. No stale cache, no stored health fields needed.
+- [x] Add `DELETE /domains/:id` endpoint and handler — handler exists at `src/api/app.ts`
+- [x] **Domain health monitoring** — `src/dns/dns-checker.ts`, `src/jobs/domain-health-job.ts`; `POST /domains/:id/verify` for on-demand check; `GET /domains/:id` includes live DNS check; EventBridge weekly cron in `infra/storage.tf`; handler dispatches via `source: "domain-health-job"` in EventBridge event detail
 
 - [ ] **Submit to awesome-privacy-tools** — open a PR at https://github.com/anondotli/awesome-privacy-tools/blob/main/CONTRIBUTING.md to add this project to the list. Follow the contributing guidelines before submitting.
 
@@ -233,11 +228,11 @@ The extension (`extension/`) has a working implementation that assumes a `/alias
 ### What the backend needs to add for extension support
 
 - [x] **`Alias` type** — renamed from `EmailAddressConfig`; now includes `createdForOrigin?: string` for alias-per-site tracking. Stored embedded in the `Account` DynamoDB record, keyed by address.
-- [ ] **`POST /accounts/:accountId/aliases`** — create a new alias (the extension calls this on signup; currently only `PUT` exists). `PUT` upserts by address, so `POST` can be a thin wrapper or the extension can switch to `PUT` directly.
-- [ ] **`GET /accounts/:accountId/aliases?domain=`** — the list endpoint returns all aliases; add a `domain` query param filter so the extension can find the alias for a specific origin without fetching everything.
-- [ ] **`PUT /aliases/:email` with `newEmail` rename** — if the user edits the generated alias before submitting, the extension sends `{ newEmail }`. Requires deleting the old map key and re-inserting — handle this in the `PUT` handler.
-- [ ] **Web Push subscription endpoint** — `POST /accounts/:accountId/push-subscriptions` to register the extension's push endpoint. Required for OTP delivery (see extension TODO).
-- [ ] **Notifier: push `auth` arcs via Web Push** — when an `auth` signal arrives, the notifier should send a Web Push payload `{ code, expiresInMinutes, originDomain }` to all registered push subscriptions for the account, in addition to (or instead of) the existing email notification.
+- [x] **`POST /accounts/:accountId/aliases`** — handler exists in `src/api/app.ts`
+- [x] **`GET /accounts/:accountId/aliases?domain=`** — `?domain=` filter added; filters by `createdForOrigin`
+- [x] **`PATCH /aliases/:address` with `newAddress` rename** — `renameAlias` in `account-database.ts`; copies all sender items to new address, deletes old
+- [x] **Web Push subscription endpoint** — `POST/DELETE /accounts/:accountId/push-subscriptions`
+- [x] **Notifier: push `auth` arcs via Web Push** — `pushNotify` in `ses-notifier.ts` fires for `auth` workflow; handles 410 Gone by deleting expired subscriptions
 - These are all **free tier** per the pricing strategy.
 
 ### What the extension needs to fix

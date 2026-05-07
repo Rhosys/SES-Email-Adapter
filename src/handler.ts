@@ -1,4 +1,4 @@
-import type { APIGatewayProxyEventV2, SQSEvent, Context, APIGatewayProxyResultV2 } from "aws-lambda";
+import type { APIGatewayProxyEventV2, SQSEvent, Context, APIGatewayProxyResultV2, EventBridgeEvent } from "aws-lambda";
 import { BedrockRuntimeClient } from "@aws-sdk/client-bedrock-runtime";
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 import { SignalClassifier } from "./classifier/classifier.js";
@@ -9,10 +9,12 @@ import { AccountDatabase } from "./database/account-database.js";
 import { ArcDatabase } from "./database/arc-database.js";
 import { ProcessingDatabase } from "./database/processing-database.js";
 import { ProcessorDatabaseAdapter, ApiDatabaseAdapter } from "./database/adapters.js";
+import { AuditDatabase } from "./database/audit-database.js";
 import { SESv2Client, SendEmailCommand } from "@aws-sdk/client-sesv2";
 import { SesNotifier } from "./notifier/ses-notifier.js";
 import { SesForwarder } from "./notifier/ses-forwarder.js";
 import { FeedbackProcessor } from "./notifier/feedback-processor.js";
+import { handler as domainHealthHandler } from "./jobs/domain-health-job.js";
 import type { VerificationMailer } from "./api/app.js";
 import { AuthressAuthService } from "./api/authress-auth.js";
 import { AuthressAccessService } from "./api/authress-access.js";
@@ -52,6 +54,7 @@ const classifier = new SignalClassifier(bedrock);
 const accountDb = new AccountDatabase();
 const arcDb = new ArcDatabase();
 const processingDb = new ProcessingDatabase();
+const auditDb = new AuditDatabase();
 
 const processor = new SignalProcessor({
   store: new ProcessorDatabaseAdapter(arcDb, accountDb, processingDb),
@@ -92,7 +95,7 @@ const sesVerificationMailer: VerificationMailer = {
 };
 
 const app = createApp({
-  store: new ApiDatabaseAdapter(arcDb, accountDb),
+  store: new ApiDatabaseAdapter(arcDb, accountDb, auditDb),
   auth: new AuthressAuthService(),
   access: new AuthressAccessService(),
   verificationMailer: sesVerificationMailer,
@@ -103,9 +106,15 @@ const app = createApp({
 // ---------------------------------------------------------------------------
 
 export async function handler(
-  event: APIGatewayProxyEventV2 | SQSEvent,
+  event: APIGatewayProxyEventV2 | SQSEvent | EventBridgeEvent<string, { source?: string }>,
   _context: Context,
 ): Promise<APIGatewayProxyResultV2 | void> {
+  if (isEventBridgeEvent(event)) {
+    if ((event as EventBridgeEvent<string, { source?: string }>).detail?.source === "domain-health-job") {
+      await domainHealthHandler();
+    }
+    return;
+  }
   if (isSqsEvent(event)) {
     if (isFeedbackEvent(event)) {
       await feedbackProcessor.process(event);
@@ -120,6 +129,10 @@ export async function handler(
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+function isEventBridgeEvent(event: unknown): event is EventBridgeEvent<string, unknown> {
+  return typeof event === "object" && event !== null && "source" in event && "detail-type" in event;
+}
 
 function isSqsEvent(event: unknown): event is SQSEvent {
   return (

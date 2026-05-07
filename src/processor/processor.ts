@@ -1,6 +1,6 @@
 import { randomUUID } from "crypto";
 import type { SQSEvent } from "aws-lambda";
-import type { Signal, Arc, Rule, Workflow, WorkflowData, Alias, AccountFilteringConfig, SignalSource, SchedulingData, SignalStatus, Domain, ArcUrgency, SenderFilterMode, MatchedRuleResult } from "../types/index.js";
+import type { Signal, Arc, Rule, Workflow, WorkflowData, Alias, AliasSender, SenderMode, AccountFilteringConfig, SignalSource, SchedulingData, SignalStatus, Domain, ArcUrgency, SenderFilterMode, MatchedRuleResult } from "../types/index.js";
 import type { MimeParser } from "./mime.js";
 import type { SignalClassifier } from "../classifier/classifier.js";
 import { getETLD1, assignSystemLabels, DEFAULT_SPAM_SCORE_THRESHOLD } from "./filter.js";
@@ -26,6 +26,9 @@ export interface ProcessorDatabase {
   listEnabledRules(accountId: string): Promise<Rule[]>;
   getProcessorAccountContext(accountId: string, recipientAddress: string): Promise<ProcessorAccountContext>;
   saveAlias(alias: Alias): Promise<Alias>;
+  getSender(accountId: string, address: string, domain: string): Promise<AliasSender | null>;
+  saveSender(accountId: string, address: string, domain: string, mode: SenderMode): Promise<void>;
+  getTemplate(accountId: string, id: string): Promise<import("../types/index.js").EmailTemplate | null>;
   updateGlobalReputation(domain: string, update: { wasSpam: boolean; wasBlocked: boolean }): Promise<void>;
   getDomainByName(accountId: string, domainName: string): Promise<Pick<Domain, "senderSetupComplete"> | null>;
 }
@@ -36,7 +39,7 @@ export interface ArcMatcher {
 }
 
 export interface RuleEvaluator {
-  evaluate(rule: Rule, context: { signal: Signal; arc: Arc; isMatchedArc: boolean }): boolean;
+  evaluate(rule: Rule, context: { signal: Signal; arc: Arc; isMatchedArc: boolean }): Promise<boolean>;
 }
 
 export interface Notifier {
@@ -105,6 +108,8 @@ interface ProcessingOutcome {
   forwardAddresses: string[];
   additionalLabels: string[];
   doPong: boolean;
+  autoReplyTemplateIds: string[];
+  autoDraftTemplateIds: string[];
 }
 
 function emptyOutcome(): ProcessingOutcome {
@@ -118,27 +123,29 @@ function emptyOutcome(): ProcessingOutcome {
     forwardAddresses: [],
     additionalLabels: [],
     doPong: false,
+    autoReplyTemplateIds: [],
+    autoDraftTemplateIds: [],
   };
 }
 
-function applyRules(
+async function applyRules(
   rules: Rule[],
   context: { signal: Signal; arc: Arc; isMatchedArc: boolean },
   evaluator: RuleEvaluator,
-): MatchedRuleResult[] {
+): Promise<MatchedRuleResult[]> {
   const matchedRules: MatchedRuleResult[] = [];
   for (const rule of rules) {
-    if (!evaluator.evaluate(rule, context)) continue;
+    if (!await evaluator.evaluate(rule, context)) continue;
     const actions = rule.actions.filter((a) => !a.disabled).map(({ type, value }) => ({ type, ...(value !== undefined ? { value } : {}) }));
     const labelsAdded = actions.filter((a) => a.type === "assign_label" && a.value).map((a) => a.value!);
-    const statusChange = (
+    const statusChange: MatchedRuleResult["statusChange"] = (
       actions.some((a) => a.type === "block")      ? "blocked"     :
       actions.some((a) => a.type === "quarantine") ? "quarantined" :
       actions.some((a) => a.type === "archive")    ? "archived"    :
       actions.some((a) => a.type === "delete")     ? "deleted"     :
       undefined
-    ) satisfies MatchedRuleResult["statusChange"];
-    matchedRules.push({ ruleId: rule.id, actions, labelsAdded, statusChange });
+    );
+    matchedRules.push({ ruleId: rule.id, actions, labelsAdded, ...(statusChange ? { statusChange } : {}) });
     // assign_workflow mutates the arc so subsequent rules evaluate against the updated workflow
     const workflowAction = actions.find((a) => a.type === "assign_workflow");
     if (workflowAction?.value) context.arc.workflow = workflowAction.value as Workflow;
@@ -171,6 +178,8 @@ function deriveOutcome(matchedRules: MatchedRuleResult[]): ProcessingOutcome {
         case "assign_label":          if (action.value) outcome.additionalLabels.push(action.value); break;
         case "forward":               if (action.value) outcome.forwardAddresses.push(action.value); break;
         case "pong":                  outcome.doPong = true; break;
+        case "auto_reply":            if (action.value) outcome.autoReplyTemplateIds.push(action.value); break;
+        case "auto_draft":            if (action.value) outcome.autoDraftTemplateIds.push(action.value); break;
       }
     }
   }
@@ -300,8 +309,11 @@ export class SignalProcessor {
 
     const now = new Date().toISOString();
 
-    // 4. Fetch account context
-    const accountCtx = await this.store.getProcessorAccountContext(accountId, recipientAddress);
+    // 4. Fetch account context + sender entry in parallel
+    const [accountCtx, senderEntry] = await Promise.all([
+      this.store.getProcessorAccountContext(accountId, recipientAddress),
+      this.store.getSender(accountId, recipientAddress, senderETLD1),
+    ]);
     const ttl = accountCtx.retentionDays > 0
       ? Math.floor(Date.now() / 1000) + accountCtx.retentionDays * 86400
       : undefined;
@@ -362,13 +374,15 @@ export class SignalProcessor {
       : accountCtx.filtering?.newAddressHandling === "block_until_approved"
         ? "notify_new"
         : "allow_all";
+    // When no alias exists for the recipient, sender entries don't apply — treat as no entry
+    const effectiveSenderEntry = emailConfig ? senderEntry : null;
     const systemLabels = assignSystemLabels({
       workflow: classification.workflow,
       workflowData: classification.workflowData,
       spamScore: classification.spamScore,
       spamScoreThreshold,
       senderETLD1,
-      approvedSenders: emailConfig?.approvedSenders ?? [],
+      senderEntry: effectiveSenderEntry,
       filterMode: effectiveFilterMode,
       hasSentMessages: (arc.sentMessageIds?.length ?? 0) > 0,
     });
@@ -394,7 +408,7 @@ export class SignalProcessor {
 
     // 10. Evaluate all rules (system rules seeded at low position numbers, user rules at higher positions)
     const rules = await this.store.listEnabledRules(accountId);
-    const matchedRules = applyRules(rules, { signal: signalShell, arc, isMatchedArc }, this.ruleEvaluator);
+    const matchedRules = await applyRules(rules, { signal: signalShell, arc, isMatchedArc }, this.ruleEvaluator);
     const outcome = deriveOutcome(matchedRules);
 
     const buildArgs = { accountId, sesMessageId, recipientAddress, parsed, classification, s3Key, receivedAt: timestamp, now, ...(ttl !== undefined ? { ttl } : {}) };
@@ -485,7 +499,75 @@ export class SignalProcessor {
       }
     }
 
-    // 15. Notify
+    // 15. Auto-reply (fire-and-forget composed emails from templates)
+    if (this.testReplier && outcome.autoReplyTemplateIds.length > 0) {
+      const recipientDomain = recipientAddress.split("@")[1] ?? "";
+      const domain = await this.store.getDomainByName(accountId, recipientDomain);
+      if (domain?.senderSetupComplete) {
+        const vars = {
+          "signal.subject": parsed.subject,
+          "sender.name": parsed.from.name ?? "",
+          "sender.address": parsed.from.address,
+          "arc.workflow": classification.workflow,
+        };
+        for (const templateId of outcome.autoReplyTemplateIds) {
+          const tmpl = await this.store.getTemplate(accountId, templateId);
+          if (!tmpl) continue;
+          const replyResult = await this.testReplier.pong({
+            to: parsed.from.address,
+            from: recipientAddress,
+            subject: renderTemplate(tmpl.subject, vars),
+            body: renderTemplate(tmpl.body, vars),
+            inReplyTo: sesMessageId,
+          }).catch((err) => { console.error("Auto-reply failed:", err); return null; });
+          if (replyResult) {
+            arc.sentMessageIds = [...(arc.sentMessageIds ?? []), replyResult.messageId];
+            await this.store.saveArc(arc);
+          }
+        }
+      }
+    }
+
+    // 16. Auto-draft (create held draft signals from templates)
+    if (outcome.autoDraftTemplateIds.length > 0) {
+      const vars = {
+        "signal.subject": parsed.subject,
+        "sender.name": parsed.from.name ?? "",
+        "sender.address": parsed.from.address,
+        "arc.workflow": classification.workflow,
+      };
+      for (const templateId of outcome.autoDraftTemplateIds) {
+        const tmpl = await this.store.getTemplate(accountId, templateId);
+        if (!tmpl) continue;
+        const draft: Signal = {
+          id: `USR#${randomUUID()}`,
+          arcId: arc.id,
+          accountId,
+          source: "user",
+          status: "draft",
+          receivedAt: now,
+          from: { address: recipientAddress },
+          to: [parsed.from],
+          cc: [],
+          subject: renderTemplate(tmpl.subject, vars),
+          textBody: renderTemplate(tmpl.body, vars),
+          attachments: [],
+          headers: {},
+          recipientAddress: parsed.from.address,
+          workflow: classification.workflow,
+          workflowData: classification.workflowData,
+          spamScore: 0,
+          summary: "",
+          classificationModelId: "",
+          s3Key: "",
+          createdAt: now,
+          ...(ttl !== undefined ? { ttl } : {}),
+        };
+        await this.store.saveSignal(draft);
+      }
+    }
+
+    // 17. Notify
     if (this.notifier && !outcome.suppressNotification) {
       await this.notifier.notify(accountId, arc, signal).catch((err) => {
         console.error("Notification failed:", err);
@@ -506,29 +588,27 @@ export class SignalProcessor {
     defaultFilterMode: AccountFilteringConfig["defaultFilterMode"] = "notify_new",
   ): Promise<void> {
     const now = new Date().toISOString();
-    if (existing) {
-      await this.store.saveAlias({
-        ...existing,
-        approvedSenders: [...existing.approvedSenders, senderETLD1],
-        updatedAt: now,
-      });
-    } else {
+    if (!existing) {
       await this.store.saveAlias({
         id: randomUUID(),
         accountId,
         address,
         filterMode: defaultFilterMode,
-        approvedSenders: [senderETLD1],
         createdAt: now,
         updatedAt: now,
       });
     }
+    await this.store.saveSender(accountId, address, senderETLD1, "allow");
   }
 }
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+function renderTemplate(text: string, vars: Record<string, string>): string {
+  return text.replace(/\{\{([^}]+)\}\}/g, (_, key: string) => vars[key.trim()] ?? "");
+}
 
 function buildSignal(opts: {
   arcId?: string;
