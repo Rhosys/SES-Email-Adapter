@@ -14,6 +14,7 @@ const AccountRole = z.enum(["owner", "admin", "member", "viewer"]);
 const RuleActionType = z.enum([
   "assign_label", "assign_workflow", "archive", "delete", "forward",
   "block", "quarantine", "set_urgency", "suppress_notification", "pong", "approve_sender",
+  "auto_reply", "auto_draft",
 ]);
 const RuleStatus = z.enum(["enabled", "disabled"]);
 
@@ -105,20 +106,20 @@ export type UpdateLabelRequest = z.infer<typeof UpdateLabelRequest>;
 
 export const CreateRuleRequest = z.object({
   name: z.string(),
-  condition: z.string().optional(),
+  condition: z.string().max(10_240).optional(),
   actions: z.array(RuleActionSchema).min(1),
   priorityOrder: z.number().int().min(0).optional(),
-  tags: z.record(z.string()).optional(),
+  tags: z.record(z.string(), z.string()).optional(),
 });
 export type CreateRuleRequest = z.infer<typeof CreateRuleRequest>;
 
 export const UpdateRuleRequest = z.object({
   name: z.string().optional(),
-  condition: z.string().optional(),
+  condition: z.string().max(10_240).optional(),
   actions: z.array(RuleActionSchema).optional(),
   priorityOrder: z.number().int().min(0).optional(),
   status: RuleStatus.optional(),
-  tags: z.record(z.string()).optional(),
+  tags: z.record(z.string(), z.string()).optional(),
 });
 export type UpdateRuleRequest = z.infer<typeof UpdateRuleRequest>;
 
@@ -139,12 +140,47 @@ export const CreateAliasRequest = z.object({
 export type CreateAliasRequest = z.infer<typeof CreateAliasRequest>;
 
 export const UpdateAliasRequest = z.object({
+  newAddress: z.string().email().optional(),
   filterMode: SenderFilterMode.optional(),
-  approvedSenders: z.array(z.string()).optional(),
   spamScoreThreshold: z.number().min(0).max(1).optional(),
   createdForOrigin: z.string().optional(),
 });
 export type UpdateAliasRequest = z.infer<typeof UpdateAliasRequest>;
+
+// ---- Alias Senders ----
+
+export const CreateSenderRequest = z.object({
+  domain: z.string(),
+  mode: z.enum(["allow", "block"]),
+});
+export type CreateSenderRequest = z.infer<typeof CreateSenderRequest>;
+
+// ---- Email Templates ----
+
+export const CreateTemplateRequest = z.object({
+  name: z.string().min(1),
+  subject: z.string(),
+  body: z.string(),
+});
+export type CreateTemplateRequest = z.infer<typeof CreateTemplateRequest>;
+
+export const UpdateTemplateRequest = z.object({
+  name: z.string().min(1).optional(),
+  subject: z.string().optional(),
+  body: z.string().optional(),
+});
+export type UpdateTemplateRequest = z.infer<typeof UpdateTemplateRequest>;
+
+// ---- Push Subscriptions ----
+
+export const CreatePushSubscriptionRequest = z.object({
+  endpoint: z.string().url(),
+  keys: z.object({
+    p256dh: z.string(),
+    auth: z.string(),
+  }),
+});
+export type CreatePushSubscriptionRequest = z.infer<typeof CreatePushSubscriptionRequest>;
 
 // ---- Account ----
 

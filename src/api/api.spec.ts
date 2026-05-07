@@ -71,6 +71,20 @@ function makeStore(): ApiDatabase {
     getVerifiedForwardingAddress: vi.fn().mockResolvedValue(null),
     saveVerifiedForwardingAddress: vi.fn().mockResolvedValue(undefined),
     deleteVerifiedForwardingAddress: vi.fn().mockResolvedValue(undefined),
+    updateDomainHealth: vi.fn().mockResolvedValue(undefined),
+    renameAlias: vi.fn().mockResolvedValue(makeAlias()),
+    saveSender: vi.fn().mockResolvedValue(undefined),
+    removeSender: vi.fn().mockResolvedValue(undefined),
+    listSenders: vi.fn().mockResolvedValue([]),
+    createTemplate: vi.fn().mockResolvedValue(undefined),
+    getTemplate: vi.fn().mockResolvedValue(null),
+    updateTemplate: vi.fn().mockResolvedValue(undefined),
+    deleteTemplate: vi.fn().mockResolvedValue(undefined),
+    listTemplates: vi.fn().mockResolvedValue([]),
+    savePushSubscription: vi.fn().mockResolvedValue(undefined),
+    listPushSubscriptions: vi.fn().mockResolvedValue([]),
+    deletePushSubscription: vi.fn().mockResolvedValue(undefined),
+    listAuditEvents: vi.fn().mockResolvedValue({ items: [] }),
   };
 }
 
@@ -92,7 +106,6 @@ function makeAlias(overrides: Partial<Alias> = {}): Alias {
     accountId: TEST_ACCOUNT_ID,
     address: "user@example.com",
     filterMode: "notify_new",
-    approvedSenders: ["amazon.com", "google.com"],
     createdAt: "2024-01-01T00:00:00Z",
     updatedAt: "2024-01-01T00:00:00Z",
     ...overrides,
@@ -866,20 +879,15 @@ describe("API", () => {
   // Search
   // -------------------------------------------------------------------------
 
-  describe("GET /accounts/:accountId/search", () => {
+  describe("GET /accounts/:accountId/arcs?q=", () => {
     it("returns Arc search results in named envelope", async () => {
       vi.mocked(store.searchArcs).mockResolvedValueOnce({ items: [makeArc()] });
-      const res = await req(app, "GET", `${A}/search?q=invoice+from+stripe`);
+      const res = await req(app, "GET", `${A}/arcs?q=invoice+from+stripe`);
       expect(res.status).toBe(200);
       const body = await res.json() as { arcs: unknown[]; pagination: { cursor: null } };
       expect(body.arcs).toHaveLength(1);
       expect(body.pagination).toEqual({ cursor: null });
       expect(store.searchArcs).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "invoice from stripe", expect.any(Object));
-    });
-
-    it("returns 400 when query is missing", async () => {
-      const res = await req(app, "GET", `${A}/search`);
-      expect(res.status).toBe(400);
     });
   });
 
@@ -1184,9 +1192,7 @@ describe("API", () => {
         makeSignal({ status: "blocked", from: { address: "noreply@mail.amazon.com" }, recipientAddress: "me@mydomain.com" }),
       );
       await req(app, "POST", `${A}/arcs`, { body: { signalId: "SES#msg-001", approveSender: true } });
-      const saved = vi.mocked(store.upsertAlias).mock.calls[0]![0] as Alias;
-      expect(saved.approvedSenders).toContain("amazon.com");
-      expect(saved.address).toBe("me@mydomain.com");
+      expect(store.saveSender).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "me@mydomain.com", "amazon.com", "allow");
     });
 
     it("updates filter mode when updateFilterMode is provided", async () => {
@@ -1196,20 +1202,6 @@ describe("API", () => {
       expect(saved.filterMode).toBe("allow_all");
     });
 
-    it("preserves existing approved senders when approving a new one", async () => {
-      vi.mocked(store.getSignal).mockResolvedValueOnce(
-        makeSignal({ status: "blocked", from: { address: "support@github.com" }, recipientAddress: "user@example.com" }),
-      );
-      vi.mocked(store.getAlias).mockResolvedValueOnce(
-        makeAlias({ approvedSenders: ["amazon.com", "google.com"] }),
-      );
-      await req(app, "POST", `${A}/arcs`, { body: { signalId: "SES#msg-001", approveSender: true } });
-      const saved = vi.mocked(store.upsertAlias).mock.calls[0]![0] as Alias;
-      expect(saved.approvedSenders).toContain("amazon.com");
-      expect(saved.approvedSenders).toContain("google.com");
-      expect(saved.approvedSenders).toContain("github.com");
-    });
-
     it("does not modify aliases when neither approveSender nor updateFilterMode is set", async () => {
       vi.mocked(store.getSignal).mockResolvedValueOnce(makeSignal({ status: "blocked" }));
       await req(app, "POST", `${A}/arcs`, { body: { signalId: "SES#msg-001" } });
@@ -1217,26 +1209,14 @@ describe("API", () => {
       expect(store.getAlias).not.toHaveBeenCalled();
     });
 
-    it("does not add sender to approvedSenders when approveSender is false and updateFilterMode is set", async () => {
+    it("does not call saveSender when approveSender is false and updateFilterMode is set", async () => {
       vi.mocked(store.getSignal).mockResolvedValueOnce(
         makeSignal({ status: "blocked", from: { address: "news@amazon.com" }, recipientAddress: "me@mydomain.com" }),
       );
       await req(app, "POST", `${A}/arcs`, { body: { signalId: "SES#msg-001", updateFilterMode: "allow_all" } });
       const saved = vi.mocked(store.upsertAlias).mock.calls[0]![0] as Alias;
       expect(saved.filterMode).toBe("allow_all");
-      expect(saved.approvedSenders).not.toContain("amazon.com");
-    });
-
-    it("does not add duplicate sender when sender is already in approvedSenders", async () => {
-      vi.mocked(store.getSignal).mockResolvedValueOnce(
-        makeSignal({ status: "blocked", from: { address: "deals@amazon.com" }, recipientAddress: "user@example.com" }),
-      );
-      vi.mocked(store.getAlias).mockResolvedValueOnce(
-        makeAlias({ approvedSenders: ["amazon.com", "google.com"] }), // amazon.com already approved
-      );
-      await req(app, "POST", `${A}/arcs`, { body: { signalId: "SES#msg-001", approveSender: true } });
-      const saved = vi.mocked(store.upsertAlias).mock.calls[0]![0] as Alias;
-      expect(saved.approvedSenders.filter((s) => s === "amazon.com")).toHaveLength(1); // no duplicate
+      expect(store.saveSender).not.toHaveBeenCalled();
     });
   });
 

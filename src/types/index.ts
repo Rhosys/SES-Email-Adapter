@@ -249,13 +249,43 @@ export interface Alias {
   accountId: string;
   address: string;              // The recipient address, e.g. me@mydomain.com
   filterMode: SenderFilterMode;
-  approvedSenders: string[];    // eTLD+1 domains (e.g. "amazon.com", "google.com")
   // Spam score at which a signal is treated as spam (0–1). Overrides account default when set.
   spamScoreThreshold?: number;
   // eTLD+1 of the site this alias was created for (set by the extension on alias generation)
   createdForOrigin?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+// Approved/blocked sender domain per alias — stored as individual DynamoDB items
+export type SenderMode = "allow" | "block";
+
+export interface AliasSender {
+  accountId: string;
+  aliasAddress: string;
+  domain: string;   // eTLD+1
+  mode: SenderMode;
+  addedAt: string;
+}
+
+// Email template for auto_reply and auto_draft rule actions
+export interface EmailTemplate {
+  id: string;
+  accountId: string;
+  name: string;
+  subject: string;   // supports {{signal.subject}}, {{sender.name}}, {{sender.address}}, {{arc.workflow}}
+  body: string;      // same interpolation; unrecognised tokens render as ""
+  createdAt: string;
+  updatedAt: string;
+}
+
+// Web Push subscription registered by the extension
+export interface PushSubscription {
+  id: string;
+  accountId: string;
+  endpoint: string;
+  keys: { p256dh: string; auth: string };
+  createdAt: string;
 }
 
 // Account-level filtering defaults
@@ -423,7 +453,9 @@ export type RuleActionType =
   | "set_urgency"
   | "suppress_notification"
   | "pong"
-  | "approve_sender";
+  | "approve_sender"
+  | "auto_reply"   // send immediately using template (value = templateId)
+  | "auto_draft";  // create draft signal for human review (value = templateId)
 
 // System-assigned labels. Return type of assignSystemLabels() — adding here requires explicit approval.
 // The compile-time gate: assignSystemLabels() returns SystemLabel[], so any unlisted label is a type error.

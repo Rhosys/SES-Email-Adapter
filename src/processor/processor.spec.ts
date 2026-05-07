@@ -19,8 +19,13 @@ const TEST_ACCOUNT_ID = "acct-001";
 // Tests that specifically test sender filtering use explicit mockResolvedValueOnce overrides.
 const DEFAULT_EMAIL_CONFIG: Alias = {
   id: "cfg-default", accountId: "acct-test-001", address: "user@example.com",
-  filterMode: "notify_new", approvedSenders: ["example.com"],
+  filterMode: "notify_new",
   createdAt: "2024-01-01T00:00:00Z", updatedAt: "2024-01-01T00:00:00Z",
+};
+
+// Default AliasSender: marks example.com as an allowed sender for the default alias.
+const DEFAULT_SENDER_ENTRY: import("../types/index.js").AliasSender = {
+  accountId: "acct-test-001", aliasAddress: "user@example.com", domain: "example.com", mode: "allow", addedAt: "2024-01-01T00:00:00Z",
 };
 const DEFAULT_CTX = { retentionDays: 0, filtering: null, emailConfig: DEFAULT_EMAIL_CONFIG, registeredDomains: [], userEmails: [] };
 
@@ -34,6 +39,9 @@ function makeStore(): ProcessorDatabase {
     listEnabledRules: vi.fn().mockResolvedValue(SYSTEM_RULES),
     getProcessorAccountContext: vi.fn().mockResolvedValue(DEFAULT_CTX),
     saveAlias: vi.fn().mockImplementation((a: Alias) => Promise.resolve(a)),
+    getSender: vi.fn().mockResolvedValue(DEFAULT_SENDER_ENTRY),
+    saveSender: vi.fn().mockResolvedValue(undefined),
+    getTemplate: vi.fn().mockResolvedValue(null),
     updateGlobalReputation: vi.fn().mockResolvedValue(undefined),
     getDomainByName: vi.fn().mockResolvedValue(null),
   };
@@ -51,11 +59,15 @@ function makeAlias(overrides: Partial<Alias> = {}): Alias {
     accountId: TEST_ACCOUNT_ID,
     address: "user@example.com",
     filterMode: "notify_new",
-    approvedSenders: ["example.com"],
     createdAt: "2024-01-01T00:00:00Z",
     updatedAt: "2024-01-01T00:00:00Z",
     ...overrides,
   };
+}
+
+// Helper to make an AliasSender entry (approved sender for a given alias+domain).
+function makeSenderEntry(domain: string, aliasAddress = "user@example.com"): import("../types/index.js").AliasSender {
+  return { accountId: TEST_ACCOUNT_ID, aliasAddress, domain, mode: "allow", addedAt: "2024-01-01T00:00:00Z" };
 }
 
 function makeMimeParser(): MimeParser {
@@ -758,6 +770,8 @@ describe("SignalProcessor", () => {
       vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce(
         { ...DEFAULT_CTX, emailConfig: null },
       );
+      // No existing sender entry for a brand-new address
+      vi.mocked(store.getSender).mockResolvedValueOnce(null);
       await processor.process(makeSqsEvent([{}]));
 
       expect(store.saveSignal).toHaveBeenCalledOnce();
@@ -766,13 +780,14 @@ describe("SignalProcessor", () => {
 
       const savedConfig = vi.mocked(store.saveAlias).mock.calls[0]![0] as Alias;
       expect(savedConfig.filterMode).toBe("notify_new");
-      expect(savedConfig.approvedSenders).toContain("example.com"); // sender domain from mimeParser mock
+      expect(store.saveSender).toHaveBeenCalledWith(TEST_ACCOUNT_ID, expect.any(String), "example.com", "allow");
     });
 
     it("allows signal from a known sender (eTLD+1 in approved list)", async () => {
       vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce(
-        { ...DEFAULT_CTX, emailConfig: makeAlias({ approvedSenders: ["example.com"] }) },
+        { ...DEFAULT_CTX, emailConfig: makeAlias() },
       );
+      // getSender returns an approved entry for example.com (default mock already does this)
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -783,8 +798,10 @@ describe("SignalProcessor", () => {
 
     it("quarantines signal from unknown sender by default (notify user for review)", async () => {
       vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce(
-        { ...DEFAULT_CTX, emailConfig: makeAlias({ approvedSenders: ["trusted.com"] }) }, // sender is example.com, not trusted.com
+        { ...DEFAULT_CTX, emailConfig: makeAlias() }, // sender is example.com, not a trusted sender
       );
+      // No approved entry for example.com on this alias
+      vi.mocked(store.getSender).mockResolvedValueOnce(null);
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -797,8 +814,9 @@ describe("SignalProcessor", () => {
 
     it("calls notifyBlocked when a signal is quarantined", async () => {
       vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce(
-        { ...DEFAULT_CTX, emailConfig: makeAlias({ approvedSenders: ["other.com"] }) },
+        { ...DEFAULT_CTX, emailConfig: makeAlias() },
       );
+      vi.mocked(store.getSender).mockResolvedValueOnce(null);
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -808,8 +826,9 @@ describe("SignalProcessor", () => {
 
     it("does NOT call notifyBlocked when a signal is silently blocked by a block rule", async () => {
       vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce(
-        { ...DEFAULT_CTX, emailConfig: makeAlias({ approvedSenders: ["other.com"] }) },
+        { ...DEFAULT_CTX, emailConfig: makeAlias() },
       );
+      vi.mocked(store.getSender).mockResolvedValueOnce(null);
       vi.mocked(store.listEnabledRules).mockResolvedValueOnce([
         makeRule({ condition: JSON.stringify({ "in": ["system:sender:untrusted", { var: "arc.labels" }] }), actions: [{ type: "block" }] }),
       ]);
@@ -823,8 +842,9 @@ describe("SignalProcessor", () => {
 
     it("does not fail when notifyBlocked throws", async () => {
       vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce(
-        { ...DEFAULT_CTX, emailConfig: makeAlias({ approvedSenders: [] }) },
+        { ...DEFAULT_CTX, emailConfig: makeAlias() },
       );
+      vi.mocked(store.getSender).mockResolvedValueOnce(null);
       vi.mocked(notifier.notifyBlocked).mockRejectedValueOnce(new Error("SES error"));
 
       await processor.process(makeSqsEvent([{}]));
@@ -857,8 +877,9 @@ describe("SignalProcessor", () => {
 
     it("strict mode quarantines a known sender with high spam score (default disposition)", async () => {
       vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce(
-        { ...DEFAULT_CTX, emailConfig: makeAlias({ filterMode: "strict", approvedSenders: ["example.com"] }) },
+        { ...DEFAULT_CTX, emailConfig: makeAlias({ filterMode: "strict" }) },
       );
+      // Sender is known/approved but spam score is too high in strict mode
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
         ...validClassification,
         spamScore: 0.95,
@@ -873,20 +894,21 @@ describe("SignalProcessor", () => {
 
     it("allow_all mode auto-approves new sender without blocking", async () => {
       vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce(
-        { ...DEFAULT_CTX, emailConfig: makeAlias({ filterMode: "allow_all", approvedSenders: [] }) },
+        { ...DEFAULT_CTX, emailConfig: makeAlias({ filterMode: "allow_all" }) },
       );
+      vi.mocked(store.getSender).mockResolvedValueOnce(null); // sender not yet in list
 
       await processor.process(makeSqsEvent([{}]));
 
       expect(store.saveArc).toHaveBeenCalledOnce();
-      const savedConfig = vi.mocked(store.saveAlias).mock.calls[0]![0] as Alias;
-      expect(savedConfig.approvedSenders).toContain("example.com");
+      expect(store.saveSender).toHaveBeenCalledWith(TEST_ACCOUNT_ID, expect.any(String), "example.com", "allow");
     });
 
     it("saves blocked signal with classification data for user review", async () => {
       vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce(
-        { ...DEFAULT_CTX, emailConfig: makeAlias({ approvedSenders: [] }) },
+        { ...DEFAULT_CTX, emailConfig: makeAlias() },
       );
+      vi.mocked(store.getSender).mockResolvedValueOnce(null);
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -920,8 +942,9 @@ describe("SignalProcessor", () => {
   describe("global reputation tracking", () => {
     it("updates reputation with wasBlocked=true for blocked signals", async () => {
       vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce(
-        { ...DEFAULT_CTX, emailConfig: makeAlias({ approvedSenders: [] }) },
+        { ...DEFAULT_CTX, emailConfig: makeAlias() },
       );
+      vi.mocked(store.getSender).mockResolvedValueOnce(null);
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -1441,11 +1464,12 @@ describe("SignalProcessor", () => {
 
     it("blocks status emails from untrusted senders (SR-05 priority beats SR-02 quarantine)", async () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(noticeClassification);
-      // Untrusted sender: not in approvedSenders, so SR-02 would quarantine if it won
+      // Untrusted sender: no approved sender entry, so SR-02 would quarantine if it won
       vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce({
         ...DEFAULT_CTX,
-        emailConfig: makeAlias({ approvedSenders: [] }),
+        emailConfig: makeAlias(),
       });
+      vi.mocked(store.getSender).mockResolvedValueOnce(null);
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -1648,7 +1672,6 @@ describe("SignalProcessor", () => {
         ...DEFAULT_CTX,
         emailConfig: makeAlias({
           filterMode: "strict",
-          approvedSenders: ["example.com"],
           spamScoreThreshold: 0.5,
         }),
       });
@@ -1667,7 +1690,7 @@ describe("SignalProcessor", () => {
     it("uses account-level spamScoreThreshold when no per-address override is set", async () => {
       vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce({
         ...DEFAULT_CTX,
-        emailConfig: makeAlias({ filterMode: "strict", approvedSenders: ["example.com"] }),
+        emailConfig: makeAlias({ filterMode: "strict" }),
         filtering: { defaultFilterMode: "notify_new", newAddressHandling: "auto_allow", spamScoreThreshold: 0.6 },
       });
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
@@ -1745,7 +1768,8 @@ describe("SignalProcessor", () => {
         name: "Reclassify as content",
         condition: "true",
         actions: [{ type: "assign_workflow", value: "content" }],
-        position: 0,
+        status: "enabled",
+        priorityOrder: 0,
         createdAt: "2024-01-01T00:00:00Z",
         updatedAt: "2024-01-01T00:00:00Z",
       }]);
@@ -1763,7 +1787,8 @@ describe("SignalProcessor", () => {
         name: "Auto-delete promotions",
         condition: "true",
         actions: [{ type: "delete" }],
-        position: 0,
+        status: "enabled",
+        priorityOrder: 0,
         createdAt: "2024-01-01T00:00:00Z",
         updatedAt: "2024-01-01T00:00:00Z",
       }]);
@@ -1785,7 +1810,8 @@ describe("SignalProcessor", () => {
           { type: "assign_label", value: "archived-auto" },
           { type: "archive" },
         ],
-        position: 0,
+        status: "enabled",
+        priorityOrder: 0,
         createdAt: "2024-01-01T00:00:00Z",
         updatedAt: "2024-01-01T00:00:00Z",
       }]);

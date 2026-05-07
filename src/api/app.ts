@@ -1,7 +1,10 @@
-import { Hono } from "hono";
+import { OpenAPIHono } from "@hono/zod-openapi";
+import type { Context } from "hono";
 import { randomUUID } from "crypto";
 import { getDomain } from "tldts";
-import type { Arc, Signal, View, Label, Rule, Domain, DnsRecord, Account, Page, PageParams, ArcStatus, Workflow, WorkflowData, Alias, SenderFilterMode, VerifiedForwardingAddress, Pagination } from "../types/index.js";
+import { checkDomain } from "../dns/dns-checker.js";
+import type { AuditEvent } from "../database/audit-database.js";
+import type { Arc, Signal, View, Label, Rule, Domain, DnsRecord, Account, Page, PageParams, ArcStatus, Workflow, WorkflowData, Alias, AliasSender, SenderMode, SenderFilterMode, VerifiedForwardingAddress, Pagination, EmailTemplate, PushSubscription } from "../types/index.js";
 import { deriveGroupingKey } from "../processor/processor.js";
 import { zParse } from "./validate.js";
 import {
@@ -14,6 +17,7 @@ import {
   UpdateAccountRequest,
   CreateForwardingAddressRequest, VerifyForwardingAddressRequest,
   InviteUserRequest, UpdateUserRequest,
+  CreateSenderRequest, CreateTemplateRequest, UpdateTemplateRequest, CreatePushSubscriptionRequest,
 } from "./requests.js";
 
 // ---------------------------------------------------------------------------
@@ -97,6 +101,7 @@ export interface ApiDatabase {
   getDomain(accountId: string, id: string): Promise<Domain | null>;
   createDomain(accountId: string, domain: string): Promise<Domain>;
   deleteDomain(accountId: string, id: string): Promise<void>;
+  updateDomainHealth(accountId: string, id: string, health: { receivingHealthy: boolean; senderHealthy: boolean; failingRecords: string[]; lastCheckedAt: string; lastHealthyAt?: string }): Promise<void>;
 
   // Search
   searchArcs(accountId: string, query: string, params: PageParams): Promise<Page<Arc>>;
@@ -111,6 +116,24 @@ export interface ApiDatabase {
   createAlias(alias: Alias): Promise<Alias>;
   upsertAlias(alias: Alias): Promise<Alias>;
   deleteAlias(accountId: string, address: string): Promise<void>;
+  renameAlias(accountId: string, oldAddress: string, newAddress: string): Promise<Alias>;
+
+  // Alias Senders
+  saveSender(accountId: string, address: string, domain: string, mode: SenderMode): Promise<void>;
+  removeSender(accountId: string, address: string, domain: string): Promise<void>;
+  listSenders(accountId: string, address: string): Promise<AliasSender[]>;
+
+  // Templates
+  createTemplate(template: EmailTemplate): Promise<EmailTemplate>;
+  getTemplate(accountId: string, id: string): Promise<EmailTemplate | null>;
+  updateTemplate(accountId: string, id: string, update: Partial<Pick<EmailTemplate, "name" | "subject" | "body">>): Promise<EmailTemplate>;
+  deleteTemplate(accountId: string, id: string): Promise<void>;
+  listTemplates(accountId: string): Promise<EmailTemplate[]>;
+
+  // Push Subscriptions
+  savePushSubscription(sub: PushSubscription): Promise<void>;
+  listPushSubscriptions(accountId: string): Promise<PushSubscription[]>;
+  deletePushSubscription(accountId: string, id: string): Promise<void>;
 
   // Signal status management
   blockSignal(accountId: string, signalId: string): Promise<Signal>;
@@ -124,6 +147,9 @@ export interface ApiDatabase {
   getVerifiedForwardingAddress(accountId: string, address: string): Promise<VerifiedForwardingAddress | null>;
   saveVerifiedForwardingAddress(addr: VerifiedForwardingAddress): Promise<void>;
   deleteVerifiedForwardingAddress(accountId: string, address: string): Promise<void>;
+
+  // Audit
+  listAuditEvents(accountId: string, params: PageParams): Promise<Page<AuditEvent>>;
 }
 
 // ---------------------------------------------------------------------------
@@ -156,9 +182,16 @@ function page<K extends string, T>(key: K, items: T[], nextCursor?: string): Rec
 }
 
 export function createApp({ store, auth, access, verificationMailer }: AppDeps) {
-  const app = new Hono<AppEnv>();
+  const app = new OpenAPIHono<AppEnv>();
 
-  function err(c: Parameters<ReturnType<typeof app.get>>[0], status: number, title: string, errorCode?: string, details?: unknown) {
+  app.doc("/openapi.json", {
+    openapi: "3.1.0",
+    info: { title: "SES Email Adapter", version: "1.0.0" },
+  });
+
+  app.get("/", (c) => c.redirect("/openapi.json", 301));
+
+  function err(c: Context<AppEnv>, status: number, title: string, errorCode?: string, details?: unknown) {
     return c.json(
       { title, ...(errorCode ? { errorCode } : {}), ...(details !== undefined ? { details } : {}) },
       status as 400 | 401 | 403 | 404 | 409 | 501,
@@ -203,6 +236,15 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
   app.get("/accounts/:accountId/arcs", async (c) => {
     const { accountId } = c.get("auth");
     const query = c.req.query();
+    const q = query["q"];
+    if (q) {
+      const params: PageParams = {
+        ...(query["cursor"] ? { cursor: query["cursor"] } : {}),
+        ...(query["limit"] ? { limit: parseInt(query["limit"], 10) } : {}),
+      };
+      const result = await store.searchArcs(accountId, q, params);
+      return c.json(page("arcs", result.items, result.nextCursor));
+    }
     const params: ListArcsParams = {
       ...(query["workflow"] ? { workflow: query["workflow"] as Workflow } : {}),
       ...(query["label"] ? { label: query["label"] } : {}),
@@ -270,7 +312,6 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
         accountId,
         address: signal.recipientAddress,
         filterMode: "notify_new" as SenderFilterMode,
-        approvedSenders: [] as string[],
         createdAt: now,
         updatedAt: now,
       };
@@ -278,11 +319,11 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
       await store.upsertAlias({
         ...base,
         filterMode: body.updateFilterMode ?? base.filterMode,
-        approvedSenders: body.approveSender && !base.approvedSenders.includes(senderETLD1)
-          ? [...base.approvedSenders, senderETLD1]
-          : base.approvedSenders,
         updatedAt: now,
       });
+      if (body.approveSender) {
+        await store.saveSender(accountId, signal.recipientAddress, senderETLD1, "allow");
+      }
     }
 
     return c.json(arc, 201);
@@ -387,7 +428,7 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
     if (signal.accountId !== accountId) return err(c, 403, "Forbidden");
     if (signal.status !== "draft") return err(c, 400, "Only draft signals can be updated", "SIGNAL_NOT_DRAFT");
     const body = await zParse(UpdateSignalRequest, c.req.raw);
-    const updated = await store.updateSignal(accountId, signal.id, body);
+    const updated = await store.updateSignal(accountId, signal.id, body as Parameters<typeof store.updateSignal>[2]);
     return c.json(updated);
   });
 
@@ -495,9 +536,9 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
   app.post("/accounts/:accountId/rules", async (c) => {
     const { accountId } = c.get("auth");
     const body = await zParse(CreateRuleRequest, c.req.raw);
-    const forwardError = await validateForwardTargets(accountId, body.actions, store);
+    const forwardError = await validateForwardTargets(accountId, body.actions as Rule["actions"], store);
     if (forwardError) return err(c, 400, forwardError, "UNVERIFIED_FORWARD_TARGET");
-    const rule = await store.createRule(accountId, body);
+    const rule = await store.createRule(accountId, body as Parameters<typeof store.createRule>[1]);
     return c.json(rule, 201);
   });
 
@@ -508,10 +549,10 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
     if (!rule) return err(c, 404, "Rule not found", "RULE_NOT_FOUND");
     const body = await zParse(UpdateRuleRequest, c.req.raw);
     if (body.actions) {
-      const forwardError = await validateForwardTargets(accountId, body.actions, store);
+      const forwardError = await validateForwardTargets(accountId, body.actions as Rule["actions"], store);
       if (forwardError) return err(c, 400, forwardError, "UNVERIFIED_FORWARD_TARGET");
     }
-    const updated = await store.updateRule(accountId, rule.id, body);
+    const updated = await store.updateRule(accountId, rule.id, body as Parameters<typeof store.updateRule>[2]);
     return c.json(updated);
   });
 
@@ -541,12 +582,41 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
     return c.json(domain, 201);
   });
 
+  app.get("/accounts/:accountId/domains/:id", async (c) => {
+    const { accountId } = c.get("auth");
+    const domain = await store.getDomain(accountId, c.req.param("id"));
+    if (!domain) return err(c, 404, "Domain not found", "DOMAIN_NOT_FOUND");
+    if (domain.accountId !== accountId) return err(c, 403, "Forbidden");
+    const records = await checkDomain(domain);
+    return c.json({ ...domain, records });
+  });
+
   app.get("/accounts/:accountId/domains/:id/records", async (c) => {
     const { accountId } = c.get("auth");
     const domain = await store.getDomain(accountId, c.req.param("id"));
     if (!domain) return err(c, 404, "Domain not found", "DOMAIN_NOT_FOUND");
     if (domain.accountId !== accountId) return err(c, 403, "Forbidden");
     return c.json(buildDnsRecords(domain));
+  });
+
+  app.post("/accounts/:accountId/domains/:id/verify", async (c) => {
+    const { accountId } = c.get("auth");
+    const domain = await store.getDomain(accountId, c.req.param("id"));
+    if (!domain) return err(c, 404, "Domain not found", "DOMAIN_NOT_FOUND");
+    if (domain.accountId !== accountId) return err(c, 403, "Forbidden");
+    const records = await checkDomain(domain);
+    const now = new Date().toISOString();
+    const failingRecords = records.filter((r) => r.status === "failing").map((r) => r.name);
+    const receivingHealthy = records.find((r) => r.type === "MX")?.status === "verified";
+    const senderHealthy = records.filter((r) => r.type !== "MX").every((r) => r.status === "verified");
+    await store.updateDomainHealth(accountId, domain.id, {
+      receivingHealthy,
+      senderHealthy,
+      failingRecords,
+      lastCheckedAt: now,
+      ...(failingRecords.length === 0 ? { lastHealthyAt: now } : {}),
+    });
+    return c.json(records);
   });
 
   app.delete("/accounts/:accountId/domains/:id", async (c) => {
@@ -616,7 +686,9 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
 
   app.get("/accounts/:accountId/aliases", async (c) => {
     const { accountId } = c.get("auth");
-    const aliases = await store.listAliases(accountId);
+    const domain = c.req.query("domain");
+    let aliases = await store.listAliases(accountId);
+    if (domain) aliases = aliases.filter(a => a.createdForOrigin?.includes(domain));
     return c.json(page("aliases", aliases));
   });
 
@@ -639,7 +711,6 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
       accountId,
       address: body.address,
       filterMode: body.filterMode ?? "notify_new",
-      approvedSenders: [],
       ...(body.createdForOrigin !== undefined ? { createdForOrigin: body.createdForOrigin } : {}),
       createdAt: now,
       updatedAt: now,
@@ -651,6 +722,10 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
     const { accountId } = c.get("auth");
     const address = decodeURIComponent(c.req.param("address"));
     const body = await zParse(UpdateAliasRequest, c.req.raw);
+    if (body.newAddress) {
+      const renamed = await store.renameAlias(accountId, address, body.newAddress);
+      return c.json(renamed);
+    }
     const existing = await store.getAlias(accountId, address);
     const now = new Date().toISOString();
     const updated = await store.upsertAlias({
@@ -658,7 +733,6 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
       accountId,
       address,
       filterMode: body.filterMode ?? existing?.filterMode ?? "notify_new",
-      approvedSenders: body.approvedSenders ?? existing?.approvedSenders ?? [],
       ...(body.spamScoreThreshold !== undefined ? { spamScoreThreshold: body.spamScoreThreshold } : existing?.spamScoreThreshold !== undefined ? { spamScoreThreshold: existing.spamScoreThreshold } : {}),
       ...(body.createdForOrigin !== undefined ? { createdForOrigin: body.createdForOrigin } : existing?.createdForOrigin !== undefined ? { createdForOrigin: existing.createdForOrigin } : {}),
       createdAt: existing?.createdAt ?? now,
@@ -671,6 +745,93 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
     const { accountId } = c.get("auth");
     const address = decodeURIComponent(c.req.param("address"));
     await store.deleteAlias(accountId, address);
+    return new Response(null, { status: 204 });
+  });
+
+  // -------------------------------------------------------------------------
+  // Alias Senders  —  /accounts/:accountId/aliases/:address/senders
+  // -------------------------------------------------------------------------
+
+  app.get("/accounts/:accountId/aliases/:address/senders", async (c) => {
+    const { accountId } = c.get("auth");
+    const address = decodeURIComponent(c.req.param("address"));
+    const senders = await store.listSenders(accountId, address);
+    return c.json({ senders });
+  });
+
+  app.post("/accounts/:accountId/aliases/:address/senders", async (c) => {
+    const { accountId } = c.get("auth");
+    const address = decodeURIComponent(c.req.param("address"));
+    const body = await zParse(CreateSenderRequest, c.req.raw);
+    await store.saveSender(accountId, address, body.domain, body.mode);
+    return new Response(null, { status: 201 });
+  });
+
+  app.delete("/accounts/:accountId/aliases/:address/senders/:domain", async (c) => {
+    const { accountId } = c.get("auth");
+    const address = decodeURIComponent(c.req.param("address"));
+    const domain = decodeURIComponent(c.req.param("domain"));
+    await store.removeSender(accountId, address, domain);
+    return new Response(null, { status: 204 });
+  });
+
+  // -------------------------------------------------------------------------
+  // Email Templates  —  /accounts/:accountId/templates
+  // -------------------------------------------------------------------------
+
+  app.get("/accounts/:accountId/templates", async (c) => {
+    const { accountId } = c.get("auth");
+    const templates = await store.listTemplates(accountId);
+    return c.json({ templates });
+  });
+
+  app.post("/accounts/:accountId/templates", async (c) => {
+    const { accountId } = c.get("auth");
+    const body = await zParse(CreateTemplateRequest, c.req.raw);
+    const now = new Date().toISOString();
+    const template = await store.createTemplate({
+      id: randomUUID(), accountId, name: body.name, subject: body.subject, body: body.body,
+      createdAt: now, updatedAt: now,
+    });
+    return c.json(template, 201);
+  });
+
+  app.patch("/accounts/:accountId/templates/:id", async (c) => {
+    const { accountId } = c.get("auth");
+    const body = await zParse(UpdateTemplateRequest, c.req.raw);
+    const existing = await store.getTemplate(accountId, c.req.param("id"));
+    if (!existing) return err(c, 404, "Template not found", "TEMPLATE_NOT_FOUND");
+    const updated = await store.updateTemplate(accountId, c.req.param("id"), body as Parameters<typeof store.updateTemplate>[2]);
+    return c.json(updated);
+  });
+
+  app.delete("/accounts/:accountId/templates/:id", async (c) => {
+    const { accountId } = c.get("auth");
+    const existing = await store.getTemplate(accountId, c.req.param("id"));
+    if (!existing) return err(c, 404, "Template not found", "TEMPLATE_NOT_FOUND");
+    await store.deleteTemplate(accountId, c.req.param("id"));
+    return new Response(null, { status: 204 });
+  });
+
+  // -------------------------------------------------------------------------
+  // Push Subscriptions  —  /accounts/:accountId/push-subscriptions
+  // -------------------------------------------------------------------------
+
+  app.post("/accounts/:accountId/push-subscriptions", async (c) => {
+    const { accountId } = c.get("auth");
+    const body = await zParse(CreatePushSubscriptionRequest, c.req.raw);
+    const sub: PushSubscription = {
+      id: randomUUID(), accountId,
+      endpoint: body.endpoint, keys: body.keys,
+      createdAt: new Date().toISOString(),
+    };
+    await store.savePushSubscription(sub);
+    return c.json(sub, 201);
+  });
+
+  app.delete("/accounts/:accountId/push-subscriptions/:id", async (c) => {
+    const { accountId } = c.get("auth");
+    await store.deletePushSubscription(accountId, c.req.param("id"));
     return new Response(null, { status: 204 });
   });
 
@@ -735,20 +896,16 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
   });
 
   // -------------------------------------------------------------------------
-  // Search  —  /accounts/:accountId/search
+  // Audit  —  /accounts/:accountId/audit
   // -------------------------------------------------------------------------
 
-  app.get("/accounts/:accountId/search", async (c) => {
+  app.get("/accounts/:accountId/audit", async (c) => {
     const { accountId } = c.get("auth");
-    const q = c.req.query("q");
-    if (!q) return err(c, 400, "q is required", "MISSING_FIELD", { field: "q" });
-    const query = c.req.query();
-    const params: PageParams = {
-      ...(query["cursor"] ? { cursor: query["cursor"] } : {}),
-      ...(query["limit"] ? { limit: parseInt(query["limit"], 10) } : {}),
-    };
-    const result = await store.searchArcs(accountId, q, params);
-    return c.json(page("arcs", result.items, result.nextCursor));
+    const cursor = c.req.query("cursor");
+    const rawLimit = c.req.query("limit");
+    const params: PageParams = { ...(cursor ? { cursor } : {}), ...(rawLimit ? { limit: parseInt(rawLimit, 10) } : {}) };
+    const result = await store.listAuditEvents(accountId, params);
+    return c.json(result);
   });
 
   return app;
