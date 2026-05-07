@@ -224,12 +224,12 @@ export type NewAddressHandling =
   | "auto_allow"           // First contact always allowed; sender eTLD+1 auto-approved (default)
   | "block_until_approved"; // New addresses blocked until user explicitly approves via POST /arcs
 
-// How strictly an email address filters incoming signals by sender
+// Default disposition for emails from unknown senders, applied after rules run
 export type SenderFilterMode =
-  | "strict"       // sender eTLD+1 must be approved AND spam score must be low
-  | "sender_match" // sender eTLD+1 must be approved (spam score ignored)
-  | "notify_new"   // allow approved senders, block + notify on new senders (default)
-  | "allow_all";   // no filtering
+  | "allow_all"          // all senders pass through; system:sender:untrusted label suppressed
+  | "quarantine_notify"  // unknown sender → quarantine + email notification (default)
+  | "quarantine_silent"  // unknown sender → quarantine, no notification
+  | "block";             // unknown sender → silent block
 
 // active = visible; quarantined = user notified + shown for review; blocked = silent; draft = user-authored, unsent
 export type SignalStatus = "active" | "blocked" | "quarantined" | "draft";

@@ -13,7 +13,7 @@ function makeCtx(overrides: Partial<SystemLabelContext> = {}): SystemLabelContex
     spamScoreThreshold: DEFAULT_SPAM_SCORE_THRESHOLD,
     senderETLD1: "amazon.com",
     senderEntry: { accountId: "acct-001", aliasAddress: "user@example.com", domain: "amazon.com", mode: "allow", addedAt: "2024-01-01T00:00:00Z" },
-    filterMode: "notify_new",
+    filterMode: "quarantine_notify",
     hasSentMessages: false,
     ...overrides,
   };

@@ -15,11 +15,11 @@ import type { Arc, Rule, Signal, Alias, AccountFilteringConfig } from "../types/
 
 const TEST_ACCOUNT_ID = "acct-001";
 
-// Default context: sender example.com is pre-approved so most tests exercise the happy path without hitting SR-02.
+// Default context: sender example.com is pre-approved so most tests exercise the happy path without triggering the filter-mode fallback.
 // Tests that specifically test sender filtering use explicit mockResolvedValueOnce overrides.
 const DEFAULT_EMAIL_CONFIG: Alias = {
   id: "cfg-default", accountId: "acct-test-001", address: "user@example.com",
-  filterMode: "notify_new",
+  filterMode: "quarantine_notify",
   createdAt: "2024-01-01T00:00:00Z", updatedAt: "2024-01-01T00:00:00Z",
 };
 
@@ -58,7 +58,7 @@ function makeAlias(overrides: Partial<Alias> = {}): Alias {
     id: "cfg-001",
     accountId: TEST_ACCOUNT_ID,
     address: "user@example.com",
-    filterMode: "notify_new",
+    filterMode: "quarantine_notify",
     createdAt: "2024-01-01T00:00:00Z",
     updatedAt: "2024-01-01T00:00:00Z",
     ...overrides,
@@ -779,7 +779,7 @@ describe("SignalProcessor", () => {
       expect(store.saveAlias).toHaveBeenCalledOnce();
 
       const savedConfig = vi.mocked(store.saveAlias).mock.calls[0]![0] as Alias;
-      expect(savedConfig.filterMode).toBe("notify_new");
+      expect(savedConfig.filterMode).toBe("quarantine_notify");
       expect(store.saveSender).toHaveBeenCalledWith(TEST_ACCOUNT_ID, expect.any(String), "example.com", "allow");
     });
 
@@ -822,6 +822,19 @@ describe("SignalProcessor", () => {
 
       expect(notifier.notifyBlocked).toHaveBeenCalledOnce();
       expect(notifier.notify).not.toHaveBeenCalled();
+    });
+
+    it("does NOT call notifyBlocked when filter mode is quarantine_silent (fallback path)", async () => {
+      vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce(
+        { ...DEFAULT_CTX, emailConfig: makeAlias({ filterMode: "quarantine_silent" }) },
+      );
+      vi.mocked(store.getSender).mockResolvedValueOnce(null);
+
+      await processor.process(makeSqsEvent([{}]));
+
+      expect(notifier.notifyBlocked).not.toHaveBeenCalled();
+      const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
+      expect(saved.status).toBe("quarantined");
     });
 
     it("does NOT call notifyBlocked when a signal is silently blocked by a block rule", async () => {
@@ -868,18 +881,18 @@ describe("SignalProcessor", () => {
 
       await processor.process(makeSqsEvent([{}]));
 
-      // Filtering logic was bypassed — signal is active despite restrictive default config
+      // Filtering fallback bypassed on matched arc — signal is active despite untrusted sender
       expect(store.saveArc).toHaveBeenCalledOnce();
       expect(store.saveSignal).toHaveBeenCalledOnce();
       const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
       expect(saved.status).toBe("active");
     });
 
-    it("strict mode quarantines a known sender with high spam score (default disposition)", async () => {
+    it("quarantines a known sender with high spam score (SR-03 fires regardless of filter mode)", async () => {
       vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce(
-        { ...DEFAULT_CTX, emailConfig: makeAlias({ filterMode: "strict" }) },
+        { ...DEFAULT_CTX, emailConfig: makeAlias({ filterMode: "quarantine_notify" }) },
       );
-      // Sender is known/approved but spam score is too high in strict mode
+      // Sender is known/approved but spam score is too high — SR-03 quarantines independently of filter mode
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
         ...validClassification,
         spamScore: 0.95,
@@ -921,7 +934,7 @@ describe("SignalProcessor", () => {
     it("quarantines new address when newAddressHandling is block_until_approved (default disposition)", async () => {
       vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce({
         retentionDays: 0,
-        filtering: { newAddressHandling: "block_until_approved", defaultFilterMode: "notify_new" },
+        filtering: { newAddressHandling: "block_until_approved", defaultFilterMode: "quarantine_notify" },
         emailConfig: null,
         registeredDomains: [],
         userEmails: [],
@@ -1462,9 +1475,9 @@ describe("SignalProcessor", () => {
       expect(notifier.notifyBlocked).not.toHaveBeenCalled();
     });
 
-    it("blocks status emails from untrusted senders (SR-05 priority beats SR-02 quarantine)", async () => {
+    it("blocks status emails from untrusted senders (SR-05 rule fires, fallback does not apply)", async () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(noticeClassification);
-      // Untrusted sender: no approved sender entry, so SR-02 would quarantine if it won
+      // Untrusted sender: no approved sender entry — filter-mode fallback would quarantine, but SR-05 fires first
       vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce({
         ...DEFAULT_CTX,
         emailConfig: makeAlias(),
@@ -1474,7 +1487,7 @@ describe("SignalProcessor", () => {
       await processor.process(makeSqsEvent([{}]));
 
       const signal = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
-      expect(signal.status).toBe("blocked"); // SR-05 fires first (priority 3) — not quarantined by SR-02 (priority 4)
+      expect(signal.status).toBe("blocked"); // SR-05 sets status → fallback skipped (hasStatusOutcome = true)
       expect(store.saveArc).not.toHaveBeenCalled();
     });
   });
@@ -1671,7 +1684,7 @@ describe("SignalProcessor", () => {
       vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce({
         ...DEFAULT_CTX,
         emailConfig: makeAlias({
-          filterMode: "strict",
+          filterMode: "quarantine_notify",
           spamScoreThreshold: 0.5,
         }),
       });
@@ -1690,8 +1703,8 @@ describe("SignalProcessor", () => {
     it("uses account-level spamScoreThreshold when no per-address override is set", async () => {
       vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce({
         ...DEFAULT_CTX,
-        emailConfig: makeAlias({ filterMode: "strict" }),
-        filtering: { defaultFilterMode: "notify_new", newAddressHandling: "auto_allow", spamScoreThreshold: 0.6 },
+        emailConfig: makeAlias({ filterMode: "quarantine_notify" }),
+        filtering: { defaultFilterMode: "quarantine_notify", newAddressHandling: "auto_allow", spamScoreThreshold: 0.6 },
       });
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
         ...validClassification,

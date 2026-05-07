@@ -3,7 +3,7 @@ import { WORKFLOWS } from "../types/index.js";
 
 // ---- Shared primitives ----
 
-const SenderFilterMode = z.enum(["strict", "sender_match", "notify_new", "allow_all"]);
+const SenderFilterMode = z.enum(["allow_all", "quarantine_notify", "quarantine_silent", "block"]);
 const ArcStatus = z.enum(["active", "archived", "deleted"]);
 const ArcUrgency = z.enum(["critical", "high", "normal", "low", "silent"]);
 const Workflow = z.enum(WORKFLOWS);
