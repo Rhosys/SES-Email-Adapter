@@ -15,11 +15,6 @@ resource "aws_iam_role" "lambda" {
   })
 }
 
-resource "aws_iam_role_policy_attachment" "lambda_vpc" {
-  role       = aws_iam_role.lambda.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
-}
-
 resource "aws_iam_role_policy" "lambda_permissions" {
   role = aws_iam_role.lambda.id
 
@@ -155,11 +150,6 @@ resource "aws_lambda_function" "main" {
 
   filename         = data.archive_file.lambda_stub.output_path
   source_code_hash = data.archive_file.lambda_stub.output_base64sha256
-
-  vpc_config {
-    subnet_ids         = aws_subnet.private[*].id
-    security_group_ids = [aws_security_group.lambda.id]
-  }
 
   environment {
     variables = {
