@@ -4,7 +4,7 @@
 - [x] **Urgency is a first-class field** — `Signal.urgency` and `Arc.urgency` are explicit fields; no `system:urgency:*` labels; label-to-urgency conversion rules (SR-08–SR-12) removed; `priorityCalculator` removed; urgency resolves as: set_urgency rule outcome ?? arc.urgency ?? "normal"; arc.urgency set on creation only, user-settable via API after that.
 - [x] **Classifier workflow names aligned** — classifier prompt rewritten to use the 15 consolidated workflow names matching TypeScript `Workflow` type (removed: invoice, order, financial, newsletter, promotions, social, personal, security, developer, subscription, government, notice).
 - [x] **Block phishing/status emails by default** — SR-05 blocks all `status` workflow emails; first-rule-wins for status-changing actions (`statusSet` flag in `deriveOutcome`).
-- [ ] Wire infra (see `infra/`)
+- [x] Wire infra (see `infra/`)
 - [x] Set up CI (lint, typecheck, test) for backend, site, and extension independently — `.github/workflows/backend.yml`, `site.yml`, `extension.yml`
 - [x] **API modernization** — collection envelopes, error shapes, PUT→PATCH, consistent create/update responses. See "API Breaking Changes" section below.
 - [ ] Review AWS Bedrock comparison with Aurora pg vectors. I think we are looking for RAG, the question is should we store that data in aurora or is there an optimized bedrock version available for us here?
@@ -14,7 +14,7 @@
 - [ ] Digests? Does that even make sense? Basically once per month expose a digest of just list of things — the idea would be to reuse the same Arc.
 - [x] Rules support tags — key/value pairs stored on the rule for user annotation (e.g. team, category, notes). No functional effect on rule evaluation.
 - [x] Use quickjs-emscripten to support custom JS function execution as a rule type — `src/processor/rule-engine.ts`; conditions prefixed `js:` run in sandboxed QuickJS VM; JSONLogic still handles non-prefixed conditions
-- [x] Create a WebSocket/WebPush APIGW API. WebSocket API GW (`infra/api-gateway.tf`); Lambda handler detects WebSocket events via `event.requestContext.connectionId`; Web Push via `src/notifier/ses-notifier.ts` pushNotify for auth workflow
+- [x] Create WebSocket APIGW API. WebSocket API GW (`infra/api-gateway.tf`); Lambda handles all event types (EventBridge → SQS → WsAuthorizer → WebSocket → HTTP); connections stored in ACCOUNTS_TABLE at `CONN#<id>` SK; notifier fans out via `WS_API_ENDPOINT`; Web Push removed in favour of WebSocket
 
 
 ---
