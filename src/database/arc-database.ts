@@ -351,35 +351,53 @@ export class ArcDatabase implements ArcMatcher {
   // ArcMatcher (pgvector — internal implementation detail)
   // ---------------------------------------------------------------------------
 
+  // Sets app.current_account_id for the duration of the transaction so that
+  // the RLS policy on arc_embeddings enforces tenant isolation at the DB level,
+  // independent of the WHERE clause in each query.
+  private async withAccountContext<T>(accountId: string, fn: (client: import("pg").PoolClient) => Promise<T>): Promise<T> {
+    const client = await getPool().connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SET LOCAL app.current_account_id = $1", [accountId]);
+      const result = await fn(client);
+      await client.query("COMMIT");
+      return result;
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
   async findMatch(accountId: string, recipientAddress: string, embedding: number[]): Promise<Arc | null> {
-    const pool = getPool();
     const vectorLiteral = `[${embedding.join(",")}]`;
-
-    const res = await pool.query<{ arc_id: string }>(
-      `SELECT arc_id
-       FROM arc_embeddings
-       WHERE account_id = $1 AND recipient_address = $2
-         AND embedding <=> $3::vector < $4
-       ORDER BY embedding <=> $3::vector
-       LIMIT 1`,
-      [accountId, recipientAddress, vectorLiteral, SIMILARITY_THRESHOLD],
+    const res = await this.withAccountContext(accountId, (client) =>
+      client.query<{ arc_id: string }>(
+        `SELECT arc_id
+         FROM arc_embeddings
+         WHERE account_id = $1 AND recipient_address = $2
+           AND embedding <=> $3::vector < $4
+         ORDER BY embedding <=> $3::vector
+         LIMIT 1`,
+        [accountId, recipientAddress, vectorLiteral, SIMILARITY_THRESHOLD],
+      ),
     );
-
     if (!res.rows[0]) return null;
     return this.getArc(accountId, res.rows[0].arc_id);
   }
 
   async upsertEmbedding(arcId: string, embedding: number[], accountId: string, recipientAddress: string): Promise<void> {
-    const pool = getPool();
     const vectorLiteral = `[${embedding.join(",")}]`;
-
-    await pool.query(
-      `INSERT INTO arc_embeddings (arc_id, account_id, recipient_address, embedding, updated_at)
-       VALUES ($1, $2, $3, $4::vector, NOW())
-       ON CONFLICT (arc_id) DO UPDATE
-         SET embedding = EXCLUDED.embedding,
-             updated_at = NOW()`,
-      [arcId, accountId, recipientAddress, vectorLiteral],
+    await this.withAccountContext(accountId, (client) =>
+      client.query(
+        `INSERT INTO arc_embeddings (arc_id, account_id, recipient_address, embedding, updated_at)
+         VALUES ($1, $2, $3, $4::vector, NOW())
+         ON CONFLICT (arc_id) DO UPDATE
+           SET embedding = EXCLUDED.embedding,
+               updated_at = NOW()`,
+        [arcId, accountId, recipientAddress, vectorLiteral],
+      ),
     );
   }
 }
