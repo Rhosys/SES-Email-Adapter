@@ -72,10 +72,15 @@ resource "aws_iam_role_policy" "lambda_permissions" {
         ]
       },
       {
-        Sid      = "RdsProxyConnect"
-        Effect   = "Allow"
-        Action   = ["rds-db:connect"]
-        Resource = "*"
+        Sid    = "AuroraDataAPI"
+        Effect = "Allow"
+        Action = [
+          "rds-data:ExecuteStatement",
+          "rds-data:BeginTransaction",
+          "rds-data:CommitTransaction",
+          "rds-data:RollbackTransaction",
+        ]
+        Resource = aws_rds_cluster.aurora.arn
       },
       {
         Sid    = "SESSend"
@@ -164,9 +169,9 @@ resource "aws_lambda_function" "main" {
       PROCESSING_TABLE          = aws_dynamodb_table.processing.name
       AUDIT_TABLE               = aws_dynamodb_table.audit.name
       EMAIL_BUCKET              = aws_s3_bucket.emails.name
-      RDS_PROXY_ENDPOINT        = aws_db_proxy.aurora.endpoint
+      AURORA_CLUSTER_ARN        = aws_rds_cluster.aurora.arn
+      AURORA_SECRET_ARN         = aws_secretsmanager_secret.aurora_master.arn
       AURORA_DB_NAME            = "signals"
-      DB_USER                   = "lambda"
       NOTIFICATION_FROM         = var.notification_from_address
       SES_CONFIGURATION_SET     = aws_sesv2_configuration_set.sending.configuration_set_name
       APP_BASE_URL              = var.app_base_url

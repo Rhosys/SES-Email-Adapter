@@ -1,6 +1,5 @@
 import { randomUUID } from "crypto";
-import { Pool } from "pg";
-import { Signer } from "@aws-sdk/rds-signer";
+import { RDSDataClient, ExecuteStatementCommand, BeginTransactionCommand, CommitTransactionCommand, RollbackTransactionCommand } from "@aws-sdk/client-rds-data";
 import { DeleteCommand, GetCommand, PutCommand, QueryCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { dynamo, SIGNALS_TABLE, encodeCursor, decodeCursor } from "./shared.js";
 import type { ArcMatcher } from "../processor/processor.js";
@@ -8,38 +7,15 @@ import type { ListArcsParams, UpdateArcRequest, CreateViewRequest, UpdateViewReq
 import type { Arc, Signal, Page, PageParams } from "../types/index.js";
 
 // ---------------------------------------------------------------------------
-// pgvector pool (module-scoped, lazy, reused across warm Lambda invocations)
+// Aurora Data API client (stateless — no connection pool needed)
 // ---------------------------------------------------------------------------
 
 const SIMILARITY_THRESHOLD = 0.5;
-const RDS_HOST = process.env["RDS_PROXY_ENDPOINT"] ?? "";
-const DB_USER  = process.env["DB_USER"] ?? "lambda";
-const DB_NAME  = process.env["AURORA_DB_NAME"] ?? "signals";
-const AWS_REGION = process.env["AWS_REGION"] ?? "eu-west-1";
+const CLUSTER_ARN = process.env["AURORA_CLUSTER_ARN"] ?? "";
+const SECRET_ARN  = process.env["AURORA_SECRET_ARN"]  ?? "";
+const DB_NAME     = process.env["AURORA_DB_NAME"]      ?? "signals";
 
-const signer = new Signer({ hostname: RDS_HOST, port: 5432, region: AWS_REGION, username: DB_USER });
-
-let _pool: Pool | null = null;
-
-function getPool(): Pool {
-  if (_pool) return _pool;
-  _pool = new Pool({
-    host:     RDS_HOST,
-    database: DB_NAME,
-    user:     DB_USER,
-    password: () => signer.getAuthToken(),
-    port: 5432,
-    ssl: { rejectUnauthorized: true },
-    max: 2,
-    idleTimeoutMillis: 30_000,
-    connectionTimeoutMillis: 5_000,
-  });
-  _pool.on("error", (err) => {
-    console.error("pgvector pool error:", err);
-    _pool = null;
-  });
-  return _pool;
-}
+const rdsData = new RDSDataClient({});
 
 // ---------------------------------------------------------------------------
 // Key helpers
@@ -348,56 +324,74 @@ export class ArcDatabase implements ArcMatcher {
   }
 
   // ---------------------------------------------------------------------------
-  // ArcMatcher (pgvector — internal implementation detail)
+  // ArcMatcher (pgvector via Aurora Data API)
   // ---------------------------------------------------------------------------
 
-  // Sets app.current_account_id for the duration of the transaction so that
-  // the RLS policy on arc_embeddings enforces tenant isolation at the DB level,
-  // independent of the WHERE clause in each query.
-  private async withAccountContext<T>(accountId: string, fn: (client: import("pg").PoolClient) => Promise<T>): Promise<T> {
-    const client = await getPool().connect();
+  // Wraps a Data API call in an explicit transaction so SET LOCAL is scoped
+  // to that transaction — required for the RLS policy to apply correctly.
+  private async withAccountContext<T>(accountId: string, fn: (transactionId: string) => Promise<T>): Promise<T> {
+    const { transactionId } = await rdsData.send(new BeginTransactionCommand({
+      resourceArn: CLUSTER_ARN, secretArn: SECRET_ARN, database: DB_NAME,
+    }));
     try {
-      await client.query("BEGIN");
-      await client.query("SET LOCAL app.current_account_id = $1", [accountId]);
-      const result = await fn(client);
-      await client.query("COMMIT");
+      await rdsData.send(new ExecuteStatementCommand({
+        resourceArn: CLUSTER_ARN, secretArn: SECRET_ARN, database: DB_NAME,
+        transactionId,
+        sql: "SET LOCAL app.current_account_id = :accountId",
+        parameters: [{ name: "accountId", value: { stringValue: accountId } }],
+      }));
+      const result = await fn(transactionId!);
+      await rdsData.send(new CommitTransactionCommand({
+        resourceArn: CLUSTER_ARN, secretArn: SECRET_ARN, transactionId,
+      }));
       return result;
     } catch (err) {
-      await client.query("ROLLBACK");
+      await rdsData.send(new RollbackTransactionCommand({
+        resourceArn: CLUSTER_ARN, secretArn: SECRET_ARN, transactionId,
+      }));
       throw err;
-    } finally {
-      client.release();
     }
   }
 
   async findMatch(accountId: string, recipientAddress: string, embedding: number[]): Promise<Arc | null> {
-    const vectorLiteral = `[${embedding.join(",")}]`;
-    const res = await this.withAccountContext(accountId, (client) =>
-      client.query<{ arc_id: string }>(
-        `SELECT arc_id
-         FROM arc_embeddings
-         WHERE account_id = $1 AND recipient_address = $2
-           AND embedding <=> $3::vector < $4
-         ORDER BY embedding <=> $3::vector
-         LIMIT 1`,
-        [accountId, recipientAddress, vectorLiteral, SIMILARITY_THRESHOLD],
-      ),
+    const res = await this.withAccountContext(accountId, (transactionId) =>
+      rdsData.send(new ExecuteStatementCommand({
+        resourceArn: CLUSTER_ARN, secretArn: SECRET_ARN, database: DB_NAME,
+        transactionId,
+        sql: `SELECT arc_id FROM arc_embeddings
+              WHERE account_id = :accountId AND recipient_address = :recipient
+                AND embedding <=> :embedding::vector < :threshold
+              ORDER BY embedding <=> :embedding::vector
+              LIMIT 1`,
+        parameters: [
+          { name: "accountId",  value: { stringValue: accountId } },
+          { name: "recipient",  value: { stringValue: recipientAddress } },
+          { name: "embedding",  value: { stringValue: `[${embedding.join(",")}]` } },
+          { name: "threshold",  value: { doubleValue: SIMILARITY_THRESHOLD } },
+        ],
+      })),
     );
-    if (!res.rows[0]) return null;
-    return this.getArc(accountId, res.rows[0].arc_id);
+    const arcId = res.records?.[0]?.[0]?.stringValue;
+    if (!arcId) return null;
+    return this.getArc(accountId, arcId);
   }
 
   async upsertEmbedding(arcId: string, embedding: number[], accountId: string, recipientAddress: string): Promise<void> {
-    const vectorLiteral = `[${embedding.join(",")}]`;
-    await this.withAccountContext(accountId, (client) =>
-      client.query(
-        `INSERT INTO arc_embeddings (arc_id, account_id, recipient_address, embedding, updated_at)
-         VALUES ($1, $2, $3, $4::vector, NOW())
-         ON CONFLICT (arc_id) DO UPDATE
-           SET embedding = EXCLUDED.embedding,
-               updated_at = NOW()`,
-        [arcId, accountId, recipientAddress, vectorLiteral],
-      ),
+    await this.withAccountContext(accountId, (transactionId) =>
+      rdsData.send(new ExecuteStatementCommand({
+        resourceArn: CLUSTER_ARN, secretArn: SECRET_ARN, database: DB_NAME,
+        transactionId,
+        sql: `INSERT INTO arc_embeddings (arc_id, account_id, recipient_address, embedding, updated_at)
+              VALUES (:arcId, :accountId, :recipient, :embedding::vector, NOW())
+              ON CONFLICT (arc_id) DO UPDATE
+                SET embedding = EXCLUDED.embedding, updated_at = NOW()`,
+        parameters: [
+          { name: "arcId",     value: { stringValue: arcId } },
+          { name: "accountId", value: { stringValue: accountId } },
+          { name: "recipient", value: { stringValue: recipientAddress } },
+          { name: "embedding", value: { stringValue: `[${embedding.join(",")}]` } },
+        ],
+      })),
     );
   }
 }

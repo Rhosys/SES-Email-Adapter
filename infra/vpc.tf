@@ -92,37 +92,10 @@ resource "aws_security_group" "lambda" {
   }
 }
 
-resource "aws_security_group" "rds_proxy" {
-  name        = "${local.prefix}-rds-proxy"
-  description = "RDS Proxy — accepts connections from Lambda"
-  vpc_id      = aws_vpc.main.id
-
-  ingress {
-    from_port       = 5432
-    to_port         = 5432
-    protocol        = "tcp"
-    security_groups = [aws_security_group.lambda.id]
-  }
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-}
-
 resource "aws_security_group" "aurora" {
   name        = "${local.prefix}-aurora"
-  description = "Aurora — accepts connections from RDS Proxy only"
+  description = "Aurora — no inbound connections needed (Data API only)"
   vpc_id      = aws_vpc.main.id
-
-  ingress {
-    from_port       = 5432
-    to_port         = 5432
-    protocol        = "tcp"
-    security_groups = [aws_security_group.rds_proxy.id]
-  }
 
   egress {
     from_port   = 0
