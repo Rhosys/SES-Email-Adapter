@@ -42,11 +42,6 @@ output "signals_dlq_url" {
   value       = aws_sqs_queue.signals_dlq.url
 }
 
-output "rds_proxy_endpoint" {
-  description = "RDS Proxy endpoint for Lambda to connect to Aurora"
-  value       = aws_db_proxy.aurora.endpoint
-}
-
 output "aurora_cluster_identifier" {
   value = aws_rds_cluster.aurora.cluster_identifier
 }
