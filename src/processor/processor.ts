@@ -300,6 +300,7 @@ export class SignalProcessor {
     // 3. Embed + classify in parallel
     const returnPath = parsed.headers["return-path"] ?? parsed.headers["Return-Path"] ?? "";
     const embedText = [
+      `Account: ${accountId}`,
       `From: ${parsed.from.address}`,
       parsed.replyTo ? `Reply-To: ${parsed.replyTo.address}` : "",
       returnPath ? `Return-Path: ${returnPath}` : "",
