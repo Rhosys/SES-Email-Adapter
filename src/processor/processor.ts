@@ -298,7 +298,15 @@ export class SignalProcessor {
     const senderETLD1 = getETLD1(parsed.from.address);
 
     // 3. Embed + classify in parallel
-    const embedText = [parsed.subject, parsed.textBody ?? ""].join(" ").slice(0, 4000);
+    const returnPath = parsed.headers["return-path"] ?? parsed.headers["Return-Path"] ?? "";
+    const embedText = [
+      `From: ${parsed.from.address}`,
+      parsed.replyTo ? `Reply-To: ${parsed.replyTo.address}` : "",
+      returnPath ? `Return-Path: ${returnPath}` : "",
+      `To: ${recipientAddress}`,
+      `Subject: ${parsed.subject}`,
+      parsed.textBody ?? "",
+    ].filter(Boolean).join("\n").slice(0, 4000);
     const [embedding, classification] = await Promise.all([
       this.classifier.embed(embedText),
       this.classifier.classify({
