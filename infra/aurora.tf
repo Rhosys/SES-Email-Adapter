@@ -139,9 +139,26 @@ resource "aws_db_proxy_target" "aurora" {
 resource "terraform_data" "pgvector_init" {
   triggers_replace = [aws_rds_cluster.aurora.id]
 
-  # Run after cluster is available to enable the pgvector extension
-  # In practice this is handled by a migration script in your CI pipeline:
-  #   psql $DATABASE_URL -c "CREATE EXTENSION IF NOT EXISTS vector;"
-  #   psql $DATABASE_URL -c "CREATE TABLE arc_embeddings (arc_id TEXT PRIMARY KEY, embedding vector(1024));"
-  #   psql $DATABASE_URL -c "CREATE INDEX ON arc_embeddings USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);"
+  # Run once after cluster creation via CI migration script (requires VPC access):
+  #
+  # CREATE EXTENSION IF NOT EXISTS vector;
+  #
+  # CREATE TABLE arc_embeddings (
+  #   arc_id           TEXT PRIMARY KEY,
+  #   account_id       TEXT NOT NULL,
+  #   recipient_address TEXT NOT NULL,
+  #   embedding        vector(1024) NOT NULL,
+  #   updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  # );
+  #
+  # CREATE INDEX ON arc_embeddings
+  #   USING hnsw (embedding vector_cosine_ops);
+  #
+  # -- Row-Level Security: Lambda must SET LOCAL app.current_account_id before
+  # -- any query. If unset, current_setting returns NULL and no rows are visible.
+  # ALTER TABLE arc_embeddings ENABLE ROW LEVEL SECURITY;
+  # ALTER TABLE arc_embeddings FORCE ROW LEVEL SECURITY;
+  # CREATE POLICY arc_tenant_isolation ON arc_embeddings
+  #   USING (account_id = current_setting('app.current_account_id', true))
+  #   WITH CHECK (account_id = current_setting('app.current_account_id', true));
 }
