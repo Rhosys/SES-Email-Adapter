@@ -46,7 +46,7 @@ jobs:
         run: tofu -chdir=deploy init -input=false -backend-config="bucket=${STATE_BUCKET}" -backend-config="key=${STATE_KEY}"
 
       - name: Tofu Plan
-        run: tofu -chdir=deploy plan -out=plan.cache
+        run: tofu -chdir=deploy plan -input=false -out=plan.cache
 
   # ==========================================
   # PATH B: PRODUCTION BUILD & PLAN
@@ -77,7 +77,7 @@ jobs:
         run: tofu -chdir=deploy init -input=false -backend-config="bucket=${STATE_BUCKET}" -backend-config="key=${STATE_KEY}"
 
       - name: Tofu Plan
-        run: tofu -chdir=deploy plan -out=plan.cache
+        run: tofu -chdir=deploy plan -input=false -out=plan.cache
         env:
           TF_LOG: TRACE
 
