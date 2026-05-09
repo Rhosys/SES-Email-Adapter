@@ -15,6 +15,9 @@
 - [x] Rules support tags — key/value pairs stored on the rule for user annotation (e.g. team, category, notes). No functional effect on rule evaluation.
 - [x] Use quickjs-emscripten to support custom JS function execution as a rule type — `src/processor/rule-engine.ts`; conditions prefixed `js:` run in sandboxed QuickJS VM; JSONLogic still handles non-prefixed conditions
 - [x] Create WebSocket APIGW API. WebSocket API GW (`infra/api-gateway.tf`); Lambda handles all event types (EventBridge → SQS → WsAuthorizer → WebSocket → HTTP); connections stored in ACCOUNTS_TABLE at `CONN#<id>` SK; notifier fans out via `WS_API_ENDPOINT`; Web Push removed in favour of WebSocket
+- [ ] We should also set up the S3 bucket as an origin and connect it to the  CloudFront distribution, so that the front end can deploy there. Which means we need the necessary website related bucket, policy, stuff.
+- [ ] And all buckets should use the new format from AWS to ensure local regional buckets for the account, so that we can be sure these buckets haven't already been claimed. ALL BUCKETS.
+- [ ] For the dkim_private_key, I passing it into open tofu is just not really secure, right? Discuss with me alternatives to make that happen.
 
 
 ---
