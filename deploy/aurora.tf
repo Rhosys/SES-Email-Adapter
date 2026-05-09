@@ -38,16 +38,16 @@ resource "aws_secretsmanager_secret_version" "aurora_master" {
 }
 
 resource "aws_rds_cluster" "aurora" {
-  cluster_identifier          = "${local.prefix}-aurora"
-  engine                      = "aurora-postgresql"
-  engine_mode                 = "provisioned"
-  engine_version              = "16.4"
-  database_name               = "signals"
-  master_username             = "admin"
-  manage_master_user_password = false
-  master_password             = random_password.aurora_master.result
-  db_subnet_group_name        = aws_db_subnet_group.aurora.name
-  vpc_security_group_ids      = [aws_security_group.aurora.id]
+  cluster_identifier              = "${local.prefix}-aurora"
+  engine                          = "aurora-postgresql"
+  engine_mode                     = "provisioned"
+  engine_version                  = "16.4"
+  database_name                   = "signals"
+  master_username                 = "admin"
+  manage_master_user_password     = false
+  master_password                 = random_password.aurora_master.result
+  db_subnet_group_name            = aws_db_subnet_group.aurora.name
+  vpc_security_group_ids          = [aws_security_group.aurora.id]
   db_cluster_parameter_group_name = aws_rds_cluster_parameter_group.aurora.name
 
   serverlessv2_scaling_configuration {
@@ -62,7 +62,7 @@ resource "aws_rds_cluster" "aurora" {
   final_snapshot_identifier = var.env == "prod" ? "${local.prefix}-final" : null
 
   enabled_cloudwatch_logs_exports = ["postgresql"]
-  enable_http_endpoint            = true  # Aurora Data API
+  enable_http_endpoint            = true # Aurora Data API
 }
 
 resource "aws_rds_cluster_instance" "aurora" {

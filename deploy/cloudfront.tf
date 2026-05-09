@@ -50,7 +50,7 @@ resource "aws_cloudfront_distribution" "api" {
   enabled         = true
   is_ipv6_enabled = true
   comment         = "${local.prefix} API"
-  price_class     = "PriceClass_100"  # US/EU only — expand for global
+  price_class     = "PriceClass_100" # US/EU only — expand for global
 
   aliases = [var.api_domain]
 

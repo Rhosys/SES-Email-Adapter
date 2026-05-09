@@ -17,9 +17,9 @@ resource "aws_ses_receipt_rule" "store_and_notify" {
   name          = "store-and-notify"
   rule_set_name = aws_ses_receipt_rule_set.main.rule_set_name
   enabled       = true
-  scan_enabled  = true  # Enable SES spam/virus scanning
+  scan_enabled  = true # Enable SES spam/virus scanning
   tls_policy    = "Require"
-  recipients    = []    # Empty = matches all recipients
+  recipients    = [] # Empty = matches all recipients
 
   s3_action {
     bucket_name       = aws_s3_bucket.emails.id

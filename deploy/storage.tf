@@ -65,13 +65,13 @@ resource "aws_s3_bucket_policy" "emails" {
 
 resource "aws_sqs_queue" "signals_dlq" {
   name                      = "${local.prefix}-signals-dlq"
-  message_retention_seconds = 1209600  # 14 days
+  message_retention_seconds = 1209600 # 14 days
 }
 
 resource "aws_sqs_queue" "signals" {
   name                       = "${local.prefix}-signals"
-  visibility_timeout_seconds = 180  # 6x Lambda timeout (30s * 6)  # 6x Lambda timeout
-  message_retention_seconds  = 86400  # 1 day
+  visibility_timeout_seconds = 180   # 6x Lambda timeout (30s * 6)  # 6x Lambda timeout
+  message_retention_seconds  = 86400 # 1 day
 
   redrive_policy = jsonencode({
     deadLetterTargetArn = aws_sqs_queue.signals_dlq.arn
@@ -111,8 +111,8 @@ resource "aws_sqs_queue_policy" "signals_sns" {
 
 resource "aws_sqs_queue" "feedback" {
   name                       = "${local.prefix}-feedback"
-  visibility_timeout_seconds = 180  # 6x Lambda timeout (30s * 6)
-  message_retention_seconds  = 86400  # 1 day
+  visibility_timeout_seconds = 180   # 6x Lambda timeout (30s * 6)
+  message_retention_seconds  = 86400 # 1 day
 
   redrive_policy = jsonencode({
     deadLetterTargetArn = aws_sqs_queue.signals_dlq.arn
@@ -151,10 +151,22 @@ resource "aws_dynamodb_table" "accounts" {
   hash_key     = "pk"
   range_key    = "sk"
 
-  attribute { name = "pk";     type = "S" }
-  attribute { name = "sk";     type = "S" }
-  attribute { name = "gsi1pk"; type = "S" }
-  attribute { name = "gsi1sk"; type = "S" }
+  attribute {
+    name = "pk"
+    type = "S"
+  }
+  attribute {
+    name = "sk"
+    type = "S"
+  }
+  attribute {
+    name = "gsi1pk"
+    type = "S"
+  }
+  attribute {
+    name = "gsi1sk"
+    type = "S"
+  }
 
   global_secondary_index {
     name            = "gsi1"
@@ -180,10 +192,22 @@ resource "aws_dynamodb_table" "signals" {
   hash_key     = "pk"
   range_key    = "sk"
 
-  attribute { name = "pk"; type = "S" }
-  attribute { name = "sk"; type = "S" }
-  attribute { name = "gsi1pk"; type = "S" }
-  attribute { name = "gsi1sk"; type = "S" }
+  attribute {
+    name = "pk"
+    type = "S"
+  }
+  attribute {
+    name = "sk"
+    type = "S"
+  }
+  attribute {
+    name = "gsi1pk"
+    type = "S"
+  }
+  attribute {
+    name = "gsi1sk"
+    type = "S"
+  }
 
   global_secondary_index {
     name            = "gsi1"
@@ -214,8 +238,14 @@ resource "aws_dynamodb_table" "processing" {
   hash_key     = "pk"
   range_key    = "sk"
 
-  attribute { name = "pk"; type = "S" }
-  attribute { name = "sk"; type = "S" }
+  attribute {
+    name = "pk"
+    type = "S"
+  }
+  attribute {
+    name = "sk"
+    type = "S"
+  }
 
   ttl {
     attribute_name = "ttl"
@@ -239,10 +269,22 @@ resource "aws_dynamodb_table" "audit" {
   hash_key     = "pk"
   range_key    = "sk"
 
-  attribute { name = "pk";     type = "S" }
-  attribute { name = "sk";     type = "S" }
-  attribute { name = "gsi1pk"; type = "S" }
-  attribute { name = "gsi1sk"; type = "S" }
+  attribute {
+    name = "pk"
+    type = "S"
+  }
+  attribute {
+    name = "sk"
+    type = "S"
+  }
+  attribute {
+    name = "gsi1pk"
+    type = "S"
+  }
+  attribute {
+    name = "gsi1sk"
+    type = "S"
+  }
 
   global_secondary_index {
     name            = "gsi1"
