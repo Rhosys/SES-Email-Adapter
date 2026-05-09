@@ -1,14 +1,16 @@
 import { SESv2Client, SendEmailCommand } from "@aws-sdk/client-sesv2";
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import { DynamoDBDocumentClient, GetCommand } from "@aws-sdk/lib-dynamodb";
+import { DynamoDBDocumentClient, DeleteCommand, GetCommand, QueryCommand } from "@aws-sdk/lib-dynamodb";
 import type { Notifier } from "../processor/processor.js";
-import type { Arc, Signal, Account } from "../types/index.js";
+import type { Arc, Signal, Account, WsConnection, AuthData } from "../types/index.js";
 
 const ACCOUNTS_TABLE = process.env["ACCOUNTS_TABLE"] ?? "ses-accounts";
 const PROCESSING_TABLE = process.env["PROCESSING_TABLE"] ?? "ses-processing";
 const FROM_ADDRESS = process.env["NOTIFICATION_FROM"] ?? "";
 const CONFIG_SET = process.env["SES_CONFIGURATION_SET"] ?? "";
 const APP_BASE_URL = process.env["APP_BASE_URL"] ?? "https://app.example.com";
+
+const WS_ENDPOINT = process.env["WS_API_ENDPOINT"] ?? "";
 
 const sesv2 = new SESv2Client({});
 const dynamo = DynamoDBDocumentClient.from(new DynamoDBClient({}));
@@ -57,6 +59,10 @@ export class SesNotifier implements Notifier {
         { Name: "type", Value: "signal_notify" },
       ],
     }));
+
+    if (signal.workflow === "auth") {
+      await this.wsNotify(accountId, arc, signal);
+    }
   }
 
   async notifyBlocked(accountId: string, signal: Signal): Promise<void> {
@@ -103,6 +109,44 @@ export class SesNotifier implements Notifier {
       Key: { pk: `ACCT#${accountId}`, sk: "META" },
     }));
     return result.Item ? (result.Item as Account) : null;
+  }
+
+  private async wsNotify(accountId: string, _arc: Arc, signal: Signal): Promise<void> {
+    if (!WS_ENDPOINT) return;
+    const authData = signal.workflowData as AuthData;
+
+    const res = await dynamo.send(new QueryCommand({
+      TableName: ACCOUNTS_TABLE,
+      KeyConditionExpression: "pk = :pk AND begins_with(sk, :prefix)",
+      ExpressionAttributeValues: { ":pk": `ACCT#${accountId}`, ":prefix": "CONN#" },
+      ProjectionExpression: "connectionId",
+    }));
+    const connections = (res.Items ?? []) as Pick<WsConnection, "connectionId">[];
+
+    const payload = JSON.stringify({
+      type: "auth",
+      code: authData.code,
+      expiresInMinutes: authData.expiresInMinutes,
+      originDomain: authData.service,
+    });
+
+    await Promise.all(connections.map(async ({ connectionId }) => {
+      try {
+        await fetch(`${WS_ENDPOINT}/${connectionId}`, {
+          method: "POST",
+          body: payload,
+        });
+      } catch (err: unknown) {
+        // Stale connection — remove it
+        const status = (err as { status?: number }).status;
+        if (status === 410) {
+          await dynamo.send(new DeleteCommand({
+            TableName: ACCOUNTS_TABLE,
+            Key: { pk: `ACCT#${accountId}`, sk: `CONN#${connectionId}` },
+          }));
+        }
+      }
+    }));
   }
 
   private async isAddressSuppressed(address: string): Promise<boolean> {

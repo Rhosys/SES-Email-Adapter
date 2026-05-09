@@ -1,0 +1,149 @@
+name: CI/CD Pipeline
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  AWS_DEFAULT_REGION: "eu-west-1"
+  STATE_BUCKET: "rhosys-opentofu-${{ secrets.AWS_ACCOUNT_ID }}-eu-west-1"
+  STATE_KEY: "${{ github.event.repository.name }}/terraform.tfstate"
+  TF_VAR_aws_account_id: "${{ secrets.AWS_ACCOUNT_ID }}"
+  TF_VAR_service_name: "${{ github.event.repository.name }}"
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  # ==========================================
+  # PATH A: PULL REQUEST VALIDATION
+  # ==========================================
+  pr_validate:
+    name: Validate PR
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Environment
+        uses: ./.github/actions/setup
+        with:
+          aws_account_id: ${{ secrets.AWS_ACCOUNT_ID }}
+          aws_region: ${{ env.AWS_DEFAULT_REGION }}
+
+      - name: Build Code
+        run: npm run build
+
+      - name: Test Code
+        run: npm test
+
+      - name: Tofu Init
+        run: tofu -chdir=deploy init -input=false -backend-config="bucket=${STATE_BUCKET}" -backend-config="key=${STATE_KEY}"
+
+      - name: Tofu Plan
+        run: tofu -chdir=deploy plan -out=plan.cache
+
+  # ==========================================
+  # PATH B: PRODUCTION BUILD & PLAN
+  # ==========================================
+  prod_build_and_plan:
+    name: Prod Build & Plan
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    outputs:
+      requires_approval: ${{ steps.plan_check.outputs.requires_approval }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Environment
+        uses: ./.github/actions/setup
+        with:
+          aws_account_id: ${{ secrets.AWS_ACCOUNT_ID }}
+          aws_region: ${{ env.AWS_DEFAULT_REGION }}
+
+      - name: Build Code
+        run: npm run build
+
+      - name: Test Code
+        run: npm test
+
+      - name: Tofu Init
+        run: tofu -chdir=deploy init -input=false -backend-config="bucket=${STATE_BUCKET}" -backend-config="key=${STATE_KEY}"
+
+      - name: Tofu Plan
+        run: tofu -chdir=deploy plan -out=plan.cache
+
+      - name: Convert Plan to JSON
+        run: tofu -chdir=deploy show -json plan.cache > deploy/plan.json
+
+      - name: Check for Destructive Changes
+        id: plan_check
+        run: |
+          DESTROYS=$(jq '[.resource_changes[]? | select(.change.actions | contains(["delete"]))] | length' deploy/plan.json)
+          
+          echo "Found $DESTROYS destructive changes."
+          
+          if [ "$DESTROYS" -gt 0 ]; then
+            echo "requires_approval=true" >> $GITHUB_OUTPUT
+            echo "⚠️ DESTRUCTIVE CHANGES DETECTED. Routing to manual approval." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "requires_approval=false" >> $GITHUB_OUTPUT
+            echo "✅ No destructive changes. Routing to auto-deploy." >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Pass Artifacts to Deploy Job
+        uses: actions/upload-artifact@v4
+        with:
+          name: prod-artifacts
+          path: |
+            deploy/plan.cache
+            deploy/plan.json
+            dist/
+          retention-days: 1
+
+  # ==========================================
+  # PATH B: PRODUCTION DEPLOY (Gated)
+  # ==========================================
+  prod_deploy:
+    name: Prod Deploy
+    needs: prod_build_and_plan
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    concurrency: production
+    environment: 
+      name: ${{ needs.prod_build_and_plan.outputs.requires_approval == 'true' && 'production-gated' || 'production-auto' }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Environment
+        uses: ./.github/actions/setup
+        with:
+          aws_account_id: ${{ secrets.AWS_ACCOUNT_ID }}
+          aws_region: ${{ env.AWS_DEFAULT_REGION }}
+
+      - name: Retrieve Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: prod-artifacts
+
+      - name: Show Plan Summary
+        if: needs.prod_build_and_plan.outputs.requires_approval == 'true'
+        run: |
+          curl -sL https://github.com/dineshba/tf-summarize/releases/latest/download/tf-summarize_linux_amd64.tar.gz | tar xz
+          ./tf-summarize -json deploy/plan.json >> $GITHUB_STEP_SUMMARY
+
+      - name: Tofu Init
+        run: tofu -chdir=deploy init -input=false -backend-config="bucket=${STATE_BUCKET}" -backend-config="key=${STATE_KEY}"
+
+      - name: Tofu Apply
+        run: tofu -chdir=deploy apply -input=false -auto-approve plan.cache
+
+      - name: Deploy Application Code
+        run: npm run deploy

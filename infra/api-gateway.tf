@@ -66,3 +66,75 @@ resource "aws_lambda_permission" "api_gateway" {
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${aws_apigatewayv2_api.main.execution_arn}/*/*"
 }
+
+# ---------------------------------------------------------------------------
+# WebSocket API Gateway
+# ---------------------------------------------------------------------------
+
+resource "aws_apigatewayv2_api" "ws" {
+  name                       = "${local.prefix}-ws"
+  protocol_type              = "WEBSOCKET"
+  route_selection_expression = "$request.body.action"
+}
+
+resource "aws_apigatewayv2_integration" "ws_lambda" {
+  api_id                 = aws_apigatewayv2_api.ws.id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = aws_lambda_alias.production.invoke_arn
+  content_handling_strategy = "CONVERT_TO_TEXT"
+}
+
+resource "aws_apigatewayv2_authorizer" "ws" {
+  api_id           = aws_apigatewayv2_api.ws.id
+  authorizer_type  = "REQUEST"
+  authorizer_uri   = aws_lambda_alias.production.invoke_arn
+  identity_sources = ["$request.querystring.token"]
+  name             = "${local.prefix}-ws-authorizer"
+
+  # Cache the Allow result per token for 5 minutes
+  authorizer_result_ttl_in_seconds = 300
+}
+
+resource "aws_lambda_permission" "ws_authorizer" {
+  statement_id  = "AllowWSAuthorizerInvoke"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.main.function_name
+  qualifier     = aws_lambda_alias.production.name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.ws.execution_arn}/authorizers/*"
+}
+
+resource "aws_apigatewayv2_route" "ws_connect" {
+  api_id             = aws_apigatewayv2_api.ws.id
+  route_key          = "$connect"
+  target             = "integrations/${aws_apigatewayv2_integration.ws_lambda.id}"
+  authorization_type = "CUSTOM"
+  authorizer_id      = aws_apigatewayv2_authorizer.ws.id
+}
+
+resource "aws_apigatewayv2_route" "ws_disconnect" {
+  api_id    = aws_apigatewayv2_api.ws.id
+  route_key = "$disconnect"
+  target    = "integrations/${aws_apigatewayv2_integration.ws_lambda.id}"
+}
+
+resource "aws_apigatewayv2_route" "ws_default" {
+  api_id    = aws_apigatewayv2_api.ws.id
+  route_key = "$default"
+  target    = "integrations/${aws_apigatewayv2_integration.ws_lambda.id}"
+}
+
+resource "aws_apigatewayv2_stage" "ws" {
+  api_id      = aws_apigatewayv2_api.ws.id
+  name        = "production"
+  auto_deploy = true
+}
+
+resource "aws_lambda_permission" "ws_gateway" {
+  statement_id  = "AllowWSAPIGatewayInvoke"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.main.function_name
+  qualifier     = aws_lambda_alias.production.name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.ws.execution_arn}/*/*"
+}

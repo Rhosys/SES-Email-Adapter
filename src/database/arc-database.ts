@@ -1,6 +1,5 @@
 import { randomUUID } from "crypto";
-import { Pool } from "pg";
-import { Signer } from "@aws-sdk/rds-signer";
+import { RDSDataClient, ExecuteStatementCommand, BeginTransactionCommand, CommitTransactionCommand, RollbackTransactionCommand } from "@aws-sdk/client-rds-data";
 import { DeleteCommand, GetCommand, PutCommand, QueryCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { dynamo, SIGNALS_TABLE, encodeCursor, decodeCursor } from "./shared.js";
 import type { ArcMatcher } from "../processor/processor.js";
@@ -8,46 +7,23 @@ import type { ListArcsParams, UpdateArcRequest, CreateViewRequest, UpdateViewReq
 import type { Arc, Signal, Page, PageParams } from "../types/index.js";
 
 // ---------------------------------------------------------------------------
-// pgvector pool (module-scoped, lazy, reused across warm Lambda invocations)
+// Aurora Data API client (stateless — no connection pool needed)
 // ---------------------------------------------------------------------------
 
 const SIMILARITY_THRESHOLD = 0.5;
-const RDS_HOST = process.env["RDS_PROXY_ENDPOINT"] ?? "";
-const DB_USER  = process.env["DB_USER"] ?? "lambda";
-const DB_NAME  = process.env["AURORA_DB_NAME"] ?? "signals";
-const AWS_REGION = process.env["AWS_REGION"] ?? "eu-west-1";
+const CLUSTER_ARN = process.env["AURORA_CLUSTER_ARN"] ?? "";
+const SECRET_ARN  = process.env["AURORA_SECRET_ARN"]  ?? "";
+const DB_NAME     = process.env["AURORA_DB_NAME"]      ?? "signals";
 
-const signer = new Signer({ hostname: RDS_HOST, port: 5432, region: AWS_REGION, username: DB_USER });
-
-let _pool: Pool | null = null;
-
-function getPool(): Pool {
-  if (_pool) return _pool;
-  _pool = new Pool({
-    host:     RDS_HOST,
-    database: DB_NAME,
-    user:     DB_USER,
-    password: () => signer.getAuthToken(),
-    port: 5432,
-    ssl: { rejectUnauthorized: true },
-    max: 2,
-    idleTimeoutMillis: 30_000,
-    connectionTimeoutMillis: 5_000,
-  });
-  _pool.on("error", (err) => {
-    console.error("pgvector pool error:", err);
-    _pool = null;
-  });
-  return _pool;
-}
+const rdsData = new RDSDataClient({});
 
 // ---------------------------------------------------------------------------
 // Key helpers
 // ---------------------------------------------------------------------------
 
-const acctPk = (accountId: string) => `ACCT#${accountId}`;
-const arcSk = (id: string) => `ARC#${id}`;
-const sigSk = (id: string) => `SIG#${id}`;
+const arcPk  = (accountId: string, id: string) => `ACCT#${accountId}#ARC#${id}`;
+const sigPk  = (accountId: string, id: string) => `ACCT#${accountId}#SIG#${id}`;
+const ITEM_SK = "#";
 const gkeyPk = (accountId: string, key: string) => `GKEY#${accountId}#${key}`;
 
 // ---------------------------------------------------------------------------
@@ -63,21 +39,28 @@ export class ArcDatabase implements ArcMatcher {
   async getSignalByMessageId(accountId: string, sesMessageId: string): Promise<Pick<Signal, "id"> | null> {
     const result = await dynamo.send(new GetCommand({
       TableName: SIGNALS_TABLE,
-      Key: { pk: acctPk(accountId), sk: sigSk(`SES#${sesMessageId}`) },
+      Key: { pk: sigPk(accountId, `SES#${sesMessageId}`), sk: ITEM_SK },
       ProjectionExpression: "id",
     }));
     return result.Item ? (result.Item as Pick<Signal, "id">) : null;
   }
 
   async saveSignal(signal: Signal): Promise<void> {
-    const gsi1pk = signal.arcId ? `ARCSIG#${signal.arcId}` : `BLOCKED#${signal.accountId}`;
+    let gsi1pk: string;
+    if (signal.arcId) {
+      gsi1pk = `ARCSIG#${signal.arcId}`;
+    } else if (signal.status === "quarantine_visible" || signal.status === "quarantine_hidden") {
+      gsi1pk = `QUARANTINED#${signal.accountId}`;
+    } else {
+      gsi1pk = `BLOCKED#${signal.accountId}`;
+    }
     const gsi1sk = `RECV#${signal.receivedAt}#${signal.id}`;
     await dynamo.send(new PutCommand({
       TableName: SIGNALS_TABLE,
       Item: {
         ...signal,
-        pk: acctPk(signal.accountId),
-        sk: sigSk(signal.id),
+        pk: sigPk(signal.accountId, signal.id),
+        sk: ITEM_SK,
         gsi1pk,
         gsi1sk,
       },
@@ -87,7 +70,7 @@ export class ArcDatabase implements ArcMatcher {
   async getSignal(accountId: string, id: string): Promise<Signal | null> {
     const result = await dynamo.send(new GetCommand({
       TableName: SIGNALS_TABLE,
-      Key: { pk: acctPk(accountId), sk: sigSk(id) },
+      Key: { pk: sigPk(accountId, id), sk: ITEM_SK },
     }));
     return result.Item ? (result.Item as Signal) : null;
   }
@@ -110,10 +93,42 @@ export class ArcDatabase implements ArcMatcher {
     return { items: page, ...(nextKey ? { nextCursor: nextKey } : {}) };
   }
 
+  async listPreArcSignals(accountId: string, status: "blocked" | "quarantined", params: PageParams): Promise<Page<Signal>> {
+    const limit = Math.min(params.limit ?? 20, 100);
+    const gsi1pk = status === "quarantined" ? `QUARANTINED#${accountId}` : `BLOCKED#${accountId}`;
+    const res = await dynamo.send(new QueryCommand({
+      TableName: SIGNALS_TABLE,
+      IndexName: "gsi1",
+      KeyConditionExpression: "gsi1pk = :pk",
+      ExpressionAttributeValues: { ":pk": gsi1pk },
+      ScanIndexForward: false,
+      Limit: limit + 1,
+      ...(params.cursor ? { ExclusiveStartKey: decodeCursor(params.cursor) } : {}),
+    }));
+    const items = (res.Items ?? []) as Signal[];
+    const page = items.slice(0, limit);
+    const nextKey = items.length > limit && res.LastEvaluatedKey ? encodeCursor(res.LastEvaluatedKey) : null;
+    return { items: page, ...(nextKey ? { nextCursor: nextKey } : {}) };
+  }
+
+  async blockSignal(accountId: string, signalId: string): Promise<Signal> {
+    await dynamo.send(new UpdateCommand({
+      TableName: SIGNALS_TABLE,
+      Key: { pk: sigPk(accountId, signalId), sk: ITEM_SK },
+      UpdateExpression: "SET #status = :status, gsi1pk = :gsi1pk",
+      ExpressionAttributeNames: { "#status": "status" },
+      ExpressionAttributeValues: {
+        ":status": "blocked",
+        ":gsi1pk": `BLOCKED#${accountId}`,
+      },
+    }));
+    return (await this.getSignal(accountId, signalId))!;
+  }
+
   async unblockSignal(accountId: string, signalId: string, arcId: string): Promise<void> {
     await dynamo.send(new UpdateCommand({
       TableName: SIGNALS_TABLE,
-      Key: { pk: acctPk(accountId), sk: sigSk(signalId) },
+      Key: { pk: sigPk(accountId, signalId), sk: ITEM_SK },
       UpdateExpression: "SET arcId = :arcId, #status = :status, gsi1pk = :gsi1pk",
       ExpressionAttributeNames: { "#status": "status" },
       ExpressionAttributeValues: {
@@ -131,7 +146,7 @@ export class ArcDatabase implements ArcMatcher {
   async getArc(accountId: string, id: string): Promise<Arc | null> {
     const result = await dynamo.send(new GetCommand({
       TableName: SIGNALS_TABLE,
-      Key: { pk: acctPk(accountId), sk: arcSk(id) },
+      Key: { pk: arcPk(accountId, id), sk: ITEM_SK },
     }));
     return result.Item ? (result.Item as Arc) : null;
   }
@@ -154,10 +169,10 @@ export class ArcDatabase implements ArcMatcher {
         TableName: SIGNALS_TABLE,
         Item: {
           ...arc,
-          pk: acctPk(arc.accountId),
-          sk: arcSk(arc.id),
-          gsi1pk: acctPk(arc.accountId),
-          gsi1sk: `LASTACT#${arc.lastSignalAt}#${arc.id}`,
+          pk: arcPk(arc.accountId, arc.id),
+          sk: ITEM_SK,
+          gsi1pk: `ACCT#${arc.accountId}`,
+          gsi1sk: `LASTACT#${arc.status}#${arc.lastSignalAt}#${arc.id}`,
         },
       })),
     ];
@@ -187,15 +202,25 @@ export class ArcDatabase implements ArcMatcher {
       exprValues[":status"] = update.status;
       exprNames["#status"] = "status";
       if (update.status === "deleted") setParts.push("deletedAt = :now");
+      // Fetch current arc to reconstruct gsi1sk with new status
+      const current = await this.getArc(accountId, id);
+      if (current) {
+        setParts.push("gsi1sk = :gsi1sk");
+        exprValues[":gsi1sk"] = `LASTACT#${update.status}#${current.lastSignalAt}#${id}`;
+      }
     }
     if (update.labels !== undefined) {
       setParts.push("labels = :labels");
       exprValues[":labels"] = update.labels;
     }
+    if (update.urgency !== undefined) {
+      setParts.push("urgency = :urgency");
+      exprValues[":urgency"] = update.urgency;
+    }
 
     await dynamo.send(new UpdateCommand({
       TableName: SIGNALS_TABLE,
-      Key: { pk: acctPk(accountId), sk: arcSk(id) },
+      Key: { pk: arcPk(accountId, id), sk: ITEM_SK },
       UpdateExpression: `SET ${setParts.join(", ")}`,
       ExpressionAttributeValues: exprValues,
       ...(Object.keys(exprNames).length ? { ExpressionAttributeNames: exprNames } : {}),
@@ -216,7 +241,7 @@ export class ArcDatabase implements ArcMatcher {
 
     await dynamo.send(new UpdateCommand({
       TableName: SIGNALS_TABLE,
-      Key: { pk: acctPk(accountId), sk: sigSk(id) },
+      Key: { pk: sigPk(accountId, id), sk: ITEM_SK },
       UpdateExpression: `SET ${setParts.join(", ")}`,
       ExpressionAttributeValues: exprValues,
       ...(Object.keys(exprNames).length ? { ExpressionAttributeNames: exprNames } : {}),
@@ -227,29 +252,53 @@ export class ArcDatabase implements ArcMatcher {
   async deleteSignal(accountId: string, id: string): Promise<void> {
     await dynamo.send(new DeleteCommand({
       TableName: SIGNALS_TABLE,
-      Key: { pk: acctPk(accountId), sk: sigSk(id) },
+      Key: { pk: sigPk(accountId, id), sk: ITEM_SK },
     }));
   }
 
   async listArcs(accountId: string, params: ListArcsParams): Promise<Page<Arc>> {
     const limit = Math.min(params.limit ?? 20, 100);
-    const res = await dynamo.send(new QueryCommand({
-      TableName: SIGNALS_TABLE,
-      IndexName: "gsi1",
-      KeyConditionExpression: "gsi1pk = :pk AND begins_with(gsi1sk, :prefix)",
-      ExpressionAttributeValues: { ":pk": acctPk(accountId), ":prefix": "LASTACT#" },
-      ScanIndexForward: false,
-      Limit: 200,
-      ...(params.cursor ? { ExclusiveStartKey: decodeCursor(params.cursor) } : {}),
-    }));
+    const gsi1pk = `ACCT#${accountId}`;
 
-    let items = (res.Items ?? []) as Arc[];
+    let items: Arc[];
+    let lastKey: Record<string, unknown> | undefined;
+
+    if (params.status) {
+      // Single query — status is encoded in gsi1sk prefix for efficient reads
+      const res = await dynamo.send(new QueryCommand({
+        TableName: SIGNALS_TABLE,
+        IndexName: "gsi1",
+        KeyConditionExpression: "gsi1pk = :pk AND begins_with(gsi1sk, :prefix)",
+        ExpressionAttributeValues: { ":pk": gsi1pk, ":prefix": `LASTACT#${params.status}#` },
+        ScanIndexForward: false,
+        Limit: limit + 1,
+        ...(params.cursor ? { ExclusiveStartKey: decodeCursor(params.cursor) } : {}),
+      }));
+      items = (res.Items ?? []) as Arc[];
+      lastKey = res.LastEvaluatedKey;
+    } else {
+      // Multi-status view: parallel queries per status, merge by lastSignalAt
+      const statuses: Array<"active" | "archived" | "deleted"> = ["active", "archived", "deleted"];
+      const results = await Promise.all(statuses.map(s =>
+        dynamo.send(new QueryCommand({
+          TableName: SIGNALS_TABLE,
+          IndexName: "gsi1",
+          KeyConditionExpression: "gsi1pk = :pk AND begins_with(gsi1sk, :prefix)",
+          ExpressionAttributeValues: { ":pk": gsi1pk, ":prefix": `LASTACT#${s}#` },
+          ScanIndexForward: false,
+          Limit: limit + 1,
+        }))
+      ));
+      items = results.flatMap(r => (r.Items ?? []) as Arc[]);
+      items.sort((a, b) => b.lastSignalAt.localeCompare(a.lastSignalAt));
+      lastKey = undefined; // no cursor for multi-status merge
+    }
+
     if (params.workflow) items = items.filter((a) => a.workflow === params.workflow);
-    if (params.status) items = items.filter((a) => a.status === params.status);
     if (params.label) items = items.filter((a) => a.labels.includes(params.label!));
 
     const page = items.slice(0, limit);
-    const nextKey = items.length > limit && res.LastEvaluatedKey ? encodeCursor(res.LastEvaluatedKey) : null;
+    const nextKey = items.length > limit && lastKey ? encodeCursor(lastKey) : null;
     return { items: page, ...(nextKey ? { nextCursor: nextKey } : {}) };
   }
 
@@ -259,7 +308,7 @@ export class ArcDatabase implements ArcMatcher {
       TableName: SIGNALS_TABLE,
       IndexName: "gsi1",
       KeyConditionExpression: "gsi1pk = :pk AND begins_with(gsi1sk, :prefix)",
-      ExpressionAttributeValues: { ":pk": acctPk(accountId), ":prefix": "LASTACT#" },
+      ExpressionAttributeValues: { ":pk": `ACCT#${accountId}`, ":prefix": "LASTACT#active#" },
       ScanIndexForward: false,
       Limit: 500,
       ...(params.cursor ? { ExclusiveStartKey: decodeCursor(params.cursor) } : {}),
@@ -275,38 +324,74 @@ export class ArcDatabase implements ArcMatcher {
   }
 
   // ---------------------------------------------------------------------------
-  // ArcMatcher (pgvector — internal implementation detail)
+  // ArcMatcher (pgvector via Aurora Data API)
   // ---------------------------------------------------------------------------
 
+  // Wraps a Data API call in an explicit transaction so SET LOCAL is scoped
+  // to that transaction — required for the RLS policy to apply correctly.
+  private async withAccountContext<T>(accountId: string, fn: (transactionId: string) => Promise<T>): Promise<T> {
+    const { transactionId } = await rdsData.send(new BeginTransactionCommand({
+      resourceArn: CLUSTER_ARN, secretArn: SECRET_ARN, database: DB_NAME,
+    }));
+    try {
+      await rdsData.send(new ExecuteStatementCommand({
+        resourceArn: CLUSTER_ARN, secretArn: SECRET_ARN, database: DB_NAME,
+        transactionId,
+        sql: "SET LOCAL app.current_account_id = :accountId",
+        parameters: [{ name: "accountId", value: { stringValue: accountId } }],
+      }));
+      const result = await fn(transactionId!);
+      await rdsData.send(new CommitTransactionCommand({
+        resourceArn: CLUSTER_ARN, secretArn: SECRET_ARN, transactionId,
+      }));
+      return result;
+    } catch (err) {
+      await rdsData.send(new RollbackTransactionCommand({
+        resourceArn: CLUSTER_ARN, secretArn: SECRET_ARN, transactionId,
+      }));
+      throw err;
+    }
+  }
+
   async findMatch(accountId: string, recipientAddress: string, embedding: number[]): Promise<Arc | null> {
-    const pool = getPool();
-    const vectorLiteral = `[${embedding.join(",")}]`;
-
-    const res = await pool.query<{ arc_id: string }>(
-      `SELECT arc_id
-       FROM arc_embeddings
-       WHERE account_id = $1 AND recipient_address = $2
-         AND embedding <=> $3::vector < $4
-       ORDER BY embedding <=> $3::vector
-       LIMIT 1`,
-      [accountId, recipientAddress, vectorLiteral, SIMILARITY_THRESHOLD],
+    const res = await this.withAccountContext(accountId, (transactionId) =>
+      rdsData.send(new ExecuteStatementCommand({
+        resourceArn: CLUSTER_ARN, secretArn: SECRET_ARN, database: DB_NAME,
+        transactionId,
+        sql: `SELECT arc_id FROM arc_embeddings
+              WHERE account_id = :accountId AND recipient_address = :recipient
+                AND embedding <=> :embedding::vector < :threshold
+              ORDER BY embedding <=> :embedding::vector
+              LIMIT 1`,
+        parameters: [
+          { name: "accountId",  value: { stringValue: accountId } },
+          { name: "recipient",  value: { stringValue: recipientAddress } },
+          { name: "embedding",  value: { stringValue: `[${embedding.join(",")}]` } },
+          { name: "threshold",  value: { doubleValue: SIMILARITY_THRESHOLD } },
+        ],
+      })),
     );
-
-    if (!res.rows[0]) return null;
-    return this.getArc(accountId, res.rows[0].arc_id);
+    const arcId = res.records?.[0]?.[0]?.stringValue;
+    if (!arcId) return null;
+    return this.getArc(accountId, arcId);
   }
 
   async upsertEmbedding(arcId: string, embedding: number[], accountId: string, recipientAddress: string): Promise<void> {
-    const pool = getPool();
-    const vectorLiteral = `[${embedding.join(",")}]`;
-
-    await pool.query(
-      `INSERT INTO arc_embeddings (arc_id, account_id, recipient_address, embedding, updated_at)
-       VALUES ($1, $2, $3, $4::vector, NOW())
-       ON CONFLICT (arc_id) DO UPDATE
-         SET embedding = EXCLUDED.embedding,
-             updated_at = NOW()`,
-      [arcId, accountId, recipientAddress, vectorLiteral],
+    await this.withAccountContext(accountId, (transactionId) =>
+      rdsData.send(new ExecuteStatementCommand({
+        resourceArn: CLUSTER_ARN, secretArn: SECRET_ARN, database: DB_NAME,
+        transactionId,
+        sql: `INSERT INTO arc_embeddings (arc_id, account_id, recipient_address, embedding, updated_at)
+              VALUES (:arcId, :accountId, :recipient, :embedding::vector, NOW())
+              ON CONFLICT (arc_id) DO UPDATE
+                SET embedding = EXCLUDED.embedding, updated_at = NOW()`,
+        parameters: [
+          { name: "arcId",     value: { stringValue: arcId } },
+          { name: "accountId", value: { stringValue: accountId } },
+          { name: "recipient", value: { stringValue: recipientAddress } },
+          { name: "embedding", value: { stringValue: `[${embedding.join(",")}]` } },
+        ],
+      })),
     );
   }
 }

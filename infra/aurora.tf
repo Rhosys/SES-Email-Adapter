@@ -62,6 +62,7 @@ resource "aws_rds_cluster" "aurora" {
   final_snapshot_identifier = var.env == "prod" ? "${local.prefix}-final" : null
 
   enabled_cloudwatch_logs_exports = ["postgresql"]
+  enable_http_endpoint            = true  # Aurora Data API
 }
 
 resource "aws_rds_cluster_instance" "aurora" {
@@ -72,76 +73,30 @@ resource "aws_rds_cluster_instance" "aurora" {
   engine_version     = aws_rds_cluster.aurora.engine_version
 }
 
-# ---------------------------------------------------------------------------
-# RDS Proxy
-# Pools Lambda connections to avoid exhausting Aurora's connection limit
-# ---------------------------------------------------------------------------
-
-resource "aws_iam_role" "rds_proxy" {
-  name = "${local.prefix}-rds-proxy"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect    = "Allow"
-      Principal = { Service = "rds.amazonaws.com" }
-      Action    = "sts:AssumeRole"
-    }]
-  })
-}
-
-resource "aws_iam_role_policy" "rds_proxy_secrets" {
-  role = aws_iam_role.rds_proxy.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect   = "Allow"
-      Action   = ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"]
-      Resource = aws_secretsmanager_secret.aurora_master.arn
-    }]
-  })
-}
-
-resource "aws_db_proxy" "aurora" {
-  name                   = "${local.prefix}-proxy"
-  debug_logging          = false
-  engine_family          = "POSTGRESQL"
-  idle_client_timeout    = 1800
-  require_tls            = true
-  role_arn               = aws_iam_role.rds_proxy.arn
-  vpc_security_group_ids = [aws_security_group.rds_proxy.id]
-  vpc_subnet_ids         = aws_subnet.private[*].id
-
-  auth {
-    auth_scheme = "SECRETS"
-    secret_arn  = aws_secretsmanager_secret.aurora_master.arn
-    iam_auth    = "REQUIRED"
-  }
-}
-
-resource "aws_db_proxy_default_target_group" "aurora" {
-  db_proxy_name = aws_db_proxy.aurora.name
-
-  connection_pool_config {
-    max_connections_percent      = 90
-    max_idle_connections_percent = 50
-    connection_borrow_timeout    = 120
-  }
-}
-
-resource "aws_db_proxy_target" "aurora" {
-  db_proxy_name          = aws_db_proxy.aurora.name
-  target_group_name      = aws_db_proxy_default_target_group.aurora.name
-  db_cluster_identifier  = aws_rds_cluster.aurora.cluster_identifier
-}
 
 resource "terraform_data" "pgvector_init" {
   triggers_replace = [aws_rds_cluster.aurora.id]
 
-  # Run after cluster is available to enable the pgvector extension
-  # In practice this is handled by a migration script in your CI pipeline:
-  #   psql $DATABASE_URL -c "CREATE EXTENSION IF NOT EXISTS vector;"
-  #   psql $DATABASE_URL -c "CREATE TABLE arc_embeddings (arc_id TEXT PRIMARY KEY, embedding vector(1024));"
-  #   psql $DATABASE_URL -c "CREATE INDEX ON arc_embeddings USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);"
+  # Run once after cluster creation via CI migration script (requires VPC access):
+  #
+  # CREATE EXTENSION IF NOT EXISTS vector;
+  #
+  # CREATE TABLE arc_embeddings (
+  #   arc_id           TEXT PRIMARY KEY,
+  #   account_id       TEXT NOT NULL,
+  #   recipient_address TEXT NOT NULL,
+  #   embedding        vector(1024) NOT NULL,
+  #   updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  # );
+  #
+  # CREATE INDEX ON arc_embeddings
+  #   USING hnsw (embedding vector_cosine_ops);
+  #
+  # -- Row-Level Security: Lambda must SET LOCAL app.current_account_id before
+  # -- any query. If unset, current_setting returns NULL and no rows are visible.
+  # ALTER TABLE arc_embeddings ENABLE ROW LEVEL SECURITY;
+  # ALTER TABLE arc_embeddings FORCE ROW LEVEL SECURITY;
+  # CREATE POLICY arc_tenant_isolation ON arc_embeddings
+  #   USING (account_id = current_setting('app.current_account_id', true))
+  #   WITH CHECK (account_id = current_setting('app.current_account_id', true));
 }
