@@ -22,15 +22,15 @@ resource "aws_iam_role_policy" "lambda_permissions" {
     Version = "2012-10-17"
     Statement = [
       {
-        Sid    = "CloudWatchLogs"
-        Effect = "Allow"
-        Action = ["logs:CreateLogStream", "logs:PutLogEvents"]
+        Sid      = "CloudWatchLogs"
+        Effect   = "Allow"
+        Action   = ["logs:CreateLogStream", "logs:PutLogEvents"]
         Resource = "${aws_cloudwatch_log_group.lambda.arn}:*"
       },
       {
-        Sid    = "S3ReadEmails"
-        Effect = "Allow"
-        Action = ["s3:GetObject"]
+        Sid      = "S3ReadEmails"
+        Effect   = "Allow"
+        Action   = ["s3:GetObject"]
         Resource = "${aws_s3_bucket.emails.arn}/emails/*"
       },
       {
@@ -52,9 +52,9 @@ resource "aws_iam_role_policy" "lambda_permissions" {
         ]
       },
       {
-        Sid    = "WebSocketManage"
-        Effect = "Allow"
-        Action = ["execute-api:ManageConnections"]
+        Sid      = "WebSocketManage"
+        Effect   = "Allow"
+        Action   = ["execute-api:ManageConnections"]
         Resource = "${aws_apigatewayv2_api.ws.execution_arn}/*/@connections/*"
       },
       {
@@ -78,9 +78,9 @@ resource "aws_iam_role_policy" "lambda_permissions" {
         Resource = aws_rds_cluster.aurora.arn
       },
       {
-        Sid    = "SESSend"
-        Effect = "Allow"
-        Action = ["ses:SendEmail"]
+        Sid      = "SESSend"
+        Effect   = "Allow"
+        Action   = ["ses:SendEmail"]
         Resource = "*"
         Condition = {
           StringEquals = { "ses:FromAddress" = var.notification_from_address }
@@ -104,9 +104,9 @@ resource "aws_iam_role_policy" "lambda_permissions" {
         Resource = aws_secretsmanager_secret.aurora_master.arn
       },
       {
-        Sid    = "KMS"
-        Effect = "Allow"
-        Action = ["kms:Decrypt", "kms:GenerateDataKey*", "kms:DescribeKey"]
+        Sid      = "KMS"
+        Effect   = "Allow"
+        Action   = ["kms:Decrypt", "kms:GenerateDataKey*", "kms:DescribeKey"]
         Resource = aws_kms_key.default.arn
       },
     ]
@@ -140,33 +140,33 @@ data "archive_file" "lambda_stub" {
 }
 
 resource "aws_lambda_function" "main" {
-  function_name    = "${local.prefix}-main"
-  role             = aws_iam_role.lambda.arn
-  handler          = "handler.handler"
-  runtime          = "nodejs24.x"
-  memory_size      = 1024
-  timeout          = 30
-  publish          = true
+  function_name = "${local.prefix}-main"
+  role          = aws_iam_role.lambda.arn
+  handler       = "handler.handler"
+  runtime       = "nodejs24.x"
+  memory_size   = 1024
+  timeout       = 30
+  publish       = true
 
   filename         = data.archive_file.lambda_stub.output_path
   source_code_hash = data.archive_file.lambda_stub.output_base64sha256
 
   environment {
     variables = {
-      NODE_ENV                  = var.env
-      ACCOUNTS_TABLE            = aws_dynamodb_table.accounts.name
-      SIGNALS_TABLE             = aws_dynamodb_table.signals.name
-      PROCESSING_TABLE          = aws_dynamodb_table.processing.name
-      AUDIT_TABLE               = aws_dynamodb_table.audit.name
-      EMAIL_BUCKET              = aws_s3_bucket.emails.name
-      AURORA_CLUSTER_ARN        = aws_rds_cluster.aurora.arn
-      AURORA_SECRET_ARN         = aws_secretsmanager_secret.aurora_master.arn
-      AURORA_DB_NAME            = "signals"
-      NOTIFICATION_FROM         = var.notification_from_address
-      SES_CONFIGURATION_SET     = aws_sesv2_configuration_set.sending.configuration_set_name
-      APP_BASE_URL              = var.app_base_url
-      WS_API_ENDPOINT           = "https://${aws_apigatewayv2_api.ws.id}.execute-api.${data.aws_region.current.name}.amazonaws.com/${aws_apigatewayv2_stage.ws.name}"
-      CF_ORIGIN_SECRET          = random_password.cf_origin_secret.result
+      NODE_ENV              = var.env
+      ACCOUNTS_TABLE        = aws_dynamodb_table.accounts.name
+      SIGNALS_TABLE         = aws_dynamodb_table.signals.name
+      PROCESSING_TABLE      = aws_dynamodb_table.processing.name
+      AUDIT_TABLE           = aws_dynamodb_table.audit.name
+      EMAIL_BUCKET          = aws_s3_bucket.emails.name
+      AURORA_CLUSTER_ARN    = aws_rds_cluster.aurora.arn
+      AURORA_SECRET_ARN     = aws_secretsmanager_secret.aurora_master.arn
+      AURORA_DB_NAME        = "signals"
+      NOTIFICATION_FROM     = var.notification_from_address
+      SES_CONFIGURATION_SET = aws_sesv2_configuration_set.sending.configuration_set_name
+      APP_BASE_URL          = var.app_base_url
+      WS_API_ENDPOINT       = "https://${aws_apigatewayv2_api.ws.id}.execute-api.${data.aws_region.current.name}.amazonaws.com/${aws_apigatewayv2_stage.ws.name}"
+      CF_ORIGIN_SECRET      = random_password.cf_origin_secret.result
     }
   }
 

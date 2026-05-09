@@ -78,9 +78,9 @@ resource "aws_apigatewayv2_api" "ws" {
 }
 
 resource "aws_apigatewayv2_integration" "ws_lambda" {
-  api_id                 = aws_apigatewayv2_api.ws.id
-  integration_type       = "AWS_PROXY"
-  integration_uri        = aws_lambda_alias.production.invoke_arn
+  api_id                    = aws_apigatewayv2_api.ws.id
+  integration_type          = "AWS_PROXY"
+  integration_uri           = aws_lambda_alias.production.invoke_arn
   content_handling_strategy = "CONVERT_TO_TEXT"
 }
 
