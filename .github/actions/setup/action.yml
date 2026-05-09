@@ -24,7 +24,7 @@ runs:
     - name: Configure AWS Credentials
       uses: aws-actions/configure-aws-credentials@v4
       with:
-        role-to-assume: arn:aws:iam::${{ inputs.aws_account_id }}:role/GitLabRunnerRole
+        role-to-assume: arn:aws:iam::${{ inputs.aws_account_id }}:role/GitHubActionsRole
         aws-region: ${{ inputs.aws_region }}
 
     - name: Install Node dependencies
