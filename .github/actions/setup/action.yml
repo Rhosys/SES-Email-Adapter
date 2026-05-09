@@ -1,0 +1,32 @@
+name: 'Setup Environment'
+description: 'Sets up Node, OpenTofu, AWS credentials, and installs dependencies'
+inputs:
+  aws_account_id:
+    description: 'AWS Account ID for STS AssumeRole'
+    required: true
+  aws_region:
+    description: 'AWS Region'
+    required: true
+runs:
+  using: "composite"
+  steps:
+    - name: Setup Node.js 24
+      uses: actions/setup-node@v4
+      with:
+        node-version: '24'
+        cache: 'npm'
+
+    - name: Setup OpenTofu
+      uses: opentofu/setup-opentofu@v1
+      with:
+        tofu_version: '1.8.8'
+
+    - name: Configure AWS Credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        role-to-assume: arn:aws:iam::${{ inputs.aws_account_id }}:role/GitLabRunnerRole
+        aws-region: ${{ inputs.aws_region }}
+
+    - name: Install Node dependencies
+      run: npm ci
+      shell: bash
