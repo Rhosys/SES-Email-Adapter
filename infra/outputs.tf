@@ -42,15 +42,23 @@ output "signals_dlq_url" {
   value       = aws_sqs_queue.signals_dlq.url
 }
 
-output "rds_proxy_endpoint" {
-  description = "RDS Proxy endpoint for Lambda to connect to Aurora"
-  value       = aws_db_proxy.aurora.endpoint
-}
-
 output "aurora_cluster_identifier" {
   value = aws_rds_cluster.aurora.cluster_identifier
 }
 
 output "ses_rule_set_name" {
   value = aws_ses_receipt_rule_set.main.rule_set_name
+}
+
+output "dynamodb_audit_table" {
+  value = aws_dynamodb_table.audit.name
+}
+
+output "feedback_queue_url" {
+  value = aws_sqs_queue.feedback.url
+}
+
+output "ws_api_endpoint" {
+  description = "WebSocket API endpoint — clients connect to wss://<id>.execute-api.<region>.amazonaws.com/production"
+  value       = "wss://${aws_apigatewayv2_api.ws.id}.execute-api.${data.aws_region.current.name}.amazonaws.com/${aws_apigatewayv2_stage.ws.name}"
 }

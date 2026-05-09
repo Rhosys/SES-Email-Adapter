@@ -65,6 +65,8 @@ provider "aws" {
   }
 }
 
+data "aws_region" "current" {}
+
 locals {
   prefix      = "ses-email-adapter-${var.env}"
   mail_domain = split("@", var.notification_from_address)[1]

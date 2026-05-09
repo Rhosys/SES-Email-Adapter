@@ -78,7 +78,7 @@ resource "aws_route53_record" "ses_mx_host" {
   name     = "mx.${local.mail_domain}"
   type     = "CNAME"
   ttl      = 300
-  records  = ["inbound-smtp.eu-west-1.amazonaws.com"]
+  records  = ["inbound-smtp.${data.aws_region.current.name}.amazonaws.com"]
 }
 
 # Platform domain's own MX record — points to our branded hostname
@@ -103,7 +103,7 @@ resource "aws_route53_record" "bounce_mx" {
   name     = "bounce.${local.mail_domain}"
   type     = "MX"
   ttl      = 300
-  records  = ["10 feedback-smtp.eu-west-1.amazonses.com"]
+  records  = ["10 feedback-smtp.${data.aws_region.current.name}.amazonses.com"]
 }
 
 # SPF on the bounce subdomain — SES is the only authorised sender

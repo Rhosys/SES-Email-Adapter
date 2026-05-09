@@ -22,7 +22,7 @@ export class MailparserMimeParser {
   async parse(rawEmail: Buffer | string): Promise<ParsedMime> {
     const parsed = await simpleParser(rawEmail);
 
-    const toAddr = (addr: { address?: string; name?: string }): EmailAddress => ({
+    const toAddr = (addr: { address?: string | undefined; name?: string }): EmailAddress => ({
       address: addr.address ?? "",
       ...(addr.name ? { name: addr.name } : {}),
     });

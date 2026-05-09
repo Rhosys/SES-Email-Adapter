@@ -1,4 +1,4 @@
-import type { APIGatewayProxyEventV2, SQSEvent, Context, APIGatewayProxyResultV2 } from "aws-lambda";
+import type { APIGatewayProxyEventV2, SQSEvent, Context, APIGatewayProxyResultV2, EventBridgeEvent, APIGatewayProxyWebsocketEventV2 } from "aws-lambda";
 import { BedrockRuntimeClient } from "@aws-sdk/client-bedrock-runtime";
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 import { SignalClassifier } from "./classifier/classifier.js";
@@ -9,10 +9,12 @@ import { AccountDatabase } from "./database/account-database.js";
 import { ArcDatabase } from "./database/arc-database.js";
 import { ProcessingDatabase } from "./database/processing-database.js";
 import { ProcessorDatabaseAdapter, ApiDatabaseAdapter } from "./database/adapters.js";
+import { AuditDatabase } from "./database/audit-database.js";
 import { SESv2Client, SendEmailCommand } from "@aws-sdk/client-sesv2";
 import { SesNotifier } from "./notifier/ses-notifier.js";
 import { SesForwarder } from "./notifier/ses-forwarder.js";
 import { FeedbackProcessor } from "./notifier/feedback-processor.js";
+import { handler as domainHealthHandler } from "./jobs/domain-health-job.js";
 import type { VerificationMailer } from "./api/app.js";
 import { AuthressAuthService } from "./api/authress-auth.js";
 import { AuthressAccessService } from "./api/authress-access.js";
@@ -52,6 +54,7 @@ const classifier = new SignalClassifier(bedrock);
 const accountDb = new AccountDatabase();
 const arcDb = new ArcDatabase();
 const processingDb = new ProcessingDatabase();
+const auditDb = new AuditDatabase();
 
 const processor = new SignalProcessor({
   store: new ProcessorDatabaseAdapter(arcDb, accountDb, processingDb),
@@ -91,9 +94,11 @@ const sesVerificationMailer: VerificationMailer = {
   },
 };
 
+const authService = new AuthressAuthService();
+
 const app = createApp({
-  store: new ApiDatabaseAdapter(arcDb, accountDb),
-  auth: new AuthressAuthService(),
+  store: new ApiDatabaseAdapter(arcDb, accountDb, auditDb),
+  auth: authService,
   access: new AuthressAccessService(),
   verificationMailer: sesVerificationMailer,
 });
@@ -103,9 +108,15 @@ const app = createApp({
 // ---------------------------------------------------------------------------
 
 export async function handler(
-  event: APIGatewayProxyEventV2 | SQSEvent,
+  event: APIGatewayProxyEventV2 | APIGatewayProxyWebsocketEventV2 | SQSEvent | EventBridgeEvent<string, { source?: string }>,
   _context: Context,
-): Promise<APIGatewayProxyResultV2 | void> {
+): Promise<APIGatewayProxyResultV2 | WsAuthorizerResult | { statusCode: number } | void> {
+  if (isEventBridgeEvent(event)) {
+    if ((event as EventBridgeEvent<string, { source?: string }>).detail?.source === "domain-health-job") {
+      await domainHealthHandler();
+    }
+    return;
+  }
   if (isSqsEvent(event)) {
     if (isFeedbackEvent(event)) {
       await feedbackProcessor.process(event);
@@ -114,12 +125,116 @@ export async function handler(
     }
     return;
   }
+  if (isWsAuthorizerEvent(event)) {
+    return handleWsAuthorizer(event as WsAuthorizerEvent);
+  }
+  if (isWebSocketEvent(event)) {
+    return handleWebSocket(event as APIGatewayProxyWebsocketEventV2);
+  }
   return honoToApiGateway(app, event as APIGatewayProxyEventV2);
 }
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// WebSocket authorizer  (fires on $connect; injects accountId into context)
+// ---------------------------------------------------------------------------
+
+type WsAuthorizerEvent = {
+  type: "REQUEST";
+  methodArn: string;
+  headers?: Record<string, string>;
+  queryStringParameters?: Record<string, string>;
+};
+
+type WsAuthorizerResult = {
+  principalId: string;
+  policyDocument: {
+    Version: string;
+    Statement: Array<{ Action: string; Effect: "Allow" | "Deny"; Resource: string }>;
+  };
+  context: Record<string, string>;
+};
+
+function isWsAuthorizerEvent(event: unknown): event is WsAuthorizerEvent {
+  const e = event as Record<string, unknown>;
+  return e["type"] === "REQUEST" && typeof e["methodArn"] === "string";
+}
+
+async function handleWsAuthorizer(event: WsAuthorizerEvent): Promise<WsAuthorizerResult> {
+  // Browsers can't set headers on WebSocket upgrades — token comes as ?token=
+  const token =
+    event.queryStringParameters?.["token"] ??
+    (event.headers?.["Authorization"] ?? event.headers?.["authorization"])?.replace(/^Bearer\s+/i, "");
+
+  if (!token) return wsDeny(event.methodArn);
+
+  try {
+    const ctx = await authService.verify(token);
+    return {
+      principalId: ctx.userId,
+      policyDocument: {
+        Version: "2012-10-17",
+        Statement: [{ Action: "execute-api:Invoke", Effect: "Allow", Resource: event.methodArn }],
+      },
+      context: { accountId: ctx.accountId, userId: ctx.userId },
+    };
+  } catch {
+    return wsDeny(event.methodArn);
+  }
+}
+
+function wsDeny(methodArn: string): WsAuthorizerResult {
+  return {
+    principalId: "anonymous",
+    policyDocument: {
+      Version: "2012-10-17",
+      Statement: [{ Action: "execute-api:Invoke", Effect: "Deny", Resource: methodArn }],
+    },
+    context: {},
+  };
+}
+
+// ---------------------------------------------------------------------------
+// WebSocket route handlers  ($connect / $disconnect / $default)
+// ---------------------------------------------------------------------------
+
+function isWebSocketEvent(event: unknown): event is APIGatewayProxyWebsocketEventV2 {
+  const ctx = (event as { requestContext?: Record<string, unknown> }).requestContext;
+  return typeof ctx === "object" && ctx !== null && "connectionId" in ctx;
+}
+
+async function handleWebSocket(event: APIGatewayProxyWebsocketEventV2): Promise<{ statusCode: number }> {
+  const { routeKey, connectionId } = event.requestContext;
+  // accountId is injected by the Lambda authorizer into requestContext.authorizer
+  const authorizer = (event.requestContext as unknown as { authorizer?: Record<string, string> }).authorizer;
+  const accountId = authorizer?.["accountId"] ?? "";
+
+  switch (routeKey) {
+    case "$connect":
+      await accountDb.saveWsConnection({
+        connectionId,
+        accountId,
+        connectedAt: new Date().toISOString(),
+        // 2-hour TTL — API Gateway closes idle connections after 10 min anyway
+        ttl: Math.floor(Date.now() / 1000) + 7200,
+      });
+      return { statusCode: 200 };
+
+    case "$disconnect":
+      if (accountId) await accountDb.deleteWsConnection(accountId, connectionId);
+      return { statusCode: 200 };
+
+    default:
+      return { statusCode: 200 };
+  }
+}
+
+function isEventBridgeEvent(event: unknown): event is EventBridgeEvent<string, unknown> {
+  return typeof event === "object" && event !== null && "source" in event && "detail-type" in event;
+}
 
 function isSqsEvent(event: unknown): event is SQSEvent {
   return (
