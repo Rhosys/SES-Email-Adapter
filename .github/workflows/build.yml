@@ -78,6 +78,8 @@ jobs:
 
       - name: Tofu Plan
         run: tofu -chdir=deploy plan -out=plan.cache
+        env:
+          TF_LOG: TRACE
 
       - name: Convert Plan to JSON
         run: tofu -chdir=deploy show -json plan.cache > deploy/plan.json
