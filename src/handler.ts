@@ -20,6 +20,11 @@ import { AuthressAuthService } from "./api/authress-auth.js";
 import { AuthressAccessService } from "./api/authress-access.js";
 import { createApp } from "./api/app.js";
 import type { MimeParser } from "./processor/mime.js";
+import { BedrockEmbeddingGenerator } from "./embedding/embedding-generator.js";
+import { multiClusterWriter } from "./database/multi-cluster-aurora-writer.js";
+import { S3RetentionServiceImpl } from "./embedding/s3-retention-service.js";
+import { reindexWorker } from "./jobs/reindex/reindex-worker.js";
+import { handleJobDispatch } from "./api/job-dispatch-handler.js";
 
 // ---------------------------------------------------------------------------
 // AWS SDK clients (reused across warm invocations)
@@ -50,6 +55,7 @@ class S3MimeParser implements MimeParser {
 // ---------------------------------------------------------------------------
 
 const classifier = new SignalClassifier(bedrock);
+const embeddingGenerator = new BedrockEmbeddingGenerator(bedrock);
 
 const accountDb = new AccountDatabase();
 const arcDb = new ArcDatabase();
@@ -60,10 +66,13 @@ const processor = new SignalProcessor({
   store: new ProcessorDatabaseAdapter(arcDb, accountDb, processingDb),
   mimeParser: new S3MimeParser(),
   classifier,
+  embeddingGenerator,
+  auroraWriter: multiClusterWriter,
   arcMatcher: arcDb,
   ruleEvaluator: new JsonLogicRuleEvaluator(),
   notifier: new SesNotifier(),
   forwarder: new SesForwarder(sesv2, s3),
+  retentionService: new S3RetentionServiceImpl(s3),
 });
 
 const feedbackProcessor = new FeedbackProcessor(processingDb, accountDb);
@@ -120,6 +129,8 @@ export async function handler(
   if (isSqsEvent(event)) {
     if (isFeedbackEvent(event)) {
       await feedbackProcessor.process(event);
+    } else if (isReindexEvent(event)) {
+      await reindexWorker.process(event);
     } else {
       await processor.process(event);
     }
@@ -130,6 +141,9 @@ export async function handler(
   }
   if (isWebSocketEvent(event)) {
     return handleWebSocket(event as APIGatewayProxyWebsocketEventV2);
+  }
+  if (isReindexApiEvent(event as APIGatewayProxyEventV2)) {
+    return handleJobDispatch(event as APIGatewayProxyEventV2);
   }
   return honoToApiGateway(app, event as APIGatewayProxyEventV2);
 }
@@ -248,6 +262,20 @@ function isSqsEvent(event: unknown): event is SQSEvent {
 
 function isFeedbackEvent(event: SQSEvent): boolean {
   return (event.Records[0]?.eventSourceARN ?? "").includes("-feedback");
+}
+
+function isReindexEvent(event: SQSEvent): boolean {
+  return (event.Records[0]?.eventSourceARN ?? "").includes("-reindex");
+}
+
+function isReindexApiEvent(event: APIGatewayProxyEventV2): boolean {
+  const http = (event as APIGatewayProxyEventV2).requestContext?.http;
+  if (!http) return false;
+  const method = http.method;
+  const path = (event as APIGatewayProxyEventV2).rawPath ?? "";
+  if (method === "POST" && /^\/reindex\/?$/.test(path)) return true;
+  if (method === "GET" && /^\/reindex\/[^/]+\/?$/.test(path)) return true;
+  return false;
 }
 
 async function honoToApiGateway(

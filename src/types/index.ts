@@ -326,6 +326,20 @@ export interface Attachment {
 }
 
 // ---------------------------------------------------------------------------
+// EmbedTextInput — input to the embed-text builder
+// ---------------------------------------------------------------------------
+
+export interface EmbedTextInput {
+  accountId: string;
+  from: string;
+  replyTo?: string;
+  returnPath?: string;
+  recipientAddress: string;
+  subject: string;
+  rawTextBody: string;
+}
+
+// ---------------------------------------------------------------------------
 // MatchedRuleResult — per-rule trace written to Signal.matchedRules
 // ---------------------------------------------------------------------------
 
@@ -339,6 +353,8 @@ export interface MatchedRuleResult {
 // ---------------------------------------------------------------------------
 // Signal (immutable inbound email event)
 // ---------------------------------------------------------------------------
+
+export type UserDisplayedRetention = '1 year' | '5 years' | 'forever';
 
 export interface Signal {
   // Discriminated ID encoding origin: "SES#${sesMessageId}" | "SYS#${uuid}" | "USR#${uuid}"
@@ -375,6 +391,18 @@ export interface Signal {
   urgency?: ArcUrgency;
   createdAt: string;
   ttl?: number;   // Unix seconds; absent = never expire
+
+  // Embedding cache, keyed by Bedrock model ID
+  // Absent on quarantined/blocked signals (no Aurora write happened).
+  // Partially populated if individual Bedrock calls failed (see processor metrics).
+  embeddings?: Record<string, number[]>;
+
+  // ISO 8601 retention duration — the ONLY retention field stored in DynamoDB.
+  // Free/Beta: 'P1Y' (S3 object tagged retention-tier=P1Y, expires after 365 days)
+  // Paid/Lifetime: 'P5Y' (S3 object untagged in inbox/, expires after 1825 days)
+  // Premium/Internal: 'P1000Y' (S3 object moved to saved/, no lifecycle rule)
+  // userDisplayedRetention is NEVER stored — derived at API response time via getUserDisplayedRetention().
+  retentionDuration?: import("../embedding/retention-tier.js").RetentionDuration;
 }
 
 // ---------------------------------------------------------------------------
@@ -536,6 +564,7 @@ export interface Account {
   deletionRetentionDays: number;
   notifications?: NotificationSettings;
   filtering?: AccountFilteringConfig;
+  billingPlan?: import("../embedding/retention-tier.js").BillingPlan;
   createdAt: string;
   updatedAt: string;
 }

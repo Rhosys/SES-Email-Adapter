@@ -7,7 +7,28 @@ import { baseUrgency } from "./priority.js";
 import type { ProcessorDatabase, ArcMatcher, RuleEvaluator, Notifier, Forwarder, ForwardOptions, TestReplier } from "./processor.js";
 import type { MimeParser } from "./mime.js";
 import type { SignalClassifier, ClassificationOutput } from "../classifier/classifier.js";
+import type { EmbeddingGenerator, EmbeddingResult } from "../embedding/embedding-generator.js";
+import type { MultiClusterAuroraWriter } from "../database/multi-cluster-aurora-writer.js";
 import type { Arc, Rule, Signal, Alias, AccountFilteringConfig } from "../types/index.js";
+
+// Mock cluster-registry so processor can resolve the read cluster
+vi.mock("../embedding/cluster-registry.js", () => {
+  const entry = Object.freeze({
+    clusterId: "aurora-prod-titan-v2",
+    clusterArn: "arn:aws:rds:eu-west-1:123456789012:cluster:aurora-prod-titan-v2",
+    secretArn: "arn:aws:secretsmanager:eu-west-1:123456789012:secret:aurora-prod-titan-v2-xxxxxx",
+    databaseName: "signals",
+    modelId: "amazon.titan-embed-text-v2:0",
+    dimensions: 1024,
+    active: true,
+  });
+  return {
+    CLUSTER_REGISTRY: Object.freeze([entry]),
+    getActiveClusters: () => [entry],
+    getClusterById: (id: string) => (id === entry.clusterId ? entry : null),
+    getReadCluster: () => entry,
+  };
+});
 
 // ---------------------------------------------------------------------------
 // Test doubles
@@ -27,12 +48,13 @@ const DEFAULT_EMAIL_CONFIG: Alias = {
 const DEFAULT_SENDER_ENTRY: import("../types/index.js").AliasSender = {
   accountId: "acct-test-001", aliasAddress: "user@example.com", domain: "example.com", mode: "allow", addedAt: "2024-01-01T00:00:00Z",
 };
-const DEFAULT_CTX = { retentionDays: 0, filtering: null, emailConfig: DEFAULT_EMAIL_CONFIG, registeredDomains: [], userEmails: [] };
+const DEFAULT_CTX = { retentionDays: 0, filtering: null, emailConfig: DEFAULT_EMAIL_CONFIG, registeredDomains: [], userEmails: [], billingPlan: "Paid" as const };
 
 function makeStore(): ProcessorDatabase {
   return {
     getSignalByMessageId: vi.fn().mockResolvedValue(null),
     saveSignal: vi.fn().mockResolvedValue(undefined),
+    updateSignalRetention: vi.fn().mockResolvedValue(undefined),
     getArc: vi.fn().mockResolvedValue(null),
     findArcByGroupingKey: vi.fn().mockResolvedValue(null),
     saveArc: vi.fn().mockResolvedValue(undefined),
@@ -86,10 +108,27 @@ function makeMimeParser(): MimeParser {
   };
 }
 
-function makeClassifier(): Pick<SignalClassifier, "classify" | "embed"> {
+function makeClassifier(): Pick<SignalClassifier, "classify"> {
   return {
     classify: vi.fn().mockImplementation(() => Promise.resolve({ ...validClassification })),
-    embed: vi.fn().mockResolvedValue(new Array(1024).fill(0.1)),
+  };
+}
+
+function makeEmbeddingGenerator(): EmbeddingGenerator {
+  return {
+    generateForActiveClusters: vi.fn().mockResolvedValue([
+      { modelId: "amazon.titan-embed-text-v2:0", vector: new Array(1024).fill(0.1), dimensions: 1024 },
+    ] as EmbeddingResult[]),
+    generateForModel: vi.fn().mockResolvedValue(
+      { modelId: "amazon.titan-embed-text-v2:0", vector: new Array(1024).fill(0.1), dimensions: 1024 } as EmbeddingResult,
+    ),
+  };
+}
+
+function makeAuroraWriter(): MultiClusterAuroraWriter {
+  return {
+    upsertEmbedding: vi.fn().mockResolvedValue(undefined),
+    findMatch: vi.fn().mockResolvedValue(null),
   };
 }
 
@@ -210,7 +249,9 @@ function makeArc(overrides: Partial<Arc> = {}): Arc {
 describe("SignalProcessor", () => {
   let store: ProcessorDatabase;
   let mimeParser: MimeParser;
-  let classifier: Pick<SignalClassifier, "classify" | "embed">;
+  let classifier: Pick<SignalClassifier, "classify">;
+  let embeddingGenerator: EmbeddingGenerator;
+  let auroraWriter: MultiClusterAuroraWriter;
   let arcMatcher: ArcMatcher;
   let ruleEvaluator: RuleEvaluator;
   let processor: SignalProcessor;
@@ -220,9 +261,11 @@ describe("SignalProcessor", () => {
     store = makeStore();
     mimeParser = makeMimeParser();
     classifier = makeClassifier();
+    embeddingGenerator = makeEmbeddingGenerator();
+    auroraWriter = makeAuroraWriter();
     arcMatcher = makeArcMatcher();
     ruleEvaluator = makeRuleEvaluator();
-    processor = new SignalProcessor({ store, mimeParser, classifier, arcMatcher, ruleEvaluator });
+    processor = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator });
   });
 
   // -------------------------------------------------------------------------
@@ -263,7 +306,7 @@ describe("SignalProcessor", () => {
     it("embeds the signal content and runs arc matching", async () => {
       await processor.process(makeSqsEvent([{}]));
 
-      expect(classifier.embed).toHaveBeenCalledOnce();
+      expect(embeddingGenerator.generateForActiveClusters).toHaveBeenCalledOnce();
       // personal workflow has no grouping key — falls back to vector search
       expect(arcMatcher.findMatch).toHaveBeenCalledOnce();
     });
@@ -271,7 +314,7 @@ describe("SignalProcessor", () => {
     it("stores the embedding after saving", async () => {
       await processor.process(makeSqsEvent([{}]));
 
-      expect(arcMatcher.upsertEmbedding).toHaveBeenCalledOnce();
+      expect(auroraWriter.upsertEmbedding).toHaveBeenCalledOnce();
     });
 
     it("sets Arc workflow and summary from classification", async () => {
@@ -525,7 +568,7 @@ describe("SignalProcessor", () => {
 
     beforeEach(() => {
       forwarder = { forward: vi.fn().mockResolvedValue(undefined) };
-      processor = new SignalProcessor({ store, mimeParser, classifier, arcMatcher, ruleEvaluator, forwarder });
+      processor = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, forwarder });
     });
 
     it("calls forwarder with s3Key and target address when forward rule matches", async () => {
@@ -704,7 +747,7 @@ describe("SignalProcessor", () => {
 
     beforeEach(() => {
       notifier = makeNotifier();
-      processor = new SignalProcessor({ store, mimeParser, classifier, arcMatcher, ruleEvaluator, notifier });
+      processor = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, notifier });
     });
 
     it("calls notifier after saving a new Signal", async () => {
@@ -745,7 +788,7 @@ describe("SignalProcessor", () => {
     it("does not call notifier when no notifier is configured", async () => {
       // Processor without notifier
       const processorWithoutNotifier = new SignalProcessor({
-        store, mimeParser, classifier, arcMatcher, ruleEvaluator,
+        store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator,
       });
 
       await processorWithoutNotifier.process(makeSqsEvent([{}]));
@@ -763,7 +806,7 @@ describe("SignalProcessor", () => {
 
     beforeEach(() => {
       notifier = makeNotifier();
-      processor = new SignalProcessor({ store, mimeParser, classifier, arcMatcher, ruleEvaluator, notifier });
+      processor = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, notifier });
     });
 
     it("allows signal on brand new address and auto-creates aliases with sender approved", async () => {
@@ -971,6 +1014,7 @@ describe("SignalProcessor", () => {
         emailConfig: null,
         registeredDomains: [],
         userEmails: [],
+        billingPlan: "Paid",
       });
 
       await processor.process(makeSqsEvent([{}]));
@@ -1396,7 +1440,7 @@ describe("SignalProcessor", () => {
       ]);
 
       const notifier = makeNotifier();
-      const proc = new SignalProcessor({ store, mimeParser, classifier, arcMatcher, ruleEvaluator, notifier });
+      const proc = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, notifier });
       await proc.process(makeSqsEvent([{}]));
 
       expect(store.saveArc).not.toHaveBeenCalled();
@@ -1412,7 +1456,7 @@ describe("SignalProcessor", () => {
       ]);
 
       const notifier = makeNotifier();
-      const proc = new SignalProcessor({ store, mimeParser, classifier, arcMatcher, ruleEvaluator, notifier });
+      const proc = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, notifier });
       await proc.process(makeSqsEvent([{}]));
 
       expect(store.saveArc).not.toHaveBeenCalled();
@@ -1487,7 +1531,7 @@ describe("SignalProcessor", () => {
 
     beforeEach(() => {
       notifier = makeNotifier();
-      processor = new SignalProcessor({ store, mimeParser, classifier, arcMatcher, ruleEvaluator, notifier });
+      processor = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, notifier });
     });
 
     it("blocks status emails silently — no arc created, signal saved as blocked", async () => {
@@ -1545,7 +1589,7 @@ describe("SignalProcessor", () => {
 
     beforeEach(() => {
       testReplier = makeTestReplier();
-      processor = new SignalProcessor({ store, mimeParser, classifier, arcMatcher, ruleEvaluator, testReplier });
+      processor = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, testReplier });
     });
 
     it("sends a pong when workflow is 'test' and testReplier is configured", async () => {
@@ -1644,7 +1688,7 @@ describe("SignalProcessor", () => {
     });
 
     it("does not call pong when testReplier is not configured", async () => {
-      const processorWithoutReplier = new SignalProcessor({ store, mimeParser, classifier, arcMatcher, ruleEvaluator });
+      const processorWithoutReplier = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator });
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(testClassification);
 
       // Should not throw — testReplier is optional
@@ -1775,7 +1819,7 @@ describe("SignalProcessor", () => {
 
     it("passes dkimPass=true and dmarcPass=true when both SES verdicts are PASS", async () => {
       const forwarder: Forwarder = { forward: vi.fn().mockResolvedValue(undefined) };
-      const proc = new SignalProcessor({ store, mimeParser, classifier, arcMatcher, ruleEvaluator, forwarder });
+      const proc = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, forwarder });
       vi.mocked(store.listEnabledRules).mockResolvedValueOnce([makeForwardRule()]);
 
       await proc.process(makeSqsEvent([{ dkimVerdict: "PASS", dmarcVerdict: "PASS" }]));
@@ -1790,7 +1834,7 @@ describe("SignalProcessor", () => {
 
     it("passes dkimPass=false and dmarcPass=false when SES verdicts are FAIL and GRAY", async () => {
       const forwarder: Forwarder = { forward: vi.fn().mockResolvedValue(undefined) };
-      const proc = new SignalProcessor({ store, mimeParser, classifier, arcMatcher, ruleEvaluator, forwarder });
+      const proc = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, forwarder });
       vi.mocked(store.listEnabledRules).mockResolvedValueOnce([makeForwardRule()]);
 
       await proc.process(makeSqsEvent([{ dkimVerdict: "FAIL", dmarcVerdict: "GRAY" }]));

@@ -29,6 +29,22 @@ resource "aws_apigatewayv2_route" "catch_all" {
   target    = "integrations/${aws_apigatewayv2_integration.lambda.id}"
 }
 
+# ---------------------------------------------------------------------------
+# Reindex operator API routes
+# ---------------------------------------------------------------------------
+
+resource "aws_apigatewayv2_route" "reindex_post" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "POST /reindex"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda.id}"
+}
+
+resource "aws_apigatewayv2_route" "reindex_get" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "GET /reindex/{jobId}"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda.id}"
+}
+
 resource "aws_apigatewayv2_stage" "main" {
   api_id      = aws_apigatewayv2_api.main.id
   name        = "$default"

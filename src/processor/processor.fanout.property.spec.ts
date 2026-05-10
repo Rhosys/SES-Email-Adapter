@@ -80,7 +80,7 @@ describe("Property 6: Multi-cluster fanout writes vectors to every active target
     emailConfig: DEFAULT_EMAIL_CONFIG,
     registeredDomains: [],
     userEmails: [],
-    billingPlan: { type: "paid" as const },
+    billingPlan: "Paid" as const,
   };
 
   const validClassification: ClassificationOutput = {

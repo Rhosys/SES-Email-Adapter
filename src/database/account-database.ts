@@ -176,7 +176,7 @@ export class AccountDatabase {
     return account?.deletionRetentionDays ?? 0;
   }
 
-  async getProcessorAccountContext(accountId: string, recipientAddress: string): Promise<{ retentionDays: number; filtering: AccountFilteringConfig | null; emailConfig: Alias | null; registeredDomains: string[]; userEmails: string[] }> {
+  async getProcessorAccountContext(accountId: string, recipientAddress: string): Promise<{ retentionDays: number; filtering: AccountFilteringConfig | null; emailConfig: Alias | null; registeredDomains: string[]; userEmails: string[]; billingPlan: import("../embedding/retention-tier.js").BillingPlan }> {
     const [account, emailConfig, domains] = await Promise.all([
       this.getAccount(accountId),
       this.getAlias(accountId, recipientAddress),
@@ -189,6 +189,8 @@ export class AccountDatabase {
       registeredDomains: domains.map((d) => d.domain),
       // userEmails fetched via Authress at runtime; placeholder empty array here
       userEmails: [],
+      // Billing plan drives S3 retention tier. Defaults to Paid (5-year inbox/ lifecycle).
+      billingPlan: account?.billingPlan ?? "Paid",
     };
   }
 

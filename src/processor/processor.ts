@@ -2,7 +2,14 @@ import { randomUUID } from "crypto";
 import type { SQSEvent } from "aws-lambda";
 import type { Signal, Arc, Rule, Workflow, WorkflowData, Alias, AliasSender, SenderMode, AccountFilteringConfig, SignalSource, SchedulingData, SignalStatus, Domain, ArcUrgency, SenderFilterMode, MatchedRuleResult } from "../types/index.js";
 import type { MimeParser } from "./mime.js";
+import { buildEmbedText, extractEmbedTextInput } from "../embedding/embed-text.js";
 import type { SignalClassifier } from "../classifier/classifier.js";
+import type { EmbeddingGenerator } from "../embedding/embedding-generator.js";
+import type { MultiClusterAuroraWriter } from "../database/multi-cluster-aurora-writer.js";
+import type { S3RetentionService } from "../embedding/s3-retention-service.js";
+import { getRetentionForPlan, retentionDurationToSeconds } from "../embedding/retention-tier.js";
+import type { BillingPlan } from "../embedding/retention-tier.js";
+import { getReadCluster, getActiveClusters } from "../embedding/cluster-registry.js";
 import { getETLD1, assignSystemLabels, DEFAULT_SPAM_SCORE_THRESHOLD } from "./filter.js";
 
 // ---------------------------------------------------------------------------
@@ -15,11 +22,13 @@ export interface ProcessorAccountContext {
   emailConfig: Alias | null;
   registeredDomains: string[];
   userEmails: string[];
+  billingPlan: BillingPlan;
 }
 
 export interface ProcessorDatabase {
   getSignalByMessageId(accountId: string, sesMessageId: string): Promise<Pick<Signal, "id"> | null>;
   saveSignal(signal: Signal): Promise<void>;
+  updateSignalRetention(accountId: string, signalId: string, update: Partial<Pick<Signal, "s3Key" | "retentionDuration">>): Promise<void>;
   getArc(accountId: string, id: string): Promise<Arc | null>;
   findArcByGroupingKey(accountId: string, key: string): Promise<Arc | null>;
   saveArc(arc: Arc): Promise<void>;
@@ -234,33 +243,42 @@ export const SYSTEM_RULES: Rule[] = [
 interface SignalProcessorOptions {
   store: ProcessorDatabase;
   mimeParser: MimeParser;
-  classifier: Pick<SignalClassifier, "classify" | "embed">;
+  classifier: Pick<SignalClassifier, "classify">;
+  embeddingGenerator: EmbeddingGenerator;
+  auroraWriter: MultiClusterAuroraWriter;
   arcMatcher: ArcMatcher;
   ruleEvaluator: RuleEvaluator;
   notifier?: Notifier;
   forwarder?: Forwarder;
   testReplier?: TestReplier;
+  retentionService?: S3RetentionService;
 }
 
 export class SignalProcessor {
   private readonly store: ProcessorDatabase;
   private readonly mimeParser: MimeParser;
-  private readonly classifier: Pick<SignalClassifier, "classify" | "embed">;
+  private readonly classifier: Pick<SignalClassifier, "classify">;
+  private readonly embeddingGenerator: EmbeddingGenerator;
+  private readonly auroraWriter: MultiClusterAuroraWriter;
   private readonly arcMatcher: ArcMatcher;
   private readonly ruleEvaluator: RuleEvaluator;
   private readonly notifier: Notifier | undefined;
   private readonly forwarder: Forwarder | undefined;
   private readonly testReplier: TestReplier | undefined;
+  private readonly retentionService: S3RetentionService | undefined;
 
   constructor(opts: SignalProcessorOptions) {
     this.store = opts.store;
     this.mimeParser = opts.mimeParser;
     this.classifier = opts.classifier;
+    this.embeddingGenerator = opts.embeddingGenerator;
+    this.auroraWriter = opts.auroraWriter;
     this.arcMatcher = opts.arcMatcher;
     this.ruleEvaluator = opts.ruleEvaluator;
     this.notifier = opts.notifier;
     this.forwarder = opts.forwarder;
     this.testReplier = opts.testReplier;
+    this.retentionService = opts.retentionService;
   }
 
   async process(event: SQSEvent): Promise<void> {
@@ -297,19 +315,12 @@ export class SignalProcessor {
     const recipientAddress = destination[0] ?? "";
     const senderETLD1 = getETLD1(parsed.from.address);
 
-    // 3. Embed + classify in parallel
-    const returnPath = parsed.headers["return-path"] ?? parsed.headers["Return-Path"] ?? "";
-    const embedText = [
-      `Account: ${accountId}`,
-      `From: ${parsed.from.address}`,
-      parsed.replyTo ? `Reply-To: ${parsed.replyTo.address}` : "",
-      returnPath ? `Return-Path: ${returnPath}` : "",
-      `To: ${recipientAddress}`,
-      `Subject: ${parsed.subject}`,
-      parsed.textBody ?? "",
-    ].filter(Boolean).join("\n").slice(0, 4000);
-    const [embedding, classification] = await Promise.all([
-      this.classifier.embed(embedText),
+    // 3. Build EmbedTextInput and construct embed text
+    // Reuses existing MIME parser; ensures from / reply-to / return-path / subject / text body extraction
+    const embedTextInput = extractEmbedTextInput(parsed, accountId, recipientAddress);
+    const embedText = buildEmbedText(embedTextInput);
+    const [embeddingResults, classification] = await Promise.all([
+      this.embeddingGenerator.generateForActiveClusters(embedText),
       this.classifier.classify({
         from: parsed.from.address,
         to: parsed.to.map((a) => a.address),
@@ -320,6 +331,11 @@ export class SignalProcessor {
         receivedAt: timestamp,
       }),
     ]);
+
+    // Use the read cluster's embedding for arc matching (backward-compatible with single-cluster)
+    const readCluster = getReadCluster();
+    const readClusterResult = embeddingResults.find((r) => r.modelId === readCluster.modelId);
+    const embedding = readClusterResult?.vector ?? [];
 
     const now = new Date().toISOString();
 
@@ -508,16 +524,81 @@ export class SignalProcessor {
       }
     }
 
+    // Compose the embeddings map from all successful EmbeddingResults.
+    // This is set on the signal BEFORE save so the DynamoDB cache is populated
+    // regardless of whether subsequent Aurora writes succeed or fail.
+    if (embeddingResults.length > 0) {
+      const embeddings: Record<string, number[]> = {};
+      for (const result of embeddingResults) {
+        embeddings[result.modelId] = result.vector;
+      }
+      signal.embeddings = embeddings;
+    }
+
     await this.store.saveArc(arc);
     await this.store.saveSignal(signal);
 
-    // 13. Calendar synthetic signal
+    // 13. Apply S3 retention based on billing plan (only on new signal creation, never retroactive)
+    if (this.retentionService) {
+      try {
+        const retention = getRetentionForPlan(accountCtx.billingPlan);
+        const { s3Key: updatedS3Key } = await this.retentionService.applyPlanRetention(s3Key, {
+          s3Tag: retention.s3Tag,
+          copyToSaved: retention.copyToSaved,
+        });
+
+        // Persist retention metadata on the signal record
+        const retentionUpdate: Partial<Pick<Signal, "s3Key" | "retentionDuration">> = {
+          retentionDuration: retention.retentionDuration,
+        };
+        if (updatedS3Key !== s3Key) {
+          retentionUpdate.s3Key = updatedS3Key;
+        }
+        await this.store.updateSignalRetention(accountId, signal.id, retentionUpdate);
+
+        // Set TTL on the arc based on retentionDuration
+        const ttlSeconds = retentionDurationToSeconds(retention.retentionDuration);
+        const arcTtl = Math.floor(Date.now() / 1000) + ttlSeconds;
+        arc.ttl = arcTtl;
+        await this.store.saveArc(arc);
+      } catch (err) {
+        // Retention application failure is non-fatal — the signal is already saved.
+        // The default lifecycle rule will apply (5-year inbox/ expiry).
+        console.error("S3 retention application failed:", err);
+      }
+    }
+
+    // 14. Calendar synthetic signal
     if (classification.workflow === "scheduling") {
       const calSignal = buildCalendarSignal(arc, signal, now, ttl);
       await this.store.saveSignal(calSignal);
     }
 
-    await this.arcMatcher.upsertEmbedding(arc.id, embedding, accountId, recipientAddress);
+    // Multi-cluster Aurora fanout: write each successful embedding to its corresponding cluster
+    // Per-cluster failures are handled gracefully — emit metric, continue with other clusters.
+    // The DynamoDB cache entry (signal.embeddings) is preserved regardless of Aurora failures.
+
+    // Write embeddings to each active cluster in parallel
+    const activeClusters = getActiveClusters();
+    await Promise.all(
+      activeClusters.map(async (cluster) => {
+        const result = embeddingResults.find((r) => r.modelId === cluster.modelId);
+        if (!result) return; // Bedrock failed for this model — already handled by generator metric
+        try {
+          await this.auroraWriter.upsertEmbedding({
+            clusterId: cluster.clusterId,
+            arcId: arc.id,
+            accountId,
+            recipientAddress,
+            embedding: result.vector,
+          });
+        } catch (err) {
+          // Per-cluster Aurora failure: log and continue.
+          // The DynamoDB cache entry preserves the embedding for recovery via reindex.
+          console.error(`Aurora upsert failed for cluster ${cluster.clusterId}:`, err);
+        }
+      }),
+    );
 
     // 14. Forward
     if (this.forwarder && outcome.forwardAddresses.length > 0) {
