@@ -211,7 +211,17 @@ const arbMixedSignals = fc.record({
   cached: fc.array(arbCachedSignal, { minLength: 0, maxLength: 4 }),
   s3Retrievable: fc.array(arbS3RetrievableSignal, { minLength: 0, maxLength: 4 }),
   unrecoverable: fc.array(arbUnrecoverableSignal, { minLength: 0, maxLength: 4 }),
-}).filter((s) => s.cached.length + s.s3Retrievable.length + s.unrecoverable.length > 0);
+}).filter((s) => {
+  // Ensure total > 0
+  if (s.cached.length + s.s3Retrievable.length + s.unrecoverable.length === 0) return false;
+  // Ensure s3Keys are unique across s3Retrievable and unrecoverable to prevent
+  // the S3 mock from returning success for "unrecoverable" signals
+  const retrievableKeys = new Set(s.s3Retrievable.map((sig) => sig.item.s3Key));
+  const unrecoverableKeys = s.unrecoverable
+    .filter((sig) => sig.item.s3Key)
+    .map((sig) => sig.item.s3Key);
+  return unrecoverableKeys.every((key) => !retrievableKeys.has(key));
+});
 
 // ---------------------------------------------------------------------------
 // Helpers

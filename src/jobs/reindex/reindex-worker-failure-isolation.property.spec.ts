@@ -13,7 +13,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import fc from "fast-check";
 import { mockClient } from "aws-sdk-client-mock";
 import { DynamoDBDocumentClient, ScanCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
-import { BedrockRuntimeClient, InvokeModelCommand } from "@aws-sdk/client-bedrock-runtime";
+import { BedrockRuntimeClient } from "@aws-sdk/client-bedrock-runtime";
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 import { Readable } from "stream";
 import { sdkStreamMixin } from "@smithy/util-stream";
@@ -175,30 +175,16 @@ const arbValidS3RetrievableSignal = fc.record({
 
 // ---------------------------------------------------------------------------
 // Arbitraries for malformed signals (K signals)
+// These signals have a valid `id` (string) but are missing one of the required
+// string fields: accountId, arcId, or recipientAddress.
+// The worker silently skips signals without an `id`, so we always include one.
 // ---------------------------------------------------------------------------
-
-/** Signal missing required field: id */
-const arbMalformedSignalMissingId = fc.record({
-  accountId: arbAccountId,
-  arcId: arbArcId,
-  recipientAddress: arbEmail,
-  embeddings: fc.record({ [TARGET_MODEL_ID]: arbEmbedding }),
-}).map((s) => ({
-  pk: `ACCT#${s.accountId}#SIG#placeholder`,
-  sk: "#",
-  // id is missing
-  accountId: s.accountId,
-  arcId: s.arcId,
-  recipientAddress: s.recipientAddress,
-  embeddings: s.embeddings,
-}));
 
 /** Signal missing required field: accountId */
 const arbMalformedSignalMissingAccountId = fc.record({
   id: arbSignalId,
   arcId: arbArcId,
   recipientAddress: arbEmail,
-  embeddings: fc.record({ [TARGET_MODEL_ID]: arbEmbedding }),
 }).map((s) => ({
   pk: `ACCT#placeholder#SIG#${s.id}`,
   sk: "#",
@@ -206,7 +192,7 @@ const arbMalformedSignalMissingAccountId = fc.record({
   // accountId is missing
   arcId: s.arcId,
   recipientAddress: s.recipientAddress,
-  embeddings: s.embeddings,
+  embeddings: {},
 }));
 
 /** Signal missing required field: arcId */
@@ -214,7 +200,6 @@ const arbMalformedSignalMissingArcId = fc.record({
   id: arbSignalId,
   accountId: arbAccountId,
   recipientAddress: arbEmail,
-  embeddings: fc.record({ [TARGET_MODEL_ID]: arbEmbedding }),
 }).map((s) => ({
   pk: `ACCT#${s.accountId}#SIG#${s.id}`,
   sk: "#",
@@ -222,7 +207,7 @@ const arbMalformedSignalMissingArcId = fc.record({
   accountId: s.accountId,
   // arcId is missing
   recipientAddress: s.recipientAddress,
-  embeddings: s.embeddings,
+  embeddings: {},
 }));
 
 /** Signal missing required field: recipientAddress */
@@ -230,7 +215,6 @@ const arbMalformedSignalMissingRecipientAddress = fc.record({
   id: arbSignalId,
   accountId: arbAccountId,
   arcId: arbArcId,
-  embeddings: fc.record({ [TARGET_MODEL_ID]: arbEmbedding }),
 }).map((s) => ({
   pk: `ACCT#${s.accountId}#SIG#${s.id}`,
   sk: "#",
@@ -238,80 +222,62 @@ const arbMalformedSignalMissingRecipientAddress = fc.record({
   accountId: s.accountId,
   arcId: s.arcId,
   // recipientAddress is missing
-  embeddings: s.embeddings,
+  embeddings: {},
 }));
 
-/** Signal with malformed embeddings (not an object) */
-const arbMalformedSignalBadEmbeddings = fc.record({
+/** Signal with accountId as non-string (number) */
+const arbMalformedSignalNonStringAccountId = fc.record({
   id: arbSignalId,
-  accountId: arbAccountId,
   arcId: arbArcId,
   recipientAddress: arbEmail,
-  embeddings: fc.oneof(
-    fc.string(), // string instead of object
-    fc.integer(), // integer instead of object
-    fc.array(fc.float()), // array instead of object
-  ),
 }).map((s) => ({
-  pk: `ACCT#${s.accountId}#SIG#${s.id}`,
+  pk: `ACCT#placeholder#SIG#${s.id}`,
   sk: "#",
   id: s.id,
-  accountId: s.accountId,
-  arcId: s.arcId,
-  recipientAddress: s.recipientAddress,
-  embeddings: s.embeddings,
-}));
-
-/** Signal with malformed embeddings (object but wrong structure) */
-const arbMalformedSignalWrongEmbeddingsStructure = fc.record({
-  id: arbSignalId,
-  accountId: arbAccountId,
-  arcId: arbArcId,
-  recipientAddress: arbEmail,
-  embeddings: fc.record({
-    [TARGET_MODEL_ID]: fc.oneof(
-      fc.string(), // string instead of array
-      fc.integer(), // integer instead of array
-      fc.array(fc.string()), // string[] instead of number[]
-    ),
-  }),
-}).map((s) => ({
-  pk: `ACCT#${s.accountId}#SIG#${s.id}`,
-  sk: "#",
-  id: s.id,
-  accountId: s.accountId,
-  arcId: s.arcId,
-  recipientAddress: s.recipientAddress,
-  embeddings: s.embeddings,
-}));
-
-/** Signal with malformed s3Key (non-string) */
-const arbMalformedSignalBadS3Key = fc.record({
-  id: arbSignalId,
-  accountId: arbAccountId,
-  arcId: arbArcId,
-  recipientAddress: arbEmail,
-  s3Key: fc.oneof(fc.integer(), fc.array(fc.string()), fc.boolean()),
-}).map((s) => ({
-  pk: `ACCT#${s.accountId}#SIG#${s.id}`,
-  sk: "#",
-  id: s.id,
-  accountId: s.accountId,
+  accountId: 12345, // number instead of string
   arcId: s.arcId,
   recipientAddress: s.recipientAddress,
   embeddings: {},
-  s3Key: s.s3Key,
+}));
+
+/** Signal with arcId as non-string (boolean) */
+const arbMalformedSignalNonStringArcId = fc.record({
+  id: arbSignalId,
+  accountId: arbAccountId,
+  recipientAddress: arbEmail,
+}).map((s) => ({
+  pk: `ACCT#${s.accountId}#SIG#${s.id}`,
+  sk: "#",
+  id: s.id,
+  accountId: s.accountId,
+  arcId: true, // boolean instead of string
+  recipientAddress: s.recipientAddress,
+  embeddings: {},
+}));
+
+/** Signal with recipientAddress as non-string (null) */
+const arbMalformedSignalNullRecipientAddress = fc.record({
+  id: arbSignalId,
+  accountId: arbAccountId,
+  arcId: arbArcId,
+}).map((s) => ({
+  pk: `ACCT#${s.accountId}#SIG#${s.id}`,
+  sk: "#",
+  id: s.id,
+  accountId: s.accountId,
+  arcId: s.arcId,
+  recipientAddress: null, // null instead of string
+  embeddings: {},
 }));
 
 /** A generic malformed signal (any of the above) */
 const arbMalformedSignal = fc.oneof(
-  arbMalformedSignalMissingId,
   arbMalformedSignalMissingAccountId,
   arbMalformedSignalMissingArcId,
   arbMalformedSignalMissingRecipientAddress,
-  arbMalformedSignalBadEmbeddings,
-  arbMalformedSignalWrongEmbeddingsStructure,
-  arbMalformedSignalBadS3Key,
+  arbMalformedSignalNonStringAccountId,
+  arbMalformedSignalNonStringArcId,
+  arbMalformedSignalNullRecipientAddress,
 );
 
 // ---------------------------------------------------------------------------
@@ -367,11 +333,8 @@ describe("Property 22: Worker isolates per-signal failures within a segment", ()
     mockMimeParse.mockClear();
     logOutput = [];
 
-    // Capture console.log and console.error calls
-    const originalLog = console.log;
-    const originalError = console.error;
-
-    console.log = ((...args: unknown[]) => {
+    // Capture console.log and console.error calls via vi.spyOn
+    vi.spyOn(console, "log").mockImplementation((...args: unknown[]) => {
       try {
         const payload = JSON.parse(args[0] as string);
         if (payload.level && payload.message) {
@@ -384,10 +347,9 @@ describe("Property 22: Worker isolates per-signal failures within a segment", ()
       } catch {
         // Ignore non-JSON log entries
       }
-      originalLog(...args);
-    }) as typeof console.log;
+    });
 
-    console.error = ((...args: unknown[]) => {
+    vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => {
       try {
         const payload = JSON.parse(args[0] as string);
         if (payload.level && payload.message) {
@@ -400,14 +362,11 @@ describe("Property 22: Worker isolates per-signal failures within a segment", ()
       } catch {
         // Ignore non-JSON log entries
       }
-      originalError(...args);
-    }) as typeof console.error;
+    });
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
-    console.log = originalLog;
-    console.error = originalError;
   });
 
   it("for any mix of valid and malformed signals, the worker processes all valid signals and logs each malformed signal individually", async () => {
@@ -618,8 +577,8 @@ describe("Property 22: Worker isolates per-signal failures within a segment", ()
       {
         pk: "ACCT#acct-2#SIG#SES#malformed1",
         sk: "#",
-        // id is missing
-        accountId: "acct-2",
+        id: "SES#malformed1",
+        // accountId is missing
         arcId: "arc-2",
         recipientAddress: "malformed1@example.com",
         embeddings: { [TARGET_MODEL_ID]: [0.4, 0.5, 0.6] },

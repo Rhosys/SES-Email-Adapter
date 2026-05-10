@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import fc from "fast-check";
 import type { SQSEvent } from "aws-lambda";
 import { SignalProcessor, SYSTEM_RULES } from "./processor.js";
@@ -58,6 +58,10 @@ vi.mock("../embedding/cluster-registry.js", () => {
  * Aurora row.
  */
 describe("Property 8: Aurora cluster failure preserves the DynamoDB cache entry", () => {
+  // Suppress expected console.error from the processor's Aurora failure catch block
+  beforeEach(() => { vi.spyOn(console, "error").mockImplementation(() => {}); });
+  afterEach(() => { vi.restoreAllMocks(); });
+
   const TEST_ACCOUNT_ID = "acct-prop8";
 
   const DEFAULT_EMAIL_CONFIG: Alias = {

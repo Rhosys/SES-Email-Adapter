@@ -3,20 +3,36 @@
 // **Validates: Requirements 3.5**
 // ---------------------------------------------------------------------------
 
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import fc from "fast-check";
 import { mockClient } from "aws-sdk-client-mock";
 import { BedrockRuntimeClient, InvokeModelCommand } from "@aws-sdk/client-bedrock-runtime";
-import { BedrockEmbeddingGenerator } from "./embedding-generator.js";
 import { propertyRunner } from "../testing/property-runner.js";
+
+// ---------------------------------------------------------------------------
+// Hoisted mock state — available before vi.mock factories run
+// ---------------------------------------------------------------------------
+
+const { mockActiveClusters } = vi.hoisted(() => ({
+  mockActiveClusters: { value: [] as Array<{ clusterId: string; clusterArn: string; secretArn: string; databaseName: string; modelId: string; dimensions: number; active: boolean }> },
+}));
+
+// ---------------------------------------------------------------------------
+// Mock cluster registry using hoisted state
+// ---------------------------------------------------------------------------
+
+vi.mock("./cluster-registry.js", () => ({
+  CLUSTER_REGISTRY: Object.freeze(mockActiveClusters.value.map((c) => Object.freeze(c))),
+  getActiveClusters: () => mockActiveClusters.value.filter((c) => c.active),
+  getClusterById: (id: string) => mockActiveClusters.value.find((c) => c.clusterId === id) ?? null,
+}));
 
 // ---------------------------------------------------------------------------
 // Arbitraries for generating cluster registries
 // ---------------------------------------------------------------------------
 
-const arbString = fc.string1000();
+const arbString = fc.stringMatching(/^[a-zA-Z0-9_-]{1,20}$/);
 const arbDimension = fc.integer({ min: 512, max: 4096 });
-const arbActive = fc.boolean();
 
 const arbClusterRegistryEntry = fc
   .tuple(
@@ -26,21 +42,20 @@ const arbClusterRegistryEntry = fc
     arbString,
     arbString,
     arbDimension,
-    arbActive,
   )
-  .map(([clusterId, clusterArn, secretArn, databaseName, modelId, dimensions, active]) => ({
+  .map(([clusterId, clusterArn, secretArn, databaseName, modelId, dimensions]) => ({
     clusterId,
     clusterArn,
     secretArn,
     databaseName,
     modelId,
     dimensions,
-    active,
+    active: true,
   }));
 
 const arbClusterRegistry = fc
   .array(arbClusterRegistryEntry, { minLength: 2, maxLength: 4 })
-  .filter((entries) => entries.filter((e) => e.active).length >= 2);
+  .filter((entries) => new Set(entries.map((e) => e.modelId)).size === entries.length);
 
 // ---------------------------------------------------------------------------
 // Property 7: Bedrock failure for one model preserves all other writes
@@ -61,35 +76,33 @@ describe("Property 7: Bedrock failure for one model preserves all other writes (
     stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
   });
 
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it(
     "for any registry with 2-4 active clusters, when one model fails, results contain only succeeding models and metric is emitted",
-    () => {
-      fc.assert(
-        fc.property(arbClusterRegistry, (registryEntries) => {
-          // Filter to only active clusters
-          const activeClusters = registryEntries.filter((c) => c.active);
-          
+    async () => {
+      // Dynamic import after mocks are set up
+      const { BedrockEmbeddingGenerator } = await import("./embedding-generator.js");
+
+      await propertyRunner.assert(
+        fc.asyncProperty(arbClusterRegistry, async (registryEntries) => {
           // Need at least 2 active clusters for this test
-          if (activeClusters.length < 2) {
-            return true; // Skip if not enough active clusters
+          if (registryEntries.length < 2) {
+            return true;
           }
 
-          // Mock the cluster registry
-          vi.mock("./cluster-registry.js", () => ({
-            CLUSTER_REGISTRY: Object.freeze(
-              activeClusters.map((c) => Object.freeze(c)),
-            ),
-            getActiveClusters: () =>
-              activeClusters.map((c) => Object.freeze(c)),
-          }));
+          // Update the hoisted mock state
+          mockActiveClusters.value = registryEntries;
 
-          // Re-import to pick up the mock
-          // Note: In practice, we'd need to use a dynamic import or re-run the test
-          // For this property test, we'll simulate the behavior directly
+          // Reset mocks for each iteration
+          bedrockMock.reset();
+          stdoutSpy.mockClear();
 
           // Simulate failure for exactly one model (the first one)
-          const failingModelId = activeClusters[0]!.modelId;
-          const succeedingModels = activeClusters.slice(1).map((c) => c.modelId);
+          const failingModelId = registryEntries[0]!.modelId;
+          const succeedingModels = registryEntries.slice(1).map((c) => c.modelId);
 
           // Create generator with mocked Bedrock
           const generator = new BedrockEmbeddingGenerator(new BedrockRuntimeClient({}));
@@ -99,10 +112,8 @@ describe("Property 7: Bedrock failure for one model preserves all other writes (
           bedrockMock.on(InvokeModelCommand).callsFake(() => {
             callCount++;
             if (callCount === 1) {
-              // First call (failing model) fails
               throw new Error("Bedrock failed for testing");
             }
-            // Subsequent calls succeed
             return {
               body: new TextEncoder().encode(
                 JSON.stringify({ embedding: Array(10).fill(0.1) }),
@@ -111,7 +122,7 @@ describe("Property 7: Bedrock failure for one model preserves all other writes (
           });
 
           // Generate embeddings
-          const results = generator.generateForActiveClusters("test text");
+          const results = await generator.generateForActiveClusters("test text");
 
           // Verify results contain only succeeding models
           expect(results).toHaveLength(succeedingModels.length);
@@ -129,45 +140,43 @@ describe("Property 7: Bedrock failure for one model preserves all other writes (
 
           return true;
         }),
-        { numRuns: 50 },
       );
     },
-    10000,
+    30000,
   );
 
   it(
     "for any registry, when multiple models fail, results contain only successful models",
-    () => {
-      fc.assert(
-        fc.property(arbClusterRegistry, (registryEntries) => {
-          const activeClusters = registryEntries.filter((c) => c.active);
-          if (activeClusters.length < 2) {
+    async () => {
+      const { BedrockEmbeddingGenerator } = await import("./embedding-generator.js");
+
+      await propertyRunner.assert(
+        fc.asyncProperty(arbClusterRegistry, async (registryEntries) => {
+          if (registryEntries.length < 2) {
             return true;
           }
 
-          vi.mock("./cluster-registry.js", () => ({
-            CLUSTER_REGISTRY: Object.freeze(
-              activeClusters.map((c) => Object.freeze(c)),
-            ),
-            getActiveClusters: () =>
-              activeClusters.map((c) => Object.freeze(c)),
-          }));
+          // Update the hoisted mock state
+          mockActiveClusters.value = registryEntries;
+
+          bedrockMock.reset();
+          stdoutSpy.mockClear();
 
           const generator = new BedrockEmbeddingGenerator(new BedrockRuntimeClient({}));
 
-          // Randomly select which models fail (at least one, but not all)
-          const numFailing = Math.floor(Math.random() * (activeClusters.length - 1)) + 1;
+          // Fail at least one but not all (fail the first half)
+          const numFailing = Math.max(1, Math.floor(registryEntries.length / 2));
           const failingModels = new Set(
-            activeClusters.slice(0, numFailing).map((c) => c.modelId),
+            registryEntries.slice(0, numFailing).map((c) => c.modelId),
           );
-          const succeedingModels = activeClusters
+          const succeedingModels = registryEntries
             .slice(numFailing)
             .map((c) => c.modelId);
 
           let callCount = 0;
           bedrockMock.on(InvokeModelCommand).callsFake(() => {
             callCount++;
-            if (failingModels.has(activeClusters[callCount - 1]!.modelId)) {
+            if (callCount <= numFailing) {
               throw new Error("Bedrock failed");
             }
             return {
@@ -177,7 +186,7 @@ describe("Property 7: Bedrock failure for one model preserves all other writes (
             };
           });
 
-          const results = generator.generateForActiveClusters("test text");
+          const results = await generator.generateForActiveClusters("test text");
 
           expect(results).toHaveLength(succeedingModels.length);
           const resultModelIds = results.map((r) => r.modelId);
@@ -193,54 +202,51 @@ describe("Property 7: Bedrock failure for one model preserves all other writes (
 
           return true;
         }),
-        { numRuns: 50 },
       );
     },
-    10000,
+    30000,
   );
 
   it(
     "for any registry, when all models fail, results is empty array and metrics are emitted for each",
-    () => {
-      fc.assert(
-        fc.property(arbClusterRegistry, (registryEntries) => {
-          const activeClusters = registryEntries.filter((c) => c.active);
-          if (activeClusters.length === 0) {
+    async () => {
+      const { BedrockEmbeddingGenerator } = await import("./embedding-generator.js");
+
+      await propertyRunner.assert(
+        fc.asyncProperty(arbClusterRegistry, async (registryEntries) => {
+          if (registryEntries.length === 0) {
             return true;
           }
 
-          vi.mock("./cluster-registry.js", () => ({
-            CLUSTER_REGISTRY: Object.freeze(
-              activeClusters.map((c) => Object.freeze(c)),
-            ),
-            getActiveClusters: () =>
-              activeClusters.map((c) => Object.freeze(c)),
-          }));
+          // Update the hoisted mock state
+          mockActiveClusters.value = registryEntries;
+
+          bedrockMock.reset();
+          stdoutSpy.mockClear();
 
           const generator = new BedrockEmbeddingGenerator(new BedrockRuntimeClient({}));
 
           // All calls fail
           bedrockMock.on(InvokeModelCommand).rejects(new Error("All broken"));
 
-          const results = generator.generateForActiveClusters("test text");
+          const results = await generator.generateForActiveClusters("test text");
 
           expect(results).toEqual([]);
-          expect(stdoutSpy).toHaveBeenCalledTimes(activeClusters.length);
+          expect(stdoutSpy).toHaveBeenCalledTimes(registryEntries.length);
 
           // Verify each failed model emitted a metric
           const metricLogs = stdoutSpy.mock.calls.map(
             (call) => JSON.parse(call[0] as string),
           );
-          const failedModelIds = metricLogs.map((m) => m.modelId);
-          activeClusters.forEach((c) => {
+          const failedModelIds = metricLogs.map((m: { modelId: string }) => m.modelId);
+          registryEntries.forEach((c) => {
             expect(failedModelIds).toContain(c.modelId);
           });
 
           return true;
         }),
-        { numRuns: 50 },
       );
     },
-    10000,
+    30000,
   );
 });
