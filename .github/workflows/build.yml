@@ -76,13 +76,10 @@ jobs:
       - name: Tofu Init
         run: tofu -chdir=deploy init -input=false -backend-config="bucket=${STATE_BUCKET}" -backend-config="key=${STATE_KEY}"
 
-      - name: Tofu Init
-        run: tofu -chdir=deploy init -input=false -backend-config="bucket=${STATE_BUCKET}" -backend-config="key=${STATE_KEY}"
-
       - name: Tofu Plan
         run: tofu -chdir=deploy plan -input=false -out=plan.cache
         env:
-          TF_LOG: TRACE
+          TF_LOG: ${{ github.event_name == 'workflow_dispatch' && 'TRACE' || '' }}
 
       - name: Convert Plan to JSON
         run: tofu -chdir=deploy show -json plan.cache > deploy/plan.json
