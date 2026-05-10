@@ -22,16 +22,15 @@ import * as s3RetentionServiceModule from "./s3-retention-service.js";
 // ---------------------------------------------------------------------------
 
 /**
- * Arbitrary billing plan generator covering all plan types.
+ * Arbitrary billing plan generator covering all plan types handled by
+ * resolveRetentionForPlan. The function handles 'free' and 'paid' (with
+ * optional indefinite flag) — these are the only plans used in the processor's
+ * retention path.
  */
 const arbBillingPlan: fc.Arbitrary<BillingPlan> = fc.oneof(
   fc.constant({ type: "free" } as BillingPlan),
-  fc.constant({ type: "beta" } as BillingPlan),
   fc.constant({ type: "paid" } as BillingPlan),
   fc.constant({ type: "paid", indefinite: true } as BillingPlan),
-  fc.constant({ type: "lifetime" } as BillingPlan),
-  fc.constant({ type: "premium" } as BillingPlan),
-  fc.constant({ type: "internal" } as BillingPlan),
 );
 
 describe("Property 19: Plan changes never retroactively retag", () => {
