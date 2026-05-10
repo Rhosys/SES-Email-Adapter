@@ -43,7 +43,7 @@ resource "aws_sesv2_email_identity" "main" {
   # Selector is "mail"; the matching public key is published via the CNAME below.
   dkim_signing_attributes {
     domain_signing_selector    = "mail"
-    domain_signing_private_key = var.dkim_private_key
+    domain_signing_private_key = data.aws_kms_secrets.dkim.plaintext["private_key"]
   }
 
   # Custom MAIL FROM: SPF lives on the bounce subdomain so customers only need
