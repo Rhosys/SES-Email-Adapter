@@ -4,12 +4,12 @@
 # ---------------------------------------------------------------------------
 
 resource "aws_db_subnet_group" "aurora" {
-  name       = "${var.service_name}-aurora"
+  name       = "${lower(var.service_name)}-aurora"
   subnet_ids = aws_subnet.private[*].id
 }
 
 resource "aws_rds_cluster_parameter_group" "aurora" {
-  name   = "${var.service_name}-aurora-pg"
+  name   = "${lower(var.service_name)}-aurora-pg"
   family = "aurora-postgresql16"
 
   parameter {
