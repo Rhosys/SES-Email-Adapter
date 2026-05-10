@@ -13,7 +13,7 @@ locals {
 
 resource "aws_acm_certificate" "api" {
   provider          = aws.us_east_1
-  domain_name       = "email.rhosys.cloud"
+  domain_name       = data.aws_route53_zone.main.name
   validation_method = "DNS"
 
   lifecycle {
@@ -52,10 +52,10 @@ resource "aws_cloudfront_distribution" "api" {
   comment         = "${var.service_name} API"
   price_class     = "PriceClass_100" # US/EU only — expand for global
 
-  aliases = ["email.rhosys.cloud"]
+  aliases = [data.aws_route53_zone.main.name]
 
   origin {
-    domain_name = replace(aws_apigatewayv2_api.main.api_endpoint, "https://", "")
+    domain_name = aws_apigatewayv2_domain_name.http.domain_name
     origin_id   = local.api_gateway_origin_id
 
     custom_origin_config {
@@ -105,7 +105,7 @@ resource "aws_cloudfront_distribution" "api" {
 resource "aws_route53_record" "api" {
   provider = aws.us_east_1
   zone_id  = data.aws_route53_zone.main.zone_id
-  name     = "email.rhosys.cloud"
+  name     = data.aws_route53_zone.main.name
   type     = "A"
 
   alias {
@@ -113,6 +113,28 @@ resource "aws_route53_record" "api" {
     zone_id                = aws_cloudfront_distribution.api.hosted_zone_id
     evaluate_target_health = false
   }
+}
+
+resource "aws_route53_record" "api_aaaa" {
+  provider = aws.us_east_1
+  zone_id  = data.aws_route53_zone.main.zone_id
+  name     = data.aws_route53_zone.main.name
+  type     = "AAAA"
+
+  alias {
+    name                   = aws_cloudfront_distribution.api.domain_name
+    zone_id                = aws_cloudfront_distribution.api.hosted_zone_id
+    evaluate_target_health = false
+  }
+}
+
+resource "aws_route53_record" "api_https" {
+  provider = aws.us_east_1
+  zone_id  = data.aws_route53_zone.main.zone_id
+  name     = data.aws_route53_zone.main.name
+  type     = "HTTPS"
+  ttl      = 300
+  records  = ["1 . alpn=\"h2\""]
 }
 
 # Secret shared between CloudFront and API Gateway to block direct access

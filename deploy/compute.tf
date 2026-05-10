@@ -154,12 +154,12 @@ resource "aws_lambda_function" "main" {
       SIGNALS_TABLE         = aws_dynamodb_table.signals.name
       PROCESSING_TABLE      = aws_dynamodb_table.processing.name
       AUDIT_TABLE           = aws_dynamodb_table.audit.name
-      EMAIL_BUCKET          = aws_s3_bucket.emails.name
+      EMAIL_BUCKET          = aws_s3_bucket.emails.bucket
       AURORA_CLUSTER_ARN    = aws_rds_cluster.aurora.arn
       AURORA_SECRET_ARN     = aws_secretsmanager_secret.aurora_master.arn
       AURORA_DB_NAME        = "signals"
       SES_CONFIGURATION_SET = aws_sesv2_configuration_set.sending.configuration_set_name
-      WS_API_ENDPOINT       = "https://${aws_apigatewayv2_api.ws.id}.execute-api.${data.aws_region.current.name}.amazonaws.com/${aws_apigatewayv2_stage.ws.name}"
+      WS_API_ENDPOINT       = "https://wss.${data.aws_route53_zone.main.name}"
       CF_ORIGIN_SECRET      = random_password.cf_origin_secret.result
     }
   }

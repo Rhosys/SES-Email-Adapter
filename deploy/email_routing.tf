@@ -37,7 +37,7 @@ resource "aws_ses_receipt_rule" "store_and_notify" {
 # ---------------------------------------------------------------------------
 
 resource "aws_sesv2_email_identity" "main" {
-  email_identity = local.mail_domain
+  email_identity = data.aws_route53_zone.main.name
 
   # BYODKIM: one selector + private key works identically in every region.
   # Selector is "mail"; the matching public key is published via the CNAME below.
@@ -46,13 +46,15 @@ resource "aws_sesv2_email_identity" "main" {
     domain_signing_private_key = data.aws_kms_secrets.dkim.plaintext["private_key"]
   }
 
-  # Custom MAIL FROM: SPF lives on the bounce subdomain so customers only need
-  # a CNAME (bounce.{their} → bounce.{ours}) instead of adding a TXT record.
-  # DMARC relaxed alignment still passes because bounce.{their} and {their}
-  # share the same organisational domain.
-  mail_from_attributes {
-    mail_from_domain = "bounce.${local.mail_domain}"
-  }
+}
+
+# Custom MAIL FROM: SPF lives on the bounce subdomain so customers only need
+# a CNAME (bounce.{their} → bounce.{ours}) instead of adding a TXT record.
+# DMARC relaxed alignment still passes because bounce.{their} and {their}
+# share the same organisational domain.
+resource "aws_sesv2_email_identity_mail_from_attributes" "main" {
+  email_identity   = aws_sesv2_email_identity.main.email_identity
+  mail_from_domain = "bounce.${data.aws_route53_zone.main.name}"
 }
 
 # Shared DKIM terminus — all customer domains CNAME here instead of directly to
@@ -62,10 +64,10 @@ resource "aws_sesv2_email_identity" "main" {
 resource "aws_route53_record" "ses_dkim" {
   provider = aws.us_east_1
   zone_id  = data.aws_route53_zone.main.zone_id
-  name     = "mail._domainkey.${local.mail_domain}"
+  name     = "mail._domainkey.${data.aws_route53_zone.main.name}"
   type     = "CNAME"
   ttl      = 300
-  records  = ["mail.${local.mail_domain}._domainkey.amazonses.com"]
+  records  = ["mail.${data.aws_route53_zone.main.name}._domainkey.amazonses.com"]
 }
 
 # Branded MX hostname — customers point their MX here instead of directly to
@@ -75,20 +77,20 @@ resource "aws_route53_record" "ses_dkim" {
 resource "aws_route53_record" "ses_mx_host" {
   provider = aws.us_east_1
   zone_id  = data.aws_route53_zone.main.zone_id
-  name     = "mx.${local.mail_domain}"
+  name     = "mx.${data.aws_route53_zone.main.name}"
   type     = "CNAME"
   ttl      = 300
-  records  = ["inbound-smtp.${data.aws_region.current.name}.amazonaws.com"]
+  records  = ["inbound-smtp.${data.aws_region.current.id}.amazonaws.com"]
 }
 
 # Platform domain's own MX record — points to our branded hostname
 resource "aws_route53_record" "ses_mx" {
   provider = aws.us_east_1
   zone_id  = data.aws_route53_zone.main.zone_id
-  name     = local.mail_domain
+  name     = data.aws_route53_zone.main.name
   type     = "MX"
   ttl      = 300
-  records  = ["10 mx.${local.mail_domain}"]
+  records  = ["10 mx.${data.aws_route53_zone.main.name}"]
 }
 
 # ---------------------------------------------------------------------------
@@ -100,17 +102,17 @@ resource "aws_route53_record" "ses_mx" {
 resource "aws_route53_record" "bounce_mx" {
   provider = aws.us_east_1
   zone_id  = data.aws_route53_zone.main.zone_id
-  name     = "bounce.${local.mail_domain}"
+  name     = "bounce.${data.aws_route53_zone.main.name}"
   type     = "MX"
   ttl      = 300
-  records  = ["10 feedback-smtp.${data.aws_region.current.name}.amazonses.com"]
+  records  = ["10 feedback-smtp.${data.aws_region.current.id}.amazonses.com"]
 }
 
 # SPF on the bounce subdomain — SES is the only authorised sender
 resource "aws_route53_record" "bounce_spf" {
   provider = aws.us_east_1
   zone_id  = data.aws_route53_zone.main.zone_id
-  name     = "bounce.${local.mail_domain}"
+  name     = "bounce.${data.aws_route53_zone.main.name}"
   type     = "TXT"
   ttl      = 300
   records  = ["v=spf1 include:amazonses.com ~all"]
@@ -124,10 +126,10 @@ resource "aws_route53_record" "bounce_spf" {
 resource "aws_route53_record" "dmarc" {
   provider = aws.us_east_1
   zone_id  = data.aws_route53_zone.main.zone_id
-  name     = "_dmarc.${local.mail_domain}"
+  name     = "_dmarc.${data.aws_route53_zone.main.name}"
   type     = "TXT"
   ttl      = 300
-  records  = ["v=DMARC1; p=quarantine; rua=mailto:postmaster@${local.mail_domain}"]
+  records  = ["v=DMARC1; p=quarantine; rua=mailto:postmaster@${data.aws_route53_zone.main.name}"]
 }
 
 # ---------------------------------------------------------------------------
