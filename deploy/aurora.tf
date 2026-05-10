@@ -4,12 +4,12 @@
 # ---------------------------------------------------------------------------
 
 resource "aws_db_subnet_group" "aurora" {
-  name       = "${local.prefix}-aurora"
+  name       = "${var.service_name}-aurora"
   subnet_ids = aws_subnet.private[*].id
 }
 
 resource "aws_rds_cluster_parameter_group" "aurora" {
-  name   = "${local.prefix}-aurora-pg"
+  name   = "${var.service_name}-aurora-pg"
   family = "aurora-postgresql16"
 
   parameter {
@@ -25,7 +25,7 @@ resource "random_password" "aurora_master" {
 }
 
 resource "aws_secretsmanager_secret" "aurora_master" {
-  name                    = "${local.prefix}/aurora/master"
+  name                    = "${var.service_name}/aurora/master"
   recovery_window_in_days = 7
 }
 
@@ -38,7 +38,7 @@ resource "aws_secretsmanager_secret_version" "aurora_master" {
 }
 
 resource "aws_rds_cluster" "aurora" {
-  cluster_identifier              = "${local.prefix}-aurora"
+  cluster_identifier              = "${var.service_name}-aurora"
   engine                          = "aurora-postgresql"
   engine_mode                     = "provisioned"
   engine_version                  = "16.4"
@@ -57,16 +57,16 @@ resource "aws_rds_cluster" "aurora" {
 
   backup_retention_period   = 7
   preferred_backup_window   = "03:00-04:00"
-  deletion_protection       = var.env == "prod"
-  skip_final_snapshot       = var.env != "prod"
-  final_snapshot_identifier = var.env == "prod" ? "${local.prefix}-final" : null
+  deletion_protection       = true
+  skip_final_snapshot       = false
+  final_snapshot_identifier = "${var.service_name}-aurora-final"
 
   enabled_cloudwatch_logs_exports = ["postgresql"]
   enable_http_endpoint            = true # Aurora Data API
 }
 
 resource "aws_rds_cluster_instance" "aurora" {
-  identifier         = "${local.prefix}-aurora-1"
+  identifier         = "${var.service_name}-aurora-1"
   cluster_identifier = aws_rds_cluster.aurora.id
   instance_class     = "db.serverless"
   engine             = aws_rds_cluster.aurora.engine

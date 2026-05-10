@@ -31,8 +31,7 @@ provider "aws" {
 
   default_tags {
     tags = {
-      App = "ses-email-adapter"
-      Env = var.env
+      App = var.service_name
     }
   }
 }
@@ -45,8 +44,7 @@ provider "aws" {
 
   default_tags {
     tags = {
-      App = "ses-email-adapter"
-      Env = var.env
+      App = var.service_name
     }
   }
 }
@@ -59,15 +57,18 @@ provider "aws" {
 
   default_tags {
     tags = {
-      App = "ses-email-adapter"
-      Env = var.env
+      App = var.service_name
     }
   }
 }
 
 data "aws_region" "current" {}
 
+data "aws_route53_zone" "main" {
+  provider = aws.us_east_1
+  name     = "email.rhosys.cloud"
+}
+
 locals {
-  prefix      = "ses-email-adapter-${var.env}"
-  mail_domain = split("@", var.notification_from_address)[1]
+  mail_domain = "email.rhosys.cloud"
 }

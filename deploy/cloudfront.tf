@@ -13,7 +13,7 @@ locals {
 
 resource "aws_acm_certificate" "api" {
   provider          = aws.us_east_1
-  domain_name       = var.api_domain
+  domain_name       = "email.rhosys.cloud"
   validation_method = "DNS"
 
   lifecycle {
@@ -36,7 +36,7 @@ resource "aws_route53_record" "acm_validation" {
   records         = [each.value.record]
   ttl             = 60
   type            = each.value.type
-  zone_id         = var.hosted_zone_id
+  zone_id         = data.aws_route53_zone.main.zone_id
 }
 
 resource "aws_acm_certificate_validation" "api" {
@@ -49,10 +49,10 @@ resource "aws_cloudfront_distribution" "api" {
   provider        = aws.us_east_1
   enabled         = true
   is_ipv6_enabled = true
-  comment         = "${local.prefix} API"
+  comment         = "${var.service_name} API"
   price_class     = "PriceClass_100" # US/EU only — expand for global
 
-  aliases = [var.api_domain]
+  aliases = ["email.rhosys.cloud"]
 
   origin {
     domain_name = replace(aws_apigatewayv2_api.main.api_endpoint, "https://", "")
@@ -104,8 +104,8 @@ resource "aws_cloudfront_distribution" "api" {
 
 resource "aws_route53_record" "api" {
   provider = aws.us_east_1
-  zone_id  = var.hosted_zone_id
-  name     = var.api_domain
+  zone_id  = data.aws_route53_zone.main.zone_id
+  name     = "email.rhosys.cloud"
   type     = "A"
 
   alias {
@@ -122,7 +122,7 @@ resource "random_password" "cf_origin_secret" {
 }
 
 resource "aws_secretsmanager_secret" "cf_origin_secret" {
-  name                    = "${local.prefix}/cloudfront/origin-secret"
+  name                    = "${var.service_name}/cloudfront/origin-secret"
   recovery_window_in_days = 0
 }
 
