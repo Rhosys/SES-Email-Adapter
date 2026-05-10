@@ -104,7 +104,7 @@ resource "aws_iam_role_policy" "lambda_permissions" {
         Sid      = "KMS"
         Effect   = "Allow"
         Action   = ["kms:Decrypt", "kms:GenerateDataKey*", "kms:DescribeKey"]
-        Resource = aws_kms_key.default.arn
+        Resource = data.aws_kms_alias.default.target_key_arn
       },
     ]
   })
