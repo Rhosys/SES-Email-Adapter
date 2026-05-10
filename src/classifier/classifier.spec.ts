@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { SignalClassifier, CLASSIFICATION_MODEL_ID, EMBEDDING_MODEL_ID } from "./classifier.js";
+import { SignalClassifier, CLASSIFICATION_MODEL_ID } from "./classifier.js";
 import type { ClassificationInput } from "./classifier.js";
 
 // ---------------------------------------------------------------------------
@@ -69,11 +69,6 @@ function mockClassifyResponse(raw: object) {
   const body = new TextEncoder().encode(
     JSON.stringify({ content: [{ type: "text", text: JSON.stringify(raw) }] }),
   );
-  mockSend.mockResolvedValueOnce({ body });
-}
-
-function mockEmbedResponse(embedding: number[]) {
-  const body = new TextEncoder().encode(JSON.stringify({ embedding }));
   mockSend.mockResolvedValueOnce({ body });
 }
 
@@ -336,40 +331,6 @@ describe("SignalClassifier", () => {
       };
       expect(body.messages[0]?.content.length).toBeLessThan(6000);
       expect(body.messages[0]?.content).toContain("[... truncated]");
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // embed
-  // -------------------------------------------------------------------------
-
-  describe("embed", () => {
-    it("returns an embedding vector from Titan", async () => {
-      const embedding = Array.from({ length: 1024 }, (_, i) => i / 1024);
-      mockEmbedResponse(embedding);
-
-      const result = await classifier.embed("Hello world email content");
-
-      expect(result).toHaveLength(1024);
-    });
-
-    it("uses EMBEDDING_MODEL_ID", async () => {
-      mockEmbedResponse(new Array(1024).fill(0.1));
-
-      await classifier.embed("test");
-
-      const callArgs = mockSend.mock.calls[0]![0] as { modelId: string };
-      expect(callArgs.modelId).toBe(EMBEDDING_MODEL_ID);
-    });
-
-    it("truncates text to 8000 characters before embedding", async () => {
-      mockEmbedResponse(new Array(1024).fill(0.1));
-
-      await classifier.embed("x".repeat(10_000));
-
-      const callArgs = mockSend.mock.calls[0]![0] as { body: Uint8Array };
-      const body = JSON.parse(new TextDecoder().decode(callArgs.body)) as { inputText: string };
-      expect(body.inputText.length).toBe(8000);
     });
   });
 

@@ -23,15 +23,4 @@ resource "aws_subnet" "private" {
   tags = { Name = "${var.service_name}-private-${count.index}" }
 }
 
-resource "aws_security_group" "aurora" {
-  name        = "${var.service_name}-aurora"
-  description = "Aurora — no inbound connections needed (accessed via Data API)"
-  vpc_id      = aws_vpc.main.id
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-}
+# Security groups for Aurora clusters are defined in search.tf (per-cluster via for_each)

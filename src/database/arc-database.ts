@@ -394,4 +394,50 @@ export class ArcDatabase implements ArcMatcher {
       })),
     );
   }
+
+  // ---------------------------------------------------------------------------
+  // Embedding Cache (DynamoDB partial update for backfill/reindex)
+  // ---------------------------------------------------------------------------
+
+  async addEmbeddingToCache(
+    accountId: string,
+    signalId: string,
+    modelId: string,
+    vector: number[],
+  ): Promise<void> {
+    await dynamo.send(new UpdateCommand({
+      TableName: SIGNALS_TABLE,
+      Key: { pk: sigPk(accountId, signalId), sk: ITEM_SK },
+      UpdateExpression: "SET embeddings.#mid = :v",
+      ExpressionAttributeNames: { "#mid": modelId },
+      ExpressionAttributeValues: { ":v": vector },
+    }));
+  }
+
+  async updateSignalRetention(
+    accountId: string,
+    signalId: string,
+    update: Partial<Pick<Signal, "s3Key" | "retentionDuration">>,
+  ): Promise<void> {
+    const setParts: string[] = [];
+    const exprValues: Record<string, unknown> = {};
+
+    if (update.s3Key !== undefined) {
+      setParts.push("s3Key = :s3Key");
+      exprValues[":s3Key"] = update.s3Key;
+    }
+    if (update.retentionDuration !== undefined) {
+      setParts.push("retentionDuration = :rd");
+      exprValues[":rd"] = update.retentionDuration;
+    }
+
+    if (setParts.length === 0) return;
+
+    await dynamo.send(new UpdateCommand({
+      TableName: SIGNALS_TABLE,
+      Key: { pk: sigPk(accountId, signalId), sk: ITEM_SK },
+      UpdateExpression: `SET ${setParts.join(", ")}`,
+      ExpressionAttributeValues: exprValues,
+    }));
+  }
 }

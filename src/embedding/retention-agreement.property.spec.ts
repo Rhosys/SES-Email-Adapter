@@ -1,8 +1,7 @@
 import { describe, it, expect } from "vitest";
 import fc from "fast-check";
 import { propertyRunner } from "../testing/property-runner.js";
-import { resolveRetentionForPlan, type BillingPlan, type FreePlan, type PaidPlan } from "./retention-tier.js";
-import type { RetentionDecision } from "./retention-tier.js";
+import { getRetentionForPlan, getUserDisplayedRetention, type BillingPlan, type RetentionForPlan } from "./retention-tier.js";
 
 // ---------------------------------------------------------------------------
 // Property 18: Retention tier on S3 tag and DynamoDB record always agree
@@ -10,138 +9,140 @@ import type { RetentionDecision } from "./retention-tier.js";
 // ---------------------------------------------------------------------------
 
 /**
- * Maps a retention decision to the expected DynamoDB userDisplayedRetention value.
- * This is the "agreement" check: the S3 tag and DynamoDB field should both reflect
- * the same plan-based retention decision.
+ * The new model stores `retentionDuration` (ISO 8601) on the DynamoDB record.
+ * `userDisplayedRetention` is NEVER stored — it's derived at API response time.
+ * This property verifies that the S3 tag and the stored retentionDuration always
+ * agree according to the plan-to-retention mapping.
  */
-function userDisplayedRetentionFromDecision(decision: RetentionDecision): string {
-  // The decision's userDisplayedRetention field IS the DynamoDB value
-  return decision.userDisplayedRetention;
-}
-
-/**
- * Maps a retention decision to the expected S3 tag value.
- * Free tier: "retention-tier=P6M" tag
- * Paid tier: no tag (null)
- */
-function s3TagFromDecision(decision: RetentionDecision): string | null {
-  return decision.s3Tag;
-}
 
 describe("Property 18: Retention tier on S3 tag and DynamoDB record always agree", () => {
-  // Generators for billing plans
-  const arbFreePlan: fc.Arbitrary<FreePlan> = fc.constant({ type: 'free' } as FreePlan);
-  
-  const arbPaidPlan: fc.Arbitrary<PaidPlan> = fc.boolean().map(indefinite => ({
-    type: 'paid' as const,
-    indefinite,
-  }));
+  const arbBillingPlan: fc.Arbitrary<BillingPlan> = fc.oneof(
+    fc.constant('Free' as BillingPlan),
+    fc.constant('Beta' as BillingPlan),
+    fc.constant('Paid' as BillingPlan),
+    fc.constant('Lifetime' as BillingPlan),
+    fc.constant('Premium' as BillingPlan),
+    fc.constant('Internal' as BillingPlan),
+  );
 
-  const arbBillingPlan: fc.Arbitrary<BillingPlan> = fc.oneof(arbFreePlan, arbPaidPlan);
-
-  it("for any plan, userDisplayedRetention matches the plan-to-retention mapping", async () => {
+  it("for any plan, retentionDuration matches the plan-to-retention mapping", async () => {
     await propertyRunner.assert(
       fc.asyncProperty(arbBillingPlan, async (plan) => {
-        const decision = resolveRetentionForPlan(plan);
-        
-        // The userDisplayedRetention field should match the expected value for this plan type
-        if (plan.type === 'free') {
-          expect(decision.userDisplayedRetention).toBe('6 months');
-        } else if (plan.type === 'paid') {
-          if (plan.indefinite) {
-            expect(decision.userDisplayedRetention).toBe('forever');
-          } else {
-            expect(decision.userDisplayedRetention).toBe('5 years');
-          }
+        const retention = getRetentionForPlan(plan);
+
+        // Free/Beta → P1Y
+        if (plan === 'Free' || plan === 'Beta') {
+          expect(retention.retentionDuration).toBe('P1Y');
         }
-        
+        // Paid/Lifetime → P5Y
+        if (plan === 'Paid' || plan === 'Lifetime') {
+          expect(retention.retentionDuration).toBe('P5Y');
+        }
+        // Premium/Internal → P1000Y
+        if (plan === 'Premium' || plan === 'Internal') {
+          expect(retention.retentionDuration).toBe('P1000Y');
+        }
+
         return true;
       }),
     );
   });
 
-  it("for any plan, S3 tag and DynamoDB retention always agree on the tier", async () => {
+  it("for any plan, S3 tag and retentionDuration always agree on the tier", async () => {
     await propertyRunner.assert(
       fc.asyncProperty(arbBillingPlan, async (plan) => {
-        const decision = resolveRetentionForPlan(plan);
-        
-        // Free tier: P6M tag + '6 months' display
-        if (plan.type === 'free') {
-          expect(decision.s3Tag).toBe('retention-tier=P6M');
-          expect(decision.userDisplayedRetention).toBe('6 months');
+        const retention = getRetentionForPlan(plan);
+
+        // Free/Beta: P1Y tag + P1Y duration
+        if (plan === 'Free' || plan === 'Beta') {
+          expect(retention.s3Tag).toBe('retention-tier=P1Y');
+          expect(retention.retentionDuration).toBe('P1Y');
         }
-        
-        // Paid tier (default): no tag + '5 years' display
-        if (plan.type === 'paid' && !plan.indefinite) {
-          expect(decision.s3Tag).toBeNull();
-          expect(decision.userDisplayedRetention).toBe('5 years');
+
+        // Paid/Lifetime: no tag + P5Y duration
+        if (plan === 'Paid' || plan === 'Lifetime') {
+          expect(retention.s3Tag).toBeNull();
+          expect(retention.retentionDuration).toBe('P5Y');
         }
-        
-        // Paid tier (indefinite): no tag + 'forever' display
-        if (plan.type === 'paid' && plan.indefinite) {
-          expect(decision.s3Tag).toBeNull();
-          expect(decision.userDisplayedRetention).toBe('forever');
+
+        // Premium/Internal: no tag + P1000Y duration + copy to saved
+        if (plan === 'Premium' || plan === 'Internal') {
+          expect(retention.s3Tag).toBeNull();
+          expect(retention.retentionDuration).toBe('P1000Y');
+          expect(retention.copyToSaved).toBe(true);
         }
-        
+
         return true;
       }),
     );
   });
 
-  it("S3 tag presence correlates with user-facing retention duration", async () => {
+  it("S3 tag presence correlates with retention duration", async () => {
     await propertyRunner.assert(
       fc.asyncProperty(arbBillingPlan, async (plan) => {
-        const decision = resolveRetentionForPlan(plan);
-        
-        // Free tier (6 months) has a tag
-        if (plan.type === 'free') {
-          expect(decision.s3Tag).not.toBeNull();
-          expect(decision.userDisplayedRetention).toBe('6 months');
+        const retention = getRetentionForPlan(plan);
+
+        // Free/Beta (P1Y) has a tag
+        if (plan === 'Free' || plan === 'Beta') {
+          expect(retention.s3Tag).not.toBeNull();
+          expect(retention.retentionDuration).toBe('P1Y');
         }
-        
-        // Paid tier (5 years or forever) has no tag
-        if (plan.type === 'paid') {
-          expect(decision.s3Tag).toBeNull();
-          // But the retention duration is still reflected in userDisplayedRetention
-          expect(['5 years', 'forever']).toContain(decision.userDisplayedRetention);
+
+        // Paid+ (P5Y or P1000Y) has no tag
+        if (plan === 'Paid' || plan === 'Lifetime' || plan === 'Premium' || plan === 'Internal') {
+          expect(retention.s3Tag).toBeNull();
+          expect(['P5Y', 'P1000Y']).toContain(retention.retentionDuration);
         }
-        
+
         return true;
       }),
     );
   });
 
-  it("plan type determines both S3 tag and DynamoDB field consistently", async () => {
+  it("plan type determines both S3 tag and retentionDuration consistently", async () => {
     await propertyRunner.assert(
       fc.asyncProperty(arbBillingPlan, async (plan) => {
-        const decision = resolveRetentionForPlan(plan);
-        
-        // The decision is derived solely from the plan type
-        // Both S3 tag and DynamoDB field should be deterministic based on plan
-        const expectedTag = plan.type === 'free' ? 'retention-tier=P6M' : null;
-        const expectedDisplay = 
-          plan.type === 'free' ? '6 months' :
-          plan.type === 'paid' && plan.indefinite ? 'forever' :
-          '5 years';
-        
-        expect(decision.s3Tag).toBe(expectedTag);
-        expect(decision.userDisplayedRetention).toBe(expectedDisplay);
-        
+        const retention = getRetentionForPlan(plan);
+
+        const expectedTag = (plan === 'Free' || plan === 'Beta') ? 'retention-tier=P1Y' : null;
+        const expectedDuration =
+          (plan === 'Free' || plan === 'Beta') ? 'P1Y' :
+          (plan === 'Paid' || plan === 'Lifetime') ? 'P5Y' :
+          'P1000Y';
+
+        expect(retention.s3Tag).toBe(expectedTag);
+        expect(retention.retentionDuration).toBe(expectedDuration);
+
         return true;
       }),
     );
   });
 
-  it("determinism: same plan always produces same tag and DynamoDB value", async () => {
+  it("determinism: same plan always produces same tag and retentionDuration", async () => {
     await propertyRunner.assert(
       fc.asyncProperty(arbBillingPlan, async (plan) => {
-        const decision1 = resolveRetentionForPlan(plan);
-        const decision2 = resolveRetentionForPlan(plan);
-        
-        // Both decisions should be identical
-        expect(decision1.s3Tag).toBe(decision2.s3Tag);
-        expect(decision1.userDisplayedRetention).toBe(decision2.userDisplayedRetention);
-        
+        const retention1 = getRetentionForPlan(plan);
+        const retention2 = getRetentionForPlan(plan);
+
+        expect(retention1.s3Tag).toBe(retention2.s3Tag);
+        expect(retention1.retentionDuration).toBe(retention2.retentionDuration);
+        expect(retention1.copyToSaved).toBe(retention2.copyToSaved);
+
+        return true;
+      }),
+    );
+  });
+
+  it("getUserDisplayedRetention correctly derives display from retentionDuration", async () => {
+    await propertyRunner.assert(
+      fc.asyncProperty(arbBillingPlan, async (plan) => {
+        const retention = getRetentionForPlan(plan);
+        const display = getUserDisplayedRetention(retention.retentionDuration);
+
+        if (retention.retentionDuration === 'P1Y') expect(display).toBe('1 year');
+        if (retention.retentionDuration === 'P5Y') expect(display).toBe('5 years');
+        if (retention.retentionDuration === 'P1000Y') expect(display).toBe('forever');
+
         return true;
       }),
     );

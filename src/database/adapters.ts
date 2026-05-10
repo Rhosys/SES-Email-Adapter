@@ -20,6 +20,7 @@ export class ProcessorDatabaseAdapter implements ProcessorDatabase {
 
   getSignalByMessageId(accountId: string, sesMessageId: string) { return this.arc.getSignalByMessageId(accountId, sesMessageId); }
   saveSignal(signal: Signal) { return this.arc.saveSignal(signal); }
+  updateSignalRetention(accountId: string, signalId: string, update: Partial<Pick<Signal, "s3Key" | "retentionDuration">>) { return this.arc.updateSignalRetention(accountId, signalId, update); }
   getArc(accountId: string, id: string) { return this.arc.getArc(accountId, id); }
   findArcByGroupingKey(accountId: string, key: string) { return this.arc.findArcByGroupingKey(accountId, key); }
   saveArc(arc: Arc) { return this.arc.saveArc(arc); }

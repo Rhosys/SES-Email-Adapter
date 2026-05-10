@@ -7,22 +7,22 @@ variables {
   service_name   = "test-svc"
 }
 
-# Aurora cluster must never be deletable — it holds vector embeddings that are
+# Aurora clusters must never be deletable — they hold vector embeddings that are
 # expensive to regenerate from raw emails.
 run "aurora_cluster_deletion_protection_enabled" {
   command = plan
 
   assert {
-    condition     = aws_rds_cluster.aurora.deletion_protection == true
-    error_message = "Aurora cluster must have deletion_protection = true"
+    condition     = alltrue([for k, v in aws_rds_cluster.aurora : v.deletion_protection == true])
+    error_message = "All Aurora clusters must have deletion_protection = true"
   }
 }
 
-run "aurora_cluster_retains_final_snapshot" {
+run "aurora_cluster_skips_final_snapshot" {
   command = plan
 
   assert {
-    condition     = aws_rds_cluster.aurora.skip_final_snapshot == false
-    error_message = "Aurora cluster must take a final snapshot on deletion (skip_final_snapshot = false)"
+    condition     = alltrue([for k, v in aws_rds_cluster.aurora : v.skip_final_snapshot == true])
+    error_message = "All Aurora clusters must skip final snapshot (recovery is via DynamoDB embedding cache + S3 raw emails)"
   }
 }

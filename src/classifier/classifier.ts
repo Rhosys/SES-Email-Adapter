@@ -2,7 +2,6 @@ import { BedrockRuntimeClient, InvokeModelCommand } from "@aws-sdk/client-bedroc
 import type { Workflow, WorkflowData } from "../types/index.js";
 
 export const CLASSIFICATION_MODEL_ID = "us.anthropic.claude-opus-4-5-20251101-v1:0";
-export const EMBEDDING_MODEL_ID = "amazon.titan-embed-text-v2:0";
 
 export interface ClassificationInput {
   from: string;
@@ -71,26 +70,6 @@ export class SignalClassifier {
       labels: raw.labels,
       classificationModelId: CLASSIFICATION_MODEL_ID,
     };
-  }
-
-  async embed(text: string): Promise<number[]> {
-    const requestBody = {
-      inputText: text.slice(0, 8000),
-      dimensions: 1024,
-      normalize: true,
-    };
-
-    const response = await this.client.send(
-      new InvokeModelCommand({
-        modelId: EMBEDDING_MODEL_ID,
-        contentType: "application/json",
-        accept: "application/json",
-        body: new TextEncoder().encode(JSON.stringify(requestBody)),
-      }),
-    );
-
-    const result = JSON.parse(new TextDecoder().decode(response.body)) as { embedding: number[] };
-    return result.embedding;
   }
 
   private formatContent(input: ClassificationInput): string {

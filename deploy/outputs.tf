@@ -42,8 +42,9 @@ output "signals_dlq_url" {
   value       = aws_sqs_queue.signals_dlq.url
 }
 
-output "aurora_cluster_identifier" {
-  value = aws_rds_cluster.aurora.cluster_identifier
+output "aurora_cluster_identifiers" {
+  description = "Aurora cluster identifiers keyed by cluster registry ID"
+  value       = { for k, v in aws_rds_cluster.aurora : k => v.cluster_identifier }
 }
 
 output "ses_rule_set_name" {
