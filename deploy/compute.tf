@@ -98,7 +98,7 @@ resource "aws_iam_role_policy" "lambda_permissions" {
         Sid      = "SecretsManager"
         Effect   = "Allow"
         Action   = ["secretsmanager:GetSecretValue"]
-        Resource = aws_secretsmanager_secret.aurora_master.arn
+        Resource = aws_rds_cluster.aurora.master_user_secret[0].secret_arn
       },
       {
         Sid      = "KMS"
@@ -156,7 +156,7 @@ resource "aws_lambda_function" "main" {
       AUDIT_TABLE           = aws_dynamodb_table.audit.name
       EMAIL_BUCKET          = aws_s3_bucket.emails.bucket
       AURORA_CLUSTER_ARN    = aws_rds_cluster.aurora.arn
-      AURORA_SECRET_ARN     = aws_secretsmanager_secret.aurora_master.arn
+      AURORA_SECRET_ARN     = aws_rds_cluster.aurora.master_user_secret[0].secret_arn
       AURORA_DB_NAME        = "signals"
       SES_CONFIGURATION_SET = aws_sesv2_configuration_set.sending.configuration_set_name
       WS_API_ENDPOINT       = "https://wss.${data.aws_route53_zone.main.name}"
