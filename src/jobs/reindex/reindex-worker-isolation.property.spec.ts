@@ -161,7 +161,7 @@ function makeSqsEvent(records: SQSRecord[]): SQSEvent {
 // Property test
 // ---------------------------------------------------------------------------
 
-describe.skip("Property 22: Worker isolates per-signal failures within a segment", () => {
+describe("Property 22: Worker isolates per-signal failures within a segment", () => {
   let worker: ReindexWorker;
   let consoleLogSpy: ReturnType<typeof vi.spyOn>;
   let consoleErrorSpy: ReturnType<typeof vi.spyOn>;

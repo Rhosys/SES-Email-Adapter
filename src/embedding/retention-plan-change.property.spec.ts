@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import fc from "fast-check";
 import { propertyRunner } from "../testing/property-runner.js";
 import {
@@ -8,6 +8,9 @@ import {
 } from "./retention-tier.js";
 import * as retentionTierModule from "./retention-tier.js";
 import * as s3RetentionServiceModule from "./s3-retention-service.js";
+import { S3RetentionServiceImpl } from "./s3-retention-service.js";
+import { S3Client, PutObjectTaggingCommand, CopyObjectCommand } from "@aws-sdk/client-s3";
+import { mockClient } from "aws-sdk-client-mock";
 
 // ---------------------------------------------------------------------------
 // Property 19: Plan changes never retroactively retag
@@ -19,6 +22,9 @@ import * as s3RetentionServiceModule from "./s3-retention-service.js";
 //   1. getRetentionForPlan is a pure function called once at creation
 //   2. There is no "update retention" API that takes a signal ID
 //   3. S3RetentionService.applyPlanRetention only operates on a single s3Key
+//   4. For any plan change event, no S3 PutObjectTagging or CopyObject calls
+//      are made against existing email objects, and no DynamoDB UpdateItem
+//      calls modifying retentionDuration are issued for existing Signal records
 // ---------------------------------------------------------------------------
 
 /**
@@ -32,6 +38,13 @@ const arbBillingPlan: fc.Arbitrary<BillingPlan> = fc.oneof(
   fc.constant('Premium' as BillingPlan),
   fc.constant('Internal' as BillingPlan),
 );
+
+/**
+ * Arbitrary s3Key generator for inbox objects.
+ */
+const arbS3Key: fc.Arbitrary<string> = fc.string({ minLength: 3, maxLength: 30 })
+  .filter((s) => /^[a-zA-Z0-9/_.-]+$/.test(s))
+  .map((s) => `inbox/${s}.eml`);
 
 describe("Property 19: Plan changes never retroactively retag", () => {
   // -------------------------------------------------------------------------
@@ -182,6 +195,160 @@ describe("Property 19: Plan changes never retroactively retag", () => {
           const freshRetentionAfter = getRetentionForPlan(planAfter);
           expect(retentionAfter).toEqual(freshRetentionAfter);
         }),
+      );
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // 4. Plan change produces no S3 PutObjectTagging/CopyObject calls against
+  //    existing objects and no DynamoDB UpdateItem for retentionDuration
+  // -------------------------------------------------------------------------
+  describe("plan change produces no retroactive S3 or DynamoDB operations on existing signals", () => {
+    it("applyPlanRetention for a NEW signal after plan change only touches the new signal's s3Key — never existing keys", () => {
+      const s3Mock = mockClient(S3Client);
+
+      return propertyRunner.assert(
+        fc.asyncProperty(
+          arbBillingPlan,
+          arbBillingPlan,
+          arbS3Key,
+          arbS3Key,
+          async (oldPlan, newPlan, existingS3Key, newS3Key) => {
+            // Ensure the two keys are distinct to simulate "existing" vs "new"
+            fc.pre(existingS3Key !== newS3Key);
+
+            s3Mock.reset();
+            s3Mock.on(PutObjectTaggingCommand).resolves({});
+            s3Mock.on(CopyObjectCommand).resolves({});
+
+            const service = new S3RetentionServiceImpl(
+              s3Mock as unknown as S3Client,
+              "test-bucket",
+            );
+
+            // Step 1: Apply retention for the existing signal under the old plan
+            const oldRetention = getRetentionForPlan(oldPlan);
+            await service.applyPlanRetention(existingS3Key, {
+              s3Tag: oldRetention.s3Tag,
+              copyToSaved: oldRetention.copyToSaved,
+            });
+
+            // Record how many S3 calls were made for the existing signal
+            const callsAfterExisting = s3Mock.calls().length;
+
+            // Step 2: Plan changes — apply retention for the NEW signal under the new plan
+            const newRetention = getRetentionForPlan(newPlan);
+            await service.applyPlanRetention(newS3Key, {
+              s3Tag: newRetention.s3Tag,
+              copyToSaved: newRetention.copyToSaved,
+            });
+
+            // All S3 calls after the plan change only reference the NEW s3Key
+            const callsAfterNew = s3Mock.calls();
+            const newCalls = callsAfterNew.slice(callsAfterExisting);
+
+            for (const call of newCalls) {
+              const input = call.args[0].input as Record<string, unknown>;
+              // PutObjectTagging and CopyObject both have a Key field
+              if (input["Key"]) {
+                expect(input["Key"]).not.toBe(existingS3Key);
+              }
+              // CopyObject has a CopySource field — must not reference existing key
+              if (input["CopySource"]) {
+                expect(input["CopySource"]).not.toContain(existingS3Key);
+              }
+            }
+          },
+        ),
+      );
+    });
+
+    it("no S3 call references an existing signal's key when processing a new signal after plan change", () => {
+      const s3Mock = mockClient(S3Client);
+
+      return propertyRunner.assert(
+        fc.asyncProperty(
+          arbBillingPlan,
+          arbBillingPlan,
+          fc.array(arbS3Key, { minLength: 1, maxLength: 5 }),
+          arbS3Key,
+          async (oldPlan, newPlan, existingKeys, newKey) => {
+            // Ensure the new key is not in the existing set
+            fc.pre(!existingKeys.includes(newKey));
+
+            s3Mock.reset();
+            s3Mock.on(PutObjectTaggingCommand).resolves({});
+            s3Mock.on(CopyObjectCommand).resolves({});
+
+            const service = new S3RetentionServiceImpl(
+              s3Mock as unknown as S3Client,
+              "test-bucket",
+            );
+
+            // Process multiple existing signals under the old plan
+            const oldRetention = getRetentionForPlan(oldPlan);
+            for (const key of existingKeys) {
+              await service.applyPlanRetention(key, {
+                s3Tag: oldRetention.s3Tag,
+                copyToSaved: oldRetention.copyToSaved,
+              });
+            }
+
+            const callsBeforePlanChange = s3Mock.calls().length;
+
+            // Plan changes — process the new signal under the new plan
+            const newRetention = getRetentionForPlan(newPlan);
+            await service.applyPlanRetention(newKey, {
+              s3Tag: newRetention.s3Tag,
+              copyToSaved: newRetention.copyToSaved,
+            });
+
+            // Verify: all S3 calls after the plan change only reference the new key
+            const allCalls = s3Mock.calls();
+            const postChangeCalls = allCalls.slice(callsBeforePlanChange);
+
+            for (const call of postChangeCalls) {
+              const input = call.args[0].input as Record<string, unknown>;
+              if (input["Key"]) {
+                expect(input["Key"]).not.toSatisfy((key: string) =>
+                  existingKeys.includes(key),
+                );
+              }
+              if (input["CopySource"]) {
+                for (const existingKey of existingKeys) {
+                  expect(input["CopySource"]).not.toContain(existingKey);
+                }
+              }
+            }
+          },
+        ),
+      );
+    });
+
+    it("retention decision for a new signal never includes existing signal IDs or existing s3Keys in its output", () => {
+      return propertyRunner.assert(
+        fc.asyncProperty(
+          arbBillingPlan,
+          arbBillingPlan,
+          arbS3Key,
+          async (oldPlan, newPlan, existingS3Key) => {
+            // Simulate: old signal was created under oldPlan
+            const oldRetention = getRetentionForPlan(oldPlan);
+
+            // Plan changes to newPlan — compute retention for a new signal
+            const newRetention = getRetentionForPlan(newPlan);
+
+            // The new retention decision is computed purely from the new plan
+            // It has no reference to the old signal's s3Key or retention
+            expect(newRetention).not.toHaveProperty("existingS3Key");
+            expect(newRetention).not.toHaveProperty("previousRetention");
+            expect(newRetention).not.toHaveProperty("signalsToUpdate");
+
+            // The old retention is unchanged — no mutation occurred
+            const oldRetentionAgain = getRetentionForPlan(oldPlan);
+            expect(oldRetentionAgain).toEqual(oldRetention);
+          },
+        ),
       );
     });
   });

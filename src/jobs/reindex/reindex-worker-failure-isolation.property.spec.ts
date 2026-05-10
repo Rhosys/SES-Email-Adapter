@@ -352,7 +352,7 @@ function makeS3Body(content: string) {
 // Property test
 // ---------------------------------------------------------------------------
 
-describe.skip("Property 22: Worker isolates per-signal failures within a segment", () => {
+describe("Property 22: Worker isolates per-signal failures within a segment", () => {
   let worker: ReindexWorker;
   let logOutput: Array<{ level: string; message: string; signalId?: string }> = [];
 
