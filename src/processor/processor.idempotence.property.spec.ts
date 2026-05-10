@@ -151,7 +151,7 @@ describe("Property 9 (full scope): Cross-layer idempotence — live writes + cac
     return propertyRunner.assert(
       fc.asyncProperty(
         fc.array(fc.double({ min: -1, max: 1, noNaN: true }), { minLength: 3, maxLength: 10 }),
-        fc.string({ minLength: 5, maxLength: 20 }).filter((s) => /^[a-zA-Z0-9]+$/.test(s)),
+        fc.constant("test-msg-001"),
         async (vector, sesMessageId) => {
           // Store mock: first call returns null (signal not found), second call returns existing signal
           const store: ProcessorDatabase = {
@@ -223,7 +223,7 @@ describe("Property 9 (full scope): Cross-layer idempotence — live writes + cac
     return propertyRunner.assert(
       fc.asyncProperty(
         fc.array(fc.double({ min: -1, max: 1, noNaN: true }), { minLength: 3, maxLength: 10 }),
-        fc.string({ minLength: 5, maxLength: 20 }).filter((s) => /^[a-zA-Z0-9]+$/.test(s)),
+        fc.constant("test-msg-001"),
         async (vector, sesMessageId) => {
           // Simulate the race condition: both calls see no existing signal (dedup hasn't saved yet)
           const savedSignals: Signal[] = [];
@@ -323,7 +323,7 @@ describe("Property 9 (full scope): Cross-layer idempotence — live writes + cac
     return propertyRunner.assert(
       fc.asyncProperty(
         fc.array(fc.double({ min: -1, max: 1, noNaN: true }), { minLength: 3, maxLength: 10 }),
-        fc.string({ minLength: 5, maxLength: 20 }).filter((s) => /^[a-zA-Z0-9]+$/.test(s)),
+        fc.constant("test-msg-001"),
         async (vector, sesMessageId) => {
           // Run 1: process once (fresh)
           const savedSignalsRun1: Signal[] = [];

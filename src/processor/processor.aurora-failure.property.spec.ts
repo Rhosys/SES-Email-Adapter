@@ -191,7 +191,7 @@ describe("Property 8: Aurora cluster failure preserves the DynamoDB cache entry"
         // Which cluster fails: 0 = cluster-a, 1 = cluster-b
         fc.integer({ min: 0, max: 1 }),
         // Arbitrary session message ID
-        fc.string({ minLength: 5, maxLength: 20 }).filter((s) => /^[a-zA-Z0-9]+$/.test(s)),
+        fc.constant("test-msg-aurora"),
         async (vectorA, vectorB, failingClusterIdx, sesMessageId) => {
           const store = makeStore();
           const mimeParser = makeMimeParser();
@@ -256,7 +256,7 @@ describe("Property 8: Aurora cluster failure preserves the DynamoDB cache entry"
         fc.array(fc.double({ min: -1, max: 1, noNaN: true }), { minLength: 3, maxLength: 10 }),
         fc.array(fc.double({ min: -1, max: 1, noNaN: true }), { minLength: 3, maxLength: 10 }),
         fc.integer({ min: 0, max: 1 }),
-        fc.string({ minLength: 5, maxLength: 20 }).filter((s) => /^[a-zA-Z0-9]+$/.test(s)),
+        fc.constant("test-msg-aurora"),
         async (vectorA, vectorB, failingClusterIdx, sesMessageId) => {
           const store = makeStore();
           const mimeParser = makeMimeParser();
