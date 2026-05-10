@@ -925,3 +925,7 @@ Things competitors charge for that we include, plus things only we can offer:
 - **AI classification** — paywalling this makes us just another forwarder.
 - **Spam threshold tuning** — charging for spam protection is a trust-breaker.
 - **Browser extension** — free acquisition channel.
+
+- [ ] **Convert all `console.*` statements to `logger.log`** — replace `console.log`, `console.error`, `console.warn` throughout the codebase with a structured logger (e.g. `src/logger.ts`) that supports log levels, JSON output, and can be silenced in tests without `vi.spyOn(console, ...)` hacks. When migrating, remove the `vi.spyOn(console, "error").mockImplementation(() => {})` calls added as a temporary fix in these test files:
+  - `src/processor/processor.spec.ts` (6 tests: forwarder throws, batch failure, notifier throws, notifyBlocked throws, updateGlobalReputation throws, pong throws)
+  - `src/processor/processor.aurora-failure.property.spec.ts` (top-level beforeEach/afterEach)

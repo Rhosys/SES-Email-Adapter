@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { SQSEvent } from "aws-lambda";
 import { SignalProcessor, deriveGroupingKey, SYSTEM_RULES, extractForwardedAddress } from "./processor.js";
 import { JsonLogicRuleEvaluator } from "./rule-evaluator.js";
@@ -266,6 +266,10 @@ describe("SignalProcessor", () => {
     arcMatcher = makeArcMatcher();
     ruleEvaluator = makeRuleEvaluator();
     processor = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   // -------------------------------------------------------------------------
@@ -663,6 +667,7 @@ describe("SignalProcessor", () => {
     });
 
     it("continues processing when forwarder throws", async () => {
+      vi.spyOn(console, "error").mockImplementation(() => {});
       vi.mocked(forwarder.forward).mockRejectedValueOnce(new Error("SES throttle"));
       const rule: Rule = {
         id: "rule-fwd",
@@ -720,6 +725,7 @@ describe("SignalProcessor", () => {
     });
 
     it("continues processing remaining records when one fails", async () => {
+      vi.spyOn(console, "error").mockImplementation(() => {});
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>)
         .mockRejectedValueOnce(new Error("Bedrock error"))
         .mockResolvedValueOnce(validClassification);
@@ -777,6 +783,7 @@ describe("SignalProcessor", () => {
     });
 
     it("does not fail processing when notifier throws", async () => {
+      vi.spyOn(console, "error").mockImplementation(() => {});
       vi.mocked(notifier.notify).mockRejectedValueOnce(new Error("SES error"));
 
       await processor.process(makeSqsEvent([{}]));
@@ -926,6 +933,7 @@ describe("SignalProcessor", () => {
     });
 
     it("does not fail when notifyBlocked throws (quarantine_visible via SR-03)", async () => {
+      vi.spyOn(console, "error").mockImplementation(() => {});
       vi.mocked(store.getProcessorAccountContext).mockResolvedValueOnce(
         { ...DEFAULT_CTX, emailConfig: makeAlias() },
       );
@@ -1069,6 +1077,7 @@ describe("SignalProcessor", () => {
     });
 
     it("does not fail processing when updateGlobalReputation throws", async () => {
+      vi.spyOn(console, "error").mockImplementation(() => {});
       vi.mocked(store.updateGlobalReputation).mockRejectedValueOnce(new Error("DynamoDB error"));
 
       await processor.process(makeSqsEvent([{}]));
@@ -1669,6 +1678,7 @@ describe("SignalProcessor", () => {
     });
 
     it("does not set sentMessageIds when pong throws", async () => {
+      vi.spyOn(console, "error").mockImplementation(() => {});
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(testClassification);
       vi.mocked(testReplier.pong).mockRejectedValueOnce(new Error("SES timeout"));
 

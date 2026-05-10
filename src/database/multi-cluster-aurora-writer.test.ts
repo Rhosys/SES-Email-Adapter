@@ -78,7 +78,7 @@ describe("MultiClusterAuroraWriterImpl", () => {
   });
 
   describe("upsertEmbedding", () => {
-    it.skip("runs BEGIN → SET LOCAL → INSERT ON CONFLICT → COMMIT in sequence", async () => {
+    it("runs BEGIN → SET LOCAL → INSERT ON CONFLICT → COMMIT in sequence", async () => {
       rdsMock
         .on(BeginTransactionCommand).resolves({ transactionId: "txn-1" })
         .on(ExecuteStatementCommand).resolves({ records: [] })
@@ -130,7 +130,7 @@ describe("MultiClusterAuroraWriterImpl", () => {
       });
     });
 
-    it.skip("throws when clusterId is not in the registry", async () => {
+    it("throws when clusterId is not in the registry", async () => {
       await expect(
         writer.upsertEmbedding({
           clusterId: "nonexistent-cluster",
@@ -142,7 +142,7 @@ describe("MultiClusterAuroraWriterImpl", () => {
       ).rejects.toThrow('Cluster "nonexistent-cluster" not found in CLUSTER_REGISTRY');
     });
 
-    it.skip("rolls back on SQL error", async () => {
+    it("rolls back on SQL error", async () => {
       rdsMock
         .on(BeginTransactionCommand).resolves({ transactionId: "txn-2" })
         .on(ExecuteStatementCommand)
@@ -168,7 +168,7 @@ describe("MultiClusterAuroraWriterImpl", () => {
       });
     });
 
-    it.skip("retries on transient errors with exponential backoff", async () => {
+    it("retries on transient errors with exponential backoff", async () => {
       vi.useFakeTimers();
 
       const transientError = Object.assign(new Error("Service unavailable"), {
@@ -203,7 +203,7 @@ describe("MultiClusterAuroraWriterImpl", () => {
       vi.useRealTimers();
     });
 
-    it.skip("throws after 3 failed attempts on transient errors", async () => {
+    it("throws after 3 failed attempts on transient errors", async () => {
       const transientError = Object.assign(new Error("Service unavailable"), {
         name: "InternalServerErrorException",
         $metadata: { httpStatusCode: 500 },
@@ -226,7 +226,7 @@ describe("MultiClusterAuroraWriterImpl", () => {
       expect(beginCalls).toHaveLength(3);
     });
 
-    it.skip("does not retry non-transient errors", async () => {
+    it("does not retry non-transient errors", async () => {
       const nonTransientError = new Error("BadRequestException: invalid SQL");
 
       rdsMock.on(BeginTransactionCommand).rejects(nonTransientError);
@@ -248,7 +248,7 @@ describe("MultiClusterAuroraWriterImpl", () => {
   });
 
   describe("findMatch", () => {
-    it.skip("returns arcId when a match is found within threshold", async () => {
+    it("returns arcId when a match is found within threshold", async () => {
       rdsMock
         .on(BeginTransactionCommand).resolves({ transactionId: "txn-find-1" })
         .on(ExecuteStatementCommand)
@@ -274,7 +274,7 @@ describe("MultiClusterAuroraWriterImpl", () => {
       expect(selectInput.sql).toContain("LIMIT 1");
     });
 
-    it.skip("returns null when no match is found", async () => {
+    it("returns null when no match is found", async () => {
       rdsMock
         .on(BeginTransactionCommand).resolves({ transactionId: "txn-find-2" })
         .on(ExecuteStatementCommand)
@@ -292,7 +292,7 @@ describe("MultiClusterAuroraWriterImpl", () => {
       expect(result).toBeNull();
     });
 
-    it.skip("returns null when records is undefined", async () => {
+    it("returns null when records is undefined", async () => {
       rdsMock
         .on(BeginTransactionCommand).resolves({ transactionId: "txn-find-3" })
         .on(ExecuteStatementCommand)
@@ -310,7 +310,7 @@ describe("MultiClusterAuroraWriterImpl", () => {
       expect(result).toBeNull();
     });
 
-    it.skip("retries on transient errors", async () => {
+    it("retries on transient errors", async () => {
       vi.useFakeTimers();
 
       const transientError = Object.assign(new Error("throttled"), {
@@ -353,7 +353,7 @@ describe("MultiClusterAuroraWriterImpl", () => {
   describe("property tests", () => {
     // Property 16: Aurora retries with exponential backoff up to 3 attempts
     // **Validates: Requirements 6.4**
-    it.skip(
+    it(
       "retries transient errors up to 3 attempts and propagates the error with context for logging",
       () => {
         // Spy on global setTimeout to capture delay values and execute immediately
@@ -427,7 +427,7 @@ describe("MultiClusterAuroraWriterImpl", () => {
 
     // Property 16 (recovery after transient failures): Verify successful retry after N failures
     // **Validates: Requirements 6.4**
-    it.skip(
+    it(
       "succeeds after transient failures when a retry attempt succeeds within the 3-attempt limit",
       () => {
         const setTimeoutSpy = vi.spyOn(global, "setTimeout").mockImplementation(((fn: () => void) => {
@@ -493,7 +493,7 @@ describe("MultiClusterAuroraWriterImpl", () => {
 
     // Property 16 (non-transient errors): Non-transient errors are NOT retried
     // **Validates: Requirements 6.4**
-    it.skip(
+    it(
       "non-transient errors are not retried — only transient errors trigger the backoff schedule",
       () => {
         return propertyRunner.assert(
@@ -545,7 +545,7 @@ describe("MultiClusterAuroraWriterImpl", () => {
 
     // Property 9 (writer-scope subset): All embedding upserts are idempotent
     // **Validates: Requirements 3.4, 6.1, 6.3**
-    it.skip(
+    it(
       "repeated upserts for the same (arc_id, account_id, recipient_address) tuple produce the same final state",
       () => {
         return propertyRunner.assert(
@@ -619,7 +619,7 @@ describe("MultiClusterAuroraWriterImpl", () => {
 
     // Property 15: Aurora upserts run inside an RLS-scoped transaction
     // Validates: Requirements 6.2
-    it.skip(
+    it(
       "upserts execute BeginTransaction → SET LOCAL → INSERT ON CONFLICT → CommitTransaction on the same transactionId",
       () => {
         return propertyRunner.assert(
