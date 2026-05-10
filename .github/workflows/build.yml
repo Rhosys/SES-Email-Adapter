@@ -77,7 +77,18 @@ jobs:
         run: tofu -chdir=deploy init -input=false -backend-config="bucket=${STATE_BUCKET}" -backend-config="key=${STATE_KEY}"
 
       - name: Tofu Plan
-        run: tofu -chdir=deploy plan -input=false -out=plan.cache
+        id: plan
+        run: |
+          set +e
+          tofu -chdir=deploy plan -input=false -out=plan.cache -no-color 2>&1 | tee /tmp/plan_output.txt
+          EXIT_CODE=${PIPESTATUS[0]}
+          if [ $EXIT_CODE -ne 0 ]; then
+            echo "## ❌ Tofu Plan Failed" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            grep -A2 '│ Error:' /tmp/plan_output.txt >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            exit $EXIT_CODE
+          fi
         env:
           TF_LOG: ${{ github.event_name == 'workflow_dispatch' && 'TRACE' || '' }}
 
