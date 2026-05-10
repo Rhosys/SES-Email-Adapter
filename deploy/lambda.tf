@@ -3,7 +3,7 @@
 # ---------------------------------------------------------------------------
 
 resource "aws_iam_role" "lambda" {
-  name = "${local.prefix}-lambda"
+  name = "${var.service_name}-lambda"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -82,9 +82,6 @@ resource "aws_iam_role_policy" "lambda_permissions" {
         Effect   = "Allow"
         Action   = ["ses:SendEmail"]
         Resource = "*"
-        Condition = {
-          StringEquals = { "ses:FromAddress" = var.notification_from_address }
-        }
       },
       {
         Sid    = "SESSuppression"
@@ -118,7 +115,7 @@ resource "aws_iam_role_policy" "lambda_permissions" {
 # ---------------------------------------------------------------------------
 
 resource "aws_cloudwatch_log_group" "lambda" {
-  name              = "/aws/lambda/${local.prefix}-main"
+  name              = "/aws/lambda/${var.service_name}-main"
   retention_in_days = 90
 }
 
@@ -140,7 +137,7 @@ data "archive_file" "lambda_stub" {
 }
 
 resource "aws_lambda_function" "main" {
-  function_name = "${local.prefix}-main"
+  function_name = "${var.service_name}-main"
   role          = aws_iam_role.lambda.arn
   handler       = "handler.handler"
   runtime       = "nodejs24.x"
@@ -153,7 +150,6 @@ resource "aws_lambda_function" "main" {
 
   environment {
     variables = {
-      NODE_ENV              = var.env
       ACCOUNTS_TABLE        = aws_dynamodb_table.accounts.name
       SIGNALS_TABLE         = aws_dynamodb_table.signals.name
       PROCESSING_TABLE      = aws_dynamodb_table.processing.name
@@ -162,9 +158,7 @@ resource "aws_lambda_function" "main" {
       AURORA_CLUSTER_ARN    = aws_rds_cluster.aurora.arn
       AURORA_SECRET_ARN     = aws_secretsmanager_secret.aurora_master.arn
       AURORA_DB_NAME        = "signals"
-      NOTIFICATION_FROM     = var.notification_from_address
       SES_CONFIGURATION_SET = aws_sesv2_configuration_set.sending.configuration_set_name
-      APP_BASE_URL          = var.app_base_url
       WS_API_ENDPOINT       = "https://${aws_apigatewayv2_api.ws.id}.execute-api.${data.aws_region.current.name}.amazonaws.com/${aws_apigatewayv2_stage.ws.name}"
       CF_ORIGIN_SECRET      = random_password.cf_origin_secret.result
     }

@@ -3,23 +3,8 @@ variable "aws_account_id" {
   type        = string
 }
 
-variable "env" {
-  description = "Environment (prod, staging, dev)"
-  type        = string
-}
-
-variable "api_domain" {
-  description = "Custom domain for the API (e.g. api.yourdomain.com)"
-  type        = string
-}
-
-variable "hosted_zone_id" {
-  description = "Route53 hosted zone ID for api_domain — used for ACM DNS validation and CloudFront alias record"
-  type        = string
-}
-
-variable "notification_from_address" {
-  description = "Verified SES email address used to send account notifications"
+variable "service_name" {
+  description = "Service name — injected via TF_VAR_service_name (CI_PROJECT_NAME in CI)"
   type        = string
 }
 
@@ -27,9 +12,4 @@ variable "dkim_private_key" {
   description = "Base64-encoded RSA-2048 private key for BYODKIM. Generate with: openssl genrsa 2048 | openssl pkcs8 -topk8 -nocrypt -outform DER | base64 -w0"
   type        = string
   sensitive   = true
-}
-
-variable "app_base_url" {
-  description = "Base URL of the frontend app, used in notification email links"
-  type        = string
 }

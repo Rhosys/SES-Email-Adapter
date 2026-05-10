@@ -4,7 +4,7 @@
 # ---------------------------------------------------------------------------
 
 resource "aws_ses_receipt_rule_set" "main" {
-  rule_set_name = "${local.prefix}-rules"
+  rule_set_name = "${var.service_name}-rules"
 }
 
 resource "aws_ses_active_receipt_rule_set" "main" {
@@ -61,7 +61,7 @@ resource "aws_sesv2_email_identity" "main" {
 # Customer creates: mail._domainkey.{their_domain} CNAME mail._domainkey.{mail_domain}
 resource "aws_route53_record" "ses_dkim" {
   provider = aws.us_east_1
-  zone_id  = var.hosted_zone_id
+  zone_id  = data.aws_route53_zone.main.zone_id
   name     = "mail._domainkey.${local.mail_domain}"
   type     = "CNAME"
   ttl      = 300
@@ -74,7 +74,7 @@ resource "aws_route53_record" "ses_dkim" {
 # with every major mail server.
 resource "aws_route53_record" "ses_mx_host" {
   provider = aws.us_east_1
-  zone_id  = var.hosted_zone_id
+  zone_id  = data.aws_route53_zone.main.zone_id
   name     = "mx.${local.mail_domain}"
   type     = "CNAME"
   ttl      = 300
@@ -84,7 +84,7 @@ resource "aws_route53_record" "ses_mx_host" {
 # Platform domain's own MX record — points to our branded hostname
 resource "aws_route53_record" "ses_mx" {
   provider = aws.us_east_1
-  zone_id  = var.hosted_zone_id
+  zone_id  = data.aws_route53_zone.main.zone_id
   name     = local.mail_domain
   type     = "MX"
   ttl      = 300
@@ -99,7 +99,7 @@ resource "aws_route53_record" "ses_mx" {
 # SES requires an MX record on the bounce subdomain pointing to its MAIL FROM endpoint
 resource "aws_route53_record" "bounce_mx" {
   provider = aws.us_east_1
-  zone_id  = var.hosted_zone_id
+  zone_id  = data.aws_route53_zone.main.zone_id
   name     = "bounce.${local.mail_domain}"
   type     = "MX"
   ttl      = 300
@@ -109,7 +109,7 @@ resource "aws_route53_record" "bounce_mx" {
 # SPF on the bounce subdomain — SES is the only authorised sender
 resource "aws_route53_record" "bounce_spf" {
   provider = aws.us_east_1
-  zone_id  = var.hosted_zone_id
+  zone_id  = data.aws_route53_zone.main.zone_id
   name     = "bounce.${local.mail_domain}"
   type     = "TXT"
   ttl      = 300
@@ -123,7 +123,7 @@ resource "aws_route53_record" "bounce_spf" {
 
 resource "aws_route53_record" "dmarc" {
   provider = aws.us_east_1
-  zone_id  = var.hosted_zone_id
+  zone_id  = data.aws_route53_zone.main.zone_id
   name     = "_dmarc.${local.mail_domain}"
   type     = "TXT"
   ttl      = 300
@@ -136,7 +136,7 @@ resource "aws_route53_record" "dmarc" {
 # ---------------------------------------------------------------------------
 
 resource "aws_sesv2_configuration_set" "sending" {
-  configuration_set_name = "${local.prefix}-sending"
+  configuration_set_name = "${var.service_name}-sending"
 
   sending_options {
     sending_enabled = true
@@ -150,7 +150,7 @@ resource "aws_sesv2_configuration_set" "sending" {
 }
 
 resource "aws_sns_topic" "ses_feedback" {
-  name = "${local.prefix}-ses-feedback"
+  name = "${var.service_name}-ses-feedback"
 }
 
 # Route Bounce and Complaint events to SNS so Lambda can update the suppression list

@@ -3,11 +3,11 @@
 # ---------------------------------------------------------------------------
 
 resource "aws_apigatewayv2_api" "main" {
-  name          = "${local.prefix}-api"
+  name          = "${var.service_name}-api"
   protocol_type = "HTTP"
 
   cors_configuration {
-    allow_origins = [var.app_base_url]
+    allow_origins = ["*"]
     allow_methods = ["HEAD", "GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
     allow_headers = ["Authorization", "Content-Type"]
     max_age       = 300
@@ -54,7 +54,7 @@ resource "aws_apigatewayv2_stage" "main" {
 }
 
 resource "aws_cloudwatch_log_group" "api_gateway" {
-  name              = "/aws/apigateway/${local.prefix}"
+  name              = "/aws/apigateway/${var.service_name}"
   retention_in_days = 14
 }
 
@@ -72,7 +72,7 @@ resource "aws_lambda_permission" "api_gateway" {
 # ---------------------------------------------------------------------------
 
 resource "aws_apigatewayv2_api" "ws" {
-  name                       = "${local.prefix}-ws"
+  name                       = "${var.service_name}-ws"
   protocol_type              = "WEBSOCKET"
   route_selection_expression = "$request.body.action"
 }
@@ -89,7 +89,7 @@ resource "aws_apigatewayv2_authorizer" "ws" {
   authorizer_type  = "REQUEST"
   authorizer_uri   = aws_lambda_alias.production.invoke_arn
   identity_sources = ["$request.querystring.token"]
-  name             = "${local.prefix}-ws-authorizer"
+  name             = "${var.service_name}-ws-authorizer"
 
   # Cache the Allow result per token for 5 minutes
   authorizer_result_ttl_in_seconds = 300

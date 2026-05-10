@@ -20,11 +20,11 @@ resource "aws_subnet" "private" {
   cidr_block        = local.private_cidrs[count.index]
   availability_zone = local.azs[count.index]
 
-  tags = { Name = "${local.prefix}-private-${count.index}" }
+  tags = { Name = "${var.service_name}-private-${count.index}" }
 }
 
 resource "aws_security_group" "aurora" {
-  name        = "${local.prefix}-aurora"
+  name        = "${var.service_name}-aurora"
   description = "Aurora — no inbound connections needed (accessed via Data API)"
   vpc_id      = aws_vpc.main.id
 

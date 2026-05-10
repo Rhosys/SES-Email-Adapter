@@ -3,7 +3,7 @@
 # ---------------------------------------------------------------------------
 
 resource "aws_s3_bucket" "emails" {
-  bucket = "${local.prefix}-emails"
+  bucket = "${var.service_name}-emails"
 }
 
 resource "aws_s3_bucket_lifecycle_configuration" "emails" {
@@ -64,12 +64,12 @@ resource "aws_s3_bucket_policy" "emails" {
 # ---------------------------------------------------------------------------
 
 resource "aws_sqs_queue" "signals_dlq" {
-  name                      = "${local.prefix}-signals-dlq"
+  name                      = "${var.service_name}-signals-dlq"
   message_retention_seconds = 1209600 # 14 days
 }
 
 resource "aws_sqs_queue" "signals" {
-  name                       = "${local.prefix}-signals"
+  name                       = "${var.service_name}-signals"
   visibility_timeout_seconds = 180   # 6x Lambda timeout (30s * 6)  # 6x Lambda timeout
   message_retention_seconds  = 86400 # 1 day
 
@@ -81,7 +81,7 @@ resource "aws_sqs_queue" "signals" {
 
 # SNS topic that SES notifies after storing to S3
 resource "aws_sns_topic" "ses_notifications" {
-  name = "${local.prefix}-ses-notifications"
+  name = "${var.service_name}-ses-notifications"
 }
 
 resource "aws_sns_topic_subscription" "ses_to_sqs" {
@@ -110,7 +110,7 @@ resource "aws_sqs_queue_policy" "signals_sns" {
 # ---------------------------------------------------------------------------
 
 resource "aws_sqs_queue" "feedback" {
-  name                       = "${local.prefix}-feedback"
+  name                       = "${var.service_name}-feedback"
   visibility_timeout_seconds = 180   # 6x Lambda timeout (30s * 6)
   message_retention_seconds  = 86400 # 1 day
 
@@ -146,7 +146,7 @@ resource "aws_sqs_queue_policy" "feedback_sns" {
 # ---------------------------------------------------------------------------
 
 resource "aws_dynamodb_table" "accounts" {
-  name         = "${local.prefix}-accounts"
+  name         = "${var.service_name}-accounts"
   billing_mode = "PAY_PER_REQUEST"
   hash_key     = "pk"
   range_key    = "sk"
@@ -187,7 +187,7 @@ resource "aws_dynamodb_table" "accounts" {
 }
 
 resource "aws_dynamodb_table" "signals" {
-  name         = "${local.prefix}-signals"
+  name         = "${var.service_name}-signals"
   billing_mode = "PAY_PER_REQUEST"
   hash_key     = "pk"
   range_key    = "sk"
@@ -233,7 +233,7 @@ resource "aws_dynamodb_table" "signals" {
 }
 
 resource "aws_dynamodb_table" "processing" {
-  name         = "${local.prefix}-processing"
+  name         = "${var.service_name}-processing"
   billing_mode = "PAY_PER_REQUEST"
   hash_key     = "pk"
   range_key    = "sk"
@@ -264,7 +264,7 @@ resource "aws_dynamodb_table" "processing" {
 }
 
 resource "aws_dynamodb_table" "audit" {
-  name         = "${local.prefix}-audit"
+  name         = "${var.service_name}-audit"
   billing_mode = "PAY_PER_REQUEST"
   hash_key     = "pk"
   range_key    = "sk"
@@ -307,7 +307,7 @@ resource "aws_dynamodb_table" "audit" {
 # ---------------------------------------------------------------------------
 
 resource "aws_cloudwatch_event_rule" "domain_health" {
-  name                = "${local.prefix}-domain-health"
+  name                = "${var.service_name}-domain-health"
   description         = "Weekly DNS health check for all registered domains"
   schedule_expression = "cron(0 6 ? * MON *)"
 }
