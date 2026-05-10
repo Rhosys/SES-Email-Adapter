@@ -9,23 +9,23 @@ resource "aws_s3_bucket" "emails" {
 resource "aws_s3_bucket_lifecycle_configuration" "emails" {
   bucket = aws_s3_bucket.emails.id
 
-  # Rule 1: free-tier 6-month expiry (only applies to objects tagged retention-tier=P6M)
+  # Rule 1: free-tier 1-year expiry (only applies to objects tagged retention-tier=P1Y)
   rule {
-    id     = "inbox-free-tier-6mo"
+    id     = "inbox-free-tier-1yr"
     status = "Enabled"
     filter {
       and {
         prefix = "inbox/"
         tags = {
-          "retention-tier" = "P6M"
+          "retention-tier" = "P1Y"
         }
       }
     }
-    expiration { days = 180 }
+    expiration { days = 365 }
   }
 
   # Rule 2: default 5-year expiry on the inbox prefix (applies to all inbox/ objects)
-  # When both rules apply, S3 takes the shorter expiration — so free-tier objects (tagged) expire at 180 days, paid-tier (untagged) at 1825 days.
+  # When both rules apply, S3 takes the shorter expiration — so free-tier objects (tagged) expire at 365 days, paid-tier (untagged) at 1825 days.
   rule {
     id     = "inbox-default-5yr"
     status = "Enabled"

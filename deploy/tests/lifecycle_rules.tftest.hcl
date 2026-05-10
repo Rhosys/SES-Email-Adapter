@@ -82,20 +82,20 @@ run "lifecycle_rules_count" {
   }
 }
 
-# Rule 1: inbox/ prefix + tag retention-tier=P6M → expire after 180 days
+# Rule 1: inbox/ prefix + tag retention-tier=P1Y → expire after 365 days
 run "lifecycle_rule_free_tier" {
   command = plan
 
   assert {
     condition     = anytrue([
       for rule in aws_s3_bucket_lifecycle_configuration.emails.rule :
-      rule.id == "inbox-free-tier-6mo" &&
+      rule.id == "inbox-free-tier-1yr" &&
       rule.status == "Enabled" &&
       rule.filter[0].and[0].prefix == "inbox/" &&
-      rule.filter[0].and[0].tags["retention-tier"] == "P6M" &&
-      rule.expiration[0].days == 180
+      rule.filter[0].and[0].tags["retention-tier"] == "P1Y" &&
+      rule.expiration[0].days == 365
     ])
-    error_message = "Free-tier rule must have id='inbox-free-tier-6mo', prefix='inbox/', tag retention-tier=P6M, expiration=180 days"
+    error_message = "Free-tier rule must have id='inbox-free-tier-1yr', prefix='inbox/', tag retention-tier=P1Y, expiration=365 days"
   }
 }
 
