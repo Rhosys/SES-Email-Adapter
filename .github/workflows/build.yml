@@ -80,7 +80,7 @@ jobs:
         id: plan
         run: |
           set +e
-          tofu -chdir=deploy plan -input=false -out=plan.cache -no-color 2>&1 | tee /tmp/plan_output.txt
+          tofu -chdir=deploy plan -input=false -out=plan.cache 2>&1 | tee /tmp/plan_output.txt
           EXIT_CODE=${PIPESTATUS[0]}
           if [ $EXIT_CODE -ne 0 ]; then
             echo "## ❌ Tofu Plan Failed" >> $GITHUB_STEP_SUMMARY
