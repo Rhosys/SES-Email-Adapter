@@ -3,8 +3,10 @@
 # ---------------------------------------------------------------------------
 
 resource "aws_apigatewayv2_api" "main" {
-  name          = "${var.service_name}-api"
-  protocol_type = "HTTP"
+  name                         = "${var.service_name}-api"
+  protocol_type                = "HTTP"
+  disable_execute_api_endpoint = true
+  ip_address_type              = "dualstack"
 
   cors_configuration {
     allow_origins = ["*"]
@@ -72,9 +74,11 @@ resource "aws_lambda_permission" "api_gateway" {
 # ---------------------------------------------------------------------------
 
 resource "aws_apigatewayv2_api" "ws" {
-  name                       = "${var.service_name}-ws"
-  protocol_type              = "WEBSOCKET"
-  route_selection_expression = "$request.body.action"
+  name                         = "${var.service_name}-ws"
+  protocol_type                = "WEBSOCKET"
+  route_selection_expression   = "$request.body.action"
+  disable_execute_api_endpoint = true
+  ip_address_type              = "dualstack"
 }
 
 resource "aws_apigatewayv2_integration" "ws_lambda" {
@@ -137,4 +141,151 @@ resource "aws_lambda_permission" "ws_gateway" {
   qualifier     = aws_lambda_alias.production.name
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${aws_apigatewayv2_api.ws.execution_arn}/*/*"
+}
+
+# ---------------------------------------------------------------------------
+# Custom domains — regional ACM cert + API Gateway domain names
+# ---------------------------------------------------------------------------
+
+resource "aws_acm_certificate" "api_gateways" {
+  domain_name               = "api.${data.aws_route53_zone.main.name}"
+  subject_alternative_names = ["wss.${data.aws_route53_zone.main.name}"]
+  validation_method         = "DNS"
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource "aws_route53_record" "api_gateways_cert_validation" {
+  provider = aws.us_east_1
+  for_each = {
+    for dvo in aws_acm_certificate.api_gateways.domain_validation_options : dvo.domain_name => {
+      name   = dvo.resource_record_name
+      record = dvo.resource_record_value
+      type   = dvo.resource_record_type
+    }
+  }
+
+  allow_overwrite = true
+  zone_id         = data.aws_route53_zone.main.zone_id
+  name            = each.value.name
+  type            = each.value.type
+  records         = [each.value.record]
+  ttl             = 60
+}
+
+resource "aws_acm_certificate_validation" "api_gateways" {
+  certificate_arn         = aws_acm_certificate.api_gateways.arn
+  validation_record_fqdns = [for record in aws_route53_record.api_gateways_cert_validation : record.fqdn]
+}
+
+# HTTP API custom domain — CloudFront origin points here
+resource "aws_apigatewayv2_domain_name" "http" {
+  domain_name = "api.${data.aws_route53_zone.main.name}"
+
+  domain_name_configuration {
+    certificate_arn = aws_acm_certificate_validation.api_gateways.certificate_arn
+    endpoint_type   = "REGIONAL"
+    security_policy = "TLS_1_2"
+  }
+}
+
+resource "aws_apigatewayv2_api_mapping" "http" {
+  api_id      = aws_apigatewayv2_api.main.id
+  domain_name = aws_apigatewayv2_domain_name.http.id
+  stage       = aws_apigatewayv2_stage.main.id
+}
+
+# WebSocket API custom domain — clients connect directly
+resource "aws_apigatewayv2_domain_name" "ws" {
+  domain_name = "wss.${data.aws_route53_zone.main.name}"
+
+  domain_name_configuration {
+    certificate_arn = aws_acm_certificate_validation.api_gateways.certificate_arn
+    endpoint_type   = "REGIONAL"
+    security_policy = "TLS_1_2"
+  }
+}
+
+resource "aws_apigatewayv2_api_mapping" "ws" {
+  api_id      = aws_apigatewayv2_api.ws.id
+  domain_name = aws_apigatewayv2_domain_name.ws.id
+  stage       = aws_apigatewayv2_stage.ws.id
+}
+
+# ---------------------------------------------------------------------------
+# DNS — API Gateway custom domains (dualstack A + AAAA)
+# api.email.rhosys.cloud is the CloudFront origin; not directly client-facing
+# wss.email.rhosys.cloud is client-facing for WebSocket connections
+# ---------------------------------------------------------------------------
+
+resource "aws_route53_record" "api_gateway_a" {
+  provider = aws.us_east_1
+  zone_id  = data.aws_route53_zone.main.zone_id
+  name     = "api.${data.aws_route53_zone.main.name}"
+  type     = "A"
+
+  alias {
+    name                   = aws_apigatewayv2_domain_name.http.domain_name_configuration[0].target_domain_name
+    zone_id                = aws_apigatewayv2_domain_name.http.domain_name_configuration[0].hosted_zone_id
+    evaluate_target_health = false
+  }
+}
+
+resource "aws_route53_record" "api_gateway_aaaa" {
+  provider = aws.us_east_1
+  zone_id  = data.aws_route53_zone.main.zone_id
+  name     = "api.${data.aws_route53_zone.main.name}"
+  type     = "AAAA"
+
+  alias {
+    name                   = aws_apigatewayv2_domain_name.http.domain_name_configuration[0].target_domain_name
+    zone_id                = aws_apigatewayv2_domain_name.http.domain_name_configuration[0].hosted_zone_id
+    evaluate_target_health = false
+  }
+}
+
+resource "aws_route53_record" "ws_gateway_a" {
+  provider = aws.us_east_1
+  zone_id  = data.aws_route53_zone.main.zone_id
+  name     = "wss.${data.aws_route53_zone.main.name}"
+  type     = "A"
+
+  alias {
+    name                   = aws_apigatewayv2_domain_name.ws.domain_name_configuration[0].target_domain_name
+    zone_id                = aws_apigatewayv2_domain_name.ws.domain_name_configuration[0].hosted_zone_id
+    evaluate_target_health = false
+  }
+}
+
+resource "aws_route53_record" "ws_gateway_aaaa" {
+  provider = aws.us_east_1
+  zone_id  = data.aws_route53_zone.main.zone_id
+  name     = "wss.${data.aws_route53_zone.main.name}"
+  type     = "AAAA"
+
+  alias {
+    name                   = aws_apigatewayv2_domain_name.ws.domain_name_configuration[0].target_domain_name
+    zone_id                = aws_apigatewayv2_domain_name.ws.domain_name_configuration[0].hosted_zone_id
+    evaluate_target_health = false
+  }
+}
+
+resource "aws_route53_record" "api_gateway_https" {
+  provider = aws.us_east_1
+  zone_id  = data.aws_route53_zone.main.zone_id
+  name     = "api.${data.aws_route53_zone.main.name}"
+  type     = "HTTPS"
+  ttl      = 300
+  records  = ["1 . alpn=\"h2\""]
+}
+
+resource "aws_route53_record" "ws_gateway_https" {
+  provider = aws.us_east_1
+  zone_id  = data.aws_route53_zone.main.zone_id
+  name     = "wss.${data.aws_route53_zone.main.name}"
+  type     = "HTTPS"
+  ttl      = 300
+  records  = ["1 . alpn=\"h2\""]
 }

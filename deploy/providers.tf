@@ -68,7 +68,3 @@ data "aws_route53_zone" "main" {
   provider = aws.us_east_1
   name     = "email.rhosys.cloud"
 }
-
-locals {
-  mail_domain = "email.rhosys.cloud"
-}

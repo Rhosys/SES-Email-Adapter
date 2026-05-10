@@ -30,7 +30,7 @@ output "dynamodb_processing_table" {
 }
 
 output "email_bucket_name" {
-  value = aws_s3_bucket.emails.name
+  value = aws_s3_bucket.emails.bucket
 }
 
 output "signals_queue_url" {
@@ -59,6 +59,6 @@ output "feedback_queue_url" {
 }
 
 output "ws_api_endpoint" {
-  description = "WebSocket API endpoint — clients connect to wss://<id>.execute-api.<region>.amazonaws.com/production"
-  value       = "wss://${aws_apigatewayv2_api.ws.id}.execute-api.${data.aws_region.current.name}.amazonaws.com/${aws_apigatewayv2_stage.ws.name}"
+  description = "WebSocket API endpoint — clients connect to wss://wss.email.rhosys.cloud"
+  value       = "wss://wss.${data.aws_route53_zone.main.name}"
 }
