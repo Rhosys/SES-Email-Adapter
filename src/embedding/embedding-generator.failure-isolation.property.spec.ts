@@ -3,7 +3,7 @@
 // **Validates: Requirements 3.5**
 // ---------------------------------------------------------------------------
 
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi, type MockInstance } from "vitest";
 import fc from "fast-check";
 import { mockClient } from "aws-sdk-client-mock";
 import { BedrockRuntimeClient, InvokeModelCommand } from "@aws-sdk/client-bedrock-runtime";
@@ -69,7 +69,7 @@ const arbClusterRegistry = fc
  */
 describe("Property 7: Bedrock failure for one model preserves all other writes (Property Test)", () => {
   const bedrockMock = mockClient(BedrockRuntimeClient);
-  let stdoutSpy: ReturnType<typeof vi.spyOn>;
+  let stdoutSpy: MockInstance;
 
   beforeEach(() => {
     bedrockMock.reset();

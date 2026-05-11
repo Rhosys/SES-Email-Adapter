@@ -7,7 +7,7 @@
 - [x] Wire infra (see `infra/`)
 - [x] Set up CI (lint, typecheck, test) for backend, site, and extension independently — `.github/workflows/backend.yml`, `site.yml`, `extension.yml`
 - [x] **API modernization** — collection envelopes, error shapes, PUT→PATCH, consistent create/update responses. See "API Breaking Changes" section below.
-- [ ] Review AWS Bedrock comparison with Aurora pg vectors. I think we are looking for RAG, the question is should we store that data in aurora or is there an optimized bedrock version available for us here?
+- [x] Review AWS Bedrock comparison with Aurora pg vectors — decided: keep self-managed Aurora pgvector. Bedrock Knowledge Bases doesn't fit real-time per-signal upsert workloads. See `docs/adr/001-self-managed-aurora-pgvector-over-bedrock-knowledge-bases.md`.
 - [x] Use Zod to validate incoming requests — all POST/PATCH handlers now use `zParse()` with typed schemas in `src/api/requests.ts`
 - [x] Dynamically generate the OpenAPI Specification from the types. Build it on deployment using an npm run script, and serve it on the `/` endpoint — `scripts/openapi.ts`, `npm run openapi`, `GET /openapi.json`
 - [x] Remove or redesign `GET /search` — merged into `GET /arcs?q=`; `GET /search` endpoint removed
@@ -17,7 +17,10 @@
 - [x] Create WebSocket APIGW API. WebSocket API GW (`infra/api-gateway.tf`); Lambda handles all event types (EventBridge → SQS → WsAuthorizer → WebSocket → HTTP); connections stored in ACCOUNTS_TABLE at `CONN#<id>` SK; notifier fans out via `WS_API_ENDPOINT`; Web Push removed in favour of WebSocket
 - [ ] We should also set up the S3 bucket as an origin and connect it to the  CloudFront distribution, so that the front end can deploy there. Which means we need the necessary website related bucket, policy, stuff.
 - [ ] And all buckets should use the new format from AWS to ensure local regional buckets for the account, so that we can be sure these buckets haven't already been claimed. ALL BUCKETS.
-- [ ] For the dkim_private_key, I passing it into open tofu is just not really secure, right? Discuss with me alternatives to make that happen.
+- [x] For the dkim_private_key — resolved: KMS-encrypted ciphertext committed in CI, decrypted at plan time via `kms:Decrypt`. No plaintext in state or variables.
+- [x] **Rename domain verify endpoint** — `POST /domains/:id/verify` → `PATCH /accounts/:accountId/domains/:domainId` (re-check is a state refresh, returns full updated domain).
+- [ ] **Review DynamoDB storage architecture** — audit all handlers for redundant reads/writes. Ensure single-call access patterns where possible. Check that the processor never re-fetches data it already holds. Verify batch operations are used where multiple items are needed.
+- [ ] **DMARC policy → p=reject** — done in code, pending next deploy.
 
 
 ---

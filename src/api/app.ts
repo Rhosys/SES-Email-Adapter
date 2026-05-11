@@ -7,6 +7,8 @@ import type { AuditEvent } from "../database/audit-database.js";
 import type { Arc, Signal, View, Label, Rule, Domain, DnsRecord, Account, Page, PageParams, ArcStatus, Workflow, WorkflowData, Alias, AliasSender, SenderMode, SenderFilterMode, VerifiedForwardingAddress, Pagination, EmailTemplate } from "../types/index.js";
 import { deriveGroupingKey } from "../processor/processor.js";
 import { zParse } from "./validate.js";
+import { authorizationGuard } from "./authorization-guard.js";
+import { createAuthorize } from "./authorization-middleware.js";
 import {
   UpdateArcRequest, CreateArcFromSignalRequest, UpdateSignalRequest, UpdateSignalStatusRequest,
   CreateViewRequest, UpdateViewRequest,
@@ -167,7 +169,7 @@ interface AppDeps {
   verificationMailer?: VerificationMailer;
 }
 
-type AppEnv = { Variables: { auth: AuthContext } };
+type AppEnv = { Variables: { auth: AuthContext; authorizationVerified?: boolean } };
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -205,7 +207,7 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
     });
   }
 
-  // JWT verification
+  // JWT verification (authentication only — authorization is handled per-route)
   app.use("*", async (c, next) => {
     const header = c.req.header("Authorization");
     if (!header?.startsWith("Bearer ")) return err(c, 401, "Unauthorized");
@@ -217,18 +219,10 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
       return err(c, 401, "Unauthorized");
     }
 
-    // For /accounts/:accountId routes, extract accountId from URL and verify access
+    // Extract accountId from URL path for account-scoped routes
     const accountMatch = /^\/accounts\/([^/]+)/.exec(c.req.path);
     if (accountMatch) {
-      const accountId = accountMatch[1]!;
-      if (access) {
-        try {
-          await access.checkAccess(ctx.userId, accountId, "account:read");
-        } catch {
-          return err(c, 403, "Forbidden");
-        }
-      }
-      c.set("auth", { accountId, userId: ctx.userId });
+      c.set("auth", { accountId: accountMatch[1]!, userId: ctx.userId });
     } else {
       c.set("auth", ctx);
     }
@@ -236,11 +230,29 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
     await next();
   });
 
+  // Authorization guard — safety net for forgotten authorize() calls on account-scoped routes
+  app.use("/accounts/:accountId/*", authorizationGuard());
+
+  // Per-route authorization middleware factory
+  const authorize = access ? createAuthorize(access) : null;
+
+  // Helper that returns the authorize middleware or a no-op if access service is unavailable
+  function authz(permission: string, resourceUri: string | ((c: Context<AppEnv>) => string)): ReturnType<NonNullable<typeof authorize>> {
+    if (authorize) {
+      return authorize(permission, resourceUri as string | ((c: Context) => string));
+    }
+    // When no access service, mark as authorized (backward compat for tests without access)
+    return async (c, next) => {
+      c.set("authorizationVerified", true);
+      await next();
+    };
+  }
+
   // -------------------------------------------------------------------------
   // Arcs  —  /accounts/:accountId/arcs
   // -------------------------------------------------------------------------
 
-  app.get("/accounts/:accountId/arcs", async (c) => {
+  app.get("/accounts/:accountId/arcs", authz("arcs:read", c => `accounts/${c.req.param("accountId")}/arcs`), async (c) => {
     const { accountId } = c.get("auth");
     const query = c.req.query();
     const q = query["q"];
@@ -263,7 +275,7 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
     return c.json(page("arcs", result.items, result.nextCursor));
   });
 
-  app.get("/accounts/:accountId/arcs/:id", async (c) => {
+  app.get("/accounts/:accountId/arcs/:id", authz("arcs:read", c => `accounts/${c.req.param("accountId")}/arcs/${c.req.param("id")}`), async (c) => {
     const { accountId } = c.get("auth");
     const arc = await store.getArc(accountId, c.req.param("id"));
     if (!arc) return err(c, 404, "Arc not found", "ARC_NOT_FOUND");
@@ -271,7 +283,7 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
     return c.json(arc);
   });
 
-  app.patch("/accounts/:accountId/arcs/:id", async (c) => {
+  app.patch("/accounts/:accountId/arcs/:id", authz("arcs:write", c => `accounts/${c.req.param("accountId")}/arcs/${c.req.param("id")}`), async (c) => {
     const { accountId } = c.get("auth");
     const arc = await store.getArc(accountId, c.req.param("id"));
     if (!arc) return err(c, 404, "Arc not found", "ARC_NOT_FOUND");
@@ -281,7 +293,7 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
     return c.json(updated);
   });
 
-  app.post("/accounts/:accountId/arcs", async (c) => {
+  app.post("/accounts/:accountId/arcs", authz("arcs:write", c => `accounts/${c.req.param("accountId")}/arcs`), async (c) => {
     const { accountId } = c.get("auth");
     const body = await zParse(CreateArcFromSignalRequest, c.req.raw);
 
@@ -340,7 +352,7 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
   // Signals  —  /accounts/:accountId/arcs/:arcId/signals  &  /signals/:id
   // -------------------------------------------------------------------------
 
-  app.get("/accounts/:accountId/arcs/:arcId/signals", async (c) => {
+  app.get("/accounts/:accountId/arcs/:arcId/signals", authz("signals:read", c => `accounts/${c.req.param("accountId")}/arcs/${c.req.param("arcId")}/signals`), async (c) => {
     const { accountId } = c.get("auth");
     const arc = await store.getArc(accountId, c.req.param("arcId"));
     if (!arc) return err(c, 404, "Arc not found", "ARC_NOT_FOUND");
@@ -354,7 +366,7 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
     return c.json(page("signals", result.items, result.nextCursor));
   });
 
-  app.get("/accounts/:accountId/signals", async (c) => {
+  app.get("/accounts/:accountId/signals", authz("signals:read", c => `accounts/${c.req.param("accountId")}/signals`), async (c) => {
     const { accountId } = c.get("auth");
     const query = c.req.query();
     const status = query["status"];
@@ -373,7 +385,7 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
     return c.json(page("signals", items, result.nextCursor));
   });
 
-  app.post("/accounts/:accountId/signals/:id/quarantineResponse", async (c) => {
+  app.post("/accounts/:accountId/signals/:id/quarantineResponse", authz("signals:write", c => `accounts/${c.req.param("accountId")}/signals/${c.req.param("id")}`), async (c) => {
     const { accountId } = c.get("auth");
     const signal = await store.getSignal(accountId, c.req.param("id"));
     if (!signal) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
@@ -424,7 +436,7 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
     return c.json({ arc, signal: { ...signal, status: "active", arcId: arc.id } });
   });
 
-  app.get("/accounts/:accountId/signals/:id", async (c) => {
+  app.get("/accounts/:accountId/signals/:id", authz("signals:read", c => `accounts/${c.req.param("accountId")}/signals/${c.req.param("id")}`), async (c) => {
     const { accountId } = c.get("auth");
     const signal = await store.getSignal(accountId, c.req.param("id"));
     if (!signal) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
@@ -432,7 +444,7 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
     return c.json(signal);
   });
 
-  app.patch("/accounts/:accountId/signals/:id", async (c) => {
+  app.patch("/accounts/:accountId/signals/:id", authz("signals:write", c => `accounts/${c.req.param("accountId")}/signals/${c.req.param("id")}`), async (c) => {
     const { accountId } = c.get("auth");
     const signal = await store.getSignal(accountId, c.req.param("id"));
     if (!signal) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
@@ -443,7 +455,7 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
     return c.json(updated);
   });
 
-  app.post("/accounts/:accountId/signals/:id/send", async (c) => {
+  app.post("/accounts/:accountId/signals/:id/send", authz("signals:write", c => `accounts/${c.req.param("accountId")}/signals/${c.req.param("id")}`), async (c) => {
     const { accountId } = c.get("auth");
     const signal = await store.getSignal(accountId, c.req.param("id"));
     if (!signal) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
@@ -454,7 +466,7 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
     return c.json(sent);
   });
 
-  app.delete("/accounts/:accountId/signals/:id", async (c) => {
+  app.delete("/accounts/:accountId/signals/:id", authz("signals:write", c => `accounts/${c.req.param("accountId")}/signals/${c.req.param("id")}`), async (c) => {
     const { accountId } = c.get("auth");
     const signal = await store.getSignal(accountId, c.req.param("id"));
     if (!signal) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
@@ -468,20 +480,20 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
   // Views  —  /accounts/:accountId/views
   // -------------------------------------------------------------------------
 
-  app.get("/accounts/:accountId/views", async (c) => {
+  app.get("/accounts/:accountId/views", authz("views:read", c => `accounts/${c.req.param("accountId")}/views`), async (c) => {
     const { accountId } = c.get("auth");
     const views = await store.listViews(accountId);
     return c.json(page("views", views));
   });
 
-  app.post("/accounts/:accountId/views", async (c) => {
+  app.post("/accounts/:accountId/views", authz("views:write", c => `accounts/${c.req.param("accountId")}/views`), async (c) => {
     const { accountId } = c.get("auth");
     const body = await zParse(CreateViewRequest, c.req.raw);
     const view = await store.createView(accountId, body);
     return c.json(view, 201);
   });
 
-  app.patch("/accounts/:accountId/views/:id", async (c) => {
+  app.patch("/accounts/:accountId/views/:id", authz("views:write", c => `accounts/${c.req.param("accountId")}/views/${c.req.param("id")}`), async (c) => {
     const { accountId } = c.get("auth");
     const view = await store.getView(accountId, c.req.param("id"));
     if (!view) return err(c, 404, "View not found", "VIEW_NOT_FOUND");
@@ -490,7 +502,7 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
     return c.json(updated);
   });
 
-  app.delete("/accounts/:accountId/views/:id", async (c) => {
+  app.delete("/accounts/:accountId/views/:id", authz("views:write", c => `accounts/${c.req.param("accountId")}/views/${c.req.param("id")}`), async (c) => {
     const { accountId } = c.get("auth");
     const view = await store.getView(accountId, c.req.param("id"));
     if (!view) return err(c, 404, "View not found", "VIEW_NOT_FOUND");
@@ -502,20 +514,20 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
   // Labels  —  /accounts/:accountId/labels
   // -------------------------------------------------------------------------
 
-  app.get("/accounts/:accountId/labels", async (c) => {
+  app.get("/accounts/:accountId/labels", authz("labels:read", c => `accounts/${c.req.param("accountId")}/labels`), async (c) => {
     const { accountId } = c.get("auth");
     const labels = await store.listLabels(accountId);
     return c.json(page("labels", labels));
   });
 
-  app.post("/accounts/:accountId/labels", async (c) => {
+  app.post("/accounts/:accountId/labels", authz("labels:write", c => `accounts/${c.req.param("accountId")}/labels`), async (c) => {
     const { accountId } = c.get("auth");
     const body = await zParse(CreateLabelRequest, c.req.raw);
     const label = await store.createLabel(accountId, body);
     return c.json(label, 201);
   });
 
-  app.patch("/accounts/:accountId/labels/:id", async (c) => {
+  app.patch("/accounts/:accountId/labels/:id", authz("labels:write", c => `accounts/${c.req.param("accountId")}/labels/${c.req.param("id")}`), async (c) => {
     const { accountId } = c.get("auth");
     const labels = await store.listLabels(accountId);
     const label = labels.find((l) => l.id === c.req.param("id"));
@@ -525,7 +537,7 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
     return c.json(updated);
   });
 
-  app.delete("/accounts/:accountId/labels/:id", async (c) => {
+  app.delete("/accounts/:accountId/labels/:id", authz("labels:write", c => `accounts/${c.req.param("accountId")}/labels/${c.req.param("id")}`), async (c) => {
     const { accountId } = c.get("auth");
     const labels = await store.listLabels(accountId);
     const label = labels.find((l) => l.id === c.req.param("id"));
@@ -538,13 +550,13 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
   // Rules  —  /accounts/:accountId/rules
   // -------------------------------------------------------------------------
 
-  app.get("/accounts/:accountId/rules", async (c) => {
+  app.get("/accounts/:accountId/rules", authz("rules:read", c => `accounts/${c.req.param("accountId")}/rules`), async (c) => {
     const { accountId } = c.get("auth");
     const rules = await store.listRules(accountId);
     return c.json(page("rules", rules));
   });
 
-  app.post("/accounts/:accountId/rules", async (c) => {
+  app.post("/accounts/:accountId/rules", authz("rules:write", c => `accounts/${c.req.param("accountId")}/rules`), async (c) => {
     const { accountId } = c.get("auth");
     const body = await zParse(CreateRuleRequest, c.req.raw);
     const forwardError = await validateForwardTargets(accountId, body.actions as Rule["actions"], store);
@@ -553,7 +565,7 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
     return c.json(rule, 201);
   });
 
-  app.patch("/accounts/:accountId/rules/:id", async (c) => {
+  app.patch("/accounts/:accountId/rules/:id", authz("rules:write", c => `accounts/${c.req.param("accountId")}/rules/${c.req.param("id")}`), async (c) => {
     const { accountId } = c.get("auth");
     const rules = await store.listRules(accountId);
     const rule = rules.find((r) => r.id === c.req.param("id"));
@@ -567,7 +579,7 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
     return c.json(updated);
   });
 
-  app.delete("/accounts/:accountId/rules/:id", async (c) => {
+  app.delete("/accounts/:accountId/rules/:id", authz("rules:write", c => `accounts/${c.req.param("accountId")}/rules/${c.req.param("id")}`), async (c) => {
     const { accountId } = c.get("auth");
     const rules = await store.listRules(accountId);
     const rule = rules.find((r) => r.id === c.req.param("id"));
@@ -580,20 +592,20 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
   // Domains  —  /accounts/:accountId/domains
   // -------------------------------------------------------------------------
 
-  app.get("/accounts/:accountId/domains", async (c) => {
+  app.get("/accounts/:accountId/domains", authz("domains:read", c => `accounts/${c.req.param("accountId")}/domains`), async (c) => {
     const { accountId } = c.get("auth");
     const domains = await store.listDomains(accountId);
     return c.json(page("domains", domains));
   });
 
-  app.post("/accounts/:accountId/domains", async (c) => {
+  app.post("/accounts/:accountId/domains", authz("domains:write", c => `accounts/${c.req.param("accountId")}/domains`), async (c) => {
     const { accountId } = c.get("auth");
     const body = await zParse(CreateDomainRequest, c.req.raw);
     const domain = await store.createDomain(accountId, body.domain);
     return c.json(domain, 201);
   });
 
-  app.get("/accounts/:accountId/domains/:id", async (c) => {
+  app.get("/accounts/:accountId/domains/:id", authz("domains:read", c => `accounts/${c.req.param("accountId")}/domains/${c.req.param("id")}`), async (c) => {
     const { accountId } = c.get("auth");
     const domain = await store.getDomain(accountId, c.req.param("id"));
     if (!domain) return err(c, 404, "Domain not found", "DOMAIN_NOT_FOUND");
@@ -602,7 +614,7 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
     return c.json({ ...domain, records });
   });
 
-  app.get("/accounts/:accountId/domains/:id/records", async (c) => {
+  app.get("/accounts/:accountId/domains/:id/records", authz("domains:read", c => `accounts/${c.req.param("accountId")}/domains/${c.req.param("id")}`), async (c) => {
     const { accountId } = c.get("auth");
     const domain = await store.getDomain(accountId, c.req.param("id"));
     if (!domain) return err(c, 404, "Domain not found", "DOMAIN_NOT_FOUND");
@@ -610,7 +622,7 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
     return c.json(buildDnsRecords(domain));
   });
 
-  app.post("/accounts/:accountId/domains/:id/verify", async (c) => {
+  app.patch("/accounts/:accountId/domains/:id", authz("domains:write", c => `accounts/${c.req.param("accountId")}/domains/${c.req.param("id")}`), async (c) => {
     const { accountId } = c.get("auth");
     const domain = await store.getDomain(accountId, c.req.param("id"));
     if (!domain) return err(c, 404, "Domain not found", "DOMAIN_NOT_FOUND");
@@ -627,10 +639,11 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
       lastCheckedAt: now,
       ...(failingRecords.length === 0 ? { lastHealthyAt: now } : {}),
     });
-    return c.json(records);
+    const updated = await store.getDomain(accountId, domain.id);
+    return c.json(updated);
   });
 
-  app.delete("/accounts/:accountId/domains/:id", async (c) => {
+  app.delete("/accounts/:accountId/domains/:id", authz("domains:write", c => `accounts/${c.req.param("accountId")}/domains/${c.req.param("id")}`), async (c) => {
     const { accountId } = c.get("auth");
     const domain = await store.getDomain(accountId, c.req.param("id"));
     if (!domain) return err(c, 404, "Domain not found", "DOMAIN_NOT_FOUND");
@@ -643,14 +656,14 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
   // Account  —  /accounts/:accountId
   // -------------------------------------------------------------------------
 
-  app.get("/accounts/:accountId", async (c) => {
+  app.get("/accounts/:accountId", authz("accounts:read", c => `accounts/${c.req.param("accountId")}`), async (c) => {
     const { accountId } = c.get("auth");
     const account = await store.getAccount(accountId);
     if (!account) return err(c, 404, "Account not found", "ACCOUNT_NOT_FOUND");
     return c.json(account);
   });
 
-  app.patch("/accounts/:accountId", async (c) => {
+  app.patch("/accounts/:accountId", authz("accounts:write", c => `accounts/${c.req.param("accountId")}`), async (c) => {
     const { accountId } = c.get("auth");
     const body = await zParse(UpdateAccountRequest, c.req.raw);
     const updated = await store.updateAccount(accountId, body as Partial<Pick<Account, "name" | "deletionRetentionDays" | "notifications" | "filtering">>);
@@ -661,14 +674,14 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
   // Account users  —  /accounts/:accountId/users
   // -------------------------------------------------------------------------
 
-  app.get("/accounts/:accountId/users", async (c) => {
+  app.get("/accounts/:accountId/users", authz("users:read", c => `accounts/${c.req.param("accountId")}/users`), async (c) => {
     if (!access) return err(c, 501, "Not implemented");
     const { accountId } = c.get("auth");
     const users = await access.listUsers(accountId);
     return c.json(page("users", users));
   });
 
-  app.post("/accounts/:accountId/users", async (c) => {
+  app.post("/accounts/:accountId/users", authz("users:write", c => `accounts/${c.req.param("accountId")}/users`), async (c) => {
     if (!access) return err(c, 501, "Not implemented");
     const { accountId } = c.get("auth");
     const body = await zParse(InviteUserRequest, c.req.raw);
@@ -676,7 +689,7 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
     return c.json({ userId: body.userId, role: body.role }, 201);
   });
 
-  app.patch("/accounts/:accountId/users/:userId", async (c) => {
+  app.patch("/accounts/:accountId/users/:userId", authz("users:write", c => `accounts/${c.req.param("accountId")}/users/${c.req.param("userId")}`), async (c) => {
     if (!access) return err(c, 501, "Not implemented");
     const { accountId } = c.get("auth");
     const body = await zParse(UpdateUserRequest, c.req.raw);
@@ -684,7 +697,7 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
     return c.json({ userId: c.req.param("userId"), role: body.role });
   });
 
-  app.delete("/accounts/:accountId/users/:userId", async (c) => {
+  app.delete("/accounts/:accountId/users/:userId", authz("users:write", c => `accounts/${c.req.param("accountId")}/users/${c.req.param("userId")}`), async (c) => {
     if (!access) return err(c, 501, "Not implemented");
     const { accountId } = c.get("auth");
     await access.removeUser(accountId, c.req.param("userId"));
@@ -695,7 +708,7 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
   // Aliases  —  /accounts/:accountId/aliases
   // -------------------------------------------------------------------------
 
-  app.get("/accounts/:accountId/aliases", async (c) => {
+  app.get("/accounts/:accountId/aliases", authz("aliases:read", c => `accounts/${c.req.param("accountId")}/aliases`), async (c) => {
     const { accountId } = c.get("auth");
     const domain = c.req.query("domain");
     let aliases = await store.listAliases(accountId);
@@ -703,7 +716,7 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
     return c.json(page("aliases", aliases));
   });
 
-  app.get("/accounts/:accountId/aliases/:address", async (c) => {
+  app.get("/accounts/:accountId/aliases/:address", authz("aliases:read", c => `accounts/${c.req.param("accountId")}/aliases/${c.req.param("address")}`), async (c) => {
     const { accountId } = c.get("auth");
     const address = decodeURIComponent(c.req.param("address"));
     const alias = await store.getAlias(accountId, address);
@@ -711,7 +724,7 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
     return c.json(alias);
   });
 
-  app.post("/accounts/:accountId/aliases", async (c) => {
+  app.post("/accounts/:accountId/aliases", authz("aliases:write", c => `accounts/${c.req.param("accountId")}/aliases`), async (c) => {
     const { accountId } = c.get("auth");
     const body = await zParse(CreateAliasRequest, c.req.raw);
     const existing = await store.getAlias(accountId, body.address);
@@ -729,7 +742,7 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
     return c.json(alias, 201);
   });
 
-  app.patch("/accounts/:accountId/aliases/:address", async (c) => {
+  app.patch("/accounts/:accountId/aliases/:address", authz("aliases:write", c => `accounts/${c.req.param("accountId")}/aliases/${c.req.param("address")}`), async (c) => {
     const { accountId } = c.get("auth");
     const address = decodeURIComponent(c.req.param("address"));
     const body = await zParse(UpdateAliasRequest, c.req.raw);
@@ -752,7 +765,7 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
     return c.json(updated);
   });
 
-  app.delete("/accounts/:accountId/aliases/:address", async (c) => {
+  app.delete("/accounts/:accountId/aliases/:address", authz("aliases:write", c => `accounts/${c.req.param("accountId")}/aliases/${c.req.param("address")}`), async (c) => {
     const { accountId } = c.get("auth");
     const address = decodeURIComponent(c.req.param("address"));
     await store.deleteAlias(accountId, address);
@@ -763,14 +776,14 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
   // Alias Senders  —  /accounts/:accountId/aliases/:address/senders
   // -------------------------------------------------------------------------
 
-  app.get("/accounts/:accountId/aliases/:address/senders", async (c) => {
+  app.get("/accounts/:accountId/aliases/:address/senders", authz("aliases:read", c => `accounts/${c.req.param("accountId")}/aliases/${c.req.param("address")}/senders`), async (c) => {
     const { accountId } = c.get("auth");
     const address = decodeURIComponent(c.req.param("address"));
     const senders = await store.listSenders(accountId, address);
     return c.json({ senders });
   });
 
-  app.post("/accounts/:accountId/aliases/:address/senders", async (c) => {
+  app.post("/accounts/:accountId/aliases/:address/senders", authz("aliases:write", c => `accounts/${c.req.param("accountId")}/aliases/${c.req.param("address")}/senders`), async (c) => {
     const { accountId } = c.get("auth");
     const address = decodeURIComponent(c.req.param("address"));
     const body = await zParse(CreateSenderRequest, c.req.raw);
@@ -778,7 +791,7 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
     return new Response(null, { status: 201 });
   });
 
-  app.delete("/accounts/:accountId/aliases/:address/senders/:domain", async (c) => {
+  app.delete("/accounts/:accountId/aliases/:address/senders/:domain", authz("aliases:write", c => `accounts/${c.req.param("accountId")}/aliases/${c.req.param("address")}/senders/${c.req.param("domain")}`), async (c) => {
     const { accountId } = c.get("auth");
     const address = decodeURIComponent(c.req.param("address"));
     const domain = decodeURIComponent(c.req.param("domain"));
@@ -790,13 +803,13 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
   // Email Templates  —  /accounts/:accountId/templates
   // -------------------------------------------------------------------------
 
-  app.get("/accounts/:accountId/templates", async (c) => {
+  app.get("/accounts/:accountId/templates", authz("templates:read", c => `accounts/${c.req.param("accountId")}/templates`), async (c) => {
     const { accountId } = c.get("auth");
     const templates = await store.listTemplates(accountId);
     return c.json({ templates });
   });
 
-  app.post("/accounts/:accountId/templates", async (c) => {
+  app.post("/accounts/:accountId/templates", authz("templates:write", c => `accounts/${c.req.param("accountId")}/templates`), async (c) => {
     const { accountId } = c.get("auth");
     const body = await zParse(CreateTemplateRequest, c.req.raw);
     const now = new Date().toISOString();
@@ -807,7 +820,7 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
     return c.json(template, 201);
   });
 
-  app.patch("/accounts/:accountId/templates/:id", async (c) => {
+  app.patch("/accounts/:accountId/templates/:id", authz("templates:write", c => `accounts/${c.req.param("accountId")}/templates/${c.req.param("id")}`), async (c) => {
     const { accountId } = c.get("auth");
     const body = await zParse(UpdateTemplateRequest, c.req.raw);
     const existing = await store.getTemplate(accountId, c.req.param("id"));
@@ -816,7 +829,7 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
     return c.json(updated);
   });
 
-  app.delete("/accounts/:accountId/templates/:id", async (c) => {
+  app.delete("/accounts/:accountId/templates/:id", authz("templates:write", c => `accounts/${c.req.param("accountId")}/templates/${c.req.param("id")}`), async (c) => {
     const { accountId } = c.get("auth");
     const existing = await store.getTemplate(accountId, c.req.param("id"));
     if (!existing) return err(c, 404, "Template not found", "TEMPLATE_NOT_FOUND");
@@ -829,13 +842,13 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
   // Verified forwarding addresses  —  /accounts/:accountId/forwarding-addresses
   // -------------------------------------------------------------------------
 
-  app.get("/accounts/:accountId/forwarding-addresses", async (c) => {
+  app.get("/accounts/:accountId/forwarding-addresses", authz("forwarding-addresses:read", c => `accounts/${c.req.param("accountId")}/forwarding-addresses`), async (c) => {
     const { accountId } = c.get("auth");
     const addresses = await store.listVerifiedForwardingAddresses(accountId);
     return c.json(page("forwardingAddresses", addresses));
   });
 
-  app.post("/accounts/:accountId/forwarding-addresses", async (c) => {
+  app.post("/accounts/:accountId/forwarding-addresses", authz("forwarding-addresses:write", c => `accounts/${c.req.param("accountId")}/forwarding-addresses`), async (c) => {
     const { accountId } = c.get("auth");
     const body = await zParse(CreateForwardingAddressRequest, c.req.raw);
 
@@ -863,7 +876,7 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
     return c.json(addr, 201);
   });
 
-  app.post("/accounts/:accountId/forwarding-addresses/:address/verify", async (c) => {
+  app.post("/accounts/:accountId/forwarding-addresses/:address/verify", authz("forwarding-addresses:write", c => `accounts/${c.req.param("accountId")}/forwarding-addresses/${c.req.param("address")}`), async (c) => {
     const { accountId } = c.get("auth");
     const address = decodeURIComponent(c.req.param("address"));
     const body = await zParse(VerifyForwardingAddressRequest, c.req.raw);
@@ -878,7 +891,7 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
     return c.json(verified);
   });
 
-  app.delete("/accounts/:accountId/forwarding-addresses/:address", async (c) => {
+  app.delete("/accounts/:accountId/forwarding-addresses/:address", authz("forwarding-addresses:write", c => `accounts/${c.req.param("accountId")}/forwarding-addresses/${c.req.param("address")}`), async (c) => {
     const { accountId } = c.get("auth");
     const address = decodeURIComponent(c.req.param("address"));
     await store.deleteVerifiedForwardingAddress(accountId, address);
@@ -889,7 +902,7 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
   // Audit  —  /accounts/:accountId/audit
   // -------------------------------------------------------------------------
 
-  app.get("/accounts/:accountId/audit", async (c) => {
+  app.get("/accounts/:accountId/audit", authz("audit:read", c => `accounts/${c.req.param("accountId")}/audit`), async (c) => {
     const { accountId } = c.get("auth");
     const cursor = c.req.query("cursor");
     const rawLimit = c.req.query("limit");

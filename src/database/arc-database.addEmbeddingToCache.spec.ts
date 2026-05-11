@@ -44,7 +44,7 @@ describe("ArcDatabase.addEmbeddingToCache", () => {
   it("is idempotent — calling twice with the same args sends the same command", async () => {
     ddbMock.on(UpdateCommand).resolves({});
 
-    const args = ["acct-1", "SES#id-1", "model-x", [1, 2, 3]] as const;
+    const args: [string, string, string, number[]] = ["acct-1", "SES#id-1", "model-x", [1, 2, 3]];
 
     await db.addEmbeddingToCache(...args);
     await db.addEmbeddingToCache(...args);

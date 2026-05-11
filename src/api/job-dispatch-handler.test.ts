@@ -3,7 +3,7 @@
 // ---------------------------------------------------------------------------
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import type { APIGatewayProxyEventV2 } from "aws-lambda";
+import type { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2 } from "aws-lambda";
 import { handleJobDispatch, type JobDispatcher } from "./job-dispatch-handler.js";
 
 // ---------------------------------------------------------------------------
@@ -53,6 +53,11 @@ function makeEvent(overrides: {
   } as unknown as APIGatewayProxyEventV2;
 }
 
+/** Narrows APIGatewayProxyResultV2 to the structured variant (always returned by handleJobDispatch). */
+async function dispatch(event: APIGatewayProxyEventV2, d: JobDispatcher): Promise<APIGatewayProxyStructuredResultV2> {
+  return await handleJobDispatch(event, d) as APIGatewayProxyStructuredResultV2;
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -71,7 +76,7 @@ describe("handleJobDispatch", () => {
   describe("POST /reindex", () => {
     it("returns 400 when body is not valid JSON", async () => {
       const event = makeEvent({ method: "POST", path: "/reindex", body: "not json" });
-      const result = await handleJobDispatch(event, dispatcher);
+      const result = await dispatch(event, dispatcher);
 
       expect(result.statusCode).toBe(400);
       expect(JSON.parse(result.body as string).title).toContain("Invalid JSON");
@@ -79,7 +84,7 @@ describe("handleJobDispatch", () => {
 
     it("returns 400 when targetClusterId is missing", async () => {
       const event = makeEvent({ method: "POST", path: "/reindex", body: JSON.stringify({}) });
-      const result = await handleJobDispatch(event, dispatcher);
+      const result = await dispatch(event, dispatcher);
 
       expect(result.statusCode).toBe(400);
       expect(JSON.parse(result.body as string).title).toContain("targetClusterId");
@@ -87,7 +92,7 @@ describe("handleJobDispatch", () => {
 
     it("returns 400 when targetClusterId is not a string", async () => {
       const event = makeEvent({ method: "POST", path: "/reindex", body: JSON.stringify({ targetClusterId: 123 }) });
-      const result = await handleJobDispatch(event, dispatcher);
+      const result = await dispatch(event, dispatcher);
 
       expect(result.statusCode).toBe(400);
       expect(JSON.parse(result.body as string).title).toContain("targetClusterId");
@@ -95,7 +100,7 @@ describe("handleJobDispatch", () => {
 
     it("returns 400 when targetClusterId is empty string", async () => {
       const event = makeEvent({ method: "POST", path: "/reindex", body: JSON.stringify({ targetClusterId: "" }) });
-      const result = await handleJobDispatch(event, dispatcher);
+      const result = await dispatch(event, dispatcher);
 
       expect(result.statusCode).toBe(400);
       expect(JSON.parse(result.body as string).title).toContain("targetClusterId");
@@ -107,7 +112,7 @@ describe("handleJobDispatch", () => {
         path: "/reindex",
         body: JSON.stringify({ targetClusterId: "cluster-1", segmentCount: 0 }),
       });
-      const result = await handleJobDispatch(event, dispatcher);
+      const result = await dispatch(event, dispatcher);
 
       expect(result.statusCode).toBe(400);
       expect(JSON.parse(result.body as string).title).toContain("between 1 and 256");
@@ -119,7 +124,7 @@ describe("handleJobDispatch", () => {
         path: "/reindex",
         body: JSON.stringify({ targetClusterId: "cluster-1", segmentCount: 257 }),
       });
-      const result = await handleJobDispatch(event, dispatcher);
+      const result = await dispatch(event, dispatcher);
 
       expect(result.statusCode).toBe(400);
       expect(JSON.parse(result.body as string).title).toContain("between 1 and 256");
@@ -131,7 +136,7 @@ describe("handleJobDispatch", () => {
         path: "/reindex",
         body: JSON.stringify({ targetClusterId: "cluster-1", segmentCount: 3.5 }),
       });
-      const result = await handleJobDispatch(event, dispatcher);
+      const result = await dispatch(event, dispatcher);
 
       expect(result.statusCode).toBe(400);
       expect(JSON.parse(result.body as string).title).toContain("integer");
@@ -139,7 +144,7 @@ describe("handleJobDispatch", () => {
 
     it("returns 400 when body is an array", async () => {
       const event = makeEvent({ method: "POST", path: "/reindex", body: JSON.stringify([1, 2, 3]) });
-      const result = await handleJobDispatch(event, dispatcher);
+      const result = await dispatch(event, dispatcher);
 
       expect(result.statusCode).toBe(400);
       expect(JSON.parse(result.body as string).title).toContain("JSON object");
@@ -164,7 +169,7 @@ describe("handleJobDispatch", () => {
         path: "/reindex",
         body: JSON.stringify({ targetClusterId: "aurora-prod-titan-v2" }),
       });
-      const result = await handleJobDispatch(event, dispatcher);
+      const result = await dispatch(event, dispatcher);
 
       expect(result.statusCode).toBe(202);
       expect(JSON.parse(result.body as string)).toEqual(job);
@@ -181,7 +186,7 @@ describe("handleJobDispatch", () => {
         path: "/reindex",
         body: JSON.stringify({ targetClusterId: "aurora-prod-titan-v2", segmentCount: 16 }),
       });
-      await handleJobDispatch(event, dispatcher);
+      await dispatch(event, dispatcher);
 
       expect(dispatcher.dispatch).toHaveBeenCalledWith("aurora-prod-titan-v2", 16);
     });
@@ -203,7 +208,7 @@ describe("handleJobDispatch", () => {
         body: Buffer.from(bodyStr).toString("base64"),
         isBase64Encoded: true,
       });
-      const result = await handleJobDispatch(event, dispatcher);
+      const result = await dispatch(event, dispatcher);
 
       expect(result.statusCode).toBe(202);
       expect(dispatcher.dispatch).toHaveBeenCalledWith("aurora-prod-titan-v2", undefined);
@@ -221,7 +226,7 @@ describe("handleJobDispatch", () => {
         path: "/reindex",
         body: JSON.stringify({ targetClusterId: "unknown-cluster" }),
       });
-      const result = await handleJobDispatch(event, dispatcher);
+      const result = await dispatch(event, dispatcher);
 
       expect(result.statusCode).toBe(404);
       expect(JSON.parse(result.body as string).title).toContain("not found");
@@ -239,7 +244,7 @@ describe("handleJobDispatch", () => {
         path: "/reindex",
         body: JSON.stringify({ targetClusterId: "aurora-prod-titan-v2" }),
       });
-      const result = await handleJobDispatch(event, dispatcher);
+      const result = await dispatch(event, dispatcher);
 
       expect(result.statusCode).toBe(500);
     });
@@ -268,7 +273,7 @@ describe("handleJobDispatch", () => {
         path: "/reindex/job-456",
         pathParams: { jobId: "job-456" },
       });
-      const result = await handleJobDispatch(event, dispatcher);
+      const result = await dispatch(event, dispatcher);
 
       expect(result.statusCode).toBe(200);
       expect(JSON.parse(result.body as string)).toEqual(report);
@@ -282,7 +287,7 @@ describe("handleJobDispatch", () => {
       });
 
       const event = makeEvent({ method: "GET", path: "/reindex/path-job" });
-      await handleJobDispatch(event, dispatcher);
+      await dispatch(event, dispatcher);
 
       expect(dispatcher.getReport).toHaveBeenCalledWith("path-job");
     });
@@ -295,7 +300,7 @@ describe("handleJobDispatch", () => {
         path: "/reindex/missing-job",
         pathParams: { jobId: "missing-job" },
       });
-      const result = await handleJobDispatch(event, dispatcher);
+      const result = await dispatch(event, dispatcher);
 
       expect(result.statusCode).toBe(404);
       expect(JSON.parse(result.body as string).title).toContain("not found");
@@ -309,7 +314,7 @@ describe("handleJobDispatch", () => {
         path: "/reindex/job-789",
         pathParams: { jobId: "job-789" },
       });
-      const result = await handleJobDispatch(event, dispatcher);
+      const result = await dispatch(event, dispatcher);
 
       expect(result.statusCode).toBe(500);
     });
@@ -322,21 +327,21 @@ describe("handleJobDispatch", () => {
   describe("unknown routes", () => {
     it("returns 404 for unmatched paths", async () => {
       const event = makeEvent({ method: "GET", path: "/unknown" });
-      const result = await handleJobDispatch(event, dispatcher);
+      const result = await dispatch(event, dispatcher);
 
       expect(result.statusCode).toBe(404);
     });
 
     it("returns 404 for DELETE /reindex", async () => {
       const event = makeEvent({ method: "DELETE", path: "/reindex" });
-      const result = await handleJobDispatch(event, dispatcher);
+      const result = await dispatch(event, dispatcher);
 
       expect(result.statusCode).toBe(404);
     });
 
     it("returns 404 for PUT /reindex", async () => {
       const event = makeEvent({ method: "PUT", path: "/reindex" });
-      const result = await handleJobDispatch(event, dispatcher);
+      const result = await dispatch(event, dispatcher);
 
       expect(result.statusCode).toBe(404);
     });

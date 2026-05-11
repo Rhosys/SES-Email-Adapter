@@ -1702,7 +1702,8 @@ describe("SignalProcessor", () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(testClassification);
 
       // Should not throw — testReplier is optional
-      await expect(processorWithoutReplier.process(makeSqsEvent([{}]))).resolves.toBeUndefined();
+      const result = await processorWithoutReplier.process(makeSqsEvent([{}]));
+      expect(result.batchItemFailures).toEqual([]);
     });
 
     it("looks up domain by the domain part of the recipient address", async () => {

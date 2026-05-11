@@ -218,8 +218,8 @@ const arbMixedSignals = fc.record({
   // the S3 mock from returning success for "unrecoverable" signals
   const retrievableKeys = new Set(s.s3Retrievable.map((sig) => sig.item.s3Key));
   const unrecoverableKeys = s.unrecoverable
-    .filter((sig) => sig.item.s3Key)
-    .map((sig) => sig.item.s3Key);
+    .map((sig) => sig.item.s3Key)
+    .filter((key): key is string => !!key);
   return unrecoverableKeys.every((key) => !retrievableKeys.has(key));
 });
 

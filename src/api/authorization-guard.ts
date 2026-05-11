@@ -1,0 +1,53 @@
+import type { Context, MiddlewareHandler } from "hono";
+
+/**
+ * Global middleware that runs AFTER route handlers.
+ * For any route, verifies that the authorization middleware was executed
+ * (by checking the context flag). If not, returns 403.
+ *
+ * This is the safety net — if someone forgets to add authorize() to a route,
+ * the guard catches it at runtime.
+ *
+ * Explicit exceptions (always allowed without authorization):
+ * - GET /healthcheck — health check endpoint
+ * - OPTIONS * — CORS preflight requests
+ * - GET / — OpenAPI specification
+ */
+export function authorizationGuard(): MiddlewareHandler {
+  return async (c, next) => {
+    await next();
+
+    // Check if authorization was verified by the authorize() middleware
+    const authorizationVerified = c.get("authorizationVerified");
+
+    // If authorization was verified, allow the response to pass through
+    if (authorizationVerified) {
+      return;
+    }
+
+    // Check for explicit exceptions (routes that don't require authorization)
+    const method = c.req.method;
+    const path = c.req.path;
+
+    // Exception 1: GET /healthcheck
+    if (method === "GET" && path === "/healthcheck") {
+      return;
+    }
+
+    // Exception 2: OPTIONS * (all OPTIONS requests)
+    if (method === "OPTIONS") {
+      return;
+    }
+
+    // Exception 3: GET / (OpenAPI specification)
+    if (method === "GET" && path === "/") {
+      return;
+    }
+
+    // No authorization verified and not an exception — return 403
+    c.res = new Response(
+      JSON.stringify({ title: "Forbidden", errorCode: "AccessDenied" }),
+      { status: 403, headers: { "Content-Type": "application/json" } },
+    );
+  };
+}

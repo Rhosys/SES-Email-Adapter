@@ -346,7 +346,7 @@ describe("Property 6: Multi-cluster fanout writes vectors to every active target
           for (let i = 0; i < clusters.length; i++) {
             const cluster = clusters[i]!;
             const matchingCall = upsertCalls.find(
-              (call: Array<{ clusterId: string }>) => call[0].clusterId === cluster.clusterId,
+              (call: Array<{ clusterId: string }>) => call[0]?.clusterId === cluster.clusterId,
             );
             expect(matchingCall).toBeDefined();
 

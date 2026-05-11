@@ -79,20 +79,10 @@ resource "aws_s3_bucket_policy" "emails" {
 # SQS — signal processing queue
 # ---------------------------------------------------------------------------
 
-resource "aws_sqs_queue" "signals_dlq" {
-  name                      = "${var.service_name}-signals-dlq"
-  message_retention_seconds = 1209600 # 14 days
-}
-
 resource "aws_sqs_queue" "signals" {
   name                       = "${var.service_name}-signals"
-  visibility_timeout_seconds = 180   # 6x Lambda timeout (30s * 6)  # 6x Lambda timeout
-  message_retention_seconds  = 86400 # 1 day
-
-  redrive_policy = jsonencode({
-    deadLetterTargetArn = aws_sqs_queue.signals_dlq.arn
-    maxReceiveCount     = 3
-  })
+  visibility_timeout_seconds = 900    # match expected worker runtime
+  message_retention_seconds  = 1209600 # 14 days (maximum)
 }
 
 # SNS topic that SES notifies after storing to S3
@@ -127,13 +117,8 @@ resource "aws_sqs_queue_policy" "signals_sns" {
 
 resource "aws_sqs_queue" "feedback" {
   name                       = "${var.service_name}-feedback"
-  visibility_timeout_seconds = 180   # 6x Lambda timeout (30s * 6)
-  message_retention_seconds  = 86400 # 1 day
-
-  redrive_policy = jsonencode({
-    deadLetterTargetArn = aws_sqs_queue.signals_dlq.arn
-    maxReceiveCount     = 3
-  })
+  visibility_timeout_seconds = 900    # match expected worker runtime
+  message_retention_seconds  = 1209600 # 14 days (maximum)
 }
 
 resource "aws_sns_topic_subscription" "feedback_to_sqs" {

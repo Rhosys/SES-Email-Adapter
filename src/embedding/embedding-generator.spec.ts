@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, vi, type MockInstance } from "vitest";
 import { mockClient } from "aws-sdk-client-mock";
 import { BedrockRuntimeClient, InvokeModelCommand } from "@aws-sdk/client-bedrock-runtime";
 import { BedrockEmbeddingGenerator } from "./embedding-generator.js";
@@ -65,9 +65,12 @@ vi.mock("./cluster-registry.js", () => ({
 
 const bedrockMock = mockClient(BedrockRuntimeClient);
 
+/** Encode JSON as a mock Bedrock response body (cast to satisfy Uint8ArrayBlobAdapter type). */
+const mockBody = (data: unknown) => new TextEncoder().encode(JSON.stringify(data)) as never;
+
 describe("BedrockEmbeddingGenerator", () => {
   let generator: BedrockEmbeddingGenerator;
-  let stdoutSpy: ReturnType<typeof vi.spyOn>;
+  let stdoutSpy: MockInstance;
 
   beforeEach(() => {
     bedrockMock.reset();
@@ -81,9 +84,7 @@ describe("BedrockEmbeddingGenerator", () => {
         const body = JSON.parse(new TextDecoder().decode(input.body as Uint8Array));
         const dims = body.dimensions as number;
         return {
-          body: new TextEncoder().encode(JSON.stringify({
-            embedding: Array(dims).fill(0.01),
-          })),
+          body: mockBody({ embedding: Array(dims).fill(0.01) }),
         };
       });
 
@@ -104,7 +105,7 @@ describe("BedrockEmbeddingGenerator", () => {
 
     it("calls Bedrock with normalize=true and correct dimensions", async () => {
       bedrockMock.on(InvokeModelCommand).resolves({
-        body: new TextEncoder().encode(JSON.stringify({ embedding: [0.1, 0.2] })),
+        body: mockBody({ embedding: [0.1, 0.2] }),
       });
 
       await generator.generateForActiveClusters("hello");
@@ -123,7 +124,7 @@ describe("BedrockEmbeddingGenerator", () => {
 
     it("does not include inactive clusters", async () => {
       bedrockMock.on(InvokeModelCommand).resolves({
-        body: new TextEncoder().encode(JSON.stringify({ embedding: [0.1] })),
+        body: mockBody({ embedding: [0.1] }),
       });
 
       const results = await generator.generateForActiveClusters("text");
@@ -139,7 +140,7 @@ describe("BedrockEmbeddingGenerator", () => {
         callIndex++;
         if (callIndex === 1) throw new Error("Bedrock throttled");
         return {
-          body: new TextEncoder().encode(JSON.stringify({ embedding: [0.5, 0.6] })),
+          body: mockBody({ embedding: [0.5, 0.6] }),
         };
       });
 
@@ -173,7 +174,7 @@ describe("BedrockEmbeddingGenerator", () => {
 
     it("truncates input text to 8000 characters", async () => {
       bedrockMock.on(InvokeModelCommand).resolves({
-        body: new TextEncoder().encode(JSON.stringify({ embedding: [0.1] })),
+        body: mockBody({ embedding: [0.1] }),
       });
 
       const longText = "x".repeat(10000);
@@ -188,7 +189,7 @@ describe("BedrockEmbeddingGenerator", () => {
   describe("generateForModel", () => {
     it("generates an embedding for a specific model by ID", async () => {
       bedrockMock.on(InvokeModelCommand).resolves({
-        body: new TextEncoder().encode(JSON.stringify({ embedding: [0.1, 0.2, 0.3] })),
+        body: mockBody({ embedding: [0.1, 0.2, 0.3] }),
       });
 
       const result = await generator.generateForModel("embed text", "amazon.titan-embed-text-v2:0");
@@ -202,7 +203,7 @@ describe("BedrockEmbeddingGenerator", () => {
 
     it("resolves dimensions from CLUSTER_REGISTRY by modelId", async () => {
       bedrockMock.on(InvokeModelCommand).resolves({
-        body: new TextEncoder().encode(JSON.stringify({ embedding: [0.1] })),
+        body: mockBody({ embedding: [0.1] }),
       });
 
       await generator.generateForModel("text", "amazon.titan-embed-text-v3:0");
@@ -215,7 +216,7 @@ describe("BedrockEmbeddingGenerator", () => {
 
     it("calls Bedrock with normalize=true", async () => {
       bedrockMock.on(InvokeModelCommand).resolves({
-        body: new TextEncoder().encode(JSON.stringify({ embedding: [0.1] })),
+        body: mockBody({ embedding: [0.1] }),
       });
 
       await generator.generateForModel("text", "amazon.titan-embed-text-v2:0");
@@ -241,7 +242,7 @@ describe("BedrockEmbeddingGenerator", () => {
 
     it("can resolve inactive model IDs from the registry", async () => {
       bedrockMock.on(InvokeModelCommand).resolves({
-        body: new TextEncoder().encode(JSON.stringify({ embedding: [0.1] })),
+        body: mockBody({ embedding: [0.1] }),
       });
 
       // cluster-c is inactive but its model should still be resolvable

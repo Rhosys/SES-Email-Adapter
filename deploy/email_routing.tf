@@ -129,7 +129,7 @@ resource "aws_route53_record" "dmarc" {
   name     = "_dmarc.${data.aws_route53_zone.main.name}"
   type     = "TXT"
   ttl      = 300
-  records  = ["v=DMARC1; p=quarantine; rua=mailto:postmaster@${data.aws_route53_zone.main.name}"]
+  records  = ["v=DMARC1; p=reject; rua=mailto:postmaster@${data.aws_route53_zone.main.name}"]
 }
 
 # ---------------------------------------------------------------------------

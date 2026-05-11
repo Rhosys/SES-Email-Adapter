@@ -209,7 +209,7 @@ function extractReturnPathAddress(headerValue: string): string {
 
   // Strip angle brackets if present: "<addr>" → "addr"
   const match = headerValue.match(/^<(.+)>$/);
-  if (match) return match[1];
+  if (match?.[1]) return match[1];
 
   return headerValue;
 }
