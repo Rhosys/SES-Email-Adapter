@@ -31,7 +31,7 @@ resource "aws_security_group" "aurora" {
   for_each = local.cluster_registry
 
   name        = "${lower(var.service_name)}-aurora-${each.key}"
-  description = "Aurora ${each.key} — no inbound connections needed (accessed via Data API)"
+  description = "Aurora ${each.key} - no inbound connections needed (accessed via Data API)"
   vpc_id      = aws_vpc.main.id
 
   egress {

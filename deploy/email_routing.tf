@@ -83,16 +83,6 @@ resource "aws_route53_record" "ses_mx_host" {
   records  = ["inbound-smtp.${data.aws_region.current.id}.amazonaws.com"]
 }
 
-# Platform domain's own MX record — points to our branded hostname
-resource "aws_route53_record" "ses_mx" {
-  provider = aws.us_east_1
-  zone_id  = data.aws_route53_zone.main.zone_id
-  name     = data.aws_route53_zone.main.name
-  type     = "MX"
-  ttl      = 300
-  records  = ["10 mx.platform.${data.aws_route53_zone.main.name}"]
-}
-
 # ---------------------------------------------------------------------------
 # Bounce subdomain — SES custom MAIL FROM
 # SPF lives here; customers CNAME bounce.{their} → bounce.{ours}.
