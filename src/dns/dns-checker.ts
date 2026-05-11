@@ -2,23 +2,13 @@ import dns from "dns/promises";
 import type { DnsRecord, Domain } from "../types/index.js";
 
 const DKIM_SELECTOR = "mail";
-const MAIL_DOMAIN = process.env["MAIL_DOMAIN"] ?? "mail.ses-email-adapter.example.com";
-const SES_INBOUND_ENDPOINT = process.env["SES_INBOUND_ENDPOINT"] ?? "inbound-smtp.eu-west-1.amazonaws.com";
+const MAIL_DOMAIN = process.env["MAIL_DOMAIN"] ?? "platform.email.rhosys.cloud";
 
 async function resolveMx(name: string): Promise<string | undefined> {
   try {
     const records = await dns.resolveMx(name);
     const sorted = records.sort((a, b) => a.priority - b.priority);
     return sorted[0] ? `${sorted[0].priority} ${sorted[0].exchange}` : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-async function resolveTxt(name: string): Promise<string | undefined> {
-  try {
-    const records = await dns.resolveTxt(name);
-    return records.map((r) => r.join("")).find((r) => r.startsWith("v=spf1")) ?? records[0]?.join("") ?? undefined;
   } catch {
     return undefined;
   }
@@ -56,22 +46,22 @@ export async function checkDomain(domain: Domain): Promise<DnsRecord[]> {
   const spfName = `bounce.${d}`;
   const dmarcName = `_dmarc.${d}`;
 
-  const expectedMx = `10 ${SES_INBOUND_ENDPOINT}`;
-  const expectedDkim = `${DKIM_SELECTOR}.${MAIL_DOMAIN}._domainkey.amazonses.com`;
-  const expectedSpf = `v=spf1 include:amazonses.com ~all`;
+  const expectedMx = `10 mx.${MAIL_DOMAIN}`;
+  const expectedDkim = `${DKIM_SELECTOR}._domainkey.${MAIL_DOMAIN}`;
+  const expectedSpf = `bounce.${MAIL_DOMAIN}`;
   const expectedDmarc = `_dmarc.${MAIL_DOMAIN}`;
 
   const [mx, dkim, spf, dmarc] = await Promise.all([
     resolveMx(mxName),
     resolveCname(dkimName),
-    resolveTxt(spfName),
+    resolveCname(spfName),
     resolveCname(dmarcName),
   ]);
 
   return [
     toRecord(mxName,   "MX",    expectedMx,   mx),
     toRecord(dkimName, "CNAME", expectedDkim,  dkim),
-    toRecord(spfName,  "TXT",   expectedSpf,   spf),
+    toRecord(spfName,  "CNAME", expectedSpf,   spf),
     toRecord(dmarcName,"CNAME", expectedDmarc, dmarc),
   ];
 }

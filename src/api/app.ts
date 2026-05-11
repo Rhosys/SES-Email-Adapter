@@ -610,16 +610,8 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
     const domain = await store.getDomain(accountId, c.req.param("id"));
     if (!domain) return err(c, 404, "Domain not found", "DOMAIN_NOT_FOUND");
     if (domain.accountId !== accountId) return err(c, 403, "Forbidden");
-    const records = await checkDomain(domain);
+    const records = buildDnsRecords(domain);
     return c.json({ ...domain, records });
-  });
-
-  app.get("/accounts/:accountId/domains/:id/records", authz("domains:read", c => `accounts/${c.req.param("accountId")}/domains/${c.req.param("id")}`), async (c) => {
-    const { accountId } = c.get("auth");
-    const domain = await store.getDomain(accountId, c.req.param("id"));
-    if (!domain) return err(c, 404, "Domain not found", "DOMAIN_NOT_FOUND");
-    if (domain.accountId !== accountId) return err(c, 403, "Forbidden");
-    return c.json(buildDnsRecords(domain));
   });
 
   app.patch("/accounts/:accountId/domains/:id", authz("domains:write", c => `accounts/${c.req.param("accountId")}/domains/${c.req.param("id")}`), async (c) => {
@@ -640,7 +632,7 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
       ...(failingRecords.length === 0 ? { lastHealthyAt: now } : {}),
     });
     const updated = await store.getDomain(accountId, domain.id);
-    return c.json(updated);
+    return c.json({ ...updated, records });
   });
 
   app.delete("/accounts/:accountId/domains/:id", authz("domains:write", c => `accounts/${c.req.param("accountId")}/domains/${c.req.param("id")}`), async (c) => {
@@ -934,8 +926,7 @@ async function validateForwardTargets(
 }
 
 const DKIM_SELECTOR = "mail";
-const MAIL_DOMAIN = process.env["MAIL_DOMAIN"] ?? "mail.ses-email-adapter.example.com";
-const SES_INBOUND_ENDPOINT = process.env["SES_INBOUND_ENDPOINT"] ?? "inbound-smtp.eu-west-1.amazonaws.com";
+const MAIL_DOMAIN = process.env["MAIL_DOMAIN"] ?? "platform.email.rhosys.cloud";
 
 // Always returns all 4 DNS records for a domain regardless of setup tier.
 // The status field on each record reflects the last health check result.
@@ -958,19 +949,19 @@ function buildDnsRecords(domain: Domain): DnsRecord[] {
     {
       name: mxName,
       type: "MX",
-      value: `10 ${SES_INBOUND_ENDPOINT}`,
+      value: `10 mx.${MAIL_DOMAIN}`,
       status: recordStatus(mxName),
     },
     {
       name: dkimName,
       type: "CNAME",
-      value: `${DKIM_SELECTOR}.${MAIL_DOMAIN}._domainkey.amazonses.com`,
+      value: `${DKIM_SELECTOR}._domainkey.${MAIL_DOMAIN}`,
       status: recordStatus(dkimName),
     },
     {
       name: spfName,
-      type: "TXT",
-      value: `v=spf1 include:amazonses.com ~all`,
+      type: "CNAME",
+      value: `bounce.${MAIL_DOMAIN}`,
       status: recordStatus(spfName),
     },
     {

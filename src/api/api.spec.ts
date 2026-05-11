@@ -785,39 +785,39 @@ describe("API", () => {
     });
   });
 
-  describe("GET /accounts/:accountId/domains/:id/records", () => {
-    it("returns all DNS records for a Domain", async () => {
+  describe("GET /accounts/:accountId/domains/:id — DNS records", () => {
+    it("returns records array alongside domain data", async () => {
       vi.mocked(store.getDomain).mockResolvedValueOnce(makeDomain());
-      const res = await req(app, "GET", `${A}/domains/domain-001/records`);
+      const res = await req(app, "GET", `${A}/domains/domain-001`);
       expect(res.status).toBe(200);
-      const body = await res.json() as Array<{ type: string; name: string; value: string; status: string }>;
-      expect(Array.isArray(body)).toBe(true);
-      expect(body.length).toBe(4); // MX, DKIM, SPF, DMARC
-      expect(body[0]).toHaveProperty("type");
-      expect(body[0]).toHaveProperty("status");
+      const body = await res.json() as { records: Array<{ type: string; name: string; value: string; status: string }> };
+      expect(Array.isArray(body.records)).toBe(true);
+      expect(body.records.length).toBe(4); // MX, DKIM, SPF (CNAME), DMARC
+      expect(body.records[0]).toHaveProperty("type");
+      expect(body.records[0]).toHaveProperty("status");
     });
 
-    it("returns exactly 4 records with correct types: MX, CNAME, TXT, CNAME", async () => {
+    it("returns exactly 4 records with correct types: MX, CNAME, CNAME, CNAME", async () => {
       vi.mocked(store.getDomain).mockResolvedValueOnce(makeDomain());
-      const res = await req(app, "GET", `${A}/domains/domain-001/records`);
-      const body = await res.json() as Array<{ type: string; name: string; value: string; status: string }>;
-      expect(body.map((r) => r.type)).toEqual(["MX", "CNAME", "TXT", "CNAME"]);
+      const res = await req(app, "GET", `${A}/domains/domain-001`);
+      const body = await res.json() as { records: Array<{ type: string }> };
+      expect(body.records.map((r) => r.type)).toEqual(["MX", "CNAME", "CNAME", "CNAME"]);
     });
 
     it("returns status=pending for every record when domain has never been health-checked", async () => {
       vi.mocked(store.getDomain).mockResolvedValueOnce(makeDomain()); // no lastCheckedAt
-      const res = await req(app, "GET", `${A}/domains/domain-001/records`);
-      const body = await res.json() as Array<{ status: string }>;
-      expect(body.every((r) => r.status === "pending")).toBe(true);
+      const res = await req(app, "GET", `${A}/domains/domain-001`);
+      const body = await res.json() as { records: Array<{ status: string }> };
+      expect(body.records.every((r) => r.status === "pending")).toBe(true);
     });
 
     it("returns status=verified for all records after a clean health check", async () => {
       vi.mocked(store.getDomain).mockResolvedValueOnce(
         makeDomain({ lastCheckedAt: "2024-01-15T00:00:00Z", failingRecords: [] }),
       );
-      const res = await req(app, "GET", `${A}/domains/domain-001/records`);
-      const body = await res.json() as Array<{ status: string }>;
-      expect(body.every((r) => r.status === "verified")).toBe(true);
+      const res = await req(app, "GET", `${A}/domains/domain-001`);
+      const body = await res.json() as { records: Array<{ status: string }> };
+      expect(body.records.every((r) => r.status === "verified")).toBe(true);
     });
 
     it("shows failing status only for the records listed in failingRecords", async () => {
@@ -827,10 +827,10 @@ describe("API", () => {
           failingRecords: ["_dmarc.example.com"],
         }),
       );
-      const res = await req(app, "GET", `${A}/domains/domain-001/records`);
-      const body = await res.json() as Array<{ name: string; status: string }>;
-      const dmarc = body.find((r) => r.name === "_dmarc.example.com")!;
-      const others = body.filter((r) => r.name !== "_dmarc.example.com");
+      const res = await req(app, "GET", `${A}/domains/domain-001`);
+      const body = await res.json() as { records: Array<{ name: string; status: string }> };
+      const dmarc = body.records.find((r) => r.name === "_dmarc.example.com")!;
+      const others = body.records.filter((r) => r.name !== "_dmarc.example.com");
       expect(dmarc.status).toBe("failing");
       expect(others.every((r) => r.status === "verified")).toBe(true);
     });
@@ -839,24 +839,13 @@ describe("API", () => {
       vi.mocked(store.getDomain).mockResolvedValueOnce(
         makeDomain({ domain: "acme.io", lastCheckedAt: "2024-01-15T00:00:00Z" }),
       );
-      const res = await req(app, "GET", `${A}/domains/domain-001/records`);
-      const body = await res.json() as Array<{ name: string; type: string }>;
-      const names = body.map((r) => r.name);
+      const res = await req(app, "GET", `${A}/domains/domain-001`);
+      const body = await res.json() as { records: Array<{ name: string; type: string }> };
+      const names = body.records.map((r) => r.name);
       expect(names).toContain("acme.io");                        // MX
       expect(names).toContain("mail._domainkey.acme.io");        // DKIM CNAME
-      expect(names).toContain("bounce.acme.io");                 // SPF TXT
+      expect(names).toContain("bounce.acme.io");                 // SPF CNAME
       expect(names).toContain("_dmarc.acme.io");                 // DMARC CNAME
-    });
-
-    it("returns 404 for unknown Domain", async () => {
-      const res = await req(app, "GET", `${A}/domains/nonexistent/records`);
-      expect(res.status).toBe(404);
-    });
-
-    it("returns 403 when Domain belongs to a different account", async () => {
-      vi.mocked(store.getDomain).mockResolvedValueOnce(makeDomain({ accountId: "other" }));
-      const res = await req(app, "GET", `${A}/domains/domain-001/records`);
-      expect(res.status).toBe(403);
     });
   });
 
