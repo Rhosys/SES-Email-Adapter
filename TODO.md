@@ -1,28 +1,7 @@
 # TODO
 
-- [x] Review and complete `WORKFLOW_UX_SPEC.md` implementation — urgency system rules (SR-15–SR-24) encode conversation/crm/support urgency mappings; `baseUrgency` handles remaining workflows.
-- [x] **Urgency is a first-class field** — `Signal.urgency` and `Arc.urgency` are explicit fields; no `system:urgency:*` labels; label-to-urgency conversion rules (SR-08–SR-12) removed; `priorityCalculator` removed; urgency resolves as: set_urgency rule outcome ?? arc.urgency ?? "normal"; arc.urgency set on creation only, user-settable via API after that.
-- [x] **Classifier workflow names aligned** — classifier prompt rewritten to use the 15 consolidated workflow names matching TypeScript `Workflow` type (removed: invoice, order, financial, newsletter, promotions, social, personal, security, developer, subscription, government, notice).
-- [x] **Block phishing/status emails by default** — SR-05 blocks all `status` workflow emails; first-rule-wins for status-changing actions (`statusSet` flag in `deriveOutcome`).
-- [x] Wire infra (see `infra/`)
-- [x] Set up CI (lint, typecheck, test) for backend, site, and extension independently — `.github/workflows/backend.yml`, `site.yml`, `extension.yml`
-- [x] **API modernization** — collection envelopes, error shapes, PUT→PATCH, consistent create/update responses. See "API Breaking Changes" section below.
-- [x] Review AWS Bedrock comparison with Aurora pg vectors — decided: keep self-managed Aurora pgvector. Bedrock Knowledge Bases doesn't fit real-time per-signal upsert workloads. See `docs/adr/001-self-managed-aurora-pgvector-over-bedrock-knowledge-bases.md`.
-- [x] Use Zod to validate incoming requests — all POST/PATCH handlers now use `zParse()` with typed schemas in `src/api/requests.ts`
-- [x] Dynamically generate the OpenAPI Specification from the types. Build it on deployment using an npm run script, and serve it on the `/` endpoint — `scripts/openapi.ts`, `npm run openapi`, `GET /openapi.json`
-- [x] Remove or redesign `GET /search` — merged into `GET /arcs?q=`; `GET /search` endpoint removed
 - [ ] Digests? Does that even make sense? Basically once per month expose a digest of just list of things — the idea would be to reuse the same Arc.
-- [x] Rules support tags — key/value pairs stored on the rule for user annotation (e.g. team, category, notes). No functional effect on rule evaluation.
-- [x] Use quickjs-emscripten to support custom JS function execution as a rule type — `src/processor/rule-engine.ts`; conditions prefixed `js:` run in sandboxed QuickJS VM; JSONLogic still handles non-prefixed conditions
-- [x] Create WebSocket APIGW API. WebSocket API GW (`infra/api-gateway.tf`); Lambda handles all event types (EventBridge → SQS → WsAuthorizer → WebSocket → HTTP); connections stored in ACCOUNTS_TABLE at `CONN#<id>` SK; notifier fans out via `WS_API_ENDPOINT`; Web Push removed in favour of WebSocket
-- [x] We should also set up the S3 bucket as an origin and connect it to the  CloudFront distribution, so that the front end can deploy there. Which means we need the necessary website related bucket, policy, stuff.
-- [x] And all buckets should use the new format from AWS to ensure local regional buckets for the account, so that we can be sure these buckets haven't already been claimed. ALL BUCKETS.
-- [x] For the dkim_private_key — resolved: KMS-encrypted ciphertext committed in CI, decrypted at plan time via `kms:Decrypt`. No plaintext in state or variables.
-- [x] **Rename domain verify endpoint** — `POST /domains/:id/verify` → `PATCH /accounts/:accountId/domains/:domainId` (re-check is a state refresh, returns full updated domain).
 - [ ] **Review DynamoDB storage architecture** — audit all handlers for redundant reads/writes. Ensure single-call access patterns where possible. Check that the processor never re-fetches data it already holds. Verify batch operations are used where multiple items are needed.
-- [x] **DMARC policy → p=reject** — deployed.
-- [ ] **platform subdomain** — all records meant for handling CNAMEing for users will have .platform in them. The actual records have been updated. First validate that they are correct, and then we need to change anywhere we were using them.
-- [ ] Review SES sender notification config set, I don't think we created one of those, so we'll need to review and update
 
 
 ---
@@ -112,15 +91,7 @@ DELETE /accounts/:accountId/signals/:id       — discard draft; 400 if not draf
 
 ---
 
-- [x] Detect forwarded emails and auto-tag with a label `original:john@gmail.com`, where `john@gmail.com` is the original recipient address the email was sent to before being forwarded into the system. Use `X-Forwarded-To`, `X-Original-To`, or `Resent-To` headers to extract the address. **Validation required**: add a test asserting that the `original:*` label is correctly attached to the signal/arc and that the address is extracted accurately from the header.
-- [x] **`"test"` workflow** — implemented: in `WORKFLOWS`, `TestData` interface, processor pong (Bedrock auto-reply), urgency override, onboarding integration all done.
-- [x] **Spam score threshold configurable** — `spamScoreThreshold` on both `AccountFilteringConfig` and `EmailAddressConfig` with account → per-address override chain.
-- [x] **Two-tier domain setup model** — `receivingSetupComplete`, `senderSetupComplete`, per-record `DnsRecord` status, all in `Domain` type and API.
 - [ ] **Become FedCM identity provider** — meaning other apps log in via our app. This means registering as a FedCM provider so other apps can log in.
-- [x] **Block phishing-warning and terms-update emails by default** — covered above.
-- [x] Add `DELETE /domains/:id` endpoint and handler — handler exists at `src/api/app.ts`
-- [x] **Domain health monitoring** — `src/dns/dns-checker.ts`, `src/jobs/domain-health-job.ts`; `POST /domains/:id/verify` for on-demand check; `GET /domains/:id` includes live DNS check; EventBridge weekly cron in `infra/storage.tf`; handler dispatches via `source: "domain-health-job"` in EventBridge event detail
-
 - [ ] **Submit to awesome-privacy-tools** — open a PR at https://github.com/anondotli/awesome-privacy-tools/blob/main/CONTRIBUTING.md to add this project to the list. Follow the contributing guidelines before submitting.
 
 ---
@@ -233,19 +204,8 @@ The extension (`extension/`) has a working implementation that assumes a `/alias
 
 4. **`GET /accounts/:accountId/domains`** — the extension calls this and expects `string[]` (array of domain name strings). The backend endpoint returns `Domain[]` (full domain objects with `receivingSetupComplete`, `senderSetupComplete`, etc.). **Type mismatch** — the extension will break on real data. Fix: extension should map `domains.map(d => d.domain)`, or the backend should add a `?names=true` query param.
 
-### What the backend needs to add for extension support
-
-- [x] **`Alias` type** — renamed from `EmailAddressConfig`; now includes `createdForOrigin?: string` for alias-per-site tracking. Stored embedded in the `Account` DynamoDB record, keyed by address.
-- [x] **`POST /accounts/:accountId/aliases`** — handler exists in `src/api/app.ts`
-- [x] **`GET /accounts/:accountId/aliases?domain=`** — `?domain=` filter added; filters by `createdForOrigin`
-- [x] **`PATCH /aliases/:address` with `newAddress` rename** — `renameAlias` in `account-database.ts`; copies all sender items to new address, deletes old
-- [x] **Web Push subscription endpoint** — `POST/DELETE /accounts/:accountId/push-subscriptions`
-- [x] **Notifier: push `auth` arcs via Web Push** — `pushNotify` in `ses-notifier.ts` fires for `auth` workflow; handles 410 Gone by deleting expired subscriptions
-- These are all **free tier** per the pricing strategy.
-
 ### What the extension needs to fix
 
-- [x] **`fetchDomains()` return type** — fixed in `src/api.ts` to map `Domain[]` → `string[]` via `d.domain`.
 - [ ] **OTP auto-fill + Web Push service worker** — tracked in detail in `extension/TODO.md`.
 
 ---

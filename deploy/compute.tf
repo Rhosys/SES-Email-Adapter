@@ -169,6 +169,7 @@ resource "aws_lambda_function" "main" {
       WS_API_ENDPOINT       = "https://wss.${data.aws_route53_zone.main.name}"
       CF_ORIGIN_SECRET      = random_password.cf_origin_secret.result
       REINDEX_QUEUE_URL     = aws_sqs_queue.reindex.url
+      MAIL_DOMAIN           = "platform.${data.aws_route53_zone.main.name}"
     }
   }
 
