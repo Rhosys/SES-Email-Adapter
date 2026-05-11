@@ -1,7 +1,6 @@
 # TODO
 
 - [ ] Digests? Does that even make sense? Basically once per month expose a digest of just list of things — the idea would be to reuse the same Arc.
-- [ ] **Review DynamoDB storage architecture** — audit all handlers for redundant reads/writes. Ensure single-call access patterns where possible. Check that the processor never re-fetches data it already holds. Verify batch operations are used where multiple items are needed.
 
 
 ---
