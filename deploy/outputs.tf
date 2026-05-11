@@ -29,8 +29,19 @@ output "dynamodb_processing_table" {
   value = aws_dynamodb_table.processing.name
 }
 
+output "site_bucket_name" {
+  description = "S3 bucket name for static site assets (for CI sync)"
+  value       = aws_s3_bucket.web.bucket
+}
+
+output "site_bucket_arn" {
+  description = "S3 bucket ARN for static site assets (for CI IAM policies)"
+  value       = aws_s3_bucket.web.arn
+}
+
 output "email_bucket_name" {
-  value = aws_s3_bucket.emails.bucket
+  description = "S3 bucket name for email storage (account-regional format)"
+  value       = aws_s3_bucket.emails.bucket
 }
 
 output "signals_queue_url" {

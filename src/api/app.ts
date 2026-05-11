@@ -180,14 +180,14 @@ function page<K extends string, T>(key: K, items: T[], nextCursor?: string): Rec
 }
 
 export function createApp({ store, auth, access, verificationMailer }: AppDeps) {
-  const app = new OpenAPIHono<AppEnv>();
+  const app = new OpenAPIHono<AppEnv>().basePath('/api');
 
   app.doc("/openapi.json", {
     openapi: "3.1.0",
     info: { title: "SES Email Adapter", version: "1.0.0" },
   });
 
-  app.get("/", (c) => c.redirect("/openapi.json", 301));
+  app.get("/", (c) => c.redirect("/api/openapi.json", 301));
 
   function err(c: Context<AppEnv>, status: number, title: string, errorCode?: string, details?: unknown) {
     return c.json(

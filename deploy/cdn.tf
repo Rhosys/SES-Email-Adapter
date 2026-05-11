@@ -5,6 +5,7 @@
 
 locals {
   api_gateway_origin_id = "api-gateway"
+  s3_site_origin_id     = "s3-site"
 }
 
 # ---------------------------------------------------------------------------
@@ -54,6 +55,14 @@ resource "aws_cloudfront_distribution" "api" {
 
   aliases = [data.aws_route53_zone.main.name]
 
+  # S3 origin — static site assets via OAC
+  origin {
+    domain_name              = aws_s3_bucket.web.bucket_regional_domain_name
+    origin_id                = local.s3_site_origin_id
+    origin_access_control_id = aws_cloudfront_origin_access_control.s3.id
+  }
+
+  # API Gateway origin — existing API with x-origin-verify secret
   origin {
     domain_name = aws_apigatewayv2_domain_name.http.domain_name
     origin_id   = local.api_gateway_origin_id
@@ -71,24 +80,41 @@ resource "aws_cloudfront_distribution" "api" {
     }
   }
 
+  # Default behavior — S3 static site with SPA rewrite
   default_cache_behavior {
+    allowed_methods        = ["GET", "HEAD"]
+    cached_methods         = ["GET", "HEAD"]
+    target_origin_id       = local.s3_site_origin_id
+    cache_policy_id        = aws_cloudfront_cache_policy.s3_cache.id
+    viewer_protocol_policy = "redirect-to-https"
+    compress               = true
+
+    function_association {
+      event_type   = "viewer-request"
+      function_arn = aws_cloudfront_function.spa_rewrite.arn
+    }
+  }
+
+  # /assets/* — S3 immutable hashed assets (no SPA rewrite)
+  ordered_cache_behavior {
+    path_pattern           = "/assets/*"
+    allowed_methods        = ["GET", "HEAD"]
+    cached_methods         = ["GET", "HEAD"]
+    target_origin_id       = local.s3_site_origin_id
+    cache_policy_id        = aws_cloudfront_cache_policy.assets_cache.id
+    viewer_protocol_policy = "redirect-to-https"
+    compress               = true
+  }
+
+  # /api/* — API Gateway origin (all methods, no caching by default)
+  ordered_cache_behavior {
+    path_pattern           = "/api/*"
     allowed_methods        = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
     cached_methods         = ["GET", "HEAD"]
     target_origin_id       = local.api_gateway_origin_id
+    cache_policy_id        = aws_cloudfront_cache_policy.api_cache.id
     viewer_protocol_policy = "redirect-to-https"
-
-    forwarded_values {
-      query_string = true
-      headers      = ["Authorization", "Content-Type"]
-      cookies { forward = "none" }
-    }
-
-    # Most API responses are not cacheable — let the app control via Cache-Control
-    min_ttl     = 0
-    default_ttl = 0
-    max_ttl     = 31536000
-
-    compress = true
+    compress               = true
   }
 
   restrictions {
@@ -151,4 +177,159 @@ resource "aws_secretsmanager_secret" "cf_origin_secret" {
 resource "aws_secretsmanager_secret_version" "cf_origin_secret" {
   secret_id     = aws_secretsmanager_secret.cf_origin_secret.id
   secret_string = random_password.cf_origin_secret.result
+}
+
+# ---------------------------------------------------------------------------
+# S3 — static site assets (front-end)
+# ---------------------------------------------------------------------------
+
+resource "aws_s3_bucket" "web" {
+  bucket           = "${lower(var.service_name)}-web-${var.aws_account_id}-eu-west-1-an"
+  bucket_namespace = "account-regional"
+}
+
+resource "aws_s3_bucket_public_access_block" "web" {
+  bucket                  = aws_s3_bucket.web.id
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "web" {
+  bucket = aws_s3_bucket.web.id
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
+resource "aws_s3_bucket_lifecycle_configuration" "web" {
+  bucket = aws_s3_bucket.web.id
+
+  rule {
+    id     = "abort-incomplete-multipart-uploads"
+    status = "Enabled"
+    filter {}
+    abort_incomplete_multipart_upload { days_after_initiation = 7 }
+  }
+}
+
+# ---------------------------------------------------------------------------
+# CloudFront Origin Access Control — S3
+# ---------------------------------------------------------------------------
+
+resource "aws_cloudfront_origin_access_control" "s3" {
+  name                              = "${var.service_name}-s3-oac"
+  origin_access_control_origin_type = "s3"
+  signing_behavior                  = "always"
+  signing_protocol                  = "sigv4"
+}
+
+resource "aws_s3_bucket_policy" "web" {
+  bucket = aws_s3_bucket.web.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid       = "AllowCloudFrontOAC"
+      Effect    = "Allow"
+      Principal = { Service = "cloudfront.amazonaws.com" }
+      Action    = "s3:GetObject"
+      Resource  = "${aws_s3_bucket.web.arn}/*"
+      Condition = {
+        StringEquals = { "AWS:SourceArn" = aws_cloudfront_distribution.api.arn }
+      }
+    }]
+  })
+}
+
+# ---------------------------------------------------------------------------
+# CloudFront Cache Policies
+# ---------------------------------------------------------------------------
+
+resource "aws_cloudfront_cache_policy" "s3_cache" {
+  name        = "${var.service_name}-s3-cache"
+  default_ttl = 86400
+  max_ttl     = 31536000
+  min_ttl     = 0
+
+  parameters_in_cache_key_and_forwarded_to_origin {
+    cookies_config {
+      cookie_behavior = "none"
+    }
+    headers_config {
+      header_behavior = "none"
+    }
+    query_strings_config {
+      query_string_behavior = "none"
+    }
+    enable_accept_encoding_brotli = true
+    enable_accept_encoding_gzip   = true
+  }
+}
+
+resource "aws_cloudfront_cache_policy" "assets_cache" {
+  name        = "${var.service_name}-assets-cache"
+  default_ttl = 31536000
+  max_ttl     = 31536000
+  min_ttl     = 31536000
+
+  parameters_in_cache_key_and_forwarded_to_origin {
+    cookies_config {
+      cookie_behavior = "none"
+    }
+    headers_config {
+      header_behavior = "none"
+    }
+    query_strings_config {
+      query_string_behavior = "none"
+    }
+    enable_accept_encoding_brotli = true
+    enable_accept_encoding_gzip   = true
+  }
+}
+
+resource "aws_cloudfront_cache_policy" "api_cache" {
+  name        = "${var.service_name}-api-cache"
+  default_ttl = 0
+  max_ttl     = 31536000
+  min_ttl     = 0
+
+  parameters_in_cache_key_and_forwarded_to_origin {
+    cookies_config {
+      cookie_behavior = "whitelist"
+      cookies { items = ["authorization"] }
+    }
+    headers_config {
+      header_behavior = "whitelist"
+      headers { items = ["Authorization", "Content-Type", "Origin", "Accept"] }
+    }
+    query_strings_config {
+      query_string_behavior = "all"
+    }
+    enable_accept_encoding_brotli = true
+    enable_accept_encoding_gzip   = true
+  }
+}
+
+# ---------------------------------------------------------------------------
+# CloudFront Function — SPA rewrite (viewer-request)
+# ---------------------------------------------------------------------------
+
+resource "aws_cloudfront_function" "spa_rewrite" {
+  name    = "${var.service_name}-spa-rewrite"
+  runtime = "cloudfront-js-2.0"
+  publish = true
+  code    = <<-EOF
+function handler(event) {
+  var request = event.request;
+  var uri = request.uri;
+  if (!uri.includes('.')) {
+    request.uri = '/index.html';
+  }
+  return request;
+}
+EOF
 }
