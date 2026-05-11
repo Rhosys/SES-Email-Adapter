@@ -1,5 +1,7 @@
 # TODO
 
+- [ ] **Structured logging implementation** — adopt the log level taxonomy from ADR 002 (DEBUG/INFO/TRACK/WARN/ERROR/CRITICAL) across the codebase. Replace raw `console.warn`/`console.error` calls with structured JSON emitters that set the correct `level` field. The logging infrastructure already routes based on `level`.
+- [ ] **Expected error handling** — audit all catch blocks and error paths. Distinguish between expected errors (validation failures, not-found, rate limits → INFO or silent) and unexpected errors (DynamoDB failures, SES timeouts → ERROR). Expected errors should never trigger alerts.
 - [ ] Digests? Does that even make sense? Basically once per month expose a digest of just list of things — the idea would be to reuse the same Arc.
 
 

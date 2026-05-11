@@ -45,14 +45,15 @@ export class AccountDatabase {
     if (update.notifications !== undefined) { setParts.push("notifications = :notif"); exprValues[":notif"] = update.notifications; }
     if (update.filtering !== undefined) { setParts.push("filtering = :filtering"); exprValues[":filtering"] = update.filtering; }
 
-    await dynamo.send(new UpdateCommand({
+    const result = await dynamo.send(new UpdateCommand({
       TableName: ACCOUNTS_TABLE,
       Key: { pk: pk(accountId), sk: "META" },
       UpdateExpression: `SET ${setParts.join(", ")}`,
       ExpressionAttributeValues: exprValues,
       ...(Object.keys(exprNames).length ? { ExpressionAttributeNames: exprNames } : {}),
+      ReturnValues: "ALL_NEW",
     }));
-    return (await this.getAccount(accountId))!;
+    return result.Attributes! as unknown as Account;
   }
 
   // ---------------------------------------------------------------------------
@@ -254,14 +255,15 @@ export class AccountDatabase {
     if (data.color !== undefined) { setParts.push("color = :color"); exprValues[":color"] = data.color; }
     if (data.position !== undefined) { setParts.push("#pos = :pos"); exprValues[":pos"] = data.position; exprNames["#pos"] = "position"; }
 
-    await dynamo.send(new UpdateCommand({
+    const result = await dynamo.send(new UpdateCommand({
       TableName: ACCOUNTS_TABLE,
       Key: { pk: pk(accountId), sk: `VIEW#${id}` },
       UpdateExpression: `SET ${setParts.join(", ")}`,
       ExpressionAttributeValues: exprValues,
       ...(Object.keys(exprNames).length ? { ExpressionAttributeNames: exprNames } : {}),
+      ReturnValues: "ALL_NEW",
     }));
-    return (await this.getView(accountId, id))!;
+    return result.Attributes as unknown as View;
   }
 
   async deleteView(accountId: string, id: string): Promise<void> {
@@ -316,18 +318,23 @@ export class AccountDatabase {
     if (data.color !== undefined) { setParts.push("color = :color"); exprValues[":color"] = data.color; }
     if (data.icon !== undefined) { setParts.push("icon = :icon"); exprValues[":icon"] = data.icon; }
 
-    if (setParts.length > 0) {
-      await dynamo.send(new UpdateCommand({
+    if (setParts.length === 0) {
+      const result = await dynamo.send(new GetCommand({
         TableName: ACCOUNTS_TABLE,
         Key: { pk: pk(accountId), sk: `LABEL#${id}` },
-        UpdateExpression: `SET ${setParts.join(", ")}`,
-        ExpressionAttributeValues: exprValues,
-        ...(Object.keys(exprNames).length ? { ExpressionAttributeNames: exprNames } : {}),
       }));
+      return result.Item as unknown as Label;
     }
 
-    const labels = await this.listLabels(accountId);
-    return labels.find((l) => l.id === id)!;
+    const result = await dynamo.send(new UpdateCommand({
+      TableName: ACCOUNTS_TABLE,
+      Key: { pk: pk(accountId), sk: `LABEL#${id}` },
+      UpdateExpression: `SET ${setParts.join(", ")}`,
+      ExpressionAttributeValues: exprValues,
+      ...(Object.keys(exprNames).length ? { ExpressionAttributeNames: exprNames } : {}),
+      ReturnValues: "ALL_NEW",
+    }));
+    return result.Attributes as unknown as Label;
   }
 
   async deleteLabel(accountId: string, id: string): Promise<void> {
@@ -414,19 +421,16 @@ export class AccountDatabase {
     if (data.status !== undefined) { setParts.push("#status = :status"); exprValues[":status"] = data.status; exprNames["#status"] = "status"; }
     if (data.tags !== undefined) { setParts.push("tags = :tags"); exprValues[":tags"] = data.tags; }
 
-    await dynamo.send(new UpdateCommand({
+    const result = await dynamo.send(new UpdateCommand({
       TableName: ACCOUNTS_TABLE,
       Key: { pk: pk(accountId), sk: `RULE#${id}` },
       UpdateExpression: `SET ${setParts.join(", ")}`,
       ExpressionAttributeValues: exprValues,
       ...(Object.keys(exprNames).length ? { ExpressionAttributeNames: exprNames } : {}),
+      ReturnValues: "ALL_NEW",
     }));
 
-    const updated = await dynamo.send(new GetCommand({
-      TableName: ACCOUNTS_TABLE,
-      Key: { pk: pk(accountId), sk: `RULE#${id}` },
-    }));
-    return updated.Item as Rule;
+    return result.Attributes as unknown as Rule;
   }
 
   async deleteRule(accountId: string, id: string): Promise<void> {
@@ -448,18 +452,21 @@ export class AccountDatabase {
 
   async getDomain(accountId: string, id: string): Promise<Domain | null> {
     const result = await dynamo.send(new GetCommand({ TableName: ACCOUNTS_TABLE, Key: { pk: pk(accountId), sk: `DOMAIN#${id}` } }));
-    return result.Item ? (result.Item as Domain) : null;
+    return result.Item ? result.Item as unknown as Domain : null;
   }
 
-  async getDomainByName(accountId: string, domainName: string): Promise<Pick<Domain, "senderSetupComplete"> | null> {
-    const domains = await this.listDomains(accountId);
-    return domains.find((d) => d.domain === domainName) ?? null;
+  async getDomainByName(accountId: string, domainName: string): Promise<Domain | null> {
+    const result = await dynamo.send(new GetCommand({
+      TableName: ACCOUNTS_TABLE,
+      Key: { pk: pk(accountId), sk: `DOMAIN#${domainName}` },
+    }));
+    return result.Item ? result.Item as unknown as Domain : null;
   }
 
   async createDomain(accountId: string, domain: string): Promise<Domain> {
     const now = new Date().toISOString();
     const item: Domain = {
-      id: randomUUID(),
+      id: domain,
       accountId,
       domain,
       receivingSetupComplete: false,
@@ -467,7 +474,7 @@ export class AccountDatabase {
       createdAt: now,
       updatedAt: now,
     };
-    await dynamo.send(new PutCommand({ TableName: ACCOUNTS_TABLE, Item: { ...item, pk: pk(accountId), sk: `DOMAIN#${item.id}` } }));
+    await dynamo.send(new PutCommand({ TableName: ACCOUNTS_TABLE, Item: { ...item, pk: pk(accountId), sk: `DOMAIN#${domain}` } }));
     return item;
   }
 
@@ -604,14 +611,15 @@ export class AccountDatabase {
     if (update.name !== undefined) { setParts.push("#name = :name"); exprValues[":name"] = update.name; exprNames["#name"] = "name"; }
     if (update.subject !== undefined) { setParts.push("#subject = :subject"); exprValues[":subject"] = update.subject; exprNames["#subject"] = "subject"; }
     if (update.body !== undefined) { setParts.push("body = :body"); exprValues[":body"] = update.body; }
-    await dynamo.send(new UpdateCommand({
+    const result = await dynamo.send(new UpdateCommand({
       TableName: ACCOUNTS_TABLE,
       Key: { pk: pk(accountId), sk: `TEMPLATE#${id}` },
       UpdateExpression: `SET ${setParts.join(", ")}`,
       ExpressionAttributeValues: exprValues,
       ...(Object.keys(exprNames).length ? { ExpressionAttributeNames: exprNames } : {}),
+      ReturnValues: "ALL_NEW",
     }));
-    return (await this.getTemplate(accountId, id))!;
+    return result.Attributes as unknown as EmailTemplate;
   }
 
   async deleteTemplate(accountId: string, id: string): Promise<void> {

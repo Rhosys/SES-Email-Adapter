@@ -204,7 +204,7 @@ function makeRule(overrides: Partial<Rule> = {}): Rule {
 
 function makeDomain(overrides: Partial<Domain> = {}): Domain {
   return {
-    id: "domain-001",
+    id: "example.com",
     accountId: TEST_ACCOUNT_ID,
     domain: "example.com",
     receivingSetupComplete: false,
@@ -788,7 +788,7 @@ describe("API", () => {
   describe("GET /accounts/:accountId/domains/:id — DNS records", () => {
     it("returns records array alongside domain data", async () => {
       vi.mocked(store.getDomain).mockResolvedValueOnce(makeDomain());
-      const res = await req(app, "GET", `${A}/domains/domain-001`);
+      const res = await req(app, "GET", `${A}/domains/example.com`);
       expect(res.status).toBe(200);
       const body = await res.json() as { records: Array<{ type: string; name: string; value: string; status: string }> };
       expect(Array.isArray(body.records)).toBe(true);
@@ -799,14 +799,14 @@ describe("API", () => {
 
     it("returns exactly 4 records with correct types: MX, CNAME, CNAME, CNAME", async () => {
       vi.mocked(store.getDomain).mockResolvedValueOnce(makeDomain());
-      const res = await req(app, "GET", `${A}/domains/domain-001`);
+      const res = await req(app, "GET", `${A}/domains/example.com`);
       const body = await res.json() as { records: Array<{ type: string }> };
       expect(body.records.map((r) => r.type)).toEqual(["MX", "CNAME", "CNAME", "CNAME"]);
     });
 
     it("returns status=pending for every record when domain has never been health-checked", async () => {
       vi.mocked(store.getDomain).mockResolvedValueOnce(makeDomain()); // no lastCheckedAt
-      const res = await req(app, "GET", `${A}/domains/domain-001`);
+      const res = await req(app, "GET", `${A}/domains/example.com`);
       const body = await res.json() as { records: Array<{ status: string }> };
       expect(body.records.every((r) => r.status === "pending")).toBe(true);
     });
@@ -815,7 +815,7 @@ describe("API", () => {
       vi.mocked(store.getDomain).mockResolvedValueOnce(
         makeDomain({ lastCheckedAt: "2024-01-15T00:00:00Z", failingRecords: [] }),
       );
-      const res = await req(app, "GET", `${A}/domains/domain-001`);
+      const res = await req(app, "GET", `${A}/domains/example.com`);
       const body = await res.json() as { records: Array<{ status: string }> };
       expect(body.records.every((r) => r.status === "verified")).toBe(true);
     });
@@ -827,7 +827,7 @@ describe("API", () => {
           failingRecords: ["_dmarc.example.com"],
         }),
       );
-      const res = await req(app, "GET", `${A}/domains/domain-001`);
+      const res = await req(app, "GET", `${A}/domains/example.com`);
       const body = await res.json() as { records: Array<{ name: string; status: string }> };
       const dmarc = body.records.find((r) => r.name === "_dmarc.example.com")!;
       const others = body.records.filter((r) => r.name !== "_dmarc.example.com");
@@ -837,9 +837,9 @@ describe("API", () => {
 
     it("records include correct name patterns for the registered domain", async () => {
       vi.mocked(store.getDomain).mockResolvedValueOnce(
-        makeDomain({ domain: "acme.io", lastCheckedAt: "2024-01-15T00:00:00Z" }),
+        makeDomain({ id: "acme.io", domain: "acme.io", lastCheckedAt: "2024-01-15T00:00:00Z" }),
       );
-      const res = await req(app, "GET", `${A}/domains/domain-001`);
+      const res = await req(app, "GET", `${A}/domains/acme.io`);
       const body = await res.json() as { records: Array<{ name: string; type: string }> };
       const names = body.records.map((r) => r.name);
       expect(names).toContain("acme.io");                        // MX
@@ -852,9 +852,9 @@ describe("API", () => {
   describe("DELETE /accounts/:accountId/domains/:id", () => {
     it("removes the Domain", async () => {
       vi.mocked(store.getDomain).mockResolvedValueOnce(makeDomain());
-      const res = await req(app, "DELETE", `${A}/domains/domain-001`);
+      const res = await req(app, "DELETE", `${A}/domains/example.com`);
       expect(res.status).toBe(204);
-      expect(store.deleteDomain).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "domain-001");
+      expect(store.deleteDomain).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "example.com");
     });
   });
 

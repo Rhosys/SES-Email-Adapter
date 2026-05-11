@@ -112,7 +112,7 @@ export class ArcDatabase implements ArcMatcher {
   }
 
   async blockSignal(accountId: string, signalId: string): Promise<Signal> {
-    await dynamo.send(new UpdateCommand({
+    const result = await dynamo.send(new UpdateCommand({
       TableName: SIGNALS_TABLE,
       Key: { pk: sigPk(accountId, signalId), sk: ITEM_SK },
       UpdateExpression: "SET #status = :status, gsi1pk = :gsi1pk",
@@ -121,8 +121,9 @@ export class ArcDatabase implements ArcMatcher {
         ":status": "blocked",
         ":gsi1pk": `BLOCKED#${accountId}`,
       },
+      ReturnValues: "ALL_NEW",
     }));
-    return (await this.getSignal(accountId, signalId))!;
+    return result.Attributes as unknown as Signal;
   }
 
   async unblockSignal(accountId: string, signalId: string, arcId: string): Promise<void> {
@@ -202,11 +203,9 @@ export class ArcDatabase implements ArcMatcher {
       exprValues[":status"] = update.status;
       exprNames["#status"] = "status";
       if (update.status === "deleted") setParts.push("deletedAt = :now");
-      // Fetch current arc to reconstruct gsi1sk with new status
-      const current = await this.getArc(accountId, id);
-      if (current) {
+      if (update.lastSignalAt) {
         setParts.push("gsi1sk = :gsi1sk");
-        exprValues[":gsi1sk"] = `LASTACT#${update.status}#${current.lastSignalAt}#${id}`;
+        exprValues[":gsi1sk"] = `LASTACT#${update.status}#${update.lastSignalAt}#${id}`;
       }
     }
     if (update.labels !== undefined) {
@@ -218,14 +217,15 @@ export class ArcDatabase implements ArcMatcher {
       exprValues[":urgency"] = update.urgency;
     }
 
-    await dynamo.send(new UpdateCommand({
+    const result = await dynamo.send(new UpdateCommand({
       TableName: SIGNALS_TABLE,
       Key: { pk: arcPk(accountId, id), sk: ITEM_SK },
       UpdateExpression: `SET ${setParts.join(", ")}`,
       ExpressionAttributeValues: exprValues,
       ...(Object.keys(exprNames).length ? { ExpressionAttributeNames: exprNames } : {}),
+      ReturnValues: "ALL_NEW",
     }));
-    return (await this.getArc(accountId, id))!;
+    return result.Attributes as unknown as Arc;
   }
 
   async updateSignal(accountId: string, id: string, update: Partial<Pick<Signal, "subject" | "textBody" | "from" | "to">>): Promise<Signal> {
@@ -239,14 +239,15 @@ export class ArcDatabase implements ArcMatcher {
     if (update.from !== undefined) { setParts.push("#from = :from"); exprValues[":from"] = update.from; exprNames["#from"] = "from"; }
     if (update.to !== undefined) { setParts.push("#to = :to"); exprValues[":to"] = update.to; exprNames["#to"] = "to"; }
 
-    await dynamo.send(new UpdateCommand({
+    const result = await dynamo.send(new UpdateCommand({
       TableName: SIGNALS_TABLE,
       Key: { pk: sigPk(accountId, id), sk: ITEM_SK },
       UpdateExpression: `SET ${setParts.join(", ")}`,
       ExpressionAttributeValues: exprValues,
       ...(Object.keys(exprNames).length ? { ExpressionAttributeNames: exprNames } : {}),
+      ReturnValues: "ALL_NEW",
     }));
-    return (await this.getSignal(accountId, id))!;
+    return result.Attributes as unknown as Signal;
   }
 
   async deleteSignal(accountId: string, id: string): Promise<void> {
@@ -302,6 +303,21 @@ export class ArcDatabase implements ArcMatcher {
     return { items: page, ...(nextKey ? { nextCursor: nextKey } : {}) };
   }
 
+  async listActiveArcsBefore(accountId: string, beforeDate: string): Promise<Arc[]> {
+    const res = await dynamo.send(new QueryCommand({
+      TableName: SIGNALS_TABLE,
+      IndexName: "gsi1",
+      KeyConditionExpression: "gsi1pk = :pk AND gsi1sk BETWEEN :start AND :end",
+      ExpressionAttributeValues: {
+        ":pk": `ACCT#${accountId}`,
+        ":start": "LASTACT#active#",
+        ":end": `LASTACT#active#${beforeDate}#`,
+      },
+      ScanIndexForward: true,
+    }));
+    return (res.Items ?? []) as Arc[];
+  }
+
   async searchArcs(accountId: string, query: string, params: PageParams): Promise<Page<Arc>> {
     const limit = Math.min(params.limit ?? 20, 100);
     const res = await dynamo.send(new QueryCommand({
@@ -314,8 +330,20 @@ export class ArcDatabase implements ArcMatcher {
       ...(params.cursor ? { ExclusiveStartKey: decodeCursor(params.cursor) } : {}),
     }));
 
+    const fetchedItems = (res.Items ?? []) as Arc[];
+    if (fetchedItems.length > 200) {
+      console.warn(JSON.stringify({
+        level: "warn",
+        message: "searchArcs.large_result_set",
+        accountId,
+        query,
+        itemsFetched: fetchedItems.length,
+        timestamp: new Date().toISOString(),
+      }));
+    }
+
     const q = query.toLowerCase();
-    const items = ((res.Items ?? []) as Arc[]).filter(
+    const items = fetchedItems.filter(
       (a) => a.summary.toLowerCase().includes(q) || a.workflow.toLowerCase().includes(q),
     );
     const page = items.slice(0, limit);

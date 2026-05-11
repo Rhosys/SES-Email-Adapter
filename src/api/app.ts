@@ -289,7 +289,7 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
     if (!arc) return err(c, 404, "Arc not found", "ARC_NOT_FOUND");
     if (arc.accountId !== accountId) return err(c, 403, "Forbidden");
     const body = await zParse(UpdateArcRequest, c.req.raw);
-    const updated = await store.updateArc(accountId, arc.id, body);
+    const updated = await store.updateArc(accountId, arc.id, { ...body, lastSignalAt: arc.lastSignalAt });
     return c.json(updated);
   });
 
