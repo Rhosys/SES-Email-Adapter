@@ -10,6 +10,7 @@ export const dynamo = DynamoDBDocumentClient.from(new DynamoDBClient({}), {
   marshallOptions: { removeUndefinedValues: true },
 });
 
+
 export function encodeCursor(key: Record<string, unknown>): string {
   return Buffer.from(JSON.stringify(key)).toString("base64url");
 }

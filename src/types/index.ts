@@ -420,7 +420,6 @@ export interface Arc {
   status: ArcStatus;
   summary: string;
   lastSignalAt: string;
-  lastUserConfirmedAt?: string;
   deletedAt?: string;
   createdAt: string;
   updatedAt: string;

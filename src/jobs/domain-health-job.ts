@@ -1,15 +1,21 @@
 import { SESv2Client, SendEmailCommand } from "@aws-sdk/client-sesv2";
 import { AccountDatabase } from "../database/account-database.js";
+import { ArcDatabase } from "../database/arc-database.js";
 import { checkDomain } from "../dns/dns-checker.js";
+import { isOutstandingArc, buildAccountLogEntry, buildAccountReports, buildRunCompleteLogEntry } from "./staleness-logic.js";
+import type { AccountStalenessReport } from "./staleness-logic.js";
 
 const FROM_ADDRESS = process.env["NOTIFICATION_FROM"] ?? "";
 const APP_BASE_URL = process.env["APP_BASE_URL"] ?? "https://app.example.com";
 
 const sesv2 = new SESv2Client({});
 const db = new AccountDatabase();
+const arcDb = new ArcDatabase();
 
 export async function handler(): Promise<void> {
+  const startTime = Date.now();
   const allAccounts = await db.scanAllDomains();
+  const reports: AccountStalenessReport[] = [];
 
   await Promise.all(allAccounts.map(async ({ accountId, domains }) => {
     const account = await db.getAccount(accountId);
@@ -53,5 +59,34 @@ export async function handler(): Promise<void> {
         })).catch((e) => console.error(`Failed to notify ${notifyEmail} for domain ${domain.domain}:`, e));
       }
     }
+
+    // Staleness check: identify outstanding arcs for this account
+    try {
+      const cutoffDate = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+      const staleArcs = await arcDb.listActiveArcsBefore(accountId, cutoffDate);
+      const outstanding = staleArcs.filter(arc => isOutstandingArc(arc, cutoffDate));
+      if (outstanding.length > 0) {
+        const [report] = buildAccountReports(outstanding.map(arc => ({
+          id: arc.id,
+          accountId: arc.accountId,
+          lastSignalAt: arc.lastSignalAt,
+          urgency: arc.urgency,
+          workflow: arc.workflow,
+        })));
+        reports.push(report!);
+        console.log(JSON.stringify(buildAccountLogEntry(report!, new Date().toISOString())));
+      }
+    } catch (e) {
+      console.log(JSON.stringify({
+        level: "error",
+        message: "staleness_checker.account_error",
+        accountId,
+        error: e instanceof Error ? e.message : String(e),
+        timestamp: new Date().toISOString(),
+      }));
+    }
   }));
+
+  const durationMs = Date.now() - startTime;
+  console.log(JSON.stringify(buildRunCompleteLogEntry(reports, durationMs, new Date().toISOString())));
 }

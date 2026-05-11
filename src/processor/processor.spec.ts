@@ -1623,7 +1623,7 @@ describe("SignalProcessor", () => {
 
     it("uses recipientAddress as 'from' when domain has senderSetupComplete=true", async () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(testClassification);
-      vi.mocked(store.getDomainByName).mockResolvedValueOnce({ senderSetupComplete: true });
+      vi.mocked(store.getDomainByName).mockResolvedValueOnce({ id: "example.com", accountId: "test-account", domain: "example.com", receivingSetupComplete: true, senderSetupComplete: true, createdAt: "2024-01-01T00:00:00Z", updatedAt: "2024-01-01T00:00:00Z" });
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -1634,7 +1634,7 @@ describe("SignalProcessor", () => {
 
     it("falls back to NOTIFICATION_FROM when senderSetupComplete=false", async () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(testClassification);
-      vi.mocked(store.getDomainByName).mockResolvedValueOnce({ senderSetupComplete: false });
+      vi.mocked(store.getDomainByName).mockResolvedValueOnce({ id: "example.com", accountId: "test-account", domain: "example.com", receivingSetupComplete: true, senderSetupComplete: false, createdAt: "2024-01-01T00:00:00Z", updatedAt: "2024-01-01T00:00:00Z" });
       process.env["NOTIFICATION_FROM"] = "noreply@system.example.com";
 
       await processor.process(makeSqsEvent([{}]));

@@ -41,7 +41,7 @@ export interface ProcessorDatabase {
   saveSender(accountId: string, address: string, domain: string, mode: SenderMode): Promise<void>;
   getTemplate(accountId: string, id: string): Promise<import("../types/index.js").EmailTemplate | null>;
   updateGlobalReputation(domain: string, update: { wasSpam: boolean; wasBlocked: boolean }): Promise<void>;
-  getDomainByName(accountId: string, domainName: string): Promise<Pick<Domain, "senderSetupComplete"> | null>;
+  getDomainByName(accountId: string, domainName: string): Promise<Domain | null>;
 }
 
 export interface ArcMatcher {
@@ -555,7 +555,6 @@ export class SignalProcessor {
       signal.embeddings = embeddings;
     }
 
-    await this.store.saveArc(arc);
     await this.store.saveSignal(signal);
 
     // 13. Apply S3 retention based on billing plan (only on new signal creation, never retroactive)
@@ -580,7 +579,6 @@ export class SignalProcessor {
         const ttlSeconds = retentionDurationToSeconds(retention.retentionDuration);
         const arcTtl = Math.floor(Date.now() / 1000) + ttlSeconds;
         arc.ttl = arcTtl;
-        await this.store.saveArc(arc);
       } catch (err) {
         // Retention application failure is non-fatal — the signal is already saved.
         // The default lifecycle rule will apply (5-year inbox/ expiry).
@@ -657,11 +655,13 @@ export class SignalProcessor {
           }).catch((err) => { console.error("Auto-reply failed:", err); return null; });
           if (replyResult) {
             arc.sentMessageIds = [...(arc.sentMessageIds ?? []), replyResult.messageId];
-            await this.store.saveArc(arc);
           }
         }
       }
     }
+
+    // Final arc write: single saveArc with all accumulated mutations (TTL, sentMessageIds, status, labels, urgency)
+    await this.store.saveArc(arc);
 
     // 16. Auto-draft (create held draft signals from templates)
     if (outcome.autoDraftTemplateIds.length > 0) {

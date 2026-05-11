@@ -1,0 +1,354 @@
+import { describe, it, vi } from "vitest";
+import fc from "fast-check";
+import type { SQSEvent } from "aws-lambda";
+import { SignalProcessor, SYSTEM_RULES } from "./processor.js";
+import { JsonLogicRuleEvaluator } from "./rule-evaluator.js";
+import type { ProcessorDatabase, ArcMatcher } from "./processor.js";
+import type { MimeParser } from "./mime.js";
+import type { SignalClassifier, ClassificationOutput } from "../classifier/classifier.js";
+import type { EmbeddingGenerator, EmbeddingResult } from "../embedding/embedding-generator.js";
+import type { MultiClusterAuroraWriter } from "../database/multi-cluster-aurora-writer.js";
+import type { Alias, AliasSender, Rule, SenderFilterMode, Workflow } from "../types/index.js";
+import { propertyRunner } from "../testing/property-runner.js";
+
+// ---------------------------------------------------------------------------
+// Property 2: Blocked/quarantined signals never trigger saveArc
+// **Validates: Requirements 1.5**
+// ---------------------------------------------------------------------------
+
+vi.mock("../embedding/cluster-registry.js", () => {
+  const entry = Object.freeze({
+    clusterId: "aurora-prod-titan-v2",
+    clusterArn: "arn:aws:rds:eu-west-1:123456789012:cluster:aurora-prod-titan-v2",
+    secretArn: "arn:aws:secretsmanager:eu-west-1:123456789012:secret:aurora-prod-titan-v2-xxxxxx",
+    databaseName: "signals",
+    modelId: "amazon.titan-embed-text-v2:0",
+    dimensions: 1024,
+    active: true,
+  });
+  return {
+    CLUSTER_REGISTRY: Object.freeze([entry]),
+    getActiveClusters: () => [entry],
+    getClusterById: (id: string) => (id === entry.clusterId ? entry : null),
+    getReadCluster: () => entry,
+  };
+});
+
+/**
+ * Feature: dynamodb-storage-optimization, Property 2: Blocked/quarantined signals never trigger saveArc
+ *
+ * For any signal processing path where the outcome is blocked or quarantined,
+ * the store's saveArc method SHALL never be called.
+ *
+ * Validates: Requirements 1.5
+ */
+describe("Feature: dynamodb-storage-optimization, Property 2: Blocked/quarantined signals never trigger saveArc", () => {
+  const TEST_ACCOUNT_ID = "acct-prop2";
+
+  // Strategy: generate inputs that produce block/quarantine outcomes via three mechanisms:
+  // 1. High spam score → system:spam:high label → SR-03 quarantines
+  // 2. Onboarding/status workflow → SR-01/SR-05 blocks
+  // 3. Untrusted sender + restrictive filter mode → fallback block/quarantine
+
+  type BlockStrategy = "high_spam" | "onboarding_workflow" | "status_workflow" | "untrusted_sender_block" | "untrusted_sender_quarantine" | "custom_block_rule" | "custom_quarantine_rule";
+
+  const blockStrategies: BlockStrategy[] = [
+    "high_spam",
+    "onboarding_workflow",
+    "status_workflow",
+    "untrusted_sender_block",
+    "untrusted_sender_quarantine",
+    "custom_block_rule",
+    "custom_quarantine_rule",
+  ];
+
+  function makeStore(): ProcessorDatabase {
+    return {
+      getSignalByMessageId: vi.fn().mockResolvedValue(null),
+      saveSignal: vi.fn().mockResolvedValue(undefined),
+      updateSignalRetention: vi.fn().mockResolvedValue(undefined),
+      getArc: vi.fn().mockResolvedValue(null),
+      findArcByGroupingKey: vi.fn().mockResolvedValue(null),
+      saveArc: vi.fn().mockResolvedValue(undefined),
+      listEnabledRules: vi.fn().mockResolvedValue(SYSTEM_RULES),
+      getProcessorAccountContext: vi.fn().mockResolvedValue(null),
+      saveAlias: vi.fn().mockImplementation((a: Alias) => Promise.resolve(a)),
+      getSender: vi.fn().mockResolvedValue(null),
+      saveSender: vi.fn().mockResolvedValue(undefined),
+      getTemplate: vi.fn().mockResolvedValue(null),
+      updateGlobalReputation: vi.fn().mockResolvedValue(undefined),
+      getDomainByName: vi.fn().mockResolvedValue(null),
+    };
+  }
+
+  function makeMimeParser(fromDomain: string): MimeParser {
+    return {
+      parse: vi.fn().mockResolvedValue({
+        from: { address: `sender@${fromDomain}`, name: "Sender" },
+        to: [{ address: "user@example.com" }],
+        cc: [],
+        subject: "Test email",
+        textBody: "Hello world",
+        htmlBody: "<p>Hello world</p>",
+        attachments: [],
+        headers: {},
+        sentAt: "2024-01-15T09:00:00Z",
+      }),
+    };
+  }
+
+  function makeClassifier(overrides: Partial<ClassificationOutput> = {}): Pick<SignalClassifier, "classify"> {
+    return {
+      classify: vi.fn().mockResolvedValue({
+        workflow: "conversation" as Workflow,
+        workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
+        spamScore: 0.05,
+        summary: "A test email.",
+        labels: [],
+        classificationModelId: "us.anthropic.claude-opus-4-5-20251101-v1:0",
+        ...overrides,
+      }),
+    };
+  }
+
+  function makeEmbeddingGenerator(): EmbeddingGenerator {
+    return {
+      generateForActiveClusters: vi.fn().mockResolvedValue([
+        { modelId: "amazon.titan-embed-text-v2:0", vector: new Array(1024).fill(0.1), dimensions: 1024 },
+      ] as EmbeddingResult[]),
+      generateForModel: vi.fn().mockResolvedValue(
+        { modelId: "amazon.titan-embed-text-v2:0", vector: new Array(1024).fill(0.1), dimensions: 1024 } as EmbeddingResult,
+      ),
+    };
+  }
+
+  function makeArcMatcher(): ArcMatcher {
+    return {
+      findMatch: vi.fn().mockResolvedValue(null),
+      upsertEmbedding: vi.fn().mockResolvedValue(undefined),
+    };
+  }
+
+  function makeAuroraWriter(): MultiClusterAuroraWriter {
+    return {
+      upsertEmbedding: vi.fn().mockResolvedValue(undefined),
+      findMatch: vi.fn().mockResolvedValue(null),
+    };
+  }
+
+  function makeSqsEvent(sesMessageId: string): SQSEvent {
+    const notification = {
+      accountId: TEST_ACCOUNT_ID,
+      mail: {
+        messageId: sesMessageId,
+        timestamp: "2024-01-15T10:00:00Z",
+        destination: ["user@example.com"],
+      },
+      receipt: {
+        recipients: ["user@example.com"],
+        dkimVerdict: { status: "PASS" },
+        dmarcVerdict: { status: "PASS" },
+        action: { bucketName: "test-bucket", objectKey: `emails/${sesMessageId}` },
+      },
+    };
+    return {
+      Records: [{
+        messageId: "sqs-1",
+        receiptHandle: "handle",
+        body: JSON.stringify({ Message: JSON.stringify(notification) }),
+        attributes: {
+          ApproximateReceiveCount: "1",
+          SentTimestamp: "1234567890",
+          SenderId: "sender",
+          ApproximateFirstReceiveTimestamp: "1234567890",
+        },
+        messageAttributes: {},
+        md5OfBody: "",
+        eventSource: "aws:sqs",
+        eventSourceARN: "arn:aws:sqs:us-east-1:123:queue",
+        awsRegion: "us-east-1",
+      }],
+    };
+  }
+
+  function configureForStrategy(strategy: BlockStrategy, store: ProcessorDatabase): {
+    classifier: Pick<SignalClassifier, "classify">;
+    mimeParser: MimeParser;
+    filterMode: SenderFilterMode;
+    senderEntry: AliasSender | null;
+    rules: Rule[];
+  } {
+    switch (strategy) {
+      case "high_spam":
+        // High spam score → system:spam:high → SR-03 quarantines
+        return {
+          classifier: makeClassifier({ spamScore: 0.95, workflow: "conversation" }),
+          mimeParser: makeMimeParser("spammer.com"),
+          filterMode: "quarantine_visible",
+          senderEntry: { accountId: TEST_ACCOUNT_ID, aliasAddress: "user@example.com", domain: "spammer.com", mode: "allow", addedAt: "2024-01-01T00:00:00Z" },
+          rules: SYSTEM_RULES,
+        };
+
+      case "onboarding_workflow":
+        // Onboarding workflow → SR-01 blocks
+        return {
+          classifier: makeClassifier({
+            workflow: "onboarding",
+            workflowData: { workflow: "onboarding", service: "acme.com", onboardingType: "welcome" },
+          }),
+          mimeParser: makeMimeParser("acme.com"),
+          filterMode: "quarantine_visible",
+          senderEntry: { accountId: TEST_ACCOUNT_ID, aliasAddress: "user@example.com", domain: "acme.com", mode: "allow", addedAt: "2024-01-01T00:00:00Z" },
+          rules: SYSTEM_RULES,
+        };
+
+      case "status_workflow":
+        // Status workflow → SR-05 blocks
+        return {
+          classifier: makeClassifier({
+            workflow: "status",
+            workflowData: { workflow: "status", statusType: "terms_update", provider: "gov.uk" },
+          }),
+          mimeParser: makeMimeParser("gov.uk"),
+          filterMode: "quarantine_visible",
+          senderEntry: { accountId: TEST_ACCOUNT_ID, aliasAddress: "user@example.com", domain: "gov.uk", mode: "allow", addedAt: "2024-01-01T00:00:00Z" },
+          rules: SYSTEM_RULES,
+        };
+
+      case "untrusted_sender_block":
+        // Untrusted sender + block filter mode → fallback blocks
+        return {
+          classifier: makeClassifier({ workflow: "conversation" }),
+          mimeParser: makeMimeParser("unknown-sender.com"),
+          filterMode: "block",
+          senderEntry: null,
+          rules: SYSTEM_RULES,
+        };
+
+      case "untrusted_sender_quarantine":
+        // Untrusted sender + quarantine filter mode → fallback quarantines
+        return {
+          classifier: makeClassifier({ workflow: "conversation" }),
+          mimeParser: makeMimeParser("unknown-sender.com"),
+          filterMode: "quarantine_visible",
+          senderEntry: null,
+          rules: SYSTEM_RULES,
+        };
+
+      case "custom_block_rule":
+        // Custom user rule that blocks
+        return {
+          classifier: makeClassifier({ workflow: "conversation" }),
+          mimeParser: makeMimeParser("example.com"),
+          filterMode: "allow_all",
+          senderEntry: { accountId: TEST_ACCOUNT_ID, aliasAddress: "user@example.com", domain: "example.com", mode: "allow", addedAt: "2024-01-01T00:00:00Z" },
+          rules: [{
+            id: "custom-block",
+            accountId: TEST_ACCOUNT_ID,
+            name: "Block all",
+            condition: "true",
+            actions: [{ type: "block" }],
+            status: "enabled",
+            priorityOrder: 0,
+            createdAt: "2024-01-01T00:00:00Z",
+            updatedAt: "2024-01-01T00:00:00Z",
+          }],
+        };
+
+      case "custom_quarantine_rule":
+        // Custom user rule that quarantines
+        return {
+          classifier: makeClassifier({ workflow: "conversation" }),
+          mimeParser: makeMimeParser("example.com"),
+          filterMode: "allow_all",
+          senderEntry: { accountId: TEST_ACCOUNT_ID, aliasAddress: "user@example.com", domain: "example.com", mode: "allow", addedAt: "2024-01-01T00:00:00Z" },
+          rules: [{
+            id: "custom-quarantine",
+            accountId: TEST_ACCOUNT_ID,
+            name: "Quarantine all",
+            condition: "true",
+            actions: [{ type: "quarantine" }],
+            status: "enabled",
+            priorityOrder: 0,
+            createdAt: "2024-01-01T00:00:00Z",
+            updatedAt: "2024-01-01T00:00:00Z",
+          }],
+        };
+    }
+  }
+
+  it("saveArc is never called when signal is blocked or quarantined", async () => {
+    await propertyRunner.assert(
+      fc.asyncProperty(
+        // Pick a random block/quarantine strategy
+        fc.constantFrom(...blockStrategies),
+        // Random message ID suffix to ensure uniqueness
+        fc.stringMatching(/^[a-zA-Z0-9]{5,20}$/),
+        // Random spam score variation for high_spam strategy (0.9–1.0)
+        fc.double({ min: 0.9, max: 1.0, noNaN: true }),
+        async (strategy, msgIdSuffix, spamScore) => {
+          // Suppress expected console.error from reputation updates
+          vi.spyOn(console, "error").mockImplementation(() => {});
+
+          const store = makeStore();
+          const config = configureForStrategy(strategy, store);
+
+          // For high_spam strategy, use the generated spam score
+          if (strategy === "high_spam") {
+            (config.classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValue({
+              workflow: "conversation",
+              workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
+              spamScore,
+              summary: "A test email.",
+              labels: [],
+              classificationModelId: "us.anthropic.claude-opus-4-5-20251101-v1:0",
+            });
+          }
+
+          const emailConfig: Alias = {
+            id: "cfg-prop2",
+            accountId: TEST_ACCOUNT_ID,
+            address: "user@example.com",
+            filterMode: config.filterMode,
+            createdAt: "2024-01-01T00:00:00Z",
+            updatedAt: "2024-01-01T00:00:00Z",
+          };
+
+          (store.getProcessorAccountContext as ReturnType<typeof vi.fn>).mockResolvedValue({
+            retentionDays: 0,
+            filtering: null,
+            emailConfig,
+            registeredDomains: [],
+            userEmails: [],
+            billingPlan: "Paid" as const,
+          });
+          (store.getSender as ReturnType<typeof vi.fn>).mockResolvedValue(config.senderEntry);
+          (store.listEnabledRules as ReturnType<typeof vi.fn>).mockResolvedValue(config.rules);
+
+          const processor = new SignalProcessor({
+            store,
+            mimeParser: config.mimeParser,
+            classifier: config.classifier,
+            embeddingGenerator: makeEmbeddingGenerator(),
+            auroraWriter: makeAuroraWriter(),
+            arcMatcher: makeArcMatcher(),
+            ruleEvaluator: new JsonLogicRuleEvaluator(),
+          });
+
+          const sesMessageId = `msg-blocked-${msgIdSuffix}`;
+          await processor.process(makeSqsEvent(sesMessageId));
+
+          // PROPERTY: saveArc must NEVER be called for blocked/quarantined signals
+          const saveArcCalls = (store.saveArc as ReturnType<typeof vi.fn>).mock.calls;
+          if (saveArcCalls.length !== 0) {
+            throw new Error(
+              `Expected zero saveArc calls for strategy "${strategy}", but got ${saveArcCalls.length}`,
+            );
+          }
+
+          vi.restoreAllMocks();
+        },
+      ),
+    );
+  });
+});
