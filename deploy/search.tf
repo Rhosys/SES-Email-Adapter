@@ -46,12 +46,10 @@ resource "aws_rds_cluster_parameter_group" "aurora" {
   for_each = local.cluster_registry
 
   name   = "${lower(var.service_name)}-${each.key}-pg"
-  family = "aurora-postgresql16"
+  family = "aurora-postgresql17"
 
-  parameter {
-    name  = "shared_preload_libraries"
-    value = "pgvector"
-  }
+  # pgvector does not require shared_preload_libraries — it is loaded
+  # on-demand via CREATE EXTENSION vector; in the bootstrap migration.
 }
 
 resource "aws_rds_cluster" "aurora" {
@@ -60,7 +58,7 @@ resource "aws_rds_cluster" "aurora" {
   cluster_identifier              = "${lower(var.service_name)}-${each.key}"
   engine                          = "aurora-postgresql"
   engine_mode                     = "provisioned"
-  engine_version                  = "16.4"
+  engine_version                  = "17.4"
   database_name                   = "signals"
   master_username                 = "admin"
   manage_master_user_password     = true
