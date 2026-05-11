@@ -20,7 +20,7 @@
 - [x] For the dkim_private_key — resolved: KMS-encrypted ciphertext committed in CI, decrypted at plan time via `kms:Decrypt`. No plaintext in state or variables.
 - [x] **Rename domain verify endpoint** — `POST /domains/:id/verify` → `PATCH /accounts/:accountId/domains/:domainId` (re-check is a state refresh, returns full updated domain).
 - [ ] **Review DynamoDB storage architecture** — audit all handlers for redundant reads/writes. Ensure single-call access patterns where possible. Check that the processor never re-fetches data it already holds. Verify batch operations are used where multiple items are needed.
-- [ ] **DMARC policy → p=reject** — done in code, pending next deploy.
+- [x] **DMARC policy → p=reject** — deployed.
 
 
 ---
