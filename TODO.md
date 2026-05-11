@@ -15,12 +15,14 @@
 - [x] Rules support tags — key/value pairs stored on the rule for user annotation (e.g. team, category, notes). No functional effect on rule evaluation.
 - [x] Use quickjs-emscripten to support custom JS function execution as a rule type — `src/processor/rule-engine.ts`; conditions prefixed `js:` run in sandboxed QuickJS VM; JSONLogic still handles non-prefixed conditions
 - [x] Create WebSocket APIGW API. WebSocket API GW (`infra/api-gateway.tf`); Lambda handles all event types (EventBridge → SQS → WsAuthorizer → WebSocket → HTTP); connections stored in ACCOUNTS_TABLE at `CONN#<id>` SK; notifier fans out via `WS_API_ENDPOINT`; Web Push removed in favour of WebSocket
-- [ ] We should also set up the S3 bucket as an origin and connect it to the  CloudFront distribution, so that the front end can deploy there. Which means we need the necessary website related bucket, policy, stuff.
-- [ ] And all buckets should use the new format from AWS to ensure local regional buckets for the account, so that we can be sure these buckets haven't already been claimed. ALL BUCKETS.
+- [x] We should also set up the S3 bucket as an origin and connect it to the  CloudFront distribution, so that the front end can deploy there. Which means we need the necessary website related bucket, policy, stuff.
+- [x] And all buckets should use the new format from AWS to ensure local regional buckets for the account, so that we can be sure these buckets haven't already been claimed. ALL BUCKETS.
 - [x] For the dkim_private_key — resolved: KMS-encrypted ciphertext committed in CI, decrypted at plan time via `kms:Decrypt`. No plaintext in state or variables.
 - [x] **Rename domain verify endpoint** — `POST /domains/:id/verify` → `PATCH /accounts/:accountId/domains/:domainId` (re-check is a state refresh, returns full updated domain).
 - [ ] **Review DynamoDB storage architecture** — audit all handlers for redundant reads/writes. Ensure single-call access patterns where possible. Check that the processor never re-fetches data it already holds. Verify batch operations are used where multiple items are needed.
 - [x] **DMARC policy → p=reject** — deployed.
+- [ ] **platform subdomain** — all records meant for handling CNAMEing for users will have .platform in them. The actual records have been updated. First validate that they are correct, and then we need to change anywhere we were using them.
+- [ ] Review SES sender notification config set, I don't think we created one of those, so we'll need to review and update
 
 
 ---
