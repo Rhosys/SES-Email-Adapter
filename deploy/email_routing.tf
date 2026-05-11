@@ -54,7 +54,7 @@ resource "aws_sesv2_email_identity" "main" {
 # share the same organisational domain.
 resource "aws_sesv2_email_identity_mail_from_attributes" "main" {
   email_identity   = aws_sesv2_email_identity.main.email_identity
-  mail_from_domain = "bounce.${data.aws_route53_zone.main.name}"
+  mail_from_domain = "bounce.platform.${data.aws_route53_zone.main.name}"
 }
 
 # Shared DKIM terminus — all customer domains CNAME here instead of directly to
@@ -64,7 +64,7 @@ resource "aws_sesv2_email_identity_mail_from_attributes" "main" {
 resource "aws_route53_record" "ses_dkim" {
   provider = aws.us_east_1
   zone_id  = data.aws_route53_zone.main.zone_id
-  name     = "mail._domainkey.${data.aws_route53_zone.main.name}"
+  name     = "mail._domainkey.platform.${data.aws_route53_zone.main.name}"
   type     = "CNAME"
   ttl      = 300
   records  = ["mail.${data.aws_route53_zone.main.name}._domainkey.amazonses.com"]
@@ -77,7 +77,7 @@ resource "aws_route53_record" "ses_dkim" {
 resource "aws_route53_record" "ses_mx_host" {
   provider = aws.us_east_1
   zone_id  = data.aws_route53_zone.main.zone_id
-  name     = "mx.${data.aws_route53_zone.main.name}"
+  name     = "mx.platform.${data.aws_route53_zone.main.name}"
   type     = "CNAME"
   ttl      = 300
   records  = ["inbound-smtp.${data.aws_region.current.id}.amazonaws.com"]
@@ -90,7 +90,7 @@ resource "aws_route53_record" "ses_mx" {
   name     = data.aws_route53_zone.main.name
   type     = "MX"
   ttl      = 300
-  records  = ["10 mx.${data.aws_route53_zone.main.name}"]
+  records  = ["10 mx.platform.${data.aws_route53_zone.main.name}"]
 }
 
 # ---------------------------------------------------------------------------
@@ -102,7 +102,7 @@ resource "aws_route53_record" "ses_mx" {
 resource "aws_route53_record" "bounce_mx" {
   provider = aws.us_east_1
   zone_id  = data.aws_route53_zone.main.zone_id
-  name     = "bounce.${data.aws_route53_zone.main.name}"
+  name     = "bounce.platform.${data.aws_route53_zone.main.name}"
   type     = "MX"
   ttl      = 300
   records  = ["10 feedback-smtp.${data.aws_region.current.id}.amazonses.com"]
@@ -112,7 +112,7 @@ resource "aws_route53_record" "bounce_mx" {
 resource "aws_route53_record" "bounce_spf" {
   provider = aws.us_east_1
   zone_id  = data.aws_route53_zone.main.zone_id
-  name     = "bounce.${data.aws_route53_zone.main.name}"
+  name     = "bounce.platform.${data.aws_route53_zone.main.name}"
   type     = "TXT"
   ttl      = 300
   records  = ["v=spf1 include:amazonses.com ~all"]
@@ -126,10 +126,10 @@ resource "aws_route53_record" "bounce_spf" {
 resource "aws_route53_record" "dmarc" {
   provider = aws.us_east_1
   zone_id  = data.aws_route53_zone.main.zone_id
-  name     = "_dmarc.${data.aws_route53_zone.main.name}"
+  name     = "_dmarc.platform.${data.aws_route53_zone.main.name}"
   type     = "TXT"
   ttl      = 300
-  records  = ["v=DMARC1; p=reject; rua=mailto:postmaster@${data.aws_route53_zone.main.name}"]
+  records = ["v=DMARC1;p=reject;pct=100"]
 }
 
 # ---------------------------------------------------------------------------
