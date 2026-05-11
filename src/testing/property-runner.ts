@@ -5,7 +5,8 @@ import fc from "fast-check";
  * Usage: propertyRunner.assert(property, { numRuns: 100 })
  */
 export const propertyRunner = {
-  assert: <T>(property: fc.AsyncProperty<T>, args?: fc.PropertiesArguments) => {
-    return fc.assert(property, { numRuns: 100, ...args });
+  assert: <T>(property: fc.IRawProperty<T>, args?: fc.Parameters<T>): Promise<void> => {
+    const result = fc.assert(property, { numRuns: 100, ...args });
+    return result instanceof Promise ? result : Promise.resolve(result);
   },
 };

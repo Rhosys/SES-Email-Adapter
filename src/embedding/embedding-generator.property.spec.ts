@@ -74,6 +74,8 @@ vi.mock("./cluster-registry.js", () => ({
  */
 describe("Property 5: Active cluster set drives embedding generation", () => {
   const bedrockMock = mockClient(BedrockRuntimeClient);
+  /** Encode JSON as a mock Bedrock response body. */
+  const mockBody = (data: unknown) => new TextEncoder().encode(JSON.stringify(data)) as never;
   let generator: BedrockEmbeddingGenerator;
 
   beforeEach(() => {
@@ -84,7 +86,7 @@ describe("Property 5: Active cluster set drives embedding generation", () => {
   it("generates exactly one embedding per active cluster", async () => {
     // Setup: Mock Bedrock to return a deterministic embedding for any call
     bedrockMock.on(InvokeModelCommand).resolves({
-      body: new TextEncoder().encode(JSON.stringify({ embedding: [0.1, 0.2, 0.3] })),
+      body: mockBody({ embedding: [0.1, 0.2, 0.3] }),
     });
 
     const results = await generator.generateForActiveClusters("test embed text");
@@ -105,7 +107,7 @@ describe("Property 5: Active cluster set drives embedding generation", () => {
   it("does not call Bedrock for inactive clusters", async () => {
     // Setup: Mock Bedrock to track calls
     bedrockMock.on(InvokeModelCommand).resolves({
-      body: new TextEncoder().encode(JSON.stringify({ embedding: [0.1] })),
+      body: mockBody({ embedding: [0.1] }),
     });
 
     await generator.generateForActiveClusters("test text");
@@ -121,7 +123,7 @@ describe("Property 5: Active cluster set drives embedding generation", () => {
 
   it("calls Bedrock with normalize=true for all active clusters", async () => {
     bedrockMock.on(InvokeModelCommand).resolves({
-      body: new TextEncoder().encode(JSON.stringify({ embedding: [0.1] })),
+      body: mockBody({ embedding: [0.1] }),
     });
 
     await generator.generateForActiveClusters("test");
@@ -141,7 +143,7 @@ describe("Property 5: Active cluster set drives embedding generation", () => {
 
   it("calls Bedrock with the correct dimensions per model", async () => {
     bedrockMock.on(InvokeModelCommand).resolves({
-      body: new TextEncoder().encode(JSON.stringify({ embedding: [0.1] })),
+      body: mockBody({ embedding: [0.1] }),
     });
 
     await generator.generateForActiveClusters("test");
@@ -158,7 +160,7 @@ describe("Property 5: Active cluster set drives embedding generation", () => {
 
   it("produces deterministic results for the same input", async () => {
     bedrockMock.on(InvokeModelCommand).resolves({
-      body: new TextEncoder().encode(JSON.stringify({ embedding: [0.5, 0.6] })),
+      body: mockBody({ embedding: [0.5, 0.6] }),
     });
 
     const results1 = await generator.generateForActiveClusters("same text");

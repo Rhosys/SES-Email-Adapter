@@ -12,6 +12,8 @@ import type { BillingPlan } from "../embedding/retention-tier.js";
 import { getReadCluster, getActiveClusters } from "../embedding/cluster-registry.js";
 import { getETLD1, assignSystemLabels, DEFAULT_SPAM_SCORE_THRESHOLD } from "./filter.js";
 
+const RETRY_TRACK_THRESHOLD = 30;
+
 // ---------------------------------------------------------------------------
 // Interfaces
 // ---------------------------------------------------------------------------
@@ -281,9 +283,11 @@ export class SignalProcessor {
     this.retentionService = opts.retentionService;
   }
 
-  async process(event: SQSEvent): Promise<void> {
+  async process(event: SQSEvent): Promise<{ batchItemFailures: Array<{ itemIdentifier: string }> }> {
+    const failures: Array<{ itemIdentifier: string }> = [];
     for (const record of event.Records) {
       try {
+        const receiveCount = Number(record.attributes?.ApproximateReceiveCount ?? "1");
         const sns = JSON.parse(record.body) as { Message: string };
         const notification = JSON.parse(sns.Message) as SesReceiptNotification & { accountId?: string };
         const msg: InboundSignalMessage = {
@@ -295,11 +299,27 @@ export class SignalProcessor {
           dkimVerdict: notification.receipt.dkimVerdict.status,
           dmarcVerdict: notification.receipt.dmarcVerdict.status,
         };
+
+        // On redelivery, check DDB for existing signal before doing expensive work
+        if (receiveCount > 1) {
+          const existing = await this.store.getSignalByMessageId(msg.accountId, msg.sesMessageId);
+          if (existing) continue;
+        }
+
         await this.processMessage(msg);
       } catch (err) {
-        console.error("Failed to process SQS record:", err);
+        const receiveCount = Number(record.attributes?.ApproximateReceiveCount ?? "1");
+        const level = receiveCount > RETRY_TRACK_THRESHOLD ? "error" : "track";
+        const payload = { level, message: "processor.signal.failed", messageId: record.messageId, receiveCount, error: String(err), timestamp: new Date().toISOString() };
+        if (level === "error") {
+          console.error(JSON.stringify(payload));
+        } else {
+          console.log(JSON.stringify(payload));
+        }
+        failures.push({ itemIdentifier: record.messageId });
       }
     }
+    return { batchItemFailures: failures };
   }
 
   private async processMessage(msg: InboundSignalMessage): Promise<void> {

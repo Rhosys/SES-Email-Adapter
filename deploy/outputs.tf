@@ -37,11 +37,6 @@ output "signals_queue_url" {
   value = aws_sqs_queue.signals.url
 }
 
-output "signals_dlq_url" {
-  description = "Dead-letter queue — monitor this for processing failures"
-  value       = aws_sqs_queue.signals_dlq.url
-}
-
 output "aurora_cluster_identifiers" {
   description = "Aurora cluster identifiers keyed by cluster registry ID"
   value       = { for k, v in aws_rds_cluster.aurora : k => v.cluster_identifier }

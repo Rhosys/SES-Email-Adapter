@@ -18,15 +18,16 @@ const plainText = (opts: { minLength: number; maxLength: number }) =>
   fc.stringMatching(new RegExp(`^[a-zA-Z0-9 .,!?;:'"()\\-]{${opts.minLength},${opts.maxLength}}$`));
 
 /** Generates arbitrary EmbedTextInput with optional fields randomly present/absent. */
-const arbEmbedTextInput: fc.Arbitrary<EmbedTextInput> = fc.record({
-  accountId: headerString,
-  from: headerString,
-  replyTo: fc.option(headerString, { nil: undefined }),
-  returnPath: fc.option(headerString, { nil: undefined }),
-  recipientAddress: headerString,
-  subject: headerString,
-  rawTextBody: fc.string({ minLength: 0, maxLength: 6000 }),
-});
+const arbEmbedTextInput: fc.Arbitrary<EmbedTextInput> = fc
+  .record({
+    accountId: headerString,
+    from: headerString,
+    replyTo: headerString,
+    returnPath: headerString,
+    recipientAddress: headerString,
+    subject: headerString,
+    rawTextBody: fc.string({ minLength: 0, maxLength: 6000 }),
+  }, { requiredKeys: ["accountId", "from", "recipientAddress", "subject", "rawTextBody"] }) as fc.Arbitrary<EmbedTextInput>;
 
 // ---------------------------------------------------------------------------
 // Property 1: Embed text is deterministic, bounded, and contains all input fields
@@ -70,12 +71,10 @@ describe("Property 1: Embed text is deterministic, bounded, and contains all inp
     const longBodyInput = fc.record({
       accountId: headerString,
       from: headerString,
-      replyTo: fc.constant(undefined),
-      returnPath: fc.constant(undefined),
       recipientAddress: headerString,
       subject: headerString,
       rawTextBody: plainText({ minLength: 4500, maxLength: 6000 }),
-    });
+    }) as fc.Arbitrary<EmbedTextInput>;
 
     await propertyRunner.assert(
       fc.asyncProperty(longBodyInput, async (input) => {
@@ -161,12 +160,10 @@ describe("Property 2: Sanitization removes all structural HTML/CSS/image artifac
     fc.record({
       accountId: fc.string({ minLength: 1, maxLength: 20 }).filter((s) => !s.includes("\n")),
       from: fc.string({ minLength: 1, maxLength: 50 }).filter((s) => !s.includes("\n")),
-      replyTo: fc.constant(undefined),
-      returnPath: fc.constant(undefined),
       recipientAddress: fc.string({ minLength: 1, maxLength: 50 }).filter((s) => !s.includes("\n")),
       subject: fc.string({ minLength: 1, maxLength: 50 }).filter((s) => !s.includes("\n")),
       rawTextBody: htmlBody,
-    });
+    }) as fc.Arbitrary<EmbedTextInput>;
 
   /**
    * Helper: extracts the body portion from buildEmbedText output.

@@ -80,9 +80,9 @@ describe("Property 19: Plan changes never retroactively retag", () => {
         fc.asyncProperty(arbBillingPlan, async (plan) => {
           const result1 = getRetentionForPlan(plan);
           // Mutate the returned object
-          (result1 as Record<string, unknown>).s3Tag = "MUTATED";
-          (result1 as Record<string, unknown>).retentionDuration = "MUTATED";
-          (result1 as Record<string, unknown>).copyToSaved = "MUTATED";
+          (result1 as unknown as Record<string, unknown>).s3Tag = "MUTATED";
+          (result1 as unknown as Record<string, unknown>).retentionDuration = "MUTATED";
+          (result1 as unknown as Record<string, unknown>).copyToSaved = "MUTATED";
 
           // A fresh call should still return the correct, unmutated result
           const result2 = getRetentionForPlan(plan);

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, vi, type MockInstance } from "vitest";
 import fc from "fast-check";
 import { mockClient } from "aws-sdk-client-mock";
 import { BedrockRuntimeClient, InvokeModelCommand } from "@aws-sdk/client-bedrock-runtime";
@@ -70,8 +70,10 @@ const ACTIVE_CLUSTERS = [
  */
 describe("Property 7: Bedrock failure for one model preserves all other writes", () => {
   const bedrockMock = mockClient(BedrockRuntimeClient);
+  /** Encode JSON as a mock Bedrock response body. */
+  const mockBody = (data: unknown) => new TextEncoder().encode(JSON.stringify(data)) as never;
   let generator: BedrockEmbeddingGenerator;
-  let stdoutSpy: ReturnType<typeof vi.spyOn>;
+  let stdoutSpy: MockInstance;
 
   beforeEach(() => {
     bedrockMock.reset();
@@ -120,9 +122,7 @@ describe("Property 7: Bedrock failure for one model preserves all other writes",
             const body = JSON.parse(new TextDecoder().decode(input.body as Uint8Array));
             const dims = body.dimensions as number;
             return {
-              body: new TextEncoder().encode(
-                JSON.stringify({ embedding: Array(dims).fill(0.42) }),
-              ),
+              body: mockBody({ embedding: Array(dims).fill(0.42) }),
             };
           });
 
@@ -185,7 +185,7 @@ describe("Property 7: Bedrock failure for one model preserves all other writes",
       }
       // Second call (cluster-b) succeeds
       return {
-        body: new TextEncoder().encode(JSON.stringify({ embedding: [0.5, 0.6, 0.7] })),
+        body: mockBody({ embedding: [0.5, 0.6, 0.7] }),
       };
     });
 
@@ -206,7 +206,7 @@ describe("Property 7: Bedrock failure for one model preserves all other writes",
         throw new Error("Bedrock unavailable");
       }
       return {
-        body: new TextEncoder().encode(JSON.stringify({ embedding: [0.1] })),
+        body: mockBody({ embedding: [0.1] }),
       };
     });
 
@@ -224,7 +224,7 @@ describe("Property 7: Bedrock failure for one model preserves all other writes",
   it("does not emit metric for successful models", async () => {
     // Both calls succeed
     bedrockMock.on(InvokeModelCommand).resolves({
-      body: new TextEncoder().encode(JSON.stringify({ embedding: [0.1] })),
+      body: mockBody({ embedding: [0.1] }),
     });
 
     await generator.generateForActiveClusters("test");
@@ -242,7 +242,7 @@ describe("Property 7: Bedrock failure for one model preserves all other writes",
         throw new Error("Bedrock error");
       }
       return {
-        body: new TextEncoder().encode(JSON.stringify({ embedding: [0.2] })),
+        body: mockBody({ embedding: [0.2] }),
       };
     });
 
@@ -273,7 +273,7 @@ describe("Property 7: Bedrock failure for one model preserves all other writes",
       .rejects(new Error("Bedrock throttled"));
     bedrockMock.on(InvokeModelCommand, { modelId: "amazon.titan-embed-text-v3:0" })
       .resolves({
-        body: new TextEncoder().encode(JSON.stringify({ embedding: [0.5, 0.6] })),
+        body: mockBody({ embedding: [0.5, 0.6] }),
       });
 
     const results1 = await generator.generateForActiveClusters("same text");
