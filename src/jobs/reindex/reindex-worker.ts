@@ -23,6 +23,7 @@ import type { Signal } from "../../types/index.js";
 import type { Result } from "../../errors.js";
 import { ok, err, processError } from "../../errors.js";
 import type { ProcessError } from "../../errors.js";
+import type { Logger } from "../../logger.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -52,18 +53,7 @@ const mimeParser = new MailparserMimeParser();
 const embeddingGenerator = new BedrockEmbeddingGenerator(new BedrockRuntimeClient({}));
 const arcDatabase = new ArcDatabase();
 
-// ---------------------------------------------------------------------------
-// Logging helper — escalates level based on SQS receive count
-// ---------------------------------------------------------------------------
 
-function logAtLevel(level: "track" | "error", message: string, context: Record<string, unknown>): void {
-  const payload = { level, message, ...context, timestamp: new Date().toISOString() };
-  if (level === "error") {
-    console.error(JSON.stringify(payload));
-  } else {
-    console.log(JSON.stringify(payload));
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Signal validation — checks minimum fields needed for a pure-copy upsert
@@ -96,7 +86,10 @@ function isNoSuchKeyError(err: unknown): boolean {
 // ---------------------------------------------------------------------------
 
 export class ReindexWorker {
+  constructor(private readonly logger: Logger) {}
+
   async process(event: SQSEvent): Promise<{ batchItemFailures: Array<{ itemIdentifier: string }> }> {
+    this.logger.startInvocation();
     const results = await Promise.all(
       event.Records.map(record => this.processRecord(record))
     );
@@ -107,8 +100,8 @@ export class ReindexWorker {
       if (result.isErr()) {
         const record = event.Records[i]!;
         const receiveCount = Number(record.attributes?.ApproximateReceiveCount ?? "1");
-        const level = receiveCount > RETRY_TRACK_THRESHOLD ? "error" : "track";
-        logAtLevel(level, "reindex.worker.segment_failed", {
+        const logMethod = receiveCount > RETRY_TRACK_THRESHOLD ? "error" : "track";
+        this.logger[logMethod]("reindex.worker.segment_failed", {
           messageId: result.error.messageId,
           receiveCount,
           error: result.error,
@@ -186,7 +179,7 @@ export class ReindexWorker {
 
     // Validate signal has the minimum fields for a copy
     if (!isValidSignalForCopy(item)) {
-      logAtLevel("track", "reindex.worker.malformed_signal", {
+      this.logger.track("reindex.worker.malformed_signal", {
         jobId,
         signalId: id,
         reason: "missing required fields (accountId, arcId, or recipientAddress)",
@@ -237,7 +230,7 @@ export class ReindexWorker {
       }));
     } catch (err) {
       // Per-signal failure: log and continue, do not retry the whole segment
-      logAtLevel("track", "reindex.worker.signal_upsert_failed", {
+      this.logger.track("reindex.worker.signal_upsert_failed", {
         jobId,
         signalId: signal.id,
         arcId: signal.arcId,
@@ -275,7 +268,7 @@ export class ReindexWorker {
         return;
       }
       // Non-NoSuchKey S3 error — log per-signal and continue
-      logAtLevel("track", "reindex.worker.s3_fetch_failed", {
+      this.logger.track("reindex.worker.s3_fetch_failed", {
         jobId,
         signalId: signal.id,
         s3Key,
@@ -318,7 +311,7 @@ export class ReindexWorker {
       }));
     } catch (err) {
       // Per-signal failure during regeneration: log and continue
-      logAtLevel("track", "reindex.worker.regeneration_failed", {
+      this.logger.track("reindex.worker.regeneration_failed", {
         jobId,
         signalId: signal.id,
         s3Key,
@@ -348,7 +341,7 @@ export class ReindexWorker {
     signalId: string,
     reason: string,
   ): Promise<void> {
-    logAtLevel("track", "reindex.worker.unrecoverable", {
+    this.logger.track("reindex.worker.unrecoverable", {
       jobId,
       signalId,
       reason,
@@ -364,7 +357,5 @@ export class ReindexWorker {
 }
 
 // ---------------------------------------------------------------------------
-// Singleton export
+// Factory (handler.ts instantiates with the shared logger)
 // ---------------------------------------------------------------------------
-
-export const reindexWorker = new ReindexWorker();
