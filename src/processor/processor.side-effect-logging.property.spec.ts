@@ -12,6 +12,7 @@ import type { MultiClusterAuroraWriter } from "../database/multi-cluster-aurora-
 import type { Alias, AliasSender, Rule } from "../types/index.js";
 import { dbError } from "../errors.js";
 import { propertyRunner } from "../testing/property-runner.js";
+import { createMockLogger, type MockLogger } from "../testing/mock-logger.js";
 
 // ---------------------------------------------------------------------------
 // Mock the cluster registry
@@ -82,12 +83,10 @@ describe("Property 5: Side effect caller logging", () => {
     classificationModelId: "us.anthropic.claude-opus-4-5-20251101-v1:0",
   };
 
-  let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
-  let consoleLogSpy: ReturnType<typeof vi.spyOn>;
+  let mockLogger: MockLogger;
 
   beforeEach(() => {
-    consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    consoleLogSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    mockLogger = createMockLogger();
   });
 
   afterEach(() => {
@@ -202,8 +201,7 @@ describe("Property 5: Side effect caller logging", () => {
         fc.string({ minLength: 3, maxLength: 20 }),
         async (shouldFail, errorMessage) => {
           vi.clearAllMocks();
-          consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-          consoleLogSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+          mockLogger = createMockLogger();
 
           const notifier: Notifier = {
             notify: shouldFail
@@ -219,25 +217,19 @@ describe("Property 5: Side effect caller logging", () => {
             embeddingGenerator: makeEmbeddingGenerator(),
             auroraWriter: makeAuroraWriter(),
             arcMatcher: makeArcMatcher(),
-            ruleEvaluator: new JsonLogicRuleEvaluator(),
+            ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
             notifier,
+            logger: mockLogger,
           });
 
           await processor.process(makeSqsEvent("test-msg-notify"));
 
           if (shouldFail) {
             // Verify the caller logged at TRACK or ERROR level — not silently discarded
-            const allLogs = [
-              ...consoleErrorSpy.mock.calls.map((c) => c[0] as string),
-              ...consoleLogSpy.mock.calls.map((c) => c[0] as string),
-            ];
-            const sideEffectLog = allLogs.find((log) => {
-              try {
-                const parsed = JSON.parse(log);
-                return parsed.message === "notification_failed" &&
-                  (parsed.level === "track" || parsed.level === "error");
-              } catch { return false; }
-            });
+            const sideEffectLog = mockLogger.calls.find((call) =>
+              call.message === "notification_failed" &&
+              (call.method === "track" || call.method === "error"),
+            );
             expect(sideEffectLog).toBeDefined();
           }
         },
@@ -252,8 +244,7 @@ describe("Property 5: Side effect caller logging", () => {
         fc.string({ minLength: 3, maxLength: 20 }),
         async (shouldFail, errorMessage) => {
           vi.clearAllMocks();
-          consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-          consoleLogSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+          mockLogger = createMockLogger();
 
           const forwarder: Forwarder = {
             forward: shouldFail
@@ -283,25 +274,19 @@ describe("Property 5: Side effect caller logging", () => {
             embeddingGenerator: makeEmbeddingGenerator(),
             auroraWriter: makeAuroraWriter(),
             arcMatcher: makeArcMatcher(),
-            ruleEvaluator: new JsonLogicRuleEvaluator(),
+            ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
             forwarder,
+            logger: mockLogger,
           });
 
           await processor.process(makeSqsEvent("test-msg-forward"));
 
           if (shouldFail) {
             // Verify the caller logged at TRACK or ERROR level — not silently discarded
-            const allLogs = [
-              ...consoleErrorSpy.mock.calls.map((c) => c[0] as string),
-              ...consoleLogSpy.mock.calls.map((c) => c[0] as string),
-            ];
-            const sideEffectLog = allLogs.find((log) => {
-              try {
-                const parsed = JSON.parse(log);
-                return parsed.message === "forward_failed" &&
-                  (parsed.level === "track" || parsed.level === "error");
-              } catch { return false; }
-            });
+            const sideEffectLog = mockLogger.calls.find((call) =>
+              call.message === "forward_failed" &&
+              (call.method === "track" || call.method === "error"),
+            );
             expect(sideEffectLog).toBeDefined();
           }
         },

@@ -11,6 +11,7 @@ import type { EmbeddingGenerator, EmbeddingResult } from "../embedding/embedding
 import type { MultiClusterAuroraWriter } from "../database/multi-cluster-aurora-writer.js";
 import type { Signal, Alias, AliasSender } from "../types/index.js";
 import { propertyRunner } from "../testing/property-runner.js";
+import { createMockLogger } from "../testing/mock-logger.js";
 
 // ---------------------------------------------------------------------------
 // Property 6: Multi-cluster fanout writes vectors to every active target
@@ -235,6 +236,7 @@ describe("Property 6: Multi-cluster fanout writes vectors to every active target
             findMatch: vi.fn().mockResolvedValue(null),
           };
 
+          const mockLogger = createMockLogger();
           const processor = new SignalProcessor({
             store,
             mimeParser,
@@ -242,7 +244,8 @@ describe("Property 6: Multi-cluster fanout writes vectors to every active target
             embeddingGenerator,
             auroraWriter,
             arcMatcher,
-            ruleEvaluator: new JsonLogicRuleEvaluator(),
+            ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
+            logger: mockLogger,
           });
 
           await processor.process(makeSqsEvent(sesMessageId));
@@ -327,6 +330,7 @@ describe("Property 6: Multi-cluster fanout writes vectors to every active target
             findMatch: vi.fn().mockResolvedValue(null),
           };
 
+          const mockLogger = createMockLogger();
           const processor = new SignalProcessor({
             store,
             mimeParser,
@@ -334,7 +338,8 @@ describe("Property 6: Multi-cluster fanout writes vectors to every active target
             embeddingGenerator,
             auroraWriter,
             arcMatcher,
-            ruleEvaluator: new JsonLogicRuleEvaluator(),
+            ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
+            logger: mockLogger,
           });
 
           await processor.process(makeSqsEvent(sesMessageId));
@@ -411,6 +416,7 @@ describe("Property 6: Multi-cluster fanout writes vectors to every active target
             findMatch: vi.fn().mockResolvedValue(null),
           };
 
+          const mockLogger = createMockLogger();
           const processor = new SignalProcessor({
             store,
             mimeParser,
@@ -418,7 +424,8 @@ describe("Property 6: Multi-cluster fanout writes vectors to every active target
             embeddingGenerator,
             auroraWriter,
             arcMatcher,
-            ruleEvaluator: new JsonLogicRuleEvaluator(),
+            ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
+            logger: mockLogger,
           });
 
           await processor.process(makeSqsEvent(sesMessageId));
