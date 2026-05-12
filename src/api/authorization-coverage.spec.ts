@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { createApp } from "./app.js";
 import type { AccessService, AuthService } from "./app.js";
 import { createAuthorize } from "./authorization-middleware.js";
+import { createMockLogger } from "../testing/mock-logger.js";
 
 /**
  * Authorization Coverage Test
@@ -34,7 +35,7 @@ function makeMockDeps() {
   };
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return { store, auth, access } as any;
+  return { store, auth, access, logger: createMockLogger() } as any;
 }
 
 /**
@@ -177,7 +178,7 @@ describe("Authorization Coverage", () => {
       removeUser: vi.fn().mockResolvedValue(undefined),
       checkAccess: vi.fn().mockResolvedValue(undefined),
     };
-    const authz = createAuthorize(access);
+    const authz = createAuthorize(access, createMockLogger());
     app.get("/accounts/:accountId/protected", authz("arcs:read", (c) => `accounts/${c.req.param("accountId")}/arcs`), (c) => c.json({ data: "safe" }));
 
     // Run the same detection logic used in the main test

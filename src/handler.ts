@@ -122,6 +122,7 @@ const app = createApp({
   store: new ApiDatabaseAdapter(arcDb, accountDb, auditDb),
   auth: authService,
   access: new AuthressAccessService(),
+  logger,
   verificationMailer: sesVerificationMailer,
 });
 

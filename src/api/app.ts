@@ -7,6 +7,7 @@ import type { AuditEvent } from "../database/audit-database.js";
 import type { Result, ResultAsync } from "neverthrow";
 import type { DbError, NotFoundError } from "../errors.js";
 import type { Arc, Signal, View, Label, Rule, Domain, DnsRecord, Account, Page, PageParams, ArcStatus, Workflow, WorkflowData, Alias, AliasSender, SenderMode, SenderFilterMode, VerifiedForwardingAddress, Pagination, EmailTemplate } from "../types/index.js";
+import type { Logger } from "../logger.js";
 import { deriveGroupingKey } from "../processor/processor.js";
 import { zParse } from "./validate.js";
 import { authorizationGuard } from "./authorization-guard.js";
@@ -168,6 +169,7 @@ interface AppDeps {
   store: ApiDatabase;
   auth: AuthService;
   access?: AccessService;
+  logger: Logger;
   verificationMailer?: VerificationMailer;
 }
 
@@ -181,7 +183,7 @@ function page<K extends string, T>(key: K, items: T[], nextCursor?: string): Rec
   return { [key]: items, pagination: { cursor: nextCursor ?? null } } as Record<K, T[]> & { pagination: Pagination };
 }
 
-export function createApp({ store, auth, access, verificationMailer }: AppDeps) {
+export function createApp({ store, auth, access, logger, verificationMailer }: AppDeps) {
   const app = new OpenAPIHono<AppEnv>().basePath('/api');
 
   app.doc("/openapi.json", {
@@ -236,7 +238,7 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
   app.use("/accounts/:accountId/*", authorizationGuard());
 
   // Per-route authorization middleware factory
-  const authorize = access ? createAuthorize(access) : null;
+  const authorize = access ? createAuthorize(access, logger) : null;
 
   // Helper that returns the authorize middleware or a no-op if access service is unavailable
   function authz(permission: string, resourceUri: string | ((c: Context<AppEnv>) => string)): ReturnType<NonNullable<typeof authorize>> {

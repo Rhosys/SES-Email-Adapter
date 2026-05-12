@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createApp } from "./app.js";
 import type { ApiDatabase, AuthService, AuthContext, AccessService, VerificationMailer } from "./app.js";
 import { ok, okAsync } from "neverthrow";
+import { createMockLogger } from "../testing/mock-logger.js";
 
 // ---------------------------------------------------------------------------
 // Test doubles (minimal — only what's needed for migration verification)
@@ -121,7 +122,7 @@ describe("Route migration — backward compatibility", () => {
     auth = makeAuth();
     access = makeAccess();
     verificationMailer = { sendForwardVerification: vi.fn().mockReturnValue(okAsync(undefined)) };
-    app = createApp({ store, auth, access, verificationMailer });
+    app = createApp({ store, auth, access, logger: createMockLogger(), verificationMailer });
   });
 
   // -------------------------------------------------------------------------
