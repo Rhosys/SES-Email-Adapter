@@ -76,7 +76,7 @@ const processor = new SignalProcessor({
   arcMatcher: arcDb,
   ruleEvaluator: new JsonLogicRuleEvaluator(logger),
   notifier: new SesNotifier(),
-  forwarder: new SesForwarder(sesv2, s3),
+  forwarder: new SesForwarder(logger, sesv2, s3),
   retentionService: new S3RetentionServiceImpl(s3),
   logger,
 });
