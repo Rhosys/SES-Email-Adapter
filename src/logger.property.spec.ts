@@ -380,6 +380,59 @@ describe("Feature: structured-logging, Property 6: Recursive secret redaction", 
   });
 });
 
+describe("Feature: log-message-review, Property 2: Code field does not duplicate in context", () => {
+  let consoleSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    consoleSpy.mockRestore();
+  });
+
+  it("code appears exactly once in serialized output when provided in context", async () => {
+    /**
+     * Validates: Requirements 2.1, 2.2
+     */
+    const arbLevel = fc.constantFrom(...ALL_LEVELS);
+    const arbMessage = fc.string({ minLength: 1, maxLength: 100 });
+    // Generate valid dot-separated identifiers for code values
+    const arbSegment = fc.stringMatching(/^[a-z][a-z0-9_]{0,15}$/);
+    const arbCode = fc
+      .array(arbSegment, { minLength: 2, maxLength: 4 })
+      .map((segments) => segments.join("."));
+    // Generate random context with additional fields (excluding "code" key)
+    const arbExtraContext = fc.dictionary(
+      fc.string({ minLength: 1, maxLength: 20 }).filter((k) => k !== "code"),
+      fc.jsonValue(),
+    );
+
+    await propertyRunner.assert(
+      fc.asyncProperty(arbLevel, arbMessage, arbCode, arbExtraContext, async (level, message, code, extra) => {
+        consoleSpy.mockClear();
+        const logger = new RequestLogger("test1234");
+        logger.startInvocation();
+
+        const context = { ...extra, code };
+        callLevel(logger, level, message, context);
+
+        const calls = consoleSpy.mock.calls;
+        expect(calls.length).toBeGreaterThanOrEqual(1);
+
+        // Get the primary log entry (last call, skipping any truncation warning)
+        const lastCall = calls[calls.length - 1];
+        const raw = lastCall[0] as string;
+
+        // Count occurrences of "code" as a JSON key in the serialized output.
+        // A JSON key appears as "code": (with quotes and colon).
+        const codeKeyMatches = raw.match(/"code"\s*:/g);
+        expect(codeKeyMatches).not.toBeNull();
+        expect(codeKeyMatches!.length).toBe(1);
+      }),
+    );
+  });
+});
+
 describe("Feature: structured-logging, Property 7: Payload truncation guard", () => {
   let consoleSpy: ReturnType<typeof vi.spyOn>;
 
