@@ -5,11 +5,13 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach, beforeAll } from "vitest";
 import { ResultAsync } from "neverthrow";
-import { ok, err, dbError } from "../errors.js";
+import { dbError } from "../errors.js";
 import type { Arc, Domain, Account } from "../types/index.js";
+import { createMockLogger } from "../testing/mock-logger.js";
+import type { MockLogger } from "../testing/mock-logger.js";
 
 // ---------------------------------------------------------------------------
-// Module mocks — must be declared before importing the handler
+// Module mocks
 // ---------------------------------------------------------------------------
 
 const mockScanAllDomains = vi.fn();
@@ -57,11 +59,11 @@ vi.mock("@aws-sdk/client-sesv2", () => ({
   SendEmailCommand: vi.fn(),
 }));
 
-// Import handler after mocks are set up
-let handler: () => Promise<void>;
+// Import DomainHealthJob after mocks are set up
+let DomainHealthJob: typeof import("./domain-health-job.js").DomainHealthJob;
 beforeAll(async () => {
   const mod = await import("./domain-health-job.js");
-  handler = mod.handler;
+  DomainHealthJob = mod.DomainHealthJob;
 });
 
 // ---------------------------------------------------------------------------
@@ -102,35 +104,28 @@ function setupDefaultMocks() {
   mockUpdateDomainHealth.mockReturnValue(okAsync(undefined));
 }
 
-/** Extract all JSON objects logged via console.log */
-function getLoggedEntries(spy: ReturnType<typeof vi.spyOn>): unknown[] {
-  return spy.mock.calls
-    .map(([arg]) => {
-      try { return JSON.parse(arg as string); }
-      catch { return null; }
-    })
-    .filter((v): v is object => v !== null);
-}
-
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
 describe("domain-health-job staleness integration", () => {
-  let consoleSpy: ReturnType<typeof vi.spyOn>;
+  let mockLogger: MockLogger;
+  let job: InstanceType<typeof DomainHealthJob>;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2025-05-11T16:00:00.000Z"));
-    consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-    vi.spyOn(console, "error").mockImplementation(() => {});
     setupDefaultMocks();
     mockCheckDomain.mockResolvedValue([]);
+
+    mockLogger = createMockLogger();
+    const { AccountDatabase } = await import("../database/account-database.js");
+    const { ArcDatabase } = await import("../database/arc-database.js");
+    job = new DomainHealthJob(new AccountDatabase() as any, new ArcDatabase() as any, mockLogger);
   });
 
   afterEach(() => {
     vi.useRealTimers();
-    consoleSpy.mockRestore();
     mockScanAllDomains.mockReset();
     mockGetAccount.mockReset();
     mockUpdateDomainHealth.mockReset();
@@ -157,15 +152,12 @@ describe("domain-health-job staleness integration", () => {
     });
     mockListActiveArcsBefore.mockReturnValue(okAsync([staleArc]));
 
-    await handler();
+    await job.run();
 
-    const entries = getLoggedEntries(consoleSpy);
-    const trackLogs = entries.filter((e: any) => e.level === "track" && e.message === "staleness_checker.outstanding_arcs");
+    const trackCalls = mockLogger.calls.filter(c => c.method === "track" && c.message === "staleness_checker.outstanding_arcs");
 
-    expect(trackLogs).toHaveLength(1);
-    expect(trackLogs[0]).toMatchObject({
-      level: "track",
-      message: "staleness_checker.outstanding_arcs",
+    expect(trackCalls).toHaveLength(1);
+    expect(trackCalls[0]!.context).toMatchObject({
       accountId: "acct-1",
       outstandingArcCount: 1,
       oldestArcLastSignalAt: "2025-04-01T00:00:00.000Z",
@@ -184,12 +176,11 @@ describe("domain-health-job staleness integration", () => {
     // No stale arcs returned
     mockListActiveArcsBefore.mockReturnValue(okAsync([]));
 
-    await handler();
+    await job.run();
 
-    const entries = getLoggedEntries(consoleSpy);
-    const trackLogs = entries.filter((e: any) => e.level === "track" && e.message === "staleness_checker.outstanding_arcs");
+    const trackCalls = mockLogger.calls.filter(c => c.method === "track" && c.message === "staleness_checker.outstanding_arcs");
 
-    expect(trackLogs).toHaveLength(0);
+    expect(trackCalls).toHaveLength(0);
   });
 
   it("does not emit TRACK log when arcs are returned but none qualify as outstanding", async () => {
@@ -207,12 +198,11 @@ describe("domain-health-job staleness integration", () => {
     });
     mockListActiveArcsBefore.mockReturnValue(okAsync([silentArc]));
 
-    await handler();
+    await job.run();
 
-    const entries = getLoggedEntries(consoleSpy);
-    const trackLogs = entries.filter((e: any) => e.level === "track" && e.message === "staleness_checker.outstanding_arcs");
+    const trackCalls = mockLogger.calls.filter(c => c.method === "track" && c.message === "staleness_checker.outstanding_arcs");
 
-    expect(trackLogs).toHaveLength(0);
+    expect(trackCalls).toHaveLength(0);
   });
 
   // -------------------------------------------------------------------------
@@ -234,23 +224,19 @@ describe("domain-health-job staleness integration", () => {
       return okAsync([makeArc({ id: "arc-ok", accountId: "acct-ok", status: "active", urgency: "high", lastSignalAt: "2025-04-01T00:00:00.000Z" })]);
     });
 
-    await handler();
-
-    const entries = getLoggedEntries(consoleSpy);
+    await job.run();
 
     // Error logged for the failing account
-    const errorLogs = entries.filter((e: any) => e.level === "error" && e.message === "staleness_checker.account_error");
-    expect(errorLogs).toHaveLength(1);
-    expect(errorLogs[0]).toMatchObject({
-      level: "error",
-      message: "staleness_checker.account_error",
+    const errorCalls = mockLogger.calls.filter(c => c.method === "error" && c.message === "staleness_checker.account_error");
+    expect(errorCalls).toHaveLength(1);
+    expect(errorCalls[0]!.context).toMatchObject({
       accountId: "acct-fail",
     });
 
     // TRACK log still emitted for the successful account
-    const trackLogs = entries.filter((e: any) => e.level === "track" && e.message === "staleness_checker.outstanding_arcs");
-    expect(trackLogs).toHaveLength(1);
-    expect(trackLogs[0]).toMatchObject({
+    const trackCalls = mockLogger.calls.filter(c => c.method === "track" && c.message === "staleness_checker.outstanding_arcs");
+    expect(trackCalls).toHaveLength(1);
+    expect(trackCalls[0]!.context).toMatchObject({
       accountId: "acct-ok",
       outstandingArcCount: 1,
     });
@@ -279,21 +265,17 @@ describe("domain-health-job staleness integration", () => {
       return okAsync([]);
     });
 
-    await handler();
+    await job.run();
 
-    const entries = getLoggedEntries(consoleSpy);
-    const runCompleteLogs = entries.filter((e: any) => e.level === "info" && e.message === "staleness_checker.run_complete");
+    const infoCalls = mockLogger.calls.filter(c => c.method === "info" && c.message === "staleness_checker.run_complete");
 
-    expect(runCompleteLogs).toHaveLength(1);
-    expect(runCompleteLogs[0]).toMatchObject({
-      level: "info",
-      message: "staleness_checker.run_complete",
+    expect(infoCalls).toHaveLength(1);
+    expect(infoCalls[0]!.context).toMatchObject({
       accountsWithOutstandingArcs: 1,
       totalOutstandingArcs: 2,
     });
     // durationMs should be present and non-negative
-    expect((runCompleteLogs[0] as any).durationMs).toBeGreaterThanOrEqual(0);
-    expect((runCompleteLogs[0] as any).timestamp).toBeDefined();
+    expect((infoCalls[0]!.context as any).durationMs).toBeGreaterThanOrEqual(0);
   });
 
   it("emits run-complete log with zero counts when no accounts have outstanding arcs", async () => {
@@ -302,15 +284,12 @@ describe("domain-health-job staleness integration", () => {
     mockGetAccount.mockReturnValue(okAsync({ id: "acct-clean", notifications: {} } as Account));
     mockListActiveArcsBefore.mockReturnValue(okAsync([]));
 
-    await handler();
+    await job.run();
 
-    const entries = getLoggedEntries(consoleSpy);
-    const runCompleteLogs = entries.filter((e: any) => e.level === "info" && e.message === "staleness_checker.run_complete");
+    const infoCalls = mockLogger.calls.filter(c => c.method === "info" && c.message === "staleness_checker.run_complete");
 
-    expect(runCompleteLogs).toHaveLength(1);
-    expect(runCompleteLogs[0]).toMatchObject({
-      level: "info",
-      message: "staleness_checker.run_complete",
+    expect(infoCalls).toHaveLength(1);
+    expect(infoCalls[0]!.context).toMatchObject({
       accountsWithOutstandingArcs: 0,
       totalOutstandingArcs: 0,
     });
@@ -322,15 +301,12 @@ describe("domain-health-job staleness integration", () => {
     mockGetAccount.mockReturnValue(okAsync({ id: "acct-err", notifications: {} } as Account));
     mockListActiveArcsBefore.mockReturnValue(errAsync(new Error("Total failure")));
 
-    await handler();
+    await job.run();
 
-    const entries = getLoggedEntries(consoleSpy);
-    const runCompleteLogs = entries.filter((e: any) => e.level === "info" && e.message === "staleness_checker.run_complete");
+    const infoCalls = mockLogger.calls.filter(c => c.method === "info" && c.message === "staleness_checker.run_complete");
 
-    expect(runCompleteLogs).toHaveLength(1);
-    expect(runCompleteLogs[0]).toMatchObject({
-      level: "info",
-      message: "staleness_checker.run_complete",
+    expect(infoCalls).toHaveLength(1);
+    expect(infoCalls[0]!.context).toMatchObject({
       accountsWithOutstandingArcs: 0,
       totalOutstandingArcs: 0,
     });

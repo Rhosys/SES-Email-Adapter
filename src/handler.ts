@@ -14,7 +14,7 @@ import { SESv2Client, SendEmailCommand } from "@aws-sdk/client-sesv2";
 import { SesNotifier } from "./notifier/ses-notifier.js";
 import { SesForwarder } from "./notifier/ses-forwarder.js";
 import { FeedbackProcessor } from "./notifier/feedback-processor.js";
-import { handler as domainHealthHandler } from "./jobs/domain-health-job.js";
+import { DomainHealthJob } from "./jobs/domain-health-job.js";
 import { ResultAsync } from "neverthrow";
 import { dbError } from "./errors.js";
 import type { VerificationMailer } from "./api/app.js";
@@ -85,6 +85,8 @@ const feedbackProcessor = new FeedbackProcessor(processingDb, accountDb);
 
 const reindexWorker = new ReindexWorker(logger);
 
+const domainHealthJob = new DomainHealthJob(accountDb, arcDb, logger);
+
 const NOTIFICATION_FROM = process.env["NOTIFICATION_FROM"] ?? "";
 const APP_BASE_URL = process.env["APP_BASE_URL"] ?? "";
 const CONFIG_SET = process.env["SES_CONFIGURATION_SET"] ?? "";
@@ -133,7 +135,7 @@ export async function handler(
 ): Promise<APIGatewayProxyResultV2 | WsAuthorizerResult | { statusCode: number } | { batchItemFailures: Array<{ itemIdentifier: string }> } | void> {
   if (isEventBridgeEvent(event)) {
     if ((event as EventBridgeEvent<string, { source?: string }>).detail?.source === "domain-health-job") {
-      await domainHealthHandler();
+      await domainHealthJob.run();
     }
     return;
   }
