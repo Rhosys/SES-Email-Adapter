@@ -81,7 +81,7 @@ const processor = new SignalProcessor({
   logger,
 });
 
-const feedbackProcessor = new FeedbackProcessor(processingDb, accountDb);
+const feedbackProcessor = new FeedbackProcessor(processingDb, accountDb, logger);
 
 const reindexWorker = new ReindexWorker(logger);
 
