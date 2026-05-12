@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto";
 import type { SQSEvent, SQSRecord } from "aws-lambda";
 import { ResultAsync } from "neverthrow";
+import type { Logger } from "../logger.js";
 import type { Result } from "neverthrow";
 import { ok, err, dbError, processError } from "../errors.js";
 import type { DbError, InvalidResponseError, ProcessError } from "../errors.js";
@@ -17,15 +18,6 @@ import { getReadCluster, getActiveClusters } from "../embedding/cluster-registry
 import { getETLD1, assignSystemLabels, DEFAULT_SPAM_SCORE_THRESHOLD } from "./filter.js";
 
 const RETRY_TRACK_THRESHOLD = 30;
-
-function log(level: "track" | "error", message: string, context: Record<string, unknown>): void {
-  const payload = { level, message, ...context, timestamp: new Date().toISOString() };
-  if (level === "error") {
-    console.error(JSON.stringify(payload));
-  } else {
-    console.log(JSON.stringify(payload));
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Interfaces
@@ -263,6 +255,7 @@ interface SignalProcessorOptions {
   auroraWriter: MultiClusterAuroraWriter;
   arcMatcher: ArcMatcher;
   ruleEvaluator: RuleEvaluator;
+  logger: Logger;
   notifier?: Notifier;
   forwarder?: Forwarder;
   testReplier?: TestReplier;
@@ -277,6 +270,7 @@ export class SignalProcessor {
   private readonly auroraWriter: MultiClusterAuroraWriter;
   private readonly arcMatcher: ArcMatcher;
   private readonly ruleEvaluator: RuleEvaluator;
+  private readonly logger: Logger;
   private readonly notifier: Notifier | undefined;
   private readonly forwarder: Forwarder | undefined;
   private readonly testReplier: TestReplier | undefined;
@@ -290,6 +284,7 @@ export class SignalProcessor {
     this.auroraWriter = opts.auroraWriter;
     this.arcMatcher = opts.arcMatcher;
     this.ruleEvaluator = opts.ruleEvaluator;
+    this.logger = opts.logger;
     this.notifier = opts.notifier;
     this.forwarder = opts.forwarder;
     this.testReplier = opts.testReplier;
@@ -336,6 +331,8 @@ export class SignalProcessor {
   }
 
   async process(event: SQSEvent): Promise<{ batchItemFailures: Array<{ itemIdentifier: string }> }> {
+    this.logger.startInvocation();
+
     const results = await Promise.all(
       event.Records.map(record => this.processRecord(record))
     );
@@ -347,7 +344,11 @@ export class SignalProcessor {
         const record = event.Records[i]!;
         const receiveCount = Number(record.attributes?.ApproximateReceiveCount ?? "1");
         const level = receiveCount > RETRY_TRACK_THRESHOLD ? "error" : "track";
-        log(level, "processor.signal.failed", { messageId: result.error.messageId, receiveCount });
+        if (level === "error") {
+          this.logger.error("processor.signal.failed", { messageId: result.error.messageId, receiveCount });
+        } else {
+          this.logger.track("processor.signal.failed", { messageId: result.error.messageId, receiveCount });
+        }
         failures.push({ itemIdentifier: result.error.messageId });
       }
     }
@@ -365,6 +366,7 @@ export class SignalProcessor {
 
     // 2. Parse MIME
     const parsed = await this.mimeParser.parse(s3Key);
+    this.logger.trackPoint("parse");
 
     const recipientAddress = destination[0] ?? "";
     const senderETLD1 = getETLD1(parsed.from.address);
@@ -385,6 +387,7 @@ export class SignalProcessor {
         receivedAt: timestamp,
       }),
     ]);
+    this.logger.trackPoint("classify");
 
     // Use the read cluster's embedding for arc matching (backward-compatible with single-cluster)
     const readCluster = getReadCluster();
@@ -436,6 +439,7 @@ export class SignalProcessor {
     }
 
     const isMatchedArc = matchedArc !== null;
+    this.logger.trackPoint("arc_match");
 
     // 7. Build arc shell (lastSignalAt applied after rules — archive outcome suppresses it on existing arcs)
     let arc: Arc;
@@ -516,6 +520,7 @@ export class SignalProcessor {
     const rules = rulesResult.value;
     const matchedRules = await applyRules(rules, { signal: signalShell, arc, isMatchedArc }, this.ruleEvaluator);
     const outcome = deriveOutcome(matchedRules);
+    this.logger.trackPoint("rules");
 
     // Fallback: if no rule set a status, apply filter mode for untrusted senders
     const hasStatusOutcome = outcome.block || outcome.quarantine || outcome.archive || outcome.delete;
@@ -535,7 +540,7 @@ export class SignalProcessor {
       if (saveResult.isErr()) return err(saveResult.error);
       const repResult = await this.store.updateGlobalReputation(senderETLD1, { wasSpam: classification.spamScore >= spamScoreThreshold, wasBlocked: true });
       if (repResult.isErr()) {
-        console.error(JSON.stringify({ level: "track", message: "reputation_update_failed", accountId, error: String(repResult.error.cause) }));
+        this.logger.track("reputation_update_failed", { accountId, error: String(repResult.error.cause) });
       }
       return ok(undefined);
     }
@@ -549,12 +554,12 @@ export class SignalProcessor {
       if (this.notifier && !outcome.quarantineHidden) {
         const notifyResult = await this.notifier.notifyBlocked(accountId, quarantinedSignal);
         if (notifyResult.isErr()) {
-          console.error(JSON.stringify({ level: "track", message: "quarantine_notification_failed", accountId, error: String(notifyResult.error.cause) }));
+          this.logger.track("quarantine_notification_failed", { accountId, error: String(notifyResult.error.cause) });
         }
       }
       const repResult = await this.store.updateGlobalReputation(senderETLD1, { wasSpam: classification.spamScore >= spamScoreThreshold, wasBlocked: true });
       if (repResult.isErr()) {
-        console.error(JSON.stringify({ level: "track", message: "reputation_update_failed", accountId, error: String(repResult.error.cause) }));
+        this.logger.track("reputation_update_failed", { accountId, error: String(repResult.error.cause) });
       }
       return ok(undefined);
     }
@@ -600,7 +605,7 @@ export class SignalProcessor {
         (e) => dbError(e instanceof Error ? e : new Error(String(e))),
       );
       if (pongResult.isErr()) {
-        console.error(JSON.stringify({ level: "error", message: "pong_reply_failed", accountId, error: String(pongResult.error.cause) }));
+        this.logger.error("pong_reply_failed", { accountId, error: String(pongResult.error.cause) });
       } else if (pongResult.value) {
         arc.sentMessageIds = [...(arc.sentMessageIds ?? []), pongResult.value.messageId];
       }
@@ -619,6 +624,7 @@ export class SignalProcessor {
 
     const saveSignalResult = await this.store.saveSignal(signal);
     if (saveSignalResult.isErr()) return err(saveSignalResult.error);
+    this.logger.trackPoint("save");
 
     // 13. Apply S3 retention based on billing plan (only on new signal creation, never retroactive)
     if (this.retentionService) {
@@ -633,7 +639,7 @@ export class SignalProcessor {
       if (retentionApplyResult.isErr()) {
         // Retention application failure is non-fatal — the signal is already saved.
         // The default lifecycle rule will apply (5-year inbox/ expiry).
-        console.error(JSON.stringify({ level: "error", message: "s3_retention_failed", accountId, error: String(retentionApplyResult.error.cause) }));
+        this.logger.error("s3_retention_failed", { accountId, error: String(retentionApplyResult.error.cause) });
       } else {
         const { s3Key: updatedS3Key } = retentionApplyResult.value;
 
@@ -646,7 +652,7 @@ export class SignalProcessor {
         }
         const retentionSaveResult = await this.store.updateSignalRetention(accountId, signal.id, retentionUpdate);
         if (retentionSaveResult.isErr()) {
-          console.error(JSON.stringify({ level: "track", message: "retention_metadata_save_failed", accountId, error: String(retentionSaveResult.error.cause) }));
+          this.logger.track("retention_metadata_save_failed", { accountId, error: String(retentionSaveResult.error.cause) });
         }
 
         // Set TTL on the arc based on retentionDuration
@@ -661,7 +667,7 @@ export class SignalProcessor {
       const calSignal = buildCalendarSignal(arc, signal, now, ttl);
       const calSaveResult = await this.store.saveSignal(calSignal);
       if (calSaveResult.isErr()) {
-        console.error(JSON.stringify({ level: "track", message: "calendar_signal_save_failed", accountId, error: String(calSaveResult.error.cause) }));
+        this.logger.track("calendar_signal_save_failed", { accountId, error: String(calSaveResult.error.cause) });
       }
     }
 
@@ -688,7 +694,7 @@ export class SignalProcessor {
         if (upsertResult.isErr()) {
           // Per-cluster Aurora failure: log and continue.
           // The DynamoDB cache entry preserves the embedding for recovery via reindex.
-          console.error(JSON.stringify({ level: "error", message: "aurora_upsert_failed", accountId, clusterId: cluster.clusterId, error: String(upsertResult.error.cause) }));
+          this.logger.error("aurora_upsert_failed", { accountId, clusterId: cluster.clusterId, error: String(upsertResult.error.cause) });
         }
       }),
     );
@@ -703,7 +709,7 @@ export class SignalProcessor {
       for (const toAddress of outcome.forwardAddresses) {
         const forwardResult = await this.forwarder.forward(s3Key, toAddress, accountId, forwardOpts);
         if (forwardResult.isErr()) {
-          console.error(JSON.stringify({ level: "error", message: "forward_failed", accountId, toAddress, error: String(forwardResult.error.cause) }));
+          this.logger.error("forward_failed", { accountId, toAddress, error: String(forwardResult.error.cause) });
         }
       }
     }
@@ -734,7 +740,7 @@ export class SignalProcessor {
             (e) => dbError(e instanceof Error ? e : new Error(String(e))),
           );
           if (replyResult.isErr()) {
-            console.error(JSON.stringify({ level: "error", message: "auto_reply_failed", accountId, error: String(replyResult.error.cause) }));
+            this.logger.error("auto_reply_failed", { accountId, error: String(replyResult.error.cause) });
           } else if (replyResult.value) {
             arc.sentMessageIds = [...(arc.sentMessageIds ?? []), replyResult.value.messageId];
           }
@@ -784,7 +790,7 @@ export class SignalProcessor {
         };
         const draftSaveResult = await this.store.saveSignal(draft);
         if (draftSaveResult.isErr()) {
-          console.error(JSON.stringify({ level: "track", message: "auto_draft_save_failed", accountId, error: String(draftSaveResult.error.cause) }));
+          this.logger.track("auto_draft_save_failed", { accountId, error: String(draftSaveResult.error.cause) });
         }
       }
     }
@@ -793,7 +799,7 @@ export class SignalProcessor {
     if (this.notifier && !outcome.suppressNotification) {
       const notifyResult = await this.notifier.notify(accountId, arc, signal);
       if (notifyResult.isErr()) {
-        console.error(JSON.stringify({ level: "track", message: "notification_failed", accountId, error: String(notifyResult.error.cause) }));
+        this.logger.track("notification_failed", { accountId, error: String(notifyResult.error.cause) });
       }
     }
 
@@ -802,7 +808,7 @@ export class SignalProcessor {
       wasBlocked: false,
     });
     if (finalRepResult.isErr()) {
-      console.error(JSON.stringify({ level: "track", message: "reputation_update_failed", accountId, error: String(finalRepResult.error.cause) }));
+      this.logger.track("reputation_update_failed", { accountId, error: String(finalRepResult.error.cause) });
     }
 
     return ok(undefined);
