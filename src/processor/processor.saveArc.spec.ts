@@ -13,6 +13,7 @@ import type { ArcMatcher } from "./processor.js";
 import type { S3RetentionService } from "../embedding/s3-retention-service.js";
 import type { Arc, Alias, EmailTemplate } from "../types/index.js";
 import type { SQSEvent } from "aws-lambda";
+import { createMockLogger } from "../testing/mock-logger.js";
 
 // Mock cluster-registry so processor can resolve the read cluster
 vi.mock("../embedding/cluster-registry.js", () => {
@@ -281,6 +282,7 @@ describe("Feature: dynamodb-storage-optimization, Property 1: Single saveArc cal
             }
           : undefined;
 
+        const mockLogger = createMockLogger();
         const processor = new SignalProcessor({
           store,
           mimeParser,
@@ -288,8 +290,9 @@ describe("Feature: dynamodb-storage-optimization, Property 1: Single saveArc cal
           embeddingGenerator,
           auroraWriter,
           arcMatcher,
-          ruleEvaluator: new JsonLogicRuleEvaluator(),
+          ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
           testReplier,
+          logger: mockLogger,
           ...(retentionService ? { retentionService } : {}),
         });
 

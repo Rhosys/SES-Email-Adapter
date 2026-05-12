@@ -11,6 +11,7 @@ import type { EmbeddingGenerator, EmbeddingResult } from "../embedding/embedding
 import type { MultiClusterAuroraWriter } from "../database/multi-cluster-aurora-writer.js";
 import type { Signal, Alias, AliasSender } from "../types/index.js";
 import { propertyRunner } from "../testing/property-runner.js";
+import { createMockLogger, type MockLogger } from "../testing/mock-logger.js";
 
 // ---------------------------------------------------------------------------
 // Mock the cluster registry with two active clusters
@@ -59,8 +60,8 @@ vi.mock("../embedding/cluster-registry.js", () => {
  * Aurora row.
  */
 describe("Property 8: Aurora cluster failure preserves the DynamoDB cache entry", () => {
-  // Suppress expected console.error from the processor's Aurora failure catch block
-  beforeEach(() => { vi.spyOn(console, "error").mockImplementation(() => {}); });
+  let mockLogger: MockLogger;
+  beforeEach(() => { mockLogger = createMockLogger(); });
   afterEach(() => { vi.restoreAllMocks(); });
 
   const TEST_ACCOUNT_ID = "acct-prop8";
@@ -229,7 +230,8 @@ describe("Property 8: Aurora cluster failure preserves the DynamoDB cache entry"
             embeddingGenerator,
             auroraWriter,
             arcMatcher,
-            ruleEvaluator: new JsonLogicRuleEvaluator(),
+            ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
+            logger: mockLogger,
           });
 
           await processor.process(makeSqsEvent(sesMessageId));
@@ -293,7 +295,8 @@ describe("Property 8: Aurora cluster failure preserves the DynamoDB cache entry"
             embeddingGenerator,
             auroraWriter,
             arcMatcher,
-            ruleEvaluator: new JsonLogicRuleEvaluator(),
+            ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
+            logger: mockLogger,
           });
 
           await processor.process(makeSqsEvent(sesMessageId));

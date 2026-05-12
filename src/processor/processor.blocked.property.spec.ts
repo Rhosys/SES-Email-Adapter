@@ -11,6 +11,7 @@ import type { EmbeddingGenerator, EmbeddingResult } from "../embedding/embedding
 import type { MultiClusterAuroraWriter } from "../database/multi-cluster-aurora-writer.js";
 import type { Alias, AliasSender, Rule, SenderFilterMode, Workflow } from "../types/index.js";
 import { propertyRunner } from "../testing/property-runner.js";
+import { createMockLogger } from "../testing/mock-logger.js";
 
 // ---------------------------------------------------------------------------
 // Property 2: Blocked/quarantined signals never trigger saveArc
@@ -288,8 +289,7 @@ describe("Feature: dynamodb-storage-optimization, Property 2: Blocked/quarantine
         // Random spam score variation for high_spam strategy (0.9–1.0)
         fc.double({ min: 0.9, max: 1.0, noNaN: true }),
         async (strategy, msgIdSuffix, spamScore) => {
-          // Suppress expected console.error from reputation updates
-          vi.spyOn(console, "error").mockImplementation(() => {});
+          const mockLogger = createMockLogger();
 
           const store = makeStore();
           const config = configureForStrategy(strategy, store);
@@ -333,7 +333,8 @@ describe("Feature: dynamodb-storage-optimization, Property 2: Blocked/quarantine
             embeddingGenerator: makeEmbeddingGenerator(),
             auroraWriter: makeAuroraWriter(),
             arcMatcher: makeArcMatcher(),
-            ruleEvaluator: new JsonLogicRuleEvaluator(),
+            ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
+            logger: mockLogger,
           });
 
           const sesMessageId = `msg-blocked-${msgIdSuffix}`;
@@ -346,8 +347,6 @@ describe("Feature: dynamodb-storage-optimization, Property 2: Blocked/quarantine
               `Expected zero saveArc calls for strategy "${strategy}", but got ${saveArcCalls.length}`,
             );
           }
-
-          vi.restoreAllMocks();
         },
       ),
     );

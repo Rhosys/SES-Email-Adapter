@@ -11,6 +11,7 @@ import type { EmbeddingGenerator, EmbeddingResult } from "../embedding/embedding
 import type { MultiClusterAuroraWriter } from "../database/multi-cluster-aurora-writer.js";
 import type { Signal, Alias, AliasSender } from "../types/index.js";
 import { propertyRunner } from "../testing/property-runner.js";
+import { createMockLogger } from "../testing/mock-logger.js";
 
 // ---------------------------------------------------------------------------
 // Mock the cluster registry with a single active cluster
@@ -188,6 +189,7 @@ describe("Property 9 (full scope): Cross-layer idempotence — live writes + cac
             findMatch: vi.fn().mockResolvedValue(null),
           };
 
+          const mockLogger = createMockLogger();
           const processor = new SignalProcessor({
             store,
             mimeParser: makeMimeParser(),
@@ -195,7 +197,8 @@ describe("Property 9 (full scope): Cross-layer idempotence — live writes + cac
             embeddingGenerator,
             auroraWriter,
             arcMatcher: makeArcMatcher(),
-            ruleEvaluator: new JsonLogicRuleEvaluator(),
+            ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
+            logger: mockLogger,
           });
 
           const event = makeSqsEvent(sesMessageId);
@@ -271,6 +274,7 @@ describe("Property 9 (full scope): Cross-layer idempotence — live writes + cac
             findMatch: vi.fn().mockResolvedValue(null),
           };
 
+          const mockLogger = createMockLogger();
           const processor = new SignalProcessor({
             store,
             mimeParser: makeMimeParser(),
@@ -278,7 +282,8 @@ describe("Property 9 (full scope): Cross-layer idempotence — live writes + cac
             embeddingGenerator,
             auroraWriter,
             arcMatcher: makeArcMatcher(),
-            ruleEvaluator: new JsonLogicRuleEvaluator(),
+            ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
+            logger: mockLogger,
           });
 
           const event = makeSqsEvent(sesMessageId);
@@ -363,6 +368,7 @@ describe("Property 9 (full scope): Cross-layer idempotence — live writes + cac
             findMatch: vi.fn().mockResolvedValue(null),
           };
 
+          const mockLogger1 = createMockLogger();
           const processorRun1 = new SignalProcessor({
             store: storeRun1,
             mimeParser: makeMimeParser(),
@@ -370,7 +376,8 @@ describe("Property 9 (full scope): Cross-layer idempotence — live writes + cac
             embeddingGenerator,
             auroraWriter,
             arcMatcher: makeArcMatcher(),
-            ruleEvaluator: new JsonLogicRuleEvaluator(),
+            ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger1),
+            logger: mockLogger1,
           });
 
           await processorRun1.process(makeSqsEvent(sesMessageId));
@@ -411,6 +418,7 @@ describe("Property 9 (full scope): Cross-layer idempotence — live writes + cac
             findMatch: vi.fn().mockResolvedValue(null),
           };
 
+          const mockLogger2 = createMockLogger();
           const processorRun2 = new SignalProcessor({
             store: storeRun2,
             mimeParser: makeMimeParser(),
@@ -418,7 +426,8 @@ describe("Property 9 (full scope): Cross-layer idempotence — live writes + cac
             embeddingGenerator: embeddingGenerator2,
             auroraWriter: auroraWriter2,
             arcMatcher: makeArcMatcher(),
-            ruleEvaluator: new JsonLogicRuleEvaluator(),
+            ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger2),
+            logger: mockLogger2,
           });
 
           await processorRun2.process(makeSqsEvent(sesMessageId));

@@ -11,6 +11,7 @@ import type { EmbeddingGenerator } from "../embedding/embedding-generator.js";
 import type { MultiClusterAuroraWriter } from "../database/multi-cluster-aurora-writer.js";
 import { dbError } from "../errors.js";
 import { propertyRunner } from "../testing/property-runner.js";
+import { createMockLogger } from "../testing/mock-logger.js";
 
 // ---------------------------------------------------------------------------
 // Mock the cluster registry
@@ -127,6 +128,7 @@ describe("Property 7: ProcessError always carries the SQS messageId", () => {
       upsertEmbedding: vi.fn().mockReturnValue(okAsync(undefined)),
     };
 
+    const mockLogger = createMockLogger();
     return new SignalProcessor({
       store,
       mimeParser,
@@ -134,7 +136,8 @@ describe("Property 7: ProcessError always carries the SQS messageId", () => {
       embeddingGenerator,
       auroraWriter,
       arcMatcher,
-      ruleEvaluator: new JsonLogicRuleEvaluator(),
+      ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
+      logger: mockLogger,
     });
   }
 

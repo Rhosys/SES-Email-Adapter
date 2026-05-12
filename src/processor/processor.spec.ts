@@ -12,6 +12,7 @@ import type { EmbeddingGenerator, EmbeddingResult } from "../embedding/embedding
 import type { MultiClusterAuroraWriter } from "../database/multi-cluster-aurora-writer.js";
 import type { Arc, Rule, Signal, Alias, AccountFilteringConfig } from "../types/index.js";
 import { dbError } from "../errors.js";
+import { createMockLogger, type MockLogger } from "../testing/mock-logger.js";
 
 // Mock cluster-registry so processor can resolve the read cluster
 vi.mock("../embedding/cluster-registry.js", () => {
@@ -141,8 +142,8 @@ function makeArcMatcher(): ArcMatcher {
   };
 }
 
-function makeRuleEvaluator(): RuleEvaluator {
-  return new JsonLogicRuleEvaluator();
+function makeRuleEvaluator(logger: MockLogger): RuleEvaluator {
+  return new JsonLogicRuleEvaluator(logger);
 }
 
 function makeNotifier(): Notifier {
@@ -257,17 +258,19 @@ describe("SignalProcessor", () => {
   let arcMatcher: ArcMatcher;
   let ruleEvaluator: RuleEvaluator;
   let processor: SignalProcessor;
+  let mockLogger: MockLogger;
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockLogger = createMockLogger();
     store = makeStore();
     mimeParser = makeMimeParser();
     classifier = makeClassifier();
     embeddingGenerator = makeEmbeddingGenerator();
     auroraWriter = makeAuroraWriter();
     arcMatcher = makeArcMatcher();
-    ruleEvaluator = makeRuleEvaluator();
-    processor = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator });
+    ruleEvaluator = makeRuleEvaluator(mockLogger);
+    processor = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, logger: mockLogger });
   });
 
   afterEach(() => {
@@ -574,7 +577,7 @@ describe("SignalProcessor", () => {
 
     beforeEach(() => {
       forwarder = { forward: vi.fn().mockReturnValue(okAsync(undefined)) };
-      processor = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, forwarder });
+      processor = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, forwarder, logger: mockLogger });
     });
 
     it("calls forwarder with s3Key and target address when forward rule matches", async () => {
@@ -669,7 +672,6 @@ describe("SignalProcessor", () => {
     });
 
     it("continues processing when forwarder throws", async () => {
-      vi.spyOn(console, "error").mockImplementation(() => {});
       vi.mocked(forwarder.forward).mockReturnValueOnce(errAsync(dbError(new Error("SES throttle"))));
       const rule: Rule = {
         id: "rule-fwd",
@@ -727,7 +729,6 @@ describe("SignalProcessor", () => {
     });
 
     it("continues processing remaining records when one fails", async () => {
-      vi.spyOn(console, "error").mockImplementation(() => {});
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>)
         .mockRejectedValueOnce(new Error("Bedrock error"))
         .mockResolvedValueOnce(validClassification);
@@ -755,7 +756,7 @@ describe("SignalProcessor", () => {
 
     beforeEach(() => {
       notifier = makeNotifier();
-      processor = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, notifier });
+      processor = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, notifier, logger: mockLogger });
     });
 
     it("calls notifier after saving a new Signal", async () => {
@@ -785,7 +786,6 @@ describe("SignalProcessor", () => {
     });
 
     it("does not fail processing when notifier throws", async () => {
-      vi.spyOn(console, "error").mockImplementation(() => {});
       vi.mocked(notifier.notify).mockReturnValueOnce(errAsync(dbError(new Error("SES error"))));
 
       await processor.process(makeSqsEvent([{}]));
@@ -797,7 +797,7 @@ describe("SignalProcessor", () => {
     it("does not call notifier when no notifier is configured", async () => {
       // Processor without notifier
       const processorWithoutNotifier = new SignalProcessor({
-        store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator,
+        store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, logger: mockLogger,
       });
 
       await processorWithoutNotifier.process(makeSqsEvent([{}]));
@@ -815,7 +815,7 @@ describe("SignalProcessor", () => {
 
     beforeEach(() => {
       notifier = makeNotifier();
-      processor = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, notifier });
+      processor = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, notifier, logger: mockLogger });
     });
 
     it("allows signal on brand new address and auto-creates aliases with sender approved", async () => {
@@ -935,7 +935,6 @@ describe("SignalProcessor", () => {
     });
 
     it("does not fail when notifyBlocked throws (quarantine_visible via SR-03)", async () => {
-      vi.spyOn(console, "error").mockImplementation(() => {});
       vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(okAsync(
         { ...DEFAULT_CTX, emailConfig: makeAlias() },
       ));
@@ -1079,7 +1078,6 @@ describe("SignalProcessor", () => {
     });
 
     it("does not fail processing when updateGlobalReputation throws", async () => {
-      vi.spyOn(console, "error").mockImplementation(() => {});
       vi.mocked(store.updateGlobalReputation).mockRejectedValueOnce(new Error("DynamoDB error"));
 
       await processor.process(makeSqsEvent([{}]));
@@ -1451,7 +1449,7 @@ describe("SignalProcessor", () => {
       ]));
 
       const notifier = makeNotifier();
-      const proc = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, notifier });
+      const proc = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, notifier, logger: mockLogger });
       await proc.process(makeSqsEvent([{}]));
 
       expect(store.saveArc).not.toHaveBeenCalled();
@@ -1467,7 +1465,7 @@ describe("SignalProcessor", () => {
       ]));
 
       const notifier = makeNotifier();
-      const proc = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, notifier });
+      const proc = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, notifier, logger: mockLogger });
       await proc.process(makeSqsEvent([{}]));
 
       expect(store.saveArc).not.toHaveBeenCalled();
@@ -1542,7 +1540,7 @@ describe("SignalProcessor", () => {
 
     beforeEach(() => {
       notifier = makeNotifier();
-      processor = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, notifier });
+      processor = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, notifier, logger: mockLogger });
     });
 
     it("blocks status emails silently — no arc created, signal saved as blocked", async () => {
@@ -1600,7 +1598,7 @@ describe("SignalProcessor", () => {
 
     beforeEach(() => {
       testReplier = makeTestReplier();
-      processor = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, testReplier });
+      processor = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, testReplier, logger: mockLogger });
     });
 
     it("sends a pong when workflow is 'test' and testReplier is configured", async () => {
@@ -1680,7 +1678,6 @@ describe("SignalProcessor", () => {
     });
 
     it("does not set sentMessageIds when pong throws", async () => {
-      vi.spyOn(console, "error").mockImplementation(() => {});
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(testClassification);
       vi.mocked(testReplier.pong).mockRejectedValueOnce(new Error("SES timeout"));
 
@@ -1700,7 +1697,7 @@ describe("SignalProcessor", () => {
     });
 
     it("does not call pong when testReplier is not configured", async () => {
-      const processorWithoutReplier = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator });
+      const processorWithoutReplier = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, logger: mockLogger });
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(testClassification);
 
       // Should not throw — testReplier is optional
@@ -1832,7 +1829,7 @@ describe("SignalProcessor", () => {
 
     it("passes dkimPass=true and dmarcPass=true when both SES verdicts are PASS", async () => {
       const forwarder: Forwarder = { forward: vi.fn().mockReturnValue(okAsync(undefined)) };
-      const proc = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, forwarder });
+      const proc = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, forwarder, logger: mockLogger });
       vi.mocked(store.listEnabledRules).mockReturnValueOnce(okAsync([makeForwardRule()]));
 
       await proc.process(makeSqsEvent([{ dkimVerdict: "PASS", dmarcVerdict: "PASS" }]));
@@ -1847,7 +1844,7 @@ describe("SignalProcessor", () => {
 
     it("passes dkimPass=false and dmarcPass=false when SES verdicts are FAIL and GRAY", async () => {
       const forwarder: Forwarder = { forward: vi.fn().mockReturnValue(okAsync(undefined)) };
-      const proc = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, forwarder });
+      const proc = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, forwarder, logger: mockLogger });
       vi.mocked(store.listEnabledRules).mockReturnValueOnce(okAsync([makeForwardRule()]));
 
       await proc.process(makeSqsEvent([{ dkimVerdict: "FAIL", dmarcVerdict: "GRAY" }]));
