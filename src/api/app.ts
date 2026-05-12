@@ -965,7 +965,7 @@ export function createApp({ store, auth, access, logger, verificationMailer }: A
     if (verificationMailer) {
       const verifyResult = await verificationMailer.sendForwardVerification(accountId, addr.address, addr.token);
       if (verifyResult.isErr()) {
-        logger.error("forwarding.verification_email_failed", { cause: String(verifyResult.error.cause) });
+        logger.error("Failed to send forwarding address verification email. The SES send call returned an error. The user won't receive the verification link until they re-trigger it. Check SES sending limits.", { code: "forwarding.verification_email_failed", cause: String(verifyResult.error.cause) });
       }
     }
 
