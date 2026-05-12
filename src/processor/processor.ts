@@ -343,11 +343,11 @@ export class SignalProcessor {
       if (result.isErr()) {
         const record = event.Records[i]!;
         const receiveCount = Number(record.attributes?.ApproximateReceiveCount ?? "1");
-        const level = receiveCount > RETRY_TRACK_THRESHOLD ? "error" : "track";
+        const level = receiveCount > RETRY_TRACK_THRESHOLD ? "error" : "warn";
         if (level === "error") {
-          this.logger.error("Signal processing failed after exceeding retry threshold. SQS message was redelivered " + receiveCount + " times without successful completion. This message will move to the DLQ and the email won't be processed. Investigate the root cause in earlier track-level logs for this messageId.", { code: "processor.signal.failed", messageId: result.error.messageId, receiveCount });
+          this.logger.error("Signal processing failed after exceeding retry threshold. SQS message was redelivered " + receiveCount + " times without successful completion. The message will keep being redelivered indefinitely until the root cause is fixed. Investigate earlier track-level logs for this messageId to identify the failure.", { code: "processor.signal.failed", messageId: result.error.messageId, receiveCount });
         } else {
-          this.logger.track("Signal processing failed on attempt " + receiveCount + ". The SQS message will be retried automatically. Tracked for retry-rate monitoring.", { code: "processor.signal.failed", messageId: result.error.messageId, receiveCount });
+          this.logger.warn("Signal processing failed on attempt " + receiveCount + ". The SQS message will be retried automatically. If this pattern persists at high volume, investigate the root cause in earlier logs for this messageId.", { code: "processor.signal.failed", messageId: result.error.messageId, receiveCount });
         }
         failures.push({ itemIdentifier: result.error.messageId });
       }
@@ -639,7 +639,7 @@ export class SignalProcessor {
       if (retentionApplyResult.isErr()) {
         // Retention application failure is non-fatal — the signal is already saved.
         // The default lifecycle rule will apply (5-year inbox/ expiry).
-        this.logger.error("Failed to apply S3 retention policy to signal object. The S3 tagging or copy operation returned an error. The signal is saved but will use the default 5-year lifecycle rule instead of the plan-specific retention. Non-fatal — no operator action required unless pattern persists.", { code: "processor.s3_retention_failed", accountId, error: String(retentionApplyResult.error.cause) });
+        this.logger.track("Failed to apply S3 retention policy to signal object. The S3 tagging or copy operation returned an error. The signal is saved but will use the default 5-year lifecycle rule instead of the plan-specific retention.", { code: "processor.s3_retention_failed", accountId, error: String(retentionApplyResult.error.cause) });
       } else {
         const { s3Key: updatedS3Key } = retentionApplyResult.value;
 
