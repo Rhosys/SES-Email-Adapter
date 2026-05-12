@@ -59,6 +59,33 @@ function findPatternViolations(files: string[], pattern: RegExp): Violation[] {
 const sourceFiles = collectSourceFiles(SRC_DIR);
 
 // ---------------------------------------------------------------------------
+// Console-free source file collection (excludes logger.ts and testing/)
+// ---------------------------------------------------------------------------
+
+const CONSOLE_EXCLUDED_DIRS = new Set(["testing"]);
+const CONSOLE_EXCLUDED_FILES = new Set(["logger.ts", "run-migration.ts"]);
+
+function collectConsoleCheckFiles(dir: string): string[] {
+  const files: string[] = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (entry.isDirectory()) {
+      if (CONSOLE_EXCLUDED_DIRS.has(entry.name)) continue;
+      files.push(...collectConsoleCheckFiles(path.join(dir, entry.name)));
+    } else if (
+      entry.name.endsWith(".ts") &&
+      !entry.name.endsWith(".spec.ts") &&
+      !entry.name.endsWith(".test.ts") &&
+      !CONSOLE_EXCLUDED_FILES.has(entry.name)
+    ) {
+      files.push(path.join(dir, entry.name));
+    }
+  }
+  return files;
+}
+
+const consoleCheckFiles = collectConsoleCheckFiles(SRC_DIR);
+
+// ---------------------------------------------------------------------------
 // Property 3: No `.catch()` in codebase (static analysis property)
 // The codebase contains zero occurrences of `.catch(` outside of test files
 // and Hono middleware.
@@ -113,6 +140,34 @@ describe("Property 4: No .andThen() / .mapErr() in codebase", () => {
       fc.asyncProperty(fc.constant(null), async () => {
         const violations = findPatternViolations(sourceFiles, resultMapPattern);
         expect(violations).toEqual([]);
+      }),
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// No console.log/error/warn in source files (excluding logger.ts and tests)
+// After the structured logging migration, all logging must go through the
+// RequestLogger class. Direct console calls are forbidden in production code.
+// **Validates: Requirements 8.1, 8.2**
+// ---------------------------------------------------------------------------
+
+describe("No direct console calls in source files", () => {
+  const consolePattern = /\bconsole\.(log|error|warn)\b/;
+
+  it("zero occurrences of console.log|error|warn outside logger.ts and test files", async () => {
+    await propertyRunner.assert(
+      fc.asyncProperty(fc.constant(null), async () => {
+        const violations = findPatternViolations(consoleCheckFiles, consolePattern);
+
+        if (violations.length > 0) {
+          const details = violations
+            .map((v) => `  ${v.file}:${v.line} → ${v.content}`)
+            .join("\n");
+          expect.fail(
+            `Found ${violations.length} direct console call(s):\n${details}`,
+          );
+        }
       }),
     );
   });

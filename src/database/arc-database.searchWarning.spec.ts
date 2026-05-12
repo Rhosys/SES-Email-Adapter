@@ -4,6 +4,7 @@ import { mockClient } from "aws-sdk-client-mock";
 import { DynamoDBDocumentClient, QueryCommand } from "@aws-sdk/lib-dynamodb";
 import { propertyRunner } from "../testing/property-runner.js";
 import { ArcDatabase } from "./arc-database.js";
+import { createMockLogger } from "../testing/mock-logger.js";
 
 /**
  * Feature: dynamodb-storage-optimization, Property 5: Search warning threshold is bidirectional
@@ -12,17 +13,16 @@ import { ArcDatabase } from "./arc-database.js";
 describe("Feature: dynamodb-storage-optimization, Property 5: Search warning threshold is bidirectional", () => {
   const ddbMock = mockClient(DynamoDBDocumentClient);
   let db: ArcDatabase;
-  let warnSpy: ReturnType<typeof vi.spyOn>;
+  let mockLogger: ReturnType<typeof createMockLogger>;
 
   beforeEach(() => {
     ddbMock.reset();
-    db = new ArcDatabase();
-    warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mockLogger = createMockLogger();
+    db = new ArcDatabase(mockLogger);
   });
 
   afterEach(() => {
     ddbMock.restore();
-    warnSpy.mockRestore();
   });
 
   // Generator: random item count between 0 and 500
@@ -46,13 +46,13 @@ describe("Feature: dynamodb-storage-optimization, Property 5: Search warning thr
     await propertyRunner.assert(
       fc.asyncProperty(arbitraryItemCount, async (itemCount) => {
         ddbMock.reset();
-        warnSpy.mockClear();
+        mockLogger.calls.length = 0;
 
         ddbMock.on(QueryCommand).resolves({ Items: makeFakeItems(itemCount) });
 
         await db.searchArcs("acct-1", "test", { limit: 20 });
 
-        const warningEmitted = warnSpy.mock.calls.length > 0;
+        const warningEmitted = mockLogger.calls.some(c => c.method === "warn");
         const shouldWarn = itemCount > 200;
 
         if (shouldWarn && !warningEmitted) {
