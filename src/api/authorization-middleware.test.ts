@@ -139,9 +139,10 @@ describe("authorize() middleware", () => {
     const app = createTestApp(access, logger);
     await app.request("/accounts/acct-123");
 
-    const errorCall = logger.calls.find(c => c.method === "error" && c.message === "authorization.sdk_error");
+    const errorCall = logger.calls.find(c => c.method === "error" && c.context?.code === "authorization.sdk_error");
     expect(errorCall).toBeDefined();
     expect(errorCall!.context).toMatchObject({
+      code: "authorization.sdk_error",
       userId: "user-456",
       resourceUri: "accounts/acct-123",
       permission: "accounts:read",
