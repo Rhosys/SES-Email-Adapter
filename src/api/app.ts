@@ -4,6 +4,8 @@ import { randomUUID } from "crypto";
 import { getDomain } from "tldts";
 import { checkDomain } from "../dns/dns-checker.js";
 import type { AuditEvent } from "../database/audit-database.js";
+import type { Result, ResultAsync } from "neverthrow";
+import type { DbError, NotFoundError } from "../errors.js";
 import type { Arc, Signal, View, Label, Rule, Domain, DnsRecord, Account, Page, PageParams, ArcStatus, Workflow, WorkflowData, Alias, AliasSender, SenderMode, SenderFilterMode, VerifiedForwardingAddress, Pagination, EmailTemplate } from "../types/index.js";
 import { deriveGroupingKey } from "../processor/processor.js";
 import { zParse } from "./validate.js";
@@ -68,86 +70,86 @@ export type { UpdateArcRequest, UpdateSignalStatusRequest, CreateViewRequest, Up
 
 export interface ApiDatabase {
   // Arcs
-  listArcs(accountId: string, params: ListArcsParams): Promise<Page<Arc>>;
-  getArc(accountId: string, id: string): Promise<Arc | null>;
-  updateArc(accountId: string, id: string, update: UpdateArcRequest): Promise<Arc>;
+  listArcs(accountId: string, params: ListArcsParams): PromiseLike<Result<Page<Arc>, DbError>>;
+  getArc(accountId: string, id: string): PromiseLike<Result<Arc | null, DbError>>;
+  updateArc(accountId: string, id: string, update: UpdateArcRequest): PromiseLike<Result<Arc, DbError>>;
 
   // Signals
-  listSignals(accountId: string, arcId: string, params: PageParams): Promise<Page<Signal>>;
-  listPreArcSignals(accountId: string, status: "blocked" | "quarantined", params: PageParams): Promise<Page<Signal>>;
-  getSignal(accountId: string, id: string): Promise<Signal | null>;
-  updateSignal(accountId: string, id: string, update: Partial<Pick<Signal, "subject" | "textBody" | "from" | "to">>): Promise<Signal>;
-  deleteSignal(accountId: string, id: string): Promise<void>;
+  listSignals(accountId: string, arcId: string, params: PageParams): PromiseLike<Result<Page<Signal>, DbError>>;
+  listPreArcSignals(accountId: string, status: "blocked" | "quarantined", params: PageParams): PromiseLike<Result<Page<Signal>, DbError>>;
+  getSignal(accountId: string, id: string): PromiseLike<Result<Signal | null, DbError>>;
+  updateSignal(accountId: string, id: string, update: Partial<Pick<Signal, "subject" | "textBody" | "from" | "to">>): PromiseLike<Result<Signal, DbError>>;
+  deleteSignal(accountId: string, id: string): PromiseLike<Result<void, DbError>>;
 
   // Views
-  listViews(accountId: string): Promise<View[]>;
-  getView(accountId: string, id: string): Promise<View | null>;
-  createView(accountId: string, data: CreateViewRequest): Promise<View>;
-  updateView(accountId: string, id: string, data: UpdateViewRequest): Promise<View>;
-  deleteView(accountId: string, id: string): Promise<void>;
+  listViews(accountId: string): PromiseLike<Result<View[], DbError>>;
+  getView(accountId: string, id: string): PromiseLike<Result<View | null, DbError>>;
+  createView(accountId: string, data: CreateViewRequest): PromiseLike<Result<View, DbError>>;
+  updateView(accountId: string, id: string, data: UpdateViewRequest): PromiseLike<Result<View, DbError>>;
+  deleteView(accountId: string, id: string): PromiseLike<Result<void, DbError>>;
 
   // Labels
-  listLabels(accountId: string): Promise<Label[]>;
-  createLabel(accountId: string, data: CreateLabelRequest): Promise<Label>;
-  updateLabel(accountId: string, id: string, data: UpdateLabelRequest): Promise<Label>;
-  deleteLabel(accountId: string, id: string): Promise<void>;
+  listLabels(accountId: string): PromiseLike<Result<Label[], DbError>>;
+  createLabel(accountId: string, data: CreateLabelRequest): PromiseLike<Result<Label, DbError>>;
+  updateLabel(accountId: string, id: string, data: UpdateLabelRequest): PromiseLike<Result<Label, DbError>>;
+  deleteLabel(accountId: string, id: string): PromiseLike<Result<void, DbError>>;
 
   // Rules
-  listRules(accountId: string): Promise<Rule[]>;
-  createRule(accountId: string, data: CreateRuleRequest): Promise<Rule>;
-  updateRule(accountId: string, id: string, data: UpdateRuleRequest): Promise<Rule>;
-  deleteRule(accountId: string, id: string): Promise<void>;
+  listRules(accountId: string): PromiseLike<Result<Rule[], DbError>>;
+  createRule(accountId: string, data: CreateRuleRequest): PromiseLike<Result<Rule, DbError>>;
+  updateRule(accountId: string, id: string, data: UpdateRuleRequest): PromiseLike<Result<Rule, DbError>>;
+  deleteRule(accountId: string, id: string): PromiseLike<Result<void, DbError>>;
 
   // Domains
-  listDomains(accountId: string): Promise<Domain[]>;
-  getDomain(accountId: string, id: string): Promise<Domain | null>;
-  createDomain(accountId: string, domain: string): Promise<Domain>;
-  deleteDomain(accountId: string, id: string): Promise<void>;
-  updateDomainHealth(accountId: string, id: string, health: { receivingHealthy: boolean; senderHealthy: boolean; failingRecords: string[]; lastCheckedAt: string; lastHealthyAt?: string }): Promise<void>;
+  listDomains(accountId: string): PromiseLike<Result<Domain[], DbError>>;
+  getDomain(accountId: string, id: string): PromiseLike<Result<Domain | null, DbError>>;
+  createDomain(accountId: string, domain: string): PromiseLike<Result<Domain, DbError>>;
+  deleteDomain(accountId: string, id: string): PromiseLike<Result<void, DbError>>;
+  updateDomainHealth(accountId: string, id: string, health: { receivingHealthy: boolean; senderHealthy: boolean; failingRecords: string[]; lastCheckedAt: string; lastHealthyAt?: string }): PromiseLike<Result<void, DbError>>;
 
   // Search
-  searchArcs(accountId: string, query: string, params: PageParams): Promise<Page<Arc>>;
+  searchArcs(accountId: string, query: string, params: PageParams): PromiseLike<Result<Page<Arc>, DbError>>;
 
   // Account
-  getAccount(accountId: string): Promise<Account | null>;
-  updateAccount(accountId: string, update: Partial<Pick<Account, "name" | "deletionRetentionDays" | "notifications" | "filtering">>): Promise<Account>;
+  getAccount(accountId: string): PromiseLike<Result<Account | null, DbError>>;
+  updateAccount(accountId: string, update: Partial<Pick<Account, "name" | "deletionRetentionDays" | "notifications" | "filtering">>): PromiseLike<Result<Account, DbError>>;
 
   // Aliases
-  listAliases(accountId: string): Promise<Alias[]>;
-  getAlias(accountId: string, address: string): Promise<Alias | null>;
-  createAlias(alias: Alias): Promise<Alias>;
-  upsertAlias(alias: Alias): Promise<Alias>;
-  deleteAlias(accountId: string, address: string): Promise<void>;
-  renameAlias(accountId: string, oldAddress: string, newAddress: string): Promise<Alias>;
+  listAliases(accountId: string): PromiseLike<Result<Alias[], DbError>>;
+  getAlias(accountId: string, address: string): PromiseLike<Result<Alias | null, DbError>>;
+  createAlias(alias: Alias): PromiseLike<Result<Alias, DbError>>;
+  upsertAlias(alias: Alias): PromiseLike<Result<Alias, DbError>>;
+  deleteAlias(accountId: string, address: string): PromiseLike<Result<void, DbError>>;
+  renameAlias(accountId: string, oldAddress: string, newAddress: string): PromiseLike<Result<Alias, DbError | NotFoundError>>;
 
   // Alias Senders
-  saveSender(accountId: string, address: string, domain: string, mode: SenderMode): Promise<void>;
-  removeSender(accountId: string, address: string, domain: string): Promise<void>;
-  listSenders(accountId: string, address: string): Promise<AliasSender[]>;
+  saveSender(accountId: string, address: string, domain: string, mode: SenderMode): PromiseLike<Result<void, DbError>>;
+  removeSender(accountId: string, address: string, domain: string): PromiseLike<Result<void, DbError>>;
+  listSenders(accountId: string, address: string): PromiseLike<Result<AliasSender[], DbError>>;
 
   // Templates
-  createTemplate(template: EmailTemplate): Promise<EmailTemplate>;
-  getTemplate(accountId: string, id: string): Promise<EmailTemplate | null>;
-  updateTemplate(accountId: string, id: string, update: Partial<Pick<EmailTemplate, "name" | "subject" | "body">>): Promise<EmailTemplate>;
-  deleteTemplate(accountId: string, id: string): Promise<void>;
-  listTemplates(accountId: string): Promise<EmailTemplate[]>;
+  createTemplate(template: EmailTemplate): PromiseLike<Result<EmailTemplate, DbError>>;
+  getTemplate(accountId: string, id: string): PromiseLike<Result<EmailTemplate | null, DbError>>;
+  updateTemplate(accountId: string, id: string, update: Partial<Pick<EmailTemplate, "name" | "subject" | "body">>): PromiseLike<Result<EmailTemplate, DbError>>;
+  deleteTemplate(accountId: string, id: string): PromiseLike<Result<void, DbError>>;
+  listTemplates(accountId: string): PromiseLike<Result<EmailTemplate[], DbError>>;
 
 
   // Signal status management
-  blockSignal(accountId: string, signalId: string): Promise<Signal>;
-  unblockSignal(accountId: string, signalId: string, arcId: string): Promise<void>;
-  createArc(arc: Arc): Promise<void>;
-  saveArc(arc: Arc): Promise<void>;
-  findArcByGroupingKey(accountId: string, key: string): Promise<Arc | null>;
+  blockSignal(accountId: string, signalId: string): PromiseLike<Result<Signal, DbError>>;
+  unblockSignal(accountId: string, signalId: string, arcId: string): PromiseLike<Result<void, DbError>>;
+  createArc(arc: Arc): PromiseLike<Result<void, DbError>>;
+  saveArc(arc: Arc): PromiseLike<Result<void, DbError>>;
+  findArcByGroupingKey(accountId: string, key: string): PromiseLike<Result<Arc | null, DbError>>;
 
   // Verified forwarding addresses
-  listVerifiedForwardingAddresses(accountId: string): Promise<VerifiedForwardingAddress[]>;
-  getVerifiedForwardingAddress(accountId: string, address: string): Promise<VerifiedForwardingAddress | null>;
-  saveVerifiedForwardingAddress(addr: VerifiedForwardingAddress): Promise<void>;
-  deleteVerifiedForwardingAddress(accountId: string, address: string): Promise<void>;
+  listVerifiedForwardingAddresses(accountId: string): PromiseLike<Result<VerifiedForwardingAddress[], DbError>>;
+  getVerifiedForwardingAddress(accountId: string, address: string): PromiseLike<Result<VerifiedForwardingAddress | null, DbError>>;
+  saveVerifiedForwardingAddress(addr: VerifiedForwardingAddress): PromiseLike<Result<void, DbError>>;
+  deleteVerifiedForwardingAddress(accountId: string, address: string): PromiseLike<Result<void, DbError>>;
 
   // Audit
-  listAuditEvents(accountId: string, params: PageParams): Promise<Page<AuditEvent>>;
+  listAuditEvents(accountId: string, params: PageParams): PromiseLike<Result<Page<AuditEvent>, DbError>>;
 }
 
 // ---------------------------------------------------------------------------
@@ -155,7 +157,7 @@ export interface ApiDatabase {
 // ---------------------------------------------------------------------------
 
 export interface VerificationMailer {
-  sendForwardVerification(accountId: string, address: string, token: string): Promise<void>;
+  sendForwardVerification(accountId: string, address: string, token: string): ResultAsync<void, DbError>;
 }
 
 // ---------------------------------------------------------------------------
@@ -262,7 +264,8 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
         ...(query["limit"] ? { limit: parseInt(query["limit"], 10) } : {}),
       };
       const result = await store.searchArcs(accountId, q, params);
-      return c.json(page("arcs", result.items, result.nextCursor));
+      if (result.isErr()) return err(c, 500, "Internal Server Error");
+      return c.json(page("arcs", result.value.items, result.value.nextCursor));
     }
     const params: ListArcsParams = {
       ...(query["workflow"] ? { workflow: query["workflow"] as Workflow } : {}),
@@ -272,12 +275,15 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
       ...(query["limit"] ? { limit: parseInt(query["limit"], 10) } : {}),
     };
     const result = await store.listArcs(accountId, params);
-    return c.json(page("arcs", result.items, result.nextCursor));
+    if (result.isErr()) return err(c, 500, "Internal Server Error");
+    return c.json(page("arcs", result.value.items, result.value.nextCursor));
   });
 
   app.get("/accounts/:accountId/arcs/:id", authz("arcs:read", c => `accounts/${c.req.param("accountId")}/arcs/${c.req.param("id")}`), async (c) => {
     const { accountId } = c.get("auth");
-    const arc = await store.getArc(accountId, c.req.param("id"));
+    const arcResult = await store.getArc(accountId, c.req.param("id"));
+    if (arcResult.isErr()) return err(c, 500, "Internal Server Error");
+    const arc = arcResult.value;
     if (!arc) return err(c, 404, "Arc not found", "ARC_NOT_FOUND");
     if (arc.accountId !== accountId) return err(c, 403, "Forbidden");
     return c.json(arc);
@@ -285,19 +291,24 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
 
   app.patch("/accounts/:accountId/arcs/:id", authz("arcs:write", c => `accounts/${c.req.param("accountId")}/arcs/${c.req.param("id")}`), async (c) => {
     const { accountId } = c.get("auth");
-    const arc = await store.getArc(accountId, c.req.param("id"));
+    const arcResult = await store.getArc(accountId, c.req.param("id"));
+    if (arcResult.isErr()) return err(c, 500, "Internal Server Error");
+    const arc = arcResult.value;
     if (!arc) return err(c, 404, "Arc not found", "ARC_NOT_FOUND");
     if (arc.accountId !== accountId) return err(c, 403, "Forbidden");
     const body = await zParse(UpdateArcRequest, c.req.raw);
-    const updated = await store.updateArc(accountId, arc.id, { ...body, lastSignalAt: arc.lastSignalAt });
-    return c.json(updated);
+    const updateResult = await store.updateArc(accountId, arc.id, { ...body, lastSignalAt: arc.lastSignalAt });
+    if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
+    return c.json(updateResult.value);
   });
 
   app.post("/accounts/:accountId/arcs", authz("arcs:write", c => `accounts/${c.req.param("accountId")}/arcs`), async (c) => {
     const { accountId } = c.get("auth");
     const body = await zParse(CreateArcFromSignalRequest, c.req.raw);
 
-    const signal = await store.getSignal(accountId, body.signalId);
+    const signalResult = await store.getSignal(accountId, body.signalId);
+    if (signalResult.isErr()) return err(c, 500, "Internal Server Error");
+    const signal = signalResult.value;
     if (!signal) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
     if (signal.status !== "blocked" && signal.status !== "quarantine_visible" && signal.status !== "quarantine_hidden") {
       return err(c, 400, "Signal is not blocked or quarantined", "SIGNAL_NOT_BLOCKED");
@@ -316,15 +327,19 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
       updatedAt: now,
     };
 
-    await store.createArc(arc);
-    await store.unblockSignal(accountId, signal.id, arc.id);
+    const createArcResult = await store.createArc(arc);
+    if (createArcResult.isErr()) return err(c, 500, "Internal Server Error");
+    const unblockResult = await store.unblockSignal(accountId, signal.id, arc.id);
+    if (unblockResult.isErr()) return err(c, 500, "Internal Server Error");
 
     if (body.approveSender || body.updateFilterMode) {
       const senderDomain = signal.from.address.includes("@")
         ? signal.from.address.split("@").pop()!
         : signal.from.address;
       const senderETLD1 = getDomain(senderDomain) ?? senderDomain;
-      const existing = await store.getAlias(accountId, signal.recipientAddress);
+      const existingResult = await store.getAlias(accountId, signal.recipientAddress);
+      if (existingResult.isErr()) return err(c, 500, "Internal Server Error");
+      const existing = existingResult.value;
 
       const base = existing ?? {
         id: randomUUID(),
@@ -335,13 +350,15 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
         updatedAt: now,
       };
 
-      await store.upsertAlias({
+      const upsertResult = await store.upsertAlias({
         ...base,
         filterMode: body.updateFilterMode ?? base.filterMode,
         updatedAt: now,
       });
+      if (upsertResult.isErr()) return err(c, 500, "Internal Server Error");
       if (body.approveSender) {
-        await store.saveSender(accountId, signal.recipientAddress, senderETLD1, "allow");
+        const saveSenderResult = await store.saveSender(accountId, signal.recipientAddress, senderETLD1, "allow");
+        if (saveSenderResult.isErr()) return err(c, 500, "Internal Server Error");
       }
     }
 
@@ -354,7 +371,9 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
 
   app.get("/accounts/:accountId/arcs/:arcId/signals", authz("signals:read", c => `accounts/${c.req.param("accountId")}/arcs/${c.req.param("arcId")}/signals`), async (c) => {
     const { accountId } = c.get("auth");
-    const arc = await store.getArc(accountId, c.req.param("arcId"));
+    const arcResult = await store.getArc(accountId, c.req.param("arcId"));
+    if (arcResult.isErr()) return err(c, 500, "Internal Server Error");
+    const arc = arcResult.value;
     if (!arc) return err(c, 404, "Arc not found", "ARC_NOT_FOUND");
     if (arc.accountId !== accountId) return err(c, 403, "Forbidden");
     const query = c.req.query();
@@ -363,7 +382,8 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
       ...(query["limit"] ? { limit: parseInt(query["limit"], 10) } : {}),
     };
     const result = await store.listSignals(accountId, arc.id, params);
-    return c.json(page("signals", result.items, result.nextCursor));
+    if (result.isErr()) return err(c, 500, "Internal Server Error");
+    return c.json(page("signals", result.value.items, result.value.nextCursor));
   });
 
   app.get("/accounts/:accountId/signals", authz("signals:read", c => `accounts/${c.req.param("accountId")}/signals`), async (c) => {
@@ -379,15 +399,18 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
       ...(query["limit"] ? { limit: parseInt(query["limit"], 10) } : {}),
     };
     const result = await store.listPreArcSignals(accountId, quarantineCategory as "blocked" | "quarantined", params);
+    if (result.isErr()) return err(c, 500, "Internal Server Error");
     const items = (status === "quarantine_visible" || status === "quarantine_hidden")
-      ? result.items.filter(s => s.status === status)
-      : result.items;
-    return c.json(page("signals", items, result.nextCursor));
+      ? result.value.items.filter(s => s.status === status)
+      : result.value.items;
+    return c.json(page("signals", items, result.value.nextCursor));
   });
 
   app.post("/accounts/:accountId/signals/:id/quarantineResponse", authz("signals:write", c => `accounts/${c.req.param("accountId")}/signals/${c.req.param("id")}`), async (c) => {
     const { accountId } = c.get("auth");
-    const signal = await store.getSignal(accountId, c.req.param("id"));
+    const signalResult = await store.getSignal(accountId, c.req.param("id"));
+    if (signalResult.isErr()) return err(c, 500, "Internal Server Error");
+    const signal = signalResult.value;
     if (!signal) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
     if (signal.accountId !== accountId) return err(c, 403, "Forbidden");
     if (signal.status !== "blocked" && signal.status !== "quarantine_visible" && signal.status !== "quarantine_hidden") {
@@ -397,15 +420,18 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
     const body = await zParse(UpdateSignalStatusRequest, c.req.raw);
 
     if (body.status === "blocked") {
-      const updated = await store.blockSignal(accountId, signal.id);
-      return c.json(updated);
+      const blockResult = await store.blockSignal(accountId, signal.id);
+      if (blockResult.isErr()) return err(c, 500, "Internal Server Error");
+      return c.json(blockResult.value);
     }
 
     // status === "active": find existing arc or create one, bypassing rule evaluation
     const senderDomain = signal.from.address.includes("@") ? signal.from.address.split("@").pop()! : signal.from.address;
     const senderETLD1 = getDomain(senderDomain) ?? senderDomain;
     const groupingKey = deriveGroupingKey(signal.workflow, signal.workflowData, signal.recipientAddress, senderETLD1);
-    const matchedArc = groupingKey ? await store.findArcByGroupingKey(accountId, groupingKey) : null;
+    const matchedArcResult = groupingKey ? await store.findArcByGroupingKey(accountId, groupingKey) : null;
+    if (matchedArcResult && matchedArcResult.isErr()) return err(c, 500, "Internal Server Error");
+    const matchedArc = matchedArcResult ? matchedArcResult.value : null;
 
     const now = new Date().toISOString();
     let arc: Arc;
@@ -413,7 +439,8 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
       arc = matchedArc;
       if (signal.receivedAt > arc.lastSignalAt) {
         arc = { ...arc, lastSignalAt: signal.receivedAt, updatedAt: now };
-        await store.saveArc(arc);
+        const saveResult = await store.saveArc(arc);
+        if (saveResult.isErr()) return err(c, 500, "Internal Server Error");
       }
     } else {
       arc = {
@@ -428,17 +455,21 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
         updatedAt: now,
         ...(groupingKey ? { groupingKey } : {}),
       };
-      await store.createArc(arc);
+      const createResult = await store.createArc(arc);
+      if (createResult.isErr()) return err(c, 500, "Internal Server Error");
     }
 
-    await store.unblockSignal(accountId, signal.id, arc.id);
+    const unblockResult = await store.unblockSignal(accountId, signal.id, arc.id);
+    if (unblockResult.isErr()) return err(c, 500, "Internal Server Error");
 
     return c.json({ arc, signal: { ...signal, status: "active", arcId: arc.id } });
   });
 
   app.get("/accounts/:accountId/signals/:id", authz("signals:read", c => `accounts/${c.req.param("accountId")}/signals/${c.req.param("id")}`), async (c) => {
     const { accountId } = c.get("auth");
-    const signal = await store.getSignal(accountId, c.req.param("id"));
+    const signalResult = await store.getSignal(accountId, c.req.param("id"));
+    if (signalResult.isErr()) return err(c, 500, "Internal Server Error");
+    const signal = signalResult.value;
     if (!signal) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
     if (signal.accountId !== accountId) return err(c, 403, "Forbidden");
     return c.json(signal);
@@ -446,33 +477,42 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
 
   app.patch("/accounts/:accountId/signals/:id", authz("signals:write", c => `accounts/${c.req.param("accountId")}/signals/${c.req.param("id")}`), async (c) => {
     const { accountId } = c.get("auth");
-    const signal = await store.getSignal(accountId, c.req.param("id"));
+    const signalResult = await store.getSignal(accountId, c.req.param("id"));
+    if (signalResult.isErr()) return err(c, 500, "Internal Server Error");
+    const signal = signalResult.value;
     if (!signal) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
     if (signal.accountId !== accountId) return err(c, 403, "Forbidden");
     if (signal.status !== "draft") return err(c, 400, "Only draft signals can be updated", "SIGNAL_NOT_DRAFT");
     const body = await zParse(UpdateSignalRequest, c.req.raw);
-    const updated = await store.updateSignal(accountId, signal.id, body as Parameters<typeof store.updateSignal>[2]);
-    return c.json(updated);
+    const updateResult = await store.updateSignal(accountId, signal.id, body as Parameters<typeof store.updateSignal>[2]);
+    if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
+    return c.json(updateResult.value);
   });
 
   app.post("/accounts/:accountId/signals/:id/send", authz("signals:write", c => `accounts/${c.req.param("accountId")}/signals/${c.req.param("id")}`), async (c) => {
     const { accountId } = c.get("auth");
-    const signal = await store.getSignal(accountId, c.req.param("id"));
+    const signalResult = await store.getSignal(accountId, c.req.param("id"));
+    if (signalResult.isErr()) return err(c, 500, "Internal Server Error");
+    const signal = signalResult.value;
     if (!signal) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
     if (signal.accountId !== accountId) return err(c, 403, "Forbidden");
     if (signal.status !== "draft") return err(c, 400, "Only draft signals can be sent", "SIGNAL_NOT_DRAFT");
     // Flip to active — the actual SES send is wired at the handler layer outside the API
-    const sent = await store.updateSignal(accountId, signal.id, {});
-    return c.json(sent);
+    const sendResult = await store.updateSignal(accountId, signal.id, {});
+    if (sendResult.isErr()) return err(c, 500, "Internal Server Error");
+    return c.json(sendResult.value);
   });
 
   app.delete("/accounts/:accountId/signals/:id", authz("signals:write", c => `accounts/${c.req.param("accountId")}/signals/${c.req.param("id")}`), async (c) => {
     const { accountId } = c.get("auth");
-    const signal = await store.getSignal(accountId, c.req.param("id"));
+    const signalResult = await store.getSignal(accountId, c.req.param("id"));
+    if (signalResult.isErr()) return err(c, 500, "Internal Server Error");
+    const signal = signalResult.value;
     if (!signal) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
     if (signal.accountId !== accountId) return err(c, 403, "Forbidden");
     if (signal.status !== "draft") return err(c, 400, "Only draft signals can be deleted", "SIGNAL_NOT_DRAFT");
-    await store.deleteSignal(accountId, signal.id);
+    const deleteResult = await store.deleteSignal(accountId, signal.id);
+    if (deleteResult.isErr()) return err(c, 500, "Internal Server Error");
     return new Response(null, { status: 204 });
   });
 
@@ -482,31 +522,39 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
 
   app.get("/accounts/:accountId/views", authz("views:read", c => `accounts/${c.req.param("accountId")}/views`), async (c) => {
     const { accountId } = c.get("auth");
-    const views = await store.listViews(accountId);
-    return c.json(page("views", views));
+    const viewsResult = await store.listViews(accountId);
+    if (viewsResult.isErr()) return err(c, 500, "Internal Server Error");
+    return c.json(page("views", viewsResult.value));
   });
 
   app.post("/accounts/:accountId/views", authz("views:write", c => `accounts/${c.req.param("accountId")}/views`), async (c) => {
     const { accountId } = c.get("auth");
     const body = await zParse(CreateViewRequest, c.req.raw);
-    const view = await store.createView(accountId, body);
-    return c.json(view, 201);
+    const viewResult = await store.createView(accountId, body);
+    if (viewResult.isErr()) return err(c, 500, "Internal Server Error");
+    return c.json(viewResult.value, 201);
   });
 
   app.patch("/accounts/:accountId/views/:id", authz("views:write", c => `accounts/${c.req.param("accountId")}/views/${c.req.param("id")}`), async (c) => {
     const { accountId } = c.get("auth");
-    const view = await store.getView(accountId, c.req.param("id"));
+    const viewResult = await store.getView(accountId, c.req.param("id"));
+    if (viewResult.isErr()) return err(c, 500, "Internal Server Error");
+    const view = viewResult.value;
     if (!view) return err(c, 404, "View not found", "VIEW_NOT_FOUND");
     const body = await zParse(UpdateViewRequest, c.req.raw);
-    const updated = await store.updateView(accountId, view.id, body);
-    return c.json(updated);
+    const updateResult = await store.updateView(accountId, view.id, body);
+    if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
+    return c.json(updateResult.value);
   });
 
   app.delete("/accounts/:accountId/views/:id", authz("views:write", c => `accounts/${c.req.param("accountId")}/views/${c.req.param("id")}`), async (c) => {
     const { accountId } = c.get("auth");
-    const view = await store.getView(accountId, c.req.param("id"));
+    const viewResult = await store.getView(accountId, c.req.param("id"));
+    if (viewResult.isErr()) return err(c, 500, "Internal Server Error");
+    const view = viewResult.value;
     if (!view) return err(c, 404, "View not found", "VIEW_NOT_FOUND");
-    await store.deleteView(accountId, view.id);
+    const deleteResult = await store.deleteView(accountId, view.id);
+    if (deleteResult.isErr()) return err(c, 500, "Internal Server Error");
     return new Response(null, { status: 204 });
   });
 
@@ -516,33 +564,39 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
 
   app.get("/accounts/:accountId/labels", authz("labels:read", c => `accounts/${c.req.param("accountId")}/labels`), async (c) => {
     const { accountId } = c.get("auth");
-    const labels = await store.listLabels(accountId);
-    return c.json(page("labels", labels));
+    const labelsResult = await store.listLabels(accountId);
+    if (labelsResult.isErr()) return err(c, 500, "Internal Server Error");
+    return c.json(page("labels", labelsResult.value));
   });
 
   app.post("/accounts/:accountId/labels", authz("labels:write", c => `accounts/${c.req.param("accountId")}/labels`), async (c) => {
     const { accountId } = c.get("auth");
     const body = await zParse(CreateLabelRequest, c.req.raw);
-    const label = await store.createLabel(accountId, body);
-    return c.json(label, 201);
+    const labelResult = await store.createLabel(accountId, body);
+    if (labelResult.isErr()) return err(c, 500, "Internal Server Error");
+    return c.json(labelResult.value, 201);
   });
 
   app.patch("/accounts/:accountId/labels/:id", authz("labels:write", c => `accounts/${c.req.param("accountId")}/labels/${c.req.param("id")}`), async (c) => {
     const { accountId } = c.get("auth");
-    const labels = await store.listLabels(accountId);
-    const label = labels.find((l) => l.id === c.req.param("id"));
+    const labelsResult = await store.listLabels(accountId);
+    if (labelsResult.isErr()) return err(c, 500, "Internal Server Error");
+    const label = labelsResult.value.find((l) => l.id === c.req.param("id"));
     if (!label) return err(c, 404, "Label not found", "LABEL_NOT_FOUND");
     const body = await zParse(UpdateLabelRequest, c.req.raw);
-    const updated = await store.updateLabel(accountId, label.id, body);
-    return c.json(updated);
+    const updateResult = await store.updateLabel(accountId, label.id, body);
+    if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
+    return c.json(updateResult.value);
   });
 
   app.delete("/accounts/:accountId/labels/:id", authz("labels:write", c => `accounts/${c.req.param("accountId")}/labels/${c.req.param("id")}`), async (c) => {
     const { accountId } = c.get("auth");
-    const labels = await store.listLabels(accountId);
-    const label = labels.find((l) => l.id === c.req.param("id"));
+    const labelsResult = await store.listLabels(accountId);
+    if (labelsResult.isErr()) return err(c, 500, "Internal Server Error");
+    const label = labelsResult.value.find((l) => l.id === c.req.param("id"));
     if (!label) return err(c, 404, "Label not found", "LABEL_NOT_FOUND");
-    await store.deleteLabel(accountId, label.id);
+    const deleteResult = await store.deleteLabel(accountId, label.id);
+    if (deleteResult.isErr()) return err(c, 500, "Internal Server Error");
     return new Response(null, { status: 204 });
   });
 
@@ -552,8 +606,9 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
 
   app.get("/accounts/:accountId/rules", authz("rules:read", c => `accounts/${c.req.param("accountId")}/rules`), async (c) => {
     const { accountId } = c.get("auth");
-    const rules = await store.listRules(accountId);
-    return c.json(page("rules", rules));
+    const rulesResult = await store.listRules(accountId);
+    if (rulesResult.isErr()) return err(c, 500, "Internal Server Error");
+    return c.json(page("rules", rulesResult.value));
   });
 
   app.post("/accounts/:accountId/rules", authz("rules:write", c => `accounts/${c.req.param("accountId")}/rules`), async (c) => {
@@ -561,30 +616,35 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
     const body = await zParse(CreateRuleRequest, c.req.raw);
     const forwardError = await validateForwardTargets(accountId, body.actions as Rule["actions"], store);
     if (forwardError) return err(c, 400, forwardError, "UNVERIFIED_FORWARD_TARGET");
-    const rule = await store.createRule(accountId, body as Parameters<typeof store.createRule>[1]);
-    return c.json(rule, 201);
+    const ruleResult = await store.createRule(accountId, body as Parameters<typeof store.createRule>[1]);
+    if (ruleResult.isErr()) return err(c, 500, "Internal Server Error");
+    return c.json(ruleResult.value, 201);
   });
 
   app.patch("/accounts/:accountId/rules/:id", authz("rules:write", c => `accounts/${c.req.param("accountId")}/rules/${c.req.param("id")}`), async (c) => {
     const { accountId } = c.get("auth");
-    const rules = await store.listRules(accountId);
-    const rule = rules.find((r) => r.id === c.req.param("id"));
+    const rulesResult = await store.listRules(accountId);
+    if (rulesResult.isErr()) return err(c, 500, "Internal Server Error");
+    const rule = rulesResult.value.find((r) => r.id === c.req.param("id"));
     if (!rule) return err(c, 404, "Rule not found", "RULE_NOT_FOUND");
     const body = await zParse(UpdateRuleRequest, c.req.raw);
     if (body.actions) {
       const forwardError = await validateForwardTargets(accountId, body.actions as Rule["actions"], store);
       if (forwardError) return err(c, 400, forwardError, "UNVERIFIED_FORWARD_TARGET");
     }
-    const updated = await store.updateRule(accountId, rule.id, body as Parameters<typeof store.updateRule>[2]);
-    return c.json(updated);
+    const updateResult = await store.updateRule(accountId, rule.id, body as Parameters<typeof store.updateRule>[2]);
+    if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
+    return c.json(updateResult.value);
   });
 
   app.delete("/accounts/:accountId/rules/:id", authz("rules:write", c => `accounts/${c.req.param("accountId")}/rules/${c.req.param("id")}`), async (c) => {
     const { accountId } = c.get("auth");
-    const rules = await store.listRules(accountId);
-    const rule = rules.find((r) => r.id === c.req.param("id"));
+    const rulesResult = await store.listRules(accountId);
+    if (rulesResult.isErr()) return err(c, 500, "Internal Server Error");
+    const rule = rulesResult.value.find((r) => r.id === c.req.param("id"));
     if (!rule) return err(c, 404, "Rule not found", "RULE_NOT_FOUND");
-    await store.deleteRule(accountId, rule.id);
+    const deleteResult = await store.deleteRule(accountId, rule.id);
+    if (deleteResult.isErr()) return err(c, 500, "Internal Server Error");
     return new Response(null, { status: 204 });
   });
 
@@ -594,20 +654,24 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
 
   app.get("/accounts/:accountId/domains", authz("domains:read", c => `accounts/${c.req.param("accountId")}/domains`), async (c) => {
     const { accountId } = c.get("auth");
-    const domains = await store.listDomains(accountId);
-    return c.json(page("domains", domains));
+    const domainsResult = await store.listDomains(accountId);
+    if (domainsResult.isErr()) return err(c, 500, "Internal Server Error");
+    return c.json(page("domains", domainsResult.value));
   });
 
   app.post("/accounts/:accountId/domains", authz("domains:write", c => `accounts/${c.req.param("accountId")}/domains`), async (c) => {
     const { accountId } = c.get("auth");
     const body = await zParse(CreateDomainRequest, c.req.raw);
-    const domain = await store.createDomain(accountId, body.domain);
-    return c.json(domain, 201);
+    const domainResult = await store.createDomain(accountId, body.domain);
+    if (domainResult.isErr()) return err(c, 500, "Internal Server Error");
+    return c.json(domainResult.value, 201);
   });
 
   app.get("/accounts/:accountId/domains/:id", authz("domains:read", c => `accounts/${c.req.param("accountId")}/domains/${c.req.param("id")}`), async (c) => {
     const { accountId } = c.get("auth");
-    const domain = await store.getDomain(accountId, c.req.param("id"));
+    const domainResult = await store.getDomain(accountId, c.req.param("id"));
+    if (domainResult.isErr()) return err(c, 500, "Internal Server Error");
+    const domain = domainResult.value;
     if (!domain) return err(c, 404, "Domain not found", "DOMAIN_NOT_FOUND");
     if (domain.accountId !== accountId) return err(c, 403, "Forbidden");
     const records = buildDnsRecords(domain);
@@ -616,7 +680,9 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
 
   app.patch("/accounts/:accountId/domains/:id", authz("domains:write", c => `accounts/${c.req.param("accountId")}/domains/${c.req.param("id")}`), async (c) => {
     const { accountId } = c.get("auth");
-    const domain = await store.getDomain(accountId, c.req.param("id"));
+    const domainResult = await store.getDomain(accountId, c.req.param("id"));
+    if (domainResult.isErr()) return err(c, 500, "Internal Server Error");
+    const domain = domainResult.value;
     if (!domain) return err(c, 404, "Domain not found", "DOMAIN_NOT_FOUND");
     if (domain.accountId !== accountId) return err(c, 403, "Forbidden");
     const records = await checkDomain(domain);
@@ -624,23 +690,28 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
     const failingRecords = records.filter((r) => r.status === "failing").map((r) => r.name);
     const receivingHealthy = records.find((r) => r.type === "MX")?.status === "verified";
     const senderHealthy = records.filter((r) => r.type !== "MX").every((r) => r.status === "verified");
-    await store.updateDomainHealth(accountId, domain.id, {
+    const healthResult = await store.updateDomainHealth(accountId, domain.id, {
       receivingHealthy,
       senderHealthy,
       failingRecords,
       lastCheckedAt: now,
       ...(failingRecords.length === 0 ? { lastHealthyAt: now } : {}),
     });
-    const updated = await store.getDomain(accountId, domain.id);
-    return c.json({ ...updated, records });
+    if (healthResult.isErr()) return err(c, 500, "Internal Server Error");
+    const updatedResult = await store.getDomain(accountId, domain.id);
+    if (updatedResult.isErr()) return err(c, 500, "Internal Server Error");
+    return c.json({ ...updatedResult.value, records });
   });
 
   app.delete("/accounts/:accountId/domains/:id", authz("domains:write", c => `accounts/${c.req.param("accountId")}/domains/${c.req.param("id")}`), async (c) => {
     const { accountId } = c.get("auth");
-    const domain = await store.getDomain(accountId, c.req.param("id"));
+    const domainResult = await store.getDomain(accountId, c.req.param("id"));
+    if (domainResult.isErr()) return err(c, 500, "Internal Server Error");
+    const domain = domainResult.value;
     if (!domain) return err(c, 404, "Domain not found", "DOMAIN_NOT_FOUND");
     if (domain.accountId !== accountId) return err(c, 403, "Forbidden");
-    await store.deleteDomain(accountId, domain.id);
+    const deleteResult = await store.deleteDomain(accountId, domain.id);
+    if (deleteResult.isErr()) return err(c, 500, "Internal Server Error");
     return new Response(null, { status: 204 });
   });
 
@@ -650,7 +721,9 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
 
   app.get("/accounts/:accountId", authz("accounts:read", c => `accounts/${c.req.param("accountId")}`), async (c) => {
     const { accountId } = c.get("auth");
-    const account = await store.getAccount(accountId);
+    const accountResult = await store.getAccount(accountId);
+    if (accountResult.isErr()) return err(c, 500, "Internal Server Error");
+    const account = accountResult.value;
     if (!account) return err(c, 404, "Account not found", "ACCOUNT_NOT_FOUND");
     return c.json(account);
   });
@@ -658,8 +731,9 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
   app.patch("/accounts/:accountId", authz("accounts:write", c => `accounts/${c.req.param("accountId")}`), async (c) => {
     const { accountId } = c.get("auth");
     const body = await zParse(UpdateAccountRequest, c.req.raw);
-    const updated = await store.updateAccount(accountId, body as Partial<Pick<Account, "name" | "deletionRetentionDays" | "notifications" | "filtering">>);
-    return c.json(updated);
+    const updateResult = await store.updateAccount(accountId, body as Partial<Pick<Account, "name" | "deletionRetentionDays" | "notifications" | "filtering">>);
+    if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
+    return c.json(updateResult.value);
   });
 
   // -------------------------------------------------------------------------
@@ -703,7 +777,9 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
   app.get("/accounts/:accountId/aliases", authz("aliases:read", c => `accounts/${c.req.param("accountId")}/aliases`), async (c) => {
     const { accountId } = c.get("auth");
     const domain = c.req.query("domain");
-    let aliases = await store.listAliases(accountId);
+    const aliasesResult = await store.listAliases(accountId);
+    if (aliasesResult.isErr()) return err(c, 500, "Internal Server Error");
+    let aliases = aliasesResult.value;
     if (domain) aliases = aliases.filter(a => a.createdForOrigin?.includes(domain));
     return c.json(page("aliases", aliases));
   });
@@ -711,7 +787,9 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
   app.get("/accounts/:accountId/aliases/:address", authz("aliases:read", c => `accounts/${c.req.param("accountId")}/aliases/${c.req.param("address")}`), async (c) => {
     const { accountId } = c.get("auth");
     const address = decodeURIComponent(c.req.param("address"));
-    const alias = await store.getAlias(accountId, address);
+    const aliasResult = await store.getAlias(accountId, address);
+    if (aliasResult.isErr()) return err(c, 500, "Internal Server Error");
+    const alias = aliasResult.value;
     if (!alias) return err(c, 404, "Alias not found", "ALIAS_NOT_FOUND");
     return c.json(alias);
   });
@@ -719,10 +797,11 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
   app.post("/accounts/:accountId/aliases", authz("aliases:write", c => `accounts/${c.req.param("accountId")}/aliases`), async (c) => {
     const { accountId } = c.get("auth");
     const body = await zParse(CreateAliasRequest, c.req.raw);
-    const existing = await store.getAlias(accountId, body.address);
-    if (existing) return err(c, 409, "Alias already exists", "ALIAS_EXISTS");
+    const existingResult = await store.getAlias(accountId, body.address);
+    if (existingResult.isErr()) return err(c, 500, "Internal Server Error");
+    if (existingResult.value) return err(c, 409, "Alias already exists", "ALIAS_EXISTS");
     const now = new Date().toISOString();
-    const alias = await store.createAlias({
+    const createResult = await store.createAlias({
       id: randomUUID(),
       accountId,
       address: body.address,
@@ -731,7 +810,8 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
       createdAt: now,
       updatedAt: now,
     });
-    return c.json(alias, 201);
+    if (createResult.isErr()) return err(c, 500, "Internal Server Error");
+    return c.json(createResult.value, 201);
   });
 
   app.patch("/accounts/:accountId/aliases/:address", authz("aliases:write", c => `accounts/${c.req.param("accountId")}/aliases/${c.req.param("address")}`), async (c) => {
@@ -739,12 +819,18 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
     const address = decodeURIComponent(c.req.param("address"));
     const body = await zParse(UpdateAliasRequest, c.req.raw);
     if (body.newAddress) {
-      const renamed = await store.renameAlias(accountId, address, body.newAddress);
-      return c.json(renamed);
+      const renameResult = await store.renameAlias(accountId, address, body.newAddress);
+      if (renameResult.isErr()) {
+        if (renameResult.error.kind === "not_found") return err(c, 404, "Alias not found", "ALIAS_NOT_FOUND");
+        return err(c, 500, "Internal Server Error");
+      }
+      return c.json(renameResult.value);
     }
-    const existing = await store.getAlias(accountId, address);
+    const existingResult = await store.getAlias(accountId, address);
+    if (existingResult.isErr()) return err(c, 500, "Internal Server Error");
+    const existing = existingResult.value;
     const now = new Date().toISOString();
-    const updated = await store.upsertAlias({
+    const upsertResult = await store.upsertAlias({
       id: existing?.id ?? randomUUID(),
       accountId,
       address,
@@ -754,13 +840,15 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
     });
-    return c.json(updated);
+    if (upsertResult.isErr()) return err(c, 500, "Internal Server Error");
+    return c.json(upsertResult.value);
   });
 
   app.delete("/accounts/:accountId/aliases/:address", authz("aliases:write", c => `accounts/${c.req.param("accountId")}/aliases/${c.req.param("address")}`), async (c) => {
     const { accountId } = c.get("auth");
     const address = decodeURIComponent(c.req.param("address"));
-    await store.deleteAlias(accountId, address);
+    const deleteResult = await store.deleteAlias(accountId, address);
+    if (deleteResult.isErr()) return err(c, 500, "Internal Server Error");
     return new Response(null, { status: 204 });
   });
 
@@ -771,15 +859,17 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
   app.get("/accounts/:accountId/aliases/:address/senders", authz("aliases:read", c => `accounts/${c.req.param("accountId")}/aliases/${c.req.param("address")}/senders`), async (c) => {
     const { accountId } = c.get("auth");
     const address = decodeURIComponent(c.req.param("address"));
-    const senders = await store.listSenders(accountId, address);
-    return c.json({ senders });
+    const sendersResult = await store.listSenders(accountId, address);
+    if (sendersResult.isErr()) return err(c, 500, "Internal Server Error");
+    return c.json({ senders: sendersResult.value });
   });
 
   app.post("/accounts/:accountId/aliases/:address/senders", authz("aliases:write", c => `accounts/${c.req.param("accountId")}/aliases/${c.req.param("address")}/senders`), async (c) => {
     const { accountId } = c.get("auth");
     const address = decodeURIComponent(c.req.param("address"));
     const body = await zParse(CreateSenderRequest, c.req.raw);
-    await store.saveSender(accountId, address, body.domain, body.mode);
+    const saveResult = await store.saveSender(accountId, address, body.domain, body.mode);
+    if (saveResult.isErr()) return err(c, 500, "Internal Server Error");
     return new Response(null, { status: 201 });
   });
 
@@ -787,7 +877,8 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
     const { accountId } = c.get("auth");
     const address = decodeURIComponent(c.req.param("address"));
     const domain = decodeURIComponent(c.req.param("domain"));
-    await store.removeSender(accountId, address, domain);
+    const removeResult = await store.removeSender(accountId, address, domain);
+    if (removeResult.isErr()) return err(c, 500, "Internal Server Error");
     return new Response(null, { status: 204 });
   });
 
@@ -797,35 +888,41 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
 
   app.get("/accounts/:accountId/templates", authz("templates:read", c => `accounts/${c.req.param("accountId")}/templates`), async (c) => {
     const { accountId } = c.get("auth");
-    const templates = await store.listTemplates(accountId);
-    return c.json({ templates });
+    const templatesResult = await store.listTemplates(accountId);
+    if (templatesResult.isErr()) return err(c, 500, "Internal Server Error");
+    return c.json({ templates: templatesResult.value });
   });
 
   app.post("/accounts/:accountId/templates", authz("templates:write", c => `accounts/${c.req.param("accountId")}/templates`), async (c) => {
     const { accountId } = c.get("auth");
     const body = await zParse(CreateTemplateRequest, c.req.raw);
     const now = new Date().toISOString();
-    const template = await store.createTemplate({
+    const templateResult = await store.createTemplate({
       id: randomUUID(), accountId, name: body.name, subject: body.subject, body: body.body,
       createdAt: now, updatedAt: now,
     });
-    return c.json(template, 201);
+    if (templateResult.isErr()) return err(c, 500, "Internal Server Error");
+    return c.json(templateResult.value, 201);
   });
 
   app.patch("/accounts/:accountId/templates/:id", authz("templates:write", c => `accounts/${c.req.param("accountId")}/templates/${c.req.param("id")}`), async (c) => {
     const { accountId } = c.get("auth");
     const body = await zParse(UpdateTemplateRequest, c.req.raw);
-    const existing = await store.getTemplate(accountId, c.req.param("id"));
-    if (!existing) return err(c, 404, "Template not found", "TEMPLATE_NOT_FOUND");
-    const updated = await store.updateTemplate(accountId, c.req.param("id"), body as Parameters<typeof store.updateTemplate>[2]);
-    return c.json(updated);
+    const existingResult = await store.getTemplate(accountId, c.req.param("id"));
+    if (existingResult.isErr()) return err(c, 500, "Internal Server Error");
+    if (!existingResult.value) return err(c, 404, "Template not found", "TEMPLATE_NOT_FOUND");
+    const updateResult = await store.updateTemplate(accountId, c.req.param("id"), body as Parameters<typeof store.updateTemplate>[2]);
+    if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
+    return c.json(updateResult.value);
   });
 
   app.delete("/accounts/:accountId/templates/:id", authz("templates:write", c => `accounts/${c.req.param("accountId")}/templates/${c.req.param("id")}`), async (c) => {
     const { accountId } = c.get("auth");
-    const existing = await store.getTemplate(accountId, c.req.param("id"));
-    if (!existing) return err(c, 404, "Template not found", "TEMPLATE_NOT_FOUND");
-    await store.deleteTemplate(accountId, c.req.param("id"));
+    const existingResult = await store.getTemplate(accountId, c.req.param("id"));
+    if (existingResult.isErr()) return err(c, 500, "Internal Server Error");
+    if (!existingResult.value) return err(c, 404, "Template not found", "TEMPLATE_NOT_FOUND");
+    const deleteResult = await store.deleteTemplate(accountId, c.req.param("id"));
+    if (deleteResult.isErr()) return err(c, 500, "Internal Server Error");
     return new Response(null, { status: 204 });
   });
 
@@ -836,15 +933,18 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
 
   app.get("/accounts/:accountId/forwarding-addresses", authz("forwarding-addresses:read", c => `accounts/${c.req.param("accountId")}/forwarding-addresses`), async (c) => {
     const { accountId } = c.get("auth");
-    const addresses = await store.listVerifiedForwardingAddresses(accountId);
-    return c.json(page("forwardingAddresses", addresses));
+    const addressesResult = await store.listVerifiedForwardingAddresses(accountId);
+    if (addressesResult.isErr()) return err(c, 500, "Internal Server Error");
+    return c.json(page("forwardingAddresses", addressesResult.value));
   });
 
   app.post("/accounts/:accountId/forwarding-addresses", authz("forwarding-addresses:write", c => `accounts/${c.req.param("accountId")}/forwarding-addresses`), async (c) => {
     const { accountId } = c.get("auth");
     const body = await zParse(CreateForwardingAddressRequest, c.req.raw);
 
-    const existing = await store.getVerifiedForwardingAddress(accountId, body.address);
+    const existingResult = await store.getVerifiedForwardingAddress(accountId, body.address);
+    if (existingResult.isErr()) return err(c, 500, "Internal Server Error");
+    const existing = existingResult.value;
     if (existing?.status === "verified") return c.json(existing, 200);
 
     const now = new Date().toISOString();
@@ -857,12 +957,14 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
       createdAt: existing?.createdAt ?? now,
       ...(existing?.verifiedAt !== undefined ? { verifiedAt: existing.verifiedAt } : {}),
     };
-    await store.saveVerifiedForwardingAddress(addr);
+    const saveResult = await store.saveVerifiedForwardingAddress(addr);
+    if (saveResult.isErr()) return err(c, 500, "Internal Server Error");
 
     if (verificationMailer) {
-      await verificationMailer.sendForwardVerification(accountId, addr.address, addr.token).catch((e) => {
-        console.error("Failed to send verification email:", e);
-      });
+      const verifyResult = await verificationMailer.sendForwardVerification(accountId, addr.address, addr.token);
+      if (verifyResult.isErr()) {
+        console.error("Failed to send verification email:", verifyResult.error.cause);
+      }
     }
 
     return c.json(addr, 201);
@@ -873,20 +975,24 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
     const address = decodeURIComponent(c.req.param("address"));
     const body = await zParse(VerifyForwardingAddressRequest, c.req.raw);
 
-    const existing = await store.getVerifiedForwardingAddress(accountId, address);
+    const existingResult = await store.getVerifiedForwardingAddress(accountId, address);
+    if (existingResult.isErr()) return err(c, 500, "Internal Server Error");
+    const existing = existingResult.value;
     if (!existing) return err(c, 404, "Forwarding address not found", "FORWARDING_ADDRESS_NOT_FOUND");
     if (existing.status === "verified") return c.json(existing);
     if (existing.token !== body.token) return err(c, 400, "Invalid token", "INVALID_TOKEN");
 
     const verified: VerifiedForwardingAddress = { ...existing, status: "verified", verifiedAt: new Date().toISOString() };
-    await store.saveVerifiedForwardingAddress(verified);
+    const saveResult = await store.saveVerifiedForwardingAddress(verified);
+    if (saveResult.isErr()) return err(c, 500, "Internal Server Error");
     return c.json(verified);
   });
 
   app.delete("/accounts/:accountId/forwarding-addresses/:address", authz("forwarding-addresses:write", c => `accounts/${c.req.param("accountId")}/forwarding-addresses/${c.req.param("address")}`), async (c) => {
     const { accountId } = c.get("auth");
     const address = decodeURIComponent(c.req.param("address"));
-    await store.deleteVerifiedForwardingAddress(accountId, address);
+    const deleteResult = await store.deleteVerifiedForwardingAddress(accountId, address);
+    if (deleteResult.isErr()) return err(c, 500, "Internal Server Error");
     return new Response(null, { status: 204 });
   });
 
@@ -900,7 +1006,8 @@ export function createApp({ store, auth, access, verificationMailer }: AppDeps) 
     const rawLimit = c.req.query("limit");
     const params: PageParams = { ...(cursor ? { cursor } : {}), ...(rawLimit ? { limit: parseInt(rawLimit, 10) } : {}) };
     const result = await store.listAuditEvents(accountId, params);
-    return c.json(result);
+    if (result.isErr()) return err(c, 500, "Internal Server Error");
+    return c.json(result.value);
   });
 
   return app;
@@ -919,8 +1026,9 @@ async function validateForwardTargets(
 ): Promise<string | null> {
   const forwardTargets = actions.filter((a) => a.type === "forward" && a.value).map((a) => a.value!);
   if (forwardTargets.length === 0) return null;
-  const verified = await store.listVerifiedForwardingAddresses(accountId);
-  const verifiedSet = new Set(verified.filter((v) => v.status === "verified").map((v) => v.address));
+  const verifiedResult = await store.listVerifiedForwardingAddresses(accountId);
+  if (verifiedResult.isErr()) return "Internal error validating forward targets";
+  const verifiedSet = new Set(verifiedResult.value.filter((v) => v.status === "verified").map((v) => v.address));
   const unverified = forwardTargets.filter((t) => !verifiedSet.has(t));
   return unverified.length > 0 ? `Forward targets not verified: ${unverified.join(", ")}` : null;
 }

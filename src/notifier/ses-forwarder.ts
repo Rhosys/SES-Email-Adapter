@@ -1,6 +1,9 @@
 import { SESv2Client, SendEmailCommand } from "@aws-sdk/client-sesv2";
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
+import { ResultAsync } from "neverthrow";
 import type { Forwarder, ForwardOptions } from "../processor/processor.js";
+import { dbError } from "../errors.js";
+import type { DbError } from "../errors.js";
 
 const FROM_ADDRESS = process.env["NOTIFICATION_FROM"] ?? "";
 const EMAIL_BUCKET = process.env["EMAIL_BUCKET"] ?? "";
@@ -15,7 +18,14 @@ export class SesForwarder implements Forwarder {
     this.s3 = s3 ?? new S3Client({});
   }
 
-  async forward(s3Key: string, toAddress: string, accountId: string, opts: ForwardOptions): Promise<void> {
+  forward(s3Key: string, toAddress: string, accountId: string, opts: ForwardOptions): ResultAsync<void, DbError> {
+    return ResultAsync.fromPromise(
+      this.doForward(s3Key, toAddress, accountId, opts),
+      (e) => dbError(e instanceof Error ? e : new Error(String(e)))
+    );
+  }
+
+  private async doForward(s3Key: string, toAddress: string, accountId: string, opts: ForwardOptions): Promise<void> {
     if (!opts.dkimPass) {
       console.warn(`Forward skipped (no DKIM pass): ${opts.senderDomain} -> ${toAddress}`);
       return;

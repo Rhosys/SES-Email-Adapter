@@ -1,9 +1,11 @@
-import { randomUUID } from "crypto";
 import { RDSDataClient, ExecuteStatementCommand, BeginTransactionCommand, CommitTransactionCommand, RollbackTransactionCommand } from "@aws-sdk/client-rds-data";
 import { DeleteCommand, GetCommand, PutCommand, QueryCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
+import { ResultAsync } from "neverthrow";
 import { dynamo, SIGNALS_TABLE, encodeCursor, decodeCursor } from "./shared.js";
+import { dbError } from "../errors.js";
+import type { DbError } from "../errors.js";
 import type { ArcMatcher } from "../processor/processor.js";
-import type { ListArcsParams, UpdateArcRequest, CreateViewRequest, UpdateViewRequest } from "../api/app.js";
+import type { ListArcsParams, UpdateArcRequest } from "../api/app.js";
 import type { Arc, Signal, Page, PageParams } from "../types/index.js";
 
 // ---------------------------------------------------------------------------
@@ -27,6 +29,12 @@ const ITEM_SK = "#";
 const gkeyPk = (accountId: string, key: string) => `GKEY#${accountId}#${key}`;
 
 // ---------------------------------------------------------------------------
+// Error mapper for ResultAsync.fromPromise
+// ---------------------------------------------------------------------------
+
+const toDbError = (e: unknown): DbError => dbError(e instanceof Error ? e : new Error(String(e)));
+
+// ---------------------------------------------------------------------------
 // ArcDatabase
 // Owns: Arcs and Signals in SIGNALS_TABLE, plus pgvector similarity search
 // ---------------------------------------------------------------------------
@@ -36,16 +44,18 @@ export class ArcDatabase implements ArcMatcher {
   // Signals
   // ---------------------------------------------------------------------------
 
-  async getSignalByMessageId(accountId: string, sesMessageId: string): Promise<Pick<Signal, "id"> | null> {
-    const result = await dynamo.send(new GetCommand({
-      TableName: SIGNALS_TABLE,
-      Key: { pk: sigPk(accountId, `SES#${sesMessageId}`), sk: ITEM_SK },
-      ProjectionExpression: "id",
-    }));
-    return result.Item ? (result.Item as Pick<Signal, "id">) : null;
+  getSignalByMessageId(accountId: string, sesMessageId: string): ResultAsync<Pick<Signal, "id"> | null, DbError> {
+    return ResultAsync.fromPromise(
+      dynamo.send(new GetCommand({
+        TableName: SIGNALS_TABLE,
+        Key: { pk: sigPk(accountId, `SES#${sesMessageId}`), sk: ITEM_SK },
+        ProjectionExpression: "id",
+      })).then(res => res.Item ? (res.Item as Pick<Signal, "id">) : null),
+      toDbError,
+    );
   }
 
-  async saveSignal(signal: Signal): Promise<void> {
+  saveSignal(signal: Signal): ResultAsync<void, DbError> {
     let gsi1pk: string;
     if (signal.arcId) {
       gsi1pk = `ARCSIG#${signal.arcId}`;
@@ -55,144 +65,177 @@ export class ArcDatabase implements ArcMatcher {
       gsi1pk = `BLOCKED#${signal.accountId}`;
     }
     const gsi1sk = `RECV#${signal.receivedAt}#${signal.id}`;
-    await dynamo.send(new PutCommand({
-      TableName: SIGNALS_TABLE,
-      Item: {
-        ...signal,
-        pk: sigPk(signal.accountId, signal.id),
-        sk: ITEM_SK,
-        gsi1pk,
-        gsi1sk,
-      },
-    }));
+    return ResultAsync.fromPromise(
+      dynamo.send(new PutCommand({
+        TableName: SIGNALS_TABLE,
+        Item: {
+          ...signal,
+          pk: sigPk(signal.accountId, signal.id),
+          sk: ITEM_SK,
+          gsi1pk,
+          gsi1sk,
+        },
+      })).then(() => undefined),
+      toDbError,
+    );
   }
 
-  async getSignal(accountId: string, id: string): Promise<Signal | null> {
-    const result = await dynamo.send(new GetCommand({
-      TableName: SIGNALS_TABLE,
-      Key: { pk: sigPk(accountId, id), sk: ITEM_SK },
-    }));
-    return result.Item ? (result.Item as Signal) : null;
+  getSignal(accountId: string, id: string): ResultAsync<Signal | null, DbError> {
+    return ResultAsync.fromPromise(
+      dynamo.send(new GetCommand({
+        TableName: SIGNALS_TABLE,
+        Key: { pk: sigPk(accountId, id), sk: ITEM_SK },
+      })).then(res => res.Item ? (res.Item as Signal) : null),
+      toDbError,
+    );
   }
 
-  async listSignals(accountId: string, arcId: string, params: PageParams): Promise<Page<Signal>> {
+  listSignals(accountId: string, arcId: string, params: PageParams): ResultAsync<Page<Signal>, DbError> {
     const limit = Math.min(params.limit ?? 20, 100);
-    const res = await dynamo.send(new QueryCommand({
-      TableName: SIGNALS_TABLE,
-      IndexName: "gsi1",
-      KeyConditionExpression: "gsi1pk = :pk",
-      ExpressionAttributeValues: { ":pk": `ARCSIG#${arcId}` },
-      ScanIndexForward: false,
-      Limit: limit + 1,
-      ...(params.cursor ? { ExclusiveStartKey: decodeCursor(params.cursor) } : {}),
-    }));
-
-    const items = (res.Items ?? []) as Signal[];
-    const page = items.slice(0, limit);
-    const nextKey = items.length > limit && res.LastEvaluatedKey ? encodeCursor(res.LastEvaluatedKey) : null;
-    return { items: page, ...(nextKey ? { nextCursor: nextKey } : {}) };
+    return ResultAsync.fromPromise(
+      dynamo.send(new QueryCommand({
+        TableName: SIGNALS_TABLE,
+        IndexName: "gsi1",
+        KeyConditionExpression: "gsi1pk = :pk",
+        ExpressionAttributeValues: { ":pk": `ARCSIG#${arcId}` },
+        ScanIndexForward: false,
+        Limit: limit + 1,
+        ...(params.cursor ? { ExclusiveStartKey: decodeCursor(params.cursor) } : {}),
+      })).then(res => {
+        const items = (res.Items ?? []) as Signal[];
+        const page = items.slice(0, limit);
+        const nextKey = items.length > limit && res.LastEvaluatedKey ? encodeCursor(res.LastEvaluatedKey) : null;
+        return { items: page, ...(nextKey ? { nextCursor: nextKey } : {}) } as Page<Signal>;
+      }),
+      toDbError,
+    );
   }
 
-  async listPreArcSignals(accountId: string, status: "blocked" | "quarantined", params: PageParams): Promise<Page<Signal>> {
+  listPreArcSignals(accountId: string, status: "blocked" | "quarantined", params: PageParams): ResultAsync<Page<Signal>, DbError> {
     const limit = Math.min(params.limit ?? 20, 100);
     const gsi1pk = status === "quarantined" ? `QUARANTINED#${accountId}` : `BLOCKED#${accountId}`;
-    const res = await dynamo.send(new QueryCommand({
-      TableName: SIGNALS_TABLE,
-      IndexName: "gsi1",
-      KeyConditionExpression: "gsi1pk = :pk",
-      ExpressionAttributeValues: { ":pk": gsi1pk },
-      ScanIndexForward: false,
-      Limit: limit + 1,
-      ...(params.cursor ? { ExclusiveStartKey: decodeCursor(params.cursor) } : {}),
-    }));
-    const items = (res.Items ?? []) as Signal[];
-    const page = items.slice(0, limit);
-    const nextKey = items.length > limit && res.LastEvaluatedKey ? encodeCursor(res.LastEvaluatedKey) : null;
-    return { items: page, ...(nextKey ? { nextCursor: nextKey } : {}) };
+    return ResultAsync.fromPromise(
+      dynamo.send(new QueryCommand({
+        TableName: SIGNALS_TABLE,
+        IndexName: "gsi1",
+        KeyConditionExpression: "gsi1pk = :pk",
+        ExpressionAttributeValues: { ":pk": gsi1pk },
+        ScanIndexForward: false,
+        Limit: limit + 1,
+        ...(params.cursor ? { ExclusiveStartKey: decodeCursor(params.cursor) } : {}),
+      })).then(res => {
+        const items = (res.Items ?? []) as Signal[];
+        const page = items.slice(0, limit);
+        const nextKey = items.length > limit && res.LastEvaluatedKey ? encodeCursor(res.LastEvaluatedKey) : null;
+        return { items: page, ...(nextKey ? { nextCursor: nextKey } : {}) } as Page<Signal>;
+      }),
+      toDbError,
+    );
   }
 
-  async blockSignal(accountId: string, signalId: string): Promise<Signal> {
-    const result = await dynamo.send(new UpdateCommand({
-      TableName: SIGNALS_TABLE,
-      Key: { pk: sigPk(accountId, signalId), sk: ITEM_SK },
-      UpdateExpression: "SET #status = :status, gsi1pk = :gsi1pk",
-      ExpressionAttributeNames: { "#status": "status" },
-      ExpressionAttributeValues: {
-        ":status": "blocked",
-        ":gsi1pk": `BLOCKED#${accountId}`,
-      },
-      ReturnValues: "ALL_NEW",
-    }));
-    return result.Attributes as unknown as Signal;
+  blockSignal(accountId: string, signalId: string): ResultAsync<Signal, DbError> {
+    return ResultAsync.fromPromise(
+      dynamo.send(new UpdateCommand({
+        TableName: SIGNALS_TABLE,
+        Key: { pk: sigPk(accountId, signalId), sk: ITEM_SK },
+        UpdateExpression: "SET #status = :status, gsi1pk = :gsi1pk",
+        ExpressionAttributeNames: { "#status": "status" },
+        ExpressionAttributeValues: {
+          ":status": "blocked",
+          ":gsi1pk": `BLOCKED#${accountId}`,
+        },
+        ReturnValues: "ALL_NEW",
+      })).then(result => result.Attributes as unknown as Signal),
+      toDbError,
+    );
   }
 
-  async unblockSignal(accountId: string, signalId: string, arcId: string): Promise<void> {
-    await dynamo.send(new UpdateCommand({
-      TableName: SIGNALS_TABLE,
-      Key: { pk: sigPk(accountId, signalId), sk: ITEM_SK },
-      UpdateExpression: "SET arcId = :arcId, #status = :status, gsi1pk = :gsi1pk",
-      ExpressionAttributeNames: { "#status": "status" },
-      ExpressionAttributeValues: {
-        ":arcId": arcId,
-        ":status": "active",
-        ":gsi1pk": `ARCSIG#${arcId}`,
-      },
-    }));
+  unblockSignal(accountId: string, signalId: string, arcId: string): ResultAsync<void, DbError> {
+    return ResultAsync.fromPromise(
+      dynamo.send(new UpdateCommand({
+        TableName: SIGNALS_TABLE,
+        Key: { pk: sigPk(accountId, signalId), sk: ITEM_SK },
+        UpdateExpression: "SET arcId = :arcId, #status = :status, gsi1pk = :gsi1pk",
+        ExpressionAttributeNames: { "#status": "status" },
+        ExpressionAttributeValues: {
+          ":arcId": arcId,
+          ":status": "active",
+          ":gsi1pk": `ARCSIG#${arcId}`,
+        },
+      })).then(() => undefined),
+      toDbError,
+    );
   }
 
   // ---------------------------------------------------------------------------
   // Arcs
   // ---------------------------------------------------------------------------
 
-  async getArc(accountId: string, id: string): Promise<Arc | null> {
-    const result = await dynamo.send(new GetCommand({
-      TableName: SIGNALS_TABLE,
-      Key: { pk: arcPk(accountId, id), sk: ITEM_SK },
-    }));
-    return result.Item ? (result.Item as Arc) : null;
-  }
-
-  async findArcByGroupingKey(accountId: string, key: string): Promise<Arc | null> {
-    const result = await dynamo.send(new GetCommand({
-      TableName: SIGNALS_TABLE,
-      Key: { pk: gkeyPk(accountId, key), sk: "GKEY" },
-      ProjectionExpression: "arcId",
-    }));
-    if (!result.Item) return null;
-    const arcId = result.Item["arcId"] as string | undefined;
-    if (!arcId) return null;
-    return this.getArc(accountId, arcId);
-  }
-
-  async saveArc(arc: Arc): Promise<void> {
-    const writes: Promise<unknown>[] = [
-      dynamo.send(new PutCommand({
+  getArc(accountId: string, id: string): ResultAsync<Arc | null, DbError> {
+    return ResultAsync.fromPromise(
+      dynamo.send(new GetCommand({
         TableName: SIGNALS_TABLE,
-        Item: {
-          ...arc,
-          pk: arcPk(arc.accountId, arc.id),
-          sk: ITEM_SK,
-          gsi1pk: `ACCT#${arc.accountId}`,
-          gsi1sk: `LASTACT#${arc.status}#${arc.lastSignalAt}#${arc.id}`,
-        },
-      })),
-    ];
-
-    if (arc.groupingKey) {
-      writes.push(dynamo.send(new PutCommand({
-        TableName: SIGNALS_TABLE,
-        Item: { pk: gkeyPk(arc.accountId, arc.groupingKey), sk: "GKEY", arcId: arc.id },
-      })));
-    }
-
-    await Promise.all(writes);
+        Key: { pk: arcPk(accountId, id), sk: ITEM_SK },
+      })).then(res => res.Item ? (res.Item as Arc) : null),
+      toDbError,
+    );
   }
 
-  async createArc(arc: Arc): Promise<void> {
+  findArcByGroupingKey(accountId: string, key: string): ResultAsync<Arc | null, DbError> {
+    return ResultAsync.fromPromise(
+      (async () => {
+        const result = await dynamo.send(new GetCommand({
+          TableName: SIGNALS_TABLE,
+          Key: { pk: gkeyPk(accountId, key), sk: "GKEY" },
+          ProjectionExpression: "arcId",
+        }));
+        if (!result.Item) return null;
+        const arcId = result.Item["arcId"] as string | undefined;
+        if (!arcId) return null;
+        const arcResult = await dynamo.send(new GetCommand({
+          TableName: SIGNALS_TABLE,
+          Key: { pk: arcPk(accountId, arcId), sk: ITEM_SK },
+        }));
+        return arcResult.Item ? (arcResult.Item as Arc) : null;
+      })(),
+      toDbError,
+    );
+  }
+
+  saveArc(arc: Arc): ResultAsync<void, DbError> {
+    return ResultAsync.fromPromise(
+      (async () => {
+        const writes: Promise<unknown>[] = [
+          dynamo.send(new PutCommand({
+            TableName: SIGNALS_TABLE,
+            Item: {
+              ...arc,
+              pk: arcPk(arc.accountId, arc.id),
+              sk: ITEM_SK,
+              gsi1pk: `ACCT#${arc.accountId}`,
+              gsi1sk: `LASTACT#${arc.status}#${arc.lastSignalAt}#${arc.id}`,
+            },
+          })),
+        ];
+
+        if (arc.groupingKey) {
+          writes.push(dynamo.send(new PutCommand({
+            TableName: SIGNALS_TABLE,
+            Item: { pk: gkeyPk(arc.accountId, arc.groupingKey), sk: "GKEY", arcId: arc.id },
+          })));
+        }
+
+        await Promise.all(writes);
+      })(),
+      toDbError,
+    );
+  }
+
+  createArc(arc: Arc): ResultAsync<void, DbError> {
     return this.saveArc(arc);
   }
 
-  async updateArc(accountId: string, id: string, update: UpdateArcRequest): Promise<Arc> {
+  updateArc(accountId: string, id: string, update: UpdateArcRequest): ResultAsync<Arc, DbError> {
     const now = new Date().toISOString();
     const setParts: string[] = ["updatedAt = :now"];
     const exprValues: Record<string, unknown> = { ":now": now };
@@ -217,18 +260,20 @@ export class ArcDatabase implements ArcMatcher {
       exprValues[":urgency"] = update.urgency;
     }
 
-    const result = await dynamo.send(new UpdateCommand({
-      TableName: SIGNALS_TABLE,
-      Key: { pk: arcPk(accountId, id), sk: ITEM_SK },
-      UpdateExpression: `SET ${setParts.join(", ")}`,
-      ExpressionAttributeValues: exprValues,
-      ...(Object.keys(exprNames).length ? { ExpressionAttributeNames: exprNames } : {}),
-      ReturnValues: "ALL_NEW",
-    }));
-    return result.Attributes as unknown as Arc;
+    return ResultAsync.fromPromise(
+      dynamo.send(new UpdateCommand({
+        TableName: SIGNALS_TABLE,
+        Key: { pk: arcPk(accountId, id), sk: ITEM_SK },
+        UpdateExpression: `SET ${setParts.join(", ")}`,
+        ExpressionAttributeValues: exprValues,
+        ...(Object.keys(exprNames).length ? { ExpressionAttributeNames: exprNames } : {}),
+        ReturnValues: "ALL_NEW",
+      })).then(result => result.Attributes as unknown as Arc),
+      toDbError,
+    );
   }
 
-  async updateSignal(accountId: string, id: string, update: Partial<Pick<Signal, "subject" | "textBody" | "from" | "to">>): Promise<Signal> {
+  updateSignal(accountId: string, id: string, update: Partial<Pick<Signal, "subject" | "textBody" | "from" | "to">>): ResultAsync<Signal, DbError> {
     const now = new Date().toISOString();
     const setParts: string[] = ["updatedAt = :now"];
     const exprValues: Record<string, unknown> = { ":now": now };
@@ -239,116 +284,129 @@ export class ArcDatabase implements ArcMatcher {
     if (update.from !== undefined) { setParts.push("#from = :from"); exprValues[":from"] = update.from; exprNames["#from"] = "from"; }
     if (update.to !== undefined) { setParts.push("#to = :to"); exprValues[":to"] = update.to; exprNames["#to"] = "to"; }
 
-    const result = await dynamo.send(new UpdateCommand({
-      TableName: SIGNALS_TABLE,
-      Key: { pk: sigPk(accountId, id), sk: ITEM_SK },
-      UpdateExpression: `SET ${setParts.join(", ")}`,
-      ExpressionAttributeValues: exprValues,
-      ...(Object.keys(exprNames).length ? { ExpressionAttributeNames: exprNames } : {}),
-      ReturnValues: "ALL_NEW",
-    }));
-    return result.Attributes as unknown as Signal;
+    return ResultAsync.fromPromise(
+      dynamo.send(new UpdateCommand({
+        TableName: SIGNALS_TABLE,
+        Key: { pk: sigPk(accountId, id), sk: ITEM_SK },
+        UpdateExpression: `SET ${setParts.join(", ")}`,
+        ExpressionAttributeValues: exprValues,
+        ...(Object.keys(exprNames).length ? { ExpressionAttributeNames: exprNames } : {}),
+        ReturnValues: "ALL_NEW",
+      })).then(result => result.Attributes as unknown as Signal),
+      toDbError,
+    );
   }
 
-  async deleteSignal(accountId: string, id: string): Promise<void> {
-    await dynamo.send(new DeleteCommand({
-      TableName: SIGNALS_TABLE,
-      Key: { pk: sigPk(accountId, id), sk: ITEM_SK },
-    }));
+  deleteSignal(accountId: string, id: string): ResultAsync<void, DbError> {
+    return ResultAsync.fromPromise(
+      dynamo.send(new DeleteCommand({
+        TableName: SIGNALS_TABLE,
+        Key: { pk: sigPk(accountId, id), sk: ITEM_SK },
+      })).then(() => undefined),
+      toDbError,
+    );
   }
 
-  async listArcs(accountId: string, params: ListArcsParams): Promise<Page<Arc>> {
+  listArcs(accountId: string, params: ListArcsParams): ResultAsync<Page<Arc>, DbError> {
     const limit = Math.min(params.limit ?? 20, 100);
     const gsi1pk = `ACCT#${accountId}`;
 
-    let items: Arc[];
-    let lastKey: Record<string, unknown> | undefined;
+    return ResultAsync.fromPromise(
+      (async () => {
+        let items: Arc[];
+        let lastKey: Record<string, unknown> | undefined;
 
-    if (params.status) {
-      // Single query — status is encoded in gsi1sk prefix for efficient reads
-      const res = await dynamo.send(new QueryCommand({
+        if (params.status) {
+          const res = await dynamo.send(new QueryCommand({
+            TableName: SIGNALS_TABLE,
+            IndexName: "gsi1",
+            KeyConditionExpression: "gsi1pk = :pk AND begins_with(gsi1sk, :prefix)",
+            ExpressionAttributeValues: { ":pk": gsi1pk, ":prefix": `LASTACT#${params.status}#` },
+            ScanIndexForward: false,
+            Limit: limit + 1,
+            ...(params.cursor ? { ExclusiveStartKey: decodeCursor(params.cursor) } : {}),
+          }));
+          items = (res.Items ?? []) as Arc[];
+          lastKey = res.LastEvaluatedKey;
+        } else {
+          const statuses: Array<"active" | "archived" | "deleted"> = ["active", "archived", "deleted"];
+          const results = await Promise.all(statuses.map(s =>
+            dynamo.send(new QueryCommand({
+              TableName: SIGNALS_TABLE,
+              IndexName: "gsi1",
+              KeyConditionExpression: "gsi1pk = :pk AND begins_with(gsi1sk, :prefix)",
+              ExpressionAttributeValues: { ":pk": gsi1pk, ":prefix": `LASTACT#${s}#` },
+              ScanIndexForward: false,
+              Limit: limit + 1,
+            }))
+          ));
+          items = results.flatMap(r => (r.Items ?? []) as Arc[]);
+          items.sort((a, b) => b.lastSignalAt.localeCompare(a.lastSignalAt));
+          lastKey = undefined;
+        }
+
+        if (params.workflow) items = items.filter((a) => a.workflow === params.workflow);
+        if (params.label) items = items.filter((a) => a.labels.includes(params.label!));
+
+        const page = items.slice(0, limit);
+        const nextKey = items.length > limit && lastKey ? encodeCursor(lastKey) : null;
+        return { items: page, ...(nextKey ? { nextCursor: nextKey } : {}) } as Page<Arc>;
+      })(),
+      toDbError,
+    );
+  }
+
+  listActiveArcsBefore(accountId: string, beforeDate: string): ResultAsync<Arc[], DbError> {
+    return ResultAsync.fromPromise(
+      dynamo.send(new QueryCommand({
+        TableName: SIGNALS_TABLE,
+        IndexName: "gsi1",
+        KeyConditionExpression: "gsi1pk = :pk AND gsi1sk BETWEEN :start AND :end",
+        ExpressionAttributeValues: {
+          ":pk": `ACCT#${accountId}`,
+          ":start": "LASTACT#active#",
+          ":end": `LASTACT#active#${beforeDate}#`,
+        },
+        ScanIndexForward: true,
+      })).then(res => (res.Items ?? []) as Arc[]),
+      toDbError,
+    );
+  }
+
+  searchArcs(accountId: string, query: string, params: PageParams): ResultAsync<Page<Arc>, DbError> {
+    const limit = Math.min(params.limit ?? 20, 100);
+    return ResultAsync.fromPromise(
+      dynamo.send(new QueryCommand({
         TableName: SIGNALS_TABLE,
         IndexName: "gsi1",
         KeyConditionExpression: "gsi1pk = :pk AND begins_with(gsi1sk, :prefix)",
-        ExpressionAttributeValues: { ":pk": gsi1pk, ":prefix": `LASTACT#${params.status}#` },
+        ExpressionAttributeValues: { ":pk": `ACCT#${accountId}`, ":prefix": "LASTACT#active#" },
         ScanIndexForward: false,
-        Limit: limit + 1,
+        Limit: 500,
         ...(params.cursor ? { ExclusiveStartKey: decodeCursor(params.cursor) } : {}),
-      }));
-      items = (res.Items ?? []) as Arc[];
-      lastKey = res.LastEvaluatedKey;
-    } else {
-      // Multi-status view: parallel queries per status, merge by lastSignalAt
-      const statuses: Array<"active" | "archived" | "deleted"> = ["active", "archived", "deleted"];
-      const results = await Promise.all(statuses.map(s =>
-        dynamo.send(new QueryCommand({
-          TableName: SIGNALS_TABLE,
-          IndexName: "gsi1",
-          KeyConditionExpression: "gsi1pk = :pk AND begins_with(gsi1sk, :prefix)",
-          ExpressionAttributeValues: { ":pk": gsi1pk, ":prefix": `LASTACT#${s}#` },
-          ScanIndexForward: false,
-          Limit: limit + 1,
-        }))
-      ));
-      items = results.flatMap(r => (r.Items ?? []) as Arc[]);
-      items.sort((a, b) => b.lastSignalAt.localeCompare(a.lastSignalAt));
-      lastKey = undefined; // no cursor for multi-status merge
-    }
+      })).then(res => {
+        const fetchedItems = (res.Items ?? []) as Arc[];
+        if (fetchedItems.length > 200) {
+          console.warn(JSON.stringify({
+            level: "warn",
+            message: "searchArcs.large_result_set",
+            accountId,
+            query,
+            itemsFetched: fetchedItems.length,
+            timestamp: new Date().toISOString(),
+          }));
+        }
 
-    if (params.workflow) items = items.filter((a) => a.workflow === params.workflow);
-    if (params.label) items = items.filter((a) => a.labels.includes(params.label!));
-
-    const page = items.slice(0, limit);
-    const nextKey = items.length > limit && lastKey ? encodeCursor(lastKey) : null;
-    return { items: page, ...(nextKey ? { nextCursor: nextKey } : {}) };
-  }
-
-  async listActiveArcsBefore(accountId: string, beforeDate: string): Promise<Arc[]> {
-    const res = await dynamo.send(new QueryCommand({
-      TableName: SIGNALS_TABLE,
-      IndexName: "gsi1",
-      KeyConditionExpression: "gsi1pk = :pk AND gsi1sk BETWEEN :start AND :end",
-      ExpressionAttributeValues: {
-        ":pk": `ACCT#${accountId}`,
-        ":start": "LASTACT#active#",
-        ":end": `LASTACT#active#${beforeDate}#`,
-      },
-      ScanIndexForward: true,
-    }));
-    return (res.Items ?? []) as Arc[];
-  }
-
-  async searchArcs(accountId: string, query: string, params: PageParams): Promise<Page<Arc>> {
-    const limit = Math.min(params.limit ?? 20, 100);
-    const res = await dynamo.send(new QueryCommand({
-      TableName: SIGNALS_TABLE,
-      IndexName: "gsi1",
-      KeyConditionExpression: "gsi1pk = :pk AND begins_with(gsi1sk, :prefix)",
-      ExpressionAttributeValues: { ":pk": `ACCT#${accountId}`, ":prefix": "LASTACT#active#" },
-      ScanIndexForward: false,
-      Limit: 500,
-      ...(params.cursor ? { ExclusiveStartKey: decodeCursor(params.cursor) } : {}),
-    }));
-
-    const fetchedItems = (res.Items ?? []) as Arc[];
-    if (fetchedItems.length > 200) {
-      console.warn(JSON.stringify({
-        level: "warn",
-        message: "searchArcs.large_result_set",
-        accountId,
-        query,
-        itemsFetched: fetchedItems.length,
-        timestamp: new Date().toISOString(),
-      }));
-    }
-
-    const q = query.toLowerCase();
-    const items = fetchedItems.filter(
-      (a) => a.summary.toLowerCase().includes(q) || a.workflow.toLowerCase().includes(q),
+        const q = query.toLowerCase();
+        const items = fetchedItems.filter(
+          (a) => a.summary.toLowerCase().includes(q) || a.workflow.toLowerCase().includes(q),
+        );
+        const page = items.slice(0, limit);
+        const nextKey = items.length > limit && res.LastEvaluatedKey ? encodeCursor(res.LastEvaluatedKey) : null;
+        return { items: page, ...(nextKey ? { nextCursor: nextKey } : {}) } as Page<Arc>;
+      }),
+      toDbError,
     );
-    const page = items.slice(0, limit);
-    const nextKey = items.length > limit && res.LastEvaluatedKey ? encodeCursor(res.LastEvaluatedKey) : null;
-    return { items: page, ...(nextKey ? { nextCursor: nextKey } : {}) };
   }
 
   // ---------------------------------------------------------------------------
@@ -374,52 +432,66 @@ export class ArcDatabase implements ArcMatcher {
       }));
       return result;
     } catch (err) {
-      await rdsData.send(new RollbackTransactionCommand({
-        resourceArn: CLUSTER_ARN, secretArn: SECRET_ARN, transactionId,
-      }));
+      try {
+        await rdsData.send(new RollbackTransactionCommand({
+          resourceArn: CLUSTER_ARN, secretArn: SECRET_ARN, transactionId,
+        }));
+      } catch { /* rollback best-effort */ }
       throw err;
     }
   }
 
-  async findMatch(accountId: string, recipientAddress: string, embedding: number[]): Promise<Arc | null> {
-    const res = await this.withAccountContext(accountId, (transactionId) =>
-      rdsData.send(new ExecuteStatementCommand({
-        resourceArn: CLUSTER_ARN, secretArn: SECRET_ARN, database: DB_NAME,
-        transactionId,
-        sql: `SELECT arc_id FROM arc_embeddings
-              WHERE account_id = :accountId AND recipient_address = :recipient
-                AND embedding <=> :embedding::vector < :threshold
-              ORDER BY embedding <=> :embedding::vector
-              LIMIT 1`,
-        parameters: [
-          { name: "accountId",  value: { stringValue: accountId } },
-          { name: "recipient",  value: { stringValue: recipientAddress } },
-          { name: "embedding",  value: { stringValue: `[${embedding.join(",")}]` } },
-          { name: "threshold",  value: { doubleValue: SIMILARITY_THRESHOLD } },
-        ],
-      })),
+  findMatch(accountId: string, recipientAddress: string, embedding: number[]): ResultAsync<Arc | null, DbError> {
+    return ResultAsync.fromPromise(
+      (async () => {
+        const res = await this.withAccountContext(accountId, (transactionId) =>
+          rdsData.send(new ExecuteStatementCommand({
+            resourceArn: CLUSTER_ARN, secretArn: SECRET_ARN, database: DB_NAME,
+            transactionId,
+            sql: `SELECT arc_id FROM arc_embeddings
+                  WHERE account_id = :accountId AND recipient_address = :recipient
+                    AND embedding <=> :embedding::vector < :threshold
+                  ORDER BY embedding <=> :embedding::vector
+                  LIMIT 1`,
+            parameters: [
+              { name: "accountId",  value: { stringValue: accountId } },
+              { name: "recipient",  value: { stringValue: recipientAddress } },
+              { name: "embedding",  value: { stringValue: `[${embedding.join(",")}]` } },
+              { name: "threshold",  value: { doubleValue: SIMILARITY_THRESHOLD } },
+            ],
+          })),
+        );
+        const arcId = res.records?.[0]?.[0]?.stringValue;
+        if (!arcId) return null;
+        const arcResult = await dynamo.send(new GetCommand({
+          TableName: SIGNALS_TABLE,
+          Key: { pk: arcPk(accountId, arcId), sk: ITEM_SK },
+        }));
+        return arcResult.Item ? (arcResult.Item as Arc) : null;
+      })(),
+      toDbError,
     );
-    const arcId = res.records?.[0]?.[0]?.stringValue;
-    if (!arcId) return null;
-    return this.getArc(accountId, arcId);
   }
 
-  async upsertEmbedding(arcId: string, embedding: number[], accountId: string, recipientAddress: string): Promise<void> {
-    await this.withAccountContext(accountId, (transactionId) =>
-      rdsData.send(new ExecuteStatementCommand({
-        resourceArn: CLUSTER_ARN, secretArn: SECRET_ARN, database: DB_NAME,
-        transactionId,
-        sql: `INSERT INTO arc_embeddings (arc_id, account_id, recipient_address, embedding, updated_at)
-              VALUES (:arcId, :accountId, :recipient, :embedding::vector, NOW())
-              ON CONFLICT (arc_id) DO UPDATE
-                SET embedding = EXCLUDED.embedding, updated_at = NOW()`,
-        parameters: [
-          { name: "arcId",     value: { stringValue: arcId } },
-          { name: "accountId", value: { stringValue: accountId } },
-          { name: "recipient", value: { stringValue: recipientAddress } },
-          { name: "embedding", value: { stringValue: `[${embedding.join(",")}]` } },
-        ],
-      })),
+  upsertEmbedding(arcId: string, embedding: number[], accountId: string, recipientAddress: string): ResultAsync<void, DbError> {
+    return ResultAsync.fromPromise(
+      this.withAccountContext(accountId, (transactionId) =>
+        rdsData.send(new ExecuteStatementCommand({
+          resourceArn: CLUSTER_ARN, secretArn: SECRET_ARN, database: DB_NAME,
+          transactionId,
+          sql: `INSERT INTO arc_embeddings (arc_id, account_id, recipient_address, embedding, updated_at)
+                VALUES (:arcId, :accountId, :recipient, :embedding::vector, NOW())
+                ON CONFLICT (arc_id) DO UPDATE
+                  SET embedding = EXCLUDED.embedding, updated_at = NOW()`,
+          parameters: [
+            { name: "arcId",     value: { stringValue: arcId } },
+            { name: "accountId", value: { stringValue: accountId } },
+            { name: "recipient", value: { stringValue: recipientAddress } },
+            { name: "embedding", value: { stringValue: `[${embedding.join(",")}]` } },
+          ],
+        })),
+      ).then(() => undefined),
+      toDbError,
     );
   }
 
@@ -427,26 +499,29 @@ export class ArcDatabase implements ArcMatcher {
   // Embedding Cache (DynamoDB partial update for backfill/reindex)
   // ---------------------------------------------------------------------------
 
-  async addEmbeddingToCache(
+  addEmbeddingToCache(
     accountId: string,
     signalId: string,
     modelId: string,
     vector: number[],
-  ): Promise<void> {
-    await dynamo.send(new UpdateCommand({
-      TableName: SIGNALS_TABLE,
-      Key: { pk: sigPk(accountId, signalId), sk: ITEM_SK },
-      UpdateExpression: "SET embeddings.#mid = :v",
-      ExpressionAttributeNames: { "#mid": modelId },
-      ExpressionAttributeValues: { ":v": vector },
-    }));
+  ): ResultAsync<void, DbError> {
+    return ResultAsync.fromPromise(
+      dynamo.send(new UpdateCommand({
+        TableName: SIGNALS_TABLE,
+        Key: { pk: sigPk(accountId, signalId), sk: ITEM_SK },
+        UpdateExpression: "SET embeddings.#mid = :v",
+        ExpressionAttributeNames: { "#mid": modelId },
+        ExpressionAttributeValues: { ":v": vector },
+      })).then(() => undefined),
+      toDbError,
+    );
   }
 
-  async updateSignalRetention(
+  updateSignalRetention(
     accountId: string,
     signalId: string,
     update: Partial<Pick<Signal, "s3Key" | "retentionDuration">>,
-  ): Promise<void> {
+  ): ResultAsync<void, DbError> {
     const setParts: string[] = [];
     const exprValues: Record<string, unknown> = {};
 
@@ -459,13 +534,16 @@ export class ArcDatabase implements ArcMatcher {
       exprValues[":rd"] = update.retentionDuration;
     }
 
-    if (setParts.length === 0) return;
+    if (setParts.length === 0) return ResultAsync.fromPromise(Promise.resolve(undefined), toDbError);
 
-    await dynamo.send(new UpdateCommand({
-      TableName: SIGNALS_TABLE,
-      Key: { pk: sigPk(accountId, signalId), sk: ITEM_SK },
-      UpdateExpression: `SET ${setParts.join(", ")}`,
-      ExpressionAttributeValues: exprValues,
-    }));
+    return ResultAsync.fromPromise(
+      dynamo.send(new UpdateCommand({
+        TableName: SIGNALS_TABLE,
+        Key: { pk: sigPk(accountId, signalId), sk: ITEM_SK },
+        UpdateExpression: `SET ${setParts.join(", ")}`,
+        ExpressionAttributeValues: exprValues,
+      })).then(() => undefined),
+      toDbError,
+    );
   }
 }

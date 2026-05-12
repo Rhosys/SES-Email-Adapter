@@ -20,6 +20,9 @@ import { BedrockEmbeddingGenerator } from "../../embedding/embedding-generator.j
 import { BedrockRuntimeClient } from "@aws-sdk/client-bedrock-runtime";
 import { ArcDatabase } from "../../database/arc-database.js";
 import type { Signal } from "../../types/index.js";
+import type { Result } from "../../errors.js";
+import { ok, err, processError } from "../../errors.js";
+import type { ProcessError } from "../../errors.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -93,60 +96,49 @@ function isNoSuchKeyError(err: unknown): boolean {
 // ---------------------------------------------------------------------------
 
 export class ReindexWorker {
-  async process(event: SQSEvent): Promise<void> {
-    for (const record of event.Records) {
-      await this.processRecord(record);
+  async process(event: SQSEvent): Promise<{ batchItemFailures: Array<{ itemIdentifier: string }> }> {
+    const results = await Promise.all(
+      event.Records.map(record => this.processRecord(record))
+    );
+
+    const failures: Array<{ itemIdentifier: string }> = [];
+    for (let i = 0; i < results.length; i++) {
+      const result = results[i]!;
+      if (result.isErr()) {
+        const record = event.Records[i]!;
+        const receiveCount = Number(record.attributes?.ApproximateReceiveCount ?? "1");
+        const level = receiveCount > RETRY_TRACK_THRESHOLD ? "error" : "track";
+        logAtLevel(level, "reindex.worker.segment_failed", {
+          messageId: result.error.messageId,
+          receiveCount,
+          error: result.error,
+        });
+        failures.push({ itemIdentifier: result.error.messageId });
+      }
     }
+
+    return { batchItemFailures: failures };
   }
 
-  private async processRecord(record: SQSRecord): Promise<void> {
-    const receiveCount = Number(record.attributes?.ApproximateReceiveCount ?? "1");
-    const level: "track" | "error" = receiveCount > RETRY_TRACK_THRESHOLD ? "error" : "track";
-
+  private async processRecord(record: SQSRecord): Promise<Result<void, ProcessError>> {
     let message: ReindexSegmentMessage;
     try {
       message = JSON.parse(record.body) as ReindexSegmentMessage;
-    } catch (err) {
-      logAtLevel(level, "reindex.worker.invalid_message", {
-        messageId: record.messageId,
-        receiveCount,
-        error: String(err),
-      });
-      // Malformed message body — cannot parse, acknowledge by not throwing
-      return;
+    } catch {
+      return err(processError(record.messageId));
     }
 
     const { jobId, segment, totalSegments, targetClusterId, modelId } = message;
 
     // Validate target cluster exists in registry
     const cluster = getClusterById(targetClusterId);
-    if (!cluster) {
-      logAtLevel("error", "reindex.worker.unknown_cluster", {
-        jobId,
-        segment,
-        targetClusterId,
-        messageId: record.messageId,
-      });
-      // Unknown cluster — no point retrying, acknowledge
-      return;
-    }
+    if (!cluster) return err(processError(record.messageId));
 
-    try {
-      await this.processSegment(jobId, segment, totalSegments, targetClusterId, modelId, level);
-    } catch (err) {
-      logAtLevel(level, "reindex.worker.segment_failed", {
-        jobId,
-        segment,
-        totalSegments,
-        targetClusterId,
-        modelId,
-        receiveCount,
-        error: String(err),
-        messageId: record.messageId,
-      });
-      // Re-throw so SQS redelivers via visibility timeout
-      throw err;
-    }
+    // Process segment
+    const segmentResult = await this.processSegment(jobId, segment, totalSegments, targetClusterId, modelId);
+    if (segmentResult.isErr()) return err(processError(record.messageId));
+
+    return ok(undefined);
   }
 
   private async processSegment(
@@ -155,26 +147,31 @@ export class ReindexWorker {
     totalSegments: number,
     targetClusterId: string,
     modelId: string,
-    level: "track" | "error",
-  ): Promise<void> {
+  ): Promise<Result<void, ProcessError>> {
     let lastEvaluatedKey: Record<string, unknown> | undefined;
 
-    do {
-      const res = await dynamo.send(new ScanCommand({
-        TableName: SIGNALS_TABLE,
-        Segment: segment,
-        TotalSegments: totalSegments,
-        ...(lastEvaluatedKey ? { ExclusiveStartKey: lastEvaluatedKey } : {}),
-      }));
+    try {
+      do {
+        const res = await dynamo.send(new ScanCommand({
+          TableName: SIGNALS_TABLE,
+          Segment: segment,
+          TotalSegments: totalSegments,
+          ...(lastEvaluatedKey ? { ExclusiveStartKey: lastEvaluatedKey } : {}),
+        }));
 
-      const items = (res.Items ?? []) as Array<Record<string, unknown>>;
+        const items = (res.Items ?? []) as Array<Record<string, unknown>>;
 
-      for (const item of items) {
-        await this.processSignal(item, jobId, targetClusterId, modelId, level);
-      }
+        for (const item of items) {
+          await this.processSignal(item, jobId, targetClusterId, modelId);
+        }
 
-      lastEvaluatedKey = res.LastEvaluatedKey as Record<string, unknown> | undefined;
-    } while (lastEvaluatedKey);
+        lastEvaluatedKey = res.LastEvaluatedKey as Record<string, unknown> | undefined;
+      } while (lastEvaluatedKey);
+    } catch {
+      return err(processError(""));
+    }
+
+    return ok(undefined);
   }
 
   private async processSignal(
@@ -182,7 +179,6 @@ export class ReindexWorker {
     jobId: string,
     targetClusterId: string,
     modelId: string,
-    level: "track" | "error",
   ): Promise<void> {
     // Skip non-signal items (arcs, grouping keys, etc.)
     const id = item["id"] as string | undefined;
@@ -190,7 +186,7 @@ export class ReindexWorker {
 
     // Validate signal has the minimum fields for a copy
     if (!isValidSignalForCopy(item)) {
-      logAtLevel(level, "reindex.worker.malformed_signal", {
+      logAtLevel("track", "reindex.worker.malformed_signal", {
         jobId,
         signalId: id,
         reason: "missing required fields (accountId, arcId, or recipientAddress)",
@@ -205,12 +201,12 @@ export class ReindexWorker {
     const vector = embeddings?.[modelId];
     if (vector && Array.isArray(vector)) {
       // Pure-copy: upsert the cached embedding to the target Aurora cluster
-      await this.pureCopyToAurora(signal, vector, jobId, targetClusterId, level);
+      await this.pureCopyToAurora(signal, vector, jobId, targetClusterId);
       return;
     }
 
     // Cache miss — attempt regeneration from S3
-    await this.regenerateFromS3(signal, jobId, targetClusterId, modelId, level);
+    await this.regenerateFromS3(signal, jobId, targetClusterId, modelId);
   }
 
   // ---------------------------------------------------------------------------
@@ -222,7 +218,6 @@ export class ReindexWorker {
     vector: number[],
     jobId: string,
     targetClusterId: string,
-    level: "track" | "error",
   ): Promise<void> {
     try {
       await multiClusterWriter.upsertEmbedding({
@@ -242,7 +237,7 @@ export class ReindexWorker {
       }));
     } catch (err) {
       // Per-signal failure: log and continue, do not retry the whole segment
-      logAtLevel(level, "reindex.worker.signal_upsert_failed", {
+      logAtLevel("track", "reindex.worker.signal_upsert_failed", {
         jobId,
         signalId: signal.id,
         arcId: signal.arcId,
@@ -261,13 +256,12 @@ export class ReindexWorker {
     jobId: string,
     targetClusterId: string,
     modelId: string,
-    level: "track" | "error",
   ): Promise<void> {
     const s3Key = signal.s3Key;
 
     // If no s3Key on the signal, it's unrecoverable
     if (!s3Key) {
-      await this.incrementUnrecoverable(jobId, signal.id, level, "no s3Key on signal record");
+      await this.incrementUnrecoverable(jobId, signal.id, "no s3Key on signal record");
       return;
     }
 
@@ -277,11 +271,11 @@ export class ReindexWorker {
       rawMimeBuffer = await this.fetchFromS3(s3Key);
     } catch (err) {
       if (isNoSuchKeyError(err)) {
-        await this.incrementUnrecoverable(jobId, signal.id, level, `NoSuchKey: ${s3Key}`);
+        await this.incrementUnrecoverable(jobId, signal.id, `NoSuchKey: ${s3Key}`);
         return;
       }
       // Non-NoSuchKey S3 error — log per-signal and continue
-      logAtLevel(level, "reindex.worker.s3_fetch_failed", {
+      logAtLevel("track", "reindex.worker.s3_fetch_failed", {
         jobId,
         signalId: signal.id,
         s3Key,
@@ -324,7 +318,7 @@ export class ReindexWorker {
       }));
     } catch (err) {
       // Per-signal failure during regeneration: log and continue
-      logAtLevel(level, "reindex.worker.regeneration_failed", {
+      logAtLevel("track", "reindex.worker.regeneration_failed", {
         jobId,
         signalId: signal.id,
         s3Key,
@@ -352,10 +346,9 @@ export class ReindexWorker {
   private async incrementUnrecoverable(
     jobId: string,
     signalId: string,
-    level: "track" | "error",
     reason: string,
   ): Promise<void> {
-    logAtLevel(level, "reindex.worker.unrecoverable", {
+    logAtLevel("track", "reindex.worker.unrecoverable", {
       jobId,
       signalId,
       reason,

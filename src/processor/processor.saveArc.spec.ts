@@ -1,5 +1,6 @@
 import { describe, it, vi, beforeEach } from "vitest";
 import fc from "fast-check";
+import { okAsync } from "neverthrow";
 import { propertyRunner } from "../testing/property-runner.js";
 import { SignalProcessor, SYSTEM_RULES } from "./processor.js";
 import { JsonLogicRuleEvaluator } from "./rule-evaluator.js";
@@ -176,18 +177,18 @@ describe("Feature: dynamodb-storage-optimization, Property 1: Single saveArc cal
         const recipientDomain = input.recipientEmail.split("@")[1] ?? "example.com";
 
         const store: ProcessorDatabase = {
-          getSignalByMessageId: vi.fn().mockResolvedValue(null),
-          saveSignal: vi.fn().mockResolvedValue(undefined),
-          updateSignalRetention: vi.fn().mockResolvedValue(undefined),
-          getArc: vi.fn().mockResolvedValue(null),
-          findArcByGroupingKey: vi.fn().mockResolvedValue(null),
+          getSignalByMessageId: vi.fn().mockReturnValue(okAsync(null)),
+          saveSignal: vi.fn().mockReturnValue(okAsync(undefined)),
+          updateSignalRetention: vi.fn().mockReturnValue(okAsync(undefined)),
+          getArc: vi.fn().mockReturnValue(okAsync(null)),
+          findArcByGroupingKey: vi.fn().mockReturnValue(okAsync(null)),
           saveArc: vi.fn().mockImplementation((arc: Arc) => {
             saveArcCallCount++;
             savedArc = arc;
-            return Promise.resolve();
+            return okAsync(undefined);
           }),
-          listEnabledRules: vi.fn().mockResolvedValue([...SYSTEM_RULES, ...userRules]),
-          getProcessorAccountContext: vi.fn().mockResolvedValue({
+          listEnabledRules: vi.fn().mockReturnValue(okAsync([...SYSTEM_RULES, ...userRules])),
+          getProcessorAccountContext: vi.fn().mockReturnValue(okAsync({
             retentionDays: 0,
             filtering: null,
             emailConfig: {
@@ -198,27 +199,27 @@ describe("Feature: dynamodb-storage-optimization, Property 1: Single saveArc cal
             registeredDomains: input.doPong ? [recipientDomain] : [],
             userEmails: input.doPong ? [input.senderEmail] : [],
             billingPlan: "Paid",
-          }),
-          saveAlias: vi.fn().mockImplementation((a: Alias) => Promise.resolve(a)),
-          getSender: vi.fn().mockResolvedValue({
+          })),
+          saveAlias: vi.fn().mockImplementation((a: Alias) => okAsync(a)),
+          getSender: vi.fn().mockReturnValue(okAsync({
             accountId: input.accountId, aliasAddress: input.recipientEmail,
             domain: input.senderEmail.split("@")[1] ?? "example.com",
             mode: "allow", addedAt: "2024-01-01T00:00:00Z",
-          }),
-          saveSender: vi.fn().mockResolvedValue(undefined),
+          })),
+          saveSender: vi.fn().mockReturnValue(okAsync(undefined)),
           getTemplate: vi.fn().mockImplementation((_accountId: string, id: string) =>
-            Promise.resolve({
+            okAsync({
               id, accountId: input.accountId, name: `Template ${id}`,
               subject: "Re: {{signal.subject}}", body: "Auto-reply body",
               createdAt: "2024-01-01T00:00:00Z", updatedAt: "2024-01-01T00:00:00Z",
             } satisfies EmailTemplate),
           ),
-          updateGlobalReputation: vi.fn().mockResolvedValue(undefined),
-          getDomainByName: vi.fn().mockResolvedValue({
+          updateGlobalReputation: vi.fn().mockReturnValue(okAsync(undefined)),
+          getDomainByName: vi.fn().mockReturnValue(okAsync({
             id: recipientDomain, accountId: input.accountId, domain: recipientDomain,
             receivingSetupComplete: true, senderSetupComplete: true,
             createdAt: "2024-01-01T00:00:00Z", updatedAt: "2024-01-01T00:00:00Z",
-          }),
+          })),
         };
 
         const mimeParser: MimeParser = {
@@ -254,8 +255,8 @@ describe("Feature: dynamodb-storage-optimization, Property 1: Single saveArc cal
         };
 
         const arcMatcher: ArcMatcher = {
-          findMatch: vi.fn().mockResolvedValue(null),
-          upsertEmbedding: vi.fn().mockResolvedValue(undefined),
+          findMatch: vi.fn().mockReturnValue(okAsync(null)),
+          upsertEmbedding: vi.fn().mockReturnValue(okAsync(undefined)),
         };
 
         // Track pong message IDs

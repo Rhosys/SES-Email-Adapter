@@ -26,6 +26,7 @@
     "hono": "^4.0.0",
     "json-logic-js": "^2.0.0",
     "mailparser": "^3.7.0",
+    "neverthrow": "^8.2.0",
     "quickjs-emscripten": "^0.32.0",
     "tldts": "^7.0.28",
     "web-push": "^3.6.7",

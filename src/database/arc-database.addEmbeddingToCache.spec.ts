@@ -25,7 +25,9 @@ describe("ArcDatabase.addEmbeddingToCache", () => {
     const modelId = "amazon.titan-embed-text-v2:0";
     const vector = [0.1, -0.2, 0.3];
 
-    await db.addEmbeddingToCache(accountId, signalId, modelId, vector);
+    const result = await db.addEmbeddingToCache(accountId, signalId, modelId, vector);
+
+    expect(result.isOk()).toBe(true);
 
     const calls = ddbMock.commandCalls(UpdateCommand);
     expect(calls).toHaveLength(1);
@@ -46,8 +48,11 @@ describe("ArcDatabase.addEmbeddingToCache", () => {
 
     const args: [string, string, string, number[]] = ["acct-1", "SES#id-1", "model-x", [1, 2, 3]];
 
-    await db.addEmbeddingToCache(...args);
-    await db.addEmbeddingToCache(...args);
+    const result1 = await db.addEmbeddingToCache(...args);
+    const result2 = await db.addEmbeddingToCache(...args);
+
+    expect(result1.isOk()).toBe(true);
+    expect(result2.isOk()).toBe(true);
 
     const calls = ddbMock.commandCalls(UpdateCommand);
     expect(calls).toHaveLength(2);
@@ -59,7 +64,9 @@ describe("ArcDatabase.addEmbeddingToCache", () => {
     ddbMock.on(UpdateCommand).resolves({});
 
     const modelWithDots = "amazon.titan-embed-text-v2:0";
-    await db.addEmbeddingToCache("acct-1", "SES#id-1", modelWithDots, [0.5]);
+    const result = await db.addEmbeddingToCache("acct-1", "SES#id-1", modelWithDots, [0.5]);
+
+    expect(result.isOk()).toBe(true);
 
     const calls = ddbMock.commandCalls(UpdateCommand);
     const input = calls[0]!.args[0].input;
@@ -67,11 +74,12 @@ describe("ArcDatabase.addEmbeddingToCache", () => {
     expect(input.ExpressionAttributeNames!["#mid"]).toBe(modelWithDots);
   });
 
-  it("propagates DynamoDB errors to the caller", async () => {
+  it("returns a DbError when DynamoDB fails", async () => {
     ddbMock.on(UpdateCommand).rejects(new Error("ConditionalCheckFailedException"));
 
-    await expect(
-      db.addEmbeddingToCache("acct-1", "SES#id-1", "model-x", [1]),
-    ).rejects.toThrow("ConditionalCheckFailedException");
+    const result = await db.addEmbeddingToCache("acct-1", "SES#id-1", "model-x", [1]);
+
+    expect(result.isErr()).toBe(true);
+    expect(result._unsafeUnwrapErr().kind).toBe("db_error");
   });
 });

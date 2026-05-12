@@ -15,6 +15,8 @@ import { SesNotifier } from "./notifier/ses-notifier.js";
 import { SesForwarder } from "./notifier/ses-forwarder.js";
 import { FeedbackProcessor } from "./notifier/feedback-processor.js";
 import { handler as domainHealthHandler } from "./jobs/domain-health-job.js";
+import { ResultAsync } from "neverthrow";
+import { dbError } from "./errors.js";
 import type { VerificationMailer } from "./api/app.js";
 import { AuthressAuthService } from "./api/authress-auth.js";
 import { AuthressAccessService } from "./api/authress-access.js";
@@ -82,24 +84,27 @@ const APP_BASE_URL = process.env["APP_BASE_URL"] ?? "";
 const CONFIG_SET = process.env["SES_CONFIGURATION_SET"] ?? "";
 
 const sesVerificationMailer: VerificationMailer = {
-  async sendForwardVerification(accountId: string, address: string, token: string): Promise<void> {
+  sendForwardVerification(accountId: string, address: string, token: string) {
     const verifyUrl = `${APP_BASE_URL}/accounts/${accountId}/forwarding-addresses/${encodeURIComponent(address)}/verify?token=${token}`;
-    await sesv2.send(new SendEmailCommand({
-      FromEmailAddress: NOTIFICATION_FROM,
-      Destination: { ToAddresses: [address] },
-      Content: {
-        Simple: {
-          Subject: { Data: "Verify your forwarding address", Charset: "UTF-8" },
-          Body: {
-            Text: {
-              Data: `Click the link below to verify that you want to receive forwarded emails at this address:\n\n${verifyUrl}\n\nIf you did not request this, you can ignore this email.`,
-              Charset: "UTF-8",
+    return ResultAsync.fromPromise(
+      sesv2.send(new SendEmailCommand({
+        FromEmailAddress: NOTIFICATION_FROM,
+        Destination: { ToAddresses: [address] },
+        Content: {
+          Simple: {
+            Subject: { Data: "Verify your forwarding address", Charset: "UTF-8" },
+            Body: {
+              Text: {
+                Data: `Click the link below to verify that you want to receive forwarded emails at this address:\n\n${verifyUrl}\n\nIf you did not request this, you can ignore this email.`,
+                Charset: "UTF-8",
+              },
             },
           },
         },
-      },
-      ...(CONFIG_SET ? { ConfigurationSetName: CONFIG_SET } : {}),
-    }));
+        ...(CONFIG_SET ? { ConfigurationSetName: CONFIG_SET } : {}),
+      })).then(() => undefined),
+      (e) => dbError(e instanceof Error ? e : new Error(String(e)))
+    );
   },
 };
 
@@ -119,7 +124,7 @@ const app = createApp({
 export async function handler(
   event: APIGatewayProxyEventV2 | APIGatewayProxyWebsocketEventV2 | SQSEvent | EventBridgeEvent<string, { source?: string }>,
   _context: Context,
-): Promise<APIGatewayProxyResultV2 | WsAuthorizerResult | { statusCode: number } | void> {
+): Promise<APIGatewayProxyResultV2 | WsAuthorizerResult | { statusCode: number } | { batchItemFailures: Array<{ itemIdentifier: string }> } | void> {
   if (isEventBridgeEvent(event)) {
     if ((event as EventBridgeEvent<string, { source?: string }>).detail?.source === "domain-health-job") {
       await domainHealthHandler();
@@ -130,7 +135,7 @@ export async function handler(
     if (isFeedbackEvent(event)) {
       await feedbackProcessor.process(event);
     } else if (isReindexEvent(event)) {
-      await reindexWorker.process(event);
+      return reindexWorker.process(event);
     } else {
       await processor.process(event);
     }

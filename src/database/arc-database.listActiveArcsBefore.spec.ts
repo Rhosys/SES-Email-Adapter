@@ -58,8 +58,9 @@ describe("ArcDatabase.listActiveArcsBefore", () => {
 
     const result = await db.listActiveArcsBefore("acct-1", "2025-05-01T00:00:00.000Z");
 
-    expect(result).toEqual(fakeArcs);
-    expect(result).toHaveLength(2);
+    expect(result.isOk()).toBe(true);
+    expect(result._unsafeUnwrap()).toEqual(fakeArcs);
+    expect(result._unsafeUnwrap()).toHaveLength(2);
   });
 
   it("returns empty array when no items match", async () => {
@@ -67,14 +68,16 @@ describe("ArcDatabase.listActiveArcsBefore", () => {
 
     const result = await db.listActiveArcsBefore("acct-1", "2025-01-01T00:00:00.000Z");
 
-    expect(result).toEqual([]);
+    expect(result.isOk()).toBe(true);
+    expect(result._unsafeUnwrap()).toEqual([]);
   });
 
-  it("propagates DynamoDB errors to the caller", async () => {
+  it("returns a DbError when DynamoDB fails", async () => {
     ddbMock.on(QueryCommand).rejects(new Error("ProvisionedThroughputExceededException"));
 
-    await expect(
-      db.listActiveArcsBefore("acct-1", "2025-01-01T00:00:00.000Z"),
-    ).rejects.toThrow("ProvisionedThroughputExceededException");
+    const result = await db.listActiveArcsBefore("acct-1", "2025-01-01T00:00:00.000Z");
+
+    expect(result.isErr()).toBe(true);
+    expect(result._unsafeUnwrapErr().kind).toBe("db_error");
   });
 });

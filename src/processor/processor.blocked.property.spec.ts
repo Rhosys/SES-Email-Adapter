@@ -1,6 +1,7 @@
 import { describe, it, vi } from "vitest";
 import fc from "fast-check";
 import type { SQSEvent } from "aws-lambda";
+import { okAsync } from "neverthrow";
 import { SignalProcessor, SYSTEM_RULES } from "./processor.js";
 import { JsonLogicRuleEvaluator } from "./rule-evaluator.js";
 import type { ProcessorDatabase, ArcMatcher } from "./processor.js";
@@ -64,20 +65,20 @@ describe("Feature: dynamodb-storage-optimization, Property 2: Blocked/quarantine
 
   function makeStore(): ProcessorDatabase {
     return {
-      getSignalByMessageId: vi.fn().mockResolvedValue(null),
-      saveSignal: vi.fn().mockResolvedValue(undefined),
-      updateSignalRetention: vi.fn().mockResolvedValue(undefined),
-      getArc: vi.fn().mockResolvedValue(null),
-      findArcByGroupingKey: vi.fn().mockResolvedValue(null),
-      saveArc: vi.fn().mockResolvedValue(undefined),
-      listEnabledRules: vi.fn().mockResolvedValue(SYSTEM_RULES),
-      getProcessorAccountContext: vi.fn().mockResolvedValue(null),
-      saveAlias: vi.fn().mockImplementation((a: Alias) => Promise.resolve(a)),
-      getSender: vi.fn().mockResolvedValue(null),
-      saveSender: vi.fn().mockResolvedValue(undefined),
-      getTemplate: vi.fn().mockResolvedValue(null),
-      updateGlobalReputation: vi.fn().mockResolvedValue(undefined),
-      getDomainByName: vi.fn().mockResolvedValue(null),
+      getSignalByMessageId: vi.fn().mockReturnValue(okAsync(null)),
+      saveSignal: vi.fn().mockReturnValue(okAsync(undefined)),
+      updateSignalRetention: vi.fn().mockReturnValue(okAsync(undefined)),
+      getArc: vi.fn().mockReturnValue(okAsync(null)),
+      findArcByGroupingKey: vi.fn().mockReturnValue(okAsync(null)),
+      saveArc: vi.fn().mockReturnValue(okAsync(undefined)),
+      listEnabledRules: vi.fn().mockReturnValue(okAsync(SYSTEM_RULES)),
+      getProcessorAccountContext: vi.fn().mockReturnValue(okAsync(null)),
+      saveAlias: vi.fn().mockImplementation((a: Alias) => okAsync(a)),
+      getSender: vi.fn().mockReturnValue(okAsync(null)),
+      saveSender: vi.fn().mockReturnValue(okAsync(undefined)),
+      getTemplate: vi.fn().mockReturnValue(okAsync(null)),
+      updateGlobalReputation: vi.fn().mockReturnValue(okAsync(undefined)),
+      getDomainByName: vi.fn().mockReturnValue(okAsync(null)),
     };
   }
 
@@ -124,8 +125,8 @@ describe("Feature: dynamodb-storage-optimization, Property 2: Blocked/quarantine
 
   function makeArcMatcher(): ArcMatcher {
     return {
-      findMatch: vi.fn().mockResolvedValue(null),
-      upsertEmbedding: vi.fn().mockResolvedValue(undefined),
+      findMatch: vi.fn().mockReturnValue(okAsync(null)),
+      upsertEmbedding: vi.fn().mockReturnValue(okAsync(undefined)),
     };
   }
 
@@ -314,16 +315,16 @@ describe("Feature: dynamodb-storage-optimization, Property 2: Blocked/quarantine
             updatedAt: "2024-01-01T00:00:00Z",
           };
 
-          (store.getProcessorAccountContext as ReturnType<typeof vi.fn>).mockResolvedValue({
+          (store.getProcessorAccountContext as ReturnType<typeof vi.fn>).mockReturnValue(okAsync({
             retentionDays: 0,
             filtering: null,
             emailConfig,
             registeredDomains: [],
             userEmails: [],
             billingPlan: "Paid" as const,
-          });
-          (store.getSender as ReturnType<typeof vi.fn>).mockResolvedValue(config.senderEntry);
-          (store.listEnabledRules as ReturnType<typeof vi.fn>).mockResolvedValue(config.rules);
+          }));
+          (store.getSender as ReturnType<typeof vi.fn>).mockReturnValue(okAsync(config.senderEntry));
+          (store.listEnabledRules as ReturnType<typeof vi.fn>).mockReturnValue(okAsync(config.rules));
 
           const processor = new SignalProcessor({
             store,

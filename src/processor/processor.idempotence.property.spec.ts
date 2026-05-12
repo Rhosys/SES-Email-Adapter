@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import fc from "fast-check";
 import type { SQSEvent } from "aws-lambda";
+import { okAsync } from "neverthrow";
 import { SignalProcessor, SYSTEM_RULES } from "./processor.js";
 import { JsonLogicRuleEvaluator } from "./rule-evaluator.js";
 import type { ProcessorDatabase, ArcMatcher } from "./processor.js";
@@ -107,8 +108,8 @@ describe("Property 9 (full scope): Cross-layer idempotence — live writes + cac
 
   function makeArcMatcher(): ArcMatcher {
     return {
-      findMatch: vi.fn().mockResolvedValue(null),
-      upsertEmbedding: vi.fn().mockResolvedValue(undefined),
+      findMatch: vi.fn().mockReturnValue(okAsync(null)),
+      upsertEmbedding: vi.fn().mockReturnValue(okAsync(undefined)),
     };
   }
 
@@ -156,21 +157,21 @@ describe("Property 9 (full scope): Cross-layer idempotence — live writes + cac
           // Store mock: first call returns null (signal not found), second call returns existing signal
           const store: ProcessorDatabase = {
             getSignalByMessageId: vi.fn()
-              .mockResolvedValueOnce(null) // First processing: signal doesn't exist yet
-              .mockResolvedValueOnce({ id: `SES#${sesMessageId}` }), // Second processing: signal already saved
-            saveSignal: vi.fn().mockResolvedValue(undefined),
-            updateSignalRetention: vi.fn().mockResolvedValue(undefined),
-            getArc: vi.fn().mockResolvedValue(null),
-            findArcByGroupingKey: vi.fn().mockResolvedValue(null),
-            saveArc: vi.fn().mockResolvedValue(undefined),
-            listEnabledRules: vi.fn().mockResolvedValue(SYSTEM_RULES),
-            getProcessorAccountContext: vi.fn().mockResolvedValue(DEFAULT_CTX),
-            saveAlias: vi.fn().mockImplementation((a: Alias) => Promise.resolve(a)),
-            getSender: vi.fn().mockResolvedValue(DEFAULT_SENDER_ENTRY),
-            saveSender: vi.fn().mockResolvedValue(undefined),
-            getTemplate: vi.fn().mockResolvedValue(null),
-            updateGlobalReputation: vi.fn().mockResolvedValue(undefined),
-            getDomainByName: vi.fn().mockResolvedValue(null),
+              .mockReturnValueOnce(okAsync(null)) // First processing: signal doesn't exist yet
+              .mockReturnValueOnce(okAsync({ id: `SES#${sesMessageId}` })), // Second processing: signal already saved
+            saveSignal: vi.fn().mockReturnValue(okAsync(undefined)),
+            updateSignalRetention: vi.fn().mockReturnValue(okAsync(undefined)),
+            getArc: vi.fn().mockReturnValue(okAsync(null)),
+            findArcByGroupingKey: vi.fn().mockReturnValue(okAsync(null)),
+            saveArc: vi.fn().mockReturnValue(okAsync(undefined)),
+            listEnabledRules: vi.fn().mockReturnValue(okAsync(SYSTEM_RULES)),
+            getProcessorAccountContext: vi.fn().mockReturnValue(okAsync(DEFAULT_CTX)),
+            saveAlias: vi.fn().mockImplementation((a: Alias) => okAsync(a)),
+            getSender: vi.fn().mockReturnValue(okAsync(DEFAULT_SENDER_ENTRY)),
+            saveSender: vi.fn().mockReturnValue(okAsync(undefined)),
+            getTemplate: vi.fn().mockReturnValue(okAsync(null)),
+            updateGlobalReputation: vi.fn().mockReturnValue(okAsync(undefined)),
+            getDomainByName: vi.fn().mockReturnValue(okAsync(null)),
           };
 
           const embeddingGenerator: EmbeddingGenerator = {
@@ -228,22 +229,23 @@ describe("Property 9 (full scope): Cross-layer idempotence — live writes + cac
           // Simulate the race condition: both calls see no existing signal (dedup hasn't saved yet)
           const savedSignals: Signal[] = [];
           const store: ProcessorDatabase = {
-            getSignalByMessageId: vi.fn().mockResolvedValue(null), // Both calls see no existing signal
-            saveSignal: vi.fn().mockImplementation(async (signal: Signal) => {
+            getSignalByMessageId: vi.fn().mockReturnValue(okAsync(null)), // Both calls see no existing signal
+            saveSignal: vi.fn().mockImplementation((signal: Signal) => {
               savedSignals.push(signal);
+              return okAsync(undefined);
             }),
-            updateSignalRetention: vi.fn().mockResolvedValue(undefined),
-            getArc: vi.fn().mockResolvedValue(null),
-            findArcByGroupingKey: vi.fn().mockResolvedValue(null),
-            saveArc: vi.fn().mockResolvedValue(undefined),
-            listEnabledRules: vi.fn().mockResolvedValue(SYSTEM_RULES),
-            getProcessorAccountContext: vi.fn().mockResolvedValue(DEFAULT_CTX),
-            saveAlias: vi.fn().mockImplementation((a: Alias) => Promise.resolve(a)),
-            getSender: vi.fn().mockResolvedValue(DEFAULT_SENDER_ENTRY),
-            saveSender: vi.fn().mockResolvedValue(undefined),
-            getTemplate: vi.fn().mockResolvedValue(null),
-            updateGlobalReputation: vi.fn().mockResolvedValue(undefined),
-            getDomainByName: vi.fn().mockResolvedValue(null),
+            updateSignalRetention: vi.fn().mockReturnValue(okAsync(undefined)),
+            getArc: vi.fn().mockReturnValue(okAsync(null)),
+            findArcByGroupingKey: vi.fn().mockReturnValue(okAsync(null)),
+            saveArc: vi.fn().mockReturnValue(okAsync(undefined)),
+            listEnabledRules: vi.fn().mockReturnValue(okAsync(SYSTEM_RULES)),
+            getProcessorAccountContext: vi.fn().mockReturnValue(okAsync(DEFAULT_CTX)),
+            saveAlias: vi.fn().mockImplementation((a: Alias) => okAsync(a)),
+            getSender: vi.fn().mockReturnValue(okAsync(DEFAULT_SENDER_ENTRY)),
+            saveSender: vi.fn().mockReturnValue(okAsync(undefined)),
+            getTemplate: vi.fn().mockReturnValue(okAsync(null)),
+            updateGlobalReputation: vi.fn().mockReturnValue(okAsync(undefined)),
+            getDomainByName: vi.fn().mockReturnValue(okAsync(null)),
           };
 
           const embeddingGenerator: EmbeddingGenerator = {
@@ -328,22 +330,23 @@ describe("Property 9 (full scope): Cross-layer idempotence — live writes + cac
           // Run 1: process once (fresh)
           const savedSignalsRun1: Signal[] = [];
           const storeRun1: ProcessorDatabase = {
-            getSignalByMessageId: vi.fn().mockResolvedValue(null),
-            saveSignal: vi.fn().mockImplementation(async (signal: Signal) => {
+            getSignalByMessageId: vi.fn().mockReturnValue(okAsync(null)),
+            saveSignal: vi.fn().mockImplementation((signal: Signal) => {
               savedSignalsRun1.push(signal);
+              return okAsync(undefined);
             }),
-            updateSignalRetention: vi.fn().mockResolvedValue(undefined),
-            getArc: vi.fn().mockResolvedValue(null),
-            findArcByGroupingKey: vi.fn().mockResolvedValue(null),
-            saveArc: vi.fn().mockResolvedValue(undefined),
-            listEnabledRules: vi.fn().mockResolvedValue(SYSTEM_RULES),
-            getProcessorAccountContext: vi.fn().mockResolvedValue(DEFAULT_CTX),
-            saveAlias: vi.fn().mockImplementation((a: Alias) => Promise.resolve(a)),
-            getSender: vi.fn().mockResolvedValue(DEFAULT_SENDER_ENTRY),
-            saveSender: vi.fn().mockResolvedValue(undefined),
-            getTemplate: vi.fn().mockResolvedValue(null),
-            updateGlobalReputation: vi.fn().mockResolvedValue(undefined),
-            getDomainByName: vi.fn().mockResolvedValue(null),
+            updateSignalRetention: vi.fn().mockReturnValue(okAsync(undefined)),
+            getArc: vi.fn().mockReturnValue(okAsync(null)),
+            findArcByGroupingKey: vi.fn().mockReturnValue(okAsync(null)),
+            saveArc: vi.fn().mockReturnValue(okAsync(undefined)),
+            listEnabledRules: vi.fn().mockReturnValue(okAsync(SYSTEM_RULES)),
+            getProcessorAccountContext: vi.fn().mockReturnValue(okAsync(DEFAULT_CTX)),
+            saveAlias: vi.fn().mockImplementation((a: Alias) => okAsync(a)),
+            getSender: vi.fn().mockReturnValue(okAsync(DEFAULT_SENDER_ENTRY)),
+            saveSender: vi.fn().mockReturnValue(okAsync(undefined)),
+            getTemplate: vi.fn().mockReturnValue(okAsync(null)),
+            updateGlobalReputation: vi.fn().mockReturnValue(okAsync(undefined)),
+            getDomainByName: vi.fn().mockReturnValue(okAsync(null)),
           };
 
           const embeddingGenerator: EmbeddingGenerator = {
@@ -375,22 +378,23 @@ describe("Property 9 (full scope): Cross-layer idempotence — live writes + cac
           // Run 2: process again (simulating redelivery that bypasses dedup)
           const savedSignalsRun2: Signal[] = [];
           const storeRun2: ProcessorDatabase = {
-            getSignalByMessageId: vi.fn().mockResolvedValue(null),
-            saveSignal: vi.fn().mockImplementation(async (signal: Signal) => {
+            getSignalByMessageId: vi.fn().mockReturnValue(okAsync(null)),
+            saveSignal: vi.fn().mockImplementation((signal: Signal) => {
               savedSignalsRun2.push(signal);
+              return okAsync(undefined);
             }),
-            updateSignalRetention: vi.fn().mockResolvedValue(undefined),
-            getArc: vi.fn().mockResolvedValue(null),
-            findArcByGroupingKey: vi.fn().mockResolvedValue(null),
-            saveArc: vi.fn().mockResolvedValue(undefined),
-            listEnabledRules: vi.fn().mockResolvedValue(SYSTEM_RULES),
-            getProcessorAccountContext: vi.fn().mockResolvedValue(DEFAULT_CTX),
-            saveAlias: vi.fn().mockImplementation((a: Alias) => Promise.resolve(a)),
-            getSender: vi.fn().mockResolvedValue(DEFAULT_SENDER_ENTRY),
-            saveSender: vi.fn().mockResolvedValue(undefined),
-            getTemplate: vi.fn().mockResolvedValue(null),
-            updateGlobalReputation: vi.fn().mockResolvedValue(undefined),
-            getDomainByName: vi.fn().mockResolvedValue(null),
+            updateSignalRetention: vi.fn().mockReturnValue(okAsync(undefined)),
+            getArc: vi.fn().mockReturnValue(okAsync(null)),
+            findArcByGroupingKey: vi.fn().mockReturnValue(okAsync(null)),
+            saveArc: vi.fn().mockReturnValue(okAsync(undefined)),
+            listEnabledRules: vi.fn().mockReturnValue(okAsync(SYSTEM_RULES)),
+            getProcessorAccountContext: vi.fn().mockReturnValue(okAsync(DEFAULT_CTX)),
+            saveAlias: vi.fn().mockImplementation((a: Alias) => okAsync(a)),
+            getSender: vi.fn().mockReturnValue(okAsync(DEFAULT_SENDER_ENTRY)),
+            saveSender: vi.fn().mockReturnValue(okAsync(undefined)),
+            getTemplate: vi.fn().mockReturnValue(okAsync(null)),
+            updateGlobalReputation: vi.fn().mockReturnValue(okAsync(undefined)),
+            getDomainByName: vi.fn().mockReturnValue(okAsync(null)),
           };
 
           const embeddingGenerator2: EmbeddingGenerator = {
