@@ -8,6 +8,9 @@ import { ArcDatabase } from "./arc-database.js";
 import { ProcessingDatabase } from "./processing-database.js";
 import { AuditDatabase } from "./audit-database.js";
 
+// Generate arbitrary Error instances for SDK rejection testing
+const arbError = fc.string({ minLength: 0, maxLength: 200 }).map((msg) => new Error(msg));
+
 // ---------------------------------------------------------------------------
 // Property 1: Database boundary completeness
 // For any database method, verify it returns ResultAsync that resolves to
@@ -29,9 +32,9 @@ describe("Property 1: Database boundary completeness", () => {
 
   it("AccountDatabase.getAccount never throws/rejects — SDK errors become DbError", async () => {
     await propertyRunner.assert(
-      fc.asyncProperty(fc.anything(), async (arbitraryError) => {
+      fc.asyncProperty(arbError, async (error) => {
         ddbMock.reset();
-        ddbMock.rejectsOnce(arbitraryError);
+        ddbMock.rejectsOnce(error);
 
         const db = new AccountDatabase();
         const result = await db.getAccount("any-account-id");
@@ -47,9 +50,9 @@ describe("Property 1: Database boundary completeness", () => {
 
   it("AccountDatabase.listAliases never throws/rejects — SDK errors become DbError", async () => {
     await propertyRunner.assert(
-      fc.asyncProperty(fc.anything(), async (arbitraryError) => {
+      fc.asyncProperty(arbError, async (error) => {
         ddbMock.reset();
-        ddbMock.rejectsOnce(arbitraryError);
+        ddbMock.rejectsOnce(error);
 
         const db = new AccountDatabase();
         const result = await db.listAliases("any-account-id");
@@ -65,9 +68,9 @@ describe("Property 1: Database boundary completeness", () => {
 
   it("ArcDatabase.getArc never throws/rejects — SDK errors become DbError", async () => {
     await propertyRunner.assert(
-      fc.asyncProperty(fc.anything(), async (arbitraryError) => {
+      fc.asyncProperty(arbError, async (error) => {
         ddbMock.reset();
-        ddbMock.rejectsOnce(arbitraryError);
+        ddbMock.rejectsOnce(error);
 
         const db = new ArcDatabase();
         const result = await db.getArc("any-account-id", "any-arc-id");
@@ -83,9 +86,9 @@ describe("Property 1: Database boundary completeness", () => {
 
   it("ArcDatabase.saveSignal never throws/rejects — SDK errors become DbError", async () => {
     await propertyRunner.assert(
-      fc.asyncProperty(fc.anything(), async (arbitraryError) => {
+      fc.asyncProperty(arbError, async (error) => {
         ddbMock.reset();
-        ddbMock.rejectsOnce(arbitraryError);
+        ddbMock.rejectsOnce(error);
 
         const db = new ArcDatabase();
         const result = await db.saveSignal({
@@ -110,9 +113,9 @@ describe("Property 1: Database boundary completeness", () => {
 
   it("ProcessingDatabase.isAddressSuppressed never throws/rejects — SDK errors become DbError", async () => {
     await propertyRunner.assert(
-      fc.asyncProperty(fc.anything(), async (arbitraryError) => {
+      fc.asyncProperty(arbError, async (error) => {
         ddbMock.reset();
-        ddbMock.rejectsOnce(arbitraryError);
+        ddbMock.rejectsOnce(error);
 
         const db = new ProcessingDatabase();
         const result = await db.isAddressSuppressed("test@example.com");
@@ -128,9 +131,9 @@ describe("Property 1: Database boundary completeness", () => {
 
   it("ProcessingDatabase.suppressAddress never throws/rejects — SDK errors become DbError", async () => {
     await propertyRunner.assert(
-      fc.asyncProperty(fc.anything(), async (arbitraryError) => {
+      fc.asyncProperty(arbError, async (error) => {
         ddbMock.reset();
-        ddbMock.rejectsOnce(arbitraryError);
+        ddbMock.rejectsOnce(error);
 
         const db = new ProcessingDatabase();
         const result = await db.suppressAddress({ address: "x@y.com", reason: "bounce", suppressedAt: new Date().toISOString() } as any);
@@ -146,9 +149,9 @@ describe("Property 1: Database boundary completeness", () => {
 
   it("AuditDatabase.saveAuditEvent never throws/rejects — SDK errors become DbError", async () => {
     await propertyRunner.assert(
-      fc.asyncProperty(fc.anything(), async (arbitraryError) => {
+      fc.asyncProperty(arbError, async (error) => {
         ddbMock.reset();
-        ddbMock.rejectsOnce(arbitraryError);
+        ddbMock.rejectsOnce(error);
 
         const db = new AuditDatabase();
         const result = await db.saveAuditEvent({
@@ -170,9 +173,9 @@ describe("Property 1: Database boundary completeness", () => {
 
   it("AuditDatabase.listAuditEvents never throws/rejects — SDK errors become DbError", async () => {
     await propertyRunner.assert(
-      fc.asyncProperty(fc.anything(), async (arbitraryError) => {
+      fc.asyncProperty(arbError, async (error) => {
         ddbMock.reset();
-        ddbMock.rejectsOnce(arbitraryError);
+        ddbMock.rejectsOnce(error);
 
         const db = new AuditDatabase();
         const result = await db.listAuditEvents("acct-1", { limit: 10 });

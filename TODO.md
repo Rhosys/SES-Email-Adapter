@@ -2,6 +2,9 @@
 
 - [ ] **Structured logging implementation** — adopt the log level taxonomy from ADR 002 (DEBUG/INFO/TRACK/WARN/ERROR/CRITICAL) across the codebase. Replace raw `console.warn`/`console.error` calls with structured JSON emitters that set the correct `level` field. The logging infrastructure already routes based on `level`.
 - [ ] **Expected error handling** — audit all catch blocks and error paths. Distinguish between expected errors (validation failures, not-found, rate limits → INFO or silent) and unexpected errors (DynamoDB failures, SES timeouts → ERROR). Expected errors should never trigger alerts.
+- [ ] **Review all log message levels**
+- [ ] **Review Lambda Authorizer**
+- [ ] **Never use fs sync anything** every call should be async when available, Sync is always wrong
 
 
 ---

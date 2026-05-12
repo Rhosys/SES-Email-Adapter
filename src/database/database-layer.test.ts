@@ -59,10 +59,11 @@ describe("AccountDatabase", () => {
       const result = await db.renameAlias("acct-1", "old@example.com", "new@example.com");
 
       expect(result.isErr()).toBe(true);
-      expect(result._unsafeUnwrapErr().kind).toBe("not_found");
-      if (result._unsafeUnwrapErr().kind === "not_found") {
-        expect(result._unsafeUnwrapErr().resource).toBe("alias");
-        expect(result._unsafeUnwrapErr().id).toBe("old@example.com");
+      const error = result._unsafeUnwrapErr();
+      expect(error.kind).toBe("not_found");
+      if (error.kind === "not_found") {
+        expect(error.resource).toBe("alias");
+        expect(error.id).toBe("old@example.com");
       }
     });
 
