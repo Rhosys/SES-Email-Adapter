@@ -5,6 +5,7 @@ import type { ProcessingDatabase } from "../database/processing-database.js";
 import type { AccountDatabase } from "../database/account-database.js";
 import { dbError, ok } from "../errors.js";
 import type { DbError, Result } from "../errors.js";
+import type { Logger } from "../logger.js";
 
 // 72 hours in seconds — soft bounces expire and can retry
 const SOFT_BOUNCE_TTL_SECONDS = 72 * 60 * 60;
@@ -12,10 +13,12 @@ const SOFT_BOUNCE_TTL_SECONDS = 72 * 60 * 60;
 export class FeedbackProcessor {
   private readonly processingDb: ProcessingDatabase;
   private readonly accountDb: AccountDatabase;
+  private readonly logger: Logger;
 
-  constructor(processingDb: ProcessingDatabase, accountDb: AccountDatabase) {
+  constructor(processingDb: ProcessingDatabase, accountDb: AccountDatabase, logger: Logger) {
     this.processingDb = processingDb;
     this.accountDb = accountDb;
+    this.logger = logger;
   }
 
   process(event: SQSEvent): ResultAsync<void, DbError> {
@@ -32,13 +35,13 @@ export class FeedbackProcessor {
         const sns = JSON.parse(record.body) as { Message: string };
         feedback = JSON.parse(sns.Message) as SesFeedback;
       } catch (err) {
-        console.error("Failed to parse feedback record:", err);
+        this.logger.error("feedback.parse_failed", { error: err instanceof Error ? err.message : String(err) });
         continue;
       }
 
       const result = await this.processFeedback(feedback);
       if (result.isErr()) {
-        console.error("Failed to process feedback record:", result.error.cause);
+        this.logger.error("feedback.process_failed", { error: result.error.cause instanceof Error ? result.error.cause.message : String(result.error.cause) });
       }
     }
   }
@@ -66,7 +69,7 @@ export class FeedbackProcessor {
           for (const r of feedback.bounce!.bouncedRecipients) {
             const disableResult = await this.accountDb.disableForwardActions(accountId, r.emailAddress);
             if (disableResult.isErr()) {
-              console.error("Failed to disable forward actions after bounce:", disableResult.error.cause);
+              this.logger.error("feedback.disable_forward_failed", { accountId, address: r.emailAddress, error: disableResult.error.cause instanceof Error ? disableResult.error.cause.message : String(disableResult.error.cause) });
             }
           }
         }
