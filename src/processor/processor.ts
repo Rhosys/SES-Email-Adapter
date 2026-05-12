@@ -345,9 +345,9 @@ export class SignalProcessor {
         const receiveCount = Number(record.attributes?.ApproximateReceiveCount ?? "1");
         const level = receiveCount > RETRY_TRACK_THRESHOLD ? "error" : "track";
         if (level === "error") {
-          this.logger.error("processor.signal.failed", { messageId: result.error.messageId, receiveCount });
+          this.logger.error("Signal processing failed after exceeding retry threshold. SQS message was redelivered " + receiveCount + " times without successful completion. This message will move to the DLQ and the email won't be processed. Investigate the root cause in earlier track-level logs for this messageId.", { code: "processor.signal.failed", messageId: result.error.messageId, receiveCount });
         } else {
-          this.logger.track("processor.signal.failed", { messageId: result.error.messageId, receiveCount });
+          this.logger.track("Signal processing failed on attempt " + receiveCount + ". The SQS message will be retried automatically. Tracked for retry-rate monitoring.", { code: "processor.signal.failed", messageId: result.error.messageId, receiveCount });
         }
         failures.push({ itemIdentifier: result.error.messageId });
       }
@@ -540,7 +540,7 @@ export class SignalProcessor {
       if (saveResult.isErr()) return err(saveResult.error);
       const repResult = await this.store.updateGlobalReputation(senderETLD1, { wasSpam: classification.spamScore >= spamScoreThreshold, wasBlocked: true });
       if (repResult.isErr()) {
-        this.logger.track("reputation_update_failed", { accountId, error: String(repResult.error.cause) });
+        this.logger.track("Failed to update global sender reputation after signal processing. The DynamoDB update returned an error. Reputation data may be stale for this domain. Tracked for consistency monitoring.", { code: "processor.reputation_update_failed", accountId, error: String(repResult.error.cause) });
       }
       return ok(undefined);
     }
@@ -554,12 +554,12 @@ export class SignalProcessor {
       if (this.notifier && !outcome.quarantineHidden) {
         const notifyResult = await this.notifier.notifyBlocked(accountId, quarantinedSignal);
         if (notifyResult.isErr()) {
-          this.logger.track("quarantine_notification_failed", { accountId, error: String(notifyResult.error.cause) });
+          this.logger.track("Failed to send quarantine notification to user. The notification service returned an error. The signal is quarantined but the user won't be alerted. Tracked for notification reliability monitoring.", { code: "processor.quarantine_notification_failed", accountId, error: String(notifyResult.error.cause) });
         }
       }
       const repResult = await this.store.updateGlobalReputation(senderETLD1, { wasSpam: classification.spamScore >= spamScoreThreshold, wasBlocked: true });
       if (repResult.isErr()) {
-        this.logger.track("reputation_update_failed", { accountId, error: String(repResult.error.cause) });
+        this.logger.track("Failed to update global sender reputation after signal processing. The DynamoDB update returned an error. Reputation data may be stale for this domain. Tracked for consistency monitoring.", { code: "processor.reputation_update_failed", accountId, error: String(repResult.error.cause) });
       }
       return ok(undefined);
     }
@@ -605,7 +605,7 @@ export class SignalProcessor {
         (e) => dbError(e instanceof Error ? e : new Error(String(e))),
       );
       if (pongResult.isErr()) {
-        this.logger.error("pong_reply_failed", { accountId, error: String(pongResult.error.cause) });
+        this.logger.error("Failed to send pong reply to test email sender. The SES send call returned an error. The sender won't receive the automated test confirmation. Check SES sending limits and verify the from-address domain is configured.", { code: "processor.pong_reply_failed", accountId, error: String(pongResult.error.cause) });
       } else if (pongResult.value) {
         arc.sentMessageIds = [...(arc.sentMessageIds ?? []), pongResult.value.messageId];
       }
@@ -639,7 +639,7 @@ export class SignalProcessor {
       if (retentionApplyResult.isErr()) {
         // Retention application failure is non-fatal — the signal is already saved.
         // The default lifecycle rule will apply (5-year inbox/ expiry).
-        this.logger.error("s3_retention_failed", { accountId, error: String(retentionApplyResult.error.cause) });
+        this.logger.error("Failed to apply S3 retention policy to signal object. The S3 tagging or copy operation returned an error. The signal is saved but will use the default 5-year lifecycle rule instead of the plan-specific retention. Non-fatal — no operator action required unless pattern persists.", { code: "processor.s3_retention_failed", accountId, error: String(retentionApplyResult.error.cause) });
       } else {
         const { s3Key: updatedS3Key } = retentionApplyResult.value;
 
@@ -652,7 +652,7 @@ export class SignalProcessor {
         }
         const retentionSaveResult = await this.store.updateSignalRetention(accountId, signal.id, retentionUpdate);
         if (retentionSaveResult.isErr()) {
-          this.logger.track("retention_metadata_save_failed", { accountId, error: String(retentionSaveResult.error.cause) });
+          this.logger.track("Failed to persist retention metadata on signal record. The DynamoDB update returned an error. The S3 retention is applied but the signal record won't reflect the retention duration. Tracked for data consistency monitoring.", { code: "processor.retention_metadata_save_failed", accountId, error: String(retentionSaveResult.error.cause) });
         }
 
         // Set TTL on the arc based on retentionDuration
@@ -667,7 +667,7 @@ export class SignalProcessor {
       const calSignal = buildCalendarSignal(arc, signal, now, ttl);
       const calSaveResult = await this.store.saveSignal(calSignal);
       if (calSaveResult.isErr()) {
-        this.logger.track("calendar_signal_save_failed", { accountId, error: String(calSaveResult.error.cause) });
+        this.logger.track("Failed to save synthetic calendar signal for scheduling workflow. The DynamoDB put returned an error. The email signal is saved but the calendar entry won't appear. Tracked for scheduling feature reliability.", { code: "processor.calendar_signal_save_failed", accountId, error: String(calSaveResult.error.cause) });
       }
     }
 
@@ -694,7 +694,7 @@ export class SignalProcessor {
         if (upsertResult.isErr()) {
           // Per-cluster Aurora failure: log and continue.
           // The DynamoDB cache entry preserves the embedding for recovery via reindex.
-          this.logger.error("aurora_upsert_failed", { accountId, clusterId: cluster.clusterId, error: String(upsertResult.error.cause) });
+          this.logger.error("Failed to upsert embedding to Aurora cluster. The Data API call returned an error for the target cluster. This signal's embedding won't be searchable on that cluster until the next reindex run. Check Aurora cluster health in the AWS console.", { code: "processor.aurora_upsert_failed", accountId, clusterId: cluster.clusterId, error: String(upsertResult.error.cause) });
         }
       }),
     );
@@ -709,7 +709,7 @@ export class SignalProcessor {
       for (const toAddress of outcome.forwardAddresses) {
         const forwardResult = await this.forwarder.forward(s3Key, toAddress, accountId, forwardOpts);
         if (forwardResult.isErr()) {
-          this.logger.error("forward_failed", { accountId, toAddress, error: String(forwardResult.error.cause) });
+          this.logger.error("Failed to forward email to configured address. The SES send-raw-email call returned an error. The recipient won't receive the forwarded copy. Check SES sending quota and verify the forward address isn't suppressed.", { code: "processor.forward_failed", accountId, toAddress, error: String(forwardResult.error.cause) });
         }
       }
     }
@@ -740,7 +740,7 @@ export class SignalProcessor {
             (e) => dbError(e instanceof Error ? e : new Error(String(e))),
           );
           if (replyResult.isErr()) {
-            this.logger.error("auto_reply_failed", { accountId, error: String(replyResult.error.cause) });
+            this.logger.error("Failed to send auto-reply from template. The SES send call returned an error. The sender won't receive the automated response. Check SES limits and template configuration.", { code: "processor.auto_reply_failed", accountId, error: String(replyResult.error.cause) });
           } else if (replyResult.value) {
             arc.sentMessageIds = [...(arc.sentMessageIds ?? []), replyResult.value.messageId];
           }
@@ -790,7 +790,7 @@ export class SignalProcessor {
         };
         const draftSaveResult = await this.store.saveSignal(draft);
         if (draftSaveResult.isErr()) {
-          this.logger.track("auto_draft_save_failed", { accountId, error: String(draftSaveResult.error.cause) });
+          this.logger.track("Failed to save auto-draft signal from template. The DynamoDB put returned an error. The draft won't appear in the user's arc. Tracked for auto-draft feature reliability.", { code: "processor.auto_draft_save_failed", accountId, error: String(draftSaveResult.error.cause) });
         }
       }
     }
@@ -799,7 +799,7 @@ export class SignalProcessor {
     if (this.notifier && !outcome.suppressNotification) {
       const notifyResult = await this.notifier.notify(accountId, arc, signal);
       if (notifyResult.isErr()) {
-        this.logger.track("notification_failed", { accountId, error: String(notifyResult.error.cause) });
+        this.logger.track("Failed to send new-signal notification to user. The notification service returned an error. The signal is processed but the user won't be alerted. Tracked for notification reliability monitoring.", { code: "processor.notification_failed", accountId, error: String(notifyResult.error.cause) });
       }
     }
 
@@ -808,7 +808,7 @@ export class SignalProcessor {
       wasBlocked: false,
     });
     if (finalRepResult.isErr()) {
-      this.logger.track("reputation_update_failed", { accountId, error: String(finalRepResult.error.cause) });
+      this.logger.track("Failed to update global sender reputation after signal processing. The DynamoDB update returned an error. Reputation data may be stale for this domain. Tracked for consistency monitoring.", { code: "processor.reputation_update_failed", accountId, error: String(finalRepResult.error.cause) });
     }
 
     return ok(undefined);

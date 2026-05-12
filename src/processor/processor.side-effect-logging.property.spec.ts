@@ -227,7 +227,7 @@ describe("Property 5: Side effect caller logging", () => {
           if (shouldFail) {
             // Verify the caller logged at TRACK or ERROR level — not silently discarded
             const sideEffectLog = mockLogger.calls.find((call) =>
-              call.message === "notification_failed" &&
+              call.context?.code === "processor.notification_failed" &&
               (call.method === "track" || call.method === "error"),
             );
             expect(sideEffectLog).toBeDefined();
@@ -284,7 +284,7 @@ describe("Property 5: Side effect caller logging", () => {
           if (shouldFail) {
             // Verify the caller logged at TRACK or ERROR level — not silently discarded
             const sideEffectLog = mockLogger.calls.find((call) =>
-              call.message === "forward_failed" &&
+              call.context?.code === "processor.forward_failed" &&
               (call.method === "track" || call.method === "error"),
             );
             expect(sideEffectLog).toBeDefined();

@@ -172,10 +172,10 @@ describe("Property 21: Persistent failures surface via SQS metrics, not DLQ", ()
 
         // Failure should be logged at 'track' level via the mock logger
         const trackCalls = mockLogger.calls.filter(
-          (c) => c.method === "track" && c.message.includes("reindex.worker.segment_failed"),
+          (c) => c.method === "track" && c.context?.code === "reindex.worker.segment_failed",
         );
         const errorCalls = mockLogger.calls.filter(
-          (c) => c.method === "error" && c.message.includes("reindex.worker.segment_failed"),
+          (c) => c.method === "error" && c.context?.code === "reindex.worker.segment_failed",
         );
 
         expect(trackCalls.length).toBeGreaterThanOrEqual(1);
@@ -218,10 +218,10 @@ describe("Property 21: Persistent failures surface via SQS metrics, not DLQ", ()
 
         // Failure should be logged at 'error' level via the mock logger
         const errorCalls = mockLogger.calls.filter(
-          (c) => c.method === "error" && c.message.includes("reindex.worker.segment_failed"),
+          (c) => c.method === "error" && c.context?.code === "reindex.worker.segment_failed",
         );
         const trackCalls = mockLogger.calls.filter(
-          (c) => c.method === "track" && c.message.includes("reindex.worker.segment_failed"),
+          (c) => c.method === "track" && c.context?.code === "reindex.worker.segment_failed",
         );
 
         expect(errorCalls.length).toBeGreaterThanOrEqual(1);
@@ -262,10 +262,10 @@ describe("Property 21: Persistent failures surface via SQS metrics, not DLQ", ()
         expect(result.batchItemFailures).toHaveLength(1);
 
         const trackCalls = mockLogger.calls.filter(
-          (c) => c.method === "track" && c.message.includes("reindex.worker.segment_failed"),
+          (c) => c.method === "track" && c.context?.code === "reindex.worker.segment_failed",
         );
         const errorCalls = mockLogger.calls.filter(
-          (c) => c.method === "error" && c.message.includes("reindex.worker.segment_failed"),
+          (c) => c.method === "error" && c.context?.code === "reindex.worker.segment_failed",
         );
 
         if (receiveCount <= 30) {

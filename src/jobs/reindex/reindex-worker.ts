@@ -101,11 +101,11 @@ export class ReindexWorker {
         const record = event.Records[i]!;
         const receiveCount = Number(record.attributes?.ApproximateReceiveCount ?? "1");
         const logMethod = receiveCount > RETRY_TRACK_THRESHOLD ? "error" : "track";
-        this.logger[logMethod]("reindex.worker.segment_failed", {
-          messageId: result.error.messageId,
-          receiveCount,
-          error: result.error,
-        });
+        if (logMethod === "error") {
+          this.logger.error("Reindex segment failed after exceeding retry threshold. SQS message was redelivered " + receiveCount + " times without successful completion. This segment's signals won't be reindexed until the job is re-triggered. Investigate DynamoDB scan or Aurora write failures.", { code: "reindex.worker.segment_failed", messageId: result.error.messageId, receiveCount, error: result.error });
+        } else {
+          this.logger.track("Reindex segment failed on attempt " + receiveCount + ". The SQS message will be retried automatically. Tracked for segment retry-rate monitoring.", { code: "reindex.worker.segment_failed", messageId: result.error.messageId, receiveCount, error: result.error });
+        }
         failures.push({ itemIdentifier: result.error.messageId });
       }
     }
@@ -179,7 +179,8 @@ export class ReindexWorker {
 
     // Validate signal has the minimum fields for a copy
     if (!isValidSignalForCopy(item)) {
-      this.logger.track("reindex.worker.malformed_signal", {
+      this.logger.track("Skipped malformed signal during reindex scan. The DynamoDB item is missing required fields (accountId, arcId, or recipientAddress). This signal cannot be reindexed and will be counted as unrecoverable. Tracked for data quality monitoring.", {
+        code: "reindex.worker.malformed_signal",
         jobId,
         signalId: id,
         reason: "missing required fields (accountId, arcId, or recipientAddress)",
@@ -230,7 +231,8 @@ export class ReindexWorker {
       }));
     } catch (err) {
       // Per-signal failure: log and continue, do not retry the whole segment
-      this.logger.track("reindex.worker.signal_upsert_failed", {
+      this.logger.track("Failed to upsert cached embedding to Aurora during reindex pure-copy. The Aurora Data API call returned an error for this signal. The signal will be skipped and counted toward failure metrics. Tracked for per-signal reindex reliability.", {
+        code: "reindex.worker.signal_upsert_failed",
         jobId,
         signalId: signal.id,
         arcId: signal.arcId,
@@ -268,7 +270,8 @@ export class ReindexWorker {
         return;
       }
       // Non-NoSuchKey S3 error — log per-signal and continue
-      this.logger.track("reindex.worker.s3_fetch_failed", {
+      this.logger.track("Failed to fetch raw MIME from S3 during reindex regeneration. A non-NoSuchKey S3 error occurred. This signal's embedding cannot be regenerated in this run. Tracked for S3 access reliability during reindex.", {
+        code: "reindex.worker.s3_fetch_failed",
         jobId,
         signalId: signal.id,
         s3Key,
@@ -311,7 +314,8 @@ export class ReindexWorker {
       }));
     } catch (err) {
       // Per-signal failure during regeneration: log and continue
-      this.logger.track("reindex.worker.regeneration_failed", {
+      this.logger.track("Failed to regenerate embedding from S3 source during reindex. The MIME parse, Bedrock call, or Aurora write failed. This signal will be skipped. Tracked for regeneration pipeline reliability.", {
+        code: "reindex.worker.regeneration_failed",
         jobId,
         signalId: signal.id,
         s3Key,
@@ -341,7 +345,8 @@ export class ReindexWorker {
     signalId: string,
     reason: string,
   ): Promise<void> {
-    this.logger.track("reindex.worker.unrecoverable", {
+    this.logger.track("Signal marked unrecoverable during reindex — cannot regenerate embedding. The signal record lacks an s3Key or the S3 object no longer exists (NoSuchKey). This signal will never be reindexed. Tracked for data loss monitoring.", {
+      code: "reindex.worker.unrecoverable",
       jobId,
       signalId,
       reason,

@@ -218,7 +218,7 @@ describe("Property 22: Worker isolates per-signal failures within a segment", ()
 
         // 2. Malformed signals are logged via the mock logger
         const malformedLogs = mockLogger.calls.filter(
-          (call) => call.message.includes("malformed_signal"),
+          (call) => call.context?.code === "reindex.worker.malformed_signal",
         );
         // Each malformed signal with an `id` field should produce a log entry
         const malformedWithId = items.filter(
@@ -292,7 +292,7 @@ describe("Property 22: Worker isolates per-signal failures within a segment", ()
 
           // The failure was logged per-signal via the mock logger
           const failureLogs = mockLogger.calls.filter(
-            (call) => call.message.includes("signal_upsert_failed"),
+            (call) => call.context?.code === "reindex.worker.signal_upsert_failed",
           );
           expect(failureLogs.length).toBe(1);
 

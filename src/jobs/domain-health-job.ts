@@ -26,7 +26,8 @@ export class DomainHealthJob {
 
     const accountsResult = await this.db.scanAllDomains();
     if (accountsResult.isErr()) {
-      this.logger.error("domain_health.accounts_fetch_failed", {
+      this.logger.error("Failed to fetch account list for domain health check run. The DynamoDB scan of all domains returned an error. No domains will be checked in this invocation. Investigate DynamoDB table health and retry on next scheduled run.", {
+        code: "domain_health.accounts_fetch_failed",
         error: accountsResult.error.cause?.message ?? String(accountsResult.error),
       });
       return;
@@ -38,7 +39,8 @@ export class DomainHealthJob {
     for (const { accountId, domains } of allAccounts) {
       const accountResult = await this.db.getAccount(accountId);
       if (accountResult.isErr()) {
-        this.logger.error("domain_health.account_fetch_failed", {
+        this.logger.error("Failed to fetch account details during domain health check. The DynamoDB get for the account record returned an error. This account's domains will be skipped. Check DynamoDB read capacity.", {
+          code: "domain_health.account_fetch_failed",
           accountId,
           error: accountResult.error.cause?.message ?? String(accountResult.error),
         });
@@ -63,7 +65,8 @@ export class DomainHealthJob {
           ...(allHealthy ? { lastHealthyAt: now } : {}),
         });
         if (updateResult.isErr()) {
-          this.logger.error("domain_health.update_health_failed", {
+          this.logger.error("Failed to persist domain health check results. The DynamoDB update for the domain record returned an error. Health status won't be reflected in the UI until the next successful check. Check DynamoDB write capacity.", {
+            code: "domain_health.update_health_failed",
             accountId,
             domainId: domain.id,
             error: updateResult.error.cause?.message ?? String(updateResult.error),
@@ -95,7 +98,8 @@ export class DomainHealthJob {
             (e) => dbError(e instanceof Error ? e : new Error(String(e))),
           );
           if (sendResult.isErr()) {
-            this.logger.error("domain_health.notification_failed", {
+            this.logger.error("Failed to send DNS health alert email to account owner. The SESv2 send call returned an error. The owner won't be notified of failing DNS records. Check SES sending limits and verify the notification from-address.", {
+              code: "domain_health.notification_failed",
               accountId,
               domain: domain.domain,
               notifyEmail,
@@ -109,7 +113,8 @@ export class DomainHealthJob {
       const cutoffDate = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
       const staleArcsResult = await this.arcDb.listActiveArcsBefore(accountId, cutoffDate);
       if (staleArcsResult.isErr()) {
-        this.logger.error("staleness_checker.account_error", {
+        this.logger.error("Failed to query stale arcs for account during staleness check. The DynamoDB query returned an error. This account's staleness report will be skipped. Check DynamoDB read capacity.", {
+          code: "staleness_checker.account_error",
           accountId,
           error: staleArcsResult.error.cause?.message ?? String(staleArcsResult.error),
         });
