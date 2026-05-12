@@ -4,6 +4,7 @@ import { ResultAsync } from "neverthrow";
 import { dynamo, SIGNALS_TABLE, encodeCursor, decodeCursor } from "./shared.js";
 import { dbError } from "../errors.js";
 import type { DbError } from "../errors.js";
+import type { Logger } from "../logger.js";
 import type { ArcMatcher } from "../processor/processor.js";
 import type { ListArcsParams, UpdateArcRequest } from "../api/app.js";
 import type { Arc, Signal, Page, PageParams } from "../types/index.js";
@@ -40,6 +41,12 @@ const toDbError = (e: unknown): DbError => dbError(e instanceof Error ? e : new 
 // ---------------------------------------------------------------------------
 
 export class ArcDatabase implements ArcMatcher {
+  private readonly logger: Logger | undefined;
+
+  constructor(logger?: Logger) {
+    this.logger = logger;
+  }
+
   // ---------------------------------------------------------------------------
   // Signals
   // ---------------------------------------------------------------------------
@@ -387,14 +394,11 @@ export class ArcDatabase implements ArcMatcher {
       })).then(res => {
         const fetchedItems = (res.Items ?? []) as Arc[];
         if (fetchedItems.length > 200) {
-          console.warn(JSON.stringify({
-            level: "warn",
-            message: "searchArcs.large_result_set",
+          this.logger?.warn("searchArcs.large_result_set", {
             accountId,
             query,
             itemsFetched: fetchedItems.length,
-            timestamp: new Date().toISOString(),
-          }));
+          });
         }
 
         const q = query.toLowerCase();

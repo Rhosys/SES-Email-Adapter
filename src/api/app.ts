@@ -965,7 +965,7 @@ export function createApp({ store, auth, access, logger, verificationMailer }: A
     if (verificationMailer) {
       const verifyResult = await verificationMailer.sendForwardVerification(accountId, addr.address, addr.token);
       if (verifyResult.isErr()) {
-        console.error("Failed to send verification email:", verifyResult.error.cause);
+        logger.error("forwarding.verification_email_failed", { cause: String(verifyResult.error.cause) });
       }
     }
 

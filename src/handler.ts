@@ -63,7 +63,7 @@ const embeddingGenerator = new BedrockEmbeddingGenerator(bedrock);
 const logger = new RequestLogger();
 
 const accountDb = new AccountDatabase();
-const arcDb = new ArcDatabase();
+const arcDb = new ArcDatabase(logger);
 const processingDb = new ProcessingDatabase();
 const auditDb = new AuditDatabase();
 
