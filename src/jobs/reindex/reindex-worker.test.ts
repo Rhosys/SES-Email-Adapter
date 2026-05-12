@@ -187,8 +187,9 @@ describe("ReindexWorker — pure-copy mode", () => {
       }),
     ]);
 
-    await worker.process(event);
+    const result = await worker.process(event);
 
+    expect(result.batchItemFailures).toEqual([]);
     expect(mockUpsertEmbedding).toHaveBeenCalledWith({
       clusterId: "aurora-prod-titan-v2",
       arcId: "arc-xyz",
@@ -224,8 +225,9 @@ describe("ReindexWorker — pure-copy mode", () => {
       }),
     ]);
 
-    await worker.process(event);
+    const result = await worker.process(event);
 
+    expect(result.batchItemFailures).toEqual([]);
     expect(mockUpsertEmbedding).not.toHaveBeenCalled();
   });
 
@@ -252,8 +254,9 @@ describe("ReindexWorker — pure-copy mode", () => {
       }),
     ]);
 
-    await worker.process(event);
+    const result = await worker.process(event);
 
+    expect(result.batchItemFailures).toEqual([]);
     // Only the valid signal should be upserted
     expect(mockUpsertEmbedding).toHaveBeenCalledTimes(1);
     expect(mockUpsertEmbedding).toHaveBeenCalledWith(expect.objectContaining({ arcId: "arc-good" }));
@@ -293,9 +296,10 @@ describe("ReindexWorker — pure-copy mode", () => {
       }),
     ]);
 
-    // Should not throw — per-signal failures are isolated
-    await worker.process(event);
+    // Should not fail the segment — per-signal failures are isolated
+    const result = await worker.process(event);
 
+    expect(result.batchItemFailures).toEqual([]);
     expect(mockUpsertEmbedding).toHaveBeenCalledTimes(2);
   });
 
@@ -331,12 +335,13 @@ describe("ReindexWorker — pure-copy mode", () => {
       }),
     ]);
 
-    await worker.process(event);
+    const result = await worker.process(event);
 
+    expect(result.batchItemFailures).toEqual([]);
     expect(mockUpsertEmbedding).toHaveBeenCalledTimes(2);
   });
 
-  it("acknowledges messages with unknown cluster without throwing", async () => {
+  it("returns batchItemFailure for messages with unknown cluster", async () => {
     const event = makeSqsEvent([
       makeSqsRecord({
         jobId: "job-1",
@@ -347,12 +352,13 @@ describe("ReindexWorker — pure-copy mode", () => {
       }),
     ]);
 
-    // Should not throw — unknown cluster is logged and acknowledged
-    await worker.process(event);
+    const result = await worker.process(event);
+
+    expect(result.batchItemFailures).toEqual([{ itemIdentifier: "msg-1" }]);
     expect(mockUpsertEmbedding).not.toHaveBeenCalled();
   });
 
-  it("acknowledges unparseable message body without throwing", async () => {
+  it("returns batchItemFailure for unparseable message body", async () => {
     const event = makeSqsEvent([
       {
         ...makeSqsRecord({}),
@@ -360,7 +366,9 @@ describe("ReindexWorker — pure-copy mode", () => {
       },
     ]);
 
-    await worker.process(event);
+    const result = await worker.process(event);
+
+    expect(result.batchItemFailures).toEqual([{ itemIdentifier: "msg-1" }]);
     expect(mockUpsertEmbedding).not.toHaveBeenCalled();
   });
 
@@ -387,8 +395,9 @@ describe("ReindexWorker — pure-copy mode", () => {
       ),
     ]);
 
-    await worker.process(event);
+    const result = await worker.process(event);
 
+    expect(result.batchItemFailures).toEqual([{ itemIdentifier: "msg-1" }]);
     expect(consoleSpy).toHaveBeenCalled();
     const logPayload = JSON.parse(consoleSpy.mock.calls[0]![0] as string);
     expect(logPayload.level).toBe("error");
@@ -420,8 +429,9 @@ describe("ReindexWorker — pure-copy mode", () => {
       }),
     ]);
 
-    await worker.process(event);
+    const result = await worker.process(event);
 
+    expect(result.batchItemFailures).toEqual([]);
     // Only the real signal should be processed
     expect(mockUpsertEmbedding).toHaveBeenCalledTimes(1);
   });
@@ -439,8 +449,9 @@ describe("ReindexWorker — pure-copy mode", () => {
       }),
     ]);
 
-    await worker.process(event);
+    const result = await worker.process(event);
 
+    expect(result.batchItemFailures).toEqual([]);
     const scanCalls = ddbMock.commandCalls(ScanCommand);
     expect(scanCalls.length).toBe(1);
     expect(scanCalls[0]!.args[0].input.Segment).toBe(7);
@@ -520,7 +531,9 @@ describe("ReindexWorker — regenerate-from-S3 mode", () => {
       }),
     ]);
 
-    await worker.process(event);
+    const result = await worker.process(event);
+
+    expect(result.batchItemFailures).toEqual([]);
 
     // Should call S3 to fetch the raw email
     expect(s3Mock.commandCalls(GetObjectCommand)).toHaveLength(1);
@@ -587,7 +600,9 @@ describe("ReindexWorker — regenerate-from-S3 mode", () => {
       }),
     ]);
 
-    await worker.process(event);
+    const result = await worker.process(event);
+
+    expect(result.batchItemFailures).toEqual([]);
 
     // Should NOT call Bedrock or upsert to Aurora
     expect(mockGenerateForModel).not.toHaveBeenCalled();
@@ -623,7 +638,9 @@ describe("ReindexWorker — regenerate-from-S3 mode", () => {
       }),
     ]);
 
-    await worker.process(event);
+    const result = await worker.process(event);
+
+    expect(result.batchItemFailures).toEqual([]);
 
     // Should NOT call S3, Bedrock, or Aurora
     expect(s3Mock.commandCalls(GetObjectCommand)).toHaveLength(0);
@@ -661,7 +678,9 @@ describe("ReindexWorker — regenerate-from-S3 mode", () => {
       }),
     ]);
 
-    await worker.process(event);
+    const result = await worker.process(event);
+
+    expect(result.batchItemFailures).toEqual([]);
 
     // Should NOT call S3 or Bedrock — cache hit takes the pure-copy path
     expect(s3Mock.commandCalls(GetObjectCommand)).toHaveLength(0);
@@ -754,7 +773,9 @@ describe("ReindexWorker — regenerate-from-S3 mode", () => {
       }),
     ]);
 
-    await worker.process(event);
+    const result = await worker.process(event);
+
+    expect(result.batchItemFailures).toEqual([]);
 
     // Aurora upsert called twice: once for cache hit, once for regenerated
     expect(mockUpsertEmbedding).toHaveBeenCalledTimes(2);

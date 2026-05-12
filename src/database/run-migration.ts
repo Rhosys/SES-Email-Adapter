@@ -123,8 +123,9 @@ function arraysEqual(a: string[], b: string[]): boolean {
 // ---------------------------------------------------------------------------
 
 if (process.argv[1]?.includes("run-migration")) {
-  runMigration()
-    .then((result) => {
+  (async () => {
+    try {
+      const result = await runMigration();
       console.log("Migration complete:", JSON.stringify(result, null, 2));
       if (!result.valid) {
         console.error(
@@ -132,9 +133,9 @@ if (process.argv[1]?.includes("run-migration")) {
         );
         process.exitCode = 1;
       }
-    })
-    .catch((err: unknown) => {
+    } catch (err: unknown) {
       console.error("Migration failed:", err);
       process.exitCode = 1;
-    });
+    }
+  })();
 }

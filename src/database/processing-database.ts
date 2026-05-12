@@ -1,5 +1,8 @@
 import { GetCommand, PutCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
+import { ResultAsync } from "neverthrow";
 import { dynamo, PROCESSING_TABLE } from "./shared.js";
+import { dbError } from "../errors.js";
+import type { DbError } from "../errors.js";
 import type { SuppressedAddress } from "../types/index.js";
 
 // ---------------------------------------------------------------------------
@@ -8,34 +11,42 @@ import type { SuppressedAddress } from "../types/index.js";
 // ---------------------------------------------------------------------------
 
 export class ProcessingDatabase {
-  async suppressAddress(entry: SuppressedAddress): Promise<void> {
-    await dynamo.send(new PutCommand({
-      TableName: PROCESSING_TABLE,
-      Item: { ...entry, pk: `SUPPRESS#${entry.address}`, sk: "SUPPRESS" },
-    }));
+  suppressAddress(entry: SuppressedAddress): ResultAsync<void, DbError> {
+    return ResultAsync.fromPromise(
+      dynamo.send(new PutCommand({
+        TableName: PROCESSING_TABLE,
+        Item: { ...entry, pk: `SUPPRESS#${entry.address}`, sk: "SUPPRESS" },
+      })).then(() => undefined),
+      (e) => dbError(e instanceof Error ? e : new Error(String(e))),
+    );
   }
 
-  async isAddressSuppressed(address: string): Promise<boolean> {
-    const result = await dynamo.send(new GetCommand({
-      TableName: PROCESSING_TABLE,
-      Key: { pk: `SUPPRESS#${address}`, sk: "SUPPRESS" },
-      ProjectionExpression: "address",
-    }));
-    return result.Item !== undefined;
+  isAddressSuppressed(address: string): ResultAsync<boolean, DbError> {
+    return ResultAsync.fromPromise(
+      dynamo.send(new GetCommand({
+        TableName: PROCESSING_TABLE,
+        Key: { pk: `SUPPRESS#${address}`, sk: "SUPPRESS" },
+        ProjectionExpression: "address",
+      })).then(res => res.Item !== undefined),
+      (e) => dbError(e instanceof Error ? e : new Error(String(e))),
+    );
   }
 
-  async updateGlobalReputation(domain: string, update: { wasSpam: boolean; wasBlocked: boolean }): Promise<void> {
+  updateGlobalReputation(domain: string, update: { wasSpam: boolean; wasBlocked: boolean }): ResultAsync<void, DbError> {
     const now = new Date().toISOString();
     const addParts = ["signalCount :one"];
     if (update.wasSpam) addParts.push("spamCount :one");
     if (update.wasBlocked) addParts.push("blockCount :one");
 
-    await dynamo.send(new UpdateCommand({
-      TableName: PROCESSING_TABLE,
-      Key: { pk: `GREP#${domain}`, sk: "GLOBAL_REP" },
-      UpdateExpression: `ADD ${addParts.join(", ")} SET lastSeenAt = :now, updatedAt = :now, #domain = :domain`,
-      ExpressionAttributeNames: { "#domain": "domain" },
-      ExpressionAttributeValues: { ":one": 1, ":now": now, ":domain": domain },
-    }));
+    return ResultAsync.fromPromise(
+      dynamo.send(new UpdateCommand({
+        TableName: PROCESSING_TABLE,
+        Key: { pk: `GREP#${domain}`, sk: "GLOBAL_REP" },
+        UpdateExpression: `ADD ${addParts.join(", ")} SET lastSeenAt = :now, updatedAt = :now, #domain = :domain`,
+        ExpressionAttributeNames: { "#domain": "domain" },
+        ExpressionAttributeValues: { ":one": 1, ":now": now, ":domain": domain },
+      })).then(() => undefined),
+      (e) => dbError(e instanceof Error ? e : new Error(String(e))),
+    );
   }
 }

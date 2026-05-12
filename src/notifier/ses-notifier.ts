@@ -1,6 +1,9 @@
 import { SESv2Client, SendEmailCommand } from "@aws-sdk/client-sesv2";
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, DeleteCommand, GetCommand, QueryCommand } from "@aws-sdk/lib-dynamodb";
+import { ResultAsync } from "neverthrow";
+import { dbError } from "../errors.js";
+import type { DbError } from "../errors.js";
 import type { Notifier } from "../processor/processor.js";
 import type { Arc, Signal, Account, WsConnection, AuthData } from "../types/index.js";
 
@@ -16,7 +19,21 @@ const sesv2 = new SESv2Client({});
 const dynamo = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 
 export class SesNotifier implements Notifier {
-  async notify(accountId: string, arc: Arc, signal: Signal): Promise<void> {
+  notify(accountId: string, arc: Arc, signal: Signal): ResultAsync<void, DbError> {
+    return ResultAsync.fromPromise(
+      this.doNotify(accountId, arc, signal),
+      (e) => dbError(e instanceof Error ? e : new Error(String(e)))
+    );
+  }
+
+  notifyBlocked(accountId: string, signal: Signal): ResultAsync<void, DbError> {
+    return ResultAsync.fromPromise(
+      this.doNotifyBlocked(accountId, signal),
+      (e) => dbError(e instanceof Error ? e : new Error(String(e)))
+    );
+  }
+
+  private async doNotify(accountId: string, arc: Arc, signal: Signal): Promise<void> {
     const [account, suppressed] = await Promise.all([
       this.getAccount(accountId),
       this.isAddressSuppressed(FROM_ADDRESS),
@@ -65,7 +82,7 @@ export class SesNotifier implements Notifier {
     }
   }
 
-  async notifyBlocked(accountId: string, signal: Signal): Promise<void> {
+  private async doNotifyBlocked(accountId: string, signal: Signal): Promise<void> {
     const account = await this.getAccount(accountId);
     const emailSettings = account?.notifications?.email;
     if (!emailSettings?.enabled || !emailSettings.address) return;

@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import fc from "fast-check";
 import type { SQSEvent } from "aws-lambda";
+import { okAsync } from "neverthrow";
 import { SignalProcessor, SYSTEM_RULES } from "./processor.js";
 import { JsonLogicRuleEvaluator } from "./rule-evaluator.js";
 import type { ProcessorDatabase, ArcMatcher, Notifier } from "./processor.js";
@@ -101,20 +102,20 @@ describe("Property 8: Aurora cluster failure preserves the DynamoDB cache entry"
 
   function makeStore(): ProcessorDatabase {
     return {
-      getSignalByMessageId: vi.fn().mockResolvedValue(null),
-      saveSignal: vi.fn().mockResolvedValue(undefined),
-      updateSignalRetention: vi.fn().mockResolvedValue(undefined),
-      getArc: vi.fn().mockResolvedValue(null),
-      findArcByGroupingKey: vi.fn().mockResolvedValue(null),
-      saveArc: vi.fn().mockResolvedValue(undefined),
-      listEnabledRules: vi.fn().mockResolvedValue(SYSTEM_RULES),
-      getProcessorAccountContext: vi.fn().mockResolvedValue(DEFAULT_CTX),
-      saveAlias: vi.fn().mockImplementation((a: Alias) => Promise.resolve(a)),
-      getSender: vi.fn().mockResolvedValue(DEFAULT_SENDER_ENTRY),
-      saveSender: vi.fn().mockResolvedValue(undefined),
-      getTemplate: vi.fn().mockResolvedValue(null),
-      updateGlobalReputation: vi.fn().mockResolvedValue(undefined),
-      getDomainByName: vi.fn().mockResolvedValue(null),
+      getSignalByMessageId: vi.fn().mockReturnValue(okAsync(null)),
+      saveSignal: vi.fn().mockReturnValue(okAsync(undefined)),
+      updateSignalRetention: vi.fn().mockReturnValue(okAsync(undefined)),
+      getArc: vi.fn().mockReturnValue(okAsync(null)),
+      findArcByGroupingKey: vi.fn().mockReturnValue(okAsync(null)),
+      saveArc: vi.fn().mockReturnValue(okAsync(undefined)),
+      listEnabledRules: vi.fn().mockReturnValue(okAsync(SYSTEM_RULES)),
+      getProcessorAccountContext: vi.fn().mockReturnValue(okAsync(DEFAULT_CTX)),
+      saveAlias: vi.fn().mockImplementation((a: Alias) => okAsync(a)),
+      getSender: vi.fn().mockReturnValue(okAsync(DEFAULT_SENDER_ENTRY)),
+      saveSender: vi.fn().mockReturnValue(okAsync(undefined)),
+      getTemplate: vi.fn().mockReturnValue(okAsync(null)),
+      updateGlobalReputation: vi.fn().mockReturnValue(okAsync(undefined)),
+      getDomainByName: vi.fn().mockReturnValue(okAsync(null)),
     };
   }
 
@@ -142,8 +143,8 @@ describe("Property 8: Aurora cluster failure preserves the DynamoDB cache entry"
 
   function makeArcMatcher(): ArcMatcher {
     return {
-      findMatch: vi.fn().mockResolvedValue(null),
-      upsertEmbedding: vi.fn().mockResolvedValue(undefined),
+      findMatch: vi.fn().mockReturnValue(okAsync(null)),
+      upsertEmbedding: vi.fn().mockReturnValue(okAsync(undefined)),
     };
   }
 

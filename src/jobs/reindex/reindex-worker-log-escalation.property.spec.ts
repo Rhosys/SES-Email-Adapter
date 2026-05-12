@@ -172,8 +172,9 @@ describe("Property 21: Persistent failures surface via SQS metrics, not DLQ", ()
           ),
         ]);
 
-        // The worker should re-throw on segment failure (for SQS redelivery)
-        await expect(worker.process(event)).rejects.toThrow();
+        // The worker returns batchItemFailures for failed records (no longer throws)
+        const result = await worker.process(event);
+        expect(result.batchItemFailures).toHaveLength(1);
 
         // Failure should be logged at 'track' level (via console.log, not console.error)
         const logCalls = consoleSpy.log.mock.calls.flat().join(" ");
@@ -216,8 +217,9 @@ describe("Property 21: Persistent failures surface via SQS metrics, not DLQ", ()
           ),
         ]);
 
-        // The worker should re-throw on segment failure (for SQS redelivery)
-        await expect(worker.process(event)).rejects.toThrow();
+        // The worker returns batchItemFailures for failed records (no longer throws)
+        const result = await worker.process(event);
+        expect(result.batchItemFailures).toHaveLength(1);
 
         // Failure should be logged at 'error' level (via console.error)
         const errorCalls = consoleSpy.error.mock.calls.flat().join(" ");
@@ -260,7 +262,8 @@ describe("Property 21: Persistent failures surface via SQS metrics, not DLQ", ()
           ),
         ]);
 
-        await expect(worker.process(event)).rejects.toThrow();
+        const result = await worker.process(event);
+        expect(result.batchItemFailures).toHaveLength(1);
 
         const logCalls = consoleSpy.log.mock.calls.flat().join(" ");
         const errorCalls = consoleSpy.error.mock.calls.flat().join(" ");
