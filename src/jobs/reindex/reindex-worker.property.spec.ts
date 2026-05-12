@@ -15,6 +15,7 @@ import { BedrockRuntimeClient, InvokeModelCommand } from "@aws-sdk/client-bedroc
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 import type { SQSEvent, SQSRecord } from "aws-lambda";
 import { propertyRunner } from "../../testing/property-runner.js";
+import { createMockLogger } from "../../testing/mock-logger.js";
 import { ReindexWorker } from "./reindex-worker.js";
 
 // ---------------------------------------------------------------------------
@@ -132,7 +133,7 @@ describe("Property 11: Reindex worker uses cache exclusively and never calls Bed
   let worker: ReindexWorker;
 
   beforeEach(() => {
-    worker = new ReindexWorker();
+    worker = new ReindexWorker(createMockLogger());
     ddbMock.reset();
     bedrockMock.reset();
     s3Mock.reset();

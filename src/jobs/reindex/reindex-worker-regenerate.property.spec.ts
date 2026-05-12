@@ -18,6 +18,7 @@ import { Readable } from "stream";
 import { sdkStreamMixin } from "@smithy/util-stream";
 import type { SQSEvent, SQSRecord } from "aws-lambda";
 import { propertyRunner } from "../../testing/property-runner.js";
+import { createMockLogger } from "../../testing/mock-logger.js";
 import { ReindexWorker } from "./reindex-worker.js";
 
 // ---------------------------------------------------------------------------
@@ -265,7 +266,7 @@ describe("Property 12: Backfill targets exactly the signals missing the new mode
   let worker: ReindexWorker;
 
   beforeEach(() => {
-    worker = new ReindexWorker();
+    worker = new ReindexWorker(createMockLogger());
     ddbMock.reset();
     bedrockMock.reset();
     s3Mock.reset();

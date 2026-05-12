@@ -15,6 +15,7 @@ import { readFileSync } from "fs";
 import { resolve } from "path";
 import type { SQSEvent, SQSRecord } from "aws-lambda";
 import { propertyRunner } from "../../testing/property-runner.js";
+import { createMockLogger } from "../../testing/mock-logger.js";
 import { ReindexWorker } from "./reindex-worker.js";
 
 // ---------------------------------------------------------------------------
@@ -102,22 +103,16 @@ const arbReceiveCount = fc.integer({ min: 1, max: 200 });
 
 describe("Property 21: Persistent failures surface via SQS metrics, not DLQ", () => {
   let worker: ReindexWorker;
-  let consoleSpy: { log: ReturnType<typeof vi.spyOn>; error: ReturnType<typeof vi.spyOn> };
+  let mockLogger: ReturnType<typeof createMockLogger>;
 
   beforeEach(() => {
-    worker = new ReindexWorker();
+    mockLogger = createMockLogger();
+    worker = new ReindexWorker(mockLogger);
     ddbMock.reset();
     mockUpsertEmbedding.mockClear();
-
-    consoleSpy = {
-      log: vi.spyOn(console, "log").mockImplementation(() => {}),
-      error: vi.spyOn(console, "error").mockImplementation(() => {}),
-    };
   });
 
   afterEach(() => {
-    consoleSpy.log.mockRestore();
-    consoleSpy.error.mockRestore();
     vi.restoreAllMocks();
   });
 
@@ -153,8 +148,7 @@ describe("Property 21: Persistent failures surface via SQS metrics, not DLQ", ()
     await propertyRunner.assert(
       fc.asyncProperty(arbTrackReceiveCount, async (receiveCount) => {
         ddbMock.reset();
-        consoleSpy.log.mockClear();
-        consoleSpy.error.mockClear();
+        mockLogger.calls.length = 0;
 
         // Make the DynamoDB scan throw to trigger a segment failure
         ddbMock.on(ScanCommand).rejects(new Error("Simulated DynamoDB failure"));
@@ -176,14 +170,16 @@ describe("Property 21: Persistent failures surface via SQS metrics, not DLQ", ()
         const result = await worker.process(event);
         expect(result.batchItemFailures).toHaveLength(1);
 
-        // Failure should be logged at 'track' level (via console.log, not console.error)
-        const logCalls = consoleSpy.log.mock.calls.flat().join(" ");
-        const errorCalls = consoleSpy.error.mock.calls.flat().join(" ");
+        // Failure should be logged at 'track' level via the mock logger
+        const trackCalls = mockLogger.calls.filter(
+          (c) => c.method === "track" && c.message.includes("reindex.worker.segment_failed"),
+        );
+        const errorCalls = mockLogger.calls.filter(
+          (c) => c.method === "error" && c.message.includes("reindex.worker.segment_failed"),
+        );
 
-        // The segment_failed log should appear in console.log (track level)
-        expect(logCalls).toContain("reindex.worker.segment_failed");
-        // It should NOT appear in console.error
-        expect(errorCalls).not.toContain("reindex.worker.segment_failed");
+        expect(trackCalls.length).toBeGreaterThanOrEqual(1);
+        expect(errorCalls.length).toBe(0);
 
         return true;
       }),
@@ -198,8 +194,7 @@ describe("Property 21: Persistent failures surface via SQS metrics, not DLQ", ()
     await propertyRunner.assert(
       fc.asyncProperty(arbErrorReceiveCount, async (receiveCount) => {
         ddbMock.reset();
-        consoleSpy.log.mockClear();
-        consoleSpy.error.mockClear();
+        mockLogger.calls.length = 0;
 
         // Make the DynamoDB scan throw to trigger a segment failure
         ddbMock.on(ScanCommand).rejects(new Error("Simulated DynamoDB failure"));
@@ -221,14 +216,16 @@ describe("Property 21: Persistent failures surface via SQS metrics, not DLQ", ()
         const result = await worker.process(event);
         expect(result.batchItemFailures).toHaveLength(1);
 
-        // Failure should be logged at 'error' level (via console.error)
-        const errorCalls = consoleSpy.error.mock.calls.flat().join(" ");
-        const logCalls = consoleSpy.log.mock.calls.flat().join(" ");
+        // Failure should be logged at 'error' level via the mock logger
+        const errorCalls = mockLogger.calls.filter(
+          (c) => c.method === "error" && c.message.includes("reindex.worker.segment_failed"),
+        );
+        const trackCalls = mockLogger.calls.filter(
+          (c) => c.method === "track" && c.message.includes("reindex.worker.segment_failed"),
+        );
 
-        // The segment_failed log should appear in console.error
-        expect(errorCalls).toContain("reindex.worker.segment_failed");
-        // It should NOT appear in console.log (track level)
-        expect(logCalls).not.toContain("reindex.worker.segment_failed");
+        expect(errorCalls.length).toBeGreaterThanOrEqual(1);
+        expect(trackCalls.length).toBe(0);
 
         return true;
       }),
@@ -243,8 +240,7 @@ describe("Property 21: Persistent failures surface via SQS metrics, not DLQ", ()
     await propertyRunner.assert(
       fc.asyncProperty(arbReceiveCount, async (receiveCount) => {
         ddbMock.reset();
-        consoleSpy.log.mockClear();
-        consoleSpy.error.mockClear();
+        mockLogger.calls.length = 0;
 
         // Make the DynamoDB scan throw to trigger a segment failure
         ddbMock.on(ScanCommand).rejects(new Error("Simulated DynamoDB failure"));
@@ -265,17 +261,21 @@ describe("Property 21: Persistent failures surface via SQS metrics, not DLQ", ()
         const result = await worker.process(event);
         expect(result.batchItemFailures).toHaveLength(1);
 
-        const logCalls = consoleSpy.log.mock.calls.flat().join(" ");
-        const errorCalls = consoleSpy.error.mock.calls.flat().join(" ");
+        const trackCalls = mockLogger.calls.filter(
+          (c) => c.method === "track" && c.message.includes("reindex.worker.segment_failed"),
+        );
+        const errorCalls = mockLogger.calls.filter(
+          (c) => c.method === "error" && c.message.includes("reindex.worker.segment_failed"),
+        );
 
         if (receiveCount <= 30) {
-          // Track level: logged via console.log
-          expect(logCalls).toContain("reindex.worker.segment_failed");
-          expect(errorCalls).not.toContain("reindex.worker.segment_failed");
+          // Track level
+          expect(trackCalls.length).toBeGreaterThanOrEqual(1);
+          expect(errorCalls.length).toBe(0);
         } else {
-          // Error level: logged via console.error
-          expect(errorCalls).toContain("reindex.worker.segment_failed");
-          expect(logCalls).not.toContain("reindex.worker.segment_failed");
+          // Error level
+          expect(errorCalls.length).toBeGreaterThanOrEqual(1);
+          expect(trackCalls.length).toBe(0);
         }
 
         return true;
