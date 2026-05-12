@@ -25,7 +25,8 @@ import type { MimeParser } from "./processor/mime.js";
 import { BedrockEmbeddingGenerator } from "./embedding/embedding-generator.js";
 import { multiClusterWriter } from "./database/multi-cluster-aurora-writer.js";
 import { S3RetentionServiceImpl } from "./embedding/s3-retention-service.js";
-import { reindexWorker } from "./jobs/reindex/reindex-worker.js";
+import { ReindexWorker } from "./jobs/reindex/reindex-worker.js";
+import { RequestLogger } from "./logger.js";
 import { handleJobDispatch } from "./api/job-dispatch-handler.js";
 
 // ---------------------------------------------------------------------------
@@ -59,6 +60,8 @@ class S3MimeParser implements MimeParser {
 const classifier = new SignalClassifier(bedrock);
 const embeddingGenerator = new BedrockEmbeddingGenerator(bedrock);
 
+const logger = new RequestLogger();
+
 const accountDb = new AccountDatabase();
 const arcDb = new ArcDatabase();
 const processingDb = new ProcessingDatabase();
@@ -71,13 +74,16 @@ const processor = new SignalProcessor({
   embeddingGenerator,
   auroraWriter: multiClusterWriter,
   arcMatcher: arcDb,
-  ruleEvaluator: new JsonLogicRuleEvaluator(),
+  ruleEvaluator: new JsonLogicRuleEvaluator(logger),
   notifier: new SesNotifier(),
   forwarder: new SesForwarder(sesv2, s3),
   retentionService: new S3RetentionServiceImpl(s3),
+  logger,
 });
 
 const feedbackProcessor = new FeedbackProcessor(processingDb, accountDb);
+
+const reindexWorker = new ReindexWorker(logger);
 
 const NOTIFICATION_FROM = process.env["NOTIFICATION_FROM"] ?? "";
 const APP_BASE_URL = process.env["APP_BASE_URL"] ?? "";
