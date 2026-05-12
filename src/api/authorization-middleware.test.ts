@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Hono } from "hono";
 import { createAuthorize } from "./authorization-middleware.js";
 import type { AccessService, AuthContext } from "./app.js";
+import { createMockLogger, type MockLogger } from "../testing/mock-logger.js";
 
 type AppEnv = { Variables: { auth: AuthContext; authorizationVerified?: boolean } };
 
@@ -15,8 +16,8 @@ function makeAccess(): AccessService {
   };
 }
 
-function createTestApp(access: AccessService) {
-  const authorize = createAuthorize(access);
+function createTestApp(access: AccessService, logger: MockLogger) {
+  const authorize = createAuthorize(access, logger);
   const app = new Hono<AppEnv>();
 
   // Simulate JWT middleware setting auth context
@@ -51,31 +52,33 @@ function createTestApp(access: AccessService) {
 
 describe("authorize() middleware", () => {
   let access: AccessService;
+  let logger: MockLogger;
 
   beforeEach(() => {
     access = makeAccess();
+    logger = createMockLogger();
   });
 
   it("calls checkAccess with resolved resourceUri and permission", async () => {
-    const app = createTestApp(access);
+    const app = createTestApp(access, logger);
     await app.request("/accounts/acct-123");
     expect(access.checkAccess).toHaveBeenCalledWith("user-456", "accounts/acct-123", "accounts:read");
   });
 
   it("calls checkAccess with dynamic resourceUri from function", async () => {
-    const app = createTestApp(access);
+    const app = createTestApp(access, logger);
     await app.request("/accounts/acct-123/arcs/arc-789");
     expect(access.checkAccess).toHaveBeenCalledWith("user-456", "accounts/acct-123/arcs/arc-789", "arcs:read");
   });
 
   it("calls checkAccess with static string resourceUri", async () => {
-    const app = createTestApp(access);
+    const app = createTestApp(access, logger);
     await app.request("/accounts");
     expect(access.checkAccess).toHaveBeenCalledWith("user-456", "accounts", "accounts:read");
   });
 
   it("sets authorizationVerified and calls next on success", async () => {
-    const app = createTestApp(access);
+    const app = createTestApp(access, logger);
     const res = await app.request("/accounts/acct-123");
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true });
@@ -85,7 +88,7 @@ describe("authorize() middleware", () => {
     const authError = Object.assign(new Error("Forbidden"), { response: { status: 403 } });
     vi.mocked(access.checkAccess).mockRejectedValueOnce(authError);
 
-    const app = createTestApp(access);
+    const app = createTestApp(access, logger);
     const res = await app.request("/accounts/acct-123");
     expect(res.status).toBe(403);
     const body = await res.json();
@@ -96,7 +99,7 @@ describe("authorize() middleware", () => {
     const authError = Object.assign(new Error("Forbidden"), { status: 403 });
     vi.mocked(access.checkAccess).mockRejectedValueOnce(authError);
 
-    const app = createTestApp(access);
+    const app = createTestApp(access, logger);
     const res = await app.request("/accounts/acct-123");
     expect(res.status).toBe(403);
     const body = await res.json();
@@ -106,52 +109,52 @@ describe("authorize() middleware", () => {
   it("returns 500 on SDK error (non-403)", async () => {
     vi.mocked(access.checkAccess).mockRejectedValueOnce(new Error("Network timeout"));
 
-    const app = createTestApp(access);
+    const app = createTestApp(access, logger);
     const res = await app.request("/accounts/acct-123");
     expect(res.status).toBe(500);
     const body = await res.json();
     expect(body).toEqual({ title: "Internal Server Error" });
   });
 
-  it("logs warning on authorization failure", async () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+  it("logs info on authorization failure", async () => {
     const authError = Object.assign(new Error("Forbidden"), { response: { status: 403 } });
     vi.mocked(access.checkAccess).mockRejectedValueOnce(authError);
 
-    const app = createTestApp(access);
+    const app = createTestApp(access, logger);
     await app.request("/accounts/acct-123");
 
-    expect(warnSpy).toHaveBeenCalledWith("Authorization failed", expect.objectContaining({
+    const infoCall = logger.calls.find(c => c.method === "info" && c.message === "authorization.failed");
+    expect(infoCall).toBeDefined();
+    expect(infoCall!.context).toMatchObject({
       userId: "user-456",
       resourceUri: "accounts/acct-123",
       permission: "accounts:read",
       path: "/accounts/acct-123",
-    }));
-    warnSpy.mockRestore();
+    });
   });
 
   it("logs error on SDK failure", async () => {
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     vi.mocked(access.checkAccess).mockRejectedValueOnce(new Error("Connection refused"));
 
-    const app = createTestApp(access);
+    const app = createTestApp(access, logger);
     await app.request("/accounts/acct-123");
 
-    expect(errorSpy).toHaveBeenCalledWith("Authress SDK call failed", expect.objectContaining({
+    const errorCall = logger.calls.find(c => c.method === "error" && c.message === "authorization.sdk_error");
+    expect(errorCall).toBeDefined();
+    expect(errorCall!.context).toMatchObject({
       userId: "user-456",
       resourceUri: "accounts/acct-123",
       permission: "accounts:read",
       path: "/accounts/acct-123",
       error: expect.objectContaining({ message: "Connection refused" }),
-    }));
-    errorSpy.mockRestore();
+    });
   });
 
   it("does not execute route handler on authorization failure", async () => {
     const authError = Object.assign(new Error("Forbidden"), { response: { status: 403 } });
     vi.mocked(access.checkAccess).mockRejectedValueOnce(authError);
 
-    const authorize = createAuthorize(access);
+    const authorize = createAuthorize(access, logger);
     const handlerSpy = vi.fn((c: any) => c.json({ ok: true }));
     const app = new Hono<AppEnv>();
     app.use("*", async (c, next) => {
@@ -165,7 +168,7 @@ describe("authorize() middleware", () => {
   });
 
   it("returns 401 when auth context is missing", async () => {
-    const authorize = createAuthorize(access);
+    const authorize = createAuthorize(access, logger);
     const app = new Hono<AppEnv>();
     // No auth middleware — auth context not set
     app.get("/test", authorize("test:read", "resource"), (c) => c.json({ ok: true }));
@@ -176,11 +179,10 @@ describe("authorize() middleware", () => {
   });
 
   it("does not expose internal details in error responses", async () => {
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const sdkError = new Error("https://api.authress.io/v1/users/user-456/resources/accounts%2Facct-123/permissions/accounts:read failed");
     vi.mocked(access.checkAccess).mockRejectedValueOnce(sdkError);
 
-    const app = createTestApp(access);
+    const app = createTestApp(access, logger);
     const res = await app.request("/accounts/acct-123");
     const body = await res.json();
 
@@ -189,6 +191,5 @@ describe("authorize() middleware", () => {
     expect(bodyStr).not.toContain("authress");
     expect(bodyStr).not.toContain("api.authress.io");
     expect(body).toEqual({ title: "Internal Server Error" });
-    errorSpy.mockRestore();
   });
 });

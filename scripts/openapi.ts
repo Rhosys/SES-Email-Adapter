@@ -1,6 +1,7 @@
 import { writeFileSync } from "fs";
 import { resolve } from "path";
 import { createApp } from "../src/api/app.js";
+import { RequestLogger } from "../src/logger.js";
 
 // Stub deps — only needed to instantiate the router; no actual DB calls happen at startup
 const noop = () => { throw new Error("stub"); };
@@ -11,7 +12,7 @@ const authStub: Parameters<typeof createApp>[0]["auth"] = {
   validateToken: noop as never,
 };
 
-const app = createApp({ store: storeStub, auth: authStub });
+const app = createApp({ store: storeStub, auth: authStub, logger: new RequestLogger() });
 
 const spec = app.getOpenAPIDocument({
   openapi: "3.1.0",

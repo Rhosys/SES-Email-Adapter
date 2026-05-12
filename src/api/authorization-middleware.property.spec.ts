@@ -14,6 +14,7 @@ import { Hono } from "hono";
 import { createAuthorize } from "./authorization-middleware.js";
 import type { AccessService, AuthContext } from "./app.js";
 import { propertyRunner } from "../testing/property-runner.js";
+import { createMockLogger } from "../testing/mock-logger.js";
 
 // ---------------------------------------------------------------------------
 // Arbitraries
@@ -70,7 +71,7 @@ describe("Property 1: Authorization middleware extracts account ID from path", (
         arbPermission,
         async (accountId, userId, permission) => {
           const access = makeAccess();
-          const authorize = createAuthorize(access);
+          const authorize = createAuthorize(access, createMockLogger());
           const app = new Hono<AppEnv>();
 
           app.use("*", async (c, next) => {
@@ -103,7 +104,7 @@ describe("Property 1: Authorization middleware extracts account ID from path", (
         arbUserId,
         async (accountId, userId) => {
           const access = makeAccess();
-          const authorize = createAuthorize(access);
+          const authorize = createAuthorize(access, createMockLogger());
           const app = new Hono<AppEnv>();
 
           app.use("*", async (c, next) => {
@@ -144,7 +145,7 @@ describe("Property 2: Authorization middleware enforces permission level", () =>
         arbPermission,
         async (accountId, userId, permission) => {
           const access = makeAccess();
-          const authorize = createAuthorize(access);
+          const authorize = createAuthorize(access, createMockLogger());
           const app = new Hono<AppEnv>();
 
           app.use("*", async (c, next) => {
@@ -180,7 +181,7 @@ describe("Property 2: Authorization middleware enforces permission level", () =>
         arbPermission,
         async (accountId, userId, readPerm, writePerm) => {
           const access = makeAccess();
-          const authorize = createAuthorize(access);
+          const authorize = createAuthorize(access, createMockLogger());
           const app = new Hono<AppEnv>();
 
           app.use("*", async (c, next) => {
@@ -225,7 +226,7 @@ describe("Property 3: Authorization short-circuits on failure", () => {
         async (accountId, userId, permission) => {
           const authError = Object.assign(new Error("Forbidden"), { response: { status: 403 } });
           const access = makeAccess({ checkAccess: vi.fn().mockRejectedValue(authError) });
-          const authorize = createAuthorize(access);
+          const authorize = createAuthorize(access, createMockLogger());
           const handlerSpy = vi.fn((c: any) => c.json({ ok: true }));
 
           const app = new Hono<AppEnv>();
@@ -252,7 +253,7 @@ describe("Property 3: Authorization short-circuits on failure", () => {
         fc.string({ minLength: 1, maxLength: 50 }),
         async (accountId, userId, permission, errorMessage) => {
           const access = makeAccess({ checkAccess: vi.fn().mockRejectedValue(new Error(errorMessage)) });
-          const authorize = createAuthorize(access);
+          const authorize = createAuthorize(access, createMockLogger());
           const handlerSpy = vi.fn((c: any) => c.json({ ok: true }));
 
           const app = new Hono<AppEnv>();
@@ -290,7 +291,7 @@ describe("Property 4: Authorization failure returns 403 with error code", () => 
         ),
         async (accountId, userId, permission, makeError) => {
           const access = makeAccess({ checkAccess: vi.fn().mockRejectedValue(makeError("Forbidden")) });
-          const authorize = createAuthorize(access);
+          const authorize = createAuthorize(access, createMockLogger());
 
           const app = new Hono<AppEnv>();
           app.use("*", async (c, next) => {
@@ -327,9 +328,9 @@ describe("Property 5: Authress SDK failure returns 500 with logged error", () =>
           // Create an error that is NOT a 403 — all generated status codes are non-403
           const error = Object.assign(new Error(errorMessage), { response: { status: statusCode } });
           const access = makeAccess({ checkAccess: vi.fn().mockRejectedValue(error) });
-          const authorize = createAuthorize(access);
+          const logger = createMockLogger();
+          const authorize = createAuthorize(access, logger);
 
-          const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
           const app = new Hono<AppEnv>();
           app.use("*", async (c, next) => {
             c.set("auth", { accountId, userId });
@@ -343,13 +344,13 @@ describe("Property 5: Authress SDK failure returns 500 with logged error", () =>
           const body = await res.json();
           expect(body).toEqual({ title: "Internal Server Error" });
 
-          // Verify error was logged
-          expect(errorSpy).toHaveBeenCalledWith("Authress SDK call failed", expect.objectContaining({
+          // Verify error was logged via mock logger
+          const errorCall = logger.calls.find(c => c.method === "error" && c.message === "authorization.sdk_error");
+          expect(errorCall).toBeDefined();
+          expect(errorCall!.context).toMatchObject({
             userId,
             permission,
-          }));
-
-          errorSpy.mockRestore();
+          });
         },
       ),
     );
@@ -370,9 +371,9 @@ describe("Property 6: Authorization failures are logged", () => {
         async (accountId, userId, permission) => {
           const authError = Object.assign(new Error("Forbidden"), { response: { status: 403 } });
           const access = makeAccess({ checkAccess: vi.fn().mockRejectedValue(authError) });
-          const authorize = createAuthorize(access);
+          const logger = createMockLogger();
+          const authorize = createAuthorize(access, logger);
 
-          const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
           const app = new Hono<AppEnv>();
           app.use("*", async (c, next) => {
             c.set("auth", { accountId, userId });
@@ -382,14 +383,14 @@ describe("Property 6: Authorization failures are logged", () => {
 
           await app.request(`/accounts/${encodeURIComponent(accountId)}`);
 
-          expect(warnSpy).toHaveBeenCalledWith("Authorization failed", expect.objectContaining({
+          const infoCall = logger.calls.find(c => c.method === "info" && c.message === "authorization.failed");
+          expect(infoCall).toBeDefined();
+          expect(infoCall!.context).toMatchObject({
             userId,
             resourceUri: `accounts/${accountId}`,
             permission,
             path: `/accounts/${encodeURIComponent(accountId)}`,
-          }));
-
-          warnSpy.mockRestore();
+          });
         },
       ),
     );
@@ -433,9 +434,8 @@ describe("Property 7: Error responses sanitize internal details", () => {
         async (accountId, userId, permission, errorMessage) => {
           const error = new Error(errorMessage);
           const access = makeAccess({ checkAccess: vi.fn().mockRejectedValue(error) });
-          const authorize = createAuthorize(access);
+          const authorize = createAuthorize(access, createMockLogger());
 
-          const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
           const app = new Hono<AppEnv>();
           app.use("*", async (c, next) => {
             c.set("auth", { accountId, userId });
@@ -461,8 +461,6 @@ describe("Property 7: Error responses sanitize internal details", () => {
           expect(bodyStr).not.toMatch(/\/node_modules\//);
           // Response should be the sanitized error
           expect(body).toEqual({ title: "Internal Server Error" });
-
-          errorSpy.mockRestore();
         },
       ),
     );
@@ -478,9 +476,8 @@ describe("Property 7: Error responses sanitize internal details", () => {
         async (accountId, userId, permission, errorMessage) => {
           const authError = Object.assign(new Error(errorMessage), { response: { status: 403 } });
           const access = makeAccess({ checkAccess: vi.fn().mockRejectedValue(authError) });
-          const authorize = createAuthorize(access);
+          const authorize = createAuthorize(access, createMockLogger());
 
-          const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
           const app = new Hono<AppEnv>();
           app.use("*", async (c, next) => {
             c.set("auth", { accountId, userId });
@@ -498,8 +495,6 @@ describe("Property 7: Error responses sanitize internal details", () => {
           expect(bodyStr).not.toMatch(/at\s+\w+.*\(.*:\d+:\d+\)/);
           // Response should be the sanitized 403
           expect(body).toEqual({ title: "Forbidden", errorCode: "AccessDenied" });
-
-          warnSpy.mockRestore();
         },
       ),
     );

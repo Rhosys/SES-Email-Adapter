@@ -3,6 +3,7 @@ import type { Arc, Signal, View, Label, Rule, Domain, Account, Alias, VerifiedFo
 import { createApp } from "./app.js";
 import type { ApiDatabase, AuthService, AuthContext, AccessService, AccountUser, VerificationMailer } from "./app.js";
 import { ok, okAsync } from "neverthrow";
+import { createMockLogger } from "../testing/mock-logger.js";
 
 // ---------------------------------------------------------------------------
 // Test doubles
@@ -252,7 +253,7 @@ describe("API", () => {
     auth = makeAuth();
     access = makeAccess();
     verificationMailer = { sendForwardVerification: vi.fn().mockReturnValue(okAsync(undefined)) };
-    app = createApp({ store, auth, access, verificationMailer });
+    app = createApp({ store, auth, access, logger: createMockLogger(), verificationMailer });
   });
 
   // -------------------------------------------------------------------------
@@ -959,7 +960,7 @@ describe("API", () => {
     });
 
     it("returns 501 when access service is not configured", async () => {
-      app = createApp({ store, auth });
+      app = createApp({ store, auth, logger: createMockLogger() });
       const res = await req(app, "GET", `${A}/users`);
       expect(res.status).toBe(501);
     });

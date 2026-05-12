@@ -14,6 +14,7 @@ import { createApp } from "./app.js";
 import type { ApiDatabase, AuthService, AuthContext, AccessService, VerificationMailer } from "./app.js";
 import type { Arc } from "../types/index.js";
 import type { DbError } from "../errors.js";
+import { createMockLogger } from "../testing/mock-logger.js";
 
 // ---------------------------------------------------------------------------
 // Test doubles
@@ -151,6 +152,7 @@ describe("Property 6: API route error mapping consistency", () => {
           store,
           auth: makeAuth(),
           access: makeAccess(),
+          logger: createMockLogger(),
           verificationMailer: { sendForwardVerification: vi.fn().mockReturnValue(okAsync(undefined)) },
         });
 
@@ -219,6 +221,7 @@ describe("Property 6: API route error mapping consistency", () => {
           store,
           auth: makeAuth(),
           access: makeAccess(),
+          logger: createMockLogger(),
           verificationMailer: { sendForwardVerification: vi.fn().mockReturnValue(okAsync(undefined)) },
         });
 
@@ -268,6 +271,7 @@ describe("Property 6: API route error mapping consistency", () => {
           store,
           auth: makeAuth(),
           access: makeAccess(),
+          logger: createMockLogger(),
           verificationMailer: { sendForwardVerification: vi.fn().mockReturnValue(okAsync(undefined)) },
         });
 

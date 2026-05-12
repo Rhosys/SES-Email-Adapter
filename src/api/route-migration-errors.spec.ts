@@ -6,6 +6,7 @@ import { okAsync } from "neverthrow";
 import type { DbError, NotFoundError } from "../errors.js";
 import { dbError, notFoundError } from "../errors.js";
 import type { Arc, Account, Alias } from "../types/index.js";
+import { createMockLogger } from "../testing/mock-logger.js";
 
 // ---------------------------------------------------------------------------
 // Test doubles
@@ -160,7 +161,7 @@ describe("API route error mapping — unit tests", () => {
     const auth = makeAuth();
     const access = makeAccess();
     const verificationMailer: VerificationMailer = { sendForwardVerification: vi.fn().mockReturnValue(okAsync(undefined)) };
-    app = createApp({ store, auth, access, verificationMailer });
+    app = createApp({ store, auth, access, logger: createMockLogger(), verificationMailer });
   });
 
   // -------------------------------------------------------------------------
