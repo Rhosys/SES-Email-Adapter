@@ -11,6 +11,7 @@ export interface TrackPoint {
 export interface LogEntry {
   level: LogLevel;
   message: string;
+  code?: string;
   timestamp: string;
   invocationId: string;
   containerId: string;
@@ -110,10 +111,22 @@ export class RequestLogger implements Logger {
     const includeTrackPoints = level === "track" || level === "error" || level === "critical";
     const includeStack = level === "error" || level === "critical";
 
+    // Extract code from context if present
+    let code: string | undefined;
+    let restContext: Record<string, unknown> | undefined;
+    if (context && "code" in context && typeof context.code === "string") {
+      const { code: extractedCode, ...rest } = context;
+      code = extractedCode;
+      restContext = Object.keys(rest).length > 0 ? rest : undefined;
+    } else {
+      restContext = context;
+    }
+
     const entry: LogEntry = {
-      ...(context ?? {}),
+      ...(restContext ?? {}),
       level,
       message,
+      ...(code !== undefined ? { code } : {}),
       timestamp: new Date().toISOString(),
       invocationId: this.invocationId,
       containerId: this.containerId,
@@ -126,6 +139,7 @@ export class RequestLogger implements Logger {
     entry.message = message;
     entry.invocationId = this.invocationId;
     entry.containerId = this.containerId;
+    if (code !== undefined) entry.code = code;
 
     let serialized: string;
     try {
