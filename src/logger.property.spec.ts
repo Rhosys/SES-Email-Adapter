@@ -44,7 +44,7 @@ describe("Feature: structured-logging, Property 1: Log entry structural invarian
         const calls = consoleSpy.mock.calls;
         expect(calls.length).toBeGreaterThanOrEqual(1);
 
-        const lastCall = calls[calls.length - 1];
+        const lastCall = calls[calls.length - 1]!;
         expect(lastCall).toHaveLength(1);
         const raw = lastCall[0] as string;
 
@@ -102,7 +102,7 @@ describe("Feature: structured-logging, Property 2: Context merge preserves requi
         callLevel(logger, level, message, context);
 
         const calls = consoleSpy.mock.calls;
-        const lastCall = calls[calls.length - 1];
+        const lastCall = calls[calls.length - 1]!;
         const entry = JSON.parse(lastCall[0] as string);
 
         // Required fields reflect logger state, not context values
@@ -149,7 +149,7 @@ describe("Feature: structured-logging, Property 3: Track points included for tra
         callLevel(logger, level, "test.message");
 
         const calls = consoleSpy.mock.calls;
-        const lastCall = calls[calls.length - 1];
+        const lastCall = calls[calls.length - 1]!;
         const entry = JSON.parse(lastCall[0] as string);
 
         expect(entry.trackPoints).toBeDefined();
@@ -174,7 +174,7 @@ describe("Feature: structured-logging, Property 3: Track points included for tra
         callLevel(logger, level, "test.message");
 
         const calls = consoleSpy.mock.calls;
-        const lastCall = calls[calls.length - 1];
+        const lastCall = calls[calls.length - 1]!;
         const entry = JSON.parse(lastCall[0] as string);
 
         expect(entry.trackPoints).toBeUndefined();
@@ -210,7 +210,7 @@ describe("Feature: structured-logging, Property 4: Error and critical include st
         callLevel(logger, level, message);
 
         const calls = consoleSpy.mock.calls;
-        const lastCall = calls[calls.length - 1];
+        const lastCall = calls[calls.length - 1]!;
         const entry = JSON.parse(lastCall[0] as string);
 
         expect(entry.stack).toBeDefined();
@@ -228,7 +228,7 @@ describe("Feature: structured-logging, Property 4: Error and critical include st
         callLevel(logger, level, message);
 
         const calls = consoleSpy.mock.calls;
-        const lastCall = calls[calls.length - 1];
+        const lastCall = calls[calls.length - 1]!;
         const entry = JSON.parse(lastCall[0] as string);
 
         expect(entry.stack).toBeUndefined();
@@ -266,7 +266,7 @@ describe("Feature: structured-logging, Property 5: startInvocation resets state 
 
         // Log to capture the first invocationId
         logger.track("before.reset");
-        const firstCall = consoleSpy.mock.calls[consoleSpy.mock.calls.length - 1];
+        const firstCall = consoleSpy.mock.calls[consoleSpy.mock.calls.length - 1]!;
         const firstEntry = JSON.parse(firstCall[0] as string);
         const firstInvocationId = firstEntry.invocationId;
         const firstContainerId = firstEntry.containerId;
@@ -277,7 +277,7 @@ describe("Feature: structured-logging, Property 5: startInvocation resets state 
         // Log again — should have new invocationId, no track points, same containerId
         consoleSpy.mockClear();
         logger.track("after.reset");
-        const secondCall = consoleSpy.mock.calls[consoleSpy.mock.calls.length - 1];
+        const secondCall = consoleSpy.mock.calls[consoleSpy.mock.calls.length - 1]!;
         const secondEntry = JSON.parse(secondCall[0] as string);
 
         expect(secondEntry.invocationId).not.toBe(firstInvocationId);
@@ -318,7 +318,7 @@ describe("Feature: structured-logging, Property 6: Recursive secret redaction", 
         logger.info("test.redaction", { [key]: value });
 
         const calls = consoleSpy.mock.calls;
-        const lastCall = calls[calls.length - 1];
+        const lastCall = calls[calls.length - 1]!;
         const entry = JSON.parse(lastCall[0] as string);
 
         expect(entry[key]).toBe(value.slice(0, 8) + "[REDACTED]");
@@ -335,7 +335,7 @@ describe("Feature: structured-logging, Property 6: Recursive secret redaction", 
         logger.info("test.redaction", { [key]: value });
 
         const calls = consoleSpy.mock.calls;
-        const lastCall = calls[calls.length - 1];
+        const lastCall = calls[calls.length - 1]!;
         const entry = JSON.parse(lastCall[0] as string);
 
         expect(entry[key]).toBe("[REDACTED]");
@@ -352,7 +352,7 @@ describe("Feature: structured-logging, Property 6: Recursive secret redaction", 
         logger.info("test.auth.redaction", { [key]: value });
 
         const calls = consoleSpy.mock.calls;
-        const lastCall = calls[calls.length - 1];
+        const lastCall = calls[calls.length - 1]!;
         const entry = JSON.parse(lastCall[0] as string);
 
         expect(entry[key]).toBe(value.slice(0, 8) + "[REDACTED]");
@@ -371,7 +371,7 @@ describe("Feature: structured-logging, Property 6: Recursive secret redaction", 
         });
 
         const calls = consoleSpy.mock.calls;
-        const lastCall = calls[calls.length - 1];
+        const lastCall = calls[calls.length - 1]!;
         const entry = JSON.parse(lastCall[0] as string);
 
         expect(entry.outer.inner[key]).toBe(value.slice(0, 8) + "[REDACTED]");
@@ -420,7 +420,7 @@ describe("Feature: log-message-review, Property 2: Code field does not duplicate
         expect(calls.length).toBeGreaterThanOrEqual(1);
 
         // Get the primary log entry (last call, skipping any truncation warning)
-        const lastCall = calls[calls.length - 1];
+        const lastCall = calls[calls.length - 1]!;
         const raw = lastCall[0] as string;
 
         // Count occurrences of "code" as a JSON key in the serialized output.
@@ -463,23 +463,139 @@ describe("Feature: structured-logging, Property 7: Payload truncation guard", ()
         expect(calls.length).toBe(2);
 
         // First call is the warning
-        const warningEntry = JSON.parse(calls[0][0] as string);
+        const warningEntry = JSON.parse(calls[0]![0] as string);
         expect(warningEntry.level).toBe("warn");
         expect(warningEntry.message).toBe("logger.payload_truncated");
         expect(warningEntry.originalMessage).toBe("test.large.payload");
         expect(warningEntry.originalSizeBytes).toBeGreaterThan(262_144);
 
         // Second call is the truncated entry
-        const truncatedEntry = JSON.parse(calls[1][0] as string);
+        const truncatedEntry = JSON.parse(calls[1]![0] as string);
         expect(truncatedEntry._truncated).toBe(true);
         expect(truncatedEntry.level).toBe("info");
         expect(truncatedEntry.message).toBe("test.large.payload");
 
         // Verify the truncated output is within the limit
-        const truncatedSize = Buffer.byteLength(calls[1][0] as string, "utf8");
+        const truncatedSize = Buffer.byteLength(calls[1]![0] as string, "utf8");
         expect(truncatedSize).toBeLessThanOrEqual(262_144);
       }),
       { numRuns: 20 }, // Fewer runs for large payloads to keep test time reasonable
+    );
+  });
+});
+
+describe("Feature: log-message-review, Property 1: Code field promotion and omission", () => {
+  let consoleSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    consoleSpy.mockRestore();
+  });
+
+  it("string code in context is promoted to top-level field with that value", async () => {
+    /**
+     * Validates: Requirements 2.2, 2.4, 7.2
+     */
+    const arbLevel = fc.constantFrom(...ALL_LEVELS);
+    const arbMessage = fc.string({ minLength: 1, maxLength: 100 });
+    // Generate valid dot-separated code identifiers (2-4 segments, lowercase)
+    const arbCodeSegment = fc.stringMatching(/^[a-z][a-z0-9_]{0,15}$/);
+    const arbCode = fc
+      .array(arbCodeSegment, { minLength: 2, maxLength: 4 })
+      .map((segments) => segments.join("."));
+    // Generate additional context fields (excluding 'code' key)
+    const arbExtraContext = fc.dictionary(
+      fc.string({ minLength: 1, maxLength: 20 }).filter((k) => k !== "code"),
+      fc.jsonValue(),
+    );
+
+    await propertyRunner.assert(
+      fc.asyncProperty(arbLevel, arbMessage, arbCode, arbExtraContext, async (level, message, code, extra) => {
+        consoleSpy.mockClear();
+        const logger = new RequestLogger("test1234");
+        logger.startInvocation();
+
+        callLevel(logger, level, message, { ...extra, code });
+
+        const calls = consoleSpy.mock.calls;
+        expect(calls.length).toBeGreaterThanOrEqual(1);
+
+        // Get the primary log entry (last call handles truncation warning case)
+        const lastCall = calls[calls.length - 1]!;
+        const entry = JSON.parse(lastCall[0] as string);
+
+        // code must be promoted to top-level with the exact value
+        expect(entry.code).toBe(code);
+      }),
+    );
+  });
+
+  it("non-string or missing code in context results in no code field in output", async () => {
+    /**
+     * Validates: Requirements 2.2, 2.4, 7.2
+     */
+    const arbLevel = fc.constantFrom(...ALL_LEVELS);
+    const arbMessage = fc.string({ minLength: 1, maxLength: 100 });
+    // Generate non-string code values: numbers, booleans, null, objects, arrays
+    const arbNonStringCode = fc.oneof(
+      fc.integer(),
+      fc.boolean(),
+      fc.constant(null),
+      fc.constant(undefined),
+      fc.array(fc.integer(), { maxLength: 3 }),
+      fc.dictionary(fc.string({ minLength: 1, maxLength: 5 }), fc.integer()),
+    );
+    // Generate context without a code field
+    const arbContextWithoutCode = fc.dictionary(
+      fc.string({ minLength: 1, maxLength: 20 }).filter((k) => k !== "code"),
+      fc.jsonValue(),
+    );
+
+    // Case 1: context has non-string code — code field should NOT appear in output
+    await propertyRunner.assert(
+      fc.asyncProperty(arbLevel, arbMessage, arbNonStringCode, async (level, message, nonStringCode) => {
+        consoleSpy.mockClear();
+        const logger = new RequestLogger("test1234");
+        logger.startInvocation();
+
+        callLevel(logger, level, message, { code: nonStringCode } as Record<string, unknown>);
+
+        const calls = consoleSpy.mock.calls;
+        expect(calls.length).toBeGreaterThanOrEqual(1);
+
+        const lastCall = calls[calls.length - 1]!;
+        const raw = lastCall[0] as string;
+        const entry = JSON.parse(raw);
+
+        // code must NOT be a top-level promoted field
+        // Non-string code is treated as regular context data, so it may appear
+        // but it should NOT have been promoted (i.e., it won't be a string)
+        if ("code" in entry) {
+          expect(typeof entry.code).not.toBe("string");
+        }
+      }),
+    );
+
+    // Case 2: context has no code field at all — code field should NOT appear in output
+    await propertyRunner.assert(
+      fc.asyncProperty(arbLevel, arbMessage, arbContextWithoutCode, async (level, message, context) => {
+        consoleSpy.mockClear();
+        const logger = new RequestLogger("test1234");
+        logger.startInvocation();
+
+        callLevel(logger, level, message, Object.keys(context).length > 0 ? context : undefined);
+
+        const calls = consoleSpy.mock.calls;
+        expect(calls.length).toBeGreaterThanOrEqual(1);
+
+        const lastCall = calls[calls.length - 1]!;
+        const entry = JSON.parse(lastCall[0] as string);
+
+        // No code field should exist
+        expect(entry).not.toHaveProperty("code");
+      }),
     );
   });
 });

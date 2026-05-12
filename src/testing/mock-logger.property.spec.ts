@@ -41,10 +41,10 @@ describe("Feature: structured-logging, Property 8: Mock injection routes all cal
 
         // All calls are recorded in mock.calls
         expect(mock.calls).toHaveLength(1);
-        expect(mock.calls[0].method).toBe(level);
-        expect(mock.calls[0].message).toBe(message);
+        expect(mock.calls[0]!.method).toBe(level);
+        expect(mock.calls[0]!.message).toBe(message);
         if (context !== undefined) {
-          expect(mock.calls[0].context).toEqual(context);
+          expect(mock.calls[0]!.context).toEqual(context);
         }
 
         // Nothing was written to stdout
@@ -79,8 +79,8 @@ describe("Feature: structured-logging, Property 8: Mock injection routes all cal
         // Every call is recorded
         expect(mock.calls).toHaveLength(calls.length);
         for (let i = 0; i < calls.length; i++) {
-          expect(mock.calls[i].method).toBe(calls[i].level);
-          expect(mock.calls[i].message).toBe(calls[i].message);
+          expect(mock.calls[i]!.method).toBe(calls[i]!.level);
+          expect(mock.calls[i]!.message).toBe(calls[i]!.message);
         }
 
         // Nothing reached stdout

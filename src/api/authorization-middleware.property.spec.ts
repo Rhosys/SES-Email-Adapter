@@ -345,9 +345,10 @@ describe("Property 5: Authress SDK failure returns 500 with logged error", () =>
           expect(body).toEqual({ title: "Internal Server Error" });
 
           // Verify error was logged via mock logger
-          const errorCall = logger.calls.find(c => c.method === "error" && c.message === "authorization.sdk_error");
+          const errorCall = logger.calls.find(c => c.method === "error" && c.context?.code === "authorization.sdk_error");
           expect(errorCall).toBeDefined();
           expect(errorCall!.context).toMatchObject({
+            code: "authorization.sdk_error",
             userId,
             permission,
           });
