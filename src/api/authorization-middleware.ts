@@ -61,7 +61,8 @@ export class AuthorizationMiddleware {
         }
 
         // Any other error is an SDK/service failure
-        this.logger.error("authorization.sdk_error", {
+        this.logger.error("Authorization SDK call failed unexpectedly. The Authress service returned an unhandled error. This request will be rejected with 500. Check Authress service health and SDK configuration.", {
+          code: "authorization.sdk_error",
           userId,
           resourceUri: resolvedResourceUri,
           permission,
