@@ -19,6 +19,7 @@ import { Readable } from "stream";
 import { sdkStreamMixin } from "@smithy/util-stream";
 import type { SQSEvent, SQSRecord } from "aws-lambda";
 import { propertyRunner } from "../../testing/property-runner.js";
+import { createMockLogger } from "../../testing/mock-logger.js";
 import { ReindexWorker } from "./reindex-worker.js";
 
 // ---------------------------------------------------------------------------
@@ -320,10 +321,11 @@ function makeS3Body(content: string) {
 
 describe("Property 22: Worker isolates per-signal failures within a segment", () => {
   let worker: ReindexWorker;
-  let logOutput: Array<{ level: string; message: string; signalId?: string }> = [];
+  let mockLogger: ReturnType<typeof createMockLogger>;
 
   beforeEach(() => {
-    worker = new ReindexWorker();
+    mockLogger = createMockLogger();
+    worker = new ReindexWorker(mockLogger);
     ddbMock.reset();
     bedrockMock.reset();
     s3Mock.reset();
@@ -331,38 +333,6 @@ describe("Property 22: Worker isolates per-signal failures within a segment", ()
     mockAddEmbeddingToCache.mockClear();
     mockGenerateForModel.mockClear();
     mockMimeParse.mockClear();
-    logOutput = [];
-
-    // Capture console.log and console.error calls via vi.spyOn
-    vi.spyOn(console, "log").mockImplementation((...args: unknown[]) => {
-      try {
-        const payload = JSON.parse(args[0] as string);
-        if (payload.level && payload.message) {
-          logOutput.push({
-            level: payload.level,
-            message: payload.message,
-            signalId: payload.signalId,
-          });
-        }
-      } catch {
-        // Ignore non-JSON log entries
-      }
-    });
-
-    vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => {
-      try {
-        const payload = JSON.parse(args[0] as string);
-        if (payload.level && payload.message) {
-          logOutput.push({
-            level: payload.level,
-            message: payload.message,
-            signalId: payload.signalId,
-          });
-        }
-      } catch {
-        // Ignore non-JSON log entries
-      }
-    });
   });
 
   afterEach(() => {
@@ -378,14 +348,13 @@ describe("Property 22: Worker isolates per-signal failures within a segment", ()
           malformed: fc.array(arbMalformedSignal, { minLength: 1, maxLength: 5 }),
         }),
         async ({ validCached, validS3Retrievable, malformed }) => {
-          // Reset mocks for each iteration
           ddbMock.reset();
           s3Mock.reset();
           mockUpsertEmbedding.mockClear();
           mockAddEmbeddingToCache.mockClear();
           mockGenerateForModel.mockClear();
           mockMimeParse.mockClear();
-          logOutput = [];
+          mockLogger.calls.length = 0;
 
           // Collect all signal items in a shuffled order to test ordering independence
           const allSignals = [
@@ -473,9 +442,9 @@ describe("Property 22: Worker isolates per-signal failures within a segment", ()
 
           // Property 5: Each malformed signal was logged individually
           const malformedSignalIds = malformed.map((s) => (s as unknown as { id: string }).id);
-          const loggedMalformedSignalIds = logOutput
-            .filter((log) => log.message.includes("reindex.worker.malformed_signal"))
-            .map((log) => log.signalId);
+          const loggedMalformedSignalIds = mockLogger.calls
+            .filter((call) => call.message.includes("reindex.worker.malformed_signal"))
+            .map((call) => call.context?.signalId);
 
           expect(loggedMalformedSignalIds.length).toBe(malformed.length);
           for (const malformedId of malformedSignalIds) {
@@ -509,7 +478,7 @@ describe("Property 22: Worker isolates per-signal failures within a segment", ()
           mockAddEmbeddingToCache.mockClear();
           mockGenerateForModel.mockClear();
           mockMimeParse.mockClear();
-          logOutput = [];
+          mockLogger.calls.length = 0;
 
           // DynamoDB scan returns only malformed signals
           ddbMock.on(ScanCommand).resolves({ Items: malformed, LastEvaluatedKey: undefined });
@@ -547,9 +516,9 @@ describe("Property 22: Worker isolates per-signal failures within a segment", ()
 
           // Each malformed signal was logged individually
           const malformedSignalIds = malformed.map((s) => (s as unknown as { id: string }).id);
-          const loggedMalformedSignalIds = logOutput
-            .filter((log) => log.message.includes("reindex.worker.malformed_signal"))
-            .map((log) => log.signalId);
+          const loggedMalformedSignalIds = mockLogger.calls
+            .filter((call) => call.message.includes("reindex.worker.malformed_signal"))
+            .map((call) => call.context?.signalId);
 
           expect(loggedMalformedSignalIds.length).toBe(malformed.length);
           for (const malformedId of malformedSignalIds) {
@@ -600,7 +569,7 @@ describe("Property 22: Worker isolates per-signal failures within a segment", ()
     mockAddEmbeddingToCache.mockClear();
     mockGenerateForModel.mockClear();
     mockMimeParse.mockClear();
-    logOutput = [];
+    mockLogger.calls.length = 0;
 
     // DynamoDB scan returns valid signal followed by malformed signals
     ddbMock.on(ScanCommand).resolves({ Items: [validSignal, ...malformedSignals], LastEvaluatedKey: undefined });
@@ -630,9 +599,9 @@ describe("Property 22: Worker isolates per-signal failures within a segment", ()
     });
 
     // Each malformed signal was logged individually
-    const loggedMalformedSignalIds = logOutput
-      .filter((log) => log.message.includes("reindex.worker.malformed_signal"))
-      .map((log) => log.signalId);
+    const loggedMalformedSignalIds = mockLogger.calls
+      .filter((call) => call.message.includes("reindex.worker.malformed_signal"))
+      .map((call) => call.context?.signalId);
 
     expect(loggedMalformedSignalIds.length).toBe(2);
     expect(loggedMalformedSignalIds).toContain("SES#malformed1");

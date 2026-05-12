@@ -11,6 +11,7 @@ import type { SQSEvent, SQSRecord } from "aws-lambda";
 import { Readable } from "stream";
 import { sdkStreamMixin } from "@smithy/util-stream";
 import { ReindexWorker } from "./reindex-worker.js";
+import { createMockLogger } from "../../testing/mock-logger.js";
 
 // ---------------------------------------------------------------------------
 // Hoisted mock functions (available before vi.mock factories run)
@@ -150,9 +151,11 @@ function makeSignalItem(opts: {
 
 describe("ReindexWorker — pure-copy mode", () => {
   let worker: ReindexWorker;
+  let mockLogger: ReturnType<typeof createMockLogger>;
 
   beforeEach(() => {
-    worker = new ReindexWorker();
+    mockLogger = createMockLogger();
+    worker = new ReindexWorker(mockLogger);
     ddbMock.reset();
     s3Mock.reset();
     mockUpsertEmbedding.mockClear();
@@ -373,8 +376,6 @@ describe("ReindexWorker — pure-copy mode", () => {
   });
 
   it("uses error log level when receiveCount exceeds threshold", async () => {
-    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-
     const event = makeSqsEvent([
       makeSqsRecord(
         {
@@ -398,11 +399,8 @@ describe("ReindexWorker — pure-copy mode", () => {
     const result = await worker.process(event);
 
     expect(result.batchItemFailures).toEqual([{ itemIdentifier: "msg-1" }]);
-    expect(consoleSpy).toHaveBeenCalled();
-    const logPayload = JSON.parse(consoleSpy.mock.calls[0]![0] as string);
-    expect(logPayload.level).toBe("error");
-
-    consoleSpy.mockRestore();
+    const errorCalls = mockLogger.calls.filter((c) => c.method === "error");
+    expect(errorCalls.length).toBeGreaterThanOrEqual(1);
   });
 
   it("skips non-signal items (arcs, grouping keys) without error", async () => {
@@ -467,7 +465,7 @@ describe("ReindexWorker — regenerate-from-S3 mode", () => {
   let worker: ReindexWorker;
 
   beforeEach(() => {
-    worker = new ReindexWorker();
+    worker = new ReindexWorker(createMockLogger());
     ddbMock.reset();
     s3Mock.reset();
     mockUpsertEmbedding.mockClear();

@@ -15,6 +15,8 @@ import { BedrockRuntimeClient, InvokeModelCommand } from "@aws-sdk/client-bedroc
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 import type { SQSEvent, SQSRecord } from "aws-lambda";
 import { propertyRunner } from "../../testing/property-runner.js";
+import { createMockLogger } from "../../testing/mock-logger.js";
+import type { MockLogger } from "../../testing/mock-logger.js";
 import { ReindexWorker } from "./reindex-worker.js";
 
 // ---------------------------------------------------------------------------
@@ -163,17 +165,15 @@ function makeSqsEvent(records: SQSRecord[]): SQSEvent {
 
 describe("Property 22: Worker isolates per-signal failures within a segment", () => {
   let worker: ReindexWorker;
-  let consoleLogSpy: ReturnType<typeof vi.spyOn>;
-  let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
+  let mockLogger: MockLogger;
 
   beforeEach(() => {
-    worker = new ReindexWorker();
+    mockLogger = createMockLogger();
+    worker = new ReindexWorker(mockLogger);
     ddbMock.reset();
     bedrockMock.reset();
     s3Mock.reset();
     mockUpsertEmbedding.mockClear();
-    consoleLogSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-    consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
     // Bedrock and S3 should not be called for pure-copy signals
     bedrockMock.on(InvokeModelCommand).rejects(new Error("PROPERTY VIOLATION: Bedrock was called"));
@@ -181,8 +181,6 @@ describe("Property 22: Worker isolates per-signal failures within a segment", ()
   });
 
   afterEach(() => {
-    consoleLogSpy.mockRestore();
-    consoleErrorSpy.mockRestore();
     vi.restoreAllMocks();
   });
 
@@ -192,8 +190,7 @@ describe("Property 22: Worker isolates per-signal failures within a segment", ()
         // Reset mocks for each iteration
         ddbMock.reset();
         mockUpsertEmbedding.mockClear();
-        consoleLogSpy.mockClear();
-        consoleErrorSpy.mockClear();
+        mockLogger.calls.length = 0;
 
         // Re-arm Bedrock and S3 traps
         bedrockMock.on(InvokeModelCommand).rejects(new Error("PROPERTY VIOLATION: Bedrock was called"));
@@ -219,13 +216,9 @@ describe("Property 22: Worker isolates per-signal failures within a segment", ()
         // 1. Valid signals get their upserts written to Aurora
         expect(mockUpsertEmbedding).toHaveBeenCalledTimes(validCount);
 
-        // 2. Malformed signals are logged (console.log or console.error called with malformed_signal)
-        const allLogCalls = [
-          ...consoleLogSpy.mock.calls.map((c) => c[0]),
-          ...consoleErrorSpy.mock.calls.map((c) => c[0]),
-        ];
-        const malformedLogs = allLogCalls.filter(
-          (msg) => typeof msg === "string" && msg.includes("malformed_signal"),
+        // 2. Malformed signals are logged via the mock logger
+        const malformedLogs = mockLogger.calls.filter(
+          (call) => call.message.includes("malformed_signal"),
         );
         // Each malformed signal with an `id` field should produce a log entry
         const malformedWithId = items.filter(
@@ -264,8 +257,7 @@ describe("Property 22: Worker isolates per-signal failures within a segment", ()
           // Reset mocks for each iteration
           ddbMock.reset();
           mockUpsertEmbedding.mockClear();
-          consoleLogSpy.mockClear();
-          consoleErrorSpy.mockClear();
+          mockLogger.calls.length = 0;
 
           // Determine which signals will have Aurora failures (at least 1 fails, at least 1 succeeds)
           const failIndex = seed % signals.length;
@@ -298,13 +290,9 @@ describe("Property 22: Worker isolates per-signal failures within a segment", ()
           // All signals were attempted (upsert called for each)
           expect(mockUpsertEmbedding).toHaveBeenCalledTimes(signals.length);
 
-          // The failure was logged per-signal
-          const allLogCalls = [
-            ...consoleLogSpy.mock.calls.map((c) => c[0]),
-            ...consoleErrorSpy.mock.calls.map((c) => c[0]),
-          ];
-          const failureLogs = allLogCalls.filter(
-            (msg) => typeof msg === "string" && msg.includes("signal_upsert_failed"),
+          // The failure was logged per-signal via the mock logger
+          const failureLogs = mockLogger.calls.filter(
+            (call) => call.message.includes("signal_upsert_failed"),
           );
           expect(failureLogs.length).toBe(1);
 
