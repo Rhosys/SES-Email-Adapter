@@ -10,7 +10,7 @@ export class JsonLogicRuleEvaluator implements RuleEvaluator {
     try {
       return await evalCondition(rule.condition, context);
     } catch {
-      this.logger.warn("rule-evaluator.condition.failed", { ruleId: rule.id, condition: rule.condition });
+      this.logger.warn("Rule condition evaluation threw an exception. The json-logic engine failed to evaluate the condition expression. The rule will be treated as non-matching and processing continues. Check the rule condition syntax for this ruleId.", { code: "rule_evaluator.condition.failed", ruleId: rule.id, condition: rule.condition });
       return false;
     }
   }

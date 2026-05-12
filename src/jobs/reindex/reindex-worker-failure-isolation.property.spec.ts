@@ -443,7 +443,7 @@ describe("Property 22: Worker isolates per-signal failures within a segment", ()
           // Property 5: Each malformed signal was logged individually
           const malformedSignalIds = malformed.map((s) => (s as unknown as { id: string }).id);
           const loggedMalformedSignalIds = mockLogger.calls
-            .filter((call) => call.message.includes("reindex.worker.malformed_signal"))
+            .filter((call) => call.context?.code === "reindex.worker.malformed_signal")
             .map((call) => call.context?.signalId);
 
           expect(loggedMalformedSignalIds.length).toBe(malformed.length);
@@ -517,7 +517,7 @@ describe("Property 22: Worker isolates per-signal failures within a segment", ()
           // Each malformed signal was logged individually
           const malformedSignalIds = malformed.map((s) => (s as unknown as { id: string }).id);
           const loggedMalformedSignalIds = mockLogger.calls
-            .filter((call) => call.message.includes("reindex.worker.malformed_signal"))
+            .filter((call) => call.context?.code === "reindex.worker.malformed_signal")
             .map((call) => call.context?.signalId);
 
           expect(loggedMalformedSignalIds.length).toBe(malformed.length);
@@ -600,7 +600,7 @@ describe("Property 22: Worker isolates per-signal failures within a segment", ()
 
     // Each malformed signal was logged individually
     const loggedMalformedSignalIds = mockLogger.calls
-      .filter((call) => call.message.includes("reindex.worker.malformed_signal"))
+      .filter((call) => call.context?.code === "reindex.worker.malformed_signal")
       .map((call) => call.context?.signalId);
 
     expect(loggedMalformedSignalIds.length).toBe(2);
