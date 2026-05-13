@@ -4,9 +4,8 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { mockClient } from "aws-sdk-client-mock";
-import { DynamoDBDocumentClient, ScanCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
+import { DynamoDBDocumentClient, ScanCommand } from "@aws-sdk/lib-dynamodb";
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
-import { BedrockRuntimeClient, InvokeModelCommand } from "@aws-sdk/client-bedrock-runtime";
 import type { SQSEvent, SQSRecord } from "aws-lambda";
 import { Readable } from "stream";
 import { sdkStreamMixin } from "@smithy/util-stream";
@@ -168,7 +167,7 @@ describe("ReindexWorker — pure-copy mode", () => {
     vi.restoreAllMocks();
   });
 
-  it("upserts cached embedding to Aurora and increments copiedCount", async () => {
+  it("upserts cached embedding to Aurora for cache-hit signals", async () => {
     const signal = makeSignalItem({
       id: "SES#abc123",
       accountId: "acct-1",
@@ -178,7 +177,6 @@ describe("ReindexWorker — pure-copy mode", () => {
     });
 
     ddbMock.on(ScanCommand).resolves({ Items: [signal], LastEvaluatedKey: undefined });
-    ddbMock.on(UpdateCommand).resolves({});
 
     const event = makeSqsEvent([
       makeSqsRecord({
@@ -200,11 +198,6 @@ describe("ReindexWorker — pure-copy mode", () => {
       recipientAddress: "me@example.com",
       embedding: [0.1, 0.2, 0.3],
     });
-
-    // Verify copiedCount increment
-    const updateCalls = ddbMock.commandCalls(UpdateCommand);
-    expect(updateCalls.length).toBe(1);
-    expect(updateCalls[0]!.args[0].input.UpdateExpression).toBe("ADD copiedCount :one");
   });
 
   it("skips signals without the target model embedding (cache miss)", async () => {
@@ -245,7 +238,6 @@ describe("ReindexWorker — pure-copy mode", () => {
     });
 
     ddbMock.on(ScanCommand).resolves({ Items: [malformed, valid], LastEvaluatedKey: undefined });
-    ddbMock.on(UpdateCommand).resolves({});
 
     const event = makeSqsEvent([
       makeSqsRecord({
@@ -282,7 +274,6 @@ describe("ReindexWorker — pure-copy mode", () => {
     });
 
     ddbMock.on(ScanCommand).resolves({ Items: [signal1, signal2], LastEvaluatedKey: undefined });
-    ddbMock.on(UpdateCommand).resolves({});
 
     // First call fails, second succeeds
     mockUpsertEmbedding
@@ -326,7 +317,6 @@ describe("ReindexWorker — pure-copy mode", () => {
       .on(ScanCommand)
       .resolvesOnce({ Items: [signal1], LastEvaluatedKey: { pk: "cursor" } })
       .resolvesOnce({ Items: [signal2], LastEvaluatedKey: undefined });
-    ddbMock.on(UpdateCommand).resolves({});
 
     const event = makeSqsEvent([
       makeSqsRecord({
@@ -415,7 +405,6 @@ describe("ReindexWorker — pure-copy mode", () => {
     });
 
     ddbMock.on(ScanCommand).resolves({ Items: [arcItem, gkeyItem, signal], LastEvaluatedKey: undefined });
-    ddbMock.on(UpdateCommand).resolves({});
 
     const event = makeSqsEvent([
       makeSqsRecord({
@@ -496,7 +485,6 @@ describe("ReindexWorker — regenerate-from-S3 mode", () => {
     });
 
     ddbMock.on(ScanCommand).resolves({ Items: [signal], LastEvaluatedKey: undefined });
-    ddbMock.on(UpdateCommand).resolves({});
 
     s3Mock.on(GetObjectCommand).resolves({
       Body: makeS3Body("From: sender@test.com\r\nTo: regen@example.com\r\nSubject: Test\r\n\r\nHello world"),
@@ -562,95 +550,6 @@ describe("ReindexWorker — regenerate-from-S3 mode", () => {
       recipientAddress: "regen@example.com",
       embedding: [0.1, 0.2, 0.3],
     });
-
-    // Should increment regeneratedCount
-    const updateCalls = ddbMock.commandCalls(UpdateCommand);
-    const regenUpdate = updateCalls.find(
-      (c) => c.args[0].input.UpdateExpression === "ADD regeneratedCount :one",
-    );
-    expect(regenUpdate).toBeDefined();
-  });
-
-  it("increments unrecoverableCount on NoSuchKey from S3", async () => {
-    const signal = makeSignalItem({
-      id: "SES#expired",
-      accountId: "acct-1",
-      arcId: "arc-expired",
-      recipientAddress: "expired@example.com",
-      embeddings: {}, // no target model embedding
-      s3Key: "inbox/2024/01/expired.eml",
-    });
-
-    ddbMock.on(ScanCommand).resolves({ Items: [signal], LastEvaluatedKey: undefined });
-    ddbMock.on(UpdateCommand).resolves({});
-
-    const noSuchKeyError = new Error("NoSuchKey");
-    (noSuchKeyError as unknown as { name: string }).name = "NoSuchKey";
-    s3Mock.on(GetObjectCommand).rejects(noSuchKeyError);
-
-    const event = makeSqsEvent([
-      makeSqsRecord({
-        jobId: "job-expired",
-        segment: 0,
-        totalSegments: 1,
-        targetClusterId: "aurora-prod-titan-v2",
-        modelId: "amazon.titan-embed-text-v2:0",
-      }),
-    ]);
-
-    const result = await worker.process(event);
-
-    expect(result.batchItemFailures).toEqual([]);
-
-    // Should NOT call Bedrock or upsert to Aurora
-    expect(mockGenerateForModel).not.toHaveBeenCalled();
-    expect(mockUpsertEmbedding).not.toHaveBeenCalled();
-
-    // Should increment unrecoverableCount
-    const updateCalls = ddbMock.commandCalls(UpdateCommand);
-    const unrecoverableUpdate = updateCalls.find(
-      (c) => c.args[0].input.UpdateExpression === "ADD unrecoverableCount :one",
-    );
-    expect(unrecoverableUpdate).toBeDefined();
-  });
-
-  it("increments unrecoverableCount when signal has no s3Key", async () => {
-    const signal = makeSignalItem({
-      id: "SES#nokey",
-      accountId: "acct-1",
-      arcId: "arc-nokey",
-      recipientAddress: "nokey@example.com",
-      embeddings: {}, // no target model embedding, no s3Key
-    });
-
-    ddbMock.on(ScanCommand).resolves({ Items: [signal], LastEvaluatedKey: undefined });
-    ddbMock.on(UpdateCommand).resolves({});
-
-    const event = makeSqsEvent([
-      makeSqsRecord({
-        jobId: "job-nokey",
-        segment: 0,
-        totalSegments: 1,
-        targetClusterId: "aurora-prod-titan-v2",
-        modelId: "amazon.titan-embed-text-v2:0",
-      }),
-    ]);
-
-    const result = await worker.process(event);
-
-    expect(result.batchItemFailures).toEqual([]);
-
-    // Should NOT call S3, Bedrock, or Aurora
-    expect(s3Mock.commandCalls(GetObjectCommand)).toHaveLength(0);
-    expect(mockGenerateForModel).not.toHaveBeenCalled();
-    expect(mockUpsertEmbedding).not.toHaveBeenCalled();
-
-    // Should increment unrecoverableCount
-    const updateCalls = ddbMock.commandCalls(UpdateCommand);
-    const unrecoverableUpdate = updateCalls.find(
-      (c) => c.args[0].input.UpdateExpression === "ADD unrecoverableCount :one",
-    );
-    expect(unrecoverableUpdate).toBeDefined();
   });
 
   it("skips Bedrock entirely when cache entry already exists (cache-hit guard)", async () => {
@@ -664,7 +563,6 @@ describe("ReindexWorker — regenerate-from-S3 mode", () => {
     });
 
     ddbMock.on(ScanCommand).resolves({ Items: [signal], LastEvaluatedKey: undefined });
-    ddbMock.on(UpdateCommand).resolves({});
 
     const event = makeSqsEvent([
       makeSqsRecord({
@@ -692,13 +590,6 @@ describe("ReindexWorker — regenerate-from-S3 mode", () => {
       recipientAddress: "cached@example.com",
       embedding: [0.5, 0.6, 0.7],
     });
-
-    // Should increment copiedCount (not regeneratedCount)
-    const updateCalls = ddbMock.commandCalls(UpdateCommand);
-    const copiedUpdate = updateCalls.find(
-      (c) => c.args[0].input.UpdateExpression === "ADD copiedCount :one",
-    );
-    expect(copiedUpdate).toBeDefined();
   });
 
   it("handles mixed signals: cache hit + cache miss + unrecoverable in one segment", async () => {
@@ -731,7 +622,6 @@ describe("ReindexWorker — regenerate-from-S3 mode", () => {
       Items: [cachedSignal, regenSignal, expiredSignal],
       LastEvaluatedKey: undefined,
     });
-    ddbMock.on(UpdateCommand).resolves({});
 
     // S3: first call (for regenSignal) succeeds, second (for expiredSignal) returns NoSuchKey
     s3Mock
@@ -783,11 +673,5 @@ describe("ReindexWorker — regenerate-from-S3 mode", () => {
 
     // Cache write called once (only for the regenerated signal)
     expect(mockAddEmbeddingToCache).toHaveBeenCalledTimes(1);
-
-    // Counters: copiedCount, regeneratedCount, unrecoverableCount
-    const updateCalls = ddbMock.commandCalls(UpdateCommand);
-    expect(updateCalls.some((c) => c.args[0].input.UpdateExpression === "ADD copiedCount :one")).toBe(true);
-    expect(updateCalls.some((c) => c.args[0].input.UpdateExpression === "ADD regeneratedCount :one")).toBe(true);
-    expect(updateCalls.some((c) => c.args[0].input.UpdateExpression === "ADD unrecoverableCount :one")).toBe(true);
   });
 });

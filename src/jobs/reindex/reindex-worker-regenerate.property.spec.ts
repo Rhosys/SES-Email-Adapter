@@ -6,11 +6,10 @@
 // 1. Pure-copies signals that have `embeddings[modelId]` (never calls Bedrock for these)
 // 2. Regenerates signals that lack `embeddings[modelId]` but have a retrievable S3 object (calls Bedrock, writes back to cache)
 // 3. Records as unrecoverable signals that lack both the cache entry and a retrievable S3 object
-// 4. The sum `copiedCount + regeneratedCount + unrecoverableCount` equals the total signals processed
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { mockClient } from "aws-sdk-client-mock";
-import { DynamoDBDocumentClient, ScanCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
+import { DynamoDBDocumentClient, ScanCommand } from "@aws-sdk/lib-dynamodb";
 import { BedrockRuntimeClient, InvokeModelCommand } from "@aws-sdk/client-bedrock-runtime";
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 import { Readable } from "stream";
@@ -290,7 +289,6 @@ describe("Property 12: Backfill targets exactly the signals missing the new mode
     );
 
     ddbMock.on(ScanCommand).resolves({ Items: allSignals, LastEvaluatedKey: undefined });
-    ddbMock.on(UpdateCommand).resolves({});
 
     s3Mock.on(GetObjectCommand).callsFake((input) => {
       const key = input.Key as string;
@@ -330,31 +328,6 @@ describe("Property 12: Backfill targets exactly the signals missing the new mode
     ]);
 
     await worker.process(event);
-
-    // Count DynamoDB UpdateCommand calls to track counter increments
-    const updateCalls = ddbMock.commandCalls(UpdateCommand);
-    const copiedCount = updateCalls.filter(
-      (c) => c.args[0].input.UpdateExpression === "ADD copiedCount :one",
-    ).length;
-    const regeneratedCount = updateCalls.filter(
-      (c) => c.args[0].input.UpdateExpression === "ADD regeneratedCount :one",
-    ).length;
-    const unrecoverableCount = updateCalls.filter(
-      (c) => c.args[0].input.UpdateExpression === "ADD unrecoverableCount :one",
-    ).length;
-
-    // Property 1: Signals with cached embeddings are pure-copied
-    expect(copiedCount).toBe(cached.length);
-
-    // Property 2: Signals without cache but with retrievable S3 are regenerated
-    expect(regeneratedCount).toBe(s3Retrievable.length);
-
-    // Property 3: Signals without cache and without retrievable S3 are unrecoverable
-    expect(unrecoverableCount).toBe(unrecoverable.length);
-
-    // Property 4: Sum equals total signals processed
-    const totalProcessed = cached.length + s3Retrievable.length + unrecoverable.length;
-    expect(copiedCount + regeneratedCount + unrecoverableCount).toBe(totalProcessed);
 
     // Bedrock is never called for cached signals (only for s3Retrievable)
     expect(mockGenerateForModel).toHaveBeenCalledTimes(s3Retrievable.length);

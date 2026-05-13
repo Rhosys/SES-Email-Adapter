@@ -9,7 +9,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { mockClient } from "aws-sdk-client-mock";
-import { DynamoDBDocumentClient, ScanCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
+import { DynamoDBDocumentClient, ScanCommand } from "@aws-sdk/lib-dynamodb";
 import { BedrockRuntimeClient, InvokeModelCommand } from "@aws-sdk/client-bedrock-runtime";
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 import type { SQSEvent, SQSRecord } from "aws-lambda";
@@ -145,7 +145,6 @@ describe("Property 11: Reindex worker uses cache exclusively and never calls Bed
     s3Mock.on(GetObjectCommand).rejects(new Error("PROPERTY VIOLATION: S3 GetObject was called during pure-copy reindex"));
 
     ddbMock.on(ScanCommand).resolves({ Items: signals, LastEvaluatedKey: undefined });
-    ddbMock.on(UpdateCommand).resolves({});
 
     const event = makeSqsEvent([
       makeSqsRecord({
@@ -196,7 +195,6 @@ describe("Property 11: Reindex worker uses cache exclusively and never calls Bed
     const signal = makeSignal("SES#exact-vec", "acct-exact", "arc-exact", "exact@example.com", distinctiveVector);
 
     ddbMock.on(ScanCommand).resolves({ Items: [signal], LastEvaluatedKey: undefined });
-    ddbMock.on(UpdateCommand).resolves({});
 
     const event = makeSqsEvent([
       makeSqsRecord({
