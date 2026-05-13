@@ -13,7 +13,7 @@ import { ProcessingDatabase } from "./database/processing-database.js";
 import { ProcessorDatabaseAdapter, ApiDatabaseAdapter } from "./database/adapters.js";
 import { AuditDatabase } from "./database/audit-database.js";
 import { SESv2Client, SendEmailCommand } from "@aws-sdk/client-sesv2";
-import { SesNotifier } from "./notifier/ses-notifier.js";
+import { SesNotifier } from "./notifier/notifier.js";
 import { SesForwarder } from "./notifier/ses-forwarder.js";
 import { FeedbackProcessor } from "./notifier/feedback-processor.js";
 import { DomainHealthJob } from "./jobs/domain-health-job.js";

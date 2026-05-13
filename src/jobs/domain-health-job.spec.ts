@@ -227,7 +227,7 @@ describe("domain-health-job staleness integration", () => {
     await job.run();
 
     // Error logged for the failing account
-    const errorCalls = mockLogger.calls.filter(c => c.method === "error" && c.context?.code === "staleness_checker.account_error");
+    const errorCalls = mockLogger.calls.filter(c => c.method === "track" && c.context?.code === "staleness_checker.account_error");
     expect(errorCalls).toHaveLength(1);
     expect(errorCalls[0]!.context).toMatchObject({
       accountId: "acct-fail",
