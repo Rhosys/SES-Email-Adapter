@@ -98,20 +98,67 @@ jobs:
       - name: Check for Destructive Changes
         id: plan_check
         run: |
+          tofu -chdir=deploy show -no-color plan.cache > /tmp/plan_text.txt
+
           DESTROYS=$(jq '[.resource_changes[]? | select(.change.actions | contains(["delete"]))] | length' deploy/plan.json)
-          
+
           echo "Found $DESTROYS destructive changes."
-          
+
           if [ "$DESTROYS" -gt 0 ]; then
             echo "requires_approval=true" >> $GITHUB_OUTPUT
 
             echo "## ⚠️ DESTRUCTIVE CHANGES DETECTED" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "**$DESTROYS resource(s) will be destroyed.** Routing to manual approval." >> $GITHUB_STEP_SUMMARY
+            echo "**$DESTROYS resource(s) will be destroyed or replaced.** Routing to manual approval." >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "| Action | Resource |" >> $GITHUB_STEP_SUMMARY
-            echo "|--------|----------|" >> $GITHUB_STEP_SUMMARY
-            jq -r '.resource_changes[]? | select(.change.actions | contains(["delete"])) | "| \(.change.actions | join(" → ")) | `\(.address)` |"' deploy/plan.json >> $GITHUB_STEP_SUMMARY
+
+            python3 - << 'PYEOF'
+import json, re, os
+
+plan = json.load(open('deploy/plan.json'))
+plan_text = open('/tmp/plan_text.txt').read()
+
+REASON_LABELS = {
+    'replace_because_tainted':              'Resource was tainted (forced replacement)',
+    'replace_because_cannot_update':        'Immutable attribute changed (forced replacement)',
+    'delete_because_no_resource_config':    'Removed from configuration',
+    'delete_because_wrong_repetition_type': 'Repetition type changed (count ↔ for_each)',
+}
+
+def extract_block(text, address):
+    lines = text.splitlines()
+    start = None
+    for i, line in enumerate(lines):
+        if ('# ' + address) in line:
+            start = i
+            break
+    if start is None:
+        return '(diff not available)'
+    result = []
+    for i, line in enumerate(lines[start:], start):
+        if i > start and re.match(r'\s+#\s+\S', line):
+            break
+        if line.startswith('Plan:'):
+            break
+        result.append(line)
+    return '\n'.join(result).strip()
+
+with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as out:
+    for rc in plan.get('resource_changes', []):
+        if 'delete' not in rc['change']['actions']:
+            continue
+        address    = rc['address']
+        actions    = rc['change']['actions']
+        raw_reason = rc['change'].get('action_reason') or 'none'
+        reason     = REASON_LABELS.get(raw_reason, raw_reason if raw_reason != 'none' else '')
+        action_label = ' → '.join(a.capitalize() for a in actions)
+        diff = extract_block(plan_text, address)
+        summary_line = f'<strong>{action_label}: <code>{address}</code></strong>'
+        if reason:
+            summary_line += f' — {reason}'
+        out.write(f'<details>\n<summary>{summary_line}</summary>\n\n```diff\n{diff}\n```\n\n</details>\n\n')
+PYEOF
+
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "👉 [Review & Approve Deployment](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> $GITHUB_STEP_SUMMARY
           else
