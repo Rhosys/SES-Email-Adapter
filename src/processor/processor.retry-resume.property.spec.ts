@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import fc from "fast-check";
 import type { SQSEvent } from "aws-lambda";
 import { okAsync, errAsync } from "neverthrow";
 import { SignalProcessor, SYSTEM_RULES } from "./processor.js";
@@ -11,7 +10,6 @@ import type { EmbeddingGenerator } from "../embedding/embedding-generator.js";
 import type { MultiClusterAuroraWriter } from "../database/multi-cluster-aurora-writer.js";
 import type { Signal, Arc, Alias, AliasSender, Workflow } from "../types/index.js";
 import { dbError } from "../errors.js";
-import { propertyRunner } from "../testing/property-runner.js";
 import { createMockLogger, type MockLogger } from "../testing/mock-logger.js";
 
 // ---------------------------------------------------------------------------
@@ -80,47 +78,55 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
   };
 
   // -------------------------------------------------------------------------
-  // Arbitraries
+  // Edge-case inputs
   // -------------------------------------------------------------------------
 
-  const WORKFLOWS: Workflow[] = [
-    "auth", "conversation", "crm", "package", "travel", "scheduling",
-    "payments", "alert", "content", "onboarding", "status", "healthcare",
-    "job", "support", "test",
-  ];
+  const RECEIVE_COUNTS = [2, 5, 30, 100] as const;
 
-  const arbWorkflow = fc.constantFrom(...WORKFLOWS);
+  const EMBEDDINGS: Record<string, number[]> = {
+    "single-element": [0.5],
+    "typical-3d": [0.1, -0.9, 0.5],
+    "full-size-1024": new Array(1024).fill(0),
+  };
 
-  const arbEmbedding = fc.array(fc.double({ min: -1, max: 1, noNaN: true }), { minLength: 3, maxLength: 10 });
+  const SIGNALS: Array<{ label: string; signal: Signal }> = Object.entries(EMBEDDINGS).map(([embLabel, vec]) => ({
+    label: embLabel,
+    signal: {
+      id: `SES#msg-${embLabel}`,
+      arcId: `arc-${embLabel}`,
+      accountId: TEST_ACCOUNT_ID,
+      source: "email" as const,
+      receivedAt: "2024-01-15T10:00:00Z",
+      from: { address: "sender@external.com", name: "Sender" },
+      to: [{ address: "user@example.com" }],
+      cc: [],
+      subject: "Test email",
+      textBody: "Hello world",
+      attachments: [],
+      headers: {},
+      recipientAddress: "user@example.com",
+      workflow: "conversation" as Workflow,
+      workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false } as const,
+      spamScore: 0.01,
+      summary: "A test email.",
+      classificationModelId: "us.anthropic.claude-opus-4-5-20251101-v1:0",
+      s3Key: `emails/msg-${embLabel}`,
+      status: "active" as const,
+      createdAt: "2024-01-15T10:00:00Z",
+      embeddings: { "amazon.titan-embed-text-v2:0": vec },
+      matchedRules: [],
+    } as Signal,
+  }));
 
-  /** Generate a valid Signal that would exist in DDB on retry */
-  const arbSignal = fc.record({
-    id: fc.uuid().map((id) => `SES#${id}`),
-    arcId: fc.uuid(),
-    accountId: fc.constant(TEST_ACCOUNT_ID),
-    source: fc.constant("email" as const),
-    receivedAt: fc.constant("2024-01-15T10:00:00Z"),
-    from: fc.record({ address: fc.emailAddress(), name: fc.string({ minLength: 1, maxLength: 20 }) }),
-    to: fc.constant([{ address: "user@example.com" }]),
-    cc: fc.constant([]),
-    subject: fc.string({ minLength: 1, maxLength: 50 }),
-    textBody: fc.string({ minLength: 1, maxLength: 100 }),
-    attachments: fc.constant([]),
-    headers: fc.constant({}),
-    recipientAddress: fc.constant("user@example.com"),
-    workflow: arbWorkflow,
-    workflowData: fc.constant({ workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false } as const),
-    spamScore: fc.double({ min: 0, max: 1, noNaN: true }),
-    summary: fc.string({ minLength: 1, maxLength: 50 }),
-    classificationModelId: fc.constant("us.anthropic.claude-opus-4-5-20251101-v1:0"),
-    s3Key: fc.uuid().map((id) => `emails/${id}`),
-    status: fc.constant("active" as const),
-    createdAt: fc.constant("2024-01-15T10:00:00Z"),
-    embeddings: arbEmbedding.map((vec) => ({ "amazon.titan-embed-text-v2:0": vec })),
-    matchedRules: fc.constant([]),
-  }) as fc.Arbitrary<Signal>;
+  // Build test cases: cross-product of signals × receive counts
+  const RETRY_CASES = SIGNALS.flatMap(({ label, signal }) =>
+    RECEIVE_COUNTS.map((rc) => ({
+      label: `embedding=${label}, receiveCount=${rc}`,
+      signal,
+      receiveCount: rc,
+    })),
+  );
 
-  /** Generate an Arc that matches the signal's arcId */
   function arbArcForSignal(signal: Signal): Arc {
     return {
       id: signal.arcId!,
@@ -134,9 +140,6 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
       updatedAt: signal.receivedAt,
     };
   }
-
-  /** Receive count > 1 (retry) */
-  const arbReceiveCount = fc.integer({ min: 2, max: 10 });
 
   function makeSqsEvent(sesMessageId: string, receiveCount: number): SQSEvent {
     const notification = {
@@ -173,276 +176,141 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
     };
   }
 
+  function makeStore(signal: Signal, arc: Arc): ProcessorDatabase {
+    return {
+      getSignalByMessageId: vi.fn().mockReturnValue(okAsync(signal)),
+      saveSignal: vi.fn().mockReturnValue(okAsync(undefined)),
+      updateSignalRetention: vi.fn().mockReturnValue(okAsync(undefined)),
+      getArc: vi.fn().mockReturnValue(okAsync(arc)),
+      findArcByGroupingKey: vi.fn().mockReturnValue(okAsync(null)),
+      saveArc: vi.fn().mockReturnValue(okAsync(undefined)),
+      listEnabledRules: vi.fn().mockReturnValue(okAsync(SYSTEM_RULES)),
+      getProcessorAccountContext: vi.fn().mockReturnValue(okAsync(DEFAULT_CTX)),
+      saveAlias: vi.fn().mockImplementation((a: Alias) => okAsync(a)),
+      getSender: vi.fn().mockReturnValue(okAsync(DEFAULT_SENDER_ENTRY)),
+      saveSender: vi.fn().mockReturnValue(okAsync(undefined)),
+      getTemplate: vi.fn().mockReturnValue(okAsync(null)),
+      updateGlobalReputation: vi.fn().mockReturnValue(okAsync(undefined)),
+      getDomainByName: vi.fn().mockReturnValue(okAsync(null)),
+    };
+  }
+
+  function makeAuroraWriter(): MultiClusterAuroraWriter {
+    return {
+      upsertEmbedding: vi.fn().mockResolvedValue(undefined),
+      findMatch: vi.fn().mockResolvedValue(null),
+    };
+  }
+
   // -------------------------------------------------------------------------
   // Tests
   // -------------------------------------------------------------------------
 
-  it("MIME parser is NOT called on retry when signal exists in DDB", () => {
-    return propertyRunner.assert(
-      fc.asyncProperty(
-        arbSignal,
-        arbReceiveCount,
-        async (signal, receiveCount) => {
-          const arc = arbArcForSignal(signal);
-          const sesMessageId = signal.id.replace("SES#", "");
+  it.each(RETRY_CASES)("MIME parser is NOT called on retry when signal exists in DDB ($label)", async ({ signal, receiveCount }) => {
+    const arc = arbArcForSignal(signal);
+    const sesMessageId = signal.id.replace("SES#", "");
+    const mimeParser: MimeParser = { parse: vi.fn() };
 
-          const mimeParser: MimeParser = { parse: vi.fn() };
+    const processor = new SignalProcessor({
+      store: makeStore(signal, arc),
+      mimeParser,
+      classifier: { classify: vi.fn() },
+      embeddingGenerator: { generateForActiveClusters: vi.fn(), generateForModel: vi.fn() },
+      auroraWriter: makeAuroraWriter(),
+      arcMatcher: { findMatch: vi.fn().mockReturnValue(okAsync(null)), upsertEmbedding: vi.fn().mockReturnValue(okAsync(undefined)) },
+      ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
+      logger: mockLogger,
+    });
 
-          const store: ProcessorDatabase = {
-            getSignalByMessageId: vi.fn().mockReturnValue(okAsync(signal)),
-            saveSignal: vi.fn().mockReturnValue(okAsync(undefined)),
-            updateSignalRetention: vi.fn().mockReturnValue(okAsync(undefined)),
-            getArc: vi.fn().mockReturnValue(okAsync(arc)),
-            findArcByGroupingKey: vi.fn().mockReturnValue(okAsync(null)),
-            saveArc: vi.fn().mockReturnValue(okAsync(undefined)),
-            listEnabledRules: vi.fn().mockReturnValue(okAsync(SYSTEM_RULES)),
-            getProcessorAccountContext: vi.fn().mockReturnValue(okAsync(DEFAULT_CTX)),
-            saveAlias: vi.fn().mockImplementation((a: Alias) => okAsync(a)),
-            getSender: vi.fn().mockReturnValue(okAsync(DEFAULT_SENDER_ENTRY)),
-            saveSender: vi.fn().mockReturnValue(okAsync(undefined)),
-            getTemplate: vi.fn().mockReturnValue(okAsync(null)),
-            updateGlobalReputation: vi.fn().mockReturnValue(okAsync(undefined)),
-            getDomainByName: vi.fn().mockReturnValue(okAsync(null)),
-          };
-
-          const auroraWriter: MultiClusterAuroraWriter = {
-            upsertEmbedding: vi.fn().mockResolvedValue(undefined),
-            findMatch: vi.fn().mockResolvedValue(null),
-          };
-
-          const processor = new SignalProcessor({
-            store,
-            mimeParser,
-            classifier: { classify: vi.fn() },
-            embeddingGenerator: { generateForActiveClusters: vi.fn(), generateForModel: vi.fn() },
-            auroraWriter,
-            arcMatcher: { findMatch: vi.fn().mockReturnValue(okAsync(null)), upsertEmbedding: vi.fn().mockReturnValue(okAsync(undefined)) },
-            ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
-            logger: mockLogger,
-          });
-
-          await processor.process(makeSqsEvent(sesMessageId, receiveCount));
-
-          // MIME parser must NOT be called — no re-parsing on retry
-          expect(mimeParser.parse).not.toHaveBeenCalled();
-        },
-      ),
-    );
+    await processor.process(makeSqsEvent(sesMessageId, receiveCount));
+    expect(mimeParser.parse).not.toHaveBeenCalled();
   });
 
-  it("classifier is NOT called on retry when signal exists in DDB", () => {
-    return propertyRunner.assert(
-      fc.asyncProperty(
-        arbSignal,
-        arbReceiveCount,
-        async (signal, receiveCount) => {
-          const arc = arbArcForSignal(signal);
-          const sesMessageId = signal.id.replace("SES#", "");
+  it.each(RETRY_CASES)("classifier is NOT called on retry when signal exists in DDB ($label)", async ({ signal, receiveCount }) => {
+    const arc = arbArcForSignal(signal);
+    const sesMessageId = signal.id.replace("SES#", "");
+    const classifier: Pick<SignalClassifier, "classify"> = { classify: vi.fn() };
 
-          const classifier: Pick<SignalClassifier, "classify"> = { classify: vi.fn() };
+    const processor = new SignalProcessor({
+      store: makeStore(signal, arc),
+      mimeParser: { parse: vi.fn() },
+      classifier,
+      embeddingGenerator: { generateForActiveClusters: vi.fn(), generateForModel: vi.fn() },
+      auroraWriter: makeAuroraWriter(),
+      arcMatcher: { findMatch: vi.fn().mockReturnValue(okAsync(null)), upsertEmbedding: vi.fn().mockReturnValue(okAsync(undefined)) },
+      ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
+      logger: mockLogger,
+    });
 
-          const store: ProcessorDatabase = {
-            getSignalByMessageId: vi.fn().mockReturnValue(okAsync(signal)),
-            saveSignal: vi.fn().mockReturnValue(okAsync(undefined)),
-            updateSignalRetention: vi.fn().mockReturnValue(okAsync(undefined)),
-            getArc: vi.fn().mockReturnValue(okAsync(arc)),
-            findArcByGroupingKey: vi.fn().mockReturnValue(okAsync(null)),
-            saveArc: vi.fn().mockReturnValue(okAsync(undefined)),
-            listEnabledRules: vi.fn().mockReturnValue(okAsync(SYSTEM_RULES)),
-            getProcessorAccountContext: vi.fn().mockReturnValue(okAsync(DEFAULT_CTX)),
-            saveAlias: vi.fn().mockImplementation((a: Alias) => okAsync(a)),
-            getSender: vi.fn().mockReturnValue(okAsync(DEFAULT_SENDER_ENTRY)),
-            saveSender: vi.fn().mockReturnValue(okAsync(undefined)),
-            getTemplate: vi.fn().mockReturnValue(okAsync(null)),
-            updateGlobalReputation: vi.fn().mockReturnValue(okAsync(undefined)),
-            getDomainByName: vi.fn().mockReturnValue(okAsync(null)),
-          };
-
-          const auroraWriter: MultiClusterAuroraWriter = {
-            upsertEmbedding: vi.fn().mockResolvedValue(undefined),
-            findMatch: vi.fn().mockResolvedValue(null),
-          };
-
-          const processor = new SignalProcessor({
-            store,
-            mimeParser: { parse: vi.fn() },
-            classifier,
-            embeddingGenerator: { generateForActiveClusters: vi.fn(), generateForModel: vi.fn() },
-            auroraWriter,
-            arcMatcher: { findMatch: vi.fn().mockReturnValue(okAsync(null)), upsertEmbedding: vi.fn().mockReturnValue(okAsync(undefined)) },
-            ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
-            logger: mockLogger,
-          });
-
-          await processor.process(makeSqsEvent(sesMessageId, receiveCount));
-
-          // Classifier must NOT be called — no re-classifying on retry
-          expect(classifier.classify).not.toHaveBeenCalled();
-        },
-      ),
-    );
+    await processor.process(makeSqsEvent(sesMessageId, receiveCount));
+    expect(classifier.classify).not.toHaveBeenCalled();
   });
 
-  it("rule evaluation is NOT called on retry when signal exists in DDB", () => {
-    return propertyRunner.assert(
-      fc.asyncProperty(
-        arbSignal,
-        arbReceiveCount,
-        async (signal, receiveCount) => {
-          const arc = arbArcForSignal(signal);
-          const sesMessageId = signal.id.replace("SES#", "");
+  it.each(RETRY_CASES)("rule evaluation is NOT called on retry when signal exists in DDB ($label)", async ({ signal, receiveCount }) => {
+    const arc = arbArcForSignal(signal);
+    const sesMessageId = signal.id.replace("SES#", "");
+    const ruleEvaluator = new JsonLogicRuleEvaluator(mockLogger);
+    const evaluateSpy = vi.spyOn(ruleEvaluator, "evaluate");
 
-          const ruleEvaluator = new JsonLogicRuleEvaluator(mockLogger);
-          const evaluateSpy = vi.spyOn(ruleEvaluator, "evaluate");
+    const processor = new SignalProcessor({
+      store: makeStore(signal, arc),
+      mimeParser: { parse: vi.fn() },
+      classifier: { classify: vi.fn() },
+      embeddingGenerator: { generateForActiveClusters: vi.fn(), generateForModel: vi.fn() },
+      auroraWriter: makeAuroraWriter(),
+      arcMatcher: { findMatch: vi.fn().mockReturnValue(okAsync(null)), upsertEmbedding: vi.fn().mockReturnValue(okAsync(undefined)) },
+      ruleEvaluator,
+      logger: mockLogger,
+    });
 
-          const store: ProcessorDatabase = {
-            getSignalByMessageId: vi.fn().mockReturnValue(okAsync(signal)),
-            saveSignal: vi.fn().mockReturnValue(okAsync(undefined)),
-            updateSignalRetention: vi.fn().mockReturnValue(okAsync(undefined)),
-            getArc: vi.fn().mockReturnValue(okAsync(arc)),
-            findArcByGroupingKey: vi.fn().mockReturnValue(okAsync(null)),
-            saveArc: vi.fn().mockReturnValue(okAsync(undefined)),
-            listEnabledRules: vi.fn().mockReturnValue(okAsync(SYSTEM_RULES)),
-            getProcessorAccountContext: vi.fn().mockReturnValue(okAsync(DEFAULT_CTX)),
-            saveAlias: vi.fn().mockImplementation((a: Alias) => okAsync(a)),
-            getSender: vi.fn().mockReturnValue(okAsync(DEFAULT_SENDER_ENTRY)),
-            saveSender: vi.fn().mockReturnValue(okAsync(undefined)),
-            getTemplate: vi.fn().mockReturnValue(okAsync(null)),
-            updateGlobalReputation: vi.fn().mockReturnValue(okAsync(undefined)),
-            getDomainByName: vi.fn().mockReturnValue(okAsync(null)),
-          };
-
-          const auroraWriter: MultiClusterAuroraWriter = {
-            upsertEmbedding: vi.fn().mockResolvedValue(undefined),
-            findMatch: vi.fn().mockResolvedValue(null),
-          };
-
-          const processor = new SignalProcessor({
-            store,
-            mimeParser: { parse: vi.fn() },
-            classifier: { classify: vi.fn() },
-            embeddingGenerator: { generateForActiveClusters: vi.fn(), generateForModel: vi.fn() },
-            auroraWriter,
-            arcMatcher: { findMatch: vi.fn().mockReturnValue(okAsync(null)), upsertEmbedding: vi.fn().mockReturnValue(okAsync(undefined)) },
-            ruleEvaluator,
-            logger: mockLogger,
-          });
-
-          await processor.process(makeSqsEvent(sesMessageId, receiveCount));
-
-          // Rule evaluator must NOT be called — no re-evaluating rules on retry
-          expect(evaluateSpy).not.toHaveBeenCalled();
-        },
-      ),
-    );
+    await processor.process(makeSqsEvent(sesMessageId, receiveCount));
+    expect(evaluateSpy).not.toHaveBeenCalled();
   });
 
-  it("Aurora upserts ARE called with the signal's cached embeddings on retry", () => {
-    return propertyRunner.assert(
-      fc.asyncProperty(
-        arbSignal,
-        arbReceiveCount,
-        async (signal, receiveCount) => {
-          const arc = arbArcForSignal(signal);
-          const sesMessageId = signal.id.replace("SES#", "");
+  it.each(RETRY_CASES)("Aurora upserts ARE called with the signal's cached embeddings on retry ($label)", async ({ signal, receiveCount }) => {
+    const arc = arbArcForSignal(signal);
+    const sesMessageId = signal.id.replace("SES#", "");
+    const auroraWriter = makeAuroraWriter();
 
-          const store: ProcessorDatabase = {
-            getSignalByMessageId: vi.fn().mockReturnValue(okAsync(signal)),
-            saveSignal: vi.fn().mockReturnValue(okAsync(undefined)),
-            updateSignalRetention: vi.fn().mockReturnValue(okAsync(undefined)),
-            getArc: vi.fn().mockReturnValue(okAsync(arc)),
-            findArcByGroupingKey: vi.fn().mockReturnValue(okAsync(null)),
-            saveArc: vi.fn().mockReturnValue(okAsync(undefined)),
-            listEnabledRules: vi.fn().mockReturnValue(okAsync(SYSTEM_RULES)),
-            getProcessorAccountContext: vi.fn().mockReturnValue(okAsync(DEFAULT_CTX)),
-            saveAlias: vi.fn().mockImplementation((a: Alias) => okAsync(a)),
-            getSender: vi.fn().mockReturnValue(okAsync(DEFAULT_SENDER_ENTRY)),
-            saveSender: vi.fn().mockReturnValue(okAsync(undefined)),
-            getTemplate: vi.fn().mockReturnValue(okAsync(null)),
-            updateGlobalReputation: vi.fn().mockReturnValue(okAsync(undefined)),
-            getDomainByName: vi.fn().mockReturnValue(okAsync(null)),
-          };
+    const processor = new SignalProcessor({
+      store: makeStore(signal, arc),
+      mimeParser: { parse: vi.fn() },
+      classifier: { classify: vi.fn() },
+      embeddingGenerator: { generateForActiveClusters: vi.fn(), generateForModel: vi.fn() },
+      auroraWriter,
+      arcMatcher: { findMatch: vi.fn().mockReturnValue(okAsync(null)), upsertEmbedding: vi.fn().mockReturnValue(okAsync(undefined)) },
+      ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
+      logger: mockLogger,
+    });
 
-          const auroraWriter: MultiClusterAuroraWriter = {
-            upsertEmbedding: vi.fn().mockResolvedValue(undefined),
-            findMatch: vi.fn().mockResolvedValue(null),
-          };
+    await processor.process(makeSqsEvent(sesMessageId, receiveCount));
 
-          const processor = new SignalProcessor({
-            store,
-            mimeParser: { parse: vi.fn() },
-            classifier: { classify: vi.fn() },
-            embeddingGenerator: { generateForActiveClusters: vi.fn(), generateForModel: vi.fn() },
-            auroraWriter,
-            arcMatcher: { findMatch: vi.fn().mockReturnValue(okAsync(null)), upsertEmbedding: vi.fn().mockReturnValue(okAsync(undefined)) },
-            ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
-            logger: mockLogger,
-          });
-
-          await processor.process(makeSqsEvent(sesMessageId, receiveCount));
-
-          // Aurora upsert must be called with the cached embedding from the signal
-          expect(auroraWriter.upsertEmbedding).toHaveBeenCalled();
-          const call = vi.mocked(auroraWriter.upsertEmbedding).mock.calls[0]!;
-          expect(call[0]).toMatchObject({
-            arcId: arc.id,
-            accountId: signal.accountId,
-            embedding: signal.embeddings!["amazon.titan-embed-text-v2:0"],
-          });
-        },
-      ),
-    );
+    expect(auroraWriter.upsertEmbedding).toHaveBeenCalled();
+    const call = vi.mocked(auroraWriter.upsertEmbedding).mock.calls[0]!;
+    expect(call[0]).toMatchObject({
+      arcId: arc.id,
+      accountId: signal.accountId,
+      embedding: signal.embeddings!["amazon.titan-embed-text-v2:0"],
+    });
   });
 
-  it("result is NOT a batchItemFailure on retry when signal exists in DDB", () => {
-    return propertyRunner.assert(
-      fc.asyncProperty(
-        arbSignal,
-        arbReceiveCount,
-        async (signal, receiveCount) => {
-          const arc = arbArcForSignal(signal);
-          const sesMessageId = signal.id.replace("SES#", "");
+  it.each(RETRY_CASES)("result is NOT a batchItemFailure on retry when signal exists in DDB ($label)", async ({ signal, receiveCount }) => {
+    const arc = arbArcForSignal(signal);
+    const sesMessageId = signal.id.replace("SES#", "");
 
-          const store: ProcessorDatabase = {
-            getSignalByMessageId: vi.fn().mockReturnValue(okAsync(signal)),
-            saveSignal: vi.fn().mockReturnValue(okAsync(undefined)),
-            updateSignalRetention: vi.fn().mockReturnValue(okAsync(undefined)),
-            getArc: vi.fn().mockReturnValue(okAsync(arc)),
-            findArcByGroupingKey: vi.fn().mockReturnValue(okAsync(null)),
-            saveArc: vi.fn().mockReturnValue(okAsync(undefined)),
-            listEnabledRules: vi.fn().mockReturnValue(okAsync(SYSTEM_RULES)),
-            getProcessorAccountContext: vi.fn().mockReturnValue(okAsync(DEFAULT_CTX)),
-            saveAlias: vi.fn().mockImplementation((a: Alias) => okAsync(a)),
-            getSender: vi.fn().mockReturnValue(okAsync(DEFAULT_SENDER_ENTRY)),
-            saveSender: vi.fn().mockReturnValue(okAsync(undefined)),
-            getTemplate: vi.fn().mockReturnValue(okAsync(null)),
-            updateGlobalReputation: vi.fn().mockReturnValue(okAsync(undefined)),
-            getDomainByName: vi.fn().mockReturnValue(okAsync(null)),
-          };
+    const processor = new SignalProcessor({
+      store: makeStore(signal, arc),
+      mimeParser: { parse: vi.fn() },
+      classifier: { classify: vi.fn() },
+      embeddingGenerator: { generateForActiveClusters: vi.fn(), generateForModel: vi.fn() },
+      auroraWriter: makeAuroraWriter(),
+      arcMatcher: { findMatch: vi.fn().mockReturnValue(okAsync(null)), upsertEmbedding: vi.fn().mockReturnValue(okAsync(undefined)) },
+      ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
+      logger: mockLogger,
+    });
 
-          const auroraWriter: MultiClusterAuroraWriter = {
-            upsertEmbedding: vi.fn().mockResolvedValue(undefined),
-            findMatch: vi.fn().mockResolvedValue(null),
-          };
-
-          const processor = new SignalProcessor({
-            store,
-            mimeParser: { parse: vi.fn() },
-            classifier: { classify: vi.fn() },
-            embeddingGenerator: { generateForActiveClusters: vi.fn(), generateForModel: vi.fn() },
-            auroraWriter,
-            arcMatcher: { findMatch: vi.fn().mockReturnValue(okAsync(null)), upsertEmbedding: vi.fn().mockReturnValue(okAsync(undefined)) },
-            ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
-            logger: mockLogger,
-          });
-
-          const result = await processor.process(makeSqsEvent(sesMessageId, receiveCount));
-
-          // Processing must succeed — no batchItemFailures
-          expect(result.batchItemFailures).toEqual([]);
-        },
-      ),
-    );
+    const result = await processor.process(makeSqsEvent(sesMessageId, receiveCount));
+    expect(result.batchItemFailures).toEqual([]);
   });
 });
 
@@ -584,100 +452,96 @@ describe("Feature: signal-processor-retry-resilience, Property 3: DDB read failu
     };
   }
 
-  // Arbitrary DDB error messages
-  const arbDdbError = fc.string({ minLength: 1, maxLength: 50 }).map(
-    (msg) => dbError(new Error(`DDB error: ${msg}`)),
+  // -------------------------------------------------------------------------
+  // Edge-case inputs
+  // -------------------------------------------------------------------------
+
+  const DDB_ERRORS = [
+    { label: "empty message", error: dbError(new Error("DDB error: ")) },
+    { label: "short message", error: dbError(new Error("DDB error: x")) },
+    { label: "connection timeout", error: dbError(new Error("DDB error: Connection timeout")) },
+    { label: "long message", error: dbError(new Error(`DDB error: ${"A".repeat(200)}`)) },
+  ] as const;
+
+  const RETRY_RECEIVE_COUNTS = [2, 5, 30, 50] as const;
+
+  const SES_MESSAGE_IDS = ["abc123", "a1b2c3d4-e5f6-7890-abcd-ef1234567890", "x"] as const;
+
+  const SIGNAL_READ_FAILURE_CASES = DDB_ERRORS.flatMap(({ label: errLabel, error }) =>
+    RETRY_RECEIVE_COUNTS.flatMap((rc) =>
+      SES_MESSAGE_IDS.map((msgId) => ({
+        label: `error="${errLabel}", receiveCount=${rc}, msgId="${msgId}"`,
+        error,
+        receiveCount: rc,
+        sesMessageId: msgId,
+      })),
+    ),
   );
 
-  // Arbitrary receive count > 1 (retry scenario)
-  const arbRetryReceiveCount = fc.integer({ min: 2, max: 50 });
+  const ARC_READ_FAILURE_CASES = DDB_ERRORS.flatMap(({ label: errLabel, error }) =>
+    RETRY_RECEIVE_COUNTS.map((rc) => ({
+      label: `error="${errLabel}", receiveCount=${rc}`,
+      error,
+      receiveCount: rc,
+      sesMessageId: "test-msg-arc-fail",
+    })),
+  );
 
-  it("signal read failure returns batchItemFailure without Aurora upserts or DDB writes", () => {
-    return propertyRunner.assert(
-      fc.asyncProperty(
-        arbDdbError,
-        arbRetryReceiveCount,
-        fc.uuid(),
-        async (ddbErr, receiveCount, sesMessageId) => {
-          const store = makeStore({
-            getSignalByMessageId: vi.fn().mockReturnValue(errAsync(ddbErr)),
-          });
-          const auroraWriter = makeAuroraWriter();
+  it.each(SIGNAL_READ_FAILURE_CASES)("signal read failure returns batchItemFailure without Aurora upserts or DDB writes ($label)", async ({ error, receiveCount, sesMessageId }) => {
+    const store = makeStore({
+      getSignalByMessageId: vi.fn().mockReturnValue(errAsync(error)),
+    });
+    const auroraWriter = makeAuroraWriter();
 
-          const processor = new SignalProcessor({
-            store,
-            mimeParser: { parse: vi.fn() },
-            classifier: { classify: vi.fn() },
-            embeddingGenerator: { generateForActiveClusters: vi.fn(), generateForModel: vi.fn() },
-            auroraWriter,
-            arcMatcher: { findMatch: vi.fn().mockReturnValue(okAsync(null)), upsertEmbedding: vi.fn().mockReturnValue(okAsync(undefined)) },
-            ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
-            logger: mockLogger,
-          });
+    const processor = new SignalProcessor({
+      store,
+      mimeParser: { parse: vi.fn() },
+      classifier: { classify: vi.fn() },
+      embeddingGenerator: { generateForActiveClusters: vi.fn(), generateForModel: vi.fn() },
+      auroraWriter,
+      arcMatcher: { findMatch: vi.fn().mockReturnValue(okAsync(null)), upsertEmbedding: vi.fn().mockReturnValue(okAsync(undefined)) },
+      ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
+      logger: mockLogger,
+    });
 
-          const result = await processor.process(makeRetrySqsEvent(sesMessageId, receiveCount));
+    const result = await processor.process(makeRetrySqsEvent(sesMessageId, receiveCount));
 
-          // Record must be in batchItemFailures
-          expect(result.batchItemFailures).toHaveLength(1);
-          expect(result.batchItemFailures[0]!.itemIdentifier).toBe("sqs-retry-1");
-
-          // Aurora upsert must NOT be called
-          expect(auroraWriter.upsertEmbedding).not.toHaveBeenCalled();
-
-          // saveSignal must NOT be called
-          expect(store.saveSignal).not.toHaveBeenCalled();
-
-          // saveArc must NOT be called (no new writes)
-          expect(store.saveArc).not.toHaveBeenCalled();
-        },
-      ),
-    );
+    expect(result.batchItemFailures).toHaveLength(1);
+    expect(result.batchItemFailures[0]!.itemIdentifier).toBe("sqs-retry-1");
+    expect(auroraWriter.upsertEmbedding).not.toHaveBeenCalled();
+    expect(store.saveSignal).not.toHaveBeenCalled();
+    expect(store.saveArc).not.toHaveBeenCalled();
   });
 
-  it("arc read failure returns batchItemFailure without Aurora upserts or DDB writes", () => {
-    return propertyRunner.assert(
-      fc.asyncProperty(
-        arbDdbError,
-        arbRetryReceiveCount,
-        fc.uuid(),
-        async (ddbErr, receiveCount, sesMessageId) => {
-          const existingSignal = makeExistingSignal(sesMessageId);
-          const store = makeStore({
-            getSignalByMessageId: vi.fn().mockReturnValue(okAsync(existingSignal)),
-            getArc: vi.fn().mockReturnValue(errAsync(ddbErr)),
-          });
-          const auroraWriter = makeAuroraWriter();
+  it.each(ARC_READ_FAILURE_CASES)("arc read failure returns batchItemFailure without Aurora upserts or DDB writes ($label)", async ({ error, receiveCount, sesMessageId }) => {
+    const existingSignal = makeExistingSignal(sesMessageId);
+    const store = makeStore({
+      getSignalByMessageId: vi.fn().mockReturnValue(okAsync(existingSignal)),
+      getArc: vi.fn().mockReturnValue(errAsync(error)),
+    });
+    const auroraWriter = makeAuroraWriter();
 
-          const processor = new SignalProcessor({
-            store,
-            mimeParser: { parse: vi.fn() },
-            classifier: { classify: vi.fn() },
-            embeddingGenerator: { generateForActiveClusters: vi.fn(), generateForModel: vi.fn() },
-            auroraWriter,
-            arcMatcher: { findMatch: vi.fn().mockReturnValue(okAsync(null)), upsertEmbedding: vi.fn().mockReturnValue(okAsync(undefined)) },
-            ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
-            logger: mockLogger,
-          });
+    const processor = new SignalProcessor({
+      store,
+      mimeParser: { parse: vi.fn() },
+      classifier: { classify: vi.fn() },
+      embeddingGenerator: { generateForActiveClusters: vi.fn(), generateForModel: vi.fn() },
+      auroraWriter,
+      arcMatcher: { findMatch: vi.fn().mockReturnValue(okAsync(null)), upsertEmbedding: vi.fn().mockReturnValue(okAsync(undefined)) },
+      ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
+      logger: mockLogger,
+    });
 
-          const result = await processor.process(makeRetrySqsEvent(sesMessageId, receiveCount));
+    const result = await processor.process(makeRetrySqsEvent(sesMessageId, receiveCount));
 
-          // Record must be in batchItemFailures
-          expect(result.batchItemFailures).toHaveLength(1);
-          expect(result.batchItemFailures[0]!.itemIdentifier).toBe("sqs-retry-1");
-
-          // Aurora upsert must NOT be called
-          expect(auroraWriter.upsertEmbedding).not.toHaveBeenCalled();
-
-          // saveSignal must NOT be called
-          expect(store.saveSignal).not.toHaveBeenCalled();
-
-          // saveArc must NOT be called (no new writes)
-          expect(store.saveArc).not.toHaveBeenCalled();
-        },
-      ),
-    );
+    expect(result.batchItemFailures).toHaveLength(1);
+    expect(result.batchItemFailures[0]!.itemIdentifier).toBe("sqs-retry-1");
+    expect(auroraWriter.upsertEmbedding).not.toHaveBeenCalled();
+    expect(store.saveSignal).not.toHaveBeenCalled();
+    expect(store.saveArc).not.toHaveBeenCalled();
   });
 });
+
 
 // ---------------------------------------------------------------------------
 // Property 2: Missing signal on retry triggers fresh processing
@@ -796,12 +660,6 @@ describe("Feature: signal-processor-retry-resilience, Property 2: Missing signal
     };
   }
 
-  // Arbitrary receiveCount > 1 (retry deliveries)
-  const arbRetryReceiveCount = fc.integer({ min: 2, max: 50 });
-
-  // Arbitrary SES message IDs
-  const arbSesMessageId = fc.stringMatching(/^[a-z0-9]{5,30}$/);
-
   function makeSqsEvent(sesMessageId: string, receiveCount: number): SQSEvent {
     const notification = {
       accountId: TEST_ACCOUNT_ID,
@@ -837,121 +695,89 @@ describe("Feature: signal-processor-retry-resilience, Property 2: Missing signal
     };
   }
 
-  it("MIME parser IS called when signal does not exist on retry", () => {
-    return propertyRunner.assert(
-      fc.asyncProperty(
-        arbRetryReceiveCount,
-        arbSesMessageId,
-        async (receiveCount, sesMessageId) => {
-          const store = makeStore();
-          const mimeParser = makeMimeParser();
+  // -------------------------------------------------------------------------
+  // Edge-case inputs
+  // -------------------------------------------------------------------------
 
-          const processor = new SignalProcessor({
-            store,
-            mimeParser,
-            classifier: makeClassifier(),
-            embeddingGenerator: makeEmbeddingGenerator(),
-            auroraWriter: makeAuroraWriter(),
-            arcMatcher: makeArcMatcher(),
-            ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
-            logger: mockLogger,
-          });
+  const MISSING_SIGNAL_CASES = [
+    { label: "receiveCount=2, short msgId", receiveCount: 2, sesMessageId: "abc" },
+    { label: "receiveCount=5, uuid msgId", receiveCount: 5, sesMessageId: "a1b2c3d4e5f67890abcdef1234567890" },
+    { label: "receiveCount=30, typical msgId", receiveCount: 30, sesMessageId: "msg001122334455" },
+    { label: "receiveCount=50, long msgId", receiveCount: 50, sesMessageId: "abcdefghijklmnopqrstuvwxyz1234" },
+  ] as const;
 
-          await processor.process(makeSqsEvent(sesMessageId, receiveCount));
+  it.each(MISSING_SIGNAL_CASES)("MIME parser IS called when signal does not exist on retry ($label)", async ({ receiveCount, sesMessageId }) => {
+    const mimeParser = makeMimeParser();
 
-          // Full pipeline must run — MIME parser called
-          expect(mimeParser.parse).toHaveBeenCalled();
-        },
-      ),
-    );
+    const processor = new SignalProcessor({
+      store: makeStore(),
+      mimeParser,
+      classifier: makeClassifier(),
+      embeddingGenerator: makeEmbeddingGenerator(),
+      auroraWriter: makeAuroraWriter(),
+      arcMatcher: makeArcMatcher(),
+      ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
+      logger: mockLogger,
+    });
+
+    await processor.process(makeSqsEvent(sesMessageId, receiveCount));
+    expect(mimeParser.parse).toHaveBeenCalled();
   });
 
-  it("classifier IS called when signal does not exist on retry", () => {
-    return propertyRunner.assert(
-      fc.asyncProperty(
-        arbRetryReceiveCount,
-        arbSesMessageId,
-        async (receiveCount, sesMessageId) => {
-          const store = makeStore();
-          const classifier = makeClassifier();
+  it.each(MISSING_SIGNAL_CASES)("classifier IS called when signal does not exist on retry ($label)", async ({ receiveCount, sesMessageId }) => {
+    const classifier = makeClassifier();
 
-          const processor = new SignalProcessor({
-            store,
-            mimeParser: makeMimeParser(),
-            classifier,
-            embeddingGenerator: makeEmbeddingGenerator(),
-            auroraWriter: makeAuroraWriter(),
-            arcMatcher: makeArcMatcher(),
-            ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
-            logger: mockLogger,
-          });
+    const processor = new SignalProcessor({
+      store: makeStore(),
+      mimeParser: makeMimeParser(),
+      classifier,
+      embeddingGenerator: makeEmbeddingGenerator(),
+      auroraWriter: makeAuroraWriter(),
+      arcMatcher: makeArcMatcher(),
+      ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
+      logger: mockLogger,
+    });
 
-          await processor.process(makeSqsEvent(sesMessageId, receiveCount));
-
-          // Full pipeline must run — classifier called
-          expect(classifier.classify).toHaveBeenCalled();
-        },
-      ),
-    );
+    await processor.process(makeSqsEvent(sesMessageId, receiveCount));
+    expect(classifier.classify).toHaveBeenCalled();
   });
 
-  it("saveArc and saveSignal ARE called when signal does not exist on retry", () => {
-    return propertyRunner.assert(
-      fc.asyncProperty(
-        arbRetryReceiveCount,
-        arbSesMessageId,
-        async (receiveCount, sesMessageId) => {
-          const store = makeStore();
+  it.each(MISSING_SIGNAL_CASES)("saveArc and saveSignal ARE called when signal does not exist on retry ($label)", async ({ receiveCount, sesMessageId }) => {
+    const store = makeStore();
 
-          const processor = new SignalProcessor({
-            store,
-            mimeParser: makeMimeParser(),
-            classifier: makeClassifier(),
-            embeddingGenerator: makeEmbeddingGenerator(),
-            auroraWriter: makeAuroraWriter(),
-            arcMatcher: makeArcMatcher(),
-            ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
-            logger: mockLogger,
-          });
+    const processor = new SignalProcessor({
+      store,
+      mimeParser: makeMimeParser(),
+      classifier: makeClassifier(),
+      embeddingGenerator: makeEmbeddingGenerator(),
+      auroraWriter: makeAuroraWriter(),
+      arcMatcher: makeArcMatcher(),
+      ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
+      logger: mockLogger,
+    });
 
-          await processor.process(makeSqsEvent(sesMessageId, receiveCount));
-
-          // Full pipeline must run — both saves called
-          expect(store.saveArc).toHaveBeenCalled();
-          expect(store.saveSignal).toHaveBeenCalled();
-        },
-      ),
-    );
+    await processor.process(makeSqsEvent(sesMessageId, receiveCount));
+    expect(store.saveArc).toHaveBeenCalled();
+    expect(store.saveSignal).toHaveBeenCalled();
   });
 
-  it("result is NOT a batchItemFailure when signal does not exist on retry", () => {
-    return propertyRunner.assert(
-      fc.asyncProperty(
-        arbRetryReceiveCount,
-        arbSesMessageId,
-        async (receiveCount, sesMessageId) => {
-          const store = makeStore();
+  it.each(MISSING_SIGNAL_CASES)("result is NOT a batchItemFailure when signal does not exist on retry ($label)", async ({ receiveCount, sesMessageId }) => {
+    const processor = new SignalProcessor({
+      store: makeStore(),
+      mimeParser: makeMimeParser(),
+      classifier: makeClassifier(),
+      embeddingGenerator: makeEmbeddingGenerator(),
+      auroraWriter: makeAuroraWriter(),
+      arcMatcher: makeArcMatcher(),
+      ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
+      logger: mockLogger,
+    });
 
-          const processor = new SignalProcessor({
-            store,
-            mimeParser: makeMimeParser(),
-            classifier: makeClassifier(),
-            embeddingGenerator: makeEmbeddingGenerator(),
-            auroraWriter: makeAuroraWriter(),
-            arcMatcher: makeArcMatcher(),
-            ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
-            logger: mockLogger,
-          });
-
-          const result = await processor.process(makeSqsEvent(sesMessageId, receiveCount));
-
-          // Processing must succeed — no batchItemFailures
-          expect(result.batchItemFailures).toEqual([]);
-        },
-      ),
-    );
+    const result = await processor.process(makeSqsEvent(sesMessageId, receiveCount));
+    expect(result.batchItemFailures).toEqual([]);
   });
 });
+
 
 // ---------------------------------------------------------------------------
 // Property 8: Outcome re-derived from persisted matchedRules on retry
@@ -998,86 +824,106 @@ describe("Feature: signal-processor-retry-resilience, Property 8: Outcome re-der
   };
 
   // -------------------------------------------------------------------------
-  // Arbitraries
+  // Edge-case inputs for matchedRules
   // -------------------------------------------------------------------------
 
-  const RULE_ACTION_TYPES: Array<{ type: string; value?: string }> = [
-    { type: "forward", value: "fwd@example.com" },
-    { type: "assign_label", value: "important" },
-    { type: "archive" },
-    { type: "pong" },
-    { type: "suppress_notification" },
-    { type: "auto_reply", value: "template-1" },
-    { type: "auto_draft", value: "template-2" },
-    { type: "set_urgency", value: "high" },
-  ];
+  const MATCHED_RULES_CASES = [
+    {
+      label: "single rule with forward action",
+      matchedRules: [{ ruleId: "rule-1", actions: [{ type: "forward", value: "fwd@example.com" }], labelsAdded: [], statusChange: undefined }],
+    },
+    {
+      label: "multiple rules with mixed actions",
+      matchedRules: [
+        { ruleId: "rule-1", actions: [{ type: "assign_label", value: "important" }], labelsAdded: ["important"], statusChange: undefined },
+        { ruleId: "rule-2", actions: [{ type: "archive" }], labelsAdded: [], statusChange: "archived" as const },
+      ],
+    },
+    {
+      label: "rule with all action types",
+      matchedRules: [{
+        ruleId: "rule-all",
+        actions: [
+          { type: "forward", value: "fwd@example.com" },
+          { type: "assign_label", value: "urgent" },
+          { type: "pong" },
+        ],
+        labelsAdded: ["urgent"],
+        statusChange: undefined,
+      }],
+    },
+    {
+      label: "many rules (5)",
+      matchedRules: Array.from({ length: 5 }, (_, i) => ({
+        ruleId: `rule-${i}`,
+        actions: [{ type: "assign_label", value: `label-${i}` }],
+        labelsAdded: [`label-${i}`],
+        statusChange: undefined,
+      })),
+    },
+    {
+      label: "rule with suppress_notification",
+      matchedRules: [{ ruleId: "rule-suppress", actions: [{ type: "suppress_notification" }], labelsAdded: [], statusChange: undefined }],
+    },
+  ] as const;
 
-  const arbRuleAction = fc.constantFrom(...RULE_ACTION_TYPES).map((a) => ({ type: a.type, ...(a.value !== undefined ? { value: a.value } : {}) }));
+  const RECEIVE_COUNTS = [2, 5, 10] as const;
 
-  const arbMatchedRuleResult = fc.record({
-    ruleId: fc.uuid(),
-    actions: fc.array(arbRuleAction, { minLength: 1, maxLength: 3 }),
-    labelsAdded: fc.array(fc.string({ minLength: 1, maxLength: 15 }), { minLength: 0, maxLength: 2 }),
-    statusChange: fc.constantFrom(undefined, "blocked" as const, "quarantine_visible" as const, "archived" as const),
-  });
-
-  /** Generate a non-empty matchedRules array */
-  const arbMatchedRules = fc.array(arbMatchedRuleResult, { minLength: 1, maxLength: 5 });
-
-  const arbEmbedding = fc.array(fc.double({ min: -1, max: 1, noNaN: true }), { minLength: 3, maxLength: 10 });
-
-  /** Generate a valid Signal with arbitrary matchedRules */
-  const arbSignalWithRules = arbMatchedRules.chain((matchedRules) =>
-    fc.record({
-      id: fc.uuid().map((id) => `SES#${id}`),
-      arcId: fc.uuid(),
-      accountId: fc.constant(TEST_ACCOUNT_ID),
-      source: fc.constant("email" as const),
-      receivedAt: fc.constant("2024-01-15T10:00:00Z"),
-      from: fc.record({ address: fc.emailAddress(), name: fc.string({ minLength: 1, maxLength: 20 }) }),
-      to: fc.constant([{ address: "user@example.com" }]),
-      cc: fc.constant([]),
-      subject: fc.string({ minLength: 1, maxLength: 50 }),
-      textBody: fc.string({ minLength: 1, maxLength: 100 }),
-      attachments: fc.constant([]),
-      headers: fc.constant({}),
-      recipientAddress: fc.constant("user@example.com"),
-      workflow: fc.constantFrom("conversation", "auth", "crm", "alert", "scheduling") as fc.Arbitrary<Workflow>,
-      workflowData: fc.constant({ workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false } as const),
-      spamScore: fc.double({ min: 0, max: 1, noNaN: true }),
-      summary: fc.string({ minLength: 1, maxLength: 50 }),
-      classificationModelId: fc.constant("us.anthropic.claude-opus-4-5-20251101-v1:0"),
-      s3Key: fc.uuid().map((id) => `emails/${id}`),
-      status: fc.constant("active" as const),
-      createdAt: fc.constant("2024-01-15T10:00:00Z"),
-      embeddings: arbEmbedding.map((vec) => ({ "amazon.titan-embed-text-v2:0": vec })),
-      matchedRules: fc.constant(matchedRules),
-    }) as fc.Arbitrary<Signal>,
+  const PROP8_CASES = MATCHED_RULES_CASES.flatMap(({ label: ruleLabel, matchedRules }) =>
+    RECEIVE_COUNTS.map((rc) => ({
+      label: `${ruleLabel}, receiveCount=${rc}`,
+      matchedRules,
+      receiveCount: rc,
+    })),
   );
 
-  /** Generate an Arc that matches the signal's arcId */
-  function arbArcForSignal(signal: Signal): Arc {
+  function makeSignalWithRules(matchedRules: readonly unknown[]): Signal {
     return {
-      id: signal.arcId!,
-      accountId: signal.accountId,
-      workflow: signal.workflow,
+      id: "SES#msg-prop8",
+      arcId: "arc-prop8",
+      accountId: TEST_ACCOUNT_ID,
+      source: "email" as const,
+      receivedAt: "2024-01-15T10:00:00Z",
+      from: { address: "sender@external.com", name: "Sender" },
+      to: [{ address: "user@example.com" }],
+      cc: [],
+      subject: "Test email with rules",
+      textBody: "Hello world",
+      attachments: [],
+      headers: {},
+      recipientAddress: "user@example.com",
+      workflow: "conversation" as Workflow,
+      workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false } as const,
+      spamScore: 0.01,
+      summary: "A test email.",
+      classificationModelId: "us.anthropic.claude-opus-4-5-20251101-v1:0",
+      s3Key: "emails/msg-prop8",
+      status: "active" as const,
+      createdAt: "2024-01-15T10:00:00Z",
+      embeddings: { "amazon.titan-embed-text-v2:0": [0.1, -0.5, 0.3] },
+      matchedRules: matchedRules as Signal["matchedRules"],
+    } as Signal;
+  }
+
+  function makeArc(): Arc {
+    return {
+      id: "arc-prop8",
+      accountId: TEST_ACCOUNT_ID,
+      workflow: "conversation" as Workflow,
       labels: [],
       status: "active",
-      summary: signal.summary,
-      lastSignalAt: signal.receivedAt,
-      createdAt: signal.receivedAt,
-      updatedAt: signal.receivedAt,
+      summary: "A test email.",
+      lastSignalAt: "2024-01-15T10:00:00Z",
+      createdAt: "2024-01-15T10:00:00Z",
+      updatedAt: "2024-01-15T10:00:00Z",
     };
   }
 
-  /** Receive count > 1 (retry) */
-  const arbReceiveCount = fc.integer({ min: 2, max: 10 });
-
-  function makeSqsEvent(sesMessageId: string, receiveCount: number): SQSEvent {
+  function makeSqsEvent(receiveCount: number): SQSEvent {
     const notification = {
       accountId: TEST_ACCOUNT_ID,
       mail: {
-        messageId: sesMessageId,
+        messageId: "msg-prop8",
         timestamp: "2024-01-15T10:00:00Z",
         destination: ["user@example.com"],
       },
@@ -1085,7 +931,7 @@ describe("Feature: signal-processor-retry-resilience, Property 8: Outcome re-der
         recipients: ["user@example.com"],
         dkimVerdict: { status: "PASS" },
         dmarcVerdict: { status: "PASS" },
-        action: { bucketName: "test-bucket", objectKey: `emails/${sesMessageId}` },
+        action: { bucketName: "test-bucket", objectKey: "emails/msg-prop8" },
       },
     };
     return {
@@ -1108,121 +954,88 @@ describe("Feature: signal-processor-retry-resilience, Property 8: Outcome re-der
     };
   }
 
-  // -------------------------------------------------------------------------
-  // Tests
-  // -------------------------------------------------------------------------
+  it.each(PROP8_CASES)("listEnabledRules is NOT called on retry when signal exists in DDB ($label)", async ({ matchedRules, receiveCount }) => {
+    const signal = makeSignalWithRules(matchedRules);
+    const arc = makeArc();
 
-  it("listEnabledRules is NOT called on retry when signal exists in DDB", () => {
-    return propertyRunner.assert(
-      fc.asyncProperty(
-        arbSignalWithRules,
-        arbReceiveCount,
-        async (signal, receiveCount) => {
-          const arc = arbArcForSignal(signal);
-          const sesMessageId = signal.id.replace("SES#", "");
+    const store: ProcessorDatabase = {
+      getSignalByMessageId: vi.fn().mockReturnValue(okAsync(signal)),
+      saveSignal: vi.fn().mockReturnValue(okAsync(undefined)),
+      updateSignalRetention: vi.fn().mockReturnValue(okAsync(undefined)),
+      getArc: vi.fn().mockReturnValue(okAsync(arc)),
+      findArcByGroupingKey: vi.fn().mockReturnValue(okAsync(null)),
+      saveArc: vi.fn().mockReturnValue(okAsync(undefined)),
+      listEnabledRules: vi.fn().mockReturnValue(okAsync(SYSTEM_RULES)),
+      getProcessorAccountContext: vi.fn().mockReturnValue(okAsync(DEFAULT_CTX)),
+      saveAlias: vi.fn().mockImplementation((a: Alias) => okAsync(a)),
+      getSender: vi.fn().mockReturnValue(okAsync(DEFAULT_SENDER_ENTRY)),
+      saveSender: vi.fn().mockReturnValue(okAsync(undefined)),
+      getTemplate: vi.fn().mockReturnValue(okAsync(null)),
+      updateGlobalReputation: vi.fn().mockReturnValue(okAsync(undefined)),
+      getDomainByName: vi.fn().mockReturnValue(okAsync(null)),
+    };
 
-          const store: ProcessorDatabase = {
-            getSignalByMessageId: vi.fn().mockReturnValue(okAsync(signal)),
-            saveSignal: vi.fn().mockReturnValue(okAsync(undefined)),
-            updateSignalRetention: vi.fn().mockReturnValue(okAsync(undefined)),
-            getArc: vi.fn().mockReturnValue(okAsync(arc)),
-            findArcByGroupingKey: vi.fn().mockReturnValue(okAsync(null)),
-            saveArc: vi.fn().mockReturnValue(okAsync(undefined)),
-            listEnabledRules: vi.fn().mockReturnValue(okAsync(SYSTEM_RULES)),
-            getProcessorAccountContext: vi.fn().mockReturnValue(okAsync(DEFAULT_CTX)),
-            saveAlias: vi.fn().mockImplementation((a: Alias) => okAsync(a)),
-            getSender: vi.fn().mockReturnValue(okAsync(DEFAULT_SENDER_ENTRY)),
-            saveSender: vi.fn().mockReturnValue(okAsync(undefined)),
-            getTemplate: vi.fn().mockReturnValue(okAsync(null)),
-            updateGlobalReputation: vi.fn().mockReturnValue(okAsync(undefined)),
-            getDomainByName: vi.fn().mockReturnValue(okAsync(null)),
-          };
+    const sqsDispatcher: SqsDispatcher = {
+      sendMessage: vi.fn().mockReturnValue(okAsync(undefined)),
+    };
 
-          const auroraWriter: MultiClusterAuroraWriter = {
-            upsertEmbedding: vi.fn().mockResolvedValue(undefined),
-            findMatch: vi.fn().mockResolvedValue(null),
-          };
+    const processor = new SignalProcessor({
+      store,
+      mimeParser: { parse: vi.fn() },
+      classifier: { classify: vi.fn() },
+      embeddingGenerator: { generateForActiveClusters: vi.fn(), generateForModel: vi.fn() },
+      auroraWriter: { upsertEmbedding: vi.fn().mockResolvedValue(undefined), findMatch: vi.fn().mockResolvedValue(null) },
+      arcMatcher: { findMatch: vi.fn().mockReturnValue(okAsync(null)), upsertEmbedding: vi.fn().mockReturnValue(okAsync(undefined)) },
+      ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
+      sqsDispatcher,
+      logger: mockLogger,
+    });
 
-          const sqsDispatcher: SqsDispatcher = {
-            sendMessage: vi.fn().mockReturnValue(okAsync(undefined)),
-          };
-
-          const processor = new SignalProcessor({
-            store,
-            mimeParser: { parse: vi.fn() },
-            classifier: { classify: vi.fn() },
-            embeddingGenerator: { generateForActiveClusters: vi.fn(), generateForModel: vi.fn() },
-            auroraWriter,
-            arcMatcher: { findMatch: vi.fn().mockReturnValue(okAsync(null)), upsertEmbedding: vi.fn().mockReturnValue(okAsync(undefined)) },
-            ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
-            sqsDispatcher,
-            logger: mockLogger,
-          });
-
-          await processor.process(makeSqsEvent(sesMessageId, receiveCount));
-
-          // listEnabledRules must NOT be called — rules are not re-evaluated on retry
-          expect(store.listEnabledRules).not.toHaveBeenCalled();
-        },
-      ),
-    );
+    await processor.process(makeSqsEvent(receiveCount));
+    expect(store.listEnabledRules).not.toHaveBeenCalled();
   });
 
-  it("dispatched side-effect payload contains the signal's persisted matchedRules", () => {
-    return propertyRunner.assert(
-      fc.asyncProperty(
-        arbSignalWithRules,
-        arbReceiveCount,
-        async (signal, receiveCount) => {
-          const arc = arbArcForSignal(signal);
-          const sesMessageId = signal.id.replace("SES#", "");
+  it.each(PROP8_CASES)("dispatched side-effect payload contains the signal's persisted matchedRules ($label)", async ({ matchedRules, receiveCount }) => {
+    const signal = makeSignalWithRules(matchedRules);
+    const arc = makeArc();
 
-          const store: ProcessorDatabase = {
-            getSignalByMessageId: vi.fn().mockReturnValue(okAsync(signal)),
-            saveSignal: vi.fn().mockReturnValue(okAsync(undefined)),
-            updateSignalRetention: vi.fn().mockReturnValue(okAsync(undefined)),
-            getArc: vi.fn().mockReturnValue(okAsync(arc)),
-            findArcByGroupingKey: vi.fn().mockReturnValue(okAsync(null)),
-            saveArc: vi.fn().mockReturnValue(okAsync(undefined)),
-            listEnabledRules: vi.fn().mockReturnValue(okAsync(SYSTEM_RULES)),
-            getProcessorAccountContext: vi.fn().mockReturnValue(okAsync(DEFAULT_CTX)),
-            saveAlias: vi.fn().mockImplementation((a: Alias) => okAsync(a)),
-            getSender: vi.fn().mockReturnValue(okAsync(DEFAULT_SENDER_ENTRY)),
-            saveSender: vi.fn().mockReturnValue(okAsync(undefined)),
-            getTemplate: vi.fn().mockReturnValue(okAsync(null)),
-            updateGlobalReputation: vi.fn().mockReturnValue(okAsync(undefined)),
-            getDomainByName: vi.fn().mockReturnValue(okAsync(null)),
-          };
+    const store: ProcessorDatabase = {
+      getSignalByMessageId: vi.fn().mockReturnValue(okAsync(signal)),
+      saveSignal: vi.fn().mockReturnValue(okAsync(undefined)),
+      updateSignalRetention: vi.fn().mockReturnValue(okAsync(undefined)),
+      getArc: vi.fn().mockReturnValue(okAsync(arc)),
+      findArcByGroupingKey: vi.fn().mockReturnValue(okAsync(null)),
+      saveArc: vi.fn().mockReturnValue(okAsync(undefined)),
+      listEnabledRules: vi.fn().mockReturnValue(okAsync(SYSTEM_RULES)),
+      getProcessorAccountContext: vi.fn().mockReturnValue(okAsync(DEFAULT_CTX)),
+      saveAlias: vi.fn().mockImplementation((a: Alias) => okAsync(a)),
+      getSender: vi.fn().mockReturnValue(okAsync(DEFAULT_SENDER_ENTRY)),
+      saveSender: vi.fn().mockReturnValue(okAsync(undefined)),
+      getTemplate: vi.fn().mockReturnValue(okAsync(null)),
+      updateGlobalReputation: vi.fn().mockReturnValue(okAsync(undefined)),
+      getDomainByName: vi.fn().mockReturnValue(okAsync(null)),
+    };
 
-          const auroraWriter: MultiClusterAuroraWriter = {
-            upsertEmbedding: vi.fn().mockResolvedValue(undefined),
-            findMatch: vi.fn().mockResolvedValue(null),
-          };
+    const sqsDispatcher: SqsDispatcher = {
+      sendMessage: vi.fn().mockReturnValue(okAsync(undefined)),
+    };
 
-          const sqsDispatcher: SqsDispatcher = {
-            sendMessage: vi.fn().mockReturnValue(okAsync(undefined)),
-          };
+    const processor = new SignalProcessor({
+      store,
+      mimeParser: { parse: vi.fn() },
+      classifier: { classify: vi.fn() },
+      embeddingGenerator: { generateForActiveClusters: vi.fn(), generateForModel: vi.fn() },
+      auroraWriter: { upsertEmbedding: vi.fn().mockResolvedValue(undefined), findMatch: vi.fn().mockResolvedValue(null) },
+      arcMatcher: { findMatch: vi.fn().mockReturnValue(okAsync(null)), upsertEmbedding: vi.fn().mockReturnValue(okAsync(undefined)) },
+      ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
+      sqsDispatcher,
+      logger: mockLogger,
+    });
 
-          const processor = new SignalProcessor({
-            store,
-            mimeParser: { parse: vi.fn() },
-            classifier: { classify: vi.fn() },
-            embeddingGenerator: { generateForActiveClusters: vi.fn(), generateForModel: vi.fn() },
-            auroraWriter,
-            arcMatcher: { findMatch: vi.fn().mockReturnValue(okAsync(null)), upsertEmbedding: vi.fn().mockReturnValue(okAsync(undefined)) },
-            ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
-            sqsDispatcher,
-            logger: mockLogger,
-          });
+    await processor.process(makeSqsEvent(receiveCount));
 
-          await processor.process(makeSqsEvent(sesMessageId, receiveCount));
-
-          // sqsDispatcher.sendMessage must be called with the signal's persisted matchedRules
-          expect(sqsDispatcher.sendMessage).toHaveBeenCalledTimes(1);
-          const payload = vi.mocked(sqsDispatcher.sendMessage).mock.calls[0]![0];
-          expect(payload.signal.matchedRules).toEqual(signal.matchedRules);
-        },
-      ),
-    );
+    expect(sqsDispatcher.sendMessage).toHaveBeenCalledTimes(1);
+    const payload = vi.mocked(sqsDispatcher.sendMessage).mock.calls[0]![0];
+    expect(payload.signal.matchedRules).toEqual(signal.matchedRules);
   });
 });

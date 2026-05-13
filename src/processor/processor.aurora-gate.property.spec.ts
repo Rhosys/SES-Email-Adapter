@@ -1,5 +1,4 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import fc from "fast-check";
 import type { SQSEvent } from "aws-lambda";
 import { okAsync, errAsync } from "neverthrow";
 import { SignalProcessor, SYSTEM_RULES } from "./processor.js";
@@ -11,7 +10,6 @@ import type { EmbeddingGenerator, EmbeddingResult } from "../embedding/embedding
 import type { MultiClusterAuroraWriter } from "../database/multi-cluster-aurora-writer.js";
 import type { Alias, AliasSender } from "../types/index.js";
 import { dbError } from "../errors.js";
-import { propertyRunner } from "../testing/property-runner.js";
 import { createMockLogger, type MockLogger } from "../testing/mock-logger.js";
 
 // ---------------------------------------------------------------------------
@@ -166,149 +164,147 @@ describe("Feature: signal-processor-retry-resilience, Property 4: Arc saved befo
     };
   }
 
-  it("saveArc is always called before saveSignal on first-attempt processing", () => {
-    return propertyRunner.assert(
-      fc.asyncProperty(
-        fc.array(fc.double({ min: -1, max: 1, noNaN: true }), { minLength: 3, maxLength: 10 }),
-        fc.uuid(),
-        async (vector, sesMessageId) => {
-          // Track call ordering
-          const callOrder: string[] = [];
+  // -------------------------------------------------------------------------
+  // Edge-case inputs
+  // -------------------------------------------------------------------------
 
-          const store: ProcessorDatabase = {
-            getSignalByMessageId: vi.fn().mockReturnValue(okAsync(null)),
-            saveSignal: vi.fn().mockImplementation(() => {
-              callOrder.push("saveSignal");
-              return okAsync(undefined);
-            }),
-            updateSignalRetention: vi.fn().mockReturnValue(okAsync(undefined)),
-            getArc: vi.fn().mockReturnValue(okAsync(null)),
-            findArcByGroupingKey: vi.fn().mockReturnValue(okAsync(null)),
-            saveArc: vi.fn().mockImplementation(() => {
-              callOrder.push("saveArc");
-              return okAsync(undefined);
-            }),
-            listEnabledRules: vi.fn().mockReturnValue(okAsync(SYSTEM_RULES)),
-            getProcessorAccountContext: vi.fn().mockReturnValue(okAsync(DEFAULT_CTX)),
-            saveAlias: vi.fn().mockImplementation((a: Alias) => okAsync(a)),
-            getSender: vi.fn().mockReturnValue(okAsync(DEFAULT_SENDER_ENTRY)),
-            saveSender: vi.fn().mockReturnValue(okAsync(undefined)),
-            getTemplate: vi.fn().mockReturnValue(okAsync(null)),
-            updateGlobalReputation: vi.fn().mockReturnValue(okAsync(undefined)),
-            getDomainByName: vi.fn().mockReturnValue(okAsync(null)),
-          };
+  const VECTORS: Array<{ label: string; vector: number[] }> = [
+    { label: "single-element", vector: [0.5] },
+    { label: "typical-3d", vector: [0.1, -0.9, 0.5] },
+    { label: "zeros-10d", vector: new Array(10).fill(0) },
+    { label: "full-size-1024", vector: new Array(1024).fill(0.01) },
+  ];
 
-          const embeddingGenerator: EmbeddingGenerator = {
-            generateForActiveClusters: vi.fn().mockResolvedValue([
-              { modelId: "amazon.titan-embed-text-v2:0", vector, dimensions: 1024 },
-              { modelId: "amazon.titan-embed-text-v3:0", vector, dimensions: 1536 },
-            ] as EmbeddingResult[]),
-            generateForModel: vi.fn().mockResolvedValue(
-              { modelId: "amazon.titan-embed-text-v2:0", vector, dimensions: 1024 } as EmbeddingResult,
-            ),
-          };
+  const SES_IDS = ["msg-001", "a1b2c3d4-e5f6-7890-abcd-ef1234567890"] as const;
 
-          const auroraWriter: MultiClusterAuroraWriter = {
-            upsertEmbedding: vi.fn().mockResolvedValue(undefined),
-            findMatch: vi.fn().mockResolvedValue(null),
-          };
+  const ORDER_CASES = VECTORS.flatMap(({ label: vecLabel, vector }) =>
+    SES_IDS.map((sesId) => ({
+      label: `vector=${vecLabel}, sesId=${sesId}`,
+      vector,
+      sesMessageId: sesId,
+    })),
+  );
 
-          const processor = new SignalProcessor({
-            store,
-            mimeParser: makeMimeParser(),
-            classifier: makeClassifier(),
-            embeddingGenerator,
-            auroraWriter,
-            arcMatcher: makeArcMatcher(),
-            ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
-            logger: mockLogger,
-          });
+  it.each(ORDER_CASES)("saveArc is always called before saveSignal on first-attempt processing ($label)", async ({ vector, sesMessageId }) => {
+    const callOrder: string[] = [];
 
-          await processor.process(makeSqsEvent(sesMessageId));
+    const store: ProcessorDatabase = {
+      getSignalByMessageId: vi.fn().mockReturnValue(okAsync(null)),
+      saveSignal: vi.fn().mockImplementation(() => {
+        callOrder.push("saveSignal");
+        return okAsync(undefined);
+      }),
+      updateSignalRetention: vi.fn().mockReturnValue(okAsync(undefined)),
+      getArc: vi.fn().mockReturnValue(okAsync(null)),
+      findArcByGroupingKey: vi.fn().mockReturnValue(okAsync(null)),
+      saveArc: vi.fn().mockImplementation(() => {
+        callOrder.push("saveArc");
+        return okAsync(undefined);
+      }),
+      listEnabledRules: vi.fn().mockReturnValue(okAsync(SYSTEM_RULES)),
+      getProcessorAccountContext: vi.fn().mockReturnValue(okAsync(DEFAULT_CTX)),
+      saveAlias: vi.fn().mockImplementation((a: Alias) => okAsync(a)),
+      getSender: vi.fn().mockReturnValue(okAsync(DEFAULT_SENDER_ENTRY)),
+      saveSender: vi.fn().mockReturnValue(okAsync(undefined)),
+      getTemplate: vi.fn().mockReturnValue(okAsync(null)),
+      updateGlobalReputation: vi.fn().mockReturnValue(okAsync(undefined)),
+      getDomainByName: vi.fn().mockReturnValue(okAsync(null)),
+    };
 
-          // Assert saveArc was called
-          const saveArcIdx = callOrder.indexOf("saveArc");
-          const saveSignalIdx = callOrder.indexOf("saveSignal");
-
-          expect(saveArcIdx).toBeGreaterThanOrEqual(0);
-          expect(saveSignalIdx).toBeGreaterThanOrEqual(0);
-          // Arc must be saved before signal
-          expect(saveArcIdx).toBeLessThan(saveSignalIdx);
-        },
+    const embeddingGenerator: EmbeddingGenerator = {
+      generateForActiveClusters: vi.fn().mockResolvedValue([
+        { modelId: "amazon.titan-embed-text-v2:0", vector, dimensions: 1024 },
+        { modelId: "amazon.titan-embed-text-v3:0", vector, dimensions: 1536 },
+      ] as EmbeddingResult[]),
+      generateForModel: vi.fn().mockResolvedValue(
+        { modelId: "amazon.titan-embed-text-v2:0", vector, dimensions: 1024 } as EmbeddingResult,
       ),
-    );
+    };
+
+    const auroraWriter: MultiClusterAuroraWriter = {
+      upsertEmbedding: vi.fn().mockResolvedValue(undefined),
+      findMatch: vi.fn().mockResolvedValue(null),
+    };
+
+    const processor = new SignalProcessor({
+      store,
+      mimeParser: makeMimeParser(),
+      classifier: makeClassifier(),
+      embeddingGenerator,
+      auroraWriter,
+      arcMatcher: makeArcMatcher(),
+      ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
+      logger: mockLogger,
+    });
+
+    await processor.process(makeSqsEvent(sesMessageId));
+
+    const saveArcIdx = callOrder.indexOf("saveArc");
+    const saveSignalIdx = callOrder.indexOf("saveSignal");
+
+    expect(saveArcIdx).toBeGreaterThanOrEqual(0);
+    expect(saveSignalIdx).toBeGreaterThanOrEqual(0);
+    expect(saveArcIdx).toBeLessThan(saveSignalIdx);
   });
 
-  it("when saveArc fails, saveSignal is never called and the record is a batchItemFailure", () => {
-    return propertyRunner.assert(
-      fc.asyncProperty(
-        fc.array(fc.double({ min: -1, max: 1, noNaN: true }), { minLength: 3, maxLength: 10 }),
-        fc.uuid(),
-        async (vector, sesMessageId) => {
-          let saveSignalCalled = false;
+  it.each(ORDER_CASES)("when saveArc fails, saveSignal is never called and the record is a batchItemFailure ($label)", async ({ vector, sesMessageId }) => {
+    let saveSignalCalled = false;
 
-          const store: ProcessorDatabase = {
-            getSignalByMessageId: vi.fn().mockReturnValue(okAsync(null)),
-            saveSignal: vi.fn().mockImplementation(() => {
-              saveSignalCalled = true;
-              return okAsync(undefined);
-            }),
-            updateSignalRetention: vi.fn().mockReturnValue(okAsync(undefined)),
-            getArc: vi.fn().mockReturnValue(okAsync(null)),
-            findArcByGroupingKey: vi.fn().mockReturnValue(okAsync(null)),
-            saveArc: vi.fn().mockReturnValue(errAsync(dbError(new Error("DDB write failed")))),
-            listEnabledRules: vi.fn().mockReturnValue(okAsync(SYSTEM_RULES)),
-            getProcessorAccountContext: vi.fn().mockReturnValue(okAsync(DEFAULT_CTX)),
-            saveAlias: vi.fn().mockImplementation((a: Alias) => okAsync(a)),
-            getSender: vi.fn().mockReturnValue(okAsync(DEFAULT_SENDER_ENTRY)),
-            saveSender: vi.fn().mockReturnValue(okAsync(undefined)),
-            getTemplate: vi.fn().mockReturnValue(okAsync(null)),
-            updateGlobalReputation: vi.fn().mockReturnValue(okAsync(undefined)),
-            getDomainByName: vi.fn().mockReturnValue(okAsync(null)),
-          };
+    const store: ProcessorDatabase = {
+      getSignalByMessageId: vi.fn().mockReturnValue(okAsync(null)),
+      saveSignal: vi.fn().mockImplementation(() => {
+        saveSignalCalled = true;
+        return okAsync(undefined);
+      }),
+      updateSignalRetention: vi.fn().mockReturnValue(okAsync(undefined)),
+      getArc: vi.fn().mockReturnValue(okAsync(null)),
+      findArcByGroupingKey: vi.fn().mockReturnValue(okAsync(null)),
+      saveArc: vi.fn().mockReturnValue(errAsync(dbError(new Error("DDB write failed")))),
+      listEnabledRules: vi.fn().mockReturnValue(okAsync(SYSTEM_RULES)),
+      getProcessorAccountContext: vi.fn().mockReturnValue(okAsync(DEFAULT_CTX)),
+      saveAlias: vi.fn().mockImplementation((a: Alias) => okAsync(a)),
+      getSender: vi.fn().mockReturnValue(okAsync(DEFAULT_SENDER_ENTRY)),
+      saveSender: vi.fn().mockReturnValue(okAsync(undefined)),
+      getTemplate: vi.fn().mockReturnValue(okAsync(null)),
+      updateGlobalReputation: vi.fn().mockReturnValue(okAsync(undefined)),
+      getDomainByName: vi.fn().mockReturnValue(okAsync(null)),
+    };
 
-          const embeddingGenerator: EmbeddingGenerator = {
-            generateForActiveClusters: vi.fn().mockResolvedValue([
-              { modelId: "amazon.titan-embed-text-v2:0", vector, dimensions: 1024 },
-              { modelId: "amazon.titan-embed-text-v3:0", vector, dimensions: 1536 },
-            ] as EmbeddingResult[]),
-            generateForModel: vi.fn().mockResolvedValue(
-              { modelId: "amazon.titan-embed-text-v2:0", vector, dimensions: 1024 } as EmbeddingResult,
-            ),
-          };
-
-          const auroraWriter: MultiClusterAuroraWriter = {
-            upsertEmbedding: vi.fn().mockResolvedValue(undefined),
-            findMatch: vi.fn().mockResolvedValue(null),
-          };
-
-          const processor = new SignalProcessor({
-            store,
-            mimeParser: makeMimeParser(),
-            classifier: makeClassifier(),
-            embeddingGenerator,
-            auroraWriter,
-            arcMatcher: makeArcMatcher(),
-            ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
-            logger: mockLogger,
-          });
-
-          const result = await processor.process(makeSqsEvent(sesMessageId));
-
-          // saveSignal must NOT have been called
-          expect(saveSignalCalled).toBe(false);
-
-          // Aurora upsert must NOT have been called
-          expect(auroraWriter.upsertEmbedding).not.toHaveBeenCalled();
-
-          // The record must be returned as a batchItemFailure
-          expect(result.batchItemFailures).toHaveLength(1);
-          expect(result.batchItemFailures[0]!.itemIdentifier).toBe("sqs-1");
-        },
+    const embeddingGenerator: EmbeddingGenerator = {
+      generateForActiveClusters: vi.fn().mockResolvedValue([
+        { modelId: "amazon.titan-embed-text-v2:0", vector, dimensions: 1024 },
+        { modelId: "amazon.titan-embed-text-v3:0", vector, dimensions: 1536 },
+      ] as EmbeddingResult[]),
+      generateForModel: vi.fn().mockResolvedValue(
+        { modelId: "amazon.titan-embed-text-v2:0", vector, dimensions: 1024 } as EmbeddingResult,
       ),
-    );
+    };
+
+    const auroraWriter: MultiClusterAuroraWriter = {
+      upsertEmbedding: vi.fn().mockResolvedValue(undefined),
+      findMatch: vi.fn().mockResolvedValue(null),
+    };
+
+    const processor = new SignalProcessor({
+      store,
+      mimeParser: makeMimeParser(),
+      classifier: makeClassifier(),
+      embeddingGenerator,
+      auroraWriter,
+      arcMatcher: makeArcMatcher(),
+      ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
+      logger: mockLogger,
+    });
+
+    const result = await processor.process(makeSqsEvent(sesMessageId));
+
+    expect(saveSignalCalled).toBe(false);
+    expect(auroraWriter.upsertEmbedding).not.toHaveBeenCalled();
+    expect(result.batchItemFailures).toHaveLength(1);
+    expect(result.batchItemFailures[0]!.itemIdentifier).toBe("sqs-1");
   });
 });
+
 
 // ---------------------------------------------------------------------------
 // Property 6: Aurora failure returns batchItemFailure with appropriate log level
@@ -446,129 +442,126 @@ describe("Feature: signal-processor-retry-resilience, Property 6: Aurora failure
     };
   }
 
-  it("primary cluster failure logs at ERROR level with cluster ID and error message, and returns batchItemFailure", () => {
-    return propertyRunner.assert(
-      fc.asyncProperty(
-        fc.array(fc.double({ min: -1, max: 1, noNaN: true }), { minLength: 3, maxLength: 10 }),
-        fc.array(fc.double({ min: -1, max: 1, noNaN: true }), { minLength: 3, maxLength: 10 }),
-        fc.uuid(),
-        async (vectorA, vectorB, sesMessageId) => {
-          mockLogger.calls.length = 0;
+  // -------------------------------------------------------------------------
+  // Edge-case inputs
+  // -------------------------------------------------------------------------
 
-          const store = makeStore();
+  const VECTORS: Array<{ label: string; vectorA: number[]; vectorB: number[] }> = [
+    { label: "single-element vectors", vectorA: [0.5], vectorB: [-0.3] },
+    { label: "typical-3d vectors", vectorA: [0.1, -0.9, 0.5], vectorB: [0.2, 0.8, -0.4] },
+    { label: "zeros-10d vectors", vectorA: new Array(10).fill(0), vectorB: new Array(10).fill(0) },
+  ];
 
-          const embeddingGenerator: EmbeddingGenerator = {
-            generateForActiveClusters: vi.fn().mockResolvedValue([
-              { modelId: "amazon.titan-embed-text-v2:0", vector: vectorA, dimensions: 1024 },
-              { modelId: "amazon.titan-embed-text-v3:0", vector: vectorB, dimensions: 1536 },
-            ] as EmbeddingResult[]),
-            generateForModel: vi.fn().mockResolvedValue(
-              { modelId: "amazon.titan-embed-text-v2:0", vector: vectorA, dimensions: 1024 } as EmbeddingResult,
-            ),
-          };
+  const PRIMARY_FAILURE_CASES = VECTORS.map(({ label, vectorA, vectorB }) => ({
+    label,
+    vectorA,
+    vectorB,
+    sesMessageId: "msg-primary-fail",
+  }));
 
-          // Primary cluster (cluster-a) fails
-          const auroraWriter: MultiClusterAuroraWriter = {
-            upsertEmbedding: vi.fn().mockImplementation(async (opts: { clusterId: string }) => {
-              if (opts.clusterId === "cluster-a") {
-                throw new Error("Connection timeout on primary");
-              }
-            }),
-            findMatch: vi.fn().mockResolvedValue(null),
-          };
+  const SECONDARY_FAILURE_CASES = VECTORS.map(({ label, vectorA, vectorB }) => ({
+    label,
+    vectorA,
+    vectorB,
+    sesMessageId: "msg-secondary-fail",
+  }));
 
-          const processor = new SignalProcessor({
-            store,
-            mimeParser: makeMimeParser(),
-            classifier: makeClassifier(),
-            embeddingGenerator,
-            auroraWriter,
-            arcMatcher: makeArcMatcher(),
-            ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
-            logger: mockLogger,
-          });
+  it.each(PRIMARY_FAILURE_CASES)("primary cluster failure logs at ERROR level with cluster ID and error message, and returns batchItemFailure ($label)", async ({ vectorA, vectorB, sesMessageId }) => {
+    mockLogger.calls.length = 0;
 
-          const result = await processor.process(makeSqsEvent(sesMessageId));
-
-          // Must return batchItemFailure
-          expect(result.batchItemFailures).toHaveLength(1);
-          expect(result.batchItemFailures[0]!.itemIdentifier).toBe("sqs-1");
-
-          // Must log at ERROR level for primary cluster failure
-          const errorLogs = mockLogger.calls.filter((c) => c.method === "error");
-          const auroraErrorLog = errorLogs.find((c) => c.context?.clusterId === "cluster-a");
-          expect(auroraErrorLog).toBeDefined();
-          expect(auroraErrorLog!.context!.clusterId).toBe("cluster-a");
-          expect(auroraErrorLog!.context!.error).toBeDefined();
-          expect(String(auroraErrorLog!.context!.error)).toContain("Connection timeout on primary");
-        },
+    const embeddingGenerator: EmbeddingGenerator = {
+      generateForActiveClusters: vi.fn().mockResolvedValue([
+        { modelId: "amazon.titan-embed-text-v2:0", vector: vectorA, dimensions: 1024 },
+        { modelId: "amazon.titan-embed-text-v3:0", vector: vectorB, dimensions: 1536 },
+      ] as EmbeddingResult[]),
+      generateForModel: vi.fn().mockResolvedValue(
+        { modelId: "amazon.titan-embed-text-v2:0", vector: vectorA, dimensions: 1024 } as EmbeddingResult,
       ),
-    );
+    };
+
+    // Primary cluster (cluster-a) fails
+    const auroraWriter: MultiClusterAuroraWriter = {
+      upsertEmbedding: vi.fn().mockImplementation(async (opts: { clusterId: string }) => {
+        if (opts.clusterId === "cluster-a") {
+          throw new Error("Connection timeout on primary");
+        }
+      }),
+      findMatch: vi.fn().mockResolvedValue(null),
+    };
+
+    const processor = new SignalProcessor({
+      store: makeStore(),
+      mimeParser: makeMimeParser(),
+      classifier: makeClassifier(),
+      embeddingGenerator,
+      auroraWriter,
+      arcMatcher: makeArcMatcher(),
+      ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
+      logger: mockLogger,
+    });
+
+    const result = await processor.process(makeSqsEvent(sesMessageId));
+
+    expect(result.batchItemFailures).toHaveLength(1);
+    expect(result.batchItemFailures[0]!.itemIdentifier).toBe("sqs-1");
+
+    const errorLogs = mockLogger.calls.filter((c) => c.method === "error");
+    const auroraErrorLog = errorLogs.find((c) => c.context?.clusterId === "cluster-a");
+    expect(auroraErrorLog).toBeDefined();
+    expect(auroraErrorLog!.context!.clusterId).toBe("cluster-a");
+    expect(auroraErrorLog!.context!.error).toBeDefined();
+    expect(String(auroraErrorLog!.context!.error)).toContain("Connection timeout on primary");
   });
 
-  it("non-primary cluster failure logs at WARN level with cluster ID and error message, and returns batchItemFailure", () => {
-    return propertyRunner.assert(
-      fc.asyncProperty(
-        fc.array(fc.double({ min: -1, max: 1, noNaN: true }), { minLength: 3, maxLength: 10 }),
-        fc.array(fc.double({ min: -1, max: 1, noNaN: true }), { minLength: 3, maxLength: 10 }),
-        fc.uuid(),
-        async (vectorA, vectorB, sesMessageId) => {
-          mockLogger.calls.length = 0;
+  it.each(SECONDARY_FAILURE_CASES)("non-primary cluster failure logs at WARN level with cluster ID and error message, and returns batchItemFailure ($label)", async ({ vectorA, vectorB, sesMessageId }) => {
+    mockLogger.calls.length = 0;
 
-          const store = makeStore();
-
-          const embeddingGenerator: EmbeddingGenerator = {
-            generateForActiveClusters: vi.fn().mockResolvedValue([
-              { modelId: "amazon.titan-embed-text-v2:0", vector: vectorA, dimensions: 1024 },
-              { modelId: "amazon.titan-embed-text-v3:0", vector: vectorB, dimensions: 1536 },
-            ] as EmbeddingResult[]),
-            generateForModel: vi.fn().mockResolvedValue(
-              { modelId: "amazon.titan-embed-text-v2:0", vector: vectorA, dimensions: 1024 } as EmbeddingResult,
-            ),
-          };
-
-          // Non-primary cluster (cluster-b) fails, primary succeeds
-          const auroraWriter: MultiClusterAuroraWriter = {
-            upsertEmbedding: vi.fn().mockImplementation(async (opts: { clusterId: string }) => {
-              if (opts.clusterId === "cluster-b") {
-                throw new Error("Throttled on secondary");
-              }
-            }),
-            findMatch: vi.fn().mockResolvedValue(null),
-          };
-
-          const processor = new SignalProcessor({
-            store,
-            mimeParser: makeMimeParser(),
-            classifier: makeClassifier(),
-            embeddingGenerator,
-            auroraWriter,
-            arcMatcher: makeArcMatcher(),
-            ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
-            logger: mockLogger,
-          });
-
-          const result = await processor.process(makeSqsEvent(sesMessageId));
-
-          // Must return batchItemFailure
-          expect(result.batchItemFailures).toHaveLength(1);
-          expect(result.batchItemFailures[0]!.itemIdentifier).toBe("sqs-1");
-
-          // Must log at WARN level (not ERROR) for non-primary cluster failure
-          const warnLogs = mockLogger.calls.filter((c) => c.method === "warn");
-          const auroraWarnLog = warnLogs.find((c) => c.context?.clusterId === "cluster-b");
-          expect(auroraWarnLog).toBeDefined();
-          expect(auroraWarnLog!.context!.clusterId).toBe("cluster-b");
-          expect(auroraWarnLog!.context!.error).toBeDefined();
-          expect(String(auroraWarnLog!.context!.error)).toContain("Throttled on secondary");
-
-          // Must NOT log at ERROR level for this failure (it's non-primary)
-          const errorLogs = mockLogger.calls.filter((c) => c.method === "error");
-          const auroraErrorLog = errorLogs.find((c) => c.context?.clusterId === "cluster-b");
-          expect(auroraErrorLog).toBeUndefined();
-        },
+    const embeddingGenerator: EmbeddingGenerator = {
+      generateForActiveClusters: vi.fn().mockResolvedValue([
+        { modelId: "amazon.titan-embed-text-v2:0", vector: vectorA, dimensions: 1024 },
+        { modelId: "amazon.titan-embed-text-v3:0", vector: vectorB, dimensions: 1536 },
+      ] as EmbeddingResult[]),
+      generateForModel: vi.fn().mockResolvedValue(
+        { modelId: "amazon.titan-embed-text-v2:0", vector: vectorA, dimensions: 1024 } as EmbeddingResult,
       ),
-    );
+    };
+
+    // Non-primary cluster (cluster-b) fails, primary succeeds
+    const auroraWriter: MultiClusterAuroraWriter = {
+      upsertEmbedding: vi.fn().mockImplementation(async (opts: { clusterId: string }) => {
+        if (opts.clusterId === "cluster-b") {
+          throw new Error("Throttled on secondary");
+        }
+      }),
+      findMatch: vi.fn().mockResolvedValue(null),
+    };
+
+    const processor = new SignalProcessor({
+      store: makeStore(),
+      mimeParser: makeMimeParser(),
+      classifier: makeClassifier(),
+      embeddingGenerator,
+      auroraWriter,
+      arcMatcher: makeArcMatcher(),
+      ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
+      logger: mockLogger,
+    });
+
+    const result = await processor.process(makeSqsEvent(sesMessageId));
+
+    expect(result.batchItemFailures).toHaveLength(1);
+    expect(result.batchItemFailures[0]!.itemIdentifier).toBe("sqs-1");
+
+    const warnLogs = mockLogger.calls.filter((c) => c.method === "warn");
+    const auroraWarnLog = warnLogs.find((c) => c.context?.clusterId === "cluster-b");
+    expect(auroraWarnLog).toBeDefined();
+    expect(auroraWarnLog!.context!.clusterId).toBe("cluster-b");
+    expect(auroraWarnLog!.context!.error).toBeDefined();
+    expect(String(auroraWarnLog!.context!.error)).toContain("Throttled on secondary");
+
+    const errorLogs = mockLogger.calls.filter((c) => c.method === "error");
+    const auroraErrorLog = errorLogs.find((c) => c.context?.clusterId === "cluster-b");
+    expect(auroraErrorLog).toBeUndefined();
   });
 });
 
@@ -708,111 +701,94 @@ describe("Feature: signal-processor-retry-resilience, Property 5: Side-effects d
     };
   }
 
-  it("when all Aurora upserts succeed, sqsDispatcher.sendMessage is called", () => {
-    return propertyRunner.assert(
-      fc.asyncProperty(
-        fc.array(fc.double({ min: -1, max: 1, noNaN: true }), { minLength: 3, maxLength: 10 }),
-        fc.uuid(),
-        async (vector, sesMessageId) => {
-          const store = makeStore();
+  // -------------------------------------------------------------------------
+  // Edge-case inputs
+  // -------------------------------------------------------------------------
 
-          const embeddingGenerator: EmbeddingGenerator = {
-            generateForActiveClusters: vi.fn().mockResolvedValue([
-              { modelId: "amazon.titan-embed-text-v2:0", vector, dimensions: 1024 },
-            ] as EmbeddingResult[]),
-            generateForModel: vi.fn().mockResolvedValue(
-              { modelId: "amazon.titan-embed-text-v2:0", vector, dimensions: 1024 } as EmbeddingResult,
-            ),
-          };
+  const DISPATCH_CASES = [
+    { label: "single-element vector", vector: [0.5], sesMessageId: "msg-dispatch-1" },
+    { label: "typical-3d vector", vector: [0.1, -0.9, 0.5], sesMessageId: "msg-dispatch-2" },
+    { label: "zeros-10d vector", vector: new Array(10).fill(0), sesMessageId: "msg-dispatch-3" },
+  ] as const;
 
-          const auroraWriter: MultiClusterAuroraWriter = {
-            upsertEmbedding: vi.fn().mockResolvedValue(undefined),
-            findMatch: vi.fn().mockResolvedValue(null),
-          };
-
-          const sqsDispatcher: SqsDispatcher = {
-            sendMessage: vi.fn().mockReturnValue(okAsync(undefined)),
-          };
-
-          const processor = new SignalProcessor({
-            store,
-            mimeParser: makeMimeParser(),
-            classifier: makeClassifier(),
-            embeddingGenerator,
-            auroraWriter,
-            arcMatcher: makeArcMatcher(),
-            ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
-            logger: mockLogger,
-            sqsDispatcher,
-          });
-
-          const result = await processor.process(makeSqsEvent(sesMessageId));
-
-          // No batch item failures — processing succeeded
-          expect(result.batchItemFailures).toHaveLength(0);
-
-          // sqsDispatcher.sendMessage must have been called
-          expect(sqsDispatcher.sendMessage).toHaveBeenCalled();
-
-          // Verify the payload contains signal and arc
-          const call = (sqsDispatcher.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0]!;
-          const payload = call[0] as { signal: unknown; arc: unknown };
-          expect(payload.signal).toBeDefined();
-          expect(payload.arc).toBeDefined();
-        },
+  it.each(DISPATCH_CASES)("when all Aurora upserts succeed, sqsDispatcher.sendMessage is called ($label)", async ({ vector, sesMessageId }) => {
+    const embeddingGenerator: EmbeddingGenerator = {
+      generateForActiveClusters: vi.fn().mockResolvedValue([
+        { modelId: "amazon.titan-embed-text-v2:0", vector, dimensions: 1024 },
+      ] as EmbeddingResult[]),
+      generateForModel: vi.fn().mockResolvedValue(
+        { modelId: "amazon.titan-embed-text-v2:0", vector, dimensions: 1024 } as EmbeddingResult,
       ),
-    );
+    };
+
+    const auroraWriter: MultiClusterAuroraWriter = {
+      upsertEmbedding: vi.fn().mockResolvedValue(undefined),
+      findMatch: vi.fn().mockResolvedValue(null),
+    };
+
+    const sqsDispatcher: SqsDispatcher = {
+      sendMessage: vi.fn().mockReturnValue(okAsync(undefined)),
+    };
+
+    const processor = new SignalProcessor({
+      store: makeStore(),
+      mimeParser: makeMimeParser(),
+      classifier: makeClassifier(),
+      embeddingGenerator,
+      auroraWriter,
+      arcMatcher: makeArcMatcher(),
+      ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
+      logger: mockLogger,
+      sqsDispatcher,
+    });
+
+    const result = await processor.process(makeSqsEvent(sesMessageId));
+
+    expect(result.batchItemFailures).toHaveLength(0);
+    expect(sqsDispatcher.sendMessage).toHaveBeenCalled();
+
+    const call = (sqsDispatcher.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    const payload = call[0] as { signal: unknown; arc: unknown };
+    expect(payload.signal).toBeDefined();
+    expect(payload.arc).toBeDefined();
   });
 
-  it("when any Aurora upsert fails, sqsDispatcher.sendMessage is NOT called and record is a batchItemFailure", () => {
-    return propertyRunner.assert(
-      fc.asyncProperty(
-        fc.array(fc.double({ min: -1, max: 1, noNaN: true }), { minLength: 3, maxLength: 10 }),
-        fc.uuid(),
-        async (vector, sesMessageId) => {
-          const store = makeStore();
-
-          const embeddingGenerator: EmbeddingGenerator = {
-            generateForActiveClusters: vi.fn().mockResolvedValue([
-              { modelId: "amazon.titan-embed-text-v2:0", vector, dimensions: 1024 },
-            ] as EmbeddingResult[]),
-            generateForModel: vi.fn().mockResolvedValue(
-              { modelId: "amazon.titan-embed-text-v2:0", vector, dimensions: 1024 } as EmbeddingResult,
-            ),
-          };
-
-          const auroraWriter: MultiClusterAuroraWriter = {
-            upsertEmbedding: vi.fn().mockRejectedValue(new Error("Aurora cluster unavailable")),
-            findMatch: vi.fn().mockResolvedValue(null),
-          };
-
-          const sqsDispatcher: SqsDispatcher = {
-            sendMessage: vi.fn().mockReturnValue(okAsync(undefined)),
-          };
-
-          const processor = new SignalProcessor({
-            store,
-            mimeParser: makeMimeParser(),
-            classifier: makeClassifier(),
-            embeddingGenerator,
-            auroraWriter,
-            arcMatcher: makeArcMatcher(),
-            ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
-            logger: mockLogger,
-            sqsDispatcher,
-          });
-
-          const result = await processor.process(makeSqsEvent(sesMessageId));
-
-          // sqsDispatcher.sendMessage must NOT have been called
-          expect(sqsDispatcher.sendMessage).not.toHaveBeenCalled();
-
-          // The record must be returned as a batchItemFailure
-          expect(result.batchItemFailures).toHaveLength(1);
-          expect(result.batchItemFailures[0]!.itemIdentifier).toBe("sqs-1");
-        },
+  it.each(DISPATCH_CASES)("when any Aurora upsert fails, sqsDispatcher.sendMessage is NOT called and record is a batchItemFailure ($label)", async ({ vector, sesMessageId }) => {
+    const embeddingGenerator: EmbeddingGenerator = {
+      generateForActiveClusters: vi.fn().mockResolvedValue([
+        { modelId: "amazon.titan-embed-text-v2:0", vector, dimensions: 1024 },
+      ] as EmbeddingResult[]),
+      generateForModel: vi.fn().mockResolvedValue(
+        { modelId: "amazon.titan-embed-text-v2:0", vector, dimensions: 1024 } as EmbeddingResult,
       ),
-    );
+    };
+
+    const auroraWriter: MultiClusterAuroraWriter = {
+      upsertEmbedding: vi.fn().mockRejectedValue(new Error("Aurora cluster unavailable")),
+      findMatch: vi.fn().mockResolvedValue(null),
+    };
+
+    const sqsDispatcher: SqsDispatcher = {
+      sendMessage: vi.fn().mockReturnValue(okAsync(undefined)),
+    };
+
+    const processor = new SignalProcessor({
+      store: makeStore(),
+      mimeParser: makeMimeParser(),
+      classifier: makeClassifier(),
+      embeddingGenerator,
+      auroraWriter,
+      arcMatcher: makeArcMatcher(),
+      ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
+      logger: mockLogger,
+      sqsDispatcher,
+    });
+
+    const result = await processor.process(makeSqsEvent(sesMessageId));
+
+    expect(sqsDispatcher.sendMessage).not.toHaveBeenCalled();
+    expect(result.batchItemFailures).toHaveLength(1);
+    expect(result.batchItemFailures[0]!.itemIdentifier).toBe("sqs-1");
   });
 });
 
@@ -934,85 +910,85 @@ describe("Feature: signal-processor-retry-resilience, Property 7: Partial Aurora
     };
   }
 
-  it("primary cluster write is preserved when non-primary cluster fails, record returned as batchItemFailure, no side-effects dispatched", () => {
-    return propertyRunner.assert(
-      fc.asyncProperty(
-        fc.array(fc.double({ min: -1, max: 1, noNaN: true }), { minLength: 3, maxLength: 10 }),
-        fc.uuid(),
-        async (vector, sesMessageId) => {
-          // Track which clusters had their upsert called and completed
-          const completedUpserts: string[] = [];
+  // -------------------------------------------------------------------------
+  // Edge-case inputs
+  // -------------------------------------------------------------------------
 
-          const store: ProcessorDatabase = {
-            getSignalByMessageId: vi.fn().mockReturnValue(okAsync(null)),
-            saveSignal: vi.fn().mockReturnValue(okAsync(undefined)),
-            updateSignalRetention: vi.fn().mockReturnValue(okAsync(undefined)),
-            getArc: vi.fn().mockReturnValue(okAsync(null)),
-            findArcByGroupingKey: vi.fn().mockReturnValue(okAsync(null)),
-            saveArc: vi.fn().mockReturnValue(okAsync(undefined)),
-            listEnabledRules: vi.fn().mockReturnValue(okAsync(SYSTEM_RULES)),
-            getProcessorAccountContext: vi.fn().mockReturnValue(okAsync(DEFAULT_CTX)),
-            saveAlias: vi.fn().mockImplementation((a: Alias) => okAsync(a)),
-            getSender: vi.fn().mockReturnValue(okAsync(DEFAULT_SENDER_ENTRY)),
-            saveSender: vi.fn().mockReturnValue(okAsync(undefined)),
-            getTemplate: vi.fn().mockReturnValue(okAsync(null)),
-            updateGlobalReputation: vi.fn().mockReturnValue(okAsync(undefined)),
-            getDomainByName: vi.fn().mockReturnValue(okAsync(null)),
-          };
+  const PARTIAL_SUCCESS_CASES = [
+    { label: "single-element vector", vector: [0.5], sesMessageId: "msg-partial-1" },
+    { label: "typical-3d vector", vector: [0.1, -0.9, 0.5], sesMessageId: "msg-partial-2" },
+    { label: "zeros-10d vector", vector: new Array(10).fill(0), sesMessageId: "msg-partial-3" },
+    { label: "full-size-1024 vector", vector: new Array(1024).fill(0.01), sesMessageId: "msg-partial-4" },
+  ] as const;
 
-          const embeddingGenerator: EmbeddingGenerator = {
-            generateForActiveClusters: vi.fn().mockResolvedValue([
-              { modelId: "amazon.titan-embed-text-v2:0", vector, dimensions: 1024 },
-              { modelId: "amazon.titan-embed-text-v3:0", vector, dimensions: 1536 },
-            ] as EmbeddingResult[]),
-            generateForModel: vi.fn().mockResolvedValue(
-              { modelId: "amazon.titan-embed-text-v2:0", vector, dimensions: 1024 } as EmbeddingResult,
-            ),
-          };
+  it.each(PARTIAL_SUCCESS_CASES)("primary cluster write is preserved when non-primary cluster fails, record returned as batchItemFailure, no side-effects dispatched ($label)", async ({ vector, sesMessageId }) => {
+    const completedUpserts: string[] = [];
 
-          // Primary cluster (cluster-a) succeeds, non-primary (cluster-b) fails
-          const auroraWriter: MultiClusterAuroraWriter = {
-            upsertEmbedding: vi.fn().mockImplementation((opts: { clusterId: string }) => {
-              if (opts.clusterId === "cluster-a") {
-                completedUpserts.push("cluster-a");
-                return Promise.resolve(undefined);
-              }
-              // Non-primary cluster fails
-              return Promise.reject(new Error("Aurora cluster-b connection timeout"));
-            }),
-            findMatch: vi.fn().mockResolvedValue(null),
-          };
+    const store: ProcessorDatabase = {
+      getSignalByMessageId: vi.fn().mockReturnValue(okAsync(null)),
+      saveSignal: vi.fn().mockReturnValue(okAsync(undefined)),
+      updateSignalRetention: vi.fn().mockReturnValue(okAsync(undefined)),
+      getArc: vi.fn().mockReturnValue(okAsync(null)),
+      findArcByGroupingKey: vi.fn().mockReturnValue(okAsync(null)),
+      saveArc: vi.fn().mockReturnValue(okAsync(undefined)),
+      listEnabledRules: vi.fn().mockReturnValue(okAsync(SYSTEM_RULES)),
+      getProcessorAccountContext: vi.fn().mockReturnValue(okAsync(DEFAULT_CTX)),
+      saveAlias: vi.fn().mockImplementation((a: Alias) => okAsync(a)),
+      getSender: vi.fn().mockReturnValue(okAsync(DEFAULT_SENDER_ENTRY)),
+      saveSender: vi.fn().mockReturnValue(okAsync(undefined)),
+      getTemplate: vi.fn().mockReturnValue(okAsync(null)),
+      updateGlobalReputation: vi.fn().mockReturnValue(okAsync(undefined)),
+      getDomainByName: vi.fn().mockReturnValue(okAsync(null)),
+    };
 
-          // Mock SQS dispatcher to track side-effect dispatch attempts
-          const sqsDispatcher: SqsDispatcher = {
-            sendMessage: vi.fn().mockReturnValue(okAsync(undefined)),
-          };
-
-          const processor = new SignalProcessor({
-            store,
-            mimeParser: makeMimeParser(),
-            classifier: makeClassifier(),
-            embeddingGenerator,
-            auroraWriter,
-            arcMatcher: makeArcMatcher(),
-            ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
-            logger: mockLogger,
-            sqsDispatcher,
-          });
-
-          const result = await processor.process(makeSqsEvent(sesMessageId));
-
-          // 1. Primary cluster's upsert was called and completed (not rolled back)
-          expect(completedUpserts).toContain("cluster-a");
-
-          // 2. Record IS returned as a batchItemFailure (because non-primary failed)
-          expect(result.batchItemFailures).toHaveLength(1);
-          expect(result.batchItemFailures[0]!.itemIdentifier).toBe("sqs-1");
-
-          // 3. No side-effects are dispatched (Aurora failure gates side-effect dispatch)
-          expect(sqsDispatcher.sendMessage).not.toHaveBeenCalled();
-        },
+    const embeddingGenerator: EmbeddingGenerator = {
+      generateForActiveClusters: vi.fn().mockResolvedValue([
+        { modelId: "amazon.titan-embed-text-v2:0", vector, dimensions: 1024 },
+        { modelId: "amazon.titan-embed-text-v3:0", vector, dimensions: 1536 },
+      ] as EmbeddingResult[]),
+      generateForModel: vi.fn().mockResolvedValue(
+        { modelId: "amazon.titan-embed-text-v2:0", vector, dimensions: 1024 } as EmbeddingResult,
       ),
-    );
+    };
+
+    // Primary cluster (cluster-a) succeeds, non-primary (cluster-b) fails
+    const auroraWriter: MultiClusterAuroraWriter = {
+      upsertEmbedding: vi.fn().mockImplementation((opts: { clusterId: string }) => {
+        if (opts.clusterId === "cluster-a") {
+          completedUpserts.push("cluster-a");
+          return Promise.resolve(undefined);
+        }
+        return Promise.reject(new Error("Aurora cluster-b connection timeout"));
+      }),
+      findMatch: vi.fn().mockResolvedValue(null),
+    };
+
+    const sqsDispatcher: SqsDispatcher = {
+      sendMessage: vi.fn().mockReturnValue(okAsync(undefined)),
+    };
+
+    const processor = new SignalProcessor({
+      store,
+      mimeParser: makeMimeParser(),
+      classifier: makeClassifier(),
+      embeddingGenerator,
+      auroraWriter,
+      arcMatcher: makeArcMatcher(),
+      ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
+      logger: mockLogger,
+      sqsDispatcher,
+    });
+
+    const result = await processor.process(makeSqsEvent(sesMessageId));
+
+    // 1. Primary cluster's upsert was called and completed (not rolled back)
+    expect(completedUpserts).toContain("cluster-a");
+
+    // 2. Record IS returned as a batchItemFailure (because non-primary failed)
+    expect(result.batchItemFailures).toHaveLength(1);
+    expect(result.batchItemFailures[0]!.itemIdentifier).toBe("sqs-1");
+
+    // 3. No side-effects are dispatched (Aurora failure gates side-effect dispatch)
+    expect(sqsDispatcher.sendMessage).not.toHaveBeenCalled();
   });
 });

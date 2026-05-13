@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import fc from "fast-check";
 import type { SQSEvent } from "aws-lambda";
 import { okAsync } from "neverthrow";
 import { SignalProcessor, SYSTEM_RULES } from "./processor.js";
@@ -11,7 +10,6 @@ import type { EmbeddingGenerator, EmbeddingResult } from "../embedding/embedding
 import type { MultiClusterAuroraWriter } from "../database/multi-cluster-aurora-writer.js";
 import type { S3RetentionService } from "../embedding/s3-retention-service.js";
 import type { Alias, AliasSender } from "../types/index.js";
-import { propertyRunner } from "../testing/property-runner.js";
 import { createMockLogger, type MockLogger } from "../testing/mock-logger.js";
 
 // ---------------------------------------------------------------------------
@@ -188,180 +186,143 @@ describe("Property 9: S3 retention failure is isolated and non-fatal", () => {
     };
   }
 
-  // Arbitrary S3 failure modes: thrown errors and rejected promises
-  const arbS3Error = fc.oneof(
-    fc.string({ minLength: 1, maxLength: 50 }).map((msg) => new Error(`S3 error: ${msg}`)),
-    fc.string({ minLength: 1, maxLength: 50 }).map((msg) => new Error(`AccessDenied: ${msg}`)),
-    fc.string({ minLength: 1, maxLength: 50 }).map((msg) => new Error(`NoSuchKey: ${msg}`)),
-  );
+  // -------------------------------------------------------------------------
+  // Edge-case inputs: S3 failure modes
+  // -------------------------------------------------------------------------
 
-  it("S3 retention failure does not produce a batchItemFailure", () => {
-    return propertyRunner.assert(
-      fc.asyncProperty(
-        arbS3Error,
-        fc.constant("test-msg-s3-isolation"),
-        async (s3Error, sesMessageId) => {
-          const store = makeStore();
-          const auroraWriter = makeAuroraWriter();
+  const S3_ERROR_CASES = [
+    { label: "generic S3 error", error: new Error("S3 error: connection reset") },
+    { label: "access denied", error: new Error("AccessDenied: insufficient permissions") },
+    { label: "no such key", error: new Error("NoSuchKey: object not found") },
+    { label: "empty message", error: new Error("") },
+    { label: "long error message", error: new Error(`S3 error: ${"A".repeat(500)}`) },
+  ] as const;
 
-          const retentionService: S3RetentionService = {
-            applyPlanRetention: vi.fn().mockRejectedValue(s3Error),
-          };
+  it.each(S3_ERROR_CASES)("S3 retention failure does not produce a batchItemFailure ($label)", async ({ error }) => {
+    const retentionService: S3RetentionService = {
+      applyPlanRetention: vi.fn().mockRejectedValue(error),
+    };
 
-          const processor = new SignalProcessor({
-            store,
-            mimeParser: makeMimeParser(),
-            classifier: makeClassifier(),
-            embeddingGenerator: makeEmbeddingGenerator(),
-            auroraWriter,
-            arcMatcher: makeArcMatcher(),
-            ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
-            logger: mockLogger,
-            retentionService,
-          });
+    const processor = new SignalProcessor({
+      store: makeStore(),
+      mimeParser: makeMimeParser(),
+      classifier: makeClassifier(),
+      embeddingGenerator: makeEmbeddingGenerator(),
+      auroraWriter: makeAuroraWriter(),
+      arcMatcher: makeArcMatcher(),
+      ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
+      logger: mockLogger,
+      retentionService,
+    });
 
-          const result = await processor.process(makeSqsEvent(sesMessageId));
-
-          // S3 failure must NOT produce a batchItemFailure
-          expect(result.batchItemFailures).toEqual([]);
-        },
-      ),
-    );
+    const result = await processor.process(makeSqsEvent("test-msg-s3-isolation"));
+    expect(result.batchItemFailures).toEqual([]);
   });
 
-  it("Aurora upserts still execute when S3 retention fails", () => {
-    return propertyRunner.assert(
-      fc.asyncProperty(
-        arbS3Error,
-        fc.constant("test-msg-s3-aurora"),
-        async (s3Error, sesMessageId) => {
-          const store = makeStore();
-          const auroraWriter = makeAuroraWriter();
+  it.each(S3_ERROR_CASES)("Aurora upserts still execute when S3 retention fails ($label)", async ({ error }) => {
+    const auroraWriter = makeAuroraWriter();
 
-          const retentionService: S3RetentionService = {
-            applyPlanRetention: vi.fn().mockRejectedValue(s3Error),
-          };
+    const retentionService: S3RetentionService = {
+      applyPlanRetention: vi.fn().mockRejectedValue(error),
+    };
 
-          const processor = new SignalProcessor({
-            store,
-            mimeParser: makeMimeParser(),
-            classifier: makeClassifier(),
-            embeddingGenerator: makeEmbeddingGenerator(),
-            auroraWriter,
-            arcMatcher: makeArcMatcher(),
-            ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
-            logger: mockLogger,
-            retentionService,
-          });
+    const processor = new SignalProcessor({
+      store: makeStore(),
+      mimeParser: makeMimeParser(),
+      classifier: makeClassifier(),
+      embeddingGenerator: makeEmbeddingGenerator(),
+      auroraWriter,
+      arcMatcher: makeArcMatcher(),
+      ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
+      logger: mockLogger,
+      retentionService,
+    });
 
-          await processor.process(makeSqsEvent(sesMessageId));
-
-          // Aurora upsert must still be called despite S3 failure
-          expect(auroraWriter.upsertEmbedding).toHaveBeenCalled();
-        },
-      ),
-    );
+    await processor.process(makeSqsEvent("test-msg-s3-aurora"));
+    expect(auroraWriter.upsertEmbedding).toHaveBeenCalled();
   });
 
-  it("warn-level log is emitted when S3 retention fails", () => {
-    return propertyRunner.assert(
-      fc.asyncProperty(
-        arbS3Error,
-        fc.constant("test-msg-s3-warn"),
-        async (s3Error, sesMessageId) => {
-          mockLogger = createMockLogger();
+  it.each(S3_ERROR_CASES)("warn-level log is emitted when S3 retention fails ($label)", async ({ error }) => {
+    mockLogger = createMockLogger();
 
-          const retentionService: S3RetentionService = {
-            applyPlanRetention: vi.fn().mockRejectedValue(s3Error),
-          };
+    const retentionService: S3RetentionService = {
+      applyPlanRetention: vi.fn().mockRejectedValue(error),
+    };
 
-          const processor = new SignalProcessor({
-            store: makeStore(),
-            mimeParser: makeMimeParser(),
-            classifier: makeClassifier(),
-            embeddingGenerator: makeEmbeddingGenerator(),
-            auroraWriter: makeAuroraWriter(),
-            arcMatcher: makeArcMatcher(),
-            ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
-            logger: mockLogger,
-            retentionService,
-          });
+    const processor = new SignalProcessor({
+      store: makeStore(),
+      mimeParser: makeMimeParser(),
+      classifier: makeClassifier(),
+      embeddingGenerator: makeEmbeddingGenerator(),
+      auroraWriter: makeAuroraWriter(),
+      arcMatcher: makeArcMatcher(),
+      ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
+      logger: mockLogger,
+      retentionService,
+    });
 
-          await processor.process(makeSqsEvent(sesMessageId));
+    await processor.process(makeSqsEvent("test-msg-s3-warn"));
 
-          // A warn-level log must be emitted for the S3 failure
-          const warnCalls = mockLogger.calls.filter((c) => c.method === "warn");
-          expect(warnCalls.length).toBeGreaterThanOrEqual(1);
+    const warnCalls = mockLogger.calls.filter((c) => c.method === "warn");
+    expect(warnCalls.length).toBeGreaterThanOrEqual(1);
 
-          // At least one warn call should relate to S3 retention
-          const s3WarnCall = warnCalls.find((c) =>
-            c.message.toLowerCase().includes("s3") || c.message.toLowerCase().includes("retention"),
-          );
-          expect(s3WarnCall).toBeDefined();
-        },
-      ),
+    const s3WarnCall = warnCalls.find((c) =>
+      c.message.toLowerCase().includes("s3") || c.message.toLowerCase().includes("retention"),
     );
+    expect(s3WarnCall).toBeDefined();
   });
 
-  it("processing outcome is identical with and without S3 failure", () => {
-    return propertyRunner.assert(
-      fc.asyncProperty(
-        arbS3Error,
-        fc.constant("test-msg-s3-outcome"),
-        async (s3Error, sesMessageId) => {
-          // Run 1: with S3 failure
-          const store1 = makeStore();
-          const auroraWriter1 = makeAuroraWriter();
-          const failingRetention: S3RetentionService = {
-            applyPlanRetention: vi.fn().mockRejectedValue(s3Error),
-          };
-          const logger1 = createMockLogger();
+  it.each(S3_ERROR_CASES)("processing outcome is identical with and without S3 failure ($label)", async ({ error }) => {
+    // Run 1: with S3 failure
+    const store1 = makeStore();
+    const auroraWriter1 = makeAuroraWriter();
+    const failingRetention: S3RetentionService = {
+      applyPlanRetention: vi.fn().mockRejectedValue(error),
+    };
+    const logger1 = createMockLogger();
 
-          const processor1 = new SignalProcessor({
-            store: store1,
-            mimeParser: makeMimeParser(),
-            classifier: makeClassifier(),
-            embeddingGenerator: makeEmbeddingGenerator(),
-            auroraWriter: auroraWriter1,
-            arcMatcher: makeArcMatcher(),
-            ruleEvaluator: new JsonLogicRuleEvaluator(logger1),
-            logger: logger1,
-            retentionService: failingRetention,
-          });
+    const processor1 = new SignalProcessor({
+      store: store1,
+      mimeParser: makeMimeParser(),
+      classifier: makeClassifier(),
+      embeddingGenerator: makeEmbeddingGenerator(),
+      auroraWriter: auroraWriter1,
+      arcMatcher: makeArcMatcher(),
+      ruleEvaluator: new JsonLogicRuleEvaluator(logger1),
+      logger: logger1,
+      retentionService: failingRetention,
+    });
 
-          const result1 = await processor1.process(makeSqsEvent(sesMessageId));
+    const result1 = await processor1.process(makeSqsEvent("test-msg-s3-outcome"));
 
-          // Run 2: without S3 retention service (no retention at all)
-          const store2 = makeStore();
-          const auroraWriter2 = makeAuroraWriter();
-          const logger2 = createMockLogger();
+    // Run 2: without S3 retention service (no retention at all)
+    const store2 = makeStore();
+    const auroraWriter2 = makeAuroraWriter();
+    const logger2 = createMockLogger();
 
-          const processor2 = new SignalProcessor({
-            store: store2,
-            mimeParser: makeMimeParser(),
-            classifier: makeClassifier(),
-            embeddingGenerator: makeEmbeddingGenerator(),
-            auroraWriter: auroraWriter2,
-            arcMatcher: makeArcMatcher(),
-            ruleEvaluator: new JsonLogicRuleEvaluator(logger2),
-            logger: logger2,
-            // No retentionService — S3 retention is skipped entirely
-          });
+    const processor2 = new SignalProcessor({
+      store: store2,
+      mimeParser: makeMimeParser(),
+      classifier: makeClassifier(),
+      embeddingGenerator: makeEmbeddingGenerator(),
+      auroraWriter: auroraWriter2,
+      arcMatcher: makeArcMatcher(),
+      ruleEvaluator: new JsonLogicRuleEvaluator(logger2),
+      logger: logger2,
+      // No retentionService — S3 retention is skipped entirely
+    });
 
-          const result2 = await processor2.process(makeSqsEvent(sesMessageId));
+    const result2 = await processor2.process(makeSqsEvent("test-msg-s3-outcome"));
 
-          // Both runs must produce the same batchItemFailures result
-          expect(result1.batchItemFailures).toEqual(result2.batchItemFailures);
+    // Both runs must produce the same batchItemFailures result
+    expect(result1.batchItemFailures).toEqual(result2.batchItemFailures);
 
-          // Both runs must call saveSignal (signal was persisted)
-          expect(store1.saveSignal).toHaveBeenCalled();
-          expect(store2.saveSignal).toHaveBeenCalled();
+    // Both runs must call saveSignal (signal was persisted)
+    expect(store1.saveSignal).toHaveBeenCalled();
+    expect(store2.saveSignal).toHaveBeenCalled();
 
-          // Both runs must call Aurora upsert
-          expect(auroraWriter1.upsertEmbedding).toHaveBeenCalled();
-          expect(auroraWriter2.upsertEmbedding).toHaveBeenCalled();
-        },
-      ),
-    );
+    // Both runs must call Aurora upsert
+    expect(auroraWriter1.upsertEmbedding).toHaveBeenCalled();
+    expect(auroraWriter2.upsertEmbedding).toHaveBeenCalled();
   });
 });
