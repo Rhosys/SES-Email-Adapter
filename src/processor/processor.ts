@@ -20,6 +20,21 @@ import { getETLD1, assignSystemLabels, DEFAULT_SPAM_SCORE_THRESHOLD } from "./fi
 const RETRY_TRACK_THRESHOLD = 30;
 
 // ---------------------------------------------------------------------------
+// Message types
+// ---------------------------------------------------------------------------
+
+export type ProcessorMessageType = "inbound_signal" | "side_effect";
+
+export interface SideEffectPayload {
+  signal: Signal;
+  arc: Arc;
+}
+
+export interface SqsDispatcher {
+  sendMessage(payload: SideEffectPayload): ResultAsync<void, DbError>;
+}
+
+// ---------------------------------------------------------------------------
 // Interfaces
 // ---------------------------------------------------------------------------
 
@@ -260,6 +275,7 @@ interface SignalProcessorOptions {
   forwarder?: Forwarder;
   testReplier?: TestReplier;
   retentionService?: S3RetentionService;
+  sqsDispatcher?: SqsDispatcher;
 }
 
 export class SignalProcessor {
