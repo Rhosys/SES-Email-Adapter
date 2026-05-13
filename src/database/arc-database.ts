@@ -51,13 +51,12 @@ export class ArcDatabase implements ArcMatcher {
   // Signals
   // ---------------------------------------------------------------------------
 
-  getSignalByMessageId(accountId: string, sesMessageId: string): ResultAsync<Pick<Signal, "id"> | null, DbError> {
+  getSignalByMessageId(accountId: string, sesMessageId: string): ResultAsync<Signal | null, DbError> {
     return ResultAsync.fromPromise(
       dynamo.send(new GetCommand({
         TableName: SIGNALS_TABLE,
         Key: { pk: sigPk(accountId, `SES#${sesMessageId}`), sk: ITEM_SK },
-        ProjectionExpression: "id",
-      })).then(res => res.Item ? (res.Item as Pick<Signal, "id">) : null),
+      })).then(res => res.Item ? (res.Item as Signal) : null),
       toDbError,
     );
   }
