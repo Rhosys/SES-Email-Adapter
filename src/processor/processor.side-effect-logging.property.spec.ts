@@ -174,7 +174,7 @@ describe("Side effect caller logging", () => {
 
     const sideEffectLog = mockLogger.calls.find((call) =>
       call.context?.code === "processor.notification_failed" &&
-      (call.method === "track" || call.method === "error"),
+      (call.method === "warn" || call.method === "error"),
     );
     expect(sideEffectLog).toBeDefined();
   });
