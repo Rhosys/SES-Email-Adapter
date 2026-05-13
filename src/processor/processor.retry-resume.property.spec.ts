@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import fc from "fast-check";
 import type { SQSEvent } from "aws-lambda";
-import { okAsync } from "neverthrow";
+import { okAsync, errAsync } from "neverthrow";
 import { SignalProcessor, SYSTEM_RULES } from "./processor.js";
 import { JsonLogicRuleEvaluator } from "./rule-evaluator.js";
 import type { ProcessorDatabase, ArcMatcher } from "./processor.js";
@@ -10,6 +10,7 @@ import type { SignalClassifier } from "../classifier/classifier.js";
 import type { EmbeddingGenerator } from "../embedding/embedding-generator.js";
 import type { MultiClusterAuroraWriter } from "../database/multi-cluster-aurora-writer.js";
 import type { Signal, Arc, Alias, AliasSender, Workflow } from "../types/index.js";
+import { dbError } from "../errors.js";
 import { propertyRunner } from "../testing/property-runner.js";
 import { createMockLogger, type MockLogger } from "../testing/mock-logger.js";
 
@@ -431,6 +432,506 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
             embeddingGenerator: { generateForActiveClusters: vi.fn(), generateForModel: vi.fn() },
             auroraWriter,
             arcMatcher: { findMatch: vi.fn().mockReturnValue(okAsync(null)), upsertEmbedding: vi.fn().mockReturnValue(okAsync(undefined)) },
+            ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
+            logger: mockLogger,
+          });
+
+          const result = await processor.process(makeSqsEvent(sesMessageId, receiveCount));
+
+          // Processing must succeed — no batchItemFailures
+          expect(result.batchItemFailures).toEqual([]);
+        },
+      ),
+    );
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// Property 3: DDB read failure on retry returns batchItemFailure without writes
+// **Validates: Requirements 1.5**
+// ---------------------------------------------------------------------------
+
+/**
+ * For any retry attempt where the DDB read for the signal or arc record fails,
+ * the processor SHALL return the record as a batchItemFailure without executing
+ * any Aurora upserts, side-effect dispatches, or DDB writes.
+ */
+describe("Feature: signal-processor-retry-resilience, Property 3: DDB read failure on retry returns batchItemFailure without writes", () => {
+  let mockLogger: MockLogger;
+  beforeEach(() => { mockLogger = createMockLogger(); });
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  const TEST_ACCOUNT_ID = "acct-prop3";
+
+  const DEFAULT_ALIAS: Alias = {
+    id: "cfg-default",
+    accountId: TEST_ACCOUNT_ID,
+    address: "user@example.com",
+    filterMode: "allow_all",
+    createdAt: "2024-01-01T00:00:00Z",
+    updatedAt: "2024-01-01T00:00:00Z",
+  };
+
+  const DEFAULT_SENDER_ENTRY: AliasSender = {
+    accountId: TEST_ACCOUNT_ID,
+    aliasAddress: "user@example.com",
+    domain: "example.com",
+    mode: "allow",
+    addedAt: "2024-01-01T00:00:00Z",
+  };
+
+  const DEFAULT_CTX = {
+    retentionDays: 0,
+    filtering: null,
+    emailConfig: DEFAULT_ALIAS,
+    registeredDomains: [],
+    userEmails: [],
+    billingPlan: "Paid" as const,
+  };
+
+  function makeRetrySqsEvent(sesMessageId: string, receiveCount: number): SQSEvent {
+    const notification = {
+      accountId: TEST_ACCOUNT_ID,
+      mail: {
+        messageId: sesMessageId,
+        timestamp: "2024-01-15T10:00:00Z",
+        destination: ["user@example.com"],
+      },
+      receipt: {
+        recipients: ["user@example.com"],
+        dkimVerdict: { status: "PASS" },
+        dmarcVerdict: { status: "PASS" },
+        action: { bucketName: "test-bucket", objectKey: `emails/${sesMessageId}` },
+      },
+    };
+    return {
+      Records: [{
+        messageId: "sqs-retry-1",
+        receiptHandle: "handle",
+        body: JSON.stringify({ Message: JSON.stringify(notification) }),
+        attributes: {
+          ApproximateReceiveCount: String(receiveCount),
+          SentTimestamp: "1234567890",
+          SenderId: "sender",
+          ApproximateFirstReceiveTimestamp: "1234567890",
+        },
+        messageAttributes: {},
+        md5OfBody: "",
+        eventSource: "aws:sqs",
+        eventSourceARN: "arn:aws:sqs:us-east-1:123:queue",
+        awsRegion: "us-east-1",
+      }],
+    };
+  }
+
+  function makeExistingSignal(sesMessageId: string): Signal {
+    return {
+      id: `sig-${sesMessageId}`,
+      accountId: TEST_ACCOUNT_ID,
+      sesMessageId,
+      arcId: "arc-existing",
+      recipientAddress: "user@example.com",
+      senderAddress: "sender@external.com",
+      senderName: "Sender",
+      subject: "Test email",
+      workflow: "conversation",
+      workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
+      spamScore: 0.01,
+      summary: "A test email.",
+      labels: [],
+      status: "active",
+      s3Key: `emails/${sesMessageId}`,
+      matchedRules: [],
+      receivedAt: "2024-01-15T10:00:00Z",
+      createdAt: "2024-01-15T10:00:01Z",
+      updatedAt: "2024-01-15T10:00:01Z",
+      embeddings: { "amazon.titan-embed-text-v2:0": new Array(10).fill(0.1) },
+    } as Signal;
+  }
+
+  function makeAuroraWriter(): MultiClusterAuroraWriter {
+    return {
+      upsertEmbedding: vi.fn().mockResolvedValue(undefined),
+      findMatch: vi.fn().mockResolvedValue(null),
+    };
+  }
+
+  function makeStore(overrides: Partial<ProcessorDatabase> = {}): ProcessorDatabase {
+    return {
+      getSignalByMessageId: vi.fn().mockReturnValue(okAsync(null)),
+      saveSignal: vi.fn().mockReturnValue(okAsync(undefined)),
+      updateSignalRetention: vi.fn().mockReturnValue(okAsync(undefined)),
+      getArc: vi.fn().mockReturnValue(okAsync(null)),
+      findArcByGroupingKey: vi.fn().mockReturnValue(okAsync(null)),
+      saveArc: vi.fn().mockReturnValue(okAsync(undefined)),
+      listEnabledRules: vi.fn().mockReturnValue(okAsync(SYSTEM_RULES)),
+      getProcessorAccountContext: vi.fn().mockReturnValue(okAsync(DEFAULT_CTX)),
+      saveAlias: vi.fn().mockImplementation((a: Alias) => okAsync(a)),
+      getSender: vi.fn().mockReturnValue(okAsync(DEFAULT_SENDER_ENTRY)),
+      saveSender: vi.fn().mockReturnValue(okAsync(undefined)),
+      getTemplate: vi.fn().mockReturnValue(okAsync(null)),
+      updateGlobalReputation: vi.fn().mockReturnValue(okAsync(undefined)),
+      getDomainByName: vi.fn().mockReturnValue(okAsync(null)),
+      ...overrides,
+    };
+  }
+
+  // Arbitrary DDB error messages
+  const arbDdbError = fc.string({ minLength: 1, maxLength: 50 }).map(
+    (msg) => dbError(new Error(`DDB error: ${msg}`)),
+  );
+
+  // Arbitrary receive count > 1 (retry scenario)
+  const arbRetryReceiveCount = fc.integer({ min: 2, max: 50 });
+
+  it("signal read failure returns batchItemFailure without Aurora upserts or DDB writes", () => {
+    return propertyRunner.assert(
+      fc.asyncProperty(
+        arbDdbError,
+        arbRetryReceiveCount,
+        fc.uuid(),
+        async (ddbErr, receiveCount, sesMessageId) => {
+          const store = makeStore({
+            getSignalByMessageId: vi.fn().mockReturnValue(errAsync(ddbErr)),
+          });
+          const auroraWriter = makeAuroraWriter();
+
+          const processor = new SignalProcessor({
+            store,
+            mimeParser: { parse: vi.fn() },
+            classifier: { classify: vi.fn() },
+            embeddingGenerator: { generateForActiveClusters: vi.fn(), generateForModel: vi.fn() },
+            auroraWriter,
+            arcMatcher: { findMatch: vi.fn().mockReturnValue(okAsync(null)), upsertEmbedding: vi.fn().mockReturnValue(okAsync(undefined)) },
+            ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
+            logger: mockLogger,
+          });
+
+          const result = await processor.process(makeRetrySqsEvent(sesMessageId, receiveCount));
+
+          // Record must be in batchItemFailures
+          expect(result.batchItemFailures).toHaveLength(1);
+          expect(result.batchItemFailures[0]!.itemIdentifier).toBe("sqs-retry-1");
+
+          // Aurora upsert must NOT be called
+          expect(auroraWriter.upsertEmbedding).not.toHaveBeenCalled();
+
+          // saveSignal must NOT be called
+          expect(store.saveSignal).not.toHaveBeenCalled();
+
+          // saveArc must NOT be called (no new writes)
+          expect(store.saveArc).not.toHaveBeenCalled();
+        },
+      ),
+    );
+  });
+
+  it("arc read failure returns batchItemFailure without Aurora upserts or DDB writes", () => {
+    return propertyRunner.assert(
+      fc.asyncProperty(
+        arbDdbError,
+        arbRetryReceiveCount,
+        fc.uuid(),
+        async (ddbErr, receiveCount, sesMessageId) => {
+          const existingSignal = makeExistingSignal(sesMessageId);
+          const store = makeStore({
+            getSignalByMessageId: vi.fn().mockReturnValue(okAsync(existingSignal)),
+            getArc: vi.fn().mockReturnValue(errAsync(ddbErr)),
+          });
+          const auroraWriter = makeAuroraWriter();
+
+          const processor = new SignalProcessor({
+            store,
+            mimeParser: { parse: vi.fn() },
+            classifier: { classify: vi.fn() },
+            embeddingGenerator: { generateForActiveClusters: vi.fn(), generateForModel: vi.fn() },
+            auroraWriter,
+            arcMatcher: { findMatch: vi.fn().mockReturnValue(okAsync(null)), upsertEmbedding: vi.fn().mockReturnValue(okAsync(undefined)) },
+            ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
+            logger: mockLogger,
+          });
+
+          const result = await processor.process(makeRetrySqsEvent(sesMessageId, receiveCount));
+
+          // Record must be in batchItemFailures
+          expect(result.batchItemFailures).toHaveLength(1);
+          expect(result.batchItemFailures[0]!.itemIdentifier).toBe("sqs-retry-1");
+
+          // Aurora upsert must NOT be called
+          expect(auroraWriter.upsertEmbedding).not.toHaveBeenCalled();
+
+          // saveSignal must NOT be called
+          expect(store.saveSignal).not.toHaveBeenCalled();
+
+          // saveArc must NOT be called (no new writes)
+          expect(store.saveArc).not.toHaveBeenCalled();
+        },
+      ),
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Property 2: Missing signal on retry triggers fresh processing
+// **Validates: Requirements 1.3**
+// ---------------------------------------------------------------------------
+
+/**
+ * For any SQS record with receiveCount > 1 where the signal does NOT exist
+ * in DDB, the processor SHALL execute the full first-attempt pipeline (parse,
+ * classify, match, save) identically to a first delivery.
+ */
+describe("Feature: signal-processor-retry-resilience, Property 2: Missing signal on retry triggers fresh processing", () => {
+  let mockLogger: MockLogger;
+  beforeEach(() => { mockLogger = createMockLogger(); });
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  const TEST_ACCOUNT_ID = "acct-prop2";
+
+  const DEFAULT_ALIAS: Alias = {
+    id: "cfg-default",
+    accountId: TEST_ACCOUNT_ID,
+    address: "user@example.com",
+    filterMode: "allow_all",
+    createdAt: "2024-01-01T00:00:00Z",
+    updatedAt: "2024-01-01T00:00:00Z",
+  };
+
+  const DEFAULT_SENDER_ENTRY: AliasSender = {
+    accountId: TEST_ACCOUNT_ID,
+    aliasAddress: "user@example.com",
+    domain: "example.com",
+    mode: "allow",
+    addedAt: "2024-01-01T00:00:00Z",
+  };
+
+  const DEFAULT_CTX = {
+    retentionDays: 0,
+    filtering: null,
+    emailConfig: DEFAULT_ALIAS,
+    registeredDomains: [],
+    userEmails: [],
+    billingPlan: "Paid" as const,
+  };
+
+  const validClassification = {
+    workflow: "conversation" as const,
+    workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
+    spamScore: 0.01,
+    summary: "A test email.",
+    labels: [],
+    classificationModelId: "us.anthropic.claude-opus-4-5-20251101-v1:0",
+  };
+
+  function makeStore(): ProcessorDatabase {
+    return {
+      // Signal does NOT exist — triggers fresh processing on retry
+      getSignalByMessageId: vi.fn().mockReturnValue(okAsync(null)),
+      saveSignal: vi.fn().mockReturnValue(okAsync(undefined)),
+      updateSignalRetention: vi.fn().mockReturnValue(okAsync(undefined)),
+      getArc: vi.fn().mockReturnValue(okAsync(null)),
+      findArcByGroupingKey: vi.fn().mockReturnValue(okAsync(null)),
+      saveArc: vi.fn().mockReturnValue(okAsync(undefined)),
+      listEnabledRules: vi.fn().mockReturnValue(okAsync(SYSTEM_RULES)),
+      getProcessorAccountContext: vi.fn().mockReturnValue(okAsync(DEFAULT_CTX)),
+      saveAlias: vi.fn().mockImplementation((a: Alias) => okAsync(a)),
+      getSender: vi.fn().mockReturnValue(okAsync(DEFAULT_SENDER_ENTRY)),
+      saveSender: vi.fn().mockReturnValue(okAsync(undefined)),
+      getTemplate: vi.fn().mockReturnValue(okAsync(null)),
+      updateGlobalReputation: vi.fn().mockReturnValue(okAsync(undefined)),
+      getDomainByName: vi.fn().mockReturnValue(okAsync(null)),
+    };
+  }
+
+  function makeMimeParser(): MimeParser {
+    return {
+      parse: vi.fn().mockResolvedValue({
+        from: { address: "sender@example.com", name: "Sender" },
+        to: [{ address: "user@example.com" }],
+        cc: [],
+        subject: "Test email",
+        textBody: "Hello world",
+        htmlBody: "<p>Hello world</p>",
+        attachments: [],
+        headers: {},
+        sentAt: "2024-01-15T09:00:00Z",
+      }),
+    };
+  }
+
+  function makeClassifier(): Pick<SignalClassifier, "classify"> {
+    return { classify: vi.fn().mockResolvedValue({ ...validClassification }) };
+  }
+
+  function makeEmbeddingGenerator(): EmbeddingGenerator {
+    return {
+      generateForActiveClusters: vi.fn().mockResolvedValue([
+        { modelId: "amazon.titan-embed-text-v2:0", vector: new Array(10).fill(0.1), dimensions: 1024 },
+      ]),
+      generateForModel: vi.fn().mockResolvedValue(
+        { modelId: "amazon.titan-embed-text-v2:0", vector: new Array(10).fill(0.1), dimensions: 1024 },
+      ),
+    };
+  }
+
+  function makeAuroraWriter(): MultiClusterAuroraWriter {
+    return {
+      upsertEmbedding: vi.fn().mockResolvedValue(undefined),
+      findMatch: vi.fn().mockResolvedValue(null),
+    };
+  }
+
+  function makeArcMatcher(): ArcMatcher {
+    return {
+      findMatch: vi.fn().mockReturnValue(okAsync(null)),
+      upsertEmbedding: vi.fn().mockReturnValue(okAsync(undefined)),
+    };
+  }
+
+  // Arbitrary receiveCount > 1 (retry deliveries)
+  const arbRetryReceiveCount = fc.integer({ min: 2, max: 50 });
+
+  // Arbitrary SES message IDs
+  const arbSesMessageId = fc.stringMatching(/^[a-z0-9]{5,30}$/);
+
+  function makeSqsEvent(sesMessageId: string, receiveCount: number): SQSEvent {
+    const notification = {
+      accountId: TEST_ACCOUNT_ID,
+      mail: {
+        messageId: sesMessageId,
+        timestamp: "2024-01-15T10:00:00Z",
+        destination: ["user@example.com"],
+      },
+      receipt: {
+        recipients: ["user@example.com"],
+        dkimVerdict: { status: "PASS" },
+        dmarcVerdict: { status: "PASS" },
+        action: { bucketName: "test-bucket", objectKey: `emails/${sesMessageId}` },
+      },
+    };
+    return {
+      Records: [{
+        messageId: "sqs-1",
+        receiptHandle: "handle",
+        body: JSON.stringify({ Message: JSON.stringify(notification) }),
+        attributes: {
+          ApproximateReceiveCount: String(receiveCount),
+          SentTimestamp: "1234567890",
+          SenderId: "sender",
+          ApproximateFirstReceiveTimestamp: "1234567890",
+        },
+        messageAttributes: {},
+        md5OfBody: "",
+        eventSource: "aws:sqs",
+        eventSourceARN: "arn:aws:sqs:us-east-1:123:queue",
+        awsRegion: "us-east-1",
+      }],
+    };
+  }
+
+  it("MIME parser IS called when signal does not exist on retry", () => {
+    return propertyRunner.assert(
+      fc.asyncProperty(
+        arbRetryReceiveCount,
+        arbSesMessageId,
+        async (receiveCount, sesMessageId) => {
+          const store = makeStore();
+          const mimeParser = makeMimeParser();
+
+          const processor = new SignalProcessor({
+            store,
+            mimeParser,
+            classifier: makeClassifier(),
+            embeddingGenerator: makeEmbeddingGenerator(),
+            auroraWriter: makeAuroraWriter(),
+            arcMatcher: makeArcMatcher(),
+            ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
+            logger: mockLogger,
+          });
+
+          await processor.process(makeSqsEvent(sesMessageId, receiveCount));
+
+          // Full pipeline must run — MIME parser called
+          expect(mimeParser.parse).toHaveBeenCalled();
+        },
+      ),
+    );
+  });
+
+  it("classifier IS called when signal does not exist on retry", () => {
+    return propertyRunner.assert(
+      fc.asyncProperty(
+        arbRetryReceiveCount,
+        arbSesMessageId,
+        async (receiveCount, sesMessageId) => {
+          const store = makeStore();
+          const classifier = makeClassifier();
+
+          const processor = new SignalProcessor({
+            store,
+            mimeParser: makeMimeParser(),
+            classifier,
+            embeddingGenerator: makeEmbeddingGenerator(),
+            auroraWriter: makeAuroraWriter(),
+            arcMatcher: makeArcMatcher(),
+            ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
+            logger: mockLogger,
+          });
+
+          await processor.process(makeSqsEvent(sesMessageId, receiveCount));
+
+          // Full pipeline must run — classifier called
+          expect(classifier.classify).toHaveBeenCalled();
+        },
+      ),
+    );
+  });
+
+  it("saveArc and saveSignal ARE called when signal does not exist on retry", () => {
+    return propertyRunner.assert(
+      fc.asyncProperty(
+        arbRetryReceiveCount,
+        arbSesMessageId,
+        async (receiveCount, sesMessageId) => {
+          const store = makeStore();
+
+          const processor = new SignalProcessor({
+            store,
+            mimeParser: makeMimeParser(),
+            classifier: makeClassifier(),
+            embeddingGenerator: makeEmbeddingGenerator(),
+            auroraWriter: makeAuroraWriter(),
+            arcMatcher: makeArcMatcher(),
+            ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
+            logger: mockLogger,
+          });
+
+          await processor.process(makeSqsEvent(sesMessageId, receiveCount));
+
+          // Full pipeline must run — both saves called
+          expect(store.saveArc).toHaveBeenCalled();
+          expect(store.saveSignal).toHaveBeenCalled();
+        },
+      ),
+    );
+  });
+
+  it("result is NOT a batchItemFailure when signal does not exist on retry", () => {
+    return propertyRunner.assert(
+      fc.asyncProperty(
+        arbRetryReceiveCount,
+        arbSesMessageId,
+        async (receiveCount, sesMessageId) => {
+          const store = makeStore();
+
+          const processor = new SignalProcessor({
+            store,
+            mimeParser: makeMimeParser(),
+            classifier: makeClassifier(),
+            embeddingGenerator: makeEmbeddingGenerator(),
+            auroraWriter: makeAuroraWriter(),
+            arcMatcher: makeArcMatcher(),
             ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
             logger: mockLogger,
           });
