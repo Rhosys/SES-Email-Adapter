@@ -83,7 +83,7 @@ const processor = new SignalProcessor({
   forwarder: new SesForwarder(logger, sesv2, s3),
   retentionService: new S3RetentionServiceImpl(s3),
   logger,
-  ...(SIGNAL_QUEUE_URL ? { sqsDispatcher: new SqsDispatcherImpl(SIGNAL_QUEUE_URL, sqs) } : {}),
+  ...(SIGNAL_QUEUE_URL ? { sqsDispatcher: new SqsDispatcherImpl(SIGNAL_QUEUE_URL, sqs, logger) } : {}),
 });
 
 const feedbackProcessor = new FeedbackProcessor(processingDb, accountDb, logger);
