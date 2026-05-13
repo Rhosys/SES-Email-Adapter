@@ -98,7 +98,7 @@ jobs:
       - name: Check for Destructive Changes
         id: plan_check
         run: |
-          tofu -chdir=deploy show -no-color plan.cache > /tmp/plan_text.txt
+          tofu -chdir=deploy show plan.cache > /tmp/plan_text.txt
 
           DESTROYS=$(jq '[.resource_changes[]? | select(.change.actions | contains(["delete"]))] | length' deploy/plan.json)
 
