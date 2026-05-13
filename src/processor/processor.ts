@@ -353,27 +353,9 @@ export class SignalProcessor {
         // S3 retention — always attempt, fire-and-forget (idempotent)
         await this.attemptS3Retention(signal, accountCtx, arc);
 
-        // Aurora upserts — always run (idempotent). Use cached embeddings from signal.
-        const activeClusters = getActiveClusters();
-        await Promise.all(
-          activeClusters.map(async (cluster) => {
-            const embedding = signal.embeddings?.[cluster.modelId];
-            if (!embedding) return;
-            const upsertResult = await ResultAsync.fromPromise(
-              this.auroraWriter.upsertEmbedding({
-                clusterId: cluster.clusterId,
-                arcId: arc.id,
-                accountId: message.accountId,
-                recipientAddress: signal.recipientAddress,
-                embedding,
-              }),
-              (e) => dbError(e instanceof Error ? e : new Error(String(e))),
-            );
-            if (upsertResult.isErr()) {
-              this.logger.error("Failed to upsert embedding to Aurora cluster. The Data API call returned an error for the target cluster. This signal's embedding won't be searchable on that cluster until the next reindex run. Check Aurora cluster health in the AWS console.", { code: "processor.aurora_upsert_failed", accountId: message.accountId, clusterId: cluster.clusterId, error: String(upsertResult.error.cause) });
-            }
-          }),
-        );
+        // Aurora upserts — always run (idempotent). Gates side-effect dispatch.
+        const auroraResult = await this.executeAuroraUpserts(signal, arc);
+        if (auroraResult.isErr()) return err(processError(record.messageId));
 
         return ok(undefined);
       }
@@ -698,7 +680,11 @@ export class SignalProcessor {
     // 13. S3 retention — fire-and-forget (idempotent, always attempted)
     await this.attemptS3Retention(signal, accountCtx, arc);
 
-    // 14. Calendar synthetic signal
+    // 14. Aurora upserts — gates side-effect dispatch. All clusters must succeed.
+    const auroraResult = await this.executeAuroraUpserts(signal, arc);
+    if (auroraResult.isErr()) return err(dbError(new Error("Aurora upsert failed")));
+
+    // 15. Calendar synthetic signal
     if (classification.workflow === "scheduling") {
       const calSignal = buildCalendarSignal(arc, signal, now, ttl);
       const calSaveResult = await this.store.saveSignal(calSignal);
@@ -707,35 +693,7 @@ export class SignalProcessor {
       }
     }
 
-    // Multi-cluster Aurora fanout: write each successful embedding to its corresponding cluster
-    // Per-cluster failures are handled gracefully — emit metric, continue with other clusters.
-    // The DynamoDB cache entry (signal.embeddings) is preserved regardless of Aurora failures.
-
-    // Write embeddings to each active cluster in parallel
-    const activeClusters = getActiveClusters();
-    await Promise.all(
-      activeClusters.map(async (cluster) => {
-        const clusterResult = embeddingResults.find((r) => r.modelId === cluster.modelId);
-        if (!clusterResult) return; // Bedrock failed for this model — already handled by generator metric
-        const upsertResult = await ResultAsync.fromPromise(
-          this.auroraWriter.upsertEmbedding({
-            clusterId: cluster.clusterId,
-            arcId: arc.id,
-            accountId,
-            recipientAddress,
-            embedding: clusterResult.vector,
-          }),
-          (e) => dbError(e instanceof Error ? e : new Error(String(e))),
-        );
-        if (upsertResult.isErr()) {
-          // Per-cluster Aurora failure: log and continue.
-          // The DynamoDB cache entry preserves the embedding for recovery via reindex.
-          this.logger.error("Failed to upsert embedding to Aurora cluster. The Data API call returned an error for the target cluster. This signal's embedding won't be searchable on that cluster until the next reindex run. Check Aurora cluster health in the AWS console.", { code: "processor.aurora_upsert_failed", accountId, clusterId: cluster.clusterId, error: String(upsertResult.error.cause) });
-        }
-      }),
-    );
-
-    // 14. Forward
+    // 16. Forward
     if (this.forwarder && outcome.forwardAddresses.length > 0) {
       const forwardOpts: ForwardOptions = {
         senderDomain: senderETLD1,
@@ -844,6 +802,62 @@ export class SignalProcessor {
     });
     if (finalRepResult.isErr()) {
       this.logger.track("Failed to update global sender reputation after signal processing. The DynamoDB update returned an error. Reputation data may be stale for this domain. Tracked for consistency monitoring.", { code: "processor.reputation_update_failed", accountId, error: String(finalRepResult.error.cause) });
+    }
+
+    return ok(undefined);
+  }
+
+  /**
+   * Execute Aurora upserts for all active clusters in parallel.
+   * Returns ok if ALL clusters succeed, err if ANY cluster fails.
+   * Logs ERROR for primary cluster failures, WARN for non-primary.
+   * Upserts are idempotent (ON CONFLICT DO UPDATE) — safe to re-run on every attempt.
+   */
+  async executeAuroraUpserts(signal: Signal, arc: Arc): Promise<Result<void, ProcessError>> {
+    const activeClusters = getActiveClusters();
+    const primaryCluster = getReadCluster();
+
+    const results = await Promise.all(
+      activeClusters.map(async (cluster) => {
+        const embedding = signal.embeddings?.[cluster.modelId];
+        if (!embedding) {
+          this.logger.info("Aurora upsert skipped for cluster — no embedding available for the cluster's model. This is expected when the embedding generator did not produce a vector for this model (e.g. Bedrock failure for that model).", { code: "processor.aurora_upsert_skipped", accountId: signal.accountId, clusterId: cluster.clusterId, modelId: cluster.modelId });
+          return { cluster, success: true as const };
+        }
+
+        const upsertResult = await ResultAsync.fromPromise(
+          this.auroraWriter.upsertEmbedding({
+            clusterId: cluster.clusterId,
+            arcId: arc.id,
+            accountId: signal.accountId,
+            recipientAddress: signal.recipientAddress,
+            embedding,
+          }),
+          (e) => dbError(e instanceof Error ? e : new Error(String(e))),
+        );
+
+        if (upsertResult.isErr()) {
+          return { cluster, success: false as const, error: upsertResult.error };
+        }
+        return { cluster, success: true as const };
+      }),
+    );
+
+    const failures = results.filter((r) => !r.success);
+    if (failures.length > 0) {
+      for (const failure of failures) {
+        if (!failure.success) {
+          const isPrimary = failure.cluster.clusterId === primaryCluster.clusterId;
+          const message = "Failed to upsert embedding to Aurora cluster. The Data API call returned an error for the target cluster. This signal's embedding won't be searchable on that cluster until the next retry succeeds. Check Aurora cluster health in the AWS console.";
+          const context = { code: "processor.aurora_upsert_failed", accountId: signal.accountId, clusterId: failure.cluster.clusterId, error: String(failure.error.cause) };
+          if (isPrimary) {
+            this.logger.error(message, context);
+          } else {
+            this.logger.warn(message, context);
+          }
+        }
+      }
+      return err(processError(signal.id));
     }
 
     return ok(undefined);
