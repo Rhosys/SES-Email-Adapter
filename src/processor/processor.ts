@@ -470,7 +470,7 @@ export class SignalProcessor {
         this.logger.trackPoint("side_effect_notify_start");
         const notifyResult = await this.notifier.notify(accountId, arc, signal);
         if (notifyResult.isErr()) {
-          this.logger.warn("Side-effect notification failed. The notification service returned an error. The signal is processed but the user won't receive a real-time alert.", { code: "processor.side_effect.notify_failed", accountId, error: String(notifyResult.error.cause) });
+          this.logger.error("Side-effect notification failed.", { code: "processor.side_effect.notify_failed", accountId, error: String(notifyResult.error.cause) });
         }
         this.logger.trackPoint("side_effect_notify_complete");
       } catch (e) {
@@ -568,7 +568,7 @@ export class SignalProcessor {
           };
           const draftSaveResult = await this.store.saveSignal(draft);
           if (draftSaveResult.isErr()) {
-            this.logger.warn("Side-effect auto-draft save failed. The DynamoDB put returned an error. The draft won't appear in the user's arc.", { code: "processor.side_effect.auto_draft_failed", accountId, error: String(draftSaveResult.error.cause) });
+            this.logger.error("Side-effect auto-draft save failed.", { code: "processor.side_effect.auto_draft_failed", accountId, error: String(draftSaveResult.error.cause) });
           }
         }
         this.logger.trackPoint("side_effect_auto_draft_complete");
@@ -585,7 +585,7 @@ export class SignalProcessor {
         const calSignal = buildCalendarSignal(arc, signal, now, undefined);
         const calSaveResult = await this.store.saveSignal(calSignal);
         if (calSaveResult.isErr()) {
-          this.logger.warn("Side-effect calendar signal save failed. The DynamoDB put returned an error. The calendar entry won't appear in the user's arc.", { code: "processor.side_effect.calendar_failed", accountId, error: String(calSaveResult.error.cause) });
+          this.logger.error("Side-effect calendar signal save failed.", { code: "processor.side_effect.calendar_failed", accountId, error: String(calSaveResult.error.cause) });
         }
         this.logger.trackPoint("side_effect_calendar_complete");
       } catch (e) {
@@ -805,7 +805,7 @@ export class SignalProcessor {
       if (this.notifier && !outcome.quarantineHidden) {
         const notifyResult = await this.notifier.notifyBlocked(accountId, quarantinedSignal);
         if (notifyResult.isErr()) {
-          this.logger.warn("Failed to send quarantine notification to user. The notification service returned an error. The signal is quarantined but the user won't be alerted until they check the quarantine view. Investigate if pattern persists — notifications are part of the quarantine feature contract.", { code: "processor.quarantine_notification_failed", accountId, error: String(notifyResult.error.cause) });
+          this.logger.track("Failed to send quarantine notification to user. The notification service returned an error. The signal is quarantined but the user won't be alerted. Tracked for notification reliability monitoring.", { code: "processor.quarantine_notification_failed", accountId, error: String(notifyResult.error.cause) });
         }
       }
       const repResult = await this.store.updateGlobalReputation(senderETLD1, { wasSpam: classification.spamScore >= spamScoreThreshold, wasBlocked: true });
@@ -899,7 +899,7 @@ export class SignalProcessor {
       const calSignal = buildCalendarSignal(arc, signal, now, ttl);
       const calSaveResult = await this.store.saveSignal(calSignal);
       if (calSaveResult.isErr()) {
-        this.logger.warn("Failed to save synthetic calendar signal for scheduling workflow. The DynamoDB put returned an error. The email signal is saved but the calendar entry won't appear in the user's arc. Investigate if pattern persists — calendar extraction is a user-visible feature.", { code: "processor.calendar_signal_save_failed", accountId, error: String(calSaveResult.error.cause) });
+        this.logger.track("Failed to save synthetic calendar signal for scheduling workflow. The DynamoDB put returned an error. The email signal is saved but the calendar entry won't appear. Tracked for scheduling feature reliability.", { code: "processor.calendar_signal_save_failed", accountId, error: String(calSaveResult.error.cause) });
       }
     }
 
@@ -993,7 +993,7 @@ export class SignalProcessor {
         };
         const draftSaveResult = await this.store.saveSignal(draft);
         if (draftSaveResult.isErr()) {
-          this.logger.warn("Failed to save auto-draft signal from template. The DynamoDB put returned an error. The draft won't appear in the user's arc for review. Investigate if pattern persists — user configured this auto-draft rule explicitly.", { code: "processor.auto_draft_save_failed", accountId, error: String(draftSaveResult.error.cause) });
+          this.logger.track("Failed to save auto-draft signal from template. The DynamoDB put returned an error. The draft won't appear in the user's arc. Tracked for auto-draft feature reliability.", { code: "processor.auto_draft_save_failed", accountId, error: String(draftSaveResult.error.cause) });
         }
       }
     }
@@ -1002,7 +1002,7 @@ export class SignalProcessor {
     if (this.notifier && !outcome.suppressNotification) {
       const notifyResult = await this.notifier.notify(accountId, arc, signal);
       if (notifyResult.isErr()) {
-        this.logger.warn("Failed to send new-signal notification to user. The notification service returned an error. The signal is processed but the user won't receive a real-time alert. Investigate if pattern persists — notifications are a user-facing feature.", { code: "processor.notification_failed", accountId, error: String(notifyResult.error.cause) });
+        this.logger.track("Failed to send new-signal notification to user. The notification service returned an error. The signal is processed but the user won't be alerted. Tracked for notification reliability monitoring.", { code: "processor.notification_failed", accountId, error: String(notifyResult.error.cause) });
       }
     }
 

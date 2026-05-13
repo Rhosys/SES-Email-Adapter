@@ -4,7 +4,7 @@
 // For any reindex SQS message that fails processing:
 // 1. The reindex SQS queue has no `redrive_policy` (no DLQ) — infrastructure assertion
 // 2. The reindex worker uses `ApproximateReceiveCount` from SQS message attributes to determine log level
-// 3. When receiveCount <= 30, failures log at 'warn' level
+// 3. When receiveCount <= 30, failures log at 'track' level
 // 4. When receiveCount > 30, failures log at 'error' level
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -144,10 +144,10 @@ describe("Property 21: Persistent failures surface via SQS metrics, not DLQ", ()
   });
 
   // -------------------------------------------------------------------------
-  // receiveCount <= 30 → failures log at 'warn' level
+  // receiveCount <= 30 → failures log at 'track' level
   // -------------------------------------------------------------------------
 
-  it.each(trackLevelCases)("logs at 'warn' level when %s", async (_label, { receiveCount }) => {
+  it.each(trackLevelCases)("logs at 'track' level when %s", async (_label, { receiveCount }) => {
     ddbMock.reset();
     mockLogger.calls.length = 0;
 
@@ -170,14 +170,14 @@ describe("Property 21: Persistent failures surface via SQS metrics, not DLQ", ()
     const result = await worker.process(event);
     expect(result.batchItemFailures).toHaveLength(1);
 
-    const warnCalls = mockLogger.calls.filter(
-      (c) => c.method === "warn" && c.context?.code === "reindex.worker.segment_failed",
+    const trackCalls = mockLogger.calls.filter(
+      (c) => c.method === "track" && c.context?.code === "reindex.worker.segment_failed",
     );
     const errorCalls = mockLogger.calls.filter(
       (c) => c.method === "error" && c.context?.code === "reindex.worker.segment_failed",
     );
 
-    expect(warnCalls.length).toBeGreaterThanOrEqual(1);
+    expect(trackCalls.length).toBeGreaterThanOrEqual(1);
     expect(errorCalls.length).toBe(0);
   });
 
@@ -210,11 +210,11 @@ describe("Property 21: Persistent failures surface via SQS metrics, not DLQ", ()
     const errorCalls = mockLogger.calls.filter(
       (c) => c.method === "error" && c.context?.code === "reindex.worker.segment_failed",
     );
-    const warnCalls = mockLogger.calls.filter(
-      (c) => c.method === "warn" && c.context?.code === "reindex.worker.segment_failed",
+    const trackCalls = mockLogger.calls.filter(
+      (c) => c.method === "track" && c.context?.code === "reindex.worker.segment_failed",
     );
 
     expect(errorCalls.length).toBeGreaterThanOrEqual(1);
-    expect(warnCalls.length).toBe(0);
+    expect(trackCalls.length).toBe(0);
   });
 });
