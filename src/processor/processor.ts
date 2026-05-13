@@ -48,7 +48,7 @@ export interface ProcessorAccountContext {
 }
 
 export interface ProcessorDatabase {
-  getSignalByMessageId(accountId: string, sesMessageId: string): ResultAsync<Pick<Signal, "id"> | null, DbError>;
+  getSignalByMessageId(accountId: string, sesMessageId: string): ResultAsync<Signal | null, DbError>;
   saveSignal(signal: Signal): ResultAsync<void, DbError>;
   updateSignalRetention(accountId: string, signalId: string, update: Partial<Pick<Signal, "s3Key" | "retentionDuration">>): ResultAsync<void, DbError>;
   getArc(accountId: string, id: string): ResultAsync<Arc | null, DbError>;
@@ -332,7 +332,51 @@ export class SignalProcessor {
     if (receiveCount > 1) {
       const existingResult = await this.store.getSignalByMessageId(message.accountId, message.sesMessageId);
       if (existingResult.isErr()) return err(processError(record.messageId));
-      if (existingResult.value) return ok(undefined); // already processed
+
+      if (existingResult.value) {
+        const signal = existingResult.value;
+
+        // Signal exists — arc is guaranteed to exist (arc saved before signal).
+        // Load arc to resume from the convergence point.
+        if (!signal.arcId) return err(processError(record.messageId));
+        const arcResult = await this.store.getArc(message.accountId, signal.arcId);
+        if (arcResult.isErr()) return err(processError(record.messageId));
+        const arc = arcResult.value;
+        if (!arc) return err(processError(record.messageId));
+
+        // Fetch account context (needed for S3 retention)
+        const accountCtxResultAsync = await this.store.getProcessorAccountContext(message.accountId, signal.recipientAddress);
+        const accountCtxResult = await accountCtxResultAsync;
+        if (accountCtxResult.isErr()) return err(processError(record.messageId));
+        const accountCtx = accountCtxResult.value;
+
+        // S3 retention — always attempt, fire-and-forget (idempotent)
+        await this.attemptS3Retention(signal, accountCtx, arc);
+
+        // Aurora upserts — always run (idempotent). Use cached embeddings from signal.
+        const activeClusters = getActiveClusters();
+        await Promise.all(
+          activeClusters.map(async (cluster) => {
+            const embedding = signal.embeddings?.[cluster.modelId];
+            if (!embedding) return;
+            const upsertResult = await ResultAsync.fromPromise(
+              this.auroraWriter.upsertEmbedding({
+                clusterId: cluster.clusterId,
+                arcId: arc.id,
+                accountId: message.accountId,
+                recipientAddress: signal.recipientAddress,
+                embedding,
+              }),
+              (e) => dbError(e instanceof Error ? e : new Error(String(e))),
+            );
+            if (upsertResult.isErr()) {
+              this.logger.error("Failed to upsert embedding to Aurora cluster. The Data API call returned an error for the target cluster. This signal's embedding won't be searchable on that cluster until the next reindex run. Check Aurora cluster health in the AWS console.", { code: "processor.aurora_upsert_failed", accountId: message.accountId, clusterId: cluster.clusterId, error: String(upsertResult.error.cause) });
+            }
+          }),
+        );
+
+        return ok(undefined);
+      }
     }
 
     let processResult: Result<void, DbError | InvalidResponseError>;
