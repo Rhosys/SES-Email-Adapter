@@ -349,15 +349,16 @@ export class SignalProcessor {
   async process(event: SQSEvent): Promise<{ batchItemFailures: Array<{ itemIdentifier: string }> }> {
     this.logger.startInvocation();
 
-    const results = await Promise.all(
-      event.Records.map(record => this.processRecord(record))
-    );
-
     const failures: Array<{ itemIdentifier: string }> = [];
-    for (let i = 0; i < results.length; i++) {
-      const result = results[i]!;
+
+    for (const record of event.Records) {
+      const messageType = record.messageAttributes?.["messageType"]?.stringValue ?? "inbound_signal";
+
+      const result = messageType === "side_effect"
+        ? await this.processSideEffectRecord(record)
+        : await this.processRecord(record);
+
       if (result.isErr()) {
-        const record = event.Records[i]!;
         const receiveCount = Number(record.attributes?.ApproximateReceiveCount ?? "1");
         const level = receiveCount > RETRY_TRACK_THRESHOLD ? "error" : "warn";
         if (level === "error") {
@@ -365,11 +366,15 @@ export class SignalProcessor {
         } else {
           this.logger.warn("Signal processing failed on attempt " + receiveCount + ". The SQS message will be retried automatically. If this pattern persists at high volume, investigate the root cause in earlier logs for this messageId.", { code: "processor.signal.failed", messageId: result.error.messageId, receiveCount });
         }
-        failures.push({ itemIdentifier: result.error.messageId });
+        failures.push({ itemIdentifier: record.messageId });
       }
     }
 
     return { batchItemFailures: failures };
+  }
+
+  private async processSideEffectRecord(_record: SQSRecord): Promise<Result<void, ProcessError>> {
+    return ok(undefined);
   }
 
   private async processMessage(msg: InboundSignalMessage): Promise<Result<void, DbError | InvalidResponseError>> {
@@ -599,6 +604,10 @@ export class SignalProcessor {
     const signalUrgency = outcome.urgency ?? arc.urgency ?? "normal";
     if (!matchedArc) arc.urgency = signalUrgency;
 
+    // 11b. Save arc (leaf node) — must succeed before signal save
+    const saveArcResult = await this.store.saveArc(arc);
+    if (saveArcResult.isErr()) return err(saveArcResult.error);
+
     const signal: Signal = { ...signalShell, arcId: arc.id, matchedRules, urgency: signalUrgency };
 
     // 12. Pong (driven by SR-13 rule action)
@@ -642,41 +651,8 @@ export class SignalProcessor {
     if (saveSignalResult.isErr()) return err(saveSignalResult.error);
     this.logger.trackPoint("save");
 
-    // 13. Apply S3 retention based on billing plan (only on new signal creation, never retroactive)
-    if (this.retentionService) {
-      const retention = getRetentionForPlan(accountCtx.billingPlan);
-      const retentionApplyResult = await ResultAsync.fromPromise(
-        this.retentionService.applyPlanRetention(s3Key, {
-          s3Tag: retention.s3Tag,
-          copyToSaved: retention.copyToSaved,
-        }),
-        (e) => dbError(e instanceof Error ? e : new Error(String(e))),
-      );
-      if (retentionApplyResult.isErr()) {
-        // Retention application failure is non-fatal — the signal is already saved.
-        // The default lifecycle rule will apply (5-year inbox/ expiry).
-        this.logger.track("Failed to apply S3 retention policy to signal object. The S3 tagging or copy operation returned an error. The signal is saved but will use the default 5-year lifecycle rule instead of the plan-specific retention.", { code: "processor.s3_retention_failed", accountId, error: String(retentionApplyResult.error.cause) });
-      } else {
-        const { s3Key: updatedS3Key } = retentionApplyResult.value;
-
-        // Persist retention metadata on the signal record
-        const retentionUpdate: Partial<Pick<Signal, "s3Key" | "retentionDuration">> = {
-          retentionDuration: retention.retentionDuration,
-        };
-        if (updatedS3Key !== s3Key) {
-          retentionUpdate.s3Key = updatedS3Key;
-        }
-        const retentionSaveResult = await this.store.updateSignalRetention(accountId, signal.id, retentionUpdate);
-        if (retentionSaveResult.isErr()) {
-          this.logger.track("Failed to persist retention metadata on signal record. The DynamoDB update returned an error. The S3 retention is applied but the signal record won't reflect the retention duration. Tracked for data consistency monitoring.", { code: "processor.retention_metadata_save_failed", accountId, error: String(retentionSaveResult.error.cause) });
-        }
-
-        // Set TTL on the arc based on retentionDuration
-        const ttlSeconds = retentionDurationToSeconds(retention.retentionDuration);
-        const arcTtl = Math.floor(Date.now() / 1000) + ttlSeconds;
-        arc.ttl = arcTtl;
-      }
-    }
+    // 13. S3 retention — fire-and-forget (idempotent, always attempted)
+    await this.attemptS3Retention(signal, accountCtx, arc);
 
     // 14. Calendar synthetic signal
     if (classification.workflow === "scheduling") {
@@ -764,9 +740,13 @@ export class SignalProcessor {
       }
     }
 
-    // Final arc write: single saveArc with all accumulated mutations (TTL, sentMessageIds, status, labels, urgency)
-    const saveArcResult = await this.store.saveArc(arc);
-    if (saveArcResult.isErr()) return err(saveArcResult.error);
+    // Final arc write: persist pong/auto-reply sentMessageIds and TTL mutations accumulated after the initial arc save
+    if (arc.sentMessageIds?.length || arc.ttl) {
+      const updateArcResult = await this.store.saveArc(arc);
+      if (updateArcResult.isErr()) {
+        this.logger.track("Failed to persist post-save arc mutations (sentMessageIds, TTL). The DynamoDB put returned an error. Arc state may be stale for these fields. Tracked for data consistency monitoring.", { code: "processor.arc_update_failed", accountId, error: String(updateArcResult.error.cause) });
+      }
+    }
 
     // 16. Auto-draft (create held draft signals from templates)
     if (outcome.autoDraftTemplateIds.length > 0) {
@@ -828,6 +808,51 @@ export class SignalProcessor {
     }
 
     return ok(undefined);
+  }
+
+  /**
+   * Fire-and-forget S3 retention. Always attempted on every delivery (idempotent).
+   * Errors are logged at warn level and never propagate — S3 retention failure
+   * must not alter the processing outcome or prevent Aurora/side-effect execution.
+   */
+  async attemptS3Retention(signal: Signal, accountCtx: ProcessorAccountContext, arc: Arc): Promise<void> {
+    if (!this.retentionService) return;
+
+    try {
+      const retention = getRetentionForPlan(accountCtx.billingPlan);
+      const retentionApplyResult = await ResultAsync.fromPromise(
+        this.retentionService.applyPlanRetention(signal.s3Key, {
+          s3Tag: retention.s3Tag,
+          copyToSaved: retention.copyToSaved,
+        }),
+        (e) => dbError(e instanceof Error ? e : new Error(String(e))),
+      );
+      if (retentionApplyResult.isErr()) {
+        this.logger.warn("Failed to apply S3 retention policy to signal object. The S3 tagging or copy operation returned an error. The signal is saved but will use the default 5-year lifecycle rule instead of the plan-specific retention.", { code: "processor.s3_retention_failed", accountId: signal.accountId, error: String(retentionApplyResult.error.cause) });
+        return;
+      }
+
+      const { s3Key: updatedS3Key } = retentionApplyResult.value;
+
+      // Persist retention metadata on the signal record
+      const retentionUpdate: Partial<Pick<Signal, "s3Key" | "retentionDuration">> = {
+        retentionDuration: retention.retentionDuration,
+      };
+      if (updatedS3Key !== signal.s3Key) {
+        retentionUpdate.s3Key = updatedS3Key;
+      }
+      const retentionSaveResult = await this.store.updateSignalRetention(signal.accountId, signal.id, retentionUpdate);
+      if (retentionSaveResult.isErr()) {
+        this.logger.warn("Failed to persist retention metadata on signal record. The DynamoDB update returned an error. The S3 retention is applied but the signal record won't reflect the retention duration.", { code: "processor.retention_metadata_save_failed", accountId: signal.accountId, error: String(retentionSaveResult.error.cause) });
+      }
+
+      // Set TTL on the arc based on retentionDuration
+      const ttlSeconds = retentionDurationToSeconds(retention.retentionDuration);
+      const arcTtl = Math.floor(Date.now() / 1000) + ttlSeconds;
+      arc.ttl = arcTtl;
+    } catch (e) {
+      this.logger.warn("S3 retention threw an unexpected error. The signal will use the default lifecycle rule. Processing continues unaffected.", { code: "processor.s3_retention_unexpected", accountId: signal.accountId, error: String(e) });
+    }
   }
 
   private async autoApprove(
