@@ -125,6 +125,7 @@ export class ReindexWorker {
     modelId: string,
   ): Promise<Result<void, ProcessError>> {
     let lastEvaluatedKey: Record<string, unknown> | undefined;
+    const failures: Array<{ signalId: string; reason: string }> = [];
 
     try {
       do {
@@ -140,13 +141,25 @@ export class ReindexWorker {
         const items = (res.Items ?? []) as Array<Record<string, unknown>>;
 
         for (const item of items) {
-          await this.processSignal(item, targetClusterId, modelId);
+          const result = await this.processSignal(item, targetClusterId, modelId);
+          if (result.isErr()) {
+            failures.push(result.error);
+          }
         }
 
         lastEvaluatedKey = res.LastEvaluatedKey as Record<string, unknown> | undefined;
       } while (lastEvaluatedKey);
     } catch {
       return err(processError(""));
+    }
+
+    if (failures.length > 0) {
+      this.logger.error("Reindex segment completed with per-signal failures.", {
+        code: "reindex.worker.segment_partial_failure",
+        segment,
+        failureCount: failures.length,
+        failures: failures.slice(0, 10),
+      });
     }
 
     return ok(undefined);
@@ -156,19 +169,16 @@ export class ReindexWorker {
     item: Record<string, unknown>,
     targetClusterId: string,
     modelId: string,
-  ): Promise<void> {
+  ): Promise<Result<void, { signalId: string; reason: string }>> {
     const signal = item as unknown as Pick<Signal, "id" | "accountId" | "arcId" | "recipientAddress" | "embeddings" | "s3Key">;
     const embeddings = signal.embeddings;
 
-    // Check if the target model's embedding is cached (cache-hit guard)
     const vector = embeddings?.[modelId];
     if (vector && Array.isArray(vector)) {
-      await this.pureCopyToAurora(signal, vector, targetClusterId);
-      return;
+      return this.pureCopyToAurora(signal, vector, targetClusterId);
     }
 
-    // Cache miss — attempt regeneration from S3
-    await this.regenerateFromS3(signal, targetClusterId, modelId);
+    return this.regenerateFromS3(signal, targetClusterId, modelId);
   }
 
   // ---------------------------------------------------------------------------
@@ -179,7 +189,7 @@ export class ReindexWorker {
     signal: Pick<Signal, "id" | "accountId" | "arcId" | "recipientAddress">,
     vector: number[],
     targetClusterId: string,
-  ): Promise<void> {
+  ): Promise<Result<void, { signalId: string; reason: string }>> {
     try {
       await multiClusterWriter.upsertEmbedding({
         clusterId: targetClusterId,
@@ -188,13 +198,9 @@ export class ReindexWorker {
         recipientAddress: signal.recipientAddress,
         embedding: vector,
       });
+      return ok(undefined);
     } catch (e) {
-      this.logger.track("Failed to upsert cached embedding to Aurora during reindex pure-copy. The signal will be skipped in this run.", {
-        code: "reindex.worker.signal_upsert_failed",
-        signalId: signal.id,
-        targetClusterId,
-        error: String(e),
-      });
+      return err({ signalId: signal.id, reason: `Aurora upsert failed: ${String(e)}` });
     }
   }
 
@@ -206,15 +212,11 @@ export class ReindexWorker {
     signal: Pick<Signal, "id" | "accountId" | "arcId" | "recipientAddress" | "s3Key">,
     targetClusterId: string,
     modelId: string,
-  ): Promise<void> {
+  ): Promise<Result<void, { signalId: string; reason: string }>> {
     const s3Key = signal.s3Key;
 
     if (!s3Key) {
-      this.logger.warn("Signal has no s3Key — cannot regenerate embedding. Permanent data loss for this signal's search index entry.", {
-        code: "reindex.worker.unrecoverable",
-        signalId: signal.id,
-      });
-      return;
+      return err({ signalId: signal.id, reason: "no s3Key on signal record" });
     }
 
     let rawMimeBuffer: Buffer;
@@ -222,20 +224,9 @@ export class ReindexWorker {
       rawMimeBuffer = await this.fetchFromS3(s3Key);
     } catch (e) {
       if (isNoSuchKeyError(e)) {
-        this.logger.warn("S3 object no longer exists (NoSuchKey) — cannot regenerate embedding. Permanent data loss for this signal's search index entry.", {
-          code: "reindex.worker.unrecoverable",
-          signalId: signal.id,
-          s3Key,
-        });
-        return;
+        return err({ signalId: signal.id, reason: `NoSuchKey: ${s3Key}` });
       }
-      this.logger.track("Failed to fetch raw MIME from S3 during reindex regeneration. Transient error — will retry on next run.", {
-        code: "reindex.worker.s3_fetch_failed",
-        signalId: signal.id,
-        s3Key,
-        error: String(e),
-      });
-      return;
+      return err({ signalId: signal.id, reason: `S3 fetch failed: ${String(e)}` });
     }
 
     try {
@@ -245,7 +236,6 @@ export class ReindexWorker {
 
       const result = await embeddingGenerator.generateForModel(embedText, modelId);
 
-      // Write the vector back to DynamoDB cache
       await arcDatabase.addEmbeddingToCache(
         signal.accountId,
         signal.id,
@@ -253,7 +243,6 @@ export class ReindexWorker {
         result.vector,
       );
 
-      // Upsert to target Aurora cluster
       await multiClusterWriter.upsertEmbedding({
         clusterId: targetClusterId,
         arcId: signal.arcId!,
@@ -261,14 +250,10 @@ export class ReindexWorker {
         recipientAddress: signal.recipientAddress,
         embedding: result.vector,
       });
+
+      return ok(undefined);
     } catch (e) {
-      this.logger.track("Failed to regenerate embedding from S3 source during reindex. The signal will be skipped in this run.", {
-        code: "reindex.worker.regeneration_failed",
-        signalId: signal.id,
-        s3Key,
-        modelId,
-        error: String(e),
-      });
+      return err({ signalId: signal.id, reason: `Regeneration failed: ${String(e)}` });
     }
   }
 
