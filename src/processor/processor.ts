@@ -291,6 +291,7 @@ export class SignalProcessor {
   private readonly forwarder: Forwarder | undefined;
   private readonly testReplier: TestReplier | undefined;
   private readonly retentionService: S3RetentionService | undefined;
+  private readonly sqsDispatcher: SqsDispatcher | undefined;
 
   constructor(opts: SignalProcessorOptions) {
     this.store = opts.store;
@@ -305,6 +306,7 @@ export class SignalProcessor {
     this.forwarder = opts.forwarder;
     this.testReplier = opts.testReplier;
     this.retentionService = opts.retentionService;
+    this.sqsDispatcher = opts.sqsDispatcher;
   }
 
   async processRecord(record: SQSRecord): Promise<Result<void, ProcessError>> {
@@ -356,6 +358,10 @@ export class SignalProcessor {
         // Aurora upserts — always run (idempotent). Gates side-effect dispatch.
         const auroraResult = await this.executeAuroraUpserts(signal, arc);
         if (auroraResult.isErr()) return err(processError(record.messageId));
+
+        // Dispatch side-effects via SQS after Aurora succeeds
+        const dispatchResult = await this.dispatchSideEffects(signal, arc);
+        if (dispatchResult.isErr()) return err(processError(record.messageId));
 
         return ok(undefined);
       }
@@ -684,6 +690,10 @@ export class SignalProcessor {
     const auroraResult = await this.executeAuroraUpserts(signal, arc);
     if (auroraResult.isErr()) return err(dbError(new Error("Aurora upsert failed")));
 
+    // Dispatch side-effects via SQS after Aurora succeeds
+    const dispatchResult = await this.dispatchSideEffects(signal, arc);
+    if (dispatchResult.isErr()) return err(dbError(new Error("Side-effect dispatch failed")));
+
     // 15. Calendar synthetic signal
     if (classification.workflow === "scheduling") {
       const calSignal = buildCalendarSignal(arc, signal, now, ttl);
@@ -857,6 +867,26 @@ export class SignalProcessor {
           }
         }
       }
+      return err(processError(signal.id));
+    }
+
+    return ok(undefined);
+  }
+
+  /**
+   * Dispatch side-effects as a separate SQS message after Aurora upserts succeed.
+   * If sqsDispatcher is not provided (backward compatibility during rollout),
+   * returns ok(undefined) — side-effects execute inline as they do today.
+   * If the SQS send fails, returns err — this causes a batchItemFailure so the
+   * message is retried (Aurora succeeded but side-effects won't fire without dispatch).
+   */
+  async dispatchSideEffects(signal: Signal, arc: Arc): Promise<Result<void, ProcessError>> {
+    if (!this.sqsDispatcher) return ok(undefined);
+
+    const payload: SideEffectPayload = { signal, arc };
+    const sendResult = await this.sqsDispatcher.sendMessage(payload);
+    if (sendResult.isErr()) {
+      this.logger.error("Failed to dispatch side-effect SQS message. Aurora upserts succeeded but side-effects won't fire until the message is retried and dispatch succeeds. Check SQS queue health and permissions.", { code: "processor.side_effect_dispatch_failed", accountId: signal.accountId, signalId: signal.id, arcId: arc.id, error: String(sendResult.error.cause) });
       return err(processError(signal.id));
     }
 
