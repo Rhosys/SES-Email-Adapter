@@ -4,7 +4,7 @@ import type { SQSEvent } from "aws-lambda";
 import { okAsync, errAsync } from "neverthrow";
 import { SignalProcessor, SYSTEM_RULES } from "./processor.js";
 import { JsonLogicRuleEvaluator } from "./rule-evaluator.js";
-import type { ProcessorDatabase, ArcMatcher } from "./processor.js";
+import type { ProcessorDatabase, ArcMatcher, SqsDispatcher } from "./processor.js";
 import type { MimeParser } from "./mime.js";
 import type { SignalClassifier } from "../classifier/classifier.js";
 import type { EmbeddingGenerator } from "../embedding/embedding-generator.js";
@@ -947,6 +947,280 @@ describe("Feature: signal-processor-retry-resilience, Property 2: Missing signal
 
           // Processing must succeed — no batchItemFailures
           expect(result.batchItemFailures).toEqual([]);
+        },
+      ),
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Property 8: Outcome re-derived from persisted matchedRules on retry
+// **Validates: Requirements 4.1**
+// ---------------------------------------------------------------------------
+
+/**
+ * For any signal that exists in DDB on retry, the processor SHALL call
+ * `deriveOutcome()` with the signal's persisted `matchedRules` field to
+ * reconstruct the processing outcome, rather than re-evaluating rules against
+ * the current rule set.
+ */
+describe("Feature: signal-processor-retry-resilience, Property 8: Outcome re-derived from persisted matchedRules on retry", () => {
+  let mockLogger: MockLogger;
+  beforeEach(() => { mockLogger = createMockLogger(); });
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  const TEST_ACCOUNT_ID = "acct-prop8";
+
+  const DEFAULT_ALIAS: Alias = {
+    id: "cfg-default",
+    accountId: TEST_ACCOUNT_ID,
+    address: "user@example.com",
+    filterMode: "allow_all",
+    createdAt: "2024-01-01T00:00:00Z",
+    updatedAt: "2024-01-01T00:00:00Z",
+  };
+
+  const DEFAULT_SENDER_ENTRY: AliasSender = {
+    accountId: TEST_ACCOUNT_ID,
+    aliasAddress: "user@example.com",
+    domain: "example.com",
+    mode: "allow",
+    addedAt: "2024-01-01T00:00:00Z",
+  };
+
+  const DEFAULT_CTX = {
+    retentionDays: 0,
+    filtering: null,
+    emailConfig: DEFAULT_ALIAS,
+    registeredDomains: [],
+    userEmails: [],
+    billingPlan: "Paid" as const,
+  };
+
+  // -------------------------------------------------------------------------
+  // Arbitraries
+  // -------------------------------------------------------------------------
+
+  const RULE_ACTION_TYPES: Array<{ type: string; value?: string }> = [
+    { type: "forward", value: "fwd@example.com" },
+    { type: "assign_label", value: "important" },
+    { type: "archive" },
+    { type: "pong" },
+    { type: "suppress_notification" },
+    { type: "auto_reply", value: "template-1" },
+    { type: "auto_draft", value: "template-2" },
+    { type: "set_urgency", value: "high" },
+  ];
+
+  const arbRuleAction = fc.constantFrom(...RULE_ACTION_TYPES).map((a) => ({ type: a.type, ...(a.value !== undefined ? { value: a.value } : {}) }));
+
+  const arbMatchedRuleResult = fc.record({
+    ruleId: fc.uuid(),
+    actions: fc.array(arbRuleAction, { minLength: 1, maxLength: 3 }),
+    labelsAdded: fc.array(fc.string({ minLength: 1, maxLength: 15 }), { minLength: 0, maxLength: 2 }),
+    statusChange: fc.constantFrom(undefined, "blocked" as const, "quarantine_visible" as const, "archived" as const),
+  });
+
+  /** Generate a non-empty matchedRules array */
+  const arbMatchedRules = fc.array(arbMatchedRuleResult, { minLength: 1, maxLength: 5 });
+
+  const arbEmbedding = fc.array(fc.double({ min: -1, max: 1, noNaN: true }), { minLength: 3, maxLength: 10 });
+
+  /** Generate a valid Signal with arbitrary matchedRules */
+  const arbSignalWithRules = arbMatchedRules.chain((matchedRules) =>
+    fc.record({
+      id: fc.uuid().map((id) => `SES#${id}`),
+      arcId: fc.uuid(),
+      accountId: fc.constant(TEST_ACCOUNT_ID),
+      source: fc.constant("email" as const),
+      receivedAt: fc.constant("2024-01-15T10:00:00Z"),
+      from: fc.record({ address: fc.emailAddress(), name: fc.string({ minLength: 1, maxLength: 20 }) }),
+      to: fc.constant([{ address: "user@example.com" }]),
+      cc: fc.constant([]),
+      subject: fc.string({ minLength: 1, maxLength: 50 }),
+      textBody: fc.string({ minLength: 1, maxLength: 100 }),
+      attachments: fc.constant([]),
+      headers: fc.constant({}),
+      recipientAddress: fc.constant("user@example.com"),
+      workflow: fc.constantFrom("conversation", "auth", "crm", "alert", "scheduling") as fc.Arbitrary<Workflow>,
+      workflowData: fc.constant({ workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false } as const),
+      spamScore: fc.double({ min: 0, max: 1, noNaN: true }),
+      summary: fc.string({ minLength: 1, maxLength: 50 }),
+      classificationModelId: fc.constant("us.anthropic.claude-opus-4-5-20251101-v1:0"),
+      s3Key: fc.uuid().map((id) => `emails/${id}`),
+      status: fc.constant("active" as const),
+      createdAt: fc.constant("2024-01-15T10:00:00Z"),
+      embeddings: arbEmbedding.map((vec) => ({ "amazon.titan-embed-text-v2:0": vec })),
+      matchedRules: fc.constant(matchedRules),
+    }) as fc.Arbitrary<Signal>,
+  );
+
+  /** Generate an Arc that matches the signal's arcId */
+  function arbArcForSignal(signal: Signal): Arc {
+    return {
+      id: signal.arcId!,
+      accountId: signal.accountId,
+      workflow: signal.workflow,
+      labels: [],
+      status: "active",
+      summary: signal.summary,
+      lastSignalAt: signal.receivedAt,
+      createdAt: signal.receivedAt,
+      updatedAt: signal.receivedAt,
+    };
+  }
+
+  /** Receive count > 1 (retry) */
+  const arbReceiveCount = fc.integer({ min: 2, max: 10 });
+
+  function makeSqsEvent(sesMessageId: string, receiveCount: number): SQSEvent {
+    const notification = {
+      accountId: TEST_ACCOUNT_ID,
+      mail: {
+        messageId: sesMessageId,
+        timestamp: "2024-01-15T10:00:00Z",
+        destination: ["user@example.com"],
+      },
+      receipt: {
+        recipients: ["user@example.com"],
+        dkimVerdict: { status: "PASS" },
+        dmarcVerdict: { status: "PASS" },
+        action: { bucketName: "test-bucket", objectKey: `emails/${sesMessageId}` },
+      },
+    };
+    return {
+      Records: [{
+        messageId: "sqs-1",
+        receiptHandle: "handle",
+        body: JSON.stringify({ Message: JSON.stringify(notification) }),
+        attributes: {
+          ApproximateReceiveCount: String(receiveCount),
+          SentTimestamp: "1234567890",
+          SenderId: "sender",
+          ApproximateFirstReceiveTimestamp: "1234567890",
+        },
+        messageAttributes: {},
+        md5OfBody: "",
+        eventSource: "aws:sqs",
+        eventSourceARN: "arn:aws:sqs:us-east-1:123:queue",
+        awsRegion: "us-east-1",
+      }],
+    };
+  }
+
+  // -------------------------------------------------------------------------
+  // Tests
+  // -------------------------------------------------------------------------
+
+  it("listEnabledRules is NOT called on retry when signal exists in DDB", () => {
+    return propertyRunner.assert(
+      fc.asyncProperty(
+        arbSignalWithRules,
+        arbReceiveCount,
+        async (signal, receiveCount) => {
+          const arc = arbArcForSignal(signal);
+          const sesMessageId = signal.id.replace("SES#", "");
+
+          const store: ProcessorDatabase = {
+            getSignalByMessageId: vi.fn().mockReturnValue(okAsync(signal)),
+            saveSignal: vi.fn().mockReturnValue(okAsync(undefined)),
+            updateSignalRetention: vi.fn().mockReturnValue(okAsync(undefined)),
+            getArc: vi.fn().mockReturnValue(okAsync(arc)),
+            findArcByGroupingKey: vi.fn().mockReturnValue(okAsync(null)),
+            saveArc: vi.fn().mockReturnValue(okAsync(undefined)),
+            listEnabledRules: vi.fn().mockReturnValue(okAsync(SYSTEM_RULES)),
+            getProcessorAccountContext: vi.fn().mockReturnValue(okAsync(DEFAULT_CTX)),
+            saveAlias: vi.fn().mockImplementation((a: Alias) => okAsync(a)),
+            getSender: vi.fn().mockReturnValue(okAsync(DEFAULT_SENDER_ENTRY)),
+            saveSender: vi.fn().mockReturnValue(okAsync(undefined)),
+            getTemplate: vi.fn().mockReturnValue(okAsync(null)),
+            updateGlobalReputation: vi.fn().mockReturnValue(okAsync(undefined)),
+            getDomainByName: vi.fn().mockReturnValue(okAsync(null)),
+          };
+
+          const auroraWriter: MultiClusterAuroraWriter = {
+            upsertEmbedding: vi.fn().mockResolvedValue(undefined),
+            findMatch: vi.fn().mockResolvedValue(null),
+          };
+
+          const sqsDispatcher: SqsDispatcher = {
+            sendMessage: vi.fn().mockReturnValue(okAsync(undefined)),
+          };
+
+          const processor = new SignalProcessor({
+            store,
+            mimeParser: { parse: vi.fn() },
+            classifier: { classify: vi.fn() },
+            embeddingGenerator: { generateForActiveClusters: vi.fn(), generateForModel: vi.fn() },
+            auroraWriter,
+            arcMatcher: { findMatch: vi.fn().mockReturnValue(okAsync(null)), upsertEmbedding: vi.fn().mockReturnValue(okAsync(undefined)) },
+            ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
+            sqsDispatcher,
+            logger: mockLogger,
+          });
+
+          await processor.process(makeSqsEvent(sesMessageId, receiveCount));
+
+          // listEnabledRules must NOT be called — rules are not re-evaluated on retry
+          expect(store.listEnabledRules).not.toHaveBeenCalled();
+        },
+      ),
+    );
+  });
+
+  it("dispatched side-effect payload contains the signal's persisted matchedRules", () => {
+    return propertyRunner.assert(
+      fc.asyncProperty(
+        arbSignalWithRules,
+        arbReceiveCount,
+        async (signal, receiveCount) => {
+          const arc = arbArcForSignal(signal);
+          const sesMessageId = signal.id.replace("SES#", "");
+
+          const store: ProcessorDatabase = {
+            getSignalByMessageId: vi.fn().mockReturnValue(okAsync(signal)),
+            saveSignal: vi.fn().mockReturnValue(okAsync(undefined)),
+            updateSignalRetention: vi.fn().mockReturnValue(okAsync(undefined)),
+            getArc: vi.fn().mockReturnValue(okAsync(arc)),
+            findArcByGroupingKey: vi.fn().mockReturnValue(okAsync(null)),
+            saveArc: vi.fn().mockReturnValue(okAsync(undefined)),
+            listEnabledRules: vi.fn().mockReturnValue(okAsync(SYSTEM_RULES)),
+            getProcessorAccountContext: vi.fn().mockReturnValue(okAsync(DEFAULT_CTX)),
+            saveAlias: vi.fn().mockImplementation((a: Alias) => okAsync(a)),
+            getSender: vi.fn().mockReturnValue(okAsync(DEFAULT_SENDER_ENTRY)),
+            saveSender: vi.fn().mockReturnValue(okAsync(undefined)),
+            getTemplate: vi.fn().mockReturnValue(okAsync(null)),
+            updateGlobalReputation: vi.fn().mockReturnValue(okAsync(undefined)),
+            getDomainByName: vi.fn().mockReturnValue(okAsync(null)),
+          };
+
+          const auroraWriter: MultiClusterAuroraWriter = {
+            upsertEmbedding: vi.fn().mockResolvedValue(undefined),
+            findMatch: vi.fn().mockResolvedValue(null),
+          };
+
+          const sqsDispatcher: SqsDispatcher = {
+            sendMessage: vi.fn().mockReturnValue(okAsync(undefined)),
+          };
+
+          const processor = new SignalProcessor({
+            store,
+            mimeParser: { parse: vi.fn() },
+            classifier: { classify: vi.fn() },
+            embeddingGenerator: { generateForActiveClusters: vi.fn(), generateForModel: vi.fn() },
+            auroraWriter,
+            arcMatcher: { findMatch: vi.fn().mockReturnValue(okAsync(null)), upsertEmbedding: vi.fn().mockReturnValue(okAsync(undefined)) },
+            ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
+            sqsDispatcher,
+            logger: mockLogger,
+          });
+
+          await processor.process(makeSqsEvent(sesMessageId, receiveCount));
+
+          // sqsDispatcher.sendMessage must be called with the signal's persisted matchedRules
+          expect(sqsDispatcher.sendMessage).toHaveBeenCalledTimes(1);
+          const payload = vi.mocked(sqsDispatcher.sendMessage).mock.calls[0]![0];
+          expect(payload.signal.matchedRules).toEqual(signal.matchedRules);
         },
       ),
     );
