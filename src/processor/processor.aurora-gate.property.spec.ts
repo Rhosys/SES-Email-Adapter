@@ -165,27 +165,15 @@ describe("Feature: signal-processor-retry-resilience, Property 4: Arc saved befo
   }
 
   // -------------------------------------------------------------------------
-  // Edge-case inputs
+  // Edge-case inputs: what matters is the embedding map, not vector values
   // -------------------------------------------------------------------------
 
-  const VECTORS: Array<{ label: string; vector: number[] }> = [
-    { label: "single-element", vector: [0.5] },
-    { label: "typical-3d", vector: [0.1, -0.9, 0.5] },
-    { label: "zeros-10d", vector: new Array(10).fill(0) },
-    { label: "full-size-1024", vector: new Array(1024).fill(0.01) },
+  const ORDER_CASES = [
+    { label: "valid embeddings for both clusters", sesMessageId: "msg-order-both", vectorA: [0.1, -0.9, 0.5], vectorB: [0.2, 0.8, -0.4] },
+    { label: "single-element vectors (minimal valid embedding)", sesMessageId: "msg-order-minimal", vectorA: [0.5], vectorB: [-0.3] },
   ];
 
-  const SES_IDS = ["msg-001", "a1b2c3d4-e5f6-7890-abcd-ef1234567890"] as const;
-
-  const ORDER_CASES = VECTORS.flatMap(({ label: vecLabel, vector }) =>
-    SES_IDS.map((sesId) => ({
-      label: `vector=${vecLabel}, sesId=${sesId}`,
-      vector,
-      sesMessageId: sesId,
-    })),
-  );
-
-  it.each(ORDER_CASES)("saveArc is always called before saveSignal on first-attempt processing ($label)", async ({ vector, sesMessageId }) => {
+  it.each(ORDER_CASES)("saveArc is always called before saveSignal on first-attempt processing ($label)", async ({ vectorA, vectorB, sesMessageId }) => {
     const callOrder: string[] = [];
 
     const store: ProcessorDatabase = {
@@ -213,11 +201,11 @@ describe("Feature: signal-processor-retry-resilience, Property 4: Arc saved befo
 
     const embeddingGenerator: EmbeddingGenerator = {
       generateForActiveClusters: vi.fn().mockResolvedValue([
-        { modelId: "amazon.titan-embed-text-v2:0", vector, dimensions: 1024 },
-        { modelId: "amazon.titan-embed-text-v3:0", vector, dimensions: 1536 },
+        { modelId: "amazon.titan-embed-text-v2:0", vector: vectorA, dimensions: 1024 },
+        { modelId: "amazon.titan-embed-text-v3:0", vector: vectorB, dimensions: 1536 },
       ] as EmbeddingResult[]),
       generateForModel: vi.fn().mockResolvedValue(
-        { modelId: "amazon.titan-embed-text-v2:0", vector, dimensions: 1024 } as EmbeddingResult,
+        { modelId: "amazon.titan-embed-text-v2:0", vector: vectorA, dimensions: 1024 } as EmbeddingResult,
       ),
     };
 
@@ -247,7 +235,7 @@ describe("Feature: signal-processor-retry-resilience, Property 4: Arc saved befo
     expect(saveArcIdx).toBeLessThan(saveSignalIdx);
   });
 
-  it.each(ORDER_CASES)("when saveArc fails, saveSignal is never called and the record is a batchItemFailure ($label)", async ({ vector, sesMessageId }) => {
+  it.each(ORDER_CASES)("when saveArc fails, saveSignal is never called and the record is a batchItemFailure ($label)", async ({ vectorA, vectorB, sesMessageId }) => {
     let saveSignalCalled = false;
 
     const store: ProcessorDatabase = {
@@ -272,11 +260,11 @@ describe("Feature: signal-processor-retry-resilience, Property 4: Arc saved befo
 
     const embeddingGenerator: EmbeddingGenerator = {
       generateForActiveClusters: vi.fn().mockResolvedValue([
-        { modelId: "amazon.titan-embed-text-v2:0", vector, dimensions: 1024 },
-        { modelId: "amazon.titan-embed-text-v3:0", vector, dimensions: 1536 },
+        { modelId: "amazon.titan-embed-text-v2:0", vector: vectorA, dimensions: 1024 },
+        { modelId: "amazon.titan-embed-text-v3:0", vector: vectorB, dimensions: 1536 },
       ] as EmbeddingResult[]),
       generateForModel: vi.fn().mockResolvedValue(
-        { modelId: "amazon.titan-embed-text-v2:0", vector, dimensions: 1024 } as EmbeddingResult,
+        { modelId: "amazon.titan-embed-text-v2:0", vector: vectorA, dimensions: 1024 } as EmbeddingResult,
       ),
     };
 
@@ -443,28 +431,20 @@ describe("Feature: signal-processor-retry-resilience, Property 6: Aurora failure
   }
 
   // -------------------------------------------------------------------------
-  // Edge-case inputs
+  // Edge-case inputs: what matters is WHICH cluster fails (primary vs non-primary)
   // -------------------------------------------------------------------------
 
-  const VECTORS: Array<{ label: string; vectorA: number[]; vectorB: number[] }> = [
-    { label: "single-element vectors", vectorA: [0.5], vectorB: [-0.3] },
-    { label: "typical-3d vectors", vectorA: [0.1, -0.9, 0.5], vectorB: [0.2, 0.8, -0.4] },
-    { label: "zeros-10d vectors", vectorA: new Array(10).fill(0), vectorB: new Array(10).fill(0) },
+  const PRIMARY_FAILURE_CASES = [
+    { label: "primary cluster fails (connection timeout)", vectorA: [0.1, -0.9, 0.5], vectorB: [0.2, 0.8, -0.4], sesMessageId: "msg-primary-fail" },
   ];
 
-  const PRIMARY_FAILURE_CASES = VECTORS.map(({ label, vectorA, vectorB }) => ({
-    label,
-    vectorA,
-    vectorB,
-    sesMessageId: "msg-primary-fail",
-  }));
+  const SECONDARY_FAILURE_CASES = [
+    { label: "non-primary cluster fails (throttled)", vectorA: [0.1, -0.9, 0.5], vectorB: [0.2, 0.8, -0.4], sesMessageId: "msg-secondary-fail" },
+  ];
 
-  const SECONDARY_FAILURE_CASES = VECTORS.map(({ label, vectorA, vectorB }) => ({
-    label,
-    vectorA,
-    vectorB,
-    sesMessageId: "msg-secondary-fail",
-  }));
+  const BOTH_FAIL_CASES = [
+    { label: "both clusters fail (total Aurora outage)", vectorA: [0.1, -0.9, 0.5], vectorB: [0.2, 0.8, -0.4], sesMessageId: "msg-both-fail" },
+  ];
 
   it.each(PRIMARY_FAILURE_CASES)("primary cluster failure logs at ERROR level with cluster ID and error message, and returns batchItemFailure ($label)", async ({ vectorA, vectorB, sesMessageId }) => {
     mockLogger.calls.length = 0;
@@ -562,6 +542,54 @@ describe("Feature: signal-processor-retry-resilience, Property 6: Aurora failure
     const errorLogs = mockLogger.calls.filter((c) => c.method === "error");
     const auroraErrorLog = errorLogs.find((c) => c.context?.clusterId === "cluster-b");
     expect(auroraErrorLog).toBeUndefined();
+  });
+
+  it.each(BOTH_FAIL_CASES)("both clusters failing logs ERROR for primary and WARN for non-primary, returns batchItemFailure ($label)", async ({ vectorA, vectorB, sesMessageId }) => {
+    mockLogger.calls.length = 0;
+
+    const embeddingGenerator: EmbeddingGenerator = {
+      generateForActiveClusters: vi.fn().mockResolvedValue([
+        { modelId: "amazon.titan-embed-text-v2:0", vector: vectorA, dimensions: 1024 },
+        { modelId: "amazon.titan-embed-text-v3:0", vector: vectorB, dimensions: 1536 },
+      ] as EmbeddingResult[]),
+      generateForModel: vi.fn().mockResolvedValue(
+        { modelId: "amazon.titan-embed-text-v2:0", vector: vectorA, dimensions: 1024 } as EmbeddingResult,
+      ),
+    };
+
+    // Both clusters fail
+    const auroraWriter: MultiClusterAuroraWriter = {
+      upsertEmbedding: vi.fn().mockImplementation(async (opts: { clusterId: string }) => {
+        if (opts.clusterId === "cluster-a") throw new Error("Primary connection refused");
+        if (opts.clusterId === "cluster-b") throw new Error("Secondary connection refused");
+      }),
+      findMatch: vi.fn().mockResolvedValue(null),
+    };
+
+    const processor = new SignalProcessor({
+      store: makeStore(),
+      mimeParser: makeMimeParser(),
+      classifier: makeClassifier(),
+      embeddingGenerator,
+      auroraWriter,
+      arcMatcher: makeArcMatcher(),
+      ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
+      logger: mockLogger,
+    });
+
+    const result = await processor.process(makeSqsEvent(sesMessageId));
+
+    expect(result.batchItemFailures).toHaveLength(1);
+
+    // Primary cluster failure → ERROR
+    const errorLogs = mockLogger.calls.filter((c) => c.method === "error");
+    const primaryErrorLog = errorLogs.find((c) => c.context?.clusterId === "cluster-a");
+    expect(primaryErrorLog).toBeDefined();
+
+    // Non-primary cluster failure → WARN
+    const warnLogs = mockLogger.calls.filter((c) => c.method === "warn");
+    const secondaryWarnLog = warnLogs.find((c) => c.context?.clusterId === "cluster-b");
+    expect(secondaryWarnLog).toBeDefined();
   });
 });
 
@@ -702,16 +730,11 @@ describe("Feature: signal-processor-retry-resilience, Property 5: Side-effects d
   }
 
   // -------------------------------------------------------------------------
-  // Edge-case inputs
+  // Edge-case inputs: what matters is Aurora success/failure and dispatcher state
   // -------------------------------------------------------------------------
 
-  const DISPATCH_CASES = [
-    { label: "single-element vector", vector: [0.5], sesMessageId: "msg-dispatch-1" },
-    { label: "typical-3d vector", vector: [0.1, -0.9, 0.5], sesMessageId: "msg-dispatch-2" },
-    { label: "zeros-10d vector", vector: new Array(10).fill(0), sesMessageId: "msg-dispatch-3" },
-  ] as const;
-
-  it.each(DISPATCH_CASES)("when all Aurora upserts succeed, sqsDispatcher.sendMessage is called ($label)", async ({ vector, sesMessageId }) => {
+  it("when all Aurora upserts succeed, sqsDispatcher.sendMessage is called with signal and arc", async () => {
+    const vector = [0.1, -0.9, 0.5];
     const embeddingGenerator: EmbeddingGenerator = {
       generateForActiveClusters: vi.fn().mockResolvedValue([
         { modelId: "amazon.titan-embed-text-v2:0", vector, dimensions: 1024 },
@@ -742,7 +765,7 @@ describe("Feature: signal-processor-retry-resilience, Property 5: Side-effects d
       sqsDispatcher,
     });
 
-    const result = await processor.process(makeSqsEvent(sesMessageId));
+    const result = await processor.process(makeSqsEvent("msg-dispatch-success"));
 
     expect(result.batchItemFailures).toHaveLength(0);
     expect(sqsDispatcher.sendMessage).toHaveBeenCalled();
@@ -753,7 +776,8 @@ describe("Feature: signal-processor-retry-resilience, Property 5: Side-effects d
     expect(payload.arc).toBeDefined();
   });
 
-  it.each(DISPATCH_CASES)("when any Aurora upsert fails, sqsDispatcher.sendMessage is NOT called and record is a batchItemFailure ($label)", async ({ vector, sesMessageId }) => {
+  it("when any Aurora upsert fails, sqsDispatcher.sendMessage is NOT called and record is a batchItemFailure", async () => {
+    const vector = [0.1, -0.9, 0.5];
     const embeddingGenerator: EmbeddingGenerator = {
       generateForActiveClusters: vi.fn().mockResolvedValue([
         { modelId: "amazon.titan-embed-text-v2:0", vector, dimensions: 1024 },
@@ -784,11 +808,84 @@ describe("Feature: signal-processor-retry-resilience, Property 5: Side-effects d
       sqsDispatcher,
     });
 
-    const result = await processor.process(makeSqsEvent(sesMessageId));
+    const result = await processor.process(makeSqsEvent("msg-dispatch-aurora-fail"));
 
     expect(sqsDispatcher.sendMessage).not.toHaveBeenCalled();
     expect(result.batchItemFailures).toHaveLength(1);
     expect(result.batchItemFailures[0]!.itemIdentifier).toBe("sqs-1");
+  });
+
+  it("when sqsDispatcher is undefined (backward compat), returns ok without dispatching", async () => {
+    const vector = [0.1, -0.9, 0.5];
+    const embeddingGenerator: EmbeddingGenerator = {
+      generateForActiveClusters: vi.fn().mockResolvedValue([
+        { modelId: "amazon.titan-embed-text-v2:0", vector, dimensions: 1024 },
+      ] as EmbeddingResult[]),
+      generateForModel: vi.fn().mockResolvedValue(
+        { modelId: "amazon.titan-embed-text-v2:0", vector, dimensions: 1024 } as EmbeddingResult,
+      ),
+    };
+
+    const auroraWriter: MultiClusterAuroraWriter = {
+      upsertEmbedding: vi.fn().mockResolvedValue(undefined),
+      findMatch: vi.fn().mockResolvedValue(null),
+    };
+
+    const processor = new SignalProcessor({
+      store: makeStore(),
+      mimeParser: makeMimeParser(),
+      classifier: makeClassifier(),
+      embeddingGenerator,
+      auroraWriter,
+      arcMatcher: makeArcMatcher(),
+      ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
+      logger: mockLogger,
+      // No sqsDispatcher — backward compatibility path
+    });
+
+    const result = await processor.process(makeSqsEvent("msg-dispatch-no-dispatcher"));
+
+    expect(result.batchItemFailures).toHaveLength(0);
+  });
+
+  it("when sqsDispatcher.sendMessage fails, returns batchItemFailure (Aurora succeeded but dispatch failed)", async () => {
+    const vector = [0.1, -0.9, 0.5];
+    const embeddingGenerator: EmbeddingGenerator = {
+      generateForActiveClusters: vi.fn().mockResolvedValue([
+        { modelId: "amazon.titan-embed-text-v2:0", vector, dimensions: 1024 },
+      ] as EmbeddingResult[]),
+      generateForModel: vi.fn().mockResolvedValue(
+        { modelId: "amazon.titan-embed-text-v2:0", vector, dimensions: 1024 } as EmbeddingResult,
+      ),
+    };
+
+    const auroraWriter: MultiClusterAuroraWriter = {
+      upsertEmbedding: vi.fn().mockResolvedValue(undefined),
+      findMatch: vi.fn().mockResolvedValue(null),
+    };
+
+    const sqsDispatcher: SqsDispatcher = {
+      sendMessage: vi.fn().mockReturnValue(errAsync(dbError(new Error("SQS SendMessage failed")))),
+    };
+
+    const processor = new SignalProcessor({
+      store: makeStore(),
+      mimeParser: makeMimeParser(),
+      classifier: makeClassifier(),
+      embeddingGenerator,
+      auroraWriter,
+      arcMatcher: makeArcMatcher(),
+      ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
+      logger: mockLogger,
+      sqsDispatcher,
+    });
+
+    const result = await processor.process(makeSqsEvent("msg-dispatch-sqs-fail"));
+
+    expect(result.batchItemFailures).toHaveLength(1);
+    expect(result.batchItemFailures[0]!.itemIdentifier).toBe("sqs-1");
+    // Aurora upsert should have been called (it succeeded)
+    expect(auroraWriter.upsertEmbedding).toHaveBeenCalled();
   });
 });
 
@@ -911,14 +1008,11 @@ describe("Feature: signal-processor-retry-resilience, Property 7: Partial Aurora
   }
 
   // -------------------------------------------------------------------------
-  // Edge-case inputs
+  // Edge-case inputs: the branching logic is about which cluster fails, not vector content
   // -------------------------------------------------------------------------
 
   const PARTIAL_SUCCESS_CASES = [
-    { label: "single-element vector", vector: [0.5], sesMessageId: "msg-partial-1" },
-    { label: "typical-3d vector", vector: [0.1, -0.9, 0.5], sesMessageId: "msg-partial-2" },
-    { label: "zeros-10d vector", vector: new Array(10).fill(0), sesMessageId: "msg-partial-3" },
-    { label: "full-size-1024 vector", vector: new Array(1024).fill(0.01), sesMessageId: "msg-partial-4" },
+    { label: "non-primary fails with connection timeout", vector: [0.1, -0.9, 0.5], sesMessageId: "msg-partial-timeout" },
   ] as const;
 
   it.each(PARTIAL_SUCCESS_CASES)("primary cluster write is preserved when non-primary cluster fails, record returned as batchItemFailure, no side-effects dispatched ($label)", async ({ vector, sesMessageId }) => {

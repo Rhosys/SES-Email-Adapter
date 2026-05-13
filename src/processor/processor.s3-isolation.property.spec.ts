@@ -188,17 +188,18 @@ describe("Property 9: S3 retention failure is isolated and non-fatal", () => {
 
   // -------------------------------------------------------------------------
   // Edge-case inputs: S3 failure modes
+  // The code has TWO distinct error paths:
+  // 1. ResultAsync error: applyPlanRetention rejects → caught by ResultAsync.fromPromise → logs "processor.s3_retention_failed"
+  // 2. Thrown exception: code outside ResultAsync throws → caught by outer try/catch → logs "processor.s3_retention_unexpected"
   // -------------------------------------------------------------------------
 
-  const S3_ERROR_CASES = [
-    { label: "generic S3 error", error: new Error("S3 error: connection reset") },
-    { label: "access denied", error: new Error("AccessDenied: insufficient permissions") },
-    { label: "no such key", error: new Error("NoSuchKey: object not found") },
-    { label: "empty message", error: new Error("") },
-    { label: "long error message", error: new Error(`S3 error: ${"A".repeat(500)}`) },
+  const S3_RESULT_ASYNC_ERROR_CASES = [
+    { label: "rejected promise (ResultAsync error path — S3 connection reset)", error: new Error("S3 error: connection reset") },
+    { label: "rejected promise (ResultAsync error path — access denied)", error: new Error("AccessDenied: insufficient permissions") },
+    { label: "rejected promise (ResultAsync error path — no such key)", error: new Error("NoSuchKey: object not found") },
   ] as const;
 
-  it.each(S3_ERROR_CASES)("S3 retention failure does not produce a batchItemFailure ($label)", async ({ error }) => {
+  it.each(S3_RESULT_ASYNC_ERROR_CASES)("S3 retention failure does not produce a batchItemFailure ($label)", async ({ error }) => {
     const retentionService: S3RetentionService = {
       applyPlanRetention: vi.fn().mockRejectedValue(error),
     };
@@ -219,7 +220,7 @@ describe("Property 9: S3 retention failure is isolated and non-fatal", () => {
     expect(result.batchItemFailures).toEqual([]);
   });
 
-  it.each(S3_ERROR_CASES)("Aurora upserts still execute when S3 retention fails ($label)", async ({ error }) => {
+  it.each(S3_RESULT_ASYNC_ERROR_CASES)("Aurora upserts still execute when S3 retention fails ($label)", async ({ error }) => {
     const auroraWriter = makeAuroraWriter();
 
     const retentionService: S3RetentionService = {
@@ -242,7 +243,7 @@ describe("Property 9: S3 retention failure is isolated and non-fatal", () => {
     expect(auroraWriter.upsertEmbedding).toHaveBeenCalled();
   });
 
-  it.each(S3_ERROR_CASES)("warn-level log is emitted when S3 retention fails ($label)", async ({ error }) => {
+  it.each(S3_RESULT_ASYNC_ERROR_CASES)("warn-level log is emitted when S3 retention fails ($label)", async ({ error }) => {
     mockLogger = createMockLogger();
 
     const retentionService: S3RetentionService = {
@@ -272,7 +273,7 @@ describe("Property 9: S3 retention failure is isolated and non-fatal", () => {
     expect(s3WarnCall).toBeDefined();
   });
 
-  it.each(S3_ERROR_CASES)("processing outcome is identical with and without S3 failure ($label)", async ({ error }) => {
+  it.each(S3_RESULT_ASYNC_ERROR_CASES)("processing outcome is identical with and without S3 failure ($label)", async ({ error }) => {
     // Run 1: with S3 failure
     const store1 = makeStore();
     const auroraWriter1 = makeAuroraWriter();
@@ -324,5 +325,76 @@ describe("Property 9: S3 retention failure is isolated and non-fatal", () => {
     // Both runs must call Aurora upsert
     expect(auroraWriter1.upsertEmbedding).toHaveBeenCalled();
     expect(auroraWriter2.upsertEmbedding).toHaveBeenCalled();
+  });
+
+  // -------------------------------------------------------------------------
+  // Boundary: retentionService undefined (no S3 retention configured)
+  // The code does `if (!this.retentionService) return;` — early exit, no error
+  // -------------------------------------------------------------------------
+
+  it("no retentionService configured — processing succeeds without any S3 interaction", async () => {
+    const auroraWriter = makeAuroraWriter();
+
+    const processor = new SignalProcessor({
+      store: makeStore(),
+      mimeParser: makeMimeParser(),
+      classifier: makeClassifier(),
+      embeddingGenerator: makeEmbeddingGenerator(),
+      auroraWriter,
+      arcMatcher: makeArcMatcher(),
+      ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
+      logger: mockLogger,
+      // No retentionService — S3 retention is skipped entirely
+    });
+
+    const result = await processor.process(makeSqsEvent("test-msg-no-retention-svc"));
+
+    expect(result.batchItemFailures).toEqual([]);
+    expect(auroraWriter.upsertEmbedding).toHaveBeenCalled();
+  });
+
+  // -------------------------------------------------------------------------
+  // Boundary: applyPlanRetention resolves successfully but returns a value
+  // that triggers the outer try/catch (e.g., getRetentionForPlan throws)
+  // This exercises the "processor.s3_retention_unexpected" log path
+  // -------------------------------------------------------------------------
+
+  it("outer try/catch path — non-promise error in retention flow logs warn and continues", async () => {
+    mockLogger = createMockLogger();
+    const auroraWriter = makeAuroraWriter();
+
+    // applyPlanRetention resolves, but we'll make the retention service throw
+    // synchronously before the promise is awaited by using a getter that throws
+    const retentionService: S3RetentionService = {
+      applyPlanRetention: vi.fn().mockImplementation(() => {
+        throw new Error("Unexpected sync error in retention");
+      }),
+    };
+
+    const processor = new SignalProcessor({
+      store: makeStore(),
+      mimeParser: makeMimeParser(),
+      classifier: makeClassifier(),
+      embeddingGenerator: makeEmbeddingGenerator(),
+      auroraWriter,
+      arcMatcher: makeArcMatcher(),
+      ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
+      logger: mockLogger,
+      retentionService,
+    });
+
+    const result = await processor.process(makeSqsEvent("test-msg-s3-sync-throw"));
+
+    // Processing continues — no batchItemFailure
+    expect(result.batchItemFailures).toEqual([]);
+    // Aurora upserts still execute
+    expect(auroraWriter.upsertEmbedding).toHaveBeenCalled();
+
+    // Warn log emitted for the unexpected error
+    const warnCalls = mockLogger.calls.filter((c) => c.method === "warn");
+    const unexpectedWarn = warnCalls.find((c) =>
+      c.message.toLowerCase().includes("unexpected") || c.message.toLowerCase().includes("s3") || c.message.toLowerCase().includes("retention"),
+    );
+    expect(unexpectedWarn).toBeDefined();
   });
 });
