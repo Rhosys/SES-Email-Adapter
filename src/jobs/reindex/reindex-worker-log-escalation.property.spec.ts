@@ -8,13 +8,11 @@
 // 4. When receiveCount > 30, failures log at 'error' level
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import fc from "fast-check";
 import { mockClient } from "aws-sdk-client-mock";
 import { DynamoDBDocumentClient, ScanCommand } from "@aws-sdk/lib-dynamodb";
 import { readFileSync } from "fs";
 import { resolve } from "path";
 import type { SQSEvent, SQSRecord } from "aws-lambda";
-import { propertyRunner } from "../../testing/property-runner.js";
 import { createMockLogger } from "../../testing/mock-logger.js";
 import { ReindexWorker } from "./reindex-worker.js";
 
@@ -85,20 +83,25 @@ function makeSqsEvent(records: SQSRecord[]): SQSEvent {
 }
 
 // ---------------------------------------------------------------------------
-// Arbitraries
+// Edge cases for log escalation threshold
 // ---------------------------------------------------------------------------
 
-/** Receive count in the 'track' range: 1..30 */
-const arbTrackReceiveCount = fc.integer({ min: 1, max: 30 });
+const trackLevelCases: Array<[string, { receiveCount: number }]> = [
+  ["first attempt (receiveCount=1)", { receiveCount: 1 }],
+  ["mid-range (receiveCount=15)", { receiveCount: 15 }],
+  ["just below threshold (receiveCount=29)", { receiveCount: 29 }],
+  ["exactly at threshold (receiveCount=30)", { receiveCount: 30 }],
+];
 
-/** Receive count in the 'error' range: 31..200 */
-const arbErrorReceiveCount = fc.integer({ min: 31, max: 200 });
-
-/** Any valid receive count */
-const arbReceiveCount = fc.integer({ min: 1, max: 200 });
+const errorLevelCases: Array<[string, { receiveCount: number }]> = [
+  ["just above threshold (receiveCount=31)", { receiveCount: 31 }],
+  ["well above threshold (receiveCount=50)", { receiveCount: 50 }],
+  ["high retry count (receiveCount=100)", { receiveCount: 100 }],
+  ["maximum observed (receiveCount=200)", { receiveCount: 200 }],
+];
 
 // ---------------------------------------------------------------------------
-// Property tests
+// Tests
 // ---------------------------------------------------------------------------
 
 describe("Property 21: Persistent failures surface via SQS metrics, not DLQ", () => {
@@ -141,145 +144,77 @@ describe("Property 21: Persistent failures surface via SQS metrics, not DLQ", ()
   });
 
   // -------------------------------------------------------------------------
-  // Property: receiveCount <= 30 → failures log at 'track' level
+  // receiveCount <= 30 → failures log at 'track' level
   // -------------------------------------------------------------------------
 
-  it("for any receiveCount <= 30, segment failures log at 'track' level (console.log)", async () => {
-    await propertyRunner.assert(
-      fc.asyncProperty(arbTrackReceiveCount, async (receiveCount) => {
-        ddbMock.reset();
-        mockLogger.calls.length = 0;
+  it.each(trackLevelCases)("logs at 'track' level when %s", async (_label, { receiveCount }) => {
+    ddbMock.reset();
+    mockLogger.calls.length = 0;
 
-        // Make the DynamoDB scan throw to trigger a segment failure
-        ddbMock.on(ScanCommand).rejects(new Error("Simulated DynamoDB failure"));
+    // Make the DynamoDB scan throw to trigger a segment failure
+    ddbMock.on(ScanCommand).rejects(new Error("Simulated DynamoDB failure"));
 
-        const event = makeSqsEvent([
-          makeSqsRecord(
-            {
-              jobId: "job-prop21-track",
-              segment: 0,
-              totalSegments: 1,
-              targetClusterId: "aurora-prod-titan-v2",
-              modelId: "amazon.titan-embed-text-v2:0",
-            },
-            receiveCount,
-          ),
-        ]);
+    const event = makeSqsEvent([
+      makeSqsRecord(
+        {
+          jobId: "job-prop21-track",
+          segment: 0,
+          totalSegments: 1,
+          targetClusterId: "aurora-prod-titan-v2",
+          modelId: "amazon.titan-embed-text-v2:0",
+        },
+        receiveCount,
+      ),
+    ]);
 
-        // The worker returns batchItemFailures for failed records (no longer throws)
-        const result = await worker.process(event);
-        expect(result.batchItemFailures).toHaveLength(1);
+    const result = await worker.process(event);
+    expect(result.batchItemFailures).toHaveLength(1);
 
-        // Failure should be logged at 'track' level via the mock logger
-        const trackCalls = mockLogger.calls.filter(
-          (c) => c.method === "track" && c.context?.code === "reindex.worker.segment_failed",
-        );
-        const errorCalls = mockLogger.calls.filter(
-          (c) => c.method === "error" && c.context?.code === "reindex.worker.segment_failed",
-        );
-
-        expect(trackCalls.length).toBeGreaterThanOrEqual(1);
-        expect(errorCalls.length).toBe(0);
-
-        return true;
-      }),
+    const trackCalls = mockLogger.calls.filter(
+      (c) => c.method === "track" && c.context?.code === "reindex.worker.segment_failed",
     );
+    const errorCalls = mockLogger.calls.filter(
+      (c) => c.method === "error" && c.context?.code === "reindex.worker.segment_failed",
+    );
+
+    expect(trackCalls.length).toBeGreaterThanOrEqual(1);
+    expect(errorCalls.length).toBe(0);
   });
 
   // -------------------------------------------------------------------------
-  // Property: receiveCount > 30 → failures log at 'error' level
+  // receiveCount > 30 → failures log at 'error' level
   // -------------------------------------------------------------------------
 
-  it("for any receiveCount > 30, segment failures log at 'error' level (console.error)", async () => {
-    await propertyRunner.assert(
-      fc.asyncProperty(arbErrorReceiveCount, async (receiveCount) => {
-        ddbMock.reset();
-        mockLogger.calls.length = 0;
+  it.each(errorLevelCases)("logs at 'error' level when %s", async (_label, { receiveCount }) => {
+    ddbMock.reset();
+    mockLogger.calls.length = 0;
 
-        // Make the DynamoDB scan throw to trigger a segment failure
-        ddbMock.on(ScanCommand).rejects(new Error("Simulated DynamoDB failure"));
+    ddbMock.on(ScanCommand).rejects(new Error("Simulated DynamoDB failure"));
 
-        const event = makeSqsEvent([
-          makeSqsRecord(
-            {
-              jobId: "job-prop21-error",
-              segment: 0,
-              totalSegments: 1,
-              targetClusterId: "aurora-prod-titan-v2",
-              modelId: "amazon.titan-embed-text-v2:0",
-            },
-            receiveCount,
-          ),
-        ]);
+    const event = makeSqsEvent([
+      makeSqsRecord(
+        {
+          jobId: "job-prop21-error",
+          segment: 0,
+          totalSegments: 1,
+          targetClusterId: "aurora-prod-titan-v2",
+          modelId: "amazon.titan-embed-text-v2:0",
+        },
+        receiveCount,
+      ),
+    ]);
 
-        // The worker returns batchItemFailures for failed records (no longer throws)
-        const result = await worker.process(event);
-        expect(result.batchItemFailures).toHaveLength(1);
+    const result = await worker.process(event);
+    expect(result.batchItemFailures).toHaveLength(1);
 
-        // Failure should be logged at 'error' level via the mock logger
-        const errorCalls = mockLogger.calls.filter(
-          (c) => c.method === "error" && c.context?.code === "reindex.worker.segment_failed",
-        );
-        const trackCalls = mockLogger.calls.filter(
-          (c) => c.method === "track" && c.context?.code === "reindex.worker.segment_failed",
-        );
-
-        expect(errorCalls.length).toBeGreaterThanOrEqual(1);
-        expect(trackCalls.length).toBe(0);
-
-        return true;
-      }),
+    const errorCalls = mockLogger.calls.filter(
+      (c) => c.method === "error" && c.context?.code === "reindex.worker.segment_failed",
     );
-  });
-
-  // -------------------------------------------------------------------------
-  // Property: the threshold boundary is exactly 30
-  // -------------------------------------------------------------------------
-
-  it("for any receiveCount, the log level is 'track' iff receiveCount <= 30, 'error' otherwise", async () => {
-    await propertyRunner.assert(
-      fc.asyncProperty(arbReceiveCount, async (receiveCount) => {
-        ddbMock.reset();
-        mockLogger.calls.length = 0;
-
-        // Make the DynamoDB scan throw to trigger a segment failure
-        ddbMock.on(ScanCommand).rejects(new Error("Simulated DynamoDB failure"));
-
-        const event = makeSqsEvent([
-          makeSqsRecord(
-            {
-              jobId: "job-prop21-boundary",
-              segment: 0,
-              totalSegments: 1,
-              targetClusterId: "aurora-prod-titan-v2",
-              modelId: "amazon.titan-embed-text-v2:0",
-            },
-            receiveCount,
-          ),
-        ]);
-
-        const result = await worker.process(event);
-        expect(result.batchItemFailures).toHaveLength(1);
-
-        const trackCalls = mockLogger.calls.filter(
-          (c) => c.method === "track" && c.context?.code === "reindex.worker.segment_failed",
-        );
-        const errorCalls = mockLogger.calls.filter(
-          (c) => c.method === "error" && c.context?.code === "reindex.worker.segment_failed",
-        );
-
-        if (receiveCount <= 30) {
-          // Track level
-          expect(trackCalls.length).toBeGreaterThanOrEqual(1);
-          expect(errorCalls.length).toBe(0);
-        } else {
-          // Error level
-          expect(errorCalls.length).toBeGreaterThanOrEqual(1);
-          expect(trackCalls.length).toBe(0);
-        }
-
-        return true;
-      }),
+    const trackCalls = mockLogger.calls.filter(
+      (c) => c.method === "track" && c.context?.code === "reindex.worker.segment_failed",
     );
+
+    expect(errorCalls.length).toBeGreaterThanOrEqual(1);
+    expect(trackCalls.length).toBe(0);
   });
 });

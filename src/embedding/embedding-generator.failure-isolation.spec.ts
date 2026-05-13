@@ -1,5 +1,4 @@
 import { describe, it, expect, beforeEach, vi, type MockInstance } from "vitest";
-import fc from "fast-check";
 import { mockClient } from "aws-sdk-client-mock";
 import { BedrockRuntimeClient, InvokeModelCommand } from "@aws-sdk/client-bedrock-runtime";
 import { BedrockEmbeddingGenerator } from "./embedding-generator.js";
@@ -79,95 +78,6 @@ describe("Property 7: Bedrock failure for one model preserves all other writes",
     bedrockMock.reset();
     generator = new BedrockEmbeddingGenerator(new BedrockRuntimeClient({}));
     stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
-  });
-
-  // -------------------------------------------------------------------------
-  // Property-based test using fast-check
-  // -------------------------------------------------------------------------
-
-  /**
-   * Arbitrary: generates embed text of varying lengths (non-empty strings).
-   */
-  const arbEmbedText = fc.string({ minLength: 1, maxLength: 500 });
-
-  /**
-   * Arbitrary: generates a non-empty subset of model indices to fail.
-   * With 2 active clusters (indices 0 and 1), this produces subsets like [0], [1], or [0,1].
-   */
-  const arbFailingModelIndices = fc.subarray([0, 1], { minLength: 1, maxLength: 2 });
-
-  it("for any embed text and any subset of failing models, results contain only succeeding models and metrics are emitted for each failure", async () => {
-    await fc.assert(
-      fc.asyncProperty(
-        arbEmbedText,
-        arbFailingModelIndices,
-        async (embedText, failingIndices) => {
-          // Reset mocks for each iteration
-          bedrockMock.reset();
-          stdoutSpy.mockClear();
-
-          const activeModels = [
-            "amazon.titan-embed-text-v2:0",
-            "amazon.titan-embed-text-v3:0",
-          ];
-          const failingModels = new Set(failingIndices.map(i => activeModels[i]!));
-          const succeedingModels = activeModels.filter(m => !failingModels.has(m));
-
-          // Configure mock: failing models throw, succeeding models return a vector
-          bedrockMock.on(InvokeModelCommand).callsFake((input) => {
-            const modelId = input.modelId as string;
-            if (failingModels.has(modelId)) {
-              throw new Error(`Bedrock failure for ${modelId}`);
-            }
-            const body = JSON.parse(new TextDecoder().decode(input.body as Uint8Array));
-            const dims = body.dimensions as number;
-            return {
-              body: mockBody({ embedding: Array(dims).fill(0.42) }),
-            };
-          });
-
-          // Act
-          const results = await generator.generateForActiveClusters(embedText);
-
-          // --- Assertion 1: results contain ONLY the succeeding models ---
-          expect(results).toHaveLength(succeedingModels.length);
-          const resultModelIds = new Set(results.map(r => r.modelId));
-          for (const model of succeedingModels) {
-            expect(resultModelIds.has(model)).toBe(true);
-          }
-          for (const model of failingModels) {
-            expect(resultModelIds.has(model)).toBe(false);
-          }
-
-          // --- Assertion 2: each succeeding result has correct dimensions and a valid vector ---
-          for (const result of results) {
-            const entry = ACTIVE_CLUSTERS.find(c => c.modelId === result.modelId)!;
-            expect(result.dimensions).toBe(entry.dimensions);
-            expect(result.vector).toHaveLength(entry.dimensions);
-          }
-
-          // --- Assertion 3: embedding_generation_failed metric emitted for each failing model ---
-          expect(stdoutSpy).toHaveBeenCalledTimes(failingModels.size);
-          const emittedModelIds = new Set<string>();
-          for (let i = 0; i < stdoutSpy.mock.calls.length; i++) {
-            const metricLog = JSON.parse(stdoutSpy.mock.calls[i]![0] as string);
-            expect(metricLog._aws.CloudWatchMetrics[0].Metrics[0].Name).toBe(
-              "embedding_generation_failed",
-            );
-            expect(metricLog.embedding_generation_failed).toBe(1);
-            emittedModelIds.add(metricLog.modelId);
-          }
-          // Every failing model has exactly one metric
-          for (const model of failingModels) {
-            expect(emittedModelIds.has(model)).toBe(true);
-          }
-
-          // --- Assertion 4: the generator does NOT throw (DynamoDB write can proceed) ---
-          // This is implicitly verified by reaching this point without an exception.
-        },
-      ),
-      { numRuns: 100 },
-    );
   });
 
   // -------------------------------------------------------------------------

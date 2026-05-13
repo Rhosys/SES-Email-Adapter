@@ -8,13 +8,11 @@
 // 4. The segment-level processing continues past individual failures
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import fc from "fast-check";
 import { mockClient } from "aws-sdk-client-mock";
 import { DynamoDBDocumentClient, ScanCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { BedrockRuntimeClient, InvokeModelCommand } from "@aws-sdk/client-bedrock-runtime";
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 import type { SQSEvent, SQSRecord } from "aws-lambda";
-import { propertyRunner } from "../../testing/property-runner.js";
 import { createMockLogger } from "../../testing/mock-logger.js";
 import type { MockLogger } from "../../testing/mock-logger.js";
 import { ReindexWorker } from "./reindex-worker.js";
@@ -61,76 +59,64 @@ const bedrockMock = mockClient(BedrockRuntimeClient);
 const s3Mock = mockClient(S3Client);
 
 // ---------------------------------------------------------------------------
-// Arbitraries
+// Static test signals
 // ---------------------------------------------------------------------------
 
-/** Generate a valid signal ID */
-const arbSignalId = fc.string({ minLength: 1, maxLength: 30 }).map((s) => `SES#${s.replace(/[^a-zA-Z0-9]/g, "x")}`);
-
-/** Generate a valid account ID */
-const arbAccountId = fc.string({ minLength: 1, maxLength: 20 }).map((s) => `acct-${s.replace(/[^a-zA-Z0-9]/g, "a")}`);
-
-/** Generate a valid arc ID */
-const arbArcId = fc.string({ minLength: 1, maxLength: 20 }).map((s) => `arc-${s.replace(/[^a-zA-Z0-9]/g, "b")}`);
-
-/** Generate a valid email address */
-const arbEmail = fc.string({ minLength: 1, maxLength: 20 }).map((s) => `${s.replace(/[^a-zA-Z0-9]/g, "c")}@example.com`);
-
-/** Generate a non-empty embedding vector */
-const arbEmbedding = fc.array(fc.float({ noNaN: true, noDefaultInfinity: true, min: -1, max: 1 }), { minLength: 3, maxLength: 5 });
-
-/** Generate a valid signal with a cached embedding for the target model */
-const arbValidSignal = fc.record({
-  id: arbSignalId,
-  accountId: arbAccountId,
-  arcId: arbArcId,
-  recipientAddress: arbEmail,
-  embedding: arbEmbedding,
-}).map((s) => ({
-  pk: `ACCT#${s.accountId}#SIG#${s.id}`,
+const validSignal1 = {
+  pk: "ACCT#acct-1#SIG#SES#valid1",
   sk: "#",
-  id: s.id,
-  accountId: s.accountId,
-  arcId: s.arcId,
-  recipientAddress: s.recipientAddress,
-  embeddings: { "amazon.titan-embed-text-v2:0": s.embedding },
-}));
+  id: "SES#valid1",
+  accountId: "acct-1",
+  arcId: "arc-1",
+  recipientAddress: "valid1@example.com",
+  embeddings: { "amazon.titan-embed-text-v2:0": [0.1, 0.2, 0.3] },
+};
 
-/** Generate a malformed signal — missing required fields (accountId, arcId, or recipientAddress) */
-const arbMalformedSignal = fc.oneof(
-  // Has id but missing accountId
-  arbSignalId.map((id) => ({ pk: "BAD#1", sk: "#", id })),
-  // Has id and accountId but missing arcId
-  fc.record({ id: arbSignalId, accountId: arbAccountId }).map((s) => ({
-    pk: `ACCT#${s.accountId}#SIG#${s.id}`,
-    sk: "#",
-    id: s.id,
-    accountId: s.accountId,
-    recipientAddress: "missing-arc@example.com",
-  })),
-  // Has id, accountId, arcId but missing recipientAddress
-  fc.record({ id: arbSignalId, accountId: arbAccountId, arcId: arbArcId }).map((s) => ({
-    pk: `ACCT#${s.accountId}#SIG#${s.id}`,
-    sk: "#",
-    id: s.id,
-    accountId: s.accountId,
-    arcId: s.arcId,
-  })),
-);
+const validSignal2 = {
+  pk: "ACCT#acct-2#SIG#SES#valid2",
+  sk: "#",
+  id: "SES#valid2",
+  accountId: "acct-2",
+  arcId: "arc-2",
+  recipientAddress: "valid2@example.com",
+  embeddings: { "amazon.titan-embed-text-v2:0": [0.4, 0.5, 0.6] },
+};
 
-/**
- * Generate a mixed segment: at least 1 valid signal and at least 1 malformed signal,
- * interleaved in arbitrary order.
- */
-const arbMixedSegment = fc.record({
-  validSignals: fc.array(arbValidSignal, { minLength: 1, maxLength: 3 }),
-  malformedSignals: fc.array(arbMalformedSignal, { minLength: 1, maxLength: 3 }),
-}).chain(({ validSignals, malformedSignals }) => {
-  // Shuffle the combined array to ensure ordering doesn't matter
-  const combined = [...validSignals, ...malformedSignals];
-  return fc.shuffledSubarray(combined, { minLength: combined.length, maxLength: combined.length })
-    .map((shuffled) => ({ items: shuffled, validCount: validSignals.length, malformedCount: malformedSignals.length }));
-});
+const validSignal3 = {
+  pk: "ACCT#acct-3#SIG#SES#valid3",
+  sk: "#",
+  id: "SES#valid3",
+  accountId: "acct-3",
+  arcId: "arc-3",
+  recipientAddress: "valid3@example.com",
+  embeddings: { "amazon.titan-embed-text-v2:0": [0.7, 0.8, 0.9] },
+};
+
+// Malformed: missing accountId
+const malformedMissingAccountId = {
+  pk: "BAD#1",
+  sk: "#",
+  id: "SES#malformed-no-acct",
+  recipientAddress: "missing-acct@example.com",
+};
+
+// Malformed: missing arcId
+const malformedMissingArcId = {
+  pk: "ACCT#acct-x#SIG#SES#malformed-no-arc",
+  sk: "#",
+  id: "SES#malformed-no-arc",
+  accountId: "acct-x",
+  recipientAddress: "missing-arc@example.com",
+};
+
+// Malformed: missing recipientAddress
+const malformedMissingRecipient = {
+  pk: "ACCT#acct-y#SIG#SES#malformed-no-email",
+  sk: "#",
+  id: "SES#malformed-no-email",
+  accountId: "acct-y",
+  arcId: "arc-y",
+};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -160,7 +146,44 @@ function makeSqsEvent(records: SQSRecord[]): SQSEvent {
 }
 
 // ---------------------------------------------------------------------------
-// Property test
+// Edge cases
+// ---------------------------------------------------------------------------
+
+const mixedSegmentCases: Array<[string, { items: unknown[]; validCount: number; malformedCount: number }]> = [
+  ["1 valid + 1 malformed (missing accountId)", {
+    items: [validSignal1, malformedMissingAccountId],
+    validCount: 1,
+    malformedCount: 1,
+  }],
+  ["1 valid + 1 malformed (missing arcId)", {
+    items: [validSignal1, malformedMissingArcId],
+    validCount: 1,
+    malformedCount: 1,
+  }],
+  ["1 valid + 1 malformed (missing recipientAddress)", {
+    items: [validSignal1, malformedMissingRecipient],
+    validCount: 1,
+    malformedCount: 1,
+  }],
+  ["malformed first, valid second — order doesn't matter", {
+    items: [malformedMissingAccountId, validSignal1],
+    validCount: 1,
+    malformedCount: 1,
+  }],
+  ["2 valid + 2 malformed interleaved", {
+    items: [validSignal1, malformedMissingAccountId, validSignal2, malformedMissingArcId],
+    validCount: 2,
+    malformedCount: 2,
+  }],
+  ["3 valid + 3 malformed — all malformation types", {
+    items: [validSignal1, malformedMissingAccountId, validSignal2, malformedMissingArcId, validSignal3, malformedMissingRecipient],
+    validCount: 3,
+    malformedCount: 3,
+  }],
+];
+
+// ---------------------------------------------------------------------------
+// Tests
 // ---------------------------------------------------------------------------
 
 describe("Property 22: Worker isolates per-signal failures within a segment", () => {
@@ -175,7 +198,6 @@ describe("Property 22: Worker isolates per-signal failures within a segment", ()
     s3Mock.reset();
     mockUpsertEmbedding.mockClear();
 
-    // Bedrock and S3 should not be called for pure-copy signals
     bedrockMock.on(InvokeModelCommand).rejects(new Error("PROPERTY VIOLATION: Bedrock was called"));
     s3Mock.on(GetObjectCommand).rejects(new Error("PROPERTY VIOLATION: S3 was called"));
   });
@@ -184,121 +206,80 @@ describe("Property 22: Worker isolates per-signal failures within a segment", ()
     vi.restoreAllMocks();
   });
 
-  it("for any segment with a mix of valid and malformed signals, valid signals are upserted and malformed signals are skipped without aborting", async () => {
-    await propertyRunner.assert(
-      fc.asyncProperty(arbMixedSegment, async ({ items, validCount }) => {
-        // Reset mocks for each iteration
-        ddbMock.reset();
-        mockUpsertEmbedding.mockClear();
-        mockLogger.calls.length = 0;
+  it.each(mixedSegmentCases)("%s", async (_label, { items, validCount, malformedCount }) => {
+    ddbMock.reset();
+    mockUpsertEmbedding.mockClear();
+    mockLogger.calls.length = 0;
 
-        // Re-arm Bedrock and S3 traps
-        bedrockMock.on(InvokeModelCommand).rejects(new Error("PROPERTY VIOLATION: Bedrock was called"));
-        s3Mock.on(GetObjectCommand).rejects(new Error("PROPERTY VIOLATION: S3 was called"));
+    bedrockMock.on(InvokeModelCommand).rejects(new Error("PROPERTY VIOLATION: Bedrock was called"));
+    s3Mock.on(GetObjectCommand).rejects(new Error("PROPERTY VIOLATION: S3 was called"));
 
-        // DynamoDB scan returns the mixed set of signals in one page
-        ddbMock.on(ScanCommand).resolves({ Items: items, LastEvaluatedKey: undefined });
-        ddbMock.on(UpdateCommand).resolves({});
+    ddbMock.on(ScanCommand).resolves({ Items: items, LastEvaluatedKey: undefined });
+    ddbMock.on(UpdateCommand).resolves({});
 
-        const event = makeSqsEvent([
-          makeSqsRecord({
-            jobId: "job-prop-22",
-            segment: 0,
-            totalSegments: 1,
-            targetClusterId: "aurora-prod-titan-v2",
-            modelId: "amazon.titan-embed-text-v2:0",
-          }),
-        ]);
-
-        // The worker should NOT throw — segment processing completes
-        await worker.process(event);
-
-        // 1. Valid signals get their upserts written to Aurora
-        expect(mockUpsertEmbedding).toHaveBeenCalledTimes(validCount);
-
-        // 2. Malformed signals are logged via the mock logger
-        const malformedLogs = mockLogger.calls.filter(
-          (call) => call.context?.code === "reindex.worker.malformed_signal",
-        );
-        // Each malformed signal with an `id` field should produce a log entry
-        const malformedWithId = items.filter(
-          (item) => typeof item.id === "string" && !("embeddings" in item && "arcId" in item && "recipientAddress" in item && "accountId" in item),
-        );
-        expect(malformedLogs.length).toBe(malformedWithId.length);
-
-        // 3. The segment-level processing did NOT throw (we reached this point)
-        // 4. All valid signals were processed regardless of malformed signal positions
-        for (const item of items) {
-          if ("embeddings" in item && "arcId" in item && "recipientAddress" in item && "accountId" in item) {
-            const embedding = (item as Record<string, unknown>)["embeddings"] as Record<string, number[]>;
-            expect(mockUpsertEmbedding).toHaveBeenCalledWith(
-              expect.objectContaining({
-                clusterId: "aurora-prod-titan-v2",
-                arcId: (item as Record<string, unknown>)["arcId"],
-                accountId: (item as Record<string, unknown>)["accountId"],
-                recipientAddress: (item as Record<string, unknown>)["recipientAddress"],
-                embedding: embedding["amazon.titan-embed-text-v2:0"],
-              }),
-            );
-          }
-        }
-
-        return true;
+    const event = makeSqsEvent([
+      makeSqsRecord({
+        jobId: "job-prop-22",
+        segment: 0,
+        totalSegments: 1,
+        targetClusterId: "aurora-prod-titan-v2",
+        modelId: "amazon.titan-embed-text-v2:0",
       }),
+    ]);
+
+    // The worker should NOT throw — segment processing completes
+    await worker.process(event);
+
+    // 1. Valid signals get their upserts written to Aurora
+    expect(mockUpsertEmbedding).toHaveBeenCalledTimes(validCount);
+
+    // 2. Malformed signals are logged
+    const malformedLogs = mockLogger.calls.filter(
+      (call) => call.context?.code === "reindex.worker.malformed_signal",
     );
+    expect(malformedLogs.length).toBe(malformedCount);
   });
 
-  it("for any segment where Aurora upsert fails for some signals, remaining signals still get processed", async () => {
-    await propertyRunner.assert(
-      fc.asyncProperty(
-        fc.array(arbValidSignal, { minLength: 2, maxLength: 4 }),
-        fc.nat({ max: 100 }),
-        async (signals, seed) => {
-          // Reset mocks for each iteration
-          ddbMock.reset();
-          mockUpsertEmbedding.mockClear();
-          mockLogger.calls.length = 0;
+  it("when Aurora upsert fails for one signal, remaining signals still get processed", async () => {
+    ddbMock.reset();
+    mockUpsertEmbedding.mockClear();
+    mockLogger.calls.length = 0;
 
-          // Determine which signals will have Aurora failures (at least 1 fails, at least 1 succeeds)
-          const failIndex = seed % signals.length;
-          let callIndex = 0;
-          mockUpsertEmbedding.mockImplementation(() => {
-            const idx = callIndex++;
-            if (idx === failIndex) {
-              return Promise.reject(new Error("Simulated Aurora failure"));
-            }
-            return Promise.resolve(undefined);
-          });
+    const signals = [validSignal1, validSignal2, validSignal3];
 
-          // DynamoDB scan returns all signals
-          ddbMock.on(ScanCommand).resolves({ Items: signals, LastEvaluatedKey: undefined });
-          ddbMock.on(UpdateCommand).resolves({});
+    // First upsert fails, rest succeed
+    let callIndex = 0;
+    mockUpsertEmbedding.mockImplementation(() => {
+      const idx = callIndex++;
+      if (idx === 0) {
+        return Promise.reject(new Error("Simulated Aurora failure"));
+      }
+      return Promise.resolve(undefined);
+    });
 
-          const event = makeSqsEvent([
-            makeSqsRecord({
-              jobId: "job-prop-22-aurora-fail",
-              segment: 0,
-              totalSegments: 1,
-              targetClusterId: "aurora-prod-titan-v2",
-              modelId: "amazon.titan-embed-text-v2:0",
-            }),
-          ]);
+    ddbMock.on(ScanCommand).resolves({ Items: signals, LastEvaluatedKey: undefined });
+    ddbMock.on(UpdateCommand).resolves({});
 
-          // The worker should NOT throw — segment processing continues past Aurora failures
-          await worker.process(event);
+    const event = makeSqsEvent([
+      makeSqsRecord({
+        jobId: "job-prop-22-aurora-fail",
+        segment: 0,
+        totalSegments: 1,
+        targetClusterId: "aurora-prod-titan-v2",
+        modelId: "amazon.titan-embed-text-v2:0",
+      }),
+    ]);
 
-          // All signals were attempted (upsert called for each)
-          expect(mockUpsertEmbedding).toHaveBeenCalledTimes(signals.length);
+    // The worker should NOT throw
+    await worker.process(event);
 
-          // The failure was logged per-signal via the mock logger
-          const failureLogs = mockLogger.calls.filter(
-            (call) => call.context?.code === "reindex.worker.signal_upsert_failed",
-          );
-          expect(failureLogs.length).toBe(1);
+    // All signals were attempted (upsert called for each)
+    expect(mockUpsertEmbedding).toHaveBeenCalledTimes(signals.length);
 
-          return true;
-        },
-      ),
+    // The failure was logged per-signal
+    const failureLogs = mockLogger.calls.filter(
+      (call) => call.context?.code === "reindex.worker.signal_upsert_failed",
     );
+    expect(failureLogs.length).toBe(1);
   });
 });

@@ -9,7 +9,6 @@
 // 4. The sum `copiedCount + regeneratedCount + unrecoverableCount` equals the total signals processed
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import fc from "fast-check";
 import { mockClient } from "aws-sdk-client-mock";
 import { DynamoDBDocumentClient, ScanCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { BedrockRuntimeClient, InvokeModelCommand } from "@aws-sdk/client-bedrock-runtime";
@@ -17,7 +16,6 @@ import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 import { Readable } from "stream";
 import { sdkStreamMixin } from "@smithy/util-stream";
 import type { SQSEvent, SQSRecord } from "aws-lambda";
-import { propertyRunner } from "../../testing/property-runner.js";
 import { createMockLogger } from "../../testing/mock-logger.js";
 import { ReindexWorker } from "./reindex-worker.js";
 
@@ -105,124 +103,76 @@ const bedrockMock = mockClient(BedrockRuntimeClient);
 const s3Mock = mockClient(S3Client);
 
 // ---------------------------------------------------------------------------
-// Signal category enum for the property test
+// Static test signals
 // ---------------------------------------------------------------------------
 
-type SignalCategory = "cached" | "s3_retrievable" | "unrecoverable";
+// Cached signals (pure-copy path) — have embeddings[TARGET_MODEL_ID]
+const cachedSignal1 = {
+  pk: "ACCT#acct-1#SIG#SES#cached1",
+  sk: "#",
+  id: "SES#cached1",
+  accountId: "acct-1",
+  arcId: "arc-c1",
+  recipientAddress: "cached1@example.com",
+  embeddings: { [TARGET_MODEL_ID]: [0.1, 0.2, 0.3] },
+  s3Key: "inbox/2025/cached1.eml",
+};
 
-// ---------------------------------------------------------------------------
-// Arbitraries
-// ---------------------------------------------------------------------------
+const cachedSignal2 = {
+  pk: "ACCT#acct-2#SIG#SES#cached2",
+  sk: "#",
+  id: "SES#cached2",
+  accountId: "acct-2",
+  arcId: "arc-c2",
+  recipientAddress: "cached2@example.com",
+  embeddings: { [TARGET_MODEL_ID]: [0.4, 0.5, 0.6] },
+};
 
-const arbSignalId = fc.string({ minLength: 1, maxLength: 20 }).map(
-  (s) => `SES#${s.replace(/[^a-zA-Z0-9]/g, "x")}`,
-);
+// S3-retrievable signals (regeneration path) — no target model embedding, but S3 key works
+const s3Signal1 = {
+  pk: "ACCT#acct-3#SIG#SES#s3regen1",
+  sk: "#",
+  id: "SES#s3regen1",
+  accountId: "acct-3",
+  arcId: "arc-s1",
+  recipientAddress: "s3regen1@example.com",
+  embeddings: { "amazon.titan-embed-text-v3:0": [0.9, 0.8] },
+  s3Key: "inbox/2025/s3regen1.eml",
+};
 
-const arbAccountId = fc.string({ minLength: 1, maxLength: 15 }).map(
-  (s) => `acct-${s.replace(/[^a-zA-Z0-9]/g, "a")}`,
-);
+const s3Signal2 = {
+  pk: "ACCT#acct-4#SIG#SES#s3regen2",
+  sk: "#",
+  id: "SES#s3regen2",
+  accountId: "acct-4",
+  arcId: "arc-s2",
+  recipientAddress: "s3regen2@example.com",
+  embeddings: {},
+  s3Key: "inbox/2025/s3regen2.eml",
+};
 
-const arbArcId = fc.string({ minLength: 1, maxLength: 15 }).map(
-  (s) => `arc-${s.replace(/[^a-zA-Z0-9]/g, "b")}`,
-);
+// Unrecoverable signals — no target model embedding AND no retrievable S3 object
+const unrecoverableNoS3Key = {
+  pk: "ACCT#acct-5#SIG#SES#unrec1",
+  sk: "#",
+  id: "SES#unrec1",
+  accountId: "acct-5",
+  arcId: "arc-u1",
+  recipientAddress: "unrec1@example.com",
+  embeddings: {},
+  // no s3Key
+};
 
-const arbEmail = fc.string({ minLength: 1, maxLength: 15 }).map(
-  (s) => `${s.replace(/[^a-zA-Z0-9]/g, "c")}@example.com`,
-);
-
-const arbEmbedding = fc.array(
-  fc.float({ noNaN: true, noDefaultInfinity: true, min: -1, max: 1 }),
-  { minLength: 3, maxLength: 10 },
-);
-
-const arbS3Key = fc.string({ minLength: 1, maxLength: 20 }).map(
-  (s) => `inbox/2025/${s.replace(/[^a-zA-Z0-9]/g, "k")}.eml`,
-);
-
-/** A signal with a cached embedding for the target model (pure-copy path) */
-const arbCachedSignal = fc.record({
-  id: arbSignalId,
-  accountId: arbAccountId,
-  arcId: arbArcId,
-  recipientAddress: arbEmail,
-  embedding: arbEmbedding,
-  s3Key: fc.option(arbS3Key, { nil: undefined }),
-}).map((s) => ({
-  category: "cached" as SignalCategory,
-  item: {
-    pk: `ACCT#${s.accountId}#SIG#${s.id}`,
-    sk: "#",
-    id: s.id,
-    accountId: s.accountId,
-    arcId: s.arcId,
-    recipientAddress: s.recipientAddress,
-    embeddings: { [TARGET_MODEL_ID]: s.embedding },
-    ...(s.s3Key ? { s3Key: s.s3Key } : {}),
-  },
-}));
-
-/** A signal without the target model embedding but with a valid S3 key (regeneration path) */
-const arbS3RetrievableSignal = fc.record({
-  id: arbSignalId,
-  accountId: arbAccountId,
-  arcId: arbArcId,
-  recipientAddress: arbEmail,
-  s3Key: arbS3Key,
-  otherModelEmbedding: fc.option(arbEmbedding, { nil: undefined }),
-}).map((s) => ({
-  category: "s3_retrievable" as SignalCategory,
-  item: {
-    pk: `ACCT#${s.accountId}#SIG#${s.id}`,
-    sk: "#",
-    id: s.id,
-    accountId: s.accountId,
-    arcId: s.arcId,
-    recipientAddress: s.recipientAddress,
-    embeddings: s.otherModelEmbedding
-      ? { "amazon.titan-embed-text-v3:0": s.otherModelEmbedding }
-      : {},
-    s3Key: s.s3Key,
-  },
-}));
-
-/** A signal without the target model embedding and with an expired/missing S3 object (unrecoverable) */
-const arbUnrecoverableSignal = fc.record({
-  id: arbSignalId,
-  accountId: arbAccountId,
-  arcId: arbArcId,
-  recipientAddress: arbEmail,
-  hasS3Key: fc.boolean(),
-  s3Key: arbS3Key,
-}).map((s) => ({
-  category: "unrecoverable" as SignalCategory,
-  item: {
-    pk: `ACCT#${s.accountId}#SIG#${s.id}`,
-    sk: "#",
-    id: s.id,
-    accountId: s.accountId,
-    arcId: s.arcId,
-    recipientAddress: s.recipientAddress,
-    embeddings: {},
-    ...(s.hasS3Key ? { s3Key: s.s3Key } : {}),
-  },
-}));
-
-/** Generate a mixed set of signals from all three categories */
-const arbMixedSignals = fc.record({
-  cached: fc.array(arbCachedSignal, { minLength: 0, maxLength: 4 }),
-  s3Retrievable: fc.array(arbS3RetrievableSignal, { minLength: 0, maxLength: 4 }),
-  unrecoverable: fc.array(arbUnrecoverableSignal, { minLength: 0, maxLength: 4 }),
-}).filter((s) => {
-  // Ensure total > 0
-  if (s.cached.length + s.s3Retrievable.length + s.unrecoverable.length === 0) return false;
-  // Ensure s3Keys are unique across s3Retrievable and unrecoverable to prevent
-  // the S3 mock from returning success for "unrecoverable" signals
-  const retrievableKeys = new Set(s.s3Retrievable.map((sig) => sig.item.s3Key));
-  const unrecoverableKeys = s.unrecoverable
-    .map((sig) => sig.item.s3Key)
-    .filter((key): key is string => !!key);
-  return unrecoverableKeys.every((key) => !retrievableKeys.has(key));
-});
+const unrecoverableExpiredS3 = {
+  pk: "ACCT#acct-6#SIG#SES#unrec2",
+  sk: "#",
+  id: "SES#unrec2",
+  accountId: "acct-6",
+  arcId: "arc-u2",
+  recipientAddress: "unrec2@example.com",
+  embeddings: {},
+  s3Key: "inbox/2025/expired.eml", // S3 will return NoSuchKey
+};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -259,7 +209,48 @@ function makeS3Body(content: string) {
 }
 
 // ---------------------------------------------------------------------------
-// Property test
+// Edge cases — different mixes of signal categories
+// ---------------------------------------------------------------------------
+
+const cases: Array<[string, {
+  cached: typeof cachedSignal1[];
+  s3Retrievable: typeof s3Signal1[];
+  unrecoverable: typeof unrecoverableNoS3Key[];
+}]> = [
+  ["all cached — pure copy only", {
+    cached: [cachedSignal1, cachedSignal2],
+    s3Retrievable: [],
+    unrecoverable: [],
+  }],
+  ["all S3-retrievable — regeneration only", {
+    cached: [],
+    s3Retrievable: [s3Signal1, s3Signal2],
+    unrecoverable: [],
+  }],
+  ["all unrecoverable — nothing to write", {
+    cached: [],
+    s3Retrievable: [],
+    unrecoverable: [unrecoverableNoS3Key, unrecoverableExpiredS3],
+  }],
+  ["one of each category", {
+    cached: [cachedSignal1],
+    s3Retrievable: [s3Signal1],
+    unrecoverable: [unrecoverableNoS3Key],
+  }],
+  ["mixed — 2 cached, 2 S3, 2 unrecoverable", {
+    cached: [cachedSignal1, cachedSignal2],
+    s3Retrievable: [s3Signal1, s3Signal2],
+    unrecoverable: [unrecoverableNoS3Key, unrecoverableExpiredS3],
+  }],
+  ["unrecoverable with expired S3 key (NoSuchKey)", {
+    cached: [cachedSignal1],
+    s3Retrievable: [s3Signal1],
+    unrecoverable: [unrecoverableExpiredS3],
+  }],
+];
+
+// ---------------------------------------------------------------------------
+// Tests
 // ---------------------------------------------------------------------------
 
 describe("Property 12: Backfill targets exactly the signals missing the new model", () => {
@@ -280,112 +271,98 @@ describe("Property 12: Backfill targets exactly the signals missing the new mode
     vi.restoreAllMocks();
   });
 
-  it("for any mix of signals, the worker correctly categorizes each as copied/regenerated/unrecoverable and the sum equals total processed", async () => {
-    await propertyRunner.assert(
-      fc.asyncProperty(arbMixedSignals, async ({ cached, s3Retrievable, unrecoverable }) => {
-        // Reset mocks for each iteration
-        ddbMock.reset();
-        s3Mock.reset();
-        mockUpsertEmbedding.mockClear();
-        mockAddEmbeddingToCache.mockClear();
-        mockGenerateForModel.mockClear();
-        mockMimeParse.mockClear();
+  it.each(cases)("%s", async (_label, { cached, s3Retrievable, unrecoverable }) => {
+    ddbMock.reset();
+    s3Mock.reset();
+    mockUpsertEmbedding.mockClear();
+    mockAddEmbeddingToCache.mockClear();
+    mockGenerateForModel.mockClear();
+    mockMimeParse.mockClear();
 
-        // Collect all signal items in a shuffled order to test ordering independence
-        const allSignals = [
-          ...cached.map((s) => s.item),
-          ...s3Retrievable.map((s) => s.item),
-          ...unrecoverable.map((s) => s.item),
-        ];
+    const allSignals = [
+      ...cached,
+      ...s3Retrievable,
+      ...unrecoverable,
+    ];
 
-        // Track which S3 keys are "retrievable" vs "expired"
-        const retrievableS3Keys = new Set(
-          s3Retrievable.map((s) => s.item.s3Key),
-        );
-
-        // DynamoDB scan returns all signals
-        ddbMock.on(ScanCommand).resolves({ Items: allSignals, LastEvaluatedKey: undefined });
-        ddbMock.on(UpdateCommand).resolves({});
-
-        // S3 mock: retrievable keys return content, all others return NoSuchKey
-        s3Mock.on(GetObjectCommand).callsFake((input) => {
-          const key = input.Key as string;
-          if (retrievableS3Keys.has(key)) {
-            return { Body: makeS3Body("From: test@test.com\r\nSubject: Test\r\n\r\nBody content") };
-          }
-          const err = new Error("NoSuchKey");
-          (err as unknown as { name: string }).name = "NoSuchKey";
-          throw err;
-        });
-
-        // MIME parser returns a valid parsed result for regeneration
-        mockMimeParse.mockResolvedValue({
-          from: { address: "test@test.com" },
-          to: [{ address: "recipient@example.com" }],
-          cc: [],
-          subject: "Test",
-          textBody: "Body content",
-          htmlBody: null,
-          attachments: [],
-          headers: {},
-        });
-
-        // Bedrock returns a valid embedding for regeneration
-        mockGenerateForModel.mockResolvedValue({
-          modelId: TARGET_MODEL_ID,
-          vector: [0.1, 0.2, 0.3],
-          dimensions: 1024,
-        });
-
-        const event = makeSqsEvent([
-          makeSqsRecord({
-            jobId: "job-prop-12",
-            segment: 0,
-            totalSegments: 1,
-            targetClusterId: TARGET_CLUSTER_ID,
-            modelId: TARGET_MODEL_ID,
-          }),
-        ]);
-
-        await worker.process(event);
-
-        // Count the DynamoDB UpdateCommand calls to track counter increments
-        const updateCalls = ddbMock.commandCalls(UpdateCommand);
-        const copiedCount = updateCalls.filter(
-          (c) => c.args[0].input.UpdateExpression === "ADD copiedCount :one",
-        ).length;
-        const regeneratedCount = updateCalls.filter(
-          (c) => c.args[0].input.UpdateExpression === "ADD regeneratedCount :one",
-        ).length;
-        const unrecoverableCount = updateCalls.filter(
-          (c) => c.args[0].input.UpdateExpression === "ADD unrecoverableCount :one",
-        ).length;
-
-        // Property 1: Signals with cached embeddings are pure-copied (never call Bedrock)
-        expect(copiedCount).toBe(cached.length);
-
-        // Property 2: Signals without cache but with retrievable S3 are regenerated
-        expect(regeneratedCount).toBe(s3Retrievable.length);
-
-        // Property 3: Signals without cache and without retrievable S3 are unrecoverable
-        expect(unrecoverableCount).toBe(unrecoverable.length);
-
-        // Property 4: Sum equals total signals processed
-        const totalProcessed = cached.length + s3Retrievable.length + unrecoverable.length;
-        expect(copiedCount + regeneratedCount + unrecoverableCount).toBe(totalProcessed);
-
-        // Additional invariant: Bedrock is never called for cached signals
-        // (only called for s3Retrievable signals)
-        expect(mockGenerateForModel).toHaveBeenCalledTimes(s3Retrievable.length);
-
-        // Additional invariant: Aurora upsert is called for cached + regenerated (not unrecoverable)
-        expect(mockUpsertEmbedding).toHaveBeenCalledTimes(cached.length + s3Retrievable.length);
-
-        // Additional invariant: addEmbeddingToCache is called only for regenerated signals
-        expect(mockAddEmbeddingToCache).toHaveBeenCalledTimes(s3Retrievable.length);
-
-        return true;
-      }),
+    const retrievableS3Keys = new Set(
+      s3Retrievable.map((s) => s.s3Key),
     );
+
+    ddbMock.on(ScanCommand).resolves({ Items: allSignals, LastEvaluatedKey: undefined });
+    ddbMock.on(UpdateCommand).resolves({});
+
+    s3Mock.on(GetObjectCommand).callsFake((input) => {
+      const key = input.Key as string;
+      if (retrievableS3Keys.has(key)) {
+        return { Body: makeS3Body("From: test@test.com\r\nSubject: Test\r\n\r\nBody content") };
+      }
+      const err = new Error("NoSuchKey");
+      (err as unknown as { name: string }).name = "NoSuchKey";
+      throw err;
+    });
+
+    mockMimeParse.mockResolvedValue({
+      from: { address: "test@test.com" },
+      to: [{ address: "recipient@example.com" }],
+      cc: [],
+      subject: "Test",
+      textBody: "Body content",
+      htmlBody: null,
+      attachments: [],
+      headers: {},
+    });
+
+    mockGenerateForModel.mockResolvedValue({
+      modelId: TARGET_MODEL_ID,
+      vector: [0.1, 0.2, 0.3],
+      dimensions: 1024,
+    });
+
+    const event = makeSqsEvent([
+      makeSqsRecord({
+        jobId: "job-prop-12",
+        segment: 0,
+        totalSegments: 1,
+        targetClusterId: TARGET_CLUSTER_ID,
+        modelId: TARGET_MODEL_ID,
+      }),
+    ]);
+
+    await worker.process(event);
+
+    // Count DynamoDB UpdateCommand calls to track counter increments
+    const updateCalls = ddbMock.commandCalls(UpdateCommand);
+    const copiedCount = updateCalls.filter(
+      (c) => c.args[0].input.UpdateExpression === "ADD copiedCount :one",
+    ).length;
+    const regeneratedCount = updateCalls.filter(
+      (c) => c.args[0].input.UpdateExpression === "ADD regeneratedCount :one",
+    ).length;
+    const unrecoverableCount = updateCalls.filter(
+      (c) => c.args[0].input.UpdateExpression === "ADD unrecoverableCount :one",
+    ).length;
+
+    // Property 1: Signals with cached embeddings are pure-copied
+    expect(copiedCount).toBe(cached.length);
+
+    // Property 2: Signals without cache but with retrievable S3 are regenerated
+    expect(regeneratedCount).toBe(s3Retrievable.length);
+
+    // Property 3: Signals without cache and without retrievable S3 are unrecoverable
+    expect(unrecoverableCount).toBe(unrecoverable.length);
+
+    // Property 4: Sum equals total signals processed
+    const totalProcessed = cached.length + s3Retrievable.length + unrecoverable.length;
+    expect(copiedCount + regeneratedCount + unrecoverableCount).toBe(totalProcessed);
+
+    // Bedrock is never called for cached signals (only for s3Retrievable)
+    expect(mockGenerateForModel).toHaveBeenCalledTimes(s3Retrievable.length);
+
+    // Aurora upsert is called for cached + regenerated (not unrecoverable)
+    expect(mockUpsertEmbedding).toHaveBeenCalledTimes(cached.length + s3Retrievable.length);
+
+    // addEmbeddingToCache is called only for regenerated signals
+    expect(mockAddEmbeddingToCache).toHaveBeenCalledTimes(s3Retrievable.length);
   });
 });

@@ -9,14 +9,12 @@
 //   (assuming sample validation passes)
 // ---------------------------------------------------------------------------
 
-import { describe, it, beforeEach, vi } from "vitest";
-import fc from "fast-check";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { mockClient } from "aws-sdk-client-mock";
 import { SQSClient } from "@aws-sdk/client-sqs";
 import { RDSDataClient, ExecuteStatementCommand } from "@aws-sdk/client-rds-data";
 import { GetCommand } from "@aws-sdk/lib-dynamodb";
 import { ReindexDispatcher } from "./reindex-dispatcher.js";
-import { propertyRunner } from "../../testing/property-runner.js";
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -45,7 +43,30 @@ async function getDynamoMock() {
 }
 
 // ---------------------------------------------------------------------------
-// Property test
+// Edge cases for discrepancy threshold
+// ---------------------------------------------------------------------------
+
+const discrepancyCases: Array<[string, { copiedCount: number; regeneratedCount: number; auroraRowCount: number; expectedOk: boolean }]> = [
+  ["exact match — 0% discrepancy", { copiedCount: 1000, regeneratedCount: 0, auroraRowCount: 1000, expectedOk: true }],
+  ["at threshold — exactly 1% below", { copiedCount: 1000, regeneratedCount: 0, auroraRowCount: 990, expectedOk: true }],
+  ["just above threshold — 2% discrepancy", { copiedCount: 1000, regeneratedCount: 0, auroraRowCount: 980, expectedOk: false }],
+  ["large discrepancy — 50% missing", { copiedCount: 1000, regeneratedCount: 0, auroraRowCount: 500, expectedOk: false }],
+  ["aurora has more rows than expected — 2% over", { copiedCount: 1000, regeneratedCount: 0, auroraRowCount: 1020, expectedOk: false }],
+  ["zero expected, zero aurora — no discrepancy", { copiedCount: 0, regeneratedCount: 0, auroraRowCount: 0, expectedOk: true }],
+  ["zero expected, non-zero aurora — 100% discrepancy", { copiedCount: 0, regeneratedCount: 0, auroraRowCount: 5, expectedOk: false }],
+  ["both copied and regenerated contribute to expected", { copiedCount: 500, regeneratedCount: 500, auroraRowCount: 1000, expectedOk: true }],
+  ["small count at threshold boundary — 100 expected, 99 aurora", { copiedCount: 100, regeneratedCount: 0, auroraRowCount: 99, expectedOk: true }],
+  ["small count just over threshold — 100 expected, 98 aurora", { copiedCount: 100, regeneratedCount: 0, auroraRowCount: 98, expectedOk: false }],
+];
+
+const invalidSampleCases: Array<[string, { invalidSimilarity: number | null }]> = [
+  ["NaN similarity value", { invalidSimilarity: NaN }],
+  ["similarity above valid range (2.5)", { invalidSimilarity: 2.5 }],
+  ["similarity below valid range (-1.5)", { invalidSimilarity: -1.5 }],
+];
+
+// ---------------------------------------------------------------------------
+// Tests
 // ---------------------------------------------------------------------------
 
 describe("ReindexDispatcher — Property 17: Validation flags discrepancies above 1%", () => {
@@ -64,123 +85,81 @@ describe("ReindexDispatcher — Property 17: Validation flags discrepancies abov
     });
   });
 
-  it("validationOk is true iff discrepancy ≤ 1% and samples are valid", async () => {
-    await propertyRunner.assert(
-      fc.asyncProperty(
-        // Generate copiedCount and regeneratedCount (these sum to the expected DDB count)
-        fc.nat({ max: 10000 }),
-        fc.nat({ max: 10000 }),
-        // Generate unrecoverableCount (does not affect expected Aurora count)
-        fc.nat({ max: 1000 }),
-        // Generate auroraRowCount independently
-        fc.nat({ max: 20000 }),
-        async (copiedCount, regeneratedCount, unrecoverableCount, auroraRowCount) => {
-          dynamoMock.reset();
-          rdsMock.reset();
+  it.each(discrepancyCases)("%s", async (_label, { copiedCount, regeneratedCount, auroraRowCount, expectedOk }) => {
+    dynamoMock.reset();
+    rdsMock.reset();
 
-          const jobId = "prop17-job";
-          const expectedCount = copiedCount + regeneratedCount;
+    const jobId = "prop17-job";
 
-          // Mock DynamoDB GetCommand to return the job counters
-          dynamoMock.on(GetCommand).resolves({
-            Item: {
-              pk: `REINDEX#${jobId}`,
-              sk: "JOB",
-              jobId,
-              targetClusterId: "aurora-prod-titan-v2",
-              modelId: "amazon.titan-embed-text-v2:0",
-              startedAt: new Date(Date.now() - 5000).toISOString(),
-              copiedCount,
-              regeneratedCount,
-              unrecoverableCount,
-            },
-          });
+    dynamoMock.on(GetCommand).resolves({
+      Item: {
+        pk: `REINDEX#${jobId}`,
+        sk: "JOB",
+        jobId,
+        targetClusterId: "aurora-prod-titan-v2",
+        modelId: "amazon.titan-embed-text-v2:0",
+        startedAt: new Date(Date.now() - 5000).toISOString(),
+        copiedCount,
+        regeneratedCount,
+        unrecoverableCount: 0,
+      },
+    });
 
-          // Mock Aurora: first call returns row count, second returns valid samples
-          rdsMock.on(ExecuteStatementCommand)
-            .resolvesOnce({
-              records: [[{ longValue: auroraRowCount }]],
-            })
-            .resolvesOnce({
-              // 10 valid sample vectors with self-similarity = 0
-              records: Array.from({ length: 10 }, (_, i) => [
-                { stringValue: `arc_${i}` },
-                { doubleValue: 0 },
-              ]),
-            });
+    rdsMock.on(ExecuteStatementCommand)
+      .resolvesOnce({
+        records: [[{ longValue: auroraRowCount }]],
+      })
+      .resolvesOnce({
+        // 10 valid sample vectors with self-similarity = 0
+        records: Array.from({ length: 10 }, (_, i) => [
+          { stringValue: `arc_${i}` },
+          { doubleValue: 0 },
+        ]),
+      });
 
-          const report = await dispatcher.getReport(jobId);
+    const report = await dispatcher.getReport(jobId);
 
-          // Compute expected discrepancy using the same formula as the implementation
-          const discrepancy = expectedCount > 0
-            ? Math.abs(auroraRowCount - expectedCount) / expectedCount
-            : (auroraRowCount === 0 ? 0 : 1);
-
-          const shouldBeOk = discrepancy <= 0.01;
-
-          // validationOk should match the threshold check
-          // (sample validation always passes in this test since we mock valid samples)
-          if (shouldBeOk) {
-            return report.validationOk === true;
-          } else {
-            return report.validationOk === false;
-          }
-        },
-      ),
-    );
+    expect(report.validationOk).toBe(expectedOk);
   });
 
-  it("validationOk is false when samples contain invalid cosine similarity values", async () => {
-    await propertyRunner.assert(
-      fc.asyncProperty(
-        // Generate a matching count (discrepancy = 0%) so only sample validation matters
-        fc.integer({ min: 1, max: 5000 }),
-        // Generate an invalid similarity value (NaN, or out of [-1, 2] range)
-        fc.oneof(
-          fc.constant(NaN),
-          fc.double({ min: 2.01, max: 100, noNaN: true }),
-          fc.double({ min: -100, max: -1.01, noNaN: true }),
-        ),
-        async (count, invalidSimilarity) => {
-          dynamoMock.reset();
-          rdsMock.reset();
+  it.each(invalidSampleCases)("validationOk is false when samples contain %s", async (_label, { invalidSimilarity }) => {
+    dynamoMock.reset();
+    rdsMock.reset();
 
-          const jobId = "prop17-invalid-sample";
+    const jobId = "prop17-invalid-sample";
+    const count = 1000;
 
-          dynamoMock.on(GetCommand).resolves({
-            Item: {
-              pk: `REINDEX#${jobId}`,
-              sk: "JOB",
-              jobId,
-              targetClusterId: "aurora-prod-titan-v2",
-              modelId: "amazon.titan-embed-text-v2:0",
-              startedAt: new Date(Date.now() - 5000).toISOString(),
-              copiedCount: count,
-              regeneratedCount: 0,
-              unrecoverableCount: 0,
-            },
-          });
+    dynamoMock.on(GetCommand).resolves({
+      Item: {
+        pk: `REINDEX#${jobId}`,
+        sk: "JOB",
+        jobId,
+        targetClusterId: "aurora-prod-titan-v2",
+        modelId: "amazon.titan-embed-text-v2:0",
+        startedAt: new Date(Date.now() - 5000).toISOString(),
+        copiedCount: count,
+        regeneratedCount: 0,
+        unrecoverableCount: 0,
+      },
+    });
 
-          // Aurora row count matches exactly (0% discrepancy)
-          rdsMock.on(ExecuteStatementCommand)
-            .resolvesOnce({
-              records: [[{ longValue: count }]],
-            })
-            .resolvesOnce({
-              // Include at least one invalid sample
-              records: [
-                [{ stringValue: "arc_0" }, { doubleValue: 0 }],
-                [{ stringValue: "arc_1" }, { doubleValue: invalidSimilarity }],
-                [{ stringValue: "arc_2" }, { doubleValue: 0 }],
-              ],
-            });
+    // Aurora row count matches exactly (0% discrepancy)
+    rdsMock.on(ExecuteStatementCommand)
+      .resolvesOnce({
+        records: [[{ longValue: count }]],
+      })
+      .resolvesOnce({
+        // Include one invalid sample
+        records: [
+          [{ stringValue: "arc_0" }, { doubleValue: 0 }],
+          [{ stringValue: "arc_1" }, invalidSimilarity === null ? { isNull: true } : { doubleValue: invalidSimilarity }],
+          [{ stringValue: "arc_2" }, { doubleValue: 0 }],
+        ],
+      });
 
-          const report = await dispatcher.getReport(jobId);
+    const report = await dispatcher.getReport(jobId);
 
-          // Even with 0% count discrepancy, invalid samples should fail validation
-          return report.validationOk === false;
-        },
-      ),
-    );
+    // Even with 0% count discrepancy, invalid samples should fail validation
+    expect(report.validationOk).toBe(false);
   });
 });

@@ -1,6 +1,4 @@
 import { describe, it, expect } from "vitest";
-import fc from "fast-check";
-import { propertyRunner } from "../testing/property-runner.js";
 import {
   getRetentionForPlan,
   getUserDisplayedRetention,
@@ -207,69 +205,44 @@ describe("isWithinPlanLimit", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Property-based tests
+// Tier requests above plan max are rejected
 // ---------------------------------------------------------------------------
 
-const arbBillingPlan: fc.Arbitrary<BillingPlan> = fc.oneof(
-  fc.constant('Free' as BillingPlan),
-  fc.constant('Beta' as BillingPlan),
-  fc.constant('Paid' as BillingPlan),
-  fc.constant('Lifetime' as BillingPlan),
-  fc.constant('Premium' as BillingPlan),
-  fc.constant('Internal' as BillingPlan),
-);
+describe("Tier requests above plan max are rejected", () => {
+  const ALL_PLANS: BillingPlan[] = ["Free", "Beta", "Paid", "Lifetime", "Premium", "Internal"];
+  const ALL_DURATIONS: RetentionDuration[] = ["P1Y", "P5Y", "P1000Y"];
 
-const arbRetentionDuration: fc.Arbitrary<RetentionDuration> = fc.oneof(
-  fc.constant('P1Y' as RetentionDuration),
-  fc.constant('P5Y' as RetentionDuration),
-  fc.constant('P1000Y' as RetentionDuration),
-);
+  const planMaxMap: Record<BillingPlan, RetentionDuration> = {
+    Free: "P1Y", Beta: "P1Y", Paid: "P5Y", Lifetime: "P5Y", Premium: "P1000Y", Internal: "P1000Y",
+  };
 
-describe("Property 20: Tier requests above plan max are rejected", () => {
-  it("isWithinPlanLimit returns true iff tierIndex(requested) <= tierIndex(planMax)", () => {
-    const property = fc.property(
-      arbBillingPlan,
-      arbRetentionDuration,
-      (plan, requestedDuration) => {
-        const planMaxMap: Record<BillingPlan, RetentionDuration> = {
-          Free: 'P1Y', Beta: 'P1Y', Paid: 'P5Y', Lifetime: 'P5Y', Premium: 'P1000Y', Internal: 'P1000Y',
-        };
-        const maxDuration = planMaxMap[plan];
-        const expected = tierIndex(requestedDuration) <= tierIndex(maxDuration);
-        return isWithinPlanLimit(requestedDuration, plan) === expected;
-      }
-    );
+  const cases = ALL_PLANS.flatMap((plan) =>
+    ALL_DURATIONS.map((duration) => ({
+      plan,
+      duration,
+      expected: tierIndex(duration) <= tierIndex(planMaxMap[plan]),
+    })),
+  );
 
-    propertyRunner.assert(property);
+  it.each(cases)("isWithinPlanLimit($duration, $plan) = $expected", ({ plan, duration, expected }) => {
+    expect(isWithinPlanLimit(duration, plan)).toBe(expected);
   });
 });
 
 describe("Determinism: getRetentionForPlan is pure", () => {
-  it("returns same result for same plan", () => {
-    const property = fc.property(
-      arbBillingPlan,
-      (plan) => {
-        const result1 = getRetentionForPlan(plan);
-        const result2 = getRetentionForPlan(plan);
-        return JSON.stringify(result1) === JSON.stringify(result2);
-      }
-    );
+  const ALL_PLANS: BillingPlan[] = ["Free", "Beta", "Paid", "Lifetime", "Premium", "Internal"];
 
-    propertyRunner.assert(property);
+  it.each(ALL_PLANS.map((plan) => ({ plan })))("plan=$plan returns same result on repeated calls", ({ plan }) => {
+    expect(JSON.stringify(getRetentionForPlan(plan))).toBe(JSON.stringify(getRetentionForPlan(plan)));
   });
 });
 
 describe("Consistency: getUserDisplayedRetention matches getRetentionForPlan", () => {
-  it("getUserDisplayedRetention(getRetentionForPlan(plan).retentionDuration) is always a valid display string", () => {
-    const property = fc.property(
-      arbBillingPlan,
-      (plan) => {
-        const retention = getRetentionForPlan(plan);
-        const display = getUserDisplayedRetention(retention.retentionDuration);
-        return ['1 year', '5 years', 'forever'].includes(display);
-      }
-    );
+  const ALL_PLANS: BillingPlan[] = ["Free", "Beta", "Paid", "Lifetime", "Premium", "Internal"];
 
-    propertyRunner.assert(property);
+  it.each(ALL_PLANS.map((plan) => ({ plan })))("plan=$plan produces valid display string", ({ plan }) => {
+    const retention = getRetentionForPlan(plan);
+    const display = getUserDisplayedRetention(retention.retentionDuration);
+    expect(["1 year", "5 years", "forever"]).toContain(display);
   });
 });

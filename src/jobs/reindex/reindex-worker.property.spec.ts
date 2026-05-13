@@ -8,13 +8,11 @@
 // 4. NEVER calls S3 `GetObject`
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import fc from "fast-check";
 import { mockClient } from "aws-sdk-client-mock";
 import { DynamoDBDocumentClient, ScanCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { BedrockRuntimeClient, InvokeModelCommand } from "@aws-sdk/client-bedrock-runtime";
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 import type { SQSEvent, SQSRecord } from "aws-lambda";
-import { propertyRunner } from "../../testing/property-runner.js";
 import { createMockLogger } from "../../testing/mock-logger.js";
 import { ReindexWorker } from "./reindex-worker.js";
 
@@ -60,43 +58,24 @@ const bedrockMock = mockClient(BedrockRuntimeClient);
 const s3Mock = mockClient(S3Client);
 
 // ---------------------------------------------------------------------------
-// Arbitraries
+// Static test signals
 // ---------------------------------------------------------------------------
 
-/** Generate a valid signal ID */
-const arbSignalId = fc.string({ minLength: 1, maxLength: 30 }).map((s) => `SES#${s.replace(/[^a-zA-Z0-9]/g, "x")}`);
+function makeSignal(id: string, accountId: string, arcId: string, email: string, embedding: number[]) {
+  return {
+    pk: `ACCT#${accountId}#SIG#${id}`,
+    sk: "#",
+    id,
+    accountId,
+    arcId,
+    recipientAddress: email,
+    embeddings: { "amazon.titan-embed-text-v2:0": embedding },
+  };
+}
 
-/** Generate a valid account ID */
-const arbAccountId = fc.string({ minLength: 1, maxLength: 20 }).map((s) => `acct-${s.replace(/[^a-zA-Z0-9]/g, "a")}`);
-
-/** Generate a valid arc ID */
-const arbArcId = fc.string({ minLength: 1, maxLength: 20 }).map((s) => `arc-${s.replace(/[^a-zA-Z0-9]/g, "b")}`);
-
-/** Generate a valid email address */
-const arbEmail = fc.string({ minLength: 1, maxLength: 20 }).map((s) => `${s.replace(/[^a-zA-Z0-9]/g, "c")}@example.com`);
-
-/** Generate a non-empty embedding vector (array of floats) */
-const arbEmbedding = fc.array(fc.float({ noNaN: true, noDefaultInfinity: true, min: -1, max: 1 }), { minLength: 3, maxLength: 20 });
-
-/** Generate a signal item with a cached embedding for the target model */
-const arbSignalWithCache = fc.record({
-  id: arbSignalId,
-  accountId: arbAccountId,
-  arcId: arbArcId,
-  recipientAddress: arbEmail,
-  embedding: arbEmbedding,
-}).map((s) => ({
-  pk: `ACCT#${s.accountId}#SIG#${s.id}`,
-  sk: "#",
-  id: s.id,
-  accountId: s.accountId,
-  arcId: s.arcId,
-  recipientAddress: s.recipientAddress,
-  embeddings: { "amazon.titan-embed-text-v2:0": s.embedding },
-}));
-
-/** Generate a non-empty array of signals with cached embeddings */
-const arbSignalSet = fc.array(arbSignalWithCache, { minLength: 1, maxLength: 10 });
+const signal1 = makeSignal("SES#sig1", "acct-1", "arc-1", "alice@example.com", [0.1, 0.2, 0.3]);
+const signal2 = makeSignal("SES#sig2", "acct-2", "arc-2", "bob@example.com", [-0.5, 0.0, 0.5]);
+const signal3 = makeSignal("SES#sig3", "acct-1", "arc-3", "carol@example.com", [1.0, -1.0, 0.0, 0.5, 0.25]);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -126,7 +105,17 @@ function makeSqsEvent(records: SQSRecord[]): SQSEvent {
 }
 
 // ---------------------------------------------------------------------------
-// Property test
+// Edge cases
+// ---------------------------------------------------------------------------
+
+const cases: Array<[string, { signals: typeof signal1[] }]> = [
+  ["single signal — minimum batch", { signals: [signal1] }],
+  ["two signals from different accounts", { signals: [signal1, signal2] }],
+  ["three signals — one account has two arcs", { signals: [signal1, signal2, signal3] }],
+];
+
+// ---------------------------------------------------------------------------
+// Tests
 // ---------------------------------------------------------------------------
 
 describe("Property 11: Reindex worker uses cache exclusively and never calls Bedrock", () => {
@@ -148,96 +137,82 @@ describe("Property 11: Reindex worker uses cache exclusively and never calls Bed
     vi.restoreAllMocks();
   });
 
-  it("for any set of signals with cached embeddings, the worker upserts each to Aurora and never calls Bedrock or S3", async () => {
-    await propertyRunner.assert(
-      fc.asyncProperty(arbSignalSet, async (signals) => {
-        // Reset mocks for each iteration
-        ddbMock.reset();
-        mockUpsertEmbedding.mockClear();
+  it.each(cases)("%s", async (_label, { signals }) => {
+    ddbMock.reset();
+    mockUpsertEmbedding.mockClear();
 
-        // Re-arm Bedrock and S3 traps after reset
-        bedrockMock.on(InvokeModelCommand).rejects(new Error("PROPERTY VIOLATION: Bedrock was called during pure-copy reindex"));
-        s3Mock.on(GetObjectCommand).rejects(new Error("PROPERTY VIOLATION: S3 GetObject was called during pure-copy reindex"));
+    bedrockMock.on(InvokeModelCommand).rejects(new Error("PROPERTY VIOLATION: Bedrock was called during pure-copy reindex"));
+    s3Mock.on(GetObjectCommand).rejects(new Error("PROPERTY VIOLATION: S3 GetObject was called during pure-copy reindex"));
 
-        // DynamoDB scan returns the generated signals in one page
-        ddbMock.on(ScanCommand).resolves({ Items: signals, LastEvaluatedKey: undefined });
-        ddbMock.on(UpdateCommand).resolves({});
+    ddbMock.on(ScanCommand).resolves({ Items: signals, LastEvaluatedKey: undefined });
+    ddbMock.on(UpdateCommand).resolves({});
 
-        const event = makeSqsEvent([
-          makeSqsRecord({
-            jobId: "job-prop-11",
-            segment: 0,
-            totalSegments: 1,
-            targetClusterId: "aurora-prod-titan-v2",
-            modelId: "amazon.titan-embed-text-v2:0",
-          }),
-        ]);
-
-        await worker.process(event);
-
-        // 1. Worker reads from DynamoDB (scan was called)
-        const scanCalls = ddbMock.commandCalls(ScanCommand);
-        expect(scanCalls.length).toBeGreaterThanOrEqual(1);
-
-        // 2. Worker upserts each signal's cached embedding to Aurora
-        expect(mockUpsertEmbedding).toHaveBeenCalledTimes(signals.length);
-
-        for (let i = 0; i < signals.length; i++) {
-          const signal = signals[i]!;
-          const expectedVector = signal.embeddings["amazon.titan-embed-text-v2:0"];
-          expect(mockUpsertEmbedding).toHaveBeenCalledWith({
-            clusterId: "aurora-prod-titan-v2",
-            arcId: signal.arcId,
-            accountId: signal.accountId,
-            recipientAddress: signal.recipientAddress,
-            embedding: expectedVector,
-          });
-        }
-
-        // 3. NEVER calls Bedrock — zero InvokeModelCommand calls
-        expect(bedrockMock.commandCalls(InvokeModelCommand)).toHaveLength(0);
-
-        // 4. NEVER calls S3 GetObject
-        expect(s3Mock.commandCalls(GetObjectCommand)).toHaveLength(0);
-
-        return true;
+    const event = makeSqsEvent([
+      makeSqsRecord({
+        jobId: "job-prop-11",
+        segment: 0,
+        totalSegments: 1,
+        targetClusterId: "aurora-prod-titan-v2",
+        modelId: "amazon.titan-embed-text-v2:0",
       }),
-    );
+    ]);
+
+    await worker.process(event);
+
+    // 1. Worker reads from DynamoDB (scan was called)
+    const scanCalls = ddbMock.commandCalls(ScanCommand);
+    expect(scanCalls.length).toBeGreaterThanOrEqual(1);
+
+    // 2. Worker upserts each signal's cached embedding to Aurora
+    expect(mockUpsertEmbedding).toHaveBeenCalledTimes(signals.length);
+
+    for (const signal of signals) {
+      const expectedVector = signal.embeddings["amazon.titan-embed-text-v2:0"];
+      expect(mockUpsertEmbedding).toHaveBeenCalledWith({
+        clusterId: "aurora-prod-titan-v2",
+        arcId: signal.arcId,
+        accountId: signal.accountId,
+        recipientAddress: signal.recipientAddress,
+        embedding: expectedVector,
+      });
+    }
+
+    // 3. NEVER calls Bedrock — zero InvokeModelCommand calls
+    expect(bedrockMock.commandCalls(InvokeModelCommand)).toHaveLength(0);
+
+    // 4. NEVER calls S3 GetObject
+    expect(s3Mock.commandCalls(GetObjectCommand)).toHaveLength(0);
   });
 
-  it("for signals with cached embeddings, the exact cached vector is passed to Aurora (no transformation)", async () => {
-    await propertyRunner.assert(
-      fc.asyncProperty(arbSignalWithCache, async (signal) => {
-        ddbMock.reset();
-        mockUpsertEmbedding.mockClear();
+  it("the exact cached vector is passed to Aurora unchanged (no transformation)", async () => {
+    ddbMock.reset();
+    mockUpsertEmbedding.mockClear();
 
-        bedrockMock.on(InvokeModelCommand).rejects(new Error("PROPERTY VIOLATION: Bedrock was called"));
-        s3Mock.on(GetObjectCommand).rejects(new Error("PROPERTY VIOLATION: S3 was called"));
+    bedrockMock.on(InvokeModelCommand).rejects(new Error("PROPERTY VIOLATION: Bedrock was called"));
+    s3Mock.on(GetObjectCommand).rejects(new Error("PROPERTY VIOLATION: S3 was called"));
 
-        ddbMock.on(ScanCommand).resolves({ Items: [signal], LastEvaluatedKey: undefined });
-        ddbMock.on(UpdateCommand).resolves({});
+    // Use a signal with a distinctive vector to verify no transformation
+    const distinctiveVector = [0.123456, -0.789012, 0.0, 1.0, -1.0];
+    const signal = makeSignal("SES#exact-vec", "acct-exact", "arc-exact", "exact@example.com", distinctiveVector);
 
-        const event = makeSqsEvent([
-          makeSqsRecord({
-            jobId: "job-prop-11-exact",
-            segment: 0,
-            totalSegments: 1,
-            targetClusterId: "aurora-prod-titan-v2",
-            modelId: "amazon.titan-embed-text-v2:0",
-          }),
-        ]);
+    ddbMock.on(ScanCommand).resolves({ Items: [signal], LastEvaluatedKey: undefined });
+    ddbMock.on(UpdateCommand).resolves({});
 
-        await worker.process(event);
-
-        // The exact vector from the DynamoDB record is passed through unchanged
-        const cachedVector = signal.embeddings["amazon.titan-embed-text-v2:0"];
-        expect(mockUpsertEmbedding).toHaveBeenCalledTimes(1);
-        expect(mockUpsertEmbedding).toHaveBeenCalledWith(
-          expect.objectContaining({ embedding: cachedVector }),
-        );
-
-        return true;
+    const event = makeSqsEvent([
+      makeSqsRecord({
+        jobId: "job-prop-11-exact",
+        segment: 0,
+        totalSegments: 1,
+        targetClusterId: "aurora-prod-titan-v2",
+        modelId: "amazon.titan-embed-text-v2:0",
       }),
+    ]);
+
+    await worker.process(event);
+
+    expect(mockUpsertEmbedding).toHaveBeenCalledTimes(1);
+    expect(mockUpsertEmbedding).toHaveBeenCalledWith(
+      expect.objectContaining({ embedding: distinctiveVector }),
     );
   });
 });

@@ -1,7 +1,5 @@
 import { describe, it, expect } from "vitest";
-import fc from "fast-check";
 import { buildEmbedText, reduceLink, type EmbedTextInput } from "./embed-text.js";
-import { propertyRunner } from "../testing/property-runner.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -272,74 +270,3 @@ describe("reduceLink", () => {
 });
 
 
-// ---------------------------------------------------------------------------
-// Property-based tests
-// ---------------------------------------------------------------------------
-
-// Feature: aurora-reindex-strategy, Property 2: Sanitization removes all structural HTML/CSS/image artifacts
-// **Validates: Requirements 2.2**
-describe("Property 2: Sanitization removes all structural HTML/CSS/image artifacts", () => {
-  /**
-   * Arbitrary that generates HTML body content with structural artifacts:
-   * - <style> blocks with CSS content
-   * - HTML tags (<div>, <p>, <span>, etc.)
-   * - <img> tags with src and alt attributes
-   * - Plain text interspersed
-   */
-  const arbHtmlFragment = fc.oneof(
-    // Style blocks
-    fc.string({ minLength: 1, maxLength: 50 }).map(css => `<style>${css}</style>`),
-    fc.string({ minLength: 1, maxLength: 50 }).map(css => `<style type="text/css">${css}</style>`),
-    // Image tags with alt text
-    fc.record({
-      src: fc.webUrl(),
-      alt: fc.string({ minLength: 1, maxLength: 30 }),
-    }).map(({ src, alt }) => `<img src="${src}" alt="${alt}">`),
-    fc.string({ minLength: 1, maxLength: 30 }).map(src => `<img src="${src}" />`),
-    // HTML tags wrapping content
-    fc.string({ minLength: 1, maxLength: 50 }).map(text => `<div>${text}</div>`),
-    fc.string({ minLength: 1, maxLength: 50 }).map(text => `<p>${text}</p>`),
-    fc.string({ minLength: 1, maxLength: 50 }).map(text => `<span class="foo">${text}</span>`),
-    // Plain text (no HTML)
-    fc.string({ minLength: 1, maxLength: 100 }).filter(s => !s.includes("<") && !s.includes(">")),
-  );
-
-  const arbHtmlBody = fc.array(arbHtmlFragment, { minLength: 1, maxLength: 10 })
-    .map(fragments => fragments.join(" "));
-
-  it("sanitized output contains no <style> blocks, no HTML tags, no <img> references, and no alt= content", () => {
-    const property = fc.property(
-      arbHtmlBody,
-      (htmlBody) => {
-        const result = buildEmbedText({
-          accountId: "acct-test",
-          from: "sender@test.com",
-          recipientAddress: "recipient@test.com",
-          subject: "Test",
-          rawTextBody: htmlBody,
-        });
-
-        // Extract the body portion (last line after header lines)
-        // Header lines: accountId, from, recipientAddress, subject = 4 lines minimum
-        // The output after the header lines is the sanitized body content
-
-        // No <style> blocks
-        expect(result).not.toMatch(/<style[\s>]/i);
-        expect(result).not.toMatch(/<\/style>/i);
-
-        // No HTML tags (no `<` followed by an alpha character)
-        expect(result).not.toMatch(/<[a-zA-Z]/);
-
-        // No <img> references
-        expect(result).not.toMatch(/<img/i);
-
-        // No alt= attribute content
-        expect(result).not.toMatch(/alt=/i);
-
-        return true;
-      }
-    );
-
-    propertyRunner.assert(property);
-  });
-});

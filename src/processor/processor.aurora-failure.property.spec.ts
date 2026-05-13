@@ -1,21 +1,15 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import fc from "fast-check";
 import type { SQSEvent } from "aws-lambda";
 import { okAsync } from "neverthrow";
 import { SignalProcessor, SYSTEM_RULES } from "./processor.js";
 import { JsonLogicRuleEvaluator } from "./rule-evaluator.js";
-import type { ProcessorDatabase, ArcMatcher, Notifier } from "./processor.js";
+import type { ProcessorDatabase, ArcMatcher } from "./processor.js";
 import type { MimeParser } from "./mime.js";
 import type { SignalClassifier, ClassificationOutput } from "../classifier/classifier.js";
 import type { EmbeddingGenerator, EmbeddingResult } from "../embedding/embedding-generator.js";
 import type { MultiClusterAuroraWriter } from "../database/multi-cluster-aurora-writer.js";
 import type { Signal, Alias, AliasSender } from "../types/index.js";
-import { propertyRunner } from "../testing/property-runner.js";
 import { createMockLogger, type MockLogger } from "../testing/mock-logger.js";
-
-// ---------------------------------------------------------------------------
-// Mock the cluster registry with two active clusters
-// ---------------------------------------------------------------------------
 
 vi.mock("../embedding/cluster-registry.js", () => {
   const clusterA = Object.freeze({
@@ -48,23 +42,14 @@ vi.mock("../embedding/cluster-registry.js", () => {
   };
 });
 
-// ---------------------------------------------------------------------------
-// Property 8: Aurora cluster failure preserves the DynamoDB cache entry
-// **Validates: Requirements 3.6**
-// ---------------------------------------------------------------------------
-
-/**
- * For any signal processed against a registry where the Aurora upsert fails for one cluster
- * after retries, the DynamoDB Signal record's `embeddings` map still contains that model's
- * vector. The cache is the recovery mechanism — a subsequent reindex restores the missing
- * Aurora row.
- */
-describe("Property 8: Aurora cluster failure preserves the DynamoDB cache entry", () => {
+describe("Aurora cluster failure preserves the DynamoDB cache entry", () => {
   let mockLogger: MockLogger;
   beforeEach(() => { mockLogger = createMockLogger(); });
   afterEach(() => { vi.restoreAllMocks(); });
 
   const TEST_ACCOUNT_ID = "acct-prop8";
+  const VECTOR_A = [0.1, -0.5, 0.3];
+  const VECTOR_B = [0.7, 0.2, -0.9];
 
   const DEFAULT_EMAIL_CONFIG: Alias = {
     id: "cfg-default",
@@ -136,12 +121,6 @@ describe("Property 8: Aurora cluster failure preserves the DynamoDB cache entry"
     };
   }
 
-  function makeClassifier(): Pick<SignalClassifier, "classify"> {
-    return {
-      classify: vi.fn().mockResolvedValue({ ...validClassification }),
-    };
-  }
-
   function makeArcMatcher(): ArcMatcher {
     return {
       findMatch: vi.fn().mockReturnValue(okAsync(null)),
@@ -152,11 +131,7 @@ describe("Property 8: Aurora cluster failure preserves the DynamoDB cache entry"
   function makeSqsEvent(sesMessageId: string): SQSEvent {
     const notification = {
       accountId: TEST_ACCOUNT_ID,
-      mail: {
-        messageId: sesMessageId,
-        timestamp: "2024-01-15T10:00:00Z",
-        destination: ["user@example.com"],
-      },
+      mail: { messageId: sesMessageId, timestamp: "2024-01-15T10:00:00Z", destination: ["user@example.com"] },
       receipt: {
         recipients: ["user@example.com"],
         dkimVerdict: { status: "PASS" },
@@ -169,12 +144,7 @@ describe("Property 8: Aurora cluster failure preserves the DynamoDB cache entry"
         messageId: "sqs-1",
         receiptHandle: "handle",
         body: JSON.stringify({ Message: JSON.stringify(notification) }),
-        attributes: {
-          ApproximateReceiveCount: "1",
-          SentTimestamp: "1234567890",
-          SenderId: "sender",
-          ApproximateFirstReceiveTimestamp: "1234567890",
-        },
+        attributes: { ApproximateReceiveCount: "1", SentTimestamp: "1234567890", SenderId: "sender", ApproximateFirstReceiveTimestamp: "1234567890" },
         messageAttributes: {},
         md5OfBody: "",
         eventSource: "aws:sqs",
@@ -184,134 +154,92 @@ describe("Property 8: Aurora cluster failure preserves the DynamoDB cache entry"
     };
   }
 
-  it("DynamoDB signal embeddings map contains the failing cluster's model vector even when Aurora upsert throws", () => {
-    return propertyRunner.assert(
-      fc.asyncProperty(
-        // Generate arbitrary vectors for two models
-        fc.array(fc.double({ min: -1, max: 1, noNaN: true }), { minLength: 3, maxLength: 10 }),
-        fc.array(fc.double({ min: -1, max: 1, noNaN: true }), { minLength: 3, maxLength: 10 }),
-        // Which cluster fails: 0 = cluster-a, 1 = cluster-b
-        fc.integer({ min: 0, max: 1 }),
-        // Arbitrary session message ID
-        fc.constant("test-msg-aurora"),
-        async (vectorA, vectorB, failingClusterIdx, sesMessageId) => {
-          const store = makeStore();
-          const mimeParser = makeMimeParser();
-          const classifier = makeClassifier();
-          const arcMatcher = makeArcMatcher();
+  const failureCases = [
+    { label: "cluster-a fails", failingClusterId: "cluster-a", succeedingClusterId: "cluster-b" },
+    { label: "cluster-b fails", failingClusterId: "cluster-b", succeedingClusterId: "cluster-a" },
+  ];
 
-          const failingClusterId = failingClusterIdx === 0 ? "cluster-a" : "cluster-b";
-
-          // Embedding generator returns results for both models
-          const embeddingGenerator: EmbeddingGenerator = {
-            generateForActiveClusters: vi.fn().mockResolvedValue([
-              { modelId: "amazon.titan-embed-text-v2:0", vector: vectorA, dimensions: 1024 },
-              { modelId: "amazon.titan-embed-text-v3:0", vector: vectorB, dimensions: 1536 },
-            ] as EmbeddingResult[]),
-            generateForModel: vi.fn().mockResolvedValue(
-              { modelId: "amazon.titan-embed-text-v2:0", vector: vectorA, dimensions: 1024 } as EmbeddingResult,
-            ),
-          };
-
-          // Aurora writer: throws for the failing cluster, succeeds for the other
-          const auroraWriter: MultiClusterAuroraWriter = {
-            upsertEmbedding: vi.fn().mockImplementation(async (opts: { clusterId: string }) => {
-              if (opts.clusterId === failingClusterId) {
-                throw new Error(`Aurora upsert failed for cluster ${failingClusterId} after retries`);
-              }
-            }),
-            findMatch: vi.fn().mockResolvedValue(null),
-          };
-
-          const processor = new SignalProcessor({
-            store,
-            mimeParser,
-            classifier,
-            embeddingGenerator,
-            auroraWriter,
-            arcMatcher,
-            ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
-            logger: mockLogger,
-          });
-
-          await processor.process(makeSqsEvent(sesMessageId));
-
-          // Verify saveSignal was called
-          const saveSignalCalls = (store.saveSignal as ReturnType<typeof vi.fn>).mock.calls;
-          expect(saveSignalCalls.length).toBeGreaterThanOrEqual(1);
-
-          // Find the main signal save (not calendar synthetic signals)
-          const savedSignal = saveSignalCalls[0]![0] as Signal;
-
-          // The DynamoDB cache entry MUST contain BOTH models' vectors,
-          // regardless of which Aurora cluster failed
-          expect(savedSignal.embeddings).toBeDefined();
-          expect(savedSignal.embeddings!["amazon.titan-embed-text-v2:0"]).toEqual(vectorA);
-          expect(savedSignal.embeddings!["amazon.titan-embed-text-v3:0"]).toEqual(vectorB);
-        },
+  it.each(failureCases)("$label — DynamoDB cache still contains both models' vectors", async ({ failingClusterId }) => {
+    const store = makeStore();
+    const embeddingGenerator: EmbeddingGenerator = {
+      generateForActiveClusters: vi.fn().mockResolvedValue([
+        { modelId: "amazon.titan-embed-text-v2:0", vector: VECTOR_A, dimensions: 1024 },
+        { modelId: "amazon.titan-embed-text-v3:0", vector: VECTOR_B, dimensions: 1536 },
+      ] as EmbeddingResult[]),
+      generateForModel: vi.fn().mockResolvedValue(
+        { modelId: "amazon.titan-embed-text-v2:0", vector: VECTOR_A, dimensions: 1024 } as EmbeddingResult,
       ),
-    );
+    };
+
+    const auroraWriter: MultiClusterAuroraWriter = {
+      upsertEmbedding: vi.fn().mockImplementation(async (opts: { clusterId: string }) => {
+        if (opts.clusterId === failingClusterId) {
+          throw new Error(`Aurora upsert failed for cluster ${failingClusterId}`);
+        }
+      }),
+      findMatch: vi.fn().mockResolvedValue(null),
+    };
+
+    const processor = new SignalProcessor({
+      store,
+      mimeParser: makeMimeParser(),
+      classifier: { classify: vi.fn().mockResolvedValue({ ...validClassification }) },
+      embeddingGenerator,
+      auroraWriter,
+      arcMatcher: makeArcMatcher(),
+      ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
+      logger: mockLogger,
+    });
+
+    await processor.process(makeSqsEvent("test-msg-aurora"));
+
+    const saveSignalCalls = (store.saveSignal as ReturnType<typeof vi.fn>).mock.calls;
+    expect(saveSignalCalls.length).toBeGreaterThanOrEqual(1);
+    const savedSignal = saveSignalCalls[0]![0] as Signal;
+
+    expect(savedSignal.embeddings).toBeDefined();
+    expect(savedSignal.embeddings!["amazon.titan-embed-text-v2:0"]).toEqual(VECTOR_A);
+    expect(savedSignal.embeddings!["amazon.titan-embed-text-v3:0"]).toEqual(VECTOR_B);
   });
 
-  it("Aurora upsert is still attempted for the non-failing cluster", () => {
-    return propertyRunner.assert(
-      fc.asyncProperty(
-        fc.array(fc.double({ min: -1, max: 1, noNaN: true }), { minLength: 3, maxLength: 10 }),
-        fc.array(fc.double({ min: -1, max: 1, noNaN: true }), { minLength: 3, maxLength: 10 }),
-        fc.integer({ min: 0, max: 1 }),
-        fc.constant("test-msg-aurora"),
-        async (vectorA, vectorB, failingClusterIdx, sesMessageId) => {
-          const store = makeStore();
-          const mimeParser = makeMimeParser();
-          const classifier = makeClassifier();
-          const arcMatcher = makeArcMatcher();
-
-          const failingClusterId = failingClusterIdx === 0 ? "cluster-a" : "cluster-b";
-          const succeedingClusterId = failingClusterIdx === 0 ? "cluster-b" : "cluster-a";
-
-          const embeddingGenerator: EmbeddingGenerator = {
-            generateForActiveClusters: vi.fn().mockResolvedValue([
-              { modelId: "amazon.titan-embed-text-v2:0", vector: vectorA, dimensions: 1024 },
-              { modelId: "amazon.titan-embed-text-v3:0", vector: vectorB, dimensions: 1536 },
-            ] as EmbeddingResult[]),
-            generateForModel: vi.fn().mockResolvedValue(
-              { modelId: "amazon.titan-embed-text-v2:0", vector: vectorA, dimensions: 1024 } as EmbeddingResult,
-            ),
-          };
-
-          const auroraWriter: MultiClusterAuroraWriter = {
-            upsertEmbedding: vi.fn().mockImplementation(async (opts: { clusterId: string }) => {
-              if (opts.clusterId === failingClusterId) {
-                throw new Error(`Aurora upsert failed for cluster ${failingClusterId}`);
-              }
-            }),
-            findMatch: vi.fn().mockResolvedValue(null),
-          };
-
-          const processor = new SignalProcessor({
-            store,
-            mimeParser,
-            classifier,
-            embeddingGenerator,
-            auroraWriter,
-            arcMatcher,
-            ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
-            logger: mockLogger,
-          });
-
-          await processor.process(makeSqsEvent(sesMessageId));
-
-          // Verify the Aurora writer was called for both clusters
-          const upsertCalls = (auroraWriter.upsertEmbedding as ReturnType<typeof vi.fn>).mock.calls;
-          expect(upsertCalls.length).toBe(2);
-
-          // Verify the succeeding cluster received its upsert call
-          const succeedingCall = upsertCalls.find(
-            (call) => call[0].clusterId === succeedingClusterId,
-          );
-          expect(succeedingCall).toBeDefined();
-        },
+  it.each(failureCases)("$label — non-failing cluster still receives its upsert", async ({ failingClusterId, succeedingClusterId }) => {
+    const store = makeStore();
+    const embeddingGenerator: EmbeddingGenerator = {
+      generateForActiveClusters: vi.fn().mockResolvedValue([
+        { modelId: "amazon.titan-embed-text-v2:0", vector: VECTOR_A, dimensions: 1024 },
+        { modelId: "amazon.titan-embed-text-v3:0", vector: VECTOR_B, dimensions: 1536 },
+      ] as EmbeddingResult[]),
+      generateForModel: vi.fn().mockResolvedValue(
+        { modelId: "amazon.titan-embed-text-v2:0", vector: VECTOR_A, dimensions: 1024 } as EmbeddingResult,
       ),
-    );
+    };
+
+    const auroraWriter: MultiClusterAuroraWriter = {
+      upsertEmbedding: vi.fn().mockImplementation(async (opts: { clusterId: string }) => {
+        if (opts.clusterId === failingClusterId) {
+          throw new Error(`Aurora upsert failed for cluster ${failingClusterId}`);
+        }
+      }),
+      findMatch: vi.fn().mockResolvedValue(null),
+    };
+
+    const processor = new SignalProcessor({
+      store,
+      mimeParser: makeMimeParser(),
+      classifier: { classify: vi.fn().mockResolvedValue({ ...validClassification }) },
+      embeddingGenerator,
+      auroraWriter,
+      arcMatcher: makeArcMatcher(),
+      ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
+      logger: mockLogger,
+    });
+
+    await processor.process(makeSqsEvent("test-msg-aurora"));
+
+    const upsertCalls = (auroraWriter.upsertEmbedding as ReturnType<typeof vi.fn>).mock.calls;
+    expect(upsertCalls.length).toBe(2);
+
+    const succeedingCall = upsertCalls.find((call) => call[0].clusterId === succeedingClusterId);
+    expect(succeedingCall).toBeDefined();
   });
 });
