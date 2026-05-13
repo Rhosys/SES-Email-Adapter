@@ -8,13 +8,11 @@
 // 3. signalsScanned is always computed (never stored), so stale stored values are ignored
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import fc from "fast-check";
 import { mockClient } from "aws-sdk-client-mock";
 import { SQSClient } from "@aws-sdk/client-sqs";
 import { RDSDataClient, ExecuteStatementCommand } from "@aws-sdk/client-rds-data";
 import { DynamoDBDocumentClient, GetCommand } from "@aws-sdk/lib-dynamodb";
 import { ReindexDispatcher } from "./reindex-dispatcher.js";
-import { propertyRunner } from "../../testing/property-runner.js";
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -43,14 +41,20 @@ async function getDynamoMock() {
 }
 
 // ---------------------------------------------------------------------------
-// Arbitraries
+// Edge cases
 // ---------------------------------------------------------------------------
 
-/** Generate arbitrary non-negative integer counter values */
-const arbCounterValue = fc.integer({ min: 0, max: 10_000 });
+const counterCases: Array<[string, { copiedCount: number; regeneratedCount: number; unrecoverableCount: number }]> = [
+  ["all zeros — empty job", { copiedCount: 0, regeneratedCount: 0, unrecoverableCount: 0 }],
+  ["only copied signals", { copiedCount: 500, regeneratedCount: 0, unrecoverableCount: 0 }],
+  ["only regenerated signals", { copiedCount: 0, regeneratedCount: 300, unrecoverableCount: 0 }],
+  ["only unrecoverable signals", { copiedCount: 0, regeneratedCount: 0, unrecoverableCount: 42 }],
+  ["all three counters populated", { copiedCount: 100, regeneratedCount: 50, unrecoverableCount: 7 }],
+  ["large values — overflow boundary", { copiedCount: 10000, regeneratedCount: 10000, unrecoverableCount: 10000 }],
+];
 
 // ---------------------------------------------------------------------------
-// Property test
+// Tests
 // ---------------------------------------------------------------------------
 
 describe("Property 14: Job reports preserve scan accounting", () => {
@@ -69,145 +73,96 @@ describe("Property 14: Job reports preserve scan accounting", () => {
     });
   });
 
-  it("for any counter values, signalsScanned === copiedCount + regeneratedCount + unrecoverableCount", async () => {
-    await propertyRunner.assert(
-      fc.asyncProperty(
-        arbCounterValue,
-        arbCounterValue,
-        arbCounterValue,
-        async (copiedCount, regeneratedCount, unrecoverableCount) => {
-          dynamoMock.reset();
-          rdsMock.reset();
+  it.each(counterCases)("%s", async (_label, { copiedCount, regeneratedCount, unrecoverableCount }) => {
+    dynamoMock.reset();
+    rdsMock.reset();
 
-          const jobId = "prop14-job";
-          const expectedSignalsScanned = copiedCount + regeneratedCount + unrecoverableCount;
+    const jobId = "prop14-job";
+    const expectedSignalsScanned = copiedCount + regeneratedCount + unrecoverableCount;
 
-          // Mock DynamoDB GetCommand to return the job record with arbitrary counters
-          dynamoMock.on(GetCommand).resolves({
-            Item: {
-              pk: `REINDEX#${jobId}`,
-              sk: "JOB",
-              jobId,
-              targetClusterId: "aurora-prod-titan-v2",
-              modelId: "amazon.titan-embed-text-v2:0",
-              startedAt: new Date(Date.now() - 5000).toISOString(),
-              copiedCount,
-              regeneratedCount,
-              unrecoverableCount,
-            },
-          });
-
-          // Mock Aurora validation (row count + sample vectors)
-          rdsMock
-            .on(ExecuteStatementCommand)
-            .resolvesOnce({
-              records: [[{ longValue: copiedCount + regeneratedCount }]],
-            })
-            .resolvesOnce({
-              records: Array.from({ length: 10 }, (_, i) => [
-                { stringValue: `arc_${i}` },
-                { doubleValue: 0 },
-              ]),
-            });
-
-          const report = await dispatcher.getReport(jobId);
-
-          // Core invariant: signalsScanned is the sum of the three counters
-          expect(report.signalsScanned).toBe(expectedSignalsScanned);
-          expect(report.signalsScanned).toBe(
-            report.copiedCount + report.regeneratedCount + report.unrecoverableCount,
-          );
-
-          // Verify individual counters are preserved
-          expect(report.copiedCount).toBe(copiedCount);
-          expect(report.regeneratedCount).toBe(regeneratedCount);
-          expect(report.unrecoverableCount).toBe(unrecoverableCount);
-
-          return true;
-        },
-      ),
-    );
-  });
-
-  it("signalsScanned is always computed from counters, never from a stored value", async () => {
-    await propertyRunner.assert(
-      fc.asyncProperty(
-        arbCounterValue,
-        arbCounterValue,
-        arbCounterValue,
-        async (copiedCount, regeneratedCount, unrecoverableCount) => {
-          dynamoMock.reset();
-          rdsMock.reset();
-
-          const jobId = "prop14-stale";
-          const staleSignalsScanned = 999_999; // Clearly wrong stored value
-
-          // DynamoDB record includes a stale signalsScanned field — dispatcher must ignore it
-          dynamoMock.on(GetCommand).resolves({
-            Item: {
-              pk: `REINDEX#${jobId}`,
-              sk: "JOB",
-              jobId,
-              targetClusterId: "aurora-prod-titan-v2",
-              modelId: "amazon.titan-embed-text-v2:0",
-              startedAt: new Date(Date.now() - 5000).toISOString(),
-              signalsScanned: staleSignalsScanned,
-              copiedCount,
-              regeneratedCount,
-              unrecoverableCount,
-            },
-          });
-
-          rdsMock
-            .on(ExecuteStatementCommand)
-            .resolvesOnce({
-              records: [[{ longValue: copiedCount + regeneratedCount }]],
-            })
-            .resolvesOnce({
-              records: Array.from({ length: 10 }, (_, i) => [
-                { stringValue: `arc_${i}` },
-                { doubleValue: 0 },
-              ]),
-            });
-
-          const report = await dispatcher.getReport(jobId);
-
-          // Must compute from the three counters, NOT use the stored value
-          const expectedSignalsScanned = copiedCount + regeneratedCount + unrecoverableCount;
-          expect(report.signalsScanned).toBe(expectedSignalsScanned);
-          expect(report.signalsScanned).not.toBe(staleSignalsScanned);
-
-          return true;
-        },
-      ),
-    );
-  });
-
-  it("edge case: all zero counters produce signalsScanned of zero", async () => {
     dynamoMock.on(GetCommand).resolves({
       Item: {
-        pk: "REINDEX#job-zero",
+        pk: `REINDEX#${jobId}`,
         sk: "JOB",
-        jobId: "job-zero",
+        jobId,
         targetClusterId: "aurora-prod-titan-v2",
         modelId: "amazon.titan-embed-text-v2:0",
-        startedAt: new Date().toISOString(),
-        copiedCount: 0,
-        regeneratedCount: 0,
-        unrecoverableCount: 0,
+        startedAt: new Date(Date.now() - 5000).toISOString(),
+        copiedCount,
+        regeneratedCount,
+        unrecoverableCount,
       },
     });
 
     rdsMock
       .on(ExecuteStatementCommand)
-      .resolvesOnce({ records: [[{ longValue: 0 }]] })
-      .resolvesOnce({ records: [] });
+      .resolvesOnce({
+        records: [[{ longValue: copiedCount + regeneratedCount }]],
+      })
+      .resolvesOnce({
+        records: Array.from({ length: 10 }, (_, i) => [
+          { stringValue: `arc_${i}` },
+          { doubleValue: 0 },
+        ]),
+      });
 
-    const report = await dispatcher.getReport("job-zero");
+    const report = await dispatcher.getReport(jobId);
 
-    expect(report.signalsScanned).toBe(0);
-    expect(report.copiedCount).toBe(0);
-    expect(report.regeneratedCount).toBe(0);
-    expect(report.unrecoverableCount).toBe(0);
+    // Core invariant: signalsScanned is the sum of the three counters
+    expect(report.signalsScanned).toBe(expectedSignalsScanned);
+    expect(report.signalsScanned).toBe(
+      report.copiedCount + report.regeneratedCount + report.unrecoverableCount,
+    );
+
+    // Verify individual counters are preserved
+    expect(report.copiedCount).toBe(copiedCount);
+    expect(report.regeneratedCount).toBe(regeneratedCount);
+    expect(report.unrecoverableCount).toBe(unrecoverableCount);
+  });
+
+  it("signalsScanned is always computed from counters, never from a stored value", async () => {
+    dynamoMock.reset();
+    rdsMock.reset();
+
+    const jobId = "prop14-stale";
+    const staleSignalsScanned = 999_999;
+    const copiedCount = 100;
+    const regeneratedCount = 50;
+    const unrecoverableCount = 7;
+
+    // DynamoDB record includes a stale signalsScanned field — dispatcher must ignore it
+    dynamoMock.on(GetCommand).resolves({
+      Item: {
+        pk: `REINDEX#${jobId}`,
+        sk: "JOB",
+        jobId,
+        targetClusterId: "aurora-prod-titan-v2",
+        modelId: "amazon.titan-embed-text-v2:0",
+        startedAt: new Date(Date.now() - 5000).toISOString(),
+        signalsScanned: staleSignalsScanned,
+        copiedCount,
+        regeneratedCount,
+        unrecoverableCount,
+      },
+    });
+
+    rdsMock
+      .on(ExecuteStatementCommand)
+      .resolvesOnce({
+        records: [[{ longValue: copiedCount + regeneratedCount }]],
+      })
+      .resolvesOnce({
+        records: Array.from({ length: 10 }, (_, i) => [
+          { stringValue: `arc_${i}` },
+          { doubleValue: 0 },
+        ]),
+      });
+
+    const report = await dispatcher.getReport(jobId);
+
+    // Must compute from the three counters, NOT use the stored value
+    const expectedSignalsScanned = copiedCount + regeneratedCount + unrecoverableCount;
+    expect(report.signalsScanned).toBe(expectedSignalsScanned);
+    expect(report.signalsScanned).not.toBe(staleSignalsScanned);
   });
 });

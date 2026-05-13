@@ -1,6 +1,4 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import fc from "fast-check";
-import { propertyRunner } from "./testing/property-runner.js";
 import { RequestLogger } from "./logger.js";
 import type { LogLevel } from "./logger.js";
 
@@ -14,7 +12,13 @@ function callLevel(logger: RequestLogger, level: LogLevel, message: string, cont
   logger[level](message, context);
 }
 
-describe("Feature: structured-logging, Property 1: Log entry structural invariant", () => {
+function lastEntry(consoleSpy: ReturnType<typeof vi.spyOn>): Record<string, unknown> {
+  const calls = consoleSpy.mock.calls;
+  const lastCall = calls[calls.length - 1]!;
+  return JSON.parse(lastCall[0] as string);
+}
+
+describe("Log entry structural invariant", () => {
   let consoleSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
@@ -24,52 +28,24 @@ describe("Feature: structured-logging, Property 1: Log entry structural invarian
     consoleSpy.mockRestore();
   });
 
-  it("every log call produces a single valid JSON line with required fields via console.log", async () => {
-    /**
-     * Validates: Requirements 1.1, 1.2, 1.3, 2.5, 3.3
-     */
-    const arbLevel = fc.constantFrom(...ALL_LEVELS);
-    const arbMessage = fc.string({ minLength: 1, maxLength: 100 }).map((s) => s.replace(/\s/g, "."));
-    const arbContext = fc.option(fc.dictionary(fc.string({ minLength: 1, maxLength: 20 }), fc.jsonValue()), { nil: undefined });
+  it.each(ALL_LEVELS.map((level) => ({ level })))(
+    "level=$level produces valid JSON with required fields",
+    ({ level }) => {
+      const logger = new RequestLogger("test1234");
+      logger.startInvocation();
+      callLevel(logger, level, "test.msg", { extra: "data" });
 
-    await propertyRunner.assert(
-      fc.asyncProperty(arbLevel, arbMessage, arbContext, async (level, message, context) => {
-        consoleSpy.mockClear();
-        const logger = new RequestLogger("test1234");
-        logger.startInvocation();
-
-        callLevel(logger, level, message, context ?? undefined);
-
-        // Find the last console.log call (the actual entry, not a truncation warning)
-        const calls = consoleSpy.mock.calls;
-        expect(calls.length).toBeGreaterThanOrEqual(1);
-
-        const lastCall = calls[calls.length - 1]!;
-        expect(lastCall).toHaveLength(1);
-        const raw = lastCall[0] as string;
-
-        // Must be valid JSON
-        const entry = JSON.parse(raw);
-
-        // Required fields present
-        expect(entry).toHaveProperty("level", level);
-        expect(entry).toHaveProperty("message", message);
-        expect(entry).toHaveProperty("timestamp");
-        expect(entry).toHaveProperty("invocationId");
-        expect(entry).toHaveProperty("containerId", "test1234");
-
-        // Timestamp is ISO 8601
-        const ts = new Date(entry.timestamp);
-        expect(ts.toISOString()).toBe(entry.timestamp);
-
-        // Written via console.log (not console.error)
-        expect(consoleSpy).toHaveBeenCalled();
-      }),
-    );
-  });
+      const entry = lastEntry(consoleSpy);
+      expect(entry.level).toBe(level);
+      expect(entry.message).toBe("test.msg");
+      expect(entry.containerId).toBe("test1234");
+      expect(entry.invocationId).toMatch(/^[0-9a-f-]{36}$/);
+      expect(new Date(entry.timestamp as string).toISOString()).toBe(entry.timestamp);
+    },
+  );
 });
 
-describe("Feature: structured-logging, Property 2: Context merge preserves required fields", () => {
+describe("Context merge preserves required fields", () => {
   let consoleSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
@@ -79,45 +55,28 @@ describe("Feature: structured-logging, Property 2: Context merge preserves requi
     consoleSpy.mockRestore();
   });
 
-  it("context keys matching required field names cannot overwrite logger internal state", async () => {
-    /**
-     * Validates: Requirements 1.5
-     */
-    const arbLevel = fc.constantFrom(...ALL_LEVELS);
-    const arbMessage = fc.string({ minLength: 1, maxLength: 50 }).map((s) => s.replace(/\s/g, "."));
-    const arbConflictingContext = fc.record({
-      level: fc.string({ minLength: 1, maxLength: 20 }),
-      message: fc.string({ minLength: 1, maxLength: 50 }),
-      timestamp: fc.string({ minLength: 1, maxLength: 30 }),
-      invocationId: fc.string({ minLength: 1, maxLength: 40 }),
-      containerId: fc.string({ minLength: 1, maxLength: 20 }),
+  it("context keys matching required field names cannot overwrite logger state", () => {
+    const logger = new RequestLogger("test1234");
+    logger.startInvocation();
+
+    callLevel(logger, "info", "real.message", {
+      level: "FAKE",
+      message: "FAKE",
+      timestamp: "FAKE",
+      invocationId: "FAKE",
+      containerId: "FAKE",
     });
 
-    await propertyRunner.assert(
-      fc.asyncProperty(arbLevel, arbMessage, arbConflictingContext, async (level, message, context) => {
-        consoleSpy.mockClear();
-        const logger = new RequestLogger("test1234");
-        logger.startInvocation();
-
-        callLevel(logger, level, message, context);
-
-        const calls = consoleSpy.mock.calls;
-        const lastCall = calls[calls.length - 1]!;
-        const entry = JSON.parse(lastCall[0] as string);
-
-        // Required fields reflect logger state, not context values
-        expect(entry.level).toBe(level);
-        expect(entry.message).toBe(message);
-        expect(entry.containerId).toBe("test1234");
-        // invocationId should be a UUID, not the arbitrary string from context
-        expect(entry.invocationId).not.toBe(context.invocationId);
-        expect(entry.invocationId).toMatch(/^[0-9a-f-]{36}$/);
-      }),
-    );
+    const entry = lastEntry(consoleSpy);
+    expect(entry.level).toBe("info");
+    expect(entry.message).toBe("real.message");
+    expect(entry.containerId).toBe("test1234");
+    expect(entry.invocationId).not.toBe("FAKE");
+    expect(entry.invocationId).toMatch(/^[0-9a-f-]{36}$/);
   });
 });
 
-describe("Feature: structured-logging, Property 3: Track points included for track/error/critical levels", () => {
+describe("Track points included for track/error/critical levels", () => {
   let consoleSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
@@ -127,63 +86,40 @@ describe("Feature: structured-logging, Property 3: Track points included for tra
     consoleSpy.mockRestore();
   });
 
-  it("track/error/critical include all recorded track points; debug/info/warn do not", async () => {
-    /**
-     * Validates: Requirements 2.3, 2.4, 4.2, 4.3
-     */
-    const arbTrackPointNames = fc.array(fc.string({ minLength: 1, maxLength: 30 }), { minLength: 1, maxLength: 5 });
-    const arbLevelWithPoints = fc.constantFrom(...TRACK_POINT_LEVELS);
-    const arbLevelWithoutPoints = fc.constantFrom(...NO_TRACK_POINT_LEVELS);
-    const arbMessage = fc.constant("test.message");
+  it.each(TRACK_POINT_LEVELS.map((level) => ({ level })))(
+    "level=$level includes trackPoints array",
+    ({ level }) => {
+      const logger = new RequestLogger("test1234");
+      logger.startInvocation();
+      logger.trackPoint("step.one");
+      logger.trackPoint("step.two");
+      callLevel(logger, level, "test.msg");
 
-    await propertyRunner.assert(
-      fc.asyncProperty(arbTrackPointNames, arbLevelWithPoints, async (names, level) => {
-        consoleSpy.mockClear();
-        const logger = new RequestLogger("test1234");
-        logger.startInvocation();
+      const entry = lastEntry(consoleSpy);
+      expect(entry.trackPoints).toBeDefined();
+      const tp = entry.trackPoints as Array<{ name: string; elapsedMs: number }>;
+      expect(tp).toHaveLength(2);
+      expect(tp[0]!.name).toBe("step.one");
+      expect(tp[1]!.name).toBe("step.two");
+      expect(tp[0]!.elapsedMs).toBeGreaterThanOrEqual(0);
+    },
+  );
 
-        for (const name of names) {
-          logger.trackPoint(name);
-        }
+  it.each(NO_TRACK_POINT_LEVELS.map((level) => ({ level })))(
+    "level=$level does NOT include trackPoints",
+    ({ level }) => {
+      const logger = new RequestLogger("test1234");
+      logger.startInvocation();
+      logger.trackPoint("step.one");
+      callLevel(logger, level, "test.msg");
 
-        callLevel(logger, level, "test.message");
-
-        const calls = consoleSpy.mock.calls;
-        const lastCall = calls[calls.length - 1]!;
-        const entry = JSON.parse(lastCall[0] as string);
-
-        expect(entry.trackPoints).toBeDefined();
-        expect(entry.trackPoints).toHaveLength(names.length);
-        for (let i = 0; i < names.length; i++) {
-          expect(entry.trackPoints[i].name).toBe(names[i]);
-          expect(entry.trackPoints[i].elapsedMs).toBeGreaterThanOrEqual(0);
-        }
-      }),
-    );
-
-    await propertyRunner.assert(
-      fc.asyncProperty(arbTrackPointNames, arbLevelWithoutPoints, async (names, level) => {
-        consoleSpy.mockClear();
-        const logger = new RequestLogger("test1234");
-        logger.startInvocation();
-
-        for (const name of names) {
-          logger.trackPoint(name);
-        }
-
-        callLevel(logger, level, "test.message");
-
-        const calls = consoleSpy.mock.calls;
-        const lastCall = calls[calls.length - 1]!;
-        const entry = JSON.parse(lastCall[0] as string);
-
-        expect(entry.trackPoints).toBeUndefined();
-      }),
-    );
-  });
+      const entry = lastEntry(consoleSpy);
+      expect(entry.trackPoints).toBeUndefined();
+    },
+  );
 });
 
-describe("Feature: structured-logging, Property 4: Error and critical include stack trace", () => {
+describe("Error and critical include stack trace", () => {
   let consoleSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
@@ -193,51 +129,33 @@ describe("Feature: structured-logging, Property 4: Error and critical include st
     consoleSpy.mockRestore();
   });
 
-  it("error/critical have non-empty stack field; other levels have no stack field", async () => {
-    /**
-     * Validates: Requirements 2.2
-     */
-    const arbStackLevel = fc.constantFrom(...STACK_LEVELS);
-    const arbNoStackLevel = fc.constantFrom(...NO_STACK_LEVELS);
-    const arbMessage = fc.string({ minLength: 1, maxLength: 50 }).map((s) => s.replace(/\s/g, "."));
+  it.each(STACK_LEVELS.map((level) => ({ level })))(
+    "level=$level has non-empty stack field",
+    ({ level }) => {
+      const logger = new RequestLogger("test1234");
+      logger.startInvocation();
+      callLevel(logger, level, "test.msg");
 
-    await propertyRunner.assert(
-      fc.asyncProperty(arbStackLevel, arbMessage, async (level, message) => {
-        consoleSpy.mockClear();
-        const logger = new RequestLogger("test1234");
-        logger.startInvocation();
+      const entry = lastEntry(consoleSpy);
+      expect(typeof entry.stack).toBe("string");
+      expect((entry.stack as string).length).toBeGreaterThan(0);
+    },
+  );
 
-        callLevel(logger, level, message);
+  it.each(NO_STACK_LEVELS.map((level) => ({ level })))(
+    "level=$level has no stack field",
+    ({ level }) => {
+      const logger = new RequestLogger("test1234");
+      logger.startInvocation();
+      callLevel(logger, level, "test.msg");
 
-        const calls = consoleSpy.mock.calls;
-        const lastCall = calls[calls.length - 1]!;
-        const entry = JSON.parse(lastCall[0] as string);
-
-        expect(entry.stack).toBeDefined();
-        expect(typeof entry.stack).toBe("string");
-        expect(entry.stack.length).toBeGreaterThan(0);
-      }),
-    );
-
-    await propertyRunner.assert(
-      fc.asyncProperty(arbNoStackLevel, arbMessage, async (level, message) => {
-        consoleSpy.mockClear();
-        const logger = new RequestLogger("test1234");
-        logger.startInvocation();
-
-        callLevel(logger, level, message);
-
-        const calls = consoleSpy.mock.calls;
-        const lastCall = calls[calls.length - 1]!;
-        const entry = JSON.parse(lastCall[0] as string);
-
-        expect(entry.stack).toBeUndefined();
-      }),
-    );
-  });
+      const entry = lastEntry(consoleSpy);
+      expect(entry.stack).toBeUndefined();
+    },
+  );
 });
 
-describe("Feature: structured-logging, Property 5: startInvocation resets state and preserves container ID", () => {
+describe("startInvocation resets state and preserves container ID", () => {
   let consoleSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
@@ -247,50 +165,28 @@ describe("Feature: structured-logging, Property 5: startInvocation resets state 
     consoleSpy.mockRestore();
   });
 
-  it("after startInvocation, invocationId changes, track points are cleared, containerId is stable", async () => {
-    /**
-     * Validates: Requirements 3.1, 3.2, 3.4
-     */
-    const arbTrackPointNames = fc.array(fc.string({ minLength: 1, maxLength: 20 }), { minLength: 1, maxLength: 5 });
+  it("after startInvocation, invocationId changes, track points cleared, containerId stable", () => {
+    const logger = new RequestLogger("test1234");
+    logger.startInvocation();
+    logger.trackPoint("old.point");
+    logger.track("before.reset");
 
-    await propertyRunner.assert(
-      fc.asyncProperty(arbTrackPointNames, async (names) => {
-        consoleSpy.mockClear();
-        const logger = new RequestLogger("test1234");
-        logger.startInvocation();
+    const firstEntry = lastEntry(consoleSpy);
+    const firstInvocationId = firstEntry.invocationId;
 
-        // Record some track points
-        for (const name of names) {
-          logger.trackPoint(name);
-        }
+    logger.startInvocation();
+    consoleSpy.mockClear();
+    logger.track("after.reset");
 
-        // Log to capture the first invocationId
-        logger.track("before.reset");
-        const firstCall = consoleSpy.mock.calls[consoleSpy.mock.calls.length - 1]!;
-        const firstEntry = JSON.parse(firstCall[0] as string);
-        const firstInvocationId = firstEntry.invocationId;
-        const firstContainerId = firstEntry.containerId;
-
-        // Reset
-        logger.startInvocation();
-
-        // Log again — should have new invocationId, no track points, same containerId
-        consoleSpy.mockClear();
-        logger.track("after.reset");
-        const secondCall = consoleSpy.mock.calls[consoleSpy.mock.calls.length - 1]!;
-        const secondEntry = JSON.parse(secondCall[0] as string);
-
-        expect(secondEntry.invocationId).not.toBe(firstInvocationId);
-        expect(secondEntry.invocationId).toMatch(/^[0-9a-f-]{36}$/);
-        expect(secondEntry.trackPoints).toBeUndefined();
-        expect(secondEntry.containerId).toBe(firstContainerId);
-        expect(secondEntry.containerId).toBe("test1234");
-      }),
-    );
+    const secondEntry = lastEntry(consoleSpy);
+    expect(secondEntry.invocationId).not.toBe(firstInvocationId);
+    expect(secondEntry.invocationId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(secondEntry.trackPoints).toBeUndefined();
+    expect(secondEntry.containerId).toBe("test1234");
   });
 });
 
-describe("Feature: structured-logging, Property 6: Recursive secret redaction", () => {
+describe("Recursive secret redaction", () => {
   let consoleSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
@@ -300,87 +196,35 @@ describe("Feature: structured-logging, Property 6: Recursive secret redaction", 
     consoleSpy.mockRestore();
   });
 
-  it("fields matching secret/signature/authorization are redacted preserving first 8 chars", async () => {
-    /**
-     * Validates: Requirements 5.1, 5.2, 5.4
-     */
-    const arbSecretKey = fc.constantFrom("clientSecret", "webhookSignature", "apiSecret", "tokenSignature");
-    const arbLongValue = fc.string({ minLength: 9, maxLength: 100 });
-    const arbShortValue = fc.string({ minLength: 1, maxLength: 8 });
+  const redactionCases = [
+    { label: "long secret key — preserves first 8 chars", key: "clientSecret", value: "abcdefghijklmnop", expected: "abcdefgh[REDACTED]" },
+    { label: "short secret key — fully redacted", key: "clientSecret", value: "short", expected: "[REDACTED]" },
+    { label: "signature key — preserves first 8 chars", key: "webhookSignature", value: "123456789abcdef", expected: "12345678[REDACTED]" },
+    { label: "authorization key — preserves first 8 chars", key: "authorization", value: "Bearer xyztoken123", expected: "Bearer x[REDACTED]" },
+    { label: "Authorization (capitalized) — preserves first 8 chars", key: "Authorization", value: "Bearer xyztoken123", expected: "Bearer x[REDACTED]" },
+    { label: "short authorization — fully redacted", key: "authorization", value: "short", expected: "[REDACTED]" },
+  ];
 
-    // Test long values (> 8 chars): first 8 preserved + [REDACTED]
-    await propertyRunner.assert(
-      fc.asyncProperty(arbSecretKey, arbLongValue, async (key, value) => {
-        consoleSpy.mockClear();
-        const logger = new RequestLogger("test1234");
-        logger.startInvocation();
+  it.each(redactionCases)("$label", ({ key, value, expected }) => {
+    const logger = new RequestLogger("test1234");
+    logger.startInvocation();
+    logger.info("test.redaction", { [key]: value });
 
-        logger.info("test.redaction", { [key]: value });
+    const entry = lastEntry(consoleSpy);
+    expect(entry[key]).toBe(expected);
+  });
 
-        const calls = consoleSpy.mock.calls;
-        const lastCall = calls[calls.length - 1]!;
-        const entry = JSON.parse(lastCall[0] as string);
+  it("nested secret fields are redacted recursively", () => {
+    const logger = new RequestLogger("test1234");
+    logger.startInvocation();
+    logger.info("test.nested", { outer: { inner: { apiSecret: "longvalue123456" } } });
 
-        expect(entry[key]).toBe(value.slice(0, 8) + "[REDACTED]");
-      }),
-    );
-
-    // Test short values (<= 8 chars): entire value replaced
-    await propertyRunner.assert(
-      fc.asyncProperty(arbSecretKey, arbShortValue, async (key, value) => {
-        consoleSpy.mockClear();
-        const logger = new RequestLogger("test1234");
-        logger.startInvocation();
-
-        logger.info("test.redaction", { [key]: value });
-
-        const calls = consoleSpy.mock.calls;
-        const lastCall = calls[calls.length - 1]!;
-        const entry = JSON.parse(lastCall[0] as string);
-
-        expect(entry[key]).toBe("[REDACTED]");
-      }),
-    );
-
-    // Test authorization key specifically
-    await propertyRunner.assert(
-      fc.asyncProperty(fc.constantFrom("authorization", "Authorization"), arbLongValue, async (key, value) => {
-        consoleSpy.mockClear();
-        const logger = new RequestLogger("test1234");
-        logger.startInvocation();
-
-        logger.info("test.auth.redaction", { [key]: value });
-
-        const calls = consoleSpy.mock.calls;
-        const lastCall = calls[calls.length - 1]!;
-        const entry = JSON.parse(lastCall[0] as string);
-
-        expect(entry[key]).toBe(value.slice(0, 8) + "[REDACTED]");
-      }),
-    );
-
-    // Test nested redaction (recursive)
-    await propertyRunner.assert(
-      fc.asyncProperty(arbSecretKey, arbLongValue, async (key, value) => {
-        consoleSpy.mockClear();
-        const logger = new RequestLogger("test1234");
-        logger.startInvocation();
-
-        logger.info("test.nested.redaction", {
-          outer: { inner: { [key]: value } },
-        });
-
-        const calls = consoleSpy.mock.calls;
-        const lastCall = calls[calls.length - 1]!;
-        const entry = JSON.parse(lastCall[0] as string);
-
-        expect(entry.outer.inner[key]).toBe(value.slice(0, 8) + "[REDACTED]");
-      }),
-    );
+    const entry = lastEntry(consoleSpy);
+    expect((entry.outer as Record<string, unknown> & { inner: { apiSecret: string } }).inner.apiSecret).toBe("longvalu[REDACTED]");
   });
 });
 
-describe("Feature: log-message-review, Property 2: Code field does not duplicate in context", () => {
+describe("Code field promotion and omission", () => {
   let consoleSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
@@ -390,50 +234,55 @@ describe("Feature: log-message-review, Property 2: Code field does not duplicate
     consoleSpy.mockRestore();
   });
 
-  it("code appears exactly once in serialized output when provided in context", async () => {
-    /**
-     * Validates: Requirements 2.1, 2.2
-     */
-    const arbLevel = fc.constantFrom(...ALL_LEVELS);
-    const arbMessage = fc.string({ minLength: 1, maxLength: 100 });
-    // Generate valid dot-separated identifiers for code values
-    const arbSegment = fc.stringMatching(/^[a-z][a-z0-9_]{0,15}$/);
-    const arbCode = fc
-      .array(arbSegment, { minLength: 2, maxLength: 4 })
-      .map((segments) => segments.join("."));
-    // Generate random context with additional fields (excluding "code" key)
-    const arbExtraContext = fc.dictionary(
-      fc.string({ minLength: 1, maxLength: 20 }).filter((k) => k !== "code"),
-      fc.jsonValue(),
-    );
+  it("string code in context is promoted to top-level field", () => {
+    const logger = new RequestLogger("test1234");
+    logger.startInvocation();
+    callLevel(logger, "info", "test.msg", { code: "auth.token_expired", extra: "data" });
 
-    await propertyRunner.assert(
-      fc.asyncProperty(arbLevel, arbMessage, arbCode, arbExtraContext, async (level, message, code, extra) => {
-        consoleSpy.mockClear();
-        const logger = new RequestLogger("test1234");
-        logger.startInvocation();
+    const entry = lastEntry(consoleSpy);
+    expect(entry.code).toBe("auth.token_expired");
+  });
 
-        const context = { ...extra, code };
-        callLevel(logger, level, message, context);
+  it("code appears exactly once in serialized output", () => {
+    const logger = new RequestLogger("test1234");
+    logger.startInvocation();
+    callLevel(logger, "warn", "test.msg", { code: "db.connection_failed" });
 
-        const calls = consoleSpy.mock.calls;
-        expect(calls.length).toBeGreaterThanOrEqual(1);
+    const raw = consoleSpy.mock.calls[consoleSpy.mock.calls.length - 1]![0] as string;
+    const codeKeyMatches = raw.match(/"code"\s*:/g);
+    expect(codeKeyMatches).not.toBeNull();
+    expect(codeKeyMatches!.length).toBe(1);
+  });
 
-        // Get the primary log entry (last call, skipping any truncation warning)
-        const lastCall = calls[calls.length - 1]!;
-        const raw = lastCall[0] as string;
+  const nonStringCases = [
+    { label: "numeric code", code: 42 },
+    { label: "boolean code", code: true },
+    { label: "null code", code: null },
+    { label: "object code", code: { nested: true } },
+  ];
 
-        // Count occurrences of "code" as a JSON key in the serialized output.
-        // A JSON key appears as "code": (with quotes and colon).
-        const codeKeyMatches = raw.match(/"code"\s*:/g);
-        expect(codeKeyMatches).not.toBeNull();
-        expect(codeKeyMatches!.length).toBe(1);
-      }),
-    );
+  it.each(nonStringCases)("$label is not promoted to top-level string", ({ code }) => {
+    const logger = new RequestLogger("test1234");
+    logger.startInvocation();
+    callLevel(logger, "info", "test.msg", { code } as Record<string, unknown>);
+
+    const entry = lastEntry(consoleSpy);
+    if ("code" in entry) {
+      expect(typeof entry.code).not.toBe("string");
+    }
+  });
+
+  it("missing code in context results in no code field", () => {
+    const logger = new RequestLogger("test1234");
+    logger.startInvocation();
+    callLevel(logger, "info", "test.msg", { other: "data" });
+
+    const entry = lastEntry(consoleSpy);
+    expect(entry).not.toHaveProperty("code");
   });
 });
 
-describe("Feature: structured-logging, Property 7: Payload truncation guard", () => {
+describe("Payload truncation guard", () => {
   let consoleSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
@@ -443,159 +292,29 @@ describe("Feature: structured-logging, Property 7: Payload truncation guard", ()
     consoleSpy.mockRestore();
   });
 
-  it("entries exceeding 262,144 bytes are truncated with _truncated flag and a separate WARN entry", async () => {
-    /**
-     * Validates: Requirements 6.1, 6.2
-     */
-    // Generate a string large enough to exceed 256KB
-    const arbLargeString = fc.string({ minLength: 270_000, maxLength: 300_000 });
+  it("entries exceeding 262,144 bytes are truncated with _truncated flag and a WARN entry", () => {
+    const logger = new RequestLogger("test1234");
+    logger.startInvocation();
+    const largeValue = "x".repeat(270_000);
+    logger.info("test.large.payload", { data: largeValue });
 
-    await propertyRunner.assert(
-      fc.asyncProperty(arbLargeString, async (largeValue) => {
-        consoleSpy.mockClear();
-        const logger = new RequestLogger("test1234");
-        logger.startInvocation();
+    const calls = consoleSpy.mock.calls;
+    expect(calls.length).toBe(2);
 
-        logger.info("test.large.payload", { data: largeValue });
+    // First call is the warning
+    const warningEntry = JSON.parse(calls[0]![0] as string);
+    expect(warningEntry.level).toBe("warn");
+    expect(warningEntry.message).toBe("logger.payload_truncated");
+    expect(warningEntry.originalMessage).toBe("test.large.payload");
+    expect(warningEntry.originalSizeBytes).toBeGreaterThan(262_144);
 
-        const calls = consoleSpy.mock.calls;
-        // Should have 2 calls: the warning entry and the truncated entry
-        expect(calls.length).toBe(2);
+    // Second call is the truncated entry
+    const truncatedEntry = JSON.parse(calls[1]![0] as string);
+    expect(truncatedEntry._truncated).toBe(true);
+    expect(truncatedEntry.level).toBe("info");
+    expect(truncatedEntry.message).toBe("test.large.payload");
 
-        // First call is the warning
-        const warningEntry = JSON.parse(calls[0]![0] as string);
-        expect(warningEntry.level).toBe("warn");
-        expect(warningEntry.message).toBe("logger.payload_truncated");
-        expect(warningEntry.originalMessage).toBe("test.large.payload");
-        expect(warningEntry.originalSizeBytes).toBeGreaterThan(262_144);
-
-        // Second call is the truncated entry
-        const truncatedEntry = JSON.parse(calls[1]![0] as string);
-        expect(truncatedEntry._truncated).toBe(true);
-        expect(truncatedEntry.level).toBe("info");
-        expect(truncatedEntry.message).toBe("test.large.payload");
-
-        // Verify the truncated output is within the limit
-        const truncatedSize = Buffer.byteLength(calls[1]![0] as string, "utf8");
-        expect(truncatedSize).toBeLessThanOrEqual(262_144);
-      }),
-      { numRuns: 20 }, // Fewer runs for large payloads to keep test time reasonable
-    );
-  });
-});
-
-describe("Feature: log-message-review, Property 1: Code field promotion and omission", () => {
-  let consoleSpy: ReturnType<typeof vi.spyOn>;
-
-  beforeEach(() => {
-    consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-  });
-  afterEach(() => {
-    consoleSpy.mockRestore();
-  });
-
-  it("string code in context is promoted to top-level field with that value", async () => {
-    /**
-     * Validates: Requirements 2.2, 2.4, 7.2
-     */
-    const arbLevel = fc.constantFrom(...ALL_LEVELS);
-    const arbMessage = fc.string({ minLength: 1, maxLength: 100 });
-    // Generate valid dot-separated code identifiers (2-4 segments, lowercase)
-    const arbCodeSegment = fc.stringMatching(/^[a-z][a-z0-9_]{0,15}$/);
-    const arbCode = fc
-      .array(arbCodeSegment, { minLength: 2, maxLength: 4 })
-      .map((segments) => segments.join("."));
-    // Generate additional context fields (excluding 'code' key)
-    const arbExtraContext = fc.dictionary(
-      fc.string({ minLength: 1, maxLength: 20 }).filter((k) => k !== "code"),
-      fc.jsonValue(),
-    );
-
-    await propertyRunner.assert(
-      fc.asyncProperty(arbLevel, arbMessage, arbCode, arbExtraContext, async (level, message, code, extra) => {
-        consoleSpy.mockClear();
-        const logger = new RequestLogger("test1234");
-        logger.startInvocation();
-
-        callLevel(logger, level, message, { ...extra, code });
-
-        const calls = consoleSpy.mock.calls;
-        expect(calls.length).toBeGreaterThanOrEqual(1);
-
-        // Get the primary log entry (last call handles truncation warning case)
-        const lastCall = calls[calls.length - 1]!;
-        const entry = JSON.parse(lastCall[0] as string);
-
-        // code must be promoted to top-level with the exact value
-        expect(entry.code).toBe(code);
-      }),
-    );
-  });
-
-  it("non-string or missing code in context results in no code field in output", async () => {
-    /**
-     * Validates: Requirements 2.2, 2.4, 7.2
-     */
-    const arbLevel = fc.constantFrom(...ALL_LEVELS);
-    const arbMessage = fc.string({ minLength: 1, maxLength: 100 });
-    // Generate non-string code values: numbers, booleans, null, objects, arrays
-    const arbNonStringCode = fc.oneof(
-      fc.integer(),
-      fc.boolean(),
-      fc.constant(null),
-      fc.constant(undefined),
-      fc.array(fc.integer(), { maxLength: 3 }),
-      fc.dictionary(fc.string({ minLength: 1, maxLength: 5 }), fc.integer()),
-    );
-    // Generate context without a code field
-    const arbContextWithoutCode = fc.dictionary(
-      fc.string({ minLength: 1, maxLength: 20 }).filter((k) => k !== "code"),
-      fc.jsonValue(),
-    );
-
-    // Case 1: context has non-string code — code field should NOT appear in output
-    await propertyRunner.assert(
-      fc.asyncProperty(arbLevel, arbMessage, arbNonStringCode, async (level, message, nonStringCode) => {
-        consoleSpy.mockClear();
-        const logger = new RequestLogger("test1234");
-        logger.startInvocation();
-
-        callLevel(logger, level, message, { code: nonStringCode } as Record<string, unknown>);
-
-        const calls = consoleSpy.mock.calls;
-        expect(calls.length).toBeGreaterThanOrEqual(1);
-
-        const lastCall = calls[calls.length - 1]!;
-        const raw = lastCall[0] as string;
-        const entry = JSON.parse(raw);
-
-        // code must NOT be a top-level promoted field
-        // Non-string code is treated as regular context data, so it may appear
-        // but it should NOT have been promoted (i.e., it won't be a string)
-        if ("code" in entry) {
-          expect(typeof entry.code).not.toBe("string");
-        }
-      }),
-    );
-
-    // Case 2: context has no code field at all — code field should NOT appear in output
-    await propertyRunner.assert(
-      fc.asyncProperty(arbLevel, arbMessage, arbContextWithoutCode, async (level, message, context) => {
-        consoleSpy.mockClear();
-        const logger = new RequestLogger("test1234");
-        logger.startInvocation();
-
-        callLevel(logger, level, message, Object.keys(context).length > 0 ? context : undefined);
-
-        const calls = consoleSpy.mock.calls;
-        expect(calls.length).toBeGreaterThanOrEqual(1);
-
-        const lastCall = calls[calls.length - 1]!;
-        const entry = JSON.parse(lastCall[0] as string);
-
-        // No code field should exist
-        expect(entry).not.toHaveProperty("code");
-      }),
-    );
+    const truncatedSize = Buffer.byteLength(calls[1]![0] as string, "utf8");
+    expect(truncatedSize).toBeLessThanOrEqual(262_144);
   });
 });

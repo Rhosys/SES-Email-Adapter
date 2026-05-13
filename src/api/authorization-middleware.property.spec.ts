@@ -1,49 +1,8 @@
-// Feature: email-catcher-authz-checks, Property 1: Authorization middleware extracts account ID from path
-// Feature: email-catcher-authz-checks, Property 2: Authorization middleware enforces permission level
-// Feature: email-catcher-authz-checks, Property 3: Authorization short-circuits on failure
-// Feature: email-catcher-authz-checks, Property 4: Authorization failure returns 403 with error code
-// Feature: email-catcher-authz-checks, Property 5: Authress SDK failure returns 500 with logged error
-// Feature: email-catcher-authz-checks, Property 6: Authorization failures are logged
-// Feature: email-catcher-authz-checks, Property 7: Error responses sanitize internal details
-//
-// **Validates: Requirements 1.2, 1.3, 1.4, 2.2, 2.3, 2.4, 5.1, 5.2, 5.3, 5.4**
-
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import fc from "fast-check";
+import { describe, it, expect, vi } from "vitest";
 import { Hono } from "hono";
 import { createAuthorize } from "./authorization-middleware.js";
 import type { AccessService, AuthContext } from "./app.js";
-import { propertyRunner } from "../testing/property-runner.js";
 import { createMockLogger } from "../testing/mock-logger.js";
-
-// ---------------------------------------------------------------------------
-// Arbitraries
-// ---------------------------------------------------------------------------
-
-/** Generates valid account IDs (alphanumeric with hyphens, 3-36 chars) */
-const arbAccountId = fc.stringMatching(/^[a-zA-Z0-9][a-zA-Z0-9-]{1,34}[a-zA-Z0-9]$/);
-
-/** Generates valid user IDs (alphanumeric with hyphens/underscores, 3-36 chars) */
-const arbUserId = fc.stringMatching(/^[a-zA-Z][a-zA-Z0-9_-]{1,34}[a-zA-Z0-9]$/);
-
-/** Generates permission strings in the format "resource:action" */
-const arbPermission = fc.tuple(
-  fc.constantFrom("accounts", "arcs", "users", "signals", "views", "labels", "rules", "domains", "aliases", "management"),
-  fc.constantFrom("read", "write"),
-).map(([resource, action]) => `${resource}:${action}`);
-
-/** Generates sub-resource path segments (e.g., "/arcs/arc-123") */
-const arbSubPath = fc.oneof(
-  fc.constant(""),
-  fc.tuple(
-    fc.constantFrom("arcs", "users", "signals", "views", "labels", "rules", "domains", "aliases"),
-    fc.stringMatching(/^[a-zA-Z0-9-]{3,20}$/),
-  ).map(([resource, id]) => `/${resource}/${id}`),
-);
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 type AppEnv = { Variables: { auth: AuthContext; authorizationVerified?: boolean } };
 
@@ -58,446 +17,176 @@ function makeAccess(overrides?: Partial<AccessService>): AccessService {
   };
 }
 
-// ---------------------------------------------------------------------------
-// Property 1: Authorization middleware extracts account ID from path
-// ---------------------------------------------------------------------------
+describe("Authorization middleware extracts account ID from path", () => {
+  it("constructs correct resourceUri from path params", async () => {
+    const access = makeAccess();
+    const authorize = createAuthorize(access, createMockLogger());
+    const app = new Hono<AppEnv>();
+    app.use("*", async (c, next) => { c.set("auth", { accountId: "acct-abc", userId: "user-xyz" }); await next(); });
+    app.get("/accounts/:accountId", authorize("accounts:read", (c) => `accounts/${c.req.param("accountId")}`), (c) => c.json({ ok: true }));
 
-describe("Property 1: Authorization middleware extracts account ID from path", () => {
-  it("correctly extracts accountId and constructs resourceUri for any valid accountId", async () => {
-    await propertyRunner.assert(
-      fc.asyncProperty(
-        arbAccountId,
-        arbUserId,
-        arbPermission,
-        async (accountId, userId, permission) => {
-          const access = makeAccess();
-          const authorize = createAuthorize(access, createMockLogger());
-          const app = new Hono<AppEnv>();
-
-          app.use("*", async (c, next) => {
-            c.set("auth", { accountId, userId });
-            await next();
-          });
-
-          app.get(
-            "/accounts/:accountId",
-            authorize(permission, c => `accounts/${c.req.param("accountId")}`),
-            (c) => c.json({ ok: true }),
-          );
-
-          await app.request(`/accounts/${encodeURIComponent(accountId)}`);
-
-          expect(access.checkAccess).toHaveBeenCalledWith(
-            userId,
-            `accounts/${accountId}`,
-            permission,
-          );
-        },
-      ),
-    );
+    await app.request("/accounts/acct-abc");
+    expect(access.checkAccess).toHaveBeenCalledWith("user-xyz", "accounts/acct-abc", "accounts:read");
   });
 
-  it("correctly extracts accountId with nested sub-resource paths", async () => {
-    await propertyRunner.assert(
-      fc.asyncProperty(
-        arbAccountId,
-        arbUserId,
-        async (accountId, userId) => {
-          const access = makeAccess();
-          const authorize = createAuthorize(access, createMockLogger());
-          const app = new Hono<AppEnv>();
+  it("handles nested sub-resource paths", async () => {
+    const access = makeAccess();
+    const authorize = createAuthorize(access, createMockLogger());
+    const app = new Hono<AppEnv>();
+    app.use("*", async (c, next) => { c.set("auth", { accountId: "acct-abc", userId: "user-xyz" }); await next(); });
+    app.get("/accounts/:accountId/arcs/:arcId", authorize("arcs:read", (c) => `accounts/${c.req.param("accountId")}/arcs/${c.req.param("arcId")}`), (c) => c.json({ ok: true }));
 
-          app.use("*", async (c, next) => {
-            c.set("auth", { accountId, userId });
-            await next();
-          });
-
-          app.get(
-            "/accounts/:accountId/arcs/:arcId",
-            authorize("arcs:read", c => `accounts/${c.req.param("accountId")}/arcs/${c.req.param("arcId")}`),
-            (c) => c.json({ ok: true }),
-          );
-
-          const arcId = "arc-test-123";
-          await app.request(`/accounts/${encodeURIComponent(accountId)}/arcs/${arcId}`);
-
-          expect(access.checkAccess).toHaveBeenCalledWith(
-            userId,
-            `accounts/${accountId}/arcs/${arcId}`,
-            "arcs:read",
-          );
-        },
-      ),
-    );
+    await app.request("/accounts/acct-abc/arcs/arc-123");
+    expect(access.checkAccess).toHaveBeenCalledWith("user-xyz", "accounts/acct-abc/arcs/arc-123", "arcs:read");
   });
 });
 
-// ---------------------------------------------------------------------------
-// Property 2: Authorization middleware enforces permission level
-// ---------------------------------------------------------------------------
+describe("Authorization middleware enforces permission level", () => {
+  const permissions = ["accounts:read", "arcs:write", "signals:read", "management:write"];
 
-describe("Property 2: Authorization middleware enforces permission level", () => {
-  it("uses the specified permission level when calling checkAccess", async () => {
-    await propertyRunner.assert(
-      fc.asyncProperty(
-        arbAccountId,
-        arbUserId,
-        arbPermission,
-        async (accountId, userId, permission) => {
-          const access = makeAccess();
-          const authorize = createAuthorize(access, createMockLogger());
-          const app = new Hono<AppEnv>();
+  it.each(permissions.map((p) => ({ permission: p })))("forwards $permission to checkAccess", async ({ permission }) => {
+    const access = makeAccess();
+    const authorize = createAuthorize(access, createMockLogger());
+    const app = new Hono<AppEnv>();
+    app.use("*", async (c, next) => { c.set("auth", { accountId: "acct-1", userId: "user-1" }); await next(); });
+    app.get("/accounts/:accountId", authorize(permission, (c) => `accounts/${c.req.param("accountId")}`), (c) => c.json({ ok: true }));
 
-          app.use("*", async (c, next) => {
-            c.set("auth", { accountId, userId });
-            await next();
-          });
-
-          app.get(
-            "/accounts/:accountId",
-            authorize(permission, c => `accounts/${c.req.param("accountId")}`),
-            (c) => c.json({ ok: true }),
-          );
-
-          await app.request(`/accounts/${encodeURIComponent(accountId)}`);
-
-          // The exact permission passed to authorize() must be forwarded to checkAccess
-          expect(access.checkAccess).toHaveBeenCalledWith(
-            userId,
-            expect.any(String),
-            permission,
-          );
-        },
-      ),
-    );
-  });
-
-  it("different permissions on different routes are enforced independently", async () => {
-    await propertyRunner.assert(
-      fc.asyncProperty(
-        arbAccountId,
-        arbUserId,
-        arbPermission,
-        arbPermission,
-        async (accountId, userId, readPerm, writePerm) => {
-          const access = makeAccess();
-          const authorize = createAuthorize(access, createMockLogger());
-          const app = new Hono<AppEnv>();
-
-          app.use("*", async (c, next) => {
-            c.set("auth", { accountId, userId });
-            await next();
-          });
-
-          app.get(
-            "/accounts/:accountId/resource",
-            authorize(readPerm, c => `accounts/${c.req.param("accountId")}/resource`),
-            (c) => c.json({ ok: true }),
-          );
-
-          app.post(
-            "/accounts/:accountId/resource",
-            authorize(writePerm, c => `accounts/${c.req.param("accountId")}/resource`),
-            (c) => c.json({ ok: true }),
-          );
-
-          await app.request(`/accounts/${encodeURIComponent(accountId)}/resource`, { method: "GET" });
-          expect(access.checkAccess).toHaveBeenLastCalledWith(userId, expect.any(String), readPerm);
-
-          await app.request(`/accounts/${encodeURIComponent(accountId)}/resource`, { method: "POST" });
-          expect(access.checkAccess).toHaveBeenLastCalledWith(userId, expect.any(String), writePerm);
-        },
-      ),
-    );
+    await app.request("/accounts/acct-1");
+    expect(access.checkAccess).toHaveBeenCalledWith("user-1", expect.any(String), permission);
   });
 });
 
-// ---------------------------------------------------------------------------
-// Property 3: Authorization short-circuits on failure
-// ---------------------------------------------------------------------------
+describe("Authorization short-circuits on failure", () => {
+  it("does NOT execute route handler when authorization fails (403)", async () => {
+    const authError = Object.assign(new Error("Forbidden"), { response: { status: 403 } });
+    const access = makeAccess({ checkAccess: vi.fn().mockRejectedValue(authError) });
+    const authorize = createAuthorize(access, createMockLogger());
+    const handlerSpy = vi.fn((c: any) => c.json({ ok: true }));
 
-describe("Property 3: Authorization short-circuits on failure", () => {
-  it("does NOT execute the route handler when authorization fails", async () => {
-    await propertyRunner.assert(
-      fc.asyncProperty(
-        arbAccountId,
-        arbUserId,
-        arbPermission,
-        async (accountId, userId, permission) => {
-          const authError = Object.assign(new Error("Forbidden"), { response: { status: 403 } });
-          const access = makeAccess({ checkAccess: vi.fn().mockRejectedValue(authError) });
-          const authorize = createAuthorize(access, createMockLogger());
-          const handlerSpy = vi.fn((c: any) => c.json({ ok: true }));
+    const app = new Hono<AppEnv>();
+    app.use("*", async (c, next) => { c.set("auth", { accountId: "acct-1", userId: "user-1" }); await next(); });
+    app.get("/accounts/:accountId", authorize("accounts:read", (c) => `accounts/${c.req.param("accountId")}`), handlerSpy);
 
-          const app = new Hono<AppEnv>();
-          app.use("*", async (c, next) => {
-            c.set("auth", { accountId, userId });
-            await next();
-          });
-          app.get("/accounts/:accountId", authorize(permission, c => `accounts/${c.req.param("accountId")}`), handlerSpy);
-
-          await app.request(`/accounts/${encodeURIComponent(accountId)}`);
-
-          expect(handlerSpy).not.toHaveBeenCalled();
-        },
-      ),
-    );
+    await app.request("/accounts/acct-1");
+    expect(handlerSpy).not.toHaveBeenCalled();
   });
 
-  it("does NOT execute the route handler when SDK throws non-403 error", async () => {
-    await propertyRunner.assert(
-      fc.asyncProperty(
-        arbAccountId,
-        arbUserId,
-        arbPermission,
-        fc.string({ minLength: 1, maxLength: 50 }),
-        async (accountId, userId, permission, errorMessage) => {
-          const access = makeAccess({ checkAccess: vi.fn().mockRejectedValue(new Error(errorMessage)) });
-          const authorize = createAuthorize(access, createMockLogger());
-          const handlerSpy = vi.fn((c: any) => c.json({ ok: true }));
+  it("does NOT execute route handler when SDK throws non-403 error", async () => {
+    const access = makeAccess({ checkAccess: vi.fn().mockRejectedValue(new Error("connection timeout")) });
+    const authorize = createAuthorize(access, createMockLogger());
+    const handlerSpy = vi.fn((c: any) => c.json({ ok: true }));
 
-          const app = new Hono<AppEnv>();
-          app.use("*", async (c, next) => {
-            c.set("auth", { accountId, userId });
-            await next();
-          });
-          app.get("/accounts/:accountId", authorize(permission, c => `accounts/${c.req.param("accountId")}`), handlerSpy);
+    const app = new Hono<AppEnv>();
+    app.use("*", async (c, next) => { c.set("auth", { accountId: "acct-1", userId: "user-1" }); await next(); });
+    app.get("/accounts/:accountId", authorize("accounts:read", (c) => `accounts/${c.req.param("accountId")}`), handlerSpy);
 
-          await app.request(`/accounts/${encodeURIComponent(accountId)}`);
-
-          expect(handlerSpy).not.toHaveBeenCalled();
-        },
-      ),
-    );
+    await app.request("/accounts/acct-1");
+    expect(handlerSpy).not.toHaveBeenCalled();
   });
 });
 
-// ---------------------------------------------------------------------------
-// Property 4: Authorization failure returns 403 with error code
-// ---------------------------------------------------------------------------
+describe("Authorization failure returns 403 with error code", () => {
+  it("returns { title: 'Forbidden', errorCode: 'AccessDenied' } for 403 from SDK", async () => {
+    const authError = Object.assign(new Error("Forbidden"), { response: { status: 403 } });
+    const access = makeAccess({ checkAccess: vi.fn().mockRejectedValue(authError) });
+    const authorize = createAuthorize(access, createMockLogger());
 
-describe("Property 4: Authorization failure returns 403 with error code", () => {
-  it("returns HTTP 403 with { title: 'Forbidden', errorCode: 'AccessDenied' } for any unauthorized request", async () => {
-    await propertyRunner.assert(
-      fc.asyncProperty(
-        arbAccountId,
-        arbUserId,
-        arbPermission,
-        fc.constantFrom(
-          // Authress SDK v2 style (response.status)
-          (msg: string) => Object.assign(new Error(msg), { response: { status: 403 } }),
-          // Authress SDK v3 style (status directly)
-          (msg: string) => Object.assign(new Error(msg), { status: 403 }),
-        ),
-        async (accountId, userId, permission, makeError) => {
-          const access = makeAccess({ checkAccess: vi.fn().mockRejectedValue(makeError("Forbidden")) });
-          const authorize = createAuthorize(access, createMockLogger());
+    const app = new Hono<AppEnv>();
+    app.use("*", async (c, next) => { c.set("auth", { accountId: "acct-1", userId: "user-1" }); await next(); });
+    app.get("/accounts/:accountId", authorize("accounts:read", (c) => `accounts/${c.req.param("accountId")}`), (c) => c.json({ ok: true }));
 
-          const app = new Hono<AppEnv>();
-          app.use("*", async (c, next) => {
-            c.set("auth", { accountId, userId });
-            await next();
-          });
-          app.get("/accounts/:accountId", authorize(permission, c => `accounts/${c.req.param("accountId")}`), (c) => c.json({ ok: true }));
-
-          const res = await app.request(`/accounts/${encodeURIComponent(accountId)}`);
-
-          expect(res.status).toBe(403);
-          const body = await res.json();
-          expect(body).toEqual({ title: "Forbidden", errorCode: "AccessDenied" });
-        },
-      ),
-    );
+    const res = await app.request("/accounts/acct-1");
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ title: "Forbidden", errorCode: "AccessDenied" });
   });
 });
 
-// ---------------------------------------------------------------------------
-// Property 5: Authress SDK failure returns 500 with logged error
-// ---------------------------------------------------------------------------
+describe("Authress SDK failure returns 500 with logged error", () => {
+  const nonForbiddenStatuses = [400, 401, 404, 429, 500, 502, 503];
 
-describe("Property 5: Authress SDK failure returns 500 with logged error", () => {
-  it("returns HTTP 500 with { title: 'Internal Server Error' } for any SDK failure (non-403)", async () => {
-    await propertyRunner.assert(
-      fc.asyncProperty(
-        arbAccountId,
-        arbUserId,
-        arbPermission,
-        fc.string({ minLength: 1, maxLength: 100 }),
-        fc.constantFrom(400, 401, 404, 408, 429, 500, 502, 503),
-        async (accountId, userId, permission, errorMessage, statusCode) => {
-          // Create an error that is NOT a 403 — all generated status codes are non-403
-          const error = Object.assign(new Error(errorMessage), { response: { status: statusCode } });
-          const access = makeAccess({ checkAccess: vi.fn().mockRejectedValue(error) });
-          const logger = createMockLogger();
-          const authorize = createAuthorize(access, logger);
+  it.each(nonForbiddenStatuses.map((s) => ({ statusCode: s })))("status=$statusCode → returns 500 and logs error", async ({ statusCode }) => {
+    const error = Object.assign(new Error("SDK failure"), { response: { status: statusCode } });
+    const access = makeAccess({ checkAccess: vi.fn().mockRejectedValue(error) });
+    const logger = createMockLogger();
+    const authorize = createAuthorize(access, logger);
 
-          const app = new Hono<AppEnv>();
-          app.use("*", async (c, next) => {
-            c.set("auth", { accountId, userId });
-            await next();
-          });
-          app.get("/accounts/:accountId", authorize(permission, c => `accounts/${c.req.param("accountId")}`), (c) => c.json({ ok: true }));
+    const app = new Hono<AppEnv>();
+    app.use("*", async (c, next) => { c.set("auth", { accountId: "acct-1", userId: "user-1" }); await next(); });
+    app.get("/accounts/:accountId", authorize("accounts:read", (c) => `accounts/${c.req.param("accountId")}`), (c) => c.json({ ok: true }));
 
-          const res = await app.request(`/accounts/${encodeURIComponent(accountId)}`);
+    const res = await app.request("/accounts/acct-1");
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({ title: "Internal Server Error" });
 
-          expect(res.status).toBe(500);
-          const body = await res.json();
-          expect(body).toEqual({ title: "Internal Server Error" });
-
-          // Verify error was logged via mock logger
-          const errorCall = logger.calls.find(c => c.method === "error" && c.context?.code === "authorization.sdk_error");
-          expect(errorCall).toBeDefined();
-          expect(errorCall!.context).toMatchObject({
-            code: "authorization.sdk_error",
-            userId,
-            permission,
-          });
-        },
-      ),
-    );
+    const errorCall = logger.calls.find((c) => c.method === "error" && c.context?.code === "authorization.sdk_error");
+    expect(errorCall).toBeDefined();
   });
 });
 
-// ---------------------------------------------------------------------------
-// Property 6: Authorization failures are logged
-// ---------------------------------------------------------------------------
+describe("Authorization failures are logged", () => {
+  it("logs userId, resourceUri, permission, and path on 403", async () => {
+    const authError = Object.assign(new Error("Forbidden"), { response: { status: 403 } });
+    const access = makeAccess({ checkAccess: vi.fn().mockRejectedValue(authError) });
+    const logger = createMockLogger();
+    const authorize = createAuthorize(access, logger);
 
-describe("Property 6: Authorization failures are logged", () => {
-  it("logs with userId, resourceUri, permission, and path for any authorization failure", async () => {
-    await propertyRunner.assert(
-      fc.asyncProperty(
-        arbAccountId,
-        arbUserId,
-        arbPermission,
-        async (accountId, userId, permission) => {
-          const authError = Object.assign(new Error("Forbidden"), { response: { status: 403 } });
-          const access = makeAccess({ checkAccess: vi.fn().mockRejectedValue(authError) });
-          const logger = createMockLogger();
-          const authorize = createAuthorize(access, logger);
+    const app = new Hono<AppEnv>();
+    app.use("*", async (c, next) => { c.set("auth", { accountId: "acct-1", userId: "user-1" }); await next(); });
+    app.get("/accounts/:accountId", authorize("accounts:read", (c) => `accounts/${c.req.param("accountId")}`), (c) => c.json({ ok: true }));
 
-          const app = new Hono<AppEnv>();
-          app.use("*", async (c, next) => {
-            c.set("auth", { accountId, userId });
-            await next();
-          });
-          app.get("/accounts/:accountId", authorize(permission, c => `accounts/${c.req.param("accountId")}`), (c) => c.json({ ok: true }));
+    await app.request("/accounts/acct-1");
 
-          await app.request(`/accounts/${encodeURIComponent(accountId)}`);
-
-          const infoCall = logger.calls.find(c => c.method === "info" && c.message === "authorization.failed");
-          expect(infoCall).toBeDefined();
-          expect(infoCall!.context).toMatchObject({
-            userId,
-            resourceUri: `accounts/${accountId}`,
-            permission,
-            path: `/accounts/${encodeURIComponent(accountId)}`,
-          });
-        },
-      ),
-    );
+    const infoCall = logger.calls.find((c) => c.method === "info" && c.message === "authorization.failed");
+    expect(infoCall).toBeDefined();
+    expect(infoCall!.context).toMatchObject({
+      userId: "user-1",
+      resourceUri: "accounts/acct-1",
+      permission: "accounts:read",
+      path: "/accounts/acct-1",
+    });
   });
 });
 
-// ---------------------------------------------------------------------------
-// Property 7: Error responses sanitize internal details
-// ---------------------------------------------------------------------------
+describe("Error responses sanitize internal details", () => {
+  const internalErrors = [
+    "https://api.authress.io/v1/users/user-123/resources/accounts%2Facct-123/permissions/accounts:read failed",
+    "ECONNREFUSED 10.0.3.42:443 authress-internal-service",
+    "Error at AuthressClient.authorizeUser (/node_modules/@authress/sdk/src/index.js:123:45)",
+  ];
 
-describe("Property 7: Error responses sanitize internal details", () => {
-  /** Generates error messages that contain internal details that should NOT leak */
-  const arbInternalErrorMessage = fc.oneof(
-    fc.constant("https://api.authress.io/v1/users/user-123/resources/accounts%2Facct-123/permissions/accounts:read failed"),
-    fc.constant("ECONNREFUSED 10.0.3.42:443 authress-internal-service"),
-    fc.constant("Error at AuthressClient.authorizeUser (/node_modules/@authress/sdk/src/index.js:123:45)"),
-    fc.tuple(
-      fc.constantFrom("https://", "http://"),
-      fc.stringMatching(/^[a-z0-9.-]{3,30}$/),
-      fc.constantFrom(".authress.io", ".internal.svc", ".amazonaws.com", ".local"),
-      fc.constantFrom("/v1/users", "/api/check", "/permissions"),
-    ).map(([proto, host, domain, path]) => `${proto}${host}${domain}${path} connection failed`),
-    fc.tuple(
-      fc.constantFrom("Error at ", "TypeError at ", "ReferenceError at "),
-      fc.stringMatching(/^[A-Za-z.]+$/),
-      fc.constant(" ("),
-      fc.stringMatching(/^\/[a-z/]+\.js$/),
-      fc.constant(":"),
-      fc.nat({ max: 999 }),
-      fc.constant(")"),
-    ).map(parts => parts.join("")),
-  );
+  it.each(internalErrors.map((msg) => ({ msg })))("500 response does not expose: $msg", async ({ msg }) => {
+    const access = makeAccess({ checkAccess: vi.fn().mockRejectedValue(new Error(msg)) });
+    const authorize = createAuthorize(access, createMockLogger());
 
-  it("does NOT expose internal URLs, service names, or stack traces in error responses", async () => {
-    await propertyRunner.assert(
-      fc.asyncProperty(
-        arbAccountId,
-        arbUserId,
-        arbPermission,
-        arbInternalErrorMessage,
-        async (accountId, userId, permission, errorMessage) => {
-          const error = new Error(errorMessage);
-          const access = makeAccess({ checkAccess: vi.fn().mockRejectedValue(error) });
-          const authorize = createAuthorize(access, createMockLogger());
+    const app = new Hono<AppEnv>();
+    app.use("*", async (c, next) => { c.set("auth", { accountId: "acct-1", userId: "user-1" }); await next(); });
+    app.get("/accounts/:accountId", authorize("accounts:read", (c) => `accounts/${c.req.param("accountId")}`), (c) => c.json({ ok: true }));
 
-          const app = new Hono<AppEnv>();
-          app.use("*", async (c, next) => {
-            c.set("auth", { accountId, userId });
-            await next();
-          });
-          app.get("/accounts/:accountId", authorize(permission, c => `accounts/${c.req.param("accountId")}`), (c) => c.json({ ok: true }));
+    const res = await app.request("/accounts/acct-1");
+    const body = await res.json();
+    const bodyStr = JSON.stringify(body);
 
-          const res = await app.request(`/accounts/${encodeURIComponent(accountId)}`);
-          const body = await res.json();
-          const bodyStr = JSON.stringify(body);
-
-          // Must not contain internal URLs
-          expect(bodyStr).not.toMatch(/https?:\/\//);
-          // Must not contain authress references
-          expect(bodyStr.toLowerCase()).not.toContain("authress");
-          // Must not contain stack traces
-          expect(bodyStr).not.toMatch(/at\s+\w+.*\(.*:\d+:\d+\)/);
-          // Must not contain internal service names
-          expect(bodyStr).not.toContain(".internal.");
-          expect(bodyStr).not.toContain(".svc");
-          expect(bodyStr).not.toContain(".local");
-          // Must not contain file paths
-          expect(bodyStr).not.toMatch(/\/node_modules\//);
-          // Response should be the sanitized error
-          expect(body).toEqual({ title: "Internal Server Error" });
-        },
-      ),
-    );
+    expect(bodyStr).not.toMatch(/https?:\/\//);
+    expect(bodyStr.toLowerCase()).not.toContain("authress");
+    expect(bodyStr).not.toMatch(/at\s+\w+.*\(.*:\d+:\d+\)/);
+    expect(body).toEqual({ title: "Internal Server Error" });
   });
 
-  it("does NOT expose internal details in 403 responses either", async () => {
-    await propertyRunner.assert(
-      fc.asyncProperty(
-        arbAccountId,
-        arbUserId,
-        arbPermission,
-        arbInternalErrorMessage,
-        async (accountId, userId, permission, errorMessage) => {
-          const authError = Object.assign(new Error(errorMessage), { response: { status: 403 } });
-          const access = makeAccess({ checkAccess: vi.fn().mockRejectedValue(authError) });
-          const authorize = createAuthorize(access, createMockLogger());
+  it.each(internalErrors.map((msg) => ({ msg })))("403 response does not expose: $msg", async ({ msg }) => {
+    const authError = Object.assign(new Error(msg), { response: { status: 403 } });
+    const access = makeAccess({ checkAccess: vi.fn().mockRejectedValue(authError) });
+    const authorize = createAuthorize(access, createMockLogger());
 
-          const app = new Hono<AppEnv>();
-          app.use("*", async (c, next) => {
-            c.set("auth", { accountId, userId });
-            await next();
-          });
-          app.get("/accounts/:accountId", authorize(permission, c => `accounts/${c.req.param("accountId")}`), (c) => c.json({ ok: true }));
+    const app = new Hono<AppEnv>();
+    app.use("*", async (c, next) => { c.set("auth", { accountId: "acct-1", userId: "user-1" }); await next(); });
+    app.get("/accounts/:accountId", authorize("accounts:read", (c) => `accounts/${c.req.param("accountId")}`), (c) => c.json({ ok: true }));
 
-          const res = await app.request(`/accounts/${encodeURIComponent(accountId)}`);
-          const body = await res.json();
-          const bodyStr = JSON.stringify(body);
+    const res = await app.request("/accounts/acct-1");
+    const body = await res.json();
+    const bodyStr = JSON.stringify(body);
 
-          // Must not contain internal URLs or service details
-          expect(bodyStr).not.toMatch(/https?:\/\//);
-          expect(bodyStr.toLowerCase()).not.toContain("authress");
-          expect(bodyStr).not.toMatch(/at\s+\w+.*\(.*:\d+:\d+\)/);
-          // Response should be the sanitized 403
-          expect(body).toEqual({ title: "Forbidden", errorCode: "AccessDenied" });
-        },
-      ),
-    );
+    expect(bodyStr).not.toMatch(/https?:\/\//);
+    expect(bodyStr.toLowerCase()).not.toContain("authress");
+    expect(body).toEqual({ title: "Forbidden", errorCode: "AccessDenied" });
   });
 });

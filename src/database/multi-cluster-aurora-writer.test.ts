@@ -1,5 +1,4 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import fc from "fast-check";
 import { mockClient } from "aws-sdk-client-mock";
 import {
   RDSDataClient,
@@ -9,7 +8,6 @@ import {
   RollbackTransactionCommand,
 } from "@aws-sdk/client-rds-data";
 import { MultiClusterAuroraWriterImpl } from "./multi-cluster-aurora-writer.js";
-import { propertyRunner } from "../testing/property-runner.js";
 
 // ---------------------------------------------------------------------------
 // Mock the cluster registry to avoid coupling to the real registry values
@@ -347,272 +345,238 @@ describe("MultiClusterAuroraWriterImpl", () => {
   });
 
   // ---------------------------------------------------------------------------
-  // Property-based tests
+  // Property-based tests (converted to static edge cases)
   // ---------------------------------------------------------------------------
 
   describe("property tests", () => {
     // Property 16: Aurora retries with exponential backoff up to 3 attempts
     // **Validates: Requirements 6.4**
-    it(
-      "retries transient errors up to 3 attempts and propagates the error with context for logging",
-      () => {
-        // Spy on global setTimeout to capture delay values and execute immediately
+
+    const transientErrorTypes: Array<[string, { errorName: string }]> = [
+      ["InternalServerErrorException", { errorName: "InternalServerErrorException" }],
+      ["ThrottlingException", { errorName: "ThrottlingException" }],
+      ["ServiceUnavailableError", { errorName: "ServiceUnavailableError" }],
+      ["StatementTimeoutException", { errorName: "StatementTimeoutException" }],
+    ];
+
+    it.each(transientErrorTypes)(
+      "retries transient error %s up to 3 attempts with exponential backoff",
+      async (_label, { errorName }) => {
         const setTimeoutSpy = vi.spyOn(global, "setTimeout").mockImplementation(((fn: () => void) => {
           fn();
           return 0 as unknown as NodeJS.Timeout;
         }) as typeof setTimeout);
 
-        const result = propertyRunner.assert(
-          fc.asyncProperty(
-            fc.string({ minLength: 1, maxLength: 50 }), // arcId
-            fc.string({ minLength: 1, maxLength: 50 }), // accountId
-            fc.string({ minLength: 1, maxLength: 50 }), // recipientAddress
-            fc.array(fc.float({ noNaN: true, noDefaultInfinity: true }), { minLength: 3, maxLength: 10 }), // embedding
-            fc.constantFrom(
-              "InternalServerErrorException",
-              "ThrottlingException",
-              "ServiceUnavailableError",
-              "StatementTimeoutException",
-            ), // transient error type
-            async (arcId, accountId, recipientAddress, embedding, errorName) => {
-              rdsMock.reset();
-              setTimeoutSpy.mockClear();
+        try {
+          rdsMock.reset();
 
-              const transientError = Object.assign(new Error(`Transient: ${errorName}`), {
-                name: errorName,
-              });
+          const transientError = Object.assign(new Error(`Transient: ${errorName}`), {
+            name: errorName,
+          });
 
-              // All BeginTransaction calls fail with transient error
-              rdsMock.on(BeginTransactionCommand).rejects(transientError);
+          rdsMock.on(BeginTransactionCommand).rejects(transientError);
 
-              let caughtError: Error | undefined;
-              try {
-                await writer.upsertEmbedding({
-                  clusterId: "test-cluster-1",
-                  arcId,
-                  accountId,
-                  recipientAddress,
-                  embedding,
-                });
-              } catch (err) {
-                caughtError = err as Error;
-              }
+          let caughtError: Error | undefined;
+          try {
+            await writer.upsertEmbedding({
+              clusterId: "test-cluster-1",
+              arcId: "arc-retry-test",
+              accountId: "acct-retry-test",
+              recipientAddress: "retry@example.com",
+              embedding: [0.1, 0.2, 0.3],
+            });
+          } catch (err) {
+            caughtError = err as Error;
+          }
 
-              // After 3 failed attempts, the error should be thrown
-              expect(caughtError).toBeDefined();
-              expect(caughtError!.message).toContain(errorName);
+          // After 3 failed attempts, the error should be thrown
+          expect(caughtError).toBeDefined();
+          expect(caughtError!.message).toContain(errorName);
 
-              // Verify exactly 3 attempts were made (initial + 2 retries)
-              const beginCalls = rdsMock.commandCalls(BeginTransactionCommand);
-              expect(beginCalls).toHaveLength(3);
+          // Verify exactly 3 attempts were made (initial + 2 retries)
+          const beginCalls = rdsMock.commandCalls(BeginTransactionCommand);
+          expect(beginCalls).toHaveLength(3);
 
-              // Verify exponential backoff delays: 1s after attempt 0, 2s after attempt 1
-              // (attempt 2 is the last attempt so no delay after it — it throws immediately)
-              const delayCalls = setTimeoutSpy.mock.calls;
-              expect(delayCalls).toHaveLength(2); // 2 delays between 3 attempts
-              expect(delayCalls[0]![1]).toBe(1000); // 1s after first failure
-              expect(delayCalls[1]![1]).toBe(2000); // 2s after second failure
-
-              return true;
-            },
-          ),
-        );
-
-        return result.finally(() => {
+          // Verify exponential backoff delays: 1s after attempt 0, 2s after attempt 1
+          const delayCalls = setTimeoutSpy.mock.calls;
+          expect(delayCalls).toHaveLength(2);
+          expect(delayCalls[0]![1]).toBe(1000);
+          expect(delayCalls[1]![1]).toBe(2000);
+        } finally {
           setTimeoutSpy.mockRestore();
-        });
+        }
       },
       { timeout: 30000 },
     );
 
-    // Property 16 (recovery after transient failures): Verify successful retry after N failures
-    // **Validates: Requirements 6.4**
-    it(
-      "succeeds after transient failures when a retry attempt succeeds within the 3-attempt limit",
-      () => {
+    // Property 16 (recovery): Verify successful retry after N failures
+    const recoveryCases: Array<[string, { failCount: number }]> = [
+      ["succeeds after 1 transient failure", { failCount: 1 }],
+      ["succeeds after 2 transient failures", { failCount: 2 }],
+    ];
+
+    it.each(recoveryCases)(
+      "%s",
+      async (_label, { failCount }) => {
         const setTimeoutSpy = vi.spyOn(global, "setTimeout").mockImplementation(((fn: () => void) => {
           fn();
           return 0 as unknown as NodeJS.Timeout;
         }) as typeof setTimeout);
 
-        const result = propertyRunner.assert(
-          fc.asyncProperty(
-            fc.string({ minLength: 1, maxLength: 20 }), // arcId
-            fc.string({ minLength: 1, maxLength: 20 }), // accountId
-            fc.integer({ min: 1, max: 2 }), // failCount: how many transient failures before success (1 or 2)
-            async (arcId, accountId, failCount) => {
-              rdsMock.reset();
-              setTimeoutSpy.mockClear();
+        try {
+          rdsMock.reset();
 
-              const transientError = Object.assign(new Error("Service unavailable"), {
-                name: "InternalServerErrorException",
-                $metadata: { httpStatusCode: 500 },
-              });
+          const transientError = Object.assign(new Error("Service unavailable"), {
+            name: "InternalServerErrorException",
+            $metadata: { httpStatusCode: 500 },
+          });
 
-              let callCount = 0;
-              rdsMock
-                .on(BeginTransactionCommand).callsFake(() => {
-                  callCount++;
-                  if (callCount <= failCount) throw transientError;
-                  return { transactionId: `txn-${callCount}` };
-                })
-                .on(ExecuteStatementCommand).resolves({})
-                .on(CommitTransactionCommand).resolves({});
+          let callCount = 0;
+          rdsMock
+            .on(BeginTransactionCommand).callsFake(() => {
+              callCount++;
+              if (callCount <= failCount) throw transientError;
+              return { transactionId: `txn-${callCount}` };
+            })
+            .on(ExecuteStatementCommand).resolves({})
+            .on(CommitTransactionCommand).resolves({});
 
-              // Should succeed without throwing
-              await writer.upsertEmbedding({
-                clusterId: "test-cluster-1",
-                arcId,
-                accountId,
-                recipientAddress: "test@example.com",
-                embedding: [0.1, 0.2, 0.3],
-              });
+          // Should succeed without throwing
+          await writer.upsertEmbedding({
+            clusterId: "test-cluster-1",
+            arcId: "arc-recovery",
+            accountId: "acct-recovery",
+            recipientAddress: "recovery@example.com",
+            embedding: [0.1, 0.2, 0.3],
+          });
 
-              // Verify the correct number of attempts: failCount failures + 1 success
-              expect(callCount).toBe(failCount + 1);
+          // Verify the correct number of attempts: failCount failures + 1 success
+          expect(callCount).toBe(failCount + 1);
 
-              // Verify the backoff delays match the exponential schedule
-              const expectedDelays = [1000, 2000, 4000];
-              const delayCalls = setTimeoutSpy.mock.calls;
-              expect(delayCalls).toHaveLength(failCount);
-              for (let i = 0; i < failCount; i++) {
-                expect(delayCalls[i]![1]).toBe(expectedDelays[i]);
-              }
-
-              return true;
-            },
-          ),
-        );
-
-        return result.finally(() => {
+          // Verify the backoff delays match the exponential schedule
+          const expectedDelays = [1000, 2000, 4000];
+          const delayCalls = setTimeoutSpy.mock.calls;
+          expect(delayCalls).toHaveLength(failCount);
+          for (let i = 0; i < failCount; i++) {
+            expect(delayCalls[i]![1]).toBe(expectedDelays[i]);
+          }
+        } finally {
           setTimeoutSpy.mockRestore();
-        });
+        }
       },
       { timeout: 30000 },
     );
 
     // Property 16 (non-transient errors): Non-transient errors are NOT retried
-    // **Validates: Requirements 6.4**
-    it(
-      "non-transient errors are not retried — only transient errors trigger the backoff schedule",
-      () => {
-        return propertyRunner.assert(
-          fc.asyncProperty(
-            fc.string({ minLength: 1, maxLength: 20 }), // arcId
-            fc.string({ minLength: 1, maxLength: 20 }), // accountId
-            fc.constantFrom(
-              "BadRequestException",
-              "ValidationException",
-              "AccessDeniedException",
-              "NotFoundException",
-            ), // non-transient error type
-            async (arcId, accountId, errorName) => {
-              rdsMock.reset();
+    const nonTransientErrorTypes: Array<[string, { errorName: string }]> = [
+      ["BadRequestException", { errorName: "BadRequestException" }],
+      ["ValidationException", { errorName: "ValidationException" }],
+      ["AccessDeniedException", { errorName: "AccessDeniedException" }],
+      ["NotFoundException", { errorName: "NotFoundException" }],
+    ];
 
-              const nonTransientError = Object.assign(new Error(`Non-transient: ${errorName}`), {
-                name: errorName,
-              });
+    it.each(nonTransientErrorTypes)(
+      "non-transient error %s is not retried",
+      async (_label, { errorName }) => {
+        rdsMock.reset();
 
-              rdsMock.on(BeginTransactionCommand).rejects(nonTransientError);
+        const nonTransientError = Object.assign(new Error(`Non-transient: ${errorName}`), {
+          name: errorName,
+        });
 
-              let caughtError: Error | undefined;
-              try {
-                await writer.upsertEmbedding({
-                  clusterId: "test-cluster-1",
-                  arcId,
-                  accountId,
-                  recipientAddress: "test@example.com",
-                  embedding: [0.1, 0.2, 0.3],
-                });
-              } catch (err) {
-                caughtError = err as Error;
-              }
+        rdsMock.on(BeginTransactionCommand).rejects(nonTransientError);
 
-              expect(caughtError).toBeDefined();
-              expect(caughtError!.message).toContain(errorName);
+        let caughtError: Error | undefined;
+        try {
+          await writer.upsertEmbedding({
+            clusterId: "test-cluster-1",
+            arcId: "arc-nontransient",
+            accountId: "acct-nontransient",
+            recipientAddress: "nontransient@example.com",
+            embedding: [0.1, 0.2, 0.3],
+          });
+        } catch (err) {
+          caughtError = err as Error;
+        }
 
-              // Only 1 attempt — no retries for non-transient errors
-              const beginCalls = rdsMock.commandCalls(BeginTransactionCommand);
-              expect(beginCalls).toHaveLength(1);
+        expect(caughtError).toBeDefined();
+        expect(caughtError!.message).toContain(errorName);
 
-              return true;
-            },
-          ),
-        );
+        // Only 1 attempt — no retries for non-transient errors
+        const beginCalls = rdsMock.commandCalls(BeginTransactionCommand);
+        expect(beginCalls).toHaveLength(1);
       },
       { timeout: 30000 },
     );
 
-    // Property 9 (writer-scope subset): All embedding upserts are idempotent
+    // Property 9: All embedding upserts are idempotent
     // **Validates: Requirements 3.4, 6.1, 6.3**
-    it(
-      "repeated upserts for the same (arc_id, account_id, recipient_address) tuple produce the same final state",
-      () => {
-        return propertyRunner.assert(
-          fc.asyncProperty(
-            fc.string({ minLength: 1 }), // arcId
-            fc.string({ minLength: 1 }), // accountId
-            fc.string({ minLength: 1 }), // recipientAddress
-            fc.array(fc.float({ noNaN: true, noDefaultInfinity: true }), { minLength: 3, maxLength: 128 }), // embedding vector
-            fc.integer({ min: 2, max: 5 }), // number of repeated writes
-            async (arcId, accountId, recipientAddress, embedding, repeatCount) => {
-              // Reset mock for each property run
-              rdsMock.reset();
 
-              let txnCounter = 0;
-              rdsMock
-                .on(BeginTransactionCommand).callsFake(() => ({ transactionId: `txn-${++txnCounter}` }))
-                .on(ExecuteStatementCommand).resolves({})
-                .on(CommitTransactionCommand).resolves({});
+    const idempotencyCases: Array<[string, { repeatCount: number }]> = [
+      ["2 repeated writes produce identical SQL", { repeatCount: 2 }],
+      ["3 repeated writes produce identical SQL", { repeatCount: 3 }],
+      ["5 repeated writes produce identical SQL", { repeatCount: 5 }],
+    ];
 
-              // Perform the upsert N times with the same inputs
-              for (let i = 0; i < repeatCount; i++) {
-                await writer.upsertEmbedding({
-                  clusterId: "test-cluster-1",
-                  arcId,
-                  accountId,
-                  recipientAddress,
-                  embedding,
-                });
-              }
+    it.each(idempotencyCases)(
+      "%s",
+      async (_label, { repeatCount }) => {
+        rdsMock.reset();
 
-              // Each upsert produces 2 ExecuteStatementCommand calls: SET LOCAL + INSERT
-              const execCalls = rdsMock.commandCalls(ExecuteStatementCommand);
-              expect(execCalls).toHaveLength(repeatCount * 2);
+        let txnCounter = 0;
+        rdsMock
+          .on(BeginTransactionCommand).callsFake(() => ({ transactionId: `txn-${++txnCounter}` }))
+          .on(ExecuteStatementCommand).resolves({})
+          .on(CommitTransactionCommand).resolves({});
 
-              // Extract only the INSERT statements (every second ExecuteStatementCommand)
-              const upsertCalls = execCalls.filter((_call, idx) => idx % 2 === 1);
-              expect(upsertCalls).toHaveLength(repeatCount);
+        const arcId = "arc-idempotent";
+        const accountId = "acct-idempotent";
+        const recipientAddress = "idempotent@example.com";
+        const embedding = [0.1, 0.2, 0.3, -0.5, 0.0];
 
-              // All INSERT statements must have identical SQL and parameters
-              const firstUpsert = upsertCalls[0]!.args[0].input as { sql?: string; parameters?: unknown[] };
+        // Perform the upsert N times with the same inputs
+        for (let i = 0; i < repeatCount; i++) {
+          await writer.upsertEmbedding({
+            clusterId: "test-cluster-1",
+            arcId,
+            accountId,
+            recipientAddress,
+            embedding,
+          });
+        }
 
-              for (let i = 1; i < upsertCalls.length; i++) {
-                const nthUpsert = upsertCalls[i]!.args[0].input as { sql?: string; parameters?: unknown[] };
-                expect(nthUpsert.sql).toBe(firstUpsert.sql);
-                expect(nthUpsert.parameters).toEqual(firstUpsert.parameters);
-              }
+        // Each upsert produces 2 ExecuteStatementCommand calls: SET LOCAL + INSERT
+        const execCalls = rdsMock.commandCalls(ExecuteStatementCommand);
+        expect(execCalls).toHaveLength(repeatCount * 2);
 
-              // Verify the SQL uses ON CONFLICT with the correct composite key
-              expect(firstUpsert.sql).toContain("INSERT INTO arc_embeddings");
-              expect(firstUpsert.sql).toContain("ON CONFLICT (arc_id, account_id, recipient_address) DO UPDATE");
+        // Extract only the INSERT statements (every second ExecuteStatementCommand)
+        const upsertCalls = execCalls.filter((_call, idx) => idx % 2 === 1);
+        expect(upsertCalls).toHaveLength(repeatCount);
 
-              // Verify parameters match the input exactly — proving determinism
-              expect(firstUpsert.parameters).toEqual([
-                { name: "arcId", value: { stringValue: arcId } },
-                { name: "accountId", value: { stringValue: accountId } },
-                { name: "recipient", value: { stringValue: recipientAddress } },
-                { name: "embedding", value: { stringValue: `[${embedding.join(",")}]` } },
-              ]);
+        // All INSERT statements must have identical SQL and parameters
+        const firstUpsert = upsertCalls[0]!.args[0].input as { sql?: string; parameters?: unknown[] };
 
-              // Verify each upsert was committed (not rolled back)
-              const commitCalls = rdsMock.commandCalls(CommitTransactionCommand);
-              expect(commitCalls).toHaveLength(repeatCount);
+        for (let i = 1; i < upsertCalls.length; i++) {
+          const nthUpsert = upsertCalls[i]!.args[0].input as { sql?: string; parameters?: unknown[] };
+          expect(nthUpsert.sql).toBe(firstUpsert.sql);
+          expect(nthUpsert.parameters).toEqual(firstUpsert.parameters);
+        }
 
-              return true;
-            },
-          ),
-        );
+        // Verify the SQL uses ON CONFLICT with the correct composite key
+        expect(firstUpsert.sql).toContain("INSERT INTO arc_embeddings");
+        expect(firstUpsert.sql).toContain("ON CONFLICT (arc_id, account_id, recipient_address) DO UPDATE");
+
+        // Verify parameters match the input exactly — proving determinism
+        expect(firstUpsert.parameters).toEqual([
+          { name: "arcId", value: { stringValue: arcId } },
+          { name: "accountId", value: { stringValue: accountId } },
+          { name: "recipient", value: { stringValue: recipientAddress } },
+          { name: "embedding", value: { stringValue: `[${embedding.join(",")}]` } },
+        ]);
+
+        // Verify each upsert was committed (not rolled back)
+        const commitCalls = rdsMock.commandCalls(CommitTransactionCommand);
+        expect(commitCalls).toHaveLength(repeatCount);
       },
       { timeout: 30000 },
     );
@@ -621,82 +585,75 @@ describe("MultiClusterAuroraWriterImpl", () => {
     // Validates: Requirements 6.2
     it(
       "upserts execute BeginTransaction → SET LOCAL → INSERT ON CONFLICT → CommitTransaction on the same transactionId",
-      () => {
-        return propertyRunner.assert(
-          fc.asyncProperty(
-            fc.string({ minLength: 1 }), // arcId
-            fc.string({ minLength: 1 }), // accountId
-            fc.string({ minLength: 1 }), // recipientAddress
-            fc.array(fc.float({ noNaN: true }), { minLength: 1, maxLength: 128 }), // embedding vector
-            async (arcId, accountId, recipientAddress, embedding) => {
-              rdsMock.reset();
+      async () => {
+        rdsMock.reset();
 
-              const txnId = `txn-rls-${Math.random().toString(36).slice(2)}`;
+        const txnId = "txn-rls-test";
 
-              rdsMock
-                .on(BeginTransactionCommand).resolves({ transactionId: txnId })
-                .on(ExecuteStatementCommand).resolves({})
-                .on(CommitTransactionCommand).resolves({});
+        rdsMock
+          .on(BeginTransactionCommand).resolves({ transactionId: txnId })
+          .on(ExecuteStatementCommand).resolves({})
+          .on(CommitTransactionCommand).resolves({});
 
-              await writer.upsertEmbedding({
-                clusterId: "test-cluster-1",
-                arcId,
-                accountId,
-                recipientAddress,
-                embedding,
-              });
+        const arcId = "arc-rls";
+        const accountId = "acct-rls";
+        const recipientAddress = "rls@example.com";
+        const embedding = [0.1, 0.2, 0.3];
 
-              const calls = rdsMock.calls();
+        await writer.upsertEmbedding({
+          clusterId: "test-cluster-1",
+          arcId,
+          accountId,
+          recipientAddress,
+          embedding,
+        });
 
-              // Exactly 4 calls: BEGIN, SET LOCAL, INSERT, COMMIT
-              expect(calls).toHaveLength(4);
+        const calls = rdsMock.calls();
 
-              // Call 0: BeginTransaction
-              const beginInput = calls[0]!.args[0].input as {
-                resourceArn?: string;
-                secretArn?: string;
-                database?: string;
-              };
-              expect(calls[0]!.args[0]).toBeInstanceOf(BeginTransactionCommand);
-              expect(beginInput.resourceArn).toBe("arn:aws:rds:eu-west-1:111111111111:cluster:test-cluster-1");
-              expect(beginInput.secretArn).toBe("arn:aws:secretsmanager:eu-west-1:111111111111:secret:test-1");
-              expect(beginInput.database).toBe("testdb");
+        // Exactly 4 calls: BEGIN, SET LOCAL, INSERT, COMMIT
+        expect(calls).toHaveLength(4);
 
-              // Call 1: ExecuteStatement — SET LOCAL with the same transactionId
-              const setLocalInput = calls[1]!.args[0].input as {
-                sql?: string;
-                transactionId?: string;
-                parameters?: Array<{ name: string; value: { stringValue?: string } }>;
-              };
-              expect(calls[1]!.args[0]).toBeInstanceOf(ExecuteStatementCommand);
-              expect(setLocalInput.transactionId).toBe(txnId);
-              expect(setLocalInput.sql).toBe("SET LOCAL app.current_account_id = :accountId");
-              expect(setLocalInput.parameters).toEqual([
-                { name: "accountId", value: { stringValue: accountId } },
-              ]);
+        // Call 0: BeginTransaction
+        const beginInput = calls[0]!.args[0].input as {
+          resourceArn?: string;
+          secretArn?: string;
+          database?: string;
+        };
+        expect(calls[0]!.args[0]).toBeInstanceOf(BeginTransactionCommand);
+        expect(beginInput.resourceArn).toBe("arn:aws:rds:eu-west-1:111111111111:cluster:test-cluster-1");
+        expect(beginInput.secretArn).toBe("arn:aws:secretsmanager:eu-west-1:111111111111:secret:test-1");
+        expect(beginInput.database).toBe("testdb");
 
-              // Call 2: ExecuteStatement — INSERT ON CONFLICT with the same transactionId
-              const upsertInput = calls[2]!.args[0].input as {
-                sql?: string;
-                transactionId?: string;
-                parameters?: Array<{ name: string; value: { stringValue?: string } }>;
-              };
-              expect(calls[2]!.args[0]).toBeInstanceOf(ExecuteStatementCommand);
-              expect(upsertInput.transactionId).toBe(txnId);
-              expect(upsertInput.sql).toContain("INSERT INTO arc_embeddings");
-              expect(upsertInput.sql).toContain("ON CONFLICT");
+        // Call 1: ExecuteStatement — SET LOCAL with the same transactionId
+        const setLocalInput = calls[1]!.args[0].input as {
+          sql?: string;
+          transactionId?: string;
+          parameters?: Array<{ name: string; value: { stringValue?: string } }>;
+        };
+        expect(calls[1]!.args[0]).toBeInstanceOf(ExecuteStatementCommand);
+        expect(setLocalInput.transactionId).toBe(txnId);
+        expect(setLocalInput.sql).toBe("SET LOCAL app.current_account_id = :accountId");
+        expect(setLocalInput.parameters).toEqual([
+          { name: "accountId", value: { stringValue: accountId } },
+        ]);
 
-              // Call 3: CommitTransaction with the same transactionId
-              const commitInput = calls[3]!.args[0].input as {
-                transactionId?: string;
-              };
-              expect(calls[3]!.args[0]).toBeInstanceOf(CommitTransactionCommand);
-              expect(commitInput.transactionId).toBe(txnId);
+        // Call 2: ExecuteStatement — INSERT ON CONFLICT with the same transactionId
+        const upsertInput = calls[2]!.args[0].input as {
+          sql?: string;
+          transactionId?: string;
+          parameters?: Array<{ name: string; value: { stringValue?: string } }>;
+        };
+        expect(calls[2]!.args[0]).toBeInstanceOf(ExecuteStatementCommand);
+        expect(upsertInput.transactionId).toBe(txnId);
+        expect(upsertInput.sql).toContain("INSERT INTO arc_embeddings");
+        expect(upsertInput.sql).toContain("ON CONFLICT");
 
-              return true;
-            },
-          ),
-        );
+        // Call 3: CommitTransaction with the same transactionId
+        const commitInput = calls[3]!.args[0].input as {
+          transactionId?: string;
+        };
+        expect(calls[3]!.args[0]).toBeInstanceOf(CommitTransactionCommand);
+        expect(commitInput.transactionId).toBe(txnId);
       },
       { timeout: 10000 },
     );

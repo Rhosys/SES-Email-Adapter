@@ -1,8 +1,6 @@
 import { describe, it, expect } from "vitest";
-import fc from "fast-check";
 import fs from "node:fs";
 import path from "node:path";
-import { propertyRunner } from "./testing/property-runner.js";
 
 // ---------------------------------------------------------------------------
 // Static analysis helpers
@@ -86,89 +84,54 @@ function collectConsoleCheckFiles(dir: string): string[] {
 const consoleCheckFiles = collectConsoleCheckFiles(SRC_DIR);
 
 // ---------------------------------------------------------------------------
-// Property 3: No `.catch()` in codebase (static analysis property)
-// The codebase contains zero occurrences of `.catch(` outside of test files
-// and Hono middleware.
-// **Validates: Requirements 5.4**
+// No .catch() in codebase
 // ---------------------------------------------------------------------------
 
-describe("Property 3: No .catch() in codebase", () => {
-  it("zero occurrences of .catch( in source files", async () => {
-    await propertyRunner.assert(
-      fc.asyncProperty(fc.constant(null), async () => {
-        const violations = findPatternViolations(sourceFiles, /\.catch\(/);
-        expect(violations).toEqual([]);
-      }),
-    );
+describe("No .catch() in codebase", () => {
+  it("zero occurrences of .catch( in source files", () => {
+    const violations = findPatternViolations(sourceFiles, /\.catch\(/);
+    expect(violations).toEqual([]);
   });
 });
 
 // ---------------------------------------------------------------------------
-// Property 4: No .andThen() / .mapErr() in codebase, and no Result .map()
-// The codebase contains zero occurrences of `.andThen(`, `.mapErr(` on
-// Result/ResultAsync values. For `.map(`, only flag it if it appears to be
-// on a Result/ResultAsync value (not Array.map).
-// **Validates: Requirements 9.1, 9.2, 9.3**
+// No .andThen() / .mapErr() / Result .map() in codebase
 // ---------------------------------------------------------------------------
 
-describe("Property 4: No .andThen() / .mapErr() in codebase", () => {
-  it("zero occurrences of .andThen( in source files", async () => {
-    await propertyRunner.assert(
-      fc.asyncProperty(fc.constant(null), async () => {
-        const violations = findPatternViolations(sourceFiles, /\.andThen\(/);
-        expect(violations).toEqual([]);
-      }),
-    );
+describe("No .andThen() / .mapErr() in codebase", () => {
+  it("zero occurrences of .andThen( in source files", () => {
+    const violations = findPatternViolations(sourceFiles, /\.andThen\(/);
+    expect(violations).toEqual([]);
   });
 
-  it("zero occurrences of .mapErr( in source files", async () => {
-    await propertyRunner.assert(
-      fc.asyncProperty(fc.constant(null), async () => {
-        const violations = findPatternViolations(sourceFiles, /\.mapErr\(/);
-        expect(violations).toEqual([]);
-      }),
-    );
+  it("zero occurrences of .mapErr( in source files", () => {
+    const violations = findPatternViolations(sourceFiles, /\.mapErr\(/);
+    expect(violations).toEqual([]);
   });
 
-  it("zero occurrences of Result .map( in source files (excluding Array.map)", async () => {
-    // Flag .map( only when preceded by a Result-like variable pattern:
-    // e.g. `result.map(`, `xResult.map(`, or chained after ResultAsync methods
-    // We look for `Result` or `result` identifiers followed by .map(
+  it("zero occurrences of Result .map( in source files (excluding Array.map)", () => {
     const resultMapPattern = /[Rr]esult\w*\.map\(/;
-
-    await propertyRunner.assert(
-      fc.asyncProperty(fc.constant(null), async () => {
-        const violations = findPatternViolations(sourceFiles, resultMapPattern);
-        expect(violations).toEqual([]);
-      }),
-    );
+    const violations = findPatternViolations(sourceFiles, resultMapPattern);
+    expect(violations).toEqual([]);
   });
 });
 
 // ---------------------------------------------------------------------------
-// No console.log/error/warn in source files (excluding logger.ts and tests)
-// After the structured logging migration, all logging must go through the
-// RequestLogger class. Direct console calls are forbidden in production code.
-// **Validates: Requirements 8.1, 8.2**
+// No direct console calls in source files
 // ---------------------------------------------------------------------------
 
 describe("No direct console calls in source files", () => {
-  const consolePattern = /\bconsole\.(log|error|warn)\b/;
+  it("zero occurrences of console.log|error|warn outside logger.ts and test files", () => {
+    const consolePattern = /\bconsole\.(log|error|warn)\b/;
+    const violations = findPatternViolations(consoleCheckFiles, consolePattern);
 
-  it("zero occurrences of console.log|error|warn outside logger.ts and test files", async () => {
-    await propertyRunner.assert(
-      fc.asyncProperty(fc.constant(null), async () => {
-        const violations = findPatternViolations(consoleCheckFiles, consolePattern);
-
-        if (violations.length > 0) {
-          const details = violations
-            .map((v) => `  ${v.file}:${v.line} → ${v.content}`)
-            .join("\n");
-          expect.fail(
-            `Found ${violations.length} direct console call(s):\n${details}`,
-          );
-        }
-      }),
-    );
+    if (violations.length > 0) {
+      const details = violations
+        .map((v) => `  ${v.file}:${v.line} → ${v.content}`)
+        .join("\n");
+      expect.fail(
+        `Found ${violations.length} direct console call(s):\n${details}`,
+      );
+    }
   });
 });

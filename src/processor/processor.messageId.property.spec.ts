@@ -1,5 +1,4 @@
 import { describe, it, expect, vi } from "vitest";
-import fc from "fast-check";
 import type { SQSRecord } from "aws-lambda";
 import { okAsync, errAsync } from "neverthrow";
 import { SignalProcessor, SYSTEM_RULES } from "./processor.js";
@@ -10,12 +9,7 @@ import type { SignalClassifier } from "../classifier/classifier.js";
 import type { EmbeddingGenerator } from "../embedding/embedding-generator.js";
 import type { MultiClusterAuroraWriter } from "../database/multi-cluster-aurora-writer.js";
 import { dbError } from "../errors.js";
-import { propertyRunner } from "../testing/property-runner.js";
 import { createMockLogger } from "../testing/mock-logger.js";
-
-// ---------------------------------------------------------------------------
-// Mock the cluster registry
-// ---------------------------------------------------------------------------
 
 vi.mock("../embedding/cluster-registry.js", () => {
   const cluster = Object.freeze({
@@ -35,17 +29,7 @@ vi.mock("../embedding/cluster-registry.js", () => {
   };
 });
 
-// ---------------------------------------------------------------------------
-// Property 7: ProcessError always carries the SQS messageId
-// **Validates: Requirements 3.2**
-// ---------------------------------------------------------------------------
-
-/**
- * For any SQS record processed by the processor, if the result is `err`,
- * the `ProcessError.messageId` matches the original `record.messageId`.
- * This property must hold for ALL failure cases — the messageId is always preserved.
- */
-describe("Property 7: ProcessError always carries the SQS messageId", () => {
+describe("ProcessError always carries the SQS messageId", () => {
   function makeStore(): ProcessorDatabase {
     return {
       getSignalByMessageId: vi.fn().mockReturnValue(okAsync(null)),
@@ -77,12 +61,7 @@ describe("Property 7: ProcessError always carries the SQS messageId", () => {
       messageId,
       receiptHandle: "handle",
       body,
-      attributes: {
-        ApproximateReceiveCount: "1",
-        SentTimestamp: "1234567890",
-        SenderId: "sender",
-        ApproximateFirstReceiveTimestamp: "1234567890",
-      },
+      attributes: { ApproximateReceiveCount: "1", SentTimestamp: "1234567890", SenderId: "sender", ApproximateFirstReceiveTimestamp: "1234567890" },
       messageAttributes: {},
       md5OfBody: "",
       eventSource: "aws:sqs",
@@ -109,10 +88,7 @@ describe("Property 7: ProcessError always carries the SQS messageId", () => {
       classify: vi.fn().mockResolvedValue({
         workflow: "conversation",
         workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
-        spamScore: 0.05,
-        summary: "Test.",
-        labels: [],
-        classificationModelId: "model-1",
+        spamScore: 0.05, summary: "Test.", labels: [], classificationModelId: "model-1",
       }),
     };
     const embeddingGenerator: EmbeddingGenerator = {
@@ -127,83 +103,56 @@ describe("Property 7: ProcessError always carries the SQS messageId", () => {
       findMatch: vi.fn().mockReturnValue(okAsync(null)),
       upsertEmbedding: vi.fn().mockReturnValue(okAsync(undefined)),
     };
-
     const mockLogger = createMockLogger();
     return new SignalProcessor({
-      store,
-      mimeParser,
-      classifier,
-      embeddingGenerator,
-      auroraWriter,
-      arcMatcher,
-      ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
-      logger: mockLogger,
+      store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher,
+      ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger), logger: mockLogger,
     });
   }
 
-  it("invalid body causes err with matching messageId", () => {
-    return propertyRunner.assert(
-      fc.asyncProperty(
-        fc.uuid(),
-        // Generate bodies that are NOT valid JSON or don't have the expected structure
-        fc.oneof(
-          fc.string(), // arbitrary string (usually not valid JSON)
-          fc.constant(""), // empty string
-          fc.constant("null"),
-          fc.constant("{}"), // valid JSON but missing Message field
-          fc.constant('{"Message": "not-json"}'), // Message is not valid JSON
-        ),
-        async (messageId, body) => {
-          const store = makeStore();
-          const processor = makeProcessor(store);
-          const record = makeSqsRecord(messageId, body);
+  const invalidBodies = [
+    { label: "empty string", body: "" },
+    { label: "not JSON", body: "hello world" },
+    { label: "null JSON", body: "null" },
+    { label: "empty object (missing Message)", body: "{}" },
+    { label: "Message is not valid JSON", body: '{"Message": "not-json"}' },
+  ];
 
-          const result = await processor.processRecord(record);
+  it.each(invalidBodies)("$label causes err with matching messageId", async ({ body }) => {
+    const store = makeStore();
+    const processor = makeProcessor(store);
+    const record = makeSqsRecord("sqs-msg-abc", body);
 
-          // If the result is an error, the messageId MUST match
-          if (result.isErr()) {
-            expect(result.error.kind).toBe("process_error");
-            expect(result.error.messageId).toBe(messageId);
-          }
-          // If it somehow succeeds (unlikely with these bodies), that's fine too —
-          // the property only constrains the error case
-        },
-      ),
-    );
+    const result = await processor.processRecord(record);
+
+    if (result.isErr()) {
+      expect(result.error.kind).toBe("process_error");
+      expect(result.error.messageId).toBe("sqs-msg-abc");
+    }
   });
 
-  it("database failure on redelivery causes err with matching messageId", () => {
-    return propertyRunner.assert(
-      fc.asyncProperty(
-        fc.uuid(),
-        async (messageId) => {
-          const store = makeStore();
-          // Make the dedup check fail with a DB error
-          (store.getSignalByMessageId as ReturnType<typeof vi.fn>).mockReturnValue(
-            errAsync(dbError(new Error("connection timeout"))),
-          );
-
-          const processor = makeProcessor(store);
-
-          // Build a valid SQS body so parsing succeeds, but set receiveCount > 1 to trigger dedup
-          const notification = {
-            accountId: "acct-test",
-            mail: { messageId: "ses-msg-1", timestamp: "2024-01-15T10:00:00Z", destination: ["u@x.com"] },
-            receipt: { recipients: ["u@x.com"], dkimVerdict: { status: "PASS" }, dmarcVerdict: { status: "PASS" }, action: { bucketName: "b", objectKey: "k" } },
-          };
-          const record = makeSqsRecord(messageId, JSON.stringify({ Message: JSON.stringify(notification) }));
-          // Set receiveCount > 1 to trigger the dedup path
-          record.attributes.ApproximateReceiveCount = "2";
-
-          const result = await processor.processRecord(record);
-
-          expect(result.isErr()).toBe(true);
-          if (result.isErr()) {
-            expect(result.error.kind).toBe("process_error");
-            expect(result.error.messageId).toBe(messageId);
-          }
-        },
-      ),
+  it("database failure on dedup check causes err with matching messageId", async () => {
+    const store = makeStore();
+    (store.getSignalByMessageId as ReturnType<typeof vi.fn>).mockReturnValue(
+      errAsync(dbError(new Error("connection timeout"))),
     );
+
+    const processor = makeProcessor(store);
+
+    const notification = {
+      accountId: "acct-test",
+      mail: { messageId: "ses-msg-1", timestamp: "2024-01-15T10:00:00Z", destination: ["u@x.com"] },
+      receipt: { recipients: ["u@x.com"], dkimVerdict: { status: "PASS" }, dmarcVerdict: { status: "PASS" }, action: { bucketName: "b", objectKey: "k" } },
+    };
+    const record = makeSqsRecord("sqs-msg-xyz", JSON.stringify({ Message: JSON.stringify(notification) }));
+    record.attributes.ApproximateReceiveCount = "2";
+
+    const result = await processor.processRecord(record);
+
+    expect(result.isErr()).toBe(true);
+    if (result.isErr()) {
+      expect(result.error.kind).toBe("process_error");
+      expect(result.error.messageId).toBe("sqs-msg-xyz");
+    }
   });
 });

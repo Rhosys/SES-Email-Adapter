@@ -1,8 +1,6 @@
-import { describe, it, vi, beforeEach, afterEach } from "vitest";
-import fc from "fast-check";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { mockClient } from "aws-sdk-client-mock";
 import { DynamoDBDocumentClient, QueryCommand } from "@aws-sdk/lib-dynamodb";
-import { propertyRunner } from "../testing/property-runner.js";
 import { ArcDatabase } from "./arc-database.js";
 import { createMockLogger } from "../testing/mock-logger.js";
 
@@ -25,9 +23,6 @@ describe("Feature: dynamodb-storage-optimization, Property 5: Search warning thr
     ddbMock.restore();
   });
 
-  // Generator: random item count between 0 and 500
-  const arbitraryItemCount = fc.integer({ min: 0, max: 500 });
-
   // Helper: generate fake Arc items for a given count
   function makeFakeItems(count: number): Record<string, unknown>[] {
     return Array.from({ length: count }, (_, i) => ({
@@ -42,30 +37,30 @@ describe("Feature: dynamodb-storage-optimization, Property 5: Search warning thr
     }));
   }
 
-  it("emits warning if and only if item count > 200", async () => {
-    await propertyRunner.assert(
-      fc.asyncProperty(arbitraryItemCount, async (itemCount) => {
-        ddbMock.reset();
-        mockLogger.calls.length = 0;
+  // ---------------------------------------------------------------------------
+  // Edge cases for the 200-item warning threshold
+  // ---------------------------------------------------------------------------
 
-        ddbMock.on(QueryCommand).resolves({ Items: makeFakeItems(itemCount) });
+  const cases: Array<[string, { itemCount: number; shouldWarn: boolean }]> = [
+    ["0 items — no warning", { itemCount: 0, shouldWarn: false }],
+    ["1 item — no warning", { itemCount: 1, shouldWarn: false }],
+    ["199 items — just below threshold, no warning", { itemCount: 199, shouldWarn: false }],
+    ["200 items — exactly at threshold, no warning", { itemCount: 200, shouldWarn: false }],
+    ["201 items — just above threshold, emits warning", { itemCount: 201, shouldWarn: true }],
+    ["300 items — well above threshold, emits warning", { itemCount: 300, shouldWarn: true }],
+    ["500 items — far above threshold, emits warning", { itemCount: 500, shouldWarn: true }],
+  ];
 
-        await db.searchArcs("acct-1", "test", { limit: 20 });
+  it.each(cases)("%s", async (_label, { itemCount, shouldWarn }) => {
+    ddbMock.reset();
+    mockLogger.calls.length = 0;
 
-        const warningEmitted = mockLogger.calls.some(c => c.method === "warn");
-        const shouldWarn = itemCount > 200;
+    ddbMock.on(QueryCommand).resolves({ Items: makeFakeItems(itemCount) });
 
-        if (shouldWarn && !warningEmitted) {
-          throw new Error(
-            `Expected warning for itemCount=${itemCount} (>200), but none was emitted`,
-          );
-        }
-        if (!shouldWarn && warningEmitted) {
-          throw new Error(
-            `Expected no warning for itemCount=${itemCount} (<=200), but one was emitted`,
-          );
-        }
-      }),
-    );
+    await db.searchArcs("acct-1", "test", { limit: 20 });
+
+    const warningEmitted = mockLogger.calls.some(c => c.method === "warn");
+
+    expect(warningEmitted).toBe(shouldWarn);
   });
 });

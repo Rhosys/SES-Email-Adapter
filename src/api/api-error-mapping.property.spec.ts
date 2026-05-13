@@ -1,28 +1,13 @@
-// Property 6: API route error mapping consistency
-// **Validates: Requirements 4.1, 4.2, 4.3**
-//
-// For any store method returning `err({ kind: "db_error" })`, the route handler
-// responds with HTTP 500. For any store method returning `ok(null)` on a read,
-// the route handler responds with HTTP 404. For any store method returning
-// `ok(value)`, the route handler responds with HTTP 200.
-
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import fc from "fast-check";
+import { describe, it, expect, vi } from "vitest";
 import { ok, err, okAsync } from "neverthrow";
-import { propertyRunner } from "../testing/property-runner.js";
 import { createApp } from "./app.js";
-import type { ApiDatabase, AuthService, AuthContext, AccessService, VerificationMailer } from "./app.js";
+import type { ApiDatabase, AuthService, AuthContext, AccessService } from "./app.js";
 import type { Arc } from "../types/index.js";
 import type { DbError } from "../errors.js";
 import { createMockLogger } from "../testing/mock-logger.js";
 
-// ---------------------------------------------------------------------------
-// Test doubles
-// ---------------------------------------------------------------------------
-
 const TEST_ACCOUNT_ID = "acct-prop-001";
 const TEST_USER_ID = "user-prop-001";
-
 const validAuth: AuthContext = { accountId: TEST_ACCOUNT_ID, userId: TEST_USER_ID };
 
 function makeAuth(): AuthService {
@@ -41,16 +26,9 @@ function makeAccess(): AccessService {
 
 function makeArc(overrides: Partial<Arc> = {}): Arc {
   return {
-    id: "arc-001",
-    accountId: TEST_ACCOUNT_ID,
-    workflow: "conversation",
-    labels: [],
-    status: "active",
-    summary: "A test arc.",
-    lastSignalAt: "2024-01-15T10:00:00Z",
-    createdAt: "2024-01-15T10:00:00Z",
-    updatedAt: "2024-01-15T10:00:00Z",
-    ...overrides,
+    id: "arc-001", accountId: TEST_ACCOUNT_ID, workflow: "conversation", labels: [], status: "active",
+    summary: "A test arc.", lastSignalAt: "2024-01-15T10:00:00Z",
+    createdAt: "2024-01-15T10:00:00Z", updatedAt: "2024-01-15T10:00:00Z", ...overrides,
   };
 }
 
@@ -112,184 +90,97 @@ function makeBaseStore(): ApiDatabase {
   } as unknown as ApiDatabase;
 }
 
-// ---------------------------------------------------------------------------
-// Arbitraries
-// ---------------------------------------------------------------------------
+function makeApp(store: ApiDatabase) {
+  return createApp({
+    store,
+    auth: makeAuth(),
+    access: makeAccess(),
+    logger: createMockLogger(),
+    verificationMailer: { sendForwardVerification: vi.fn().mockReturnValue(okAsync(undefined)) },
+  });
+}
 
-type Scenario = { type: "db_error" } | { type: "null_read" } | { type: "success" };
+describe("API route error mapping consistency", () => {
+  const scenarios = [
+    { label: "db_error → 500", type: "db_error" as const, expectedStatus: 500 },
+    { label: "null_read → 404", type: "null_read" as const, expectedStatus: 404 },
+    { label: "success → 200", type: "success" as const, expectedStatus: 200 },
+  ];
 
-const arbScenario: fc.Arbitrary<Scenario> = fc.oneof(
-  fc.constant({ type: "db_error" as const }),
-  fc.constant({ type: "null_read" as const }),
-  fc.constant({ type: "success" as const }),
-);
+  describe("GET /accounts/:accountId/arcs/:id", () => {
+    it.each(scenarios)("$label", async ({ type, expectedStatus }) => {
+      const store = makeBaseStore();
+      switch (type) {
+        case "db_error":
+          vi.mocked(store.getArc).mockResolvedValue(err({ kind: "db_error", cause: new Error("timeout") } satisfies DbError));
+          break;
+        case "null_read":
+          vi.mocked(store.getArc).mockResolvedValue(ok(null));
+          break;
+        case "success":
+          vi.mocked(store.getArc).mockResolvedValue(ok(makeArc()));
+          break;
+      }
 
-// ---------------------------------------------------------------------------
-// Property 6: API route error mapping consistency
-// ---------------------------------------------------------------------------
-
-describe("Property 6: API route error mapping consistency", () => {
-  it("GET /accounts/:accountId/arcs/:id maps store results to correct HTTP status", async () => {
-    await propertyRunner.assert(
-      fc.asyncProperty(arbScenario, async (scenario) => {
-        const store = makeBaseStore();
-
-        switch (scenario.type) {
-          case "db_error":
-            vi.mocked(store.getArc).mockResolvedValue(
-              err({ kind: "db_error", cause: new Error("connection timeout") } satisfies DbError),
-            );
-            break;
-          case "null_read":
-            vi.mocked(store.getArc).mockResolvedValue(ok(null));
-            break;
-          case "success":
-            vi.mocked(store.getArc).mockResolvedValue(ok(makeArc()));
-            break;
-        }
-
-        const app = createApp({
-          store,
-          auth: makeAuth(),
-          access: makeAccess(),
-          logger: createMockLogger(),
-          verificationMailer: { sendForwardVerification: vi.fn().mockReturnValue(okAsync(undefined)) },
-        });
-
-        const res = await app.fetch(
-          new Request(`http://localhost/api/accounts/${TEST_ACCOUNT_ID}/arcs/arc-001`, {
-            headers: { Authorization: "Bearer valid-token" },
-          }),
-        );
-
-        switch (scenario.type) {
-          case "db_error":
-            expect(res.status).toBe(500);
-            break;
-          case "null_read":
-            expect(res.status).toBe(404);
-            break;
-          case "success":
-            expect(res.status).toBe(200);
-            break;
-        }
-      }),
-    );
+      const app = makeApp(store);
+      const res = await app.fetch(new Request(`http://localhost/api/accounts/${TEST_ACCOUNT_ID}/arcs/arc-001`, {
+        headers: { Authorization: "Bearer valid-token" },
+      }));
+      expect(res.status).toBe(expectedStatus);
+    });
   });
 
-  it("GET /accounts/:accountId/signals/:id maps store results to correct HTTP status", async () => {
-    await propertyRunner.assert(
-      fc.asyncProperty(arbScenario, async (scenario) => {
-        const store = makeBaseStore();
+  describe("GET /accounts/:accountId/signals/:id", () => {
+    it.each(scenarios)("$label", async ({ type, expectedStatus }) => {
+      const store = makeBaseStore();
+      switch (type) {
+        case "db_error":
+          vi.mocked(store.getSignal).mockResolvedValue(err({ kind: "db_error", cause: new Error("timeout") } satisfies DbError));
+          break;
+        case "null_read":
+          vi.mocked(store.getSignal).mockResolvedValue(ok(null));
+          break;
+        case "success":
+          vi.mocked(store.getSignal).mockResolvedValue(ok({
+            id: "SES#msg-001", arcId: "arc-001", accountId: TEST_ACCOUNT_ID, source: "email",
+            receivedAt: "2024-01-15T10:00:00Z", from: { address: "sender@example.com", name: "Sender" },
+            to: [{ address: "user@example.com" }], cc: [], subject: "Test", attachments: [], headers: {},
+            recipientAddress: "user@example.com", workflow: "conversation",
+            workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
+            spamScore: 0.02, summary: "A test signal.", classificationModelId: "model-1",
+            s3Key: "emails/msg-001", status: "active", createdAt: "2024-01-15T10:00:00Z",
+          } as any));
+          break;
+      }
 
-        switch (scenario.type) {
-          case "db_error":
-            vi.mocked(store.getSignal).mockResolvedValue(
-              err({ kind: "db_error", cause: new Error("timeout") } satisfies DbError),
-            );
-            break;
-          case "null_read":
-            vi.mocked(store.getSignal).mockResolvedValue(ok(null));
-            break;
-          case "success":
-            vi.mocked(store.getSignal).mockResolvedValue(ok({
-              id: "SES#msg-001",
-              arcId: "arc-001",
-              accountId: TEST_ACCOUNT_ID,
-              source: "email",
-              receivedAt: "2024-01-15T10:00:00Z",
-              from: { address: "sender@example.com", name: "Sender" },
-              to: [{ address: "user@example.com" }],
-              cc: [],
-              subject: "Test",
-              attachments: [],
-              headers: {},
-              recipientAddress: "user@example.com",
-              workflow: "conversation",
-              workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
-              spamScore: 0.02,
-              summary: "A test signal.",
-              classificationModelId: "model-1",
-              s3Key: "emails/msg-001",
-              status: "active",
-              createdAt: "2024-01-15T10:00:00Z",
-            } as any));
-            break;
-        }
-
-        const app = createApp({
-          store,
-          auth: makeAuth(),
-          access: makeAccess(),
-          logger: createMockLogger(),
-          verificationMailer: { sendForwardVerification: vi.fn().mockReturnValue(okAsync(undefined)) },
-        });
-
-        const res = await app.fetch(
-          new Request(`http://localhost/api/accounts/${TEST_ACCOUNT_ID}/signals/SES%23msg-001`, {
-            headers: { Authorization: "Bearer valid-token" },
-          }),
-        );
-
-        switch (scenario.type) {
-          case "db_error":
-            expect(res.status).toBe(500);
-            break;
-          case "null_read":
-            expect(res.status).toBe(404);
-            break;
-          case "success":
-            expect(res.status).toBe(200);
-            break;
-        }
-      }),
-    );
+      const app = makeApp(store);
+      const res = await app.fetch(new Request(`http://localhost/api/accounts/${TEST_ACCOUNT_ID}/signals/SES%23msg-001`, {
+        headers: { Authorization: "Bearer valid-token" },
+      }));
+      expect(res.status).toBe(expectedStatus);
+    });
   });
 
-  it("GET /accounts/:accountId/arcs (list) maps db_error to 500 and success to 200", async () => {
-    const arbListScenario = fc.oneof(
-      fc.constant({ type: "db_error" as const }),
-      fc.constant({ type: "success" as const }),
-    );
+  describe("GET /accounts/:accountId/arcs (list)", () => {
+    it.each([
+      { label: "db_error → 500", type: "db_error" as const, expectedStatus: 500 },
+      { label: "success → 200", type: "success" as const, expectedStatus: 200 },
+    ])("$label", async ({ type, expectedStatus }) => {
+      const store = makeBaseStore();
+      switch (type) {
+        case "db_error":
+          vi.mocked(store.listArcs).mockResolvedValue(err({ kind: "db_error", cause: new Error("reset") } satisfies DbError));
+          break;
+        case "success":
+          vi.mocked(store.listArcs).mockResolvedValue(ok({ items: [makeArc()] }));
+          break;
+      }
 
-    await propertyRunner.assert(
-      fc.asyncProperty(arbListScenario, async (scenario) => {
-        const store = makeBaseStore();
-
-        switch (scenario.type) {
-          case "db_error":
-            vi.mocked(store.listArcs).mockResolvedValue(
-              err({ kind: "db_error", cause: new Error("connection reset") } satisfies DbError),
-            );
-            break;
-          case "success":
-            vi.mocked(store.listArcs).mockResolvedValue(ok({ items: [makeArc()] }));
-            break;
-        }
-
-        const app = createApp({
-          store,
-          auth: makeAuth(),
-          access: makeAccess(),
-          logger: createMockLogger(),
-          verificationMailer: { sendForwardVerification: vi.fn().mockReturnValue(okAsync(undefined)) },
-        });
-
-        const res = await app.fetch(
-          new Request(`http://localhost/api/accounts/${TEST_ACCOUNT_ID}/arcs`, {
-            headers: { Authorization: "Bearer valid-token" },
-          }),
-        );
-
-        switch (scenario.type) {
-          case "db_error":
-            expect(res.status).toBe(500);
-            break;
-          case "success":
-            expect(res.status).toBe(200);
-            break;
-        }
-      }),
-    );
+      const app = makeApp(store);
+      const res = await app.fetch(new Request(`http://localhost/api/accounts/${TEST_ACCOUNT_ID}/arcs`, {
+        headers: { Authorization: "Bearer valid-token" },
+      }));
+      expect(res.status).toBe(expectedStatus);
+    });
   });
 });

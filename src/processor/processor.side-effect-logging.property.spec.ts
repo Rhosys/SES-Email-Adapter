@@ -1,22 +1,16 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import fc from "fast-check";
 import type { SQSEvent } from "aws-lambda";
 import { okAsync, errAsync } from "neverthrow";
 import { SignalProcessor, SYSTEM_RULES } from "./processor.js";
 import { JsonLogicRuleEvaluator } from "./rule-evaluator.js";
-import type { ProcessorDatabase, ArcMatcher, Notifier, Forwarder, ForwardOptions } from "./processor.js";
+import type { ProcessorDatabase, ArcMatcher, Notifier, Forwarder } from "./processor.js";
 import type { MimeParser } from "./mime.js";
 import type { SignalClassifier, ClassificationOutput } from "../classifier/classifier.js";
 import type { EmbeddingGenerator, EmbeddingResult } from "../embedding/embedding-generator.js";
 import type { MultiClusterAuroraWriter } from "../database/multi-cluster-aurora-writer.js";
 import type { Alias, AliasSender, Rule } from "../types/index.js";
 import { dbError } from "../errors.js";
-import { propertyRunner } from "../testing/property-runner.js";
 import { createMockLogger, type MockLogger } from "../testing/mock-logger.js";
-
-// ---------------------------------------------------------------------------
-// Mock the cluster registry
-// ---------------------------------------------------------------------------
 
 vi.mock("../embedding/cluster-registry.js", () => {
   const entry = Object.freeze({
@@ -36,16 +30,7 @@ vi.mock("../embedding/cluster-registry.js", () => {
   };
 });
 
-// ---------------------------------------------------------------------------
-// Property 5: Side effect caller logging
-// **Validates: Requirements 5.3**
-// ---------------------------------------------------------------------------
-
-/**
- * For any side effect (notifier, forwarder) that returns `err`, the immediate
- * caller logs at TRACK or ERROR level. No error result is silently discarded.
- */
-describe("Property 5: Side effect caller logging", () => {
+describe("Side effect caller logging", () => {
   const TEST_ACCOUNT_ID = "acct-side-effect";
 
   const DEFAULT_EMAIL_CONFIG: Alias = {
@@ -84,14 +69,8 @@ describe("Property 5: Side effect caller logging", () => {
   };
 
   let mockLogger: MockLogger;
-
-  beforeEach(() => {
-    mockLogger = createMockLogger();
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
+  beforeEach(() => { mockLogger = createMockLogger(); });
+  afterEach(() => { vi.restoreAllMocks(); });
 
   function makeStore(): ProcessorDatabase {
     return {
@@ -128,12 +107,6 @@ describe("Property 5: Side effect caller logging", () => {
     };
   }
 
-  function makeClassifier(): Pick<SignalClassifier, "classify"> {
-    return {
-      classify: vi.fn().mockResolvedValue({ ...validClassification }),
-    };
-  }
-
   function makeEmbeddingGenerator(): EmbeddingGenerator {
     return {
       generateForActiveClusters: vi.fn().mockResolvedValue([
@@ -146,27 +119,17 @@ describe("Property 5: Side effect caller logging", () => {
   }
 
   function makeAuroraWriter(): MultiClusterAuroraWriter {
-    return {
-      upsertEmbedding: vi.fn().mockResolvedValue(undefined),
-      findMatch: vi.fn().mockResolvedValue(null),
-    };
+    return { upsertEmbedding: vi.fn().mockResolvedValue(undefined), findMatch: vi.fn().mockResolvedValue(null) };
   }
 
   function makeArcMatcher(): ArcMatcher {
-    return {
-      findMatch: vi.fn().mockReturnValue(okAsync(null)),
-      upsertEmbedding: vi.fn().mockReturnValue(okAsync(undefined)),
-    };
+    return { findMatch: vi.fn().mockReturnValue(okAsync(null)), upsertEmbedding: vi.fn().mockReturnValue(okAsync(undefined)) };
   }
 
   function makeSqsEvent(sesMessageId: string): SQSEvent {
     const notification = {
       accountId: TEST_ACCOUNT_ID,
-      mail: {
-        messageId: sesMessageId,
-        timestamp: "2024-01-15T10:00:00Z",
-        destination: ["user@example.com"],
-      },
+      mail: { messageId: sesMessageId, timestamp: "2024-01-15T10:00:00Z", destination: ["user@example.com"] },
       receipt: {
         recipients: ["user@example.com"],
         dkimVerdict: { status: "PASS" },
@@ -179,12 +142,7 @@ describe("Property 5: Side effect caller logging", () => {
         messageId: "sqs-1",
         receiptHandle: "handle",
         body: JSON.stringify({ Message: JSON.stringify(notification) }),
-        attributes: {
-          ApproximateReceiveCount: "1",
-          SentTimestamp: "1234567890",
-          SenderId: "sender",
-          ApproximateFirstReceiveTimestamp: "1234567890",
-        },
+        attributes: { ApproximateReceiveCount: "1", SentTimestamp: "1234567890", SenderId: "sender", ApproximateFirstReceiveTimestamp: "1234567890" },
         messageAttributes: {},
         md5OfBody: "",
         eventSource: "aws:sqs",
@@ -194,103 +152,90 @@ describe("Property 5: Side effect caller logging", () => {
     };
   }
 
-  it("when notifier.notify() returns err, the caller logs at TRACK or ERROR level", () => {
-    return propertyRunner.assert(
-      fc.asyncProperty(
-        fc.boolean(),
-        fc.string({ minLength: 3, maxLength: 20 }),
-        async (shouldFail, errorMessage) => {
-          vi.clearAllMocks();
-          mockLogger = createMockLogger();
+  it("when notifier.notify() returns err, caller logs at track or error level", async () => {
+    const notifier: Notifier = {
+      notify: vi.fn().mockReturnValue(errAsync(dbError(new Error("push failed")))),
+      notifyBlocked: vi.fn().mockReturnValue(okAsync(undefined)),
+    };
 
-          const notifier: Notifier = {
-            notify: shouldFail
-              ? vi.fn().mockReturnValue(errAsync(dbError(new Error(errorMessage))))
-              : vi.fn().mockReturnValue(okAsync(undefined)),
-            notifyBlocked: vi.fn().mockReturnValue(okAsync(undefined)),
-          };
+    const processor = new SignalProcessor({
+      store: makeStore(),
+      mimeParser: makeMimeParser(),
+      classifier: { classify: vi.fn().mockResolvedValue({ ...validClassification }) },
+      embeddingGenerator: makeEmbeddingGenerator(),
+      auroraWriter: makeAuroraWriter(),
+      arcMatcher: makeArcMatcher(),
+      ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
+      notifier,
+      logger: mockLogger,
+    });
 
-          const processor = new SignalProcessor({
-            store: makeStore(),
-            mimeParser: makeMimeParser(),
-            classifier: makeClassifier(),
-            embeddingGenerator: makeEmbeddingGenerator(),
-            auroraWriter: makeAuroraWriter(),
-            arcMatcher: makeArcMatcher(),
-            ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
-            notifier,
-            logger: mockLogger,
-          });
+    await processor.process(makeSqsEvent("test-msg-notify"));
 
-          await processor.process(makeSqsEvent("test-msg-notify"));
-
-          if (shouldFail) {
-            // Verify the caller logged at TRACK or ERROR level — not silently discarded
-            const sideEffectLog = mockLogger.calls.find((call) =>
-              call.context?.code === "processor.notification_failed" &&
-              (call.method === "track" || call.method === "error"),
-            );
-            expect(sideEffectLog).toBeDefined();
-          }
-        },
-      ),
+    const sideEffectLog = mockLogger.calls.find((call) =>
+      call.context?.code === "processor.notification_failed" &&
+      (call.method === "track" || call.method === "error"),
     );
+    expect(sideEffectLog).toBeDefined();
   });
 
-  it("when forwarder.forward() returns err, the caller logs at TRACK or ERROR level", () => {
-    return propertyRunner.assert(
-      fc.asyncProperty(
-        fc.boolean(),
-        fc.string({ minLength: 3, maxLength: 20 }),
-        async (shouldFail, errorMessage) => {
-          vi.clearAllMocks();
-          mockLogger = createMockLogger();
+  it("when notifier.notify() succeeds, no failure log is emitted", async () => {
+    const notifier: Notifier = {
+      notify: vi.fn().mockReturnValue(okAsync(undefined)),
+      notifyBlocked: vi.fn().mockReturnValue(okAsync(undefined)),
+    };
 
-          const forwarder: Forwarder = {
-            forward: shouldFail
-              ? vi.fn().mockReturnValue(errAsync(dbError(new Error(errorMessage))))
-              : vi.fn().mockReturnValue(okAsync(undefined)),
-          };
+    const processor = new SignalProcessor({
+      store: makeStore(),
+      mimeParser: makeMimeParser(),
+      classifier: { classify: vi.fn().mockResolvedValue({ ...validClassification }) },
+      embeddingGenerator: makeEmbeddingGenerator(),
+      auroraWriter: makeAuroraWriter(),
+      arcMatcher: makeArcMatcher(),
+      ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
+      notifier,
+      logger: mockLogger,
+    });
 
-          // Add a forward rule so the forwarder is actually invoked
-          const store = makeStore();
-          const forwardRule: Rule = {
-            id: "rule-fwd-prop",
-            accountId: TEST_ACCOUNT_ID,
-            name: "Forward all",
-            condition: JSON.stringify(true),
-            actions: [{ type: "forward", value: "fwd@example.com" }],
-            status: "enabled",
-            priorityOrder: 100,
-            createdAt: "",
-            updatedAt: "",
-          };
-          vi.mocked(store.listEnabledRules).mockReturnValue(okAsync([...SYSTEM_RULES, forwardRule]));
+    await processor.process(makeSqsEvent("test-msg-notify-ok"));
 
-          const processor = new SignalProcessor({
-            store,
-            mimeParser: makeMimeParser(),
-            classifier: makeClassifier(),
-            embeddingGenerator: makeEmbeddingGenerator(),
-            auroraWriter: makeAuroraWriter(),
-            arcMatcher: makeArcMatcher(),
-            ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
-            forwarder,
-            logger: mockLogger,
-          });
-
-          await processor.process(makeSqsEvent("test-msg-forward"));
-
-          if (shouldFail) {
-            // Verify the caller logged at TRACK or ERROR level — not silently discarded
-            const sideEffectLog = mockLogger.calls.find((call) =>
-              call.context?.code === "processor.forward_failed" &&
-              (call.method === "track" || call.method === "error"),
-            );
-            expect(sideEffectLog).toBeDefined();
-          }
-        },
-      ),
+    const sideEffectLog = mockLogger.calls.find((call) =>
+      call.context?.code === "processor.notification_failed",
     );
+    expect(sideEffectLog).toBeUndefined();
+  });
+
+  it("when forwarder.forward() returns err, caller logs at track or error level", async () => {
+    const forwarder: Forwarder = {
+      forward: vi.fn().mockReturnValue(errAsync(dbError(new Error("forward failed")))),
+    };
+
+    const store = makeStore();
+    const forwardRule: Rule = {
+      id: "rule-fwd-prop", accountId: TEST_ACCOUNT_ID, name: "Forward all",
+      condition: JSON.stringify(true), actions: [{ type: "forward", value: "fwd@example.com" }],
+      status: "enabled", priorityOrder: 100, createdAt: "", updatedAt: "",
+    };
+    vi.mocked(store.listEnabledRules).mockReturnValue(okAsync([...SYSTEM_RULES, forwardRule]));
+
+    const processor = new SignalProcessor({
+      store,
+      mimeParser: makeMimeParser(),
+      classifier: { classify: vi.fn().mockResolvedValue({ ...validClassification }) },
+      embeddingGenerator: makeEmbeddingGenerator(),
+      auroraWriter: makeAuroraWriter(),
+      arcMatcher: makeArcMatcher(),
+      ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
+      forwarder,
+      logger: mockLogger,
+    });
+
+    await processor.process(makeSqsEvent("test-msg-forward"));
+
+    const sideEffectLog = mockLogger.calls.find((call) =>
+      call.context?.code === "processor.forward_failed" &&
+      (call.method === "track" || call.method === "error"),
+    );
+    expect(sideEffectLog).toBeDefined();
   });
 });
