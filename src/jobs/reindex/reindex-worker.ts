@@ -100,11 +100,11 @@ export class ReindexWorker {
       if (result.isErr()) {
         const record = event.Records[i]!;
         const receiveCount = Number(record.attributes?.ApproximateReceiveCount ?? "1");
-        const logMethod = receiveCount > RETRY_TRACK_THRESHOLD ? "error" : "warn";
+        const logMethod = receiveCount > RETRY_TRACK_THRESHOLD ? "error" : "track";
         if (logMethod === "error") {
           this.logger.error("Reindex segment failed after exceeding retry threshold. SQS message was redelivered " + receiveCount + " times without successful completion. This segment's signals won't be reindexed until the job is re-triggered. Investigate DynamoDB scan or Aurora write failures.", { code: "reindex.worker.segment_failed", messageId: result.error.messageId, receiveCount, error: result.error });
         } else {
-          this.logger.warn("Reindex segment failed on attempt " + receiveCount + ". The SQS message will be retried automatically. Investigate if this pattern persists across multiple attempts.", { code: "reindex.worker.segment_failed", messageId: result.error.messageId, receiveCount, error: result.error });
+          this.logger.track("Reindex segment failed on attempt " + receiveCount + ". The SQS message will be retried automatically. Tracked for segment retry-rate monitoring.", { code: "reindex.worker.segment_failed", messageId: result.error.messageId, receiveCount, error: result.error });
         }
         failures.push({ itemIdentifier: result.error.messageId });
       }
@@ -345,7 +345,7 @@ export class ReindexWorker {
     signalId: string,
     reason: string,
   ): Promise<void> {
-    this.logger.warn("Signal marked unrecoverable during reindex — cannot regenerate embedding. The signal record lacks an s3Key or the S3 object no longer exists (NoSuchKey). This signal will never be reindexed — permanent data loss. Investigate why signals lack s3Keys or why objects are being deleted from the email bucket.", {
+    this.logger.track("Signal marked unrecoverable during reindex — cannot regenerate embedding. The signal record lacks an s3Key or the S3 object no longer exists (NoSuchKey). This signal will never be reindexed. Tracked for data loss monitoring.", {
       code: "reindex.worker.unrecoverable",
       jobId,
       signalId,
