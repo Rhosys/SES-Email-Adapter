@@ -125,6 +125,7 @@ const cachedSignal2 = {
   arcId: "arc-c2",
   recipientAddress: "cached2@example.com",
   embeddings: { [TARGET_MODEL_ID]: [0.4, 0.5, 0.6] },
+  s3Key: "inbox/2025/cached2.eml",
 };
 
 // S3-retrievable signals (regeneration path) — no target model embedding, but S3 key works
@@ -146,7 +147,7 @@ const s3Signal2 = {
   accountId: "acct-4",
   arcId: "arc-s2",
   recipientAddress: "s3regen2@example.com",
-  embeddings: {},
+  embeddings: { "amazon.titan-embed-text-v3:0": [0.7, 0.8] },
   s3Key: "inbox/2025/s3regen2.eml",
 };
 

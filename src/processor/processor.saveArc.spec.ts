@@ -214,7 +214,7 @@ describe("Single saveArc call with complete mutations", () => {
     expect(saveArcCallCount).toBe(1);
     expect(savedArc).not.toBeNull();
 
-    const arc = savedArc as Arc;
+    const arc = savedArc!;
     expect(arc.status).toBe("active");
 
     for (const label of testCase.additionalLabels) {

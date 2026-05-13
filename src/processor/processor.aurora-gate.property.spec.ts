@@ -1011,9 +1011,9 @@ describe("Feature: signal-processor-retry-resilience, Property 7: Partial Aurora
   // Edge-case inputs: the branching logic is about which cluster fails, not vector content
   // -------------------------------------------------------------------------
 
-  const PARTIAL_SUCCESS_CASES = [
+  const PARTIAL_SUCCESS_CASES: Array<{ label: string; vector: number[]; sesMessageId: string }> = [
     { label: "non-primary fails with connection timeout", vector: [0.1, -0.9, 0.5], sesMessageId: "msg-partial-timeout" },
-  ] as const;
+  ];
 
   it.each(PARTIAL_SUCCESS_CASES)("primary cluster write is preserved when non-primary cluster fails, record returned as batchItemFailure, no side-effects dispatched ($label)", async ({ vector, sesMessageId }) => {
     const completedUpserts: string[] = [];

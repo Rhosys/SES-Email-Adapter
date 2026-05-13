@@ -144,9 +144,8 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
         s3Key: "emails/msg-no-emb",
         status: "active" as const,
         createdAt: "2024-01-15T10:00:00Z",
-        embeddings: undefined,
         matchedRules: [],
-      } as Signal,
+      } as unknown as Signal,
     },
     {
       label: "embedding for wrong model (Aurora upsert skipped for cluster)",
