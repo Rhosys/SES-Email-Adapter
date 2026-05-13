@@ -1737,33 +1737,6 @@ describe("SignalProcessor", () => {
     classificationModelId: "us.anthropic.claude-opus-4-5-20251101-v1:0",
   };
 
-  describe("scheduling signal synthesis", () => {
-    it("saves a synthetic calendar signal in addition to the email signal", async () => {
-      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(schedulingClassification);
-
-      await processor.process(makeSqsEvent([{}]));
-
-      expect(store.saveSignal).toHaveBeenCalledTimes(2);
-      const emailSig = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
-      const calSig = vi.mocked(store.saveSignal).mock.calls[1]![0] as Signal;
-      expect(emailSig.id).toMatch(/^SES#/);
-      expect(calSig.id).toMatch(/^SYS#/);
-    });
-
-    it("calendar signal has source=system, the title as subject, empty attachments, and empty s3Key", async () => {
-      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(schedulingClassification);
-
-      await processor.process(makeSqsEvent([{}]));
-
-      const calSig = vi.mocked(store.saveSignal).mock.calls[1]![0] as Signal;
-      expect(calSig.source).toBe("system");
-      expect(calSig.subject).toBe("Team Standup");
-      expect(calSig.attachments).toEqual([]);
-      expect(calSig.s3Key).toBe("");
-      expect(calSig.spamScore).toBe(0);
-    });
-  });
-
   // -------------------------------------------------------------------------
   // Spam threshold — per-address and account-level overrides
   // -------------------------------------------------------------------------

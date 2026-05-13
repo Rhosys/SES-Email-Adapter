@@ -5,7 +5,7 @@ import type { Logger } from "../logger.js";
 import type { Result } from "neverthrow";
 import { ok, err, dbError, processError } from "../errors.js";
 import type { DbError, InvalidResponseError, ProcessError } from "../errors.js";
-import type { Signal, Arc, Rule, Workflow, WorkflowData, Alias, AliasSender, SenderMode, AccountFilteringConfig, SignalSource, SchedulingData, SignalStatus, Domain, ArcUrgency, SenderFilterMode, MatchedRuleResult } from "../types/index.js";
+import type { Signal, Arc, Rule, Workflow, WorkflowData, Alias, AliasSender, SenderMode, AccountFilteringConfig, SignalSource, SignalStatus, Domain, ArcUrgency, SenderFilterMode, MatchedRuleResult } from "../types/index.js";
 import type { MimeParser } from "./mime.js";
 import { buildEmbedText, extractEmbedTextInput } from "../embedding/embed-text.js";
 import type { SignalClassifier } from "../classifier/classifier.js";
@@ -439,7 +439,6 @@ export class SignalProcessor {
     if (outcome.doPong) effectTypes.push("pong");
     if (outcome.autoReplyTemplateIds.length > 0) effectTypes.push("auto_reply");
     if (outcome.autoDraftTemplateIds.length > 0) effectTypes.push("auto_draft");
-    if (signal.workflow === "scheduling") effectTypes.push("calendar");
     this.logger.info("Outcome derived from matchedRules — executing side-effects.", { code: "processor.side_effect.outcome_derived", accountId, signalId: signal.id, arcId: arc.id, effectTypes });
 
     // Execute all indicated side-effects — individual failures are logged and do NOT cause batchItemFailure
@@ -470,7 +469,7 @@ export class SignalProcessor {
         this.logger.trackPoint("side_effect_notify_start");
         const notifyResult = await this.notifier.notify(accountId, arc, signal);
         if (notifyResult.isErr()) {
-          this.logger.error("Side-effect notification failed.", { code: "processor.side_effect.notify_failed", accountId, error: String(notifyResult.error.cause) });
+          this.logger.track("Side-effect notification failed.", { code: "processor.side_effect.notify_failed", accountId, error: String(notifyResult.error.cause) });
         }
         this.logger.trackPoint("side_effect_notify_complete");
       } catch (e) {
@@ -574,22 +573,6 @@ export class SignalProcessor {
         this.logger.trackPoint("side_effect_auto_draft_complete");
       } catch (e) {
         this.logger.error("Side-effect auto-draft threw unexpectedly.", { code: "processor.side_effect.auto_draft_error", accountId, error: String(e) });
-      }
-    }
-
-    // Calendar
-    if (signal.workflow === "scheduling") {
-      try {
-        this.logger.trackPoint("side_effect_calendar_start");
-        const now = new Date().toISOString();
-        const calSignal = buildCalendarSignal(arc, signal, now, undefined);
-        const calSaveResult = await this.store.saveSignal(calSignal);
-        if (calSaveResult.isErr()) {
-          this.logger.error("Side-effect calendar signal save failed.", { code: "processor.side_effect.calendar_failed", accountId, error: String(calSaveResult.error.cause) });
-        }
-        this.logger.trackPoint("side_effect_calendar_complete");
-      } catch (e) {
-        this.logger.error("Side-effect calendar threw unexpectedly.", { code: "processor.side_effect.calendar_error", accountId, error: String(e) });
       }
     }
 
@@ -791,7 +774,7 @@ export class SignalProcessor {
       if (saveResult.isErr()) return err(saveResult.error);
       const repResult = await this.store.updateGlobalReputation(senderETLD1, { wasSpam: classification.spamScore >= spamScoreThreshold, wasBlocked: true });
       if (repResult.isErr()) {
-        this.logger.track("Failed to update global sender reputation after signal processing. The DynamoDB update returned an error. Reputation data may be stale for this domain. Tracked for consistency monitoring.", { code: "processor.reputation_update_failed", accountId, error: String(repResult.error.cause) });
+        this.logger.warn("Failed to update global sender reputation after signal processing. The DynamoDB update returned an error. Reputation data may be stale for this domain.", { code: "processor.reputation_update_failed", accountId, error: String(repResult.error.cause) });
       }
       return ok(undefined);
     }
@@ -810,7 +793,7 @@ export class SignalProcessor {
       }
       const repResult = await this.store.updateGlobalReputation(senderETLD1, { wasSpam: classification.spamScore >= spamScoreThreshold, wasBlocked: true });
       if (repResult.isErr()) {
-        this.logger.track("Failed to update global sender reputation after signal processing. The DynamoDB update returned an error. Reputation data may be stale for this domain. Tracked for consistency monitoring.", { code: "processor.reputation_update_failed", accountId, error: String(repResult.error.cause) });
+        this.logger.warn("Failed to update global sender reputation after signal processing. The DynamoDB update returned an error. Reputation data may be stale for this domain.", { code: "processor.reputation_update_failed", accountId, error: String(repResult.error.cause) });
       }
       return ok(undefined);
     }
@@ -893,15 +876,6 @@ export class SignalProcessor {
     // Dispatch side-effects via SQS after Aurora succeeds
     const dispatchResult = await this.dispatchSideEffects(signal, arc);
     if (dispatchResult.isErr()) return err(dbError(new Error("Side-effect dispatch failed")));
-
-    // 15. Calendar synthetic signal
-    if (classification.workflow === "scheduling") {
-      const calSignal = buildCalendarSignal(arc, signal, now, ttl);
-      const calSaveResult = await this.store.saveSignal(calSignal);
-      if (calSaveResult.isErr()) {
-        this.logger.track("Failed to save synthetic calendar signal for scheduling workflow. The DynamoDB put returned an error. The email signal is saved but the calendar entry won't appear. Tracked for scheduling feature reliability.", { code: "processor.calendar_signal_save_failed", accountId, error: String(calSaveResult.error.cause) });
-      }
-    }
 
     // 16. Forward
     if (this.forwarder && outcome.forwardAddresses.length > 0) {
@@ -1011,7 +985,7 @@ export class SignalProcessor {
       wasBlocked: false,
     });
     if (finalRepResult.isErr()) {
-      this.logger.track("Failed to update global sender reputation after signal processing. The DynamoDB update returned an error. Reputation data may be stale for this domain. Tracked for consistency monitoring.", { code: "processor.reputation_update_failed", accountId, error: String(finalRepResult.error.cause) });
+      this.logger.warn("Failed to update global sender reputation after signal processing. The DynamoDB update returned an error. Reputation data may be stale for this domain.", { code: "processor.reputation_update_failed", accountId, error: String(finalRepResult.error.cause) });
     }
 
     return ok(undefined);
@@ -1223,34 +1197,6 @@ function buildSignal(opts: {
   if (ttl !== undefined) signal.ttl = ttl;
 
   return signal;
-}
-
-function buildCalendarSignal(arc: Arc, emailSignal: Signal, now: string, ttl: number | undefined): Signal {
-  const data = emailSignal.workflowData as SchedulingData;
-  const calSignal: Signal = {
-    id: `SYS#${randomUUID()}`,
-    arcId: arc.id,
-    accountId: arc.accountId,
-    source: "system",
-    receivedAt: emailSignal.receivedAt,
-    from: emailSignal.from,
-    to: emailSignal.to,
-    cc: [],
-    subject: data.title,
-    attachments: [],
-    headers: {},
-    recipientAddress: emailSignal.recipientAddress,
-    workflow: "scheduling",
-    workflowData: emailSignal.workflowData,
-    spamScore: 0,
-    summary: emailSignal.summary,
-    classificationModelId: emailSignal.classificationModelId,
-    s3Key: "",
-    status: "active",
-    createdAt: now,
-  };
-  if (ttl !== undefined) calSignal.ttl = ttl;
-  return calSignal;
 }
 
 // Extracts the original recipient address from forwarding headers, in priority order.
