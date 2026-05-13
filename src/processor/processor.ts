@@ -405,7 +405,177 @@ export class SignalProcessor {
     return { batchItemFailures: failures };
   }
 
-  private async processSideEffectRecord(_record: SQSRecord): Promise<Result<void, ProcessError>> {
+  private async processSideEffectRecord(record: SQSRecord): Promise<Result<void, ProcessError>> {
+    // Parse SideEffectPayload from record body
+    let payload: SideEffectPayload;
+    try {
+      payload = JSON.parse(record.body) as SideEffectPayload;
+      if (!payload.signal || !payload.arc) throw new Error("Missing signal or arc in payload");
+    } catch (e) {
+      this.logger.error("Malformed side-effect payload — cannot parse. Dropping message to prevent infinite retry of unparseable content.", { code: "processor.side_effect.malformed_payload", messageId: record.messageId, error: String(e) });
+      return ok(undefined);
+    }
+
+    const { signal, arc } = payload;
+    const accountId = signal.accountId;
+
+    // Re-derive outcome from persisted matchedRules
+    const outcome = deriveOutcome(signal.matchedRules ?? []);
+
+    this.logger.trackPoint("side_effect_received");
+
+    // Execute all indicated side-effects — individual failures are logged and do NOT cause batchItemFailure
+
+    // Forward
+    if (this.forwarder && outcome.forwardAddresses.length > 0) {
+      for (const toAddress of outcome.forwardAddresses) {
+        try {
+          this.logger.trackPoint("side_effect_forward_start");
+          const forwardResult = await this.forwarder.forward(signal.s3Key, toAddress, accountId, {
+            senderDomain: getETLD1(signal.from.address),
+            dkimPass: false,
+            dmarcPass: false,
+          });
+          if (forwardResult.isErr()) {
+            this.logger.error("Side-effect forward failed. The SES send-raw-email call returned an error. The recipient won't receive the forwarded copy.", { code: "processor.side_effect.forward_failed", accountId, toAddress, error: String(forwardResult.error.cause) });
+          }
+          this.logger.trackPoint("side_effect_forward_complete");
+        } catch (e) {
+          this.logger.error("Side-effect forward threw unexpectedly.", { code: "processor.side_effect.forward_error", accountId, toAddress, error: String(e) });
+        }
+      }
+    }
+
+    // Notify
+    if (this.notifier && !outcome.suppressNotification) {
+      try {
+        this.logger.trackPoint("side_effect_notify_start");
+        const notifyResult = await this.notifier.notify(accountId, arc, signal);
+        if (notifyResult.isErr()) {
+          this.logger.error("Side-effect notification failed.", { code: "processor.side_effect.notify_failed", accountId, error: String(notifyResult.error.cause) });
+        }
+        this.logger.trackPoint("side_effect_notify_complete");
+      } catch (e) {
+        this.logger.error("Side-effect notification threw unexpectedly.", { code: "processor.side_effect.notify_error", accountId, error: String(e) });
+      }
+    }
+
+    // Pong
+    if (outcome.doPong && this.testReplier) {
+      try {
+        this.logger.trackPoint("side_effect_pong_start");
+        const from = signal.recipientAddress;
+        await this.testReplier.pong({
+          to: signal.from.address,
+          from,
+          subject: signal.subject ?? "",
+          body: signal.textBody ?? "",
+          inReplyTo: signal.id,
+        });
+        this.logger.trackPoint("side_effect_pong_complete");
+      } catch (e) {
+        this.logger.error("Side-effect pong failed.", { code: "processor.side_effect.pong_failed", accountId, error: String(e) });
+      }
+    }
+
+    // Auto-reply
+    if (this.testReplier && outcome.autoReplyTemplateIds.length > 0) {
+      try {
+        this.logger.trackPoint("side_effect_auto_reply_start");
+        const recipientDomain = signal.recipientAddress.split("@")[1] ?? "";
+        const domainResult = await this.store.getDomainByName(accountId, recipientDomain);
+        if (domainResult.isOk() && domainResult.value?.senderSetupComplete) {
+          const vars = {
+            "signal.subject": signal.subject ?? "",
+            "sender.name": signal.from.name ?? "",
+            "sender.address": signal.from.address,
+            "arc.workflow": signal.workflow ?? "",
+          };
+          for (const templateId of outcome.autoReplyTemplateIds) {
+            const tmplResult = await this.store.getTemplate(accountId, templateId);
+            if (tmplResult.isErr() || !tmplResult.value) continue;
+            const tmpl = tmplResult.value;
+            await this.testReplier.pong({
+              to: signal.from.address,
+              from: signal.recipientAddress,
+              subject: renderTemplate(tmpl.subject, vars),
+              body: renderTemplate(tmpl.body, vars),
+              inReplyTo: signal.id,
+            });
+          }
+        }
+        this.logger.trackPoint("side_effect_auto_reply_complete");
+      } catch (e) {
+        this.logger.error("Side-effect auto-reply failed.", { code: "processor.side_effect.auto_reply_failed", accountId, error: String(e) });
+      }
+    }
+
+    // Auto-draft
+    if (outcome.autoDraftTemplateIds.length > 0) {
+      try {
+        this.logger.trackPoint("side_effect_auto_draft_start");
+        const now = new Date().toISOString();
+        const vars = {
+          "signal.subject": signal.subject ?? "",
+          "sender.name": signal.from.name ?? "",
+          "sender.address": signal.from.address,
+          "arc.workflow": signal.workflow ?? "",
+        };
+        for (const templateId of outcome.autoDraftTemplateIds) {
+          const tmplResult = await this.store.getTemplate(accountId, templateId);
+          if (tmplResult.isErr() || !tmplResult.value) continue;
+          const tmpl = tmplResult.value;
+          const draft: Signal = {
+            id: `USR#${randomUUID()}`,
+            arcId: arc.id,
+            accountId,
+            source: "user",
+            status: "draft",
+            receivedAt: now,
+            from: { address: signal.recipientAddress },
+            to: [signal.from],
+            cc: [],
+            subject: renderTemplate(tmpl.subject, vars),
+            textBody: renderTemplate(tmpl.body, vars),
+            attachments: [],
+            headers: {},
+            recipientAddress: signal.from.address,
+            workflow: signal.workflow,
+            workflowData: signal.workflowData,
+            spamScore: 0,
+            summary: "",
+            classificationModelId: "",
+            s3Key: "",
+            createdAt: now,
+          };
+          const draftSaveResult = await this.store.saveSignal(draft);
+          if (draftSaveResult.isErr()) {
+            this.logger.error("Side-effect auto-draft save failed.", { code: "processor.side_effect.auto_draft_failed", accountId, error: String(draftSaveResult.error.cause) });
+          }
+        }
+        this.logger.trackPoint("side_effect_auto_draft_complete");
+      } catch (e) {
+        this.logger.error("Side-effect auto-draft threw unexpectedly.", { code: "processor.side_effect.auto_draft_error", accountId, error: String(e) });
+      }
+    }
+
+    // Calendar
+    if (signal.workflow === "scheduling") {
+      try {
+        this.logger.trackPoint("side_effect_calendar_start");
+        const now = new Date().toISOString();
+        const calSignal = buildCalendarSignal(arc, signal, now, undefined);
+        const calSaveResult = await this.store.saveSignal(calSignal);
+        if (calSaveResult.isErr()) {
+          this.logger.error("Side-effect calendar signal save failed.", { code: "processor.side_effect.calendar_failed", accountId, error: String(calSaveResult.error.cause) });
+        }
+        this.logger.trackPoint("side_effect_calendar_complete");
+      } catch (e) {
+        this.logger.error("Side-effect calendar threw unexpectedly.", { code: "processor.side_effect.calendar_error", accountId, error: String(e) });
+      }
+    }
+
+    this.logger.trackPoint("side_effect_all_complete");
     return ok(undefined);
   }
 
