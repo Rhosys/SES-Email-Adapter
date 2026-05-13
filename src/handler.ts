@@ -1,8 +1,10 @@
 import type { APIGatewayProxyEventV2, SQSEvent, Context, APIGatewayProxyResultV2, EventBridgeEvent, APIGatewayProxyWebsocketEventV2 } from "aws-lambda";
 import { BedrockRuntimeClient } from "@aws-sdk/client-bedrock-runtime";
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
+import { SQSClient } from "@aws-sdk/client-sqs";
 import { SignalClassifier } from "./classifier/classifier.js";
 import { SignalProcessor } from "./processor/processor.js";
+import { SqsDispatcherImpl } from "./processor/sqs-dispatcher.js";
 import { MailparserMimeParser } from "./processor/mime.js";
 import { JsonLogicRuleEvaluator } from "./processor/rule-evaluator.js";
 import { AccountDatabase } from "./database/account-database.js";
@@ -36,8 +38,10 @@ import { handleJobDispatch } from "./api/job-dispatch-handler.js";
 const bedrock = new BedrockRuntimeClient({});
 const s3 = new S3Client({});
 const sesv2 = new SESv2Client({});
+const sqs = new SQSClient({});
 
 const S3_BUCKET = process.env["EMAIL_BUCKET"] ?? "";
+const SIGNAL_QUEUE_URL = process.env["SIGNAL_QUEUE_URL"] ?? "";
 
 // ---------------------------------------------------------------------------
 // S3-backed MimeParser
@@ -79,6 +83,7 @@ const processor = new SignalProcessor({
   forwarder: new SesForwarder(logger, sesv2, s3),
   retentionService: new S3RetentionServiceImpl(s3),
   logger,
+  ...(SIGNAL_QUEUE_URL ? { sqsDispatcher: new SqsDispatcherImpl(SIGNAL_QUEUE_URL, sqs) } : {}),
 });
 
 const feedbackProcessor = new FeedbackProcessor(processingDb, accountDb, logger);
