@@ -332,17 +332,22 @@ export class SignalProcessor {
 
     // On redelivery, check DDB for existing signal before doing expensive work
     if (receiveCount > 1) {
+      this.logger.info("Retry path activated — checking DDB for existing signal state before re-processing.", { code: "processor.retry_path_activated", receiveCount, accountId: message.accountId, sesMessageId: message.sesMessageId });
+
       const existingResult = await this.store.getSignalByMessageId(message.accountId, message.sesMessageId);
       if (existingResult.isErr()) return err(processError(record.messageId));
+      this.logger.trackPoint("retry_signal_lookup");
 
       if (existingResult.value) {
         const signal = existingResult.value;
+        this.logger.info("Signal found in DDB on retry — resuming from Aurora upserts.", { code: "processor.retry_signal_found", signalId: signal.id, arcId: signal.arcId, accountId: message.accountId, sesMessageId: message.sesMessageId, receiveCount });
 
         // Signal exists — arc is guaranteed to exist (arc saved before signal).
         // Load arc to resume from the convergence point.
         if (!signal.arcId) return err(processError(record.messageId));
         const arcResult = await this.store.getArc(message.accountId, signal.arcId);
         if (arcResult.isErr()) return err(processError(record.messageId));
+        this.logger.trackPoint("retry_arc_lookup");
         const arc = arcResult.value;
         if (!arc) return err(processError(record.messageId));
 
@@ -365,6 +370,9 @@ export class SignalProcessor {
 
         return ok(undefined);
       }
+
+      // Signal not found in DDB on retry — fall through to full pipeline
+      this.logger.info("Signal NOT found in DDB on retry — running full pipeline.", { code: "processor.retry_signal_not_found", accountId: message.accountId, sesMessageId: message.sesMessageId, receiveCount });
     }
 
     let processResult: Result<void, DbError | InvalidResponseError>;
@@ -423,6 +431,16 @@ export class SignalProcessor {
     const outcome = deriveOutcome(signal.matchedRules ?? []);
 
     this.logger.trackPoint("side_effect_received");
+
+    // Determine which effect types will execute
+    const effectTypes: string[] = [];
+    if (outcome.forwardAddresses.length > 0) effectTypes.push("forward");
+    if (!outcome.suppressNotification) effectTypes.push("notify");
+    if (outcome.doPong) effectTypes.push("pong");
+    if (outcome.autoReplyTemplateIds.length > 0) effectTypes.push("auto_reply");
+    if (outcome.autoDraftTemplateIds.length > 0) effectTypes.push("auto_draft");
+    if (signal.workflow === "scheduling") effectTypes.push("calendar");
+    this.logger.info("Outcome derived from matchedRules — executing side-effects.", { code: "processor.side_effect.outcome_derived", accountId, signalId: signal.id, arcId: arc.id, effectTypes });
 
     // Execute all indicated side-effects — individual failures are logged and do NOT cause batchItemFailure
 
@@ -589,7 +607,7 @@ export class SignalProcessor {
 
     // 2. Parse MIME
     const parsed = await this.mimeParser.parse(s3Key);
-    this.logger.trackPoint("parse");
+    this.logger.trackPoint("email_parsed");
 
     const recipientAddress = destination[0] ?? "";
     const senderETLD1 = getETLD1(parsed.from.address);
@@ -610,7 +628,7 @@ export class SignalProcessor {
         receivedAt: timestamp,
       }),
     ]);
-    this.logger.trackPoint("classify");
+    this.logger.trackPoint("email_processed");
 
     // Use the read cluster's embedding for arc matching (backward-compatible with single-cluster)
     const readCluster = getReadCluster();
@@ -650,19 +668,27 @@ export class SignalProcessor {
 
     // 6. Arc matching
     const groupingKey = deriveGroupingKey(classification.workflow, classification.workflowData, recipientAddress, senderETLD1);
+    this.logger.trackPoint("arc_matcher_values_generated");
     let matchedArc: Arc | null;
+    this.logger.trackPoint("arc_match_search");
     if (groupingKey) {
+      this.logger.trackPoint("arc_matcher_grouping_key_lookup");
       const gkResult = await this.store.findArcByGroupingKey(accountId, groupingKey);
       if (gkResult.isErr()) return err(gkResult.error);
       matchedArc = gkResult.value;
     } else {
+      this.logger.trackPoint("arc_matcher_similarity_search");
       const matchResult = await this.arcMatcher.findMatch(accountId, recipientAddress, embedding);
       if (matchResult.isErr()) return err(matchResult.error);
       matchedArc = matchResult.value;
+      if (matchedArc) {
+        this.logger.info("Similarity search returned match.", { code: "processor.arc_matcher.similarity_match", arcId: matchedArc.id, accountId, sesMessageId });
+      } else {
+        this.logger.info("Similarity search returned no match.", { code: "processor.arc_matcher.no_match", accountId, sesMessageId });
+      }
     }
 
     const isMatchedArc = matchedArc !== null;
-    this.logger.trackPoint("arc_match");
 
     // 7. Build arc shell (lastSignalAt applied after rules — archive outcome suppresses it on existing arcs)
     let arc: Arc;
@@ -673,6 +699,7 @@ export class SignalProcessor {
         summary: classification.summary,
         updatedAt: now,
       };
+      this.logger.info("Existing arc matched.", { code: "processor.arc_matched", arcId: arc.id, matchMethod: groupingKey ? "groupingKey" : "similarity", accountId, sesMessageId });
     } else {
       arc = {
         id: randomUUID(),
@@ -687,6 +714,7 @@ export class SignalProcessor {
         updatedAt: now,
         ...(ttl !== undefined ? { ttl } : {}),
       };
+      this.logger.info("New arc created.", { code: "processor.arc_created", arcId: arc.id, accountId, sesMessageId, ...(groupingKey ? { groupingKey } : {}) });
     }
 
     // 8. Assign system labels and merge classifier labels
@@ -743,7 +771,7 @@ export class SignalProcessor {
     const rules = rulesResult.value;
     const matchedRules = await applyRules(rules, { signal: signalShell, arc, isMatchedArc }, this.ruleEvaluator);
     const outcome = deriveOutcome(matchedRules);
-    this.logger.trackPoint("rules");
+    this.logger.trackPoint("rules_evaluated", { matchedRuleCount: matchedRules.length });
 
     // Fallback: if no rule set a status, apply filter mode for untrusted senders
     const hasStatusOutcome = outcome.block || outcome.quarantine || outcome.archive || outcome.delete;
@@ -807,6 +835,7 @@ export class SignalProcessor {
     if (!matchedArc) arc.urgency = signalUrgency;
 
     const signal: Signal = { ...signalShell, arcId: arc.id, matchedRules, urgency: signalUrgency };
+    this.logger.trackPoint("arc_updated", { arcId: arc.id });
 
     // 12. Pong (driven by SR-13 rule action)
     if (outcome.doPong && this.testReplier) {
@@ -848,10 +877,11 @@ export class SignalProcessor {
     // Save arc (leaf node) before signal (dependent node) — guarantees arc exists whenever signal exists
     const saveArcResult = await this.store.saveArc(arc);
     if (saveArcResult.isErr()) return err(saveArcResult.error);
+    this.logger.trackPoint("arc_saved", { arcId: arc.id });
 
     const saveSignalResult = await this.store.saveSignal(signal);
     if (saveSignalResult.isErr()) return err(saveSignalResult.error);
-    this.logger.trackPoint("save");
+    this.logger.trackPoint("signal_saved", { signalId: signal.id, arcId: arc.id });
 
     // 13. S3 retention — fire-and-forget (idempotent, always attempted)
     await this.attemptS3Retention(signal, accountCtx, arc);
@@ -996,6 +1026,7 @@ export class SignalProcessor {
   async executeAuroraUpserts(signal: Signal, arc: Arc): Promise<Result<void, ProcessError>> {
     const activeClusters = getActiveClusters();
     const primaryCluster = getReadCluster();
+    this.logger.trackPoint("aurora_upsert_start", { clusterCount: activeClusters.length });
 
     const results = await Promise.all(
       activeClusters.map(async (cluster) => {
@@ -1019,6 +1050,7 @@ export class SignalProcessor {
         if (upsertResult.isErr()) {
           return { cluster, success: false as const, error: upsertResult.error };
         }
+        this.logger.trackPoint("aurora_upsert_cluster_complete", { clusterId: cluster.clusterId });
         return { cluster, success: true as const };
       }),
     );
@@ -1040,6 +1072,7 @@ export class SignalProcessor {
       return err(processError(signal.id));
     }
 
+    this.logger.trackPoint("aurora_upsert_all_complete");
     return ok(undefined);
   }
 
@@ -1053,6 +1086,7 @@ export class SignalProcessor {
   async dispatchSideEffects(signal: Signal, arc: Arc): Promise<Result<void, ProcessError>> {
     if (!this.sqsDispatcher) return ok(undefined);
 
+    this.logger.trackPoint("side_effect_dispatch_start");
     const payload: SideEffectPayload = { signal, arc };
     const sendResult = await this.sqsDispatcher.sendMessage(payload);
     if (sendResult.isErr()) {
@@ -1060,6 +1094,8 @@ export class SignalProcessor {
       return err(processError(signal.id));
     }
 
+    this.logger.info("Side-effect SQS message dispatched.", { code: "processor.side_effect_dispatched", signalId: signal.id, arcId: arc.id, accountId: signal.accountId });
+    this.logger.trackPoint("side_effect_dispatch_complete");
     return ok(undefined);
   }
 
@@ -1071,6 +1107,7 @@ export class SignalProcessor {
   async attemptS3Retention(signal: Signal, accountCtx: ProcessorAccountContext, arc: Arc): Promise<void> {
     if (!this.retentionService) return;
 
+    this.logger.trackPoint("s3_retention_start");
     try {
       const retention = getRetentionForPlan(accountCtx.billingPlan);
       const retentionApplyResult = await ResultAsync.fromPromise(
@@ -1103,6 +1140,7 @@ export class SignalProcessor {
       const ttlSeconds = retentionDurationToSeconds(retention.retentionDuration);
       const arcTtl = Math.floor(Date.now() / 1000) + ttlSeconds;
       arc.ttl = arcTtl;
+      this.logger.trackPoint("s3_retention_complete");
     } catch (e) {
       this.logger.warn("S3 retention threw an unexpected error. The signal will use the default lifecycle rule. Processing continues unaffected.", { code: "processor.s3_retention_unexpected", accountId: signal.accountId, error: String(e) });
     }
