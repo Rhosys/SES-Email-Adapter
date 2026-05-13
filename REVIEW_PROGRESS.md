@@ -21,21 +21,22 @@
 | 13 | `processor.notification_failed` | processor.ts | TRACK | **Keep** | Same as #9. Notifier shouldn't be failing. TRACK surfaces it. Also fixed inconsistency: `processor.side_effect.notify_failed` in the SQS path was ERROR, changed to TRACK to match. |
 | 14 | `reindex.worker.segment_failed` | reindex-worker.ts | TRACK→**WARN** / ERROR | **Fixed (partial)** | Changed low-count from TRACK to WARN. But the threshold logic itself belongs in the handler, not in each processor — TODO added for the full SQS dispatch refactor. |
 | 15 | `reindex.worker.malformed_signal` | reindex-worker.ts | TRACK | **Removed** | The validation was pointless — the scan now uses `FilterExpression` to only return signal items (`#SIG#` in pk). Removed `isValidSignalForCopy`, the log call, and the associated tests. |
-| 16 | `reindex.worker.signal_upsert_failed` | reindex-worker.ts | TRACK | **Keep** | Per-signal failure within a batch. We can do something — next reindex run will pick it up. Transient Aurora throttling. |
+| 16 | `reindex.worker.signal_upsert_failed` | reindex-worker.ts | TRACK | **Removed** | All per-signal log calls removed. Errors now propagate via Result to `processSegment`, which logs a single ERROR summary with the failure list. |
+| 17 | `reindex.worker.s3_fetch_failed` | reindex-worker.ts | TRACK | **Removed** | Same — errors bubble up via Result. |
+| 18 | `reindex.worker.regeneration_failed` | reindex-worker.ts | TRACK | **Removed** | Same — errors bubble up via Result. |
+| 19 | `reindex.worker.unrecoverable` | reindex-worker.ts | WARN | **Removed** | Same — errors bubble up via Result. Permanent vs transient distinction is captured in the `reason` field of the error. |
 
 ## Remaining Reviews
 
-### reindex-worker.ts
-- `reindex.worker.s3_fetch_failed` (TRACK)
-- `reindex.worker.regeneration_failed` (TRACK)
-- `reindex.worker.unrecoverable` (TRACK)
-
 ### domain-health-job.ts
-- `domain_health.accounts_fetch_failed` (ERROR)
-- `domain_health.account_fetch_failed` (ERROR)
-- `domain_health.update_health_failed` (ERROR)
-- `domain_health.notification_failed` (ERROR)
-- `staleness_checker.account_error` (ERROR)
+
+| # | Code | Level | Verdict | Notes |
+|---|------|-------|---------|-------|
+| 20 | `domain_health.accounts_fetch_failed` | ERROR→**TRACK** | **Fixed** | Background job — no direct user-visible impact. TRACK with [Action Required]. |
+| 21 | `domain_health.account_fetch_failed` | ERROR→**TRACK** | **Fixed** | Same. Single account skipped, job continues. |
+| 22 | `domain_health.update_health_failed` | ERROR→**TRACK** | **Fixed** | Same. UI shows stale data until next run. |
+| 23 | `domain_health.notification_failed` | ERROR→**TRACK** | **Fixed** | Same. [Action Required] manually notify the account owner. |
+| 24 | `staleness_checker.account_error` | ERROR→**TRACK** | **Fixed** | Same. One account's staleness report skipped. |
 
 ### feedback-processor.ts
 - `feedback.parse_failed` (ERROR)
