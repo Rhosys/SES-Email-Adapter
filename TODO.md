@@ -5,6 +5,7 @@
 - [ ] **Review all log message levels**
 - [ ] **Review Lambda Authorizer**
 - [ ] **Never use fs sync anything** every call should be async when available, Sync is always wrong
+- [ ] **Capture all string literals as enums** — all discriminated string values (message types, workflow names, signal statuses, rule action types, etc.) should be defined as TypeScript enums or const objects, never inline string literals
 
 
 ---
