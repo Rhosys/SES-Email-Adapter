@@ -81,47 +81,107 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
   // Edge-case inputs
   // -------------------------------------------------------------------------
 
-  const RECEIVE_COUNTS = [2, 5, 30, 100] as const;
+  // receiveCount values that matter for branching:
+  // - 2: first retry (enters retry path, `receiveCount > 1`)
+  // - 30: at RETRY_TRACK_THRESHOLD (still logs at warn level)
+  // - 31: exceeds threshold (logs at error level on failure)
+  const RECEIVE_COUNTS = [2, 30, 31] as const;
 
-  const EMBEDDINGS: Record<string, number[]> = {
-    "single-element": [0.5],
-    "typical-3d": [0.1, -0.9, 0.5],
-    "full-size-1024": new Array(1024).fill(0),
-  };
+  // Embedding variations that exercise different Aurora upsert paths:
+  // - valid embedding: normal upsert path
+  // - undefined embeddings: Aurora upsert skipped for all clusters
+  // - wrong model key: Aurora upsert skipped (no matching modelId)
+  const SIGNAL_VARIANTS: Array<{ label: string; signal: Signal }> = [
+    {
+      label: "valid embedding for cluster model",
+      signal: {
+        id: "SES#msg-valid-emb",
+        arcId: "arc-valid-emb",
+        accountId: TEST_ACCOUNT_ID,
+        source: "email" as const,
+        receivedAt: "2024-01-15T10:00:00Z",
+        from: { address: "sender@external.com", name: "Sender" },
+        to: [{ address: "user@example.com" }],
+        cc: [],
+        subject: "Test email",
+        textBody: "Hello world",
+        attachments: [],
+        headers: {},
+        recipientAddress: "user@example.com",
+        workflow: "conversation" as Workflow,
+        workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false } as const,
+        spamScore: 0.01,
+        summary: "A test email.",
+        classificationModelId: "us.anthropic.claude-opus-4-5-20251101-v1:0",
+        s3Key: "emails/msg-valid-emb",
+        status: "active" as const,
+        createdAt: "2024-01-15T10:00:00Z",
+        embeddings: { "amazon.titan-embed-text-v2:0": [0.1, -0.5, 0.3] },
+        matchedRules: [],
+      } as Signal,
+    },
+    {
+      label: "embeddings undefined (Aurora upsert skipped)",
+      signal: {
+        id: "SES#msg-no-emb",
+        arcId: "arc-no-emb",
+        accountId: TEST_ACCOUNT_ID,
+        source: "email" as const,
+        receivedAt: "2024-01-15T10:00:00Z",
+        from: { address: "sender@external.com", name: "Sender" },
+        to: [{ address: "user@example.com" }],
+        cc: [],
+        subject: "Test email",
+        textBody: "Hello world",
+        attachments: [],
+        headers: {},
+        recipientAddress: "user@example.com",
+        workflow: "conversation" as Workflow,
+        workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false } as const,
+        spamScore: 0.01,
+        summary: "A test email.",
+        classificationModelId: "us.anthropic.claude-opus-4-5-20251101-v1:0",
+        s3Key: "emails/msg-no-emb",
+        status: "active" as const,
+        createdAt: "2024-01-15T10:00:00Z",
+        embeddings: undefined,
+        matchedRules: [],
+      } as Signal,
+    },
+    {
+      label: "embedding for wrong model (Aurora upsert skipped for cluster)",
+      signal: {
+        id: "SES#msg-wrong-model",
+        arcId: "arc-wrong-model",
+        accountId: TEST_ACCOUNT_ID,
+        source: "email" as const,
+        receivedAt: "2024-01-15T10:00:00Z",
+        from: { address: "sender@external.com", name: "Sender" },
+        to: [{ address: "user@example.com" }],
+        cc: [],
+        subject: "Test email",
+        textBody: "Hello world",
+        attachments: [],
+        headers: {},
+        recipientAddress: "user@example.com",
+        workflow: "conversation" as Workflow,
+        workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false } as const,
+        spamScore: 0.01,
+        summary: "A test email.",
+        classificationModelId: "us.anthropic.claude-opus-4-5-20251101-v1:0",
+        s3Key: "emails/msg-wrong-model",
+        status: "active" as const,
+        createdAt: "2024-01-15T10:00:00Z",
+        embeddings: { "cohere.embed-english-v3": [0.1, 0.2, 0.3] },
+        matchedRules: [],
+      } as Signal,
+    },
+  ];
 
-  const SIGNALS: Array<{ label: string; signal: Signal }> = Object.entries(EMBEDDINGS).map(([embLabel, vec]) => ({
-    label: embLabel,
-    signal: {
-      id: `SES#msg-${embLabel}`,
-      arcId: `arc-${embLabel}`,
-      accountId: TEST_ACCOUNT_ID,
-      source: "email" as const,
-      receivedAt: "2024-01-15T10:00:00Z",
-      from: { address: "sender@external.com", name: "Sender" },
-      to: [{ address: "user@example.com" }],
-      cc: [],
-      subject: "Test email",
-      textBody: "Hello world",
-      attachments: [],
-      headers: {},
-      recipientAddress: "user@example.com",
-      workflow: "conversation" as Workflow,
-      workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false } as const,
-      spamScore: 0.01,
-      summary: "A test email.",
-      classificationModelId: "us.anthropic.claude-opus-4-5-20251101-v1:0",
-      s3Key: `emails/msg-${embLabel}`,
-      status: "active" as const,
-      createdAt: "2024-01-15T10:00:00Z",
-      embeddings: { "amazon.titan-embed-text-v2:0": vec },
-      matchedRules: [],
-    } as Signal,
-  }));
-
-  // Build test cases: cross-product of signals × receive counts
-  const RETRY_CASES = SIGNALS.flatMap(({ label, signal }) =>
+  // Build test cases: cross-product of signal variants × receive counts
+  const RETRY_CASES = SIGNAL_VARIANTS.flatMap(({ label, signal }) =>
     RECEIVE_COUNTS.map((rc) => ({
-      label: `embedding=${label}, receiveCount=${rc}`,
+      label: `${label}, receiveCount=${rc}`,
       signal,
       receiveCount: rc,
     })),
@@ -267,7 +327,7 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
     expect(evaluateSpy).not.toHaveBeenCalled();
   });
 
-  it.each(RETRY_CASES)("Aurora upserts ARE called with the signal's cached embeddings on retry ($label)", async ({ signal, receiveCount }) => {
+  it.each(RETRY_CASES.filter(c => c.signal.embeddings?.["amazon.titan-embed-text-v2:0"]))("Aurora upserts ARE called with the signal's cached embeddings on retry ($label)", async ({ signal, receiveCount }) => {
     const arc = arbArcForSignal(signal);
     const sesMessageId = signal.id.replace("SES#", "");
     const auroraWriter = makeAuroraWriter();
@@ -294,6 +354,28 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
     });
   });
 
+  it.each(RETRY_CASES.filter(c => !c.signal.embeddings?.["amazon.titan-embed-text-v2:0"]))("Aurora upsert is SKIPPED when embedding is missing for cluster model ($label)", async ({ signal, receiveCount }) => {
+    const arc = arbArcForSignal(signal);
+    const sesMessageId = signal.id.replace("SES#", "");
+    const auroraWriter = makeAuroraWriter();
+
+    const processor = new SignalProcessor({
+      store: makeStore(signal, arc),
+      mimeParser: { parse: vi.fn() },
+      classifier: { classify: vi.fn() },
+      embeddingGenerator: { generateForActiveClusters: vi.fn(), generateForModel: vi.fn() },
+      auroraWriter,
+      arcMatcher: { findMatch: vi.fn().mockReturnValue(okAsync(null)), upsertEmbedding: vi.fn().mockReturnValue(okAsync(undefined)) },
+      ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
+      logger: mockLogger,
+    });
+
+    await processor.process(makeSqsEvent(sesMessageId, receiveCount));
+
+    // Aurora upsert is NOT called when embedding is missing for the cluster's model
+    expect(auroraWriter.upsertEmbedding).not.toHaveBeenCalled();
+  });
+
   it.each(RETRY_CASES)("result is NOT a batchItemFailure on retry when signal exists in DDB ($label)", async ({ signal, receiveCount }) => {
     const arc = arbArcForSignal(signal);
     const sesMessageId = signal.id.replace("SES#", "");
@@ -311,6 +393,82 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
 
     const result = await processor.process(makeSqsEvent(sesMessageId, receiveCount));
     expect(result.batchItemFailures).toEqual([]);
+  });
+
+  // -------------------------------------------------------------------------
+  // Boundary: arcId falsy on retry → early error return
+  // The code checks `if (!signal.arcId) return err(processError(...))`
+  // -------------------------------------------------------------------------
+
+  const FALSY_ARC_ID_CASES = [
+    { label: "arcId=undefined (signal saved before arc assignment)", arcId: undefined },
+    { label: "arcId='' (empty string — falsy)", arcId: "" },
+  ] as const;
+
+  it.each(FALSY_ARC_ID_CASES)("returns batchItemFailure when signal exists but $label", async ({ arcId }) => {
+    const signal: Signal = {
+      id: "SES#msg-no-arc",
+      arcId: arcId as string | undefined,
+      accountId: TEST_ACCOUNT_ID,
+      source: "email" as const,
+      receivedAt: "2024-01-15T10:00:00Z",
+      from: { address: "sender@external.com", name: "Sender" },
+      to: [{ address: "user@example.com" }],
+      cc: [],
+      subject: "Test email",
+      textBody: "Hello world",
+      attachments: [],
+      headers: {},
+      recipientAddress: "user@example.com",
+      workflow: "conversation" as Workflow,
+      workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false } as const,
+      spamScore: 0.01,
+      summary: "A test email.",
+      classificationModelId: "us.anthropic.claude-opus-4-5-20251101-v1:0",
+      s3Key: "emails/msg-no-arc",
+      status: "active" as const,
+      createdAt: "2024-01-15T10:00:00Z",
+      embeddings: { "amazon.titan-embed-text-v2:0": [0.1, 0.2] },
+      matchedRules: [],
+    } as Signal;
+
+    const store: ProcessorDatabase = {
+      getSignalByMessageId: vi.fn().mockReturnValue(okAsync(signal)),
+      saveSignal: vi.fn().mockReturnValue(okAsync(undefined)),
+      updateSignalRetention: vi.fn().mockReturnValue(okAsync(undefined)),
+      getArc: vi.fn().mockReturnValue(okAsync(null)),
+      findArcByGroupingKey: vi.fn().mockReturnValue(okAsync(null)),
+      saveArc: vi.fn().mockReturnValue(okAsync(undefined)),
+      listEnabledRules: vi.fn().mockReturnValue(okAsync(SYSTEM_RULES)),
+      getProcessorAccountContext: vi.fn().mockReturnValue(okAsync(DEFAULT_CTX)),
+      saveAlias: vi.fn().mockImplementation((a: Alias) => okAsync(a)),
+      getSender: vi.fn().mockReturnValue(okAsync(DEFAULT_SENDER_ENTRY)),
+      saveSender: vi.fn().mockReturnValue(okAsync(undefined)),
+      getTemplate: vi.fn().mockReturnValue(okAsync(null)),
+      updateGlobalReputation: vi.fn().mockReturnValue(okAsync(undefined)),
+      getDomainByName: vi.fn().mockReturnValue(okAsync(null)),
+    };
+
+    const auroraWriter = makeAuroraWriter();
+
+    const processor = new SignalProcessor({
+      store,
+      mimeParser: { parse: vi.fn() },
+      classifier: { classify: vi.fn() },
+      embeddingGenerator: { generateForActiveClusters: vi.fn(), generateForModel: vi.fn() },
+      auroraWriter,
+      arcMatcher: { findMatch: vi.fn().mockReturnValue(okAsync(null)), upsertEmbedding: vi.fn().mockReturnValue(okAsync(undefined)) },
+      ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
+      logger: mockLogger,
+    });
+
+    const result = await processor.process(makeSqsEvent("msg-no-arc", 2));
+
+    expect(result.batchItemFailures).toHaveLength(1);
+    // No Aurora upserts should execute when arcId is falsy
+    expect(auroraWriter.upsertEmbedding).not.toHaveBeenCalled();
+    // No DDB writes should execute
+    expect(store.saveSignal).not.toHaveBeenCalled();
   });
 });
 
@@ -457,15 +615,17 @@ describe("Feature: signal-processor-retry-resilience, Property 3: DDB read failu
   // -------------------------------------------------------------------------
 
   const DDB_ERRORS = [
-    { label: "empty message", error: dbError(new Error("DDB error: ")) },
-    { label: "short message", error: dbError(new Error("DDB error: x")) },
     { label: "connection timeout", error: dbError(new Error("DDB error: Connection timeout")) },
-    { label: "long message", error: dbError(new Error(`DDB error: ${"A".repeat(200)}`)) },
+    { label: "throughput exceeded", error: dbError(new Error("DDB error: ProvisionedThroughputExceededException")) },
   ] as const;
 
-  const RETRY_RECEIVE_COUNTS = [2, 5, 30, 50] as const;
+  // receiveCount values that exercise different log-level branches on failure:
+  // - 2: first retry (warn level)
+  // - 30: at threshold (warn level — threshold is >30)
+  // - 31: exceeds threshold (error level)
+  const RETRY_RECEIVE_COUNTS = [2, 30, 31] as const;
 
-  const SES_MESSAGE_IDS = ["abc123", "a1b2c3d4-e5f6-7890-abcd-ef1234567890", "x"] as const;
+  const SES_MESSAGE_IDS = ["abc123", "a1b2c3d4-e5f6-7890-abcd-ef1234567890"] as const;
 
   const SIGNAL_READ_FAILURE_CASES = DDB_ERRORS.flatMap(({ label: errLabel, error }) =>
     RETRY_RECEIVE_COUNTS.flatMap((rc) =>
@@ -700,10 +860,9 @@ describe("Feature: signal-processor-retry-resilience, Property 2: Missing signal
   // -------------------------------------------------------------------------
 
   const MISSING_SIGNAL_CASES = [
-    { label: "receiveCount=2, short msgId", receiveCount: 2, sesMessageId: "abc" },
-    { label: "receiveCount=5, uuid msgId", receiveCount: 5, sesMessageId: "a1b2c3d4e5f67890abcdef1234567890" },
-    { label: "receiveCount=30, typical msgId", receiveCount: 30, sesMessageId: "msg001122334455" },
-    { label: "receiveCount=50, long msgId", receiveCount: 50, sesMessageId: "abcdefghijklmnopqrstuvwxyz1234" },
+    { label: "receiveCount=2 (first retry — enters retry path, falls through to full pipeline)", receiveCount: 2, sesMessageId: "msg-missing-first-retry" },
+    { label: "receiveCount=30 (at threshold — still warn level on failure)", receiveCount: 30, sesMessageId: "msg-missing-at-threshold" },
+    { label: "receiveCount=31 (exceeds threshold — error level on failure)", receiveCount: 31, sesMessageId: "msg-missing-over-threshold" },
   ] as const;
 
   it.each(MISSING_SIGNAL_CASES)("MIME parser IS called when signal does not exist on retry ($label)", async ({ receiveCount, sesMessageId }) => {
@@ -829,45 +988,43 @@ describe("Feature: signal-processor-retry-resilience, Property 8: Outcome re-der
 
   const MATCHED_RULES_CASES = [
     {
-      label: "single rule with forward action",
+      label: "empty matchedRules (no actions — default outcome)",
+      matchedRules: [],
+    },
+    {
+      label: "single forward action (triggers side-effect dispatch)",
       matchedRules: [{ ruleId: "rule-1", actions: [{ type: "forward", value: "fwd@example.com" }], labelsAdded: [], statusChange: undefined }],
     },
     {
-      label: "multiple rules with mixed actions",
+      label: "pong action (triggers test reply side-effect)",
+      matchedRules: [{ ruleId: "rule-pong", actions: [{ type: "pong" }], labelsAdded: [], statusChange: undefined }],
+    },
+    {
+      label: "suppress_notification (suppresses notify side-effect)",
+      matchedRules: [{ ruleId: "rule-suppress", actions: [{ type: "suppress_notification" }], labelsAdded: [], statusChange: undefined }],
+    },
+    {
+      label: "block action (first-wins status: blocked)",
+      matchedRules: [{ ruleId: "rule-block", actions: [{ type: "block" }], labelsAdded: [], statusChange: "blocked" as const }],
+    },
+    {
+      label: "conflicting status actions (first-wins: block beats archive)",
       matchedRules: [
-        { ruleId: "rule-1", actions: [{ type: "assign_label", value: "important" }], labelsAdded: ["important"], statusChange: undefined },
-        { ruleId: "rule-2", actions: [{ type: "archive" }], labelsAdded: [], statusChange: "archived" as const },
+        { ruleId: "rule-block", actions: [{ type: "block" }], labelsAdded: [], statusChange: "blocked" as const },
+        { ruleId: "rule-archive", actions: [{ type: "archive" }], labelsAdded: [], statusChange: "archived" as const },
       ],
     },
     {
-      label: "rule with all action types",
-      matchedRules: [{
-        ruleId: "rule-all",
-        actions: [
-          { type: "forward", value: "fwd@example.com" },
-          { type: "assign_label", value: "urgent" },
-          { type: "pong" },
-        ],
-        labelsAdded: ["urgent"],
-        statusChange: undefined,
-      }],
-    },
-    {
-      label: "many rules (5)",
-      matchedRules: Array.from({ length: 5 }, (_, i) => ({
-        ruleId: `rule-${i}`,
-        actions: [{ type: "assign_label", value: `label-${i}` }],
-        labelsAdded: [`label-${i}`],
-        statusChange: undefined,
-      })),
-    },
-    {
-      label: "rule with suppress_notification",
-      matchedRules: [{ ruleId: "rule-suppress", actions: [{ type: "suppress_notification" }], labelsAdded: [], statusChange: undefined }],
+      label: "multiple non-status actions (forward + label + suppress)",
+      matchedRules: [
+        { ruleId: "rule-fwd", actions: [{ type: "forward", value: "fwd@example.com" }, { type: "assign_label", value: "urgent" }], labelsAdded: ["urgent"], statusChange: undefined },
+        { ruleId: "rule-suppress", actions: [{ type: "suppress_notification" }], labelsAdded: [], statusChange: undefined },
+      ],
     },
   ] as const;
 
-  const RECEIVE_COUNTS = [2, 5, 10] as const;
+  // Only test receive counts that exercise different code paths
+  const RECEIVE_COUNTS = [2, 31] as const;
 
   const PROP8_CASES = MATCHED_RULES_CASES.flatMap(({ label: ruleLabel, matchedRules }) =>
     RECEIVE_COUNTS.map((rc) => ({
