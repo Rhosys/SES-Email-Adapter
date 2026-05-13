@@ -33,13 +33,13 @@ const accountingCases: Array<[string, { copiedCount: number; regeneratedCount: n
 ];
 
 const missingFieldCases: Array<[string, { copiedCount?: number; regeneratedCount?: number; unrecoverableCount?: number }]> = [
-  ["all fields missing — defaults to 0", { copiedCount: undefined, regeneratedCount: undefined, unrecoverableCount: undefined }],
-  ["only copiedCount present", { copiedCount: 500, regeneratedCount: undefined, unrecoverableCount: undefined }],
-  ["only regeneratedCount present", { copiedCount: undefined, regeneratedCount: 300, unrecoverableCount: undefined }],
-  ["only unrecoverableCount present", { copiedCount: undefined, regeneratedCount: undefined, unrecoverableCount: 10 }],
-  ["copiedCount missing", { copiedCount: undefined, regeneratedCount: 200, unrecoverableCount: 50 }],
-  ["regeneratedCount missing", { copiedCount: 400, regeneratedCount: undefined, unrecoverableCount: 30 }],
-  ["unrecoverableCount missing", { copiedCount: 400, regeneratedCount: 200, unrecoverableCount: undefined }],
+  ["all fields missing — defaults to 0", {}],
+  ["only copiedCount present", { copiedCount: 500 }],
+  ["only regeneratedCount present", { regeneratedCount: 300 }],
+  ["only unrecoverableCount present", { unrecoverableCount: 10 }],
+  ["copiedCount missing", { regeneratedCount: 200, unrecoverableCount: 50 }],
+  ["regeneratedCount missing", { copiedCount: 400, unrecoverableCount: 30 }],
+  ["unrecoverableCount missing", { copiedCount: 400, regeneratedCount: 200 }],
 ];
 
 // ---------------------------------------------------------------------------
