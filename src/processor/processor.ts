@@ -604,10 +604,6 @@ export class SignalProcessor {
     const signalUrgency = outcome.urgency ?? arc.urgency ?? "normal";
     if (!matchedArc) arc.urgency = signalUrgency;
 
-    // 11b. Save arc (leaf node) — must succeed before signal save
-    const saveArcResult = await this.store.saveArc(arc);
-    if (saveArcResult.isErr()) return err(saveArcResult.error);
-
     const signal: Signal = { ...signalShell, arcId: arc.id, matchedRules, urgency: signalUrgency };
 
     // 12. Pong (driven by SR-13 rule action)
@@ -646,6 +642,10 @@ export class SignalProcessor {
       }
       signal.embeddings = embeddings;
     }
+
+    // Save arc (leaf node) before signal (dependent node) — guarantees arc exists whenever signal exists
+    const saveArcResult = await this.store.saveArc(arc);
+    if (saveArcResult.isErr()) return err(saveArcResult.error);
 
     const saveSignalResult = await this.store.saveSignal(signal);
     if (saveSignalResult.isErr()) return err(saveSignalResult.error);
@@ -740,13 +740,8 @@ export class SignalProcessor {
       }
     }
 
-    // Final arc write: persist pong/auto-reply sentMessageIds and TTL mutations accumulated after the initial arc save
-    if (arc.sentMessageIds?.length || arc.ttl) {
-      const updateArcResult = await this.store.saveArc(arc);
-      if (updateArcResult.isErr()) {
-        this.logger.track("Failed to persist post-save arc mutations (sentMessageIds, TTL). The DynamoDB put returned an error. Arc state may be stale for these fields. Tracked for data consistency monitoring.", { code: "processor.arc_update_failed", accountId, error: String(updateArcResult.error.cause) });
-      }
-    }
+    // Note: arc was saved earlier (before signal). Later mutations (TTL from S3 retention,
+    // sentMessageIds from auto-reply) will be persisted when side-effects move to a separate handler.
 
     // 16. Auto-draft (create held draft signals from templates)
     if (outcome.autoDraftTemplateIds.length > 0) {
