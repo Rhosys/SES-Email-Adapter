@@ -57,13 +57,96 @@ function rewrite(uri: string): string {
 
 describe("CloudFront SPA rewrite function", () => {
   describe("Property 1: PR prefix deep-link routing", () => {
-    it.todo("rewrites PR deep links without dot to /pr/{slug}/index.html");
-    it.todo("passes through PR static files (dot in final segment) unchanged");
+    /** Validates: Requirements 1.1, 1.3 */
+
+    const slugArb = fc.stringMatching(/^[a-z0-9-]{1,63}$/);
+    const routeSegmentArb = fc.stringMatching(/^[a-z0-9-]+$/);
+
+    it("rewrites PR deep links without dot to /pr/{slug}/index.html", () => {
+      fc.assert(
+        fc.property(
+          slugArb,
+          fc.array(routeSegmentArb, { minLength: 1, maxLength: 5 }),
+          (slug, segments) => {
+            const uri = `/pr/${slug}/${segments.join("/")}`;
+            expect(rewrite(uri)).toBe(`/pr/${slug}/index.html`);
+          }
+        ),
+        { numRuns: 200 }
+      );
+    });
+
+    it("passes through PR static files (dot in final segment) unchanged", () => {
+      const fileNameArb = fc.stringMatching(/^[a-z0-9-]+\.[a-z]{2,4}$/);
+
+      fc.assert(
+        fc.property(
+          slugArb,
+          fc.array(routeSegmentArb, { minLength: 0, maxLength: 4 }),
+          fileNameArb,
+          (slug, middleSegments, fileName) => {
+            const pathParts = [slug, ...middleSegments, fileName];
+            const uri = `/pr/${pathParts.join("/")}`;
+            expect(rewrite(uri)).toBe(uri);
+          }
+        ),
+        { numRuns: 200 }
+      );
+    });
   });
 
   describe("Property 2: Root-level SPA routing", () => {
-    it.todo("rewrites root SPA routes to /main/2026/index.html");
-    it.todo("prepends /main/2026 to root static file URIs");
+    /** Validates: Requirements 2.1, 2.2 */
+
+    const pathSegment = fc.stringOf(
+      fc.constantFrom(..."abcdefghijklmnopqrstuvwxyz0123456789-".split("")),
+      { minLength: 1, maxLength: 20 },
+    );
+
+    const nonPrFirstSegment = pathSegment.filter((s) => s !== "pr");
+
+    it("rewrites root SPA routes to /main/2026/index.html", () => {
+      fc.assert(
+        fc.property(
+          nonPrFirstSegment,
+          fc.array(pathSegment, { minLength: 0, maxLength: 4 }),
+          (first, rest) => {
+            const uri = "/" + [first, ...rest].join("/");
+            expect(rewrite(uri)).toBe("/main/2026/index.html");
+          },
+        ),
+        { numRuns: 100 },
+      );
+    });
+
+    it("prepends /main/2026 to root static file URIs", () => {
+      const fileExtension = fc.constantFrom(
+        ".js",
+        ".css",
+        ".html",
+        ".ico",
+        ".json",
+        ".txt",
+        ".svg",
+        ".woff2",
+      );
+      const fileName = fc
+        .tuple(pathSegment, fileExtension)
+        .map(([name, ext]) => name + ext);
+
+      fc.assert(
+        fc.property(
+          nonPrFirstSegment,
+          fc.array(pathSegment, { minLength: 0, maxLength: 3 }),
+          fileName,
+          (first, middle, file) => {
+            const uri = "/" + [first, ...middle, file].join("/");
+            expect(rewrite(uri)).toBe("/main/2026" + uri);
+          },
+        ),
+        { numRuns: 100 },
+      );
+    });
   });
 
   describe("Property 3: Bare prefix rewrite regardless of slug content", () => {
