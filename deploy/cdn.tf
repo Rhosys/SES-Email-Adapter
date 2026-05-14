@@ -338,6 +338,11 @@ function handler(event) {
   var uri = request.uri;
   var MAIN_PREFIX = '/${local.site_version}';
 
+  // Bare /pr with no trailing slash — pass through unchanged
+  if (uri === '/pr') {
+    return request;
+  }
+
   // PR preview prefix — rewrite SPA routes to prefix-scoped index.html
   if (uri.startsWith('/pr/')) {
     var segments = uri.split('/');
