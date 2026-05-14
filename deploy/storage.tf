@@ -3,7 +3,7 @@
 # ---------------------------------------------------------------------------
 
 resource "aws_s3_bucket" "emails" {
-  bucket           = "${lower(var.service_name)}-emails-${var.aws_account_id}-eu-west-1-an"
+  bucket           = "${lower(var.service_name)}-emails-${var.aws_account_id}-eu-central-1-an"
   bucket_namespace = "account-regional"
 }
 
@@ -191,7 +191,7 @@ resource "aws_dynamodb_table" "accounts" {
   stream_view_type = "NEW_AND_OLD_IMAGES"
 
   replica {
-    region_name = "eu-central-1"
+    region_name = "eu-central-2"
   }
 }
 
@@ -244,7 +244,7 @@ resource "aws_dynamodb_table" "signals" {
   stream_view_type = "NEW_AND_OLD_IMAGES"
 
   replica {
-    region_name = "eu-central-1"
+    region_name = "eu-central-2"
   }
 }
 
@@ -275,7 +275,7 @@ resource "aws_dynamodb_table" "processing" {
   stream_view_type = "NEW_AND_OLD_IMAGES"
 
   replica {
-    region_name = "eu-central-1"
+    region_name = "eu-central-2"
   }
 }
 

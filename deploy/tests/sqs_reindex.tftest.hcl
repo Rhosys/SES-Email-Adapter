@@ -1,6 +1,5 @@
 mock_provider "aws" {}
 mock_provider "aws" { alias = "us_east_1" }
-mock_provider "aws" { alias = "eu_central_1" }
 
 variables {
   aws_account_id = "123456789012"
@@ -15,10 +14,10 @@ variables {
 override_resource {
   target = aws_rds_cluster.aurora
   values = {
-    arn = "arn:aws:rds:eu-west-1:123456789012:cluster:test-aurora"
+    arn = "arn:aws:rds:eu-central-1:123456789012:cluster:test-aurora"
     master_user_secret = [{
-      secret_arn    = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:test"
-      kms_key_id    = "arn:aws:kms:eu-west-1:123456789012:key/test-key"
+      secret_arn    = "arn:aws:secretsmanager:eu-central-1:123456789012:secret:test"
+      kms_key_id    = "arn:aws:kms:eu-central-1:123456789012:key/test-key"
       secret_status = "active"
     }]
   }
@@ -34,15 +33,15 @@ override_resource {
 override_resource {
   target = aws_lambda_alias.production
   values = {
-    arn        = "arn:aws:lambda:eu-west-1:123456789012:function:test-main:production"
-    invoke_arn = "arn:aws:apigateway:eu-west-1:lambda:path/2015-03-31/functions/arn:aws:lambda:eu-west-1:123456789012:function:test-main:production/invocations"
+    arn        = "arn:aws:lambda:eu-central-1:123456789012:function:test-main:production"
+    invoke_arn = "arn:aws:apigateway:eu-central-1:lambda:path/2015-03-31/functions/arn:aws:lambda:eu-central-1:123456789012:function:test-main:production/invocations"
   }
 }
 
 override_resource {
   target = aws_cloudwatch_log_group.api_gateway
   values = {
-    arn = "arn:aws:logs:eu-west-1:123456789012:log-group:/aws/apigateway/test"
+    arn = "arn:aws:logs:eu-central-1:123456789012:log-group:/aws/apigateway/test"
   }
 }
 
@@ -63,35 +62,35 @@ override_resource {
 override_resource {
   target = aws_sns_topic.ses_notifications
   values = {
-    arn = "arn:aws:sns:eu-west-1:123456789012:ses-notifications"
+    arn = "arn:aws:sns:eu-central-1:123456789012:ses-notifications"
   }
 }
 
 override_resource {
   target = aws_sns_topic.ses_feedback
   values = {
-    arn = "arn:aws:sns:eu-west-1:123456789012:ses-feedback"
+    arn = "arn:aws:sns:eu-central-1:123456789012:ses-feedback"
   }
 }
 
 override_resource {
   target = aws_apigatewayv2_api.main
   values = {
-    execution_arn = "arn:aws:execute-api:eu-west-1:123456789012:testapi123"
+    execution_arn = "arn:aws:execute-api:eu-central-1:123456789012:testapi123"
   }
 }
 
 override_resource {
   target = aws_apigatewayv2_api.ws
   values = {
-    execution_arn = "arn:aws:execute-api:eu-west-1:123456789012:testwsapi1"
+    execution_arn = "arn:aws:execute-api:eu-central-1:123456789012:testwsapi1"
   }
 }
 
 override_resource {
   target = aws_cloudwatch_event_rule.domain_health
   values = {
-    arn = "arn:aws:events:eu-west-1:123456789012:rule/domain-health"
+    arn = "arn:aws:events:eu-central-1:123456789012:rule/domain-health"
   }
 }
 

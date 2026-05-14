@@ -194,7 +194,7 @@ resource "aws_secretsmanager_secret_version" "cf_origin_secret" {
 # ---------------------------------------------------------------------------
 
 resource "aws_s3_bucket" "web" {
-  bucket           = "${lower(var.service_name)}-web-${var.aws_account_id}-eu-west-1-an"
+  bucket           = "${lower(var.service_name)}-web-${var.aws_account_id}-eu-central-1-an"
   bucket_namespace = "account-regional"
 }
 
