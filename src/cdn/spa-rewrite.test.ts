@@ -26,6 +26,14 @@ function handler(event: { request: CfRequest }): CfRequest {
       return request;
     }
 
+    // Bare prefix: /pr/{slug} or /pr/{slug}/ — always rewrite regardless of dot in slug
+    // segments for /pr/{slug} = ['', 'pr', slug] (length 3)
+    // segments for /pr/{slug}/ = ['', 'pr', slug, ''] (length 4, last is empty)
+    if (segments.length === 3 || (segments.length === 4 && segments[3] === "")) {
+      request.uri = "/pr/" + slug + "/index.html";
+      return request;
+    }
+
     const lastSegment = segments[segments.length - 1];
     if (lastSegment.includes(".")) {
       return request;
@@ -98,10 +106,7 @@ describe("CloudFront SPA rewrite function", () => {
   describe("Property 2: Root-level SPA routing", () => {
     /** Validates: Requirements 2.1, 2.2 */
 
-    const pathSegment = fc.stringOf(
-      fc.constantFrom(..."abcdefghijklmnopqrstuvwxyz0123456789-".split("")),
-      { minLength: 1, maxLength: 20 },
-    );
+    const pathSegment = fc.stringMatching(/^[a-z0-9-]{1,20}$/);
 
     const nonPrFirstSegment = pathSegment.filter((s) => s !== "pr");
 
@@ -150,7 +155,32 @@ describe("CloudFront SPA rewrite function", () => {
   });
 
   describe("Property 3: Bare prefix rewrite regardless of slug content", () => {
-    it.todo("rewrites /pr/{slug} and /pr/{slug}/ to /pr/{slug}/index.html");
+    /** Validates: Requirements 1.2, 3.1 */
+
+    const slugWithDotsArb = fc.stringOf(
+      fc.constantFrom(..."abcdefghijklmnopqrstuvwxyz0123456789.-".split("")),
+      { minLength: 1, maxLength: 63 },
+    );
+
+    it("rewrites /pr/{slug} (no trailing slash) to /pr/{slug}/index.html", () => {
+      fc.assert(
+        fc.property(slugWithDotsArb, (slug) => {
+          const uri = `/pr/${slug}`;
+          expect(rewrite(uri)).toBe(`/pr/${slug}/index.html`);
+        }),
+        { numRuns: 200 },
+      );
+    });
+
+    it("rewrites /pr/{slug}/ (trailing slash) to /pr/{slug}/index.html", () => {
+      fc.assert(
+        fc.property(slugWithDotsArb, (slug) => {
+          const uri = `/pr/${slug}/`;
+          expect(rewrite(uri)).toBe(`/pr/${slug}/index.html`);
+        }),
+        { numRuns: 200 },
+      );
+    });
   });
 
   describe("Edge cases", () => {
