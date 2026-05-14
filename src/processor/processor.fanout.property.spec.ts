@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import type { SQSEvent } from "aws-lambda";
-import { okAsync } from "neverthrow";
+import { ok, okAsync } from "neverthrow";
 import { SignalProcessor, SYSTEM_RULES } from "./processor.js";
 import { JsonLogicRuleEvaluator } from "./rule-evaluator.js";
 import type { ProcessorDatabase, ArcMatcher } from "./processor.js";
@@ -188,7 +188,7 @@ describe("Multi-cluster fanout writes vectors to every active target", () => {
     }));
 
     const embeddingGenerator: EmbeddingGenerator = {
-      generateForActiveClusters: vi.fn().mockResolvedValue(embeddingResults),
+      generateForActiveClusters: vi.fn().mockResolvedValue(embeddingResults.map((r) => ok(r))),
       generateForModel: vi.fn().mockImplementation(async (_: string, modelId: string) => {
         const result = embeddingResults.find((r) => r.modelId === modelId);
         if (!result) throw new Error(`Model ${modelId} not found`);
@@ -238,7 +238,7 @@ describe("Multi-cluster fanout writes vectors to every active target", () => {
     }));
 
     const embeddingGenerator: EmbeddingGenerator = {
-      generateForActiveClusters: vi.fn().mockResolvedValue(embeddingResults),
+      generateForActiveClusters: vi.fn().mockResolvedValue(embeddingResults.map((r) => ok(r))),
       generateForModel: vi.fn().mockImplementation(async (_: string, modelId: string) => {
         const result = embeddingResults.find((r) => r.modelId === modelId);
         if (!result) throw new Error(`Model ${modelId} not found`);
@@ -289,7 +289,7 @@ describe("Multi-cluster fanout writes vectors to every active target", () => {
     }));
 
     const embeddingGenerator: EmbeddingGenerator = {
-      generateForActiveClusters: vi.fn().mockResolvedValue(embeddingResults),
+      generateForActiveClusters: vi.fn().mockResolvedValue(embeddingResults.map((r) => ok(r))),
       generateForModel: vi.fn().mockResolvedValue(embeddingResults[0]!),
     };
 

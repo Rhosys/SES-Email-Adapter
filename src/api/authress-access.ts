@@ -1,5 +1,8 @@
 import { AuthressClient } from "@authress/sdk";
 import type { AccessRecord } from "@authress/sdk";
+import { ResultAsync } from "neverthrow";
+import { ok, err, authressServiceError } from "../errors.js";
+import type { AuthressServiceError, Result } from "../errors.js";
 import type { AccessService, AccountUser, AccountRole } from "./app.js";
 
 const AUTHRESS_API_URL = "https://login.rhosys.cloud";
@@ -44,43 +47,71 @@ function recordId(accountId: string): string {
   return `email:account-${accountId}`;
 }
 
+function isNotFound(e: unknown): boolean {
+  const status = (e as { status?: number }).status
+    ?? (e as { response?: { status?: number } }).response?.status;
+  return status === 404;
+}
+
+function toError(e: unknown): Error {
+  return e instanceof Error ? e : new Error(String(e));
+}
+
 export class AuthressAccessService implements AccessService {
   private get client() {
     return getClient();
   }
 
-  async listUsers(accountId: string): Promise<AccountUser[]> {
-    try {
-      const response = await this.client.accessRecords.getRecord(recordId(accountId));
-      return parseUsers(response.data);
-    } catch {
-      return [];
-    }
+  listUsers(accountId: string): ResultAsync<AccountUser[], AuthressServiceError> {
+    return ResultAsync.fromPromise(
+      (async () => {
+        try {
+          const response = await this.client.accessRecords.getRecord(recordId(accountId));
+          return parseUsers(response.data);
+        } catch (e) {
+          if (isNotFound(e)) return [];
+          throw e;
+        }
+      })(),
+      (e) => authressServiceError(toError(e)),
+    );
   }
 
-  async addUser(accountId: string, userId: string, role: AccountRole): Promise<void> {
-    await this._upsertUser(accountId, userId, role);
+  addUser(accountId: string, userId: string, role: AccountRole): ResultAsync<void, AuthressServiceError> {
+    return ResultAsync.fromPromise(
+      this._upsertUser(accountId, userId, role),
+      (e) => authressServiceError(toError(e)),
+    );
   }
 
-  async updateUserRole(accountId: string, userId: string, role: AccountRole): Promise<void> {
-    await this._upsertUser(accountId, userId, role);
+  updateUserRole(accountId: string, userId: string, role: AccountRole): ResultAsync<void, AuthressServiceError> {
+    return ResultAsync.fromPromise(
+      this._upsertUser(accountId, userId, role),
+      (e) => authressServiceError(toError(e)),
+    );
   }
 
-  async removeUser(accountId: string, userId: string): Promise<void> {
-    const rid = recordId(accountId);
-    let record: AccessRecord;
-    try {
-      const response = await this.client.accessRecords.getRecord(rid);
-      record = response.data;
-    } catch {
-      return;
-    }
+  removeUser(accountId: string, userId: string): ResultAsync<void, AuthressServiceError> {
+    return ResultAsync.fromPromise(
+      (async () => {
+        const rid = recordId(accountId);
+        let record: AccessRecord;
+        try {
+          const response = await this.client.accessRecords.getRecord(rid);
+          record = response.data;
+        } catch (e) {
+          if (isNotFound(e)) return;
+          throw e;
+        }
 
-    const statements = record.statements
-      .map((stmt) => ({ ...stmt, users: (stmt.users ?? []).filter((u) => u.userId !== userId) }))
-      .filter((stmt) => (stmt.users ?? []).length > 0);
+        const statements = record.statements
+          .map((stmt) => ({ ...stmt, users: (stmt.users ?? []).filter((u) => u.userId !== userId) }))
+          .filter((stmt) => (stmt.users ?? []).length > 0);
 
-    await this.client.accessRecords.updateRecord(rid, { ...record, statements });
+        await this.client.accessRecords.updateRecord(rid, { ...record, statements });
+      })(),
+      (e) => authressServiceError(toError(e)),
+    );
   }
 
   async checkAccess(userId: string, accountId: string, permission: string): Promise<void> {
@@ -96,7 +127,9 @@ export class AuthressAccessService implements AccessService {
     try {
       const response = await this.client.accessRecords.getRecord(rid);
       existing = response.data;
-    } catch { /* record doesn't exist yet — will create */ }
+    } catch (e) {
+      if (!isNotFound(e)) throw e;
+    }
 
     if (!existing) {
       await this.client.accessRecords.createRecord({

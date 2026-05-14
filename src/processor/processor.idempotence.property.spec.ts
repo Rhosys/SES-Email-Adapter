@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import type { SQSEvent } from "aws-lambda";
-import { okAsync } from "neverthrow";
+import { ok, okAsync } from "neverthrow";
 import { SignalProcessor, SYSTEM_RULES } from "./processor.js";
 import { JsonLogicRuleEvaluator } from "./rule-evaluator.js";
 import type { ProcessorDatabase, ArcMatcher } from "./processor.js";
@@ -143,8 +143,8 @@ describe("Cross-layer idempotence — live writes + cache + Aurora", () => {
 
     const embeddingGenerator: EmbeddingGenerator = {
       generateForActiveClusters: vi.fn().mockResolvedValue([
-        { modelId: "amazon.titan-embed-text-v2:0", vector: VECTOR, dimensions: 1024 },
-      ] as EmbeddingResult[]),
+        ok({ modelId: "amazon.titan-embed-text-v2:0", vector: VECTOR, dimensions: 1024 }),
+      ]),
       generateForModel: vi.fn().mockResolvedValue(
         { modelId: "amazon.titan-embed-text-v2:0", vector: VECTOR, dimensions: 1024 } as EmbeddingResult,
       ),
@@ -201,8 +201,8 @@ describe("Cross-layer idempotence — live writes + cache + Aurora", () => {
 
     const embeddingGenerator: EmbeddingGenerator = {
       generateForActiveClusters: vi.fn().mockResolvedValue([
-        { modelId: "amazon.titan-embed-text-v2:0", vector: VECTOR, dimensions: 1024 },
-      ] as EmbeddingResult[]),
+        ok({ modelId: "amazon.titan-embed-text-v2:0", vector: VECTOR, dimensions: 1024 }),
+      ]),
       generateForModel: vi.fn().mockResolvedValue(
         { modelId: "amazon.titan-embed-text-v2:0", vector: VECTOR, dimensions: 1024 } as EmbeddingResult,
       ),

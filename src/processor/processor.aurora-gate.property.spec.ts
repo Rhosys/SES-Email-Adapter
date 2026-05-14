@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import type { SQSEvent } from "aws-lambda";
-import { okAsync, errAsync } from "neverthrow";
+import { ok, okAsync, errAsync } from "neverthrow";
 import { SignalProcessor, SYSTEM_RULES } from "./processor.js";
 import { JsonLogicRuleEvaluator } from "./rule-evaluator.js";
 import type { ProcessorDatabase, ArcMatcher, SqsDispatcher } from "./processor.js";
@@ -201,9 +201,9 @@ describe("Feature: signal-processor-retry-resilience, Property 4: Arc saved befo
 
     const embeddingGenerator: EmbeddingGenerator = {
       generateForActiveClusters: vi.fn().mockResolvedValue([
-        { modelId: "amazon.titan-embed-text-v2:0", vector: vectorA, dimensions: 1024 },
-        { modelId: "amazon.titan-embed-text-v3:0", vector: vectorB, dimensions: 1536 },
-      ] as EmbeddingResult[]),
+        ok({ modelId: "amazon.titan-embed-text-v2:0", vector: vectorA, dimensions: 1024 }),
+        ok({ modelId: "amazon.titan-embed-text-v3:0", vector: vectorB, dimensions: 1536 }),
+      ]),
       generateForModel: vi.fn().mockResolvedValue(
         { modelId: "amazon.titan-embed-text-v2:0", vector: vectorA, dimensions: 1024 } as EmbeddingResult,
       ),
@@ -260,9 +260,9 @@ describe("Feature: signal-processor-retry-resilience, Property 4: Arc saved befo
 
     const embeddingGenerator: EmbeddingGenerator = {
       generateForActiveClusters: vi.fn().mockResolvedValue([
-        { modelId: "amazon.titan-embed-text-v2:0", vector: vectorA, dimensions: 1024 },
-        { modelId: "amazon.titan-embed-text-v3:0", vector: vectorB, dimensions: 1536 },
-      ] as EmbeddingResult[]),
+        ok({ modelId: "amazon.titan-embed-text-v2:0", vector: vectorA, dimensions: 1024 }),
+        ok({ modelId: "amazon.titan-embed-text-v3:0", vector: vectorB, dimensions: 1536 }),
+      ]),
       generateForModel: vi.fn().mockResolvedValue(
         { modelId: "amazon.titan-embed-text-v2:0", vector: vectorA, dimensions: 1024 } as EmbeddingResult,
       ),
@@ -451,9 +451,9 @@ describe("Feature: signal-processor-retry-resilience, Property 6: Aurora failure
 
     const embeddingGenerator: EmbeddingGenerator = {
       generateForActiveClusters: vi.fn().mockResolvedValue([
-        { modelId: "amazon.titan-embed-text-v2:0", vector: vectorA, dimensions: 1024 },
-        { modelId: "amazon.titan-embed-text-v3:0", vector: vectorB, dimensions: 1536 },
-      ] as EmbeddingResult[]),
+        ok({ modelId: "amazon.titan-embed-text-v2:0", vector: vectorA, dimensions: 1024 }),
+        ok({ modelId: "amazon.titan-embed-text-v3:0", vector: vectorB, dimensions: 1536 }),
+      ]),
       generateForModel: vi.fn().mockResolvedValue(
         { modelId: "amazon.titan-embed-text-v2:0", vector: vectorA, dimensions: 1024 } as EmbeddingResult,
       ),
@@ -498,9 +498,9 @@ describe("Feature: signal-processor-retry-resilience, Property 6: Aurora failure
 
     const embeddingGenerator: EmbeddingGenerator = {
       generateForActiveClusters: vi.fn().mockResolvedValue([
-        { modelId: "amazon.titan-embed-text-v2:0", vector: vectorA, dimensions: 1024 },
-        { modelId: "amazon.titan-embed-text-v3:0", vector: vectorB, dimensions: 1536 },
-      ] as EmbeddingResult[]),
+        ok({ modelId: "amazon.titan-embed-text-v2:0", vector: vectorA, dimensions: 1024 }),
+        ok({ modelId: "amazon.titan-embed-text-v3:0", vector: vectorB, dimensions: 1536 }),
+      ]),
       generateForModel: vi.fn().mockResolvedValue(
         { modelId: "amazon.titan-embed-text-v2:0", vector: vectorA, dimensions: 1024 } as EmbeddingResult,
       ),
@@ -549,9 +549,9 @@ describe("Feature: signal-processor-retry-resilience, Property 6: Aurora failure
 
     const embeddingGenerator: EmbeddingGenerator = {
       generateForActiveClusters: vi.fn().mockResolvedValue([
-        { modelId: "amazon.titan-embed-text-v2:0", vector: vectorA, dimensions: 1024 },
-        { modelId: "amazon.titan-embed-text-v3:0", vector: vectorB, dimensions: 1536 },
-      ] as EmbeddingResult[]),
+        ok({ modelId: "amazon.titan-embed-text-v2:0", vector: vectorA, dimensions: 1024 }),
+        ok({ modelId: "amazon.titan-embed-text-v3:0", vector: vectorB, dimensions: 1536 }),
+      ]),
       generateForModel: vi.fn().mockResolvedValue(
         { modelId: "amazon.titan-embed-text-v2:0", vector: vectorA, dimensions: 1024 } as EmbeddingResult,
       ),
@@ -737,8 +737,8 @@ describe("Feature: signal-processor-retry-resilience, Property 5: Side-effects d
     const vector = [0.1, -0.9, 0.5];
     const embeddingGenerator: EmbeddingGenerator = {
       generateForActiveClusters: vi.fn().mockResolvedValue([
-        { modelId: "amazon.titan-embed-text-v2:0", vector, dimensions: 1024 },
-      ] as EmbeddingResult[]),
+        ok({ modelId: "amazon.titan-embed-text-v2:0", vector, dimensions: 1024 }),
+      ]),
       generateForModel: vi.fn().mockResolvedValue(
         { modelId: "amazon.titan-embed-text-v2:0", vector, dimensions: 1024 } as EmbeddingResult,
       ),
@@ -780,8 +780,8 @@ describe("Feature: signal-processor-retry-resilience, Property 5: Side-effects d
     const vector = [0.1, -0.9, 0.5];
     const embeddingGenerator: EmbeddingGenerator = {
       generateForActiveClusters: vi.fn().mockResolvedValue([
-        { modelId: "amazon.titan-embed-text-v2:0", vector, dimensions: 1024 },
-      ] as EmbeddingResult[]),
+        ok({ modelId: "amazon.titan-embed-text-v2:0", vector, dimensions: 1024 }),
+      ]),
       generateForModel: vi.fn().mockResolvedValue(
         { modelId: "amazon.titan-embed-text-v2:0", vector, dimensions: 1024 } as EmbeddingResult,
       ),
@@ -819,8 +819,8 @@ describe("Feature: signal-processor-retry-resilience, Property 5: Side-effects d
     const vector = [0.1, -0.9, 0.5];
     const embeddingGenerator: EmbeddingGenerator = {
       generateForActiveClusters: vi.fn().mockResolvedValue([
-        { modelId: "amazon.titan-embed-text-v2:0", vector, dimensions: 1024 },
-      ] as EmbeddingResult[]),
+        ok({ modelId: "amazon.titan-embed-text-v2:0", vector, dimensions: 1024 }),
+      ]),
       generateForModel: vi.fn().mockResolvedValue(
         { modelId: "amazon.titan-embed-text-v2:0", vector, dimensions: 1024 } as EmbeddingResult,
       ),
@@ -852,8 +852,8 @@ describe("Feature: signal-processor-retry-resilience, Property 5: Side-effects d
     const vector = [0.1, -0.9, 0.5];
     const embeddingGenerator: EmbeddingGenerator = {
       generateForActiveClusters: vi.fn().mockResolvedValue([
-        { modelId: "amazon.titan-embed-text-v2:0", vector, dimensions: 1024 },
-      ] as EmbeddingResult[]),
+        ok({ modelId: "amazon.titan-embed-text-v2:0", vector, dimensions: 1024 }),
+      ]),
       generateForModel: vi.fn().mockResolvedValue(
         { modelId: "amazon.titan-embed-text-v2:0", vector, dimensions: 1024 } as EmbeddingResult,
       ),
@@ -1037,9 +1037,9 @@ describe("Feature: signal-processor-retry-resilience, Property 7: Partial Aurora
 
     const embeddingGenerator: EmbeddingGenerator = {
       generateForActiveClusters: vi.fn().mockResolvedValue([
-        { modelId: "amazon.titan-embed-text-v2:0", vector, dimensions: 1024 },
-        { modelId: "amazon.titan-embed-text-v3:0", vector, dimensions: 1536 },
-      ] as EmbeddingResult[]),
+        ok({ modelId: "amazon.titan-embed-text-v2:0", vector, dimensions: 1024 }),
+        ok({ modelId: "amazon.titan-embed-text-v3:0", vector, dimensions: 1536 }),
+      ]),
       generateForModel: vi.fn().mockResolvedValue(
         { modelId: "amazon.titan-embed-text-v2:0", vector, dimensions: 1024 } as EmbeddingResult,
       ),

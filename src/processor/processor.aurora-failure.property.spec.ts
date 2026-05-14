@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import type { SQSEvent } from "aws-lambda";
-import { okAsync } from "neverthrow";
+import { ok, okAsync } from "neverthrow";
 import { SignalProcessor, SYSTEM_RULES } from "./processor.js";
 import { JsonLogicRuleEvaluator } from "./rule-evaluator.js";
 import type { ProcessorDatabase, ArcMatcher } from "./processor.js";
@@ -163,9 +163,9 @@ describe("Aurora cluster failure preserves the DynamoDB cache entry", () => {
     const store = makeStore();
     const embeddingGenerator: EmbeddingGenerator = {
       generateForActiveClusters: vi.fn().mockResolvedValue([
-        { modelId: "amazon.titan-embed-text-v2:0", vector: VECTOR_A, dimensions: 1024 },
-        { modelId: "amazon.titan-embed-text-v3:0", vector: VECTOR_B, dimensions: 1536 },
-      ] as EmbeddingResult[]),
+        ok({ modelId: "amazon.titan-embed-text-v2:0", vector: VECTOR_A, dimensions: 1024 }),
+        ok({ modelId: "amazon.titan-embed-text-v3:0", vector: VECTOR_B, dimensions: 1536 }),
+      ]),
       generateForModel: vi.fn().mockResolvedValue(
         { modelId: "amazon.titan-embed-text-v2:0", vector: VECTOR_A, dimensions: 1024 } as EmbeddingResult,
       ),
@@ -206,9 +206,9 @@ describe("Aurora cluster failure preserves the DynamoDB cache entry", () => {
     const store = makeStore();
     const embeddingGenerator: EmbeddingGenerator = {
       generateForActiveClusters: vi.fn().mockResolvedValue([
-        { modelId: "amazon.titan-embed-text-v2:0", vector: VECTOR_A, dimensions: 1024 },
-        { modelId: "amazon.titan-embed-text-v3:0", vector: VECTOR_B, dimensions: 1536 },
-      ] as EmbeddingResult[]),
+        ok({ modelId: "amazon.titan-embed-text-v2:0", vector: VECTOR_A, dimensions: 1024 }),
+        ok({ modelId: "amazon.titan-embed-text-v3:0", vector: VECTOR_B, dimensions: 1536 }),
+      ]),
       generateForModel: vi.fn().mockResolvedValue(
         { modelId: "amazon.titan-embed-text-v2:0", vector: VECTOR_A, dimensions: 1024 } as EmbeddingResult,
       ),

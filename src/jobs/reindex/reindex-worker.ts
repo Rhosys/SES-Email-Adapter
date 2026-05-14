@@ -240,7 +240,7 @@ export class ReindexWorker {
         signal.accountId,
         signal.id,
         modelId,
-        result.vector,
+        result.vector!,
       );
 
       await multiClusterWriter.upsertEmbedding({
@@ -248,7 +248,7 @@ export class ReindexWorker {
         arcId: signal.arcId!,
         accountId: signal.accountId,
         recipientAddress: signal.recipientAddress,
-        embedding: result.vector,
+        embedding: result.vector!,
       });
 
       return ok(undefined);

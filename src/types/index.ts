@@ -394,7 +394,7 @@ export interface Signal {
 
   // Embedding cache, keyed by Bedrock model ID
   // Absent on quarantined/blocked signals (no Aurora write happened).
-  // Partially populated if individual Bedrock calls failed (see processor metrics).
+  // Partially populated if individual Bedrock calls failed (logged at WARN level).
   embeddings?: Record<string, number[]>;
 
   // ISO 8601 retention duration — the ONLY retention field stored in DynamoDB.

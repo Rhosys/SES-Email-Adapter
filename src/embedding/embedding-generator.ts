@@ -4,7 +4,12 @@
 // ---------------------------------------------------------------------------
 
 import { BedrockRuntimeClient, InvokeModelCommand } from "@aws-sdk/client-bedrock-runtime";
-import { getActiveClusters, CLUSTER_REGISTRY, type ClusterRegistryEntry } from "./cluster-registry.js";
+import { ok, err } from "../errors.js";
+import type { Result } from "../errors.js";
+import { bedrockError } from "../errors.js";
+import type { BedrockError } from "../errors.js";
+import { getActiveClusters, getReadCluster, CLUSTER_REGISTRY, type ClusterRegistryEntry } from "./cluster-registry.js";
+import type { Logger } from "../logger.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -17,7 +22,7 @@ export interface EmbeddingResult {
 }
 
 export interface EmbeddingGenerator {
-  generateForActiveClusters(embedText: string): Promise<EmbeddingResult[]>;
+  generateForActiveClusters(embedText: string): Promise<Result<EmbeddingResult, BedrockError>[]>;
   generateForModel(embedText: string, modelId: string): Promise<EmbeddingResult>;
 }
 
@@ -26,28 +31,45 @@ export interface EmbeddingGenerator {
 // ---------------------------------------------------------------------------
 
 export class BedrockEmbeddingGenerator implements EmbeddingGenerator {
-  constructor(private readonly bedrock: BedrockRuntimeClient) {}
+  constructor(
+    private readonly bedrock: BedrockRuntimeClient,
+    private readonly logger?: Logger,
+  ) {}
 
   /**
    * Generates embeddings for all active clusters in parallel.
-   * Per-model failures return null (filtered out of results), do not throw.
-   * Emits `embedding_generation_failed` metric tagged with modelId on failure.
+   * Returns one Result per cluster — ok with the embedding, or err with BedrockError.
+   * Logs ERROR for primary cluster failures, WARN for non-primary.
    */
-  async generateForActiveClusters(embedText: string): Promise<EmbeddingResult[]> {
+  async generateForActiveClusters(embedText: string): Promise<Result<EmbeddingResult, BedrockError>[]> {
     const activeClusters = getActiveClusters();
+    const primaryCluster = getReadCluster();
 
     const results = await Promise.all(
       activeClusters.map((entry) => this.invokeForEntry(embedText, entry)),
     );
 
-    // Filter out nulls (failed models)
-    return results.filter((r): r is EmbeddingResult => r !== null);
+    // Log failures with primary/non-primary distinction
+    for (const result of results) {
+      if (result.isErr()) {
+        const isPrimary = result.error.modelId === primaryCluster.modelId;
+        const message = "Bedrock embedding generation failed. The InvokeModel call returned an error. This signal will proceed without an embedding for this cluster — arc matching may be degraded.";
+        const context = { code: "embedding.generation_failed", modelId: result.error.modelId, error: result.error.cause };
+        if (isPrimary) {
+          this.logger?.error(message, context);
+        } else {
+          this.logger?.warn(message, context);
+        }
+      }
+    }
+
+    return results;
   }
 
   /**
    * Generates an embedding for a specific model by ID.
    * Resolves dimensions from CLUSTER_REGISTRY by modelId.
-   * Throws if the modelId is not found in the registry.
+   * Throws if the modelId is not found in the registry or if generation fails.
    */
   async generateForModel(embedText: string, modelId: string): Promise<EmbeddingResult> {
     const entry = CLUSTER_REGISTRY.find((c) => c.modelId === modelId);
@@ -56,17 +78,17 @@ export class BedrockEmbeddingGenerator implements EmbeddingGenerator {
     }
 
     const result = await this.invokeForEntry(embedText, entry);
-    if (!result) {
+    if (result.isErr()) {
       throw new Error(`Embedding generation failed for model "${modelId}"`);
     }
-    return result;
+    return result.value;
   }
 
   // ---------------------------------------------------------------------------
   // Private
   // ---------------------------------------------------------------------------
 
-  private async invokeForEntry(embedText: string, entry: ClusterRegistryEntry): Promise<EmbeddingResult | null> {
+  private async invokeForEntry(embedText: string, entry: ClusterRegistryEntry): Promise<Result<EmbeddingResult, BedrockError>> {
     try {
       const requestBody = {
         inputText: embedText.slice(0, 8000),
@@ -83,38 +105,14 @@ export class BedrockEmbeddingGenerator implements EmbeddingGenerator {
         }),
       );
 
-      const result = JSON.parse(new TextDecoder().decode(response.body)) as { embedding: number[] };
-      return {
+      const parsed = JSON.parse(new TextDecoder().decode(response.body)) as { embedding: number[] };
+      return ok({
         modelId: entry.modelId,
-        vector: result.embedding,
+        vector: parsed.embedding,
         dimensions: entry.dimensions,
-      };
+      });
     } catch (error) {
-      emitEmbeddingGenerationFailedMetric(entry.modelId);
-      return null;
+      return err(bedrockError(entry.modelId, error instanceof Error ? error : new Error(String(error))));
     }
   }
-}
-
-// ---------------------------------------------------------------------------
-// Metrics (CloudWatch Embedded Metric Format)
-// ---------------------------------------------------------------------------
-
-function emitEmbeddingGenerationFailedMetric(modelId: string): void {
-  // CloudWatch EMF — structured JSON to stdout is picked up by Lambda as a metric
-  const emfLog = {
-    _aws: {
-      Timestamp: Date.now(),
-      CloudWatchMetrics: [
-        {
-          Namespace: "EmailCatcher/Embeddings",
-          Dimensions: [["modelId"]],
-          Metrics: [{ Name: "embedding_generation_failed", Unit: "Count" }],
-        },
-      ],
-    },
-    modelId,
-    embedding_generation_failed: 1,
-  };
-  process.stdout.write(JSON.stringify(emfLog) + "\n");
 }

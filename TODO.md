@@ -18,6 +18,7 @@
 - [ ] **Review Lambda Authorizer**
 - [ ] **Never use fs sync anything** every call should be async when available, Sync is always wrong
 - [ ] **Capture all string literals as enums** — all discriminated string values (message types, workflow names, signal statuses, rule action types, etc.) should be defined as TypeScript enums or const objects, never inline string literals
+- [ ] **ResultAsync** is almost always wrong. The ADR needs to be updated, these methods should explictl use Try/Catch, but return the Result type. The return should likely be Promise<Result<T, E>>.
 
 
 ---

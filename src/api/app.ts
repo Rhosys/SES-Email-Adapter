@@ -5,7 +5,7 @@ import { getDomain } from "tldts";
 import { checkDomain } from "../dns/dns-checker.js";
 import type { AuditEvent } from "../database/audit-database.js";
 import type { Result, ResultAsync } from "neverthrow";
-import type { DbError, NotFoundError } from "../errors.js";
+import type { DbError, NotFoundError, AuthressServiceError } from "../errors.js";
 import type { Arc, Signal, View, Label, Rule, Domain, DnsRecord, Account, Page, PageParams, ArcStatus, Workflow, WorkflowData, Alias, AliasSender, SenderMode, SenderFilterMode, VerifiedForwardingAddress, Pagination, EmailTemplate } from "../types/index.js";
 import type { Logger } from "../logger.js";
 import { deriveGroupingKey } from "../processor/processor.js";
@@ -50,10 +50,10 @@ export interface AccountUser {
 }
 
 export interface AccessService {
-  listUsers(accountId: string): Promise<AccountUser[]>;
-  addUser(accountId: string, userId: string, role: AccountRole): Promise<void>;
-  updateUserRole(accountId: string, userId: string, role: AccountRole): Promise<void>;
-  removeUser(accountId: string, userId: string): Promise<void>;
+  listUsers(accountId: string): ResultAsync<AccountUser[], AuthressServiceError>;
+  addUser(accountId: string, userId: string, role: AccountRole): ResultAsync<void, AuthressServiceError>;
+  updateUserRole(accountId: string, userId: string, role: AccountRole): ResultAsync<void, AuthressServiceError>;
+  removeUser(accountId: string, userId: string): ResultAsync<void, AuthressServiceError>;
   checkAccess(userId: string, accountId: string, permission: string): Promise<void>;
 }
 
@@ -745,15 +745,23 @@ export function createApp({ store, auth, access, logger, verificationMailer }: A
   app.get("/accounts/:accountId/users", authz("users:read", c => `accounts/${c.req.param("accountId")}/users`), async (c) => {
     if (!access) return err(c, 501, "Not implemented");
     const { accountId } = c.get("auth");
-    const users = await access.listUsers(accountId);
-    return c.json(page("users", users));
+    const result = await access.listUsers(accountId);
+    if (result.isErr()) {
+      logger.warn("Authress service unavailable while listing account users.", { code: "api.authress_unavailable", accountId, error: result.error });
+      return err(c, 503, "Service temporarily unavailable");
+    }
+    return c.json(page("users", result.value));
   });
 
   app.post("/accounts/:accountId/users", authz("users:write", c => `accounts/${c.req.param("accountId")}/users`), async (c) => {
     if (!access) return err(c, 501, "Not implemented");
     const { accountId } = c.get("auth");
     const body = await zParse(InviteUserRequest, c.req.raw);
-    await access.addUser(accountId, body.userId, body.role);
+    const result = await access.addUser(accountId, body.userId, body.role);
+    if (result.isErr()) {
+      logger.warn("Authress service unavailable while adding user.", { code: "api.authress_unavailable", accountId, userId: body.userId, error: result.error });
+      return err(c, 503, "Service temporarily unavailable");
+    }
     return c.json({ userId: body.userId, role: body.role }, 201);
   });
 
@@ -761,14 +769,22 @@ export function createApp({ store, auth, access, logger, verificationMailer }: A
     if (!access) return err(c, 501, "Not implemented");
     const { accountId } = c.get("auth");
     const body = await zParse(UpdateUserRequest, c.req.raw);
-    await access.updateUserRole(accountId, c.req.param("userId"), body.role);
+    const result = await access.updateUserRole(accountId, c.req.param("userId"), body.role);
+    if (result.isErr()) {
+      logger.warn("Authress service unavailable while updating user role.", { code: "api.authress_unavailable", accountId, userId: c.req.param("userId"), error: result.error });
+      return err(c, 503, "Service temporarily unavailable");
+    }
     return c.json({ userId: c.req.param("userId"), role: body.role });
   });
 
   app.delete("/accounts/:accountId/users/:userId", authz("users:write", c => `accounts/${c.req.param("accountId")}/users/${c.req.param("userId")}`), async (c) => {
     if (!access) return err(c, 501, "Not implemented");
     const { accountId } = c.get("auth");
-    await access.removeUser(accountId, c.req.param("userId"));
+    const result = await access.removeUser(accountId, c.req.param("userId"));
+    if (result.isErr()) {
+      logger.warn("Authress service unavailable while removing user.", { code: "api.authress_unavailable", accountId, userId: c.req.param("userId"), error: result.error });
+      return err(c, 503, "Service temporarily unavailable");
+    }
     return new Response(null, { status: 204 });
   });
 

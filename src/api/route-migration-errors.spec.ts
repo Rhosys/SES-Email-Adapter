@@ -24,10 +24,10 @@ function makeAuth(): AuthService {
 
 function makeAccess(): AccessService {
   return {
-    listUsers: vi.fn().mockResolvedValue([]),
-    addUser: vi.fn().mockResolvedValue(undefined),
-    updateUserRole: vi.fn().mockResolvedValue(undefined),
-    removeUser: vi.fn().mockResolvedValue(undefined),
+    listUsers: vi.fn().mockReturnValue(okAsync([])),
+    addUser: vi.fn().mockReturnValue(okAsync(undefined)),
+    updateUserRole: vi.fn().mockReturnValue(okAsync(undefined)),
+    removeUser: vi.fn().mockReturnValue(okAsync(undefined)),
     checkAccess: vi.fn().mockResolvedValue(undefined),
   };
 }
