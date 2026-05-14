@@ -60,7 +60,7 @@ resource "aws_rds_cluster" "aurora" {
   engine_mode                     = "provisioned"
   engine_version                  = "17.4"
   database_name                   = "signals"
-  master_username                 = "admin"
+  master_username                 = "master-admin"
   manage_master_user_password     = true
   db_subnet_group_name            = aws_db_subnet_group.aurora.name
   vpc_security_group_ids          = [aws_security_group.aurora[each.key].id]
