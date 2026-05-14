@@ -72,8 +72,8 @@ vi.mock("../../embedding/cluster-registry.js", () => ({
     if (clusterId === "aurora-prod-titan-v2") {
       return {
         clusterId: "aurora-prod-titan-v2",
-        clusterArn: "arn:aws:rds:eu-west-1:123:cluster:aurora-prod-titan-v2",
-        secretArn: "arn:aws:secretsmanager:eu-west-1:123:secret:test",
+        clusterArn: "arn:aws:rds:eu-central-1:123:cluster:aurora-prod-titan-v2",
+        secretArn: "arn:aws:secretsmanager:eu-central-1:123:secret:test",
         databaseName: "signals",
         modelId: "amazon.titan-embed-text-v2:0",
         dimensions: 1024,
@@ -114,8 +114,8 @@ function makeSqsRecord(body: unknown, overrides?: Partial<SQSRecord>): SQSRecord
     messageAttributes: {},
     md5OfBody: "",
     eventSource: "aws:sqs",
-    eventSourceARN: "arn:aws:sqs:eu-west-1:123:reindex-queue",
-    awsRegion: "eu-west-1",
+    eventSourceARN: "arn:aws:sqs:eu-central-1:123:reindex-queue",
+    awsRegion: "eu-central-1",
     ...overrides,
   };
 }

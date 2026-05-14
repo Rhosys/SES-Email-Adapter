@@ -14,8 +14,8 @@ import { createMockLogger } from "../testing/mock-logger.js";
 vi.mock("../embedding/cluster-registry.js", () => {
   const entry = Object.freeze({
     clusterId: "aurora-prod-titan-v2",
-    clusterArn: "arn:aws:rds:eu-west-1:123456789012:cluster:aurora-prod-titan-v2",
-    secretArn: "arn:aws:secretsmanager:eu-west-1:123456789012:secret:aurora-prod-titan-v2-xxxxxx",
+    clusterArn: "arn:aws:rds:eu-central-1:123456789012:cluster:aurora-prod-titan-v2",
+    secretArn: "arn:aws:secretsmanager:eu-central-1:123456789012:secret:aurora-prod-titan-v2-xxxxxx",
     databaseName: "signals",
     modelId: "amazon.titan-embed-text-v2:0",
     dimensions: 1024,

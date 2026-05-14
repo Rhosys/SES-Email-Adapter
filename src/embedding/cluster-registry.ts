@@ -9,7 +9,7 @@
 
 export interface ClusterRegistryEntry {
   clusterId: string;          // 'aurora-prod-titan-v2'
-  clusterArn: string;         // arn:aws:rds:eu-west-1:...:cluster:...
+  clusterArn: string;         // arn:aws:rds:eu-central-1:...:cluster:...
   secretArn: string;          // Secrets Manager ARN for this cluster's master credentials
   databaseName: string;
   modelId: string;            // 'amazon.titan-embed-text-v2:0'
@@ -24,8 +24,8 @@ export interface ClusterRegistryEntry {
 export const CLUSTER_REGISTRY: readonly ClusterRegistryEntry[] = Object.freeze([
   Object.freeze({
     clusterId: 'aurora-prod-titan-v2',
-    clusterArn: 'arn:aws:rds:eu-west-1:123456789012:cluster:aurora-prod-titan-v2',
-    secretArn: 'arn:aws:secretsmanager:eu-west-1:123456789012:secret:aurora-prod-titan-v2-xxxxxx',
+    clusterArn: 'arn:aws:rds:eu-central-1:123456789012:cluster:aurora-prod-titan-v2',
+    secretArn: 'arn:aws:secretsmanager:eu-central-1:123456789012:secret:aurora-prod-titan-v2-xxxxxx',
     databaseName: 'signals',
     modelId: 'amazon.titan-embed-text-v2:0',
     dimensions: 1024,
