@@ -41,16 +41,23 @@ export class AuthorizationMiddleware {
 
       try {
         await this.access.checkAccess(userId, resolvedResourceUri, permission);
+        this.logger.debug("Authorization check passed.", { userId, resourceUri: resolvedResourceUri, permission, path });
         // Authorization successful — set flag for guard to check
         c.set("authorizationVerified", true);
         await next();
       } catch (error) {
-        // Check if this is a 403 authorization failure (Authress SDK throws with response.status)
         const status = (error as { status?: number }).status
           ?? (error as { response?: { status?: number } }).response?.status;
 
         if (status === 403) {
-          this.logger.info("authorization.failed", {
+          this.logger.info("authorization.denied", { userId, resourceUri: resolvedResourceUri, permission, path });
+          c.status(403);
+          return c.json({ title: "Forbidden", errorCode: "AccessDenied" });
+        }
+
+        if (status === 404) {
+          this.logger.warn("Authorization check returned 404 — resource or user not found in Authress.", {
+            code: "authorization.not_found",
             userId,
             resourceUri: resolvedResourceUri,
             permission,
@@ -60,13 +67,14 @@ export class AuthorizationMiddleware {
           return c.json({ title: "Forbidden", errorCode: "AccessDenied" });
         }
 
-        // Any other error is an SDK/service failure
-        this.logger.error("Authorization SDK call failed unexpectedly. The Authress service returned an unhandled error. This request will be rejected with 500. Check Authress service health and SDK configuration.", {
+        // Any non-2XX, non-404 status is an SDK/service failure
+        this.logger.error("Authorization SDK call failed unexpectedly. The Authress service returned an unhandled error. This request will be rejected with 500.", {
           code: "authorization.sdk_error",
           userId,
           resourceUri: resolvedResourceUri,
           permission,
           path,
+          status,
           error: error instanceof Error ? { message: error.message, stack: error.stack } : error,
         });
         c.status(500);

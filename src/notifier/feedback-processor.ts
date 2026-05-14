@@ -41,7 +41,7 @@ export class FeedbackProcessor {
 
       const result = await this.processFeedback(feedback);
       if (result.isErr()) {
-        this.logger.error("Failed to process SES bounce/complaint feedback. A database operation failed while suppressing the address or disabling forward rules. The suppression entry may be incomplete. Retry will occur on next SQS delivery.", { code: "feedback.process_failed", error: result.error.cause instanceof Error ? result.error.cause.message : String(result.error.cause) });
+        this.logger.track("Failed to process SES bounce/complaint feedback. A database operation failed while suppressing the address or disabling forward rules. The suppression entry may be incomplete.", { code: "feedback.process_failed", error: result.error.cause instanceof Error ? result.error.cause.message : String(result.error.cause) });
       }
     }
   }
@@ -69,7 +69,7 @@ export class FeedbackProcessor {
           for (const r of feedback.bounce!.bouncedRecipients) {
             const disableResult = await this.accountDb.disableForwardActions(accountId, r.emailAddress);
             if (disableResult.isErr()) {
-              this.logger.error("Failed to disable forward actions after permanent bounce. The DynamoDB update for the forward rule returned an error. Emails may continue to be forwarded to the bouncing address. Investigate and manually disable if pattern persists.", { code: "feedback.disable_forward_failed", accountId, address: r.emailAddress, error: disableResult.error.cause instanceof Error ? disableResult.error.cause.message : String(disableResult.error.cause) });
+              this.logger.track("Failed to disable forward actions after permanent bounce. The DynamoDB update for the forward rule returned an error. Emails may continue to be forwarded to the bouncing address.", { code: "feedback.disable_forward_failed", accountId, address: r.emailAddress, error: disableResult.error.cause instanceof Error ? disableResult.error.cause.message : String(disableResult.error.cause) });
             }
           }
         }
