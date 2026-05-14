@@ -8,8 +8,8 @@ on:
   workflow_dispatch:
 
 env:
-  AWS_DEFAULT_REGION: "eu-west-1"
-  STATE_BUCKET: "rhosys-opentofu-${{ secrets.AWS_ACCOUNT_ID }}-eu-west-1"
+  AWS_DEFAULT_REGION: "eu-central-1"
+  STATE_BUCKET: "rhosys-opentofu-${{ secrets.AWS_ACCOUNT_ID }}-eu-central-1"
   STATE_KEY: "${{ github.event.repository.name }}/terraform.tfstate"
   TF_VAR_aws_account_id: "${{ secrets.AWS_ACCOUNT_ID }}"
   TF_VAR_service_name: "${{ github.event.repository.name }}"
