@@ -41,7 +41,7 @@ export class AuthorizationMiddleware {
 
       try {
         await this.access.checkAccess(userId, resolvedResourceUri, permission);
-        this.logger.debug("Authorization check passed.", { userId, resourceUri: resolvedResourceUri, permission, path });
+        this.logger.trackPoint("authorization_check_passed");
         // Authorization successful — set flag for guard to check
         c.set("authorizationVerified", true);
         await next();

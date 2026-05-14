@@ -1,6 +1,6 @@
 import { randomUUID } from "crypto";
 
-export type LogLevel = "debug" | "info" | "track" | "warn" | "error" | "critical";
+export type LogLevel = "info" | "track" | "warn" | "error" | "critical";
 
 export interface TrackPoint {
   name: string;
@@ -24,7 +24,6 @@ export interface LogEntry {
 export interface Logger {
   startInvocation(): void;
   trackPoint(name: string, data?: Record<string, unknown>): void;
-  debug(message: string, context?: Record<string, unknown>): void;
   info(message: string, context?: Record<string, unknown>): void;
   track(message: string, context?: Record<string, unknown>): void;
   warn(message: string, context?: Record<string, unknown>): void;
@@ -81,10 +80,6 @@ export class RequestLogger implements Logger {
       elapsedMs: Date.now() - this.startTime,
       ...(data !== undefined ? { data } : {}),
     });
-  }
-
-  debug(message: string, context?: Record<string, unknown>): void {
-    this.emit("debug", message, context);
   }
 
   info(message: string, context?: Record<string, unknown>): void {

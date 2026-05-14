@@ -2,11 +2,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { RequestLogger } from "./logger.js";
 import type { LogLevel } from "./logger.js";
 
-const ALL_LEVELS: LogLevel[] = ["debug", "info", "track", "warn", "error", "critical"];
+const ALL_LEVELS: LogLevel[] = ["info", "track", "warn", "error", "critical"];
 const TRACK_POINT_LEVELS: LogLevel[] = ["track", "error", "critical"];
-const NO_TRACK_POINT_LEVELS: LogLevel[] = ["debug", "info", "warn"];
+const NO_TRACK_POINT_LEVELS: LogLevel[] = ["info", "warn"];
 const STACK_LEVELS: LogLevel[] = ["error", "critical"];
-const NO_STACK_LEVELS: LogLevel[] = ["debug", "info", "track", "warn"];
+const NO_STACK_LEVELS: LogLevel[] = ["info", "track", "warn"];
 
 function callLevel(logger: RequestLogger, level: LogLevel, message: string, context?: Record<string, unknown>): void {
   logger[level](message, context);
