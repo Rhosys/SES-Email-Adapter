@@ -1,6 +1,6 @@
 # Log Message Review — Progress
 
-## Status: IN PROGRESS (item #8 next)
+## Status: COMPLETE
 
 ## Completed Reviews
 
