@@ -20,9 +20,6 @@ export function createMockLogger(): MockLogger {
     trackPoint() {
       /* no-op */
     },
-    debug(msg, ctx) {
-      calls.push({ method: "debug", message: msg, ...(ctx !== undefined ? { context: ctx } : {}) });
-    },
     info(msg, ctx) {
       calls.push({ method: "info", message: msg, ...(ctx !== undefined ? { context: ctx } : {}) });
     },
