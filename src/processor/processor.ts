@@ -615,8 +615,8 @@ export class SignalProcessor {
 
     // Use the read cluster's embedding for arc matching (backward-compatible with single-cluster)
     const readCluster = getReadCluster();
-    const readClusterResult = embeddingResults.find((r) => r.modelId === readCluster.modelId);
-    const embedding = readClusterResult?.vector ?? [];
+    const readClusterResult = embeddingResults.find((r) => r.isOk() && r.value.modelId === readCluster.modelId);
+    const embedding = readClusterResult?.isOk() ? readClusterResult.value.vector : [];
 
     const now = new Date().toISOString();
 
@@ -852,9 +852,13 @@ export class SignalProcessor {
     if (embeddingResults.length > 0) {
       const embeddings: Record<string, number[]> = {};
       for (const result of embeddingResults) {
-        embeddings[result.modelId] = result.vector;
+        if (result.isOk()) {
+          embeddings[result.value.modelId] = result.value.vector;
+        }
       }
-      signal.embeddings = embeddings;
+      if (Object.keys(embeddings).length > 0) {
+        signal.embeddings = embeddings;
+      }
     }
 
     // Save arc (leaf node) before signal (dependent node) — guarantees arc exists whenever signal exists

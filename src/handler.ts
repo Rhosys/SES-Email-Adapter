@@ -62,9 +62,10 @@ class S3MimeParser implements MimeParser {
 // ---------------------------------------------------------------------------
 
 const classifier = new SignalClassifier(bedrock);
-const embeddingGenerator = new BedrockEmbeddingGenerator(bedrock);
 
 const logger = new RequestLogger();
+
+const embeddingGenerator = new BedrockEmbeddingGenerator(bedrock, logger);
 
 const accountDb = new AccountDatabase();
 const arcDb = new ArcDatabase(logger);

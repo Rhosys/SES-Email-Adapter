@@ -1,7 +1,8 @@
-import { describe, it, expect, beforeEach, vi, type MockInstance } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { mockClient } from "aws-sdk-client-mock";
 import { BedrockRuntimeClient, InvokeModelCommand } from "@aws-sdk/client-bedrock-runtime";
 import { BedrockEmbeddingGenerator } from "./embedding-generator.js";
+import { createMockLogger } from "../testing/mock-logger.js";
 
 // ---------------------------------------------------------------------------
 // Mock the cluster registry
@@ -57,6 +58,10 @@ vi.mock("./cluster-registry.js", () => ({
       active: true,
     },
   ],
+  getReadCluster: () => ({
+    clusterId: "cluster-a",
+    modelId: "amazon.titan-embed-text-v2:0",
+  }),
 }));
 
 // ---------------------------------------------------------------------------
@@ -70,12 +75,12 @@ const mockBody = (data: unknown) => new TextEncoder().encode(JSON.stringify(data
 
 describe("BedrockEmbeddingGenerator", () => {
   let generator: BedrockEmbeddingGenerator;
-  let stdoutSpy: MockInstance;
+  const mockLogger = createMockLogger();
 
   beforeEach(() => {
     bedrockMock.reset();
-    generator = new BedrockEmbeddingGenerator(new BedrockRuntimeClient({}));
-    stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    generator = new BedrockEmbeddingGenerator(new BedrockRuntimeClient({}), mockLogger);
+    mockLogger.calls.length = 0;
   });
 
   describe("generateForActiveClusters", () => {
@@ -91,12 +96,13 @@ describe("BedrockEmbeddingGenerator", () => {
       const results = await generator.generateForActiveClusters("test embed text");
 
       expect(results).toHaveLength(2);
-      expect(results[0]).toEqual({
+      expect(results.every(r => r.isOk())).toBe(true);
+      expect(results[0]!.isOk() && results[0]!.value).toEqual({
         modelId: "amazon.titan-embed-text-v2:0",
         vector: Array(1024).fill(0.01),
         dimensions: 1024,
       });
-      expect(results[1]).toEqual({
+      expect(results[1]!.isOk() && results[1]!.value).toEqual({
         modelId: "amazon.titan-embed-text-v3:0",
         vector: Array(1536).fill(0.01),
         dimensions: 1536,
@@ -131,10 +137,11 @@ describe("BedrockEmbeddingGenerator", () => {
 
       // Only 2 active clusters, not the inactive cluster-c
       expect(bedrockMock.commandCalls(InvokeModelCommand)).toHaveLength(2);
-      expect(results.every((r) => r.modelId !== "amazon.titan-embed-text-v1:0")).toBe(true);
+      const modelIds = results.filter(r => r.isOk()).map(r => r.value.modelId);
+      expect(modelIds).not.toContain("amazon.titan-embed-text-v1:0");
     });
 
-    it("returns null for failed models and filters them out", async () => {
+    it("returns err for failed models and ok for successful ones", async () => {
       let callIndex = 0;
       bedrockMock.on(InvokeModelCommand).callsFake(() => {
         callIndex++;
@@ -146,30 +153,39 @@ describe("BedrockEmbeddingGenerator", () => {
 
       const results = await generator.generateForActiveClusters("text");
 
-      // Only the successful model is returned
-      expect(results).toHaveLength(1);
-      expect(results[0]!.modelId).toBe("amazon.titan-embed-text-v3:0");
+      expect(results).toHaveLength(2);
+      expect(results[0]!.isErr()).toBe(true);
+      if (results[0]!.isErr()) {
+        expect(results[0]!.error.modelId).toBe("amazon.titan-embed-text-v2:0");
+      }
+      expect(results[1]!.isOk()).toBe(true);
+      if (results[1]!.isOk()) {
+        expect(results[1]!.value.modelId).toBe("amazon.titan-embed-text-v3:0");
+      }
     });
 
-    it("emits embedding_generation_failed metric on failure", async () => {
+    it("logs ERROR for primary cluster failure, WARN for non-primary", async () => {
       bedrockMock.on(InvokeModelCommand).rejects(new Error("Bedrock error"));
 
       await generator.generateForActiveClusters("text");
 
-      // Should have emitted 2 metrics (one per failed active cluster)
-      expect(stdoutSpy).toHaveBeenCalledTimes(2);
-      const firstCall = stdoutSpy.mock.calls[0]![0] as string;
-      const emfLog = JSON.parse(firstCall.trim());
-      expect(emfLog._aws.CloudWatchMetrics[0].Metrics[0].Name).toBe("embedding_generation_failed");
-      expect(emfLog.modelId).toBe("amazon.titan-embed-text-v2:0");
-      expect(emfLog.embedding_generation_failed).toBe(1);
+      // cluster-a is primary → ERROR, cluster-b is non-primary → WARN
+      expect(mockLogger.calls.filter(c => c.method === "error")).toHaveLength(1);
+      expect(mockLogger.calls.find(c => c.method === "error")!.context).toEqual(
+        expect.objectContaining({ code: "embedding.generation_failed", modelId: "amazon.titan-embed-text-v2:0" }),
+      );
+      expect(mockLogger.calls.filter(c => c.method === "warn")).toHaveLength(1);
+      expect(mockLogger.calls.find(c => c.method === "warn")!.context).toEqual(
+        expect.objectContaining({ code: "embedding.generation_failed", modelId: "amazon.titan-embed-text-v3:0" }),
+      );
     });
 
     it("does not throw when all models fail", async () => {
       bedrockMock.on(InvokeModelCommand).rejects(new Error("All broken"));
 
       const results = await generator.generateForActiveClusters("text");
-      expect(results).toEqual([]);
+      expect(results).toHaveLength(2);
+      expect(results.every(r => r.isErr())).toBe(true);
     });
 
     it("truncates input text to 8000 characters", async () => {

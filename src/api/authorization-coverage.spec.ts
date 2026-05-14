@@ -4,6 +4,7 @@ import { createApp } from "./app.js";
 import type { AccessService, AuthService } from "./app.js";
 import { createAuthorize } from "./authorization-middleware.js";
 import { createMockLogger } from "../testing/mock-logger.js";
+import { okAsync } from "neverthrow";
 
 /**
  * Authorization Coverage Test
@@ -27,10 +28,10 @@ function makeMockDeps() {
   };
 
   const access: AccessService = {
-    listUsers: vi.fn().mockResolvedValue([]),
-    addUser: vi.fn().mockResolvedValue(undefined),
-    updateUserRole: vi.fn().mockResolvedValue(undefined),
-    removeUser: vi.fn().mockResolvedValue(undefined),
+    listUsers: vi.fn().mockReturnValue(okAsync([])),
+    addUser: vi.fn().mockReturnValue(okAsync(undefined)),
+    updateUserRole: vi.fn().mockReturnValue(okAsync(undefined)),
+    removeUser: vi.fn().mockReturnValue(okAsync(undefined)),
     checkAccess: vi.fn().mockResolvedValue(undefined),
   };
 
@@ -172,10 +173,10 @@ describe("Authorization Coverage", () => {
 
     // Also add a properly protected route for comparison
     const access: AccessService = {
-      listUsers: vi.fn().mockResolvedValue([]),
-      addUser: vi.fn().mockResolvedValue(undefined),
-      updateUserRole: vi.fn().mockResolvedValue(undefined),
-      removeUser: vi.fn().mockResolvedValue(undefined),
+      listUsers: vi.fn().mockReturnValue(okAsync([])),
+      addUser: vi.fn().mockReturnValue(okAsync(undefined)),
+      updateUserRole: vi.fn().mockReturnValue(okAsync(undefined)),
+      removeUser: vi.fn().mockReturnValue(okAsync(undefined)),
       checkAccess: vi.fn().mockResolvedValue(undefined),
     };
     const authz = createAuthorize(access, createMockLogger());

@@ -3,27 +3,30 @@
 // **Validates: Requirements 3.5**
 // ---------------------------------------------------------------------------
 
-import { describe, it, expect, beforeEach, afterEach, vi, type MockInstance } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mockClient } from "aws-sdk-client-mock";
 import { BedrockRuntimeClient, InvokeModelCommand } from "@aws-sdk/client-bedrock-runtime";
+import { createMockLogger } from "../testing/mock-logger.js";
 
 // ---------------------------------------------------------------------------
 // Hoisted mock state
 // ---------------------------------------------------------------------------
 
-const { mockActiveClusters } = vi.hoisted(() => ({
+const { mockActiveClusters, mockReadCluster } = vi.hoisted(() => ({
   mockActiveClusters: { value: [] as Array<{ clusterId: string; clusterArn: string; secretArn: string; databaseName: string; modelId: string; dimensions: number; active: boolean }> },
+  mockReadCluster: { value: { clusterId: "cluster-a", modelId: "model-alpha" } as { clusterId: string; modelId: string } },
 }));
 
 vi.mock("./cluster-registry.js", () => ({
   CLUSTER_REGISTRY: Object.freeze(mockActiveClusters.value.map((c) => Object.freeze(c))),
   getActiveClusters: () => mockActiveClusters.value.filter((c) => c.active),
+  getReadCluster: () => mockReadCluster.value,
   getClusterById: (id: string) => mockActiveClusters.value.find((c) => c.clusterId === id) ?? null,
 }));
 
 describe("Bedrock failure for one model preserves all other writes", () => {
   const bedrockMock = mockClient(BedrockRuntimeClient);
-  let stdoutSpy: MockInstance;
+  const mockLogger = createMockLogger();
 
   const THREE_CLUSTERS = [
     { clusterId: "cluster-a", clusterArn: "arn:a", secretArn: "secret:a", databaseName: "signals", modelId: "model-alpha", dimensions: 1024, active: true },
@@ -33,15 +36,16 @@ describe("Bedrock failure for one model preserves all other writes", () => {
 
   beforeEach(() => {
     bedrockMock.reset();
-    stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    mockLogger.calls.length = 0;
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  it("when first model fails, results contain only the succeeding models and metric is emitted", async () => {
+  it("when first (primary) model fails, results contain err for that model and ok for others", async () => {
     mockActiveClusters.value = THREE_CLUSTERS;
+    mockReadCluster.value = THREE_CLUSTERS[0]!;
     const { BedrockEmbeddingGenerator } = await import("./embedding-generator.js");
 
     let callCount = 0;
@@ -51,23 +55,30 @@ describe("Bedrock failure for one model preserves all other writes", () => {
       return { body: new TextEncoder().encode(JSON.stringify({ embedding: Array(10).fill(0.1) })) };
     });
 
-    const generator = new BedrockEmbeddingGenerator(new BedrockRuntimeClient({}));
+    const generator = new BedrockEmbeddingGenerator(new BedrockRuntimeClient({}), mockLogger);
     const results = await generator.generateForActiveClusters("test text");
 
-    expect(results).toHaveLength(2);
-    const resultModelIds = results.map((r) => r.modelId);
-    expect(resultModelIds).toContain("model-beta");
-    expect(resultModelIds).toContain("model-gamma");
-    expect(resultModelIds).not.toContain("model-alpha");
+    expect(results).toHaveLength(3);
+    expect(results[0]!.isErr()).toBe(true);
+    if (results[0]!.isErr()) {
+      expect(results[0]!.error.modelId).toBe("model-alpha");
+    }
+    const successful = results.filter(r => r.isOk());
+    expect(successful).toHaveLength(2);
+    const successModelIds = successful.map(r => r.isOk() ? r.value.modelId : "");
+    expect(successModelIds).toContain("model-beta");
+    expect(successModelIds).toContain("model-gamma");
 
-    expect(stdoutSpy).toHaveBeenCalledTimes(1);
-    const metricLog = JSON.parse(stdoutSpy.mock.calls[0]![0] as string);
-    expect(metricLog.modelId).toBe("model-alpha");
-    expect(metricLog.embedding_generation_failed).toBe(1);
+    // Primary cluster failure → ERROR
+    expect(mockLogger.calls.filter(c => c.method === "error")).toHaveLength(1);
+    expect(mockLogger.calls.find(c => c.method === "error")!.context).toEqual(
+      expect.objectContaining({ code: "embedding.generation_failed", modelId: "model-alpha" }),
+    );
   });
 
-  it("when multiple models fail, results contain only successful models", async () => {
+  it("when multiple non-primary models fail, results contain err for each", async () => {
     mockActiveClusters.value = THREE_CLUSTERS;
+    mockReadCluster.value = THREE_CLUSTERS[2]!; // gamma is primary
     const { BedrockEmbeddingGenerator } = await import("./embedding-generator.js");
 
     let callCount = 0;
@@ -77,30 +88,32 @@ describe("Bedrock failure for one model preserves all other writes", () => {
       return { body: new TextEncoder().encode(JSON.stringify({ embedding: Array(10).fill(0.1) })) };
     });
 
-    const generator = new BedrockEmbeddingGenerator(new BedrockRuntimeClient({}));
+    const generator = new BedrockEmbeddingGenerator(new BedrockRuntimeClient({}), mockLogger);
     const results = await generator.generateForActiveClusters("test text");
 
-    expect(results).toHaveLength(1);
-    expect(results[0]!.modelId).toBe("model-gamma");
-    expect(stdoutSpy).toHaveBeenCalledTimes(2);
+    expect(results).toHaveLength(3);
+    const successful = results.filter(r => r.isOk());
+    expect(successful).toHaveLength(1);
+    expect(successful[0]!.isOk() && successful[0]!.value.modelId).toBe("model-gamma");
+    // Non-primary failures → WARN
+    expect(mockLogger.calls.filter(c => c.method === "warn")).toHaveLength(2);
+    expect(mockLogger.calls.filter(c => c.method === "error")).toHaveLength(0);
   });
 
-  it("when all models fail, results is empty and metrics emitted for each", async () => {
+  it("when all models fail including primary, results are all err", async () => {
     mockActiveClusters.value = THREE_CLUSTERS;
+    mockReadCluster.value = THREE_CLUSTERS[0]!;
     const { BedrockEmbeddingGenerator } = await import("./embedding-generator.js");
 
     bedrockMock.on(InvokeModelCommand).rejects(new Error("All broken"));
 
-    const generator = new BedrockEmbeddingGenerator(new BedrockRuntimeClient({}));
+    const generator = new BedrockEmbeddingGenerator(new BedrockRuntimeClient({}), mockLogger);
     const results = await generator.generateForActiveClusters("test text");
 
-    expect(results).toEqual([]);
-    expect(stdoutSpy).toHaveBeenCalledTimes(3);
-
-    const metricLogs = stdoutSpy.mock.calls.map((call) => JSON.parse(call[0] as string));
-    const failedModelIds = metricLogs.map((m: { modelId: string }) => m.modelId);
-    expect(failedModelIds).toContain("model-alpha");
-    expect(failedModelIds).toContain("model-beta");
-    expect(failedModelIds).toContain("model-gamma");
+    expect(results).toHaveLength(3);
+    expect(results.every(r => r.isErr())).toBe(true);
+    // 1 ERROR (primary) + 2 WARN (non-primary)
+    expect(mockLogger.calls.filter(c => c.method === "error")).toHaveLength(1);
+    expect(mockLogger.calls.filter(c => c.method === "warn")).toHaveLength(2);
   });
 });

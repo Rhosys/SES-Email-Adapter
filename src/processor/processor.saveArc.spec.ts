@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { okAsync } from "neverthrow";
+import { ok, okAsync } from "neverthrow";
 import { SignalProcessor, SYSTEM_RULES } from "./processor.js";
 import { JsonLogicRuleEvaluator } from "./rule-evaluator.js";
 import type { ProcessorDatabase, TestReplier } from "./processor.js";
@@ -166,8 +166,8 @@ describe("Single saveArc call with complete mutations", () => {
 
     const embeddingGenerator: EmbeddingGenerator = {
       generateForActiveClusters: vi.fn().mockResolvedValue([
-        { modelId: "amazon.titan-embed-text-v2:0", vector: new Array(1024).fill(0.1), dimensions: 1024 },
-      ] as EmbeddingResult[]),
+        ok({ modelId: "amazon.titan-embed-text-v2:0", vector: new Array(1024).fill(0.1), dimensions: 1024 }),
+      ]),
       generateForModel: vi.fn().mockResolvedValue(
         { modelId: "amazon.titan-embed-text-v2:0", vector: new Array(1024).fill(0.1), dimensions: 1024 } as EmbeddingResult,
       ),

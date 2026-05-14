@@ -13,6 +13,7 @@ vi.mock("./cluster-registry.js", () => ({
     { clusterId: "cluster-a", clusterArn: "arn:aws:rds:eu-west-1:111:cluster:cluster-a", secretArn: "arn:aws:secretsmanager:eu-west-1:111:secret:cluster-a", databaseName: "signals", modelId: "amazon.titan-embed-text-v2:0", dimensions: 1024, active: true },
     { clusterId: "cluster-b", clusterArn: "arn:aws:rds:eu-west-1:111:cluster:cluster-b", secretArn: "arn:aws:secretsmanager:eu-west-1:111:secret:cluster-b", databaseName: "signals", modelId: "amazon.titan-embed-text-v3:0", dimensions: 1536, active: true },
   ],
+  getReadCluster: () => ({ clusterId: "cluster-a", modelId: "amazon.titan-embed-text-v2:0" }),
 }));
 
 describe("Active cluster set drives embedding generation", () => {
@@ -31,10 +32,12 @@ describe("Active cluster set drives embedding generation", () => {
     const results = await generator.generateForActiveClusters("test embed text");
 
     expect(results).toHaveLength(2);
-    const modelIds = results.map((r) => r.modelId);
+    expect(results.every(r => r.isOk())).toBe(true);
+    const values = results.filter(r => r.isOk()).map(r => r.value);
+    const modelIds = values.map((r) => r.modelId);
     expect(modelIds).toContain("amazon.titan-embed-text-v2:0");
     expect(modelIds).toContain("amazon.titan-embed-text-v3:0");
-    expect(results.map((r) => r.dimensions)).toEqual(expect.arrayContaining([1024, 1536]));
+    expect(values.map((r) => r.dimensions)).toEqual(expect.arrayContaining([1024, 1536]));
   });
 
   it("does not call Bedrock for inactive clusters", async () => {

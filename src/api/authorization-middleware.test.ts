@@ -3,15 +3,16 @@ import { Hono } from "hono";
 import { createAuthorize } from "./authorization-middleware.js";
 import type { AccessService, AuthContext } from "./app.js";
 import { createMockLogger, type MockLogger } from "../testing/mock-logger.js";
+import { okAsync } from "neverthrow";
 
 type AppEnv = { Variables: { auth: AuthContext; authorizationVerified?: boolean } };
 
 function makeAccess(): AccessService {
   return {
-    listUsers: vi.fn().mockResolvedValue([]),
-    addUser: vi.fn().mockResolvedValue(undefined),
-    updateUserRole: vi.fn().mockResolvedValue(undefined),
-    removeUser: vi.fn().mockResolvedValue(undefined),
+    listUsers: vi.fn().mockReturnValue(okAsync([])),
+    addUser: vi.fn().mockReturnValue(okAsync(undefined)),
+    updateUserRole: vi.fn().mockReturnValue(okAsync(undefined)),
+    removeUser: vi.fn().mockReturnValue(okAsync(undefined)),
     checkAccess: vi.fn().mockResolvedValue(undefined),
   };
 }

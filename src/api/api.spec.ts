@@ -21,10 +21,10 @@ function makeAuth(ctx: AuthContext = validAuth): AuthService {
 
 function makeAccess(): AccessService {
   return {
-    listUsers: vi.fn().mockResolvedValue([]),
-    addUser: vi.fn().mockResolvedValue(undefined),
-    updateUserRole: vi.fn().mockResolvedValue(undefined),
-    removeUser: vi.fn().mockResolvedValue(undefined),
+    listUsers: vi.fn().mockReturnValue(okAsync([])),
+    addUser: vi.fn().mockReturnValue(okAsync(undefined)),
+    updateUserRole: vi.fn().mockReturnValue(okAsync(undefined)),
+    removeUser: vi.fn().mockReturnValue(okAsync(undefined)),
     checkAccess: vi.fn().mockResolvedValue(undefined),
   };
 }
@@ -950,7 +950,7 @@ describe("API", () => {
         { userId: "user-1", role: "owner" },
         { userId: "user-2", role: "member" },
       ];
-      vi.mocked(access.listUsers).mockResolvedValueOnce(users);
+      vi.mocked(access.listUsers).mockReturnValueOnce(okAsync(users));
       const res = await req(app, "GET", `${A}/users`);
       expect(res.status).toBe(200);
       const body = await res.json() as { users: AccountUser[]; pagination: { cursor: null } };
