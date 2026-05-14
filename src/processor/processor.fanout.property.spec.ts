@@ -16,8 +16,8 @@ const mockState = vi.hoisted(() => ({
   clusters: [
     {
       clusterId: "cluster-default",
-      clusterArn: "arn:aws:rds:eu-west-1:111:cluster:cluster-default",
-      secretArn: "arn:aws:secretsmanager:eu-west-1:111:secret:cluster-default",
+      clusterArn: "arn:aws:rds:eu-central-1:111:cluster:cluster-default",
+      secretArn: "arn:aws:secretsmanager:eu-central-1:111:secret:cluster-default",
       databaseName: "signals",
       modelId: "amazon.titan-embed-text-v2:0",
       dimensions: 1024,
@@ -157,22 +157,22 @@ describe("Multi-cluster fanout writes vectors to every active target", () => {
     {
       label: "single cluster",
       clusters: [
-        { clusterId: "cluster-alpha-0", clusterArn: "arn:aws:rds:eu-west-1:111:cluster:cluster-alpha-0", secretArn: "arn:aws:secretsmanager:eu-west-1:111:secret:cluster-alpha-0", databaseName: "signals", modelId: "model-alpha", dimensions: 512, active: true },
+        { clusterId: "cluster-alpha-0", clusterArn: "arn:aws:rds:eu-central-1:111:cluster:cluster-alpha-0", secretArn: "arn:aws:secretsmanager:eu-central-1:111:secret:cluster-alpha-0", databaseName: "signals", modelId: "model-alpha", dimensions: 512, active: true },
       ],
     },
     {
       label: "two clusters with different dimensions",
       clusters: [
-        { clusterId: "cluster-alpha-0", clusterArn: "arn:aws:rds:eu-west-1:111:cluster:cluster-alpha-0", secretArn: "arn:aws:secretsmanager:eu-west-1:111:secret:cluster-alpha-0", databaseName: "signals", modelId: "model-alpha", dimensions: 512, active: true },
-        { clusterId: "cluster-beta-1", clusterArn: "arn:aws:rds:eu-west-1:111:cluster:cluster-beta-1", secretArn: "arn:aws:secretsmanager:eu-west-1:111:secret:cluster-beta-1", databaseName: "signals", modelId: "model-beta", dimensions: 1024, active: true },
+        { clusterId: "cluster-alpha-0", clusterArn: "arn:aws:rds:eu-central-1:111:cluster:cluster-alpha-0", secretArn: "arn:aws:secretsmanager:eu-central-1:111:secret:cluster-alpha-0", databaseName: "signals", modelId: "model-alpha", dimensions: 512, active: true },
+        { clusterId: "cluster-beta-1", clusterArn: "arn:aws:rds:eu-central-1:111:cluster:cluster-beta-1", secretArn: "arn:aws:secretsmanager:eu-central-1:111:secret:cluster-beta-1", databaseName: "signals", modelId: "model-beta", dimensions: 1024, active: true },
       ],
     },
     {
       label: "three clusters",
       clusters: [
-        { clusterId: "cluster-alpha-0", clusterArn: "arn:aws:rds:eu-west-1:111:cluster:cluster-alpha-0", secretArn: "arn:aws:secretsmanager:eu-west-1:111:secret:cluster-alpha-0", databaseName: "signals", modelId: "model-alpha", dimensions: 256, active: true },
-        { clusterId: "cluster-beta-1", clusterArn: "arn:aws:rds:eu-west-1:111:cluster:cluster-beta-1", secretArn: "arn:aws:secretsmanager:eu-west-1:111:secret:cluster-beta-1", databaseName: "signals", modelId: "model-beta", dimensions: 512, active: true },
-        { clusterId: "cluster-gamma-2", clusterArn: "arn:aws:rds:eu-west-1:111:cluster:cluster-gamma-2", secretArn: "arn:aws:secretsmanager:eu-west-1:111:secret:cluster-gamma-2", databaseName: "signals", modelId: "model-gamma", dimensions: 1024, active: true },
+        { clusterId: "cluster-alpha-0", clusterArn: "arn:aws:rds:eu-central-1:111:cluster:cluster-alpha-0", secretArn: "arn:aws:secretsmanager:eu-central-1:111:secret:cluster-alpha-0", databaseName: "signals", modelId: "model-alpha", dimensions: 256, active: true },
+        { clusterId: "cluster-beta-1", clusterArn: "arn:aws:rds:eu-central-1:111:cluster:cluster-beta-1", secretArn: "arn:aws:secretsmanager:eu-central-1:111:secret:cluster-beta-1", databaseName: "signals", modelId: "model-beta", dimensions: 512, active: true },
+        { clusterId: "cluster-gamma-2", clusterArn: "arn:aws:rds:eu-central-1:111:cluster:cluster-gamma-2", secretArn: "arn:aws:secretsmanager:eu-central-1:111:secret:cluster-gamma-2", databaseName: "signals", modelId: "model-gamma", dimensions: 1024, active: true },
       ],
     },
   ];

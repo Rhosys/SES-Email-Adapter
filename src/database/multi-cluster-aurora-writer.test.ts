@@ -17,8 +17,8 @@ vi.mock("../embedding/cluster-registry.js", () => ({
   CLUSTER_REGISTRY: Object.freeze([
     Object.freeze({
       clusterId: "test-cluster-1",
-      clusterArn: "arn:aws:rds:eu-west-1:111111111111:cluster:test-cluster-1",
-      secretArn: "arn:aws:secretsmanager:eu-west-1:111111111111:secret:test-1",
+      clusterArn: "arn:aws:rds:eu-central-1:111111111111:cluster:test-cluster-1",
+      secretArn: "arn:aws:secretsmanager:eu-central-1:111111111111:secret:test-1",
       databaseName: "testdb",
       modelId: "amazon.titan-embed-text-v2:0",
       dimensions: 1024,
@@ -28,8 +28,8 @@ vi.mock("../embedding/cluster-registry.js", () => ({
   getActiveClusters: () => [
     {
       clusterId: "test-cluster-1",
-      clusterArn: "arn:aws:rds:eu-west-1:111111111111:cluster:test-cluster-1",
-      secretArn: "arn:aws:secretsmanager:eu-west-1:111111111111:secret:test-1",
+      clusterArn: "arn:aws:rds:eu-central-1:111111111111:cluster:test-cluster-1",
+      secretArn: "arn:aws:secretsmanager:eu-central-1:111111111111:secret:test-1",
       databaseName: "testdb",
       modelId: "amazon.titan-embed-text-v2:0",
       dimensions: 1024,
@@ -40,8 +40,8 @@ vi.mock("../embedding/cluster-registry.js", () => ({
     if (id === "test-cluster-1") {
       return {
         clusterId: "test-cluster-1",
-        clusterArn: "arn:aws:rds:eu-west-1:111111111111:cluster:test-cluster-1",
-        secretArn: "arn:aws:secretsmanager:eu-west-1:111111111111:secret:test-1",
+        clusterArn: "arn:aws:rds:eu-central-1:111111111111:cluster:test-cluster-1",
+        secretArn: "arn:aws:secretsmanager:eu-central-1:111111111111:secret:test-1",
         databaseName: "testdb",
         modelId: "amazon.titan-embed-text-v2:0",
         dimensions: 1024,
@@ -52,8 +52,8 @@ vi.mock("../embedding/cluster-registry.js", () => ({
   },
   getReadCluster: () => ({
     clusterId: "test-cluster-1",
-    clusterArn: "arn:aws:rds:eu-west-1:111111111111:cluster:test-cluster-1",
-    secretArn: "arn:aws:secretsmanager:eu-west-1:111111111111:secret:test-1",
+    clusterArn: "arn:aws:rds:eu-central-1:111111111111:cluster:test-cluster-1",
+    secretArn: "arn:aws:secretsmanager:eu-central-1:111111111111:secret:test-1",
     databaseName: "testdb",
     modelId: "amazon.titan-embed-text-v2:0",
     dimensions: 1024,
@@ -95,8 +95,8 @@ describe("MultiClusterAuroraWriterImpl", () => {
 
       // BEGIN
       expect(calls[0]!.args[0].input).toMatchObject({
-        resourceArn: "arn:aws:rds:eu-west-1:111111111111:cluster:test-cluster-1",
-        secretArn: "arn:aws:secretsmanager:eu-west-1:111111111111:secret:test-1",
+        resourceArn: "arn:aws:rds:eu-central-1:111111111111:cluster:test-cluster-1",
+        secretArn: "arn:aws:secretsmanager:eu-central-1:111111111111:secret:test-1",
         database: "testdb",
       });
 
@@ -122,8 +122,8 @@ describe("MultiClusterAuroraWriterImpl", () => {
 
       // COMMIT
       expect(calls[3]!.args[0].input).toMatchObject({
-        resourceArn: "arn:aws:rds:eu-west-1:111111111111:cluster:test-cluster-1",
-        secretArn: "arn:aws:secretsmanager:eu-west-1:111111111111:secret:test-1",
+        resourceArn: "arn:aws:rds:eu-central-1:111111111111:cluster:test-cluster-1",
+        secretArn: "arn:aws:secretsmanager:eu-central-1:111111111111:secret:test-1",
         transactionId: "txn-1",
       });
     });
@@ -620,8 +620,8 @@ describe("MultiClusterAuroraWriterImpl", () => {
           database?: string;
         };
         expect(calls[0]!.args[0]).toBeInstanceOf(BeginTransactionCommand);
-        expect(beginInput.resourceArn).toBe("arn:aws:rds:eu-west-1:111111111111:cluster:test-cluster-1");
-        expect(beginInput.secretArn).toBe("arn:aws:secretsmanager:eu-west-1:111111111111:secret:test-1");
+        expect(beginInput.resourceArn).toBe("arn:aws:rds:eu-central-1:111111111111:cluster:test-cluster-1");
+        expect(beginInput.secretArn).toBe("arn:aws:secretsmanager:eu-central-1:111111111111:secret:test-1");
         expect(beginInput.database).toBe("testdb");
 
         // Call 1: ExecuteStatement — SET LOCAL with the same transactionId
