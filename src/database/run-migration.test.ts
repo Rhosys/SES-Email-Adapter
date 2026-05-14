@@ -10,8 +10,8 @@ import { runMigration } from "./run-migration.js";
 vi.mock("../embedding/cluster-registry.js", () => {
   const cluster = Object.freeze({
     clusterId: "test-cluster-1",
-    clusterArn: "arn:aws:rds:eu-west-1:111111111111:cluster:test-cluster-1",
-    secretArn: "arn:aws:secretsmanager:eu-west-1:111111111111:secret:test-1",
+    clusterArn: "arn:aws:rds:eu-central-1:111111111111:cluster:test-cluster-1",
+    secretArn: "arn:aws:secretsmanager:eu-central-1:111111111111:secret:test-1",
     databaseName: "testdb",
     modelId: "amazon.titan-embed-text-v2:0",
     dimensions: 1024,
@@ -62,7 +62,7 @@ describe("runMigration", () => {
     expect(result.executed).toBe(true);
     expect(result.pkColumns).toEqual(["arc_id", "account_id", "recipient_address"]);
     expect(result.valid).toBe(true);
-    expect(result.clusterArn).toBe("arn:aws:rds:eu-west-1:111111111111:cluster:test-cluster-1");
+    expect(result.clusterArn).toBe("arn:aws:rds:eu-central-1:111111111111:cluster:test-cluster-1");
   });
 
   it("reports invalid when PK columns do not match expected shape", async () => {
@@ -96,8 +96,8 @@ describe("runMigration", () => {
 
     // First call: execute migration
     const migrationCall = calls[0]!.args[0].input;
-    expect(migrationCall.resourceArn).toBe("arn:aws:rds:eu-west-1:111111111111:cluster:test-cluster-1");
-    expect(migrationCall.secretArn).toBe("arn:aws:secretsmanager:eu-west-1:111111111111:secret:test-1");
+    expect(migrationCall.resourceArn).toBe("arn:aws:rds:eu-central-1:111111111111:cluster:test-cluster-1");
+    expect(migrationCall.secretArn).toBe("arn:aws:secretsmanager:eu-central-1:111111111111:secret:test-1");
     expect(migrationCall.database).toBe("testdb");
     expect(migrationCall.sql).toBe("-- mock SQL migration content");
 

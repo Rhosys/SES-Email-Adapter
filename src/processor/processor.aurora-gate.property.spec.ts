@@ -19,8 +19,8 @@ import { createMockLogger, type MockLogger } from "../testing/mock-logger.js";
 vi.mock("../embedding/cluster-registry.js", () => {
   const clusterA = Object.freeze({
     clusterId: "cluster-a",
-    clusterArn: "arn:aws:rds:eu-west-1:111:cluster:cluster-a",
-    secretArn: "arn:aws:secretsmanager:eu-west-1:111:secret:cluster-a",
+    clusterArn: "arn:aws:rds:eu-central-1:111:cluster:cluster-a",
+    secretArn: "arn:aws:secretsmanager:eu-central-1:111:secret:cluster-a",
     databaseName: "signals",
     modelId: "amazon.titan-embed-text-v2:0",
     dimensions: 1024,
@@ -28,8 +28,8 @@ vi.mock("../embedding/cluster-registry.js", () => {
   });
   const clusterB = Object.freeze({
     clusterId: "cluster-b",
-    clusterArn: "arn:aws:rds:eu-west-1:111:cluster:cluster-b",
-    secretArn: "arn:aws:secretsmanager:eu-west-1:111:secret:cluster-b",
+    clusterArn: "arn:aws:rds:eu-central-1:111:cluster:cluster-b",
+    secretArn: "arn:aws:secretsmanager:eu-central-1:111:secret:cluster-b",
     databaseName: "signals",
     modelId: "amazon.titan-embed-text-v3:0",
     dimensions: 1536,

@@ -1,6 +1,4 @@
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { CLUSTER_REGISTRY, getActiveClusters, getClusterById, getReadCluster } from "./cluster-registry.js";
 
 // ---------------------------------------------------------------------------
@@ -49,11 +47,6 @@ describe("CLUSTER_REGISTRY", () => {
       expect(typeof entry.dimensions).toBe("number");
       expect(typeof entry.active).toBe("boolean");
     }
-  });
-
-  it("does not reference environment variables in the module source", () => {
-    const source = readFileSync(resolve(__dirname, "cluster-registry.ts"), "utf-8");
-    expect(source).not.toContain("process.env");
   });
 
   it("has exactly one active cluster by default", () => {

@@ -9,7 +9,7 @@
 
 export interface ClusterRegistryEntry {
   clusterId: string;          // 'aurora-prod-titan-v2'
-  clusterArn: string;         // arn:aws:rds:eu-west-1:...:cluster:...
+  clusterArn: string;         // arn:aws:rds:eu-central-1:...:cluster:...
   secretArn: string;          // Secrets Manager ARN for this cluster's master credentials
   databaseName: string;
   modelId: string;            // 'amazon.titan-embed-text-v2:0'
@@ -21,12 +21,18 @@ export interface ClusterRegistryEntry {
 // Cluster Registry
 // ---------------------------------------------------------------------------
 
+function requireEnv(name: string): string {
+  const val = process.env[name];
+  if (!val) throw new Error(`Required environment variable ${name} is not set`);
+  return val;
+}
+
 export const CLUSTER_REGISTRY: readonly ClusterRegistryEntry[] = Object.freeze([
   Object.freeze({
     clusterId: 'aurora-prod-titan-v2',
-    clusterArn: 'arn:aws:rds:eu-west-1:123456789012:cluster:aurora-prod-titan-v2',
-    secretArn: 'arn:aws:secretsmanager:eu-west-1:123456789012:secret:aurora-prod-titan-v2-xxxxxx',
-    databaseName: 'signals',
+    clusterArn: requireEnv('AURORA_CLUSTER_ARN'),
+    secretArn:  requireEnv('AURORA_SECRET_ARN'),
+    databaseName: process.env['AURORA_DB_NAME'] ?? 'signals',
     modelId: 'amazon.titan-embed-text-v2:0',
     dimensions: 1024,
     active: true,
