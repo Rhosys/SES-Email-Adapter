@@ -6,6 +6,8 @@
 locals {
   api_gateway_origin_id = "api-gateway"
   s3_site_origin_id     = "s3-site"
+  s3_assets_origin_id   = "s3-site-assets"
+  site_version          = "main/2026"
 }
 
 # ---------------------------------------------------------------------------
