@@ -64,6 +64,14 @@ resource "aws_cloudfront_distribution" "api" {
     origin_access_control_id = aws_cloudfront_origin_access_control.s3.id
   }
 
+  # S3 origin — versioned assets with origin_path (no function needed)
+  origin {
+    domain_name              = aws_s3_bucket.web.bucket_regional_domain_name
+    origin_id                = local.s3_assets_origin_id
+    origin_path              = "/${local.site_version}"
+    origin_access_control_id = aws_cloudfront_origin_access_control.s3.id
+  }
+
   # API Gateway origin — existing API with x-origin-verify secret
   origin {
     domain_name = aws_apigatewayv2_domain_name.http.domain_name
