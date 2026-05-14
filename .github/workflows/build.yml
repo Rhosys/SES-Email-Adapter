@@ -42,6 +42,16 @@ jobs:
       - name: Test Code
         run: npm test
 
+      - name: Migrate Tofu State
+        run: |
+          OLD_BUCKET="${STATE_BUCKET/eu-central-1/eu-west-1}"
+          if aws s3 ls "s3://${STATE_BUCKET}/${STATE_KEY}" > /dev/null 2>&1; then
+            echo "State already exists in ${STATE_BUCKET} — skipping migration."
+          else
+            echo "State not found in ${STATE_BUCKET}, copying from ${OLD_BUCKET}..."
+            aws s3 cp "s3://${OLD_BUCKET}/${STATE_KEY}" "s3://${STATE_BUCKET}/${STATE_KEY}"
+          fi
+
       - name: Tofu Init
         run: tofu -chdir=deploy init -input=false -backend-config="bucket=${STATE_BUCKET}" -backend-config="key=${STATE_KEY}"
 
@@ -72,6 +82,16 @@ jobs:
 
       - name: Test Code
         run: npm test
+
+      - name: Migrate Tofu State
+        run: |
+          OLD_BUCKET="${STATE_BUCKET/eu-central-1/eu-west-1}"
+          if aws s3 ls "s3://${STATE_BUCKET}/${STATE_KEY}" > /dev/null 2>&1; then
+            echo "State already exists in ${STATE_BUCKET} — skipping migration."
+          else
+            echo "State not found in ${STATE_BUCKET}, copying from ${OLD_BUCKET}..."
+            aws s3 cp "s3://${OLD_BUCKET}/${STATE_KEY}" "s3://${STATE_BUCKET}/${STATE_KEY}"
+          fi
 
       - name: Tofu Init
         run: tofu -chdir=deploy init -input=false -backend-config="bucket=${STATE_BUCKET}" -backend-config="key=${STATE_KEY}"
