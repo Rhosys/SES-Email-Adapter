@@ -102,7 +102,7 @@ describe("Authorization failure returns 403 with error code", () => {
 });
 
 describe("Authress SDK failure returns 500 with logged error", () => {
-  const nonForbiddenStatuses = [400, 401, 404, 429, 500, 502, 503];
+  const nonForbiddenStatuses = [400, 401, 429, 500, 502, 503];
 
   it.each(nonForbiddenStatuses.map((s) => ({ statusCode: s })))("status=$statusCode → returns 500 and logs error", async ({ statusCode }) => {
     const error = Object.assign(new Error("SDK failure"), { response: { status: statusCode } });
@@ -121,6 +121,24 @@ describe("Authress SDK failure returns 500 with logged error", () => {
     const errorCall = logger.calls.find((c) => c.method === "error" && c.context?.code === "authorization.sdk_error");
     expect(errorCall).toBeDefined();
   });
+
+  it("status=404 → returns 403 and logs warn", async () => {
+    const error = Object.assign(new Error("Not found"), { response: { status: 404 } });
+    const access = makeAccess({ checkAccess: vi.fn().mockRejectedValue(error) });
+    const logger = createMockLogger();
+    const authorize = createAuthorize(access, logger);
+
+    const app = new Hono<AppEnv>();
+    app.use("*", async (c, next) => { c.set("auth", { accountId: "acct-1", userId: "user-1" }); await next(); });
+    app.get("/accounts/:accountId", authorize("accounts:read", (c) => `accounts/${c.req.param("accountId")}`), (c) => c.json({ ok: true }));
+
+    const res = await app.request("/accounts/acct-1");
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ title: "Forbidden", errorCode: "AccessDenied" });
+
+    const warnCall = logger.calls.find((c) => c.method === "warn" && c.context?.code === "authorization.not_found");
+    expect(warnCall).toBeDefined();
+  });
 });
 
 describe("Authorization failures are logged", () => {
@@ -136,7 +154,7 @@ describe("Authorization failures are logged", () => {
 
     await app.request("/accounts/acct-1");
 
-    const infoCall = logger.calls.find((c) => c.method === "info" && c.message === "authorization.failed");
+    const infoCall = logger.calls.find((c) => c.method === "info" && c.message === "authorization.denied");
     expect(infoCall).toBeDefined();
     expect(infoCall!.context).toMatchObject({
       userId: "user-1",

@@ -123,7 +123,7 @@ describe("authorize() middleware", () => {
     const app = createTestApp(access, logger);
     await app.request("/accounts/acct-123");
 
-    const infoCall = logger.calls.find(c => c.method === "info" && c.message === "authorization.failed");
+    const infoCall = logger.calls.find(c => c.method === "info" && c.message === "authorization.denied");
     expect(infoCall).toBeDefined();
     expect(infoCall!.context).toMatchObject({
       userId: "user-456",

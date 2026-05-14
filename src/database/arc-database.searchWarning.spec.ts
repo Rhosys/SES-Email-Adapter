@@ -59,7 +59,7 @@ describe("Feature: dynamodb-storage-optimization, Property 5: Search warning thr
 
     await db.searchArcs("acct-1", "test", { limit: 20 });
 
-    const warningEmitted = mockLogger.calls.some(c => c.method === "warn");
+    const warningEmitted = mockLogger.calls.some(c => c.method === "track");
 
     expect(warningEmitted).toBe(shouldWarn);
   });
