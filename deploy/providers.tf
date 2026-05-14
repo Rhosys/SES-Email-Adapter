@@ -26,7 +26,7 @@ terraform {
 }
 
 provider "aws" {
-  region              = "eu-west-1"
+  region              = "eu-central-1"
   allowed_account_ids = [var.aws_account_id]
 
   default_tags {
@@ -40,19 +40,6 @@ provider "aws" {
 provider "aws" {
   alias               = "us_east_1"
   region              = "us-east-1"
-  allowed_account_ids = [var.aws_account_id]
-
-  default_tags {
-    tags = {
-      App = var.service_name
-    }
-  }
-}
-
-# DynamoDB global table replica + KMS replica key
-provider "aws" {
-  alias               = "eu_central_1"
-  region              = "eu-central-1"
   allowed_account_ids = [var.aws_account_id]
 
   default_tags {

@@ -1,6 +1,5 @@
 mock_provider "aws" {}
 mock_provider "aws" { alias = "us_east_1" }
-mock_provider "aws" { alias = "eu_central_1" }
 
 variables {
   aws_account_id = "123456789012"

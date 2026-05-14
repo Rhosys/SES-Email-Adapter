@@ -1,12 +1,12 @@
 mock_provider "aws" {
   mock_resource "aws_cloudwatch_log_group" {
     defaults = {
-      arn = "arn:aws:logs:eu-west-1:123456789012:log-group:mock"
+      arn = "arn:aws:logs:eu-central-1:123456789012:log-group:mock"
     }
   }
   mock_resource "aws_sns_topic" {
     defaults = {
-      arn = "arn:aws:sns:eu-west-1:123456789012:mock-topic"
+      arn = "arn:aws:sns:eu-central-1:123456789012:mock-topic"
     }
   }
   mock_resource "aws_iam_role" {
@@ -17,26 +17,26 @@ mock_provider "aws" {
   mock_resource "aws_rds_cluster" {
     defaults = {
       master_user_secret = [{
-        secret_arn    = "arn:aws:secretsmanager:eu-west-1:123456789012:secret:mock"
-        kms_key_id    = "arn:aws:kms:eu-west-1:123456789012:key/mock-key"
+        secret_arn    = "arn:aws:secretsmanager:eu-central-1:123456789012:secret:mock"
+        kms_key_id    = "arn:aws:kms:eu-central-1:123456789012:key/mock-key"
         secret_status = "active"
       }]
     }
   }
   mock_resource "aws_apigatewayv2_api" {
     defaults = {
-      execution_arn = "arn:aws:execute-api:eu-west-1:123456789012:mockapi"
+      execution_arn = "arn:aws:execute-api:eu-central-1:123456789012:mockapi"
     }
   }
   mock_resource "aws_lambda_alias" {
     defaults = {
-      arn        = "arn:aws:lambda:eu-west-1:123456789012:function:mock:production"
-      invoke_arn = "arn:aws:apigateway:eu-west-1:lambda:path/2015-03-31/functions/arn:aws:lambda:eu-west-1:123456789012:function:mock:production/invocations"
+      arn        = "arn:aws:lambda:eu-central-1:123456789012:function:mock:production"
+      invoke_arn = "arn:aws:apigateway:eu-central-1:lambda:path/2015-03-31/functions/arn:aws:lambda:eu-central-1:123456789012:function:mock:production/invocations"
     }
   }
   mock_resource "aws_cloudwatch_event_rule" {
     defaults = {
-      arn = "arn:aws:events:eu-west-1:123456789012:rule/mock-rule"
+      arn = "arn:aws:events:eu-central-1:123456789012:rule/mock-rule"
     }
   }
   mock_resource "aws_acm_certificate" {
@@ -53,7 +53,7 @@ mock_provider "aws" {
   }
   mock_data "aws_kms_alias" {
     defaults = {
-      target_key_arn = "arn:aws:kms:eu-west-1:123456789012:key/mock-key"
+      target_key_arn = "arn:aws:kms:eu-central-1:123456789012:key/mock-key"
     }
   }
 }
@@ -65,7 +65,6 @@ mock_provider "aws" {
     }
   }
 }
-mock_provider "aws" { alias = "eu_central_1" }
 
 variables {
   aws_account_id = "123456789012"
