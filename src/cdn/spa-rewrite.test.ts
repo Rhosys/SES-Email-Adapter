@@ -39,7 +39,7 @@ function handler(event: { request: CfRequest }): CfRequest {
       return request;
     }
 
-    const lastSegment = segments[segments.length - 1];
+    const lastSegment = segments[segments.length - 1]!;
     if (lastSegment.includes(".")) {
       return request;
     }
