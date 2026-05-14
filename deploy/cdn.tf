@@ -353,6 +353,14 @@ function handler(event) {
       return request;
     }
 
+    // Bare prefix: /pr/{slug} or /pr/{slug}/ — always rewrite regardless of dot in slug
+    // segments for /pr/{slug} = ['', 'pr', slug] (length 3)
+    // segments for /pr/{slug}/ = ['', 'pr', slug, ''] (length 4, last is empty)
+    if (segments.length === 3 || (segments.length === 4 && segments[3] === '')) {
+      request.uri = '/pr/' + slug + '/index.html';
+      return request;
+    }
+
     var lastSegment = segments[segments.length - 1];
     if (lastSegment.includes('.')) {
       return request;
