@@ -16,6 +16,11 @@ function handler(event: { request: CfRequest }): CfRequest {
   const request = event.request;
   const uri = request.uri;
 
+  // Bare /pr with no trailing slash — pass through unchanged
+  if (uri === "/pr") {
+    return request;
+  }
+
   // PR preview prefix — rewrite SPA routes to prefix-scoped index.html
   if (uri.startsWith("/pr/")) {
     const segments = uri.split("/");
@@ -157,10 +162,7 @@ describe("CloudFront SPA rewrite function", () => {
   describe("Property 3: Bare prefix rewrite regardless of slug content", () => {
     /** Validates: Requirements 1.2, 3.1 */
 
-    const slugWithDotsArb = fc.stringOf(
-      fc.constantFrom(..."abcdefghijklmnopqrstuvwxyz0123456789.-".split("")),
-      { minLength: 1, maxLength: 63 },
-    );
+    const slugWithDotsArb = fc.stringMatching(/^[a-z0-9.-]{1,63}$/);
 
     it("rewrites /pr/{slug} (no trailing slash) to /pr/{slug}/index.html", () => {
       fc.assert(
@@ -184,6 +186,50 @@ describe("CloudFront SPA rewrite function", () => {
   });
 
   describe("Edge cases", () => {
-    it.todo("passes /pr/ and /pr through unchanged");
+    /** Validates: Requirements 1.4, 3.2 */
+
+    it("passes /pr/ through unchanged", () => {
+      expect(rewrite("/pr/")).toBe("/pr/");
+    });
+
+    it("passes /pr through unchanged", () => {
+      expect(rewrite("/pr")).toBe("/pr");
+    });
+
+    // Static test cases from design document — PR preview deep links
+    it("rewrites /pr/my-branch/dashboard to /pr/my-branch/index.html", () => {
+      expect(rewrite("/pr/my-branch/dashboard")).toBe("/pr/my-branch/index.html");
+    });
+
+    it("rewrites /pr/my-branch/settings/domains to /pr/my-branch/index.html", () => {
+      expect(rewrite("/pr/my-branch/settings/domains")).toBe("/pr/my-branch/index.html");
+    });
+
+    // Static test cases — PR preview static files (pass through)
+    it("passes /pr/my-branch/assets/index-abc123.js through unchanged", () => {
+      expect(rewrite("/pr/my-branch/assets/index-abc123.js")).toBe("/pr/my-branch/assets/index-abc123.js");
+    });
+
+    it("passes /pr/my-branch/favicon.ico through unchanged", () => {
+      expect(rewrite("/pr/my-branch/favicon.ico")).toBe("/pr/my-branch/favicon.ico");
+    });
+
+    // Static test cases — Root-level SPA routes
+    it("rewrites / to /main/2026/index.html", () => {
+      expect(rewrite("/")).toBe("/main/2026/index.html");
+    });
+
+    it("rewrites /dashboard to /main/2026/index.html", () => {
+      expect(rewrite("/dashboard")).toBe("/main/2026/index.html");
+    });
+
+    // Static test cases — Root-level static files
+    it("rewrites /favicon.ico to /main/2026/favicon.ico", () => {
+      expect(rewrite("/favicon.ico")).toBe("/main/2026/favicon.ico");
+    });
+
+    it("rewrites /robots.txt to /main/2026/robots.txt", () => {
+      expect(rewrite("/robots.txt")).toBe("/main/2026/robots.txt");
+    });
   });
 });
