@@ -189,6 +189,10 @@ resource "aws_dynamodb_table" "accounts" {
 
   stream_enabled   = true
   stream_view_type = "NEW_AND_OLD_IMAGES"
+
+  replica {
+    region_name = "eu-central-2"
+  }
 }
 
 resource "aws_dynamodb_table" "signals" {
@@ -238,6 +242,10 @@ resource "aws_dynamodb_table" "signals" {
 
   stream_enabled   = true
   stream_view_type = "NEW_AND_OLD_IMAGES"
+
+  replica {
+    region_name = "eu-central-2"
+  }
 }
 
 resource "aws_dynamodb_table" "processing" {
@@ -265,6 +273,10 @@ resource "aws_dynamodb_table" "processing" {
 
   stream_enabled   = true
   stream_view_type = "NEW_AND_OLD_IMAGES"
+
+  replica {
+    region_name = "eu-central-2"
+  }
 }
 
 resource "aws_dynamodb_table" "audit" {
