@@ -55,6 +55,35 @@ jobs:
       - name: Tofu Init
         run: tofu -chdir=deploy init -input=false -backend-config="bucket=${STATE_BUCKET}" -backend-config="key=${STATE_KEY}"
 
+      - name: Orphan eu-west-1 State (one-time migration)
+        run: |
+          MARKER="s3://${STATE_BUCKET}/migration/eu-west-1-orphaned"
+          if aws s3 ls "$MARKER" > /dev/null 2>&1; then
+            echo "eu-west-1 orphan migration already complete — skipping."
+            exit 0
+          fi
+          RESOURCES=$(tofu -chdir=deploy state list 2>/dev/null || true)
+          if [ -z "$RESOURCES" ]; then
+            echo "State is empty — marking migration as done."
+            echo "" | aws s3 cp - "$MARKER"
+            exit 0
+          fi
+          # Keep global/us-east-1 resources: IAM, ACM, CloudFront, Route53, random
+          KEEP="^(aws_iam_|aws_acm_|aws_cloudfront_|aws_route53_|random_)"
+          TO_REMOVE=$(echo "$RESOURCES" | grep -vE "$KEEP" || true)
+          if [ -z "$TO_REMOVE" ]; then
+            echo "No regional resources in state — marking migration as done."
+            echo "" | aws s3 cp - "$MARKER"
+            exit 0
+          fi
+          echo "→ Orphaning eu-west-1 regional resources from state:"
+          while IFS= read -r addr; do
+            echo "   removing: $addr"
+            tofu -chdir=deploy state rm "$addr" 2>/dev/null || echo "   (already removed)"
+          done <<< "$TO_REMOVE"
+          echo "" | aws s3 cp - "$MARKER"
+          echo "✓ Done. Old eu-west-1 resources are now unmanaged in AWS."
+
       - name: Tofu Plan
         run: tofu -chdir=deploy plan -input=false -out=plan.cache
 
@@ -95,6 +124,35 @@ jobs:
 
       - name: Tofu Init
         run: tofu -chdir=deploy init -input=false -backend-config="bucket=${STATE_BUCKET}" -backend-config="key=${STATE_KEY}"
+
+      - name: Orphan eu-west-1 State (one-time migration)
+        run: |
+          MARKER="s3://${STATE_BUCKET}/migration/eu-west-1-orphaned"
+          if aws s3 ls "$MARKER" > /dev/null 2>&1; then
+            echo "eu-west-1 orphan migration already complete — skipping."
+            exit 0
+          fi
+          RESOURCES=$(tofu -chdir=deploy state list 2>/dev/null || true)
+          if [ -z "$RESOURCES" ]; then
+            echo "State is empty — marking migration as done."
+            echo "" | aws s3 cp - "$MARKER"
+            exit 0
+          fi
+          # Keep global/us-east-1 resources: IAM, ACM, CloudFront, Route53, random
+          KEEP="^(aws_iam_|aws_acm_|aws_cloudfront_|aws_route53_|random_)"
+          TO_REMOVE=$(echo "$RESOURCES" | grep -vE "$KEEP" || true)
+          if [ -z "$TO_REMOVE" ]; then
+            echo "No regional resources in state — marking migration as done."
+            echo "" | aws s3 cp - "$MARKER"
+            exit 0
+          fi
+          echo "→ Orphaning eu-west-1 regional resources from state:"
+          while IFS= read -r addr; do
+            echo "   removing: $addr"
+            tofu -chdir=deploy state rm "$addr" 2>/dev/null || echo "   (already removed)"
+          done <<< "$TO_REMOVE"
+          echo "" | aws s3 cp - "$MARKER"
+          echo "✓ Done. Old eu-west-1 resources are now unmanaged in AWS."
 
       - name: Tofu Plan
         id: plan

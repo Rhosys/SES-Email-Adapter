@@ -14,8 +14,8 @@ import { createMockLogger } from "../testing/mock-logger.js";
 vi.mock("../embedding/cluster-registry.js", () => {
   const cluster = Object.freeze({
     clusterId: "cluster-a",
-    clusterArn: "arn:aws:rds:eu-west-1:111:cluster:cluster-a",
-    secretArn: "arn:aws:secretsmanager:eu-west-1:111:secret:cluster-a",
+    clusterArn: "arn:aws:rds:eu-central-1:111:cluster:cluster-a",
+    secretArn: "arn:aws:secretsmanager:eu-central-1:111:secret:cluster-a",
     databaseName: "signals",
     modelId: "amazon.titan-embed-text-v2:0",
     dimensions: 1024,
@@ -65,8 +65,8 @@ describe("ProcessError always carries the SQS messageId", () => {
       messageAttributes: {},
       md5OfBody: "",
       eventSource: "aws:sqs",
-      eventSourceARN: "arn:aws:sqs:eu-west-1:123:queue",
-      awsRegion: "eu-west-1",
+      eventSourceARN: "arn:aws:sqs:eu-central-1:123:queue",
+      awsRegion: "eu-central-1",
     };
   }
 

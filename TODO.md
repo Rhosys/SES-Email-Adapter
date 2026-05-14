@@ -1,5 +1,22 @@
 # TODO
 
+## eu-west-1 → eu-central-1 Migration Cleanup (manual, human credentials required)
+
+The CI/CD orphan step removes old eu-west-1 resources from Tofu state so the next apply can create fresh eu-central-1 resources. These old resources still exist in AWS and must be deleted manually **after** eu-central-1 is confirmed live.
+
+- [ ] **S3: empty and delete old email bucket** — `ses-email-adapter-emails-{account_id}-eu-west-1-an` in eu-west-1. Run `aws s3 rm s3://<bucket> --recursive` then `aws s3 rb s3://<bucket> --region eu-west-1`.
+- [ ] **S3: empty and delete old web bucket** — `ses-email-adapter-web-{account_id}-eu-west-1-an` in eu-west-1. Same two-step rm + rb.
+- [ ] **DynamoDB: remove eu-central-1 replicas** — the `accounts`, `signals`, and `processing` tables in eu-central-1 had replicas pointing at eu-central-1 (now the primary). Remove any stale replica entries via `aws dynamodb delete-table --table-name <name> --region eu-west-1` (the replica tables in eu-west-1).
+- [ ] **Aurora: disable deletion_protection and delete** — connect to eu-west-1 Aurora cluster. Set `deletion_protection = false` on the cluster, then delete each instance (`aws rds delete-db-instance --db-instance-identifier <id> --region eu-west-1`), then delete the cluster (`aws rds delete-db-cluster --db-cluster-identifier <id> --skip-final-snapshot --region eu-west-1`). Cluster has `prevent_destroy` in Tofu but is now unmanaged — Tofu won't block deletion.
+- [ ] **Secrets Manager: delete old Aurora secret** — `aws secretsmanager delete-secret --secret-id <arn> --region eu-west-1 --force-delete-without-recovery`.
+- [ ] **VPC / subnets / security groups / route tables in eu-west-1** — once Aurora is deleted the ENIs detach automatically. Then delete the VPC and all its resources: subnets, IGW, route tables, security groups. Use `aws ec2 delete-vpc --vpc-id <id> --region eu-west-1` (requires all dependencies cleared first).
+- [ ] **SQS queues in eu-west-1** — `aws sqs delete-queue --queue-url <url> --region eu-west-1` for the email-processing queue and DLQ.
+- [ ] **SNS topics / subscriptions in eu-west-1** — `aws sns delete-topic --topic-arn <arn> --region eu-west-1` for any SNS topics.
+- [ ] **KMS keys in eu-west-1** — schedule deletion for the old eu-west-1 CMKs (minimum 7-day waiting period). `aws kms schedule-key-deletion --key-id <id> --pending-window-in-days 7 --region eu-west-1`.
+- [ ] **Delete S3 state migration marker** (optional cleanup) — once all eu-west-1 resources are gone: `aws s3 rm s3://{STATE_BUCKET}/migration/eu-west-1-orphaned`.
+
+---
+
 - [ ] **Expected error handling** — audit all catch blocks and error paths. Distinguish between expected errors (validation failures, not-found, rate limits → INFO or silent) and unexpected errors (DynamoDB failures, SES timeouts → ERROR). Expected errors should never trigger alerts.
 - [ ] **Validate reply-to addresses before sending** — block spoofed inbound emails from triggering auto-replies/pongs to arbitrary third parties. Before any outbound send (auto-reply, pong, forward), verify the `from` address on the inbound signal is plausibly the actual sender (DKIM pass + DMARC pass as minimum gate, or match against known sender domains). Without this, an attacker can forge `From: victim@example.com` and we'll spam the victim with our auto-reply.
 - [ ] **Unify auto-reply and auto-draft into a single action** — `auto_draft` with an `autoSend: boolean` flag. When `autoSend: true` and the send fails, the draft stays in `status: "draft"` for user review (graceful degradation). Rename the `Sender` interface away from `testReplier.pong` — auto-reply should not be coupled to the test infrastructure.
