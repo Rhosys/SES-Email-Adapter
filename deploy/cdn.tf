@@ -336,9 +336,35 @@ resource "aws_cloudfront_function" "spa_rewrite" {
 function handler(event) {
   var request = event.request;
   var uri = request.uri;
-  if (!uri.includes('.')) {
-    request.uri = '/index.html';
+  var MAIN_PREFIX = '/${local.site_version}';
+
+  // PR preview prefix — rewrite SPA routes to prefix-scoped index.html
+  if (uri.startsWith('/pr/')) {
+    var segments = uri.split('/');
+    // segments: ['', 'pr', slug, ...rest]
+    var slug = segments[2];
+
+    if (!slug) {
+      return request;
+    }
+
+    var lastSegment = segments[segments.length - 1];
+    if (lastSegment.includes('.')) {
+      return request;
+    }
+
+    request.uri = '/pr/' + slug + '/index.html';
+    return request;
   }
+
+  // Root-level requests: prepend site_version prefix
+  var lastSeg = uri.substring(uri.lastIndexOf('/') + 1);
+  if (!lastSeg.includes('.')) {
+    request.uri = MAIN_PREFIX + '/index.html';
+  } else {
+    request.uri = MAIN_PREFIX + uri;
+  }
+
   return request;
 }
 EOF
