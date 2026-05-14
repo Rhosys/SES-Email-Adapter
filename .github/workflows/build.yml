@@ -135,6 +135,7 @@ jobs:
           path: |
             deploy/plan.cache
             deploy/plan.json
+            deploy/.terraform/lambda-stub.zip
             dist/
           retention-days: 1
 
