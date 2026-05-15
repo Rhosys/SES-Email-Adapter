@@ -118,6 +118,39 @@ jobs:
           echo "" | aws s3 cp - "$MARKER"
           echo "✓ Post-migration state fix applied."
 
+      - name: Fix eu-central-1 S3 Bucket State (one-time)
+        run: |
+          MARKER="s3://${STATE_BUCKET}/migration/eu-central-1-s3-buckets-fixed"
+          if aws s3 ls "$MARKER" > /dev/null 2>&1; then
+            echo "S3 bucket state fix already applied — skipping."
+            exit 0
+          fi
+          NEW_WEB="${TF_VAR_service_name,,}-web-${TF_VAR_aws_account_id}-eu-central-1-an"
+          NEW_EMAILS="${TF_VAR_service_name,,}-emails-${TF_VAR_aws_account_id}-eu-central-1-an"
+          for bucket_key in web emails; do
+            addr="aws_s3_bucket.${bucket_key}"
+            CURRENT=$(tofu -chdir=deploy state show "$addr" 2>/dev/null | grep '^ *id ' | awk '{print $3}' | tr -d '"' || true)
+            if [[ "$CURRENT" == *"eu-west-1"* ]]; then
+              NEW_NAME="NEW_${bucket_key^^}"
+              NEW_BUCKET="${!NEW_NAME}"
+              echo "→ $addr in state is '$CURRENT'; migrating to '$NEW_BUCKET'..."
+              for sub in \
+                "aws_s3_bucket_policy.${bucket_key}" \
+                "aws_s3_bucket_lifecycle_configuration.${bucket_key}" \
+                "aws_s3_bucket_server_side_encryption_configuration.${bucket_key}" \
+                "aws_s3_bucket_public_access_block.${bucket_key}" \
+                "aws_s3_bucket.${bucket_key}"; do
+                tofu -chdir=deploy state rm "$sub" 2>/dev/null || echo "  (already absent): $sub"
+              done
+              tofu -chdir=deploy import "aws_s3_bucket.${bucket_key}" "$NEW_BUCKET"
+              echo "  ✓ aws_s3_bucket.${bucket_key} imported as '$NEW_BUCKET'"
+            else
+              echo "$addr OK ('$CURRENT') — skipping"
+            fi
+          done
+          echo "" | aws s3 cp - "$MARKER"
+          echo "✓ S3 bucket state fix applied."
+
       - name: Tofu Plan
         run: tofu -chdir=deploy plan -input=false -out=plan.cache
 
@@ -221,6 +254,39 @@ jobs:
           done
           echo "" | aws s3 cp - "$MARKER"
           echo "✓ Post-migration state fix applied."
+
+      - name: Fix eu-central-1 S3 Bucket State (one-time)
+        run: |
+          MARKER="s3://${STATE_BUCKET}/migration/eu-central-1-s3-buckets-fixed"
+          if aws s3 ls "$MARKER" > /dev/null 2>&1; then
+            echo "S3 bucket state fix already applied — skipping."
+            exit 0
+          fi
+          NEW_WEB="${TF_VAR_service_name,,}-web-${TF_VAR_aws_account_id}-eu-central-1-an"
+          NEW_EMAILS="${TF_VAR_service_name,,}-emails-${TF_VAR_aws_account_id}-eu-central-1-an"
+          for bucket_key in web emails; do
+            addr="aws_s3_bucket.${bucket_key}"
+            CURRENT=$(tofu -chdir=deploy state show "$addr" 2>/dev/null | grep '^ *id ' | awk '{print $3}' | tr -d '"' || true)
+            if [[ "$CURRENT" == *"eu-west-1"* ]]; then
+              NEW_NAME="NEW_${bucket_key^^}"
+              NEW_BUCKET="${!NEW_NAME}"
+              echo "→ $addr in state is '$CURRENT'; migrating to '$NEW_BUCKET'..."
+              for sub in \
+                "aws_s3_bucket_policy.${bucket_key}" \
+                "aws_s3_bucket_lifecycle_configuration.${bucket_key}" \
+                "aws_s3_bucket_server_side_encryption_configuration.${bucket_key}" \
+                "aws_s3_bucket_public_access_block.${bucket_key}" \
+                "aws_s3_bucket.${bucket_key}"; do
+                tofu -chdir=deploy state rm "$sub" 2>/dev/null || echo "  (already absent): $sub"
+              done
+              tofu -chdir=deploy import "aws_s3_bucket.${bucket_key}" "$NEW_BUCKET"
+              echo "  ✓ aws_s3_bucket.${bucket_key} imported as '$NEW_BUCKET'"
+            else
+              echo "$addr OK ('$CURRENT') — skipping"
+            fi
+          done
+          echo "" | aws s3 cp - "$MARKER"
+          echo "✓ S3 bucket state fix applied."
 
       - name: Tofu Plan
         id: plan
@@ -327,12 +393,26 @@ jobs:
           echo ${PIPESTATUS[0]} > /tmp/apply_exit_code.txt
           exit $(cat /tmp/apply_exit_code.txt)
 
+      - name: Deploy Application Code
+        id: deploy
+        env:
+          LAMBDA_FUNCTION_NAME: ${{ steps.tofu_outputs.outputs.lambda_function_name }}
+          AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+        run: npm run deploy
+
       - name: Deployment Summary
         if: always()
         run: |
           EXIT_CODE=$(cat /tmp/apply_exit_code.txt 2>/dev/null || echo "0")
-          if [ "$EXIT_CODE" = "0" ]; then
+          DEPLOY_OUTCOME="${{ steps.deploy.outcome }}"
+          if [ "$EXIT_CODE" = "0" ] && [ "$DEPLOY_OUTCOME" = "success" ]; then
             echo "## ✅ Deployment Successful" >> $GITHUB_STEP_SUMMARY
+            exit 0
+          fi
+          if [ "$EXIT_CODE" = "0" ] && [ "$DEPLOY_OUTCOME" != "success" ]; then
+            echo "## ❌ Deploy Application Code Failed" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Tofu apply succeeded but \`npm run deploy\` failed. Check the step log for details." >> $GITHUB_STEP_SUMMARY
             exit 0
           fi
 
@@ -370,8 +450,3 @@ jobs:
             echo '```' >> $GITHUB_STEP_SUMMARY
           fi
 
-      - name: Deploy Application Code
-        env:
-          LAMBDA_FUNCTION_NAME: ${{ steps.tofu_outputs.outputs.lambda_function_name }}
-          AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
-        run: npm run deploy
