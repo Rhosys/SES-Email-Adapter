@@ -6,7 +6,7 @@ import { JsonLogicRuleEvaluator } from "./rule-evaluator.js";
 import type { ProcessorDatabase, ArcMatcher } from "./processor.js";
 import type { MimeParser } from "./mime.js";
 import type { SignalClassifier, ClassificationOutput } from "../classifier/classifier.js";
-import type { EmbeddingGenerator, EmbeddingResult } from "../embedding/embedding-generator.js";
+import type { EmbeddingGenerator } from "../embedding/embedding-generator.js";
 import type { MultiClusterAuroraWriter } from "../database/multi-cluster-aurora-writer.js";
 import type { S3RetentionService } from "../embedding/s3-retention-service.js";
 import type { Alias, AliasSender } from "../types/index.js";
@@ -31,6 +31,7 @@ vi.mock("../embedding/cluster-registry.js", () => {
     getActiveClusters: () => [cluster],
     getClusterById: (id: string) => (id === cluster.clusterId ? cluster : null),
     getReadCluster: () => cluster,
+    getSecondaryClusters: () => [],
   };
 });
 
@@ -128,12 +129,10 @@ describe("Property 9: S3 retention failure is isolated and non-fatal", () => {
 
   function makeEmbeddingGenerator(): EmbeddingGenerator {
     return {
-      generateForActiveClusters: vi.fn().mockResolvedValue([
-        ok({ modelId: "amazon.titan-embed-text-v2:0", vector: new Array(10).fill(0.1), dimensions: 1024 }),
-      ]),
       generateForModel: vi.fn().mockResolvedValue(
-        { modelId: "amazon.titan-embed-text-v2:0", vector: new Array(10).fill(0.1), dimensions: 1024 } as EmbeddingResult,
+        ok({ modelId: "amazon.titan-embed-text-v2:0", vector: new Array(10).fill(0.1), dimensions: 1024 }),
       ),
+      generateForSecondaryClusters: vi.fn().mockResolvedValue([]),
     };
   }
 
