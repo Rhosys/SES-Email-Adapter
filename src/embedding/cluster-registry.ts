@@ -8,7 +8,7 @@
 // ---------------------------------------------------------------------------
 
 export interface ClusterRegistryEntry {
-  clusterId: string;          // 'aurora-prod-titan-v2'
+  registryId: string;          // 'aurora-prod-titan-v2'
   clusterArn: string;         // arn:aws:rds:eu-central-1:...:cluster:...
   secretArn: string;          // Secrets Manager ARN for this cluster's master credentials
   databaseName: string;
@@ -30,7 +30,7 @@ function requireEnv(name: string): string {
 
 export const CLUSTER_REGISTRY: readonly ClusterRegistryEntry[] = Object.freeze([
   Object.freeze({
-    clusterId: 'aurora-prod-titan-v2',
+    registryId: 'aurora-prod-titan-v2',
     clusterArn: requireEnv('AURORA_CLUSTER_ARN'),
     secretArn:  requireEnv('AURORA_SECRET_ARN'),
     databaseName: process.env['AURORA_DB_NAME'] ?? 'signals',
@@ -41,8 +41,8 @@ export const CLUSTER_REGISTRY: readonly ClusterRegistryEntry[] = Object.freeze([
   }),
 ]);
 
-// ---------------------------------------------------------------------------
-// Module-load assertion
+export type RegistryId = typeof CLUSTER_REGISTRY[number]['registryId'];
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -51,11 +51,11 @@ export function getActiveClusters(): readonly ClusterRegistryEntry[] {
   return CLUSTER_REGISTRY.filter((c) => c.active);
 }
 
-export function getClusterById(clusterId: string): ClusterRegistryEntry | null {
-  return CLUSTER_REGISTRY.find((c) => c.clusterId === clusterId) ?? null;
+export function getRegistryById(registryId: string): ClusterRegistryEntry | null {
+  return CLUSTER_REGISTRY.find((c) => c.registryId === registryId) ?? null;
 }
 
-export function getReadCluster(): ClusterRegistryEntry {
+export function getPrimaryArcMatcherRegistry(): ClusterRegistryEntry {
   return CLUSTER_REGISTRY.find((c) => c.primary)!;
 }
 

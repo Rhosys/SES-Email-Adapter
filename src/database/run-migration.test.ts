@@ -9,7 +9,7 @@ import { runMigration } from "./run-migration.js";
 
 vi.mock("../embedding/cluster-registry.js", () => {
   const cluster = Object.freeze({
-    clusterId: "test-cluster-1",
+    registryId: "test-cluster-1",
     clusterArn: "arn:aws:rds:eu-central-1:111111111111:cluster:test-cluster-1",
     secretArn: "arn:aws:secretsmanager:eu-central-1:111111111111:secret:test-1",
     databaseName: "testdb",
@@ -19,7 +19,7 @@ vi.mock("../embedding/cluster-registry.js", () => {
   });
   return {
     CLUSTER_REGISTRY: Object.freeze([cluster]),
-    getReadCluster: () => cluster,
+    getPrimaryArcMatcherRegistry: () => cluster,
   };
 });
 

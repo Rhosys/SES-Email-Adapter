@@ -3,7 +3,7 @@
 //
 // For any target cluster and any segment count (1-256), the ReindexDispatcher dispatch method:
 // 1. Emits exactly N SQS messages (where N = segmentCount)
-// 2. Each message has the correct structure: { jobId, segment, totalSegments, targetClusterId, modelId }
+// 2. Each message has the correct structure: { jobId, segment, totalSegments, targetRegistryId, modelId }
 // 3. Segment numbers are 0..N-1 with no gaps or duplicates
 // 4. totalSegments equals the requested segmentCount
 // 5. modelId is resolved from the cluster registry
@@ -54,11 +54,11 @@ function makeDispatcher(): ReindexDispatcher {
 // Edge-case-driven tests
 // ---------------------------------------------------------------------------
 
-const cases: Array<[string, { targetClusterId: string; segmentCount: number }]> = [
-  ["single segment — minimum work unit", { targetClusterId: "aurora-prod-titan-v2", segmentCount: 1 }],
-  ["two segments — verifies 0-based indexing", { targetClusterId: "aurora-prod-titan-v2", segmentCount: 2 }],
-  ["ten segments — typical small job", { targetClusterId: "aurora-prod-titan-v2", segmentCount: 10 }],
-  ["256 segments — maximum allowed", { targetClusterId: "aurora-prod-titan-v2", segmentCount: 256 }],
+const cases: Array<[string, { targetRegistryId: string; segmentCount: number }]> = [
+  ["single segment — minimum work unit", { targetRegistryId: "aurora-prod-titan-v2", segmentCount: 1 }],
+  ["two segments — verifies 0-based indexing", { targetRegistryId: "aurora-prod-titan-v2", segmentCount: 2 }],
+  ["ten segments — typical small job", { targetRegistryId: "aurora-prod-titan-v2", segmentCount: 10 }],
+  ["256 segments — maximum allowed", { targetRegistryId: "aurora-prod-titan-v2", segmentCount: 256 }],
 ];
 
 describe("Property 10: Reindex dispatcher emits exactly N well-formed segment messages", () => {
@@ -77,7 +77,7 @@ describe("Property 10: Reindex dispatcher emits exactly N well-formed segment me
     dispatcher = makeDispatcher();
   });
 
-  it.each(cases)("%s", async (_label, { targetClusterId, segmentCount }) => {
+  it.each(cases)("%s", async (_label, { targetRegistryId, segmentCount }) => {
     sqsMock.reset();
     sqsMock.on(SendMessageCommand).resolves({});
 
@@ -87,7 +87,7 @@ describe("Property 10: Reindex dispatcher emits exactly N well-formed segment me
     mod.__dynamoMock.reset();
     mod.__dynamoMock.on(PutCommand).resolves({});
 
-    const result = await dispatcher.dispatch(targetClusterId, segmentCount);
+    const result = await dispatcher.dispatch(targetRegistryId, segmentCount);
 
     // 1. Verify exactly N SQS messages were sent
     const sqsCalls = sqsMock.commandCalls(SendMessageCommand);
@@ -99,21 +99,21 @@ describe("Property 10: Reindex dispatcher emits exactly N well-formed segment me
         jobId: string;
         segment: number;
         totalSegments: number;
-        targetClusterId: string;
+        targetRegistryId: string;
         modelId: string;
       },
     );
 
     // Get expected modelId from registry
     const expectedModelId = CLUSTER_REGISTRY.find(
-      (c) => c.clusterId === targetClusterId,
+      (c) => c.registryId === targetRegistryId,
     )!.modelId;
 
     // 3. Each message contains all required fields with correct values
     for (const message of messages) {
       expect(message.jobId).toBe(result.jobId);
       expect(message.totalSegments).toBe(segmentCount);
-      expect(message.targetClusterId).toBe(targetClusterId);
+      expect(message.targetRegistryId).toBe(targetRegistryId);
       expect(message.modelId).toBe(expectedModelId);
       expect(typeof message.segment).toBe("number");
     }

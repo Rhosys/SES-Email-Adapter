@@ -12,7 +12,7 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { RDSDataClient, ExecuteStatementCommand } from "@aws-sdk/client-rds-data";
-import { getReadCluster } from "../embedding/cluster-registry.js";
+import { getPrimaryArcMatcherRegistry } from "../embedding/cluster-registry.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -43,7 +43,7 @@ export async function runMigration(opts?: {
   migrationPath?: string;
 }): Promise<MigrationResult> {
   // Resolve the cluster — use the read cluster (first active entry in the registry)
-  const cluster = getReadCluster();
+  const cluster = getPrimaryArcMatcherRegistry();
 
   const rdsData = opts?.rdsClient ?? new RDSDataClient({});
 

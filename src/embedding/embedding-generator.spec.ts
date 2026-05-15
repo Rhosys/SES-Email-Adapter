@@ -11,7 +11,7 @@ import { createMockLogger } from "../testing/mock-logger.js";
 vi.mock("./cluster-registry.js", () => ({
   CLUSTER_REGISTRY: Object.freeze([
     Object.freeze({
-      clusterId: "cluster-a",
+      registryId: "cluster-a",
       clusterArn: "arn:aws:rds:eu-central-1:111:cluster:cluster-a",
       secretArn: "arn:aws:secretsmanager:eu-central-1:111:secret:cluster-a",
       databaseName: "signals",
@@ -20,7 +20,7 @@ vi.mock("./cluster-registry.js", () => ({
       active: true,
     }),
     Object.freeze({
-      clusterId: "cluster-b",
+      registryId: "cluster-b",
       clusterArn: "arn:aws:rds:eu-central-1:111:cluster:cluster-b",
       secretArn: "arn:aws:secretsmanager:eu-central-1:111:secret:cluster-b",
       databaseName: "signals",
@@ -29,7 +29,7 @@ vi.mock("./cluster-registry.js", () => ({
       active: true,
     }),
     Object.freeze({
-      clusterId: "cluster-c",
+      registryId: "cluster-c",
       clusterArn: "arn:aws:rds:eu-central-1:111:cluster:cluster-c",
       secretArn: "arn:aws:secretsmanager:eu-central-1:111:secret:cluster-c",
       databaseName: "signals",
@@ -40,7 +40,7 @@ vi.mock("./cluster-registry.js", () => ({
   ]),
   getActiveClusters: () => [
     {
-      clusterId: "cluster-a",
+      registryId: "cluster-a",
       clusterArn: "arn:aws:rds:eu-central-1:111:cluster:cluster-a",
       secretArn: "arn:aws:secretsmanager:eu-central-1:111:secret:cluster-a",
       databaseName: "signals",
@@ -49,7 +49,7 @@ vi.mock("./cluster-registry.js", () => ({
       active: true,
     },
     {
-      clusterId: "cluster-b",
+      registryId: "cluster-b",
       clusterArn: "arn:aws:rds:eu-central-1:111:cluster:cluster-b",
       secretArn: "arn:aws:secretsmanager:eu-central-1:111:secret:cluster-b",
       databaseName: "signals",
@@ -58,8 +58,8 @@ vi.mock("./cluster-registry.js", () => ({
       active: true,
     },
   ],
-  getReadCluster: () => ({
-    clusterId: "cluster-a",
+  getPrimaryArcMatcherRegistry: () => ({
+    registryId: "cluster-a",
     modelId: "amazon.titan-embed-text-v2:0",
   }),
 }));

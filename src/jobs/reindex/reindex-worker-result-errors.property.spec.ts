@@ -77,10 +77,10 @@ const TARGET_MODEL_ID = "amazon.titan-embed-text-v2:0";
 const TARGET_CLUSTER_ID = "aurora-prod-titan-v2";
 
 vi.mock("../../embedding/cluster-registry.js", () => ({
-  getClusterById: (clusterId: string) => {
-    if (clusterId === "aurora-prod-titan-v2") {
+  getRegistryById: (registryId: string) => {
+    if (registryId === "aurora-prod-titan-v2") {
       return {
-        clusterId: "aurora-prod-titan-v2",
+        registryId: "aurora-prod-titan-v2",
         clusterArn: "arn:aws:rds:eu-west-1:123:cluster:aurora-prod-titan-v2",
         secretArn: "arn:aws:secretsmanager:eu-west-1:123:secret:test",
         databaseName: "signals",
@@ -222,7 +222,7 @@ describe("Property 7: Reindex worker propagates Result errors", () => {
             jobId: "job-prop-7",
             segment: 0,
             totalSegments: 1,
-            targetClusterId: TARGET_CLUSTER_ID,
+            targetRegistryId: TARGET_CLUSTER_ID,
             modelId: TARGET_MODEL_ID,
           }),
         ]);

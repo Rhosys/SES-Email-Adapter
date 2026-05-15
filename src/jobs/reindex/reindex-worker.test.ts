@@ -69,10 +69,10 @@ vi.mock("../../processor/mime.js", () => ({
 // ---------------------------------------------------------------------------
 
 vi.mock("../../embedding/cluster-registry.js", () => ({
-  getClusterById: (clusterId: string) => {
-    if (clusterId === "aurora-prod-titan-v2") {
+  getRegistryById: (registryId: string) => {
+    if (registryId === "aurora-prod-titan-v2") {
       return {
-        clusterId: "aurora-prod-titan-v2",
+        registryId: "aurora-prod-titan-v2",
         clusterArn: "arn:aws:rds:eu-central-1:123:cluster:aurora-prod-titan-v2",
         secretArn: "arn:aws:secretsmanager:eu-central-1:123:secret:test",
         databaseName: "signals",
@@ -193,7 +193,7 @@ describe("ReindexWorker — pure-copy mode", () => {
 
     expect(result.batchItemFailures).toEqual([]);
     expect(mockUpsertEmbedding).toHaveBeenCalledWith({
-      clusterId: "aurora-prod-titan-v2",
+      registryId: "aurora-prod-titan-v2",
       arcId: "arc-xyz",
       accountId: "acct-1",
       recipientAddress: "me@example.com",
@@ -545,7 +545,7 @@ describe("ReindexWorker — regenerate-from-S3 mode", () => {
 
     // Should upsert to Aurora
     expect(mockUpsertEmbedding).toHaveBeenCalledWith({
-      clusterId: "aurora-prod-titan-v2",
+      registryId: "aurora-prod-titan-v2",
       arcId: "arc-regen",
       accountId: "acct-1",
       recipientAddress: "regen@example.com",
@@ -585,7 +585,7 @@ describe("ReindexWorker — regenerate-from-S3 mode", () => {
 
     // Should upsert the cached vector directly
     expect(mockUpsertEmbedding).toHaveBeenCalledWith({
-      clusterId: "aurora-prod-titan-v2",
+      registryId: "aurora-prod-titan-v2",
       arcId: "arc-cached",
       accountId: "acct-1",
       recipientAddress: "cached@example.com",

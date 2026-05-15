@@ -72,7 +72,7 @@ describe("ReindexDispatcher — Property 14: Job reports preserve scan accountin
         pk: `REINDEX#${jobId}`,
         sk: "JOB",
         jobId,
-        targetClusterId: "aurora-prod-titan-v2",
+        targetRegistryId: "aurora-prod-titan-v2",
         modelId: "amazon.titan-embed-text-v2:0",
         startedAt: new Date(Date.now() - 60000).toISOString(),
         copiedCount,
@@ -113,7 +113,7 @@ describe("ReindexDispatcher — Property 14: Job reports preserve scan accountin
       pk: `REINDEX#${jobId}`,
       sk: "JOB",
       jobId,
-      targetClusterId: "aurora-prod-titan-v2",
+      targetRegistryId: "aurora-prod-titan-v2",
       modelId: "amazon.titan-embed-text-v2:0",
       startedAt: new Date(Date.now() - 60000).toISOString(),
     };

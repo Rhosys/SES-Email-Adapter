@@ -13,17 +13,17 @@ import { createMockLogger } from "../testing/mock-logger.js";
 // ---------------------------------------------------------------------------
 
 const { mockActiveClusters, mockReadCluster, mockSecondaryClusters } = vi.hoisted(() => ({
-  mockActiveClusters: { value: [] as Array<{ clusterId: string; clusterArn: string; secretArn: string; databaseName: string; modelId: string; dimensions: number; active: boolean }> },
-  mockReadCluster: { value: { clusterId: "cluster-a", clusterArn: "arn:a", secretArn: "secret:a", databaseName: "signals", modelId: "model-alpha", dimensions: 1024, active: true } as { clusterId: string; clusterArn: string; secretArn: string; databaseName: string; modelId: string; dimensions: number; active: boolean } },
-  mockSecondaryClusters: { value: [] as Array<{ clusterId: string; clusterArn: string; secretArn: string; databaseName: string; modelId: string; dimensions: number; active: boolean }> },
+  mockActiveClusters: { value: [] as Array<{ registryId: string; clusterArn: string; secretArn: string; databaseName: string; modelId: string; dimensions: number; active: boolean }> },
+  mockReadCluster: { value: { registryId: "cluster-a", clusterArn: "arn:a", secretArn: "secret:a", databaseName: "signals", modelId: "model-alpha", dimensions: 1024, active: true } as { registryId: string; clusterArn: string; secretArn: string; databaseName: string; modelId: string; dimensions: number; active: boolean } },
+  mockSecondaryClusters: { value: [] as Array<{ registryId: string; clusterArn: string; secretArn: string; databaseName: string; modelId: string; dimensions: number; active: boolean }> },
 }));
 
 vi.mock("./cluster-registry.js", () => ({
   CLUSTER_REGISTRY: Object.freeze(mockActiveClusters.value.map((c) => Object.freeze(c))),
   getActiveClusters: () => mockActiveClusters.value.filter((c) => c.active),
-  getReadCluster: () => mockReadCluster.value,
+  getPrimaryArcMatcherRegistry: () => mockReadCluster.value,
   getSecondaryClusters: () => mockSecondaryClusters.value,
-  getClusterById: (id: string) => mockActiveClusters.value.find((c) => c.clusterId === id) ?? null,
+  getRegistryById: (id: string) => mockActiveClusters.value.find((c) => c.registryId === id) ?? null,
 }));
 
 describe("Bedrock failure for one model preserves all other writes", () => {
@@ -31,9 +31,9 @@ describe("Bedrock failure for one model preserves all other writes", () => {
   const mockLogger = createMockLogger();
 
   const THREE_CLUSTERS = [
-    { clusterId: "cluster-a", clusterArn: "arn:a", secretArn: "secret:a", databaseName: "signals", modelId: "model-alpha", dimensions: 1024, active: true },
-    { clusterId: "cluster-b", clusterArn: "arn:b", secretArn: "secret:b", databaseName: "signals", modelId: "model-beta", dimensions: 1536, active: true },
-    { clusterId: "cluster-c", clusterArn: "arn:c", secretArn: "secret:c", databaseName: "signals", modelId: "model-gamma", dimensions: 512, active: true },
+    { registryId: "cluster-a", clusterArn: "arn:a", secretArn: "secret:a", databaseName: "signals", modelId: "model-alpha", dimensions: 1024, active: true },
+    { registryId: "cluster-b", clusterArn: "arn:b", secretArn: "secret:b", databaseName: "signals", modelId: "model-beta", dimensions: 1536, active: true },
+    { registryId: "cluster-c", clusterArn: "arn:c", secretArn: "secret:c", databaseName: "signals", modelId: "model-gamma", dimensions: 512, active: true },
   ];
 
   beforeEach(() => {

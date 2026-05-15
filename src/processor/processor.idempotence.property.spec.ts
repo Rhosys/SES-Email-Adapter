@@ -13,7 +13,7 @@ import { createMockLogger } from "../testing/mock-logger.js";
 
 vi.mock("../embedding/cluster-registry.js", () => {
   const cluster = Object.freeze({
-    clusterId: "cluster-a",
+    registryId: "cluster-a",
     clusterArn: "arn:aws:rds:eu-central-1:111:cluster:cluster-a",
     secretArn: "arn:aws:secretsmanager:eu-central-1:111:secret:cluster-a",
     databaseName: "signals",
@@ -24,8 +24,8 @@ vi.mock("../embedding/cluster-registry.js", () => {
   return {
     CLUSTER_REGISTRY: Object.freeze([cluster]),
     getActiveClusters: () => [cluster],
-    getClusterById: (id: string) => (id === "cluster-a" ? cluster : null),
-    getReadCluster: () => cluster,
+    getRegistryById: (id: string) => (id === "cluster-a" ? cluster : null),
+    getPrimaryArcMatcherRegistry: () => cluster,
     getSecondaryClusters: () => [],
   };
 });
@@ -205,7 +205,7 @@ describe("Cross-layer idempotence — live writes + cache + Aurora", () => {
       generateForSecondaryClusters: vi.fn().mockResolvedValue([]),
     };
 
-    const auroraUpsertCalls: Array<{ clusterId: string; accountId: string; recipientAddress: string; embedding: number[] }> = [];
+    const auroraUpsertCalls: Array<{ registryId: string; accountId: string; recipientAddress: string; embedding: number[] }> = [];
     const auroraWriter: MultiClusterAuroraWriter = {
       upsertEmbedding: vi.fn().mockImplementation(async (opts) => { auroraUpsertCalls.push(opts); }),
       findMatch: vi.fn().mockResolvedValue(null),
@@ -232,7 +232,7 @@ describe("Cross-layer idempotence — live writes + cache + Aurora", () => {
     expect(savedSignals[0]!.embeddings!["amazon.titan-embed-text-v2:0"]).toEqual(VECTOR);
 
     expect(auroraUpsertCalls.length).toBe(2);
-    expect(auroraUpsertCalls[0]!.clusterId).toBe(auroraUpsertCalls[1]!.clusterId);
+    expect(auroraUpsertCalls[0]!.registryId).toBe(auroraUpsertCalls[1]!.registryId);
     expect(auroraUpsertCalls[0]!.accountId).toBe(auroraUpsertCalls[1]!.accountId);
     expect(auroraUpsertCalls[0]!.recipientAddress).toBe(auroraUpsertCalls[1]!.recipientAddress);
     expect(auroraUpsertCalls[0]!.embedding).toEqual(auroraUpsertCalls[1]!.embedding);

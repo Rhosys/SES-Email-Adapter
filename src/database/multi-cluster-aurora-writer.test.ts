@@ -16,7 +16,7 @@ import { MultiClusterAuroraWriterImpl } from "./multi-cluster-aurora-writer.js";
 vi.mock("../embedding/cluster-registry.js", () => ({
   CLUSTER_REGISTRY: Object.freeze([
     Object.freeze({
-      clusterId: "test-cluster-1",
+      registryId: "test-cluster-1",
       clusterArn: "arn:aws:rds:eu-central-1:111111111111:cluster:test-cluster-1",
       secretArn: "arn:aws:secretsmanager:eu-central-1:111111111111:secret:test-1",
       databaseName: "testdb",
@@ -27,7 +27,7 @@ vi.mock("../embedding/cluster-registry.js", () => ({
   ]),
   getActiveClusters: () => [
     {
-      clusterId: "test-cluster-1",
+      registryId: "test-cluster-1",
       clusterArn: "arn:aws:rds:eu-central-1:111111111111:cluster:test-cluster-1",
       secretArn: "arn:aws:secretsmanager:eu-central-1:111111111111:secret:test-1",
       databaseName: "testdb",
@@ -36,10 +36,10 @@ vi.mock("../embedding/cluster-registry.js", () => ({
       active: true,
     },
   ],
-  getClusterById: (id: string) => {
+  getRegistryById: (id: string) => {
     if (id === "test-cluster-1") {
       return {
-        clusterId: "test-cluster-1",
+        registryId: "test-cluster-1",
         clusterArn: "arn:aws:rds:eu-central-1:111111111111:cluster:test-cluster-1",
         secretArn: "arn:aws:secretsmanager:eu-central-1:111111111111:secret:test-1",
         databaseName: "testdb",
@@ -50,8 +50,8 @@ vi.mock("../embedding/cluster-registry.js", () => ({
     }
     return null;
   },
-  getReadCluster: () => ({
-    clusterId: "test-cluster-1",
+  getPrimaryArcMatcherRegistry: () => ({
+    registryId: "test-cluster-1",
     clusterArn: "arn:aws:rds:eu-central-1:111111111111:cluster:test-cluster-1",
     secretArn: "arn:aws:secretsmanager:eu-central-1:111111111111:secret:test-1",
     databaseName: "testdb",
@@ -83,7 +83,7 @@ describe("MultiClusterAuroraWriterImpl", () => {
         .on(CommitTransactionCommand).resolves({});
 
       await writer.upsertEmbedding({
-        clusterId: "test-cluster-1",
+        registryId: "test-cluster-1",
         arcId: "arc_123",
         accountId: "acct_1",
         recipientAddress: "user@example.com",
@@ -128,10 +128,10 @@ describe("MultiClusterAuroraWriterImpl", () => {
       });
     });
 
-    it("throws when clusterId is not in the registry", async () => {
+    it("throws when registryId is not in the registry", async () => {
       await expect(
         writer.upsertEmbedding({
-          clusterId: "nonexistent-cluster",
+          registryId: "nonexistent-cluster",
           arcId: "arc_1",
           accountId: "acct_1",
           recipientAddress: "a@b.com",
@@ -150,7 +150,7 @@ describe("MultiClusterAuroraWriterImpl", () => {
 
       await expect(
         writer.upsertEmbedding({
-          clusterId: "test-cluster-1",
+          registryId: "test-cluster-1",
           arcId: "arc_1",
           accountId: "acct_1",
           recipientAddress: "a@b.com",
@@ -185,7 +185,7 @@ describe("MultiClusterAuroraWriterImpl", () => {
         .on(CommitTransactionCommand).resolves({});
 
       const promise = writer.upsertEmbedding({
-        clusterId: "test-cluster-1",
+        registryId: "test-cluster-1",
         arcId: "arc_1",
         accountId: "acct_1",
         recipientAddress: "a@b.com",
@@ -211,7 +211,7 @@ describe("MultiClusterAuroraWriterImpl", () => {
 
       await expect(
         writer.upsertEmbedding({
-          clusterId: "test-cluster-1",
+          registryId: "test-cluster-1",
           arcId: "arc_1",
           accountId: "acct_1",
           recipientAddress: "a@b.com",
@@ -231,7 +231,7 @@ describe("MultiClusterAuroraWriterImpl", () => {
 
       await expect(
         writer.upsertEmbedding({
-          clusterId: "test-cluster-1",
+          registryId: "test-cluster-1",
           arcId: "arc_1",
           accountId: "acct_1",
           recipientAddress: "a@b.com",
@@ -255,7 +255,7 @@ describe("MultiClusterAuroraWriterImpl", () => {
         .on(CommitTransactionCommand).resolves({});
 
       const result = await writer.findMatch({
-        clusterId: "test-cluster-1",
+        registryId: "test-cluster-1",
         accountId: "acct_1",
         recipientAddress: "user@example.com",
         embedding: [0.5, 0.6, 0.7],
@@ -281,7 +281,7 @@ describe("MultiClusterAuroraWriterImpl", () => {
         .on(CommitTransactionCommand).resolves({});
 
       const result = await writer.findMatch({
-        clusterId: "test-cluster-1",
+        registryId: "test-cluster-1",
         accountId: "acct_1",
         recipientAddress: "user@example.com",
         embedding: [0.1, 0.2],
@@ -299,7 +299,7 @@ describe("MultiClusterAuroraWriterImpl", () => {
         .on(CommitTransactionCommand).resolves({});
 
       const result = await writer.findMatch({
-        clusterId: "test-cluster-1",
+        registryId: "test-cluster-1",
         accountId: "acct_1",
         recipientAddress: "user@example.com",
         embedding: [0.1],
@@ -328,7 +328,7 @@ describe("MultiClusterAuroraWriterImpl", () => {
         .on(CommitTransactionCommand).resolves({});
 
       const promise = writer.findMatch({
-        clusterId: "test-cluster-1",
+        registryId: "test-cluster-1",
         accountId: "acct_1",
         recipientAddress: "user@example.com",
         embedding: [0.1],
@@ -379,7 +379,7 @@ describe("MultiClusterAuroraWriterImpl", () => {
           let caughtError: Error | undefined;
           try {
             await writer.upsertEmbedding({
-              clusterId: "test-cluster-1",
+              registryId: "test-cluster-1",
               arcId: "arc-retry-test",
               accountId: "acct-retry-test",
               recipientAddress: "retry@example.com",
@@ -443,7 +443,7 @@ describe("MultiClusterAuroraWriterImpl", () => {
 
           // Should succeed without throwing
           await writer.upsertEmbedding({
-            clusterId: "test-cluster-1",
+            registryId: "test-cluster-1",
             arcId: "arc-recovery",
             accountId: "acct-recovery",
             recipientAddress: "recovery@example.com",
@@ -489,7 +489,7 @@ describe("MultiClusterAuroraWriterImpl", () => {
         let caughtError: Error | undefined;
         try {
           await writer.upsertEmbedding({
-            clusterId: "test-cluster-1",
+            registryId: "test-cluster-1",
             arcId: "arc-nontransient",
             accountId: "acct-nontransient",
             recipientAddress: "nontransient@example.com",
@@ -537,7 +537,7 @@ describe("MultiClusterAuroraWriterImpl", () => {
         // Perform the upsert N times with the same inputs
         for (let i = 0; i < repeatCount; i++) {
           await writer.upsertEmbedding({
-            clusterId: "test-cluster-1",
+            registryId: "test-cluster-1",
             arcId,
             accountId,
             recipientAddress,
@@ -601,7 +601,7 @@ describe("MultiClusterAuroraWriterImpl", () => {
         const embedding = [0.1, 0.2, 0.3];
 
         await writer.upsertEmbedding({
-          clusterId: "test-cluster-1",
+          registryId: "test-cluster-1",
           arcId,
           accountId,
           recipientAddress,

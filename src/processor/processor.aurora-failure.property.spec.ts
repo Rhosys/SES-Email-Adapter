@@ -13,7 +13,7 @@ import { createMockLogger, type MockLogger } from "../testing/mock-logger.js";
 
 vi.mock("../embedding/cluster-registry.js", () => {
   const clusterA = Object.freeze({
-    clusterId: "cluster-a",
+    registryId: "cluster-a",
     clusterArn: "arn:aws:rds:eu-central-1:111:cluster:cluster-a",
     secretArn: "arn:aws:secretsmanager:eu-central-1:111:secret:cluster-a",
     databaseName: "signals",
@@ -22,7 +22,7 @@ vi.mock("../embedding/cluster-registry.js", () => {
     active: true,
   });
   const clusterB = Object.freeze({
-    clusterId: "cluster-b",
+    registryId: "cluster-b",
     clusterArn: "arn:aws:rds:eu-central-1:111:cluster:cluster-b",
     secretArn: "arn:aws:secretsmanager:eu-central-1:111:secret:cluster-b",
     databaseName: "signals",
@@ -33,12 +33,12 @@ vi.mock("../embedding/cluster-registry.js", () => {
   return {
     CLUSTER_REGISTRY: Object.freeze([clusterA, clusterB]),
     getActiveClusters: () => [clusterA, clusterB],
-    getClusterById: (id: string) => {
+    getRegistryById: (id: string) => {
       if (id === "cluster-a") return clusterA;
       if (id === "cluster-b") return clusterB;
       return null;
     },
-    getReadCluster: () => clusterA,
+    getPrimaryArcMatcherRegistry: () => clusterA,
     getSecondaryClusters: () => [clusterB],
   };
 });
@@ -172,8 +172,8 @@ describe("Aurora cluster failure preserves the DynamoDB cache entry", () => {
     };
 
     const auroraWriter: MultiClusterAuroraWriter = {
-      upsertEmbedding: vi.fn().mockImplementation(async (opts: { clusterId: string }) => {
-        if (opts.clusterId === failingClusterId) {
+      upsertEmbedding: vi.fn().mockImplementation(async (opts: { registryId: string }) => {
+        if (opts.registryId === failingClusterId) {
           throw new Error(`Aurora upsert failed for cluster ${failingClusterId}`);
         }
       }),
@@ -214,8 +214,8 @@ describe("Aurora cluster failure preserves the DynamoDB cache entry", () => {
     };
 
     const auroraWriter: MultiClusterAuroraWriter = {
-      upsertEmbedding: vi.fn().mockImplementation(async (opts: { clusterId: string }) => {
-        if (opts.clusterId === failingClusterId) {
+      upsertEmbedding: vi.fn().mockImplementation(async (opts: { registryId: string }) => {
+        if (opts.registryId === failingClusterId) {
           throw new Error(`Aurora upsert failed for cluster ${failingClusterId}`);
         }
       }),
@@ -238,7 +238,7 @@ describe("Aurora cluster failure preserves the DynamoDB cache entry", () => {
     const upsertCalls = (auroraWriter.upsertEmbedding as ReturnType<typeof vi.fn>).mock.calls;
     expect(upsertCalls.length).toBe(2);
 
-    const succeedingCall = upsertCalls.find((call) => call[0].clusterId === succeedingClusterId);
+    const succeedingCall = upsertCalls.find((call) => call[0].registryId === succeedingClusterId);
     expect(succeedingCall).toBeDefined();
   });
 });

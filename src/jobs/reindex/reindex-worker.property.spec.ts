@@ -33,10 +33,10 @@ vi.mock("../../database/multi-cluster-aurora-writer.js", () => ({
 // ---------------------------------------------------------------------------
 
 vi.mock("../../embedding/cluster-registry.js", () => ({
-  getClusterById: (clusterId: string) => {
-    if (clusterId === "aurora-prod-titan-v2") {
+  getRegistryById: (registryId: string) => {
+    if (registryId === "aurora-prod-titan-v2") {
       return {
-        clusterId: "aurora-prod-titan-v2",
+        registryId: "aurora-prod-titan-v2",
         clusterArn: "arn:aws:rds:eu-central-1:123:cluster:aurora-prod-titan-v2",
         secretArn: "arn:aws:secretsmanager:eu-central-1:123:secret:test",
         databaseName: "signals",
@@ -168,7 +168,7 @@ describe("Property 11: Reindex worker uses cache exclusively and never calls Bed
     for (const signal of signals) {
       const expectedVector = signal.embeddings["amazon.titan-embed-text-v2:0"];
       expect(mockUpsertEmbedding).toHaveBeenCalledWith({
-        clusterId: "aurora-prod-titan-v2",
+        registryId: "aurora-prod-titan-v2",
         arcId: signal.arcId,
         accountId: signal.accountId,
         recipientAddress: signal.recipientAddress,

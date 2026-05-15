@@ -69,7 +69,7 @@ describe("ReindexDispatcher", () => {
     it("dispatches correct number of SQS messages with default segment count", async () => {
       const result = await dispatcher.dispatch("aurora-prod-titan-v2");
 
-      expect(result.targetClusterId).toBe("aurora-prod-titan-v2");
+      expect(result.targetRegistryId).toBe("aurora-prod-titan-v2");
       expect(result.modelId).toBe("amazon.titan-embed-text-v2:0");
       expect(result.segmentCount).toBe(32);
       expect(result.jobId).toBeDefined();
@@ -101,7 +101,7 @@ describe("ReindexDispatcher", () => {
           jobId: result.jobId,
           segment: i,
           totalSegments: 4,
-          targetClusterId: "aurora-prod-titan-v2",
+          targetRegistryId: "aurora-prod-titan-v2",
           modelId: "amazon.titan-embed-text-v2:0",
         });
       }
@@ -118,7 +118,7 @@ describe("ReindexDispatcher", () => {
         pk: `REINDEX#${result.jobId}`,
         sk: "JOB",
         jobId: result.jobId,
-        targetClusterId: "aurora-prod-titan-v2",
+        targetRegistryId: "aurora-prod-titan-v2",
         modelId: "amazon.titan-embed-text-v2:0",
         segmentCount: 16,
         copiedCount: 0,
@@ -146,7 +146,7 @@ describe("ReindexDispatcher", () => {
           pk: `REINDEX#${jobId}`,
           sk: "JOB",
           jobId,
-          targetClusterId: "aurora-prod-titan-v2",
+          targetRegistryId: "aurora-prod-titan-v2",
           modelId: "amazon.titan-embed-text-v2:0",
           startedAt: new Date(Date.now() - 60000).toISOString(),
           copiedCount: 95,
@@ -186,7 +186,7 @@ describe("ReindexDispatcher", () => {
           pk: `REINDEX#${jobId}`,
           sk: "JOB",
           jobId,
-          targetClusterId: "aurora-prod-titan-v2",
+          targetRegistryId: "aurora-prod-titan-v2",
           modelId: "amazon.titan-embed-text-v2:0",
           startedAt: new Date(Date.now() - 30000).toISOString(),
           copiedCount: 900,
@@ -218,7 +218,7 @@ describe("ReindexDispatcher", () => {
           pk: `REINDEX#${jobId}`,
           sk: "JOB",
           jobId,
-          targetClusterId: "aurora-prod-titan-v2",
+          targetRegistryId: "aurora-prod-titan-v2",
           modelId: "amazon.titan-embed-text-v2:0",
           startedAt: new Date(Date.now() - 10000).toISOString(),
           copiedCount: 50,
@@ -252,7 +252,7 @@ describe("ReindexDispatcher", () => {
           pk: `REINDEX#${jobId}`,
           sk: "JOB",
           jobId,
-          targetClusterId: "removed-cluster-xyz",
+          targetRegistryId: "removed-cluster-xyz",
           modelId: "some-model",
           startedAt: new Date(Date.now() - 5000).toISOString(),
           copiedCount: 10,
@@ -274,7 +274,7 @@ describe("ReindexDispatcher", () => {
           pk: `REINDEX#${jobId}`,
           sk: "JOB",
           jobId,
-          targetClusterId: "aurora-prod-titan-v2",
+          targetRegistryId: "aurora-prod-titan-v2",
           modelId: "amazon.titan-embed-text-v2:0",
           startedAt: new Date(Date.now() - 20000).toISOString(),
           copiedCount: 42,
@@ -307,7 +307,7 @@ describe("ReindexDispatcher", () => {
           pk: `REINDEX#${jobId}`,
           sk: "JOB",
           jobId,
-          targetClusterId: "aurora-prod-titan-v2",
+          targetRegistryId: "aurora-prod-titan-v2",
           modelId: "amazon.titan-embed-text-v2:0",
           startedAt: new Date(Date.now() - 1000).toISOString(),
           copiedCount: 0,
@@ -337,7 +337,7 @@ describe("ReindexDispatcher", () => {
           pk: `REINDEX#${jobId}`,
           sk: "JOB",
           jobId,
-          targetClusterId: "aurora-prod-titan-v2",
+          targetRegistryId: "aurora-prod-titan-v2",
           modelId: "amazon.titan-embed-text-v2:0",
           startedAt: new Date(Date.now() - 15000).toISOString(),
           signalsScanned: 9999, // stale/wrong value — should be ignored

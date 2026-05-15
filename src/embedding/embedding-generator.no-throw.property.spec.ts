@@ -13,7 +13,7 @@ import { BedrockEmbeddingGenerator } from "./embedding-generator.js";
 vi.mock("./cluster-registry.js", () => ({
   CLUSTER_REGISTRY: Object.freeze([
     Object.freeze({
-      clusterId: "cluster-a",
+      registryId: "cluster-a",
       clusterArn: "arn:aws:rds:eu-west-1:111:cluster:cluster-a",
       secretArn: "arn:aws:secretsmanager:eu-west-1:111:secret:cluster-a",
       databaseName: "signals",
@@ -24,7 +24,7 @@ vi.mock("./cluster-registry.js", () => ({
   ]),
   getActiveClusters: () => [
     {
-      clusterId: "cluster-a",
+      registryId: "cluster-a",
       clusterArn: "arn:aws:rds:eu-west-1:111:cluster:cluster-a",
       secretArn: "arn:aws:secretsmanager:eu-west-1:111:secret:cluster-a",
       databaseName: "signals",
@@ -33,8 +33,8 @@ vi.mock("./cluster-registry.js", () => ({
       active: true,
     },
   ],
-  getReadCluster: () => ({
-    clusterId: "cluster-a",
+  getPrimaryArcMatcherRegistry: () => ({
+    registryId: "cluster-a",
     modelId: "amazon.titan-embed-text-v2:0",
   }),
 }));

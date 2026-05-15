@@ -18,8 +18,8 @@ const MAX_SEGMENT_COUNT = 256;
 // ---------------------------------------------------------------------------
 
 export interface JobDispatcher {
-  dispatch(targetClusterId: string, segmentCount?: number): Promise<{
-    jobId: string; targetClusterId: string; modelId: string; segmentCount: number; startedAt: string;
+  dispatch(targetRegistryId: string, segmentCount?: number): Promise<{
+    jobId: string; targetRegistryId: string; modelId: string; segmentCount: number; startedAt: string;
   }>;
   getReport(jobId: string): Promise<{
     jobId: string; signalsScanned: number; copiedCount: number; regeneratedCount: number;
@@ -112,11 +112,11 @@ async function handlePostReindex(
     return errorResponse(400, "Request body must be a JSON object");
   }
 
-  const { targetClusterId, segmentCount } = body as Record<string, unknown>;
+  const { targetRegistryId, segmentCount } = body as Record<string, unknown>;
 
-  // Validate targetClusterId is present
-  if (!targetClusterId || typeof targetClusterId !== "string") {
-    return errorResponse(400, "targetClusterId is required and must be a string");
+  // Validate targetRegistryId is present
+  if (!targetRegistryId || typeof targetRegistryId !== "string") {
+    return errorResponse(400, "targetRegistryId is required and must be a string");
   }
 
   // Validate segmentCount if provided
@@ -130,12 +130,12 @@ async function handlePostReindex(
   }
 
   try {
-    const job = await dispatcher.dispatch(targetClusterId, segmentCount as number | undefined);
+    const job = await dispatcher.dispatch(targetRegistryId, segmentCount as number | undefined);
     return jsonResponse(202, job);
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
     if (message.includes("not found in CLUSTER_REGISTRY")) {
-      return errorResponse(404, `Cluster "${targetClusterId}" not found`);
+      return errorResponse(404, `Cluster "${targetRegistryId}" not found`);
     }
     return errorResponse(500, "Internal server error");
   }

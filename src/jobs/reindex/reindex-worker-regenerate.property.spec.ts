@@ -78,10 +78,10 @@ const TARGET_MODEL_ID = "amazon.titan-embed-text-v2:0";
 const TARGET_CLUSTER_ID = "aurora-prod-titan-v2";
 
 vi.mock("../../embedding/cluster-registry.js", () => ({
-  getClusterById: (clusterId: string) => {
-    if (clusterId === "aurora-prod-titan-v2") {
+  getRegistryById: (registryId: string) => {
+    if (registryId === "aurora-prod-titan-v2") {
       return {
-        clusterId: "aurora-prod-titan-v2",
+        registryId: "aurora-prod-titan-v2",
         clusterArn: "arn:aws:rds:eu-central-1:123:cluster:aurora-prod-titan-v2",
         secretArn: "arn:aws:secretsmanager:eu-central-1:123:secret:test",
         databaseName: "signals",
