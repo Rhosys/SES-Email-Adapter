@@ -7,7 +7,7 @@
 // it back to the DynamoDB cache, and upserts to Aurora.
 // ---------------------------------------------------------------------------
 
-import type { SQSEvent, SQSRecord } from "aws-lambda";
+import type { SQSRecord } from "aws-lambda";
 import { ScanCommand } from "@aws-sdk/lib-dynamodb";
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 import { dynamo, SIGNALS_TABLE } from "../../database/shared.js";
@@ -71,24 +71,7 @@ function isNoSuchKeyError(e: unknown): boolean {
 export class ReindexWorker {
   constructor(private readonly logger: Logger) {}
 
-  async process(event: SQSEvent): Promise<{ batchItemFailures: Array<{ itemIdentifier: string }> }> {
-    this.logger.startInvocation();
-    const results = await Promise.all(
-      event.Records.map(record => this.processRecord(record))
-    );
-
-    const failures: Array<{ itemIdentifier: string }> = [];
-    for (let i = 0; i < results.length; i++) {
-      const result = results[i]!;
-      if (result.isErr()) {
-        failures.push({ itemIdentifier: result.error.messageId });
-      }
-    }
-
-    return { batchItemFailures: failures };
-  }
-
-  private async processRecord(record: SQSRecord): Promise<Result<void, ProcessError>> {
+  async processRecord(record: SQSRecord): Promise<Result<void, ProcessError>> {
     let message: ReindexSegmentMessage;
     try {
       message = JSON.parse(record.body) as ReindexSegmentMessage;

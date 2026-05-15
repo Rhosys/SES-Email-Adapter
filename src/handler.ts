@@ -165,24 +165,29 @@ export async function handler(
     for (const record of event.Records) {
       const arn = record.eventSourceARN ?? "";
 
-      let result: { batchItemFailures: Array<{ itemIdentifier: string }> };
+      let failed: boolean;
       if (arn.includes("-feedback")) {
         await feedbackProcessor.process({ Records: [record] });
-        result = { batchItemFailures: [] };
+        failed = false;
       } else if (arn.includes("-reindex")) {
-        result = await reindexWorker.process({ Records: [record] });
+        const result = await reindexWorker.processRecord(record);
+        failed = result.isErr();
       } else {
-        result = await processor.process({ Records: [record] });
+        const messageType = record.messageAttributes?.["messageType"]?.stringValue;
+        const result = messageType === "side_effect"
+          ? await processor.processSideEffectRecord(record)
+          : await processor.processRecord(record);
+        failed = result.isErr();
       }
 
-      if (result.batchItemFailures.length > 0) {
+      if (failed) {
         const receiveCount = Number(record.attributes?.ApproximateReceiveCount ?? "1");
         if (receiveCount > RETRY_TRACK_THRESHOLD) {
           logger.error("SQS message failed after exceeding retry threshold. Message was redelivered " + receiveCount + " times without successful completion. Investigate earlier logs for this messageId.", { code: "handler.sqs.retry_threshold_exceeded", messageId: record.messageId, receiveCount });
         } else {
           logger.warn("SQS message processing failed on attempt " + receiveCount + ". Will be retried automatically.", { code: "handler.sqs.processing_failed", messageId: record.messageId, receiveCount });
         }
-        failures.push(...result.batchItemFailures);
+        failures.push({ itemIdentifier: record.messageId });
       }
     }
 

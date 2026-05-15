@@ -353,10 +353,10 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
     it("executes full pipeline: parse → classify → arc match → save arc → save signal → S3 retention → Aurora → dispatch", async () => {
       const event = makeInboundEvent({ receiveCount: 1 });
 
-      const result = await processor.process(event);
+      const result = await processor.processRecord(event.Records[0]!);
 
       // No failures
-      expect(result.batchItemFailures).toHaveLength(0);
+      expect(result.isOk()).toBe(true);
 
       // MIME was parsed
       expect(mimeParser.parse).toHaveBeenCalledOnce();
@@ -397,7 +397,7 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
     it("dispatches side-effect payload containing signal and arc", async () => {
       const event = makeInboundEvent({ receiveCount: 1 });
 
-      await processor.process(event);
+      await processor.processRecord(event.Records[0]!);
 
       const payload = vi.mocked(sqsDispatcher.sendMessage).mock.calls[0]![0];
       expect(payload.signal).toBeDefined();
@@ -424,10 +424,10 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
     it("skips parse, classify, and embedding — resumes from S3 retention → Aurora → dispatch", async () => {
       const event = makeInboundEvent({ receiveCount: 3 });
 
-      const result = await processor.process(event);
+      const result = await processor.processRecord(event.Records[0]!);
 
       // No failures
-      expect(result.batchItemFailures).toHaveLength(0);
+      expect(result.isOk()).toBe(true);
 
       // Signal was looked up from DDB
       expect(store.getSignalByMessageId).toHaveBeenCalledWith(TEST_ACCOUNT_ID, SES_MESSAGE_ID);
@@ -476,11 +476,10 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
     it("returns batchItemFailure and does not dispatch side-effects", async () => {
       const event = makeInboundEvent({ receiveCount: 2 });
 
-      const result = await processor.process(event);
+      const result = await processor.processRecord(event.Records[0]!);
 
       // Record returned as failure
-      expect(result.batchItemFailures).toHaveLength(1);
-      expect(result.batchItemFailures[0]!.itemIdentifier).toBe("sqs-integration-0");
+      expect(result.isErr()).toBe(true);
 
       // Side-effect dispatch was NOT called (Aurora failed)
       expect(sqsDispatcher.sendMessage).not.toHaveBeenCalled();
@@ -509,10 +508,10 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
 
       const event = makeSideEffectEvent({ signal, arc });
 
-      const result = await processor.process(event);
+      const result = await processor.processSideEffectRecord(event.Records[0]!);
 
       // No failures (side-effect handler does not return batchItemFailure for execution errors)
-      expect(result.batchItemFailures).toHaveLength(0);
+      expect(result.isOk()).toBe(true);
 
       // Forward was called with the address from matchedRules
       expect(forwarder.forward).toHaveBeenCalledOnce();
@@ -542,9 +541,9 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
 
       const event = makeSideEffectEvent({ signal, arc });
 
-      const result = await processor.process(event);
+      const result = await processor.processSideEffectRecord(event.Records[0]!);
 
-      expect(result.batchItemFailures).toHaveLength(0);
+      expect(result.isOk()).toBe(true);
       expect(replySender.sendReply).toHaveBeenCalledOnce();
       expect(replySender.sendReply).toHaveBeenCalledWith(expect.objectContaining({
         to: signal.from.address,
@@ -566,7 +565,7 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
 
       const event = makeSideEffectEvent({ signal, arc });
 
-      await processor.process(event);
+      await processor.processSideEffectRecord(event.Records[0]!);
 
       expect(notifier.notify).not.toHaveBeenCalled();
     });
@@ -577,7 +576,7 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
 
       const event = makeSideEffectEvent({ signal, arc });
 
-      await processor.process(event);
+      await processor.processRecord(event.Records[0]!);
 
       // None of the inbound signal pipeline was invoked
       expect(mimeParser.parse).not.toHaveBeenCalled();
