@@ -90,7 +90,7 @@ program
     const result = await awsArchitect.publishAndDeployStagePromise({
       stage: 'production',
       functionName,
-      deploymentKeyName: `${functionName}/${version}/lambda.zip`,
+      deploymentKeyName: `${packageMetadata.name}/${version}/lambda.zip`,
     });
 
     console.log(result);
