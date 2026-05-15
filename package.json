@@ -10,6 +10,7 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "make": "tsx make.ts",
+    "deploy": "tsx make.ts deploy",
     "openapi": "tsx scripts/openapi.ts"
   },
   "dependencies": {

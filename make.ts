@@ -14,9 +14,9 @@ const packageMetadata = require('./package.json') as { name: string; version: st
 const AWS_ACCOUNT_ID = process.env['AWS_ACCOUNT_ID'];
 if (!AWS_ACCOUNT_ID) throw new Error('AWS_ACCOUNT_ID is required');
 
-const AWS_REGION   = process.env['AWS_REGION'] ?? 'us-east-1';
-const ENV          = process.env['ENV'] ?? 'prod';
-const version      = `0.0.${process.env['CI_PIPELINE_ID'] ?? '0'}`;
+const AWS_REGION = process.env['AWS_REGION'] ?? process.env['AWS_DEFAULT_REGION'] ?? 'eu-central-1';
+const ENV     = process.env['ENV'] ?? 'prod';
+const version = `0.0.${process.env['GITHUB_RUN_NUMBER'] ?? process.env['CI_PIPELINE_ID'] ?? '0'}`;
 
 // Bucket convention matches the rhosys deployments pattern; override via DEPLOYMENT_BUCKET if needed
 const deploymentBucket = process.env['DEPLOYMENT_BUCKET']
@@ -57,8 +57,8 @@ program
   .command('deploy')
   .description('Build and deploy to AWS (CI only).')
   .action(async () => {
-    if (!process.env['CI_COMMIT_REF_SLUG']) {
-      console.log('Deployment should only run in CI. Set CI_COMMIT_REF_SLUG to proceed.');
+    if (!process.env['GITHUB_ACTIONS'] && !process.env['CI_COMMIT_REF_SLUG']) {
+      console.log('Deployment should only run in CI. Set GITHUB_ACTIONS=true or CI_COMMIT_REF_SLUG to proceed.');
       return;
     }
 
