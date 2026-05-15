@@ -10,7 +10,16 @@ import type { Arc, Signal, View, Label, Rule, Domain, DnsRecord, Account, Page, 
 import type { Logger } from "../logger.js";
 import { deriveGroupingKey } from "../processor/processor.js";
 import { zParse } from "./validate.js";
-import type { JobDispatcher } from "./job-dispatch-handler.js";
+
+// ---------------------------------------------------------------------------
+// Job Dispatcher interface (used by reindex route)
+// ---------------------------------------------------------------------------
+
+export interface JobDispatcher {
+  dispatch(targetRegistryId: string, segmentCount?: number): Promise<Result<{
+    jobId: string; targetRegistryId: string; modelId: string; segmentCount: number; startedAt: string;
+  }, NotFoundError>>;
+}
 import { authorizationGuard } from "./authorization-guard.js";
 import { createAuthorize } from "./authorization-middleware.js";
 import {
@@ -1063,13 +1072,6 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
       const result = await jobDispatcher.dispatch(targetRegistryId, segmentCount as number | undefined);
       if (result.isErr()) return err(c, 404, `Cluster "${targetRegistryId}" not found`);
       return c.json(result.value, 202);
-    });
-
-    app.get("/reindex/:jobId", async (c) => {
-      const jobId = c.req.param("jobId");
-      const result = await jobDispatcher.getReport(jobId);
-      if (result.isErr()) return err(c, 404, `Reindex job "${jobId}" not found`);
-      return c.json(result.value);
     });
   }
 
