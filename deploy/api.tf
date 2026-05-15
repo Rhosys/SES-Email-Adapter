@@ -23,10 +23,32 @@ resource "aws_apigatewayv2_integration" "lambda" {
   payload_format_version = "2.0"
 }
 
+resource "aws_apigatewayv2_authorizer" "main" {
+  api_id                            = aws_apigatewayv2_api.main.id
+  authorizer_type                   = "REQUEST"
+  authorizer_uri                    = aws_lambda_alias.production.invoke_arn
+  authorizer_payload_format_version = "2.0"
+  identity_sources                  = ["$request.header.Authorization"]
+  name                              = "${var.service_name}-authorizer"
+  authorizer_result_ttl_in_seconds  = 3600
+  enable_simple_responses           = true
+}
+
+resource "aws_lambda_permission" "http_authorizer" {
+  statement_id  = "AllowHTTPAuthorizerInvoke"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.main.function_name
+  qualifier     = aws_lambda_alias.production.name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.main.execution_arn}/authorizers/*"
+}
+
 resource "aws_apigatewayv2_route" "catch_all" {
-  api_id    = aws_apigatewayv2_api.main.id
-  route_key = "$default"
-  target    = "integrations/${aws_apigatewayv2_integration.lambda.id}"
+  api_id             = aws_apigatewayv2_api.main.id
+  route_key          = "$default"
+  target             = "integrations/${aws_apigatewayv2_integration.lambda.id}"
+  authorization_type = "CUSTOM"
+  authorizer_id      = aws_apigatewayv2_authorizer.main.id
 }
 
 # ---------------------------------------------------------------------------
@@ -34,15 +56,19 @@ resource "aws_apigatewayv2_route" "catch_all" {
 # ---------------------------------------------------------------------------
 
 resource "aws_apigatewayv2_route" "reindex_post" {
-  api_id    = aws_apigatewayv2_api.main.id
-  route_key = "POST /reindex"
-  target    = "integrations/${aws_apigatewayv2_integration.lambda.id}"
+  api_id             = aws_apigatewayv2_api.main.id
+  route_key          = "POST /reindex"
+  target             = "integrations/${aws_apigatewayv2_integration.lambda.id}"
+  authorization_type = "CUSTOM"
+  authorizer_id      = aws_apigatewayv2_authorizer.main.id
 }
 
 resource "aws_apigatewayv2_route" "reindex_get" {
-  api_id    = aws_apigatewayv2_api.main.id
-  route_key = "GET /reindex/{jobId}"
-  target    = "integrations/${aws_apigatewayv2_integration.lambda.id}"
+  api_id             = aws_apigatewayv2_api.main.id
+  route_key          = "GET /reindex/{jobId}"
+  target             = "integrations/${aws_apigatewayv2_integration.lambda.id}"
+  authorization_type = "CUSTOM"
+  authorizer_id      = aws_apigatewayv2_authorizer.main.id
 }
 
 resource "aws_apigatewayv2_stage" "main" {
