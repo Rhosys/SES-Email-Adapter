@@ -87,8 +87,8 @@ export interface Forwarder {
   forward(s3Key: string, toAddress: string, accountId: string, opts: ForwardOptions): Promise<Result<void, DbError>>;
 }
 
-export interface TestReplier {
-  pong(opts: {
+export interface ReplySender {
+  sendReply(opts: {
     to: string;
     from: string;
     subject: string;
@@ -273,8 +273,8 @@ interface SignalProcessorOptions {
   notifier: Notifier;
   forwarder: Forwarder;
   retentionService: S3RetentionService;
-  testReplier?: TestReplier;
-  sqsDispatcher?: SqsDispatcher;
+  replySender: ReplySender;
+  sqsDispatcher: SqsDispatcher;
 }
 
 export class SignalProcessor {
@@ -288,9 +288,9 @@ export class SignalProcessor {
   private readonly logger: Logger;
   private readonly notifier: Notifier;
   private readonly forwarder: Forwarder;
-  private readonly testReplier: TestReplier | undefined;
+  private readonly replySender: ReplySender;
   private readonly retentionService: S3RetentionService;
-  private readonly sqsDispatcher: SqsDispatcher | undefined;
+  private readonly sqsDispatcher: SqsDispatcher;
 
   constructor(opts: SignalProcessorOptions) {
     this.store = opts.store;
@@ -303,7 +303,7 @@ export class SignalProcessor {
     this.logger = opts.logger;
     this.notifier = opts.notifier;
     this.forwarder = opts.forwarder;
-    this.testReplier = opts.testReplier;
+    this.replySender = opts.replySender;
     this.retentionService = opts.retentionService;
     this.sqsDispatcher = opts.sqsDispatcher;
   }
@@ -481,11 +481,11 @@ export class SignalProcessor {
     }
 
     // Pong
-    if (outcome.doPong && this.testReplier) {
+    if (outcome.doPong) {
       try {
         this.logger.trackPoint("side_effect_pong_start");
         const from = signal.recipientAddress;
-        await this.testReplier.pong({
+        await this.replySender.sendReply({
           to: signal.from.address,
           from,
           subject: signal.subject ?? "",
@@ -499,7 +499,7 @@ export class SignalProcessor {
     }
 
     // Auto-reply
-    if (this.testReplier && outcome.autoReplyTemplateIds.length > 0) {
+    if (outcome.autoReplyTemplateIds.length > 0) {
       try {
         this.logger.trackPoint("side_effect_auto_reply_start");
         const recipientDomain = signal.recipientAddress.split("@")[1] ?? "";
@@ -515,7 +515,7 @@ export class SignalProcessor {
             const tmplResult = await this.store.getTemplate(accountId, templateId);
             if (tmplResult.isErr() || !tmplResult.value) continue;
             const tmpl = tmplResult.value;
-            await this.testReplier.pong({
+            await this.replySender.sendReply({
               to: signal.from.address,
               from: signal.recipientAddress,
               subject: renderTemplate(tmpl.subject, vars),
@@ -829,7 +829,7 @@ export class SignalProcessor {
     this.logger.trackPoint("arc_updated", { arcId: arc.id });
 
     // 12. Pong (driven by SR-13 rule action)
-    if (outcome.doPong && this.testReplier) {
+    if (outcome.doPong) {
       const recipientDomain = recipientAddress.split("@")[1] ?? "";
       const domainResult = await this.store.getDomainByName(accountId, recipientDomain);
       if (domainResult.isErr()) return err(domainResult.error);
@@ -839,7 +839,7 @@ export class SignalProcessor {
         : (process.env["NOTIFICATION_FROM"] ?? recipientAddress);
       let pongResult: Result<{ messageId: string }, DbError>;
       try {
-        const pongValue = await this.testReplier.pong({
+        const pongValue = await this.replySender.sendReply({
           to: parsed.from.address,
           from,
           subject: parsed.subject,
@@ -910,7 +910,7 @@ export class SignalProcessor {
     }
 
     // 15. Auto-reply (fire-and-forget composed emails from templates)
-    if (this.testReplier && outcome.autoReplyTemplateIds.length > 0) {
+    if (outcome.autoReplyTemplateIds.length > 0) {
       const recipientDomain = recipientAddress.split("@")[1] ?? "";
       const autoReplyDomainResult = await this.store.getDomainByName(accountId, recipientDomain);
       if (autoReplyDomainResult.isOk() && autoReplyDomainResult.value?.senderSetupComplete) {
@@ -926,7 +926,7 @@ export class SignalProcessor {
           const tmpl = tmplResult.value;
           let replyResult: Result<{ messageId: string }, DbError>;
           try {
-            const replyValue = await this.testReplier.pong({
+            const replyValue = await this.replySender.sendReply({
               to: parsed.from.address,
               from: recipientAddress,
               subject: renderTemplate(tmpl.subject, vars),
@@ -1062,14 +1062,10 @@ export class SignalProcessor {
 
   /**
    * Dispatch side-effects as a separate SQS message after Aurora upserts succeed.
-   * If sqsDispatcher is not provided (backward compatibility during rollout),
-   * returns ok(undefined) — side-effects execute inline as they do today.
    * If the SQS send fails, returns err — this causes a batchItemFailure so the
    * message is retried (Aurora succeeded but side-effects won't fire without dispatch).
    */
   async dispatchSideEffects(signal: Signal, arc: Arc): Promise<Result<void, ProcessError>> {
-    if (!this.sqsDispatcher) return ok(undefined);
-
     this.logger.trackPoint("side_effect_dispatch_start");
     const payload: SideEffectPayload = { signal, arc };
     const sendResult = await this.sqsDispatcher.sendMessage(payload);

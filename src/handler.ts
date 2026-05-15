@@ -28,6 +28,7 @@ import { BedrockEmbeddingGenerator } from "./embedding/embedding-generator.js";
 import { multiClusterWriter } from "./database/multi-cluster-aurora-writer.js";
 import { S3RetentionServiceImpl } from "./embedding/s3-retention-service.js";
 import { ReindexWorker } from "./jobs/reindex/reindex-worker.js";
+import { SesReplySender } from "./notifier/ses-reply-sender.js";
 import { RequestLogger } from "./logger.js";
 import { handleJobDispatch } from "./api/job-dispatch-handler.js";
 
@@ -88,8 +89,9 @@ const processor = new SignalProcessor({
   notifier: new SesNotifier(),
   forwarder: new SesForwarder(logger, sesv2, s3),
   retentionService: new S3RetentionServiceImpl(s3),
+  replySender: new SesReplySender(sesv2),
+  sqsDispatcher: new SqsDispatcherImpl(SIGNAL_QUEUE_URL, sqs, logger),
   logger,
-  ...(SIGNAL_QUEUE_URL ? { sqsDispatcher: new SqsDispatcherImpl(SIGNAL_QUEUE_URL, sqs, logger) } : {}),
 });
 
 const feedbackProcessor = new FeedbackProcessor(processingDb, accountDb, logger);

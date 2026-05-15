@@ -108,10 +108,13 @@ resource "aws_iam_role_policy" "lambda_permissions" {
         Resource = data.aws_kms_alias.default.target_key_arn
       },
       {
-        Sid      = "SQSReindexSend"
+        Sid      = "SQSSend"
         Effect   = "Allow"
         Action   = ["sqs:SendMessage"]
-        Resource = aws_sqs_queue.reindex.arn
+        Resource = [
+          aws_sqs_queue.reindex.arn,
+          aws_sqs_queue.signals.arn,
+        ]
       },
       {
         Sid    = "SQSConsume"
@@ -179,6 +182,7 @@ resource "aws_lambda_function" "main" {
       WS_API_ENDPOINT       = "https://wss.${data.aws_route53_zone.main.name}"
       CF_ORIGIN_SECRET      = random_password.cf_origin_secret.result
       REINDEX_QUEUE_URL     = aws_sqs_queue.reindex.url
+      SIGNAL_QUEUE_URL      = aws_sqs_queue.signals.url
       MAIL_DOMAIN           = "platform.${data.aws_route53_zone.main.name}"
     }
   }

@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { ok } from "../errors.js";
 import { SignalProcessor, SYSTEM_RULES } from "./processor.js";
 import { JsonLogicRuleEvaluator } from "./rule-evaluator.js";
-import type { ProcessorDatabase, TestReplier } from "./processor.js";
+import type { ProcessorDatabase, ReplySender } from "./processor.js";
 import type { MimeParser } from "./mime.js";
 import type { SignalClassifier, ClassificationOutput } from "../classifier/classifier.js";
 import type { EmbeddingGenerator, EmbeddingResult } from "../embedding/embedding-generator.js";
@@ -182,8 +182,8 @@ describe("Single saveArc call with complete mutations", () => {
     };
 
     let pongMessageId: string | null = null;
-    const testReplier: TestReplier = {
-      pong: vi.fn().mockImplementation(() => {
+    const replySender: ReplySender = {
+      sendReply: vi.fn().mockImplementation(() => {
         pongMessageId = "pong-msg-001";
         return Promise.resolve({ messageId: pongMessageId });
       }),
@@ -202,7 +202,8 @@ describe("Single saveArc call with complete mutations", () => {
       auroraWriter,
       arcMatcher,
       ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
-      testReplier,
+      replySender,
+      sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       logger: mockLogger,
       notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), notifyBlocked: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
