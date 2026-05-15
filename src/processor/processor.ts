@@ -1003,7 +1003,6 @@ export class SignalProcessor {
    */
   async executeAuroraUpserts(signal: Signal, arc: Arc): Promise<Result<void, ProcessError>> {
     const activeClusters = getActiveClusters();
-    const primaryCluster = getReadCluster();
     this.logger.trackPoint("aurora_upsert_start", { clusterCount: activeClusters.length });
 
     const results = await Promise.all(
@@ -1037,14 +1036,7 @@ export class SignalProcessor {
     if (failures.length > 0) {
       for (const failure of failures) {
         if (!failure.success) {
-          const isPrimary = failure.cluster.clusterId === primaryCluster.clusterId;
-          const message = "Failed to upsert embedding to Aurora cluster. The Data API call returned an error for the target cluster. This signal's embedding won't be searchable on that cluster until the next retry succeeds. Check Aurora cluster health in the AWS console.";
-          const context = { code: "processor.aurora_upsert_failed", accountId: signal.accountId, clusterId: failure.cluster.clusterId, error: String(failure.error.cause) };
-          if (isPrimary) {
-            this.logger.error(message, context);
-          } else {
-            this.logger.warn(message, context);
-          }
+          this.logger.error("Failed to upsert embedding to Aurora cluster. The Data API call returned an error for the target cluster. This signal's embedding won't be searchable on that cluster until the next retry succeeds. Check Aurora cluster health in the AWS console.", { code: "processor.aurora_upsert_failed", accountId: signal.accountId, clusterId: failure.cluster.clusterId, error: String(failure.error.cause) });
         }
       }
       return err(processError(signal.id));
