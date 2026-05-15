@@ -61,19 +61,23 @@ describe("ReindexDispatcher", () => {
 
   describe("dispatch", () => {
     it("rejects unknown cluster IDs", async () => {
-      await expect(dispatcher.dispatch("nonexistent-cluster")).rejects.toThrow(
-        'Cluster "nonexistent-cluster" not found in CLUSTER_REGISTRY',
-      );
+      const result = await dispatcher.dispatch("nonexistent-cluster");
+      expect(result.isErr()).toBe(true);
+      if (result.isErr()) {
+        expect(result.error.kind).toBe("not_found");
+      }
     });
 
     it("dispatches correct number of SQS messages with default segment count", async () => {
       const result = await dispatcher.dispatch("aurora-prod-titan-v2");
 
-      expect(result.targetRegistryId).toBe("aurora-prod-titan-v2");
-      expect(result.modelId).toBe("amazon.titan-embed-text-v2:0");
-      expect(result.segmentCount).toBe(32);
-      expect(result.jobId).toBeDefined();
-      expect(result.startedAt).toBeDefined();
+      expect(result.isOk()).toBe(true);
+      if (!result.isOk()) return;
+      expect(result.value.targetRegistryId).toBe("aurora-prod-titan-v2");
+      expect(result.value.modelId).toBe("amazon.titan-embed-text-v2:0");
+      expect(result.value.segmentCount).toBe(32);
+      expect(result.value.jobId).toBeDefined();
+      expect(result.value.startedAt).toBeDefined();
 
       // Verify 32 SQS messages were sent
       const sqsCalls = sqsMock.commandCalls(SendMessageCommand);
@@ -83,7 +87,9 @@ describe("ReindexDispatcher", () => {
     it("dispatches custom segment count", async () => {
       const result = await dispatcher.dispatch("aurora-prod-titan-v2", 8);
 
-      expect(result.segmentCount).toBe(8);
+      expect(result.isOk()).toBe(true);
+      if (!result.isOk()) return;
+      expect(result.value.segmentCount).toBe(8);
 
       const sqsCalls = sqsMock.commandCalls(SendMessageCommand);
       expect(sqsCalls).toHaveLength(8);
@@ -92,13 +98,16 @@ describe("ReindexDispatcher", () => {
     it("sends well-formed SQS messages with correct segment metadata", async () => {
       const result = await dispatcher.dispatch("aurora-prod-titan-v2", 4);
 
+      expect(result.isOk()).toBe(true);
+      if (!result.isOk()) return;
+
       const sqsCalls = sqsMock.commandCalls(SendMessageCommand);
       const messages = sqsCalls.map((call) => JSON.parse(call.args[0].input.MessageBody!));
 
       // Verify each message has correct structure
       for (let i = 0; i < 4; i++) {
         expect(messages[i]).toEqual({
-          jobId: result.jobId,
+          jobId: result.value.jobId,
           segment: i,
           totalSegments: 4,
           targetRegistryId: "aurora-prod-titan-v2",
@@ -110,14 +119,17 @@ describe("ReindexDispatcher", () => {
     it("writes initial counters row to processing table without signalsScanned", async () => {
       const result = await dispatcher.dispatch("aurora-prod-titan-v2", 16);
 
+      expect(result.isOk()).toBe(true);
+      if (!result.isOk()) return;
+
       const putCalls = dynamoMock.commandCalls(PutCommand);
       expect(putCalls).toHaveLength(1);
 
       const putInput = putCalls[0]!.args[0].input;
       expect(putInput.Item).toMatchObject({
-        pk: `REINDEX#${result.jobId}`,
+        pk: `REINDEX#${result.value.jobId}`,
         sk: "JOB",
-        jobId: result.jobId,
+        jobId: result.value.jobId,
         targetRegistryId: "aurora-prod-titan-v2",
         modelId: "amazon.titan-embed-text-v2:0",
         segmentCount: 16,
@@ -134,9 +146,11 @@ describe("ReindexDispatcher", () => {
     it("throws when job not found", async () => {
       dynamoMock.on(GetCommand).resolves({ Item: undefined });
 
-      await expect(dispatcher.getReport("nonexistent-job")).rejects.toThrow(
-        'Reindex job "nonexistent-job" not found',
-      );
+      const result = await dispatcher.getReport("nonexistent-job");
+      expect(result.isErr()).toBe(true);
+      if (result.isErr()) {
+        expect(result.error.kind).toBe("not_found");
+      }
     });
 
     it("returns report with validation when Aurora is healthy", async () => {
@@ -168,15 +182,17 @@ describe("ReindexDispatcher", () => {
 
       const report = await dispatcher.getReport(jobId);
 
-      expect(report.jobId).toBe(jobId);
+      expect(report.isOk()).toBe(true);
+      if (!report.isOk()) return;
+      expect(report.value.jobId).toBe(jobId);
       // signalsScanned is computed as copiedCount + regeneratedCount + unrecoverableCount
-      expect(report.signalsScanned).toBe(95 + 3 + 2);
-      expect(report.signalsScanned).toBe(report.copiedCount + report.regeneratedCount + report.unrecoverableCount);
-      expect(report.copiedCount).toBe(95);
-      expect(report.regeneratedCount).toBe(3);
-      expect(report.unrecoverableCount).toBe(2);
-      expect(report.validationOk).toBe(true);
-      expect(report.durationMs).toBeGreaterThan(0);
+      expect(report.value.signalsScanned).toBe(95 + 3 + 2);
+      expect(report.value.signalsScanned).toBe(report.value.copiedCount + report.value.regeneratedCount + report.value.unrecoverableCount);
+      expect(report.value.copiedCount).toBe(95);
+      expect(report.value.regeneratedCount).toBe(3);
+      expect(report.value.unrecoverableCount).toBe(2);
+      expect(report.value.validationOk).toBe(true);
+      expect(report.value.durationMs).toBeGreaterThan(0);
     });
 
     it("flags validation failure when row count discrepancy exceeds 1%", async () => {
@@ -207,8 +223,10 @@ describe("ReindexDispatcher", () => {
 
       const report = await dispatcher.getReport(jobId);
 
-      expect(report.validationOk).toBe(false);
-      expect(report.validationDetail).toContain("Row count discrepancy");
+      expect(report.isOk()).toBe(true);
+      if (!report.isOk()) return;
+      expect(report.value.validationOk).toBe(false);
+      expect(report.value.validationDetail).toContain("Row count discrepancy");
     });
 
     it("flags validation failure when sample vectors are invalid", async () => {
@@ -241,8 +259,10 @@ describe("ReindexDispatcher", () => {
 
       const report = await dispatcher.getReport(jobId);
 
-      expect(report.validationOk).toBe(false);
-      expect(report.validationDetail).toContain("Sample validation failed");
+      expect(report.isOk()).toBe(true);
+      if (!report.isOk()) return;
+      expect(report.value.validationOk).toBe(false);
+      expect(report.value.validationDetail).toContain("Sample validation failed");
     });
 
     it("handles cluster removed from registry gracefully", async () => {
@@ -263,8 +283,10 @@ describe("ReindexDispatcher", () => {
 
       const report = await dispatcher.getReport(jobId);
 
-      expect(report.validationOk).toBe(false);
-      expect(report.validationDetail).toContain("no longer in registry");
+      expect(report.isOk()).toBe(true);
+      if (!report.isOk()) return;
+      expect(report.value.validationOk).toBe(false);
+      expect(report.value.validationDetail).toContain("no longer in registry");
     });
 
     it("computes signalsScanned as copiedCount + regeneratedCount + unrecoverableCount (invariant)", async () => {
@@ -296,8 +318,10 @@ describe("ReindexDispatcher", () => {
       const report = await dispatcher.getReport(jobId);
 
       // The invariant: signalsScanned is always the sum of the three counters
-      expect(report.signalsScanned).toBe(42 + 7 + 3);
-      expect(report.signalsScanned).toBe(report.copiedCount + report.regeneratedCount + report.unrecoverableCount);
+      expect(report.isOk()).toBe(true);
+      if (!report.isOk()) return;
+      expect(report.value.signalsScanned).toBe(42 + 7 + 3);
+      expect(report.value.signalsScanned).toBe(report.value.copiedCount + report.value.regeneratedCount + report.value.unrecoverableCount);
     });
 
     it("signalsScanned is zero when all counters are zero", async () => {
@@ -324,8 +348,10 @@ describe("ReindexDispatcher", () => {
 
       const report = await dispatcher.getReport(jobId);
 
-      expect(report.signalsScanned).toBe(0);
-      expect(report.signalsScanned).toBe(report.copiedCount + report.regeneratedCount + report.unrecoverableCount);
+      expect(report.isOk()).toBe(true);
+      if (!report.isOk()) return;
+      expect(report.value.signalsScanned).toBe(0);
+      expect(report.value.signalsScanned).toBe(report.value.copiedCount + report.value.regeneratedCount + report.value.unrecoverableCount);
     });
 
     it("ignores any stored signalsScanned value and computes from counters", async () => {
@@ -359,9 +385,11 @@ describe("ReindexDispatcher", () => {
       const report = await dispatcher.getReport(jobId);
 
       // Must compute from the three counters, NOT use the stored value
-      expect(report.signalsScanned).toBe(20 + 5 + 1);
-      expect(report.signalsScanned).not.toBe(9999);
-      expect(report.signalsScanned).toBe(report.copiedCount + report.regeneratedCount + report.unrecoverableCount);
+      expect(report.isOk()).toBe(true);
+      if (!report.isOk()) return;
+      expect(report.value.signalsScanned).toBe(20 + 5 + 1);
+      expect(report.value.signalsScanned).not.toBe(9999);
+      expect(report.value.signalsScanned).toBe(report.value.copiedCount + report.value.regeneratedCount + report.value.unrecoverableCount);
     });
   });
 });

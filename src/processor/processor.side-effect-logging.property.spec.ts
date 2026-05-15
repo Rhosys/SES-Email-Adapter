@@ -117,7 +117,7 @@ describe("Side effect caller logging", () => {
   }
 
   function makeAuroraWriter(): MultiClusterAuroraWriter {
-    return { upsertEmbedding: vi.fn().mockResolvedValue(undefined), findMatch: vi.fn().mockResolvedValue(null) };
+    return { upsertEmbedding: vi.fn().mockResolvedValue(ok(undefined)), findMatch: vi.fn().mockResolvedValue(ok(null)) };
   }
 
   function makeArcMatcher(): ArcMatcher {

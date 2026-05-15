@@ -210,8 +210,8 @@ describe("Feature: signal-processor-retry-resilience, Property 4: Arc saved befo
     };
 
     const auroraWriter: MultiClusterAuroraWriter = {
-      upsertEmbedding: vi.fn().mockResolvedValue(undefined),
-      findMatch: vi.fn().mockResolvedValue(null),
+      upsertEmbedding: vi.fn().mockResolvedValue(ok(undefined)),
+      findMatch: vi.fn().mockResolvedValue(ok(null)),
     };
 
     const processor = new SignalProcessor({
@@ -268,8 +268,8 @@ describe("Feature: signal-processor-retry-resilience, Property 4: Arc saved befo
     };
 
     const auroraWriter: MultiClusterAuroraWriter = {
-      upsertEmbedding: vi.fn().mockResolvedValue(undefined),
-      findMatch: vi.fn().mockResolvedValue(null),
+      upsertEmbedding: vi.fn().mockResolvedValue(ok(undefined)),
+      findMatch: vi.fn().mockResolvedValue(ok(null)),
     };
 
     const processor = new SignalProcessor({
@@ -461,10 +461,11 @@ describe("Feature: signal-processor-retry-resilience, Property 6: Aurora failure
     const auroraWriter: MultiClusterAuroraWriter = {
       upsertEmbedding: vi.fn().mockImplementation(async (opts: { registryId: string }) => {
         if (opts.registryId === "cluster-a") {
-          throw new Error("Connection timeout on primary");
+          return err(dbError(new Error("Connection timeout on primary")));
         }
+        return ok(undefined);
       }),
-      findMatch: vi.fn().mockResolvedValue(null),
+      findMatch: vi.fn().mockResolvedValue(ok(null)),
     };
 
     const processor = new SignalProcessor({
@@ -507,10 +508,11 @@ describe("Feature: signal-processor-retry-resilience, Property 6: Aurora failure
     const auroraWriter: MultiClusterAuroraWriter = {
       upsertEmbedding: vi.fn().mockImplementation(async (opts: { registryId: string }) => {
         if (opts.registryId === "cluster-b") {
-          throw new Error("Throttled on secondary");
+          return err(dbError(new Error("Throttled on secondary")));
         }
+        return ok(undefined);
       }),
-      findMatch: vi.fn().mockResolvedValue(null),
+      findMatch: vi.fn().mockResolvedValue(ok(null)),
     };
 
     const processor = new SignalProcessor({
@@ -553,10 +555,11 @@ describe("Feature: signal-processor-retry-resilience, Property 6: Aurora failure
     // Both clusters fail
     const auroraWriter: MultiClusterAuroraWriter = {
       upsertEmbedding: vi.fn().mockImplementation(async (opts: { registryId: string }) => {
-        if (opts.registryId === "cluster-a") throw new Error("Primary connection refused");
-        if (opts.registryId === "cluster-b") throw new Error("Secondary connection refused");
+        if (opts.registryId === "cluster-a") return err(dbError(new Error("Primary connection refused")));
+        if (opts.registryId === "cluster-b") return err(dbError(new Error("Secondary connection refused")));
+        return ok(undefined);
       }),
-      findMatch: vi.fn().mockResolvedValue(null),
+      findMatch: vi.fn().mockResolvedValue(ok(null)),
     };
 
     const processor = new SignalProcessor({
@@ -734,8 +737,8 @@ describe("Feature: signal-processor-retry-resilience, Property 5: Side-effects d
     };
 
     const auroraWriter: MultiClusterAuroraWriter = {
-      upsertEmbedding: vi.fn().mockResolvedValue(undefined),
-      findMatch: vi.fn().mockResolvedValue(null),
+      upsertEmbedding: vi.fn().mockResolvedValue(ok(undefined)),
+      findMatch: vi.fn().mockResolvedValue(ok(null)),
     };
 
     const sqsDispatcher: SqsDispatcher = {
@@ -775,8 +778,8 @@ describe("Feature: signal-processor-retry-resilience, Property 5: Side-effects d
     };
 
     const auroraWriter: MultiClusterAuroraWriter = {
-      upsertEmbedding: vi.fn().mockRejectedValue(new Error("Aurora cluster unavailable")),
-      findMatch: vi.fn().mockResolvedValue(null),
+      upsertEmbedding: vi.fn().mockResolvedValue(err(dbError(new Error("Aurora cluster unavailable")))),
+      findMatch: vi.fn().mockResolvedValue(ok(null)),
     };
 
     const sqsDispatcher: SqsDispatcher = {
@@ -812,8 +815,8 @@ describe("Feature: signal-processor-retry-resilience, Property 5: Side-effects d
     };
 
     const auroraWriter: MultiClusterAuroraWriter = {
-      upsertEmbedding: vi.fn().mockResolvedValue(undefined),
-      findMatch: vi.fn().mockResolvedValue(null),
+      upsertEmbedding: vi.fn().mockResolvedValue(ok(undefined)),
+      findMatch: vi.fn().mockResolvedValue(ok(null)),
     };
 
     const processor = new SignalProcessor({
@@ -843,8 +846,8 @@ describe("Feature: signal-processor-retry-resilience, Property 5: Side-effects d
     };
 
     const auroraWriter: MultiClusterAuroraWriter = {
-      upsertEmbedding: vi.fn().mockResolvedValue(undefined),
-      findMatch: vi.fn().mockResolvedValue(null),
+      upsertEmbedding: vi.fn().mockResolvedValue(ok(undefined)),
+      findMatch: vi.fn().mockResolvedValue(ok(null)),
     };
 
     const sqsDispatcher: SqsDispatcher = {
@@ -1032,11 +1035,11 @@ describe("Feature: signal-processor-retry-resilience, Property 7: Partial Aurora
       upsertEmbedding: vi.fn().mockImplementation((opts: { registryId: string }) => {
         if (opts.registryId === "cluster-a") {
           completedUpserts.push("cluster-a");
-          return Promise.resolve(undefined);
+          return Promise.resolve(ok(undefined));
         }
-        return Promise.reject(new Error("Aurora cluster-b connection timeout"));
+        return Promise.resolve(err(dbError(new Error("Aurora cluster-b connection timeout"))));
       }),
-      findMatch: vi.fn().mockResolvedValue(null),
+      findMatch: vi.fn().mockResolvedValue(ok(null)),
     };
 
     const sqsDispatcher: SqsDispatcher = {

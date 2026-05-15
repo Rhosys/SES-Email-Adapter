@@ -95,11 +95,13 @@ describe("ReindexDispatcher — Property 14: Job reports preserve scan accountin
 
     const report = await dispatcher.getReport(jobId);
 
-    expect(report.signalsScanned).toBe(expectedSignalsScanned);
-    expect(report.signalsScanned).toBe(report.copiedCount + report.regeneratedCount + report.unrecoverableCount);
-    expect(report.copiedCount).toBe(copiedCount);
-    expect(report.regeneratedCount).toBe(regeneratedCount);
-    expect(report.unrecoverableCount).toBe(unrecoverableCount);
+    expect(report.isOk()).toBe(true);
+    if (!report.isOk()) return;
+    expect(report.value.signalsScanned).toBe(expectedSignalsScanned);
+    expect(report.value.signalsScanned).toBe(report.value.copiedCount + report.value.regeneratedCount + report.value.unrecoverableCount);
+    expect(report.value.copiedCount).toBe(copiedCount);
+    expect(report.value.regeneratedCount).toBe(regeneratedCount);
+    expect(report.value.unrecoverableCount).toBe(unrecoverableCount);
   });
 
   it.each(missingFieldCases)("missing fields: %s", async (_label, { copiedCount, regeneratedCount, unrecoverableCount }) => {
@@ -140,7 +142,9 @@ describe("ReindexDispatcher — Property 14: Job reports preserve scan accountin
 
     const report = await dispatcher.getReport(jobId);
 
-    expect(report.signalsScanned).toBe(expectedSignalsScanned);
-    expect(report.signalsScanned).toBe(report.copiedCount + report.regeneratedCount + report.unrecoverableCount);
+    expect(report.isOk()).toBe(true);
+    if (!report.isOk()) return;
+    expect(report.value.signalsScanned).toBe(expectedSignalsScanned);
+    expect(report.value.signalsScanned).toBe(report.value.copiedCount + report.value.regeneratedCount + report.value.unrecoverableCount);
   });
 });

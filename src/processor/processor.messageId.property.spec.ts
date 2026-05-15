@@ -96,8 +96,8 @@ describe("ProcessError always carries the SQS messageId", () => {
       generateForSecondaryClusters: vi.fn().mockResolvedValue([]),
     };
     const auroraWriter: MultiClusterAuroraWriter = {
-      upsertEmbedding: vi.fn().mockResolvedValue(undefined),
-      findMatch: vi.fn().mockResolvedValue(null),
+      upsertEmbedding: vi.fn().mockResolvedValue(ok(undefined)),
+      findMatch: vi.fn().mockResolvedValue(ok(null)),
     };
     const arcMatcher: ArcMatcher = {
       findMatch: vi.fn().mockReturnValue(Promise.resolve(ok(null))),

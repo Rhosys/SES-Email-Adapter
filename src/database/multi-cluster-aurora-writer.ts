@@ -10,7 +10,9 @@ import {
   CommitTransactionCommand,
   RollbackTransactionCommand,
 } from "@aws-sdk/client-rds-data";
-import { CLUSTER_REGISTRY, getRegistryById, type ClusterRegistryEntry } from "../embedding/cluster-registry.js";
+import { getRegistryById, type ClusterRegistryEntry } from "../embedding/cluster-registry.js";
+import { ok, err, dbError } from "../errors.js";
+import type { DbError, Result } from "../errors.js";
 
 // ---------------------------------------------------------------------------
 // Interface
@@ -23,14 +25,14 @@ export interface MultiClusterAuroraWriter {
     accountId: string;
     recipientAddress: string;
     embedding: number[];
-  }): Promise<void>;
+  }): Promise<Result<void, DbError>>;
 
   findMatch(opts: {
     registryId: string;
     accountId: string;
     recipientAddress: string;
     embedding: number[];
-  }): Promise<{ arcId: string } | null>;
+  }): Promise<Result<{ arcId: string } | null, DbError>>;
 }
 
 // ---------------------------------------------------------------------------
@@ -118,30 +120,36 @@ export class MultiClusterAuroraWriterImpl implements MultiClusterAuroraWriter {
     accountId: string;
     recipientAddress: string;
     embedding: number[];
-  }): Promise<void> {
-    const cluster = resolveCluster(opts.registryId);
+  }): Promise<Result<void, DbError>> {
+    const cluster = getRegistryById(opts.registryId);
+    if (!cluster) return err(dbError(`Cluster "${opts.registryId}" not found in CLUSTER_REGISTRY`));
     const client = getClientForCluster(opts.registryId);
 
-    await withRetry(async () => {
-      await this.withAccountContext(client, cluster, opts.accountId, async (transactionId) => {
-        await client.send(new ExecuteStatementCommand({
-          resourceArn: cluster.clusterArn,
-          secretArn: cluster.secretArn,
-          database: cluster.databaseName,
-          transactionId,
-          sql: `INSERT INTO arc_embeddings (arc_id, account_id, recipient_address, embedding, updated_at)
-                VALUES (:arcId, :accountId, :recipient, :embedding::vector, NOW())
-                ON CONFLICT (arc_id, account_id, recipient_address) DO UPDATE
-                  SET embedding = EXCLUDED.embedding, updated_at = NOW()`,
-          parameters: [
-            { name: "arcId", value: { stringValue: opts.arcId } },
-            { name: "accountId", value: { stringValue: opts.accountId } },
-            { name: "recipient", value: { stringValue: opts.recipientAddress } },
-            { name: "embedding", value: { stringValue: `[${opts.embedding.join(",")}]` } },
-          ],
-        }));
+    try {
+      await withRetry(async () => {
+        await this.withAccountContext(client, cluster, opts.accountId, async (transactionId) => {
+          await client.send(new ExecuteStatementCommand({
+            resourceArn: cluster.clusterArn,
+            secretArn: cluster.secretArn,
+            database: cluster.databaseName,
+            transactionId,
+            sql: `INSERT INTO arc_embeddings (arc_id, account_id, recipient_address, embedding, updated_at)
+                  VALUES (:arcId, :accountId, :recipient, :embedding::vector, NOW())
+                  ON CONFLICT (arc_id, account_id, recipient_address) DO UPDATE
+                    SET embedding = EXCLUDED.embedding, updated_at = NOW()`,
+            parameters: [
+              { name: "arcId", value: { stringValue: opts.arcId } },
+              { name: "accountId", value: { stringValue: opts.accountId } },
+              { name: "recipient", value: { stringValue: opts.recipientAddress } },
+              { name: "embedding", value: { stringValue: `[${opts.embedding.join(",")}]` } },
+            ],
+          }));
+        });
       });
-    });
+      return ok(undefined);
+    } catch (e) {
+      return err(dbError(e));
+    }
   }
 
   async findMatch(opts: {
@@ -149,35 +157,41 @@ export class MultiClusterAuroraWriterImpl implements MultiClusterAuroraWriter {
     accountId: string;
     recipientAddress: string;
     embedding: number[];
-  }): Promise<{ arcId: string } | null> {
-    const cluster = resolveCluster(opts.registryId);
+  }): Promise<Result<{ arcId: string } | null, DbError>> {
+    const cluster = getRegistryById(opts.registryId);
+    if (!cluster) return err(dbError(`Cluster "${opts.registryId}" not found in CLUSTER_REGISTRY`));
     const client = getClientForCluster(opts.registryId);
 
-    return withRetry(async () => {
-      const res = await this.withAccountContext(client, cluster, opts.accountId, async (transactionId) => {
-        return client.send(new ExecuteStatementCommand({
-          resourceArn: cluster.clusterArn,
-          secretArn: cluster.secretArn,
-          database: cluster.databaseName,
-          transactionId,
-          sql: `SELECT arc_id FROM arc_embeddings
-                WHERE account_id = :accountId AND recipient_address = :recipient
-                  AND embedding <=> :embedding::vector < :threshold
-                ORDER BY embedding <=> :embedding::vector
-                LIMIT 1`,
-          parameters: [
-            { name: "accountId", value: { stringValue: opts.accountId } },
-            { name: "recipient", value: { stringValue: opts.recipientAddress } },
-            { name: "embedding", value: { stringValue: `[${opts.embedding.join(",")}]` } },
-            { name: "threshold", value: { doubleValue: SIMILARITY_THRESHOLD } },
-          ],
-        }));
-      });
+    try {
+      const result = await withRetry(async () => {
+        const res = await this.withAccountContext(client, cluster, opts.accountId, async (transactionId) => {
+          return client.send(new ExecuteStatementCommand({
+            resourceArn: cluster.clusterArn,
+            secretArn: cluster.secretArn,
+            database: cluster.databaseName,
+            transactionId,
+            sql: `SELECT arc_id FROM arc_embeddings
+                  WHERE account_id = :accountId AND recipient_address = :recipient
+                    AND embedding <=> :embedding::vector < :threshold
+                  ORDER BY embedding <=> :embedding::vector
+                  LIMIT 1`,
+            parameters: [
+              { name: "accountId", value: { stringValue: opts.accountId } },
+              { name: "recipient", value: { stringValue: opts.recipientAddress } },
+              { name: "embedding", value: { stringValue: `[${opts.embedding.join(",")}]` } },
+              { name: "threshold", value: { doubleValue: SIMILARITY_THRESHOLD } },
+            ],
+          }));
+        });
 
-      const arcId = res.records?.[0]?.[0]?.stringValue;
-      if (!arcId) return null;
-      return { arcId };
-    });
+        const arcId = res.records?.[0]?.[0]?.stringValue;
+        if (!arcId) return null;
+        return { arcId };
+      });
+      return ok(result);
+    } catch (e) {
+      return err(dbError(e));
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -228,18 +242,6 @@ export class MultiClusterAuroraWriterImpl implements MultiClusterAuroraWriter {
       throw err;
     }
   }
-}
-
-// ---------------------------------------------------------------------------
-// Cluster resolution helper
-// ---------------------------------------------------------------------------
-
-function resolveCluster(registryId: string): ClusterRegistryEntry {
-  const entry = getRegistryById(registryId);
-  if (!entry) {
-    throw new Error(`Cluster "${registryId}" not found in CLUSTER_REGISTRY`);
-  }
-  return entry;
 }
 
 // ---------------------------------------------------------------------------

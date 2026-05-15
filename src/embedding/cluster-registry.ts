@@ -22,17 +22,11 @@ export interface ClusterRegistryEntry {
 // Cluster Registry
 // ---------------------------------------------------------------------------
 
-function requireEnv(name: string): string {
-  const val = process.env[name];
-  if (!val) throw new Error(`Required environment variable ${name} is not set`);
-  return val;
-}
-
 export const CLUSTER_REGISTRY: readonly ClusterRegistryEntry[] = Object.freeze([
   Object.freeze({
     registryId: 'aurora-prod-titan-v2',
-    clusterArn: requireEnv('AURORA_CLUSTER_ARN'),
-    secretArn:  requireEnv('AURORA_SECRET_ARN'),
+    clusterArn: process.env['AURORA_CLUSTER_ARN'] ?? '',
+    secretArn:  process.env['AURORA_SECRET_ARN'] ?? '',
     databaseName: process.env['AURORA_DB_NAME'] ?? 'signals',
     modelId: 'amazon.titan-embed-text-v2:0',
     dimensions: 1024,

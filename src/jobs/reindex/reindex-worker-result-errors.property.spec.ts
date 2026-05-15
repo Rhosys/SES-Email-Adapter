@@ -15,7 +15,7 @@ import { sdkStreamMixin } from "@smithy/util-stream";
 import type { SQSEvent, SQSRecord } from "aws-lambda";
 import { createMockLogger, type MockLogger } from "../../testing/mock-logger.js";
 import { ReindexWorker } from "./reindex-worker.js";
-import { err } from "../../errors.js";
+import { err, ok } from "../../errors.js";
 import type { BedrockError } from "../../errors.js";
 
 // ---------------------------------------------------------------------------
@@ -23,8 +23,8 @@ import type { BedrockError } from "../../errors.js";
 // ---------------------------------------------------------------------------
 
 const { mockUpsertEmbedding, mockAddEmbeddingToCache, mockGenerateForModel, mockMimeParse } = vi.hoisted(() => ({
-  mockUpsertEmbedding: vi.fn().mockResolvedValue(undefined),
-  mockAddEmbeddingToCache: vi.fn().mockResolvedValue(undefined),
+  mockUpsertEmbedding: vi.fn(),
+  mockAddEmbeddingToCache: vi.fn(),
   mockGenerateForModel: vi.fn(),
   mockMimeParse: vi.fn(),
 }));
@@ -162,8 +162,8 @@ describe("Property 7: Reindex worker propagates Result errors", () => {
     worker = new ReindexWorker(logger);
     ddbMock.reset();
     s3Mock.reset();
-    mockUpsertEmbedding.mockClear();
-    mockAddEmbeddingToCache.mockClear();
+    mockUpsertEmbedding.mockClear().mockResolvedValue(ok(undefined));
+    mockAddEmbeddingToCache.mockClear().mockResolvedValue(ok(undefined));
     mockGenerateForModel.mockClear();
     mockMimeParse.mockClear();
   });

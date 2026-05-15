@@ -5,6 +5,8 @@
 
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from "aws-lambda";
 import { ReindexDispatcher } from "../jobs/reindex/reindex-dispatcher.js";
+import type { Result } from "../errors.js";
+import type { NotFoundError } from "../errors.js";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -18,13 +20,13 @@ const MAX_SEGMENT_COUNT = 256;
 // ---------------------------------------------------------------------------
 
 export interface JobDispatcher {
-  dispatch(targetRegistryId: string, segmentCount?: number): Promise<{
+  dispatch(targetRegistryId: string, segmentCount?: number): Promise<Result<{
     jobId: string; targetRegistryId: string; modelId: string; segmentCount: number; startedAt: string;
-  }>;
-  getReport(jobId: string): Promise<{
+  }, NotFoundError>>;
+  getReport(jobId: string): Promise<Result<{
     jobId: string; signalsScanned: number; copiedCount: number; regeneratedCount: number;
     unrecoverableCount: number; validationOk: boolean; validationDetail: string; durationMs: number;
-  }>;
+  }, NotFoundError>>;
 }
 
 // ---------------------------------------------------------------------------
@@ -130,13 +132,12 @@ async function handlePostReindex(
   }
 
   try {
-    const job = await dispatcher.dispatch(targetRegistryId, segmentCount as number | undefined);
-    return jsonResponse(202, job);
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (message.includes("not found in CLUSTER_REGISTRY")) {
+    const result = await dispatcher.dispatch(targetRegistryId, segmentCount as number | undefined);
+    if (result.isErr()) {
       return errorResponse(404, `Cluster "${targetRegistryId}" not found`);
     }
+    return jsonResponse(202, result.value);
+  } catch (error: unknown) {
     return errorResponse(500, "Internal server error");
   }
 }
@@ -147,13 +148,12 @@ async function handlePostReindex(
 
 async function handleGetReindex(jobId: string, dispatcher: JobDispatcher): Promise<APIGatewayProxyResultV2> {
   try {
-    const report = await dispatcher.getReport(jobId);
-    return jsonResponse(200, report);
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (message.includes("not found")) {
+    const result = await dispatcher.getReport(jobId);
+    if (result.isErr()) {
       return errorResponse(404, `Reindex job "${jobId}" not found`);
     }
+    return jsonResponse(200, result.value);
+  } catch (error: unknown) {
     return errorResponse(500, "Internal server error");
   }
 }

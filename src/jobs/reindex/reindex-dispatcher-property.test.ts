@@ -100,9 +100,11 @@ describe("Property 17: Validation flags discrepancies above 1%", () => {
 
     const report = await dispatcher.getReport(jobId);
 
+    expect(report.isOk()).toBe(true);
+    if (!report.isOk()) return;
     const discrepancy = Math.abs(auroraRowCount - expectedCount) / Math.max(expectedCount, 1);
     expect(discrepancy).toBeLessThanOrEqual(0.01);
-    expect(report.validationOk).toBe(true);
+    expect(report.value.validationOk).toBe(true);
   });
 
   // -------------------------------------------------------------------------
@@ -150,10 +152,12 @@ describe("Property 17: Validation flags discrepancies above 1%", () => {
 
     const report = await dispatcher.getReport(jobId);
 
+    expect(report.isOk()).toBe(true);
+    if (!report.isOk()) return;
     const discrepancy = Math.abs(auroraRowCount - expectedCount) / Math.max(expectedCount, 1);
     expect(discrepancy).toBeGreaterThan(0.01);
-    expect(report.validationOk).toBe(false);
-    expect(report.validationDetail).toContain("Row count discrepancy");
+    expect(report.value.validationOk).toBe(false);
+    expect(report.value.validationDetail).toContain("Row count discrepancy");
   });
 
   // -------------------------------------------------------------------------
@@ -200,8 +204,10 @@ describe("Property 17: Validation flags discrepancies above 1%", () => {
 
     const report = await dispatcher.getReport(jobId);
 
-    expect(report.validationOk).toBe(false);
-    expect(report.validationDetail).toContain("Sample validation failed");
+    expect(report.isOk()).toBe(true);
+    if (!report.isOk()) return;
+    expect(report.value.validationOk).toBe(false);
+    expect(report.value.validationDetail).toContain("Sample validation failed");
   });
 
   // -------------------------------------------------------------------------
@@ -245,7 +251,9 @@ describe("Property 17: Validation flags discrepancies above 1%", () => {
 
     const report = await dispatcher.getReport(jobId);
 
-    expect(report.validationOk).toBe(expectedOk);
+    expect(report.isOk()).toBe(true);
+    if (!report.isOk()) return;
+    expect(report.value.validationOk).toBe(expectedOk);
   });
 
   // -------------------------------------------------------------------------
@@ -292,6 +300,8 @@ describe("Property 17: Validation flags discrepancies above 1%", () => {
 
     const report = await dispatcher.getReport(jobId);
 
-    expect(report.validationOk).toBe(true);
+    expect(report.isOk()).toBe(true);
+    if (!report.isOk()) return;
+    expect(report.value.validationOk).toBe(true);
   });
 });

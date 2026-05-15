@@ -53,7 +53,7 @@ class S3MimeParser implements MimeParser {
     try {
       const res = await s3.send(new GetObjectCommand({ Bucket: S3_BUCKET, Key: s3Key }));
       const buf = await res.Body?.transformToByteArray();
-      if (!buf) throw new Error(`Empty S3 object: ${s3Key}`);
+      if (!buf) return err(dbError(`Empty S3 object: ${s3Key}`));
       const parsed = await this.delegate.parse(Buffer.from(buf));
       return ok(parsed);
     } catch (e) {

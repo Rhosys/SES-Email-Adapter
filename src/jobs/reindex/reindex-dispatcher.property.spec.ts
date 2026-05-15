@@ -89,6 +89,9 @@ describe("Property 10: Reindex dispatcher emits exactly N well-formed segment me
 
     const result = await dispatcher.dispatch(targetRegistryId, segmentCount);
 
+    expect(result.isOk()).toBe(true);
+    if (!result.isOk()) return;
+
     // 1. Verify exactly N SQS messages were sent
     const sqsCalls = sqsMock.commandCalls(SendMessageCommand);
     expect(sqsCalls).toHaveLength(segmentCount);
@@ -111,7 +114,7 @@ describe("Property 10: Reindex dispatcher emits exactly N well-formed segment me
 
     // 3. Each message contains all required fields with correct values
     for (const message of messages) {
-      expect(message.jobId).toBe(result.jobId);
+      expect(message.jobId).toBe(result.value.jobId);
       expect(message.totalSegments).toBe(segmentCount);
       expect(message.targetRegistryId).toBe(targetRegistryId);
       expect(message.modelId).toBe(expectedModelId);
@@ -124,6 +127,6 @@ describe("Property 10: Reindex dispatcher emits exactly N well-formed segment me
     expect(segments).toEqual(expectedSegments);
 
     // 5. modelId matches the target cluster's registry entry
-    expect(result.modelId).toBe(expectedModelId);
+    expect(result.value.modelId).toBe(expectedModelId);
   });
 });

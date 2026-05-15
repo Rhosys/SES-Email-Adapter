@@ -109,15 +109,17 @@ describe("Property 14: Job reports preserve scan accounting", () => {
     const report = await dispatcher.getReport(jobId);
 
     // Core invariant: signalsScanned is the sum of the three counters
-    expect(report.signalsScanned).toBe(expectedSignalsScanned);
-    expect(report.signalsScanned).toBe(
-      report.copiedCount + report.regeneratedCount + report.unrecoverableCount,
+    expect(report.isOk()).toBe(true);
+    if (!report.isOk()) return;
+    expect(report.value.signalsScanned).toBe(expectedSignalsScanned);
+    expect(report.value.signalsScanned).toBe(
+      report.value.copiedCount + report.value.regeneratedCount + report.value.unrecoverableCount,
     );
 
     // Verify individual counters are preserved
-    expect(report.copiedCount).toBe(copiedCount);
-    expect(report.regeneratedCount).toBe(regeneratedCount);
-    expect(report.unrecoverableCount).toBe(unrecoverableCount);
+    expect(report.value.copiedCount).toBe(copiedCount);
+    expect(report.value.regeneratedCount).toBe(regeneratedCount);
+    expect(report.value.unrecoverableCount).toBe(unrecoverableCount);
   });
 
   it("signalsScanned is always computed from counters, never from a stored value", async () => {
@@ -161,8 +163,10 @@ describe("Property 14: Job reports preserve scan accounting", () => {
     const report = await dispatcher.getReport(jobId);
 
     // Must compute from the three counters, NOT use the stored value
+    expect(report.isOk()).toBe(true);
+    if (!report.isOk()) return;
     const expectedSignalsScanned = copiedCount + regeneratedCount + unrecoverableCount;
-    expect(report.signalsScanned).toBe(expectedSignalsScanned);
-    expect(report.signalsScanned).not.toBe(staleSignalsScanned);
+    expect(report.value.signalsScanned).toBe(expectedSignalsScanned);
+    expect(report.value.signalsScanned).not.toBe(staleSignalsScanned);
   });
 });

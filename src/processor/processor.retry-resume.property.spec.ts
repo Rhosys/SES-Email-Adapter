@@ -256,8 +256,8 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
 
   function makeAuroraWriter(): MultiClusterAuroraWriter {
     return {
-      upsertEmbedding: vi.fn().mockResolvedValue(undefined),
-      findMatch: vi.fn().mockResolvedValue(null),
+      upsertEmbedding: vi.fn().mockResolvedValue(ok(undefined)),
+      findMatch: vi.fn().mockResolvedValue(ok(null)),
     };
   }
 
@@ -584,8 +584,8 @@ describe("Feature: signal-processor-retry-resilience, Property 3: DDB read failu
 
   function makeAuroraWriter(): MultiClusterAuroraWriter {
     return {
-      upsertEmbedding: vi.fn().mockResolvedValue(undefined),
-      findMatch: vi.fn().mockResolvedValue(null),
+      upsertEmbedding: vi.fn().mockResolvedValue(ok(undefined)),
+      findMatch: vi.fn().mockResolvedValue(ok(null)),
     };
   }
 
@@ -805,8 +805,8 @@ describe("Feature: signal-processor-retry-resilience, Property 2: Missing signal
 
   function makeAuroraWriter(): MultiClusterAuroraWriter {
     return {
-      upsertEmbedding: vi.fn().mockResolvedValue(undefined),
-      findMatch: vi.fn().mockResolvedValue(null),
+      upsertEmbedding: vi.fn().mockResolvedValue(ok(undefined)),
+      findMatch: vi.fn().mockResolvedValue(ok(null)),
     };
   }
 
@@ -1138,7 +1138,7 @@ describe("Feature: signal-processor-retry-resilience, Property 8: Outcome re-der
       mimeParser: { parse: vi.fn() },
       classifier: { classify: vi.fn() },
       embeddingGenerator: { generateForSecondaryClusters: vi.fn(), generateForModel: vi.fn() },
-      auroraWriter: { upsertEmbedding: vi.fn().mockResolvedValue(undefined), findMatch: vi.fn().mockResolvedValue(null) },
+      auroraWriter: { upsertEmbedding: vi.fn().mockResolvedValue(ok(undefined)), findMatch: vi.fn().mockResolvedValue(ok(null)) },
       arcMatcher: { findMatch: vi.fn().mockReturnValue(Promise.resolve(ok(null))), upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
       sqsDispatcher,
@@ -1179,7 +1179,7 @@ describe("Feature: signal-processor-retry-resilience, Property 8: Outcome re-der
       mimeParser: { parse: vi.fn() },
       classifier: { classify: vi.fn() },
       embeddingGenerator: { generateForSecondaryClusters: vi.fn(), generateForModel: vi.fn() },
-      auroraWriter: { upsertEmbedding: vi.fn().mockResolvedValue(undefined), findMatch: vi.fn().mockResolvedValue(null) },
+      auroraWriter: { upsertEmbedding: vi.fn().mockResolvedValue(ok(undefined)), findMatch: vi.fn().mockResolvedValue(ok(null)) },
       arcMatcher: { findMatch: vi.fn().mockReturnValue(Promise.resolve(ok(null))), upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
       sqsDispatcher,

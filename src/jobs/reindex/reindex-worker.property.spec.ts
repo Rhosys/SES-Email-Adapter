@@ -15,12 +15,13 @@ import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 import type { SQSEvent, SQSRecord } from "aws-lambda";
 import { createMockLogger } from "../../testing/mock-logger.js";
 import { ReindexWorker } from "./reindex-worker.js";
+import { ok } from "../../errors.js";
 
 // ---------------------------------------------------------------------------
 // Mock MultiClusterAuroraWriter
 // ---------------------------------------------------------------------------
 
-const mockUpsertEmbedding = vi.fn().mockResolvedValue(undefined);
+const mockUpsertEmbedding = vi.fn().mockResolvedValue(ok(undefined));
 
 vi.mock("../../database/multi-cluster-aurora-writer.js", () => ({
   multiClusterWriter: {
@@ -139,7 +140,7 @@ describe("Property 11: Reindex worker uses cache exclusively and never calls Bed
 
   it.each(cases)("%s", async (_label, { signals }) => {
     ddbMock.reset();
-    mockUpsertEmbedding.mockClear();
+    mockUpsertEmbedding.mockClear().mockResolvedValue(ok(undefined));
 
     bedrockMock.on(InvokeModelCommand).rejects(new Error("PROPERTY VIOLATION: Bedrock was called during pure-copy reindex"));
     s3Mock.on(GetObjectCommand).rejects(new Error("PROPERTY VIOLATION: S3 GetObject was called during pure-copy reindex"));
@@ -151,7 +152,7 @@ describe("Property 11: Reindex worker uses cache exclusively and never calls Bed
         jobId: "job-prop-11",
         segment: 0,
         totalSegments: 1,
-        targetClusterId: "aurora-prod-titan-v2",
+        targetRegistryId: "aurora-prod-titan-v2",
         modelId: "amazon.titan-embed-text-v2:0",
       }),
     ]);
@@ -201,7 +202,7 @@ describe("Property 11: Reindex worker uses cache exclusively and never calls Bed
         jobId: "job-prop-11-exact",
         segment: 0,
         totalSegments: 1,
-        targetClusterId: "aurora-prod-titan-v2",
+        targetRegistryId: "aurora-prod-titan-v2",
         modelId: "amazon.titan-embed-text-v2:0",
       }),
     ]);
