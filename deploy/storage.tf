@@ -321,8 +321,15 @@ resource "aws_dynamodb_table" "audit" {
     enabled        = true
   }
 
+  stream_enabled   = true
+  stream_view_type = "NEW_AND_OLD_IMAGES"
+
   point_in_time_recovery { enabled = true }
   deletion_protection_enabled = true
+
+  replica {
+    region_name = "eu-central-2"
+  }
 }
 
 # ---------------------------------------------------------------------------
