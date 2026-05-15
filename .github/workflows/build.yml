@@ -272,7 +272,7 @@ jobs:
           curl -sL https://github.com/dineshba/tf-summarize/releases/latest/download/tf-summarize_linux_amd64.tar.gz | tar xz
           echo "## Plan Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          ./tf-summarize -json deploy/plan.json >> $GITHUB_STEP_SUMMARY
+          ./tf-summarize -md deploy/plan.json >> $GITHUB_STEP_SUMMARY
 
       - name: Pass Artifacts to Deploy Job
         uses: actions/upload-artifact@v4
