@@ -314,6 +314,11 @@ jobs:
       - name: Tofu Init
         run: tofu -chdir=deploy init -input=false -backend-config="bucket=${STATE_BUCKET}" -backend-config="key=${STATE_KEY}"
 
+      - name: Read Tofu Outputs
+        id: tofu_outputs
+        run: |
+          tofu -chdir=deploy output -json | jq -r 'to_entries[] | "\(.key)=\(.value.value)"' >> $GITHUB_OUTPUT
+
       - name: Tofu Apply
         id: apply
         run: |
@@ -367,6 +372,6 @@ jobs:
 
       - name: Deploy Application Code
         env:
-          LAMBDA_FUNCTION_NAME: "${{ github.event.repository.name }}-main"
+          LAMBDA_FUNCTION_NAME: ${{ steps.tofu_outputs.outputs.lambda_function_name }}
           AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
         run: npm run deploy
