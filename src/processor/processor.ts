@@ -420,9 +420,12 @@ export class SignalProcessor {
     let payload: SideEffectPayload;
     try {
       payload = JSON.parse(record.body) as SideEffectPayload;
-      if (!payload.signal || !payload.arc) throw new Error("Missing signal or arc in payload");
     } catch (e) {
-      this.logger.error("Malformed side-effect payload — cannot parse. Dropping message to prevent infinite retry of unparseable content.", { code: "processor.side_effect.malformed_payload", messageId: record.messageId, error: e });
+      this.logger.error("Malformed side-effect payload — cannot parse JSON. Dropping message to prevent infinite retry of unparseable content.", { code: "processor.side_effect.malformed_payload", messageId: record.messageId, error: e, record });
+      return ok(undefined);
+    }
+    if (!payload.signal || !payload.arc) {
+      this.logger.error("Malformed side-effect payload — missing signal or arc fields. Dropping message to prevent infinite retry.", { code: "processor.side_effect.malformed_payload", messageId: record.messageId, record });
       return ok(undefined);
     }
 
