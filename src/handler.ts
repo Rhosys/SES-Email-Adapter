@@ -43,6 +43,7 @@ const sqs = new SQSClient({});
 
 const S3_BUCKET = process.env["EMAIL_BUCKET"] ?? "";
 const SIGNAL_QUEUE_URL = process.env["SIGNAL_QUEUE_URL"] ?? "";
+const RETRY_TRACK_THRESHOLD = 30;
 
 // ---------------------------------------------------------------------------
 // S3-backed MimeParser
@@ -164,13 +165,23 @@ export async function handler(
     for (const record of event.Records) {
       const arn = record.eventSourceARN ?? "";
 
+      let result: { batchItemFailures: Array<{ itemIdentifier: string }> };
       if (arn.includes("-feedback")) {
         await feedbackProcessor.process({ Records: [record] });
+        result = { batchItemFailures: [] };
       } else if (arn.includes("-reindex")) {
-        const result = await reindexWorker.process({ Records: [record] });
-        failures.push(...result.batchItemFailures);
+        result = await reindexWorker.process({ Records: [record] });
       } else {
-        const result = await processor.process({ Records: [record] });
+        result = await processor.process({ Records: [record] });
+      }
+
+      if (result.batchItemFailures.length > 0) {
+        const receiveCount = Number(record.attributes?.ApproximateReceiveCount ?? "1");
+        if (receiveCount > RETRY_TRACK_THRESHOLD) {
+          logger.error("SQS message failed after exceeding retry threshold. Message was redelivered " + receiveCount + " times without successful completion. Investigate earlier logs for this messageId.", { code: "handler.sqs.retry_threshold_exceeded", messageId: record.messageId, receiveCount });
+        } else {
+          logger.warn("SQS message processing failed on attempt " + receiveCount + ". Will be retried automatically.", { code: "handler.sqs.processing_failed", messageId: record.messageId, receiveCount });
+        }
         failures.push(...result.batchItemFailures);
       }
     }

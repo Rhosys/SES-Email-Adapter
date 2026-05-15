@@ -40,7 +40,6 @@ export interface ReindexSegmentMessage {
 // Constants
 // ---------------------------------------------------------------------------
 
-const RETRY_TRACK_THRESHOLD = 30;
 const EMAIL_BUCKET = process.env["EMAIL_BUCKET"] ?? "";
 
 // ---------------------------------------------------------------------------
@@ -82,14 +81,6 @@ export class ReindexWorker {
     for (let i = 0; i < results.length; i++) {
       const result = results[i]!;
       if (result.isErr()) {
-        const record = event.Records[i]!;
-        const receiveCount = Number(record.attributes?.ApproximateReceiveCount ?? "1");
-        const logMethod = receiveCount > RETRY_TRACK_THRESHOLD ? "error" : "warn";
-        if (logMethod === "error") {
-          this.logger.error("Reindex segment failed after exceeding retry threshold. SQS message was redelivered " + receiveCount + " times without successful completion. This segment's signals won't be reindexed until the job is re-triggered. Investigate DynamoDB scan or Aurora write failures.", { code: "reindex.worker.segment_failed", messageId: result.error.messageId, receiveCount, error: result.error });
-        } else {
-          this.logger.warn("Reindex segment failed on attempt " + receiveCount + ". The SQS message will be retried automatically.", { code: "reindex.worker.segment_failed", messageId: result.error.messageId, receiveCount, error: result.error });
-        }
         failures.push({ itemIdentifier: result.error.messageId });
       }
     }
