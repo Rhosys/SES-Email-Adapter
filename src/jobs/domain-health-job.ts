@@ -20,7 +20,7 @@ export class DomainHealthJob {
     if (accountsResult.isErr()) {
       this.logger.track("Failed to fetch account list for domain health check run. The DynamoDB scan of all domains returned an error. No domains will be checked in this invocation. [Action Required] Investigate DynamoDB table health.", {
         code: "domain_health.accounts_fetch_failed",
-        error: accountsResult.error.cause?.message ?? String(accountsResult.error),
+        error: accountsResult.error,
       });
       return;
     }
@@ -34,7 +34,7 @@ export class DomainHealthJob {
         this.logger.track("Failed to fetch account details during domain health check. The DynamoDB get for the account record returned an error. This account's domains will be skipped. [Action Required] Check DynamoDB read capacity.", {
           code: "domain_health.account_fetch_failed",
           accountId,
-          error: accountResult.error.cause?.message ?? String(accountResult.error),
+          error: accountResult.error,
         });
         continue;
       }
@@ -59,7 +59,7 @@ export class DomainHealthJob {
             code: "domain_health.update_health_failed",
             accountId,
             domainId: domain.id,
-            error: updateResult.error.cause?.message ?? String(updateResult.error),
+            error: updateResult.error,
           });
           continue;
         }
@@ -81,7 +81,7 @@ export class DomainHealthJob {
         this.logger.track("Failed to query stale arcs for account during staleness check. The DynamoDB query returned an error. This account's staleness report will be skipped. [Action Required] Check DynamoDB read capacity.", {
           code: "staleness_checker.account_error",
           accountId,
-          error: staleArcsResult.error.cause?.message ?? String(staleArcsResult.error),
+          error: staleArcsResult.error,
         });
         continue;
       }

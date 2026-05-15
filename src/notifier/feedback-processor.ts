@@ -35,13 +35,13 @@ export class FeedbackProcessor {
         const sns = JSON.parse(record.body) as { Message: string };
         feedback = JSON.parse(sns.Message) as SesFeedback;
       } catch (err) {
-        this.logger.error("Failed to parse SES feedback notification from SQS record. The JSON payload could not be deserialized as a valid SesFeedback structure. This feedback event will be skipped and the bounce/complaint won't be recorded. Check the SNS subscription format.", { code: "feedback.parse_failed", error: err instanceof Error ? err.message : String(err) });
+        this.logger.error("Failed to parse SES feedback notification from SQS record. The JSON payload could not be deserialized as a valid SesFeedback structure. This feedback event will be skipped and the bounce/complaint won't be recorded. Check the SNS subscription format.", { code: "feedback.parse_failed", error: err, record });
         continue;
       }
 
       const result = await this.processFeedback(feedback);
       if (result.isErr()) {
-        this.logger.track("Failed to process SES bounce/complaint feedback. A database operation failed while suppressing the address or disabling forward rules. The suppression entry may be incomplete.", { code: "feedback.process_failed", error: result.error.cause instanceof Error ? result.error.cause.message : String(result.error.cause) });
+        this.logger.track("Failed to process SES bounce/complaint feedback. A database operation failed while suppressing the address or disabling forward rules. The suppression entry may be incomplete.", { code: "feedback.process_failed", error: result.error });
       }
     }
   }
@@ -69,7 +69,7 @@ export class FeedbackProcessor {
           for (const r of feedback.bounce!.bouncedRecipients) {
             const disableResult = await this.accountDb.disableForwardActions(accountId, r.emailAddress);
             if (disableResult.isErr()) {
-              this.logger.track("Failed to disable forward actions after permanent bounce. The DynamoDB update for the forward rule returned an error. Emails may continue to be forwarded to the bouncing address.", { code: "feedback.disable_forward_failed", accountId, address: r.emailAddress, error: disableResult.error.cause instanceof Error ? disableResult.error.cause.message : String(disableResult.error.cause) });
+              this.logger.track("Failed to disable forward actions after permanent bounce. The DynamoDB update for the forward rule returned an error. Emails may continue to be forwarded to the bouncing address.", { code: "feedback.disable_forward_failed", accountId, address: r.emailAddress, error: disableResult.error });
             }
           }
         }

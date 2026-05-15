@@ -75,7 +75,7 @@ export class AuthorizationMiddleware {
           permission,
           path,
           status,
-          error: error instanceof Error ? { message: error.message, stack: error.stack } : error,
+          error,
         });
         c.status(500);
         return c.json({ title: "Internal Server Error" });
