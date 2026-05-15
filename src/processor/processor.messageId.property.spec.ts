@@ -92,8 +92,8 @@ describe("ProcessError always carries the SQS messageId", () => {
       }),
     };
     const embeddingGenerator: EmbeddingGenerator = {
-      generateForActiveClusters: vi.fn().mockResolvedValue([]),
-      generateForModel: vi.fn().mockResolvedValue({ modelId: "m", vector: [0.1], dimensions: 1024 }),
+      generateForModel: vi.fn().mockResolvedValue(ok({ modelId: "m", vector: [0.1], dimensions: 1024 })),
+      generateForSecondaryClusters: vi.fn().mockResolvedValue([]),
     };
     const auroraWriter: MultiClusterAuroraWriter = {
       upsertEmbedding: vi.fn().mockResolvedValue(undefined),

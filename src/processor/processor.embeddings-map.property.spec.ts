@@ -266,7 +266,7 @@ describe("Feature: split-embedding-pipeline, Property 4: Embeddings map composit
 
         // Extract signal.embeddings from the saveSignal call
         expect(store.saveSignal).toHaveBeenCalledOnce();
-        const savedSignal = (store.saveSignal as ReturnType<typeof vi.fn>).mock.calls[0][0] as Signal;
+        const savedSignal = (store.saveSignal as ReturnType<typeof vi.fn>).mock.calls[0]![0] as Signal;
         const embeddings = savedSignal.embeddings;
 
         expect(embeddings).toBeDefined();
