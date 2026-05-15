@@ -31,7 +31,6 @@ resource "aws_apigatewayv2_authorizer" "main" {
   identity_sources                  = ["$request.header.Authorization"]
   name                              = "${var.service_name}-authorizer"
   authorizer_result_ttl_in_seconds  = 3600
-  enable_simple_responses           = true
 }
 
 resource "aws_lambda_permission" "http_authorizer" {
