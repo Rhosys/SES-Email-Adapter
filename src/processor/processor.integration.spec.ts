@@ -3,7 +3,7 @@ import type { SQSEvent, SQSRecord } from "aws-lambda";
 import { ok, err } from "neverthrow";
 import { SignalProcessor, SYSTEM_RULES } from "./processor.js";
 import { JsonLogicRuleEvaluator } from "./rule-evaluator.js";
-import type { ProcessorDatabase, ArcMatcher, SqsDispatcher, Notifier, Forwarder, TestReplier } from "./processor.js";
+import type { ProcessorDatabase, ArcMatcher, SqsDispatcher, Notifier, Forwarder, ReplySender } from "./processor.js";
 import type { MimeParser } from "./mime.js";
 import type { SignalClassifier, ClassificationOutput } from "../classifier/classifier.js";
 import type { EmbeddingGenerator, EmbeddingResult } from "../embedding/embedding-generator.js";
@@ -163,9 +163,9 @@ function makeForwarder(): Forwarder {
   };
 }
 
-function makeTestReplier(): TestReplier {
+function makeReplySender(): ReplySender {
   return {
-    pong: vi.fn().mockResolvedValue({ messageId: "pong-msg-001" }),
+    sendReply: vi.fn().mockResolvedValue({ messageId: "pong-msg-001" }),
   };
 }
 
@@ -306,7 +306,7 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
   let sqsDispatcher: SqsDispatcher;
   let notifier: Notifier;
   let forwarder: Forwarder;
-  let testReplier: TestReplier;
+  let replySender: ReplySender;
   let mockLogger: MockLogger;
   let processor: SignalProcessor;
 
@@ -323,7 +323,7 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
     sqsDispatcher = makeSqsDispatcher();
     notifier = makeNotifier();
     forwarder = makeForwarder();
-    testReplier = makeTestReplier();
+    replySender = makeReplySender();
     processor = new SignalProcessor({
       store,
       mimeParser,
@@ -337,7 +337,7 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
       sqsDispatcher,
       notifier,
       forwarder,
-      testReplier,
+      replySender,
     });
   });
 
@@ -545,8 +545,8 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
       const result = await processor.process(event);
 
       expect(result.batchItemFailures).toHaveLength(0);
-      expect(testReplier.pong).toHaveBeenCalledOnce();
-      expect(testReplier.pong).toHaveBeenCalledWith(expect.objectContaining({
+      expect(replySender.sendReply).toHaveBeenCalledOnce();
+      expect(replySender.sendReply).toHaveBeenCalledWith(expect.objectContaining({
         to: signal.from.address,
         from: signal.recipientAddress,
       }));

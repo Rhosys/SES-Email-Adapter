@@ -282,6 +282,8 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
       notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), notifyBlocked: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
+      replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "mock-reply-id" }) },
+      sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
     });
 
     await processor.process(makeSqsEvent(sesMessageId, receiveCount));
@@ -305,6 +307,8 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
       notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), notifyBlocked: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
+      replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "mock-reply-id" }) },
+      sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
     });
 
     await processor.process(makeSqsEvent(sesMessageId, receiveCount));
@@ -329,6 +333,8 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
       notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), notifyBlocked: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
+      replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "mock-reply-id" }) },
+      sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
     });
 
     await processor.process(makeSqsEvent(sesMessageId, receiveCount));
@@ -352,6 +358,8 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
       notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), notifyBlocked: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
+      replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "mock-reply-id" }) },
+      sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
     });
 
     await processor.process(makeSqsEvent(sesMessageId, receiveCount));
@@ -382,6 +390,8 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
       notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), notifyBlocked: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
+      replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "mock-reply-id" }) },
+      sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
     });
 
     await processor.process(makeSqsEvent(sesMessageId, receiveCount));
@@ -406,6 +416,8 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
       notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), notifyBlocked: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
+      replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "mock-reply-id" }) },
+      sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
     });
 
     const result = await processor.process(makeSqsEvent(sesMessageId, receiveCount));
@@ -480,6 +492,8 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
       notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), notifyBlocked: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
+      replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "mock-reply-id" }) },
+      sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
     });
 
     const result = await processor.process(makeSqsEvent("msg-no-arc", 2));
@@ -685,6 +699,8 @@ describe("Feature: signal-processor-retry-resilience, Property 3: DDB read failu
       notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), notifyBlocked: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
+      replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "mock-reply-id" }) },
+      sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
     });
 
     const result = await processor.process(makeRetrySqsEvent(sesMessageId, receiveCount));
@@ -716,6 +732,8 @@ describe("Feature: signal-processor-retry-resilience, Property 3: DDB read failu
       notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), notifyBlocked: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
+      replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "mock-reply-id" }) },
+      sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
     });
 
     const result = await processor.process(makeRetrySqsEvent(sesMessageId, receiveCount));
@@ -904,6 +922,8 @@ describe("Feature: signal-processor-retry-resilience, Property 2: Missing signal
       notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), notifyBlocked: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
+      replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "mock-reply-id" }) },
+      sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
     });
 
     await processor.process(makeSqsEvent(sesMessageId, receiveCount));
@@ -925,6 +945,8 @@ describe("Feature: signal-processor-retry-resilience, Property 2: Missing signal
       notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), notifyBlocked: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
+      replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "mock-reply-id" }) },
+      sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
     });
 
     await processor.process(makeSqsEvent(sesMessageId, receiveCount));
@@ -946,6 +968,8 @@ describe("Feature: signal-processor-retry-resilience, Property 2: Missing signal
       notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), notifyBlocked: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
+      replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "mock-reply-id" }) },
+      sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
     });
 
     await processor.process(makeSqsEvent(sesMessageId, receiveCount));
@@ -966,6 +990,8 @@ describe("Feature: signal-processor-retry-resilience, Property 2: Missing signal
       notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), notifyBlocked: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
+      replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "mock-reply-id" }) },
+      sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
     });
 
     const result = await processor.process(makeSqsEvent(sesMessageId, receiveCount));
@@ -1181,6 +1207,7 @@ describe("Feature: signal-processor-retry-resilience, Property 8: Outcome re-der
       arcMatcher: { findMatch: vi.fn().mockReturnValue(Promise.resolve(ok(null))), upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
       sqsDispatcher,
+      replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "mock-reply-id" }) },
       logger: mockLogger,
       notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), notifyBlocked: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
@@ -1225,6 +1252,7 @@ describe("Feature: signal-processor-retry-resilience, Property 8: Outcome re-der
       arcMatcher: { findMatch: vi.fn().mockReturnValue(Promise.resolve(ok(null))), upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
       sqsDispatcher,
+      replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "mock-reply-id" }) },
       logger: mockLogger,
       notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), notifyBlocked: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },

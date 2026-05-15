@@ -5,7 +5,7 @@ import { ok, err } from "neverthrow";
 import { SignalProcessor, deriveGroupingKey, SYSTEM_RULES, extractForwardedAddress } from "./processor.js";
 import { JsonLogicRuleEvaluator } from "./rule-evaluator.js";
 import { baseUrgency } from "./priority.js";
-import type { ProcessorDatabase, ArcMatcher, RuleEvaluator, Notifier, Forwarder, ForwardOptions, TestReplier } from "./processor.js";
+import type { ProcessorDatabase, ArcMatcher, RuleEvaluator, Notifier, Forwarder, ForwardOptions, ReplySender } from "./processor.js";
 import type { MimeParser } from "./mime.js";
 import type { SignalClassifier, ClassificationOutput } from "../classifier/classifier.js";
 import type { EmbeddingGenerator, EmbeddingResult } from "../embedding/embedding-generator.js";
@@ -72,9 +72,9 @@ function makeStore(): ProcessorDatabase {
   };
 }
 
-function makeTestReplier(): TestReplier {
+function makeReplySender(): ReplySender {
   return {
-    pong: vi.fn().mockResolvedValue({ messageId: "pong-msg-001" }),
+    sendReply: vi.fn().mockResolvedValue({ messageId: "pong-msg-001" }),
   };
 }
 
@@ -268,7 +268,7 @@ describe("SignalProcessor", () => {
     auroraWriter = makeAuroraWriter();
     arcMatcher = makeArcMatcher();
     ruleEvaluator = makeRuleEvaluator(mockLogger);
-    processor = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, logger: mockLogger, notifier: makeNotifier(), forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) } });
+    processor = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, logger: mockLogger, notifier: makeNotifier(), forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) } });
   });
 
   afterEach(() => {
@@ -575,7 +575,7 @@ describe("SignalProcessor", () => {
 
     beforeEach(() => {
       forwarder = { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) };
-      processor = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, forwarder, logger: mockLogger, notifier: makeNotifier(), retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) } });
+      processor = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, forwarder, logger: mockLogger, notifier: makeNotifier(), retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) } });
     });
 
     it("calls forwarder with s3Key and target address when forward rule matches", async () => {
@@ -754,7 +754,7 @@ describe("SignalProcessor", () => {
 
     beforeEach(() => {
       notifier = makeNotifier();
-      processor = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, notifier, logger: mockLogger, forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) } });
+      processor = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, notifier, logger: mockLogger, forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) } });
     });
 
     it("calls notifier after saving a new Signal", async () => {
@@ -797,6 +797,7 @@ describe("SignalProcessor", () => {
       const processorWithoutNotifier = new SignalProcessor({
         store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, logger: mockLogger,
         notifier: makeNotifier(), forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
+        replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       });
 
       await processorWithoutNotifier.process(makeSqsEvent([{}]));
@@ -814,7 +815,7 @@ describe("SignalProcessor", () => {
 
     beforeEach(() => {
       notifier = makeNotifier();
-      processor = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, notifier, logger: mockLogger, forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) } });
+      processor = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, notifier, logger: mockLogger, forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) } });
     });
 
     it("allows signal on brand new address and auto-creates aliases with sender approved", async () => {
@@ -1448,7 +1449,7 @@ describe("SignalProcessor", () => {
       ])));
 
       const notifier = makeNotifier();
-      const proc = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, notifier, logger: mockLogger, forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) } });
+      const proc = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, notifier, logger: mockLogger, forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) } });
       await proc.process(makeSqsEvent([{}]));
 
       expect(store.saveArc).not.toHaveBeenCalled();
@@ -1464,7 +1465,7 @@ describe("SignalProcessor", () => {
       ])));
 
       const notifier = makeNotifier();
-      const proc = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, notifier, logger: mockLogger, forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) } });
+      const proc = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, notifier, logger: mockLogger, forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) } });
       await proc.process(makeSqsEvent([{}]));
 
       expect(store.saveArc).not.toHaveBeenCalled();
@@ -1539,7 +1540,7 @@ describe("SignalProcessor", () => {
 
     beforeEach(() => {
       notifier = makeNotifier();
-      processor = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, notifier, logger: mockLogger, forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) } });
+      processor = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, notifier, logger: mockLogger, forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) } });
     });
 
     it("blocks status emails silently — no arc created, signal saved as blocked", async () => {
@@ -1593,19 +1594,19 @@ describe("SignalProcessor", () => {
   };
 
   describe("pong auto-reply", () => {
-    let testReplier: TestReplier;
+    let replySender: ReplySender;
 
     beforeEach(() => {
-      testReplier = makeTestReplier();
-      processor = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, testReplier, logger: mockLogger, notifier: makeNotifier(), forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) } });
+      replySender = makeReplySender();
+      processor = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, replySender, sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, logger: mockLogger, notifier: makeNotifier(), forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) } });
     });
 
-    it("sends a pong when workflow is 'test' and testReplier is configured", async () => {
+    it("sends a pong when workflow is 'test' and replySender is configured", async () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(testClassification);
 
       await processor.process(makeSqsEvent([{}]));
 
-      expect(testReplier.pong).toHaveBeenCalledOnce();
+      expect(replySender.sendReply).toHaveBeenCalledOnce();
     });
 
     it("passes original sender as 'to', subject, and body to pong", async () => {
@@ -1613,7 +1614,7 @@ describe("SignalProcessor", () => {
 
       await processor.process(makeSqsEvent([{}]));
 
-      const opts = vi.mocked(testReplier.pong).mock.calls[0]![0];
+      const opts = vi.mocked(replySender.sendReply).mock.calls[0]![0];
       // Default mime parser mock: from.address = "sender@example.com", subject = "Test email"
       expect(opts.to).toBe("sender@example.com");
       expect(opts.subject).toBe("Test email");
@@ -1626,7 +1627,7 @@ describe("SignalProcessor", () => {
 
       await processor.process(makeSqsEvent([{}]));
 
-      const opts = vi.mocked(testReplier.pong).mock.calls[0]![0];
+      const opts = vi.mocked(replySender.sendReply).mock.calls[0]![0];
       // recipientAddress = destination[0] = "user@example.com" from the SQS event default
       expect(opts.from).toBe("user@example.com");
     });
@@ -1638,7 +1639,7 @@ describe("SignalProcessor", () => {
 
       await processor.process(makeSqsEvent([{}]));
 
-      const opts = vi.mocked(testReplier.pong).mock.calls[0]![0];
+      const opts = vi.mocked(replySender.sendReply).mock.calls[0]![0];
       expect(opts.from).toBe("noreply@system.example.com");
 
       delete process.env["NOTIFICATION_FROM"];
@@ -1651,7 +1652,7 @@ describe("SignalProcessor", () => {
 
       await processor.process(makeSqsEvent([{}]));
 
-      const opts = vi.mocked(testReplier.pong).mock.calls[0]![0];
+      const opts = vi.mocked(replySender.sendReply).mock.calls[0]![0];
       expect(opts.from).toBe("noreply@system.example.com");
 
       delete process.env["NOTIFICATION_FROM"];
@@ -1662,13 +1663,13 @@ describe("SignalProcessor", () => {
 
       await processor.process(makeSqsEvent([{ sesMessageId: "original-ses-123" }]));
 
-      const opts = vi.mocked(testReplier.pong).mock.calls[0]![0];
+      const opts = vi.mocked(replySender.sendReply).mock.calls[0]![0];
       expect(opts.inReplyTo).toBe("original-ses-123");
     });
 
     it("adds the pong messageId to arc.sentMessageIds before saving", async () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(testClassification);
-      vi.mocked(testReplier.pong).mockResolvedValueOnce({ messageId: "pong-out-001" });
+      vi.mocked(replySender.sendReply).mockResolvedValueOnce({ messageId: "pong-out-001" });
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -1678,7 +1679,7 @@ describe("SignalProcessor", () => {
 
     it("does not set sentMessageIds when pong throws", async () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(testClassification);
-      vi.mocked(testReplier.pong).mockRejectedValueOnce(new Error("SES timeout"));
+      vi.mocked(replySender.sendReply).mockRejectedValueOnce(new Error("SES timeout"));
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -1692,14 +1693,14 @@ describe("SignalProcessor", () => {
       // classifier returns personal by default (no mockResolvedValueOnce override)
       await processor.process(makeSqsEvent([{}]));
 
-      expect(testReplier.pong).not.toHaveBeenCalled();
+      expect(replySender.sendReply).not.toHaveBeenCalled();
     });
 
-    it("does not call pong when testReplier is not configured", async () => {
-      const processorWithoutReplier = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, logger: mockLogger, notifier: makeNotifier(), forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) } });
+    it("does not call pong when replySender is not configured", async () => {
+      const processorWithoutReplier = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, logger: mockLogger, notifier: makeNotifier(), forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) } });
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(testClassification);
 
-      // Should not throw — testReplier is optional
+      // Should not throw — replySender is optional
       const result = await processorWithoutReplier.process(makeSqsEvent([{}]));
       expect(result.batchItemFailures).toEqual([]);
     });
@@ -1801,7 +1802,7 @@ describe("SignalProcessor", () => {
 
     it("passes dkimPass=true and dmarcPass=true when both SES verdicts are PASS", async () => {
       const forwarder: Forwarder = { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) };
-      const proc = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, forwarder, logger: mockLogger, notifier: makeNotifier(), retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) } });
+      const proc = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, forwarder, logger: mockLogger, notifier: makeNotifier(), retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) } });
       vi.mocked(store.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([makeForwardRule()])));
 
       await proc.process(makeSqsEvent([{ dkimVerdict: "PASS", dmarcVerdict: "PASS" }]));
@@ -1816,7 +1817,7 @@ describe("SignalProcessor", () => {
 
     it("passes dkimPass=false and dmarcPass=false when SES verdicts are FAIL and GRAY", async () => {
       const forwarder: Forwarder = { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) };
-      const proc = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, forwarder, logger: mockLogger, notifier: makeNotifier(), retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) } });
+      const proc = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, forwarder, logger: mockLogger, notifier: makeNotifier(), retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) } });
       vi.mocked(store.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([makeForwardRule()])));
 
       await proc.process(makeSqsEvent([{ dkimVerdict: "FAIL", dmarcVerdict: "GRAY" }]));

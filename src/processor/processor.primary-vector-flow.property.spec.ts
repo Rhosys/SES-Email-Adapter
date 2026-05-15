@@ -208,6 +208,8 @@ describe("Feature: split-embedding-pipeline, Property 2: Primary vector flows to
             notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), notifyBlocked: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
             forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
             retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
+            replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) },
+            sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
           });
 
           await processor.process(makeSqsEvent("ses-prop2-test"));

@@ -193,6 +193,8 @@ describe("Aurora cluster failure preserves the DynamoDB cache entry", () => {
       notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), notifyBlocked: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "emails/test.eml" }) },
+      replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) },
+      sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
     });
 
     await processor.process(makeSqsEvent("test-msg-aurora"));
@@ -239,6 +241,8 @@ describe("Aurora cluster failure preserves the DynamoDB cache entry", () => {
       notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), notifyBlocked: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "emails/test.eml" }) },
+      replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) },
+      sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
     });
 
     await processor.process(makeSqsEvent("test-msg-aurora"));
