@@ -1,19 +1,12 @@
 # TODO
 
-## eu-west-1 → eu-central-1 Migration Cleanup (manual, human credentials required)
+## ~~eu-west-1 → eu-central-1 Migration Cleanup~~ ✓ Complete
 
-The CI/CD orphan step removes old eu-west-1 resources from Tofu state so the next apply can create fresh eu-central-1 resources. These old resources still exist in AWS and must be deleted manually **after** eu-central-1 is confirmed live.
-
-- [ ] **S3: empty and delete old email bucket** — `ses-email-adapter-emails-{account_id}-eu-west-1-an` in eu-west-1. Run `aws s3 rm s3://<bucket> --recursive` then `aws s3 rb s3://<bucket> --region eu-west-1`.
-- [ ] **S3: empty and delete old web bucket** — `ses-email-adapter-web-{account_id}-eu-west-1-an` in eu-west-1. Same two-step rm + rb.
-- [ ] **DynamoDB: remove eu-central-1 replicas** — the `accounts`, `signals`, and `processing` tables in eu-central-1 had replicas pointing at eu-central-1 (now the primary). Remove any stale replica entries via `aws dynamodb delete-table --table-name <name> --region eu-west-1` (the replica tables in eu-west-1).
-- [ ] **Aurora: disable deletion_protection and delete** — connect to eu-west-1 Aurora cluster. Set `deletion_protection = false` on the cluster, then delete each instance (`aws rds delete-db-instance --db-instance-identifier <id> --region eu-west-1`), then delete the cluster (`aws rds delete-db-cluster --db-cluster-identifier <id> --skip-final-snapshot --region eu-west-1`). Cluster has `prevent_destroy` in Tofu but is now unmanaged — Tofu won't block deletion.
-- [ ] **Secrets Manager: delete old Aurora secret** — `aws secretsmanager delete-secret --secret-id <arn> --region eu-west-1 --force-delete-without-recovery`.
-- [ ] **VPC / subnets / security groups / route tables in eu-west-1** — once Aurora is deleted the ENIs detach automatically. Then delete the VPC and all its resources: subnets, IGW, route tables, security groups. Use `aws ec2 delete-vpc --vpc-id <id> --region eu-west-1` (requires all dependencies cleared first).
-- [ ] **SQS queues in eu-west-1** — `aws sqs delete-queue --queue-url <url> --region eu-west-1` for the email-processing queue and DLQ.
-- [ ] **SNS topics / subscriptions in eu-west-1** — `aws sns delete-topic --topic-arn <arn> --region eu-west-1` for any SNS topics.
-- [ ] **KMS key** — the encryption key is a multi-region key managed externally (referenced here only as `data "aws_kms_alias" "default"`). No deletion needed; verify the primary key's replica in eu-central-1 is active and the old eu-west-1 primary is no longer the one being used for new encryptions.
-- [ ] **Delete S3 state migration markers** (optional cleanup) — once all eu-west-1 resources are gone: `aws s3 rm s3://{STATE_BUCKET}/migration/eu-west-1-orphaned` and `aws s3 rm s3://{STATE_BUCKET}/migration/eu-central-1-state-fixed`.
+All eu-west-1 resources deleted. Cleanup script was run 2026-05-15.
+Remember to delete the S3 state migration markers if not already done:
+- `aws s3 rm s3://rhosys-opentofu-REDACTED-eu-central-1/migration/eu-west-1-orphaned`
+- `aws s3 rm s3://rhosys-opentofu-REDACTED-eu-central-1/migration/eu-central-1-state-fixed`
+- `aws s3 rm s3://rhosys-opentofu-REDACTED-eu-central-1/migration/eu-central-1-s3-buckets-fixed`
 
 ---
 
