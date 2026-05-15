@@ -11,6 +11,7 @@ import { Readable } from "stream";
 import { sdkStreamMixin } from "@smithy/util-stream";
 import { ReindexWorker } from "./reindex-worker.js";
 import { createMockLogger } from "../../testing/mock-logger.js";
+import { ok } from "../../errors.js";
 
 // ---------------------------------------------------------------------------
 // Hoisted mock functions (available before vi.mock factories run)
@@ -501,11 +502,11 @@ describe("ReindexWorker — regenerate-from-S3 mode", () => {
       headers: {},
     });
 
-    mockGenerateForModel.mockResolvedValue({
+    mockGenerateForModel.mockResolvedValue(ok({
       modelId: "amazon.titan-embed-text-v2:0",
       vector: [0.1, 0.2, 0.3],
       dimensions: 1024,
-    });
+    }));
 
     const event = makeSqsEvent([
       makeSqsRecord({
@@ -645,11 +646,11 @@ describe("ReindexWorker — regenerate-from-S3 mode", () => {
       headers: {},
     });
 
-    mockGenerateForModel.mockResolvedValue({
+    mockGenerateForModel.mockResolvedValue(ok({
       modelId: "amazon.titan-embed-text-v2:0",
       vector: [0.2, 0.3],
       dimensions: 1024,
-    });
+    }));
 
     const event = makeSqsEvent([
       makeSqsRecord({

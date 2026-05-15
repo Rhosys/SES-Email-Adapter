@@ -229,18 +229,27 @@ export class ReindexWorker {
       return err({ signalId: signal.id, reason: `S3 fetch failed: ${String(e)}` });
     }
 
+    let parsed: Awaited<ReturnType<typeof mimeParser.parse>>;
     try {
-      const parsed = await mimeParser.parse(rawMimeBuffer);
-      const embedTextInput = extractEmbedTextInput(parsed, signal.accountId, signal.recipientAddress);
-      const embedText = buildEmbedText(embedTextInput);
+      parsed = await mimeParser.parse(rawMimeBuffer);
+    } catch (e) {
+      return err({ signalId: signal.id, reason: `MIME parse failed: ${String(e)}` });
+    }
 
-      const result = await embeddingGenerator.generateForModel(embedText, modelId);
+    const embedTextInput = extractEmbedTextInput(parsed, signal.accountId, signal.recipientAddress);
+    const embedText = buildEmbedText(embedTextInput);
 
+    const result = await embeddingGenerator.generateForModel(embedText, modelId);
+    if (result.isErr()) {
+      return err({ signalId: signal.id, reason: `Embedding generation failed for model "${modelId}": ${result.error.cause.message}` });
+    }
+
+    try {
       await arcDatabase.addEmbeddingToCache(
         signal.accountId,
         signal.id,
         modelId,
-        result.vector!,
+        result.value.vector,
       );
 
       await multiClusterWriter.upsertEmbedding({
@@ -248,7 +257,7 @@ export class ReindexWorker {
         arcId: signal.arcId!,
         accountId: signal.accountId,
         recipientAddress: signal.recipientAddress,
-        embedding: result.vector!,
+        embedding: result.value.vector,
       });
 
       return ok(undefined);

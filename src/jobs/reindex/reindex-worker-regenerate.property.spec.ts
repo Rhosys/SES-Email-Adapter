@@ -17,6 +17,7 @@ import { sdkStreamMixin } from "@smithy/util-stream";
 import type { SQSEvent, SQSRecord } from "aws-lambda";
 import { createMockLogger } from "../../testing/mock-logger.js";
 import { ReindexWorker } from "./reindex-worker.js";
+import { ok } from "../../errors.js";
 
 // ---------------------------------------------------------------------------
 // Hoisted mock functions
@@ -312,11 +313,11 @@ describe("Property 12: Backfill targets exactly the signals missing the new mode
       headers: {},
     });
 
-    mockGenerateForModel.mockResolvedValue({
+    mockGenerateForModel.mockResolvedValue(ok({
       modelId: TARGET_MODEL_ID,
       vector: [0.1, 0.2, 0.3],
       dimensions: 1024,
-    });
+    }));
 
     const event = makeSqsEvent([
       makeSqsRecord({
