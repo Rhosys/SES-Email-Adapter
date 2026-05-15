@@ -1,9 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import type { SQSEvent } from "aws-lambda";
 import { ok, err } from "../errors.js";
 import { SignalProcessor, SYSTEM_RULES } from "./processor.js";
 import { JsonLogicRuleEvaluator } from "./rule-evaluator.js";
-import type { ProcessorDatabase, ArcMatcher, SqsDispatcher } from "./processor.js";
+import type { ProcessorDatabase, ArcMatcher, SqsDispatcher, InboundSignalMessage } from "./processor.js";
 import type { MimeParser } from "./mime.js";
 import type { SignalClassifier } from "../classifier/classifier.js";
 import type { EmbeddingGenerator } from "../embedding/embedding-generator.js";
@@ -200,38 +199,15 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
     };
   }
 
-  function makeSqsEvent(sesMessageId: string, receiveCount: number): SQSEvent {
-    const notification = {
-      accountId: TEST_ACCOUNT_ID,
-      mail: {
-        messageId: sesMessageId,
-        timestamp: "2024-01-15T10:00:00Z",
-        destination: ["user@example.com"],
-      },
-      receipt: {
-        recipients: ["user@example.com"],
-        dkimVerdict: { status: "PASS" },
-        dmarcVerdict: { status: "PASS" },
-        action: { bucketName: "test-bucket", objectKey: `emails/${sesMessageId}` },
-      },
-    };
+  function makeMessage(sesMessageId: string): InboundSignalMessage {
     return {
-      Records: [{
-        messageId: "sqs-1",
-        receiptHandle: "handle",
-        body: JSON.stringify({ Message: JSON.stringify(notification) }),
-        attributes: {
-          ApproximateReceiveCount: String(receiveCount),
-          SentTimestamp: "1234567890",
-          SenderId: "sender",
-          ApproximateFirstReceiveTimestamp: "1234567890",
-        },
-        messageAttributes: {},
-        md5OfBody: "",
-        eventSource: "aws:sqs",
-        eventSourceARN: "arn:aws:sqs:us-east-1:123:queue",
-        awsRegion: "us-east-1",
-      }],
+      accountId: TEST_ACCOUNT_ID,
+      s3Key: `emails/${sesMessageId}`,
+      sesMessageId,
+      timestamp: "2024-01-15T10:00:00Z",
+      destination: ["user@example.com"],
+      dkimVerdict: "PASS",
+      dmarcVerdict: "PASS",
     };
   }
 
@@ -286,7 +262,7 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
     });
 
-    await processor.process(makeSqsEvent(sesMessageId, receiveCount));
+    await processor.processRecord(makeMessage(sesMessageId), receiveCount);
     expect(mimeParser.parse).not.toHaveBeenCalled();
   });
 
@@ -311,7 +287,7 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
     });
 
-    await processor.process(makeSqsEvent(sesMessageId, receiveCount));
+    await processor.processRecord(makeMessage(sesMessageId), receiveCount);
     expect(classifier.classify).not.toHaveBeenCalled();
   });
 
@@ -337,7 +313,7 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
     });
 
-    await processor.process(makeSqsEvent(sesMessageId, receiveCount));
+    await processor.processRecord(makeMessage(sesMessageId), receiveCount);
     expect(evaluateSpy).not.toHaveBeenCalled();
   });
 
@@ -362,7 +338,7 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
     });
 
-    await processor.process(makeSqsEvent(sesMessageId, receiveCount));
+    await processor.processRecord(makeMessage(sesMessageId), receiveCount);
 
     expect(auroraWriter.upsertEmbedding).toHaveBeenCalled();
     const call = vi.mocked(auroraWriter.upsertEmbedding).mock.calls[0]!;
@@ -394,7 +370,7 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
     });
 
-    await processor.process(makeSqsEvent(sesMessageId, receiveCount));
+    await processor.processRecord(makeMessage(sesMessageId), receiveCount);
 
     // Aurora upsert is NOT called when embedding is missing for the cluster's model
     expect(auroraWriter.upsertEmbedding).not.toHaveBeenCalled();
@@ -420,8 +396,8 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
     });
 
-    const result = await processor.process(makeSqsEvent(sesMessageId, receiveCount));
-    expect(result.batchItemFailures).toEqual([]);
+    const result = await processor.processRecord(makeMessage(sesMessageId), receiveCount);
+    expect(result.isOk()).toBe(true);
   });
 
   // -------------------------------------------------------------------------
@@ -496,9 +472,9 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
     });
 
-    const result = await processor.process(makeSqsEvent("msg-no-arc", 2));
+    const result = await processor.processRecord(makeMessage("msg-no-arc"), 2);
 
-    expect(result.batchItemFailures).toHaveLength(1);
+    expect(result.isErr()).toBe(true);
     // No Aurora upserts should execute when arcId is falsy
     expect(auroraWriter.upsertEmbedding).not.toHaveBeenCalled();
     // No DDB writes should execute
@@ -550,38 +526,15 @@ describe("Feature: signal-processor-retry-resilience, Property 3: DDB read failu
     billingPlan: "Paid" as const,
   };
 
-  function makeRetrySqsEvent(sesMessageId: string, receiveCount: number): SQSEvent {
-    const notification = {
-      accountId: TEST_ACCOUNT_ID,
-      mail: {
-        messageId: sesMessageId,
-        timestamp: "2024-01-15T10:00:00Z",
-        destination: ["user@example.com"],
-      },
-      receipt: {
-        recipients: ["user@example.com"],
-        dkimVerdict: { status: "PASS" },
-        dmarcVerdict: { status: "PASS" },
-        action: { bucketName: "test-bucket", objectKey: `emails/${sesMessageId}` },
-      },
-    };
+  function makeRetryMessage(sesMessageId: string): InboundSignalMessage {
     return {
-      Records: [{
-        messageId: "sqs-retry-1",
-        receiptHandle: "handle",
-        body: JSON.stringify({ Message: JSON.stringify(notification) }),
-        attributes: {
-          ApproximateReceiveCount: String(receiveCount),
-          SentTimestamp: "1234567890",
-          SenderId: "sender",
-          ApproximateFirstReceiveTimestamp: "1234567890",
-        },
-        messageAttributes: {},
-        md5OfBody: "",
-        eventSource: "aws:sqs",
-        eventSourceARN: "arn:aws:sqs:us-east-1:123:queue",
-        awsRegion: "us-east-1",
-      }],
+      accountId: TEST_ACCOUNT_ID,
+      s3Key: `emails/${sesMessageId}`,
+      sesMessageId,
+      timestamp: "2024-01-15T10:00:00Z",
+      destination: ["user@example.com"],
+      dkimVerdict: "PASS",
+      dmarcVerdict: "PASS",
     };
   }
 
@@ -703,10 +656,9 @@ describe("Feature: signal-processor-retry-resilience, Property 3: DDB read failu
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
     });
 
-    const result = await processor.process(makeRetrySqsEvent(sesMessageId, receiveCount));
+    const result = await processor.processRecord(makeRetryMessage(sesMessageId), receiveCount);
 
-    expect(result.batchItemFailures).toHaveLength(1);
-    expect(result.batchItemFailures[0]!.itemIdentifier).toBe("sqs-retry-1");
+    expect(result.isErr()).toBe(true);
     expect(auroraWriter.upsertEmbedding).not.toHaveBeenCalled();
     expect(store.saveSignal).not.toHaveBeenCalled();
     expect(store.saveArc).not.toHaveBeenCalled();
@@ -736,10 +688,9 @@ describe("Feature: signal-processor-retry-resilience, Property 3: DDB read failu
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
     });
 
-    const result = await processor.process(makeRetrySqsEvent(sesMessageId, receiveCount));
+    const result = await processor.processRecord(makeRetryMessage(sesMessageId), receiveCount);
 
-    expect(result.batchItemFailures).toHaveLength(1);
-    expect(result.batchItemFailures[0]!.itemIdentifier).toBe("sqs-retry-1");
+    expect(result.isErr()).toBe(true);
     expect(auroraWriter.upsertEmbedding).not.toHaveBeenCalled();
     expect(store.saveSignal).not.toHaveBeenCalled();
     expect(store.saveArc).not.toHaveBeenCalled();
@@ -862,38 +813,15 @@ describe("Feature: signal-processor-retry-resilience, Property 2: Missing signal
     };
   }
 
-  function makeSqsEvent(sesMessageId: string, receiveCount: number): SQSEvent {
-    const notification = {
-      accountId: TEST_ACCOUNT_ID,
-      mail: {
-        messageId: sesMessageId,
-        timestamp: "2024-01-15T10:00:00Z",
-        destination: ["user@example.com"],
-      },
-      receipt: {
-        recipients: ["user@example.com"],
-        dkimVerdict: { status: "PASS" },
-        dmarcVerdict: { status: "PASS" },
-        action: { bucketName: "test-bucket", objectKey: `emails/${sesMessageId}` },
-      },
-    };
+  function makeMessage(sesMessageId: string): InboundSignalMessage {
     return {
-      Records: [{
-        messageId: "sqs-1",
-        receiptHandle: "handle",
-        body: JSON.stringify({ Message: JSON.stringify(notification) }),
-        attributes: {
-          ApproximateReceiveCount: String(receiveCount),
-          SentTimestamp: "1234567890",
-          SenderId: "sender",
-          ApproximateFirstReceiveTimestamp: "1234567890",
-        },
-        messageAttributes: {},
-        md5OfBody: "",
-        eventSource: "aws:sqs",
-        eventSourceARN: "arn:aws:sqs:us-east-1:123:queue",
-        awsRegion: "us-east-1",
-      }],
+      accountId: TEST_ACCOUNT_ID,
+      s3Key: `emails/${sesMessageId}`,
+      sesMessageId,
+      timestamp: "2024-01-15T10:00:00Z",
+      destination: ["user@example.com"],
+      dkimVerdict: "PASS",
+      dmarcVerdict: "PASS",
     };
   }
 
@@ -926,7 +854,7 @@ describe("Feature: signal-processor-retry-resilience, Property 2: Missing signal
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
     });
 
-    await processor.process(makeSqsEvent(sesMessageId, receiveCount));
+    await processor.processRecord(makeMessage(sesMessageId), receiveCount);
     expect(mimeParser.parse).toHaveBeenCalled();
   });
 
@@ -949,7 +877,7 @@ describe("Feature: signal-processor-retry-resilience, Property 2: Missing signal
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
     });
 
-    await processor.process(makeSqsEvent(sesMessageId, receiveCount));
+    await processor.processRecord(makeMessage(sesMessageId), receiveCount);
     expect(classifier.classify).toHaveBeenCalled();
   });
 
@@ -972,7 +900,7 @@ describe("Feature: signal-processor-retry-resilience, Property 2: Missing signal
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
     });
 
-    await processor.process(makeSqsEvent(sesMessageId, receiveCount));
+    await processor.processRecord(makeMessage(sesMessageId), receiveCount);
     expect(store.saveArc).toHaveBeenCalled();
     expect(store.saveSignal).toHaveBeenCalled();
   });
@@ -994,8 +922,8 @@ describe("Feature: signal-processor-retry-resilience, Property 2: Missing signal
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
     });
 
-    const result = await processor.process(makeSqsEvent(sesMessageId, receiveCount));
-    expect(result.batchItemFailures).toEqual([]);
+    const result = await processor.processRecord(makeMessage(sesMessageId), receiveCount);
+    expect(result.isOk()).toBe(true);
   });
 });
 
@@ -1138,38 +1066,15 @@ describe("Feature: signal-processor-retry-resilience, Property 8: Outcome re-der
     };
   }
 
-  function makeSqsEvent(receiveCount: number): SQSEvent {
-    const notification = {
-      accountId: TEST_ACCOUNT_ID,
-      mail: {
-        messageId: "msg-prop8",
-        timestamp: "2024-01-15T10:00:00Z",
-        destination: ["user@example.com"],
-      },
-      receipt: {
-        recipients: ["user@example.com"],
-        dkimVerdict: { status: "PASS" },
-        dmarcVerdict: { status: "PASS" },
-        action: { bucketName: "test-bucket", objectKey: "emails/msg-prop8" },
-      },
-    };
+  function makeMessage(): InboundSignalMessage {
     return {
-      Records: [{
-        messageId: "sqs-1",
-        receiptHandle: "handle",
-        body: JSON.stringify({ Message: JSON.stringify(notification) }),
-        attributes: {
-          ApproximateReceiveCount: String(receiveCount),
-          SentTimestamp: "1234567890",
-          SenderId: "sender",
-          ApproximateFirstReceiveTimestamp: "1234567890",
-        },
-        messageAttributes: {},
-        md5OfBody: "",
-        eventSource: "aws:sqs",
-        eventSourceARN: "arn:aws:sqs:us-east-1:123:queue",
-        awsRegion: "us-east-1",
-      }],
+      accountId: TEST_ACCOUNT_ID,
+      s3Key: "emails/msg-prop8",
+      sesMessageId: "msg-prop8",
+      timestamp: "2024-01-15T10:00:00Z",
+      destination: ["user@example.com"],
+      dkimVerdict: "PASS",
+      dmarcVerdict: "PASS",
     };
   }
 
@@ -1214,7 +1119,7 @@ describe("Feature: signal-processor-retry-resilience, Property 8: Outcome re-der
       retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
     });
 
-    await processor.process(makeSqsEvent(receiveCount));
+    await processor.processRecord(makeMessage(), receiveCount);
     expect(store.listEnabledRules).not.toHaveBeenCalled();
   });
 
@@ -1259,7 +1164,7 @@ describe("Feature: signal-processor-retry-resilience, Property 8: Outcome re-der
       retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
     });
 
-    await processor.process(makeSqsEvent(receiveCount));
+    await processor.processRecord(makeMessage(), receiveCount);
 
     expect(sqsDispatcher.sendMessage).toHaveBeenCalledTimes(1);
     const payload = vi.mocked(sqsDispatcher.sendMessage).mock.calls[0]![0];

@@ -1,9 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
-import type { SQSRecord } from "aws-lambda";
 import { ok, err } from "neverthrow";
 import { SignalProcessor, SYSTEM_RULES } from "./processor.js";
 import { JsonLogicRuleEvaluator } from "./rule-evaluator.js";
-import type { ProcessorDatabase, ArcMatcher } from "./processor.js";
+import type { ProcessorDatabase, ArcMatcher, InboundSignalMessage } from "./processor.js";
 import type { MimeParser } from "./mime.js";
 import type { SignalClassifier } from "../classifier/classifier.js";
 import type { EmbeddingGenerator } from "../embedding/embedding-generator.js";
@@ -29,7 +28,7 @@ vi.mock("../embedding/cluster-registry.js", () => {
   };
 });
 
-describe("ProcessError always carries the SQS messageId", () => {
+describe("ProcessError on database failure", () => {
   function makeStore(): ProcessorDatabase {
     return {
       getSignalByMessageId: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
@@ -56,17 +55,15 @@ describe("ProcessError always carries the SQS messageId", () => {
     };
   }
 
-  function makeSqsRecord(messageId: string, body: string): SQSRecord {
+  function makeMessage(): InboundSignalMessage {
     return {
-      messageId,
-      receiptHandle: "handle",
-      body,
-      attributes: { ApproximateReceiveCount: "1", SentTimestamp: "1234567890", SenderId: "sender", ApproximateFirstReceiveTimestamp: "1234567890" },
-      messageAttributes: {},
-      md5OfBody: "",
-      eventSource: "aws:sqs",
-      eventSourceARN: "arn:aws:sqs:eu-central-1:123:queue",
-      awsRegion: "eu-central-1",
+      accountId: "acct-test",
+      s3Key: "emails/ses-msg-1",
+      sesMessageId: "ses-msg-1",
+      timestamp: "2024-01-15T10:00:00Z",
+      destination: ["u@x.com"],
+      dkimVerdict: "PASS",
+      dmarcVerdict: "PASS",
     };
   }
 
@@ -115,49 +112,20 @@ describe("ProcessError always carries the SQS messageId", () => {
     });
   }
 
-  const invalidBodies = [
-    { label: "empty string", body: "" },
-    { label: "not JSON", body: "hello world" },
-    { label: "null JSON", body: "null" },
-    { label: "empty object (missing Message)", body: "{}" },
-    { label: "Message is not valid JSON", body: '{"Message": "not-json"}' },
-  ];
-
-  it.each(invalidBodies)("$label causes err with matching messageId", async ({ body }) => {
-    const store = makeStore();
-    const processor = makeProcessor(store);
-    const record = makeSqsRecord("sqs-msg-abc", body);
-
-    const result = await processor.processRecord(record);
-
-    if (result.isErr()) {
-      expect(result.error.kind).toBe("process_error");
-      expect(result.error.messageId).toBe("sqs-msg-abc");
-    }
-  });
-
-  it("database failure on dedup check causes err with matching messageId", async () => {
+  it("database failure on dedup check returns err with cause", async () => {
     const store = makeStore();
     (store.getSignalByMessageId as ReturnType<typeof vi.fn>).mockReturnValue(
       Promise.resolve(err(dbError(new Error("connection timeout")))),
     );
 
     const processor = makeProcessor(store);
+    const message = makeMessage();
 
-    const notification = {
-      accountId: "acct-test",
-      mail: { messageId: "ses-msg-1", timestamp: "2024-01-15T10:00:00Z", destination: ["u@x.com"] },
-      receipt: { recipients: ["u@x.com"], dkimVerdict: { status: "PASS" }, dmarcVerdict: { status: "PASS" }, action: { bucketName: "b", objectKey: "k" } },
-    };
-    const record = makeSqsRecord("sqs-msg-xyz", JSON.stringify({ Message: JSON.stringify(notification) }));
-    record.attributes.ApproximateReceiveCount = "2";
-
-    const result = await processor.processRecord(record);
+    const result = await processor.processRecord(message, 2);
 
     expect(result.isErr()).toBe(true);
     if (result.isErr()) {
-      expect(result.error.kind).toBe("process_error");
-      expect(result.error.messageId).toBe("sqs-msg-xyz");
+      expect(result.error.cause).toBeDefined();
     }
   });
 });

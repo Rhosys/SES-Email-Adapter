@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import type { SQSEvent } from "aws-lambda";
 import { ok, err, dbError } from "../errors.js";
 import { SignalProcessor, SYSTEM_RULES } from "./processor.js";
+import type { InboundSignalMessage } from "./processor.js";
 import { JsonLogicRuleEvaluator } from "./rule-evaluator.js";
 import type { ProcessorDatabase, ArcMatcher } from "./processor.js";
 import type { MimeParser } from "./mime.js";
@@ -129,29 +129,15 @@ describe("Aurora cluster failure preserves the DynamoDB cache entry", () => {
     };
   }
 
-  function makeSqsEvent(sesMessageId: string): SQSEvent {
-    const notification = {
-      accountId: TEST_ACCOUNT_ID,
-      mail: { messageId: sesMessageId, timestamp: "2024-01-15T10:00:00Z", destination: ["user@example.com"] },
-      receipt: {
-        recipients: ["user@example.com"],
-        dkimVerdict: { status: "PASS" },
-        dmarcVerdict: { status: "PASS" },
-        action: { bucketName: "test-bucket", objectKey: `emails/${sesMessageId}` },
-      },
-    };
+  function makeMessage(sesMessageId: string): InboundSignalMessage {
     return {
-      Records: [{
-        messageId: "sqs-1",
-        receiptHandle: "handle",
-        body: JSON.stringify({ Message: JSON.stringify(notification) }),
-        attributes: { ApproximateReceiveCount: "1", SentTimestamp: "1234567890", SenderId: "sender", ApproximateFirstReceiveTimestamp: "1234567890" },
-        messageAttributes: {},
-        md5OfBody: "",
-        eventSource: "aws:sqs",
-        eventSourceARN: "arn:aws:sqs:us-east-1:123:queue",
-        awsRegion: "us-east-1",
-      }],
+      accountId: TEST_ACCOUNT_ID,
+      s3Key: `emails/${sesMessageId}`,
+      sesMessageId,
+      timestamp: "2024-01-15T10:00:00Z",
+      destination: ["user@example.com"],
+      dkimVerdict: "PASS",
+      dmarcVerdict: "PASS",
     };
   }
 
@@ -197,7 +183,7 @@ describe("Aurora cluster failure preserves the DynamoDB cache entry", () => {
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
     });
 
-    await processor.process(makeSqsEvent("test-msg-aurora"));
+    await processor.processRecord(makeMessage("test-msg-aurora"), 1);
 
     const saveSignalCalls = (store.saveSignal as ReturnType<typeof vi.fn>).mock.calls;
     expect(saveSignalCalls.length).toBeGreaterThanOrEqual(1);
@@ -245,7 +231,7 @@ describe("Aurora cluster failure preserves the DynamoDB cache entry", () => {
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
     });
 
-    await processor.process(makeSqsEvent("test-msg-aurora"));
+    await processor.processRecord(makeMessage("test-msg-aurora"), 1);
 
     const upsertCalls = (auroraWriter.upsertEmbedding as ReturnType<typeof vi.fn>).mock.calls;
     expect(upsertCalls.length).toBe(2);

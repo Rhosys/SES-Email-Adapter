@@ -1,9 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import type { SQSEvent } from "aws-lambda";
 import { ok } from "../errors.js";
 import { SignalProcessor, SYSTEM_RULES } from "./processor.js";
 import { JsonLogicRuleEvaluator } from "./rule-evaluator.js";
-import type { ProcessorDatabase, ArcMatcher } from "./processor.js";
+import type { InboundSignalMessage, ProcessorDatabase, ArcMatcher } from "./processor.js";
 import type { MimeParser } from "./mime.js";
 import type { SignalClassifier, ClassificationOutput } from "../classifier/classifier.js";
 import type { EmbeddingGenerator } from "../embedding/embedding-generator.js";
@@ -150,38 +149,15 @@ describe("Property 9: S3 retention failure is isolated and non-fatal", () => {
     };
   }
 
-  function makeSqsEvent(sesMessageId: string): SQSEvent {
-    const notification = {
-      accountId: TEST_ACCOUNT_ID,
-      mail: {
-        messageId: sesMessageId,
-        timestamp: "2024-01-15T10:00:00Z",
-        destination: ["user@example.com"],
-      },
-      receipt: {
-        recipients: ["user@example.com"],
-        dkimVerdict: { status: "PASS" },
-        dmarcVerdict: { status: "PASS" },
-        action: { bucketName: "test-bucket", objectKey: `emails/${sesMessageId}` },
-      },
-    };
+  function makeMessage(sesMessageId: string): InboundSignalMessage {
     return {
-      Records: [{
-        messageId: "sqs-1",
-        receiptHandle: "handle",
-        body: JSON.stringify({ Message: JSON.stringify(notification) }),
-        attributes: {
-          ApproximateReceiveCount: "1",
-          SentTimestamp: "1234567890",
-          SenderId: "sender",
-          ApproximateFirstReceiveTimestamp: "1234567890",
-        },
-        messageAttributes: {},
-        md5OfBody: "",
-        eventSource: "aws:sqs",
-        eventSourceARN: "arn:aws:sqs:us-east-1:123:queue",
-        awsRegion: "us-east-1",
-      }],
+      accountId: TEST_ACCOUNT_ID,
+      s3Key: `emails/${sesMessageId}`,
+      sesMessageId,
+      timestamp: "2024-01-15T10:00:00Z",
+      destination: ["user@example.com"],
+      dkimVerdict: "PASS",
+      dmarcVerdict: "PASS",
     };
   }
 
@@ -219,8 +195,8 @@ describe("Property 9: S3 retention failure is isolated and non-fatal", () => {
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
     });
 
-    const result = await processor.process(makeSqsEvent("test-msg-s3-isolation"));
-    expect(result.batchItemFailures).toEqual([]);
+    const result = await processor.processRecord(makeMessage("test-msg-s3-isolation"), 1);
+    expect(result.isOk()).toBe(true);
   });
 
   it.each(S3_RESULT_ASYNC_ERROR_CASES)("Aurora upserts still execute when S3 retention fails ($label)", async ({ error }) => {
@@ -246,7 +222,7 @@ describe("Property 9: S3 retention failure is isolated and non-fatal", () => {
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
     });
 
-    await processor.process(makeSqsEvent("test-msg-s3-aurora"));
+    await processor.processRecord(makeMessage("test-msg-s3-aurora"), 1);
     expect(auroraWriter.upsertEmbedding).toHaveBeenCalled();
   });
 
@@ -273,7 +249,7 @@ describe("Property 9: S3 retention failure is isolated and non-fatal", () => {
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
     });
 
-    await processor.process(makeSqsEvent("test-msg-s3-warn"));
+    await processor.processRecord(makeMessage("test-msg-s3-warn"), 1);
 
     const warnCalls = mockLogger.calls.filter((c) => c.method === "warn");
     expect(warnCalls.length).toBeGreaterThanOrEqual(1);
@@ -309,7 +285,7 @@ describe("Property 9: S3 retention failure is isolated and non-fatal", () => {
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
     });
 
-    const result1 = await processor1.process(makeSqsEvent("test-msg-s3-outcome"));
+    const result1 = await processor1.processRecord(makeMessage("test-msg-s3-outcome"), 1);
 
     // Run 2: without S3 retention service (no retention at all)
     const store2 = makeStore();
@@ -333,10 +309,10 @@ describe("Property 9: S3 retention failure is isolated and non-fatal", () => {
       // No retentionService — S3 retention is skipped entirely
     });
 
-    const result2 = await processor2.process(makeSqsEvent("test-msg-s3-outcome"));
+    const result2 = await processor2.processRecord(makeMessage("test-msg-s3-outcome"), 1);
 
-    // Both runs must produce the same batchItemFailures result
-    expect(result1.batchItemFailures).toEqual(result2.batchItemFailures);
+    // Both runs must produce the same result
+    expect(result1.isOk()).toBe(result2.isOk());
 
     // Both runs must call saveSignal (signal was persisted)
     expect(store1.saveSignal).toHaveBeenCalled();
@@ -372,9 +348,9 @@ describe("Property 9: S3 retention failure is isolated and non-fatal", () => {
       // No retentionService — S3 retention is skipped entirely
     });
 
-    const result = await processor.process(makeSqsEvent("test-msg-no-retention-svc"));
+    const result = await processor.processRecord(makeMessage("test-msg-no-retention-svc"), 1);
 
-    expect(result.batchItemFailures).toEqual([]);
+    expect(result.isOk()).toBe(true);
     expect(auroraWriter.upsertEmbedding).toHaveBeenCalled();
   });
 
@@ -412,10 +388,10 @@ describe("Property 9: S3 retention failure is isolated and non-fatal", () => {
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
     });
 
-    const result = await processor.process(makeSqsEvent("test-msg-s3-sync-throw"));
+    const result = await processor.processRecord(makeMessage("test-msg-s3-sync-throw"), 1);
 
     // Processing continues — no batchItemFailure
-    expect(result.batchItemFailures).toEqual([]);
+    expect(result.isOk()).toBe(true);
     // Aurora upserts still execute
     expect(auroraWriter.upsertEmbedding).toHaveBeenCalled();
 

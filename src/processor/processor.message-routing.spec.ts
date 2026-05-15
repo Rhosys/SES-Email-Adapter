@@ -1,9 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { SQSEvent, SQSRecord } from "aws-lambda";
 import { ok } from "../errors.js";
 import { SignalProcessor, SYSTEM_RULES } from "./processor.js";
 import { JsonLogicRuleEvaluator } from "./rule-evaluator.js";
-import type { ProcessorDatabase, ArcMatcher } from "./processor.js";
+import type { ProcessorDatabase, ArcMatcher, InboundSignalMessage } from "./processor.js";
 import type { MimeParser } from "./mime.js";
 import type { SignalClassifier, ClassificationOutput } from "../classifier/classifier.js";
 import type { EmbeddingGenerator, EmbeddingResult } from "../embedding/embedding-generator.js";
@@ -118,53 +117,18 @@ function makeArcMatcher(): ArcMatcher {
 }
 
 /**
- * Build an SQS record with a specific messageType attribute (or absent).
+ * Build an InboundSignalMessage for routing tests.
  */
-function makeSqsRecord(opts: {
-  messageType?: string;
-  body?: string;
-  messageId?: string;
-}): SQSRecord {
+function makeMessage(): InboundSignalMessage {
   const sesMessageId = "msg-routing-test";
-  const notification = {
-    accountId: TEST_ACCOUNT_ID,
-    mail: {
-      messageId: sesMessageId,
-      timestamp: "2024-01-15T10:00:00Z",
-      destination: ["user@example.com"],
-    },
-    receipt: {
-      dkimVerdict: { status: "PASS" },
-      dmarcVerdict: { status: "PASS" },
-      action: { bucketName: "test-bucket", objectKey: `emails/${sesMessageId}` },
-    },
-  };
-
-  const messageAttributes: SQSRecord["messageAttributes"] = {};
-  if (opts.messageType !== undefined) {
-    messageAttributes["messageType"] = {
-      stringValue: opts.messageType,
-      dataType: "String",
-      stringListValues: [],
-      binaryListValues: [],
-    };
-  }
-
   return {
-    messageId: opts.messageId ?? "sqs-routing-0",
-    receiptHandle: "handle",
-    body: opts.body ?? JSON.stringify({ Message: JSON.stringify(notification) }),
-    attributes: {
-      ApproximateReceiveCount: "1",
-      SentTimestamp: "1234567890",
-      SenderId: "sender",
-      ApproximateFirstReceiveTimestamp: "1234567890",
-    },
-    messageAttributes,
-    md5OfBody: "",
-    eventSource: "aws:sqs",
-    eventSourceARN: "arn:aws:sqs:us-east-1:123:queue",
-    awsRegion: "us-east-1",
+    accountId: TEST_ACCOUNT_ID,
+    s3Key: `emails/${sesMessageId}`,
+    sesMessageId,
+    timestamp: "2024-01-15T10:00:00Z",
+    destination: ["user@example.com"],
+    dkimVerdict: "PASS",
+    dmarcVerdict: "PASS",
   };
 }
 
@@ -200,10 +164,10 @@ describe("SignalProcessor message routing", () => {
   });
 
   it("routes to processRecord when messageType attribute is absent", async () => {
-    const event: SQSEvent = { Records: [makeSqsRecord({})] };
+    const message = makeMessage();
 
     const processRecordSpy = vi.spyOn(processor, "processRecord");
-    await processor.processRecord(event.Records[0]!);
+    await processor.processRecord(message, 1);
 
     // processRecord was called — observable via the store's dedup check
     expect(processRecordSpy).toHaveBeenCalledOnce();
@@ -211,10 +175,10 @@ describe("SignalProcessor message routing", () => {
   });
 
   it("routes to processRecord when messageType is 'inbound_signal'", async () => {
-    const event: SQSEvent = { Records: [makeSqsRecord({ messageType: "inbound_signal" })] };
+    const message = makeMessage();
 
     const processRecordSpy = vi.spyOn(processor, "processRecord");
-    await processor.processRecord(event.Records[0]!);
+    await processor.processRecord(message, 1);
 
     // processRecord was called — observable via the store's dedup check
     expect(processRecordSpy).toHaveBeenCalledOnce();

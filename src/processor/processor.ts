@@ -1,9 +1,8 @@
 import { randomUUID } from "crypto";
-import type { SQSRecord } from "aws-lambda";
 import type { Logger } from "../logger.js";
 import type { Result } from "neverthrow";
-import { ok, err, dbError, processError } from "../errors.js";
-import type { DbError, InvalidResponseError, ProcessError } from "../errors.js";
+import { ok, err, dbError } from "../errors.js";
+import type { DbError, InvalidResponseError } from "../errors.js";
 import type { Signal, Arc, Rule, Workflow, WorkflowData, Alias, AliasSender, SenderMode, AccountFilteringConfig, SignalSource, SignalStatus, Domain, ArcUrgency, SenderFilterMode, MatchedRuleResult } from "../types/index.js";
 import type { MimeParser, ParsedMime } from "./mime.js";
 import { buildEmbedText, extractEmbedTextInput } from "../embedding/embed-text.js";
@@ -95,7 +94,7 @@ export interface ReplySender {
   }): Promise<{ messageId: string }>;
 }
 
-type SesVerdict = "PASS" | "FAIL" | "GRAY" | "PROCESSING_FAILED";
+export type SesVerdict = "PASS" | "FAIL" | "GRAY" | "PROCESSING_FAILED";
 
 interface SesReceiptNotification {
   mail: {
@@ -111,7 +110,7 @@ interface SesReceiptNotification {
   };
 }
 
-interface InboundSignalMessage {
+export interface InboundSignalMessage {
   accountId: string;
   s3Key: string;
   sesMessageId: string;
@@ -306,34 +305,13 @@ export class SignalProcessor {
     this.sqsDispatcher = opts.sqsDispatcher;
   }
 
-  async processRecord(record: SQSRecord): Promise<Result<void, ProcessError>> {
-    const receiveCount = Number(record.attributes?.ApproximateReceiveCount ?? "1");
-
-    // Parse the SQS message body
-    let message: InboundSignalMessage;
-    try {
-      const sns = JSON.parse(record.body) as { Message: string };
-      const notification = JSON.parse(sns.Message) as SesReceiptNotification & { accountId?: string };
-      message = {
-        accountId: notification.accountId ?? notification.mail.destination[0]!,
-        s3Key: notification.receipt.action.objectKey,
-        sesMessageId: notification.mail.messageId,
-        timestamp: notification.mail.timestamp,
-        destination: notification.mail.destination,
-        dkimVerdict: notification.receipt.dkimVerdict.status,
-        dmarcVerdict: notification.receipt.dmarcVerdict.status,
-      };
-    } catch (e) {
-      this.logger.error("Failed to parse inbound signal from SQS record. The JSON payload could not be deserialized as a valid SES notification. This message will be retried.", { code: "processor.parse_failed", error: e, record });
-      return err(processError(record.messageId));
-    }
-
+  async processRecord(message: InboundSignalMessage, receiveCount: number): Promise<Result<void, DbError>> {
     // On redelivery, check DDB for existing signal before doing expensive work
     if (receiveCount > 1) {
       this.logger.info("Retry path activated — checking DDB for existing signal state before re-processing.", { code: "processor.retry_path_activated", receiveCount, accountId: message.accountId, sesMessageId: message.sesMessageId });
 
       const existingResult = await this.store.getSignalByMessageId(message.accountId, message.sesMessageId);
-      if (existingResult.isErr()) return err(processError(record.messageId));
+      if (existingResult.isErr()) return err(existingResult.error);
       this.logger.trackPoint("retry_signal_lookup");
 
       if (existingResult.value) {
@@ -342,16 +320,16 @@ export class SignalProcessor {
 
         // Signal exists — arc is guaranteed to exist (arc saved before signal).
         // Load arc to resume from the convergence point.
-        if (!signal.arcId) return err(processError(record.messageId));
+        if (!signal.arcId) return err(dbError("signal missing arcId on retry"));
         const arcResult = await this.store.getArc(message.accountId, signal.arcId);
-        if (arcResult.isErr()) return err(processError(record.messageId));
+        if (arcResult.isErr()) return err(arcResult.error);
         this.logger.trackPoint("retry_arc_lookup");
         const arc = arcResult.value;
-        if (!arc) return err(processError(record.messageId));
+        if (!arc) return err(dbError("arc not found on retry"));
 
         // Fetch account context (needed for S3 retention)
         const accountCtxResult = await this.store.getProcessorAccountContext(message.accountId, signal.recipientAddress);
-        if (accountCtxResult.isErr()) return err(processError(record.messageId));
+        if (accountCtxResult.isErr()) return err(accountCtxResult.error);
         const accountCtx = accountCtxResult.value;
 
         // S3 retention — always attempt, fire-and-forget (idempotent)
@@ -359,11 +337,11 @@ export class SignalProcessor {
 
         // Aurora upserts — always run (idempotent). Gates side-effect dispatch.
         const auroraResult = await this.executeAuroraUpserts(signal, arc);
-        if (auroraResult.isErr()) return err(processError(record.messageId));
+        if (auroraResult.isErr()) return err(dbError("Aurora upsert failed on retry"));
 
         // Dispatch side-effects via SQS after Aurora succeeds
         const dispatchResult = await this.dispatchSideEffects(signal, arc);
-        if (dispatchResult.isErr()) return err(processError(record.messageId));
+        if (dispatchResult.isErr()) return err(dbError("side-effect dispatch failed on retry"));
 
         return ok(undefined);
       }
@@ -377,27 +355,14 @@ export class SignalProcessor {
       processResult = await this.processMessage(message);
     } catch (e) {
       this.logger.error("processMessage threw an unhandled exception. This should not happen — all errors should be returned as Result types. The message will be retried.", { code: "processor.unhandled_exception", error: e, accountId: message.accountId, sesMessageId: message.sesMessageId });
-      return err(processError(record.messageId));
+      return err(dbError(e));
     }
-    if (processResult.isErr()) return err(processError(record.messageId));
+    if (processResult.isErr()) return err(dbError(processResult.error));
 
     return ok(undefined);
   }
 
-  async processSideEffectRecord(record: SQSRecord): Promise<Result<void, ProcessError>> {
-    // Parse SideEffectPayload from record body
-    let payload: SideEffectPayload;
-    try {
-      payload = JSON.parse(record.body) as SideEffectPayload;
-    } catch (e) {
-      this.logger.error("Malformed side-effect payload — cannot parse JSON. Dropping message to prevent infinite retry of unparseable content.", { code: "processor.side_effect.malformed_payload", messageId: record.messageId, error: e, record });
-      return ok(undefined);
-    }
-    if (!payload.signal || !payload.arc) {
-      this.logger.error("Malformed side-effect payload — missing signal or arc fields. Dropping message to prevent infinite retry.", { code: "processor.side_effect.malformed_payload", messageId: record.messageId, record });
-      return ok(undefined);
-    }
-
+  async processSideEffect(payload: SideEffectPayload): Promise<Result<void, DbError>> {
     const { signal, arc } = payload;
     const accountId = signal.accountId;
 
@@ -988,7 +953,7 @@ export class SignalProcessor {
    * Logs ERROR for primary cluster failures, WARN for non-primary.
    * Upserts are idempotent (ON CONFLICT DO UPDATE) — safe to re-run on every attempt.
    */
-  async executeAuroraUpserts(signal: Signal, arc: Arc): Promise<Result<void, ProcessError>> {
+  async executeAuroraUpserts(signal: Signal, arc: Arc): Promise<Result<void, DbError>> {
     const activeClusters = getActiveClusters();
     this.logger.trackPoint("aurora_upsert_start", { clusterCount: activeClusters.length });
 
@@ -1024,7 +989,7 @@ export class SignalProcessor {
           this.logger.error("Failed to upsert embedding to Aurora cluster. The Data API call returned an error for the target cluster. This signal's embedding won't be searchable on that cluster until the next retry succeeds. Check Aurora cluster health in the AWS console.", { code: "processor.aurora_upsert_failed", accountId: signal.accountId, registryId: failure.cluster.registryId, error: failure.error });
         }
       }
-      return err(processError(signal.id));
+      return err(dbError("Aurora upsert failed for one or more clusters"));
     }
 
     this.logger.trackPoint("aurora_upsert_all_complete");
@@ -1036,13 +1001,13 @@ export class SignalProcessor {
    * If the SQS send fails, returns err — this causes a batchItemFailure so the
    * message is retried (Aurora succeeded but side-effects won't fire without dispatch).
    */
-  async dispatchSideEffects(signal: Signal, arc: Arc): Promise<Result<void, ProcessError>> {
+  async dispatchSideEffects(signal: Signal, arc: Arc): Promise<Result<void, DbError>> {
     this.logger.trackPoint("side_effect_dispatch_start");
     const payload: SideEffectPayload = { signal, arc };
     const sendResult = await this.sqsDispatcher.sendMessage(payload);
     if (sendResult.isErr()) {
       this.logger.error("Failed to dispatch side-effect SQS message. Aurora upserts succeeded but side-effects won't fire until the message is retried and dispatch succeeds. Check SQS queue health and permissions.", { code: "processor.side_effect_dispatch_failed", accountId: signal.accountId, signalId: signal.id, arcId: arc.id, error: sendResult.error });
-      return err(processError(signal.id));
+      return err(sendResult.error);
     }
 
     this.logger.info("Side-effect SQS message dispatched.", { code: "processor.side_effect_dispatched", signalId: signal.id, arcId: arc.id, accountId: signal.accountId });

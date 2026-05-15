@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { dbError, notFoundError, invalidResponseError, processError } from "./errors.js";
+import { dbError, notFoundError, invalidResponseError } from "./errors.js";
 
 describe("Error type constructors produce correct kind fields", () => {
   it("dbError wraps an Error with kind 'db_error'", () => {
@@ -21,11 +21,5 @@ describe("Error type constructors produce correct kind fields", () => {
     const result = invalidResponseError();
     expect(result.kind).toBe("invalid_response");
     expect(Object.keys(result)).toEqual(["kind"]);
-  });
-
-  it("processError stores messageId with kind 'process_error'", () => {
-    const result = processError("msg-abc-456");
-    expect(result.kind).toBe("process_error");
-    expect(result.messageId).toBe("msg-abc-456");
   });
 });

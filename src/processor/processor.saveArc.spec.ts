@@ -10,7 +10,7 @@ import type { MultiClusterAuroraWriter } from "../database/multi-cluster-aurora-
 import type { ArcMatcher } from "./processor.js";
 import type { S3RetentionService } from "../embedding/s3-retention-service.js";
 import type { Arc, Alias, EmailTemplate, Rule } from "../types/index.js";
-import type { SQSEvent } from "aws-lambda";
+import type { InboundSignalMessage } from "./processor.js";
 import { createMockLogger } from "../testing/mock-logger.js";
 
 vi.mock("../embedding/cluster-registry.js", () => {
@@ -34,28 +34,15 @@ vi.mock("../embedding/cluster-registry.js", () => {
 describe("Single saveArc call with complete mutations", () => {
   const TEST_ACCOUNT_ID = "acct-savearc";
 
-  function makeSqsEvent(sesMessageId: string, recipientEmail: string): SQSEvent {
-    const notification = {
-      accountId: TEST_ACCOUNT_ID,
-      mail: { messageId: sesMessageId, timestamp: "2024-01-15T10:00:00Z", destination: [recipientEmail] },
-      receipt: {
-        dkimVerdict: { status: "PASS" },
-        dmarcVerdict: { status: "PASS" },
-        action: { bucketName: "test-bucket", objectKey: `emails/${sesMessageId}` },
-      },
-    };
+  function makeMessage(sesMessageId: string, recipientEmail: string): InboundSignalMessage {
     return {
-      Records: [{
-        messageId: "sqs-0",
-        receiptHandle: "handle",
-        body: JSON.stringify({ Message: JSON.stringify(notification) }),
-        attributes: { ApproximateReceiveCount: "1", SentTimestamp: "1234567890", SenderId: "sender", ApproximateFirstReceiveTimestamp: "1234567890" },
-        messageAttributes: {},
-        md5OfBody: "",
-        eventSource: "aws:sqs",
-        eventSourceARN: "arn:aws:sqs:us-east-1:123:queue",
-        awsRegion: "us-east-1",
-      }],
+      accountId: TEST_ACCOUNT_ID,
+      s3Key: `emails/${sesMessageId}`,
+      sesMessageId,
+      timestamp: "2024-01-15T10:00:00Z",
+      destination: [recipientEmail],
+      dkimVerdict: "PASS",
+      dmarcVerdict: "PASS",
     };
   }
 
@@ -210,7 +197,7 @@ describe("Single saveArc call with complete mutations", () => {
       retentionService: retentionService ?? { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "emails/test-ses-id" }) },
     });
 
-    await processor.process(makeSqsEvent("test-ses-id", recipientEmail));
+    await processor.processRecord(makeMessage("test-ses-id", recipientEmail), 1);
 
     expect(saveArcCallCount).toBe(1);
     expect(savedArc).not.toBeNull();

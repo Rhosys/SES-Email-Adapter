@@ -14,9 +14,8 @@ import { BedrockRuntimeClient, InvokeModelCommand } from "@aws-sdk/client-bedroc
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 import { Readable } from "stream";
 import { sdkStreamMixin } from "@smithy/util-stream";
-import type { SQSEvent, SQSRecord } from "aws-lambda";
 import { createMockLogger } from "../../testing/mock-logger.js";
-import { ReindexWorker } from "./reindex-worker.js";
+import { ReindexWorker, type ReindexSegmentMessage } from "./reindex-worker.js";
 import { ok } from "../../errors.js";
 
 // ---------------------------------------------------------------------------
@@ -181,31 +180,9 @@ const unrecoverableExpiredS3 = {
 };
 
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function makeSqsRecord(body: unknown): SQSRecord {
-  return {
-    messageId: "msg-prop-12",
-    receiptHandle: "handle-1",
-    body: JSON.stringify(body),
-    attributes: {
-      ApproximateReceiveCount: "1",
-      SentTimestamp: "0",
-      SenderId: "sender",
-      ApproximateFirstReceiveTimestamp: "0",
-    },
-    messageAttributes: {},
-    md5OfBody: "",
-    eventSource: "aws:sqs",
-    eventSourceARN: "arn:aws:sqs:eu-central-1:123:reindex-queue",
-    awsRegion: "eu-central-1",
-  };
-}
-
-function makeSqsEvent(records: SQSRecord[]): SQSEvent {
-  return { Records: records };
-}
 
 function makeS3Body(content: string) {
   const stream = new Readable();
@@ -324,17 +301,15 @@ describe("Property 12: Backfill targets exactly the signals missing the new mode
       dimensions: 1024,
     }));
 
-    const event = makeSqsEvent([
-      makeSqsRecord({
-        jobId: "job-prop-12",
-        segment: 0,
-        totalSegments: 1,
-        targetRegistryId: TARGET_CLUSTER_ID,
-        modelId: TARGET_MODEL_ID,
-      }),
-    ]);
+    const message: ReindexSegmentMessage = {
+      jobId: "job-prop-12",
+      segment: 0,
+      totalSegments: 1,
+      targetRegistryId: TARGET_CLUSTER_ID,
+      modelId: TARGET_MODEL_ID,
+    };
 
-    await worker.process(event);
+    await worker.processSegmentMessage(message);
 
     // Bedrock is never called for cached signals (only for s3Retrievable)
     expect(mockGenerateForModel).toHaveBeenCalledTimes(s3Retrievable.length);

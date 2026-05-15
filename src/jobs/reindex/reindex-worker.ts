@@ -7,7 +7,6 @@
 // it back to the DynamoDB cache, and upserts to Aurora.
 // ---------------------------------------------------------------------------
 
-import type { SQSRecord } from "aws-lambda";
 import { ScanCommand } from "@aws-sdk/lib-dynamodb";
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 import { dynamo, SIGNALS_TABLE } from "../../database/shared.js";
@@ -19,9 +18,8 @@ import { BedrockEmbeddingGenerator } from "../../embedding/embedding-generator.j
 import { BedrockRuntimeClient } from "@aws-sdk/client-bedrock-runtime";
 import { ArcDatabase } from "../../database/arc-database.js";
 import type { Signal } from "../../types/index.js";
-import type { Result } from "../../errors.js";
-import { ok, err, processError, dbError } from "../../errors.js";
-import type { ProcessError } from "../../errors.js";
+import type { DbError, Result } from "../../errors.js";
+import { ok, err, dbError } from "../../errors.js";
 import type { Logger } from "../../logger.js";
 
 // ---------------------------------------------------------------------------
@@ -71,24 +69,16 @@ function isNoSuchKeyError(e: unknown): boolean {
 export class ReindexWorker {
   constructor(private readonly logger: Logger) {}
 
-  async processRecord(record: SQSRecord): Promise<Result<void, ProcessError>> {
-    let message: ReindexSegmentMessage;
-    try {
-      message = JSON.parse(record.body) as ReindexSegmentMessage;
-    } catch (e) {
-      this.logger.error("Failed to parse reindex segment message from SQS record. The JSON payload could not be deserialized. This message will be retried.", { code: "reindex.worker.parse_failed", error: e, record });
-      return err(processError(record.messageId));
-    }
-
+  async processSegmentMessage(message: ReindexSegmentMessage): Promise<Result<void, DbError>> {
     const { segment, totalSegments, targetRegistryId, modelId } = message;
 
     // Validate target cluster exists in registry
     const cluster = getRegistryById(targetRegistryId);
-    if (!cluster) return err(processError(record.messageId));
+    if (!cluster) return err(dbError(`Cluster "${targetRegistryId}" not found in registry`));
 
     // Process segment
     const segmentResult = await this.processSegment(segment, totalSegments, targetRegistryId, modelId);
-    if (segmentResult.isErr()) return err(processError(record.messageId));
+    if (segmentResult.isErr()) return err(dbError("segment processing failed"));
 
     return ok(undefined);
   }
@@ -98,7 +88,7 @@ export class ReindexWorker {
     totalSegments: number,
     targetRegistryId: string,
     modelId: string,
-  ): Promise<Result<void, ProcessError>> {
+  ): Promise<Result<void, DbError>> {
     let lastEvaluatedKey: Record<string, unknown> | undefined;
     const failures: Array<{ signalId: string; reason: string }> = [];
 
@@ -126,7 +116,7 @@ export class ReindexWorker {
       } while (lastEvaluatedKey);
     } catch (e) {
       this.logger.error("DynamoDB scan failed during reindex segment processing. The segment will be retried.", { code: "reindex.worker.scan_failed", error: e, segment, totalSegments, targetRegistryId });
-      return err(processError(""));
+      return err(dbError(e));
     }
 
     if (failures.length > 0) {

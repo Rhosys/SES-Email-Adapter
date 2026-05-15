@@ -8,11 +8,10 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import fc from "fast-check";
-import type { SQSEvent } from "aws-lambda";
 import { ok } from "../errors.js";
 import { SignalProcessor, SYSTEM_RULES } from "./processor.js";
 import { JsonLogicRuleEvaluator } from "./rule-evaluator.js";
-import type { ProcessorDatabase, ArcMatcher } from "./processor.js";
+import type { InboundSignalMessage, ProcessorDatabase, ArcMatcher } from "./processor.js";
 import type { MimeParser } from "./mime.js";
 import type { SignalClassifier, ClassificationOutput } from "../classifier/classifier.js";
 import type { EmbeddingGenerator } from "../embedding/embedding-generator.js";
@@ -125,37 +124,15 @@ function makeStore(): ProcessorDatabase {
   };
 }
 
-function makeSqsEvent(sesMessageId: string): SQSEvent {
-  const notification = {
-    accountId: TEST_ACCOUNT_ID,
-    mail: {
-      messageId: sesMessageId,
-      timestamp: "2024-01-15T10:00:00Z",
-      destination: ["user@example.com"],
-    },
-    receipt: {
-      dkimVerdict: { status: "PASS" },
-      dmarcVerdict: { status: "PASS" },
-      action: { bucketName: "test-bucket", objectKey: `emails/${sesMessageId}` },
-    },
-  };
+function makeMessage(sesMessageId: string): InboundSignalMessage {
   return {
-    Records: [{
-      messageId: "sqs-1",
-      receiptHandle: "handle",
-      body: JSON.stringify({ Message: JSON.stringify(notification) }),
-      attributes: {
-        ApproximateReceiveCount: "1",
-        SentTimestamp: "1234567890",
-        SenderId: "sender",
-        ApproximateFirstReceiveTimestamp: "1234567890",
-      },
-      messageAttributes: {},
-      md5OfBody: "",
-      eventSource: "aws:sqs",
-      eventSourceARN: "arn:aws:sqs:us-east-1:123:queue",
-      awsRegion: "us-east-1",
-    }],
+    accountId: TEST_ACCOUNT_ID,
+    s3Key: `emails/${sesMessageId}`,
+    sesMessageId,
+    timestamp: "2024-01-15T10:00:00Z",
+    destination: ["user@example.com"],
+    dkimVerdict: "PASS",
+    dmarcVerdict: "PASS",
   };
 }
 
@@ -212,7 +189,7 @@ describe("Feature: split-embedding-pipeline, Property 2: Primary vector flows to
             sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
           });
 
-          await processor.process(makeSqsEvent("ses-prop2-test"));
+          await processor.processRecord(makeMessage("ses-prop2-test"), 1);
 
           // Arc matcher must have been called
           expect(arcMatcher.findMatch).toHaveBeenCalledOnce();

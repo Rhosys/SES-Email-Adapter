@@ -12,9 +12,8 @@ import { DynamoDBDocumentClient, ScanCommand } from "@aws-sdk/lib-dynamodb";
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 import { Readable } from "stream";
 import { sdkStreamMixin } from "@smithy/util-stream";
-import type { SQSEvent, SQSRecord } from "aws-lambda";
 import { createMockLogger, type MockLogger } from "../../testing/mock-logger.js";
-import { ReindexWorker } from "./reindex-worker.js";
+import { ReindexWorker, type ReindexSegmentMessage } from "./reindex-worker.js";
 import { err, ok } from "../../errors.js";
 import type { BedrockError } from "../../errors.js";
 
@@ -109,29 +108,6 @@ const s3Mock = mockClient(S3Client);
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeSqsRecord(body: unknown): SQSRecord {
-  return {
-    messageId: "msg-prop-7",
-    receiptHandle: "handle-1",
-    body: JSON.stringify(body),
-    attributes: {
-      ApproximateReceiveCount: "1",
-      SentTimestamp: "0",
-      SenderId: "sender",
-      ApproximateFirstReceiveTimestamp: "0",
-    },
-    messageAttributes: {},
-    md5OfBody: "",
-    eventSource: "aws:sqs",
-    eventSourceARN: "arn:aws:sqs:eu-west-1:123:reindex-queue",
-    awsRegion: "eu-west-1",
-  };
-}
-
-function makeSqsEvent(records: SQSRecord[]): SQSEvent {
-  return { Records: records };
-}
-
 function makeS3Body(content: string) {
   const stream = new Readable();
   stream.push(content);
@@ -222,23 +198,21 @@ describe("Property 7: Reindex worker propagates Result errors", () => {
         };
         mockGenerateForModel.mockResolvedValue(err(bedrockErr));
 
-        const event = makeSqsEvent([
-          makeSqsRecord({
-            jobId: "job-prop-7",
-            segment: 0,
-            totalSegments: 1,
-            targetRegistryId: TARGET_CLUSTER_ID,
-            modelId: TARGET_MODEL_ID,
-          }),
-        ]);
+        const message: ReindexSegmentMessage = {
+          jobId: "job-prop-7",
+          segment: 0,
+          totalSegments: 1,
+          targetRegistryId: TARGET_CLUSTER_ID,
+          modelId: TARGET_MODEL_ID,
+        };
 
         // The worker must NOT throw — it handles the error via Result path
-        const response = await worker.process(event);
+        const response = await worker.processSegmentMessage(message);
 
         // Worker completes without throwing (batch item failures are empty because
         // per-signal failures are logged but the segment itself succeeds)
         expect(response).toBeDefined();
-        expect(response.batchItemFailures).toBeDefined();
+        expect(response.isOk()).toBe(true);
 
         // The error was propagated via Result — no Aurora upsert attempted
         expect(mockUpsertEmbedding).not.toHaveBeenCalled();
