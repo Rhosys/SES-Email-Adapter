@@ -29,8 +29,8 @@ import { multiClusterWriter } from "./database/multi-cluster-aurora-writer.js";
 import { S3RetentionServiceImpl } from "./embedding/s3-retention-service.js";
 import { ReindexWorker } from "./jobs/reindex/reindex-worker.js";
 import { SesReplySender } from "./notifier/ses-reply-sender.js";
+import { ReindexDispatcher } from "./jobs/reindex/reindex-dispatcher.js";
 import { RequestLogger } from "./logger.js";
-import { handleJobDispatch } from "./api/job-dispatch-handler.js";
 
 // ---------------------------------------------------------------------------
 // AWS SDK clients (reused across warm invocations)
@@ -139,6 +139,7 @@ const app = createApp({
   access: new AuthressAccessService(),
   logger,
   verificationMailer: sesVerificationMailer,
+  jobDispatcher: new ReindexDispatcher(),
 });
 
 // ---------------------------------------------------------------------------
@@ -172,9 +173,6 @@ export async function handler(
   }
   if (isWebSocketEvent(event)) {
     return handleWebSocket(event as APIGatewayProxyWebsocketEventV2);
-  }
-  if (isReindexApiEvent(event as APIGatewayProxyEventV2)) {
-    return handleJobDispatch(event as APIGatewayProxyEventV2);
   }
   return honoToApiGateway(app, event as APIGatewayProxyEventV2);
 }
@@ -296,16 +294,6 @@ function isFeedbackEvent(event: SQSEvent): boolean {
 
 function isReindexEvent(event: SQSEvent): boolean {
   return (event.Records[0]?.eventSourceARN ?? "").includes("-reindex");
-}
-
-function isReindexApiEvent(event: APIGatewayProxyEventV2): boolean {
-  const http = (event as APIGatewayProxyEventV2).requestContext?.http;
-  if (!http) return false;
-  const method = http.method;
-  const path = (event as APIGatewayProxyEventV2).rawPath ?? "";
-  if (method === "POST" && /^\/reindex\/?$/.test(path)) return true;
-  if (method === "GET" && /^\/reindex\/[^/]+\/?$/.test(path)) return true;
-  return false;
 }
 
 async function honoToApiGateway(
