@@ -19,7 +19,7 @@ import { ok } from "../../errors.js";
 
 const { mockUpsertEmbedding, mockAddEmbeddingToCache, mockGenerateForModel, mockMimeParse } = vi.hoisted(() => ({
   mockUpsertEmbedding: vi.fn().mockResolvedValue(undefined),
-  mockAddEmbeddingToCache: vi.fn().mockResolvedValue(undefined),
+  mockAddEmbeddingToCache: vi.fn(),
   mockGenerateForModel: vi.fn(),
   mockMimeParse: vi.fn(),
 }));
@@ -61,6 +61,11 @@ vi.mock("../../embedding/embedding-generator.js", () => ({
 vi.mock("../../processor/mime.js", () => ({
   MailparserMimeParser: class {
     parse = mockMimeParse;
+    parseBuffer = async (...args: unknown[]) => {
+      const { ok: okFn } = await import("../../errors.js");
+      const result = await mockMimeParse(...args);
+      return okFn(result);
+    };
   },
 }));
 
@@ -159,7 +164,7 @@ describe("ReindexWorker — pure-copy mode", () => {
     ddbMock.reset();
     s3Mock.reset();
     mockUpsertEmbedding.mockClear();
-    mockAddEmbeddingToCache.mockClear();
+    mockAddEmbeddingToCache.mockClear().mockResolvedValue(ok(undefined));
     mockGenerateForModel.mockClear();
     mockMimeParse.mockClear();
   });
@@ -459,7 +464,7 @@ describe("ReindexWorker — regenerate-from-S3 mode", () => {
     ddbMock.reset();
     s3Mock.reset();
     mockUpsertEmbedding.mockClear();
-    mockAddEmbeddingToCache.mockClear();
+    mockAddEmbeddingToCache.mockClear().mockResolvedValue(ok(undefined));
     mockGenerateForModel.mockClear();
     mockMimeParse.mockClear();
   });

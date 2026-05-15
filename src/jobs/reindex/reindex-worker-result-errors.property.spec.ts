@@ -66,6 +66,11 @@ vi.mock("../../embedding/embedding-generator.js", () => ({
 vi.mock("../../processor/mime.js", () => ({
   MailparserMimeParser: class {
     parse = mockMimeParse;
+    parseBuffer = async (...args: unknown[]) => {
+      const { ok: okFn } = await import("../../errors.js");
+      const result = await mockMimeParse(...args);
+      return okFn(result);
+    };
   },
 }));
 

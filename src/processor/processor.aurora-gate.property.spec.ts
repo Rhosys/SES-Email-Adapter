@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import type { SQSEvent } from "aws-lambda";
-import { ok, err } from "neverthrow";
+import { ok, err } from "../errors.js";
 import { SignalProcessor, SYSTEM_RULES } from "./processor.js";
 import { JsonLogicRuleEvaluator } from "./rule-evaluator.js";
 import type { ProcessorDatabase, ArcMatcher, SqsDispatcher } from "./processor.js";
@@ -103,7 +103,7 @@ describe("Feature: signal-processor-retry-resilience, Property 4: Arc saved befo
 
   function makeMimeParser(): MimeParser {
     return {
-      parse: vi.fn().mockResolvedValue({
+      parse: vi.fn().mockResolvedValue(ok({
         from: { address: "sender@external.com", name: "Sender" },
         to: [{ address: "user@example.com" }],
         cc: [],
@@ -113,7 +113,7 @@ describe("Feature: signal-processor-retry-resilience, Property 4: Arc saved befo
         attachments: [],
         headers: {},
         sentAt: "2024-01-15T09:00:00Z",
-      }),
+      })),
     };
   }
 
@@ -367,7 +367,7 @@ describe("Feature: signal-processor-retry-resilience, Property 6: Aurora failure
 
   function makeMimeParser(): MimeParser {
     return {
-      parse: vi.fn().mockResolvedValue({
+      parse: vi.fn().mockResolvedValue(ok({
         from: { address: "sender@external.com", name: "Sender" },
         to: [{ address: "user@example.com" }],
         cc: [],
@@ -377,7 +377,7 @@ describe("Feature: signal-processor-retry-resilience, Property 6: Aurora failure
         attachments: [],
         headers: {},
         sentAt: "2024-01-15T09:00:00Z",
-      }),
+      })),
     };
   }
 
@@ -488,7 +488,7 @@ describe("Feature: signal-processor-retry-resilience, Property 6: Aurora failure
     expect(auroraErrorLog).toBeDefined();
     expect(auroraErrorLog!.context!.registryId).toBe("cluster-a");
     expect(auroraErrorLog!.context!.error).toBeDefined();
-    expect(String(auroraErrorLog!.context!.error)).toContain("Connection timeout on primary");
+    expect(String((auroraErrorLog!.context!.error as { cause: unknown }).cause)).toContain("Connection timeout on primary");
   });
 
   it.each(SECONDARY_FAILURE_CASES)("non-primary cluster failure logs at ERROR level with cluster ID and error message, and returns batchItemFailure ($label)", async ({ vectorA, vectorB, sesMessageId }) => {
@@ -535,7 +535,7 @@ describe("Feature: signal-processor-retry-resilience, Property 6: Aurora failure
     expect(auroraErrorLog).toBeDefined();
     expect(auroraErrorLog!.context!.registryId).toBe("cluster-b");
     expect(auroraErrorLog!.context!.error).toBeDefined();
-    expect(String(auroraErrorLog!.context!.error)).toContain("Throttled on secondary");
+    expect(String((auroraErrorLog!.context!.error as { cause: unknown }).cause)).toContain("Throttled on secondary");
   });
 
   it.each(BOTH_FAIL_CASES)("both clusters failing logs ERROR for all failures, returns batchItemFailure ($label)", async ({ vectorA, vectorB, sesMessageId }) => {
@@ -639,7 +639,7 @@ describe("Feature: signal-processor-retry-resilience, Property 5: Side-effects d
 
   function makeMimeParser(): MimeParser {
     return {
-      parse: vi.fn().mockResolvedValue({
+      parse: vi.fn().mockResolvedValue(ok({
         from: { address: "sender@external.com", name: "Sender" },
         to: [{ address: "user@example.com" }],
         cc: [],
@@ -649,7 +649,7 @@ describe("Feature: signal-processor-retry-resilience, Property 5: Side-effects d
         attachments: [],
         headers: {},
         sentAt: "2024-01-15T09:00:00Z",
-      }),
+      })),
     };
   }
 
@@ -928,7 +928,7 @@ describe("Feature: signal-processor-retry-resilience, Property 7: Partial Aurora
 
   function makeMimeParser(): MimeParser {
     return {
-      parse: vi.fn().mockResolvedValue({
+      parse: vi.fn().mockResolvedValue(ok({
         from: { address: "sender@external.com", name: "Sender" },
         to: [{ address: "user@example.com" }],
         cc: [],
@@ -938,7 +938,7 @@ describe("Feature: signal-processor-retry-resilience, Property 7: Partial Aurora
         attachments: [],
         headers: {},
         sentAt: "2024-01-15T09:00:00Z",
-      }),
+      })),
     };
   }
 
