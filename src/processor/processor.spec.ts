@@ -97,7 +97,7 @@ function makeSenderEntry(domain: string, aliasAddress = "user@example.com"): imp
 
 function makeMimeParser(): MimeParser {
   return {
-    parse: vi.fn().mockResolvedValue({
+    parse: vi.fn().mockReturnValue(okAsync({
       from: { address: "sender@example.com", name: "Sender" },
       to: [{ address: "user@example.com" }],
       cc: [],
@@ -107,7 +107,7 @@ function makeMimeParser(): MimeParser {
       attachments: [],
       headers: { "authentication-results": "spf=pass dkim=pass" },
       sentAt: "2024-01-15T09:00:00Z",
-    }),
+    })),
   };
 }
 
@@ -119,12 +119,10 @@ function makeClassifier(): Pick<SignalClassifier, "classify"> {
 
 function makeEmbeddingGenerator(): EmbeddingGenerator {
   return {
-    generateForActiveClusters: vi.fn().mockResolvedValue([
-      ok({ modelId: "amazon.titan-embed-text-v2:0", vector: new Array(1024).fill(0.1), dimensions: 1024 }),
-    ]),
     generateForModel: vi.fn().mockResolvedValue(
-      { modelId: "amazon.titan-embed-text-v2:0", vector: new Array(1024).fill(0.1), dimensions: 1024 } as EmbeddingResult,
+      ok({ modelId: "amazon.titan-embed-text-v2:0", vector: new Array(1024).fill(0.1), dimensions: 1024 }),
     ),
+    generateForSecondaryClusters: vi.fn().mockResolvedValue([]),
   };
 }
 
@@ -315,7 +313,7 @@ describe("SignalProcessor", () => {
     it("embeds the signal content and runs arc matching", async () => {
       await processor.process(makeSqsEvent([{}]));
 
-      expect(embeddingGenerator.generateForActiveClusters).toHaveBeenCalledOnce();
+      expect(embeddingGenerator.generateForModel).toHaveBeenCalledOnce();
       // personal workflow has no grouping key — falls back to vector search
       expect(arcMatcher.findMatch).toHaveBeenCalledOnce();
     });
@@ -1901,7 +1899,7 @@ describe("SignalProcessor", () => {
 
   describe("forwarded email detection", () => {
     it("attaches original:* label when X-Forwarded-To header is present", async () => {
-      vi.mocked(mimeParser.parse).mockResolvedValueOnce({
+      vi.mocked(mimeParser.parse).mockReturnValueOnce(okAsync({
         from: { address: "sender@example.com", name: "Sender" },
         to: [{ address: "user@example.com" }],
         cc: [],
@@ -1909,7 +1907,7 @@ describe("SignalProcessor", () => {
         textBody: "Hello",
         attachments: [],
         headers: { "x-forwarded-to": "john@gmail.com" },
-      });
+      }));
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -1918,7 +1916,7 @@ describe("SignalProcessor", () => {
     });
 
     it("extracts address from X-Original-To header with angle brackets", async () => {
-      vi.mocked(mimeParser.parse).mockResolvedValueOnce({
+      vi.mocked(mimeParser.parse).mockReturnValueOnce(okAsync({
         from: { address: "sender@example.com", name: "Sender" },
         to: [{ address: "user@example.com" }],
         cc: [],
@@ -1926,7 +1924,7 @@ describe("SignalProcessor", () => {
         textBody: "Hello",
         attachments: [],
         headers: { "x-original-to": "<alice@example.com>" },
-      });
+      }));
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -1935,7 +1933,7 @@ describe("SignalProcessor", () => {
     });
 
     it("extracts address from Resent-To header with display name", async () => {
-      vi.mocked(mimeParser.parse).mockResolvedValueOnce({
+      vi.mocked(mimeParser.parse).mockReturnValueOnce(okAsync({
         from: { address: "sender@example.com", name: "Sender" },
         to: [{ address: "user@example.com" }],
         cc: [],
@@ -1943,7 +1941,7 @@ describe("SignalProcessor", () => {
         textBody: "Hello",
         attachments: [],
         headers: { "resent-to": "Bob Smith <bob@example.com>" },
-      });
+      }));
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -1952,7 +1950,7 @@ describe("SignalProcessor", () => {
     });
 
     it("X-Forwarded-To takes priority over X-Original-To when both are present", async () => {
-      vi.mocked(mimeParser.parse).mockResolvedValueOnce({
+      vi.mocked(mimeParser.parse).mockReturnValueOnce(okAsync({
         from: { address: "sender@example.com", name: "Sender" },
         to: [{ address: "user@example.com" }],
         cc: [],
@@ -1963,7 +1961,7 @@ describe("SignalProcessor", () => {
           "x-forwarded-to": "primary@gmail.com",
           "x-original-to": "secondary@gmail.com",
         },
-      });
+      }));
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -1973,7 +1971,7 @@ describe("SignalProcessor", () => {
     });
 
     it("does not attach any original:* label when no forwarding headers are present", async () => {
-      vi.mocked(mimeParser.parse).mockResolvedValueOnce({
+      vi.mocked(mimeParser.parse).mockReturnValueOnce(okAsync({
         from: { address: "sender@example.com", name: "Sender" },
         to: [{ address: "user@example.com" }],
         cc: [],
@@ -1981,7 +1979,7 @@ describe("SignalProcessor", () => {
         textBody: "Hello",
         attachments: [],
         headers: { "authentication-results": "spf=pass" },
-      });
+      }));
 
       await processor.process(makeSqsEvent([{}]));
 

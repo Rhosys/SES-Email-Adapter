@@ -14,8 +14,11 @@ export interface ParsedMime {
   sentAt?: string;
 }
 
+import type { ResultAsync } from "neverthrow";
+import type { DbError } from "../errors.js";
+
 export interface MimeParser {
-  parse(s3Key: string): Promise<ParsedMime>;
+  parse(s3Key: string): ResultAsync<ParsedMime, DbError>;
 }
 
 export class MailparserMimeParser {

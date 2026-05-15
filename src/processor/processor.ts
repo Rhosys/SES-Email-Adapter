@@ -6,7 +6,7 @@ import type { Result } from "neverthrow";
 import { ok, err, dbError, processError } from "../errors.js";
 import type { DbError, InvalidResponseError, ProcessError } from "../errors.js";
 import type { Signal, Arc, Rule, Workflow, WorkflowData, Alias, AliasSender, SenderMode, AccountFilteringConfig, SignalSource, SignalStatus, Domain, ArcUrgency, SenderFilterMode, MatchedRuleResult } from "../types/index.js";
-import type { MimeParser } from "./mime.js";
+import type { MimeParser, ParsedMime } from "./mime.js";
 import { buildEmbedText, extractEmbedTextInput } from "../embedding/embed-text.js";
 import type { SignalClassifier } from "../classifier/classifier.js";
 import type { EmbeddingGenerator } from "../embedding/embedding-generator.js";
@@ -591,7 +591,9 @@ export class SignalProcessor {
     if (existingResult.value) return ok(undefined);
 
     // 2. Parse MIME
-    const parsed = await this.mimeParser.parse(s3Key);
+    const parsedResult = await this.mimeParser.parse(s3Key);
+    if (parsedResult.isErr()) return err(parsedResult.error);
+    const parsed = parsedResult.value;
     this.logger.trackPoint("email_parsed");
 
     const recipientAddress = destination[0] ?? "";
@@ -1163,7 +1165,7 @@ function buildSignal(opts: {
   accountId: string;
   sesMessageId: string;
   recipientAddress: string;
-  parsed: Awaited<ReturnType<MimeParser["parse"]>>;
+  parsed: ParsedMime;
   classification: Awaited<ReturnType<SignalClassifier["classify"]>>;
   s3Key: string;
   receivedAt: string;

@@ -13,7 +13,10 @@ vi.mock("./cluster-registry.js", () => ({
     { clusterId: "cluster-a", clusterArn: "arn:aws:rds:eu-central-1:111:cluster:cluster-a", secretArn: "arn:aws:secretsmanager:eu-central-1:111:secret:cluster-a", databaseName: "signals", modelId: "amazon.titan-embed-text-v2:0", dimensions: 1024, active: true },
     { clusterId: "cluster-b", clusterArn: "arn:aws:rds:eu-central-1:111:cluster:cluster-b", secretArn: "arn:aws:secretsmanager:eu-central-1:111:secret:cluster-b", databaseName: "signals", modelId: "amazon.titan-embed-text-v3:0", dimensions: 1536, active: true },
   ],
-  getReadCluster: () => ({ clusterId: "cluster-a", modelId: "amazon.titan-embed-text-v2:0" }),
+  getReadCluster: () => ({ clusterId: "cluster-a", clusterArn: "arn:aws:rds:eu-west-1:111:cluster:cluster-a", secretArn: "arn:aws:secretsmanager:eu-west-1:111:secret:cluster-a", databaseName: "signals", modelId: "amazon.titan-embed-text-v2:0", dimensions: 1024, active: true }),
+  getSecondaryClusters: () => [
+    { clusterId: "cluster-b", clusterArn: "arn:aws:rds:eu-west-1:111:cluster:cluster-b", secretArn: "arn:aws:secretsmanager:eu-west-1:111:secret:cluster-b", databaseName: "signals", modelId: "amazon.titan-embed-text-v3:0", dimensions: 1536, active: true },
+  ],
 }));
 
 describe("Active cluster set drives embedding generation", () => {
@@ -26,24 +29,37 @@ describe("Active cluster set drives embedding generation", () => {
     generator = new BedrockEmbeddingGenerator(new BedrockRuntimeClient({}));
   });
 
-  it("generates exactly one embedding per active cluster", async () => {
+  it("generateForModel returns ok with correct modelId and dimensions", async () => {
     bedrockMock.on(InvokeModelCommand).resolves({ body: mockBody({ embedding: [0.1, 0.2, 0.3] }) });
 
-    const results = await generator.generateForActiveClusters("test embed text");
+    const result = await generator.generateForModel("test embed text", "amazon.titan-embed-text-v2:0");
 
-    expect(results).toHaveLength(2);
-    expect(results.every(r => r.isOk())).toBe(true);
-    const values = results.filter(r => r.isOk()).map(r => r.value);
-    const modelIds = values.map((r) => r.modelId);
-    expect(modelIds).toContain("amazon.titan-embed-text-v2:0");
-    expect(modelIds).toContain("amazon.titan-embed-text-v3:0");
-    expect(values.map((r) => r.dimensions)).toEqual(expect.arrayContaining([1024, 1536]));
+    expect(result.isOk()).toBe(true);
+    if (result.isOk()) {
+      expect(result.value.modelId).toBe("amazon.titan-embed-text-v2:0");
+      expect(result.value.dimensions).toBe(1024);
+      expect(result.value.vector).toEqual([0.1, 0.2, 0.3]);
+    }
+  });
+
+  it("generateForSecondaryClusters generates one embedding per secondary cluster", async () => {
+    bedrockMock.on(InvokeModelCommand).resolves({ body: mockBody({ embedding: [0.1, 0.2, 0.3] }) });
+
+    const results = await generator.generateForSecondaryClusters("test embed text");
+
+    expect(results).toHaveLength(1);
+    expect(results[0]!.isOk()).toBe(true);
+    if (results[0]!.isOk()) {
+      expect(results[0]!.value.modelId).toBe("amazon.titan-embed-text-v3:0");
+      expect(results[0]!.value.dimensions).toBe(1536);
+    }
   });
 
   it("does not call Bedrock for inactive clusters", async () => {
     bedrockMock.on(InvokeModelCommand).resolves({ body: mockBody({ embedding: [0.1] }) });
 
-    await generator.generateForActiveClusters("test text");
+    await generator.generateForModel("test text", "amazon.titan-embed-text-v2:0");
+    await generator.generateForSecondaryClusters("test text");
 
     const calls = bedrockMock.commandCalls(InvokeModelCommand);
     expect(calls).toHaveLength(2);
@@ -54,7 +70,8 @@ describe("Active cluster set drives embedding generation", () => {
   it("calls Bedrock with normalize=true for all active clusters", async () => {
     bedrockMock.on(InvokeModelCommand).resolves({ body: mockBody({ embedding: [0.1] }) });
 
-    await generator.generateForActiveClusters("test");
+    await generator.generateForModel("test", "amazon.titan-embed-text-v2:0");
+    await generator.generateForSecondaryClusters("test");
 
     const calls = bedrockMock.commandCalls(InvokeModelCommand);
     calls.forEach((call) => {
@@ -66,7 +83,8 @@ describe("Active cluster set drives embedding generation", () => {
   it("calls Bedrock with the correct dimensions per model", async () => {
     bedrockMock.on(InvokeModelCommand).resolves({ body: mockBody({ embedding: [0.1] }) });
 
-    await generator.generateForActiveClusters("test");
+    await generator.generateForModel("test", "amazon.titan-embed-text-v2:0");
+    await generator.generateForSecondaryClusters("test");
 
     const calls = bedrockMock.commandCalls(InvokeModelCommand);
     const call0Body = JSON.parse(new TextDecoder().decode(calls[0]!.args[0].input.body as Uint8Array));
@@ -77,8 +95,8 @@ describe("Active cluster set drives embedding generation", () => {
   it("produces deterministic results for the same input", async () => {
     bedrockMock.on(InvokeModelCommand).resolves({ body: mockBody({ embedding: [0.5, 0.6] }) });
 
-    const results1 = await generator.generateForActiveClusters("same text");
-    const results2 = await generator.generateForActiveClusters("same text");
+    const results1 = await generator.generateForModel("same text", "amazon.titan-embed-text-v2:0");
+    const results2 = await generator.generateForModel("same text", "amazon.titan-embed-text-v2:0");
     expect(results1).toEqual(results2);
   });
 });

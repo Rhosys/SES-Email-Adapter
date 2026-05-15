@@ -15,6 +15,7 @@ export interface ClusterRegistryEntry {
   modelId: string;            // 'amazon.titan-embed-text-v2:0'
   dimensions: number;         // 1024
   active: boolean;            // false = stop writing, retain reads + cache
+  primary: boolean;           // true = the read cluster used for arc matching
 }
 
 // ---------------------------------------------------------------------------
@@ -36,19 +37,12 @@ export const CLUSTER_REGISTRY: readonly ClusterRegistryEntry[] = Object.freeze([
     modelId: 'amazon.titan-embed-text-v2:0',
     dimensions: 1024,
     active: true,
+    primary: true,
   }),
 ]);
 
 // ---------------------------------------------------------------------------
 // Module-load assertion
-// Enforce ≤ 4 active entries at runtime
-// ---------------------------------------------------------------------------
-
-const activeCount = CLUSTER_REGISTRY.filter((c) => c.active).length;
-if (activeCount > 4) {
-  throw new Error(`CLUSTER_REGISTRY has ${activeCount} active entries; maximum is 4`);
-}
-
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -62,14 +56,9 @@ export function getClusterById(clusterId: string): ClusterRegistryEntry | null {
 }
 
 export function getReadCluster(): ClusterRegistryEntry {
-  const active = getActiveClusters();
-  if (active.length === 0) {
-    throw new Error('No active clusters in CLUSTER_REGISTRY');
-  }
-  return active[0]!;
+  return CLUSTER_REGISTRY.find((c) => c.primary)!;
 }
 
 export function getSecondaryClusters(): readonly ClusterRegistryEntry[] {
-  const primary = getReadCluster();
-  return getActiveClusters().filter((c) => c.clusterId !== primary.clusterId);
+  return getActiveClusters().filter((c) => !c.primary);
 }

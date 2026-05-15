@@ -165,12 +165,10 @@ describe("Single saveArc call with complete mutations", () => {
     };
 
     const embeddingGenerator: EmbeddingGenerator = {
-      generateForActiveClusters: vi.fn().mockResolvedValue([
-        ok({ modelId: "amazon.titan-embed-text-v2:0", vector: new Array(1024).fill(0.1), dimensions: 1024 }),
-      ]),
       generateForModel: vi.fn().mockResolvedValue(
-        { modelId: "amazon.titan-embed-text-v2:0", vector: new Array(1024).fill(0.1), dimensions: 1024 } as EmbeddingResult,
+        ok({ modelId: "amazon.titan-embed-text-v2:0", vector: new Array(1024).fill(0.1), dimensions: 1024 }),
       ),
+      generateForSecondaryClusters: vi.fn().mockResolvedValue([]),
     };
 
     const auroraWriter: MultiClusterAuroraWriter = {

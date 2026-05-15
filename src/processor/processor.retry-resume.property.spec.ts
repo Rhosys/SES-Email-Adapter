@@ -796,12 +796,10 @@ describe("Feature: signal-processor-retry-resilience, Property 2: Missing signal
 
   function makeEmbeddingGenerator(): EmbeddingGenerator {
     return {
-      generateForActiveClusters: vi.fn().mockResolvedValue([
-        ok({ modelId: "amazon.titan-embed-text-v2:0", vector: new Array(10).fill(0.1), dimensions: 1024 }),
-      ]),
       generateForModel: vi.fn().mockResolvedValue(
-        { modelId: "amazon.titan-embed-text-v2:0", vector: new Array(10).fill(0.1), dimensions: 1024 },
+        ok({ modelId: "amazon.titan-embed-text-v2:0", vector: new Array(10).fill(0.1), dimensions: 1024 }),
       ),
+      generateForSecondaryClusters: vi.fn().mockResolvedValue([]),
     };
   }
 

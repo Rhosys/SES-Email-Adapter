@@ -97,7 +97,7 @@ function makeStore(): ProcessorDatabase {
 
 function makeMimeParser(): MimeParser {
   return {
-    parse: vi.fn().mockResolvedValue({
+    parse: vi.fn().mockReturnValue(okAsync({
       from: { address: "sender@example.com", name: "Sender" },
       to: [{ address: "user@example.com" }],
       cc: [],
@@ -107,7 +107,7 @@ function makeMimeParser(): MimeParser {
       attachments: [],
       headers: { "authentication-results": "spf=pass dkim=pass" },
       sentAt: "2024-01-15T09:00:00Z",
-    }),
+    })),
   };
 }
 
@@ -117,12 +117,10 @@ function makeClassifier(): Pick<SignalClassifier, "classify"> {
 
 function makeEmbeddingGenerator(): EmbeddingGenerator {
   return {
-    generateForActiveClusters: vi.fn().mockResolvedValue([
-      ok({ modelId: "amazon.titan-embed-text-v2:0", vector: new Array(1024).fill(0.1), dimensions: 1024 }),
-    ]),
     generateForModel: vi.fn().mockResolvedValue(
-      { modelId: "amazon.titan-embed-text-v2:0", vector: new Array(1024).fill(0.1), dimensions: 1024 } as EmbeddingResult,
+      ok({ modelId: "amazon.titan-embed-text-v2:0", vector: new Array(1024).fill(0.1), dimensions: 1024 }),
     ),
+    generateForSecondaryClusters: vi.fn().mockResolvedValue([]),
   };
 }
 
@@ -367,7 +365,7 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
       expect(classifier.classify).toHaveBeenCalledOnce();
 
       // Embedding generated
-      expect(embeddingGenerator.generateForActiveClusters).toHaveBeenCalledOnce();
+      expect(embeddingGenerator.generateForModel).toHaveBeenCalledOnce();
 
       // Arc was saved before signal
       const callOrder: string[] = [];
@@ -440,7 +438,7 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
       // Expensive operations were NOT called
       expect(mimeParser.parse).not.toHaveBeenCalled();
       expect(classifier.classify).not.toHaveBeenCalled();
-      expect(embeddingGenerator.generateForActiveClusters).not.toHaveBeenCalled();
+      expect(embeddingGenerator.generateForModel).not.toHaveBeenCalled();
 
       // No new DDB saves (arc and signal already exist)
       expect(store.saveArc).not.toHaveBeenCalled();
@@ -584,7 +582,7 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
       // None of the inbound signal pipeline was invoked
       expect(mimeParser.parse).not.toHaveBeenCalled();
       expect(classifier.classify).not.toHaveBeenCalled();
-      expect(embeddingGenerator.generateForActiveClusters).not.toHaveBeenCalled();
+      expect(embeddingGenerator.generateForModel).not.toHaveBeenCalled();
       expect(store.getSignalByMessageId).not.toHaveBeenCalled();
       expect(auroraWriter.upsertEmbedding).not.toHaveBeenCalled();
     });
