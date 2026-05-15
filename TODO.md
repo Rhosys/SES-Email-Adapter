@@ -1,5 +1,9 @@
 # TODO
 
+## One-time CI step to remove after next successful prod run
+
+`.github/workflows/build.yml` has a `Pre-apply S3 Bucket (one-time CloudFront plan fix)` step in `prod_deploy`. It works around a provider bug after the S3 bucket was deleted and recreated. Remove it (and the regeneration of `plan.cache`) once the next prod deploy succeeds.
+
 ## ~~eu-west-1 → eu-central-1 Migration Cleanup~~ ✓ Complete
 
 All eu-west-1 resources deleted. Cleanup script was run 2026-05-15.
