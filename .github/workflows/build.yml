@@ -173,22 +173,6 @@ jobs:
         run: |
           tofu -chdir=deploy output -json | jq -r 'to_entries[] | "\(.key)=\(.value.value)"' >> $GITHUB_OUTPUT
 
-      # ONE-TIME STEP — remove after next successful prod run.
-      # Works around an AWS provider bug ("Provider produced inconsistent final plan")
-      # when CloudFront origins reference an S3 bucket whose attributes aren't yet known.
-      # Materialise the S3 bucket and its sub-resources first, then re-plan so CloudFront
-      # sees a fully-known origin domain at plan time.
-      - name: Pre-apply S3 Bucket (one-time CloudFront plan fix)
-        run: |
-          tofu -chdir=deploy apply -input=false -auto-approve \
-            -target=aws_s3_bucket.web \
-            -target=aws_s3_bucket_public_access_block.web \
-            -target=aws_s3_bucket_server_side_encryption_configuration.web \
-            -target=aws_s3_bucket_lifecycle_configuration.web \
-            -target=aws_s3_bucket_policy.web
-          # Plan cache is stale after the targeted apply — regenerate it.
-          tofu -chdir=deploy plan -input=false -out=plan.cache
-
       - name: Tofu Apply
         id: apply
         run: |
