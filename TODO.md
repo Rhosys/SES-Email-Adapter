@@ -38,6 +38,46 @@ Remember to delete the S3 state migration markers if not already done:
 
 ---
 
+- [ ] **API completeness audit** — verify all required endpoints exist and match the contract below. Implemented routes should be validated against the spec (correct method, path params, query params, response shape). Missing routes must be added.
+
+  **Implemented (verify correctness):**
+
+  | Method | Path | Used for |
+  |--------|------|----------|
+  | GET | /accounts | Account picker on login |
+  | GET | /accounts/:id | Account name in billing/header |
+  | PATCH | /accounts/:id | Settings save (name, retention, notifications) |
+  | GET | /accounts/:id/arcs | Inbox list (workflow, status, sender, after, before, cursor, limit) |
+  | GET | /accounts/:id/arcs/:arcId | Arc detail |
+  | PATCH | /accounts/:id/arcs/:arcId | Archive, label arcs |
+  | GET | /accounts/:id/arcs/:arcId/signals | Signal thread in arc detail |
+  | GET | /accounts/:id/signals | Quarantine list (?status=quarantine_visible or quarantine_hidden) |
+  | POST | /accounts/:id/signals | Create draft reply |
+  | PUT | /accounts/:id/signals/:signalId | Update draft |
+  | POST | /accounts/:id/signals/:signalId/send | Send reply |
+  | DELETE | /accounts/:id/signals/:signalId | Discard draft |
+  | POST | /accounts/:id/signals/:signalId/quarantineResponse | Allow/block quarantined signal |
+  | GET | /accounts/:id/aliases | Settings → email addresses |
+  | POST | /accounts/:id/aliases | Add email address |
+  | PATCH | /accounts/:id/aliases/:address | Update filter mode / approved/blocked senders |
+  | DELETE | /accounts/:id/aliases/:address | Remove email address |
+  | POST | /accounts/:id/domains | Add domain |
+  | PATCH | /accounts/:id/domains/:domainId | Re-check DNS verification |
+
+  **Not yet implemented (add in phases):**
+
+  | Phase | Methods | Path | Used for |
+  |-------|---------|------|----------|
+  | 6 | GET POST PATCH DELETE | /accounts/:id/labels | Labels & Views page |
+  | 6 | GET POST PATCH DELETE | /accounts/:id/views | Saved sidebar views |
+  | 7 | GET POST PATCH DELETE | /accounts/:id/rules | Rules engine |
+  | 9 | GET | /accounts/:id/domains | Domain list in settings |
+  | 9 | GET POST DELETE | /accounts/:id/forwarding-addresses | Forwarding addresses in settings |
+  | 9 | GET POST PATCH DELETE | /accounts/:id/users | Team members in settings |
+  | 10 | GET | /accounts/:id/audit-log | Audit log (cursor-paginated, returns { events, pagination: { cursor } }) |
+
+---
+
 - [ ] **Become FedCM identity provider** — meaning other apps log in via our app. This means registering as a FedCM provider so other apps can log in.
 - [ ] **Submit to awesome-privacy-tools** — open a PR at https://github.com/anondotli/awesome-privacy-tools/blob/main/CONTRIBUTING.md to add this project to the list. Follow the contributing guidelines before submitting.
 - [ ] **One-click DPA complaint filing** — when a sender ignores an unsubscribe request or continues emailing after being blocked, the user can file a formal complaint to the relevant Data Protection Authority directly from the arc detail UI. The system should: (1) maintain a registry of DPAs per country (EU/EEA member states + UK, Switzerland, Norway, Iceland) with complaint form URLs, email addresses, and phone numbers — reference https://www.paperweight.email/resources/authorities for the initial dataset, (2) determine the appropriate DPA based on the sender's jurisdiction (eTLD+1 → company → country mapping, or user-selected), (3) pre-fill a GDPR complaint with evidence: the original unsubscribe request date, the `List-Unsubscribe` attempt, subsequent emails received after unsubscribe, sender domain, and the user's account jurisdiction, (4) offer both "file via web form" (deep-link to the DPA's complaint portal with pre-filled fields where supported) and "file via email" (generate a templated complaint email to the DPA's contact address), (5) track complaint status per arc (filed, acknowledged, resolved) so the user has an audit trail. This is the nuclear option beyond unsubscribe/block — it holds senders accountable under GDPR/nFADP/UK GDPR with zero friction for the user.
