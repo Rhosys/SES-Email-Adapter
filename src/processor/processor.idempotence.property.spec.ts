@@ -6,7 +6,7 @@ import { JsonLogicRuleEvaluator } from "./rule-evaluator.js";
 import type { ProcessorDatabase, ArcMatcher } from "./processor.js";
 import type { MimeParser } from "./mime.js";
 import type { SignalClassifier, ClassificationOutput } from "../classifier/classifier.js";
-import type { EmbeddingGenerator, EmbeddingResult } from "../embedding/embedding-generator.js";
+import type { EmbeddingGenerator } from "../embedding/embedding-generator.js";
 import type { MultiClusterAuroraWriter } from "../database/multi-cluster-aurora-writer.js";
 import type { Signal, Alias, AliasSender } from "../types/index.js";
 import { createMockLogger } from "../testing/mock-logger.js";
@@ -26,6 +26,7 @@ vi.mock("../embedding/cluster-registry.js", () => {
     getActiveClusters: () => [cluster],
     getClusterById: (id: string) => (id === "cluster-a" ? cluster : null),
     getReadCluster: () => cluster,
+    getSecondaryClusters: () => [],
   };
 });
 
@@ -142,12 +143,10 @@ describe("Cross-layer idempotence — live writes + cache + Aurora", () => {
     };
 
     const embeddingGenerator: EmbeddingGenerator = {
-      generateForActiveClusters: vi.fn().mockResolvedValue([
-        ok({ modelId: "amazon.titan-embed-text-v2:0", vector: VECTOR, dimensions: 1024 }),
-      ]),
       generateForModel: vi.fn().mockResolvedValue(
-        { modelId: "amazon.titan-embed-text-v2:0", vector: VECTOR, dimensions: 1024 } as EmbeddingResult,
+        ok({ modelId: "amazon.titan-embed-text-v2:0", vector: VECTOR, dimensions: 1024 }),
       ),
+      generateForSecondaryClusters: vi.fn().mockResolvedValue([]),
     };
 
     const auroraWriter: MultiClusterAuroraWriter = {
@@ -174,7 +173,7 @@ describe("Cross-layer idempotence — live writes + cache + Aurora", () => {
     expect(store.getSignalByMessageId).toHaveBeenCalledTimes(2);
     expect(store.saveSignal).toHaveBeenCalledTimes(1);
     expect(auroraWriter.upsertEmbedding).toHaveBeenCalledTimes(1);
-    expect(embeddingGenerator.generateForActiveClusters).toHaveBeenCalledTimes(1);
+    expect(embeddingGenerator.generateForModel).toHaveBeenCalledTimes(1);
   });
 
   it("race condition: both runs produce identical embeddings and Aurora upsert params", async () => {
@@ -200,12 +199,10 @@ describe("Cross-layer idempotence — live writes + cache + Aurora", () => {
     };
 
     const embeddingGenerator: EmbeddingGenerator = {
-      generateForActiveClusters: vi.fn().mockResolvedValue([
-        ok({ modelId: "amazon.titan-embed-text-v2:0", vector: VECTOR, dimensions: 1024 }),
-      ]),
       generateForModel: vi.fn().mockResolvedValue(
-        { modelId: "amazon.titan-embed-text-v2:0", vector: VECTOR, dimensions: 1024 } as EmbeddingResult,
+        ok({ modelId: "amazon.titan-embed-text-v2:0", vector: VECTOR, dimensions: 1024 }),
       ),
+      generateForSecondaryClusters: vi.fn().mockResolvedValue([]),
     };
 
     const auroraUpsertCalls: Array<{ clusterId: string; accountId: string; recipientAddress: string; embedding: number[] }> = [];

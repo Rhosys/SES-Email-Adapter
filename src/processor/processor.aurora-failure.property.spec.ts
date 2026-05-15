@@ -6,7 +6,7 @@ import { JsonLogicRuleEvaluator } from "./rule-evaluator.js";
 import type { ProcessorDatabase, ArcMatcher } from "./processor.js";
 import type { MimeParser } from "./mime.js";
 import type { SignalClassifier, ClassificationOutput } from "../classifier/classifier.js";
-import type { EmbeddingGenerator, EmbeddingResult } from "../embedding/embedding-generator.js";
+import type { EmbeddingGenerator } from "../embedding/embedding-generator.js";
 import type { MultiClusterAuroraWriter } from "../database/multi-cluster-aurora-writer.js";
 import type { Signal, Alias, AliasSender } from "../types/index.js";
 import { createMockLogger, type MockLogger } from "../testing/mock-logger.js";
@@ -39,6 +39,7 @@ vi.mock("../embedding/cluster-registry.js", () => {
       return null;
     },
     getReadCluster: () => clusterA,
+    getSecondaryClusters: () => [clusterB],
   };
 });
 
@@ -162,13 +163,12 @@ describe("Aurora cluster failure preserves the DynamoDB cache entry", () => {
   it.each(failureCases)("$label — DynamoDB cache still contains both models' vectors", async ({ failingClusterId }) => {
     const store = makeStore();
     const embeddingGenerator: EmbeddingGenerator = {
-      generateForActiveClusters: vi.fn().mockResolvedValue([
+      generateForModel: vi.fn().mockResolvedValue(
         ok({ modelId: "amazon.titan-embed-text-v2:0", vector: VECTOR_A, dimensions: 1024 }),
+      ),
+      generateForSecondaryClusters: vi.fn().mockResolvedValue([
         ok({ modelId: "amazon.titan-embed-text-v3:0", vector: VECTOR_B, dimensions: 1536 }),
       ]),
-      generateForModel: vi.fn().mockResolvedValue(
-        { modelId: "amazon.titan-embed-text-v2:0", vector: VECTOR_A, dimensions: 1024 } as EmbeddingResult,
-      ),
     };
 
     const auroraWriter: MultiClusterAuroraWriter = {
@@ -205,13 +205,12 @@ describe("Aurora cluster failure preserves the DynamoDB cache entry", () => {
   it.each(failureCases)("$label — non-failing cluster still receives its upsert", async ({ failingClusterId, succeedingClusterId }) => {
     const store = makeStore();
     const embeddingGenerator: EmbeddingGenerator = {
-      generateForActiveClusters: vi.fn().mockResolvedValue([
+      generateForModel: vi.fn().mockResolvedValue(
         ok({ modelId: "amazon.titan-embed-text-v2:0", vector: VECTOR_A, dimensions: 1024 }),
+      ),
+      generateForSecondaryClusters: vi.fn().mockResolvedValue([
         ok({ modelId: "amazon.titan-embed-text-v3:0", vector: VECTOR_B, dimensions: 1536 }),
       ]),
-      generateForModel: vi.fn().mockResolvedValue(
-        { modelId: "amazon.titan-embed-text-v2:0", vector: VECTOR_A, dimensions: 1024 } as EmbeddingResult,
-      ),
     };
 
     const auroraWriter: MultiClusterAuroraWriter = {
