@@ -599,8 +599,11 @@ export class SignalProcessor {
     // Reuses existing MIME parser; ensures from / reply-to / return-path / subject / text body extraction
     const embedTextInput = extractEmbedTextInput(parsed, accountId, recipientAddress);
     const embedText = buildEmbedText(embedTextInput);
-    const [embeddingResults, classification] = await Promise.all([
-      this.embeddingGenerator.generateForActiveClusters(embedText),
+
+    // Phase 1: Primary embedding (fail-hard) — must succeed for arc matching
+    const readCluster = getReadCluster();
+    const [primaryResult, classification] = await Promise.all([
+      this.embeddingGenerator.generateForModel(embedText, readCluster.modelId),
       this.classifier.classify({
         from: parsed.from.address,
         to: parsed.to.map((a) => a.address),
@@ -611,12 +614,13 @@ export class SignalProcessor {
         receivedAt: timestamp,
       }),
     ]);
-    this.logger.trackPoint("email_processed");
 
-    // Use the read cluster's embedding for arc matching (backward-compatible with single-cluster)
-    const readCluster = getReadCluster();
-    const readClusterResult = embeddingResults.find((r) => r.isOk() && r.value.modelId === readCluster.modelId);
-    const embedding = readClusterResult?.isOk() ? readClusterResult.value.vector : [];
+    if (primaryResult.isErr()) {
+      this.logger.error("Primary embedding generation failed. The Bedrock InvokeModel call for the read cluster returned an error. Arc matching cannot proceed without a valid vector — the message will be retried via batch item failure.", { code: "embedding.primary_failed", modelId: readCluster.modelId, error: String(primaryResult.error.cause) });
+      return err(dbError(primaryResult.error.cause));
+    }
+    const embedding = primaryResult.value.vector;
+    this.logger.trackPoint("email_processed");
 
     const now = new Date().toISOString();
 
@@ -846,20 +850,10 @@ export class SignalProcessor {
       }
     }
 
-    // Compose the embeddings map from all successful EmbeddingResults.
+    // Compose the embeddings map from the primary embedding result.
     // This is set on the signal BEFORE save so the DynamoDB cache is populated
     // regardless of whether subsequent Aurora writes succeed or fail.
-    if (embeddingResults.length > 0) {
-      const embeddings: Record<string, number[]> = {};
-      for (const result of embeddingResults) {
-        if (result.isOk()) {
-          embeddings[result.value.modelId] = result.value.vector;
-        }
-      }
-      if (Object.keys(embeddings).length > 0) {
-        signal.embeddings = embeddings;
-      }
-    }
+    signal.embeddings = { [primaryResult.value.modelId]: primaryResult.value.vector };
 
     // Save arc (leaf node) before signal (dependent node) — guarantees arc exists whenever signal exists
     const saveArcResult = await this.store.saveArc(arc);
