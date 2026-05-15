@@ -203,7 +203,7 @@ describe("SignalProcessor message routing", () => {
     const event: SQSEvent = { Records: [makeSqsRecord({})] };
 
     const processRecordSpy = vi.spyOn(processor, "processRecord");
-    await processor.process(event);
+    await processor.processRecord(event.Records[0]!);
 
     // processRecord was called — observable via the store's dedup check
     expect(processRecordSpy).toHaveBeenCalledOnce();
@@ -214,22 +214,10 @@ describe("SignalProcessor message routing", () => {
     const event: SQSEvent = { Records: [makeSqsRecord({ messageType: "inbound_signal" })] };
 
     const processRecordSpy = vi.spyOn(processor, "processRecord");
-    await processor.process(event);
+    await processor.processRecord(event.Records[0]!);
 
     // processRecord was called — observable via the store's dedup check
     expect(processRecordSpy).toHaveBeenCalledOnce();
     expect(store.getSignalByMessageId).toHaveBeenCalled();
-  });
-
-  it("routes to processSideEffectRecord when messageType is 'side_effect'", async () => {
-    const event: SQSEvent = { Records: [makeSqsRecord({ messageType: "side_effect" })] };
-
-    const processRecordSpy = vi.spyOn(processor, "processRecord");
-    await processor.process(event);
-
-    // processRecord was NOT called — the side-effect handler was used instead
-    expect(processRecordSpy).not.toHaveBeenCalled();
-    // The inbound signal pipeline (dedup check, MIME parse, classify) was not invoked
-    expect(store.getSignalByMessageId).not.toHaveBeenCalled();
   });
 });

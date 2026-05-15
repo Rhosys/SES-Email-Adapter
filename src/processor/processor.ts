@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto";
-import type { SQSEvent, SQSRecord } from "aws-lambda";
+import type { SQSRecord } from "aws-lambda";
 import type { Logger } from "../logger.js";
 import type { Result } from "neverthrow";
 import { ok, err, dbError, processError } from "../errors.js";
@@ -384,27 +384,7 @@ export class SignalProcessor {
     return ok(undefined);
   }
 
-  async process(event: SQSEvent): Promise<{ batchItemFailures: Array<{ itemIdentifier: string }> }> {
-    this.logger.startInvocation();
-
-    const failures: Array<{ itemIdentifier: string }> = [];
-
-    for (const record of event.Records) {
-      const messageType = record.messageAttributes?.["messageType"]?.stringValue ?? "inbound_signal";
-
-      const result = messageType === "side_effect"
-        ? await this.processSideEffectRecord(record)
-        : await this.processRecord(record);
-
-      if (result.isErr()) {
-        failures.push({ itemIdentifier: record.messageId });
-      }
-    }
-
-    return { batchItemFailures: failures };
-  }
-
-  private async processSideEffectRecord(record: SQSRecord): Promise<Result<void, ProcessError>> {
+  async processSideEffectRecord(record: SQSRecord): Promise<Result<void, ProcessError>> {
     // Parse SideEffectPayload from record body
     let payload: SideEffectPayload;
     try {
