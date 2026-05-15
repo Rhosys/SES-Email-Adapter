@@ -850,10 +850,22 @@ export class SignalProcessor {
       }
     }
 
-    // Compose the embeddings map from the primary embedding result.
+    // Phase 2: Secondary embeddings (warn-only) — best-effort population of write-ahead indexes
+    const secondaryResults = await this.embeddingGenerator.generateForSecondaryClusters(embedText);
+    for (const result of secondaryResults) {
+      if (result.isErr()) {
+        this.logger.warn("Secondary embedding generation failed. We will run the full re-index anyway before switching over — revalidate all WARNINGS to check for failures in generating Aurora embeddings.", { code: "embedding.secondary_failed", modelId: result.error.modelId, error: String(result.error.cause) });
+      }
+    }
+
+    // Compose the embeddings map from primary + successful secondary results.
     // This is set on the signal BEFORE save so the DynamoDB cache is populated
     // regardless of whether subsequent Aurora writes succeed or fail.
-    signal.embeddings = { [primaryResult.value.modelId]: primaryResult.value.vector };
+    const embeddings: Record<string, number[]> = { [primaryResult.value.modelId]: primaryResult.value.vector };
+    for (const result of secondaryResults) {
+      if (result.isOk()) embeddings[result.value.modelId] = result.value.vector;
+    }
+    signal.embeddings = embeddings;
 
     // Save arc (leaf node) before signal (dependent node) — guarantees arc exists whenever signal exists
     const saveArcResult = await this.store.saveArc(arc);
