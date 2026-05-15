@@ -212,6 +212,8 @@ describe("Property 9: S3 retention failure is isolated and non-fatal", () => {
       arcMatcher: makeArcMatcher(),
       ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
       logger: mockLogger,
+      notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), notifyBlocked: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       retentionService,
     });
 
@@ -235,6 +237,8 @@ describe("Property 9: S3 retention failure is isolated and non-fatal", () => {
       arcMatcher: makeArcMatcher(),
       ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
       logger: mockLogger,
+      notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), notifyBlocked: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       retentionService,
     });
 
@@ -258,6 +262,8 @@ describe("Property 9: S3 retention failure is isolated and non-fatal", () => {
       arcMatcher: makeArcMatcher(),
       ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
       logger: mockLogger,
+      notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), notifyBlocked: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       retentionService,
     });
 
@@ -290,6 +296,8 @@ describe("Property 9: S3 retention failure is isolated and non-fatal", () => {
       arcMatcher: makeArcMatcher(),
       ruleEvaluator: new JsonLogicRuleEvaluator(logger1),
       logger: logger1,
+      notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), notifyBlocked: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       retentionService: failingRetention,
     });
 
@@ -309,6 +317,9 @@ describe("Property 9: S3 retention failure is isolated and non-fatal", () => {
       arcMatcher: makeArcMatcher(),
       ruleEvaluator: new JsonLogicRuleEvaluator(logger2),
       logger: logger2,
+      notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), notifyBlocked: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
       // No retentionService — S3 retention is skipped entirely
     });
 
@@ -343,6 +354,9 @@ describe("Property 9: S3 retention failure is isolated and non-fatal", () => {
       arcMatcher: makeArcMatcher(),
       ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
       logger: mockLogger,
+      notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), notifyBlocked: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
       // No retentionService — S3 retention is skipped entirely
     });
 
@@ -379,6 +393,8 @@ describe("Property 9: S3 retention failure is isolated and non-fatal", () => {
       arcMatcher: makeArcMatcher(),
       ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
       logger: mockLogger,
+      notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), notifyBlocked: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       retentionService,
     });
 

@@ -223,6 +223,9 @@ describe("Feature: signal-processor-retry-resilience, Property 4: Arc saved befo
       arcMatcher: makeArcMatcher(),
       ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
       logger: mockLogger,
+      notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), notifyBlocked: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
     });
 
     await processor.process(makeSqsEvent(sesMessageId));
@@ -281,6 +284,9 @@ describe("Feature: signal-processor-retry-resilience, Property 4: Arc saved befo
       arcMatcher: makeArcMatcher(),
       ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
       logger: mockLogger,
+      notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), notifyBlocked: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
     });
 
     const result = await processor.process(makeSqsEvent(sesMessageId));
@@ -477,6 +483,9 @@ describe("Feature: signal-processor-retry-resilience, Property 6: Aurora failure
       arcMatcher: makeArcMatcher(),
       ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
       logger: mockLogger,
+      notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), notifyBlocked: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
     });
 
     const result = await processor.process(makeSqsEvent(sesMessageId));
@@ -524,6 +533,9 @@ describe("Feature: signal-processor-retry-resilience, Property 6: Aurora failure
       arcMatcher: makeArcMatcher(),
       ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
       logger: mockLogger,
+      notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), notifyBlocked: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
     });
 
     const result = await processor.process(makeSqsEvent(sesMessageId));
@@ -571,6 +583,9 @@ describe("Feature: signal-processor-retry-resilience, Property 6: Aurora failure
       arcMatcher: makeArcMatcher(),
       ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
       logger: mockLogger,
+      notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), notifyBlocked: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
     });
 
     const result = await processor.process(makeSqsEvent(sesMessageId));
@@ -755,6 +770,9 @@ describe("Feature: signal-processor-retry-resilience, Property 5: Side-effects d
       ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
       logger: mockLogger,
       sqsDispatcher,
+      notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), notifyBlocked: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
     });
 
     const result = await processor.process(makeSqsEvent("msg-dispatch-success"));
@@ -796,6 +814,9 @@ describe("Feature: signal-processor-retry-resilience, Property 5: Side-effects d
       ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
       logger: mockLogger,
       sqsDispatcher,
+      notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), notifyBlocked: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
     });
 
     const result = await processor.process(makeSqsEvent("msg-dispatch-aurora-fail"));
@@ -828,6 +849,9 @@ describe("Feature: signal-processor-retry-resilience, Property 5: Side-effects d
       arcMatcher: makeArcMatcher(),
       ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
       logger: mockLogger,
+      notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), notifyBlocked: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
       // No sqsDispatcher — backward compatibility path
     });
 
@@ -864,6 +888,9 @@ describe("Feature: signal-processor-retry-resilience, Property 5: Side-effects d
       ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
       logger: mockLogger,
       sqsDispatcher,
+      notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), notifyBlocked: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
     });
 
     const result = await processor.process(makeSqsEvent("msg-dispatch-sqs-fail"));
@@ -1056,6 +1083,9 @@ describe("Feature: signal-processor-retry-resilience, Property 7: Partial Aurora
       ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
       logger: mockLogger,
       sqsDispatcher,
+      notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), notifyBlocked: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
     });
 
     const result = await processor.process(makeSqsEvent(sesMessageId));

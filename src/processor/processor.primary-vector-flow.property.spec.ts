@@ -205,6 +205,9 @@ describe("Feature: split-embedding-pipeline, Property 2: Primary vector flows to
             arcMatcher,
             ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
             logger: mockLogger,
+            notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), notifyBlocked: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+            forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+            retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
           });
 
           await processor.process(makeSqsEvent("ses-prop2-test"));

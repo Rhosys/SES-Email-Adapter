@@ -40,6 +40,7 @@ Remember to delete the S3 state migration markers if not already done:
 
 - [ ] **Become FedCM identity provider** — meaning other apps log in via our app. This means registering as a FedCM provider so other apps can log in.
 - [ ] **Submit to awesome-privacy-tools** — open a PR at https://github.com/anondotli/awesome-privacy-tools/blob/main/CONTRIBUTING.md to add this project to the list. Follow the contributing guidelines before submitting.
+- [ ] **One-click DPA complaint filing** — when a sender ignores an unsubscribe request or continues emailing after being blocked, the user can file a formal complaint to the relevant Data Protection Authority directly from the arc detail UI. The system should: (1) maintain a registry of DPAs per country (EU/EEA member states + UK, Switzerland, Norway, Iceland) with complaint form URLs, email addresses, and phone numbers — reference https://www.paperweight.email/resources/authorities for the initial dataset, (2) determine the appropriate DPA based on the sender's jurisdiction (eTLD+1 → company → country mapping, or user-selected), (3) pre-fill a GDPR complaint with evidence: the original unsubscribe request date, the `List-Unsubscribe` attempt, subsequent emails received after unsubscribe, sender domain, and the user's account jurisdiction, (4) offer both "file via web form" (deep-link to the DPA's complaint portal with pre-filled fields where supported) and "file via email" (generate a templated complaint email to the DPA's contact address), (5) track complaint status per arc (filed, acknowledged, resolved) so the user has an audit trail. This is the nuclear option beyond unsubscribe/block — it holds senders accountable under GDPR/nFADP/UK GDPR with zero friction for the user.
 
 ---
 
@@ -195,6 +196,17 @@ Novel and differentiated features to highlight. Each item here represents someth
 - **POST-based unsubscribe** — where the sender supports `List-Unsubscribe-Post` (Gmail-compatible one-click standard), the inbox fires the POST server-side without opening a browser. Instant, no confirmation page, no re-marketing flow.
 - **Post-unsubscribe auto-archive rule** — after unsubscribing, the arc is archived and a label `unsubscribed:{publisher}` is applied. A rule can be auto-created to archive future mail from that sender.
 - **Unsubscribe audit** — account-level list of all unsubscriptions: publisher, date, method (POST vs link). Exportable. Useful for compliance and for verifying that unsubscribes actually took effect.
+
+---
+
+### DPA Complaint Filing
+
+- **One-click report to Data Protection Authority** — when a sender ignores unsubscribe requests or continues emailing after being blocked, the user can escalate directly to the relevant national DPA from the arc detail UI. No Googling complaint forms, no drafting letters — the system handles it.
+- **Jurisdiction-aware DPA routing** — built-in registry of EU/EEA DPAs plus UK ICO, Swiss FDPIC, and Norwegian/Icelandic authorities. The system determines the correct DPA based on the sender's jurisdiction (company country derived from domain/WHOIS) or the user's own country (for cross-border complaints under GDPR Art. 77).
+- **Pre-filled complaint with evidence** — the complaint includes: original unsubscribe request date, `List-Unsubscribe` attempt proof, count and dates of emails received after unsubscribe, sender domain and company identification, and the user's account jurisdiction. All machine-generated from the arc's signal history.
+- **Dual filing paths** — "File via web" deep-links to the DPA's online complaint portal (pre-filling where the form supports URL params). "File via email" generates a structured complaint email to the DPA's contact address, ready to send.
+- **Complaint tracking** — each filed complaint is tracked per arc with status (filed → acknowledged → resolved). The user has a full audit trail of enforcement actions taken. Exportable for legal proceedings if needed.
+- **Escalation ladder UX** — the UI presents a clear progression: unsubscribe → block → report to DPA. Each step is one tap. The nuclear option is always available but never accidental.
 
 ---
 

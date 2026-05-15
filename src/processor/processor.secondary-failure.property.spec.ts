@@ -217,6 +217,9 @@ describe("Feature: split-embedding-pipeline, Property 3: Secondary failures are 
           arcMatcher: makeArcMatcher(),
           ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
           logger: mockLogger,
+          notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), notifyBlocked: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+          forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+          retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
         });
 
         const result = await processor.process(makeSqsEvent("test-msg-secondary-fail"));

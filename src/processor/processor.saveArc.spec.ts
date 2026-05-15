@@ -204,7 +204,9 @@ describe("Single saveArc call with complete mutations", () => {
       ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
       testReplier,
       logger: mockLogger,
-      ...(retentionService ? { retentionService } : {}),
+      notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), notifyBlocked: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      retentionService: retentionService ?? { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "emails/test-ses-id" }) },
     });
 
     await processor.process(makeSqsEvent("test-ses-id", recipientEmail));
