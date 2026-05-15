@@ -133,7 +133,7 @@ resource "aws_apigatewayv2_authorizer" "ws" {
   api_id           = aws_apigatewayv2_api.ws.id
   authorizer_type  = "REQUEST"
   authorizer_uri   = aws_lambda_alias.production.invoke_arn
-  identity_sources = ["$request.querystring.token"]
+  identity_sources = ["route.request.querystring.token"]
   name             = "${var.service_name}-ws-authorizer"
 }
 
