@@ -51,8 +51,24 @@ vi.mock("./cluster-registry.js", () => ({
   ],
   getReadCluster: () => ({
     clusterId: "cluster-a",
+    clusterArn: "arn:aws:rds:eu-west-1:111:cluster:cluster-a",
+    secretArn: "arn:aws:secretsmanager:eu-west-1:111:secret:cluster-a",
+    databaseName: "signals",
     modelId: "amazon.titan-embed-text-v2:0",
+    dimensions: 1024,
+    active: true,
   }),
+  getSecondaryClusters: () => [
+    {
+      clusterId: "cluster-b",
+      clusterArn: "arn:aws:rds:eu-west-1:111:cluster:cluster-b",
+      secretArn: "arn:aws:secretsmanager:eu-west-1:111:secret:cluster-b",
+      databaseName: "signals",
+      modelId: "amazon.titan-embed-text-v3:0",
+      dimensions: 1536,
+      active: true,
+    },
+  ],
 }));
 
 describe("Property 7: Bedrock failure for one model preserves all other writes", () => {
@@ -68,96 +84,91 @@ describe("Property 7: Bedrock failure for one model preserves all other writes",
   });
 
   it("returns err for the failed model and ok for the successful model", async () => {
-    let callCount = 0;
-    bedrockMock.on(InvokeModelCommand).callsFake(() => {
-      callCount++;
-      if (callCount === 1) {
-        throw new Error("Bedrock throttled for titan-v2");
-      }
-      return { body: mockBody({ embedding: [0.5, 0.6, 0.7] }) };
-    });
+    bedrockMock.on(InvokeModelCommand, { modelId: "amazon.titan-embed-text-v2:0" })
+      .rejects(new Error("Bedrock throttled for titan-v2"));
+    bedrockMock.on(InvokeModelCommand, { modelId: "amazon.titan-embed-text-v3:0" })
+      .resolves({ body: mockBody({ embedding: [0.5, 0.6, 0.7] }) });
 
-    const results = await generator.generateForActiveClusters("test text");
+    const primaryResult = await generator.generateForModel("test text", "amazon.titan-embed-text-v2:0");
+    const secondaryResults = await generator.generateForSecondaryClusters("test text");
 
-    expect(results).toHaveLength(2);
-    expect(results[0]!.isErr()).toBe(true);
-    if (results[0]!.isErr()) {
-      expect(results[0]!.error.modelId).toBe("amazon.titan-embed-text-v2:0");
+    expect(primaryResult.isErr()).toBe(true);
+    if (primaryResult.isErr()) {
+      expect(primaryResult.error.modelId).toBe("amazon.titan-embed-text-v2:0");
     }
-    expect(results[1]!.isOk()).toBe(true);
-    if (results[1]!.isOk()) {
-      expect(results[1]!.value.modelId).toBe("amazon.titan-embed-text-v3:0");
-      expect(results[1]!.value.dimensions).toBe(1536);
+    expect(secondaryResults).toHaveLength(1);
+    expect(secondaryResults[0]!.isOk()).toBe(true);
+    if (secondaryResults[0]!.isOk()) {
+      expect(secondaryResults[0]!.value.modelId).toBe("amazon.titan-embed-text-v3:0");
+      expect(secondaryResults[0]!.value.dimensions).toBe(1536);
     }
   });
 
-  it("logs ERROR for primary cluster failure", async () => {
-    let callCount = 0;
-    bedrockMock.on(InvokeModelCommand).callsFake(() => {
-      callCount++;
-      if (callCount === 1) throw new Error("Bedrock unavailable");
-      return { body: mockBody({ embedding: [0.1] }) };
-    });
+  it("generateForModel returns err without throwing on Bedrock failure", async () => {
+    bedrockMock.on(InvokeModelCommand).rejects(new Error("Bedrock unavailable"));
 
-    await generator.generateForActiveClusters("test");
+    const result = await generator.generateForModel("test", "amazon.titan-embed-text-v2:0");
 
-    // cluster-a is primary → ERROR
-    expect(mockLogger.calls.filter(c => c.method === "error")).toHaveLength(1);
-    expect(mockLogger.calls.find(c => c.method === "error")!.context).toEqual(
-      expect.objectContaining({ code: "embedding.generation_failed", modelId: "amazon.titan-embed-text-v2:0" }),
-    );
+    expect(result.isErr()).toBe(true);
+    if (result.isErr()) {
+      expect(result.error.modelId).toBe("amazon.titan-embed-text-v2:0");
+    }
   });
 
-  it("does not log when all models succeed", async () => {
+  it("does not throw when all models succeed", async () => {
     bedrockMock.on(InvokeModelCommand).resolves({ body: mockBody({ embedding: [0.1] }) });
 
-    await generator.generateForActiveClusters("test");
+    const primaryResult = await generator.generateForModel("test", "amazon.titan-embed-text-v2:0");
+    const secondaryResults = await generator.generateForSecondaryClusters("test");
 
-    expect(mockLogger.calls.filter(c => c.method === "warn" || c.method === "error")).toHaveLength(0);
+    expect(primaryResult.isOk()).toBe(true);
+    expect(secondaryResults.every(r => r.isOk())).toBe(true);
   });
 
-  it("continues processing remaining models after one failure", async () => {
-    let callCount = 0;
-    bedrockMock.on(InvokeModelCommand).callsFake(() => {
-      callCount++;
-      if (callCount === 1) throw new Error("Bedrock error");
-      return { body: mockBody({ embedding: [0.2] }) };
-    });
+  it("secondary cluster failure does not affect primary result", async () => {
+    bedrockMock.on(InvokeModelCommand, { modelId: "amazon.titan-embed-text-v2:0" })
+      .resolves({ body: mockBody({ embedding: [0.2] }) });
+    bedrockMock.on(InvokeModelCommand, { modelId: "amazon.titan-embed-text-v3:0" })
+      .rejects(new Error("Bedrock error"));
 
-    const results = await generator.generateForActiveClusters("test");
+    const primaryResult = await generator.generateForModel("test", "amazon.titan-embed-text-v2:0");
+    const secondaryResults = await generator.generateForSecondaryClusters("test");
 
-    expect(results).toHaveLength(2);
-    const successful = results.filter(r => r.isOk());
-    expect(successful).toHaveLength(1);
+    expect(primaryResult.isOk()).toBe(true);
+    expect(secondaryResults).toHaveLength(1);
+    expect(secondaryResults[0]!.isErr()).toBe(true);
   });
 
   it("does not throw when all models fail", async () => {
     bedrockMock.on(InvokeModelCommand).rejects(new Error("All broken"));
 
-    const results = await generator.generateForActiveClusters("test");
+    const primaryResult = await generator.generateForModel("test", "amazon.titan-embed-text-v2:0");
+    const secondaryResults = await generator.generateForSecondaryClusters("test");
 
-    expect(results).toHaveLength(2);
-    expect(results.every(r => r.isErr())).toBe(true);
+    expect(primaryResult.isErr()).toBe(true);
+    expect(secondaryResults).toHaveLength(1);
+    expect(secondaryResults[0]!.isErr()).toBe(true);
   });
 
   it("produces deterministic results when same model fails consistently", async () => {
-    bedrockMock.reset();
-
     bedrockMock.on(InvokeModelCommand, { modelId: "amazon.titan-embed-text-v2:0" })
       .rejects(new Error("Bedrock throttled"));
     bedrockMock.on(InvokeModelCommand, { modelId: "amazon.titan-embed-text-v3:0" })
       .resolves({ body: mockBody({ embedding: [0.5, 0.6] }) });
 
-    const results1 = await generator.generateForActiveClusters("same text");
-    mockLogger.calls.length = 0;
-    const results2 = await generator.generateForActiveClusters("same text");
+    const result1 = await generator.generateForModel("same text", "amazon.titan-embed-text-v2:0");
+    const result2 = await generator.generateForModel("same text", "amazon.titan-embed-text-v2:0");
 
-    expect(results1[0]!.isErr()).toBe(true);
-    expect(results2[0]!.isErr()).toBe(true);
-    expect(results1[1]!.isOk()).toBe(true);
-    expect(results2[1]!.isOk()).toBe(true);
-    if (results1[1]!.isOk() && results2[1]!.isOk()) {
-      expect(results1[1]!.value.vector).toEqual(results2[1]!.value.vector);
+    expect(result1.isErr()).toBe(true);
+    expect(result2.isErr()).toBe(true);
+
+    const secondary1 = await generator.generateForSecondaryClusters("same text");
+    const secondary2 = await generator.generateForSecondaryClusters("same text");
+
+    expect(secondary1[0]!.isOk()).toBe(true);
+    expect(secondary2[0]!.isOk()).toBe(true);
+    if (secondary1[0]!.isOk() && secondary2[0]!.isOk()) {
+      expect(secondary1[0]!.value.vector).toEqual(secondary2[0]!.value.vector);
     }
   });
 });

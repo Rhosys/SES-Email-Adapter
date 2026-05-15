@@ -19,11 +19,12 @@ import { FeedbackProcessor } from "./notifier/feedback-processor.js";
 import { DomainHealthJob } from "./jobs/domain-health-job.js";
 import { ResultAsync } from "neverthrow";
 import { dbError } from "./errors.js";
+import type { DbError } from "./errors.js";
 import type { VerificationMailer } from "./api/app.js";
 import { AuthressAuthService } from "./api/authress-auth.js";
 import { AuthressAccessService } from "./api/authress-access.js";
 import { createApp } from "./api/app.js";
-import type { MimeParser } from "./processor/mime.js";
+import type { MimeParser, ParsedMime } from "./processor/mime.js";
 import { BedrockEmbeddingGenerator } from "./embedding/embedding-generator.js";
 import { multiClusterWriter } from "./database/multi-cluster-aurora-writer.js";
 import { S3RetentionServiceImpl } from "./embedding/s3-retention-service.js";
@@ -49,11 +50,16 @@ const SIGNAL_QUEUE_URL = process.env["SIGNAL_QUEUE_URL"] ?? "";
 
 class S3MimeParser implements MimeParser {
   private readonly delegate = new MailparserMimeParser();
-  async parse(s3Key: string): ReturnType<MimeParser["parse"]> {
-    const res = await s3.send(new GetObjectCommand({ Bucket: S3_BUCKET, Key: s3Key }));
-    const buf = await res.Body?.transformToByteArray();
-    if (!buf) throw new Error(`Empty S3 object: ${s3Key}`);
-    return this.delegate.parse(Buffer.from(buf));
+  parse(s3Key: string): ResultAsync<ParsedMime, DbError> {
+    return ResultAsync.fromPromise(
+      (async () => {
+        const res = await s3.send(new GetObjectCommand({ Bucket: S3_BUCKET, Key: s3Key }));
+        const buf = await res.Body?.transformToByteArray();
+        if (!buf) throw new Error(`Empty S3 object: ${s3Key}`);
+        return this.delegate.parse(Buffer.from(buf));
+      })(),
+      (e) => dbError(e instanceof Error ? e : new Error(String(e))),
+    );
   }
 }
 

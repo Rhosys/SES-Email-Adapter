@@ -41,6 +41,10 @@ vi.mock("../embedding/cluster-registry.js", () => ({
   getActiveClusters: () => mockState.clusters.filter((c) => c.active),
   getClusterById: (id: string) => mockState.clusters.find((c) => c.clusterId === id) ?? null,
   getReadCluster: () => mockState.clusters.find((c) => c.active) ?? mockState.clusters[0],
+  getSecondaryClusters: () => {
+    const primary = mockState.clusters.find((c) => c.active) ?? mockState.clusters[0];
+    return mockState.clusters.filter((c) => c.active && c.clusterId !== primary!.clusterId);
+  },
 }));
 
 describe("Multi-cluster fanout writes vectors to every active target", () => {
@@ -188,11 +192,14 @@ describe("Multi-cluster fanout writes vectors to every active target", () => {
     }));
 
     const embeddingGenerator: EmbeddingGenerator = {
-      generateForActiveClusters: vi.fn().mockResolvedValue(embeddingResults.map((r) => ok(r))),
       generateForModel: vi.fn().mockImplementation(async (_: string, modelId: string) => {
         const result = embeddingResults.find((r) => r.modelId === modelId);
-        if (!result) throw new Error(`Model ${modelId} not found`);
-        return result;
+        if (!result) return ok(embeddingResults[0]!);
+        return ok(result);
+      }),
+      generateForSecondaryClusters: vi.fn().mockImplementation(async () => {
+        const primary = clusters[0]!;
+        return embeddingResults.filter((r) => r.modelId !== primary.modelId).map((r) => ok(r));
       }),
     };
 
@@ -238,11 +245,14 @@ describe("Multi-cluster fanout writes vectors to every active target", () => {
     }));
 
     const embeddingGenerator: EmbeddingGenerator = {
-      generateForActiveClusters: vi.fn().mockResolvedValue(embeddingResults.map((r) => ok(r))),
       generateForModel: vi.fn().mockImplementation(async (_: string, modelId: string) => {
         const result = embeddingResults.find((r) => r.modelId === modelId);
-        if (!result) throw new Error(`Model ${modelId} not found`);
-        return result;
+        if (!result) return ok(embeddingResults[0]!);
+        return ok(result);
+      }),
+      generateForSecondaryClusters: vi.fn().mockImplementation(async () => {
+        const primary = clusters[0]!;
+        return embeddingResults.filter((r) => r.modelId !== primary.modelId).map((r) => ok(r));
       }),
     };
 
@@ -289,8 +299,15 @@ describe("Multi-cluster fanout writes vectors to every active target", () => {
     }));
 
     const embeddingGenerator: EmbeddingGenerator = {
-      generateForActiveClusters: vi.fn().mockResolvedValue(embeddingResults.map((r) => ok(r))),
-      generateForModel: vi.fn().mockResolvedValue(embeddingResults[0]!),
+      generateForModel: vi.fn().mockImplementation(async (_: string, modelId: string) => {
+        const result = embeddingResults.find((r) => r.modelId === modelId);
+        if (!result) return ok(embeddingResults[0]!);
+        return ok(result);
+      }),
+      generateForSecondaryClusters: vi.fn().mockImplementation(async () => {
+        const primary = clusters[0]!;
+        return embeddingResults.filter((r) => r.modelId !== primary.modelId).map((r) => ok(r));
+      }),
     };
 
     const auroraWriter: MultiClusterAuroraWriter = {
