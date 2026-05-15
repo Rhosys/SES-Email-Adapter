@@ -12,8 +12,8 @@ The CI/CD orphan step removes old eu-west-1 resources from Tofu state so the nex
 - [ ] **VPC / subnets / security groups / route tables in eu-west-1** — once Aurora is deleted the ENIs detach automatically. Then delete the VPC and all its resources: subnets, IGW, route tables, security groups. Use `aws ec2 delete-vpc --vpc-id <id> --region eu-west-1` (requires all dependencies cleared first).
 - [ ] **SQS queues in eu-west-1** — `aws sqs delete-queue --queue-url <url> --region eu-west-1` for the email-processing queue and DLQ.
 - [ ] **SNS topics / subscriptions in eu-west-1** — `aws sns delete-topic --topic-arn <arn> --region eu-west-1` for any SNS topics.
-- [ ] **KMS keys in eu-west-1** — schedule deletion for the old eu-west-1 CMKs (minimum 7-day waiting period). `aws kms schedule-key-deletion --key-id <id> --pending-window-in-days 7 --region eu-west-1`.
-- [ ] **Delete S3 state migration marker** (optional cleanup) — once all eu-west-1 resources are gone: `aws s3 rm s3://{STATE_BUCKET}/migration/eu-west-1-orphaned`.
+- [ ] **KMS key** — the encryption key is a multi-region key managed externally (referenced here only as `data "aws_kms_alias" "default"`). No deletion needed; verify the primary key's replica in eu-central-1 is active and the old eu-west-1 primary is no longer the one being used for new encryptions.
+- [ ] **Delete S3 state migration markers** (optional cleanup) — once all eu-west-1 resources are gone: `aws s3 rm s3://{STATE_BUCKET}/migration/eu-west-1-orphaned` and `aws s3 rm s3://{STATE_BUCKET}/migration/eu-central-1-state-fixed`.
 
 ---
 

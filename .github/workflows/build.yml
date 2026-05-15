@@ -84,6 +84,33 @@ jobs:
           echo "" | aws s3 cp - "$MARKER"
           echo "✓ Done. Old eu-west-1 resources are now unmanaged in AWS."
 
+      - name: Fix eu-central-1 Migration State (one-time)
+        run: |
+          MARKER="s3://${STATE_BUCKET}/migration/eu-central-1-state-fixed"
+          if aws s3 ls "$MARKER" > /dev/null 2>&1; then
+            echo "Post-migration state fix already applied — skipping."
+            exit 0
+          fi
+          # The api_gateways ACM cert was kept by the orphan step (matches aws_acm_*)
+          # but it lives in eu-west-1. Drop it so Tofu recreates it in eu-central-1.
+          # (aws_acm_certificate.api uses provider=us_east_1 and is intentionally kept.)
+          echo "→ Removing eu-west-1 API Gateway cert from state..."
+          tofu -chdir=deploy state rm aws_acm_certificate.api_gateways 2>/dev/null || echo "  (already absent)"
+          tofu -chdir=deploy state rm aws_acm_certificate_validation.api_gateways 2>/dev/null || echo "  (already absent)"
+          CERT_RECORDS=$(tofu -chdir=deploy state list 2>/dev/null | grep '^aws_route53_record\.api_gateways_cert_validation' || true)
+          while IFS= read -r addr; do
+            [ -z "$addr" ] && continue
+            tofu -chdir=deploy state rm "$addr" 2>/dev/null || echo "  (already absent)"
+          done <<< "$CERT_RECORDS"
+          # DynamoDB tables already exist in eu-central-1 (they were replicas of the eu-west-1
+          # primary). The orphan step removed them from state; import them rather than creating.
+          echo "→ Importing existing DynamoDB tables..."
+          tofu -chdir=deploy import aws_dynamodb_table.accounts "${TF_VAR_service_name}-accounts" 2>/dev/null || echo "  (already in state)"
+          tofu -chdir=deploy import aws_dynamodb_table.signals "${TF_VAR_service_name}-signals" 2>/dev/null || echo "  (already in state)"
+          tofu -chdir=deploy import aws_dynamodb_table.processing "${TF_VAR_service_name}-processing" 2>/dev/null || echo "  (already in state)"
+          echo "" | aws s3 cp - "$MARKER"
+          echo "✓ Post-migration state fix applied."
+
       - name: Tofu Plan
         run: tofu -chdir=deploy plan -input=false -out=plan.cache
 
@@ -153,6 +180,33 @@ jobs:
           done <<< "$TO_REMOVE"
           echo "" | aws s3 cp - "$MARKER"
           echo "✓ Done. Old eu-west-1 resources are now unmanaged in AWS."
+
+      - name: Fix eu-central-1 Migration State (one-time)
+        run: |
+          MARKER="s3://${STATE_BUCKET}/migration/eu-central-1-state-fixed"
+          if aws s3 ls "$MARKER" > /dev/null 2>&1; then
+            echo "Post-migration state fix already applied — skipping."
+            exit 0
+          fi
+          # The api_gateways ACM cert was kept by the orphan step (matches aws_acm_*)
+          # but it lives in eu-west-1. Drop it so Tofu recreates it in eu-central-1.
+          # (aws_acm_certificate.api uses provider=us_east_1 and is intentionally kept.)
+          echo "→ Removing eu-west-1 API Gateway cert from state..."
+          tofu -chdir=deploy state rm aws_acm_certificate.api_gateways 2>/dev/null || echo "  (already absent)"
+          tofu -chdir=deploy state rm aws_acm_certificate_validation.api_gateways 2>/dev/null || echo "  (already absent)"
+          CERT_RECORDS=$(tofu -chdir=deploy state list 2>/dev/null | grep '^aws_route53_record\.api_gateways_cert_validation' || true)
+          while IFS= read -r addr; do
+            [ -z "$addr" ] && continue
+            tofu -chdir=deploy state rm "$addr" 2>/dev/null || echo "  (already absent)"
+          done <<< "$CERT_RECORDS"
+          # DynamoDB tables already exist in eu-central-1 (they were replicas of the eu-west-1
+          # primary). The orphan step removed them from state; import them rather than creating.
+          echo "→ Importing existing DynamoDB tables..."
+          tofu -chdir=deploy import aws_dynamodb_table.accounts "${TF_VAR_service_name}-accounts" 2>/dev/null || echo "  (already in state)"
+          tofu -chdir=deploy import aws_dynamodb_table.signals "${TF_VAR_service_name}-signals" 2>/dev/null || echo "  (already in state)"
+          tofu -chdir=deploy import aws_dynamodb_table.processing "${TF_VAR_service_name}-processing" 2>/dev/null || echo "  (already in state)"
+          echo "" | aws s3 cp - "$MARKER"
+          echo "✓ Post-migration state fix applied."
 
       - name: Tofu Plan
         id: plan
