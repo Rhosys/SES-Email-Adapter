@@ -110,9 +110,6 @@ resource "aws_apigatewayv2_authorizer" "ws" {
   authorizer_uri   = aws_lambda_alias.production.invoke_arn
   identity_sources = ["$request.querystring.token"]
   name             = "${var.service_name}-ws-authorizer"
-
-  # Cache the Allow result per token for 5 minutes
-  authorizer_result_ttl_in_seconds = 300
 }
 
 resource "aws_lambda_permission" "ws_authorizer" {

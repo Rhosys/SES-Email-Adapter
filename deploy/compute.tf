@@ -113,6 +113,16 @@ resource "aws_iam_role_policy" "lambda_permissions" {
         Action   = ["sqs:SendMessage"]
         Resource = aws_sqs_queue.reindex.arn
       },
+      {
+        Sid    = "SQSConsume"
+        Effect = "Allow"
+        Action = ["sqs:ReceiveMessage", "sqs:DeleteMessage", "sqs:GetQueueAttributes"]
+        Resource = [
+          aws_sqs_queue.signals.arn,
+          aws_sqs_queue.feedback.arn,
+          aws_sqs_queue.reindex.arn,
+        ]
+      },
     ]
   })
 }
