@@ -159,14 +159,23 @@ export async function handler(
     return;
   }
   if (isSqsEvent(event)) {
-    if (isFeedbackEvent(event)) {
-      await feedbackProcessor.process(event);
-    } else if (isReindexEvent(event)) {
-      return reindexWorker.process(event);
-    } else {
-      await processor.process(event);
+    const failures: Array<{ itemIdentifier: string }> = [];
+
+    for (const record of event.Records) {
+      const arn = record.eventSourceARN ?? "";
+
+      if (arn.includes("-feedback")) {
+        await feedbackProcessor.process({ Records: [record] });
+      } else if (arn.includes("-reindex")) {
+        const result = await reindexWorker.process({ Records: [record] });
+        failures.push(...result.batchItemFailures);
+      } else {
+        const result = await processor.process({ Records: [record] });
+        failures.push(...result.batchItemFailures);
+      }
     }
-    return;
+
+    return { batchItemFailures: failures };
   }
   if (isWsAuthorizerEvent(event)) {
     return handleWsAuthorizer(event as WsAuthorizerEvent);
@@ -286,14 +295,6 @@ function isSqsEvent(event: unknown): event is SQSEvent {
     Array.isArray((event as SQSEvent).Records) &&
     (event as SQSEvent).Records[0]?.eventSource === "aws:sqs"
   );
-}
-
-function isFeedbackEvent(event: SQSEvent): boolean {
-  return (event.Records[0]?.eventSourceARN ?? "").includes("-feedback");
-}
-
-function isReindexEvent(event: SQSEvent): boolean {
-  return (event.Records[0]?.eventSourceARN ?? "").includes("-reindex");
 }
 
 async function honoToApiGateway(
