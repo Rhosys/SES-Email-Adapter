@@ -366,4 +366,7 @@ jobs:
           fi
 
       - name: Deploy Application Code
+        env:
+          LAMBDA_FUNCTION_NAME: "${{ github.event.repository.name }}-main"
+          AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
         run: npm run deploy
