@@ -20,9 +20,8 @@ import { BedrockRuntimeClient } from "@aws-sdk/client-bedrock-runtime";
 import { ArcDatabase } from "../../database/arc-database.js";
 import type { Signal } from "../../types/index.js";
 import type { Result } from "../../errors.js";
-import { ok, err, processError } from "../../errors.js";
+import { ok, err, processError, dbError } from "../../errors.js";
 import type { ProcessError } from "../../errors.js";
-import { ResultAsync } from "neverthrow";
 import type { Logger } from "../../logger.js";
 
 // ---------------------------------------------------------------------------
@@ -243,7 +242,7 @@ export class ReindexWorker {
 
     const result = await embeddingGenerator.generateForModel(embedText, modelId);
     if (result.isErr()) {
-      return err({ signalId: signal.id, reason: `Embedding generation failed for model "${modelId}": ${result.error.cause.message}` });
+      return err({ signalId: signal.id, reason: `Embedding generation failed for model "${modelId}": ${String(result.error.cause)}` });
     }
 
     const cacheResult = await arcDatabase.addEmbeddingToCache(
@@ -256,16 +255,19 @@ export class ReindexWorker {
       return err({ signalId: signal.id, reason: `DDB cache write failed: ${String(cacheResult.error.cause)}` });
     }
 
-    const upsertResult = await ResultAsync.fromPromise(
-      multiClusterWriter.upsertEmbedding({
+    let upsertResult: Result<void, unknown>;
+    try {
+      await multiClusterWriter.upsertEmbedding({
         clusterId: targetClusterId,
         arcId: signal.arcId!,
         accountId: signal.accountId,
         recipientAddress: signal.recipientAddress,
         embedding: result.value.vector,
-      }),
-      (e) => e,
-    );
+      });
+      upsertResult = ok(undefined);
+    } catch (e) {
+      upsertResult = err(e);
+    }
     if (upsertResult.isErr()) {
       return err({ signalId: signal.id, reason: `Aurora upsert failed: ${String(upsertResult.error)}` });
     }
@@ -277,15 +279,14 @@ export class ReindexWorker {
   // S3 fetch helper
   // ---------------------------------------------------------------------------
 
-  private fetchFromS3(s3Key: string): ResultAsync<Buffer, Error> {
-    return ResultAsync.fromPromise(
-      (async () => {
-        const res = await s3.send(new GetObjectCommand({ Bucket: EMAIL_BUCKET, Key: s3Key }));
-        const body = await res.Body?.transformToByteArray();
-        if (!body) throw new Error(`Empty S3 object: ${s3Key}`);
-        return Buffer.from(body);
-      })(),
-      (e) => e instanceof Error ? e : new Error(String(e)),
-    );
+  private async fetchFromS3(s3Key: string): Promise<Result<Buffer, Error>> {
+    try {
+      const res = await s3.send(new GetObjectCommand({ Bucket: EMAIL_BUCKET, Key: s3Key }));
+      const body = await res.Body?.transformToByteArray();
+      if (!body) throw new Error(`Empty S3 object: ${s3Key}`);
+      return ok(Buffer.from(body));
+    } catch (e) {
+      return err(e instanceof Error ? e : new Error(String(e)));
+    }
   }
 }

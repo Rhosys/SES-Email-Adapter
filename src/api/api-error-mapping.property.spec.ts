@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { ok, err, okAsync } from "neverthrow";
+import { ok, err } from "neverthrow";
 import { createApp } from "./app.js";
 import type { ApiDatabase, AuthService, AuthContext, AccessService } from "./app.js";
 import type { Arc } from "../types/index.js";
@@ -11,15 +11,15 @@ const TEST_USER_ID = "user-prop-001";
 const validAuth: AuthContext = { accountId: TEST_ACCOUNT_ID, userId: TEST_USER_ID };
 
 function makeAuth(): AuthService {
-  return { verify: vi.fn().mockReturnValue(okAsync(validAuth)) };
+  return { verify: vi.fn().mockReturnValue(Promise.resolve(ok(validAuth))) };
 }
 
 function makeAccess(): AccessService {
   return {
-    listUsers: vi.fn().mockReturnValue(okAsync([])),
-    addUser: vi.fn().mockReturnValue(okAsync(undefined)),
-    updateUserRole: vi.fn().mockReturnValue(okAsync(undefined)),
-    removeUser: vi.fn().mockReturnValue(okAsync(undefined)),
+    listUsers: vi.fn().mockReturnValue(Promise.resolve(ok([]))),
+    addUser: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+    updateUserRole: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+    removeUser: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     checkAccess: vi.fn().mockResolvedValue(undefined),
   };
 }
@@ -96,7 +96,7 @@ function makeApp(store: ApiDatabase) {
     auth: makeAuth(),
     access: makeAccess(),
     logger: createMockLogger(),
-    verificationMailer: { sendForwardVerification: vi.fn().mockReturnValue(okAsync(undefined)) },
+    verificationMailer: { sendForwardVerification: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
   });
 }
 

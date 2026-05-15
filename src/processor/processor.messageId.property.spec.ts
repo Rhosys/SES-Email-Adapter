@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import type { SQSRecord } from "aws-lambda";
-import { okAsync, errAsync } from "neverthrow";
+import { ok, err } from "neverthrow";
 import { SignalProcessor, SYSTEM_RULES } from "./processor.js";
 import { JsonLogicRuleEvaluator } from "./rule-evaluator.js";
 import type { ProcessorDatabase, ArcMatcher } from "./processor.js";
@@ -32,27 +32,27 @@ vi.mock("../embedding/cluster-registry.js", () => {
 describe("ProcessError always carries the SQS messageId", () => {
   function makeStore(): ProcessorDatabase {
     return {
-      getSignalByMessageId: vi.fn().mockReturnValue(okAsync(null)),
-      saveSignal: vi.fn().mockReturnValue(okAsync(undefined)),
-      updateSignalRetention: vi.fn().mockReturnValue(okAsync(undefined)),
-      getArc: vi.fn().mockReturnValue(okAsync(null)),
-      findArcByGroupingKey: vi.fn().mockReturnValue(okAsync(null)),
-      saveArc: vi.fn().mockReturnValue(okAsync(undefined)),
-      listEnabledRules: vi.fn().mockReturnValue(okAsync(SYSTEM_RULES)),
-      getProcessorAccountContext: vi.fn().mockReturnValue(okAsync({
+      getSignalByMessageId: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
+      saveSignal: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+      updateSignalRetention: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+      getArc: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
+      findArcByGroupingKey: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
+      saveArc: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+      listEnabledRules: vi.fn().mockReturnValue(Promise.resolve(ok(SYSTEM_RULES))),
+      getProcessorAccountContext: vi.fn().mockReturnValue(Promise.resolve(ok({
         retentionDays: 0,
         filtering: null,
         emailConfig: { id: "cfg", accountId: "acct", address: "u@x.com", filterMode: "quarantine_visible", createdAt: "2024-01-01T00:00:00Z", updatedAt: "2024-01-01T00:00:00Z" },
         registeredDomains: [],
         userEmails: [],
         billingPlan: "Paid" as const,
-      })),
-      saveAlias: vi.fn().mockImplementation((a) => okAsync(a)),
-      getSender: vi.fn().mockReturnValue(okAsync(null)),
-      saveSender: vi.fn().mockReturnValue(okAsync(undefined)),
-      getTemplate: vi.fn().mockReturnValue(okAsync(null)),
-      updateGlobalReputation: vi.fn().mockReturnValue(okAsync(undefined)),
-      getDomainByName: vi.fn().mockReturnValue(okAsync(null)),
+      }))),
+      saveAlias: vi.fn().mockImplementation((a) => Promise.resolve(ok(a))),
+      getSender: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
+      saveSender: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+      getTemplate: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
+      updateGlobalReputation: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+      getDomainByName: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
     };
   }
 
@@ -100,8 +100,8 @@ describe("ProcessError always carries the SQS messageId", () => {
       findMatch: vi.fn().mockResolvedValue(null),
     };
     const arcMatcher: ArcMatcher = {
-      findMatch: vi.fn().mockReturnValue(okAsync(null)),
-      upsertEmbedding: vi.fn().mockReturnValue(okAsync(undefined)),
+      findMatch: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
+      upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     };
     const mockLogger = createMockLogger();
     return new SignalProcessor({
@@ -134,7 +134,7 @@ describe("ProcessError always carries the SQS messageId", () => {
   it("database failure on dedup check causes err with matching messageId", async () => {
     const store = makeStore();
     (store.getSignalByMessageId as ReturnType<typeof vi.fn>).mockReturnValue(
-      errAsync(dbError(new Error("connection timeout"))),
+      Promise.resolve(err(dbError(new Error("connection timeout")))),
     );
 
     const processor = makeProcessor(store);

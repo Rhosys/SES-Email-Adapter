@@ -1,8 +1,7 @@
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, DeleteCommand, QueryCommand } from "@aws-sdk/lib-dynamodb";
-import { ResultAsync, ok } from "neverthrow";
-import { dbError } from "../errors.js";
-import type { DbError } from "../errors.js";
+import { ok, err, dbError } from "../errors.js";
+import type { DbError, Result } from "../errors.js";
 import type { Notifier } from "../processor/processor.js";
 import type { Arc, Signal, WsConnection, AuthData } from "../types/index.js";
 
@@ -13,18 +12,20 @@ const WS_ENDPOINT = process.env["WS_API_ENDPOINT"] ?? "";
 const dynamo = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 
 export class SesNotifier implements Notifier {
-  notify(accountId: string, arc: Arc, signal: Signal): ResultAsync<void, DbError> {
+  async notify(accountId: string, arc: Arc, signal: Signal): Promise<Result<void, DbError>> {
     if (signal.workflow === "auth") {
-      return ResultAsync.fromPromise(
-        this.wsNotify(accountId, arc, signal),
-        (e) => dbError(e instanceof Error ? e : new Error(String(e))),
-      );
+      try {
+        await this.wsNotify(accountId, arc, signal);
+        return ok(undefined);
+      } catch (e) {
+        return err(dbError(e));
+      }
     }
-    return ok(undefined) as unknown as ResultAsync<void, DbError>;
+    return ok(undefined);
   }
 
-  notifyBlocked(_accountId: string, _signal: Signal): ResultAsync<void, DbError> {
-    return ok(undefined) as unknown as ResultAsync<void, DbError>;
+  async notifyBlocked(_accountId: string, _signal: Signal): Promise<Result<void, DbError>> {
+    return ok(undefined);
   }
 
   private async wsNotify(accountId: string, _arc: Arc, signal: Signal): Promise<void> {

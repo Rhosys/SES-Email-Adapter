@@ -4,7 +4,7 @@ import { randomUUID } from "crypto";
 import { getDomain } from "tldts";
 import { checkDomain } from "../dns/dns-checker.js";
 import type { AuditEvent } from "../database/audit-database.js";
-import type { Result, ResultAsync } from "neverthrow";
+import type { Result } from "neverthrow";
 import type { DbError, NotFoundError, AuthressServiceError, AuthError } from "../errors.js";
 import type { Arc, Signal, View, Label, Rule, Domain, DnsRecord, Account, Page, PageParams, ArcStatus, Workflow, WorkflowData, Alias, AliasSender, SenderMode, SenderFilterMode, VerifiedForwardingAddress, Pagination, EmailTemplate } from "../types/index.js";
 import type { Logger } from "../logger.js";
@@ -35,7 +35,7 @@ export interface AuthContext {
 }
 
 export interface AuthService {
-  verify(token: string): ResultAsync<AuthContext, AuthError>;
+  verify(token: string): Promise<Result<AuthContext, AuthError>>;
 }
 
 // ---------------------------------------------------------------------------
@@ -50,10 +50,10 @@ export interface AccountUser {
 }
 
 export interface AccessService {
-  listUsers(accountId: string): ResultAsync<AccountUser[], AuthressServiceError>;
-  addUser(accountId: string, userId: string, role: AccountRole): ResultAsync<void, AuthressServiceError>;
-  updateUserRole(accountId: string, userId: string, role: AccountRole): ResultAsync<void, AuthressServiceError>;
-  removeUser(accountId: string, userId: string): ResultAsync<void, AuthressServiceError>;
+  listUsers(accountId: string): Promise<Result<AccountUser[], AuthressServiceError>>;
+  addUser(accountId: string, userId: string, role: AccountRole): Promise<Result<void, AuthressServiceError>>;
+  updateUserRole(accountId: string, userId: string, role: AccountRole): Promise<Result<void, AuthressServiceError>>;
+  removeUser(accountId: string, userId: string): Promise<Result<void, AuthressServiceError>>;
   checkAccess(userId: string, accountId: string, permission: string): Promise<void>;
 }
 
@@ -158,7 +158,7 @@ export interface ApiDatabase {
 // ---------------------------------------------------------------------------
 
 export interface VerificationMailer {
-  sendForwardVerification(accountId: string, address: string, token: string): ResultAsync<void, DbError>;
+  sendForwardVerification(accountId: string, address: string, token: string): Promise<Result<void, DbError>>;
 }
 
 // ---------------------------------------------------------------------------

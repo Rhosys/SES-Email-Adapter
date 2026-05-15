@@ -4,8 +4,7 @@
 // ---------------------------------------------------------------------------
 
 import { describe, it, expect, vi, beforeEach, afterEach, beforeAll } from "vitest";
-import { ResultAsync } from "neverthrow";
-import { dbError } from "../errors.js";
+import { ok, err, dbError } from "../errors.js";
 import type { Arc, Domain, Account } from "../types/index.js";
 import { createMockLogger } from "../testing/mock-logger.js";
 import type { MockLogger } from "../testing/mock-logger.js";
@@ -33,16 +32,6 @@ vi.mock("../database/arc-database.js", () => ({
     listActiveArcsBefore: mockListActiveArcsBefore,
   })),
 }));
-
-/** Helper to wrap a value in a ResultAsync ok */
-function okAsync<T>(value: T) {
-  return ResultAsync.fromPromise(Promise.resolve(value), () => dbError(new Error("unexpected")));
-}
-
-/** Helper to wrap an error in a ResultAsync err */
-function errAsync(error: Error) {
-  return ResultAsync.fromPromise(Promise.reject(error), () => dbError(error));
-}
 
 const mockCheckDomain = vi.fn().mockResolvedValue([]);
 
@@ -100,8 +89,8 @@ function makeDomain(overrides: Partial<Domain> = {}): Domain {
 }
 
 function setupDefaultMocks() {
-  mockGetAccount.mockReturnValue(okAsync({ id: "acct-1", notifications: {} } as Account));
-  mockUpdateDomainHealth.mockReturnValue(okAsync(undefined));
+  mockGetAccount.mockReturnValue(Promise.resolve(ok({ id: "acct-1", notifications: {} } as Account)));
+  mockUpdateDomainHealth.mockReturnValue(Promise.resolve(ok(undefined)));
 }
 
 // ---------------------------------------------------------------------------
@@ -140,7 +129,7 @@ describe("domain-health-job staleness integration", () => {
 
   it("emits TRACK log for accounts with outstanding arcs", async () => {
     const domain = makeDomain({ accountId: "acct-1" });
-    mockScanAllDomains.mockReturnValue(okAsync([{ accountId: "acct-1", domains: [domain] }]));
+    mockScanAllDomains.mockReturnValue(Promise.resolve(ok([{ accountId: "acct-1", domains: [domain] }])));
 
     // Arc is stale: lastSignalAt is well before the 7-day cutoff
     const staleArc = makeArc({
@@ -150,7 +139,7 @@ describe("domain-health-job staleness integration", () => {
       urgency: "normal",
       lastSignalAt: "2025-04-01T00:00:00.000Z",
     });
-    mockListActiveArcsBefore.mockReturnValue(okAsync([staleArc]));
+    mockListActiveArcsBefore.mockReturnValue(Promise.resolve(ok([staleArc])));
 
     await job.run();
 
@@ -170,11 +159,11 @@ describe("domain-health-job staleness integration", () => {
 
   it("does not emit TRACK log for accounts with zero outstanding arcs", async () => {
     const domain = makeDomain({ accountId: "acct-2" });
-    mockScanAllDomains.mockReturnValue(okAsync([{ accountId: "acct-2", domains: [domain] }]));
-    mockGetAccount.mockReturnValue(okAsync({ id: "acct-2", notifications: {} } as Account));
+    mockScanAllDomains.mockReturnValue(Promise.resolve(ok([{ accountId: "acct-2", domains: [domain] }])));
+    mockGetAccount.mockReturnValue(Promise.resolve(ok({ id: "acct-2", notifications: {} } as Account)));
 
     // No stale arcs returned
-    mockListActiveArcsBefore.mockReturnValue(okAsync([]));
+    mockListActiveArcsBefore.mockReturnValue(Promise.resolve(ok([])));
 
     await job.run();
 
@@ -185,8 +174,8 @@ describe("domain-health-job staleness integration", () => {
 
   it("does not emit TRACK log when arcs are returned but none qualify as outstanding", async () => {
     const domain = makeDomain({ accountId: "acct-3" });
-    mockScanAllDomains.mockReturnValue(okAsync([{ accountId: "acct-3", domains: [domain] }]));
-    mockGetAccount.mockReturnValue(okAsync({ id: "acct-3", notifications: {} } as Account));
+    mockScanAllDomains.mockReturnValue(Promise.resolve(ok([{ accountId: "acct-3", domains: [domain] }])));
+    mockGetAccount.mockReturnValue(Promise.resolve(ok({ id: "acct-3", notifications: {} } as Account)));
 
     // Arc has urgency "silent" — should be filtered out by isOutstandingArc
     const silentArc = makeArc({
@@ -196,7 +185,7 @@ describe("domain-health-job staleness integration", () => {
       urgency: "silent",
       lastSignalAt: "2025-04-01T00:00:00.000Z",
     });
-    mockListActiveArcsBefore.mockReturnValue(okAsync([silentArc]));
+    mockListActiveArcsBefore.mockReturnValue(Promise.resolve(ok([silentArc])));
 
     await job.run();
 
@@ -212,16 +201,16 @@ describe("domain-health-job staleness integration", () => {
   it("continues processing remaining accounts when one account errors", async () => {
     const domain1 = makeDomain({ accountId: "acct-fail" });
     const domain2 = makeDomain({ accountId: "acct-ok" });
-    mockScanAllDomains.mockReturnValue(okAsync([
+    mockScanAllDomains.mockReturnValue(Promise.resolve(ok([
       { accountId: "acct-fail", domains: [domain1] },
       { accountId: "acct-ok", domains: [domain2] },
-    ]));
-    mockGetAccount.mockImplementation((id: string) => okAsync({ id, notifications: {} } as Account));
+    ])));
+    mockGetAccount.mockImplementation((id: string) => Promise.resolve(ok({ id, notifications: {} } as Account)));
 
     // First account returns error on staleness query
     mockListActiveArcsBefore.mockImplementation((accountId: string) => {
-      if (accountId === "acct-fail") return errAsync(new Error("DynamoDB timeout"));
-      return okAsync([makeArc({ id: "arc-ok", accountId: "acct-ok", status: "active", urgency: "high", lastSignalAt: "2025-04-01T00:00:00.000Z" })]);
+      if (accountId === "acct-fail") return Promise.resolve(err(new Error("DynamoDB timeout")));
+      return Promise.resolve(ok([makeArc({ id: "arc-ok", accountId: "acct-ok", status: "active", urgency: "high", lastSignalAt: "2025-04-01T00:00:00.000Z" })]));
     });
 
     await job.run();
@@ -249,20 +238,20 @@ describe("domain-health-job staleness integration", () => {
   it("emits run-complete log with correct totals after all accounts processed", async () => {
     const domain1 = makeDomain({ accountId: "acct-a" });
     const domain2 = makeDomain({ accountId: "acct-b" });
-    mockScanAllDomains.mockReturnValue(okAsync([
+    mockScanAllDomains.mockReturnValue(Promise.resolve(ok([
       { accountId: "acct-a", domains: [domain1] },
       { accountId: "acct-b", domains: [domain2] },
-    ]));
-    mockGetAccount.mockImplementation((id: string) => okAsync({ id, notifications: {} } as Account));
+    ])));
+    mockGetAccount.mockImplementation((id: string) => Promise.resolve(ok({ id, notifications: {} } as Account)));
 
     mockListActiveArcsBefore.mockImplementation((accountId: string) => {
       if (accountId === "acct-a") {
-        return okAsync([
+        return Promise.resolve(ok([
           makeArc({ id: "arc-a1", accountId: "acct-a", status: "active", urgency: "normal", lastSignalAt: "2025-04-01T00:00:00.000Z" }),
           makeArc({ id: "arc-a2", accountId: "acct-a", status: "active", urgency: "high", lastSignalAt: "2025-04-02T00:00:00.000Z" }),
-        ]);
+        ]));
       }
-      return okAsync([]);
+      return Promise.resolve(ok([]));
     });
 
     await job.run();
@@ -280,9 +269,9 @@ describe("domain-health-job staleness integration", () => {
 
   it("emits run-complete log with zero counts when no accounts have outstanding arcs", async () => {
     const domain = makeDomain({ accountId: "acct-clean" });
-    mockScanAllDomains.mockReturnValue(okAsync([{ accountId: "acct-clean", domains: [domain] }]));
-    mockGetAccount.mockReturnValue(okAsync({ id: "acct-clean", notifications: {} } as Account));
-    mockListActiveArcsBefore.mockReturnValue(okAsync([]));
+    mockScanAllDomains.mockReturnValue(Promise.resolve(ok([{ accountId: "acct-clean", domains: [domain] }])));
+    mockGetAccount.mockReturnValue(Promise.resolve(ok({ id: "acct-clean", notifications: {} } as Account)));
+    mockListActiveArcsBefore.mockReturnValue(Promise.resolve(ok([])));
 
     await job.run();
 
@@ -297,9 +286,9 @@ describe("domain-health-job staleness integration", () => {
 
   it("emits run-complete log even when all accounts error", async () => {
     const domain = makeDomain({ accountId: "acct-err" });
-    mockScanAllDomains.mockReturnValue(okAsync([{ accountId: "acct-err", domains: [domain] }]));
-    mockGetAccount.mockReturnValue(okAsync({ id: "acct-err", notifications: {} } as Account));
-    mockListActiveArcsBefore.mockReturnValue(errAsync(new Error("Total failure")));
+    mockScanAllDomains.mockReturnValue(Promise.resolve(ok([{ accountId: "acct-err", domains: [domain] }])));
+    mockGetAccount.mockReturnValue(Promise.resolve(ok({ id: "acct-err", notifications: {} } as Account)));
+    mockListActiveArcsBefore.mockReturnValue(Promise.resolve(err(new Error("Total failure"))));
 
     await job.run();
 

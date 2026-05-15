@@ -1,7 +1,6 @@
 import { SQSClient, SendMessageCommand } from "@aws-sdk/client-sqs";
-import { ResultAsync } from "neverthrow";
-import { dbError } from "../errors.js";
-import type { DbError } from "../errors.js";
+import { ok, err, dbError } from "../errors.js";
+import type { DbError, Result } from "../errors.js";
 import type { Logger } from "../logger.js";
 import type { SqsDispatcher, SideEffectPayload } from "./processor.js";
 
@@ -16,10 +15,10 @@ export class SqsDispatcherImpl implements SqsDispatcher {
     this.logger = logger;
   }
 
-  sendMessage(payload: SideEffectPayload): ResultAsync<void, DbError> {
+  async sendMessage(payload: SideEffectPayload): Promise<Result<void, DbError>> {
     this.logger.trackPoint("sqs_send_start");
-    return ResultAsync.fromPromise(
-      this.client.send(
+    try {
+      await this.client.send(
         new SendMessageCommand({
           QueueUrl: this.queueUrl,
           MessageBody: JSON.stringify(payload),
@@ -27,10 +26,11 @@ export class SqsDispatcherImpl implements SqsDispatcher {
             messageType: { DataType: "String", StringValue: "side_effect" },
           },
         }),
-      ),
-      (e) => dbError(e instanceof Error ? e : new Error(String(e))),
-    ).map(() => {
+      );
       this.logger.trackPoint("sqs_send_complete");
-    });
+      return ok(undefined);
+    } catch (e) {
+      return err(dbError(e));
+    }
   }
 }

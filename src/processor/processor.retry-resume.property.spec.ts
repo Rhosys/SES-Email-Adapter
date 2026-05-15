@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { SQSEvent } from "aws-lambda";
-import { ok, okAsync, errAsync } from "neverthrow";
+import { ok, err } from "neverthrow";
 import { SignalProcessor, SYSTEM_RULES } from "./processor.js";
 import { JsonLogicRuleEvaluator } from "./rule-evaluator.js";
 import type { ProcessorDatabase, ArcMatcher, SqsDispatcher } from "./processor.js";
@@ -237,20 +237,20 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
 
   function makeStore(signal: Signal, arc: Arc): ProcessorDatabase {
     return {
-      getSignalByMessageId: vi.fn().mockReturnValue(okAsync(signal)),
-      saveSignal: vi.fn().mockReturnValue(okAsync(undefined)),
-      updateSignalRetention: vi.fn().mockReturnValue(okAsync(undefined)),
-      getArc: vi.fn().mockReturnValue(okAsync(arc)),
-      findArcByGroupingKey: vi.fn().mockReturnValue(okAsync(null)),
-      saveArc: vi.fn().mockReturnValue(okAsync(undefined)),
-      listEnabledRules: vi.fn().mockReturnValue(okAsync(SYSTEM_RULES)),
-      getProcessorAccountContext: vi.fn().mockReturnValue(okAsync(DEFAULT_CTX)),
-      saveAlias: vi.fn().mockImplementation((a: Alias) => okAsync(a)),
-      getSender: vi.fn().mockReturnValue(okAsync(DEFAULT_SENDER_ENTRY)),
-      saveSender: vi.fn().mockReturnValue(okAsync(undefined)),
-      getTemplate: vi.fn().mockReturnValue(okAsync(null)),
-      updateGlobalReputation: vi.fn().mockReturnValue(okAsync(undefined)),
-      getDomainByName: vi.fn().mockReturnValue(okAsync(null)),
+      getSignalByMessageId: vi.fn().mockReturnValue(Promise.resolve(ok(signal))),
+      saveSignal: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+      updateSignalRetention: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+      getArc: vi.fn().mockReturnValue(Promise.resolve(ok(arc))),
+      findArcByGroupingKey: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
+      saveArc: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+      listEnabledRules: vi.fn().mockReturnValue(Promise.resolve(ok(SYSTEM_RULES))),
+      getProcessorAccountContext: vi.fn().mockReturnValue(Promise.resolve(ok(DEFAULT_CTX))),
+      saveAlias: vi.fn().mockImplementation((a: Alias) => Promise.resolve(ok(a))),
+      getSender: vi.fn().mockReturnValue(Promise.resolve(ok(DEFAULT_SENDER_ENTRY))),
+      saveSender: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+      getTemplate: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
+      updateGlobalReputation: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+      getDomainByName: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
     };
   }
 
@@ -276,7 +276,7 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
       classifier: { classify: vi.fn() },
       embeddingGenerator: { generateForActiveClusters: vi.fn(), generateForModel: vi.fn() },
       auroraWriter: makeAuroraWriter(),
-      arcMatcher: { findMatch: vi.fn().mockReturnValue(okAsync(null)), upsertEmbedding: vi.fn().mockReturnValue(okAsync(undefined)) },
+      arcMatcher: { findMatch: vi.fn().mockReturnValue(Promise.resolve(ok(null))), upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
       logger: mockLogger,
     });
@@ -296,7 +296,7 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
       classifier,
       embeddingGenerator: { generateForActiveClusters: vi.fn(), generateForModel: vi.fn() },
       auroraWriter: makeAuroraWriter(),
-      arcMatcher: { findMatch: vi.fn().mockReturnValue(okAsync(null)), upsertEmbedding: vi.fn().mockReturnValue(okAsync(undefined)) },
+      arcMatcher: { findMatch: vi.fn().mockReturnValue(Promise.resolve(ok(null))), upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
       logger: mockLogger,
     });
@@ -317,7 +317,7 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
       classifier: { classify: vi.fn() },
       embeddingGenerator: { generateForActiveClusters: vi.fn(), generateForModel: vi.fn() },
       auroraWriter: makeAuroraWriter(),
-      arcMatcher: { findMatch: vi.fn().mockReturnValue(okAsync(null)), upsertEmbedding: vi.fn().mockReturnValue(okAsync(undefined)) },
+      arcMatcher: { findMatch: vi.fn().mockReturnValue(Promise.resolve(ok(null))), upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       ruleEvaluator,
       logger: mockLogger,
     });
@@ -337,7 +337,7 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
       classifier: { classify: vi.fn() },
       embeddingGenerator: { generateForActiveClusters: vi.fn(), generateForModel: vi.fn() },
       auroraWriter,
-      arcMatcher: { findMatch: vi.fn().mockReturnValue(okAsync(null)), upsertEmbedding: vi.fn().mockReturnValue(okAsync(undefined)) },
+      arcMatcher: { findMatch: vi.fn().mockReturnValue(Promise.resolve(ok(null))), upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
       logger: mockLogger,
     });
@@ -364,7 +364,7 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
       classifier: { classify: vi.fn() },
       embeddingGenerator: { generateForActiveClusters: vi.fn(), generateForModel: vi.fn() },
       auroraWriter,
-      arcMatcher: { findMatch: vi.fn().mockReturnValue(okAsync(null)), upsertEmbedding: vi.fn().mockReturnValue(okAsync(undefined)) },
+      arcMatcher: { findMatch: vi.fn().mockReturnValue(Promise.resolve(ok(null))), upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
       logger: mockLogger,
     });
@@ -385,7 +385,7 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
       classifier: { classify: vi.fn() },
       embeddingGenerator: { generateForActiveClusters: vi.fn(), generateForModel: vi.fn() },
       auroraWriter: makeAuroraWriter(),
-      arcMatcher: { findMatch: vi.fn().mockReturnValue(okAsync(null)), upsertEmbedding: vi.fn().mockReturnValue(okAsync(undefined)) },
+      arcMatcher: { findMatch: vi.fn().mockReturnValue(Promise.resolve(ok(null))), upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
       logger: mockLogger,
     });
@@ -432,20 +432,20 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
     } as Signal;
 
     const store: ProcessorDatabase = {
-      getSignalByMessageId: vi.fn().mockReturnValue(okAsync(signal)),
-      saveSignal: vi.fn().mockReturnValue(okAsync(undefined)),
-      updateSignalRetention: vi.fn().mockReturnValue(okAsync(undefined)),
-      getArc: vi.fn().mockReturnValue(okAsync(null)),
-      findArcByGroupingKey: vi.fn().mockReturnValue(okAsync(null)),
-      saveArc: vi.fn().mockReturnValue(okAsync(undefined)),
-      listEnabledRules: vi.fn().mockReturnValue(okAsync(SYSTEM_RULES)),
-      getProcessorAccountContext: vi.fn().mockReturnValue(okAsync(DEFAULT_CTX)),
-      saveAlias: vi.fn().mockImplementation((a: Alias) => okAsync(a)),
-      getSender: vi.fn().mockReturnValue(okAsync(DEFAULT_SENDER_ENTRY)),
-      saveSender: vi.fn().mockReturnValue(okAsync(undefined)),
-      getTemplate: vi.fn().mockReturnValue(okAsync(null)),
-      updateGlobalReputation: vi.fn().mockReturnValue(okAsync(undefined)),
-      getDomainByName: vi.fn().mockReturnValue(okAsync(null)),
+      getSignalByMessageId: vi.fn().mockReturnValue(Promise.resolve(ok(signal))),
+      saveSignal: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+      updateSignalRetention: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+      getArc: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
+      findArcByGroupingKey: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
+      saveArc: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+      listEnabledRules: vi.fn().mockReturnValue(Promise.resolve(ok(SYSTEM_RULES))),
+      getProcessorAccountContext: vi.fn().mockReturnValue(Promise.resolve(ok(DEFAULT_CTX))),
+      saveAlias: vi.fn().mockImplementation((a: Alias) => Promise.resolve(ok(a))),
+      getSender: vi.fn().mockReturnValue(Promise.resolve(ok(DEFAULT_SENDER_ENTRY))),
+      saveSender: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+      getTemplate: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
+      updateGlobalReputation: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+      getDomainByName: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
     };
 
     const auroraWriter = makeAuroraWriter();
@@ -456,7 +456,7 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
       classifier: { classify: vi.fn() },
       embeddingGenerator: { generateForActiveClusters: vi.fn(), generateForModel: vi.fn() },
       auroraWriter,
-      arcMatcher: { findMatch: vi.fn().mockReturnValue(okAsync(null)), upsertEmbedding: vi.fn().mockReturnValue(okAsync(undefined)) },
+      arcMatcher: { findMatch: vi.fn().mockReturnValue(Promise.resolve(ok(null))), upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
       logger: mockLogger,
     });
@@ -591,20 +591,20 @@ describe("Feature: signal-processor-retry-resilience, Property 3: DDB read failu
 
   function makeStore(overrides: Partial<ProcessorDatabase> = {}): ProcessorDatabase {
     return {
-      getSignalByMessageId: vi.fn().mockReturnValue(okAsync(null)),
-      saveSignal: vi.fn().mockReturnValue(okAsync(undefined)),
-      updateSignalRetention: vi.fn().mockReturnValue(okAsync(undefined)),
-      getArc: vi.fn().mockReturnValue(okAsync(null)),
-      findArcByGroupingKey: vi.fn().mockReturnValue(okAsync(null)),
-      saveArc: vi.fn().mockReturnValue(okAsync(undefined)),
-      listEnabledRules: vi.fn().mockReturnValue(okAsync(SYSTEM_RULES)),
-      getProcessorAccountContext: vi.fn().mockReturnValue(okAsync(DEFAULT_CTX)),
-      saveAlias: vi.fn().mockImplementation((a: Alias) => okAsync(a)),
-      getSender: vi.fn().mockReturnValue(okAsync(DEFAULT_SENDER_ENTRY)),
-      saveSender: vi.fn().mockReturnValue(okAsync(undefined)),
-      getTemplate: vi.fn().mockReturnValue(okAsync(null)),
-      updateGlobalReputation: vi.fn().mockReturnValue(okAsync(undefined)),
-      getDomainByName: vi.fn().mockReturnValue(okAsync(null)),
+      getSignalByMessageId: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
+      saveSignal: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+      updateSignalRetention: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+      getArc: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
+      findArcByGroupingKey: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
+      saveArc: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+      listEnabledRules: vi.fn().mockReturnValue(Promise.resolve(ok(SYSTEM_RULES))),
+      getProcessorAccountContext: vi.fn().mockReturnValue(Promise.resolve(ok(DEFAULT_CTX))),
+      saveAlias: vi.fn().mockImplementation((a: Alias) => Promise.resolve(ok(a))),
+      getSender: vi.fn().mockReturnValue(Promise.resolve(ok(DEFAULT_SENDER_ENTRY))),
+      saveSender: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+      getTemplate: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
+      updateGlobalReputation: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+      getDomainByName: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
       ...overrides,
     };
   }
@@ -648,7 +648,7 @@ describe("Feature: signal-processor-retry-resilience, Property 3: DDB read failu
 
   it.each(SIGNAL_READ_FAILURE_CASES)("signal read failure returns batchItemFailure without Aurora upserts or DDB writes ($label)", async ({ error, receiveCount, sesMessageId }) => {
     const store = makeStore({
-      getSignalByMessageId: vi.fn().mockReturnValue(errAsync(error)),
+      getSignalByMessageId: vi.fn().mockReturnValue(Promise.resolve(err(error))),
     });
     const auroraWriter = makeAuroraWriter();
 
@@ -658,7 +658,7 @@ describe("Feature: signal-processor-retry-resilience, Property 3: DDB read failu
       classifier: { classify: vi.fn() },
       embeddingGenerator: { generateForActiveClusters: vi.fn(), generateForModel: vi.fn() },
       auroraWriter,
-      arcMatcher: { findMatch: vi.fn().mockReturnValue(okAsync(null)), upsertEmbedding: vi.fn().mockReturnValue(okAsync(undefined)) },
+      arcMatcher: { findMatch: vi.fn().mockReturnValue(Promise.resolve(ok(null))), upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
       logger: mockLogger,
     });
@@ -675,8 +675,8 @@ describe("Feature: signal-processor-retry-resilience, Property 3: DDB read failu
   it.each(ARC_READ_FAILURE_CASES)("arc read failure returns batchItemFailure without Aurora upserts or DDB writes ($label)", async ({ error, receiveCount, sesMessageId }) => {
     const existingSignal = makeExistingSignal(sesMessageId);
     const store = makeStore({
-      getSignalByMessageId: vi.fn().mockReturnValue(okAsync(existingSignal)),
-      getArc: vi.fn().mockReturnValue(errAsync(error)),
+      getSignalByMessageId: vi.fn().mockReturnValue(Promise.resolve(ok(existingSignal))),
+      getArc: vi.fn().mockReturnValue(Promise.resolve(err(error))),
     });
     const auroraWriter = makeAuroraWriter();
 
@@ -686,7 +686,7 @@ describe("Feature: signal-processor-retry-resilience, Property 3: DDB read failu
       classifier: { classify: vi.fn() },
       embeddingGenerator: { generateForActiveClusters: vi.fn(), generateForModel: vi.fn() },
       auroraWriter,
-      arcMatcher: { findMatch: vi.fn().mockReturnValue(okAsync(null)), upsertEmbedding: vi.fn().mockReturnValue(okAsync(undefined)) },
+      arcMatcher: { findMatch: vi.fn().mockReturnValue(Promise.resolve(ok(null))), upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
       logger: mockLogger,
     });
@@ -757,20 +757,20 @@ describe("Feature: signal-processor-retry-resilience, Property 2: Missing signal
   function makeStore(): ProcessorDatabase {
     return {
       // Signal does NOT exist — triggers fresh processing on retry
-      getSignalByMessageId: vi.fn().mockReturnValue(okAsync(null)),
-      saveSignal: vi.fn().mockReturnValue(okAsync(undefined)),
-      updateSignalRetention: vi.fn().mockReturnValue(okAsync(undefined)),
-      getArc: vi.fn().mockReturnValue(okAsync(null)),
-      findArcByGroupingKey: vi.fn().mockReturnValue(okAsync(null)),
-      saveArc: vi.fn().mockReturnValue(okAsync(undefined)),
-      listEnabledRules: vi.fn().mockReturnValue(okAsync(SYSTEM_RULES)),
-      getProcessorAccountContext: vi.fn().mockReturnValue(okAsync(DEFAULT_CTX)),
-      saveAlias: vi.fn().mockImplementation((a: Alias) => okAsync(a)),
-      getSender: vi.fn().mockReturnValue(okAsync(DEFAULT_SENDER_ENTRY)),
-      saveSender: vi.fn().mockReturnValue(okAsync(undefined)),
-      getTemplate: vi.fn().mockReturnValue(okAsync(null)),
-      updateGlobalReputation: vi.fn().mockReturnValue(okAsync(undefined)),
-      getDomainByName: vi.fn().mockReturnValue(okAsync(null)),
+      getSignalByMessageId: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
+      saveSignal: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+      updateSignalRetention: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+      getArc: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
+      findArcByGroupingKey: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
+      saveArc: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+      listEnabledRules: vi.fn().mockReturnValue(Promise.resolve(ok(SYSTEM_RULES))),
+      getProcessorAccountContext: vi.fn().mockReturnValue(Promise.resolve(ok(DEFAULT_CTX))),
+      saveAlias: vi.fn().mockImplementation((a: Alias) => Promise.resolve(ok(a))),
+      getSender: vi.fn().mockReturnValue(Promise.resolve(ok(DEFAULT_SENDER_ENTRY))),
+      saveSender: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+      getTemplate: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
+      updateGlobalReputation: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+      getDomainByName: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
     };
   }
 
@@ -812,8 +812,8 @@ describe("Feature: signal-processor-retry-resilience, Property 2: Missing signal
 
   function makeArcMatcher(): ArcMatcher {
     return {
-      findMatch: vi.fn().mockReturnValue(okAsync(null)),
-      upsertEmbedding: vi.fn().mockReturnValue(okAsync(undefined)),
+      findMatch: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
+      upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     };
   }
 
@@ -1113,24 +1113,24 @@ describe("Feature: signal-processor-retry-resilience, Property 8: Outcome re-der
     const arc = makeArc();
 
     const store: ProcessorDatabase = {
-      getSignalByMessageId: vi.fn().mockReturnValue(okAsync(signal)),
-      saveSignal: vi.fn().mockReturnValue(okAsync(undefined)),
-      updateSignalRetention: vi.fn().mockReturnValue(okAsync(undefined)),
-      getArc: vi.fn().mockReturnValue(okAsync(arc)),
-      findArcByGroupingKey: vi.fn().mockReturnValue(okAsync(null)),
-      saveArc: vi.fn().mockReturnValue(okAsync(undefined)),
-      listEnabledRules: vi.fn().mockReturnValue(okAsync(SYSTEM_RULES)),
-      getProcessorAccountContext: vi.fn().mockReturnValue(okAsync(DEFAULT_CTX)),
-      saveAlias: vi.fn().mockImplementation((a: Alias) => okAsync(a)),
-      getSender: vi.fn().mockReturnValue(okAsync(DEFAULT_SENDER_ENTRY)),
-      saveSender: vi.fn().mockReturnValue(okAsync(undefined)),
-      getTemplate: vi.fn().mockReturnValue(okAsync(null)),
-      updateGlobalReputation: vi.fn().mockReturnValue(okAsync(undefined)),
-      getDomainByName: vi.fn().mockReturnValue(okAsync(null)),
+      getSignalByMessageId: vi.fn().mockReturnValue(Promise.resolve(ok(signal))),
+      saveSignal: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+      updateSignalRetention: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+      getArc: vi.fn().mockReturnValue(Promise.resolve(ok(arc))),
+      findArcByGroupingKey: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
+      saveArc: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+      listEnabledRules: vi.fn().mockReturnValue(Promise.resolve(ok(SYSTEM_RULES))),
+      getProcessorAccountContext: vi.fn().mockReturnValue(Promise.resolve(ok(DEFAULT_CTX))),
+      saveAlias: vi.fn().mockImplementation((a: Alias) => Promise.resolve(ok(a))),
+      getSender: vi.fn().mockReturnValue(Promise.resolve(ok(DEFAULT_SENDER_ENTRY))),
+      saveSender: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+      getTemplate: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
+      updateGlobalReputation: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+      getDomainByName: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
     };
 
     const sqsDispatcher: SqsDispatcher = {
-      sendMessage: vi.fn().mockReturnValue(okAsync(undefined)),
+      sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     };
 
     const processor = new SignalProcessor({
@@ -1139,7 +1139,7 @@ describe("Feature: signal-processor-retry-resilience, Property 8: Outcome re-der
       classifier: { classify: vi.fn() },
       embeddingGenerator: { generateForActiveClusters: vi.fn(), generateForModel: vi.fn() },
       auroraWriter: { upsertEmbedding: vi.fn().mockResolvedValue(undefined), findMatch: vi.fn().mockResolvedValue(null) },
-      arcMatcher: { findMatch: vi.fn().mockReturnValue(okAsync(null)), upsertEmbedding: vi.fn().mockReturnValue(okAsync(undefined)) },
+      arcMatcher: { findMatch: vi.fn().mockReturnValue(Promise.resolve(ok(null))), upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
       sqsDispatcher,
       logger: mockLogger,
@@ -1154,24 +1154,24 @@ describe("Feature: signal-processor-retry-resilience, Property 8: Outcome re-der
     const arc = makeArc();
 
     const store: ProcessorDatabase = {
-      getSignalByMessageId: vi.fn().mockReturnValue(okAsync(signal)),
-      saveSignal: vi.fn().mockReturnValue(okAsync(undefined)),
-      updateSignalRetention: vi.fn().mockReturnValue(okAsync(undefined)),
-      getArc: vi.fn().mockReturnValue(okAsync(arc)),
-      findArcByGroupingKey: vi.fn().mockReturnValue(okAsync(null)),
-      saveArc: vi.fn().mockReturnValue(okAsync(undefined)),
-      listEnabledRules: vi.fn().mockReturnValue(okAsync(SYSTEM_RULES)),
-      getProcessorAccountContext: vi.fn().mockReturnValue(okAsync(DEFAULT_CTX)),
-      saveAlias: vi.fn().mockImplementation((a: Alias) => okAsync(a)),
-      getSender: vi.fn().mockReturnValue(okAsync(DEFAULT_SENDER_ENTRY)),
-      saveSender: vi.fn().mockReturnValue(okAsync(undefined)),
-      getTemplate: vi.fn().mockReturnValue(okAsync(null)),
-      updateGlobalReputation: vi.fn().mockReturnValue(okAsync(undefined)),
-      getDomainByName: vi.fn().mockReturnValue(okAsync(null)),
+      getSignalByMessageId: vi.fn().mockReturnValue(Promise.resolve(ok(signal))),
+      saveSignal: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+      updateSignalRetention: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+      getArc: vi.fn().mockReturnValue(Promise.resolve(ok(arc))),
+      findArcByGroupingKey: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
+      saveArc: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+      listEnabledRules: vi.fn().mockReturnValue(Promise.resolve(ok(SYSTEM_RULES))),
+      getProcessorAccountContext: vi.fn().mockReturnValue(Promise.resolve(ok(DEFAULT_CTX))),
+      saveAlias: vi.fn().mockImplementation((a: Alias) => Promise.resolve(ok(a))),
+      getSender: vi.fn().mockReturnValue(Promise.resolve(ok(DEFAULT_SENDER_ENTRY))),
+      saveSender: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+      getTemplate: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
+      updateGlobalReputation: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+      getDomainByName: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
     };
 
     const sqsDispatcher: SqsDispatcher = {
-      sendMessage: vi.fn().mockReturnValue(okAsync(undefined)),
+      sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     };
 
     const processor = new SignalProcessor({
@@ -1180,7 +1180,7 @@ describe("Feature: signal-processor-retry-resilience, Property 8: Outcome re-der
       classifier: { classify: vi.fn() },
       embeddingGenerator: { generateForActiveClusters: vi.fn(), generateForModel: vi.fn() },
       auroraWriter: { upsertEmbedding: vi.fn().mockResolvedValue(undefined), findMatch: vi.fn().mockResolvedValue(null) },
-      arcMatcher: { findMatch: vi.fn().mockReturnValue(okAsync(null)), upsertEmbedding: vi.fn().mockReturnValue(okAsync(undefined)) },
+      arcMatcher: { findMatch: vi.fn().mockReturnValue(Promise.resolve(ok(null))), upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
       sqsDispatcher,
       logger: mockLogger,
