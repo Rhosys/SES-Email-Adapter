@@ -76,6 +76,39 @@ jobs:
       - name: Tofu Init
         run: tofu -chdir=deploy init -input=false -backend-config="bucket=${STATE_BUCKET}" -backend-config="key=${STATE_KEY}"
 
+      - name: Fix S3 Web Bucket State (one-time)
+        run: |
+          MARKER="s3://${STATE_BUCKET}/migration/eu-central-1-s3-buckets-fixed"
+          if aws s3 ls "$MARKER" > /dev/null 2>&1; then
+            echo "S3 bucket state fix already applied — skipping."
+            exit 0
+          fi
+          NEW_WEB="${TF_VAR_service_name,,}-web-${TF_VAR_aws_account_id}-eu-central-1-an"
+          NEW_EMAILS="${TF_VAR_service_name,,}-emails-${TF_VAR_aws_account_id}-eu-central-1-an"
+          for bucket_key in web emails; do
+            addr="aws_s3_bucket.${bucket_key}"
+            CURRENT=$(tofu -chdir=deploy state show "$addr" 2>/dev/null | grep '^ *id ' | awk '{print $3}' | tr -d '"' || true)
+            if [[ "$CURRENT" == *"eu-west-1"* ]]; then
+              NEW_NAME="NEW_${bucket_key^^}"
+              NEW_BUCKET="${!NEW_NAME}"
+              echo "→ $addr in state is '$CURRENT'; migrating to '$NEW_BUCKET'..."
+              for sub in \
+                "aws_s3_bucket_policy.${bucket_key}" \
+                "aws_s3_bucket_lifecycle_configuration.${bucket_key}" \
+                "aws_s3_bucket_server_side_encryption_configuration.${bucket_key}" \
+                "aws_s3_bucket_public_access_block.${bucket_key}" \
+                "aws_s3_bucket.${bucket_key}"; do
+                tofu -chdir=deploy state rm "$sub" 2>/dev/null || true
+              done
+              tofu -chdir=deploy import "aws_s3_bucket.${bucket_key}" "$NEW_BUCKET"
+              echo "  ✓ aws_s3_bucket.${bucket_key} imported as '$NEW_BUCKET'"
+            else
+              echo "$addr OK ('$CURRENT') — skipping"
+            fi
+          done
+          echo "" | aws s3 cp - "$MARKER"
+          echo "✓ S3 bucket state fix applied."
+
       - name: Tofu Plan
         id: plan
         run: |
