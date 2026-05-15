@@ -68,3 +68,8 @@ export function getReadCluster(): ClusterRegistryEntry {
   }
   return active[0]!;
 }
+
+export function getSecondaryClusters(): readonly ClusterRegistryEntry[] {
+  const primary = getReadCluster();
+  return getActiveClusters().filter((c) => c.clusterId !== primary.clusterId);
+}
