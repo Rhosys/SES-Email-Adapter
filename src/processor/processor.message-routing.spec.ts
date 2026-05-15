@@ -76,7 +76,7 @@ function makeStore(): ProcessorDatabase {
 
 function makeMimeParser(): MimeParser {
   return {
-    parse: vi.fn().mockResolvedValue({
+    parse: vi.fn().mockResolvedValue(ok({
       from: { address: "sender@example.com", name: "Sender" },
       to: [{ address: "user@example.com" }],
       cc: [],
@@ -86,7 +86,7 @@ function makeMimeParser(): MimeParser {
       attachments: [],
       headers: { "authentication-results": "spf=pass dkim=pass" },
       sentAt: "2024-01-15T09:00:00Z",
-    }),
+    })),
   };
 }
 

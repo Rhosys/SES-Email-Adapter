@@ -53,7 +53,7 @@ describe("Blocked/quarantined signals never trigger saveArc", () => {
 
   function makeMimeParser(fromDomain: string): MimeParser {
     return {
-      parse: vi.fn().mockResolvedValue({
+      parse: vi.fn().mockResolvedValue(ok({
         from: { address: `sender@${fromDomain}`, name: "Sender" },
         to: [{ address: "user@example.com" }],
         cc: [],
@@ -63,7 +63,7 @@ describe("Blocked/quarantined signals never trigger saveArc", () => {
         attachments: [],
         headers: {},
         sentAt: "2024-01-15T09:00:00Z",
-      }),
+      })),
     };
   }
 

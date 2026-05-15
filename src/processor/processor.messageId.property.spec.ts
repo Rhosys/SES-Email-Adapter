@@ -72,7 +72,7 @@ describe("ProcessError always carries the SQS messageId", () => {
 
   function makeProcessor(store: ProcessorDatabase): SignalProcessor {
     const mimeParser: MimeParser = {
-      parse: vi.fn().mockResolvedValue({
+      parse: vi.fn().mockResolvedValue(ok({
         from: { address: "s@x.com", name: "S" },
         to: [{ address: "u@x.com" }],
         cc: [],
@@ -82,7 +82,7 @@ describe("ProcessError always carries the SQS messageId", () => {
         attachments: [],
         headers: {},
         sentAt: "2024-01-15T09:00:00Z",
-      }),
+      })),
     };
     const classifier: Pick<SignalClassifier, "classify"> = {
       classify: vi.fn().mockResolvedValue({

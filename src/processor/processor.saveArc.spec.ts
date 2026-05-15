@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { ok } from "neverthrow";
+import { ok } from "../errors.js";
 import { SignalProcessor, SYSTEM_RULES } from "./processor.js";
 import { JsonLogicRuleEvaluator } from "./rule-evaluator.js";
 import type { ProcessorDatabase, TestReplier } from "./processor.js";
@@ -151,7 +151,7 @@ describe("Single saveArc call with complete mutations", () => {
     };
 
     const mimeParser: MimeParser = {
-      parse: vi.fn().mockResolvedValue({
+      parse: vi.fn().mockResolvedValue(ok({
         from: { address: senderEmail, name: "Sender" },
         to: [{ address: recipientEmail }],
         cc: [],
@@ -161,7 +161,7 @@ describe("Single saveArc call with complete mutations", () => {
         attachments: [],
         headers: { "authentication-results": "spf=pass dkim=pass" },
         sentAt: "2024-01-15T09:00:00Z",
-      }),
+      })),
     };
 
     const embeddingGenerator: EmbeddingGenerator = {

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import type { SQSEvent } from "aws-lambda";
-import { ok } from "neverthrow";
+import { ok } from "../errors.js";
 import { SignalProcessor, SYSTEM_RULES } from "./processor.js";
 import { JsonLogicRuleEvaluator } from "./rule-evaluator.js";
 import type { ProcessorDatabase, ArcMatcher } from "./processor.js";
@@ -71,7 +71,7 @@ describe("Cross-layer idempotence — live writes + cache + Aurora", () => {
 
   function makeMimeParser(): MimeParser {
     return {
-      parse: vi.fn().mockResolvedValue({
+      parse: vi.fn().mockResolvedValue(ok({
         from: { address: "sender@external.com", name: "Sender" },
         to: [{ address: "user@example.com" }],
         cc: [],
@@ -81,7 +81,7 @@ describe("Cross-layer idempotence — live writes + cache + Aurora", () => {
         attachments: [],
         headers: {},
         sentAt: "2024-01-15T09:00:00Z",
-      }),
+      })),
     };
   }
 

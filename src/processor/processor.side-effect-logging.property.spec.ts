@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { SQSEvent } from "aws-lambda";
-import { ok, err } from "neverthrow";
+import { ok, err } from "../errors.js";
 import { SignalProcessor, SYSTEM_RULES } from "./processor.js";
 import { JsonLogicRuleEvaluator } from "./rule-evaluator.js";
 import type { ProcessorDatabase, ArcMatcher, Notifier, Forwarder } from "./processor.js";
@@ -93,7 +93,7 @@ describe("Side effect caller logging", () => {
 
   function makeMimeParser(): MimeParser {
     return {
-      parse: vi.fn().mockResolvedValue({
+      parse: vi.fn().mockResolvedValue(ok({
         from: { address: "sender@example.com", name: "Sender" },
         to: [{ address: "user@example.com" }],
         cc: [],
@@ -103,7 +103,7 @@ describe("Side effect caller logging", () => {
         attachments: [],
         headers: {},
         sentAt: "2024-01-15T09:00:00Z",
-      }),
+      })),
     };
   }
 

@@ -9,7 +9,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import fc from "fast-check";
 import type { SQSEvent } from "aws-lambda";
-import { ok } from "neverthrow";
+import { ok } from "../errors.js";
 import { SignalProcessor, SYSTEM_RULES } from "./processor.js";
 import { JsonLogicRuleEvaluator } from "./rule-evaluator.js";
 import type { ProcessorDatabase, ArcMatcher } from "./processor.js";
@@ -92,7 +92,7 @@ const CLASSIFICATION: ClassificationOutput = {
 
 function makeMimeParser(): MimeParser {
   return {
-    parse: vi.fn().mockResolvedValue({
+    parse: vi.fn().mockResolvedValue(ok({
       from: { address: "sender@external.com", name: "Sender" },
       to: [{ address: "user@example.com" }],
       cc: [],
@@ -102,7 +102,7 @@ function makeMimeParser(): MimeParser {
       attachments: [],
       headers: {},
       sentAt: "2024-01-15T09:00:00Z",
-    }),
+    })),
   };
 }
 
