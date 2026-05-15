@@ -8,7 +8,7 @@ import { ok, err } from "../errors.js";
 import type { Result } from "../errors.js";
 import { bedrockError } from "../errors.js";
 import type { BedrockError } from "../errors.js";
-import { CLUSTER_REGISTRY, type ClusterRegistryEntry } from "./cluster-registry.js";
+import { CLUSTER_REGISTRY, getSecondaryClusters, type ClusterRegistryEntry } from "./cluster-registry.js";
 import type { Logger } from "../logger.js";
 
 // ---------------------------------------------------------------------------
@@ -23,6 +23,7 @@ export interface EmbeddingResult {
 
 export interface EmbeddingGenerator {
   generateForModel(embedText: string, modelId: string): Promise<Result<EmbeddingResult, BedrockError>>;
+  generateForSecondaryClusters(embedText: string): Promise<Result<EmbeddingResult, BedrockError>[]>;
 }
 
 // ---------------------------------------------------------------------------
@@ -47,6 +48,15 @@ export class BedrockEmbeddingGenerator implements EmbeddingGenerator {
     }
 
     return this.invokeForEntry(embedText, entry);
+  }
+
+  /**
+   * Generates embeddings for all secondary clusters in parallel.
+   * Returns one Result per secondary cluster.
+   */
+  async generateForSecondaryClusters(embedText: string): Promise<Result<EmbeddingResult, BedrockError>[]> {
+    const clusters = getSecondaryClusters();
+    return Promise.all(clusters.map((entry) => this.invokeForEntry(embedText, entry)));
   }
 
   // ---------------------------------------------------------------------------
