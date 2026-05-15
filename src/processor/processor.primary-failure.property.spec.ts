@@ -7,7 +7,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { SQSEvent } from "aws-lambda";
-import { err, ok } from "neverthrow";
+import { err, ok } from "../errors.js";
 import fc from "fast-check";
 import { SignalProcessor, SYSTEM_RULES } from "./processor.js";
 import { JsonLogicRuleEvaluator } from "./rule-evaluator.js";
@@ -105,7 +105,7 @@ function makeStore(): ProcessorDatabase {
 
 function makeMimeParser(): MimeParser {
   return {
-    parse: vi.fn().mockResolvedValue({
+    parse: vi.fn().mockResolvedValue(ok({
       from: { address: "sender@example.com", name: "Sender" },
       to: [{ address: "user@example.com" }],
       cc: [],
@@ -115,7 +115,7 @@ function makeMimeParser(): MimeParser {
       attachments: [],
       headers: {},
       sentAt: "2024-01-15T09:00:00Z",
-    }),
+    })),
   };
 }
 

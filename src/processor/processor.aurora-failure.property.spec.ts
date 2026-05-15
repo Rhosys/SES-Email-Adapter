@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import type { SQSEvent } from "aws-lambda";
-import { ok } from "neverthrow";
+import { ok } from "../errors.js";
 import { SignalProcessor, SYSTEM_RULES } from "./processor.js";
 import { JsonLogicRuleEvaluator } from "./rule-evaluator.js";
 import type { ProcessorDatabase, ArcMatcher } from "./processor.js";
@@ -108,7 +108,7 @@ describe("Aurora cluster failure preserves the DynamoDB cache entry", () => {
 
   function makeMimeParser(): MimeParser {
     return {
-      parse: vi.fn().mockResolvedValue({
+      parse: vi.fn().mockResolvedValue(ok({
         from: { address: "sender@example.com", name: "Sender" },
         to: [{ address: "user@example.com" }],
         cc: [],
@@ -118,7 +118,7 @@ describe("Aurora cluster failure preserves the DynamoDB cache entry", () => {
         attachments: [],
         headers: {},
         sentAt: "2024-01-15T09:00:00Z",
-      }),
+      })),
     };
   }
 
