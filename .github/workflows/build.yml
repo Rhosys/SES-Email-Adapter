@@ -314,52 +314,64 @@ jobs:
       - name: Tofu Init
         run: tofu -chdir=deploy init -input=false -backend-config="bucket=${STATE_BUCKET}" -backend-config="key=${STATE_KEY}"
 
+      - name: Read Tofu Outputs
+        id: tofu_outputs
+        run: |
+          tofu -chdir=deploy output -json | jq -r 'to_entries[] | "\(.key)=\(.value.value)"' >> $GITHUB_OUTPUT
+
       - name: Tofu Apply
         id: apply
         run: |
           set +e
           tofu -chdir=deploy apply -input=false -auto-approve plan.cache 2>&1 | tee /tmp/apply_output.txt
-          EXIT_CODE=${PIPESTATUS[0]}
-          if [ $EXIT_CODE -ne 0 ]; then
-            echo "## ❌ Tofu Apply Failed" >> $GITHUB_STEP_SUMMARY
+          echo ${PIPESTATUS[0]} > /tmp/apply_exit_code.txt
+          exit $(cat /tmp/apply_exit_code.txt)
+
+      - name: Deployment Summary
+        if: always()
+        run: |
+          EXIT_CODE=$(cat /tmp/apply_exit_code.txt 2>/dev/null || echo "0")
+          if [ "$EXIT_CODE" = "0" ]; then
+            echo "## ✅ Deployment Successful" >> $GITHUB_STEP_SUMMARY
+            exit 0
+          fi
+
+          echo "## ❌ Tofu Apply Failed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if grep -q "AccessDenied\|is not authorized to perform\|explicit deny" /tmp/apply_output.txt; then
+            echo "## 🚨🚨🚨 MANUAL DELETION REQUIRED 🚨🚨🚨" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-
-            # Check for permission-denied resource deletions (CI role lacks destructive permissions)
-            if grep -q "AccessDenied\|is not authorized to perform\|explicit deny" /tmp/apply_output.txt; then
-              echo "## 🚨🚨🚨 MANUAL DELETION REQUIRED 🚨🚨🚨" >> $GITHUB_STEP_SUMMARY
-              echo "" >> $GITHUB_STEP_SUMMARY
-              echo "The CI role does not have permission to delete resources." >> $GITHUB_STEP_SUMMARY
-              echo "This is **intentional** — destructive operations require human credentials." >> $GITHUB_STEP_SUMMARY
-              echo "" >> $GITHUB_STEP_SUMMARY
-              echo "**⚠️ WARNING: The following commands permanently destroy AWS resources. Data loss is irreversible.**" >> $GITHUB_STEP_SUMMARY
-              echo "" >> $GITHUB_STEP_SUMMARY
-              echo "**WHY this is safe:** The tofu code no longer references these resources." >> $GITHUB_STEP_SUMMARY
-              echo "They are orphaned infrastructure that was intentionally removed from the codebase." >> $GITHUB_STEP_SUMMARY
-              echo "The tool validates that the resource is in state but absent from .tf code before deleting." >> $GITHUB_STEP_SUMMARY
-              echo "" >> $GITHUB_STEP_SUMMARY
-
-              # Extract resource addresses from the error output
-              RESOURCES=$(grep -oP '(?<=resource ")[^"]+\.[^"]+(?=")' /tmp/apply_output.txt | sort -u)
-              echo '```bash' >> $GITHUB_STEP_SUMMARY
-              echo "# Run from _tools/ with your local AWS credentials:" >> $GITHUB_STEP_SUMMARY
-              for addr in $RESOURCES; do
-                echo "npx tsx src/delete-tf-resource.ts --deploy-dir $(pwd)/deploy --resource \"$addr\" --region ${AWS_DEFAULT_REGION}" >> $GITHUB_STEP_SUMMARY
-              done
-              if [ -z "$RESOURCES" ]; then
-                echo "# Could not auto-extract resource addresses. Check the error below and run:" >> $GITHUB_STEP_SUMMARY
-                echo "# npx tsx src/delete-tf-resource.ts --deploy-dir $(pwd)/deploy --resource \"<address>\" --region ${AWS_DEFAULT_REGION}" >> $GITHUB_STEP_SUMMARY
-              fi
-              echo '```' >> $GITHUB_STEP_SUMMARY
-              echo "" >> $GITHUB_STEP_SUMMARY
-              echo "After running, re-trigger this workflow." >> $GITHUB_STEP_SUMMARY
-            else
-              echo '```' >> $GITHUB_STEP_SUMMARY
-              tail -50 /tmp/apply_output.txt | sed 's/\x1B\[[0-9;]*[mGKHF]//g' >> $GITHUB_STEP_SUMMARY
-              echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "The CI role does not have permission to delete resources." >> $GITHUB_STEP_SUMMARY
+            echo "This is **intentional** — destructive operations require human credentials." >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**⚠️ WARNING: The following commands permanently destroy AWS resources. Data loss is irreversible.**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**WHY this is safe:** The tofu code no longer references these resources." >> $GITHUB_STEP_SUMMARY
+            echo "They are orphaned infrastructure that was intentionally removed from the codebase." >> $GITHUB_STEP_SUMMARY
+            echo "The tool validates that the resource is in state but absent from .tf code before deleting." >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            RESOURCES=$(grep -oP '(?<=resource ")[^"]+\.[^"]+(?=")' /tmp/apply_output.txt | sort -u)
+            echo '```bash' >> $GITHUB_STEP_SUMMARY
+            echo "# Run from _tools/ with your local AWS credentials:" >> $GITHUB_STEP_SUMMARY
+            for addr in $RESOURCES; do
+              echo "npx tsx src/delete-tf-resource.ts --deploy-dir $(pwd)/deploy --resource \"$addr\" --region ${AWS_DEFAULT_REGION}" >> $GITHUB_STEP_SUMMARY
+            done
+            if [ -z "$RESOURCES" ]; then
+              echo "# Could not auto-extract resource addresses. Check the error below and run:" >> $GITHUB_STEP_SUMMARY
+              echo "# npx tsx src/delete-tf-resource.ts --deploy-dir $(pwd)/deploy --resource \"<address>\" --region ${AWS_DEFAULT_REGION}" >> $GITHUB_STEP_SUMMARY
             fi
-
-            exit $EXIT_CODE
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "After running, re-trigger this workflow." >> $GITHUB_STEP_SUMMARY
+          else
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            tail -50 /tmp/apply_output.txt | sed 's/\x1B\[[0-9;]*[mGKHF]//g' >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
           fi
 
       - name: Deploy Application Code
+        env:
+          LAMBDA_FUNCTION_NAME: ${{ steps.tofu_outputs.outputs.lambda_function_name }}
+          AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
         run: npm run deploy
