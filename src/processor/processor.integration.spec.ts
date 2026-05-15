@@ -126,8 +126,8 @@ function makeEmbeddingGenerator(): EmbeddingGenerator {
 
 function makeAuroraWriter(): MultiClusterAuroraWriter {
   return {
-    upsertEmbedding: vi.fn().mockResolvedValue(undefined),
-    findMatch: vi.fn().mockResolvedValue(null),
+    upsertEmbedding: vi.fn().mockResolvedValue(ok(undefined)),
+    findMatch: vi.fn().mockResolvedValue(ok(null)),
   };
 }
 
@@ -470,7 +470,7 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
       vi.mocked(store.getSignalByMessageId).mockReturnValue(Promise.resolve(ok(existingSignal)));
       vi.mocked(store.getArc).mockReturnValue(Promise.resolve(ok(existingArc)));
       // Aurora fails
-      vi.mocked(auroraWriter.upsertEmbedding).mockRejectedValue(new Error("Aurora cluster timeout"));
+      vi.mocked(auroraWriter.upsertEmbedding).mockResolvedValue(err(dbError(new Error("Aurora cluster timeout"))));
     });
 
     it("returns batchItemFailure and does not dispatch side-effects", async () => {

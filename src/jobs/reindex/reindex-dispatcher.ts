@@ -9,6 +9,8 @@ import { ExecuteStatementCommand, RDSDataClient } from "@aws-sdk/client-rds-data
 import { randomUUID } from "node:crypto";
 import { dynamo, PROCESSING_TABLE } from "../../database/shared.js";
 import { CLUSTER_REGISTRY, getRegistryById, type ClusterRegistryEntry } from "../../embedding/cluster-registry.js";
+import { ok, err, notFoundError } from "../../errors.js";
+import type { NotFoundError, Result } from "../../errors.js";
 
 // ---------------------------------------------------------------------------
 // Interfaces
@@ -76,11 +78,11 @@ export class ReindexDispatcher {
   // dispatch — validate cluster, fan out SQS messages, write initial counters
   // -------------------------------------------------------------------------
 
-  async dispatch(targetRegistryId: string, segmentCount = 32): Promise<ReindexJob> {
+  async dispatch(targetRegistryId: string, segmentCount = 32): Promise<Result<ReindexJob, NotFoundError>> {
     // Validate cluster exists in registry
     const cluster = getRegistryById(targetRegistryId);
     if (!cluster) {
-      throw new Error(`Cluster "${targetRegistryId}" not found in CLUSTER_REGISTRY`);
+      return err(notFoundError("cluster", targetRegistryId));
     }
 
     const modelId = cluster.modelId;
@@ -127,14 +129,14 @@ export class ReindexDispatcher {
       },
     }));
 
-    return { jobId, targetRegistryId, modelId, segmentCount, startedAt };
+    return ok({ jobId, targetRegistryId, modelId, segmentCount, startedAt });
   }
 
   // -------------------------------------------------------------------------
   // getReport — read counters, query Aurora for validation, compute result
   // -------------------------------------------------------------------------
 
-  async getReport(jobId: string): Promise<ReindexReport> {
+  async getReport(jobId: string): Promise<Result<ReindexReport, NotFoundError>> {
     // Read counters from processing table
     const result = await dynamo.send(new GetCommand({
       TableName: PROCESSING_TABLE,
@@ -142,7 +144,7 @@ export class ReindexDispatcher {
     }));
 
     if (!result.Item) {
-      throw new Error(`Reindex job "${jobId}" not found`);
+      return err(notFoundError("reindex_job", jobId));
     }
 
     const item = result.Item;
@@ -162,7 +164,7 @@ export class ReindexDispatcher {
     // Query target Aurora for validation
     const cluster = getRegistryById(targetRegistryId);
     if (!cluster) {
-      return {
+      return ok({
         jobId,
         signalsScanned,
         copiedCount,
@@ -171,7 +173,7 @@ export class ReindexDispatcher {
         validationOk: false,
         validationDetail: `Target cluster "${targetRegistryId}" no longer in registry`,
         durationMs,
-      };
+      });
     }
 
     const { auroraRowCount, sampleValidation } = await this.validateAuroraState(cluster);
@@ -196,7 +198,7 @@ export class ReindexDispatcher {
       details.push(`Validation passed: ${auroraRowCount} Aurora rows match expected ${expectedCount}, ${VALIDATION_SAMPLE_SIZE} sample vectors valid`);
     }
 
-    return {
+    return ok({
       jobId,
       signalsScanned,
       copiedCount,
@@ -205,7 +207,7 @@ export class ReindexDispatcher {
       validationOk,
       validationDetail: details.join("; "),
       durationMs,
-    };
+    });
   }
 
   // -------------------------------------------------------------------------

@@ -192,18 +192,17 @@ export class ReindexWorker {
     vector: number[],
     targetRegistryId: string,
   ): Promise<Result<void, { signalId: string; reason: string }>> {
-    try {
-      await multiClusterWriter.upsertEmbedding({
-        registryId: targetRegistryId,
-        arcId: signal.arcId!,
-        accountId: signal.accountId,
-        recipientAddress: signal.recipientAddress,
-        embedding: vector,
-      });
-      return ok(undefined);
-    } catch (e) {
-      return err({ signalId: signal.id, reason: `Aurora upsert failed: ${String(e)}` });
+    const upsertResult = await multiClusterWriter.upsertEmbedding({
+      registryId: targetRegistryId,
+      arcId: signal.arcId!,
+      accountId: signal.accountId,
+      recipientAddress: signal.recipientAddress,
+      embedding: vector,
+    });
+    if (upsertResult.isErr()) {
+      return err({ signalId: signal.id, reason: `Aurora upsert failed: ${String(upsertResult.error.cause)}` });
     }
+    return ok(undefined);
   }
 
   // ---------------------------------------------------------------------------
@@ -255,21 +254,15 @@ export class ReindexWorker {
       return err({ signalId: signal.id, reason: `DDB cache write failed: ${String(cacheResult.error.cause)}` });
     }
 
-    let upsertResult: Result<void, unknown>;
-    try {
-      await multiClusterWriter.upsertEmbedding({
-        registryId: targetRegistryId,
-        arcId: signal.arcId!,
-        accountId: signal.accountId,
-        recipientAddress: signal.recipientAddress,
-        embedding: result.value.vector,
-      });
-      upsertResult = ok(undefined);
-    } catch (e) {
-      upsertResult = err(e);
-    }
+    const upsertResult = await multiClusterWriter.upsertEmbedding({
+      registryId: targetRegistryId,
+      arcId: signal.arcId!,
+      accountId: signal.accountId,
+      recipientAddress: signal.recipientAddress,
+      embedding: result.value.vector,
+    });
     if (upsertResult.isErr()) {
-      return err({ signalId: signal.id, reason: `Aurora upsert failed: ${String(upsertResult.error)}` });
+      return err({ signalId: signal.id, reason: `Aurora upsert failed: ${String(upsertResult.error.cause)}` });
     }
 
     return ok(undefined);
@@ -283,7 +276,7 @@ export class ReindexWorker {
     try {
       const res = await s3.send(new GetObjectCommand({ Bucket: EMAIL_BUCKET, Key: s3Key }));
       const body = await res.Body?.transformToByteArray();
-      if (!body) throw new Error(`Empty S3 object: ${s3Key}`);
+      if (!body) return err(new Error(`Empty S3 object: ${s3Key}`));
       return ok(Buffer.from(body));
     } catch (e) {
       return err(e instanceof Error ? e : new Error(String(e)));

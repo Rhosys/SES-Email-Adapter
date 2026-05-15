@@ -138,8 +138,8 @@ describe("Property 9: S3 retention failure is isolated and non-fatal", () => {
 
   function makeAuroraWriter(): MultiClusterAuroraWriter {
     return {
-      upsertEmbedding: vi.fn().mockResolvedValue(undefined),
-      findMatch: vi.fn().mockResolvedValue(null),
+      upsertEmbedding: vi.fn().mockResolvedValue(ok(undefined)),
+      findMatch: vi.fn().mockResolvedValue(ok(null)),
     };
   }
 

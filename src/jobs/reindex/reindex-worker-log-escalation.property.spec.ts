@@ -15,12 +15,13 @@ import { resolve } from "path";
 import type { SQSEvent, SQSRecord } from "aws-lambda";
 import { createMockLogger } from "../../testing/mock-logger.js";
 import { ReindexWorker } from "./reindex-worker.js";
+import { ok } from "../../errors.js";
 
 // ---------------------------------------------------------------------------
 // Mock MultiClusterAuroraWriter
 // ---------------------------------------------------------------------------
 
-const mockUpsertEmbedding = vi.fn().mockResolvedValue(undefined);
+const mockUpsertEmbedding = vi.fn().mockResolvedValue(ok(undefined));
 
 vi.mock("../../database/multi-cluster-aurora-writer.js", () => ({
   multiClusterWriter: {
@@ -160,7 +161,7 @@ describe("Property 21: Persistent failures surface via SQS metrics, not DLQ", ()
           jobId: "job-prop21-track",
           segment: 0,
           totalSegments: 1,
-          targetClusterId: "aurora-prod-titan-v2",
+          targetRegistryId: "aurora-prod-titan-v2",
           modelId: "amazon.titan-embed-text-v2:0",
         },
         receiveCount,
@@ -197,7 +198,7 @@ describe("Property 21: Persistent failures surface via SQS metrics, not DLQ", ()
           jobId: "job-prop21-error",
           segment: 0,
           totalSegments: 1,
-          targetClusterId: "aurora-prod-titan-v2",
+          targetRegistryId: "aurora-prod-titan-v2",
           modelId: "amazon.titan-embed-text-v2:0",
         },
         receiveCount,

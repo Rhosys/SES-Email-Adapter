@@ -11,7 +11,7 @@ export class AuthressAuthService implements AuthService {
     try {
       const identity = await TokenVerifier(AUTHRESS_API_URL, token) as { userId?: string; sub?: string };
       const userId = identity.userId ?? identity.sub;
-      if (!userId) throw new Error("Token missing userId");
+      if (!userId) return err(authError("Token missing userId"));
       return ok({ accountId: userId, userId } as AuthContext);
     } catch (e) {
       return err(authError(e));

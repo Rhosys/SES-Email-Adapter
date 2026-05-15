@@ -150,8 +150,8 @@ describe("Cross-layer idempotence — live writes + cache + Aurora", () => {
     };
 
     const auroraWriter: MultiClusterAuroraWriter = {
-      upsertEmbedding: vi.fn().mockResolvedValue(undefined),
-      findMatch: vi.fn().mockResolvedValue(null),
+      upsertEmbedding: vi.fn().mockResolvedValue(ok(undefined)),
+      findMatch: vi.fn().mockResolvedValue(ok(null)),
     };
 
     const mockLogger = createMockLogger();
@@ -207,8 +207,8 @@ describe("Cross-layer idempotence — live writes + cache + Aurora", () => {
 
     const auroraUpsertCalls: Array<{ registryId: string; accountId: string; recipientAddress: string; embedding: number[] }> = [];
     const auroraWriter: MultiClusterAuroraWriter = {
-      upsertEmbedding: vi.fn().mockImplementation(async (opts) => { auroraUpsertCalls.push(opts); }),
-      findMatch: vi.fn().mockResolvedValue(null),
+      upsertEmbedding: vi.fn().mockImplementation(async (opts) => { auroraUpsertCalls.push(opts); return ok(undefined); }),
+      findMatch: vi.fn().mockResolvedValue(ok(null)),
     };
 
     const mockLogger = createMockLogger();

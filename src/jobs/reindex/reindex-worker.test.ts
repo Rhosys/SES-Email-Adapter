@@ -11,14 +11,14 @@ import { Readable } from "stream";
 import { sdkStreamMixin } from "@smithy/util-stream";
 import { ReindexWorker } from "./reindex-worker.js";
 import { createMockLogger } from "../../testing/mock-logger.js";
-import { ok } from "../../errors.js";
+import { ok, err, dbError } from "../../errors.js";
 
 // ---------------------------------------------------------------------------
 // Hoisted mock functions (available before vi.mock factories run)
 // ---------------------------------------------------------------------------
 
 const { mockUpsertEmbedding, mockAddEmbeddingToCache, mockGenerateForModel, mockMimeParse } = vi.hoisted(() => ({
-  mockUpsertEmbedding: vi.fn().mockResolvedValue(undefined),
+  mockUpsertEmbedding: vi.fn(),
   mockAddEmbeddingToCache: vi.fn(),
   mockGenerateForModel: vi.fn(),
   mockMimeParse: vi.fn(),
@@ -163,7 +163,7 @@ describe("ReindexWorker — pure-copy mode", () => {
     worker = new ReindexWorker(mockLogger);
     ddbMock.reset();
     s3Mock.reset();
-    mockUpsertEmbedding.mockClear();
+    mockUpsertEmbedding.mockClear().mockResolvedValue(ok(undefined));
     mockAddEmbeddingToCache.mockClear().mockResolvedValue(ok(undefined));
     mockGenerateForModel.mockClear();
     mockMimeParse.mockClear();
@@ -189,7 +189,7 @@ describe("ReindexWorker — pure-copy mode", () => {
         jobId: "job-1",
         segment: 0,
         totalSegments: 1,
-        targetClusterId: "aurora-prod-titan-v2",
+        targetRegistryId: "aurora-prod-titan-v2",
         modelId: "amazon.titan-embed-text-v2:0",
       }),
     ]);
@@ -222,7 +222,7 @@ describe("ReindexWorker — pure-copy mode", () => {
         jobId: "job-1",
         segment: 0,
         totalSegments: 1,
-        targetClusterId: "aurora-prod-titan-v2",
+        targetRegistryId: "aurora-prod-titan-v2",
         modelId: "amazon.titan-embed-text-v2:0",
       }),
     ]);
@@ -250,7 +250,7 @@ describe("ReindexWorker — pure-copy mode", () => {
         jobId: "job-1",
         segment: 0,
         totalSegments: 1,
-        targetClusterId: "aurora-prod-titan-v2",
+        targetRegistryId: "aurora-prod-titan-v2",
         modelId: "amazon.titan-embed-text-v2:0",
       }),
     ]);
@@ -283,15 +283,15 @@ describe("ReindexWorker — pure-copy mode", () => {
 
     // First call fails, second succeeds
     mockUpsertEmbedding
-      .mockRejectedValueOnce(new Error("Aurora timeout"))
-      .mockResolvedValueOnce(undefined);
+      .mockResolvedValueOnce(err(dbError(new Error("Aurora timeout"))))
+      .mockResolvedValueOnce(ok(undefined));
 
     const event = makeSqsEvent([
       makeSqsRecord({
         jobId: "job-1",
         segment: 0,
         totalSegments: 1,
-        targetClusterId: "aurora-prod-titan-v2",
+        targetRegistryId: "aurora-prod-titan-v2",
         modelId: "amazon.titan-embed-text-v2:0",
       }),
     ]);
@@ -329,7 +329,7 @@ describe("ReindexWorker — pure-copy mode", () => {
         jobId: "job-1",
         segment: 0,
         totalSegments: 1,
-        targetClusterId: "aurora-prod-titan-v2",
+        targetRegistryId: "aurora-prod-titan-v2",
         modelId: "amazon.titan-embed-text-v2:0",
       }),
     ]);
@@ -346,7 +346,7 @@ describe("ReindexWorker — pure-copy mode", () => {
         jobId: "job-1",
         segment: 0,
         totalSegments: 1,
-        targetClusterId: "nonexistent-cluster",
+        targetRegistryId: "nonexistent-cluster",
         modelId: "amazon.titan-embed-text-v2:0",
       }),
     ]);
@@ -378,7 +378,7 @@ describe("ReindexWorker — pure-copy mode", () => {
           jobId: "job-1",
           segment: 0,
           totalSegments: 1,
-          targetClusterId: "nonexistent-cluster",
+          targetRegistryId: "nonexistent-cluster",
           modelId: "amazon.titan-embed-text-v2:0",
         },
         {
@@ -417,7 +417,7 @@ describe("ReindexWorker — pure-copy mode", () => {
         jobId: "job-1",
         segment: 0,
         totalSegments: 1,
-        targetClusterId: "aurora-prod-titan-v2",
+        targetRegistryId: "aurora-prod-titan-v2",
         modelId: "amazon.titan-embed-text-v2:0",
       }),
     ]);
@@ -437,7 +437,7 @@ describe("ReindexWorker — pure-copy mode", () => {
         jobId: "job-1",
         segment: 7,
         totalSegments: 32,
-        targetClusterId: "aurora-prod-titan-v2",
+        targetRegistryId: "aurora-prod-titan-v2",
         modelId: "amazon.titan-embed-text-v2:0",
       }),
     ]);
@@ -463,7 +463,7 @@ describe("ReindexWorker — regenerate-from-S3 mode", () => {
     worker = new ReindexWorker(createMockLogger());
     ddbMock.reset();
     s3Mock.reset();
-    mockUpsertEmbedding.mockClear();
+    mockUpsertEmbedding.mockClear().mockResolvedValue(ok(undefined));
     mockAddEmbeddingToCache.mockClear().mockResolvedValue(ok(undefined));
     mockGenerateForModel.mockClear();
     mockMimeParse.mockClear();
@@ -518,7 +518,7 @@ describe("ReindexWorker — regenerate-from-S3 mode", () => {
         jobId: "job-regen",
         segment: 0,
         totalSegments: 1,
-        targetClusterId: "aurora-prod-titan-v2",
+        targetRegistryId: "aurora-prod-titan-v2",
         modelId: "amazon.titan-embed-text-v2:0",
       }),
     ]);
@@ -575,7 +575,7 @@ describe("ReindexWorker — regenerate-from-S3 mode", () => {
         jobId: "job-cached",
         segment: 0,
         totalSegments: 1,
-        targetClusterId: "aurora-prod-titan-v2",
+        targetRegistryId: "aurora-prod-titan-v2",
         modelId: "amazon.titan-embed-text-v2:0",
       }),
     ]);
@@ -662,7 +662,7 @@ describe("ReindexWorker — regenerate-from-S3 mode", () => {
         jobId: "job-mixed",
         segment: 0,
         totalSegments: 1,
-        targetClusterId: "aurora-prod-titan-v2",
+        targetRegistryId: "aurora-prod-titan-v2",
         modelId: "amazon.titan-embed-text-v2:0",
       }),
     ]);

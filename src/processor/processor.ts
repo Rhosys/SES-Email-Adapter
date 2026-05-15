@@ -1030,18 +1030,13 @@ export class SignalProcessor {
         }
 
         let upsertResult: Result<void, DbError>;
-        try {
-          await this.auroraWriter.upsertEmbedding({
-            registryId: cluster.registryId,
-            arcId: arc.id,
-            accountId: signal.accountId,
-            recipientAddress: signal.recipientAddress,
-            embedding,
-          });
-          upsertResult = ok(undefined);
-        } catch (e) {
-          upsertResult = err(dbError(e));
-        }
+        upsertResult = await this.auroraWriter.upsertEmbedding({
+          registryId: cluster.registryId,
+          arcId: arc.id,
+          accountId: signal.accountId,
+          recipientAddress: signal.recipientAddress,
+          embedding,
+        });
 
         if (upsertResult.isErr()) {
           return { cluster, success: false as const, error: upsertResult.error };

@@ -15,6 +15,7 @@ function makeRegistryEntry(overrides: Partial<import("./cluster-registry.js").Cl
     modelId: "amazon.titan-embed-text-v2:0",
     dimensions: 1024,
     active: true,
+    primary: false,
     ...overrides,
   };
 }

@@ -119,7 +119,9 @@ describe("ReindexDispatcher — Property 17: Validation flags discrepancies abov
 
     const report = await dispatcher.getReport(jobId);
 
-    expect(report.validationOk).toBe(expectedOk);
+    expect(report.isOk()).toBe(true);
+    if (!report.isOk()) return;
+    expect(report.value.validationOk).toBe(expectedOk);
   });
 
   it.each(invalidSampleCases)("validationOk is false when samples contain %s", async (_label, { invalidSimilarity }) => {
@@ -160,6 +162,8 @@ describe("ReindexDispatcher — Property 17: Validation flags discrepancies abov
     const report = await dispatcher.getReport(jobId);
 
     // Even with 0% count discrepancy, invalid samples should fail validation
-    expect(report.validationOk).toBe(false);
+    expect(report.isOk()).toBe(true);
+    if (!report.isOk()) return;
+    expect(report.value.validationOk).toBe(false);
   });
 });

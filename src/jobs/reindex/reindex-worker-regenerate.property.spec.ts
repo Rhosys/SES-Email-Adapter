@@ -24,7 +24,7 @@ import { ok } from "../../errors.js";
 // ---------------------------------------------------------------------------
 
 const { mockUpsertEmbedding, mockAddEmbeddingToCache, mockGenerateForModel, mockMimeParse } = vi.hoisted(() => ({
-  mockUpsertEmbedding: vi.fn().mockResolvedValue(undefined),
+  mockUpsertEmbedding: vi.fn(),
   mockAddEmbeddingToCache: vi.fn(),
   mockGenerateForModel: vi.fn(),
   mockMimeParse: vi.fn(),
@@ -267,7 +267,7 @@ describe("Property 12: Backfill targets exactly the signals missing the new mode
     ddbMock.reset();
     bedrockMock.reset();
     s3Mock.reset();
-    mockUpsertEmbedding.mockClear();
+    mockUpsertEmbedding.mockClear().mockResolvedValue(ok(undefined));
     mockAddEmbeddingToCache.mockClear().mockResolvedValue(ok(undefined));
     mockGenerateForModel.mockClear();
     mockMimeParse.mockClear();
@@ -329,7 +329,7 @@ describe("Property 12: Backfill targets exactly the signals missing the new mode
         jobId: "job-prop-12",
         segment: 0,
         totalSegments: 1,
-        targetClusterId: TARGET_CLUSTER_ID,
+        targetRegistryId: TARGET_CLUSTER_ID,
         modelId: TARGET_MODEL_ID,
       }),
     ]);

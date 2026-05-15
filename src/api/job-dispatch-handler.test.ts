@@ -5,6 +5,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import type { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2 } from "aws-lambda";
 import { handleJobDispatch, type JobDispatcher } from "./job-dispatch-handler.js";
+import { ok, err, notFoundError } from "../errors.js";
 
 // ---------------------------------------------------------------------------
 // Mock dispatcher
@@ -162,7 +163,7 @@ describe("handleJobDispatch", () => {
         segmentCount: 32,
         startedAt: "2025-01-01T00:00:00.000Z",
       };
-      dispatcher.dispatch.mockResolvedValue(job);
+      dispatcher.dispatch.mockResolvedValue(ok(job));
 
       const event = makeEvent({
         method: "POST",
@@ -177,9 +178,9 @@ describe("handleJobDispatch", () => {
     });
 
     it("passes segmentCount to dispatcher when provided", async () => {
-      dispatcher.dispatch.mockResolvedValue({
+      dispatcher.dispatch.mockResolvedValue(ok({
         jobId: "j", targetRegistryId: "c", modelId: "m", segmentCount: 16, startedAt: "",
-      });
+      }));
 
       const event = makeEvent({
         method: "POST",
@@ -199,7 +200,7 @@ describe("handleJobDispatch", () => {
         segmentCount: 32,
         startedAt: "2025-01-01T00:00:00.000Z",
       };
-      dispatcher.dispatch.mockResolvedValue(job);
+      dispatcher.dispatch.mockResolvedValue(ok(job));
 
       const bodyStr = JSON.stringify({ targetRegistryId: "aurora-prod-titan-v2" });
       const event = makeEvent({
@@ -219,7 +220,7 @@ describe("handleJobDispatch", () => {
     // -----------------------------------------------------------------------
 
     it("returns 404 when cluster not found in registry", async () => {
-      dispatcher.dispatch.mockRejectedValue(new Error('Cluster "unknown-cluster" not found in CLUSTER_REGISTRY'));
+      dispatcher.dispatch.mockResolvedValue(err(notFoundError("cluster", "unknown-cluster")));
 
       const event = makeEvent({
         method: "POST",
@@ -266,7 +267,7 @@ describe("handleJobDispatch", () => {
         validationDetail: "All good",
         durationMs: 5000,
       };
-      dispatcher.getReport.mockResolvedValue(report);
+      dispatcher.getReport.mockResolvedValue(ok(report));
 
       const event = makeEvent({
         method: "GET",
@@ -281,10 +282,10 @@ describe("handleJobDispatch", () => {
     });
 
     it("extracts jobId from path when pathParameters not set", async () => {
-      dispatcher.getReport.mockResolvedValue({
+      dispatcher.getReport.mockResolvedValue(ok({
         jobId: "path-job", signalsScanned: 0, copiedCount: 0, regeneratedCount: 0,
         unrecoverableCount: 0, validationOk: true, validationDetail: "", durationMs: 0,
-      });
+      }));
 
       const event = makeEvent({ method: "GET", path: "/reindex/path-job" });
       await dispatch(event, dispatcher);
@@ -293,7 +294,7 @@ describe("handleJobDispatch", () => {
     });
 
     it("returns 404 when job not found", async () => {
-      dispatcher.getReport.mockRejectedValue(new Error('Reindex job "missing-job" not found'));
+      dispatcher.getReport.mockResolvedValue(err(notFoundError("reindex_job", "missing-job")));
 
       const event = makeEvent({
         method: "GET",

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import type { SQSEvent } from "aws-lambda";
-import { ok } from "../errors.js";
+import { ok, err, dbError } from "../errors.js";
 import { SignalProcessor, SYSTEM_RULES } from "./processor.js";
 import { JsonLogicRuleEvaluator } from "./rule-evaluator.js";
 import type { ProcessorDatabase, ArcMatcher } from "./processor.js";
@@ -174,10 +174,11 @@ describe("Aurora cluster failure preserves the DynamoDB cache entry", () => {
     const auroraWriter: MultiClusterAuroraWriter = {
       upsertEmbedding: vi.fn().mockImplementation(async (opts: { registryId: string }) => {
         if (opts.registryId === failingClusterId) {
-          throw new Error(`Aurora upsert failed for cluster ${failingClusterId}`);
+          return err(dbError(new Error(`Aurora upsert failed for cluster ${failingClusterId}`)));
         }
+        return ok(undefined);
       }),
-      findMatch: vi.fn().mockResolvedValue(null),
+      findMatch: vi.fn().mockResolvedValue(ok(null)),
     };
 
     const processor = new SignalProcessor({
@@ -216,10 +217,11 @@ describe("Aurora cluster failure preserves the DynamoDB cache entry", () => {
     const auroraWriter: MultiClusterAuroraWriter = {
       upsertEmbedding: vi.fn().mockImplementation(async (opts: { registryId: string }) => {
         if (opts.registryId === failingClusterId) {
-          throw new Error(`Aurora upsert failed for cluster ${failingClusterId}`);
+          return err(dbError(new Error(`Aurora upsert failed for cluster ${failingClusterId}`)));
         }
+        return ok(undefined);
       }),
-      findMatch: vi.fn().mockResolvedValue(null),
+      findMatch: vi.fn().mockResolvedValue(ok(null)),
     };
 
     const processor = new SignalProcessor({

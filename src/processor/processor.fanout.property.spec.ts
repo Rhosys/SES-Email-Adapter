@@ -204,8 +204,8 @@ describe("Multi-cluster fanout writes vectors to every active target", () => {
     };
 
     const auroraWriter: MultiClusterAuroraWriter = {
-      upsertEmbedding: vi.fn().mockResolvedValue(undefined),
-      findMatch: vi.fn().mockResolvedValue(null),
+      upsertEmbedding: vi.fn().mockResolvedValue(ok(undefined)),
+      findMatch: vi.fn().mockResolvedValue(ok(null)),
     };
 
     const mockLogger = createMockLogger();
@@ -257,8 +257,8 @@ describe("Multi-cluster fanout writes vectors to every active target", () => {
     };
 
     const auroraWriter: MultiClusterAuroraWriter = {
-      upsertEmbedding: vi.fn().mockResolvedValue(undefined),
-      findMatch: vi.fn().mockResolvedValue(null),
+      upsertEmbedding: vi.fn().mockResolvedValue(ok(undefined)),
+      findMatch: vi.fn().mockResolvedValue(ok(null)),
     };
 
     const mockLogger = createMockLogger();
@@ -311,8 +311,8 @@ describe("Multi-cluster fanout writes vectors to every active target", () => {
     };
 
     const auroraWriter: MultiClusterAuroraWriter = {
-      upsertEmbedding: vi.fn().mockResolvedValue(undefined),
-      findMatch: vi.fn().mockResolvedValue(null),
+      upsertEmbedding: vi.fn().mockResolvedValue(ok(undefined)),
+      findMatch: vi.fn().mockResolvedValue(ok(null)),
     };
 
     const mockLogger = createMockLogger();

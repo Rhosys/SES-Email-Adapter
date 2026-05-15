@@ -82,13 +82,15 @@ describe("MultiClusterAuroraWriterImpl", () => {
         .on(ExecuteStatementCommand).resolves({ records: [] })
         .on(CommitTransactionCommand).resolves({});
 
-      await writer.upsertEmbedding({
+      const result = await writer.upsertEmbedding({
         registryId: "test-cluster-1",
         arcId: "arc_123",
         accountId: "acct_1",
         recipientAddress: "user@example.com",
         embedding: [0.1, 0.2, 0.3],
       });
+
+      expect(result.isOk()).toBe(true);
 
       const calls = rdsMock.calls();
       expect(calls).toHaveLength(4); // BEGIN, SET LOCAL, INSERT, COMMIT
@@ -128,16 +130,16 @@ describe("MultiClusterAuroraWriterImpl", () => {
       });
     });
 
-    it("throws when registryId is not in the registry", async () => {
-      await expect(
-        writer.upsertEmbedding({
-          registryId: "nonexistent-cluster",
-          arcId: "arc_1",
-          accountId: "acct_1",
-          recipientAddress: "a@b.com",
-          embedding: [1],
-        }),
-      ).rejects.toThrow('Cluster "nonexistent-cluster" not found in CLUSTER_REGISTRY');
+    it("returns err when registryId is not in the registry", async () => {
+      const result = await writer.upsertEmbedding({
+        registryId: "nonexistent-cluster",
+        arcId: "arc_1",
+        accountId: "acct_1",
+        recipientAddress: "a@b.com",
+        embedding: [1],
+      });
+
+      expect(result.isErr()).toBe(true);
     });
 
     it("rolls back on SQL error", async () => {
@@ -148,15 +150,15 @@ describe("MultiClusterAuroraWriterImpl", () => {
           .rejectsOnce(new Error("SQL syntax error")) // INSERT fails
         .on(RollbackTransactionCommand).resolves({});
 
-      await expect(
-        writer.upsertEmbedding({
-          registryId: "test-cluster-1",
-          arcId: "arc_1",
-          accountId: "acct_1",
-          recipientAddress: "a@b.com",
-          embedding: [1],
-        }),
-      ).rejects.toThrow("SQL syntax error");
+      const result = await writer.upsertEmbedding({
+        registryId: "test-cluster-1",
+        arcId: "arc_1",
+        accountId: "acct_1",
+        recipientAddress: "a@b.com",
+        embedding: [1],
+      });
+
+      expect(result.isErr()).toBe(true);
 
       // Verify rollback was called
       const rollbackCalls = rdsMock.commandCalls(RollbackTransactionCommand);
@@ -195,13 +197,14 @@ describe("MultiClusterAuroraWriterImpl", () => {
       // Advance past both retry delays (1s + 2s)
       await vi.advanceTimersByTimeAsync(3000);
 
-      await promise;
+      const result = await promise;
+      expect(result.isOk()).toBe(true);
       expect(callCount).toBe(3);
 
       vi.useRealTimers();
     });
 
-    it("throws after 3 failed attempts on transient errors", async () => {
+    it("returns err after 3 failed attempts on transient errors", async () => {
       const transientError = Object.assign(new Error("Service unavailable"), {
         name: "InternalServerErrorException",
         $metadata: { httpStatusCode: 500 },
@@ -209,35 +212,35 @@ describe("MultiClusterAuroraWriterImpl", () => {
 
       rdsMock.on(BeginTransactionCommand).rejects(transientError);
 
-      await expect(
-        writer.upsertEmbedding({
-          registryId: "test-cluster-1",
-          arcId: "arc_1",
-          accountId: "acct_1",
-          recipientAddress: "a@b.com",
-          embedding: [1],
-        }),
-      ).rejects.toThrow("Service unavailable");
+      const result = await writer.upsertEmbedding({
+        registryId: "test-cluster-1",
+        arcId: "arc_1",
+        accountId: "acct_1",
+        recipientAddress: "a@b.com",
+        embedding: [1],
+      });
+
+      expect(result.isErr()).toBe(true);
 
       // 3 attempts total (initial + 2 retries)
       const beginCalls = rdsMock.commandCalls(BeginTransactionCommand);
       expect(beginCalls).toHaveLength(3);
     });
 
-    it("does not retry non-transient errors", async () => {
+    it("returns err for non-transient errors", async () => {
       const nonTransientError = new Error("BadRequestException: invalid SQL");
 
       rdsMock.on(BeginTransactionCommand).rejects(nonTransientError);
 
-      await expect(
-        writer.upsertEmbedding({
-          registryId: "test-cluster-1",
-          arcId: "arc_1",
-          accountId: "acct_1",
-          recipientAddress: "a@b.com",
-          embedding: [1],
-        }),
-      ).rejects.toThrow("BadRequestException: invalid SQL");
+      const result = await writer.upsertEmbedding({
+        registryId: "test-cluster-1",
+        arcId: "arc_1",
+        accountId: "acct_1",
+        recipientAddress: "a@b.com",
+        embedding: [1],
+      });
+
+      expect(result.isErr()).toBe(true);
 
       // Only 1 call — no retries
       const beginCalls = rdsMock.commandCalls(BeginTransactionCommand);
@@ -261,7 +264,8 @@ describe("MultiClusterAuroraWriterImpl", () => {
         embedding: [0.5, 0.6, 0.7],
       });
 
-      expect(result).toEqual({ arcId: "arc_match_1" });
+      expect(result.isOk()).toBe(true);
+      expect(result._unsafeUnwrap()).toEqual({ arcId: "arc_match_1" });
 
       // Verify the SELECT query
       const execCalls = rdsMock.commandCalls(ExecuteStatementCommand);
@@ -287,7 +291,8 @@ describe("MultiClusterAuroraWriterImpl", () => {
         embedding: [0.1, 0.2],
       });
 
-      expect(result).toBeNull();
+      expect(result.isOk()).toBe(true);
+      expect(result._unsafeUnwrap()).toBeNull();
     });
 
     it("returns null when records is undefined", async () => {
@@ -305,7 +310,8 @@ describe("MultiClusterAuroraWriterImpl", () => {
         embedding: [0.1],
       });
 
-      expect(result).toBeNull();
+      expect(result.isOk()).toBe(true);
+      expect(result._unsafeUnwrap()).toBeNull();
     });
 
     it("retries on transient errors", async () => {
@@ -337,7 +343,8 @@ describe("MultiClusterAuroraWriterImpl", () => {
       await vi.advanceTimersByTimeAsync(1000);
 
       const result = await promise;
-      expect(result).toEqual({ arcId: "arc_retried" });
+      expect(result.isOk()).toBe(true);
+      expect(result._unsafeUnwrap()).toEqual({ arcId: "arc_retried" });
       expect(beginCallCount).toBe(2);
 
       vi.useRealTimers();
@@ -376,22 +383,16 @@ describe("MultiClusterAuroraWriterImpl", () => {
 
           rdsMock.on(BeginTransactionCommand).rejects(transientError);
 
-          let caughtError: Error | undefined;
-          try {
-            await writer.upsertEmbedding({
-              registryId: "test-cluster-1",
-              arcId: "arc-retry-test",
-              accountId: "acct-retry-test",
-              recipientAddress: "retry@example.com",
-              embedding: [0.1, 0.2, 0.3],
-            });
-          } catch (err) {
-            caughtError = err as Error;
-          }
+          const result = await writer.upsertEmbedding({
+            registryId: "test-cluster-1",
+            arcId: "arc-retry-test",
+            accountId: "acct-retry-test",
+            recipientAddress: "retry@example.com",
+            embedding: [0.1, 0.2, 0.3],
+          });
 
-          // After 3 failed attempts, the error should be thrown
-          expect(caughtError).toBeDefined();
-          expect(caughtError!.message).toContain(errorName);
+          // After 3 failed attempts, the result should be an error
+          expect(result.isErr()).toBe(true);
 
           // Verify exactly 3 attempts were made (initial + 2 retries)
           const beginCalls = rdsMock.commandCalls(BeginTransactionCommand);
@@ -441,14 +442,16 @@ describe("MultiClusterAuroraWriterImpl", () => {
             .on(ExecuteStatementCommand).resolves({})
             .on(CommitTransactionCommand).resolves({});
 
-          // Should succeed without throwing
-          await writer.upsertEmbedding({
+          // Should succeed without error
+          const result = await writer.upsertEmbedding({
             registryId: "test-cluster-1",
             arcId: "arc-recovery",
             accountId: "acct-recovery",
             recipientAddress: "recovery@example.com",
             embedding: [0.1, 0.2, 0.3],
           });
+
+          expect(result.isOk()).toBe(true);
 
           // Verify the correct number of attempts: failCount failures + 1 success
           expect(callCount).toBe(failCount + 1);
@@ -486,21 +489,15 @@ describe("MultiClusterAuroraWriterImpl", () => {
 
         rdsMock.on(BeginTransactionCommand).rejects(nonTransientError);
 
-        let caughtError: Error | undefined;
-        try {
-          await writer.upsertEmbedding({
-            registryId: "test-cluster-1",
-            arcId: "arc-nontransient",
-            accountId: "acct-nontransient",
-            recipientAddress: "nontransient@example.com",
-            embedding: [0.1, 0.2, 0.3],
-          });
-        } catch (err) {
-          caughtError = err as Error;
-        }
+        const result = await writer.upsertEmbedding({
+          registryId: "test-cluster-1",
+          arcId: "arc-nontransient",
+          accountId: "acct-nontransient",
+          recipientAddress: "nontransient@example.com",
+          embedding: [0.1, 0.2, 0.3],
+        });
 
-        expect(caughtError).toBeDefined();
-        expect(caughtError!.message).toContain(errorName);
+        expect(result.isErr()).toBe(true);
 
         // Only 1 attempt — no retries for non-transient errors
         const beginCalls = rdsMock.commandCalls(BeginTransactionCommand);
