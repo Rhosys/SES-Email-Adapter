@@ -175,20 +175,19 @@ resource "aws_acm_certificate" "api_gateways" {
 
 resource "aws_route53_record" "api_gateways_cert_validation" {
   provider = aws.us_east_1
-  for_each = {
-    for dvo in aws_acm_certificate.api_gateways.domain_validation_options : dvo.domain_name => {
-      name   = dvo.resource_record_name
-      record = dvo.resource_record_value
-      type   = dvo.resource_record_type
-    }
-  }
+  # Keys must be statically known at plan time — use the domain names from config,
+  # not from domain_validation_options (which is unknown while the cert is being created).
+  for_each = toset([
+    "api.${data.aws_route53_zone.main.name}",
+    "wss.${data.aws_route53_zone.main.name}",
+  ])
 
   allow_overwrite = true
   zone_id         = data.aws_route53_zone.main.zone_id
-  name            = each.value.name
-  type            = each.value.type
-  records         = [each.value.record]
-  ttl             = 60
+  name    = lookup({ for dvo in aws_acm_certificate.api_gateways.domain_validation_options : dvo.domain_name => dvo.resource_record_name }, each.key)
+  type    = lookup({ for dvo in aws_acm_certificate.api_gateways.domain_validation_options : dvo.domain_name => dvo.resource_record_type }, each.key)
+  records = [lookup({ for dvo in aws_acm_certificate.api_gateways.domain_validation_options : dvo.domain_name => dvo.resource_record_value }, each.key)]
+  ttl     = 60
 }
 
 resource "aws_acm_certificate_validation" "api_gateways" {

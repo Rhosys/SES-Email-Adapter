@@ -26,20 +26,15 @@ resource "aws_acm_certificate" "api" {
 
 resource "aws_route53_record" "acm_validation" {
   provider = aws.us_east_1
-  for_each = {
-    for dvo in aws_acm_certificate.api.domain_validation_options : dvo.domain_name => {
-      name   = dvo.resource_record_name
-      record = dvo.resource_record_value
-      type   = dvo.resource_record_type
-    }
-  }
+  # Static key so this survives cert recreation without "known only after apply" errors.
+  for_each = toset([data.aws_route53_zone.main.name])
 
   allow_overwrite = true
-  name            = each.value.name
-  records         = [each.value.record]
-  ttl             = 60
-  type            = each.value.type
   zone_id         = data.aws_route53_zone.main.zone_id
+  name    = lookup({ for dvo in aws_acm_certificate.api.domain_validation_options : dvo.domain_name => dvo.resource_record_name }, each.key)
+  type    = lookup({ for dvo in aws_acm_certificate.api.domain_validation_options : dvo.domain_name => dvo.resource_record_type }, each.key)
+  records = [lookup({ for dvo in aws_acm_certificate.api.domain_validation_options : dvo.domain_name => dvo.resource_record_value }, each.key)]
+  ttl     = 60
 }
 
 resource "aws_acm_certificate_validation" "api" {
