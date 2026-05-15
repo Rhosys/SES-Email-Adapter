@@ -1,0 +1,218 @@
+// Feature: split-embedding-pipeline, Property 1: Primary failure causes batch item failure
+// **Validates: Requirements 1.2**
+//
+// For any BedrockError returned by generateForModel for the primary cluster, the processor
+// SHALL return a batch item failure for that message and log an ERROR with code
+// `embedding.primary_failed`.
+
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import type { SQSEvent } from "aws-lambda";
+import { err, okAsync } from "neverthrow";
+import fc from "fast-check";
+import { SignalProcessor, SYSTEM_RULES } from "./processor.js";
+import { JsonLogicRuleEvaluator } from "./rule-evaluator.js";
+import type { ProcessorDatabase, ArcMatcher } from "./processor.js";
+import type { MimeParser } from "./mime.js";
+import type { SignalClassifier, ClassificationOutput } from "../classifier/classifier.js";
+import type { EmbeddingGenerator } from "../embedding/embedding-generator.js";
+import type { MultiClusterAuroraWriter } from "../database/multi-cluster-aurora-writer.js";
+import type { Alias, AliasSender } from "../types/index.js";
+import { bedrockError } from "../errors.js";
+import { createMockLogger, type MockLogger } from "../testing/mock-logger.js";
+
+// ---------------------------------------------------------------------------
+// Mock cluster-registry
+// ---------------------------------------------------------------------------
+
+vi.mock("../embedding/cluster-registry.js", () => {
+  const entry = Object.freeze({
+    clusterId: "aurora-prod-titan-v2",
+    clusterArn: "arn:aws:rds:eu-west-1:123456789012:cluster:aurora-prod-titan-v2",
+    secretArn: "arn:aws:secretsmanager:eu-west-1:123456789012:secret:aurora-prod-titan-v2-xxxxxx",
+    databaseName: "signals",
+    modelId: "amazon.titan-embed-text-v2:0",
+    dimensions: 1024,
+    active: true,
+  });
+  return {
+    CLUSTER_REGISTRY: Object.freeze([entry]),
+    getActiveClusters: () => [entry],
+    getClusterById: (id: string) => (id === entry.clusterId ? entry : null),
+    getReadCluster: () => entry,
+    getSecondaryClusters: () => [],
+  };
+});
+
+// ---------------------------------------------------------------------------
+// Constants and helpers
+// ---------------------------------------------------------------------------
+
+const TEST_ACCOUNT_ID = "acct-primary-fail";
+
+const DEFAULT_ALIAS: Alias = {
+  id: "cfg-default",
+  accountId: TEST_ACCOUNT_ID,
+  address: "user@example.com",
+  filterMode: "allow_all",
+  createdAt: "2024-01-01T00:00:00Z",
+  updatedAt: "2024-01-01T00:00:00Z",
+};
+
+const DEFAULT_SENDER_ENTRY: AliasSender = {
+  accountId: TEST_ACCOUNT_ID,
+  aliasAddress: "user@example.com",
+  domain: "example.com",
+  mode: "allow",
+  addedAt: "2024-01-01T00:00:00Z",
+};
+
+const DEFAULT_CTX = {
+  retentionDays: 0,
+  filtering: null,
+  emailConfig: DEFAULT_ALIAS,
+  registeredDomains: [],
+  userEmails: [],
+  billingPlan: "Paid" as const,
+};
+
+const validClassification: ClassificationOutput = {
+  workflow: "conversation",
+  workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
+  spamScore: 0.05,
+  summary: "A test email.",
+  labels: [],
+  classificationModelId: "us.anthropic.claude-opus-4-5-20251101-v1:0",
+};
+
+function makeStore(): ProcessorDatabase {
+  return {
+    getSignalByMessageId: vi.fn().mockReturnValue(okAsync(null)),
+    saveSignal: vi.fn().mockReturnValue(okAsync(undefined)),
+    updateSignalRetention: vi.fn().mockReturnValue(okAsync(undefined)),
+    getArc: vi.fn().mockReturnValue(okAsync(null)),
+    findArcByGroupingKey: vi.fn().mockReturnValue(okAsync(null)),
+    saveArc: vi.fn().mockReturnValue(okAsync(undefined)),
+    listEnabledRules: vi.fn().mockReturnValue(okAsync(SYSTEM_RULES)),
+    getProcessorAccountContext: vi.fn().mockReturnValue(okAsync(DEFAULT_CTX)),
+    saveAlias: vi.fn().mockImplementation((a: Alias) => okAsync(a)),
+    getSender: vi.fn().mockReturnValue(okAsync(DEFAULT_SENDER_ENTRY)),
+    saveSender: vi.fn().mockReturnValue(okAsync(undefined)),
+    getTemplate: vi.fn().mockReturnValue(okAsync(null)),
+    updateGlobalReputation: vi.fn().mockReturnValue(okAsync(undefined)),
+    getDomainByName: vi.fn().mockReturnValue(okAsync(null)),
+  };
+}
+
+function makeMimeParser(): MimeParser {
+  return {
+    parse: vi.fn().mockResolvedValue({
+      from: { address: "sender@example.com", name: "Sender" },
+      to: [{ address: "user@example.com" }],
+      cc: [],
+      subject: "Test email",
+      textBody: "Hello world",
+      htmlBody: "<p>Hello world</p>",
+      attachments: [],
+      headers: {},
+      sentAt: "2024-01-15T09:00:00Z",
+    }),
+  };
+}
+
+function makeArcMatcher(): ArcMatcher {
+  return {
+    findMatch: vi.fn().mockReturnValue(okAsync(null)),
+    upsertEmbedding: vi.fn().mockReturnValue(okAsync(undefined)),
+  };
+}
+
+function makeAuroraWriter(): MultiClusterAuroraWriter {
+  return {
+    upsertEmbedding: vi.fn().mockResolvedValue(undefined),
+    findMatch: vi.fn().mockResolvedValue(null),
+  };
+}
+
+function makeSqsEvent(sesMessageId: string): SQSEvent {
+  const notification = {
+    accountId: TEST_ACCOUNT_ID,
+    mail: { messageId: sesMessageId, timestamp: "2024-01-15T10:00:00Z", destination: ["user@example.com"] },
+    receipt: {
+      recipients: ["user@example.com"],
+      dkimVerdict: { status: "PASS" },
+      dmarcVerdict: { status: "PASS" },
+      action: { bucketName: "test-bucket", objectKey: `emails/${sesMessageId}` },
+    },
+  };
+  return {
+    Records: [{
+      messageId: "sqs-primary-fail-0",
+      receiptHandle: "handle",
+      body: JSON.stringify({ Message: JSON.stringify(notification) }),
+      attributes: { ApproximateReceiveCount: "1", SentTimestamp: "1234567890", SenderId: "sender", ApproximateFirstReceiveTimestamp: "1234567890" },
+      messageAttributes: {},
+      md5OfBody: "",
+      eventSource: "aws:sqs",
+      eventSourceARN: "arn:aws:sqs:us-east-1:123:queue",
+      awsRegion: "us-east-1",
+    }],
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Generator: arbitrary BedrockError inputs
+// ---------------------------------------------------------------------------
+
+const bedrockErrorArb = fc.record({
+  modelId: fc.string({ minLength: 1 }),
+  cause: fc.string({ minLength: 1 }),
+});
+
+// ---------------------------------------------------------------------------
+// Property 1: Primary failure causes batch item failure
+// ---------------------------------------------------------------------------
+
+describe("Property 1: Primary failure causes batch item failure", () => {
+  let mockLogger: MockLogger;
+  beforeEach(() => { mockLogger = createMockLogger(); });
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  it("for any BedrockError from generateForModel, the processor returns a batch item failure and logs embedding.primary_failed", async () => {
+    await fc.assert(
+      fc.asyncProperty(bedrockErrorArb, async ({ modelId, cause }) => {
+        mockLogger = createMockLogger();
+
+        const embeddingGenerator: EmbeddingGenerator = {
+          generateForModel: vi.fn().mockResolvedValue(
+            err(bedrockError(modelId, new Error(cause))),
+          ),
+          generateForSecondaryClusters: vi.fn().mockResolvedValue([]),
+        };
+
+        const processor = new SignalProcessor({
+          store: makeStore(),
+          mimeParser: makeMimeParser(),
+          classifier: { classify: vi.fn().mockResolvedValue({ ...validClassification }) },
+          embeddingGenerator,
+          auroraWriter: makeAuroraWriter(),
+          arcMatcher: makeArcMatcher(),
+          ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
+          logger: mockLogger,
+        });
+
+        const result = await processor.process(makeSqsEvent("test-msg-primary-fail"));
+
+        // Assert: batch item failure returned
+        expect(result.batchItemFailures).toHaveLength(1);
+        expect(result.batchItemFailures[0]!.itemIdentifier).toBe("sqs-primary-fail-0");
+
+        // Assert: ERROR logged with code embedding.primary_failed
+        const errorCalls = mockLogger.calls.filter(
+          (c) => c.method === "error" && c.context?.code === "embedding.primary_failed",
+        );
+        expect(errorCalls.length).toBeGreaterThanOrEqual(1);
+      }),
+      { numRuns: 100 },
+    );
+  });
+});
