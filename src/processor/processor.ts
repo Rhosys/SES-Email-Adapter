@@ -13,7 +13,7 @@ import type { MultiClusterAuroraWriter } from "../database/multi-cluster-aurora-
 import type { S3RetentionService } from "../embedding/s3-retention-service.js";
 import { getRetentionForPlan, retentionDurationToSeconds } from "../embedding/retention-tier.js";
 import type { BillingPlan } from "../embedding/retention-tier.js";
-import { getReadCluster, getActiveClusters } from "../embedding/cluster-registry.js";
+import { getPrimaryArcMatcherRegistry, getActiveClusters } from "../embedding/cluster-registry.js";
 import { getETLD1, assignSystemLabels, DEFAULT_SPAM_SCORE_THRESHOLD } from "./filter.js";
 
 const RETRY_TRACK_THRESHOLD = 30;
@@ -606,7 +606,7 @@ export class SignalProcessor {
     const embedText = buildEmbedText(embedTextInput);
 
     // Phase 1: Primary embedding (fail-hard) — must succeed for arc matching
-    const readCluster = getReadCluster();
+    const readCluster = getPrimaryArcMatcherRegistry();
     const [primaryResult, classification] = await Promise.all([
       this.embeddingGenerator.generateForModel(embedText, readCluster.modelId),
       this.classifier.classify({
@@ -1025,14 +1025,14 @@ export class SignalProcessor {
       activeClusters.map(async (cluster) => {
         const embedding = signal.embeddings?.[cluster.modelId];
         if (!embedding) {
-          this.logger.info("Aurora upsert skipped for cluster — no embedding available for the cluster's model. This is expected when the embedding generator did not produce a vector for this model (e.g. Bedrock failure for that model).", { code: "processor.aurora_upsert_skipped", accountId: signal.accountId, clusterId: cluster.clusterId, modelId: cluster.modelId });
+          this.logger.info("Aurora upsert skipped for cluster — no embedding available for the cluster's model. This is expected when the embedding generator did not produce a vector for this model (e.g. Bedrock failure for that model).", { code: "processor.aurora_upsert_skipped", accountId: signal.accountId, registryId: cluster.registryId, modelId: cluster.modelId });
           return { cluster, success: true as const };
         }
 
         let upsertResult: Result<void, DbError>;
         try {
           await this.auroraWriter.upsertEmbedding({
-            clusterId: cluster.clusterId,
+            registryId: cluster.registryId,
             arcId: arc.id,
             accountId: signal.accountId,
             recipientAddress: signal.recipientAddress,
@@ -1046,7 +1046,7 @@ export class SignalProcessor {
         if (upsertResult.isErr()) {
           return { cluster, success: false as const, error: upsertResult.error };
         }
-        this.logger.trackPoint("aurora_upsert_cluster_complete", { clusterId: cluster.clusterId });
+        this.logger.trackPoint("aurora_upsert_cluster_complete", { registryId: cluster.registryId });
         return { cluster, success: true as const };
       }),
     );
@@ -1055,7 +1055,7 @@ export class SignalProcessor {
     if (failures.length > 0) {
       for (const failure of failures) {
         if (!failure.success) {
-          this.logger.error("Failed to upsert embedding to Aurora cluster. The Data API call returned an error for the target cluster. This signal's embedding won't be searchable on that cluster until the next retry succeeds. Check Aurora cluster health in the AWS console.", { code: "processor.aurora_upsert_failed", accountId: signal.accountId, clusterId: failure.cluster.clusterId, error: failure.error });
+          this.logger.error("Failed to upsert embedding to Aurora cluster. The Data API call returned an error for the target cluster. This signal's embedding won't be searchable on that cluster until the next retry succeeds. Check Aurora cluster health in the AWS console.", { code: "processor.aurora_upsert_failed", accountId: signal.accountId, registryId: failure.cluster.registryId, error: failure.error });
         }
       }
       return err(processError(signal.id));

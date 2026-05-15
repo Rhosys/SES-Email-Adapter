@@ -8,7 +8,7 @@ import { GetCommand, PutCommand } from "@aws-sdk/lib-dynamodb";
 import { ExecuteStatementCommand, RDSDataClient } from "@aws-sdk/client-rds-data";
 import { randomUUID } from "node:crypto";
 import { dynamo, PROCESSING_TABLE } from "../../database/shared.js";
-import { CLUSTER_REGISTRY, getClusterById, type ClusterRegistryEntry } from "../../embedding/cluster-registry.js";
+import { CLUSTER_REGISTRY, getRegistryById, type ClusterRegistryEntry } from "../../embedding/cluster-registry.js";
 
 // ---------------------------------------------------------------------------
 // Interfaces
@@ -16,7 +16,7 @@ import { CLUSTER_REGISTRY, getClusterById, type ClusterRegistryEntry } from "../
 
 export interface ReindexJob {
   jobId: string;
-  targetClusterId: string;
+  targetRegistryId: string;
   modelId: string;
   segmentCount: number;
   startedAt: string;
@@ -37,7 +37,7 @@ export interface ReindexSegmentMessage {
   jobId: string;
   segment: number;
   totalSegments: number;
-  targetClusterId: string;
+  targetRegistryId: string;
   modelId: string;
 }
 
@@ -76,11 +76,11 @@ export class ReindexDispatcher {
   // dispatch — validate cluster, fan out SQS messages, write initial counters
   // -------------------------------------------------------------------------
 
-  async dispatch(targetClusterId: string, segmentCount = 32): Promise<ReindexJob> {
+  async dispatch(targetRegistryId: string, segmentCount = 32): Promise<ReindexJob> {
     // Validate cluster exists in registry
-    const cluster = getClusterById(targetClusterId);
+    const cluster = getRegistryById(targetRegistryId);
     if (!cluster) {
-      throw new Error(`Cluster "${targetClusterId}" not found in CLUSTER_REGISTRY`);
+      throw new Error(`Cluster "${targetRegistryId}" not found in CLUSTER_REGISTRY`);
     }
 
     const modelId = cluster.modelId;
@@ -94,7 +94,7 @@ export class ReindexDispatcher {
         jobId,
         segment,
         totalSegments: segmentCount,
-        targetClusterId,
+        targetRegistryId,
         modelId,
       };
 
@@ -117,7 +117,7 @@ export class ReindexDispatcher {
         pk: jobPk(jobId),
         sk: JOB_SK,
         jobId,
-        targetClusterId,
+        targetRegistryId,
         modelId,
         segmentCount,
         startedAt,
@@ -127,7 +127,7 @@ export class ReindexDispatcher {
       },
     }));
 
-    return { jobId, targetClusterId, modelId, segmentCount, startedAt };
+    return { jobId, targetRegistryId, modelId, segmentCount, startedAt };
   }
 
   // -------------------------------------------------------------------------
@@ -146,7 +146,7 @@ export class ReindexDispatcher {
     }
 
     const item = result.Item;
-    const targetClusterId = item["targetClusterId"] as string;
+    const targetRegistryId = item["targetRegistryId"] as string;
     const modelId = item["modelId"] as string;
     const startedAt = item["startedAt"] as string;
     const copiedCount = (item["copiedCount"] as number) ?? 0;
@@ -160,7 +160,7 @@ export class ReindexDispatcher {
     const durationMs = Date.now() - new Date(startedAt).getTime();
 
     // Query target Aurora for validation
-    const cluster = getClusterById(targetClusterId);
+    const cluster = getRegistryById(targetRegistryId);
     if (!cluster) {
       return {
         jobId,
@@ -169,7 +169,7 @@ export class ReindexDispatcher {
         regeneratedCount,
         unrecoverableCount,
         validationOk: false,
-        validationDetail: `Target cluster "${targetClusterId}" no longer in registry`,
+        validationDetail: `Target cluster "${targetRegistryId}" no longer in registry`,
         durationMs,
       };
     }

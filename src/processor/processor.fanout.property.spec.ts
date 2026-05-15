@@ -15,7 +15,7 @@ import { createMockLogger } from "../testing/mock-logger.js";
 const mockState = vi.hoisted(() => ({
   clusters: [
     {
-      clusterId: "cluster-default",
+      registryId: "cluster-default",
       clusterArn: "arn:aws:rds:eu-central-1:111:cluster:cluster-default",
       secretArn: "arn:aws:secretsmanager:eu-central-1:111:secret:cluster-default",
       databaseName: "signals",
@@ -24,7 +24,7 @@ const mockState = vi.hoisted(() => ({
       active: true,
     },
   ] as Array<{
-    clusterId: string;
+    registryId: string;
     clusterArn: string;
     secretArn: string;
     databaseName: string;
@@ -39,11 +39,11 @@ vi.mock("../embedding/cluster-registry.js", () => ({
     return Object.freeze(mockState.clusters);
   },
   getActiveClusters: () => mockState.clusters.filter((c) => c.active),
-  getClusterById: (id: string) => mockState.clusters.find((c) => c.clusterId === id) ?? null,
-  getReadCluster: () => mockState.clusters.find((c) => c.active) ?? mockState.clusters[0],
+  getRegistryById: (id: string) => mockState.clusters.find((c) => c.registryId === id) ?? null,
+  getPrimaryArcMatcherRegistry: () => mockState.clusters.find((c) => c.active) ?? mockState.clusters[0],
   getSecondaryClusters: () => {
     const primary = mockState.clusters.find((c) => c.active) ?? mockState.clusters[0];
-    return mockState.clusters.filter((c) => c.active && c.clusterId !== primary!.clusterId);
+    return mockState.clusters.filter((c) => c.active && c.registryId !== primary!.registryId);
   },
 }));
 
@@ -161,22 +161,22 @@ describe("Multi-cluster fanout writes vectors to every active target", () => {
     {
       label: "single cluster",
       clusters: [
-        { clusterId: "cluster-alpha-0", clusterArn: "arn:aws:rds:eu-central-1:111:cluster:cluster-alpha-0", secretArn: "arn:aws:secretsmanager:eu-central-1:111:secret:cluster-alpha-0", databaseName: "signals", modelId: "model-alpha", dimensions: 512, active: true },
+        { registryId: "cluster-alpha-0", clusterArn: "arn:aws:rds:eu-central-1:111:cluster:cluster-alpha-0", secretArn: "arn:aws:secretsmanager:eu-central-1:111:secret:cluster-alpha-0", databaseName: "signals", modelId: "model-alpha", dimensions: 512, active: true },
       ],
     },
     {
       label: "two clusters with different dimensions",
       clusters: [
-        { clusterId: "cluster-alpha-0", clusterArn: "arn:aws:rds:eu-central-1:111:cluster:cluster-alpha-0", secretArn: "arn:aws:secretsmanager:eu-central-1:111:secret:cluster-alpha-0", databaseName: "signals", modelId: "model-alpha", dimensions: 512, active: true },
-        { clusterId: "cluster-beta-1", clusterArn: "arn:aws:rds:eu-central-1:111:cluster:cluster-beta-1", secretArn: "arn:aws:secretsmanager:eu-central-1:111:secret:cluster-beta-1", databaseName: "signals", modelId: "model-beta", dimensions: 1024, active: true },
+        { registryId: "cluster-alpha-0", clusterArn: "arn:aws:rds:eu-central-1:111:cluster:cluster-alpha-0", secretArn: "arn:aws:secretsmanager:eu-central-1:111:secret:cluster-alpha-0", databaseName: "signals", modelId: "model-alpha", dimensions: 512, active: true },
+        { registryId: "cluster-beta-1", clusterArn: "arn:aws:rds:eu-central-1:111:cluster:cluster-beta-1", secretArn: "arn:aws:secretsmanager:eu-central-1:111:secret:cluster-beta-1", databaseName: "signals", modelId: "model-beta", dimensions: 1024, active: true },
       ],
     },
     {
       label: "three clusters",
       clusters: [
-        { clusterId: "cluster-alpha-0", clusterArn: "arn:aws:rds:eu-central-1:111:cluster:cluster-alpha-0", secretArn: "arn:aws:secretsmanager:eu-central-1:111:secret:cluster-alpha-0", databaseName: "signals", modelId: "model-alpha", dimensions: 256, active: true },
-        { clusterId: "cluster-beta-1", clusterArn: "arn:aws:rds:eu-central-1:111:cluster:cluster-beta-1", secretArn: "arn:aws:secretsmanager:eu-central-1:111:secret:cluster-beta-1", databaseName: "signals", modelId: "model-beta", dimensions: 512, active: true },
-        { clusterId: "cluster-gamma-2", clusterArn: "arn:aws:rds:eu-central-1:111:cluster:cluster-gamma-2", secretArn: "arn:aws:secretsmanager:eu-central-1:111:secret:cluster-gamma-2", databaseName: "signals", modelId: "model-gamma", dimensions: 1024, active: true },
+        { registryId: "cluster-alpha-0", clusterArn: "arn:aws:rds:eu-central-1:111:cluster:cluster-alpha-0", secretArn: "arn:aws:secretsmanager:eu-central-1:111:secret:cluster-alpha-0", databaseName: "signals", modelId: "model-alpha", dimensions: 256, active: true },
+        { registryId: "cluster-beta-1", clusterArn: "arn:aws:rds:eu-central-1:111:cluster:cluster-beta-1", secretArn: "arn:aws:secretsmanager:eu-central-1:111:secret:cluster-beta-1", databaseName: "signals", modelId: "model-beta", dimensions: 512, active: true },
+        { registryId: "cluster-gamma-2", clusterArn: "arn:aws:rds:eu-central-1:111:cluster:cluster-gamma-2", secretArn: "arn:aws:secretsmanager:eu-central-1:111:secret:cluster-gamma-2", databaseName: "signals", modelId: "model-gamma", dimensions: 1024, active: true },
       ],
     },
   ];
@@ -280,7 +280,7 @@ describe("Multi-cluster fanout writes vectors to every active target", () => {
 
     for (const cluster of clusters) {
       const matchingCall = upsertCalls.find(
-        (call: Array<{ clusterId: string }>) => call[0]?.clusterId === cluster.clusterId,
+        (call: Array<{ registryId: string }>) => call[0]?.registryId === cluster.registryId,
       );
       expect(matchingCall).toBeDefined();
       expect(matchingCall![0].accountId).toBe(TEST_ACCOUNT_ID);

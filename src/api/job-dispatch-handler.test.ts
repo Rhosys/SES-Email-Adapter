@@ -82,35 +82,35 @@ describe("handleJobDispatch", () => {
       expect(JSON.parse(result.body as string).title).toContain("Invalid JSON");
     });
 
-    it("returns 400 when targetClusterId is missing", async () => {
+    it("returns 400 when targetRegistryId is missing", async () => {
       const event = makeEvent({ method: "POST", path: "/reindex", body: JSON.stringify({}) });
       const result = await dispatch(event, dispatcher);
 
       expect(result.statusCode).toBe(400);
-      expect(JSON.parse(result.body as string).title).toContain("targetClusterId");
+      expect(JSON.parse(result.body as string).title).toContain("targetRegistryId");
     });
 
-    it("returns 400 when targetClusterId is not a string", async () => {
-      const event = makeEvent({ method: "POST", path: "/reindex", body: JSON.stringify({ targetClusterId: 123 }) });
+    it("returns 400 when targetRegistryId is not a string", async () => {
+      const event = makeEvent({ method: "POST", path: "/reindex", body: JSON.stringify({ targetRegistryId: 123 }) });
       const result = await dispatch(event, dispatcher);
 
       expect(result.statusCode).toBe(400);
-      expect(JSON.parse(result.body as string).title).toContain("targetClusterId");
+      expect(JSON.parse(result.body as string).title).toContain("targetRegistryId");
     });
 
-    it("returns 400 when targetClusterId is empty string", async () => {
-      const event = makeEvent({ method: "POST", path: "/reindex", body: JSON.stringify({ targetClusterId: "" }) });
+    it("returns 400 when targetRegistryId is empty string", async () => {
+      const event = makeEvent({ method: "POST", path: "/reindex", body: JSON.stringify({ targetRegistryId: "" }) });
       const result = await dispatch(event, dispatcher);
 
       expect(result.statusCode).toBe(400);
-      expect(JSON.parse(result.body as string).title).toContain("targetClusterId");
+      expect(JSON.parse(result.body as string).title).toContain("targetRegistryId");
     });
 
     it("returns 400 when segmentCount is below 1", async () => {
       const event = makeEvent({
         method: "POST",
         path: "/reindex",
-        body: JSON.stringify({ targetClusterId: "cluster-1", segmentCount: 0 }),
+        body: JSON.stringify({ targetRegistryId: "cluster-1", segmentCount: 0 }),
       });
       const result = await dispatch(event, dispatcher);
 
@@ -122,7 +122,7 @@ describe("handleJobDispatch", () => {
       const event = makeEvent({
         method: "POST",
         path: "/reindex",
-        body: JSON.stringify({ targetClusterId: "cluster-1", segmentCount: 257 }),
+        body: JSON.stringify({ targetRegistryId: "cluster-1", segmentCount: 257 }),
       });
       const result = await dispatch(event, dispatcher);
 
@@ -134,7 +134,7 @@ describe("handleJobDispatch", () => {
       const event = makeEvent({
         method: "POST",
         path: "/reindex",
-        body: JSON.stringify({ targetClusterId: "cluster-1", segmentCount: 3.5 }),
+        body: JSON.stringify({ targetRegistryId: "cluster-1", segmentCount: 3.5 }),
       });
       const result = await dispatch(event, dispatcher);
 
@@ -157,7 +157,7 @@ describe("handleJobDispatch", () => {
     it("returns 202 with ReindexJob on success", async () => {
       const job = {
         jobId: "job-123",
-        targetClusterId: "aurora-prod-titan-v2",
+        targetRegistryId: "aurora-prod-titan-v2",
         modelId: "amazon.titan-embed-text-v2:0",
         segmentCount: 32,
         startedAt: "2025-01-01T00:00:00.000Z",
@@ -167,7 +167,7 @@ describe("handleJobDispatch", () => {
       const event = makeEvent({
         method: "POST",
         path: "/reindex",
-        body: JSON.stringify({ targetClusterId: "aurora-prod-titan-v2" }),
+        body: JSON.stringify({ targetRegistryId: "aurora-prod-titan-v2" }),
       });
       const result = await dispatch(event, dispatcher);
 
@@ -178,13 +178,13 @@ describe("handleJobDispatch", () => {
 
     it("passes segmentCount to dispatcher when provided", async () => {
       dispatcher.dispatch.mockResolvedValue({
-        jobId: "j", targetClusterId: "c", modelId: "m", segmentCount: 16, startedAt: "",
+        jobId: "j", targetRegistryId: "c", modelId: "m", segmentCount: 16, startedAt: "",
       });
 
       const event = makeEvent({
         method: "POST",
         path: "/reindex",
-        body: JSON.stringify({ targetClusterId: "aurora-prod-titan-v2", segmentCount: 16 }),
+        body: JSON.stringify({ targetRegistryId: "aurora-prod-titan-v2", segmentCount: 16 }),
       });
       await dispatch(event, dispatcher);
 
@@ -194,14 +194,14 @@ describe("handleJobDispatch", () => {
     it("handles base64-encoded body", async () => {
       const job = {
         jobId: "job-b64",
-        targetClusterId: "aurora-prod-titan-v2",
+        targetRegistryId: "aurora-prod-titan-v2",
         modelId: "amazon.titan-embed-text-v2:0",
         segmentCount: 32,
         startedAt: "2025-01-01T00:00:00.000Z",
       };
       dispatcher.dispatch.mockResolvedValue(job);
 
-      const bodyStr = JSON.stringify({ targetClusterId: "aurora-prod-titan-v2" });
+      const bodyStr = JSON.stringify({ targetRegistryId: "aurora-prod-titan-v2" });
       const event = makeEvent({
         method: "POST",
         path: "/reindex",
@@ -224,7 +224,7 @@ describe("handleJobDispatch", () => {
       const event = makeEvent({
         method: "POST",
         path: "/reindex",
-        body: JSON.stringify({ targetClusterId: "unknown-cluster" }),
+        body: JSON.stringify({ targetRegistryId: "unknown-cluster" }),
       });
       const result = await dispatch(event, dispatcher);
 
@@ -242,7 +242,7 @@ describe("handleJobDispatch", () => {
       const event = makeEvent({
         method: "POST",
         path: "/reindex",
-        body: JSON.stringify({ targetClusterId: "aurora-prod-titan-v2" }),
+        body: JSON.stringify({ targetRegistryId: "aurora-prod-titan-v2" }),
       });
       const result = await dispatch(event, dispatcher);
 

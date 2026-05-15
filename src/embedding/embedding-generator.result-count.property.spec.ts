@@ -22,7 +22,7 @@ const { mockSecondaryClusters, mockRegistry } = vi.hoisted(() => ({
 vi.mock("./cluster-registry.js", () => ({
   CLUSTER_REGISTRY: mockRegistry.value,
   getActiveClusters: () => mockRegistry.value.filter((c) => c.active),
-  getReadCluster: () => mockRegistry.value.find((c) => c.active)!,
+  getPrimaryArcMatcherRegistry: () => mockRegistry.value.find((c) => c.active)!,
   getSecondaryClusters: () => mockSecondaryClusters.value,
 }));
 
@@ -47,23 +47,25 @@ describe("Property 6: generateForSecondaryClusters result count", () => {
         async (embedText, secondaryCount) => {
           // Build a primary cluster + N secondary clusters
           const primary: ClusterRegistryEntry = {
-            clusterId: "primary-cluster",
+            registryId: "primary-cluster",
             clusterArn: "arn:aws:rds:eu-west-1:111:cluster:primary",
             secretArn: "arn:aws:secretsmanager:eu-west-1:111:secret:primary",
             databaseName: "signals",
             modelId: "amazon.titan-embed-text-v2:0",
             dimensions: 1024,
             active: true,
+            primary: true,
           };
 
           const secondaries: ClusterRegistryEntry[] = Array.from({ length: secondaryCount }, (_, i) => ({
-            clusterId: `secondary-cluster-${i}`,
+            registryId: `secondary-cluster-${i}`,
             clusterArn: `arn:aws:rds:eu-west-1:111:cluster:secondary-${i}`,
             secretArn: `arn:aws:secretsmanager:eu-west-1:111:secret:secondary-${i}`,
             databaseName: "signals",
             modelId: `model-secondary-${i}`,
             dimensions: 1024,
             active: true,
+            primary: false,
           }));
 
           // Configure mocks for this iteration

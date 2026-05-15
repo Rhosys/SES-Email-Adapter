@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { CLUSTER_REGISTRY, getActiveClusters, getClusterById, getReadCluster } from "./cluster-registry.js";
+import { CLUSTER_REGISTRY, getActiveClusters, getRegistryById, getPrimaryArcMatcherRegistry } from "./cluster-registry.js";
 
 // ---------------------------------------------------------------------------
 // Test doubles
@@ -8,7 +8,7 @@ import { CLUSTER_REGISTRY, getActiveClusters, getClusterById, getReadCluster } f
 // Helper to create a test registry entry
 function makeRegistryEntry(overrides: Partial<import("./cluster-registry.js").ClusterRegistryEntry> = {}): import("./cluster-registry.js").ClusterRegistryEntry {
   return {
-    clusterId: "test-cluster",
+    registryId: "test-cluster",
     clusterArn: "arn:aws:rds:us-east-1:123456789012:cluster:test-cluster",
     secretArn: "arn:aws:secretsmanager:us-east-1:123456789012:secret:test-cluster",
     databaseName: "signals",
@@ -39,7 +39,7 @@ describe("CLUSTER_REGISTRY", () => {
 
   it("each entry has all required fields with correct types", () => {
     for (const entry of CLUSTER_REGISTRY) {
-      expect(typeof entry.clusterId).toBe("string");
+      expect(typeof entry.registryId).toBe("string");
       expect(typeof entry.clusterArn).toBe("string");
       expect(typeof entry.secretArn).toBe("string");
       expect(typeof entry.databaseName).toBe("string");
@@ -56,7 +56,7 @@ describe("CLUSTER_REGISTRY", () => {
 
   it("the active cluster has expected values", () => {
     const activeClusters = getActiveClusters();
-    expect(activeClusters[0]?.clusterId).toBe("aurora-prod-titan-v2");
+    expect(activeClusters[0]?.registryId).toBe("aurora-prod-titan-v2");
     expect(activeClusters[0]?.modelId).toBe("amazon.titan-embed-text-v2:0");
     expect(activeClusters[0]?.dimensions).toBe(1024);
     expect(activeClusters[0]?.active).toBe(true);
@@ -83,28 +83,28 @@ describe("getActiveClusters", () => {
   });
 });
 
-describe("getClusterById", () => {
-  it("returns the correct cluster for a valid clusterId", () => {
-    const cluster = getClusterById("aurora-prod-titan-v2");
+describe("getRegistryById", () => {
+  it("returns the correct cluster for a valid registryId", () => {
+    const cluster = getRegistryById("aurora-prod-titan-v2");
     expect(cluster).not.toBeNull();
-    expect(cluster?.clusterId).toBe("aurora-prod-titan-v2");
+    expect(cluster?.registryId).toBe("aurora-prod-titan-v2");
     expect(cluster?.modelId).toBe("amazon.titan-embed-text-v2:0");
   });
 
-  it("returns null for a non-existent clusterId", () => {
-    const cluster = getClusterById("non-existent-cluster");
+  it("returns null for a non-existent registryId", () => {
+    const cluster = getRegistryById("non-existent-cluster");
     expect(cluster).toBeNull();
   });
 
   it("returns null for empty string", () => {
-    const cluster = getClusterById("");
+    const cluster = getRegistryById("");
     expect(cluster).toBeNull();
   });
 });
 
-describe("getReadCluster", () => {
+describe("getPrimaryArcMatcherRegistry", () => {
   it("returns the first active cluster", () => {
-    const readCluster = getReadCluster();
+    const readCluster = getPrimaryArcMatcherRegistry();
     const activeClusters = getActiveClusters();
     expect(readCluster).toBe(activeClusters[0]);
   });
@@ -112,7 +112,7 @@ describe("getReadCluster", () => {
   it("throws error when no active clusters exist", () => {
     // This test would require modifying the registry, which is readonly
     // So we just verify the function exists and works with the current registry
-    expect(() => getReadCluster()).not.toThrow();
+    expect(() => getPrimaryArcMatcherRegistry()).not.toThrow();
   });
 });
 

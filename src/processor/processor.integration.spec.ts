@@ -19,7 +19,7 @@ import { createMockLogger, type MockLogger } from "../testing/mock-logger.js";
 
 vi.mock("../embedding/cluster-registry.js", () => {
   const entry = Object.freeze({
-    clusterId: "aurora-prod-titan-v2",
+    registryId: "aurora-prod-titan-v2",
     clusterArn: "arn:aws:rds:eu-central-1:123456789012:cluster:aurora-prod-titan-v2",
     secretArn: "arn:aws:secretsmanager:eu-central-1:123456789012:secret:aurora-prod-titan-v2-xxxxxx",
     databaseName: "signals",
@@ -30,8 +30,8 @@ vi.mock("../embedding/cluster-registry.js", () => {
   return {
     CLUSTER_REGISTRY: Object.freeze([entry]),
     getActiveClusters: () => [entry],
-    getClusterById: (id: string) => (id === entry.clusterId ? entry : null),
-    getReadCluster: () => entry,
+    getRegistryById: (id: string) => (id === entry.registryId ? entry : null),
+    getPrimaryArcMatcherRegistry: () => entry,
   };
 });
 

@@ -10,7 +10,7 @@ import {
   CommitTransactionCommand,
   RollbackTransactionCommand,
 } from "@aws-sdk/client-rds-data";
-import { CLUSTER_REGISTRY, getClusterById, type ClusterRegistryEntry } from "../embedding/cluster-registry.js";
+import { CLUSTER_REGISTRY, getRegistryById, type ClusterRegistryEntry } from "../embedding/cluster-registry.js";
 
 // ---------------------------------------------------------------------------
 // Interface
@@ -18,7 +18,7 @@ import { CLUSTER_REGISTRY, getClusterById, type ClusterRegistryEntry } from "../
 
 export interface MultiClusterAuroraWriter {
   upsertEmbedding(opts: {
-    clusterId: string;
+    registryId: string;
     arcId: string;
     accountId: string;
     recipientAddress: string;
@@ -26,7 +26,7 @@ export interface MultiClusterAuroraWriter {
   }): Promise<void>;
 
   findMatch(opts: {
-    clusterId: string;
+    registryId: string;
     accountId: string;
     recipientAddress: string;
     embedding: number[];
@@ -98,11 +98,11 @@ function sleep(ms: number): Promise<void> {
 
 const clientCache = new Map<string, RDSDataClient>();
 
-function getClientForCluster(_clusterId: string): RDSDataClient {
-  let client = clientCache.get(_clusterId);
+function getClientForCluster(_registryId: string): RDSDataClient {
+  let client = clientCache.get(_registryId);
   if (!client) {
     client = new RDSDataClient({});
-    clientCache.set(_clusterId, client);
+    clientCache.set(_registryId, client);
   }
   return client;
 }
@@ -113,14 +113,14 @@ function getClientForCluster(_clusterId: string): RDSDataClient {
 
 export class MultiClusterAuroraWriterImpl implements MultiClusterAuroraWriter {
   async upsertEmbedding(opts: {
-    clusterId: string;
+    registryId: string;
     arcId: string;
     accountId: string;
     recipientAddress: string;
     embedding: number[];
   }): Promise<void> {
-    const cluster = resolveCluster(opts.clusterId);
-    const client = getClientForCluster(opts.clusterId);
+    const cluster = resolveCluster(opts.registryId);
+    const client = getClientForCluster(opts.registryId);
 
     await withRetry(async () => {
       await this.withAccountContext(client, cluster, opts.accountId, async (transactionId) => {
@@ -145,13 +145,13 @@ export class MultiClusterAuroraWriterImpl implements MultiClusterAuroraWriter {
   }
 
   async findMatch(opts: {
-    clusterId: string;
+    registryId: string;
     accountId: string;
     recipientAddress: string;
     embedding: number[];
   }): Promise<{ arcId: string } | null> {
-    const cluster = resolveCluster(opts.clusterId);
-    const client = getClientForCluster(opts.clusterId);
+    const cluster = resolveCluster(opts.registryId);
+    const client = getClientForCluster(opts.registryId);
 
     return withRetry(async () => {
       const res = await this.withAccountContext(client, cluster, opts.accountId, async (transactionId) => {
@@ -234,10 +234,10 @@ export class MultiClusterAuroraWriterImpl implements MultiClusterAuroraWriter {
 // Cluster resolution helper
 // ---------------------------------------------------------------------------
 
-function resolveCluster(clusterId: string): ClusterRegistryEntry {
-  const entry = getClusterById(clusterId);
+function resolveCluster(registryId: string): ClusterRegistryEntry {
+  const entry = getRegistryById(registryId);
   if (!entry) {
-    throw new Error(`Cluster "${clusterId}" not found in CLUSTER_REGISTRY`);
+    throw new Error(`Cluster "${registryId}" not found in CLUSTER_REGISTRY`);
   }
   return entry;
 }

@@ -2,7 +2,7 @@
 // **Validates: Requirements 5.1, 5.2**
 //
 // For any cluster registry configuration, getSecondaryClusters() SHALL return exactly
-// getActiveClusters() minus getReadCluster() — i.e., every active cluster that is not
+// getActiveClusters() minus getPrimaryArcMatcherRegistry() — i.e., every active cluster that is not
 // the read cluster, and no others.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -18,26 +18,26 @@ const { mockRegistry } = vi.hoisted(() => ({
 }));
 
 // Mock the module but let getSecondaryClusters use the real implementation logic.
-// We mock getActiveClusters and getReadCluster to read from our mutable registry,
+// We mock getActiveClusters and getPrimaryArcMatcherRegistry to read from our mutable registry,
 // and provide getSecondaryClusters as a real implementation that calls them.
 vi.mock("./cluster-registry.js", () => {
   const getActiveClusters = () => mockRegistry.value.filter((c: ClusterRegistryEntry) => c.active);
-  const getReadCluster = () => {
+  const getPrimaryArcMatcherRegistry = () => {
     const active = getActiveClusters();
     if (active.length === 0) throw new Error("No active clusters in CLUSTER_REGISTRY");
     return active[0]!;
   };
   // This is the REAL implementation from cluster-registry.ts — we're testing this logic
   const getSecondaryClusters = () => {
-    const primary = getReadCluster();
-    return getActiveClusters().filter((c: ClusterRegistryEntry) => c.clusterId !== primary.clusterId);
+    const primary = getPrimaryArcMatcherRegistry();
+    return getActiveClusters().filter((c: ClusterRegistryEntry) => c.registryId !== primary.registryId);
   };
   return {
     CLUSTER_REGISTRY: Object.freeze([]),
     getActiveClusters,
-    getReadCluster,
+    getPrimaryArcMatcherRegistry,
     getSecondaryClusters,
-    getClusterById: (id: string) => mockRegistry.value.find((c: ClusterRegistryEntry) => c.clusterId === id) ?? null,
+    getRegistryById: (id: string) => mockRegistry.value.find((c: ClusterRegistryEntry) => c.registryId === id) ?? null,
   };
 });
 
@@ -47,13 +47,14 @@ vi.mock("./cluster-registry.js", () => {
 
 function makeEntry(index: number, active: boolean): ClusterRegistryEntry {
   return {
-    clusterId: `cluster-${index}`,
+    registryId: `cluster-${index}`,
     clusterArn: `arn:aws:rds:eu-west-1:123456789012:cluster:cluster-${index}`,
     secretArn: `arn:aws:secretsmanager:eu-west-1:123456789012:secret:cluster-${index}-xxx`,
     databaseName: "signals",
     modelId: `model-${index}:0`,
     dimensions: 1024,
     active,
+    primary: index === 0 && active,
   };
 }
 
@@ -75,28 +76,28 @@ describe("Property 8: getSecondaryClusters is the set difference", () => {
     mockRegistry.value = [];
   });
 
-  it("returns exactly getActiveClusters() minus getReadCluster() for any valid registry", async () => {
-    const { getActiveClusters, getReadCluster, getSecondaryClusters } = await import("./cluster-registry.js");
+  it("returns exactly getActiveClusters() minus getPrimaryArcMatcherRegistry() for any valid registry", async () => {
+    const { getActiveClusters, getPrimaryArcMatcherRegistry, getSecondaryClusters } = await import("./cluster-registry.js");
 
     fc.assert(
       fc.property(registryArb, (registry) => {
         mockRegistry.value = registry;
 
         const active = getActiveClusters();
-        const read = getReadCluster();
+        const read = getPrimaryArcMatcherRegistry();
         const secondary = getSecondaryClusters();
 
         // Property A: secondary contains no element equal to the read cluster
         for (const entry of secondary) {
-          expect(entry.clusterId).not.toBe(read.clusterId);
+          expect(entry.registryId).not.toBe(read.registryId);
         }
 
         // Property B: every active cluster that is NOT the read cluster IS in secondary
         const expectedIds = active
-          .filter((c) => c.clusterId !== read.clusterId)
-          .map((c) => c.clusterId)
+          .filter((c) => c.registryId !== read.registryId)
+          .map((c) => c.registryId)
           .sort();
-        const actualIds = secondary.map((c) => c.clusterId).sort();
+        const actualIds = secondary.map((c) => c.registryId).sort();
         expect(actualIds).toEqual(expectedIds);
 
         // Property C: secondary length equals active length minus 1 (the read cluster)

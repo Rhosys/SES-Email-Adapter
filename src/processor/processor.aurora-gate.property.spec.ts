@@ -18,7 +18,7 @@ import { createMockLogger, type MockLogger } from "../testing/mock-logger.js";
 
 vi.mock("../embedding/cluster-registry.js", () => {
   const clusterA = Object.freeze({
-    clusterId: "cluster-a",
+    registryId: "cluster-a",
     clusterArn: "arn:aws:rds:eu-central-1:111:cluster:cluster-a",
     secretArn: "arn:aws:secretsmanager:eu-central-1:111:secret:cluster-a",
     databaseName: "signals",
@@ -27,7 +27,7 @@ vi.mock("../embedding/cluster-registry.js", () => {
     active: true,
   });
   const clusterB = Object.freeze({
-    clusterId: "cluster-b",
+    registryId: "cluster-b",
     clusterArn: "arn:aws:rds:eu-central-1:111:cluster:cluster-b",
     secretArn: "arn:aws:secretsmanager:eu-central-1:111:secret:cluster-b",
     databaseName: "signals",
@@ -38,12 +38,12 @@ vi.mock("../embedding/cluster-registry.js", () => {
   return {
     CLUSTER_REGISTRY: Object.freeze([clusterA, clusterB]),
     getActiveClusters: () => [clusterA, clusterB],
-    getClusterById: (id: string) => {
+    getRegistryById: (id: string) => {
       if (id === "cluster-a") return clusterA;
       if (id === "cluster-b") return clusterB;
       return null;
     },
-    getReadCluster: () => clusterA,
+    getPrimaryArcMatcherRegistry: () => clusterA,
     getSecondaryClusters: () => [clusterB],
   };
 });
@@ -459,8 +459,8 @@ describe("Feature: signal-processor-retry-resilience, Property 6: Aurora failure
 
     // Primary cluster (cluster-a) fails
     const auroraWriter: MultiClusterAuroraWriter = {
-      upsertEmbedding: vi.fn().mockImplementation(async (opts: { clusterId: string }) => {
-        if (opts.clusterId === "cluster-a") {
+      upsertEmbedding: vi.fn().mockImplementation(async (opts: { registryId: string }) => {
+        if (opts.registryId === "cluster-a") {
           throw new Error("Connection timeout on primary");
         }
       }),
@@ -484,9 +484,9 @@ describe("Feature: signal-processor-retry-resilience, Property 6: Aurora failure
     expect(result.batchItemFailures[0]!.itemIdentifier).toBe("sqs-1");
 
     const errorLogs = mockLogger.calls.filter((c) => c.method === "error");
-    const auroraErrorLog = errorLogs.find((c) => c.context?.clusterId === "cluster-a");
+    const auroraErrorLog = errorLogs.find((c) => c.context?.registryId === "cluster-a");
     expect(auroraErrorLog).toBeDefined();
-    expect(auroraErrorLog!.context!.clusterId).toBe("cluster-a");
+    expect(auroraErrorLog!.context!.registryId).toBe("cluster-a");
     expect(auroraErrorLog!.context!.error).toBeDefined();
     expect(String(auroraErrorLog!.context!.error)).toContain("Connection timeout on primary");
   });
@@ -505,8 +505,8 @@ describe("Feature: signal-processor-retry-resilience, Property 6: Aurora failure
 
     // Non-primary cluster (cluster-b) fails, primary succeeds
     const auroraWriter: MultiClusterAuroraWriter = {
-      upsertEmbedding: vi.fn().mockImplementation(async (opts: { clusterId: string }) => {
-        if (opts.clusterId === "cluster-b") {
+      upsertEmbedding: vi.fn().mockImplementation(async (opts: { registryId: string }) => {
+        if (opts.registryId === "cluster-b") {
           throw new Error("Throttled on secondary");
         }
       }),
@@ -531,9 +531,9 @@ describe("Feature: signal-processor-retry-resilience, Property 6: Aurora failure
 
     // All Aurora failures now log at ERROR level uniformly (no primary/non-primary distinction)
     const errorLogs = mockLogger.calls.filter((c) => c.method === "error");
-    const auroraErrorLog = errorLogs.find((c) => c.context?.clusterId === "cluster-b");
+    const auroraErrorLog = errorLogs.find((c) => c.context?.registryId === "cluster-b");
     expect(auroraErrorLog).toBeDefined();
-    expect(auroraErrorLog!.context!.clusterId).toBe("cluster-b");
+    expect(auroraErrorLog!.context!.registryId).toBe("cluster-b");
     expect(auroraErrorLog!.context!.error).toBeDefined();
     expect(String(auroraErrorLog!.context!.error)).toContain("Throttled on secondary");
   });
@@ -552,9 +552,9 @@ describe("Feature: signal-processor-retry-resilience, Property 6: Aurora failure
 
     // Both clusters fail
     const auroraWriter: MultiClusterAuroraWriter = {
-      upsertEmbedding: vi.fn().mockImplementation(async (opts: { clusterId: string }) => {
-        if (opts.clusterId === "cluster-a") throw new Error("Primary connection refused");
-        if (opts.clusterId === "cluster-b") throw new Error("Secondary connection refused");
+      upsertEmbedding: vi.fn().mockImplementation(async (opts: { registryId: string }) => {
+        if (opts.registryId === "cluster-a") throw new Error("Primary connection refused");
+        if (opts.registryId === "cluster-b") throw new Error("Secondary connection refused");
       }),
       findMatch: vi.fn().mockResolvedValue(null),
     };
@@ -576,10 +576,10 @@ describe("Feature: signal-processor-retry-resilience, Property 6: Aurora failure
 
     // All Aurora failures now log at ERROR level uniformly
     const errorLogs = mockLogger.calls.filter((c) => c.method === "error");
-    const primaryErrorLog = errorLogs.find((c) => c.context?.clusterId === "cluster-a");
+    const primaryErrorLog = errorLogs.find((c) => c.context?.registryId === "cluster-a");
     expect(primaryErrorLog).toBeDefined();
 
-    const secondaryErrorLog = errorLogs.find((c) => c.context?.clusterId === "cluster-b");
+    const secondaryErrorLog = errorLogs.find((c) => c.context?.registryId === "cluster-b");
     expect(secondaryErrorLog).toBeDefined();
   });
 });
@@ -1029,8 +1029,8 @@ describe("Feature: signal-processor-retry-resilience, Property 7: Partial Aurora
 
     // Primary cluster (cluster-a) succeeds, non-primary (cluster-b) fails
     const auroraWriter: MultiClusterAuroraWriter = {
-      upsertEmbedding: vi.fn().mockImplementation((opts: { clusterId: string }) => {
-        if (opts.clusterId === "cluster-a") {
+      upsertEmbedding: vi.fn().mockImplementation((opts: { registryId: string }) => {
+        if (opts.registryId === "cluster-a") {
           completedUpserts.push("cluster-a");
           return Promise.resolve(undefined);
         }

@@ -18,7 +18,7 @@ import { createMockLogger, type MockLogger } from "../testing/mock-logger.js";
 
 vi.mock("../embedding/cluster-registry.js", () => {
   const cluster = Object.freeze({
-    clusterId: "cluster-primary",
+    registryId: "cluster-primary",
     clusterArn: "arn:aws:rds:eu-central-1:111:cluster:cluster-primary",
     secretArn: "arn:aws:secretsmanager:eu-central-1:111:secret:cluster-primary",
     databaseName: "signals",
@@ -29,8 +29,8 @@ vi.mock("../embedding/cluster-registry.js", () => {
   return {
     CLUSTER_REGISTRY: Object.freeze([cluster]),
     getActiveClusters: () => [cluster],
-    getClusterById: (id: string) => (id === cluster.clusterId ? cluster : null),
-    getReadCluster: () => cluster,
+    getRegistryById: (id: string) => (id === cluster.registryId ? cluster : null),
+    getPrimaryArcMatcherRegistry: () => cluster,
   };
 });
 

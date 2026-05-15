@@ -12,7 +12,7 @@ import { ScanCommand } from "@aws-sdk/lib-dynamodb";
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 import { dynamo, SIGNALS_TABLE } from "../../database/shared.js";
 import { multiClusterWriter } from "../../database/multi-cluster-aurora-writer.js";
-import { getClusterById } from "../../embedding/cluster-registry.js";
+import { getRegistryById } from "../../embedding/cluster-registry.js";
 import { MailparserMimeParser } from "../../processor/mime.js";
 import { buildEmbedText, extractEmbedTextInput } from "../../embedding/embed-text.js";
 import { BedrockEmbeddingGenerator } from "../../embedding/embedding-generator.js";
@@ -32,7 +32,7 @@ export interface ReindexSegmentMessage {
   jobId: string;
   segment: number;
   totalSegments: number;
-  targetClusterId: string;
+  targetRegistryId: string;
   modelId: string;
 }
 
@@ -106,14 +106,14 @@ export class ReindexWorker {
       return err(processError(record.messageId));
     }
 
-    const { segment, totalSegments, targetClusterId, modelId } = message;
+    const { segment, totalSegments, targetRegistryId, modelId } = message;
 
     // Validate target cluster exists in registry
-    const cluster = getClusterById(targetClusterId);
+    const cluster = getRegistryById(targetRegistryId);
     if (!cluster) return err(processError(record.messageId));
 
     // Process segment
-    const segmentResult = await this.processSegment(segment, totalSegments, targetClusterId, modelId);
+    const segmentResult = await this.processSegment(segment, totalSegments, targetRegistryId, modelId);
     if (segmentResult.isErr()) return err(processError(record.messageId));
 
     return ok(undefined);
@@ -122,7 +122,7 @@ export class ReindexWorker {
   private async processSegment(
     segment: number,
     totalSegments: number,
-    targetClusterId: string,
+    targetRegistryId: string,
     modelId: string,
   ): Promise<Result<void, ProcessError>> {
     let lastEvaluatedKey: Record<string, unknown> | undefined;
@@ -142,7 +142,7 @@ export class ReindexWorker {
         const items = (res.Items ?? []) as Array<Record<string, unknown>>;
 
         for (const item of items) {
-          const result = await this.processSignal(item, targetClusterId, modelId);
+          const result = await this.processSignal(item, targetRegistryId, modelId);
           if (result.isErr()) {
             failures.push(result.error);
           }
@@ -151,7 +151,7 @@ export class ReindexWorker {
         lastEvaluatedKey = res.LastEvaluatedKey as Record<string, unknown> | undefined;
       } while (lastEvaluatedKey);
     } catch (e) {
-      this.logger.error("DynamoDB scan failed during reindex segment processing. The segment will be retried.", { code: "reindex.worker.scan_failed", error: e, segment, totalSegments, targetClusterId });
+      this.logger.error("DynamoDB scan failed during reindex segment processing. The segment will be retried.", { code: "reindex.worker.scan_failed", error: e, segment, totalSegments, targetRegistryId });
       return err(processError(""));
     }
 
@@ -169,7 +169,7 @@ export class ReindexWorker {
 
   private async processSignal(
     item: Record<string, unknown>,
-    targetClusterId: string,
+    targetRegistryId: string,
     modelId: string,
   ): Promise<Result<void, { signalId: string; reason: string }>> {
     const signal = item as unknown as Pick<Signal, "id" | "accountId" | "arcId" | "recipientAddress" | "embeddings" | "s3Key">;
@@ -177,10 +177,10 @@ export class ReindexWorker {
 
     const vector = embeddings?.[modelId];
     if (vector && Array.isArray(vector)) {
-      return this.pureCopyToAurora(signal, vector, targetClusterId);
+      return this.pureCopyToAurora(signal, vector, targetRegistryId);
     }
 
-    return this.regenerateFromS3(signal, targetClusterId, modelId);
+    return this.regenerateFromS3(signal, targetRegistryId, modelId);
   }
 
   // ---------------------------------------------------------------------------
@@ -190,11 +190,11 @@ export class ReindexWorker {
   private async pureCopyToAurora(
     signal: Pick<Signal, "id" | "accountId" | "arcId" | "recipientAddress">,
     vector: number[],
-    targetClusterId: string,
+    targetRegistryId: string,
   ): Promise<Result<void, { signalId: string; reason: string }>> {
     try {
       await multiClusterWriter.upsertEmbedding({
-        clusterId: targetClusterId,
+        registryId: targetRegistryId,
         arcId: signal.arcId!,
         accountId: signal.accountId,
         recipientAddress: signal.recipientAddress,
@@ -212,7 +212,7 @@ export class ReindexWorker {
 
   private async regenerateFromS3(
     signal: Pick<Signal, "id" | "accountId" | "arcId" | "recipientAddress" | "s3Key">,
-    targetClusterId: string,
+    targetRegistryId: string,
     modelId: string,
   ): Promise<Result<void, { signalId: string; reason: string }>> {
     const s3Key = signal.s3Key;
@@ -258,7 +258,7 @@ export class ReindexWorker {
     let upsertResult: Result<void, unknown>;
     try {
       await multiClusterWriter.upsertEmbedding({
-        clusterId: targetClusterId,
+        registryId: targetRegistryId,
         arcId: signal.arcId!,
         accountId: signal.accountId,
         recipientAddress: signal.recipientAddress,

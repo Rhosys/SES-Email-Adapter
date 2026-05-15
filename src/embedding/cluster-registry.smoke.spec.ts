@@ -35,19 +35,19 @@ describe("CLUSTER_REGISTRY smoke test", () => {
       // Check clusterArn
       expect(entry.clusterArn).not.match(
         envVarPattern,
-        `clusterArn for ${entry.clusterId} should not use environment variables`
+        `clusterArn for ${entry.registryId} should not use environment variables`
       );
       
       // Check secretArn
       expect(entry.secretArn).not.match(
         envVarPattern,
-        `secretArn for ${entry.clusterId} should not use environment variables`
+        `secretArn for ${entry.registryId} should not use environment variables`
       );
       
       // Check databaseName
       expect(entry.databaseName).not.match(
         envVarPattern,
-        `databaseName for ${entry.clusterId} should not use environment variables`
+        `databaseName for ${entry.registryId} should not use environment variables`
       );
       
       // Verify values are non-empty strings
@@ -73,7 +73,7 @@ describe("CLUSTER_REGISTRY smoke test", () => {
     
     for (const entry of activeEntries) {
       // Verify all required fields are present and valid
-      expect(entry.clusterId).toBeTypeOf("string");
+      expect(entry.registryId).toBeTypeOf("string");
       expect(entry.modelId).toBeTypeOf("string");
       expect(entry.dimensions).toBeTypeOf("number");
       expect(entry.dimensions).toBeGreaterThan(0);
