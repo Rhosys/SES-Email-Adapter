@@ -231,7 +231,7 @@ jobs:
           if [ $EXIT_CODE -ne 0 ]; then
             echo "## ❌ Tofu Plan Failed" >> $GITHUB_STEP_SUMMARY
             echo '```' >> $GITHUB_STEP_SUMMARY
-            grep -A2 '│ Error:' /tmp/plan_output.txt >> $GITHUB_STEP_SUMMARY
+            grep -A2 '│ Error:' /tmp/plan_output.txt | sed 's/\x1B\[[0-9;]*[mGKHF]//g' >> $GITHUB_STEP_SUMMARY
             echo '```' >> $GITHUB_STEP_SUMMARY
             exit $EXIT_CODE
           fi
@@ -354,7 +354,7 @@ jobs:
               echo "After running, re-trigger this workflow." >> $GITHUB_STEP_SUMMARY
             else
               echo '```' >> $GITHUB_STEP_SUMMARY
-              tail -50 /tmp/apply_output.txt >> $GITHUB_STEP_SUMMARY
+              tail -50 /tmp/apply_output.txt | sed 's/\x1B\[[0-9;]*[mGKHF]//g' >> $GITHUB_STEP_SUMMARY
               echo '```' >> $GITHUB_STEP_SUMMARY
             fi
 
