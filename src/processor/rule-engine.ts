@@ -3,11 +3,7 @@ import jsonLogic from "json-logic-js";
 
 export async function evalCondition(condition: string, ctx: object): Promise<boolean> {
   if (!condition.startsWith("js:")) {
-    try {
-      return Boolean(jsonLogic.apply(JSON.parse(condition) as object, ctx));
-    } catch {
-      return false;
-    }
+    return Boolean(jsonLogic.apply(JSON.parse(condition) as object, ctx));
   }
 
   const qjs = await getQuickJS();

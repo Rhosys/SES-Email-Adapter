@@ -101,7 +101,8 @@ export class ReindexWorker {
     let message: ReindexSegmentMessage;
     try {
       message = JSON.parse(record.body) as ReindexSegmentMessage;
-    } catch {
+    } catch (e) {
+      this.logger.error("Failed to parse reindex segment message from SQS record. The JSON payload could not be deserialized. This message will be retried.", { code: "reindex.worker.parse_failed", error: e, record });
       return err(processError(record.messageId));
     }
 
@@ -149,7 +150,8 @@ export class ReindexWorker {
 
         lastEvaluatedKey = res.LastEvaluatedKey as Record<string, unknown> | undefined;
       } while (lastEvaluatedKey);
-    } catch {
+    } catch (e) {
+      this.logger.error("DynamoDB scan failed during reindex segment processing. The segment will be retried.", { code: "reindex.worker.scan_failed", error: e, segment, totalSegments, targetClusterId });
       return err(processError(""));
     }
 

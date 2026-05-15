@@ -326,7 +326,8 @@ export class SignalProcessor {
         dkimVerdict: notification.receipt.dkimVerdict.status,
         dmarcVerdict: notification.receipt.dmarcVerdict.status,
       };
-    } catch {
+    } catch (e) {
+      this.logger.error("Failed to parse inbound signal from SQS record. The JSON payload could not be deserialized as a valid SES notification. This message will be retried.", { code: "processor.parse_failed", error: e, record });
       return err(processError(record.messageId));
     }
 
@@ -378,7 +379,8 @@ export class SignalProcessor {
     let processResult: Result<void, DbError | InvalidResponseError>;
     try {
       processResult = await this.processMessage(message);
-    } catch {
+    } catch (e) {
+      this.logger.error("processMessage threw an unhandled exception. This should not happen — all errors should be returned as Result types. The message will be retried.", { code: "processor.unhandled_exception", error: e, accountId: message.accountId, sesMessageId: message.sesMessageId });
       return err(processError(record.messageId));
     }
     if (processResult.isErr()) return err(processError(record.messageId));
@@ -420,7 +422,7 @@ export class SignalProcessor {
       payload = JSON.parse(record.body) as SideEffectPayload;
       if (!payload.signal || !payload.arc) throw new Error("Missing signal or arc in payload");
     } catch (e) {
-      this.logger.error("Malformed side-effect payload — cannot parse. Dropping message to prevent infinite retry of unparseable content.", { code: "processor.side_effect.malformed_payload", messageId: record.messageId, error: String(e) });
+      this.logger.error("Malformed side-effect payload — cannot parse. Dropping message to prevent infinite retry of unparseable content.", { code: "processor.side_effect.malformed_payload", messageId: record.messageId, error: e });
       return ok(undefined);
     }
 
@@ -454,11 +456,11 @@ export class SignalProcessor {
             dmarcPass: false,
           });
           if (forwardResult.isErr()) {
-            this.logger.error("Side-effect forward failed. The SES send-raw-email call returned an error. The recipient won't receive the forwarded copy.", { code: "processor.side_effect.forward_failed", accountId, toAddress, error: String(forwardResult.error.cause) });
+            this.logger.error("Side-effect forward failed. The SES send-raw-email call returned an error. The recipient won't receive the forwarded copy.", { code: "processor.side_effect.forward_failed", accountId, toAddress, error: forwardResult.error });
           }
           this.logger.trackPoint("side_effect_forward_complete");
         } catch (e) {
-          this.logger.error("Side-effect forward threw unexpectedly.", { code: "processor.side_effect.forward_error", accountId, toAddress, error: String(e) });
+          this.logger.error("Side-effect forward threw unexpectedly.", { code: "processor.side_effect.forward_error", accountId, toAddress, error: e });
         }
       }
     }
@@ -469,11 +471,11 @@ export class SignalProcessor {
         this.logger.trackPoint("side_effect_notify_start");
         const notifyResult = await this.notifier.notify(accountId, arc, signal);
         if (notifyResult.isErr()) {
-          this.logger.track("Side-effect notification failed.", { code: "processor.side_effect.notify_failed", accountId, error: String(notifyResult.error.cause) });
+          this.logger.track("Side-effect notification failed.", { code: "processor.side_effect.notify_failed", accountId, error: notifyResult.error });
         }
         this.logger.trackPoint("side_effect_notify_complete");
       } catch (e) {
-        this.logger.error("Side-effect notification threw unexpectedly.", { code: "processor.side_effect.notify_error", accountId, error: String(e) });
+        this.logger.error("Side-effect notification threw unexpectedly.", { code: "processor.side_effect.notify_error", accountId, error: e });
       }
     }
 
@@ -491,7 +493,7 @@ export class SignalProcessor {
         });
         this.logger.trackPoint("side_effect_pong_complete");
       } catch (e) {
-        this.logger.error("Side-effect pong failed.", { code: "processor.side_effect.pong_failed", accountId, error: String(e) });
+        this.logger.error("Side-effect pong failed.", { code: "processor.side_effect.pong_failed", accountId, error: e });
       }
     }
 
@@ -523,7 +525,7 @@ export class SignalProcessor {
         }
         this.logger.trackPoint("side_effect_auto_reply_complete");
       } catch (e) {
-        this.logger.error("Side-effect auto-reply failed.", { code: "processor.side_effect.auto_reply_failed", accountId, error: String(e) });
+        this.logger.error("Side-effect auto-reply failed.", { code: "processor.side_effect.auto_reply_failed", accountId, error: e });
       }
     }
 
@@ -567,12 +569,12 @@ export class SignalProcessor {
           };
           const draftSaveResult = await this.store.saveSignal(draft);
           if (draftSaveResult.isErr()) {
-            this.logger.error("Side-effect auto-draft save failed.", { code: "processor.side_effect.auto_draft_failed", accountId, error: String(draftSaveResult.error.cause) });
+            this.logger.error("Side-effect auto-draft save failed.", { code: "processor.side_effect.auto_draft_failed", accountId, error: draftSaveResult.error });
           }
         }
         this.logger.trackPoint("side_effect_auto_draft_complete");
       } catch (e) {
-        this.logger.error("Side-effect auto-draft threw unexpectedly.", { code: "processor.side_effect.auto_draft_error", accountId, error: String(e) });
+        this.logger.error("Side-effect auto-draft threw unexpectedly.", { code: "processor.side_effect.auto_draft_error", accountId, error: e });
       }
     }
 
@@ -616,7 +618,7 @@ export class SignalProcessor {
     ]);
 
     if (primaryResult.isErr()) {
-      this.logger.error("Primary embedding generation failed. The Bedrock InvokeModel call for the read cluster returned an error. Arc matching cannot proceed without a valid vector — the message will be retried via batch item failure.", { code: "embedding.primary_failed", modelId: readCluster.modelId, error: String(primaryResult.error.cause) });
+      this.logger.error("Primary embedding generation failed. The Bedrock InvokeModel call for the read cluster returned an error. Arc matching cannot proceed without a valid vector — the message will be retried via batch item failure.", { code: "embedding.primary_failed", modelId: readCluster.modelId, error: primaryResult.error });
       return err(dbError(primaryResult.error.cause));
     }
     const embedding = primaryResult.value.vector;
@@ -778,7 +780,7 @@ export class SignalProcessor {
       if (saveResult.isErr()) return err(saveResult.error);
       const repResult = await this.store.updateGlobalReputation(senderETLD1, { wasSpam: classification.spamScore >= spamScoreThreshold, wasBlocked: true });
       if (repResult.isErr()) {
-        this.logger.warn("Failed to update global sender reputation after signal processing. The DynamoDB update returned an error. Reputation data may be stale for this domain.", { code: "processor.reputation_update_failed", accountId, error: String(repResult.error.cause) });
+        this.logger.warn("Failed to update global sender reputation after signal processing. The DynamoDB update returned an error. Reputation data may be stale for this domain.", { code: "processor.reputation_update_failed", accountId, error: repResult.error });
       }
       return ok(undefined);
     }
@@ -792,12 +794,12 @@ export class SignalProcessor {
       if (this.notifier && !outcome.quarantineHidden) {
         const notifyResult = await this.notifier.notifyBlocked(accountId, quarantinedSignal);
         if (notifyResult.isErr()) {
-          this.logger.track("Failed to send quarantine notification to user. The notification service returned an error. The signal is quarantined but the user won't be alerted. Tracked for notification reliability monitoring.", { code: "processor.quarantine_notification_failed", accountId, error: String(notifyResult.error.cause) });
+          this.logger.track("Failed to send quarantine notification to user. The notification service returned an error. The signal is quarantined but the user won't be alerted. Tracked for notification reliability monitoring.", { code: "processor.quarantine_notification_failed", accountId, error: notifyResult.error });
         }
       }
       const repResult = await this.store.updateGlobalReputation(senderETLD1, { wasSpam: classification.spamScore >= spamScoreThreshold, wasBlocked: true });
       if (repResult.isErr()) {
-        this.logger.warn("Failed to update global sender reputation after signal processing. The DynamoDB update returned an error. Reputation data may be stale for this domain.", { code: "processor.reputation_update_failed", accountId, error: String(repResult.error.cause) });
+        this.logger.warn("Failed to update global sender reputation after signal processing. The DynamoDB update returned an error. Reputation data may be stale for this domain.", { code: "processor.reputation_update_failed", accountId, error: repResult.error });
       }
       return ok(undefined);
     }
@@ -844,7 +846,7 @@ export class SignalProcessor {
         (e) => dbError(e instanceof Error ? e : new Error(String(e))),
       );
       if (pongResult.isErr()) {
-        this.logger.error("Failed to send pong reply to test email sender. The SES send call returned an error. The sender won't receive the automated test confirmation. Check SES sending limits and verify the from-address domain is configured.", { code: "processor.pong_reply_failed", accountId, error: String(pongResult.error.cause) });
+        this.logger.error("Failed to send pong reply to test email sender. The SES send call returned an error. The sender won't receive the automated test confirmation. Check SES sending limits and verify the from-address domain is configured.", { code: "processor.pong_reply_failed", accountId, error: pongResult.error });
       } else if (pongResult.value) {
         arc.sentMessageIds = [...(arc.sentMessageIds ?? []), pongResult.value.messageId];
       }
@@ -854,7 +856,7 @@ export class SignalProcessor {
     const secondaryResults = await this.embeddingGenerator.generateForSecondaryClusters(embedText);
     for (const result of secondaryResults) {
       if (result.isErr()) {
-        this.logger.warn("Secondary embedding generation failed. We will run the full re-index anyway before switching over — revalidate all WARNINGS to check for failures in generating Aurora embeddings.", { code: "embedding.secondary_failed", modelId: result.error.modelId, error: String(result.error.cause) });
+        this.logger.warn("Secondary embedding generation failed. We will run the full re-index anyway before switching over — revalidate all WARNINGS to check for failures in generating Aurora embeddings.", { code: "embedding.secondary_failed", modelId: result.error.modelId, error: result.error });
       }
     }
 
@@ -897,7 +899,7 @@ export class SignalProcessor {
       for (const toAddress of outcome.forwardAddresses) {
         const forwardResult = await this.forwarder.forward(s3Key, toAddress, accountId, forwardOpts);
         if (forwardResult.isErr()) {
-          this.logger.error("Failed to forward email to configured address. The SES send-raw-email call returned an error. The recipient won't receive the forwarded copy. Check SES sending quota and verify the forward address isn't suppressed.", { code: "processor.forward_failed", accountId, toAddress, error: String(forwardResult.error.cause) });
+          this.logger.error("Failed to forward email to configured address. The SES send-raw-email call returned an error. The recipient won't receive the forwarded copy. Check SES sending quota and verify the forward address isn't suppressed.", { code: "processor.forward_failed", accountId, toAddress, error: forwardResult.error });
         }
       }
     }
@@ -928,7 +930,7 @@ export class SignalProcessor {
             (e) => dbError(e instanceof Error ? e : new Error(String(e))),
           );
           if (replyResult.isErr()) {
-            this.logger.error("Failed to send auto-reply from template. The SES send call returned an error. The sender won't receive the automated response. Check SES limits and template configuration.", { code: "processor.auto_reply_failed", accountId, error: String(replyResult.error.cause) });
+            this.logger.error("Failed to send auto-reply from template. The SES send call returned an error. The sender won't receive the automated response. Check SES limits and template configuration.", { code: "processor.auto_reply_failed", accountId, error: replyResult.error });
           } else if (replyResult.value) {
             arc.sentMessageIds = [...(arc.sentMessageIds ?? []), replyResult.value.messageId];
           }
@@ -977,7 +979,7 @@ export class SignalProcessor {
         };
         const draftSaveResult = await this.store.saveSignal(draft);
         if (draftSaveResult.isErr()) {
-          this.logger.track("Failed to save auto-draft signal from template. The DynamoDB put returned an error. The draft won't appear in the user's arc. Tracked for auto-draft feature reliability.", { code: "processor.auto_draft_save_failed", accountId, error: String(draftSaveResult.error.cause) });
+          this.logger.track("Failed to save auto-draft signal from template. The DynamoDB put returned an error. The draft won't appear in the user's arc. Tracked for auto-draft feature reliability.", { code: "processor.auto_draft_save_failed", accountId, error: draftSaveResult.error });
         }
       }
     }
@@ -986,7 +988,7 @@ export class SignalProcessor {
     if (this.notifier && !outcome.suppressNotification) {
       const notifyResult = await this.notifier.notify(accountId, arc, signal);
       if (notifyResult.isErr()) {
-        this.logger.track("Failed to send new-signal notification to user. The notification service returned an error. The signal is processed but the user won't be alerted. Tracked for notification reliability monitoring.", { code: "processor.notification_failed", accountId, error: String(notifyResult.error.cause) });
+        this.logger.track("Failed to send new-signal notification to user. The notification service returned an error. The signal is processed but the user won't be alerted. Tracked for notification reliability monitoring.", { code: "processor.notification_failed", accountId, error: notifyResult.error });
       }
     }
 
@@ -995,7 +997,7 @@ export class SignalProcessor {
       wasBlocked: false,
     });
     if (finalRepResult.isErr()) {
-      this.logger.warn("Failed to update global sender reputation after signal processing. The DynamoDB update returned an error. Reputation data may be stale for this domain.", { code: "processor.reputation_update_failed", accountId, error: String(finalRepResult.error.cause) });
+      this.logger.warn("Failed to update global sender reputation after signal processing. The DynamoDB update returned an error. Reputation data may be stale for this domain.", { code: "processor.reputation_update_failed", accountId, error: finalRepResult.error });
     }
 
     return ok(undefined);
@@ -1042,7 +1044,7 @@ export class SignalProcessor {
     if (failures.length > 0) {
       for (const failure of failures) {
         if (!failure.success) {
-          this.logger.error("Failed to upsert embedding to Aurora cluster. The Data API call returned an error for the target cluster. This signal's embedding won't be searchable on that cluster until the next retry succeeds. Check Aurora cluster health in the AWS console.", { code: "processor.aurora_upsert_failed", accountId: signal.accountId, clusterId: failure.cluster.clusterId, error: String(failure.error.cause) });
+          this.logger.error("Failed to upsert embedding to Aurora cluster. The Data API call returned an error for the target cluster. This signal's embedding won't be searchable on that cluster until the next retry succeeds. Check Aurora cluster health in the AWS console.", { code: "processor.aurora_upsert_failed", accountId: signal.accountId, clusterId: failure.cluster.clusterId, error: failure.error });
         }
       }
       return err(processError(signal.id));
@@ -1066,7 +1068,7 @@ export class SignalProcessor {
     const payload: SideEffectPayload = { signal, arc };
     const sendResult = await this.sqsDispatcher.sendMessage(payload);
     if (sendResult.isErr()) {
-      this.logger.error("Failed to dispatch side-effect SQS message. Aurora upserts succeeded but side-effects won't fire until the message is retried and dispatch succeeds. Check SQS queue health and permissions.", { code: "processor.side_effect_dispatch_failed", accountId: signal.accountId, signalId: signal.id, arcId: arc.id, error: String(sendResult.error.cause) });
+      this.logger.error("Failed to dispatch side-effect SQS message. Aurora upserts succeeded but side-effects won't fire until the message is retried and dispatch succeeds. Check SQS queue health and permissions.", { code: "processor.side_effect_dispatch_failed", accountId: signal.accountId, signalId: signal.id, arcId: arc.id, error: sendResult.error });
       return err(processError(signal.id));
     }
 
@@ -1094,7 +1096,7 @@ export class SignalProcessor {
         (e) => dbError(e instanceof Error ? e : new Error(String(e))),
       );
       if (retentionApplyResult.isErr()) {
-        this.logger.warn("Failed to apply S3 retention policy to signal object. The S3 tagging or copy operation returned an error. The signal is saved but will use the default 5-year lifecycle rule instead of the plan-specific retention.", { code: "processor.s3_retention_failed", accountId: signal.accountId, error: String(retentionApplyResult.error.cause) });
+        this.logger.warn("Failed to apply S3 retention policy to signal object. The S3 tagging or copy operation returned an error. The signal is saved but will use the default 5-year lifecycle rule instead of the plan-specific retention.", { code: "processor.s3_retention_failed", accountId: signal.accountId, error: retentionApplyResult.error });
         return;
       }
 
@@ -1109,7 +1111,7 @@ export class SignalProcessor {
       }
       const retentionSaveResult = await this.store.updateSignalRetention(signal.accountId, signal.id, retentionUpdate);
       if (retentionSaveResult.isErr()) {
-        this.logger.warn("Failed to persist retention metadata on signal record. The DynamoDB update returned an error. The S3 retention is applied but the signal record won't reflect the retention duration.", { code: "processor.retention_metadata_save_failed", accountId: signal.accountId, error: String(retentionSaveResult.error.cause) });
+        this.logger.warn("Failed to persist retention metadata on signal record. The DynamoDB update returned an error. The S3 retention is applied but the signal record won't reflect the retention duration.", { code: "processor.retention_metadata_save_failed", accountId: signal.accountId, error: retentionSaveResult.error });
       }
 
       // Set TTL on the arc based on retentionDuration
@@ -1118,7 +1120,7 @@ export class SignalProcessor {
       arc.ttl = arcTtl;
       this.logger.trackPoint("s3_retention_complete");
     } catch (e) {
-      this.logger.warn("S3 retention threw an unexpected error. The signal will use the default lifecycle rule. Processing continues unaffected.", { code: "processor.s3_retention_unexpected", accountId: signal.accountId, error: String(e) });
+      this.logger.warn("S3 retention threw an unexpected error. The signal will use the default lifecycle rule. Processing continues unaffected.", { code: "processor.s3_retention_unexpected", accountId: signal.accountId, error: e });
     }
   }
 
