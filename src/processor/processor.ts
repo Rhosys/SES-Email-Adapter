@@ -270,10 +270,10 @@ interface SignalProcessorOptions {
   arcMatcher: ArcMatcher;
   ruleEvaluator: RuleEvaluator;
   logger: Logger;
-  notifier?: Notifier;
-  forwarder?: Forwarder;
+  notifier: Notifier;
+  forwarder: Forwarder;
+  retentionService: S3RetentionService;
   testReplier?: TestReplier;
-  retentionService?: S3RetentionService;
   sqsDispatcher?: SqsDispatcher;
 }
 
@@ -286,10 +286,10 @@ export class SignalProcessor {
   private readonly arcMatcher: ArcMatcher;
   private readonly ruleEvaluator: RuleEvaluator;
   private readonly logger: Logger;
-  private readonly notifier: Notifier | undefined;
-  private readonly forwarder: Forwarder | undefined;
+  private readonly notifier: Notifier;
+  private readonly forwarder: Forwarder;
   private readonly testReplier: TestReplier | undefined;
-  private readonly retentionService: S3RetentionService | undefined;
+  private readonly retentionService: S3RetentionService;
   private readonly sqsDispatcher: SqsDispatcher | undefined;
 
   constructor(opts: SignalProcessorOptions) {
@@ -447,7 +447,7 @@ export class SignalProcessor {
     // Execute all indicated side-effects — individual failures are logged and do NOT cause batchItemFailure
 
     // Forward
-    if (this.forwarder && outcome.forwardAddresses.length > 0) {
+    if (outcome.forwardAddresses.length > 0) {
       for (const toAddress of outcome.forwardAddresses) {
         try {
           this.logger.trackPoint("side_effect_forward_start");
@@ -467,7 +467,7 @@ export class SignalProcessor {
     }
 
     // Notify
-    if (this.notifier && !outcome.suppressNotification) {
+    if (!outcome.suppressNotification) {
       try {
         this.logger.trackPoint("side_effect_notify_start");
         const notifyResult = await this.notifier.notify(accountId, arc, signal);
@@ -793,7 +793,7 @@ export class SignalProcessor {
       const quarantinedSignal: Signal = { ...buildSignal({ status: quarantineStatus, ...buildArgs }), matchedRules };
       const saveResult = await this.store.saveSignal(quarantinedSignal);
       if (saveResult.isErr()) return err(saveResult.error);
-      if (this.notifier && !outcome.quarantineHidden) {
+      if (!outcome.quarantineHidden) {
         const notifyResult = await this.notifier.notifyBlocked(accountId, quarantinedSignal);
         if (notifyResult.isErr()) {
           this.logger.track("Failed to send quarantine notification to user. The notification service returned an error. The signal is quarantined but the user won't be alerted. Tracked for notification reliability monitoring.", { code: "processor.quarantine_notification_failed", accountId, error: notifyResult.error });
@@ -895,7 +895,7 @@ export class SignalProcessor {
     if (dispatchResult.isErr()) return err(dbError(new Error("Side-effect dispatch failed")));
 
     // 16. Forward
-    if (this.forwarder && outcome.forwardAddresses.length > 0) {
+    if (outcome.forwardAddresses.length > 0) {
       const forwardOpts: ForwardOptions = {
         senderDomain: senderETLD1,
         dkimPass: msg.dkimVerdict === "PASS",
@@ -993,7 +993,7 @@ export class SignalProcessor {
     }
 
     // 17. Notify
-    if (this.notifier && !outcome.suppressNotification) {
+    if (!outcome.suppressNotification) {
       const notifyResult = await this.notifier.notify(accountId, arc, signal);
       if (notifyResult.isErr()) {
         this.logger.track("Failed to send new-signal notification to user. The notification service returned an error. The signal is processed but the user won't be alerted. Tracked for notification reliability monitoring.", { code: "processor.notification_failed", accountId, error: notifyResult.error });
@@ -1089,8 +1089,6 @@ export class SignalProcessor {
    * must not alter the processing outcome or prevent Aurora/side-effect execution.
    */
   async attemptS3Retention(signal: Signal, accountCtx: ProcessorAccountContext, arc: Arc): Promise<void> {
-    if (!this.retentionService) return;
-
     this.logger.trackPoint("s3_retention_start");
     try {
       const retention = getRetentionForPlan(accountCtx.billingPlan);
