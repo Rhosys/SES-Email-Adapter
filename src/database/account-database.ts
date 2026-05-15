@@ -1,10 +1,8 @@
 import { randomUUID } from "crypto";
 import { DeleteCommand, GetCommand, PutCommand, QueryCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
-import { ResultAsync } from "neverthrow";
-import type { Result } from "neverthrow";
 import { dynamo, ACCOUNTS_TABLE } from "./shared.js";
 import { dbError, notFoundError, ok, err } from "../errors.js";
-import type { DbError, NotFoundError } from "../errors.js";
+import type { Result, DbError, NotFoundError } from "../errors.js";
 import type { Account, View, Label, Rule, RuleStatus, Domain, Alias, AliasSender, SenderMode, AccountFilteringConfig, VerifiedForwardingAddress, EmailTemplate, WsConnection } from "../types/index.js";
 import type { CreateViewRequest, UpdateViewRequest, CreateLabelRequest, UpdateLabelRequest, CreateRuleRequest, UpdateRuleRequest } from "../api/app.js";
 
@@ -20,12 +18,6 @@ function ruleGsi1sk(status: RuleStatus, priorityOrder: number, id: string) {
 }
 
 // ---------------------------------------------------------------------------
-// Error mapper for AWS SDK calls
-// ---------------------------------------------------------------------------
-
-const toDbError = (e: unknown): DbError => dbError(e instanceof Error ? e : new Error(String(e)));
-
-// ---------------------------------------------------------------------------
 // AccountDatabase
 // Owns: Account record, Aliases, Views, Labels, Rules, Domains
 // Table: ACCOUNTS_TABLE
@@ -36,17 +28,19 @@ export class AccountDatabase {
   // Account
   // ---------------------------------------------------------------------------
 
-  getAccount(accountId: string): ResultAsync<Account | null, DbError> {
-    return ResultAsync.fromPromise(
-      dynamo.send(new GetCommand({
+  async getAccount(accountId: string): Promise<Result<Account | null, DbError>> {
+    try {
+      const res = await dynamo.send(new GetCommand({
         TableName: ACCOUNTS_TABLE,
         Key: { pk: pk(accountId), sk: "META" },
-      })).then(res => res.Item ? (res.Item as Account) : null),
-      toDbError,
-    );
+      }));
+      return ok(res.Item ? (res.Item as Account) : null);
+    } catch (e) {
+      return err(dbError(e));
+    }
   }
 
-  updateAccount(accountId: string, update: Partial<Pick<Account, "name" | "deletionRetentionDays" | "notifications" | "filtering">>): ResultAsync<Account, DbError> {
+  async updateAccount(accountId: string, update: Partial<Pick<Account, "name" | "deletionRetentionDays" | "notifications" | "filtering">>): Promise<Result<Account, DbError>> {
     const now = new Date().toISOString();
     const setParts: string[] = ["updatedAt = :now"];
     const exprValues: Record<string, unknown> = { ":now": now };
@@ -57,70 +51,80 @@ export class AccountDatabase {
     if (update.notifications !== undefined) { setParts.push("notifications = :notif"); exprValues[":notif"] = update.notifications; }
     if (update.filtering !== undefined) { setParts.push("filtering = :filtering"); exprValues[":filtering"] = update.filtering; }
 
-    return ResultAsync.fromPromise(
-      dynamo.send(new UpdateCommand({
+    try {
+      const res = await dynamo.send(new UpdateCommand({
         TableName: ACCOUNTS_TABLE,
         Key: { pk: pk(accountId), sk: "META" },
         UpdateExpression: `SET ${setParts.join(", ")}`,
         ExpressionAttributeValues: exprValues,
         ...(Object.keys(exprNames).length ? { ExpressionAttributeNames: exprNames } : {}),
         ReturnValues: "ALL_NEW",
-      })).then(res => res.Attributes! as unknown as Account),
-      toDbError,
-    );
+      }));
+      return ok(res.Attributes! as unknown as Account);
+    } catch (e) {
+      return err(dbError(e));
+    }
   }
 
   // ---------------------------------------------------------------------------
   // Aliases (each stored as its own item: SK = ALIAS#${address})
   // ---------------------------------------------------------------------------
 
-  getAlias(accountId: string, address: string): ResultAsync<Alias | null, DbError> {
-    return ResultAsync.fromPromise(
-      dynamo.send(new GetCommand({
+  async getAlias(accountId: string, address: string): Promise<Result<Alias | null, DbError>> {
+    try {
+      const res = await dynamo.send(new GetCommand({
         TableName: ACCOUNTS_TABLE,
         Key: { pk: pk(accountId), sk: `ALIAS#${address}` },
-      })).then(res => res.Item ? (res.Item as Alias) : null),
-      toDbError,
-    );
+      }));
+      return ok(res.Item ? (res.Item as Alias) : null);
+    } catch (e) {
+      return err(dbError(e));
+    }
   }
 
-  saveAlias(alias: Alias): ResultAsync<Alias, DbError> {
-    return ResultAsync.fromPromise(
-      dynamo.send(new PutCommand({
+  async saveAlias(alias: Alias): Promise<Result<Alias, DbError>> {
+    try {
+      await dynamo.send(new PutCommand({
         TableName: ACCOUNTS_TABLE,
         Item: { ...alias, pk: pk(alias.accountId), sk: `ALIAS#${alias.address}` },
-      })).then(() => alias),
-      toDbError,
-    );
+      }));
+      return ok(alias);
+    } catch (e) {
+      return err(dbError(e));
+    }
   }
 
-  createAlias(alias: Alias): ResultAsync<Alias, DbError> {
+  async createAlias(alias: Alias): Promise<Result<Alias, DbError>> {
     return this.saveAlias(alias);
   }
 
-  listAliases(accountId: string): ResultAsync<Alias[], DbError> {
-    return ResultAsync.fromPromise(
-      dynamo.send(new QueryCommand({
+  async listAliases(accountId: string): Promise<Result<Alias[], DbError>> {
+    try {
+      const res = await dynamo.send(new QueryCommand({
         TableName: ACCOUNTS_TABLE,
         KeyConditionExpression: "pk = :pk AND begins_with(sk, :prefix)",
         ExpressionAttributeValues: { ":pk": pk(accountId), ":prefix": "ALIAS#" },
-      })).then(res => (res.Items ?? []) as Alias[]),
-      toDbError,
-    );
+      }));
+      return ok((res.Items ?? []) as Alias[]);
+    } catch (e) {
+      return err(dbError(e));
+    }
   }
 
-  upsertAlias(alias: Alias): ResultAsync<Alias, DbError> {
+  async upsertAlias(alias: Alias): Promise<Result<Alias, DbError>> {
     return this.saveAlias(alias);
   }
 
-  deleteAlias(accountId: string, address: string): ResultAsync<void, DbError> {
-    return ResultAsync.fromPromise(
-      dynamo.send(new DeleteCommand({
+  async deleteAlias(accountId: string, address: string): Promise<Result<void, DbError>> {
+    try {
+      await dynamo.send(new DeleteCommand({
         TableName: ACCOUNTS_TABLE,
         Key: { pk: pk(accountId), sk: `ALIAS#${address}` },
-      })).then(() => undefined),
-      toDbError,
-    );
+      }));
+      return ok(undefined);
+    } catch (e) {
+      return err(dbError(e));
+    }
   }
 
   async renameAlias(accountId: string, oldAddress: string, newAddress: string): Promise<Result<Alias, DbError | NotFoundError>> {
@@ -158,9 +162,9 @@ export class AccountDatabase {
   // sk = SENDER#${address}#${domain}  — distinct prefix from alias items
   // ---------------------------------------------------------------------------
 
-  saveSender(accountId: string, address: string, domain: string, mode: SenderMode): ResultAsync<void, DbError> {
-    return ResultAsync.fromPromise(
-      dynamo.send(new PutCommand({
+  async saveSender(accountId: string, address: string, domain: string, mode: SenderMode): Promise<Result<void, DbError>> {
+    try {
+      await dynamo.send(new PutCommand({
         TableName: ACCOUNTS_TABLE,
         Item: {
           pk: pk(accountId),
@@ -170,67 +174,77 @@ export class AccountDatabase {
           accountId, aliasAddress: address, domain, mode,
           addedAt: new Date().toISOString(),
         },
-      })).then(() => undefined),
-      toDbError,
-    );
+      }));
+      return ok(undefined);
+    } catch (e) {
+      return err(dbError(e));
+    }
   }
 
-  removeSender(accountId: string, address: string, domain: string): ResultAsync<void, DbError> {
-    return ResultAsync.fromPromise(
-      dynamo.send(new DeleteCommand({
+  async removeSender(accountId: string, address: string, domain: string): Promise<Result<void, DbError>> {
+    try {
+      await dynamo.send(new DeleteCommand({
         TableName: ACCOUNTS_TABLE,
         Key: { pk: pk(accountId), sk: `SENDER#${address}#${domain}` },
-      })).then(() => undefined),
-      toDbError,
-    );
+      }));
+      return ok(undefined);
+    } catch (e) {
+      return err(dbError(e));
+    }
   }
 
-  getSender(accountId: string, address: string, domain: string): ResultAsync<AliasSender | null, DbError> {
-    return ResultAsync.fromPromise(
-      dynamo.send(new GetCommand({
+  async getSender(accountId: string, address: string, domain: string): Promise<Result<AliasSender | null, DbError>> {
+    try {
+      const res = await dynamo.send(new GetCommand({
         TableName: ACCOUNTS_TABLE,
         Key: { pk: pk(accountId), sk: `SENDER#${address}#${domain}` },
-      })).then(res => res.Item ? (res.Item as AliasSender) : null),
-      toDbError,
-    );
+      }));
+      return ok(res.Item ? (res.Item as AliasSender) : null);
+    } catch (e) {
+      return err(dbError(e));
+    }
   }
 
-  listSenders(accountId: string, address: string): ResultAsync<AliasSender[], DbError> {
-    return ResultAsync.fromPromise(
-      dynamo.send(new QueryCommand({
+  async listSenders(accountId: string, address: string): Promise<Result<AliasSender[], DbError>> {
+    try {
+      const res = await dynamo.send(new QueryCommand({
         TableName: ACCOUNTS_TABLE,
         KeyConditionExpression: "pk = :pk AND begins_with(sk, :prefix)",
         ExpressionAttributeValues: { ":pk": pk(accountId), ":prefix": `SENDER#${address}#` },
-      })).then(res => (res.Items ?? []) as AliasSender[]),
-      toDbError,
-    );
+      }));
+      return ok((res.Items ?? []) as AliasSender[]);
+    } catch (e) {
+      return err(dbError(e));
+    }
   }
 
-  listAliasesForDomain(accountId: string, domain: string): ResultAsync<AliasSender[], DbError> {
-    return ResultAsync.fromPromise(
-      dynamo.send(new QueryCommand({
+  async listAliasesForDomain(accountId: string, domain: string): Promise<Result<AliasSender[], DbError>> {
+    try {
+      const res = await dynamo.send(new QueryCommand({
         TableName: ACCOUNTS_TABLE,
         IndexName: "gsi1",
         KeyConditionExpression: "gsi1pk = :pk",
         ExpressionAttributeValues: { ":pk": `SENDERS#${accountId}#${domain}` },
-      })).then(res => (res.Items ?? []) as AliasSender[]),
-      toDbError,
-    );
+      }));
+      return ok((res.Items ?? []) as AliasSender[]);
+    } catch (e) {
+      return err(dbError(e));
+    }
   }
 
-  async getAccountFilteringConfig(accountId: string): Promise<ResultAsync<AccountFilteringConfig | null, DbError>> {
+  async getAccountFilteringConfig(accountId: string): Promise<Result<AccountFilteringConfig | null, DbError>> {
     const accountResult = await this.getAccount(accountId);
     if (accountResult.isErr()) return err(accountResult.error);
     return ok(accountResult.value?.filtering ?? null);
   }
 
-  async getAccountRetentionDays(accountId: string): Promise<ResultAsync<number, DbError>> {
+  async getAccountRetentionDays(accountId: string): Promise<Result<number, DbError>> {
     const accountResult = await this.getAccount(accountId);
     if (accountResult.isErr()) return err(accountResult.error);
     return ok(accountResult.value?.deletionRetentionDays ?? 0);
   }
 
-  async getProcessorAccountContext(accountId: string, recipientAddress: string): Promise<ResultAsync<{ retentionDays: number; filtering: AccountFilteringConfig | null; emailConfig: Alias | null; registeredDomains: string[]; userEmails: string[]; billingPlan: import("../embedding/retention-tier.js").BillingPlan }, DbError>> {
+  async getProcessorAccountContext(accountId: string, recipientAddress: string): Promise<Result<{ retentionDays: number; filtering: AccountFilteringConfig | null; emailConfig: Alias | null; registeredDomains: string[]; userEmails: string[]; billingPlan: import("../embedding/retention-tier.js").BillingPlan }, DbError>> {
     const accountResult = await this.getAccount(accountId);
     if (accountResult.isErr()) return err(accountResult.error);
     const account = accountResult.value;
@@ -257,25 +271,29 @@ export class AccountDatabase {
   // Views
   // ---------------------------------------------------------------------------
 
-  listViews(accountId: string): ResultAsync<View[], DbError> {
-    return ResultAsync.fromPromise(
-      dynamo.send(new QueryCommand({
+  async listViews(accountId: string): Promise<Result<View[], DbError>> {
+    try {
+      const res = await dynamo.send(new QueryCommand({
         TableName: ACCOUNTS_TABLE,
         KeyConditionExpression: "pk = :pk AND begins_with(sk, :prefix)",
         ExpressionAttributeValues: { ":pk": pk(accountId), ":prefix": "VIEW#" },
-      })).then(res => ((res.Items ?? []) as View[]).sort((a, b) => a.position - b.position)),
-      toDbError,
-    );
+      }));
+      return ok(((res.Items ?? []) as View[]).sort((a, b) => a.position - b.position));
+    } catch (e) {
+      return err(dbError(e));
+    }
   }
 
-  getView(accountId: string, id: string): ResultAsync<View | null, DbError> {
-    return ResultAsync.fromPromise(
-      dynamo.send(new GetCommand({
+  async getView(accountId: string, id: string): Promise<Result<View | null, DbError>> {
+    try {
+      const res = await dynamo.send(new GetCommand({
         TableName: ACCOUNTS_TABLE,
         Key: { pk: pk(accountId), sk: `VIEW#${id}` },
-      })).then(res => res.Item ? (res.Item as View) : null),
-      toDbError,
-    );
+      }));
+      return ok(res.Item ? (res.Item as View) : null);
+    } catch (e) {
+      return err(dbError(e));
+    }
   }
 
   async createView(accountId: string, data: CreateViewRequest): Promise<Result<View, DbError>> {
@@ -299,18 +317,18 @@ export class AccountDatabase {
       updatedAt: now,
     };
 
-    const putResult = await ResultAsync.fromPromise(
-      dynamo.send(new PutCommand({
+    try {
+      await dynamo.send(new PutCommand({
         TableName: ACCOUNTS_TABLE,
         Item: { ...view, pk: pk(accountId), sk: `VIEW#${view.id}` },
-      })).then(() => view),
-      toDbError,
-    );
-    if (putResult.isErr()) return err(putResult.error);
-    return ok(putResult.value);
+      }));
+      return ok(view);
+    } catch (e) {
+      return err(dbError(e));
+    }
   }
 
-  updateView(accountId: string, id: string, data: UpdateViewRequest): ResultAsync<View, DbError> {
+  async updateView(accountId: string, id: string, data: UpdateViewRequest): Promise<Result<View, DbError>> {
     const now = new Date().toISOString();
     const setParts: string[] = ["updatedAt = :now"];
     const exprValues: Record<string, unknown> = { ":now": now };
@@ -325,29 +343,33 @@ export class AccountDatabase {
     if (data.color !== undefined) { setParts.push("color = :color"); exprValues[":color"] = data.color; }
     if (data.position !== undefined) { setParts.push("#pos = :pos"); exprValues[":pos"] = data.position; exprNames["#pos"] = "position"; }
 
-    return ResultAsync.fromPromise(
-      dynamo.send(new UpdateCommand({
+    try {
+      const res = await dynamo.send(new UpdateCommand({
         TableName: ACCOUNTS_TABLE,
         Key: { pk: pk(accountId), sk: `VIEW#${id}` },
         UpdateExpression: `SET ${setParts.join(", ")}`,
         ExpressionAttributeValues: exprValues,
         ...(Object.keys(exprNames).length ? { ExpressionAttributeNames: exprNames } : {}),
         ReturnValues: "ALL_NEW",
-      })).then(res => res.Attributes as unknown as View),
-      toDbError,
-    );
+      }));
+      return ok(res.Attributes as unknown as View);
+    } catch (e) {
+      return err(dbError(e));
+    }
   }
 
-  deleteView(accountId: string, id: string): ResultAsync<void, DbError> {
-    return ResultAsync.fromPromise(
-      dynamo.send(new DeleteCommand({ TableName: ACCOUNTS_TABLE, Key: { pk: pk(accountId), sk: `VIEW#${id}` } })).then(() => undefined),
-      toDbError,
-    );
+  async deleteView(accountId: string, id: string): Promise<Result<void, DbError>> {
+    try {
+      await dynamo.send(new DeleteCommand({ TableName: ACCOUNTS_TABLE, Key: { pk: pk(accountId), sk: `VIEW#${id}` } }));
+      return ok(undefined);
+    } catch (e) {
+      return err(dbError(e));
+    }
   }
 
-  reorderViews(accountId: string, orderedIds: string[]): ResultAsync<void, DbError> {
-    return ResultAsync.fromPromise(
-      Promise.all(orderedIds.map((id, position) =>
+  async reorderViews(accountId: string, orderedIds: string[]): Promise<Result<void, DbError>> {
+    try {
+      await Promise.all(orderedIds.map((id, position) =>
         dynamo.send(new UpdateCommand({
           TableName: ACCOUNTS_TABLE,
           Key: { pk: pk(accountId), sk: `VIEW#${id}` },
@@ -355,27 +377,31 @@ export class AccountDatabase {
           ExpressionAttributeNames: { "#pos": "position" },
           ExpressionAttributeValues: { ":pos": position },
         })),
-      )).then(() => undefined),
-      toDbError,
-    );
+      ));
+      return ok(undefined);
+    } catch (e) {
+      return err(dbError(e));
+    }
   }
 
   // ---------------------------------------------------------------------------
   // Labels
   // ---------------------------------------------------------------------------
 
-  listLabels(accountId: string): ResultAsync<Label[], DbError> {
-    return ResultAsync.fromPromise(
-      dynamo.send(new QueryCommand({
+  async listLabels(accountId: string): Promise<Result<Label[], DbError>> {
+    try {
+      const res = await dynamo.send(new QueryCommand({
         TableName: ACCOUNTS_TABLE,
         KeyConditionExpression: "pk = :pk AND begins_with(sk, :prefix)",
         ExpressionAttributeValues: { ":pk": pk(accountId), ":prefix": "LABEL#" },
-      })).then(res => (res.Items ?? []) as Label[]),
-      toDbError,
-    );
+      }));
+      return ok((res.Items ?? []) as Label[]);
+    } catch (e) {
+      return err(dbError(e));
+    }
   }
 
-  createLabel(accountId: string, data: CreateLabelRequest): ResultAsync<Label, DbError> {
+  async createLabel(accountId: string, data: CreateLabelRequest): Promise<Result<Label, DbError>> {
     const now = new Date().toISOString();
     const label: Label = {
       id: randomUUID(),
@@ -385,10 +411,12 @@ export class AccountDatabase {
       ...(data.icon !== undefined ? { icon: data.icon } : {}),
       createdAt: now,
     };
-    return ResultAsync.fromPromise(
-      dynamo.send(new PutCommand({ TableName: ACCOUNTS_TABLE, Item: { ...label, pk: pk(accountId), sk: `LABEL#${label.id}` } })).then(() => label),
-      toDbError,
-    );
+    try {
+      await dynamo.send(new PutCommand({ TableName: ACCOUNTS_TABLE, Item: { ...label, pk: pk(accountId), sk: `LABEL#${label.id}` } }));
+      return ok(label);
+    } catch (e) {
+      return err(dbError(e));
+    }
   }
 
   async updateLabel(accountId: string, id: string, data: UpdateLabelRequest): Promise<Result<Label, DbError>> {
@@ -401,65 +429,71 @@ export class AccountDatabase {
     if (data.icon !== undefined) { setParts.push("icon = :icon"); exprValues[":icon"] = data.icon; }
 
     if (setParts.length === 0) {
-      const getResult = await ResultAsync.fromPromise(
-        dynamo.send(new GetCommand({
+      try {
+        const res = await dynamo.send(new GetCommand({
           TableName: ACCOUNTS_TABLE,
           Key: { pk: pk(accountId), sk: `LABEL#${id}` },
-        })).then(res => res.Item as unknown as Label),
-        toDbError,
-      );
-      if (getResult.isErr()) return err(getResult.error);
-      return ok(getResult.value);
+        }));
+        return ok(res.Item as unknown as Label);
+      } catch (e) {
+        return err(dbError(e));
+      }
     }
 
-    const updateResult = await ResultAsync.fromPromise(
-      dynamo.send(new UpdateCommand({
+    try {
+      const res = await dynamo.send(new UpdateCommand({
         TableName: ACCOUNTS_TABLE,
         Key: { pk: pk(accountId), sk: `LABEL#${id}` },
         UpdateExpression: `SET ${setParts.join(", ")}`,
         ExpressionAttributeValues: exprValues,
         ...(Object.keys(exprNames).length ? { ExpressionAttributeNames: exprNames } : {}),
         ReturnValues: "ALL_NEW",
-      })).then(res => res.Attributes as unknown as Label),
-      toDbError,
-    );
-    if (updateResult.isErr()) return err(updateResult.error);
-    return ok(updateResult.value);
+      }));
+      return ok(res.Attributes as unknown as Label);
+    } catch (e) {
+      return err(dbError(e));
+    }
   }
 
-  deleteLabel(accountId: string, id: string): ResultAsync<void, DbError> {
-    return ResultAsync.fromPromise(
-      dynamo.send(new DeleteCommand({ TableName: ACCOUNTS_TABLE, Key: { pk: pk(accountId), sk: `LABEL#${id}` } })).then(() => undefined),
-      toDbError,
-    );
+  async deleteLabel(accountId: string, id: string): Promise<Result<void, DbError>> {
+    try {
+      await dynamo.send(new DeleteCommand({ TableName: ACCOUNTS_TABLE, Key: { pk: pk(accountId), sk: `LABEL#${id}` } }));
+      return ok(undefined);
+    } catch (e) {
+      return err(dbError(e));
+    }
   }
 
   // ---------------------------------------------------------------------------
   // Rules
   // ---------------------------------------------------------------------------
 
-  listRules(accountId: string): ResultAsync<Rule[], DbError> {
-    return ResultAsync.fromPromise(
-      dynamo.send(new QueryCommand({
+  async listRules(accountId: string): Promise<Result<Rule[], DbError>> {
+    try {
+      const res = await dynamo.send(new QueryCommand({
         TableName: ACCOUNTS_TABLE,
         IndexName: "gsi1",
         KeyConditionExpression: "gsi1pk = :pk AND begins_with(gsi1sk, :prefix)",
         ExpressionAttributeValues: { ":pk": ruleGsi1pk(accountId), ":prefix": "RULE#" },
-      })).then(res => (res.Items ?? []) as Rule[]),
-      toDbError,
-    );
+      }));
+      return ok((res.Items ?? []) as Rule[]);
+    } catch (e) {
+      return err(dbError(e));
+    }
   }
 
-  listEnabledRules(accountId: string): ResultAsync<Rule[], DbError> {
-    return ResultAsync.fromPromise(
-      dynamo.send(new QueryCommand({
+  async listEnabledRules(accountId: string): Promise<Result<Rule[], DbError>> {
+    try {
+      const res = await dynamo.send(new QueryCommand({
         TableName: ACCOUNTS_TABLE,
         IndexName: "gsi1",
         KeyConditionExpression: "gsi1pk = :pk AND begins_with(gsi1sk, :prefix)",
         ExpressionAttributeValues: { ":pk": ruleGsi1pk(accountId), ":prefix": "RULE#enabled#" },
-      })).then(res => (res.Items ?? []) as Rule[]),
-      toDbError,
-    );
+      }));
+      return ok((res.Items ?? []) as Rule[]);
+    } catch (e) {
+      return err(dbError(e));
+    }
   }
 
   async createRule(accountId: string, data: CreateRuleRequest): Promise<Result<Rule, DbError>> {
@@ -482,31 +516,32 @@ export class AccountDatabase {
       updatedAt: now,
     };
 
-    const putResult = await ResultAsync.fromPromise(
-      dynamo.send(new PutCommand({
+    try {
+      await dynamo.send(new PutCommand({
         TableName: ACCOUNTS_TABLE,
         Item: {
           ...rule,
           pk: pk(accountId), sk: `RULE#${rule.id}`,
           gsi1pk: ruleGsi1pk(accountId), gsi1sk: ruleGsi1sk(rule.status, rule.priorityOrder, rule.id),
         },
-      })).then(() => rule),
-      toDbError,
-    );
-    if (putResult.isErr()) return err(putResult.error);
-    return ok(putResult.value);
+      }));
+      return ok(rule);
+    } catch (e) {
+      return err(dbError(e));
+    }
   }
 
   async updateRule(accountId: string, id: string, data: UpdateRuleRequest): Promise<Result<Rule, DbError>> {
-    const currentResult = await ResultAsync.fromPromise(
-      dynamo.send(new GetCommand({
+    let existing: Rule;
+    try {
+      const res = await dynamo.send(new GetCommand({
         TableName: ACCOUNTS_TABLE,
         Key: { pk: pk(accountId), sk: `RULE#${id}` },
-      })).then(res => res.Item as Rule),
-      toDbError,
-    );
-    if (currentResult.isErr()) return err(currentResult.error);
-    const existing = currentResult.value;
+      }));
+      existing = res.Item as Rule;
+    } catch (e) {
+      return err(dbError(e));
+    }
 
     const now = new Date().toISOString();
     const mergedStatus = data.status ?? existing.status;
@@ -531,62 +566,69 @@ export class AccountDatabase {
     if (data.status !== undefined) { setParts.push("#status = :status"); exprValues[":status"] = data.status; exprNames["#status"] = "status"; }
     if (data.tags !== undefined) { setParts.push("tags = :tags"); exprValues[":tags"] = data.tags; }
 
-    const updateResult = await ResultAsync.fromPromise(
-      dynamo.send(new UpdateCommand({
+    try {
+      const res = await dynamo.send(new UpdateCommand({
         TableName: ACCOUNTS_TABLE,
         Key: { pk: pk(accountId), sk: `RULE#${id}` },
         UpdateExpression: `SET ${setParts.join(", ")}`,
         ExpressionAttributeValues: exprValues,
         ...(Object.keys(exprNames).length ? { ExpressionAttributeNames: exprNames } : {}),
         ReturnValues: "ALL_NEW",
-      })).then(res => res.Attributes as unknown as Rule),
-      toDbError,
-    );
-    if (updateResult.isErr()) return err(updateResult.error);
-    return ok(updateResult.value);
+      }));
+      return ok(res.Attributes as unknown as Rule);
+    } catch (e) {
+      return err(dbError(e));
+    }
   }
 
-  deleteRule(accountId: string, id: string): ResultAsync<void, DbError> {
-    return ResultAsync.fromPromise(
-      dynamo.send(new DeleteCommand({ TableName: ACCOUNTS_TABLE, Key: { pk: pk(accountId), sk: `RULE#${id}` } })).then(() => undefined),
-      toDbError,
-    );
+  async deleteRule(accountId: string, id: string): Promise<Result<void, DbError>> {
+    try {
+      await dynamo.send(new DeleteCommand({ TableName: ACCOUNTS_TABLE, Key: { pk: pk(accountId), sk: `RULE#${id}` } }));
+      return ok(undefined);
+    } catch (e) {
+      return err(dbError(e));
+    }
   }
 
   // ---------------------------------------------------------------------------
   // Domains
   // ---------------------------------------------------------------------------
 
-  listDomains(accountId: string): ResultAsync<Domain[], DbError> {
-    return ResultAsync.fromPromise(
-      dynamo.send(new QueryCommand({
+  async listDomains(accountId: string): Promise<Result<Domain[], DbError>> {
+    try {
+      const res = await dynamo.send(new QueryCommand({
         TableName: ACCOUNTS_TABLE,
         KeyConditionExpression: "pk = :pk AND begins_with(sk, :prefix)",
         ExpressionAttributeValues: { ":pk": pk(accountId), ":prefix": "DOMAIN#" },
-      })).then(res => (res.Items ?? []) as Domain[]),
-      toDbError,
-    );
+      }));
+      return ok((res.Items ?? []) as Domain[]);
+    } catch (e) {
+      return err(dbError(e));
+    }
   }
 
-  getDomain(accountId: string, id: string): ResultAsync<Domain | null, DbError> {
-    return ResultAsync.fromPromise(
-      dynamo.send(new GetCommand({ TableName: ACCOUNTS_TABLE, Key: { pk: pk(accountId), sk: `DOMAIN#${id}` } }))
-        .then(res => res.Item ? res.Item as unknown as Domain : null),
-      toDbError,
-    );
+  async getDomain(accountId: string, id: string): Promise<Result<Domain | null, DbError>> {
+    try {
+      const res = await dynamo.send(new GetCommand({ TableName: ACCOUNTS_TABLE, Key: { pk: pk(accountId), sk: `DOMAIN#${id}` } }));
+      return ok(res.Item ? res.Item as unknown as Domain : null);
+    } catch (e) {
+      return err(dbError(e));
+    }
   }
 
-  getDomainByName(accountId: string, domainName: string): ResultAsync<Domain | null, DbError> {
-    return ResultAsync.fromPromise(
-      dynamo.send(new GetCommand({
+  async getDomainByName(accountId: string, domainName: string): Promise<Result<Domain | null, DbError>> {
+    try {
+      const res = await dynamo.send(new GetCommand({
         TableName: ACCOUNTS_TABLE,
         Key: { pk: pk(accountId), sk: `DOMAIN#${domainName}` },
-      })).then(res => res.Item ? res.Item as unknown as Domain : null),
-      toDbError,
-    );
+      }));
+      return ok(res.Item ? res.Item as unknown as Domain : null);
+    } catch (e) {
+      return err(dbError(e));
+    }
   }
 
-  createDomain(accountId: string, domain: string): ResultAsync<Domain, DbError> {
+  async createDomain(accountId: string, domain: string): Promise<Result<Domain, DbError>> {
     const now = new Date().toISOString();
     const item: Domain = {
       id: domain,
@@ -597,28 +639,32 @@ export class AccountDatabase {
       createdAt: now,
       updatedAt: now,
     };
-    return ResultAsync.fromPromise(
-      dynamo.send(new PutCommand({ TableName: ACCOUNTS_TABLE, Item: { ...item, pk: pk(accountId), sk: `DOMAIN#${domain}` } })).then(() => item),
-      toDbError,
-    );
+    try {
+      await dynamo.send(new PutCommand({ TableName: ACCOUNTS_TABLE, Item: { ...item, pk: pk(accountId), sk: `DOMAIN#${domain}` } }));
+      return ok(item);
+    } catch (e) {
+      return err(dbError(e));
+    }
   }
 
-  deleteDomain(accountId: string, id: string): ResultAsync<void, DbError> {
-    return ResultAsync.fromPromise(
-      dynamo.send(new DeleteCommand({ TableName: ACCOUNTS_TABLE, Key: { pk: pk(accountId), sk: `DOMAIN#${id}` } })).then(() => undefined),
-      toDbError,
-    );
+  async deleteDomain(accountId: string, id: string): Promise<Result<void, DbError>> {
+    try {
+      await dynamo.send(new DeleteCommand({ TableName: ACCOUNTS_TABLE, Key: { pk: pk(accountId), sk: `DOMAIN#${id}` } }));
+      return ok(undefined);
+    } catch (e) {
+      return err(dbError(e));
+    }
   }
 
-  updateDomainHealth(accountId: string, id: string, health: {
+  async updateDomainHealth(accountId: string, id: string, health: {
     receivingHealthy: boolean;
     senderHealthy: boolean;
     failingRecords: string[];
     lastCheckedAt: string;
     lastHealthyAt?: string;
-  }): ResultAsync<void, DbError> {
-    return ResultAsync.fromPromise(
-      dynamo.send(new UpdateCommand({
+  }): Promise<Result<void, DbError>> {
+    try {
+      await dynamo.send(new UpdateCommand({
         TableName: ACCOUNTS_TABLE,
         Key: { pk: pk(accountId), sk: `DOMAIN#${id}` },
         UpdateExpression: "SET receivingHealthy = :rh, senderHealthy = :sh, failingRecords = :fr, lastCheckedAt = :lc, updatedAt = :ua" +
@@ -631,90 +677,99 @@ export class AccountDatabase {
           ":ua": health.lastCheckedAt,
           ...(health.lastHealthyAt ? { ":lha": health.lastHealthyAt } : {}),
         },
-      })).then(() => undefined),
-      toDbError,
-    );
+      }));
+      return ok(undefined);
+    } catch (e) {
+      return err(dbError(e));
+    }
   }
 
-  scanAllDomains(): ResultAsync<Array<{ accountId: string; domains: Domain[] }>, DbError> {
-    return ResultAsync.fromPromise(
-      (async () => {
-        const { ScanCommand } = await import("@aws-sdk/lib-dynamodb");
-        const accountDomains = new Map<string, Domain[]>();
-        let lastKey: Record<string, unknown> | undefined;
+  async scanAllDomains(): Promise<Result<Array<{ accountId: string; domains: Domain[] }>, DbError>> {
+    try {
+      const { ScanCommand } = await import("@aws-sdk/lib-dynamodb");
+      const accountDomains = new Map<string, Domain[]>();
+      let lastKey: Record<string, unknown> | undefined;
 
-        do {
-          const res = await dynamo.send(new ScanCommand({
-            TableName: ACCOUNTS_TABLE,
-            FilterExpression: "begins_with(sk, :prefix)",
-            ExpressionAttributeValues: { ":prefix": "DOMAIN#" },
-            ...(lastKey ? { ExclusiveStartKey: lastKey } : {}),
-          }));
-          for (const item of res.Items ?? []) {
-            const domain = item as Domain;
-            const list = accountDomains.get(domain.accountId) ?? [];
-            list.push(domain);
-            accountDomains.set(domain.accountId, list);
-          }
-          lastKey = res.LastEvaluatedKey as Record<string, unknown> | undefined;
-        } while (lastKey);
-
-        const results: Array<{ accountId: string; domains: Domain[] }> = [];
-        for (const [accountId, domains] of accountDomains) {
-          results.push({ accountId, domains });
+      do {
+        const res = await dynamo.send(new ScanCommand({
+          TableName: ACCOUNTS_TABLE,
+          FilterExpression: "begins_with(sk, :prefix)",
+          ExpressionAttributeValues: { ":prefix": "DOMAIN#" },
+          ...(lastKey ? { ExclusiveStartKey: lastKey } : {}),
+        }));
+        for (const item of res.Items ?? []) {
+          const domain = item as Domain;
+          const list = accountDomains.get(domain.accountId) ?? [];
+          list.push(domain);
+          accountDomains.set(domain.accountId, list);
         }
-        return results;
-      })(),
-      toDbError,
-    );
+        lastKey = res.LastEvaluatedKey as Record<string, unknown> | undefined;
+      } while (lastKey);
+
+      const results: Array<{ accountId: string; domains: Domain[] }> = [];
+      for (const [accountId, domains] of accountDomains) {
+        results.push({ accountId, domains });
+      }
+      return ok(results);
+    } catch (e) {
+      return err(dbError(e));
+    }
   }
 
   // ---------------------------------------------------------------------------
   // Verified forwarding addresses
   // ---------------------------------------------------------------------------
 
-  listVerifiedForwardingAddresses(accountId: string): ResultAsync<VerifiedForwardingAddress[], DbError> {
-    return ResultAsync.fromPromise(
-      dynamo.send(new QueryCommand({
+  async listVerifiedForwardingAddresses(accountId: string): Promise<Result<VerifiedForwardingAddress[], DbError>> {
+    try {
+      const res = await dynamo.send(new QueryCommand({
         TableName: ACCOUNTS_TABLE,
         KeyConditionExpression: "pk = :pk AND begins_with(sk, :prefix)",
         ExpressionAttributeValues: { ":pk": pk(accountId), ":prefix": "FWDADDR#" },
-      })).then(res => (res.Items ?? []) as VerifiedForwardingAddress[]),
-      toDbError,
-    );
+      }));
+      return ok((res.Items ?? []) as VerifiedForwardingAddress[]);
+    } catch (e) {
+      return err(dbError(e));
+    }
   }
 
-  getVerifiedForwardingAddress(accountId: string, address: string): ResultAsync<VerifiedForwardingAddress | null, DbError> {
-    return ResultAsync.fromPromise(
-      dynamo.send(new GetCommand({
+  async getVerifiedForwardingAddress(accountId: string, address: string): Promise<Result<VerifiedForwardingAddress | null, DbError>> {
+    try {
+      const res = await dynamo.send(new GetCommand({
         TableName: ACCOUNTS_TABLE,
         Key: { pk: pk(accountId), sk: `FWDADDR#${address}` },
-      })).then(res => res.Item ? (res.Item as VerifiedForwardingAddress) : null),
-      toDbError,
-    );
+      }));
+      return ok(res.Item ? (res.Item as VerifiedForwardingAddress) : null);
+    } catch (e) {
+      return err(dbError(e));
+    }
   }
 
-  saveVerifiedForwardingAddress(addr: VerifiedForwardingAddress): ResultAsync<void, DbError> {
-    return ResultAsync.fromPromise(
-      dynamo.send(new PutCommand({
+  async saveVerifiedForwardingAddress(addr: VerifiedForwardingAddress): Promise<Result<void, DbError>> {
+    try {
+      await dynamo.send(new PutCommand({
         TableName: ACCOUNTS_TABLE,
         Item: { ...addr, pk: pk(addr.accountId), sk: `FWDADDR#${addr.address}` },
-      })).then(() => undefined),
-      toDbError,
-    );
+      }));
+      return ok(undefined);
+    } catch (e) {
+      return err(dbError(e));
+    }
   }
 
-  deleteVerifiedForwardingAddress(accountId: string, address: string): ResultAsync<void, DbError> {
-    return ResultAsync.fromPromise(
-      dynamo.send(new DeleteCommand({
+  async deleteVerifiedForwardingAddress(accountId: string, address: string): Promise<Result<void, DbError>> {
+    try {
+      await dynamo.send(new DeleteCommand({
         TableName: ACCOUNTS_TABLE,
         Key: { pk: pk(accountId), sk: `FWDADDR#${address}` },
-      })).then(() => undefined),
-      toDbError,
-    );
+      }));
+      return ok(undefined);
+    } catch (e) {
+      return err(dbError(e));
+    }
   }
 
-  async disableForwardActions(accountId: string, toAddress: string): Promise<ResultAsync<void, DbError>> {
+  async disableForwardActions(accountId: string, toAddress: string): Promise<Result<void, DbError>> {
     const rulesResult = await this.listRules(accountId);
     if (rulesResult.isErr()) return err(rulesResult.error);
     const rules = rulesResult.value;
@@ -735,24 +790,28 @@ export class AccountDatabase {
   // Email Templates
   // ---------------------------------------------------------------------------
 
-  createTemplate(template: EmailTemplate): ResultAsync<EmailTemplate, DbError> {
-    return ResultAsync.fromPromise(
-      dynamo.send(new PutCommand({
+  async createTemplate(template: EmailTemplate): Promise<Result<EmailTemplate, DbError>> {
+    try {
+      await dynamo.send(new PutCommand({
         TableName: ACCOUNTS_TABLE,
         Item: { ...template, pk: pk(template.accountId), sk: `TEMPLATE#${template.id}` },
-      })).then(() => template),
-      toDbError,
-    );
+      }));
+      return ok(template);
+    } catch (e) {
+      return err(dbError(e));
+    }
   }
 
-  getTemplate(accountId: string, id: string): ResultAsync<EmailTemplate | null, DbError> {
-    return ResultAsync.fromPromise(
-      dynamo.send(new GetCommand({
+  async getTemplate(accountId: string, id: string): Promise<Result<EmailTemplate | null, DbError>> {
+    try {
+      const res = await dynamo.send(new GetCommand({
         TableName: ACCOUNTS_TABLE,
         Key: { pk: pk(accountId), sk: `TEMPLATE#${id}` },
-      })).then(res => res.Item ? (res.Item as EmailTemplate) : null),
-      toDbError,
-    );
+      }));
+      return ok(res.Item ? (res.Item as EmailTemplate) : null);
+    } catch (e) {
+      return err(dbError(e));
+    }
   }
 
   async updateTemplate(accountId: string, id: string, update: Partial<Pick<EmailTemplate, "name" | "subject" | "body">>): Promise<Result<EmailTemplate, DbError>> {
@@ -764,74 +823,84 @@ export class AccountDatabase {
     if (update.subject !== undefined) { setParts.push("#subject = :subject"); exprValues[":subject"] = update.subject; exprNames["#subject"] = "subject"; }
     if (update.body !== undefined) { setParts.push("body = :body"); exprValues[":body"] = update.body; }
 
-    const result = await ResultAsync.fromPromise(
-      dynamo.send(new UpdateCommand({
+    try {
+      const res = await dynamo.send(new UpdateCommand({
         TableName: ACCOUNTS_TABLE,
         Key: { pk: pk(accountId), sk: `TEMPLATE#${id}` },
         UpdateExpression: `SET ${setParts.join(", ")}`,
         ExpressionAttributeValues: exprValues,
         ...(Object.keys(exprNames).length ? { ExpressionAttributeNames: exprNames } : {}),
         ReturnValues: "ALL_NEW",
-      })).then(res => res.Attributes as unknown as EmailTemplate),
-      toDbError,
-    );
-    if (result.isErr()) return err(result.error);
-    return ok(result.value);
+      }));
+      return ok(res.Attributes as unknown as EmailTemplate);
+    } catch (e) {
+      return err(dbError(e));
+    }
   }
 
-  deleteTemplate(accountId: string, id: string): ResultAsync<void, DbError> {
-    return ResultAsync.fromPromise(
-      dynamo.send(new DeleteCommand({
+  async deleteTemplate(accountId: string, id: string): Promise<Result<void, DbError>> {
+    try {
+      await dynamo.send(new DeleteCommand({
         TableName: ACCOUNTS_TABLE,
         Key: { pk: pk(accountId), sk: `TEMPLATE#${id}` },
-      })).then(() => undefined),
-      toDbError,
-    );
+      }));
+      return ok(undefined);
+    } catch (e) {
+      return err(dbError(e));
+    }
   }
 
-  listTemplates(accountId: string): ResultAsync<EmailTemplate[], DbError> {
-    return ResultAsync.fromPromise(
-      dynamo.send(new QueryCommand({
+  async listTemplates(accountId: string): Promise<Result<EmailTemplate[], DbError>> {
+    try {
+      const res = await dynamo.send(new QueryCommand({
         TableName: ACCOUNTS_TABLE,
         KeyConditionExpression: "pk = :pk AND begins_with(sk, :prefix)",
         ExpressionAttributeValues: { ":pk": pk(accountId), ":prefix": "TEMPLATE#" },
-      })).then(res => (res.Items ?? []) as EmailTemplate[]),
-      toDbError,
-    );
+      }));
+      return ok((res.Items ?? []) as EmailTemplate[]);
+    } catch (e) {
+      return err(dbError(e));
+    }
   }
 
   // ---------------------------------------------------------------------------
   // WebSocket Connections
   // ---------------------------------------------------------------------------
 
-  saveWsConnection(conn: WsConnection): ResultAsync<void, DbError> {
-    return ResultAsync.fromPromise(
-      dynamo.send(new PutCommand({
+  async saveWsConnection(conn: WsConnection): Promise<Result<void, DbError>> {
+    try {
+      await dynamo.send(new PutCommand({
         TableName: ACCOUNTS_TABLE,
         Item: { ...conn, pk: pk(conn.accountId), sk: `CONN#${conn.connectionId}` },
-      })).then(() => undefined),
-      toDbError,
-    );
+      }));
+      return ok(undefined);
+    } catch (e) {
+      return err(dbError(e));
+    }
   }
 
-  listWsConnections(accountId: string): ResultAsync<WsConnection[], DbError> {
-    return ResultAsync.fromPromise(
-      dynamo.send(new QueryCommand({
+  async listWsConnections(accountId: string): Promise<Result<WsConnection[], DbError>> {
+    try {
+      const res = await dynamo.send(new QueryCommand({
         TableName: ACCOUNTS_TABLE,
         KeyConditionExpression: "pk = :pk AND begins_with(sk, :prefix)",
         ExpressionAttributeValues: { ":pk": pk(accountId), ":prefix": "CONN#" },
-      })).then(res => (res.Items ?? []) as WsConnection[]),
-      toDbError,
-    );
+      }));
+      return ok((res.Items ?? []) as WsConnection[]);
+    } catch (e) {
+      return err(dbError(e));
+    }
   }
 
-  deleteWsConnection(accountId: string, connectionId: string): ResultAsync<void, DbError> {
-    return ResultAsync.fromPromise(
-      dynamo.send(new DeleteCommand({
+  async deleteWsConnection(accountId: string, connectionId: string): Promise<Result<void, DbError>> {
+    try {
+      await dynamo.send(new DeleteCommand({
         TableName: ACCOUNTS_TABLE,
         Key: { pk: pk(accountId), sk: `CONN#${connectionId}` },
-      })).then(() => undefined),
-      toDbError,
-    );
+      }));
+      return ok(undefined);
+    } catch (e) {
+      return err(dbError(e));
+    }
   }
 }

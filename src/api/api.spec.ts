@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { Arc, Signal, View, Label, Rule, Domain, Account, Alias, VerifiedForwardingAddress } from "../types/index.js";
 import { createApp } from "./app.js";
 import type { ApiDatabase, AuthService, AuthContext, AccessService, AccountUser, VerificationMailer } from "./app.js";
-import { ok, okAsync, errAsync } from "neverthrow";
+import { ok, err } from "neverthrow";
 import { createMockLogger } from "../testing/mock-logger.js";
 import { authError } from "../errors.js";
 
@@ -17,15 +17,15 @@ const A = `/accounts/${TEST_ACCOUNT_ID}`;
 const validAuth: AuthContext = { accountId: TEST_ACCOUNT_ID, userId: TEST_USER_ID };
 
 function makeAuth(ctx: AuthContext = validAuth): AuthService {
-  return { verify: vi.fn().mockReturnValue(okAsync(ctx)) };
+  return { verify: vi.fn().mockReturnValue(Promise.resolve(ok(ctx))) };
 }
 
 function makeAccess(): AccessService {
   return {
-    listUsers: vi.fn().mockReturnValue(okAsync([])),
-    addUser: vi.fn().mockReturnValue(okAsync(undefined)),
-    updateUserRole: vi.fn().mockReturnValue(okAsync(undefined)),
-    removeUser: vi.fn().mockReturnValue(okAsync(undefined)),
+    listUsers: vi.fn().mockReturnValue(Promise.resolve(ok([]))),
+    addUser: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+    updateUserRole: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+    removeUser: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     checkAccess: vi.fn().mockResolvedValue(undefined),
   };
 }
@@ -253,7 +253,7 @@ describe("API", () => {
     store = makeStore();
     auth = makeAuth();
     access = makeAccess();
-    verificationMailer = { sendForwardVerification: vi.fn().mockReturnValue(okAsync(undefined)) };
+    verificationMailer = { sendForwardVerification: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) };
     app = createApp({ store, auth, access, logger: createMockLogger(), verificationMailer });
   });
 
@@ -268,7 +268,7 @@ describe("API", () => {
     });
 
     it("returns 401 when token is invalid", async () => {
-      vi.mocked(auth.verify).mockReturnValueOnce(errAsync(authError(new Error("Invalid token"))));
+      vi.mocked(auth.verify).mockReturnValueOnce(Promise.resolve(err(authError(new Error("Invalid token")))));
       const res = await req(app, "GET", `${A}/arcs`, { token: "bad-token" });
       expect(res.status).toBe(401);
     });
@@ -951,7 +951,7 @@ describe("API", () => {
         { userId: "user-1", role: "owner" },
         { userId: "user-2", role: "member" },
       ];
-      vi.mocked(access.listUsers).mockReturnValueOnce(okAsync(users));
+      vi.mocked(access.listUsers).mockReturnValueOnce(Promise.resolve(ok(users)));
       const res = await req(app, "GET", `${A}/users`);
       expect(res.status).toBe(200);
       const body = await res.json() as { users: AccountUser[]; pagination: { cursor: null } };

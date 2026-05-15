@@ -1,6 +1,5 @@
 import { AuthressClient } from "@authress/sdk";
 import type { AccessRecord } from "@authress/sdk";
-import { ResultAsync } from "neverthrow";
 import { ok, err, authressServiceError } from "../errors.js";
 import type { AuthressServiceError, Result } from "../errors.js";
 import type { AccessService, AccountUser, AccountRole } from "./app.js";
@@ -53,65 +52,64 @@ function isNotFound(e: unknown): boolean {
   return status === 404;
 }
 
-function toError(e: unknown): Error {
-  return e instanceof Error ? e : new Error(String(e));
-}
-
 export class AuthressAccessService implements AccessService {
   private get client() {
     return getClient();
   }
 
-  listUsers(accountId: string): ResultAsync<AccountUser[], AuthressServiceError> {
-    return ResultAsync.fromPromise(
-      (async () => {
-        try {
-          const response = await this.client.accessRecords.getRecord(recordId(accountId));
-          return parseUsers(response.data);
-        } catch (e) {
-          if (isNotFound(e)) return [];
-          throw e;
-        }
-      })(),
-      (e) => authressServiceError(toError(e)),
-    );
+  async listUsers(accountId: string): Promise<Result<AccountUser[], AuthressServiceError>> {
+    try {
+      try {
+        const response = await this.client.accessRecords.getRecord(recordId(accountId));
+        return ok(parseUsers(response.data));
+      } catch (e) {
+        if (isNotFound(e)) return ok([]);
+        throw e;
+      }
+    } catch (e) {
+      return err(authressServiceError(e));
+    }
   }
 
-  addUser(accountId: string, userId: string, role: AccountRole): ResultAsync<void, AuthressServiceError> {
-    return ResultAsync.fromPromise(
-      this._upsertUser(accountId, userId, role),
-      (e) => authressServiceError(toError(e)),
-    );
+  async addUser(accountId: string, userId: string, role: AccountRole): Promise<Result<void, AuthressServiceError>> {
+    try {
+      await this._upsertUser(accountId, userId, role);
+      return ok(undefined);
+    } catch (e) {
+      return err(authressServiceError(e));
+    }
   }
 
-  updateUserRole(accountId: string, userId: string, role: AccountRole): ResultAsync<void, AuthressServiceError> {
-    return ResultAsync.fromPromise(
-      this._upsertUser(accountId, userId, role),
-      (e) => authressServiceError(toError(e)),
-    );
+  async updateUserRole(accountId: string, userId: string, role: AccountRole): Promise<Result<void, AuthressServiceError>> {
+    try {
+      await this._upsertUser(accountId, userId, role);
+      return ok(undefined);
+    } catch (e) {
+      return err(authressServiceError(e));
+    }
   }
 
-  removeUser(accountId: string, userId: string): ResultAsync<void, AuthressServiceError> {
-    return ResultAsync.fromPromise(
-      (async () => {
-        const rid = recordId(accountId);
-        let record: AccessRecord;
-        try {
-          const response = await this.client.accessRecords.getRecord(rid);
-          record = response.data;
-        } catch (e) {
-          if (isNotFound(e)) return;
-          throw e;
-        }
+  async removeUser(accountId: string, userId: string): Promise<Result<void, AuthressServiceError>> {
+    try {
+      const rid = recordId(accountId);
+      let record: AccessRecord;
+      try {
+        const response = await this.client.accessRecords.getRecord(rid);
+        record = response.data;
+      } catch (e) {
+        if (isNotFound(e)) return ok(undefined);
+        throw e;
+      }
 
-        const statements = record.statements
-          .map((stmt) => ({ ...stmt, users: (stmt.users ?? []).filter((u) => u.userId !== userId) }))
-          .filter((stmt) => (stmt.users ?? []).length > 0);
+      const statements = record.statements
+        .map((stmt) => ({ ...stmt, users: (stmt.users ?? []).filter((u) => u.userId !== userId) }))
+        .filter((stmt) => (stmt.users ?? []).length > 0);
 
-        await this.client.accessRecords.updateRecord(rid, { ...record, statements });
-      })(),
-      (e) => authressServiceError(toError(e)),
-    );
+      await this.client.accessRecords.updateRecord(rid, { ...record, statements });
+      return ok(undefined);
+    } catch (e) {
+      return err(authressServiceError(e));
+    }
   }
 
   async checkAccess(userId: string, accountId: string, permission: string): Promise<void> {

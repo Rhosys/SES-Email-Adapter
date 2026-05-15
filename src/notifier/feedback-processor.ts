@@ -1,9 +1,8 @@
 import type { SQSEvent } from "aws-lambda";
-import { ResultAsync } from "neverthrow";
 import type { SesFeedback, SuppressedAddress } from "../types/index.js";
 import type { ProcessingDatabase } from "../database/processing-database.js";
 import type { AccountDatabase } from "../database/account-database.js";
-import { dbError, ok } from "../errors.js";
+import { ok, err, dbError } from "../errors.js";
 import type { DbError, Result } from "../errors.js";
 import type { Logger } from "../logger.js";
 
@@ -21,11 +20,13 @@ export class FeedbackProcessor {
     this.logger = logger;
   }
 
-  process(event: SQSEvent): ResultAsync<void, DbError> {
-    return ResultAsync.fromPromise(
-      this.doProcess(event),
-      (e) => dbError(e instanceof Error ? e : new Error(String(e))),
-    );
+  async process(event: SQSEvent): Promise<Result<void, DbError>> {
+    try {
+      await this.doProcess(event);
+      return ok(undefined);
+    } catch (e) {
+      return err(dbError(e));
+    }
   }
 
   private async doProcess(event: SQSEvent): Promise<void> {

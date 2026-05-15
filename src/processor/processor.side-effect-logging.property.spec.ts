@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { SQSEvent } from "aws-lambda";
-import { ok, okAsync, errAsync } from "neverthrow";
+import { ok, err } from "neverthrow";
 import { SignalProcessor, SYSTEM_RULES } from "./processor.js";
 import { JsonLogicRuleEvaluator } from "./rule-evaluator.js";
 import type { ProcessorDatabase, ArcMatcher, Notifier, Forwarder } from "./processor.js";
@@ -74,20 +74,20 @@ describe("Side effect caller logging", () => {
 
   function makeStore(): ProcessorDatabase {
     return {
-      getSignalByMessageId: vi.fn().mockReturnValue(okAsync(null)),
-      saveSignal: vi.fn().mockReturnValue(okAsync(undefined)),
-      updateSignalRetention: vi.fn().mockReturnValue(okAsync(undefined)),
-      getArc: vi.fn().mockReturnValue(okAsync(null)),
-      findArcByGroupingKey: vi.fn().mockReturnValue(okAsync(null)),
-      saveArc: vi.fn().mockReturnValue(okAsync(undefined)),
-      listEnabledRules: vi.fn().mockReturnValue(okAsync(SYSTEM_RULES)),
-      getProcessorAccountContext: vi.fn().mockReturnValue(okAsync(DEFAULT_CTX)),
-      saveAlias: vi.fn().mockImplementation((a: Alias) => okAsync(a)),
-      getSender: vi.fn().mockReturnValue(okAsync(DEFAULT_SENDER_ENTRY)),
-      saveSender: vi.fn().mockReturnValue(okAsync(undefined)),
-      getTemplate: vi.fn().mockReturnValue(okAsync(null)),
-      updateGlobalReputation: vi.fn().mockReturnValue(okAsync(undefined)),
-      getDomainByName: vi.fn().mockReturnValue(okAsync(null)),
+      getSignalByMessageId: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
+      saveSignal: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+      updateSignalRetention: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+      getArc: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
+      findArcByGroupingKey: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
+      saveArc: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+      listEnabledRules: vi.fn().mockReturnValue(Promise.resolve(ok(SYSTEM_RULES))),
+      getProcessorAccountContext: vi.fn().mockReturnValue(Promise.resolve(ok(DEFAULT_CTX))),
+      saveAlias: vi.fn().mockImplementation((a: Alias) => Promise.resolve(ok(a))),
+      getSender: vi.fn().mockReturnValue(Promise.resolve(ok(DEFAULT_SENDER_ENTRY))),
+      saveSender: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+      getTemplate: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
+      updateGlobalReputation: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+      getDomainByName: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
     };
   }
 
@@ -121,7 +121,7 @@ describe("Side effect caller logging", () => {
   }
 
   function makeArcMatcher(): ArcMatcher {
-    return { findMatch: vi.fn().mockReturnValue(okAsync(null)), upsertEmbedding: vi.fn().mockReturnValue(okAsync(undefined)) };
+    return { findMatch: vi.fn().mockReturnValue(Promise.resolve(ok(null))), upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) };
   }
 
   function makeSqsEvent(sesMessageId: string): SQSEvent {
@@ -152,8 +152,8 @@ describe("Side effect caller logging", () => {
 
   it("when notifier.notify() returns err, caller logs at track or error level", async () => {
     const notifier: Notifier = {
-      notify: vi.fn().mockReturnValue(errAsync(dbError(new Error("push failed")))),
-      notifyBlocked: vi.fn().mockReturnValue(okAsync(undefined)),
+      notify: vi.fn().mockReturnValue(Promise.resolve(err(dbError(new Error("push failed"))))),
+      notifyBlocked: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     };
 
     const processor = new SignalProcessor({
@@ -179,8 +179,8 @@ describe("Side effect caller logging", () => {
 
   it("when notifier.notify() succeeds, no failure log is emitted", async () => {
     const notifier: Notifier = {
-      notify: vi.fn().mockReturnValue(okAsync(undefined)),
-      notifyBlocked: vi.fn().mockReturnValue(okAsync(undefined)),
+      notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+      notifyBlocked: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     };
 
     const processor = new SignalProcessor({
@@ -205,7 +205,7 @@ describe("Side effect caller logging", () => {
 
   it("when forwarder.forward() returns err, caller logs at track or error level", async () => {
     const forwarder: Forwarder = {
-      forward: vi.fn().mockReturnValue(errAsync(dbError(new Error("forward failed")))),
+      forward: vi.fn().mockReturnValue(Promise.resolve(err(dbError(new Error("forward failed"))))),
     };
 
     const store = makeStore();
@@ -214,7 +214,7 @@ describe("Side effect caller logging", () => {
       condition: JSON.stringify(true), actions: [{ type: "forward", value: "fwd@example.com" }],
       status: "enabled", priorityOrder: 100, createdAt: "", updatedAt: "",
     };
-    vi.mocked(store.listEnabledRules).mockReturnValue(okAsync([...SYSTEM_RULES, forwardRule]));
+    vi.mocked(store.listEnabledRules).mockReturnValue(Promise.resolve(ok([...SYSTEM_RULES, forwardRule])));
 
     const processor = new SignalProcessor({
       store,

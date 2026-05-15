@@ -14,12 +14,11 @@ export interface ParsedMime {
   sentAt?: string;
 }
 
-import { ResultAsync } from "neverthrow";
-import { dbError } from "../errors.js";
-import type { DbError } from "../errors.js";
+import { ok, err, dbError } from "../errors.js";
+import type { DbError, Result } from "../errors.js";
 
 export interface MimeParser {
-  parse(s3Key: string): ResultAsync<ParsedMime, DbError>;
+  parse(s3Key: string): Promise<Result<ParsedMime, DbError>>;
 }
 
 export class MailparserMimeParser {
@@ -70,10 +69,12 @@ export class MailparserMimeParser {
     };
   }
 
-  parseBuffer(rawEmail: Buffer | string): ResultAsync<ParsedMime, DbError> {
-    return ResultAsync.fromPromise(
-      this.parse(rawEmail),
-      (e) => dbError(e instanceof Error ? e : new Error(String(e))),
-    );
+  async parseBuffer(rawEmail: Buffer | string): Promise<Result<ParsedMime, DbError>> {
+    try {
+      const result = await this.parse(rawEmail);
+      return ok(result);
+    } catch (e) {
+      return err(dbError(e));
+    }
   }
 }

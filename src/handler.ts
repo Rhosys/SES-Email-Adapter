@@ -17,9 +17,8 @@ import { SesNotifier } from "./notifier/notifier.js";
 import { SesForwarder } from "./notifier/ses-forwarder.js";
 import { FeedbackProcessor } from "./notifier/feedback-processor.js";
 import { DomainHealthJob } from "./jobs/domain-health-job.js";
-import { ResultAsync } from "neverthrow";
-import { dbError } from "./errors.js";
-import type { DbError } from "./errors.js";
+import { ok, err, dbError } from "./errors.js";
+import type { DbError, Result } from "./errors.js";
 import type { VerificationMailer } from "./api/app.js";
 import { AuthressAuthService } from "./api/authress-auth.js";
 import { AuthressAccessService } from "./api/authress-access.js";
@@ -50,16 +49,16 @@ const SIGNAL_QUEUE_URL = process.env["SIGNAL_QUEUE_URL"] ?? "";
 
 class S3MimeParser implements MimeParser {
   private readonly delegate = new MailparserMimeParser();
-  parse(s3Key: string): ResultAsync<ParsedMime, DbError> {
-    return ResultAsync.fromPromise(
-      (async () => {
-        const res = await s3.send(new GetObjectCommand({ Bucket: S3_BUCKET, Key: s3Key }));
-        const buf = await res.Body?.transformToByteArray();
-        if (!buf) throw new Error(`Empty S3 object: ${s3Key}`);
-        return this.delegate.parse(Buffer.from(buf));
-      })(),
-      (e) => dbError(e instanceof Error ? e : new Error(String(e))),
-    );
+  async parse(s3Key: string): Promise<Result<ParsedMime, DbError>> {
+    try {
+      const res = await s3.send(new GetObjectCommand({ Bucket: S3_BUCKET, Key: s3Key }));
+      const buf = await res.Body?.transformToByteArray();
+      if (!buf) throw new Error(`Empty S3 object: ${s3Key}`);
+      const parsed = await this.delegate.parse(Buffer.from(buf));
+      return ok(parsed);
+    } catch (e) {
+      return err(dbError(e));
+    }
   }
 }
 
@@ -104,10 +103,10 @@ const APP_BASE_URL = process.env["APP_BASE_URL"] ?? "";
 const CONFIG_SET = process.env["SES_CONFIGURATION_SET"] ?? "";
 
 const sesVerificationMailer: VerificationMailer = {
-  sendForwardVerification(accountId: string, address: string, token: string) {
+  async sendForwardVerification(accountId: string, address: string, token: string) {
     const verifyUrl = `${APP_BASE_URL}/accounts/${accountId}/forwarding-addresses/${encodeURIComponent(address)}/verify?token=${token}`;
-    return ResultAsync.fromPromise(
-      sesv2.send(new SendEmailCommand({
+    try {
+      await sesv2.send(new SendEmailCommand({
         FromEmailAddress: NOTIFICATION_FROM,
         Destination: { ToAddresses: [address] },
         Content: {
@@ -122,9 +121,11 @@ const sesVerificationMailer: VerificationMailer = {
           },
         },
         ...(CONFIG_SET ? { ConfigurationSetName: CONFIG_SET } : {}),
-      })).then(() => undefined),
-      (e) => dbError(e instanceof Error ? e : new Error(String(e)))
-    );
+      }));
+      return ok(undefined);
+    } catch (e) {
+      return err(dbError(e));
+    }
   },
 };
 

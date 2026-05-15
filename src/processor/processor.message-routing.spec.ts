@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { SQSEvent, SQSRecord } from "aws-lambda";
-import { ok, okAsync } from "neverthrow";
+import { ok } from "neverthrow";
 import { SignalProcessor, SYSTEM_RULES } from "./processor.js";
 import { JsonLogicRuleEvaluator } from "./rule-evaluator.js";
 import type { ProcessorDatabase, ArcMatcher } from "./processor.js";
@@ -54,23 +54,23 @@ const validClassification: ClassificationOutput = {
 
 function makeStore(): ProcessorDatabase {
   return {
-    getSignalByMessageId: vi.fn().mockReturnValue(okAsync(null)),
-    saveSignal: vi.fn().mockReturnValue(okAsync(undefined)),
-    updateSignalRetention: vi.fn().mockReturnValue(okAsync(undefined)),
-    getArc: vi.fn().mockReturnValue(okAsync(null)),
-    findArcByGroupingKey: vi.fn().mockReturnValue(okAsync(null)),
-    saveArc: vi.fn().mockReturnValue(okAsync(undefined)),
-    listEnabledRules: vi.fn().mockReturnValue(okAsync(SYSTEM_RULES)),
-    getProcessorAccountContext: vi.fn().mockReturnValue(okAsync(DEFAULT_CTX)),
-    saveAlias: vi.fn().mockImplementation((a: Alias) => okAsync(a)),
-    getSender: vi.fn().mockReturnValue(okAsync({
+    getSignalByMessageId: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
+    saveSignal: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+    updateSignalRetention: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+    getArc: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
+    findArcByGroupingKey: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
+    saveArc: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+    listEnabledRules: vi.fn().mockReturnValue(Promise.resolve(ok(SYSTEM_RULES))),
+    getProcessorAccountContext: vi.fn().mockReturnValue(Promise.resolve(ok(DEFAULT_CTX))),
+    saveAlias: vi.fn().mockImplementation((a: Alias) => Promise.resolve(ok(a))),
+    getSender: vi.fn().mockReturnValue(Promise.resolve(ok({
       accountId: TEST_ACCOUNT_ID, aliasAddress: "user@example.com",
       domain: "example.com", mode: "allow", addedAt: "2024-01-01T00:00:00Z",
-    })),
-    saveSender: vi.fn().mockReturnValue(okAsync(undefined)),
-    getTemplate: vi.fn().mockReturnValue(okAsync(null)),
-    updateGlobalReputation: vi.fn().mockReturnValue(okAsync(undefined)),
-    getDomainByName: vi.fn().mockReturnValue(okAsync(null)),
+    }))),
+    saveSender: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+    getTemplate: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
+    updateGlobalReputation: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+    getDomainByName: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
   };
 }
 
@@ -114,8 +114,8 @@ function makeAuroraWriter(): MultiClusterAuroraWriter {
 
 function makeArcMatcher(): ArcMatcher {
   return {
-    findMatch: vi.fn().mockReturnValue(okAsync(null)),
-    upsertEmbedding: vi.fn().mockReturnValue(okAsync(undefined)),
+    findMatch: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
+    upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
   };
 }
 

@@ -4,7 +4,7 @@ import { createApp } from "./app.js";
 import type { AccessService, AuthService } from "./app.js";
 import { createAuthorize } from "./authorization-middleware.js";
 import { createMockLogger } from "../testing/mock-logger.js";
-import { okAsync } from "neverthrow";
+import { ok } from "neverthrow";
 
 /**
  * Authorization Coverage Test
@@ -24,14 +24,14 @@ function makeMockDeps() {
   });
 
   const auth: AuthService = {
-    verify: vi.fn().mockReturnValue(okAsync({ userId: "user-1", accountId: "acct-1" })),
+    verify: vi.fn().mockReturnValue(Promise.resolve(ok({ userId: "user-1", accountId: "acct-1" }))),
   };
 
   const access: AccessService = {
-    listUsers: vi.fn().mockReturnValue(okAsync([])),
-    addUser: vi.fn().mockReturnValue(okAsync(undefined)),
-    updateUserRole: vi.fn().mockReturnValue(okAsync(undefined)),
-    removeUser: vi.fn().mockReturnValue(okAsync(undefined)),
+    listUsers: vi.fn().mockReturnValue(Promise.resolve(ok([]))),
+    addUser: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+    updateUserRole: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+    removeUser: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     checkAccess: vi.fn().mockResolvedValue(undefined),
   };
 
@@ -173,10 +173,10 @@ describe("Authorization Coverage", () => {
 
     // Also add a properly protected route for comparison
     const access: AccessService = {
-      listUsers: vi.fn().mockReturnValue(okAsync([])),
-      addUser: vi.fn().mockReturnValue(okAsync(undefined)),
-      updateUserRole: vi.fn().mockReturnValue(okAsync(undefined)),
-      removeUser: vi.fn().mockReturnValue(okAsync(undefined)),
+      listUsers: vi.fn().mockReturnValue(Promise.resolve(ok([]))),
+      addUser: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+      updateUserRole: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+      removeUser: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
       checkAccess: vi.fn().mockResolvedValue(undefined),
     };
     const authz = createAuthorize(access, createMockLogger());

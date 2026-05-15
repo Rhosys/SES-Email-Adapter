@@ -1,9 +1,8 @@
 import { SESv2Client, SendEmailCommand } from "@aws-sdk/client-sesv2";
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
-import { ResultAsync } from "neverthrow";
 import type { Forwarder, ForwardOptions } from "../processor/processor.js";
-import { dbError } from "../errors.js";
-import type { DbError } from "../errors.js";
+import { ok, err, dbError } from "../errors.js";
+import type { DbError, Result } from "../errors.js";
 import type { Logger } from "../logger.js";
 
 const FROM_ADDRESS = process.env["NOTIFICATION_FROM"] ?? "";
@@ -21,11 +20,13 @@ export class SesForwarder implements Forwarder {
     this.s3 = s3 ?? new S3Client({});
   }
 
-  forward(s3Key: string, toAddress: string, accountId: string, opts: ForwardOptions): ResultAsync<void, DbError> {
-    return ResultAsync.fromPromise(
-      this.doForward(s3Key, toAddress, accountId, opts),
-      (e) => dbError(e instanceof Error ? e : new Error(String(e)))
-    );
+  async forward(s3Key: string, toAddress: string, accountId: string, opts: ForwardOptions): Promise<Result<void, DbError>> {
+    try {
+      await this.doForward(s3Key, toAddress, accountId, opts);
+      return ok(undefined);
+    } catch (e) {
+      return err(dbError(e));
+    }
   }
 
   private async doForward(s3Key: string, toAddress: string, accountId: string, opts: ForwardOptions): Promise<void> {

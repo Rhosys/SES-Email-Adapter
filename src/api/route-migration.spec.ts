@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createApp } from "./app.js";
 import type { ApiDatabase, AuthService, AuthContext, AccessService, VerificationMailer } from "./app.js";
-import { ok, okAsync } from "neverthrow";
+import { ok } from "neverthrow";
 import { createMockLogger } from "../testing/mock-logger.js";
 
 // ---------------------------------------------------------------------------
@@ -15,15 +15,15 @@ const A = `/accounts/${TEST_ACCOUNT_ID}`;
 const validAuth: AuthContext = { accountId: TEST_ACCOUNT_ID, userId: TEST_USER_ID };
 
 function makeAuth(): AuthService {
-  return { verify: vi.fn().mockReturnValue(okAsync(validAuth)) };
+  return { verify: vi.fn().mockReturnValue(Promise.resolve(ok(validAuth))) };
 }
 
 function makeAccess(): AccessService {
   return {
-    listUsers: vi.fn().mockReturnValue(okAsync([])),
-    addUser: vi.fn().mockReturnValue(okAsync(undefined)),
-    updateUserRole: vi.fn().mockReturnValue(okAsync(undefined)),
-    removeUser: vi.fn().mockReturnValue(okAsync(undefined)),
+    listUsers: vi.fn().mockReturnValue(Promise.resolve(ok([]))),
+    addUser: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+    updateUserRole: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+    removeUser: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     checkAccess: vi.fn().mockResolvedValue(undefined),
   };
 }
@@ -121,7 +121,7 @@ describe("Route migration — backward compatibility", () => {
     store = makeStore();
     auth = makeAuth();
     access = makeAccess();
-    verificationMailer = { sendForwardVerification: vi.fn().mockReturnValue(okAsync(undefined)) };
+    verificationMailer = { sendForwardVerification: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) };
     app = createApp({ store, auth, access, logger: createMockLogger(), verificationMailer });
   });
 

@@ -16,9 +16,22 @@ Adopt `neverthrow` `Result` and `ResultAsync` types as the standard error handli
 
 ## Rules
 
-### 1. No throwing, no catching
+### 1. No throwing, no catching, no `ResultAsync.fromPromise`
 
-Functions return `Result<T, E>` or `ResultAsync<T, E>`. Callers check `isErr()` explicitly.
+Functions return `Result<T, E>` or `ResultAsync<T, E>`. Callers check `isErr()` explicitly. Never use `ResultAsync.fromPromise` — it hides throw/catch under an abstraction. At SDK boundaries (AWS SDK, Authress SDK, etc.), use an explicit try/catch that returns `ok(value)` or `err(typedError)`:
+
+```ts
+async getArc(accountId: string, id: string): Promise<Result<Arc | null, DbError>> {
+  try {
+    const res = await dynamo.send(new GetCommand({ ... }));
+    return ok(res.Item as Arc | null ?? null);
+  } catch (e) {
+    return err(dbError(e));
+  }
+}
+```
+
+The try/catch exists only to catch third-party SDK throws at the boundary. Our own code never throws. `okAsync` and `errAsync` are fine as return value constructors.
 
 ### 2. No `.andThen()` chaining
 

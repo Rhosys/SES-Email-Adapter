@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { ok, okAsync } from "neverthrow";
+import { ok } from "neverthrow";
 import { SignalProcessor, SYSTEM_RULES } from "./processor.js";
 import { JsonLogicRuleEvaluator } from "./rule-evaluator.js";
 import type { ProcessorDatabase, TestReplier } from "./processor.js";
@@ -107,18 +107,18 @@ describe("Single saveArc call with complete mutations", () => {
     let savedArc: Arc | null = null;
 
     const store: ProcessorDatabase = {
-      getSignalByMessageId: vi.fn().mockReturnValue(okAsync(null)),
-      saveSignal: vi.fn().mockReturnValue(okAsync(undefined)),
-      updateSignalRetention: vi.fn().mockReturnValue(okAsync(undefined)),
-      getArc: vi.fn().mockReturnValue(okAsync(null)),
-      findArcByGroupingKey: vi.fn().mockReturnValue(okAsync(null)),
+      getSignalByMessageId: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
+      saveSignal: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+      updateSignalRetention: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+      getArc: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
+      findArcByGroupingKey: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
       saveArc: vi.fn().mockImplementation((arc: Arc) => {
         saveArcCallCount++;
         savedArc = arc;
-        return okAsync(undefined);
+        return Promise.resolve(ok(undefined));
       }),
-      listEnabledRules: vi.fn().mockReturnValue(okAsync([...SYSTEM_RULES, ...userRules])),
-      getProcessorAccountContext: vi.fn().mockReturnValue(okAsync({
+      listEnabledRules: vi.fn().mockReturnValue(Promise.resolve(ok([...SYSTEM_RULES, ...userRules]))),
+      getProcessorAccountContext: vi.fn().mockReturnValue(Promise.resolve(ok({
         retentionDays: 0,
         filtering: null,
         emailConfig: {
@@ -128,26 +128,26 @@ describe("Single saveArc call with complete mutations", () => {
         registeredDomains: testCase.doPong ? [recipientDomain] : [],
         userEmails: testCase.doPong ? [senderEmail] : [],
         billingPlan: "Paid",
-      })),
-      saveAlias: vi.fn().mockImplementation((a: Alias) => okAsync(a)),
-      getSender: vi.fn().mockReturnValue(okAsync({
+      }))),
+      saveAlias: vi.fn().mockImplementation((a: Alias) => Promise.resolve(ok(a))),
+      getSender: vi.fn().mockReturnValue(Promise.resolve(ok({
         accountId: TEST_ACCOUNT_ID, aliasAddress: recipientEmail,
         domain: "external.com", mode: "allow", addedAt: "2024-01-01T00:00:00Z",
-      })),
-      saveSender: vi.fn().mockReturnValue(okAsync(undefined)),
+      }))),
+      saveSender: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
       getTemplate: vi.fn().mockImplementation((_accountId: string, id: string) =>
-        okAsync({
+        Promise.resolve(ok({
           id, accountId: TEST_ACCOUNT_ID, name: `Template ${id}`,
           subject: "Re: {{signal.subject}}", body: "Auto-reply body",
           createdAt: "2024-01-01T00:00:00Z", updatedAt: "2024-01-01T00:00:00Z",
-        } satisfies EmailTemplate),
+        } satisfies EmailTemplate)),
       ),
-      updateGlobalReputation: vi.fn().mockReturnValue(okAsync(undefined)),
-      getDomainByName: vi.fn().mockReturnValue(okAsync({
+      updateGlobalReputation: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+      getDomainByName: vi.fn().mockReturnValue(Promise.resolve(ok({
         id: recipientDomain, accountId: TEST_ACCOUNT_ID, domain: recipientDomain,
         receivingSetupComplete: true, senderSetupComplete: true,
         createdAt: "2024-01-01T00:00:00Z", updatedAt: "2024-01-01T00:00:00Z",
-      })),
+      }))),
     };
 
     const mimeParser: MimeParser = {
@@ -177,8 +177,8 @@ describe("Single saveArc call with complete mutations", () => {
     };
 
     const arcMatcher: ArcMatcher = {
-      findMatch: vi.fn().mockReturnValue(okAsync(null)),
-      upsertEmbedding: vi.fn().mockReturnValue(okAsync(undefined)),
+      findMatch: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
+      upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     };
 
     let pongMessageId: string | null = null;

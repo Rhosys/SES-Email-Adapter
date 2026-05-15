@@ -1,6 +1,5 @@
 import { randomUUID } from "crypto";
 import type { SQSEvent, SQSRecord } from "aws-lambda";
-import { ResultAsync } from "neverthrow";
 import type { Logger } from "../logger.js";
 import type { Result } from "neverthrow";
 import { ok, err, dbError, processError } from "../errors.js";
@@ -31,7 +30,7 @@ export interface SideEffectPayload {
 }
 
 export interface SqsDispatcher {
-  sendMessage(payload: SideEffectPayload): ResultAsync<void, DbError>;
+  sendMessage(payload: SideEffectPayload): Promise<Result<void, DbError>>;
 }
 
 // ---------------------------------------------------------------------------
@@ -48,25 +47,25 @@ export interface ProcessorAccountContext {
 }
 
 export interface ProcessorDatabase {
-  getSignalByMessageId(accountId: string, sesMessageId: string): ResultAsync<Signal | null, DbError>;
-  saveSignal(signal: Signal): ResultAsync<void, DbError>;
-  updateSignalRetention(accountId: string, signalId: string, update: Partial<Pick<Signal, "s3Key" | "retentionDuration">>): ResultAsync<void, DbError>;
-  getArc(accountId: string, id: string): ResultAsync<Arc | null, DbError>;
-  findArcByGroupingKey(accountId: string, key: string): ResultAsync<Arc | null, DbError>;
-  saveArc(arc: Arc): ResultAsync<void, DbError>;
-  listEnabledRules(accountId: string): ResultAsync<Rule[], DbError>;
-  getProcessorAccountContext(accountId: string, recipientAddress: string): ResultAsync<ProcessorAccountContext, DbError> | Promise<ResultAsync<ProcessorAccountContext, DbError>>;
-  saveAlias(alias: Alias): ResultAsync<Alias, DbError>;
-  getSender(accountId: string, address: string, domain: string): ResultAsync<AliasSender | null, DbError>;
-  saveSender(accountId: string, address: string, domain: string, mode: SenderMode): ResultAsync<void, DbError>;
-  getTemplate(accountId: string, id: string): ResultAsync<import("../types/index.js").EmailTemplate | null, DbError>;
-  updateGlobalReputation(domain: string, update: { wasSpam: boolean; wasBlocked: boolean }): ResultAsync<void, DbError>;
-  getDomainByName(accountId: string, domainName: string): ResultAsync<Domain | null, DbError>;
+  getSignalByMessageId(accountId: string, sesMessageId: string): Promise<Result<Signal | null, DbError>>;
+  saveSignal(signal: Signal): Promise<Result<void, DbError>>;
+  updateSignalRetention(accountId: string, signalId: string, update: Partial<Pick<Signal, "s3Key" | "retentionDuration">>): Promise<Result<void, DbError>>;
+  getArc(accountId: string, id: string): Promise<Result<Arc | null, DbError>>;
+  findArcByGroupingKey(accountId: string, key: string): Promise<Result<Arc | null, DbError>>;
+  saveArc(arc: Arc): Promise<Result<void, DbError>>;
+  listEnabledRules(accountId: string): Promise<Result<Rule[], DbError>>;
+  getProcessorAccountContext(accountId: string, recipientAddress: string): Promise<Result<ProcessorAccountContext, DbError>>;
+  saveAlias(alias: Alias): Promise<Result<Alias, DbError>>;
+  getSender(accountId: string, address: string, domain: string): Promise<Result<AliasSender | null, DbError>>;
+  saveSender(accountId: string, address: string, domain: string, mode: SenderMode): Promise<Result<void, DbError>>;
+  getTemplate(accountId: string, id: string): Promise<Result<import("../types/index.js").EmailTemplate | null, DbError>>;
+  updateGlobalReputation(domain: string, update: { wasSpam: boolean; wasBlocked: boolean }): Promise<Result<void, DbError>>;
+  getDomainByName(accountId: string, domainName: string): Promise<Result<Domain | null, DbError>>;
 }
 
 export interface ArcMatcher {
-  findMatch(accountId: string, recipientAddress: string, embedding: number[]): ResultAsync<Arc | null, DbError>;
-  upsertEmbedding(arcId: string, embedding: number[], accountId: string, recipientAddress: string): ResultAsync<void, DbError>;
+  findMatch(accountId: string, recipientAddress: string, embedding: number[]): Promise<Result<Arc | null, DbError>>;
+  upsertEmbedding(arcId: string, embedding: number[], accountId: string, recipientAddress: string): Promise<Result<void, DbError>>;
 }
 
 export interface RuleEvaluator {
@@ -74,8 +73,8 @@ export interface RuleEvaluator {
 }
 
 export interface Notifier {
-  notify(accountId: string, arc: Arc, signal: Signal): ResultAsync<void, DbError>;
-  notifyBlocked(accountId: string, signal: Signal): ResultAsync<void, DbError>;
+  notify(accountId: string, arc: Arc, signal: Signal): Promise<Result<void, DbError>>;
+  notifyBlocked(accountId: string, signal: Signal): Promise<Result<void, DbError>>;
 }
 
 export interface ForwardOptions {
@@ -85,7 +84,7 @@ export interface ForwardOptions {
 }
 
 export interface Forwarder {
-  forward(s3Key: string, toAddress: string, accountId: string, opts: ForwardOptions): ResultAsync<void, DbError>;
+  forward(s3Key: string, toAddress: string, accountId: string, opts: ForwardOptions): Promise<Result<void, DbError>>;
 }
 
 export interface TestReplier {
@@ -353,8 +352,7 @@ export class SignalProcessor {
         if (!arc) return err(processError(record.messageId));
 
         // Fetch account context (needed for S3 retention)
-        const accountCtxResultAsync = await this.store.getProcessorAccountContext(message.accountId, signal.recipientAddress);
-        const accountCtxResult = await accountCtxResultAsync;
+        const accountCtxResult = await this.store.getProcessorAccountContext(message.accountId, signal.recipientAddress);
         if (accountCtxResult.isErr()) return err(processError(record.messageId));
         const accountCtx = accountCtxResult.value;
 
@@ -632,11 +630,10 @@ export class SignalProcessor {
     const now = new Date().toISOString();
 
     // 4. Fetch account context + sender entry in parallel
-    const [accountCtxResultAsync, senderEntryResult] = await Promise.all([
+    const [accountCtxResult, senderEntryResult] = await Promise.all([
       this.store.getProcessorAccountContext(accountId, recipientAddress),
       this.store.getSender(accountId, recipientAddress, senderETLD1),
     ]);
-    const accountCtxResult = await accountCtxResultAsync;
     if (accountCtxResult.isErr()) return err(accountCtxResult.error);
     const accountCtx = accountCtxResult.value;
     if (senderEntryResult.isErr()) return err(senderEntryResult.error);
@@ -840,16 +837,19 @@ export class SignalProcessor {
       const from = domain?.senderSetupComplete
         ? recipientAddress
         : (process.env["NOTIFICATION_FROM"] ?? recipientAddress);
-      const pongResult = await ResultAsync.fromPromise(
-        this.testReplier.pong({
+      let pongResult: Result<{ messageId: string }, DbError>;
+      try {
+        const pongValue = await this.testReplier.pong({
           to: parsed.from.address,
           from,
           subject: parsed.subject,
           body: parsed.textBody ?? parsed.htmlBody ?? "",
           inReplyTo: sesMessageId,
-        }),
-        (e) => dbError(e instanceof Error ? e : new Error(String(e))),
-      );
+        });
+        pongResult = ok(pongValue);
+      } catch (e) {
+        pongResult = err(dbError(e));
+      }
       if (pongResult.isErr()) {
         this.logger.error("Failed to send pong reply to test email sender. The SES send call returned an error. The sender won't receive the automated test confirmation. Check SES sending limits and verify the from-address domain is configured.", { code: "processor.pong_reply_failed", accountId, error: pongResult.error });
       } else if (pongResult.value) {
@@ -924,16 +924,19 @@ export class SignalProcessor {
           const tmplResult = await this.store.getTemplate(accountId, templateId);
           if (tmplResult.isErr() || !tmplResult.value) continue;
           const tmpl = tmplResult.value;
-          const replyResult = await ResultAsync.fromPromise(
-            this.testReplier.pong({
+          let replyResult: Result<{ messageId: string }, DbError>;
+          try {
+            const replyValue = await this.testReplier.pong({
               to: parsed.from.address,
               from: recipientAddress,
               subject: renderTemplate(tmpl.subject, vars),
               body: renderTemplate(tmpl.body, vars),
               inReplyTo: sesMessageId,
-            }),
-            (e) => dbError(e instanceof Error ? e : new Error(String(e))),
-          );
+            });
+            replyResult = ok(replyValue);
+          } catch (e) {
+            replyResult = err(dbError(e));
+          }
           if (replyResult.isErr()) {
             this.logger.error("Failed to send auto-reply from template. The SES send call returned an error. The sender won't receive the automated response. Check SES limits and template configuration.", { code: "processor.auto_reply_failed", accountId, error: replyResult.error });
           } else if (replyResult.value) {
@@ -1026,16 +1029,19 @@ export class SignalProcessor {
           return { cluster, success: true as const };
         }
 
-        const upsertResult = await ResultAsync.fromPromise(
-          this.auroraWriter.upsertEmbedding({
+        let upsertResult: Result<void, DbError>;
+        try {
+          await this.auroraWriter.upsertEmbedding({
             clusterId: cluster.clusterId,
             arcId: arc.id,
             accountId: signal.accountId,
             recipientAddress: signal.recipientAddress,
             embedding,
-          }),
-          (e) => dbError(e instanceof Error ? e : new Error(String(e))),
-        );
+          });
+          upsertResult = ok(undefined);
+        } catch (e) {
+          upsertResult = err(dbError(e));
+        }
 
         if (upsertResult.isErr()) {
           return { cluster, success: false as const, error: upsertResult.error };
@@ -1093,13 +1099,16 @@ export class SignalProcessor {
     this.logger.trackPoint("s3_retention_start");
     try {
       const retention = getRetentionForPlan(accountCtx.billingPlan);
-      const retentionApplyResult = await ResultAsync.fromPromise(
-        this.retentionService.applyPlanRetention(signal.s3Key, {
+      let retentionApplyResult: Result<{ s3Key: string }, DbError>;
+      try {
+        const retentionValue = await this.retentionService.applyPlanRetention(signal.s3Key, {
           s3Tag: retention.s3Tag,
           copyToSaved: retention.copyToSaved,
-        }),
-        (e) => dbError(e instanceof Error ? e : new Error(String(e))),
-      );
+        });
+        retentionApplyResult = ok(retentionValue);
+      } catch (e) {
+        retentionApplyResult = err(dbError(e));
+      }
       if (retentionApplyResult.isErr()) {
         this.logger.warn("Failed to apply S3 retention policy to signal object. The S3 tagging or copy operation returned an error. The signal is saved but will use the default 5-year lifecycle rule instead of the plan-specific retention.", { code: "processor.s3_retention_failed", accountId: signal.accountId, error: retentionApplyResult.error });
         return;

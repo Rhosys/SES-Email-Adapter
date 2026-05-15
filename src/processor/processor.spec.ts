@@ -1,7 +1,7 @@
 import { randomUUID } from "crypto";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { SQSEvent } from "aws-lambda";
-import { ok, okAsync, errAsync } from "neverthrow";
+import { ok, err } from "neverthrow";
 import { SignalProcessor, deriveGroupingKey, SYSTEM_RULES, extractForwardedAddress } from "./processor.js";
 import { JsonLogicRuleEvaluator } from "./rule-evaluator.js";
 import { baseUrgency } from "./priority.js";
@@ -55,20 +55,20 @@ const DEFAULT_CTX = { retentionDays: 0, filtering: null, emailConfig: DEFAULT_EM
 
 function makeStore(): ProcessorDatabase {
   return {
-    getSignalByMessageId: vi.fn().mockReturnValue(okAsync(null)),
-    saveSignal: vi.fn().mockReturnValue(okAsync(undefined)),
-    updateSignalRetention: vi.fn().mockReturnValue(okAsync(undefined)),
-    getArc: vi.fn().mockReturnValue(okAsync(null)),
-    findArcByGroupingKey: vi.fn().mockReturnValue(okAsync(null)),
-    saveArc: vi.fn().mockReturnValue(okAsync(undefined)),
-    listEnabledRules: vi.fn().mockReturnValue(okAsync(SYSTEM_RULES)),
-    getProcessorAccountContext: vi.fn().mockReturnValue(okAsync(DEFAULT_CTX)),
-    saveAlias: vi.fn().mockImplementation((a: Alias) => okAsync(a)),
-    getSender: vi.fn().mockReturnValue(okAsync(DEFAULT_SENDER_ENTRY)),
-    saveSender: vi.fn().mockReturnValue(okAsync(undefined)),
-    getTemplate: vi.fn().mockReturnValue(okAsync(null)),
-    updateGlobalReputation: vi.fn().mockReturnValue(okAsync(undefined)),
-    getDomainByName: vi.fn().mockReturnValue(okAsync(null)),
+    getSignalByMessageId: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
+    saveSignal: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+    updateSignalRetention: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+    getArc: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
+    findArcByGroupingKey: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
+    saveArc: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+    listEnabledRules: vi.fn().mockReturnValue(Promise.resolve(ok(SYSTEM_RULES))),
+    getProcessorAccountContext: vi.fn().mockReturnValue(Promise.resolve(ok(DEFAULT_CTX))),
+    saveAlias: vi.fn().mockImplementation((a: Alias) => Promise.resolve(ok(a))),
+    getSender: vi.fn().mockReturnValue(Promise.resolve(ok(DEFAULT_SENDER_ENTRY))),
+    saveSender: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+    getTemplate: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
+    updateGlobalReputation: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+    getDomainByName: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
   };
 }
 
@@ -97,7 +97,7 @@ function makeSenderEntry(domain: string, aliasAddress = "user@example.com"): imp
 
 function makeMimeParser(): MimeParser {
   return {
-    parse: vi.fn().mockReturnValue(okAsync({
+    parse: vi.fn().mockReturnValue(Promise.resolve(ok({
       from: { address: "sender@example.com", name: "Sender" },
       to: [{ address: "user@example.com" }],
       cc: [],
@@ -107,7 +107,7 @@ function makeMimeParser(): MimeParser {
       attachments: [],
       headers: { "authentication-results": "spf=pass dkim=pass" },
       sentAt: "2024-01-15T09:00:00Z",
-    })),
+    }))),
   };
 }
 
@@ -135,8 +135,8 @@ function makeAuroraWriter(): MultiClusterAuroraWriter {
 
 function makeArcMatcher(): ArcMatcher {
   return {
-    findMatch: vi.fn().mockReturnValue(okAsync(null)),
-    upsertEmbedding: vi.fn().mockReturnValue(okAsync(undefined)),
+    findMatch: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
+    upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
   };
 }
 
@@ -146,8 +146,8 @@ function makeRuleEvaluator(logger: MockLogger): RuleEvaluator {
 
 function makeNotifier(): Notifier {
   return {
-    notify: vi.fn().mockReturnValue(okAsync(undefined)),
-    notifyBlocked: vi.fn().mockReturnValue(okAsync(undefined)),
+    notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+    notifyBlocked: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
   };
 }
 
@@ -370,7 +370,7 @@ describe("SignalProcessor", () => {
   describe("signal that matches an existing Arc", () => {
     it("links Signal to the existing Arc instead of creating a new one", async () => {
       const existing = makeArc({ id: "arc-existing" });
-      vi.mocked(arcMatcher.findMatch).mockReturnValueOnce(okAsync(existing));
+      vi.mocked(arcMatcher.findMatch).mockReturnValueOnce(Promise.resolve(ok(existing)));
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -380,7 +380,7 @@ describe("SignalProcessor", () => {
 
     it("updates Arc summary and lastSignalAt from new classification", async () => {
       const existing = makeArc({ id: "arc-existing", summary: "Old summary." });
-      vi.mocked(arcMatcher.findMatch).mockReturnValueOnce(okAsync(existing));
+      vi.mocked(arcMatcher.findMatch).mockReturnValueOnce(Promise.resolve(ok(existing)));
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
         ...validClassification,
         summary: "Updated summary from new signal.",
@@ -411,7 +411,7 @@ describe("SignalProcessor", () => {
         createdAt: "2024-01-01T00:00:00Z",
         updatedAt: "2024-01-01T00:00:00Z",
       };
-      vi.mocked(store.listEnabledRules).mockReturnValueOnce(okAsync([rule]));
+      vi.mocked(store.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([rule])));
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -431,7 +431,7 @@ describe("SignalProcessor", () => {
         createdAt: "2024-01-01T00:00:00Z",
         updatedAt: "2024-01-01T00:00:00Z",
       };
-      vi.mocked(store.listEnabledRules).mockReturnValueOnce(okAsync([rule]));
+      vi.mocked(store.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([rule])));
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -451,7 +451,7 @@ describe("SignalProcessor", () => {
         createdAt: "2024-01-01T00:00:00Z",
         updatedAt: "2024-01-01T00:00:00Z",
       };
-      vi.mocked(store.listEnabledRules).mockReturnValueOnce(okAsync([rule]));
+      vi.mocked(store.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([rule])));
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -471,7 +471,7 @@ describe("SignalProcessor", () => {
         createdAt: "2024-01-01T00:00:00Z",
         updatedAt: "2024-01-01T00:00:00Z",
       };
-      vi.mocked(store.listEnabledRules).mockReturnValueOnce(okAsync([rule]));
+      vi.mocked(store.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([rule])));
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -491,7 +491,7 @@ describe("SignalProcessor", () => {
         createdAt: "2024-01-01T00:00:00Z",
         updatedAt: "2024-01-01T00:00:00Z",
       };
-      vi.mocked(store.listEnabledRules).mockReturnValueOnce(okAsync([rule]));
+      vi.mocked(store.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([rule])));
 
       // No error — processor without forwarder silently skips forward actions
       await processor.process(makeSqsEvent([{}]));
@@ -517,7 +517,7 @@ describe("SignalProcessor", () => {
         createdAt: "2024-01-01T00:00:00Z",
         updatedAt: "2024-01-01T00:00:00Z",
       };
-      vi.mocked(store.listEnabledRules).mockReturnValueOnce(okAsync([rule]));
+      vi.mocked(store.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([rule])));
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -540,11 +540,11 @@ describe("SignalProcessor", () => {
         createdAt: "2024-01-01T00:00:00Z",
         updatedAt: "2024-01-01T00:00:00Z",
       };
-      vi.mocked(store.listEnabledRules).mockReturnValueOnce(okAsync([rule]));
-      vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(okAsync({
+      vi.mocked(store.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([rule])));
+      vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok({
         ...DEFAULT_CTX,
         emailConfig: { ...DEFAULT_EMAIL_CONFIG, filterMode: "allow_all" },
-      }));
+      })));
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -557,7 +557,7 @@ describe("SignalProcessor", () => {
     it("does not include rules that did not match", async () => {
       const matching: Rule = { ...makeRule({ id: "r-match", name: "Matches", condition: "true", actions: [{ type: "archive" }] }) };
       const nonMatching: Rule = { ...makeRule({ id: "r-skip", name: "Never", condition: '{"==": [1, 2]}', actions: [{ type: "block" }] }) };
-      vi.mocked(store.listEnabledRules).mockReturnValueOnce(okAsync([matching, nonMatching]));
+      vi.mocked(store.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([matching, nonMatching])));
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -574,7 +574,7 @@ describe("SignalProcessor", () => {
     let forwarder: Forwarder;
 
     beforeEach(() => {
-      forwarder = { forward: vi.fn().mockReturnValue(okAsync(undefined)) };
+      forwarder = { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) };
       processor = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, forwarder, logger: mockLogger });
     });
 
@@ -590,7 +590,7 @@ describe("SignalProcessor", () => {
         createdAt: "2024-01-01T00:00:00Z",
         updatedAt: "2024-01-01T00:00:00Z",
       };
-      vi.mocked(store.listEnabledRules).mockReturnValueOnce(okAsync([rule]));
+      vi.mocked(store.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([rule])));
 
       await processor.process(makeSqsEvent([{ s3Key: "emails/msg-123" }]));
 
@@ -617,7 +617,7 @@ describe("SignalProcessor", () => {
         createdAt: "2024-01-01T00:00:00Z",
         updatedAt: "2024-01-01T00:00:00Z",
       };
-      vi.mocked(store.listEnabledRules).mockReturnValueOnce(okAsync([rule]));
+      vi.mocked(store.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([rule])));
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -639,7 +639,7 @@ describe("SignalProcessor", () => {
         createdAt: "2024-01-01T00:00:00Z",
         updatedAt: "2024-01-01T00:00:00Z",
       };
-      vi.mocked(store.listEnabledRules).mockReturnValueOnce(okAsync([rule]));
+      vi.mocked(store.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([rule])));
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -648,8 +648,8 @@ describe("SignalProcessor", () => {
 
     it("forwards after arc and signal are saved", async () => {
       const callOrder: string[] = [];
-      vi.mocked(store.saveSignal).mockImplementation(() => { callOrder.push("saveSignal"); return okAsync(undefined); });
-      vi.mocked(forwarder.forward).mockImplementation(() => { callOrder.push("forward"); return okAsync(undefined); });
+      vi.mocked(store.saveSignal).mockImplementation(() => { callOrder.push("saveSignal"); return Promise.resolve(ok(undefined)); });
+      vi.mocked(forwarder.forward).mockImplementation(() => { callOrder.push("forward"); return Promise.resolve(ok(undefined)); });
 
       const rule: Rule = {
         id: "rule-fwd",
@@ -662,7 +662,7 @@ describe("SignalProcessor", () => {
         createdAt: "2024-01-01T00:00:00Z",
         updatedAt: "2024-01-01T00:00:00Z",
       };
-      vi.mocked(store.listEnabledRules).mockReturnValueOnce(okAsync([rule]));
+      vi.mocked(store.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([rule])));
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -670,7 +670,7 @@ describe("SignalProcessor", () => {
     });
 
     it("continues processing when forwarder throws", async () => {
-      vi.mocked(forwarder.forward).mockReturnValueOnce(errAsync(dbError(new Error("SES throttle"))));
+      vi.mocked(forwarder.forward).mockReturnValueOnce(Promise.resolve(err(dbError(new Error("SES throttle")))));
       const rule: Rule = {
         id: "rule-fwd",
         accountId: TEST_ACCOUNT_ID,
@@ -682,7 +682,7 @@ describe("SignalProcessor", () => {
         createdAt: "2024-01-01T00:00:00Z",
         updatedAt: "2024-01-01T00:00:00Z",
       };
-      vi.mocked(store.listEnabledRules).mockReturnValueOnce(okAsync([rule]));
+      vi.mocked(store.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([rule])));
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -697,9 +697,9 @@ describe("SignalProcessor", () => {
 
   describe("deduplication", () => {
     it("skips processing if Signal with same messageId already exists", async () => {
-      vi.mocked(store.getSignalByMessageId).mockReturnValueOnce(okAsync({
+      vi.mocked(store.getSignalByMessageId).mockReturnValueOnce(Promise.resolve(ok({
         id: "SES#msg-123",
-      } as never));
+      } as never)));
 
       await processor.process(makeSqsEvent([{ sesMessageId: "msg-123" }]));
 
@@ -784,7 +784,7 @@ describe("SignalProcessor", () => {
     });
 
     it("does not fail processing when notifier throws", async () => {
-      vi.mocked(notifier.notify).mockReturnValueOnce(errAsync(dbError(new Error("SES error"))));
+      vi.mocked(notifier.notify).mockReturnValueOnce(Promise.resolve(err(dbError(new Error("SES error")))));
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -817,11 +817,11 @@ describe("SignalProcessor", () => {
     });
 
     it("allows signal on brand new address and auto-creates aliases with sender approved", async () => {
-      vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(okAsync(
+      vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok(
         { ...DEFAULT_CTX, emailConfig: null },
-      ));
+      )));
       // No existing sender entry for a brand-new address
-      vi.mocked(store.getSender).mockReturnValueOnce(okAsync(null));
+      vi.mocked(store.getSender).mockReturnValueOnce(Promise.resolve(ok(null)));
       await processor.process(makeSqsEvent([{}]));
 
       expect(store.saveSignal).toHaveBeenCalledOnce();
@@ -834,9 +834,9 @@ describe("SignalProcessor", () => {
     });
 
     it("allows signal from a known sender (eTLD+1 in approved list)", async () => {
-      vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(okAsync(
+      vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok(
         { ...DEFAULT_CTX, emailConfig: makeAlias() },
-      ));
+      )));
       // getSender returns an approved entry for example.com (default mock already does this)
 
       await processor.process(makeSqsEvent([{}]));
@@ -847,10 +847,10 @@ describe("SignalProcessor", () => {
     });
 
     it("unknown sender with default filter mode → quarantine_visible (shown in review queue)", async () => {
-      vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(okAsync(
+      vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok(
         { ...DEFAULT_CTX, emailConfig: makeAlias() }, // default filterMode: quarantine_visible
-      ));
-      vi.mocked(store.getSender).mockReturnValueOnce(okAsync(null));
+      )));
+      vi.mocked(store.getSender).mockReturnValueOnce(Promise.resolve(ok(null)));
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -862,10 +862,10 @@ describe("SignalProcessor", () => {
     });
 
     it("calls notifyBlocked when an unknown sender is quarantined (quarantine_visible fallback)", async () => {
-      vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(okAsync(
+      vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok(
         { ...DEFAULT_CTX, emailConfig: makeAlias() },
-      ));
-      vi.mocked(store.getSender).mockReturnValueOnce(okAsync(null));
+      )));
+      vi.mocked(store.getSender).mockReturnValueOnce(Promise.resolve(ok(null)));
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -874,9 +874,9 @@ describe("SignalProcessor", () => {
     });
 
     it("calls notifyBlocked when a signal is quarantine_visible (e.g. high-spam from approved sender)", async () => {
-      vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(okAsync(
+      vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok(
         { ...DEFAULT_CTX, emailConfig: makeAlias() },
-      ));
+      )));
       // Approved sender → SR-03 fires on high spam → quarantine_visible
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
         ...validClassification,
@@ -891,10 +891,10 @@ describe("SignalProcessor", () => {
     });
 
     it("filter mode quarantine_visible: unknown sender → quarantine_visible + notifies", async () => {
-      vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(okAsync(
+      vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok(
         { ...DEFAULT_CTX, emailConfig: makeAlias({ filterMode: "quarantine_visible" }) },
-      ));
-      vi.mocked(store.getSender).mockReturnValueOnce(okAsync(null));
+      )));
+      vi.mocked(store.getSender).mockReturnValueOnce(Promise.resolve(ok(null)));
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -904,10 +904,10 @@ describe("SignalProcessor", () => {
     });
 
     it("filter mode quarantine_hidden: unknown sender → quarantine_hidden + does not notify", async () => {
-      vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(okAsync(
+      vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok(
         { ...DEFAULT_CTX, emailConfig: makeAlias({ filterMode: "quarantine_hidden" }) },
-      ));
-      vi.mocked(store.getSender).mockReturnValueOnce(okAsync(null));
+      )));
+      vi.mocked(store.getSender).mockReturnValueOnce(Promise.resolve(ok(null)));
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -917,13 +917,13 @@ describe("SignalProcessor", () => {
     });
 
     it("does NOT call notifyBlocked when a signal is silently blocked by a block rule", async () => {
-      vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(okAsync(
+      vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok(
         { ...DEFAULT_CTX, emailConfig: makeAlias() },
-      ));
-      vi.mocked(store.getSender).mockReturnValueOnce(okAsync(null));
-      vi.mocked(store.listEnabledRules).mockReturnValueOnce(okAsync([
+      )));
+      vi.mocked(store.getSender).mockReturnValueOnce(Promise.resolve(ok(null)));
+      vi.mocked(store.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([
         makeRule({ condition: JSON.stringify({ "in": ["system:sender:untrusted", { var: "arc.labels" }] }), actions: [{ type: "block" }] }),
-      ]));
+      ])));
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -933,15 +933,15 @@ describe("SignalProcessor", () => {
     });
 
     it("does not fail when notifyBlocked throws (quarantine_visible via SR-03)", async () => {
-      vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(okAsync(
+      vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok(
         { ...DEFAULT_CTX, emailConfig: makeAlias() },
-      ));
+      )));
       // Approved sender + high spam → SR-03 fires → quarantine_visible → notifyBlocked called
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
         ...validClassification,
         spamScore: 0.95,
       });
-      vi.mocked(notifier.notifyBlocked).mockReturnValueOnce(errAsync(dbError(new Error("SES error"))));
+      vi.mocked(notifier.notifyBlocked).mockReturnValueOnce(Promise.resolve(err(dbError(new Error("SES error")))));
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -960,7 +960,7 @@ describe("SignalProcessor", () => {
         createdAt: "2024-01-14T10:00:00Z",
         updatedAt: "2024-01-14T10:00:00Z",
       };
-      vi.mocked(arcMatcher.findMatch).mockReturnValueOnce(okAsync(existingArc));
+      vi.mocked(arcMatcher.findMatch).mockReturnValueOnce(Promise.resolve(ok(existingArc)));
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -972,9 +972,9 @@ describe("SignalProcessor", () => {
     });
 
     it("quarantines a known sender with high spam score (SR-03 fires regardless of filter mode)", async () => {
-      vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(okAsync(
+      vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok(
         { ...DEFAULT_CTX, emailConfig: makeAlias({ filterMode: "quarantine_visible" }) },
-      ));
+      )));
       // Sender is known/approved but spam score is too high — SR-03 quarantines independently of filter mode
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
         ...validClassification,
@@ -989,10 +989,10 @@ describe("SignalProcessor", () => {
     });
 
     it("allow_all mode auto-approves new sender without blocking", async () => {
-      vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(okAsync(
+      vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok(
         { ...DEFAULT_CTX, emailConfig: makeAlias({ filterMode: "allow_all" }) },
-      ));
-      vi.mocked(store.getSender).mockReturnValueOnce(okAsync(null)); // sender not yet in list
+      )));
+      vi.mocked(store.getSender).mockReturnValueOnce(Promise.resolve(ok(null))); // sender not yet in list
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -1001,10 +1001,10 @@ describe("SignalProcessor", () => {
     });
 
     it("saves blocked signal with classification data for user review", async () => {
-      vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(okAsync(
+      vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok(
         { ...DEFAULT_CTX, emailConfig: makeAlias() },
-      ));
-      vi.mocked(store.getSender).mockReturnValueOnce(okAsync(null));
+      )));
+      vi.mocked(store.getSender).mockReturnValueOnce(Promise.resolve(ok(null)));
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -1015,14 +1015,14 @@ describe("SignalProcessor", () => {
     });
 
     it("quarantines new address when newAddressHandling is block_until_approved (default disposition)", async () => {
-      vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(okAsync({
+      vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok({
         retentionDays: 0,
         filtering: { newAddressHandling: "block_until_approved", defaultFilterMode: "quarantine_visible" },
         emailConfig: null,
         registeredDomains: [],
         userEmails: [],
         billingPlan: "Paid",
-      }));
+      })));
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -1039,10 +1039,10 @@ describe("SignalProcessor", () => {
 
   describe("global reputation tracking", () => {
     it("updates reputation with wasBlocked=true for blocked signals", async () => {
-      vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(okAsync(
+      vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok(
         { ...DEFAULT_CTX, emailConfig: makeAlias() },
-      ));
-      vi.mocked(store.getSender).mockReturnValueOnce(okAsync(null));
+      )));
+      vi.mocked(store.getSender).mockReturnValueOnce(Promise.resolve(ok(null)));
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -1120,7 +1120,7 @@ describe("SignalProcessor", () => {
 
     it("reuses existing arc found by grouping key", async () => {
       const existing = makeArc({ id: "auth-arc", groupingKey: "user@example.com:auth:example.com" });
-      vi.mocked(store.findArcByGroupingKey).mockReturnValueOnce(okAsync(existing));
+      vi.mocked(store.findArcByGroupingKey).mockReturnValueOnce(Promise.resolve(ok(existing)));
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
         ...validClassification,
         workflow: "auth",
@@ -1339,10 +1339,10 @@ describe("SignalProcessor", () => {
     });
 
     it("SR-16: conversation with prior replies (system:replied) → not low (falls back to arc urgency)", async () => {
-      vi.mocked(arcMatcher.findMatch).mockReturnValueOnce(okAsync(makeArc({
+      vi.mocked(arcMatcher.findMatch).mockReturnValueOnce(Promise.resolve(ok(makeArc({
         workflow: "conversation", labels: [], urgency: "normal",
         sentMessageIds: ["<prior-msg@example.com>"],
-      })));
+      }))));
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
         workflow: "conversation", workflowData: { workflow: "conversation", isReply: true, sentiment: "neutral", requiresReply: false },
         spamScore: 0.05, summary: "test", labels: [], classificationModelId: "us.anthropic.claude-opus-4-5-20251101-v1:0",
@@ -1430,7 +1430,7 @@ describe("SignalProcessor", () => {
 
     it("processes onboarding emails as active when no blocking rule is configured", async () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(onboardingClassification);
-      vi.mocked(store.listEnabledRules).mockReturnValueOnce(okAsync([])); // no system rules — SR-01 (block onboarding) is disabled
+      vi.mocked(store.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([]))); // no system rules — SR-01 (block onboarding) is disabled
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -1442,9 +1442,9 @@ describe("SignalProcessor", () => {
 
     it("blocks onboarding emails when a block rule targeting system:workflow:onboarding is active", async () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(onboardingClassification);
-      vi.mocked(store.listEnabledRules).mockReturnValueOnce(okAsync([
+      vi.mocked(store.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([
         makeRule({ condition: JSON.stringify({ "in": ["system:workflow:onboarding", { var: "arc.labels" }] }), actions: [{ type: "block" }] }),
-      ]));
+      ])));
 
       const notifier = makeNotifier();
       const proc = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, notifier, logger: mockLogger });
@@ -1458,9 +1458,9 @@ describe("SignalProcessor", () => {
 
     it("quarantines onboarding emails when a quarantine rule is active", async () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(onboardingClassification);
-      vi.mocked(store.listEnabledRules).mockReturnValueOnce(okAsync([
+      vi.mocked(store.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([
         makeRule({ condition: JSON.stringify({ "in": ["system:workflow:onboarding", { var: "arc.labels" }] }), actions: [{ type: "quarantine" }] }),
-      ]));
+      ])));
 
       const notifier = makeNotifier();
       const proc = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, notifier, logger: mockLogger });
@@ -1482,10 +1482,10 @@ describe("SignalProcessor", () => {
     it("overrides workflow to 'test' when from-domain matches a registered account domain", async () => {
       // Default mime parser mock returns from: { address: "sender@example.com" }
       // getETLD1("sender@example.com") = "example.com"
-      vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(okAsync({
+      vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok({
         ...DEFAULT_CTX,
         registeredDomains: ["example.com"],
-      }));
+      })));
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -1495,10 +1495,10 @@ describe("SignalProcessor", () => {
     });
 
     it("overrides workflow to 'test' when from-address exactly matches a userEmail (case-insensitive)", async () => {
-      vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(okAsync({
+      vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok({
         ...DEFAULT_CTX,
         userEmails: ["SENDER@example.com"], // uppercase — must still match
-      }));
+      })));
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -1507,11 +1507,11 @@ describe("SignalProcessor", () => {
     });
 
     it("does not override workflow when from-domain is not in registeredDomains and address not in userEmails", async () => {
-      vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(okAsync({
+      vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok({
         ...DEFAULT_CTX,
         registeredDomains: ["otherdomain.com"],
         userEmails: ["different@email.com"],
-      }));
+      })));
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -1564,11 +1564,11 @@ describe("SignalProcessor", () => {
     it("blocks status emails from untrusted senders (SR-05 rule fires, fallback does not apply)", async () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(noticeClassification);
       // Untrusted sender: no approved sender entry — filter-mode fallback would quarantine, but SR-05 fires first
-      vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(okAsync({
+      vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok({
         ...DEFAULT_CTX,
         emailConfig: makeAlias(),
-      }));
-      vi.mocked(store.getSender).mockReturnValueOnce(okAsync(null));
+      })));
+      vi.mocked(store.getSender).mockReturnValueOnce(Promise.resolve(ok(null)));
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -1621,7 +1621,7 @@ describe("SignalProcessor", () => {
 
     it("uses recipientAddress as 'from' when domain has senderSetupComplete=true", async () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(testClassification);
-      vi.mocked(store.getDomainByName).mockReturnValueOnce(okAsync({ id: "example.com", accountId: "test-account", domain: "example.com", receivingSetupComplete: true, senderSetupComplete: true, createdAt: "2024-01-01T00:00:00Z", updatedAt: "2024-01-01T00:00:00Z" }));
+      vi.mocked(store.getDomainByName).mockReturnValueOnce(Promise.resolve(ok({ id: "example.com", accountId: "test-account", domain: "example.com", receivingSetupComplete: true, senderSetupComplete: true, createdAt: "2024-01-01T00:00:00Z", updatedAt: "2024-01-01T00:00:00Z" })));
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -1632,7 +1632,7 @@ describe("SignalProcessor", () => {
 
     it("falls back to NOTIFICATION_FROM when senderSetupComplete=false", async () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(testClassification);
-      vi.mocked(store.getDomainByName).mockReturnValueOnce(okAsync({ id: "example.com", accountId: "test-account", domain: "example.com", receivingSetupComplete: true, senderSetupComplete: false, createdAt: "2024-01-01T00:00:00Z", updatedAt: "2024-01-01T00:00:00Z" }));
+      vi.mocked(store.getDomainByName).mockReturnValueOnce(Promise.resolve(ok({ id: "example.com", accountId: "test-account", domain: "example.com", receivingSetupComplete: true, senderSetupComplete: false, createdAt: "2024-01-01T00:00:00Z", updatedAt: "2024-01-01T00:00:00Z" })));
       process.env["NOTIFICATION_FROM"] = "noreply@system.example.com";
 
       await processor.process(makeSqsEvent([{}]));
@@ -1741,13 +1741,13 @@ describe("SignalProcessor", () => {
 
   describe("spam threshold override", () => {
     it("quarantines signal when per-address spamScoreThreshold is lower than default and score exceeds it", async () => {
-      vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(okAsync({
+      vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok({
         ...DEFAULT_CTX,
         emailConfig: makeAlias({
           filterMode: "quarantine_visible",
           spamScoreThreshold: 0.5,
         }),
-      }));
+      })));
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
         ...validClassification,
         spamScore: 0.7, // above per-address threshold (0.5), below default (0.9)
@@ -1761,11 +1761,11 @@ describe("SignalProcessor", () => {
     });
 
     it("uses account-level spamScoreThreshold when no per-address override is set", async () => {
-      vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(okAsync({
+      vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok({
         ...DEFAULT_CTX,
         emailConfig: makeAlias({ filterMode: "quarantine_visible" }),
         filtering: { defaultFilterMode: "quarantine_visible", newAddressHandling: "auto_allow", spamScoreThreshold: 0.6 },
-      }));
+      })));
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
         ...validClassification,
         spamScore: 0.7, // above account threshold (0.6), below default (0.9)
@@ -1799,9 +1799,9 @@ describe("SignalProcessor", () => {
     }
 
     it("passes dkimPass=true and dmarcPass=true when both SES verdicts are PASS", async () => {
-      const forwarder: Forwarder = { forward: vi.fn().mockReturnValue(okAsync(undefined)) };
+      const forwarder: Forwarder = { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) };
       const proc = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, forwarder, logger: mockLogger });
-      vi.mocked(store.listEnabledRules).mockReturnValueOnce(okAsync([makeForwardRule()]));
+      vi.mocked(store.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([makeForwardRule()])));
 
       await proc.process(makeSqsEvent([{ dkimVerdict: "PASS", dmarcVerdict: "PASS" }]));
 
@@ -1814,9 +1814,9 @@ describe("SignalProcessor", () => {
     });
 
     it("passes dkimPass=false and dmarcPass=false when SES verdicts are FAIL and GRAY", async () => {
-      const forwarder: Forwarder = { forward: vi.fn().mockReturnValue(okAsync(undefined)) };
+      const forwarder: Forwarder = { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) };
       const proc = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, forwarder, logger: mockLogger });
-      vi.mocked(store.listEnabledRules).mockReturnValueOnce(okAsync([makeForwardRule()]));
+      vi.mocked(store.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([makeForwardRule()])));
 
       await proc.process(makeSqsEvent([{ dkimVerdict: "FAIL", dmarcVerdict: "GRAY" }]));
 
@@ -1835,7 +1835,7 @@ describe("SignalProcessor", () => {
 
   describe("rule actions — assign_workflow and delete", () => {
     it("assign_workflow action changes the arc workflow to the specified value", async () => {
-      vi.mocked(store.listEnabledRules).mockReturnValueOnce(okAsync([{
+      vi.mocked(store.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([{
         id: "rw-rule",
         accountId: TEST_ACCOUNT_ID,
         name: "Reclassify as content",
@@ -1845,7 +1845,7 @@ describe("SignalProcessor", () => {
         priorityOrder: 0,
         createdAt: "2024-01-01T00:00:00Z",
         updatedAt: "2024-01-01T00:00:00Z",
-      }]));
+      }])));
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -1854,7 +1854,7 @@ describe("SignalProcessor", () => {
     });
 
     it("delete action sets arc.status=deleted and records arc.deletedAt", async () => {
-      vi.mocked(store.listEnabledRules).mockReturnValueOnce(okAsync([{
+      vi.mocked(store.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([{
         id: "del-rule",
         accountId: TEST_ACCOUNT_ID,
         name: "Auto-delete promotions",
@@ -1864,7 +1864,7 @@ describe("SignalProcessor", () => {
         priorityOrder: 0,
         createdAt: "2024-01-01T00:00:00Z",
         updatedAt: "2024-01-01T00:00:00Z",
-      }]));
+      }])));
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -1874,7 +1874,7 @@ describe("SignalProcessor", () => {
     });
 
     it("multiple actions in one rule are all applied in order", async () => {
-      vi.mocked(store.listEnabledRules).mockReturnValueOnce(okAsync([{
+      vi.mocked(store.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([{
         id: "multi-rule",
         accountId: TEST_ACCOUNT_ID,
         name: "Label and archive",
@@ -1887,7 +1887,7 @@ describe("SignalProcessor", () => {
         priorityOrder: 0,
         createdAt: "2024-01-01T00:00:00Z",
         updatedAt: "2024-01-01T00:00:00Z",
-      }]));
+      }])));
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -1899,7 +1899,7 @@ describe("SignalProcessor", () => {
 
   describe("forwarded email detection", () => {
     it("attaches original:* label when X-Forwarded-To header is present", async () => {
-      vi.mocked(mimeParser.parse).mockReturnValueOnce(okAsync({
+      vi.mocked(mimeParser.parse).mockReturnValueOnce(Promise.resolve(ok({
         from: { address: "sender@example.com", name: "Sender" },
         to: [{ address: "user@example.com" }],
         cc: [],
@@ -1907,7 +1907,7 @@ describe("SignalProcessor", () => {
         textBody: "Hello",
         attachments: [],
         headers: { "x-forwarded-to": "john@gmail.com" },
-      }));
+      })));
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -1916,7 +1916,7 @@ describe("SignalProcessor", () => {
     });
 
     it("extracts address from X-Original-To header with angle brackets", async () => {
-      vi.mocked(mimeParser.parse).mockReturnValueOnce(okAsync({
+      vi.mocked(mimeParser.parse).mockReturnValueOnce(Promise.resolve(ok({
         from: { address: "sender@example.com", name: "Sender" },
         to: [{ address: "user@example.com" }],
         cc: [],
@@ -1924,7 +1924,7 @@ describe("SignalProcessor", () => {
         textBody: "Hello",
         attachments: [],
         headers: { "x-original-to": "<alice@example.com>" },
-      }));
+      })));
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -1933,7 +1933,7 @@ describe("SignalProcessor", () => {
     });
 
     it("extracts address from Resent-To header with display name", async () => {
-      vi.mocked(mimeParser.parse).mockReturnValueOnce(okAsync({
+      vi.mocked(mimeParser.parse).mockReturnValueOnce(Promise.resolve(ok({
         from: { address: "sender@example.com", name: "Sender" },
         to: [{ address: "user@example.com" }],
         cc: [],
@@ -1941,7 +1941,7 @@ describe("SignalProcessor", () => {
         textBody: "Hello",
         attachments: [],
         headers: { "resent-to": "Bob Smith <bob@example.com>" },
-      }));
+      })));
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -1950,7 +1950,7 @@ describe("SignalProcessor", () => {
     });
 
     it("X-Forwarded-To takes priority over X-Original-To when both are present", async () => {
-      vi.mocked(mimeParser.parse).mockReturnValueOnce(okAsync({
+      vi.mocked(mimeParser.parse).mockReturnValueOnce(Promise.resolve(ok({
         from: { address: "sender@example.com", name: "Sender" },
         to: [{ address: "user@example.com" }],
         cc: [],
@@ -1961,7 +1961,7 @@ describe("SignalProcessor", () => {
           "x-forwarded-to": "primary@gmail.com",
           "x-original-to": "secondary@gmail.com",
         },
-      }));
+      })));
 
       await processor.process(makeSqsEvent([{}]));
 
@@ -1971,7 +1971,7 @@ describe("SignalProcessor", () => {
     });
 
     it("does not attach any original:* label when no forwarding headers are present", async () => {
-      vi.mocked(mimeParser.parse).mockReturnValueOnce(okAsync({
+      vi.mocked(mimeParser.parse).mockReturnValueOnce(Promise.resolve(ok({
         from: { address: "sender@example.com", name: "Sender" },
         to: [{ address: "user@example.com" }],
         cc: [],
@@ -1979,7 +1979,7 @@ describe("SignalProcessor", () => {
         textBody: "Hello",
         attachments: [],
         headers: { "authentication-results": "spf=pass" },
-      }));
+      })));
 
       await processor.process(makeSqsEvent([{}]));
 
