@@ -103,11 +103,18 @@ jobs:
             tofu -chdir=deploy state rm "$addr" 2>/dev/null || echo "  (already absent)"
           done <<< "$CERT_RECORDS"
           # DynamoDB tables already exist in eu-central-1 (they were replicas of the eu-west-1
-          # primary). The orphan step removed them from state; import them rather than creating.
+          # primary). Check state first so we distinguish "already imported" from import failure.
           echo "→ Importing existing DynamoDB tables..."
-          tofu -chdir=deploy import aws_dynamodb_table.accounts "${TF_VAR_service_name}-accounts" 2>/dev/null || echo "  (already in state)"
-          tofu -chdir=deploy import aws_dynamodb_table.signals "${TF_VAR_service_name}-signals" 2>/dev/null || echo "  (already in state)"
-          tofu -chdir=deploy import aws_dynamodb_table.processing "${TF_VAR_service_name}-processing" 2>/dev/null || echo "  (already in state)"
+          for table in accounts signals processing; do
+            addr="aws_dynamodb_table.${table}"
+            if tofu -chdir=deploy state show "$addr" > /dev/null 2>&1; then
+              echo "  $addr already in state — skipping"
+            else
+              echo "  Importing $addr ..."
+              tofu -chdir=deploy import "$addr" "${TF_VAR_service_name}-${table}"
+              echo "  ✓ $addr imported"
+            fi
+          done
           echo "" | aws s3 cp - "$MARKER"
           echo "✓ Post-migration state fix applied."
 
@@ -200,11 +207,18 @@ jobs:
             tofu -chdir=deploy state rm "$addr" 2>/dev/null || echo "  (already absent)"
           done <<< "$CERT_RECORDS"
           # DynamoDB tables already exist in eu-central-1 (they were replicas of the eu-west-1
-          # primary). The orphan step removed them from state; import them rather than creating.
+          # primary). Check state first so we distinguish "already imported" from import failure.
           echo "→ Importing existing DynamoDB tables..."
-          tofu -chdir=deploy import aws_dynamodb_table.accounts "${TF_VAR_service_name}-accounts" 2>/dev/null || echo "  (already in state)"
-          tofu -chdir=deploy import aws_dynamodb_table.signals "${TF_VAR_service_name}-signals" 2>/dev/null || echo "  (already in state)"
-          tofu -chdir=deploy import aws_dynamodb_table.processing "${TF_VAR_service_name}-processing" 2>/dev/null || echo "  (already in state)"
+          for table in accounts signals processing; do
+            addr="aws_dynamodb_table.${table}"
+            if tofu -chdir=deploy state show "$addr" > /dev/null 2>&1; then
+              echo "  $addr already in state — skipping"
+            else
+              echo "  Importing $addr ..."
+              tofu -chdir=deploy import "$addr" "${TF_VAR_service_name}-${table}"
+              echo "  ✓ $addr imported"
+            fi
+          done
           echo "" | aws s3 cp - "$MARKER"
           echo "✓ Post-migration state fix applied."
 
