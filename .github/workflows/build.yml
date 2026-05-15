@@ -327,12 +327,26 @@ jobs:
           echo ${PIPESTATUS[0]} > /tmp/apply_exit_code.txt
           exit $(cat /tmp/apply_exit_code.txt)
 
+      - name: Deploy Application Code
+        id: deploy
+        env:
+          LAMBDA_FUNCTION_NAME: ${{ steps.tofu_outputs.outputs.lambda_function_name }}
+          AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+        run: npm run deploy
+
       - name: Deployment Summary
         if: always()
         run: |
           EXIT_CODE=$(cat /tmp/apply_exit_code.txt 2>/dev/null || echo "0")
-          if [ "$EXIT_CODE" = "0" ]; then
+          DEPLOY_OUTCOME="${{ steps.deploy.outcome }}"
+          if [ "$EXIT_CODE" = "0" ] && [ "$DEPLOY_OUTCOME" = "success" ]; then
             echo "## ✅ Deployment Successful" >> $GITHUB_STEP_SUMMARY
+            exit 0
+          fi
+          if [ "$EXIT_CODE" = "0" ] && [ "$DEPLOY_OUTCOME" != "success" ]; then
+            echo "## ❌ Deploy Application Code Failed" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Tofu apply succeeded but \`npm run deploy\` failed. Check the step log for details." >> $GITHUB_STEP_SUMMARY
             exit 0
           fi
 
@@ -370,8 +384,3 @@ jobs:
             echo '```' >> $GITHUB_STEP_SUMMARY
           fi
 
-      - name: Deploy Application Code
-        env:
-          LAMBDA_FUNCTION_NAME: ${{ steps.tofu_outputs.outputs.lambda_function_name }}
-          AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
-        run: npm run deploy
