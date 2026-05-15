@@ -371,34 +371,6 @@ describe("ReindexWorker — pure-copy mode", () => {
     expect(mockUpsertEmbedding).not.toHaveBeenCalled();
   });
 
-  it("uses error log level when receiveCount exceeds threshold", async () => {
-    const event = makeSqsEvent([
-      makeSqsRecord(
-        {
-          jobId: "job-1",
-          segment: 0,
-          totalSegments: 1,
-          targetRegistryId: "nonexistent-cluster",
-          modelId: "amazon.titan-embed-text-v2:0",
-        },
-        {
-          attributes: {
-            ApproximateReceiveCount: "31",
-            SentTimestamp: "0",
-            SenderId: "sender",
-            ApproximateFirstReceiveTimestamp: "0",
-          },
-        },
-      ),
-    ]);
-
-    const result = await worker.process(event);
-
-    expect(result.batchItemFailures).toEqual([{ itemIdentifier: "msg-1" }]);
-    const errorCalls = mockLogger.calls.filter((c) => c.method === "error");
-    expect(errorCalls.length).toBeGreaterThanOrEqual(1);
-  });
-
   it("skips non-signal items (arcs, grouping keys) without error", async () => {
     const arcItem = { pk: "ACCT#a1#ARC#arc-1", sk: "#", id: "arc-1", accountId: "a1", workflow: "auth" };
     const gkeyItem = { pk: "GKEY#a1#somekey", sk: "GKEY", arcId: "arc-1" };

@@ -16,8 +16,6 @@ import type { BillingPlan } from "../embedding/retention-tier.js";
 import { getPrimaryArcMatcherRegistry, getActiveClusters } from "../embedding/cluster-registry.js";
 import { getETLD1, assignSystemLabels, DEFAULT_SPAM_SCORE_THRESHOLD } from "./filter.js";
 
-const RETRY_TRACK_THRESHOLD = 30;
-
 // ---------------------------------------------------------------------------
 // Message types
 // ---------------------------------------------------------------------------
@@ -399,13 +397,6 @@ export class SignalProcessor {
         : await this.processRecord(record);
 
       if (result.isErr()) {
-        const receiveCount = Number(record.attributes?.ApproximateReceiveCount ?? "1");
-        const level = receiveCount > RETRY_TRACK_THRESHOLD ? "error" : "warn";
-        if (level === "error") {
-          this.logger.error("Signal processing failed after exceeding retry threshold. SQS message was redelivered " + receiveCount + " times without successful completion. The message will keep being redelivered indefinitely until the root cause is fixed. Investigate earlier track-level logs for this messageId to identify the failure.", { code: "processor.signal.failed", messageId: result.error.messageId, receiveCount });
-        } else {
-          this.logger.warn("Signal processing failed on attempt " + receiveCount + ". The SQS message will be retried automatically. If this pattern persists at high volume, investigate the root cause in earlier logs for this messageId.", { code: "processor.signal.failed", messageId: result.error.messageId, receiveCount });
-        }
         failures.push({ itemIdentifier: record.messageId });
       }
     }
