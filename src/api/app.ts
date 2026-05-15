@@ -5,7 +5,7 @@ import { getDomain } from "tldts";
 import { checkDomain } from "../dns/dns-checker.js";
 import type { AuditEvent } from "../database/audit-database.js";
 import type { Result, ResultAsync } from "neverthrow";
-import type { DbError, NotFoundError, AuthressServiceError } from "../errors.js";
+import type { DbError, NotFoundError, AuthressServiceError, AuthError } from "../errors.js";
 import type { Arc, Signal, View, Label, Rule, Domain, DnsRecord, Account, Page, PageParams, ArcStatus, Workflow, WorkflowData, Alias, AliasSender, SenderMode, SenderFilterMode, VerifiedForwardingAddress, Pagination, EmailTemplate } from "../types/index.js";
 import type { Logger } from "../logger.js";
 import { deriveGroupingKey } from "../processor/processor.js";
@@ -35,7 +35,7 @@ export interface AuthContext {
 }
 
 export interface AuthService {
-  verify(token: string): Promise<AuthContext>;
+  verify(token: string): ResultAsync<AuthContext, AuthError>;
 }
 
 // ---------------------------------------------------------------------------
@@ -216,12 +216,9 @@ export function createApp({ store, auth, access, logger, verificationMailer }: A
     const header = c.req.header("Authorization");
     if (!header?.startsWith("Bearer ")) return err(c, 401, "Unauthorized");
 
-    let ctx: AuthContext;
-    try {
-      ctx = await auth.verify(header.slice(7));
-    } catch {
-      return err(c, 401, "Unauthorized");
-    }
+    const verifyResult = await auth.verify(header.slice(7));
+    if (verifyResult.isErr()) return err(c, 401, "Unauthorized");
+    const ctx = verifyResult.value;
 
     // Extract accountId from URL path for account-scoped routes
     const accountMatch = /^\/accounts\/([^/]+)/.exec(c.req.path);

@@ -19,7 +19,7 @@ const A = `/accounts/${TEST_ACCOUNT_ID}`;
 const validAuth: AuthContext = { accountId: TEST_ACCOUNT_ID, userId: TEST_USER_ID };
 
 function makeAuth(): AuthService {
-  return { verify: vi.fn().mockResolvedValue(validAuth) };
+  return { verify: vi.fn().mockReturnValue(okAsync(validAuth)) };
 }
 
 function makeAccess(): AccessService {
