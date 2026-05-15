@@ -9,6 +9,7 @@ export type InvalidResponseError = { kind: "invalid_response" };
 export type ProcessError = { kind: "process_error"; messageId: string };
 export type AuthressServiceError = { kind: "authress_service_error"; cause: Error };
 export type BedrockError = { kind: "bedrock_error"; modelId: string; cause: Error };
+export type AuthError = { kind: "auth_error"; cause: Error };
 
 // --- Constructor helpers ---
 
@@ -18,6 +19,7 @@ export const invalidResponseError = (): InvalidResponseError => ({ kind: "invali
 export const processError = (messageId: string): ProcessError => ({ kind: "process_error", messageId });
 export const authressServiceError = (cause: Error): AuthressServiceError => ({ kind: "authress_service_error", cause });
 export const bedrockError = (modelId: string, cause: Error): BedrockError => ({ kind: "bedrock_error", modelId, cause });
+export const authError = (cause: Error): AuthError => ({ kind: "auth_error", cause });
 
 // Re-export neverthrow primitives for convenience
 export { ok, err };

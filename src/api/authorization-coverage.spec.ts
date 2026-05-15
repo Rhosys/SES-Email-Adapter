@@ -24,7 +24,7 @@ function makeMockDeps() {
   });
 
   const auth: AuthService = {
-    verify: vi.fn().mockResolvedValue({ userId: "user-1", accountId: "acct-1" }),
+    verify: vi.fn().mockReturnValue(okAsync({ userId: "user-1", accountId: "acct-1" })),
   };
 
   const access: AccessService = {

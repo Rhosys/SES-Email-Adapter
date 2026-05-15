@@ -2,8 +2,9 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { Arc, Signal, View, Label, Rule, Domain, Account, Alias, VerifiedForwardingAddress } from "../types/index.js";
 import { createApp } from "./app.js";
 import type { ApiDatabase, AuthService, AuthContext, AccessService, AccountUser, VerificationMailer } from "./app.js";
-import { ok, okAsync } from "neverthrow";
+import { ok, okAsync, errAsync } from "neverthrow";
 import { createMockLogger } from "../testing/mock-logger.js";
+import { authError } from "../errors.js";
 
 // ---------------------------------------------------------------------------
 // Test doubles
@@ -16,7 +17,7 @@ const A = `/accounts/${TEST_ACCOUNT_ID}`;
 const validAuth: AuthContext = { accountId: TEST_ACCOUNT_ID, userId: TEST_USER_ID };
 
 function makeAuth(ctx: AuthContext = validAuth): AuthService {
-  return { verify: vi.fn().mockResolvedValue(ctx) };
+  return { verify: vi.fn().mockReturnValue(okAsync(ctx)) };
 }
 
 function makeAccess(): AccessService {
@@ -267,7 +268,7 @@ describe("API", () => {
     });
 
     it("returns 401 when token is invalid", async () => {
-      vi.mocked(auth.verify).mockRejectedValueOnce(new Error("Invalid token"));
+      vi.mocked(auth.verify).mockReturnValueOnce(errAsync(authError(new Error("Invalid token"))));
       const res = await req(app, "GET", `${A}/arcs`, { token: "bad-token" });
       expect(res.status).toBe(401);
     });

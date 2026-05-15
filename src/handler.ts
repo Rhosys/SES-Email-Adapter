@@ -213,19 +213,18 @@ async function handleWsAuthorizer(event: WsAuthorizerEvent): Promise<WsAuthorize
 
   if (!token) return wsDeny(event.methodArn);
 
-  try {
-    const ctx = await authService.verify(token);
-    return {
-      principalId: ctx.userId,
-      policyDocument: {
-        Version: "2012-10-17",
-        Statement: [{ Action: "execute-api:Invoke", Effect: "Allow", Resource: event.methodArn }],
-      },
-      context: { accountId: ctx.accountId, userId: ctx.userId },
-    };
-  } catch {
-    return wsDeny(event.methodArn);
-  }
+  const verifyResult = await authService.verify(token);
+  if (verifyResult.isErr()) return wsDeny(event.methodArn);
+  const ctx = verifyResult.value;
+
+  return {
+    principalId: ctx.userId,
+    policyDocument: {
+      Version: "2012-10-17",
+      Statement: [{ Action: "execute-api:Invoke", Effect: "Allow", Resource: event.methodArn }],
+    },
+    context: { accountId: ctx.accountId, userId: ctx.userId },
+  };
 }
 
 function wsDeny(methodArn: string): WsAuthorizerResult {

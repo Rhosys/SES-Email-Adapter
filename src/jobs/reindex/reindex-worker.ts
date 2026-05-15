@@ -22,6 +22,7 @@ import type { Signal } from "../../types/index.js";
 import type { Result } from "../../errors.js";
 import { ok, err, processError } from "../../errors.js";
 import type { ProcessError } from "../../errors.js";
+import { ResultAsync } from "neverthrow";
 import type { Logger } from "../../logger.js";
 
 // ---------------------------------------------------------------------------
@@ -221,22 +222,21 @@ export class ReindexWorker {
       return err({ signalId: signal.id, reason: "no s3Key on signal record" });
     }
 
-    let rawMimeBuffer: Buffer;
-    try {
-      rawMimeBuffer = await this.fetchFromS3(s3Key);
-    } catch (e) {
+    const fetchResult = await this.fetchFromS3(s3Key);
+    if (fetchResult.isErr()) {
+      const e = fetchResult.error;
       if (isNoSuchKeyError(e)) {
         return err({ signalId: signal.id, reason: `NoSuchKey: ${s3Key}` });
       }
       return err({ signalId: signal.id, reason: `S3 fetch failed: ${String(e)}` });
     }
+    const rawMimeBuffer = fetchResult.value;
 
-    let parsed: Awaited<ReturnType<typeof mimeParser.parse>>;
-    try {
-      parsed = await mimeParser.parse(rawMimeBuffer);
-    } catch (e) {
-      return err({ signalId: signal.id, reason: `MIME parse failed: ${String(e)}` });
+    const parseResult = await mimeParser.parseBuffer(rawMimeBuffer);
+    if (parseResult.isErr()) {
+      return err({ signalId: signal.id, reason: `MIME parse failed: ${String(parseResult.error.cause)}` });
     }
+    const parsed = parseResult.value;
 
     const embedTextInput = extractEmbedTextInput(parsed, signal.accountId, signal.recipientAddress);
     const embedText = buildEmbedText(embedTextInput);
@@ -246,36 +246,46 @@ export class ReindexWorker {
       return err({ signalId: signal.id, reason: `Embedding generation failed for model "${modelId}": ${result.error.cause.message}` });
     }
 
-    try {
-      await arcDatabase.addEmbeddingToCache(
-        signal.accountId,
-        signal.id,
-        modelId,
-        result.value.vector,
-      );
+    const cacheResult = await arcDatabase.addEmbeddingToCache(
+      signal.accountId,
+      signal.id,
+      modelId,
+      result.value.vector,
+    );
+    if (cacheResult.isErr()) {
+      return err({ signalId: signal.id, reason: `DDB cache write failed: ${String(cacheResult.error.cause)}` });
+    }
 
-      await multiClusterWriter.upsertEmbedding({
+    const upsertResult = await ResultAsync.fromPromise(
+      multiClusterWriter.upsertEmbedding({
         clusterId: targetClusterId,
         arcId: signal.arcId!,
         accountId: signal.accountId,
         recipientAddress: signal.recipientAddress,
         embedding: result.value.vector,
-      });
-
-      return ok(undefined);
-    } catch (e) {
-      return err({ signalId: signal.id, reason: `Regeneration failed: ${String(e)}` });
+      }),
+      (e) => e,
+    );
+    if (upsertResult.isErr()) {
+      return err({ signalId: signal.id, reason: `Aurora upsert failed: ${String(upsertResult.error)}` });
     }
+
+    return ok(undefined);
   }
 
   // ---------------------------------------------------------------------------
   // S3 fetch helper
   // ---------------------------------------------------------------------------
 
-  private async fetchFromS3(s3Key: string): Promise<Buffer> {
-    const res = await s3.send(new GetObjectCommand({ Bucket: EMAIL_BUCKET, Key: s3Key }));
-    const body = await res.Body?.transformToByteArray();
-    if (!body) throw new Error(`Empty S3 object: ${s3Key}`);
-    return Buffer.from(body);
+  private fetchFromS3(s3Key: string): ResultAsync<Buffer, Error> {
+    return ResultAsync.fromPromise(
+      (async () => {
+        const res = await s3.send(new GetObjectCommand({ Bucket: EMAIL_BUCKET, Key: s3Key }));
+        const body = await res.Body?.transformToByteArray();
+        if (!body) throw new Error(`Empty S3 object: ${s3Key}`);
+        return Buffer.from(body);
+      })(),
+      (e) => e instanceof Error ? e : new Error(String(e)),
+    );
   }
 }

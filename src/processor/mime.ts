@@ -14,7 +14,8 @@ export interface ParsedMime {
   sentAt?: string;
 }
 
-import type { ResultAsync } from "neverthrow";
+import { ResultAsync } from "neverthrow";
+import { dbError } from "../errors.js";
 import type { DbError } from "../errors.js";
 
 export interface MimeParser {
@@ -67,5 +68,12 @@ export class MailparserMimeParser {
       headers,
       ...(parsed.date ? { sentAt: parsed.date.toISOString() } : {}),
     };
+  }
+
+  parseBuffer(rawEmail: Buffer | string): ResultAsync<ParsedMime, DbError> {
+    return ResultAsync.fromPromise(
+      this.parse(rawEmail),
+      (e) => dbError(e instanceof Error ? e : new Error(String(e))),
+    );
   }
 }

@@ -12,13 +12,13 @@ The codebase uses traditional throw/catch patterns exclusively. Database methods
 
 ## Decision
 
-Adopt `neverthrow` `Result` and `ResultAsync` types as the standard error handling mechanism across the entire codebase, with one exception: Hono middleware (which expects thrown errors by design).
+Adopt `neverthrow` `Result` and `ResultAsync` types as the standard error handling mechanism across the entire codebase.
 
 ## Rules
 
 ### 1. No throwing, no catching
 
-Functions return `Result<T, E>` or `ResultAsync<T, E>`. Callers check `isErr()` explicitly. The only exception is Hono middleware, where the framework expects errors to be thrown.
+Functions return `Result<T, E>` or `ResultAsync<T, E>`. Callers check `isErr()` explicitly.
 
 ### 2. No `.andThen()` chaining
 
@@ -108,9 +108,9 @@ app.get("/accounts/:accountId/arcs/:id", async (c) => {
 });
 ```
 
-### 9. Hono middleware is the only exception
+### 9. No exceptions anywhere
 
-Auth and authorization middleware continue to use try/catch because Hono's middleware model expects it. This is the only place in the codebase where throwing is acceptable.
+Every function returns `Result` or `ResultAsync`. The TypeScript type system enforces that callers handle errors — if a function returns `Result<T, E>`, the caller must check `isErr()` before accessing the value. This applies to middleware, auth services, and all other code equally.
 
 ## Consequences
 
