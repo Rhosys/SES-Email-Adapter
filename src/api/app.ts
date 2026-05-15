@@ -10,6 +10,7 @@ import type { Arc, Signal, View, Label, Rule, Domain, DnsRecord, Account, Page, 
 import type { Logger } from "../logger.js";
 import { deriveGroupingKey } from "../processor/processor.js";
 import { zParse } from "./validate.js";
+import type { JobDispatcher } from "./job-dispatch-handler.js";
 import { authorizationGuard } from "./authorization-guard.js";
 import { createAuthorize } from "./authorization-middleware.js";
 import {
@@ -171,6 +172,7 @@ interface AppDeps {
   access?: AccessService;
   logger: Logger;
   verificationMailer?: VerificationMailer;
+  jobDispatcher?: JobDispatcher;
 }
 
 type AppEnv = { Variables: { auth: AuthContext; authorizationVerified?: boolean } };
@@ -183,7 +185,7 @@ function page<K extends string, T>(key: K, items: T[], nextCursor?: string): Rec
   return { [key]: items, pagination: { cursor: nextCursor ?? null } } as Record<K, T[]> & { pagination: Pagination };
 }
 
-export function createApp({ store, auth, access, logger, verificationMailer }: AppDeps) {
+export function createApp({ store, auth, access, logger, verificationMailer, jobDispatcher }: AppDeps) {
   const app = new OpenAPIHono<AppEnv>().basePath('/api');
 
   app.doc("/openapi.json", {
@@ -1025,6 +1027,51 @@ export function createApp({ store, auth, access, logger, verificationMailer }: A
     if (result.isErr()) return err(c, 500, "Internal Server Error");
     return c.json(result.value);
   });
+
+  // ---------------------------------------------------------------------------
+  // Reindex jobs (admin)
+  // ---------------------------------------------------------------------------
+
+  if (jobDispatcher) {
+    const MIN_SEGMENT_COUNT = 1;
+    const MAX_SEGMENT_COUNT = 256;
+
+    app.post("/reindex", async (c) => {
+      let body: Record<string, unknown> | null;
+      try {
+        body = await c.req.json<Record<string, unknown>>();
+      } catch {
+        body = null;
+      }
+      if (!body || typeof body !== "object" || Array.isArray(body)) {
+        return err(c, 400, "Request body must be a JSON object");
+      }
+
+      const { targetRegistryId, segmentCount } = body;
+      if (!targetRegistryId || typeof targetRegistryId !== "string") {
+        return err(c, 400, "targetRegistryId is required and must be a string");
+      }
+      if (segmentCount !== undefined) {
+        if (typeof segmentCount !== "number" || !Number.isInteger(segmentCount)) {
+          return err(c, 400, "segmentCount must be an integer");
+        }
+        if (segmentCount < MIN_SEGMENT_COUNT || segmentCount > MAX_SEGMENT_COUNT) {
+          return err(c, 400, `segmentCount must be between ${MIN_SEGMENT_COUNT} and ${MAX_SEGMENT_COUNT}`);
+        }
+      }
+
+      const result = await jobDispatcher.dispatch(targetRegistryId, segmentCount as number | undefined);
+      if (result.isErr()) return err(c, 404, `Cluster "${targetRegistryId}" not found`);
+      return c.json(result.value, 202);
+    });
+
+    app.get("/reindex/:jobId", async (c) => {
+      const jobId = c.req.param("jobId");
+      const result = await jobDispatcher.getReport(jobId);
+      if (result.isErr()) return err(c, 404, `Reindex job "${jobId}" not found`);
+      return c.json(result.value);
+    });
+  }
 
   return app;
 }
