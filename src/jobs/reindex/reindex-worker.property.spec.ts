@@ -12,9 +12,8 @@ import { mockClient } from "aws-sdk-client-mock";
 import { DynamoDBDocumentClient, ScanCommand } from "@aws-sdk/lib-dynamodb";
 import { BedrockRuntimeClient, InvokeModelCommand } from "@aws-sdk/client-bedrock-runtime";
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
-import type { SQSEvent, SQSRecord } from "aws-lambda";
 import { createMockLogger } from "../../testing/mock-logger.js";
-import { ReindexWorker } from "./reindex-worker.js";
+import { ReindexWorker, type ReindexSegmentMessage } from "./reindex-worker.js";
 import { ok } from "../../errors.js";
 
 // ---------------------------------------------------------------------------
@@ -79,34 +78,7 @@ const signal2 = makeSignal("SES#sig2", "acct-2", "arc-2", "bob@example.com", [-0
 const signal3 = makeSignal("SES#sig3", "acct-1", "arc-3", "carol@example.com", [1.0, -1.0, 0.0, 0.5, 0.25]);
 
 // ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function makeSqsRecord(body: unknown): SQSRecord {
-  return {
-    messageId: "msg-prop-test",
-    receiptHandle: "handle-1",
-    body: JSON.stringify(body),
-    attributes: {
-      ApproximateReceiveCount: "1",
-      SentTimestamp: "0",
-      SenderId: "sender",
-      ApproximateFirstReceiveTimestamp: "0",
-    },
-    messageAttributes: {},
-    md5OfBody: "",
-    eventSource: "aws:sqs",
-    eventSourceARN: "arn:aws:sqs:eu-central-1:123:reindex-queue",
-    awsRegion: "eu-central-1",
-  };
-}
-
-function makeSqsEvent(records: SQSRecord[]): SQSEvent {
-  return { Records: records };
-}
-
-// ---------------------------------------------------------------------------
-// Edge cases
+// Tests
 // ---------------------------------------------------------------------------
 
 const cases: Array<[string, { signals: typeof signal1[] }]> = [
@@ -147,17 +119,15 @@ describe("Property 11: Reindex worker uses cache exclusively and never calls Bed
 
     ddbMock.on(ScanCommand).resolves({ Items: signals, LastEvaluatedKey: undefined });
 
-    const event = makeSqsEvent([
-      makeSqsRecord({
-        jobId: "job-prop-11",
-        segment: 0,
-        totalSegments: 1,
-        targetRegistryId: "aurora-prod-titan-v2",
-        modelId: "amazon.titan-embed-text-v2:0",
-      }),
-    ]);
+    const message: ReindexSegmentMessage = {
+      jobId: "job-prop-11",
+      segment: 0,
+      totalSegments: 1,
+      targetRegistryId: "aurora-prod-titan-v2",
+      modelId: "amazon.titan-embed-text-v2:0",
+    };
 
-    await worker.process(event);
+    await worker.processSegmentMessage(message);
 
     // 1. Worker reads from DynamoDB (scan was called)
     const scanCalls = ddbMock.commandCalls(ScanCommand);
@@ -197,17 +167,15 @@ describe("Property 11: Reindex worker uses cache exclusively and never calls Bed
 
     ddbMock.on(ScanCommand).resolves({ Items: [signal], LastEvaluatedKey: undefined });
 
-    const event = makeSqsEvent([
-      makeSqsRecord({
-        jobId: "job-prop-11-exact",
-        segment: 0,
-        totalSegments: 1,
-        targetRegistryId: "aurora-prod-titan-v2",
-        modelId: "amazon.titan-embed-text-v2:0",
-      }),
-    ]);
+    const message: ReindexSegmentMessage = {
+      jobId: "job-prop-11-exact",
+      segment: 0,
+      totalSegments: 1,
+      targetRegistryId: "aurora-prod-titan-v2",
+      modelId: "amazon.titan-embed-text-v2:0",
+    };
 
-    await worker.process(event);
+    await worker.processSegmentMessage(message);
 
     expect(mockUpsertEmbedding).toHaveBeenCalledTimes(1);
     expect(mockUpsertEmbedding).toHaveBeenCalledWith(

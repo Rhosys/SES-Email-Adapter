@@ -6,12 +6,11 @@
 // `embedding.primary_failed`.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import type { SQSEvent } from "aws-lambda";
 import { err, ok } from "../errors.js";
 import fc from "fast-check";
 import { SignalProcessor, SYSTEM_RULES } from "./processor.js";
 import { JsonLogicRuleEvaluator } from "./rule-evaluator.js";
-import type { ProcessorDatabase, ArcMatcher } from "./processor.js";
+import type { InboundSignalMessage, ProcessorDatabase, ArcMatcher } from "./processor.js";
 import type { MimeParser } from "./mime.js";
 import type { SignalClassifier, ClassificationOutput } from "../classifier/classifier.js";
 import type { EmbeddingGenerator } from "../embedding/embedding-generator.js";
@@ -133,29 +132,15 @@ function makeAuroraWriter(): MultiClusterAuroraWriter {
   };
 }
 
-function makeSqsEvent(sesMessageId: string): SQSEvent {
-  const notification = {
-    accountId: TEST_ACCOUNT_ID,
-    mail: { messageId: sesMessageId, timestamp: "2024-01-15T10:00:00Z", destination: ["user@example.com"] },
-    receipt: {
-      recipients: ["user@example.com"],
-      dkimVerdict: { status: "PASS" },
-      dmarcVerdict: { status: "PASS" },
-      action: { bucketName: "test-bucket", objectKey: `emails/${sesMessageId}` },
-    },
-  };
+function makeMessage(sesMessageId: string): InboundSignalMessage {
   return {
-    Records: [{
-      messageId: "sqs-primary-fail-0",
-      receiptHandle: "handle",
-      body: JSON.stringify({ Message: JSON.stringify(notification) }),
-      attributes: { ApproximateReceiveCount: "1", SentTimestamp: "1234567890", SenderId: "sender", ApproximateFirstReceiveTimestamp: "1234567890" },
-      messageAttributes: {},
-      md5OfBody: "",
-      eventSource: "aws:sqs",
-      eventSourceARN: "arn:aws:sqs:us-east-1:123:queue",
-      awsRegion: "us-east-1",
-    }],
+    accountId: TEST_ACCOUNT_ID,
+    s3Key: `emails/${sesMessageId}`,
+    sesMessageId,
+    timestamp: "2024-01-15T10:00:00Z",
+    destination: ["user@example.com"],
+    dkimVerdict: "PASS",
+    dmarcVerdict: "PASS",
   };
 }
 
@@ -205,11 +190,10 @@ describe("Property 1: Primary failure causes batch item failure", () => {
           sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
         });
 
-        const result = await processor.process(makeSqsEvent("test-msg-primary-fail"));
+        const result = await processor.processRecord(makeMessage("test-msg-primary-fail"), 1);
 
         // Assert: batch item failure returned
-        expect(result.batchItemFailures).toHaveLength(1);
-        expect(result.batchItemFailures[0]!.itemIdentifier).toBe("sqs-primary-fail-0");
+        expect(result.isErr()).toBe(true);
 
         // Assert: ERROR logged with code embedding.primary_failed
         const errorCalls = mockLogger.calls.filter(

@@ -1,11 +1,10 @@
 import { randomUUID } from "crypto";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import type { SQSEvent } from "aws-lambda";
 import { ok, err } from "neverthrow";
 import { SignalProcessor, deriveGroupingKey, SYSTEM_RULES, extractForwardedAddress } from "./processor.js";
 import { JsonLogicRuleEvaluator } from "./rule-evaluator.js";
 import { baseUrgency } from "./priority.js";
-import type { ProcessorDatabase, ArcMatcher, RuleEvaluator, Notifier, Forwarder, ForwardOptions, ReplySender } from "./processor.js";
+import type { ProcessorDatabase, ArcMatcher, RuleEvaluator, Notifier, Forwarder, ForwardOptions, ReplySender, InboundSignalMessage } from "./processor.js";
 import type { MimeParser } from "./mime.js";
 import type { SignalClassifier, ClassificationOutput } from "../classifier/classifier.js";
 import type { EmbeddingGenerator, EmbeddingResult } from "../embedding/embedding-generator.js";
@@ -151,7 +150,7 @@ function makeNotifier(): Notifier {
   };
 }
 
-function makeSqsEvent(messages: Array<{
+function makeMessage(opts: {
   accountId?: string;
   s3Key?: string;
   sesMessageId?: string;
@@ -159,43 +158,16 @@ function makeSqsEvent(messages: Array<{
   destination?: string[];
   dkimVerdict?: "PASS" | "FAIL" | "GRAY" | "PROCESSING_FAILED";
   dmarcVerdict?: "PASS" | "FAIL" | "GRAY" | "PROCESSING_FAILED";
-}>): SQSEvent {
+} = {}): InboundSignalMessage {
+  const sesMessageId = opts.sesMessageId ?? "msg-123";
   return {
-    Records: messages.map((msg, i) => {
-      const sesMessageId = msg.sesMessageId ?? "msg-123";
-      const notification = {
-        accountId: msg.accountId ?? TEST_ACCOUNT_ID,
-        mail: {
-          messageId: sesMessageId,
-          timestamp: msg.timestamp ?? "2024-01-15T10:00:00Z",
-          destination: msg.destination ?? ["user@example.com"],
-        },
-        receipt: {
-          dkimVerdict: { status: msg.dkimVerdict ?? "PASS" },
-          dmarcVerdict: { status: msg.dmarcVerdict ?? "PASS" },
-          action: {
-            bucketName: "test-bucket",
-            objectKey: msg.s3Key ?? `emails/${sesMessageId}`,
-          },
-        },
-      };
-      return {
-        messageId: `sqs-${i}`,
-        receiptHandle: "handle",
-        body: JSON.stringify({ Message: JSON.stringify(notification) }),
-        attributes: {
-          ApproximateReceiveCount: "1",
-          SentTimestamp: "1234567890",
-          SenderId: "sender",
-          ApproximateFirstReceiveTimestamp: "1234567890",
-        },
-        messageAttributes: {},
-        md5OfBody: "",
-        eventSource: "aws:sqs",
-        eventSourceARN: "arn:aws:sqs:us-east-1:123:queue",
-        awsRegion: "us-east-1",
-      };
-    }),
+    accountId: opts.accountId ?? TEST_ACCOUNT_ID,
+    s3Key: opts.s3Key ?? `emails/${sesMessageId}`,
+    sesMessageId,
+    timestamp: opts.timestamp ?? "2024-01-15T10:00:00Z",
+    destination: opts.destination ?? ["user@example.com"],
+    dkimVerdict: opts.dkimVerdict ?? "PASS",
+    dmarcVerdict: opts.dmarcVerdict ?? "PASS",
   };
 }
 
@@ -281,8 +253,7 @@ describe("SignalProcessor", () => {
 
   describe("new signal with no matching Arc", () => {
     it("saves a Signal after classification", async () => {
-      const event = makeSqsEvent([{ sesMessageId: "msg-abc" }]);
-      await processor.process(event);
+      await processor.processRecord(makeMessage({ sesMessageId: "msg-abc" }), 1);
 
       expect(store.saveSignal).toHaveBeenCalledOnce();
       const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
@@ -293,7 +264,7 @@ describe("SignalProcessor", () => {
     });
 
     it("creates a new Arc when arcMatcher returns null", async () => {
-      await processor.process(makeSqsEvent([{}]));
+      await processor.processRecord(makeMessage(), 1);
 
       expect(store.saveArc).toHaveBeenCalledOnce();
       const arc = vi.mocked(store.saveArc).mock.calls[0]![0] as Arc;
@@ -303,7 +274,7 @@ describe("SignalProcessor", () => {
     });
 
     it("links Signal to the newly created Arc", async () => {
-      await processor.process(makeSqsEvent([{}]));
+      await processor.processRecord(makeMessage(), 1);
 
       const arc = vi.mocked(store.saveArc).mock.calls[0]![0] as Arc;
       const signal = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
@@ -311,7 +282,7 @@ describe("SignalProcessor", () => {
     });
 
     it("embeds the signal content and runs arc matching", async () => {
-      await processor.process(makeSqsEvent([{}]));
+      await processor.processRecord(makeMessage(), 1);
 
       expect(embeddingGenerator.generateForModel).toHaveBeenCalledOnce();
       // personal workflow has no grouping key — falls back to vector search
@@ -319,7 +290,7 @@ describe("SignalProcessor", () => {
     });
 
     it("stores the embedding after saving", async () => {
-      await processor.process(makeSqsEvent([{}]));
+      await processor.processRecord(makeMessage(), 1);
 
       expect(auroraWriter.upsertEmbedding).toHaveBeenCalledOnce();
     });
@@ -339,7 +310,7 @@ describe("SignalProcessor", () => {
         },
       });
 
-      await processor.process(makeSqsEvent([{}]));
+      await processor.processRecord(makeMessage(), 1);
 
       const arc = vi.mocked(store.saveArc).mock.calls[0]![0] as Arc;
       expect(arc.workflow).toBe("payments");
@@ -348,7 +319,7 @@ describe("SignalProcessor", () => {
     });
 
     it("preserves from/to/subject from parsed MIME on the Signal", async () => {
-      await processor.process(makeSqsEvent([{}]));
+      await processor.processRecord(makeMessage(), 1);
 
       const signal = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
       expect(signal.from.address).toBe("sender@example.com");
@@ -356,7 +327,7 @@ describe("SignalProcessor", () => {
     });
 
     it("sets recipientAddress from the SQS destination field", async () => {
-      await processor.process(makeSqsEvent([{ destination: ["inbox@customer.com"] }]));
+      await processor.processRecord(makeMessage({ destination: ["inbox@customer.com"] }), 1);
 
       const signal = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
       expect(signal.recipientAddress).toBe("inbox@customer.com");
@@ -372,7 +343,7 @@ describe("SignalProcessor", () => {
       const existing = makeArc({ id: "arc-existing" });
       vi.mocked(arcMatcher.findMatch).mockReturnValueOnce(Promise.resolve(ok(existing)));
 
-      await processor.process(makeSqsEvent([{}]));
+      await processor.processRecord(makeMessage(), 1);
 
       const signal = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
       expect(signal.arcId).toBe("arc-existing");
@@ -386,7 +357,7 @@ describe("SignalProcessor", () => {
         summary: "Updated summary from new signal.",
       });
 
-      await processor.process(makeSqsEvent([{}]));
+      await processor.processRecord(makeMessage(), 1);
 
       const arc = vi.mocked(store.saveArc).mock.calls[0]![0] as Arc;
       expect(arc.id).toBe("arc-existing");
@@ -413,7 +384,7 @@ describe("SignalProcessor", () => {
       };
       vi.mocked(store.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([rule])));
 
-      await processor.process(makeSqsEvent([{}]));
+      await processor.processRecord(makeMessage(), 1);
 
       const arc = vi.mocked(store.saveArc).mock.calls[0]![0] as Arc;
       expect(arc.labels).toContain("billing");
@@ -433,7 +404,7 @@ describe("SignalProcessor", () => {
       };
       vi.mocked(store.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([rule])));
 
-      await processor.process(makeSqsEvent([{}]));
+      await processor.processRecord(makeMessage(), 1);
 
       const arc = vi.mocked(store.saveArc).mock.calls[0]![0] as Arc;
       expect(arc.status).toBe("archived");
@@ -453,7 +424,7 @@ describe("SignalProcessor", () => {
       };
       vi.mocked(store.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([rule])));
 
-      await processor.process(makeSqsEvent([{}]));
+      await processor.processRecord(makeMessage(), 1);
 
       const arc = vi.mocked(store.saveArc).mock.calls[0]![0] as Arc;
       expect(arc.status).toBe("active");
@@ -473,7 +444,7 @@ describe("SignalProcessor", () => {
       };
       vi.mocked(store.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([rule])));
 
-      await processor.process(makeSqsEvent([{}]));
+      await processor.processRecord(makeMessage(), 1);
 
       const arc = vi.mocked(store.saveArc).mock.calls[0]![0] as Arc;
       expect(arc.labels).not.toContain("important");
@@ -494,7 +465,7 @@ describe("SignalProcessor", () => {
       vi.mocked(store.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([rule])));
 
       // No error — processor without forwarder silently skips forward actions
-      await processor.process(makeSqsEvent([{}]));
+      await processor.processRecord(makeMessage(), 1);
 
       expect(store.saveSignal).toHaveBeenCalledOnce();
     });
@@ -519,7 +490,7 @@ describe("SignalProcessor", () => {
       };
       vi.mocked(store.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([rule])));
 
-      await processor.process(makeSqsEvent([{}]));
+      await processor.processRecord(makeMessage(), 1);
 
       const signal = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
       expect(signal.matchedRules).toHaveLength(1);
@@ -546,7 +517,7 @@ describe("SignalProcessor", () => {
         emailConfig: { ...DEFAULT_EMAIL_CONFIG, filterMode: "allow_all" },
       })));
 
-      await processor.process(makeSqsEvent([{}]));
+      await processor.processRecord(makeMessage(), 1);
 
       const signal = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
       expect(signal.status).toBe("quarantine_visible");
@@ -559,7 +530,7 @@ describe("SignalProcessor", () => {
       const nonMatching: Rule = { ...makeRule({ id: "r-skip", name: "Never", condition: '{"==": [1, 2]}', actions: [{ type: "block" }] }) };
       vi.mocked(store.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([matching, nonMatching])));
 
-      await processor.process(makeSqsEvent([{}]));
+      await processor.processRecord(makeMessage(), 1);
 
       const signal = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
       expect(signal.matchedRules?.map((r) => r.ruleId)).toEqual(["r-match"]);
@@ -592,7 +563,7 @@ describe("SignalProcessor", () => {
       };
       vi.mocked(store.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([rule])));
 
-      await processor.process(makeSqsEvent([{ s3Key: "emails/msg-123" }]));
+      await processor.processRecord(makeMessage({ s3Key: "emails/msg-123" }), 1);
 
       expect(forwarder.forward).toHaveBeenCalledOnce();
       expect(forwarder.forward).toHaveBeenCalledWith("emails/msg-123", "backup@personal.com", TEST_ACCOUNT_ID, {
@@ -619,7 +590,7 @@ describe("SignalProcessor", () => {
       };
       vi.mocked(store.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([rule])));
 
-      await processor.process(makeSqsEvent([{}]));
+      await processor.processRecord(makeMessage(), 1);
 
       const expectedOpts: ForwardOptions = { senderDomain: "example.com", dkimPass: true, dmarcPass: true };
       expect(forwarder.forward).toHaveBeenCalledTimes(2);
@@ -641,7 +612,7 @@ describe("SignalProcessor", () => {
       };
       vi.mocked(store.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([rule])));
 
-      await processor.process(makeSqsEvent([{}]));
+      await processor.processRecord(makeMessage(), 1);
 
       expect(forwarder.forward).not.toHaveBeenCalled();
     });
@@ -664,7 +635,7 @@ describe("SignalProcessor", () => {
       };
       vi.mocked(store.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([rule])));
 
-      await processor.process(makeSqsEvent([{}]));
+      await processor.processRecord(makeMessage(), 1);
 
       expect(callOrder.indexOf("saveSignal")).toBeLessThan(callOrder.indexOf("forward"));
     });
@@ -684,7 +655,7 @@ describe("SignalProcessor", () => {
       };
       vi.mocked(store.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([rule])));
 
-      await processor.process(makeSqsEvent([{}]));
+      await processor.processRecord(makeMessage(), 1);
 
       // Signal was still saved despite forward failure
       expect(store.saveSignal).toHaveBeenCalledOnce();
@@ -701,7 +672,7 @@ describe("SignalProcessor", () => {
         id: "SES#msg-123",
       } as never)));
 
-      await processor.process(makeSqsEvent([{ sesMessageId: "msg-123" }]));
+      await processor.processRecord(makeMessage({ sesMessageId: "msg-123" }), 1);
 
       expect(classifier.classify).not.toHaveBeenCalled();
       expect(store.saveSignal).not.toHaveBeenCalled();
@@ -714,13 +685,15 @@ describe("SignalProcessor", () => {
 
   describe("batch processing", () => {
     it("processes all SQS records", async () => {
-      const event = makeSqsEvent([
-        { sesMessageId: "msg-1" },
-        { sesMessageId: "msg-2" },
-        { sesMessageId: "msg-3" },
-      ]);
+      const messages = [
+        makeMessage({ sesMessageId: "msg-1" }),
+        makeMessage({ sesMessageId: "msg-2" }),
+        makeMessage({ sesMessageId: "msg-3" }),
+      ];
 
-      await processor.process(event);
+      for (const message of messages) {
+        await processor.processRecord(message, 1);
+      }
 
       expect(classifier.classify).toHaveBeenCalledTimes(3);
       expect(store.saveSignal).toHaveBeenCalledTimes(3);
@@ -731,13 +704,11 @@ describe("SignalProcessor", () => {
         .mockRejectedValueOnce(new Error("Bedrock error"))
         .mockResolvedValueOnce(validClassification);
 
-      const event = makeSqsEvent([
-        { sesMessageId: "msg-fail" },
-        { sesMessageId: "msg-ok" },
-      ]);
+      const result1 = await processor.processRecord(makeMessage({ sesMessageId: "msg-fail" }), 1);
+      const result2 = await processor.processRecord(makeMessage({ sesMessageId: "msg-ok" }), 1);
 
-      await processor.process(event);
-
+      expect(result1.isErr()).toBe(true);
+      expect(result2.isOk()).toBe(true);
       expect(store.saveSignal).toHaveBeenCalledOnce();
       const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
       expect(saved.id).toBe("SES#msg-ok");
@@ -758,13 +729,13 @@ describe("SignalProcessor", () => {
     });
 
     it("calls notifier after saving a new Signal", async () => {
-      await processor.process(makeSqsEvent([{}]));
+      await processor.processRecord(makeMessage(), 1);
 
       expect(notifier.notify).toHaveBeenCalledOnce();
     });
 
     it("passes accountId, arc, and signal to notifier", async () => {
-      await processor.process(makeSqsEvent([{}]));
+      await processor.processRecord(makeMessage(), 1);
 
       const [accountId, arc, signal] = vi.mocked(notifier.notify).mock.calls[0]!;
       expect(accountId).toBe(TEST_ACCOUNT_ID);
@@ -778,7 +749,7 @@ describe("SignalProcessor", () => {
         spamScore: 0.95,
       });
 
-      await processor.process(makeSqsEvent([{}]));
+      await processor.processRecord(makeMessage(), 1);
 
       expect(notifier.notify).not.toHaveBeenCalled();
     });
@@ -786,7 +757,7 @@ describe("SignalProcessor", () => {
     it("does not fail processing when notifier throws", async () => {
       vi.mocked(notifier.notify).mockReturnValueOnce(Promise.resolve(err(dbError(new Error("SES error")))));
 
-      await processor.process(makeSqsEvent([{}]));
+      await processor.processRecord(makeMessage(), 1);
 
       // Signal was still saved despite notification failure
       expect(store.saveSignal).toHaveBeenCalledOnce();
@@ -800,7 +771,7 @@ describe("SignalProcessor", () => {
         replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       });
 
-      await processorWithoutNotifier.process(makeSqsEvent([{}]));
+      await processorWithoutNotifier.processRecord(makeMessage(), 1);
 
       expect(notifier.notify).not.toHaveBeenCalled();
     });
@@ -824,7 +795,7 @@ describe("SignalProcessor", () => {
       )));
       // No existing sender entry for a brand-new address
       vi.mocked(store.getSender).mockReturnValueOnce(Promise.resolve(ok(null)));
-      await processor.process(makeSqsEvent([{}]));
+      await processor.processRecord(makeMessage(), 1);
 
       expect(store.saveSignal).toHaveBeenCalledOnce();
       expect(store.saveArc).toHaveBeenCalledOnce();
@@ -841,7 +812,7 @@ describe("SignalProcessor", () => {
       )));
       // getSender returns an approved entry for example.com (default mock already does this)
 
-      await processor.process(makeSqsEvent([{}]));
+      await processor.processRecord(makeMessage(), 1);
 
       expect(store.saveSignal).toHaveBeenCalledOnce();
       expect(store.saveArc).toHaveBeenCalledOnce();
@@ -854,7 +825,7 @@ describe("SignalProcessor", () => {
       )));
       vi.mocked(store.getSender).mockReturnValueOnce(Promise.resolve(ok(null)));
 
-      await processor.process(makeSqsEvent([{}]));
+      await processor.processRecord(makeMessage(), 1);
 
       expect(store.saveArc).not.toHaveBeenCalled();
       expect(store.saveSignal).toHaveBeenCalledOnce();
@@ -869,7 +840,7 @@ describe("SignalProcessor", () => {
       )));
       vi.mocked(store.getSender).mockReturnValueOnce(Promise.resolve(ok(null)));
 
-      await processor.process(makeSqsEvent([{}]));
+      await processor.processRecord(makeMessage(), 1);
 
       expect(notifier.notifyBlocked).toHaveBeenCalledOnce();
       expect(notifier.notify).not.toHaveBeenCalled();
@@ -885,7 +856,7 @@ describe("SignalProcessor", () => {
         spamScore: 0.95,
       });
 
-      await processor.process(makeSqsEvent([{}]));
+      await processor.processRecord(makeMessage(), 1);
 
       expect(notifier.notifyBlocked).toHaveBeenCalledOnce();
       const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
@@ -898,7 +869,7 @@ describe("SignalProcessor", () => {
       )));
       vi.mocked(store.getSender).mockReturnValueOnce(Promise.resolve(ok(null)));
 
-      await processor.process(makeSqsEvent([{}]));
+      await processor.processRecord(makeMessage(), 1);
 
       expect(notifier.notifyBlocked).toHaveBeenCalledOnce();
       const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
@@ -911,7 +882,7 @@ describe("SignalProcessor", () => {
       )));
       vi.mocked(store.getSender).mockReturnValueOnce(Promise.resolve(ok(null)));
 
-      await processor.process(makeSqsEvent([{}]));
+      await processor.processRecord(makeMessage(), 1);
 
       expect(notifier.notifyBlocked).not.toHaveBeenCalled();
       const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
@@ -927,7 +898,7 @@ describe("SignalProcessor", () => {
         makeRule({ condition: JSON.stringify({ "in": ["system:sender:untrusted", { var: "arc.labels" }] }), actions: [{ type: "block" }] }),
       ])));
 
-      await processor.process(makeSqsEvent([{}]));
+      await processor.processRecord(makeMessage(), 1);
 
       expect(notifier.notifyBlocked).not.toHaveBeenCalled();
       const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
@@ -945,7 +916,7 @@ describe("SignalProcessor", () => {
       });
       vi.mocked(notifier.notifyBlocked).mockReturnValueOnce(Promise.resolve(err(dbError(new Error("SES error")))));
 
-      await processor.process(makeSqsEvent([{}]));
+      await processor.processRecord(makeMessage(), 1);
 
       expect(store.saveSignal).toHaveBeenCalledOnce();
     });
@@ -964,7 +935,7 @@ describe("SignalProcessor", () => {
       };
       vi.mocked(arcMatcher.findMatch).mockReturnValueOnce(Promise.resolve(ok(existingArc)));
 
-      await processor.process(makeSqsEvent([{}]));
+      await processor.processRecord(makeMessage(), 1);
 
       // Filtering fallback bypassed on matched arc — signal is active despite untrusted sender
       expect(store.saveArc).toHaveBeenCalledOnce();
@@ -983,7 +954,7 @@ describe("SignalProcessor", () => {
         spamScore: 0.95,
       });
 
-      await processor.process(makeSqsEvent([{}]));
+      await processor.processRecord(makeMessage(), 1);
 
       expect(store.saveArc).not.toHaveBeenCalled();
       const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
@@ -996,7 +967,7 @@ describe("SignalProcessor", () => {
       )));
       vi.mocked(store.getSender).mockReturnValueOnce(Promise.resolve(ok(null))); // sender not yet in list
 
-      await processor.process(makeSqsEvent([{}]));
+      await processor.processRecord(makeMessage(), 1);
 
       expect(store.saveArc).toHaveBeenCalledOnce();
       expect(store.saveSender).toHaveBeenCalledWith(TEST_ACCOUNT_ID, expect.any(String), "example.com", "allow");
@@ -1008,7 +979,7 @@ describe("SignalProcessor", () => {
       )));
       vi.mocked(store.getSender).mockReturnValueOnce(Promise.resolve(ok(null)));
 
-      await processor.process(makeSqsEvent([{}]));
+      await processor.processRecord(makeMessage(), 1);
 
       const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
       expect(saved.workflow).toBe(validClassification.workflow);
@@ -1026,7 +997,7 @@ describe("SignalProcessor", () => {
         billingPlan: "Paid",
       })));
 
-      await processor.process(makeSqsEvent([{}]));
+      await processor.processRecord(makeMessage(), 1);
 
       expect(store.saveArc).not.toHaveBeenCalled();
       const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
@@ -1046,7 +1017,7 @@ describe("SignalProcessor", () => {
       )));
       vi.mocked(store.getSender).mockReturnValueOnce(Promise.resolve(ok(null)));
 
-      await processor.process(makeSqsEvent([{}]));
+      await processor.processRecord(makeMessage(), 1);
 
       expect(store.updateGlobalReputation).toHaveBeenCalledWith(
         "example.com",
@@ -1055,7 +1026,7 @@ describe("SignalProcessor", () => {
     });
 
     it("updates reputation with wasBlocked=false for active signals", async () => {
-      await processor.process(makeSqsEvent([{}]));
+      await processor.processRecord(makeMessage(), 1);
 
       expect(store.updateGlobalReputation).toHaveBeenCalledWith(
         "example.com",
@@ -1069,7 +1040,7 @@ describe("SignalProcessor", () => {
         spamScore: 0.97,
       });
 
-      await processor.process(makeSqsEvent([{}]));
+      await processor.processRecord(makeMessage(), 1);
 
       expect(store.updateGlobalReputation).toHaveBeenCalledWith(
         "example.com",
@@ -1080,7 +1051,7 @@ describe("SignalProcessor", () => {
     it("does not fail processing when updateGlobalReputation throws", async () => {
       vi.mocked(store.updateGlobalReputation).mockRejectedValueOnce(new Error("DynamoDB error"));
 
-      await processor.process(makeSqsEvent([{}]));
+      await processor.processRecord(makeMessage(), 1);
 
       expect(store.saveSignal).toHaveBeenCalledOnce();
     });
@@ -1098,7 +1069,7 @@ describe("SignalProcessor", () => {
         workflowData: { workflow: "auth", authType: "otp", code: "123456", service: "GitHub" },
       });
 
-      await processor.process(makeSqsEvent([{}]));
+      await processor.processRecord(makeMessage(), 1);
 
       expect(store.findArcByGroupingKey).toHaveBeenCalledWith(
         TEST_ACCOUNT_ID,
@@ -1114,7 +1085,7 @@ describe("SignalProcessor", () => {
         workflowData: { workflow: "auth", authType: "otp", code: "123456", service: "GitHub" },
       });
 
-      await processor.process(makeSqsEvent([{}]));
+      await processor.processRecord(makeMessage(), 1);
 
       const arc = vi.mocked(store.saveArc).mock.calls[0]![0] as Arc;
       expect(arc.groupingKey).toBe("user@example.com:auth:example.com");
@@ -1129,14 +1100,14 @@ describe("SignalProcessor", () => {
         workflowData: { workflow: "auth", authType: "otp", code: "999999", service: "GitHub" },
       });
 
-      await processor.process(makeSqsEvent([{}]));
+      await processor.processRecord(makeMessage(), 1);
 
       const arc = vi.mocked(store.saveArc).mock.calls[0]![0] as Arc;
       expect(arc.id).toBe("auth-arc");
     });
 
     it("scopes vector search by recipientAddress for workflows without a grouping key", async () => {
-      await processor.process(makeSqsEvent([{ destination: ["inbox@work.com"] }]));
+      await processor.processRecord(makeMessage({ destination: ["inbox@work.com"] }), 1);
 
       expect(arcMatcher.findMatch).toHaveBeenCalledWith(
         TEST_ACCOUNT_ID,
@@ -1152,7 +1123,7 @@ describe("SignalProcessor", () => {
         workflowData: { workflow: "package", packageType: "shipping", retailer: "Amazon", orderNumber: "112-999" },
       });
 
-      await processor.process(makeSqsEvent([{}]));
+      await processor.processRecord(makeMessage(), 1);
 
       expect(store.findArcByGroupingKey).toHaveBeenCalledWith(
         TEST_ACCOUNT_ID,
@@ -1167,7 +1138,7 @@ describe("SignalProcessor", () => {
         workflowData: { workflow: "package", packageType: "shipping", retailer: "Amazon" },
       });
 
-      await processor.process(makeSqsEvent([{}]));
+      await processor.processRecord(makeMessage(), 1);
 
       expect(store.findArcByGroupingKey).not.toHaveBeenCalled();
       expect(arcMatcher.findMatch).toHaveBeenCalledOnce();
@@ -1321,7 +1292,7 @@ describe("SignalProcessor", () => {
         ...classification,
       };
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(full);
-      await processor.process(makeSqsEvent([{ sesMessageId: randomUUID() }]));
+      await processor.processRecord(makeMessage({ sesMessageId: randomUUID() }), 1);
       return vi.mocked(store.saveArc).mock.calls.at(-1)![0] as Arc;
     }
 
@@ -1349,7 +1320,7 @@ describe("SignalProcessor", () => {
         workflow: "conversation", workflowData: { workflow: "conversation", isReply: true, sentiment: "neutral", requiresReply: false },
         spamScore: 0.05, summary: "test", labels: [], classificationModelId: "us.anthropic.claude-opus-4-5-20251101-v1:0",
       });
-      await processor.process(makeSqsEvent([{ sesMessageId: randomUUID() }]));
+      await processor.processRecord(makeMessage({ sesMessageId: randomUUID() }), 1);
       const signal = vi.mocked(store.saveSignal).mock.calls.at(-1)![0] as Signal;
       expect(signal.urgency).toBe("normal");
     });
@@ -1434,7 +1405,7 @@ describe("SignalProcessor", () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(onboardingClassification);
       vi.mocked(store.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([]))); // no system rules — SR-01 (block onboarding) is disabled
 
-      await processor.process(makeSqsEvent([{}]));
+      await processor.processRecord(makeMessage(), 1);
 
       expect(store.saveArc).toHaveBeenCalledOnce();
       const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
@@ -1450,7 +1421,7 @@ describe("SignalProcessor", () => {
 
       const notifier = makeNotifier();
       const proc = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, notifier, logger: mockLogger, forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) } });
-      await proc.process(makeSqsEvent([{}]));
+      await proc.processRecord(makeMessage(), 1);
 
       expect(store.saveArc).not.toHaveBeenCalled();
       const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
@@ -1466,7 +1437,7 @@ describe("SignalProcessor", () => {
 
       const notifier = makeNotifier();
       const proc = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, notifier, logger: mockLogger, forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) } });
-      await proc.process(makeSqsEvent([{}]));
+      await proc.processRecord(makeMessage(), 1);
 
       expect(store.saveArc).not.toHaveBeenCalled();
       const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
@@ -1489,7 +1460,7 @@ describe("SignalProcessor", () => {
         registeredDomains: ["example.com"],
       })));
 
-      await processor.process(makeSqsEvent([{}]));
+      await processor.processRecord(makeMessage(), 1);
 
       const signal = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
       expect(signal.workflow).toBe("test");
@@ -1502,7 +1473,7 @@ describe("SignalProcessor", () => {
         userEmails: ["SENDER@example.com"], // uppercase — must still match
       })));
 
-      await processor.process(makeSqsEvent([{}]));
+      await processor.processRecord(makeMessage(), 1);
 
       const signal = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
       expect(signal.workflow).toBe("test");
@@ -1515,7 +1486,7 @@ describe("SignalProcessor", () => {
         userEmails: ["different@email.com"],
       })));
 
-      await processor.process(makeSqsEvent([{}]));
+      await processor.processRecord(makeMessage(), 1);
 
       const signal = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
       expect(signal.workflow).toBe("conversation"); // unchanged from validClassification mock
@@ -1546,7 +1517,7 @@ describe("SignalProcessor", () => {
     it("blocks status emails silently — no arc created, signal saved as blocked", async () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(noticeClassification);
 
-      await processor.process(makeSqsEvent([{}]));
+      await processor.processRecord(makeMessage(), 1);
 
       expect(store.saveArc).not.toHaveBeenCalled();
       const signal = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
@@ -1557,7 +1528,7 @@ describe("SignalProcessor", () => {
     it("does not call notifier for a blocked status email", async () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(noticeClassification);
 
-      await processor.process(makeSqsEvent([{}]));
+      await processor.processRecord(makeMessage(), 1);
 
       expect(notifier.notify).not.toHaveBeenCalled();
       expect(notifier.notifyBlocked).not.toHaveBeenCalled();
@@ -1572,7 +1543,7 @@ describe("SignalProcessor", () => {
       })));
       vi.mocked(store.getSender).mockReturnValueOnce(Promise.resolve(ok(null)));
 
-      await processor.process(makeSqsEvent([{}]));
+      await processor.processRecord(makeMessage(), 1);
 
       const signal = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
       expect(signal.status).toBe("blocked"); // SR-05 sets status → fallback skipped (hasStatusOutcome = true)
@@ -1604,7 +1575,7 @@ describe("SignalProcessor", () => {
     it("sends a pong when workflow is 'test' and replySender is configured", async () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(testClassification);
 
-      await processor.process(makeSqsEvent([{}]));
+      await processor.processRecord(makeMessage(), 1);
 
       expect(replySender.sendReply).toHaveBeenCalledOnce();
     });
@@ -1612,7 +1583,7 @@ describe("SignalProcessor", () => {
     it("passes original sender as 'to', subject, and body to pong", async () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(testClassification);
 
-      await processor.process(makeSqsEvent([{}]));
+      await processor.processRecord(makeMessage(), 1);
 
       const opts = vi.mocked(replySender.sendReply).mock.calls[0]![0];
       // Default mime parser mock: from.address = "sender@example.com", subject = "Test email"
@@ -1625,7 +1596,7 @@ describe("SignalProcessor", () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(testClassification);
       vi.mocked(store.getDomainByName).mockReturnValueOnce(Promise.resolve(ok({ id: "example.com", accountId: "test-account", domain: "example.com", receivingSetupComplete: true, senderSetupComplete: true, createdAt: "2024-01-01T00:00:00Z", updatedAt: "2024-01-01T00:00:00Z" })));
 
-      await processor.process(makeSqsEvent([{}]));
+      await processor.processRecord(makeMessage(), 1);
 
       const opts = vi.mocked(replySender.sendReply).mock.calls[0]![0];
       // recipientAddress = destination[0] = "user@example.com" from the SQS event default
@@ -1637,7 +1608,7 @@ describe("SignalProcessor", () => {
       vi.mocked(store.getDomainByName).mockReturnValueOnce(Promise.resolve(ok({ id: "example.com", accountId: "test-account", domain: "example.com", receivingSetupComplete: true, senderSetupComplete: false, createdAt: "2024-01-01T00:00:00Z", updatedAt: "2024-01-01T00:00:00Z" })));
       process.env["NOTIFICATION_FROM"] = "noreply@system.example.com";
 
-      await processor.process(makeSqsEvent([{}]));
+      await processor.processRecord(makeMessage(), 1);
 
       const opts = vi.mocked(replySender.sendReply).mock.calls[0]![0];
       expect(opts.from).toBe("noreply@system.example.com");
@@ -1650,7 +1621,7 @@ describe("SignalProcessor", () => {
       // getDomainByName already returns null by default from makeStore()
       process.env["NOTIFICATION_FROM"] = "noreply@system.example.com";
 
-      await processor.process(makeSqsEvent([{}]));
+      await processor.processRecord(makeMessage(), 1);
 
       const opts = vi.mocked(replySender.sendReply).mock.calls[0]![0];
       expect(opts.from).toBe("noreply@system.example.com");
@@ -1661,7 +1632,7 @@ describe("SignalProcessor", () => {
     it("passes sesMessageId as inReplyTo for email threading", async () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(testClassification);
 
-      await processor.process(makeSqsEvent([{ sesMessageId: "original-ses-123" }]));
+      await processor.processRecord(makeMessage({ sesMessageId: "original-ses-123" }), 1);
 
       const opts = vi.mocked(replySender.sendReply).mock.calls[0]![0];
       expect(opts.inReplyTo).toBe("original-ses-123");
@@ -1671,7 +1642,7 @@ describe("SignalProcessor", () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(testClassification);
       vi.mocked(replySender.sendReply).mockResolvedValueOnce({ messageId: "pong-out-001" });
 
-      await processor.process(makeSqsEvent([{}]));
+      await processor.processRecord(makeMessage(), 1);
 
       const arc = vi.mocked(store.saveArc).mock.calls[0]![0] as Arc;
       expect(arc.sentMessageIds).toContain("pong-out-001");
@@ -1681,7 +1652,7 @@ describe("SignalProcessor", () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(testClassification);
       vi.mocked(replySender.sendReply).mockRejectedValueOnce(new Error("SES timeout"));
 
-      await processor.process(makeSqsEvent([{}]));
+      await processor.processRecord(makeMessage(), 1);
 
       // Processing still completes and arc is saved without sentMessageIds
       expect(store.saveArc).toHaveBeenCalledOnce();
@@ -1691,7 +1662,7 @@ describe("SignalProcessor", () => {
 
     it("does not call pong for non-test workflows", async () => {
       // classifier returns personal by default (no mockResolvedValueOnce override)
-      await processor.process(makeSqsEvent([{}]));
+      await processor.processRecord(makeMessage(), 1);
 
       expect(replySender.sendReply).not.toHaveBeenCalled();
     });
@@ -1701,14 +1672,14 @@ describe("SignalProcessor", () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(testClassification);
 
       // Should not throw — replySender is optional
-      const result = await processorWithoutReplier.process(makeSqsEvent([{}]));
-      expect(result.batchItemFailures).toEqual([]);
+      const result = await processorWithoutReplier.processRecord(makeMessage(), 1);
+      expect(result.isOk()).toBe(true);
     });
 
     it("looks up domain by the domain part of the recipient address", async () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(testClassification);
 
-      await processor.process(makeSqsEvent([{ destination: ["me@custom-domain.com"] }]));
+      await processor.processRecord(makeMessage({ destination: ["me@custom-domain.com"] }), 1);
 
       expect(store.getDomainByName).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "custom-domain.com");
     });
@@ -1755,7 +1726,7 @@ describe("SignalProcessor", () => {
         spamScore: 0.7, // above per-address threshold (0.5), below default (0.9)
       });
 
-      await processor.process(makeSqsEvent([{}]));
+      await processor.processRecord(makeMessage(), 1);
 
       // DEFAULT_SENDER_ENTRY is approved → SR-03 fires → quarantine_visible
       const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
@@ -1773,7 +1744,7 @@ describe("SignalProcessor", () => {
         spamScore: 0.7, // above account threshold (0.6), below default (0.9)
       });
 
-      await processor.process(makeSqsEvent([{}]));
+      await processor.processRecord(makeMessage(), 1);
 
       // DEFAULT_SENDER_ENTRY is approved → SR-03 fires → quarantine_visible
       const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
@@ -1805,7 +1776,7 @@ describe("SignalProcessor", () => {
       const proc = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, forwarder, logger: mockLogger, notifier: makeNotifier(), retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) } });
       vi.mocked(store.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([makeForwardRule()])));
 
-      await proc.process(makeSqsEvent([{ dkimVerdict: "PASS", dmarcVerdict: "PASS" }]));
+      await proc.processRecord(makeMessage({ dkimVerdict: "PASS", dmarcVerdict: "PASS" }), 1);
 
       expect(forwarder.forward).toHaveBeenCalledWith(
         expect.any(String),
@@ -1820,7 +1791,7 @@ describe("SignalProcessor", () => {
       const proc = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, forwarder, logger: mockLogger, notifier: makeNotifier(), retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) } });
       vi.mocked(store.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([makeForwardRule()])));
 
-      await proc.process(makeSqsEvent([{ dkimVerdict: "FAIL", dmarcVerdict: "GRAY" }]));
+      await proc.processRecord(makeMessage({ dkimVerdict: "FAIL", dmarcVerdict: "GRAY" }), 1);
 
       expect(forwarder.forward).toHaveBeenCalledWith(
         expect.any(String),
@@ -1849,7 +1820,7 @@ describe("SignalProcessor", () => {
         updatedAt: "2024-01-01T00:00:00Z",
       }])));
 
-      await processor.process(makeSqsEvent([{}]));
+      await processor.processRecord(makeMessage(), 1);
 
       const arc = vi.mocked(store.saveArc).mock.calls[0]![0] as Arc;
       expect(arc.workflow).toBe("content");
@@ -1868,7 +1839,7 @@ describe("SignalProcessor", () => {
         updatedAt: "2024-01-01T00:00:00Z",
       }])));
 
-      await processor.process(makeSqsEvent([{}]));
+      await processor.processRecord(makeMessage(), 1);
 
       const arc = vi.mocked(store.saveArc).mock.calls[0]![0] as Arc;
       expect(arc.status).toBe("deleted");
@@ -1891,7 +1862,7 @@ describe("SignalProcessor", () => {
         updatedAt: "2024-01-01T00:00:00Z",
       }])));
 
-      await processor.process(makeSqsEvent([{}]));
+      await processor.processRecord(makeMessage(), 1);
 
       const arc = vi.mocked(store.saveArc).mock.calls[0]![0] as Arc;
       expect(arc.labels).toContain("archived-auto");
@@ -1911,7 +1882,7 @@ describe("SignalProcessor", () => {
         headers: { "x-forwarded-to": "john@gmail.com" },
       })));
 
-      await processor.process(makeSqsEvent([{}]));
+      await processor.processRecord(makeMessage(), 1);
 
       const arc = vi.mocked(store.saveArc).mock.calls[0]![0] as Arc;
       expect(arc.labels).toContain("original:john@gmail.com");
@@ -1928,7 +1899,7 @@ describe("SignalProcessor", () => {
         headers: { "x-original-to": "<alice@example.com>" },
       })));
 
-      await processor.process(makeSqsEvent([{}]));
+      await processor.processRecord(makeMessage(), 1);
 
       const arc = vi.mocked(store.saveArc).mock.calls[0]![0] as Arc;
       expect(arc.labels).toContain("original:alice@example.com");
@@ -1945,7 +1916,7 @@ describe("SignalProcessor", () => {
         headers: { "resent-to": "Bob Smith <bob@example.com>" },
       })));
 
-      await processor.process(makeSqsEvent([{}]));
+      await processor.processRecord(makeMessage(), 1);
 
       const arc = vi.mocked(store.saveArc).mock.calls[0]![0] as Arc;
       expect(arc.labels).toContain("original:bob@example.com");
@@ -1965,7 +1936,7 @@ describe("SignalProcessor", () => {
         },
       })));
 
-      await processor.process(makeSqsEvent([{}]));
+      await processor.processRecord(makeMessage(), 1);
 
       const arc = vi.mocked(store.saveArc).mock.calls[0]![0] as Arc;
       expect(arc.labels).toContain("original:primary@gmail.com");
@@ -1983,7 +1954,7 @@ describe("SignalProcessor", () => {
         headers: { "authentication-results": "spf=pass" },
       })));
 
-      await processor.process(makeSqsEvent([{}]));
+      await processor.processRecord(makeMessage(), 1);
 
       const arc = vi.mocked(store.saveArc).mock.calls[0]![0] as Arc;
       expect(arc.labels.some((l) => l.startsWith("original:"))).toBe(false);

@@ -6,10 +6,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { mockClient } from "aws-sdk-client-mock";
 import { DynamoDBDocumentClient, ScanCommand } from "@aws-sdk/lib-dynamodb";
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
-import type { SQSEvent, SQSRecord } from "aws-lambda";
 import { Readable } from "stream";
 import { sdkStreamMixin } from "@smithy/util-stream";
-import { ReindexWorker } from "./reindex-worker.js";
+import { ReindexWorker, type ReindexSegmentMessage } from "./reindex-worker.js";
 import { createMockLogger } from "../../testing/mock-logger.js";
 import { ok, err, dbError } from "../../errors.js";
 
@@ -106,30 +105,6 @@ const s3Mock = mockClient(S3Client);
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeSqsRecord(body: unknown, overrides?: Partial<SQSRecord>): SQSRecord {
-  return {
-    messageId: "msg-1",
-    receiptHandle: "handle-1",
-    body: JSON.stringify(body),
-    attributes: {
-      ApproximateReceiveCount: "1",
-      SentTimestamp: "0",
-      SenderId: "sender",
-      ApproximateFirstReceiveTimestamp: "0",
-    },
-    messageAttributes: {},
-    md5OfBody: "",
-    eventSource: "aws:sqs",
-    eventSourceARN: "arn:aws:sqs:eu-central-1:123:reindex-queue",
-    awsRegion: "eu-central-1",
-    ...overrides,
-  };
-}
-
-function makeSqsEvent(records: SQSRecord[]): SQSEvent {
-  return { Records: records };
-}
-
 function makeSignalItem(opts: {
   id: string;
   accountId: string;
@@ -184,19 +159,17 @@ describe("ReindexWorker — pure-copy mode", () => {
 
     ddbMock.on(ScanCommand).resolves({ Items: [signal], LastEvaluatedKey: undefined });
 
-    const event = makeSqsEvent([
-      makeSqsRecord({
-        jobId: "job-1",
-        segment: 0,
-        totalSegments: 1,
-        targetRegistryId: "aurora-prod-titan-v2",
-        modelId: "amazon.titan-embed-text-v2:0",
-      }),
-    ]);
+    const message: ReindexSegmentMessage = {
+      jobId: "job-1",
+      segment: 0,
+      totalSegments: 1,
+      targetRegistryId: "aurora-prod-titan-v2",
+      modelId: "amazon.titan-embed-text-v2:0",
+    };
 
-    const result = await worker.process(event);
+    const result = await worker.processSegmentMessage(message);
 
-    expect(result.batchItemFailures).toEqual([]);
+    expect(result.isOk()).toBe(true);
     expect(mockUpsertEmbedding).toHaveBeenCalledWith({
       registryId: "aurora-prod-titan-v2",
       arcId: "arc-xyz",
@@ -217,19 +190,17 @@ describe("ReindexWorker — pure-copy mode", () => {
 
     ddbMock.on(ScanCommand).resolves({ Items: [signal], LastEvaluatedKey: undefined });
 
-    const event = makeSqsEvent([
-      makeSqsRecord({
-        jobId: "job-1",
-        segment: 0,
-        totalSegments: 1,
-        targetRegistryId: "aurora-prod-titan-v2",
-        modelId: "amazon.titan-embed-text-v2:0",
-      }),
-    ]);
+    const message: ReindexSegmentMessage = {
+      jobId: "job-1",
+      segment: 0,
+      totalSegments: 1,
+      targetRegistryId: "aurora-prod-titan-v2",
+      modelId: "amazon.titan-embed-text-v2:0",
+    };
 
-    const result = await worker.process(event);
+    const result = await worker.processSegmentMessage(message);
 
-    expect(result.batchItemFailures).toEqual([]);
+    expect(result.isOk()).toBe(true);
     expect(mockUpsertEmbedding).not.toHaveBeenCalled();
   });
 
@@ -245,19 +216,17 @@ describe("ReindexWorker — pure-copy mode", () => {
 
     ddbMock.on(ScanCommand).resolves({ Items: [malformed, valid], LastEvaluatedKey: undefined });
 
-    const event = makeSqsEvent([
-      makeSqsRecord({
-        jobId: "job-1",
-        segment: 0,
-        totalSegments: 1,
-        targetRegistryId: "aurora-prod-titan-v2",
-        modelId: "amazon.titan-embed-text-v2:0",
-      }),
-    ]);
+    const message: ReindexSegmentMessage = {
+      jobId: "job-1",
+      segment: 0,
+      totalSegments: 1,
+      targetRegistryId: "aurora-prod-titan-v2",
+      modelId: "amazon.titan-embed-text-v2:0",
+    };
 
-    const result = await worker.process(event);
+    const result = await worker.processSegmentMessage(message);
 
-    expect(result.batchItemFailures).toEqual([]);
+    expect(result.isOk()).toBe(true);
     // Only the valid signal should be upserted
     expect(mockUpsertEmbedding).toHaveBeenCalledTimes(1);
     expect(mockUpsertEmbedding).toHaveBeenCalledWith(expect.objectContaining({ arcId: "arc-good" }));
@@ -286,20 +255,18 @@ describe("ReindexWorker — pure-copy mode", () => {
       .mockResolvedValueOnce(err(dbError(new Error("Aurora timeout"))))
       .mockResolvedValueOnce(ok(undefined));
 
-    const event = makeSqsEvent([
-      makeSqsRecord({
-        jobId: "job-1",
-        segment: 0,
-        totalSegments: 1,
-        targetRegistryId: "aurora-prod-titan-v2",
-        modelId: "amazon.titan-embed-text-v2:0",
-      }),
-    ]);
+    const message: ReindexSegmentMessage = {
+      jobId: "job-1",
+      segment: 0,
+      totalSegments: 1,
+      targetRegistryId: "aurora-prod-titan-v2",
+      modelId: "amazon.titan-embed-text-v2:0",
+    };
 
     // Should not fail the segment — per-signal failures are isolated
-    const result = await worker.process(event);
+    const result = await worker.processSegmentMessage(message);
 
-    expect(result.batchItemFailures).toEqual([]);
+    expect(result.isOk()).toBe(true);
     expect(mockUpsertEmbedding).toHaveBeenCalledTimes(2);
   });
 
@@ -324,50 +291,32 @@ describe("ReindexWorker — pure-copy mode", () => {
       .resolvesOnce({ Items: [signal1], LastEvaluatedKey: { pk: "cursor" } })
       .resolvesOnce({ Items: [signal2], LastEvaluatedKey: undefined });
 
-    const event = makeSqsEvent([
-      makeSqsRecord({
-        jobId: "job-1",
-        segment: 0,
-        totalSegments: 1,
-        targetRegistryId: "aurora-prod-titan-v2",
-        modelId: "amazon.titan-embed-text-v2:0",
-      }),
-    ]);
+    const message: ReindexSegmentMessage = {
+      jobId: "job-1",
+      segment: 0,
+      totalSegments: 1,
+      targetRegistryId: "aurora-prod-titan-v2",
+      modelId: "amazon.titan-embed-text-v2:0",
+    };
 
-    const result = await worker.process(event);
+    const result = await worker.processSegmentMessage(message);
 
-    expect(result.batchItemFailures).toEqual([]);
+    expect(result.isOk()).toBe(true);
     expect(mockUpsertEmbedding).toHaveBeenCalledTimes(2);
   });
 
-  it("returns batchItemFailure for messages with unknown cluster", async () => {
-    const event = makeSqsEvent([
-      makeSqsRecord({
-        jobId: "job-1",
-        segment: 0,
-        totalSegments: 1,
-        targetRegistryId: "nonexistent-cluster",
-        modelId: "amazon.titan-embed-text-v2:0",
-      }),
-    ]);
+  it("returns error for messages with unknown cluster", async () => {
+    const message: ReindexSegmentMessage = {
+      jobId: "job-1",
+      segment: 0,
+      totalSegments: 1,
+      targetRegistryId: "nonexistent-cluster",
+      modelId: "amazon.titan-embed-text-v2:0",
+    };
 
-    const result = await worker.process(event);
+    const result = await worker.processSegmentMessage(message);
 
-    expect(result.batchItemFailures).toEqual([{ itemIdentifier: "msg-1" }]);
-    expect(mockUpsertEmbedding).not.toHaveBeenCalled();
-  });
-
-  it("returns batchItemFailure for unparseable message body", async () => {
-    const event = makeSqsEvent([
-      {
-        ...makeSqsRecord({}),
-        body: "not valid json {{{",
-      },
-    ]);
-
-    const result = await worker.process(event);
-
-    expect(result.batchItemFailures).toEqual([{ itemIdentifier: "msg-1" }]);
+    expect(result.isErr()).toBe(true);
     expect(mockUpsertEmbedding).not.toHaveBeenCalled();
   });
 
@@ -384,19 +333,17 @@ describe("ReindexWorker — pure-copy mode", () => {
 
     ddbMock.on(ScanCommand).resolves({ Items: [arcItem, gkeyItem, signal], LastEvaluatedKey: undefined });
 
-    const event = makeSqsEvent([
-      makeSqsRecord({
-        jobId: "job-1",
-        segment: 0,
-        totalSegments: 1,
-        targetRegistryId: "aurora-prod-titan-v2",
-        modelId: "amazon.titan-embed-text-v2:0",
-      }),
-    ]);
+    const message: ReindexSegmentMessage = {
+      jobId: "job-1",
+      segment: 0,
+      totalSegments: 1,
+      targetRegistryId: "aurora-prod-titan-v2",
+      modelId: "amazon.titan-embed-text-v2:0",
+    };
 
-    const result = await worker.process(event);
+    const result = await worker.processSegmentMessage(message);
 
-    expect(result.batchItemFailures).toEqual([]);
+    expect(result.isOk()).toBe(true);
     // Only the real signal should be processed
     expect(mockUpsertEmbedding).toHaveBeenCalledTimes(1);
   });
@@ -404,19 +351,17 @@ describe("ReindexWorker — pure-copy mode", () => {
   it("passes correct Segment and TotalSegments to DynamoDB scan", async () => {
     ddbMock.on(ScanCommand).resolves({ Items: [], LastEvaluatedKey: undefined });
 
-    const event = makeSqsEvent([
-      makeSqsRecord({
-        jobId: "job-1",
-        segment: 7,
-        totalSegments: 32,
-        targetRegistryId: "aurora-prod-titan-v2",
-        modelId: "amazon.titan-embed-text-v2:0",
-      }),
-    ]);
+    const message: ReindexSegmentMessage = {
+      jobId: "job-1",
+      segment: 7,
+      totalSegments: 32,
+      targetRegistryId: "aurora-prod-titan-v2",
+      modelId: "amazon.titan-embed-text-v2:0",
+    };
 
-    const result = await worker.process(event);
+    const result = await worker.processSegmentMessage(message);
 
-    expect(result.batchItemFailures).toEqual([]);
+    expect(result.isOk()).toBe(true);
     const scanCalls = ddbMock.commandCalls(ScanCommand);
     expect(scanCalls.length).toBe(1);
     expect(scanCalls[0]!.args[0].input.Segment).toBe(7);
@@ -485,19 +430,17 @@ describe("ReindexWorker — regenerate-from-S3 mode", () => {
       dimensions: 1024,
     }));
 
-    const event = makeSqsEvent([
-      makeSqsRecord({
-        jobId: "job-regen",
-        segment: 0,
-        totalSegments: 1,
-        targetRegistryId: "aurora-prod-titan-v2",
-        modelId: "amazon.titan-embed-text-v2:0",
-      }),
-    ]);
+    const message: ReindexSegmentMessage = {
+      jobId: "job-regen",
+      segment: 0,
+      totalSegments: 1,
+      targetRegistryId: "aurora-prod-titan-v2",
+      modelId: "amazon.titan-embed-text-v2:0",
+    };
 
-    const result = await worker.process(event);
+    const result = await worker.processSegmentMessage(message);
 
-    expect(result.batchItemFailures).toEqual([]);
+    expect(result.isOk()).toBe(true);
 
     // Should call S3 to fetch the raw email
     expect(s3Mock.commandCalls(GetObjectCommand)).toHaveLength(1);
@@ -542,19 +485,17 @@ describe("ReindexWorker — regenerate-from-S3 mode", () => {
 
     ddbMock.on(ScanCommand).resolves({ Items: [signal], LastEvaluatedKey: undefined });
 
-    const event = makeSqsEvent([
-      makeSqsRecord({
-        jobId: "job-cached",
-        segment: 0,
-        totalSegments: 1,
-        targetRegistryId: "aurora-prod-titan-v2",
-        modelId: "amazon.titan-embed-text-v2:0",
-      }),
-    ]);
+    const message: ReindexSegmentMessage = {
+      jobId: "job-cached",
+      segment: 0,
+      totalSegments: 1,
+      targetRegistryId: "aurora-prod-titan-v2",
+      modelId: "amazon.titan-embed-text-v2:0",
+    };
 
-    const result = await worker.process(event);
+    const result = await worker.processSegmentMessage(message);
 
-    expect(result.batchItemFailures).toEqual([]);
+    expect(result.isOk()).toBe(true);
 
     // Should NOT call S3 or Bedrock — cache hit takes the pure-copy path
     expect(s3Mock.commandCalls(GetObjectCommand)).toHaveLength(0);
@@ -629,19 +570,17 @@ describe("ReindexWorker — regenerate-from-S3 mode", () => {
       dimensions: 1024,
     }));
 
-    const event = makeSqsEvent([
-      makeSqsRecord({
-        jobId: "job-mixed",
-        segment: 0,
-        totalSegments: 1,
-        targetRegistryId: "aurora-prod-titan-v2",
-        modelId: "amazon.titan-embed-text-v2:0",
-      }),
-    ]);
+    const message: ReindexSegmentMessage = {
+      jobId: "job-mixed",
+      segment: 0,
+      totalSegments: 1,
+      targetRegistryId: "aurora-prod-titan-v2",
+      modelId: "amazon.titan-embed-text-v2:0",
+    };
 
-    const result = await worker.process(event);
+    const result = await worker.processSegmentMessage(message);
 
-    expect(result.batchItemFailures).toEqual([]);
+    expect(result.isOk()).toBe(true);
 
     // Aurora upsert called twice: once for cache hit, once for regenerated
     expect(mockUpsertEmbedding).toHaveBeenCalledTimes(2);

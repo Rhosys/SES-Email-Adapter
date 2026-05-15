@@ -1,9 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import type { SQSEvent, SQSRecord } from "aws-lambda";
 import { ok, err } from "neverthrow";
 import { SignalProcessor, SYSTEM_RULES } from "./processor.js";
 import { JsonLogicRuleEvaluator } from "./rule-evaluator.js";
-import type { ProcessorDatabase, ArcMatcher, SqsDispatcher, Notifier, Forwarder, ReplySender } from "./processor.js";
+import type { ProcessorDatabase, ArcMatcher, SqsDispatcher, Notifier, Forwarder, ReplySender, InboundSignalMessage, SideEffectPayload } from "./processor.js";
 import type { MimeParser } from "./mime.js";
 import type { SignalClassifier, ClassificationOutput } from "../classifier/classifier.js";
 import type { EmbeddingGenerator, EmbeddingResult } from "../embedding/embedding-generator.js";
@@ -170,76 +169,28 @@ function makeReplySender(): ReplySender {
 }
 
 /**
- * Build an inbound signal SQS event (from SES notification).
+ * Build an inbound signal message.
  */
-function makeInboundEvent(opts: {
+function makeMessage(opts: {
   sesMessageId?: string;
-  receiveCount?: number;
-}): SQSEvent {
+}): InboundSignalMessage {
   const sesMessageId = opts.sesMessageId ?? SES_MESSAGE_ID;
-  const notification = {
-    accountId: TEST_ACCOUNT_ID,
-    mail: {
-      messageId: sesMessageId,
-      timestamp: "2024-01-15T10:00:00Z",
-      destination: ["user@example.com"],
-    },
-    receipt: {
-      dkimVerdict: { status: "PASS" },
-      dmarcVerdict: { status: "PASS" },
-      action: { bucketName: "test-bucket", objectKey: `emails/${sesMessageId}` },
-    },
-  };
-
   return {
-    Records: [{
-      messageId: "sqs-integration-0",
-      receiptHandle: "handle",
-      body: JSON.stringify({ Message: JSON.stringify(notification) }),
-      attributes: {
-        ApproximateReceiveCount: String(opts.receiveCount ?? 1),
-        SentTimestamp: "1234567890",
-        SenderId: "sender",
-        ApproximateFirstReceiveTimestamp: "1234567890",
-      },
-      messageAttributes: {},
-      md5OfBody: "",
-      eventSource: "aws:sqs",
-      eventSourceARN: "arn:aws:sqs:us-east-1:123:queue",
-      awsRegion: "us-east-1",
-    }],
+    accountId: TEST_ACCOUNT_ID,
+    s3Key: `emails/${sesMessageId}`,
+    sesMessageId,
+    timestamp: "2024-01-15T10:00:00Z",
+    destination: ["user@example.com"],
+    dkimVerdict: "PASS",
+    dmarcVerdict: "PASS",
   };
 }
 
 /**
- * Build a side-effect SQS event (dispatched by the processor itself).
+ * Build a side-effect payload (dispatched by the processor itself).
  */
-function makeSideEffectEvent(payload: { signal: Signal; arc: Arc }): SQSEvent {
-  return {
-    Records: [{
-      messageId: "sqs-side-effect-0",
-      receiptHandle: "handle",
-      body: JSON.stringify(payload),
-      attributes: {
-        ApproximateReceiveCount: "1",
-        SentTimestamp: "1234567890",
-        SenderId: "sender",
-        ApproximateFirstReceiveTimestamp: "1234567890",
-      },
-      messageAttributes: {
-        messageType: {
-          stringValue: "side_effect",
-          dataType: "String",
-          stringListValues: [],
-          binaryListValues: [],
-        },
-      },
-      md5OfBody: "",
-      eventSource: "aws:sqs",
-      eventSourceARN: "arn:aws:sqs:us-east-1:123:queue",
-      awsRegion: "us-east-1",
-    }],
-  };
+function makeSideEffectPayload(payload: { signal: Signal; arc: Arc }): SideEffectPayload {
+  return payload;
 }
 
 /**
@@ -351,9 +302,9 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
 
   describe("first attempt (receiveCount=1)", () => {
     it("executes full pipeline: parse → classify → arc match → save arc → save signal → S3 retention → Aurora → dispatch", async () => {
-      const event = makeInboundEvent({ receiveCount: 1 });
+      const message = makeMessage({});
 
-      const result = await processor.processRecord(event.Records[0]!);
+      const result = await processor.processRecord(message, 1);
 
       // No failures
       expect(result.isOk()).toBe(true);
@@ -395,9 +346,9 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
     });
 
     it("dispatches side-effect payload containing signal and arc", async () => {
-      const event = makeInboundEvent({ receiveCount: 1 });
+      const message = makeMessage({});
 
-      await processor.processRecord(event.Records[0]!);
+      await processor.processRecord(message, 1);
 
       const payload = vi.mocked(sqsDispatcher.sendMessage).mock.calls[0]![0];
       expect(payload.signal).toBeDefined();
@@ -422,9 +373,9 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
     });
 
     it("skips parse, classify, and embedding — resumes from S3 retention → Aurora → dispatch", async () => {
-      const event = makeInboundEvent({ receiveCount: 3 });
+      const message = makeMessage({});
 
-      const result = await processor.processRecord(event.Records[0]!);
+      const result = await processor.processRecord(message, 3);
 
       // No failures
       expect(result.isOk()).toBe(true);
@@ -474,9 +425,9 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
     });
 
     it("returns batchItemFailure and does not dispatch side-effects", async () => {
-      const event = makeInboundEvent({ receiveCount: 2 });
+      const message = makeMessage({});
 
-      const result = await processor.processRecord(event.Records[0]!);
+      const result = await processor.processRecord(message, 2);
 
       // Record returned as failure
       expect(result.isErr()).toBe(true);
@@ -506,9 +457,9 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
       });
       const arc = makeExistingArc();
 
-      const event = makeSideEffectEvent({ signal, arc });
+      const payload = makeSideEffectPayload({ signal, arc });
 
-      const result = await processor.processSideEffectRecord(event.Records[0]!);
+      const result = await processor.processSideEffect(payload);
 
       // No failures (side-effect handler does not return batchItemFailure for execution errors)
       expect(result.isOk()).toBe(true);
@@ -539,9 +490,9 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
       });
       const arc = makeExistingArc();
 
-      const event = makeSideEffectEvent({ signal, arc });
+      const payload = makeSideEffectPayload({ signal, arc });
 
-      const result = await processor.processSideEffectRecord(event.Records[0]!);
+      const result = await processor.processSideEffect(payload);
 
       expect(result.isOk()).toBe(true);
       expect(replySender.sendReply).toHaveBeenCalledOnce();
@@ -563,9 +514,9 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
       });
       const arc = makeExistingArc();
 
-      const event = makeSideEffectEvent({ signal, arc });
+      const payload = makeSideEffectPayload({ signal, arc });
 
-      await processor.processSideEffectRecord(event.Records[0]!);
+      await processor.processSideEffect(payload);
 
       expect(notifier.notify).not.toHaveBeenCalled();
     });
@@ -574,9 +525,9 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
       const signal = makeExistingSignal();
       const arc = makeExistingArc();
 
-      const event = makeSideEffectEvent({ signal, arc });
+      const payload = makeSideEffectPayload({ signal, arc });
 
-      await processor.processRecord(event.Records[0]!);
+      await processor.processSideEffect(payload);
 
       // None of the inbound signal pipeline was invoked
       expect(mimeParser.parse).not.toHaveBeenCalled();
