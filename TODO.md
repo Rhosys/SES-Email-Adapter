@@ -17,6 +17,10 @@ The CI/CD orphan step removes old eu-west-1 resources from Tofu state so the nex
 
 ---
 
+- [ ] **Review and implement Lambda authorizer for both API Gateway APIs** — The HTTP API (`aws_apigatewayv2_api.main`) now has a REQUEST authorizer with 1-hour TTL cache keyed on the `Authorization` header, returning full IAM policy documents. The WebSocket API (`aws_apigatewayv2_api.ws`) has a REQUEST authorizer keyed on `?token=` query string. Verify: (1) the Lambda authorizer handler correctly parses both invocation formats (HTTP payload format 2.0 vs WebSocket `$connect`), (2) the IAM policy document returned grants/denies the correct `execute-api:Invoke` resource ARN, (3) the 1-hour TTL is safe — any token revocation won't take effect until the cache expires, so ensure short-lived tokens or an explicit cache invalidation strategy is in place, (4) the WebSocket authorizer result is cached for the connection lifetime — verify that is acceptable.
+
+---
+
 - [ ] **Expected error handling** — audit all catch blocks and error paths. Distinguish between expected errors (validation failures, not-found, rate limits → INFO or silent) and unexpected errors (DynamoDB failures, SES timeouts → ERROR). Expected errors should never trigger alerts.
 - [ ] **Validate reply-to addresses before sending** — block spoofed inbound emails from triggering auto-replies/pongs to arbitrary third parties. Before any outbound send (auto-reply, pong, forward), verify the `from` address on the inbound signal is plausibly the actual sender (DKIM pass + DMARC pass as minimum gate, or match against known sender domains). Without this, an attacker can forge `From: victim@example.com` and we'll spam the victim with our auto-reply.
 - [ ] **Unify auto-reply and auto-draft into a single action** — `auto_draft` with an `autoSend: boolean` flag. When `autoSend: true` and the send fails, the draft stays in `status: "draft"` for user review (graceful degradation). Rename the `Sender` interface away from `testReplier.pong` — auto-reply should not be coupled to the test infrastructure.
