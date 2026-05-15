@@ -8,47 +8,17 @@
 // 4. totalSegments equals the requested segmentCount
 // 5. modelId is resolved from the cluster registry
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import { mockClient } from "aws-sdk-client-mock";
 import { SQSClient, SendMessageCommand } from "@aws-sdk/client-sqs";
-import { DynamoDBDocumentClient, PutCommand } from "@aws-sdk/lib-dynamodb";
-import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { ReindexDispatcher } from "./reindex-dispatcher.js";
 import { CLUSTER_REGISTRY } from "../../embedding/cluster-registry.js";
-import { PROCESSING_TABLE } from "../../database/shared.js";
 
 // ---------------------------------------------------------------------------
 // Mocks
 // ---------------------------------------------------------------------------
 
 const sqsMock = mockClient(SQSClient);
-const dynamoMock = mockClient(DynamoDBDocumentClient);
-
-vi.mock("../../database/shared.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../database/shared.js")>();
-  const { mockClient } = await import("aws-sdk-client-mock");
-  const { DynamoDBDocumentClient } = await import("@aws-sdk/lib-dynamodb");
-  const mockedDynamo = mockClient(DynamoDBDocumentClient);
-  return {
-    ...actual,
-    dynamo: mockedDynamo as unknown as typeof actual.dynamo,
-    __dynamoMock: mockedDynamo,
-  };
-});
-
-function getDynamoMock() {
-  return dynamoMock;
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function makeDispatcher(): ReindexDispatcher {
-  return new ReindexDispatcher({
-    sqs: sqsMock as unknown as SQSClient,
-  });
-}
 
 // ---------------------------------------------------------------------------
 // Edge-case-driven tests
@@ -64,28 +34,15 @@ const cases: Array<[string, { targetRegistryId: string; segmentCount: number }]>
 describe("Property 10: Reindex dispatcher emits exactly N well-formed segment messages", () => {
   let dispatcher: ReindexDispatcher;
 
-  beforeEach(async () => {
+  beforeEach(() => {
     sqsMock.reset();
     sqsMock.on(SendMessageCommand).resolves({});
-
-    const mod = await import("../../database/shared.js") as unknown as {
-      __dynamoMock: ReturnType<typeof mockClient>;
-    };
-    mod.__dynamoMock.reset();
-    mod.__dynamoMock.on(PutCommand).resolves({});
-
-    dispatcher = makeDispatcher();
+    dispatcher = new ReindexDispatcher({ sqs: sqsMock as unknown as SQSClient });
   });
 
   it.each(cases)("%s", async (_label, { targetRegistryId, segmentCount }) => {
     sqsMock.reset();
     sqsMock.on(SendMessageCommand).resolves({});
-
-    const mod = await import("../../database/shared.js") as unknown as {
-      __dynamoMock: ReturnType<typeof mockClient>;
-    };
-    mod.__dynamoMock.reset();
-    mod.__dynamoMock.on(PutCommand).resolves({});
 
     const result = await dispatcher.dispatch(targetRegistryId, segmentCount);
 
