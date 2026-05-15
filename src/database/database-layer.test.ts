@@ -47,7 +47,7 @@ describe("AccountDatabase", () => {
       expect(result.isErr()).toBe(true);
       expect(result._unsafeUnwrapErr().kind).toBe("db_error");
       expect(result._unsafeUnwrapErr().cause).toBeInstanceOf(Error);
-      expect(result._unsafeUnwrapErr().cause.message).toBe("ProvisionedThroughputExceededException");
+      expect((result._unsafeUnwrapErr().cause as Error).message).toBe("ProvisionedThroughputExceededException");
     });
   });
 
@@ -195,7 +195,7 @@ describe("ArcDatabase", () => {
 
       expect(result.isErr()).toBe(true);
       expect(result._unsafeUnwrapErr().kind).toBe("db_error");
-      expect(result._unsafeUnwrapErr().cause.message).toBe("ConditionalCheckFailedException");
+      expect((result._unsafeUnwrapErr().cause as Error).message).toBe("ConditionalCheckFailedException");
     });
   });
 
@@ -284,7 +284,7 @@ describe("ProcessingDatabase", () => {
 
       expect(result.isErr()).toBe(true);
       expect(result._unsafeUnwrapErr().kind).toBe("db_error");
-      expect(result._unsafeUnwrapErr().cause.message).toBe("ThrottlingException");
+      expect((result._unsafeUnwrapErr().cause as Error).message).toBe("ThrottlingException");
     });
   });
 
@@ -347,7 +347,7 @@ describe("AuditDatabase", () => {
       expect(result.isErr()).toBe(true);
       expect(result._unsafeUnwrapErr().kind).toBe("db_error");
       expect(result._unsafeUnwrapErr().cause).toBeInstanceOf(Error);
-      expect(result._unsafeUnwrapErr().cause.message).toBe("ValidationException");
+      expect((result._unsafeUnwrapErr().cause as Error).message).toBe("ValidationException");
     });
   });
 

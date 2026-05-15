@@ -131,7 +131,7 @@ describe("BedrockEmbeddingGenerator", () => {
       if (result.isErr()) {
         expect(result.error.kind).toBe("bedrock_error");
         expect(result.error.modelId).toBe("nonexistent-model");
-        expect(result.error.cause.message).toContain("not found in CLUSTER_REGISTRY");
+        expect((result.error.cause as Error).message).toContain("not found in CLUSTER_REGISTRY");
       }
     });
 
@@ -144,7 +144,7 @@ describe("BedrockEmbeddingGenerator", () => {
       if (result.isErr()) {
         expect(result.error.kind).toBe("bedrock_error");
         expect(result.error.modelId).toBe("amazon.titan-embed-text-v2:0");
-        expect(result.error.cause.message).toBe("Bedrock unavailable");
+        expect((result.error.cause as Error).message).toBe("Bedrock unavailable");
       }
     });
 
