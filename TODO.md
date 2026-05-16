@@ -1,82 +1,60 @@
 # TODO
 
-## ~~eu-west-1 → eu-central-1 Migration Cleanup~~ ✓ Complete
-
-All eu-west-1 resources deleted. Cleanup script was run 2026-05-15.
-Remember to delete the S3 state migration markers if not already done:
-- `aws s3 rm s3://rhosys-opentofu-342695602194-eu-central-1/migration/eu-west-1-orphaned`
-- `aws s3 rm s3://rhosys-opentofu-342695602194-eu-central-1/migration/eu-central-1-state-fixed`
-- `aws s3 rm s3://rhosys-opentofu-342695602194-eu-central-1/migration/eu-central-1-s3-buckets-fixed`
-
----
+## Processing & Architecture
 
 - [ ] **Review and implement Lambda authorizer for both API Gateway APIs** — The HTTP API (`aws_apigatewayv2_api.main`) now has a REQUEST authorizer with 1-hour TTL cache keyed on the `Authorization` header, returning full IAM policy documents. The WebSocket API (`aws_apigatewayv2_api.ws`) has a REQUEST authorizer keyed on `?token=` query string. Verify: (1) the Lambda authorizer handler correctly parses both invocation formats (HTTP payload format 2.0 vs WebSocket `$connect`), (2) the IAM policy document returned grants/denies the correct `execute-api:Invoke` resource ARN, (3) the 1-hour TTL is safe — any token revocation won't take effect until the cache expires, so ensure short-lived tokens or an explicit cache invalidation strategy is in place, (4) the WebSocket authorizer result is cached for the connection lifetime — verify that is acceptable.
-
----
-
 - [ ] **Expected error handling** — audit all catch blocks and error paths. Distinguish between expected errors (validation failures, not-found, rate limits → INFO or silent) and unexpected errors (DynamoDB failures, SES timeouts → ERROR). Expected errors should never trigger alerts.
 - [ ] **Rules engine: conditionType + dynamic actions** — add a `conditionType` discriminator to the Rule schema (`"json_logic" | "js"`). Change condition evaluation to return an object or null (instead of boolean). The returned object may include an `actions` array that maps to RuleAction types, allowing conditions to dynamically decide actions rather than relying solely on the static `actions` field. Merge condition-returned actions with the rule's static actions during outcome derivation.
 - [ ] **Validate reply-to addresses before sending** — block spoofed inbound emails from triggering auto-replies/pongs to arbitrary third parties. Before any outbound send (auto-reply, pong, forward), verify the `from` address on the inbound signal is plausibly the actual sender (DKIM pass + DMARC pass as minimum gate, or match against known sender domains). Without this, an attacker can forge `From: victim@example.com` and we'll spam the victim with our auto-reply.
 - [ ] **Unify auto-reply and auto-draft into a single action** — `auto_draft` with an `autoSend: boolean` flag. When `autoSend: true` and the send fails, the draft stays in `status: "draft"` for user review (graceful degradation). Rename the `Sender` interface away from `testReplier.pong` — auto-reply should not be coupled to the test infrastructure.
 - [ ] **Forward/auto-reply should force retry on transient failure** — forward is currently fire-and-forget. If SES returns a transient error, the side-effect is lost. Forward should return a force-retry error so the SQS message is redelivered. (Auto-reply doesn't need retry — the draft fallback is the durable artifact.)
-- [ ] **Rework Notifier** — (1) Remove the SES email notification path entirely (sending an email about an email is circular — there is NO case for `notifications.email` on accounts). (2) Notifier should: update browser UI via WebSocket, send mobile push notification, send Web Push to subscribed browsers. (3) Pass urgency to the notifier so it can decide notification priority/sound/badge. (4) Make `notifier` a required field in `SignalProcessorOptions` (not optional) — remove all `this.notifier &&` null checks. The notifier is always present.
+- [ ] **Rework Notifier** — Notifier should: update browser UI via WebSocket, send mobile push notification, send Web Push to subscribed browsers. Pass urgency to the notifier so it can decide notification priority/sound/badge. Currently only fires for `auth` workflow (WebSocket OTP push) — all other workflows are no-op.
 - [ ] **Review all locations where we might want to send emails to users** — domain health alerts, quarantine notifications, etc. Define what the notification strategy actually is (Web Push? In-app? Email digest?) before implementing any of them. Currently all email sending to users is removed — only WebSocket push for auth OTPs remains.
-- [ ] **Review database organizational structure**
 - [ ] **DRY the reindex worker** — the reindex worker duplicates the processor's embedding pipeline (MIME parse → embed text → Bedrock → Aurora upsert). Extract the shared operation into a single function both paths call.
-- [ ] **Eliminate `throw new Error` from application code** — all errors should be returned as `Result` types (neverthrow). `throw` is only acceptable in the Lambda API handler (HTTP error responses) and the Lambda Authorizer (AWS contract). Every other `throw new Error` is a control flow bug — replace with `err()` returns. Never return a raw `Error` instance — always `err(...)`.
 - [ ] **ADR: Error handling and naming conventions** — document the three rules: (1) never throw, always return `err()`, (2) never return raw `Error` instances, (3) all interfaces/types prefixed with `I`. Reference the updated `_Strategy/languages/javascript.md`.
 - [ ] **Enrich all log call context with full input data** — every error/warn/track/critical log call must include the full incoming parameters in context: the request/event that triggered the code path, and the full error object (not just `String(err)` or `err.message`). Without the input data, logs are useless for debugging — you can't reproduce the failure without knowing what went in. Also review all `trackPoint()` calls — ensure they carry meaningful data about what just completed (not just a name).
 - [ ] **Validate rule conditions on save** — when a user creates or updates a rule via the API, validate the JSONLogic condition is syntactically valid and evaluable before persisting. Return a 400 with a clear error message if the condition is broken. This prevents broken rules from silently not matching at processing time.
-- [ ] **Remove optional dependency patterns** — make `notifier`, `forwarder`, `testReplier`, `retentionService`, `sqsDispatcher` all required in `SignalProcessorOptions`. Remove all `this.x &&` null checks. Remove the inline side-effect code from `processMessage` (forward, auto-reply, auto-draft, notify) — it's dead code now that `sqsDispatcher` is always present. Remove `process.env["X"] ?? ""` fallbacks — env vars are always set.
-- [ ] **Consolidate to single SQS queue** — delete the `reindex` and `feedback` queues. All message types flow through the `signals` queue, routed by `messageType` attribute (`inbound_signal`, `side_effect`, `reindex`, `feedback`). One queue, one event source mapping, one Lambda. The `ReindexDispatcher` sends to `SIGNAL_QUEUE_URL` with `messageType: "reindex"`. Feedback SNS subscription targets the signals queue with a message attribute filter or the handler routes by attribute. Visibility timeout set to 900s (max needed for reindex segments). Remove the per-ARN routing in the handler — route purely by `messageType` attribute on each record.
-- [ ] **Typed SQS payloads** — the handler parses `record.body` into the typed payload (`InboundSignalMessage`, `SideEffectPayload`, `ReindexSegmentMessage`, `FeedbackNotification`) and passes the typed object to the processor. Processors never see `SQSRecord` or do `JSON.parse`. Remove `ProcessError` — the handler owns `record.messageId` and maps any `Err` to `batchItemFailures` directly. Processors return `Result<void, DbError>`.
-- [ ] **Centralize retry escalation** — move `RETRY_TRACK_THRESHOLD` logic from inside each processor's loop into the handler's per-record loop. One place decides warn vs error based on `ApproximateReceiveCount`. Processors don't log retry-level decisions.
+- [ ] **Capture all string literals as enums** — message types (`"reindex"`, `"side_effect"`, `"inbound_signal"`) in handler.ts are still inline strings. Define as `as const` objects alongside the existing workflow/status types.
 - [ ] **UI: render calendar cards from scheduling workflow signal directly** — the `buildCalendarSignal` synthetic signal was removed (it was a redundant copy with no new data). The UI should render calendar entry cards for any signal with `workflow: "scheduling"` using the `workflowData` fields (title, start/end time, location, etc.) already present on the email signal.
-- [ ] **Review Lambda Authorizer**
-- [ ] **Never use fs sync anything** every call should be async when available, Sync is always wrong
-- [ ] **Capture all string literals as enums** — all discriminated string values (message types, workflow names, signal statuses, rule action types, etc.) should be defined as TypeScript enums or const objects, never inline string literals
-- [ ] **ResultAsync** is almost always wrong. The ADR needs to be updated, these methods should explictl use Try/Catch, but return the Result type. The return should likely be Promise<Result<T, E>>.
 
 
 ---
 
-- [ ] **API completeness audit** — verify all required endpoints exist and match the contract below. Implemented routes should be validated against the spec (correct method, path params, query params, response shape). Missing routes must be added.
+## Frontend Contract Comparison (2026-05-16)
 
-  **Implemented (verify correctness):**
+Compared the frontend's expected API surface against the actual backend implementation.
 
-  | Method | Path | Used for |
-  |--------|------|----------|
-  | GET | /accounts | Account picker on login |
-  | GET | /accounts/:id | Account name in billing/header |
-  | PATCH | /accounts/:id | Settings save (name, retention, notifications) |
-  | GET | /accounts/:id/arcs | Inbox list (workflow, status, sender, after, before, cursor, limit) |
-  | GET | /accounts/:id/arcs/:arcId | Arc detail |
-  | PATCH | /accounts/:id/arcs/:arcId | Archive, label arcs |
-  | GET | /accounts/:id/arcs/:arcId/signals | Signal thread in arc detail |
-  | GET | /accounts/:id/signals | Quarantine list (?status=quarantine_visible or quarantine_hidden) |
-  | POST | /accounts/:id/signals | Create draft reply |
-  | PUT | /accounts/:id/signals/:signalId | Update draft |
-  | POST | /accounts/:id/signals/:signalId/send | Send reply |
-  | DELETE | /accounts/:id/signals/:signalId | Discard draft |
-  | POST | /accounts/:id/signals/:signalId/quarantineResponse | Allow/block quarantined signal |
-  | GET | /accounts/:id/aliases | Settings → email addresses |
-  | POST | /accounts/:id/aliases | Add email address |
-  | PATCH | /accounts/:id/aliases/:address | Update filter mode / approved/blocked senders |
-  | DELETE | /accounts/:id/aliases/:address | Remove email address |
-  | POST | /accounts/:id/domains | Add domain |
-  | PATCH | /accounts/:id/domains/:domainId | Re-check DNS verification |
+### ✅ Exists and matches — frontend can use as-is
 
-  **Not yet implemented (add in phases):**
+| Area | Endpoints | Notes |
+|------|-----------|-------|
+| Labels | GET/POST/PATCH/DELETE `/accounts/:id/labels` | Shapes match |
+| Views | GET/POST/PATCH/DELETE `/accounts/:id/views` | Shapes match |
+| Rules | GET/POST/PATCH/DELETE `/accounts/:id/rules` | Shapes match |
+| Domains | GET/POST/PATCH `/accounts/:id/domains` | Backend also has GET /:id and DELETE |
+| Forwarding addresses | GET/POST/DELETE `/accounts/:id/forwarding-addresses` | Backend also has verify endpoint |
+| Team members | GET/POST/PATCH/DELETE `/accounts/:id/users` | Shapes match |
+| Templates | GET/POST/PUT/DELETE `/accounts/:id/templates` | Backend supports PUT for full replace |
+| Quarantine signals | GET `?status=quarantine_visible\|quarantine_hidden` | Works |
+| Quarantine response | POST `/:signalId/quarantineResponse` | Backend will support `block_hidden`, `block_reject`, `violate_report` |
+| Draft signals | PUT, POST send, DELETE on `/arcs/:arcId/signals/:id` | Works |
+| Aliases | GET/POST/PATCH/DELETE `/accounts/:id/aliases` | Senders via sub-resource |
+| Account GET/PATCH | `/accounts/:id` | Works |
 
-  | Phase | Methods | Path | Used for |
-  |-------|---------|------|----------|
-  | 6 | GET POST PATCH DELETE | /accounts/:id/labels | Labels & Views page |
-  | 6 | GET POST PATCH DELETE | /accounts/:id/views | Saved sidebar views |
-  | 7 | GET POST PATCH DELETE | /accounts/:id/rules | Rules engine |
-  | 9 | GET | /accounts/:id/domains | Domain list in settings |
-  | 9 | GET POST DELETE | /accounts/:id/forwarding-addresses | Forwarding addresses in settings |
-  | 9 | GET POST PATCH DELETE | /accounts/:id/users | Team members in settings |
-  | 10 | GET | /accounts/:id/audit-log | Audit log (cursor-paginated, returns { events, pagination: { cursor } }) |
+### ❌ Backend TODOs (from contract comparison)
+
+- [ ] **`PUT /accounts/:id/templates/:id`** — add PUT route for full template replacement (frontend sends the whole object). Keep PATCH for partial updates.
+- [ ] **Template `functions` field** — add `functions: TemplateFunction[]` to `EmailTemplate` schema. Each function is `{ name: string, code: string }` — an arrow expression `(signal, arc) => string` executed in sandboxed VM. Validate `name` is valid JS identifier. On render: run each function, collect into `fn.*` namespace, Handlebars pass over subject+body with `{ sender: { name, address }, fn }`.
+- [ ] **`POST /accounts/:id/arcs/:arcId/signals`** — create a draft signal on an arc. Body: `{ from, to, subject, textBody? }`. Signal is created with `status:'draft', source:'user'`, `arcId` set from the path. Required for the reply composer.
+- [ ] **`PUT /accounts/:id/signals/:id`** — full replace of a draft signal (subject, textBody, from, to). Frontend has the whole draft and sends it back.
+- [ ] **`POST /accounts/:id/users` accept `{ email, role }`** — resolve email→userId via Authress lookup server-side. Frontend doesn't know other users' Authress IDs.
+- [ ] **`POST /accounts/:id/rules` accept `status` field** — allow rules to be created with `status: "disabled"`. No reason to block it, and keeps create/update schemas consistent.
+- [ ] **`POST /accounts`** — self-service account creation for onboarding.
+- [ ] **`GET /accounts`** — list all accounts the authenticated user belongs to (account switcher). Requires Authress token introspection or a user→accounts mapping table.
+- [ ] **Billing endpoints** — `GET /accounts/:id/billing` → `BillingInfo`, `POST /accounts/:id/billing/checkout-session` → Stripe Checkout URL, `POST /accounts/:id/billing/portal-session` → Stripe Portal URL. Requires Stripe integration.
+- [ ] **View layout persistence** — `GET /accounts/:id/views/:viewId/layout` (404 if not customised), `PUT` (upsert), `DELETE` (reset to default). Store `nodes: LayoutNode[]` as opaque JSON blob.
+- [ ] **System view seeding** — seed `system:inbox`, `system:all`, `system:quarantine` as undeletable view records. `DELETE` on system view → 403. `DELETE` on system view layout → 204 (allowed).
+- [ ] **Rule `code` field** — add `code?: string` to Rule schema. Validate/sandbox server-side (parse to AST, reject unsafe nodes). Execute in isolated VM context, not raw `eval`.
 
 ---
 
@@ -86,117 +64,12 @@ Remember to delete the S3 state migration markers if not already done:
 
 ---
 
-## Email Templates + Auto-Reply / Auto-Draft Rule Actions
-
-Three new concepts that extend the rules engine.
-
-### `EmailTemplate` entity
-
-Account-scoped, named templates with a subject, body, and basic variable interpolation. Managed via Settings → Templates. Both `auto_reply` and `auto_draft` rule actions reference a template by ID.
-
-**Type shape** (add to `src/types/index.ts`):
-```ts
-export interface EmailTemplate {
-  id: string;
-  accountId: string;
-  name: string;           // user-facing label, e.g. "Support acknowledgement"
-  subject: string;        // supports {{signal.subject}}, {{sender.name}}, {{sender.address}}
-  body: string;           // same interpolation; plain text only for now
-  createdAt: string;
-  updatedAt: string;
-}
-```
-
-Interpolation variables available at render time: `{{sender.name}}`, `{{sender.address}}`, `{{signal.subject}}`, `{{arc.workflow}}`. Unrecognised tokens render as empty string (never throw).
-
-**API** (under `/accounts/:accountId/templates`):
-- `GET /templates` — list all templates
-- `POST /templates` — create
-- `PUT /templates/:id` — update
-- `DELETE /templates/:id` — delete (warn if referenced by active rules)
-
-**Database**: store in DynamoDB with PK `TEMPLATE#${accountId}` SK `${id}`.
-
----
-
-### New rule action types
-
-Extend `RuleActionType` in `src/types/index.ts`:
-
-```ts
-export type RuleActionType =
-  | "assign_label"
-  | "assign_workflow"
-  | "archive"
-  | "delete"
-  | "forward"
-  | "auto_reply"   // send immediately using a template
-  | "auto_draft";  // create a held draft signal for human review
-```
-
-`RuleAction.value` for both new types = the `EmailTemplate.id` to use.
-
----
-
-### `auto_reply` action
-
-When the rule fires, render the template against the signal context and send immediately via SES (same path as the test pong, using the Forwarder/TestReplier infrastructure). Gate on `domain.senderSetupComplete === true`; if false, skip and log a warning (do not surface an error to the user — silently no-op, same as the forward gate).
-
-Add the outbound `messageId` to `arc.sentMessageIds`.
-
-Processor implementation: collect `auto_reply` template IDs from matching rules alongside `forwardAddresses`, resolve each template, render, and send after `saveArc`/`saveSignal` (same ordering as forward dispatch today).
-
----
-
-### `auto_draft` action + Signal draft status
-
-Draft signals are user-authored signals held for review before sending. They are `Signal` records with `source: "user"` and a new status value.
-
-**Extend `SignalStatus`** in `src/types/index.ts`:
-```ts
-export type SignalStatus = "active" | "blocked" | "quarantined" | "draft";
-```
-
-When an `auto_draft` rule fires:
-- Render the template against the signal context
-- Create a `Signal` with:
-  - `id: "USR#${uuid}"`
-  - `source: "user"`
-  - `status: "draft"`
-  - `arcId` set to the current arc
-  - `subject`, `textBody` populated from the rendered template
-  - `to` pre-filled with the inbound signal's `from`
-  - `from` pre-filled with the recipient address (or first Tier-2-complete domain address)
-- Save via `store.saveSignal()`
-
-The arc detail UI shows draft signals as an editable compose card — the user can edit and send (flip `status` to `"active"`, send via SES, add `messageId` to `arc.sentMessageIds`) or discard (delete the signal).
-
-**New API endpoints needed**:
-- `PUT /accounts/:accountId/signals/:id` — update a draft signal's subject/body/from/to before sending
-- `POST /accounts/:accountId/signals/:id/send` — send a draft: render final content, call SES, update `status → "active"`, add `messageId` to `arc.sentMessageIds`
-- `DELETE /accounts/:accountId/signals/:id` — discard a draft (only allowed when `status === "draft"`)
-
-Draft signals must be excluded from the inbox arc list aggregation — they are not inbound events and should not affect `arc.lastSignalAt` or urgency recalculation.
-
----
-
 ## Extension Audit — Gaps vs. Backend Spec
-
-The extension (`extension/`) has a working implementation that assumes a `/aliases` API that does not exist in the backend. This section tracks what needs to change on each side before they can talk to each other.
-
-### What the extension assumes that the backend doesn't have
-
-1. **`POST /accounts/:accountId/aliases`** — the extension calls this to record a draft alias when the user fills a signup form. No such endpoint exists. The backend has catch-all domain routing but no alias tracking table or API.
-
-2. **`PUT /accounts/:accountId/aliases/:email`** — called to either rename a draft alias (user edited the field) or promote it from `draft → active` (form submit). Same gap — no endpoint, no data model.
-
-3. **`GET /accounts/:accountId/aliases?domain=`** — called to check if an existing alias was created for a given eTLD+1. Same gap.
-
-4. **`GET /accounts/:accountId/domains`** — the extension calls this and expects `string[]` (array of domain name strings). The backend endpoint returns `Domain[]` (full domain objects with `receivingSetupComplete`, `senderSetupComplete`, etc.). **Type mismatch** — the extension will break on real data. Fix: extension should map `domains.map(d => d.domain)`, or the backend should add a `?names=true` query param.
 
 ### What the extension needs to fix
 
 - [ ] **OTP auto-fill + Web Push service worker** — tracked in detail in `extension/TODO.md`.
+- [ ] **Domain list type mismatch** — extension expects `string[]` from `GET /domains` but backend returns `Domain[]`. Extension should map `domains.map(d => d.domain)`.
 
 ---
 
@@ -891,10 +764,6 @@ Things competitors charge for that we include, plus things only we can offer:
 - **AI classification** — paywalling this makes us just another forwarder.
 - **Spam threshold tuning** — charging for spam protection is a trust-breaker.
 - **Browser extension** — free acquisition channel.
-
-- [ ] **Convert all `console.*` statements to `logger.log`** — replace `console.log`, `console.error`, `console.warn` throughout the codebase with a structured logger (e.g. `src/logger.ts`) that supports log levels, JSON output, and can be silenced in tests without `vi.spyOn(console, ...)` hacks. When migrating, remove the `vi.spyOn(console, "error").mockImplementation(() => {})` calls added as a temporary fix in these test files:
-  - `src/processor/processor.spec.ts` (6 tests: forwarder throws, batch failure, notifier throws, notifyBlocked throws, updateGlobalReputation throws, pong throws)
-  - `src/processor/processor.aurora-failure.property.spec.ts` (top-level beforeEach/afterEach)
 
 - [ ] **Replace random string generation in embed-text property tests with real email fixtures** — `src/embedding/embed-text.spec.ts` and `src/embedding/embed-text.property.spec.ts` use `fc.string().filter()` to generate random HTML/text bodies. This is wrong — we can't know if randomly generated content is legitimate input. Replace with a static corpus of real-world email bodies (newsletters, receipts, phishing attempts, HTML-heavy marketing emails, plain-text conversations) stored in a `src/testing/fixtures/` directory. The property tests should iterate over these fixtures and verify sanitization produces correct output for each.
 
