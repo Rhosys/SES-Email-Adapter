@@ -19,6 +19,7 @@ import { AuditDatabase } from "./database/audit-database.js";
 import { SESv2Client, SendEmailCommand } from "@aws-sdk/client-sesv2";
 import { SesNotifier } from "./notifier/notifier.js";
 import { SesForwarder } from "./notifier/ses-forwarder.js";
+import { DynamoDeviceStore } from "./notifier/device-store.js";
 import { FeedbackProcessor } from "./notifier/feedback-processor.js";
 import { DomainHealthJob } from "./jobs/domain-health-job.js";
 import { ok, err, dbError } from "./errors.js";
@@ -83,6 +84,7 @@ const accountDb = new AccountDatabase();
 const arcDb = new ArcDatabase(logger);
 const processingDb = new ProcessingDatabase();
 const auditDb = new AuditDatabase();
+const deviceStore = new DynamoDeviceStore();
 
 const processor = new SignalProcessor({
   store: new ProcessorDatabaseAdapter(arcDb, accountDb, processingDb),
@@ -329,17 +331,19 @@ async function handleWebSocket(event: APIGatewayProxyWebsocketEventV2): Promise<
 
   switch (routeKey) {
     case "$connect":
-      await accountDb.saveWsConnection({
-        connectionId,
+      await deviceStore.saveDevice({
         accountId,
-        connectedAt: new Date().toISOString(),
+        token: connectionId,
+        type: "websocket",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
         // 2-hour TTL — API Gateway closes idle connections after 10 min anyway
         ttl: Math.floor(Date.now() / 1000) + 7200,
       });
       return { statusCode: 200 };
 
     case "$disconnect":
-      if (accountId) await accountDb.deleteWsConnection(accountId, connectionId);
+      if (accountId) await deviceStore.deleteDevice(accountId, connectionId);
       return { statusCode: 200 };
 
     default:
