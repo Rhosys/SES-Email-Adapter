@@ -4,7 +4,7 @@ import { ok, err } from "neverthrow";
 import { SignalProcessor, deriveGroupingKey, SYSTEM_RULES, extractForwardedAddress } from "./processor.js";
 import { JsonLogicRuleEvaluator } from "./rule-evaluator.js";
 import { baseUrgency } from "./priority.js";
-import type { ProcessorDatabase, ArcMatcher, RuleEvaluator, Notifier, Forwarder, ForwardOptions, ReplySender, InboundSignalMessage } from "./processor.js";
+import type { ProcessorDatabase, ArcMatcher, RuleEvaluator, Notifier, Forwarder, ReplySender, InboundSignalMessage, SqsDispatcher } from "./processor.js";
 import type { MimeParser } from "./mime.js";
 import type { SignalClassifier, ClassificationOutput } from "../classifier/classifier.js";
 import type { EmbeddingGenerator, EmbeddingResult } from "../embedding/embedding-generator.js";
@@ -42,13 +42,13 @@ const TEST_ACCOUNT_ID = "acct-001";
 // Tests that specifically test sender filtering use explicit mockResolvedValueOnce overrides.
 const DEFAULT_EMAIL_CONFIG: Alias = {
   id: "cfg-default", accountId: "acct-test-001", address: "user@example.com",
-  filterMode: "quarantine_visible",
+  unknownSenderPolicy: "quarantine_visible",
   createdAt: "2024-01-01T00:00:00Z", updatedAt: "2024-01-01T00:00:00Z",
 };
 
 // Default AliasSender: marks example.com as an allowed sender for the default alias.
 const DEFAULT_SENDER_ENTRY: import("../types/index.js").AliasSender = {
-  accountId: "acct-test-001", aliasAddress: "user@example.com", domain: "example.com", mode: "allow", addedAt: "2024-01-01T00:00:00Z",
+  accountId: "acct-test-001", aliasAddress: "user@example.com", domain: "example.com", policy: "allow", addedAt: "2024-01-01T00:00:00Z",
 };
 const DEFAULT_CTX = { retentionDays: 0, filtering: null, emailConfig: DEFAULT_EMAIL_CONFIG, registeredDomains: [], userEmails: [], billingPlan: "Paid" as const };
 
@@ -82,7 +82,7 @@ function makeAlias(overrides: Partial<Alias> = {}): Alias {
     id: "cfg-001",
     accountId: TEST_ACCOUNT_ID,
     address: "user@example.com",
-    filterMode: "quarantine_visible",
+    unknownSenderPolicy: "quarantine_visible",
     createdAt: "2024-01-01T00:00:00Z",
     updatedAt: "2024-01-01T00:00:00Z",
     ...overrides,
@@ -91,7 +91,7 @@ function makeAlias(overrides: Partial<Alias> = {}): Alias {
 
 // Helper to make an AliasSender entry (approved sender for a given alias+domain).
 function makeSenderEntry(domain: string, aliasAddress = "user@example.com"): import("../types/index.js").AliasSender {
-  return { accountId: TEST_ACCOUNT_ID, aliasAddress, domain, mode: "allow", addedAt: "2024-01-01T00:00:00Z" };
+  return { accountId: TEST_ACCOUNT_ID, aliasAddress, domain, policy: "allow", addedAt: "2024-01-01T00:00:00Z" };
 }
 
 function makeMimeParser(): MimeParser {
@@ -146,7 +146,7 @@ function makeRuleEvaluator(logger: MockLogger): RuleEvaluator {
 function makeNotifier(): Notifier {
   return {
     notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    notifyBlocked: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+    
   };
 }
 
@@ -514,7 +514,7 @@ describe("SignalProcessor", () => {
       vi.mocked(store.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([rule])));
       vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok({
         ...DEFAULT_CTX,
-        emailConfig: { ...DEFAULT_EMAIL_CONFIG, filterMode: "allow_all" },
+        emailConfig: { ...DEFAULT_EMAIL_CONFIG, unknownSenderPolicy: "allow_all" },
       })));
 
       await processor.processRecord(makeMessage(), 1);
@@ -527,7 +527,7 @@ describe("SignalProcessor", () => {
 
     it("does not include rules that did not match", async () => {
       const matching: Rule = { ...makeRule({ id: "r-match", name: "Matches", condition: "true", actions: [{ type: "archive" }] }) };
-      const nonMatching: Rule = { ...makeRule({ id: "r-skip", name: "Never", condition: '{"==": [1, 2]}', actions: [{ type: "block" }] }) };
+      const nonMatching: Rule = { ...makeRule({ id: "r-skip", name: "Never", condition: '{"==": [1, 2]}', actions: [{ type: "block_hidden" }] }) };
       vi.mocked(store.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([matching, nonMatching])));
 
       await processor.processRecord(makeMessage(), 1);
@@ -538,18 +538,18 @@ describe("SignalProcessor", () => {
   });
 
   // -------------------------------------------------------------------------
-  // Forwarding
+  // Forwarding (dispatched via SQS side-effect)
   // -------------------------------------------------------------------------
 
   describe("forwarding", () => {
-    let forwarder: Forwarder;
+    let sqsDispatcher: SqsDispatcher;
 
     beforeEach(() => {
-      forwarder = { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) };
-      processor = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, forwarder, logger: mockLogger, notifier: makeNotifier(), retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) } });
+      sqsDispatcher = { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) };
+      processor = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, sqsDispatcher, logger: mockLogger, notifier: makeNotifier(), forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) } });
     });
 
-    it("calls forwarder with s3Key and target address when forward rule matches", async () => {
+    it("dispatches side-effect with forward action in matchedRules when forward rule matches", async () => {
       const rule: Rule = {
         id: "rule-fwd",
         accountId: TEST_ACCOUNT_ID,
@@ -565,15 +565,13 @@ describe("SignalProcessor", () => {
 
       await processor.processRecord(makeMessage({ s3Key: "emails/msg-123" }), 1);
 
-      expect(forwarder.forward).toHaveBeenCalledOnce();
-      expect(forwarder.forward).toHaveBeenCalledWith("emails/msg-123", "backup@personal.com", TEST_ACCOUNT_ID, {
-        senderDomain: "example.com",
-        dkimPass: true,
-        dmarcPass: true,
-      });
+      expect(sqsDispatcher.sendMessage).toHaveBeenCalledOnce();
+      const payload = vi.mocked(sqsDispatcher.sendMessage).mock.calls[0]![0];
+      const forwardActions = payload.signal.matchedRules?.flatMap((r) => r.actions.filter((a) => a.type === "forward"));
+      expect(forwardActions).toContainEqual({ type: "forward", value: "backup@personal.com" });
     });
 
-    it("forwards to multiple addresses when multiple forward actions match", async () => {
+    it("includes multiple forward addresses in matchedRules when multiple forward actions match", async () => {
       const rule: Rule = {
         id: "rule-multi",
         accountId: TEST_ACCOUNT_ID,
@@ -592,13 +590,14 @@ describe("SignalProcessor", () => {
 
       await processor.processRecord(makeMessage(), 1);
 
-      const expectedOpts: ForwardOptions = { senderDomain: "example.com", dkimPass: true, dmarcPass: true };
-      expect(forwarder.forward).toHaveBeenCalledTimes(2);
-      expect(forwarder.forward).toHaveBeenCalledWith(expect.any(String), "first@example.com", TEST_ACCOUNT_ID, expectedOpts);
-      expect(forwarder.forward).toHaveBeenCalledWith(expect.any(String), "second@example.com", TEST_ACCOUNT_ID, expectedOpts);
+      expect(sqsDispatcher.sendMessage).toHaveBeenCalledOnce();
+      const payload = vi.mocked(sqsDispatcher.sendMessage).mock.calls[0]![0];
+      const forwardActions = payload.signal.matchedRules?.flatMap((r) => r.actions.filter((a) => a.type === "forward"));
+      expect(forwardActions).toContainEqual({ type: "forward", value: "first@example.com" });
+      expect(forwardActions).toContainEqual({ type: "forward", value: "second@example.com" });
     });
 
-    it("does not forward when rule does not match", async () => {
+    it("does not include forward actions in matchedRules when rule does not match", async () => {
       const rule: Rule = {
         id: "rule-no-match",
         accountId: TEST_ACCOUNT_ID,
@@ -614,13 +613,14 @@ describe("SignalProcessor", () => {
 
       await processor.processRecord(makeMessage(), 1);
 
-      expect(forwarder.forward).not.toHaveBeenCalled();
+      expect(sqsDispatcher.sendMessage).toHaveBeenCalledOnce();
+      const payload = vi.mocked(sqsDispatcher.sendMessage).mock.calls[0]![0];
+      const forwardActions = payload.signal.matchedRules?.flatMap((r) => r.actions.filter((a) => a.type === "forward")) ?? [];
+      expect(forwardActions).toHaveLength(0);
     });
 
-    it("forwards after arc and signal are saved", async () => {
-      const callOrder: string[] = [];
-      vi.mocked(store.saveSignal).mockImplementation(() => { callOrder.push("saveSignal"); return Promise.resolve(ok(undefined)); });
-      vi.mocked(forwarder.forward).mockImplementation(() => { callOrder.push("forward"); return Promise.resolve(ok(undefined)); });
+    it("dispatches side-effect after arc and signal are saved", async () => {
+      const sqsMock = vi.mocked(sqsDispatcher.sendMessage);
 
       const rule: Rule = {
         id: "rule-fwd",
@@ -637,11 +637,13 @@ describe("SignalProcessor", () => {
 
       await processor.processRecord(makeMessage(), 1);
 
-      expect(callOrder.indexOf("saveSignal")).toBeLessThan(callOrder.indexOf("forward"));
+      // saveSignal was called before sqsDispatcher.sendMessage
+      const signalOrder = vi.mocked(store.saveSignal).mock.invocationCallOrder[0]!;
+      const dispatchOrder = sqsMock.mock.invocationCallOrder[0]!;
+      expect(signalOrder).toBeLessThan(dispatchOrder);
     });
 
-    it("continues processing when forwarder throws", async () => {
-      vi.mocked(forwarder.forward).mockReturnValueOnce(Promise.resolve(err(dbError(new Error("SES throttle")))));
+    it("continues processing when no forward rule matches", async () => {
       const rule: Rule = {
         id: "rule-fwd",
         accountId: TEST_ACCOUNT_ID,
@@ -657,8 +659,9 @@ describe("SignalProcessor", () => {
 
       await processor.processRecord(makeMessage(), 1);
 
-      // Signal was still saved despite forward failure
+      // Signal was saved and side-effect dispatched
       expect(store.saveSignal).toHaveBeenCalledOnce();
+      expect(sqsDispatcher.sendMessage).toHaveBeenCalledOnce();
     });
   });
 
@@ -717,33 +720,33 @@ describe("SignalProcessor", () => {
   });
 
   // -------------------------------------------------------------------------
-  // Notifications
+  // Notifications (dispatched via SQS side-effect)
   // -------------------------------------------------------------------------
 
   describe("notifications", () => {
-    let notifier: Notifier;
+    let sqsDispatcher: SqsDispatcher;
 
     beforeEach(() => {
-      notifier = makeNotifier();
-      processor = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, notifier, logger: mockLogger, forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) } });
+      sqsDispatcher = { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) };
+      processor = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, sqsDispatcher, logger: mockLogger, notifier: makeNotifier(), forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) } });
     });
 
-    it("calls notifier after saving a new Signal", async () => {
+    it("dispatches side-effect after saving a new Signal", async () => {
       await processor.processRecord(makeMessage(), 1);
 
-      expect(notifier.notify).toHaveBeenCalledOnce();
+      expect(sqsDispatcher.sendMessage).toHaveBeenCalledOnce();
     });
 
-    it("passes accountId, arc, and signal to notifier", async () => {
+    it("dispatches side-effect payload containing accountId, arc, and signal", async () => {
       await processor.processRecord(makeMessage(), 1);
 
-      const [accountId, arc, signal] = vi.mocked(notifier.notify).mock.calls[0]!;
-      expect(accountId).toBe(TEST_ACCOUNT_ID);
-      expect(arc.accountId).toBe(TEST_ACCOUNT_ID);
-      expect(signal.accountId).toBe(TEST_ACCOUNT_ID);
+      const payload = vi.mocked(sqsDispatcher.sendMessage).mock.calls[0]![0];
+      expect(payload.signal.accountId).toBe(TEST_ACCOUNT_ID);
+      expect(payload.arc.accountId).toBe(TEST_ACCOUNT_ID);
+      expect(payload.signal.arcId).toBe(payload.arc.id);
     });
 
-    it("does not call notifier when spamScore >= 0.9", async () => {
+    it("does not dispatch side-effect when signal is blocked (spamScore >= 0.9 triggers system rule)", async () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
         ...validClassification,
         spamScore: 0.95,
@@ -751,29 +754,32 @@ describe("SignalProcessor", () => {
 
       await processor.processRecord(makeMessage(), 1);
 
-      expect(notifier.notify).not.toHaveBeenCalled();
+      // Blocked signals don't reach the side-effect dispatch path
+      expect(sqsDispatcher.sendMessage).not.toHaveBeenCalled();
     });
 
-    it("does not fail processing when notifier throws", async () => {
-      vi.mocked(notifier.notify).mockReturnValueOnce(Promise.resolve(err(dbError(new Error("SES error")))));
+    it("does not fail processing when sqsDispatcher returns err", async () => {
+      vi.mocked(sqsDispatcher.sendMessage).mockReturnValueOnce(Promise.resolve(err(dbError(new Error("SQS error")))));
 
-      await processor.processRecord(makeMessage(), 1);
+      const result = await processor.processRecord(makeMessage(), 1);
 
-      // Signal was still saved despite notification failure
+      // Signal was still saved
       expect(store.saveSignal).toHaveBeenCalledOnce();
+      // But the overall result is err because dispatch failed
+      expect(result.isErr()).toBe(true);
     });
 
-    it("does not call notifier when no notifier is configured", async () => {
-      // Processor without notifier
+    it("dispatches side-effect even without explicit notifier configured", async () => {
+      // Processor with default notifier — side-effect dispatch still happens
       const processorWithoutNotifier = new SignalProcessor({
         store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, logger: mockLogger,
         notifier: makeNotifier(), forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
-        replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+        replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher,
       });
 
       await processorWithoutNotifier.processRecord(makeMessage(), 1);
 
-      expect(notifier.notify).not.toHaveBeenCalled();
+      expect(sqsDispatcher.sendMessage).toHaveBeenCalledOnce();
     });
   });
 
@@ -802,7 +808,7 @@ describe("SignalProcessor", () => {
       expect(store.saveAlias).toHaveBeenCalledOnce();
 
       const savedConfig = vi.mocked(store.saveAlias).mock.calls[0]![0] as Alias;
-      expect(savedConfig.filterMode).toBe("quarantine_visible");
+      expect(savedConfig.unknownSenderPolicy).toBe("quarantine_visible");
       expect(store.saveSender).toHaveBeenCalledWith(TEST_ACCOUNT_ID, expect.any(String), "example.com", "allow");
     });
 
@@ -834,19 +840,7 @@ describe("SignalProcessor", () => {
       expect(saved.arcId).toBeUndefined();
     });
 
-    it("calls notifyBlocked when an unknown sender is quarantined (quarantine_visible fallback)", async () => {
-      vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok(
-        { ...DEFAULT_CTX, emailConfig: makeAlias() },
-      )));
-      vi.mocked(store.getSender).mockReturnValueOnce(Promise.resolve(ok(null)));
-
-      await processor.processRecord(makeMessage(), 1);
-
-      expect(notifier.notifyBlocked).toHaveBeenCalledOnce();
-      expect(notifier.notify).not.toHaveBeenCalled();
-    });
-
-    it("calls notifyBlocked when a signal is quarantine_visible (e.g. high-spam from approved sender)", async () => {
+    it("quarantines high-spam signal from approved sender (SR-03 fires)", async () => {
       vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok(
         { ...DEFAULT_CTX, emailConfig: makeAlias() },
       )));
@@ -858,67 +852,47 @@ describe("SignalProcessor", () => {
 
       await processor.processRecord(makeMessage(), 1);
 
-      expect(notifier.notifyBlocked).toHaveBeenCalledOnce();
       const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
       expect(saved.status).toBe("quarantine_visible");
     });
 
-    it("filter mode quarantine_visible: unknown sender → quarantine_visible + notifies", async () => {
+    it("filter mode quarantine_visible: unknown sender → quarantine_visible", async () => {
       vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok(
-        { ...DEFAULT_CTX, emailConfig: makeAlias({ filterMode: "quarantine_visible" }) },
+        { ...DEFAULT_CTX, emailConfig: makeAlias({ unknownSenderPolicy: "quarantine_visible" }) },
       )));
       vi.mocked(store.getSender).mockReturnValueOnce(Promise.resolve(ok(null)));
 
       await processor.processRecord(makeMessage(), 1);
 
-      expect(notifier.notifyBlocked).toHaveBeenCalledOnce();
       const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
       expect(saved.status).toBe("quarantine_visible");
     });
 
-    it("filter mode quarantine_hidden: unknown sender → quarantine_hidden + does not notify", async () => {
+    it("filter mode quarantine_hidden: unknown sender → quarantine_hidden", async () => {
       vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok(
-        { ...DEFAULT_CTX, emailConfig: makeAlias({ filterMode: "quarantine_hidden" }) },
+        { ...DEFAULT_CTX, emailConfig: makeAlias({ unknownSenderPolicy: "quarantine_hidden" }) },
       )));
       vi.mocked(store.getSender).mockReturnValueOnce(Promise.resolve(ok(null)));
 
       await processor.processRecord(makeMessage(), 1);
 
-      expect(notifier.notifyBlocked).not.toHaveBeenCalled();
       const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
       expect(saved.status).toBe("quarantine_hidden");
     });
 
-    it("does NOT call notifyBlocked when a signal is silently blocked by a block rule", async () => {
+    it("silently blocks signal when a block_hidden rule matches", async () => {
       vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok(
         { ...DEFAULT_CTX, emailConfig: makeAlias() },
       )));
       vi.mocked(store.getSender).mockReturnValueOnce(Promise.resolve(ok(null)));
       vi.mocked(store.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([
-        makeRule({ condition: JSON.stringify({ "in": ["system:sender:untrusted", { var: "arc.labels" }] }), actions: [{ type: "block" }] }),
+        makeRule({ condition: JSON.stringify({ "in": ["system:sender:untrusted", { var: "arc.labels" }] }), actions: [{ type: "block_hidden" }] }),
       ])));
 
       await processor.processRecord(makeMessage(), 1);
 
-      expect(notifier.notifyBlocked).not.toHaveBeenCalled();
       const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
-      expect(saved.status).toBe("blocked");
-    });
-
-    it("does not fail when notifyBlocked throws (quarantine_visible via SR-03)", async () => {
-      vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok(
-        { ...DEFAULT_CTX, emailConfig: makeAlias() },
-      )));
-      // Approved sender + high spam → SR-03 fires → quarantine_visible → notifyBlocked called
-      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-        ...validClassification,
-        spamScore: 0.95,
-      });
-      vi.mocked(notifier.notifyBlocked).mockReturnValueOnce(Promise.resolve(err(dbError(new Error("SES error")))));
-
-      await processor.processRecord(makeMessage(), 1);
-
-      expect(store.saveSignal).toHaveBeenCalledOnce();
+      expect(saved.status).toBe("block_hidden");
     });
 
     it("bypasses filtering when signal matches an existing Arc", async () => {
@@ -946,7 +920,7 @@ describe("SignalProcessor", () => {
 
     it("quarantines a known sender with high spam score (SR-03 fires regardless of filter mode)", async () => {
       vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok(
-        { ...DEFAULT_CTX, emailConfig: makeAlias({ filterMode: "quarantine_visible" }) },
+        { ...DEFAULT_CTX, emailConfig: makeAlias({ unknownSenderPolicy: "quarantine_visible" }) },
       )));
       // Sender is known/approved but spam score is too high — SR-03 quarantines independently of filter mode
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
@@ -963,7 +937,7 @@ describe("SignalProcessor", () => {
 
     it("allow_all mode auto-approves new sender without blocking", async () => {
       vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok(
-        { ...DEFAULT_CTX, emailConfig: makeAlias({ filterMode: "allow_all" }) },
+        { ...DEFAULT_CTX, emailConfig: makeAlias({ unknownSenderPolicy: "allow_all" }) },
       )));
       vi.mocked(store.getSender).mockReturnValueOnce(Promise.resolve(ok(null))); // sender not yet in list
 
@@ -990,7 +964,7 @@ describe("SignalProcessor", () => {
     it("quarantines new address when newAddressHandling is block_until_approved (default disposition)", async () => {
       vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok({
         retentionDays: 0,
-        filtering: { newAddressHandling: "block_until_approved", defaultFilterMode: "quarantine_visible" },
+        filtering: { newAddressHandling: "block_until_approved", defaultUnknownSenderPolicy: "quarantine_visible" },
         emailConfig: null,
         registeredDomains: [],
         userEmails: [],
@@ -1416,7 +1390,7 @@ describe("SignalProcessor", () => {
     it("blocks onboarding emails when a block rule targeting system:workflow:onboarding is active", async () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(onboardingClassification);
       vi.mocked(store.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([
-        makeRule({ condition: JSON.stringify({ "in": ["system:workflow:onboarding", { var: "arc.labels" }] }), actions: [{ type: "block" }] }),
+        makeRule({ condition: JSON.stringify({ "in": ["system:workflow:onboarding", { var: "arc.labels" }] }), actions: [{ type: "block_hidden" }] }),
       ])));
 
       const notifier = makeNotifier();
@@ -1425,8 +1399,7 @@ describe("SignalProcessor", () => {
 
       expect(store.saveArc).not.toHaveBeenCalled();
       const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
-      expect(saved.status).toBe("blocked");
-      expect(notifier.notifyBlocked).not.toHaveBeenCalled();
+      expect(saved.status).toBe("block_hidden");
     });
 
     it("quarantines onboarding emails when a quarantine rule is active", async () => {
@@ -1443,7 +1416,6 @@ describe("SignalProcessor", () => {
       const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
       // Plain `quarantine` action → quarantine_visible (shown in review queue)
       expect(saved.status).toBe("quarantine_visible");
-      expect(notifier.notifyBlocked).toHaveBeenCalledOnce();
     });
   });
 
@@ -1521,7 +1493,7 @@ describe("SignalProcessor", () => {
 
       expect(store.saveArc).not.toHaveBeenCalled();
       const signal = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
-      expect(signal.status).toBe("blocked");
+      expect(signal.status).toBe("block_hidden");
       expect(signal.workflow).toBe("status");
     });
 
@@ -1531,7 +1503,6 @@ describe("SignalProcessor", () => {
       await processor.processRecord(makeMessage(), 1);
 
       expect(notifier.notify).not.toHaveBeenCalled();
-      expect(notifier.notifyBlocked).not.toHaveBeenCalled();
     });
 
     it("blocks status emails from untrusted senders (SR-05 rule fires, fallback does not apply)", async () => {
@@ -1546,7 +1517,7 @@ describe("SignalProcessor", () => {
       await processor.processRecord(makeMessage(), 1);
 
       const signal = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
-      expect(signal.status).toBe("blocked"); // SR-05 sets status → fallback skipped (hasStatusOutcome = true)
+      expect(signal.status).toBe("block_hidden"); // SR-05 sets status → fallback skipped (hasStatusOutcome = true)
       expect(store.saveArc).not.toHaveBeenCalled();
     });
   });
@@ -1565,123 +1536,80 @@ describe("SignalProcessor", () => {
   };
 
   describe("pong auto-reply", () => {
-    let replySender: ReplySender;
+    let sqsDispatcher: SqsDispatcher;
 
     beforeEach(() => {
-      replySender = makeReplySender();
-      processor = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, replySender, sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, logger: mockLogger, notifier: makeNotifier(), forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) } });
+      sqsDispatcher = { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) };
+      processor = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, sqsDispatcher, logger: mockLogger, notifier: makeNotifier(), forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: makeReplySender() });
     });
 
-    it("sends a pong when workflow is 'test' and replySender is configured", async () => {
+    it("dispatches side-effect with pong action when workflow is 'test'", async () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(testClassification);
 
       await processor.processRecord(makeMessage(), 1);
 
-      expect(replySender.sendReply).toHaveBeenCalledOnce();
+      expect(sqsDispatcher.sendMessage).toHaveBeenCalledOnce();
+      const payload = vi.mocked(sqsDispatcher.sendMessage).mock.calls[0]![0];
+      const pongActions = payload.signal.matchedRules?.flatMap((r) => r.actions.filter((a) => a.type === "pong")) ?? [];
+      expect(pongActions.length).toBeGreaterThan(0);
     });
 
-    it("passes original sender as 'to', subject, and body to pong", async () => {
+    it("dispatches side-effect payload with signal containing from address and subject for pong", async () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(testClassification);
 
       await processor.processRecord(makeMessage(), 1);
 
-      const opts = vi.mocked(replySender.sendReply).mock.calls[0]![0];
+      const payload = vi.mocked(sqsDispatcher.sendMessage).mock.calls[0]![0];
       // Default mime parser mock: from.address = "sender@example.com", subject = "Test email"
-      expect(opts.to).toBe("sender@example.com");
-      expect(opts.subject).toBe("Test email");
-      expect(opts.body).toBe("Hello world");
+      expect(payload.signal.from.address).toBe("sender@example.com");
+      expect(payload.signal.subject).toBe("Test email");
+      expect(payload.signal.textBody).toBe("Hello world");
     });
 
-    it("uses recipientAddress as 'from' when domain has senderSetupComplete=true", async () => {
+    it("dispatches side-effect with recipientAddress for pong from-address resolution", async () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(testClassification);
-      vi.mocked(store.getDomainByName).mockReturnValueOnce(Promise.resolve(ok({ id: "example.com", accountId: "test-account", domain: "example.com", receivingSetupComplete: true, senderSetupComplete: true, createdAt: "2024-01-01T00:00:00Z", updatedAt: "2024-01-01T00:00:00Z" })));
 
       await processor.processRecord(makeMessage(), 1);
 
-      const opts = vi.mocked(replySender.sendReply).mock.calls[0]![0];
-      // recipientAddress = destination[0] = "user@example.com" from the SQS event default
-      expect(opts.from).toBe("user@example.com");
+      const payload = vi.mocked(sqsDispatcher.sendMessage).mock.calls[0]![0];
+      expect(payload.signal.recipientAddress).toBe("user@example.com");
     });
 
-    it("falls back to NOTIFICATION_FROM when senderSetupComplete=false", async () => {
-      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(testClassification);
-      vi.mocked(store.getDomainByName).mockReturnValueOnce(Promise.resolve(ok({ id: "example.com", accountId: "test-account", domain: "example.com", receivingSetupComplete: true, senderSetupComplete: false, createdAt: "2024-01-01T00:00:00Z", updatedAt: "2024-01-01T00:00:00Z" })));
-      process.env["NOTIFICATION_FROM"] = "noreply@system.example.com";
-
-      await processor.processRecord(makeMessage(), 1);
-
-      const opts = vi.mocked(replySender.sendReply).mock.calls[0]![0];
-      expect(opts.from).toBe("noreply@system.example.com");
-
-      delete process.env["NOTIFICATION_FROM"];
-    });
-
-    it("falls back to NOTIFICATION_FROM when domain record is not found", async () => {
-      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(testClassification);
-      // getDomainByName already returns null by default from makeStore()
-      process.env["NOTIFICATION_FROM"] = "noreply@system.example.com";
-
-      await processor.processRecord(makeMessage(), 1);
-
-      const opts = vi.mocked(replySender.sendReply).mock.calls[0]![0];
-      expect(opts.from).toBe("noreply@system.example.com");
-
-      delete process.env["NOTIFICATION_FROM"];
-    });
-
-    it("passes sesMessageId as inReplyTo for email threading", async () => {
+    it("dispatches side-effect with signal.id containing sesMessageId for inReplyTo", async () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(testClassification);
 
       await processor.processRecord(makeMessage({ sesMessageId: "original-ses-123" }), 1);
 
-      const opts = vi.mocked(replySender.sendReply).mock.calls[0]![0];
-      expect(opts.inReplyTo).toBe("original-ses-123");
+      const payload = vi.mocked(sqsDispatcher.sendMessage).mock.calls[0]![0];
+      expect(payload.signal.id).toBe("SES#original-ses-123");
     });
 
-    it("adds the pong messageId to arc.sentMessageIds before saving", async () => {
-      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(testClassification);
-      vi.mocked(replySender.sendReply).mockResolvedValueOnce({ messageId: "pong-out-001" });
-
+    it("does not include pong action for non-test workflows", async () => {
+      // classifier returns conversation by default (no mockResolvedValueOnce override)
       await processor.processRecord(makeMessage(), 1);
 
-      const arc = vi.mocked(store.saveArc).mock.calls[0]![0] as Arc;
-      expect(arc.sentMessageIds).toContain("pong-out-001");
+      expect(sqsDispatcher.sendMessage).toHaveBeenCalledOnce();
+      const payload = vi.mocked(sqsDispatcher.sendMessage).mock.calls[0]![0];
+      const pongActions = payload.signal.matchedRules?.flatMap((r) => r.actions.filter((a) => a.type === "pong")) ?? [];
+      expect(pongActions).toHaveLength(0);
     });
 
-    it("does not set sentMessageIds when pong throws", async () => {
-      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(testClassification);
-      vi.mocked(replySender.sendReply).mockRejectedValueOnce(new Error("SES timeout"));
-
-      await processor.processRecord(makeMessage(), 1);
-
-      // Processing still completes and arc is saved without sentMessageIds
-      expect(store.saveArc).toHaveBeenCalledOnce();
-      const arc = vi.mocked(store.saveArc).mock.calls[0]![0] as Arc;
-      expect(arc.sentMessageIds).toBeUndefined();
-    });
-
-    it("does not call pong for non-test workflows", async () => {
-      // classifier returns personal by default (no mockResolvedValueOnce override)
-      await processor.processRecord(makeMessage(), 1);
-
-      expect(replySender.sendReply).not.toHaveBeenCalled();
-    });
-
-    it("does not call pong when replySender is not configured", async () => {
-      const processorWithoutReplier = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, logger: mockLogger, notifier: makeNotifier(), forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) } });
+    it("still dispatches side-effect when replySender is configured", async () => {
+      const processorWithReplier = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, logger: mockLogger, notifier: makeNotifier(), forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher });
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(testClassification);
 
-      // Should not throw — replySender is optional
-      const result = await processorWithoutReplier.processRecord(makeMessage(), 1);
+      const result = await processorWithReplier.processRecord(makeMessage(), 1);
       expect(result.isOk()).toBe(true);
+      expect(sqsDispatcher.sendMessage).toHaveBeenCalledOnce();
     });
 
-    it("looks up domain by the domain part of the recipient address", async () => {
+    it("dispatches side-effect with signal.recipientAddress containing the domain for lookup", async () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(testClassification);
 
       await processor.processRecord(makeMessage({ destination: ["me@custom-domain.com"] }), 1);
 
-      expect(store.getDomainByName).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "custom-domain.com");
+      const payload = vi.mocked(sqsDispatcher.sendMessage).mock.calls[0]![0];
+      expect(payload.signal.recipientAddress).toBe("me@custom-domain.com");
     });
   });
 
@@ -1717,7 +1645,7 @@ describe("SignalProcessor", () => {
       vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok({
         ...DEFAULT_CTX,
         emailConfig: makeAlias({
-          filterMode: "quarantine_visible",
+          unknownSenderPolicy: "quarantine_visible",
           spamScoreThreshold: 0.5,
         }),
       })));
@@ -1736,8 +1664,8 @@ describe("SignalProcessor", () => {
     it("uses account-level spamScoreThreshold when no per-address override is set", async () => {
       vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok({
         ...DEFAULT_CTX,
-        emailConfig: makeAlias({ filterMode: "quarantine_visible" }),
-        filtering: { defaultFilterMode: "quarantine_visible", newAddressHandling: "auto_allow", spamScoreThreshold: 0.6 },
+        emailConfig: makeAlias({ unknownSenderPolicy: "quarantine_visible" }),
+        filtering: { defaultUnknownSenderPolicy: "quarantine_visible", newAddressHandling: "auto_allow", spamScoreThreshold: 0.6 },
       })));
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
         ...validClassification,
@@ -1753,52 +1681,24 @@ describe("SignalProcessor", () => {
   });
 
   // -------------------------------------------------------------------------
-  // Forward options reflect SES DKIM and DMARC verdicts
+  // DKIM/DMARC block — emails failing verification are rejected at pipeline entry
   // -------------------------------------------------------------------------
 
-  describe("forward options from SES verdicts", () => {
-    function makeForwardRule(): Rule {
-      return {
-        id: "fwd-rule",
-        accountId: TEST_ACCOUNT_ID,
-        name: "Forward all",
-        condition: "true",
-        actions: [{ type: "forward", value: "backup@personal.com" }],
-        status: "enabled",
-        priorityOrder: 0,
-        createdAt: "2024-01-01T00:00:00Z",
-        updatedAt: "2024-01-01T00:00:00Z",
-      };
-    }
+  describe("DKIM/DMARC block at pipeline entry", () => {
+    it("blocks email and saves signal with block_reject status when DKIM fails", async () => {
+      await processor.processRecord(makeMessage({ dkimVerdict: "FAIL", dmarcVerdict: "PASS" }), 1);
 
-    it("passes dkimPass=true and dmarcPass=true when both SES verdicts are PASS", async () => {
-      const forwarder: Forwarder = { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) };
-      const proc = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, forwarder, logger: mockLogger, notifier: makeNotifier(), retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) } });
-      vi.mocked(store.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([makeForwardRule()])));
-
-      await proc.processRecord(makeMessage({ dkimVerdict: "PASS", dmarcVerdict: "PASS" }), 1);
-
-      expect(forwarder.forward).toHaveBeenCalledWith(
-        expect.any(String),
-        "backup@personal.com",
-        TEST_ACCOUNT_ID,
-        expect.objectContaining({ dkimPass: true, dmarcPass: true }),
-      );
+      const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
+      expect(saved.status).toBe("block_reject");
+      expect(store.saveArc).not.toHaveBeenCalled();
     });
 
-    it("passes dkimPass=false and dmarcPass=false when SES verdicts are FAIL and GRAY", async () => {
-      const forwarder: Forwarder = { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) };
-      const proc = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, forwarder, logger: mockLogger, notifier: makeNotifier(), retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) } });
-      vi.mocked(store.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([makeForwardRule()])));
+    it("blocks email and saves signal with block_reject status when DMARC fails", async () => {
+      await processor.processRecord(makeMessage({ dkimVerdict: "PASS", dmarcVerdict: "GRAY" }), 1);
 
-      await proc.processRecord(makeMessage({ dkimVerdict: "FAIL", dmarcVerdict: "GRAY" }), 1);
-
-      expect(forwarder.forward).toHaveBeenCalledWith(
-        expect.any(String),
-        "backup@personal.com",
-        TEST_ACCOUNT_ID,
-        expect.objectContaining({ dkimPass: false, dmarcPass: false }),
-      );
+      const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
+      expect(saved.status).toBe("block_reject");
+      expect(store.saveArc).not.toHaveBeenCalled();
     });
   });
 

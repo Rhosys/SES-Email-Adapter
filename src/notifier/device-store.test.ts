@@ -241,7 +241,7 @@ describe("DynamoDeviceStore", () => {
 
       // Verify only one call (PutCommand) — no count query
       expect(mockSend).toHaveBeenCalledTimes(1);
-      expect(mockSend.mock.calls[0][0].constructor.name).toBe("PutCommand");
+      expect(mockSend.mock.calls[0]![0].constructor.name).toBe("PutCommand");
     });
   });
 });

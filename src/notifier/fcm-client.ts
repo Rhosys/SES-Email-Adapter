@@ -74,9 +74,12 @@ export class HttpFcmClient implements FcmClient {
       return { ok: true, messageId: body.name };
     }
 
-    const body = await response.json().catch(() => ({})) as {
-      error?: { code?: number; status?: string; details?: Array<{ errorCode?: string }> };
-    };
+    let body: { error?: { code?: number; status?: string; details?: Array<{ errorCode?: string }> } };
+    try {
+      body = await response.json() as typeof body;
+    } catch {
+      body = {};
+    }
 
     const errorCode = body.error?.details?.[0]?.errorCode ?? body.error?.status;
     const mappedError = mapFcmError(response.status, errorCode);

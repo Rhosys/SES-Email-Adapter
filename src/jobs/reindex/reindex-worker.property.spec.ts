@@ -156,7 +156,7 @@ describe("Property 11: Reindex worker uses cache exclusively and never calls Bed
 
   it("the exact cached vector is passed to Aurora unchanged (no transformation)", async () => {
     ddbMock.reset();
-    mockUpsertEmbedding.mockClear();
+    mockUpsertEmbedding.mockClear().mockResolvedValue(ok(undefined));
 
     bedrockMock.on(InvokeModelCommand).rejects(new Error("PROPERTY VIOLATION: Bedrock was called"));
     s3Mock.on(GetObjectCommand).rejects(new Error("PROPERTY VIOLATION: S3 was called"));
