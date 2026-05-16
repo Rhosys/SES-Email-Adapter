@@ -87,6 +87,7 @@ function makeStore(): ApiDatabase {
     deleteTemplate: vi.fn().mockResolvedValue(ok(undefined)),
     listTemplates: vi.fn().mockResolvedValue(ok([])),
     listAuditEvents: vi.fn().mockResolvedValue(ok({ items: [] })),
+    getStats: vi.fn().mockResolvedValue(ok(null)),
   };
 }
 
