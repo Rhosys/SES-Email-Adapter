@@ -12,6 +12,7 @@ import type { MultiClusterAuroraWriter } from "../database/multi-cluster-aurora-
 import type { S3RetentionService } from "../embedding/s3-retention-service.js";
 import { getRetentionForPlan, retentionDurationToSeconds } from "../embedding/retention-tier.js";
 import type { BillingPlan } from "../embedding/retention-tier.js";
+import type { RetentionDuration } from "./retention.js";
 import { getPrimaryArcMatcherRegistry, getActiveClusters } from "../embedding/cluster-registry.js";
 import { getETLD1, assignSystemLabels, DEFAULT_SPAM_SCORE_THRESHOLD } from "./filter.js";
 import { statusToCategory } from "../database/stats-writer.js";
@@ -988,7 +989,7 @@ export class SignalProcessor {
 
       // Persist retention metadata on the signal record
       const retentionUpdate: Partial<Pick<Signal, "s3Key" | "retentionDuration">> = {
-        retentionDuration: retention.retentionDuration,
+        retentionDuration: retention.retentionDuration as RetentionDuration,
       };
       if (updatedS3Key !== signal.s3Key) {
         retentionUpdate.s3Key = updatedS3Key;
