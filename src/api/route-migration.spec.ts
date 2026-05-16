@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createApp } from "./app.js";
-import type { ApiDatabase, AuthService, AuthContext, AccessService, VerificationMailer } from "./app.js";
+import type { ApiDatabase, AuthService, AccessService, VerificationMailer } from "./app.js";
 import { ok } from "neverthrow";
 import { createMockLogger } from "../testing/mock-logger.js";
 
@@ -12,7 +12,7 @@ const TEST_ACCOUNT_ID = "acct-migration-001";
 const TEST_USER_ID = "user-migration-001";
 const A = `/accounts/${TEST_ACCOUNT_ID}`;
 
-const validAuth: AuthContext = { accountId: TEST_ACCOUNT_ID, userId: TEST_USER_ID };
+const validAuth = { userId: TEST_USER_ID };
 
 function makeAuth(): AuthService {
   return { verify: vi.fn().mockReturnValue(Promise.resolve(ok(validAuth))) };
@@ -21,6 +21,7 @@ function makeAuth(): AuthService {
 function makeAccess(): AccessService {
   return {
     listUsers: vi.fn().mockReturnValue(Promise.resolve(ok([]))),
+    listAccountsForUser: vi.fn().mockReturnValue(Promise.resolve(ok([]))),
     addUser: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     updateUserRole: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     removeUser: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),

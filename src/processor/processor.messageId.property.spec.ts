@@ -41,7 +41,7 @@ describe("ProcessError on database failure", () => {
       getProcessorAccountContext: vi.fn().mockReturnValue(Promise.resolve(ok({
         retentionDays: 0,
         filtering: null,
-        emailConfig: { id: "cfg", accountId: "acct", address: "u@x.com", filterMode: "quarantine_visible", createdAt: "2024-01-01T00:00:00Z", updatedAt: "2024-01-01T00:00:00Z" },
+        emailConfig: { id: "cfg", accountId: "acct", address: "u@x.com", unknownSenderPolicy: "quarantine_visible", createdAt: "2024-01-01T00:00:00Z", updatedAt: "2024-01-01T00:00:00Z" },
         registeredDomains: [],
         userEmails: [],
         billingPlan: "Paid" as const,
@@ -104,7 +104,7 @@ describe("ProcessError on database failure", () => {
     return new SignalProcessor({
       store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher,
       ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger), logger: mockLogger,
-      notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), notifyBlocked: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
       replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) },

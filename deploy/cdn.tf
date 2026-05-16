@@ -309,7 +309,7 @@ resource "aws_cloudfront_cache_policy" "api_cache" {
     }
     headers_config {
       header_behavior = "whitelist"
-      headers { items = ["Authorization", "Content-Type", "Origin", "Accept"] }
+      headers { items = ["Authorization", "Content-Type", "Origin", "Accept", "Access-Control-Request-Method", "Access-Control-Request-Headers", "Access-Control-Request-Private-Network"] }
     }
     query_strings_config {
       query_string_behavior = "all"

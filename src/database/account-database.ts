@@ -3,7 +3,7 @@ import { DeleteCommand, GetCommand, PutCommand, QueryCommand, UpdateCommand } fr
 import { dynamo, ACCOUNTS_TABLE } from "./shared.js";
 import { dbError, notFoundError, ok, err } from "../errors.js";
 import type { Result, DbError, NotFoundError } from "../errors.js";
-import type { Account, View, Label, Rule, RuleStatus, Domain, Alias, AliasSender, SenderMode, AccountFilteringConfig, VerifiedForwardingAddress, EmailTemplate, WsConnection } from "../types/index.js";
+import type { Account, View, Label, Rule, RuleStatus, Domain, Alias, AliasSender, SenderPolicy, AccountFilteringConfig, VerifiedForwardingAddress, EmailTemplate, WsConnection } from "../types/index.js";
 import type { CreateViewRequest, UpdateViewRequest, CreateLabelRequest, UpdateLabelRequest, CreateRuleRequest, UpdateRuleRequest } from "../api/app.js";
 
 // ---------------------------------------------------------------------------
@@ -40,7 +40,20 @@ export class AccountDatabase {
     }
   }
 
-  async updateAccount(accountId: string, update: Partial<Pick<Account, "name" | "deletionRetentionDays" | "notifications" | "filtering">>): Promise<Result<Account, DbError>> {
+  async createAccount(account: Account): Promise<Result<Account, DbError>> {
+    try {
+      await dynamo.send(new PutCommand({
+        TableName: ACCOUNTS_TABLE,
+        Item: { ...account, pk: pk(account.id), sk: "META" },
+        ConditionExpression: "attribute_not_exists(pk)",
+      }));
+      return ok(account);
+    } catch (e) {
+      return err(dbError(e));
+    }
+  }
+
+  async updateAccount(accountId: string, update: Partial<Pick<Account, "name" | "deletionRetentionDays" | "notifications" | "filtering" | "onboarding">>): Promise<Result<Account, DbError>> {
     const now = new Date().toISOString();
     const setParts: string[] = ["updatedAt = :now"];
     const exprValues: Record<string, unknown> = { ":now": now };
@@ -50,6 +63,7 @@ export class AccountDatabase {
     if (update.deletionRetentionDays !== undefined) { setParts.push("deletionRetentionDays = :drd"); exprValues[":drd"] = update.deletionRetentionDays; }
     if (update.notifications !== undefined) { setParts.push("notifications = :notif"); exprValues[":notif"] = update.notifications; }
     if (update.filtering !== undefined) { setParts.push("filtering = :filtering"); exprValues[":filtering"] = update.filtering; }
+    if (update.onboarding !== undefined) { setParts.push("onboarding = :onboarding"); exprValues[":onboarding"] = update.onboarding; }
 
     try {
       const res = await dynamo.send(new UpdateCommand({
@@ -142,7 +156,7 @@ export class AccountDatabase {
     if (saveResult.isErr()) return err(saveResult.error);
 
     for (const s of senders) {
-      const saveSenderResult = await this.saveSender(accountId, newAddress, s.domain, s.mode);
+      const saveSenderResult = await this.saveSender(accountId, newAddress, s.domain, s.policy);
       if (saveSenderResult.isErr()) return err(saveSenderResult.error);
     }
 
@@ -162,7 +176,7 @@ export class AccountDatabase {
   // sk = SENDER#${address}#${domain}  — distinct prefix from alias items
   // ---------------------------------------------------------------------------
 
-  async saveSender(accountId: string, address: string, domain: string, mode: SenderMode): Promise<Result<void, DbError>> {
+  async saveSender(accountId: string, address: string, domain: string, policy: SenderPolicy): Promise<Result<void, DbError>> {
     try {
       await dynamo.send(new PutCommand({
         TableName: ACCOUNTS_TABLE,
@@ -171,7 +185,7 @@ export class AccountDatabase {
           sk: `SENDER#${address}#${domain}`,
           gsi1pk: `SENDERS#${accountId}#${domain}`,
           gsi1sk: `ALIAS#${address}`,
-          accountId, aliasAddress: address, domain, mode,
+          accountId, aliasAddress: address, domain, policy,
           addedAt: new Date().toISOString(),
         },
       }));

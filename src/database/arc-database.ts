@@ -63,6 +63,7 @@ export class ArcDatabase implements ArcMatcher {
     } else if (signal.status === "quarantine_visible" || signal.status === "quarantine_hidden") {
       gsi1pk = `QUARANTINED#${signal.accountId}`;
     } else {
+      // block_hidden, block_reject, violate_report — no GSI needed (write-only, never queried by status)
       gsi1pk = `BLOCKED#${signal.accountId}`;
     }
     const gsi1sk = `RECV#${signal.receivedAt}#${signal.id}`;
@@ -116,9 +117,9 @@ export class ArcDatabase implements ArcMatcher {
     }
   }
 
-  async listPreArcSignals(accountId: string, status: "blocked" | "quarantined", params: PageParams): Promise<Result<Page<Signal>, DbError>> {
+  async listPreArcSignals(accountId: string, _status: "quarantined", params: PageParams): Promise<Result<Page<Signal>, DbError>> {
     const limit = Math.min(params.limit ?? 20, 100);
-    const gsi1pk = status === "quarantined" ? `QUARANTINED#${accountId}` : `BLOCKED#${accountId}`;
+    const gsi1pk = `QUARANTINED#${accountId}`;
     try {
       const res = await dynamo.send(new QueryCommand({
         TableName: SIGNALS_TABLE,
@@ -138,7 +139,7 @@ export class ArcDatabase implements ArcMatcher {
     }
   }
 
-  async blockSignal(accountId: string, signalId: string): Promise<Result<Signal, DbError>> {
+  async updateSignalStatus(accountId: string, signalId: string, status: "block_hidden" | "block_reject" | "violate_report"): Promise<Result<Signal, DbError>> {
     try {
       const result = await dynamo.send(new UpdateCommand({
         TableName: SIGNALS_TABLE,
@@ -146,7 +147,7 @@ export class ArcDatabase implements ArcMatcher {
         UpdateExpression: "SET #status = :status, gsi1pk = :gsi1pk",
         ExpressionAttributeNames: { "#status": "status" },
         ExpressionAttributeValues: {
-          ":status": "blocked",
+          ":status": status,
           ":gsi1pk": `BLOCKED#${accountId}`,
         },
         ReturnValues: "ALL_NEW",

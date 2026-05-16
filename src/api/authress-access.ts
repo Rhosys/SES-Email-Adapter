@@ -57,6 +57,19 @@ export class AuthressAccessService implements AccessService {
     return getClient();
   }
 
+  async listAccountsForUser(userId: string): Promise<Result<string[], AuthressServiceError>> {
+    try {
+      const response = await this.client.userPermissions.getUserResources(userId, "accounts", undefined, undefined, "accounts:read");
+      const accountIds = (response.data.resources ?? [])
+        .map((r) => r.resourceUri.replace(/^accounts\//, ""))
+        .filter((id) => id.length > 0);
+      return ok(accountIds);
+    } catch (e) {
+      if (isNotFound(e)) return ok([]);
+      return err(authressServiceError(e));
+    }
+  }
+
   async listUsers(accountId: string): Promise<Result<AccountUser[], AuthressServiceError>> {
     try {
       try {

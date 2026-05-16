@@ -69,7 +69,7 @@ describe("Feature: signal-processor-retry-resilience, Property 4: Arc saved befo
     id: "cfg-default",
     accountId: TEST_ACCOUNT_ID,
     address: "user@example.com",
-    filterMode: "allow_all",
+    unknownSenderPolicy: "allow_all",
     createdAt: "2024-01-01T00:00:00Z",
     updatedAt: "2024-01-01T00:00:00Z",
   };
@@ -78,7 +78,7 @@ describe("Feature: signal-processor-retry-resilience, Property 4: Arc saved befo
     accountId: TEST_ACCOUNT_ID,
     aliasAddress: "user@example.com",
     domain: "example.com",
-    mode: "allow",
+    policy: "allow",
     addedAt: "2024-01-01T00:00:00Z",
   };
 
@@ -199,7 +199,7 @@ describe("Feature: signal-processor-retry-resilience, Property 4: Arc saved befo
       arcMatcher: makeArcMatcher(),
       ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
       logger: mockLogger,
-      notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), notifyBlocked: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
       replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "mock-reply-id" }) },
@@ -262,7 +262,7 @@ describe("Feature: signal-processor-retry-resilience, Property 4: Arc saved befo
       arcMatcher: makeArcMatcher(),
       ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
       logger: mockLogger,
-      notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), notifyBlocked: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
       replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "mock-reply-id" }) },
@@ -300,7 +300,7 @@ describe("Feature: signal-processor-retry-resilience, Property 6: Aurora failure
     id: "cfg-default",
     accountId: TEST_ACCOUNT_ID,
     address: "user@example.com",
-    filterMode: "allow_all",
+    unknownSenderPolicy: "allow_all",
     createdAt: "2024-01-01T00:00:00Z",
     updatedAt: "2024-01-01T00:00:00Z",
   };
@@ -309,7 +309,7 @@ describe("Feature: signal-processor-retry-resilience, Property 6: Aurora failure
     accountId: TEST_ACCOUNT_ID,
     aliasAddress: "user@example.com",
     domain: "example.com",
-    mode: "allow",
+    policy: "allow",
     addedAt: "2024-01-01T00:00:00Z",
   };
 
@@ -439,7 +439,7 @@ describe("Feature: signal-processor-retry-resilience, Property 6: Aurora failure
       arcMatcher: makeArcMatcher(),
       ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
       logger: mockLogger,
-      notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), notifyBlocked: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
       replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "mock-reply-id" }) },
@@ -490,7 +490,7 @@ describe("Feature: signal-processor-retry-resilience, Property 6: Aurora failure
       arcMatcher: makeArcMatcher(),
       ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
       logger: mockLogger,
-      notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), notifyBlocked: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
       replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "mock-reply-id" }) },
@@ -541,7 +541,7 @@ describe("Feature: signal-processor-retry-resilience, Property 6: Aurora failure
       arcMatcher: makeArcMatcher(),
       ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
       logger: mockLogger,
-      notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), notifyBlocked: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
       replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "mock-reply-id" }) },
@@ -584,7 +584,7 @@ describe("Feature: signal-processor-retry-resilience, Property 5: Side-effects d
     id: "cfg-default",
     accountId: TEST_ACCOUNT_ID,
     address: "user@example.com",
-    filterMode: "allow_all",
+    unknownSenderPolicy: "allow_all",
     createdAt: "2024-01-01T00:00:00Z",
     updatedAt: "2024-01-01T00:00:00Z",
   };
@@ -593,7 +593,7 @@ describe("Feature: signal-processor-retry-resilience, Property 5: Side-effects d
     accountId: TEST_ACCOUNT_ID,
     aliasAddress: "user@example.com",
     domain: "example.com",
-    mode: "allow",
+    policy: "allow",
     addedAt: "2024-01-01T00:00:00Z",
   };
 
@@ -708,7 +708,7 @@ describe("Feature: signal-processor-retry-resilience, Property 5: Side-effects d
       logger: mockLogger,
       sqsDispatcher,
       replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "mock-reply-id" }) },
-      notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), notifyBlocked: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
     });
@@ -753,7 +753,7 @@ describe("Feature: signal-processor-retry-resilience, Property 5: Side-effects d
       logger: mockLogger,
       sqsDispatcher,
       replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "mock-reply-id" }) },
-      notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), notifyBlocked: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
     });
@@ -787,7 +787,7 @@ describe("Feature: signal-processor-retry-resilience, Property 5: Side-effects d
       arcMatcher: makeArcMatcher(),
       ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
       logger: mockLogger,
-      notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), notifyBlocked: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
       replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "mock-reply-id" }) },
@@ -829,7 +829,7 @@ describe("Feature: signal-processor-retry-resilience, Property 5: Side-effects d
       logger: mockLogger,
       sqsDispatcher,
       replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "mock-reply-id" }) },
-      notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), notifyBlocked: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
     });
@@ -865,7 +865,7 @@ describe("Feature: signal-processor-retry-resilience, Property 7: Partial Aurora
     id: "cfg-default",
     accountId: TEST_ACCOUNT_ID,
     address: "user@example.com",
-    filterMode: "allow_all",
+    unknownSenderPolicy: "allow_all",
     createdAt: "2024-01-01T00:00:00Z",
     updatedAt: "2024-01-01T00:00:00Z",
   };
@@ -874,7 +874,7 @@ describe("Feature: signal-processor-retry-resilience, Property 7: Partial Aurora
     accountId: TEST_ACCOUNT_ID,
     aliasAddress: "user@example.com",
     domain: "example.com",
-    mode: "allow",
+    policy: "allow",
     addedAt: "2024-01-01T00:00:00Z",
   };
 
@@ -1001,7 +1001,7 @@ describe("Feature: signal-processor-retry-resilience, Property 7: Partial Aurora
       logger: mockLogger,
       sqsDispatcher,
       replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "mock-reply-id" }) },
-      notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), notifyBlocked: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
     });

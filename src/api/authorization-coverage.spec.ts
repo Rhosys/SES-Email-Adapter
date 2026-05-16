@@ -24,11 +24,12 @@ function makeMockDeps() {
   });
 
   const auth: AuthService = {
-    verify: vi.fn().mockReturnValue(Promise.resolve(ok({ userId: "user-1", accountId: "acct-1" }))),
+    verify: vi.fn().mockReturnValue(Promise.resolve(ok({ userId: "user-1" }))),
   };
 
   const access: AccessService = {
     listUsers: vi.fn().mockReturnValue(Promise.resolve(ok([]))),
+    listAccountsForUser: vi.fn().mockReturnValue(Promise.resolve(ok([]))),
     addUser: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     updateUserRole: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     removeUser: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
@@ -174,6 +175,7 @@ describe("Authorization Coverage", () => {
     // Also add a properly protected route for comparison
     const access: AccessService = {
       listUsers: vi.fn().mockReturnValue(Promise.resolve(ok([]))),
+      listAccountsForUser: vi.fn().mockReturnValue(Promise.resolve(ok([]))),
       addUser: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
       updateUserRole: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
       removeUser: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),

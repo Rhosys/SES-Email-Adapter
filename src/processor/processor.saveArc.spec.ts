@@ -110,7 +110,7 @@ describe("Single saveArc call with complete mutations", () => {
         filtering: null,
         emailConfig: {
           id: "cfg-001", accountId: TEST_ACCOUNT_ID, address: recipientEmail,
-          filterMode: "allow_all", createdAt: "2024-01-01T00:00:00Z", updatedAt: "2024-01-01T00:00:00Z",
+          unknownSenderPolicy: "allow_all", createdAt: "2024-01-01T00:00:00Z", updatedAt: "2024-01-01T00:00:00Z",
         } satisfies Alias,
         registeredDomains: testCase.doPong ? [recipientDomain] : [],
         userEmails: testCase.doPong ? [senderEmail] : [],
@@ -119,7 +119,7 @@ describe("Single saveArc call with complete mutations", () => {
       saveAlias: vi.fn().mockImplementation((a: Alias) => Promise.resolve(ok(a))),
       getSender: vi.fn().mockReturnValue(Promise.resolve(ok({
         accountId: TEST_ACCOUNT_ID, aliasAddress: recipientEmail,
-        domain: "external.com", mode: "allow", addedAt: "2024-01-01T00:00:00Z",
+        domain: "external.com", policy: "allow", addedAt: "2024-01-01T00:00:00Z",
       }))),
       saveSender: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
       getTemplate: vi.fn().mockImplementation((_accountId: string, id: string) =>
@@ -192,7 +192,7 @@ describe("Single saveArc call with complete mutations", () => {
       replySender,
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       logger: mockLogger,
-      notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), notifyBlocked: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       retentionService: retentionService ?? { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "emails/test-ses-id" }) },
     });

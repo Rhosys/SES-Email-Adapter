@@ -1,12 +1,12 @@
 import { OpenAPIHono } from "@hono/zod-openapi";
 import type { Context } from "hono";
-import { randomUUID } from "crypto";
+import { randomUUID, createHash, randomBytes } from "crypto";
 import { getDomain } from "tldts";
 import { checkDomain } from "../dns/dns-checker.js";
 import type { AuditEvent } from "../database/audit-database.js";
 import type { Result } from "neverthrow";
 import type { DbError, NotFoundError, AuthressServiceError, AuthError } from "../errors.js";
-import type { Arc, Signal, View, Label, Rule, Domain, DnsRecord, Account, Page, PageParams, ArcStatus, Workflow, WorkflowData, Alias, AliasSender, SenderMode, SenderFilterMode, VerifiedForwardingAddress, Pagination, EmailTemplate } from "../types/index.js";
+import type { Arc, Signal, View, Label, Rule, Domain, DnsRecord, Account, Page, PageParams, ArcStatus, Workflow, WorkflowData, Alias, AliasSender, SenderPolicy, VerifiedForwardingAddress, Pagination, EmailTemplate } from "../types/index.js";
 import type { Logger } from "../logger.js";
 import { deriveGroupingKey } from "../processor/processor.js";
 import { zParse } from "./validate.js";
@@ -23,7 +23,7 @@ export interface JobDispatcher {
 import { authorizationGuard } from "./authorization-guard.js";
 import { createAuthorize } from "./authorization-middleware.js";
 import {
-  UpdateArcRequest, CreateArcFromSignalRequest, UpdateSignalRequest, UpdateSignalStatusRequest,
+  UpdateArcRequest, UpdateSignalRequest, UpdateSignalStatusRequest,
   CreateViewRequest, UpdateViewRequest,
   CreateLabelRequest, UpdateLabelRequest,
   CreateRuleRequest, UpdateRuleRequest,
@@ -45,7 +45,7 @@ export interface AuthContext {
 }
 
 export interface AuthService {
-  verify(token: string): Promise<Result<AuthContext, AuthError>>;
+  verify(token: string): Promise<Result<{ userId: string }, AuthError>>;
 }
 
 // ---------------------------------------------------------------------------
@@ -61,6 +61,7 @@ export interface AccountUser {
 
 export interface AccessService {
   listUsers(accountId: string): Promise<Result<AccountUser[], AuthressServiceError>>;
+  listAccountsForUser(userId: string): Promise<Result<string[], AuthressServiceError>>;
   addUser(accountId: string, userId: string, role: AccountRole): Promise<Result<void, AuthressServiceError>>;
   updateUserRole(accountId: string, userId: string, role: AccountRole): Promise<Result<void, AuthressServiceError>>;
   removeUser(accountId: string, userId: string): Promise<Result<void, AuthressServiceError>>;
@@ -87,7 +88,7 @@ export interface ApiDatabase {
 
   // Signals
   listSignals(accountId: string, arcId: string, params: PageParams): PromiseLike<Result<Page<Signal>, DbError>>;
-  listPreArcSignals(accountId: string, status: "blocked" | "quarantined", params: PageParams): PromiseLike<Result<Page<Signal>, DbError>>;
+  listPreArcSignals(accountId: string, status: "quarantined", params: PageParams): PromiseLike<Result<Page<Signal>, DbError>>;
   getSignal(accountId: string, id: string): PromiseLike<Result<Signal | null, DbError>>;
   updateSignal(accountId: string, id: string, update: Partial<Pick<Signal, "subject" | "textBody" | "from" | "to">>): PromiseLike<Result<Signal, DbError>>;
   deleteSignal(accountId: string, id: string): PromiseLike<Result<void, DbError>>;
@@ -123,7 +124,8 @@ export interface ApiDatabase {
 
   // Account
   getAccount(accountId: string): PromiseLike<Result<Account | null, DbError>>;
-  updateAccount(accountId: string, update: Partial<Pick<Account, "name" | "deletionRetentionDays" | "notifications" | "filtering">>): PromiseLike<Result<Account, DbError>>;
+  createAccount(account: Account): PromiseLike<Result<Account, DbError>>;
+  updateAccount(accountId: string, update: Partial<Pick<Account, "name" | "deletionRetentionDays" | "notifications" | "filtering" | "onboarding">>): PromiseLike<Result<Account, DbError>>;
 
   // Aliases
   listAliases(accountId: string): PromiseLike<Result<Alias[], DbError>>;
@@ -134,7 +136,7 @@ export interface ApiDatabase {
   renameAlias(accountId: string, oldAddress: string, newAddress: string): PromiseLike<Result<Alias, DbError | NotFoundError>>;
 
   // Alias Senders
-  saveSender(accountId: string, address: string, domain: string, mode: SenderMode): PromiseLike<Result<void, DbError>>;
+  saveSender(accountId: string, address: string, domain: string, policy: SenderPolicy): PromiseLike<Result<void, DbError>>;
   removeSender(accountId: string, address: string, domain: string): PromiseLike<Result<void, DbError>>;
   listSenders(accountId: string, address: string): PromiseLike<Result<AliasSender[], DbError>>;
 
@@ -147,7 +149,7 @@ export interface ApiDatabase {
 
 
   // Signal status management
-  blockSignal(accountId: string, signalId: string): PromiseLike<Result<Signal, DbError>>;
+  updateSignalStatus(accountId: string, signalId: string, status: "block_hidden" | "block_reject" | "violate_report"): PromiseLike<Result<Signal, DbError>>;
   unblockSignal(accountId: string, signalId: string, arcId: string): PromiseLike<Result<void, DbError>>;
   createArc(arc: Arc): PromiseLike<Result<void, DbError>>;
   saveArc(arc: Arc): PromiseLike<Result<void, DbError>>;
@@ -194,6 +196,20 @@ function page<K extends string, T>(key: K, items: T[], nextCursor?: string): Rec
   return { [key]: items, pagination: { cursor: nextCursor ?? null } } as Record<K, T[]> & { pagination: Pagination };
 }
 
+const ACCOUNT_ID_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789";
+
+function generateAccountId(): string {
+  const bytes = randomBytes(10);
+  let rawId = "";
+  for (let i = 0; i < 10; i++) {
+    rawId += ACCOUNT_ID_ALPHABET[bytes[i]! % ACCOUNT_ID_ALPHABET.length];
+  }
+  const checkBits = createHash("sha256").update(rawId).digest("base64")
+    .replace(/[^abcdefghijklmnopqrstuvwxyz0123456789]/g, "")
+    .slice(0, 3);
+  return `acc-${rawId}${checkBits}`;
+}
+
 export function createApp({ store, auth, access, logger, verificationMailer, jobDispatcher }: AppDeps) {
   const app = new OpenAPIHono<AppEnv>().basePath('/api');
 
@@ -224,20 +240,24 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
 
   // JWT verification (authentication only — authorization is handled per-route)
   app.use("*", async (c, next) => {
+    if (c.req.method === "OPTIONS") {
+      return c.body(null, 204, {
+        "Access-Control-Allow-Origin": c.req.header("Origin") ?? "*",
+        "Access-Control-Allow-Methods": "DELETE,GET,HEAD,OPTIONS,PATCH,POST,PUT",
+        "Access-Control-Allow-Headers": "Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Powered-By,X-Login-Hash,If-Unmodified-Since,Origin,Referer,Accept,Accept-Language,Accept-Encoding,User-Agent,Content-Length,Cache-Control,Pragma,Sec-Fetch-Dest,Sec-Fetch-Mode,Sec-Fetch-Site,sec-gpc",
+        "Cache-Control": "public, max-age=3600",
+      });
+    }
     const header = c.req.header("Authorization");
     if (!header?.startsWith("Bearer ")) return err(c, 401, "Unauthorized");
 
     const verifyResult = await auth.verify(header.slice(7));
     if (verifyResult.isErr()) return err(c, 401, "Unauthorized");
-    const ctx = verifyResult.value;
+    const { userId } = verifyResult.value;
 
     // Extract accountId from URL path for account-scoped routes
-    const accountMatch = /^\/accounts\/([^/]+)/.exec(c.req.path);
-    if (accountMatch) {
-      c.set("auth", { accountId: accountMatch[1]!, userId: ctx.userId });
-    } else {
-      c.set("auth", ctx);
-    }
+    const accountMatch = /\/accounts\/([^/]+)/.exec(c.req.path);
+    c.set("auth", { accountId: accountMatch?.[1] ?? "", userId });
 
     await next();
   });
@@ -259,6 +279,69 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
       await next();
     };
   }
+
+  // -------------------------------------------------------------------------
+  // Accounts  —  /accounts
+  // -------------------------------------------------------------------------
+
+  app.get("/accounts", async (c) => {
+    const { userId } = c.get("auth");
+    if (!access) return err(c, 501, "Not implemented");
+
+    // Query Authress for all accounts this user has access to
+    const usersResult = await access.listAccountsForUser(userId);
+    if (usersResult.isErr()) return err(c, 500, "Internal Server Error");
+    const accountIds = usersResult.value;
+
+    // Fetch each account from DynamoDB
+    const accounts: Account[] = [];
+    for (const accountId of accountIds) {
+      const accountResult = await store.getAccount(accountId);
+      if (accountResult.isErr()) continue;
+      if (accountResult.value) accounts.push(accountResult.value);
+    }
+
+    return c.json({ accounts });
+  });
+
+  app.post("/accounts", async (c) => {
+    const { userId } = c.get("auth");
+    if (!access) return err(c, 501, "Not implemented");
+
+    // Check if user already has an account via Authress
+    const existingResult = await access.listAccountsForUser(userId);
+    if (existingResult.isErr()) return err(c, 500, "Internal Server Error");
+    if (existingResult.value.length > 0) return err(c, 409, "Account already exists", "ACCOUNT_EXISTS");
+
+    // Generate a unique account ID — cycle until DynamoDB conditional put succeeds
+    const now = new Date().toISOString();
+    let account: Account | null = null;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const candidate: Account = {
+        id: generateAccountId(),
+        name: "",
+        deletionRetentionDays: 0,
+        onboarding: { completed: false },
+        createdAt: now,
+        updatedAt: now,
+      };
+      const createResult = await store.createAccount(candidate);
+      if (createResult.isOk()) {
+        account = candidate;
+        break;
+      }
+      // ConditionalCheckFailedException means ID collision — retry with a new ID
+    }
+    if (!account) return err(c, 500, "Internal Server Error");
+
+    // Grant owner role in Authress
+    const accessResult = await access.addUser(account.id, userId, "owner");
+    if (accessResult.isErr()) {
+      logger.error("Failed to create Authress access record for new account. The account exists in DynamoDB but the user won't have permissions until this is resolved.", { code: "api.account_create.authress_failed", userId, accountId: account.id, error: accessResult.error });
+    }
+
+    return c.json(account, 201);
+  });
 
   // -------------------------------------------------------------------------
   // Arcs  —  /accounts/:accountId/arcs
@@ -312,69 +395,6 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
     return c.json(updateResult.value);
   });
 
-  app.post("/accounts/:accountId/arcs", authz("arcs:write", c => `accounts/${c.req.param("accountId")}/arcs`), async (c) => {
-    const { accountId } = c.get("auth");
-    const body = await zParse(CreateArcFromSignalRequest, c.req.raw);
-
-    const signalResult = await store.getSignal(accountId, body.signalId);
-    if (signalResult.isErr()) return err(c, 500, "Internal Server Error");
-    const signal = signalResult.value;
-    if (!signal) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
-    if (signal.status !== "blocked" && signal.status !== "quarantine_visible" && signal.status !== "quarantine_hidden") {
-      return err(c, 400, "Signal is not blocked or quarantined", "SIGNAL_NOT_BLOCKED");
-    }
-
-    const now = new Date().toISOString();
-    const arc: Arc = {
-      id: randomUUID(),
-      accountId,
-      workflow: signal.workflow,
-      labels: [],
-      status: "active",
-      summary: signal.summary,
-      lastSignalAt: signal.receivedAt,
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    const createArcResult = await store.createArc(arc);
-    if (createArcResult.isErr()) return err(c, 500, "Internal Server Error");
-    const unblockResult = await store.unblockSignal(accountId, signal.id, arc.id);
-    if (unblockResult.isErr()) return err(c, 500, "Internal Server Error");
-
-    if (body.approveSender || body.updateFilterMode) {
-      const senderDomain = signal.from.address.includes("@")
-        ? signal.from.address.split("@").pop()!
-        : signal.from.address;
-      const senderETLD1 = getDomain(senderDomain) ?? senderDomain;
-      const existingResult = await store.getAlias(accountId, signal.recipientAddress);
-      if (existingResult.isErr()) return err(c, 500, "Internal Server Error");
-      const existing = existingResult.value;
-
-      const base = existing ?? {
-        id: randomUUID(),
-        accountId,
-        address: signal.recipientAddress,
-        filterMode: "quarantine_visible" as SenderFilterMode,
-        createdAt: now,
-        updatedAt: now,
-      };
-
-      const upsertResult = await store.upsertAlias({
-        ...base,
-        filterMode: body.updateFilterMode ?? base.filterMode,
-        updatedAt: now,
-      });
-      if (upsertResult.isErr()) return err(c, 500, "Internal Server Error");
-      if (body.approveSender) {
-        const saveSenderResult = await store.saveSender(accountId, signal.recipientAddress, senderETLD1, "allow");
-        if (saveSenderResult.isErr()) return err(c, 500, "Internal Server Error");
-      }
-    }
-
-    return c.json(arc, 201);
-  });
-
   // -------------------------------------------------------------------------
   // Signals  —  /accounts/:accountId/arcs/:arcId/signals  &  /signals/:id
   // -------------------------------------------------------------------------
@@ -400,15 +420,14 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
     const { accountId } = c.get("auth");
     const query = c.req.query();
     const status = query["status"];
-    if (status !== "blocked" && status !== "quarantined" && status !== "quarantine_visible" && status !== "quarantine_hidden") {
-      return err(c, 400, "status query param must be 'blocked', 'quarantined', 'quarantine_visible', or 'quarantine_hidden'", "INVALID_STATUS");
+    if (status !== "quarantined" && status !== "quarantine_visible" && status !== "quarantine_hidden") {
+      return err(c, 400, "status query param must be 'quarantined', 'quarantine_visible', or 'quarantine_hidden'", "INVALID_STATUS");
     }
-    const quarantineCategory = (status === "quarantined" || status === "quarantine_visible" || status === "quarantine_hidden") ? "quarantined" : "blocked";
     const params: PageParams = {
       ...(query["cursor"] ? { cursor: query["cursor"] } : {}),
       ...(query["limit"] ? { limit: parseInt(query["limit"], 10) } : {}),
     };
-    const result = await store.listPreArcSignals(accountId, quarantineCategory as "blocked" | "quarantined", params);
+    const result = await store.listPreArcSignals(accountId, "quarantined", params);
     if (result.isErr()) return err(c, 500, "Internal Server Error");
     const items = (status === "quarantine_visible" || status === "quarantine_hidden")
       ? result.value.items.filter(s => s.status === status)
@@ -423,15 +442,27 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
     const signal = signalResult.value;
     if (!signal) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
     if (signal.accountId !== accountId) return err(c, 403, "Forbidden");
-    if (signal.status !== "blocked" && signal.status !== "quarantine_visible" && signal.status !== "quarantine_hidden") {
-      return err(c, 400, "Only blocked or quarantined signals can have their status updated", "SIGNAL_NOT_REVIEWABLE");
+    if (signal.status !== "quarantine_visible" && signal.status !== "quarantine_hidden") {
+      return err(c, 400, "Only quarantined signals can have their status updated", "SIGNAL_NOT_REVIEWABLE");
     }
 
     const body = await zParse(UpdateSignalStatusRequest, c.req.raw);
 
-    if (body.status === "blocked") {
-      const blockResult = await store.blockSignal(accountId, signal.id);
+    // Determine if quarantine was caused by unknown sender (no status-changing rule fired)
+    const wasQuarantinedByUnknownSender = !(signal.matchedRules ?? []).some(r => r.statusChange);
+
+    if (body.status === "block_hidden" || body.status === "block_reject" || body.status === "violate_report") {
+      const blockResult = await store.updateSignalStatus(accountId, signal.id, body.status);
       if (blockResult.isErr()) return err(c, 500, "Internal Server Error");
+
+      // When quarantined by unknown sender, persist sender disposition for future auto-blocking
+      if (wasQuarantinedByUnknownSender) {
+        const senderDomain = signal.from.address.includes("@") ? signal.from.address.split("@").pop()! : signal.from.address;
+        const senderETLD1 = getDomain(senderDomain) ?? senderDomain;
+        const saveSenderResult = await store.saveSender(accountId, signal.recipientAddress, senderETLD1, body.status);
+        if (saveSenderResult.isErr()) return err(c, 500, "Internal Server Error");
+      }
+
       return c.json(blockResult.value);
     }
 
@@ -471,6 +502,12 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
 
     const unblockResult = await store.unblockSignal(accountId, signal.id, arc.id);
     if (unblockResult.isErr()) return err(c, 500, "Internal Server Error");
+
+    // When quarantined by unknown sender, approve the sender for future emails
+    if (wasQuarantinedByUnknownSender) {
+      const saveSenderResult = await store.saveSender(accountId, signal.recipientAddress, senderETLD1, "allow");
+      if (saveSenderResult.isErr()) return err(c, 500, "Internal Server Error");
+    }
 
     return c.json({ arc, signal: { ...signal, status: "active", arcId: arc.id } });
   });
@@ -741,7 +778,7 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
   app.patch("/accounts/:accountId", authz("accounts:write", c => `accounts/${c.req.param("accountId")}`), async (c) => {
     const { accountId } = c.get("auth");
     const body = await zParse(UpdateAccountRequest, c.req.raw);
-    const updateResult = await store.updateAccount(accountId, body as Partial<Pick<Account, "name" | "deletionRetentionDays" | "notifications" | "filtering">>);
+    const updateResult = await store.updateAccount(accountId, body as Partial<Pick<Account, "name" | "deletionRetentionDays" | "notifications" | "filtering" | "onboarding">>);
     if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
     return c.json(updateResult.value);
   });
@@ -831,7 +868,7 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
       id: randomUUID(),
       accountId,
       address: body.address,
-      filterMode: body.filterMode ?? "quarantine_visible",
+      unknownSenderPolicy: body.unknownSenderPolicy ?? "quarantine_visible",
       ...(body.createdForOrigin !== undefined ? { createdForOrigin: body.createdForOrigin } : {}),
       createdAt: now,
       updatedAt: now,
@@ -860,7 +897,7 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
       id: existing?.id ?? randomUUID(),
       accountId,
       address,
-      filterMode: body.filterMode ?? existing?.filterMode ?? "quarantine_visible",
+      unknownSenderPolicy: body.unknownSenderPolicy ?? existing?.unknownSenderPolicy ?? "quarantine_visible",
       ...(body.spamScoreThreshold !== undefined ? { spamScoreThreshold: body.spamScoreThreshold } : existing?.spamScoreThreshold !== undefined ? { spamScoreThreshold: existing.spamScoreThreshold } : {}),
       ...(body.createdForOrigin !== undefined ? { createdForOrigin: body.createdForOrigin } : existing?.createdForOrigin !== undefined ? { createdForOrigin: existing.createdForOrigin } : {}),
       createdAt: existing?.createdAt ?? now,
@@ -894,7 +931,7 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
     const { accountId } = c.get("auth");
     const address = decodeURIComponent(c.req.param("address"));
     const body = await zParse(CreateSenderRequest, c.req.raw);
-    const saveResult = await store.saveSender(accountId, address, body.domain, body.mode);
+    const saveResult = await store.saveSender(accountId, address, body.domain, body.policy);
     if (saveResult.isErr()) return err(c, 500, "Internal Server Error");
     return new Response(null, { status: 201 });
   });
