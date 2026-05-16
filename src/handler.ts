@@ -59,14 +59,14 @@ const sesv2 = new SESv2Client({});
 const sqs = new SQSClient({});
 const sfn = new SFNClient({});
 
-const S3_BUCKET = process.env["EMAIL_BUCKET"] ?? "";
-const CONTENT_BUCKET = process.env["CONTENT_BUCKET"] ?? "";
-const CONTENT_CDN_BASE_URL = process.env["CONTENT_CDN_BASE_URL"] ?? "";
-const CONTENT_SANITIZER_ARN = process.env["CONTENT_SANITIZER_ARN"] ?? "";
-const USER_CODE_EXECUTOR_ARN = process.env["USER_CODE_EXECUTOR_ARN"] ?? "";
-const SIGNAL_QUEUE_URL = process.env["SIGNAL_QUEUE_URL"] ?? "";
-const WS_ENDPOINT = process.env["WS_API_ENDPOINT"] ?? "";
-const FCM_PROJECT_ID = process.env["FCM_PROJECT_ID"] ?? "";
+const S3_BUCKET = process.env["EMAIL_BUCKET"]!;
+const CONTENT_BUCKET = process.env["CONTENT_BUCKET"]!;
+const CONTENT_CDN_BASE_URL = process.env["CONTENT_CDN_BASE_URL"]!;
+const CONTENT_SANITIZER_ARN = process.env["CONTENT_SANITIZER_ARN"]!;
+const USER_CODE_EXECUTOR_ARN = process.env["USER_CODE_EXECUTOR_ARN"]!;
+const SIGNAL_QUEUE_URL = process.env["SIGNAL_QUEUE_URL"]!;
+const WS_ENDPOINT = process.env["WS_API_ENDPOINT"]!;
+const FCM_PROJECT_ID = process.env["FCM_PROJECT_ID"]!;
 const RETRY_TRACK_THRESHOLD = 30;
 
 // ---------------------------------------------------------------------------
