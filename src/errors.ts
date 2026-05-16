@@ -10,6 +10,8 @@ export type AuthressServiceError = { kind: "authress_service_error"; cause: unkn
 export type BedrockError = { kind: "bedrock_error"; modelId: string; cause: unknown };
 export type AuthError = { kind: "auth_error"; cause: unknown };
 
+export type ReindexSegmentProcessingError = { kind: "reindex_segment_processing_error"; segment: number; failureCount: number; failures: Array<{ signalId: string; reason: string }> };
+
 // --- Constructor helpers ---
 
 export const dbError = (cause: unknown): DbError => ({ kind: "db_error", cause });
@@ -18,6 +20,7 @@ export const invalidResponseError = (): InvalidResponseError => ({ kind: "invali
 export const authressServiceError = (cause: unknown): AuthressServiceError => ({ kind: "authress_service_error", cause });
 export const bedrockError = (modelId: string, cause: unknown): BedrockError => ({ kind: "bedrock_error", modelId, cause });
 export const authError = (cause: unknown): AuthError => ({ kind: "auth_error", cause });
+export const reindexSegmentProcessingError = (segment: number, failures: Array<{ signalId: string; reason: string }>): ReindexSegmentProcessingError => ({ kind: "reindex_segment_processing_error", segment, failureCount: failures.length, failures });
 
 // Re-export neverthrow primitives for convenience
 export { ok, err };
