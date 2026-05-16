@@ -56,7 +56,7 @@ export class AuthorizationMiddleware {
         }
 
         if (status === 404) {
-          this.logger.warn("Authorization check returned 404 — resource or user not found in Authress.", {
+          this.logger.warn("Authorization check returned 404 — resource or user not found in Authress. Users should always have access to resources they request — this indicates a misconfigured access record or a client bug sending requests to resources the user was never granted.", {
             code: "authorization.not_found",
             userId,
             resourceUri: resolvedResourceUri,
