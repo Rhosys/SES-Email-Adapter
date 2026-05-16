@@ -67,6 +67,13 @@ resource "aws_cloudfront_distribution" "api" {
     origin_access_control_id = aws_cloudfront_origin_access_control.s3.id
   }
 
+  # S3 origin — extracted content (images, attachments) via OAC
+  origin {
+    domain_name              = aws_s3_bucket.extracted_content.bucket_regional_domain_name
+    origin_id                = "s3-content"
+    origin_access_control_id = aws_cloudfront_origin_access_control.content.id
+  }
+
   # API Gateway origin — existing API with x-origin-verify secret
   origin {
     domain_name = aws_apigatewayv2_domain_name.http.domain_name
@@ -118,6 +125,17 @@ resource "aws_cloudfront_distribution" "api" {
     cached_methods         = ["GET", "HEAD"]
     target_origin_id       = local.api_gateway_origin_id
     cache_policy_id        = aws_cloudfront_cache_policy.api_cache.id
+    viewer_protocol_policy = "redirect-to-https"
+    compress               = true
+  }
+
+  # /content/* — S3 extracted content (images, attachments) via OAC
+  ordered_cache_behavior {
+    path_pattern           = "/content/*"
+    allowed_methods        = ["GET", "HEAD"]
+    cached_methods         = ["GET", "HEAD"]
+    target_origin_id       = "s3-content"
+    cache_policy_id        = aws_cloudfront_cache_policy.content_cache.id
     viewer_protocol_policy = "redirect-to-https"
     compress               = true
   }
@@ -232,6 +250,13 @@ resource "aws_cloudfront_origin_access_control" "s3" {
   signing_protocol                  = "sigv4"
 }
 
+resource "aws_cloudfront_origin_access_control" "content" {
+  name                              = "${var.service_name}-content"
+  origin_access_control_origin_type = "s3"
+  signing_behavior                  = "always"
+  signing_protocol                  = "sigv4"
+}
+
 resource "aws_s3_bucket_policy" "web" {
   bucket = aws_s3_bucket.web.id
 
@@ -280,6 +305,27 @@ resource "aws_cloudfront_cache_policy" "assets_cache" {
   default_ttl = 31536000
   max_ttl     = 31536000
   min_ttl     = 31536000
+
+  parameters_in_cache_key_and_forwarded_to_origin {
+    cookies_config {
+      cookie_behavior = "none"
+    }
+    headers_config {
+      header_behavior = "none"
+    }
+    query_strings_config {
+      query_string_behavior = "none"
+    }
+    enable_accept_encoding_brotli = true
+    enable_accept_encoding_gzip   = true
+  }
+}
+
+resource "aws_cloudfront_cache_policy" "content_cache" {
+  name        = "${var.service_name}-content-cache"
+  default_ttl = 31536000
+  max_ttl     = 31536000
+  min_ttl     = 0
 
   parameters_in_cache_key_and_forwarded_to_origin {
     cookies_config {
