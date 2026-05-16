@@ -33,7 +33,7 @@ export interface ReindexSegmentMessage {
 // Constants
 // ---------------------------------------------------------------------------
 
-const REINDEX_QUEUE_URL = process.env["REINDEX_QUEUE_URL"] ?? "";
+const SIGNAL_QUEUE_URL = process.env["SIGNAL_QUEUE_URL"] ?? "";
 
 // ---------------------------------------------------------------------------
 // Implementation
@@ -68,8 +68,11 @@ export class ReindexDispatcher {
 
       sendPromises.push(
         this.sqs.send(new SendMessageCommand({
-          QueueUrl: REINDEX_QUEUE_URL,
+          QueueUrl: SIGNAL_QUEUE_URL,
           MessageBody: JSON.stringify(message),
+          MessageAttributes: {
+            messageType: { DataType: "String", StringValue: "reindex" },
+          },
         })),
       );
     }

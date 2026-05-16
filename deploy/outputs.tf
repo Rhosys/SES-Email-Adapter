@@ -61,10 +61,6 @@ output "dynamodb_audit_table" {
   value = aws_dynamodb_table.audit.name
 }
 
-output "feedback_queue_url" {
-  value = aws_sqs_queue.feedback.url
-}
-
 output "ws_api_endpoint" {
   description = "WebSocket API endpoint — clients connect to wss://wss.email.rhosys.cloud"
   value       = "wss://wss.${data.aws_route53_zone.main.name}"

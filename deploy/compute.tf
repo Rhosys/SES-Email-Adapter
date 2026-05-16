@@ -111,20 +111,13 @@ resource "aws_iam_role_policy" "lambda_permissions" {
         Sid      = "SQSSend"
         Effect   = "Allow"
         Action   = ["sqs:SendMessage"]
-        Resource = [
-          aws_sqs_queue.reindex.arn,
-          aws_sqs_queue.signals.arn,
-        ]
+        Resource = aws_sqs_queue.signals.arn
       },
       {
         Sid    = "SQSConsume"
         Effect = "Allow"
         Action = ["sqs:ReceiveMessage", "sqs:DeleteMessage", "sqs:GetQueueAttributes"]
-        Resource = [
-          aws_sqs_queue.signals.arn,
-          aws_sqs_queue.feedback.arn,
-          aws_sqs_queue.reindex.arn,
-        ]
+        Resource = aws_sqs_queue.signals.arn
       },
     ]
   })
@@ -181,7 +174,6 @@ resource "aws_lambda_function" "main" {
       SES_CONFIGURATION_SET = aws_sesv2_configuration_set.sending.configuration_set_name
       WS_API_ENDPOINT       = "https://wss.${data.aws_route53_zone.main.name}"
       CF_ORIGIN_SECRET      = random_password.cf_origin_secret.result
-      REINDEX_QUEUE_URL     = aws_sqs_queue.reindex.url
       SIGNAL_QUEUE_URL      = aws_sqs_queue.signals.url
       MAIL_DOMAIN           = "platform.${data.aws_route53_zone.main.name}"
     }
@@ -220,7 +212,7 @@ resource "aws_lambda_alias" "production" {
 }
 
 # ---------------------------------------------------------------------------
-# SQS → Lambda event source mappings (both point at alias)
+# SQS → Lambda event source mapping
 # ---------------------------------------------------------------------------
 
 resource "aws_lambda_event_source_mapping" "signals" {
@@ -228,52 +220,6 @@ resource "aws_lambda_event_source_mapping" "signals" {
   function_name                      = aws_lambda_alias.production.arn
   batch_size                         = 10
   maximum_batching_window_in_seconds = 5
-
-  function_response_types = ["ReportBatchItemFailures"]
-}
-
-# Bounce/complaint feedback events — processed by FeedbackProcessor
-resource "aws_lambda_event_source_mapping" "feedback" {
-  event_source_arn                   = aws_sqs_queue.feedback.arn
-  function_name                      = aws_lambda_alias.production.arn
-  batch_size                         = 10
-  maximum_batching_window_in_seconds = 5
-
-  function_response_types = ["ReportBatchItemFailures"]
-}
-# ---------------------------------------------------------------------------
-# SQS queue for reindex jobs (no DLQ - indefinite retries with log escalation)
-# ---------------------------------------------------------------------------
-
-resource "aws_sqs_queue" "reindex" {
-  name                       = "${var.service_name}-reindex"
-  visibility_timeout_seconds = 900   # 15 minutes - longer than expected segment processing
-  message_retention_seconds  = 345600 # 4 days
-
-  # No redrive_policy - failed messages return to queue indefinitely
-  # Idempotent worker handles every retry safely
-  # Log-level escalation at 30 receives per _Strategy/conventions.md
-}
-
-resource "aws_sqs_queue_policy" "reindex_lambda" {
-  queue_url = aws_sqs_queue.reindex.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect    = "Allow"
-      Principal = { Service = "lambda.amazonaws.com" }
-      Action    = "sqs:SendMessage"
-      Resource  = aws_sqs_queue.reindex.arn
-    }]
-  })
-}
-
-resource "aws_lambda_event_source_mapping" "reindex" {
-  event_source_arn                   = aws_sqs_queue.reindex.arn
-  function_name                      = aws_lambda_alias.production.arn
-  batch_size                         = 1
-  maximum_batching_window_in_seconds = 0
 
   function_response_types = ["ReportBatchItemFailures"]
 }
