@@ -400,11 +400,11 @@ export class SignalProcessor {
             dmarcPass: false,
           });
           if (forwardResult.isErr()) {
-            this.logger.error("Side-effect forward failed. The SES send-raw-email call returned an error. The recipient won't receive the forwarded copy.", { code: "processor.side_effect.forward_failed", accountId, toAddress, error: forwardResult.error });
+            this.logger.track("Side-effect forward failed. The SES send-raw-email call returned an error. The recipient won't receive the forwarded copy.", { code: "processor.side_effect.forward_failed", accountId, toAddress, error: forwardResult.error });
           }
           this.logger.trackPoint("side_effect_forward_complete");
         } catch (e) {
-          this.logger.error("Side-effect forward threw unexpectedly.", { code: "processor.side_effect.forward_error", accountId, toAddress, error: e });
+          this.logger.track("Side-effect forward threw unexpectedly.", { code: "processor.side_effect.forward_error", accountId, toAddress, error: e });
         }
       }
     }
@@ -474,7 +474,7 @@ export class SignalProcessor {
         }
         this.logger.trackPoint("side_effect_auto_reply_complete");
       } catch (e) {
-        this.logger.error("Side-effect auto-reply failed.", { code: "processor.side_effect.auto_reply_failed", accountId, error: e });
+        this.logger.track("Side-effect auto-reply failed.", { code: "processor.side_effect.auto_reply_failed", accountId, error: e });
       }
     }
 
@@ -518,12 +518,12 @@ export class SignalProcessor {
           };
           const draftSaveResult = await this.store.saveSignal(draft);
           if (draftSaveResult.isErr()) {
-            this.logger.error("Side-effect auto-draft save failed.", { code: "processor.side_effect.auto_draft_failed", accountId, error: draftSaveResult.error });
+            this.logger.track("Side-effect auto-draft save failed.", { code: "processor.side_effect.auto_draft_failed", accountId, error: draftSaveResult.error });
           }
         }
         this.logger.trackPoint("side_effect_auto_draft_complete");
       } catch (e) {
-        this.logger.error("Side-effect auto-draft threw unexpectedly.", { code: "processor.side_effect.auto_draft_error", accountId, error: e });
+        this.logger.track("Side-effect auto-draft threw unexpectedly.", { code: "processor.side_effect.auto_draft_error", accountId, error: e });
       }
     }
 
@@ -835,7 +835,7 @@ export class SignalProcessor {
       for (const toAddress of outcome.forwardAddresses) {
         const forwardResult = await this.forwarder.forward(s3Key, toAddress, accountId, forwardOpts);
         if (forwardResult.isErr()) {
-          this.logger.error("Failed to forward email to configured address. The SES send-raw-email call returned an error. The recipient won't receive the forwarded copy. Check SES sending quota and verify the forward address isn't suppressed.", { code: "processor.forward_failed", accountId, toAddress, error: forwardResult.error });
+          this.logger.track("Failed to forward email to configured address. The SES send-raw-email call returned an error. The recipient won't receive the forwarded copy.", { code: "processor.forward_failed", accountId, toAddress, error: forwardResult.error });
         }
       }
     }
@@ -869,7 +869,7 @@ export class SignalProcessor {
             replyResult = err(dbError(e));
           }
           if (replyResult.isErr()) {
-            this.logger.error("Failed to send auto-reply from template. The SES send call returned an error. The sender won't receive the automated response. Check SES limits and template configuration.", { code: "processor.auto_reply_failed", accountId, error: replyResult.error });
+            this.logger.track("Failed to send auto-reply from template. The SES send call returned an error. The sender won't receive the automated response.", { code: "processor.auto_reply_failed", accountId, error: replyResult.error });
           } else if (replyResult.value) {
             arc.sentMessageIds = [...(arc.sentMessageIds ?? []), replyResult.value.messageId];
           }
