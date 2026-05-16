@@ -259,7 +259,7 @@ describe("DeviceNotifier", () => {
 
       await notifier.notify("acct-1", arc, signalNoName, "normal");
 
-      const call = wsDeliverer.deliver.mock.calls[0];
+      const call = wsDeliverer.deliver.mock.calls[0]!;
       const deliveredPayload = call[1] as NotificationPayload;
       expect(deliveredPayload.senderName).toBe("bob@example.com");
     });
@@ -312,7 +312,7 @@ describe("DeviceNotifier", () => {
 
       await notifier.notify("acct-1", arc, signal, undefined);
 
-      const call = wsDeliverer.deliver.mock.calls[0];
+      const call = wsDeliverer.deliver.mock.calls[0]!;
       const deliveredPayload = call[1] as NotificationPayload;
       // "normal" urgency → "ambient" push priority
       expect(deliveredPayload.urgency).toBe("normal");
