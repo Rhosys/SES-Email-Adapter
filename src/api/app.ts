@@ -10,6 +10,7 @@ import type { Arc, Signal, View, Label, Rule, Domain, DnsRecord, Account, Page, 
 import type { Logger } from "../logger.js";
 import { deriveGroupingKey } from "../processor/processor.js";
 import { zParse } from "./validate.js";
+import { validateRuleCondition } from "./validate-rule-condition.js";
 import { parseStatsRow } from "../database/stats-writer.js";
 
 // ---------------------------------------------------------------------------
@@ -672,6 +673,10 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
   app.post("/accounts/:accountId/rules", authz("rules:write", c => `accounts/${c.req.param("accountId")}/rules`), async (c) => {
     const { accountId } = c.get("auth");
     const body = await zParse(CreateRuleRequest, c.req.raw);
+    if (body.condition) {
+      const conditionError = validateRuleCondition(body.condition);
+      if (conditionError) return err(c, 400, conditionError, "INVALID_CONDITION");
+    }
     const forwardError = await validateForwardTargets(accountId, body.actions as Rule["actions"], store);
     if (forwardError) return err(c, 400, forwardError, "UNVERIFIED_FORWARD_TARGET");
     const ruleResult = await store.createRule(accountId, body as Parameters<typeof store.createRule>[1]);
@@ -686,6 +691,10 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
     const rule = rulesResult.value.find((r) => r.id === c.req.param("id"));
     if (!rule) return err(c, 404, "Rule not found", "RULE_NOT_FOUND");
     const body = await zParse(UpdateRuleRequest, c.req.raw);
+    if (body.condition) {
+      const conditionError = validateRuleCondition(body.condition);
+      if (conditionError) return err(c, 400, conditionError, "INVALID_CONDITION");
+    }
     if (body.actions) {
       const forwardError = await validateForwardTargets(accountId, body.actions as Rule["actions"], store);
       if (forwardError) return err(c, 400, forwardError, "UNVERIFIED_FORWARD_TARGET");
