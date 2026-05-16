@@ -2,12 +2,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ok, err } from "../errors.js";
 import { SignalProcessor, SYSTEM_RULES } from "./processor.js";
 import { JsonLogicRuleEvaluator } from "./rule-evaluator.js";
-import type { InboundSignalMessage, ProcessorDatabase, ArcMatcher, Notifier, Forwarder } from "./processor.js";
+import type { ProcessorDatabase, ArcMatcher, Notifier, Forwarder, SideEffectPayload } from "./processor.js";
 import type { MimeParser } from "./mime.js";
-import type { SignalClassifier, ClassificationOutput } from "../classifier/classifier.js";
-import type { EmbeddingGenerator, EmbeddingResult } from "../embedding/embedding-generator.js";
+import type { EmbeddingGenerator } from "../embedding/embedding-generator.js";
 import type { MultiClusterAuroraWriter } from "../database/multi-cluster-aurora-writer.js";
-import type { Alias, AliasSender, Rule } from "../types/index.js";
+import type { Signal, Arc, Alias, AliasSender } from "../types/index.js";
 import { dbError } from "../errors.js";
 import { createMockLogger, type MockLogger } from "../testing/mock-logger.js";
 
@@ -36,7 +35,7 @@ describe("Side effect caller logging", () => {
     id: "cfg-default",
     accountId: TEST_ACCOUNT_ID,
     address: "user@example.com",
-    filterMode: "quarantine_visible",
+    unknownSenderPolicy: "quarantine_visible",
     createdAt: "2024-01-01T00:00:00Z",
     updatedAt: "2024-01-01T00:00:00Z",
   };
@@ -45,7 +44,7 @@ describe("Side effect caller logging", () => {
     accountId: TEST_ACCOUNT_ID,
     aliasAddress: "user@example.com",
     domain: "example.com",
-    mode: "allow",
+    policy: "allow",
     addedAt: "2024-01-01T00:00:00Z",
   };
 
@@ -56,15 +55,6 @@ describe("Side effect caller logging", () => {
     registeredDomains: [],
     userEmails: [],
     billingPlan: "Paid" as const,
-  };
-
-  const validClassification: ClassificationOutput = {
-    workflow: "conversation",
-    workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
-    spamScore: 0.05,
-    summary: "A test email.",
-    labels: [],
-    classificationModelId: "us.anthropic.claude-opus-4-5-20251101-v1:0",
   };
 
   let mockLogger: MockLogger;
@@ -123,28 +113,56 @@ describe("Side effect caller logging", () => {
     return { findMatch: vi.fn().mockReturnValue(Promise.resolve(ok(null))), upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) };
   }
 
-  function makeMessage(sesMessageId: string): InboundSignalMessage {
+  function makeSignal(overrides: Partial<Signal> = {}): Signal {
     return {
+      id: "SES#test-msg",
       accountId: TEST_ACCOUNT_ID,
-      s3Key: `emails/${sesMessageId}`,
-      sesMessageId,
-      timestamp: "2024-01-15T10:00:00Z",
-      destination: ["user@example.com"],
-      dkimVerdict: "PASS",
-      dmarcVerdict: "PASS",
+      source: "email",
+      receivedAt: "2024-01-15T10:00:00Z",
+      from: { address: "sender@example.com", name: "Sender" },
+      to: [{ address: "user@example.com" }],
+      cc: [],
+      subject: "Test email",
+      textBody: "Hello world",
+      attachments: [],
+      headers: {},
+      recipientAddress: "user@example.com",
+      workflow: "conversation",
+      workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
+      spamScore: 0.05,
+      summary: "A test email.",
+      classificationModelId: "us.anthropic.claude-opus-4-5-20251101-v1:0",
+      s3Key: "emails/test-msg",
+      status: "active",
+      createdAt: "2024-01-15T10:00:00Z",
+      matchedRules: [],
+      ...overrides,
     };
   }
 
-  it("when notifier.notify() returns err, caller logs at track or error level", async () => {
+  function makeArc(): Arc {
+    return {
+      id: "arc-test",
+      accountId: TEST_ACCOUNT_ID,
+      workflow: "conversation",
+      labels: [],
+      status: "active",
+      summary: "A test email.",
+      lastSignalAt: "2024-01-15T10:00:00Z",
+      createdAt: "2024-01-15T10:00:00Z",
+      updatedAt: "2024-01-15T10:00:00Z",
+    };
+  }
+
+  it("when notifier.notify() returns err, caller logs at track level", async () => {
     const notifier: Notifier = {
       notify: vi.fn().mockReturnValue(Promise.resolve(err(dbError(new Error("push failed"))))),
-      notifyBlocked: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     };
 
     const processor = new SignalProcessor({
       store: makeStore(),
       mimeParser: makeMimeParser(),
-      classifier: { classify: vi.fn().mockResolvedValue({ ...validClassification }) },
+      classifier: { classify: vi.fn().mockResolvedValue({ workflow: "conversation", workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false }, spamScore: 0.05, summary: "A test email.", labels: [], classificationModelId: "us.anthropic.claude-opus-4-5-20251101-v1:0" }) },
       embeddingGenerator: makeEmbeddingGenerator(),
       auroraWriter: makeAuroraWriter(),
       arcMatcher: makeArcMatcher(),
@@ -157,10 +175,12 @@ describe("Side effect caller logging", () => {
       logger: mockLogger,
     });
 
-    await processor.processRecord(makeMessage("test-msg-notify"), 1);
+    // Side-effects are now executed via processSideEffect, not processRecord
+    const payload: SideEffectPayload = { signal: makeSignal(), arc: makeArc() };
+    await processor.processSideEffect(payload);
 
     const sideEffectLog = mockLogger.calls.find((call) =>
-      call.context?.code === "processor.notification_failed" &&
+      call.context?.code === "processor.side_effect.notify_failed" &&
       (call.method === "track" || call.method === "error"),
     );
     expect(sideEffectLog).toBeDefined();
@@ -169,13 +189,12 @@ describe("Side effect caller logging", () => {
   it("when notifier.notify() succeeds, no failure log is emitted", async () => {
     const notifier: Notifier = {
       notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      notifyBlocked: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     };
 
     const processor = new SignalProcessor({
       store: makeStore(),
       mimeParser: makeMimeParser(),
-      classifier: { classify: vi.fn().mockResolvedValue({ ...validClassification }) },
+      classifier: { classify: vi.fn().mockResolvedValue({ workflow: "conversation", workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false }, spamScore: 0.05, summary: "A test email.", labels: [], classificationModelId: "us.anthropic.claude-opus-4-5-20251101-v1:0" }) },
       embeddingGenerator: makeEmbeddingGenerator(),
       auroraWriter: makeAuroraWriter(),
       arcMatcher: makeArcMatcher(),
@@ -188,47 +207,45 @@ describe("Side effect caller logging", () => {
       logger: mockLogger,
     });
 
-    await processor.processRecord(makeMessage("test-msg-notify-ok"), 1);
+    const payload: SideEffectPayload = { signal: makeSignal(), arc: makeArc() };
+    await processor.processSideEffect(payload);
 
     const sideEffectLog = mockLogger.calls.find((call) =>
-      call.context?.code === "processor.notification_failed",
+      call.context?.code === "processor.side_effect.notify_failed",
     );
     expect(sideEffectLog).toBeUndefined();
   });
 
-  it("when forwarder.forward() returns err, caller logs at track or error level", async () => {
+  it("when forwarder.forward() returns err, caller logs at track level", async () => {
     const forwarder: Forwarder = {
       forward: vi.fn().mockReturnValue(Promise.resolve(err(dbError(new Error("forward failed"))))),
     };
 
-    const store = makeStore();
-    const forwardRule: Rule = {
-      id: "rule-fwd-prop", accountId: TEST_ACCOUNT_ID, name: "Forward all",
-      condition: JSON.stringify(true), actions: [{ type: "forward", value: "fwd@example.com" }],
-      status: "enabled", priorityOrder: 100, createdAt: "", updatedAt: "",
-    };
-    vi.mocked(store.listEnabledRules).mockReturnValue(Promise.resolve(ok([...SYSTEM_RULES, forwardRule])));
-
     const processor = new SignalProcessor({
-      store,
+      store: makeStore(),
       mimeParser: makeMimeParser(),
-      classifier: { classify: vi.fn().mockResolvedValue({ ...validClassification }) },
+      classifier: { classify: vi.fn().mockResolvedValue({ workflow: "conversation", workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false }, spamScore: 0.05, summary: "A test email.", labels: [], classificationModelId: "us.anthropic.claude-opus-4-5-20251101-v1:0" }) },
       embeddingGenerator: makeEmbeddingGenerator(),
       auroraWriter: makeAuroraWriter(),
       arcMatcher: makeArcMatcher(),
       ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
       forwarder,
-      notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), notifyBlocked: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
       replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) },
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       logger: mockLogger,
     });
 
-    await processor.processRecord(makeMessage("test-msg-forward"), 1);
+    // Signal with a forward action in matchedRules
+    const signal = makeSignal({
+      matchedRules: [{ ruleId: "rule-fwd", actions: [{ type: "forward", value: "fwd@example.com" }], labelsAdded: [] }],
+    });
+    const payload: SideEffectPayload = { signal, arc: makeArc() };
+    await processor.processSideEffect(payload);
 
     const sideEffectLog = mockLogger.calls.find((call) =>
-      call.context?.code === "processor.forward_failed" &&
+      call.context?.code === "processor.side_effect.forward_failed" &&
       (call.method === "track" || call.method === "error"),
     );
     expect(sideEffectLog).toBeDefined();

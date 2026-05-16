@@ -45,7 +45,7 @@ const DEFAULT_ALIAS: Alias = {
   id: "cfg-default",
   accountId: TEST_ACCOUNT_ID,
   address: "user@example.com",
-  filterMode: "allow_all",
+  unknownSenderPolicy: "allow_all",
   createdAt: "2024-01-01T00:00:00Z",
   updatedAt: "2024-01-01T00:00:00Z",
 };
@@ -85,7 +85,7 @@ function makeStore(): ProcessorDatabase {
     saveAlias: vi.fn().mockImplementation((a: Alias) => Promise.resolve(ok(a))),
     getSender: vi.fn().mockReturnValue(Promise.resolve(ok({
       accountId: TEST_ACCOUNT_ID, aliasAddress: "user@example.com",
-      domain: "example.com", mode: "allow", addedAt: "2024-01-01T00:00:00Z",
+      domain: "example.com", policy: "allow", addedAt: "2024-01-01T00:00:00Z",
     }))),
     saveSender: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     getTemplate: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
@@ -152,7 +152,7 @@ function makeSqsDispatcher(): SqsDispatcher {
 function makeNotifier(): Notifier {
   return {
     notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    notifyBlocked: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+    
   };
 }
 
@@ -470,7 +470,6 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
         signal.s3Key,
         "backup@personal.com",
         TEST_ACCOUNT_ID,
-        expect.objectContaining({ senderDomain: "example.com" }),
       );
 
       // Notification was sent (no suppress_notification action)
