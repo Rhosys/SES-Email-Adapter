@@ -73,3 +73,8 @@ output "ws_api_endpoint" {
   description = "WebSocket API endpoint — clients connect to wss://wss.email.rhosys.cloud"
   value       = "wss://wss.${data.aws_route53_zone.main.name}"
 }
+
+output "authress_service_client_public_key" {
+  description = "Base64 DER public key for Authress service client registration (POST /v1/clients/{clientId}/access-keys)"
+  value       = data.aws_kms_public_key.authress_service_client.public_key
+}
