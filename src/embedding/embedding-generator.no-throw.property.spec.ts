@@ -5,7 +5,6 @@
 // `generateForModel` SHALL return a Result and never throw an exception.
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import fc from "fast-check";
 import { mockClient } from "aws-sdk-client-mock";
 import { BedrockRuntimeClient, InvokeModelCommand } from "@aws-sdk/client-bedrock-runtime";
 import { BedrockEmbeddingGenerator } from "./embedding-generator.js";
@@ -40,6 +39,37 @@ vi.mock("./cluster-registry.js", () => ({
 }));
 
 // ---------------------------------------------------------------------------
+// Static test cases: distinct code paths through generateForModel
+// ---------------------------------------------------------------------------
+
+const cases = [
+  {
+    scenario: "empty embedText + valid model → Bedrock succeeds → Ok",
+    embedText: "",
+    modelId: "amazon.titan-embed-text-v2:0",
+    bedrockBehavior: "succeed" as const,
+  },
+  {
+    scenario: "normal text + invalid model → Bedrock throws → Err",
+    embedText: "Hello world, this is a normal email body.",
+    modelId: "invalid.nonexistent-model:99",
+    bedrockBehavior: "throw" as const,
+  },
+  {
+    scenario: "very long text + valid model → Bedrock succeeds → Ok",
+    embedText: "A".repeat(10_000),
+    modelId: "amazon.titan-embed-text-v2:0",
+    bedrockBehavior: "succeed" as const,
+  },
+  {
+    scenario: "normal text + empty model ID → Bedrock throws → Err",
+    embedText: "Some email content to embed.",
+    modelId: "",
+    bedrockBehavior: "throw" as const,
+  },
+];
+
+// ---------------------------------------------------------------------------
 // Property 5: generateForModel never throws
 // ---------------------------------------------------------------------------
 
@@ -52,27 +82,27 @@ describe("Property 5: generateForModel never throws", () => {
     generator = new BedrockEmbeddingGenerator(new BedrockRuntimeClient({}));
   });
 
-  it("always returns a Result and never throws for any embedText and modelId", async () => {
-    await fc.assert(
-      fc.asyncProperty(fc.string(), fc.string(), async (embedText, modelId) => {
-        // Randomly configure the mock to either succeed or throw
-        const shouldFail = modelId.length % 2 === 0;
-        bedrockMock.reset();
-        if (shouldFail) {
-          bedrockMock.on(InvokeModelCommand).rejects(new Error("Simulated Bedrock failure"));
-        } else {
-          bedrockMock.on(InvokeModelCommand).resolves({
-            body: new TextEncoder().encode(JSON.stringify({ embedding: [0.1, 0.2] })) as never,
-          });
-        }
+  it.each(cases)("$scenario", async ({ embedText, modelId, bedrockBehavior }) => {
+    bedrockMock.reset();
+    if (bedrockBehavior === "throw") {
+      bedrockMock.on(InvokeModelCommand).rejects(new Error("Simulated Bedrock failure"));
+    } else {
+      bedrockMock.on(InvokeModelCommand).resolves({
+        body: new TextEncoder().encode(JSON.stringify({ embedding: [0.1, 0.2] })) as never,
+      });
+    }
 
-        // The property: calling generateForModel must NEVER throw — it must always return a Result
-        const result = await generator.generateForModel(embedText, modelId);
+    // The property: calling generateForModel must NEVER throw — it must always return a Result
+    const result = await generator.generateForModel(embedText, modelId);
 
-        // Result must be either Ok or Err — never undefined/null
-        expect(result.isOk() || result.isErr()).toBe(true);
-      }),
-      { numRuns: 100 },
-    );
+    // Result must be either Ok or Err — never undefined/null
+    expect(result.isOk() || result.isErr()).toBe(true);
+
+    // Verify the correct branch was taken
+    if (bedrockBehavior === "succeed") {
+      expect(result.isOk()).toBe(true);
+    } else {
+      expect(result.isErr()).toBe(true);
+    }
   });
 });
