@@ -18,8 +18,8 @@ import { BedrockEmbeddingGenerator } from "../../embedding/embedding-generator.j
 import { BedrockRuntimeClient } from "@aws-sdk/client-bedrock-runtime";
 import { ArcDatabase } from "../../database/arc-database.js";
 import type { Signal } from "../../types/index.js";
-import type { DbError, Result } from "../../errors.js";
-import { ok, err, dbError } from "../../errors.js";
+import type { DbError, ReindexSegmentProcessingError, Result } from "../../errors.js";
+import { ok, err, dbError, reindexSegmentProcessingError } from "../../errors.js";
 import type { Logger } from "../../logger.js";
 
 // ---------------------------------------------------------------------------
@@ -69,18 +69,14 @@ function isNoSuchKeyError(e: unknown): boolean {
 export class ReindexWorker {
   constructor(private readonly logger: Logger) {}
 
-  async processSegmentMessage(message: ReindexSegmentMessage): Promise<Result<void, DbError>> {
+  async processSegmentMessage(message: ReindexSegmentMessage): Promise<Result<void, DbError | ReindexSegmentProcessingError>> {
     const { segment, totalSegments, targetRegistryId, modelId } = message;
 
     // Validate target cluster exists in registry
     const cluster = getRegistryById(targetRegistryId);
     if (!cluster) return err(dbError(`Cluster "${targetRegistryId}" not found in registry`));
 
-    // Process segment
-    const segmentResult = await this.processSegment(segment, totalSegments, targetRegistryId, modelId);
-    if (segmentResult.isErr()) return err(dbError("segment processing failed"));
-
-    return ok(undefined);
+    return this.processSegment(segment, totalSegments, targetRegistryId, modelId);
   }
 
   private async processSegment(
@@ -88,13 +84,14 @@ export class ReindexWorker {
     totalSegments: number,
     targetRegistryId: string,
     modelId: string,
-  ): Promise<Result<void, DbError>> {
+  ): Promise<Result<void, DbError | ReindexSegmentProcessingError>> {
     let lastEvaluatedKey: Record<string, unknown> | undefined;
     const failures: Array<{ signalId: string; reason: string }> = [];
 
-    try {
-      do {
-        const res = await dynamo.send(new ScanCommand({
+    do {
+      let res;
+      try {
+        res = await dynamo.send(new ScanCommand({
           TableName: SIGNALS_TABLE,
           Segment: segment,
           TotalSegments: totalSegments,
@@ -102,30 +99,31 @@ export class ReindexWorker {
           ExpressionAttributeValues: { ":sigMarker": "#SIG#" },
           ...(lastEvaluatedKey ? { ExclusiveStartKey: lastEvaluatedKey } : {}),
         }));
+      } catch (e) {
+        this.logger.error("DynamoDB scan failed during reindex segment processing. The segment will be retried.", { code: "reindex.worker.scan_failed", error: e, segment, totalSegments, targetRegistryId });
+        return err(dbError(e));
+      }
 
-        const items = (res.Items ?? []) as Array<Record<string, unknown>>;
+      const items = (res.Items ?? []) as Array<Record<string, unknown>>;
 
-        for (const item of items) {
-          const result = await this.processSignal(item, targetRegistryId, modelId);
-          if (result.isErr()) {
-            failures.push(result.error);
-          }
+      for (const item of items) {
+        const result = await this.processSignal(item, targetRegistryId, modelId);
+        if (result.isErr()) {
+          failures.push(result.error);
         }
+      }
 
-        lastEvaluatedKey = res.LastEvaluatedKey as Record<string, unknown> | undefined;
-      } while (lastEvaluatedKey);
-    } catch (e) {
-      this.logger.error("DynamoDB scan failed during reindex segment processing. The segment will be retried.", { code: "reindex.worker.scan_failed", error: e, segment, totalSegments, targetRegistryId });
-      return err(dbError(e));
-    }
+      lastEvaluatedKey = res.LastEvaluatedKey as Record<string, unknown> | undefined;
+    } while (lastEvaluatedKey);
 
     if (failures.length > 0) {
-      this.logger.error("Reindex segment completed with per-signal failures.", {
+      this.logger.warn("Reindex segment completed with per-signal failures. The segment will be retried.", {
         code: "reindex.worker.segment_partial_failure",
         segment,
         failureCount: failures.length,
         failures: failures.slice(0, 10),
       });
+      return err(reindexSegmentProcessingError(segment, failures));
     }
 
     return ok(undefined);
