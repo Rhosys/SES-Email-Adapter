@@ -4,6 +4,7 @@ export default defineConfig({
   test: {
     globals: true,
     environment: "node",
+    setupFiles: ["src/testing/setup.ts"],
     env: {
       AURORA_CLUSTER_ARN: "arn:aws:rds:eu-central-1:123456789012:cluster:aurora-prod-titan-v2",
       AURORA_SECRET_ARN:  "arn:aws:secretsmanager:eu-central-1:123456789012:secret:aurora-prod-titan-v2-test",
