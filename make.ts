@@ -135,7 +135,7 @@ program
     });
 
     console.log(`Uploading user-code-executor artifact to s3://${deploymentBucket}...`);
-    await userCodeArchitect.publishLambdaArtifactPromise();
+    await userCodeArchitect.publishLambdaArtifactPromise({ zipFileName: 'user-code-executor.zip' });
 
     console.log(`Deploying ${userCodeExecutorFunctionName} alias 'production'...`);
     const userCodeResult = await userCodeArchitect.publishAndDeployStagePromise({
@@ -156,7 +156,7 @@ program
     });
 
     console.log(`Uploading content-sanitizer artifact to s3://${deploymentBucket}...`);
-    await contentSanitizerArchitect.publishLambdaArtifactPromise();
+    await contentSanitizerArchitect.publishLambdaArtifactPromise({ zipFileName: 'content-sanitizer.zip' });
 
     console.log(`Deploying ${contentSanitizerFunctionName} alias 'production'...`);
     const contentSanitizerResult = await contentSanitizerArchitect.publishAndDeployStagePromise({
