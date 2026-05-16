@@ -149,7 +149,7 @@ jobs:
     runs-on: ubuntu-latest
     concurrency: production
     environment:
-      name: ${{ needs.prod_build_and_plan.outputs.requires_approval == 'true' && 'production-gated' || 'production-auto' }}
+      name: ${{ needs.prod_build_and_plan.outputs.requires_approval == 'true' && 'dangerous-infrastructure-deployment' || 'production-auto' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
