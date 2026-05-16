@@ -89,7 +89,7 @@ const processor = new SignalProcessor({
   auroraWriter: multiClusterWriter,
   arcMatcher: arcDb,
   ruleEvaluator: new JsonLogicRuleEvaluator(logger),
-  notifier: new SesNotifier(),
+  notifier: new SesNotifier(logger),
   forwarder: new SesForwarder(logger, sesv2, s3),
   retentionService: new S3RetentionServiceImpl(s3),
   replySender: new SesReplySender(sesv2),
