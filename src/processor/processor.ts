@@ -3,7 +3,7 @@ import type { Logger } from "../logger.js";
 import type { Result } from "neverthrow";
 import { ok, err, dbError } from "../errors.js";
 import type { DbError, InvalidResponseError } from "../errors.js";
-import type { Signal, Arc, Rule, Workflow, WorkflowData, Alias, AliasSender, SenderMode, AccountFilteringConfig, SignalSource, SignalStatus, Domain, ArcUrgency, UnknownSenderPolicy, MatchedRuleResult } from "../types/index.js";
+import type { Signal, Arc, Rule, Workflow, WorkflowData, Alias, AliasSender, SenderPolicy, AccountFilteringConfig, SignalSource, SignalStatus, Domain, ArcUrgency, UnknownSenderPolicy, MatchedRuleResult } from "../types/index.js";
 import type { MimeParser, ParsedMime } from "./mime.js";
 import { buildEmbedText, extractEmbedTextInput } from "../embedding/embed-text.js";
 import type { SignalClassifier } from "../classifier/classifier.js";
@@ -54,7 +54,7 @@ export interface ProcessorDatabase {
   getProcessorAccountContext(accountId: string, recipientAddress: string): Promise<Result<ProcessorAccountContext, DbError>>;
   saveAlias(alias: Alias): Promise<Result<Alias, DbError>>;
   getSender(accountId: string, address: string, domain: string): Promise<Result<AliasSender | null, DbError>>;
-  saveSender(accountId: string, address: string, domain: string, mode: SenderMode): Promise<Result<void, DbError>>;
+  saveSender(accountId: string, address: string, domain: string, policy: SenderPolicy): Promise<Result<void, DbError>>;
   getTemplate(accountId: string, id: string): Promise<Result<import("../types/index.js").EmailTemplate | null, DbError>>;
   updateGlobalReputation(domain: string, update: { wasSpam: boolean; wasBlocked: boolean }): Promise<Result<void, DbError>>;
   getDomainByName(accountId: string, domainName: string): Promise<Result<Domain | null, DbError>>;
@@ -167,7 +167,6 @@ async function applyRules(
     const actions = rule.actions.filter((a) => !a.disabled).map(({ type, value }) => ({ type, ...(value !== undefined ? { value } : {}) }));
     const labelsAdded = actions.filter((a) => a.type === "assign_label" && a.value).map((a) => a.value!);
     const statusChange: MatchedRuleResult["statusChange"] = (
-      actions.some((a) => a.type === "violate_report")    ? "violate_report"    :
       actions.some((a) => a.type === "block_reject")      ? "block_reject"      :
       actions.some((a) => a.type === "block_hidden")      ? "block_hidden"      :
       actions.some((a) => a.type === "quarantine_hidden") ? "quarantine_hidden"  :
@@ -196,9 +195,6 @@ function deriveOutcome(matchedRules: MatchedRuleResult[]): ProcessingOutcome {
           break;
         case "block_reject":
           if (!statusSet) { outcome.blockDisposition = "block_reject"; statusSet = true; }
-          break;
-        case "violate_report":
-          if (!statusSet) { outcome.blockDisposition = "violate_report"; statusSet = true; }
           break;
         case "quarantine":
           if (!statusSet) { outcome.quarantine = true; statusSet = true; }
@@ -394,11 +390,7 @@ export class SignalProcessor {
       for (const toAddress of outcome.forwardAddresses) {
         try {
           this.logger.trackPoint("side_effect_forward_start");
-          const forwardResult = await this.forwarder.forward(signal.s3Key, toAddress, accountId, {
-            senderDomain: getETLD1(signal.from.address),
-            dkimPass: false,
-            dmarcPass: false,
-          });
+          const forwardResult = await this.forwarder.forward(signal.s3Key, toAddress, accountId);
           if (forwardResult.isErr()) {
             this.logger.track("Side-effect forward failed. The SES send-raw-email call returned an error. The recipient won't receive the forwarded copy.", { code: "processor.side_effect.forward_failed", accountId, toAddress, error: forwardResult.error });
           }
@@ -539,6 +531,36 @@ export class SignalProcessor {
     if (existingResult.isErr()) return err(existingResult.error);
     if (existingResult.value) return ok(undefined);
 
+    // 1b. Block emails that fail DKIM or DMARC — spoofed sender, reject immediately
+    if (msg.dkimVerdict !== "PASS" || msg.dmarcVerdict !== "PASS") {
+      const signal: Signal = {
+        id: `SES#${sesMessageId}`,
+        accountId,
+        status: "block_reject",
+        source: "email",
+        s3Key,
+        recipientAddress: destination[0] ?? "",
+        receivedAt: timestamp,
+        createdAt: new Date().toISOString(),
+        from: { address: "" },
+        to: [],
+        cc: [],
+        subject: "",
+        textBody: "",
+        attachments: [],
+        headers: {},
+        workflow: "status",
+        workflowData: { workflow: "status", statusType: "service_notice", provider: "unknown" },
+        spamScore: 0,
+        summary: "",
+        classificationModelId: "",
+      };
+      const saveResult = await this.store.saveSignal(signal);
+      if (saveResult.isErr()) return err(saveResult.error);
+      this.logger.info("Blocked email — DKIM or DMARC verification failed.", { code: "processor.dkim_dmarc_block", accountId, sesMessageId, dkimVerdict: msg.dkimVerdict, dmarcVerdict: msg.dmarcVerdict });
+      return ok(undefined);
+    }
+
     // 2. Parse MIME
     const parsedResult = await this.mimeParser.parse(s3Key);
     if (parsedResult.isErr()) return err(parsedResult.error);
@@ -667,8 +689,8 @@ export class SignalProcessor {
     const effectiveSenderEntry = emailConfig ? senderEntry : null;
 
     // Explicit sender block — if the sender has been explicitly blocked for this alias, short-circuit
-    if (effectiveSenderEntry && effectiveSenderEntry.mode !== "allow") {
-      const blockStatus = effectiveSenderEntry.mode; // block_hidden | block_reject | violate_report
+    if (effectiveSenderEntry && effectiveSenderEntry.policy !== "allow") {
+      const blockStatus = effectiveSenderEntry.policy; // block_hidden | block_reject | violate_report
       const blockedSignal = buildSignal({ status: blockStatus, accountId, sesMessageId, recipientAddress, parsed, classification, s3Key, receivedAt: timestamp, now, ...(ttl !== undefined ? { ttl } : {}) });
       const saveResult = await this.store.saveSignal(blockedSignal);
       if (saveResult.isErr()) return err(saveResult.error);
@@ -825,111 +847,7 @@ export class SignalProcessor {
     const dispatchResult = await this.dispatchSideEffects(signal, arc);
     if (dispatchResult.isErr()) return err(dbError(new Error("Side-effect dispatch failed")));
 
-    // 16. Forward
-    if (outcome.forwardAddresses.length > 0) {
-      const forwardOpts: ForwardOptions = {
-        senderDomain: senderETLD1,
-        dkimPass: msg.dkimVerdict === "PASS",
-        dmarcPass: msg.dmarcVerdict === "PASS",
-      };
-      for (const toAddress of outcome.forwardAddresses) {
-        const forwardResult = await this.forwarder.forward(s3Key, toAddress, accountId, forwardOpts);
-        if (forwardResult.isErr()) {
-          this.logger.track("Failed to forward email to configured address. The SES send-raw-email call returned an error. The recipient won't receive the forwarded copy.", { code: "processor.forward_failed", accountId, toAddress, error: forwardResult.error });
-        }
-      }
-    }
-
-    // 15. Auto-reply (fire-and-forget composed emails from templates)
-    if (outcome.autoReplyTemplateIds.length > 0) {
-      const recipientDomain = recipientAddress.split("@")[1] ?? "";
-      const autoReplyDomainResult = await this.store.getDomainByName(accountId, recipientDomain);
-      if (autoReplyDomainResult.isOk() && autoReplyDomainResult.value?.senderSetupComplete) {
-        const vars = {
-          "signal.subject": parsed.subject,
-          "sender.name": parsed.from.name ?? "",
-          "sender.address": parsed.from.address,
-          "arc.workflow": classification.workflow,
-        };
-        for (const templateId of outcome.autoReplyTemplateIds) {
-          const tmplResult = await this.store.getTemplate(accountId, templateId);
-          if (tmplResult.isErr() || !tmplResult.value) continue;
-          const tmpl = tmplResult.value;
-          let replyResult: Result<{ messageId: string }, DbError>;
-          try {
-            const replyValue = await this.replySender.sendReply({
-              to: parsed.from.address,
-              from: recipientAddress,
-              subject: renderTemplate(tmpl.subject, vars),
-              body: renderTemplate(tmpl.body, vars),
-              inReplyTo: sesMessageId,
-            });
-            replyResult = ok(replyValue);
-          } catch (e) {
-            replyResult = err(dbError(e));
-          }
-          if (replyResult.isErr()) {
-            this.logger.track("Failed to send auto-reply from template. The SES send call returned an error. The sender won't receive the automated response.", { code: "processor.auto_reply_failed", accountId, error: replyResult.error });
-          } else if (replyResult.value) {
-            arc.sentMessageIds = [...(arc.sentMessageIds ?? []), replyResult.value.messageId];
-          }
-        }
-      }
-    }
-
-    // Note: arc was saved earlier (before signal). Later mutations (TTL from S3 retention,
-    // sentMessageIds from auto-reply) will be persisted when side-effects move to a separate handler.
-
-    // 16. Auto-draft (create held draft signals from templates)
-    if (outcome.autoDraftTemplateIds.length > 0) {
-      const vars = {
-        "signal.subject": parsed.subject,
-        "sender.name": parsed.from.name ?? "",
-        "sender.address": parsed.from.address,
-        "arc.workflow": classification.workflow,
-      };
-      for (const templateId of outcome.autoDraftTemplateIds) {
-        const tmplResult = await this.store.getTemplate(accountId, templateId);
-        if (tmplResult.isErr() || !tmplResult.value) continue;
-        const tmpl = tmplResult.value;
-        const draft: Signal = {
-          id: `USR#${randomUUID()}`,
-          arcId: arc.id,
-          accountId,
-          source: "user",
-          status: "draft",
-          receivedAt: now,
-          from: { address: recipientAddress },
-          to: [parsed.from],
-          cc: [],
-          subject: renderTemplate(tmpl.subject, vars),
-          textBody: renderTemplate(tmpl.body, vars),
-          attachments: [],
-          headers: {},
-          recipientAddress: parsed.from.address,
-          workflow: classification.workflow,
-          workflowData: classification.workflowData,
-          spamScore: 0,
-          summary: "",
-          classificationModelId: "",
-          s3Key: "",
-          createdAt: now,
-          ...(ttl !== undefined ? { ttl } : {}),
-        };
-        const draftSaveResult = await this.store.saveSignal(draft);
-        if (draftSaveResult.isErr()) {
-          this.logger.track("Failed to save auto-draft signal from template. The DynamoDB put returned an error. The draft won't appear in the user's arc. Tracked for auto-draft feature reliability.", { code: "processor.auto_draft_save_failed", accountId, error: draftSaveResult.error });
-        }
-      }
-    }
-
-    // 17. Notify
-    if (!outcome.suppressNotification) {
-      const notifyResult = await this.notifier.notify(accountId, arc, signal);
-      if (notifyResult.isErr()) {
-        this.logger.track("Failed to send new-signal notification to user. The notification service returned an error. The signal is processed but the user won't be alerted. Tracked for notification reliability monitoring.", { code: "processor.notification_failed", accountId, error: notifyResult.error });
-      }
-    }
+    // Side-effects (forward, auto-reply, auto-draft, notify) are handled by processSideEffect via SQS dispatch.
 
     const finalRepResult = await this.store.updateGlobalReputation(senderETLD1, {
       wasSpam: classification.spamScore >= spamScoreThreshold,
