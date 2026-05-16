@@ -4,7 +4,9 @@ import { dynamo, ACCOUNTS_TABLE } from "./shared.js";
 import { dbError, notFoundError, ok, err } from "../errors.js";
 import type { Result, DbError, NotFoundError } from "../errors.js";
 import type { Account, View, Label, Rule, RuleStatus, Domain, Alias, AliasSender, SenderPolicy, AccountFilteringConfig, VerifiedForwardingAddress, EmailTemplate, WsConnection } from "../types/index.js";
+import type { StatsCategory } from "../types/index.js";
 import type { CreateViewRequest, UpdateViewRequest, CreateLabelRequest, UpdateLabelRequest, CreateRuleRequest, UpdateRuleRequest } from "../api/app.js";
+import { buildStatsUpdateParams, buildPruneNames } from "./stats-writer.js";
 
 // ---------------------------------------------------------------------------
 // Key helpers
@@ -913,6 +915,41 @@ export class AccountDatabase {
         Key: { pk: pk(accountId), sk: `CONN#${connectionId}` },
       }));
       return ok(undefined);
+    } catch (e) {
+      return err(dbError(e));
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Stats
+  // ---------------------------------------------------------------------------
+
+  async incrementStats(accountId: string, category: StatsCategory): Promise<Result<void, DbError>> {
+    const now = new Date();
+    const params = buildStatsUpdateParams(accountId, category, now, ACCOUNTS_TABLE);
+    const pruneResult = buildPruneNames(now);
+    const finalExpression = pruneResult.expression
+      ? `${params.UpdateExpression} ${pruneResult.expression}`
+      : params.UpdateExpression;
+    try {
+      await dynamo.send(new UpdateCommand({
+        ...params,
+        UpdateExpression: finalExpression,
+        ExpressionAttributeNames: { ...params.ExpressionAttributeNames, ...pruneResult.names },
+      }));
+      return ok(undefined);
+    } catch (e) {
+      return err(dbError(e));
+    }
+  }
+
+  async getStats(accountId: string): Promise<Result<Record<string, unknown> | null, DbError>> {
+    try {
+      const res = await dynamo.send(new GetCommand({
+        TableName: ACCOUNTS_TABLE,
+        Key: { pk: `ACCT#${accountId}`, sk: "STATS" },
+      }));
+      return ok(res.Item ? (res.Item as Record<string, unknown>) : null);
     } catch (e) {
       return err(dbError(e));
     }
