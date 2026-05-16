@@ -59,6 +59,7 @@ describe("ProcessError on database failure", () => {
       getDomainByName: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
       incrementStats: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
       annotateRuleError: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+      annotateTemplateError: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     };
   }
 
@@ -113,7 +114,7 @@ describe("ProcessError on database failure", () => {
     };
     const mockLogger = createMockLogger();
     return new SignalProcessor({
-      store, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com", classifier, embeddingGenerator, auroraWriter, arcMatcher,
+      store, contentSanitizer, userCodeExecutor: { invoke: vi.fn() }, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com", classifier, embeddingGenerator, auroraWriter, arcMatcher,
       ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger), logger: mockLogger,
       notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },

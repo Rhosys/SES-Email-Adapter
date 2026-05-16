@@ -90,6 +90,7 @@ const processorStore = new ProcessorDatabaseAdapter(arcDb, accountDb, processing
 const processor = new SignalProcessor({
   store: processorStore,
   contentSanitizer: new LambdaContentSanitizer(lambda, CONTENT_SANITIZER_ARN),
+  userCodeExecutor: new LambdaUserCodeExecutor(lambda, USER_CODE_EXECUTOR_ARN),
   classifier,
   embeddingGenerator,
   auroraWriter: multiClusterWriter,

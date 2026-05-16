@@ -7,6 +7,8 @@ import type { DbError, InvalidResponseError } from "../errors.js";
 import type { Signal, Arc, Rule, Workflow, WorkflowData, Alias, AliasSender, SenderPolicy, AccountFilteringConfig, SignalSource, SignalStatus, Domain, ArcUrgency, UnknownSenderPolicy, MatchedRuleResult } from "../types/index.js";
 import type { ParsedMime } from "./mime.js";
 import type { ContentSanitizerClient } from "./content-sanitizer-client.js";
+import type { UserCodeExecutorClient, TemplateParameterResult } from "./user-code-client.js";
+import { stripSensitive } from "./rule-evaluator.js";
 import { buildEmbedText, extractEmbedTextInput } from "../embedding/embed-text.js";
 import type { SignalClassifier } from "../classifier/classifier.js";
 import type { EmbeddingGenerator } from "../embedding/embedding-generator.js";
@@ -67,6 +69,7 @@ export interface ProcessorDatabase {
   getDomainByName(accountId: string, domainName: string): Promise<Result<Domain | null, DbError>>;
   incrementStats(accountId: string, category: import("../types/index.js").StatsCategory): Promise<Result<void, DbError>>;
   annotateRuleError(accountId: string, ruleId: string, errorMessage: string): Promise<Result<void, DbError>>;
+  annotateTemplateError(accountId: string, templateId: string, functionName: string, errorMessage: string): Promise<Result<void, DbError>>;
 }
 
 export interface ArcMatcher {
@@ -267,6 +270,7 @@ export const SYSTEM_RULES: Rule[] = [
 interface SignalProcessorOptions {
   store: ProcessorDatabase;
   contentSanitizer: ContentSanitizerClient;
+  userCodeExecutor?: UserCodeExecutorClient;
   classifier: Pick<SignalClassifier, "classify">;
   embeddingGenerator: EmbeddingGenerator;
   auroraWriter: MultiClusterAuroraWriter;
@@ -287,6 +291,7 @@ interface SignalProcessorOptions {
 export class SignalProcessor {
   private readonly store: ProcessorDatabase;
   private readonly contentSanitizer: ContentSanitizerClient;
+  private readonly userCodeExecutor: UserCodeExecutorClient;
   private readonly classifier: Pick<SignalClassifier, "classify">;
   private readonly embeddingGenerator: EmbeddingGenerator;
   private readonly auroraWriter: MultiClusterAuroraWriter;
@@ -306,6 +311,7 @@ export class SignalProcessor {
   constructor(opts: SignalProcessorOptions) {
     this.store = opts.store;
     this.contentSanitizer = opts.contentSanitizer;
+    this.userCodeExecutor = opts.userCodeExecutor ?? { invoke: () => Promise.resolve({ success: true, purpose: "template_function", result: "" } as const) };
     this.classifier = opts.classifier;
     this.embeddingGenerator = opts.embeddingGenerator;
     this.auroraWriter = opts.auroraWriter;
@@ -490,7 +496,7 @@ export class SignalProcessor {
       try {
         this.logger.trackPoint("side_effect_auto_draft_start");
         const now = new Date().toISOString();
-        const vars = {
+        const vars: Record<string, string> = {
           "signal.subject": signal.subject ?? "",
           "sender.name": signal.from.name ?? "",
           "sender.address": signal.from.address,
@@ -500,12 +506,33 @@ export class SignalProcessor {
           const tmplResult = await this.store.getTemplate(accountId, templateId);
           if (tmplResult.isErr() || !tmplResult.value) continue;
           const tmpl = tmplResult.value;
+
+          // Resolve template functions via User Code Executor
+          let preventAutoSend = false;
+          if (tmpl.functions && tmpl.functions.length > 0) {
+            for (const fn of tmpl.functions) {
+              const response = await this.userCodeExecutor.invoke({
+                tenantId: accountId,
+                purpose: "template_function",
+                functionCode: fn.code,
+                executionContext: { signal: stripSensitive(signal), arc: stripSensitive(arc) },
+              });
+              if (!response.success || (response as TemplateParameterResult).result == null) {
+                await this.annotateTemplateError(accountId, tmpl.id, fn.name, response.success ? null : response.error);
+                vars[`fn.${fn.name}`] = "";
+                preventAutoSend = true;
+              } else {
+                vars[`fn.${fn.name}`] = (response as TemplateParameterResult).result!;
+              }
+            }
+          }
+
           const draft: Signal = {
             id: `USR#${randomUUID()}`,
             arcId: arc.id,
             accountId,
             source: "user",
-            status: "draft",
+            status: preventAutoSend ? "draft" : "draft",
             receivedAt: now,
             from: { address: signal.recipientAddress },
             to: [signal.from],
@@ -526,6 +553,11 @@ export class SignalProcessor {
           const draftSaveResult = await this.store.saveSignal(draft);
           if (draftSaveResult.isErr()) {
             this.logger.track("Side-effect auto-draft save failed.", { code: "processor.side_effect.auto_draft_failed", accountId, error: draftSaveResult.error });
+          }
+
+          // Skip auto-send if any template function returned null/error
+          if (preventAutoSend) {
+            this.logger.info("Auto-send skipped — template function returned null or errored.", { code: "processor.side_effect.auto_draft_prevent_send", accountId, templateId });
           }
         }
         this.logger.trackPoint("side_effect_auto_draft_complete");
@@ -1097,6 +1129,18 @@ export class SignalProcessor {
     const senderResult = await this.store.saveSender(accountId, address, senderETLD1, "allow");
     if (senderResult.isErr()) return err(senderResult.error);
     return ok(undefined);
+  }
+
+  private async annotateTemplateError(accountId: string, templateId: string, functionName: string, error: { message: string; type: string } | null): Promise<void> {
+    const errorMessage = error
+      ? `[${error.type}] ${error.message}`
+      : "Function returned no value";
+    try {
+      await this.store.annotateTemplateError(accountId, templateId, functionName, errorMessage);
+    } catch {
+      // Best-effort — don't fail draft generation if annotation fails
+      this.logger.track("Failed to annotate template function error.", { code: "processor.annotate_template_failed", accountId, templateId, functionName });
+    }
   }
 }
 

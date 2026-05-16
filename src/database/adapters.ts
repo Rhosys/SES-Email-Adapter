@@ -35,6 +35,7 @@ export class ProcessorDatabaseAdapter implements ProcessorDatabase {
   getDomainByName(accountId: string, domainName: string) { return this.account.getDomainByName(accountId, domainName); }
   incrementStats(accountId: string, category: StatsCategory) { return this.account.incrementStats(accountId, category); }
   annotateRuleError(accountId: string, ruleId: string, errorMessage: string) { return this.account.annotateRuleError(accountId, ruleId, errorMessage); }
+  annotateTemplateError(accountId: string, templateId: string, functionName: string, errorMessage: string) { return this.account.annotateTemplateError(accountId, templateId, functionName, errorMessage); }
 }
 
 // ---------------------------------------------------------------------------
