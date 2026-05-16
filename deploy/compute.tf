@@ -204,6 +204,7 @@ resource "aws_lambda_function" "main" {
       SIGNAL_QUEUE_URL         = aws_sqs_queue.signals.url
       MAIL_DOMAIN              = "platform.${data.aws_route53_zone.main.name}"
       ACCOUNT_CREATION_SFN_ARN = "arn:aws:states:${data.aws_region.current.name}:${var.aws_account_id}:stateMachine:email-catcher-AccountCreation"
+      AUTHRESS_KMS_KEY_ARN     = aws_kms_key.authress_service_client.arn
     }
   }
 

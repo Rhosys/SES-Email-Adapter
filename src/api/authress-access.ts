@@ -1,6 +1,6 @@
 import { AuthressClient } from "@authress/sdk";
-import type { AccessRecord } from "@authress/sdk";
 import { KmsServiceClientTokenProvider } from "@authress/sdk";
+import type { AccessRecord } from "@authress/sdk";
 import { ok, err, authressServiceError } from "../errors.js";
 import type { AuthressServiceError, Result } from "../errors.js";
 import type { AccessService, AccountUser, AccountRole } from "./app.js";
@@ -8,7 +8,7 @@ import type { AccessService, AccountUser, AccountRole } from "./app.js";
 const AUTHRESS_API_URL = "https://login.rhosys.cloud";
 export const AUTHRESS_APP_ID = "app_2EAWGEdtzaeCj7b45DsDtt";
 
-const AUTHRESS_KMS_KEY_ARN = "alias/ses-email-adapter-authress-service-client";
+const AUTHRESS_KMS_KEY_ARN = process.env["AUTHRESS_KMS_KEY_ARN"] ?? "";
 const AUTHRESS_CLIENT_ID = "sc_a9RdHnQzsXJeAzTJgaGf98v";
 const AUTHRESS_KEY_ID = process.env["AUTHRESS_KEY_ID"] ?? "";
 const AUTHRESS_ACCOUNT_ID = "acc-g017y29d874dh";

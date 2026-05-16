@@ -29,3 +29,8 @@ resource "aws_kms_alias" "authress_service_client" {
   name          = "alias/${var.service_name}-authress-service-client"
   target_key_id = aws_kms_key.authress_service_client.key_id
 }
+
+# Extract the public key — output after apply for Authress registration
+data "aws_kms_public_key" "authress_service_client" {
+  key_id = aws_kms_key.authress_service_client.key_id
+}
