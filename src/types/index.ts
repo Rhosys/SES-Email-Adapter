@@ -232,25 +232,23 @@ export type NewAddressHandling =
   | "block_until_approved"; // New addresses blocked until user explicitly approves via POST /arcs
 
 // Default disposition for emails from unknown senders, applied after rules run
-export type UnknownSenderPolicy =
-  | "allow_all"            // all senders pass through; system:sender:untrusted label suppressed
-  | "quarantine_visible"   // unknown sender → quarantine, surfaced in review queue (default)
-  | "quarantine_hidden"    // unknown sender → quarantine, hidden from review queue
-  | "block_hidden"         // unknown sender → accept SMTP, silently discard
-  | "block_reject"         // unknown sender → 5xx bounce to sender
-  | "violate_report";      // unknown sender → bounce + report to DPA
+export const UNKNOWN_SENDER_POLICIES = ["allow_all", "quarantine_visible", "quarantine_hidden", "block_hidden", "block_reject", "violate_report"] as const;
+export type UnknownSenderPolicy = (typeof UNKNOWN_SENDER_POLICIES)[number];
 
 // active = visible in inbox; quarantine_visible = surfaced in review queue; quarantine_hidden = stored but not shown in queue; block_hidden = accepted, silently discarded; block_reject = bounced; violate_report = bounced + reported; draft = user-authored, unsent
-export type SignalStatus = "active" | "block_hidden" | "block_reject" | "violate_report" | "quarantine_visible" | "quarantine_hidden" | "draft";
+export const SIGNAL_STATUSES = ["active", "block_hidden", "block_reject", "violate_report", "quarantine_visible", "quarantine_hidden", "draft"] as const;
+export type SignalStatus = (typeof SIGNAL_STATUSES)[number];
 
 // "email" = inbound SES email; "system" = processor-created (e.g. extracted calendar event); "user" = user-created
-export type SignalSource = "email" | "system" | "user";
+export const SIGNAL_SOURCES = ["email", "system", "user"] as const;
+export type SignalSource = (typeof SIGNAL_SOURCES)[number];
 
 // interrupt = push notification popup; ambient = badge only; silent = no push
-export type PushPriority = "interrupt" | "ambient" | "silent";
+export const PUSH_PRIORITIES = ["interrupt", "ambient", "silent"] as const;
+export type PushPriority = (typeof PUSH_PRIORITIES)[number];
 
-// Unified urgency level that drives all notification channels (push, digest, UI).
-export type ArcUrgency = "critical" | "high" | "normal" | "low" | "silent";
+export const ARC_URGENCIES = ["critical", "high", "normal", "low", "silent"] as const;
+export type ArcUrgency = (typeof ARC_URGENCIES)[number];
 
 // Per-recipient-address configuration (an "alias" is any address on a custom domain routed into the system)
 export interface Alias {
@@ -267,7 +265,8 @@ export interface Alias {
 }
 
 // Approved/blocked sender domain per alias — stored as individual DynamoDB items
-export type SenderPolicy = "allow" | "block_hidden" | "block_reject" | "violate_report";
+export const SENDER_POLICIES = ["allow", "block_hidden", "block_reject", "violate_report"] as const;
+export type SenderPolicy = (typeof SENDER_POLICIES)[number];
 
 export interface AliasSender {
   accountId: string;
@@ -418,7 +417,8 @@ export interface Signal {
 // Arc (materialized aggregate of related Signals)
 // ---------------------------------------------------------------------------
 
-export type ArcStatus = "active" | "archived" | "deleted";
+export const ARC_STATUSES = ["active", "archived", "deleted"] as const;
+export type ArcStatus = (typeof ARC_STATUSES)[number];
 
 export interface Arc {
   id: string;
@@ -442,8 +442,11 @@ export interface Arc {
 // View (configured filter over Arcs — replaces Tab)
 // ---------------------------------------------------------------------------
 
-export type SortField = "lastSignalAt" | "createdAt";
-export type SortDirection = "asc" | "desc";
+export const SORT_FIELDS = ["lastSignalAt", "createdAt"] as const;
+export type SortField = (typeof SORT_FIELDS)[number];
+
+export const SORT_DIRECTIONS = ["asc", "desc"] as const;
+export type SortDirection = (typeof SORT_DIRECTIONS)[number];
 
 export interface View {
   id: string;
@@ -477,22 +480,13 @@ export interface Label {
 // Rule (JSONLogic-based automation)
 // ---------------------------------------------------------------------------
 
-export type RuleActionType =
-  | "assign_label"
-  | "assign_workflow"
-  | "archive"
-  | "delete"
-  | "forward"
-  | "block_hidden"        // accept SMTP, silently discard
-  | "block_reject"        // 5xx bounce to sender
-  | "quarantine"          // quarantine, shown in review queue
-  | "quarantine_hidden"   // quarantine, hidden from review queue
-  | "set_urgency"
-  | "suppress_notification"
-  | "pong"
-  | "approve_sender"
-  | "auto_reply"   // send immediately using template (value = templateId)
-  | "auto_draft";  // create draft signal for human review (value = templateId)
+export const RULE_ACTION_TYPES = [
+  "assign_label", "assign_workflow", "archive", "delete", "forward",
+  "block_hidden", "block_reject", "quarantine", "quarantine_hidden",
+  "set_urgency", "suppress_notification", "pong", "approve_sender",
+  "auto_reply", "auto_draft",
+] as const;
+export type RuleActionType = (typeof RULE_ACTION_TYPES)[number];
 
 // System-assigned labels. Return type of assignSystemLabels() — adding here requires explicit approval.
 // The compile-time gate: assignSystemLabels() returns SystemLabel[], so any unlisted label is a type error.
@@ -528,7 +522,8 @@ export interface VerifiedForwardingAddress {
   verifiedAt?: string;
 }
 
-export type RuleStatus = "enabled" | "disabled";
+export const RULE_STATUSES = ["enabled", "disabled"] as const;
+export type RuleStatus = (typeof RULE_STATUSES)[number];
 
 export interface Rule {
   id: string;
@@ -645,7 +640,8 @@ export interface ApiErrorBody {
 // Suppression list
 // ---------------------------------------------------------------------------
 
-export type SuppressionReason = "hard_bounce" | "soft_bounce" | "complaint" | "manual";
+export const SUPPRESSION_REASONS = ["hard_bounce", "soft_bounce", "complaint", "manual"] as const;
+export type SuppressionReason = (typeof SUPPRESSION_REASONS)[number];
 
 export interface SuppressedAddress {
   address: string;
