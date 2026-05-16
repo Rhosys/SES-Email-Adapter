@@ -165,6 +165,20 @@ vi.mock("./api/app.js", () => ({
   createApp: vi.fn().mockReturnValue({ fetch: vi.fn() }),
 }));
 
+const mockLogger = {
+  startInvocation: vi.fn(),
+  trackPoint: vi.fn(),
+  info: vi.fn(),
+  track: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
+  critical: vi.fn(),
+};
+
+vi.mock("./logger.js", () => ({
+  RequestLogger: vi.fn().mockImplementation(() => mockLogger),
+}));
+
 // ---------------------------------------------------------------------------
 // Import handler AFTER mocks are set up
 // ---------------------------------------------------------------------------
@@ -237,18 +251,22 @@ describe("Handler: Step Function event routing", () => {
     }
   });
 
-  it("unknown state name → returns empty object", async () => {
+  it("unknown state name → logs warning and returns empty object", async () => {
     const event = makeSfnEvent("UnknownState");
 
     const result = await handler(event, dummyContext);
 
     expect(result).toEqual({});
+    expect(mockLogger.warn).toHaveBeenCalledWith("Unknown Step Function task", {
+      code: "handler.sfn.unknown_task",
+      processorId: "email-catcher-AccountCreation|UnknownState",
+    });
     expect(mockHandleFollowup).not.toHaveBeenCalled();
     expect(mockHandleCleanup).not.toHaveBeenCalled();
     expect(mockHandleTrialCheck).not.toHaveBeenCalled();
   });
 
-  it("missing Execution.Input fields → returns empty object", async () => {
+  it("missing Execution.Input fields → logs warning and returns empty object", async () => {
     const event = {
       context: {
         Execution: {
@@ -270,6 +288,10 @@ describe("Handler: Step Function event routing", () => {
     const result = await handler(event, dummyContext);
 
     expect(result).toEqual({});
+    expect(mockLogger.warn).toHaveBeenCalledWith("Step Function task missing required Input fields", {
+      code: "handler.sfn.missing_input",
+      processorId: "email-catcher-AccountCreation|FirstFollowup",
+    });
     expect(mockHandleFollowup).not.toHaveBeenCalled();
   });
 
