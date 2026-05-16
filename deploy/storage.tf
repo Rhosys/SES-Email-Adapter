@@ -97,6 +97,12 @@ resource "aws_sns_topic_subscription" "ses_to_sqs" {
   endpoint  = aws_sqs_queue.signals.arn
 }
 
+resource "aws_sns_topic_subscription" "feedback_to_sqs" {
+  topic_arn = aws_sns_topic.ses_feedback.arn
+  protocol  = "sqs"
+  endpoint  = aws_sqs_queue.signals.arn
+}
+
 resource "aws_sqs_queue_policy" "signals_sns" {
   queue_url = aws_sqs_queue.signals.id
 
@@ -107,38 +113,10 @@ resource "aws_sqs_queue_policy" "signals_sns" {
       Principal = { Service = "sns.amazonaws.com" }
       Action    = "sqs:SendMessage"
       Resource  = aws_sqs_queue.signals.arn
-      Condition = { ArnEquals = { "aws:SourceArn" = aws_sns_topic.ses_notifications.arn } }
-    }]
-  })
-}
-
-# ---------------------------------------------------------------------------
-# SQS — bounce/complaint feedback processing queue
-# ---------------------------------------------------------------------------
-
-resource "aws_sqs_queue" "feedback" {
-  name                       = "${var.service_name}-feedback"
-  visibility_timeout_seconds = 900    # match expected worker runtime
-  message_retention_seconds  = 1209600 # 14 days (maximum)
-}
-
-resource "aws_sns_topic_subscription" "feedback_to_sqs" {
-  topic_arn = aws_sns_topic.ses_feedback.arn
-  protocol  = "sqs"
-  endpoint  = aws_sqs_queue.feedback.arn
-}
-
-resource "aws_sqs_queue_policy" "feedback_sns" {
-  queue_url = aws_sqs_queue.feedback.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect    = "Allow"
-      Principal = { Service = "sns.amazonaws.com" }
-      Action    = "sqs:SendMessage"
-      Resource  = aws_sqs_queue.feedback.arn
-      Condition = { ArnEquals = { "aws:SourceArn" = aws_sns_topic.ses_feedback.arn } }
+      Condition = { ArnEquals = { "aws:SourceArn" = [
+        aws_sns_topic.ses_notifications.arn,
+        aws_sns_topic.ses_feedback.arn,
+      ] } }
     }]
   })
 }
