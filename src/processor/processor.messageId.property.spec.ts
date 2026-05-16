@@ -52,6 +52,7 @@ describe("ProcessError on database failure", () => {
       getTemplate: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
       updateGlobalReputation: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
       getDomainByName: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
+      incrementStats: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     };
   }
 

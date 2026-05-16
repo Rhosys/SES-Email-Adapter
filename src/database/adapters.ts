@@ -1,6 +1,7 @@
 import type { ProcessorDatabase } from "../processor/processor.js";
 import type { ApiDatabase, ListArcsParams, UpdateArcRequest, CreateViewRequest, UpdateViewRequest, CreateLabelRequest, UpdateLabelRequest, CreateRuleRequest, UpdateRuleRequest } from "../api/app.js";
 import type { Arc, Signal, View, Label, Rule, Domain, Account, Page, PageParams, Alias, AliasSender, SenderPolicy, VerifiedForwardingAddress, EmailTemplate } from "../types/index.js";
+import type { StatsCategory } from "../types/index.js";
 import type { AccountDatabase } from "./account-database.js";
 import type { ArcDatabase } from "./arc-database.js";
 import type { ProcessingDatabase } from "./processing-database.js";
@@ -32,6 +33,7 @@ export class ProcessorDatabaseAdapter implements ProcessorDatabase {
   getTemplate(accountId: string, id: string) { return this.account.getTemplate(accountId, id); }
   updateGlobalReputation(domain: string, update: { wasSpam: boolean; wasBlocked: boolean }) { return this.processing.updateGlobalReputation(domain, update); }
   getDomainByName(accountId: string, domainName: string) { return this.account.getDomainByName(accountId, domainName); }
+  incrementStats(accountId: string, category: StatsCategory) { return this.account.incrementStats(accountId, category); }
 }
 
 // ---------------------------------------------------------------------------
