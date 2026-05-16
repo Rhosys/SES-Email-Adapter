@@ -17,7 +17,11 @@ import { ProcessingDatabase } from "./database/processing-database.js";
 import { ProcessorDatabaseAdapter, ApiDatabaseAdapter } from "./database/adapters.js";
 import { AuditDatabase } from "./database/audit-database.js";
 import { SESv2Client, SendEmailCommand } from "@aws-sdk/client-sesv2";
-import { SesNotifier } from "./notifier/notifier.js";
+import { ApiGatewayManagementApiClient } from "@aws-sdk/client-apigatewaymanagementapi";
+import { DeviceNotifier } from "./notifier/device-notifier.js";
+import { WsDeliverer } from "./notifier/ws-deliverer.js";
+import { FcmDeliverer } from "./notifier/fcm-deliverer.js";
+import { HttpFcmClient } from "./notifier/fcm-client.js";
 import { SesForwarder } from "./notifier/ses-forwarder.js";
 import { DynamoDeviceStore } from "./notifier/device-store.js";
 import { FeedbackProcessor } from "./notifier/feedback-processor.js";
@@ -49,6 +53,8 @@ const sqs = new SQSClient({});
 
 const S3_BUCKET = process.env["EMAIL_BUCKET"] ?? "";
 const SIGNAL_QUEUE_URL = process.env["SIGNAL_QUEUE_URL"] ?? "";
+const WS_ENDPOINT = process.env["WS_API_ENDPOINT"] ?? "";
+const FCM_PROJECT_ID = process.env["FCM_PROJECT_ID"] ?? "";
 const RETRY_TRACK_THRESHOLD = 30;
 
 // ---------------------------------------------------------------------------
@@ -94,7 +100,15 @@ const processor = new SignalProcessor({
   auroraWriter: multiClusterWriter,
   arcMatcher: arcDb,
   ruleEvaluator: new JsonLogicRuleEvaluator(logger),
-  notifier: new SesNotifier(logger),
+  notifier: new DeviceNotifier({
+    deviceStore: new DynamoDeviceStore(),
+    deliverers: {
+      websocket: new WsDeliverer(new ApiGatewayManagementApiClient({ endpoint: WS_ENDPOINT })),
+      fcm: new FcmDeliverer(new HttpFcmClient({ projectId: FCM_PROJECT_ID })),
+      apns: new FcmDeliverer(new HttpFcmClient({ projectId: FCM_PROJECT_ID })),
+    },
+    logger,
+  }),
   forwarder: new SesForwarder(logger, sesv2, s3),
   retentionService: new S3RetentionServiceImpl(s3),
   replySender: new SesReplySender(sesv2),

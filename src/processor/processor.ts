@@ -70,7 +70,7 @@ export interface RuleEvaluator {
 }
 
 export interface Notifier {
-  notify(accountId: string, arc: Arc, signal: Signal): Promise<Result<void, DbError>>;
+  notify(accountId: string, arc: Arc, signal: Signal, urgency: ArcUrgency): Promise<Result<void, DbError>>;
 }
 
 export interface Forwarder {
@@ -399,7 +399,7 @@ export class SignalProcessor {
     if (!outcome.suppressNotification) {
       try {
         this.logger.trackPoint("side_effect_notify_start");
-        const notifyResult = await this.notifier.notify(accountId, arc, signal);
+        const notifyResult = await this.notifier.notify(accountId, arc, signal, arc.urgency ?? "normal");
         if (notifyResult.isErr()) {
           this.logger.track("Side-effect notification failed.", { code: "processor.side_effect.notify_failed", accountId, error: notifyResult.error });
         }

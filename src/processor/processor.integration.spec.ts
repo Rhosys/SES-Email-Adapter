@@ -474,7 +474,7 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
 
       // Notification was sent (no suppress_notification action)
       expect(notifier.notify).toHaveBeenCalledOnce();
-      expect(notifier.notify).toHaveBeenCalledWith(TEST_ACCOUNT_ID, arc, signal);
+      expect(notifier.notify).toHaveBeenCalledWith(TEST_ACCOUNT_ID, arc, signal, "normal");
     });
 
     it("executes pong when doPong action is present", async () => {
