@@ -26,6 +26,13 @@ export const WORKFLOWS = [
 
 export type Workflow = (typeof WORKFLOWS)[number];
 
+// ---------------------------------------------------------------------------
+// SQS message types — discriminator for routing in the Lambda handler
+// ---------------------------------------------------------------------------
+
+export const SQS_MESSAGE_TYPES = ["reindex", "side_effect"] as const;
+export type SqsMessageType = (typeof SQS_MESSAGE_TYPES)[number];
+
 export type WorkflowData =
   | AuthData
   | ConversationData
@@ -225,14 +232,16 @@ export type NewAddressHandling =
   | "block_until_approved"; // New addresses blocked until user explicitly approves via POST /arcs
 
 // Default disposition for emails from unknown senders, applied after rules run
-export type SenderFilterMode =
+export type UnknownSenderPolicy =
   | "allow_all"            // all senders pass through; system:sender:untrusted label suppressed
   | "quarantine_visible"   // unknown sender → quarantine, surfaced in review queue (default)
   | "quarantine_hidden"    // unknown sender → quarantine, hidden from review queue
-  | "block";               // unknown sender → silent block
+  | "block_hidden"         // unknown sender → accept SMTP, silently discard
+  | "block_reject"         // unknown sender → 5xx bounce to sender
+  | "violate_report";      // unknown sender → bounce + report to DPA
 
-// active = visible in inbox; quarantine_visible = surfaced in review queue; quarantine_hidden = stored but not shown in queue; blocked = silent drop; draft = user-authored, unsent
-export type SignalStatus = "active" | "blocked" | "quarantine_visible" | "quarantine_hidden" | "draft";
+// active = visible in inbox; quarantine_visible = surfaced in review queue; quarantine_hidden = stored but not shown in queue; block_hidden = accepted, silently discarded; block_reject = bounced; violate_report = bounced + reported; draft = user-authored, unsent
+export type SignalStatus = "active" | "block_hidden" | "block_reject" | "violate_report" | "quarantine_visible" | "quarantine_hidden" | "draft";
 
 // "email" = inbound SES email; "system" = processor-created (e.g. extracted calendar event); "user" = user-created
 export type SignalSource = "email" | "system" | "user";
@@ -248,7 +257,7 @@ export interface Alias {
   id: string;
   accountId: string;
   address: string;              // The recipient address, e.g. me@mydomain.com
-  filterMode: SenderFilterMode;
+  unknownSenderPolicy: UnknownSenderPolicy;
   // Spam score at which a signal is treated as spam (0–1). Overrides account default when set.
   spamScoreThreshold?: number;
   // eTLD+1 of the site this alias was created for (set by the extension on alias generation)
@@ -258,13 +267,13 @@ export interface Alias {
 }
 
 // Approved/blocked sender domain per alias — stored as individual DynamoDB items
-export type SenderMode = "allow" | "block";
+export type SenderPolicy = "allow" | "block_hidden" | "block_reject" | "violate_report";
 
 export interface AliasSender {
   accountId: string;
   aliasAddress: string;
   domain: string;   // eTLD+1
-  mode: SenderMode;
+  policy: SenderPolicy;
   addedAt: string;
 }
 
@@ -289,7 +298,7 @@ export interface WsConnection {
 
 // Account-level filtering defaults
 export interface AccountFilteringConfig {
-  defaultFilterMode: SenderFilterMode;
+  defaultUnknownSenderPolicy: UnknownSenderPolicy;
   newAddressHandling: NewAddressHandling;
   // Spam score at which a signal is treated as spam (0–1). Default: 0.9.
   // Per-address config can override this. Controls both filter blocking and notification suppression.
@@ -347,7 +356,7 @@ export interface MatchedRuleResult {
   ruleId: string;
   actions: Array<Pick<RuleAction, "type" | "value">>;
   labelsAdded: string[];
-  statusChange?: "blocked" | "quarantine_visible" | "quarantine_hidden" | "archived" | "deleted";
+  statusChange?: "block_hidden" | "block_reject" | "violate_report" | "quarantine_visible" | "quarantine_hidden" | "archived" | "deleted";
 }
 
 // ---------------------------------------------------------------------------
@@ -474,7 +483,8 @@ export type RuleActionType =
   | "archive"
   | "delete"
   | "forward"
-  | "block"
+  | "block_hidden"        // accept SMTP, silently discard
+  | "block_reject"        // 5xx bounce to sender
   | "quarantine"          // quarantine, shown in review queue
   | "quarantine_hidden"   // quarantine, hidden from review queue
   | "set_urgency"
@@ -557,12 +567,18 @@ export interface NotificationSettings {
 // Account
 // ---------------------------------------------------------------------------
 
+export interface AccountOnboarding {
+  completed: boolean;
+  completedAt?: string;
+}
+
 export interface Account {
   id: string;
   name: string;
   deletionRetentionDays: number;
   notifications?: NotificationSettings;
   filtering?: AccountFilteringConfig;
+  onboarding?: AccountOnboarding;
   billingPlan?: import("../embedding/retention-tier.js").BillingPlan;
   createdAt: string;
   updatedAt: string;

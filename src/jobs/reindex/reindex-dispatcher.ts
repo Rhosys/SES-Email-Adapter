@@ -8,6 +8,7 @@ import { randomUUID } from "node:crypto";
 import { getRegistryById } from "../../embedding/cluster-registry.js";
 import { ok, err, notFoundError } from "../../errors.js";
 import type { NotFoundError, Result } from "../../errors.js";
+import { SQS_MESSAGE_TYPES } from "../../types/index.js";
 
 // ---------------------------------------------------------------------------
 // Interfaces
@@ -71,7 +72,7 @@ export class ReindexDispatcher {
           QueueUrl: SIGNAL_QUEUE_URL,
           MessageBody: JSON.stringify(message),
           MessageAttributes: {
-            messageType: { DataType: "String", StringValue: "reindex" },
+            messageType: { DataType: "String", StringValue: SQS_MESSAGE_TYPES[0] },
           },
         })),
       );
