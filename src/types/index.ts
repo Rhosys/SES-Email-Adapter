@@ -239,6 +239,9 @@ export type UnknownSenderPolicy = (typeof UNKNOWN_SENDER_POLICIES)[number];
 export const SIGNAL_STATUSES = ["active", "block_hidden", "block_reject", "violate_report", "quarantine_visible", "quarantine_hidden", "draft"] as const;
 export type SignalStatus = (typeof SIGNAL_STATUSES)[number];
 
+export const STATS_CATEGORIES = ["allowed", "blocked", "quarantined", "violationReport"] as const;
+export type StatsCategory = (typeof STATS_CATEGORIES)[number];
+
 // "email" = inbound SES email; "system" = processor-created (e.g. extracted calendar event); "user" = user-created
 export const SIGNAL_SOURCES = ["email", "system", "user"] as const;
 export type SignalSource = (typeof SIGNAL_SOURCES)[number];
