@@ -1,4 +1,12 @@
 # ---------------------------------------------------------------------------
+# Data sources — external resources referenced by the Lambda
+# ---------------------------------------------------------------------------
+
+data "aws_sfn_state_machine" "account_creation" {
+  name = "email-catcher-AccountCreation"
+}
+
+# ---------------------------------------------------------------------------
 # IAM role for Lambda
 # ---------------------------------------------------------------------------
 
@@ -119,6 +127,12 @@ resource "aws_iam_role_policy" "lambda_permissions" {
         Action = ["sqs:ReceiveMessage", "sqs:DeleteMessage", "sqs:GetQueueAttributes"]
         Resource = aws_sqs_queue.signals.arn
       },
+      {
+        Sid      = "StepFunctionsStart"
+        Effect   = "Allow"
+        Action   = ["states:StartExecution"]
+        Resource = data.aws_sfn_state_machine.account_creation.arn
+      },
     ]
   })
 }
@@ -176,6 +190,7 @@ resource "aws_lambda_function" "main" {
       CF_ORIGIN_SECRET      = random_password.cf_origin_secret.result
       SIGNAL_QUEUE_URL      = aws_sqs_queue.signals.url
       MAIL_DOMAIN           = "platform.${data.aws_route53_zone.main.name}"
+      ACCOUNT_CREATION_SFN_ARN = data.aws_sfn_state_machine.account_creation.arn
     }
   }
 
