@@ -3,6 +3,7 @@ import { ok, err, dbError } from "../errors.js";
 import type { DbError, Result } from "../errors.js";
 import type { Logger } from "../logger.js";
 import type { SqsDispatcher, SideEffectPayload } from "./processor.js";
+import { SQS_MESSAGE_TYPES } from "../types/index.js";
 
 export class SqsDispatcherImpl implements SqsDispatcher {
   private readonly client: SQSClient;
@@ -23,7 +24,7 @@ export class SqsDispatcherImpl implements SqsDispatcher {
           QueueUrl: this.queueUrl,
           MessageBody: JSON.stringify(payload),
           MessageAttributes: {
-            messageType: { DataType: "String", StringValue: "side_effect" },
+            messageType: { DataType: "String", StringValue: SQS_MESSAGE_TYPES[1] },
           },
         }),
       );

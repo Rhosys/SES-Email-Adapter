@@ -2,6 +2,9 @@ import type { APIGatewayProxyEventV2, SQSEvent, Context, APIGatewayProxyResultV2
 import { BedrockRuntimeClient } from "@aws-sdk/client-bedrock-runtime";
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 import { SQSClient } from "@aws-sdk/client-sqs";
+import { SQS_MESSAGE_TYPES } from "./types/index.js";
+
+const [MSG_TYPE_REINDEX, MSG_TYPE_SIDE_EFFECT] = SQS_MESSAGE_TYPES;
 import { SignalClassifier } from "./classifier/classifier.js";
 import { SignalProcessor } from "./processor/processor.js";
 import type { InboundSignalMessage, SideEffectPayload, SesVerdict } from "./processor/processor.js";
@@ -178,10 +181,10 @@ export async function handler(
       }
 
       let failed: boolean;
-      if (messageType === "reindex") {
+      if (messageType === MSG_TYPE_REINDEX) {
         const result = await reindexWorker.processSegmentMessage(body as ReindexSegmentMessage);
         failed = result.isErr();
-      } else if (messageType === "side_effect") {
+      } else if (messageType === MSG_TYPE_SIDE_EFFECT) {
         const payload = body as SideEffectPayload;
         if (!payload.signal || !payload.arc) {
           logger.error("Malformed side-effect payload — missing signal or arc. Dropping message.", { code: "handler.sqs.malformed_side_effect", messageId: record.messageId });
@@ -283,15 +286,18 @@ async function handleWsAuthorizer(event: WsAuthorizerEvent): Promise<WsAuthorize
 
   const verifyResult = await authService.verify(token);
   if (verifyResult.isErr()) return wsDeny(event.methodArn);
-  const ctx = verifyResult.value;
+  const { userId } = verifyResult.value;
+
+  const accountId = event.queryStringParameters?.["accountId"] ?? "";
+  if (!accountId) return wsDeny(event.methodArn);
 
   return {
-    principalId: ctx.userId,
+    principalId: userId,
     policyDocument: {
       Version: "2012-10-17",
       Statement: [{ Action: "execute-api:Invoke", Effect: "Allow", Resource: event.methodArn }],
     },
-    context: { accountId: ctx.accountId, userId: ctx.userId },
+    context: { accountId, userId },
   };
 }
 
