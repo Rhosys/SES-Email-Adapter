@@ -49,3 +49,35 @@ export function buildStatsUpdateParams(accountId: string, category: StatsCategor
     },
   };
 }
+
+
+export function buildPruneNames(now: Date): { names: Record<string, string>; expression: string } {
+  const categories: StatsCategory[] = ["allowed", "blocked", "quarantined", "violationReport"];
+  const names: Record<string, string> = {};
+  let idx = 0;
+
+  // Prune daily: day-8 through day-14
+  for (let offset = 8; offset <= 14; offset++) {
+    const date = new Date(now);
+    date.setUTCDate(date.getUTCDate() - offset);
+    const dateStr = date.toISOString().slice(0, 10);
+    for (const cat of categories) {
+      names[`#prune${idx}`] = `d_${dateStr}_${cat}`;
+      idx++;
+    }
+  }
+
+  // Prune monthly: month-3 and month-4
+  for (let offset = 3; offset <= 4; offset++) {
+    const date = new Date(now);
+    date.setUTCMonth(date.getUTCMonth() - offset);
+    const monthStr = date.toISOString().slice(0, 7);
+    for (const cat of categories) {
+      names[`#prune${idx}`] = `m_${monthStr}_${cat}`;
+      idx++;
+    }
+  }
+
+  const expression = idx > 0 ? `REMOVE ${Object.keys(names).join(", ")}` : "";
+  return { names, expression };
+}
