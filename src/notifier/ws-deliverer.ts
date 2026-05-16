@@ -1,0 +1,30 @@
+import { ApiGatewayManagementApiClient, PostToConnectionCommand } from "@aws-sdk/client-apigatewaymanagementapi";
+import type { Device, Deliverer, DeliveryResult, NotificationPayload, PushPriority } from "./types.js";
+
+export class WsDeliverer implements Deliverer {
+  constructor(private readonly apigw: ApiGatewayManagementApiClient) {}
+
+  async deliver(device: Device, payload: NotificationPayload, _priority: PushPriority): Promise<DeliveryResult> {
+    try {
+      await this.apigw.send(
+        new PostToConnectionCommand({
+          ConnectionId: device.token,
+          Data: new TextEncoder().encode(JSON.stringify(payload)),
+        })
+      );
+      return { status: "delivered" };
+    } catch (error: unknown) {
+      if (isGoneException(error)) {
+        return { status: "stale" };
+      }
+      const reason = error instanceof Error ? error.message : "Unknown WebSocket delivery error";
+      return { status: "failed", reason };
+    }
+  }
+}
+
+function isGoneException(error: unknown): boolean {
+  if (error == null || typeof error !== "object") return false;
+  const err = error as { name?: string; $metadata?: { httpStatusCode?: number } };
+  return err.name === "GoneException" || err.$metadata?.httpStatusCode === 410;
+}
