@@ -141,6 +141,7 @@ describe("Single saveArc call with complete mutations", () => {
         createdAt: "2024-01-01T00:00:00Z", updatedAt: "2024-01-01T00:00:00Z",
       }))),
       incrementStats: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+      annotateRuleError: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     };
 
     const contentSanitizer: ContentSanitizerClient = {

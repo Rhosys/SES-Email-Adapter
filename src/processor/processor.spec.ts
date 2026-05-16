@@ -6,6 +6,7 @@ import { JsonLogicRuleEvaluator } from "./rule-evaluator.js";
 import { baseUrgency } from "./priority.js";
 import type { ProcessorDatabase, ArcMatcher, RuleEvaluator, Notifier, Forwarder, ReplySender, InboundSignalMessage, SqsDispatcher } from "./processor.js";
 import type { ContentSanitizerClient } from "./content-sanitizer-client.js";
+import type { UserCodeExecutorClient } from "./user-code-client.js";
 import type { SignalClassifier, ClassificationOutput } from "../classifier/classifier.js";
 import type { EmbeddingGenerator, EmbeddingResult } from "../embedding/embedding-generator.js";
 import type { MultiClusterAuroraWriter } from "../database/multi-cluster-aurora-writer.js";
@@ -74,6 +75,7 @@ function makeStore(): ProcessorDatabase {
     updateGlobalReputation: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     getDomainByName: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
     incrementStats: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+    annotateRuleError: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
   };
 }
 
@@ -150,7 +152,9 @@ function makeArcMatcher(): ArcMatcher {
 }
 
 function makeRuleEvaluator(logger: MockLogger): RuleEvaluator {
-  return new JsonLogicRuleEvaluator(logger);
+  const mockUserCodeExecutor: UserCodeExecutorClient = { invoke: vi.fn() };
+  const mockAnnotationStore = { annotateRuleError: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) };
+  return new JsonLogicRuleEvaluator(logger, mockUserCodeExecutor, mockAnnotationStore);
 }
 
 function makeNotifier(): Notifier {
