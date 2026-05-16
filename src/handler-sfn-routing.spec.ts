@@ -1,0 +1,321 @@
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import type { Context } from "aws-lambda";
+
+// ---------------------------------------------------------------------------
+// Mock heavy dependencies so the handler module can load without real AWS SDK
+// ---------------------------------------------------------------------------
+
+const mockHandleFollowup = vi.fn().mockResolvedValue({ _tag: "Ok", value: undefined });
+const mockHandleCleanup = vi.fn().mockResolvedValue({ _tag: "Ok", value: undefined });
+const mockHandleTrialCheck = vi.fn().mockResolvedValue({ accountIsTrial: true });
+
+vi.mock("./onboarding/onboarding-task-handler.js", () => ({
+  OnboardingTaskHandler: vi.fn().mockImplementation(() => ({
+    handleFollowup: mockHandleFollowup,
+    handleCleanup: mockHandleCleanup,
+    handleTrialCheck: mockHandleTrialCheck,
+  })),
+}));
+
+vi.mock("./onboarding/account-creation-starter.js", () => ({
+  SfnAccountCreationStarter: vi.fn().mockImplementation(() => ({ start: vi.fn() })),
+}));
+
+vi.mock("@aws-sdk/client-bedrock-runtime", () => ({
+  BedrockRuntimeClient: vi.fn().mockImplementation(() => ({})),
+}));
+
+vi.mock("@aws-sdk/client-s3", () => ({
+  S3Client: vi.fn().mockImplementation(() => ({})),
+  GetObjectCommand: vi.fn(),
+}));
+
+vi.mock("@aws-sdk/client-sfn", () => ({
+  SFNClient: vi.fn().mockImplementation(() => ({})),
+}));
+
+vi.mock("@aws-sdk/client-sqs", () => ({
+  SQSClient: vi.fn().mockImplementation(() => ({})),
+}));
+
+vi.mock("@aws-sdk/client-sesv2", () => ({
+  SESv2Client: vi.fn().mockImplementation(() => ({ send: vi.fn() })),
+  SendEmailCommand: vi.fn(),
+}));
+
+vi.mock("@aws-sdk/client-apigatewaymanagementapi", () => ({
+  ApiGatewayManagementApiClient: vi.fn().mockImplementation(() => ({})),
+}));
+
+vi.mock("./classifier/classifier.js", () => ({
+  SignalClassifier: vi.fn().mockImplementation(() => ({})),
+}));
+
+vi.mock("./processor/processor.js", () => ({
+  SignalProcessor: vi.fn().mockImplementation(() => ({})),
+}));
+
+vi.mock("./processor/sqs-dispatcher.js", () => ({
+  SqsDispatcherImpl: vi.fn().mockImplementation(() => ({})),
+}));
+
+vi.mock("./processor/mime.js", () => ({
+  MailparserMimeParser: vi.fn().mockImplementation(() => ({})),
+}));
+
+vi.mock("./processor/rule-evaluator.js", () => ({
+  JsonLogicRuleEvaluator: vi.fn().mockImplementation(() => ({})),
+}));
+
+vi.mock("./database/account-database.js", () => ({
+  AccountDatabase: vi.fn().mockImplementation(() => ({
+    getAccount: vi.fn(),
+    updateAccount: vi.fn(),
+    listDomains: vi.fn(),
+  })),
+}));
+
+vi.mock("./database/arc-database.js", () => ({
+  ArcDatabase: vi.fn().mockImplementation(() => ({
+    hasSignals: vi.fn(),
+  })),
+}));
+
+vi.mock("./database/processing-database.js", () => ({
+  ProcessingDatabase: vi.fn().mockImplementation(() => ({})),
+}));
+
+vi.mock("./database/adapters.js", () => ({
+  ProcessorDatabaseAdapter: vi.fn().mockImplementation(() => ({})),
+  ApiDatabaseAdapter: vi.fn().mockImplementation(() => ({})),
+}));
+
+vi.mock("./database/audit-database.js", () => ({
+  AuditDatabase: vi.fn().mockImplementation(() => ({})),
+}));
+
+vi.mock("./notifier/device-notifier.js", () => ({
+  DeviceNotifier: vi.fn().mockImplementation(() => ({})),
+}));
+
+vi.mock("./notifier/ws-deliverer.js", () => ({
+  WsDeliverer: vi.fn().mockImplementation(() => ({})),
+}));
+
+vi.mock("./notifier/fcm-deliverer.js", () => ({
+  FcmDeliverer: vi.fn().mockImplementation(() => ({})),
+}));
+
+vi.mock("./notifier/fcm-client.js", () => ({
+  HttpFcmClient: vi.fn().mockImplementation(() => ({})),
+}));
+
+vi.mock("./notifier/ses-forwarder.js", () => ({
+  SesForwarder: vi.fn().mockImplementation(() => ({})),
+}));
+
+vi.mock("./notifier/device-store.js", () => ({
+  DynamoDeviceStore: vi.fn().mockImplementation(() => ({
+    saveDevice: vi.fn(),
+    deleteDevice: vi.fn(),
+  })),
+}));
+
+vi.mock("./notifier/feedback-processor.js", () => ({
+  FeedbackProcessor: vi.fn().mockImplementation(() => ({})),
+}));
+
+vi.mock("./jobs/domain-health-job.js", () => ({
+  DomainHealthJob: vi.fn().mockImplementation(() => ({ run: vi.fn().mockResolvedValue(undefined) })),
+}));
+
+vi.mock("./embedding/embedding-generator.js", () => ({
+  BedrockEmbeddingGenerator: vi.fn().mockImplementation(() => ({})),
+}));
+
+vi.mock("./database/multi-cluster-aurora-writer.js", () => ({
+  multiClusterWriter: {},
+}));
+
+vi.mock("./embedding/s3-retention-service.js", () => ({
+  S3RetentionServiceImpl: vi.fn().mockImplementation(() => ({})),
+}));
+
+vi.mock("./jobs/reindex/reindex-worker.js", () => ({
+  ReindexWorker: vi.fn().mockImplementation(() => ({})),
+}));
+
+vi.mock("./notifier/ses-reply-sender.js", () => ({
+  SesReplySender: vi.fn().mockImplementation(() => ({})),
+}));
+
+vi.mock("./jobs/reindex/reindex-dispatcher.js", () => ({
+  ReindexDispatcher: vi.fn().mockImplementation(() => ({})),
+}));
+
+vi.mock("./api/authress-auth.js", () => ({
+  AuthressAuthService: vi.fn().mockImplementation(() => ({})),
+}));
+
+vi.mock("./api/authress-access.js", () => ({
+  AuthressAccessService: vi.fn().mockImplementation(() => ({})),
+}));
+
+vi.mock("./api/app.js", () => ({
+  createApp: vi.fn().mockReturnValue({ fetch: vi.fn() }),
+}));
+
+// ---------------------------------------------------------------------------
+// Import handler AFTER mocks are set up
+// ---------------------------------------------------------------------------
+
+const { handler } = await import("./handler.js");
+
+const dummyContext: Context = {
+  callbackWaitsForEmptyEventLoop: false,
+  functionName: "test",
+  functionVersion: "1",
+  invokedFunctionArn: "arn:aws:lambda:eu-central-1:123:function:test",
+  memoryLimitInMB: "128",
+  awsRequestId: "req-1",
+  logGroupName: "/aws/lambda/test",
+  logStreamName: "stream",
+  getRemainingTimeInMillis: () => 30000,
+  done: () => {},
+  fail: () => {},
+  succeed: () => {},
+};
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function makeSfnEvent(stateName: string, input?: { accountId: string; email: string } | null) {
+  return {
+    context: {
+      Execution: {
+        Id: "arn:aws:states:eu-central-1:342695602194:execution:email-catcher-AccountCreation:acc-123",
+        Input: input ?? { accountId: "acc-123", email: "user@test.com" },
+        Name: "acc-123",
+      },
+      StateMachine: {
+        Id: "arn:aws:states:eu-central-1:342695602194:stateMachine:email-catcher-AccountCreation",
+        Name: "email-catcher-AccountCreation",
+      },
+      State: {
+        Name: stateName,
+        EnteredTime: "2025-06-01T10:00:00Z",
+      },
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+describe("Handler: Step Function event routing", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it.each([
+    { label: "FirstFollowup → handleFollowup", stateName: "FirstFollowup", expectedFn: () => mockHandleFollowup },
+    { label: "Cleanup → handleCleanup", stateName: "Cleanup", expectedFn: () => mockHandleCleanup },
+    { label: "TrialCheck → handleTrialCheck", stateName: "TrialCheck", expectedFn: () => mockHandleTrialCheck },
+  ])("$label", async ({ stateName, expectedFn }) => {
+    const event = makeSfnEvent(stateName);
+
+    await handler(event, dummyContext);
+
+    const fn = expectedFn();
+    expect(fn).toHaveBeenCalledTimes(1);
+    if (stateName === "TrialCheck") {
+      expect(fn).toHaveBeenCalledWith("acc-123");
+    } else {
+      expect(fn).toHaveBeenCalledWith("acc-123", "user@test.com");
+    }
+  });
+
+  it("unknown state name → returns empty object", async () => {
+    const event = makeSfnEvent("UnknownState");
+
+    const result = await handler(event, dummyContext);
+
+    expect(result).toEqual({});
+    expect(mockHandleFollowup).not.toHaveBeenCalled();
+    expect(mockHandleCleanup).not.toHaveBeenCalled();
+    expect(mockHandleTrialCheck).not.toHaveBeenCalled();
+  });
+
+  it("missing Execution.Input fields → returns empty object", async () => {
+    const event = {
+      context: {
+        Execution: {
+          Id: "arn:aws:states:eu-central-1:342695602194:execution:email-catcher-AccountCreation:acc-123",
+          Input: null,
+          Name: "acc-123",
+        },
+        StateMachine: {
+          Id: "arn:aws:states:eu-central-1:342695602194:stateMachine:email-catcher-AccountCreation",
+          Name: "email-catcher-AccountCreation",
+        },
+        State: {
+          Name: "FirstFollowup",
+          EnteredTime: "2025-06-01T10:00:00Z",
+        },
+      },
+    };
+
+    const result = await handler(event, dummyContext);
+
+    expect(result).toEqual({});
+    expect(mockHandleFollowup).not.toHaveBeenCalled();
+  });
+
+  it("SQS event → not caught by Step Function check (no regression)", async () => {
+    const sqsEvent = {
+      Records: [{
+        messageId: "msg-1",
+        receiptHandle: "handle",
+        body: "{}",
+        attributes: { ApproximateReceiveCount: "1" } as Record<string, string>,
+        messageAttributes: {},
+        md5OfBody: "abc",
+        eventSource: "aws:sqs",
+        eventSourceARN: "arn:aws:sqs:eu-central-1:123:queue",
+        awsRegion: "eu-central-1",
+      }],
+    };
+
+    const result = await handler(sqsEvent, dummyContext);
+
+    // SQS handler returns batchItemFailures shape
+    expect(result).toHaveProperty("batchItemFailures");
+    expect(mockHandleFollowup).not.toHaveBeenCalled();
+    expect(mockHandleCleanup).not.toHaveBeenCalled();
+    expect(mockHandleTrialCheck).not.toHaveBeenCalled();
+  });
+
+  it("EventBridge event → not caught by Step Function check (no regression)", async () => {
+    const ebEvent = {
+      source: "aws.events",
+      "detail-type": "Scheduled Event",
+      detail: { source: "domain-health-job" },
+      id: "evt-1",
+      version: "0",
+      account: "123",
+      time: "2025-06-01T10:00:00Z",
+      region: "eu-central-1",
+      resources: [],
+    };
+
+    const result = await handler(ebEvent, dummyContext);
+
+    // EventBridge handler returns undefined
+    expect(result).toBeUndefined();
+    expect(mockHandleFollowup).not.toHaveBeenCalled();
+    expect(mockHandleCleanup).not.toHaveBeenCalled();
+    expect(mockHandleTrialCheck).not.toHaveBeenCalled();
+  });
+});
