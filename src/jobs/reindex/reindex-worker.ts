@@ -8,12 +8,10 @@
 // ---------------------------------------------------------------------------
 
 import { ScanCommand } from "@aws-sdk/lib-dynamodb";
-import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 import { dynamo, SIGNALS_TABLE } from "../../database/shared.js";
 import { multiClusterWriter } from "../../database/multi-cluster-aurora-writer.js";
 import { getRegistryById } from "../../embedding/cluster-registry.js";
-import { MailparserMimeParser } from "../../processor/mime.js";
-import { buildEmbedText, extractEmbedTextInput } from "../../embedding/embed-text.js";
+import { generateEmbeddingFromS3 } from "../../embedding/generate-embedding-from-s3.js";
 import { BedrockEmbeddingGenerator } from "../../embedding/embedding-generator.js";
 import { BedrockRuntimeClient } from "@aws-sdk/client-bedrock-runtime";
 import { ArcDatabase } from "../../database/arc-database.js";
@@ -38,29 +36,12 @@ export interface ReindexSegmentMessage {
 // Constants
 // ---------------------------------------------------------------------------
 
-const EMAIL_BUCKET = process.env["EMAIL_BUCKET"] ?? "";
-
 // ---------------------------------------------------------------------------
 // Shared clients for regeneration path
 // ---------------------------------------------------------------------------
 
-const s3 = new S3Client({});
-const mimeParser = new MailparserMimeParser();
 const embeddingGenerator = new BedrockEmbeddingGenerator(new BedrockRuntimeClient({}));
 const arcDatabase = new ArcDatabase();
-
-// ---------------------------------------------------------------------------
-// S3 NoSuchKey detection
-// ---------------------------------------------------------------------------
-
-function isNoSuchKeyError(e: unknown): boolean {
-  if (e && typeof e === "object") {
-    const err = e as { name?: string; Code?: string; $metadata?: { httpStatusCode?: number } };
-    if (err.name === "NoSuchKey" || err.Code === "NoSuchKey") return true;
-    if (err.$metadata?.httpStatusCode === 404) return true;
-  }
-  return false;
-}
 
 // ---------------------------------------------------------------------------
 // ReindexWorker
@@ -168,7 +149,7 @@ export class ReindexWorker {
   }
 
   // ---------------------------------------------------------------------------
-  // Regeneration path: cache miss → fetch S3 → parse MIME → Bedrock → cache + Aurora
+  // Regeneration path: cache miss → shared pipeline (S3 → MIME → embed → Bedrock) → cache + Aurora
   // ---------------------------------------------------------------------------
 
   private async regenerateFromS3(
@@ -176,34 +157,19 @@ export class ReindexWorker {
     targetRegistryId: string,
     modelId: string,
   ): Promise<Result<void, { signalId: string; reason: string }>> {
-    const s3Key = signal.s3Key;
-
-    if (!s3Key) {
+    if (!signal.s3Key) {
       return err({ signalId: signal.id, reason: "no s3Key on signal record" });
     }
 
-    const fetchResult = await this.fetchFromS3(s3Key);
-    if (fetchResult.isErr()) {
-      const e = fetchResult.error;
-      if (isNoSuchKeyError(e)) {
-        return err({ signalId: signal.id, reason: `NoSuchKey: ${s3Key}` });
-      }
-      return err({ signalId: signal.id, reason: `S3 fetch failed: ${String(e)}` });
-    }
-    const rawMimeBuffer = fetchResult.value;
-
-    const parseResult = await mimeParser.parseBuffer(rawMimeBuffer);
-    if (parseResult.isErr()) {
-      return err({ signalId: signal.id, reason: `MIME parse failed: ${String(parseResult.error.cause)}` });
-    }
-    const parsed = parseResult.value;
-
-    const embedTextInput = extractEmbedTextInput(parsed, signal.accountId, signal.recipientAddress);
-    const embedText = buildEmbedText(embedTextInput);
-
-    const result = await embeddingGenerator.generateForModel(embedText, modelId);
+    const result = await generateEmbeddingFromS3({
+      s3Key: signal.s3Key,
+      accountId: signal.accountId,
+      recipientAddress: signal.recipientAddress,
+      modelId,
+      embeddingGenerator,
+    });
     if (result.isErr()) {
-      return err({ signalId: signal.id, reason: `Embedding generation failed for model "${modelId}": ${String(result.error.cause)}` });
+      return err({ signalId: signal.id, reason: `Embedding generation failed: ${String(result.error.cause ?? result.error)}` });
     }
 
     const cacheResult = await arcDatabase.addEmbeddingToCache(
@@ -228,20 +194,5 @@ export class ReindexWorker {
     }
 
     return ok(undefined);
-  }
-
-  // ---------------------------------------------------------------------------
-  // S3 fetch helper
-  // ---------------------------------------------------------------------------
-
-  private async fetchFromS3(s3Key: string): Promise<Result<Buffer, Error>> {
-    try {
-      const res = await s3.send(new GetObjectCommand({ Bucket: EMAIL_BUCKET, Key: s3Key }));
-      const body = await res.Body?.transformToByteArray();
-      if (!body) return err(new Error(`Empty S3 object: ${s3Key}`));
-      return ok(Buffer.from(body));
-    } catch (e) {
-      return err(e instanceof Error ? e : new Error(String(e)));
-    }
   }
 }

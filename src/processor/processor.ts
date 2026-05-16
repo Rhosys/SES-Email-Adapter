@@ -532,7 +532,6 @@ export class SignalProcessor {
         accountId,
         status: "block_reject",
         source: "email",
-        sesMessageId,
         s3Key,
         recipientAddress: destination[0] ?? "",
         receivedAt: timestamp,
