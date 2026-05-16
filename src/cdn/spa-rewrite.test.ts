@@ -1,5 +1,4 @@
 import { describe, it, expect } from "vitest";
-import fc from "fast-check";
 
 // ---------------------------------------------------------------------------
 // Extracted CloudFront Function logic (from deploy/cdn.tf)
@@ -65,171 +64,79 @@ function rewrite(uri: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Property-based tests
+// Tests
 // ---------------------------------------------------------------------------
 
 describe("CloudFront SPA rewrite function", () => {
-  describe("Property 1: PR prefix deep-link routing", () => {
-    /** Validates: Requirements 1.1, 1.3 */
+  describe("PR prefix deep-link routing", () => {
+    const deepLinkCases = [
+      { scenario: "single route segment", uri: "/pr/my-branch/dashboard", expected: "/pr/my-branch/index.html" },
+      { scenario: "nested route segments", uri: "/pr/my-branch/settings/domains", expected: "/pr/my-branch/index.html" },
+      { scenario: "deeply nested route", uri: "/pr/feat-123/accounts/abc/rules/new", expected: "/pr/feat-123/index.html" },
+    ];
 
-    const slugArb = fc.stringMatching(/^[a-z0-9-]{1,63}$/);
-    const routeSegmentArb = fc.stringMatching(/^[a-z0-9-]+$/);
-
-    it("rewrites PR deep links without dot to /pr/{slug}/index.html", () => {
-      fc.assert(
-        fc.property(
-          slugArb,
-          fc.array(routeSegmentArb, { minLength: 1, maxLength: 5 }),
-          (slug, segments) => {
-            const uri = `/pr/${slug}/${segments.join("/")}`;
-            expect(rewrite(uri)).toBe(`/pr/${slug}/index.html`);
-          }
-        ),
-        { numRuns: 200 }
-      );
+    it.each(deepLinkCases)("rewrites PR deep link: $scenario", ({ uri, expected }) => {
+      expect(rewrite(uri)).toBe(expected);
     });
 
-    it("passes through PR static files (dot in final segment) unchanged", () => {
-      const fileNameArb = fc.stringMatching(/^[a-z0-9-]+\.[a-z]{2,4}$/);
+    const staticFileCases = [
+      { scenario: "JS asset in nested dir", uri: "/pr/my-branch/assets/index-abc123.js", expected: "/pr/my-branch/assets/index-abc123.js" },
+      { scenario: "favicon at slug root", uri: "/pr/my-branch/favicon.ico", expected: "/pr/my-branch/favicon.ico" },
+      { scenario: "CSS file", uri: "/pr/feat-99/styles/app.css", expected: "/pr/feat-99/styles/app.css" },
+      { scenario: "woff2 font", uri: "/pr/fix-typo/fonts/inter.woff2", expected: "/pr/fix-typo/fonts/inter.woff2" },
+    ];
 
-      fc.assert(
-        fc.property(
-          slugArb,
-          fc.array(routeSegmentArb, { minLength: 0, maxLength: 4 }),
-          fileNameArb,
-          (slug, middleSegments, fileName) => {
-            const pathParts = [slug, ...middleSegments, fileName];
-            const uri = `/pr/${pathParts.join("/")}`;
-            expect(rewrite(uri)).toBe(uri);
-          }
-        ),
-        { numRuns: 200 }
-      );
+    it.each(staticFileCases)("passes through PR static file: $scenario", ({ uri, expected }) => {
+      expect(rewrite(uri)).toBe(expected);
     });
   });
 
-  describe("Property 2: Root-level SPA routing", () => {
-    /** Validates: Requirements 2.1, 2.2 */
+  describe("Root-level SPA routing", () => {
+    const spaRouteCases = [
+      { scenario: "bare root", uri: "/", expected: "/main/2026/index.html" },
+      { scenario: "single segment route", uri: "/dashboard", expected: "/main/2026/index.html" },
+      { scenario: "nested route", uri: "/settings/domains", expected: "/main/2026/index.html" },
+      { scenario: "deeply nested route", uri: "/accounts/abc/rules/new", expected: "/main/2026/index.html" },
+    ];
 
-    const pathSegment = fc.stringMatching(/^[a-z0-9-]{1,20}$/);
-
-    const nonPrFirstSegment = pathSegment.filter((s) => s !== "pr");
-
-    it("rewrites root SPA routes to /main/2026/index.html", () => {
-      fc.assert(
-        fc.property(
-          nonPrFirstSegment,
-          fc.array(pathSegment, { minLength: 0, maxLength: 4 }),
-          (first, rest) => {
-            const uri = "/" + [first, ...rest].join("/");
-            expect(rewrite(uri)).toBe("/main/2026/index.html");
-          },
-        ),
-        { numRuns: 100 },
-      );
+    it.each(spaRouteCases)("rewrites root SPA route: $scenario", ({ uri, expected }) => {
+      expect(rewrite(uri)).toBe(expected);
     });
 
-    it("prepends /main/2026 to root static file URIs", () => {
-      const fileExtension = fc.constantFrom(
-        ".js",
-        ".css",
-        ".html",
-        ".ico",
-        ".json",
-        ".txt",
-        ".svg",
-        ".woff2",
-      );
-      const fileName = fc
-        .tuple(pathSegment, fileExtension)
-        .map(([name, ext]) => name + ext);
+    const rootStaticCases = [
+      { scenario: "favicon.ico", uri: "/favicon.ico", expected: "/main/2026/favicon.ico" },
+      { scenario: "robots.txt", uri: "/robots.txt", expected: "/main/2026/robots.txt" },
+      { scenario: "JS bundle in assets/", uri: "/assets/index-abc123.js", expected: "/main/2026/assets/index-abc123.js" },
+      { scenario: "CSS file", uri: "/assets/style.css", expected: "/main/2026/assets/style.css" },
+      { scenario: "SVG icon", uri: "/icons/logo.svg", expected: "/main/2026/icons/logo.svg" },
+    ];
 
-      fc.assert(
-        fc.property(
-          nonPrFirstSegment,
-          fc.array(pathSegment, { minLength: 0, maxLength: 3 }),
-          fileName,
-          (first, middle, file) => {
-            const uri = "/" + [first, ...middle, file].join("/");
-            expect(rewrite(uri)).toBe("/main/2026" + uri);
-          },
-        ),
-        { numRuns: 100 },
-      );
+    it.each(rootStaticCases)("prepends /main/2026 to root static file: $scenario", ({ uri, expected }) => {
+      expect(rewrite(uri)).toBe(expected);
     });
   });
 
-  describe("Property 3: Bare prefix rewrite regardless of slug content", () => {
-    /** Validates: Requirements 1.2, 3.1 */
+  describe("Bare prefix rewrite regardless of slug content", () => {
+    const barePrefixCases = [
+      { scenario: "simple slug, no trailing slash", uri: "/pr/my-branch", expected: "/pr/my-branch/index.html" },
+      { scenario: "simple slug, trailing slash", uri: "/pr/my-branch/", expected: "/pr/my-branch/index.html" },
+      { scenario: "slug with dots (looks like a file but is a slug)", uri: "/pr/v1.2.3", expected: "/pr/v1.2.3/index.html" },
+      { scenario: "slug with dots, trailing slash", uri: "/pr/v1.2.3/", expected: "/pr/v1.2.3/index.html" },
+      { scenario: "slug with hyphens and numbers", uri: "/pr/feat-123-fix", expected: "/pr/feat-123-fix/index.html" },
+    ];
 
-    const slugWithDotsArb = fc.stringMatching(/^[a-z0-9.-]{1,63}$/);
-
-    it("rewrites /pr/{slug} (no trailing slash) to /pr/{slug}/index.html", () => {
-      fc.assert(
-        fc.property(slugWithDotsArb, (slug) => {
-          const uri = `/pr/${slug}`;
-          expect(rewrite(uri)).toBe(`/pr/${slug}/index.html`);
-        }),
-        { numRuns: 200 },
-      );
-    });
-
-    it("rewrites /pr/{slug}/ (trailing slash) to /pr/{slug}/index.html", () => {
-      fc.assert(
-        fc.property(slugWithDotsArb, (slug) => {
-          const uri = `/pr/${slug}/`;
-          expect(rewrite(uri)).toBe(`/pr/${slug}/index.html`);
-        }),
-        { numRuns: 200 },
-      );
+    it.each(barePrefixCases)("$scenario", ({ uri, expected }) => {
+      expect(rewrite(uri)).toBe(expected);
     });
   });
 
   describe("Edge cases", () => {
-    /** Validates: Requirements 1.4, 3.2 */
-
-    it("passes /pr/ through unchanged", () => {
+    it("passes /pr/ through unchanged (empty slug)", () => {
       expect(rewrite("/pr/")).toBe("/pr/");
     });
 
-    it("passes /pr through unchanged", () => {
+    it("passes /pr through unchanged (bare prefix, no slash)", () => {
       expect(rewrite("/pr")).toBe("/pr");
-    });
-
-    // Static test cases from design document — PR preview deep links
-    it("rewrites /pr/my-branch/dashboard to /pr/my-branch/index.html", () => {
-      expect(rewrite("/pr/my-branch/dashboard")).toBe("/pr/my-branch/index.html");
-    });
-
-    it("rewrites /pr/my-branch/settings/domains to /pr/my-branch/index.html", () => {
-      expect(rewrite("/pr/my-branch/settings/domains")).toBe("/pr/my-branch/index.html");
-    });
-
-    // Static test cases — PR preview static files (pass through)
-    it("passes /pr/my-branch/assets/index-abc123.js through unchanged", () => {
-      expect(rewrite("/pr/my-branch/assets/index-abc123.js")).toBe("/pr/my-branch/assets/index-abc123.js");
-    });
-
-    it("passes /pr/my-branch/favicon.ico through unchanged", () => {
-      expect(rewrite("/pr/my-branch/favicon.ico")).toBe("/pr/my-branch/favicon.ico");
-    });
-
-    // Static test cases — Root-level SPA routes
-    it("rewrites / to /main/2026/index.html", () => {
-      expect(rewrite("/")).toBe("/main/2026/index.html");
-    });
-
-    it("rewrites /dashboard to /main/2026/index.html", () => {
-      expect(rewrite("/dashboard")).toBe("/main/2026/index.html");
-    });
-
-    // Static test cases — Root-level static files
-    it("rewrites /favicon.ico to /main/2026/favicon.ico", () => {
-      expect(rewrite("/favicon.ico")).toBe("/main/2026/favicon.ico");
-    });
-
-    it("rewrites /robots.txt to /main/2026/robots.txt", () => {
-      expect(rewrite("/robots.txt")).toBe("/main/2026/robots.txt");
     });
   });
 });

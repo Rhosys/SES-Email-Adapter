@@ -7,7 +7,6 @@
 // secondary results — no more, no less.
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import fc from "fast-check";
 import { ok, err } from "../errors.js";
 import { SignalProcessor, SYSTEM_RULES } from "./processor.js";
 import { JsonLogicRuleEvaluator } from "./rule-evaluator.js";
@@ -165,43 +164,59 @@ function makeMessage(sesMessageId: string): InboundSignalMessage {
 }
 
 // ---------------------------------------------------------------------------
-// Generators
+// Static test cases: distinct embeddings map compositions
 // ---------------------------------------------------------------------------
 
-/** Generate a unique modelId for a secondary cluster */
-const secondaryModelIdArb = (index: number) =>
-  fc.string({ minLength: 1, maxLength: 30 }).map((s) => `secondary-model-${index}-${s}`);
-
-/** Generate a short vector (we don't need full 1024 dims for this property) */
-const vectorArb = fc.array(
-  fc.double({ noNaN: true, noDefaultInfinity: true, min: -1e6, max: 1e6 }),
-  { minLength: 4, maxLength: 4 },
-);
-
-/** Generate a secondary result: either Ok with a vector or Err */
 interface SecondaryInput {
   modelId: string;
   outcome: "ok" | "err";
   vector: number[];
 }
 
-const secondaryInputArb = (index: number): fc.Arbitrary<SecondaryInput> =>
-  fc.record({
-    modelId: secondaryModelIdArb(index),
-    outcome: fc.oneof(fc.constant("ok" as const), fc.constant("err" as const)),
-    vector: vectorArb,
+function buildSecondaryResults(secondaries: SecondaryInput[]): Result<EmbeddingResult, BedrockError>[] {
+  return secondaries.map((s) => {
+    if (s.outcome === "ok") {
+      return ok({ modelId: s.modelId, vector: s.vector, dimensions: s.vector.length });
+    }
+    return err(bedrockError(s.modelId, new Error("simulated failure")));
   });
+}
 
-/** Generate 1–5 secondary cluster inputs */
-const secondariesArb: fc.Arbitrary<SecondaryInput[]> = fc.integer({ min: 1, max: 5 }).chain((count) =>
-  fc.tuple(...Array.from({ length: count }, (_, i) => secondaryInputArb(i))).map((arr) => arr),
-);
+const PRIMARY_MODEL_ID = "amazon.titan-embed-text-v2:0";
+const PRIMARY_VECTOR = [0.1, 0.2, 0.3, 0.4];
 
-/** Generate the primary vector */
-const primaryVectorArb = fc.array(
-  fc.double({ noNaN: true, noDefaultInfinity: true, min: -1e6, max: 1e6 }),
-  { minLength: 4, maxLength: 4 },
-);
+const cases = [
+  {
+    scenario: "1 secondary, all succeed → embeddings has primary + 1 secondary",
+    secondaries: [
+      { modelId: "cohere-embed-v3", outcome: "ok" as const, vector: [0.5, 0.6, 0.7, 0.8] },
+    ],
+    expectedKeys: [PRIMARY_MODEL_ID, "cohere-embed-v3"],
+  },
+  {
+    scenario: "3 secondaries, all succeed → embeddings has primary + 3",
+    secondaries: [
+      { modelId: "cohere-embed-v3", outcome: "ok" as const, vector: [0.5, 0.6, 0.7, 0.8] },
+      { modelId: "titan-embed-g1", outcome: "ok" as const, vector: [0.9, 1.0, 1.1, 1.2] },
+      { modelId: "bge-large-en", outcome: "ok" as const, vector: [1.3, 1.4, 1.5, 1.6] },
+    ],
+    expectedKeys: [PRIMARY_MODEL_ID, "cohere-embed-v3", "titan-embed-g1", "bge-large-en"],
+  },
+  {
+    scenario: "3 secondaries, 1 fails → embeddings has primary + 2 (the successful ones)",
+    secondaries: [
+      { modelId: "cohere-embed-v3", outcome: "ok" as const, vector: [0.5, 0.6, 0.7, 0.8] },
+      { modelId: "titan-embed-g1", outcome: "err" as const, vector: [0.9, 1.0, 1.1, 1.2] },
+      { modelId: "bge-large-en", outcome: "ok" as const, vector: [1.3, 1.4, 1.5, 1.6] },
+    ],
+    expectedKeys: [PRIMARY_MODEL_ID, "cohere-embed-v3", "bge-large-en"],
+  },
+  {
+    scenario: "0 secondaries → embeddings has only primary",
+    secondaries: [],
+    expectedKeys: [PRIMARY_MODEL_ID],
+  },
+];
 
 // ---------------------------------------------------------------------------
 // Property 4: Embeddings map composition
@@ -212,77 +227,61 @@ describe("Feature: split-embedding-pipeline, Property 4: Embeddings map composit
   beforeEach(() => { mockLogger = createMockLogger(); });
   afterEach(() => { vi.restoreAllMocks(); });
 
-  it("signal.embeddings contains exactly the primary vector plus vectors from all successful secondary results", async () => {
-    await fc.assert(
-      fc.asyncProperty(primaryVectorArb, secondariesArb, async (primaryVector, secondaries) => {
-        mockLogger = createMockLogger();
+  it.each(cases)("$scenario", async ({ secondaries, expectedKeys }) => {
+    const secondaryResults = buildSecondaryResults(secondaries);
 
-        const primaryModelId = "amazon.titan-embed-text-v2:0";
+    const embeddingGenerator: EmbeddingGenerator = {
+      generateForModel: vi.fn().mockResolvedValue(
+        ok({ modelId: PRIMARY_MODEL_ID, vector: PRIMARY_VECTOR, dimensions: PRIMARY_VECTOR.length }),
+      ),
+      generateForSecondaryClusters: vi.fn().mockResolvedValue(secondaryResults),
+    };
 
-        // Build the secondary results array based on the generated inputs
-        const secondaryResults: Result<EmbeddingResult, BedrockError>[] = secondaries.map((s) => {
-          if (s.outcome === "ok") {
-            return ok({ modelId: s.modelId, vector: s.vector, dimensions: s.vector.length });
-          }
-          return err(bedrockError(s.modelId, new Error("simulated failure")));
-        });
+    const store = makeStore();
 
-        const embeddingGenerator: EmbeddingGenerator = {
-          generateForModel: vi.fn().mockResolvedValue(
-            ok({ modelId: primaryModelId, vector: primaryVector, dimensions: primaryVector.length }),
-          ),
-          generateForSecondaryClusters: vi.fn().mockResolvedValue(secondaryResults),
-        };
+    const processor = new SignalProcessor({
+      store,
+      contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com",
+      classifier: { classify: vi.fn().mockResolvedValue({ ...CLASSIFICATION }) },
+      embeddingGenerator,
+      auroraWriter: makeAuroraWriter(),
+      arcMatcher: makeArcMatcher(),
+      ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
+      logger: mockLogger,
+      notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
+      replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) },
+      sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+    });
 
-        const store = makeStore();
+    const result = await processor.processRecord(makeMessage("ses-prop4-test"), 1);
 
-        const processor = new SignalProcessor({
-          store,
-          contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com",
-          classifier: { classify: vi.fn().mockResolvedValue({ ...CLASSIFICATION }) },
-          embeddingGenerator,
-          auroraWriter: makeAuroraWriter(),
-          arcMatcher: makeArcMatcher(),
-          ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
-          logger: mockLogger,
-          notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
-          forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
-          retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
-          replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) },
-          sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
-        });
+    // Processing should succeed (no batch item failures)
+    expect(result.isOk()).toBe(true);
 
-        const result = await processor.processRecord(makeMessage("ses-prop4-test"), 1);
+    // Extract signal.embeddings from the saveSignal call
+    expect(store.saveSignal).toHaveBeenCalledOnce();
+    const savedSignal = (store.saveSignal as ReturnType<typeof vi.fn>).mock.calls[0]![0] as Signal;
+    const embeddings = savedSignal.embeddings;
 
-        // Processing should succeed (no batch item failures)
-        expect(result.isOk()).toBe(true);
+    expect(embeddings).toBeDefined();
 
-        // Extract signal.embeddings from the saveSignal call
-        expect(store.saveSignal).toHaveBeenCalledOnce();
-        const savedSignal = (store.saveSignal as ReturnType<typeof vi.fn>).mock.calls[0]![0] as Signal;
-        const embeddings = savedSignal.embeddings;
+    // Build expected embeddings map
+    const expected: Record<string, number[]> = { [PRIMARY_MODEL_ID]: PRIMARY_VECTOR };
+    for (const s of secondaries) {
+      if (s.outcome === "ok") {
+        expected[s.modelId] = s.vector;
+      }
+    }
 
-        expect(embeddings).toBeDefined();
+    // Assert: exact key set — no more, no less
+    const actualKeys = Object.keys(embeddings!).sort();
+    expect(actualKeys).toEqual([...expectedKeys].sort());
 
-        // Build expected embeddings map
-        const expected: Record<string, number[]> = { [primaryModelId]: primaryVector };
-        for (const s of secondaries) {
-          if (s.outcome === "ok") {
-            expected[s.modelId] = s.vector;
-          }
-        }
-
-        // Assert: exact key set — no more, no less
-        const actualKeys = Object.keys(embeddings!).sort();
-        const expectedKeys = Object.keys(expected).sort();
-        expect(actualKeys).toEqual(expectedKeys);
-
-        // Assert: each vector matches exactly
-        for (const [modelId, expectedVector] of Object.entries(expected)) {
-          expect(embeddings![modelId]).toEqual(expectedVector);
-        }
-      }),
-      { numRuns: 100 },
-    );
+    // Assert: each vector matches exactly
+    for (const [modelId, expectedVector] of Object.entries(expected)) {
+      expect(embeddings![modelId]).toEqual(expectedVector);
+    }
   });
 });

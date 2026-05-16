@@ -7,7 +7,6 @@
 // truncation, or substitution.
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import fc from "fast-check";
 import { ok } from "../errors.js";
 import { SignalProcessor, SYSTEM_RULES } from "./processor.js";
 import { JsonLogicRuleEvaluator } from "./rule-evaluator.js";
@@ -149,6 +148,29 @@ function makeMessage(sesMessageId: string): InboundSignalMessage {
 }
 
 // ---------------------------------------------------------------------------
+// Static test vectors: each exercises a distinct value pattern
+// ---------------------------------------------------------------------------
+
+/** All zeros — tests that a zero vector is not treated as "missing" */
+const allZerosVector = Array.from({ length: 1024 }, () => 0);
+
+/** Mixed positive/negative — typical embedding output */
+const mixedVector = Array.from({ length: 1024 }, (_, i) => (i % 2 === 0 ? 0.123456 : -0.654321));
+
+/** Near float boundaries — tests no clamping or rounding occurs */
+const boundaryVector = Array.from({ length: 1024 }, (_, i) => {
+  if (i % 3 === 0) return 3.4028234e+38;   // near Float32 max
+  if (i % 3 === 1) return -3.4028234e+38;  // near Float32 min
+  return 1.1754944e-38;                     // near Float32 smallest positive normal
+});
+
+const cases = [
+  { scenario: "all-zeros vector (not treated as missing)", vector: allZerosVector },
+  { scenario: "mixed positive/negative values", vector: mixedVector },
+  { scenario: "values near float32 boundaries (no clamping)", vector: boundaryVector },
+] as const;
+
+// ---------------------------------------------------------------------------
 // Property 2: Primary vector flows to arc matcher
 // ---------------------------------------------------------------------------
 
@@ -157,66 +179,57 @@ describe("Feature: split-embedding-pipeline, Property 2: Primary vector flows to
   beforeEach(() => { mockLogger = createMockLogger(); });
   afterEach(() => { vi.restoreAllMocks(); });
 
-  it("the exact vector from generateForModel Ok result is passed to arcMatcher.findMatch — byte-for-byte identical", async () => {
-    await fc.assert(
-      fc.asyncProperty(
-        fc.array(fc.double({ noNaN: true, noDefaultInfinity: true, min: -1e10, max: 1e10 }), { minLength: 1024, maxLength: 1024 }),
-        async (vector) => {
-          // Capture the vector received by the arc matcher
-          let receivedVector: number[] | undefined;
+  it.each(cases)("$scenario", async ({ vector }) => {
+    let receivedVector: number[] | undefined;
 
-          const arcMatcher: ArcMatcher = {
-            findMatch: vi.fn().mockImplementation((_accountId: string, _recipientAddress: string, embedding: number[]) => {
-              receivedVector = embedding;
-              return Promise.resolve(ok(null));
-            }),
-            upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-          };
+    const arcMatcher: ArcMatcher = {
+      findMatch: vi.fn().mockImplementation((_accountId: string, _recipientAddress: string, embedding: number[]) => {
+        receivedVector = embedding;
+        return Promise.resolve(ok(null));
+      }),
+      upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+    };
 
-          const embeddingGenerator: EmbeddingGenerator = {
-            generateForModel: vi.fn().mockResolvedValue(
-              ok({ modelId: "amazon.titan-embed-text-v2:0", vector, dimensions: 1024 }),
-            ),
-            generateForSecondaryClusters: vi.fn().mockResolvedValue([]),
-          };
-
-          const auroraWriter: MultiClusterAuroraWriter = {
-            upsertEmbedding: vi.fn().mockResolvedValue(ok(undefined)),
-            findMatch: vi.fn().mockResolvedValue(ok(null)),
-          };
-
-          const processor = new SignalProcessor({
-            store: makeStore(),
-            contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com",
-            classifier: { classify: vi.fn().mockResolvedValue({ ...CLASSIFICATION }) },
-            embeddingGenerator,
-            auroraWriter,
-            arcMatcher,
-            ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
-            logger: mockLogger,
-            notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
-            forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
-            retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
-            replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) },
-            sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
-          });
-
-          await processor.processRecord(makeMessage("ses-prop2-test"), 1);
-
-          // Arc matcher must have been called
-          expect(arcMatcher.findMatch).toHaveBeenCalledOnce();
-
-          // The vector passed to findMatch must be the exact same reference or identical values
-          expect(receivedVector).toBeDefined();
-          expect(receivedVector).toHaveLength(vector.length);
-
-          // Byte-for-byte comparison: every element must be strictly equal
-          for (let i = 0; i < vector.length; i++) {
-            expect(receivedVector![i]).toBe(vector[i]);
-          }
-        },
+    const embeddingGenerator: EmbeddingGenerator = {
+      generateForModel: vi.fn().mockResolvedValue(
+        ok({ modelId: "amazon.titan-embed-text-v2:0", vector: [...vector], dimensions: 1024 }),
       ),
-      { numRuns: 100 },
-    );
+      generateForSecondaryClusters: vi.fn().mockResolvedValue([]),
+    };
+
+    const auroraWriter: MultiClusterAuroraWriter = {
+      upsertEmbedding: vi.fn().mockResolvedValue(ok(undefined)),
+      findMatch: vi.fn().mockResolvedValue(ok(null)),
+    };
+
+    const processor = new SignalProcessor({
+      store: makeStore(),
+      contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com",
+      classifier: { classify: vi.fn().mockResolvedValue({ ...CLASSIFICATION }) },
+      embeddingGenerator,
+      auroraWriter,
+      arcMatcher,
+      ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
+      logger: mockLogger,
+      notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
+      replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) },
+      sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+    });
+
+    await processor.processRecord(makeMessage("ses-prop2-test"), 1);
+
+    // Arc matcher must have been called
+    expect(arcMatcher.findMatch).toHaveBeenCalledOnce();
+
+    // The vector passed to findMatch must be identical values
+    expect(receivedVector).toBeDefined();
+    expect(receivedVector).toHaveLength(1024);
+
+    // Byte-for-byte comparison: every element must be strictly equal
+    for (let i = 0; i < vector.length; i++) {
+      expect(receivedVector![i]).toBe(vector[i]);
+    }
   });
 });

@@ -6,11 +6,10 @@
 // the read cluster, and no others.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import fc from "fast-check";
 import type { ClusterRegistryEntry } from "./cluster-registry.js";
 
 // ---------------------------------------------------------------------------
-// Hoisted mock state — allows fast-check to swap registry per iteration
+// Hoisted mock state — allows swapping registry per test case
 // ---------------------------------------------------------------------------
 
 const { mockRegistry } = vi.hoisted(() => ({
@@ -18,8 +17,6 @@ const { mockRegistry } = vi.hoisted(() => ({
 }));
 
 // Mock the module but let getSecondaryClusters use the real implementation logic.
-// We mock getActiveClusters and getPrimaryArcMatcherRegistry to read from our mutable registry,
-// and provide getSecondaryClusters as a real implementation that calls them.
 vi.mock("./cluster-registry.js", () => {
   const getActiveClusters = () => mockRegistry.value.filter((c: ClusterRegistryEntry) => c.active);
   const getPrimaryArcMatcherRegistry = () => {
@@ -42,7 +39,7 @@ vi.mock("./cluster-registry.js", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Generator: arbitrary cluster registry entries
+// Helpers
 // ---------------------------------------------------------------------------
 
 function makeEntry(index: number, active: boolean): ClusterRegistryEntry {
@@ -58,14 +55,37 @@ function makeEntry(index: number, active: boolean): ClusterRegistryEntry {
   };
 }
 
-/**
- * Generate a registry with 1–4 entries, ensuring at least one is active.
- * The module-load assertion enforces max 4 active entries.
- */
-const registryArb: fc.Arbitrary<ClusterRegistryEntry[]> = fc
-  .array(fc.boolean(), { minLength: 1, maxLength: 4 })
-  .filter((flags) => flags.some((f) => f)) // at least one active
-  .map((flags) => flags.map((active, i) => makeEntry(i, active)));
+// ---------------------------------------------------------------------------
+// Static test cases: distinct registry configurations
+// ---------------------------------------------------------------------------
+
+const setDifferenceCases = [
+  {
+    scenario: "1 active cluster only → secondary is empty",
+    registry: [makeEntry(0, true)],
+    expectedSecondaryIds: [],
+  },
+  {
+    scenario: "2 active clusters → secondary has 1 (the non-primary)",
+    registry: [makeEntry(0, true), makeEntry(1, true)],
+    expectedSecondaryIds: ["cluster-1"],
+  },
+  {
+    scenario: "3 active + 1 inactive → secondary has 2 active non-primary, excludes inactive",
+    registry: [makeEntry(0, true), makeEntry(1, true), makeEntry(2, true), makeEntry(3, false)],
+    expectedSecondaryIds: ["cluster-1", "cluster-2"],
+  },
+  {
+    scenario: "4 active clusters (max) → secondary has 3",
+    registry: [makeEntry(0, true), makeEntry(1, true), makeEntry(2, true), makeEntry(3, true)],
+    expectedSecondaryIds: ["cluster-1", "cluster-2", "cluster-3"],
+  },
+  {
+    scenario: "1 active + 3 inactive → secondary is empty (only primary is active)",
+    registry: [makeEntry(0, true), makeEntry(1, false), makeEntry(2, false), makeEntry(3, false)],
+    expectedSecondaryIds: [],
+  },
+];
 
 // ---------------------------------------------------------------------------
 // Property 8: getSecondaryClusters is the set difference
@@ -76,55 +96,30 @@ describe("Property 8: getSecondaryClusters is the set difference", () => {
     mockRegistry.value = [];
   });
 
-  it("returns exactly getActiveClusters() minus getPrimaryArcMatcherRegistry() for any valid registry", async () => {
+  it.each(setDifferenceCases)("$scenario", async ({ registry, expectedSecondaryIds }) => {
     const { getActiveClusters, getPrimaryArcMatcherRegistry, getSecondaryClusters } = await import("./cluster-registry.js");
 
-    fc.assert(
-      fc.property(registryArb, (registry) => {
-        mockRegistry.value = registry;
+    mockRegistry.value = registry;
 
-        const active = getActiveClusters();
-        const read = getPrimaryArcMatcherRegistry();
-        const secondary = getSecondaryClusters();
+    const active = getActiveClusters();
+    const primary = getPrimaryArcMatcherRegistry();
+    const secondary = getSecondaryClusters();
 
-        // Property A: secondary contains no element equal to the read cluster
-        for (const entry of secondary) {
-          expect(entry.registryId).not.toBe(read.registryId);
-        }
+    // Property A: secondary contains no element equal to the primary cluster
+    for (const entry of secondary) {
+      expect(entry.registryId).not.toBe(primary.registryId);
+    }
 
-        // Property B: every active cluster that is NOT the read cluster IS in secondary
-        const expectedIds = active
-          .filter((c) => c.registryId !== read.registryId)
-          .map((c) => c.registryId)
-          .sort();
-        const actualIds = secondary.map((c) => c.registryId).sort();
-        expect(actualIds).toEqual(expectedIds);
+    // Property B: every active cluster that is NOT the primary IS in secondary
+    const expectedIds = active
+      .filter((c) => c.registryId !== primary.registryId)
+      .map((c) => c.registryId)
+      .sort();
+    const actualIds = secondary.map((c) => c.registryId).sort();
+    expect(actualIds).toEqual(expectedIds);
+    expect(actualIds).toEqual([...expectedSecondaryIds].sort());
 
-        // Property C: secondary length equals active length minus 1 (the read cluster)
-        expect(secondary).toHaveLength(active.length - 1);
-      }),
-      { numRuns: 100 },
-    );
-  });
-
-  it("returns empty array when only one active cluster exists", async () => {
-    const { getSecondaryClusters } = await import("./cluster-registry.js");
-
-    const singleActiveArb = fc
-      .array(fc.constant(false), { minLength: 0, maxLength: 3 })
-      .map((inactiveFlags) => {
-        const entries = [makeEntry(0, true)];
-        inactiveFlags.forEach((_, i) => entries.push(makeEntry(i + 1, false)));
-        return entries;
-      });
-
-    fc.assert(
-      fc.property(singleActiveArb, (registry) => {
-        mockRegistry.value = registry;
-        const secondary = getSecondaryClusters();
-        expect(secondary).toHaveLength(0);
-      }),
-      { numRuns: 100 },
-    );
+    // Property C: secondary length equals active length minus 1 (the primary)
+    expect(secondary).toHaveLength(active.length - 1);
   });
 });

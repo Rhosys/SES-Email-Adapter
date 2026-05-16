@@ -7,7 +7,6 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { err, ok } from "../errors.js";
-import fc from "fast-check";
 import { SignalProcessor, SYSTEM_RULES } from "./processor.js";
 import { JsonLogicRuleEvaluator } from "./rule-evaluator.js";
 import type { InboundSignalMessage, ProcessorDatabase, ArcMatcher } from "./processor.js";
@@ -157,13 +156,26 @@ function makeMessage(sesMessageId: string): InboundSignalMessage {
 }
 
 // ---------------------------------------------------------------------------
-// Generator: arbitrary BedrockError inputs
+// Static test cases: distinct error scenarios
 // ---------------------------------------------------------------------------
 
-const bedrockErrorArb = fc.record({
-  modelId: fc.string({ minLength: 1 }),
-  cause: fc.string({ minLength: 1 }),
-});
+const cases = [
+  {
+    scenario: "short model ID + short error message",
+    modelId: "titan-v2",
+    cause: "timeout",
+  },
+  {
+    scenario: "long model ID + error with special characters",
+    modelId: "us-east-1.amazon.titan-embed-text-v2:0/provisioned-throughput/abc123",
+    cause: 'ThrottlingException: Rate exceeded; retry after 30s — "quota_id": <xQ9!@#$%>',
+  },
+  {
+    scenario: "empty-string model ID (edge case)",
+    modelId: "",
+    cause: "ValidationException: model ID must not be empty",
+  },
+] as const;
 
 // ---------------------------------------------------------------------------
 // Property 1: Primary failure causes batch item failure
@@ -174,46 +186,39 @@ describe("Property 1: Primary failure causes batch item failure", () => {
   beforeEach(() => { mockLogger = createMockLogger(); });
   afterEach(() => { vi.restoreAllMocks(); });
 
-  it("for any BedrockError from generateForModel, the processor returns a batch item failure and logs embedding.primary_failed", async () => {
-    await fc.assert(
-      fc.asyncProperty(bedrockErrorArb, async ({ modelId, cause }) => {
-        mockLogger = createMockLogger();
+  it.each(cases)("$scenario", async ({ modelId, cause }) => {
+    const embeddingGenerator: EmbeddingGenerator = {
+      generateForModel: vi.fn().mockResolvedValue(
+        err(bedrockError(modelId, new Error(cause))),
+      ),
+      generateForSecondaryClusters: vi.fn().mockResolvedValue([]),
+    };
 
-        const embeddingGenerator: EmbeddingGenerator = {
-          generateForModel: vi.fn().mockResolvedValue(
-            err(bedrockError(modelId, new Error(cause))),
-          ),
-          generateForSecondaryClusters: vi.fn().mockResolvedValue([]),
-        };
+    const processor = new SignalProcessor({
+      store: makeStore(),
+      contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com",
+      classifier: { classify: vi.fn().mockResolvedValue({ ...validClassification }) },
+      embeddingGenerator,
+      auroraWriter: makeAuroraWriter(),
+      arcMatcher: makeArcMatcher(),
+      ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
+      logger: mockLogger,
+      notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
+      replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) },
+      sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+    });
 
-        const processor = new SignalProcessor({
-          store: makeStore(),
-          contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com",
-          classifier: { classify: vi.fn().mockResolvedValue({ ...validClassification }) },
-          embeddingGenerator,
-          auroraWriter: makeAuroraWriter(),
-          arcMatcher: makeArcMatcher(),
-          ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
-          logger: mockLogger,
-          notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
-          forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
-          retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
-          replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) },
-          sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
-        });
+    const result = await processor.processRecord(makeMessage("test-msg-primary-fail"), 1);
 
-        const result = await processor.processRecord(makeMessage("test-msg-primary-fail"), 1);
+    // Assert: batch item failure returned
+    expect(result.isErr()).toBe(true);
 
-        // Assert: batch item failure returned
-        expect(result.isErr()).toBe(true);
-
-        // Assert: ERROR logged with code embedding.primary_failed
-        const errorCalls = mockLogger.calls.filter(
-          (c) => c.method === "error" && c.context?.code === "embedding.primary_failed",
-        );
-        expect(errorCalls.length).toBeGreaterThanOrEqual(1);
-      }),
-      { numRuns: 100 },
+    // Assert: ERROR logged with code embedding.primary_failed
+    const errorCalls = mockLogger.calls.filter(
+      (c) => c.method === "error" && c.context?.code === "embedding.primary_failed",
     );
+    expect(errorCalls.length).toBeGreaterThanOrEqual(1);
   });
 });

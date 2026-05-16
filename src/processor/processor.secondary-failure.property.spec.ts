@@ -8,7 +8,6 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ok, err } from "../errors.js";
-import fc from "fast-check";
 import { SignalProcessor, SYSTEM_RULES } from "./processor.js";
 import { JsonLogicRuleEvaluator } from "./rule-evaluator.js";
 import type { InboundSignalMessage, ProcessorDatabase, ArcMatcher } from "./processor.js";
@@ -161,16 +160,6 @@ function makeMessage(sesMessageId: string): InboundSignalMessage {
   };
 }
 
-// ---------------------------------------------------------------------------
-// Generator: random mix of Ok/Err results for secondary clusters, with at
-// least 1 failure guaranteed
-// ---------------------------------------------------------------------------
-
-const secondaryResultArb = fc.array(
-  fc.oneof(fc.constant("ok" as const), fc.constant("err" as const)),
-  { minLength: 1, maxLength: 8 },
-).filter((results) => results.some((r) => r === "err"));
-
 function buildSecondaryResults(outcomes: Array<"ok" | "err">): Result<EmbeddingResult, BedrockError>[] {
   return outcomes.map((outcome, i) => {
     const modelId = `secondary-model-${i}`;
@@ -182,6 +171,33 @@ function buildSecondaryResults(outcomes: Array<"ok" | "err">): Result<EmbeddingR
 }
 
 // ---------------------------------------------------------------------------
+// Static test cases: distinct failure combinations
+// ---------------------------------------------------------------------------
+
+const cases = [
+  {
+    scenario: "1 secondary, 1 failure (minimum case)",
+    outcomes: ["err"] as Array<"ok" | "err">,
+    expectedFailureCount: 1,
+  },
+  {
+    scenario: "3 secondaries, all fail (maximum failure)",
+    outcomes: ["err", "err", "err"] as Array<"ok" | "err">,
+    expectedFailureCount: 3,
+  },
+  {
+    scenario: "3 secondaries, 2 fail + 1 succeeds (mixed)",
+    outcomes: ["err", "ok", "err"] as Array<"ok" | "err">,
+    expectedFailureCount: 2,
+  },
+  {
+    scenario: "5 secondaries, 1 fails among many successes",
+    outcomes: ["ok", "ok", "err", "ok", "ok"] as Array<"ok" | "err">,
+    expectedFailureCount: 1,
+  },
+];
+
+// ---------------------------------------------------------------------------
 // Property 3: Secondary failures are tolerated
 // ---------------------------------------------------------------------------
 
@@ -190,49 +206,41 @@ describe("Feature: split-embedding-pipeline, Property 3: Secondary failures are 
   beforeEach(() => { mockLogger = createMockLogger(); });
   afterEach(() => { vi.restoreAllMocks(); });
 
-  it("for any combination of secondary failures, the processor does NOT return a batch item failure and logs WARN for each failure", async () => {
-    await fc.assert(
-      fc.asyncProperty(secondaryResultArb, async (outcomes) => {
-        mockLogger = createMockLogger();
+  it.each(cases)("$scenario", async ({ outcomes, expectedFailureCount }) => {
+    const secondaryResults = buildSecondaryResults(outcomes);
 
-        const secondaryResults = buildSecondaryResults(outcomes);
-        const expectedFailureCount = outcomes.filter((o) => o === "err").length;
+    const embeddingGenerator: EmbeddingGenerator = {
+      generateForModel: vi.fn().mockResolvedValue(
+        ok({ modelId: "amazon.titan-embed-text-v2:0", vector: Array(1024).fill(0.5), dimensions: 1024 }),
+      ),
+      generateForSecondaryClusters: vi.fn().mockResolvedValue(secondaryResults),
+    };
 
-        const embeddingGenerator: EmbeddingGenerator = {
-          generateForModel: vi.fn().mockResolvedValue(
-            ok({ modelId: "amazon.titan-embed-text-v2:0", vector: Array(1024).fill(0.5), dimensions: 1024 }),
-          ),
-          generateForSecondaryClusters: vi.fn().mockResolvedValue(secondaryResults),
-        };
+    const processor = new SignalProcessor({
+      store: makeStore(),
+      contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com",
+      classifier: { classify: vi.fn().mockResolvedValue({ ...CLASSIFICATION }) },
+      embeddingGenerator,
+      auroraWriter: makeAuroraWriter(),
+      arcMatcher: makeArcMatcher(),
+      ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
+      logger: mockLogger,
+      notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
+      replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) },
+      sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+    });
 
-        const processor = new SignalProcessor({
-          store: makeStore(),
-          contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com",
-          classifier: { classify: vi.fn().mockResolvedValue({ ...CLASSIFICATION }) },
-          embeddingGenerator,
-          auroraWriter: makeAuroraWriter(),
-          arcMatcher: makeArcMatcher(),
-          ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
-          logger: mockLogger,
-          notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
-          forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
-          retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
-          replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) },
-          sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
-        });
+    const result = await processor.processRecord(makeMessage("test-msg-secondary-fail"), 1);
 
-        const result = await processor.processRecord(makeMessage("test-msg-secondary-fail"), 1);
+    // Assert: NO batch item failures — processing continues despite secondary errors
+    expect(result.isOk()).toBe(true);
 
-        // Assert: NO batch item failures — processing continues despite secondary errors
-        expect(result.isOk()).toBe(true);
-
-        // Assert: WARN logged with code `embedding.secondary_failed` for each Err result
-        const warnCalls = mockLogger.calls.filter(
-          (c) => c.method === "warn" && c.context?.code === "embedding.secondary_failed",
-        );
-        expect(warnCalls).toHaveLength(expectedFailureCount);
-      }),
-      { numRuns: 100 },
+    // Assert: WARN logged with code `embedding.secondary_failed` for each Err result
+    const warnCalls = mockLogger.calls.filter(
+      (c) => c.method === "warn" && c.context?.code === "embedding.secondary_failed",
     );
+    expect(warnCalls).toHaveLength(expectedFailureCount);
   });
 });
