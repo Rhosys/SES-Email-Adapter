@@ -321,6 +321,7 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
         id: generateAccountId(),
         name: "",
         deletionRetentionDays: 0,
+        billingPlan: "Trial",
         onboarding: { completed: false },
         createdAt: now,
         updatedAt: now,
