@@ -1,10 +1,12 @@
 import { randomUUID } from "crypto";
+import type { S3Client } from "@aws-sdk/client-s3";
 import type { Logger } from "../logger.js";
 import type { Result } from "neverthrow";
 import { ok, err, dbError } from "../errors.js";
 import type { DbError, InvalidResponseError } from "../errors.js";
 import type { Signal, Arc, Rule, Workflow, WorkflowData, Alias, AliasSender, SenderPolicy, AccountFilteringConfig, SignalSource, SignalStatus, Domain, ArcUrgency, UnknownSenderPolicy, MatchedRuleResult } from "../types/index.js";
-import type { MimeParser, ParsedMime } from "./mime.js";
+import type { ParsedMime } from "./mime.js";
+import type { ContentSanitizerClient } from "./content-sanitizer-client.js";
 import { buildEmbedText, extractEmbedTextInput } from "../embedding/embed-text.js";
 import type { SignalClassifier } from "../classifier/classifier.js";
 import type { EmbeddingGenerator } from "../embedding/embedding-generator.js";
@@ -12,7 +14,9 @@ import type { MultiClusterAuroraWriter } from "../database/multi-cluster-aurora-
 import type { S3RetentionService } from "../embedding/s3-retention-service.js";
 import { getRetentionForPlan, retentionDurationToSeconds } from "../embedding/retention-tier.js";
 import type { BillingPlan } from "../embedding/retention-tier.js";
+import { resolveRetention, retentionToS3Tag } from "./retention.js";
 import type { RetentionDuration } from "./retention.js";
+import { generatePresignedGet, generatePresignedPost } from "./presign.js";
 import { getPrimaryArcMatcherRegistry, getActiveClusters } from "../embedding/cluster-registry.js";
 import { getETLD1, assignSystemLabels, DEFAULT_SPAM_SCORE_THRESHOLD } from "./filter.js";
 import { statusToCategory } from "../database/stats-writer.js";
@@ -38,6 +42,7 @@ export interface SqsDispatcher {
 
 export interface ProcessorAccountContext {
   retentionDays: number;
+  retentionDuration?: RetentionDuration;
   filtering: AccountFilteringConfig | null;
   emailConfig: Alias | null;
   registeredDomains: string[];
@@ -260,7 +265,7 @@ export const SYSTEM_RULES: Rule[] = [
 
 interface SignalProcessorOptions {
   store: ProcessorDatabase;
-  mimeParser: MimeParser;
+  contentSanitizer: ContentSanitizerClient;
   classifier: Pick<SignalClassifier, "classify">;
   embeddingGenerator: EmbeddingGenerator;
   auroraWriter: MultiClusterAuroraWriter;
@@ -272,11 +277,15 @@ interface SignalProcessorOptions {
   retentionService: S3RetentionService;
   replySender: ReplySender;
   sqsDispatcher: SqsDispatcher;
+  s3Client: S3Client;
+  emailBucket: string;
+  contentBucket: string;
+  contentCdnBaseUrl: string;
 }
 
 export class SignalProcessor {
   private readonly store: ProcessorDatabase;
-  private readonly mimeParser: MimeParser;
+  private readonly contentSanitizer: ContentSanitizerClient;
   private readonly classifier: Pick<SignalClassifier, "classify">;
   private readonly embeddingGenerator: EmbeddingGenerator;
   private readonly auroraWriter: MultiClusterAuroraWriter;
@@ -288,10 +297,14 @@ export class SignalProcessor {
   private readonly replySender: ReplySender;
   private readonly retentionService: S3RetentionService;
   private readonly sqsDispatcher: SqsDispatcher;
+  private readonly s3Client: S3Client;
+  private readonly emailBucket: string;
+  private readonly contentBucket: string;
+  private readonly contentCdnBaseUrl: string;
 
   constructor(opts: SignalProcessorOptions) {
     this.store = opts.store;
-    this.mimeParser = opts.mimeParser;
+    this.contentSanitizer = opts.contentSanitizer;
     this.classifier = opts.classifier;
     this.embeddingGenerator = opts.embeddingGenerator;
     this.auroraWriter = opts.auroraWriter;
@@ -303,6 +316,10 @@ export class SignalProcessor {
     this.replySender = opts.replySender;
     this.retentionService = opts.retentionService;
     this.sqsDispatcher = opts.sqsDispatcher;
+    this.s3Client = opts.s3Client;
+    this.emailBucket = opts.emailBucket;
+    this.contentBucket = opts.contentBucket;
+    this.contentCdnBaseUrl = opts.contentCdnBaseUrl;
   }
 
   async processRecord(message: InboundSignalMessage, receiveCount: number): Promise<Result<void, DbError>> {
@@ -565,13 +582,66 @@ export class SignalProcessor {
       return ok(undefined);
     }
 
-    // 2. Parse MIME
-    const parsedResult = await this.mimeParser.parse(s3Key);
-    if (parsedResult.isErr()) return err(parsedResult.error);
-    const parsed = parsedResult.value;
+    // 2. Content Sanitizer — fetch, parse, sanitize, extract
+    const recipientAddress = destination[0] ?? "";
+
+    // Fetch account context early (needed for retention resolution before content sanitizer)
+    const accountCtxResult = await this.store.getProcessorAccountContext(accountId, recipientAddress);
+    if (accountCtxResult.isErr()) return err(accountCtxResult.error);
+    const accountCtx = accountCtxResult.value;
+
+    // Resolve retention and generate pre-signed URLs for the content sanitizer
+    const retentionDuration = resolveRetention(accountCtx, null);
+    const s3Tag = retentionToS3Tag(retentionDuration);
+    const signalId = sesMessageId;
+    const keyPrefix = `accounts/${accountId}/extracted/${signalId}/`;
+
+    const [presignedGet, presignedPost] = await Promise.all([
+      generatePresignedGet(this.s3Client, this.emailBucket, s3Key),
+      generatePresignedPost(this.s3Client, this.contentBucket, keyPrefix, s3Tag),
+    ]);
+
+    const sanitizeResult = await this.contentSanitizer.invoke({
+      presignedGetUrl: presignedGet,
+      presignedPost,
+      accountId,
+      senderEtld1: "", // derived after parse — content sanitizer uses keyPrefix for uploads
+      contentBaseUrl: this.contentCdnBaseUrl,
+      keyPrefix,
+      retentionTag: s3Tag,
+    });
+
+    if (sanitizeResult.isErr()) return err(sanitizeResult.error);
+    const { parsed: sanitizedParsed, urlMapping } = sanitizeResult.value;
+
+    // Apply URL replacements (caller-side, safe string operations)
+    if (sanitizedParsed.htmlBody) {
+      for (const [originalUrl, cdnPath] of Object.entries(urlMapping)) {
+        sanitizedParsed.htmlBody = sanitizedParsed.htmlBody.replaceAll(originalUrl, `${this.contentCdnBaseUrl}${cdnPath}`);
+      }
+    }
+
+    // Map sanitized response to ParsedMime for downstream compatibility
+    const parsed: ParsedMime = {
+      from: sanitizedParsed.from,
+      to: sanitizedParsed.to,
+      cc: sanitizedParsed.cc,
+      subject: sanitizedParsed.subject,
+      attachments: sanitizedParsed.attachments.map(a => ({
+        filename: a.filename,
+        mimeType: a.mimeType,
+        sizeBytes: a.sizeBytes,
+        s3Key: a.s3Key,
+        ...(a.contentId ? { contentId: a.contentId } : {}),
+      })),
+      headers: sanitizedParsed.headers,
+      ...(sanitizedParsed.replyTo ? { replyTo: sanitizedParsed.replyTo } : {}),
+      ...(sanitizedParsed.textBody !== undefined ? { textBody: sanitizedParsed.textBody } : {}),
+      ...(sanitizedParsed.htmlBody !== undefined ? { htmlBody: sanitizedParsed.htmlBody } : {}),
+      ...(sanitizedParsed.sentAt !== undefined ? { sentAt: sanitizedParsed.sentAt } : {}),
+    };
     this.logger.trackPoint("email_parsed");
 
-    const recipientAddress = destination[0] ?? "";
     const senderETLD1 = getETLD1(parsed.from.address);
 
     // 3. Build EmbedTextInput and construct embed text
@@ -603,13 +673,8 @@ export class SignalProcessor {
 
     const now = new Date().toISOString();
 
-    // 4. Fetch account context + sender entry in parallel
-    const [accountCtxResult, senderEntryResult] = await Promise.all([
-      this.store.getProcessorAccountContext(accountId, recipientAddress),
-      this.store.getSender(accountId, recipientAddress, senderETLD1),
-    ]);
-    if (accountCtxResult.isErr()) return err(accountCtxResult.error);
-    const accountCtx = accountCtxResult.value;
+    // 4. Fetch sender entry (account context already fetched for retention resolution)
+    const senderEntryResult = await this.store.getSender(accountId, recipientAddress, senderETLD1);
     if (senderEntryResult.isErr()) return err(senderEntryResult.error);
     const senderEntry = senderEntryResult.value;
     const ttl = accountCtx.retentionDays > 0

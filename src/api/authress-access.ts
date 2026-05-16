@@ -1,12 +1,17 @@
 import { AuthressClient } from "@authress/sdk";
 import type { AccessRecord } from "@authress/sdk";
+import { KmsServiceClientTokenProvider } from "@authress/sdk";
 import { ok, err, authressServiceError } from "../errors.js";
 import type { AuthressServiceError, Result } from "../errors.js";
 import type { AccessService, AccountUser, AccountRole } from "./app.js";
 
 const AUTHRESS_API_URL = "https://login.rhosys.cloud";
 export const AUTHRESS_APP_ID = "app_2EAWGEdtzaeCj7b45DsDtt";
-const AUTHRESS_SERVICE_CLIENT_ACCESS_KEY = process.env["AUTHRESS_SERVICE_CLIENT_ACCESS_KEY"] ?? "";
+
+const AUTHRESS_KMS_KEY_ARN = "alias/ses-email-adapter-authress-service-client";
+const AUTHRESS_CLIENT_ID = "sc_a9RdHnQzsXJeAzTJgaGf98v";
+const AUTHRESS_KEY_ID = process.env["AUTHRESS_KEY_ID"] ?? "";
+const AUTHRESS_ACCOUNT_ID = "acc-g017y29d874dh";
 
 const ACCOUNT_ROLES: AccountRole[] = ["owner", "admin", "member", "viewer"];
 
@@ -14,7 +19,13 @@ let _client: AuthressClient | null = null;
 
 function getClient(): AuthressClient {
   if (!_client) {
-    _client = new AuthressClient({ authressApiUrl: AUTHRESS_API_URL }, AUTHRESS_SERVICE_CLIENT_ACCESS_KEY);
+    const tokenProvider = new KmsServiceClientTokenProvider({
+      kmsKeyArn: AUTHRESS_KMS_KEY_ARN,
+      clientId: AUTHRESS_CLIENT_ID,
+      keyId: AUTHRESS_KEY_ID,
+      authressAccountId: AUTHRESS_ACCOUNT_ID,
+    });
+    _client = new AuthressClient({ authressApiUrl: AUTHRESS_API_URL }, tokenProvider);
   }
   return _client;
 }

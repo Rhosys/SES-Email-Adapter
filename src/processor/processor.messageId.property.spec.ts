@@ -3,7 +3,7 @@ import { ok, err } from "neverthrow";
 import { SignalProcessor, SYSTEM_RULES } from "./processor.js";
 import { JsonLogicRuleEvaluator } from "./rule-evaluator.js";
 import type { ProcessorDatabase, ArcMatcher, InboundSignalMessage } from "./processor.js";
-import type { MimeParser } from "./mime.js";
+import type { ContentSanitizerClient } from "./content-sanitizer-client.js";
 import type { SignalClassifier } from "../classifier/classifier.js";
 import type { EmbeddingGenerator } from "../embedding/embedding-generator.js";
 import type { MultiClusterAuroraWriter } from "../database/multi-cluster-aurora-writer.js";
@@ -27,6 +27,11 @@ vi.mock("../embedding/cluster-registry.js", () => {
     getPrimaryArcMatcherRegistry: () => cluster,
   };
 });
+
+vi.mock("./presign.js", () => ({
+  generatePresignedGet: vi.fn().mockResolvedValue("https://presigned-get.example.com/test"),
+  generatePresignedPost: vi.fn().mockResolvedValue({ url: "https://presigned-post.example.com", fields: {} }),
+}));
 
 describe("ProcessError on database failure", () => {
   function makeStore(): ProcessorDatabase {
@@ -69,18 +74,22 @@ describe("ProcessError on database failure", () => {
   }
 
   function makeProcessor(store: ProcessorDatabase): SignalProcessor {
-    const mimeParser: MimeParser = {
-      parse: vi.fn().mockResolvedValue(ok({
-        from: { address: "s@x.com", name: "S" },
-        to: [{ address: "u@x.com" }],
-        cc: [],
-        subject: "Test",
-        textBody: "body",
-        htmlBody: "<p>body</p>",
-        attachments: [],
-        headers: {},
-        sentAt: "2024-01-15T09:00:00Z",
-      })),
+    const contentSanitizer: ContentSanitizerClient = {
+      invoke: vi.fn().mockReturnValue(Promise.resolve(ok({
+        success: true as const,
+        parsed: {
+          from: { address: "s@x.com", name: "S" },
+          to: [{ address: "u@x.com" }],
+          cc: [],
+          subject: "Test",
+          textBody: "body",
+          htmlBody: "<p>body</p>",
+          attachments: [],
+          headers: { "authentication-results": "spf=pass dkim=pass" },
+          sentAt: "2024-01-15T09:00:00Z",
+        },
+        urlMapping: {},
+      }))),
     };
     const classifier: Pick<SignalClassifier, "classify"> = {
       classify: vi.fn().mockResolvedValue({
@@ -103,7 +112,7 @@ describe("ProcessError on database failure", () => {
     };
     const mockLogger = createMockLogger();
     return new SignalProcessor({
-      store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher,
+      store, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com", classifier, embeddingGenerator, auroraWriter, arcMatcher,
       ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger), logger: mockLogger,
       notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },

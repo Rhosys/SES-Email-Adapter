@@ -78,6 +78,7 @@ program
       minify: true,
       platform: 'node' as const,
       target: 'node24',
+      format: 'esm' as const,
       external: ['@aws-sdk/*', 'pg-native'],
     };
 

@@ -5,7 +5,7 @@ import { SignalProcessor, deriveGroupingKey, SYSTEM_RULES, extractForwardedAddre
 import { JsonLogicRuleEvaluator } from "./rule-evaluator.js";
 import { baseUrgency } from "./priority.js";
 import type { ProcessorDatabase, ArcMatcher, RuleEvaluator, Notifier, Forwarder, ReplySender, InboundSignalMessage, SqsDispatcher } from "./processor.js";
-import type { MimeParser } from "./mime.js";
+import type { ContentSanitizerClient } from "./content-sanitizer-client.js";
 import type { SignalClassifier, ClassificationOutput } from "../classifier/classifier.js";
 import type { EmbeddingGenerator, EmbeddingResult } from "../embedding/embedding-generator.js";
 import type { MultiClusterAuroraWriter } from "../database/multi-cluster-aurora-writer.js";
@@ -31,6 +31,11 @@ vi.mock("../embedding/cluster-registry.js", () => {
     getPrimaryArcMatcherRegistry: () => entry,
   };
 });
+
+vi.mock("./presign.js", () => ({
+  generatePresignedGet: vi.fn().mockResolvedValue("https://presigned-get.example.com/test"),
+  generatePresignedPost: vi.fn().mockResolvedValue({ url: "https://presigned-post.example.com", fields: {} }),
+}));
 
 // ---------------------------------------------------------------------------
 // Test doubles
@@ -95,18 +100,22 @@ function makeSenderEntry(domain: string, aliasAddress = "user@example.com"): imp
   return { accountId: TEST_ACCOUNT_ID, aliasAddress, domain, policy: "allow", addedAt: "2024-01-01T00:00:00Z" };
 }
 
-function makeMimeParser(): MimeParser {
+function makeContentSanitizer(): ContentSanitizerClient {
   return {
-    parse: vi.fn().mockReturnValue(Promise.resolve(ok({
-      from: { address: "sender@example.com", name: "Sender" },
-      to: [{ address: "user@example.com" }],
-      cc: [],
-      subject: "Test email",
-      textBody: "Hello world",
-      htmlBody: "<p>Hello world</p>",
-      attachments: [],
-      headers: { "authentication-results": "spf=pass dkim=pass" },
-      sentAt: "2024-01-15T09:00:00Z",
+    invoke: vi.fn().mockReturnValue(Promise.resolve(ok({
+      success: true as const,
+      parsed: {
+        from: { address: "sender@example.com", name: "Sender" },
+        to: [{ address: "user@example.com" }],
+        cc: [],
+        subject: "Test email",
+        textBody: "Hello world",
+        htmlBody: "<p>Hello world</p>",
+        attachments: [],
+        headers: { "authentication-results": "spf=pass dkim=pass" },
+        sentAt: "2024-01-15T09:00:00Z",
+      },
+      urlMapping: {},
     }))),
   };
 }
@@ -222,7 +231,7 @@ function makeArc(overrides: Partial<Arc> = {}): Arc {
 
 describe("SignalProcessor", () => {
   let store: ProcessorDatabase;
-  let mimeParser: MimeParser;
+  let contentSanitizer: ContentSanitizerClient;
   let classifier: Pick<SignalClassifier, "classify">;
   let embeddingGenerator: EmbeddingGenerator;
   let auroraWriter: MultiClusterAuroraWriter;
@@ -235,13 +244,13 @@ describe("SignalProcessor", () => {
     vi.clearAllMocks();
     mockLogger = createMockLogger();
     store = makeStore();
-    mimeParser = makeMimeParser();
+    contentSanitizer = makeContentSanitizer();
     classifier = makeClassifier();
     embeddingGenerator = makeEmbeddingGenerator();
     auroraWriter = makeAuroraWriter();
     arcMatcher = makeArcMatcher();
     ruleEvaluator = makeRuleEvaluator(mockLogger);
-    processor = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, logger: mockLogger, notifier: makeNotifier(), forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) } });
+    processor = new SignalProcessor({ store, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com", classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, logger: mockLogger, notifier: makeNotifier(), forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) } });
   });
 
   afterEach(() => {
@@ -547,7 +556,7 @@ describe("SignalProcessor", () => {
 
     beforeEach(() => {
       sqsDispatcher = { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) };
-      processor = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, sqsDispatcher, logger: mockLogger, notifier: makeNotifier(), forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) } });
+      processor = new SignalProcessor({ store, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com", classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, sqsDispatcher, logger: mockLogger, notifier: makeNotifier(), forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) } });
     });
 
     it("dispatches side-effect with forward action in matchedRules when forward rule matches", async () => {
@@ -729,7 +738,7 @@ describe("SignalProcessor", () => {
 
     beforeEach(() => {
       sqsDispatcher = { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) };
-      processor = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, sqsDispatcher, logger: mockLogger, notifier: makeNotifier(), forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) } });
+      processor = new SignalProcessor({ store, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com", classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, sqsDispatcher, logger: mockLogger, notifier: makeNotifier(), forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) } });
     });
 
     it("dispatches side-effect after saving a new Signal", async () => {
@@ -773,7 +782,7 @@ describe("SignalProcessor", () => {
     it("dispatches side-effect even without explicit notifier configured", async () => {
       // Processor with default notifier — side-effect dispatch still happens
       const processorWithoutNotifier = new SignalProcessor({
-        store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, logger: mockLogger,
+        store, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com", classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, logger: mockLogger,
         notifier: makeNotifier(), forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
         replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher,
       });
@@ -793,7 +802,7 @@ describe("SignalProcessor", () => {
 
     beforeEach(() => {
       notifier = makeNotifier();
-      processor = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, notifier, logger: mockLogger, forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) } });
+      processor = new SignalProcessor({ store, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com", classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, notifier, logger: mockLogger, forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) } });
     });
 
     it("allows signal on brand new address and auto-creates aliases with sender approved", async () => {
@@ -1395,7 +1404,7 @@ describe("SignalProcessor", () => {
       ])));
 
       const notifier = makeNotifier();
-      const proc = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, notifier, logger: mockLogger, forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) } });
+      const proc = new SignalProcessor({ store, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com", classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, notifier, logger: mockLogger, forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) } });
       await proc.processRecord(makeMessage(), 1);
 
       expect(store.saveArc).not.toHaveBeenCalled();
@@ -1410,7 +1419,7 @@ describe("SignalProcessor", () => {
       ])));
 
       const notifier = makeNotifier();
-      const proc = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, notifier, logger: mockLogger, forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) } });
+      const proc = new SignalProcessor({ store, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com", classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, notifier, logger: mockLogger, forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) } });
       await proc.processRecord(makeMessage(), 1);
 
       expect(store.saveArc).not.toHaveBeenCalled();
@@ -1484,7 +1493,7 @@ describe("SignalProcessor", () => {
 
     beforeEach(() => {
       notifier = makeNotifier();
-      processor = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, notifier, logger: mockLogger, forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) } });
+      processor = new SignalProcessor({ store, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com", classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, notifier, logger: mockLogger, forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) } });
     });
 
     it("blocks status emails silently — no arc created, signal saved as blocked", async () => {
@@ -1541,7 +1550,7 @@ describe("SignalProcessor", () => {
 
     beforeEach(() => {
       sqsDispatcher = { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) };
-      processor = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, sqsDispatcher, logger: mockLogger, notifier: makeNotifier(), forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: makeReplySender() });
+      processor = new SignalProcessor({ store, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com", classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, sqsDispatcher, logger: mockLogger, notifier: makeNotifier(), forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: makeReplySender() });
     });
 
     it("dispatches side-effect with pong action when workflow is 'test'", async () => {
@@ -1596,7 +1605,7 @@ describe("SignalProcessor", () => {
     });
 
     it("still dispatches side-effect when replySender is configured", async () => {
-      const processorWithReplier = new SignalProcessor({ store, mimeParser, classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, logger: mockLogger, notifier: makeNotifier(), forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher });
+      const processorWithReplier = new SignalProcessor({ store, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com", classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, logger: mockLogger, notifier: makeNotifier(), forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher });
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(testClassification);
 
       const result = await processorWithReplier.processRecord(makeMessage(), 1);
@@ -1773,14 +1782,18 @@ describe("SignalProcessor", () => {
 
   describe("forwarded email detection", () => {
     it("attaches original:* label when X-Forwarded-To header is present", async () => {
-      vi.mocked(mimeParser.parse).mockReturnValueOnce(Promise.resolve(ok({
-        from: { address: "sender@example.com", name: "Sender" },
-        to: [{ address: "user@example.com" }],
-        cc: [],
-        subject: "Forwarded email",
-        textBody: "Hello",
-        attachments: [],
-        headers: { "x-forwarded-to": "john@gmail.com" },
+      vi.mocked(contentSanitizer.invoke).mockReturnValueOnce(Promise.resolve(ok({
+        success: true as const,
+        parsed: {
+          from: { address: "sender@example.com", name: "Sender" },
+          to: [{ address: "user@example.com" }],
+          cc: [],
+          subject: "Forwarded email",
+          textBody: "Hello",
+          attachments: [],
+          headers: { "x-forwarded-to": "john@gmail.com" },
+        },
+        urlMapping: {},
       })));
 
       await processor.processRecord(makeMessage(), 1);
@@ -1790,14 +1803,18 @@ describe("SignalProcessor", () => {
     });
 
     it("extracts address from X-Original-To header with angle brackets", async () => {
-      vi.mocked(mimeParser.parse).mockReturnValueOnce(Promise.resolve(ok({
-        from: { address: "sender@example.com", name: "Sender" },
-        to: [{ address: "user@example.com" }],
-        cc: [],
-        subject: "Forwarded email",
-        textBody: "Hello",
-        attachments: [],
-        headers: { "x-original-to": "<alice@example.com>" },
+      vi.mocked(contentSanitizer.invoke).mockReturnValueOnce(Promise.resolve(ok({
+        success: true as const,
+        parsed: {
+          from: { address: "sender@example.com", name: "Sender" },
+          to: [{ address: "user@example.com" }],
+          cc: [],
+          subject: "Forwarded email",
+          textBody: "Hello",
+          attachments: [],
+          headers: { "x-original-to": "<alice@example.com>" },
+        },
+        urlMapping: {},
       })));
 
       await processor.processRecord(makeMessage(), 1);
@@ -1807,14 +1824,18 @@ describe("SignalProcessor", () => {
     });
 
     it("extracts address from Resent-To header with display name", async () => {
-      vi.mocked(mimeParser.parse).mockReturnValueOnce(Promise.resolve(ok({
-        from: { address: "sender@example.com", name: "Sender" },
-        to: [{ address: "user@example.com" }],
-        cc: [],
-        subject: "Forwarded email",
-        textBody: "Hello",
-        attachments: [],
-        headers: { "resent-to": "Bob Smith <bob@example.com>" },
+      vi.mocked(contentSanitizer.invoke).mockReturnValueOnce(Promise.resolve(ok({
+        success: true as const,
+        parsed: {
+          from: { address: "sender@example.com", name: "Sender" },
+          to: [{ address: "user@example.com" }],
+          cc: [],
+          subject: "Forwarded email",
+          textBody: "Hello",
+          attachments: [],
+          headers: { "resent-to": "Bob Smith <bob@example.com>" },
+        },
+        urlMapping: {},
       })));
 
       await processor.processRecord(makeMessage(), 1);
@@ -1824,17 +1845,21 @@ describe("SignalProcessor", () => {
     });
 
     it("X-Forwarded-To takes priority over X-Original-To when both are present", async () => {
-      vi.mocked(mimeParser.parse).mockReturnValueOnce(Promise.resolve(ok({
-        from: { address: "sender@example.com", name: "Sender" },
-        to: [{ address: "user@example.com" }],
-        cc: [],
-        subject: "Forwarded email",
-        textBody: "Hello",
-        attachments: [],
-        headers: {
-          "x-forwarded-to": "primary@gmail.com",
-          "x-original-to": "secondary@gmail.com",
+      vi.mocked(contentSanitizer.invoke).mockReturnValueOnce(Promise.resolve(ok({
+        success: true as const,
+        parsed: {
+          from: { address: "sender@example.com", name: "Sender" },
+          to: [{ address: "user@example.com" }],
+          cc: [],
+          subject: "Forwarded email",
+          textBody: "Hello",
+          attachments: [],
+          headers: {
+            "x-forwarded-to": "primary@gmail.com",
+            "x-original-to": "secondary@gmail.com",
+          },
         },
+        urlMapping: {},
       })));
 
       await processor.processRecord(makeMessage(), 1);
@@ -1845,14 +1870,18 @@ describe("SignalProcessor", () => {
     });
 
     it("does not attach any original:* label when no forwarding headers are present", async () => {
-      vi.mocked(mimeParser.parse).mockReturnValueOnce(Promise.resolve(ok({
-        from: { address: "sender@example.com", name: "Sender" },
-        to: [{ address: "user@example.com" }],
-        cc: [],
-        subject: "Regular email",
-        textBody: "Hello",
-        attachments: [],
-        headers: { "authentication-results": "spf=pass" },
+      vi.mocked(contentSanitizer.invoke).mockReturnValueOnce(Promise.resolve(ok({
+        success: true as const,
+        parsed: {
+          from: { address: "sender@example.com", name: "Sender" },
+          to: [{ address: "user@example.com" }],
+          cc: [],
+          subject: "Regular email",
+          textBody: "Hello",
+          attachments: [],
+          headers: { "authentication-results": "spf=pass" },
+        },
+        urlMapping: {},
       })));
 
       await processor.processRecord(makeMessage(), 1);

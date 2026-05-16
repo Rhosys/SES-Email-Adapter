@@ -3,7 +3,7 @@ import { ok, err } from "../errors.js";
 import { SignalProcessor, SYSTEM_RULES } from "./processor.js";
 import { JsonLogicRuleEvaluator } from "./rule-evaluator.js";
 import type { ProcessorDatabase, ArcMatcher, Notifier, Forwarder, SideEffectPayload } from "./processor.js";
-import type { MimeParser } from "./mime.js";
+import type { ContentSanitizerClient } from "./content-sanitizer-client.js";
 import type { EmbeddingGenerator } from "../embedding/embedding-generator.js";
 import type { MultiClusterAuroraWriter } from "../database/multi-cluster-aurora-writer.js";
 import type { Signal, Arc, Alias, AliasSender } from "../types/index.js";
@@ -27,6 +27,11 @@ vi.mock("../embedding/cluster-registry.js", () => {
     getPrimaryArcMatcherRegistry: () => entry,
   };
 });
+
+vi.mock("./presign.js", () => ({
+  generatePresignedGet: vi.fn().mockResolvedValue("https://presigned-get.example.com/test"),
+  generatePresignedPost: vi.fn().mockResolvedValue({ url: "https://presigned-post.example.com", fields: {} }),
+}));
 
 describe("Side effect caller logging", () => {
   const TEST_ACCOUNT_ID = "acct-side-effect";
@@ -81,19 +86,23 @@ describe("Side effect caller logging", () => {
     };
   }
 
-  function makeMimeParser(): MimeParser {
+  function makeContentSanitizer(): ContentSanitizerClient {
     return {
-      parse: vi.fn().mockResolvedValue(ok({
-        from: { address: "sender@example.com", name: "Sender" },
-        to: [{ address: "user@example.com" }],
-        cc: [],
-        subject: "Test email",
-        textBody: "Hello world",
-        htmlBody: "<p>Hello world</p>",
-        attachments: [],
-        headers: {},
-        sentAt: "2024-01-15T09:00:00Z",
-      })),
+      invoke: vi.fn().mockReturnValue(Promise.resolve(ok({
+        success: true as const,
+        parsed: {
+          from: { address: "sender@example.com", name: "Sender" },
+          to: [{ address: "user@example.com" }],
+          cc: [],
+          subject: "Test email",
+          textBody: "Hello world",
+          htmlBody: "<p>Hello world</p>",
+          attachments: [],
+          headers: { "authentication-results": "spf=pass dkim=pass" },
+          sentAt: "2024-01-15T09:00:00Z",
+        },
+        urlMapping: {},
+      }))),
     };
   }
 
@@ -162,7 +171,7 @@ describe("Side effect caller logging", () => {
 
     const processor = new SignalProcessor({
       store: makeStore(),
-      mimeParser: makeMimeParser(),
+      contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com",
       classifier: { classify: vi.fn().mockResolvedValue({ workflow: "conversation", workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false }, spamScore: 0.05, summary: "A test email.", labels: [], classificationModelId: "us.anthropic.claude-opus-4-5-20251101-v1:0" }) },
       embeddingGenerator: makeEmbeddingGenerator(),
       auroraWriter: makeAuroraWriter(),
@@ -194,7 +203,7 @@ describe("Side effect caller logging", () => {
 
     const processor = new SignalProcessor({
       store: makeStore(),
-      mimeParser: makeMimeParser(),
+      contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com",
       classifier: { classify: vi.fn().mockResolvedValue({ workflow: "conversation", workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false }, spamScore: 0.05, summary: "A test email.", labels: [], classificationModelId: "us.anthropic.claude-opus-4-5-20251101-v1:0" }) },
       embeddingGenerator: makeEmbeddingGenerator(),
       auroraWriter: makeAuroraWriter(),
@@ -224,7 +233,7 @@ describe("Side effect caller logging", () => {
 
     const processor = new SignalProcessor({
       store: makeStore(),
-      mimeParser: makeMimeParser(),
+      contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com",
       classifier: { classify: vi.fn().mockResolvedValue({ workflow: "conversation", workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false }, spamScore: 0.05, summary: "A test email.", labels: [], classificationModelId: "us.anthropic.claude-opus-4-5-20251101-v1:0" }) },
       embeddingGenerator: makeEmbeddingGenerator(),
       auroraWriter: makeAuroraWriter(),

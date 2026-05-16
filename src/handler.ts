@@ -1,6 +1,7 @@
 import type { APIGatewayProxyEventV2, SQSEvent, Context, APIGatewayProxyResultV2, EventBridgeEvent, APIGatewayProxyWebsocketEventV2 } from "aws-lambda";
 import { BedrockRuntimeClient } from "@aws-sdk/client-bedrock-runtime";
-import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client } from "@aws-sdk/client-s3";
+import { LambdaClient } from "@aws-sdk/client-lambda";
 import { SFNClient } from "@aws-sdk/client-sfn";
 import { SQSClient } from "@aws-sdk/client-sqs";
 import { SQS_MESSAGE_TYPES } from "./types/index.js";
@@ -14,7 +15,7 @@ import { SignalClassifier } from "./classifier/classifier.js";
 import { SignalProcessor } from "./processor/processor.js";
 import type { InboundSignalMessage, SideEffectPayload, SesVerdict } from "./processor/processor.js";
 import { SqsDispatcherImpl } from "./processor/sqs-dispatcher.js";
-import { MailparserMimeParser } from "./processor/mime.js";
+import { LambdaContentSanitizer } from "./processor/content-sanitizer-client.js";
 import { JsonLogicRuleEvaluator } from "./processor/rule-evaluator.js";
 import { AccountDatabase } from "./database/account-database.js";
 import { ArcDatabase } from "./database/arc-database.js";
@@ -37,7 +38,6 @@ import type { VerificationMailer } from "./api/app.js";
 import { AuthressAuthService } from "./api/authress-auth.js";
 import { AuthressAccessService } from "./api/authress-access.js";
 import { createApp } from "./api/app.js";
-import type { MimeParser, ParsedMime } from "./processor/mime.js";
 import { BedrockEmbeddingGenerator } from "./embedding/embedding-generator.js";
 import { multiClusterWriter } from "./database/multi-cluster-aurora-writer.js";
 import { S3RetentionServiceImpl } from "./embedding/s3-retention-service.js";
@@ -53,34 +53,19 @@ import { RequestLogger } from "./logger.js";
 
 const bedrock = new BedrockRuntimeClient({});
 const s3 = new S3Client({});
+const lambda = new LambdaClient({});
 const sesv2 = new SESv2Client({});
 const sqs = new SQSClient({});
 const sfn = new SFNClient({});
 
 const S3_BUCKET = process.env["EMAIL_BUCKET"] ?? "";
+const CONTENT_BUCKET = process.env["CONTENT_BUCKET"] ?? "";
+const CONTENT_CDN_BASE_URL = process.env["CONTENT_CDN_BASE_URL"] ?? "";
+const CONTENT_SANITIZER_ARN = process.env["CONTENT_SANITIZER_ARN"] ?? "";
 const SIGNAL_QUEUE_URL = process.env["SIGNAL_QUEUE_URL"] ?? "";
 const WS_ENDPOINT = process.env["WS_API_ENDPOINT"] ?? "";
 const FCM_PROJECT_ID = process.env["FCM_PROJECT_ID"] ?? "";
 const RETRY_TRACK_THRESHOLD = 30;
-
-// ---------------------------------------------------------------------------
-// S3-backed MimeParser
-// ---------------------------------------------------------------------------
-
-class S3MimeParser implements MimeParser {
-  private readonly delegate = new MailparserMimeParser();
-  async parse(s3Key: string): Promise<Result<ParsedMime, DbError>> {
-    try {
-      const res = await s3.send(new GetObjectCommand({ Bucket: S3_BUCKET, Key: s3Key }));
-      const buf = await res.Body?.transformToByteArray();
-      if (!buf) return err(dbError(`Empty S3 object: ${s3Key}`));
-      const parsed = await this.delegate.parse(Buffer.from(buf));
-      return ok(parsed);
-    } catch (e) {
-      return err(dbError(e));
-    }
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Singletons
@@ -100,7 +85,7 @@ const deviceStore = new DynamoDeviceStore();
 
 const processor = new SignalProcessor({
   store: new ProcessorDatabaseAdapter(arcDb, accountDb, processingDb),
-  mimeParser: new S3MimeParser(),
+  contentSanitizer: new LambdaContentSanitizer(lambda, CONTENT_SANITIZER_ARN),
   classifier,
   embeddingGenerator,
   auroraWriter: multiClusterWriter,
@@ -120,6 +105,10 @@ const processor = new SignalProcessor({
   replySender: new SesReplySender(sesv2),
   sqsDispatcher: new SqsDispatcherImpl(SIGNAL_QUEUE_URL, sqs, logger),
   logger,
+  s3Client: s3,
+  emailBucket: S3_BUCKET,
+  contentBucket: CONTENT_BUCKET,
+  contentCdnBaseUrl: CONTENT_CDN_BASE_URL,
 });
 
 const feedbackProcessor = new FeedbackProcessor(processingDb, accountDb, logger);
@@ -323,6 +312,7 @@ export async function handler(
 type WsAuthorizerEvent = {
   type: "REQUEST";
   methodArn: string;
+  requestContext?: { path?: string };
   headers?: Record<string, string>;
   queryStringParameters?: Record<string, string>;
 };
@@ -353,7 +343,9 @@ async function handleWsAuthorizer(event: WsAuthorizerEvent): Promise<WsAuthorize
   if (verifyResult.isErr()) return wsDeny(event.methodArn);
   const { userId } = verifyResult.value;
 
-  const accountId = event.queryStringParameters?.["accountId"] ?? "";
+  // Extract accountId from connection path: /api/accounts/{accountId}
+  const pathMatch = /\/api\/accounts\/([^/?]+)/.exec(event.requestContext?.path ?? event.headers?.["x-forwarded-path"] ?? "");
+  const accountId = pathMatch?.[1] ?? event.queryStringParameters?.["accountId"] ?? "";
   if (!accountId) return wsDeny(event.methodArn);
 
   return {

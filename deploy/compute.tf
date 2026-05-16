@@ -108,6 +108,12 @@ resource "aws_iam_role_policy" "lambda_permissions" {
         Resource = data.aws_kms_alias.default.target_key_arn
       },
       {
+        Sid      = "KMSAuthressSign"
+        Effect   = "Allow"
+        Action   = ["kms:Sign"]
+        Resource = aws_kms_key.authress_service_client.arn
+      },
+      {
         Sid      = "SQSSend"
         Effect   = "Allow"
         Action   = ["sqs:SendMessage"]
@@ -203,7 +209,7 @@ resource "aws_lambda_function" "main" {
 
   logging_config {
     log_group  = aws_cloudwatch_log_group.lambda.name
-    log_format = "Text"
+    log_format = "JSON"
   }
 
   tracing_config {
@@ -298,7 +304,7 @@ resource "aws_lambda_function" "user_code_executor" {
 
   logging_config {
     log_group  = aws_cloudwatch_log_group.user_code_executor.name
-    log_format = "Text"
+    log_format = "JSON"
   }
 
   depends_on = [aws_cloudwatch_log_group.user_code_executor]
@@ -360,7 +366,7 @@ resource "aws_lambda_function" "content_sanitizer" {
 
   logging_config {
     log_group  = aws_cloudwatch_log_group.content_sanitizer.name
-    log_format = "Text"
+    log_format = "JSON"
   }
 
   depends_on = [aws_cloudwatch_log_group.content_sanitizer]
