@@ -1203,6 +1203,31 @@ describe("API", () => {
   });
 
   // -------------------------------------------------------------------------
+  // Account creation — billingPlan
+  // -------------------------------------------------------------------------
+
+  describe("POST /accounts — billingPlan assignment", () => {
+    it.each([
+      { label: "no billingPlan in body — gets Trial", body: { name: "My Account" } },
+      { label: "billingPlan: Paid in body — ignored, gets Trial", body: { name: "My Account", billingPlan: "Paid" } },
+    ])("new account: $label", async ({ body }) => {
+      vi.mocked(access.listAccountsForUser).mockResolvedValueOnce(ok([]));
+      const res = await req(app, "POST", "/accounts", { body });
+      expect(res.status).toBe(201);
+      const created = await res.json() as Account;
+      expect(created.billingPlan).toBe("Trial");
+    });
+
+    it("409 (account exists) does not modify existing account billingPlan", async () => {
+      vi.mocked(access.listAccountsForUser).mockResolvedValueOnce(ok(["existing-account"]));
+      const res = await req(app, "POST", "/accounts");
+      expect(res.status).toBe(409);
+      expect(store.createAccount).not.toHaveBeenCalled();
+      expect(store.updateAccount).not.toHaveBeenCalled();
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // Rule forward target validation
   // -------------------------------------------------------------------------
 
