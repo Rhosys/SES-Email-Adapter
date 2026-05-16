@@ -29,6 +29,15 @@ export class FeedbackProcessor {
     }
   }
 
+  async processNotification(notification: unknown): Promise<Result<void, DbError>> {
+    try {
+      const result = await this.processFeedback(notification as SesFeedback);
+      return result;
+    } catch (e) {
+      return err(dbError(e));
+    }
+  }
+
   private async doProcess(event: SQSEvent): Promise<void> {
     for (const record of event.Records) {
       let feedback: SesFeedback;
