@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { statusToCategory, buildStatsUpdateParams, buildPruneNames } from "./stats-writer.js";
+import { statusToCategory, buildStatsUpdateParams, buildPruneNames, parseStatsRow } from "./stats-writer.js";
 import type { StatsCategory } from "../types/index.js";
 
 describe("statusToCategory", () => {
@@ -110,5 +110,84 @@ describe("buildPruneNames", () => {
   it("total prune targets = (7 days × 4 categories) + (2 months × 4 categories) = 36", () => {
     const result = buildPruneNames(now);
     expect(Object.keys(result.names)).toHaveLength(36);
+  });
+});
+
+
+describe("parseStatsRow", () => {
+  it("null input returns zeroed response", () => {
+    const result = parseStatsRow(null);
+    expect(result.lifetime).toEqual({
+      totalSignals: 0,
+      totalAllowed: 0,
+      totalBlocked: 0,
+      totalQuarantined: 0,
+      totalViolationReport: 0,
+    });
+    expect(result.daily).toEqual([]);
+    expect(result.monthly).toEqual([]);
+    expect(result.yearly).toEqual([]);
+  });
+
+  it("item with mixed attributes is correctly grouped", () => {
+    const item = {
+      pk: "ACCT#acc-123", sk: "STATS",
+      totalSignals: 50,
+      totalAllowed: 30,
+      totalBlocked: 10,
+      totalQuarantined: 8,
+      totalViolationReport: 2,
+      "d_2026-05-16_allowed": 5,
+      "d_2026-05-16_blocked": 2,
+      "d_2026-05-15_allowed": 3,
+      "d_2026-05-15_quarantined": 1,
+      "m_2026-05_allowed": 20,
+      "m_2026-04_blocked": 4,
+      "y_2026_allowed": 30,
+      "y_2025_blocked": 7,
+      updatedAt: "2026-05-16T14:00:00.000Z",
+    };
+    const result = parseStatsRow(item);
+
+    expect(result.lifetime.totalSignals).toBe(50);
+    expect(result.lifetime.totalAllowed).toBe(30);
+
+    // Daily sorted descending
+    expect(result.daily[0]!.date).toBe("2026-05-16");
+    expect(result.daily[0]!.allowed).toBe(5);
+    expect(result.daily[0]!.blocked).toBe(2);
+    expect(result.daily[0]!.quarantined).toBe(0);
+    expect(result.daily[1]!.date).toBe("2026-05-15");
+    expect(result.daily[1]!.allowed).toBe(3);
+    expect(result.daily[1]!.quarantined).toBe(1);
+
+    // Monthly sorted descending
+    expect(result.monthly[0]!.month).toBe("2026-05");
+    expect(result.monthly[0]!.allowed).toBe(20);
+    expect(result.monthly[1]!.month).toBe("2026-04");
+    expect(result.monthly[1]!.blocked).toBe(4);
+
+    // Yearly sorted descending
+    expect(result.yearly[0]!.year).toBe("2026");
+    expect(result.yearly[0]!.allowed).toBe(30);
+    expect(result.yearly[1]!.year).toBe("2025");
+    expect(result.yearly[1]!.blocked).toBe(7);
+  });
+
+  it("missing counters default to 0", () => {
+    const item = {
+      pk: "ACCT#acc-123", sk: "STATS",
+      totalSignals: 5,
+      "d_2026-05-16_allowed": 5,
+      updatedAt: "2026-05-16T14:00:00.000Z",
+    };
+    const result = parseStatsRow(item);
+    expect(result.lifetime.totalAllowed).toBe(0);
+    expect(result.lifetime.totalBlocked).toBe(0);
+    expect(result.lifetime.totalQuarantined).toBe(0);
+    expect(result.lifetime.totalViolationReport).toBe(0);
+    expect(result.daily[0]!.blocked).toBe(0);
+    expect(result.daily[0]!.quarantined).toBe(0);
+    expect(result.daily[0]!.violationReport).toBe(0);
   });
 });
