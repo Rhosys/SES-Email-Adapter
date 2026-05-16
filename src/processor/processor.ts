@@ -73,14 +73,8 @@ export interface Notifier {
   notify(accountId: string, arc: Arc, signal: Signal): Promise<Result<void, DbError>>;
 }
 
-export interface ForwardOptions {
-  senderDomain: string;
-  dkimPass: boolean;
-  dmarcPass: boolean;
-}
-
 export interface Forwarder {
-  forward(s3Key: string, toAddress: string, accountId: string, opts: ForwardOptions): Promise<Result<void, DbError>>;
+  forward(s3Key: string, toAddress: string, accountId: string): Promise<Result<void, DbError>>;
 }
 
 export interface ReplySender {
@@ -538,6 +532,7 @@ export class SignalProcessor {
         accountId,
         status: "block_reject",
         source: "email",
+        sesMessageId,
         s3Key,
         recipientAddress: destination[0] ?? "",
         receivedAt: timestamp,
@@ -550,7 +545,7 @@ export class SignalProcessor {
         attachments: [],
         headers: {},
         workflow: "status",
-        workflowData: { workflow: "status", statusType: "service_notice", provider: "unknown" },
+        workflowData: { workflow: "status", statusType: "other", provider: "" } as const,
         spamScore: 0,
         summary: "",
         classificationModelId: "",
