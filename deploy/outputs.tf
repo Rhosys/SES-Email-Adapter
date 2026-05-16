@@ -17,6 +17,14 @@ output "lambda_function_name" {
   value = aws_lambda_function.main.function_name
 }
 
+output "user_code_executor_function_name" {
+  value = aws_lambda_function.user_code_executor.function_name
+}
+
+output "content_sanitizer_function_name" {
+  value = aws_lambda_function.content_sanitizer.function_name
+}
+
 output "dynamodb_accounts_table" {
   value = aws_dynamodb_table.accounts.name
 }

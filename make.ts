@@ -26,6 +26,12 @@ const deploymentBucket = process.env['DEPLOYMENT_BUCKET']
 const functionName = process.env['LAMBDA_FUNCTION_NAME']
   ?? `${packageMetadata.name}-${ENV}-main`;
 
+// Isolated Lambda function names (match Tofu resource names)
+const userCodeExecutorFunctionName = process.env['USER_CODE_EXECUTOR_FUNCTION_NAME']
+  ?? `${packageMetadata.name}-user-code`;
+const contentSanitizerFunctionName = process.env['CONTENT_SANITIZER_FUNCTION_NAME']
+  ?? `${packageMetadata.name}-content-sanitizer`;
+
 // ---------------------------------------------------------------------------
 // CLI
 // ---------------------------------------------------------------------------
@@ -64,36 +70,100 @@ program
 
     packageMetadata.version = version;
 
-    console.log(`Building ${functionName} v${version}...`);
-    await esbuild.build({
-      entryPoints: ['src/handler.ts'],
+    // -----------------------------------------------------------------------
+    // Build all Lambda bundles
+    // -----------------------------------------------------------------------
+    const esbuildDefaults = {
       bundle: true,
       minify: true,
-      platform: 'node',
+      platform: 'node' as const,
       target: 'node24',
-      // @aws-sdk/* is provided by the Lambda runtime; pg-native is optional and not used
       external: ['@aws-sdk/*', 'pg-native'],
-      outfile: 'dist/handler.js',
+    };
+
+    console.log(`Building ${functionName} v${version}...`);
+    await esbuild.build({
+      ...esbuildDefaults,
+      entryPoints: ['src/handler.ts'],
+      outfile: 'dist/main/handler.js',
     });
 
-    const awsArchitect = new AwsArchitect(packageMetadata, {
+    console.log(`Building ${userCodeExecutorFunctionName} v${version}...`);
+    await esbuild.build({
+      ...esbuildDefaults,
+      entryPoints: ['src/isolated/user-code-executor.ts'],
+      outfile: 'dist/user-code-executor/user-code-executor.js',
+    });
+
+    console.log(`Building ${contentSanitizerFunctionName} v${version}...`);
+    await esbuild.build({
+      ...esbuildDefaults,
+      entryPoints: ['src/isolated/content-sanitizer.ts'],
+      outfile: 'dist/content-sanitizer/content-sanitizer.js',
+    });
+
+    // -----------------------------------------------------------------------
+    // Upload and deploy — Main Lambda
+    // -----------------------------------------------------------------------
+    const mainArchitect = new AwsArchitect(packageMetadata, {
       deploymentBucket,
-      sourceDirectory: path.join(process.cwd(), 'dist'),
+      sourceDirectory: path.join(process.cwd(), 'dist/main'),
       description: packageMetadata.description,
       regions: [AWS_REGION],
     });
 
-    console.log(`Uploading artifact to s3://${deploymentBucket}...`);
-    await awsArchitect.publishLambdaArtifactPromise();
+    console.log(`Uploading main artifact to s3://${deploymentBucket}...`);
+    await mainArchitect.publishLambdaArtifactPromise();
 
     console.log(`Deploying ${functionName} alias 'production'...`);
-    const result = await awsArchitect.publishAndDeployStagePromise({
+    const result = await mainArchitect.publishAndDeployStagePromise({
       stage: 'production',
       functionName,
       deploymentKeyName: `${packageMetadata.name}/${version}/lambda.zip`,
     });
-
     console.log(result);
+
+    // -----------------------------------------------------------------------
+    // Upload and deploy — User Code Executor
+    // -----------------------------------------------------------------------
+    const userCodeArchitect = new AwsArchitect(packageMetadata, {
+      deploymentBucket,
+      sourceDirectory: path.join(process.cwd(), 'dist/user-code-executor'),
+      description: 'User Code Executor — sandboxed JS execution',
+      regions: [AWS_REGION],
+    });
+
+    console.log(`Uploading user-code-executor artifact to s3://${deploymentBucket}...`);
+    await userCodeArchitect.publishLambdaArtifactPromise();
+
+    console.log(`Deploying ${userCodeExecutorFunctionName} alias 'production'...`);
+    const userCodeResult = await userCodeArchitect.publishAndDeployStagePromise({
+      stage: 'production',
+      functionName: userCodeExecutorFunctionName,
+      deploymentKeyName: `${packageMetadata.name}/${version}/user-code-executor.zip`,
+    });
+    console.log(userCodeResult);
+
+    // -----------------------------------------------------------------------
+    // Upload and deploy — Content Sanitizer
+    // -----------------------------------------------------------------------
+    const contentSanitizerArchitect = new AwsArchitect(packageMetadata, {
+      deploymentBucket,
+      sourceDirectory: path.join(process.cwd(), 'dist/content-sanitizer'),
+      description: 'Content Sanitizer — MIME parsing and HTML sanitization',
+      regions: [AWS_REGION],
+    });
+
+    console.log(`Uploading content-sanitizer artifact to s3://${deploymentBucket}...`);
+    await contentSanitizerArchitect.publishLambdaArtifactPromise();
+
+    console.log(`Deploying ${contentSanitizerFunctionName} alias 'production'...`);
+    const contentSanitizerResult = await contentSanitizerArchitect.publishAndDeployStagePromise({
+      stage: 'production',
+      functionName: contentSanitizerFunctionName,
+      deploymentKeyName: `${packageMetadata.name}/${version}/content-sanitizer.zip`,
+    });
+    console.log(contentSanitizerResult);
   });
 
 program.on('*', () => {
