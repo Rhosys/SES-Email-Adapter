@@ -109,6 +109,7 @@ describe("Property 9: S3 retention failure is isolated and non-fatal", () => {
       updateGlobalReputation: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
       getDomainByName: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
       incrementStats: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+      annotateRuleError: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     };
   }
 

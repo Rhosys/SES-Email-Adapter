@@ -66,6 +66,7 @@ export interface ProcessorDatabase {
   updateGlobalReputation(domain: string, update: { wasSpam: boolean; wasBlocked: boolean }): Promise<Result<void, DbError>>;
   getDomainByName(accountId: string, domainName: string): Promise<Result<Domain | null, DbError>>;
   incrementStats(accountId: string, category: import("../types/index.js").StatsCategory): Promise<Result<void, DbError>>;
+  annotateRuleError(accountId: string, ruleId: string, errorMessage: string): Promise<Result<void, DbError>>;
 }
 
 export interface ArcMatcher {

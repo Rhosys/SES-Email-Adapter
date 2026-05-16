@@ -533,10 +533,13 @@ export interface Rule {
   accountId: string;
   name: string;
   condition: string;     // JSONLogic expression as JSON string
+  conditionType?: "json_logic" | "js";  // default: json_logic
+  code?: string;         // JavaScript function body when conditionType is "js"
   actions: RuleAction[];
   status: RuleStatus;
   priorityOrder: number;
   tags?: Record<string, string>;
+  lastError?: string;    // Error comment from last failed execution
   createdAt: string;
   updatedAt: string;
 }

@@ -34,6 +34,7 @@ export class ProcessorDatabaseAdapter implements ProcessorDatabase {
   updateGlobalReputation(domain: string, update: { wasSpam: boolean; wasBlocked: boolean }) { return this.processing.updateGlobalReputation(domain, update); }
   getDomainByName(accountId: string, domainName: string) { return this.account.getDomainByName(accountId, domainName); }
   incrementStats(accountId: string, category: StatsCategory) { return this.account.incrementStats(accountId, category); }
+  annotateRuleError(accountId: string, ruleId: string, errorMessage: string) { return this.account.annotateRuleError(accountId, ruleId, errorMessage); }
 }
 
 // ---------------------------------------------------------------------------

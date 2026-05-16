@@ -606,6 +606,20 @@ export class AccountDatabase {
     }
   }
 
+  async annotateRuleError(accountId: string, ruleId: string, errorMessage: string): Promise<Result<void, DbError>> {
+    try {
+      await dynamo.send(new UpdateCommand({
+        TableName: ACCOUNTS_TABLE,
+        Key: { pk: pk(accountId), sk: `RULE#${ruleId}` },
+        UpdateExpression: "SET lastError = :err, updatedAt = :now",
+        ExpressionAttributeValues: { ":err": errorMessage, ":now": new Date().toISOString() },
+      }));
+      return ok(undefined);
+    } catch (e) {
+      return err(dbError(e));
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // Domains
   // ---------------------------------------------------------------------------

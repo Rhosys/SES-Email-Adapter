@@ -17,6 +17,7 @@ import type { InboundSignalMessage, SideEffectPayload, SesVerdict } from "./proc
 import { SqsDispatcherImpl } from "./processor/sqs-dispatcher.js";
 import { LambdaContentSanitizer } from "./processor/content-sanitizer-client.js";
 import { JsonLogicRuleEvaluator } from "./processor/rule-evaluator.js";
+import { LambdaUserCodeExecutor } from "./processor/user-code-client.js";
 import { AccountDatabase } from "./database/account-database.js";
 import { ArcDatabase } from "./database/arc-database.js";
 import { ProcessingDatabase } from "./database/processing-database.js";
@@ -62,6 +63,7 @@ const S3_BUCKET = process.env["EMAIL_BUCKET"] ?? "";
 const CONTENT_BUCKET = process.env["CONTENT_BUCKET"] ?? "";
 const CONTENT_CDN_BASE_URL = process.env["CONTENT_CDN_BASE_URL"] ?? "";
 const CONTENT_SANITIZER_ARN = process.env["CONTENT_SANITIZER_ARN"] ?? "";
+const USER_CODE_EXECUTOR_ARN = process.env["USER_CODE_EXECUTOR_ARN"] ?? "";
 const SIGNAL_QUEUE_URL = process.env["SIGNAL_QUEUE_URL"] ?? "";
 const WS_ENDPOINT = process.env["WS_API_ENDPOINT"] ?? "";
 const FCM_PROJECT_ID = process.env["FCM_PROJECT_ID"] ?? "";
@@ -83,14 +85,16 @@ const processingDb = new ProcessingDatabase();
 const auditDb = new AuditDatabase();
 const deviceStore = new DynamoDeviceStore();
 
+const processorStore = new ProcessorDatabaseAdapter(arcDb, accountDb, processingDb);
+
 const processor = new SignalProcessor({
-  store: new ProcessorDatabaseAdapter(arcDb, accountDb, processingDb),
+  store: processorStore,
   contentSanitizer: new LambdaContentSanitizer(lambda, CONTENT_SANITIZER_ARN),
   classifier,
   embeddingGenerator,
   auroraWriter: multiClusterWriter,
   arcMatcher: arcDb,
-  ruleEvaluator: new JsonLogicRuleEvaluator(logger),
+  ruleEvaluator: new JsonLogicRuleEvaluator(logger, new LambdaUserCodeExecutor(lambda, USER_CODE_EXECUTOR_ARN), processorStore),
   notifier: new DeviceNotifier({
     deviceStore: new DynamoDeviceStore(),
     deliverers: {

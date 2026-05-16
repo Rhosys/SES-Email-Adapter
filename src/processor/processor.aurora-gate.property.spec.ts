@@ -184,6 +184,7 @@ describe("Feature: signal-processor-retry-resilience, Property 4: Arc saved befo
       updateGlobalReputation: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
       getDomainByName: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
       incrementStats: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+      annotateRuleError: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     };
 
     const embeddingGenerator: EmbeddingGenerator = {
@@ -248,6 +249,7 @@ describe("Feature: signal-processor-retry-resilience, Property 4: Arc saved befo
       updateGlobalReputation: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
       getDomainByName: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
       incrementStats: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+      annotateRuleError: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     };
 
     const embeddingGenerator: EmbeddingGenerator = {
@@ -359,6 +361,7 @@ describe("Feature: signal-processor-retry-resilience, Property 6: Aurora failure
       updateGlobalReputation: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
       getDomainByName: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
       incrementStats: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+      annotateRuleError: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     };
   }
 
@@ -693,6 +696,7 @@ describe("Feature: signal-processor-retry-resilience, Property 5: Side-effects d
       updateGlobalReputation: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
       getDomainByName: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
       incrementStats: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+      annotateRuleError: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     };
   }
 
@@ -989,6 +993,7 @@ describe("Feature: signal-processor-retry-resilience, Property 7: Partial Aurora
       updateGlobalReputation: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
       getDomainByName: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
       incrementStats: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+      annotateRuleError: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     };
 
     const embeddingGenerator: EmbeddingGenerator = {
