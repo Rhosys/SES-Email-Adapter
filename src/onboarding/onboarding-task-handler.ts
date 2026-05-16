@@ -74,7 +74,7 @@ export class OnboardingTaskHandler {
       domainAdded = domains.length > 0;
       senderSetupComplete = domains.some(d => d.senderSetupComplete);
     } else {
-      this.logger.warn("Failed to query domains, treating as incomplete", { code, accountId, error: domainsResult.error });
+      this.logger.warn("Failed to query domains, treating as incomplete", { code: code, accountId, error: domainsResult.error });
     }
 
     // 3. Query signals (failure → treat as incomplete)
@@ -83,7 +83,7 @@ export class OnboardingTaskHandler {
     if (signalsResult.isOk()) {
       emailsReceived = signalsResult.value;
     } else {
-      this.logger.warn("Failed to query signals, treating as incomplete", { code, accountId, error: signalsResult.error });
+      this.logger.warn("Failed to query signals, treating as incomplete", { code: code, accountId, error: signalsResult.error });
     }
 
     // 4. Compute progress
@@ -105,7 +105,7 @@ export class OnboardingTaskHandler {
 
     // 7. Log TRACK with progress and composed email
     this.logger.track("Onboarding progress checked", {
-      code,
+      code: code,
       accountId,
       email,
       progress,

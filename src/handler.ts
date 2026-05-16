@@ -1,8 +1,13 @@
 import type { APIGatewayProxyEventV2, SQSEvent, Context, APIGatewayProxyResultV2, EventBridgeEvent, APIGatewayProxyWebsocketEventV2 } from "aws-lambda";
 import { BedrockRuntimeClient } from "@aws-sdk/client-bedrock-runtime";
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
+import { SFNClient } from "@aws-sdk/client-sfn";
 import { SQSClient } from "@aws-sdk/client-sqs";
 import { SQS_MESSAGE_TYPES } from "./types/index.js";
+import { isStepFunctionTaskEvent } from "./onboarding/types.js";
+import { OnboardingTaskHandler } from "./onboarding/onboarding-task-handler.js";
+import { SfnAccountCreationStarter } from "./onboarding/account-creation-starter.js";
+import type { AccountCreationStarter } from "./onboarding/account-creation-starter.js";
 
 const [MSG_TYPE_REINDEX, MSG_TYPE_SIDE_EFFECT] = SQS_MESSAGE_TYPES;
 import { SignalClassifier } from "./classifier/classifier.js";
@@ -50,6 +55,7 @@ const bedrock = new BedrockRuntimeClient({});
 const s3 = new S3Client({});
 const sesv2 = new SESv2Client({});
 const sqs = new SQSClient({});
+const sfn = new SFNClient({});
 
 const S3_BUCKET = process.env["EMAIL_BUCKET"] ?? "";
 const SIGNAL_QUEUE_URL = process.env["SIGNAL_QUEUE_URL"] ?? "";
@@ -122,6 +128,24 @@ const reindexWorker = new ReindexWorker(logger);
 
 const domainHealthJob = new DomainHealthJob(accountDb, arcDb, logger);
 
+// ---------------------------------------------------------------------------
+// Onboarding (Step Function task handler + account creation starter)
+// ---------------------------------------------------------------------------
+
+const onboardingHandler = new OnboardingTaskHandler(
+  { getAccount: (id) => accountDb.getAccount(id), updateAccount: (id, u) => accountDb.updateAccount(id, u), listDomains: (id) => accountDb.listDomains(id), hasSignals: (id) => arcDb.hasSignals(id) },
+  logger,
+);
+
+const ACCOUNT_CREATION_SFN_ARN = process.env["ACCOUNT_CREATION_SFN_ARN"] ?? "";
+let accountCreationStarter: AccountCreationStarter;
+if (!ACCOUNT_CREATION_SFN_ARN) {
+  logger.warn("ACCOUNT_CREATION_SFN_ARN not set — account creation Step Function will not start", { code: "handler.sfn.arn_missing" });
+  accountCreationStarter = { start: async () => {} };
+} else {
+  accountCreationStarter = new SfnAccountCreationStarter(sfn, ACCOUNT_CREATION_SFN_ARN, logger);
+}
+
 const NOTIFICATION_FROM = process.env["NOTIFICATION_FROM"] ?? "";
 const APP_BASE_URL = process.env["APP_BASE_URL"] ?? "";
 const CONFIG_SET = process.env["SES_CONFIGURATION_SET"] ?? "";
@@ -162,6 +186,7 @@ const app = createApp({
   logger,
   verificationMailer: sesVerificationMailer,
   jobDispatcher: new ReindexDispatcher(),
+  accountCreationStarter,
 });
 
 // ---------------------------------------------------------------------------
@@ -169,10 +194,34 @@ const app = createApp({
 // ---------------------------------------------------------------------------
 
 export async function handler(
-  event: APIGatewayProxyEventV2 | APIGatewayProxyWebsocketEventV2 | SQSEvent | EventBridgeEvent<string, { source?: string }>,
+  event: APIGatewayProxyEventV2 | APIGatewayProxyWebsocketEventV2 | SQSEvent | EventBridgeEvent<string, { source?: string }> | unknown,
   _context: Context,
-): Promise<APIGatewayProxyResultV2 | WsAuthorizerResult | { statusCode: number } | { batchItemFailures: Array<{ itemIdentifier: string }> } | void> {
+): Promise<APIGatewayProxyResultV2 | WsAuthorizerResult | { statusCode: number } | { batchItemFailures: Array<{ itemIdentifier: string }> } | unknown> {
   logger.startInvocation();
+
+  if (isStepFunctionTaskEvent(event)) {
+    const { context } = event;
+    const processorId = `${context.StateMachine.Name}|${context.State.Name}`;
+    const payload = context.Execution.Input;
+
+    if (!payload?.accountId || !payload?.email) {
+      logger.warn("Step Function task missing required Input fields", { code: "handler.sfn.missing_input", processorId });
+      return {};
+    }
+
+    const processors: Record<string, () => Promise<unknown>> = {
+      "email-catcher-AccountCreation|FirstFollowup": () => onboardingHandler.handleFollowup(payload.accountId, payload.email),
+      "email-catcher-AccountCreation|Cleanup": () => onboardingHandler.handleCleanup(payload.accountId, payload.email),
+      "email-catcher-AccountCreation|TrialCheck": () => onboardingHandler.handleTrialCheck(payload.accountId),
+    };
+
+    const processor = processors[processorId];
+    if (!processor) {
+      logger.warn("Unknown Step Function task", { code: "handler.sfn.unknown_task", processorId });
+      return {};
+    }
+    return processor();
+  }
 
   if (isEventBridgeEvent(event)) {
     if ((event as EventBridgeEvent<string, { source?: string }>).detail?.source === "domain-health-job") {

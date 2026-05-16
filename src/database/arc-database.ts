@@ -567,4 +567,24 @@ export class ArcDatabase implements ArcMatcher {
       return err(dbError(e));
     }
   }
+
+  // ---------------------------------------------------------------------------
+  // Onboarding — check if account has received at least one signal
+  // ---------------------------------------------------------------------------
+
+  async hasSignals(accountId: string): Promise<Result<boolean, DbError>> {
+    try {
+      const res = await dynamo.send(new QueryCommand({
+        TableName: SIGNALS_TABLE,
+        IndexName: "gsi1",
+        KeyConditionExpression: "gsi1pk = :pk",
+        ExpressionAttributeValues: { ":pk": `ACCT#${accountId}` },
+        Limit: 1,
+        Select: "COUNT",
+      }));
+      return ok((res.Count ?? 0) > 0);
+    } catch (e) {
+      return err(dbError(e));
+    }
+  }
 }
