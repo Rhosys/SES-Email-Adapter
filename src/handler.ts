@@ -165,33 +165,24 @@ export async function handler(
     const failures: Array<{ itemIdentifier: string }> = [];
 
     for (const record of event.Records) {
-      const arn = record.eventSourceARN ?? "";
-      const messageType = record.messageAttributes?.["messageType"]?.stringValue;
       const receiveCount = Number(record.attributes?.ApproximateReceiveCount ?? "1");
+      const messageType = record.messageAttributes?.["messageType"]?.stringValue;
+
+      let body: unknown;
+      try {
+        body = JSON.parse(record.body);
+      } catch (e) {
+        logger.error("Failed to parse SQS record body as JSON.", { code: "handler.sqs.parse_failed", messageId: record.messageId, error: e });
+        failures.push({ itemIdentifier: record.messageId });
+        continue;
+      }
 
       let failed: boolean;
-      if (arn.includes("-feedback")) {
-        await feedbackProcessor.process({ Records: [record] });
-        failed = false;
-      } else if (arn.includes("-reindex") || messageType === "reindex") {
-        let reindexMessage: ReindexSegmentMessage;
-        try {
-          reindexMessage = JSON.parse(record.body) as ReindexSegmentMessage;
-        } catch (e) {
-          logger.error("Failed to parse reindex segment message.", { code: "handler.sqs.parse_failed", messageId: record.messageId, error: e });
-          failures.push({ itemIdentifier: record.messageId });
-          continue;
-        }
-        const result = await reindexWorker.processSegmentMessage(reindexMessage);
+      if (messageType === "reindex") {
+        const result = await reindexWorker.processSegmentMessage(body as ReindexSegmentMessage);
         failed = result.isErr();
       } else if (messageType === "side_effect") {
-        let payload: SideEffectPayload;
-        try {
-          payload = JSON.parse(record.body) as SideEffectPayload;
-        } catch (e) {
-          logger.error("Malformed side-effect payload — cannot parse JSON. Dropping message.", { code: "handler.sqs.malformed_side_effect", messageId: record.messageId, error: e });
-          continue; // drop unparseable messages
-        }
+        const payload = body as SideEffectPayload;
         if (!payload.signal || !payload.arc) {
           logger.error("Malformed side-effect payload — missing signal or arc. Dropping message.", { code: "handler.sqs.malformed_side_effect", messageId: record.messageId });
           continue;
@@ -199,27 +190,37 @@ export async function handler(
         const result = await processor.processSideEffect(payload);
         failed = result.isErr();
       } else {
-        // Inbound signal — parse SNS envelope
-        let message: InboundSignalMessage;
+        // SNS envelope — unwrap and route by notificationType
+        const sns = body as { Message: string };
+        let inner: unknown;
         try {
-          const sns = JSON.parse(record.body) as { Message: string };
-          const notification = JSON.parse(sns.Message) as { accountId?: string; mail: { messageId: string; timestamp: string; destination: string[] }; receipt: { dkimVerdict: { status: SesVerdict }; dmarcVerdict: { status: SesVerdict }; action: { objectKey: string } } };
-          message = {
-            accountId: notification.accountId ?? notification.mail.destination[0]!,
-            s3Key: notification.receipt.action.objectKey,
-            sesMessageId: notification.mail.messageId,
-            timestamp: notification.mail.timestamp,
-            destination: notification.mail.destination,
-            dkimVerdict: notification.receipt.dkimVerdict.status,
-            dmarcVerdict: notification.receipt.dmarcVerdict.status,
-          };
+          inner = JSON.parse(sns.Message);
         } catch (e) {
-          logger.error("Failed to parse inbound signal from SQS record.", { code: "handler.sqs.parse_failed", messageId: record.messageId, error: e });
+          logger.error("Failed to parse inner SNS message.", { code: "handler.sqs.parse_failed", messageId: record.messageId, error: e });
           failures.push({ itemIdentifier: record.messageId });
           continue;
         }
-        const result = await processor.processRecord(message, receiveCount);
-        failed = result.isErr();
+
+        const notification = inner as { notificationType?: string; mail?: { messageId: string; timestamp: string; destination: string[] }; receipt?: { dkimVerdict: { status: SesVerdict }; dmarcVerdict: { status: SesVerdict }; action: { objectKey: string } }; accountId?: string };
+
+        if (notification.notificationType === "Bounce" || notification.notificationType === "Complaint") {
+          await feedbackProcessor.processNotification(notification);
+          failed = false;
+        } else {
+          const mail = notification.mail!;
+          const receipt = notification.receipt!;
+          const message: InboundSignalMessage = {
+            accountId: notification.accountId ?? mail.destination[0]!,
+            s3Key: receipt.action.objectKey,
+            sesMessageId: mail.messageId,
+            timestamp: mail.timestamp,
+            destination: mail.destination,
+            dkimVerdict: receipt.dkimVerdict.status,
+            dmarcVerdict: receipt.dmarcVerdict.status,
+          };
+          const result = await processor.processRecord(message, receiveCount);
+          failed = result.isErr();
+        }
       }
 
       if (failed) {
