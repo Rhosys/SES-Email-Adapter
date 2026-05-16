@@ -184,6 +184,7 @@ interface AppDeps {
   logger: Logger;
   verificationMailer?: VerificationMailer;
   jobDispatcher?: JobDispatcher;
+  accountCreationStarter?: { start(accountId: string, email: string): Promise<void> };
 }
 
 type AppEnv = { Variables: { auth: AuthContext; authorizationVerified?: boolean } };
@@ -210,7 +211,7 @@ function generateAccountId(): string {
   return `acc-${rawId}${checkBits}`;
 }
 
-export function createApp({ store, auth, access, logger, verificationMailer, jobDispatcher }: AppDeps) {
+export function createApp({ store, auth, access, logger, verificationMailer, jobDispatcher, accountCreationStarter }: AppDeps) {
   const app = new OpenAPIHono<AppEnv>().basePath('/api');
 
   app.doc("/openapi.json", {
@@ -339,6 +340,11 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
     const accessResult = await access.addUser(account.id, userId, "owner");
     if (accessResult.isErr()) {
       logger.error("Failed to create Authress access record for new account. The account exists in DynamoDB but the user won't have permissions until this is resolved.", { code: "api.account_create.authress_failed", userId, accountId: account.id, error: accessResult.error });
+    }
+
+    // Start onboarding Step Function (fire-and-forget — errors are swallowed internally)
+    if (accountCreationStarter) {
+      await accountCreationStarter.start(account.id, userId);
     }
 
     return c.json(account, 201);
