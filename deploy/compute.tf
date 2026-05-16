@@ -205,6 +205,10 @@ resource "aws_lambda_function" "main" {
       MAIL_DOMAIN              = "platform.${data.aws_route53_zone.main.name}"
       ACCOUNT_CREATION_SFN_ARN = "arn:aws:states:${data.aws_region.current.name}:${var.aws_account_id}:stateMachine:email-catcher-AccountCreation"
       AUTHRESS_KMS_KEY_ARN     = aws_kms_key.authress_service_client.arn
+      USER_CODE_EXECUTOR_ARN   = aws_lambda_function.user_code_executor.arn
+      CONTENT_SANITIZER_ARN    = aws_lambda_function.content_sanitizer.arn
+      CONTENT_BUCKET           = aws_s3_bucket.extracted_content.bucket
+      CONTENT_CDN_BASE_URL     = "https://${aws_cloudfront_distribution.api.domain_name}/content"
     }
   }
 
