@@ -10,6 +10,7 @@ type AppEnv = { Variables: { auth: AuthContext; authorizationVerified?: boolean 
 function makeAccess(): AccessService {
   return {
     listUsers: vi.fn().mockReturnValue(Promise.resolve(ok([]))),
+    listAccountsForUser: vi.fn().mockReturnValue(Promise.resolve(ok([]))),
     addUser: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     updateUserRole: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     removeUser: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),

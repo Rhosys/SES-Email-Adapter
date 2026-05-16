@@ -1,6 +1,6 @@
 import type { ProcessorDatabase } from "../processor/processor.js";
 import type { ApiDatabase, ListArcsParams, UpdateArcRequest, CreateViewRequest, UpdateViewRequest, CreateLabelRequest, UpdateLabelRequest, CreateRuleRequest, UpdateRuleRequest } from "../api/app.js";
-import type { Arc, Signal, View, Label, Rule, Domain, Account, Page, PageParams, Alias, AliasSender, SenderMode, VerifiedForwardingAddress, EmailTemplate } from "../types/index.js";
+import type { Arc, Signal, View, Label, Rule, Domain, Account, Page, PageParams, Alias, AliasSender, SenderPolicy, VerifiedForwardingAddress, EmailTemplate } from "../types/index.js";
 import type { AccountDatabase } from "./account-database.js";
 import type { ArcDatabase } from "./arc-database.js";
 import type { ProcessingDatabase } from "./processing-database.js";
@@ -28,7 +28,7 @@ export class ProcessorDatabaseAdapter implements ProcessorDatabase {
   getProcessorAccountContext(accountId: string, recipientAddress: string) { return this.account.getProcessorAccountContext(accountId, recipientAddress); }
   saveAlias(alias: Alias) { return this.account.saveAlias(alias); }
   getSender(accountId: string, address: string, domain: string) { return this.account.getSender(accountId, address, domain); }
-  saveSender(accountId: string, address: string, domain: string, mode: SenderMode) { return this.account.saveSender(accountId, address, domain, mode); }
+  saveSender(accountId: string, address: string, domain: string, policy: SenderPolicy) { return this.account.saveSender(accountId, address, domain, policy); }
   getTemplate(accountId: string, id: string) { return this.account.getTemplate(accountId, id); }
   updateGlobalReputation(domain: string, update: { wasSpam: boolean; wasBlocked: boolean }) { return this.processing.updateGlobalReputation(domain, update); }
   getDomainByName(accountId: string, domainName: string) { return this.account.getDomainByName(accountId, domainName); }
@@ -54,11 +54,11 @@ export class ApiDatabaseAdapter implements ApiDatabase {
 
   // Signals
   listSignals(accountId: string, arcId: string, params: PageParams) { return this.arc.listSignals(accountId, arcId, params); }
-  listPreArcSignals(accountId: string, status: "blocked" | "quarantined", params: PageParams) { return this.arc.listPreArcSignals(accountId, status, params); }
+  listPreArcSignals(accountId: string, status: "quarantined", params: PageParams) { return this.arc.listPreArcSignals(accountId, status, params); }
   getSignal(accountId: string, id: string) { return this.arc.getSignal(accountId, id); }
   updateSignal(accountId: string, id: string, update: Partial<Pick<Signal, "subject" | "textBody" | "from" | "to">>) { return this.arc.updateSignal(accountId, id, update); }
   deleteSignal(accountId: string, id: string) { return this.arc.deleteSignal(accountId, id); }
-  blockSignal(accountId: string, signalId: string) { return this.arc.blockSignal(accountId, signalId); }
+  updateSignalStatus(accountId: string, signalId: string, status: "block_hidden" | "block_reject" | "violate_report") { return this.arc.updateSignalStatus(accountId, signalId, status); }
   unblockSignal(accountId: string, signalId: string, arcId: string) { return this.arc.unblockSignal(accountId, signalId, arcId); }
 
   // Arcs (additional)
@@ -70,7 +70,8 @@ export class ApiDatabaseAdapter implements ApiDatabase {
 
   // Account
   getAccount(accountId: string) { return this.account.getAccount(accountId); }
-  updateAccount(accountId: string, update: Partial<Pick<Account, "name" | "deletionRetentionDays" | "notifications" | "filtering">>) { return this.account.updateAccount(accountId, update); }
+  createAccount(account: Account) { return this.account.createAccount(account); }
+  updateAccount(accountId: string, update: Partial<Pick<Account, "name" | "deletionRetentionDays" | "notifications" | "filtering" | "onboarding">>) { return this.account.updateAccount(accountId, update); }
 
   // Views
   listViews(accountId: string) { return this.account.listViews(accountId); }
@@ -109,7 +110,7 @@ export class ApiDatabaseAdapter implements ApiDatabase {
   renameAlias(accountId: string, oldAddress: string, newAddress: string) { return this.account.renameAlias(accountId, oldAddress, newAddress); }
 
   // Senders
-  saveSender(accountId: string, address: string, domain: string, mode: SenderMode) { return this.account.saveSender(accountId, address, domain, mode); }
+  saveSender(accountId: string, address: string, domain: string, policy: SenderPolicy) { return this.account.saveSender(accountId, address, domain, policy); }
   removeSender(accountId: string, address: string, domain: string) { return this.account.removeSender(accountId, address, domain); }
   getSender(accountId: string, address: string, domain: string) { return this.account.getSender(accountId, address, domain); }
   listSenders(accountId: string, address: string) { return this.account.listSenders(accountId, address); }

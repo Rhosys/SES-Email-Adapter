@@ -3,7 +3,7 @@ import { WORKFLOWS } from "../types/index.js";
 
 // ---- Shared primitives ----
 
-const SenderFilterMode = z.enum(["allow_all", "quarantine_visible", "quarantine_hidden", "block"]);
+const UnknownSenderPolicy = z.enum(["allow_all", "quarantine_visible", "quarantine_hidden", "block_hidden", "block_reject", "violate_report"]);
 const ArcStatus = z.enum(["active", "archived", "deleted"]);
 const ArcUrgency = z.enum(["critical", "high", "normal", "low", "silent"]);
 const Workflow = z.enum(WORKFLOWS);
@@ -13,7 +13,7 @@ const NewAddressHandling = z.enum(["auto_allow", "block_until_approved"]);
 const AccountRole = z.enum(["owner", "admin", "member", "viewer"]);
 const RuleActionType = z.enum([
   "assign_label", "assign_workflow", "archive", "delete", "forward",
-  "block", "quarantine", "quarantine_hidden", "set_urgency", "suppress_notification", "pong", "approve_sender",
+  "block_hidden", "block_reject", "quarantine", "quarantine_hidden", "set_urgency", "suppress_notification", "pong", "approve_sender",
   "auto_reply", "auto_draft",
 ]);
 const RuleStatus = z.enum(["enabled", "disabled"]);
@@ -38,17 +38,10 @@ export const UpdateArcRequest = z.object({
 });
 export type UpdateArcRequest = z.infer<typeof UpdateArcRequest> & { lastSignalAt?: string };
 
-export const CreateArcFromSignalRequest = z.object({
-  signalId: z.string(),
-  approveSender: z.boolean().optional(),
-  updateFilterMode: SenderFilterMode.optional(),
-});
-export type CreateArcFromSignalRequest = z.infer<typeof CreateArcFromSignalRequest>;
-
 // ---- Signal ----
 
 export const UpdateSignalStatusRequest = z.object({
-  status: z.enum(["active", "blocked"]),
+  status: z.enum(["active", "block_hidden", "block_reject", "violate_report"]),
 });
 export type UpdateSignalStatusRequest = z.infer<typeof UpdateSignalStatusRequest>;
 
@@ -134,14 +127,14 @@ export type CreateDomainRequest = z.infer<typeof CreateDomainRequest>;
 
 export const CreateAliasRequest = z.object({
   address: z.string(),
-  filterMode: SenderFilterMode.optional(),
+  unknownSenderPolicy: UnknownSenderPolicy.optional(),
   createdForOrigin: z.string().optional(),
 });
 export type CreateAliasRequest = z.infer<typeof CreateAliasRequest>;
 
 export const UpdateAliasRequest = z.object({
   newAddress: z.string().email().optional(),
-  filterMode: SenderFilterMode.optional(),
+  unknownSenderPolicy: UnknownSenderPolicy.optional(),
   spamScoreThreshold: z.number().min(0).max(1).optional(),
   createdForOrigin: z.string().optional(),
 });
@@ -151,7 +144,7 @@ export type UpdateAliasRequest = z.infer<typeof UpdateAliasRequest>;
 
 export const CreateSenderRequest = z.object({
   domain: z.string(),
-  mode: z.enum(["allow", "block"]),
+  policy: z.enum(["allow", "block_hidden", "block_reject", "violate_report"]),
 });
 export type CreateSenderRequest = z.infer<typeof CreateSenderRequest>;
 
@@ -189,9 +182,14 @@ const NotificationSettingsSchema = z.object({
 });
 
 const AccountFilteringConfigSchema = z.object({
-  defaultFilterMode: SenderFilterMode.optional(),
+  defaultUnknownSenderPolicy: UnknownSenderPolicy.optional(),
   newAddressHandling: NewAddressHandling.optional(),
   spamScoreThreshold: z.number().min(0).max(1).optional(),
+}).passthrough();
+
+const AccountOnboardingSchema = z.object({
+  completed: z.boolean(),
+  completedAt: z.string().optional(),
 }).passthrough();
 
 export const UpdateAccountRequest = z.object({
@@ -199,6 +197,7 @@ export const UpdateAccountRequest = z.object({
   deletionRetentionDays: z.number().int().positive().optional(),
   notifications: NotificationSettingsSchema.optional(),
   filtering: AccountFilteringConfigSchema.optional(),
+  onboarding: AccountOnboardingSchema.optional(),
 });
 export type UpdateAccountRequest = z.infer<typeof UpdateAccountRequest>;
 

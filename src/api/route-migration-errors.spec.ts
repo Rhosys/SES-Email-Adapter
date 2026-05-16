@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createApp } from "./app.js";
-import type { ApiDatabase, AuthService, AuthContext, AccessService, VerificationMailer } from "./app.js";
+import type { ApiDatabase, AuthService, AccessService, VerificationMailer } from "./app.js";
 import { ok, err } from "neverthrow";
 import type { DbError, NotFoundError } from "../errors.js";
 import { dbError, notFoundError } from "../errors.js";
@@ -15,7 +15,7 @@ const TEST_ACCOUNT_ID = "acct-err-001";
 const TEST_USER_ID = "user-err-001";
 const A = `/accounts/${TEST_ACCOUNT_ID}`;
 
-const validAuth: AuthContext = { accountId: TEST_ACCOUNT_ID, userId: TEST_USER_ID };
+const validAuth = { userId: TEST_USER_ID };
 
 function makeAuth(): AuthService {
   return { verify: vi.fn().mockReturnValue(Promise.resolve(ok(validAuth))) };
@@ -24,6 +24,7 @@ function makeAuth(): AuthService {
 function makeAccess(): AccessService {
   return {
     listUsers: vi.fn().mockReturnValue(Promise.resolve(ok([]))),
+    listAccountsForUser: vi.fn().mockReturnValue(Promise.resolve(ok([]))),
     addUser: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     updateUserRole: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     removeUser: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
@@ -62,7 +63,7 @@ function makeAlias(overrides: Partial<Alias> = {}): Alias {
     id: "alias-001",
     accountId: TEST_ACCOUNT_ID,
     address: "user@example.com",
-    filterMode: "quarantine_visible",
+    unknownSenderPolicy: "quarantine_visible",
     createdAt: "2024-01-01T00:00:00Z",
     updatedAt: "2024-01-01T00:00:00Z",
     ...overrides,

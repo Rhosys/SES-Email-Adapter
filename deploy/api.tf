@@ -9,10 +9,11 @@ resource "aws_apigatewayv2_api" "main" {
   ip_address_type              = "dualstack"
 
   cors_configuration {
-    allow_origins = ["*"]
-    allow_methods = ["HEAD", "GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
-    allow_headers = ["Authorization", "Content-Type"]
-    max_age       = 300
+    allow_origins  = ["*"]
+    allow_methods  = ["*"]
+    allow_headers  = ["Content-Type", "Content-Length", "Cache-Control", "X-Amz-Date", "Authorization", "X-Api-Key", "X-Powered-By", "X-Login-Hash", "If-Unmodified-Since", "Origin", "Referer", "Accept", "Accept-Language", "Accept-Encoding", "User-Agent", "Pragma", "Sec-Fetch-Dest", "Sec-Fetch-Mode", "Sec-Fetch-Site", "sec-gpc"]
+    expose_headers = ["x-request-id", "content-type", "content-encoding"]
+    max_age        = 3600
   }
 }
 

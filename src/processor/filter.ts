@@ -1,5 +1,5 @@
 import { getDomain } from "tldts";
-import type { Workflow, WorkflowData, SenderFilterMode, SystemLabel, AliasSender } from "../types/index.js";
+import type { Workflow, WorkflowData, UnknownSenderPolicy, SystemLabel, AliasSender } from "../types/index.js";
 
 export const DEFAULT_SPAM_SCORE_THRESHOLD = 0.9;
 
@@ -18,7 +18,7 @@ export interface SystemLabelContext {
   spamScoreThreshold: number;
   senderETLD1: string;
   senderEntry: AliasSender | null;  // pre-fetched allow/block entry for this (alias, sender domain) pair
-  filterMode: SenderFilterMode;
+  unknownSenderPolicy: UnknownSenderPolicy;
   hasSentMessages: boolean;
 }
 
@@ -34,8 +34,8 @@ export function assignSystemLabels(ctx: SystemLabelContext): SystemLabel[] {
   else if (ctx.spamScore >= 0.4) labels.push("system:spam:medium");
 
   const senderTrusted =
-    ctx.senderEntry?.mode === "allow" ||
-    ctx.filterMode === "allow_all";
+    ctx.senderEntry?.policy === "allow" ||
+    ctx.unknownSenderPolicy === "allow_all";
   if (!senderTrusted) labels.push("system:sender:untrusted");
 
   if (ctx.hasSentMessages) labels.push("system:replied");

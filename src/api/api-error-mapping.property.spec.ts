@@ -1,14 +1,14 @@
 import { describe, it, expect, vi } from "vitest";
 import { ok, err } from "neverthrow";
 import { createApp } from "./app.js";
-import type { ApiDatabase, AuthService, AuthContext, AccessService } from "./app.js";
+import type { ApiDatabase, AuthService, AccessService } from "./app.js";
 import type { Arc } from "../types/index.js";
 import type { DbError } from "../errors.js";
 import { createMockLogger } from "../testing/mock-logger.js";
 
 const TEST_ACCOUNT_ID = "acct-prop-001";
 const TEST_USER_ID = "user-prop-001";
-const validAuth: AuthContext = { accountId: TEST_ACCOUNT_ID, userId: TEST_USER_ID };
+const validAuth = { userId: TEST_USER_ID };
 
 function makeAuth(): AuthService {
   return { verify: vi.fn().mockReturnValue(Promise.resolve(ok(validAuth))) };
@@ -17,6 +17,7 @@ function makeAuth(): AuthService {
 function makeAccess(): AccessService {
   return {
     listUsers: vi.fn().mockReturnValue(Promise.resolve(ok([]))),
+    listAccountsForUser: vi.fn().mockReturnValue(Promise.resolve(ok([]))),
     addUser: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     updateUserRole: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     removeUser: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),

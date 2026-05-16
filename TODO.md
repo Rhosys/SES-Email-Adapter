@@ -51,8 +51,6 @@ Compared the frontend's expected API surface against the actual backend implemen
 - [ ] **`PUT /accounts/:id/signals/:id`** — full replace of a draft signal (subject, textBody, from, to). Frontend has the whole draft and sends it back.
 - [ ] **`POST /accounts/:id/users` accept `{ email, role }`** — resolve email→userId via Authress lookup server-side. Frontend doesn't know other users' Authress IDs.
 - [ ] **`POST /accounts/:id/rules` accept `status` field** — allow rules to be created with `status: "disabled"`. No reason to block it, and keeps create/update schemas consistent.
-- [ ] **`POST /accounts`** — self-service account creation for onboarding.
-- [ ] **`GET /accounts`** — list all accounts the authenticated user belongs to (account switcher). Requires Authress token introspection or a user→accounts mapping table.
 - [ ] **Billing endpoints** — `GET /accounts/:id/billing` → `BillingInfo`, `POST /accounts/:id/billing/checkout-session` → Stripe Checkout URL, `POST /accounts/:id/billing/portal-session` → Stripe Portal URL. Requires Stripe integration.
 - [ ] **View layout persistence** — `GET /accounts/:id/views/:viewId/layout` (404 if not customised), `PUT` (upsert), `DELETE` (reset to default). Store `nodes: LayoutNode[]` as opaque JSON blob.
 - [ ] **System view seeding** — seed `system:inbox`, `system:all`, `system:quarantine` as undeletable view records. `DELETE` on system view → 403. `DELETE` on system view layout → 204 (allowed).

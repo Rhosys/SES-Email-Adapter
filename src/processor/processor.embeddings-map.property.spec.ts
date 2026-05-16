@@ -56,7 +56,7 @@ const DEFAULT_ALIAS: Alias = {
   id: "cfg-default",
   accountId: TEST_ACCOUNT_ID,
   address: "user@example.com",
-  filterMode: "allow_all",
+  unknownSenderPolicy: "allow_all",
   createdAt: "2024-01-01T00:00:00Z",
   updatedAt: "2024-01-01T00:00:00Z",
 };
@@ -65,7 +65,7 @@ const DEFAULT_SENDER_ENTRY: AliasSender = {
   accountId: TEST_ACCOUNT_ID,
   aliasAddress: "user@example.com",
   domain: "example.com",
-  mode: "allow",
+  policy: "allow",
   addedAt: "2024-01-01T00:00:00Z",
 };
 
@@ -233,7 +233,7 @@ describe("Feature: split-embedding-pipeline, Property 4: Embeddings map composit
           arcMatcher: makeArcMatcher(),
           ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
           logger: mockLogger,
-          notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), notifyBlocked: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+          notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
           forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
           retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
           replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) },

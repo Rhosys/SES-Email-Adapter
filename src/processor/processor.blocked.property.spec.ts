@@ -7,7 +7,7 @@ import type { MimeParser } from "./mime.js";
 import type { SignalClassifier, ClassificationOutput } from "../classifier/classifier.js";
 import type { EmbeddingGenerator, EmbeddingResult } from "../embedding/embedding-generator.js";
 import type { MultiClusterAuroraWriter } from "../database/multi-cluster-aurora-writer.js";
-import type { Alias, AliasSender, Rule, SenderFilterMode, Workflow } from "../types/index.js";
+import type { Alias, AliasSender, Rule, UnknownSenderPolicy, Workflow } from "../types/index.js";
 import { createMockLogger } from "../testing/mock-logger.js";
 
 vi.mock("../embedding/cluster-registry.js", () => {
@@ -119,7 +119,7 @@ describe("Blocked/quarantined signals never trigger saveArc", () => {
     label: string;
     classifier: Pick<SignalClassifier, "classify">;
     mimeParser: MimeParser;
-    filterMode: SenderFilterMode;
+    unknownSenderPolicy: UnknownSenderPolicy;
     senderEntry: AliasSender | null;
     rules: Rule[];
   }
@@ -129,31 +129,31 @@ describe("Blocked/quarantined signals never trigger saveArc", () => {
       label: "high spam score → SR-03 quarantines",
       classifier: makeClassifier({ spamScore: 0.95, workflow: "conversation" }),
       mimeParser: makeMimeParser("spammer.com"),
-      filterMode: "quarantine_visible",
-      senderEntry: { accountId: TEST_ACCOUNT_ID, aliasAddress: "user@example.com", domain: "spammer.com", mode: "allow", addedAt: "2024-01-01T00:00:00Z" },
+      unknownSenderPolicy: "quarantine_visible",
+      senderEntry: { accountId: TEST_ACCOUNT_ID, aliasAddress: "user@example.com", domain: "spammer.com", policy: "allow", addedAt: "2024-01-01T00:00:00Z" },
       rules: SYSTEM_RULES,
     },
     {
       label: "onboarding workflow → SR-01 blocks",
       classifier: makeClassifier({ workflow: "onboarding", workflowData: { workflow: "onboarding", service: "acme.com", onboardingType: "welcome" } }),
       mimeParser: makeMimeParser("acme.com"),
-      filterMode: "quarantine_visible",
-      senderEntry: { accountId: TEST_ACCOUNT_ID, aliasAddress: "user@example.com", domain: "acme.com", mode: "allow", addedAt: "2024-01-01T00:00:00Z" },
+      unknownSenderPolicy: "quarantine_visible",
+      senderEntry: { accountId: TEST_ACCOUNT_ID, aliasAddress: "user@example.com", domain: "acme.com", policy: "allow", addedAt: "2024-01-01T00:00:00Z" },
       rules: SYSTEM_RULES,
     },
     {
       label: "status workflow → SR-05 blocks",
       classifier: makeClassifier({ workflow: "status", workflowData: { workflow: "status", statusType: "terms_update", provider: "gov.uk" } }),
       mimeParser: makeMimeParser("gov.uk"),
-      filterMode: "quarantine_visible",
-      senderEntry: { accountId: TEST_ACCOUNT_ID, aliasAddress: "user@example.com", domain: "gov.uk", mode: "allow", addedAt: "2024-01-01T00:00:00Z" },
+      unknownSenderPolicy: "quarantine_visible",
+      senderEntry: { accountId: TEST_ACCOUNT_ID, aliasAddress: "user@example.com", domain: "gov.uk", policy: "allow", addedAt: "2024-01-01T00:00:00Z" },
       rules: SYSTEM_RULES,
     },
     {
-      label: "untrusted sender + block filter mode",
+      label: "untrusted sender + block_hidden filter mode",
       classifier: makeClassifier({ workflow: "conversation" }),
       mimeParser: makeMimeParser("unknown-sender.com"),
-      filterMode: "block",
+      unknownSenderPolicy: "block_hidden",
       senderEntry: null,
       rules: SYSTEM_RULES,
     },
@@ -161,7 +161,7 @@ describe("Blocked/quarantined signals never trigger saveArc", () => {
       label: "untrusted sender + quarantine filter mode",
       classifier: makeClassifier({ workflow: "conversation" }),
       mimeParser: makeMimeParser("unknown-sender.com"),
-      filterMode: "quarantine_visible",
+      unknownSenderPolicy: "quarantine_visible",
       senderEntry: null,
       rules: SYSTEM_RULES,
     },
@@ -169,11 +169,11 @@ describe("Blocked/quarantined signals never trigger saveArc", () => {
       label: "custom block rule",
       classifier: makeClassifier({ workflow: "conversation" }),
       mimeParser: makeMimeParser("example.com"),
-      filterMode: "allow_all",
-      senderEntry: { accountId: TEST_ACCOUNT_ID, aliasAddress: "user@example.com", domain: "example.com", mode: "allow", addedAt: "2024-01-01T00:00:00Z" },
+      unknownSenderPolicy: "allow_all",
+      senderEntry: { accountId: TEST_ACCOUNT_ID, aliasAddress: "user@example.com", domain: "example.com", policy: "allow", addedAt: "2024-01-01T00:00:00Z" },
       rules: [{
         id: "custom-block", accountId: TEST_ACCOUNT_ID, name: "Block all",
-        condition: "true", actions: [{ type: "block" }], status: "enabled",
+        condition: "true", actions: [{ type: "block_hidden" }], status: "enabled",
         priorityOrder: 0, createdAt: "2024-01-01T00:00:00Z", updatedAt: "2024-01-01T00:00:00Z",
       }],
     },
@@ -181,8 +181,8 @@ describe("Blocked/quarantined signals never trigger saveArc", () => {
       label: "custom quarantine rule",
       classifier: makeClassifier({ workflow: "conversation" }),
       mimeParser: makeMimeParser("example.com"),
-      filterMode: "allow_all",
-      senderEntry: { accountId: TEST_ACCOUNT_ID, aliasAddress: "user@example.com", domain: "example.com", mode: "allow", addedAt: "2024-01-01T00:00:00Z" },
+      unknownSenderPolicy: "allow_all",
+      senderEntry: { accountId: TEST_ACCOUNT_ID, aliasAddress: "user@example.com", domain: "example.com", policy: "allow", addedAt: "2024-01-01T00:00:00Z" },
       rules: [{
         id: "custom-quarantine", accountId: TEST_ACCOUNT_ID, name: "Quarantine all",
         condition: "true", actions: [{ type: "quarantine" }], status: "enabled",
@@ -199,7 +199,7 @@ describe("Blocked/quarantined signals never trigger saveArc", () => {
       id: "cfg-prop2",
       accountId: TEST_ACCOUNT_ID,
       address: "user@example.com",
-      filterMode: strategy.filterMode,
+      unknownSenderPolicy: strategy.unknownSenderPolicy,
       createdAt: "2024-01-01T00:00:00Z",
       updatedAt: "2024-01-01T00:00:00Z",
     };
@@ -224,7 +224,7 @@ describe("Blocked/quarantined signals never trigger saveArc", () => {
       arcMatcher: makeArcMatcher(),
       ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
       logger: mockLogger,
-      notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), notifyBlocked: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "emails/test.eml" }) },
       replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) },
