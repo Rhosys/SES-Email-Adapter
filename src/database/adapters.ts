@@ -129,6 +129,9 @@ export class ApiDatabaseAdapter implements ApiDatabase {
   listAuditEvents(accountId: string, params: PageParams) { return this.audit.listAuditEvents(accountId, params); }
   listResourceHistory(accountId: string, resourceType: import("./audit-database.js").AuditResourceType, resourceId: string) { return this.audit.listResourceHistory(accountId, resourceType, resourceId); }
 
+  // Stats
+  getStats(accountId: string) { return this.account.getStats(accountId); }
+
   // Verified forwarding addresses
   listVerifiedForwardingAddresses(accountId: string) { return this.account.listVerifiedForwardingAddresses(accountId); }
   getVerifiedForwardingAddress(accountId: string, address: string) { return this.account.getVerifiedForwardingAddress(accountId, address); }

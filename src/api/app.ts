@@ -10,6 +10,7 @@ import type { Arc, Signal, View, Label, Rule, Domain, DnsRecord, Account, Page, 
 import type { Logger } from "../logger.js";
 import { deriveGroupingKey } from "../processor/processor.js";
 import { zParse } from "./validate.js";
+import { parseStatsRow } from "../database/stats-writer.js";
 
 // ---------------------------------------------------------------------------
 // Job Dispatcher interface (used by reindex route)
@@ -163,6 +164,9 @@ export interface ApiDatabase {
 
   // Audit
   listAuditEvents(accountId: string, params: PageParams): PromiseLike<Result<Page<AuditEvent>, DbError>>;
+
+  // Stats
+  getStats(accountId: string): PromiseLike<Result<Record<string, unknown> | null, DbError>>;
 }
 
 // ---------------------------------------------------------------------------
@@ -788,6 +792,13 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
     const updateResult = await store.updateAccount(accountId, body as Partial<Pick<Account, "name" | "deletionRetentionDays" | "notifications" | "filtering" | "onboarding">>);
     if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
     return c.json(updateResult.value);
+  });
+
+  app.get("/accounts/:accountId/stats", authz("stats:read", c => `accounts/${c.req.param("accountId")}/stats`), async (c) => {
+    const { accountId } = c.get("auth");
+    const statsResult = await store.getStats(accountId);
+    if (statsResult.isErr()) return err(c, 500, "Internal Server Error");
+    return c.json(parseStatsRow(statsResult.value));
   });
 
   // -------------------------------------------------------------------------
