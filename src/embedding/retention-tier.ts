@@ -27,7 +27,7 @@ export type UserDisplayedRetention = '1 year' | '5 years' | 'forever';
 // Plan types
 // ---------------------------------------------------------------------------
 
-export type BillingPlan = 'Free' | 'Beta' | 'Paid' | 'Lifetime' | 'Premium' | 'Internal';
+export type BillingPlan = 'Trial' | 'Free' | 'Beta' | 'Paid' | 'Lifetime' | 'Premium' | 'Internal';
 
 // ---------------------------------------------------------------------------
 // RetentionForPlan — the new interface
@@ -52,6 +52,7 @@ export interface RetentionForPlan {
  */
 export function getRetentionForPlan(plan: BillingPlan): RetentionForPlan {
   switch (plan) {
+    case 'Trial':
     case 'Free':
     case 'Beta':
       return {
@@ -123,6 +124,7 @@ export function tierIndex(duration: RetentionDuration): number {
  * Plan max tiers (what each plan type allows)
  */
 const PLAN_MAX_TIER: Record<BillingPlan, RetentionDuration> = {
+  Trial: 'P1Y',
   Free: 'P1Y',
   Beta: 'P1Y',
   Paid: 'P5Y',
