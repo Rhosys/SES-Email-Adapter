@@ -4,6 +4,7 @@ import { ok, err, dbError } from "../errors.js";
 import type { DbError, Result } from "../errors.js";
 import type { Notifier } from "../processor/processor.js";
 import type { Arc, Signal, WsConnection, AuthData } from "../types/index.js";
+import type { Logger } from "../logger.js";
 
 const ACCOUNTS_TABLE = process.env["ACCOUNTS_TABLE"] ?? "ses-accounts";
 
@@ -12,6 +13,8 @@ const WS_ENDPOINT = process.env["WS_API_ENDPOINT"] ?? "";
 const dynamo = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 
 export class SesNotifier implements Notifier {
+  constructor(private readonly logger: Logger) {}
+
   async notify(accountId: string, arc: Arc, signal: Signal): Promise<Result<void, DbError>> {
     if (signal.workflow === "auth") {
       try {
@@ -21,10 +24,6 @@ export class SesNotifier implements Notifier {
         return err(dbError(e));
       }
     }
-    return ok(undefined);
-  }
-
-  async notifyBlocked(_accountId: string, _signal: Signal): Promise<Result<void, DbError>> {
     return ok(undefined);
   }
 
@@ -53,14 +52,16 @@ export class SesNotifier implements Notifier {
           method: "POST",
           body: payload,
         });
-      } catch (err: unknown) {
-        // Stale connection — remove it
-        const status = (err as { status?: number }).status;
-        if (status === 410) {
+      } catch (fetchErr: unknown) {
+        const status = (fetchErr as { status?: number }).status;
+        if (status && status < 500) {
+          this.logger.track("WebSocket push returned client error — removing stale connection.", { code: "notifier.ws_client_error", accountId, connectionId, status });
           await dynamo.send(new DeleteCommand({
             TableName: ACCOUNTS_TABLE,
             Key: { pk: `ACCT#${accountId}`, sk: `CONN#${connectionId}` },
           }));
+        } else {
+          this.logger.warn("WebSocket push failed with server error or network failure. The user won't receive the real-time notification for this signal.", { code: "notifier.ws_push_failed", accountId, connectionId, status, error: fetchErr });
         }
       }
     }));
