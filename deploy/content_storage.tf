@@ -60,3 +60,21 @@ resource "aws_s3_bucket_lifecycle_configuration" "extracted_content" {
 
   # Objects with no retention tag live forever (no expiration rule matches)
 }
+
+resource "aws_s3_bucket_policy" "extracted_content" {
+  bucket = aws_s3_bucket.extracted_content.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid       = "AllowCloudFrontOAC"
+      Effect    = "Allow"
+      Principal = { Service = "cloudfront.amazonaws.com" }
+      Action    = "s3:GetObject"
+      Resource  = "${aws_s3_bucket.extracted_content.arn}/*"
+      Condition = {
+        StringEquals = { "AWS:SourceArn" = aws_cloudfront_distribution.api.arn }
+      }
+    }]
+  })
+}
