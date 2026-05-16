@@ -1,12 +1,4 @@
 # ---------------------------------------------------------------------------
-# Data sources — external resources referenced by the Lambda
-# ---------------------------------------------------------------------------
-
-data "aws_sfn_state_machine" "account_creation" {
-  name = "email-catcher-AccountCreation"
-}
-
-# ---------------------------------------------------------------------------
 # IAM role for Lambda
 # ---------------------------------------------------------------------------
 
@@ -122,16 +114,31 @@ resource "aws_iam_role_policy" "lambda_permissions" {
         Resource = aws_sqs_queue.signals.arn
       },
       {
-        Sid    = "SQSConsume"
-        Effect = "Allow"
-        Action = ["sqs:ReceiveMessage", "sqs:DeleteMessage", "sqs:GetQueueAttributes"]
+        Sid      = "SQSConsume"
+        Effect   = "Allow"
+        Action   = ["sqs:ReceiveMessage", "sqs:DeleteMessage", "sqs:GetQueueAttributes"]
         Resource = aws_sqs_queue.signals.arn
       },
       {
         Sid      = "StepFunctionsStart"
         Effect   = "Allow"
         Action   = ["states:StartExecution"]
-        Resource = data.aws_sfn_state_machine.account_creation.arn
+        Resource = aws_sfn_state_machine.account_creation.arn
+      },
+      {
+        Sid    = "InvokeIsolatedLambdas"
+        Effect = "Allow"
+        Action = ["lambda:InvokeFunction"]
+        Resource = [
+          aws_lambda_function.user_code_executor.arn,
+          aws_lambda_function.content_sanitizer.arn,
+        ]
+      },
+      {
+        Sid      = "S3ExtractedContentWrite"
+        Effect   = "Allow"
+        Action   = ["s3:PutObject", "s3:PutObjectTagging"]
+        Resource = "${aws_s3_bucket.extracted_content.arn}/*"
       },
     ]
   })
@@ -177,20 +184,20 @@ resource "aws_lambda_function" "main" {
 
   environment {
     variables = {
-      ACCOUNTS_TABLE        = aws_dynamodb_table.accounts.name
-      SIGNALS_TABLE         = aws_dynamodb_table.signals.name
-      PROCESSING_TABLE      = aws_dynamodb_table.processing.name
-      AUDIT_TABLE           = aws_dynamodb_table.audit.name
-      EMAIL_BUCKET          = aws_s3_bucket.emails.bucket
-      AURORA_CLUSTER_ARN    = aws_rds_cluster.aurora["aurora-prod-titan-v2"].arn
-      AURORA_SECRET_ARN     = aws_rds_cluster.aurora["aurora-prod-titan-v2"].master_user_secret[0].secret_arn
-      AURORA_DB_NAME        = "signals"
-      SES_CONFIGURATION_SET = aws_sesv2_configuration_set.sending.configuration_set_name
-      WS_API_ENDPOINT       = "https://wss.${data.aws_route53_zone.main.name}"
-      CF_ORIGIN_SECRET      = random_password.cf_origin_secret.result
-      SIGNAL_QUEUE_URL      = aws_sqs_queue.signals.url
-      MAIL_DOMAIN           = "platform.${data.aws_route53_zone.main.name}"
-      ACCOUNT_CREATION_SFN_ARN = data.aws_sfn_state_machine.account_creation.arn
+      ACCOUNTS_TABLE           = aws_dynamodb_table.accounts.name
+      SIGNALS_TABLE            = aws_dynamodb_table.signals.name
+      PROCESSING_TABLE         = aws_dynamodb_table.processing.name
+      AUDIT_TABLE              = aws_dynamodb_table.audit.name
+      EMAIL_BUCKET             = aws_s3_bucket.emails.bucket
+      AURORA_CLUSTER_ARN       = aws_rds_cluster.aurora["aurora-prod-titan-v2"].arn
+      AURORA_SECRET_ARN        = aws_rds_cluster.aurora["aurora-prod-titan-v2"].master_user_secret[0].secret_arn
+      AURORA_DB_NAME           = "signals"
+      SES_CONFIGURATION_SET    = aws_sesv2_configuration_set.sending.configuration_set_name
+      WS_API_ENDPOINT          = "https://wss.${data.aws_route53_zone.main.name}"
+      CF_ORIGIN_SECRET         = random_password.cf_origin_secret.result
+      SIGNAL_QUEUE_URL         = aws_sqs_queue.signals.url
+      MAIL_DOMAIN              = "platform.${data.aws_route53_zone.main.name}"
+      ACCOUNT_CREATION_SFN_ARN = "arn:aws:states:${data.aws_region.current.name}:${var.aws_account_id}:stateMachine:email-catcher-AccountCreation"
     }
   }
 
@@ -237,4 +244,128 @@ resource "aws_lambda_event_source_mapping" "signals" {
   maximum_batching_window_in_seconds = 5
 
   function_response_types = ["ReportBatchItemFailures"]
+}
+
+# ---------------------------------------------------------------------------
+# User Code Executor Lambda — sandboxed JS execution (rule conditions, template functions)
+# ---------------------------------------------------------------------------
+
+resource "aws_iam_role" "user_code_executor" {
+  name = "${var.service_name}-user-code-executor"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "lambda.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+    }]
+  })
+}
+
+resource "aws_iam_role_policy" "user_code_executor" {
+  role = aws_iam_role.user_code_executor.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid      = "CloudWatchLogs"
+        Effect   = "Allow"
+        Action   = ["logs:CreateLogStream", "logs:PutLogEvents"]
+        Resource = "${aws_cloudwatch_log_group.user_code_executor.arn}:*"
+      },
+    ]
+  })
+}
+
+resource "aws_cloudwatch_log_group" "user_code_executor" {
+  name              = "/aws/lambda/${var.service_name}-user-code"
+  retention_in_days = 90
+}
+
+resource "aws_lambda_function" "user_code_executor" {
+  function_name = "${var.service_name}-user-code"
+  role          = aws_iam_role.user_code_executor.arn
+  handler       = "user-code-executor.handler"
+  runtime       = "nodejs24.x"
+  memory_size   = 128
+  timeout       = 1
+  publish       = true
+
+  filename         = data.archive_file.lambda_stub.output_path
+  source_code_hash = data.archive_file.lambda_stub.output_base64sha256
+
+  logging_config {
+    log_group  = aws_cloudwatch_log_group.user_code_executor.name
+    log_format = "Text"
+  }
+
+  depends_on = [aws_cloudwatch_log_group.user_code_executor]
+
+  lifecycle {
+    ignore_changes = [filename, source_code_hash]
+  }
+}
+
+# ---------------------------------------------------------------------------
+# Content Sanitizer Lambda — MIME parsing, HTML sanitization, image proxying
+# ---------------------------------------------------------------------------
+
+resource "aws_iam_role" "content_sanitizer" {
+  name = "${var.service_name}-content-sanitizer"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "lambda.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+    }]
+  })
+}
+
+resource "aws_iam_role_policy" "content_sanitizer" {
+  role = aws_iam_role.content_sanitizer.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid      = "CloudWatchLogs"
+        Effect   = "Allow"
+        Action   = ["logs:CreateLogStream", "logs:PutLogEvents"]
+        Resource = "${aws_cloudwatch_log_group.content_sanitizer.arn}:*"
+      },
+    ]
+  })
+}
+
+resource "aws_cloudwatch_log_group" "content_sanitizer" {
+  name              = "/aws/lambda/${var.service_name}-content-sanitizer"
+  retention_in_days = 90
+}
+
+resource "aws_lambda_function" "content_sanitizer" {
+  function_name = "${var.service_name}-content-sanitizer"
+  role          = aws_iam_role.content_sanitizer.arn
+  handler       = "content-sanitizer.handler"
+  runtime       = "nodejs24.x"
+  memory_size   = 128
+  timeout       = 10
+  publish       = true
+
+  filename         = data.archive_file.lambda_stub.output_path
+  source_code_hash = data.archive_file.lambda_stub.output_base64sha256
+
+  logging_config {
+    log_group  = aws_cloudwatch_log_group.content_sanitizer.name
+    log_format = "Text"
+  }
+
+  depends_on = [aws_cloudwatch_log_group.content_sanitizer]
+
+  lifecycle {
+    ignore_changes = [filename, source_code_hash]
+  }
 }
