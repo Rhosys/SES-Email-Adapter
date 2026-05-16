@@ -61,7 +61,7 @@ const sourceFiles = collectSourceFiles(SRC_DIR);
 // ---------------------------------------------------------------------------
 
 const CONSOLE_EXCLUDED_DIRS = new Set(["testing"]);
-const CONSOLE_EXCLUDED_FILES = new Set(["logger.ts", "run-migration.ts"]);
+const CONSOLE_EXCLUDED_FILES = new Set(["logger.ts"]);
 
 function collectConsoleCheckFiles(dir: string): string[] {
   const files: string[] = [];
