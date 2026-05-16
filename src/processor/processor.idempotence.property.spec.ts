@@ -3,7 +3,7 @@ import { ok } from "../errors.js";
 import { SignalProcessor, SYSTEM_RULES } from "./processor.js";
 import { JsonLogicRuleEvaluator } from "./rule-evaluator.js";
 import type { InboundSignalMessage, ProcessorDatabase, ArcMatcher } from "./processor.js";
-import type { MimeParser } from "./mime.js";
+import type { ContentSanitizerClient } from "./content-sanitizer-client.js";
 import type { SignalClassifier, ClassificationOutput } from "../classifier/classifier.js";
 import type { EmbeddingGenerator } from "../embedding/embedding-generator.js";
 import type { MultiClusterAuroraWriter } from "../database/multi-cluster-aurora-writer.js";
@@ -28,6 +28,11 @@ vi.mock("../embedding/cluster-registry.js", () => {
     getSecondaryClusters: () => [],
   };
 });
+
+vi.mock("./presign.js", () => ({
+  generatePresignedGet: vi.fn().mockResolvedValue("https://presigned-get.example.com/test"),
+  generatePresignedPost: vi.fn().mockResolvedValue({ url: "https://presigned-post.example.com", fields: {} }),
+}));
 
 describe("Cross-layer idempotence — live writes + cache + Aurora", () => {
   const TEST_ACCOUNT_ID = "acct-idem";
@@ -68,19 +73,23 @@ describe("Cross-layer idempotence — live writes + cache + Aurora", () => {
     classificationModelId: "us.anthropic.claude-opus-4-5-20251101-v1:0",
   };
 
-  function makeMimeParser(): MimeParser {
+  function makeContentSanitizer(): ContentSanitizerClient {
     return {
-      parse: vi.fn().mockResolvedValue(ok({
-        from: { address: "sender@external.com", name: "Sender" },
-        to: [{ address: "user@example.com" }],
-        cc: [],
-        subject: "Test email",
-        textBody: "Hello world",
-        htmlBody: "<p>Hello world</p>",
-        attachments: [],
-        headers: {},
-        sentAt: "2024-01-15T09:00:00Z",
-      })),
+      invoke: vi.fn().mockReturnValue(Promise.resolve(ok({
+        success: true as const,
+        parsed: {
+          from: { address: "sender@external.com", name: "Sender" },
+          to: [{ address: "user@example.com" }],
+          cc: [],
+          subject: "Test email",
+          textBody: "Hello world",
+          htmlBody: "<p>Hello world</p>",
+          attachments: [],
+          headers: { "authentication-results": "spf=pass dkim=pass" },
+          sentAt: "2024-01-15T09:00:00Z",
+        },
+        urlMapping: {},
+      }))),
     };
   }
 
@@ -143,7 +152,7 @@ describe("Cross-layer idempotence — live writes + cache + Aurora", () => {
     const mockLogger = createMockLogger();
     const processor = new SignalProcessor({
       store,
-      mimeParser: makeMimeParser(),
+      contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com",
       classifier: makeClassifier(),
       embeddingGenerator,
       auroraWriter,
@@ -206,7 +215,7 @@ describe("Cross-layer idempotence — live writes + cache + Aurora", () => {
     const mockLogger = createMockLogger();
     const processor = new SignalProcessor({
       store,
-      mimeParser: makeMimeParser(),
+      contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com",
       classifier: makeClassifier(),
       embeddingGenerator,
       auroraWriter,

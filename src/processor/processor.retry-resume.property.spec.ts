@@ -3,7 +3,7 @@ import { ok, err } from "../errors.js";
 import { SignalProcessor, SYSTEM_RULES } from "./processor.js";
 import { JsonLogicRuleEvaluator } from "./rule-evaluator.js";
 import type { ProcessorDatabase, ArcMatcher, SqsDispatcher, InboundSignalMessage } from "./processor.js";
-import type { MimeParser } from "./mime.js";
+import type { ContentSanitizerClient } from "./content-sanitizer-client.js";
 import type { SignalClassifier } from "../classifier/classifier.js";
 import type { EmbeddingGenerator } from "../embedding/embedding-generator.js";
 import type { MultiClusterAuroraWriter } from "../database/multi-cluster-aurora-writer.js";
@@ -32,6 +32,11 @@ vi.mock("../embedding/cluster-registry.js", () => {
     getPrimaryArcMatcherRegistry: () => cluster,
   };
 });
+
+vi.mock("./presign.js", () => ({
+  generatePresignedGet: vi.fn().mockResolvedValue("https://presigned-get.example.com/test"),
+  generatePresignedPost: vi.fn().mockResolvedValue({ url: "https://presigned-post.example.com", fields: {} }),
+}));
 
 // ---------------------------------------------------------------------------
 // Property 1: Resume from prior state on retry
@@ -245,11 +250,11 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
   it.each(RETRY_CASES)("MIME parser is NOT called on retry when signal exists in DDB ($label)", async ({ signal, receiveCount }) => {
     const arc = arbArcForSignal(signal);
     const sesMessageId = signal.id.replace("SES#", "");
-    const mimeParser: MimeParser = { parse: vi.fn() };
+    const contentSanitizer: ContentSanitizerClient = { invoke: vi.fn() };
 
     const processor = new SignalProcessor({
       store: makeStore(signal, arc),
-      mimeParser,
+      contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com",
       classifier: { classify: vi.fn() },
       embeddingGenerator: { generateForSecondaryClusters: vi.fn(), generateForModel: vi.fn() },
       auroraWriter: makeAuroraWriter(),
@@ -264,7 +269,7 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
     });
 
     await processor.processRecord(makeMessage(sesMessageId), receiveCount);
-    expect(mimeParser.parse).not.toHaveBeenCalled();
+    expect(contentSanitizer.invoke).not.toHaveBeenCalled();
   });
 
   it.each(RETRY_CASES)("classifier is NOT called on retry when signal exists in DDB ($label)", async ({ signal, receiveCount }) => {
@@ -274,7 +279,7 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
 
     const processor = new SignalProcessor({
       store: makeStore(signal, arc),
-      mimeParser: { parse: vi.fn() },
+      contentSanitizer: { invoke: vi.fn() }, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com",
       classifier,
       embeddingGenerator: { generateForSecondaryClusters: vi.fn(), generateForModel: vi.fn() },
       auroraWriter: makeAuroraWriter(),
@@ -300,7 +305,7 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
 
     const processor = new SignalProcessor({
       store: makeStore(signal, arc),
-      mimeParser: { parse: vi.fn() },
+      contentSanitizer: { invoke: vi.fn() }, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com",
       classifier: { classify: vi.fn() },
       embeddingGenerator: { generateForSecondaryClusters: vi.fn(), generateForModel: vi.fn() },
       auroraWriter: makeAuroraWriter(),
@@ -325,7 +330,7 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
 
     const processor = new SignalProcessor({
       store: makeStore(signal, arc),
-      mimeParser: { parse: vi.fn() },
+      contentSanitizer: { invoke: vi.fn() }, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com",
       classifier: { classify: vi.fn() },
       embeddingGenerator: { generateForSecondaryClusters: vi.fn(), generateForModel: vi.fn() },
       auroraWriter,
@@ -357,7 +362,7 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
 
     const processor = new SignalProcessor({
       store: makeStore(signal, arc),
-      mimeParser: { parse: vi.fn() },
+      contentSanitizer: { invoke: vi.fn() }, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com",
       classifier: { classify: vi.fn() },
       embeddingGenerator: { generateForSecondaryClusters: vi.fn(), generateForModel: vi.fn() },
       auroraWriter,
@@ -383,7 +388,7 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
 
     const processor = new SignalProcessor({
       store: makeStore(signal, arc),
-      mimeParser: { parse: vi.fn() },
+      contentSanitizer: { invoke: vi.fn() }, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com",
       classifier: { classify: vi.fn() },
       embeddingGenerator: { generateForSecondaryClusters: vi.fn(), generateForModel: vi.fn() },
       auroraWriter: makeAuroraWriter(),
@@ -460,7 +465,7 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
 
     const processor = new SignalProcessor({
       store,
-      mimeParser: { parse: vi.fn() },
+      contentSanitizer: { invoke: vi.fn() }, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com",
       classifier: { classify: vi.fn() },
       embeddingGenerator: { generateForSecondaryClusters: vi.fn(), generateForModel: vi.fn() },
       auroraWriter,
@@ -645,7 +650,7 @@ describe("Feature: signal-processor-retry-resilience, Property 3: DDB read failu
 
     const processor = new SignalProcessor({
       store,
-      mimeParser: { parse: vi.fn() },
+      contentSanitizer: { invoke: vi.fn() }, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com",
       classifier: { classify: vi.fn() },
       embeddingGenerator: { generateForSecondaryClusters: vi.fn(), generateForModel: vi.fn() },
       auroraWriter,
@@ -677,7 +682,7 @@ describe("Feature: signal-processor-retry-resilience, Property 3: DDB read failu
 
     const processor = new SignalProcessor({
       store,
-      mimeParser: { parse: vi.fn() },
+      contentSanitizer: { invoke: vi.fn() }, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com",
       classifier: { classify: vi.fn() },
       embeddingGenerator: { generateForSecondaryClusters: vi.fn(), generateForModel: vi.fn() },
       auroraWriter,
@@ -774,19 +779,23 @@ describe("Feature: signal-processor-retry-resilience, Property 2: Missing signal
     };
   }
 
-  function makeMimeParser(): MimeParser {
+  function makeContentSanitizer(): ContentSanitizerClient {
     return {
-      parse: vi.fn().mockResolvedValue(ok({
-        from: { address: "sender@example.com", name: "Sender" },
-        to: [{ address: "user@example.com" }],
-        cc: [],
-        subject: "Test email",
-        textBody: "Hello world",
-        htmlBody: "<p>Hello world</p>",
-        attachments: [],
-        headers: {},
-        sentAt: "2024-01-15T09:00:00Z",
-      })),
+      invoke: vi.fn().mockReturnValue(Promise.resolve(ok({
+        success: true as const,
+        parsed: {
+          from: { address: "sender@example.com", name: "Sender" },
+          to: [{ address: "user@example.com" }],
+          cc: [],
+          subject: "Test email",
+          textBody: "Hello world",
+          htmlBody: "<p>Hello world</p>",
+          attachments: [],
+          headers: { "authentication-results": "spf=pass dkim=pass" },
+          sentAt: "2024-01-15T09:00:00Z",
+        },
+        urlMapping: {},
+      }))),
     };
   }
 
@@ -840,11 +849,11 @@ describe("Feature: signal-processor-retry-resilience, Property 2: Missing signal
   ] as const;
 
   it.each(MISSING_SIGNAL_CASES)("MIME parser IS called when signal does not exist on retry ($label)", async ({ receiveCount, sesMessageId }) => {
-    const mimeParser = makeMimeParser();
+    const contentSanitizer = makeContentSanitizer();
 
     const processor = new SignalProcessor({
       store: makeStore(),
-      mimeParser,
+      contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com",
       classifier: makeClassifier(),
       embeddingGenerator: makeEmbeddingGenerator(),
       auroraWriter: makeAuroraWriter(),
@@ -859,7 +868,7 @@ describe("Feature: signal-processor-retry-resilience, Property 2: Missing signal
     });
 
     await processor.processRecord(makeMessage(sesMessageId), receiveCount);
-    expect(mimeParser.parse).toHaveBeenCalled();
+    expect(contentSanitizer.invoke).toHaveBeenCalled();
   });
 
   it.each(MISSING_SIGNAL_CASES)("classifier IS called when signal does not exist on retry ($label)", async ({ receiveCount, sesMessageId }) => {
@@ -867,7 +876,7 @@ describe("Feature: signal-processor-retry-resilience, Property 2: Missing signal
 
     const processor = new SignalProcessor({
       store: makeStore(),
-      mimeParser: makeMimeParser(),
+      contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com",
       classifier,
       embeddingGenerator: makeEmbeddingGenerator(),
       auroraWriter: makeAuroraWriter(),
@@ -890,7 +899,7 @@ describe("Feature: signal-processor-retry-resilience, Property 2: Missing signal
 
     const processor = new SignalProcessor({
       store,
-      mimeParser: makeMimeParser(),
+      contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com",
       classifier: makeClassifier(),
       embeddingGenerator: makeEmbeddingGenerator(),
       auroraWriter: makeAuroraWriter(),
@@ -912,7 +921,7 @@ describe("Feature: signal-processor-retry-resilience, Property 2: Missing signal
   it.each(MISSING_SIGNAL_CASES)("result is NOT a batchItemFailure when signal does not exist on retry ($label)", async ({ receiveCount, sesMessageId }) => {
     const processor = new SignalProcessor({
       store: makeStore(),
-      mimeParser: makeMimeParser(),
+      contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com",
       classifier: makeClassifier(),
       embeddingGenerator: makeEmbeddingGenerator(),
       auroraWriter: makeAuroraWriter(),
@@ -1110,7 +1119,7 @@ describe("Feature: signal-processor-retry-resilience, Property 8: Outcome re-der
 
     const processor = new SignalProcessor({
       store,
-      mimeParser: { parse: vi.fn() },
+      contentSanitizer: { invoke: vi.fn() }, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com",
       classifier: { classify: vi.fn() },
       embeddingGenerator: { generateForSecondaryClusters: vi.fn(), generateForModel: vi.fn() },
       auroraWriter: { upsertEmbedding: vi.fn().mockResolvedValue(ok(undefined)), findMatch: vi.fn().mockResolvedValue(ok(null)) },
@@ -1156,7 +1165,7 @@ describe("Feature: signal-processor-retry-resilience, Property 8: Outcome re-der
 
     const processor = new SignalProcessor({
       store,
-      mimeParser: { parse: vi.fn() },
+      contentSanitizer: { invoke: vi.fn() }, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com",
       classifier: { classify: vi.fn() },
       embeddingGenerator: { generateForSecondaryClusters: vi.fn(), generateForModel: vi.fn() },
       auroraWriter: { upsertEmbedding: vi.fn().mockResolvedValue(ok(undefined)), findMatch: vi.fn().mockResolvedValue(ok(null)) },

@@ -3,7 +3,7 @@ import { ok } from "../errors.js";
 import { SignalProcessor, SYSTEM_RULES } from "./processor.js";
 import { JsonLogicRuleEvaluator } from "./rule-evaluator.js";
 import type { ProcessorDatabase, ArcMatcher, InboundSignalMessage } from "./processor.js";
-import type { MimeParser } from "./mime.js";
+import type { ContentSanitizerClient } from "./content-sanitizer-client.js";
 import type { SignalClassifier, ClassificationOutput } from "../classifier/classifier.js";
 import type { EmbeddingGenerator, EmbeddingResult } from "../embedding/embedding-generator.js";
 import type { MultiClusterAuroraWriter } from "../database/multi-cluster-aurora-writer.js";
@@ -28,6 +28,11 @@ vi.mock("../embedding/cluster-registry.js", () => {
     getPrimaryArcMatcherRegistry: () => entry,
   };
 });
+
+vi.mock("./presign.js", () => ({
+  generatePresignedGet: vi.fn().mockResolvedValue("https://presigned-get.example.com/test"),
+  generatePresignedPost: vi.fn().mockResolvedValue({ url: "https://presigned-post.example.com", fields: {} }),
+}));
 
 const TEST_ACCOUNT_ID = "acct-001";
 
@@ -74,19 +79,23 @@ function makeStore(): ProcessorDatabase {
   };
 }
 
-function makeMimeParser(): MimeParser {
+function makeContentSanitizer(): ContentSanitizerClient {
   return {
-    parse: vi.fn().mockResolvedValue(ok({
-      from: { address: "sender@example.com", name: "Sender" },
-      to: [{ address: "user@example.com" }],
-      cc: [],
-      subject: "Test email",
-      textBody: "Hello world",
-      htmlBody: "<p>Hello world</p>",
-      attachments: [],
-      headers: { "authentication-results": "spf=pass dkim=pass" },
-      sentAt: "2024-01-15T09:00:00Z",
-    })),
+    invoke: vi.fn().mockReturnValue(Promise.resolve(ok({
+      success: true as const,
+      parsed: {
+        from: { address: "sender@example.com", name: "Sender" },
+        to: [{ address: "user@example.com" }],
+        cc: [],
+        subject: "Test email",
+        textBody: "Hello world",
+        htmlBody: "<p>Hello world</p>",
+        attachments: [],
+        headers: { "authentication-results": "spf=pass dkim=pass" },
+        sentAt: "2024-01-15T09:00:00Z",
+      },
+      urlMapping: {},
+    }))),
   };
 }
 
@@ -149,7 +158,7 @@ describe("SignalProcessor message routing", () => {
     store = makeStore();
     processor = new SignalProcessor({
       store,
-      mimeParser: makeMimeParser(),
+      contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com",
       classifier: makeClassifier(),
       embeddingGenerator: makeEmbeddingGenerator(),
       auroraWriter: makeAuroraWriter(),

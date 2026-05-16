@@ -3,7 +3,7 @@ import { ok } from "neverthrow";
 import { SignalProcessor, SYSTEM_RULES } from "../processor/processor.js";
 import { JsonLogicRuleEvaluator } from "../processor/rule-evaluator.js";
 import type { ProcessorDatabase, ArcMatcher, SqsDispatcher, Notifier, Forwarder, ReplySender, SideEffectPayload } from "../processor/processor.js";
-import type { MimeParser } from "../processor/mime.js";
+import type { ContentSanitizerClient } from "../processor/content-sanitizer-client.js";
 import type { SignalClassifier } from "../classifier/classifier.js";
 import type { EmbeddingGenerator } from "../embedding/embedding-generator.js";
 import type { MultiClusterAuroraWriter } from "../database/multi-cluster-aurora-writer.js";
@@ -32,6 +32,11 @@ vi.mock("../embedding/cluster-registry.js", () => {
     getPrimaryArcMatcherRegistry: () => entry,
   };
 });
+
+vi.mock("../processor/presign.js", () => ({
+  generatePresignedGet: vi.fn().mockResolvedValue("https://presigned-get.example.com/test"),
+  generatePresignedPost: vi.fn().mockResolvedValue({ url: "https://presigned-post.example.com", fields: {} }),
+}));
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -82,18 +87,22 @@ function makeStore(): ProcessorDatabase {
   };
 }
 
-function makeMimeParser(): MimeParser {
+function makeContentSanitizer(): ContentSanitizerClient {
   return {
-    parse: vi.fn().mockReturnValue(Promise.resolve(ok({
-      from: { address: "sender@example.com", name: "Sender" },
-      to: [{ address: "user@example.com" }],
-      cc: [],
-      subject: "Test email",
-      textBody: "Hello",
-      htmlBody: "<p>Hello</p>",
-      attachments: [],
-      headers: { "authentication-results": "spf=pass dkim=pass" },
-      sentAt: "2024-01-15T09:00:00Z",
+    invoke: vi.fn().mockReturnValue(Promise.resolve(ok({
+      success: true as const,
+      parsed: {
+        from: { address: "sender@example.com", name: "Sender" },
+        to: [{ address: "user@example.com" }],
+        cc: [],
+        subject: "Test email",
+        textBody: "Hello",
+        htmlBody: "<p>Hello</p>",
+        attachments: [],
+        headers: { "authentication-results": "spf=pass dkim=pass" },
+        sentAt: "2024-01-15T09:00:00Z",
+      },
+      urlMapping: {},
     }))),
   };
 }
@@ -211,7 +220,7 @@ describe("DeviceNotifier wiring: processor invokes notifier with urgency", () =>
     notifier = makeNotifier();
     processor = new SignalProcessor({
       store: makeStore(),
-      mimeParser: makeMimeParser(),
+      contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com",
       classifier: makeClassifier(),
       embeddingGenerator: makeEmbeddingGenerator(),
       auroraWriter: makeAuroraWriter(),
@@ -332,7 +341,7 @@ describe("DeviceNotifier wiring: handler instantiates with correct dependencies"
     const notifier = makeNotifier();
     const processor = new SignalProcessor({
       store: makeStore(),
-      mimeParser: makeMimeParser(),
+      contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com",
       classifier: makeClassifier(),
       embeddingGenerator: makeEmbeddingGenerator(),
       auroraWriter: makeAuroraWriter(),

@@ -3,7 +3,7 @@ import { ok, err } from "neverthrow";
 import { SignalProcessor, SYSTEM_RULES } from "./processor.js";
 import { JsonLogicRuleEvaluator } from "./rule-evaluator.js";
 import type { ProcessorDatabase, ArcMatcher, SqsDispatcher, Notifier, Forwarder, ReplySender, InboundSignalMessage, SideEffectPayload } from "./processor.js";
-import type { MimeParser } from "./mime.js";
+import type { ContentSanitizerClient } from "./content-sanitizer-client.js";
 import type { SignalClassifier, ClassificationOutput } from "../classifier/classifier.js";
 import type { EmbeddingGenerator, EmbeddingResult } from "../embedding/embedding-generator.js";
 import type { MultiClusterAuroraWriter } from "../database/multi-cluster-aurora-writer.js";
@@ -33,6 +33,11 @@ vi.mock("../embedding/cluster-registry.js", () => {
     getPrimaryArcMatcherRegistry: () => entry,
   };
 });
+
+vi.mock("./presign.js", () => ({
+  generatePresignedGet: vi.fn().mockResolvedValue("https://presigned-get.example.com/test"),
+  generatePresignedPost: vi.fn().mockResolvedValue({ url: "https://presigned-post.example.com", fields: {} }),
+}));
 
 // ---------------------------------------------------------------------------
 // Constants and helpers
@@ -95,18 +100,22 @@ function makeStore(): ProcessorDatabase {
   };
 }
 
-function makeMimeParser(): MimeParser {
+function makeContentSanitizer(): ContentSanitizerClient {
   return {
-    parse: vi.fn().mockReturnValue(Promise.resolve(ok({
-      from: { address: "sender@example.com", name: "Sender" },
-      to: [{ address: "user@example.com" }],
-      cc: [],
-      subject: "Integration test email",
-      textBody: "Hello from integration test",
-      htmlBody: "<p>Hello from integration test</p>",
-      attachments: [],
-      headers: { "authentication-results": "spf=pass dkim=pass" },
-      sentAt: "2024-01-15T09:00:00Z",
+    invoke: vi.fn().mockReturnValue(Promise.resolve(ok({
+      success: true as const,
+      parsed: {
+        from: { address: "sender@example.com", name: "Sender" },
+        to: [{ address: "user@example.com" }],
+        cc: [],
+        subject: "Integration test email",
+        textBody: "Hello from integration test",
+        htmlBody: "<p>Hello from integration test</p>",
+        attachments: [],
+        headers: { "authentication-results": "spf=pass dkim=pass" },
+        sentAt: "2024-01-15T09:00:00Z",
+      },
+      urlMapping: {},
     }))),
   };
 }
@@ -249,7 +258,7 @@ function makeExistingArc(overrides: Partial<Arc> = {}): Arc {
 
 describe("SignalProcessor integration: end-to-end retry flow", () => {
   let store: ProcessorDatabase;
-  let mimeParser: MimeParser;
+  let contentSanitizer: ContentSanitizerClient;
   let classifier: Pick<SignalClassifier, "classify">;
   let embeddingGenerator: EmbeddingGenerator;
   let auroraWriter: MultiClusterAuroraWriter;
@@ -266,7 +275,7 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
     vi.clearAllMocks();
     mockLogger = createMockLogger();
     store = makeStore();
-    mimeParser = makeMimeParser();
+    contentSanitizer = makeContentSanitizer();
     classifier = makeClassifier();
     embeddingGenerator = makeEmbeddingGenerator();
     auroraWriter = makeAuroraWriter();
@@ -278,7 +287,7 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
     replySender = makeReplySender();
     processor = new SignalProcessor({
       store,
-      mimeParser,
+      contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com",
       classifier,
       embeddingGenerator,
       auroraWriter,
@@ -311,7 +320,7 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
       expect(result.isOk()).toBe(true);
 
       // MIME was parsed
-      expect(mimeParser.parse).toHaveBeenCalledOnce();
+      expect(contentSanitizer.invoke).toHaveBeenCalledOnce();
 
       // Classification ran
       expect(classifier.classify).toHaveBeenCalledOnce();
@@ -388,7 +397,7 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
       expect(store.getArc).toHaveBeenCalledWith(TEST_ACCOUNT_ID, existingSignal.arcId);
 
       // Expensive operations were NOT called
-      expect(mimeParser.parse).not.toHaveBeenCalled();
+      expect(contentSanitizer.invoke).not.toHaveBeenCalled();
       expect(classifier.classify).not.toHaveBeenCalled();
       expect(embeddingGenerator.generateForModel).not.toHaveBeenCalled();
 
@@ -530,7 +539,7 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
       await processor.processSideEffect(payload);
 
       // None of the inbound signal pipeline was invoked
-      expect(mimeParser.parse).not.toHaveBeenCalled();
+      expect(contentSanitizer.invoke).not.toHaveBeenCalled();
       expect(classifier.classify).not.toHaveBeenCalled();
       expect(embeddingGenerator.generateForModel).not.toHaveBeenCalled();
       expect(store.getSignalByMessageId).not.toHaveBeenCalled();

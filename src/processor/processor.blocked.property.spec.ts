@@ -3,7 +3,7 @@ import { ok } from "../errors.js";
 import { SignalProcessor, SYSTEM_RULES } from "./processor.js";
 import { JsonLogicRuleEvaluator } from "./rule-evaluator.js";
 import type { InboundSignalMessage, ProcessorDatabase, ArcMatcher } from "./processor.js";
-import type { MimeParser } from "./mime.js";
+import type { ContentSanitizerClient } from "./content-sanitizer-client.js";
 import type { SignalClassifier, ClassificationOutput } from "../classifier/classifier.js";
 import type { EmbeddingGenerator, EmbeddingResult } from "../embedding/embedding-generator.js";
 import type { MultiClusterAuroraWriter } from "../database/multi-cluster-aurora-writer.js";
@@ -28,6 +28,11 @@ vi.mock("../embedding/cluster-registry.js", () => {
   };
 });
 
+vi.mock("./presign.js", () => ({
+  generatePresignedGet: vi.fn().mockResolvedValue("https://presigned-get.example.com/test"),
+  generatePresignedPost: vi.fn().mockResolvedValue({ url: "https://presigned-post.example.com", fields: {} }),
+}));
+
 describe("Blocked/quarantined signals never trigger saveArc", () => {
   const TEST_ACCOUNT_ID = "acct-prop2";
 
@@ -51,19 +56,23 @@ describe("Blocked/quarantined signals never trigger saveArc", () => {
     };
   }
 
-  function makeMimeParser(fromDomain: string): MimeParser {
+  function makeContentSanitizer(fromDomain: string): ContentSanitizerClient {
     return {
-      parse: vi.fn().mockResolvedValue(ok({
-        from: { address: `sender@${fromDomain}`, name: "Sender" },
-        to: [{ address: "user@example.com" }],
-        cc: [],
-        subject: "Test email",
-        textBody: "Hello world",
-        htmlBody: "<p>Hello world</p>",
-        attachments: [],
-        headers: {},
-        sentAt: "2024-01-15T09:00:00Z",
-      })),
+      invoke: vi.fn().mockReturnValue(Promise.resolve(ok({
+        success: true as const,
+        parsed: {
+          from: { address: `sender@${fromDomain}`, name: "Sender" },
+          to: [{ address: "user@example.com" }],
+          cc: [],
+          subject: "Test email",
+          textBody: "Hello world",
+          htmlBody: "<p>Hello world</p>",
+          attachments: [],
+          headers: { "authentication-results": "spf=pass dkim=pass" },
+          sentAt: "2024-01-15T09:00:00Z",
+        },
+        urlMapping: {},
+      }))),
     };
   }
 
@@ -119,7 +128,7 @@ describe("Blocked/quarantined signals never trigger saveArc", () => {
   interface BlockStrategy {
     label: string;
     classifier: Pick<SignalClassifier, "classify">;
-    mimeParser: MimeParser;
+    contentSanitizer: ContentSanitizerClient;
     unknownSenderPolicy: UnknownSenderPolicy;
     senderEntry: AliasSender | null;
     rules: Rule[];
@@ -129,7 +138,7 @@ describe("Blocked/quarantined signals never trigger saveArc", () => {
     {
       label: "high spam score → SR-03 quarantines",
       classifier: makeClassifier({ spamScore: 0.95, workflow: "conversation" }),
-      mimeParser: makeMimeParser("spammer.com"),
+      contentSanitizer: makeContentSanitizer("spammer.com"),
       unknownSenderPolicy: "quarantine_visible",
       senderEntry: { accountId: TEST_ACCOUNT_ID, aliasAddress: "user@example.com", domain: "spammer.com", policy: "allow", addedAt: "2024-01-01T00:00:00Z" },
       rules: SYSTEM_RULES,
@@ -137,7 +146,7 @@ describe("Blocked/quarantined signals never trigger saveArc", () => {
     {
       label: "onboarding workflow → SR-01 blocks",
       classifier: makeClassifier({ workflow: "onboarding", workflowData: { workflow: "onboarding", service: "acme.com", onboardingType: "welcome" } }),
-      mimeParser: makeMimeParser("acme.com"),
+      contentSanitizer: makeContentSanitizer("acme.com"),
       unknownSenderPolicy: "quarantine_visible",
       senderEntry: { accountId: TEST_ACCOUNT_ID, aliasAddress: "user@example.com", domain: "acme.com", policy: "allow", addedAt: "2024-01-01T00:00:00Z" },
       rules: SYSTEM_RULES,
@@ -145,7 +154,7 @@ describe("Blocked/quarantined signals never trigger saveArc", () => {
     {
       label: "status workflow → SR-05 blocks",
       classifier: makeClassifier({ workflow: "status", workflowData: { workflow: "status", statusType: "terms_update", provider: "gov.uk" } }),
-      mimeParser: makeMimeParser("gov.uk"),
+      contentSanitizer: makeContentSanitizer("gov.uk"),
       unknownSenderPolicy: "quarantine_visible",
       senderEntry: { accountId: TEST_ACCOUNT_ID, aliasAddress: "user@example.com", domain: "gov.uk", policy: "allow", addedAt: "2024-01-01T00:00:00Z" },
       rules: SYSTEM_RULES,
@@ -153,7 +162,7 @@ describe("Blocked/quarantined signals never trigger saveArc", () => {
     {
       label: "untrusted sender + block_hidden filter mode",
       classifier: makeClassifier({ workflow: "conversation" }),
-      mimeParser: makeMimeParser("unknown-sender.com"),
+      contentSanitizer: makeContentSanitizer("unknown-sender.com"),
       unknownSenderPolicy: "block_hidden",
       senderEntry: null,
       rules: SYSTEM_RULES,
@@ -161,7 +170,7 @@ describe("Blocked/quarantined signals never trigger saveArc", () => {
     {
       label: "untrusted sender + quarantine filter mode",
       classifier: makeClassifier({ workflow: "conversation" }),
-      mimeParser: makeMimeParser("unknown-sender.com"),
+      contentSanitizer: makeContentSanitizer("unknown-sender.com"),
       unknownSenderPolicy: "quarantine_visible",
       senderEntry: null,
       rules: SYSTEM_RULES,
@@ -169,7 +178,7 @@ describe("Blocked/quarantined signals never trigger saveArc", () => {
     {
       label: "custom block rule",
       classifier: makeClassifier({ workflow: "conversation" }),
-      mimeParser: makeMimeParser("example.com"),
+      contentSanitizer: makeContentSanitizer("example.com"),
       unknownSenderPolicy: "allow_all",
       senderEntry: { accountId: TEST_ACCOUNT_ID, aliasAddress: "user@example.com", domain: "example.com", policy: "allow", addedAt: "2024-01-01T00:00:00Z" },
       rules: [{
@@ -181,7 +190,7 @@ describe("Blocked/quarantined signals never trigger saveArc", () => {
     {
       label: "custom quarantine rule",
       classifier: makeClassifier({ workflow: "conversation" }),
-      mimeParser: makeMimeParser("example.com"),
+      contentSanitizer: makeContentSanitizer("example.com"),
       unknownSenderPolicy: "allow_all",
       senderEntry: { accountId: TEST_ACCOUNT_ID, aliasAddress: "user@example.com", domain: "example.com", policy: "allow", addedAt: "2024-01-01T00:00:00Z" },
       rules: [{
@@ -218,7 +227,7 @@ describe("Blocked/quarantined signals never trigger saveArc", () => {
 
     const processor = new SignalProcessor({
       store,
-      mimeParser: strategy.mimeParser,
+      contentSanitizer: strategy.contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com",
       classifier: strategy.classifier,
       embeddingGenerator: makeEmbeddingGenerator(),
       auroraWriter: makeAuroraWriter(),
