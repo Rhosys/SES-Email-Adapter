@@ -620,6 +620,21 @@ export class AccountDatabase {
     }
   }
 
+  async annotateTemplateError(accountId: string, templateId: string, functionName: string, errorMessage: string): Promise<Result<void, DbError>> {
+    try {
+      await dynamo.send(new UpdateCommand({
+        TableName: ACCOUNTS_TABLE,
+        Key: { pk: pk(accountId), sk: `TEMPLATE#${templateId}` },
+        UpdateExpression: "SET functions[0].lastError = :err, updatedAt = :now",
+        ConditionExpression: "attribute_exists(pk)",
+        ExpressionAttributeValues: { ":err": `[${functionName}] ${errorMessage}`, ":now": new Date().toISOString() },
+      }));
+      return ok(undefined);
+    } catch (e) {
+      return err(dbError(e));
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // Domains
   // ---------------------------------------------------------------------------

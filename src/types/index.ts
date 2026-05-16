@@ -280,12 +280,19 @@ export interface AliasSender {
 }
 
 // Email template for auto_reply and auto_draft rule actions
+export interface TemplateFunction {
+  name: string;      // placeholder name used in subject/body as {{fn.name}}
+  code: string;      // user-authored JS: (signal, arc) => string
+  lastError?: string; // annotation written when execution fails
+}
+
 export interface EmailTemplate {
   id: string;
   accountId: string;
   name: string;
   subject: string;   // supports {{signal.subject}}, {{sender.name}}, {{sender.address}}, {{arc.workflow}}
   body: string;      // same interpolation; unrecognised tokens render as ""
+  functions?: TemplateFunction[]; // user-authored JS functions for dynamic template values
   createdAt: string;
   updatedAt: string;
 }

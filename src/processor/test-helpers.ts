@@ -38,6 +38,9 @@ export function makeUserCodeExecutor(response?: UserCodeResponse): UserCodeExecu
 /** No-op store stub for annotateRuleError — used when tests don't exercise JS rules */
 export const stubAnnotateRuleError = vi.fn().mockReturnValue(Promise.resolve(ok(undefined)));
 
+/** No-op store stub for annotateTemplateError — used when tests don't exercise template functions */
+export const stubAnnotateTemplateError = vi.fn().mockReturnValue(Promise.resolve(ok(undefined)));
+
 /** Minimal RuleAnnotationStore mock for tests that don't exercise JS rule paths */
 export function makeRuleAnnotationStore() {
   return { annotateRuleError: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) };
@@ -48,6 +51,7 @@ export const stubS3Client = {} as never;
 
 /** Default processor options for the new fields */
 export const DEFAULT_PROCESSOR_EXTRAS = {
+  userCodeExecutor: { invoke: vi.fn().mockReturnValue(Promise.resolve({ success: true, purpose: "template_function", result: "mock" })) } as UserCodeExecutorClient,
   s3Client: stubS3Client,
   emailBucket: "test-email-bucket",
   contentBucket: "test-content-bucket",

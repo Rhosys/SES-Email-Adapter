@@ -142,6 +142,7 @@ describe("Single saveArc call with complete mutations", () => {
       }))),
       incrementStats: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
       annotateRuleError: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+      annotateTemplateError: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     };
 
     const contentSanitizer: ContentSanitizerClient = {
