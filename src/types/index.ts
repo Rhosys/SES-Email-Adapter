@@ -401,7 +401,7 @@ export interface Signal {
   status: SignalStatus;
   urgency?: ArcUrgency;
   createdAt: string;
-  ttl?: number;   // Unix seconds; absent = never expire
+  ttl?: number;   // DynamoDB TTL (epoch seconds) — computed from retentionDuration at write time; absent = never expire
 
   // Embedding cache, keyed by Bedrock model ID
   // Absent on quarantined/blocked signals (no Aurora write happened).
@@ -409,11 +409,9 @@ export interface Signal {
   embeddings?: Record<string, number[]>;
 
   // ISO 8601 retention duration — the ONLY retention field stored in DynamoDB.
-  // Free/Beta: 'P1Y' (S3 object tagged retention-tier=P1Y, expires after 365 days)
-  // Paid/Lifetime: 'P5Y' (S3 object untagged in inbox/, expires after 1825 days)
-  // Premium/Internal: 'P1000Y' (S3 object moved to saved/, no lifecycle rule)
+  // Drives DynamoDB TTL (computed at write time) and S3 lifecycle tagging.
   // userDisplayedRetention is NEVER stored — derived at API response time via getUserDisplayedRetention().
-  retentionDuration?: import("../embedding/retention-tier.js").RetentionDuration;
+  retentionDuration?: import("../processor/retention.js").RetentionDuration;
 }
 
 // ---------------------------------------------------------------------------
@@ -435,7 +433,9 @@ export interface Arc {
   deletedAt?: string;
   createdAt: string;
   updatedAt: string;
-  ttl?: number;   // Unix seconds; absent = never expire
+  ttl?: number;   // DynamoDB TTL (epoch seconds) — computed from retentionDuration at write time; absent = never expire
+  // ISO 8601 retention duration — longest of any signal in the arc
+  retentionDuration?: import("../processor/retention.js").RetentionDuration;
   // Message-IDs of emails the user sent on this arc
   sentMessageIds?: string[];
   urgency?: ArcUrgency;

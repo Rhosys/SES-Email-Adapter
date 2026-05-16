@@ -1,15 +1,18 @@
 import type { Signal, Arc } from "../types/index.js";
-import { retentionDurationToSeconds, type RetentionDuration } from "../embedding/retention-tier.js";
+import { durationToSeconds } from "../processor/retention.js";
 
 /**
  * Checks whether a signal is still visible to the user based on its retention duration.
  * A signal is visible if createdAt + retentionDuration is in the future.
  * Signals without retentionDuration are always visible (retention not yet applied).
+ * Signals with infinite retention (P100Y, Infinity) are always visible.
  */
 export function isSignalVisible(signal: Signal, now: Date = new Date()): boolean {
   if (!signal.retentionDuration) return true;
+  const seconds = durationToSeconds(signal.retentionDuration);
+  if (seconds == null) return true; // infinite retention
   const createdAtMs = new Date(signal.createdAt).getTime();
-  const retentionMs = retentionDurationToSeconds(signal.retentionDuration) * 1000;
+  const retentionMs = seconds * 1000;
   return createdAtMs + retentionMs > now.getTime();
 }
 
