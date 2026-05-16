@@ -3,7 +3,7 @@ import type { Logger } from "../logger.js";
 import type { Result } from "neverthrow";
 import { ok, err, dbError } from "../errors.js";
 import type { DbError, InvalidResponseError } from "../errors.js";
-import type { Signal, Arc, Rule, Workflow, WorkflowData, Alias, AliasSender, SenderMode, AccountFilteringConfig, SignalSource, SignalStatus, Domain, ArcUrgency, SenderFilterMode, MatchedRuleResult } from "../types/index.js";
+import type { Signal, Arc, Rule, Workflow, WorkflowData, Alias, AliasSender, SenderMode, AccountFilteringConfig, SignalSource, SignalStatus, Domain, ArcUrgency, UnknownSenderPolicy, MatchedRuleResult } from "../types/index.js";
 import type { MimeParser, ParsedMime } from "./mime.js";
 import { buildEmbedText, extractEmbedTextInput } from "../embedding/embed-text.js";
 import type { SignalClassifier } from "../classifier/classifier.js";
@@ -71,7 +71,6 @@ export interface RuleEvaluator {
 
 export interface Notifier {
   notify(accountId: string, arc: Arc, signal: Signal): Promise<Result<void, DbError>>;
-  notifyBlocked(accountId: string, signal: Signal): Promise<Result<void, DbError>>;
 }
 
 export interface ForwardOptions {
@@ -125,7 +124,7 @@ export interface InboundSignalMessage {
 // ---------------------------------------------------------------------------
 
 interface ProcessingOutcome {
-  block: boolean;
+  blockDisposition: "block_hidden" | "block_reject" | "violate_report" | null;
   quarantine: boolean;
   quarantineHidden: boolean;  // true → quarantine_hidden status; false → quarantine_visible
   approveSender: boolean;
@@ -142,7 +141,7 @@ interface ProcessingOutcome {
 
 function emptyOutcome(): ProcessingOutcome {
   return {
-    block: false,
+    blockDisposition: null,
     quarantine: false,
     quarantineHidden: false,
     approveSender: false,
@@ -168,7 +167,9 @@ async function applyRules(
     const actions = rule.actions.filter((a) => !a.disabled).map(({ type, value }) => ({ type, ...(value !== undefined ? { value } : {}) }));
     const labelsAdded = actions.filter((a) => a.type === "assign_label" && a.value).map((a) => a.value!);
     const statusChange: MatchedRuleResult["statusChange"] = (
-      actions.some((a) => a.type === "block")             ? "blocked"            :
+      actions.some((a) => a.type === "violate_report")    ? "violate_report"    :
+      actions.some((a) => a.type === "block_reject")      ? "block_reject"      :
+      actions.some((a) => a.type === "block_hidden")      ? "block_hidden"      :
       actions.some((a) => a.type === "quarantine_hidden") ? "quarantine_hidden"  :
       actions.some((a) => a.type === "quarantine")        ? "quarantine_visible" :
       actions.some((a) => a.type === "archive")           ? "archived"           :
@@ -190,8 +191,14 @@ function deriveOutcome(matchedRules: MatchedRuleResult[]): ProcessingOutcome {
   for (const { actions } of matchedRules) {
     for (const action of actions) {
       switch (action.type) {
-        case "block":
-          if (!statusSet) { outcome.block = true; statusSet = true; }
+        case "block_hidden":
+          if (!statusSet) { outcome.blockDisposition = "block_hidden"; statusSet = true; }
+          break;
+        case "block_reject":
+          if (!statusSet) { outcome.blockDisposition = "block_reject"; statusSet = true; }
+          break;
+        case "violate_report":
+          if (!statusSet) { outcome.blockDisposition = "violate_report"; statusSet = true; }
           break;
         case "quarantine":
           if (!statusSet) { outcome.quarantine = true; statusSet = true; }
@@ -230,8 +237,8 @@ const wfData_ = (field: string) => ({ "var": `signal.workflowData.${field}` });
 export const SYSTEM_RULES: Rule[] = [
   // --- Sender / content gating (1–8) ----------------------------------------
   { id: "SR-14", accountId: "SYSTEM", name: "Auto-approve sender on matched conversation", condition: JSON.stringify({ "and": [in_("system:workflow:conversation"), in_("system:sender:untrusted"), { "var": "isMatchedArc" }] }), actions: [{ type: "approve_sender" }], status: "enabled", priorityOrder: 1, createdAt: "", updatedAt: "" },
-  { id: "SR-01", accountId: "SYSTEM", name: "Block onboarding emails", condition: JSON.stringify(in_("system:workflow:onboarding")), actions: [{ type: "block" }], status: "enabled", priorityOrder: 2, createdAt: "", updatedAt: "" },
-  { id: "SR-05", accountId: "SYSTEM", name: "Block status emails", condition: JSON.stringify(in_("system:workflow:status")), actions: [{ type: "block" }], status: "enabled", priorityOrder: 3, createdAt: "", updatedAt: "" },
+  { id: "SR-01", accountId: "SYSTEM", name: "Block onboarding emails", condition: JSON.stringify(in_("system:workflow:onboarding")), actions: [{ type: "block_hidden" }], status: "enabled", priorityOrder: 2, createdAt: "", updatedAt: "" },
+  { id: "SR-05", accountId: "SYSTEM", name: "Block status emails", condition: JSON.stringify(in_("system:workflow:status")), actions: [{ type: "block_hidden" }], status: "enabled", priorityOrder: 3, createdAt: "", updatedAt: "" },
   { id: "SR-03", accountId: "SYSTEM", name: "Quarantine high-spam signals", condition: JSON.stringify(in_("system:spam:high")), actions: [{ type: "quarantine" }], status: "enabled", priorityOrder: 4, createdAt: "", updatedAt: "" },
   { id: "SR-04", accountId: "SYSTEM", name: "Suppress notification for medium spam", condition: JSON.stringify(in_("system:spam:medium")), actions: [{ type: "suppress_notification" }], status: "enabled", priorityOrder: 6, createdAt: "", updatedAt: "" },
   { id: "SR-06", accountId: "SYSTEM", name: "Suppress notification for status emails", condition: JSON.stringify(in_("system:workflow:status")), actions: [{ type: "suppress_notification" }], status: "enabled", priorityOrder: 7, createdAt: "", updatedAt: "" },
@@ -420,7 +427,12 @@ export class SignalProcessor {
     if (outcome.doPong) {
       try {
         this.logger.trackPoint("side_effect_pong_start");
-        const from = signal.recipientAddress;
+        const recipientDomain = signal.recipientAddress.split("@")[1] ?? "";
+        const domainResult = await this.store.getDomainByName(accountId, recipientDomain);
+        const domain = domainResult.isOk() ? domainResult.value : null;
+        const from = domain?.senderSetupComplete
+          ? signal.recipientAddress
+          : (process.env["NOTIFICATION_FROM"] ?? signal.recipientAddress);
         await this.replySender.sendReply({
           to: signal.from.address,
           from,
@@ -430,7 +442,7 @@ export class SignalProcessor {
         });
         this.logger.trackPoint("side_effect_pong_complete");
       } catch (e) {
-        this.logger.error("Side-effect pong failed.", { code: "processor.side_effect.pong_failed", accountId, error: e });
+        this.logger.track("Side-effect pong failed. The SES send call returned an error. The sender won't receive the automated test confirmation.", { code: "processor.side_effect.pong_failed", accountId, error: e });
       }
     }
 
@@ -646,13 +658,27 @@ export class SignalProcessor {
 
     // 8. Assign system labels and merge classifier labels
     const emailConfig = accountCtx.emailConfig;
-    const effectiveFilterMode: SenderFilterMode = emailConfig
-      ? emailConfig.filterMode
+    const effectiveFilterMode: UnknownSenderPolicy = emailConfig
+      ? emailConfig.unknownSenderPolicy
       : accountCtx.filtering?.newAddressHandling === "block_until_approved"
         ? "quarantine_visible"
         : "allow_all";
     // When no alias exists for the recipient, sender entries don't apply — treat as no entry
     const effectiveSenderEntry = emailConfig ? senderEntry : null;
+
+    // Explicit sender block — if the sender has been explicitly blocked for this alias, short-circuit
+    if (effectiveSenderEntry && effectiveSenderEntry.mode !== "allow") {
+      const blockStatus = effectiveSenderEntry.mode; // block_hidden | block_reject | violate_report
+      const blockedSignal = buildSignal({ status: blockStatus, accountId, sesMessageId, recipientAddress, parsed, classification, s3Key, receivedAt: timestamp, now, ...(ttl !== undefined ? { ttl } : {}) });
+      const saveResult = await this.store.saveSignal(blockedSignal);
+      if (saveResult.isErr()) return err(saveResult.error);
+      const repResult = await this.store.updateGlobalReputation(senderETLD1, { wasSpam: classification.spamScore >= spamScoreThreshold, wasBlocked: true });
+      if (repResult.isErr()) {
+        this.logger.warn("Failed to update global sender reputation after signal processing. The DynamoDB update returned an error. Reputation data may be stale for this domain.", { code: "processor.reputation_update_failed", accountId, error: repResult.error });
+      }
+      return ok(undefined);
+    }
+
     const systemLabels = assignSystemLabels({
       workflow: classification.workflow,
       workflowData: classification.workflowData,
@@ -660,7 +686,7 @@ export class SignalProcessor {
       spamScoreThreshold,
       senderETLD1,
       senderEntry: effectiveSenderEntry,
-      filterMode: effectiveFilterMode,
+      unknownSenderPolicy: effectiveFilterMode,
       hasSentMessages: (arc.sentMessageIds?.length ?? 0) > 0,
     });
 
@@ -701,10 +727,12 @@ export class SignalProcessor {
     this.logger.trackPoint("rules_evaluated", { matchedRuleCount: matchedRules.length });
 
     // Fallback: if no rule set a status, apply filter mode for untrusted senders
-    const hasStatusOutcome = outcome.block || outcome.quarantine || outcome.archive || outcome.delete;
+    const hasStatusOutcome = outcome.blockDisposition !== null || outcome.quarantine || outcome.archive || outcome.delete;
     if (!hasStatusOutcome && arc.labels.includes("system:sender:untrusted")) {
       switch (effectiveFilterMode) {
-        case "block":              outcome.block = true; break;
+        case "block_hidden":       outcome.blockDisposition = "block_hidden"; break;
+        case "block_reject":       outcome.blockDisposition = "block_reject"; break;
+        case "violate_report":     outcome.blockDisposition = "violate_report"; break;
         case "quarantine_hidden":  outcome.quarantine = true; outcome.quarantineHidden = true; break;
         case "quarantine_visible": outcome.quarantine = true; break;
         // "allow_all": signal proceeds as active
@@ -713,8 +741,8 @@ export class SignalProcessor {
 
     const buildArgs = { accountId, sesMessageId, recipientAddress, parsed, classification, s3Key, receivedAt: timestamp, now, ...(ttl !== undefined ? { ttl } : {}) };
 
-    if (outcome.block) {
-      const saveResult = await this.store.saveSignal({ ...buildSignal({ status: "blocked", ...buildArgs }), matchedRules });
+    if (outcome.blockDisposition) {
+      const saveResult = await this.store.saveSignal({ ...buildSignal({ status: outcome.blockDisposition, ...buildArgs }), matchedRules });
       if (saveResult.isErr()) return err(saveResult.error);
       const repResult = await this.store.updateGlobalReputation(senderETLD1, { wasSpam: classification.spamScore >= spamScoreThreshold, wasBlocked: true });
       if (repResult.isErr()) {
@@ -729,12 +757,6 @@ export class SignalProcessor {
       const quarantinedSignal: Signal = { ...buildSignal({ status: quarantineStatus, ...buildArgs }), matchedRules };
       const saveResult = await this.store.saveSignal(quarantinedSignal);
       if (saveResult.isErr()) return err(saveResult.error);
-      if (!outcome.quarantineHidden) {
-        const notifyResult = await this.notifier.notifyBlocked(accountId, quarantinedSignal);
-        if (notifyResult.isErr()) {
-          this.logger.track("Failed to send quarantine notification to user. The notification service returned an error. The signal is quarantined but the user won't be alerted. Tracked for notification reliability monitoring.", { code: "processor.quarantine_notification_failed", accountId, error: notifyResult.error });
-        }
-      }
       const repResult = await this.store.updateGlobalReputation(senderETLD1, { wasSpam: classification.spamScore >= spamScoreThreshold, wasBlocked: true });
       if (repResult.isErr()) {
         this.logger.warn("Failed to update global sender reputation after signal processing. The DynamoDB update returned an error. Reputation data may be stale for this domain.", { code: "processor.reputation_update_failed", accountId, error: repResult.error });
@@ -744,7 +766,7 @@ export class SignalProcessor {
 
     // Auto-approve: sender gets added to approvedSenders when approve_sender fires, allow_all mode, or brand-new address with auto-allow policy
     if (outcome.approveSender || effectiveFilterMode === "allow_all") {
-      const approveResult = await this.autoApprove(accountId, recipientAddress, senderETLD1, emailConfig, accountCtx.filtering?.defaultFilterMode);
+      const approveResult = await this.autoApprove(accountId, recipientAddress, senderETLD1, emailConfig, accountCtx.filtering?.defaultUnknownSenderPolicy);
       if (approveResult.isErr()) return err(approveResult.error);
     }
 
@@ -764,34 +786,7 @@ export class SignalProcessor {
     const signal: Signal = { ...signalShell, arcId: arc.id, matchedRules, urgency: signalUrgency };
     this.logger.trackPoint("arc_updated", { arcId: arc.id });
 
-    // 12. Pong (driven by SR-13 rule action)
-    if (outcome.doPong) {
-      const recipientDomain = recipientAddress.split("@")[1] ?? "";
-      const domainResult = await this.store.getDomainByName(accountId, recipientDomain);
-      if (domainResult.isErr()) return err(domainResult.error);
-      const domain = domainResult.value;
-      const from = domain?.senderSetupComplete
-        ? recipientAddress
-        : (process.env["NOTIFICATION_FROM"] ?? recipientAddress);
-      let pongResult: Result<{ messageId: string }, DbError>;
-      try {
-        const pongValue = await this.replySender.sendReply({
-          to: parsed.from.address,
-          from,
-          subject: parsed.subject,
-          body: parsed.textBody ?? parsed.htmlBody ?? "",
-          inReplyTo: sesMessageId,
-        });
-        pongResult = ok(pongValue);
-      } catch (e) {
-        pongResult = err(dbError(e));
-      }
-      if (pongResult.isErr()) {
-        this.logger.error("Failed to send pong reply to test email sender. The SES send call returned an error. The sender won't receive the automated test confirmation. Check SES sending limits and verify the from-address domain is configured.", { code: "processor.pong_reply_failed", accountId, error: pongResult.error });
-      } else if (pongResult.value) {
-        arc.sentMessageIds = [...(arc.sentMessageIds ?? []), pongResult.value.messageId];
-      }
-    }
+    // 12. Pong — handled entirely in side-effect SQS handler (processSideEffect)
 
     // Phase 2: Secondary embeddings (warn-only) — best-effort population of write-ahead indexes
     const secondaryResults = await this.embeddingGenerator.generateForSecondaryClusters(embedText);
@@ -1068,7 +1063,7 @@ export class SignalProcessor {
     address: string,
     senderETLD1: string,
     existing: Alias | null,
-    defaultFilterMode: AccountFilteringConfig["defaultFilterMode"] = "quarantine_visible",
+    defaultUnknownSenderPolicy: AccountFilteringConfig["defaultUnknownSenderPolicy"] = "quarantine_visible",
   ): Promise<Result<void, DbError>> {
     const now = new Date().toISOString();
     if (!existing) {
@@ -1076,7 +1071,7 @@ export class SignalProcessor {
         id: randomUUID(),
         accountId,
         address,
-        filterMode: defaultFilterMode,
+        unknownSenderPolicy: defaultUnknownSenderPolicy,
         createdAt: now,
         updatedAt: now,
       });
