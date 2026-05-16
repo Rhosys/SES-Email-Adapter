@@ -125,6 +125,7 @@ describe("Cross-layer idempotence — live writes + cache + Aurora", () => {
       getTemplate: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
       updateGlobalReputation: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
       getDomainByName: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
+      incrementStats: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     };
 
     const embeddingGenerator: EmbeddingGenerator = {
@@ -186,6 +187,7 @@ describe("Cross-layer idempotence — live writes + cache + Aurora", () => {
       getTemplate: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
       updateGlobalReputation: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
       getDomainByName: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
+      incrementStats: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     };
 
     const embeddingGenerator: EmbeddingGenerator = {

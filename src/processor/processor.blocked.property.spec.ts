@@ -47,6 +47,7 @@ describe("Blocked/quarantined signals never trigger saveArc", () => {
       getTemplate: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
       updateGlobalReputation: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
       getDomainByName: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
+      incrementStats: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     };
   }
 

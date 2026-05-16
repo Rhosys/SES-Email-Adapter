@@ -227,6 +227,7 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
       getTemplate: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
       updateGlobalReputation: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
       getDomainByName: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
+      incrementStats: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     };
   }
 
@@ -452,6 +453,7 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
       getTemplate: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
       updateGlobalReputation: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
       getDomainByName: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
+      incrementStats: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     };
 
     const auroraWriter = makeAuroraWriter();
@@ -593,6 +595,7 @@ describe("Feature: signal-processor-retry-resilience, Property 3: DDB read failu
       getTemplate: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
       updateGlobalReputation: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
       getDomainByName: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
+      incrementStats: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
       ...overrides,
     };
   }
@@ -767,6 +770,7 @@ describe("Feature: signal-processor-retry-resilience, Property 2: Missing signal
       getTemplate: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
       updateGlobalReputation: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
       getDomainByName: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
+      incrementStats: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     };
   }
 
@@ -1097,6 +1101,7 @@ describe("Feature: signal-processor-retry-resilience, Property 8: Outcome re-der
       getTemplate: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
       updateGlobalReputation: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
       getDomainByName: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
+      incrementStats: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     };
 
     const sqsDispatcher: SqsDispatcher = {
@@ -1142,6 +1147,7 @@ describe("Feature: signal-processor-retry-resilience, Property 8: Outcome re-der
       getTemplate: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
       updateGlobalReputation: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
       getDomainByName: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
+      incrementStats: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     };
 
     const sqsDispatcher: SqsDispatcher = {

@@ -14,6 +14,7 @@ import { getRetentionForPlan, retentionDurationToSeconds } from "../embedding/re
 import type { BillingPlan } from "../embedding/retention-tier.js";
 import { getPrimaryArcMatcherRegistry, getActiveClusters } from "../embedding/cluster-registry.js";
 import { getETLD1, assignSystemLabels, DEFAULT_SPAM_SCORE_THRESHOLD } from "./filter.js";
+import { statusToCategory } from "../database/stats-writer.js";
 
 // ---------------------------------------------------------------------------
 // Message types
@@ -58,6 +59,7 @@ export interface ProcessorDatabase {
   getTemplate(accountId: string, id: string): Promise<Result<import("../types/index.js").EmailTemplate | null, DbError>>;
   updateGlobalReputation(domain: string, update: { wasSpam: boolean; wasBlocked: boolean }): Promise<Result<void, DbError>>;
   getDomainByName(accountId: string, domainName: string): Promise<Result<Domain | null, DbError>>;
+  incrementStats(accountId: string, category: import("../types/index.js").StatsCategory): Promise<Result<void, DbError>>;
 }
 
 export interface ArcMatcher {
@@ -552,6 +554,13 @@ export class SignalProcessor {
       const saveResult = await this.store.saveSignal(signal);
       if (saveResult.isErr()) return err(saveResult.error);
       this.logger.info("Blocked email — DKIM or DMARC verification failed.", { code: "processor.dkim_dmarc_block", accountId, sesMessageId, dkimVerdict: msg.dkimVerdict, dmarcVerdict: msg.dmarcVerdict });
+      const dkimCat = statusToCategory(signal.status);
+      if (dkimCat) {
+        const statsResult = await this.store.incrementStats(accountId, dkimCat);
+        if (statsResult.isErr()) {
+          this.logger.warn("Stats increment failed — dashboard may be slightly behind.", { code: "processor.stats_increment_failed", accountId, error: statsResult.error });
+        }
+      }
       return ok(undefined);
     }
 
@@ -692,6 +701,13 @@ export class SignalProcessor {
       if (repResult.isErr()) {
         this.logger.warn("Failed to update global sender reputation after signal processing. The DynamoDB update returned an error. Reputation data may be stale for this domain.", { code: "processor.reputation_update_failed", accountId, error: repResult.error });
       }
+      const senderBlockCat = statusToCategory(blockStatus);
+      if (senderBlockCat) {
+        const statsResult = await this.store.incrementStats(accountId, senderBlockCat);
+        if (statsResult.isErr()) {
+          this.logger.warn("Stats increment failed — dashboard may be slightly behind.", { code: "processor.stats_increment_failed", accountId, error: statsResult.error });
+        }
+      }
       return ok(undefined);
     }
 
@@ -764,6 +780,13 @@ export class SignalProcessor {
       if (repResult.isErr()) {
         this.logger.warn("Failed to update global sender reputation after signal processing. The DynamoDB update returned an error. Reputation data may be stale for this domain.", { code: "processor.reputation_update_failed", accountId, error: repResult.error });
       }
+      const blockCat = statusToCategory(outcome.blockDisposition);
+      if (blockCat) {
+        const statsResult = await this.store.incrementStats(accountId, blockCat);
+        if (statsResult.isErr()) {
+          this.logger.warn("Stats increment failed — dashboard may be slightly behind.", { code: "processor.stats_increment_failed", accountId, error: statsResult.error });
+        }
+      }
       return ok(undefined);
     }
 
@@ -776,6 +799,13 @@ export class SignalProcessor {
       const repResult = await this.store.updateGlobalReputation(senderETLD1, { wasSpam: classification.spamScore >= spamScoreThreshold, wasBlocked: true });
       if (repResult.isErr()) {
         this.logger.warn("Failed to update global sender reputation after signal processing. The DynamoDB update returned an error. Reputation data may be stale for this domain.", { code: "processor.reputation_update_failed", accountId, error: repResult.error });
+      }
+      const quarantineCat = statusToCategory(quarantineStatus);
+      if (quarantineCat) {
+        const statsResult = await this.store.incrementStats(accountId, quarantineCat);
+        if (statsResult.isErr()) {
+          this.logger.warn("Stats increment failed — dashboard may be slightly behind.", { code: "processor.stats_increment_failed", accountId, error: statsResult.error });
+        }
       }
       return ok(undefined);
     }
@@ -829,6 +859,14 @@ export class SignalProcessor {
     const saveSignalResult = await this.store.saveSignal(signal);
     if (saveSignalResult.isErr()) return err(saveSignalResult.error);
     this.logger.trackPoint("signal_saved", { signalId: signal.id, arcId: arc.id });
+
+    const allowedCat = statusToCategory(signal.status);
+    if (allowedCat) {
+      const statsResult = await this.store.incrementStats(accountId, allowedCat);
+      if (statsResult.isErr()) {
+        this.logger.warn("Stats increment failed — dashboard may be slightly behind.", { code: "processor.stats_increment_failed", accountId, error: statsResult.error });
+      }
+    }
 
     // 13. S3 retention — fire-and-forget (idempotent, always attempted)
     await this.attemptS3Retention(signal, accountCtx, arc);
