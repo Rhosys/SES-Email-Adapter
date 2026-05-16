@@ -81,3 +81,76 @@ export function buildPruneNames(now: Date): { names: Record<string, string>; exp
   const expression = idx > 0 ? `REMOVE ${Object.keys(names).join(", ")}` : "";
   return { names, expression };
 }
+
+
+export interface StatsResponse {
+  lifetime: { totalSignals: number; totalAllowed: number; totalBlocked: number; totalQuarantined: number; totalViolationReport: number };
+  daily: Array<{ date: string; allowed: number; blocked: number; quarantined: number; violationReport: number }>;
+  monthly: Array<{ month: string; allowed: number; blocked: number; quarantined: number; violationReport: number }>;
+  yearly: Array<{ year: string; allowed: number; blocked: number; quarantined: number; violationReport: number }>;
+}
+
+export function parseStatsRow(item: Record<string, unknown> | null): StatsResponse {
+  if (!item) {
+    return {
+      lifetime: { totalSignals: 0, totalAllowed: 0, totalBlocked: 0, totalQuarantined: 0, totalViolationReport: 0 },
+      daily: [],
+      monthly: [],
+      yearly: [],
+    };
+  }
+
+  const lifetime = {
+    totalSignals: (item["totalSignals"] as number) ?? 0,
+    totalAllowed: (item["totalAllowed"] as number) ?? 0,
+    totalBlocked: (item["totalBlocked"] as number) ?? 0,
+    totalQuarantined: (item["totalQuarantined"] as number) ?? 0,
+    totalViolationReport: (item["totalViolationReport"] as number) ?? 0,
+  };
+
+  const dailyMap = new Map<string, { allowed: number; blocked: number; quarantined: number; violationReport: number }>();
+  const monthlyMap = new Map<string, { allowed: number; blocked: number; quarantined: number; violationReport: number }>();
+  const yearlyMap = new Map<string, { allowed: number; blocked: number; quarantined: number; violationReport: number }>();
+
+  for (const [key, value] of Object.entries(item)) {
+    if (key.startsWith("d_")) {
+      // d_YYYY-MM-DD_category
+      const parts = key.slice(2); // YYYY-MM-DD_category
+      const date = parts.slice(0, 10);
+      const category = parts.slice(11);
+      if (!dailyMap.has(date)) dailyMap.set(date, { allowed: 0, blocked: 0, quarantined: 0, violationReport: 0 });
+      const entry = dailyMap.get(date)!;
+      if (category in entry) (entry as Record<string, number>)[category] = value as number;
+    } else if (key.startsWith("m_")) {
+      // m_YYYY-MM_category
+      const parts = key.slice(2); // YYYY-MM_category
+      const month = parts.slice(0, 7);
+      const category = parts.slice(8);
+      if (!monthlyMap.has(month)) monthlyMap.set(month, { allowed: 0, blocked: 0, quarantined: 0, violationReport: 0 });
+      const entry = monthlyMap.get(month)!;
+      if (category in entry) (entry as Record<string, number>)[category] = value as number;
+    } else if (key.startsWith("y_")) {
+      // y_YYYY_category
+      const parts = key.slice(2); // YYYY_category
+      const year = parts.slice(0, 4);
+      const category = parts.slice(5);
+      if (!yearlyMap.has(year)) yearlyMap.set(year, { allowed: 0, blocked: 0, quarantined: 0, violationReport: 0 });
+      const entry = yearlyMap.get(year)!;
+      if (category in entry) (entry as Record<string, number>)[category] = value as number;
+    }
+  }
+
+  const daily = [...dailyMap.entries()]
+    .sort((a, b) => b[0].localeCompare(a[0]))
+    .map(([date, counts]) => ({ date, ...counts }));
+
+  const monthly = [...monthlyMap.entries()]
+    .sort((a, b) => b[0].localeCompare(a[0]))
+    .map(([month, counts]) => ({ month, ...counts }));
+
+  const yearly = [...yearlyMap.entries()]
+    .sort((a, b) => b[0].localeCompare(a[0]))
+    .map(([year, counts]) => ({ year, ...counts }));
+
+  return { lifetime, daily, monthly, yearly };
+}
