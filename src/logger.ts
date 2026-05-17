@@ -10,7 +10,7 @@ export interface TrackPoint {
 
 export interface LogEntry {
   level: LogLevel;
-  message: string;
+  title: string;
   code?: string;
   timestamp: string;
   invocationId: string;
@@ -57,6 +57,18 @@ export function redactReplacer(key: string, value: unknown): unknown {
   if (typeof value === "bigint") return value.toString();
   if (typeof value === "function") return `[Function: ${value.name || "anonymous"}]`;
   return value;
+}
+
+function serializeErrors(obj: Record<string, unknown>): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (value instanceof Error) {
+      result[key] = { ...value, message: value.message, name: value.name, stack: value.stack };
+    } else {
+      result[key] = value;
+    }
+  }
+  return result;
 }
 
 export class RequestLogger implements Logger {
@@ -107,7 +119,7 @@ export class RequestLogger implements Logger {
     this.emit("critical", message, context);
   }
 
-  private emit(level: LogLevel, message: string, context?: Record<string, unknown>): void {
+  private emit(level: LogLevel, title: string, context?: Record<string, unknown>): void {
     const includeTrackPoints = level === "track" || level === "error" || level === "critical";
     const includeStack = level === "error" || level === "critical";
 
@@ -122,10 +134,13 @@ export class RequestLogger implements Logger {
       restContext = context;
     }
 
+    // Serialize Error instances in context so they don't become {}
+    const serializedContext = restContext ? serializeErrors(restContext) : undefined;
+
     const entry: LogEntry = {
-      ...(restContext ?? {}),
-      level,
-      message,
+      ...(serializedContext ?? {}),
+      level: level.toUpperCase() as unknown as LogLevel,
+      title,
       ...(code !== undefined ? { code } : {}),
       timestamp: new Date().toISOString(),
       invocationId: this.invocationId,
@@ -135,26 +150,27 @@ export class RequestLogger implements Logger {
     };
 
     // Re-assign required fields AFTER spread to guarantee context cannot overwrite them
-    entry.level = level;
-    entry.message = message;
+    entry.level = level.toUpperCase() as unknown as LogLevel;
+    entry.title = title;
     entry.invocationId = this.invocationId;
     entry.containerId = this.containerId;
     if (code !== undefined) entry.code = code;
 
+    // Wrap in { message: entry } so the subscription filter receives an object at .message
     let serialized: string;
     try {
-      serialized = JSON.stringify(entry, redactReplacer);
+      serialized = JSON.stringify({ message: entry }, redactReplacer);
     } catch {
       // Circular reference or other serialization failure
       const fallback: LogEntry = {
-        level,
-        message,
+        level: level.toUpperCase() as unknown as LogLevel,
+        title,
         timestamp: entry.timestamp,
         invocationId: this.invocationId,
         containerId: this.containerId,
         _serializationError: true,
       };
-      console.log(JSON.stringify(fallback));
+      console.log(JSON.stringify({ message: fallback }));
       return;
     }
 
@@ -163,26 +179,26 @@ export class RequestLogger implements Logger {
 
       // Truncate: keep required fields + truncation marker
       const truncated: LogEntry = {
-        level,
-        message,
+        level: level.toUpperCase() as unknown as LogLevel,
+        title,
         timestamp: entry.timestamp,
         invocationId: this.invocationId,
         containerId: this.containerId,
         _truncated: true,
       };
-      serialized = JSON.stringify(truncated);
+      serialized = JSON.stringify({ message: truncated });
 
       // Emit a separate warning about the truncation
       const warning: LogEntry = {
-        level: "warn",
-        message: "logger.payload_truncated",
+        level: "WARN" as unknown as LogLevel,
+        title: "logger.payload_truncated",
         timestamp: new Date().toISOString(),
         invocationId: this.invocationId,
         containerId: this.containerId,
-        originalMessage: message,
+        originalTitle: title,
         originalSizeBytes,
       };
-      console.log(JSON.stringify(warning, redactReplacer));
+      console.log(JSON.stringify({ message: warning }, redactReplacer));
     }
 
     console.log(serialized);
