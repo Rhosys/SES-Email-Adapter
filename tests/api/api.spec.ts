@@ -1296,4 +1296,114 @@ describe("API", () => {
       expect(store.listVerifiedForwardingAddresses).not.toHaveBeenCalled();
     });
   });
+
+  // -------------------------------------------------------------------------
+  // Rule conditionType/code validation (Requirements 1.1, 1.3, 1.4, 2.1, 2.2, 2.3, 2.5, 12.2, 12.3)
+  // -------------------------------------------------------------------------
+
+  describe("POST /accounts/:accountId/rules — conditionType/code validation", () => {
+    it("creates a JS rule with valid code and returns 201", async () => {
+      vi.mocked(store.createRule).mockResolvedValueOnce(ok(makeRule({ conditionType: "js", code: "(signal) => signal.spamScore > 0.5" }) as never));
+      const res = await req(app, "POST", `${A}/rules`, {
+        body: { name: "Spam filter", conditionType: "js", code: "(signal) => signal.spamScore > 0.5", actions: [{ type: "archive" }] },
+      });
+      expect(res.status).toBe(201);
+      expect(store.createRule).toHaveBeenCalledWith(
+        TEST_ACCOUNT_ID, expect.objectContaining({ conditionType: "js", code: "(signal) => signal.spamScore > 0.5" }),
+      );
+    });
+
+    it("returns 400 when conditionType is 'js' but code is missing", async () => {
+      const res = await req(app, "POST", `${A}/rules`, {
+        body: { name: "No code", conditionType: "js", actions: [{ type: "archive" }] },
+      });
+      expect(res.status).toBe(400);
+      const body = await res.json() as { errorCode: string };
+      expect(body.errorCode).toBe("MISSING_CODE");
+    });
+
+    it("returns 400 when code exceeds 10KB", async () => {
+      const oversizedCode = `(signal) => { ${"x".repeat(10_241)} }`;
+      const res = await req(app, "POST", `${A}/rules`, {
+        body: { name: "Big code", conditionType: "js", code: oversizedCode, actions: [{ type: "archive" }] },
+      });
+      expect(res.status).toBe(400);
+    });
+
+    it("returns 400 with error location when code contains eval call", async () => {
+      const res = await req(app, "POST", `${A}/rules`, {
+        body: { name: "Eval rule", conditionType: "js", code: "(signal) => eval('1+1')", actions: [{ type: "archive" }] },
+      });
+      expect(res.status).toBe(400);
+      const body = await res.json() as { errorCode: string; details?: { location: { line: number; column: number } } };
+      expect(body.errorCode).toBe("INVALID_CODE");
+      expect(body.details?.location).toBeDefined();
+      expect(body.details!.location.line).toBeGreaterThanOrEqual(1);
+    });
+
+    it("succeeds without conditionType (backward compat — defaults to json_logic)", async () => {
+      vi.mocked(store.createRule).mockResolvedValueOnce(ok(makeRule() as never));
+      const res = await req(app, "POST", `${A}/rules`, {
+        body: { name: "Legacy rule", condition: '{"==": [1, 1]}', actions: [{ type: "archive" }] },
+      });
+      expect(res.status).toBe(201);
+    });
+  });
+
+  describe("PATCH /accounts/:accountId/rules/:id — code update clears lastError", () => {
+    it("clears lastError when code is updated on a JS rule", async () => {
+      const existingRule = makeRule({ conditionType: "js", code: "(signal) => true", lastError: "timeout after 800ms" });
+      vi.mocked(store.listRules).mockResolvedValueOnce(ok([existingRule]));
+      vi.mocked(store.updateRule).mockResolvedValueOnce(ok(makeRule({ conditionType: "js", code: "(signal) => false" })));
+      const res = await req(app, "PATCH", `${A}/rules/rule-001`, {
+        body: { code: "(signal) => false" },
+      });
+      expect(res.status).toBe(200);
+      expect(store.updateRule).toHaveBeenCalledWith(
+        TEST_ACCOUNT_ID, "rule-001", expect.objectContaining({ lastError: null }),
+      );
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Template functions validation (Requirements 7.1, 7.2, 7.3, 7.4, 12.4)
+  // -------------------------------------------------------------------------
+
+  describe("POST /accounts/:accountId/templates — functions validation", () => {
+    it("creates a template with valid functions and returns 201", async () => {
+      const template = { id: "tpl-001", accountId: TEST_ACCOUNT_ID, name: "Welcome", subject: "Hi", body: "Hello", functions: [{ name: "greeting", code: "(signal) => signal.from.name" }], createdAt: "2024-01-01T00:00:00Z", updatedAt: "2024-01-01T00:00:00Z" };
+      vi.mocked(store.createTemplate).mockResolvedValueOnce(ok(template));
+      const res = await req(app, "POST", `${A}/templates`, {
+        body: { name: "Welcome", subject: "Hi", body: "Hello", functions: [{ name: "greeting", code: "(signal) => signal.from.name" }] },
+      });
+      expect(res.status).toBe(201);
+      expect(store.createTemplate).toHaveBeenCalledWith(
+        expect.objectContaining({ functions: [{ name: "greeting", code: "(signal) => signal.from.name" }] }),
+      );
+    });
+
+    it("returns 400 when function name is not a valid JS identifier", async () => {
+      const res = await req(app, "POST", `${A}/templates`, {
+        body: { name: "Bad", subject: "Hi", body: "Hello", functions: [{ name: "123invalid", code: "(signal) => 'x'" }] },
+      });
+      expect(res.status).toBe(400);
+    });
+
+    it("returns 400 when function code exceeds 10KB", async () => {
+      const oversizedCode = `(signal) => { ${"x".repeat(10_241)} }`;
+      const res = await req(app, "POST", `${A}/templates`, {
+        body: { name: "Big", subject: "Hi", body: "Hello", functions: [{ name: "big", code: oversizedCode }] },
+      });
+      expect(res.status).toBe(400);
+    });
+
+    it("returns 400 when function code has invalid AST (eval call)", async () => {
+      const res = await req(app, "POST", `${A}/templates`, {
+        body: { name: "Evil", subject: "Hi", body: "Hello", functions: [{ name: "bad", code: "(signal) => eval('x')" }] },
+      });
+      expect(res.status).toBe(400);
+      const body = await res.json() as { errorCode: string };
+      expect(body.errorCode).toBe("INVALID_CODE");
+    });
+  });
 });
