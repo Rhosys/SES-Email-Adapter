@@ -140,6 +140,20 @@ export class AuthressAccessService implements AccessService {
     await this.client.userPermissions.authorizeUser(userId, `accounts/${accountId}`, permission);
   }
 
+  async createInvite(accountId: string, email: string, role: AccountRole): Promise<Result<{ inviteId: string }, AuthressServiceError>> {
+    try {
+      const response = await this.client.invites.createInvite({
+        statements: [{
+          roles: [roleToRoleId(role)],
+          resources: [{ resourceUri: `accounts/${accountId}` }],
+        }],
+      });
+      return ok({ inviteId: response.data.inviteId! });
+    } catch (e) {
+      return err(authressServiceError(e));
+    }
+  }
+
   private async _upsertUser(accountId: string, userId: string, role: AccountRole): Promise<void> {
     const rid = recordId(accountId);
     const resourceUri = `accounts/${accountId}`;
