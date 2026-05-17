@@ -132,6 +132,7 @@ export class ApiDatabaseAdapter implements ApiDatabase {
 
   // Audit
   listAuditEvents(accountId: string, params: PageParams) { return this.audit.listAuditEvents(accountId, params); }
+  saveAuditEvent(event: Omit<import("./audit-database.js").AuditEvent, "eventId" | "timestamp">) { return this.audit.saveAuditEvent(event); }
   listResourceHistory(accountId: string, resourceType: import("./audit-database.js").AuditResourceType, resourceId: string) { return this.audit.listResourceHistory(accountId, resourceType, resourceId); }
 
   // Stats
