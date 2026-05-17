@@ -97,7 +97,7 @@ export class ApiDatabaseAdapter implements ApiDatabase {
   // Rules
   listRules(accountId: string) { return this.account.listRules(accountId); }
   createRule(accountId: string, data: CreateRuleRequest) { return this.account.createRule(accountId, data); }
-  updateRule(accountId: string, id: string, data: UpdateRuleRequest) { return this.account.updateRule(accountId, id, data); }
+  updateRule(accountId: string, id: string, data: UpdateRuleRequest & { lastError?: string | null }) { return this.account.updateRule(accountId, id, data); }
   deleteRule(accountId: string, id: string) { return this.account.deleteRule(accountId, id); }
 
   // Domains
