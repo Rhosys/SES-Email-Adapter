@@ -117,7 +117,9 @@ export type UpdateLabelRequest = z.infer<typeof UpdateLabelRequest>;
 
 export const CreateRuleRequest = z.object({
   name: z.string(),
+  conditionType: z.enum(["json_logic", "js"]).optional(),
   condition: z.string().max(10_240).optional(),
+  code: z.string().max(10_240).optional(),
   actions: z.array(RuleActionSchema).min(1),
   priorityOrder: z.number().int().min(0).optional(),
   status: RuleStatus.optional(),
@@ -127,7 +129,9 @@ export type CreateRuleRequest = z.infer<typeof CreateRuleRequest>;
 
 export const UpdateRuleRequest = z.object({
   name: z.string().optional(),
+  conditionType: z.enum(["json_logic", "js"]).optional(),
   condition: z.string().max(10_240).optional(),
+  code: z.string().max(10_240).optional(),
   actions: z.array(RuleActionSchema).optional(),
   priorityOrder: z.number().int().min(0).optional(),
   status: RuleStatus.optional(),
@@ -169,10 +173,17 @@ export type CreateSenderRequest = z.infer<typeof CreateSenderRequest>;
 
 // ---- Email Templates ----
 
+export const TemplateFunctionSchema = z.object({
+  name: z.string().regex(/^[a-zA-Z_$][a-zA-Z0-9_$]*$/),
+  code: z.string().max(10_240),
+});
+export type TemplateFunctionSchema = z.infer<typeof TemplateFunctionSchema>;
+
 export const CreateTemplateRequest = z.object({
   name: z.string().min(1),
   subject: z.string(),
   body: z.string(),
+  functions: z.array(TemplateFunctionSchema).optional(),
 });
 export type CreateTemplateRequest = z.infer<typeof CreateTemplateRequest>;
 
@@ -180,6 +191,7 @@ export const ReplaceTemplateRequest = z.object({
   name: z.string().min(1),
   subject: z.string(),
   body: z.string(),
+  functions: z.array(TemplateFunctionSchema).optional(),
 });
 export type ReplaceTemplateRequest = z.infer<typeof ReplaceTemplateRequest>;
 
@@ -187,6 +199,7 @@ export const UpdateTemplateRequest = z.object({
   name: z.string().min(1).optional(),
   subject: z.string().optional(),
   body: z.string().optional(),
+  functions: z.array(TemplateFunctionSchema).optional(),
 });
 export type UpdateTemplateRequest = z.infer<typeof UpdateTemplateRequest>;
 
