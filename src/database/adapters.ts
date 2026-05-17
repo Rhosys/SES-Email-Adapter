@@ -78,7 +78,7 @@ export class ApiDatabaseAdapter implements ApiDatabase {
   // Account
   getAccount(accountId: string) { return this.account.getAccount(accountId); }
   createAccount(account: Account) { return this.account.createAccount(account); }
-  updateAccount(accountId: string, update: Partial<Pick<Account, "name" | "deletionRetentionDays" | "notifications" | "filtering" | "onboarding">>) { return this.account.updateAccount(accountId, update); }
+  updateAccount(accountId: string, update: Partial<Pick<Account, "name" | "deletionRetentionDays" | "notifications" | "filtering" | "onboarding" | "afterSendAction">>) { return this.account.updateAccount(accountId, update); }
 
   // Views
   listViews(accountId: string) { return this.account.listViews(accountId); }

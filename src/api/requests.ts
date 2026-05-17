@@ -224,6 +224,7 @@ export const UpdateAccountRequest = z.object({
   notifications: NotificationSettingsSchema.optional(),
   filtering: AccountFilteringConfigSchema.optional(),
   onboarding: AccountOnboardingSchema.optional(),
+  afterSendAction: z.enum(["archive", "keep_active"]).optional(),
 });
 export type UpdateAccountRequest = z.infer<typeof UpdateAccountRequest>;
 

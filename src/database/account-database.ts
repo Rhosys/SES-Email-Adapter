@@ -55,7 +55,7 @@ export class AccountDatabase {
     }
   }
 
-  async updateAccount(accountId: string, update: Partial<Pick<Account, "name" | "deletionRetentionDays" | "notifications" | "filtering" | "onboarding">>): Promise<Result<Account, DbError>> {
+  async updateAccount(accountId: string, update: Partial<Pick<Account, "name" | "deletionRetentionDays" | "notifications" | "filtering" | "onboarding" | "afterSendAction">>): Promise<Result<Account, DbError>> {
     const now = new Date().toISOString();
     const setParts: string[] = ["updatedAt = :now"];
     const exprValues: Record<string, unknown> = { ":now": now };
@@ -66,6 +66,7 @@ export class AccountDatabase {
     if (update.notifications !== undefined) { setParts.push("notifications = :notif"); exprValues[":notif"] = update.notifications; }
     if (update.filtering !== undefined) { setParts.push("filtering = :filtering"); exprValues[":filtering"] = update.filtering; }
     if (update.onboarding !== undefined) { setParts.push("onboarding = :onboarding"); exprValues[":onboarding"] = update.onboarding; }
+    if (update.afterSendAction !== undefined) { setParts.push("afterSendAction = :asa"); exprValues[":asa"] = update.afterSendAction; }
 
     try {
       const res = await dynamo.send(new UpdateCommand({
