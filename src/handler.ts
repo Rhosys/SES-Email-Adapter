@@ -23,18 +23,16 @@ import { ArcDatabase } from "./database/arc-database.js";
 import { ProcessingDatabase } from "./database/processing-database.js";
 import { ProcessorDatabaseAdapter, ApiDatabaseAdapter } from "./database/adapters.js";
 import { AuditDatabase } from "./database/audit-database.js";
-import { SESv2Client, SendEmailCommand } from "@aws-sdk/client-sesv2";
+import { SESv2Client } from "@aws-sdk/client-sesv2";
 import { ApiGatewayManagementApiClient } from "@aws-sdk/client-apigatewaymanagementapi";
 import { DeviceNotifier } from "./notifier/device-notifier.js";
 import { WsDeliverer } from "./notifier/ws-deliverer.js";
 import { FcmDeliverer } from "./notifier/fcm-deliverer.js";
 import { HttpFcmClient } from "./notifier/fcm-client.js";
-import { SesForwarder } from "./notifier/ses-forwarder.js";
+import { ExternalEmailSignalHandler } from "./notifier/external-email-signal-handler.js";
 import { DynamoDeviceStore } from "./notifier/device-store.js";
 import { FeedbackProcessor } from "./notifier/feedback-processor.js";
 import { DomainHealthJob } from "./jobs/domain-health-job.js";
-import { ok, err, dbError } from "./errors.js";
-import type { DbError, Result } from "./errors.js";
 import type { VerificationMailer } from "./api/app.js";
 import { AuthressAuthService } from "./api/authress-auth.js";
 import { AuthressAccessService } from "./api/authress-access.js";
@@ -43,7 +41,8 @@ import { BedrockEmbeddingGenerator } from "./embedding/embedding-generator.js";
 import { multiClusterWriter } from "./database/multi-cluster-aurora-writer.js";
 import { S3RetentionServiceImpl } from "./embedding/s3-retention-service.js";
 import { ReindexWorker } from "./jobs/reindex/reindex-worker.js";
-import { SesReplySender } from "./notifier/ses-reply-sender.js";
+
+import { EmailService } from "./email/email-service.js";
 import { ReindexDispatcher } from "./jobs/reindex/reindex-dispatcher.js";
 import type { ReindexSegmentMessage } from "./jobs/reindex/reindex-dispatcher.js";
 import { RequestLogger } from "./logger.js";
@@ -87,6 +86,13 @@ const deviceStore = new DynamoDeviceStore();
 
 const processorStore = new ProcessorDatabaseAdapter(arcDb, accountDb, processingDb);
 
+const NOTIFICATION_FROM = process.env["NOTIFICATION_FROM"] ?? "";
+const CONFIG_SET = process.env["SES_CONFIGURATION_SET"] ?? "";
+
+const emailService = new EmailService(sesv2, { from: NOTIFICATION_FROM, configSet: CONFIG_SET });
+
+const externalEmailHandler = new ExternalEmailSignalHandler(emailService, s3, logger, S3_BUCKET);
+
 const processor = new SignalProcessor({
   store: processorStore,
   contentSanitizer: new LambdaContentSanitizer(lambda, CONTENT_SANITIZER_ARN),
@@ -105,9 +111,9 @@ const processor = new SignalProcessor({
     },
     logger,
   }),
-  forwarder: new SesForwarder(logger, sesv2, s3),
+  forwarder: externalEmailHandler,
   retentionService: new S3RetentionServiceImpl(s3),
-  replySender: new SesReplySender(sesv2),
+  replySender: externalEmailHandler,
   sqsDispatcher: new SqsDispatcherImpl(SIGNAL_QUEUE_URL, sqs, logger),
   logger,
   s3Client: s3,
@@ -140,34 +146,16 @@ if (!ACCOUNT_CREATION_SFN_ARN) {
   accountCreationStarter = new SfnAccountCreationStarter(sfn, ACCOUNT_CREATION_SFN_ARN, logger);
 }
 
-const NOTIFICATION_FROM = process.env["NOTIFICATION_FROM"] ?? "";
 const APP_BASE_URL = process.env["APP_BASE_URL"] ?? "";
-const CONFIG_SET = process.env["SES_CONFIGURATION_SET"] ?? "";
 
 const sesVerificationMailer: VerificationMailer = {
   async sendForwardVerification(accountId: string, address: string, token: string) {
     const verifyUrl = `${APP_BASE_URL}/accounts/${accountId}/forwarding-addresses/${encodeURIComponent(address)}/verify?token=${token}`;
-    try {
-      await sesv2.send(new SendEmailCommand({
-        FromEmailAddress: NOTIFICATION_FROM,
-        Destination: { ToAddresses: [address] },
-        Content: {
-          Simple: {
-            Subject: { Data: "Verify your forwarding address", Charset: "UTF-8" },
-            Body: {
-              Text: {
-                Data: `Click the link below to verify that you want to receive forwarded emails at this address:\n\n${verifyUrl}\n\nIf you did not request this, you can ignore this email.`,
-                Charset: "UTF-8",
-              },
-            },
-          },
-        },
-        ...(CONFIG_SET ? { ConfigurationSetName: CONFIG_SET } : {}),
-      }));
-      return ok(undefined);
-    } catch (e) {
-      return err(dbError(e));
-    }
+    return emailService.send({
+      to: address,
+      subject: "Verify your forwarding address",
+      textBody: `Click the link below to verify that you want to receive forwarded emails at this address:\n\n${verifyUrl}\n\nIf you did not request this, you can ignore this email.`,
+    }).then(r => r.map(() => undefined));
   },
 };
 

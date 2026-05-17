@@ -110,10 +110,6 @@ vi.mock("../src/notifier/fcm-client.js", () => ({
   HttpFcmClient: vi.fn().mockImplementation(() => ({})),
 }));
 
-vi.mock("../src/notifier/ses-forwarder.js", () => ({
-  SesForwarder: vi.fn().mockImplementation(() => ({})),
-}));
-
 vi.mock("../src/notifier/device-store.js", () => ({
   DynamoDeviceStore: vi.fn().mockImplementation(() => ({
     saveDevice: vi.fn(),
@@ -143,10 +139,6 @@ vi.mock("../src/embedding/s3-retention-service.js", () => ({
 
 vi.mock("../src/jobs/reindex/reindex-worker.js", () => ({
   ReindexWorker: vi.fn().mockImplementation(() => ({})),
-}));
-
-vi.mock("../src/notifier/ses-reply-sender.js", () => ({
-  SesReplySender: vi.fn().mockImplementation(() => ({})),
 }));
 
 vi.mock("../src/jobs/reindex/reindex-dispatcher.js", () => ({
