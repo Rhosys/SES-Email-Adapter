@@ -135,7 +135,7 @@ export interface ApiDatabase {
   // Account
   getAccount(accountId: string): PromiseLike<Result<Account | null, DbError>>;
   createAccount(account: Account): PromiseLike<Result<Account, DbError>>;
-  updateAccount(accountId: string, update: Partial<Pick<Account, "name" | "deletionRetentionDays" | "notifications" | "filtering" | "onboarding">>): PromiseLike<Result<Account, DbError>>;
+  updateAccount(accountId: string, update: Partial<Pick<Account, "name" | "deletionRetentionDays" | "notifications" | "filtering" | "onboarding" | "afterSendAction">>): PromiseLike<Result<Account, DbError>>;
 
   // Aliases
   listAliases(accountId: string): PromiseLike<Result<Alias[], DbError>>;
@@ -913,7 +913,7 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
   app.patch("/accounts/:accountId", authz("accounts:write", c => `accounts/${c.req.param("accountId")}`), async (c) => {
     const { accountId } = c.get("auth");
     const body = await zParse(UpdateAccountRequest, c.req.raw);
-    const updateResult = await store.updateAccount(accountId, body as Partial<Pick<Account, "name" | "deletionRetentionDays" | "notifications" | "filtering" | "onboarding">>);
+    const updateResult = await store.updateAccount(accountId, body as Partial<Pick<Account, "name" | "deletionRetentionDays" | "notifications" | "filtering" | "onboarding" | "afterSendAction">>);
     if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
     return c.json(updateResult.value);
   });
