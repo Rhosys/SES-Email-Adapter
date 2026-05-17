@@ -1,4 +1,5 @@
 import { createSign } from "crypto";
+import type { Logger } from "../logger.js";
 
 // ─── FCM Message Types ───────────────────────────────────────────────────────
 
@@ -101,14 +102,21 @@ async function exchangeJwtForAccessToken(jwt: string): Promise<{ token: string; 
 export class HttpFcmClient implements FcmClient {
   private readonly credentials: ServiceAccountCredentials;
   private readonly endpoint: string;
+  private readonly logger: Logger;
   private cachedToken: { token: string; expiresAt: number } | null = null;
 
-  constructor(opts: { projectId: string; credentials: ServiceAccountCredentials }) {
+  constructor(opts: { projectId: string; credentials: ServiceAccountCredentials; logger: Logger }) {
     this.endpoint = `https://fcm.googleapis.com/v1/projects/${opts.projectId}/messages:send`;
     this.credentials = opts.credentials;
+    this.logger = opts.logger;
   }
 
   async send(message: FcmMessage): Promise<FcmSendResult> {
+    if (!this.credentials.client_email || !this.credentials.private_key) {
+      this.logger.track("FCM push skipped — no service account configured. To enable mobile push: (1) create a Firebase project, (2) Project Settings → Service Accounts → Generate new private key, (3) KMS-encrypt the JSON, (4) set FCM_SERVICE_ACCOUNT env var to the decrypted JSON at deploy time, (5) set FCM_PROJECT_ID to the Firebase project ID.", { code: "fcm.no_credentials", token: message.token });
+      return { ok: false, error: "UNAVAILABLE", detail: "FCM service account not configured" };
+    }
+
     const accessToken = await this.getAccessToken();
 
     const response = await fetch(this.endpoint, {

@@ -113,8 +113,8 @@ const processor = new SignalProcessor({
     deviceStore: new DynamoDeviceStore(),
     deliverers: {
       websocket: new WsDeliverer(new ApiGatewayManagementApiClient({ endpoint: WS_ENDPOINT })),
-      fcm: new FcmDeliverer(new HttpFcmClient({ projectId: FCM_PROJECT_ID, credentials: FCM_SERVICE_ACCOUNT })),
-      apns: new FcmDeliverer(new HttpFcmClient({ projectId: FCM_PROJECT_ID, credentials: FCM_SERVICE_ACCOUNT })),
+      fcm: new FcmDeliverer(new HttpFcmClient({ projectId: FCM_PROJECT_ID, credentials: FCM_SERVICE_ACCOUNT, logger })),
+      apns: new FcmDeliverer(new HttpFcmClient({ projectId: FCM_PROJECT_ID, credentials: FCM_SERVICE_ACCOUNT, logger })),
     },
     logger,
   }),
