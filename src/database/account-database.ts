@@ -548,7 +548,7 @@ export class AccountDatabase {
     }
   }
 
-  async updateRule(accountId: string, id: string, data: UpdateRuleRequest): Promise<Result<Rule, DbError>> {
+  async updateRule(accountId: string, id: string, data: UpdateRuleRequest & { lastError?: string | null }): Promise<Result<Rule, DbError>> {
     let existing: Rule;
     try {
       const res = await dynamo.send(new GetCommand({
@@ -578,16 +578,23 @@ export class AccountDatabase {
 
     if (data.name !== undefined) { setParts.push("#name = :name"); exprValues[":name"] = data.name; exprNames["#name"] = "name"; }
     if (data.condition !== undefined) { setParts.push("#cond = :cond"); exprValues[":cond"] = data.condition; exprNames["#cond"] = "condition"; }
+    if (data.conditionType !== undefined) { setParts.push("conditionType = :condType"); exprValues[":condType"] = data.conditionType; }
+    if (data.code !== undefined) { setParts.push("code = :code"); exprValues[":code"] = data.code; }
     if (data.actions !== undefined) { setParts.push("actions = :actions"); exprValues[":actions"] = data.actions; }
     if (data.priorityOrder !== undefined) { setParts.push("#pri = :pri"); exprValues[":pri"] = data.priorityOrder; exprNames["#pri"] = "priorityOrder"; }
     if (data.status !== undefined) { setParts.push("#status = :status"); exprValues[":status"] = data.status; exprNames["#status"] = "status"; }
     if (data.tags !== undefined) { setParts.push("tags = :tags"); exprValues[":tags"] = data.tags; }
 
+    const removeParts: string[] = [];
+    if (data.lastError === null) { removeParts.push("lastError"); }
+
     try {
+      let updateExpression = `SET ${setParts.join(", ")}`;
+      if (removeParts.length > 0) { updateExpression += ` REMOVE ${removeParts.join(", ")}`; }
       const res = await dynamo.send(new UpdateCommand({
         TableName: ACCOUNTS_TABLE,
         Key: { pk: pk(accountId), sk: `RULE#${id}` },
-        UpdateExpression: `SET ${setParts.join(", ")}`,
+        UpdateExpression: updateExpression,
         ExpressionAttributeValues: exprValues,
         ...(Object.keys(exprNames).length ? { ExpressionAttributeNames: exprNames } : {}),
         ReturnValues: "ALL_NEW",
@@ -860,7 +867,7 @@ export class AccountDatabase {
     }
   }
 
-  async updateTemplate(accountId: string, id: string, update: Partial<Pick<EmailTemplate, "name" | "subject" | "body">>): Promise<Result<EmailTemplate, DbError>> {
+  async updateTemplate(accountId: string, id: string, update: Partial<Pick<EmailTemplate, "name" | "subject" | "body" | "functions">>): Promise<Result<EmailTemplate, DbError>> {
     const now = new Date().toISOString();
     const setParts: string[] = ["updatedAt = :now"];
     const exprValues: Record<string, unknown> = { ":now": now };
@@ -868,6 +875,7 @@ export class AccountDatabase {
     if (update.name !== undefined) { setParts.push("#name = :name"); exprValues[":name"] = update.name; exprNames["#name"] = "name"; }
     if (update.subject !== undefined) { setParts.push("#subject = :subject"); exprValues[":subject"] = update.subject; exprNames["#subject"] = "subject"; }
     if (update.body !== undefined) { setParts.push("body = :body"); exprValues[":body"] = update.body; }
+    if (update.functions !== undefined) { setParts.push("functions = :functions"); exprValues[":functions"] = update.functions; }
 
     try {
       const res = await dynamo.send(new UpdateCommand({

@@ -126,7 +126,7 @@ export class ApiDatabaseAdapter implements ApiDatabase {
   // Templates
   createTemplate(template: EmailTemplate) { return this.account.createTemplate(template); }
   getTemplate(accountId: string, id: string) { return this.account.getTemplate(accountId, id); }
-  updateTemplate(accountId: string, id: string, update: Partial<Pick<EmailTemplate, "name" | "subject" | "body">>) { return this.account.updateTemplate(accountId, id, update); }
+  updateTemplate(accountId: string, id: string, update: Partial<Pick<EmailTemplate, "name" | "subject" | "body" | "functions">>) { return this.account.updateTemplate(accountId, id, update); }
   deleteTemplate(accountId: string, id: string) { return this.account.deleteTemplate(accountId, id); }
   listTemplates(accountId: string) { return this.account.listTemplates(accountId); }
 
