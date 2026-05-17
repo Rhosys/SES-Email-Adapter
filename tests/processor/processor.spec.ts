@@ -255,7 +255,7 @@ describe("SignalProcessor", () => {
     auroraWriter = makeAuroraWriter();
     arcMatcher = makeArcMatcher();
     ruleEvaluator = makeRuleEvaluator(mockLogger);
-    processor = new SignalProcessor({ store, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com", classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, logger: mockLogger, notifier: makeNotifier(), forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) } });
+    processor = new SignalProcessor({ store, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com", classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, logger: mockLogger, notifier: makeNotifier(), forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never });
   });
 
   afterEach(() => {
@@ -561,7 +561,7 @@ describe("SignalProcessor", () => {
 
     beforeEach(() => {
       sqsDispatcher = { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) };
-      processor = new SignalProcessor({ store, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com", classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, sqsDispatcher, logger: mockLogger, notifier: makeNotifier(), forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) } });
+      processor = new SignalProcessor({ store, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com", classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, sqsDispatcher, logger: mockLogger, notifier: makeNotifier(), forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never });
     });
 
     it("dispatches side-effect with forward action in matchedRules when forward rule matches", async () => {
@@ -743,7 +743,7 @@ describe("SignalProcessor", () => {
 
     beforeEach(() => {
       sqsDispatcher = { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) };
-      processor = new SignalProcessor({ store, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com", classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, sqsDispatcher, logger: mockLogger, notifier: makeNotifier(), forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) } });
+      processor = new SignalProcessor({ store, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com", classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, sqsDispatcher, logger: mockLogger, notifier: makeNotifier(), forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never });
     });
 
     it("dispatches side-effect after saving a new Signal", async () => {
@@ -790,6 +790,7 @@ describe("SignalProcessor", () => {
         store, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com", classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, logger: mockLogger,
         notifier: makeNotifier(), forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
         replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher,
+        draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
       });
 
       await processorWithoutNotifier.processRecord(makeMessage(), 1);
@@ -807,7 +808,7 @@ describe("SignalProcessor", () => {
 
     beforeEach(() => {
       notifier = makeNotifier();
-      processor = new SignalProcessor({ store, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com", classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, notifier, logger: mockLogger, forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) } });
+      processor = new SignalProcessor({ store, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com", classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, notifier, logger: mockLogger, forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never });
     });
 
     it("allows signal on brand new address and auto-creates aliases with sender approved", async () => {
@@ -1409,7 +1410,7 @@ describe("SignalProcessor", () => {
       ])));
 
       const notifier = makeNotifier();
-      const proc = new SignalProcessor({ store, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com", classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, notifier, logger: mockLogger, forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) } });
+      const proc = new SignalProcessor({ store, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com", classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, notifier, logger: mockLogger, forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never });
       await proc.processRecord(makeMessage(), 1);
 
       expect(store.saveArc).not.toHaveBeenCalled();
@@ -1424,7 +1425,7 @@ describe("SignalProcessor", () => {
       ])));
 
       const notifier = makeNotifier();
-      const proc = new SignalProcessor({ store, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com", classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, notifier, logger: mockLogger, forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) } });
+      const proc = new SignalProcessor({ store, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com", classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, notifier, logger: mockLogger, forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never });
       await proc.processRecord(makeMessage(), 1);
 
       expect(store.saveArc).not.toHaveBeenCalled();
@@ -1498,7 +1499,7 @@ describe("SignalProcessor", () => {
 
     beforeEach(() => {
       notifier = makeNotifier();
-      processor = new SignalProcessor({ store, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com", classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, notifier, logger: mockLogger, forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) } });
+      processor = new SignalProcessor({ store, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com", classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, notifier, logger: mockLogger, forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never });
     });
 
     it("blocks status emails silently — no arc created, signal saved as blocked", async () => {
@@ -1555,7 +1556,7 @@ describe("SignalProcessor", () => {
 
     beforeEach(() => {
       sqsDispatcher = { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) };
-      processor = new SignalProcessor({ store, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com", classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, sqsDispatcher, logger: mockLogger, notifier: makeNotifier(), forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: makeReplySender() });
+      processor = new SignalProcessor({ store, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com", classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, sqsDispatcher, logger: mockLogger, notifier: makeNotifier(), forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: makeReplySender(), draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never });
     });
 
     it("dispatches side-effect with pong action when workflow is 'test'", async () => {
@@ -1610,7 +1611,7 @@ describe("SignalProcessor", () => {
     });
 
     it("still dispatches side-effect when replySender is configured", async () => {
-      const processorWithReplier = new SignalProcessor({ store, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com", classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, logger: mockLogger, notifier: makeNotifier(), forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher });
+      const processorWithReplier = new SignalProcessor({ store, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com", classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, logger: mockLogger, notifier: makeNotifier(), forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher, draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never });
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(testClassification);
 
       const result = await processorWithReplier.processRecord(makeMessage(), 1);

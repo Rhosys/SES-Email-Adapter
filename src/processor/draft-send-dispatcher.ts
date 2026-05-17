@@ -10,7 +10,11 @@ export interface DraftSendPayload {
   sendInitiatedAt: string;
 }
 
-export class DraftSendDispatcher {
+export interface DraftSendDispatch {
+  dispatch(payload: DraftSendPayload, delaySeconds: number): Promise<Result<void, DbError>>;
+}
+
+export class DraftSendDispatcher implements DraftSendDispatch {
   private readonly client: SQSClient;
   private readonly queueUrl: string;
   private readonly logger: Logger;

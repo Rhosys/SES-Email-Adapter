@@ -241,6 +241,7 @@ describe("Blocked/quarantined signals never trigger saveArc", () => {
       retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "emails/test.eml" }) },
       replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) },
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
     });
 
     await processor.processRecord(makeMessage("msg-blocked-test"), 1);

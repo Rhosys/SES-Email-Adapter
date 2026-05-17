@@ -193,6 +193,7 @@ describe("Aurora cluster failure preserves the DynamoDB cache entry", () => {
       retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "emails/test.eml" }) },
       replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) },
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
     });
 
     await processor.processRecord(makeMessage("test-msg-aurora"), 1);
@@ -241,6 +242,7 @@ describe("Aurora cluster failure preserves the DynamoDB cache entry", () => {
       retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "emails/test.eml" }) },
       replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) },
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
     });
 
     await processor.processRecord(makeMessage("test-msg-aurora"), 1);

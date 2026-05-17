@@ -166,6 +166,7 @@ describe("Cross-layer idempotence — live writes + cache + Aurora", () => {
       retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
       replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) },
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
     });
 
     const message = makeMessage("test-msg-001");
@@ -231,6 +232,7 @@ describe("Cross-layer idempotence — live writes + cache + Aurora", () => {
       retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
       replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) },
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
     });
 
     const message = makeMessage("test-msg-001");

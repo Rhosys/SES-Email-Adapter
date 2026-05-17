@@ -216,6 +216,7 @@ describe("Feature: signal-processor-retry-resilience, Property 4: Arc saved befo
       retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
       replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "mock-reply-id" }) },
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
     });
 
     await processor.processRecord(makeMessage(sesMessageId), 1);
@@ -282,6 +283,7 @@ describe("Feature: signal-processor-retry-resilience, Property 4: Arc saved befo
       retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
       replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "mock-reply-id" }) },
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
     });
 
     const result = await processor.processRecord(makeMessage(sesMessageId), 1);
@@ -466,6 +468,7 @@ describe("Feature: signal-processor-retry-resilience, Property 6: Aurora failure
       retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
       replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "mock-reply-id" }) },
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
     });
 
     const result = await processor.processRecord(makeMessage(sesMessageId), 1);
@@ -517,6 +520,7 @@ describe("Feature: signal-processor-retry-resilience, Property 6: Aurora failure
       retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
       replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "mock-reply-id" }) },
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
     });
 
     const result = await processor.processRecord(makeMessage(sesMessageId), 1);
@@ -568,6 +572,7 @@ describe("Feature: signal-processor-retry-resilience, Property 6: Aurora failure
       retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
       replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "mock-reply-id" }) },
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
     });
 
     const result = await processor.processRecord(makeMessage(sesMessageId), 1);
@@ -740,6 +745,7 @@ describe("Feature: signal-processor-retry-resilience, Property 5: Side-effects d
       notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
+      draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
     });
 
     const result = await processor.processRecord(makeMessage("msg-dispatch-success"), 1);
@@ -785,6 +791,7 @@ describe("Feature: signal-processor-retry-resilience, Property 5: Side-effects d
       notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
+      draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
     });
 
     const result = await processor.processRecord(makeMessage("msg-dispatch-aurora-fail"), 1);
@@ -821,6 +828,7 @@ describe("Feature: signal-processor-retry-resilience, Property 5: Side-effects d
       retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
       replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "mock-reply-id" }) },
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
       // No sqsDispatcher — backward compatibility path
     });
 
@@ -861,6 +869,7 @@ describe("Feature: signal-processor-retry-resilience, Property 5: Side-effects d
       notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
+      draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
     });
 
     const result = await processor.processRecord(makeMessage("msg-dispatch-sqs-fail"), 1);
@@ -1040,6 +1049,7 @@ describe("Feature: signal-processor-retry-resilience, Property 7: Partial Aurora
       notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
+      draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
     });
 
     const result = await processor.processRecord(makeMessage(sesMessageId), 1);
