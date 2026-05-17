@@ -21,6 +21,7 @@ export class ProcessorDatabaseAdapter implements ProcessorDatabase {
 
   getSignalByMessageId(accountId: string, sesMessageId: string) { return this.arc.getSignalByMessageId(accountId, sesMessageId); }
   saveSignal(signal: Signal) { return this.arc.saveSignal(signal); }
+  updateSignalSendStatus(accountId: string, signalId: string, update: { status: "pending_send" | "sent" | "draft"; sendInitiatedAt?: string | null; sentAt?: string; sesMessageId?: string; sendFailureReason?: string }) { return this.arc.updateSignalSendStatus(accountId, signalId, update); }
   updateSignalRetention(accountId: string, signalId: string, update: Partial<Pick<Signal, "s3Key" | "retentionDuration">>) { return this.arc.updateSignalRetention(accountId, signalId, update); }
   getArc(accountId: string, id: string) { return this.arc.getArc(accountId, id); }
   findArcByGroupingKey(accountId: string, key: string) { return this.arc.findArcByGroupingKey(accountId, key); }
@@ -62,6 +63,7 @@ export class ApiDatabaseAdapter implements ApiDatabase {
   getSignal(accountId: string, id: string) { return this.arc.getSignal(accountId, id); }
   createSignal(signal: Signal) { return this.arc.createSignal(signal); }
   updateSignal(accountId: string, id: string, update: Partial<Pick<Signal, "subject" | "textBody" | "from" | "to">>) { return this.arc.updateSignal(accountId, id, update); }
+  updateSignalSendStatus(accountId: string, signalId: string, update: { status: "pending_send" | "sent" | "draft"; sendInitiatedAt?: string | null; sentAt?: string; sesMessageId?: string; sendFailureReason?: string }) { return this.arc.updateSignalSendStatus(accountId, signalId, update); }
   deleteSignal(accountId: string, id: string) { return this.arc.deleteSignal(accountId, id); }
   updateSignalStatus(accountId: string, signalId: string, status: "block_hidden" | "block_reject" | "violate_report") { return this.arc.updateSignalStatus(accountId, signalId, status); }
   unblockSignal(accountId: string, signalId: string, arcId: string) { return this.arc.unblockSignal(accountId, signalId, arcId); }

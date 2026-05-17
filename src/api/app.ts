@@ -97,6 +97,7 @@ export interface ApiDatabase {
   getSignal(accountId: string, id: string): PromiseLike<Result<Signal | null, DbError>>;
   createSignal(signal: Signal): PromiseLike<Result<Signal, DbError>>;
   updateSignal(accountId: string, id: string, update: Partial<Pick<Signal, "subject" | "textBody" | "from" | "to">>): PromiseLike<Result<Signal, DbError>>;
+  updateSignalSendStatus(accountId: string, signalId: string, update: { status: "pending_send" | "sent" | "draft"; sendInitiatedAt?: string | null; sentAt?: string; sesMessageId?: string; sendFailureReason?: string }): PromiseLike<Result<Signal, DbError>>;
   deleteSignal(accountId: string, id: string): PromiseLike<Result<void, DbError>>;
 
   // Views

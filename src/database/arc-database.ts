@@ -318,6 +318,51 @@ export class ArcDatabase implements ArcMatcher {
     }
   }
 
+  async updateSignalSendStatus(
+    accountId: string,
+    signalId: string,
+    update: {
+      status: "pending_send" | "sent" | "draft";
+      sendInitiatedAt?: string | null;
+      sentAt?: string;
+      sesMessageId?: string;
+      sendFailureReason?: string;
+    },
+  ): Promise<Result<Signal, DbError>> {
+    const setParts: string[] = ["#status = :status", "updatedAt = :now"];
+    const exprValues: Record<string, unknown> = { ":status": update.status, ":now": new Date().toISOString() };
+    const exprNames: Record<string, string> = { "#status": "status" };
+    const removeParts: string[] = [];
+
+    if (update.sendInitiatedAt === null) {
+      removeParts.push("sendInitiatedAt");
+    } else if (update.sendInitiatedAt !== undefined) {
+      setParts.push("sendInitiatedAt = :sia");
+      exprValues[":sia"] = update.sendInitiatedAt;
+    }
+
+    if (update.sentAt !== undefined) { setParts.push("sentAt = :sentAt"); exprValues[":sentAt"] = update.sentAt; }
+    if (update.sesMessageId !== undefined) { setParts.push("sesMessageId = :smid"); exprValues[":smid"] = update.sesMessageId; }
+    if (update.sendFailureReason !== undefined) { setParts.push("sendFailureReason = :sfr"); exprValues[":sfr"] = update.sendFailureReason; }
+
+    let updateExpr = `SET ${setParts.join(", ")}`;
+    if (removeParts.length > 0) updateExpr += ` REMOVE ${removeParts.join(", ")}`;
+
+    try {
+      const result = await dynamo.send(new UpdateCommand({
+        TableName: SIGNALS_TABLE,
+        Key: { pk: sigPk(accountId, signalId), sk: ITEM_SK },
+        UpdateExpression: updateExpr,
+        ExpressionAttributeValues: exprValues,
+        ExpressionAttributeNames: exprNames,
+        ReturnValues: "ALL_NEW",
+      }));
+      return ok(result.Attributes as unknown as Signal);
+    } catch (e) {
+      return err(dbError(e));
+    }
+  }
+
   async deleteSignal(accountId: string, id: string): Promise<Result<void, DbError>> {
     try {
       await dynamo.send(new DeleteCommand({
