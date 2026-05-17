@@ -80,7 +80,6 @@ program
       target: 'node24',
       format: 'esm' as const,
       external: ['@aws-sdk/*', 'pg-native'],
-      banner: { js: "import { createRequire } from 'module'; const require = createRequire(import.meta.url);" },
     };
 
     console.log(`Building ${functionName} v${version}...`);
