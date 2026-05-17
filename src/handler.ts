@@ -126,7 +126,11 @@ const processor = new SignalProcessor({
   contentCdnBaseUrl: CONTENT_CDN_BASE_URL,
 });
 
-const feedbackProcessor = new FeedbackProcessor(processingDb, accountDb, logger);
+const feedbackProcessor = new FeedbackProcessor(processingDb, accountDb, logger, {
+  getSignalByMessageId: (accountId, sesMessageId) => arcDb.getSignalByMessageId(accountId, sesMessageId),
+  saveSignal: (signal) => arcDb.saveSignal(signal),
+  updateSignalSendStatus: (accountId, signalId, update) => arcDb.updateSignalSendStatus(accountId, signalId, update),
+});
 
 const reindexWorker = new ReindexWorker(logger);
 
