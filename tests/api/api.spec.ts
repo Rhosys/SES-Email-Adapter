@@ -45,6 +45,7 @@ function makeStore(): ApiDatabase {
     getSignal: vi.fn().mockResolvedValue(ok(null)),
     createSignal: vi.fn().mockImplementation((signal) => Promise.resolve(ok(signal))),
     updateSignal: vi.fn().mockResolvedValue(ok(makeSignal())),
+    updateSignalSendStatus: vi.fn().mockResolvedValue(ok(makeSignal())),
     deleteSignal: vi.fn().mockResolvedValue(ok(undefined)),
     listViews: vi.fn().mockResolvedValue(ok([])),
     getView: vi.fn().mockResolvedValue(ok(null)),
