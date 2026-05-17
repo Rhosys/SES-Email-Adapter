@@ -48,8 +48,6 @@ Compared the frontend's expected API surface against the actual backend implemen
 - [ ] **Template `functions` field** — add `functions: TemplateFunction[]` to `EmailTemplate` schema. Each function is `{ name: string, code: string }` — an arrow expression `(signal, arc) => string` executed in sandboxed VM. Validate `name` is valid JS identifier. On render: run each function, collect into `fn.*` namespace, Handlebars pass over subject+body with `{ sender: { name, address }, fn }`.
 - [ ] **`POST /accounts/:id/users` accept `{ email, role }`** — resolve email→userId via Authress lookup server-side. Frontend doesn't know other users' Authress IDs.
 - [ ] **Billing endpoints** — `GET /accounts/:id/billing` → `BillingInfo`, `POST /accounts/:id/billing/checkout-session` → Stripe Checkout URL, `POST /accounts/:id/billing/portal-session` → Stripe Portal URL. Requires Stripe integration.
-- [ ] **View layout persistence** — `GET /accounts/:id/views/:viewId/layout` (404 if not customised), `PUT` (upsert), `DELETE` (reset to default). Store `nodes: LayoutNode[]` as opaque JSON blob.
-- [ ] **System view seeding** — seed `system:inbox`, `system:all`, `system:quarantine` as undeletable view records. `DELETE` on system view → 403. `DELETE` on system view layout → 204 (allowed).
 - [ ] **Rule `code` field** — add `code?: string` to Rule schema. Validate/sandbox server-side (parse to AST, reject unsafe nodes). Execute in isolated VM context, not raw `eval`.
 
 ---
