@@ -9,6 +9,7 @@ import type { ParsedMime } from "./mime.js";
 import type { ContentSanitizerClient } from "./content-sanitizer-client.js";
 import type { UserCodeExecutorClient, TemplateParameterResult } from "./user-code-client.js";
 import { stripSensitive } from "./rule-evaluator.js";
+import type { RuleEvalResult } from "./interpret-rule-result.js";
 import { buildEmbedText, extractEmbedTextInput } from "../embedding/embed-text.js";
 import type { SignalClassifier } from "../classifier/classifier.js";
 import type { EmbeddingGenerator } from "../embedding/embedding-generator.js";
@@ -79,7 +80,7 @@ export interface ArcMatcher {
 }
 
 export interface RuleEvaluator {
-  evaluate(rule: Rule, context: { signal: Signal; arc: Arc; isMatchedArc: boolean }): Promise<boolean>;
+  evaluate(rule: Rule, context: { signal: Signal; arc: Arc; isMatchedArc: boolean }): Promise<RuleEvalResult>;
 }
 
 export interface Notifier {
@@ -166,8 +167,11 @@ async function applyRules(
 ): Promise<MatchedRuleResult[]> {
   const matchedRules: MatchedRuleResult[] = [];
   for (const rule of rules) {
-    if (!await evaluator.evaluate(rule, context)) continue;
-    const actions = rule.actions.filter((a) => !a.disabled).map(({ type, value }) => ({ type, ...(value !== undefined ? { value } : {}) }));
+    const evalResult = await evaluator.evaluate(rule, context);
+    if (!evalResult.matched) continue;
+    const staticActions = rule.actions.filter((a) => !a.disabled).map(({ type, value }) => ({ type, ...(value !== undefined ? { value } : {}) }));
+    const dynamicActions = evalResult.dynamicActions.map(({ type, value }) => ({ type, ...(value !== undefined ? { value } : {}) }));
+    const actions = [...staticActions, ...dynamicActions];
     const labelsAdded = actions.filter((a) => a.type === "assign_label" && a.value).map((a) => a.value!);
     const statusChange: MatchedRuleResult["statusChange"] = (
       actions.some((a) => a.type === "block_reject")      ? "block_reject"      :

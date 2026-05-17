@@ -86,7 +86,7 @@ describe("JsonLogicRuleEvaluator — JS condition path", () => {
     evaluator = new JsonLogicRuleEvaluator(mockLogger, mockExecutor, mockStore);
   });
 
-  it("returns true when user code returns a truthy result", async () => {
+  it("returns matched with no dynamic actions when user code returns a truthy result", async () => {
     const response: UserCodeResponse = { success: true, purpose: "rule_condition", result: 42 };
     vi.mocked(mockExecutor.invoke).mockResolvedValue(response);
 
@@ -95,7 +95,7 @@ describe("JsonLogicRuleEvaluator — JS condition path", () => {
       { signal: makeSignal(), arc: makeArc(), isMatchedArc: false },
     );
 
-    expect(result).toBe(true);
+    expect(result).toEqual({ matched: true, dynamicActions: [], warnings: [] });
     expect(mockExecutor.invoke).toHaveBeenCalledWith({
       tenantId: "acc_123",
       purpose: "rule_condition",
@@ -107,7 +107,7 @@ describe("JsonLogicRuleEvaluator — JS condition path", () => {
     });
   });
 
-  it("returns false when user code returns null", async () => {
+  it("returns non-matching when user code returns null", async () => {
     const response: UserCodeResponse = { success: true, purpose: "rule_condition", result: null };
     vi.mocked(mockExecutor.invoke).mockResolvedValue(response);
 
@@ -116,12 +116,12 @@ describe("JsonLogicRuleEvaluator — JS condition path", () => {
       { signal: makeSignal(), arc: makeArc(), isMatchedArc: false },
     );
 
-    expect(result).toBe(false);
+    expect(result).toEqual({ matched: false, dynamicActions: [], warnings: [] });
     expect(mockStore.annotateRuleError).not.toHaveBeenCalled();
   });
 
-  it("returns false when user code returns a falsy value (0)", async () => {
-    const response: UserCodeResponse = { success: true, purpose: "rule_condition", result: 0 };
+  it("returns non-matching when user code returns undefined", async () => {
+    const response: UserCodeResponse = { success: true, purpose: "rule_condition", result: undefined };
     vi.mocked(mockExecutor.invoke).mockResolvedValue(response);
 
     const result = await evaluator.evaluate(
@@ -129,10 +129,24 @@ describe("JsonLogicRuleEvaluator — JS condition path", () => {
       { signal: makeSignal(), arc: makeArc(), isMatchedArc: false },
     );
 
-    expect(result).toBe(false);
+    expect(result).toEqual({ matched: false, dynamicActions: [], warnings: [] });
   });
 
-  it("returns false and annotates rule on timeout", async () => {
+  it("returns matched with dynamic actions when user code returns a RuleAction array", async () => {
+    const response: UserCodeResponse = { success: true, purpose: "rule_condition", result: [{ type: "archive" }, { type: "assign_label", value: "auto" }] };
+    vi.mocked(mockExecutor.invoke).mockResolvedValue(response);
+
+    const result = await evaluator.evaluate(
+      makeJsRule(),
+      { signal: makeSignal(), arc: makeArc(), isMatchedArc: false },
+    );
+
+    expect(result.matched).toBe(true);
+    expect(result.dynamicActions).toEqual([{ type: "archive" }, { type: "assign_label", value: "auto" }]);
+    expect(result.warnings).toEqual([]);
+  });
+
+  it("returns non-matching and annotates rule on timeout", async () => {
     const response: UserCodeResponse = { success: false, error: { message: "User code execution timed out", type: "timeout" } };
     vi.mocked(mockExecutor.invoke).mockResolvedValue(response);
 
@@ -141,7 +155,7 @@ describe("JsonLogicRuleEvaluator — JS condition path", () => {
       { signal: makeSignal(), arc: makeArc(), isMatchedArc: false },
     );
 
-    expect(result).toBe(false);
+    expect(result).toEqual({ matched: false, dynamicActions: [], warnings: [] });
     expect(mockStore.annotateRuleError).toHaveBeenCalledWith(
       "acc_123",
       "rule_timeout",
@@ -149,7 +163,7 @@ describe("JsonLogicRuleEvaluator — JS condition path", () => {
     );
   });
 
-  it("returns false and annotates rule on runtime error", async () => {
+  it("returns non-matching and annotates rule on runtime error", async () => {
     const response: UserCodeResponse = { success: false, error: { message: "ReferenceError: foo is not defined", type: "runtime_error" } };
     vi.mocked(mockExecutor.invoke).mockResolvedValue(response);
 
@@ -158,7 +172,7 @@ describe("JsonLogicRuleEvaluator — JS condition path", () => {
       { signal: makeSignal(), arc: makeArc(), isMatchedArc: false },
     );
 
-    expect(result).toBe(false);
+    expect(result).toEqual({ matched: false, dynamicActions: [], warnings: [] });
     expect(mockStore.annotateRuleError).toHaveBeenCalledWith(
       "acc_123",
       "rule_runtime",
@@ -166,7 +180,7 @@ describe("JsonLogicRuleEvaluator — JS condition path", () => {
     );
   });
 
-  it("falls through to evalCondition for non-JS rules", async () => {
+  it("falls through to evalCondition for non-JS rules and wraps boolean result", async () => {
     const jsonLogicRule: Rule = {
       id: "rule_jl_001",
       accountId: "acc_123",
@@ -184,7 +198,7 @@ describe("JsonLogicRuleEvaluator — JS condition path", () => {
       { signal: makeSignal(), arc: makeArc(), isMatchedArc: true },
     );
 
-    expect(result).toBe(true);
+    expect(result).toEqual({ matched: true, dynamicActions: [], warnings: [] });
     expect(mockExecutor.invoke).not.toHaveBeenCalled();
   });
 });
