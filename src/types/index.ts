@@ -469,6 +469,7 @@ export interface View {
   sortField: SortField;
   sortDirection: SortDirection;
   position: number;
+  layout?: unknown[];    // LayoutNode[] — opaque JSON blob, validated by the frontend
   createdAt: string;
   updatedAt: string;
 }
