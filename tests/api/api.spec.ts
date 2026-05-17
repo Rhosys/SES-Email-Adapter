@@ -5,6 +5,11 @@ import type { ApiDatabase, AuthService, AccessService, AccountUser, Verification
 import { ok, err } from "neverthrow";
 import { createMockLogger } from "../helpers/mock-logger.js";
 import { authError } from "../../src/errors.js";
+import type { DraftSendDispatcher } from "../../src/processor/draft-send-dispatcher.js";
+
+vi.mock("../../src/dns/mx-validator.js", () => ({
+  validateRecipientMx: vi.fn().mockResolvedValue({ valid: true, invalidDomains: [] }),
+}));
 
 // ---------------------------------------------------------------------------
 // Test doubles
@@ -252,6 +257,7 @@ describe("API", () => {
   let auth: AuthService;
   let access: AccessService;
   let verificationMailer: VerificationMailer;
+  let draftSendDispatcher: DraftSendDispatcher;
   let app: ReturnType<typeof createApp>;
 
   beforeEach(() => {
@@ -260,7 +266,8 @@ describe("API", () => {
     auth = makeAuth();
     access = makeAccess();
     verificationMailer = { sendForwardVerification: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) };
-    app = createApp({ store, auth, access, logger: createMockLogger(), verificationMailer });
+    draftSendDispatcher = { dispatch: vi.fn().mockResolvedValue(ok(undefined)) } as unknown as DraftSendDispatcher;
+    app = createApp({ store, auth, access, logger: createMockLogger(), verificationMailer, draftSendDispatcher });
   });
 
   // -------------------------------------------------------------------------
@@ -525,7 +532,7 @@ describe("API", () => {
       const res = await req(app, "PATCH", `${A}/signals/SES%23msg-001`, { body: { subject: "x" } });
       expect(res.status).toBe(400);
       const body = await res.json() as { errorCode: string };
-      expect(body.errorCode).toBe("SIGNAL_NOT_DRAFT");
+      expect(body.errorCode).toBe("SIGNAL_NOT_EDITABLE");
     });
 
     it("returns 404 for unknown signal", async () => {
@@ -534,24 +541,27 @@ describe("API", () => {
     });
   });
 
-  describe("POST /accounts/:accountId/signals/:id/send — send draft", () => {
+  describe("POST /accounts/:accountId/arcs/:arcId/signals/:id/send — send draft", () => {
     it("sends a draft signal and returns 200 + updated signal", async () => {
+      vi.mocked(store.getArc).mockResolvedValueOnce(ok(makeArc()));
       vi.mocked(store.getSignal).mockResolvedValueOnce(ok(makeSignal({ status: "draft" })));
-      const res = await req(app, "POST", `${A}/signals/SES%23msg-001/send`);
+      const res = await req(app, "POST", `${A}/arcs/arc-001/signals/SES%23msg-001/send`);
       expect(res.status).toBe(200);
-      expect(store.updateSignal).toHaveBeenCalledOnce();
+      expect(store.updateSignalSendStatus).toHaveBeenCalledOnce();
     });
 
     it("returns 400 when signal is not a draft", async () => {
+      vi.mocked(store.getArc).mockResolvedValueOnce(ok(makeArc()));
       vi.mocked(store.getSignal).mockResolvedValueOnce(ok(makeSignal({ status: "active" })));
-      const res = await req(app, "POST", `${A}/signals/SES%23msg-001/send`);
+      const res = await req(app, "POST", `${A}/arcs/arc-001/signals/SES%23msg-001/send`);
       expect(res.status).toBe(400);
       const body = await res.json() as { errorCode: string };
       expect(body.errorCode).toBe("SIGNAL_NOT_DRAFT");
     });
 
     it("returns 404 for unknown signal", async () => {
-      const res = await req(app, "POST", `${A}/signals/nonexistent/send`);
+      vi.mocked(store.getArc).mockResolvedValueOnce(ok(makeArc()));
+      const res = await req(app, "POST", `${A}/arcs/arc-001/signals/nonexistent/send`);
       expect(res.status).toBe(404);
     });
   });
