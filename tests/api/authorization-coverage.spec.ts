@@ -34,6 +34,7 @@ function makeMockDeps() {
     updateUserRole: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     removeUser: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     checkAccess: vi.fn().mockResolvedValue(undefined),
+    createInvite: vi.fn().mockReturnValue(Promise.resolve(ok({ inviteId: "inv-test" }))),
   };
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -180,6 +181,7 @@ describe("Authorization Coverage", () => {
       updateUserRole: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
       removeUser: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
       checkAccess: vi.fn().mockResolvedValue(undefined),
+      createInvite: vi.fn().mockReturnValue(Promise.resolve(ok({ inviteId: "inv-test" }))),
     };
     const authz = createAuthorize(access, createMockLogger());
     app.get("/accounts/:accountId/protected", authz("arcs:read", (c) => `accounts/${c.req.param("accountId")}/arcs`), (c) => c.json({ data: "safe" }));

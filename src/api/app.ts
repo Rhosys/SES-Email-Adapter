@@ -69,6 +69,7 @@ export interface AccessService {
   updateUserRole(accountId: string, userId: string, role: AccountRole): Promise<Result<void, AuthressServiceError>>;
   removeUser(accountId: string, userId: string): Promise<Result<void, AuthressServiceError>>;
   checkAccess(userId: string, accountId: string, permission: string): Promise<void>;
+  createInvite(accountId: string, email: string, role: AccountRole): Promise<Result<{ inviteId: string }, AuthressServiceError>>;
 }
 
 // ---------------------------------------------------------------------------
