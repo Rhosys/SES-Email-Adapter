@@ -174,6 +174,7 @@ export interface ApiDatabase {
 
   // Audit
   listAuditEvents(accountId: string, params: PageParams): PromiseLike<Result<Page<AuditEvent>, DbError>>;
+  saveAuditEvent(event: Omit<AuditEvent, "eventId" | "timestamp">): PromiseLike<Result<void, DbError>>;
 
   // Stats
   getStats(accountId: string): PromiseLike<Result<Record<string, unknown> | null, DbError>>;
@@ -812,6 +813,17 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
     }
     const forwardError = await validateForwardTargets(accountId, body.actions as Rule["actions"], store);
     if (forwardError) return err(c, 400, forwardError, "UNVERIFIED_FORWARD_TARGET");
+    // Audit: write code change event before persisting (best-effort)
+    if (effectiveConditionType === "js") {
+      const { userId } = c.get("auth");
+      const auditResult = await store.saveAuditEvent({
+        accountId, userId, action: "created", resourceType: "rule", resourceId: "",
+        before: null, after: { conditionType: "js", code: body.code },
+      });
+      if (auditResult.isErr()) {
+        logger.warn("Audit write failed for rule creation, proceeding with resource write", { code: "api.audit.rule_create_failed", accountId, error: auditResult.error });
+      }
+    }
     const ruleResult = await store.createRule(accountId, body as Parameters<typeof store.createRule>[1]);
     if (ruleResult.isErr()) return err(c, 500, "Internal Server Error");
     return c.json(ruleResult.value, 201);
@@ -854,6 +866,18 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
     const updateData: Parameters<typeof store.updateRule>[2] = { ...body } as Parameters<typeof store.updateRule>[2];
     if (effectiveConditionType === "js" && body.code !== undefined) {
       (updateData as Record<string, unknown>)["lastError"] = null;
+    }
+    // Audit: write code change event before persisting (best-effort)
+    if (body.code !== undefined) {
+      const { userId } = c.get("auth");
+      const auditResult = await store.saveAuditEvent({
+        accountId, userId, action: "updated", resourceType: "rule", resourceId: rule.id,
+        before: { conditionType: rule.conditionType ?? "json_logic", code: rule.code ?? null },
+        after: { conditionType: effectiveConditionType, code: body.code },
+      });
+      if (auditResult.isErr()) {
+        logger.warn("Audit write failed for rule update, proceeding with resource write", { code: "api.audit.rule_update_failed", accountId, ruleId: rule.id, error: auditResult.error });
+      }
     }
     const updateResult = await store.updateRule(accountId, rule.id, updateData);
     if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
@@ -1173,9 +1197,27 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
       }
     }
     const now = new Date().toISOString();
+    // Audit: write functions change event before persisting (best-effort)
+    if (body.functions) {
+      const { userId } = c.get("auth");
+      const templateId = randomUUID();
+      const auditResult = await store.saveAuditEvent({
+        accountId, userId, action: "created", resourceType: "template", resourceId: templateId,
+        before: null, after: { functions: body.functions },
+      });
+      if (auditResult.isErr()) {
+        logger.warn("Audit write failed for template creation, proceeding with resource write", { code: "api.audit.template_create_failed", accountId, error: auditResult.error });
+      }
+      const templateResult = await store.createTemplate({
+        id: templateId, accountId, name: body.name, subject: body.subject, body: body.body,
+        functions: body.functions,
+        createdAt: now, updatedAt: now,
+      });
+      if (templateResult.isErr()) return err(c, 500, "Internal Server Error");
+      return c.json(templateResult.value, 201);
+    }
     const templateResult = await store.createTemplate({
       id: randomUUID(), accountId, name: body.name, subject: body.subject, body: body.body,
-      ...(body.functions ? { functions: body.functions } : {}),
       createdAt: now, updatedAt: now,
     });
     if (templateResult.isErr()) return err(c, 500, "Internal Server Error");
@@ -1196,6 +1238,18 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
     const existingResult = await store.getTemplate(accountId, c.req.param("id"));
     if (existingResult.isErr()) return err(c, 500, "Internal Server Error");
     if (!existingResult.value) return err(c, 404, "Template not found", "TEMPLATE_NOT_FOUND");
+    // Audit: write functions change event before persisting (best-effort)
+    if (body.functions) {
+      const { userId } = c.get("auth");
+      const auditResult = await store.saveAuditEvent({
+        accountId, userId, action: "updated", resourceType: "template", resourceId: c.req.param("id"),
+        before: { functions: existingResult.value.functions ?? null },
+        after: { functions: body.functions },
+      });
+      if (auditResult.isErr()) {
+        logger.warn("Audit write failed for template update, proceeding with resource write", { code: "api.audit.template_update_failed", accountId, templateId: c.req.param("id"), error: auditResult.error });
+      }
+    }
     const updateResult = await store.updateTemplate(accountId, c.req.param("id"), body as Parameters<typeof store.updateTemplate>[2]);
     if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
     return c.json(updateResult.value);
@@ -1215,6 +1269,18 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
     const existingResult = await store.getTemplate(accountId, c.req.param("id"));
     if (existingResult.isErr()) return err(c, 500, "Internal Server Error");
     if (!existingResult.value) return err(c, 404, "Template not found", "TEMPLATE_NOT_FOUND");
+    // Audit: write functions change event before persisting (best-effort)
+    if (body.functions) {
+      const { userId } = c.get("auth");
+      const auditResult = await store.saveAuditEvent({
+        accountId, userId, action: "updated", resourceType: "template", resourceId: c.req.param("id"),
+        before: { functions: existingResult.value.functions ?? null },
+        after: { functions: body.functions },
+      });
+      if (auditResult.isErr()) {
+        logger.warn("Audit write failed for template replace, proceeding with resource write", { code: "api.audit.template_replace_failed", accountId, templateId: c.req.param("id"), error: auditResult.error });
+      }
+    }
     const updateResult = await store.updateTemplate(accountId, c.req.param("id"), { name: body.name, subject: body.subject, body: body.body, ...(body.functions ? { functions: body.functions } : {}) });
     if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
     return c.json(updateResult.value);
