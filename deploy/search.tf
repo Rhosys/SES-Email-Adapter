@@ -99,6 +99,29 @@ resource "aws_rds_cluster_instance" "aurora" {
 # Triggered once per cluster creation; CI migration script executes the SQL.
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# CloudWatch log group for Aurora PostgreSQL logs
+# Aurora auto-creates this log group but with no retention — we adopt it via
+# import block and set a 1-year retention policy.
+# ---------------------------------------------------------------------------
+
+resource "aws_cloudwatch_log_group" "aurora" {
+  for_each = local.cluster_registry
+
+  name              = "/aws/rds/cluster/${lower(var.service_name)}-${each.key}/postgresql"
+  retention_in_days = 365
+}
+
+import {
+  to = aws_cloudwatch_log_group.aurora["aurora-prod-titan-v2"]
+  id = "/aws/rds/cluster/ses-email-adapter-aurora-prod-titan-v2/postgresql"
+}
+
+# ---------------------------------------------------------------------------
+# Per-cluster bootstrap SQL — composite PK schema + HNSW index + RLS
+# Triggered once per cluster creation; CI migration script executes the SQL.
+# ---------------------------------------------------------------------------
+
 resource "terraform_data" "pgvector_init" {
   for_each = local.cluster_registry
 
