@@ -53,6 +53,22 @@ export const UpdateSignalRequest = z.object({
 });
 export type UpdateSignalRequest = z.infer<typeof UpdateSignalRequest>;
 
+export const CreateDraftSignalRequest = z.object({
+  from: EmailAddressSchema,
+  to: z.array(EmailAddressSchema).min(1),
+  subject: z.string(),
+  textBody: z.string().optional(),
+});
+export type CreateDraftSignalRequest = z.infer<typeof CreateDraftSignalRequest>;
+
+export const ReplaceDraftSignalRequest = z.object({
+  from: EmailAddressSchema,
+  to: z.array(EmailAddressSchema).min(1),
+  subject: z.string(),
+  textBody: z.string().optional(),
+});
+export type ReplaceDraftSignalRequest = z.infer<typeof ReplaceDraftSignalRequest>;
+
 // ---- View ----
 
 export const CreateViewRequest = z.object({
@@ -102,6 +118,7 @@ export const CreateRuleRequest = z.object({
   condition: z.string().max(10_240).optional(),
   actions: z.array(RuleActionSchema).min(1),
   priorityOrder: z.number().int().min(0).optional(),
+  status: RuleStatus.optional(),
   tags: z.record(z.string(), z.string()).optional(),
 });
 export type CreateRuleRequest = z.infer<typeof CreateRuleRequest>;
@@ -156,6 +173,13 @@ export const CreateTemplateRequest = z.object({
   body: z.string(),
 });
 export type CreateTemplateRequest = z.infer<typeof CreateTemplateRequest>;
+
+export const ReplaceTemplateRequest = z.object({
+  name: z.string().min(1),
+  subject: z.string(),
+  body: z.string(),
+});
+export type ReplaceTemplateRequest = z.infer<typeof ReplaceTemplateRequest>;
 
 export const UpdateTemplateRequest = z.object({
   name: z.string().min(1).optional(),
