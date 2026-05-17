@@ -1,5 +1,6 @@
 import type { SQSEvent } from "aws-lambda";
-import type { SesFeedback, SuppressedAddress } from "../types/index.js";
+import { randomUUID } from "crypto";
+import type { SesFeedback, Signal, SuppressedAddress } from "../types/index.js";
 import type { ProcessingDatabase } from "../database/processing-database.js";
 import type { AccountDatabase } from "../database/account-database.js";
 import { ok, err, dbError } from "../errors.js";
@@ -9,14 +10,28 @@ import type { Logger } from "../logger.js";
 // 72 hours in seconds — soft bounces expire and can retry
 const SOFT_BOUNCE_TTL_SECONDS = 72 * 60 * 60;
 
+export interface FeedbackSignalStore {
+  getSignalByMessageId(accountId: string, sesMessageId: string): Promise<Result<Signal | null, DbError>>;
+  saveSignal(signal: Signal): Promise<Result<void, DbError>>;
+  updateSignalSendStatus(accountId: string, signalId: string, update: {
+    status: "pending_send" | "sent" | "draft";
+    sendInitiatedAt?: string | null;
+    sentAt?: string;
+    sesMessageId?: string;
+    sendFailureReason?: string;
+  }): Promise<Result<Signal, DbError>>;
+}
+
 export class FeedbackProcessor {
   private readonly processingDb: ProcessingDatabase;
   private readonly accountDb: AccountDatabase;
+  private readonly signalStore: FeedbackSignalStore | undefined;
   private readonly logger: Logger;
 
-  constructor(processingDb: ProcessingDatabase, accountDb: AccountDatabase, logger: Logger) {
+  constructor(processingDb: ProcessingDatabase, accountDb: AccountDatabase, logger: Logger, signalStore?: FeedbackSignalStore) {
     this.processingDb = processingDb;
     this.accountDb = accountDb;
+    this.signalStore = signalStore;
     this.logger = logger;
   }
 
@@ -80,6 +95,67 @@ export class FeedbackProcessor {
             const disableResult = await this.accountDb.disableForwardActions(accountId, r.emailAddress);
             if (disableResult.isErr()) {
               this.logger.track("Failed to disable forward actions after permanent bounce. The DynamoDB update for the forward rule returned an error. Emails may continue to be forwarded to the bouncing address.", { code: "feedback.disable_forward_failed", accountId, address: r.emailAddress, error: disableResult.error });
+            }
+          }
+        }
+      }
+
+      // Check if this bounce is for a user-sent signal
+      if (this.signalStore) {
+        const sesMessageId = feedback.mail.messageId;
+        const accountId = feedback.mail.tags?.["accountId"];
+        if (accountId) {
+          const sentSignalResult = await this.signalStore.getSignalByMessageId(accountId, sesMessageId);
+          if (sentSignalResult.isOk()) {
+            const sentSignal = sentSignalResult.value;
+            if (sentSignal && sentSignal.source === "user") {
+              const bouncedRecipients = feedback.bounce!.bouncedRecipients.map(r => ({
+                address: r.emailAddress,
+                bounceType: isPermanent ? "permanent" as const : "transient" as const,
+                ...(r.status ? { reason: r.status } : {}),
+              }));
+
+              // Create deliverability signal in the same arc
+              const deliverabilitySignal: Signal = {
+                id: `SYS#${randomUUID()}`,
+                ...(sentSignal.arcId ? { arcId: sentSignal.arcId } : {}),
+                accountId: sentSignal.accountId,
+                source: "deliverability",
+                status: "active",
+                receivedAt: new Date().toISOString(),
+                from: { address: "system@deliverability" },
+                to: [],
+                cc: [],
+                subject: `Delivery failure: ${bouncedRecipients.length} recipient(s) bounced`,
+                attachments: [],
+                headers: {},
+                recipientAddress: sentSignal.from.address,
+                workflow: sentSignal.workflow,
+                workflowData: sentSignal.workflowData,
+                spamScore: 0,
+                summary: "",
+                classificationModelId: "",
+                s3Key: "",
+                createdAt: new Date().toISOString(),
+                relatedSignalId: sentSignal.id,
+                bouncedRecipients,
+              };
+              await this.signalStore.saveSignal(deliverabilitySignal);
+
+              // If ALL recipients permanently bounced → revert sent signal to draft
+              if (isPermanent) {
+                const allTo = sentSignal.to.map(t => t.address.toLowerCase());
+                const allBounced = allTo.every(addr =>
+                  bouncedRecipients.some(b => b.address.toLowerCase() === addr && b.bounceType === "permanent")
+                );
+                if (allBounced) {
+                  await this.signalStore.updateSignalSendStatus(sentSignal.accountId, sentSignal.id, {
+                    status: "draft",
+                    sendFailureReason: "all_recipients_bounced",
+                    sendInitiatedAt: null,
+                  });
+                }
+              }
             }
           }
         }
