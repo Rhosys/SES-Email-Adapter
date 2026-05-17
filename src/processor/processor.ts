@@ -24,6 +24,7 @@ import { getPrimaryArcMatcherRegistry, getActiveClusters } from "../embedding/cl
 import { getETLD1, assignSystemLabels, DEFAULT_SPAM_SCORE_THRESHOLD } from "./filter.js";
 import { statusToCategory } from "../database/stats-writer.js";
 import type { DraftSendDispatch } from "./draft-send-dispatcher.js";
+import type { SystemSignalCreator } from "./system-signal-creator.js";
 
 // ---------------------------------------------------------------------------
 // Message types
@@ -165,6 +166,7 @@ async function applyRules(
   context: { signal: Signal; arc: Arc; isMatchedArc: boolean },
   evaluator: RuleEvaluator,
   logger: Logger,
+  systemSignalCreator?: SystemSignalCreator,
 ): Promise<MatchedRuleResult[]> {
   const matchedRules: MatchedRuleResult[] = [];
   for (const rule of rules) {
@@ -180,7 +182,14 @@ async function applyRules(
         accountId: rule.accountId,
         warnings: evalResult.warnings,
       });
-      // TODO(task 8.1): Create system signal notifying user of invalid dynamic actions
+      if (systemSignalCreator) {
+        await systemSignalCreator.createInvalidOutputSignal({
+          accountId: rule.accountId,
+          resourceType: "rule",
+          resourceName: rule.name,
+          issue: evalResult.warnings.join("; "),
+        });
+      }
     }
 
     const staticActions = rule.actions.filter((a) => !a.disabled).map(({ type, value }) => ({ type, ...(value !== undefined ? { value } : {}) }));
@@ -296,6 +305,7 @@ interface SignalProcessorOptions {
   replySender: ReplySender;
   sqsDispatcher: SqsDispatcher;
   draftSendDispatcher: DraftSendDispatch;
+  systemSignalCreator?: SystemSignalCreator;
   s3Client: S3Client;
   emailBucket: string;
   contentBucket: string;
@@ -318,6 +328,7 @@ export class SignalProcessor {
   private readonly retentionService: S3RetentionService;
   private readonly sqsDispatcher: SqsDispatcher;
   private readonly draftSendDispatcher: DraftSendDispatch;
+  private readonly systemSignalCreator: SystemSignalCreator | undefined;
   private readonly s3Client: S3Client;
   private readonly emailBucket: string;
   private readonly contentBucket: string;
@@ -339,6 +350,7 @@ export class SignalProcessor {
     this.retentionService = opts.retentionService;
     this.sqsDispatcher = opts.sqsDispatcher;
     this.draftSendDispatcher = opts.draftSendDispatcher;
+    this.systemSignalCreator = opts.systemSignalCreator;
     this.s3Client = opts.s3Client;
     this.emailBucket = opts.emailBucket;
     this.contentBucket = opts.contentBucket;
@@ -863,7 +875,7 @@ export class SignalProcessor {
     const rulesResult = await this.store.listEnabledRules(accountId);
     if (rulesResult.isErr()) return err(rulesResult.error);
     const rules = rulesResult.value;
-    const matchedRules = await applyRules(rules, { signal: signalShell, arc, isMatchedArc }, this.ruleEvaluator, this.logger);
+    const matchedRules = await applyRules(rules, { signal: signalShell, arc, isMatchedArc }, this.ruleEvaluator, this.logger, this.systemSignalCreator);
     const outcome = deriveOutcome(matchedRules);
     this.logger.trackPoint("rules_evaluated", { matchedRuleCount: matchedRules.length });
 
