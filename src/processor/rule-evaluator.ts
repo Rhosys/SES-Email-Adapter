@@ -8,19 +8,37 @@ import type { DbError } from "../errors.js";
 import { evalCondition } from "./rule-engine.js";
 
 // ---------------------------------------------------------------------------
-// Strip sensitive fields before passing to user code
+// Strip sensitive fields before passing to user code (allowlist approach)
 // ---------------------------------------------------------------------------
 
-export function stripSensitive(signal: Signal): Partial<Signal>;
-export function stripSensitive(arc: Arc): Partial<Arc>;
-export function stripSensitive(obj: Signal | Arc): Partial<Signal> | Partial<Arc> {
-  if ("s3Key" in obj && "from" in obj) {
-    // Signal — remove s3Key, embeddings, headers (may contain auth tokens)
-    const { s3Key, embeddings, ...rest } = obj as Signal;
-    return rest;
+export type StrippedSignal = Pick<Signal, "id" | "from" | "subject" | "summary" | "spamScore" | "workflow" | "recipientAddress" | "workflowData">;
+export type StrippedArc = Pick<Arc, "id" | "labels" | "urgency" | "summary" | "workflow" | "status">;
+
+export function stripSensitive(signal: Signal): StrippedSignal;
+export function stripSensitive(arc: Arc): StrippedArc;
+export function stripSensitive(obj: Signal | Arc): StrippedSignal | StrippedArc {
+  if ("from" in obj && "subject" in obj) {
+    const signal = obj as Signal;
+    return {
+      id: signal.id,
+      from: signal.from,
+      subject: signal.subject,
+      summary: signal.summary,
+      spamScore: signal.spamScore,
+      workflow: signal.workflow,
+      recipientAddress: signal.recipientAddress,
+      workflowData: signal.workflowData,
+    };
   }
-  // Arc — no sensitive fields to strip currently
-  return { ...obj };
+  const arc = obj as Arc;
+  return {
+    id: arc.id,
+    labels: arc.labels,
+    urgency: arc.urgency,
+    summary: arc.summary,
+    workflow: arc.workflow,
+    status: arc.status,
+  };
 }
 
 // ---------------------------------------------------------------------------

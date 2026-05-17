@@ -196,15 +196,58 @@ describe("stripSensitive", () => {
 
     expect(stripped).not.toHaveProperty("s3Key");
     expect(stripped).not.toHaveProperty("embeddings");
+    expect(stripped).not.toHaveProperty("headers");
     expect(stripped).toHaveProperty("id", signal.id);
-    expect(stripped).toHaveProperty("accountId", signal.accountId);
+    expect(stripped).not.toHaveProperty("accountId");
   });
 
-  it("preserves all Arc fields", () => {
+  it("produces exactly the specified Signal fields", () => {
+    const signal = makeSignal({
+      s3Key: "secret/path.eml",
+      embeddings: { "model": [1, 2, 3] },
+      headers: { "x-custom": "value" },
+    });
+    const stripped = stripSensitive(signal);
+
+    expect(Object.keys(stripped).sort()).toEqual(
+      ["from", "id", "recipientAddress", "spamScore", "subject", "summary", "workflow", "workflowData"].sort(),
+    );
+    expect(stripped).toEqual({
+      id: signal.id,
+      from: signal.from,
+      subject: signal.subject,
+      summary: signal.summary,
+      spamScore: signal.spamScore,
+      workflow: signal.workflow,
+      recipientAddress: signal.recipientAddress,
+      workflowData: signal.workflowData,
+    });
+  });
+
+  it("produces exactly the specified Arc fields", () => {
+    const arc = makeArc({ labels: ["important"], urgency: "high" });
+    const stripped = stripSensitive(arc);
+
+    expect(Object.keys(stripped).sort()).toEqual(
+      ["id", "labels", "status", "summary", "urgency", "workflow"].sort(),
+    );
+    expect(stripped).toEqual({
+      id: arc.id,
+      labels: arc.labels,
+      urgency: arc.urgency,
+      summary: arc.summary,
+      workflow: arc.workflow,
+      status: arc.status,
+    });
+  });
+
+  it("excludes accountId, timestamps, and other non-context fields from Arc", () => {
     const arc = makeArc({ labels: ["important"] });
     const stripped = stripSensitive(arc);
 
-    expect(stripped).toHaveProperty("id", arc.id);
-    expect(stripped).toHaveProperty("labels", ["important"]);
+    expect(stripped).not.toHaveProperty("accountId");
+    expect(stripped).not.toHaveProperty("lastSignalAt");
+    expect(stripped).not.toHaveProperty("createdAt");
+    expect(stripped).not.toHaveProperty("updatedAt");
   });
 });
