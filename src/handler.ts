@@ -48,6 +48,7 @@ import { ReindexDispatcher } from "./jobs/reindex/reindex-dispatcher.js";
 import type { ReindexSegmentMessage } from "./jobs/reindex/reindex-dispatcher.js";
 import { DraftSendDispatcher } from "./processor/draft-send-dispatcher.js";
 import type { DraftSendPayload } from "./processor/draft-send-dispatcher.js";
+import { DynamoSystemSignalCreator } from "./processor/system-signal-creator.js";
 import { DraftSendWorker } from "./processor/draft-send-worker.js";
 import { RequestLogger } from "./logger.js";
 
@@ -123,6 +124,7 @@ const processor = new SignalProcessor({
   replySender: externalEmailHandler,
   sqsDispatcher: new SqsDispatcherImpl(SIGNAL_QUEUE_URL, sqs, logger),
   draftSendDispatcher,
+  systemSignalCreator: new DynamoSystemSignalCreator(logger),
   logger,
   s3Client: s3,
   emailBucket: S3_BUCKET,
