@@ -11,6 +11,7 @@ import { DeviceNotifier } from "../../src/notifier/device-notifier.js";
 function mockLogger(): Logger {
   return {
     startInvocation: vi.fn(),
+    getInvocationId: vi.fn().mockReturnValue("test-invocation-id"),
     trackPoint: vi.fn(),
     info: vi.fn(),
     track: vi.fn(),

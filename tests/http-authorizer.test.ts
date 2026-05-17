@@ -155,6 +155,7 @@ vi.mock("../src/api/app.js", () => ({
 vi.mock("../src/logger.js", () => ({
   RequestLogger: vi.fn().mockImplementation(() => ({
     startInvocation: vi.fn(),
+    getInvocationId: vi.fn().mockReturnValue("test-invocation-id"),
     trackPoint: vi.fn(),
     info: vi.fn(),
     track: vi.fn(),

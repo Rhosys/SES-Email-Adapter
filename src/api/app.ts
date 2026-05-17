@@ -234,11 +234,17 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
     info: { title: "SES Email Adapter", version: "1.0.0" },
   });
 
+  // Attach x-request-id to every response
+  app.use("*", async (c, next) => {
+    await next();
+    c.res.headers.set("x-request-id", logger.getInvocationId());
+  });
+
   app.get("/", (c) => c.redirect("/api/openapi.json", 301));
 
   function err(c: Context<AppEnv>, status: number, title: string, errorCode?: string, details?: unknown) {
     return c.json(
-      { title, ...(errorCode ? { errorCode } : {}), ...(details !== undefined ? { details } : {}) },
+      { title, ...(errorCode ? { errorCode } : {}), ...(details !== undefined ? { details } : {}), errorId: logger.getInvocationId() },
       status as 400 | 401 | 403 | 404 | 409 | 501,
     );
   }

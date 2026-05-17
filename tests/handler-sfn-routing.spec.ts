@@ -159,6 +159,7 @@ vi.mock("../src/api/app.js", () => ({
 
 const mockLogger = {
   startInvocation: vi.fn(),
+  getInvocationId: vi.fn().mockReturnValue("test-invocation-id"),
   trackPoint: vi.fn(),
   info: vi.fn(),
   track: vi.fn(),

@@ -17,6 +17,9 @@ export function createMockLogger(): MockLogger {
     startInvocation() {
       /* no-op */
     },
+    getInvocationId() {
+      return "test-invocation-id";
+    },
     trackPoint() {
       /* no-op */
     },
