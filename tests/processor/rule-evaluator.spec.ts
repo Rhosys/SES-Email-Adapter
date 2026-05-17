@@ -203,65 +203,93 @@ describe("JsonLogicRuleEvaluator — JS condition path", () => {
   });
 });
 
-describe("stripSensitive", () => {
-  it("removes s3Key and embeddings from Signal", () => {
-    const signal = makeSignal({ s3Key: "secret/path.eml", embeddings: { "model": [1, 2, 3] } });
+/**
+ * Property 2: Context preparation produces exactly the specified fields
+ * Validates: Requirements 4.1, 4.2, 4.4
+ */
+describe("stripSensitive — Property 2: context preparation produces exactly the specified fields", () => {
+  const EXPECTED_SIGNAL_KEYS = ["id", "from", "subject", "summary", "spamScore", "workflow", "recipientAddress", "workflowData"];
+  const EXPECTED_ARC_KEYS = ["id", "labels", "urgency", "summary", "workflow", "status"];
+
+  const signalCases = [
+    {
+      label: "full Signal → output has exactly the 8 specified fields",
+      input: () => makeSignal({
+        s3Key: "emails/msg.eml",
+        embeddings: { "model-v1": [0.1, 0.2] },
+        headers: { "x-custom": "value" },
+      }),
+      expectedKeys: EXPECTED_SIGNAL_KEYS,
+      expectedValues: (signal: Signal) => ({
+        id: signal.id,
+        from: signal.from,
+        subject: signal.subject,
+        summary: signal.summary,
+        spamScore: signal.spamScore,
+        workflow: signal.workflow,
+        recipientAddress: signal.recipientAddress,
+        workflowData: signal.workflowData,
+      }),
+      absentKeys: ["s3Key", "embeddings", "headers", "accountId", "source", "receivedAt", "to", "cc", "textBody", "attachments", "status", "createdAt", "classificationModelId"],
+    },
+    {
+      label: "Signal with s3Key/embeddings/headers → none appear in output",
+      input: () => makeSignal({
+        s3Key: "secret/path.eml",
+        embeddings: { "model": [1, 2, 3] },
+        headers: { "x-mailer": "test", "dkim-signature": "abc" },
+      }),
+      expectedKeys: EXPECTED_SIGNAL_KEYS,
+      expectedValues: (signal: Signal) => ({
+        id: signal.id,
+        from: signal.from,
+        subject: signal.subject,
+        summary: signal.summary,
+        spamScore: signal.spamScore,
+        workflow: signal.workflow,
+        recipientAddress: signal.recipientAddress,
+        workflowData: signal.workflowData,
+      }),
+      absentKeys: ["s3Key", "embeddings", "headers"],
+    },
+  ] as const;
+
+  it.each(signalCases)("$label", ({ input, expectedKeys, expectedValues, absentKeys }) => {
+    const signal = input();
     const stripped = stripSensitive(signal);
 
-    expect(stripped).not.toHaveProperty("s3Key");
-    expect(stripped).not.toHaveProperty("embeddings");
-    expect(stripped).not.toHaveProperty("headers");
-    expect(stripped).toHaveProperty("id", signal.id);
-    expect(stripped).not.toHaveProperty("accountId");
+    expect(Object.keys(stripped).sort()).toEqual([...expectedKeys].sort());
+    expect(stripped).toEqual(expectedValues(signal));
+    for (const key of absentKeys) {
+      expect(stripped).not.toHaveProperty(key);
+    }
   });
 
-  it("produces exactly the specified Signal fields", () => {
-    const signal = makeSignal({
-      s3Key: "secret/path.eml",
-      embeddings: { "model": [1, 2, 3] },
-      headers: { "x-custom": "value" },
-    });
-    const stripped = stripSensitive(signal);
+  const arcCases = [
+    {
+      label: "full Arc → output has exactly {id, labels, urgency, summary, workflow, status}",
+      input: () => makeArc({ labels: ["important", "billing"], urgency: "high" }),
+      expectedKeys: EXPECTED_ARC_KEYS,
+      expectedValues: (arc: Arc) => ({
+        id: arc.id,
+        labels: arc.labels,
+        urgency: arc.urgency,
+        summary: arc.summary,
+        workflow: arc.workflow,
+        status: arc.status,
+      }),
+      absentKeys: ["accountId", "lastSignalAt", "createdAt", "updatedAt"],
+    },
+  ] as const;
 
-    expect(Object.keys(stripped).sort()).toEqual(
-      ["from", "id", "recipientAddress", "spamScore", "subject", "summary", "workflow", "workflowData"].sort(),
-    );
-    expect(stripped).toEqual({
-      id: signal.id,
-      from: signal.from,
-      subject: signal.subject,
-      summary: signal.summary,
-      spamScore: signal.spamScore,
-      workflow: signal.workflow,
-      recipientAddress: signal.recipientAddress,
-      workflowData: signal.workflowData,
-    });
-  });
-
-  it("produces exactly the specified Arc fields", () => {
-    const arc = makeArc({ labels: ["important"], urgency: "high" });
+  it.each(arcCases)("$label", ({ input, expectedKeys, expectedValues, absentKeys }) => {
+    const arc = input();
     const stripped = stripSensitive(arc);
 
-    expect(Object.keys(stripped).sort()).toEqual(
-      ["id", "labels", "status", "summary", "urgency", "workflow"].sort(),
-    );
-    expect(stripped).toEqual({
-      id: arc.id,
-      labels: arc.labels,
-      urgency: arc.urgency,
-      summary: arc.summary,
-      workflow: arc.workflow,
-      status: arc.status,
-    });
-  });
-
-  it("excludes accountId, timestamps, and other non-context fields from Arc", () => {
-    const arc = makeArc({ labels: ["important"] });
-    const stripped = stripSensitive(arc);
-
-    expect(stripped).not.toHaveProperty("accountId");
-    expect(stripped).not.toHaveProperty("lastSignalAt");
-    expect(stripped).not.toHaveProperty("createdAt");
-    expect(stripped).not.toHaveProperty("updatedAt");
+    expect(Object.keys(stripped).sort()).toEqual([...expectedKeys].sort());
+    expect(stripped).toEqual(expectedValues(arc));
+    for (const key of absentKeys) {
+      expect(stripped).not.toHaveProperty(key);
+    }
   });
 });
