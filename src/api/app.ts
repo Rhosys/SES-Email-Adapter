@@ -3,6 +3,8 @@ import type { Context } from "hono";
 import { randomUUID, createHash, randomBytes } from "crypto";
 import { getDomain } from "tldts";
 import { checkDomain } from "../dns/dns-checker.js";
+import { validateRecipientMx } from "../dns/mx-validator.js";
+import { computeUndoWindowSeconds } from "./undo-window.js";
 import type { AuditEvent } from "../database/audit-database.js";
 import type { Result } from "neverthrow";
 import type { DbError, NotFoundError, AuthressServiceError, AuthError } from "../errors.js";
@@ -13,6 +15,7 @@ import { zParse } from "./validate.js";
 import { validateRuleCondition } from "./validate-rule-condition.js";
 import { parseStatsRow } from "../database/stats-writer.js";
 import { isValidEmail } from "../email/validate-email.js";
+import type { DraftSendDispatcher } from "../processor/draft-send-dispatcher.js";
 
 // ---------------------------------------------------------------------------
 // Job Dispatcher interface (used by reindex route)
@@ -194,6 +197,7 @@ interface AppDeps {
   logger: Logger;
   verificationMailer?: VerificationMailer;
   jobDispatcher?: JobDispatcher;
+  draftSendDispatcher?: DraftSendDispatcher;
   accountCreationStarter?: { start(accountId: string, email: string): Promise<void> };
   appBaseUrl?: string;
 }
@@ -222,7 +226,7 @@ function generateAccountId(): string {
   return `acc-${rawId}${checkBits}`;
 }
 
-export function createApp({ store, auth, access, logger, verificationMailer, jobDispatcher, accountCreationStarter, appBaseUrl }: AppDeps) {
+export function createApp({ store, auth, access, logger, verificationMailer, jobDispatcher, draftSendDispatcher, accountCreationStarter, appBaseUrl }: AppDeps) {
   const app = new OpenAPIHono<AppEnv>().basePath('/api');
 
   app.doc("/openapi.json", {
@@ -615,18 +619,46 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
     return c.json(updateResult.value);
   });
 
-  app.post("/accounts/:accountId/signals/:id/send", authz("signals:write", c => `accounts/${c.req.param("accountId")}/signals/${c.req.param("id")}`), async (c) => {
+  app.post("/accounts/:accountId/arcs/:arcId/signals/:id/send", authz("signals:write", c => `accounts/${c.req.param("accountId")}/arcs/${c.req.param("arcId")}/signals/${c.req.param("id")}`), async (c) => {
     const { accountId } = c.get("auth");
+
+    // Arc validation
+    const arcResult = await store.getArc(accountId, c.req.param("arcId"));
+    if (arcResult.isErr()) return err(c, 500, "Internal Server Error");
+    const arc = arcResult.value;
+    if (!arc) return err(c, 404, "Arc not found", "ARC_NOT_FOUND");
+    if (arc.accountId !== accountId) return err(c, 403, "Forbidden");
+
+    // Signal validation
     const signalResult = await store.getSignal(accountId, c.req.param("id"));
     if (signalResult.isErr()) return err(c, 500, "Internal Server Error");
     const signal = signalResult.value;
     if (!signal) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
     if (signal.accountId !== accountId) return err(c, 403, "Forbidden");
+    if (signal.arcId !== arc.id) return err(c, 400, "Signal does not belong to this arc", "SIGNAL_ARC_MISMATCH");
     if (signal.status !== "draft") return err(c, 400, "Only draft signals can be sent", "SIGNAL_NOT_DRAFT");
-    // Flip to active — the actual SES send is wired at the handler layer outside the API
-    const sendResult = await store.updateSignal(accountId, signal.id, {});
-    if (sendResult.isErr()) return err(c, 500, "Internal Server Error");
-    return c.json(sendResult.value);
+
+    // MX validation
+    const mxResult = await validateRecipientMx(signal.to);
+    if (!mxResult.valid) {
+      return c.json({ title: "Invalid recipient domain", errorCode: "INVALID_RECIPIENT_DOMAIN", details: { invalidDomains: mxResult.invalidDomains } }, 422);
+    }
+
+    // Compute undo window
+    const undoWindowSeconds = computeUndoWindowSeconds(signal.textBody);
+    const sendInitiatedAt = new Date().toISOString();
+    const undoExpiresAt = new Date(Date.now() + undoWindowSeconds * 1000).toISOString();
+
+    // SQS FIRST — before DDB write
+    if (!draftSendDispatcher) return err(c, 501, "Send not configured");
+    const sqsResult = await draftSendDispatcher.dispatch({ signalId: signal.id, accountId, sendInitiatedAt }, undoWindowSeconds);
+    if (sqsResult.isErr()) return err(c, 500, "Internal Server Error");
+
+    // DDB write — transition to pending_send
+    const updateResult = await store.updateSignalSendStatus(accountId, signal.id, { status: "pending_send", sendInitiatedAt });
+    if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
+
+    return c.json({ ...updateResult.value, undoWindowSeconds, undoExpiresAt });
   });
 
   app.delete("/accounts/:accountId/signals/:id", authz("signals:write", c => `accounts/${c.req.param("accountId")}/signals/${c.req.param("id")}`), async (c) => {
