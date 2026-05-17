@@ -968,20 +968,43 @@ describe("API", () => {
   });
 
   describe("POST /accounts/:accountId/users", () => {
-    it("adds a user with the specified role and returns 201", async () => {
+    it("creates an invite and returns 201 for valid email and role", async () => {
       const res = await req(app, "POST", `${A}/users`, { body: { email: "new-user@example.com", role: "member" } });
       expect(res.status).toBe(201);
       expect(access.createInvite).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "new-user@example.com", "member");
     });
 
-    it("returns 400 when email is missing", async () => {
-      const res = await req(app, "POST", `${A}/users`, { body: { role: "member" } });
+    it("returns 400 with INVALID_EMAIL when email fails validation", async () => {
+      const res = await req(app, "POST", `${A}/users`, { body: { email: "not-an-email", role: "member" } });
+      expect(res.status).toBe(400);
+      const body = await res.json() as { errorCode: string };
+      expect(body.errorCode).toBe("INVALID_EMAIL");
+    });
+
+    it("returns 400 when role is missing", async () => {
+      const res = await req(app, "POST", `${A}/users`, { body: { email: "user@example.com" } });
       expect(res.status).toBe(400);
     });
 
     it("returns 400 when role is invalid", async () => {
       const res = await req(app, "POST", `${A}/users`, { body: { email: "u1@example.com", role: "superadmin" } });
       expect(res.status).toBe(400);
+    });
+
+    it("returns 422 with INVITE_CREATION_FAILED when Authress createInvite errors", async () => {
+      vi.mocked(access.createInvite).mockReturnValueOnce(
+        Promise.resolve(err({ kind: "authress_service_error", cause: new Error("Authress API error") })),
+      );
+      const res = await req(app, "POST", `${A}/users`, { body: { email: "valid@example.com", role: "admin" } });
+      expect(res.status).toBe(422);
+      const body = await res.json() as { errorCode: string };
+      expect(body.errorCode).toBe("INVITE_CREATION_FAILED");
+    });
+
+    it("returns 501 when access service is not configured", async () => {
+      app = createApp({ store, auth, logger: createMockLogger() });
+      const res = await req(app, "POST", `${A}/users`, { body: { email: "user@example.com", role: "member" } });
+      expect(res.status).toBe(501);
     });
   });
 
