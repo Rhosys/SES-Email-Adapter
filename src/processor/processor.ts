@@ -523,12 +523,58 @@ export class SignalProcessor {
                 functionCode: fn.code,
                 executionContext: { signal: stripSensitive(signal), arc: stripSensitive(arc) },
               });
-              if (!response.success || (response as TemplateParameterResult).result == null) {
-                await this.annotateTemplateError(accountId, tmpl.id, fn.name, response.success ? null : response.error);
+              if (!response.success) {
+                // Execution error (timeout, runtime_error, sandbox_violation)
+                const issue = `[${response.error.type}] ${response.error.message}`;
+                await this.annotateTemplateError(accountId, tmpl.id, fn.name, response.error);
+                this.logger.warn("Template function execution failed.", {
+                  code: "processor.template_function.error",
+                  accountId,
+                  templateName: tmpl.name,
+                  functionName: fn.name,
+                  errorType: response.error.type,
+                  errorMessage: response.error.message,
+                });
+                if (this.systemSignalCreator) {
+                  await this.systemSignalCreator.createInvalidOutputSignal({
+                    accountId,
+                    resourceType: "template",
+                    resourceName: tmpl.name,
+                    functionName: fn.name,
+                    issue,
+                  });
+                }
                 actionVars[`fn.${fn.name}`] = "";
                 preventAutoSend = true;
               } else {
-                actionVars[`fn.${fn.name}`] = (response as TemplateParameterResult).result!;
+                const result = (response as TemplateParameterResult).result;
+                if (result == null || typeof result !== "string") {
+                  // Non-string or null return — treat as failure
+                  const issue = result == null
+                    ? "Function returned no value"
+                    : `Function returned non-string value (type: ${typeof result})`;
+                  await this.annotateTemplateError(accountId, tmpl.id, fn.name, null);
+                  this.logger.warn("Template function returned invalid value.", {
+                    code: "processor.template_function.invalid_return",
+                    accountId,
+                    templateName: tmpl.name,
+                    functionName: fn.name,
+                    issue,
+                  });
+                  if (this.systemSignalCreator) {
+                    await this.systemSignalCreator.createInvalidOutputSignal({
+                      accountId,
+                      resourceType: "template",
+                      resourceName: tmpl.name,
+                      functionName: fn.name,
+                      issue,
+                    });
+                  }
+                  actionVars[`fn.${fn.name}`] = "";
+                  preventAutoSend = true;
+                } else {
+                  actionVars[`fn.${fn.name}`] = result;
+                }
               }
             }
           }
