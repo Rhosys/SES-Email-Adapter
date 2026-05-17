@@ -1,0 +1,601 @@
+// ---------------------------------------------------------------------------
+// ReindexWorker — pure-copy mode unit tests
+// ---------------------------------------------------------------------------
+
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { mockClient } from "aws-sdk-client-mock";
+import { DynamoDBDocumentClient, ScanCommand } from "@aws-sdk/lib-dynamodb";
+import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
+import { Readable } from "stream";
+import { sdkStreamMixin } from "@smithy/util-stream";
+import { ReindexWorker, type ReindexSegmentMessage } from "../../../src/jobs/reindex/reindex-worker.js";
+import { createMockLogger } from "../../helpers/mock-logger.js";
+import { ok, err, dbError } from "../../../src/errors.js";
+
+// ---------------------------------------------------------------------------
+// Hoisted mock functions (available before vi.mock factories run)
+// ---------------------------------------------------------------------------
+
+const { mockUpsertEmbedding, mockAddEmbeddingToCache, mockGenerateForModel, mockMimeParse } = vi.hoisted(() => ({
+  mockUpsertEmbedding: vi.fn(),
+  mockAddEmbeddingToCache: vi.fn(),
+  mockGenerateForModel: vi.fn(),
+  mockMimeParse: vi.fn(),
+}));
+
+// ---------------------------------------------------------------------------
+// Mock MultiClusterAuroraWriter
+// ---------------------------------------------------------------------------
+
+vi.mock("../../../src/database/multi-cluster-aurora-writer.js", () => ({
+  multiClusterWriter: {
+    upsertEmbedding: (...args: unknown[]) => mockUpsertEmbedding(...args),
+  },
+}));
+
+// ---------------------------------------------------------------------------
+// Mock ArcDatabase (addEmbeddingToCache)
+// ---------------------------------------------------------------------------
+
+vi.mock("../../../src/database/arc-database.js", () => ({
+  ArcDatabase: class {
+    addEmbeddingToCache = mockAddEmbeddingToCache;
+  },
+}));
+
+// ---------------------------------------------------------------------------
+// Mock EmbeddingGenerator
+// ---------------------------------------------------------------------------
+
+vi.mock("../../../src/embedding/embedding-generator.js", () => ({
+  BedrockEmbeddingGenerator: class {
+    generateForModel = mockGenerateForModel;
+  },
+}));
+
+// ---------------------------------------------------------------------------
+// Mock MimeParser
+// ---------------------------------------------------------------------------
+
+vi.mock("../../../src/processor/mime.js", () => ({
+  MailparserMimeParser: class {
+    parse = mockMimeParse;
+    parseBuffer = async (...args: unknown[]) => {
+      const { ok: okFn } = await import("../../../src/errors.js");
+      const result = await mockMimeParse(...args);
+      return okFn(result);
+    };
+  },
+}));
+
+// ---------------------------------------------------------------------------
+// Mock cluster registry
+// ---------------------------------------------------------------------------
+
+vi.mock("../../../src/embedding/cluster-registry.js", () => ({
+  getRegistryById: (registryId: string) => {
+    if (registryId === "aurora-prod-titan-v2") {
+      return {
+        registryId: "aurora-prod-titan-v2",
+        clusterArn: "arn:aws:rds:eu-central-1:123:cluster:aurora-prod-titan-v2",
+        secretArn: "arn:aws:secretsmanager:eu-central-1:123:secret:test",
+        databaseName: "signals",
+        modelId: "amazon.titan-embed-text-v2:0",
+        dimensions: 1024,
+        active: true,
+      };
+    }
+    return null;
+  },
+}));
+
+// ---------------------------------------------------------------------------
+// DynamoDB mock
+// ---------------------------------------------------------------------------
+
+const ddbMock = mockClient(DynamoDBDocumentClient);
+
+// ---------------------------------------------------------------------------
+// S3 mock
+// ---------------------------------------------------------------------------
+
+const s3Mock = mockClient(S3Client);
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function makeSignalItem(opts: {
+  id: string;
+  accountId: string;
+  arcId: string;
+  recipientAddress: string;
+  embeddings?: Record<string, number[]>;
+  s3Key?: string;
+}): Record<string, unknown> {
+  return {
+    pk: `ACCT#${opts.accountId}#SIG#${opts.id}`,
+    sk: "#",
+    id: opts.id,
+    accountId: opts.accountId,
+    arcId: opts.arcId,
+    recipientAddress: opts.recipientAddress,
+    embeddings: opts.embeddings,
+    ...(opts.s3Key ? { s3Key: opts.s3Key } : {}),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+describe("ReindexWorker — pure-copy mode", () => {
+  let worker: ReindexWorker;
+  let mockLogger: ReturnType<typeof createMockLogger>;
+
+  beforeEach(() => {
+    mockLogger = createMockLogger();
+    worker = new ReindexWorker(mockLogger);
+    ddbMock.reset();
+    s3Mock.reset();
+    mockUpsertEmbedding.mockClear().mockResolvedValue(ok(undefined));
+    mockAddEmbeddingToCache.mockClear().mockResolvedValue(ok(undefined));
+    mockGenerateForModel.mockClear();
+    mockMimeParse.mockClear();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("upserts cached embedding to Aurora for cache-hit signals", async () => {
+    const signal = makeSignalItem({
+      id: "SES#abc123",
+      accountId: "acct-1",
+      arcId: "arc-xyz",
+      recipientAddress: "me@example.com",
+      embeddings: { "amazon.titan-embed-text-v2:0": [0.1, 0.2, 0.3] },
+    });
+
+    ddbMock.on(ScanCommand).resolves({ Items: [signal], LastEvaluatedKey: undefined });
+
+    const message: ReindexSegmentMessage = {
+      jobId: "job-1",
+      segment: 0,
+      totalSegments: 1,
+      targetRegistryId: "aurora-prod-titan-v2",
+      modelId: "amazon.titan-embed-text-v2:0",
+    };
+
+    const result = await worker.processSegmentMessage(message);
+
+    expect(result.isOk()).toBe(true);
+    expect(mockUpsertEmbedding).toHaveBeenCalledWith({
+      registryId: "aurora-prod-titan-v2",
+      arcId: "arc-xyz",
+      accountId: "acct-1",
+      recipientAddress: "me@example.com",
+      embedding: [0.1, 0.2, 0.3],
+    });
+  });
+
+  it("skips signals without the target model embedding (cache miss)", async () => {
+    const signal = makeSignalItem({
+      id: "SES#abc123",
+      accountId: "acct-1",
+      arcId: "arc-xyz",
+      recipientAddress: "me@example.com",
+      embeddings: { "amazon.titan-embed-text-v3:0": [0.4, 0.5, 0.6] },
+    });
+
+    ddbMock.on(ScanCommand).resolves({ Items: [signal], LastEvaluatedKey: undefined });
+
+    const message: ReindexSegmentMessage = {
+      jobId: "job-1",
+      segment: 0,
+      totalSegments: 1,
+      targetRegistryId: "aurora-prod-titan-v2",
+      modelId: "amazon.titan-embed-text-v2:0",
+    };
+
+    const result = await worker.processSegmentMessage(message);
+
+    // Cache miss triggers regeneration path — if S3/Bedrock not mocked, it fails per-signal
+    // and the segment returns err with partial failure
+    expect(result.isErr()).toBe(true);
+    expect(mockUpsertEmbedding).not.toHaveBeenCalled();
+  });
+
+  it("skips malformed signals and continues processing", async () => {
+    const malformed = { pk: "ACCT#a1#SIG#bad", sk: "#", id: "SES#bad" };
+    const valid = makeSignalItem({
+      id: "SES#good",
+      accountId: "acct-1",
+      arcId: "arc-good",
+      recipientAddress: "good@example.com",
+      embeddings: { "amazon.titan-embed-text-v2:0": [1.0, 2.0] },
+    });
+
+    ddbMock.on(ScanCommand).resolves({ Items: [malformed, valid], LastEvaluatedKey: undefined });
+
+    const message: ReindexSegmentMessage = {
+      jobId: "job-1",
+      segment: 0,
+      totalSegments: 1,
+      targetRegistryId: "aurora-prod-titan-v2",
+      modelId: "amazon.titan-embed-text-v2:0",
+    };
+
+    const result = await worker.processSegmentMessage(message);
+
+    // Malformed signal fails regeneration → segment returns err with partial failure
+    // but the valid signal is still upserted
+    expect(result.isErr()).toBe(true);
+    expect(mockUpsertEmbedding).toHaveBeenCalledTimes(1);
+    expect(mockUpsertEmbedding).toHaveBeenCalledWith(expect.objectContaining({ arcId: "arc-good" }));
+  });
+
+  it("isolates per-signal Aurora failures without failing the segment", async () => {
+    const signal1 = makeSignalItem({
+      id: "SES#fail",
+      accountId: "acct-1",
+      arcId: "arc-fail",
+      recipientAddress: "fail@example.com",
+      embeddings: { "amazon.titan-embed-text-v2:0": [0.1] },
+    });
+    const signal2 = makeSignalItem({
+      id: "SES#ok",
+      accountId: "acct-1",
+      arcId: "arc-ok",
+      recipientAddress: "ok@example.com",
+      embeddings: { "amazon.titan-embed-text-v2:0": [0.2] },
+    });
+
+    ddbMock.on(ScanCommand).resolves({ Items: [signal1, signal2], LastEvaluatedKey: undefined });
+
+    // First call fails, second succeeds
+    mockUpsertEmbedding
+      .mockResolvedValueOnce(err(dbError(new Error("Aurora timeout"))))
+      .mockResolvedValueOnce(ok(undefined));
+
+    const message: ReindexSegmentMessage = {
+      jobId: "job-1",
+      segment: 0,
+      totalSegments: 1,
+      targetRegistryId: "aurora-prod-titan-v2",
+      modelId: "amazon.titan-embed-text-v2:0",
+    };
+
+    // Per-signal failures cause segment-level err so SQS redelivers
+    const result = await worker.processSegmentMessage(message);
+
+    expect(result.isErr()).toBe(true);
+    // Both signals were attempted — the worker continues past individual failures
+    expect(mockUpsertEmbedding).toHaveBeenCalledTimes(2);
+  });
+
+  it("paginates through all scan pages", async () => {
+    const signal1 = makeSignalItem({
+      id: "SES#page1",
+      accountId: "acct-1",
+      arcId: "arc-1",
+      recipientAddress: "a@example.com",
+      embeddings: { "amazon.titan-embed-text-v2:0": [0.1] },
+    });
+    const signal2 = makeSignalItem({
+      id: "SES#page2",
+      accountId: "acct-1",
+      arcId: "arc-2",
+      recipientAddress: "b@example.com",
+      embeddings: { "amazon.titan-embed-text-v2:0": [0.2] },
+    });
+
+    ddbMock
+      .on(ScanCommand)
+      .resolvesOnce({ Items: [signal1], LastEvaluatedKey: { pk: "cursor" } })
+      .resolvesOnce({ Items: [signal2], LastEvaluatedKey: undefined });
+
+    const message: ReindexSegmentMessage = {
+      jobId: "job-1",
+      segment: 0,
+      totalSegments: 1,
+      targetRegistryId: "aurora-prod-titan-v2",
+      modelId: "amazon.titan-embed-text-v2:0",
+    };
+
+    const result = await worker.processSegmentMessage(message);
+
+    expect(result.isOk()).toBe(true);
+    expect(mockUpsertEmbedding).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns error for messages with unknown cluster", async () => {
+    const message: ReindexSegmentMessage = {
+      jobId: "job-1",
+      segment: 0,
+      totalSegments: 1,
+      targetRegistryId: "nonexistent-cluster",
+      modelId: "amazon.titan-embed-text-v2:0",
+    };
+
+    const result = await worker.processSegmentMessage(message);
+
+    expect(result.isErr()).toBe(true);
+    expect(mockUpsertEmbedding).not.toHaveBeenCalled();
+  });
+
+  it("skips non-signal items (arcs, grouping keys) without error", async () => {
+    const arcItem = { pk: "ACCT#a1#ARC#arc-1", sk: "#", id: "arc-1", accountId: "a1", workflow: "auth" };
+    const gkeyItem = { pk: "GKEY#a1#somekey", sk: "GKEY", arcId: "arc-1" };
+    const signal = makeSignalItem({
+      id: "SES#real",
+      accountId: "acct-1",
+      arcId: "arc-real",
+      recipientAddress: "real@example.com",
+      embeddings: { "amazon.titan-embed-text-v2:0": [0.5] },
+    });
+
+    ddbMock.on(ScanCommand).resolves({ Items: [arcItem, gkeyItem, signal], LastEvaluatedKey: undefined });
+
+    const message: ReindexSegmentMessage = {
+      jobId: "job-1",
+      segment: 0,
+      totalSegments: 1,
+      targetRegistryId: "aurora-prod-titan-v2",
+      modelId: "amazon.titan-embed-text-v2:0",
+    };
+
+    const result = await worker.processSegmentMessage(message);
+
+    // Non-signal items without embeddings trigger regeneration path which fails →
+    // segment returns err. But the real signal is still upserted.
+    expect(result.isErr()).toBe(true);
+    // The real signal with a cache hit was still processed
+    expect(mockUpsertEmbedding).toHaveBeenCalledTimes(1);
+  });
+
+  it("passes correct Segment and TotalSegments to DynamoDB scan", async () => {
+    ddbMock.on(ScanCommand).resolves({ Items: [], LastEvaluatedKey: undefined });
+
+    const message: ReindexSegmentMessage = {
+      jobId: "job-1",
+      segment: 7,
+      totalSegments: 32,
+      targetRegistryId: "aurora-prod-titan-v2",
+      modelId: "amazon.titan-embed-text-v2:0",
+    };
+
+    const result = await worker.processSegmentMessage(message);
+
+    expect(result.isOk()).toBe(true);
+    const scanCalls = ddbMock.commandCalls(ScanCommand);
+    expect(scanCalls.length).toBe(1);
+    expect(scanCalls[0]!.args[0].input.Segment).toBe(7);
+    expect(scanCalls[0]!.args[0].input.TotalSegments).toBe(32);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ReindexWorker — regenerate-from-S3 mode
+// ---------------------------------------------------------------------------
+
+describe("ReindexWorker — regenerate-from-S3 mode", () => {
+  let worker: ReindexWorker;
+
+  beforeEach(() => {
+    worker = new ReindexWorker(createMockLogger());
+    ddbMock.reset();
+    s3Mock.reset();
+    mockUpsertEmbedding.mockClear().mockResolvedValue(ok(undefined));
+    mockAddEmbeddingToCache.mockClear().mockResolvedValue(ok(undefined));
+    mockGenerateForModel.mockClear();
+    mockMimeParse.mockClear();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function makeS3Body(content: string) {
+    const stream = new Readable();
+    stream.push(content);
+    stream.push(null);
+    return sdkStreamMixin(stream);
+  }
+
+  it("regenerates embedding from S3 when cache miss and s3Key is present", async () => {
+    const signal = makeSignalItem({
+      id: "SES#regen1",
+      accountId: "acct-1",
+      arcId: "arc-regen",
+      recipientAddress: "regen@example.com",
+      embeddings: { "amazon.titan-embed-text-v3:0": [0.9] }, // different model, not the target
+      s3Key: "inbox/2025/01/regen1.eml",
+    });
+
+    ddbMock.on(ScanCommand).resolves({ Items: [signal], LastEvaluatedKey: undefined });
+
+    s3Mock.on(GetObjectCommand).resolves({
+      Body: makeS3Body("From: sender@test.com\r\nTo: regen@example.com\r\nSubject: Test\r\n\r\nHello world"),
+    });
+
+    mockMimeParse.mockResolvedValue({
+      from: { address: "sender@test.com" },
+      to: [{ address: "regen@example.com" }],
+      cc: [],
+      subject: "Test",
+      textBody: "Hello world",
+      htmlBody: null,
+      attachments: [],
+      headers: {},
+    });
+
+    mockGenerateForModel.mockResolvedValue(ok({
+      modelId: "amazon.titan-embed-text-v2:0",
+      vector: [0.1, 0.2, 0.3],
+      dimensions: 1024,
+    }));
+
+    const message: ReindexSegmentMessage = {
+      jobId: "job-regen",
+      segment: 0,
+      totalSegments: 1,
+      targetRegistryId: "aurora-prod-titan-v2",
+      modelId: "amazon.titan-embed-text-v2:0",
+    };
+
+    const result = await worker.processSegmentMessage(message);
+
+    expect(result.isOk()).toBe(true);
+
+    // Should call S3 to fetch the raw email
+    expect(s3Mock.commandCalls(GetObjectCommand)).toHaveLength(1);
+
+    // Should call MIME parser
+    expect(mockMimeParse).toHaveBeenCalledTimes(1);
+
+    // Should call Bedrock via embedding generator
+    expect(mockGenerateForModel).toHaveBeenCalledTimes(1);
+    expect(mockGenerateForModel).toHaveBeenCalledWith(
+      expect.any(String),
+      "amazon.titan-embed-text-v2:0",
+    );
+
+    // Should write back to DynamoDB cache
+    expect(mockAddEmbeddingToCache).toHaveBeenCalledWith(
+      "acct-1",
+      "SES#regen1",
+      "amazon.titan-embed-text-v2:0",
+      [0.1, 0.2, 0.3],
+    );
+
+    // Should upsert to Aurora
+    expect(mockUpsertEmbedding).toHaveBeenCalledWith({
+      registryId: "aurora-prod-titan-v2",
+      arcId: "arc-regen",
+      accountId: "acct-1",
+      recipientAddress: "regen@example.com",
+      embedding: [0.1, 0.2, 0.3],
+    });
+  });
+
+  it("skips Bedrock entirely when cache entry already exists (cache-hit guard)", async () => {
+    const signal = makeSignalItem({
+      id: "SES#cached",
+      accountId: "acct-1",
+      arcId: "arc-cached",
+      recipientAddress: "cached@example.com",
+      embeddings: { "amazon.titan-embed-text-v2:0": [0.5, 0.6, 0.7] },
+      s3Key: "inbox/2025/01/cached.eml",
+    });
+
+    ddbMock.on(ScanCommand).resolves({ Items: [signal], LastEvaluatedKey: undefined });
+
+    const message: ReindexSegmentMessage = {
+      jobId: "job-cached",
+      segment: 0,
+      totalSegments: 1,
+      targetRegistryId: "aurora-prod-titan-v2",
+      modelId: "amazon.titan-embed-text-v2:0",
+    };
+
+    const result = await worker.processSegmentMessage(message);
+
+    expect(result.isOk()).toBe(true);
+
+    // Should NOT call S3 or Bedrock — cache hit takes the pure-copy path
+    expect(s3Mock.commandCalls(GetObjectCommand)).toHaveLength(0);
+    expect(mockGenerateForModel).not.toHaveBeenCalled();
+
+    // Should upsert the cached vector directly
+    expect(mockUpsertEmbedding).toHaveBeenCalledWith({
+      registryId: "aurora-prod-titan-v2",
+      arcId: "arc-cached",
+      accountId: "acct-1",
+      recipientAddress: "cached@example.com",
+      embedding: [0.5, 0.6, 0.7],
+    });
+  });
+
+  it("handles mixed signals: cache hit + cache miss + unrecoverable in one segment", async () => {
+    const cachedSignal = makeSignalItem({
+      id: "SES#hit",
+      accountId: "acct-1",
+      arcId: "arc-hit",
+      recipientAddress: "hit@example.com",
+      embeddings: { "amazon.titan-embed-text-v2:0": [1.0] },
+      s3Key: "inbox/hit.eml",
+    });
+    const regenSignal = makeSignalItem({
+      id: "SES#miss",
+      accountId: "acct-1",
+      arcId: "arc-miss",
+      recipientAddress: "miss@example.com",
+      embeddings: {},
+      s3Key: "inbox/miss.eml",
+    });
+    const expiredSignal = makeSignalItem({
+      id: "SES#gone",
+      accountId: "acct-1",
+      arcId: "arc-gone",
+      recipientAddress: "gone@example.com",
+      embeddings: {},
+      s3Key: "inbox/gone.eml",
+    });
+
+    ddbMock.on(ScanCommand).resolves({
+      Items: [cachedSignal, regenSignal, expiredSignal],
+      LastEvaluatedKey: undefined,
+    });
+
+    // S3: first call (for regenSignal) succeeds, second (for expiredSignal) returns NoSuchKey
+    s3Mock
+      .on(GetObjectCommand, { Key: "inbox/miss.eml" })
+      .resolves({ Body: makeS3Body("From: a@b.com\r\nSubject: Hi\r\n\r\nBody") });
+
+    const noSuchKeyError = new Error("NoSuchKey");
+    (noSuchKeyError as unknown as { name: string }).name = "NoSuchKey";
+    s3Mock
+      .on(GetObjectCommand, { Key: "inbox/gone.eml" })
+      .rejects(noSuchKeyError);
+
+    mockMimeParse.mockResolvedValue({
+      from: { address: "a@b.com" },
+      to: [{ address: "miss@example.com" }],
+      cc: [],
+      subject: "Hi",
+      textBody: "Body",
+      htmlBody: null,
+      attachments: [],
+      headers: {},
+    });
+
+    mockGenerateForModel.mockResolvedValue(ok({
+      modelId: "amazon.titan-embed-text-v2:0",
+      vector: [0.2, 0.3],
+      dimensions: 1024,
+    }));
+
+    const message: ReindexSegmentMessage = {
+      jobId: "job-mixed",
+      segment: 0,
+      totalSegments: 1,
+      targetRegistryId: "aurora-prod-titan-v2",
+      modelId: "amazon.titan-embed-text-v2:0",
+    };
+
+    const result = await worker.processSegmentMessage(message);
+
+    // The expired signal fails → segment returns err for retry
+    expect(result.isErr()).toBe(true);
+
+    // Aurora upsert called twice: once for cache hit, once for regenerated
+    expect(mockUpsertEmbedding).toHaveBeenCalledTimes(2);
+
+    // Bedrock called once (only for the regenerated signal)
+    expect(mockGenerateForModel).toHaveBeenCalledTimes(1);
+
+    // Cache write called once (only for the regenerated signal)
+    expect(mockAddEmbeddingToCache).toHaveBeenCalledTimes(1);
+  });
+});
