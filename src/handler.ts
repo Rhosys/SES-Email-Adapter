@@ -5,12 +5,13 @@ import { LambdaClient } from "@aws-sdk/client-lambda";
 import { SFNClient } from "@aws-sdk/client-sfn";
 import { SQSClient } from "@aws-sdk/client-sqs";
 import { SQS_MESSAGE_TYPES } from "./types/index.js";
+import { ok, err } from "./errors.js";
 import { isStepFunctionTaskEvent } from "./onboarding/types.js";
 import { OnboardingTaskHandler } from "./onboarding/onboarding-task-handler.js";
 import { SfnAccountCreationStarter } from "./onboarding/account-creation-starter.js";
 import type { AccountCreationStarter } from "./onboarding/account-creation-starter.js";
 
-const [MSG_TYPE_REINDEX, MSG_TYPE_SIDE_EFFECT] = SQS_MESSAGE_TYPES;
+const [MSG_TYPE_REINDEX, MSG_TYPE_SIDE_EFFECT, MSG_TYPE_DRAFT_SEND] = SQS_MESSAGE_TYPES;
 import { SignalClassifier } from "./classifier/classifier.js";
 import { SignalProcessor } from "./processor/processor.js";
 import type { InboundSignalMessage, SideEffectPayload, SesVerdict } from "./processor/processor.js";
@@ -45,6 +46,9 @@ import { ReindexWorker } from "./jobs/reindex/reindex-worker.js";
 import { EmailService } from "./email/email-service.js";
 import { ReindexDispatcher } from "./jobs/reindex/reindex-dispatcher.js";
 import type { ReindexSegmentMessage } from "./jobs/reindex/reindex-dispatcher.js";
+import { DraftSendDispatcher } from "./processor/draft-send-dispatcher.js";
+import type { DraftSendPayload } from "./processor/draft-send-dispatcher.js";
+import { DraftSendWorker } from "./processor/draft-send-worker.js";
 import { RequestLogger } from "./logger.js";
 
 // ---------------------------------------------------------------------------
@@ -126,6 +130,24 @@ const feedbackProcessor = new FeedbackProcessor(processingDb, accountDb, logger)
 
 const reindexWorker = new ReindexWorker(logger);
 
+const draftSendDispatcher = new DraftSendDispatcher(SIGNAL_QUEUE_URL, sqs, logger);
+
+const draftSendWorker = new DraftSendWorker(
+  {
+    getSignal: (accountId, id) => arcDb.getSignal(accountId, id),
+    updateSignalSendStatus: (accountId, id, update) => arcDb.updateSignalSendStatus(accountId, id, update),
+    getArc: (accountId, id) => arcDb.getArc(accountId, id),
+    updateArcStatus: (accountId, id, status) => arcDb.updateArc(accountId, id, { status }).then(r => r.map(() => undefined)),
+    getAccountAfterSendAction: async (accountId) => {
+      const result = await accountDb.getAccount(accountId);
+      if (result.isErr()) return err(result.error);
+      return ok(result.value?.afterSendAction ?? "keep_active");
+    },
+  },
+  externalEmailHandler,
+  logger,
+);
+
 const domainHealthJob = new DomainHealthJob(accountDb, arcDb, logger);
 
 // ---------------------------------------------------------------------------
@@ -168,6 +190,7 @@ const app = createApp({
   logger,
   verificationMailer: sesVerificationMailer,
   jobDispatcher: new ReindexDispatcher(),
+  draftSendDispatcher,
   accountCreationStarter,
   appBaseUrl: APP_BASE_URL,
 });
@@ -239,6 +262,10 @@ export async function handler(
           continue;
         }
         const result = await processor.processSideEffect(payload);
+        failed = result.isErr();
+      } else if (messageType === MSG_TYPE_DRAFT_SEND) {
+        const payload = body as DraftSendPayload;
+        const result = await draftSendWorker.process(payload);
         failed = result.isErr();
       } else {
         // SNS envelope — unwrap and route by notificationType
