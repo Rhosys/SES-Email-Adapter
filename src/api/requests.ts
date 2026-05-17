@@ -92,6 +92,7 @@ export const UpdateViewRequest = z.object({
   icon: z.string().optional(),
   color: z.string().optional(),
   position: z.number().optional(),
+  layout: z.array(z.unknown()).nullable().optional(),
 });
 export type UpdateViewRequest = z.infer<typeof UpdateViewRequest>;
 
