@@ -164,11 +164,25 @@ async function applyRules(
   rules: Rule[],
   context: { signal: Signal; arc: Arc; isMatchedArc: boolean },
   evaluator: RuleEvaluator,
+  logger: Logger,
 ): Promise<MatchedRuleResult[]> {
   const matchedRules: MatchedRuleResult[] = [];
   for (const rule of rules) {
     const evalResult = await evaluator.evaluate(rule, context);
     if (!evalResult.matched) continue;
+
+    // Log warnings for invalid dynamic actions (failed Zod validation)
+    if (evalResult.warnings.length > 0) {
+      logger.warn("Rule returned invalid dynamic actions — discarded entries that failed Zod validation.", {
+        code: "processor.rule.invalid_dynamic_actions",
+        ruleId: rule.id,
+        ruleName: rule.name,
+        accountId: rule.accountId,
+        warnings: evalResult.warnings,
+      });
+      // TODO(task 8.1): Create system signal notifying user of invalid dynamic actions
+    }
+
     const staticActions = rule.actions.filter((a) => !a.disabled).map(({ type, value }) => ({ type, ...(value !== undefined ? { value } : {}) }));
     const dynamicActions = evalResult.dynamicActions.map(({ type, value }) => ({ type, ...(value !== undefined ? { value } : {}) }));
     const actions = [...staticActions, ...dynamicActions];
@@ -849,7 +863,7 @@ export class SignalProcessor {
     const rulesResult = await this.store.listEnabledRules(accountId);
     if (rulesResult.isErr()) return err(rulesResult.error);
     const rules = rulesResult.value;
-    const matchedRules = await applyRules(rules, { signal: signalShell, arc, isMatchedArc }, this.ruleEvaluator);
+    const matchedRules = await applyRules(rules, { signal: signalShell, arc, isMatchedArc }, this.ruleEvaluator, this.logger);
     const outcome = deriveOutcome(matchedRules);
     this.logger.trackPoint("rules_evaluated", { matchedRuleCount: matchedRules.length });
 
