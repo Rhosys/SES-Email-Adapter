@@ -6,6 +6,8 @@ import type { Result } from "neverthrow";
 import { ok } from "neverthrow";
 import type { DbError } from "../errors.js";
 import { evalCondition } from "./rule-engine.js";
+import { interpretRuleResult } from "./interpret-rule-result.js";
+import type { RuleEvalResult } from "./interpret-rule-result.js";
 
 // ---------------------------------------------------------------------------
 // Strip sensitive fields before passing to user code (allowlist approach)
@@ -64,20 +66,21 @@ export class JsonLogicRuleEvaluator implements RuleEvaluator {
     this.store = store ?? { annotateRuleError: () => Promise.resolve(ok(undefined)) };
   }
 
-  async evaluate(rule: Rule, context: { signal: Signal; arc: Arc; isMatchedArc: boolean }): Promise<boolean> {
+  async evaluate(rule: Rule, context: { signal: Signal; arc: Arc; isMatchedArc: boolean }): Promise<RuleEvalResult> {
     if (rule.conditionType === "js") {
       return this.evaluateJsCondition(rule, context);
     }
 
     try {
-      return await evalCondition(rule.condition, context);
+      const matched = await evalCondition(rule.condition, context);
+      return { matched, dynamicActions: [], warnings: [] };
     } catch {
       this.logger.track("Rule condition evaluation threw an exception. The json-logic engine failed to evaluate the condition expression. The rule will be treated as non-matching and processing continues.", { code: "rule_evaluator.condition.failed", ruleId: rule.id, condition: rule.condition });
-      return false;
+      return { matched: false, dynamicActions: [], warnings: [] };
     }
   }
 
-  private async evaluateJsCondition(rule: Rule, context: { signal: Signal; arc: Arc; isMatchedArc: boolean }): Promise<boolean> {
+  private async evaluateJsCondition(rule: Rule, context: { signal: Signal; arc: Arc; isMatchedArc: boolean }): Promise<RuleEvalResult> {
     try {
       const response = await this.userCodeExecutor.invoke({
         tenantId: context.signal.accountId,
@@ -95,10 +98,10 @@ export class JsonLogicRuleEvaluator implements RuleEvaluator {
           errorType: response.error.type,
           errorMessage: response.error.message,
         });
-        return false;
+        return { matched: false, dynamicActions: [], warnings: [] };
       }
 
-      return Boolean((response as RuleExecutionResult).result);
+      return interpretRuleResult((response as RuleExecutionResult).result);
     } catch (e) {
       this.logger.track("Unexpected error invoking User Code Executor for JS rule condition.", {
         code: "rule_evaluator.js_condition.invoke_error",
@@ -106,7 +109,7 @@ export class JsonLogicRuleEvaluator implements RuleEvaluator {
         accountId: context.signal.accountId,
         error: e,
       });
-      return false;
+      return { matched: false, dynamicActions: [], warnings: [] };
     }
   }
 
