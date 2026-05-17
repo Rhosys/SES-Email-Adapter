@@ -12,6 +12,7 @@ import { deriveGroupingKey } from "../processor/processor.js";
 import { zParse } from "./validate.js";
 import { validateRuleCondition } from "./validate-rule-condition.js";
 import { parseStatsRow } from "../database/stats-writer.js";
+import { isValidEmail } from "../email/validate-email.js";
 
 // ---------------------------------------------------------------------------
 // Job Dispatcher interface (used by reindex route)
@@ -193,6 +194,7 @@ interface AppDeps {
   verificationMailer?: VerificationMailer;
   jobDispatcher?: JobDispatcher;
   accountCreationStarter?: { start(accountId: string, email: string): Promise<void> };
+  appBaseUrl?: string;
 }
 
 type AppEnv = { Variables: { auth: AuthContext; authorizationVerified?: boolean } };
@@ -219,7 +221,7 @@ function generateAccountId(): string {
   return `acc-${rawId}${checkBits}`;
 }
 
-export function createApp({ store, auth, access, logger, verificationMailer, jobDispatcher, accountCreationStarter }: AppDeps) {
+export function createApp({ store, auth, access, logger, verificationMailer, jobDispatcher, accountCreationStarter, appBaseUrl }: AppDeps) {
   const app = new OpenAPIHono<AppEnv>().basePath('/api');
 
   app.doc("/openapi.json", {
@@ -889,16 +891,38 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
     return c.json(page("users", result.value));
   });
 
-  app.post("/accounts/:accountId/users", authz("users:write", c => `accounts/${c.req.param("accountId")}/users`), async (c) => {
+  app.post("/accounts/:accountId/users", authz("accounts:read", c => `accounts/${c.req.param("accountId")}`), async (c) => {
     if (!access) return err(c, 501, "Not implemented");
     const { accountId } = c.get("auth");
     const body = await zParse(InviteUserRequest, c.req.raw);
-    const result = await access.addUser(accountId, body.userId, body.role);
-    if (result.isErr()) {
-      logger.warn("Authress service unavailable while adding user.", { code: "api.authress_unavailable", accountId, userId: body.userId, error: result.error });
-      return err(c, 503, "Service temporarily unavailable");
+
+    if (!isValidEmail(body.email, logger)) {
+      return err(c, 400, "Invalid email address", "INVALID_EMAIL");
     }
-    return c.json({ userId: body.userId, role: body.role }, 201);
+
+    const inviteResult = await access.createInvite(accountId, body.email, body.role);
+    if (inviteResult.isErr()) {
+      logger.track("Authress invite creation failed. The Authress API rejected the invite request.", {
+        code: "invite.authress_creation_failed",
+        accountId,
+        email: body.email,
+        error: inviteResult.error,
+      });
+      return err(c, 422, "Failed to create invite", "INVITE_CREATION_FAILED");
+    }
+
+    const { inviteId } = inviteResult.value;
+    const inviteUrl = `${appBaseUrl}/invite?inviteId=${inviteId}`;
+
+    logger.track("Team invite created. SES email sending not yet implemented — wire EmailService.send() here when ready.", {
+      code: "invite.email_pending_implementation",
+      accountId,
+      email: body.email,
+      inviteId,
+      inviteUrl,
+    });
+
+    return new Response(null, { status: 201 });
   });
 
   app.patch("/accounts/:accountId/users/:userId", authz("users:write", c => `accounts/${c.req.param("accountId")}/users/${c.req.param("userId")}`), async (c) => {
