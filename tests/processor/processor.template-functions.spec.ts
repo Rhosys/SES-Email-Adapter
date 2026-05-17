@@ -136,6 +136,7 @@ function makeProcessor(opts: {
     emailBucket: "test-bucket",
     contentBucket: "test-content-bucket",
     contentCdnBaseUrl: "https://cdn.example.com",
+    draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
   });
 }
 

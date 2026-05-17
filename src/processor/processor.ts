@@ -22,6 +22,7 @@ import { generatePresignedGet, generatePresignedPost } from "./presign.js";
 import { getPrimaryArcMatcherRegistry, getActiveClusters } from "../embedding/cluster-registry.js";
 import { getETLD1, assignSystemLabels, DEFAULT_SPAM_SCORE_THRESHOLD } from "./filter.js";
 import { statusToCategory } from "../database/stats-writer.js";
+import type { DraftSendDispatch } from "./draft-send-dispatcher.js";
 
 // ---------------------------------------------------------------------------
 // Message types
@@ -141,8 +142,6 @@ interface ProcessingOutcome {
   forwardAddresses: string[];
   additionalLabels: string[];
   doPong: boolean;
-  autoReplyTemplateIds: string[];
-  autoDraftTemplateIds: string[];
 }
 
 function emptyOutcome(): ProcessingOutcome {
@@ -157,8 +156,6 @@ function emptyOutcome(): ProcessingOutcome {
     forwardAddresses: [],
     additionalLabels: [],
     doPong: false,
-    autoReplyTemplateIds: [],
-    autoDraftTemplateIds: [],
   };
 }
 
@@ -220,8 +217,6 @@ function deriveOutcome(matchedRules: MatchedRuleResult[]): ProcessingOutcome {
         case "assign_label":          if (action.value) outcome.additionalLabels.push(action.value); break;
         case "forward":               if (action.value) outcome.forwardAddresses.push(action.value); break;
         case "pong":                  outcome.doPong = true; break;
-        case "auto_reply":            if (action.value) outcome.autoReplyTemplateIds.push(action.value); break;
-        case "auto_draft":            if (action.value) outcome.autoDraftTemplateIds.push(action.value); break;
       }
     }
   }
@@ -282,6 +277,7 @@ interface SignalProcessorOptions {
   retentionService: S3RetentionService;
   replySender: ReplySender;
   sqsDispatcher: SqsDispatcher;
+  draftSendDispatcher: DraftSendDispatch;
   s3Client: S3Client;
   emailBucket: string;
   contentBucket: string;
@@ -303,6 +299,7 @@ export class SignalProcessor {
   private readonly replySender: ReplySender;
   private readonly retentionService: S3RetentionService;
   private readonly sqsDispatcher: SqsDispatcher;
+  private readonly draftSendDispatcher: DraftSendDispatch;
   private readonly s3Client: S3Client;
   private readonly emailBucket: string;
   private readonly contentBucket: string;
@@ -323,6 +320,7 @@ export class SignalProcessor {
     this.replySender = opts.replySender;
     this.retentionService = opts.retentionService;
     this.sqsDispatcher = opts.sqsDispatcher;
+    this.draftSendDispatcher = opts.draftSendDispatcher;
     this.s3Client = opts.s3Client;
     this.emailBucket = opts.emailBucket;
     this.contentBucket = opts.contentBucket;
@@ -396,12 +394,12 @@ export class SignalProcessor {
     this.logger.trackPoint("side_effect_received");
 
     // Determine which effect types will execute
+    const autoDraftActions = (signal.matchedRules ?? []).flatMap(r => r.actions.filter(a => a.type === "auto_draft" && a.value));
     const effectTypes: string[] = [];
     if (outcome.forwardAddresses.length > 0) effectTypes.push("forward");
     if (!outcome.suppressNotification) effectTypes.push("notify");
     if (outcome.doPong) effectTypes.push("pong");
-    if (outcome.autoReplyTemplateIds.length > 0) effectTypes.push("auto_reply");
-    if (outcome.autoDraftTemplateIds.length > 0) effectTypes.push("auto_draft");
+    if (autoDraftActions.length > 0) effectTypes.push("auto_draft");
     this.logger.info("Outcome derived from matchedRules — executing side-effects.", { code: "processor.side_effect.outcome_derived", accountId, signalId: signal.id, arcId: arc.id, effectTypes });
 
     // Execute all indicated side-effects — individual failures are logged and do NOT cause batchItemFailure
@@ -459,56 +457,34 @@ export class SignalProcessor {
       }
     }
 
-    // Auto-reply
-    if (outcome.autoReplyTemplateIds.length > 0) {
-      try {
-        this.logger.trackPoint("side_effect_auto_reply_start");
-        const recipientDomain = signal.recipientAddress.split("@")[1] ?? "";
-        const domainResult = await this.store.getDomainByName(accountId, recipientDomain);
-        if (domainResult.isOk() && domainResult.value?.senderSetupComplete) {
-          const vars = {
-            "signal.subject": signal.subject ?? "",
-            "sender.name": signal.from.name ?? "",
-            "sender.address": signal.from.address,
-            "arc.workflow": signal.workflow ?? "",
-          };
-          for (const templateId of outcome.autoReplyTemplateIds) {
-            const tmplResult = await this.store.getTemplate(accountId, templateId);
-            if (tmplResult.isErr() || !tmplResult.value) continue;
-            const tmpl = tmplResult.value;
-            await this.replySender.sendReply({
-              to: signal.from.address,
-              from: signal.recipientAddress,
-              subject: renderTemplate(tmpl.subject, vars),
-              body: renderTemplate(tmpl.body, vars),
-              inReplyTo: signal.id,
-            });
-          }
-        }
-        this.logger.trackPoint("side_effect_auto_reply_complete");
-      } catch (e) {
-        this.logger.track("Side-effect auto-reply failed.", { code: "processor.side_effect.auto_reply_failed", accountId, error: e });
-      }
-    }
-
-    // Auto-draft
-    if (outcome.autoDraftTemplateIds.length > 0) {
+    // Auto-draft (unified: creates draft, optionally dispatches for auto-send)
+    if (autoDraftActions.length > 0) {
       try {
         this.logger.trackPoint("side_effect_auto_draft_start");
         const now = new Date().toISOString();
+        const recipientDomain = signal.recipientAddress.split("@")[1] ?? "";
+        const domainResult = await this.store.getDomainByName(accountId, recipientDomain);
+        const senderSetupComplete = domainResult.isOk() && !!domainResult.value?.senderSetupComplete;
+
         const vars: Record<string, string> = {
           "signal.subject": signal.subject ?? "",
           "sender.name": signal.from.name ?? "",
           "sender.address": signal.from.address,
           "arc.workflow": signal.workflow ?? "",
         };
-        for (const templateId of outcome.autoDraftTemplateIds) {
+
+        for (const action of autoDraftActions) {
+          const parsed = parseAutoDraftValue(action.value!);
+          if (!parsed) continue;
+          const { templateId, autoSend } = parsed;
+
           const tmplResult = await this.store.getTemplate(accountId, templateId);
           if (tmplResult.isErr() || !tmplResult.value) continue;
           const tmpl = tmplResult.value;
 
           // Resolve template functions via User Code Executor
           let preventAutoSend = false;
+          const actionVars = { ...vars };
           if (tmpl.functions && tmpl.functions.length > 0) {
             for (const fn of tmpl.functions) {
               const response = await this.userCodeExecutor.invoke({
@@ -519,26 +495,29 @@ export class SignalProcessor {
               });
               if (!response.success || (response as TemplateParameterResult).result == null) {
                 await this.annotateTemplateError(accountId, tmpl.id, fn.name, response.success ? null : response.error);
-                vars[`fn.${fn.name}`] = "";
+                actionVars[`fn.${fn.name}`] = "";
                 preventAutoSend = true;
               } else {
-                vars[`fn.${fn.name}`] = (response as TemplateParameterResult).result!;
+                actionVars[`fn.${fn.name}`] = (response as TemplateParameterResult).result!;
               }
             }
           }
+
+          const shouldAutoSend = autoSend && senderSetupComplete && !preventAutoSend;
+          const sendInitiatedAt = shouldAutoSend ? now : undefined;
 
           const draft: Signal = {
             id: `USR#${randomUUID()}`,
             arcId: arc.id,
             accountId,
             source: "user",
-            status: preventAutoSend ? "draft" : "draft",
+            status: shouldAutoSend ? "pending_send" : "draft",
             receivedAt: now,
             from: { address: signal.recipientAddress },
             to: [signal.from],
             cc: [],
-            subject: renderTemplate(tmpl.subject, vars),
-            textBody: renderTemplate(tmpl.body, vars),
+            subject: renderTemplate(tmpl.subject, actionVars),
+            textBody: renderTemplate(tmpl.body, actionVars),
             attachments: [],
             headers: {},
             recipientAddress: signal.from.address,
@@ -549,14 +528,27 @@ export class SignalProcessor {
             classificationModelId: "",
             s3Key: "",
             createdAt: now,
+            ...(sendInitiatedAt ? { sendInitiatedAt } : {}),
           };
+
           const draftSaveResult = await this.store.saveSignal(draft);
           if (draftSaveResult.isErr()) {
             this.logger.track("Side-effect auto-draft save failed.", { code: "processor.side_effect.auto_draft_failed", accountId, error: draftSaveResult.error });
+            continue;
           }
 
-          // Skip auto-send if any template function returned null/error
-          if (preventAutoSend) {
+          // Dispatch to SQS for delayed send (5 min undo window)
+          if (shouldAutoSend) {
+            const dispatchResult = await this.draftSendDispatcher.dispatch(
+              { signalId: draft.id, accountId, sendInitiatedAt: sendInitiatedAt! },
+              300,
+            );
+            if (dispatchResult.isErr()) {
+              this.logger.track("Side-effect auto-draft SQS dispatch failed — draft remains pending_send, will not send automatically.", { code: "processor.side_effect.auto_draft_dispatch_failed", accountId, signalId: draft.id, error: dispatchResult.error });
+            }
+          }
+
+          if (preventAutoSend && autoSend) {
             this.logger.info("Auto-send skipped — template function returned null or errored.", { code: "processor.side_effect.auto_draft_prevent_send", accountId, templateId });
           }
         }
@@ -1150,6 +1142,17 @@ export class SignalProcessor {
 
 function renderTemplate(text: string, vars: Record<string, string>): string {
   return text.replace(/\{\{([^}]+)\}\}/g, (_, key: string) => vars[key.trim()] ?? "");
+}
+
+function parseAutoDraftValue(value: string): { templateId: string; autoSend: boolean } | null {
+  try {
+    const parsed = JSON.parse(value) as { templateId?: string; autoSend?: boolean };
+    if (!parsed.templateId) return null;
+    return { templateId: parsed.templateId, autoSend: parsed.autoSend ?? false };
+  } catch {
+    // Legacy format: bare template ID string (no autoSend)
+    return { templateId: value, autoSend: false };
+  }
 }
 
 function buildSignal(opts: {

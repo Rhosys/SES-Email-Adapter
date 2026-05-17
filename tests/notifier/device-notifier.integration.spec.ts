@@ -234,6 +234,7 @@ describe("DeviceNotifier wiring: processor invokes notifier with urgency", () =>
       notifier,
       forwarder: makeForwarder(),
       replySender: makeReplySender(),
+      draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
     });
   });
 
@@ -355,6 +356,7 @@ describe("DeviceNotifier wiring: handler instantiates with correct dependencies"
       notifier,
       forwarder: makeForwarder(),
       replySender: makeReplySender(),
+      draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
     });
 
     // Processor was constructed — notifier is wired

@@ -205,6 +205,7 @@ describe("Property 9: S3 retention failure is isolated and non-fatal", () => {
       retentionService,
       replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) },
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
     });
 
     const result = await processor.processRecord(makeMessage("test-msg-s3-isolation"), 1);
@@ -232,6 +233,7 @@ describe("Property 9: S3 retention failure is isolated and non-fatal", () => {
       retentionService,
       replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) },
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
     });
 
     await processor.processRecord(makeMessage("test-msg-s3-aurora"), 1);
@@ -259,6 +261,7 @@ describe("Property 9: S3 retention failure is isolated and non-fatal", () => {
       retentionService,
       replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) },
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
     });
 
     await processor.processRecord(makeMessage("test-msg-s3-warn"), 1);
@@ -295,6 +298,7 @@ describe("Property 9: S3 retention failure is isolated and non-fatal", () => {
       retentionService: failingRetention,
       replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) },
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
     });
 
     const result1 = await processor1.processRecord(makeMessage("test-msg-s3-outcome"), 1);
@@ -318,6 +322,7 @@ describe("Property 9: S3 retention failure is isolated and non-fatal", () => {
       retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
       replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) },
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
       // No retentionService — S3 retention is skipped entirely
     });
 
@@ -357,6 +362,7 @@ describe("Property 9: S3 retention failure is isolated and non-fatal", () => {
       retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
       replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) },
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
       // No retentionService — S3 retention is skipped entirely
     });
 
@@ -398,6 +404,7 @@ describe("Property 9: S3 retention failure is isolated and non-fatal", () => {
       retentionService,
       replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) },
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
     });
 
     const result = await processor.processRecord(makeMessage("test-msg-s3-sync-throw"), 1);

@@ -70,6 +70,7 @@ const USER_CODE_EXECUTOR_ARN = process.env["USER_CODE_EXECUTOR_ARN"]!;
 const SIGNAL_QUEUE_URL = process.env["SIGNAL_QUEUE_URL"]!;
 const WS_ENDPOINT = process.env["WS_API_ENDPOINT"]!;
 const FCM_PROJECT_ID = process.env["FCM_PROJECT_ID"]!;
+const FCM_SERVICE_ACCOUNT = JSON.parse(process.env["FCM_SERVICE_ACCOUNT"] ?? "{}") as { client_email: string; private_key: string };
 const RETRY_TRACK_THRESHOLD = 30;
 
 // ---------------------------------------------------------------------------
@@ -97,6 +98,8 @@ const emailService = new EmailService(sesv2, { from: NOTIFICATION_FROM, configSe
 
 const externalEmailHandler = new ExternalEmailSignalHandler(emailService, s3, logger, S3_BUCKET);
 
+const draftSendDispatcher = new DraftSendDispatcher(SIGNAL_QUEUE_URL, sqs, logger);
+
 const processor = new SignalProcessor({
   store: processorStore,
   contentSanitizer: new LambdaContentSanitizer(lambda, CONTENT_SANITIZER_ARN),
@@ -110,8 +113,8 @@ const processor = new SignalProcessor({
     deviceStore: new DynamoDeviceStore(),
     deliverers: {
       websocket: new WsDeliverer(new ApiGatewayManagementApiClient({ endpoint: WS_ENDPOINT })),
-      fcm: new FcmDeliverer(new HttpFcmClient({ projectId: FCM_PROJECT_ID })),
-      apns: new FcmDeliverer(new HttpFcmClient({ projectId: FCM_PROJECT_ID })),
+      fcm: new FcmDeliverer(new HttpFcmClient({ projectId: FCM_PROJECT_ID, credentials: FCM_SERVICE_ACCOUNT })),
+      apns: new FcmDeliverer(new HttpFcmClient({ projectId: FCM_PROJECT_ID, credentials: FCM_SERVICE_ACCOUNT })),
     },
     logger,
   }),
@@ -119,6 +122,7 @@ const processor = new SignalProcessor({
   retentionService: new S3RetentionServiceImpl(s3),
   replySender: externalEmailHandler,
   sqsDispatcher: new SqsDispatcherImpl(SIGNAL_QUEUE_URL, sqs, logger),
+  draftSendDispatcher,
   logger,
   s3Client: s3,
   emailBucket: S3_BUCKET,
@@ -133,8 +137,6 @@ const feedbackProcessor = new FeedbackProcessor(processingDb, accountDb, logger,
 });
 
 const reindexWorker = new ReindexWorker(logger);
-
-const draftSendDispatcher = new DraftSendDispatcher(SIGNAL_QUEUE_URL, sqs, logger);
 
 const draftSendWorker = new DraftSendWorker(
   {
@@ -212,6 +214,19 @@ export async function handler(
   const lambdaRequestId = _context.awsRequestId ?? "";
   const compositeId = `CF${cfRequestId}-API${apiGwRequestId}-L${lambdaRequestId}`;
   logger.startInvocation(compositeId);
+
+  try {
+  return await handlerInner(event, _context);
+  } catch (e) {
+    logger.critical("Unhandled top-level exception in Lambda handler. This should never happen — all code paths must handle their own errors.", { code: "handler.unhandled_exception", error: e, event });
+    return { statusCode: 500, headers: { "x-request-id": compositeId }, body: JSON.stringify({ title: "Internal Server Error", errorId: compositeId }) };
+  }
+}
+
+async function handlerInner(
+  event: APIGatewayProxyEventV2 | APIGatewayProxyWebsocketEventV2 | SQSEvent | EventBridgeEvent<string, { source?: string }> | unknown,
+  _context: Context,
+): Promise<APIGatewayProxyResultV2 | WsAuthorizerResult | HttpAuthorizerResponse | { statusCode: number } | { batchItemFailures: Array<{ itemIdentifier: string }> } | unknown> {
 
   if (isStepFunctionTaskEvent(event)) {
     const { context } = event;

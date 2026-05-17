@@ -279,7 +279,7 @@ export interface AliasSender {
   addedAt: string;
 }
 
-// Email template for auto_reply and auto_draft rule actions
+// Email template for auto_draft rule actions
 export interface TemplateFunction {
   name: string;      // placeholder name used in subject/body as {{fn.name}}
   code: string;      // user-authored JS: (signal, arc) => string
@@ -508,7 +508,7 @@ export const RULE_ACTION_TYPES = [
   "assign_label", "assign_workflow", "archive", "delete", "forward",
   "block_hidden", "block_reject", "quarantine", "quarantine_hidden",
   "set_urgency", "suppress_notification", "pong", "approve_sender",
-  "auto_reply", "auto_draft",
+  "auto_draft",
 ] as const;
 export type RuleActionType = (typeof RULE_ACTION_TYPES)[number];
 

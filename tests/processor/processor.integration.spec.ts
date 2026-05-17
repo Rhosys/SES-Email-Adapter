@@ -301,6 +301,7 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
       notifier,
       forwarder,
       replySender,
+      draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
     });
   });
 
