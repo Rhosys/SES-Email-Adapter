@@ -121,3 +121,40 @@ Surfaces: **Website** · **Extension** · **Mobile** · **CLI/Desktop**
 - The **extension** has zero client-side validation — all payloads sent directly to API
 - Highest UX impact: rule code AST validation (instant syntax feedback), JSONLogic validation, size limits with byte counters, enum-constrained dropdowns
 - Shared validation logic (Zod schemas, acorn AST validator) could be published as an internal package consumed by both site and extension
+
+
+---
+
+## OTP / Auth Code Autofill
+
+Backend pushes `{ code, expiresInMinutes, originDomain, signalId }` via WebSocket + Web Push + FCM when an `auth` workflow signal arrives.
+
+- [ ] **Receive OTP via WebSocket** — listen for `auth_code` message type on the existing WS connection; parse payload
+  - Extension · Website
+- [ ] **Receive OTP via Web Push** — service worker receives push event with OTP payload; show notification with "Copy code" action button
+  - Extension
+- [ ] **Receive OTP via FCM push notification** — parse structured payload from push; show notification with code and "Autofill" action
+  - Mobile
+- [ ] **Match originDomain to active tab** — compare `originDomain` from payload against the active tab's eTLD+1; if match, proceed to autofill; if no match, show popup with code + "Copy" button
+  - Extension
+- [ ] **Autofill OTP into focused input** — detect the focused input field (type=text, type=tel, or autocomplete=one-time-code); inject the code value; dispatch input/change events so frameworks detect the change
+  - Extension
+- [ ] **Autofill via OS autofill framework** — register as an autofill provider (Android Autofill Framework / iOS AutoFill Credential Provider); surface OTP codes as autofill suggestions when the OS detects a code input field
+  - Mobile
+- [ ] **Copy-to-clipboard fallback** — if no matching tab or no focused input, show a toast/popup with the code and a one-tap copy button; include countdown timer showing `expiresInMinutes`
+  - Extension · Website · Mobile
+- [ ] **Expiry countdown** — show remaining validity time on the OTP notification/popup; auto-dismiss when expired
+  - Extension · Website · Mobile
+- [ ] **OTP notification in inbox** — show the code inline on the arc row (no need to open the email); "Copy" button directly on the arc card
+  - Website · Mobile
+- [ ] **Deep-link from notification** — tapping the push notification opens the app/site to the specific auth arc
+  - Website · Mobile
+
+---
+
+## Notes
+
+- The **site** currently has only `isValidEmail()` and `isValidDomain()` in `src/lib/validation.ts` — everything else is missing
+- The **extension** has zero client-side validation — all payloads sent directly to API
+- Highest UX impact: rule code AST validation (instant syntax feedback), JSONLogic validation, size limits with byte counters, enum-constrained dropdowns
+- Shared validation logic (Zod schemas, acorn AST validator) could be published as an internal package consumed by both site and extension
