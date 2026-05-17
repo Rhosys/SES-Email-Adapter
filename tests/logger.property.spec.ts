@@ -15,7 +15,8 @@ function callLevel(logger: RequestLogger, level: LogLevel, message: string, cont
 function lastEntry(consoleSpy: ReturnType<typeof vi.spyOn>): Record<string, unknown> {
   const calls = consoleSpy.mock.calls;
   const lastCall = calls[calls.length - 1]!;
-  return JSON.parse(lastCall[0] as string);
+  const parsed = JSON.parse(lastCall[0] as string);
+  return parsed.message;
 }
 
 describe("Log entry structural invariant", () => {
@@ -36,8 +37,8 @@ describe("Log entry structural invariant", () => {
       callLevel(logger, level, "test.msg", { extra: "data" });
 
       const entry = lastEntry(consoleSpy);
-      expect(entry.level).toBe(level);
-      expect(entry.message).toBe("test.msg");
+      expect(entry.level).toBe(level.toUpperCase());
+      expect(entry.title).toBe("test.msg");
       expect(entry.containerId).toBe("test1234");
       expect(entry.invocationId).toMatch(/^[0-9a-f-]{36}$/);
       expect(new Date(entry.timestamp as string).toISOString()).toBe(entry.timestamp);
@@ -68,8 +69,8 @@ describe("Context merge preserves required fields", () => {
     });
 
     const entry = lastEntry(consoleSpy);
-    expect(entry.level).toBe("info");
-    expect(entry.message).toBe("real.message");
+    expect(entry.level).toBe("INFO");
+    expect(entry.title).toBe("real.message");
     expect(entry.containerId).toBe("test1234");
     expect(entry.invocationId).not.toBe("FAKE");
     expect(entry.invocationId).toMatch(/^[0-9a-f-]{36}$/);
@@ -302,17 +303,19 @@ describe("Payload truncation guard", () => {
     expect(calls.length).toBe(2);
 
     // First call is the warning
-    const warningEntry = JSON.parse(calls[0]![0] as string);
-    expect(warningEntry.level).toBe("warn");
-    expect(warningEntry.message).toBe("logger.payload_truncated");
-    expect(warningEntry.originalMessage).toBe("test.large.payload");
+    const warningRaw = JSON.parse(calls[0]![0] as string);
+    const warningEntry = warningRaw.message;
+    expect(warningEntry.level).toBe("WARN");
+    expect(warningEntry.title).toBe("logger.payload_truncated");
+    expect(warningEntry.originalTitle).toBe("test.large.payload");
     expect(warningEntry.originalSizeBytes).toBeGreaterThan(262_144);
 
     // Second call is the truncated entry
-    const truncatedEntry = JSON.parse(calls[1]![0] as string);
+    const truncatedRaw = JSON.parse(calls[1]![0] as string);
+    const truncatedEntry = truncatedRaw.message;
     expect(truncatedEntry._truncated).toBe(true);
-    expect(truncatedEntry.level).toBe("info");
-    expect(truncatedEntry.message).toBe("test.large.payload");
+    expect(truncatedEntry.level).toBe("INFO");
+    expect(truncatedEntry.title).toBe("test.large.payload");
 
     const truncatedSize = Buffer.byteLength(calls[1]![0] as string, "utf8");
     expect(truncatedSize).toBeLessThanOrEqual(262_144);
