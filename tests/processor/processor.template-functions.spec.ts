@@ -8,6 +8,7 @@ import type { Signal, Arc, Alias, EmailTemplate } from "../../src/types/index.js
 import type { EmbeddingGenerator } from "../../src/embedding/embedding-generator.js";
 import type { MultiClusterAuroraWriter } from "../../src/database/multi-cluster-aurora-writer.js";
 import type { S3RetentionService } from "../../src/embedding/s3-retention-service.js";
+import type { SystemSignalCreator } from "../../src/processor/system-signal-creator.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
 import { createMockLogger, type MockLogger } from "../helpers/mock-logger.js";
 
@@ -115,8 +116,9 @@ function makeProcessor(opts: {
   store: ProcessorDatabase;
   userCodeExecutor: UserCodeExecutorClient;
   logger: MockLogger;
+  systemSignalCreator?: SystemSignalCreator;
 }): SignalProcessor {
-  const { store, userCodeExecutor, logger } = opts;
+  const { store, userCodeExecutor, logger, systemSignalCreator } = opts;
   return new SignalProcessor({
     store,
     userCodeExecutor,
@@ -137,6 +139,7 @@ function makeProcessor(opts: {
     contentBucket: "test-content-bucket",
     contentCdnBaseUrl: "https://cdn.example.com",
     draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
+    ...(systemSignalCreator ? { systemSignalCreator } : {}),
   });
 }
 
@@ -147,14 +150,16 @@ function makeProcessor(opts: {
 describe("Template function resolution via User Code Executor", () => {
   let mockLogger: MockLogger;
   let mockExecutor: UserCodeExecutorClient;
+  let mockSystemSignalCreator: SystemSignalCreator;
   let store: ProcessorDatabase;
   let processor: SignalProcessor;
 
   beforeEach(() => {
     mockLogger = createMockLogger();
     mockExecutor = { invoke: vi.fn() };
+    mockSystemSignalCreator = { createInvalidOutputSignal: vi.fn().mockResolvedValue(undefined) };
     store = makeStore();
-    processor = makeProcessor({ store, userCodeExecutor: mockExecutor, logger: mockLogger });
+    processor = makeProcessor({ store, userCodeExecutor: mockExecutor, logger: mockLogger, systemSignalCreator: mockSystemSignalCreator });
   });
 
   it("resolves template functions and substitutes values into draft subject and body", async () => {
@@ -278,7 +283,7 @@ describe("Template function resolution via User Code Executor", () => {
   it("skips template function resolution when template has no functions", async () => {
     const templateWithoutFunctions = makeTemplate({ functions: [] });
     const storeNoFns = makeStore(templateWithoutFunctions);
-    const proc = makeProcessor({ store: storeNoFns, userCodeExecutor: mockExecutor, logger: mockLogger });
+    const proc = makeProcessor({ store: storeNoFns, userCodeExecutor: mockExecutor, logger: mockLogger, systemSignalCreator: mockSystemSignalCreator });
 
     const signal = makeSignal();
     const arc = makeArc();
@@ -293,5 +298,109 @@ describe("Template function resolution via User Code Executor", () => {
     expect(saveSignalCalls.length).toBe(1);
     const draft = saveSignalCalls[0]![0] as Signal;
     expect(draft.subject).toBe("Re: Test email — ");
+  });
+
+  it("logs at WARN level with template name, function name, and error details on execution error", async () => {
+    const timeoutResponse: UserCodeResponse = {
+      success: false,
+      error: { message: "User code execution timed out", type: "timeout" },
+    };
+    vi.mocked(mockExecutor.invoke)
+      .mockResolvedValueOnce(timeoutResponse)
+      .mockResolvedValueOnce({ success: true, purpose: "template_function", result: "ok" });
+
+    await processor.processSideEffect({ signal: makeSignal(), arc: makeArc() });
+
+    const warnCalls = mockLogger.calls.filter(c => c.method === "warn");
+    const fnErrorWarn = warnCalls.find(c => c.context?.code === "processor.template_function.error");
+    expect(fnErrorWarn).toBeDefined();
+    expect(fnErrorWarn!.message).toBe("Template function execution failed.");
+    expect(fnErrorWarn!.context).toMatchObject({
+      templateName: "Auto-draft template",
+      functionName: "greeting",
+      errorType: "timeout",
+      errorMessage: "User code execution timed out",
+    });
+  });
+
+  it("logs at WARN level with template name, function name, and issue on null return", async () => {
+    vi.mocked(mockExecutor.invoke)
+      .mockResolvedValueOnce({ success: true, purpose: "template_function", result: null })
+      .mockResolvedValueOnce({ success: true, purpose: "template_function", result: "ok" });
+
+    await processor.processSideEffect({ signal: makeSignal(), arc: makeArc() });
+
+    const warnCalls = mockLogger.calls.filter(c => c.method === "warn");
+    const invalidReturnWarn = warnCalls.find(c => c.context?.code === "processor.template_function.invalid_return");
+    expect(invalidReturnWarn).toBeDefined();
+    expect(invalidReturnWarn!.message).toBe("Template function returned invalid value.");
+    expect(invalidReturnWarn!.context).toMatchObject({
+      templateName: "Auto-draft template",
+      functionName: "greeting",
+      issue: "Function returned no value",
+    });
+  });
+
+  it("creates system signal on execution error with template name, function name, and issue", async () => {
+    const runtimeErrorResponse: UserCodeResponse = {
+      success: false,
+      error: { message: "ReferenceError: x is not defined", type: "runtime_error" },
+    };
+    vi.mocked(mockExecutor.invoke)
+      .mockResolvedValueOnce(runtimeErrorResponse)
+      .mockResolvedValueOnce({ success: true, purpose: "template_function", result: "ok" });
+
+    await processor.processSideEffect({ signal: makeSignal(), arc: makeArc() });
+
+    expect(mockSystemSignalCreator.createInvalidOutputSignal).toHaveBeenCalledWith({
+      accountId: TEST_ACCOUNT_ID,
+      resourceType: "template",
+      resourceName: "Auto-draft template",
+      functionName: "greeting",
+      issue: "[runtime_error] ReferenceError: x is not defined",
+    });
+  });
+
+  it("creates system signal on non-string return with template name, function name, and type info", async () => {
+    // Simulate a function returning a number (non-string) — cast to bypass TS type safety
+    vi.mocked(mockExecutor.invoke)
+      .mockResolvedValueOnce({ success: true, purpose: "template_function", result: 42 } as unknown as UserCodeResponse)
+      .mockResolvedValueOnce({ success: true, purpose: "template_function", result: "ok" });
+
+    await processor.processSideEffect({ signal: makeSignal(), arc: makeArc() });
+
+    expect(mockSystemSignalCreator.createInvalidOutputSignal).toHaveBeenCalledWith({
+      accountId: TEST_ACCOUNT_ID,
+      resourceType: "template",
+      resourceName: "Auto-draft template",
+      functionName: "greeting",
+      issue: "Function returned non-string value (type: number)",
+    });
+  });
+
+  it("prevents auto-send and substitutes empty string when function returns non-string", async () => {
+    // Simulate a function returning an object (non-string)
+    vi.mocked(mockExecutor.invoke)
+      .mockResolvedValueOnce({ success: true, purpose: "template_function", result: { foo: "bar" } } as unknown as UserCodeResponse)
+      .mockResolvedValueOnce({ success: true, purpose: "template_function", result: "body text" });
+
+    const signal = makeSignal();
+    const arc = makeArc();
+
+    await processor.processSideEffect({ signal, arc });
+
+    const saveSignalCalls = vi.mocked(store.saveSignal).mock.calls;
+    expect(saveSignalCalls.length).toBe(1);
+    const draft = saveSignalCalls[0]![0] as Signal;
+    expect(draft.subject).toBe("Re: Test email — ");
+    expect(draft.status).toBe("draft");
+
+    // annotateTemplateError should be called
+    expect(store.annotateTemplateError).toHaveBeenCalledWith(
+      TEST_ACCOUNT_ID,
+      "tmpl_001",
+      "greeting",
+      "Function returned no value",
+    );
   });
 });
