@@ -969,18 +969,18 @@ describe("API", () => {
 
   describe("POST /accounts/:accountId/users", () => {
     it("adds a user with the specified role and returns 201", async () => {
-      const res = await req(app, "POST", `${A}/users`, { body: { userId: "new-user", role: "member" } });
+      const res = await req(app, "POST", `${A}/users`, { body: { email: "new-user@example.com", role: "member" } });
       expect(res.status).toBe(201);
-      expect(access.addUser).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "new-user", "member");
+      expect(access.createInvite).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "new-user@example.com", "member");
     });
 
-    it("returns 400 when userId is missing", async () => {
+    it("returns 400 when email is missing", async () => {
       const res = await req(app, "POST", `${A}/users`, { body: { role: "member" } });
       expect(res.status).toBe(400);
     });
 
     it("returns 400 when role is invalid", async () => {
-      const res = await req(app, "POST", `${A}/users`, { body: { userId: "u1", role: "superadmin" } });
+      const res = await req(app, "POST", `${A}/users`, { body: { email: "u1@example.com", role: "superadmin" } });
       expect(res.status).toBe(400);
     });
   });

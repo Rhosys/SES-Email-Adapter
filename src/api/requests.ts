@@ -241,8 +241,8 @@ export type VerifyForwardingAddressRequest = z.infer<typeof VerifyForwardingAddr
 // ---- Users ----
 
 export const InviteUserRequest = z.object({
-  userId: z.string(),
-  role: AccountRole,
+  email: z.string(),
+  role: z.enum(["admin", "member", "viewer"]),
 });
 export type InviteUserRequest = z.infer<typeof InviteUserRequest>;
 

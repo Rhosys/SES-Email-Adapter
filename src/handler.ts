@@ -169,6 +169,7 @@ const app = createApp({
   verificationMailer: sesVerificationMailer,
   jobDispatcher: new ReindexDispatcher(),
   accountCreationStarter,
+  appBaseUrl: APP_BASE_URL,
 });
 
 // ---------------------------------------------------------------------------
