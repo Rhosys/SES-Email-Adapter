@@ -525,6 +525,8 @@ export class AccountDatabase {
       accountId,
       name: data.name,
       condition: data.condition ?? "",
+      ...(data.conditionType !== undefined ? { conditionType: data.conditionType } : {}),
+      ...(data.code !== undefined ? { code: data.code } : {}),
       actions: data.actions as Rule["actions"],
       status: "enabled",
       priorityOrder: data.priorityOrder ?? (userRules.length > 0 ? Math.max(...userRules.map((r) => r.priorityOrder)) + 1 : 100),

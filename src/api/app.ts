@@ -120,7 +120,7 @@ export interface ApiDatabase {
   // Rules
   listRules(accountId: string): PromiseLike<Result<Rule[], DbError>>;
   createRule(accountId: string, data: CreateRuleRequest): PromiseLike<Result<Rule, DbError>>;
-  updateRule(accountId: string, id: string, data: UpdateRuleRequest): PromiseLike<Result<Rule, DbError>>;
+  updateRule(accountId: string, id: string, data: UpdateRuleRequest & { lastError?: string | null }): PromiseLike<Result<Rule, DbError>>;
   deleteRule(accountId: string, id: string): PromiseLike<Result<void, DbError>>;
 
   // Domains
