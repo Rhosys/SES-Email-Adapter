@@ -1,4 +1,4 @@
-import { GoogleAuth } from "google-auth-library";
+import { createSign } from "crypto";
 
 // ─── FCM Message Types ───────────────────────────────────────────────────────
 
@@ -44,17 +44,68 @@ function mapFcmError(status: number, errorCode?: string): FcmErrorCode["error"] 
   return "INVALID_ARGUMENT";
 }
 
+// ─── Service Account JWT → Access Token ──────────────────────────────────────
+
+interface ServiceAccountCredentials {
+  client_email: string;
+  private_key: string;
+}
+
+const TOKEN_LIFETIME_SECONDS = 3600;
+const TOKEN_REFRESH_MARGIN_MS = 5 * 60 * 1000; // refresh 5 min before expiry
+
+function base64url(input: string | Buffer): string {
+  const buf = typeof input === "string" ? Buffer.from(input) : input;
+  return buf.toString("base64url");
+}
+
+function createJwt(credentials: ServiceAccountCredentials, scope: string): string {
+  const now = Math.floor(Date.now() / 1000);
+  const header = base64url(JSON.stringify({ alg: "RS256", typ: "JWT" }));
+  const payload = base64url(JSON.stringify({
+    iss: credentials.client_email,
+    scope,
+    aud: "https://oauth2.googleapis.com/token",
+    iat: now,
+    exp: now + TOKEN_LIFETIME_SECONDS,
+  }));
+
+  const signInput = `${header}.${payload}`;
+  const sign = createSign("RSA-SHA256");
+  sign.update(signInput);
+  const signature = sign.sign(credentials.private_key, "base64url");
+
+  return `${signInput}.${signature}`;
+}
+
+async function exchangeJwtForAccessToken(jwt: string): Promise<{ token: string; expiresAt: number }> {
+  const response = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: `grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=${jwt}`,
+  });
+
+  if (!response.ok) {
+    throw new Error(`Google OAuth token exchange failed: HTTP ${response.status}`);
+  }
+
+  const body = await response.json() as { access_token: string; expires_in: number };
+  return {
+    token: body.access_token,
+    expiresAt: Date.now() + body.expires_in * 1000,
+  };
+}
+
 // ─── HttpFcmClient Implementation ───────────────────────────────────────────
 
 export class HttpFcmClient implements FcmClient {
-  private readonly auth: GoogleAuth;
+  private readonly credentials: ServiceAccountCredentials;
   private readonly endpoint: string;
+  private cachedToken: { token: string; expiresAt: number } | null = null;
 
-  constructor(opts: { projectId: string; credentials?: object }) {
+  constructor(opts: { projectId: string; credentials: ServiceAccountCredentials }) {
     this.endpoint = `https://fcm.googleapis.com/v1/projects/${opts.projectId}/messages:send`;
-    this.auth = opts.credentials
-      ? new GoogleAuth({ credentials: opts.credentials as Record<string, string>, scopes: ["https://www.googleapis.com/auth/firebase.messaging"] })
-      : new GoogleAuth({ scopes: ["https://www.googleapis.com/auth/firebase.messaging"] });
+    this.credentials = opts.credentials;
   }
 
   async send(message: FcmMessage): Promise<FcmSendResult> {
@@ -88,8 +139,12 @@ export class HttpFcmClient implements FcmClient {
   }
 
   private async getAccessToken(): Promise<string> {
-    const client = await this.auth.getClient();
-    const tokenResponse = await client.getAccessToken();
-    return tokenResponse.token ?? "";
+    if (this.cachedToken && Date.now() < this.cachedToken.expiresAt - TOKEN_REFRESH_MARGIN_MS) {
+      return this.cachedToken.token;
+    }
+
+    const jwt = createJwt(this.credentials, "https://www.googleapis.com/auth/firebase.messaging");
+    this.cachedToken = await exchangeJwtForAccessToken(jwt);
+    return this.cachedToken.token;
   }
 }
