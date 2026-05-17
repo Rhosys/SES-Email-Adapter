@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { Arc, Signal, View, Label, Rule, Domain, Account, Alias, VerifiedForwardingAddress } from "../../src/types/index.js";
+import type { Arc, Signal, View, Label, Rule, Domain, Account, Alias, VerifiedForwardingAddress, EmailTemplate } from "../../src/types/index.js";
 import { createApp } from "../../src/api/app.js";
 import type { ApiDatabase, AuthService, AccessService, AccountUser, VerificationMailer } from "../../src/api/app.js";
 import { ok, err } from "neverthrow";
@@ -1405,6 +1405,172 @@ describe("API", () => {
       expect(res.status).toBe(400);
       const body = await res.json() as { errorCode: string };
       expect(body.errorCode).toBe("INVALID_CODE");
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Audit integration for code changes (Requirements 10.1, 10.2, 10.3, 10.4, 10.5)
+  // -------------------------------------------------------------------------
+
+  describe("POST /accounts/:accountId/rules — audit for JS rule creation", () => {
+    it("calls saveAuditEvent before createRule (ordering verification)", async () => {
+      const callOrder: string[] = [];
+      vi.mocked(store.saveAuditEvent).mockImplementation(async () => {
+        callOrder.push("saveAuditEvent");
+        return ok(undefined);
+      });
+      vi.mocked(store.createRule).mockImplementation(async () => {
+        callOrder.push("createRule");
+        return ok(makeRule({ conditionType: "js", code: "(signal) => true" }) as never);
+      });
+      await req(app, "POST", `${A}/rules`, {
+        body: { name: "JS rule", conditionType: "js", code: "(signal) => true", actions: [{ type: "archive" }] },
+      });
+      expect(callOrder).toEqual(["saveAuditEvent", "createRule"]);
+    });
+
+    it("audit event contains before: null and after with conditionType/code for creation", async () => {
+      vi.mocked(store.createRule).mockResolvedValueOnce(ok(makeRule({ conditionType: "js", code: "(signal) => signal.spamScore > 0.8" }) as never));
+      await req(app, "POST", `${A}/rules`, {
+        body: { name: "Spam rule", conditionType: "js", code: "(signal) => signal.spamScore > 0.8", actions: [{ type: "archive" }] },
+      });
+      expect(store.saveAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+        accountId: TEST_ACCOUNT_ID,
+        userId: TEST_USER_ID,
+        action: "created",
+        resourceType: "rule",
+        before: null,
+        after: { conditionType: "js", code: "(signal) => signal.spamScore > 0.8" },
+      }));
+    });
+
+    it("proceeds with rule creation when audit write fails", async () => {
+      vi.mocked(store.saveAuditEvent).mockResolvedValueOnce(err({ kind: "db_error", cause: new Error("DynamoDB timeout") }));
+      vi.mocked(store.createRule).mockResolvedValueOnce(ok(makeRule({ conditionType: "js", code: "(signal) => true" }) as never));
+      const res = await req(app, "POST", `${A}/rules`, {
+        body: { name: "Audit fail rule", conditionType: "js", code: "(signal) => true", actions: [{ type: "archive" }] },
+      });
+      expect(res.status).toBe(201);
+      expect(store.createRule).toHaveBeenCalledOnce();
+    });
+  });
+
+  describe("PATCH /accounts/:accountId/rules/:id — audit for JS rule update", () => {
+    it("audit event contains before/after code values when code is updated", async () => {
+      const existingRule = makeRule({ conditionType: "js", code: "(signal) => signal.spamScore > 0.5" });
+      vi.mocked(store.listRules).mockResolvedValueOnce(ok([existingRule]));
+      vi.mocked(store.updateRule).mockResolvedValueOnce(ok(makeRule({ conditionType: "js", code: "(signal) => signal.spamScore > 0.9" })));
+      await req(app, "PATCH", `${A}/rules/rule-001`, {
+        body: { code: "(signal) => signal.spamScore > 0.9" },
+      });
+      expect(store.saveAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+        accountId: TEST_ACCOUNT_ID,
+        userId: TEST_USER_ID,
+        action: "updated",
+        resourceType: "rule",
+        resourceId: "rule-001",
+        before: { conditionType: "js", code: "(signal) => signal.spamScore > 0.5" },
+        after: { conditionType: "js", code: "(signal) => signal.spamScore > 0.9" },
+      }));
+    });
+
+    it("proceeds with rule update when audit write fails", async () => {
+      const existingRule = makeRule({ conditionType: "js", code: "(signal) => true" });
+      vi.mocked(store.listRules).mockResolvedValueOnce(ok([existingRule]));
+      vi.mocked(store.saveAuditEvent).mockResolvedValueOnce(err({ kind: "db_error", cause: new Error("DynamoDB timeout") }));
+      vi.mocked(store.updateRule).mockResolvedValueOnce(ok(makeRule({ conditionType: "js", code: "(signal) => false" })));
+      const res = await req(app, "PATCH", `${A}/rules/rule-001`, {
+        body: { code: "(signal) => false" },
+      });
+      expect(res.status).toBe(200);
+      expect(store.updateRule).toHaveBeenCalledOnce();
+    });
+  });
+
+  describe("POST /accounts/:accountId/templates — audit for template functions creation", () => {
+    const makeTemplateResult = (overrides: Partial<EmailTemplate> = {}): EmailTemplate => ({
+      id: "tpl-001", accountId: TEST_ACCOUNT_ID, name: "Tpl", subject: "Hi", body: "Hello",
+      createdAt: "2024-01-01T00:00:00Z", updatedAt: "2024-01-01T00:00:00Z", ...overrides,
+    });
+
+    it("calls saveAuditEvent before createTemplate when functions are provided", async () => {
+      const callOrder: string[] = [];
+      vi.mocked(store.saveAuditEvent).mockImplementation(async () => {
+        callOrder.push("saveAuditEvent");
+        return ok(undefined);
+      });
+      vi.mocked(store.createTemplate).mockImplementation(async (tpl) => {
+        callOrder.push("createTemplate");
+        return ok(tpl as EmailTemplate);
+      });
+      await req(app, "POST", `${A}/templates`, {
+        body: { name: "Tpl", subject: "Hi", body: "Hello", functions: [{ name: "greet", code: "(signal) => signal.from.name" }] },
+      });
+      expect(callOrder).toEqual(["saveAuditEvent", "createTemplate"]);
+    });
+
+    it("audit event contains before: null and after with functions array for creation", async () => {
+      vi.mocked(store.createTemplate).mockResolvedValueOnce(ok(makeTemplateResult({ functions: [{ name: "greet", code: "(signal) => signal.from.name" }] })));
+      const functions = [{ name: "greet", code: "(signal) => signal.from.name" }];
+      await req(app, "POST", `${A}/templates`, {
+        body: { name: "Tpl", subject: "Hi", body: "Hello", functions },
+      });
+      expect(store.saveAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+        accountId: TEST_ACCOUNT_ID,
+        userId: TEST_USER_ID,
+        action: "created",
+        resourceType: "template",
+        before: null,
+        after: { functions },
+      }));
+    });
+
+    it("proceeds with template creation when audit write fails", async () => {
+      vi.mocked(store.saveAuditEvent).mockResolvedValueOnce(err({ kind: "db_error", cause: new Error("DynamoDB timeout") }));
+      vi.mocked(store.createTemplate).mockResolvedValueOnce(ok(makeTemplateResult({ functions: [{ name: "greet", code: "(signal) => signal.from.name" }] })));
+      const res = await req(app, "POST", `${A}/templates`, {
+        body: { name: "Tpl", subject: "Hi", body: "Hello", functions: [{ name: "greet", code: "(signal) => signal.from.name" }] },
+      });
+      expect(res.status).toBe(201);
+      expect(store.createTemplate).toHaveBeenCalledOnce();
+    });
+  });
+
+  describe("PATCH /accounts/:accountId/templates/:id — audit for template functions update", () => {
+    const makeTemplateResult = (overrides: Partial<EmailTemplate> = {}): EmailTemplate => ({
+      id: "tpl-001", accountId: TEST_ACCOUNT_ID, name: "Tpl", subject: "Hi", body: "Hello",
+      createdAt: "2024-01-01T00:00:00Z", updatedAt: "2024-01-01T00:00:00Z", ...overrides,
+    });
+
+    it("audit event contains before/after functions when functions are updated", async () => {
+      const existingTemplate = makeTemplateResult({ functions: [{ name: "old", code: "(signal) => 'old'" }] });
+      vi.mocked(store.getTemplate).mockResolvedValueOnce(ok(existingTemplate));
+      vi.mocked(store.updateTemplate).mockResolvedValueOnce(ok(makeTemplateResult({ functions: [{ name: "updated", code: "(signal) => 'new'" }] })));
+      const newFunctions = [{ name: "updated", code: "(signal) => 'new'" }];
+      await req(app, "PATCH", `${A}/templates/tpl-001`, {
+        body: { functions: newFunctions },
+      });
+      expect(store.saveAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+        accountId: TEST_ACCOUNT_ID,
+        userId: TEST_USER_ID,
+        action: "updated",
+        resourceType: "template",
+        resourceId: "tpl-001",
+        before: { functions: [{ name: "old", code: "(signal) => 'old'" }] },
+        after: { functions: newFunctions },
+      }));
+    });
+
+    it("proceeds with template update when audit write fails", async () => {
+      const existingTemplate = makeTemplateResult();
+      vi.mocked(store.getTemplate).mockResolvedValueOnce(ok(existingTemplate));
+      vi.mocked(store.saveAuditEvent).mockResolvedValueOnce(err({ kind: "db_error", cause: new Error("DynamoDB timeout") }));
+      vi.mocked(store.updateTemplate).mockResolvedValueOnce(ok(makeTemplateResult({ functions: [{ name: "fn", code: "(signal) => 'x'" }] })));
+      const res = await req(app, "PATCH", `${A}/templates/tpl-001`, {
+        body: { functions: [{ name: "fn", code: "(signal) => 'x'" }] },
+      });
+      expect(res.status).toBe(200);
+      expect(store.updateTemplate).toHaveBeenCalledOnce();
     });
   });
 });
