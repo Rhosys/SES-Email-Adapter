@@ -84,6 +84,12 @@ export class ArcDatabase implements ArcMatcher {
     }
   }
 
+  async createSignal(signal: Signal): Promise<Result<Signal, DbError>> {
+    const saveResult = await this.saveSignal(signal);
+    if (saveResult.isErr()) return err(saveResult.error);
+    return ok(signal);
+  }
+
   async getSignal(accountId: string, id: string): Promise<Result<Signal | null, DbError>> {
     try {
       const res = await dynamo.send(new GetCommand({

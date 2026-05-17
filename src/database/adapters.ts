@@ -60,6 +60,7 @@ export class ApiDatabaseAdapter implements ApiDatabase {
   listSignals(accountId: string, arcId: string, params: PageParams) { return this.arc.listSignals(accountId, arcId, params); }
   listPreArcSignals(accountId: string, status: "quarantined", params: PageParams) { return this.arc.listPreArcSignals(accountId, status, params); }
   getSignal(accountId: string, id: string) { return this.arc.getSignal(accountId, id); }
+  createSignal(signal: Signal) { return this.arc.createSignal(signal); }
   updateSignal(accountId: string, id: string, update: Partial<Pick<Signal, "subject" | "textBody" | "from" | "to">>) { return this.arc.updateSignal(accountId, id, update); }
   deleteSignal(accountId: string, id: string) { return this.arc.deleteSignal(accountId, id); }
   updateSignalStatus(accountId: string, signalId: string, status: "block_hidden" | "block_reject" | "violate_report") { return this.arc.updateSignalStatus(accountId, signalId, status); }

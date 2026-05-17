@@ -34,7 +34,8 @@ import {
   UpdateAccountRequest,
   CreateForwardingAddressRequest, VerifyForwardingAddressRequest,
   InviteUserRequest, UpdateUserRequest,
-  CreateSenderRequest, CreateTemplateRequest, UpdateTemplateRequest,
+  CreateSenderRequest, CreateTemplateRequest, ReplaceTemplateRequest, UpdateTemplateRequest,
+  CreateDraftSignalRequest, ReplaceDraftSignalRequest,
 } from "./requests.js";
 
 // ---------------------------------------------------------------------------
@@ -92,6 +93,7 @@ export interface ApiDatabase {
   listSignals(accountId: string, arcId: string, params: PageParams): PromiseLike<Result<Page<Signal>, DbError>>;
   listPreArcSignals(accountId: string, status: "quarantined", params: PageParams): PromiseLike<Result<Page<Signal>, DbError>>;
   getSignal(accountId: string, id: string): PromiseLike<Result<Signal | null, DbError>>;
+  createSignal(signal: Signal): PromiseLike<Result<Signal, DbError>>;
   updateSignal(accountId: string, id: string, update: Partial<Pick<Signal, "subject" | "textBody" | "from" | "to">>): PromiseLike<Result<Signal, DbError>>;
   deleteSignal(accountId: string, id: string): PromiseLike<Result<void, DbError>>;
 
@@ -426,6 +428,67 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
     const result = await store.listSignals(accountId, arc.id, params);
     if (result.isErr()) return err(c, 500, "Internal Server Error");
     return c.json(page("signals", result.value.items, result.value.nextCursor));
+  });
+
+  app.post("/accounts/:accountId/arcs/:arcId/signals", authz("signals:write", c => `accounts/${c.req.param("accountId")}/arcs/${c.req.param("arcId")}/signals`), async (c) => {
+    const { accountId } = c.get("auth");
+    const arcResult = await store.getArc(accountId, c.req.param("arcId"));
+    if (arcResult.isErr()) return err(c, 500, "Internal Server Error");
+    const arc = arcResult.value;
+    if (!arc) return err(c, 404, "Arc not found", "ARC_NOT_FOUND");
+    if (arc.accountId !== accountId) return err(c, 403, "Forbidden");
+    const body = await zParse(CreateDraftSignalRequest, c.req.raw);
+    const now = new Date().toISOString();
+    const signal: Signal = {
+      id: `USR#${randomUUID()}`,
+      arcId: arc.id,
+      accountId,
+      source: "user",
+      receivedAt: now,
+      from: body.from as Signal["from"],
+      to: body.to as Signal["to"],
+      cc: [],
+      subject: body.subject,
+      ...(body.textBody != null ? { textBody: body.textBody } : {}),
+      attachments: [],
+      headers: {},
+      recipientAddress: body.from.address,
+      workflow: arc.workflow,
+      workflowData: { workflow: arc.workflow } as Signal["workflowData"],
+      spamScore: 0,
+      summary: "",
+      classificationModelId: "",
+      s3Key: "",
+      status: "draft",
+      createdAt: now,
+    };
+    const createResult = await store.createSignal(signal);
+    if (createResult.isErr()) return err(c, 500, "Internal Server Error");
+    return c.json(createResult.value, 201);
+  });
+
+  app.put("/accounts/:accountId/arcs/:arcId/signals/:id", authz("signals:write", c => `accounts/${c.req.param("accountId")}/arcs/${c.req.param("arcId")}/signals/${c.req.param("id")}`), async (c) => {
+    const { accountId } = c.get("auth");
+    const arcResult = await store.getArc(accountId, c.req.param("arcId"));
+    if (arcResult.isErr()) return err(c, 500, "Internal Server Error");
+    const arc = arcResult.value;
+    if (!arc) return err(c, 404, "Arc not found", "ARC_NOT_FOUND");
+    if (arc.accountId !== accountId) return err(c, 403, "Forbidden");
+    const signalResult = await store.getSignal(accountId, c.req.param("id"));
+    if (signalResult.isErr()) return err(c, 500, "Internal Server Error");
+    const signal = signalResult.value;
+    if (!signal) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
+    if (signal.arcId !== arc.id) return err(c, 400, "Signal does not belong to this arc", "SIGNAL_ARC_MISMATCH");
+    if (signal.status !== "draft") return err(c, 400, "Only draft signals can be replaced", "SIGNAL_NOT_DRAFT");
+    const body = await zParse(ReplaceDraftSignalRequest, c.req.raw);
+    const updateResult = await store.updateSignal(accountId, signal.id, {
+      from: body.from as Signal["from"],
+      to: body.to as Signal["to"],
+      subject: body.subject,
+      ...(body.textBody != null ? { textBody: body.textBody } : {}),
+    });
+    if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
+    return c.json(updateResult.value);
   });
 
   app.get("/accounts/:accountId/signals", authz("signals:read", c => `accounts/${c.req.param("accountId")}/signals`), async (c) => {
@@ -1002,6 +1065,17 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
     if (existingResult.isErr()) return err(c, 500, "Internal Server Error");
     if (!existingResult.value) return err(c, 404, "Template not found", "TEMPLATE_NOT_FOUND");
     const updateResult = await store.updateTemplate(accountId, c.req.param("id"), body as Parameters<typeof store.updateTemplate>[2]);
+    if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
+    return c.json(updateResult.value);
+  });
+
+  app.put("/accounts/:accountId/templates/:id", authz("templates:write", c => `accounts/${c.req.param("accountId")}/templates/${c.req.param("id")}`), async (c) => {
+    const { accountId } = c.get("auth");
+    const body = await zParse(ReplaceTemplateRequest, c.req.raw);
+    const existingResult = await store.getTemplate(accountId, c.req.param("id"));
+    if (existingResult.isErr()) return err(c, 500, "Internal Server Error");
+    if (!existingResult.value) return err(c, 404, "Template not found", "TEMPLATE_NOT_FOUND");
+    const updateResult = await store.updateTemplate(accountId, c.req.param("id"), { name: body.name, subject: body.subject, body: body.body });
     if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
     return c.json(updateResult.value);
   });
