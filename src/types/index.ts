@@ -30,7 +30,7 @@ export type Workflow = (typeof WORKFLOWS)[number];
 // SQS message types — discriminator for routing in the Lambda handler
 // ---------------------------------------------------------------------------
 
-export const SQS_MESSAGE_TYPES = ["reindex", "side_effect"] as const;
+export const SQS_MESSAGE_TYPES = ["reindex", "side_effect", "draft_send"] as const;
 export type SqsMessageType = (typeof SQS_MESSAGE_TYPES)[number];
 
 export type WorkflowData =
@@ -235,15 +235,15 @@ export type NewAddressHandling =
 export const UNKNOWN_SENDER_POLICIES = ["allow_all", "quarantine_visible", "quarantine_hidden", "block_hidden", "block_reject", "violate_report"] as const;
 export type UnknownSenderPolicy = (typeof UNKNOWN_SENDER_POLICIES)[number];
 
-// active = visible in inbox; quarantine_visible = surfaced in review queue; quarantine_hidden = stored but not shown in queue; block_hidden = accepted, silently discarded; block_reject = bounced; violate_report = bounced + reported; draft = user-authored, unsent
-export const SIGNAL_STATUSES = ["active", "block_hidden", "block_reject", "violate_report", "quarantine_visible", "quarantine_hidden", "draft"] as const;
+// active = visible in inbox; quarantine_visible = surfaced in review queue; quarantine_hidden = stored but not shown in queue; block_hidden = accepted, silently discarded; block_reject = bounced; violate_report = bounced + reported; draft = user-authored, unsent; pending_send = send initiated, within undo window; sent = delivered via SES
+export const SIGNAL_STATUSES = ["active", "block_hidden", "block_reject", "violate_report", "quarantine_visible", "quarantine_hidden", "draft", "pending_send", "sent"] as const;
 export type SignalStatus = (typeof SIGNAL_STATUSES)[number];
 
 export const STATS_CATEGORIES = ["allowed", "blocked", "quarantined", "violationReport"] as const;
 export type StatsCategory = (typeof STATS_CATEGORIES)[number];
 
-// "email" = inbound SES email; "system" = processor-created (e.g. extracted calendar event); "user" = user-created
-export const SIGNAL_SOURCES = ["email", "system", "user"] as const;
+// "email" = inbound SES email; "system" = processor-created (e.g. extracted calendar event); "user" = user-created; "deliverability" = bounce/delivery notification
+export const SIGNAL_SOURCES = ["email", "system", "user", "deliverability"] as const;
 export type SignalSource = (typeof SIGNAL_SOURCES)[number];
 
 // interrupt = push notification popup; ambient = badge only; silent = no push
@@ -409,6 +409,19 @@ export interface Signal {
   urgency?: ArcUrgency;
   createdAt: string;
   ttl?: number;   // DynamoDB TTL (epoch seconds) — computed from retentionDuration at write time; absent = never expire
+
+  // Send flow fields (only present on source: "user" signals)
+  sendInitiatedAt?: string;    // ISO 8601 — when POST /send was called
+  sesMessageId?: string;       // SES message ID after successful delivery
+  sendFailureReason?: string;  // "all_recipients_bounced" | "ses_permanent_failure"
+
+  // Deliverability signal fields (only present on source: "deliverability" signals)
+  relatedSignalId?: string;    // ID of the sent signal this bounce relates to
+  bouncedRecipients?: Array<{
+    address: string;
+    bounceType: "permanent" | "transient";
+    reason?: string;
+  }>;
 
   // Embedding cache, keyed by Bedrock model ID
   // Absent on quarantined/blocked signals (no Aurora write happened).
@@ -589,6 +602,7 @@ export interface Account {
   filtering?: AccountFilteringConfig;
   onboarding?: AccountOnboarding;
   billingPlan?: import("../embedding/retention-tier.js").BillingPlan;
+  afterSendAction?: "archive" | "keep_active";
   createdAt: string;
   updatedAt: string;
 }
