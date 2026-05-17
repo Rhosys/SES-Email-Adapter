@@ -487,6 +487,7 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
     const signal = signalResult.value;
     if (!signal) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
     if (signal.arcId !== arc.id) return err(c, 400, "Signal does not belong to this arc", "SIGNAL_ARC_MISMATCH");
+    if (signal.status === "sent") return err(c, 400, "Signal already sent", "SIGNAL_ALREADY_SENT");
     if (signal.status !== "draft") return err(c, 400, "Only draft signals can be replaced", "SIGNAL_NOT_DRAFT");
     const body = await zParse(ReplaceDraftSignalRequest, c.req.raw);
     const updateResult = await store.updateSignal(accountId, signal.id, {
@@ -612,8 +613,22 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
     const signal = signalResult.value;
     if (!signal) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
     if (signal.accountId !== accountId) return err(c, 403, "Forbidden");
-    if (signal.status !== "draft") return err(c, 400, "Only draft signals can be updated", "SIGNAL_NOT_DRAFT");
+    if (signal.status === "sent") return err(c, 400, "Signal already sent", "SIGNAL_ALREADY_SENT");
+    if (signal.status !== "draft" && signal.status !== "pending_send") return err(c, 400, "Only draft or pending signals can be updated", "SIGNAL_NOT_EDITABLE");
+
     const body = await zParse(UpdateSignalRequest, c.req.raw);
+
+    // If pending_send, only status change to "draft" is allowed
+    if (signal.status === "pending_send") {
+      const hasContentFields = body.subject !== undefined || body.textBody !== undefined || body.from !== undefined || body.to !== undefined;
+      if (hasContentFields && body.status !== "draft") return err(c, 400, "Pending signals can only be reverted to draft", "INVALID_STATUS_TRANSITION");
+      if (body.status !== "draft") return err(c, 400, "Pending signals can only be reverted to draft", "INVALID_STATUS_TRANSITION");
+      const updateResult = await store.updateSignalSendStatus(accountId, signal.id, { status: "draft", sendInitiatedAt: null });
+      if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
+      return c.json(updateResult.value);
+    }
+
+    // Normal draft edit (subject, textBody, from, to)
     const updateResult = await store.updateSignal(accountId, signal.id, body as Parameters<typeof store.updateSignal>[2]);
     if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
     return c.json(updateResult.value);
@@ -668,6 +683,7 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
     const signal = signalResult.value;
     if (!signal) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
     if (signal.accountId !== accountId) return err(c, 403, "Forbidden");
+    if (signal.status === "sent") return err(c, 400, "Signal already sent", "SIGNAL_ALREADY_SENT");
     if (signal.status !== "draft") return err(c, 400, "Only draft signals can be deleted", "SIGNAL_NOT_DRAFT");
     const deleteResult = await store.deleteSignal(accountId, signal.id);
     if (deleteResult.isErr()) return err(c, 500, "Internal Server Error");

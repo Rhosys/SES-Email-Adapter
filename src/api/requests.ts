@@ -46,6 +46,7 @@ export const UpdateSignalStatusRequest = z.object({
 export type UpdateSignalStatusRequest = z.infer<typeof UpdateSignalStatusRequest>;
 
 export const UpdateSignalRequest = z.object({
+  status: z.literal("draft").optional(),
   subject: z.string().optional(),
   textBody: z.string().optional(),
   from: EmailAddressSchema.optional(),
