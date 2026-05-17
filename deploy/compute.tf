@@ -203,7 +203,7 @@ resource "aws_lambda_function" "main" {
       CF_ORIGIN_SECRET         = random_password.cf_origin_secret.result
       SIGNAL_QUEUE_URL         = aws_sqs_queue.signals.url
       MAIL_DOMAIN              = "platform.${data.aws_route53_zone.main.name}"
-      ACCOUNT_CREATION_SFN_ARN = "arn:aws:states:${data.aws_region.current.name}:${var.aws_account_id}:stateMachine:email-catcher-AccountCreation"
+      ACCOUNT_CREATION_SFN_ARN = aws_sfn_state_machine.account_creation.arn
       AUTHRESS_KMS_KEY_ARN     = aws_kms_key.authress_service_client.arn
       AUTHRESS_KEY_ID          = "AaWE"
       USER_CODE_EXECUTOR_ARN   = aws_lambda_function.user_code_executor.arn
