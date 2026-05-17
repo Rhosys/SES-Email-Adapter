@@ -22,7 +22,8 @@ export interface LogEntry {
 }
 
 export interface Logger {
-  startInvocation(): void;
+  startInvocation(invocationId?: string): void;
+  getInvocationId(): string;
   trackPoint(name: string, data?: Record<string, unknown>): void;
   info(message: string, context?: Record<string, unknown>): void;
   track(message: string, context?: Record<string, unknown>): void;
@@ -68,10 +69,14 @@ export class RequestLogger implements Logger {
     this.containerId = containerId ?? CONTAINER_ID;
   }
 
-  startInvocation(): void {
-    this.invocationId = randomUUID();
+  startInvocation(invocationId?: string): void {
+    this.invocationId = invocationId ?? randomUUID();
     this.startTime = Date.now();
     this.trackPoints = [];
+  }
+
+  getInvocationId(): string {
+    return this.invocationId;
   }
 
   trackPoint(name: string, data?: Record<string, unknown>): void {

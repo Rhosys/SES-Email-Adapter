@@ -207,7 +207,11 @@ export async function handler(
   event: APIGatewayProxyEventV2 | APIGatewayProxyWebsocketEventV2 | SQSEvent | EventBridgeEvent<string, { source?: string }> | unknown,
   _context: Context,
 ): Promise<APIGatewayProxyResultV2 | WsAuthorizerResult | HttpAuthorizerResponse | { statusCode: number } | { batchItemFailures: Array<{ itemIdentifier: string }> } | unknown> {
-  logger.startInvocation();
+  const cfRequestId = (event as APIGatewayProxyEventV2)?.headers?.["x-amz-cf-id"] ?? "";
+  const apiGwRequestId = (event as APIGatewayProxyEventV2)?.requestContext?.requestId ?? "";
+  const lambdaRequestId = _context.awsRequestId ?? "";
+  const compositeId = `CF${cfRequestId}-API${apiGwRequestId}-L${lambdaRequestId}`;
+  logger.startInvocation(compositeId);
 
   if (isStepFunctionTaskEvent(event)) {
     const { context } = event;
