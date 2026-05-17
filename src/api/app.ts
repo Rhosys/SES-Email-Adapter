@@ -13,6 +13,7 @@ import type { Logger } from "../logger.js";
 import { deriveGroupingKey } from "../processor/processor.js";
 import { zParse } from "./validate.js";
 import { validateRuleCondition } from "./validate-rule-condition.js";
+import { validateCodeAst } from "./ast-validator.js";
 import { parseStatsRow } from "../database/stats-writer.js";
 import { isValidEmail } from "../email/validate-email.js";
 import type { DraftSendDispatcher } from "../processor/draft-send-dispatcher.js";
@@ -153,7 +154,7 @@ export interface ApiDatabase {
   // Templates
   createTemplate(template: EmailTemplate): PromiseLike<Result<EmailTemplate, DbError>>;
   getTemplate(accountId: string, id: string): PromiseLike<Result<EmailTemplate | null, DbError>>;
-  updateTemplate(accountId: string, id: string, update: Partial<Pick<EmailTemplate, "name" | "subject" | "body">>): PromiseLike<Result<EmailTemplate, DbError>>;
+  updateTemplate(accountId: string, id: string, update: Partial<Pick<EmailTemplate, "name" | "subject" | "body" | "functions">>): PromiseLike<Result<EmailTemplate, DbError>>;
   deleteTemplate(accountId: string, id: string): PromiseLike<Result<void, DbError>>;
   listTemplates(accountId: string): PromiseLike<Result<EmailTemplate[], DbError>>;
 
@@ -794,9 +795,20 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
   app.post("/accounts/:accountId/rules", authz("rules:write", c => `accounts/${c.req.param("accountId")}/rules`), async (c) => {
     const { accountId } = c.get("auth");
     const body = await zParse(CreateRuleRequest, c.req.raw);
-    if (body.condition) {
-      const conditionError = validateRuleCondition(body.condition);
-      if (conditionError) return err(c, 400, conditionError, "INVALID_CONDITION");
+    const effectiveConditionType = body.conditionType ?? "json_logic";
+    if (effectiveConditionType === "js") {
+      if (!body.code || body.code.trim().length === 0) {
+        return err(c, 400, "code field is required when conditionType is 'js'", "MISSING_CODE");
+      }
+      const astResult = validateCodeAst(body.code);
+      if (!astResult.valid) {
+        return err(c, 400, astResult.error, "INVALID_CODE", astResult.location ? { location: astResult.location } : undefined);
+      }
+    } else {
+      if (body.condition) {
+        const conditionError = validateRuleCondition(body.condition);
+        if (conditionError) return err(c, 400, conditionError, "INVALID_CONDITION");
+      }
     }
     const forwardError = await validateForwardTargets(accountId, body.actions as Rule["actions"], store);
     if (forwardError) return err(c, 400, forwardError, "UNVERIFIED_FORWARD_TARGET");
@@ -812,15 +824,38 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
     const rule = rulesResult.value.find((r) => r.id === c.req.param("id"));
     if (!rule) return err(c, 404, "Rule not found", "RULE_NOT_FOUND");
     const body = await zParse(UpdateRuleRequest, c.req.raw);
-    if (body.condition) {
-      const conditionError = validateRuleCondition(body.condition);
-      if (conditionError) return err(c, 400, conditionError, "INVALID_CONDITION");
+    const effectiveConditionType = body.conditionType ?? rule.conditionType ?? "json_logic";
+    if (effectiveConditionType === "js") {
+      // If code is being provided, validate it
+      if (body.code !== undefined) {
+        if (!body.code || body.code.trim().length === 0) {
+          return err(c, 400, "code field is required when conditionType is 'js'", "MISSING_CODE");
+        }
+        const astResult = validateCodeAst(body.code);
+        if (!astResult.valid) {
+          return err(c, 400, astResult.error, "INVALID_CODE", astResult.location ? { location: astResult.location } : undefined);
+        }
+      }
+      // If switching to "js" conditionType without providing code, require existing code on the rule
+      if (body.conditionType === "js" && body.code === undefined && !rule.code) {
+        return err(c, 400, "code field is required when conditionType is 'js'", "MISSING_CODE");
+      }
+    } else {
+      if (body.condition) {
+        const conditionError = validateRuleCondition(body.condition);
+        if (conditionError) return err(c, 400, conditionError, "INVALID_CONDITION");
+      }
     }
     if (body.actions) {
       const forwardError = await validateForwardTargets(accountId, body.actions as Rule["actions"], store);
       if (forwardError) return err(c, 400, forwardError, "UNVERIFIED_FORWARD_TARGET");
     }
-    const updateResult = await store.updateRule(accountId, rule.id, body as Parameters<typeof store.updateRule>[2]);
+    // Clear lastError when code is updated on a JS rule
+    const updateData: Parameters<typeof store.updateRule>[2] = { ...body } as Parameters<typeof store.updateRule>[2];
+    if (effectiveConditionType === "js" && body.code !== undefined) {
+      (updateData as Record<string, unknown>)["lastError"] = null;
+    }
+    const updateResult = await store.updateRule(accountId, rule.id, updateData);
     if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
     return c.json(updateResult.value);
   });
@@ -1129,9 +1164,18 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
   app.post("/accounts/:accountId/templates", authz("templates:write", c => `accounts/${c.req.param("accountId")}/templates`), async (c) => {
     const { accountId } = c.get("auth");
     const body = await zParse(CreateTemplateRequest, c.req.raw);
+    if (body.functions) {
+      for (const fn of body.functions) {
+        const astResult = validateCodeAst(fn.code);
+        if (!astResult.valid) {
+          return err(c, 400, `Invalid code in function '${fn.name}': ${astResult.error}`, "INVALID_CODE", astResult.location ? { location: astResult.location } : undefined);
+        }
+      }
+    }
     const now = new Date().toISOString();
     const templateResult = await store.createTemplate({
       id: randomUUID(), accountId, name: body.name, subject: body.subject, body: body.body,
+      ...(body.functions ? { functions: body.functions } : {}),
       createdAt: now, updatedAt: now,
     });
     if (templateResult.isErr()) return err(c, 500, "Internal Server Error");
@@ -1141,6 +1185,14 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
   app.patch("/accounts/:accountId/templates/:id", authz("templates:write", c => `accounts/${c.req.param("accountId")}/templates/${c.req.param("id")}`), async (c) => {
     const { accountId } = c.get("auth");
     const body = await zParse(UpdateTemplateRequest, c.req.raw);
+    if (body.functions) {
+      for (const fn of body.functions) {
+        const astResult = validateCodeAst(fn.code);
+        if (!astResult.valid) {
+          return err(c, 400, `Invalid code in function '${fn.name}': ${astResult.error}`, "INVALID_CODE", astResult.location ? { location: astResult.location } : undefined);
+        }
+      }
+    }
     const existingResult = await store.getTemplate(accountId, c.req.param("id"));
     if (existingResult.isErr()) return err(c, 500, "Internal Server Error");
     if (!existingResult.value) return err(c, 404, "Template not found", "TEMPLATE_NOT_FOUND");
@@ -1152,10 +1204,18 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
   app.put("/accounts/:accountId/templates/:id", authz("templates:write", c => `accounts/${c.req.param("accountId")}/templates/${c.req.param("id")}`), async (c) => {
     const { accountId } = c.get("auth");
     const body = await zParse(ReplaceTemplateRequest, c.req.raw);
+    if (body.functions) {
+      for (const fn of body.functions) {
+        const astResult = validateCodeAst(fn.code);
+        if (!astResult.valid) {
+          return err(c, 400, `Invalid code in function '${fn.name}': ${astResult.error}`, "INVALID_CODE", astResult.location ? { location: astResult.location } : undefined);
+        }
+      }
+    }
     const existingResult = await store.getTemplate(accountId, c.req.param("id"));
     if (existingResult.isErr()) return err(c, 500, "Internal Server Error");
     if (!existingResult.value) return err(c, 404, "Template not found", "TEMPLATE_NOT_FOUND");
-    const updateResult = await store.updateTemplate(accountId, c.req.param("id"), { name: body.name, subject: body.subject, body: body.body });
+    const updateResult = await store.updateTemplate(accountId, c.req.param("id"), { name: body.name, subject: body.subject, body: body.body, ...(body.functions ? { functions: body.functions } : {}) });
     if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
     return c.json(updateResult.value);
   });
