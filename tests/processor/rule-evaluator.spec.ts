@@ -180,6 +180,57 @@ describe("JsonLogicRuleEvaluator — JS condition path", () => {
     );
   });
 
+  it("returns non-matching and logs on timeout", async () => {
+    const response: UserCodeResponse = { success: false, error: { message: "User code execution timed out", type: "timeout" } };
+    vi.mocked(mockExecutor.invoke).mockResolvedValue(response);
+
+    await evaluator.evaluate(
+      makeJsRule({ id: "rule_timeout_log" }),
+      { signal: makeSignal(), arc: makeArc(), isMatchedArc: false },
+    );
+
+    expect(mockLogger.calls.some(c => c.method === "track" && c.context?.errorType === "timeout")).toBe(true);
+  });
+
+  it("returns non-matching and logs on runtime error", async () => {
+    const response: UserCodeResponse = { success: false, error: { message: "ReferenceError: x is not defined", type: "runtime_error" } };
+    vi.mocked(mockExecutor.invoke).mockResolvedValue(response);
+
+    await evaluator.evaluate(
+      makeJsRule({ id: "rule_runtime_log" }),
+      { signal: makeSignal(), arc: makeArc(), isMatchedArc: false },
+    );
+
+    expect(mockLogger.calls.some(c => c.method === "track" && c.context?.errorType === "runtime_error")).toBe(true);
+  });
+
+  it("returns matched with warnings when user code returns array with invalid actions (Zod validation failure)", async () => {
+    const response: UserCodeResponse = {
+      success: true,
+      purpose: "rule_condition",
+      result: [
+        { type: "archive" },
+        { type: "totally_invalid_action_type" },
+        { type: "assign_label", value: "valid" },
+      ],
+    };
+    vi.mocked(mockExecutor.invoke).mockResolvedValue(response);
+
+    const result = await evaluator.evaluate(
+      makeJsRule(),
+      { signal: makeSignal(), arc: makeArc(), isMatchedArc: false },
+    );
+
+    expect(result.matched).toBe(true);
+    expect(result.dynamicActions).toEqual([
+      { type: "archive" },
+      { type: "assign_label", value: "valid" },
+    ]);
+    expect(result.warnings.length).toBe(1);
+    expect(result.warnings[0]).toContain("Element [1]");
+    expect(result.warnings[0]).toContain("not a valid RuleAction");
+  });
+
   it("falls through to evalCondition for non-JS rules and wraps boolean result", async () => {
     const jsonLogicRule: Rule = {
       id: "rule_jl_001",
