@@ -206,7 +206,7 @@ const app = createApp({
 export async function handler(
   event: APIGatewayProxyEventV2 | APIGatewayProxyWebsocketEventV2 | SQSEvent | EventBridgeEvent<string, { source?: string }> | unknown,
   _context: Context,
-): Promise<APIGatewayProxyResultV2 | WsAuthorizerResult | { statusCode: number } | { batchItemFailures: Array<{ itemIdentifier: string }> } | unknown> {
+): Promise<APIGatewayProxyResultV2 | WsAuthorizerResult | HttpAuthorizerResponse | { statusCode: number } | { batchItemFailures: Array<{ itemIdentifier: string }> } | unknown> {
   logger.startInvocation();
 
   if (isStepFunctionTaskEvent(event)) {
@@ -320,6 +320,9 @@ export async function handler(
   if (isWsAuthorizerEvent(event)) {
     return handleWsAuthorizer(event as WsAuthorizerEvent);
   }
+  if (isHttpAuthorizerEvent(event)) {
+    return handleHttpAuthorizer(event as HttpAuthorizerEvent);
+  }
   if (isWebSocketEvent(event)) {
     return handleWebSocket(event as APIGatewayProxyWebsocketEventV2);
   }
@@ -392,6 +395,59 @@ function wsDeny(methodArn: string): WsAuthorizerResult {
     },
     context: {},
   };
+}
+
+// ---------------------------------------------------------------------------
+// HTTP API authorizer  (payload format 2.0 — simple response)
+// ---------------------------------------------------------------------------
+
+type HttpAuthorizerEvent = {
+  version: "2.0";
+  type: "REQUEST";
+  routeArn: string;
+  routeKey: string;
+  rawPath: string;
+  headers: Record<string, string>;
+  queryStringParameters?: Record<string, string>;
+  requestContext: {
+    accountId: string;
+    apiId: string;
+    domainName: string;
+    http: { method: string; path: string };
+    requestId: string;
+    routeKey: string;
+    stage: string;
+    time: string;
+    timeEpoch: number;
+  };
+  identitySource?: string[];
+};
+
+type HttpAuthorizerResponse = {
+  isAuthorized: boolean;
+  context: Record<string, string>;
+};
+
+function isHttpAuthorizerEvent(event: unknown): event is HttpAuthorizerEvent {
+  const e = event as Record<string, unknown>;
+  return e["version"] === "2.0" && e["type"] === "REQUEST" && typeof e["routeArn"] === "string";
+}
+
+async function handleHttpAuthorizer(event: HttpAuthorizerEvent): Promise<HttpAuthorizerResponse> {
+  const authHeader = event.headers?.["authorization"] ?? "";
+  const match = /^Bearer\s+(.+)$/i.exec(authHeader);
+  if (!match || !match[1]?.trim()) {
+    return { isAuthorized: false, context: {} };
+  }
+
+  const token = match[1].trim();
+  const verifyResult = await authService.verify(token);
+  if (verifyResult.isErr()) {
+    return { isAuthorized: false, context: {} };
+  }
+
+  const { userId } = verifyResult.value;
+  return { isAuthorized: true, context: { userId } };
 }
 
 // ---------------------------------------------------------------------------
