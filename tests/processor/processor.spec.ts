@@ -272,7 +272,7 @@ describe("SignalProcessor", () => {
 
       expect(store.saveSignal).toHaveBeenCalledOnce();
       const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
-      expect(saved.id).toBe("SES#msg-abc");
+      expect(saved.id).toMatch(/^sgn-/);
       expect(saved.source).toBe("email");
       expect(saved.workflow).toBe("conversation");
       expect(saved.accountId).toBe(TEST_ACCOUNT_ID);
@@ -729,7 +729,7 @@ describe("SignalProcessor", () => {
       expect(result2.isOk()).toBe(true);
       expect(store.saveSignal).toHaveBeenCalledOnce();
       const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
-      expect(saved.id).toBe("SES#msg-ok");
+      expect(saved.id).toMatch(/^sgn-/);
       expect(saved.source).toBe("email");
     });
   });
@@ -1591,13 +1591,13 @@ describe("SignalProcessor", () => {
       expect(payload.signal.recipientAddress).toBe("user@example.com");
     });
 
-    it("dispatches side-effect with signal.id containing sesMessageId for inReplyTo", async () => {
+    it("dispatches side-effect with signal.id as sgn- prefixed ID for inReplyTo", async () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(testClassification);
 
       await processor.processRecord(makeMessage({ sesMessageId: "original-ses-123" }), 1);
 
       const payload = vi.mocked(sqsDispatcher.sendMessage).mock.calls[0]![0];
-      expect(payload.signal.id).toBe("SES#original-ses-123");
+      expect(payload.signal.id).toMatch(/^sgn-/);
     });
 
     it("does not include pong action for non-test workflows", async () => {

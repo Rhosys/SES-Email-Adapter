@@ -210,7 +210,8 @@ function makeSideEffectPayload(payload: { signal: Signal; arc: Arc }): SideEffec
  */
 function makeExistingSignal(overrides: Partial<Signal> = {}): Signal {
   return {
-    id: `SES#${SES_MESSAGE_ID}`,
+    id: "sgn-integration001",
+    signalLookupId: `ses-${SES_MESSAGE_ID}`,
     arcId: "arc-integration-001",
     accountId: TEST_ACCOUNT_ID,
     source: "email",

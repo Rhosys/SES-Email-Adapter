@@ -59,7 +59,8 @@ const arc: Arc = {
 };
 
 const signal: Signal = {
-  id: "SES#msg-001",
+  id: "sgn-msg001",
+  signalLookupId: "ses-msg-001",
   accountId: "acct-1",
   source: "email",
   receivedAt: "2024-06-01T12:00:00Z",
@@ -237,7 +238,7 @@ describe("DeviceNotifier", () => {
 
       const expectedPayload: NotificationPayload = {
         type: "signal",
-        signalId: "SES#msg-001",
+        signalId: "sgn-msg001",
         arcId: "arc-001",
         sender: "alice@example.com",
         senderName: "Alice",

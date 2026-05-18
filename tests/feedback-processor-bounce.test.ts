@@ -9,8 +9,8 @@ import { createMockLogger } from "./helpers/mock-logger.js";
 
 function makeSentSignal(overrides: Partial<Signal> = {}): Signal {
   return {
-    id: "USR#signal-001",
-    signalLookupId: "USR#signal-001",
+    id: "sgn-signal001",
+    signalLookupId: "sgn-signal001",
     arcId: "arc-001",
     accountId: "acct-001",
     source: "user",
@@ -116,13 +116,13 @@ describe("FeedbackProcessor — bounce handling for user-sent signals", () => {
     expect(signalStore.saveSignal).toHaveBeenCalledTimes(1);
 
     const savedSignal = vi.mocked(signalStore.saveSignal).mock.calls[0]![0];
-    expect(savedSignal.id).toMatch(/^SYS#/);
+    expect(savedSignal.id).toMatch(/^sgn-/);
     expect(savedSignal.arcId).toBe("arc-001");
     expect(savedSignal.accountId).toBe("acct-001");
     expect(savedSignal.source).toBe("deliverability");
     expect(savedSignal.status).toBe("active");
     expect(savedSignal.from).toEqual({ address: "system@deliverability" });
-    expect(savedSignal.relatedSignalId).toBe("USR#signal-001");
+    expect(savedSignal.relatedSignalId).toBe("sgn-signal001");
     expect(savedSignal.bouncedRecipients).toEqual([
       { address: "recipient@example.com", bounceType: "permanent", reason: "5.1.1" },
     ]);
@@ -135,7 +135,7 @@ describe("FeedbackProcessor — bounce handling for user-sent signals", () => {
     const result = await processor.processNotification(makeBounceFeedback());
 
     expect(result.isOk()).toBe(true);
-    expect(signalStore.updateSignalSendStatus).toHaveBeenCalledWith("acct-001", "USR#signal-001", {
+    expect(signalStore.updateSignalSendStatus).toHaveBeenCalledWith("acct-001", "sgn-signal001", {
       status: "draft",
       sendFailureReason: "all_recipients_bounced",
       sendInitiatedAt: null,

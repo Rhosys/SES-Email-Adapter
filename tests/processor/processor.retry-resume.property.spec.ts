@@ -566,7 +566,8 @@ describe("Feature: signal-processor-retry-resilience, Property 3: DDB read failu
 
   function makeExistingSignal(sesMessageId: string): Signal {
     return {
-      id: `sig-${sesMessageId}`,
+      id: `sgn-${sesMessageId}`,
+      signalLookupId: `ses-${sesMessageId}`,
       accountId: TEST_ACCOUNT_ID,
       sesMessageId,
       arcId: "arc-existing",

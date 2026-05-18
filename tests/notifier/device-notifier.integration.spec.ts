@@ -165,7 +165,8 @@ function makeReplySender(): ReplySender {
 
 function makeSignal(overrides: Partial<Signal> = {}): Signal {
   return {
-    id: "SES#msg-notifier-001",
+    id: "sgn-notifier001",
+    signalLookupId: "ses-msg-notifier-001",
     arcId: "arc-notifier-001",
     accountId: TEST_ACCOUNT_ID,
     source: "email",

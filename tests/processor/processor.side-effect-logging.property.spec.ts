@@ -127,7 +127,8 @@ describe("Side effect caller logging", () => {
 
   function makeSignal(overrides: Partial<Signal> = {}): Signal {
     return {
-      id: "SES#test-msg",
+      id: "sgn-testmsg001",
+      signalLookupId: "ses-test-msg",
       accountId: TEST_ACCOUNT_ID,
       source: "email",
       receivedAt: "2024-01-15T10:00:00Z",
