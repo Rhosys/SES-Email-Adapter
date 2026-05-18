@@ -37,7 +37,7 @@ jobs:
           aws_region: ${{ env.AWS_DEFAULT_REGION }}
 
       - name: Validate Code (strict type-check + tests)
-        run: npm run check
+        run: npm test
 
       - name: Tofu Init
         run: tofu -chdir=deploy init -input=false -backend-config="bucket=${STATE_BUCKET}" -backend-config="key=${STATE_KEY}"
@@ -68,7 +68,7 @@ jobs:
         run: npm run build
 
       - name: Test Code
-        run: npm test
+        run: npm run check
 
       - name: Tofu Init
         run: tofu -chdir=deploy init -input=false -backend-config="bucket=${STATE_BUCKET}" -backend-config="key=${STATE_KEY}"
