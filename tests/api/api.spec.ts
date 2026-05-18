@@ -1312,13 +1312,13 @@ describe("API", () => {
 
   describe("POST /accounts/:accountId/rules — conditionType/code validation", () => {
     it("creates a JS rule with valid code and returns 201", async () => {
-      vi.mocked(store.createRule).mockResolvedValueOnce(ok(makeRule({ conditionType: "js", code: "(signal) => signal.spamScore > 0.5" }) as never));
+      vi.mocked(store.createRule).mockResolvedValueOnce(ok(makeRule({ conditionType: "js", condition: "(signal) => signal.spamScore > 0.5" }) as never));
       const res = await req(app, "POST", `${A}/rules`, {
-        body: { name: "Spam filter", conditionType: "js", code: "(signal) => signal.spamScore > 0.5", actions: [{ type: "archive" }] },
+        body: { name: "Spam filter", conditionType: "js", condition: "(signal) => signal.spamScore > 0.5", actions: [{ type: "archive" }] },
       });
       expect(res.status).toBe(201);
       expect(store.createRule).toHaveBeenCalledWith(
-        TEST_ACCOUNT_ID, expect.objectContaining({ conditionType: "js", code: "(signal) => signal.spamScore > 0.5" }),
+        TEST_ACCOUNT_ID, expect.objectContaining({ conditionType: "js", condition: "(signal) => signal.spamScore > 0.5" }),
       );
     });
 
@@ -1334,7 +1334,7 @@ describe("API", () => {
     it("returns 400 when code exceeds 10KB", async () => {
       const oversizedCode = `(signal) => { ${"x".repeat(10_241)} }`;
       const res = await req(app, "POST", `${A}/rules`, {
-        body: { name: "Big code", conditionType: "js", code: oversizedCode, actions: [{ type: "archive" }] },
+        body: { name: "Big code", conditionType: "js", condition: oversizedCode, actions: [{ type: "archive" }] },
       });
       expect(res.status).toBe(400);
     });
@@ -1342,7 +1342,7 @@ describe("API", () => {
     it("returns 400 with error location when code contains eval call", async () => {
       vi.mocked(astValidator.validateAst).mockResolvedValueOnce({ success: true, purpose: "validate_ast", result: { valid: false, error: "eval() calls are not allowed", location: { line: 1, column: 13 } } });
       const res = await req(app, "POST", `${A}/rules`, {
-        body: { name: "Eval rule", conditionType: "js", code: "(signal) => eval('1+1')", actions: [{ type: "archive" }] },
+        body: { name: "Eval rule", conditionType: "js", condition: "(signal) => eval('1+1')", actions: [{ type: "archive" }] },
       });
       expect(res.status).toBe(400);
       const body = await res.json() as { errorCode: string; details?: { location: { line: number; column: number } } };
@@ -1362,11 +1362,11 @@ describe("API", () => {
 
   describe("PATCH /accounts/:accountId/rules/:id — code update clears lastError", () => {
     it("clears lastError when code is updated on a JS rule", async () => {
-      const existingRule = makeRule({ conditionType: "js", code: "(signal) => true", lastError: "timeout after 800ms" });
+      const existingRule = makeRule({ conditionType: "js", condition: "(signal) => true", lastError: "timeout after 800ms" });
       vi.mocked(store.listRules).mockResolvedValueOnce(ok([existingRule]));
-      vi.mocked(store.updateRule).mockResolvedValueOnce(ok(makeRule({ conditionType: "js", code: "(signal) => false" })));
+      vi.mocked(store.updateRule).mockResolvedValueOnce(ok(makeRule({ conditionType: "js", condition: "(signal) => false" })));
       const res = await req(app, "PATCH", `${A}/rules/rule-001`, {
-        body: { code: "(signal) => false" },
+        body: { condition: "(signal) => false" },
       });
       expect(res.status).toBe(200);
       expect(store.updateRule).toHaveBeenCalledWith(
@@ -1431,18 +1431,18 @@ describe("API", () => {
       });
       vi.mocked(store.createRule).mockImplementation(async () => {
         callOrder.push("createRule");
-        return ok(makeRule({ conditionType: "js", code: "(signal) => true" }) as never);
+        return ok(makeRule({ conditionType: "js", condition: "(signal) => true" }) as never);
       });
       await req(app, "POST", `${A}/rules`, {
-        body: { name: "JS rule", conditionType: "js", code: "(signal) => true", actions: [{ type: "archive" }] },
+        body: { name: "JS rule", conditionType: "js", condition: "(signal) => true", actions: [{ type: "archive" }] },
       });
       expect(callOrder).toEqual(["saveAuditEvent", "createRule"]);
     });
 
     it("audit event contains before: null and after with conditionType/code for creation", async () => {
-      vi.mocked(store.createRule).mockResolvedValueOnce(ok(makeRule({ conditionType: "js", code: "(signal) => signal.spamScore > 0.8" }) as never));
+      vi.mocked(store.createRule).mockResolvedValueOnce(ok(makeRule({ conditionType: "js", condition: "(signal) => signal.spamScore > 0.8" }) as never));
       await req(app, "POST", `${A}/rules`, {
-        body: { name: "Spam rule", conditionType: "js", code: "(signal) => signal.spamScore > 0.8", actions: [{ type: "archive" }] },
+        body: { name: "Spam rule", conditionType: "js", condition: "(signal) => signal.spamScore > 0.8", actions: [{ type: "archive" }] },
       });
       expect(store.saveAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
         accountId: TEST_ACCOUNT_ID,
@@ -1450,15 +1450,15 @@ describe("API", () => {
         action: "created",
         resourceType: "rule",
         before: null,
-        after: { conditionType: "js", code: "(signal) => signal.spamScore > 0.8" },
+        after: { conditionType: "js", condition: "(signal) => signal.spamScore > 0.8" },
       }));
     });
 
     it("proceeds with rule creation when audit write fails", async () => {
       vi.mocked(store.saveAuditEvent).mockResolvedValueOnce(err({ kind: "db_error", cause: new Error("DynamoDB timeout") }));
-      vi.mocked(store.createRule).mockResolvedValueOnce(ok(makeRule({ conditionType: "js", code: "(signal) => true" }) as never));
+      vi.mocked(store.createRule).mockResolvedValueOnce(ok(makeRule({ conditionType: "js", condition: "(signal) => true" }) as never));
       const res = await req(app, "POST", `${A}/rules`, {
-        body: { name: "Audit fail rule", conditionType: "js", code: "(signal) => true", actions: [{ type: "archive" }] },
+        body: { name: "Audit fail rule", conditionType: "js", condition: "(signal) => true", actions: [{ type: "archive" }] },
       });
       expect(res.status).toBe(201);
       expect(store.createRule).toHaveBeenCalledOnce();
@@ -1467,11 +1467,11 @@ describe("API", () => {
 
   describe("PATCH /accounts/:accountId/rules/:id — audit for JS rule update", () => {
     it("audit event contains before/after code values when code is updated", async () => {
-      const existingRule = makeRule({ conditionType: "js", code: "(signal) => signal.spamScore > 0.5" });
+      const existingRule = makeRule({ conditionType: "js", condition: "(signal) => signal.spamScore > 0.5" });
       vi.mocked(store.listRules).mockResolvedValueOnce(ok([existingRule]));
-      vi.mocked(store.updateRule).mockResolvedValueOnce(ok(makeRule({ conditionType: "js", code: "(signal) => signal.spamScore > 0.9" })));
+      vi.mocked(store.updateRule).mockResolvedValueOnce(ok(makeRule({ conditionType: "js", condition: "(signal) => signal.spamScore > 0.9" })));
       await req(app, "PATCH", `${A}/rules/rule-001`, {
-        body: { code: "(signal) => signal.spamScore > 0.9" },
+        body: { condition: "(signal) => signal.spamScore > 0.9" },
       });
       expect(store.saveAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
         accountId: TEST_ACCOUNT_ID,
@@ -1479,18 +1479,18 @@ describe("API", () => {
         action: "updated",
         resourceType: "rule",
         resourceId: "rule-001",
-        before: { conditionType: "js", code: "(signal) => signal.spamScore > 0.5" },
-        after: { conditionType: "js", code: "(signal) => signal.spamScore > 0.9" },
+        before: { conditionType: "js", condition: "(signal) => signal.spamScore > 0.5" },
+        after: { conditionType: "js", condition: "(signal) => signal.spamScore > 0.9" },
       }));
     });
 
     it("proceeds with rule update when audit write fails", async () => {
-      const existingRule = makeRule({ conditionType: "js", code: "(signal) => true" });
+      const existingRule = makeRule({ conditionType: "js", condition: "(signal) => true" });
       vi.mocked(store.listRules).mockResolvedValueOnce(ok([existingRule]));
       vi.mocked(store.saveAuditEvent).mockResolvedValueOnce(err({ kind: "db_error", cause: new Error("DynamoDB timeout") }));
-      vi.mocked(store.updateRule).mockResolvedValueOnce(ok(makeRule({ conditionType: "js", code: "(signal) => false" })));
+      vi.mocked(store.updateRule).mockResolvedValueOnce(ok(makeRule({ conditionType: "js", condition: "(signal) => false" })));
       const res = await req(app, "PATCH", `${A}/rules/rule-001`, {
-        body: { code: "(signal) => false" },
+        body: { condition: "(signal) => false" },
       });
       expect(res.status).toBe(200);
       expect(store.updateRule).toHaveBeenCalledOnce();

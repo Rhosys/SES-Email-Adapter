@@ -524,7 +524,6 @@ export class AccountDatabase {
       name: data.name,
       condition: data.condition ?? "",
       ...(data.conditionType !== undefined ? { conditionType: data.conditionType } : {}),
-      ...(data.code !== undefined ? { code: data.code } : {}),
       actions: data.actions as Rule["actions"],
       status: "enabled",
       priorityOrder: data.priorityOrder ?? (userRules.length > 0 ? Math.max(...userRules.map((r) => r.priorityOrder)) + 1 : 100),
@@ -579,7 +578,6 @@ export class AccountDatabase {
     if (data.name !== undefined) { setParts.push("#name = :name"); exprValues[":name"] = data.name; exprNames["#name"] = "name"; }
     if (data.condition !== undefined) { setParts.push("#cond = :cond"); exprValues[":cond"] = data.condition; exprNames["#cond"] = "condition"; }
     if (data.conditionType !== undefined) { setParts.push("conditionType = :condType"); exprValues[":condType"] = data.conditionType; }
-    if (data.code !== undefined) { setParts.push("code = :code"); exprValues[":code"] = data.code; }
     if (data.actions !== undefined) { setParts.push("actions = :actions"); exprValues[":actions"] = data.actions; }
     if (data.priorityOrder !== undefined) { setParts.push("#pri = :pri"); exprValues[":pri"] = data.priorityOrder; exprNames["#pri"] = "priorityOrder"; }
     if (data.status !== undefined) { setParts.push("#status = :status"); exprValues[":status"] = data.status; exprNames["#status"] = "status"; }

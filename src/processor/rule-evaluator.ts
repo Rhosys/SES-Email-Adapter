@@ -85,7 +85,7 @@ export class JsonLogicRuleEvaluator implements RuleEvaluator {
       const response = await this.userCodeExecutor.invoke({
         tenantId: context.signal.accountId,
         purpose: "rule_condition",
-        functionCode: rule.code!,
+        functionCode: rule.condition,
         executionContext: { signal: stripSensitive(context.signal), arc: stripSensitive(context.arc) },
       });
 

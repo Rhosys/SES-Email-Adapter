@@ -560,9 +560,8 @@ export interface Rule {
   id: string;
   accountId: string;
   name: string;
-  condition: string;     // JSONLogic expression as JSON string
+  condition: string;     // JSONLogic expression (json_logic) or JS function body (js)
   conditionType?: "json_logic" | "js";  // default: json_logic
-  code?: string;         // JavaScript function body when conditionType is "js"
   actions: RuleAction[];
   status: RuleStatus;
   priorityOrder: number;
