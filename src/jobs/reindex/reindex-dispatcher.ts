@@ -75,6 +75,7 @@ export class ReindexDispatcher {
           MessageBody: JSON.stringify(message),
           MessageAttributes: {
             messageType: { DataType: "String", StringValue: SQS_MESSAGE_TYPES[0] },
+            callerInvocationId: { DataType: "String", StringValue: this.logger.getInvocationId() || "<NULL>" },
           },
         })),
       );

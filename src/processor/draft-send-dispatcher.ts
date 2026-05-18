@@ -35,6 +35,7 @@ export class DraftSendDispatcher implements DraftSendDispatch {
           DelaySeconds: delaySeconds,
           MessageAttributes: {
             messageType: { DataType: "String", StringValue: SQS_MESSAGE_TYPES[2] },
+            callerInvocationId: { DataType: "String", StringValue: this.logger.getInvocationId() || "<NULL>" },
           },
         }),
       );

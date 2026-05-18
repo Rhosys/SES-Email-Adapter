@@ -17,7 +17,7 @@ export class SfnAccountCreationStarter implements AccountCreationStarter {
       await this.sfn.send(new StartExecutionCommand({
         stateMachineArn: this.stateMachineArn,
         name: accountId,
-        input: JSON.stringify({ accountId, email }),
+        input: JSON.stringify({ accountId, email, callerInvocationId: this.logger.getInvocationId() }),
       }));
     } catch (e: unknown) {
       if ((e as { name?: string }).name === "ExecutionAlreadyExists") {
