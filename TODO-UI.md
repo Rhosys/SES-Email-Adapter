@@ -1,127 +1,99 @@
-# TODO-UI — Frontend Validation Opportunities
+# TODO-UI — Frontend Work
 
-Validations from the backend that could be replicated client-side for instant feedback.
+Frontend work derived from backend capabilities. Covers screens, components, API integration, validations, and real-time features.
 
 Surfaces: **Website** · **Extension** · **Mobile** · **CLI/Desktop**
 
 ---
 
-## Rules
+## Feature Gap Summary
 
-- [ ] **Code size limit (10KB)** — show byte counter, reject before upload
-  - Website · Extension · CLI/Desktop
-- [ ] **Code AST validation** — parse with acorn in-browser, show inline syntax errors with line/column as user types; reject disallowed nodes (eval, Function, import, require, globalThis/process/Deno/Bun, unbounded loops, var)
-  - Website · Extension
-- [ ] **conditionType requires code field** — disable save when conditionType is "js" but code is empty
-  - Website · Extension · Mobile
-- [ ] **Condition size limit (10KB)** — byte counter
-  - Website · Extension · CLI/Desktop
-- [ ] **Condition valid JSON** — JSON.parse on blur, show syntax error inline
-  - Website · Extension
-- [ ] **Condition valid JSONLogic** — dry-run with json-logic-js against empty context, show operator errors
-  - Website · Extension
-- [ ] **Actions min 1** — disable save when actions array is empty
-  - Website · Extension · Mobile
-- [ ] **Action type enum** — type-safe dropdown (14 values: assign_label, assign_workflow, archive, delete, forward, block_hidden, block_reject, quarantine, quarantine_hidden, set_urgency, suppress_notification, pong, approve_sender, auto_draft)
-  - Website · Extension · Mobile
-- [ ] **priorityOrder integer ≥ 0** — input constraint
-  - Website · Mobile
-- [ ] **status enum** — toggle between enabled/disabled only
-  - Website · Extension · Mobile
-
----
-
-## Templates
-
-- [ ] **Template name min 1 char** — disable save when empty
-  - Website · Mobile
-- [ ] **Function name valid JS identifier** — validate `/^[a-zA-Z_$][a-zA-Z0-9_$]*$/` on keystroke
-  - Website · Extension
-- [ ] **Function code size limit (10KB per function)** — byte counter
-  - Website · Extension · CLI/Desktop
-- [ ] **Function code AST validation** — same as rule code (acorn parse + disallowed node walk)
-  - Website · Extension
+| Feature | Website | Extension | Mobile |
+|---------|---------|-----------|--------|
+| Arcs (inbox, detail, actions) | ✅ | ❌ | ❌ |
+| Signals (thread, drafts, send) | ✅ | ❌ | ❌ |
+| Quarantine | ✅ | ❌ | ❌ |
+| Views (custom filters) | ✅ | ❌ | ❌ |
+| Labels | ✅ | ❌ | ❌ |
+| Rules (incl. JS code editor) | ✅ | ❌ | ❌ |
+| Domains (register, DNS, verify) | ✅ | 🟡 reads list | ❌ |
+| Aliases (CRUD, sender policies) | ✅ | 🟡 create/search | ❌ |
+| Forwarding addresses | 🟡 missing verify UI | ❌ | ❌ |
+| Templates (CRUD, functions) | ✅ | ❌ | ❌ |
+| Account settings | 🟡 partial | ❌ | ❌ |
+| Team/Users | ✅ | ❌ | ❌ |
+| Search | ✅ | ❌ | ❌ |
+| WebSocket (real-time) | ✅ | ❌ | ❌ |
+| Notifications (push) | 🟡 tab-only | ❌ | ❌ |
+| Audit log | ✅ | ❌ | ❌ |
+| Billing | 🟡 UI ready, no backend | ❌ | ❌ |
+| OTP autofill | ❌ | ❌ | ❌ |
+| Domain DELETE | ❌ | ❌ | ❌ |
 
 ---
 
-## Aliases
+## Website — Missing / Partial
 
-- [ ] **unknownSenderPolicy enum** — dropdown (allow_all, quarantine_visible, quarantine_hidden, block_hidden, block_reject, violate_report)
-  - Website · Extension · Mobile
-- [ ] **Email format validation** — RFC 5322 regex on blur (site already has `isValidEmail`, extension has nothing)
-  - Extension · Mobile
-- [ ] **spamScoreThreshold 0–1 range** — slider or constrained number input
-  - Website · Mobile
-
----
-
-## Alias Senders
-
-- [ ] **Sender policy enum** — dropdown (allow, block_hidden, block_reject, violate_report)
-  - Website · Extension · Mobile
-
----
-
-## Views
-
-- [ ] **Workflow enum** — dropdown (15 values)
-  - Website · Mobile
-- [ ] **sortField enum** — dropdown (lastSignalAt, createdAt)
-  - Website · Mobile
-- [ ] **sortDirection enum** — toggle (asc, desc)
+- [ ] **Account settings: filtering config** — no UI for global `defaultUnknownSenderPolicy`, `newAddressHandling`, `spamScoreThreshold`
+  - Website
+- [ ] **Account settings: deletionRetentionDays** — no UI to configure how long deleted arcs are kept
+  - Website
+- [ ] **Account settings: afterSendAction** — no UI to choose archive vs keep_active after sending
+  - Website
+- [ ] **Account stats dashboard** — `GET /accounts/:id/stats` endpoint exists, no UI
+  - Website
+- [ ] **Forwarding address verification UI** — no route/view to handle the token submission from the verification email link
+  - Website
+- [ ] **Domain DELETE** — backend supports `DELETE /domains/:id`, site API client doesn't expose it, no UI
+  - Website
+- [ ] **Web Push service worker** — notifications only work while tab is open (via WebSocket). Need: service worker registration, push subscription management, background notifications
+  - Website
+- [ ] **Workflow-specific structured data cards** — `workflowData` fields should render as rich cards (tracking links, OTP codes, invoice amounts, flight details) instead of raw text
   - Website · Mobile
 
 ---
 
-## Arcs
+## Extension — Missing Features
 
-- [ ] **Status enum** — constrained to active/archived/deleted
-  - Website · Mobile
-- [ ] **Urgency enum** — dropdown (critical, high, normal, low, silent)
-  - Website · Mobile
+The extension is currently alias-generation only. These are features that would make it a fuller companion:
 
----
-
-## Signals (Drafts)
-
-- [ ] **To min 1 recipient** — disable send when to array is empty
-  - Website · Mobile
-- [ ] **Draft status guard** — only show edit/send/delete actions on draft signals
-  - Website · Mobile
-
----
-
-## Account Settings
-
-- [ ] **deletionRetentionDays positive integer** — constrained number input
-  - Website · Mobile
-- [ ] **spamScoreThreshold 0–1 range** — slider
-  - Website · Mobile
-- [ ] **afterSendAction enum** — toggle (archive, keep_active)
-  - Website · Mobile
-- [ ] **notification frequency enum** — dropdown (instant, hourly, daily)
-  - Website · Mobile
-- [ ] **newAddressHandling enum** — toggle (auto_allow, block_until_approved)
-  - Website · Mobile
+- [ ] **OTP autofill** — receive auth codes via WebSocket/Web Push, match to active tab, inject into focused input
+  - Extension
+- [ ] **WebSocket connection** — connect to WS for real-time signal notifications (at minimum for auth/OTP workflow)
+  - Extension
+- [ ] **Web Push service worker** — receive push notifications when tab is closed; show OTP codes as notification actions
+  - Extension
+- [ ] **Quick inbox view** — popup showing recent arcs (last 5-10) with urgency badges, one-click archive
+  - Extension
+- [ ] **Quarantine notifications** — badge count on extension icon when quarantined signals await review; popup action to approve/block
+  - Extension
+- [ ] **Domain management** — currently read-only; add ability to register new domains from extension popup
+  - Extension
+- [ ] **Alias sender policy management** — after creating an alias, allow configuring sender policies from the popup
+  - Extension
+- [ ] **Input validation** — zero client-side validation currently; add email format, domain format checks
+  - Extension
 
 ---
 
-## Users (Team)
+## Mobile — Full App (Future)
 
-- [ ] **Invite email format** — validate before submit (extension already has no validation)
-  - Website · Extension · Mobile
-- [ ] **Role enum** — dropdown (admin, member, viewer)
-  - Website · Mobile
-
----
-
-## Notes
-
-- The **site** currently has only `isValidEmail()` and `isValidDomain()` in `src/lib/validation.ts` — everything else is missing
-- The **extension** has zero client-side validation — all payloads sent directly to API
-- Highest UX impact: rule code AST validation (instant syntax feedback), JSONLogic validation, size limits with byte counters, enum-constrained dropdowns
-- Shared validation logic (Zod schemas, acorn AST validator) could be published as an internal package consumed by both site and extension
-
+- [ ] **Inbox (arc list)** — workflow icons, urgency badges, sender, summary, labels, swipe actions
+  - Mobile
+- [ ] **Arc detail (signal thread)** — chronological signal cards, workflow data panels, reply composer
+  - Mobile
+- [ ] **OTP autofill via OS framework** — Android Autofill Framework / iOS AutoFill Credential Provider; surface codes as autofill suggestions
+  - Mobile
+- [ ] **Push notifications (FCM)** — receive signal:created events, deep-link to arc; OTP codes as actionable notifications
+  - Mobile
+- [ ] **Quarantine review** — approve/block quarantined signals from notification or dedicated screen
+  - Mobile
+- [ ] **Settings** — account, domains, aliases, forwarding, team, notifications
+  - Mobile
+- [ ] **Search** — full-text across arcs
+  - Mobile
+- [ ] **Offline support** — cache recent arcs/signals for offline viewing
+  - Mobile
 
 ---
 
@@ -129,32 +101,86 @@ Surfaces: **Website** · **Extension** · **Mobile** · **CLI/Desktop**
 
 Backend pushes `{ code, expiresInMinutes, originDomain, signalId }` via WebSocket + Web Push + FCM when an `auth` workflow signal arrives.
 
-- [ ] **Receive OTP via WebSocket** — listen for `auth_code` message type on the existing WS connection; parse payload
+- [ ] **Receive OTP via WebSocket** — listen for `auth_code` message type on the existing WS connection
   - Extension · Website
-- [ ] **Receive OTP via Web Push** — service worker receives push event with OTP payload; show notification with "Copy code" action button
+- [ ] **Receive OTP via Web Push** — service worker receives push event with OTP payload; show notification with "Copy code" action
   - Extension
-- [ ] **Receive OTP via FCM push notification** — parse structured payload from push; show notification with code and "Autofill" action
+- [ ] **Receive OTP via FCM push** — parse structured payload; show notification with code and "Autofill" action
   - Mobile
-- [ ] **Match originDomain to active tab** — compare `originDomain` from payload against the active tab's eTLD+1; if match, proceed to autofill; if no match, show popup with code + "Copy" button
+- [ ] **Match originDomain to active tab** — compare against active tab's eTLD+1; if match, autofill; if not, show popup
   - Extension
-- [ ] **Autofill OTP into focused input** — detect the focused input field (type=text, type=tel, or autocomplete=one-time-code); inject the code value; dispatch input/change events so frameworks detect the change
+- [ ] **Autofill into focused input** — detect code input (type=text/tel, autocomplete=one-time-code); inject value; dispatch events
   - Extension
-- [ ] **Autofill via OS autofill framework** — register as an autofill provider (Android Autofill Framework / iOS AutoFill Credential Provider); surface OTP codes as autofill suggestions when the OS detects a code input field
+- [ ] **OS autofill framework** — register as autofill provider; surface OTP codes as suggestions
   - Mobile
-- [ ] **Copy-to-clipboard fallback** — if no matching tab or no focused input, show a toast/popup with the code and a one-tap copy button; include countdown timer showing `expiresInMinutes`
+- [ ] **Copy-to-clipboard fallback** — toast/popup with code + one-tap copy + countdown timer
   - Extension · Website · Mobile
-- [ ] **Expiry countdown** — show remaining validity time on the OTP notification/popup; auto-dismiss when expired
+- [ ] **Expiry countdown** — show remaining validity; auto-dismiss when expired
   - Extension · Website · Mobile
-- [ ] **OTP notification in inbox** — show the code inline on the arc row (no need to open the email); "Copy" button directly on the arc card
+- [ ] **OTP inline on arc row** — show code directly on the arc card with "Copy" button (no need to open email)
   - Website · Mobile
-- [ ] **Deep-link from notification** — tapping the push notification opens the app/site to the specific auth arc
+- [ ] **Deep-link from notification** — tapping notification opens the specific auth arc
+  - Website · Mobile
+
+---
+
+## Client-Side Validations
+
+Validations from the backend that could run client-side for instant feedback.
+
+### Rules
+- [ ] Code/condition size limit (10KB) — byte counter
+  - Website · Extension · CLI/Desktop
+- [ ] Code AST validation (acorn) — inline syntax errors as user types
+  - Website · Extension
+- [ ] conditionType requires code field — disable save when empty
+  - Website · Extension · Mobile
+- [ ] Condition valid JSON — parse on blur
+  - Website · Extension
+- [ ] Condition valid JSONLogic — dry-run with json-logic-js
+  - Website · Extension
+- [ ] Actions min 1 — disable save when empty
+  - Website · Extension · Mobile
+- [ ] Action type enum — constrained dropdown (14 values)
+  - Website · Extension · Mobile
+
+### Templates
+- [ ] Function name valid JS identifier — regex on keystroke
+  - Website · Extension
+- [ ] Function code size limit (10KB) — byte counter
+  - Website · Extension · CLI/Desktop
+- [ ] Function code AST validation — same as rule code
+  - Website · Extension
+
+### Aliases
+- [ ] unknownSenderPolicy enum — dropdown
+  - Website · Extension · Mobile
+- [ ] Email format validation — RFC 5322 regex (site has it, extension doesn't)
+  - Extension · Mobile
+- [ ] spamScoreThreshold 0–1 — slider/constrained input
+  - Website · Mobile
+
+### Account Settings
+- [ ] deletionRetentionDays positive integer — constrained input
+  - Website · Mobile
+- [ ] afterSendAction enum — toggle
+  - Website · Mobile
+- [ ] notification frequency enum — dropdown
+  - Website · Mobile
+- [ ] newAddressHandling enum — toggle
+  - Website · Mobile
+
+### Team
+- [ ] Invite email format — validate before submit
+  - Website · Extension · Mobile
+- [ ] Role enum — dropdown (admin, member, viewer)
   - Website · Mobile
 
 ---
 
 ## Notes
 
-- The **site** currently has only `isValidEmail()` and `isValidDomain()` in `src/lib/validation.ts` — everything else is missing
-- The **extension** has zero client-side validation — all payloads sent directly to API
-- Highest UX impact: rule code AST validation (instant syntax feedback), JSONLogic validation, size limits with byte counters, enum-constrained dropdowns
-- Shared validation logic (Zod schemas, acorn AST validator) could be published as an internal package consumed by both site and extension
+- The **website** has most backend features implemented but is missing: account filtering settings, retention config, afterSendAction, stats dashboard, forwarding verification UI, domain deletion, Web Push, and workflow data cards
+- The **extension** is narrowly scoped to alias generation — no inbox, no real-time, no notifications, no validation
+- A shared validation package (Zod schemas + acorn AST validator) could serve website, extension, and mobile
+- The mobile app doesn't exist yet — all items are greenfield
