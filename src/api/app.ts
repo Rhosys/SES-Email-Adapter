@@ -1,6 +1,7 @@
 import { OpenAPIHono } from "@hono/zod-openapi";
 import type { Context } from "hono";
 import { randomUUID, createHash, randomBytes } from "crypto";
+import { generateId } from "../utils/id.js";
 import { getDomain } from "tldts";
 import { checkDomain } from "../dns/dns-checker.js";
 import { validateRecipientMx } from "../dns/mx-validator.js";
@@ -101,9 +102,9 @@ export interface ApiDatabase {
   listPreArcSignals(accountId: string, status: "quarantined", params: PageParams): PromiseLike<Result<Page<Signal>, DbError>>;
   getSignal(accountId: string, id: string): PromiseLike<Result<Signal | null, DbError>>;
   createSignal(signal: Signal): PromiseLike<Result<Signal, DbError>>;
-  updateSignal(accountId: string, id: string, update: Partial<Pick<Signal, "subject" | "textBody" | "from" | "to">>): PromiseLike<Result<Signal, DbError>>;
-  updateSignalSendStatus(accountId: string, signalId: string, update: { status: "pending_send" | "sent" | "draft"; sendInitiatedAt?: string | null; sentAt?: string; sesMessageId?: string; sendFailureReason?: string }): PromiseLike<Result<Signal, DbError>>;
-  deleteSignal(accountId: string, id: string): PromiseLike<Result<void, DbError>>;
+  updateSignal(accountId: string, signalLookupId: string, update: Partial<Pick<Signal, "subject" | "textBody" | "from" | "to">>): PromiseLike<Result<Signal, DbError>>;
+  updateSignalSendStatus(accountId: string, signalLookupId: string, update: { status: "pending_send" | "sent" | "draft"; sendInitiatedAt?: string | null; sentAt?: string; sesMessageId?: string; sendFailureReason?: string }): PromiseLike<Result<Signal, DbError>>;
+  deleteSignal(accountId: string, signalLookupId: string): PromiseLike<Result<void, DbError>>;
 
   // Views
   listViews(accountId: string): PromiseLike<Result<View[], DbError>>;
@@ -161,8 +162,8 @@ export interface ApiDatabase {
 
 
   // Signal status management
-  updateSignalStatus(accountId: string, signalId: string, status: "block_hidden" | "block_reject" | "violate_report"): PromiseLike<Result<Signal, DbError>>;
-  unblockSignal(accountId: string, signalId: string, arcId: string): PromiseLike<Result<void, DbError>>;
+  updateSignalStatus(accountId: string, signalLookupId: string, status: "block_hidden" | "block_reject" | "violate_report"): PromiseLike<Result<Signal, DbError>>;
+  unblockSignal(accountId: string, signalLookupId: string, arcId: string): PromiseLike<Result<void, DbError>>;
   createArc(arc: Arc): PromiseLike<Result<void, DbError>>;
   saveArc(arc: Arc): PromiseLike<Result<void, DbError>>;
   findArcByGroupingKey(accountId: string, key: string): PromiseLike<Result<Arc | null, DbError>>;
@@ -486,8 +487,10 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
     if (arc.accountId !== accountId) return err(c, 403, "Forbidden");
     const body = await zParse(CreateDraftSignalRequest, c.req.raw);
     const now = new Date().toISOString();
+    const id = generateId("sgn-");
     const signal: Signal = {
-      id: `USR#${randomUUID()}`,
+      id,
+      signalLookupId: id,
       arcId: arc.id,
       accountId,
       source: "user",
@@ -529,7 +532,7 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
     if (signal.status === "sent") return err(c, 400, "Signal already sent", "SIGNAL_ALREADY_SENT");
     if (signal.status !== "draft") return err(c, 400, "Only draft signals can be replaced", "SIGNAL_NOT_DRAFT");
     const body = await zParse(ReplaceDraftSignalRequest, c.req.raw);
-    const updateResult = await store.updateSignal(accountId, signal.id, {
+    const updateResult = await store.updateSignal(accountId, signal.signalLookupId, {
       from: body.from as Signal["from"],
       to: body.to as Signal["to"],
       subject: body.subject,
@@ -575,7 +578,7 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
     const wasQuarantinedByUnknownSender = !(signal.matchedRules ?? []).some(r => r.statusChange);
 
     if (body.status === "block_hidden" || body.status === "block_reject" || body.status === "violate_report") {
-      const blockResult = await store.updateSignalStatus(accountId, signal.id, body.status);
+      const blockResult = await store.updateSignalStatus(accountId, signal.signalLookupId, body.status);
       if (blockResult.isErr()) return err(c, 500, "Internal Server Error");
 
       // When quarantined by unknown sender, persist sender disposition for future auto-blocking
@@ -608,7 +611,7 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
       }
     } else {
       arc = {
-        id: randomUUID(),
+        id: generateId("arc-"),
         accountId,
         workflow: signal.workflow,
         labels: [],
@@ -623,7 +626,7 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
       if (createResult.isErr()) return err(c, 500, "Internal Server Error");
     }
 
-    const unblockResult = await store.unblockSignal(accountId, signal.id, arc.id);
+    const unblockResult = await store.unblockSignal(accountId, signal.signalLookupId, arc.id);
     if (unblockResult.isErr()) return err(c, 500, "Internal Server Error");
 
     // When quarantined by unknown sender, approve the sender for future emails
@@ -662,13 +665,13 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
       const hasContentFields = body.subject !== undefined || body.textBody !== undefined || body.from !== undefined || body.to !== undefined;
       if (hasContentFields && body.status !== "draft") return err(c, 400, "Pending signals can only be reverted to draft", "INVALID_STATUS_TRANSITION");
       if (body.status !== "draft") return err(c, 400, "Pending signals can only be reverted to draft", "INVALID_STATUS_TRANSITION");
-      const updateResult = await store.updateSignalSendStatus(accountId, signal.id, { status: "draft", sendInitiatedAt: null });
+      const updateResult = await store.updateSignalSendStatus(accountId, signal.signalLookupId, { status: "draft", sendInitiatedAt: null });
       if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
       return c.json(updateResult.value);
     }
 
     // Normal draft edit (subject, textBody, from, to)
-    const updateResult = await store.updateSignal(accountId, signal.id, body as Parameters<typeof store.updateSignal>[2]);
+    const updateResult = await store.updateSignal(accountId, signal.signalLookupId, body as Parameters<typeof store.updateSignal>[2]);
     if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
     return c.json(updateResult.value);
   });
@@ -709,7 +712,7 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
     if (sqsResult.isErr()) return err(c, 500, "Internal Server Error");
 
     // DDB write — transition to pending_send
-    const updateResult = await store.updateSignalSendStatus(accountId, signal.id, { status: "pending_send", sendInitiatedAt });
+    const updateResult = await store.updateSignalSendStatus(accountId, signal.signalLookupId, { status: "pending_send", sendInitiatedAt });
     if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
 
     return c.json({ ...updateResult.value, undoWindowSeconds, undoExpiresAt });
@@ -724,7 +727,7 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
     if (signal.accountId !== accountId) return err(c, 403, "Forbidden");
     if (signal.status === "sent") return err(c, 400, "Signal already sent", "SIGNAL_ALREADY_SENT");
     if (signal.status !== "draft") return err(c, 400, "Only draft signals can be deleted", "SIGNAL_NOT_DRAFT");
-    const deleteResult = await store.deleteSignal(accountId, signal.id);
+    const deleteResult = await store.deleteSignal(accountId, signal.signalLookupId);
     if (deleteResult.isErr()) return err(c, 500, "Internal Server Error");
     return new Response(null, { status: 204 });
   });
@@ -1125,7 +1128,7 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
     if (existingResult.value) return err(c, 409, "Alias already exists", "ALIAS_EXISTS");
     const now = new Date().toISOString();
     const createResult = await store.createAlias({
-      id: randomUUID(),
+      id: body.address,
       accountId,
       address: body.address,
       unknownSenderPolicy: body.unknownSenderPolicy ?? "quarantine_visible",
@@ -1154,7 +1157,7 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
     const existing = existingResult.value;
     const now = new Date().toISOString();
     const upsertResult = await store.upsertAlias({
-      id: existing?.id ?? randomUUID(),
+      id: address,
       accountId,
       address,
       unknownSenderPolicy: body.unknownSenderPolicy ?? existing?.unknownSenderPolicy ?? "quarantine_visible",
@@ -1229,7 +1232,7 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
     // Audit: write functions change event before persisting (best-effort)
     if (body.functions) {
       const { userId } = c.get("auth");
-      const templateId = randomUUID();
+      const templateId = generateId("tpl-");
       const auditResult = await store.saveAuditEvent({
         accountId, userId, action: "created", resourceType: "template", resourceId: templateId,
         before: null, after: { functions: body.functions },
@@ -1246,7 +1249,7 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
       return c.json(templateResult.value, 201);
     }
     const templateResult = await store.createTemplate({
-      id: randomUUID(), accountId, name: body.name, subject: body.subject, body: body.body,
+      id: generateId("tpl-"), accountId, name: body.name, subject: body.subject, body: body.body,
       createdAt: now, updatedAt: now,
     });
     if (templateResult.isErr()) return err(c, 500, "Internal Server Error");
@@ -1344,7 +1347,7 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
 
     const now = new Date().toISOString();
     const addr: VerifiedForwardingAddress = {
-      id: existing?.id ?? randomUUID(),
+      id: body.address,
       accountId,
       address: body.address,
       status: "pending",
