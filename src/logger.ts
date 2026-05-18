@@ -156,10 +156,10 @@ export class RequestLogger implements Logger {
     entry.containerId = this.containerId;
     if (code !== undefined) entry.code = code;
 
-    // Wrap in { message: entry } so the subscription filter receives an object at .message
+    // Emit the entry directly — Lambda JSON log format provides the outer envelope
     let serialized: string;
     try {
-      serialized = JSON.stringify({ message: entry }, redactReplacer);
+      serialized = JSON.stringify(entry, redactReplacer);
     } catch {
       // Circular reference or other serialization failure
       const fallback: LogEntry = {
@@ -170,7 +170,7 @@ export class RequestLogger implements Logger {
         containerId: this.containerId,
         _serializationError: true,
       };
-      console.log(JSON.stringify({ message: fallback }));
+      console.log(JSON.stringify(fallback));
       return;
     }
 
@@ -186,7 +186,7 @@ export class RequestLogger implements Logger {
         containerId: this.containerId,
         _truncated: true,
       };
-      serialized = JSON.stringify({ message: truncated });
+      serialized = JSON.stringify(truncated);
 
       // Emit a separate warning about the truncation
       const warning: LogEntry = {
@@ -198,7 +198,7 @@ export class RequestLogger implements Logger {
         originalTitle: title,
         originalSizeBytes,
       };
-      console.log(JSON.stringify({ message: warning }, redactReplacer));
+      console.log(JSON.stringify(warning, redactReplacer));
     }
 
     console.log(serialized);
