@@ -1,5 +1,5 @@
-import { randomUUID } from "crypto";
 import type { S3Client } from "@aws-sdk/client-s3";
+import { generateId } from "../utils/id.js";
 import type { Logger } from "../logger.js";
 import type { Result } from "neverthrow";
 import { ok, err, dbError } from "../errors.js";
@@ -58,7 +58,7 @@ export interface ProcessorAccountContext {
 export interface ProcessorDatabase {
   getSignalByMessageId(accountId: string, sesMessageId: string): Promise<Result<Signal | null, DbError>>;
   saveSignal(signal: Signal): Promise<Result<void, DbError>>;
-  updateSignalRetention(accountId: string, signalId: string, update: Partial<Pick<Signal, "s3Key" | "retentionDuration">>): Promise<Result<void, DbError>>;
+  updateSignalRetention(accountId: string, signalLookupId: string, update: Partial<Pick<Signal, "s3Key" | "retentionDuration">>): Promise<Result<void, DbError>>;
   getArc(accountId: string, id: string): Promise<Result<Arc | null, DbError>>;
   findArcByGroupingKey(accountId: string, key: string): Promise<Result<Arc | null, DbError>>;
   saveArc(arc: Arc): Promise<Result<void, DbError>>;
@@ -582,8 +582,10 @@ export class SignalProcessor {
           const shouldAutoSend = autoSend && senderSetupComplete && !preventAutoSend;
           const sendInitiatedAt = shouldAutoSend ? now : undefined;
 
+          const draftId = generateId("sgn-");
           const draft: Signal = {
-            id: `USR#${randomUUID()}`,
+            id: draftId,
+            signalLookupId: draftId,
             arcId: arc.id,
             accountId,
             source: "user",
@@ -648,8 +650,11 @@ export class SignalProcessor {
 
     // 1b. Block emails that fail DKIM or DMARC — spoofed sender, reject immediately
     if (msg.dkimVerdict !== "PASS" || msg.dmarcVerdict !== "PASS") {
+      const signalId = generateId("sgn-");
       const signal: Signal = {
-        id: `SES#${sesMessageId}`,
+        id: signalId,
+        signalLookupId: "ses-" + sesMessageId,
+        sesMessageId,
         accountId,
         status: "block_reject",
         source: "email",
@@ -833,7 +838,7 @@ export class SignalProcessor {
       this.logger.info("Existing arc matched.", { code: "processor.arc_matched", arcId: arc.id, matchMethod: groupingKey ? "groupingKey" : "similarity", accountId, sesMessageId });
     } else {
       arc = {
-        id: randomUUID(),
+        id: generateId("arc-"),
         accountId,
         ...(groupingKey ? { groupingKey } : {}),
         workflow: classification.workflow,
@@ -1160,7 +1165,7 @@ export class SignalProcessor {
       if (updatedS3Key !== signal.s3Key) {
         retentionUpdate.s3Key = updatedS3Key;
       }
-      const retentionSaveResult = await this.store.updateSignalRetention(signal.accountId, signal.id, retentionUpdate);
+      const retentionSaveResult = await this.store.updateSignalRetention(signal.accountId, signal.signalLookupId, retentionUpdate);
       if (retentionSaveResult.isErr()) {
         this.logger.warn("Failed to persist retention metadata on signal record. The DynamoDB update returned an error. The S3 retention is applied but the signal record won't reflect the retention duration.", { code: "processor.retention_metadata_save_failed", accountId: signal.accountId, error: retentionSaveResult.error });
       }
@@ -1185,7 +1190,7 @@ export class SignalProcessor {
     const now = new Date().toISOString();
     if (!existing) {
       const aliasResult = await this.store.saveAlias({
-        id: randomUUID(),
+        id: address,
         accountId,
         address,
         unknownSenderPolicy: defaultUnknownSenderPolicy,
@@ -1245,8 +1250,11 @@ function buildSignal(opts: {
   ttl?: number;
 }): Signal {
   const { arcId, status, accountId, sesMessageId, recipientAddress, parsed, classification, s3Key, receivedAt, now, ttl } = opts;
+  const signalId = generateId("sgn-");
   const signal: Signal = {
-    id: `SES#${sesMessageId}`,
+    id: signalId,
+    signalLookupId: "ses-" + sesMessageId,
+    sesMessageId,
     accountId,
     source: "email",
     receivedAt,
