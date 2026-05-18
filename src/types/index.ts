@@ -375,8 +375,12 @@ export interface MatchedRuleResult {
 export type UserDisplayedRetention = '1 year' | '5 years' | 'forever';
 
 export interface Signal {
-  // Discriminated ID encoding origin: "SES#${sesMessageId}" | "SYS#${uuid}" | "USR#${uuid}"
+  // External-facing ID — always a `sgn-` prefixed ID (e.g. "sgn-mRk3oCMDhFXGF7CzHBt22Xabc")
   id: string;
+  // Internal storage key used as the DynamoDB table PK suffix.
+  // Inbound (SES) signals: "ses-{sesMessageId}" — enables O(1) dedup lookup.
+  // User/system signals: same as `id` (the sgn- prefixed ID).
+  signalLookupId: string;
   arcId?: string;        // Undefined while signal is blocked pending user action
   matchedRules?: MatchedRuleResult[];
   accountId: string;
@@ -412,7 +416,10 @@ export interface Signal {
 
   // Send flow fields (only present on source: "user" signals)
   sendInitiatedAt?: string;    // ISO 8601 — when POST /send was called
-  sesMessageId?: string;       // SES message ID after successful delivery
+  // SES message ID — dual purpose:
+  // • Inbound (source: "email"): raw SES message ID from the inbound notification; used to construct signalLookupId ("ses-{sesMessageId}") for dedup.
+  // • Outbound (source: "user"): SES message ID assigned after successful delivery via SES.
+  sesMessageId?: string;
   sendFailureReason?: string;  // "all_recipients_bounced" | "ses_permanent_failure"
 
   // Deliverability signal fields (only present on source: "deliverability" signals)

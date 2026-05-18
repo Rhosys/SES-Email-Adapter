@@ -1,7 +1,7 @@
-import { randomUUID } from "crypto";
 import { PutCommand, QueryCommand } from "@aws-sdk/lib-dynamodb";
 import { dynamo, AUDIT_TABLE, encodeCursor, decodeCursor } from "./shared.js";
 import { ok, err, dbError } from "../errors.js";
+import { generateId } from "../utils/id.js";
 import type { DbError, Result } from "../errors.js";
 import type { Page, PageParams } from "../types/index.js";
 
@@ -39,7 +39,7 @@ export interface AuditEvent {
 export class AuditDatabase {
   async saveAuditEvent(event: Omit<AuditEvent, "eventId" | "timestamp">): Promise<Result<void, DbError>> {
     const timestamp = new Date().toISOString();
-    const eventId = randomUUID();
+    const eventId = generateId("aud-");
     const item: AuditEvent = { ...event, eventId, timestamp };
     try {
       await dynamo.send(new PutCommand({
