@@ -12,13 +12,8 @@
 - [ ] **UI: render calendar cards from scheduling workflow signal directly** — the `buildCalendarSignal` synthetic signal was removed (it was a redundant copy with no new data). The UI should render calendar entry cards for any signal with `workflow: "scheduling"` using the `workflowData` fields (title, start/end time, location, etc.) already present on the email signal.
 - [ ] **ClamAV attachment scanning on S3** — scan email attachments for malware after saving to S3. Tag objects with `scan-status: clean|infected|pending`. Frontend only offers download for `clean` objects; `infected` get a warning badge and no download link. Use ClamAV Lambda layer or bucketAV. Definitions must auto-update.
 - [ ] **JMAP support (RFC 8620 + RFC 8621)** — expose the inbox as a standards-compliant JMAP server so any JMAP client (Apple Mail, Thunderbird, Mimestream) can connect directly. Requires: JMAP Session resource at `/.well-known/jmap`, Core/echo, Email/get, Email/query, Email/changes, Mailbox/get, Thread/get. Push notifications via EventSource (RFC 8620 §7). Outbound sending via EmailSubmission/set gated on Tier 2 sender setup. This is a separate API surface from the Hono REST API — likely its own Lambda or a new route prefix.
-- [ ] **Fixup Signal, views, rules, arc, etc.. ALL generated IDs** IDs should always be generated similar to, but instead of a acc- it should be a sgn, view-, rule-, arc-, etc... Signal might be a bit weird because we are PK it from the SES messageId right? I wonder what we can do there, I wonder if there should be an internal and external mapping for it? Or if I did fuck us earlier by making the sesMessageId be the PK
-
-```
-const rawAccountId = shortUuid('abcdefghijklmnopqrstuvwxyz0123456789').generate().slice(-10);
-    const accountIdCheckBits = require('crypto').createHash('sha256').update(rawAccountId).digest('base64').replace(/[^abcdefghijklmnopqrstuvwxyz0123456789]/g, '').slice(0, 3);
-    return `acc-${rawAccountId}${accountIdCheckBits}`;
-```
+- [ ] **Prefixed IDs for all entities** — see `.kiro/specs/prefixed-entity-ids/` for full spec. UUIDv7 → flickrBase58 → 3 check chars → prefix. Includes signal ID decoupling (`sgn-` external ID, `ses-{messageId}` as table PK for dedup), GSI tenant isolation (`ACCT#` prefix on all GSI PKs), and `signalLookupId` concept.
+- [ ] **Pass callerInvocationId to SQS and Step Functions** — when dispatching SQS messages, add `callerInvocationId: { DataType: 'String', StringValue: logger.invocationId || '<NULL>' }` as a message attribute. When starting Step Function executions, include `callerInvocationId: logger.invocationId` in the input JSON. This enables tracing a request across async boundaries.
 
 
 ---
@@ -226,6 +221,7 @@ User-defined filtered lists of arcs. Like Gmail labels but with filter logic bak
 Account-scoped tags. The main way users organise arcs beyond workflow grouping.
 
 - Label management screen: name, color picker, icon picker
+- **Label names are immutable** — the name is the identity (DynamoDB key). Users can change color and icon but cannot rename a label. To "rename", they must create a new label, re-assign arcs, and delete the old one. The UI should not offer a rename action.
 - Labels appear as chips on arc rows and arc detail
 - Click a label anywhere → filters inbox to that label (or opens the label's view if one exists)
 - Quick-add label from arc detail (type to search existing, or create inline)
@@ -389,7 +385,7 @@ Every action taken by any user in the account is logged and browsable.
   - Arc: archived, deleted, restored, label added/removed, workflow overridden, urgency overridden
   - Signal: unblocked/allowed, dismissed from quarantine
   - Rule: created, updated (condition or action changed), deleted, reordered, action disabled (bounce)
-  - Label: created, renamed, color changed, deleted
+  - Label: created, color changed, deleted
   - Domain: registered, deleted
   - Forwarding address: added, verified, deleted
   - User: invited, role changed, removed
@@ -761,7 +757,7 @@ Things competitors charge for that we include, plus things only we can offer:
 - **Spam threshold tuning** — charging for spam protection is a trust-breaker.
 - **Browser extension** — free acquisition channel.
 
-- [ ] **Replace random string generation in embed-text property tests with real email fixtures** — `src/embedding/embed-text.spec.ts` and `src/embedding/embed-text.property.spec.ts` use `fc.string().filter()` to generate random HTML/text bodies. This is wrong — we can't know if randomly generated content is legitimate input. Replace with a static corpus of real-world email bodies (newsletters, receipts, phishing attempts, HTML-heavy marketing emails, plain-text conversations) stored in a `src/testing/fixtures/` directory. The property tests should iterate over these fixtures and verify sanitization produces correct output for each.
+
 
 - [ ] **Revalidate embed-text uses HTML body first, not text body** — The current `buildEmbedText` sanitizes `rawTextBody`. But users see the HTML body in the UI. If we classify/embed based on the text body but display the HTML body, a phishing email could have innocent text body content while the HTML body contains malicious links/content that the user actually sees. The embed text builder should prefer the HTML body (stripped of tags) as the source of truth for classification and embedding, falling back to text body only when HTML is absent. This is a security-critical change.
 

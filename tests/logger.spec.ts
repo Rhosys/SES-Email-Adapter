@@ -39,7 +39,7 @@ describe("logger edge cases", () => {
 
     it("redacts cognito keys in full log context", () => {
       const logger = new RequestLogger("test1234");
-      logger.startInvocation();
+      logger.startInvocation("test-invocation");
       logger.info("auth.context", {
         cognitoIdentityId: "us-east-1:abc-123",
         cognitoIdentityPoolId: "us-east-1:pool-xyz",
@@ -47,7 +47,7 @@ describe("logger edge cases", () => {
         cognitoAuthenticationType: "authenticated",
       });
 
-      const output = JSON.parse(consoleSpy.mock.calls[0]![0] as string);
+      const output = consoleSpy.mock.calls[0]![0] as Record<string, unknown>;
       expect(output.cognitoIdentityId).toBe("[REDACTED]");
       expect(output.cognitoIdentityPoolId).toBe("[REDACTED]");
       expect(output.cognitoAuthenticationProvider).toBe("[REDACTED]");
@@ -56,20 +56,24 @@ describe("logger edge cases", () => {
   });
 
   describe("circular reference handling", () => {
-    it("emits fallback entry with _serializationError when context has circular refs", () => {
+    it("handles circular refs gracefully with _circular marker instead of crashing", () => {
       const logger = new RequestLogger("test1234");
-      logger.startInvocation();
+      logger.startInvocation("test-invocation");
 
       const circular: Record<string, unknown> = { name: "test" };
       circular.self = circular;
 
       logger.info("circular.test", circular);
 
-      const output = JSON.parse(consoleSpy.mock.calls[0]![0] as string);
-      expect(output._serializationError).toBe(true);
+      const output = consoleSpy.mock.calls[0]![0] as Record<string, unknown>;
       expect(output.level).toBe("INFO");
       expect(output.title).toBe("circular.test");
       expect(output.containerId).toBe("test1234");
+      expect(output.name).toBe("test");
+      // The circular ref is resolved: self.self becomes { _circular: true }
+      const self = output.self as Record<string, unknown>;
+      expect(self.name).toBe("test");
+      expect((self.self as Record<string, unknown>)._circular).toBe(true);
     });
   });
 
@@ -89,20 +93,20 @@ describe("logger edge cases", () => {
 
     it("handles BigInt in full log context", () => {
       const logger = new RequestLogger("test1234");
-      logger.startInvocation();
+      logger.startInvocation("test-invocation");
       logger.info("big.number", { largeId: BigInt(123456789012345) });
 
-      const output = JSON.parse(consoleSpy.mock.calls[0]![0] as string);
+      const output = consoleSpy.mock.calls[0]![0] as Record<string, unknown>;
       expect(output.largeId).toBe("123456789012345");
     });
 
     it("handles function in full log context", () => {
       const logger = new RequestLogger("test1234");
-      logger.startInvocation();
+      logger.startInvocation("test-invocation");
       function processEmail() {}
       logger.info("fn.test", { handler: processEmail });
 
-      const output = JSON.parse(consoleSpy.mock.calls[0]![0] as string);
+      const output = consoleSpy.mock.calls[0]![0] as Record<string, unknown>;
       expect(output.handler).toBe("[Function: processEmail]");
     });
   });
@@ -110,10 +114,10 @@ describe("logger edge cases", () => {
   describe("empty message identifier", () => {
     it("emits valid JSON with empty string message", () => {
       const logger = new RequestLogger("test1234");
-      logger.startInvocation();
+      logger.startInvocation("test-invocation");
       logger.info("");
 
-      const output = JSON.parse(consoleSpy.mock.calls[0]![0] as string);
+      const output = consoleSpy.mock.calls[0]![0] as Record<string, unknown>;
       expect(output.level).toBe("INFO");
       expect(output.title).toBe("");
       expect(output.timestamp).toBeDefined();
@@ -129,7 +133,7 @@ describe("logger edge cases", () => {
       logger.trackPoint("early.point");
       logger.track("timing.report");
 
-      const output = JSON.parse(consoleSpy.mock.calls[0]![0] as string);
+      const output = consoleSpy.mock.calls[0]![0] as Record<string, unknown>;
       expect(output.level).toBe("TRACK");
       expect(output.trackPoints).toHaveLength(1);
       expect(output.trackPoints[0].name).toBe("early.point");
