@@ -47,7 +47,7 @@ describe("logger edge cases", () => {
         cognitoAuthenticationType: "authenticated",
       });
 
-      const output = JSON.parse(consoleSpy.mock.calls[0]![0] as string).message;
+      const output = JSON.parse(consoleSpy.mock.calls[0]![0] as string);
       expect(output.cognitoIdentityId).toBe("[REDACTED]");
       expect(output.cognitoIdentityPoolId).toBe("[REDACTED]");
       expect(output.cognitoAuthenticationProvider).toBe("[REDACTED]");
@@ -65,7 +65,7 @@ describe("logger edge cases", () => {
 
       logger.info("circular.test", circular);
 
-      const output = JSON.parse(consoleSpy.mock.calls[0]![0] as string).message;
+      const output = JSON.parse(consoleSpy.mock.calls[0]![0] as string);
       expect(output._serializationError).toBe(true);
       expect(output.level).toBe("INFO");
       expect(output.title).toBe("circular.test");
@@ -92,7 +92,7 @@ describe("logger edge cases", () => {
       logger.startInvocation();
       logger.info("big.number", { largeId: BigInt(123456789012345) });
 
-      const output = JSON.parse(consoleSpy.mock.calls[0]![0] as string).message;
+      const output = JSON.parse(consoleSpy.mock.calls[0]![0] as string);
       expect(output.largeId).toBe("123456789012345");
     });
 
@@ -102,7 +102,7 @@ describe("logger edge cases", () => {
       function processEmail() {}
       logger.info("fn.test", { handler: processEmail });
 
-      const output = JSON.parse(consoleSpy.mock.calls[0]![0] as string).message;
+      const output = JSON.parse(consoleSpy.mock.calls[0]![0] as string);
       expect(output.handler).toBe("[Function: processEmail]");
     });
   });
@@ -113,7 +113,7 @@ describe("logger edge cases", () => {
       logger.startInvocation();
       logger.info("");
 
-      const output = JSON.parse(consoleSpy.mock.calls[0]![0] as string).message;
+      const output = JSON.parse(consoleSpy.mock.calls[0]![0] as string);
       expect(output.level).toBe("INFO");
       expect(output.title).toBe("");
       expect(output.timestamp).toBeDefined();
@@ -129,7 +129,7 @@ describe("logger edge cases", () => {
       logger.trackPoint("early.point");
       logger.track("timing.report");
 
-      const output = JSON.parse(consoleSpy.mock.calls[0]![0] as string).message;
+      const output = JSON.parse(consoleSpy.mock.calls[0]![0] as string);
       expect(output.level).toBe("TRACK");
       expect(output.trackPoints).toHaveLength(1);
       expect(output.trackPoints[0].name).toBe("early.point");

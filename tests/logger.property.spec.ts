@@ -16,7 +16,7 @@ function lastEntry(consoleSpy: ReturnType<typeof vi.spyOn>): Record<string, unkn
   const calls = consoleSpy.mock.calls;
   const lastCall = calls[calls.length - 1]!;
   const parsed = JSON.parse(lastCall[0] as string);
-  return parsed.message;
+  return parsed;
 }
 
 describe("Log entry structural invariant", () => {
@@ -303,16 +303,14 @@ describe("Payload truncation guard", () => {
     expect(calls.length).toBe(2);
 
     // First call is the warning
-    const warningRaw = JSON.parse(calls[0]![0] as string);
-    const warningEntry = warningRaw.message;
+    const warningEntry = JSON.parse(calls[0]![0] as string);
     expect(warningEntry.level).toBe("WARN");
     expect(warningEntry.title).toBe("logger.payload_truncated");
     expect(warningEntry.originalTitle).toBe("test.large.payload");
     expect(warningEntry.originalSizeBytes).toBeGreaterThan(262_144);
 
     // Second call is the truncated entry
-    const truncatedRaw = JSON.parse(calls[1]![0] as string);
-    const truncatedEntry = truncatedRaw.message;
+    const truncatedEntry = JSON.parse(calls[1]![0] as string);
     expect(truncatedEntry._truncated).toBe(true);
     expect(truncatedEntry.level).toBe("INFO");
     expect(truncatedEntry.title).toBe("test.large.payload");
