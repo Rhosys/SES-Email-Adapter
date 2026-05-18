@@ -655,7 +655,6 @@ Competitive analysis vs. Addy.io, SimpleLogin, ForwardEmail, Firefox Relay, Mail
 
 **Medium priority:**
 - [ ] **On-demand alias generation** — Catch-all + custom domains covers this technically, but there's no UI shortcut for generating `random123@yourdomain.com` at a click. All alias services have this as their primary action.
-- [ ] **Alias-per-site tracking** — Which company received which alias; breach detection when an alias starts receiving spam from a company that "shouldn't" have it. Addy.io and SimpleLogin both do this.
 - [ ] **Snooze / remind me later** — Already in UI IDEAS above. Differentiates from pure forwarders; HEY and Superhuman both do this.
 - [ ] **Calendar sync** (travel + scheduling workflows) — Export `.ics` or sync via CalDAV for travel/scheduling arcs. Already in UI IDEAS above.
 
