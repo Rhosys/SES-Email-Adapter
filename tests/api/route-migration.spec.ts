@@ -40,7 +40,7 @@ function makeStore(): ApiDatabase {
     blockSignal: vi.fn().mockResolvedValue(ok({})),
     saveArc: vi.fn().mockResolvedValue(ok(undefined)),
     findArcByGroupingKey: vi.fn().mockResolvedValue(ok(null)),
-    getSignal: vi.fn().mockResolvedValue(ok(null)),
+    getSignalById: vi.fn().mockResolvedValue(ok(null)),
     updateSignal: vi.fn().mockResolvedValue(ok({})),
     deleteSignal: vi.fn().mockResolvedValue(ok(undefined)),
     listViews: vi.fn().mockResolvedValue(ok([])),

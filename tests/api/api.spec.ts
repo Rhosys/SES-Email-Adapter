@@ -48,7 +48,7 @@ function makeStore(): ApiDatabase {
     updateSignalStatus: vi.fn().mockImplementation((_, id, status) => Promise.resolve(ok({ id, status }))),
     saveArc: vi.fn().mockResolvedValue(ok(undefined)),
     findArcByGroupingKey: vi.fn().mockResolvedValue(ok(null)),
-    getSignal: vi.fn().mockResolvedValue(ok(null)),
+    getSignalById: vi.fn().mockResolvedValue(ok(null)),
     createSignal: vi.fn().mockImplementation((signal) => Promise.resolve(ok(signal))),
     updateSignal: vi.fn().mockResolvedValue(ok(makeSignal())),
     updateSignalSendStatus: vi.fn().mockResolvedValue(ok(makeSignal())),
@@ -154,6 +154,7 @@ function makeArc(overrides: Partial<Arc> = {}): Arc {
 function makeSignal(overrides: Partial<Signal> = {}): Signal {
   return {
     id: "SES#msg-001",
+    signalLookupId: "SES#msg-001",
     arcId: "arc-001",
     accountId: TEST_ACCOUNT_ID,
     source: "email" as const,
@@ -451,15 +452,15 @@ describe("API", () => {
   describe("PUT /accounts/:accountId/signals/:id/quarantineResponse", () => {
     it("blocks a quarantined signal", async () => {
       const s = makeSignal({ status: "quarantine_visible" });
-      vi.mocked(store.getSignal).mockResolvedValueOnce(ok(s));
+      vi.mocked(store.getSignalById).mockResolvedValueOnce(ok(s));
       const res = await req(app, "POST", `${A}/signals/SES%23msg-001/quarantineResponse`, { body: { status: "block_hidden" } });
       expect(res.status).toBe(200);
-      expect(store.updateSignalStatus).toHaveBeenCalledWith(TEST_ACCOUNT_ID, s.id, "block_hidden");
+      expect(store.updateSignalStatus).toHaveBeenCalledWith(TEST_ACCOUNT_ID, s.signalLookupId, "block_hidden");
     });
 
     it("allows a quarantined signal — creates new arc when no grouping key match", async () => {
       const s = makeSignal({ status: "quarantine_visible" });
-      vi.mocked(store.getSignal).mockResolvedValueOnce(ok(s));
+      vi.mocked(store.getSignalById).mockResolvedValueOnce(ok(s));
       vi.mocked(store.findArcByGroupingKey).mockResolvedValueOnce(ok(null));
       const res = await req(app, "POST", `${A}/signals/SES%23msg-001/quarantineResponse`, { body: { status: "active" } });
       expect(res.status).toBe(200);
@@ -467,30 +468,30 @@ describe("API", () => {
       expect(body.arc.workflow).toBe(s.workflow);
       expect(body.signal.status).toBe("active");
       expect(store.createArc).toHaveBeenCalledOnce();
-      expect(store.unblockSignal).toHaveBeenCalledWith(TEST_ACCOUNT_ID, s.id, body.arc.id);
+      expect(store.unblockSignal).toHaveBeenCalledWith(TEST_ACCOUNT_ID, s.signalLookupId, body.arc.id);
     });
 
     it("allows a quarantined signal — attaches to existing arc when grouping key matches", async () => {
       const s = makeSignal({ status: "quarantine_visible", workflow: "auth" });
       const existingArc = makeArc();
-      vi.mocked(store.getSignal).mockResolvedValueOnce(ok(s));
+      vi.mocked(store.getSignalById).mockResolvedValueOnce(ok(s));
       vi.mocked(store.findArcByGroupingKey).mockResolvedValueOnce(ok(existingArc));
       const res = await req(app, "POST", `${A}/signals/SES%23msg-001/quarantineResponse`, { body: { status: "active" } });
       expect(res.status).toBe(200);
       const body = await res.json() as { arc: Arc; signal: Signal };
       expect(body.arc.id).toBe(existingArc.id);
       expect(store.createArc).not.toHaveBeenCalled();
-      expect(store.unblockSignal).toHaveBeenCalledWith(TEST_ACCOUNT_ID, s.id, existingArc.id);
+      expect(store.unblockSignal).toHaveBeenCalledWith(TEST_ACCOUNT_ID, s.signalLookupId, existingArc.id);
     });
 
     it("returns 400 when signal is already active", async () => {
-      vi.mocked(store.getSignal).mockResolvedValueOnce(ok(makeSignal({ status: "active" })));
+      vi.mocked(store.getSignalById).mockResolvedValueOnce(ok(makeSignal({ status: "active" })));
       const res = await req(app, "POST", `${A}/signals/SES%23msg-001/quarantineResponse`, { body: { status: "active" } });
       expect(res.status).toBe(400);
     });
 
     it("returns 400 when body is missing status", async () => {
-      vi.mocked(store.getSignal).mockResolvedValueOnce(ok(makeSignal({ status: "quarantine_visible" })));
+      vi.mocked(store.getSignalById).mockResolvedValueOnce(ok(makeSignal({ status: "quarantine_visible" })));
       const res = await req(app, "POST", `${A}/signals/SES%23msg-001/quarantineResponse`, { body: {} });
       expect(res.status).toBe(400);
     });
@@ -503,7 +504,7 @@ describe("API", () => {
 
   describe("GET /accounts/:accountId/signals/:id", () => {
     it("returns full Signal detail", async () => {
-      vi.mocked(store.getSignal).mockResolvedValueOnce(ok(makeSignal({ textBody: "Hello world" })));
+      vi.mocked(store.getSignalById).mockResolvedValueOnce(ok(makeSignal({ textBody: "Hello world" })));
       const res = await req(app, "GET", `${A}/signals/SES%23msg-001`);
       expect(res.status).toBe(200);
       const body = await res.json() as Signal;
@@ -517,7 +518,7 @@ describe("API", () => {
     });
 
     it("returns 403 when Signal belongs to a different account", async () => {
-      vi.mocked(store.getSignal).mockResolvedValueOnce(ok(makeSignal({ accountId: "other-account" })));
+      vi.mocked(store.getSignalById).mockResolvedValueOnce(ok(makeSignal({ accountId: "other-account" })));
       const res = await req(app, "GET", `${A}/signals/SES%23msg-001`);
       expect(res.status).toBe(403);
     });
@@ -526,17 +527,17 @@ describe("API", () => {
   describe("PATCH /accounts/:accountId/signals/:id — draft update", () => {
     it("updates a draft signal and returns 200 + full resource", async () => {
       const draft = makeSignal({ status: "draft" });
-      vi.mocked(store.getSignal).mockResolvedValueOnce(ok(draft));
+      vi.mocked(store.getSignalById).mockResolvedValueOnce(ok(draft));
       vi.mocked(store.updateSignal).mockResolvedValueOnce(ok({ ...draft, subject: "Updated subject" }));
       const res = await req(app, "PATCH", `${A}/signals/SES%23msg-001`, { body: { subject: "Updated subject" } });
       expect(res.status).toBe(200);
       const body = await res.json() as Signal;
       expect(body.subject).toBe("Updated subject");
-      expect(store.updateSignal).toHaveBeenCalledWith(TEST_ACCOUNT_ID, draft.id, expect.objectContaining({ subject: "Updated subject" }));
+      expect(store.updateSignal).toHaveBeenCalledWith(TEST_ACCOUNT_ID, draft.signalLookupId, expect.objectContaining({ subject: "Updated subject" }));
     });
 
     it("returns 400 when signal is not a draft", async () => {
-      vi.mocked(store.getSignal).mockResolvedValueOnce(ok(makeSignal({ status: "active" })));
+      vi.mocked(store.getSignalById).mockResolvedValueOnce(ok(makeSignal({ status: "active" })));
       const res = await req(app, "PATCH", `${A}/signals/SES%23msg-001`, { body: { subject: "x" } });
       expect(res.status).toBe(400);
       const body = await res.json() as { errorCode: string };
@@ -552,7 +553,7 @@ describe("API", () => {
   describe("POST /accounts/:accountId/arcs/:arcId/signals/:id/send — send draft", () => {
     it("sends a draft signal and returns 200 + updated signal", async () => {
       vi.mocked(store.getArc).mockResolvedValueOnce(ok(makeArc()));
-      vi.mocked(store.getSignal).mockResolvedValueOnce(ok(makeSignal({ status: "draft" })));
+      vi.mocked(store.getSignalById).mockResolvedValueOnce(ok(makeSignal({ status: "draft" })));
       const res = await req(app, "POST", `${A}/arcs/arc-001/signals/SES%23msg-001/send`);
       expect(res.status).toBe(200);
       expect(store.updateSignalSendStatus).toHaveBeenCalledOnce();
@@ -560,7 +561,7 @@ describe("API", () => {
 
     it("returns 400 when signal is not a draft", async () => {
       vi.mocked(store.getArc).mockResolvedValueOnce(ok(makeArc()));
-      vi.mocked(store.getSignal).mockResolvedValueOnce(ok(makeSignal({ status: "active" })));
+      vi.mocked(store.getSignalById).mockResolvedValueOnce(ok(makeSignal({ status: "active" })));
       const res = await req(app, "POST", `${A}/arcs/arc-001/signals/SES%23msg-001/send`);
       expect(res.status).toBe(400);
       const body = await res.json() as { errorCode: string };
@@ -576,14 +577,14 @@ describe("API", () => {
 
   describe("DELETE /accounts/:accountId/signals/:id — discard draft", () => {
     it("deletes a draft signal and returns 204", async () => {
-      vi.mocked(store.getSignal).mockResolvedValueOnce(ok(makeSignal({ status: "draft" })));
+      vi.mocked(store.getSignalById).mockResolvedValueOnce(ok(makeSignal({ status: "draft" })));
       const res = await req(app, "DELETE", `${A}/signals/SES%23msg-001`);
       expect(res.status).toBe(204);
       expect(store.deleteSignal).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "SES#msg-001");
     });
 
     it("returns 400 when signal is not a draft", async () => {
-      vi.mocked(store.getSignal).mockResolvedValueOnce(ok(makeSignal({ status: "active" })));
+      vi.mocked(store.getSignalById).mockResolvedValueOnce(ok(makeSignal({ status: "active" })));
       const res = await req(app, "DELETE", `${A}/signals/SES%23msg-001`);
       expect(res.status).toBe(400);
       const body = await res.json() as { errorCode: string };

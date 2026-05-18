@@ -10,6 +10,7 @@ import { createMockLogger } from "./helpers/mock-logger.js";
 function makeSentSignal(overrides: Partial<Signal> = {}): Signal {
   return {
     id: "USR#signal-001",
+    signalLookupId: "USR#signal-001",
     arcId: "arc-001",
     accountId: "acct-001",
     source: "user",
