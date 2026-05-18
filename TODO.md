@@ -60,7 +60,6 @@ Compared the frontend's expected API surface against the actual backend implemen
 ### What the extension needs to fix
 
 - [ ] **OTP auto-fill + Web Push service worker** — tracked in detail in `extension/TODO.md`.
-- [ ] **Domain list type mismatch** — extension expects `string[]` from `GET /domains` but backend returns `Domain[]`. Extension should map `domains.map(d => d.domain)`.
 
 ---
 
