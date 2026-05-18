@@ -1,7 +1,7 @@
-import { randomUUID } from "crypto";
 import { PutCommand } from "@aws-sdk/lib-dynamodb";
 import { dynamo, ACCOUNTS_TABLE } from "../database/shared.js";
 import type { Logger } from "../logger.js";
+import { generateId } from "../utils/id.js";
 
 // ---------------------------------------------------------------------------
 // System Signal Creator
@@ -34,7 +34,7 @@ export class DynamoSystemSignalCreator implements SystemSignalCreator {
     issue: string;
   }): Promise<void> {
     const { accountId, resourceType, resourceName, functionName, issue } = opts;
-    const id = randomUUID();
+    const id = generateId("sgn-");
     const timestamp = new Date().toISOString();
     const ttl = Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60; // 30 days
 
@@ -49,6 +49,7 @@ export class DynamoSystemSignalCreator implements SystemSignalCreator {
           pk: `ACCT#${accountId}`,
           sk: `SYSSIG#${timestamp}#${id}`,
           id,
+          signalLookupId: id,
           accountId,
           type: "invalid_output",
           resourceType,
