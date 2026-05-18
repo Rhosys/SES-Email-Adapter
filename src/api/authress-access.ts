@@ -13,7 +13,17 @@ const AUTHRESS_CLIENT_ID = "sc_a9RdHnQzsXJeAzTJgaGf98v";
 const AUTHRESS_KEY_ID = process.env["AUTHRESS_KEY_ID"] ?? "";
 const AUTHRESS_ACCOUNT_ID = "acc-g017y29d874dh";
 
-const ACCOUNT_ROLES: AccountRole[] = ["owner", "admin", "member", "viewer"];
+const ACCOUNT_ROLES: AccountRole[] = ["admin", "member", "viewer"];
+
+const ROLE_TO_ID: Record<AccountRole, string> = {
+  admin: "ro_ag2b0hrztp7n84b25qxqijwewm",
+  member: "ro_bvy5r9ri47n23zu4n7u6bgj0jx",
+  viewer: "ro_a4d58mfmq074p8hdy4s7whwa0e",
+};
+
+const ID_TO_ROLE = new Map<string, AccountRole>(
+  Object.entries(ROLE_TO_ID).map(([role, id]) => [id, role as AccountRole]),
+);
 
 let _client: AuthressClient | null = null;
 
@@ -31,12 +41,11 @@ function getClient(): AuthressClient {
 }
 
 function roleToRoleId(role: AccountRole): string {
-  return `account:${role}`;
+  return ROLE_TO_ID[role];
 }
 
 function roleIdToRole(roleId: string): AccountRole | null {
-  const r = roleId.replace("account:", "");
-  return ACCOUNT_ROLES.includes(r as AccountRole) ? (r as AccountRole) : null;
+  return ID_TO_ROLE.get(roleId) ?? null;
 }
 
 function parseUsers(record: AccessRecord): AccountUser[] {
