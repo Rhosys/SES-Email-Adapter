@@ -115,7 +115,7 @@ export class ReindexWorker {
     targetRegistryId: string,
     modelId: string,
   ): Promise<Result<void, { signalId: string; reason: string }>> {
-    const signal = item as unknown as Pick<Signal, "id" | "accountId" | "arcId" | "recipientAddress" | "embeddings" | "s3Key">;
+    const signal = item as unknown as Pick<Signal, "id" | "signalLookupId" | "accountId" | "arcId" | "recipientAddress" | "embeddings" | "s3Key">;
     const embeddings = signal.embeddings;
 
     const vector = embeddings?.[modelId];
@@ -153,7 +153,7 @@ export class ReindexWorker {
   // ---------------------------------------------------------------------------
 
   private async regenerateFromS3(
-    signal: Pick<Signal, "id" | "accountId" | "arcId" | "recipientAddress" | "s3Key">,
+    signal: Pick<Signal, "id" | "signalLookupId" | "accountId" | "arcId" | "recipientAddress" | "s3Key">,
     targetRegistryId: string,
     modelId: string,
   ): Promise<Result<void, { signalId: string; reason: string }>> {
@@ -174,7 +174,7 @@ export class ReindexWorker {
 
     const cacheResult = await arcDatabase.addEmbeddingToCache(
       signal.accountId,
-      signal.id,
+      signal.signalLookupId,
       modelId,
       result.value.vector,
     );

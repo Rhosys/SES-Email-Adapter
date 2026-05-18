@@ -135,15 +135,15 @@ const processor = new SignalProcessor({
 const feedbackProcessor = new FeedbackProcessor(processingDb, accountDb, logger, {
   getSignalByMessageId: (accountId, sesMessageId) => arcDb.getSignalByMessageId(accountId, sesMessageId),
   saveSignal: (signal) => arcDb.saveSignal(signal),
-  updateSignalSendStatus: (accountId, signalId, update) => arcDb.updateSignalSendStatus(accountId, signalId, update),
+  updateSignalSendStatus: (accountId, signalLookupId, update) => arcDb.updateSignalSendStatus(accountId, signalLookupId, update),
 });
 
 const reindexWorker = new ReindexWorker(logger);
 
 const draftSendWorker = new DraftSendWorker(
   {
-    getSignal: (accountId, id) => arcDb.getSignal(accountId, id),
-    updateSignalSendStatus: (accountId, id, update) => arcDb.updateSignalSendStatus(accountId, id, update),
+    getSignalById: (accountId, id) => arcDb.getSignalById(accountId, id),
+    updateSignalSendStatus: (accountId, signalLookupId, update) => arcDb.updateSignalSendStatus(accountId, signalLookupId, update),
     getArc: (accountId, id) => arcDb.getArc(accountId, id),
     updateArcStatus: (accountId, id, status) => arcDb.updateArc(accountId, id, { status }).then(r => r.map(() => undefined)),
     getAccountAfterSendAction: async (accountId) => {

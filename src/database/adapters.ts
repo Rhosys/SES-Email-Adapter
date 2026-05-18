@@ -21,8 +21,8 @@ export class ProcessorDatabaseAdapter implements ProcessorDatabase {
 
   getSignalByMessageId(accountId: string, sesMessageId: string) { return this.arc.getSignalByMessageId(accountId, sesMessageId); }
   saveSignal(signal: Signal) { return this.arc.saveSignal(signal); }
-  updateSignalSendStatus(accountId: string, signalId: string, update: { status: "pending_send" | "sent" | "draft"; sendInitiatedAt?: string | null; sentAt?: string; sesMessageId?: string; sendFailureReason?: string }) { return this.arc.updateSignalSendStatus(accountId, signalId, update); }
-  updateSignalRetention(accountId: string, signalId: string, update: Partial<Pick<Signal, "s3Key" | "retentionDuration">>) { return this.arc.updateSignalRetention(accountId, signalId, update); }
+  updateSignalSendStatus(accountId: string, signalLookupId: string, update: { status: "pending_send" | "sent" | "draft"; sendInitiatedAt?: string | null; sentAt?: string; sesMessageId?: string; sendFailureReason?: string }) { return this.arc.updateSignalSendStatus(accountId, signalLookupId, update); }
+  updateSignalRetention(accountId: string, signalLookupId: string, update: Partial<Pick<Signal, "s3Key" | "retentionDuration">>) { return this.arc.updateSignalRetention(accountId, signalLookupId, update); }
   getArc(accountId: string, id: string) { return this.arc.getArc(accountId, id); }
   findArcByGroupingKey(accountId: string, key: string) { return this.arc.findArcByGroupingKey(accountId, key); }
   saveArc(arc: Arc) { return this.arc.saveArc(arc); }
@@ -60,13 +60,13 @@ export class ApiDatabaseAdapter implements ApiDatabase {
   // Signals
   listSignals(accountId: string, arcId: string, params: PageParams) { return this.arc.listSignals(accountId, arcId, params); }
   listPreArcSignals(accountId: string, status: "quarantined", params: PageParams) { return this.arc.listPreArcSignals(accountId, status, params); }
-  getSignal(accountId: string, id: string) { return this.arc.getSignal(accountId, id); }
+  getSignalById(accountId: string, signalId: string, arcId?: string) { return this.arc.getSignalById(accountId, signalId, arcId); }
   createSignal(signal: Signal) { return this.arc.createSignal(signal); }
-  updateSignal(accountId: string, id: string, update: Partial<Pick<Signal, "subject" | "textBody" | "from" | "to">>) { return this.arc.updateSignal(accountId, id, update); }
-  updateSignalSendStatus(accountId: string, signalId: string, update: { status: "pending_send" | "sent" | "draft"; sendInitiatedAt?: string | null; sentAt?: string; sesMessageId?: string; sendFailureReason?: string }) { return this.arc.updateSignalSendStatus(accountId, signalId, update); }
-  deleteSignal(accountId: string, id: string) { return this.arc.deleteSignal(accountId, id); }
-  updateSignalStatus(accountId: string, signalId: string, status: "block_hidden" | "block_reject" | "violate_report") { return this.arc.updateSignalStatus(accountId, signalId, status); }
-  unblockSignal(accountId: string, signalId: string, arcId: string) { return this.arc.unblockSignal(accountId, signalId, arcId); }
+  updateSignal(accountId: string, signalLookupId: string, update: Partial<Pick<Signal, "subject" | "textBody" | "from" | "to">>) { return this.arc.updateSignal(accountId, signalLookupId, update); }
+  updateSignalSendStatus(accountId: string, signalLookupId: string, update: { status: "pending_send" | "sent" | "draft"; sendInitiatedAt?: string | null; sentAt?: string; sesMessageId?: string; sendFailureReason?: string }) { return this.arc.updateSignalSendStatus(accountId, signalLookupId, update); }
+  deleteSignal(accountId: string, signalLookupId: string) { return this.arc.deleteSignal(accountId, signalLookupId); }
+  updateSignalStatus(accountId: string, signalLookupId: string, status: "block_hidden" | "block_reject" | "violate_report") { return this.arc.updateSignalStatus(accountId, signalLookupId, status); }
+  unblockSignal(accountId: string, signalLookupId: string, arcId: string) { return this.arc.unblockSignal(accountId, signalLookupId, arcId); }
 
   // Arcs (additional)
   saveArc(arc: Arc) { return this.arc.saveArc(arc); }
