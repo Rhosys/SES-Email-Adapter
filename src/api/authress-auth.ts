@@ -4,7 +4,7 @@ import type { AuthError, Result } from "../errors.js";
 import type { AuthService } from "./app.js";
 import { AUTHRESS_APP_ID } from "./authress-access.js";
 
-const AUTHRESS_API_URL = "https://login.rhosys.cloud";
+const AUTHRESS_API_URL = process.env["AUTHRESS_API_URL"] ?? "https://login.rhosys.cloud";
 
 export class AuthressAuthService implements AuthService {
   async verify(token: string): Promise<Result<{ userId: string }, AuthError>> {
