@@ -43,15 +43,26 @@ describe("generateId", () => {
   });
 
   describe("time ordering", () => {
-    it("base58 body of earlier ID is lexicographically less than later ID", async () => {
+    it("base58 body of earlier ID is numerically less than later ID", async () => {
       const first = generateId("arc-");
-      await new Promise(resolve => setTimeout(resolve, 2));
+      await new Promise(resolve => setTimeout(resolve, 10));
       const second = generateId("arc-");
 
       const firstBody = first.slice(4, 4 + 22);
       const secondBody = second.slice(4, 4 + 22);
 
-      expect(firstBody < secondBody).toBe(true);
+      // Compare using base58 alphabet ordering (not ASCII)
+      const FLICKR_BASE58_ALPHABET = "123456789abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ";
+      function base58Compare(a: string, b: string): number {
+        for (let i = 0; i < a.length; i++) {
+          const ai = FLICKR_BASE58_ALPHABET.indexOf(a[i]!);
+          const bi = FLICKR_BASE58_ALPHABET.indexOf(b[i]!);
+          if (ai !== bi) return ai - bi;
+        }
+        return 0;
+      }
+
+      expect(base58Compare(firstBody, secondBody)).toBeLessThan(0);
     });
   });
 

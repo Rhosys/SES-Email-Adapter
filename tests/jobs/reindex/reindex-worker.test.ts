@@ -112,11 +112,14 @@ function makeSignalItem(opts: {
   recipientAddress: string;
   embeddings?: Record<string, number[]>;
   s3Key?: string;
+  signalLookupId?: string;
 }): Record<string, unknown> {
+  const lookupId = opts.signalLookupId ?? opts.id;
   return {
-    pk: `ACCT#${opts.accountId}#SIG#${opts.id}`,
+    pk: `ACCT#${opts.accountId}#SIG#${lookupId}`,
     sk: "#",
     id: opts.id,
+    signalLookupId: lookupId,
     accountId: opts.accountId,
     arcId: opts.arcId,
     recipientAddress: opts.recipientAddress,
@@ -405,7 +408,8 @@ describe("ReindexWorker — regenerate-from-S3 mode", () => {
 
   it("regenerates embedding from S3 when cache miss and s3Key is present", async () => {
     const signal = makeSignalItem({
-      id: "SES#regen1",
+      id: "sgn-regen001",
+      signalLookupId: "ses-regen1",
       accountId: "acct-1",
       arcId: "arc-regen",
       recipientAddress: "regen@example.com",
@@ -464,7 +468,7 @@ describe("ReindexWorker — regenerate-from-S3 mode", () => {
     // Should write back to DynamoDB cache
     expect(mockAddEmbeddingToCache).toHaveBeenCalledWith(
       "acct-1",
-      "SES#regen1",
+      "ses-regen1",
       "amazon.titan-embed-text-v2:0",
       [0.1, 0.2, 0.3],
     );

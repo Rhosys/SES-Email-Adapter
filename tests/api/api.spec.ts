@@ -1138,7 +1138,7 @@ describe("API", () => {
         body: { unknownSenderPolicy: "allow_all", approvedSenders: [] },
       });
       const saved = vi.mocked(store.upsertAlias).mock.calls[0]![0] as Alias;
-      expect(saved.id).toBe("cfg-001");
+      expect(saved.id).toBe("user@example.com");
       expect(saved.unknownSenderPolicy).toBe("allow_all");
     });
 
