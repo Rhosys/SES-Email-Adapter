@@ -157,7 +157,7 @@ describe("Template function resolution via User Code Executor", () => {
   beforeEach(() => {
     mockLogger = createMockLogger();
     mockExecutor = { invoke: vi.fn(), validateAst: vi.fn(), validateAstBatch: vi.fn() };
-    mockSystemSignalCreator = { createInvalidOutputSignal: vi.fn().mockResolvedValue(undefined) };
+    mockSystemSignalCreator = { createInvalidOutputSignal: vi.fn().mockResolvedValue(undefined), createReplyTargetSuppressionSignal: vi.fn().mockResolvedValue(undefined) };
     store = makeStore();
     processor = makeProcessor({ store, userCodeExecutor: mockExecutor, logger: mockLogger, systemSignalCreator: mockSystemSignalCreator });
   });

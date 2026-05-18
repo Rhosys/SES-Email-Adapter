@@ -17,6 +17,13 @@ export interface SystemSignalCreator {
     functionName?: string;
     issue: string;
   }): Promise<void>;
+
+  createReplyTargetSuppressionSignal(opts: {
+    accountId: string;
+    fromAddress: string;
+    replyToAddress: string;
+    recipientAddress: string;
+  }): Promise<void>;
 }
 
 export class DynamoSystemSignalCreator implements SystemSignalCreator {
@@ -70,6 +77,50 @@ export class DynamoSystemSignalCreator implements SystemSignalCreator {
         resourceName,
         functionName,
         issue,
+        error: e,
+      });
+    }
+  }
+
+  async createReplyTargetSuppressionSignal(opts: {
+    accountId: string;
+    fromAddress: string;
+    replyToAddress: string;
+    recipientAddress: string;
+  }): Promise<void> {
+    const { accountId, fromAddress, replyToAddress, recipientAddress } = opts;
+    const id = generateId("sgn-");
+    const timestamp = new Date().toISOString();
+    const ttl = Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60; // 30 days
+
+    const description = `Auto-send suppressed for ${recipientAddress}: Reply-To ${replyToAddress} does not match From ${fromAddress} and is not in approved senders`;
+
+    try {
+      await dynamo.send(new PutCommand({
+        TableName: ACCOUNTS_TABLE,
+        Item: {
+          pk: `ACCT#${accountId}`,
+          sk: `SYSSIG#${timestamp}#${id}`,
+          id,
+          signalLookupId: id,
+          accountId,
+          type: "reply_target_suppression",
+          fromAddress,
+          replyToAddress,
+          recipientAddress,
+          description,
+          createdAt: timestamp,
+          ttl,
+        },
+      }));
+    } catch (e) {
+      // Best-effort — don't fail processing if notification write fails
+      this.logger.warn("Failed to create system signal for reply-target suppression.", {
+        code: "system_signal.write_failed",
+        accountId,
+        fromAddress,
+        replyToAddress,
+        recipientAddress,
         error: e,
       });
     }

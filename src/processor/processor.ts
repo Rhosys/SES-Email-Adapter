@@ -25,6 +25,7 @@ import { getETLD1, assignSystemLabels, DEFAULT_SPAM_SCORE_THRESHOLD } from "./fi
 import { statusToCategory } from "../database/stats-writer.js";
 import type { DraftSendDispatch } from "./draft-send-dispatcher.js";
 import type { SystemSignalCreator } from "./system-signal-creator.js";
+import { isReplyTargetSafe } from "./reply-target-validator.js";
 
 // ---------------------------------------------------------------------------
 // Message types
@@ -595,7 +596,36 @@ export class SignalProcessor {
             }
           }
 
-          const shouldAutoSend = autoSend && senderSetupComplete && !preventAutoSend;
+          let shouldAutoSend = autoSend && senderSetupComplete && !preventAutoSend;
+
+          // Reply-To safety gate — suppress auto-send if Reply-To domain is untrusted
+          if (shouldAutoSend && signal.replyTo) {
+            const replyToETLD1 = getETLD1(signal.replyTo.address);
+            const senderResult = await this.store.getSender(accountId, signal.recipientAddress, replyToETLD1);
+            const approvedDomains = senderResult.isOk() && senderResult.value?.policy === "allow"
+              ? [senderResult.value.domain]
+              : [];
+            const replyTargetResult = isReplyTargetSafe(signal, approvedDomains);
+            if (!replyTargetResult.safe) {
+              shouldAutoSend = false;
+              this.logger.track("Auto-send suppressed — Reply-To domain mismatch.", {
+                code: "processor.side_effect.reply_target_suppressed",
+                accountId,
+                fromAddress: signal.from.address,
+                replyToAddress: signal.replyTo.address,
+                recipientAddress: signal.recipientAddress,
+              });
+              if (this.systemSignalCreator) {
+                await this.systemSignalCreator.createReplyTargetSuppressionSignal({
+                  accountId,
+                  fromAddress: signal.from.address,
+                  replyToAddress: signal.replyTo.address,
+                  recipientAddress: signal.recipientAddress,
+                });
+              }
+            }
+          }
+
           const sendInitiatedAt = shouldAutoSend ? now : undefined;
 
           const draftId = generateId("sgn-");
