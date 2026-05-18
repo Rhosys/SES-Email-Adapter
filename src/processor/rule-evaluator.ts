@@ -36,7 +36,7 @@ export function stripSensitive(obj: Signal | Arc): StrippedSignal | StrippedArc 
   return {
     id: arc.id,
     labels: arc.labels,
-    urgency: arc.urgency,
+    ...(arc.urgency !== undefined ? { urgency: arc.urgency } : {}),
     summary: arc.summary,
     workflow: arc.workflow,
     status: arc.status,
@@ -62,7 +62,7 @@ export class JsonLogicRuleEvaluator implements RuleEvaluator {
 
   constructor(logger: Logger, userCodeExecutor?: UserCodeExecutorClient, store?: RuleAnnotationStore) {
     this.logger = logger;
-    this.userCodeExecutor = userCodeExecutor ?? { invoke: () => Promise.resolve({ success: false, error: { message: "User code executor not configured", type: "runtime_error" } } as UserCodeResponse), validateAst: () => Promise.resolve({ success: false, error: { message: "User code executor not configured", type: "runtime_error" } }) };
+    this.userCodeExecutor = userCodeExecutor ?? { invoke: () => Promise.resolve({ success: false, error: { message: "User code executor not configured", type: "runtime_error" } } as UserCodeResponse), validateAst: () => Promise.resolve({ success: false, error: { message: "User code executor not configured", type: "runtime_error" } }), validateAstBatch: () => Promise.resolve({ success: false, error: { message: "User code executor not configured", type: "runtime_error" } }) };
     this.store = store ?? { annotateRuleError: () => Promise.resolve(ok(undefined)) };
   }
 
