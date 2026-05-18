@@ -22,7 +22,7 @@ export interface LogEntry {
 }
 
 export interface Logger {
-  startInvocation(invocationId?: string): void;
+  startInvocation(invocationId: string): void;
   getInvocationId(): string;
   trackPoint(name: string, data?: Record<string, unknown>): void;
   info(message: string, context?: Record<string, unknown>): void;
@@ -46,7 +46,7 @@ const COGNITO_KEYS = new Set([
   "cognitoAuthenticationType",
 ]);
 
-export function redactReplacer(key: string, value: unknown): unknown {
+function redactValue(key: string, value: unknown): unknown {
   if (COGNITO_KEYS.has(key)) return "[REDACTED]";
   if (SECRET_PATTERN.test(key) && typeof value === "string") {
     return value.length > 8 ? value.slice(0, 8) + "[REDACTED]" : "[REDACTED]";
@@ -57,6 +57,34 @@ export function redactReplacer(key: string, value: unknown): unknown {
   if (typeof value === "bigint") return value.toString();
   if (typeof value === "function") return `[Function: ${value.name || "anonymous"}]`;
   return value;
+}
+
+function redact(obj: Record<string, unknown>, seen = new WeakSet()): Record<string, unknown> {
+  if (seen.has(obj)) return { _circular: true };
+  seen.add(obj);
+  const result: Record<string, unknown> = {};
+  for (const [key, raw] of Object.entries(obj)) {
+    const value = redactValue(key, raw);
+    if (value !== raw) {
+      result[key] = value;
+    } else if (value && typeof value === "object" && !Array.isArray(value)) {
+      result[key] = redact(value as Record<string, unknown>, seen);
+    } else if (Array.isArray(value)) {
+      result[key] = value.map((item) =>
+        item && typeof item === "object" && !Array.isArray(item)
+          ? redact(item as Record<string, unknown>, seen)
+          : redactValue("", item),
+      );
+    } else {
+      result[key] = value;
+    }
+  }
+  return result;
+}
+
+/** @deprecated Use redact() for object trees. Kept for JSON.stringify compatibility in edge cases. */
+export function redactReplacer(key: string, value: unknown): unknown {
+  return redactValue(key, value);
 }
 
 function serializeErrors(obj: Record<string, unknown>): Record<string, unknown> {
@@ -81,8 +109,8 @@ export class RequestLogger implements Logger {
     this.containerId = containerId ?? CONTAINER_ID;
   }
 
-  startInvocation(invocationId?: string): void {
-    this.invocationId = invocationId ?? randomUUID();
+  startInvocation(invocationId: string): void {
+    this.invocationId = invocationId;
     this.startTime = Date.now();
     this.trackPoints = [];
   }
@@ -156,51 +184,48 @@ export class RequestLogger implements Logger {
     entry.containerId = this.containerId;
     if (code !== undefined) entry.code = code;
 
-    // Emit the entry directly — Lambda JSON log format provides the outer envelope
-    let serialized: string;
+    // Emit the entry directly — Lambda JSON log format serializes objects natively
+    let redacted: Record<string, unknown>;
     try {
-      serialized = JSON.stringify(entry, redactReplacer);
+      redacted = redact(entry as unknown as Record<string, unknown>);
     } catch {
-      // Circular reference or other serialization failure
-      const fallback: LogEntry = {
-        level: level.toUpperCase() as unknown as LogLevel,
+      // Circular reference or other failure
+      console.log({
+        level: level.toUpperCase(),
         title,
         timestamp: entry.timestamp,
         invocationId: this.invocationId,
         containerId: this.containerId,
         _serializationError: true,
-      };
-      console.log(JSON.stringify(fallback));
+      });
       return;
     }
 
-    if (Buffer.byteLength(serialized, "utf8") > PAYLOAD_LIMIT) {
-      const originalSizeBytes = Buffer.byteLength(serialized, "utf8");
-
-      // Truncate: keep required fields + truncation marker
-      const truncated: LogEntry = {
-        level: level.toUpperCase() as unknown as LogLevel,
-        title,
-        timestamp: entry.timestamp,
-        invocationId: this.invocationId,
-        containerId: this.containerId,
-        _truncated: true,
-      };
-      serialized = JSON.stringify(truncated);
-
+    const byteSize = Buffer.byteLength(JSON.stringify(redacted), "utf8");
+    if (byteSize > PAYLOAD_LIMIT) {
       // Emit a separate warning about the truncation
-      const warning: LogEntry = {
-        level: "WARN" as unknown as LogLevel,
+      console.log({
+        level: "WARN",
         title: "logger.payload_truncated",
         timestamp: new Date().toISOString(),
         invocationId: this.invocationId,
         containerId: this.containerId,
         originalTitle: title,
-        originalSizeBytes,
-      };
-      console.log(JSON.stringify(warning, redactReplacer));
+        originalSizeBytes: byteSize,
+      });
+
+      // Truncate: keep required fields + truncation marker
+      console.log({
+        level: level.toUpperCase(),
+        title,
+        timestamp: entry.timestamp,
+        invocationId: this.invocationId,
+        containerId: this.containerId,
+        _truncated: true,
+      });
+      return;
     }
 
-    console.log(serialized);
+    console.log(redacted);
   }
 }

@@ -14,7 +14,7 @@ export function createMockLogger(): MockLogger {
   const calls: MockLoggerCall[] = [];
   return {
     calls,
-    startInvocation() {
+    startInvocation(_id: string) {
       /* no-op */
     },
     getInvocationId() {

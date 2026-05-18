@@ -13,7 +13,6 @@ export class DomainHealthJob {
   ) {}
 
   async run(): Promise<void> {
-    this.logger.startInvocation();
     const startTime = Date.now();
 
     const accountsResult = await this.db.scanAllDomains();
