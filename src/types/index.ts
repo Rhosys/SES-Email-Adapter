@@ -445,7 +445,7 @@ export interface Signal {
 // Arc (materialized aggregate of related Signals)
 // ---------------------------------------------------------------------------
 
-export const ARC_STATUSES = ["active", "archived", "deleted"] as const;
+export const ARC_STATUSES = ["active", "archived", "deleted", "violate_report"] as const;
 export type ArcStatus = (typeof ARC_STATUSES)[number];
 
 export interface Arc {
