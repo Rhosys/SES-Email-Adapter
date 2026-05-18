@@ -45,7 +45,7 @@ export function validateCodeAst(code: string): AstValidationResult {
     } catch (e: unknown) {
       if (e instanceof SyntaxError) {
         const loc = extractSyntaxErrorLocation(e);
-        return { valid: false, error: e.message, location: loc };
+        return loc ? { valid: false, error: e.message, location: loc } : { valid: false, error: e.message };
       }
       return { valid: false, error: "Failed to parse code" };
     }
@@ -83,21 +83,25 @@ function extractSyntaxErrorLocation(e: SyntaxError): { line: number; column: num
 function walkNode(node: acorn.Node): AstValidationResult {
   const loc = node.loc ? { line: node.loc.start.line, column: node.loc.start.column } : undefined;
 
+  function invalid(error: string): AstValidationResult {
+    return loc ? { valid: false, error, location: loc } : { valid: false, error };
+  }
+
   switch (node.type) {
     case "CallExpression": {
       const call = node as acorn.CallExpression;
       // Reject eval()
       if (call.callee.type === "Identifier" && (call.callee as acorn.Identifier).name === "eval") {
-        return { valid: false, error: "eval() calls are not allowed", location: loc };
+        return invalid("eval() calls are not allowed");
       }
       // Reject Function()
       if (call.callee.type === "Identifier" && (call.callee as acorn.Identifier).name === "Function") {
-        return { valid: false, error: "Function constructor is not allowed", location: loc };
+        return invalid("Function constructor is not allowed");
       }
       // Reject new Function() — handled via NewExpression but also catch Function() direct call
       // Reject require()
       if (call.callee.type === "Identifier" && (call.callee as acorn.Identifier).name === "require") {
-        return { valid: false, error: "require() calls are not allowed", location: loc };
+        return invalid("require() calls are not allowed");
       }
       return walkChildren(node);
     }
@@ -105,13 +109,13 @@ function walkNode(node: acorn.Node): AstValidationResult {
     case "NewExpression": {
       const newExpr = node as acorn.NewExpression;
       if (newExpr.callee.type === "Identifier" && (newExpr.callee as acorn.Identifier).name === "Function") {
-        return { valid: false, error: "Function constructor is not allowed", location: loc };
+        return invalid("Function constructor is not allowed");
       }
       return walkChildren(node);
     }
 
     case "ImportExpression": {
-      return { valid: false, error: "import() expressions are not allowed", location: loc };
+      return invalid("import() expressions are not allowed");
     }
 
     case "MemberExpression": {
@@ -120,7 +124,7 @@ function walkNode(node: acorn.Node): AstValidationResult {
       if (member.object.type === "Identifier") {
         const name = (member.object as acorn.Identifier).name;
         if (DISALLOWED_GLOBALS.has(name)) {
-          return { valid: false, error: `Access on '${name}' is not allowed`, location: loc };
+          return invalid(`Access on '${name}' is not allowed`);
         }
       }
       return walkChildren(node);
@@ -129,14 +133,14 @@ function walkNode(node: acorn.Node): AstValidationResult {
     case "WhileStatement":
     case "DoWhileStatement": {
       if (!hasBoundedGuard(node)) {
-        return { valid: false, error: `Unbounded ${node.type} is not allowed; add a numeric limit or break`, location: loc };
+        return invalid(`Unbounded ${node.type} is not allowed; add a numeric limit or break`);
       }
       return walkChildren(node);
     }
 
     case "ForStatement": {
       if (!hasBoundedGuard(node)) {
-        return { valid: false, error: "Unbounded ForStatement is not allowed; add a numeric limit in the condition", location: loc };
+        return invalid("Unbounded ForStatement is not allowed; add a numeric limit in the condition");
       }
       return walkChildren(node);
     }
@@ -150,7 +154,7 @@ function walkNode(node: acorn.Node): AstValidationResult {
     case "VariableDeclaration": {
       const decl = node as acorn.VariableDeclaration;
       if (decl.kind === "var") {
-        return { valid: false, error: "'var' declarations are not allowed; use 'const' or 'let'", location: loc };
+        return invalid("'var' declarations are not allowed; use 'const' or 'let'");
       }
       return walkChildren(node);
     }

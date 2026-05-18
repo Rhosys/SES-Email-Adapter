@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { validateCodeAst } from "../../src/api/ast-validator.js";
+import { validateCodeAst } from "../../src/isolated/ast-validator.js";
 
 describe("validateCodeAst", () => {
   describe("allowed constructs — accepted when wrapped in a valid function", () => {

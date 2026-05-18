@@ -17,6 +17,18 @@ Six log levels, each with defined alerting semantics:
 | `ERROR` | Something broke for a specific request/operation | Reported immediately; high volume indicates an incident |
 | `CRITICAL` | System-wide failure, data loss risk, or security breach | Triggers incident immediately |
 
+Examples:
+
+- **TRACK** = per-invocation outcome for dashboards. Use when there IS a concrete action to take on receiving even one instance.
+- **WARN** = system compensated, investigate if pattern persists. Non-critical failures where we can't do anything immediately but should know about.
+- **ERROR** = operation failed, operator attention required now.
+- No DLQ exists on any queue — all retry indefinitely.
+- Unknown error types start at TRACK; promote once failure modes are understood.
+- Aurora upsert failure forces retry (not fire-and-forget) — resilience spec implemented this.
+- Forward failures should be WARN + retry (address is pre-verified, failures are transient).
+- Auto-reply and auto-draft should unify — single action with `autoSend` flag, fallback to draft on send failure.
+- Must validate reply-to addresses before any outbound send to prevent spoofed-sender amplification attacks.
+
 ## Log Entry Format
 
 All structured logs are JSON with at minimum:
