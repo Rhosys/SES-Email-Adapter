@@ -99,7 +99,9 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
     {
       label: "valid embedding for cluster model",
       signal: {
-        id: "SES#msg-valid-emb",
+        id: "sgn-validEmb000000000000abc",
+        signalLookupId: "ses-msg-valid-emb",
+        sesMessageId: "msg-valid-emb",
         arcId: "arc-valid-emb",
         accountId: TEST_ACCOUNT_ID,
         source: "email" as const,
@@ -127,7 +129,9 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
     {
       label: "embeddings undefined (Aurora upsert skipped)",
       signal: {
-        id: "SES#msg-no-emb",
+        id: "sgn-noEmb0000000000000000abc",
+        signalLookupId: "ses-msg-no-emb",
+        sesMessageId: "msg-no-emb",
         arcId: "arc-no-emb",
         accountId: TEST_ACCOUNT_ID,
         source: "email" as const,
@@ -154,7 +158,9 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
     {
       label: "embedding for wrong model (Aurora upsert skipped for cluster)",
       signal: {
-        id: "SES#msg-wrong-model",
+        id: "sgn-wrongModel00000000000abc",
+        signalLookupId: "ses-msg-wrong-model",
+        sesMessageId: "msg-wrong-model",
         arcId: "arc-wrong-model",
         accountId: TEST_ACCOUNT_ID,
         source: "email" as const,
@@ -251,7 +257,7 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
 
   it.each(RETRY_CASES)("MIME parser is NOT called on retry when signal exists in DDB ($label)", async ({ signal, receiveCount }) => {
     const arc = arbArcForSignal(signal);
-    const sesMessageId = signal.id.replace("SES#", "");
+    const sesMessageId = signal.sesMessageId!;
     const contentSanitizer: ContentSanitizerClient = { invoke: vi.fn() };
 
     const processor = new SignalProcessor({
@@ -277,7 +283,7 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
 
   it.each(RETRY_CASES)("classifier is NOT called on retry when signal exists in DDB ($label)", async ({ signal, receiveCount }) => {
     const arc = arbArcForSignal(signal);
-    const sesMessageId = signal.id.replace("SES#", "");
+    const sesMessageId = signal.sesMessageId!;
     const classifier: Pick<SignalClassifier, "classify"> = { classify: vi.fn() };
 
     const processor = new SignalProcessor({
@@ -303,7 +309,7 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
 
   it.each(RETRY_CASES)("rule evaluation is NOT called on retry when signal exists in DDB ($label)", async ({ signal, receiveCount }) => {
     const arc = arbArcForSignal(signal);
-    const sesMessageId = signal.id.replace("SES#", "");
+    const sesMessageId = signal.sesMessageId!;
     const ruleEvaluator = new JsonLogicRuleEvaluator(mockLogger);
     const evaluateSpy = vi.spyOn(ruleEvaluator, "evaluate");
 
@@ -330,7 +336,7 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
 
   it.each(RETRY_CASES.filter(c => c.signal.embeddings?.["amazon.titan-embed-text-v2:0"]))("Aurora upserts ARE called with the signal's cached embeddings on retry ($label)", async ({ signal, receiveCount }) => {
     const arc = arbArcForSignal(signal);
-    const sesMessageId = signal.id.replace("SES#", "");
+    const sesMessageId = signal.sesMessageId!;
     const auroraWriter = makeAuroraWriter();
 
     const processor = new SignalProcessor({
@@ -363,7 +369,7 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
 
   it.each(RETRY_CASES.filter(c => !c.signal.embeddings?.["amazon.titan-embed-text-v2:0"]))("Aurora upsert is SKIPPED when embedding is missing for cluster model ($label)", async ({ signal, receiveCount }) => {
     const arc = arbArcForSignal(signal);
-    const sesMessageId = signal.id.replace("SES#", "");
+    const sesMessageId = signal.sesMessageId!;
     const auroraWriter = makeAuroraWriter();
 
     const processor = new SignalProcessor({
@@ -391,7 +397,7 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
 
   it.each(RETRY_CASES)("result is NOT a batchItemFailure on retry when signal exists in DDB ($label)", async ({ signal, receiveCount }) => {
     const arc = arbArcForSignal(signal);
-    const sesMessageId = signal.id.replace("SES#", "");
+    const sesMessageId = signal.sesMessageId!;
 
     const processor = new SignalProcessor({
       store: makeStore(signal, arc),
@@ -426,7 +432,9 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
 
   it.each(FALSY_ARC_ID_CASES)("returns batchItemFailure when signal exists but $label", async ({ arcId }) => {
     const signal: Signal = {
-      id: "SES#msg-no-arc",
+      id: "sgn-noArc000000000000000abc",
+      signalLookupId: "ses-msg-no-arc",
+      sesMessageId: "msg-no-arc",
       arcId: arcId as string | undefined,
       accountId: TEST_ACCOUNT_ID,
       source: "email" as const,
@@ -1060,7 +1068,9 @@ describe("Feature: signal-processor-retry-resilience, Property 8: Outcome re-der
 
   function makeSignalWithRules(matchedRules: readonly unknown[]): Signal {
     return {
-      id: "SES#msg-prop8",
+      id: "sgn-prop8000000000000000abc",
+      signalLookupId: "ses-msg-prop8",
+      sesMessageId: "msg-prop8",
       arcId: "arc-prop8",
       accountId: TEST_ACCOUNT_ID,
       source: "email" as const,
