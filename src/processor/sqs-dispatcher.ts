@@ -25,6 +25,7 @@ export class SqsDispatcherImpl implements SqsDispatcher {
           MessageBody: JSON.stringify(payload),
           MessageAttributes: {
             messageType: { DataType: "String", StringValue: SQS_MESSAGE_TYPES[1] },
+            callerInvocationId: { DataType: "String", StringValue: this.logger.getInvocationId() || "<NULL>" },
           },
         }),
       );

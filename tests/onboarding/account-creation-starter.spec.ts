@@ -32,7 +32,7 @@ describe("SfnAccountCreationStarter", () => {
     expect(calls[0]!.args[0].input).toEqual({
       stateMachineArn: STATE_MACHINE_ARN,
       name: "acc-123",
-      input: JSON.stringify({ accountId: "acc-123", email: "user@example.com" }),
+      input: JSON.stringify({ accountId: "acc-123", email: "user@example.com", callerInvocationId: "test-invocation-id" }),
     });
   });
 
