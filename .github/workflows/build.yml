@@ -46,6 +46,81 @@ jobs:
         run: tofu -chdir=deploy plan -input=false -out=plan.cache
 
   # ==========================================
+  # PATH C: INTEGRATION TESTS (MiniStack)
+  # ==========================================
+  integration_test:
+    name: Integration Test
+    runs-on: ubuntu-latest
+
+    services:
+      ministack:
+        image: ministackorg/ministack:latest
+        ports:
+          - 4566:4566
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: Setup OpenTofu
+        uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version: '1.8.8'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Wait for MiniStack
+        run: |
+          echo "Waiting for MiniStack on port 4566..."
+          until curl -s http://localhost:4566 -o /dev/null; do
+            sleep 1
+          done
+          echo "MiniStack ready."
+
+      - name: Provision DynamoDB tables via Tofu
+        run: |
+          mkdir -p /tmp/itf
+          cp deploy/*.tf /tmp/itf/
+          cp deploy/integration/providers.tf /tmp/itf/providers.tf
+          tofu -chdir=/tmp/itf init -backend=false -reconfigure -input=false
+          tofu -chdir=/tmp/itf apply -backend=false -auto-approve -input=false \
+            -var="aws_account_id=000000000000" \
+            -target=aws_dynamodb_table.accounts \
+            -target=aws_dynamodb_table.signals \
+            -target=aws_dynamodb_table.audit
+        env:
+          AWS_ACCESS_KEY_ID: ministack-test
+          AWS_SECRET_ACCESS_KEY: ministack-test
+
+      - name: Read resource names from Tofu outputs
+        id: tofu_outputs
+        run: |
+          tofu -chdir=/tmp/itf output -json | \
+            jq -r 'to_entries[] | "\(.key)=\(.value.value)"' >> $GITHUB_OUTPUT
+        env:
+          AWS_ACCESS_KEY_ID: ministack-test
+          AWS_SECRET_ACCESS_KEY: ministack-test
+
+      - name: Run integration tests
+        env:
+          AWS_ENDPOINT_URL: http://localhost:4566
+          AWS_ACCESS_KEY_ID: ministack-test
+          AWS_SECRET_ACCESS_KEY: ministack-test
+          AWS_REGION: eu-central-1
+          ACCOUNTS_TABLE: ${{ steps.tofu_outputs.outputs.dynamodb_accounts_table }}
+          SIGNALS_TABLE: ${{ steps.tofu_outputs.outputs.dynamodb_signals_table }}
+          AUDIT_TABLE: ${{ steps.tofu_outputs.outputs.dynamodb_audit_table }}
+          AUTHRESS_API_URL: http://localhost:4500
+        run: npx tsx tests/integration/post-accounts.ts
+
+  # ==========================================
   # PATH B: PRODUCTION BUILD & PLAN
   # ==========================================
   prod_build_and_plan:
