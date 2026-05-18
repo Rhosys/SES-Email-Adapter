@@ -13,7 +13,7 @@ const SOFT_BOUNCE_TTL_SECONDS = 72 * 60 * 60;
 export interface FeedbackSignalStore {
   getSignalByMessageId(accountId: string, sesMessageId: string): Promise<Result<Signal | null, DbError>>;
   saveSignal(signal: Signal): Promise<Result<void, DbError>>;
-  updateSignalSendStatus(accountId: string, signalId: string, update: {
+  updateSignalSendStatus(accountId: string, signalLookupId: string, update: {
     status: "pending_send" | "sent" | "draft";
     sendInitiatedAt?: string | null;
     sentAt?: string;
@@ -151,7 +151,7 @@ export class FeedbackProcessor {
                   bouncedRecipients.some(b => b.address.toLowerCase() === addr && b.bounceType === "permanent")
                 );
                 if (allBounced) {
-                  await this.signalStore.updateSignalSendStatus(sentSignal.accountId, sentSignal.id, {
+                  await this.signalStore.updateSignalSendStatus(sentSignal.accountId, sentSignal.signalLookupId, {
                     status: "draft",
                     sendFailureReason: "all_recipients_bounced",
                     sendInitiatedAt: null,

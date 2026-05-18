@@ -6,8 +6,8 @@ import type { ReplySender } from "./processor.js";
 import type { DraftSendPayload } from "./draft-send-dispatcher.js";
 
 export interface DraftSendStore {
-  getSignal(accountId: string, id: string): Promise<Result<Signal | null, DbError>>;
-  updateSignalSendStatus(accountId: string, id: string, update: {
+  getSignalById(accountId: string, signalId: string): Promise<Result<Signal | null, DbError>>;
+  updateSignalSendStatus(accountId: string, signalLookupId: string, update: {
     status: "sent" | "draft";
     sentAt?: string;
     sesMessageId?: string;
@@ -34,7 +34,7 @@ export class DraftSendWorker {
     const { signalId, accountId, sendInitiatedAt } = payload;
 
     // Re-read signal — verify still pending_send
-    const signalResult = await this.store.getSignal(accountId, signalId);
+    const signalResult = await this.store.getSignalById(accountId, signalId);
     if (signalResult.isErr()) return err(signalResult.error);
     const signal = signalResult.value;
 
@@ -70,7 +70,7 @@ export class DraftSendWorker {
 
       // Transition to sent
       const now = new Date().toISOString();
-      const updateResult = await this.store.updateSignalSendStatus(accountId, signalId, {
+      const updateResult = await this.store.updateSignalSendStatus(accountId, signal.signalLookupId, {
         status: "sent",
         sentAt: now,
         sesMessageId: messageId,
@@ -96,7 +96,7 @@ export class DraftSendWorker {
 
       if (isPermanent) {
         this.logger.error("Draft send: SES permanent failure — reverting to draft.", { code: "draft_send.ses_permanent_failure", signalId, accountId, error: e });
-        await this.store.updateSignalSendStatus(accountId, signalId, {
+        await this.store.updateSignalSendStatus(accountId, signal.signalLookupId, {
           status: "draft",
           sendInitiatedAt: null,
           sendFailureReason: "ses_permanent_failure",
