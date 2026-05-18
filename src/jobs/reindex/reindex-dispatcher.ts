@@ -4,10 +4,10 @@
 // ---------------------------------------------------------------------------
 
 import { SQSClient, SendMessageCommand } from "@aws-sdk/client-sqs";
-import { randomUUID } from "node:crypto";
 import { getRegistryById } from "../../embedding/cluster-registry.js";
 import { ok, err, notFoundError } from "../../errors.js";
 import type { NotFoundError, Result } from "../../errors.js";
+import type { Logger } from "../../logger.js";
 import { SQS_MESSAGE_TYPES } from "../../types/index.js";
 
 // ---------------------------------------------------------------------------
@@ -42,9 +42,11 @@ const SIGNAL_QUEUE_URL = process.env["SIGNAL_QUEUE_URL"] ?? "";
 
 export class ReindexDispatcher {
   private readonly sqs: SQSClient;
+  private readonly logger: Logger;
 
-  constructor(opts?: { sqs?: SQSClient }) {
-    this.sqs = opts?.sqs ?? new SQSClient({});
+  constructor(opts: { sqs?: SQSClient; logger: Logger }) {
+    this.sqs = opts.sqs ?? new SQSClient({});
+    this.logger = opts.logger;
   }
 
   async dispatch(targetRegistryId: string, segmentCount = 32): Promise<Result<ReindexJob, NotFoundError>> {
@@ -54,7 +56,7 @@ export class ReindexDispatcher {
     }
 
     const modelId = cluster.modelId;
-    const jobId = randomUUID();
+    const jobId = this.logger.getInvocationId();
     const startedAt = new Date().toISOString();
 
     const sendPromises: Promise<unknown>[] = [];

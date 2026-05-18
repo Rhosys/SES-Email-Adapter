@@ -6,6 +6,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { mockClient } from "aws-sdk-client-mock";
 import { SQSClient, SendMessageCommand } from "@aws-sdk/client-sqs";
 import { ReindexDispatcher } from "../../../src/jobs/reindex/reindex-dispatcher.js";
+import { createMockLogger } from "../../helpers/mock-logger.js";
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -23,7 +24,7 @@ describe("ReindexDispatcher", () => {
   beforeEach(() => {
     sqsMock.reset();
     sqsMock.on(SendMessageCommand).resolves({});
-    dispatcher = new ReindexDispatcher({ sqs: sqsMock as unknown as SQSClient });
+    dispatcher = new ReindexDispatcher({ sqs: sqsMock as unknown as SQSClient, logger: createMockLogger() });
   });
 
   describe("dispatch", () => {
