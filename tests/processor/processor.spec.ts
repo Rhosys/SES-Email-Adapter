@@ -153,7 +153,7 @@ function makeArcMatcher(): ArcMatcher {
 }
 
 function makeRuleEvaluator(logger: MockLogger): RuleEvaluator {
-  const mockUserCodeExecutor: UserCodeExecutorClient = { invoke: vi.fn(), validateAst: vi.fn() };
+  const mockUserCodeExecutor: UserCodeExecutorClient = { invoke: vi.fn(), validateAst: vi.fn(), validateAstBatch: vi.fn() };
   const mockAnnotationStore = { annotateRuleError: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) };
   return new JsonLogicRuleEvaluator(logger, mockUserCodeExecutor, mockAnnotationStore);
 }

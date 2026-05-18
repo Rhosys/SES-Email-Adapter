@@ -257,7 +257,7 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
     }
     const failed = response.results.find(r => !r.valid);
     if (failed && !failed.valid) {
-      return { valid: false, name: failed.name, error: failed.error, location: failed.location };
+      return { valid: false, name: failed.name, error: failed.error, ...(failed.location ? { location: failed.location } : {}) };
     }
     return { valid: true };
   }

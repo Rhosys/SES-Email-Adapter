@@ -337,7 +337,7 @@ export class SignalProcessor {
   constructor(opts: SignalProcessorOptions) {
     this.store = opts.store;
     this.contentSanitizer = opts.contentSanitizer;
-    this.userCodeExecutor = opts.userCodeExecutor ?? { invoke: () => Promise.resolve({ success: true, purpose: "template_function", result: "" } as const), validateAst: () => Promise.resolve({ success: true, purpose: "validate_ast", result: { valid: true } } as const) };
+    this.userCodeExecutor = opts.userCodeExecutor ?? { invoke: () => Promise.resolve({ success: true, purpose: "template_function", result: "" } as const), validateAst: () => Promise.resolve({ success: true, purpose: "validate_ast", result: { valid: true } } as const), validateAstBatch: () => Promise.resolve({ success: true, purpose: "validate_ast_batch", results: [] } as const) };
     this.classifier = opts.classifier;
     this.embeddingGenerator = opts.embeddingGenerator;
     this.auroraWriter = opts.auroraWriter;

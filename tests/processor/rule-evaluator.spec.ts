@@ -81,7 +81,7 @@ describe("JsonLogicRuleEvaluator — JS condition path", () => {
 
   beforeEach(() => {
     mockLogger = createMockLogger();
-    mockExecutor = { invoke: vi.fn(), validateAst: vi.fn() };
+    mockExecutor = { invoke: vi.fn(), validateAst: vi.fn(), validateAstBatch: vi.fn() };
     mockStore = { annotateRuleError: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) };
     evaluator = new JsonLogicRuleEvaluator(mockLogger, mockExecutor, mockStore);
   });
