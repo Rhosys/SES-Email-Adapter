@@ -832,10 +832,10 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
     const body = await zParse(CreateRuleRequest, c.req.raw);
     const effectiveConditionType = body.conditionType ?? "json_logic";
     if (effectiveConditionType === "js") {
-      if (!body.code || body.code.trim().length === 0) {
-        return err(c, 400, "code field is required when conditionType is 'js'", "MISSING_CODE");
+      if (!body.condition || body.condition.trim().length === 0) {
+        return err(c, 400, "condition field is required when conditionType is 'js'", "MISSING_CODE");
       }
-      const astResult = await validateCodeAst(body.code);
+      const astResult = await validateCodeAst(body.condition);
       if (!astResult.valid) {
         return err(c, 400, astResult.error, "INVALID_CODE", astResult.location ? { location: astResult.location } : undefined);
       }
@@ -852,7 +852,7 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
       const { userId } = c.get("auth");
       const auditResult = await store.saveAuditEvent({
         accountId, userId, action: "created", resourceType: "rule", resourceId: "",
-        before: null, after: { conditionType: "js", code: body.code },
+        before: null, after: { conditionType: "js", condition: body.condition },
       });
       if (auditResult.isErr()) {
         logger.warn("Audit write failed for rule creation, proceeding with resource write", { code: "api.audit.rule_create_failed", accountId, error: auditResult.error });
@@ -872,19 +872,19 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
     const body = await zParse(UpdateRuleRequest, c.req.raw);
     const effectiveConditionType = body.conditionType ?? rule.conditionType ?? "json_logic";
     if (effectiveConditionType === "js") {
-      // If code is being provided, validate it
-      if (body.code !== undefined) {
-        if (!body.code || body.code.trim().length === 0) {
-          return err(c, 400, "code field is required when conditionType is 'js'", "MISSING_CODE");
+      // If condition is being provided, validate it as JS
+      if (body.condition !== undefined) {
+        if (!body.condition || body.condition.trim().length === 0) {
+          return err(c, 400, "condition field is required when conditionType is 'js'", "MISSING_CODE");
         }
-        const astResult = await validateCodeAst(body.code);
+        const astResult = await validateCodeAst(body.condition);
         if (!astResult.valid) {
           return err(c, 400, astResult.error, "INVALID_CODE", astResult.location ? { location: astResult.location } : undefined);
         }
       }
-      // If switching to "js" conditionType without providing code, require existing code on the rule
-      if (body.conditionType === "js" && body.code === undefined && !rule.code) {
-        return err(c, 400, "code field is required when conditionType is 'js'", "MISSING_CODE");
+      // If switching to "js" conditionType without providing condition, require existing condition on the rule
+      if (body.conditionType === "js" && body.condition === undefined && !rule.condition) {
+        return err(c, 400, "condition field is required when conditionType is 'js'", "MISSING_CODE");
       }
     } else {
       if (body.condition) {
@@ -896,18 +896,18 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
       const forwardError = await validateForwardTargets(accountId, body.actions as Rule["actions"], store);
       if (forwardError) return err(c, 400, forwardError, "UNVERIFIED_FORWARD_TARGET");
     }
-    // Clear lastError when code is updated on a JS rule
+    // Clear lastError when condition is updated on a JS rule
     const updateData: Parameters<typeof store.updateRule>[2] = { ...body } as Parameters<typeof store.updateRule>[2];
-    if (effectiveConditionType === "js" && body.code !== undefined) {
+    if (effectiveConditionType === "js" && body.condition !== undefined) {
       (updateData as Record<string, unknown>)["lastError"] = null;
     }
     // Audit: write code change event before persisting (best-effort)
-    if (body.code !== undefined) {
+    if (effectiveConditionType === "js" && body.condition !== undefined) {
       const { userId } = c.get("auth");
       const auditResult = await store.saveAuditEvent({
         accountId, userId, action: "updated", resourceType: "rule", resourceId: rule.id,
-        before: { conditionType: rule.conditionType ?? "json_logic", code: rule.code ?? null },
-        after: { conditionType: effectiveConditionType, code: body.code },
+        before: { conditionType: rule.conditionType ?? "json_logic", condition: rule.condition },
+        after: { conditionType: effectiveConditionType, condition: body.condition },
       });
       if (auditResult.isErr()) {
         logger.warn("Audit write failed for rule update, proceeding with resource write", { code: "api.audit.rule_update_failed", accountId, ruleId: rule.id, error: auditResult.error });
