@@ -287,7 +287,7 @@ async function handlerInner(
           logger.error("Malformed side-effect payload — missing signal or arc. Dropping message.", { code: "handler.sqs.malformed_side_effect", messageId: record.messageId });
           continue;
         }
-        const result = await processor.processSideEffect(payload);
+        const result = await processor.processSideEffect(payload, receiveCount);
         failed = result.isErr();
       } else if (messageType === MSG_TYPE_DRAFT_SEND) {
         const payload = body as DraftSendPayload;
