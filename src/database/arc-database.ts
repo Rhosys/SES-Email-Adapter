@@ -24,7 +24,7 @@ const rdsData = new RDSDataClient({});
 // ---------------------------------------------------------------------------
 
 const arcPk  = (accountId: string, id: string) => `ACCT#${accountId}#ARC#${id}`;
-const sigPk  = (accountId: string, id: string) => `ACCT#${accountId}#SIG#${id}`;
+const sigPk  = (accountId: string, signalLookupId: string) => `ACCT#${accountId}#SIG#${signalLookupId}`;
 const ITEM_SK = "#";
 const gkeyPk = (accountId: string, key: string) => `GKEY#${accountId}#${key}`;
 
@@ -48,7 +48,7 @@ export class ArcDatabase implements ArcMatcher {
     try {
       const res = await dynamo.send(new GetCommand({
         TableName: SIGNALS_TABLE,
-        Key: { pk: sigPk(accountId, `SES#${sesMessageId}`), sk: ITEM_SK },
+        Key: { pk: sigPk(accountId, `ses-${sesMessageId}`), sk: ITEM_SK },
       }));
       return ok(res.Item ? (res.Item as Signal) : null);
     } catch (e) {
@@ -59,20 +59,19 @@ export class ArcDatabase implements ArcMatcher {
   async saveSignal(signal: Signal): Promise<Result<void, DbError>> {
     let gsi1pk: string;
     if (signal.arcId) {
-      gsi1pk = `ARCSIG#${signal.arcId}`;
+      gsi1pk = `ACCT#${signal.accountId}#ARC#${signal.arcId}`;
     } else if (signal.status === "quarantine_visible" || signal.status === "quarantine_hidden") {
-      gsi1pk = `QUARANTINED#${signal.accountId}`;
+      gsi1pk = `ACCT#${signal.accountId}#QUARANTINED`;
     } else {
-      // block_hidden, block_reject, violate_report — no GSI needed (write-only, never queried by status)
-      gsi1pk = `BLOCKED#${signal.accountId}`;
+      gsi1pk = `ACCT#${signal.accountId}#BLOCKED`;
     }
-    const gsi1sk = `RECV#${signal.receivedAt}#${signal.id}`;
+    const gsi1sk = signal.id;
     try {
       await dynamo.send(new PutCommand({
         TableName: SIGNALS_TABLE,
         Item: {
           ...signal,
-          pk: sigPk(signal.accountId, signal.id),
+          pk: sigPk(signal.accountId, signal.signalLookupId),
           sk: ITEM_SK,
           gsi1pk,
           gsi1sk,
@@ -90,18 +89,6 @@ export class ArcDatabase implements ArcMatcher {
     return ok(signal);
   }
 
-  async getSignal(accountId: string, id: string): Promise<Result<Signal | null, DbError>> {
-    try {
-      const res = await dynamo.send(new GetCommand({
-        TableName: SIGNALS_TABLE,
-        Key: { pk: sigPk(accountId, id), sk: ITEM_SK },
-      }));
-      return ok(res.Item ? (res.Item as Signal) : null);
-    } catch (e) {
-      return err(dbError(e));
-    }
-  }
-
   async listSignals(accountId: string, arcId: string, params: PageParams): Promise<Result<Page<Signal>, DbError>> {
     const limit = Math.min(params.limit ?? 20, 100);
     try {
@@ -109,7 +96,7 @@ export class ArcDatabase implements ArcMatcher {
         TableName: SIGNALS_TABLE,
         IndexName: "gsi1",
         KeyConditionExpression: "gsi1pk = :pk",
-        ExpressionAttributeValues: { ":pk": `ARCSIG#${arcId}` },
+        ExpressionAttributeValues: { ":pk": `ACCT#${accountId}#ARC#${arcId}` },
         ScanIndexForward: false,
         Limit: limit + 1,
         ...(params.cursor ? { ExclusiveStartKey: decodeCursor(params.cursor) } : {}),
@@ -125,7 +112,7 @@ export class ArcDatabase implements ArcMatcher {
 
   async listPreArcSignals(accountId: string, _status: "quarantined", params: PageParams): Promise<Result<Page<Signal>, DbError>> {
     const limit = Math.min(params.limit ?? 20, 100);
-    const gsi1pk = `QUARANTINED#${accountId}`;
+    const gsi1pk = `ACCT#${accountId}#QUARANTINED`;
     try {
       const res = await dynamo.send(new QueryCommand({
         TableName: SIGNALS_TABLE,
@@ -145,16 +132,16 @@ export class ArcDatabase implements ArcMatcher {
     }
   }
 
-  async updateSignalStatus(accountId: string, signalId: string, status: "block_hidden" | "block_reject" | "violate_report"): Promise<Result<Signal, DbError>> {
+  async updateSignalStatus(accountId: string, signalLookupId: string, status: "block_hidden" | "block_reject" | "violate_report"): Promise<Result<Signal, DbError>> {
     try {
       const result = await dynamo.send(new UpdateCommand({
         TableName: SIGNALS_TABLE,
-        Key: { pk: sigPk(accountId, signalId), sk: ITEM_SK },
+        Key: { pk: sigPk(accountId, signalLookupId), sk: ITEM_SK },
         UpdateExpression: "SET #status = :status, gsi1pk = :gsi1pk",
         ExpressionAttributeNames: { "#status": "status" },
         ExpressionAttributeValues: {
           ":status": status,
-          ":gsi1pk": `BLOCKED#${accountId}`,
+          ":gsi1pk": `ACCT#${accountId}#BLOCKED`,
         },
         ReturnValues: "ALL_NEW",
       }));
@@ -164,17 +151,17 @@ export class ArcDatabase implements ArcMatcher {
     }
   }
 
-  async unblockSignal(accountId: string, signalId: string, arcId: string): Promise<Result<void, DbError>> {
+  async unblockSignal(accountId: string, signalLookupId: string, arcId: string): Promise<Result<void, DbError>> {
     try {
       await dynamo.send(new UpdateCommand({
         TableName: SIGNALS_TABLE,
-        Key: { pk: sigPk(accountId, signalId), sk: ITEM_SK },
+        Key: { pk: sigPk(accountId, signalLookupId), sk: ITEM_SK },
         UpdateExpression: "SET arcId = :arcId, #status = :status, gsi1pk = :gsi1pk",
         ExpressionAttributeNames: { "#status": "status" },
         ExpressionAttributeValues: {
           ":arcId": arcId,
           ":status": "active",
-          ":gsi1pk": `ARCSIG#${arcId}`,
+          ":gsi1pk": `ACCT#${accountId}#ARC#${arcId}`,
         },
       }));
       return ok(undefined);
@@ -292,7 +279,7 @@ export class ArcDatabase implements ArcMatcher {
     }
   }
 
-  async updateSignal(accountId: string, id: string, update: Partial<Pick<Signal, "subject" | "textBody" | "from" | "to">>): Promise<Result<Signal, DbError>> {
+  async updateSignal(accountId: string, signalLookupId: string, update: Partial<Pick<Signal, "subject" | "textBody" | "from" | "to">>): Promise<Result<Signal, DbError>> {
     const now = new Date().toISOString();
     const setParts: string[] = ["updatedAt = :now"];
     const exprValues: Record<string, unknown> = { ":now": now };
@@ -306,7 +293,7 @@ export class ArcDatabase implements ArcMatcher {
     try {
       const result = await dynamo.send(new UpdateCommand({
         TableName: SIGNALS_TABLE,
-        Key: { pk: sigPk(accountId, id), sk: ITEM_SK },
+        Key: { pk: sigPk(accountId, signalLookupId), sk: ITEM_SK },
         UpdateExpression: `SET ${setParts.join(", ")}`,
         ExpressionAttributeValues: exprValues,
         ...(Object.keys(exprNames).length ? { ExpressionAttributeNames: exprNames } : {}),
@@ -320,7 +307,7 @@ export class ArcDatabase implements ArcMatcher {
 
   async updateSignalSendStatus(
     accountId: string,
-    signalId: string,
+    signalLookupId: string,
     update: {
       status: "pending_send" | "sent" | "draft";
       sendInitiatedAt?: string | null;
@@ -351,7 +338,7 @@ export class ArcDatabase implements ArcMatcher {
     try {
       const result = await dynamo.send(new UpdateCommand({
         TableName: SIGNALS_TABLE,
-        Key: { pk: sigPk(accountId, signalId), sk: ITEM_SK },
+        Key: { pk: sigPk(accountId, signalLookupId), sk: ITEM_SK },
         UpdateExpression: updateExpr,
         ExpressionAttributeValues: exprValues,
         ExpressionAttributeNames: exprNames,
@@ -363,11 +350,11 @@ export class ArcDatabase implements ArcMatcher {
     }
   }
 
-  async deleteSignal(accountId: string, id: string): Promise<Result<void, DbError>> {
+  async deleteSignal(accountId: string, signalLookupId: string): Promise<Result<void, DbError>> {
     try {
       await dynamo.send(new DeleteCommand({
         TableName: SIGNALS_TABLE,
-        Key: { pk: sigPk(accountId, id), sk: ITEM_SK },
+        Key: { pk: sigPk(accountId, signalLookupId), sk: ITEM_SK },
       }));
       return ok(undefined);
     } catch (e) {
@@ -569,14 +556,14 @@ export class ArcDatabase implements ArcMatcher {
 
   async addEmbeddingToCache(
     accountId: string,
-    signalId: string,
+    signalLookupId: string,
     modelId: string,
     vector: number[],
   ): Promise<Result<void, DbError>> {
     try {
       await dynamo.send(new UpdateCommand({
         TableName: SIGNALS_TABLE,
-        Key: { pk: sigPk(accountId, signalId), sk: ITEM_SK },
+        Key: { pk: sigPk(accountId, signalLookupId), sk: ITEM_SK },
         UpdateExpression: "SET embeddings.#mid = :v",
         ExpressionAttributeNames: { "#mid": modelId },
         ExpressionAttributeValues: { ":v": vector },
@@ -589,7 +576,7 @@ export class ArcDatabase implements ArcMatcher {
 
   async updateSignalRetention(
     accountId: string,
-    signalId: string,
+    signalLookupId: string,
     update: Partial<Pick<Signal, "s3Key" | "retentionDuration">>,
   ): Promise<Result<void, DbError>> {
     const setParts: string[] = [];
@@ -609,7 +596,7 @@ export class ArcDatabase implements ArcMatcher {
     try {
       await dynamo.send(new UpdateCommand({
         TableName: SIGNALS_TABLE,
-        Key: { pk: sigPk(accountId, signalId), sk: ITEM_SK },
+        Key: { pk: sigPk(accountId, signalLookupId), sk: ITEM_SK },
         UpdateExpression: `SET ${setParts.join(", ")}`,
         ExpressionAttributeValues: exprValues,
       }));

@@ -1,8 +1,8 @@
-import { randomUUID } from "crypto";
 import { DeleteCommand, GetCommand, PutCommand, QueryCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { dynamo, ACCOUNTS_TABLE } from "./shared.js";
 import { dbError, notFoundError, ok, err } from "../errors.js";
 import type { Result, DbError, NotFoundError } from "../errors.js";
+import { generateId } from "../utils/id.js";
 import type { Account, View, Label, Rule, RuleStatus, Domain, Alias, AliasSender, SenderPolicy, AccountFilteringConfig, VerifiedForwardingAddress, EmailTemplate, WsConnection } from "../types/index.js";
 import type { StatsCategory } from "../types/index.js";
 import type { CreateViewRequest, UpdateViewRequest, CreateLabelRequest, UpdateLabelRequest, CreateRuleRequest, UpdateRuleRequest } from "../api/app.js";
@@ -320,7 +320,7 @@ export class AccountDatabase {
 
     const now = new Date().toISOString();
     const view: View = {
-      id: randomUUID(),
+      id: generateId("view-"),
       accountId,
       name: data.name,
       ...(data.workflow !== undefined ? { workflow: data.workflow } : {}),
@@ -421,7 +421,7 @@ export class AccountDatabase {
   async createLabel(accountId: string, data: CreateLabelRequest): Promise<Result<Label, DbError>> {
     const now = new Date().toISOString();
     const label: Label = {
-      id: randomUUID(),
+      id: data.name,
       accountId,
       name: data.name,
       ...(data.color !== undefined ? { color: data.color } : {}),
@@ -429,7 +429,7 @@ export class AccountDatabase {
       createdAt: now,
     };
     try {
-      await dynamo.send(new PutCommand({ TableName: ACCOUNTS_TABLE, Item: { ...label, pk: pk(accountId), sk: `LABEL#${label.id}` } }));
+      await dynamo.send(new PutCommand({ TableName: ACCOUNTS_TABLE, Item: { ...label, pk: pk(accountId), sk: `LABEL#${label.name}` } }));
       return ok(label);
     } catch (e) {
       return err(dbError(e));
@@ -439,9 +439,8 @@ export class AccountDatabase {
   async updateLabel(accountId: string, id: string, data: UpdateLabelRequest): Promise<Result<Label, DbError>> {
     const setParts: string[] = [];
     const exprValues: Record<string, unknown> = {};
-    const exprNames: Record<string, string> = {};
 
-    if (data.name !== undefined) { setParts.push("#name = :name"); exprValues[":name"] = data.name; exprNames["#name"] = "name"; }
+    // Label names are immutable (name is the key) — only color and icon can be updated
     if (data.color !== undefined) { setParts.push("color = :color"); exprValues[":color"] = data.color; }
     if (data.icon !== undefined) { setParts.push("icon = :icon"); exprValues[":icon"] = data.icon; }
 
@@ -463,7 +462,6 @@ export class AccountDatabase {
         Key: { pk: pk(accountId), sk: `LABEL#${id}` },
         UpdateExpression: `SET ${setParts.join(", ")}`,
         ExpressionAttributeValues: exprValues,
-        ...(Object.keys(exprNames).length ? { ExpressionAttributeNames: exprNames } : {}),
         ReturnValues: "ALL_NEW",
       }));
       return ok(res.Attributes as unknown as Label);
@@ -521,7 +519,7 @@ export class AccountDatabase {
     const userRules = allRules.filter((r) => r.priorityOrder >= 100);
     const now = new Date().toISOString();
     const rule: Rule = {
-      id: randomUUID(),
+      id: generateId("rule-"),
       accountId,
       name: data.name,
       condition: data.condition ?? "",
