@@ -3,8 +3,6 @@
 ## Processing & Architecture
 
 - [ ] **Validate auto-reply target addresses** — auto-reply sends to the inbound signal's `from` (or `reply-to`). A spammer can pass DKIM+DMARC legitimately (they own their domain) but set `reply-to: victim@example.com`. The auto-reply then spams the victim. Gate auto-reply on: (1) the `reply-to` address matches the `from` domain, or (2) the target address is in the account's approved senders list, or (3) the signal's spam score is below threshold. This is separate from the DKIM/DMARC block — those catch forged senders, this catches legitimate senders weaponising reply-to.
-- [ ] **Rules engine: conditionType + dynamic actions** — add a `conditionType` discriminator to the Rule schema (`"json_logic" | "js"`). Change condition evaluation to return an object or null (instead of boolean). The returned object may include an `actions` array that maps to RuleAction types, allowing conditions to dynamically decide actions rather than relying solely on the static `actions` field. Merge condition-returned actions with the rule's static actions during outcome derivation.
-- [ ] **Forward/auto-reply should force retry on transient failure** — forward is currently fire-and-forget. If SES returns a transient error, the side-effect is lost. Forward should return a force-retry error so the SQS message is redelivered. (Auto-reply doesn't need retry — the draft fallback is the durable artifact.)
 - [ ] **Auth signal real-time push to clients** — when a signal with `workflow: "auth"` is processed and contains `workflowData.code`, push the OTP payload `{ code, expiresInMinutes, originDomain, signalId }` to connected clients immediately via: (1) WebSocket to the extension/site (existing WS infrastructure), (2) Web Push notification to the extension's service worker, (3) FCM push to mobile app (future). The notifier already fires per-arc — add an `auth`-workflow branch that sends the structured OTP payload instead of a generic notification. Must include `originDomain` so clients can match the code to the correct tab/app.
 - [ ] **Review all locations where we might want to send emails to users** — domain health alerts, quarantine notifications, etc. Define what the notification strategy actually is (Web Push? In-app? Email digest?) before implementing any of them. Currently all email sending to users is removed — only WebSocket push for auth OTPs remains.
   - [ ] **Team invite email via SES** — the invite endpoint currently logs TRACK at `invite.email_pending_implementation` with the invite URL. Replace with an actual SES send once email templates and sender identity are decided.
@@ -12,8 +10,8 @@
 - [ ] **UI: render calendar cards from scheduling workflow signal directly** — the `buildCalendarSignal` synthetic signal was removed (it was a redundant copy with no new data). The UI should render calendar entry cards for any signal with `workflow: "scheduling"` using the `workflowData` fields (title, start/end time, location, etc.) already present on the email signal.
 - [ ] **ClamAV attachment scanning on S3** — scan email attachments for malware after saving to S3. Tag objects with `scan-status: clean|infected|pending`. Frontend only offers download for `clean` objects; `infected` get a warning badge and no download link. Use ClamAV Lambda layer or bucketAV. Definitions must auto-update.
 - [ ] **JMAP support (RFC 8620 + RFC 8621)** — expose the inbox as a standards-compliant JMAP server so any JMAP client (Apple Mail, Thunderbird, Mimestream) can connect directly. Requires: JMAP Session resource at `/.well-known/jmap`, Core/echo, Email/get, Email/query, Email/changes, Mailbox/get, Thread/get. Push notifications via EventSource (RFC 8620 §7). Outbound sending via EmailSubmission/set gated on Tier 2 sender setup. This is a separate API surface from the Hono REST API — likely its own Lambda or a new route prefix.
-- [ ] **Prefixed IDs for all entities** — see `.kiro/specs/prefixed-entity-ids/` for full spec. UUIDv7 → flickrBase58 → 3 check chars → prefix. Includes signal ID decoupling (`sgn-` external ID, `ses-{messageId}` as table PK for dedup), GSI tenant isolation (`ACCT#` prefix on all GSI PKs), and `signalLookupId` concept.
-- [x] **Pass callerInvocationId to SQS and Step Functions** — when dispatching SQS messages, add `callerInvocationId: { DataType: 'String', StringValue: logger.invocationId || '<NULL>' }` as a message attribute. When starting Step Function executions, include `callerInvocationId: logger.invocationId` in the input JSON. This enables tracing a request across async boundaries.
+- [ ] **Revalidate embed-text uses HTML body first, not text body** — The current `buildEmbedText` sanitizes `rawTextBody`. But users see the HTML body in the UI. If we classify/embed based on the text body but display the HTML body, a phishing email could have innocent text body content while the HTML body contains malicious links/content that the user actually sees. The embed text builder should prefer the HTML body (stripped of tags) as the source of truth for classification and embedding, falling back to text body only when HTML is absent. This is a security-critical change.
+- [ ] **Image handling strategy for email signals** — Decide how to handle images in emails: (a) auto-download and cache images at signal creation time (privacy risk: sender knows you opened the email via tracking pixels), (b) proxy images through our server on-demand (hides user IP but still loads content), (c) block all remote images by default with a user toggle to load (safest, Gmail-style), (d) strip tracking pixels but allow content images. Also decide: should we store image thumbnails for the arc list preview? Should we scan images for phishing indicators?
 
 
 ---
@@ -41,9 +39,7 @@ Compared the frontend's expected API surface against the actual backend implemen
 
 ### ❌ Backend TODOs (from contract comparison)
 
-- [ ] **Template `functions` field** — add `functions: TemplateFunction[]` to `EmailTemplate` schema. Each function is `{ name: string, code: string }` — an arrow expression `(signal, arc) => string` executed in sandboxed VM. Validate `name` is valid JS identifier. On render: run each function, collect into `fn.*` namespace, Handlebars pass over subject+body with `{ sender: { name, address }, fn }`.
 - [ ] **Billing endpoints** — `GET /accounts/:id/billing` → `BillingInfo`, `POST /accounts/:id/billing/checkout-session` → Stripe Checkout URL, `POST /accounts/:id/billing/portal-session` → Stripe Portal URL. Requires Stripe integration.
-- [ ] **Rule `code` field** — add `code?: string` to Rule schema. Validate/sandbox server-side (parse to AST, reject unsafe nodes). Execute in isolated VM context, not raw `eval`.
 
 ---
 
@@ -255,13 +251,6 @@ Global full-text search on arc summaries + workflow.
 - Results show arc rows identical to inbox (workflow icon, summary, sender, date, labels)
 - Filter chips alongside results: by workflow, by label, by date range
 - No results state with suggestion to check spelling or broaden filters
-
-### WebSocket WebPush
-The extension recommends: Web Push — as it doesn't require a persistent connection and matches how the mobile app will receive OTP notifications. It suggests that the backend notifier already fires per-arc; so it is planning on adding a `pushNotify(accountId, arc, signal)` branch for `auth` workflow that sends a Web Push payload containing `{ code, expiresInMinutes, originDomain }`.
-
-### JS Function Based Rules
-
-Store the function text in the rule, limit it to 10KB in size, create a new dynamoDB audit table to keep track of all function changes as versions. At this point it should also keep track of all rule changes, account management changes, basically all configuration changes should be saved in this way. We can write to the audit table first and then write to actual resource (DO NOT USE A DYNAMODB TRANSACTION)
 
 ### Settings — Account
 
