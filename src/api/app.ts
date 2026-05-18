@@ -13,7 +13,8 @@ import type { Logger } from "../logger.js";
 import { deriveGroupingKey } from "../processor/processor.js";
 import { zParse } from "./validate.js";
 import { validateRuleCondition } from "./validate-rule-condition.js";
-import { validateCodeAst } from "./ast-validator.js";
+import type { AstValidationResult } from "../isolated/ast-validator.js";
+import type { UserCodeExecutorClient } from "../processor/user-code-client.js";
 import { parseStatsRow } from "../database/stats-writer.js";
 import { isValidEmail } from "../email/validate-email.js";
 import type { DraftSendDispatcher } from "../processor/draft-send-dispatcher.js";
@@ -202,6 +203,7 @@ interface AppDeps {
   draftSendDispatcher?: DraftSendDispatcher;
   accountCreationStarter?: { start(accountId: string, email: string): Promise<void> };
   appBaseUrl?: string;
+  astValidator?: UserCodeExecutorClient;
 }
 
 type AppEnv = { Variables: { auth: AuthContext; authorizationVerified?: boolean } };
@@ -228,8 +230,37 @@ function generateAccountId(): string {
   return `acc-${rawId}${checkBits}`;
 }
 
-export function createApp({ store, auth, access, logger, verificationMailer, jobDispatcher, draftSendDispatcher, accountCreationStarter, appBaseUrl }: AppDeps) {
+export function createApp({ store, auth, access, logger, verificationMailer, jobDispatcher, draftSendDispatcher, accountCreationStarter, appBaseUrl, astValidator }: AppDeps) {
   const app = new OpenAPIHono<AppEnv>().basePath('/api');
+
+  // Helper: validate code AST via the isolated Lambda
+  async function validateCodeAst(code: string): Promise<AstValidationResult> {
+    if (!astValidator) {
+      // Fallback should never happen in production — fail closed
+      return { valid: false, error: "AST validator not configured" };
+    }
+    const response = await astValidator.validateAst(code);
+    if (!response.success) {
+      return { valid: false, error: response.error.message };
+    }
+    return response.result;
+  }
+
+  // Helper: validate multiple template functions in a single Lambda invocation
+  async function validateFunctionsAst(functions: Array<{ name: string; code: string }>): Promise<{ valid: true } | { valid: false; name: string; error: string; location?: { line: number; column: number } }> {
+    if (!astValidator) {
+      return { valid: false, name: functions[0]?.name ?? "", error: "AST validator not configured" };
+    }
+    const response = await astValidator.validateAstBatch(functions);
+    if (!response.success) {
+      return { valid: false, name: functions[0]?.name ?? "", error: response.error.message };
+    }
+    const failed = response.results.find(r => !r.valid);
+    if (failed && !failed.valid) {
+      return { valid: false, name: failed.name, error: failed.error, location: failed.location };
+    }
+    return { valid: true };
+  }
 
   app.doc("/openapi.json", {
     openapi: "3.1.0",
@@ -801,7 +832,7 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
       if (!body.code || body.code.trim().length === 0) {
         return err(c, 400, "code field is required when conditionType is 'js'", "MISSING_CODE");
       }
-      const astResult = validateCodeAst(body.code);
+      const astResult = await validateCodeAst(body.code);
       if (!astResult.valid) {
         return err(c, 400, astResult.error, "INVALID_CODE", astResult.location ? { location: astResult.location } : undefined);
       }
@@ -843,7 +874,7 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
         if (!body.code || body.code.trim().length === 0) {
           return err(c, 400, "code field is required when conditionType is 'js'", "MISSING_CODE");
         }
-        const astResult = validateCodeAst(body.code);
+        const astResult = await validateCodeAst(body.code);
         if (!astResult.valid) {
           return err(c, 400, astResult.error, "INVALID_CODE", astResult.location ? { location: astResult.location } : undefined);
         }
@@ -1189,11 +1220,9 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
     const { accountId } = c.get("auth");
     const body = await zParse(CreateTemplateRequest, c.req.raw);
     if (body.functions) {
-      for (const fn of body.functions) {
-        const astResult = validateCodeAst(fn.code);
-        if (!astResult.valid) {
-          return err(c, 400, `Invalid code in function '${fn.name}': ${astResult.error}`, "INVALID_CODE", astResult.location ? { location: astResult.location } : undefined);
-        }
+      const astResult = await validateFunctionsAst(body.functions);
+      if (!astResult.valid) {
+        return err(c, 400, `Invalid code in function '${astResult.name}': ${astResult.error}`, "INVALID_CODE", astResult.location ? { location: astResult.location } : undefined);
       }
     }
     const now = new Date().toISOString();
@@ -1228,11 +1257,9 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
     const { accountId } = c.get("auth");
     const body = await zParse(UpdateTemplateRequest, c.req.raw);
     if (body.functions) {
-      for (const fn of body.functions) {
-        const astResult = validateCodeAst(fn.code);
-        if (!astResult.valid) {
-          return err(c, 400, `Invalid code in function '${fn.name}': ${astResult.error}`, "INVALID_CODE", astResult.location ? { location: astResult.location } : undefined);
-        }
+      const astResult = await validateFunctionsAst(body.functions);
+      if (!astResult.valid) {
+        return err(c, 400, `Invalid code in function '${astResult.name}': ${astResult.error}`, "INVALID_CODE", astResult.location ? { location: astResult.location } : undefined);
       }
     }
     const existingResult = await store.getTemplate(accountId, c.req.param("id"));
@@ -1259,11 +1286,9 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
     const { accountId } = c.get("auth");
     const body = await zParse(ReplaceTemplateRequest, c.req.raw);
     if (body.functions) {
-      for (const fn of body.functions) {
-        const astResult = validateCodeAst(fn.code);
-        if (!astResult.valid) {
-          return err(c, 400, `Invalid code in function '${fn.name}': ${astResult.error}`, "INVALID_CODE", astResult.location ? { location: astResult.location } : undefined);
-        }
+      const astResult = await validateFunctionsAst(body.functions);
+      if (!astResult.valid) {
+        return err(c, 400, `Invalid code in function '${astResult.name}': ${astResult.error}`, "INVALID_CODE", astResult.location ? { location: astResult.location } : undefined);
       }
     }
     const existingResult = await store.getTemplate(accountId, c.req.param("id"));

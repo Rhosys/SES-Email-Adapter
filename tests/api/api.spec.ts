@@ -6,6 +6,7 @@ import { ok, err } from "neverthrow";
 import { createMockLogger } from "../helpers/mock-logger.js";
 import { authError } from "../../src/errors.js";
 import type { DraftSendDispatcher } from "../../src/processor/draft-send-dispatcher.js";
+import type { UserCodeExecutorClient } from "../../src/processor/user-code-client.js";
 
 vi.mock("../../src/dns/mx-validator.js", () => ({
   validateRecipientMx: vi.fn().mockResolvedValue({ valid: true, invalidDomains: [] }),
@@ -259,6 +260,7 @@ describe("API", () => {
   let access: AccessService;
   let verificationMailer: VerificationMailer;
   let draftSendDispatcher: DraftSendDispatcher;
+  let astValidator: UserCodeExecutorClient;
   let app: ReturnType<typeof createApp>;
 
   beforeEach(() => {
@@ -268,7 +270,12 @@ describe("API", () => {
     access = makeAccess();
     verificationMailer = { sendForwardVerification: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) };
     draftSendDispatcher = { dispatch: vi.fn().mockResolvedValue(ok(undefined)) } as unknown as DraftSendDispatcher;
-    app = createApp({ store, auth, access, logger: createMockLogger(), verificationMailer, draftSendDispatcher });
+    astValidator = {
+      invoke: vi.fn().mockResolvedValue({ success: true, purpose: "rule_condition", result: true }),
+      validateAst: vi.fn().mockResolvedValue({ success: true, purpose: "validate_ast", result: { valid: true } }),
+      validateAstBatch: vi.fn().mockResolvedValue({ success: true, purpose: "validate_ast_batch", results: [] }),
+    };
+    app = createApp({ store, auth, access, logger: createMockLogger(), verificationMailer, draftSendDispatcher, astValidator });
   });
 
   // -------------------------------------------------------------------------
@@ -1332,6 +1339,7 @@ describe("API", () => {
     });
 
     it("returns 400 with error location when code contains eval call", async () => {
+      vi.mocked(astValidator.validateAst).mockResolvedValueOnce({ success: true, purpose: "validate_ast", result: { valid: false, error: "eval() calls are not allowed", location: { line: 1, column: 13 } } });
       const res = await req(app, "POST", `${A}/rules`, {
         body: { name: "Eval rule", conditionType: "js", code: "(signal) => eval('1+1')", actions: [{ type: "archive" }] },
       });
@@ -1399,6 +1407,7 @@ describe("API", () => {
     });
 
     it("returns 400 when function code has invalid AST (eval call)", async () => {
+      vi.mocked(astValidator.validateAstBatch).mockResolvedValueOnce({ success: true, purpose: "validate_ast_batch", results: [{ name: "bad", valid: false, error: "eval() calls are not allowed", location: { line: 1, column: 13 } }] });
       const res = await req(app, "POST", `${A}/templates`, {
         body: { name: "Evil", subject: "Hi", body: "Hello", functions: [{ name: "bad", code: "(signal) => eval('x')" }] },
       });

@@ -1,4 +1,6 @@
 import { execute } from "./js-container.js";
+import { validateCodeAst } from "./ast-validator.js";
+import type { AstValidationResult } from "./ast-validator.js";
 
 // ---------------------------------------------------------------------------
 // Request / Response types
@@ -6,8 +8,9 @@ import { execute } from "./js-container.js";
 
 interface UserCodeRequest {
   tenantId: string;
-  purpose: "rule_condition" | "template_function";
+  purpose: "rule_condition" | "template_function" | "validate_ast" | "validate_ast_batch";
   functionCode: string;
+  functions?: Array<{ name: string; code: string }>;
   executionContext: {
     signal: unknown;
     arc: unknown;
@@ -26,6 +29,18 @@ interface TemplateParameterResult {
   result: string | null;
 }
 
+interface AstValidationResponse {
+  success: true;
+  purpose: "validate_ast";
+  result: AstValidationResult;
+}
+
+interface AstBatchValidationResponse {
+  success: true;
+  purpose: "validate_ast_batch";
+  results: Array<{ name: string } & AstValidationResult>;
+}
+
 interface UserCodeError {
   success: false;
   error: {
@@ -34,14 +49,14 @@ interface UserCodeError {
   };
 }
 
-type UserCodeResponse = RuleExecutionResult | TemplateParameterResult | UserCodeError;
+type UserCodeResponse = RuleExecutionResult | TemplateParameterResult | AstValidationResponse | AstBatchValidationResponse | UserCodeError;
 
 // ---------------------------------------------------------------------------
 // Validation
 // ---------------------------------------------------------------------------
 
 const MAX_CODE_LENGTH = 10_000;
-const VALID_PURPOSES = ["rule_condition", "template_function"] as const;
+const VALID_PURPOSES = ["rule_condition", "template_function", "validate_ast", "validate_ast_batch"] as const;
 
 function validate(event: unknown): UserCodeRequest | UserCodeError {
   if (event == null || typeof event !== "object") {
@@ -59,11 +74,35 @@ function validate(event: unknown): UserCodeRequest | UserCodeError {
   }
 
   if (typeof payload.functionCode !== "string") {
-    return invalidInput("functionCode is required and must be a string");
+    if (payload.purpose === "validate_ast_batch") {
+      // validate_ast_batch uses functions array, not functionCode
+    } else {
+      return invalidInput("functionCode is required and must be a string");
+    }
   }
 
-  if (payload.functionCode.length > MAX_CODE_LENGTH) {
+  if (typeof payload.functionCode === "string" && payload.functionCode.length > MAX_CODE_LENGTH) {
     return invalidInput(`functionCode exceeds maximum length of ${MAX_CODE_LENGTH} characters`);
+  }
+
+  if (payload.purpose === "validate_ast") {
+    // validate_ast doesn't need executionContext
+    return payload as unknown as UserCodeRequest;
+  }
+
+  if (payload.purpose === "validate_ast_batch") {
+    // validate_ast_batch needs a functions array instead of functionCode
+    if (!Array.isArray(payload.functions)) {
+      return invalidInput("functions is required and must be an array for validate_ast_batch");
+    }
+    for (let i = 0; i < payload.functions.length; i++) {
+      const fn = (payload.functions as unknown[])[i] as Record<string, unknown> | null;
+      if (!fn || typeof fn !== "object") return invalidInput(`functions[${i}] must be an object`);
+      if (typeof fn.name !== "string" || fn.name.length === 0) return invalidInput(`functions[${i}].name is required`);
+      if (typeof fn.code !== "string") return invalidInput(`functions[${i}].code is required`);
+      if (fn.code.length > MAX_CODE_LENGTH) return invalidInput(`functions[${i}].code exceeds maximum length of ${MAX_CODE_LENGTH} characters`);
+    }
+    return payload as unknown as UserCodeRequest;
   }
 
   if (payload.executionContext == null || typeof payload.executionContext !== "object") {
@@ -107,6 +146,31 @@ export async function handler(event: unknown): Promise<UserCodeResponse> {
   }
 
   const { purpose, functionCode, executionContext } = validated;
+
+  // validate_ast: run the AST validator and return the result
+  if (purpose === "validate_ast") {
+    try {
+      const result = validateCodeAst(functionCode);
+      return { success: true, purpose: "validate_ast", result };
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      return { success: false, error: { message, type: "runtime_error" } };
+    }
+  }
+
+  // validate_ast_batch: validate multiple functions in one invocation
+  if (purpose === "validate_ast_batch") {
+    try {
+      const results = validated.functions!.map(fn => {
+        const result = validateCodeAst(fn.code);
+        return { name: fn.name, ...result };
+      });
+      return { success: true, purpose: "validate_ast_batch", results };
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      return { success: false, error: { message, type: "runtime_error" } };
+    }
+  }
 
   const result = await execute(functionCode, {
     signal: executionContext.signal,
