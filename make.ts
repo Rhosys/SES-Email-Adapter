@@ -76,10 +76,13 @@ program
     const esbuildDefaults = {
       bundle: true,
       minify: true,
+      sourcemap: true,
       platform: 'node' as const,
       target: 'node24',
       format: 'esm' as const,
       external: ['@aws-sdk/*', 'pg-native'],
+      // CJS deps that call require() for Node built-ins need a real require in ESM context.
+      banner: { js: "import { createRequire } from 'module'; const require = createRequire(import.meta.url);" },
     };
 
     console.log(`Building ${functionName} v${version}...`);
