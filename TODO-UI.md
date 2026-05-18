@@ -184,3 +184,14 @@ Validations from the backend that could run client-side for instant feedback.
 - The **extension** is narrowly scoped to alias generation — no inbox, no real-time, no notifications, no validation
 - A shared validation package (Zod schemas + acorn AST validator) could serve website, extension, and mobile
 - The mobile app doesn't exist yet — all items are greenfield
+
+---
+
+## Security & Trust — Outbound Validation
+
+- [ ] **Signal detail: show envelope metadata** — Display Return-Path, Reply-To, CC with trust indicators. Show warning if Reply-To domain ≠ From domain. Show warning if user was BCC'd (recipient not in To/CC).
+  - Website · Extension · Mobile
+- [ ] **Manual compose: unapproved recipient warning** — When composing/replying, if any To/CC/BCC domain is not in the alias's approved senders list, prompt user to confirm and offer to add to approved senders.
+  - Website
+- [ ] **Auto-send suppression indicator** — When auto-send is suppressed due to Reply-To domain mismatch, show explanation on the draft signal's compose page with the reason.
+  - Website
