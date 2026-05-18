@@ -44,7 +44,7 @@ function makeBaseStore(): ApiDatabase {
     blockSignal: vi.fn().mockResolvedValue(ok({})),
     saveArc: vi.fn().mockResolvedValue(ok(undefined)),
     findArcByGroupingKey: vi.fn().mockResolvedValue(ok(null)),
-    getSignal: vi.fn().mockResolvedValue(ok(null)),
+    getSignalById: vi.fn().mockResolvedValue(ok(null)),
     updateSignal: vi.fn().mockResolvedValue(ok({})),
     deleteSignal: vi.fn().mockResolvedValue(ok(undefined)),
     listViews: vi.fn().mockResolvedValue(ok([])),
@@ -137,13 +137,13 @@ describe("API route error mapping consistency", () => {
       const store = makeBaseStore();
       switch (type) {
         case "db_error":
-          vi.mocked(store.getSignal).mockResolvedValue(err({ kind: "db_error", cause: new Error("timeout") } satisfies DbError));
+          vi.mocked(store.getSignalById).mockResolvedValue(err({ kind: "db_error", cause: new Error("timeout") } satisfies DbError));
           break;
         case "null_read":
-          vi.mocked(store.getSignal).mockResolvedValue(ok(null));
+          vi.mocked(store.getSignalById).mockResolvedValue(ok(null));
           break;
         case "success":
-          vi.mocked(store.getSignal).mockResolvedValue(ok({
+          vi.mocked(store.getSignalById).mockResolvedValue(ok({
             id: "SES#msg-001", arcId: "arc-001", accountId: TEST_ACCOUNT_ID, source: "email",
             receivedAt: "2024-01-15T10:00:00Z", from: { address: "sender@example.com", name: "Sender" },
             to: [{ address: "user@example.com" }], cc: [], subject: "Test", attachments: [], headers: {},

@@ -44,6 +44,48 @@ export class ArcDatabase implements ArcMatcher {
   // Signals
   // ---------------------------------------------------------------------------
 
+  async getSignalById(accountId: string, signalId: string, arcId?: string): Promise<Result<Signal | null, DbError>> {
+    try {
+      if (arcId) {
+        // Query the specific arc partition with gsi1sk = signalId
+        const res = await dynamo.send(new QueryCommand({
+          TableName: SIGNALS_TABLE,
+          IndexName: "gsi1",
+          KeyConditionExpression: "gsi1pk = :pk AND gsi1sk = :sk",
+          ExpressionAttributeValues: { ":pk": `ACCT#${accountId}#ARC#${arcId}`, ":sk": signalId },
+          Limit: 1,
+        }));
+        return ok(res.Items?.[0] ? (res.Items[0] as Signal) : null);
+      }
+
+      // No arcId — query across all three GSI PK patterns
+      const partitions = [
+        `ACCT#${accountId}#QUARANTINED`,
+        `ACCT#${accountId}#BLOCKED`,
+      ];
+
+      for (const pk of partitions) {
+        const res = await dynamo.send(new QueryCommand({
+          TableName: SIGNALS_TABLE,
+          IndexName: "gsi1",
+          KeyConditionExpression: "gsi1pk = :pk AND gsi1sk = :sk",
+          ExpressionAttributeValues: { ":pk": pk, ":sk": signalId },
+          Limit: 1,
+        }));
+        if (res.Items?.[0]) return ok(res.Items[0] as Signal);
+      }
+
+      // For user/system signals, signalLookupId === id — try direct table get
+      const directRes = await dynamo.send(new GetCommand({
+        TableName: SIGNALS_TABLE,
+        Key: { pk: sigPk(accountId, signalId), sk: ITEM_SK },
+      }));
+      return ok(directRes.Item ? (directRes.Item as Signal) : null);
+    } catch (e) {
+      return err(dbError(e));
+    }
+  }
+
   async getSignalByMessageId(accountId: string, sesMessageId: string): Promise<Result<Signal | null, DbError>> {
     try {
       const res = await dynamo.send(new GetCommand({

@@ -10,6 +10,7 @@ import { createMockLogger } from "./helpers/mock-logger.js";
 function makeSignal(overrides: Partial<Signal> = {}): Signal {
   return {
     id: "USR#signal-001",
+    signalLookupId: "USR#signal-001",
     arcId: "arc-001",
     accountId: "acct-001",
     source: "user",
@@ -37,7 +38,7 @@ function makeSignal(overrides: Partial<Signal> = {}): Signal {
 
 function makeStore(): DraftSendStore {
   return {
-    getSignal: vi.fn().mockResolvedValue(ok(makeSignal())),
+    getSignalById: vi.fn().mockResolvedValue(ok(makeSignal())),
     updateSignalSendStatus: vi.fn().mockResolvedValue(ok(makeSignal({ status: "sent" }))),
     getArc: vi.fn().mockResolvedValue(ok({ id: "arc-001", accountId: "acct-001", status: "active" })),
     updateArcStatus: vi.fn().mockResolvedValue(ok(undefined)),
@@ -70,7 +71,7 @@ describe("DraftSendWorker", () => {
   });
 
   it("discards when signal not found (returns ok)", async () => {
-    vi.mocked(store.getSignal).mockResolvedValueOnce(ok(null));
+    vi.mocked(store.getSignalById).mockResolvedValueOnce(ok(null));
 
     const result = await worker.process(PAYLOAD);
 
@@ -80,7 +81,7 @@ describe("DraftSendWorker", () => {
   });
 
   it("discards when signal status is no longer pending_send", async () => {
-    vi.mocked(store.getSignal).mockResolvedValueOnce(ok(makeSignal({ status: "draft" })));
+    vi.mocked(store.getSignalById).mockResolvedValueOnce(ok(makeSignal({ status: "draft" })));
 
     const result = await worker.process(PAYLOAD);
 
@@ -89,7 +90,7 @@ describe("DraftSendWorker", () => {
   });
 
   it("discards when sendInitiatedAt does not match payload (stale message)", async () => {
-    vi.mocked(store.getSignal).mockResolvedValueOnce(ok(makeSignal({ sendInitiatedAt: "2024-06-01T13:00:00.000Z" })));
+    vi.mocked(store.getSignalById).mockResolvedValueOnce(ok(makeSignal({ sendInitiatedAt: "2024-06-01T13:00:00.000Z" })));
 
     const result = await worker.process(PAYLOAD);
 
@@ -116,7 +117,7 @@ describe("DraftSendWorker", () => {
   });
 
   it("joins multiple recipients in the to field", async () => {
-    vi.mocked(store.getSignal).mockResolvedValueOnce(ok(makeSignal({
+    vi.mocked(store.getSignalById).mockResolvedValueOnce(ok(makeSignal({
       to: [{ address: "a@example.com" }, { address: "b@example.com" }],
     })));
 
@@ -211,7 +212,7 @@ describe("DraftSendWorker", () => {
   });
 
   it("propagates store error when getSignal fails", async () => {
-    vi.mocked(store.getSignal).mockResolvedValueOnce(err(dbError("connection lost")));
+    vi.mocked(store.getSignalById).mockResolvedValueOnce(err(dbError("connection lost")));
 
     const result = await worker.process(PAYLOAD);
 

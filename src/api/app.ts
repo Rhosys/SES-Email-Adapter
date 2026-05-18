@@ -100,7 +100,7 @@ export interface ApiDatabase {
   // Signals
   listSignals(accountId: string, arcId: string, params: PageParams): PromiseLike<Result<Page<Signal>, DbError>>;
   listPreArcSignals(accountId: string, status: "quarantined", params: PageParams): PromiseLike<Result<Page<Signal>, DbError>>;
-  getSignal(accountId: string, id: string): PromiseLike<Result<Signal | null, DbError>>;
+  getSignalById(accountId: string, signalId: string, arcId?: string): PromiseLike<Result<Signal | null, DbError>>;
   createSignal(signal: Signal): PromiseLike<Result<Signal, DbError>>;
   updateSignal(accountId: string, signalLookupId: string, update: Partial<Pick<Signal, "subject" | "textBody" | "from" | "to">>): PromiseLike<Result<Signal, DbError>>;
   updateSignalSendStatus(accountId: string, signalLookupId: string, update: { status: "pending_send" | "sent" | "draft"; sendInitiatedAt?: string | null; sentAt?: string; sesMessageId?: string; sendFailureReason?: string }): PromiseLike<Result<Signal, DbError>>;
@@ -524,7 +524,7 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
     const arc = arcResult.value;
     if (!arc) return err(c, 404, "Arc not found", "ARC_NOT_FOUND");
     if (arc.accountId !== accountId) return err(c, 403, "Forbidden");
-    const signalResult = await store.getSignal(accountId, c.req.param("id"));
+    const signalResult = await store.getSignalById(accountId, c.req.param("id"), c.req.param("arcId"));
     if (signalResult.isErr()) return err(c, 500, "Internal Server Error");
     const signal = signalResult.value;
     if (!signal) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
@@ -563,7 +563,7 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
 
   app.post("/accounts/:accountId/signals/:id/quarantineResponse", authz("signals:write", c => `accounts/${c.req.param("accountId")}/signals/${c.req.param("id")}`), async (c) => {
     const { accountId } = c.get("auth");
-    const signalResult = await store.getSignal(accountId, c.req.param("id"));
+    const signalResult = await store.getSignalById(accountId, c.req.param("id"));
     if (signalResult.isErr()) return err(c, 500, "Internal Server Error");
     const signal = signalResult.value;
     if (!signal) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
@@ -640,7 +640,7 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
 
   app.get("/accounts/:accountId/signals/:id", authz("signals:read", c => `accounts/${c.req.param("accountId")}/signals/${c.req.param("id")}`), async (c) => {
     const { accountId } = c.get("auth");
-    const signalResult = await store.getSignal(accountId, c.req.param("id"));
+    const signalResult = await store.getSignalById(accountId, c.req.param("id"));
     if (signalResult.isErr()) return err(c, 500, "Internal Server Error");
     const signal = signalResult.value;
     if (!signal) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
@@ -650,7 +650,7 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
 
   app.patch("/accounts/:accountId/signals/:id", authz("signals:write", c => `accounts/${c.req.param("accountId")}/signals/${c.req.param("id")}`), async (c) => {
     const { accountId } = c.get("auth");
-    const signalResult = await store.getSignal(accountId, c.req.param("id"));
+    const signalResult = await store.getSignalById(accountId, c.req.param("id"));
     if (signalResult.isErr()) return err(c, 500, "Internal Server Error");
     const signal = signalResult.value;
     if (!signal) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
@@ -687,7 +687,7 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
     if (arc.accountId !== accountId) return err(c, 403, "Forbidden");
 
     // Signal validation
-    const signalResult = await store.getSignal(accountId, c.req.param("id"));
+    const signalResult = await store.getSignalById(accountId, c.req.param("id"), c.req.param("arcId"));
     if (signalResult.isErr()) return err(c, 500, "Internal Server Error");
     const signal = signalResult.value;
     if (!signal) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
@@ -720,7 +720,7 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
 
   app.delete("/accounts/:accountId/signals/:id", authz("signals:write", c => `accounts/${c.req.param("accountId")}/signals/${c.req.param("id")}`), async (c) => {
     const { accountId } = c.get("auth");
-    const signalResult = await store.getSignal(accountId, c.req.param("id"));
+    const signalResult = await store.getSignalById(accountId, c.req.param("id"));
     if (signalResult.isErr()) return err(c, 500, "Internal Server Error");
     const signal = signalResult.value;
     if (!signal) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
