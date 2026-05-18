@@ -197,7 +197,7 @@ const app = createApp({
   access: new AuthressAccessService(),
   logger,
   verificationMailer: sesVerificationMailer,
-  jobDispatcher: new ReindexDispatcher(),
+  jobDispatcher: new ReindexDispatcher({ logger }),
   draftSendDispatcher,
   accountCreationStarter,
   appBaseUrl: APP_BASE_URL,

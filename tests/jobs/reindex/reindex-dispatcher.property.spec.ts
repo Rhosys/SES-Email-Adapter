@@ -13,6 +13,7 @@ import { mockClient } from "aws-sdk-client-mock";
 import { SQSClient, SendMessageCommand } from "@aws-sdk/client-sqs";
 import { ReindexDispatcher } from "../../../src/jobs/reindex/reindex-dispatcher.js";
 import { CLUSTER_REGISTRY } from "../../../src/embedding/cluster-registry.js";
+import { createMockLogger } from "../../helpers/mock-logger.js";
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -37,7 +38,7 @@ describe("Property 10: Reindex dispatcher emits exactly N well-formed segment me
   beforeEach(() => {
     sqsMock.reset();
     sqsMock.on(SendMessageCommand).resolves({});
-    dispatcher = new ReindexDispatcher({ sqs: sqsMock as unknown as SQSClient });
+    dispatcher = new ReindexDispatcher({ sqs: sqsMock as unknown as SQSClient, logger: createMockLogger() });
   });
 
   it.each(cases)("%s", async (_label, { targetRegistryId, segmentCount }) => {
