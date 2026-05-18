@@ -452,6 +452,32 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
     if (!arc) return err(c, 404, "Arc not found", "ARC_NOT_FOUND");
     if (arc.accountId !== accountId) return err(c, 403, "Forbidden");
     const body = await zParse(UpdateArcRequest, c.req.raw);
+
+    // violate_report: block the sender domain and delete the arc
+    if (body.status === "violate_report") {
+      const signalsResult = await store.listSignals(accountId, arc.id, { limit: 1 });
+      if (signalsResult.isErr()) return err(c, 500, "Internal Server Error");
+      const signal = signalsResult.value.items[0];
+      if (signal) {
+        const senderDomain = signal.from.address.includes("@") ? signal.from.address.split("@").pop()! : signal.from.address;
+        const senderETLD1 = getDomain(senderDomain) ?? senderDomain;
+        const saveSenderResult = await store.saveSender(accountId, signal.recipientAddress, senderETLD1, "violate_report");
+        if (saveSenderResult.isErr()) return err(c, 500, "Internal Server Error");
+        logger.track("Arc reported as GDPR violation. Sender domain blocked with violate_report policy and arc deleted.", {
+          code: "api.arc.violate_report",
+          accountId,
+          arcId: arc.id,
+          senderDomain: senderETLD1,
+          recipientAddress: signal.recipientAddress,
+          fromAddress: signal.from.address,
+        });
+      }
+      // Persist as deleted — violate_report is the user intent, deleted is the arc state
+      const updateResult = await store.updateArc(accountId, arc.id, { status: "deleted", lastSignalAt: arc.lastSignalAt });
+      if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
+      return c.json(updateResult.value);
+    }
+
     const updateResult = await store.updateArc(accountId, arc.id, { ...body, lastSignalAt: arc.lastSignalAt });
     if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
     return c.json(updateResult.value);

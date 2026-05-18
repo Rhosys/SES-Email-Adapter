@@ -4,7 +4,7 @@ import { WORKFLOWS } from "../types/index.js";
 // ---- Shared primitives ----
 
 const UnknownSenderPolicy = z.enum(["allow_all", "quarantine_visible", "quarantine_hidden", "block_hidden", "block_reject", "violate_report"]);
-const ArcStatus = z.enum(["active", "archived", "deleted"]);
+const ArcStatus = z.enum(["active", "archived", "deleted", "violate_report"]);
 const ArcUrgency = z.enum(["critical", "high", "normal", "low", "silent"]);
 const Workflow = z.enum(WORKFLOWS);
 const SortField = z.enum(["lastSignalAt", "createdAt"]);
