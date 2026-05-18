@@ -61,7 +61,7 @@ export interface AuthService {
 // Access (Authress RBAC)
 // ---------------------------------------------------------------------------
 
-export type AccountRole = "owner" | "admin" | "member" | "viewer";
+export type AccountRole = "admin" | "member" | "viewer";
 
 export interface AccountUser {
   userId: string;
@@ -390,8 +390,8 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
     }
     if (!account) return err(c, 500, "Internal Server Error");
 
-    // Grant owner role in Authress
-    const accessResult = await access.addUser(account.id, userId, "owner");
+    // Grant admin role in Authress
+    const accessResult = await access.addUser(account.id, userId, "admin");
     if (accessResult.isErr()) {
       logger.error("Failed to create Authress access record for new account. The account exists in DynamoDB but the user won't have permissions until this is resolved.", { code: "api.account_create.authress_failed", userId, accountId: account.id, error: accessResult.error });
     }

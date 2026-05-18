@@ -10,7 +10,7 @@ const Workflow = z.enum(WORKFLOWS);
 const SortField = z.enum(["lastSignalAt", "createdAt"]);
 const SortDirection = z.enum(["asc", "desc"]);
 const NewAddressHandling = z.enum(["auto_allow", "block_until_approved"]);
-const AccountRole = z.enum(["owner", "admin", "member", "viewer"]);
+const AccountRole = z.enum(["admin", "member", "viewer"]);
 const RuleActionType = z.enum([
   "assign_label", "assign_workflow", "archive", "delete", "forward",
   "block_hidden", "block_reject", "quarantine", "quarantine_hidden", "set_urgency", "suppress_notification", "pong", "approve_sender",

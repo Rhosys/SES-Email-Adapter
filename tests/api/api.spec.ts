@@ -967,7 +967,7 @@ describe("API", () => {
   describe("GET /accounts/:accountId/users", () => {
     it("returns list of users in named envelope", async () => {
       const users: AccountUser[] = [
-        { userId: "user-1", role: "owner" },
+        { userId: "user-1", role: "admin" },
         { userId: "user-2", role: "member" },
       ];
       vi.mocked(access.listUsers).mockReturnValueOnce(Promise.resolve(ok(users)));
