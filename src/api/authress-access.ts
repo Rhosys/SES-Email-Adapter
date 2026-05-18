@@ -179,7 +179,7 @@ export class AuthressAccessService implements AccessService {
     if (!existing) {
       await this.client.accessRecords.createRecord({
         recordId: rid,
-        name: `Account ${accountId}`,
+        name: `Email Account: ${accountId}`,
         statements: [{ roles: [roleId], resources: [{ resourceUri }], users: [{ userId }] }],
       });
       return;
