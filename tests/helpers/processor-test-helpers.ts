@@ -32,6 +32,7 @@ export function makeUserCodeExecutor(response?: UserCodeResponse): UserCodeExecu
   const defaultResponse: UserCodeResponse = { success: true, purpose: "rule_condition", result: true };
   return {
     invoke: vi.fn().mockReturnValue(Promise.resolve(response ?? defaultResponse)),
+    validateAst: vi.fn().mockReturnValue(Promise.resolve({ success: true, purpose: "validate_ast", result: { valid: true } })),
   };
 }
 
@@ -51,7 +52,7 @@ export const stubS3Client = {} as never;
 
 /** Default processor options for the new fields */
 export const DEFAULT_PROCESSOR_EXTRAS = {
-  userCodeExecutor: { invoke: vi.fn().mockReturnValue(Promise.resolve({ success: true, purpose: "template_function", result: "mock" })) } as UserCodeExecutorClient,
+  userCodeExecutor: { invoke: vi.fn().mockReturnValue(Promise.resolve({ success: true, purpose: "template_function", result: "mock" })), validateAst: vi.fn().mockReturnValue(Promise.resolve({ success: true, purpose: "validate_ast", result: { valid: true } })) } as UserCodeExecutorClient,
   s3Client: stubS3Client,
   emailBucket: "test-email-bucket",
   contentBucket: "test-content-bucket",

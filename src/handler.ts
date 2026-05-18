@@ -201,6 +201,7 @@ const app = createApp({
   draftSendDispatcher,
   accountCreationStarter,
   appBaseUrl: APP_BASE_URL,
+  astValidator: new LambdaUserCodeExecutor(lambda, USER_CODE_EXECUTOR_ARN),
 });
 
 // ---------------------------------------------------------------------------
