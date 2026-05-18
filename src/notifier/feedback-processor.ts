@@ -1,6 +1,6 @@
 import type { SQSEvent } from "aws-lambda";
-import { randomUUID } from "crypto";
 import type { SesFeedback, Signal, SuppressedAddress } from "../types/index.js";
+import { generateId } from "../utils/id.js";
 import type { ProcessingDatabase } from "../database/processing-database.js";
 import type { AccountDatabase } from "../database/account-database.js";
 import { ok, err, dbError } from "../errors.js";
@@ -116,8 +116,10 @@ export class FeedbackProcessor {
               }));
 
               // Create deliverability signal in the same arc
+              const id = generateId("sgn-");
               const deliverabilitySignal: Signal = {
-                id: `SYS#${randomUUID()}`,
+                id,
+                signalLookupId: id,
                 ...(sentSignal.arcId ? { arcId: sentSignal.arcId } : {}),
                 accountId: sentSignal.accountId,
                 source: "deliverability",
