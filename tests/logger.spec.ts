@@ -135,10 +135,11 @@ describe("logger edge cases", () => {
 
       const output = consoleSpy.mock.calls[0]![0] as Record<string, unknown>;
       expect(output.level).toBe("TRACK");
-      expect(output.trackPoints).toHaveLength(1);
-      expect(output.trackPoints[0].name).toBe("early.point");
+      const trackPoints = output.trackPoints as Array<{ name: string; elapsedMs: number }>;
+      expect(trackPoints).toHaveLength(1);
+      expect(trackPoints[0].name).toBe("early.point");
       // elapsedMs = Date.now() - 0, which is a large positive number (current timestamp in ms)
-      expect(output.trackPoints[0].elapsedMs).toBeGreaterThan(1_000_000_000);
+      expect(trackPoints[0].elapsedMs).toBeGreaterThan(1_000_000_000);
     });
   });
 });
