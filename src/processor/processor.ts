@@ -414,9 +414,19 @@ export class SignalProcessor {
     return ok(undefined);
   }
 
-  async processSideEffect(payload: SideEffectPayload): Promise<Result<void, DbError>> {
-    const { signal, arc } = payload;
+  async processSideEffect(payload: SideEffectPayload, receiveCount = 1): Promise<Result<void, DbError>> {
+    const { signal, arc: payloadArc } = payload;
     const accountId = signal.accountId;
+
+    // On retries the payload arc snapshot may be stale — refetch from DDB
+    let arc: Arc;
+    if (receiveCount > 1) {
+      const arcResult = await this.store.getArc(accountId, payloadArc.id);
+      if (arcResult.isErr()) return err(arcResult.error);
+      arc = arcResult.value ?? payloadArc;
+    } else {
+      arc = payloadArc;
+    }
 
     // Re-derive outcome from persisted matchedRules
     const outcome = deriveOutcome(signal.matchedRules ?? []);
@@ -432,20 +442,25 @@ export class SignalProcessor {
     if (autoDraftActions.length > 0) effectTypes.push("auto_draft");
     this.logger.info("Outcome derived from matchedRules — executing side-effects.", { code: "processor.side_effect.outcome_derived", accountId, signalId: signal.id, arcId: arc.id, effectTypes });
 
-    // Execute all indicated side-effects — individual failures are logged and do NOT cause batchItemFailure
+    // Critical side-effects (forward, pong) force retry on failure.
+    // Best-effort side-effects (notify, auto-send) are logged and swallowed.
+    let criticalFailure: unknown = null;
 
-    // Forward
+    // Forward (critical — recipient loses the email if this fails)
     if (outcome.forwardAddresses.length > 0) {
       for (const toAddress of outcome.forwardAddresses) {
         try {
           this.logger.trackPoint("side_effect_forward_start");
           const forwardResult = await this.forwarder.forward(signal.s3Key, toAddress, accountId);
           if (forwardResult.isErr()) {
-            this.logger.track("Side-effect forward failed. The SES send-raw-email call returned an error. The recipient won't receive the forwarded copy.", { code: "processor.side_effect.forward_failed", accountId, toAddress, error: forwardResult.error });
+            this.logger.track("Side-effect forward failed — will force retry.", { code: "processor.side_effect.forward_failed", accountId, toAddress, error: forwardResult.error });
+            criticalFailure = forwardResult.error;
+          } else {
+            this.logger.trackPoint("side_effect_forward_complete");
           }
-          this.logger.trackPoint("side_effect_forward_complete");
         } catch (e) {
-          this.logger.track("Side-effect forward threw unexpectedly.", { code: "processor.side_effect.forward_error", accountId, toAddress, error: e });
+          this.logger.track("Side-effect forward threw unexpectedly — will force retry.", { code: "processor.side_effect.forward_error", accountId, toAddress, error: e });
+          criticalFailure = e;
         }
       }
     }
@@ -464,7 +479,7 @@ export class SignalProcessor {
       }
     }
 
-    // Pong
+    // Pong (critical — the test confirmation is the product's first impression)
     if (outcome.doPong) {
       try {
         this.logger.trackPoint("side_effect_pong_start");
@@ -483,7 +498,8 @@ export class SignalProcessor {
         });
         this.logger.trackPoint("side_effect_pong_complete");
       } catch (e) {
-        this.logger.track("Side-effect pong failed. The SES send call returned an error. The sender won't receive the automated test confirmation.", { code: "processor.side_effect.pong_failed", accountId, error: e });
+        this.logger.track("Side-effect pong failed — will force retry.", { code: "processor.side_effect.pong_failed", accountId, error: e });
+        criticalFailure = e;
       }
     }
 
@@ -611,7 +627,8 @@ export class SignalProcessor {
 
           const draftSaveResult = await this.store.saveSignal(draft);
           if (draftSaveResult.isErr()) {
-            this.logger.track("Side-effect auto-draft save failed.", { code: "processor.side_effect.auto_draft_failed", accountId, error: draftSaveResult.error });
+            this.logger.track("Side-effect auto-draft save failed — will force retry.", { code: "processor.side_effect.auto_draft_failed", accountId, error: draftSaveResult.error });
+            criticalFailure = draftSaveResult.error;
             continue;
           }
 
@@ -637,6 +654,9 @@ export class SignalProcessor {
     }
 
     this.logger.trackPoint("side_effect_all_complete");
+    if (criticalFailure) {
+      return err(dbError(criticalFailure));
+    }
     return ok(undefined);
   }
 
