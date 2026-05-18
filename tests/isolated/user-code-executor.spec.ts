@@ -250,4 +250,144 @@ describe("user-code-executor", () => {
       });
     });
   });
+
+  describe("validate_ast purpose", () => {
+    it("returns valid: true for a valid arrow function", async () => {
+      const result = await handler({
+        tenantId: "acc_123",
+        purpose: "validate_ast",
+        functionCode: "(signal) => signal.subject === 'hello'",
+      });
+      expect(result).toEqual({
+        success: true,
+        purpose: "validate_ast",
+        result: { valid: true },
+      });
+    });
+
+    it("returns valid: false with error for eval() call", async () => {
+      const result = await handler({
+        tenantId: "acc_123",
+        purpose: "validate_ast",
+        functionCode: "(signal) => eval('1+1')",
+      });
+      expect(result).toEqual({
+        success: true,
+        purpose: "validate_ast",
+        result: {
+          valid: false,
+          error: "eval() calls are not allowed",
+          location: { line: 1, column: 12 },
+        },
+      });
+    });
+
+    it("returns valid: false for syntax errors", async () => {
+      const result = await handler({
+        tenantId: "acc_123",
+        purpose: "validate_ast",
+        functionCode: "}{][",
+      });
+      expect(result).toEqual({
+        success: true,
+        purpose: "validate_ast",
+        result: {
+          valid: false,
+          error: expect.stringContaining("Unexpected token"),
+          location: { line: 1, column: 0 },
+        },
+      });
+    });
+
+    it("does not require executionContext", async () => {
+      const result = await handler({
+        tenantId: "acc_123",
+        purpose: "validate_ast",
+        functionCode: "(signal) => true",
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it("returns valid: false for non-function expression", async () => {
+      const result = await handler({
+        tenantId: "acc_123",
+        purpose: "validate_ast",
+        functionCode: "const x = 1;",
+      });
+      expect(result).toEqual({
+        success: true,
+        purpose: "validate_ast",
+        result: {
+          valid: false,
+          error: expect.stringContaining("not allowed"),
+        },
+      });
+    });
+  });
+
+  describe("validate_ast_batch purpose", () => {
+    it("returns all valid for multiple valid functions", async () => {
+      const result = await handler({
+        tenantId: "acc_123",
+        purpose: "validate_ast_batch",
+        functions: [
+          { name: "greeting", code: "(signal) => signal.from.name" },
+          { name: "summary", code: "(signal, arc) => arc.summary" },
+        ],
+      });
+      expect(result).toEqual({
+        success: true,
+        purpose: "validate_ast_batch",
+        results: [
+          { name: "greeting", valid: true },
+          { name: "summary", valid: true },
+        ],
+      });
+    });
+
+    it("returns failure for the invalid function in a batch", async () => {
+      const result = await handler({
+        tenantId: "acc_123",
+        purpose: "validate_ast_batch",
+        functions: [
+          { name: "good", code: "(signal) => signal.subject" },
+          { name: "bad", code: "(signal) => eval('x')" },
+        ],
+      });
+      expect(result).toEqual({
+        success: true,
+        purpose: "validate_ast_batch",
+        results: [
+          { name: "good", valid: true },
+          { name: "bad", valid: false, error: "eval() calls are not allowed", location: { line: 1, column: 12 } },
+        ],
+      });
+    });
+
+    it("rejects missing functions array", async () => {
+      const result = await handler({
+        tenantId: "acc_123",
+        purpose: "validate_ast_batch",
+        functionCode: "(signal) => true",
+      });
+      expect(result).toEqual({
+        success: false,
+        error: { message: expect.stringContaining("functions is required"), type: "invalid_input" },
+      });
+    });
+
+    it("rejects function with code exceeding max length", async () => {
+      const result = await handler({
+        tenantId: "acc_123",
+        purpose: "validate_ast_batch",
+        functions: [
+          { name: "big", code: "x".repeat(10_001) },
+        ],
+      });
+      expect(result).toEqual({
+        success: false,
+        error: { message: expect.stringContaining("exceeds maximum length"), type: "invalid_input" },
+      });
+    });
+  });
 });
