@@ -55,6 +55,26 @@ Compared the frontend's expected API surface against the actual backend implemen
 
 ---
 
+## Security Badges & Certifications
+
+Free, publicly-verifiable trust signals that competitors (ForwardEmail, Addy.io) display. All are automated scans — no manual audit required.
+
+- [ ] **Qualys SSL Labs A+** — run https://www.ssllabs.com/ssltest/ against our domains. Requires: TLS 1.3, HSTS, strong cipher suites, no mixed content. Display badge on site.
+- [ ] **Mozilla HTTP Observatory A+** — run https://observatory.mozilla.org/ against our site. Requires: CSP, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, etc. Display badge on site.
+- [ ] **Internet.nl Mail Test 100%** — run https://internet.nl/mail/ against our mail domain. Tests: STARTTLS, DANE/TLSA, DNSSEC, SPF, DKIM, DMARC, MTA-STS, TLS-RPT. Display badge on site.
+- [ ] **Internet.nl Site Test 100%** — run https://internet.nl/site/ against our web domain. Tests: IPv6, DNSSEC, HTTPS (HSTS, TLS), security headers. Display badge on site.
+- [ ] **Hardenize report** — run https://www.hardenize.com/ against our domain. Comprehensive TLS/DNS/email security report. Link from site footer.
+- [ ] **MECSA (EU)** — run https://mecsa.jrc.ec.europa.eu/ against our mail domain. EU Joint Research Centre email security assessment. Tests: STARTTLS, x509, SPF, DKIM, DMARC, DANE.
+
+### Prerequisites (DNS/infra work needed first)
+
+- [ ] **DNSSEC** — sign our zones. Required for Internet.nl 100% and DANE.
+- [ ] **DANE/TLSA records** — publish TLSA records for MX endpoints. Required for Internet.nl mail 100%.
+- [ ] **MTA-STS** — publish `_mta-sts` TXT record + host `/.well-known/mta-sts.txt`. Already referenced in TODO but needed for badge scores.
+- [ ] **TLS-RPT** — publish `_smtp._tls` TXT record to receive TLS failure reports.
+
+---
+
 ## Extension Audit — Gaps vs. Backend Spec
 
 ### What the extension needs to fix
