@@ -860,7 +860,7 @@ describe("SignalProcessor", () => {
       vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok(
         { ...DEFAULT_CTX, emailConfig: makeAlias() },
       )));
-      // Approved sender → SR-03 fires on high spam → quarantine_visible
+      // Approved sender → SR-03 fires on high spam → quarantine_hidden
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
         ...validClassification,
         spamScore: 0.95,
@@ -869,7 +869,7 @@ describe("SignalProcessor", () => {
       await processor.processRecord(makeMessage(), 1);
 
       const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
-      expect(saved.status).toBe("quarantine_visible");
+      expect(saved.status).toBe("quarantine_hidden");
     });
 
     it("filter mode quarantine_visible: unknown sender → quarantine_visible", async () => {
@@ -938,7 +938,7 @@ describe("SignalProcessor", () => {
       vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok(
         { ...DEFAULT_CTX, emailConfig: makeAlias({ unknownSenderPolicy: "quarantine_visible" }) },
       )));
-      // Sender is known/approved but spam score is too high — SR-03 quarantines independently of filter mode
+      // Sender is known/approved but spam score is too high — SR-03 quarantines hidden independently of filter mode
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
         ...validClassification,
         spamScore: 0.95,
@@ -948,7 +948,7 @@ describe("SignalProcessor", () => {
 
       expect(store.saveArc).not.toHaveBeenCalled();
       const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
-      expect(saved.status).toBe("quarantine_visible");
+      expect(saved.status).toBe("quarantine_hidden");
     });
 
     it("allow_all mode auto-approves new sender without blocking", async () => {
@@ -1672,9 +1672,9 @@ describe("SignalProcessor", () => {
 
       await processor.processRecord(makeMessage(), 1);
 
-      // DEFAULT_SENDER_ENTRY is approved → SR-03 fires → quarantine_visible
+      // DEFAULT_SENDER_ENTRY is approved → SR-03 fires → quarantine_hidden
       const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
-      expect(saved.status).toBe("quarantine_visible");
+      expect(saved.status).toBe("quarantine_hidden");
     });
 
     it("uses account-level spamScoreThreshold when no per-address override is set", async () => {
@@ -1690,9 +1690,9 @@ describe("SignalProcessor", () => {
 
       await processor.processRecord(makeMessage(), 1);
 
-      // DEFAULT_SENDER_ENTRY is approved → SR-03 fires → quarantine_visible
+      // DEFAULT_SENDER_ENTRY is approved → SR-03 fires → quarantine_hidden
       const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
-      expect(saved.status).toBe("quarantine_visible");
+      expect(saved.status).toBe("quarantine_hidden");
     });
   });
 
