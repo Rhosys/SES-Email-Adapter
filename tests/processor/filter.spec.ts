@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { assignSystemLabels, getETLD1, DEFAULT_SPAM_SCORE_THRESHOLD, type SystemLabelContext } from "../../src/processor/filter.js";
+import { SYSTEM_RULES } from "../../src/processor/processor.js";
 
 const LOW_SPAM = 0.1;
 const MED_SPAM = 0.5;
@@ -148,5 +149,48 @@ describe("assignSystemLabels — no unlisted labels", () => {
     // This runtime test just confirms the function returns an array — the type checker does the real work.
     const labels: import("../../src/types/index.js").SystemLabel[] = assignSystemLabels(makeCtx());
     expect(Array.isArray(labels)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// assignSystemLabels — security_alert auth label
+// ---------------------------------------------------------------------------
+
+describe("assignSystemLabels — security_alert", () => {
+  it("emits system:auth:security_alert for auth signals with authType security_alert", () => {
+    const labels = assignSystemLabels(makeCtx({
+      workflow: "auth",
+      workflowData: { workflow: "auth", authType: "security_alert", service: "google.com" },
+    }));
+    expect(labels).toContain("system:auth:security_alert");
+  });
+
+  it.each([
+    { authType: "otp" as const, label: "otp" },
+    { authType: "magic_link" as const, label: "magic_link" },
+    { authType: "password_reset" as const, label: "password_reset" },
+    { authType: "verification" as const, label: "verification" },
+    { authType: "two_factor" as const, label: "two_factor" },
+    { authType: "other" as const, label: "other" },
+  ])("does NOT emit system:auth:security_alert for authType $label", ({ authType }) => {
+    const labels = assignSystemLabels(makeCtx({
+      workflow: "auth",
+      workflowData: { workflow: "auth", authType, service: "github.com" },
+    }));
+    expect(labels).not.toContain("system:auth:security_alert");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// SYSTEM_RULES — SR-25
+// ---------------------------------------------------------------------------
+
+describe("SYSTEM_RULES — SR-25", () => {
+  it("SR-25 exists with condition matching system:auth:security_alert and action quarantine_hidden", () => {
+    const sr25 = SYSTEM_RULES.find(r => r.id === "SR-25");
+    expect(sr25).toBeDefined();
+    expect(JSON.parse(sr25!.condition)).toEqual({ "in": ["system:auth:security_alert", { "var": "arc.labels" }] });
+    expect(sr25!.actions).toEqual([{ type: "quarantine_hidden" }]);
+    expect(sr25!.status).toBe("enabled");
   });
 });
