@@ -42,6 +42,8 @@ import { BedrockEmbeddingGenerator } from "./embedding/embedding-generator.js";
 import { multiClusterWriter } from "./database/multi-cluster-aurora-writer.js";
 import { S3RetentionServiceImpl } from "./embedding/s3-retention-service.js";
 import { ReindexWorker } from "./jobs/reindex/reindex-worker.js";
+import { AuthWorkflowHandler } from "./workflow/auth-handler.js";
+import { HandlerRegistry } from "./workflow/registry.js";
 
 import { EmailService } from "./email/email-service.js";
 import { ReindexDispatcher } from "./jobs/reindex/reindex-dispatcher.js";
@@ -101,6 +103,10 @@ const externalEmailHandler = new ExternalEmailSignalHandler(emailService, s3, lo
 
 const draftSendDispatcher = new DraftSendDispatcher(SIGNAL_QUEUE_URL, sqs, logger);
 
+const wsDeliverer = new WsDeliverer(new ApiGatewayManagementApiClient({ endpoint: WS_ENDPOINT }));
+const authHandler = new AuthWorkflowHandler(deviceStore, wsDeliverer, arcDb, logger);
+const handlerRegistry = new HandlerRegistry([authHandler]);
+
 const processor = new SignalProcessor({
   store: processorStore,
   contentSanitizer: new LambdaContentSanitizer(lambda, CONTENT_SANITIZER_ARN),
@@ -113,7 +119,7 @@ const processor = new SignalProcessor({
   notifier: new DeviceNotifier({
     deviceStore: new DynamoDeviceStore(),
     deliverers: {
-      websocket: new WsDeliverer(new ApiGatewayManagementApiClient({ endpoint: WS_ENDPOINT })),
+      websocket: wsDeliverer,
       fcm: new FcmDeliverer(new HttpFcmClient({ projectId: FCM_PROJECT_ID, credentials: FCM_SERVICE_ACCOUNT, logger })),
       apns: new FcmDeliverer(new HttpFcmClient({ projectId: FCM_PROJECT_ID, credentials: FCM_SERVICE_ACCOUNT, logger })),
     },
@@ -125,6 +131,7 @@ const processor = new SignalProcessor({
   sqsDispatcher: new SqsDispatcherImpl(SIGNAL_QUEUE_URL, sqs, logger),
   draftSendDispatcher,
   systemSignalCreator: new DynamoSystemSignalCreator(logger),
+  handlerRegistry,
   logger,
   s3Client: s3,
   emailBucket: S3_BUCKET,
