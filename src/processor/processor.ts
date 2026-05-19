@@ -26,6 +26,9 @@ import { statusToCategory } from "../database/stats-writer.js";
 import type { DraftSendDispatch } from "./draft-send-dispatcher.js";
 import type { SystemSignalCreator } from "./system-signal-creator.js";
 import { isReplyTargetSafe } from "./reply-target-validator.js";
+import { buildWebhookPayload, deliverWebhook } from "./webhook.js";
+import { parseWebhookConfig } from "../api/validate-webhook-config.js";
+import { BillingHandler } from "../billing/billing-handler.js";
 
 // ---------------------------------------------------------------------------
 // Message types
@@ -307,6 +310,7 @@ interface SignalProcessorOptions {
   sqsDispatcher: SqsDispatcher;
   draftSendDispatcher: DraftSendDispatch;
   systemSignalCreator?: SystemSignalCreator;
+  billingHandler?: BillingHandler;
   s3Client: S3Client;
   emailBucket: string;
   contentBucket: string;
@@ -330,6 +334,7 @@ export class SignalProcessor {
   private readonly sqsDispatcher: SqsDispatcher;
   private readonly draftSendDispatcher: DraftSendDispatch;
   private readonly systemSignalCreator: SystemSignalCreator | undefined;
+  private readonly billingHandler: BillingHandler;
   private readonly s3Client: S3Client;
   private readonly emailBucket: string;
   private readonly contentBucket: string;
@@ -352,6 +357,7 @@ export class SignalProcessor {
     this.sqsDispatcher = opts.sqsDispatcher;
     this.draftSendDispatcher = opts.draftSendDispatcher;
     this.systemSignalCreator = opts.systemSignalCreator;
+    this.billingHandler = opts.billingHandler ?? new BillingHandler();
     this.s3Client = opts.s3Client;
     this.emailBucket = opts.emailBucket;
     this.contentBucket = opts.contentBucket;
@@ -680,6 +686,37 @@ export class SignalProcessor {
         this.logger.trackPoint("side_effect_auto_draft_complete");
       } catch (e) {
         this.logger.track("Side-effect auto-draft threw unexpectedly.", { code: "processor.side_effect.auto_draft_error", accountId, error: e });
+      }
+    }
+
+    // Webhook (best-effort — never blocks or retries)
+    const webhookActions = (signal.matchedRules ?? [])
+      .flatMap(r => r.actions.filter(a => a.type === "webhook" && a.value));
+    if (webhookActions.length > 0) {
+      const accountCtxResult = await this.store.getProcessorAccountContext(accountId, signal.recipientAddress);
+      const accountPlan = accountCtxResult.isOk() ? accountCtxResult.value.billingPlan : "Free";
+
+      if (!this.billingHandler.isFeatureEnabled(accountPlan, "webhook")) {
+        this.logger.info("Webhook action skipped — feature not enabled for plan.", {
+          code: "processor.side_effect.webhook_plan_gated",
+          accountId,
+          plan: accountPlan,
+        });
+      } else {
+        const payload = buildWebhookPayload(signal, arc);
+        for (const action of webhookActions) {
+          const configResult = parseWebhookConfig(action.value);
+          if (configResult.isErr()) {
+            this.logger.track("Webhook action skipped — invalid config at processing time.", {
+              code: "processor.side_effect.webhook_invalid_config",
+              accountId,
+              value: action.value,
+              error: configResult.error,
+            });
+            continue;
+          }
+          await deliverWebhook(configResult.value.url, payload, this.logger);
+        }
       }
     }
 
