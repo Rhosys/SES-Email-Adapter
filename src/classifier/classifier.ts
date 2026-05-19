@@ -194,7 +194,7 @@ Medical appointment reminders, test results, prescription notifications, insuran
 Passive informational notices that users are not expected to act on: privacy policy changes, terms of service updates, data processor notices, cookie policy updates, GDPR/compliance notices, phishing-warning bulletins from banks/SaaS ("we will never ask for your password"), and official government correspondence (tax notices, benefits updates, license renewals).
 
 IMPORTANT — phishing-warning notices vs actual phishing:
-- "Beware of phishing — we will never ask for your password" from a bank → workflow:"status", statusType:"compliance", spamScore:0.0–0.1
+- "Beware of phishing — we will never ask for your password" from a bank → workflow:"status", statusType:"compliance", spamScore:0.5
 - An email pretending to be a bank and asking you to click a suspicious link → assign the real workflow (e.g. "auth") with spamScore:0.8–1.0
 
 { "workflow": "status", "statusType": "terms_update"|"privacy_policy"|"data_processor"|"cookie_policy"|"compliance"|"service_notice"|"government"|"account_notification"|"other", "provider": "<name>", "effectiveDate": "<YYYY-MM-DD or null>", "referenceNumber": "<string or null>", "documentUrl": "<url or null>" }
