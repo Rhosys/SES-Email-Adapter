@@ -29,6 +29,7 @@ import { isReplyTargetSafe } from "./reply-target-validator.js";
 import { buildWebhookPayload, deliverWebhook } from "./webhook.js";
 import { parseWebhookConfig } from "../api/validate-webhook-config.js";
 import { BillingHandler } from "../billing/billing-handler.js";
+import type { HandlerRegistry } from "../workflow/registry.js";
 
 // ---------------------------------------------------------------------------
 // Message types
@@ -312,6 +313,7 @@ interface SignalProcessorOptions {
   draftSendDispatcher: DraftSendDispatch;
   systemSignalCreator?: SystemSignalCreator;
   billingHandler?: BillingHandler;
+  handlerRegistry?: HandlerRegistry;
   s3Client: S3Client;
   emailBucket: string;
   contentBucket: string;
@@ -336,6 +338,7 @@ export class SignalProcessor {
   private readonly draftSendDispatcher: DraftSendDispatch;
   private readonly systemSignalCreator: SystemSignalCreator | undefined;
   private readonly billingHandler: BillingHandler;
+  private readonly handlerRegistry: HandlerRegistry | undefined;
   private readonly s3Client: S3Client;
   private readonly emailBucket: string;
   private readonly contentBucket: string;
@@ -359,6 +362,7 @@ export class SignalProcessor {
     this.draftSendDispatcher = opts.draftSendDispatcher;
     this.systemSignalCreator = opts.systemSignalCreator;
     this.billingHandler = opts.billingHandler ?? new BillingHandler();
+    this.handlerRegistry = opts.handlerRegistry;
     this.s3Client = opts.s3Client;
     this.emailBucket = opts.emailBucket;
     this.contentBucket = opts.contentBucket;
@@ -484,6 +488,16 @@ export class SignalProcessor {
         this.logger.trackPoint("side_effect_notify_complete");
       } catch (e) {
         this.logger.error("Side-effect notification threw unexpectedly.", { code: "processor.side_effect.notify_error", accountId, error: e });
+      }
+    }
+
+    // Workflow dispatch (critical — handler decides retriability)
+    if (this.handlerRegistry) {
+      this.logger.trackPoint("side_effect_workflow_start");
+      const dispatchResult = await this.handlerRegistry.dispatch(signal, arc, accountId);
+      this.logger.trackPoint("side_effect_workflow_complete");
+      if (dispatchResult.isErr()) {
+        criticalFailure = dispatchResult.error;
       }
     }
 
