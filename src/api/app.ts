@@ -14,8 +14,11 @@ import type { Logger } from "../logger.js";
 import { deriveGroupingKey } from "../processor/processor.js";
 import { zParse } from "./validate.js";
 import { validateRuleCondition } from "./validate-rule-condition.js";
+import { validateWebhookConfig } from "./validate-webhook-config.js";
 import type { AstValidationResult } from "../isolated/ast-validator.js";
 import type { UserCodeExecutorClient } from "../processor/user-code-client.js";
+import type { BillingHandler } from "../billing/billing-handler.js";
+import type { BillingPlan } from "../embedding/retention-tier.js";
 import { parseStatsRow } from "../database/stats-writer.js";
 import { isValidEmail } from "../email/validate-email.js";
 import type { DraftSendDispatcher } from "../processor/draft-send-dispatcher.js";
@@ -205,6 +208,7 @@ interface AppDeps {
   accountCreationStarter?: { start(accountId: string, email: string): Promise<void> };
   appBaseUrl?: string;
   astValidator?: UserCodeExecutorClient;
+  billingHandler?: BillingHandler;
 }
 
 type AppEnv = { Variables: { auth: AuthContext; authorizationVerified?: boolean } };
@@ -231,7 +235,7 @@ function generateAccountId(): string {
   return `acc-${rawId}${checkBits}`;
 }
 
-export function createApp({ store, auth, access, logger, verificationMailer, jobDispatcher, draftSendDispatcher, accountCreationStarter, appBaseUrl, astValidator }: AppDeps) {
+export function createApp({ store, auth, access, logger, verificationMailer, jobDispatcher, draftSendDispatcher, accountCreationStarter, appBaseUrl, astValidator, billingHandler }: AppDeps) {
   const app = new OpenAPIHono<AppEnv>().basePath('/api');
 
   // Helper: validate code AST via the isolated Lambda
@@ -873,6 +877,12 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
     }
     const forwardError = await validateForwardTargets(accountId, body.actions as Rule["actions"], store);
     if (forwardError) return err(c, 400, forwardError, "UNVERIFIED_FORWARD_TARGET");
+    if (billingHandler) {
+      const accountResult = await store.getAccount(accountId);
+      const accountPlan: BillingPlan = (accountResult.isOk() && accountResult.value?.billingPlan) || "Free";
+      const webhookError = validateWebhookActions(body.actions as Rule["actions"], accountPlan, billingHandler);
+      if (webhookError) return err(c, 400, webhookError.message, webhookError.code);
+    }
     // Audit: write code change event before persisting (best-effort)
     if (effectiveConditionType === "js") {
       const { userId } = c.get("auth");
@@ -921,6 +931,12 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
     if (body.actions) {
       const forwardError = await validateForwardTargets(accountId, body.actions as Rule["actions"], store);
       if (forwardError) return err(c, 400, forwardError, "UNVERIFIED_FORWARD_TARGET");
+      if (billingHandler) {
+        const accountResult = await store.getAccount(accountId);
+        const accountPlan: BillingPlan = (accountResult.isOk() && accountResult.value?.billingPlan) || "Free";
+        const webhookError = validateWebhookActions(body.actions as Rule["actions"], accountPlan, billingHandler);
+        if (webhookError) return err(c, 400, webhookError.message, webhookError.code);
+      }
     }
     // Clear lastError when condition is updated on a JS rule
     const updateData: Parameters<typeof store.updateRule>[2] = { ...body } as Parameters<typeof store.updateRule>[2];
@@ -1494,6 +1510,28 @@ async function validateForwardTargets(
   const verifiedSet = new Set(verifiedResult.value.filter((v) => v.status === "verified").map((v) => v.address));
   const unverified = forwardTargets.filter((t) => !verifiedSet.has(t));
   return unverified.length > 0 ? `Forward targets not verified: ${unverified.join(", ")}` : null;
+}
+
+// Validate webhook actions: config validity + plan feature gating.
+// Returns an error object if invalid, null if OK.
+function validateWebhookActions(
+  actions: Rule["actions"],
+  accountPlan: BillingPlan,
+  billing: BillingHandler,
+): { message: string; code: string } | null {
+  const webhookActions = actions.filter((a) => a.type === "webhook");
+  if (webhookActions.length === 0) return null;
+
+  for (const action of webhookActions) {
+    const configError = validateWebhookConfig(action.value);
+    if (configError) return { message: configError, code: "INVALID_WEBHOOK_CONFIG" };
+  }
+
+  if (!billing.isFeatureEnabled(accountPlan, "webhook")) {
+    return { message: "Webhook actions require a paid plan", code: "PLAN_FEATURE_REQUIRED" };
+  }
+
+  return null;
 }
 
 const DKIM_SELECTOR = "mail";
