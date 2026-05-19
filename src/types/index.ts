@@ -531,7 +531,8 @@ export type SystemLabel =
   | "system:spam:medium"
   | "system:sender:untrusted"
   | "system:replied"
-  | "system:test";
+  | "system:test"
+  | "system:auth:security_alert";
 
 export interface RuleAction {
   type: RuleActionType;
