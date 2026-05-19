@@ -515,7 +515,7 @@ export const RULE_ACTION_TYPES = [
   "assign_label", "assign_workflow", "archive", "delete", "forward",
   "block_hidden", "block_reject", "quarantine", "quarantine_hidden",
   "set_urgency", "suppress_notification", "pong", "approve_sender",
-  "auto_draft",
+  "auto_draft", "webhook",
 ] as const;
 export type RuleActionType = (typeof RULE_ACTION_TYPES)[number];
 
