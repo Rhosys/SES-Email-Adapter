@@ -1,5 +1,5 @@
 import { getDomain } from "tldts";
-import type { Workflow, WorkflowData, UnknownSenderPolicy, SystemLabel, AliasSender } from "../types/index.js";
+import type { Workflow, WorkflowData, UnknownSenderPolicy, SystemLabel, AliasSender, AuthData } from "../types/index.js";
 
 export const DEFAULT_SPAM_SCORE_THRESHOLD = 0.9;
 
@@ -40,6 +40,9 @@ export function assignSystemLabels(ctx: SystemLabelContext): SystemLabel[] {
 
   if (ctx.hasSentMessages) labels.push("system:replied");
   if (ctx.workflow === "test") labels.push("system:test");
+  if (ctx.workflow === "auth" && (ctx.workflowData as AuthData).authType === "security_alert") {
+    labels.push("system:auth:security_alert");
+  }
 
   return labels;
 }
