@@ -46,11 +46,11 @@ describe("interpretRuleResult", () => {
       const actions = [
         { type: "archive" },
         { type: "not_a_real_action" },
-        { type: "delete" },
+        { type: "forward" },
       ];
       const result = interpretRuleResult(actions);
       expect(result.matched).toBe(true);
-      expect(result.dynamicActions).toEqual([{ type: "archive" }, { type: "delete" }]);
+      expect(result.dynamicActions).toEqual([{ type: "archive" }, { type: "forward" }]);
       expect(result.warnings).toHaveLength(1);
       expect(result.warnings[0]).toContain("Element [1]");
     });
