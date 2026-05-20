@@ -77,7 +77,12 @@ export interface Notifier {
 }
 
 export interface Forwarder {
-  forward(s3Key: string, toAddress: string, accountId: string): Promise<Result<void, DbError>>;
+  forward(
+    s3Key: string,
+    toAddress: string,
+    accountId: string,
+    opts?: { signalId?: string; arcId?: string },
+  ): Promise<Result<void, DbError>>;
 }
 
 export interface ReplySender {
@@ -87,6 +92,9 @@ export interface ReplySender {
     subject: string;
     body: string;
     inReplyTo: string;
+    accountId?: string;
+    signalId?: string;
+    arcId?: string;
   }): Promise<{ messageId: string }>;
 }
 
