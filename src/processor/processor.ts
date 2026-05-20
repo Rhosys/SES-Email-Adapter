@@ -508,6 +508,9 @@ export class SignalProcessor {
           subject: signal.subject ?? "",
           body: signal.textBody ?? "",
           inReplyTo: signal.id,
+          accountId,
+          signalId: signal.id,
+          arcId: arc.id,
         });
         this.logger.trackPoint("side_effect_pong_complete");
       } catch (e) {
