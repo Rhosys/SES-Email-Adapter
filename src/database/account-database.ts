@@ -962,7 +962,7 @@ export class AccountDatabase {
   // ---------------------------------------------------------------------------
 
   async incrementStats(accountId: string, category: StatsCategory): Promise<Result<void, DbError>> {
-    const now = new Date();
+    const now = DateTime.utc();
     const params = buildStatsUpdateParams(accountId, category, now, ACCOUNTS_TABLE);
     const pruneResult = buildPruneNames(now);
     const finalExpression = pruneResult.expression
