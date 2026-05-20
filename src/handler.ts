@@ -139,6 +139,7 @@ const processor = new SignalProcessor({
 });
 
 const feedbackProcessor = new FeedbackProcessor(processingDb, accountDb, logger, {
+  getSignalById: (accountId, signalId) => arcDb.getSignalById(accountId, signalId),
   getSignalByMessageId: (accountId, sesMessageId) => arcDb.getSignalByMessageId(accountId, sesMessageId),
   saveSignal: (signal) => arcDb.saveSignal(signal),
   updateSignalSendStatus: (accountId, signalLookupId, update) => arcDb.updateSignalSendStatus(accountId, signalLookupId, update),
