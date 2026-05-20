@@ -6,6 +6,7 @@ import type { ProcessingDatabase } from "../src/database/processing-database.js"
 import type { AccountDatabase } from "../src/database/account-database.js";
 import type { SesFeedback, Signal } from "../src/types/index.js";
 import { createMockLogger } from "./helpers/mock-logger.js";
+import { TAG_ACCOUNT_ID } from "../src/email/ses-tags.js";
 
 function makeSentSignal(overrides: Partial<Signal> = {}): Signal {
   return {
@@ -48,7 +49,7 @@ function makeBounceFeedback(overrides: Partial<SesFeedback> = {}): SesFeedback {
     mail: {
       messageId: "ses-msg-abc",
       source: "me@example.com",
-      tags: { accountId: "acct-001" },
+      tags: { [TAG_ACCOUNT_ID]: "acct-001" },
     },
     ...overrides,
   };
