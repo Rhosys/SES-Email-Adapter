@@ -201,7 +201,7 @@ describe("AuthWorkflowHandler", () => {
 
     await handler.execute(signal, stubArc, "acc-1");
 
-    expect(mocks.arcDatabase.updateArc).toHaveBeenCalledWith("acc-1", "arc-test-001", { status: "archived" });
+    expect(mocks.arcDatabase.updateArc).toHaveBeenCalledWith("acc-1", "arc-test-001", "archived", "2024-01-01T00:00:00Z", {});
   });
 
   // ─── Logs warning when arc archive fails but still returns ok() ──────────

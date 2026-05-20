@@ -1,5 +1,6 @@
 import type { ProcessorDatabase } from "../processor/processor.js";
-import type { ApiDatabase, ListArcsParams, UpdateArcRequest, CreateViewRequest, UpdateViewRequest, CreateLabelRequest, UpdateLabelRequest, CreateRuleRequest, UpdateRuleRequest } from "../api/app.js";
+import type { ApiDatabase, ListArcsParams, CreateViewRequest, UpdateViewRequest, CreateLabelRequest, UpdateLabelRequest, CreateRuleRequest, UpdateRuleRequest } from "../api/app.js";
+import type { UpdateArcRequest } from "../api/requests.js";
 import type { Arc, Signal, View, Label, Rule, Domain, Account, Page, PageParams, Alias, AliasSender, SenderPolicy, VerifiedForwardingAddress, EmailTemplate } from "../types/index.js";
 import type { StatsCategory } from "../types/index.js";
 import type { AccountDatabase } from "./account-database.js";
@@ -54,7 +55,12 @@ export class ApiDatabaseAdapter implements ApiDatabase {
   // Arcs
   listArcs(accountId: string, params: ListArcsParams) { return this.arc.listArcs(accountId, params); }
   getArc(accountId: string, id: string) { return this.arc.getArc(accountId, id); }
-  updateArc(accountId: string, id: string, update: UpdateArcRequest) { return this.arc.updateArc(accountId, id, update); }
+  updateArc(accountId: string, id: string, update: UpdateArcRequest) {
+    const fields: import("./arc-database.js").UpdateArcFields = {};
+    if (update.urgency !== undefined) fields.urgency = update.urgency;
+    if (update.labels !== undefined) fields.labels = update.labels;
+    return this.arc.updateArc(accountId, id, update.status ?? "active", update.lastSignalAt ?? new Date().toISOString(), fields);
+  }
   createArc(arc: Arc) { return this.arc.createArc(arc); }
 
   // Signals

@@ -40,7 +40,7 @@ export class AuthWorkflowHandler implements WorkflowHandler {
     await this.deliverToAll(accountId, payload);
 
     // Archive — auth arcs don't need to stay in the inbox
-    const archiveResult = await this.arcDatabase.updateArc(accountId, arc.id, { status: "archived" });
+    const archiveResult = await this.arcDatabase.updateArc(accountId, arc.id, "archived", arc.lastSignalAt, {});
     if (archiveResult.isErr()) {
       this.logger.warn("Failed to archive auth arc after OTP push", {
         code: "workflow.auth.archive_failed", accountId, arcId: arc.id, error: archiveResult.error,
