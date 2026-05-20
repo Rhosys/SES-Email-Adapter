@@ -466,6 +466,7 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
         signal.s3Key,
         "backup@personal.com",
         TEST_ACCOUNT_ID,
+        { signalId: signal.id, arcId: arc.id },
       );
 
       // Notification was sent (no suppress_notification action)

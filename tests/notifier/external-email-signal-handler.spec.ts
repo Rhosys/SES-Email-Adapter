@@ -52,7 +52,7 @@ describe("ExternalEmailSignalHandler.sendReply()", () => {
         { Name: "References", Value: "<original-id@mail.example.com>" },
       ],
       tags: [
-        { Name: "type", Value: "reply" },
+        { Name: "X-Numaeel-Type", Value: "reply" },
       ],
     });
   });
@@ -101,8 +101,8 @@ describe("ExternalEmailSignalHandler.forward()", () => {
       to: "dest@example.com",
       rawData: rawBytes,
       tags: [
-        { Name: "type", Value: "forward" },
-        { Name: "accountId", Value: "acct-42" },
+        { Name: "X-Numaeel-Type", Value: "forward" },
+        { Name: "X-Numaeel-AccountId", Value: "acct-42" },
       ],
     });
   });

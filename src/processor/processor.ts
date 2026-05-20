@@ -454,7 +454,10 @@ export class SignalProcessor {
       for (const toAddress of outcome.forwardAddresses) {
         try {
           this.logger.trackPoint("side_effect_forward_start");
-          const forwardResult = await this.forwarder.forward(signal.s3Key, toAddress, accountId);
+          const forwardResult = await this.forwarder.forward(signal.s3Key, toAddress, accountId, {
+            signalId: signal.id,
+            arcId: arc.id,
+          });
           if (forwardResult.isErr()) {
             this.logger.track("Side-effect forward failed — will force retry.", { code: "processor.side_effect.forward_failed", accountId, toAddress, error: forwardResult.error });
             criticalFailure = forwardResult.error;
