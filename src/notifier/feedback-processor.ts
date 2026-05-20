@@ -12,6 +12,7 @@ import { TAG_ACCOUNT_ID, TAG_TYPE, TAG_SIGNAL_ID, TAG_ARC_ID } from "../email/se
 const SOFT_BOUNCE_TTL_SECONDS = 72 * 60 * 60;
 
 export interface FeedbackSignalStore {
+  getSignalById(accountId: string, signalId: string): Promise<Result<Signal | null, DbError>>;
   getSignalByMessageId(accountId: string, sesMessageId: string): Promise<Result<Signal | null, DbError>>;
   saveSignal(signal: Signal): Promise<Result<void, DbError>>;
   updateSignalSendStatus(accountId: string, signalLookupId: string, update: {
@@ -104,11 +105,23 @@ export class FeedbackProcessor {
       // Check if this bounce is for a user-sent signal
       if (this.signalStore) {
         const sesMessageId = feedback.mail.messageId;
-        const accountId = feedback.mail.tags?.[TAG_ACCOUNT_ID];
-        if (accountId) {
-          const sentSignalResult = await this.signalStore.getSignalByMessageId(accountId, sesMessageId);
-          if (sentSignalResult.isOk()) {
-            const sentSignal = sentSignalResult.value;
+        const signalId = feedback.mail.tags?.[TAG_SIGNAL_ID];
+        // Prefixed tag takes priority; fall back to bare "accountId" for pre-migration emails
+        const accountId = feedback.mail.tags?.[TAG_ACCOUNT_ID] ?? feedback.mail.tags?.["accountId"];
+
+        // Requirement 5.6: if neither TAG_SIGNAL_ID nor TAG_ACCOUNT_ID is present, skip signal lookup
+        // Requirement 5.3: if TAG_ACCOUNT_ID is absent, skip account-specific correlation
+        let sentSignalResult: Result<Signal | null, DbError> | undefined;
+        if (signalId && accountId) {
+          // Direct signal lookup via tag (skips SES message ID query)
+          sentSignalResult = await this.signalStore.getSignalById(accountId, signalId);
+        } else if (accountId) {
+          // Fallback: look up by SES message ID (covers pre-migration emails without SignalId tag)
+          sentSignalResult = await this.signalStore.getSignalByMessageId(accountId, sesMessageId);
+        }
+
+        if (sentSignalResult?.isOk()) {
+          const sentSignal = sentSignalResult.value;
             if (sentSignal && sentSignal.source === "user") {
               const bouncedRecipients = feedback.bounce!.bouncedRecipients.map(r => ({
                 address: r.emailAddress,
@@ -117,11 +130,15 @@ export class FeedbackProcessor {
               }));
 
               // Create deliverability signal in the same arc
+              // Direct arc assignment: TAG_ARC_ID takes precedence (no arc-matching needed)
+              const tagArcId = feedback.mail.tags?.[TAG_ARC_ID];
+              const resolvedArcId = tagArcId || sentSignal.arcId;
+
               const id = generateId("sgn-");
               const deliverabilitySignal: Signal = {
                 id,
                 signalLookupId: id,
-                ...(sentSignal.arcId ? { arcId: sentSignal.arcId } : {}),
+                ...(resolvedArcId ? { arcId: resolvedArcId } : {}),
                 accountId: sentSignal.accountId,
                 source: "deliverability",
                 status: "active",

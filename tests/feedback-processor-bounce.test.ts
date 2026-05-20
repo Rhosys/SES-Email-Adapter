@@ -71,6 +71,7 @@ function makeAccountDb(): AccountDatabase {
 
 function makeSignalStore(): FeedbackSignalStore {
   return {
+    getSignalById: vi.fn().mockResolvedValue(ok(null)),
     getSignalByMessageId: vi.fn().mockResolvedValue(ok(makeSentSignal())),
     saveSignal: vi.fn().mockResolvedValue(ok(undefined)),
     updateSignalSendStatus: vi.fn().mockResolvedValue(ok(makeSentSignal({ status: "draft" }))),
