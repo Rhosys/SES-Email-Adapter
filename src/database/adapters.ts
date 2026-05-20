@@ -27,7 +27,6 @@ export class ProcessorDatabaseAdapter implements ProcessorDatabase {
   getArc(accountId: string, id: string) { return this.arc.getArc(accountId, id); }
   findArcByGroupingKey(accountId: string, key: string) { return this.arc.findArcByGroupingKey(accountId, key); }
   saveArc(arc: Arc) { return this.arc.saveArc(arc); }
-  updateArc(...args: Parameters<ArcDatabase["updateArc"]>) { return this.arc.updateArc(...args); }
   listEnabledRules(accountId: string) { return this.account.listEnabledRules(accountId); }
   getProcessorAccountContext(accountId: string, recipientAddress: string) { return this.account.getProcessorAccountContext(accountId, recipientAddress); }
   saveAlias(alias: Alias) { return this.account.saveAlias(alias); }

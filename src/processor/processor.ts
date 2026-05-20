@@ -5,7 +5,6 @@ import type { Result } from "neverthrow";
 import { ok, err, dbError } from "../errors.js";
 import type { DbError, InvalidResponseError } from "../errors.js";
 import type { Signal, Arc, Rule, Workflow, WorkflowData, Alias, AliasSender, SenderPolicy, AccountFilteringConfig, SignalSource, SignalStatus, Domain, ArcStatus, ArcUrgency, UnknownSenderPolicy, MatchedRuleResult } from "../types/index.js";
-import type { UpdateArcFields } from "../database/arc-database.js";
 import type { ParsedMime } from "./mime.js";
 import type { ContentSanitizerClient } from "./content-sanitizer-client.js";
 import type { UserCodeExecutorClient, TemplateParameterResult } from "./user-code-client.js";
@@ -68,7 +67,6 @@ export interface ProcessorDatabase {
   getArc(accountId: string, id: string): Promise<Result<Arc | null, DbError>>;
   findArcByGroupingKey(accountId: string, key: string): Promise<Result<Arc | null, DbError>>;
   saveArc(arc: Arc): Promise<Result<void, DbError>>;
-  updateArc(accountId: string, id: string, status: ArcStatus, lastSignalAt: string, update: UpdateArcFields): Promise<Result<Arc, DbError>>;
   listEnabledRules(accountId: string): Promise<Result<Rule[], DbError>>;
   getProcessorAccountContext(accountId: string, recipientAddress: string): Promise<Result<ProcessorAccountContext, DbError>>;
   saveAlias(alias: Alias): Promise<Result<Alias, DbError>>;
@@ -145,7 +143,6 @@ interface ProcessingOutcome {
   quarantineHidden: boolean;  // true → quarantine_hidden status; false → quarantine_visible
   approveSender: boolean;
   archive: boolean;
-  delete: boolean;
   urgency?: ArcUrgency;
   suppressNotification: boolean;
   forwardAddresses: string[];
@@ -160,7 +157,6 @@ function emptyOutcome(): ProcessingOutcome {
     quarantineHidden: false,
     approveSender: false,
     archive: false,
-    delete: false,
     suppressNotification: false,
     forwardAddresses: [],
     additionalLabels: [],
@@ -209,7 +205,6 @@ async function applyRules(
       actions.some((a) => a.type === "quarantine_hidden") ? "quarantine_hidden"  :
       actions.some((a) => a.type === "quarantine")        ? "quarantine_visible" :
       actions.some((a) => a.type === "archive")           ? "archived"           :
-      actions.some((a) => a.type === "delete")            ? "deleted"            :
       undefined
     );
     matchedRules.push({ ruleId: rule.id, actions, labelsAdded, ...(statusChange ? { statusChange } : {}) });
@@ -241,9 +236,6 @@ function deriveOutcome(matchedRules: MatchedRuleResult[]): ProcessingOutcome {
           break;
         case "archive":
           if (!statusSet) { outcome.archive = true; statusSet = true; }
-          break;
-        case "delete":
-          if (!statusSet) { outcome.delete = true; statusSet = true; }
           break;
         case "approve_sender":        outcome.approveSender = true; break;
         case "suppress_notification": outcome.suppressNotification = true; break;
@@ -1035,7 +1027,7 @@ export class SignalProcessor {
     this.logger.trackPoint("rules_evaluated", { matchedRuleCount: matchedRules.length });
 
     // Fallback: if no rule set a status, apply filter mode for untrusted senders
-    const hasStatusOutcome = outcome.blockDisposition !== null || outcome.quarantine || outcome.archive || outcome.delete;
+    const hasStatusOutcome = outcome.blockDisposition !== null || outcome.quarantine || outcome.archive;
     if (!hasStatusOutcome && arc.labels.includes("system:sender:untrusted")) {
       switch (effectiveFilterMode) {
         case "block_hidden":       outcome.blockDisposition = "block_hidden"; break;
@@ -1100,7 +1092,6 @@ export class SignalProcessor {
       if (!arc.labels.includes(label)) arc.labels = [...arc.labels, label];
     }
     if (outcome.archive) arc.status = "archived";
-    if (outcome.delete) { arc.status = "deleted"; arc.deletedAt = now; }
 
     const signalUrgency = outcome.urgency ?? arc.urgency ?? "normal";
     if (!matchedArc) arc.urgency = signalUrgency;
