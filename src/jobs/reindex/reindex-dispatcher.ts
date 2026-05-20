@@ -4,6 +4,7 @@
 // ---------------------------------------------------------------------------
 
 import { SQSClient, SendMessageCommand } from "@aws-sdk/client-sqs";
+import { DateTime } from "luxon";
 import { getRegistryById } from "../../embedding/cluster-registry.js";
 import { ok, err, notFoundError } from "../../errors.js";
 import type { NotFoundError, Result } from "../../errors.js";
@@ -57,7 +58,7 @@ export class ReindexDispatcher {
 
     const modelId = cluster.modelId;
     const jobId = this.logger.getInvocationId();
-    const startedAt = new Date().toISOString();
+    const startedAt = DateTime.utc().toISO()!;
 
     const sendPromises: Promise<unknown>[] = [];
     for (let segment = 0; segment < segmentCount; segment++) {

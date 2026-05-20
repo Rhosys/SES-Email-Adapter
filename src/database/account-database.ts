@@ -1,4 +1,5 @@
 import { DeleteCommand, GetCommand, PutCommand, QueryCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
+import { DateTime } from "luxon";
 import { dynamo, ACCOUNTS_TABLE } from "./shared.js";
 import { dbError, notFoundError, ok, err } from "../errors.js";
 import type { Result, DbError, NotFoundError } from "../errors.js";
@@ -56,7 +57,7 @@ export class AccountDatabase {
   }
 
   async updateAccount(accountId: string, update: Partial<Pick<Account, "name" | "deletionRetentionDays" | "notifications" | "filtering" | "onboarding" | "afterSendAction">>): Promise<Result<Account, DbError>> {
-    const now = new Date().toISOString();
+    const now = DateTime.utc().toISO()!;
     const setParts: string[] = ["updatedAt = :now"];
     const exprValues: Record<string, unknown> = { ":now": now };
     const exprNames: Record<string, string> = {};
@@ -154,7 +155,7 @@ export class AccountDatabase {
     if (sendersResult.isErr()) return err(sendersResult.error);
     const senders = sendersResult.value;
 
-    const renamed: Alias = { ...old, address: newAddress, updatedAt: new Date().toISOString() };
+    const renamed: Alias = { ...old, address: newAddress, updatedAt: DateTime.utc().toISO()! };
     const saveResult = await this.saveAlias(renamed);
     if (saveResult.isErr()) return err(saveResult.error);
 
@@ -189,7 +190,7 @@ export class AccountDatabase {
           gsi1pk: `SENDERS#${accountId}#${domain}`,
           gsi1sk: `ALIAS#${address}`,
           accountId, aliasAddress: address, domain, policy,
-          addedAt: new Date().toISOString(),
+          addedAt: DateTime.utc().toISO()!,
         },
       }));
       return ok(undefined);
@@ -318,7 +319,7 @@ export class AccountDatabase {
     if (viewsResult.isErr()) return err(viewsResult.error);
     const views = viewsResult.value;
 
-    const now = new Date().toISOString();
+    const now = DateTime.utc().toISO()!;
     const view: View = {
       id: generateId("view-"),
       accountId,
@@ -346,7 +347,7 @@ export class AccountDatabase {
   }
 
   async updateView(accountId: string, id: string, data: UpdateViewRequest): Promise<Result<View, DbError>> {
-    const now = new Date().toISOString();
+    const now = DateTime.utc().toISO()!;
     const setParts: string[] = ["updatedAt = :now"];
     const exprValues: Record<string, unknown> = { ":now": now };
     const exprNames: Record<string, string> = {};
@@ -419,7 +420,7 @@ export class AccountDatabase {
   }
 
   async createLabel(accountId: string, data: CreateLabelRequest): Promise<Result<Label, DbError>> {
-    const now = new Date().toISOString();
+    const now = DateTime.utc().toISO()!;
     const label: Label = {
       id: data.name,
       accountId,
@@ -517,7 +518,7 @@ export class AccountDatabase {
     const allRules = allRulesResult.value;
 
     const userRules = allRules.filter((r) => r.priorityOrder >= 100);
-    const now = new Date().toISOString();
+    const now = DateTime.utc().toISO()!;
     const rule: Rule = {
       id: generateId("rule-"),
       accountId,
@@ -559,7 +560,7 @@ export class AccountDatabase {
       return err(dbError(e));
     }
 
-    const now = new Date().toISOString();
+    const now = DateTime.utc().toISO()!;
     const mergedStatus = data.status ?? existing.status;
     const mergedPriority = data.priorityOrder ?? existing.priorityOrder;
 
@@ -618,7 +619,7 @@ export class AccountDatabase {
         TableName: ACCOUNTS_TABLE,
         Key: { pk: pk(accountId), sk: `RULE#${ruleId}` },
         UpdateExpression: "SET lastError = :err, updatedAt = :now",
-        ExpressionAttributeValues: { ":err": errorMessage, ":now": new Date().toISOString() },
+        ExpressionAttributeValues: { ":err": errorMessage, ":now": DateTime.utc().toISO()! },
       }));
       return ok(undefined);
     } catch (e) {
@@ -633,7 +634,7 @@ export class AccountDatabase {
         Key: { pk: pk(accountId), sk: `TEMPLATE#${templateId}` },
         UpdateExpression: "SET functions[0].lastError = :err, updatedAt = :now",
         ConditionExpression: "attribute_exists(pk)",
-        ExpressionAttributeValues: { ":err": `[${functionName}] ${errorMessage}`, ":now": new Date().toISOString() },
+        ExpressionAttributeValues: { ":err": `[${functionName}] ${errorMessage}`, ":now": DateTime.utc().toISO()! },
       }));
       return ok(undefined);
     } catch (e) {
@@ -680,7 +681,7 @@ export class AccountDatabase {
   }
 
   async createDomain(accountId: string, domain: string): Promise<Result<Domain, DbError>> {
-    const now = new Date().toISOString();
+    const now = DateTime.utc().toISO()!;
     const item: Domain = {
       id: domain,
       accountId,
@@ -866,7 +867,7 @@ export class AccountDatabase {
   }
 
   async updateTemplate(accountId: string, id: string, update: Partial<Pick<EmailTemplate, "name" | "subject" | "body" | "functions">>): Promise<Result<EmailTemplate, DbError>> {
-    const now = new Date().toISOString();
+    const now = DateTime.utc().toISO()!;
     const setParts: string[] = ["updatedAt = :now"];
     const exprValues: Record<string, unknown> = { ":now": now };
     const exprNames: Record<string, string> = {};

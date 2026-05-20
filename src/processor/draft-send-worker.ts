@@ -1,3 +1,4 @@
+import { DateTime } from "luxon";
 import type { Signal, Arc } from "../types/index.js";
 import type { DbError, Result } from "../errors.js";
 import { ok, err, dbError } from "../errors.js";
@@ -72,7 +73,7 @@ export class DraftSendWorker {
       });
 
       // Transition to sent
-      const now = new Date().toISOString();
+      const now = DateTime.utc().toISO()!;
       const updateResult = await this.store.updateSignalSendStatus(accountId, signal.signalLookupId, {
         status: "sent",
         sentAt: now,

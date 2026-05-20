@@ -1,4 +1,5 @@
 import type { SQSEvent } from "aws-lambda";
+import { DateTime } from "luxon";
 import type { SesFeedback, Signal, SuppressedAddress } from "../types/index.js";
 import { generateId } from "../utils/id.js";
 import type { ProcessingDatabase } from "../database/processing-database.js";
@@ -76,7 +77,7 @@ export class FeedbackProcessor {
   private async processFeedback(feedback: SesFeedback): Promise<Result<void, DbError>> {
     if (feedback.notificationType === "Bounce" && feedback.bounce) {
       const isPermanent = feedback.bounce.bounceType === "Permanent";
-      const suppressedAt = new Date().toISOString();
+      const suppressedAt = DateTime.utc().toISO()!;
 
       for (const r of feedback.bounce.bouncedRecipients) {
         const entry: SuppressedAddress = {
@@ -142,7 +143,7 @@ export class FeedbackProcessor {
               accountId: sentSignal.accountId,
               source: "deliverability",
               status: "active",
-              receivedAt: new Date().toISOString(),
+              receivedAt: DateTime.utc().toISO()!,
               from: { address: "system@deliverability" },
               to: [],
               cc: [],
@@ -156,7 +157,7 @@ export class FeedbackProcessor {
               summary: "",
               classificationModelId: "",
               s3Key: "",
-              createdAt: new Date().toISOString(),
+              createdAt: DateTime.utc().toISO()!,
               relatedSignalId: sentSignal.id,
               bouncedRecipients,
             };
@@ -180,7 +181,7 @@ export class FeedbackProcessor {
         }
       }
     } else if (feedback.notificationType === "Complaint" && feedback.complaint) {
-      const suppressedAt = new Date().toISOString();
+      const suppressedAt = DateTime.utc().toISO()!;
 
       for (const r of feedback.complaint.complainedRecipients) {
         const entry: SuppressedAddress = {
