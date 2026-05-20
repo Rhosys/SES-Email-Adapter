@@ -1,3 +1,4 @@
+import { DateTime } from "luxon";
 import type { SignalStatus, StatsCategory } from "../types/index.js";
 
 const STATUS_TO_CATEGORY: Record<Exclude<SignalStatus, "draft" | "pending_send" | "sent">, StatsCategory> = {
@@ -22,8 +23,8 @@ export interface StatsUpdateParams {
   ExpressionAttributeValues: Record<string, unknown>;
 }
 
-export function buildStatsUpdateParams(accountId: string, category: StatsCategory, now: Date, tableName: string): StatsUpdateParams {
-  const today = now.toISOString().slice(0, 10); // YYYY-MM-DD
+export function buildStatsUpdateParams(accountId: string, category: StatsCategory, now: DateTime, tableName: string): StatsUpdateParams {
+  const today = now.toISODate()!; // YYYY-MM-DD
   const month = today.slice(0, 7); // YYYY-MM
   const year = today.slice(0, 4); // YYYY
 
@@ -45,22 +46,20 @@ export function buildStatsUpdateParams(accountId: string, category: StatsCategor
     },
     ExpressionAttributeValues: {
       ":one": 1,
-      ":now": now.toISOString(),
+      ":now": now.toISO()!,
     },
   };
 }
 
 
-export function buildPruneNames(now: Date): { names: Record<string, string>; expression: string } {
+export function buildPruneNames(now: DateTime): { names: Record<string, string>; expression: string } {
   const categories: StatsCategory[] = ["allowed", "blocked", "quarantined", "violationReport"];
   const names: Record<string, string> = {};
   let idx = 0;
 
   // Prune daily: day-8 through day-14
   for (let offset = 8; offset <= 14; offset++) {
-    const date = new Date(now);
-    date.setUTCDate(date.getUTCDate() - offset);
-    const dateStr = date.toISOString().slice(0, 10);
+    const dateStr = now.minus({ days: offset }).toISODate()!;
     for (const cat of categories) {
       names[`#prune${idx}`] = `d_${dateStr}_${cat}`;
       idx++;
@@ -69,9 +68,7 @@ export function buildPruneNames(now: Date): { names: Record<string, string>; exp
 
   // Prune monthly: month-3 and month-4
   for (let offset = 3; offset <= 4; offset++) {
-    const date = new Date(now);
-    date.setUTCMonth(date.getUTCMonth() - offset);
-    const monthStr = date.toISOString().slice(0, 7);
+    const monthStr = now.minus({ months: offset }).toFormat("yyyy-MM");
     for (const cat of categories) {
       names[`#prune${idx}`] = `m_${monthStr}_${cat}`;
       idx++;

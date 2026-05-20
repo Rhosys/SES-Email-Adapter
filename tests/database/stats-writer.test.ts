@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { DateTime } from "luxon";
 import { statusToCategory, buildStatsUpdateParams, buildPruneNames, parseStatsRow } from "../../src/database/stats-writer.js";
 import type { StatsCategory } from "../../src/types/index.js";
 
@@ -21,7 +22,7 @@ describe("statusToCategory", () => {
 
 
 describe("buildStatsUpdateParams", () => {
-  const now = new Date("2026-05-16T14:30:00.000Z");
+  const now = DateTime.fromISO("2026-05-16T14:30:00.000Z", { zone: "utc" });
   const accountId = "acc-test123";
   const tableName = "ses-accounts";
 
@@ -64,16 +65,14 @@ describe("buildStatsUpdateParams", () => {
 });
 
 describe("buildPruneNames", () => {
-  const now = new Date("2026-05-16T14:30:00.000Z");
+  const now = DateTime.fromISO("2026-05-16T14:30:00.000Z", { zone: "utc" });
   const categories = ["allowed", "blocked", "quarantined", "violationReport"] as const;
 
   it("returns attribute names for day-8 through day-14 × 4 categories", () => {
     const result = buildPruneNames(now);
     // day-8 = 2026-05-08, day-14 = 2026-05-02
     for (let offset = 8; offset <= 14; offset++) {
-      const date = new Date(now);
-      date.setUTCDate(date.getUTCDate() - offset);
-      const dateStr = date.toISOString().slice(0, 10);
+      const dateStr = now.minus({ days: offset }).toISODate()!;
       for (const cat of categories) {
         const attrName = `d_${dateStr}_${cat}`;
         expect(Object.values(result.names)).toContain(attrName);
