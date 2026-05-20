@@ -1,3 +1,4 @@
+import { DateTime } from "luxon";
 import { AccountDatabase } from "../database/account-database.js";
 import { ArcDatabase } from "../database/arc-database.js";
 import { checkDomain } from "../dns/dns-checker.js";
@@ -40,7 +41,7 @@ export class DomainHealthJob {
 
       for (const domain of domains) {
         const records = await checkDomain(domain);
-        const now = new Date().toISOString();
+        const now = DateTime.utc().toISO()!;
         const failingRecords = records.filter((r) => r.status === "failing").map((r) => r.name);
         const receivingHealthy = records.find((r) => r.type === "MX")?.status === "verified";
         const senderHealthy = records.filter((r) => r.type !== "MX").every((r) => r.status === "verified");
@@ -74,7 +75,7 @@ export class DomainHealthJob {
       }
 
       // Staleness check: identify outstanding arcs for this account
-      const cutoffDate = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+      const cutoffDate = DateTime.utc().minus({ days: 7 }).toISO()!;
       const staleArcsResult = await this.arcDb.listActiveArcsBefore(accountId, cutoffDate);
       if (staleArcsResult.isErr()) {
         this.logger.track("Failed to query stale arcs for account during staleness check. The DynamoDB query returned an error. This account's staleness report will be skipped. [Action Required] Check DynamoDB read capacity.", {
@@ -96,7 +97,7 @@ export class DomainHealthJob {
           workflow: arc.workflow,
         })));
         reports.push(report!);
-        const logEntry = buildAccountLogEntry(report!, new Date().toISOString());
+        const logEntry = buildAccountLogEntry(report!, DateTime.utc().toISO()!);
         // buildAccountLogEntry returns { level: "track", message, ...context }
         const { level: _level, message, timestamp: _ts, ...context } = logEntry as Record<string, unknown>;
         this.logger.track(message as string, context);
@@ -104,7 +105,7 @@ export class DomainHealthJob {
     }
 
     const durationMs = Date.now() - startTime;
-    const runCompleteEntry = buildRunCompleteLogEntry(reports, durationMs, new Date().toISOString());
+    const runCompleteEntry = buildRunCompleteLogEntry(reports, durationMs, DateTime.utc().toISO()!);
     // buildRunCompleteLogEntry returns { level: "info", message, ...context }
     const { level: _level, message, timestamp: _ts, ...context } = runCompleteEntry as Record<string, unknown>;
     this.logger.info(message as string, context);

@@ -1,6 +1,7 @@
 import { OpenAPIHono } from "@hono/zod-openapi";
 import type { Context } from "hono";
 import { randomUUID, createHash, randomBytes } from "crypto";
+import { DateTime } from "luxon";
 import { generateId } from "../utils/id.js";
 import { getDomain } from "tldts";
 import { checkDomain } from "../dns/dns-checker.js";
@@ -287,7 +288,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     if (existingResult.value.length > 0) return err(c, 409, "Account already exists", "ACCOUNT_EXISTS");
 
     // Generate a unique account ID — cycle until DynamoDB conditional put succeeds
-    const now = new Date().toISOString();
+    const now = DateTime.utc().toISO()!;
     let account: Account | null = null;
     for (let attempt = 0; attempt < 5; attempt++) {
       const candidate: Account = {
@@ -434,7 +435,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     if (!arc) return err(c, 404, "Arc not found", "ARC_NOT_FOUND");
     if (arc.accountId !== accountId) return err(c, 403, "Forbidden");
     const body = await zParse(CreateDraftSignalRequest, c.req.raw);
-    const now = new Date().toISOString();
+    const now = DateTime.utc().toISO()!;
     const id = generateId("sgn-");
     const signal: Signal = {
       id,
@@ -548,7 +549,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     if (matchedArcResult && matchedArcResult.isErr()) return err(c, 500, "Internal Server Error");
     const matchedArc = matchedArcResult ? matchedArcResult.value : null;
 
-    const now = new Date().toISOString();
+    const now = DateTime.utc().toISO()!;
     let arc: Arc;
     if (matchedArc) {
       const updateResult = await arcDb.updateArc(accountId, matchedArc.id, "active", signal.receivedAt, {});
@@ -648,8 +649,8 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
 
     // Compute undo window
     const undoWindowSeconds = computeUndoWindowSeconds(signal.textBody);
-    const sendInitiatedAt = new Date().toISOString();
-    const undoExpiresAt = new Date(Date.now() + undoWindowSeconds * 1000).toISOString();
+    const sendInitiatedAt = DateTime.utc().toISO()!;
+    const undoExpiresAt = DateTime.utc().plus({ seconds: undoWindowSeconds }).toISO()!;
 
     // SQS FIRST — before DDB write
     if (!draftSendDispatcher) return err(c, 501, "Send not configured");
@@ -924,7 +925,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     if (!domain) return err(c, 404, "Domain not found", "DOMAIN_NOT_FOUND");
     if (domain.accountId !== accountId) return err(c, 403, "Forbidden");
     const records = await checkDomain(domain);
-    const now = new Date().toISOString();
+    const now = DateTime.utc().toISO()!;
     const failingRecords = records.filter((r) => r.status === "failing").map((r) => r.name);
     const receivingHealthy = records.find((r) => r.type === "MX")?.status === "verified";
     const senderHealthy = records.filter((r) => r.type !== "MX").every((r) => r.status === "verified");
@@ -1083,7 +1084,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     const existingResult = await accountDb.getAlias(accountId, body.address);
     if (existingResult.isErr()) return err(c, 500, "Internal Server Error");
     if (existingResult.value) return err(c, 409, "Alias already exists", "ALIAS_EXISTS");
-    const now = new Date().toISOString();
+    const now = DateTime.utc().toISO()!;
     const createResult = await accountDb.createAlias({
       id: body.address,
       accountId,
@@ -1112,7 +1113,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     const existingResult = await accountDb.getAlias(accountId, address);
     if (existingResult.isErr()) return err(c, 500, "Internal Server Error");
     const existing = existingResult.value;
-    const now = new Date().toISOString();
+    const now = DateTime.utc().toISO()!;
     const upsertResult = await accountDb.upsertAlias({
       id: address,
       accountId,
@@ -1185,7 +1186,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
         return err(c, 400, `Invalid code in function '${astResult.name}': ${astResult.error}`, "INVALID_CODE", astResult.location ? { location: astResult.location } : undefined);
       }
     }
-    const now = new Date().toISOString();
+    const now = DateTime.utc().toISO()!;
     // Audit: write functions change event before persisting (best-effort)
     if (body.functions) {
       const { userId } = c.get("auth");
@@ -1302,7 +1303,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     const existing = existingResult.value;
     if (existing?.status === "verified") return c.json(existing, 200);
 
-    const now = new Date().toISOString();
+    const now = DateTime.utc().toISO()!;
     const addr: VerifiedForwardingAddress = {
       id: body.address,
       accountId,
@@ -1338,7 +1339,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     if (existing.status === "verified") return c.json(existing);
     if (existing.token !== body.token) return err(c, 400, "Invalid token", "INVALID_TOKEN");
 
-    const verified: VerifiedForwardingAddress = { ...existing, status: "verified", verifiedAt: new Date().toISOString() };
+    const verified: VerifiedForwardingAddress = { ...existing, status: "verified", verifiedAt: DateTime.utc().toISO()! };
     const saveResult = await accountDb.saveVerifiedForwardingAddress(verified);
     if (saveResult.isErr()) return err(c, 500, "Internal Server Error");
     return c.json(verified);

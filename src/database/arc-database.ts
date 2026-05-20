@@ -1,5 +1,6 @@
 import { RDSDataClient, ExecuteStatementCommand, BeginTransactionCommand, CommitTransactionCommand, RollbackTransactionCommand } from "@aws-sdk/client-rds-data";
 import { DeleteCommand, GetCommand, PutCommand, QueryCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
+import { DateTime } from "luxon";
 import { dynamo, SIGNALS_TABLE, encodeCursor, decodeCursor } from "./shared.js";
 import { ok, err, dbError } from "../errors.js";
 import type { DbError, Result } from "../errors.js";
@@ -295,7 +296,7 @@ export class ArcDatabase implements ArcMatcher {
   }
 
   async updateArc(accountId: string, id: string, status: ArcStatus, lastSignalAt: string, update: UpdateArcFields): Promise<Result<Arc, DbError>> {
-    const now = new Date().toISOString();
+    const now = DateTime.utc().toISO()!;
     const setParts: string[] = [
       "updatedAt = :now",
       "#status = :status",
@@ -333,7 +334,7 @@ export class ArcDatabase implements ArcMatcher {
   }
 
   async updateSignal(accountId: string, signalLookupId: string, update: Partial<Pick<Signal, "subject" | "textBody" | "from" | "to">>): Promise<Result<Signal, DbError>> {
-    const now = new Date().toISOString();
+    const now = DateTime.utc().toISO()!;
     const setParts: string[] = ["updatedAt = :now"];
     const exprValues: Record<string, unknown> = { ":now": now };
     const exprNames: Record<string, string> = {};
@@ -370,7 +371,7 @@ export class ArcDatabase implements ArcMatcher {
     },
   ): Promise<Result<Signal, DbError>> {
     const setParts: string[] = ["#status = :status", "updatedAt = :now"];
-    const exprValues: Record<string, unknown> = { ":status": update.status, ":now": new Date().toISOString() };
+    const exprValues: Record<string, unknown> = { ":status": update.status, ":now": DateTime.utc().toISO()! };
     const exprNames: Record<string, string> = { "#status": "status" };
     const removeParts: string[] = [];
 

@@ -1,4 +1,5 @@
 import { GetCommand, PutCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
+import { DateTime } from "luxon";
 import { dynamo, PROCESSING_TABLE } from "./shared.js";
 import { ok, err, dbError } from "../errors.js";
 import type { DbError, Result } from "../errors.js";
@@ -36,7 +37,7 @@ export class ProcessingDatabase {
   }
 
   async updateGlobalReputation(domain: string, update: { wasSpam: boolean; wasBlocked: boolean }): Promise<Result<void, DbError>> {
-    const now = new Date().toISOString();
+    const now = DateTime.utc().toISO()!;
     const addParts = ["signalCount :one"];
     if (update.wasSpam) addParts.push("spamCount :one");
     if (update.wasBlocked) addParts.push("blockCount :one");

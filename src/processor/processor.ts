@@ -1,4 +1,5 @@
 import type { S3Client } from "@aws-sdk/client-s3";
+import { DateTime } from "luxon";
 import { generateId } from "../utils/id.js";
 import type { Logger } from "../logger.js";
 import type { Result } from "neverthrow";
@@ -526,7 +527,7 @@ export class SignalProcessor {
     if (autoDraftActions.length > 0) {
       try {
         this.logger.trackPoint("side_effect_auto_draft_start");
-        const now = new Date().toISOString();
+        const now = DateTime.utc().toISO()!;
         const recipientDomain = signal.recipientAddress.split("@")[1] ?? "";
         const domainResult = await this.accountDb.getDomainByName(accountId, recipientDomain);
         const senderSetupComplete = domainResult.isOk() && !!domainResult.value?.senderSetupComplete;
@@ -760,7 +761,7 @@ export class SignalProcessor {
         s3Key,
         recipientAddress: destination[0] ?? "",
         receivedAt: timestamp,
-        createdAt: new Date().toISOString(),
+        createdAt: DateTime.utc().toISO()!,
         from: { address: "" },
         to: [],
         cc: [],
@@ -876,7 +877,7 @@ export class SignalProcessor {
     const embedding = primaryResult.value.vector;
     this.logger.trackPoint("email_processed");
 
-    const now = new Date().toISOString();
+    const now = DateTime.utc().toISO()!;
 
     // 4. Fetch sender entry (account context already fetched for retention resolution)
     const senderEntryResult = await this.accountDb.getSender(accountId, recipientAddress, senderETLD1);
@@ -1303,7 +1304,7 @@ export class SignalProcessor {
     existing: Alias | null,
     defaultUnknownSenderPolicy: AccountFilteringConfig["defaultUnknownSenderPolicy"] = "quarantine_visible",
   ): Promise<Result<void, DbError>> {
-    const now = new Date().toISOString();
+    const now = DateTime.utc().toISO()!;
     if (!existing) {
       const aliasResult = await this.accountDb.saveAlias({
         id: address,

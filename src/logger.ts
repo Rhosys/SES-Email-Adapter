@@ -1,4 +1,5 @@
 import { randomUUID } from "crypto";
+import { DateTime } from "luxon";
 
 export type LogLevel = "info" | "track" | "warn" | "error" | "critical";
 
@@ -170,7 +171,7 @@ export class RequestLogger implements Logger {
       level: level.toUpperCase() as unknown as LogLevel,
       title,
       ...(code !== undefined ? { code } : {}),
-      timestamp: new Date().toISOString(),
+      timestamp: DateTime.utc().toISO()!,
       invocationId: this.invocationId,
       containerId: this.containerId,
       ...(includeTrackPoints && this.trackPoints.length > 0 ? { trackPoints: this.trackPoints } : {}),
@@ -207,7 +208,7 @@ export class RequestLogger implements Logger {
       console.log({
         level: "WARN",
         title: "logger.payload_truncated",
-        timestamp: new Date().toISOString(),
+        timestamp: DateTime.utc().toISO()!,
         invocationId: this.invocationId,
         containerId: this.containerId,
         originalTitle: title,

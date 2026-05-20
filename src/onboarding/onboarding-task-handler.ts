@@ -1,4 +1,5 @@
 import { ok, err } from "neverthrow";
+import { DateTime } from "luxon";
 import type { Result } from "neverthrow";
 import type { DbError } from "../errors.js";
 import type { Logger } from "../logger.js";
@@ -93,7 +94,7 @@ export class OnboardingTaskHandler {
     const allComplete = progress.domainAdded && progress.senderSetupComplete && progress.emailsReceived;
     if (allComplete && !account.onboarding?.completed) {
       const updateResult = await this.store.updateAccount(accountId, {
-        onboarding: { completed: true, completedAt: new Date().toISOString() },
+        onboarding: { completed: true, completedAt: DateTime.utc().toISO()! },
       });
       if (updateResult.isErr()) {
         return err(updateResult.error);

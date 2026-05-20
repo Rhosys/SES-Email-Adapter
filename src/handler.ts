@@ -52,6 +52,7 @@ import type { DraftSendPayload } from "./processor/draft-send-dispatcher.js";
 import { DynamoSystemSignalCreator } from "./processor/system-signal-creator.js";
 import { DraftSendWorker } from "./processor/draft-send-worker.js";
 import { RequestLogger } from "./logger.js";
+import { DateTime } from "luxon";
 
 // ---------------------------------------------------------------------------
 // AWS SDK clients (reused across warm invocations)
@@ -152,7 +153,7 @@ const draftSendWorker = new DraftSendWorker(
     getSignalById: (accountId, id) => arcDb.getSignalById(accountId, id),
     updateSignalSendStatus: (accountId, signalLookupId, update) => arcDb.updateSignalSendStatus(accountId, signalLookupId, update),
     getArc: (accountId, id) => arcDb.getArc(accountId, id),
-    updateArcStatus: (accountId, id, status) => arcDb.updateArc(accountId, id, status, new Date().toISOString(), {}).then(r => r.map(() => undefined)),
+    updateArcStatus: (accountId, id, status) => arcDb.updateArc(accountId, id, status, DateTime.utc().toISO()!, {}).then(r => r.map(() => undefined)),
     getAccountAfterSendAction: async (accountId) => {
       const result = await accountDb.getAccount(accountId);
       if (result.isErr()) return err(result.error);
@@ -502,8 +503,8 @@ async function handleWebSocket(event: APIGatewayProxyWebsocketEventV2): Promise<
         accountId,
         token: connectionId,
         type: "websocket",
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+        createdAt: DateTime.utc().toISO()!,
+        updatedAt: DateTime.utc().toISO()!,
         // 2-hour TTL — API Gateway closes idle connections after 10 min anyway
         ttl: Math.floor(Date.now() / 1000) + 7200,
       });

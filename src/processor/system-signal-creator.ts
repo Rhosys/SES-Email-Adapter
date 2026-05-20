@@ -1,4 +1,5 @@
 import { PutCommand } from "@aws-sdk/lib-dynamodb";
+import { DateTime } from "luxon";
 import { dynamo, ACCOUNTS_TABLE } from "../database/shared.js";
 import type { Logger } from "../logger.js";
 import { generateId } from "../utils/id.js";
@@ -42,7 +43,7 @@ export class DynamoSystemSignalCreator implements SystemSignalCreator {
   }): Promise<void> {
     const { accountId, resourceType, resourceName, functionName, issue } = opts;
     const id = generateId("sgn-");
-    const timestamp = new Date().toISOString();
+    const timestamp = DateTime.utc().toISO()!;
     const ttl = Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60; // 30 days
 
     const description = functionName
@@ -90,7 +91,7 @@ export class DynamoSystemSignalCreator implements SystemSignalCreator {
   }): Promise<void> {
     const { accountId, fromAddress, replyToAddress, recipientAddress } = opts;
     const id = generateId("sgn-");
-    const timestamp = new Date().toISOString();
+    const timestamp = DateTime.utc().toISO()!;
     const ttl = Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60; // 30 days
 
     const description = `Auto-send suppressed for ${recipientAddress}: Reply-To ${replyToAddress} does not match From ${fromAddress} and is not in approved senders`;
