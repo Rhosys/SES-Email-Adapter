@@ -100,6 +100,7 @@ function makeStore(): ProcessorDatabase {
     getArc: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
     findArcByGroupingKey: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
     saveArc: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+    updateArc: vi.fn().mockReturnValue(Promise.resolve(ok({}))),
     listEnabledRules: vi.fn().mockReturnValue(Promise.resolve(ok(SYSTEM_RULES))),
     getProcessorAccountContext: vi.fn().mockReturnValue(Promise.resolve(ok(DEFAULT_CTX))),
     saveAlias: vi.fn().mockImplementation((a: Alias) => Promise.resolve(ok(a))),
