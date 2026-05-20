@@ -52,7 +52,7 @@ export class ExternalEmailSignalHandler implements ReplySender, Forwarder {
     return { messageId: result.value.messageId };
   }
 
-  async forward(s3Key: string, toAddress: string, accountId: string): Promise<Result<void, DbError>> {
+  async forward(s3Key: string, toAddress: string, accountId: string, _opts?: { signalId?: string; arcId?: string }): Promise<Result<void, DbError>> {
     try {
       const res = await this.s3.send(new GetObjectCommand({ Bucket: this.emailBucket, Key: s3Key }));
       const rawBytes = await res.Body!.transformToByteArray();
