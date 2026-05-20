@@ -4,7 +4,8 @@ import type { Logger } from "../logger.js";
 import type { Result } from "neverthrow";
 import { ok, err, dbError } from "../errors.js";
 import type { DbError, InvalidResponseError } from "../errors.js";
-import type { Signal, Arc, Rule, Workflow, WorkflowData, Alias, AliasSender, SenderPolicy, AccountFilteringConfig, SignalSource, SignalStatus, Domain, ArcUrgency, UnknownSenderPolicy, MatchedRuleResult } from "../types/index.js";
+import type { Signal, Arc, Rule, Workflow, WorkflowData, Alias, AliasSender, SenderPolicy, AccountFilteringConfig, SignalSource, SignalStatus, Domain, ArcStatus, ArcUrgency, UnknownSenderPolicy, MatchedRuleResult } from "../types/index.js";
+import type { UpdateArcFields } from "../database/arc-database.js";
 import type { ParsedMime } from "./mime.js";
 import type { ContentSanitizerClient } from "./content-sanitizer-client.js";
 import type { UserCodeExecutorClient, TemplateParameterResult } from "./user-code-client.js";
@@ -67,6 +68,7 @@ export interface ProcessorDatabase {
   getArc(accountId: string, id: string): Promise<Result<Arc | null, DbError>>;
   findArcByGroupingKey(accountId: string, key: string): Promise<Result<Arc | null, DbError>>;
   saveArc(arc: Arc): Promise<Result<void, DbError>>;
+  updateArc(accountId: string, id: string, status: ArcStatus, lastSignalAt: string, update: UpdateArcFields): Promise<Result<Arc, DbError>>;
   listEnabledRules(accountId: string): Promise<Result<Rule[], DbError>>;
   getProcessorAccountContext(accountId: string, recipientAddress: string): Promise<Result<ProcessorAccountContext, DbError>>;
   saveAlias(alias: Alias): Promise<Result<Alias, DbError>>;
