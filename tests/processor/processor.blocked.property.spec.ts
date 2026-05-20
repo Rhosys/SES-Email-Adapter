@@ -2,7 +2,8 @@ import { describe, it, expect, vi } from "vitest";
 import { ok } from "../../src/errors.js";
 import { SignalProcessor, SYSTEM_RULES } from "../../src/processor/processor.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
-import type { InboundSignalMessage, ProcessorDatabase, ArcMatcher } from "../../src/processor/processor.js";
+import type { InboundSignalMessage, ArcMatcher } from "../../src/processor/processor.js";
+import { makeArcDbMock, makeAccountDbMock, makeProcessingDbMock } from "./_helpers.js";
 import type { ContentSanitizerClient } from "../../src/processor/content-sanitizer-client.js";
 import type { SignalClassifier, ClassificationOutput } from "../../src/classifier/classifier.js";
 import type { EmbeddingGenerator, EmbeddingResult } from "../../src/embedding/embedding-generator.js";
@@ -36,26 +37,11 @@ vi.mock("../../src/processor/presign.js", () => ({
 describe("Blocked/quarantined signals never trigger saveArc", () => {
   const TEST_ACCOUNT_ID = "acct-prop2";
 
-  function makeStore(): ProcessorDatabase {
-    return {
-      getSignalByMessageId: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-      saveSignal: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      updateSignalRetention: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      getArc: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-      findArcByGroupingKey: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-      saveArc: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      listEnabledRules: vi.fn().mockReturnValue(Promise.resolve(ok(SYSTEM_RULES))),
-      getProcessorAccountContext: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-      saveAlias: vi.fn().mockImplementation((a: Alias) => Promise.resolve(ok(a))),
-      getSender: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-      saveSender: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      getTemplate: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-      updateGlobalReputation: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      getDomainByName: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-      incrementStats: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      annotateRuleError: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      annotateTemplateError: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    };
+  function makeStore() {
+    const arcDb = makeArcDbMock();
+    const accountDb = makeAccountDbMock();
+    const processingDb = makeProcessingDbMock();
+    return { arcDb, accountDb, processingDb };
   }
 
   function makeContentSanitizer(fromDomain: string): ContentSanitizerClient {
@@ -205,7 +191,7 @@ describe("Blocked/quarantined signals never trigger saveArc", () => {
 
   it.each(strategies)("$label — saveArc is never called", async (strategy) => {
     const mockLogger = createMockLogger();
-    const store = makeStore();
+    const { arcDb, accountDb, processingDb } = makeStore();
 
     const emailConfig: Alias = {
       id: "cfg-prop2",
@@ -216,7 +202,7 @@ describe("Blocked/quarantined signals never trigger saveArc", () => {
       updatedAt: "2024-01-01T00:00:00Z",
     };
 
-    (store.getProcessorAccountContext as ReturnType<typeof vi.fn>).mockReturnValue(Promise.resolve(ok({
+    (accountDb.getProcessorAccountContext as ReturnType<typeof vi.fn>).mockReturnValue(Promise.resolve(ok({
       retentionDays: 0,
       filtering: null,
       emailConfig,
@@ -224,11 +210,13 @@ describe("Blocked/quarantined signals never trigger saveArc", () => {
       userEmails: [],
       billingPlan: "Paid" as const,
     })));
-    (store.getSender as ReturnType<typeof vi.fn>).mockReturnValue(Promise.resolve(ok(strategy.senderEntry)));
-    (store.listEnabledRules as ReturnType<typeof vi.fn>).mockReturnValue(Promise.resolve(ok(strategy.rules)));
+    (accountDb.getSender as ReturnType<typeof vi.fn>).mockReturnValue(Promise.resolve(ok(strategy.senderEntry)));
+    (accountDb.listEnabledRules as ReturnType<typeof vi.fn>).mockReturnValue(Promise.resolve(ok(strategy.rules)));
 
     const processor = new SignalProcessor({
-      store,
+      arcDb,
+      accountDb,
+      processingDb,
       contentSanitizer: strategy.contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com",
       classifier: strategy.classifier,
       embeddingGenerator: makeEmbeddingGenerator(),
@@ -246,6 +234,6 @@ describe("Blocked/quarantined signals never trigger saveArc", () => {
 
     await processor.processRecord(makeMessage("msg-blocked-test"), 1);
 
-    expect(store.saveArc).not.toHaveBeenCalled();
+    expect(arcDb.saveArc).not.toHaveBeenCalled();
   });
 });

@@ -4,7 +4,8 @@ import { ok, err } from "neverthrow";
 import { SignalProcessor, deriveGroupingKey, SYSTEM_RULES, extractForwardedAddress } from "../../src/processor/processor.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
 import { baseUrgency } from "../../src/processor/priority.js";
-import type { ProcessorDatabase, ArcMatcher, RuleEvaluator, Notifier, Forwarder, ReplySender, InboundSignalMessage, SqsDispatcher } from "../../src/processor/processor.js";
+import type { ArcMatcher, RuleEvaluator, Notifier, Forwarder, ReplySender, InboundSignalMessage, SqsDispatcher } from "../../src/processor/processor.js";
+import { makeArcDbMock, makeAccountDbMock, makeProcessingDbMock } from "./_helpers.js";
 import type { ContentSanitizerClient } from "../../src/processor/content-sanitizer-client.js";
 import type { UserCodeExecutorClient } from "../../src/processor/user-code-client.js";
 import type { SignalClassifier, ClassificationOutput } from "../../src/classifier/classifier.js";
@@ -58,26 +59,15 @@ const DEFAULT_SENDER_ENTRY: import("../../src/types/index.js").AliasSender = {
 };
 const DEFAULT_CTX = { retentionDays: 0, filtering: null, emailConfig: DEFAULT_EMAIL_CONFIG, registeredDomains: [], userEmails: [], billingPlan: "Paid" as const };
 
-function makeStore(): ProcessorDatabase {
-  return {
-    getSignalByMessageId: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-    saveSignal: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    updateSignalRetention: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    getArc: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-    findArcByGroupingKey: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-    saveArc: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    listEnabledRules: vi.fn().mockReturnValue(Promise.resolve(ok(SYSTEM_RULES))),
-    getProcessorAccountContext: vi.fn().mockReturnValue(Promise.resolve(ok(DEFAULT_CTX))),
-    saveAlias: vi.fn().mockImplementation((a: Alias) => Promise.resolve(ok(a))),
-    getSender: vi.fn().mockReturnValue(Promise.resolve(ok(DEFAULT_SENDER_ENTRY))),
-    saveSender: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    getTemplate: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-    updateGlobalReputation: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    getDomainByName: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-    incrementStats: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    annotateRuleError: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    annotateTemplateError: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-  };
+function makeStore() {
+  const arcDb = makeArcDbMock();
+  const accountDb = makeAccountDbMock();
+  const processingDb = makeProcessingDbMock();
+  // Override defaults for this test file
+  vi.mocked(accountDb.listEnabledRules).mockReturnValue(Promise.resolve(ok(SYSTEM_RULES)));
+  vi.mocked(accountDb.getProcessorAccountContext).mockReturnValue(Promise.resolve(ok(DEFAULT_CTX)));
+  vi.mocked(accountDb.getSender).mockReturnValue(Promise.resolve(ok(DEFAULT_SENDER_ENTRY)));
+  return { arcDb, accountDb, processingDb };
 }
 
 function makeReplySender(): ReplySender {
@@ -235,7 +225,9 @@ function makeArc(overrides: Partial<Arc> = {}): Arc {
 // ---------------------------------------------------------------------------
 
 describe("SignalProcessor", () => {
-  let store: ProcessorDatabase;
+  let arcDb: ReturnType<typeof makeArcDbMock>;
+  let accountDb: ReturnType<typeof makeAccountDbMock>;
+  let processingDb: ReturnType<typeof makeProcessingDbMock>;
   let contentSanitizer: ContentSanitizerClient;
   let classifier: Pick<SignalClassifier, "classify">;
   let embeddingGenerator: EmbeddingGenerator;
@@ -244,20 +236,18 @@ describe("SignalProcessor", () => {
   let ruleEvaluator: RuleEvaluator;
   let processor: SignalProcessor;
   let mockLogger: MockLogger;
-  let mockArcDb: { updateArc: ReturnType<typeof vi.fn> };
 
   beforeEach(() => {
     vi.clearAllMocks();
     mockLogger = createMockLogger();
-    store = makeStore();
+    ({ arcDb, accountDb, processingDb } = makeStore());
     contentSanitizer = makeContentSanitizer();
     classifier = makeClassifier();
     embeddingGenerator = makeEmbeddingGenerator();
     auroraWriter = makeAuroraWriter();
     arcMatcher = makeArcMatcher();
     ruleEvaluator = makeRuleEvaluator(mockLogger);
-    mockArcDb = { updateArc: vi.fn().mockReturnValue(Promise.resolve(ok({ id: "arc-existing" }))) };
-    processor = new SignalProcessor({ store, arcDb: mockArcDb as never, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com", classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, logger: mockLogger, notifier: makeNotifier(), forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never });
+    processor = new SignalProcessor({ arcDb, accountDb, processingDb, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com", classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, logger: mockLogger, notifier: makeNotifier(), forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never });
   });
 
   afterEach(() => {
@@ -272,8 +262,8 @@ describe("SignalProcessor", () => {
     it("saves a Signal after classification", async () => {
       await processor.processRecord(makeMessage({ sesMessageId: "msg-abc" }), 1);
 
-      expect(store.saveSignal).toHaveBeenCalledOnce();
-      const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
+      expect(arcDb.saveSignal).toHaveBeenCalledOnce();
+      const saved = vi.mocked(arcDb.saveSignal).mock.calls[0]![0] as Signal;
       expect(saved.id).toMatch(/^sgn-/);
       expect(saved.source).toBe("email");
       expect(saved.workflow).toBe("conversation");
@@ -283,8 +273,8 @@ describe("SignalProcessor", () => {
     it("creates a new Arc when arcMatcher returns null", async () => {
       await processor.processRecord(makeMessage(), 1);
 
-      expect(store.saveArc).toHaveBeenCalledOnce();
-      const arc = vi.mocked(store.saveArc).mock.calls[0]![0] as Arc;
+      expect(arcDb.saveArc).toHaveBeenCalledOnce();
+      const arc = vi.mocked(arcDb.saveArc).mock.calls[0]![0] as Arc;
       expect(arc.id).toBeTruthy();
       expect(arc.status).toBe("active");
       expect(arc.accountId).toBe(TEST_ACCOUNT_ID);
@@ -293,8 +283,8 @@ describe("SignalProcessor", () => {
     it("links Signal to the newly created Arc", async () => {
       await processor.processRecord(makeMessage(), 1);
 
-      const arc = vi.mocked(store.saveArc).mock.calls[0]![0] as Arc;
-      const signal = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
+      const arc = vi.mocked(arcDb.saveArc).mock.calls[0]![0] as Arc;
+      const signal = vi.mocked(arcDb.saveSignal).mock.calls[0]![0] as Signal;
       expect(signal.arcId).toBe(arc.id);
     });
 
@@ -329,7 +319,7 @@ describe("SignalProcessor", () => {
 
       await processor.processRecord(makeMessage(), 1);
 
-      const arc = vi.mocked(store.saveArc).mock.calls[0]![0] as Arc;
+      const arc = vi.mocked(arcDb.saveArc).mock.calls[0]![0] as Arc;
       expect(arc.workflow).toBe("payments");
       expect(arc.summary).toBe("Receipt from Stripe for $99.");
       expect(arc.labels).toContain("billing");
@@ -338,7 +328,7 @@ describe("SignalProcessor", () => {
     it("preserves from/to/subject from parsed MIME on the Signal", async () => {
       await processor.processRecord(makeMessage(), 1);
 
-      const signal = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
+      const signal = vi.mocked(arcDb.saveSignal).mock.calls[0]![0] as Signal;
       expect(signal.from.address).toBe("sender@example.com");
       expect(signal.subject).toBe("Test email");
     });
@@ -346,7 +336,7 @@ describe("SignalProcessor", () => {
     it("sets recipientAddress from the SQS destination field", async () => {
       await processor.processRecord(makeMessage({ destination: ["inbox@customer.com"] }), 1);
 
-      const signal = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
+      const signal = vi.mocked(arcDb.saveSignal).mock.calls[0]![0] as Signal;
       expect(signal.recipientAddress).toBe("inbox@customer.com");
     });
   });
@@ -362,7 +352,7 @@ describe("SignalProcessor", () => {
 
       await processor.processRecord(makeMessage(), 1);
 
-      const signal = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
+      const signal = vi.mocked(arcDb.saveSignal).mock.calls[0]![0] as Signal;
       expect(signal.arcId).toBe("arc-existing");
     });
 
@@ -376,8 +366,8 @@ describe("SignalProcessor", () => {
 
       await processor.processRecord(makeMessage(), 1);
 
-      expect(mockArcDb.updateArc).toHaveBeenCalledOnce();
-      const [, arcId, status, , fields] = mockArcDb.updateArc.mock.calls[0]!;
+      expect(arcDb.updateArc).toHaveBeenCalledOnce();
+      const [, arcId, status, , fields] = vi.mocked(arcDb.updateArc).mock.calls[0]!;
       expect(arcId).toBe("arc-existing");
       expect(status).toBe("active");
       expect(fields.summary).toBe("Updated summary from new signal.");
@@ -401,11 +391,11 @@ describe("SignalProcessor", () => {
         createdAt: "2024-01-01T00:00:00Z",
         updatedAt: "2024-01-01T00:00:00Z",
       };
-      vi.mocked(store.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([rule])));
+      vi.mocked(accountDb.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([rule])));
 
       await processor.processRecord(makeMessage(), 1);
 
-      const arc = vi.mocked(store.saveArc).mock.calls[0]![0] as Arc;
+      const arc = vi.mocked(arcDb.saveArc).mock.calls[0]![0] as Arc;
       expect(arc.labels).toContain("billing");
     });
 
@@ -421,11 +411,11 @@ describe("SignalProcessor", () => {
         createdAt: "2024-01-01T00:00:00Z",
         updatedAt: "2024-01-01T00:00:00Z",
       };
-      vi.mocked(store.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([rule])));
+      vi.mocked(accountDb.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([rule])));
 
       await processor.processRecord(makeMessage(), 1);
 
-      const arc = vi.mocked(store.saveArc).mock.calls[0]![0] as Arc;
+      const arc = vi.mocked(arcDb.saveArc).mock.calls[0]![0] as Arc;
       expect(arc.status).toBe("archived");
     });
 
@@ -441,11 +431,11 @@ describe("SignalProcessor", () => {
         createdAt: "2024-01-01T00:00:00Z",
         updatedAt: "2024-01-01T00:00:00Z",
       };
-      vi.mocked(store.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([rule])));
+      vi.mocked(accountDb.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([rule])));
 
       await processor.processRecord(makeMessage(), 1);
 
-      const arc = vi.mocked(store.saveArc).mock.calls[0]![0] as Arc;
+      const arc = vi.mocked(arcDb.saveArc).mock.calls[0]![0] as Arc;
       expect(arc.status).toBe("active");
     });
 
@@ -461,11 +451,11 @@ describe("SignalProcessor", () => {
         createdAt: "2024-01-01T00:00:00Z",
         updatedAt: "2024-01-01T00:00:00Z",
       };
-      vi.mocked(store.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([rule])));
+      vi.mocked(accountDb.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([rule])));
 
       await processor.processRecord(makeMessage(), 1);
 
-      const arc = vi.mocked(store.saveArc).mock.calls[0]![0] as Arc;
+      const arc = vi.mocked(arcDb.saveArc).mock.calls[0]![0] as Arc;
       expect(arc.labels).not.toContain("important");
     });
 
@@ -481,12 +471,12 @@ describe("SignalProcessor", () => {
         createdAt: "2024-01-01T00:00:00Z",
         updatedAt: "2024-01-01T00:00:00Z",
       };
-      vi.mocked(store.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([rule])));
+      vi.mocked(accountDb.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([rule])));
 
       // No error — processor without forwarder silently skips forward actions
       await processor.processRecord(makeMessage(), 1);
 
-      expect(store.saveSignal).toHaveBeenCalledOnce();
+      expect(arcDb.saveSignal).toHaveBeenCalledOnce();
     });
   });
 
@@ -507,11 +497,11 @@ describe("SignalProcessor", () => {
         createdAt: "2024-01-01T00:00:00Z",
         updatedAt: "2024-01-01T00:00:00Z",
       };
-      vi.mocked(store.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([rule])));
+      vi.mocked(accountDb.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([rule])));
 
       await processor.processRecord(makeMessage(), 1);
 
-      const signal = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
+      const signal = vi.mocked(arcDb.saveSignal).mock.calls[0]![0] as Signal;
       expect(signal.matchedRules).toHaveLength(1);
       expect(signal.matchedRules![0]!.ruleId).toBe("rule-label");
       expect(signal.matchedRules![0]!.labelsAdded).toContain("billing");
@@ -530,15 +520,15 @@ describe("SignalProcessor", () => {
         createdAt: "2024-01-01T00:00:00Z",
         updatedAt: "2024-01-01T00:00:00Z",
       };
-      vi.mocked(store.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([rule])));
-      vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok({
+      vi.mocked(accountDb.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([rule])));
+      vi.mocked(accountDb.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok({
         ...DEFAULT_CTX,
         emailConfig: { ...DEFAULT_EMAIL_CONFIG, unknownSenderPolicy: "allow_all" },
       })));
 
       await processor.processRecord(makeMessage(), 1);
 
-      const signal = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
+      const signal = vi.mocked(arcDb.saveSignal).mock.calls[0]![0] as Signal;
       expect(signal.status).toBe("quarantine_visible");
       expect(signal.matchedRules).toHaveLength(1);
       expect(signal.matchedRules![0]!.statusChange).toBe("quarantine_visible");
@@ -547,11 +537,11 @@ describe("SignalProcessor", () => {
     it("does not include rules that did not match", async () => {
       const matching: Rule = { ...makeRule({ id: "r-match", name: "Matches", condition: "true", actions: [{ type: "archive" }] }) };
       const nonMatching: Rule = { ...makeRule({ id: "r-skip", name: "Never", condition: '{"==": [1, 2]}', actions: [{ type: "block_hidden" }] }) };
-      vi.mocked(store.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([matching, nonMatching])));
+      vi.mocked(accountDb.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([matching, nonMatching])));
 
       await processor.processRecord(makeMessage(), 1);
 
-      const signal = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
+      const signal = vi.mocked(arcDb.saveSignal).mock.calls[0]![0] as Signal;
       expect(signal.matchedRules?.map((r) => r.ruleId)).toEqual(["r-match"]);
     });
   });
@@ -565,7 +555,7 @@ describe("SignalProcessor", () => {
 
     beforeEach(() => {
       sqsDispatcher = { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) };
-      processor = new SignalProcessor({ store, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com", classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, sqsDispatcher, logger: mockLogger, notifier: makeNotifier(), forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never });
+      processor = new SignalProcessor({ arcDb, accountDb, processingDb, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com", classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, sqsDispatcher, logger: mockLogger, notifier: makeNotifier(), forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never });
     });
 
     it("dispatches side-effect with forward action in matchedRules when forward rule matches", async () => {
@@ -580,7 +570,7 @@ describe("SignalProcessor", () => {
         createdAt: "2024-01-01T00:00:00Z",
         updatedAt: "2024-01-01T00:00:00Z",
       };
-      vi.mocked(store.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([rule])));
+      vi.mocked(accountDb.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([rule])));
 
       await processor.processRecord(makeMessage({ s3Key: "emails/msg-123" }), 1);
 
@@ -605,7 +595,7 @@ describe("SignalProcessor", () => {
         createdAt: "2024-01-01T00:00:00Z",
         updatedAt: "2024-01-01T00:00:00Z",
       };
-      vi.mocked(store.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([rule])));
+      vi.mocked(accountDb.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([rule])));
 
       await processor.processRecord(makeMessage(), 1);
 
@@ -628,7 +618,7 @@ describe("SignalProcessor", () => {
         createdAt: "2024-01-01T00:00:00Z",
         updatedAt: "2024-01-01T00:00:00Z",
       };
-      vi.mocked(store.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([rule])));
+      vi.mocked(accountDb.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([rule])));
 
       await processor.processRecord(makeMessage(), 1);
 
@@ -652,12 +642,12 @@ describe("SignalProcessor", () => {
         createdAt: "2024-01-01T00:00:00Z",
         updatedAt: "2024-01-01T00:00:00Z",
       };
-      vi.mocked(store.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([rule])));
+      vi.mocked(accountDb.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([rule])));
 
       await processor.processRecord(makeMessage(), 1);
 
       // saveSignal was called before sqsDispatcher.sendMessage
-      const signalOrder = vi.mocked(store.saveSignal).mock.invocationCallOrder[0]!;
+      const signalOrder = vi.mocked(arcDb.saveSignal).mock.invocationCallOrder[0]!;
       const dispatchOrder = sqsMock.mock.invocationCallOrder[0]!;
       expect(signalOrder).toBeLessThan(dispatchOrder);
     });
@@ -674,12 +664,12 @@ describe("SignalProcessor", () => {
         createdAt: "2024-01-01T00:00:00Z",
         updatedAt: "2024-01-01T00:00:00Z",
       };
-      vi.mocked(store.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([rule])));
+      vi.mocked(accountDb.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([rule])));
 
       await processor.processRecord(makeMessage(), 1);
 
       // Signal was saved and side-effect dispatched
-      expect(store.saveSignal).toHaveBeenCalledOnce();
+      expect(arcDb.saveSignal).toHaveBeenCalledOnce();
       expect(sqsDispatcher.sendMessage).toHaveBeenCalledOnce();
     });
   });
@@ -690,14 +680,14 @@ describe("SignalProcessor", () => {
 
   describe("deduplication", () => {
     it("skips processing if Signal with same messageId already exists", async () => {
-      vi.mocked(store.getSignalByMessageId).mockReturnValueOnce(Promise.resolve(ok({
+      vi.mocked(arcDb.getSignalByMessageId).mockReturnValueOnce(Promise.resolve(ok({
         id: "SES#msg-123",
       } as never)));
 
       await processor.processRecord(makeMessage({ sesMessageId: "msg-123" }), 1);
 
       expect(classifier.classify).not.toHaveBeenCalled();
-      expect(store.saveSignal).not.toHaveBeenCalled();
+      expect(arcDb.saveSignal).not.toHaveBeenCalled();
     });
   });
 
@@ -718,7 +708,7 @@ describe("SignalProcessor", () => {
       }
 
       expect(classifier.classify).toHaveBeenCalledTimes(3);
-      expect(store.saveSignal).toHaveBeenCalledTimes(3);
+      expect(arcDb.saveSignal).toHaveBeenCalledTimes(3);
     });
 
     it("continues processing remaining records when one fails", async () => {
@@ -731,8 +721,8 @@ describe("SignalProcessor", () => {
 
       expect(result1.isErr()).toBe(true);
       expect(result2.isOk()).toBe(true);
-      expect(store.saveSignal).toHaveBeenCalledOnce();
-      const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
+      expect(arcDb.saveSignal).toHaveBeenCalledOnce();
+      const saved = vi.mocked(arcDb.saveSignal).mock.calls[0]![0] as Signal;
       expect(saved.id).toMatch(/^sgn-/);
       expect(saved.source).toBe("email");
     });
@@ -747,7 +737,7 @@ describe("SignalProcessor", () => {
 
     beforeEach(() => {
       sqsDispatcher = { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) };
-      processor = new SignalProcessor({ store, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com", classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, sqsDispatcher, logger: mockLogger, notifier: makeNotifier(), forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never });
+      processor = new SignalProcessor({ arcDb, accountDb, processingDb, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com", classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, sqsDispatcher, logger: mockLogger, notifier: makeNotifier(), forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never });
     });
 
     it("dispatches side-effect after saving a new Signal", async () => {
@@ -783,7 +773,7 @@ describe("SignalProcessor", () => {
       const result = await processor.processRecord(makeMessage(), 1);
 
       // Signal was still saved
-      expect(store.saveSignal).toHaveBeenCalledOnce();
+      expect(arcDb.saveSignal).toHaveBeenCalledOnce();
       // But the overall result is err because dispatch failed
       expect(result.isErr()).toBe(true);
     });
@@ -791,7 +781,7 @@ describe("SignalProcessor", () => {
     it("dispatches side-effect even without explicit notifier configured", async () => {
       // Processor with default notifier — side-effect dispatch still happens
       const processorWithoutNotifier = new SignalProcessor({
-        store, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com", classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, logger: mockLogger,
+        arcDb, accountDb, processingDb, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com", classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, logger: mockLogger,
         notifier: makeNotifier(), forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
         replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher,
         draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
@@ -812,56 +802,56 @@ describe("SignalProcessor", () => {
 
     beforeEach(() => {
       notifier = makeNotifier();
-      processor = new SignalProcessor({ store, arcDb: mockArcDb as never, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com", classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, notifier, logger: mockLogger, forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never });
+      processor = new SignalProcessor({ arcDb, accountDb, processingDb, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com", classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, notifier, logger: mockLogger, forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never });
     });
 
     it("allows signal on brand new address and auto-creates aliases with sender approved", async () => {
-      vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok(
+      vi.mocked(accountDb.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok(
         { ...DEFAULT_CTX, emailConfig: null },
       )));
       // No existing sender entry for a brand-new address
-      vi.mocked(store.getSender).mockReturnValueOnce(Promise.resolve(ok(null)));
+      vi.mocked(accountDb.getSender).mockReturnValueOnce(Promise.resolve(ok(null)));
       await processor.processRecord(makeMessage(), 1);
 
-      expect(store.saveSignal).toHaveBeenCalledOnce();
-      expect(store.saveArc).toHaveBeenCalledOnce();
-      expect(store.saveAlias).toHaveBeenCalledOnce();
+      expect(arcDb.saveSignal).toHaveBeenCalledOnce();
+      expect(arcDb.saveArc).toHaveBeenCalledOnce();
+      expect(accountDb.saveAlias).toHaveBeenCalledOnce();
 
-      const savedConfig = vi.mocked(store.saveAlias).mock.calls[0]![0] as Alias;
+      const savedConfig = vi.mocked(accountDb.saveAlias).mock.calls[0]![0] as Alias;
       expect(savedConfig.unknownSenderPolicy).toBe("quarantine_visible");
-      expect(store.saveSender).toHaveBeenCalledWith(TEST_ACCOUNT_ID, expect.any(String), "example.com", "allow");
+      expect(accountDb.saveSender).toHaveBeenCalledWith(TEST_ACCOUNT_ID, expect.any(String), "example.com", "allow");
     });
 
     it("allows signal from a known sender (eTLD+1 in approved list)", async () => {
-      vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok(
+      vi.mocked(accountDb.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok(
         { ...DEFAULT_CTX, emailConfig: makeAlias() },
       )));
       // getSender returns an approved entry for example.com (default mock already does this)
 
       await processor.processRecord(makeMessage(), 1);
 
-      expect(store.saveSignal).toHaveBeenCalledOnce();
-      expect(store.saveArc).toHaveBeenCalledOnce();
-      expect(store.saveAlias).not.toHaveBeenCalled(); // no auto-approve needed
+      expect(arcDb.saveSignal).toHaveBeenCalledOnce();
+      expect(arcDb.saveArc).toHaveBeenCalledOnce();
+      expect(accountDb.saveAlias).not.toHaveBeenCalled(); // no auto-approve needed
     });
 
     it("unknown sender with default filter mode → quarantine_visible (shown in review queue)", async () => {
-      vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok(
+      vi.mocked(accountDb.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok(
         { ...DEFAULT_CTX, emailConfig: makeAlias() }, // default filterMode: quarantine_visible
       )));
-      vi.mocked(store.getSender).mockReturnValueOnce(Promise.resolve(ok(null)));
+      vi.mocked(accountDb.getSender).mockReturnValueOnce(Promise.resolve(ok(null)));
 
       await processor.processRecord(makeMessage(), 1);
 
-      expect(store.saveArc).not.toHaveBeenCalled();
-      expect(store.saveSignal).toHaveBeenCalledOnce();
-      const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
+      expect(arcDb.saveArc).not.toHaveBeenCalled();
+      expect(arcDb.saveSignal).toHaveBeenCalledOnce();
+      const saved = vi.mocked(arcDb.saveSignal).mock.calls[0]![0] as Signal;
       expect(saved.status).toBe("quarantine_visible");
       expect(saved.arcId).toBeUndefined();
     });
 
     it("quarantines high-spam signal from approved sender (SR-03 fires)", async () => {
-      vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok(
+      vi.mocked(accountDb.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok(
         { ...DEFAULT_CTX, emailConfig: makeAlias() },
       )));
       // Approved sender → SR-03 fires on high spam → quarantine_hidden
@@ -872,46 +862,46 @@ describe("SignalProcessor", () => {
 
       await processor.processRecord(makeMessage(), 1);
 
-      const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
+      const saved = vi.mocked(arcDb.saveSignal).mock.calls[0]![0] as Signal;
       expect(saved.status).toBe("quarantine_hidden");
     });
 
     it("filter mode quarantine_visible: unknown sender → quarantine_visible", async () => {
-      vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok(
+      vi.mocked(accountDb.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok(
         { ...DEFAULT_CTX, emailConfig: makeAlias({ unknownSenderPolicy: "quarantine_visible" }) },
       )));
-      vi.mocked(store.getSender).mockReturnValueOnce(Promise.resolve(ok(null)));
+      vi.mocked(accountDb.getSender).mockReturnValueOnce(Promise.resolve(ok(null)));
 
       await processor.processRecord(makeMessage(), 1);
 
-      const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
+      const saved = vi.mocked(arcDb.saveSignal).mock.calls[0]![0] as Signal;
       expect(saved.status).toBe("quarantine_visible");
     });
 
     it("filter mode quarantine_hidden: unknown sender → quarantine_hidden", async () => {
-      vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok(
+      vi.mocked(accountDb.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok(
         { ...DEFAULT_CTX, emailConfig: makeAlias({ unknownSenderPolicy: "quarantine_hidden" }) },
       )));
-      vi.mocked(store.getSender).mockReturnValueOnce(Promise.resolve(ok(null)));
+      vi.mocked(accountDb.getSender).mockReturnValueOnce(Promise.resolve(ok(null)));
 
       await processor.processRecord(makeMessage(), 1);
 
-      const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
+      const saved = vi.mocked(arcDb.saveSignal).mock.calls[0]![0] as Signal;
       expect(saved.status).toBe("quarantine_hidden");
     });
 
     it("silently blocks signal when a block_hidden rule matches", async () => {
-      vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok(
+      vi.mocked(accountDb.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok(
         { ...DEFAULT_CTX, emailConfig: makeAlias() },
       )));
-      vi.mocked(store.getSender).mockReturnValueOnce(Promise.resolve(ok(null)));
-      vi.mocked(store.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([
+      vi.mocked(accountDb.getSender).mockReturnValueOnce(Promise.resolve(ok(null)));
+      vi.mocked(accountDb.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([
         makeRule({ condition: JSON.stringify({ "in": ["system:sender:untrusted", { var: "arc.labels" }] }), actions: [{ type: "block_hidden" }] }),
       ])));
 
       await processor.processRecord(makeMessage(), 1);
 
-      const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
+      const saved = vi.mocked(arcDb.saveSignal).mock.calls[0]![0] as Signal;
       expect(saved.status).toBe("block_hidden");
     });
 
@@ -932,14 +922,14 @@ describe("SignalProcessor", () => {
       await processor.processRecord(makeMessage(), 1);
 
       // Filtering fallback bypassed on matched arc — signal is active despite untrusted sender
-      expect(mockArcDb.updateArc).toHaveBeenCalledOnce();
-      expect(store.saveSignal).toHaveBeenCalledOnce();
-      const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
+      expect(arcDb.updateArc).toHaveBeenCalledOnce();
+      expect(arcDb.saveSignal).toHaveBeenCalledOnce();
+      const saved = vi.mocked(arcDb.saveSignal).mock.calls[0]![0] as Signal;
       expect(saved.status).toBe("active");
     });
 
     it("quarantines a known sender with high spam score (SR-03 fires regardless of filter mode)", async () => {
-      vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok(
+      vi.mocked(accountDb.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok(
         { ...DEFAULT_CTX, emailConfig: makeAlias({ unknownSenderPolicy: "quarantine_visible" }) },
       )));
       // Sender is known/approved but spam score is too high — SR-03 quarantines hidden independently of filter mode
@@ -950,39 +940,39 @@ describe("SignalProcessor", () => {
 
       await processor.processRecord(makeMessage(), 1);
 
-      expect(store.saveArc).not.toHaveBeenCalled();
-      const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
+      expect(arcDb.saveArc).not.toHaveBeenCalled();
+      const saved = vi.mocked(arcDb.saveSignal).mock.calls[0]![0] as Signal;
       expect(saved.status).toBe("quarantine_hidden");
     });
 
     it("allow_all mode auto-approves new sender without blocking", async () => {
-      vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok(
+      vi.mocked(accountDb.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok(
         { ...DEFAULT_CTX, emailConfig: makeAlias({ unknownSenderPolicy: "allow_all" }) },
       )));
-      vi.mocked(store.getSender).mockReturnValueOnce(Promise.resolve(ok(null))); // sender not yet in list
+      vi.mocked(accountDb.getSender).mockReturnValueOnce(Promise.resolve(ok(null))); // sender not yet in list
 
       await processor.processRecord(makeMessage(), 1);
 
-      expect(store.saveArc).toHaveBeenCalledOnce();
-      expect(store.saveSender).toHaveBeenCalledWith(TEST_ACCOUNT_ID, expect.any(String), "example.com", "allow");
+      expect(arcDb.saveArc).toHaveBeenCalledOnce();
+      expect(accountDb.saveSender).toHaveBeenCalledWith(TEST_ACCOUNT_ID, expect.any(String), "example.com", "allow");
     });
 
     it("saves blocked signal with classification data for user review", async () => {
-      vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok(
+      vi.mocked(accountDb.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok(
         { ...DEFAULT_CTX, emailConfig: makeAlias() },
       )));
-      vi.mocked(store.getSender).mockReturnValueOnce(Promise.resolve(ok(null)));
+      vi.mocked(accountDb.getSender).mockReturnValueOnce(Promise.resolve(ok(null)));
 
       await processor.processRecord(makeMessage(), 1);
 
-      const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
+      const saved = vi.mocked(arcDb.saveSignal).mock.calls[0]![0] as Signal;
       expect(saved.workflow).toBe(validClassification.workflow);
       expect(saved.summary).toBe(validClassification.summary);
       expect(saved.spamScore).toBe(validClassification.spamScore);
     });
 
     it("quarantines new address when newAddressHandling is block_until_approved (default disposition)", async () => {
-      vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok({
+      vi.mocked(accountDb.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok({
         retentionDays: 0,
         filtering: { newAddressHandling: "block_until_approved", defaultUnknownSenderPolicy: "quarantine_visible" },
         emailConfig: null,
@@ -993,8 +983,8 @@ describe("SignalProcessor", () => {
 
       await processor.processRecord(makeMessage(), 1);
 
-      expect(store.saveArc).not.toHaveBeenCalled();
-      const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
+      expect(arcDb.saveArc).not.toHaveBeenCalled();
+      const saved = vi.mocked(arcDb.saveSignal).mock.calls[0]![0] as Signal;
       // emailConfig is null → effectiveSenderEntry = null → system:sender:untrusted → filter mode fallback (quarantine_visible)
       expect(saved.status).toBe("quarantine_visible");
     });
@@ -1006,14 +996,14 @@ describe("SignalProcessor", () => {
 
   describe("global reputation tracking", () => {
     it("updates reputation with wasBlocked=true for blocked signals", async () => {
-      vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok(
+      vi.mocked(accountDb.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok(
         { ...DEFAULT_CTX, emailConfig: makeAlias() },
       )));
-      vi.mocked(store.getSender).mockReturnValueOnce(Promise.resolve(ok(null)));
+      vi.mocked(accountDb.getSender).mockReturnValueOnce(Promise.resolve(ok(null)));
 
       await processor.processRecord(makeMessage(), 1);
 
-      expect(store.updateGlobalReputation).toHaveBeenCalledWith(
+      expect(processingDb.updateGlobalReputation).toHaveBeenCalledWith(
         "example.com",
         expect.objectContaining({ wasBlocked: true }),
       );
@@ -1022,7 +1012,7 @@ describe("SignalProcessor", () => {
     it("updates reputation with wasBlocked=false for active signals", async () => {
       await processor.processRecord(makeMessage(), 1);
 
-      expect(store.updateGlobalReputation).toHaveBeenCalledWith(
+      expect(processingDb.updateGlobalReputation).toHaveBeenCalledWith(
         "example.com",
         expect.objectContaining({ wasBlocked: false }),
       );
@@ -1036,18 +1026,18 @@ describe("SignalProcessor", () => {
 
       await processor.processRecord(makeMessage(), 1);
 
-      expect(store.updateGlobalReputation).toHaveBeenCalledWith(
+      expect(processingDb.updateGlobalReputation).toHaveBeenCalledWith(
         "example.com",
         expect.objectContaining({ wasSpam: true }),
       );
     });
 
     it("does not fail processing when updateGlobalReputation throws", async () => {
-      vi.mocked(store.updateGlobalReputation).mockRejectedValueOnce(new Error("DynamoDB error"));
+      vi.mocked(processingDb.updateGlobalReputation).mockRejectedValueOnce(new Error("DynamoDB error"));
 
       await processor.processRecord(makeMessage(), 1);
 
-      expect(store.saveSignal).toHaveBeenCalledOnce();
+      expect(arcDb.saveSignal).toHaveBeenCalledOnce();
     });
   });
 
@@ -1065,7 +1055,7 @@ describe("SignalProcessor", () => {
 
       await processor.processRecord(makeMessage(), 1);
 
-      expect(store.findArcByGroupingKey).toHaveBeenCalledWith(
+      expect(arcDb.fastFindArcByAlternativeLookupKey).toHaveBeenCalledWith(
         TEST_ACCOUNT_ID,
         "user@example.com:auth:example.com",
       );
@@ -1081,13 +1071,13 @@ describe("SignalProcessor", () => {
 
       await processor.processRecord(makeMessage(), 1);
 
-      const arc = vi.mocked(store.saveArc).mock.calls[0]![0] as Arc;
+      const arc = vi.mocked(arcDb.saveArc).mock.calls[0]![0] as Arc;
       expect(arc.groupingKey).toBe("user@example.com:auth:example.com");
     });
 
     it("reuses existing arc found by grouping key", async () => {
       const existing = makeArc({ id: "auth-arc", groupingKey: "user@example.com:auth:example.com" });
-      vi.mocked(store.findArcByGroupingKey).mockReturnValueOnce(Promise.resolve(ok(existing)));
+      vi.mocked(arcDb.fastFindArcByAlternativeLookupKey).mockReturnValueOnce(Promise.resolve(ok(existing)));
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
         ...validClassification,
         workflow: "auth",
@@ -1096,8 +1086,8 @@ describe("SignalProcessor", () => {
 
       await processor.processRecord(makeMessage(), 1);
 
-      expect(mockArcDb.updateArc).toHaveBeenCalledOnce();
-      const [, arcId] = mockArcDb.updateArc.mock.calls[0]!;
+      expect(arcDb.updateArc).toHaveBeenCalledOnce();
+      const [, arcId] = vi.mocked(arcDb.updateArc).mock.calls[0]!;
       expect(arcId).toBe("auth-arc");
     });
 
@@ -1120,7 +1110,7 @@ describe("SignalProcessor", () => {
 
       await processor.processRecord(makeMessage(), 1);
 
-      expect(store.findArcByGroupingKey).toHaveBeenCalledWith(
+      expect(arcDb.fastFindArcByAlternativeLookupKey).toHaveBeenCalledWith(
         TEST_ACCOUNT_ID,
         "user@example.com:package:112-999",
       );
@@ -1135,7 +1125,7 @@ describe("SignalProcessor", () => {
 
       await processor.processRecord(makeMessage(), 1);
 
-      expect(store.findArcByGroupingKey).not.toHaveBeenCalled();
+      expect(arcDb.fastFindArcByAlternativeLookupKey).not.toHaveBeenCalled();
       expect(arcMatcher.findMatch).toHaveBeenCalledOnce();
     });
   });
@@ -1288,7 +1278,7 @@ describe("SignalProcessor", () => {
       };
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(full);
       await processor.processRecord(makeMessage({ sesMessageId: randomUUID() }), 1);
-      return vi.mocked(store.saveArc).mock.calls.at(-1)![0] as Arc;
+      return vi.mocked(arcDb.saveArc).mock.calls.at(-1)![0] as Arc;
     }
 
     it("SR-15: conversation + requiresReply + urgent sentiment → high urgency", async () => {
@@ -1316,7 +1306,7 @@ describe("SignalProcessor", () => {
         spamScore: 0.05, summary: "test", labels: [], classificationModelId: "us.anthropic.claude-opus-4-5-20251101-v1:0",
       });
       await processor.processRecord(makeMessage({ sesMessageId: randomUUID() }), 1);
-      const signal = vi.mocked(store.saveSignal).mock.calls.at(-1)![0] as Signal;
+      const signal = vi.mocked(arcDb.saveSignal).mock.calls.at(-1)![0] as Signal;
       expect(signal.urgency).toBe("normal");
     });
 
@@ -1398,43 +1388,43 @@ describe("SignalProcessor", () => {
 
     it("processes onboarding emails as active when no blocking rule is configured", async () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(onboardingClassification);
-      vi.mocked(store.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([]))); // no system rules — SR-01 (block onboarding) is disabled
+      vi.mocked(accountDb.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([]))); // no system rules — SR-01 (block onboarding) is disabled
 
       await processor.processRecord(makeMessage(), 1);
 
-      expect(store.saveArc).toHaveBeenCalledOnce();
-      const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
+      expect(arcDb.saveArc).toHaveBeenCalledOnce();
+      const saved = vi.mocked(arcDb.saveSignal).mock.calls[0]![0] as Signal;
       expect(saved.status).toBe("active");
       expect(saved.workflow).toBe("onboarding");
     });
 
     it("blocks onboarding emails when a block rule targeting system:workflow:onboarding is active", async () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(onboardingClassification);
-      vi.mocked(store.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([
+      vi.mocked(accountDb.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([
         makeRule({ condition: JSON.stringify({ "in": ["system:workflow:onboarding", { var: "arc.labels" }] }), actions: [{ type: "block_hidden" }] }),
       ])));
 
       const notifier = makeNotifier();
-      const proc = new SignalProcessor({ store, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com", classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, notifier, logger: mockLogger, forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never });
+      const proc = new SignalProcessor({ arcDb, accountDb, processingDb, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com", classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, notifier, logger: mockLogger, forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never });
       await proc.processRecord(makeMessage(), 1);
 
-      expect(store.saveArc).not.toHaveBeenCalled();
-      const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
+      expect(arcDb.saveArc).not.toHaveBeenCalled();
+      const saved = vi.mocked(arcDb.saveSignal).mock.calls[0]![0] as Signal;
       expect(saved.status).toBe("block_hidden");
     });
 
     it("quarantines onboarding emails when a quarantine rule is active", async () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(onboardingClassification);
-      vi.mocked(store.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([
+      vi.mocked(accountDb.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([
         makeRule({ condition: JSON.stringify({ "in": ["system:workflow:onboarding", { var: "arc.labels" }] }), actions: [{ type: "quarantine" }] }),
       ])));
 
       const notifier = makeNotifier();
-      const proc = new SignalProcessor({ store, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com", classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, notifier, logger: mockLogger, forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never });
+      const proc = new SignalProcessor({ arcDb, accountDb, processingDb, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com", classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, notifier, logger: mockLogger, forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never });
       await proc.processRecord(makeMessage(), 1);
 
-      expect(store.saveArc).not.toHaveBeenCalled();
-      const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
+      expect(arcDb.saveArc).not.toHaveBeenCalled();
+      const saved = vi.mocked(arcDb.saveSignal).mock.calls[0]![0] as Signal;
       // Plain `quarantine` action → quarantine_visible (shown in review queue)
       expect(saved.status).toBe("quarantine_visible");
     });
@@ -1448,32 +1438,32 @@ describe("SignalProcessor", () => {
     it("overrides workflow to 'test' when from-domain matches a registered account domain", async () => {
       // Default mime parser mock returns from: { address: "sender@example.com" }
       // getETLD1("sender@example.com") = "example.com"
-      vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok({
+      vi.mocked(accountDb.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok({
         ...DEFAULT_CTX,
         registeredDomains: ["example.com"],
       })));
 
       await processor.processRecord(makeMessage(), 1);
 
-      const signal = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
+      const signal = vi.mocked(arcDb.saveSignal).mock.calls[0]![0] as Signal;
       expect(signal.workflow).toBe("test");
       expect(signal.workflowData).toMatchObject({ workflow: "test", triggeredBy: "user" });
     });
 
     it("overrides workflow to 'test' when from-address exactly matches a userEmail (case-insensitive)", async () => {
-      vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok({
+      vi.mocked(accountDb.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok({
         ...DEFAULT_CTX,
         userEmails: ["SENDER@example.com"], // uppercase — must still match
       })));
 
       await processor.processRecord(makeMessage(), 1);
 
-      const signal = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
+      const signal = vi.mocked(arcDb.saveSignal).mock.calls[0]![0] as Signal;
       expect(signal.workflow).toBe("test");
     });
 
     it("does not override workflow when from-domain is not in registeredDomains and address not in userEmails", async () => {
-      vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok({
+      vi.mocked(accountDb.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok({
         ...DEFAULT_CTX,
         registeredDomains: ["otherdomain.com"],
         userEmails: ["different@email.com"],
@@ -1481,7 +1471,7 @@ describe("SignalProcessor", () => {
 
       await processor.processRecord(makeMessage(), 1);
 
-      const signal = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
+      const signal = vi.mocked(arcDb.saveSignal).mock.calls[0]![0] as Signal;
       expect(signal.workflow).toBe("conversation"); // unchanged from validClassification mock
     });
   });
@@ -1504,7 +1494,7 @@ describe("SignalProcessor", () => {
 
     beforeEach(() => {
       notifier = makeNotifier();
-      processor = new SignalProcessor({ store, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com", classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, notifier, logger: mockLogger, forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never });
+      processor = new SignalProcessor({ arcDb, accountDb, processingDb, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com", classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, notifier, logger: mockLogger, forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never });
     });
 
     it("blocks status emails silently — no arc created, signal saved as blocked", async () => {
@@ -1512,8 +1502,8 @@ describe("SignalProcessor", () => {
 
       await processor.processRecord(makeMessage(), 1);
 
-      expect(store.saveArc).not.toHaveBeenCalled();
-      const signal = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
+      expect(arcDb.saveArc).not.toHaveBeenCalled();
+      const signal = vi.mocked(arcDb.saveSignal).mock.calls[0]![0] as Signal;
       expect(signal.status).toBe("block_hidden");
       expect(signal.workflow).toBe("status");
     });
@@ -1529,17 +1519,17 @@ describe("SignalProcessor", () => {
     it("blocks status emails from untrusted senders (SR-05 rule fires, fallback does not apply)", async () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(noticeClassification);
       // Untrusted sender: no approved sender entry — filter-mode fallback would quarantine, but SR-05 fires first
-      vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok({
+      vi.mocked(accountDb.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok({
         ...DEFAULT_CTX,
         emailConfig: makeAlias(),
       })));
-      vi.mocked(store.getSender).mockReturnValueOnce(Promise.resolve(ok(null)));
+      vi.mocked(accountDb.getSender).mockReturnValueOnce(Promise.resolve(ok(null)));
 
       await processor.processRecord(makeMessage(), 1);
 
-      const signal = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
+      const signal = vi.mocked(arcDb.saveSignal).mock.calls[0]![0] as Signal;
       expect(signal.status).toBe("block_hidden"); // SR-05 sets status → fallback skipped (hasStatusOutcome = true)
-      expect(store.saveArc).not.toHaveBeenCalled();
+      expect(arcDb.saveArc).not.toHaveBeenCalled();
     });
   });
 
@@ -1561,7 +1551,7 @@ describe("SignalProcessor", () => {
 
     beforeEach(() => {
       sqsDispatcher = { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) };
-      processor = new SignalProcessor({ store, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com", classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, sqsDispatcher, logger: mockLogger, notifier: makeNotifier(), forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: makeReplySender(), draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never });
+      processor = new SignalProcessor({ arcDb, accountDb, processingDb, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com", classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, sqsDispatcher, logger: mockLogger, notifier: makeNotifier(), forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: makeReplySender(), draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never });
     });
 
     it("dispatches side-effect with pong action when workflow is 'test'", async () => {
@@ -1616,7 +1606,7 @@ describe("SignalProcessor", () => {
     });
 
     it("still dispatches side-effect when replySender is configured", async () => {
-      const processorWithReplier = new SignalProcessor({ store, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com", classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, logger: mockLogger, notifier: makeNotifier(), forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher, draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never });
+      const processorWithReplier = new SignalProcessor({ arcDb, accountDb, processingDb, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com", classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, logger: mockLogger, notifier: makeNotifier(), forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher, draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never });
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(testClassification);
 
       const result = await processorWithReplier.processRecord(makeMessage(), 1);
@@ -1663,7 +1653,7 @@ describe("SignalProcessor", () => {
 
   describe("spam threshold override", () => {
     it("quarantines signal when per-address spamScoreThreshold is lower than default and score exceeds it", async () => {
-      vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok({
+      vi.mocked(accountDb.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok({
         ...DEFAULT_CTX,
         emailConfig: makeAlias({
           unknownSenderPolicy: "quarantine_visible",
@@ -1678,12 +1668,12 @@ describe("SignalProcessor", () => {
       await processor.processRecord(makeMessage(), 1);
 
       // DEFAULT_SENDER_ENTRY is approved → SR-03 fires → quarantine_hidden
-      const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
+      const saved = vi.mocked(arcDb.saveSignal).mock.calls[0]![0] as Signal;
       expect(saved.status).toBe("quarantine_hidden");
     });
 
     it("uses account-level spamScoreThreshold when no per-address override is set", async () => {
-      vi.mocked(store.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok({
+      vi.mocked(accountDb.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok({
         ...DEFAULT_CTX,
         emailConfig: makeAlias({ unknownSenderPolicy: "quarantine_visible" }),
         filtering: { defaultUnknownSenderPolicy: "quarantine_visible", newAddressHandling: "auto_allow", spamScoreThreshold: 0.6 },
@@ -1696,7 +1686,7 @@ describe("SignalProcessor", () => {
       await processor.processRecord(makeMessage(), 1);
 
       // DEFAULT_SENDER_ENTRY is approved → SR-03 fires → quarantine_hidden
-      const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
+      const saved = vi.mocked(arcDb.saveSignal).mock.calls[0]![0] as Signal;
       expect(saved.status).toBe("quarantine_hidden");
     });
   });
@@ -1709,17 +1699,17 @@ describe("SignalProcessor", () => {
     it("blocks email and saves signal with block_reject status when DKIM fails", async () => {
       await processor.processRecord(makeMessage({ dkimVerdict: "FAIL", dmarcVerdict: "PASS" }), 1);
 
-      const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
+      const saved = vi.mocked(arcDb.saveSignal).mock.calls[0]![0] as Signal;
       expect(saved.status).toBe("block_reject");
-      expect(store.saveArc).not.toHaveBeenCalled();
+      expect(arcDb.saveArc).not.toHaveBeenCalled();
     });
 
     it("blocks email and saves signal with block_reject status when DMARC fails", async () => {
       await processor.processRecord(makeMessage({ dkimVerdict: "PASS", dmarcVerdict: "GRAY" }), 1);
 
-      const saved = vi.mocked(store.saveSignal).mock.calls[0]![0] as Signal;
+      const saved = vi.mocked(arcDb.saveSignal).mock.calls[0]![0] as Signal;
       expect(saved.status).toBe("block_reject");
-      expect(store.saveArc).not.toHaveBeenCalled();
+      expect(arcDb.saveArc).not.toHaveBeenCalled();
     });
   });
 
@@ -1729,7 +1719,7 @@ describe("SignalProcessor", () => {
 
   describe("rule actions — assign_workflow and delete", () => {
     it("assign_workflow action changes the arc workflow to the specified value", async () => {
-      vi.mocked(store.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([{
+      vi.mocked(accountDb.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([{
         id: "rw-rule",
         accountId: TEST_ACCOUNT_ID,
         name: "Reclassify as content",
@@ -1743,12 +1733,12 @@ describe("SignalProcessor", () => {
 
       await processor.processRecord(makeMessage(), 1);
 
-      const arc = vi.mocked(store.saveArc).mock.calls[0]![0] as Arc;
+      const arc = vi.mocked(arcDb.saveArc).mock.calls[0]![0] as Arc;
       expect(arc.workflow).toBe("content");
     });
 
     it("multiple actions in one rule are all applied in order", async () => {
-      vi.mocked(store.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([{
+      vi.mocked(accountDb.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([{
         id: "multi-rule",
         accountId: TEST_ACCOUNT_ID,
         name: "Label and archive",
@@ -1765,7 +1755,7 @@ describe("SignalProcessor", () => {
 
       await processor.processRecord(makeMessage(), 1);
 
-      const arc = vi.mocked(store.saveArc).mock.calls[0]![0] as Arc;
+      const arc = vi.mocked(arcDb.saveArc).mock.calls[0]![0] as Arc;
       expect(arc.labels).toContain("archived-auto");
       expect(arc.status).toBe("archived");
     });
@@ -1789,7 +1779,7 @@ describe("SignalProcessor", () => {
 
       await processor.processRecord(makeMessage(), 1);
 
-      const arc = vi.mocked(store.saveArc).mock.calls[0]![0] as Arc;
+      const arc = vi.mocked(arcDb.saveArc).mock.calls[0]![0] as Arc;
       expect(arc.labels).toContain("original:john@gmail.com");
     });
 
@@ -1810,7 +1800,7 @@ describe("SignalProcessor", () => {
 
       await processor.processRecord(makeMessage(), 1);
 
-      const arc = vi.mocked(store.saveArc).mock.calls[0]![0] as Arc;
+      const arc = vi.mocked(arcDb.saveArc).mock.calls[0]![0] as Arc;
       expect(arc.labels).toContain("original:alice@example.com");
     });
 
@@ -1831,7 +1821,7 @@ describe("SignalProcessor", () => {
 
       await processor.processRecord(makeMessage(), 1);
 
-      const arc = vi.mocked(store.saveArc).mock.calls[0]![0] as Arc;
+      const arc = vi.mocked(arcDb.saveArc).mock.calls[0]![0] as Arc;
       expect(arc.labels).toContain("original:bob@example.com");
     });
 
@@ -1855,7 +1845,7 @@ describe("SignalProcessor", () => {
 
       await processor.processRecord(makeMessage(), 1);
 
-      const arc = vi.mocked(store.saveArc).mock.calls[0]![0] as Arc;
+      const arc = vi.mocked(arcDb.saveArc).mock.calls[0]![0] as Arc;
       expect(arc.labels).toContain("original:primary@gmail.com");
       expect(arc.labels).not.toContain("original:secondary@gmail.com");
     });
@@ -1877,7 +1867,7 @@ describe("SignalProcessor", () => {
 
       await processor.processRecord(makeMessage(), 1);
 
-      const arc = vi.mocked(store.saveArc).mock.calls[0]![0] as Arc;
+      const arc = vi.mocked(arcDb.saveArc).mock.calls[0]![0] as Arc;
       expect(arc.labels.some((l) => l.startsWith("original:"))).toBe(false);
     });
   });

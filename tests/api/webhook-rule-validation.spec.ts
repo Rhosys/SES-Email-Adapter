@@ -1,6 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createApp } from "../../src/api/app.js";
-import type { ApiDatabase, AuthService, AccessService, VerificationMailer } from "../../src/api/app.js";
+import type { AuthService, AccessService, VerificationMailer } from "../../src/api/app.js";
+import type { ArcDatabase } from "../../src/database/arc-database.js";
+import type { AccountDatabase } from "../../src/database/account-database.js";
+import type { AuditDatabase } from "../../src/database/audit-database.js";
 import type { Account, Rule } from "../../src/types/index.js";
 import { ok } from "neverthrow";
 import { createMockLogger } from "../helpers/mock-logger.js";
@@ -62,21 +65,28 @@ function makeRule(overrides: Partial<Rule> = {}): Rule {
   };
 }
 
-function makeStore(): ApiDatabase {
+function makeArcDb() {
   return {
     listArcs: vi.fn().mockResolvedValue(ok({ items: [] })),
     getArc: vi.fn().mockResolvedValue(ok(null)),
     updateArc: vi.fn().mockResolvedValue(ok(null)),
-    updateArcDirect: vi.fn().mockResolvedValue(ok(null)),
     listSignals: vi.fn().mockResolvedValue(ok({ items: [] })),
     listPreArcSignals: vi.fn().mockResolvedValue(ok({ items: [] })),
     updateSignalStatus: vi.fn().mockResolvedValue(ok(null)),
-    findArcByGroupingKey: vi.fn().mockResolvedValue(ok(null)),
+    fastFindArcByAlternativeLookupKey: vi.fn().mockResolvedValue(ok(null)),
     getSignalById: vi.fn().mockResolvedValue(ok(null)),
     createSignal: vi.fn().mockResolvedValue(ok(null)),
     updateSignal: vi.fn().mockResolvedValue(ok(null)),
     updateSignalSendStatus: vi.fn().mockResolvedValue(ok(null)),
     deleteSignal: vi.fn().mockResolvedValue(ok(undefined)),
+    unblockSignal: vi.fn().mockResolvedValue(ok(undefined)),
+    createArc: vi.fn().mockResolvedValue(ok(undefined)),
+    searchArcs: vi.fn().mockResolvedValue(ok({ items: [] })),
+  };
+}
+
+function makeAccountDb() {
+  return {
     listViews: vi.fn().mockResolvedValue(ok([])),
     getView: vi.fn().mockResolvedValue(ok(null)),
     createView: vi.fn().mockResolvedValue(ok(null)),
@@ -94,7 +104,6 @@ function makeStore(): ApiDatabase {
     getDomain: vi.fn().mockResolvedValue(ok(null)),
     createDomain: vi.fn().mockResolvedValue(ok(null)),
     deleteDomain: vi.fn().mockResolvedValue(ok(undefined)),
-    searchArcs: vi.fn().mockResolvedValue(ok({ items: [] })),
     getAccount: vi.fn().mockResolvedValue(ok(makeAccount({ billingPlan: "Paid" }))),
     createAccount: vi.fn().mockResolvedValue(ok(null)),
     updateAccount: vi.fn().mockResolvedValue(ok(null)),
@@ -103,8 +112,6 @@ function makeStore(): ApiDatabase {
     createAlias: vi.fn().mockResolvedValue(ok(null)),
     upsertAlias: vi.fn().mockResolvedValue(ok(null)),
     deleteAlias: vi.fn().mockResolvedValue(ok(undefined)),
-    unblockSignal: vi.fn().mockResolvedValue(ok(undefined)),
-    createArc: vi.fn().mockResolvedValue(ok(undefined)),
     listVerifiedForwardingAddresses: vi.fn().mockResolvedValue(ok([])),
     getVerifiedForwardingAddress: vi.fn().mockResolvedValue(ok(null)),
     saveVerifiedForwardingAddress: vi.fn().mockResolvedValue(ok(undefined)),
@@ -119,9 +126,14 @@ function makeStore(): ApiDatabase {
     updateTemplate: vi.fn().mockResolvedValue(ok(undefined)),
     deleteTemplate: vi.fn().mockResolvedValue(ok(undefined)),
     listTemplates: vi.fn().mockResolvedValue(ok([])),
+    getStats: vi.fn().mockResolvedValue(ok(null)),
+  };
+}
+
+function makeAuditDb() {
+  return {
     listAuditEvents: vi.fn().mockResolvedValue(ok({ items: [] })),
     saveAuditEvent: vi.fn().mockResolvedValue(ok(undefined)),
-    getStats: vi.fn().mockResolvedValue(ok(null)),
   };
 }
 
@@ -149,20 +161,26 @@ async function req(
 // ---------------------------------------------------------------------------
 
 describe("API — webhook rule validation", () => {
-  let store: ApiDatabase;
+  let arcDb: ReturnType<typeof makeArcDb>;
+  let accountDb: ReturnType<typeof makeAccountDb>;
+  let auditDb: ReturnType<typeof makeAuditDb>;
   let app: ReturnType<typeof createApp>;
   let astValidator: UserCodeExecutorClient;
 
   beforeEach(() => {
     vi.clearAllMocks();
-    store = makeStore();
+    arcDb = makeArcDb();
+    accountDb = makeAccountDb();
+    auditDb = makeAuditDb();
     astValidator = {
       invoke: vi.fn().mockResolvedValue({ success: true, purpose: "rule_condition", result: true }),
       validateAst: vi.fn().mockResolvedValue({ success: true, purpose: "validate_ast", result: { valid: true } }),
       validateAstBatch: vi.fn().mockResolvedValue({ success: true, purpose: "validate_ast_batch", results: [] }),
     };
     app = createApp({
-      store,
+      arcDb: arcDb as unknown as ArcDatabase,
+      accountDb: accountDb as unknown as AccountDatabase,
+      auditDb: auditDb as unknown as AuditDatabase,
       auth: makeAuth(),
       access: makeAccess(),
       logger: createMockLogger(),
@@ -172,8 +190,8 @@ describe("API — webhook rule validation", () => {
   });
 
   it("accepts a webhook action on a paid plan", async () => {
-    vi.mocked(store.getAccount).mockResolvedValueOnce(ok(makeAccount({ billingPlan: "Paid" })));
-    vi.mocked(store.createRule).mockResolvedValueOnce(ok(makeRule() as never));
+    vi.mocked(accountDb.getAccount).mockResolvedValueOnce(ok(makeAccount({ billingPlan: "Paid" })));
+    vi.mocked(accountDb.createRule).mockResolvedValueOnce(ok(makeRule() as never));
 
     const res = await req(app, "POST", `${A}/rules`, {
       body: {
@@ -192,7 +210,7 @@ describe("API — webhook rule validation", () => {
     { label: "missing url in config", value: '{"endpoint":"https://x.com"}', expectedFragment: "must contain a non-empty 'url' field" },
     { label: "non-http protocol", value: '{"url":"ftp://files.example.com/hook"}', expectedFragment: "must use http or https" },
   ])("rejects invalid config — $label", async ({ value, expectedFragment }) => {
-    vi.mocked(store.getAccount).mockResolvedValueOnce(ok(makeAccount({ billingPlan: "Paid" })));
+    vi.mocked(accountDb.getAccount).mockResolvedValueOnce(ok(makeAccount({ billingPlan: "Paid" })));
 
     const res = await req(app, "POST", `${A}/rules`, {
       body: {
@@ -212,7 +230,7 @@ describe("API — webhook rule validation", () => {
     { label: "Free plan", plan: "Free" as const },
     { label: "Trial plan", plan: "Trial" as const },
   ])("rejects webhook on $label with PLAN_FEATURE_REQUIRED", async ({ plan }) => {
-    vi.mocked(store.getAccount).mockResolvedValueOnce(ok(makeAccount({ billingPlan: plan })));
+    vi.mocked(accountDb.getAccount).mockResolvedValueOnce(ok(makeAccount({ billingPlan: plan })));
 
     const res = await req(app, "POST", `${A}/rules`, {
       body: {

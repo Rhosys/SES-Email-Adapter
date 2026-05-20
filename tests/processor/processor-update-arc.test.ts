@@ -2,7 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ok } from "neverthrow";
 import { SignalProcessor, SYSTEM_RULES } from "../../src/processor/processor.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
-import type { ProcessorDatabase, ArcMatcher, RuleEvaluator, InboundSignalMessage, SqsDispatcher } from "../../src/processor/processor.js";
+import type { ArcMatcher, RuleEvaluator, InboundSignalMessage, SqsDispatcher } from "../../src/processor/processor.js";
+import { makeArcDbMock, makeAccountDbMock, makeProcessingDbMock } from "./_helpers.js";
 import type { ContentSanitizerClient } from "../../src/processor/content-sanitizer-client.js";
 import type { UserCodeExecutorClient } from "../../src/processor/user-code-client.js";
 import type { SignalClassifier, ClassificationOutput } from "../../src/classifier/classifier.js";
@@ -61,26 +62,15 @@ const validClassification: ClassificationOutput = {
   classificationModelId: "us.anthropic.claude-opus-4-5-20251101-v1:0",
 };
 
-function makeStore(): ProcessorDatabase {
-  return {
-    getSignalByMessageId: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-    saveSignal: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    updateSignalRetention: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    getArc: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-    findArcByGroupingKey: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-    saveArc: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    listEnabledRules: vi.fn().mockReturnValue(Promise.resolve(ok(SYSTEM_RULES))),
-    getProcessorAccountContext: vi.fn().mockReturnValue(Promise.resolve(ok(DEFAULT_CTX))),
-    saveAlias: vi.fn().mockImplementation((a: Alias) => Promise.resolve(ok(a))),
-    getSender: vi.fn().mockReturnValue(Promise.resolve(ok(DEFAULT_SENDER_ENTRY))),
-    saveSender: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    getTemplate: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-    updateGlobalReputation: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    getDomainByName: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-    incrementStats: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    annotateRuleError: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    annotateTemplateError: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-  };
+function makeStore() {
+  const arcDb = makeArcDbMock();
+  const accountDb = makeAccountDbMock();
+  const processingDb = makeProcessingDbMock();
+  // Override defaults for this test file
+  vi.mocked(accountDb.listEnabledRules).mockReturnValue(Promise.resolve(ok(SYSTEM_RULES)));
+  vi.mocked(accountDb.getProcessorAccountContext).mockReturnValue(Promise.resolve(ok(DEFAULT_CTX)));
+  vi.mocked(accountDb.getSender).mockReturnValue(Promise.resolve(ok(DEFAULT_SENDER_ENTRY)));
+  return { arcDb, accountDb, processingDb };
 }
 
 function makeContentSanitizer(): ContentSanitizerClient {
@@ -162,10 +152,11 @@ function makeArc(overrides: Partial<Arc> = {}): Arc {
   };
 }
 
-function buildProcessor(store: ProcessorDatabase, arcMatcher: ArcMatcher, mockArcDb: { updateArc: ReturnType<typeof vi.fn> }, classifier: Pick<SignalClassifier, "classify">, logger: MockLogger, ruleEvaluator: RuleEvaluator) {
+function buildProcessor(arcDb: ReturnType<typeof makeArcDbMock>, accountDb: ReturnType<typeof makeAccountDbMock>, processingDb: ReturnType<typeof makeProcessingDbMock>, arcMatcher: ArcMatcher, classifier: Pick<SignalClassifier, "classify">, logger: MockLogger, ruleEvaluator: RuleEvaluator) {
   return new SignalProcessor({
-    store,
-    arcDb: mockArcDb as never,
+    arcDb,
+    accountDb,
+    processingDb,
     contentSanitizer: makeContentSanitizer(),
     s3Client: {} as never,
     emailBucket: "test-bucket",
@@ -192,18 +183,18 @@ function buildProcessor(store: ProcessorDatabase, arcMatcher: ArcMatcher, mockAr
 // ---------------------------------------------------------------------------
 
 describe("Processor delta computation — updateArc vs saveArc", () => {
-  let store: ProcessorDatabase;
+  let arcDb: ReturnType<typeof makeArcDbMock>;
+  let accountDb: ReturnType<typeof makeAccountDbMock>;
+  let processingDb: ReturnType<typeof makeProcessingDbMock>;
   let arcMatcher: ArcMatcher;
-  let mockArcDb: { updateArc: ReturnType<typeof vi.fn> };
   let mockLogger: MockLogger;
   let ruleEvaluator: RuleEvaluator;
 
   beforeEach(() => {
     vi.clearAllMocks();
     mockLogger = createMockLogger();
-    store = makeStore();
+    ({ arcDb, accountDb, processingDb } = makeStore());
     arcMatcher = makeArcMatcher();
-    mockArcDb = { updateArc: vi.fn().mockReturnValue(Promise.resolve(ok(makeArc()))) };
     ruleEvaluator = makeRuleEvaluator(mockLogger);
   });
 
@@ -218,18 +209,18 @@ describe("Processor delta computation — updateArc vs saveArc", () => {
     vi.mocked(arcMatcher.findMatch).mockReturnValueOnce(Promise.resolve(ok(existing)));
 
     const classifier = makeClassifier({ workflow: "conversation", summary: "A test email." });
-    const processor = buildProcessor(store, arcMatcher, mockArcDb, classifier, mockLogger, ruleEvaluator);
+    const processor = buildProcessor(arcDb, accountDb, processingDb, arcMatcher, classifier, mockLogger, ruleEvaluator);
 
     await processor.processRecord(makeMessage(), 1);
 
-    expect(mockArcDb.updateArc).toHaveBeenCalledOnce();
-    const [accountId, arcId, status, lastSignalAt, fields] = mockArcDb.updateArc.mock.calls[0]!;
+    expect(arcDb.updateArc).toHaveBeenCalledOnce();
+    const [accountId, arcId, status, lastSignalAt, fields] = vi.mocked(arcDb.updateArc).mock.calls[0]!;
     expect(accountId).toBe(TEST_ACCOUNT_ID);
     expect(arcId).toBe("arc-existing");
     expect(status).toBe("active");
     expect(lastSignalAt).toBe("2024-01-15T10:00:00Z");
     expect(fields).toEqual({});
-    expect(store.saveArc).not.toHaveBeenCalled();
+    expect(arcDb.saveArc).not.toHaveBeenCalled();
   });
 
   it("existing archived arc → updateArc reactivates to active", async () => {
@@ -238,12 +229,12 @@ describe("Processor delta computation — updateArc vs saveArc", () => {
     vi.mocked(arcMatcher.findMatch).mockReturnValueOnce(Promise.resolve(ok(existing)));
 
     const classifier = makeClassifier({ workflow: "conversation", summary: "A test email." });
-    const processor = buildProcessor(store, arcMatcher, mockArcDb, classifier, mockLogger, ruleEvaluator);
+    const processor = buildProcessor(arcDb, accountDb, processingDb, arcMatcher, classifier, mockLogger, ruleEvaluator);
 
     await processor.processRecord(makeMessage(), 1);
 
-    expect(mockArcDb.updateArc).toHaveBeenCalledOnce();
-    const [, , status, lastSignalAt, fields] = mockArcDb.updateArc.mock.calls[0]!;
+    expect(arcDb.updateArc).toHaveBeenCalledOnce();
+    const [, , status, lastSignalAt, fields] = vi.mocked(arcDb.updateArc).mock.calls[0]!;
     expect(status).toBe("active");
     expect(lastSignalAt).toBe("2024-01-15T10:00:00Z");
     expect(fields).toEqual({});
@@ -259,15 +250,15 @@ describe("Processor delta computation — updateArc vs saveArc", () => {
       condition: "true", actions: [{ type: "archive" }],
       status: "enabled", priorityOrder: 0, createdAt: "2024-01-01T00:00:00Z", updatedAt: "2024-01-01T00:00:00Z",
     };
-    vi.mocked(store.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([archiveRule])));
+    vi.mocked(accountDb.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([archiveRule])));
 
     const classifier = makeClassifier({ workflow: "conversation", summary: "A test email." });
-    const processor = buildProcessor(store, arcMatcher, mockArcDb, classifier, mockLogger, ruleEvaluator);
+    const processor = buildProcessor(arcDb, accountDb, processingDb, arcMatcher, classifier, mockLogger, ruleEvaluator);
 
     await processor.processRecord(makeMessage(), 1);
 
-    expect(mockArcDb.updateArc).toHaveBeenCalledOnce();
-    const [, , status, , fields] = mockArcDb.updateArc.mock.calls[0]!;
+    expect(arcDb.updateArc).toHaveBeenCalledOnce();
+    const [, , status, , fields] = vi.mocked(arcDb.updateArc).mock.calls[0]!;
     expect(status).toBe("archived");
     expect(fields).toEqual({});
   });
@@ -283,15 +274,15 @@ describe("Processor delta computation — updateArc vs saveArc", () => {
       condition: "true", actions: [{ type: "assign_label", value: "billing" }],
       status: "enabled", priorityOrder: 0, createdAt: "2024-01-01T00:00:00Z", updatedAt: "2024-01-01T00:00:00Z",
     };
-    vi.mocked(store.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([labelRule])));
+    vi.mocked(accountDb.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([labelRule])));
 
     const classifier = makeClassifier({ workflow: "conversation", summary: "A test email." });
-    const processor = buildProcessor(store, arcMatcher, mockArcDb, classifier, mockLogger, ruleEvaluator);
+    const processor = buildProcessor(arcDb, accountDb, processingDb, arcMatcher, classifier, mockLogger, ruleEvaluator);
 
     await processor.processRecord(makeMessage(), 1);
 
-    expect(mockArcDb.updateArc).toHaveBeenCalledOnce();
-    const [, , status, , fields] = mockArcDb.updateArc.mock.calls[0]!;
+    expect(arcDb.updateArc).toHaveBeenCalledOnce();
+    const [, , status, , fields] = vi.mocked(arcDb.updateArc).mock.calls[0]!;
     expect(status).toBe("active");
     expect(fields).toEqual({ labels: ["system:workflow:conversation", "billing"] });
   });
@@ -299,12 +290,12 @@ describe("Processor delta computation — updateArc vs saveArc", () => {
   it("new arc (matchedArc is null) → saveArc called, not updateArc", async () => {
     // arcMatcher returns null (default) — no existing arc
     const classifier = makeClassifier();
-    const processor = buildProcessor(store, arcMatcher, mockArcDb, classifier, mockLogger, ruleEvaluator);
+    const processor = buildProcessor(arcDb, accountDb, processingDb, arcMatcher, classifier, mockLogger, ruleEvaluator);
 
     await processor.processRecord(makeMessage(), 1);
 
-    expect(store.saveArc).toHaveBeenCalledOnce();
-    expect(mockArcDb.updateArc).not.toHaveBeenCalled();
+    expect(arcDb.saveArc).toHaveBeenCalledOnce();
+    expect(arcDb.updateArc).not.toHaveBeenCalled();
   });
 
   it("delete rule action type is not recognized — does not set arc status to deleted", async () => {
@@ -319,15 +310,15 @@ describe("Processor delta computation — updateArc vs saveArc", () => {
       condition: "true", actions: [{ type: "delete" as never }],
       status: "enabled", priorityOrder: 0, createdAt: "2024-01-01T00:00:00Z", updatedAt: "2024-01-01T00:00:00Z",
     };
-    vi.mocked(store.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([deleteRule])));
+    vi.mocked(accountDb.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([deleteRule])));
 
     const classifier = makeClassifier({ workflow: "conversation", summary: "A test email." });
-    const processor = buildProcessor(store, arcMatcher, mockArcDb, classifier, mockLogger, ruleEvaluator);
+    const processor = buildProcessor(arcDb, accountDb, processingDb, arcMatcher, classifier, mockLogger, ruleEvaluator);
 
     await processor.processRecord(makeMessage(), 1);
 
-    expect(mockArcDb.updateArc).toHaveBeenCalledOnce();
-    const [, , status] = mockArcDb.updateArc.mock.calls[0]!;
+    expect(arcDb.updateArc).toHaveBeenCalledOnce();
+    const [, , status] = vi.mocked(arcDb.updateArc).mock.calls[0]!;
     // Status should be "active" (reactivation default) — NOT "deleted"
     expect(status).toBe("active");
     expect(status).not.toBe("deleted");

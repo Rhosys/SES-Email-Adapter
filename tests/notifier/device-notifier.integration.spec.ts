@@ -2,7 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ok } from "neverthrow";
 import { SignalProcessor, SYSTEM_RULES } from "../../src/processor/processor.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
-import type { ProcessorDatabase, ArcMatcher, SqsDispatcher, Notifier, Forwarder, ReplySender, SideEffectPayload } from "../../src/processor/processor.js";
+import type { ArcMatcher, SqsDispatcher, Notifier, Forwarder, ReplySender, SideEffectPayload } from "../../src/processor/processor.js";
+import { makeArcDbMock, makeAccountDbMock, makeProcessingDbMock } from "../processor/_helpers.js";
 import type { ContentSanitizerClient } from "../../src/processor/content-sanitizer-client.js";
 import type { SignalClassifier } from "../../src/classifier/classifier.js";
 import type { EmbeddingGenerator } from "../../src/embedding/embedding-generator.js";
@@ -57,36 +58,24 @@ const DEFAULT_ALIAS: Alias = {
 // Test double factories
 // ---------------------------------------------------------------------------
 
-function makeStore(): ProcessorDatabase {
-  return {
-    getSignalByMessageId: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-    saveSignal: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    updateSignalRetention: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    getArc: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-    findArcByGroupingKey: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-    saveArc: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    listEnabledRules: vi.fn().mockReturnValue(Promise.resolve(ok(SYSTEM_RULES))),
-    getProcessorAccountContext: vi.fn().mockReturnValue(Promise.resolve(ok({
-      retentionDays: 30,
-      filtering: null,
-      emailConfig: DEFAULT_ALIAS,
-      registeredDomains: [],
-      userEmails: [],
-      billingPlan: "Paid" as const,
-    }))),
-    saveAlias: vi.fn().mockImplementation((a: Alias) => Promise.resolve(ok(a))),
-    getSender: vi.fn().mockReturnValue(Promise.resolve(ok({
-      accountId: TEST_ACCOUNT_ID, aliasAddress: "user@example.com",
-      domain: "example.com", policy: "allow", addedAt: "2024-01-01T00:00:00Z",
-    }))),
-    saveSender: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    getTemplate: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-    updateGlobalReputation: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    getDomainByName: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-    incrementStats: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    annotateRuleError: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    annotateTemplateError: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-  };
+function makeStore() {
+  const arcDb = makeArcDbMock();
+  const accountDb = makeAccountDbMock();
+  const processingDb = makeProcessingDbMock();
+  vi.mocked(accountDb.listEnabledRules).mockReturnValue(Promise.resolve(ok(SYSTEM_RULES)));
+  vi.mocked(accountDb.getProcessorAccountContext).mockReturnValue(Promise.resolve(ok({
+    retentionDays: 30,
+    filtering: null,
+    emailConfig: DEFAULT_ALIAS,
+    registeredDomains: [],
+    userEmails: [],
+    billingPlan: "Paid" as const,
+  })));
+  vi.mocked(accountDb.getSender).mockReturnValue(Promise.resolve(ok({
+    accountId: TEST_ACCOUNT_ID, aliasAddress: "user@example.com",
+    domain: "example.com", policy: "allow", addedAt: "2024-01-01T00:00:00Z",
+  })));
+  return { arcDb, accountDb, processingDb };
 }
 
 function makeContentSanitizer(): ContentSanitizerClient {
@@ -222,7 +211,7 @@ describe("DeviceNotifier wiring: processor invokes notifier with urgency", () =>
     mockLogger = createMockLogger();
     notifier = makeNotifier();
     processor = new SignalProcessor({
-      store: makeStore(),
+      ...makeStore(),
       contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com",
       classifier: makeClassifier(),
       embeddingGenerator: makeEmbeddingGenerator(),
@@ -344,7 +333,7 @@ describe("DeviceNotifier wiring: handler instantiates with correct dependencies"
     // that processSideEffect calls it.
     const notifier = makeNotifier();
     const processor = new SignalProcessor({
-      store: makeStore(),
+      ...makeStore(),
       contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com",
       classifier: makeClassifier(),
       embeddingGenerator: makeEmbeddingGenerator(),

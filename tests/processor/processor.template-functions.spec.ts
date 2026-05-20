@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ok } from "neverthrow";
 import { SignalProcessor } from "../../src/processor/processor.js";
-import type { ProcessorDatabase, SqsDispatcher, Notifier, Forwarder, ReplySender, RuleEvaluator, ProcessorAccountContext } from "../../src/processor/processor.js";
+import type { ProcessorAccountContext } from "../../src/processor/processor.js";
+import { makeArcDbMock, makeAccountDbMock, makeProcessingDbMock } from "./_helpers.js";
+import type { AccountDatabase } from "../../src/database/account-database.js";
 import type { UserCodeExecutorClient, UserCodeResponse } from "../../src/processor/user-code-client.js";
 import type { ContentSanitizerClient } from "../../src/processor/content-sanitizer-client.js";
 import type { Signal, Arc, Alias, EmailTemplate } from "../../src/types/index.js";
@@ -90,37 +92,26 @@ function makeTemplate(overrides: Partial<EmailTemplate> = {}): EmailTemplate {
   };
 }
 
-function makeStore(template: EmailTemplate | null = makeTemplate()): ProcessorDatabase {
-  return {
-    getSignalByMessageId: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-    saveSignal: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    updateSignalRetention: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    getArc: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-    findArcByGroupingKey: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-    saveArc: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    listEnabledRules: vi.fn().mockReturnValue(Promise.resolve(ok(SYSTEM_RULES))),
-    getProcessorAccountContext: vi.fn().mockReturnValue(Promise.resolve(ok(DEFAULT_CTX))),
-    saveAlias: vi.fn().mockImplementation((a: Alias) => Promise.resolve(ok(a))),
+function makeStore(template: EmailTemplate | null = makeTemplate()) {
+  const arcDb = makeArcDbMock();
+  const accountDb = {
+    ...makeAccountDbMock(),
     getSender: vi.fn().mockReturnValue(Promise.resolve(ok({ policy: "allow", domain: "external.com", address: "sender@external.com" }))),
-    saveSender: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     getTemplate: vi.fn().mockReturnValue(Promise.resolve(ok(template))),
-    updateGlobalReputation: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    getDomainByName: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-    incrementStats: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    annotateRuleError: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    annotateTemplateError: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-  };
+  } as unknown as AccountDatabase;
+  const processingDb = makeProcessingDbMock();
+  return { arcDb, accountDb, processingDb };
 }
 
 function makeProcessor(opts: {
-  store: ProcessorDatabase;
+  store: ReturnType<typeof makeStore>;
   userCodeExecutor: UserCodeExecutorClient;
   logger: MockLogger;
   systemSignalCreator?: SystemSignalCreator;
 }): SignalProcessor {
   const { store, userCodeExecutor, logger, systemSignalCreator } = opts;
   return new SignalProcessor({
-    store,
+    ...store,
     userCodeExecutor,
     contentSanitizer: { invoke: vi.fn() } as unknown as ContentSanitizerClient,
     classifier: { classify: vi.fn() },
@@ -151,7 +142,7 @@ describe("Template function resolution via User Code Executor", () => {
   let mockLogger: MockLogger;
   let mockExecutor: UserCodeExecutorClient;
   let mockSystemSignalCreator: SystemSignalCreator;
-  let store: ProcessorDatabase;
+  let store: ReturnType<typeof makeStore>;
   let processor: SignalProcessor;
 
   beforeEach(() => {
@@ -186,7 +177,7 @@ describe("Template function resolution via User Code Executor", () => {
     }));
 
     // Verify draft was saved with resolved template values
-    const saveSignalCalls = vi.mocked(store.saveSignal).mock.calls;
+    const saveSignalCalls = vi.mocked(store.arcDb.saveSignal).mock.calls;
     expect(saveSignalCalls.length).toBe(1);
     const draft = saveSignalCalls[0]![0] as Signal;
     expect(draft.subject).toBe("Re: Test email — Hello");
@@ -205,14 +196,14 @@ describe("Template function resolution via User Code Executor", () => {
     await processor.processSideEffect({ signal, arc });
 
     // Draft should still be saved but with empty string for the null function
-    const saveSignalCalls = vi.mocked(store.saveSignal).mock.calls;
+    const saveSignalCalls = vi.mocked(store.arcDb.saveSignal).mock.calls;
     expect(saveSignalCalls.length).toBe(1);
     const draft = saveSignalCalls[0]![0] as Signal;
     expect(draft.subject).toBe("Re: Test email — ");
     expect(draft.status).toBe("draft");
 
     // annotateTemplateError should be called for the null result
-    expect(store.annotateTemplateError).toHaveBeenCalledWith(
+    expect(store.accountDb.annotateTemplateError).toHaveBeenCalledWith(
       TEST_ACCOUNT_ID,
       "tmpl_001",
       "greeting",
@@ -235,14 +226,14 @@ describe("Template function resolution via User Code Executor", () => {
     await processor.processSideEffect({ signal, arc });
 
     // Draft saved with empty string for timed-out function
-    const saveSignalCalls = vi.mocked(store.saveSignal).mock.calls;
+    const saveSignalCalls = vi.mocked(store.arcDb.saveSignal).mock.calls;
     expect(saveSignalCalls.length).toBe(1);
     const draft = saveSignalCalls[0]![0] as Signal;
     expect(draft.subject).toBe("Re: Test email — ");
     expect(draft.status).toBe("draft");
 
     // annotateTemplateError called with timeout error
-    expect(store.annotateTemplateError).toHaveBeenCalledWith(
+    expect(store.accountDb.annotateTemplateError).toHaveBeenCalledWith(
       TEST_ACCOUNT_ID,
       "tmpl_001",
       "greeting",
@@ -265,14 +256,14 @@ describe("Template function resolution via User Code Executor", () => {
     await processor.processSideEffect({ signal, arc });
 
     // Draft saved with empty string for errored function
-    const saveSignalCalls = vi.mocked(store.saveSignal).mock.calls;
+    const saveSignalCalls = vi.mocked(store.arcDb.saveSignal).mock.calls;
     expect(saveSignalCalls.length).toBe(1);
     const draft = saveSignalCalls[0]![0] as Signal;
     expect(draft.textBody).toBe("Hi Sender, ");
     expect(draft.status).toBe("draft");
 
     // annotateTemplateError called with runtime error
-    expect(store.annotateTemplateError).toHaveBeenCalledWith(
+    expect(store.accountDb.annotateTemplateError).toHaveBeenCalledWith(
       TEST_ACCOUNT_ID,
       "tmpl_001",
       "customBody",
@@ -294,7 +285,7 @@ describe("Template function resolution via User Code Executor", () => {
     expect(mockExecutor.invoke).not.toHaveBeenCalled();
 
     // Draft should still be saved with standard variable substitution
-    const saveSignalCalls = vi.mocked(storeNoFns.saveSignal).mock.calls;
+    const saveSignalCalls = vi.mocked(storeNoFns.arcDb.saveSignal).mock.calls;
     expect(saveSignalCalls.length).toBe(1);
     const draft = saveSignalCalls[0]![0] as Signal;
     expect(draft.subject).toBe("Re: Test email — ");
@@ -389,14 +380,14 @@ describe("Template function resolution via User Code Executor", () => {
 
     await processor.processSideEffect({ signal, arc });
 
-    const saveSignalCalls = vi.mocked(store.saveSignal).mock.calls;
+    const saveSignalCalls = vi.mocked(store.arcDb.saveSignal).mock.calls;
     expect(saveSignalCalls.length).toBe(1);
     const draft = saveSignalCalls[0]![0] as Signal;
     expect(draft.subject).toBe("Re: Test email — ");
     expect(draft.status).toBe("draft");
 
     // annotateTemplateError should be called
-    expect(store.annotateTemplateError).toHaveBeenCalledWith(
+    expect(store.accountDb.annotateTemplateError).toHaveBeenCalledWith(
       TEST_ACCOUNT_ID,
       "tmpl_001",
       "greeting",

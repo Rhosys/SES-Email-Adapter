@@ -85,11 +85,6 @@ vi.mock("../src/database/processing-database.js", () => ({
   ProcessingDatabase: vi.fn().mockImplementation(() => ({})),
 }));
 
-vi.mock("../src/database/adapters.js", () => ({
-  ProcessorDatabaseAdapter: vi.fn().mockImplementation(() => ({})),
-  ApiDatabaseAdapter: vi.fn().mockImplementation(() => ({})),
-}));
-
 vi.mock("../src/database/audit-database.js", () => ({
   AuditDatabase: vi.fn().mockImplementation(() => ({})),
 }));

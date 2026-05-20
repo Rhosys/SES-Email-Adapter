@@ -22,7 +22,6 @@ import { LambdaUserCodeExecutor } from "./processor/user-code-client.js";
 import { AccountDatabase } from "./database/account-database.js";
 import { ArcDatabase } from "./database/arc-database.js";
 import { ProcessingDatabase } from "./database/processing-database.js";
-import { ProcessorDatabaseAdapter, ApiDatabaseAdapter } from "./database/adapters.js";
 import { AuditDatabase } from "./database/audit-database.js";
 import { SESv2Client } from "@aws-sdk/client-sesv2";
 import { ApiGatewayManagementApiClient } from "@aws-sdk/client-apigatewaymanagementapi";
@@ -92,8 +91,6 @@ const processingDb = new ProcessingDatabase();
 const auditDb = new AuditDatabase();
 const deviceStore = new DynamoDeviceStore();
 
-const processorStore = new ProcessorDatabaseAdapter(arcDb, accountDb, processingDb);
-
 const NOTIFICATION_FROM = process.env["NOTIFICATION_FROM"] ?? "";
 const CONFIG_SET = process.env["SES_CONFIGURATION_SET"] ?? "";
 
@@ -108,15 +105,16 @@ const authHandler = new AuthWorkflowHandler(deviceStore, wsDeliverer, arcDb, log
 const handlerRegistry = new HandlerRegistry([authHandler]);
 
 const processor = new SignalProcessor({
-  store: processorStore,
   arcDb,
+  accountDb,
+  processingDb,
   contentSanitizer: new LambdaContentSanitizer(lambda, CONTENT_SANITIZER_ARN),
   userCodeExecutor: new LambdaUserCodeExecutor(lambda, USER_CODE_EXECUTOR_ARN),
   classifier,
   embeddingGenerator,
   auroraWriter: multiClusterWriter,
   arcMatcher: arcDb,
-  ruleEvaluator: new JsonLogicRuleEvaluator(logger, new LambdaUserCodeExecutor(lambda, USER_CODE_EXECUTOR_ARN), processorStore),
+  ruleEvaluator: new JsonLogicRuleEvaluator(logger, new LambdaUserCodeExecutor(lambda, USER_CODE_EXECUTOR_ARN), accountDb),
   notifier: new DeviceNotifier({
     deviceStore: new DynamoDeviceStore(),
     deliverers: {
@@ -200,7 +198,9 @@ const sesVerificationMailer: VerificationMailer = {
 const authService = new AuthressAuthService();
 
 const app = createApp({
-  store: new ApiDatabaseAdapter(arcDb, accountDb, auditDb),
+  arcDb,
+  accountDb,
+  auditDb,
   auth: authService,
   access: new AuthressAccessService(),
   logger,

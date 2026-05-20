@@ -58,12 +58,12 @@ export interface RuleAnnotationStore {
 export class JsonLogicRuleEvaluator implements RuleEvaluator {
   private readonly logger: Logger;
   private readonly userCodeExecutor: UserCodeExecutorClient;
-  private readonly store: RuleAnnotationStore;
+  private readonly accountDb: RuleAnnotationStore;
 
-  constructor(logger: Logger, userCodeExecutor?: UserCodeExecutorClient, store?: RuleAnnotationStore) {
+  constructor(logger: Logger, userCodeExecutor?: UserCodeExecutorClient, accountDb?: RuleAnnotationStore) {
     this.logger = logger;
     this.userCodeExecutor = userCodeExecutor ?? { invoke: () => Promise.resolve({ success: false, error: { message: "User code executor not configured", type: "runtime_error" } } as UserCodeResponse), validateAst: () => Promise.resolve({ success: false, error: { message: "User code executor not configured", type: "runtime_error" } }), validateAstBatch: () => Promise.resolve({ success: false, error: { message: "User code executor not configured", type: "runtime_error" } }) };
-    this.store = store ?? { annotateRuleError: () => Promise.resolve(ok(undefined)) };
+    this.accountDb = accountDb ?? { annotateRuleError: () => Promise.resolve(ok(undefined)) };
   }
 
   async evaluate(rule: Rule, context: { signal: Signal; arc: Arc; isMatchedArc: boolean }): Promise<RuleEvalResult> {
@@ -115,7 +115,7 @@ export class JsonLogicRuleEvaluator implements RuleEvaluator {
 
   async annotateRuleError(rule: Rule, error: { message: string; type: string }): Promise<void> {
     try {
-      await this.store.annotateRuleError(rule.accountId, rule.id, `[${error.type}] ${error.message}`);
+      await this.accountDb.annotateRuleError(rule.accountId, rule.id, `[${error.type}] ${error.message}`);
     } catch {
       // Best-effort — don't fail rule evaluation if annotation fails
       this.logger.track("Failed to annotate rule error.", { code: "rule_evaluator.annotate_failed", ruleId: rule.id });

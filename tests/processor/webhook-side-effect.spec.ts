@@ -1,8 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ok } from "neverthrow";
 import { SignalProcessor, SYSTEM_RULES } from "../../src/processor/processor.js";
+import type { ArcMatcher, SqsDispatcher, Notifier, Forwarder, ReplySender, SideEffectPayload } from "../../src/processor/processor.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
-import type { ProcessorDatabase, ArcMatcher, SqsDispatcher, Notifier, Forwarder, ReplySender, SideEffectPayload } from "../../src/processor/processor.js";
+import { makeArcDbMock, makeAccountDbMock, makeProcessingDbMock } from "./_helpers.js";
+import type { AccountDatabase } from "../../src/database/account-database.js";
 import type { ContentSanitizerClient } from "../../src/processor/content-sanitizer-client.js";
 import type { SignalClassifier } from "../../src/classifier/classifier.js";
 import type { EmbeddingGenerator } from "../../src/embedding/embedding-generator.js";
@@ -58,15 +60,10 @@ const DEFAULT_ALIAS: Alias = {
 // Test double factories
 // ---------------------------------------------------------------------------
 
-function makeStore(billingPlan: "Paid" | "Free" | "Trial" = "Paid"): ProcessorDatabase {
-  return {
-    getSignalByMessageId: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-    saveSignal: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    updateSignalRetention: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    getArc: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-    findArcByGroupingKey: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-    saveArc: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    listEnabledRules: vi.fn().mockReturnValue(Promise.resolve(ok(SYSTEM_RULES))),
+function makeStore(billingPlan: "Paid" | "Free" | "Trial" = "Paid") {
+  const arcDb = makeArcDbMock();
+  const accountDb = {
+    ...makeAccountDbMock(),
     getProcessorAccountContext: vi.fn().mockReturnValue(Promise.resolve(ok({
       retentionDays: 30,
       filtering: null,
@@ -75,19 +72,13 @@ function makeStore(billingPlan: "Paid" | "Free" | "Trial" = "Paid"): ProcessorDa
       userEmails: [],
       billingPlan,
     }))),
-    saveAlias: vi.fn().mockImplementation((a: Alias) => Promise.resolve(ok(a))),
     getSender: vi.fn().mockReturnValue(Promise.resolve(ok({
       accountId: TEST_ACCOUNT_ID, aliasAddress: "user@example.com",
       domain: "example.com", policy: "allow", addedAt: "2024-01-01T00:00:00Z",
     }))),
-    saveSender: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    getTemplate: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-    updateGlobalReputation: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    getDomainByName: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-    incrementStats: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    annotateRuleError: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    annotateTemplateError: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-  };
+  } as unknown as AccountDatabase;
+  const processingDb = makeProcessingDbMock();
+  return { arcDb, accountDb, processingDb };
 }
 
 function makeSignal(overrides: Partial<Signal> = {}): Signal {
@@ -135,9 +126,9 @@ function makeArc(overrides: Partial<Arc> = {}): Arc {
   };
 }
 
-function makeProcessor(opts: { store: ProcessorDatabase; logger: MockLogger; billingHandler?: BillingHandler }): SignalProcessor {
+function makeProcessor(opts: { store: ReturnType<typeof makeStore>; logger: MockLogger; billingHandler?: BillingHandler }): SignalProcessor {
   return new SignalProcessor({
-    store: opts.store,
+    ...opts.store,
     contentSanitizer: { invoke: vi.fn() } as unknown as ContentSanitizerClient,
     classifier: { classify: vi.fn() } as unknown as Pick<SignalClassifier, "classify">,
     embeddingGenerator: { generateForModel: vi.fn(), generateForSecondaryClusters: vi.fn() } as unknown as EmbeddingGenerator,
@@ -185,7 +176,7 @@ describe("processSideEffect — webhook delivery", () => {
     const notifier = { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) };
 
     const processor = new SignalProcessor({
-      store,
+      ...store,
       contentSanitizer: { invoke: vi.fn() } as unknown as ContentSanitizerClient,
       classifier: { classify: vi.fn() } as unknown as Pick<SignalClassifier, "classify">,
       embeddingGenerator: { generateForModel: vi.fn(), generateForSecondaryClusters: vi.fn() } as unknown as EmbeddingGenerator,
