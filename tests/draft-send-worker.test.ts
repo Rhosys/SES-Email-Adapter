@@ -119,6 +119,25 @@ describe("DraftSendWorker", () => {
     });
   });
 
+  it("omits arcId from sendReply opts when signal has no arcId", async () => {
+    const signalWithoutArc = makeSignal();
+    delete signalWithoutArc.arcId;
+    vi.mocked(store.getSignalById).mockResolvedValueOnce(ok(signalWithoutArc));
+
+    const result = await worker.process(PAYLOAD);
+
+    expect(result.isOk()).toBe(true);
+    expect(replySender.sendReply).toHaveBeenCalledWith({
+      to: "recipient@example.com",
+      from: "me@example.com",
+      subject: "Hello",
+      body: "Hi there",
+      inReplyTo: "",
+      accountId: "acct-001",
+      signalId: "USR#signal-001",
+    });
+  });
+
   it("joins multiple recipients in the to field", async () => {
     vi.mocked(store.getSignalById).mockResolvedValueOnce(ok(makeSignal({
       to: [{ address: "a@example.com" }, { address: "b@example.com" }],
