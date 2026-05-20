@@ -78,7 +78,6 @@ export class ApiDatabaseAdapter implements ApiDatabase {
   unblockSignal(accountId: string, signalLookupId: string, arcId: string) { return this.arc.unblockSignal(accountId, signalLookupId, arcId); }
 
   // Arcs (additional)
-  saveArc(arc: Arc) { return this.arc.saveArc(arc); }
   findArcByGroupingKey(accountId: string, key: string) { return this.arc.findArcByGroupingKey(accountId, key); }
 
   // Search
