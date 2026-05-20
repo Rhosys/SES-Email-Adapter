@@ -14,6 +14,7 @@ import { buildEmbedText, extractEmbedTextInput } from "../embedding/embed-text.j
 import type { SignalClassifier } from "../classifier/classifier.js";
 import type { EmbeddingGenerator } from "../embedding/embedding-generator.js";
 import type { MultiClusterAuroraWriter } from "../database/multi-cluster-aurora-writer.js";
+import type { ArcDatabase, UpdateArcFields } from "../database/arc-database.js";
 import type { S3RetentionService } from "../embedding/s3-retention-service.js";
 import { getRetentionForPlan, retentionDurationToSeconds } from "../embedding/retention-tier.js";
 import type { BillingPlan } from "../embedding/retention-tier.js";
@@ -291,6 +292,7 @@ export const SYSTEM_RULES: Rule[] = [
 
 interface SignalProcessorOptions {
   store: ProcessorDatabase;
+  arcDb?: ArcDatabase;
   contentSanitizer: ContentSanitizerClient;
   userCodeExecutor?: UserCodeExecutorClient;
   classifier: Pick<SignalClassifier, "classify">;
@@ -316,6 +318,7 @@ interface SignalProcessorOptions {
 
 export class SignalProcessor {
   private readonly store: ProcessorDatabase;
+  private readonly arcDb: ArcDatabase | undefined;
   private readonly contentSanitizer: ContentSanitizerClient;
   private readonly userCodeExecutor: UserCodeExecutorClient;
   private readonly classifier: Pick<SignalClassifier, "classify">;
@@ -340,6 +343,7 @@ export class SignalProcessor {
 
   constructor(opts: SignalProcessorOptions) {
     this.store = opts.store;
+    this.arcDb = opts.arcDb!;
     this.contentSanitizer = opts.contentSanitizer;
     this.userCodeExecutor = opts.userCodeExecutor ?? { invoke: () => Promise.resolve({ success: true, purpose: "template_function", result: "" } as const), validateAst: () => Promise.resolve({ success: true, purpose: "validate_ast", result: { valid: true } } as const), validateAstBatch: () => Promise.resolve({ success: true, purpose: "validate_ast_batch", results: [] } as const) };
     this.classifier = opts.classifier;
@@ -1085,13 +1089,12 @@ export class SignalProcessor {
     }
 
     // 11. Apply outcome to arc
-    // Don't bump lastSignalAt when a rule archives an incoming signal onto an existing arc — prevents status/notice emails from pushing an arc to the top of the inbox
-    if (!matchedArc || !outcome.archive) arc.lastSignalAt = timestamp;
+    // Always set lastSignalAt — reactivation semantics (a new signal always updates recency)
+    arc.lastSignalAt = timestamp;
 
     for (const label of outcome.additionalLabels) {
       if (!arc.labels.includes(label)) arc.labels = [...arc.labels, label];
     }
-    if (outcome.archive) arc.status = "archived";
 
     const signalUrgency = outcome.urgency ?? arc.urgency ?? "normal";
     if (!matchedArc) arc.urgency = signalUrgency;
@@ -1119,8 +1122,27 @@ export class SignalProcessor {
     signal.embeddings = embeddings;
 
     // Save arc (leaf node) before signal (dependent node) — guarantees arc exists whenever signal exists
-    const saveArcResult = await this.store.saveArc(arc);
-    if (saveArcResult.isErr()) return err(saveArcResult.error);
+    if (matchedArc) {
+      // Reactivate — a new signal always brings the arc back to active (unless a rule archives it)
+      arc.status = "active";
+      if (outcome.archive) arc.status = "archived";
+
+      // Compute optional field delta
+      const fields: UpdateArcFields = {};
+      if (arc.summary !== matchedArc.summary) fields.summary = arc.summary;
+      if (arc.workflow !== matchedArc.workflow) fields.workflow = arc.workflow;
+      if (arc.urgency !== undefined && arc.urgency !== matchedArc.urgency) fields.urgency = arc.urgency;
+      if (arc.retentionDuration !== undefined && arc.retentionDuration !== matchedArc.retentionDuration) fields.retentionDuration = arc.retentionDuration;
+      if (JSON.stringify(arc.labels) !== JSON.stringify(matchedArc.labels)) fields.labels = arc.labels;
+      if (arc.sentMessageIds !== undefined && JSON.stringify(arc.sentMessageIds) !== JSON.stringify(matchedArc.sentMessageIds)) fields.sentMessageIds = arc.sentMessageIds;
+
+      const updateResult = await this.arcDb!.updateArc(accountId, arc.id, arc.status, arc.lastSignalAt, fields);
+      if (updateResult.isErr()) return err(updateResult.error);
+    } else {
+      if (outcome.archive) arc.status = "archived";
+      const saveArcResult = await this.store.saveArc(arc);
+      if (saveArcResult.isErr()) return err(saveArcResult.error);
+    }
     this.logger.trackPoint("arc_saved", { arcId: arc.id });
 
     const saveSignalResult = await this.store.saveSignal(signal);

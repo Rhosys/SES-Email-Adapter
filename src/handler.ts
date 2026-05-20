@@ -109,6 +109,7 @@ const handlerRegistry = new HandlerRegistry([authHandler]);
 
 const processor = new SignalProcessor({
   store: processorStore,
+  arcDb,
   contentSanitizer: new LambdaContentSanitizer(lambda, CONTENT_SANITIZER_ARN),
   userCodeExecutor: new LambdaUserCodeExecutor(lambda, USER_CODE_EXECUTOR_ARN),
   classifier,
