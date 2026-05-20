@@ -170,7 +170,6 @@ export interface ApiDatabase {
   updateSignalStatus(accountId: string, signalLookupId: string, status: "block_hidden" | "block_reject" | "violate_report"): PromiseLike<Result<Signal, DbError>>;
   unblockSignal(accountId: string, signalLookupId: string, arcId: string): PromiseLike<Result<void, DbError>>;
   createArc(arc: Arc): PromiseLike<Result<void, DbError>>;
-  saveArc(arc: Arc): PromiseLike<Result<void, DbError>>;
   findArcByGroupingKey(accountId: string, key: string): PromiseLike<Result<Arc | null, DbError>>;
 
   // Verified forwarding addresses

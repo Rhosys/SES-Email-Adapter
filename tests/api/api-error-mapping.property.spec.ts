@@ -42,7 +42,6 @@ function makeBaseStore(): ApiDatabase {
     listSignals: vi.fn().mockResolvedValue(ok({ items: [] })),
     listPreArcSignals: vi.fn().mockResolvedValue(ok({ items: [] })),
     blockSignal: vi.fn().mockResolvedValue(ok({})),
-    saveArc: vi.fn().mockResolvedValue(ok(undefined)),
     findArcByGroupingKey: vi.fn().mockResolvedValue(ok(null)),
     getSignalById: vi.fn().mockResolvedValue(ok(null)),
     updateSignal: vi.fn().mockResolvedValue(ok({})),
