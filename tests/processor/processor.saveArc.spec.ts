@@ -109,7 +109,6 @@ describe("Single saveArc call with complete mutations", () => {
         savedArc = arc;
         return Promise.resolve(ok(undefined));
       }),
-      updateArc: vi.fn().mockReturnValue(Promise.resolve(ok({}))),
       listEnabledRules: vi.fn().mockReturnValue(Promise.resolve(ok([...SYSTEM_RULES, ...userRules]))),
       getProcessorAccountContext: vi.fn().mockReturnValue(Promise.resolve(ok({
         retentionDays: 0,
