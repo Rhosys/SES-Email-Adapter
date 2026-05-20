@@ -4,6 +4,7 @@ import { ExternalEmailSignalHandler } from "../../src/notifier/external-email-si
 import type { EmailService } from "../../src/email/email-service.js";
 import { ok } from "../../src/errors.js";
 import type { Logger } from "../../src/logger.js";
+import { TAG_TYPE, TAG_ACCOUNT_ID, TAG_SIGNAL_ID, TAG_ARC_ID } from "../../src/email/ses-tags.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -117,5 +118,100 @@ describe("ExternalEmailSignalHandler.forward()", () => {
     const result = await handler.forward("emails/xyz-789", "user@test.com", "acct-99");
 
     expect(result.isOk()).toBe(true);
+  });
+});
+
+// ─── Tag Integration ─────────────────────────────────────────────────────────
+
+describe("ExternalEmailSignalHandler tag integration", () => {
+  let emailService: EmailService;
+  let handler: ExternalEmailSignalHandler;
+
+  beforeEach(() => {
+    emailService = makeEmailService();
+    const s3 = { send: vi.fn() } as unknown as S3Client;
+    handler = new ExternalEmailSignalHandler(emailService, s3, makeLogger(), "test-bucket");
+  });
+
+  describe("sendReply tags", () => {
+    it("without optional fields → tags = [Type:reply]", async () => {
+      (emailService.send as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok({ messageId: "m-1" }));
+
+      await handler.sendReply({
+        to: "a@b.com",
+        from: "c@d.com",
+        subject: "Hi",
+        body: "Hello",
+        inReplyTo: "<ref@x.com>",
+      });
+
+      const call = (emailService.send as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+      expect(call.tags).toEqual([
+        { Name: TAG_TYPE, Value: "reply" },
+      ]);
+    });
+
+    it("with all fields → tags include AccountId, SignalId, ArcId", async () => {
+      (emailService.send as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok({ messageId: "m-2" }));
+
+      await handler.sendReply({
+        to: "a@b.com",
+        from: "c@d.com",
+        subject: "Hi",
+        body: "Hello",
+        inReplyTo: "<ref@x.com>",
+        accountId: "acct-1",
+        signalId: "sig-2",
+        arcId: "arc-3",
+      });
+
+      const call = (emailService.send as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+      expect(call.tags).toEqual([
+        { Name: TAG_TYPE, Value: "reply" },
+        { Name: TAG_ACCOUNT_ID, Value: "acct-1" },
+        { Name: TAG_SIGNAL_ID, Value: "sig-2" },
+        { Name: TAG_ARC_ID, Value: "arc-3" },
+      ]);
+    });
+  });
+
+  describe("forward tags", () => {
+    it("without opts → tags = [Type:forward, AccountId:X]", async () => {
+      const rawBytes = new Uint8Array([1, 2]);
+      const s3 = { send: vi.fn() } as unknown as S3Client;
+      const h = new ExternalEmailSignalHandler(emailService, s3, makeLogger(), "bucket");
+      (s3.send as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        Body: { transformToByteArray: () => Promise.resolve(rawBytes) },
+      });
+      (emailService.sendRaw as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok({ messageId: "f-1" }));
+
+      await h.forward("key/1", "to@x.com", "acct-7");
+
+      const call = (emailService.sendRaw as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+      expect(call.tags).toEqual([
+        { Name: TAG_TYPE, Value: "forward" },
+        { Name: TAG_ACCOUNT_ID, Value: "acct-7" },
+      ]);
+    });
+
+    it("with signalId + arcId → tags include all four", async () => {
+      const rawBytes = new Uint8Array([3, 4]);
+      const s3 = { send: vi.fn() } as unknown as S3Client;
+      const h = new ExternalEmailSignalHandler(emailService, s3, makeLogger(), "bucket");
+      (s3.send as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        Body: { transformToByteArray: () => Promise.resolve(rawBytes) },
+      });
+      (emailService.sendRaw as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok({ messageId: "f-2" }));
+
+      await h.forward("key/2", "to@y.com", "acct-8", { signalId: "sig-5", arcId: "arc-6" });
+
+      const call = (emailService.sendRaw as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+      expect(call.tags).toEqual([
+        { Name: TAG_TYPE, Value: "forward" },
+        { Name: TAG_ACCOUNT_ID, Value: "acct-8" },
+        { Name: TAG_SIGNAL_ID, Value: "sig-5" },
+        { Name: TAG_ARC_ID, Value: "arc-6" },
+      ]);
+    });
   });
 });
