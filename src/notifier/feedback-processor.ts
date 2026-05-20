@@ -122,59 +122,58 @@ export class FeedbackProcessor {
 
         if (sentSignalResult?.isOk()) {
           const sentSignal = sentSignalResult.value;
-            if (sentSignal && sentSignal.source === "user") {
-              const bouncedRecipients = feedback.bounce!.bouncedRecipients.map(r => ({
-                address: r.emailAddress,
-                bounceType: isPermanent ? "permanent" as const : "transient" as const,
-                ...(r.status ? { reason: r.status } : {}),
-              }));
+          if (sentSignal && sentSignal.source === "user") {
+            const bouncedRecipients = feedback.bounce!.bouncedRecipients.map(r => ({
+              address: r.emailAddress,
+              bounceType: isPermanent ? "permanent" as const : "transient" as const,
+              ...(r.status ? { reason: r.status } : {}),
+            }));
 
-              // Create deliverability signal in the same arc
-              // Direct arc assignment: TAG_ARC_ID takes precedence (no arc-matching needed)
-              const tagArcId = feedback.mail.tags?.[TAG_ARC_ID];
-              const resolvedArcId = tagArcId || sentSignal.arcId;
+            // Create deliverability signal in the same arc
+            // Direct arc assignment: TAG_ARC_ID takes precedence (no arc-matching needed)
+            const tagArcId = feedback.mail.tags?.[TAG_ARC_ID];
+            const resolvedArcId = tagArcId || sentSignal.arcId;
 
-              const id = generateId("sgn-");
-              const deliverabilitySignal: Signal = {
-                id,
-                signalLookupId: id,
-                ...(resolvedArcId ? { arcId: resolvedArcId } : {}),
-                accountId: sentSignal.accountId,
-                source: "deliverability",
-                status: "active",
-                receivedAt: new Date().toISOString(),
-                from: { address: "system@deliverability" },
-                to: [],
-                cc: [],
-                subject: `Delivery failure: ${bouncedRecipients.length} recipient(s) bounced`,
-                attachments: [],
-                headers: {},
-                recipientAddress: sentSignal.from.address,
-                workflow: sentSignal.workflow,
-                workflowData: sentSignal.workflowData,
-                spamScore: 0,
-                summary: "",
-                classificationModelId: "",
-                s3Key: "",
-                createdAt: new Date().toISOString(),
-                relatedSignalId: sentSignal.id,
-                bouncedRecipients,
-              };
-              await this.signalStore.saveSignal(deliverabilitySignal);
+            const id = generateId("sgn-");
+            const deliverabilitySignal: Signal = {
+              id,
+              signalLookupId: id,
+              ...(resolvedArcId ? { arcId: resolvedArcId } : {}),
+              accountId: sentSignal.accountId,
+              source: "deliverability",
+              status: "active",
+              receivedAt: new Date().toISOString(),
+              from: { address: "system@deliverability" },
+              to: [],
+              cc: [],
+              subject: `Delivery failure: ${bouncedRecipients.length} recipient(s) bounced`,
+              attachments: [],
+              headers: {},
+              recipientAddress: sentSignal.from.address,
+              workflow: sentSignal.workflow,
+              workflowData: sentSignal.workflowData,
+              spamScore: 0,
+              summary: "",
+              classificationModelId: "",
+              s3Key: "",
+              createdAt: new Date().toISOString(),
+              relatedSignalId: sentSignal.id,
+              bouncedRecipients,
+            };
+            await this.signalStore.saveSignal(deliverabilitySignal);
 
-              // If ALL recipients permanently bounced → revert sent signal to draft
-              if (isPermanent) {
-                const allTo = sentSignal.to.map(t => t.address.toLowerCase());
-                const allBounced = allTo.every(addr =>
-                  bouncedRecipients.some(b => b.address.toLowerCase() === addr && b.bounceType === "permanent")
-                );
-                if (allBounced) {
-                  await this.signalStore.updateSignalSendStatus(sentSignal.accountId, sentSignal.signalLookupId, {
-                    status: "draft",
-                    sendFailureReason: "all_recipients_bounced",
-                    sendInitiatedAt: null,
-                  });
-                }
+            // If ALL recipients permanently bounced → revert sent signal to draft
+            if (isPermanent) {
+              const allTo = sentSignal.to.map(t => t.address.toLowerCase());
+              const allBounced = allTo.every(addr =>
+                bouncedRecipients.some(b => b.address.toLowerCase() === addr && b.bounceType === "permanent")
+              );
+              if (allBounced) {
+                await this.signalStore.updateSignalSendStatus(sentSignal.accountId, sentSignal.signalLookupId, {
+                  status: "draft",
+                  sendFailureReason: "all_recipients_bounced",
+                  sendInitiatedAt: null,
+                });
               }
             }
           }
