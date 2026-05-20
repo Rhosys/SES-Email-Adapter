@@ -9,6 +9,7 @@ import type { ReplySender, Forwarder } from "../processor/processor.js";
 import type { EmailService } from "../email/email-service.js";
 import type { DbError, Result } from "../errors.js";
 import { ok, err, dbError } from "../errors.js";
+import { buildOutboundTags } from "../email/ses-tags.js";
 import type { Logger } from "../logger.js";
 
 export class ExternalEmailSignalHandler implements ReplySender, Forwarder {
@@ -30,7 +31,16 @@ export class ExternalEmailSignalHandler implements ReplySender, Forwarder {
     subject: string;
     body: string;
     inReplyTo: string;
+    accountId?: string;
+    signalId?: string;
+    arcId?: string;
   }): Promise<{ messageId: string }> {
+    const tags = buildOutboundTags("reply", {
+      accountId: opts.accountId,
+      signalId: opts.signalId,
+      arcId: opts.arcId,
+    });
+
     const result = await this.emailService.send({
       to: opts.to,
       fromOverride: opts.from,
@@ -40,9 +50,7 @@ export class ExternalEmailSignalHandler implements ReplySender, Forwarder {
         { Name: "In-Reply-To", Value: opts.inReplyTo },
         { Name: "References", Value: opts.inReplyTo },
       ],
-      tags: [
-        { Name: "type", Value: "reply" },
-      ],
+      tags,
     });
 
     if (result.isErr()) {
@@ -52,18 +60,17 @@ export class ExternalEmailSignalHandler implements ReplySender, Forwarder {
     return { messageId: result.value.messageId };
   }
 
-  async forward(s3Key: string, toAddress: string, accountId: string, _opts?: { signalId?: string; arcId?: string }): Promise<Result<void, DbError>> {
+  async forward(s3Key: string, toAddress: string, accountId: string, opts?: { signalId?: string; arcId?: string }): Promise<Result<void, DbError>> {
     try {
       const res = await this.s3.send(new GetObjectCommand({ Bucket: this.emailBucket, Key: s3Key }));
       const rawBytes = await res.Body!.transformToByteArray();
 
+      const tags = buildOutboundTags("forward", { accountId, signalId: opts?.signalId, arcId: opts?.arcId });
+
       const result = await this.emailService.sendRaw({
         to: toAddress,
         rawData: rawBytes,
-        tags: [
-          { Name: "type", Value: "forward" },
-          { Name: "accountId", Value: accountId },
-        ],
+        tags,
       });
 
       if (result.isErr()) {
