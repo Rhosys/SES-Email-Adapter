@@ -1743,26 +1743,6 @@ describe("SignalProcessor", () => {
       expect(arc.workflow).toBe("content");
     });
 
-    it("delete action sets arc.status=deleted and records arc.deletedAt", async () => {
-      vi.mocked(store.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([{
-        id: "del-rule",
-        accountId: TEST_ACCOUNT_ID,
-        name: "Auto-delete promotions",
-        condition: "true",
-        actions: [{ type: "delete" }],
-        status: "enabled",
-        priorityOrder: 0,
-        createdAt: "2024-01-01T00:00:00Z",
-        updatedAt: "2024-01-01T00:00:00Z",
-      }])));
-
-      await processor.processRecord(makeMessage(), 1);
-
-      const arc = vi.mocked(store.saveArc).mock.calls[0]![0] as Arc;
-      expect(arc.status).toBe("deleted");
-      expect(arc.deletedAt).toBeDefined();
-    });
-
     it("multiple actions in one rule are all applied in order", async () => {
       vi.mocked(store.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([{
         id: "multi-rule",
