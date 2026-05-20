@@ -6,6 +6,7 @@ import type { AccountDatabase } from "../database/account-database.js";
 import { ok, err, dbError } from "../errors.js";
 import type { DbError, Result } from "../errors.js";
 import type { Logger } from "../logger.js";
+import { TAG_ACCOUNT_ID, TAG_TYPE, TAG_SIGNAL_ID, TAG_ARC_ID } from "../email/ses-tags.js";
 
 // 72 hours in seconds — soft bounces expire and can retry
 const SOFT_BOUNCE_TTL_SECONDS = 72 * 60 * 60;
@@ -89,8 +90,8 @@ export class FeedbackProcessor {
 
       // On permanent bounce, disable forward rules if this was a forwarded email
       if (isPermanent) {
-        const accountId = feedback.mail.tags?.["accountId"];
-        if (accountId && feedback.mail.tags?.["type"] === "forward") {
+        const accountId = feedback.mail.tags?.[TAG_ACCOUNT_ID];
+        if (accountId && feedback.mail.tags?.[TAG_TYPE] === "forward") {
           for (const r of feedback.bounce!.bouncedRecipients) {
             const disableResult = await this.accountDb.disableForwardActions(accountId, r.emailAddress);
             if (disableResult.isErr()) {
@@ -103,7 +104,7 @@ export class FeedbackProcessor {
       // Check if this bounce is for a user-sent signal
       if (this.signalStore) {
         const sesMessageId = feedback.mail.messageId;
-        const accountId = feedback.mail.tags?.["accountId"];
+        const accountId = feedback.mail.tags?.[TAG_ACCOUNT_ID];
         if (accountId) {
           const sentSignalResult = await this.signalStore.getSignalByMessageId(accountId, sesMessageId);
           if (sentSignalResult.isOk()) {
