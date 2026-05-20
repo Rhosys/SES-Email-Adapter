@@ -152,7 +152,7 @@ const draftSendWorker = new DraftSendWorker(
     getSignalById: (accountId, id) => arcDb.getSignalById(accountId, id),
     updateSignalSendStatus: (accountId, signalLookupId, update) => arcDb.updateSignalSendStatus(accountId, signalLookupId, update),
     getArc: (accountId, id) => arcDb.getArc(accountId, id),
-    updateArcStatus: (accountId, id, status) => arcDb.updateArc(accountId, id, { status }).then(r => r.map(() => undefined)),
+    updateArcStatus: (accountId, id, status) => arcDb.updateArc(accountId, id, status, new Date().toISOString(), {}).then(r => r.map(() => undefined)),
     getAccountAfterSendAction: async (accountId) => {
       const result = await accountDb.getAccount(accountId);
       if (result.isErr()) return err(result.error);

@@ -5,8 +5,8 @@ import { ok, err, dbError } from "../errors.js";
 import type { DbError, Result } from "../errors.js";
 import type { Logger } from "../logger.js";
 import type { ArcMatcher } from "../processor/processor.js";
-import type { ListArcsParams, UpdateArcRequest } from "../api/app.js";
-import type { Arc, Signal, Page, PageParams } from "../types/index.js";
+import type { ListArcsParams } from "../api/app.js";
+import type { Arc, Signal, Page, PageParams, ArcStatus, ArcUrgency, Workflow } from "../types/index.js";
 
 // ---------------------------------------------------------------------------
 // Aurora Data API client (stateless — no connection pool needed)
@@ -27,6 +27,19 @@ const arcPk  = (accountId: string, id: string) => `ACCT#${accountId}#ARC#${id}`;
 const sigPk  = (accountId: string, signalLookupId: string) => `ACCT#${accountId}#SIG#${signalLookupId}`;
 const ITEM_SK = "#";
 const gkeyPk = (accountId: string, key: string) => `GKEY#${accountId}#${key}`;
+
+// ---------------------------------------------------------------------------
+// UpdateArcFields — optional fields bag for updateArc
+// ---------------------------------------------------------------------------
+
+export interface UpdateArcFields {
+  urgency?: ArcUrgency;
+  labels?: string[];
+  summary?: string;
+  workflow?: Workflow;
+  retentionDuration?: string;
+  sentMessageIds?: string[];
+}
 
 // ---------------------------------------------------------------------------
 // ArcDatabase
@@ -281,30 +294,28 @@ export class ArcDatabase implements ArcMatcher {
     return this.saveArc(arc);
   }
 
-  async updateArc(accountId: string, id: string, update: UpdateArcRequest): Promise<Result<Arc, DbError>> {
+  async updateArc(accountId: string, id: string, status: ArcStatus, lastSignalAt: string, update: UpdateArcFields): Promise<Result<Arc, DbError>> {
     const now = new Date().toISOString();
-    const setParts: string[] = ["updatedAt = :now"];
-    const exprValues: Record<string, unknown> = { ":now": now };
-    const exprNames: Record<string, string> = {};
+    const setParts: string[] = [
+      "updatedAt = :now",
+      "#status = :status",
+      "lastSignalAt = :lastSignalAt",
+      "gsi1sk = :gsi1sk",
+    ];
+    const exprValues: Record<string, unknown> = {
+      ":now": now,
+      ":status": status,
+      ":lastSignalAt": lastSignalAt,
+      ":gsi1sk": `LASTACT#${status}#${lastSignalAt}#${id}`,
+    };
+    const exprNames: Record<string, string> = { "#status": "status" };
 
-    if (update.status !== undefined) {
-      setParts.push("#status = :status");
-      exprValues[":status"] = update.status;
-      exprNames["#status"] = "status";
-      if (update.status === "deleted") setParts.push("deletedAt = :now");
-      if (update.lastSignalAt) {
-        setParts.push("gsi1sk = :gsi1sk");
-        exprValues[":gsi1sk"] = `LASTACT#${update.status}#${update.lastSignalAt}#${id}`;
-      }
-    }
-    if (update.labels !== undefined) {
-      setParts.push("labels = :labels");
-      exprValues[":labels"] = update.labels;
-    }
-    if (update.urgency !== undefined) {
-      setParts.push("urgency = :urgency");
-      exprValues[":urgency"] = update.urgency;
-    }
+    if (update.labels !== undefined) { setParts.push("labels = :labels"); exprValues[":labels"] = update.labels; }
+    if (update.urgency !== undefined) { setParts.push("urgency = :urgency"); exprValues[":urgency"] = update.urgency; }
+    if (update.summary !== undefined) { setParts.push("summary = :summary"); exprValues[":summary"] = update.summary; }
+    if (update.workflow !== undefined) { setParts.push("workflow = :workflow"); exprValues[":workflow"] = update.workflow; }
+    if (update.retentionDuration !== undefined) { setParts.push("retentionDuration = :rd"); exprValues[":rd"] = update.retentionDuration; }
+    if (update.sentMessageIds !== undefined) { setParts.push("sentMessageIds = :smids"); exprValues[":smids"] = update.sentMessageIds; }
 
     try {
       const result = await dynamo.send(new UpdateCommand({
@@ -312,7 +323,7 @@ export class ArcDatabase implements ArcMatcher {
         Key: { pk: arcPk(accountId, id), sk: ITEM_SK },
         UpdateExpression: `SET ${setParts.join(", ")}`,
         ExpressionAttributeValues: exprValues,
-        ...(Object.keys(exprNames).length ? { ExpressionAttributeNames: exprNames } : {}),
+        ExpressionAttributeNames: exprNames,
         ReturnValues: "ALL_NEW",
       }));
       return ok(result.Attributes as unknown as Arc);
