@@ -8,9 +8,9 @@ export const TAG_SIGNAL_ID = `${TAG_PREFIX}SignalId`;
 export const TAG_ARC_ID = `${TAG_PREFIX}ArcId`;
 
 export interface TagContext {
-  accountId?: string;
-  signalId?: string;
-  arcId?: string;
+  accountId?: string | undefined;
+  signalId?: string | undefined;
+  arcId?: string | undefined;
 }
 
 export type OutboundType = "reply" | "forward" | "draft-send";
