@@ -6,7 +6,7 @@ import type { ProcessingDatabase } from "../src/database/processing-database.js"
 import type { AccountDatabase } from "../src/database/account-database.js";
 import type { SesFeedback, Signal } from "../src/types/index.js";
 import { createMockLogger } from "./helpers/mock-logger.js";
-import { TAG_ACCOUNT_ID } from "../src/email/ses-tags.js";
+import { TAG_ACCOUNT_ID, TAG_TYPE, TAG_SIGNAL_ID, TAG_ARC_ID } from "../src/email/ses-tags.js";
 
 function makeSentSignal(overrides: Partial<Signal> = {}): Signal {
   return {
@@ -179,5 +179,115 @@ describe("FeedbackProcessor — bounce handling for user-sent signals", () => {
     ]);
     // Original NOT reverted — transient bounces don't trigger revert
     expect(signalStore.updateSignalSendStatus).not.toHaveBeenCalled();
+  });
+});
+
+
+describe("FeedbackProcessor — prefixed tag reading", () => {
+  let processingDb: ProcessingDatabase;
+  let accountDb: AccountDatabase;
+  let signalStore: FeedbackSignalStore;
+  let processor: FeedbackProcessor;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    processingDb = makeProcessingDb();
+    accountDb = makeAccountDb();
+    signalStore = makeSignalStore();
+    processor = new FeedbackProcessor(processingDb, accountDb, createMockLogger(), signalStore);
+  });
+
+  it("disables forward rules when X-Numaeel-AccountId and X-Numaeel-Type=forward are present", async () => {
+    const feedback = makeBounceFeedback({
+      mail: {
+        messageId: "ses-msg-abc",
+        source: "me@example.com",
+        tags: { [TAG_ACCOUNT_ID]: "acct-001", [TAG_TYPE]: "forward" },
+      },
+    });
+
+    const result = await processor.processNotification(feedback);
+
+    expect(result.isOk()).toBe(true);
+    expect(accountDb.disableForwardActions).toHaveBeenCalledWith("acct-001", "recipient@example.com");
+  });
+
+  it("skips account-specific correlation when X-Numaeel-AccountId is absent — suppression only", async () => {
+    const feedback = makeBounceFeedback({
+      mail: {
+        messageId: "ses-msg-abc",
+        source: "me@example.com",
+        tags: { [TAG_TYPE]: "forward" },
+      },
+    });
+
+    const result = await processor.processNotification(feedback);
+
+    expect(result.isOk()).toBe(true);
+    // Address suppression still happens
+    expect(processingDb.suppressAddress).toHaveBeenCalledTimes(1);
+    // Forward-rule disabling skipped (no accountId)
+    expect(accountDb.disableForwardActions).not.toHaveBeenCalled();
+    // Signal lookup skipped (no accountId)
+    expect(signalStore.getSignalById).not.toHaveBeenCalled();
+    expect(signalStore.getSignalByMessageId).not.toHaveBeenCalled();
+  });
+
+  it("uses direct signal lookup via getSignalById when X-Numaeel-SignalId is present", async () => {
+    vi.mocked(signalStore.getSignalById).mockResolvedValueOnce(ok(makeSentSignal()));
+
+    const feedback = makeBounceFeedback({
+      mail: {
+        messageId: "ses-msg-abc",
+        source: "me@example.com",
+        tags: { [TAG_ACCOUNT_ID]: "acct-001", [TAG_SIGNAL_ID]: "sgn-signal001" },
+      },
+    });
+
+    const result = await processor.processNotification(feedback);
+
+    expect(result.isOk()).toBe(true);
+    expect(signalStore.getSignalById).toHaveBeenCalledWith("acct-001", "sgn-signal001");
+    expect(signalStore.getSignalByMessageId).not.toHaveBeenCalled();
+  });
+
+  it("assigns deliverability signal to the arc from X-Numaeel-ArcId tag", async () => {
+    vi.mocked(signalStore.getSignalById).mockResolvedValueOnce(ok(makeSentSignal({ arcId: "arc-original" })));
+
+    const feedback = makeBounceFeedback({
+      mail: {
+        messageId: "ses-msg-abc",
+        source: "me@example.com",
+        tags: {
+          [TAG_ACCOUNT_ID]: "acct-001",
+          [TAG_SIGNAL_ID]: "sgn-signal001",
+          [TAG_ARC_ID]: "arc-from-tag",
+        },
+      },
+    });
+
+    const result = await processor.processNotification(feedback);
+
+    expect(result.isOk()).toBe(true);
+    expect(signalStore.saveSignal).toHaveBeenCalledTimes(1);
+    const savedSignal = vi.mocked(signalStore.saveSignal).mock.calls[0]![0];
+    // Arc ID from the tag takes precedence over the signal's own arcId
+    expect(savedSignal.arcId).toBe("arc-from-tag");
+  });
+
+  it("falls back to getSignalByMessageId when no prefixed tags are present", async () => {
+    const feedback = makeBounceFeedback({
+      mail: {
+        messageId: "ses-msg-abc",
+        source: "me@example.com",
+        tags: { accountId: "acct-001" },
+      },
+    });
+
+    const result = await processor.processNotification(feedback);
+
+    expect(result.isOk()).toBe(true);
+    expect(signalStore.getSignalById).not.toHaveBeenCalled();
+    expect(signalStore.getSignalByMessageId).toHaveBeenCalledWith("acct-001", "ses-msg-abc");
   });
 });
