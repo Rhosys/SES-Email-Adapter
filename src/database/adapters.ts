@@ -4,7 +4,7 @@ import type { UpdateArcRequest } from "../api/requests.js";
 import type { Arc, Signal, View, Label, Rule, Domain, Account, Page, PageParams, Alias, AliasSender, SenderPolicy, VerifiedForwardingAddress, EmailTemplate } from "../types/index.js";
 import type { StatsCategory } from "../types/index.js";
 import type { AccountDatabase } from "./account-database.js";
-import type { ArcDatabase } from "./arc-database.js";
+import type { ArcDatabase, UpdateArcFields } from "./arc-database.js";
 import type { ProcessingDatabase } from "./processing-database.js";
 import type { AuditDatabase } from "./audit-database.js";
 
@@ -27,6 +27,7 @@ export class ProcessorDatabaseAdapter implements ProcessorDatabase {
   getArc(accountId: string, id: string) { return this.arc.getArc(accountId, id); }
   findArcByGroupingKey(accountId: string, key: string) { return this.arc.findArcByGroupingKey(accountId, key); }
   saveArc(arc: Arc) { return this.arc.saveArc(arc); }
+  updateArc(...args: Parameters<ArcDatabase["updateArc"]>) { return this.arc.updateArc(...args); }
   listEnabledRules(accountId: string) { return this.account.listEnabledRules(accountId); }
   getProcessorAccountContext(accountId: string, recipientAddress: string) { return this.account.getProcessorAccountContext(accountId, recipientAddress); }
   saveAlias(alias: Alias) { return this.account.saveAlias(alias); }
@@ -56,7 +57,7 @@ export class ApiDatabaseAdapter implements ApiDatabase {
   listArcs(accountId: string, params: ListArcsParams) { return this.arc.listArcs(accountId, params); }
   getArc(accountId: string, id: string) { return this.arc.getArc(accountId, id); }
   updateArc(accountId: string, id: string, update: UpdateArcRequest) {
-    const fields: import("./arc-database.js").UpdateArcFields = {};
+    const fields: UpdateArcFields = {};
     if (update.urgency !== undefined) fields.urgency = update.urgency;
     if (update.labels !== undefined) fields.labels = update.labels;
     return this.arc.updateArc(accountId, id, update.status ?? "active", update.lastSignalAt ?? new Date().toISOString(), fields);
