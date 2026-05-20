@@ -6,11 +6,12 @@ import { getDomain } from "tldts";
 import { checkDomain } from "../dns/dns-checker.js";
 import { validateRecipientMx } from "../dns/mx-validator.js";
 import { computeUndoWindowSeconds } from "./undo-window.js";
-import type { AuditEvent } from "../database/audit-database.js";
+import type { AuditEvent, AuditDatabase } from "../database/audit-database.js";
 import type { Result } from "neverthrow";
 import type { DbError, NotFoundError, AuthressServiceError, AuthError } from "../errors.js";
 import type { Arc, Signal, View, Label, Rule, Domain, DnsRecord, Account, Page, PageParams, ArcStatus, Workflow, WorkflowData, Alias, AliasSender, SenderPolicy, VerifiedForwardingAddress, Pagination, EmailTemplate } from "../types/index.js";
-import type { UpdateArcFields } from "../database/arc-database.js";
+import type { UpdateArcFields, ArcDatabase } from "../database/arc-database.js";
+import type { AccountDatabase } from "../database/account-database.js";
 import type { Logger } from "../logger.js";
 import { deriveGroupingKey } from "../processor/processor.js";
 import { zParse } from "./validate.js";
@@ -84,7 +85,7 @@ export interface AccessService {
 }
 
 // ---------------------------------------------------------------------------
-// Store
+// Query params & re-exports
 // ---------------------------------------------------------------------------
 
 export interface ListArcsParams extends PageParams {
@@ -94,97 +95,6 @@ export interface ListArcsParams extends PageParams {
 }
 
 export type { UpdateArcRequest, UpdateSignalStatusRequest, CreateViewRequest, UpdateViewRequest, CreateLabelRequest, UpdateLabelRequest, CreateRuleRequest, UpdateRuleRequest };
-
-export interface ApiDatabase {
-  // Arcs
-  listArcs(accountId: string, params: ListArcsParams): PromiseLike<Result<Page<Arc>, DbError>>;
-  getArc(accountId: string, id: string): PromiseLike<Result<Arc | null, DbError>>;
-  updateArc(accountId: string, id: string, update: UpdateArcRequest): PromiseLike<Result<Arc, DbError>>;
-  updateArcDirect(accountId: string, id: string, status: ArcStatus, lastSignalAt: string, update: UpdateArcFields): PromiseLike<Result<Arc, DbError>>;
-
-  // Signals
-  listSignals(accountId: string, arcId: string, params: PageParams): PromiseLike<Result<Page<Signal>, DbError>>;
-  listPreArcSignals(accountId: string, status: "quarantined", params: PageParams): PromiseLike<Result<Page<Signal>, DbError>>;
-  getSignalById(accountId: string, signalId: string, arcId?: string): PromiseLike<Result<Signal | null, DbError>>;
-  createSignal(signal: Signal): PromiseLike<Result<Signal, DbError>>;
-  updateSignal(accountId: string, signalLookupId: string, update: Partial<Pick<Signal, "subject" | "textBody" | "from" | "to">>): PromiseLike<Result<Signal, DbError>>;
-  updateSignalSendStatus(accountId: string, signalLookupId: string, update: { status: "pending_send" | "sent" | "draft"; sendInitiatedAt?: string | null; sentAt?: string; sesMessageId?: string; sendFailureReason?: string }): PromiseLike<Result<Signal, DbError>>;
-  deleteSignal(accountId: string, signalLookupId: string): PromiseLike<Result<void, DbError>>;
-
-  // Views
-  listViews(accountId: string): PromiseLike<Result<View[], DbError>>;
-  getView(accountId: string, id: string): PromiseLike<Result<View | null, DbError>>;
-  createView(accountId: string, data: CreateViewRequest): PromiseLike<Result<View, DbError>>;
-  updateView(accountId: string, id: string, data: UpdateViewRequest): PromiseLike<Result<View, DbError>>;
-  deleteView(accountId: string, id: string): PromiseLike<Result<void, DbError>>;
-
-  // Labels
-  listLabels(accountId: string): PromiseLike<Result<Label[], DbError>>;
-  createLabel(accountId: string, data: CreateLabelRequest): PromiseLike<Result<Label, DbError>>;
-  updateLabel(accountId: string, id: string, data: UpdateLabelRequest): PromiseLike<Result<Label, DbError>>;
-  deleteLabel(accountId: string, id: string): PromiseLike<Result<void, DbError>>;
-
-  // Rules
-  listRules(accountId: string): PromiseLike<Result<Rule[], DbError>>;
-  createRule(accountId: string, data: CreateRuleRequest): PromiseLike<Result<Rule, DbError>>;
-  updateRule(accountId: string, id: string, data: UpdateRuleRequest & { lastError?: string | null }): PromiseLike<Result<Rule, DbError>>;
-  deleteRule(accountId: string, id: string): PromiseLike<Result<void, DbError>>;
-
-  // Domains
-  listDomains(accountId: string): PromiseLike<Result<Domain[], DbError>>;
-  getDomain(accountId: string, id: string): PromiseLike<Result<Domain | null, DbError>>;
-  createDomain(accountId: string, domain: string): PromiseLike<Result<Domain, DbError>>;
-  deleteDomain(accountId: string, id: string): PromiseLike<Result<void, DbError>>;
-  updateDomainHealth(accountId: string, id: string, health: { receivingHealthy: boolean; senderHealthy: boolean; failingRecords: string[]; lastCheckedAt: string; lastHealthyAt?: string }): PromiseLike<Result<void, DbError>>;
-
-  // Search
-  searchArcs(accountId: string, query: string, params: PageParams): PromiseLike<Result<Page<Arc>, DbError>>;
-
-  // Account
-  getAccount(accountId: string): PromiseLike<Result<Account | null, DbError>>;
-  createAccount(account: Account): PromiseLike<Result<Account, DbError>>;
-  updateAccount(accountId: string, update: Partial<Pick<Account, "name" | "deletionRetentionDays" | "notifications" | "filtering" | "onboarding" | "afterSendAction">>): PromiseLike<Result<Account, DbError>>;
-
-  // Aliases
-  listAliases(accountId: string): PromiseLike<Result<Alias[], DbError>>;
-  getAlias(accountId: string, address: string): PromiseLike<Result<Alias | null, DbError>>;
-  createAlias(alias: Alias): PromiseLike<Result<Alias, DbError>>;
-  upsertAlias(alias: Alias): PromiseLike<Result<Alias, DbError>>;
-  deleteAlias(accountId: string, address: string): PromiseLike<Result<void, DbError>>;
-  renameAlias(accountId: string, oldAddress: string, newAddress: string): PromiseLike<Result<Alias, DbError | NotFoundError>>;
-
-  // Alias Senders
-  saveSender(accountId: string, address: string, domain: string, policy: SenderPolicy): PromiseLike<Result<void, DbError>>;
-  removeSender(accountId: string, address: string, domain: string): PromiseLike<Result<void, DbError>>;
-  listSenders(accountId: string, address: string): PromiseLike<Result<AliasSender[], DbError>>;
-
-  // Templates
-  createTemplate(template: EmailTemplate): PromiseLike<Result<EmailTemplate, DbError>>;
-  getTemplate(accountId: string, id: string): PromiseLike<Result<EmailTemplate | null, DbError>>;
-  updateTemplate(accountId: string, id: string, update: Partial<Pick<EmailTemplate, "name" | "subject" | "body" | "functions">>): PromiseLike<Result<EmailTemplate, DbError>>;
-  deleteTemplate(accountId: string, id: string): PromiseLike<Result<void, DbError>>;
-  listTemplates(accountId: string): PromiseLike<Result<EmailTemplate[], DbError>>;
-
-
-  // Signal status management
-  updateSignalStatus(accountId: string, signalLookupId: string, status: "block_hidden" | "block_reject" | "violate_report"): PromiseLike<Result<Signal, DbError>>;
-  unblockSignal(accountId: string, signalLookupId: string, arcId: string): PromiseLike<Result<void, DbError>>;
-  createArc(arc: Arc): PromiseLike<Result<void, DbError>>;
-  findArcByGroupingKey(accountId: string, key: string): PromiseLike<Result<Arc | null, DbError>>;
-
-  // Verified forwarding addresses
-  listVerifiedForwardingAddresses(accountId: string): PromiseLike<Result<VerifiedForwardingAddress[], DbError>>;
-  getVerifiedForwardingAddress(accountId: string, address: string): PromiseLike<Result<VerifiedForwardingAddress | null, DbError>>;
-  saveVerifiedForwardingAddress(addr: VerifiedForwardingAddress): PromiseLike<Result<void, DbError>>;
-  deleteVerifiedForwardingAddress(accountId: string, address: string): PromiseLike<Result<void, DbError>>;
-
-  // Audit
-  listAuditEvents(accountId: string, params: PageParams): PromiseLike<Result<Page<AuditEvent>, DbError>>;
-  saveAuditEvent(event: Omit<AuditEvent, "eventId" | "timestamp">): PromiseLike<Result<void, DbError>>;
-
-  // Stats
-  getStats(accountId: string): PromiseLike<Result<Record<string, unknown> | null, DbError>>;
-}
 
 // ---------------------------------------------------------------------------
 // Verification mailer
@@ -199,7 +109,9 @@ export interface VerificationMailer {
 // ---------------------------------------------------------------------------
 
 interface AppDeps {
-  store: ApiDatabase;
+  arcDb: ArcDatabase;
+  accountDb: AccountDatabase;
+  auditDb: AuditDatabase;
   auth: AuthService;
   access?: AccessService;
   logger: Logger;
@@ -236,7 +148,7 @@ function generateAccountId(): string {
   return `acc-${rawId}${checkBits}`;
 }
 
-export function createApp({ store, auth, access, logger, verificationMailer, jobDispatcher, draftSendDispatcher, accountCreationStarter, appBaseUrl, astValidator, billingHandler }: AppDeps) {
+export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, verificationMailer, jobDispatcher, draftSendDispatcher, accountCreationStarter, appBaseUrl, astValidator, billingHandler }: AppDeps) {
   const app = new OpenAPIHono<AppEnv>().basePath('/api');
 
   // Helper: validate code AST via the isolated Lambda
@@ -357,7 +269,7 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
     // Fetch each account from DynamoDB
     const accounts: Account[] = [];
     for (const accountId of accountIds) {
-      const accountResult = await store.getAccount(accountId);
+      const accountResult = await accountDb.getAccount(accountId);
       if (accountResult.isErr()) continue;
       if (accountResult.value) accounts.push(accountResult.value);
     }
@@ -387,7 +299,7 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
         createdAt: now,
         updatedAt: now,
       };
-      const createResult = await store.createAccount(candidate);
+      const createResult = await accountDb.createAccount(candidate);
       if (createResult.isOk()) {
         account = candidate;
         break;
@@ -423,7 +335,7 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
         ...(query["cursor"] ? { cursor: query["cursor"] } : {}),
         ...(query["limit"] ? { limit: parseInt(query["limit"], 10) } : {}),
       };
-      const result = await store.searchArcs(accountId, q, params);
+      const result = await arcDb.searchArcs(accountId, q, params);
       if (result.isErr()) return err(c, 500, "Internal Server Error");
       return c.json(page("arcs", result.value.items, result.value.nextCursor));
     }
@@ -434,14 +346,14 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
       ...(query["cursor"] ? { cursor: query["cursor"] } : {}),
       ...(query["limit"] ? { limit: parseInt(query["limit"], 10) } : {}),
     };
-    const result = await store.listArcs(accountId, params);
+    const result = await arcDb.listArcs(accountId, params);
     if (result.isErr()) return err(c, 500, "Internal Server Error");
     return c.json(page("arcs", result.value.items, result.value.nextCursor));
   });
 
   app.get("/accounts/:accountId/arcs/:id", authz("arcs:read", c => `accounts/${c.req.param("accountId")}/arcs/${c.req.param("id")}`), async (c) => {
     const { accountId } = c.get("auth");
-    const arcResult = await store.getArc(accountId, c.req.param("id"));
+    const arcResult = await arcDb.getArc(accountId, c.req.param("id"));
     if (arcResult.isErr()) return err(c, 500, "Internal Server Error");
     const arc = arcResult.value;
     if (!arc) return err(c, 404, "Arc not found", "ARC_NOT_FOUND");
@@ -451,7 +363,7 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
 
   app.patch("/accounts/:accountId/arcs/:id", authz("arcs:write", c => `accounts/${c.req.param("accountId")}/arcs/${c.req.param("id")}`), async (c) => {
     const { accountId } = c.get("auth");
-    const arcResult = await store.getArc(accountId, c.req.param("id"));
+    const arcResult = await arcDb.getArc(accountId, c.req.param("id"));
     if (arcResult.isErr()) return err(c, 500, "Internal Server Error");
     const arc = arcResult.value;
     if (!arc) return err(c, 404, "Arc not found", "ARC_NOT_FOUND");
@@ -460,13 +372,13 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
 
     // violate_report: block the sender domain and delete the arc
     if (body.status === "violate_report") {
-      const signalsResult = await store.listSignals(accountId, arc.id, { limit: 1 });
+      const signalsResult = await arcDb.listSignals(accountId, arc.id, { limit: 1 });
       if (signalsResult.isErr()) return err(c, 500, "Internal Server Error");
       const signal = signalsResult.value.items[0];
       if (signal) {
         const senderDomain = signal.from.address.includes("@") ? signal.from.address.split("@").pop()! : signal.from.address;
         const senderETLD1 = getDomain(senderDomain) ?? senderDomain;
-        const saveSenderResult = await store.saveSender(accountId, signal.recipientAddress, senderETLD1, "violate_report");
+        const saveSenderResult = await accountDb.saveSender(accountId, signal.recipientAddress, senderETLD1, "violate_report");
         if (saveSenderResult.isErr()) return err(c, 500, "Internal Server Error");
         logger.track("Arc reported as GDPR violation. Sender domain blocked with violate_report policy and arc deleted.", {
           code: "api.arc.violate_report",
@@ -478,12 +390,17 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
         });
       }
       // Persist as deleted — violate_report is the user intent, deleted is the arc state
-      const updateResult = await store.updateArc(accountId, arc.id, { status: "deleted", lastSignalAt: arc.lastSignalAt });
+      const updateResult = await arcDb.updateArc(accountId, arc.id, "deleted", arc.lastSignalAt, {});
       if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
       return c.json(updateResult.value);
     }
 
-    const updateResult = await store.updateArc(accountId, arc.id, { ...body, lastSignalAt: arc.lastSignalAt });
+    const fields: UpdateArcFields = {};
+    if (body.urgency !== undefined) fields.urgency = body.urgency;
+    if (body.labels !== undefined) fields.labels = body.labels;
+    const status = body.status ?? arc.status;
+    const lastSignalAt = body.lastSignalAt ?? arc.lastSignalAt;
+    const updateResult = await arcDb.updateArc(accountId, arc.id, status, lastSignalAt, fields);
     if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
     return c.json(updateResult.value);
   });
@@ -494,7 +411,7 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
 
   app.get("/accounts/:accountId/arcs/:arcId/signals", authz("signals:read", c => `accounts/${c.req.param("accountId")}/arcs/${c.req.param("arcId")}/signals`), async (c) => {
     const { accountId } = c.get("auth");
-    const arcResult = await store.getArc(accountId, c.req.param("arcId"));
+    const arcResult = await arcDb.getArc(accountId, c.req.param("arcId"));
     if (arcResult.isErr()) return err(c, 500, "Internal Server Error");
     const arc = arcResult.value;
     if (!arc) return err(c, 404, "Arc not found", "ARC_NOT_FOUND");
@@ -504,14 +421,14 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
       ...(query["cursor"] ? { cursor: query["cursor"] } : {}),
       ...(query["limit"] ? { limit: parseInt(query["limit"], 10) } : {}),
     };
-    const result = await store.listSignals(accountId, arc.id, params);
+    const result = await arcDb.listSignals(accountId, arc.id, params);
     if (result.isErr()) return err(c, 500, "Internal Server Error");
     return c.json(page("signals", result.value.items, result.value.nextCursor));
   });
 
   app.post("/accounts/:accountId/arcs/:arcId/signals", authz("signals:write", c => `accounts/${c.req.param("accountId")}/arcs/${c.req.param("arcId")}/signals`), async (c) => {
     const { accountId } = c.get("auth");
-    const arcResult = await store.getArc(accountId, c.req.param("arcId"));
+    const arcResult = await arcDb.getArc(accountId, c.req.param("arcId"));
     if (arcResult.isErr()) return err(c, 500, "Internal Server Error");
     const arc = arcResult.value;
     if (!arc) return err(c, 404, "Arc not found", "ARC_NOT_FOUND");
@@ -543,19 +460,19 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
       status: "draft",
       createdAt: now,
     };
-    const createResult = await store.createSignal(signal);
+    const createResult = await arcDb.createSignal(signal);
     if (createResult.isErr()) return err(c, 500, "Internal Server Error");
     return c.json(createResult.value, 201);
   });
 
   app.put("/accounts/:accountId/arcs/:arcId/signals/:id", authz("signals:write", c => `accounts/${c.req.param("accountId")}/arcs/${c.req.param("arcId")}/signals/${c.req.param("id")}`), async (c) => {
     const { accountId } = c.get("auth");
-    const arcResult = await store.getArc(accountId, c.req.param("arcId"));
+    const arcResult = await arcDb.getArc(accountId, c.req.param("arcId"));
     if (arcResult.isErr()) return err(c, 500, "Internal Server Error");
     const arc = arcResult.value;
     if (!arc) return err(c, 404, "Arc not found", "ARC_NOT_FOUND");
     if (arc.accountId !== accountId) return err(c, 403, "Forbidden");
-    const signalResult = await store.getSignalById(accountId, c.req.param("id"), c.req.param("arcId"));
+    const signalResult = await arcDb.getSignalById(accountId, c.req.param("id"), c.req.param("arcId"));
     if (signalResult.isErr()) return err(c, 500, "Internal Server Error");
     const signal = signalResult.value;
     if (!signal) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
@@ -563,7 +480,7 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
     if (signal.status === "sent") return err(c, 400, "Signal already sent", "SIGNAL_ALREADY_SENT");
     if (signal.status !== "draft") return err(c, 400, "Only draft signals can be replaced", "SIGNAL_NOT_DRAFT");
     const body = await zParse(ReplaceDraftSignalRequest, c.req.raw);
-    const updateResult = await store.updateSignal(accountId, signal.signalLookupId, {
+    const updateResult = await arcDb.updateSignal(accountId, signal.signalLookupId, {
       from: body.from as Signal["from"],
       to: body.to as Signal["to"],
       subject: body.subject,
@@ -584,7 +501,7 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
       ...(query["cursor"] ? { cursor: query["cursor"] } : {}),
       ...(query["limit"] ? { limit: parseInt(query["limit"], 10) } : {}),
     };
-    const result = await store.listPreArcSignals(accountId, "quarantined", params);
+    const result = await arcDb.listPreArcSignals(accountId, "quarantined", params);
     if (result.isErr()) return err(c, 500, "Internal Server Error");
     const items = (status === "quarantine_visible" || status === "quarantine_hidden")
       ? result.value.items.filter(s => s.status === status)
@@ -594,7 +511,7 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
 
   app.post("/accounts/:accountId/signals/:id/quarantineResponse", authz("signals:write", c => `accounts/${c.req.param("accountId")}/signals/${c.req.param("id")}`), async (c) => {
     const { accountId } = c.get("auth");
-    const signalResult = await store.getSignalById(accountId, c.req.param("id"));
+    const signalResult = await arcDb.getSignalById(accountId, c.req.param("id"));
     if (signalResult.isErr()) return err(c, 500, "Internal Server Error");
     const signal = signalResult.value;
     if (!signal) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
@@ -609,14 +526,14 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
     const wasQuarantinedByUnknownSender = !(signal.matchedRules ?? []).some(r => r.statusChange);
 
     if (body.status === "block_hidden" || body.status === "block_reject" || body.status === "violate_report") {
-      const blockResult = await store.updateSignalStatus(accountId, signal.signalLookupId, body.status);
+      const blockResult = await arcDb.updateSignalStatus(accountId, signal.signalLookupId, body.status);
       if (blockResult.isErr()) return err(c, 500, "Internal Server Error");
 
       // When quarantined by unknown sender, persist sender disposition for future auto-blocking
       if (wasQuarantinedByUnknownSender) {
         const senderDomain = signal.from.address.includes("@") ? signal.from.address.split("@").pop()! : signal.from.address;
         const senderETLD1 = getDomain(senderDomain) ?? senderDomain;
-        const saveSenderResult = await store.saveSender(accountId, signal.recipientAddress, senderETLD1, body.status);
+        const saveSenderResult = await accountDb.saveSender(accountId, signal.recipientAddress, senderETLD1, body.status);
         if (saveSenderResult.isErr()) return err(c, 500, "Internal Server Error");
       }
 
@@ -627,14 +544,14 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
     const senderDomain = signal.from.address.includes("@") ? signal.from.address.split("@").pop()! : signal.from.address;
     const senderETLD1 = getDomain(senderDomain) ?? senderDomain;
     const groupingKey = deriveGroupingKey(signal.workflow, signal.workflowData, signal.recipientAddress, senderETLD1);
-    const matchedArcResult = groupingKey ? await store.findArcByGroupingKey(accountId, groupingKey) : null;
+    const matchedArcResult = groupingKey ? await arcDb.fastFindArcByAlternativeLookupKey(accountId, groupingKey) : null;
     if (matchedArcResult && matchedArcResult.isErr()) return err(c, 500, "Internal Server Error");
     const matchedArc = matchedArcResult ? matchedArcResult.value : null;
 
     const now = new Date().toISOString();
     let arc: Arc;
     if (matchedArc) {
-      const updateResult = await store.updateArcDirect(accountId, matchedArc.id, "active", signal.receivedAt, {});
+      const updateResult = await arcDb.updateArc(accountId, matchedArc.id, "active", signal.receivedAt, {});
       if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
       arc = updateResult.value;
     } else {
@@ -650,16 +567,16 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
         updatedAt: now,
         ...(groupingKey ? { groupingKey } : {}),
       };
-      const createResult = await store.createArc(arc);
+      const createResult = await arcDb.createArc(arc);
       if (createResult.isErr()) return err(c, 500, "Internal Server Error");
     }
 
-    const unblockResult = await store.unblockSignal(accountId, signal.signalLookupId, arc.id);
+    const unblockResult = await arcDb.unblockSignal(accountId, signal.signalLookupId, arc.id);
     if (unblockResult.isErr()) return err(c, 500, "Internal Server Error");
 
     // When quarantined by unknown sender, approve the sender for future emails
     if (wasQuarantinedByUnknownSender) {
-      const saveSenderResult = await store.saveSender(accountId, signal.recipientAddress, senderETLD1, "allow");
+      const saveSenderResult = await accountDb.saveSender(accountId, signal.recipientAddress, senderETLD1, "allow");
       if (saveSenderResult.isErr()) return err(c, 500, "Internal Server Error");
     }
 
@@ -668,7 +585,7 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
 
   app.get("/accounts/:accountId/signals/:id", authz("signals:read", c => `accounts/${c.req.param("accountId")}/signals/${c.req.param("id")}`), async (c) => {
     const { accountId } = c.get("auth");
-    const signalResult = await store.getSignalById(accountId, c.req.param("id"));
+    const signalResult = await arcDb.getSignalById(accountId, c.req.param("id"));
     if (signalResult.isErr()) return err(c, 500, "Internal Server Error");
     const signal = signalResult.value;
     if (!signal) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
@@ -678,7 +595,7 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
 
   app.patch("/accounts/:accountId/signals/:id", authz("signals:write", c => `accounts/${c.req.param("accountId")}/signals/${c.req.param("id")}`), async (c) => {
     const { accountId } = c.get("auth");
-    const signalResult = await store.getSignalById(accountId, c.req.param("id"));
+    const signalResult = await arcDb.getSignalById(accountId, c.req.param("id"));
     if (signalResult.isErr()) return err(c, 500, "Internal Server Error");
     const signal = signalResult.value;
     if (!signal) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
@@ -693,13 +610,13 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
       const hasContentFields = body.subject !== undefined || body.textBody !== undefined || body.from !== undefined || body.to !== undefined;
       if (hasContentFields && body.status !== "draft") return err(c, 400, "Pending signals can only be reverted to draft", "INVALID_STATUS_TRANSITION");
       if (body.status !== "draft") return err(c, 400, "Pending signals can only be reverted to draft", "INVALID_STATUS_TRANSITION");
-      const updateResult = await store.updateSignalSendStatus(accountId, signal.signalLookupId, { status: "draft", sendInitiatedAt: null });
+      const updateResult = await arcDb.updateSignalSendStatus(accountId, signal.signalLookupId, { status: "draft", sendInitiatedAt: null });
       if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
       return c.json(updateResult.value);
     }
 
     // Normal draft edit (subject, textBody, from, to)
-    const updateResult = await store.updateSignal(accountId, signal.signalLookupId, body as Parameters<typeof store.updateSignal>[2]);
+    const updateResult = await arcDb.updateSignal(accountId, signal.signalLookupId, body as Parameters<typeof arcDb.updateSignal>[2]);
     if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
     return c.json(updateResult.value);
   });
@@ -708,14 +625,14 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
     const { accountId } = c.get("auth");
 
     // Arc validation
-    const arcResult = await store.getArc(accountId, c.req.param("arcId"));
+    const arcResult = await arcDb.getArc(accountId, c.req.param("arcId"));
     if (arcResult.isErr()) return err(c, 500, "Internal Server Error");
     const arc = arcResult.value;
     if (!arc) return err(c, 404, "Arc not found", "ARC_NOT_FOUND");
     if (arc.accountId !== accountId) return err(c, 403, "Forbidden");
 
     // Signal validation
-    const signalResult = await store.getSignalById(accountId, c.req.param("id"), c.req.param("arcId"));
+    const signalResult = await arcDb.getSignalById(accountId, c.req.param("id"), c.req.param("arcId"));
     if (signalResult.isErr()) return err(c, 500, "Internal Server Error");
     const signal = signalResult.value;
     if (!signal) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
@@ -740,7 +657,7 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
     if (sqsResult.isErr()) return err(c, 500, "Internal Server Error");
 
     // DDB write — transition to pending_send
-    const updateResult = await store.updateSignalSendStatus(accountId, signal.signalLookupId, { status: "pending_send", sendInitiatedAt });
+    const updateResult = await arcDb.updateSignalSendStatus(accountId, signal.signalLookupId, { status: "pending_send", sendInitiatedAt });
     if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
 
     return c.json({ ...updateResult.value, undoWindowSeconds, undoExpiresAt });
@@ -748,14 +665,14 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
 
   app.delete("/accounts/:accountId/signals/:id", authz("signals:write", c => `accounts/${c.req.param("accountId")}/signals/${c.req.param("id")}`), async (c) => {
     const { accountId } = c.get("auth");
-    const signalResult = await store.getSignalById(accountId, c.req.param("id"));
+    const signalResult = await arcDb.getSignalById(accountId, c.req.param("id"));
     if (signalResult.isErr()) return err(c, 500, "Internal Server Error");
     const signal = signalResult.value;
     if (!signal) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
     if (signal.accountId !== accountId) return err(c, 403, "Forbidden");
     if (signal.status === "sent") return err(c, 400, "Signal already sent", "SIGNAL_ALREADY_SENT");
     if (signal.status !== "draft") return err(c, 400, "Only draft signals can be deleted", "SIGNAL_NOT_DRAFT");
-    const deleteResult = await store.deleteSignal(accountId, signal.signalLookupId);
+    const deleteResult = await arcDb.deleteSignal(accountId, signal.signalLookupId);
     if (deleteResult.isErr()) return err(c, 500, "Internal Server Error");
     return new Response(null, { status: 204 });
   });
@@ -766,7 +683,7 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
 
   app.get("/accounts/:accountId/views", authz("views:read", c => `accounts/${c.req.param("accountId")}/views`), async (c) => {
     const { accountId } = c.get("auth");
-    const viewsResult = await store.listViews(accountId);
+    const viewsResult = await accountDb.listViews(accountId);
     if (viewsResult.isErr()) return err(c, 500, "Internal Server Error");
     return c.json(page("views", viewsResult.value));
   });
@@ -774,30 +691,30 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
   app.post("/accounts/:accountId/views", authz("views:write", c => `accounts/${c.req.param("accountId")}/views`), async (c) => {
     const { accountId } = c.get("auth");
     const body = await zParse(CreateViewRequest, c.req.raw);
-    const viewResult = await store.createView(accountId, body);
+    const viewResult = await accountDb.createView(accountId, body);
     if (viewResult.isErr()) return err(c, 500, "Internal Server Error");
     return c.json(viewResult.value, 201);
   });
 
   app.patch("/accounts/:accountId/views/:id", authz("views:write", c => `accounts/${c.req.param("accountId")}/views/${c.req.param("id")}`), async (c) => {
     const { accountId } = c.get("auth");
-    const viewResult = await store.getView(accountId, c.req.param("id"));
+    const viewResult = await accountDb.getView(accountId, c.req.param("id"));
     if (viewResult.isErr()) return err(c, 500, "Internal Server Error");
     const view = viewResult.value;
     if (!view) return err(c, 404, "View not found", "VIEW_NOT_FOUND");
     const body = await zParse(UpdateViewRequest, c.req.raw);
-    const updateResult = await store.updateView(accountId, view.id, body);
+    const updateResult = await accountDb.updateView(accountId, view.id, body);
     if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
     return c.json(updateResult.value);
   });
 
   app.delete("/accounts/:accountId/views/:id", authz("views:write", c => `accounts/${c.req.param("accountId")}/views/${c.req.param("id")}`), async (c) => {
     const { accountId } = c.get("auth");
-    const viewResult = await store.getView(accountId, c.req.param("id"));
+    const viewResult = await accountDb.getView(accountId, c.req.param("id"));
     if (viewResult.isErr()) return err(c, 500, "Internal Server Error");
     const view = viewResult.value;
     if (!view) return err(c, 404, "View not found", "VIEW_NOT_FOUND");
-    const deleteResult = await store.deleteView(accountId, view.id);
+    const deleteResult = await accountDb.deleteView(accountId, view.id);
     if (deleteResult.isErr()) return err(c, 500, "Internal Server Error");
     return new Response(null, { status: 204 });
   });
@@ -808,7 +725,7 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
 
   app.get("/accounts/:accountId/labels", authz("labels:read", c => `accounts/${c.req.param("accountId")}/labels`), async (c) => {
     const { accountId } = c.get("auth");
-    const labelsResult = await store.listLabels(accountId);
+    const labelsResult = await accountDb.listLabels(accountId);
     if (labelsResult.isErr()) return err(c, 500, "Internal Server Error");
     return c.json(page("labels", labelsResult.value));
   });
@@ -816,30 +733,30 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
   app.post("/accounts/:accountId/labels", authz("labels:write", c => `accounts/${c.req.param("accountId")}/labels`), async (c) => {
     const { accountId } = c.get("auth");
     const body = await zParse(CreateLabelRequest, c.req.raw);
-    const labelResult = await store.createLabel(accountId, body);
+    const labelResult = await accountDb.createLabel(accountId, body);
     if (labelResult.isErr()) return err(c, 500, "Internal Server Error");
     return c.json(labelResult.value, 201);
   });
 
   app.patch("/accounts/:accountId/labels/:id", authz("labels:write", c => `accounts/${c.req.param("accountId")}/labels/${c.req.param("id")}`), async (c) => {
     const { accountId } = c.get("auth");
-    const labelsResult = await store.listLabels(accountId);
+    const labelsResult = await accountDb.listLabels(accountId);
     if (labelsResult.isErr()) return err(c, 500, "Internal Server Error");
     const label = labelsResult.value.find((l) => l.id === c.req.param("id"));
     if (!label) return err(c, 404, "Label not found", "LABEL_NOT_FOUND");
     const body = await zParse(UpdateLabelRequest, c.req.raw);
-    const updateResult = await store.updateLabel(accountId, label.id, body);
+    const updateResult = await accountDb.updateLabel(accountId, label.id, body);
     if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
     return c.json(updateResult.value);
   });
 
   app.delete("/accounts/:accountId/labels/:id", authz("labels:write", c => `accounts/${c.req.param("accountId")}/labels/${c.req.param("id")}`), async (c) => {
     const { accountId } = c.get("auth");
-    const labelsResult = await store.listLabels(accountId);
+    const labelsResult = await accountDb.listLabels(accountId);
     if (labelsResult.isErr()) return err(c, 500, "Internal Server Error");
     const label = labelsResult.value.find((l) => l.id === c.req.param("id"));
     if (!label) return err(c, 404, "Label not found", "LABEL_NOT_FOUND");
-    const deleteResult = await store.deleteLabel(accountId, label.id);
+    const deleteResult = await accountDb.deleteLabel(accountId, label.id);
     if (deleteResult.isErr()) return err(c, 500, "Internal Server Error");
     return new Response(null, { status: 204 });
   });
@@ -850,7 +767,7 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
 
   app.get("/accounts/:accountId/rules", authz("rules:read", c => `accounts/${c.req.param("accountId")}/rules`), async (c) => {
     const { accountId } = c.get("auth");
-    const rulesResult = await store.listRules(accountId);
+    const rulesResult = await accountDb.listRules(accountId);
     if (rulesResult.isErr()) return err(c, 500, "Internal Server Error");
     return c.json(page("rules", rulesResult.value));
   });
@@ -873,10 +790,10 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
         if (conditionError) return err(c, 400, conditionError, "INVALID_CONDITION");
       }
     }
-    const forwardError = await validateForwardTargets(accountId, body.actions as Rule["actions"], store);
+    const forwardError = await validateForwardTargets(accountId, body.actions as Rule["actions"], accountDb);
     if (forwardError) return err(c, 400, forwardError, "UNVERIFIED_FORWARD_TARGET");
     if (billingHandler) {
-      const accountResult = await store.getAccount(accountId);
+      const accountResult = await accountDb.getAccount(accountId);
       const accountPlan: BillingPlan = (accountResult.isOk() && accountResult.value?.billingPlan) || "Free";
       const webhookError = validateWebhookActions(body.actions as Rule["actions"], accountPlan, billingHandler);
       if (webhookError) return err(c, 400, webhookError.message, webhookError.code);
@@ -884,7 +801,7 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
     // Audit: write code change event before persisting (best-effort)
     if (effectiveConditionType === "js") {
       const { userId } = c.get("auth");
-      const auditResult = await store.saveAuditEvent({
+      const auditResult = await auditDb.saveAuditEvent({
         accountId, userId, action: "created", resourceType: "rule", resourceId: "",
         before: null, after: { conditionType: "js", condition: body.condition },
       });
@@ -892,14 +809,14 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
         logger.warn("Audit write failed for rule creation, proceeding with resource write", { code: "api.audit.rule_create_failed", accountId, error: auditResult.error });
       }
     }
-    const ruleResult = await store.createRule(accountId, body as Parameters<typeof store.createRule>[1]);
+    const ruleResult = await accountDb.createRule(accountId, body as Parameters<typeof accountDb.createRule>[1]);
     if (ruleResult.isErr()) return err(c, 500, "Internal Server Error");
     return c.json(ruleResult.value, 201);
   });
 
   app.patch("/accounts/:accountId/rules/:id", authz("rules:write", c => `accounts/${c.req.param("accountId")}/rules/${c.req.param("id")}`), async (c) => {
     const { accountId } = c.get("auth");
-    const rulesResult = await store.listRules(accountId);
+    const rulesResult = await accountDb.listRules(accountId);
     if (rulesResult.isErr()) return err(c, 500, "Internal Server Error");
     const rule = rulesResult.value.find((r) => r.id === c.req.param("id"));
     if (!rule) return err(c, 404, "Rule not found", "RULE_NOT_FOUND");
@@ -927,24 +844,24 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
       }
     }
     if (body.actions) {
-      const forwardError = await validateForwardTargets(accountId, body.actions as Rule["actions"], store);
+      const forwardError = await validateForwardTargets(accountId, body.actions as Rule["actions"], accountDb);
       if (forwardError) return err(c, 400, forwardError, "UNVERIFIED_FORWARD_TARGET");
       if (billingHandler) {
-        const accountResult = await store.getAccount(accountId);
+        const accountResult = await accountDb.getAccount(accountId);
         const accountPlan: BillingPlan = (accountResult.isOk() && accountResult.value?.billingPlan) || "Free";
         const webhookError = validateWebhookActions(body.actions as Rule["actions"], accountPlan, billingHandler);
         if (webhookError) return err(c, 400, webhookError.message, webhookError.code);
       }
     }
     // Clear lastError when condition is updated on a JS rule
-    const updateData: Parameters<typeof store.updateRule>[2] = { ...body } as Parameters<typeof store.updateRule>[2];
+    const updateData: Parameters<typeof accountDb.updateRule>[2] = { ...body } as Parameters<typeof accountDb.updateRule>[2];
     if (effectiveConditionType === "js" && body.condition !== undefined) {
       (updateData as Record<string, unknown>)["lastError"] = null;
     }
     // Audit: write code change event before persisting (best-effort)
     if (effectiveConditionType === "js" && body.condition !== undefined) {
       const { userId } = c.get("auth");
-      const auditResult = await store.saveAuditEvent({
+      const auditResult = await auditDb.saveAuditEvent({
         accountId, userId, action: "updated", resourceType: "rule", resourceId: rule.id,
         before: { conditionType: rule.conditionType ?? "json_logic", condition: rule.condition },
         after: { conditionType: effectiveConditionType, condition: body.condition },
@@ -953,18 +870,18 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
         logger.warn("Audit write failed for rule update, proceeding with resource write", { code: "api.audit.rule_update_failed", accountId, ruleId: rule.id, error: auditResult.error });
       }
     }
-    const updateResult = await store.updateRule(accountId, rule.id, updateData);
+    const updateResult = await accountDb.updateRule(accountId, rule.id, updateData);
     if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
     return c.json(updateResult.value);
   });
 
   app.delete("/accounts/:accountId/rules/:id", authz("rules:write", c => `accounts/${c.req.param("accountId")}/rules/${c.req.param("id")}`), async (c) => {
     const { accountId } = c.get("auth");
-    const rulesResult = await store.listRules(accountId);
+    const rulesResult = await accountDb.listRules(accountId);
     if (rulesResult.isErr()) return err(c, 500, "Internal Server Error");
     const rule = rulesResult.value.find((r) => r.id === c.req.param("id"));
     if (!rule) return err(c, 404, "Rule not found", "RULE_NOT_FOUND");
-    const deleteResult = await store.deleteRule(accountId, rule.id);
+    const deleteResult = await accountDb.deleteRule(accountId, rule.id);
     if (deleteResult.isErr()) return err(c, 500, "Internal Server Error");
     return new Response(null, { status: 204 });
   });
@@ -975,7 +892,7 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
 
   app.get("/accounts/:accountId/domains", authz("domains:read", c => `accounts/${c.req.param("accountId")}/domains`), async (c) => {
     const { accountId } = c.get("auth");
-    const domainsResult = await store.listDomains(accountId);
+    const domainsResult = await accountDb.listDomains(accountId);
     if (domainsResult.isErr()) return err(c, 500, "Internal Server Error");
     return c.json(page("domains", domainsResult.value));
   });
@@ -983,14 +900,14 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
   app.post("/accounts/:accountId/domains", authz("domains:write", c => `accounts/${c.req.param("accountId")}/domains`), async (c) => {
     const { accountId } = c.get("auth");
     const body = await zParse(CreateDomainRequest, c.req.raw);
-    const domainResult = await store.createDomain(accountId, body.domain);
+    const domainResult = await accountDb.createDomain(accountId, body.domain);
     if (domainResult.isErr()) return err(c, 500, "Internal Server Error");
     return c.json(domainResult.value, 201);
   });
 
   app.get("/accounts/:accountId/domains/:id", authz("domains:read", c => `accounts/${c.req.param("accountId")}/domains/${c.req.param("id")}`), async (c) => {
     const { accountId } = c.get("auth");
-    const domainResult = await store.getDomain(accountId, c.req.param("id"));
+    const domainResult = await accountDb.getDomain(accountId, c.req.param("id"));
     if (domainResult.isErr()) return err(c, 500, "Internal Server Error");
     const domain = domainResult.value;
     if (!domain) return err(c, 404, "Domain not found", "DOMAIN_NOT_FOUND");
@@ -1001,7 +918,7 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
 
   app.patch("/accounts/:accountId/domains/:id", authz("domains:write", c => `accounts/${c.req.param("accountId")}/domains/${c.req.param("id")}`), async (c) => {
     const { accountId } = c.get("auth");
-    const domainResult = await store.getDomain(accountId, c.req.param("id"));
+    const domainResult = await accountDb.getDomain(accountId, c.req.param("id"));
     if (domainResult.isErr()) return err(c, 500, "Internal Server Error");
     const domain = domainResult.value;
     if (!domain) return err(c, 404, "Domain not found", "DOMAIN_NOT_FOUND");
@@ -1011,7 +928,7 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
     const failingRecords = records.filter((r) => r.status === "failing").map((r) => r.name);
     const receivingHealthy = records.find((r) => r.type === "MX")?.status === "verified";
     const senderHealthy = records.filter((r) => r.type !== "MX").every((r) => r.status === "verified");
-    const healthResult = await store.updateDomainHealth(accountId, domain.id, {
+    const healthResult = await accountDb.updateDomainHealth(accountId, domain.id, {
       receivingHealthy,
       senderHealthy,
       failingRecords,
@@ -1019,19 +936,19 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
       ...(failingRecords.length === 0 ? { lastHealthyAt: now } : {}),
     });
     if (healthResult.isErr()) return err(c, 500, "Internal Server Error");
-    const updatedResult = await store.getDomain(accountId, domain.id);
+    const updatedResult = await accountDb.getDomain(accountId, domain.id);
     if (updatedResult.isErr()) return err(c, 500, "Internal Server Error");
     return c.json({ ...updatedResult.value, records });
   });
 
   app.delete("/accounts/:accountId/domains/:id", authz("domains:write", c => `accounts/${c.req.param("accountId")}/domains/${c.req.param("id")}`), async (c) => {
     const { accountId } = c.get("auth");
-    const domainResult = await store.getDomain(accountId, c.req.param("id"));
+    const domainResult = await accountDb.getDomain(accountId, c.req.param("id"));
     if (domainResult.isErr()) return err(c, 500, "Internal Server Error");
     const domain = domainResult.value;
     if (!domain) return err(c, 404, "Domain not found", "DOMAIN_NOT_FOUND");
     if (domain.accountId !== accountId) return err(c, 403, "Forbidden");
-    const deleteResult = await store.deleteDomain(accountId, domain.id);
+    const deleteResult = await accountDb.deleteDomain(accountId, domain.id);
     if (deleteResult.isErr()) return err(c, 500, "Internal Server Error");
     return new Response(null, { status: 204 });
   });
@@ -1042,7 +959,7 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
 
   app.get("/accounts/:accountId", authz("accounts:read", c => `accounts/${c.req.param("accountId")}`), async (c) => {
     const { accountId } = c.get("auth");
-    const accountResult = await store.getAccount(accountId);
+    const accountResult = await accountDb.getAccount(accountId);
     if (accountResult.isErr()) return err(c, 500, "Internal Server Error");
     const account = accountResult.value;
     if (!account) return err(c, 404, "Account not found", "ACCOUNT_NOT_FOUND");
@@ -1052,14 +969,14 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
   app.patch("/accounts/:accountId", authz("accounts:write", c => `accounts/${c.req.param("accountId")}`), async (c) => {
     const { accountId } = c.get("auth");
     const body = await zParse(UpdateAccountRequest, c.req.raw);
-    const updateResult = await store.updateAccount(accountId, body as Partial<Pick<Account, "name" | "deletionRetentionDays" | "notifications" | "filtering" | "onboarding" | "afterSendAction">>);
+    const updateResult = await accountDb.updateAccount(accountId, body as Partial<Pick<Account, "name" | "deletionRetentionDays" | "notifications" | "filtering" | "onboarding" | "afterSendAction">>);
     if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
     return c.json(updateResult.value);
   });
 
   app.get("/accounts/:accountId/stats", authz("stats:read", c => `accounts/${c.req.param("accountId")}/stats`), async (c) => {
     const { accountId } = c.get("auth");
-    const statsResult = await store.getStats(accountId);
+    const statsResult = await accountDb.getStats(accountId);
     if (statsResult.isErr()) return err(c, 500, "Internal Server Error");
     return c.json(parseStatsRow(statsResult.value));
   });
@@ -1143,7 +1060,7 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
   app.get("/accounts/:accountId/aliases", authz("aliases:read", c => `accounts/${c.req.param("accountId")}/aliases`), async (c) => {
     const { accountId } = c.get("auth");
     const domain = c.req.query("domain");
-    const aliasesResult = await store.listAliases(accountId);
+    const aliasesResult = await accountDb.listAliases(accountId);
     if (aliasesResult.isErr()) return err(c, 500, "Internal Server Error");
     let aliases = aliasesResult.value;
     if (domain) aliases = aliases.filter(a => a.createdForOrigin?.includes(domain));
@@ -1153,7 +1070,7 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
   app.get("/accounts/:accountId/aliases/:address", authz("aliases:read", c => `accounts/${c.req.param("accountId")}/aliases/${c.req.param("address")}`), async (c) => {
     const { accountId } = c.get("auth");
     const address = decodeURIComponent(c.req.param("address"));
-    const aliasResult = await store.getAlias(accountId, address);
+    const aliasResult = await accountDb.getAlias(accountId, address);
     if (aliasResult.isErr()) return err(c, 500, "Internal Server Error");
     const alias = aliasResult.value;
     if (!alias) return err(c, 404, "Alias not found", "ALIAS_NOT_FOUND");
@@ -1163,11 +1080,11 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
   app.post("/accounts/:accountId/aliases", authz("aliases:write", c => `accounts/${c.req.param("accountId")}/aliases`), async (c) => {
     const { accountId } = c.get("auth");
     const body = await zParse(CreateAliasRequest, c.req.raw);
-    const existingResult = await store.getAlias(accountId, body.address);
+    const existingResult = await accountDb.getAlias(accountId, body.address);
     if (existingResult.isErr()) return err(c, 500, "Internal Server Error");
     if (existingResult.value) return err(c, 409, "Alias already exists", "ALIAS_EXISTS");
     const now = new Date().toISOString();
-    const createResult = await store.createAlias({
+    const createResult = await accountDb.createAlias({
       id: body.address,
       accountId,
       address: body.address,
@@ -1185,18 +1102,18 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
     const address = decodeURIComponent(c.req.param("address"));
     const body = await zParse(UpdateAliasRequest, c.req.raw);
     if (body.newAddress) {
-      const renameResult = await store.renameAlias(accountId, address, body.newAddress);
+      const renameResult = await accountDb.renameAlias(accountId, address, body.newAddress);
       if (renameResult.isErr()) {
         if (renameResult.error.kind === "not_found") return err(c, 404, "Alias not found", "ALIAS_NOT_FOUND");
         return err(c, 500, "Internal Server Error");
       }
       return c.json(renameResult.value);
     }
-    const existingResult = await store.getAlias(accountId, address);
+    const existingResult = await accountDb.getAlias(accountId, address);
     if (existingResult.isErr()) return err(c, 500, "Internal Server Error");
     const existing = existingResult.value;
     const now = new Date().toISOString();
-    const upsertResult = await store.upsertAlias({
+    const upsertResult = await accountDb.upsertAlias({
       id: address,
       accountId,
       address,
@@ -1213,7 +1130,7 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
   app.delete("/accounts/:accountId/aliases/:address", authz("aliases:write", c => `accounts/${c.req.param("accountId")}/aliases/${c.req.param("address")}`), async (c) => {
     const { accountId } = c.get("auth");
     const address = decodeURIComponent(c.req.param("address"));
-    const deleteResult = await store.deleteAlias(accountId, address);
+    const deleteResult = await accountDb.deleteAlias(accountId, address);
     if (deleteResult.isErr()) return err(c, 500, "Internal Server Error");
     return new Response(null, { status: 204 });
   });
@@ -1225,7 +1142,7 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
   app.get("/accounts/:accountId/aliases/:address/senders", authz("aliases:read", c => `accounts/${c.req.param("accountId")}/aliases/${c.req.param("address")}/senders`), async (c) => {
     const { accountId } = c.get("auth");
     const address = decodeURIComponent(c.req.param("address"));
-    const sendersResult = await store.listSenders(accountId, address);
+    const sendersResult = await accountDb.listSenders(accountId, address);
     if (sendersResult.isErr()) return err(c, 500, "Internal Server Error");
     return c.json({ senders: sendersResult.value });
   });
@@ -1234,7 +1151,7 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
     const { accountId } = c.get("auth");
     const address = decodeURIComponent(c.req.param("address"));
     const body = await zParse(CreateSenderRequest, c.req.raw);
-    const saveResult = await store.saveSender(accountId, address, body.domain, body.policy);
+    const saveResult = await accountDb.saveSender(accountId, address, body.domain, body.policy);
     if (saveResult.isErr()) return err(c, 500, "Internal Server Error");
     return new Response(null, { status: 201 });
   });
@@ -1243,7 +1160,7 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
     const { accountId } = c.get("auth");
     const address = decodeURIComponent(c.req.param("address"));
     const domain = decodeURIComponent(c.req.param("domain"));
-    const removeResult = await store.removeSender(accountId, address, domain);
+    const removeResult = await accountDb.removeSender(accountId, address, domain);
     if (removeResult.isErr()) return err(c, 500, "Internal Server Error");
     return new Response(null, { status: 204 });
   });
@@ -1254,7 +1171,7 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
 
   app.get("/accounts/:accountId/templates", authz("templates:read", c => `accounts/${c.req.param("accountId")}/templates`), async (c) => {
     const { accountId } = c.get("auth");
-    const templatesResult = await store.listTemplates(accountId);
+    const templatesResult = await accountDb.listTemplates(accountId);
     if (templatesResult.isErr()) return err(c, 500, "Internal Server Error");
     return c.json({ templates: templatesResult.value });
   });
@@ -1273,14 +1190,14 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
     if (body.functions) {
       const { userId } = c.get("auth");
       const templateId = generateId("tpl-");
-      const auditResult = await store.saveAuditEvent({
+      const auditResult = await auditDb.saveAuditEvent({
         accountId, userId, action: "created", resourceType: "template", resourceId: templateId,
         before: null, after: { functions: body.functions },
       });
       if (auditResult.isErr()) {
         logger.warn("Audit write failed for template creation, proceeding with resource write", { code: "api.audit.template_create_failed", accountId, error: auditResult.error });
       }
-      const templateResult = await store.createTemplate({
+      const templateResult = await accountDb.createTemplate({
         id: templateId, accountId, name: body.name, subject: body.subject, body: body.body,
         functions: body.functions,
         createdAt: now, updatedAt: now,
@@ -1288,7 +1205,7 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
       if (templateResult.isErr()) return err(c, 500, "Internal Server Error");
       return c.json(templateResult.value, 201);
     }
-    const templateResult = await store.createTemplate({
+    const templateResult = await accountDb.createTemplate({
       id: generateId("tpl-"), accountId, name: body.name, subject: body.subject, body: body.body,
       createdAt: now, updatedAt: now,
     });
@@ -1305,13 +1222,13 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
         return err(c, 400, `Invalid code in function '${astResult.name}': ${astResult.error}`, "INVALID_CODE", astResult.location ? { location: astResult.location } : undefined);
       }
     }
-    const existingResult = await store.getTemplate(accountId, c.req.param("id"));
+    const existingResult = await accountDb.getTemplate(accountId, c.req.param("id"));
     if (existingResult.isErr()) return err(c, 500, "Internal Server Error");
     if (!existingResult.value) return err(c, 404, "Template not found", "TEMPLATE_NOT_FOUND");
     // Audit: write functions change event before persisting (best-effort)
     if (body.functions) {
       const { userId } = c.get("auth");
-      const auditResult = await store.saveAuditEvent({
+      const auditResult = await auditDb.saveAuditEvent({
         accountId, userId, action: "updated", resourceType: "template", resourceId: c.req.param("id"),
         before: { functions: existingResult.value.functions ?? null },
         after: { functions: body.functions },
@@ -1320,7 +1237,7 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
         logger.warn("Audit write failed for template update, proceeding with resource write", { code: "api.audit.template_update_failed", accountId, templateId: c.req.param("id"), error: auditResult.error });
       }
     }
-    const updateResult = await store.updateTemplate(accountId, c.req.param("id"), body as Parameters<typeof store.updateTemplate>[2]);
+    const updateResult = await accountDb.updateTemplate(accountId, c.req.param("id"), body as Parameters<typeof accountDb.updateTemplate>[2]);
     if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
     return c.json(updateResult.value);
   });
@@ -1334,13 +1251,13 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
         return err(c, 400, `Invalid code in function '${astResult.name}': ${astResult.error}`, "INVALID_CODE", astResult.location ? { location: astResult.location } : undefined);
       }
     }
-    const existingResult = await store.getTemplate(accountId, c.req.param("id"));
+    const existingResult = await accountDb.getTemplate(accountId, c.req.param("id"));
     if (existingResult.isErr()) return err(c, 500, "Internal Server Error");
     if (!existingResult.value) return err(c, 404, "Template not found", "TEMPLATE_NOT_FOUND");
     // Audit: write functions change event before persisting (best-effort)
     if (body.functions) {
       const { userId } = c.get("auth");
-      const auditResult = await store.saveAuditEvent({
+      const auditResult = await auditDb.saveAuditEvent({
         accountId, userId, action: "updated", resourceType: "template", resourceId: c.req.param("id"),
         before: { functions: existingResult.value.functions ?? null },
         after: { functions: body.functions },
@@ -1349,17 +1266,17 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
         logger.warn("Audit write failed for template replace, proceeding with resource write", { code: "api.audit.template_replace_failed", accountId, templateId: c.req.param("id"), error: auditResult.error });
       }
     }
-    const updateResult = await store.updateTemplate(accountId, c.req.param("id"), { name: body.name, subject: body.subject, body: body.body, ...(body.functions ? { functions: body.functions } : {}) });
+    const updateResult = await accountDb.updateTemplate(accountId, c.req.param("id"), { name: body.name, subject: body.subject, body: body.body, ...(body.functions ? { functions: body.functions } : {}) });
     if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
     return c.json(updateResult.value);
   });
 
   app.delete("/accounts/:accountId/templates/:id", authz("templates:write", c => `accounts/${c.req.param("accountId")}/templates/${c.req.param("id")}`), async (c) => {
     const { accountId } = c.get("auth");
-    const existingResult = await store.getTemplate(accountId, c.req.param("id"));
+    const existingResult = await accountDb.getTemplate(accountId, c.req.param("id"));
     if (existingResult.isErr()) return err(c, 500, "Internal Server Error");
     if (!existingResult.value) return err(c, 404, "Template not found", "TEMPLATE_NOT_FOUND");
-    const deleteResult = await store.deleteTemplate(accountId, c.req.param("id"));
+    const deleteResult = await accountDb.deleteTemplate(accountId, c.req.param("id"));
     if (deleteResult.isErr()) return err(c, 500, "Internal Server Error");
     return new Response(null, { status: 204 });
   });
@@ -1371,7 +1288,7 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
 
   app.get("/accounts/:accountId/forwarding-addresses", authz("forwarding-addresses:read", c => `accounts/${c.req.param("accountId")}/forwarding-addresses`), async (c) => {
     const { accountId } = c.get("auth");
-    const addressesResult = await store.listVerifiedForwardingAddresses(accountId);
+    const addressesResult = await accountDb.listVerifiedForwardingAddresses(accountId);
     if (addressesResult.isErr()) return err(c, 500, "Internal Server Error");
     return c.json(page("forwardingAddresses", addressesResult.value));
   });
@@ -1380,7 +1297,7 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
     const { accountId } = c.get("auth");
     const body = await zParse(CreateForwardingAddressRequest, c.req.raw);
 
-    const existingResult = await store.getVerifiedForwardingAddress(accountId, body.address);
+    const existingResult = await accountDb.getVerifiedForwardingAddress(accountId, body.address);
     if (existingResult.isErr()) return err(c, 500, "Internal Server Error");
     const existing = existingResult.value;
     if (existing?.status === "verified") return c.json(existing, 200);
@@ -1395,7 +1312,7 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
       createdAt: existing?.createdAt ?? now,
       ...(existing?.verifiedAt !== undefined ? { verifiedAt: existing.verifiedAt } : {}),
     };
-    const saveResult = await store.saveVerifiedForwardingAddress(addr);
+    const saveResult = await accountDb.saveVerifiedForwardingAddress(addr);
     if (saveResult.isErr()) return err(c, 500, "Internal Server Error");
 
     if (verificationMailer) {
@@ -1414,7 +1331,7 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
     const address = decodeURIComponent(c.req.param("address"));
     const body = await zParse(VerifyForwardingAddressRequest, c.req.raw);
 
-    const existingResult = await store.getVerifiedForwardingAddress(accountId, address);
+    const existingResult = await accountDb.getVerifiedForwardingAddress(accountId, address);
     if (existingResult.isErr()) return err(c, 500, "Internal Server Error");
     const existing = existingResult.value;
     if (!existing) return err(c, 404, "Forwarding address not found", "FORWARDING_ADDRESS_NOT_FOUND");
@@ -1422,7 +1339,7 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
     if (existing.token !== body.token) return err(c, 400, "Invalid token", "INVALID_TOKEN");
 
     const verified: VerifiedForwardingAddress = { ...existing, status: "verified", verifiedAt: new Date().toISOString() };
-    const saveResult = await store.saveVerifiedForwardingAddress(verified);
+    const saveResult = await accountDb.saveVerifiedForwardingAddress(verified);
     if (saveResult.isErr()) return err(c, 500, "Internal Server Error");
     return c.json(verified);
   });
@@ -1430,7 +1347,7 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
   app.delete("/accounts/:accountId/forwarding-addresses/:address", authz("forwarding-addresses:write", c => `accounts/${c.req.param("accountId")}/forwarding-addresses/${c.req.param("address")}`), async (c) => {
     const { accountId } = c.get("auth");
     const address = decodeURIComponent(c.req.param("address"));
-    const deleteResult = await store.deleteVerifiedForwardingAddress(accountId, address);
+    const deleteResult = await accountDb.deleteVerifiedForwardingAddress(accountId, address);
     if (deleteResult.isErr()) return err(c, 500, "Internal Server Error");
     return new Response(null, { status: 204 });
   });
@@ -1444,7 +1361,7 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
     const cursor = c.req.query("cursor");
     const rawLimit = c.req.query("limit");
     const params: PageParams = { ...(cursor ? { cursor } : {}), ...(rawLimit ? { limit: parseInt(rawLimit, 10) } : {}) };
-    const result = await store.listAuditEvents(accountId, params);
+    const result = await auditDb.listAuditEvents(accountId, params);
     if (result.isErr()) return err(c, 500, "Internal Server Error");
     return c.json(result.value);
   });
@@ -1499,7 +1416,7 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
 async function validateForwardTargets(
   accountId: string,
   actions: Rule["actions"],
-  store: Pick<ApiDatabase, "listVerifiedForwardingAddresses">,
+  store: Pick<AccountDatabase, "listVerifiedForwardingAddresses">,
 ): Promise<string | null> {
   const forwardTargets = actions.filter((a) => a.type === "forward" && a.value).map((a) => a.value!);
   if (forwardTargets.length === 0) return null;

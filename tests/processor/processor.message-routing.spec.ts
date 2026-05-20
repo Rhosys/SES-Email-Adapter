@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ok } from "../../src/errors.js";
 import { SignalProcessor, SYSTEM_RULES } from "../../src/processor/processor.js";
+import type { ArcMatcher, InboundSignalMessage } from "../../src/processor/processor.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
-import type { ProcessorDatabase, ArcMatcher, InboundSignalMessage } from "../../src/processor/processor.js";
+import { makeArcDbMock, makeAccountDbMock, makeProcessingDbMock } from "./_helpers.js";
 import type { ContentSanitizerClient } from "../../src/processor/content-sanitizer-client.js";
 import type { SignalClassifier, ClassificationOutput } from "../../src/classifier/classifier.js";
 import type { EmbeddingGenerator, EmbeddingResult } from "../../src/embedding/embedding-generator.js";
@@ -56,29 +57,8 @@ const validClassification: ClassificationOutput = {
   classificationModelId: "us.anthropic.claude-opus-4-5-20251101-v1:0",
 };
 
-function makeStore(): ProcessorDatabase {
-  return {
-    getSignalByMessageId: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-    saveSignal: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    updateSignalRetention: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    getArc: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-    findArcByGroupingKey: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-    saveArc: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    listEnabledRules: vi.fn().mockReturnValue(Promise.resolve(ok(SYSTEM_RULES))),
-    getProcessorAccountContext: vi.fn().mockReturnValue(Promise.resolve(ok(DEFAULT_CTX))),
-    saveAlias: vi.fn().mockImplementation((a: Alias) => Promise.resolve(ok(a))),
-    getSender: vi.fn().mockReturnValue(Promise.resolve(ok({
-      accountId: TEST_ACCOUNT_ID, aliasAddress: "user@example.com",
-      domain: "example.com", policy: "allow", addedAt: "2024-01-01T00:00:00Z",
-    }))),
-    saveSender: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    getTemplate: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-    updateGlobalReputation: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    getDomainByName: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-    incrementStats: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    annotateRuleError: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    annotateTemplateError: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-  };
+function makeStore() {
+  return { arcDb: makeArcDbMock(), accountDb: makeAccountDbMock(), processingDb: makeProcessingDbMock() };
 }
 
 function makeContentSanitizer(): ContentSanitizerClient {
@@ -150,16 +130,18 @@ function makeMessage(): InboundSignalMessage {
 // ---------------------------------------------------------------------------
 
 describe("SignalProcessor message routing", () => {
-  let store: ProcessorDatabase;
+  let arcDb: ReturnType<typeof makeArcDbMock>;
+  let accountDb: ReturnType<typeof makeAccountDbMock>;
+  let processingDb: ReturnType<typeof makeProcessingDbMock>;
   let processor: SignalProcessor;
   let mockLogger: MockLogger;
 
   beforeEach(() => {
     vi.clearAllMocks();
     mockLogger = createMockLogger();
-    store = makeStore();
+    ({ arcDb, accountDb, processingDb } = makeStore());
     processor = new SignalProcessor({
-      store,
+      arcDb, accountDb, processingDb,
       contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com",
       classifier: makeClassifier(),
       embeddingGenerator: makeEmbeddingGenerator(),
@@ -184,7 +166,7 @@ describe("SignalProcessor message routing", () => {
 
     // processRecord was called — observable via the store's dedup check
     expect(processRecordSpy).toHaveBeenCalledOnce();
-    expect(store.getSignalByMessageId).toHaveBeenCalled();
+    expect(arcDb.getSignalByMessageId).toHaveBeenCalled();
   });
 
   it("routes to processRecord when messageType is 'inbound_signal'", async () => {
@@ -195,6 +177,6 @@ describe("SignalProcessor message routing", () => {
 
     // processRecord was called — observable via the store's dedup check
     expect(processRecordSpy).toHaveBeenCalledOnce();
-    expect(store.getSignalByMessageId).toHaveBeenCalled();
+    expect(arcDb.getSignalByMessageId).toHaveBeenCalled();
   });
 });

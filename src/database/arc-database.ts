@@ -241,7 +241,7 @@ export class ArcDatabase implements ArcMatcher {
     }
   }
 
-  async findArcByGroupingKey(accountId: string, key: string): Promise<Result<Arc | null, DbError>> {
+  async fastFindArcByAlternativeLookupKey(accountId: string, key: string): Promise<Result<Arc | null, DbError>> {
     try {
       const result = await dynamo.send(new GetCommand({
         TableName: SIGNALS_TABLE,

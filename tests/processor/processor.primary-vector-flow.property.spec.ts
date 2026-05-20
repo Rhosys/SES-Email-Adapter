@@ -9,8 +9,9 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { ok } from "../../src/errors.js";
 import { SignalProcessor, SYSTEM_RULES } from "../../src/processor/processor.js";
+import type { ArcMatcher, InboundSignalMessage } from "../../src/processor/processor.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
-import type { InboundSignalMessage, ProcessorDatabase, ArcMatcher } from "../../src/processor/processor.js";
+import { makeArcDbMock, makeAccountDbMock, makeProcessingDbMock } from "./_helpers.js";
 import type { ContentSanitizerClient } from "../../src/processor/content-sanitizer-client.js";
 import type { SignalClassifier, ClassificationOutput } from "../../src/classifier/classifier.js";
 import type { EmbeddingGenerator } from "../../src/embedding/embedding-generator.js";
@@ -113,26 +114,8 @@ function makeContentSanitizer(): ContentSanitizerClient {
   };
 }
 
-function makeStore(): ProcessorDatabase {
-  return {
-    getSignalByMessageId: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-    saveSignal: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    updateSignalRetention: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    getArc: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-    findArcByGroupingKey: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-    saveArc: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    listEnabledRules: vi.fn().mockReturnValue(Promise.resolve(ok(SYSTEM_RULES))),
-    getProcessorAccountContext: vi.fn().mockReturnValue(Promise.resolve(ok(DEFAULT_CTX))),
-    saveAlias: vi.fn().mockImplementation((a: Alias) => Promise.resolve(ok(a))),
-    getSender: vi.fn().mockReturnValue(Promise.resolve(ok(DEFAULT_SENDER_ENTRY))),
-    saveSender: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    getTemplate: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-    updateGlobalReputation: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    getDomainByName: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-    incrementStats: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    annotateRuleError: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    annotateTemplateError: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-  };
+function makeStore() {
+  return { arcDb: makeArcDbMock(), accountDb: makeAccountDbMock(), processingDb: makeProcessingDbMock() };
 }
 
 function makeMessage(sesMessageId: string): InboundSignalMessage {
@@ -203,7 +186,7 @@ describe("Feature: split-embedding-pipeline, Property 2: Primary vector flows to
     };
 
     const processor = new SignalProcessor({
-      store: makeStore(),
+      ...makeStore(),
       contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com",
       classifier: { classify: vi.fn().mockResolvedValue({ ...CLASSIFICATION }) },
       embeddingGenerator,

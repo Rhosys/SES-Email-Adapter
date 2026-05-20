@@ -1,8 +1,10 @@
 import { describe, it, expect, vi } from "vitest";
 import { ok } from "../../src/errors.js";
 import { SignalProcessor, SYSTEM_RULES } from "../../src/processor/processor.js";
+import type { ArcMatcher, InboundSignalMessage } from "../../src/processor/processor.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
-import type { InboundSignalMessage, ProcessorDatabase, ArcMatcher } from "../../src/processor/processor.js";
+import { makeArcDbMock, makeAccountDbMock, makeProcessingDbMock } from "./_helpers.js";
+import type { ArcDatabase } from "../../src/database/arc-database.js";
 import type { ContentSanitizerClient } from "../../src/processor/content-sanitizer-client.js";
 import type { SignalClassifier, ClassificationOutput } from "../../src/classifier/classifier.js";
 import type { EmbeddingGenerator } from "../../src/embedding/embedding-generator.js";
@@ -117,27 +119,14 @@ describe("Cross-layer idempotence — live writes + cache + Aurora", () => {
   }
 
   it("dedup path: second processing of same messageId is a no-op", async () => {
-    const store: ProcessorDatabase = {
+    const arcDb = {
+      ...makeArcDbMock(),
       getSignalByMessageId: vi.fn()
         .mockReturnValueOnce(Promise.resolve(ok(null)))
         .mockReturnValueOnce(Promise.resolve(ok({ id: "SES#test-msg-001" }))),
-      saveSignal: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      updateSignalRetention: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      getArc: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-      findArcByGroupingKey: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-      saveArc: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      listEnabledRules: vi.fn().mockReturnValue(Promise.resolve(ok(SYSTEM_RULES))),
-      getProcessorAccountContext: vi.fn().mockReturnValue(Promise.resolve(ok(DEFAULT_CTX))),
-      saveAlias: vi.fn().mockImplementation((a: Alias) => Promise.resolve(ok(a))),
-      getSender: vi.fn().mockReturnValue(Promise.resolve(ok(DEFAULT_SENDER_ENTRY))),
-      saveSender: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      getTemplate: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-      updateGlobalReputation: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      getDomainByName: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-      incrementStats: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      annotateRuleError: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      annotateTemplateError: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    };
+    } as unknown as ArcDatabase;
+    const accountDb = makeAccountDbMock();
+    const processingDb = makeProcessingDbMock();
 
     const embeddingGenerator: EmbeddingGenerator = {
       generateForModel: vi.fn().mockResolvedValue(
@@ -153,7 +142,7 @@ describe("Cross-layer idempotence — live writes + cache + Aurora", () => {
 
     const mockLogger = createMockLogger();
     const processor = new SignalProcessor({
-      store,
+      arcDb, accountDb, processingDb,
       contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com",
       classifier: makeClassifier(),
       embeddingGenerator,
@@ -173,36 +162,23 @@ describe("Cross-layer idempotence — live writes + cache + Aurora", () => {
     await processor.processRecord(message, 1);
     await processor.processRecord(message, 1);
 
-    expect(store.getSignalByMessageId).toHaveBeenCalledTimes(2);
-    expect(store.saveSignal).toHaveBeenCalledTimes(1);
+    expect(arcDb.getSignalByMessageId).toHaveBeenCalledTimes(2);
+    expect(arcDb.saveSignal).toHaveBeenCalledTimes(1);
     expect(auroraWriter.upsertEmbedding).toHaveBeenCalledTimes(1);
     expect(embeddingGenerator.generateForModel).toHaveBeenCalledTimes(1);
   });
 
   it("race condition: both runs produce identical embeddings and Aurora upsert params", async () => {
     const savedSignals: Signal[] = [];
-    const store: ProcessorDatabase = {
-      getSignalByMessageId: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
+    const arcDb = {
+      ...makeArcDbMock(),
       saveSignal: vi.fn().mockImplementation((signal: Signal) => {
         savedSignals.push(signal);
         return Promise.resolve(ok(undefined));
       }),
-      updateSignalRetention: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      getArc: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-      findArcByGroupingKey: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-      saveArc: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      listEnabledRules: vi.fn().mockReturnValue(Promise.resolve(ok(SYSTEM_RULES))),
-      getProcessorAccountContext: vi.fn().mockReturnValue(Promise.resolve(ok(DEFAULT_CTX))),
-      saveAlias: vi.fn().mockImplementation((a: Alias) => Promise.resolve(ok(a))),
-      getSender: vi.fn().mockReturnValue(Promise.resolve(ok(DEFAULT_SENDER_ENTRY))),
-      saveSender: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      getTemplate: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-      updateGlobalReputation: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      getDomainByName: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-      incrementStats: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      annotateRuleError: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      annotateTemplateError: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    };
+    } as unknown as ArcDatabase;
+    const accountDb = makeAccountDbMock();
+    const processingDb = makeProcessingDbMock();
 
     const embeddingGenerator: EmbeddingGenerator = {
       generateForModel: vi.fn().mockResolvedValue(
@@ -219,7 +195,7 @@ describe("Cross-layer idempotence — live writes + cache + Aurora", () => {
 
     const mockLogger = createMockLogger();
     const processor = new SignalProcessor({
-      store,
+      arcDb, accountDb, processingDb,
       contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com",
       classifier: makeClassifier(),
       embeddingGenerator,

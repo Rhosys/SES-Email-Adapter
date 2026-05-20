@@ -2,7 +2,9 @@ import { describe, it, expect, vi } from "vitest";
 import { ok } from "../../src/errors.js";
 import { SignalProcessor, SYSTEM_RULES } from "../../src/processor/processor.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
-import type { ProcessorDatabase, ReplySender } from "../../src/processor/processor.js";
+import { makeArcDbMock, makeAccountDbMock, makeProcessingDbMock } from "./_helpers.js";
+import type { ArcDatabase } from "../../src/database/arc-database.js";
+import type { AccountDatabase } from "../../src/database/account-database.js";
 import type { ContentSanitizerClient } from "../../src/processor/content-sanitizer-client.js";
 import type { SignalClassifier, ClassificationOutput } from "../../src/classifier/classifier.js";
 import type { EmbeddingGenerator, EmbeddingResult } from "../../src/embedding/embedding-generator.js";
@@ -10,7 +12,7 @@ import type { MultiClusterAuroraWriter } from "../../src/database/multi-cluster-
 import type { ArcMatcher } from "../../src/processor/processor.js";
 import type { S3RetentionService } from "../../src/embedding/s3-retention-service.js";
 import type { Arc, Alias, EmailTemplate, Rule } from "../../src/types/index.js";
-import type { InboundSignalMessage } from "../../src/processor/processor.js";
+import type { InboundSignalMessage, ReplySender } from "../../src/processor/processor.js";
 import { createMockLogger } from "../helpers/mock-logger.js";
 
 vi.mock("../../src/embedding/cluster-registry.js", () => {
@@ -98,17 +100,16 @@ describe("Single saveArc call with complete mutations", () => {
     let saveArcCallCount = 0;
     let savedArc: Arc | null = null;
 
-    const store: ProcessorDatabase = {
-      getSignalByMessageId: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-      saveSignal: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      updateSignalRetention: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      getArc: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-      findArcByGroupingKey: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
+    const arcDb = {
+      ...makeArcDbMock(),
       saveArc: vi.fn().mockImplementation((arc: Arc) => {
         saveArcCallCount++;
         savedArc = arc;
         return Promise.resolve(ok(undefined));
       }),
+    } as unknown as ArcDatabase;
+    const accountDb = {
+      ...makeAccountDbMock(),
       listEnabledRules: vi.fn().mockReturnValue(Promise.resolve(ok([...SYSTEM_RULES, ...userRules]))),
       getProcessorAccountContext: vi.fn().mockReturnValue(Promise.resolve(ok({
         retentionDays: 0,
@@ -121,12 +122,10 @@ describe("Single saveArc call with complete mutations", () => {
         userEmails: testCase.doPong ? [senderEmail] : [],
         billingPlan: "Paid",
       }))),
-      saveAlias: vi.fn().mockImplementation((a: Alias) => Promise.resolve(ok(a))),
       getSender: vi.fn().mockReturnValue(Promise.resolve(ok({
         accountId: TEST_ACCOUNT_ID, aliasAddress: recipientEmail,
         domain: "external.com", policy: "allow", addedAt: "2024-01-01T00:00:00Z",
       }))),
-      saveSender: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
       getTemplate: vi.fn().mockImplementation((_accountId: string, id: string) =>
         Promise.resolve(ok({
           id, accountId: TEST_ACCOUNT_ID, name: `Template ${id}`,
@@ -134,16 +133,13 @@ describe("Single saveArc call with complete mutations", () => {
           createdAt: "2024-01-01T00:00:00Z", updatedAt: "2024-01-01T00:00:00Z",
         } satisfies EmailTemplate)),
       ),
-      updateGlobalReputation: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
       getDomainByName: vi.fn().mockReturnValue(Promise.resolve(ok({
         id: recipientDomain, accountId: TEST_ACCOUNT_ID, domain: recipientDomain,
         receivingSetupComplete: true, senderSetupComplete: true,
         createdAt: "2024-01-01T00:00:00Z", updatedAt: "2024-01-01T00:00:00Z",
       }))),
-      incrementStats: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      annotateRuleError: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      annotateTemplateError: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    };
+    } as unknown as AccountDatabase;
+    const processingDb = makeProcessingDbMock();
 
     const contentSanitizer: ContentSanitizerClient = {
       invoke: vi.fn().mockReturnValue(Promise.resolve(ok({
@@ -194,7 +190,7 @@ describe("Single saveArc call with complete mutations", () => {
 
     const mockLogger = createMockLogger();
     const processor = new SignalProcessor({
-      store,
+      arcDb, accountDb, processingDb,
       contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com",
       classifier: { classify: vi.fn().mockResolvedValue(classification) },
       embeddingGenerator,

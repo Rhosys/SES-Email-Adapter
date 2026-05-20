@@ -1,7 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { Arc, Signal, View, Label, Rule, Domain, Account, Alias, VerifiedForwardingAddress, EmailTemplate } from "../../src/types/index.js";
 import { createApp } from "../../src/api/app.js";
-import type { ApiDatabase, AuthService, AccessService, AccountUser, VerificationMailer } from "../../src/api/app.js";
+import type { AuthService, AccessService, AccountUser, VerificationMailer } from "../../src/api/app.js";
+import type { ArcDatabase } from "../../src/database/arc-database.js";
+import type { AccountDatabase } from "../../src/database/account-database.js";
+import type { AuditDatabase } from "../../src/database/audit-database.js";
 import { ok, err } from "neverthrow";
 import { createMockLogger } from "../helpers/mock-logger.js";
 import { authError } from "../../src/errors.js";
@@ -38,21 +41,28 @@ function makeAccess(): AccessService {
   };
 }
 
-function makeStore(): ApiDatabase {
+function makeArcDb() {
   return {
     listArcs: vi.fn().mockResolvedValue(ok({ items: [] })),
     getArc: vi.fn().mockResolvedValue(ok(null)),
     updateArc: vi.fn().mockResolvedValue(ok(makeArc())),
-    updateArcDirect: vi.fn().mockResolvedValue(ok(makeArc())),
     listSignals: vi.fn().mockResolvedValue(ok({ items: [] })),
     listPreArcSignals: vi.fn().mockResolvedValue(ok({ items: [] })),
     updateSignalStatus: vi.fn().mockImplementation((_, id, status) => Promise.resolve(ok({ id, status }))),
-    findArcByGroupingKey: vi.fn().mockResolvedValue(ok(null)),
+    fastFindArcByAlternativeLookupKey: vi.fn().mockResolvedValue(ok(null)),
     getSignalById: vi.fn().mockResolvedValue(ok(null)),
     createSignal: vi.fn().mockImplementation((signal) => Promise.resolve(ok(signal))),
     updateSignal: vi.fn().mockResolvedValue(ok(makeSignal())),
     updateSignalSendStatus: vi.fn().mockResolvedValue(ok(makeSignal())),
     deleteSignal: vi.fn().mockResolvedValue(ok(undefined)),
+    unblockSignal: vi.fn().mockResolvedValue(ok(undefined)),
+    createArc: vi.fn().mockResolvedValue(ok(undefined)),
+    searchArcs: vi.fn().mockResolvedValue(ok({ items: [] })),
+  };
+}
+
+function makeAccountDb() {
+  return {
     listViews: vi.fn().mockResolvedValue(ok([])),
     getView: vi.fn().mockResolvedValue(ok(null)),
     createView: vi.fn().mockResolvedValue(ok(makeView())),
@@ -70,7 +80,6 @@ function makeStore(): ApiDatabase {
     getDomain: vi.fn().mockResolvedValue(ok(null)),
     createDomain: vi.fn().mockResolvedValue(ok(makeDomain())),
     deleteDomain: vi.fn().mockResolvedValue(ok(undefined)),
-    searchArcs: vi.fn().mockResolvedValue(ok({ items: [] })),
     getAccount: vi.fn().mockResolvedValue(ok(null)),
     createAccount: vi.fn().mockImplementation((a) => Promise.resolve(ok(a))),
     updateAccount: vi.fn().mockResolvedValue(ok(makeAccount())),
@@ -79,8 +88,6 @@ function makeStore(): ApiDatabase {
     createAlias: vi.fn().mockResolvedValue(ok(makeAlias())),
     upsertAlias: vi.fn().mockResolvedValue(ok(makeAlias())),
     deleteAlias: vi.fn().mockResolvedValue(ok(undefined)),
-    unblockSignal: vi.fn().mockResolvedValue(ok(undefined)),
-    createArc: vi.fn().mockResolvedValue(ok(undefined)),
     listVerifiedForwardingAddresses: vi.fn().mockResolvedValue(ok([])),
     getVerifiedForwardingAddress: vi.fn().mockResolvedValue(ok(null)),
     saveVerifiedForwardingAddress: vi.fn().mockResolvedValue(ok(undefined)),
@@ -95,9 +102,14 @@ function makeStore(): ApiDatabase {
     updateTemplate: vi.fn().mockResolvedValue(ok(undefined)),
     deleteTemplate: vi.fn().mockResolvedValue(ok(undefined)),
     listTemplates: vi.fn().mockResolvedValue(ok([])),
+    getStats: vi.fn().mockResolvedValue(ok(null)),
+  };
+}
+
+function makeAuditDb() {
+  return {
     listAuditEvents: vi.fn().mockResolvedValue(ok({ items: [] })),
     saveAuditEvent: vi.fn().mockResolvedValue(ok(undefined)),
-    getStats: vi.fn().mockResolvedValue(ok(null)),
   };
 }
 
@@ -256,7 +268,9 @@ async function req(
 // ---------------------------------------------------------------------------
 
 describe("API", () => {
-  let store: ApiDatabase;
+  let arcDb: ReturnType<typeof makeArcDb>;
+  let accountDb: ReturnType<typeof makeAccountDb>;
+  let auditDb: ReturnType<typeof makeAuditDb>;
   let auth: AuthService;
   let access: AccessService;
   let verificationMailer: VerificationMailer;
@@ -266,7 +280,9 @@ describe("API", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    store = makeStore();
+    arcDb = makeArcDb();
+    accountDb = makeAccountDb();
+    auditDb = makeAuditDb();
     auth = makeAuth();
     access = makeAccess();
     verificationMailer = { sendForwardVerification: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) };
@@ -276,7 +292,7 @@ describe("API", () => {
       validateAst: vi.fn().mockResolvedValue({ success: true, purpose: "validate_ast", result: { valid: true } }),
       validateAstBatch: vi.fn().mockResolvedValue({ success: true, purpose: "validate_ast_batch", results: [] }),
     };
-    app = createApp({ store, auth, access, logger: createMockLogger(), verificationMailer, draftSendDispatcher, astValidator });
+    app = createApp({ arcDb: arcDb as unknown as ArcDatabase, accountDb: accountDb as unknown as AccountDatabase, auditDb: auditDb as unknown as AuditDatabase, auth, access, logger: createMockLogger(), verificationMailer, draftSendDispatcher, astValidator });
   });
 
   // -------------------------------------------------------------------------
@@ -315,7 +331,7 @@ describe("API", () => {
 
   describe("GET /accounts/:accountId/arcs", () => {
     it("returns paginated Arc list in named envelope", async () => {
-      vi.mocked(store.listArcs).mockResolvedValueOnce(ok({ items: [makeArc()] }));
+      vi.mocked(arcDb.listArcs).mockResolvedValueOnce(ok({ items: [makeArc()] }));
       const res = await req(app, "GET", `${A}/arcs`);
       expect(res.status).toBe(200);
       const body = await res.json() as { arcs: unknown[]; pagination: { cursor: string | null } };
@@ -325,7 +341,7 @@ describe("API", () => {
 
     it("passes workflow and label filters to the store", async () => {
       await req(app, "GET", `${A}/arcs?workflow=payments&label=billing&limit=25`);
-      expect(store.listArcs).toHaveBeenCalledWith(
+      expect(arcDb.listArcs).toHaveBeenCalledWith(
         TEST_ACCOUNT_ID,
         expect.objectContaining({ workflow: "payments", label: "billing", limit: 25 }),
       );
@@ -333,7 +349,7 @@ describe("API", () => {
 
     it("passes status filter to the store", async () => {
       await req(app, "GET", `${A}/arcs?status=archived`);
-      expect(store.listArcs).toHaveBeenCalledWith(
+      expect(arcDb.listArcs).toHaveBeenCalledWith(
         TEST_ACCOUNT_ID,
         expect.objectContaining({ status: "archived" }),
       );
@@ -341,14 +357,14 @@ describe("API", () => {
 
     it("passes cursor and limit pagination params to the store", async () => {
       await req(app, "GET", `${A}/arcs?cursor=next-page-token&limit=10`);
-      expect(store.listArcs).toHaveBeenCalledWith(
+      expect(arcDb.listArcs).toHaveBeenCalledWith(
         TEST_ACCOUNT_ID,
         expect.objectContaining({ cursor: "next-page-token", limit: 10 }),
       );
     });
 
     it("returns cursor in pagination envelope when store returns nextCursor", async () => {
-      vi.mocked(store.listArcs).mockResolvedValueOnce(ok({ items: [makeArc()], nextCursor: "cursor-abc" }));
+      vi.mocked(arcDb.listArcs).mockResolvedValueOnce(ok({ items: [makeArc()], nextCursor: "cursor-abc" }));
       const res = await req(app, "GET", `${A}/arcs`);
       const body = await res.json() as { pagination: { cursor: string } };
       expect(body.pagination.cursor).toBe("cursor-abc");
@@ -357,7 +373,7 @@ describe("API", () => {
 
   describe("GET /accounts/:accountId/arcs/:id", () => {
     it("returns Arc detail", async () => {
-      vi.mocked(store.getArc).mockResolvedValueOnce(ok(makeArc()));
+      vi.mocked(arcDb.getArc).mockResolvedValueOnce(ok(makeArc()));
       const res = await req(app, "GET", `${A}/arcs/arc-001`);
       expect(res.status).toBe(200);
       const body = await res.json() as Arc;
@@ -370,7 +386,7 @@ describe("API", () => {
     });
 
     it("returns 403 when Arc belongs to a different account", async () => {
-      vi.mocked(store.getArc).mockResolvedValueOnce(ok(makeArc({ accountId: "other-account" })));
+      vi.mocked(arcDb.getArc).mockResolvedValueOnce(ok(makeArc({ accountId: "other-account" })));
       const res = await req(app, "GET", `${A}/arcs/arc-001`);
       expect(res.status).toBe(403);
     });
@@ -378,20 +394,20 @@ describe("API", () => {
 
   describe("PATCH /accounts/:accountId/arcs/:id", () => {
     it("archives an Arc", async () => {
-      vi.mocked(store.getArc).mockResolvedValueOnce(ok(makeArc()));
+      vi.mocked(arcDb.getArc).mockResolvedValueOnce(ok(makeArc()));
       const res = await req(app, "PATCH", `${A}/arcs/arc-001`, { body: { status: "archived" } });
       expect(res.status).toBe(200);
-      expect(store.updateArc).toHaveBeenCalledWith(
-        TEST_ACCOUNT_ID, "arc-001", expect.objectContaining({ status: "archived" }),
+      expect(arcDb.updateArc).toHaveBeenCalledWith(
+        TEST_ACCOUNT_ID, "arc-001", "archived", "2024-01-15T10:00:00Z", {},
       );
     });
 
     it("assigns labels to an Arc", async () => {
-      vi.mocked(store.getArc).mockResolvedValueOnce(ok(makeArc()));
+      vi.mocked(arcDb.getArc).mockResolvedValueOnce(ok(makeArc()));
       const res = await req(app, "PATCH", `${A}/arcs/arc-001`, { body: { labels: ["billing", "urgent"] } });
       expect(res.status).toBe(200);
-      expect(store.updateArc).toHaveBeenCalledWith(
-        TEST_ACCOUNT_ID, "arc-001", expect.objectContaining({ labels: ["billing", "urgent"] }),
+      expect(arcDb.updateArc).toHaveBeenCalledWith(
+        TEST_ACCOUNT_ID, "arc-001", "active", "2024-01-15T10:00:00Z", { labels: ["billing", "urgent"] },
       );
     });
 
@@ -407,8 +423,8 @@ describe("API", () => {
 
   describe("GET /accounts/:accountId/arcs/:arcId/signals", () => {
     it("lists Signals for an Arc in named envelope", async () => {
-      vi.mocked(store.getArc).mockResolvedValueOnce(ok(makeArc()));
-      vi.mocked(store.listSignals).mockResolvedValueOnce(ok({ items: [makeSignal()] }));
+      vi.mocked(arcDb.getArc).mockResolvedValueOnce(ok(makeArc()));
+      vi.mocked(arcDb.listSignals).mockResolvedValueOnce(ok({ items: [makeSignal()] }));
       const res = await req(app, "GET", `${A}/arcs/arc-001/signals`);
       expect(res.status).toBe(200);
       const body = await res.json() as { signals: unknown[]; pagination: { cursor: string | null } };
@@ -425,12 +441,12 @@ describe("API", () => {
   describe("GET /accounts/:accountId/signals?status=", () => {
     it("returns quarantined signals (both visible and hidden) when status=quarantined", async () => {
       const s = makeSignal({ status: "quarantine_visible" });
-      vi.mocked(store.listPreArcSignals).mockResolvedValueOnce(ok({ items: [s] }));
+      vi.mocked(arcDb.listPreArcSignals).mockResolvedValueOnce(ok({ items: [s] }));
       const res = await req(app, "GET", `${A}/signals?status=quarantined`);
       expect(res.status).toBe(200);
       const body = await res.json() as { signals: Signal[]; pagination: { cursor: string | null } };
       expect(body.signals).toHaveLength(1);
-      expect(store.listPreArcSignals).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "quarantined", expect.any(Object));
+      expect(arcDb.listPreArcSignals).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "quarantined", expect.any(Object));
     });
 
     it("returns 400 when status is blocked (no longer supported)", async () => {
@@ -452,46 +468,46 @@ describe("API", () => {
   describe("PUT /accounts/:accountId/signals/:id/quarantineResponse", () => {
     it("blocks a quarantined signal", async () => {
       const s = makeSignal({ status: "quarantine_visible" });
-      vi.mocked(store.getSignalById).mockResolvedValueOnce(ok(s));
+      vi.mocked(arcDb.getSignalById).mockResolvedValueOnce(ok(s));
       const res = await req(app, "POST", `${A}/signals/SES%23msg-001/quarantineResponse`, { body: { status: "block_hidden" } });
       expect(res.status).toBe(200);
-      expect(store.updateSignalStatus).toHaveBeenCalledWith(TEST_ACCOUNT_ID, s.signalLookupId, "block_hidden");
+      expect(arcDb.updateSignalStatus).toHaveBeenCalledWith(TEST_ACCOUNT_ID, s.signalLookupId, "block_hidden");
     });
 
     it("allows a quarantined signal — creates new arc when no grouping key match", async () => {
       const s = makeSignal({ status: "quarantine_visible" });
-      vi.mocked(store.getSignalById).mockResolvedValueOnce(ok(s));
-      vi.mocked(store.findArcByGroupingKey).mockResolvedValueOnce(ok(null));
+      vi.mocked(arcDb.getSignalById).mockResolvedValueOnce(ok(s));
+      vi.mocked(arcDb.fastFindArcByAlternativeLookupKey).mockResolvedValueOnce(ok(null));
       const res = await req(app, "POST", `${A}/signals/SES%23msg-001/quarantineResponse`, { body: { status: "active" } });
       expect(res.status).toBe(200);
       const body = await res.json() as { arc: Arc; signal: Signal };
       expect(body.arc.workflow).toBe(s.workflow);
       expect(body.signal.status).toBe("active");
-      expect(store.createArc).toHaveBeenCalledOnce();
-      expect(store.unblockSignal).toHaveBeenCalledWith(TEST_ACCOUNT_ID, s.signalLookupId, body.arc.id);
+      expect(arcDb.createArc).toHaveBeenCalledOnce();
+      expect(arcDb.unblockSignal).toHaveBeenCalledWith(TEST_ACCOUNT_ID, s.signalLookupId, body.arc.id);
     });
 
     it("allows a quarantined signal — attaches to existing arc when grouping key matches", async () => {
       const s = makeSignal({ status: "quarantine_visible", workflow: "auth" });
       const existingArc = makeArc();
-      vi.mocked(store.getSignalById).mockResolvedValueOnce(ok(s));
-      vi.mocked(store.findArcByGroupingKey).mockResolvedValueOnce(ok(existingArc));
+      vi.mocked(arcDb.getSignalById).mockResolvedValueOnce(ok(s));
+      vi.mocked(arcDb.fastFindArcByAlternativeLookupKey).mockResolvedValueOnce(ok(existingArc));
       const res = await req(app, "POST", `${A}/signals/SES%23msg-001/quarantineResponse`, { body: { status: "active" } });
       expect(res.status).toBe(200);
       const body = await res.json() as { arc: Arc; signal: Signal };
       expect(body.arc.id).toBe(existingArc.id);
-      expect(store.createArc).not.toHaveBeenCalled();
-      expect(store.unblockSignal).toHaveBeenCalledWith(TEST_ACCOUNT_ID, s.signalLookupId, existingArc.id);
+      expect(arcDb.createArc).not.toHaveBeenCalled();
+      expect(arcDb.unblockSignal).toHaveBeenCalledWith(TEST_ACCOUNT_ID, s.signalLookupId, existingArc.id);
     });
 
     it("returns 400 when signal is already active", async () => {
-      vi.mocked(store.getSignalById).mockResolvedValueOnce(ok(makeSignal({ status: "active" })));
+      vi.mocked(arcDb.getSignalById).mockResolvedValueOnce(ok(makeSignal({ status: "active" })));
       const res = await req(app, "POST", `${A}/signals/SES%23msg-001/quarantineResponse`, { body: { status: "active" } });
       expect(res.status).toBe(400);
     });
 
     it("returns 400 when body is missing status", async () => {
-      vi.mocked(store.getSignalById).mockResolvedValueOnce(ok(makeSignal({ status: "quarantine_visible" })));
+      vi.mocked(arcDb.getSignalById).mockResolvedValueOnce(ok(makeSignal({ status: "quarantine_visible" })));
       const res = await req(app, "POST", `${A}/signals/SES%23msg-001/quarantineResponse`, { body: {} });
       expect(res.status).toBe(400);
     });
@@ -504,7 +520,7 @@ describe("API", () => {
 
   describe("GET /accounts/:accountId/signals/:id", () => {
     it("returns full Signal detail", async () => {
-      vi.mocked(store.getSignalById).mockResolvedValueOnce(ok(makeSignal({ textBody: "Hello world" })));
+      vi.mocked(arcDb.getSignalById).mockResolvedValueOnce(ok(makeSignal({ textBody: "Hello world" })));
       const res = await req(app, "GET", `${A}/signals/SES%23msg-001`);
       expect(res.status).toBe(200);
       const body = await res.json() as Signal;
@@ -518,7 +534,7 @@ describe("API", () => {
     });
 
     it("returns 403 when Signal belongs to a different account", async () => {
-      vi.mocked(store.getSignalById).mockResolvedValueOnce(ok(makeSignal({ accountId: "other-account" })));
+      vi.mocked(arcDb.getSignalById).mockResolvedValueOnce(ok(makeSignal({ accountId: "other-account" })));
       const res = await req(app, "GET", `${A}/signals/SES%23msg-001`);
       expect(res.status).toBe(403);
     });
@@ -527,17 +543,17 @@ describe("API", () => {
   describe("PATCH /accounts/:accountId/signals/:id — draft update", () => {
     it("updates a draft signal and returns 200 + full resource", async () => {
       const draft = makeSignal({ status: "draft" });
-      vi.mocked(store.getSignalById).mockResolvedValueOnce(ok(draft));
-      vi.mocked(store.updateSignal).mockResolvedValueOnce(ok({ ...draft, subject: "Updated subject" }));
+      vi.mocked(arcDb.getSignalById).mockResolvedValueOnce(ok(draft));
+      vi.mocked(arcDb.updateSignal).mockResolvedValueOnce(ok({ ...draft, subject: "Updated subject" }));
       const res = await req(app, "PATCH", `${A}/signals/SES%23msg-001`, { body: { subject: "Updated subject" } });
       expect(res.status).toBe(200);
       const body = await res.json() as Signal;
       expect(body.subject).toBe("Updated subject");
-      expect(store.updateSignal).toHaveBeenCalledWith(TEST_ACCOUNT_ID, draft.signalLookupId, expect.objectContaining({ subject: "Updated subject" }));
+      expect(arcDb.updateSignal).toHaveBeenCalledWith(TEST_ACCOUNT_ID, draft.signalLookupId, expect.objectContaining({ subject: "Updated subject" }));
     });
 
     it("returns 400 when signal is not a draft", async () => {
-      vi.mocked(store.getSignalById).mockResolvedValueOnce(ok(makeSignal({ status: "active" })));
+      vi.mocked(arcDb.getSignalById).mockResolvedValueOnce(ok(makeSignal({ status: "active" })));
       const res = await req(app, "PATCH", `${A}/signals/SES%23msg-001`, { body: { subject: "x" } });
       expect(res.status).toBe(400);
       const body = await res.json() as { errorCode: string };
@@ -552,16 +568,16 @@ describe("API", () => {
 
   describe("POST /accounts/:accountId/arcs/:arcId/signals/:id/send — send draft", () => {
     it("sends a draft signal and returns 200 + updated signal", async () => {
-      vi.mocked(store.getArc).mockResolvedValueOnce(ok(makeArc()));
-      vi.mocked(store.getSignalById).mockResolvedValueOnce(ok(makeSignal({ status: "draft" })));
+      vi.mocked(arcDb.getArc).mockResolvedValueOnce(ok(makeArc()));
+      vi.mocked(arcDb.getSignalById).mockResolvedValueOnce(ok(makeSignal({ status: "draft" })));
       const res = await req(app, "POST", `${A}/arcs/arc-001/signals/SES%23msg-001/send`);
       expect(res.status).toBe(200);
-      expect(store.updateSignalSendStatus).toHaveBeenCalledOnce();
+      expect(arcDb.updateSignalSendStatus).toHaveBeenCalledOnce();
     });
 
     it("returns 400 when signal is not a draft", async () => {
-      vi.mocked(store.getArc).mockResolvedValueOnce(ok(makeArc()));
-      vi.mocked(store.getSignalById).mockResolvedValueOnce(ok(makeSignal({ status: "active" })));
+      vi.mocked(arcDb.getArc).mockResolvedValueOnce(ok(makeArc()));
+      vi.mocked(arcDb.getSignalById).mockResolvedValueOnce(ok(makeSignal({ status: "active" })));
       const res = await req(app, "POST", `${A}/arcs/arc-001/signals/SES%23msg-001/send`);
       expect(res.status).toBe(400);
       const body = await res.json() as { errorCode: string };
@@ -569,7 +585,7 @@ describe("API", () => {
     });
 
     it("returns 404 for unknown signal", async () => {
-      vi.mocked(store.getArc).mockResolvedValueOnce(ok(makeArc()));
+      vi.mocked(arcDb.getArc).mockResolvedValueOnce(ok(makeArc()));
       const res = await req(app, "POST", `${A}/arcs/arc-001/signals/nonexistent/send`);
       expect(res.status).toBe(404);
     });
@@ -577,14 +593,14 @@ describe("API", () => {
 
   describe("DELETE /accounts/:accountId/signals/:id — discard draft", () => {
     it("deletes a draft signal and returns 204", async () => {
-      vi.mocked(store.getSignalById).mockResolvedValueOnce(ok(makeSignal({ status: "draft" })));
+      vi.mocked(arcDb.getSignalById).mockResolvedValueOnce(ok(makeSignal({ status: "draft" })));
       const res = await req(app, "DELETE", `${A}/signals/SES%23msg-001`);
       expect(res.status).toBe(204);
-      expect(store.deleteSignal).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "SES#msg-001");
+      expect(arcDb.deleteSignal).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "SES#msg-001");
     });
 
     it("returns 400 when signal is not a draft", async () => {
-      vi.mocked(store.getSignalById).mockResolvedValueOnce(ok(makeSignal({ status: "active" })));
+      vi.mocked(arcDb.getSignalById).mockResolvedValueOnce(ok(makeSignal({ status: "active" })));
       const res = await req(app, "DELETE", `${A}/signals/SES%23msg-001`);
       expect(res.status).toBe(400);
       const body = await res.json() as { errorCode: string };
@@ -603,7 +619,7 @@ describe("API", () => {
 
   describe("GET /accounts/:accountId/views", () => {
     it("returns all Views in named envelope", async () => {
-      vi.mocked(store.listViews).mockResolvedValueOnce(ok([makeView(), makeView({ id: "view-002" })]));
+      vi.mocked(accountDb.listViews).mockResolvedValueOnce(ok([makeView(), makeView({ id: "view-002" })]));
       const res = await req(app, "GET", `${A}/views`);
       expect(res.status).toBe(200);
       const body = await res.json() as { views: View[]; pagination: { cursor: null } };
@@ -614,12 +630,12 @@ describe("API", () => {
 
   describe("POST /accounts/:accountId/views", () => {
     it("creates a View and returns 201", async () => {
-      vi.mocked(store.createView).mockResolvedValueOnce(ok(makeView({ id: "view-new" }) as never));
+      vi.mocked(accountDb.createView).mockResolvedValueOnce(ok(makeView({ id: "view-new" }) as never));
       const res = await req(app, "POST", `${A}/views`, {
         body: { name: "Invoices", workflow: "payments", sortField: "lastSignalAt", sortDirection: "desc" },
       });
       expect(res.status).toBe(201);
-      expect(store.createView).toHaveBeenCalledWith(
+      expect(accountDb.createView).toHaveBeenCalledWith(
         TEST_ACCOUNT_ID, expect.objectContaining({ name: "Invoices", workflow: "payments" }),
       );
     });
@@ -637,10 +653,10 @@ describe("API", () => {
 
   describe("PATCH /accounts/:accountId/views/:id", () => {
     it("updates View properties", async () => {
-      vi.mocked(store.getView).mockResolvedValueOnce(ok(makeView()));
+      vi.mocked(accountDb.getView).mockResolvedValueOnce(ok(makeView()));
       const res = await req(app, "PATCH", `${A}/views/view-001`, { body: { name: "Updated", color: "#00ff00" } });
       expect(res.status).toBe(200);
-      expect(store.updateView).toHaveBeenCalledWith(
+      expect(accountDb.updateView).toHaveBeenCalledWith(
         TEST_ACCOUNT_ID, "view-001", expect.objectContaining({ name: "Updated" }),
       );
     });
@@ -653,10 +669,10 @@ describe("API", () => {
 
   describe("DELETE /accounts/:accountId/views/:id", () => {
     it("deletes the View", async () => {
-      vi.mocked(store.getView).mockResolvedValueOnce(ok(makeView()));
+      vi.mocked(accountDb.getView).mockResolvedValueOnce(ok(makeView()));
       const res = await req(app, "DELETE", `${A}/views/view-001`);
       expect(res.status).toBe(204);
-      expect(store.deleteView).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "view-001");
+      expect(accountDb.deleteView).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "view-001");
     });
   });
 
@@ -666,7 +682,7 @@ describe("API", () => {
 
   describe("GET /accounts/:accountId/labels", () => {
     it("returns all Labels in named envelope", async () => {
-      vi.mocked(store.listLabels).mockResolvedValueOnce(ok([makeLabel()]));
+      vi.mocked(accountDb.listLabels).mockResolvedValueOnce(ok([makeLabel()]));
       const res = await req(app, "GET", `${A}/labels`);
       expect(res.status).toBe(200);
       const body = await res.json() as { labels: Label[]; pagination: { cursor: null } };
@@ -677,10 +693,10 @@ describe("API", () => {
 
   describe("POST /accounts/:accountId/labels", () => {
     it("creates a Label and returns 201", async () => {
-      vi.mocked(store.createLabel).mockResolvedValueOnce(ok(makeLabel() as never));
+      vi.mocked(accountDb.createLabel).mockResolvedValueOnce(ok(makeLabel() as never));
       const res = await req(app, "POST", `${A}/labels`, { body: { name: "urgent", color: "#ff0000" } });
       expect(res.status).toBe(201);
-      expect(store.createLabel).toHaveBeenCalledWith(TEST_ACCOUNT_ID, expect.objectContaining({ name: "urgent" }));
+      expect(accountDb.createLabel).toHaveBeenCalledWith(TEST_ACCOUNT_ID, expect.objectContaining({ name: "urgent" }));
     });
 
     it("returns 400 when name is missing", async () => {
@@ -691,16 +707,16 @@ describe("API", () => {
 
   describe("PATCH /accounts/:accountId/labels/:id", () => {
     it("updates Label", async () => {
-      vi.mocked(store.listLabels).mockResolvedValueOnce(ok([makeLabel()]));
+      vi.mocked(accountDb.listLabels).mockResolvedValueOnce(ok([makeLabel()]));
       const res = await req(app, "PATCH", `${A}/labels/label-001`, { body: { name: "billing" } });
       expect(res.status).toBe(200);
-      expect(store.updateLabel).toHaveBeenCalledWith(
+      expect(accountDb.updateLabel).toHaveBeenCalledWith(
         TEST_ACCOUNT_ID, "label-001", expect.objectContaining({ name: "billing" }),
       );
     });
 
     it("returns 404 for unknown Label", async () => {
-      vi.mocked(store.listLabels).mockResolvedValueOnce(ok([]));
+      vi.mocked(accountDb.listLabels).mockResolvedValueOnce(ok([]));
       const res = await req(app, "PATCH", `${A}/labels/nonexistent`, { body: { name: "x" } });
       expect(res.status).toBe(404);
     });
@@ -708,10 +724,10 @@ describe("API", () => {
 
   describe("DELETE /accounts/:accountId/labels/:id", () => {
     it("deletes the Label", async () => {
-      vi.mocked(store.listLabels).mockResolvedValueOnce(ok([makeLabel()]));
+      vi.mocked(accountDb.listLabels).mockResolvedValueOnce(ok([makeLabel()]));
       const res = await req(app, "DELETE", `${A}/labels/label-001`);
       expect(res.status).toBe(204);
-      expect(store.deleteLabel).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "label-001");
+      expect(accountDb.deleteLabel).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "label-001");
     });
   });
 
@@ -721,7 +737,7 @@ describe("API", () => {
 
   describe("GET /accounts/:accountId/rules", () => {
     it("returns all Rules in named envelope", async () => {
-      vi.mocked(store.listRules).mockResolvedValueOnce(ok([makeRule()]));
+      vi.mocked(accountDb.listRules).mockResolvedValueOnce(ok([makeRule()]));
       const res = await req(app, "GET", `${A}/rules`);
       expect(res.status).toBe(200);
       const body = await res.json() as { rules: Rule[]; pagination: { cursor: null } };
@@ -732,12 +748,12 @@ describe("API", () => {
 
   describe("POST /accounts/:accountId/rules", () => {
     it("creates a Rule and returns 201", async () => {
-      vi.mocked(store.createRule).mockResolvedValueOnce(ok(makeRule() as never));
+      vi.mocked(accountDb.createRule).mockResolvedValueOnce(ok(makeRule() as never));
       const res = await req(app, "POST", `${A}/rules`, {
         body: { name: "Archive newsletters", condition: '{"==": []}', actions: [{ type: "archive" }] },
       });
       expect(res.status).toBe(201);
-      expect(store.createRule).toHaveBeenCalledWith(
+      expect(accountDb.createRule).toHaveBeenCalledWith(
         TEST_ACCOUNT_ID, expect.objectContaining({ name: "Archive newsletters" }),
       );
     });
@@ -755,16 +771,16 @@ describe("API", () => {
 
   describe("PATCH /accounts/:accountId/rules/:id", () => {
     it("updates Rule properties", async () => {
-      vi.mocked(store.listRules).mockResolvedValueOnce(ok([makeRule()]));
+      vi.mocked(accountDb.listRules).mockResolvedValueOnce(ok([makeRule()]));
       const res = await req(app, "PATCH", `${A}/rules/rule-001`, { body: { name: "Updated rule" } });
       expect(res.status).toBe(200);
-      expect(store.updateRule).toHaveBeenCalledWith(
+      expect(accountDb.updateRule).toHaveBeenCalledWith(
         TEST_ACCOUNT_ID, "rule-001", expect.objectContaining({ name: "Updated rule" }),
       );
     });
 
     it("returns 404 for unknown Rule", async () => {
-      vi.mocked(store.listRules).mockResolvedValueOnce(ok([]));
+      vi.mocked(accountDb.listRules).mockResolvedValueOnce(ok([]));
       const res = await req(app, "PATCH", `${A}/rules/nonexistent`, { body: { name: "x" } });
       expect(res.status).toBe(404);
     });
@@ -772,10 +788,10 @@ describe("API", () => {
 
   describe("DELETE /accounts/:accountId/rules/:id", () => {
     it("deletes the Rule", async () => {
-      vi.mocked(store.listRules).mockResolvedValueOnce(ok([makeRule()]));
+      vi.mocked(accountDb.listRules).mockResolvedValueOnce(ok([makeRule()]));
       const res = await req(app, "DELETE", `${A}/rules/rule-001`);
       expect(res.status).toBe(204);
-      expect(store.deleteRule).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "rule-001");
+      expect(accountDb.deleteRule).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "rule-001");
     });
   });
 
@@ -785,7 +801,7 @@ describe("API", () => {
 
   describe("GET /accounts/:accountId/domains", () => {
     it("returns all Domains in named envelope", async () => {
-      vi.mocked(store.listDomains).mockResolvedValueOnce(ok([makeDomain()]));
+      vi.mocked(accountDb.listDomains).mockResolvedValueOnce(ok([makeDomain()]));
       const res = await req(app, "GET", `${A}/domains`);
       expect(res.status).toBe(200);
       const body = await res.json() as { domains: Domain[]; pagination: { cursor: null } };
@@ -796,10 +812,10 @@ describe("API", () => {
 
   describe("POST /accounts/:accountId/domains", () => {
     it("adds a Domain and returns 201", async () => {
-      vi.mocked(store.createDomain).mockResolvedValueOnce(ok(makeDomain() as never));
+      vi.mocked(accountDb.createDomain).mockResolvedValueOnce(ok(makeDomain() as never));
       const res = await req(app, "POST", `${A}/domains`, { body: { domain: "example.com" } });
       expect(res.status).toBe(201);
-      expect(store.createDomain).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "example.com");
+      expect(accountDb.createDomain).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "example.com");
     });
 
     it("returns 400 when domain is missing", async () => {
@@ -810,7 +826,7 @@ describe("API", () => {
 
   describe("GET /accounts/:accountId/domains/:id — DNS records", () => {
     it("returns records array alongside domain data", async () => {
-      vi.mocked(store.getDomain).mockResolvedValueOnce(ok(makeDomain()));
+      vi.mocked(accountDb.getDomain).mockResolvedValueOnce(ok(makeDomain()));
       const res = await req(app, "GET", `${A}/domains/example.com`);
       expect(res.status).toBe(200);
       const body = await res.json() as { records: Array<{ type: string; name: string; value: string; status: string }> };
@@ -821,21 +837,21 @@ describe("API", () => {
     });
 
     it("returns exactly 4 records with correct types: MX, CNAME, CNAME, CNAME", async () => {
-      vi.mocked(store.getDomain).mockResolvedValueOnce(ok(makeDomain()));
+      vi.mocked(accountDb.getDomain).mockResolvedValueOnce(ok(makeDomain()));
       const res = await req(app, "GET", `${A}/domains/example.com`);
       const body = await res.json() as { records: Array<{ type: string }> };
       expect(body.records.map((r) => r.type)).toEqual(["MX", "CNAME", "CNAME", "CNAME"]);
     });
 
     it("returns status=pending for every record when domain has never been health-checked", async () => {
-      vi.mocked(store.getDomain).mockResolvedValueOnce(ok(makeDomain())); // no lastCheckedAt
+      vi.mocked(accountDb.getDomain).mockResolvedValueOnce(ok(makeDomain())); // no lastCheckedAt
       const res = await req(app, "GET", `${A}/domains/example.com`);
       const body = await res.json() as { records: Array<{ status: string }> };
       expect(body.records.every((r) => r.status === "pending")).toBe(true);
     });
 
     it("returns status=verified for all records after a clean health check", async () => {
-      vi.mocked(store.getDomain).mockResolvedValueOnce(
+      vi.mocked(accountDb.getDomain).mockResolvedValueOnce(
         ok(makeDomain({ lastCheckedAt: "2024-01-15T00:00:00Z", failingRecords: [] })),
       );
       const res = await req(app, "GET", `${A}/domains/example.com`);
@@ -844,7 +860,7 @@ describe("API", () => {
     });
 
     it("shows failing status only for the records listed in failingRecords", async () => {
-      vi.mocked(store.getDomain).mockResolvedValueOnce(
+      vi.mocked(accountDb.getDomain).mockResolvedValueOnce(
         ok(makeDomain({
           lastCheckedAt: "2024-01-15T00:00:00Z",
           failingRecords: ["_dmarc.example.com"],
@@ -859,7 +875,7 @@ describe("API", () => {
     });
 
     it("records include correct name patterns for the registered domain", async () => {
-      vi.mocked(store.getDomain).mockResolvedValueOnce(
+      vi.mocked(accountDb.getDomain).mockResolvedValueOnce(
         ok(makeDomain({ id: "acme.io", domain: "acme.io", lastCheckedAt: "2024-01-15T00:00:00Z" })),
       );
       const res = await req(app, "GET", `${A}/domains/acme.io`);
@@ -874,10 +890,10 @@ describe("API", () => {
 
   describe("DELETE /accounts/:accountId/domains/:id", () => {
     it("removes the Domain", async () => {
-      vi.mocked(store.getDomain).mockResolvedValueOnce(ok(makeDomain()));
+      vi.mocked(accountDb.getDomain).mockResolvedValueOnce(ok(makeDomain()));
       const res = await req(app, "DELETE", `${A}/domains/example.com`);
       expect(res.status).toBe(204);
-      expect(store.deleteDomain).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "example.com");
+      expect(accountDb.deleteDomain).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "example.com");
     });
   });
 
@@ -887,13 +903,13 @@ describe("API", () => {
 
   describe("GET /accounts/:accountId/arcs?q=", () => {
     it("returns Arc search results in named envelope", async () => {
-      vi.mocked(store.searchArcs).mockResolvedValueOnce(ok({ items: [makeArc()] }));
+      vi.mocked(arcDb.searchArcs).mockResolvedValueOnce(ok({ items: [makeArc()] }));
       const res = await req(app, "GET", `${A}/arcs?q=invoice+from+stripe`);
       expect(res.status).toBe(200);
       const body = await res.json() as { arcs: unknown[]; pagination: { cursor: null } };
       expect(body.arcs).toHaveLength(1);
       expect(body.pagination).toEqual({ cursor: null });
-      expect(store.searchArcs).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "invoice from stripe", expect.any(Object));
+      expect(arcDb.searchArcs).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "invoice from stripe", expect.any(Object));
     });
   });
 
@@ -903,7 +919,7 @@ describe("API", () => {
 
   describe("GET /accounts/:accountId", () => {
     it("returns the account config", async () => {
-      vi.mocked(store.getAccount).mockResolvedValueOnce(ok(makeAccount()));
+      vi.mocked(accountDb.getAccount).mockResolvedValueOnce(ok(makeAccount()));
       const res = await req(app, "GET", `${A}`);
       expect(res.status).toBe(200);
       const body = await res.json() as Account;
@@ -922,7 +938,7 @@ describe("API", () => {
         body: { notifications: { email: { enabled: true, address: "alerts@example.com", frequency: "instant" } } },
       });
       expect(res.status).toBe(200);
-      expect(store.updateAccount).toHaveBeenCalledWith(
+      expect(accountDb.updateAccount).toHaveBeenCalledWith(
         TEST_ACCOUNT_ID,
         expect.objectContaining({ notifications: { email: { enabled: true, address: "alerts@example.com", frequency: "instant" } } }),
       );
@@ -931,7 +947,7 @@ describe("API", () => {
     it("updates deletionRetentionDays", async () => {
       const res = await req(app, "PATCH", `${A}`, { body: { deletionRetentionDays: 90 } });
       expect(res.status).toBe(200);
-      expect(store.updateAccount).toHaveBeenCalledWith(
+      expect(accountDb.updateAccount).toHaveBeenCalledWith(
         TEST_ACCOUNT_ID, expect.objectContaining({ deletionRetentionDays: 90 }),
       );
     });
@@ -941,7 +957,7 @@ describe("API", () => {
         body: { filtering: { defaultFilterMode: "block", blockOnboardingEmails: true } },
       });
       expect(res.status).toBe(200);
-      expect(store.updateAccount).toHaveBeenCalledWith(
+      expect(accountDb.updateAccount).toHaveBeenCalledWith(
         TEST_ACCOUNT_ID,
         expect.objectContaining({ filtering: { defaultFilterMode: "block", blockOnboardingEmails: true } }),
       );
@@ -952,7 +968,7 @@ describe("API", () => {
         body: { filtering: { defaultFilterMode: "quarantine_visible", newAddressHandling: "auto_allow", spamScoreThreshold: 0.75 } },
       });
       expect(res.status).toBe(200);
-      expect(store.updateAccount).toHaveBeenCalledWith(
+      expect(accountDb.updateAccount).toHaveBeenCalledWith(
         TEST_ACCOUNT_ID,
         expect.objectContaining({
           filtering: expect.objectContaining({ spamScoreThreshold: 0.75 }),
@@ -981,7 +997,7 @@ describe("API", () => {
     });
 
     it("returns 501 when access service is not configured", async () => {
-      app = createApp({ store, auth, logger: createMockLogger() });
+      app = createApp({ arcDb: arcDb as unknown as ArcDatabase, accountDb: accountDb as unknown as AccountDatabase, auditDb: auditDb as unknown as AuditDatabase, auth, logger: createMockLogger() });
       const res = await req(app, "GET", `${A}/users`);
       expect(res.status).toBe(501);
     });
@@ -1022,7 +1038,7 @@ describe("API", () => {
     });
 
     it("returns 501 when access service is not configured", async () => {
-      app = createApp({ store, auth, logger: createMockLogger() });
+      app = createApp({ arcDb: arcDb as unknown as ArcDatabase, accountDb: accountDb as unknown as AccountDatabase, auditDb: auditDb as unknown as AuditDatabase, auth, logger: createMockLogger() });
       const res = await req(app, "POST", `${A}/users`, { body: { email: "user@example.com", role: "member" } });
       expect(res.status).toBe(501);
     });
@@ -1055,7 +1071,7 @@ describe("API", () => {
 
   describe("GET /accounts/:accountId/aliases", () => {
     it("returns all aliases in named envelope", async () => {
-      vi.mocked(store.listAliases).mockResolvedValueOnce(ok([makeAlias()]));
+      vi.mocked(accountDb.listAliases).mockResolvedValueOnce(ok([makeAlias()]));
       const res = await req(app, "GET", `${A}/aliases`);
       expect(res.status).toBe(200);
       const body = await res.json() as { aliases: Alias[]; pagination: { cursor: null } };
@@ -1067,7 +1083,7 @@ describe("API", () => {
 
   describe("GET /accounts/:accountId/aliases/:address", () => {
     it("returns alias for the given address", async () => {
-      vi.mocked(store.getAlias).mockResolvedValueOnce(ok(makeAlias()));
+      vi.mocked(accountDb.getAlias).mockResolvedValueOnce(ok(makeAlias()));
       const res = await req(app, "GET", `${A}/aliases/user%40example.com`);
       expect(res.status).toBe(200);
       const body = await res.json() as Alias;
@@ -1082,20 +1098,20 @@ describe("API", () => {
 
   describe("POST /accounts/:accountId/aliases", () => {
     it("creates an alias and returns 201 + full resource", async () => {
-      vi.mocked(store.createAlias).mockResolvedValueOnce(ok(makeAlias({ address: "me@mydomain.com" })));
+      vi.mocked(accountDb.createAlias).mockResolvedValueOnce(ok(makeAlias({ address: "me@mydomain.com" })));
       const res = await req(app, "POST", `${A}/aliases`, {
         body: { address: "me@mydomain.com", unknownSenderPolicy: "block_hidden" },
       });
       expect(res.status).toBe(201);
       const body = await res.json() as Alias;
       expect(body.address).toBe("me@mydomain.com");
-      expect(store.createAlias).toHaveBeenCalledWith(
+      expect(accountDb.createAlias).toHaveBeenCalledWith(
         expect.objectContaining({ accountId: TEST_ACCOUNT_ID, address: "me@mydomain.com", unknownSenderPolicy: "block_hidden" }),
       );
     });
 
     it("returns 409 when alias already exists", async () => {
-      vi.mocked(store.getAlias).mockResolvedValueOnce(ok(makeAlias()));
+      vi.mocked(accountDb.getAlias).mockResolvedValueOnce(ok(makeAlias()));
       const res = await req(app, "POST", `${A}/aliases`, { body: { address: "user@example.com" } });
       expect(res.status).toBe(409);
       const body = await res.json() as { title: string; errorCode: string };
@@ -1108,11 +1124,11 @@ describe("API", () => {
     });
 
     it("stores createdForOrigin when provided", async () => {
-      vi.mocked(store.createAlias).mockResolvedValueOnce(ok(makeAlias()));
+      vi.mocked(accountDb.createAlias).mockResolvedValueOnce(ok(makeAlias()));
       await req(app, "POST", `${A}/aliases`, {
         body: { address: "me@mydomain.com", createdForOrigin: "github.com" },
       });
-      expect(store.createAlias).toHaveBeenCalledWith(
+      expect(accountDb.createAlias).toHaveBeenCalledWith(
         expect.objectContaining({ createdForOrigin: "github.com" }),
       );
     });
@@ -1120,24 +1136,24 @@ describe("API", () => {
 
   describe("PATCH /accounts/:accountId/aliases/:address", () => {
     it("creates or updates an alias and returns 200 + full resource", async () => {
-      vi.mocked(store.upsertAlias).mockResolvedValueOnce(ok(makeAlias({ unknownSenderPolicy: "block_hidden" })));
+      vi.mocked(accountDb.upsertAlias).mockResolvedValueOnce(ok(makeAlias({ unknownSenderPolicy: "block_hidden" })));
       const res = await req(app, "PATCH", `${A}/aliases/me%40mydomain.com`, {
         body: { unknownSenderPolicy: "block_hidden" },
       });
       expect(res.status).toBe(200);
       const body = await res.json() as Alias;
       expect(body.unknownSenderPolicy).toBe("block_hidden");
-      expect(store.upsertAlias).toHaveBeenCalledWith(
+      expect(accountDb.upsertAlias).toHaveBeenCalledWith(
         expect.objectContaining({ accountId: TEST_ACCOUNT_ID, address: "me@mydomain.com", unknownSenderPolicy: "block_hidden" }),
       );
     });
 
     it("preserves id and createdAt when updating existing alias", async () => {
-      vi.mocked(store.getAlias).mockResolvedValueOnce(ok(makeAlias()));
+      vi.mocked(accountDb.getAlias).mockResolvedValueOnce(ok(makeAlias()));
       await req(app, "PATCH", `${A}/aliases/user%40example.com`, {
         body: { unknownSenderPolicy: "allow_all", approvedSenders: [] },
       });
-      const saved = vi.mocked(store.upsertAlias).mock.calls[0]![0] as Alias;
+      const saved = vi.mocked(accountDb.upsertAlias).mock.calls[0]![0] as Alias;
       expect(saved.id).toBe("user@example.com");
       expect(saved.unknownSenderPolicy).toBe("allow_all");
     });
@@ -1146,7 +1162,7 @@ describe("API", () => {
       await req(app, "PATCH", `${A}/aliases/me%40mydomain.com`, {
         body: { unknownSenderPolicy: "block_hidden", spamScoreThreshold: 0.7 },
       });
-      const saved = vi.mocked(store.upsertAlias).mock.calls[0]![0] as Alias;
+      const saved = vi.mocked(accountDb.upsertAlias).mock.calls[0]![0] as Alias;
       expect(saved.spamScoreThreshold).toBe(0.7);
     });
 
@@ -1154,7 +1170,7 @@ describe("API", () => {
       await req(app, "PATCH", `${A}/aliases/me%40mydomain.com`, {
         body: { unknownSenderPolicy: "quarantine_visible" },
       });
-      const saved = vi.mocked(store.upsertAlias).mock.calls[0]![0] as Alias;
+      const saved = vi.mocked(accountDb.upsertAlias).mock.calls[0]![0] as Alias;
       expect(saved.spamScoreThreshold).toBeUndefined();
     });
   });
@@ -1163,7 +1179,7 @@ describe("API", () => {
     it("deletes the alias and returns 204", async () => {
       const res = await req(app, "DELETE", `${A}/aliases/me%40mydomain.com`);
       expect(res.status).toBe(204);
-      expect(store.deleteAlias).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "me@mydomain.com");
+      expect(accountDb.deleteAlias).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "me@mydomain.com");
     });
   });
 
@@ -1173,7 +1189,7 @@ describe("API", () => {
 
   describe("GET /accounts/:accountId/forwarding-addresses", () => {
     it("returns forwarding addresses in named envelope", async () => {
-      vi.mocked(store.listVerifiedForwardingAddresses).mockResolvedValueOnce(ok([makeVerifiedAddress()]));
+      vi.mocked(accountDb.listVerifiedForwardingAddresses).mockResolvedValueOnce(ok([makeVerifiedAddress()]));
       const res = await req(app, "GET", `${A}/forwarding-addresses`);
       expect(res.status).toBe(200);
       const body = await res.json() as { forwardingAddresses: VerifiedForwardingAddress[]; pagination: { cursor: null } };
@@ -1196,14 +1212,14 @@ describe("API", () => {
       expect(body.address).toBe("backup@personal.com");
       expect(body.status).toBe("pending");
       expect(body.token).toBeTruthy();
-      expect(store.saveVerifiedForwardingAddress).toHaveBeenCalledOnce();
+      expect(accountDb.saveVerifiedForwardingAddress).toHaveBeenCalledOnce();
       expect(verificationMailer.sendForwardVerification).toHaveBeenCalledWith(
         TEST_ACCOUNT_ID, "backup@personal.com", expect.any(String),
       );
     });
 
     it("returns existing verified address without re-sending verification", async () => {
-      vi.mocked(store.getVerifiedForwardingAddress).mockResolvedValueOnce(ok(makeVerifiedAddress({ status: "verified" })));
+      vi.mocked(accountDb.getVerifiedForwardingAddress).mockResolvedValueOnce(ok(makeVerifiedAddress({ status: "verified" })));
       const res = await req(app, "POST", `${A}/forwarding-addresses`, { body: { address: "backup@personal.com" } });
       expect(res.status).toBe(200);
       expect(verificationMailer.sendForwardVerification).not.toHaveBeenCalled();
@@ -1212,7 +1228,7 @@ describe("API", () => {
 
   describe("POST /accounts/:accountId/forwarding-addresses/:address/verify", () => {
     it("returns 400 when token is missing", async () => {
-      vi.mocked(store.getVerifiedForwardingAddress).mockResolvedValueOnce(ok(makeVerifiedAddress({ status: "pending" })));
+      vi.mocked(accountDb.getVerifiedForwardingAddress).mockResolvedValueOnce(ok(makeVerifiedAddress({ status: "pending" })));
       const res = await req(app, "POST", `${A}/forwarding-addresses/backup%40personal.com/verify`, { body: {} });
       expect(res.status).toBe(400);
     });
@@ -1223,19 +1239,19 @@ describe("API", () => {
     });
 
     it("returns 400 when token is wrong", async () => {
-      vi.mocked(store.getVerifiedForwardingAddress).mockResolvedValueOnce(ok(makeVerifiedAddress({ status: "pending", token: "correct-token" })));
+      vi.mocked(accountDb.getVerifiedForwardingAddress).mockResolvedValueOnce(ok(makeVerifiedAddress({ status: "pending", token: "correct-token" })));
       const res = await req(app, "POST", `${A}/forwarding-addresses/backup%40personal.com/verify`, { body: { token: "wrong-token" } });
       expect(res.status).toBe(400);
     });
 
     it("marks address as verified when token matches", async () => {
-      vi.mocked(store.getVerifiedForwardingAddress).mockResolvedValueOnce(ok(makeVerifiedAddress({ status: "pending", token: "tok-abc123" })));
+      vi.mocked(accountDb.getVerifiedForwardingAddress).mockResolvedValueOnce(ok(makeVerifiedAddress({ status: "pending", token: "tok-abc123" })));
       const res = await req(app, "POST", `${A}/forwarding-addresses/backup%40personal.com/verify`, { body: { token: "tok-abc123" } });
       expect(res.status).toBe(200);
       const body = await res.json() as VerifiedForwardingAddress;
       expect(body.status).toBe("verified");
       expect(body.verifiedAt).toBeTruthy();
-      const saved = vi.mocked(store.saveVerifiedForwardingAddress).mock.calls[0]![0] as VerifiedForwardingAddress;
+      const saved = vi.mocked(accountDb.saveVerifiedForwardingAddress).mock.calls[0]![0] as VerifiedForwardingAddress;
       expect(saved.status).toBe("verified");
     });
   });
@@ -1244,7 +1260,7 @@ describe("API", () => {
     it("deletes the forwarding address and returns 204", async () => {
       const res = await req(app, "DELETE", `${A}/forwarding-addresses/backup%40personal.com`);
       expect(res.status).toBe(204);
-      expect(store.deleteVerifiedForwardingAddress).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "backup@personal.com");
+      expect(accountDb.deleteVerifiedForwardingAddress).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "backup@personal.com");
     });
   });
 
@@ -1268,8 +1284,8 @@ describe("API", () => {
       vi.mocked(access.listAccountsForUser).mockResolvedValueOnce(ok(["existing-account"]));
       const res = await req(app, "POST", "/accounts");
       expect(res.status).toBe(409);
-      expect(store.createAccount).not.toHaveBeenCalled();
-      expect(store.updateAccount).not.toHaveBeenCalled();
+      expect(accountDb.createAccount).not.toHaveBeenCalled();
+      expect(accountDb.updateAccount).not.toHaveBeenCalled();
     });
   });
 
@@ -1279,7 +1295,7 @@ describe("API", () => {
 
   describe("POST /accounts/:accountId/rules — forward target validation", () => {
     it("rejects a rule with an unverified forward target", async () => {
-      vi.mocked(store.listVerifiedForwardingAddresses).mockResolvedValueOnce(ok([]));
+      vi.mocked(accountDb.listVerifiedForwardingAddresses).mockResolvedValueOnce(ok([]));
       const res = await req(app, "POST", `${A}/rules`, {
         body: { name: "Forward rule", actions: [{ type: "forward", value: "backup@personal.com" }] },
       });
@@ -1290,7 +1306,7 @@ describe("API", () => {
     });
 
     it("accepts a rule when forward target is verified", async () => {
-      vi.mocked(store.listVerifiedForwardingAddresses).mockResolvedValueOnce(ok([makeVerifiedAddress({ status: "verified" })]));
+      vi.mocked(accountDb.listVerifiedForwardingAddresses).mockResolvedValueOnce(ok([makeVerifiedAddress({ status: "verified" })]));
       const res = await req(app, "POST", `${A}/rules`, {
         body: { name: "Forward rule", actions: [{ type: "forward", value: "backup@personal.com" }] },
       });
@@ -1302,7 +1318,7 @@ describe("API", () => {
         body: { name: "Label rule", actions: [{ type: "assign_label", value: "important" }] },
       });
       expect(res.status).toBe(201);
-      expect(store.listVerifiedForwardingAddresses).not.toHaveBeenCalled();
+      expect(accountDb.listVerifiedForwardingAddresses).not.toHaveBeenCalled();
     });
   });
 
@@ -1312,12 +1328,12 @@ describe("API", () => {
 
   describe("POST /accounts/:accountId/rules — conditionType/code validation", () => {
     it("creates a JS rule with valid code and returns 201", async () => {
-      vi.mocked(store.createRule).mockResolvedValueOnce(ok(makeRule({ conditionType: "js", condition: "(signal) => signal.spamScore > 0.5" }) as never));
+      vi.mocked(accountDb.createRule).mockResolvedValueOnce(ok(makeRule({ conditionType: "js", condition: "(signal) => signal.spamScore > 0.5" }) as never));
       const res = await req(app, "POST", `${A}/rules`, {
         body: { name: "Spam filter", conditionType: "js", condition: "(signal) => signal.spamScore > 0.5", actions: [{ type: "archive" }] },
       });
       expect(res.status).toBe(201);
-      expect(store.createRule).toHaveBeenCalledWith(
+      expect(accountDb.createRule).toHaveBeenCalledWith(
         TEST_ACCOUNT_ID, expect.objectContaining({ conditionType: "js", condition: "(signal) => signal.spamScore > 0.5" }),
       );
     });
@@ -1352,7 +1368,7 @@ describe("API", () => {
     });
 
     it("succeeds without conditionType (backward compat — defaults to json_logic)", async () => {
-      vi.mocked(store.createRule).mockResolvedValueOnce(ok(makeRule() as never));
+      vi.mocked(accountDb.createRule).mockResolvedValueOnce(ok(makeRule() as never));
       const res = await req(app, "POST", `${A}/rules`, {
         body: { name: "Legacy rule", condition: '{"==": [1, 1]}', actions: [{ type: "archive" }] },
       });
@@ -1363,13 +1379,13 @@ describe("API", () => {
   describe("PATCH /accounts/:accountId/rules/:id — code update clears lastError", () => {
     it("clears lastError when code is updated on a JS rule", async () => {
       const existingRule = makeRule({ conditionType: "js", condition: "(signal) => true", lastError: "timeout after 800ms" });
-      vi.mocked(store.listRules).mockResolvedValueOnce(ok([existingRule]));
-      vi.mocked(store.updateRule).mockResolvedValueOnce(ok(makeRule({ conditionType: "js", condition: "(signal) => false" })));
+      vi.mocked(accountDb.listRules).mockResolvedValueOnce(ok([existingRule]));
+      vi.mocked(accountDb.updateRule).mockResolvedValueOnce(ok(makeRule({ conditionType: "js", condition: "(signal) => false" })));
       const res = await req(app, "PATCH", `${A}/rules/rule-001`, {
         body: { condition: "(signal) => false" },
       });
       expect(res.status).toBe(200);
-      expect(store.updateRule).toHaveBeenCalledWith(
+      expect(accountDb.updateRule).toHaveBeenCalledWith(
         TEST_ACCOUNT_ID, "rule-001", expect.objectContaining({ lastError: null }),
       );
     });
@@ -1382,12 +1398,12 @@ describe("API", () => {
   describe("POST /accounts/:accountId/templates — functions validation", () => {
     it("creates a template with valid functions and returns 201", async () => {
       const template = { id: "tpl-001", accountId: TEST_ACCOUNT_ID, name: "Welcome", subject: "Hi", body: "Hello", functions: [{ name: "greeting", code: "(signal) => signal.from.name" }], createdAt: "2024-01-01T00:00:00Z", updatedAt: "2024-01-01T00:00:00Z" };
-      vi.mocked(store.createTemplate).mockResolvedValueOnce(ok(template));
+      vi.mocked(accountDb.createTemplate).mockResolvedValueOnce(ok(template));
       const res = await req(app, "POST", `${A}/templates`, {
         body: { name: "Welcome", subject: "Hi", body: "Hello", functions: [{ name: "greeting", code: "(signal) => signal.from.name" }] },
       });
       expect(res.status).toBe(201);
-      expect(store.createTemplate).toHaveBeenCalledWith(
+      expect(accountDb.createTemplate).toHaveBeenCalledWith(
         expect.objectContaining({ functions: [{ name: "greeting", code: "(signal) => signal.from.name" }] }),
       );
     });
@@ -1425,11 +1441,11 @@ describe("API", () => {
   describe("POST /accounts/:accountId/rules — audit for JS rule creation", () => {
     it("calls saveAuditEvent before createRule (ordering verification)", async () => {
       const callOrder: string[] = [];
-      vi.mocked(store.saveAuditEvent).mockImplementation(async () => {
+      vi.mocked(auditDb.saveAuditEvent).mockImplementation(async () => {
         callOrder.push("saveAuditEvent");
         return ok(undefined);
       });
-      vi.mocked(store.createRule).mockImplementation(async () => {
+      vi.mocked(accountDb.createRule).mockImplementation(async () => {
         callOrder.push("createRule");
         return ok(makeRule({ conditionType: "js", condition: "(signal) => true" }) as never);
       });
@@ -1440,11 +1456,11 @@ describe("API", () => {
     });
 
     it("audit event contains before: null and after with conditionType/code for creation", async () => {
-      vi.mocked(store.createRule).mockResolvedValueOnce(ok(makeRule({ conditionType: "js", condition: "(signal) => signal.spamScore > 0.8" }) as never));
+      vi.mocked(accountDb.createRule).mockResolvedValueOnce(ok(makeRule({ conditionType: "js", condition: "(signal) => signal.spamScore > 0.8" }) as never));
       await req(app, "POST", `${A}/rules`, {
         body: { name: "Spam rule", conditionType: "js", condition: "(signal) => signal.spamScore > 0.8", actions: [{ type: "archive" }] },
       });
-      expect(store.saveAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+      expect(auditDb.saveAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
         accountId: TEST_ACCOUNT_ID,
         userId: TEST_USER_ID,
         action: "created",
@@ -1455,25 +1471,25 @@ describe("API", () => {
     });
 
     it("proceeds with rule creation when audit write fails", async () => {
-      vi.mocked(store.saveAuditEvent).mockResolvedValueOnce(err({ kind: "db_error", cause: new Error("DynamoDB timeout") }));
-      vi.mocked(store.createRule).mockResolvedValueOnce(ok(makeRule({ conditionType: "js", condition: "(signal) => true" }) as never));
+      vi.mocked(auditDb.saveAuditEvent).mockResolvedValueOnce(err({ kind: "db_error", cause: new Error("DynamoDB timeout") }));
+      vi.mocked(accountDb.createRule).mockResolvedValueOnce(ok(makeRule({ conditionType: "js", condition: "(signal) => true" }) as never));
       const res = await req(app, "POST", `${A}/rules`, {
         body: { name: "Audit fail rule", conditionType: "js", condition: "(signal) => true", actions: [{ type: "archive" }] },
       });
       expect(res.status).toBe(201);
-      expect(store.createRule).toHaveBeenCalledOnce();
+      expect(accountDb.createRule).toHaveBeenCalledOnce();
     });
   });
 
   describe("PATCH /accounts/:accountId/rules/:id — audit for JS rule update", () => {
     it("audit event contains before/after code values when code is updated", async () => {
       const existingRule = makeRule({ conditionType: "js", condition: "(signal) => signal.spamScore > 0.5" });
-      vi.mocked(store.listRules).mockResolvedValueOnce(ok([existingRule]));
-      vi.mocked(store.updateRule).mockResolvedValueOnce(ok(makeRule({ conditionType: "js", condition: "(signal) => signal.spamScore > 0.9" })));
+      vi.mocked(accountDb.listRules).mockResolvedValueOnce(ok([existingRule]));
+      vi.mocked(accountDb.updateRule).mockResolvedValueOnce(ok(makeRule({ conditionType: "js", condition: "(signal) => signal.spamScore > 0.9" })));
       await req(app, "PATCH", `${A}/rules/rule-001`, {
         body: { condition: "(signal) => signal.spamScore > 0.9" },
       });
-      expect(store.saveAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+      expect(auditDb.saveAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
         accountId: TEST_ACCOUNT_ID,
         userId: TEST_USER_ID,
         action: "updated",
@@ -1486,14 +1502,14 @@ describe("API", () => {
 
     it("proceeds with rule update when audit write fails", async () => {
       const existingRule = makeRule({ conditionType: "js", condition: "(signal) => true" });
-      vi.mocked(store.listRules).mockResolvedValueOnce(ok([existingRule]));
-      vi.mocked(store.saveAuditEvent).mockResolvedValueOnce(err({ kind: "db_error", cause: new Error("DynamoDB timeout") }));
-      vi.mocked(store.updateRule).mockResolvedValueOnce(ok(makeRule({ conditionType: "js", condition: "(signal) => false" })));
+      vi.mocked(accountDb.listRules).mockResolvedValueOnce(ok([existingRule]));
+      vi.mocked(auditDb.saveAuditEvent).mockResolvedValueOnce(err({ kind: "db_error", cause: new Error("DynamoDB timeout") }));
+      vi.mocked(accountDb.updateRule).mockResolvedValueOnce(ok(makeRule({ conditionType: "js", condition: "(signal) => false" })));
       const res = await req(app, "PATCH", `${A}/rules/rule-001`, {
         body: { condition: "(signal) => false" },
       });
       expect(res.status).toBe(200);
-      expect(store.updateRule).toHaveBeenCalledOnce();
+      expect(accountDb.updateRule).toHaveBeenCalledOnce();
     });
   });
 
@@ -1505,11 +1521,11 @@ describe("API", () => {
 
     it("calls saveAuditEvent before createTemplate when functions are provided", async () => {
       const callOrder: string[] = [];
-      vi.mocked(store.saveAuditEvent).mockImplementation(async () => {
+      vi.mocked(auditDb.saveAuditEvent).mockImplementation(async () => {
         callOrder.push("saveAuditEvent");
         return ok(undefined);
       });
-      vi.mocked(store.createTemplate).mockImplementation(async (tpl) => {
+      vi.mocked(accountDb.createTemplate).mockImplementation(async (tpl) => {
         callOrder.push("createTemplate");
         return ok(tpl as EmailTemplate);
       });
@@ -1520,12 +1536,12 @@ describe("API", () => {
     });
 
     it("audit event contains before: null and after with functions array for creation", async () => {
-      vi.mocked(store.createTemplate).mockResolvedValueOnce(ok(makeTemplateResult({ functions: [{ name: "greet", code: "(signal) => signal.from.name" }] })));
+      vi.mocked(accountDb.createTemplate).mockResolvedValueOnce(ok(makeTemplateResult({ functions: [{ name: "greet", code: "(signal) => signal.from.name" }] })));
       const functions = [{ name: "greet", code: "(signal) => signal.from.name" }];
       await req(app, "POST", `${A}/templates`, {
         body: { name: "Tpl", subject: "Hi", body: "Hello", functions },
       });
-      expect(store.saveAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+      expect(auditDb.saveAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
         accountId: TEST_ACCOUNT_ID,
         userId: TEST_USER_ID,
         action: "created",
@@ -1536,13 +1552,13 @@ describe("API", () => {
     });
 
     it("proceeds with template creation when audit write fails", async () => {
-      vi.mocked(store.saveAuditEvent).mockResolvedValueOnce(err({ kind: "db_error", cause: new Error("DynamoDB timeout") }));
-      vi.mocked(store.createTemplate).mockResolvedValueOnce(ok(makeTemplateResult({ functions: [{ name: "greet", code: "(signal) => signal.from.name" }] })));
+      vi.mocked(auditDb.saveAuditEvent).mockResolvedValueOnce(err({ kind: "db_error", cause: new Error("DynamoDB timeout") }));
+      vi.mocked(accountDb.createTemplate).mockResolvedValueOnce(ok(makeTemplateResult({ functions: [{ name: "greet", code: "(signal) => signal.from.name" }] })));
       const res = await req(app, "POST", `${A}/templates`, {
         body: { name: "Tpl", subject: "Hi", body: "Hello", functions: [{ name: "greet", code: "(signal) => signal.from.name" }] },
       });
       expect(res.status).toBe(201);
-      expect(store.createTemplate).toHaveBeenCalledOnce();
+      expect(accountDb.createTemplate).toHaveBeenCalledOnce();
     });
   });
 
@@ -1554,13 +1570,13 @@ describe("API", () => {
 
     it("audit event contains before/after functions when functions are updated", async () => {
       const existingTemplate = makeTemplateResult({ functions: [{ name: "old", code: "(signal) => 'old'" }] });
-      vi.mocked(store.getTemplate).mockResolvedValueOnce(ok(existingTemplate));
-      vi.mocked(store.updateTemplate).mockResolvedValueOnce(ok(makeTemplateResult({ functions: [{ name: "updated", code: "(signal) => 'new'" }] })));
+      vi.mocked(accountDb.getTemplate).mockResolvedValueOnce(ok(existingTemplate));
+      vi.mocked(accountDb.updateTemplate).mockResolvedValueOnce(ok(makeTemplateResult({ functions: [{ name: "updated", code: "(signal) => 'new'" }] })));
       const newFunctions = [{ name: "updated", code: "(signal) => 'new'" }];
       await req(app, "PATCH", `${A}/templates/tpl-001`, {
         body: { functions: newFunctions },
       });
-      expect(store.saveAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+      expect(auditDb.saveAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
         accountId: TEST_ACCOUNT_ID,
         userId: TEST_USER_ID,
         action: "updated",
@@ -1573,14 +1589,14 @@ describe("API", () => {
 
     it("proceeds with template update when audit write fails", async () => {
       const existingTemplate = makeTemplateResult();
-      vi.mocked(store.getTemplate).mockResolvedValueOnce(ok(existingTemplate));
-      vi.mocked(store.saveAuditEvent).mockResolvedValueOnce(err({ kind: "db_error", cause: new Error("DynamoDB timeout") }));
-      vi.mocked(store.updateTemplate).mockResolvedValueOnce(ok(makeTemplateResult({ functions: [{ name: "fn", code: "(signal) => 'x'" }] })));
+      vi.mocked(accountDb.getTemplate).mockResolvedValueOnce(ok(existingTemplate));
+      vi.mocked(auditDb.saveAuditEvent).mockResolvedValueOnce(err({ kind: "db_error", cause: new Error("DynamoDB timeout") }));
+      vi.mocked(accountDb.updateTemplate).mockResolvedValueOnce(ok(makeTemplateResult({ functions: [{ name: "fn", code: "(signal) => 'x'" }] })));
       const res = await req(app, "PATCH", `${A}/templates/tpl-001`, {
         body: { functions: [{ name: "fn", code: "(signal) => 'x'" }] },
       });
       expect(res.status).toBe(200);
-      expect(store.updateTemplate).toHaveBeenCalledOnce();
+      expect(accountDb.updateTemplate).toHaveBeenCalledOnce();
     });
   });
 });

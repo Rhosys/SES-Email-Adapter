@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ok, err } from "neverthrow";
 import { SignalProcessor, SYSTEM_RULES } from "../../src/processor/processor.js";
+import type { ArcMatcher, InboundSignalMessage, SqsDispatcher, Notifier, Forwarder, ReplySender, SideEffectPayload } from "../../src/processor/processor.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
-import type { ProcessorDatabase, ArcMatcher, SqsDispatcher, Notifier, Forwarder, ReplySender, InboundSignalMessage, SideEffectPayload } from "../../src/processor/processor.js";
+import { makeArcDbMock, makeAccountDbMock, makeProcessingDbMock } from "./_helpers.js";
 import type { ContentSanitizerClient } from "../../src/processor/content-sanitizer-client.js";
 import type { SignalClassifier, ClassificationOutput } from "../../src/classifier/classifier.js";
 import type { EmbeddingGenerator, EmbeddingResult } from "../../src/embedding/embedding-generator.js";
@@ -77,29 +78,8 @@ const validClassification: ClassificationOutput = {
 // Test double factories
 // ---------------------------------------------------------------------------
 
-function makeStore(): ProcessorDatabase {
-  return {
-    getSignalByMessageId: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-    saveSignal: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    updateSignalRetention: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    getArc: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-    findArcByGroupingKey: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-    saveArc: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    listEnabledRules: vi.fn().mockReturnValue(Promise.resolve(ok(SYSTEM_RULES))),
-    getProcessorAccountContext: vi.fn().mockReturnValue(Promise.resolve(ok(DEFAULT_CTX))),
-    saveAlias: vi.fn().mockImplementation((a: Alias) => Promise.resolve(ok(a))),
-    getSender: vi.fn().mockReturnValue(Promise.resolve(ok({
-      accountId: TEST_ACCOUNT_ID, aliasAddress: "user@example.com",
-      domain: "example.com", policy: "allow", addedAt: "2024-01-01T00:00:00Z",
-    }))),
-    saveSender: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    getTemplate: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-    updateGlobalReputation: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    getDomainByName: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-    incrementStats: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    annotateRuleError: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    annotateTemplateError: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-  };
+function makeStore() {
+  return { arcDb: makeArcDbMock(), accountDb: makeAccountDbMock(), processingDb: makeProcessingDbMock() };
 }
 
 function makeContentSanitizer(): ContentSanitizerClient {
@@ -260,7 +240,9 @@ function makeExistingArc(overrides: Partial<Arc> = {}): Arc {
 // ---------------------------------------------------------------------------
 
 describe("SignalProcessor integration: end-to-end retry flow", () => {
-  let store: ProcessorDatabase;
+  let arcDb: ReturnType<typeof makeArcDbMock>;
+  let accountDb: ReturnType<typeof makeAccountDbMock>;
+  let processingDb: ReturnType<typeof makeProcessingDbMock>;
   let contentSanitizer: ContentSanitizerClient;
   let classifier: Pick<SignalClassifier, "classify">;
   let embeddingGenerator: EmbeddingGenerator;
@@ -277,7 +259,7 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockLogger = createMockLogger();
-    store = makeStore();
+    ({ arcDb, accountDb, processingDb } = makeStore());
     contentSanitizer = makeContentSanitizer();
     classifier = makeClassifier();
     embeddingGenerator = makeEmbeddingGenerator();
@@ -289,7 +271,7 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
     forwarder = makeForwarder();
     replySender = makeReplySender();
     processor = new SignalProcessor({
-      store,
+      arcDb, accountDb, processingDb,
       contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com",
       classifier,
       embeddingGenerator,
@@ -334,15 +316,15 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
 
       // Arc was saved before signal
       const callOrder: string[] = [];
-      vi.mocked(store.saveArc).mock.invocationCallOrder.forEach(() => callOrder.push("saveArc"));
-      vi.mocked(store.saveSignal).mock.invocationCallOrder.forEach(() => callOrder.push("saveSignal"));
+      vi.mocked(arcDb.saveArc).mock.invocationCallOrder.forEach(() => callOrder.push("saveArc"));
+      vi.mocked(arcDb.saveSignal).mock.invocationCallOrder.forEach(() => callOrder.push("saveSignal"));
       // Verify saveArc was called
-      expect(store.saveArc).toHaveBeenCalled();
+      expect(arcDb.saveArc).toHaveBeenCalled();
       // Verify saveSignal was called
-      expect(store.saveSignal).toHaveBeenCalled();
+      expect(arcDb.saveSignal).toHaveBeenCalled();
       // saveArc invocation order < saveSignal invocation order
-      const arcOrder = vi.mocked(store.saveArc).mock.invocationCallOrder[0]!;
-      const signalOrder = vi.mocked(store.saveSignal).mock.invocationCallOrder[0]!;
+      const arcOrder = vi.mocked(arcDb.saveArc).mock.invocationCallOrder[0]!;
+      const signalOrder = vi.mocked(arcDb.saveSignal).mock.invocationCallOrder[0]!;
       expect(arcOrder).toBeLessThan(signalOrder);
 
       // S3 retention was attempted
@@ -382,8 +364,8 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
     const existingArc = makeExistingArc();
 
     beforeEach(() => {
-      vi.mocked(store.getSignalByMessageId).mockReturnValue(Promise.resolve(ok(existingSignal)));
-      vi.mocked(store.getArc).mockReturnValue(Promise.resolve(ok(existingArc)));
+      vi.mocked(arcDb.getSignalByMessageId).mockReturnValue(Promise.resolve(ok(existingSignal)));
+      vi.mocked(arcDb.getArc).mockReturnValue(Promise.resolve(ok(existingArc)));
     });
 
     it("skips parse, classify, and embedding — resumes from S3 retention → Aurora → dispatch", async () => {
@@ -395,10 +377,10 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
       expect(result.isOk()).toBe(true);
 
       // Signal was looked up from DDB
-      expect(store.getSignalByMessageId).toHaveBeenCalledWith(TEST_ACCOUNT_ID, SES_MESSAGE_ID);
+      expect(arcDb.getSignalByMessageId).toHaveBeenCalledWith(TEST_ACCOUNT_ID, SES_MESSAGE_ID);
 
       // Arc was loaded from DDB
-      expect(store.getArc).toHaveBeenCalledWith(TEST_ACCOUNT_ID, existingSignal.arcId);
+      expect(arcDb.getArc).toHaveBeenCalledWith(TEST_ACCOUNT_ID, existingSignal.arcId);
 
       // Expensive operations were NOT called
       expect(contentSanitizer.invoke).not.toHaveBeenCalled();
@@ -406,8 +388,8 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
       expect(embeddingGenerator.generateForModel).not.toHaveBeenCalled();
 
       // No new DDB saves (arc and signal already exist)
-      expect(store.saveArc).not.toHaveBeenCalled();
-      expect(store.saveSignal).not.toHaveBeenCalled();
+      expect(arcDb.saveArc).not.toHaveBeenCalled();
+      expect(arcDb.saveSignal).not.toHaveBeenCalled();
 
       // S3 retention was attempted (idempotent, always runs)
       expect(retentionService.applyPlanRetention).toHaveBeenCalledOnce();
@@ -432,8 +414,8 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
     const existingArc = makeExistingArc();
 
     beforeEach(() => {
-      vi.mocked(store.getSignalByMessageId).mockReturnValue(Promise.resolve(ok(existingSignal)));
-      vi.mocked(store.getArc).mockReturnValue(Promise.resolve(ok(existingArc)));
+      vi.mocked(arcDb.getSignalByMessageId).mockReturnValue(Promise.resolve(ok(existingSignal)));
+      vi.mocked(arcDb.getArc).mockReturnValue(Promise.resolve(ok(existingArc)));
       // Aurora fails
       vi.mocked(auroraWriter.upsertEmbedding).mockResolvedValue(err(dbError(new Error("Aurora cluster timeout"))));
     });
@@ -546,7 +528,7 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
       expect(contentSanitizer.invoke).not.toHaveBeenCalled();
       expect(classifier.classify).not.toHaveBeenCalled();
       expect(embeddingGenerator.generateForModel).not.toHaveBeenCalled();
-      expect(store.getSignalByMessageId).not.toHaveBeenCalled();
+      expect(arcDb.getSignalByMessageId).not.toHaveBeenCalled();
       expect(auroraWriter.upsertEmbedding).not.toHaveBeenCalled();
     });
   });

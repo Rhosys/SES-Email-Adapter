@@ -15,6 +15,8 @@ import type { SignalClassifier } from "../classifier/classifier.js";
 import type { EmbeddingGenerator } from "../embedding/embedding-generator.js";
 import type { MultiClusterAuroraWriter } from "../database/multi-cluster-aurora-writer.js";
 import type { ArcDatabase, UpdateArcFields } from "../database/arc-database.js";
+import type { AccountDatabase } from "../database/account-database.js";
+import type { ProcessingDatabase } from "../database/processing-database.js";
 import type { S3RetentionService } from "../embedding/s3-retention-service.js";
 import { getRetentionForPlan, retentionDurationToSeconds } from "../embedding/retention-tier.js";
 import type { BillingPlan } from "../embedding/retention-tier.js";
@@ -59,26 +61,6 @@ export interface ProcessorAccountContext {
   registeredDomains: string[];
   userEmails: string[];
   billingPlan: BillingPlan;
-}
-
-export interface ProcessorDatabase {
-  getSignalByMessageId(accountId: string, sesMessageId: string): Promise<Result<Signal | null, DbError>>;
-  saveSignal(signal: Signal): Promise<Result<void, DbError>>;
-  updateSignalRetention(accountId: string, signalLookupId: string, update: Partial<Pick<Signal, "s3Key" | "retentionDuration">>): Promise<Result<void, DbError>>;
-  getArc(accountId: string, id: string): Promise<Result<Arc | null, DbError>>;
-  findArcByGroupingKey(accountId: string, key: string): Promise<Result<Arc | null, DbError>>;
-  saveArc(arc: Arc): Promise<Result<void, DbError>>;
-  listEnabledRules(accountId: string): Promise<Result<Rule[], DbError>>;
-  getProcessorAccountContext(accountId: string, recipientAddress: string): Promise<Result<ProcessorAccountContext, DbError>>;
-  saveAlias(alias: Alias): Promise<Result<Alias, DbError>>;
-  getSender(accountId: string, address: string, domain: string): Promise<Result<AliasSender | null, DbError>>;
-  saveSender(accountId: string, address: string, domain: string, policy: SenderPolicy): Promise<Result<void, DbError>>;
-  getTemplate(accountId: string, id: string): Promise<Result<import("../types/index.js").EmailTemplate | null, DbError>>;
-  updateGlobalReputation(domain: string, update: { wasSpam: boolean; wasBlocked: boolean }): Promise<Result<void, DbError>>;
-  getDomainByName(accountId: string, domainName: string): Promise<Result<Domain | null, DbError>>;
-  incrementStats(accountId: string, category: import("../types/index.js").StatsCategory): Promise<Result<void, DbError>>;
-  annotateRuleError(accountId: string, ruleId: string, errorMessage: string): Promise<Result<void, DbError>>;
-  annotateTemplateError(accountId: string, templateId: string, functionName: string, errorMessage: string): Promise<Result<void, DbError>>;
 }
 
 export interface ArcMatcher {
@@ -291,8 +273,9 @@ export const SYSTEM_RULES: Rule[] = [
 // ---------------------------------------------------------------------------
 
 interface SignalProcessorOptions {
-  store: ProcessorDatabase;
-  arcDb?: ArcDatabase;
+  arcDb: ArcDatabase;
+  accountDb: AccountDatabase;
+  processingDb: ProcessingDatabase;
   contentSanitizer: ContentSanitizerClient;
   userCodeExecutor?: UserCodeExecutorClient;
   classifier: Pick<SignalClassifier, "classify">;
@@ -317,8 +300,9 @@ interface SignalProcessorOptions {
 }
 
 export class SignalProcessor {
-  private readonly store: ProcessorDatabase;
-  private readonly arcDb: ArcDatabase | undefined;
+  private readonly arcDb: ArcDatabase;
+  private readonly accountDb: AccountDatabase;
+  private readonly processingDb: ProcessingDatabase;
   private readonly contentSanitizer: ContentSanitizerClient;
   private readonly userCodeExecutor: UserCodeExecutorClient;
   private readonly classifier: Pick<SignalClassifier, "classify">;
@@ -342,8 +326,9 @@ export class SignalProcessor {
   private readonly contentCdnBaseUrl: string;
 
   constructor(opts: SignalProcessorOptions) {
-    this.store = opts.store;
-    this.arcDb = opts.arcDb!;
+    this.arcDb = opts.arcDb;
+    this.accountDb = opts.accountDb;
+    this.processingDb = opts.processingDb;
     this.contentSanitizer = opts.contentSanitizer;
     this.userCodeExecutor = opts.userCodeExecutor ?? { invoke: () => Promise.resolve({ success: true, purpose: "template_function", result: "" } as const), validateAst: () => Promise.resolve({ success: true, purpose: "validate_ast", result: { valid: true } } as const), validateAstBatch: () => Promise.resolve({ success: true, purpose: "validate_ast_batch", results: [] } as const) };
     this.classifier = opts.classifier;
@@ -372,7 +357,7 @@ export class SignalProcessor {
     if (receiveCount > 1) {
       this.logger.info("Retry path activated — checking DDB for existing signal state before re-processing.", { code: "processor.retry_path_activated", receiveCount, accountId: message.accountId, sesMessageId: message.sesMessageId });
 
-      const existingResult = await this.store.getSignalByMessageId(message.accountId, message.sesMessageId);
+      const existingResult = await this.arcDb.getSignalByMessageId(message.accountId, message.sesMessageId);
       if (existingResult.isErr()) return err(existingResult.error);
       this.logger.trackPoint("retry_signal_lookup");
 
@@ -383,14 +368,14 @@ export class SignalProcessor {
         // Signal exists — arc is guaranteed to exist (arc saved before signal).
         // Load arc to resume from the convergence point.
         if (!signal.arcId) return err(dbError("signal missing arcId on retry"));
-        const arcResult = await this.store.getArc(message.accountId, signal.arcId);
+        const arcResult = await this.arcDb.getArc(message.accountId, signal.arcId);
         if (arcResult.isErr()) return err(arcResult.error);
         this.logger.trackPoint("retry_arc_lookup");
         const arc = arcResult.value;
         if (!arc) return err(dbError("arc not found on retry"));
 
         // Fetch account context (needed for S3 retention)
-        const accountCtxResult = await this.store.getProcessorAccountContext(message.accountId, signal.recipientAddress);
+        const accountCtxResult = await this.accountDb.getProcessorAccountContext(message.accountId, signal.recipientAddress);
         if (accountCtxResult.isErr()) return err(accountCtxResult.error);
         const accountCtx = accountCtxResult.value;
 
@@ -431,7 +416,7 @@ export class SignalProcessor {
     // On retries the payload arc snapshot may be stale — refetch from DDB
     let arc: Arc;
     if (receiveCount > 1) {
-      const arcResult = await this.store.getArc(accountId, payloadArc.id);
+      const arcResult = await this.arcDb.getArc(accountId, payloadArc.id);
       if (arcResult.isErr()) return err(arcResult.error);
       arc = arcResult.value ?? payloadArc;
     } else {
@@ -504,7 +489,7 @@ export class SignalProcessor {
       try {
         this.logger.trackPoint("side_effect_pong_start");
         const recipientDomain = signal.recipientAddress.split("@")[1] ?? "";
-        const domainResult = await this.store.getDomainByName(accountId, recipientDomain);
+        const domainResult = await this.accountDb.getDomainByName(accountId, recipientDomain);
         const domain = domainResult.isOk() ? domainResult.value : null;
         const from = domain?.senderSetupComplete
           ? signal.recipientAddress
@@ -529,7 +514,7 @@ export class SignalProcessor {
         this.logger.trackPoint("side_effect_auto_draft_start");
         const now = new Date().toISOString();
         const recipientDomain = signal.recipientAddress.split("@")[1] ?? "";
-        const domainResult = await this.store.getDomainByName(accountId, recipientDomain);
+        const domainResult = await this.accountDb.getDomainByName(accountId, recipientDomain);
         const senderSetupComplete = domainResult.isOk() && !!domainResult.value?.senderSetupComplete;
 
         const vars: Record<string, string> = {
@@ -544,7 +529,7 @@ export class SignalProcessor {
           if (!parsed) continue;
           const { templateId, autoSend } = parsed;
 
-          const tmplResult = await this.store.getTemplate(accountId, templateId);
+          const tmplResult = await this.accountDb.getTemplate(accountId, templateId);
           if (tmplResult.isErr() || !tmplResult.value) continue;
           const tmpl = tmplResult.value;
 
@@ -620,7 +605,7 @@ export class SignalProcessor {
           // Reply-To safety gate — suppress auto-send if Reply-To domain is untrusted
           if (shouldAutoSend && signal.replyTo) {
             const replyToETLD1 = getETLD1(signal.replyTo.address);
-            const senderResult = await this.store.getSender(accountId, signal.recipientAddress, replyToETLD1);
+            const senderResult = await this.accountDb.getSender(accountId, signal.recipientAddress, replyToETLD1);
             const approvedDomains = senderResult.isOk() && senderResult.value?.policy === "allow"
               ? [senderResult.value.domain]
               : [];
@@ -674,7 +659,7 @@ export class SignalProcessor {
             ...(sendInitiatedAt ? { sendInitiatedAt } : {}),
           };
 
-          const draftSaveResult = await this.store.saveSignal(draft);
+          const draftSaveResult = await this.arcDb.saveSignal(draft);
           if (draftSaveResult.isErr()) {
             this.logger.track("Side-effect auto-draft save failed — will force retry.", { code: "processor.side_effect.auto_draft_failed", accountId, error: draftSaveResult.error });
             criticalFailure = draftSaveResult.error;
@@ -706,7 +691,7 @@ export class SignalProcessor {
     const webhookActions = (signal.matchedRules ?? [])
       .flatMap(r => r.actions.filter(a => a.type === "webhook" && a.value));
     if (webhookActions.length > 0) {
-      const accountCtxResult = await this.store.getProcessorAccountContext(accountId, signal.recipientAddress);
+      const accountCtxResult = await this.accountDb.getProcessorAccountContext(accountId, signal.recipientAddress);
       const accountPlan = accountCtxResult.isOk() ? accountCtxResult.value.billingPlan : "Free";
 
       if (!this.billingHandler.isFeatureEnabled(accountPlan, "webhook")) {
@@ -744,7 +729,7 @@ export class SignalProcessor {
     const { accountId, s3Key, sesMessageId, timestamp, destination } = msg;
 
     // 1. Dedup
-    const existingResult = await this.store.getSignalByMessageId(accountId, sesMessageId);
+    const existingResult = await this.arcDb.getSignalByMessageId(accountId, sesMessageId);
     if (existingResult.isErr()) return err(existingResult.error);
     if (existingResult.value) return ok(undefined);
 
@@ -775,12 +760,12 @@ export class SignalProcessor {
         summary: "",
         classificationModelId: "",
       };
-      const saveResult = await this.store.saveSignal(signal);
+      const saveResult = await this.arcDb.saveSignal(signal);
       if (saveResult.isErr()) return err(saveResult.error);
       this.logger.info("Blocked email — DKIM or DMARC verification failed.", { code: "processor.dkim_dmarc_block", accountId, sesMessageId, dkimVerdict: msg.dkimVerdict, dmarcVerdict: msg.dmarcVerdict });
       const dkimCat = statusToCategory(signal.status);
       if (dkimCat) {
-        const statsResult = await this.store.incrementStats(accountId, dkimCat);
+        const statsResult = await this.accountDb.incrementStats(accountId, dkimCat);
         if (statsResult.isErr()) {
           this.logger.warn("Stats increment failed — dashboard may be slightly behind.", { code: "processor.stats_increment_failed", accountId, error: statsResult.error });
         }
@@ -792,12 +777,12 @@ export class SignalProcessor {
     const recipientAddress = destination[0] ?? "";
 
     // Fetch account context early (needed for retention resolution before content sanitizer)
-    const accountCtxResult = await this.store.getProcessorAccountContext(accountId, recipientAddress);
+    const accountCtxResult = await this.accountDb.getProcessorAccountContext(accountId, recipientAddress);
     if (accountCtxResult.isErr()) return err(accountCtxResult.error);
     const accountCtx = accountCtxResult.value;
 
     // Resolve retention and generate pre-signed URLs for the content sanitizer
-    const retentionDuration = resolveRetention(accountCtx, null);
+    const retentionDuration = resolveRetention({}, null);
     const s3Tag = retentionToS3Tag(retentionDuration);
     const signalId = sesMessageId;
     const keyPrefix = `accounts/${accountId}/extracted/${signalId}/`;
@@ -880,7 +865,7 @@ export class SignalProcessor {
     const now = new Date().toISOString();
 
     // 4. Fetch sender entry (account context already fetched for retention resolution)
-    const senderEntryResult = await this.store.getSender(accountId, recipientAddress, senderETLD1);
+    const senderEntryResult = await this.accountDb.getSender(accountId, recipientAddress, senderETLD1);
     if (senderEntryResult.isErr()) return err(senderEntryResult.error);
     const senderEntry = senderEntryResult.value;
     const ttl = accountCtx.retentionDays > 0
@@ -909,7 +894,7 @@ export class SignalProcessor {
     this.logger.trackPoint("arc_match_search");
     if (groupingKey) {
       this.logger.trackPoint("arc_matcher_grouping_key_lookup");
-      const gkResult = await this.store.findArcByGroupingKey(accountId, groupingKey);
+      const gkResult = await this.arcDb.fastFindArcByAlternativeLookupKey(accountId, groupingKey);
       if (gkResult.isErr()) return err(gkResult.error);
       matchedArc = gkResult.value;
     } else {
@@ -967,15 +952,15 @@ export class SignalProcessor {
     if (effectiveSenderEntry && effectiveSenderEntry.policy !== "allow") {
       const blockStatus = effectiveSenderEntry.policy; // block_hidden | block_reject | violate_report
       const blockedSignal = buildSignal({ status: blockStatus, accountId, sesMessageId, recipientAddress, parsed, classification, s3Key, receivedAt: timestamp, now, ...(ttl !== undefined ? { ttl } : {}) });
-      const saveResult = await this.store.saveSignal(blockedSignal);
+      const saveResult = await this.arcDb.saveSignal(blockedSignal);
       if (saveResult.isErr()) return err(saveResult.error);
-      const repResult = await this.store.updateGlobalReputation(senderETLD1, { wasSpam: classification.spamScore >= spamScoreThreshold, wasBlocked: true });
+      const repResult = await this.processingDb.updateGlobalReputation(senderETLD1, { wasSpam: classification.spamScore >= spamScoreThreshold, wasBlocked: true });
       if (repResult.isErr()) {
         this.logger.warn("Failed to update global sender reputation after signal processing. The DynamoDB update returned an error. Reputation data may be stale for this domain.", { code: "processor.reputation_update_failed", accountId, error: repResult.error });
       }
       const senderBlockCat = statusToCategory(blockStatus);
       if (senderBlockCat) {
-        const statsResult = await this.store.incrementStats(accountId, senderBlockCat);
+        const statsResult = await this.accountDb.incrementStats(accountId, senderBlockCat);
         if (statsResult.isErr()) {
           this.logger.warn("Stats increment failed — dashboard may be slightly behind.", { code: "processor.stats_increment_failed", accountId, error: statsResult.error });
         }
@@ -1023,7 +1008,7 @@ export class SignalProcessor {
     });
 
     // 10. Evaluate all rules (system rules seeded at low position numbers, user rules at higher positions)
-    const rulesResult = await this.store.listEnabledRules(accountId);
+    const rulesResult = await this.accountDb.listEnabledRules(accountId);
     if (rulesResult.isErr()) return err(rulesResult.error);
     const rules = rulesResult.value;
     const matchedRules = await applyRules(rules, { signal: signalShell, arc, isMatchedArc }, this.ruleEvaluator, this.logger, this.systemSignalCreator);
@@ -1046,15 +1031,15 @@ export class SignalProcessor {
     const buildArgs = { accountId, sesMessageId, recipientAddress, parsed, classification, s3Key, receivedAt: timestamp, now, ...(ttl !== undefined ? { ttl } : {}) };
 
     if (outcome.blockDisposition) {
-      const saveResult = await this.store.saveSignal({ ...buildSignal({ status: outcome.blockDisposition, ...buildArgs }), matchedRules });
+      const saveResult = await this.arcDb.saveSignal({ ...buildSignal({ status: outcome.blockDisposition, ...buildArgs }), matchedRules });
       if (saveResult.isErr()) return err(saveResult.error);
-      const repResult = await this.store.updateGlobalReputation(senderETLD1, { wasSpam: classification.spamScore >= spamScoreThreshold, wasBlocked: true });
+      const repResult = await this.processingDb.updateGlobalReputation(senderETLD1, { wasSpam: classification.spamScore >= spamScoreThreshold, wasBlocked: true });
       if (repResult.isErr()) {
         this.logger.warn("Failed to update global sender reputation after signal processing. The DynamoDB update returned an error. Reputation data may be stale for this domain.", { code: "processor.reputation_update_failed", accountId, error: repResult.error });
       }
       const blockCat = statusToCategory(outcome.blockDisposition);
       if (blockCat) {
-        const statsResult = await this.store.incrementStats(accountId, blockCat);
+        const statsResult = await this.accountDb.incrementStats(accountId, blockCat);
         if (statsResult.isErr()) {
           this.logger.warn("Stats increment failed — dashboard may be slightly behind.", { code: "processor.stats_increment_failed", accountId, error: statsResult.error });
         }
@@ -1066,15 +1051,15 @@ export class SignalProcessor {
     if (outcome.quarantine && !outcome.approveSender) {
       const quarantineStatus = outcome.quarantineHidden ? "quarantine_hidden" : "quarantine_visible";
       const quarantinedSignal: Signal = { ...buildSignal({ status: quarantineStatus, ...buildArgs }), matchedRules };
-      const saveResult = await this.store.saveSignal(quarantinedSignal);
+      const saveResult = await this.arcDb.saveSignal(quarantinedSignal);
       if (saveResult.isErr()) return err(saveResult.error);
-      const repResult = await this.store.updateGlobalReputation(senderETLD1, { wasSpam: classification.spamScore >= spamScoreThreshold, wasBlocked: true });
+      const repResult = await this.processingDb.updateGlobalReputation(senderETLD1, { wasSpam: classification.spamScore >= spamScoreThreshold, wasBlocked: true });
       if (repResult.isErr()) {
         this.logger.warn("Failed to update global sender reputation after signal processing. The DynamoDB update returned an error. Reputation data may be stale for this domain.", { code: "processor.reputation_update_failed", accountId, error: repResult.error });
       }
       const quarantineCat = statusToCategory(quarantineStatus);
       if (quarantineCat) {
-        const statsResult = await this.store.incrementStats(accountId, quarantineCat);
+        const statsResult = await this.accountDb.incrementStats(accountId, quarantineCat);
         if (statsResult.isErr()) {
           this.logger.warn("Stats increment failed — dashboard may be slightly behind.", { code: "processor.stats_increment_failed", accountId, error: statsResult.error });
         }
@@ -1136,22 +1121,22 @@ export class SignalProcessor {
       if (JSON.stringify(arc.labels) !== JSON.stringify(matchedArc.labels)) fields.labels = arc.labels;
       if (arc.sentMessageIds !== undefined && JSON.stringify(arc.sentMessageIds) !== JSON.stringify(matchedArc.sentMessageIds)) fields.sentMessageIds = arc.sentMessageIds;
 
-      const updateResult = await this.arcDb!.updateArc(accountId, arc.id, arc.status, arc.lastSignalAt, fields);
+      const updateResult = await this.arcDb.updateArc(accountId, arc.id, arc.status, arc.lastSignalAt, fields);
       if (updateResult.isErr()) return err(updateResult.error);
     } else {
       if (outcome.archive) arc.status = "archived";
-      const saveArcResult = await this.store.saveArc(arc);
+      const saveArcResult = await this.arcDb.saveArc(arc);
       if (saveArcResult.isErr()) return err(saveArcResult.error);
     }
     this.logger.trackPoint("arc_saved", { arcId: arc.id });
 
-    const saveSignalResult = await this.store.saveSignal(signal);
+    const saveSignalResult = await this.arcDb.saveSignal(signal);
     if (saveSignalResult.isErr()) return err(saveSignalResult.error);
     this.logger.trackPoint("signal_saved", { signalId: signal.id, arcId: arc.id });
 
     const allowedCat = statusToCategory(signal.status);
     if (allowedCat) {
-      const statsResult = await this.store.incrementStats(accountId, allowedCat);
+      const statsResult = await this.accountDb.incrementStats(accountId, allowedCat);
       if (statsResult.isErr()) {
         this.logger.warn("Stats increment failed — dashboard may be slightly behind.", { code: "processor.stats_increment_failed", accountId, error: statsResult.error });
       }
@@ -1170,7 +1155,7 @@ export class SignalProcessor {
 
     // Side-effects (forward, auto-reply, auto-draft, notify) are handled by processSideEffect via SQS dispatch.
 
-    const finalRepResult = await this.store.updateGlobalReputation(senderETLD1, {
+    const finalRepResult = await this.processingDb.updateGlobalReputation(senderETLD1, {
       wasSpam: classification.spamScore >= spamScoreThreshold,
       wasBlocked: false,
     });
@@ -1282,7 +1267,7 @@ export class SignalProcessor {
       if (updatedS3Key !== signal.s3Key) {
         retentionUpdate.s3Key = updatedS3Key;
       }
-      const retentionSaveResult = await this.store.updateSignalRetention(signal.accountId, signal.signalLookupId, retentionUpdate);
+      const retentionSaveResult = await this.arcDb.updateSignalRetention(signal.accountId, signal.signalLookupId, retentionUpdate);
       if (retentionSaveResult.isErr()) {
         this.logger.warn("Failed to persist retention metadata on signal record. The DynamoDB update returned an error. The S3 retention is applied but the signal record won't reflect the retention duration.", { code: "processor.retention_metadata_save_failed", accountId: signal.accountId, error: retentionSaveResult.error });
       }
@@ -1306,7 +1291,7 @@ export class SignalProcessor {
   ): Promise<Result<void, DbError>> {
     const now = new Date().toISOString();
     if (!existing) {
-      const aliasResult = await this.store.saveAlias({
+      const aliasResult = await this.accountDb.saveAlias({
         id: address,
         accountId,
         address,
@@ -1316,7 +1301,7 @@ export class SignalProcessor {
       });
       if (aliasResult.isErr()) return err(aliasResult.error);
     }
-    const senderResult = await this.store.saveSender(accountId, address, senderETLD1, "allow");
+    const senderResult = await this.accountDb.saveSender(accountId, address, senderETLD1, "allow");
     if (senderResult.isErr()) return err(senderResult.error);
     return ok(undefined);
   }
@@ -1326,7 +1311,7 @@ export class SignalProcessor {
       ? `[${error.type}] ${error.message}`
       : "Function returned no value";
     try {
-      await this.store.annotateTemplateError(accountId, templateId, functionName, errorMessage);
+      await this.accountDb.annotateTemplateError(accountId, templateId, functionName, errorMessage);
     } catch {
       // Best-effort — don't fail draft generation if annotation fails
       this.logger.track("Failed to annotate template function error.", { code: "processor.annotate_template_failed", accountId, templateId, functionName });

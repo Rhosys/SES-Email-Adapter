@@ -1,8 +1,9 @@
 import { describe, it, expect, vi } from "vitest";
 import { ok } from "../../src/errors.js";
 import { SignalProcessor, SYSTEM_RULES } from "../../src/processor/processor.js";
+import type { ArcMatcher, InboundSignalMessage } from "../../src/processor/processor.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
-import type { InboundSignalMessage, ProcessorDatabase, ArcMatcher } from "../../src/processor/processor.js";
+import { makeArcDbMock, makeAccountDbMock, makeProcessingDbMock } from "./_helpers.js";
 import type { ContentSanitizerClient } from "../../src/processor/content-sanitizer-client.js";
 import type { SignalClassifier, ClassificationOutput } from "../../src/classifier/classifier.js";
 import type { EmbeddingGenerator, EmbeddingResult } from "../../src/embedding/embedding-generator.js";
@@ -89,26 +90,8 @@ describe("Multi-cluster fanout writes vectors to every active target", () => {
     classificationModelId: "us.anthropic.claude-opus-4-5-20251101-v1:0",
   };
 
-  function makeStore(): ProcessorDatabase {
-    return {
-      getSignalByMessageId: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-      saveSignal: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      updateSignalRetention: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      getArc: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-      findArcByGroupingKey: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-      saveArc: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      listEnabledRules: vi.fn().mockReturnValue(Promise.resolve(ok(SYSTEM_RULES))),
-      getProcessorAccountContext: vi.fn().mockReturnValue(Promise.resolve(ok(DEFAULT_CTX))),
-      saveAlias: vi.fn().mockImplementation((a: Alias) => Promise.resolve(ok(a))),
-      getSender: vi.fn().mockReturnValue(Promise.resolve(ok(DEFAULT_SENDER_ENTRY))),
-      saveSender: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      getTemplate: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-      updateGlobalReputation: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      getDomainByName: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-      incrementStats: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      annotateRuleError: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      annotateTemplateError: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    };
+  function makeStore() {
+    return { arcDb: makeArcDbMock(), accountDb: makeAccountDbMock(), processingDb: makeProcessingDbMock() };
   }
 
   function makeContentSanitizer(): ContentSanitizerClient {
@@ -181,7 +164,7 @@ describe("Multi-cluster fanout writes vectors to every active target", () => {
   it.each(clusterConfigs)("$label — DynamoDB embeddings map has one entry per active cluster", async ({ clusters }) => {
     mockState.clusters = clusters;
 
-    const store = makeStore();
+    const { arcDb, accountDb, processingDb } = makeStore();
     const embeddingResults: EmbeddingResult[] = clusters.map((cluster) => ({
       modelId: cluster.modelId,
       vector: Array.from({ length: cluster.dimensions }, (_, i) => (i + 1) / cluster.dimensions),
@@ -207,7 +190,7 @@ describe("Multi-cluster fanout writes vectors to every active target", () => {
 
     const mockLogger = createMockLogger();
     const processor = new SignalProcessor({
-      store,
+arcDb, accountDb, processingDb,
       contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com",
       classifier: makeClassifier(),
       embeddingGenerator,
@@ -225,7 +208,7 @@ describe("Multi-cluster fanout writes vectors to every active target", () => {
 
     await processor.processRecord(makeMessage("ses-fanout-test"), 1);
 
-    const saveSignalCalls = (store.saveSignal as ReturnType<typeof vi.fn>).mock.calls;
+    const saveSignalCalls = (arcDb.saveSignal as ReturnType<typeof vi.fn>).mock.calls;
     expect(saveSignalCalls.length).toBeGreaterThanOrEqual(1);
     const savedSignal = saveSignalCalls[0]![0] as Signal;
 
@@ -240,7 +223,7 @@ describe("Multi-cluster fanout writes vectors to every active target", () => {
   it.each(clusterConfigs)("$label — each Aurora cluster receives exactly one upsert", async ({ clusters }) => {
     mockState.clusters = clusters;
 
-    const store = makeStore();
+    const { arcDb, accountDb, processingDb } = makeStore();
     const embeddingResults: EmbeddingResult[] = clusters.map((cluster) => ({
       modelId: cluster.modelId,
       vector: Array.from({ length: cluster.dimensions }, (_, i) => (i + 1) / cluster.dimensions),
@@ -266,7 +249,7 @@ describe("Multi-cluster fanout writes vectors to every active target", () => {
 
     const mockLogger = createMockLogger();
     const processor = new SignalProcessor({
-      store,
+arcDb, accountDb, processingDb,
       contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com",
       classifier: makeClassifier(),
       embeddingGenerator,
@@ -300,7 +283,7 @@ describe("Multi-cluster fanout writes vectors to every active target", () => {
   it.each(clusterConfigs)("$label — embeddings map keys match cluster modelIds exactly", async ({ clusters }) => {
     mockState.clusters = clusters;
 
-    const store = makeStore();
+    const { arcDb, accountDb, processingDb } = makeStore();
     const embeddingResults: EmbeddingResult[] = clusters.map((cluster) => ({
       modelId: cluster.modelId,
       vector: new Array(cluster.dimensions).fill(0.1),
@@ -326,7 +309,7 @@ describe("Multi-cluster fanout writes vectors to every active target", () => {
 
     const mockLogger = createMockLogger();
     const processor = new SignalProcessor({
-      store,
+arcDb, accountDb, processingDb,
       contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com",
       classifier: makeClassifier(),
       embeddingGenerator,
@@ -344,7 +327,7 @@ describe("Multi-cluster fanout writes vectors to every active target", () => {
 
     await processor.processRecord(makeMessage("ses-fanout-test"), 1);
 
-    const saveSignalCalls = (store.saveSignal as ReturnType<typeof vi.fn>).mock.calls;
+    const saveSignalCalls = (arcDb.saveSignal as ReturnType<typeof vi.fn>).mock.calls;
     const savedSignal = saveSignalCalls[0]![0] as Signal;
 
     const embeddingsKeys = Object.keys(savedSignal.embeddings!).sort();

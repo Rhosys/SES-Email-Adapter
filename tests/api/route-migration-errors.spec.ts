@@ -1,6 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createApp } from "../../src/api/app.js";
-import type { ApiDatabase, AuthService, AccessService, VerificationMailer } from "../../src/api/app.js";
+import type { AuthService, AccessService, VerificationMailer } from "../../src/api/app.js";
+import type { ArcDatabase } from "../../src/database/arc-database.js";
+import type { AccountDatabase } from "../../src/database/account-database.js";
+import type { AuditDatabase } from "../../src/database/audit-database.js";
 import { ok, err } from "neverthrow";
 import type { DbError, NotFoundError } from "../../src/errors.js";
 import { dbError, notFoundError } from "../../src/errors.js";
@@ -71,18 +74,25 @@ function makeAlias(overrides: Partial<Alias> = {}): Alias {
   };
 }
 
-function makeStore(): ApiDatabase {
+function makeArcDb() {
   return {
     listArcs: vi.fn().mockResolvedValue(ok({ items: [] })),
     getArc: vi.fn().mockResolvedValue(ok(null)),
     updateArc: vi.fn().mockResolvedValue(ok(makeArc())),
     listSignals: vi.fn().mockResolvedValue(ok({ items: [] })),
     listPreArcSignals: vi.fn().mockResolvedValue(ok({ items: [] })),
-    blockSignal: vi.fn().mockResolvedValue(ok({})),
-    findArcByGroupingKey: vi.fn().mockResolvedValue(ok(null)),
+    fastFindArcByAlternativeLookupKey: vi.fn().mockResolvedValue(ok(null)),
     getSignalById: vi.fn().mockResolvedValue(ok(null)),
     updateSignal: vi.fn().mockResolvedValue(ok({})),
     deleteSignal: vi.fn().mockResolvedValue(ok(undefined)),
+    unblockSignal: vi.fn().mockResolvedValue(ok(undefined)),
+    createArc: vi.fn().mockResolvedValue(ok(undefined)),
+    searchArcs: vi.fn().mockResolvedValue(ok({ items: [] })),
+  };
+}
+
+function makeAccountDb() {
+  return {
     listViews: vi.fn().mockResolvedValue(ok([])),
     getView: vi.fn().mockResolvedValue(ok(null)),
     createView: vi.fn().mockResolvedValue(ok({})),
@@ -100,7 +110,6 @@ function makeStore(): ApiDatabase {
     getDomain: vi.fn().mockResolvedValue(ok(null)),
     createDomain: vi.fn().mockResolvedValue(ok({})),
     deleteDomain: vi.fn().mockResolvedValue(ok(undefined)),
-    searchArcs: vi.fn().mockResolvedValue(ok({ items: [] })),
     getAccount: vi.fn().mockResolvedValue(ok(null)),
     updateAccount: vi.fn().mockResolvedValue(ok(makeAccount())),
     listAliases: vi.fn().mockResolvedValue(ok([])),
@@ -108,8 +117,6 @@ function makeStore(): ApiDatabase {
     createAlias: vi.fn().mockResolvedValue(ok(makeAlias())),
     upsertAlias: vi.fn().mockResolvedValue(ok(makeAlias())),
     deleteAlias: vi.fn().mockResolvedValue(ok(undefined)),
-    unblockSignal: vi.fn().mockResolvedValue(ok(undefined)),
-    createArc: vi.fn().mockResolvedValue(ok(undefined)),
     listVerifiedForwardingAddresses: vi.fn().mockResolvedValue(ok([])),
     getVerifiedForwardingAddress: vi.fn().mockResolvedValue(ok(null)),
     saveVerifiedForwardingAddress: vi.fn().mockResolvedValue(ok(undefined)),
@@ -124,8 +131,13 @@ function makeStore(): ApiDatabase {
     updateTemplate: vi.fn().mockResolvedValue(ok(undefined)),
     deleteTemplate: vi.fn().mockResolvedValue(ok(undefined)),
     listTemplates: vi.fn().mockResolvedValue(ok([])),
+  };
+}
+
+function makeAuditDb() {
+  return {
     listAuditEvents: vi.fn().mockResolvedValue(ok({ items: [] })),
-  } as unknown as ApiDatabase;
+  };
 }
 
 async function req(
@@ -152,16 +164,20 @@ async function req(
 // ---------------------------------------------------------------------------
 
 describe("API route error mapping — unit tests", () => {
-  let store: ApiDatabase;
+  let arcDb: ReturnType<typeof makeArcDb>;
+  let accountDb: ReturnType<typeof makeAccountDb>;
+  let auditDb: ReturnType<typeof makeAuditDb>;
   let app: ReturnType<typeof createApp>;
 
   beforeEach(() => {
     vi.clearAllMocks();
-    store = makeStore();
+    arcDb = makeArcDb();
+    accountDb = makeAccountDb();
+    auditDb = makeAuditDb();
     const auth = makeAuth();
     const access = makeAccess();
     const verificationMailer: VerificationMailer = { sendForwardVerification: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) };
-    app = createApp({ store, auth, access, logger: createMockLogger(), verificationMailer });
+    app = createApp({ arcDb: arcDb as unknown as ArcDatabase, accountDb: accountDb as unknown as AccountDatabase, auditDb: auditDb as unknown as AuditDatabase, auth, access, logger: createMockLogger(), verificationMailer });
   });
 
   // -------------------------------------------------------------------------
@@ -170,7 +186,7 @@ describe("API route error mapping — unit tests", () => {
 
   describe("GET /accounts/:accountId/arcs/:id", () => {
     it("returns HTTP 500 when store returns err({ kind: 'db_error' })", async () => {
-      vi.mocked(store.getArc).mockResolvedValueOnce(err(dbError(new Error("connection timeout"))));
+      vi.mocked(arcDb.getArc).mockResolvedValueOnce(err(dbError(new Error("connection timeout"))));
       const res = await req(app, "GET", `${A}/arcs/arc-001`);
       expect(res.status).toBe(500);
       const body = await res.json() as { title: string };
@@ -178,7 +194,7 @@ describe("API route error mapping — unit tests", () => {
     });
 
     it("returns HTTP 404 when store returns ok(null)", async () => {
-      vi.mocked(store.getArc).mockResolvedValueOnce(ok(null));
+      vi.mocked(arcDb.getArc).mockResolvedValueOnce(ok(null));
       const res = await req(app, "GET", `${A}/arcs/arc-001`);
       expect(res.status).toBe(404);
       const body = await res.json() as { errorCode: string };
@@ -186,7 +202,7 @@ describe("API route error mapping — unit tests", () => {
     });
 
     it("returns HTTP 200 when store returns ok(arc)", async () => {
-      vi.mocked(store.getArc).mockResolvedValueOnce(ok(makeArc()));
+      vi.mocked(arcDb.getArc).mockResolvedValueOnce(ok(makeArc()));
       const res = await req(app, "GET", `${A}/arcs/arc-001`);
       expect(res.status).toBe(200);
       const body = await res.json() as Arc;
@@ -200,27 +216,27 @@ describe("API route error mapping — unit tests", () => {
 
   describe("PATCH /accounts/:accountId/arcs/:id", () => {
     it("returns HTTP 500 when getArc returns err({ kind: 'db_error' })", async () => {
-      vi.mocked(store.getArc).mockResolvedValueOnce(err(dbError(new Error("dynamo unavailable"))));
+      vi.mocked(arcDb.getArc).mockResolvedValueOnce(err(dbError(new Error("dynamo unavailable"))));
       const res = await req(app, "PATCH", `${A}/arcs/arc-001`, { body: { status: "archived" } });
       expect(res.status).toBe(500);
     });
 
     it("returns HTTP 404 when getArc returns ok(null)", async () => {
-      vi.mocked(store.getArc).mockResolvedValueOnce(ok(null));
+      vi.mocked(arcDb.getArc).mockResolvedValueOnce(ok(null));
       const res = await req(app, "PATCH", `${A}/arcs/arc-001`, { body: { status: "archived" } });
       expect(res.status).toBe(404);
     });
 
     it("returns HTTP 500 when updateArc returns err({ kind: 'db_error' })", async () => {
-      vi.mocked(store.getArc).mockResolvedValueOnce(ok(makeArc()));
-      vi.mocked(store.updateArc).mockResolvedValueOnce(err(dbError(new Error("write failed"))));
+      vi.mocked(arcDb.getArc).mockResolvedValueOnce(ok(makeArc()));
+      vi.mocked(arcDb.updateArc).mockResolvedValueOnce(err(dbError(new Error("write failed"))));
       const res = await req(app, "PATCH", `${A}/arcs/arc-001`, { body: { status: "archived" } });
       expect(res.status).toBe(500);
     });
 
     it("returns HTTP 200 when update succeeds", async () => {
-      vi.mocked(store.getArc).mockResolvedValueOnce(ok(makeArc()));
-      vi.mocked(store.updateArc).mockResolvedValueOnce(ok(makeArc({ status: "archived" })));
+      vi.mocked(arcDb.getArc).mockResolvedValueOnce(ok(makeArc()));
+      vi.mocked(arcDb.updateArc).mockResolvedValueOnce(ok(makeArc({ status: "archived" })));
       const res = await req(app, "PATCH", `${A}/arcs/arc-001`, { body: { status: "archived" } });
       expect(res.status).toBe(200);
       const body = await res.json() as Arc;
@@ -228,7 +244,7 @@ describe("API route error mapping — unit tests", () => {
     });
 
     it("zParse throws HTTPException for invalid request body", async () => {
-      vi.mocked(store.getArc).mockResolvedValueOnce(ok(makeArc()));
+      vi.mocked(arcDb.getArc).mockResolvedValueOnce(ok(makeArc()));
       // Send an invalid body — status must be one of "active" | "archived" | "deleted"
       const res = await req(app, "PATCH", `${A}/arcs/arc-001`, { body: { status: "invalid_status" } });
       expect(res.status).toBe(400);
@@ -243,7 +259,7 @@ describe("API route error mapping — unit tests", () => {
 
   describe("GET /accounts/:accountId", () => {
     it("returns HTTP 500 when store returns err({ kind: 'db_error' })", async () => {
-      vi.mocked(store.getAccount).mockResolvedValueOnce(err(dbError(new Error("rds timeout"))));
+      vi.mocked(accountDb.getAccount).mockResolvedValueOnce(err(dbError(new Error("rds timeout"))));
       const res = await req(app, "GET", `${A}`);
       expect(res.status).toBe(500);
       const body = await res.json() as { title: string };
@@ -251,7 +267,7 @@ describe("API route error mapping — unit tests", () => {
     });
 
     it("returns HTTP 404 when store returns ok(null)", async () => {
-      vi.mocked(store.getAccount).mockResolvedValueOnce(ok(null));
+      vi.mocked(accountDb.getAccount).mockResolvedValueOnce(ok(null));
       const res = await req(app, "GET", `${A}`);
       expect(res.status).toBe(404);
       const body = await res.json() as { errorCode: string };
@@ -259,7 +275,7 @@ describe("API route error mapping — unit tests", () => {
     });
 
     it("returns HTTP 200 when store returns ok(account)", async () => {
-      vi.mocked(store.getAccount).mockResolvedValueOnce(ok(makeAccount()));
+      vi.mocked(accountDb.getAccount).mockResolvedValueOnce(ok(makeAccount()));
       const res = await req(app, "GET", `${A}`);
       expect(res.status).toBe(200);
       const body = await res.json() as Account;
@@ -273,7 +289,7 @@ describe("API route error mapping — unit tests", () => {
 
   describe("PATCH /accounts/:accountId/aliases/:address — rename", () => {
     it("returns HTTP 404 when renameAlias returns err({ kind: 'not_found' })", async () => {
-      vi.mocked(store.renameAlias).mockResolvedValueOnce(
+      vi.mocked(accountDb.renameAlias).mockResolvedValueOnce(
         err(notFoundError("alias", "old@example.com")),
       );
       const res = await req(app, "PATCH", `${A}/aliases/old%40example.com`, {
@@ -285,7 +301,7 @@ describe("API route error mapping — unit tests", () => {
     });
 
     it("returns HTTP 500 when renameAlias returns err({ kind: 'db_error' })", async () => {
-      vi.mocked(store.renameAlias).mockResolvedValueOnce(
+      vi.mocked(accountDb.renameAlias).mockResolvedValueOnce(
         err(dbError(new Error("transact write failed"))),
       );
       const res = await req(app, "PATCH", `${A}/aliases/old%40example.com`, {
@@ -297,7 +313,7 @@ describe("API route error mapping — unit tests", () => {
     });
 
     it("returns HTTP 200 when renameAlias succeeds", async () => {
-      vi.mocked(store.renameAlias).mockResolvedValueOnce(
+      vi.mocked(accountDb.renameAlias).mockResolvedValueOnce(
         ok(makeAlias({ address: "new@example.com" })),
       );
       const res = await req(app, "PATCH", `${A}/aliases/old%40example.com`, {
@@ -324,7 +340,7 @@ describe("API route error mapping — unit tests", () => {
 
   describe("zParse — HTTPException contract", () => {
     it("throws HTTPException with 400 status for completely invalid JSON", async () => {
-      vi.mocked(store.getArc).mockResolvedValueOnce(ok(makeArc()));
+      vi.mocked(arcDb.getArc).mockResolvedValueOnce(ok(makeArc()));
       // Send a request with non-JSON body to trigger zParse failure
       const res = await app.fetch(
         new Request(`http://localhost/api${A}/arcs/arc-001`, {

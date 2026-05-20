@@ -1,8 +1,9 @@
 import { describe, it, expect, vi } from "vitest";
 import { ok, err } from "neverthrow";
 import { SignalProcessor, SYSTEM_RULES } from "../../src/processor/processor.js";
+import type { ArcMatcher, InboundSignalMessage } from "../../src/processor/processor.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
-import type { ProcessorDatabase, ArcMatcher, InboundSignalMessage } from "../../src/processor/processor.js";
+import { makeArcDbMock, makeAccountDbMock, makeProcessingDbMock } from "./_helpers.js";
 import type { ContentSanitizerClient } from "../../src/processor/content-sanitizer-client.js";
 import type { SignalClassifier } from "../../src/classifier/classifier.js";
 import type { EmbeddingGenerator } from "../../src/embedding/embedding-generator.js";
@@ -34,33 +35,8 @@ vi.mock("../../src/processor/presign.js", () => ({
 }));
 
 describe("ProcessError on database failure", () => {
-  function makeStore(): ProcessorDatabase {
-    return {
-      getSignalByMessageId: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-      saveSignal: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      updateSignalRetention: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      getArc: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-      findArcByGroupingKey: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-      saveArc: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      listEnabledRules: vi.fn().mockReturnValue(Promise.resolve(ok(SYSTEM_RULES))),
-      getProcessorAccountContext: vi.fn().mockReturnValue(Promise.resolve(ok({
-        retentionDays: 0,
-        filtering: null,
-        emailConfig: { id: "cfg", accountId: "acct", address: "u@x.com", unknownSenderPolicy: "quarantine_visible", createdAt: "2024-01-01T00:00:00Z", updatedAt: "2024-01-01T00:00:00Z" },
-        registeredDomains: [],
-        userEmails: [],
-        billingPlan: "Paid" as const,
-      }))),
-      saveAlias: vi.fn().mockImplementation((a) => Promise.resolve(ok(a))),
-      getSender: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-      saveSender: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      getTemplate: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-      updateGlobalReputation: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      getDomainByName: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-      incrementStats: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      annotateRuleError: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      annotateTemplateError: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    };
+  function makeStore() {
+    return { arcDb: makeArcDbMock(), accountDb: makeAccountDbMock(), processingDb: makeProcessingDbMock() };
   }
 
   function makeMessage(): InboundSignalMessage {
@@ -75,7 +51,7 @@ describe("ProcessError on database failure", () => {
     };
   }
 
-  function makeProcessor(store: ProcessorDatabase): SignalProcessor {
+  function makeProcessor(store: ReturnType<typeof makeStore>): SignalProcessor {
     const contentSanitizer: ContentSanitizerClient = {
       invoke: vi.fn().mockReturnValue(Promise.resolve(ok({
         success: true as const,
@@ -114,7 +90,7 @@ describe("ProcessError on database failure", () => {
     };
     const mockLogger = createMockLogger();
     return new SignalProcessor({
-      store, contentSanitizer, userCodeExecutor: { invoke: vi.fn(), validateAst: vi.fn(), validateAstBatch: vi.fn() }, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com", classifier, embeddingGenerator, auroraWriter, arcMatcher,
+      ...store, contentSanitizer, userCodeExecutor: { invoke: vi.fn(), validateAst: vi.fn(), validateAstBatch: vi.fn() }, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com", classifier, embeddingGenerator, auroraWriter, arcMatcher,
       ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger), logger: mockLogger,
       notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
@@ -127,7 +103,7 @@ describe("ProcessError on database failure", () => {
 
   it("database failure on dedup check returns err with cause", async () => {
     const store = makeStore();
-    (store.getSignalByMessageId as ReturnType<typeof vi.fn>).mockReturnValue(
+    (store.arcDb.getSignalByMessageId as ReturnType<typeof vi.fn>).mockReturnValue(
       Promise.resolve(err(dbError(new Error("connection timeout")))),
     );
 

@@ -1,8 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ok, err } from "../../src/errors.js";
 import { SignalProcessor, SYSTEM_RULES } from "../../src/processor/processor.js";
+import type { ArcMatcher, InboundSignalMessage, SqsDispatcher } from "../../src/processor/processor.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
-import type { ProcessorDatabase, ArcMatcher, SqsDispatcher, InboundSignalMessage } from "../../src/processor/processor.js";
+import { makeArcDbMock, makeAccountDbMock, makeProcessingDbMock } from "./_helpers.js";
+import type { ArcDatabase } from "../../src/database/arc-database.js";
 import type { ContentSanitizerClient } from "../../src/processor/content-sanitizer-client.js";
 import type { SignalClassifier } from "../../src/classifier/classifier.js";
 import type { EmbeddingGenerator } from "../../src/embedding/embedding-generator.js";
@@ -222,26 +224,15 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
     };
   }
 
-  function makeStore(signal: Signal, arc: Arc): ProcessorDatabase {
-    return {
+  function makeStore(signal: Signal, arc: Arc) {
+    const arcDb = {
+      ...makeArcDbMock(),
       getSignalByMessageId: vi.fn().mockReturnValue(Promise.resolve(ok(signal))),
-      saveSignal: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      updateSignalRetention: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
       getArc: vi.fn().mockReturnValue(Promise.resolve(ok(arc))),
-      findArcByGroupingKey: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-      saveArc: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      listEnabledRules: vi.fn().mockReturnValue(Promise.resolve(ok(SYSTEM_RULES))),
-      getProcessorAccountContext: vi.fn().mockReturnValue(Promise.resolve(ok(DEFAULT_CTX))),
-      saveAlias: vi.fn().mockImplementation((a: Alias) => Promise.resolve(ok(a))),
-      getSender: vi.fn().mockReturnValue(Promise.resolve(ok(DEFAULT_SENDER_ENTRY))),
-      saveSender: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      getTemplate: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-      updateGlobalReputation: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      getDomainByName: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-      incrementStats: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      annotateRuleError: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      annotateTemplateError: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    };
+    } as unknown as ArcDatabase;
+    const accountDb = makeAccountDbMock();
+    const processingDb = makeProcessingDbMock();
+    return { arcDb, accountDb, processingDb };
   }
 
   function makeAuroraWriter(): MultiClusterAuroraWriter {
@@ -261,7 +252,7 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
     const contentSanitizer: ContentSanitizerClient = { invoke: vi.fn() };
 
     const processor = new SignalProcessor({
-      store: makeStore(signal, arc),
+      ...makeStore(signal, arc),
       contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com",
       classifier: { classify: vi.fn() },
       embeddingGenerator: { generateForSecondaryClusters: vi.fn(), generateForModel: vi.fn() },
@@ -287,7 +278,7 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
     const classifier: Pick<SignalClassifier, "classify"> = { classify: vi.fn() };
 
     const processor = new SignalProcessor({
-      store: makeStore(signal, arc),
+      ...makeStore(signal, arc),
       contentSanitizer: { invoke: vi.fn() }, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com",
       classifier,
       embeddingGenerator: { generateForSecondaryClusters: vi.fn(), generateForModel: vi.fn() },
@@ -314,7 +305,7 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
     const evaluateSpy = vi.spyOn(ruleEvaluator, "evaluate");
 
     const processor = new SignalProcessor({
-      store: makeStore(signal, arc),
+      ...makeStore(signal, arc),
       contentSanitizer: { invoke: vi.fn() }, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com",
       classifier: { classify: vi.fn() },
       embeddingGenerator: { generateForSecondaryClusters: vi.fn(), generateForModel: vi.fn() },
@@ -340,7 +331,7 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
     const auroraWriter = makeAuroraWriter();
 
     const processor = new SignalProcessor({
-      store: makeStore(signal, arc),
+      ...makeStore(signal, arc),
       contentSanitizer: { invoke: vi.fn() }, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com",
       classifier: { classify: vi.fn() },
       embeddingGenerator: { generateForSecondaryClusters: vi.fn(), generateForModel: vi.fn() },
@@ -373,7 +364,7 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
     const auroraWriter = makeAuroraWriter();
 
     const processor = new SignalProcessor({
-      store: makeStore(signal, arc),
+      ...makeStore(signal, arc),
       contentSanitizer: { invoke: vi.fn() }, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com",
       classifier: { classify: vi.fn() },
       embeddingGenerator: { generateForSecondaryClusters: vi.fn(), generateForModel: vi.fn() },
@@ -400,7 +391,7 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
     const sesMessageId = signal.sesMessageId!;
 
     const processor = new SignalProcessor({
-      store: makeStore(signal, arc),
+      ...makeStore(signal, arc),
       contentSanitizer: { invoke: vi.fn() }, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com",
       classifier: { classify: vi.fn() },
       embeddingGenerator: { generateForSecondaryClusters: vi.fn(), generateForModel: vi.fn() },
@@ -459,30 +450,17 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
       matchedRules: [],
     } as Signal;
 
-    const store: ProcessorDatabase = {
+    const arcDb = {
+      ...makeArcDbMock(),
       getSignalByMessageId: vi.fn().mockReturnValue(Promise.resolve(ok(signal))),
-      saveSignal: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      updateSignalRetention: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      getArc: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-      findArcByGroupingKey: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-      saveArc: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      listEnabledRules: vi.fn().mockReturnValue(Promise.resolve(ok(SYSTEM_RULES))),
-      getProcessorAccountContext: vi.fn().mockReturnValue(Promise.resolve(ok(DEFAULT_CTX))),
-      saveAlias: vi.fn().mockImplementation((a: Alias) => Promise.resolve(ok(a))),
-      getSender: vi.fn().mockReturnValue(Promise.resolve(ok(DEFAULT_SENDER_ENTRY))),
-      saveSender: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      getTemplate: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-      updateGlobalReputation: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      getDomainByName: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-      incrementStats: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      annotateRuleError: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      annotateTemplateError: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    };
+    } as unknown as ArcDatabase;
+    const accountDb = makeAccountDbMock();
+    const processingDb = makeProcessingDbMock();
 
     const auroraWriter = makeAuroraWriter();
 
     const processor = new SignalProcessor({
-      store,
+      arcDb, accountDb, processingDb,
       contentSanitizer: { invoke: vi.fn() }, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com",
       classifier: { classify: vi.fn() },
       embeddingGenerator: { generateForSecondaryClusters: vi.fn(), generateForModel: vi.fn() },
@@ -504,7 +482,7 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
     // No Aurora upserts should execute when arcId is falsy
     expect(auroraWriter.upsertEmbedding).not.toHaveBeenCalled();
     // No DDB writes should execute
-    expect(store.saveSignal).not.toHaveBeenCalled();
+    expect(arcDb.saveSignal).not.toHaveBeenCalled();
   });
 });
 
@@ -604,27 +582,15 @@ describe("Feature: signal-processor-retry-resilience, Property 3: DDB read failu
     };
   }
 
-  function makeStore(overrides: Partial<ProcessorDatabase> = {}): ProcessorDatabase {
-    return {
-      getSignalByMessageId: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-      saveSignal: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      updateSignalRetention: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      getArc: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-      findArcByGroupingKey: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-      saveArc: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      listEnabledRules: vi.fn().mockReturnValue(Promise.resolve(ok(SYSTEM_RULES))),
-      getProcessorAccountContext: vi.fn().mockReturnValue(Promise.resolve(ok(DEFAULT_CTX))),
-      saveAlias: vi.fn().mockImplementation((a: Alias) => Promise.resolve(ok(a))),
-      getSender: vi.fn().mockReturnValue(Promise.resolve(ok(DEFAULT_SENDER_ENTRY))),
-      saveSender: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      getTemplate: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-      updateGlobalReputation: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      getDomainByName: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-      incrementStats: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      annotateRuleError: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      annotateTemplateError: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      ...overrides,
-    };
+  function makeStore(overrides: { getSignalByMessageId?: unknown; getArc?: unknown } = {}) {
+    const arcDb = {
+      ...makeArcDbMock(),
+      ...(overrides.getSignalByMessageId ? { getSignalByMessageId: overrides.getSignalByMessageId } : {}),
+      ...(overrides.getArc ? { getArc: overrides.getArc } : {}),
+    } as unknown as ArcDatabase;
+    const accountDb = makeAccountDbMock();
+    const processingDb = makeProcessingDbMock();
+    return { arcDb, accountDb, processingDb };
   }
 
   // -------------------------------------------------------------------------
@@ -665,13 +631,13 @@ describe("Feature: signal-processor-retry-resilience, Property 3: DDB read failu
   );
 
   it.each(SIGNAL_READ_FAILURE_CASES)("signal read failure returns batchItemFailure without Aurora upserts or DDB writes ($label)", async ({ error, receiveCount, sesMessageId }) => {
-    const store = makeStore({
+    const { arcDb, accountDb, processingDb } = makeStore({
       getSignalByMessageId: vi.fn().mockReturnValue(Promise.resolve(err(error))),
     });
     const auroraWriter = makeAuroraWriter();
 
     const processor = new SignalProcessor({
-      store,
+      arcDb, accountDb, processingDb,
       contentSanitizer: { invoke: vi.fn() }, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com",
       classifier: { classify: vi.fn() },
       embeddingGenerator: { generateForSecondaryClusters: vi.fn(), generateForModel: vi.fn() },
@@ -691,20 +657,20 @@ describe("Feature: signal-processor-retry-resilience, Property 3: DDB read failu
 
     expect(result.isErr()).toBe(true);
     expect(auroraWriter.upsertEmbedding).not.toHaveBeenCalled();
-    expect(store.saveSignal).not.toHaveBeenCalled();
-    expect(store.saveArc).not.toHaveBeenCalled();
+    expect(arcDb.saveSignal).not.toHaveBeenCalled();
+    expect(arcDb.saveArc).not.toHaveBeenCalled();
   });
 
   it.each(ARC_READ_FAILURE_CASES)("arc read failure returns batchItemFailure without Aurora upserts or DDB writes ($label)", async ({ error, receiveCount, sesMessageId }) => {
     const existingSignal = makeExistingSignal(sesMessageId);
-    const store = makeStore({
+    const { arcDb, accountDb, processingDb } = makeStore({
       getSignalByMessageId: vi.fn().mockReturnValue(Promise.resolve(ok(existingSignal))),
       getArc: vi.fn().mockReturnValue(Promise.resolve(err(error))),
     });
     const auroraWriter = makeAuroraWriter();
 
     const processor = new SignalProcessor({
-      store,
+      arcDb, accountDb, processingDb,
       contentSanitizer: { invoke: vi.fn() }, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com",
       classifier: { classify: vi.fn() },
       embeddingGenerator: { generateForSecondaryClusters: vi.fn(), generateForModel: vi.fn() },
@@ -724,8 +690,8 @@ describe("Feature: signal-processor-retry-resilience, Property 3: DDB read failu
 
     expect(result.isErr()).toBe(true);
     expect(auroraWriter.upsertEmbedding).not.toHaveBeenCalled();
-    expect(store.saveSignal).not.toHaveBeenCalled();
-    expect(store.saveArc).not.toHaveBeenCalled();
+    expect(arcDb.saveSignal).not.toHaveBeenCalled();
+    expect(arcDb.saveArc).not.toHaveBeenCalled();
   });
 });
 
@@ -782,27 +748,8 @@ describe("Feature: signal-processor-retry-resilience, Property 2: Missing signal
     classificationModelId: "us.anthropic.claude-opus-4-5-20251101-v1:0",
   };
 
-  function makeStore(): ProcessorDatabase {
-    return {
-      // Signal does NOT exist — triggers fresh processing on retry
-      getSignalByMessageId: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-      saveSignal: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      updateSignalRetention: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      getArc: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-      findArcByGroupingKey: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-      saveArc: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      listEnabledRules: vi.fn().mockReturnValue(Promise.resolve(ok(SYSTEM_RULES))),
-      getProcessorAccountContext: vi.fn().mockReturnValue(Promise.resolve(ok(DEFAULT_CTX))),
-      saveAlias: vi.fn().mockImplementation((a: Alias) => Promise.resolve(ok(a))),
-      getSender: vi.fn().mockReturnValue(Promise.resolve(ok(DEFAULT_SENDER_ENTRY))),
-      saveSender: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      getTemplate: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-      updateGlobalReputation: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      getDomainByName: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-      incrementStats: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      annotateRuleError: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      annotateTemplateError: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    };
+  function makeStore() {
+    return { arcDb: makeArcDbMock(), accountDb: makeAccountDbMock(), processingDb: makeProcessingDbMock() };
   }
 
   function makeContentSanitizer(): ContentSanitizerClient {
@@ -878,7 +825,7 @@ describe("Feature: signal-processor-retry-resilience, Property 2: Missing signal
     const contentSanitizer = makeContentSanitizer();
 
     const processor = new SignalProcessor({
-      store: makeStore(),
+      ...makeStore(),
       contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com",
       classifier: makeClassifier(),
       embeddingGenerator: makeEmbeddingGenerator(),
@@ -902,7 +849,7 @@ describe("Feature: signal-processor-retry-resilience, Property 2: Missing signal
     const classifier = makeClassifier();
 
     const processor = new SignalProcessor({
-      store: makeStore(),
+      ...makeStore(),
       contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com",
       classifier,
       embeddingGenerator: makeEmbeddingGenerator(),
@@ -923,10 +870,10 @@ describe("Feature: signal-processor-retry-resilience, Property 2: Missing signal
   });
 
   it.each(MISSING_SIGNAL_CASES)("saveArc and saveSignal ARE called when signal does not exist on retry ($label)", async ({ receiveCount, sesMessageId }) => {
-    const store = makeStore();
+    const { arcDb, accountDb, processingDb } = makeStore();
 
     const processor = new SignalProcessor({
-      store,
+      arcDb, accountDb, processingDb,
       contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com",
       classifier: makeClassifier(),
       embeddingGenerator: makeEmbeddingGenerator(),
@@ -943,13 +890,13 @@ describe("Feature: signal-processor-retry-resilience, Property 2: Missing signal
     });
 
     await processor.processRecord(makeMessage(sesMessageId), receiveCount);
-    expect(store.saveArc).toHaveBeenCalled();
-    expect(store.saveSignal).toHaveBeenCalled();
+    expect(arcDb.saveArc).toHaveBeenCalled();
+    expect(arcDb.saveSignal).toHaveBeenCalled();
   });
 
   it.each(MISSING_SIGNAL_CASES)("result is NOT a batchItemFailure when signal does not exist on retry ($label)", async ({ receiveCount, sesMessageId }) => {
     const processor = new SignalProcessor({
-      store: makeStore(),
+      ...makeStore(),
       contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com",
       classifier: makeClassifier(),
       embeddingGenerator: makeEmbeddingGenerator(),
@@ -1127,32 +1074,20 @@ describe("Feature: signal-processor-retry-resilience, Property 8: Outcome re-der
     const signal = makeSignalWithRules(matchedRules);
     const arc = makeArc();
 
-    const store: ProcessorDatabase = {
+    const arcDb = {
+      ...makeArcDbMock(),
       getSignalByMessageId: vi.fn().mockReturnValue(Promise.resolve(ok(signal))),
-      saveSignal: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      updateSignalRetention: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
       getArc: vi.fn().mockReturnValue(Promise.resolve(ok(arc))),
-      findArcByGroupingKey: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-      saveArc: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      listEnabledRules: vi.fn().mockReturnValue(Promise.resolve(ok(SYSTEM_RULES))),
-      getProcessorAccountContext: vi.fn().mockReturnValue(Promise.resolve(ok(DEFAULT_CTX))),
-      saveAlias: vi.fn().mockImplementation((a: Alias) => Promise.resolve(ok(a))),
-      getSender: vi.fn().mockReturnValue(Promise.resolve(ok(DEFAULT_SENDER_ENTRY))),
-      saveSender: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      getTemplate: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-      updateGlobalReputation: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      getDomainByName: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-      incrementStats: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      annotateRuleError: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      annotateTemplateError: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    };
+    } as unknown as ArcDatabase;
+    const accountDb = makeAccountDbMock();
+    const processingDb = makeProcessingDbMock();
 
     const sqsDispatcher: SqsDispatcher = {
       sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     };
 
     const processor = new SignalProcessor({
-      store,
+      arcDb, accountDb, processingDb,
       contentSanitizer: { invoke: vi.fn() }, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com",
       classifier: { classify: vi.fn() },
       embeddingGenerator: { generateForSecondaryClusters: vi.fn(), generateForModel: vi.fn() },
@@ -1169,39 +1104,27 @@ describe("Feature: signal-processor-retry-resilience, Property 8: Outcome re-der
     });
 
     await processor.processRecord(makeMessage(), receiveCount);
-    expect(store.listEnabledRules).not.toHaveBeenCalled();
+    expect(accountDb.listEnabledRules).not.toHaveBeenCalled();
   });
 
   it.each(PROP8_CASES)("dispatched side-effect payload contains the signal's persisted matchedRules ($label)", async ({ matchedRules, receiveCount }) => {
     const signal = makeSignalWithRules(matchedRules);
     const arc = makeArc();
 
-    const store: ProcessorDatabase = {
+    const arcDb = {
+      ...makeArcDbMock(),
       getSignalByMessageId: vi.fn().mockReturnValue(Promise.resolve(ok(signal))),
-      saveSignal: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      updateSignalRetention: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
       getArc: vi.fn().mockReturnValue(Promise.resolve(ok(arc))),
-      findArcByGroupingKey: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-      saveArc: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      listEnabledRules: vi.fn().mockReturnValue(Promise.resolve(ok(SYSTEM_RULES))),
-      getProcessorAccountContext: vi.fn().mockReturnValue(Promise.resolve(ok(DEFAULT_CTX))),
-      saveAlias: vi.fn().mockImplementation((a: Alias) => Promise.resolve(ok(a))),
-      getSender: vi.fn().mockReturnValue(Promise.resolve(ok(DEFAULT_SENDER_ENTRY))),
-      saveSender: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      getTemplate: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-      updateGlobalReputation: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      getDomainByName: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-      incrementStats: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      annotateRuleError: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-      annotateTemplateError: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    };
+    } as unknown as ArcDatabase;
+    const accountDb = makeAccountDbMock();
+    const processingDb = makeProcessingDbMock();
 
     const sqsDispatcher: SqsDispatcher = {
       sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     };
 
     const processor = new SignalProcessor({
-      store,
+      arcDb, accountDb, processingDb,
       contentSanitizer: { invoke: vi.fn() }, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com",
       classifier: { classify: vi.fn() },
       embeddingGenerator: { generateForSecondaryClusters: vi.fn(), generateForModel: vi.fn() },
