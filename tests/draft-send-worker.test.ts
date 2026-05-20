@@ -108,6 +108,9 @@ describe("DraftSendWorker", () => {
       subject: "Hello",
       body: "Hi there",
       inReplyTo: "arc-001",
+      accountId: "acct-001",
+      signalId: "USR#signal-001",
+      arcId: "arc-001",
     });
     expect(store.updateSignalSendStatus).toHaveBeenCalledWith("acct-001", "USR#signal-001", {
       status: "sent",

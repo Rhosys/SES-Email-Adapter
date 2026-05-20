@@ -66,6 +66,9 @@ export class DraftSendWorker {
         subject,
         body,
         inReplyTo: signal.arcId ?? "",
+        accountId,
+        signalId: signal.id,
+        ...(signal.arcId ? { arcId: signal.arcId } : {}),
       });
 
       // Transition to sent
