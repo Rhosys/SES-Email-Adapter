@@ -10,6 +10,7 @@ import type { AuditEvent } from "../database/audit-database.js";
 import type { Result } from "neverthrow";
 import type { DbError, NotFoundError, AuthressServiceError, AuthError } from "../errors.js";
 import type { Arc, Signal, View, Label, Rule, Domain, DnsRecord, Account, Page, PageParams, ArcStatus, Workflow, WorkflowData, Alias, AliasSender, SenderPolicy, VerifiedForwardingAddress, Pagination, EmailTemplate } from "../types/index.js";
+import type { UpdateArcFields } from "../database/arc-database.js";
 import type { Logger } from "../logger.js";
 import { deriveGroupingKey } from "../processor/processor.js";
 import { zParse } from "./validate.js";
@@ -99,6 +100,7 @@ export interface ApiDatabase {
   listArcs(accountId: string, params: ListArcsParams): PromiseLike<Result<Page<Arc>, DbError>>;
   getArc(accountId: string, id: string): PromiseLike<Result<Arc | null, DbError>>;
   updateArc(accountId: string, id: string, update: UpdateArcRequest): PromiseLike<Result<Arc, DbError>>;
+  updateArcDirect(accountId: string, id: string, status: ArcStatus, lastSignalAt: string, update: UpdateArcFields): PromiseLike<Result<Arc, DbError>>;
 
   // Signals
   listSignals(accountId: string, arcId: string, params: PageParams): PromiseLike<Result<Page<Signal>, DbError>>;
@@ -633,12 +635,9 @@ export function createApp({ store, auth, access, logger, verificationMailer, job
     const now = new Date().toISOString();
     let arc: Arc;
     if (matchedArc) {
-      arc = matchedArc;
-      if (signal.receivedAt > arc.lastSignalAt) {
-        arc = { ...arc, lastSignalAt: signal.receivedAt, updatedAt: now };
-        const saveResult = await store.saveArc(arc);
-        if (saveResult.isErr()) return err(c, 500, "Internal Server Error");
-      }
+      const updateResult = await store.updateArcDirect(accountId, matchedArc.id, "active", signal.receivedAt, {});
+      if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
+      arc = updateResult.value;
     } else {
       arc = {
         id: generateId("arc-"),

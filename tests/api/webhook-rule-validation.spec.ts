@@ -67,6 +67,7 @@ function makeStore(): ApiDatabase {
     listArcs: vi.fn().mockResolvedValue(ok({ items: [] })),
     getArc: vi.fn().mockResolvedValue(ok(null)),
     updateArc: vi.fn().mockResolvedValue(ok(null)),
+    updateArcDirect: vi.fn().mockResolvedValue(ok(null)),
     listSignals: vi.fn().mockResolvedValue(ok({ items: [] })),
     listPreArcSignals: vi.fn().mockResolvedValue(ok({ items: [] })),
     updateSignalStatus: vi.fn().mockResolvedValue(ok(null)),

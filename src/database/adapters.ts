@@ -1,7 +1,7 @@
 import type { ProcessorDatabase } from "../processor/processor.js";
 import type { ApiDatabase, ListArcsParams, CreateViewRequest, UpdateViewRequest, CreateLabelRequest, UpdateLabelRequest, CreateRuleRequest, UpdateRuleRequest } from "../api/app.js";
 import type { UpdateArcRequest } from "../api/requests.js";
-import type { Arc, Signal, View, Label, Rule, Domain, Account, Page, PageParams, Alias, AliasSender, SenderPolicy, VerifiedForwardingAddress, EmailTemplate } from "../types/index.js";
+import type { Arc, Signal, View, Label, Rule, Domain, Account, Page, PageParams, Alias, AliasSender, SenderPolicy, VerifiedForwardingAddress, EmailTemplate, ArcStatus } from "../types/index.js";
 import type { StatsCategory } from "../types/index.js";
 import type { AccountDatabase } from "./account-database.js";
 import type { ArcDatabase, UpdateArcFields } from "./arc-database.js";
@@ -60,6 +60,9 @@ export class ApiDatabaseAdapter implements ApiDatabase {
     if (update.urgency !== undefined) fields.urgency = update.urgency;
     if (update.labels !== undefined) fields.labels = update.labels;
     return this.arc.updateArc(accountId, id, update.status ?? "active", update.lastSignalAt ?? new Date().toISOString(), fields);
+  }
+  updateArcDirect(accountId: string, id: string, status: ArcStatus, lastSignalAt: string, update: UpdateArcFields) {
+    return this.arc.updateArc(accountId, id, status, lastSignalAt, update);
   }
   createArc(arc: Arc) { return this.arc.createArc(arc); }
 
