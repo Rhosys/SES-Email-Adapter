@@ -94,8 +94,8 @@ jobs:
           sed -i '/^\s*point_in_time_recovery {/d' /tmp/itf/storage.tf
           sed -i '/deletion_protection_enabled/d' /tmp/itf/storage.tf
           sed -i '/stream_enabled\|stream_view_type/d' /tmp/itf/storage.tf
-          tofu -chdir=/tmp/itf init -backend=false -reconfigure -input=false
-          tofu -chdir=/tmp/itf apply -backend=false -auto-approve -input=false \
+          tofu -chdir=/tmp/itf init -reconfigure -input=false
+          tofu -chdir=/tmp/itf apply -auto-approve -input=false \
             -var="aws_account_id=000000000000" \
             -target=aws_dynamodb_table.accounts \
             -target=aws_dynamodb_table.signals \
