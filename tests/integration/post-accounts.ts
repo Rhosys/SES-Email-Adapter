@@ -32,6 +32,18 @@ function assert(condition: boolean, message: string): void {
   }
 }
 
+async function assertStatus(res: Response, expected: number, label: string): Promise<void> {
+  const ok = res.status === expected;
+  assert(ok, `${label} (got ${res.status})`);
+  if (!ok) {
+    const body = await res.text().catch(() => '(unreadable)');
+    console.error(`    response body: ${body}`);
+    const errors = h.logger.calls.filter(c => c.method === 'error' || c.method === 'critical');
+    for (const e of errors) console.error(`    [${e.method}] ${e.message}`, e.context ?? '');
+    h.logger.calls.length = 0;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -40,7 +52,7 @@ function assert(condition: boolean, message: string): void {
 {
   console.log('\nTest: POST /api/accounts — no Authorization header');
   const res = await h.app.request('/api/accounts', { method: 'POST' });
-  assert(res.status === 401, `returns 401 (got ${res.status})`);
+  await assertStatus(res, 401, 'returns 401');
 }
 
 // ── Invalid token returns 401 ─────────────────────────────────────────────
@@ -50,7 +62,7 @@ function assert(condition: boolean, message: string): void {
     method: 'POST',
     headers: { Authorization: 'Bearer not-a-valid-jwt' },
   });
-  assert(res.status === 401, `returns 401 (got ${res.status})`);
+  await assertStatus(res, 401, 'returns 401');
 }
 
 // ── Valid token creates an account ────────────────────────────────────────
@@ -61,7 +73,7 @@ function assert(condition: boolean, message: string): void {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
   });
-  assert(res.status === 201, `returns 201 (got ${res.status})`);
+  await assertStatus(res, 201, 'returns 201');
 
   if (res.status === 201) {
     const body = await res.json() as Record<string, unknown>;
@@ -84,7 +96,7 @@ function assert(condition: boolean, message: string): void {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
   });
-  assert(res.status === 409, `returns 409 (got ${res.status})`);
+  await assertStatus(res, 409, 'returns 409');
 
   // Restore
   h.access.listAccountsForUser = original;
