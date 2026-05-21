@@ -28,7 +28,6 @@ function makeSignal(overrides: Partial<Signal> = {}): Signal {
     workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
     spamScore: 0.01,
     summary: "A test email.",
-    classificationModelId: "model-v1",
     s3Key: "emails/test-msg-001.eml",
     status: "active",
     createdAt: "2024-01-15T10:00:00Z",
@@ -280,7 +279,7 @@ describe("stripSensitive — Property 2: context preparation produces exactly th
         recipientAddress: signal.recipientAddress,
         workflowData: signal.workflowData,
       }),
-      absentKeys: ["s3Key", "embeddings", "headers", "accountId", "source", "receivedAt", "to", "cc", "textBody", "attachments", "status", "createdAt", "classificationModelId"],
+      absentKeys: ["s3Key", "embeddings", "headers", "accountId", "source", "receivedAt", "to", "cc", "textBody", "attachments", "status", "createdAt"],
     },
     {
       label: "Signal with s3Key/embeddings/headers → none appear in output",

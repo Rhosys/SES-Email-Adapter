@@ -26,7 +26,6 @@ const stubSignal: Signal = {
   workflowData: { workflow: "auth", authType: "otp", code: "123456", service: "Example" },
   spamScore: 0,
   summary: "Test",
-  classificationModelId: "model-1",
   s3Key: "signals/test.eml",
   status: "active",
   createdAt: "2024-01-01T00:00:00Z",

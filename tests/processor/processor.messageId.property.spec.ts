@@ -73,7 +73,7 @@ describe("ProcessError on database failure", () => {
       classify: vi.fn().mockResolvedValue({
         workflow: "conversation",
         workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
-        spamScore: 0.05, summary: "Test.", labels: [], classificationModelId: "model-1",
+        spamScore: 0.05, summary: "Test.", labels: [],
       }),
     };
     const embeddingGenerator: EmbeddingGenerator = {

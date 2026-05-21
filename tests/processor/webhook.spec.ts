@@ -25,7 +25,6 @@ function makeSignal(overrides: Partial<Signal> = {}): Signal {
     workflowData: { workflow: "crm", crmType: "client_message", urgency: "high", requiresReply: true },
     spamScore: 0.1,
     summary: "A test signal summary",
-    classificationModelId: "model-v3",
     s3Key: "emails/2024/06/test.eml",
     status: "active",
     createdAt: "2024-06-15T10:30:00.000Z",
@@ -86,7 +85,7 @@ describe("buildWebhookPayload", () => {
 
   const INTERNAL_FIELDS = [
     "signalLookupId", "s3Key", "embeddings", "ttl", "sesMessageId",
-    "sendInitiatedAt", "sendFailureReason", "classificationModelId",
+    "sendInitiatedAt", "sendFailureReason",
     "retentionDuration", "bouncedRecipients", "relatedSignalId",
     "matchedRules", "textBody", "htmlBody",
   ] as const;

@@ -242,9 +242,12 @@ export type SignalStatus = (typeof SIGNAL_STATUSES)[number];
 export const STATS_CATEGORIES = ["allowed", "blocked", "quarantined", "violationReport"] as const;
 export type StatsCategory = (typeof STATS_CATEGORIES)[number];
 
-// "email" = inbound SES email; "system" = processor-created (e.g. extracted calendar event); "user" = user-created; "deliverability" = bounce/delivery notification
-export const SIGNAL_SOURCES = ["email", "system", "user", "deliverability"] as const;
+// "email" = inbound SES email; "user" = user-created; "ses_feedback" = bounce/delivery notification
+export const SIGNAL_SOURCES = ["email", "user", "ses_feedback"] as const;
 export type SignalSource = (typeof SIGNAL_SOURCES)[number];
+
+export const SIGNAL_TYPES = ["deliverability", "invalid_rule_function", "invalid_template_function", "auto_send_blocked"] as const;
+export type SignalType = (typeof SIGNAL_TYPES)[number];
 
 // interrupt = push notification popup; ambient = badge only; silent = no push
 export const PUSH_PRIORITIES = ["interrupt", "ambient", "silent"] as const;
@@ -385,6 +388,7 @@ export interface Signal {
   matchedRules?: MatchedRuleResult[];
   accountId: string;
   source: SignalSource;
+  type?: SignalType;
   receivedAt: string;      // ISO datetime
 
   from: EmailAddress;
@@ -406,7 +410,6 @@ export interface Signal {
   workflowData: WorkflowData;
   spamScore: number;
   summary: string;
-  classificationModelId: string;
 
   s3Key: string;
   status: SignalStatus;
@@ -422,7 +425,7 @@ export interface Signal {
   sesMessageId?: string;
   sendFailureReason?: string;  // "all_recipients_bounced" | "ses_permanent_failure"
 
-  // Deliverability signal fields (only present on source: "deliverability" signals)
+  // Deliverability signal fields (only present on source: "ses_feedback" signals)
   relatedSignalId?: string;    // ID of the sent signal this bounce relates to
   bouncedRecipients?: Array<{
     address: string;

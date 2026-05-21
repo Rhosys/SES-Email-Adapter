@@ -1,99 +1,52 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { DynamoSystemSignalCreator } from "../../src/processor/system-signal-creator.js";
 import { createMockLogger, type MockLogger } from "../helpers/mock-logger.js";
-
-// Mock DynamoDB
-vi.mock("@aws-sdk/lib-dynamodb", () => {
-  const mockSend = vi.fn().mockResolvedValue({});
-  return {
-    DynamoDBDocumentClient: { from: () => ({ send: mockSend }) },
-    PutCommand: vi.fn().mockImplementation((input) => ({ input })),
-    GetCommand: vi.fn(),
-    QueryCommand: vi.fn(),
-    UpdateCommand: vi.fn(),
-    DeleteCommand: vi.fn(),
-  };
-});
-
-vi.mock("@aws-sdk/client-dynamodb", () => ({
-  DynamoDBClient: vi.fn().mockImplementation(() => ({})),
-}));
-
-// Access the mocked send function
-async function getMockSend() {
-  const { DynamoDBDocumentClient } = await import("@aws-sdk/lib-dynamodb");
-  const client = DynamoDBDocumentClient.from({} as never);
-  return client.send as ReturnType<typeof vi.fn>;
-}
+import { ok, err } from "../../src/errors.js";
+import type { Signal } from "../../src/types/index.js";
 
 describe("DynamoSystemSignalCreator", () => {
   let logger: MockLogger;
   let creator: DynamoSystemSignalCreator;
-  let mockSend: ReturnType<typeof vi.fn>;
+  let mockSaveSignal: ReturnType<typeof vi.fn>;
 
-  beforeEach(async () => {
+  beforeEach(() => {
     logger = createMockLogger();
-    creator = new DynamoSystemSignalCreator(logger);
-    mockSend = await getMockSend();
-    mockSend.mockClear();
+    mockSaveSignal = vi.fn().mockResolvedValue(ok(undefined));
+    creator = new DynamoSystemSignalCreator(logger, { saveSignal: mockSaveSignal });
   });
 
-  describe("createInvalidOutputSignal", () => {
-    it.each([
-      {
-        label: "rule without functionName — writes notification with rule description",
-        opts: {
-          accountId: "acc_123",
-          resourceType: "rule" as const,
-          resourceName: "My Rule",
-          issue: "Invalid action type: unknown_action",
-        },
-        expectedDescription: 'rule "My Rule": Invalid action type: unknown_action',
-        expectFunctionName: false,
-      },
-      {
-        label: "template with functionName — writes notification with function in description",
-        opts: {
-          accountId: "acc_456",
-          resourceType: "template" as const,
-          resourceName: "Welcome Template",
-          functionName: "greeting",
-          issue: "Function returned non-string value",
-        },
-        expectedDescription: 'template "Welcome Template" function "greeting": Function returned non-string value',
-        expectFunctionName: true,
-      },
-    ])("$label", async ({ opts, expectedDescription, expectFunctionName }) => {
-      await creator.createInvalidOutputSignal(opts);
+  describe("createInvalidRuleFunctionSignal", () => {
+    it("saves a signal with type invalid_rule_function attached to the arc", async () => {
+      await creator.createInvalidRuleFunctionSignal({
+        accountId: "acc_123",
+        arcId: "arc_456",
+        recipientAddress: "inbox@example.com",
+        resourceName: "My Rule",
+        issue: "Invalid action type: unknown_action",
+      });
 
-      expect(mockSend).toHaveBeenCalledTimes(1);
-      const putCommand = mockSend.mock.calls[0]![0];
-      const item = putCommand.input.Item;
+      expect(mockSaveSignal).toHaveBeenCalledTimes(1);
+      const signal: Signal = mockSaveSignal.mock.calls[0]![0];
 
-      expect(item.pk).toBe(`ACCT#${opts.accountId}`);
-      expect(item.sk).toMatch(/^SYSSIG#\d{4}-\d{2}-\d{2}T/);
-      expect(item.accountId).toBe(opts.accountId);
-      expect(item.type).toBe("invalid_output");
-      expect(item.resourceType).toBe(opts.resourceType);
-      expect(item.resourceName).toBe(opts.resourceName);
-      expect(item.issue).toBe(opts.issue);
-      expect(item.description).toBe(expectedDescription);
-      expect(item.ttl).toBeGreaterThan(Math.floor(Date.now() / 1000));
-
-      if (expectFunctionName) {
-        expect(item.functionName).toBe(opts.functionName);
-      } else {
-        expect(item.functionName).toBeUndefined();
-      }
+      expect(signal.accountId).toBe("acc_123");
+      expect(signal.arcId).toBe("arc_456");
+      expect(signal.recipientAddress).toBe("inbox@example.com");
+      expect(signal.type).toBe("invalid_rule_function");
+      expect(signal.subject).toBe('rule "My Rule": Invalid action type: unknown_action');
+      expect(signal.source).toBe("email");
+      expect(signal.status).toBe("active");
+      expect(signal.id).toMatch(/^sgn-/);
+      expect(signal.ttl).toBeGreaterThan(Math.floor(Date.now() / 1000));
     });
 
-    it("logs warning and does not throw when DynamoDB write fails", async () => {
-      mockSend.mockRejectedValueOnce(new Error("DynamoDB throttled"));
+    it("logs warning and does not throw when save fails", async () => {
+      mockSaveSignal.mockResolvedValueOnce(err({ type: "db_error", message: "throttled" }));
 
       await expect(
-        creator.createInvalidOutputSignal({
+        creator.createInvalidRuleFunctionSignal({
           accountId: "acc_789",
-          resourceType: "rule",
+          arcId: "arc_001",
+          recipientAddress: "test@example.com",
           resourceName: "Failing Rule",
           issue: "Some issue",
         }),
@@ -104,7 +57,48 @@ describe("DynamoSystemSignalCreator", () => {
       );
       expect(warnCall).toBeDefined();
       expect(warnCall!.context!.accountId).toBe("acc_789");
-      expect(warnCall!.context!.resourceName).toBe("Failing Rule");
+    });
+  });
+
+  describe("createInvalidTemplateFunctionSignal", () => {
+    it("saves a signal with type invalid_template_function and function name in subject", async () => {
+      await creator.createInvalidTemplateFunctionSignal({
+        accountId: "acc_456",
+        arcId: "arc_789",
+        recipientAddress: "inbox@example.com",
+        resourceName: "Welcome Template",
+        functionName: "greeting",
+        issue: "Function returned non-string value",
+      });
+
+      expect(mockSaveSignal).toHaveBeenCalledTimes(1);
+      const signal: Signal = mockSaveSignal.mock.calls[0]![0];
+
+      expect(signal.accountId).toBe("acc_456");
+      expect(signal.arcId).toBe("arc_789");
+      expect(signal.type).toBe("invalid_template_function");
+      expect(signal.subject).toBe('template "Welcome Template" function "greeting": Function returned non-string value');
+    });
+  });
+
+  describe("createAutoSendBlockedSignal", () => {
+    it("saves a signal with type auto_send_blocked", async () => {
+      await creator.createAutoSendBlockedSignal({
+        accountId: "acc_111",
+        arcId: "arc_222",
+        recipientAddress: "inbox@example.com",
+        fromAddress: "sender@legit.com",
+        replyToAddress: "phish@evil.com",
+      });
+
+      expect(mockSaveSignal).toHaveBeenCalledTimes(1);
+      const signal: Signal = mockSaveSignal.mock.calls[0]![0];
+
+      expect(signal.accountId).toBe("acc_111");
+      expect(signal.arcId).toBe("arc_222");
+      expect(signal.type).toBe("auto_send_blocked");
+      expect(signal.subject).toContain("Auto-send suppressed");
+      expect(signal.subject).toContain("phish@evil.com");
     });
   });
 });

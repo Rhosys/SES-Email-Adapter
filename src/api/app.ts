@@ -456,7 +456,6 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
       workflowData: { workflow: arc.workflow } as Signal["workflowData"],
       spamScore: 0,
       summary: "",
-      classificationModelId: "",
       s3Key: "",
       status: "draft",
       createdAt: now,

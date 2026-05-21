@@ -71,7 +71,6 @@ describe("processSideEffect — correlation context", () => {
       workflowData: { workflow: "test", triggeredBy: "user" },
       spamScore: 0.0,
       summary: "A test email.",
-      classificationModelId: "us.anthropic.claude-opus-4-5-20251101-v1:0",
       s3Key: "emails/corr-msg",
       status: "active",
       createdAt: "2024-01-15T10:00:00Z",

@@ -19,7 +19,6 @@ export interface ClassificationOutput {
   spamScore: number;
   summary: string;
   labels: string[];
-  classificationModelId: string;
 }
 
 interface RawClassificationResponse {
@@ -68,7 +67,6 @@ export class SignalClassifier {
       spamScore: raw.spamScore,
       summary: raw.summary,
       labels: raw.labels,
-      classificationModelId: CLASSIFICATION_MODEL_ID,
     };
   }
 

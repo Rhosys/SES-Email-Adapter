@@ -54,7 +54,6 @@ const validClassification: ClassificationOutput = {
   spamScore: 0.05,
   summary: "A test email.",
   labels: [],
-  classificationModelId: "us.anthropic.claude-opus-4-5-20251101-v1:0",
 };
 
 function makeStore() {

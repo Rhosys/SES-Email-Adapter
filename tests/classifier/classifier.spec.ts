@@ -114,7 +114,6 @@ describe("SignalClassifier", () => {
         service: "GitHub",
       });
       expect(result.spamScore).toBeLessThan(0.1);
-      expect(result.classificationModelId).toBe(CLASSIFICATION_MODEL_ID);
     });
   });
 

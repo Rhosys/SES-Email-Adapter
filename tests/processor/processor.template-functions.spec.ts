@@ -51,7 +51,6 @@ function makeSignal(overrides: Partial<Signal> = {}): Signal {
     workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
     spamScore: 0.01,
     summary: "A test email.",
-    classificationModelId: "model-v1",
     s3Key: "emails/tmpl-test-001.eml",
     status: "active",
     createdAt: "2024-01-15T10:00:00Z",
@@ -148,7 +147,7 @@ describe("Template function resolution via User Code Executor", () => {
   beforeEach(() => {
     mockLogger = createMockLogger();
     mockExecutor = { invoke: vi.fn(), validateAst: vi.fn(), validateAstBatch: vi.fn() };
-    mockSystemSignalCreator = { createInvalidOutputSignal: vi.fn().mockResolvedValue(undefined), createReplyTargetSuppressionSignal: vi.fn().mockResolvedValue(undefined) };
+    mockSystemSignalCreator = { createInvalidRuleFunctionSignal: vi.fn().mockResolvedValue(undefined), createInvalidTemplateFunctionSignal: vi.fn().mockResolvedValue(undefined), createAutoSendBlockedSignal: vi.fn().mockResolvedValue(undefined) };
     store = makeStore();
     processor = makeProcessor({ store, userCodeExecutor: mockExecutor, logger: mockLogger, systemSignalCreator: mockSystemSignalCreator });
   });
@@ -343,9 +342,10 @@ describe("Template function resolution via User Code Executor", () => {
 
     await processor.processSideEffect({ signal: makeSignal(), arc: makeArc() });
 
-    expect(mockSystemSignalCreator.createInvalidOutputSignal).toHaveBeenCalledWith({
+    expect(mockSystemSignalCreator.createInvalidTemplateFunctionSignal).toHaveBeenCalledWith({
       accountId: TEST_ACCOUNT_ID,
-      resourceType: "template",
+      arcId: "arc_tmpl_001",
+      recipientAddress: "user@example.com",
       resourceName: "Auto-draft template",
       functionName: "greeting",
       issue: "[runtime_error] ReferenceError: x is not defined",
@@ -360,9 +360,10 @@ describe("Template function resolution via User Code Executor", () => {
 
     await processor.processSideEffect({ signal: makeSignal(), arc: makeArc() });
 
-    expect(mockSystemSignalCreator.createInvalidOutputSignal).toHaveBeenCalledWith({
+    expect(mockSystemSignalCreator.createInvalidTemplateFunctionSignal).toHaveBeenCalledWith({
       accountId: TEST_ACCOUNT_ID,
-      resourceType: "template",
+      arcId: "arc_tmpl_001",
+      recipientAddress: "user@example.com",
       resourceName: "Auto-draft template",
       functionName: "greeting",
       issue: "Function returned non-string value (type: number)",

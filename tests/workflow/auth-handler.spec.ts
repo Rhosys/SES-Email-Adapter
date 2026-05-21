@@ -32,7 +32,6 @@ function makeSignal(overrides: Partial<Signal> & { from: Signal["from"]; workflo
     workflow: "auth",
     spamScore: 0,
     summary: "OTP code",
-    classificationModelId: "model-1",
     s3Key: "signals/test.eml",
     status: "active",
     createdAt: "2024-01-01T00:00:00Z",

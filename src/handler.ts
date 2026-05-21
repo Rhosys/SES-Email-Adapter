@@ -130,7 +130,7 @@ const processor = new SignalProcessor({
   replySender: externalEmailHandler,
   sqsDispatcher: new SqsDispatcherImpl(SIGNAL_QUEUE_URL, sqs, logger),
   draftSendDispatcher,
-  systemSignalCreator: new DynamoSystemSignalCreator(logger),
+  systemSignalCreator: new DynamoSystemSignalCreator(logger, arcDb),
   handlerRegistry,
   logger,
   s3Client: s3,

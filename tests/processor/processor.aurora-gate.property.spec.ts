@@ -104,7 +104,6 @@ describe("Feature: signal-processor-retry-resilience, Property 4: Arc saved befo
     spamScore: 0.05,
     summary: "A test email.",
     labels: [],
-    classificationModelId: "us.anthropic.claude-opus-4-5-20251101-v1:0",
   };
 
   function makeContentSanitizer(): ContentSanitizerClient {
@@ -323,7 +322,6 @@ describe("Feature: signal-processor-retry-resilience, Property 6: Aurora failure
     spamScore: 0.05,
     summary: "A test email.",
     labels: [],
-    classificationModelId: "us.anthropic.claude-opus-4-5-20251101-v1:0",
   };
 
   function makeStore() {
@@ -599,7 +597,6 @@ describe("Feature: signal-processor-retry-resilience, Property 5: Side-effects d
     spamScore: 0.05,
     summary: "A test email.",
     labels: [],
-    classificationModelId: "us.anthropic.claude-opus-4-5-20251101-v1:0",
   };
 
   function makeContentSanitizer(): ContentSanitizerClient {
@@ -873,7 +870,6 @@ describe("Feature: signal-processor-retry-resilience, Property 7: Partial Aurora
     spamScore: 0.05,
     summary: "A test email.",
     labels: [],
-    classificationModelId: "us.anthropic.claude-opus-4-5-20251101-v1:0",
   };
 
   function makeContentSanitizer(): ContentSanitizerClient {
