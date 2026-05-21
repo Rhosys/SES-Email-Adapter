@@ -90,6 +90,13 @@ jobs:
           cp deploy/*.tf /tmp/itf/
           cp deploy/integration/providers.tf /tmp/itf/providers.tf
           echo -n "dummy" > /tmp/itf/secrets/dkim-private-key.kms
+          # Remove single-line attributes MiniStack doesn't support at the emulation layer.
+          # These are operational/replication features; they don't affect the table schema
+          # (key attributes, GSIs) that the application code depends on.
+          sed -i '/replica { region_name/d' /tmp/itf/storage.tf
+          sed -i '/point_in_time_recovery { enabled = true }/d' /tmp/itf/storage.tf
+          sed -i '/deletion_protection_enabled/d' /tmp/itf/storage.tf
+          sed -i '/stream_enabled\|stream_view_type/d' /tmp/itf/storage.tf
           tofu -chdir=/tmp/itf init -reconfigure -input=false
           tofu -chdir=/tmp/itf apply -auto-approve -input=false -refresh=false \
             -target=aws_dynamodb_table.accounts \
