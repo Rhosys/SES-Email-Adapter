@@ -20,7 +20,7 @@ import { AuditDatabase } from '../../src/database/audit-database.js';
 import { ApiDatabaseAdapter } from '../../src/database/adapters.js';
 import { AuthressAuthService } from '../../src/api/authress-auth.js';
 import { createApp } from '../../src/api/app.js';
-import { createMockLogger } from '../helpers/mock-logger.js';
+import { createConsoleLogger } from './logger.js';
 import { ok } from '../../src/errors.js';
 import type { AccessService } from '../../src/api/app.js';
 import { startMockAuthressServer } from './mock-authress.js';
@@ -49,7 +49,7 @@ export async function createHarness(): Promise<IntegrationHarness> {
   const authressPort = parseInt(new URL(authressUrl).port, 10) || 4500;
   const mockAuthress = await startMockAuthressServer(authressPort);
 
-  const logger = createMockLogger();
+  const logger = createConsoleLogger();
 
   // All three databases connect to MiniStack via AWS_ENDPOINT_URL.
   // Tables were provisioned by `tofu apply` before the test runs.
