@@ -14,15 +14,9 @@ export function createMockLogger(): MockLogger {
   const calls: MockLoggerCall[] = [];
   return {
     calls,
-    startInvocation(_id: string) {
-      /* no-op */
-    },
-    getInvocationId() {
-      return "test-invocation-id";
-    },
-    trackPoint() {
-      /* no-op */
-    },
+    startInvocation(_id: string) { /* no-op */ },
+    getInvocationId() { return "test-invocation-id"; },
+    trackPoint() { /* no-op */ },
     info(msg, ctx) {
       calls.push({ method: "info", message: msg, ...(ctx !== undefined ? { context: ctx } : {}) });
     },
@@ -31,12 +25,15 @@ export function createMockLogger(): MockLogger {
     },
     warn(msg, ctx) {
       calls.push({ method: "warn", message: msg, ...(ctx !== undefined ? { context: ctx } : {}) });
+      console.warn("[test:warn]", msg, ctx ?? "");
     },
     error(msg, ctx) {
       calls.push({ method: "error", message: msg, ...(ctx !== undefined ? { context: ctx } : {}) });
+      console.error("[test:error]", msg, ctx ?? "");
     },
     critical(msg, ctx) {
       calls.push({ method: "critical", message: msg, ...(ctx !== undefined ? { context: ctx } : {}) });
+      console.error("[test:critical]", msg, ctx ?? "");
     },
   };
 }

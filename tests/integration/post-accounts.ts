@@ -38,9 +38,6 @@ async function assertStatus(res: Response, expected: number, label: string): Pro
   if (!ok) {
     const body = await res.text().catch(() => '(unreadable)');
     console.error(`    response body: ${body}`);
-    const errors = h.logger.calls.filter(c => c.method === 'error' || c.method === 'critical');
-    for (const e of errors) console.error(`    [${e.method}] ${e.message}`, e.context ?? '');
-    h.logger.calls.length = 0;
   }
 }
 
