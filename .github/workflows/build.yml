@@ -87,8 +87,13 @@ jobs:
       - name: Provision DynamoDB tables via Tofu
         run: |
           mkdir -p /tmp/itf
-          cp deploy/*.tf /tmp/itf/
+          # Copy only the files needed for DynamoDB provisioning — avoids
+          # encryption.tf (references a secrets file that doesn't exist in CI)
+          # and other resources that MiniStack can't apply.
           cp deploy/integration/providers.tf /tmp/itf/providers.tf
+          cp deploy/variables.tf /tmp/itf/
+          cp deploy/outputs.tf /tmp/itf/
+          cp deploy/storage.tf /tmp/itf/
           # Strip features MiniStack doesn't support
           sed -i '/^\s*replica {/d' /tmp/itf/storage.tf
           sed -i '/^\s*point_in_time_recovery {/d' /tmp/itf/storage.tf
