@@ -178,9 +178,10 @@ async function applyRules(
         warnings: evalResult.warnings,
       });
       if (systemSignalCreator) {
-        await systemSignalCreator.createInvalidOutputSignal({
+        await systemSignalCreator.createInvalidRuleFunctionSignal({
           accountId: rule.accountId,
-          resourceType: "rule",
+          arcId: context.arc.id,
+          recipientAddress: context.signal.recipientAddress,
           resourceName: rule.name,
           issue: evalResult.warnings.join("; "),
         });
@@ -572,9 +573,10 @@ export class SignalProcessor {
                   errorMessage: response.error.message,
                 });
                 if (this.systemSignalCreator) {
-                  await this.systemSignalCreator.createInvalidOutputSignal({
+                  await this.systemSignalCreator.createInvalidTemplateFunctionSignal({
                     accountId,
-                    resourceType: "template",
+                    arcId: arc.id,
+                    recipientAddress: signal.recipientAddress,
                     resourceName: tmpl.name,
                     functionName: fn.name,
                     issue,
@@ -598,9 +600,10 @@ export class SignalProcessor {
                     issue,
                   });
                   if (this.systemSignalCreator) {
-                    await this.systemSignalCreator.createInvalidOutputSignal({
+                    await this.systemSignalCreator.createInvalidTemplateFunctionSignal({
                       accountId,
-                      resourceType: "template",
+                      arcId: arc.id,
+                      recipientAddress: signal.recipientAddress,
                       resourceName: tmpl.name,
                       functionName: fn.name,
                       issue,
@@ -635,11 +638,12 @@ export class SignalProcessor {
                 recipientAddress: signal.recipientAddress,
               });
               if (this.systemSignalCreator) {
-                await this.systemSignalCreator.createReplyTargetSuppressionSignal({
+                await this.systemSignalCreator.createAutoSendBlockedSignal({
                   accountId,
+                  arcId: arc.id,
+                  recipientAddress: signal.recipientAddress,
                   fromAddress: signal.from.address,
                   replyToAddress: signal.replyTo.address,
-                  recipientAddress: signal.recipientAddress,
                 });
               }
             }
@@ -668,7 +672,6 @@ export class SignalProcessor {
             workflowData: signal.workflowData,
             spamScore: 0,
             summary: "",
-            classificationModelId: "",
             s3Key: "",
             createdAt: now,
             ...(sendInitiatedAt ? { sendInitiatedAt } : {}),
@@ -773,7 +776,6 @@ export class SignalProcessor {
         workflowData: { workflow: "status", statusType: "other", provider: "" } as const,
         spamScore: 0,
         summary: "",
-        classificationModelId: "",
       };
       const saveResult = await this.arcDb.saveSignal(signal);
       if (saveResult.isErr()) return err(saveResult.error);
@@ -1386,7 +1388,6 @@ function buildSignal(opts: {
     workflowData: classification.workflowData,
     spamScore: classification.spamScore,
     summary: classification.summary,
-    classificationModelId: classification.classificationModelId,
     s3Key,
     status,
     createdAt: now,

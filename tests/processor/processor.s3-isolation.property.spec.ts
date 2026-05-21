@@ -90,7 +90,6 @@ describe("Property 9: S3 retention failure is isolated and non-fatal", () => {
     spamScore: 0.01,
     summary: "A test email.",
     labels: [],
-    classificationModelId: "us.anthropic.claude-opus-4-5-20251101-v1:0",
   };
 
   function makeStore() {

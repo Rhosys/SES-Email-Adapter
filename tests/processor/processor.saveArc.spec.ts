@@ -82,7 +82,6 @@ describe("Single saveArc call with complete mutations", () => {
       spamScore: 0.01,
       summary: "Test signal.",
       labels: [],
-      classificationModelId: "us.anthropic.claude-opus-4-5-20251101-v1:0",
     };
 
     const userRules: Rule[] = testCase.additionalLabels.map((label, i) => ({

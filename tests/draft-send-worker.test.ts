@@ -28,7 +28,6 @@ function makeSignal(overrides: Partial<Signal> = {}): Signal {
     workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
     spamScore: 0,
     summary: "",
-    classificationModelId: "",
     s3Key: "",
     receivedAt: "2024-06-01T12:00:00.000Z",
     createdAt: "2024-06-01T12:00:00.000Z",

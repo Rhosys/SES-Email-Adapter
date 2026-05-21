@@ -75,7 +75,6 @@ const signal: Signal = {
   workflowData: { workflow: "package", packageType: "shipping", retailer: "Amazon" },
   spamScore: 0,
   summary: "Order shipped",
-  classificationModelId: "model-1",
   s3Key: "emails/msg-001",
   status: "active",
   createdAt: "2024-06-01T12:00:00Z",

@@ -55,7 +55,6 @@ function makeSignal(overrides: Partial<Signal> = {}): Signal {
     workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
     spamScore: 0.02,
     summary: "A test signal.",
-    classificationModelId: "us.anthropic.claude-opus-4-5-20251101-v1:0",
     s3Key: "emails/msg-001",
     status: "quarantine_visible",
     createdAt: "2024-01-20T12:00:00Z",

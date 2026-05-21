@@ -1,127 +1,160 @@
-import { PutCommand } from "@aws-sdk/lib-dynamodb";
 import { DateTime } from "luxon";
-import { dynamo, ACCOUNTS_TABLE } from "../database/shared.js";
+import type { Signal, SignalType } from "../types/index.js";
 import type { Logger } from "../logger.js";
+import type { Result } from "neverthrow";
+import type { DbError } from "../errors.js";
 import { generateId } from "../utils/id.js";
 
 // ---------------------------------------------------------------------------
 // System Signal Creator
-// Writes a notification record to DynamoDB when user code produces invalid output.
-// Stored in the accounts table as a per-account notification item.
+// Creates real Signal objects for system-generated notifications (rule/template
+// failures, auto-send blocks). These are stored alongside email/user signals
+// in the same table and appear in the arc's signal thread.
 // ---------------------------------------------------------------------------
 
+export interface SignalStore {
+  saveSignal(signal: Signal): Promise<Result<void, DbError>>;
+}
+
 export interface SystemSignalCreator {
-  createInvalidOutputSignal(opts: {
+  createInvalidRuleFunctionSignal(opts: {
     accountId: string;
-    resourceType: "rule" | "template";
+    arcId: string;
+    recipientAddress: string;
     resourceName: string;
-    functionName?: string;
     issue: string;
   }): Promise<void>;
 
-  createReplyTargetSuppressionSignal(opts: {
+  createInvalidTemplateFunctionSignal(opts: {
     accountId: string;
+    arcId: string;
+    recipientAddress: string;
+    resourceName: string;
+    functionName: string;
+    issue: string;
+  }): Promise<void>;
+
+  createAutoSendBlockedSignal(opts: {
+    accountId: string;
+    arcId: string;
+    recipientAddress: string;
     fromAddress: string;
     replyToAddress: string;
-    recipientAddress: string;
   }): Promise<void>;
 }
 
 export class DynamoSystemSignalCreator implements SystemSignalCreator {
   private readonly logger: Logger;
+  private readonly signalStore: SignalStore;
 
-  constructor(logger: Logger) {
+  constructor(logger: Logger, signalStore: SignalStore) {
     this.logger = logger;
+    this.signalStore = signalStore;
   }
 
-  async createInvalidOutputSignal(opts: {
+  async createInvalidRuleFunctionSignal(opts: {
     accountId: string;
-    resourceType: "rule" | "template";
+    arcId: string;
+    recipientAddress: string;
     resourceName: string;
-    functionName?: string;
     issue: string;
   }): Promise<void> {
-    const { accountId, resourceType, resourceName, functionName, issue } = opts;
-    const id = generateId("sgn-");
-    const timestamp = DateTime.utc().toISO()!;
-    const ttl = Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60; // 30 days
-
-    const description = functionName
-      ? `${resourceType} "${resourceName}" function "${functionName}": ${issue}`
-      : `${resourceType} "${resourceName}": ${issue}`;
-
-    try {
-      await dynamo.send(new PutCommand({
-        TableName: ACCOUNTS_TABLE,
-        Item: {
-          pk: `ACCT#${accountId}`,
-          sk: `SYSSIG#${timestamp}#${id}`,
-          id,
-          signalLookupId: id,
-          accountId,
-          type: "invalid_output",
-          resourceType,
-          resourceName,
-          ...(functionName ? { functionName } : {}),
-          issue,
-          description,
-          createdAt: timestamp,
-          ttl,
-        },
-      }));
-    } catch (e) {
-      // Best-effort — don't fail processing if notification write fails
-      this.logger.warn("Failed to create system signal for invalid user code output.", {
-        code: "system_signal.write_failed",
-        accountId,
-        resourceType,
-        resourceName,
-        functionName,
-        issue,
-        error: e,
-      });
-    }
+    const description = `rule "${opts.resourceName}": ${opts.issue}`;
+    await this.saveSystemSignal({
+      type: "invalid_rule_function",
+      accountId: opts.accountId,
+      arcId: opts.arcId,
+      recipientAddress: opts.recipientAddress,
+      subject: description,
+    });
   }
 
-  async createReplyTargetSuppressionSignal(opts: {
+  async createInvalidTemplateFunctionSignal(opts: {
     accountId: string;
+    arcId: string;
+    recipientAddress: string;
+    resourceName: string;
+    functionName: string;
+    issue: string;
+  }): Promise<void> {
+    const description = `template "${opts.resourceName}" function "${opts.functionName}": ${opts.issue}`;
+    await this.saveSystemSignal({
+      type: "invalid_template_function",
+      accountId: opts.accountId,
+      arcId: opts.arcId,
+      recipientAddress: opts.recipientAddress,
+      subject: description,
+    });
+  }
+
+  async createAutoSendBlockedSignal(opts: {
+    accountId: string;
+    arcId: string;
+    recipientAddress: string;
     fromAddress: string;
     replyToAddress: string;
-    recipientAddress: string;
   }): Promise<void> {
-    const { accountId, fromAddress, replyToAddress, recipientAddress } = opts;
+    const description = `Auto-send suppressed for ${opts.recipientAddress}: Reply-To ${opts.replyToAddress} does not match From ${opts.fromAddress} and is not in approved senders`;
+    await this.saveSystemSignal({
+      type: "auto_send_blocked",
+      accountId: opts.accountId,
+      arcId: opts.arcId,
+      recipientAddress: opts.recipientAddress,
+      subject: description,
+    });
+  }
+
+  private async saveSystemSignal(opts: {
+    type: SignalType;
+    accountId: string;
+    arcId: string;
+    recipientAddress: string;
+    subject: string;
+  }): Promise<void> {
     const id = generateId("sgn-");
     const timestamp = DateTime.utc().toISO()!;
     const ttl = Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60; // 30 days
 
-    const description = `Auto-send suppressed for ${recipientAddress}: Reply-To ${replyToAddress} does not match From ${fromAddress} and is not in approved senders`;
+    const signal: Signal = {
+      id,
+      signalLookupId: id,
+      arcId: opts.arcId,
+      accountId: opts.accountId,
+      source: "email",
+      type: opts.type,
+      status: "active",
+      receivedAt: timestamp,
+      from: { address: "system@internal" },
+      to: [],
+      cc: [],
+      subject: opts.subject,
+      attachments: [],
+      headers: {},
+      recipientAddress: opts.recipientAddress,
+      workflow: "alert",
+      workflowData: { workflow: "alert", eventType: "system_notification", service: "email-catcher", severity: "warning", requiresAction: false } as never,
+      spamScore: 0,
+      summary: "",
+      s3Key: "",
+      createdAt: timestamp,
+      ttl,
+    };
 
     try {
-      await dynamo.send(new PutCommand({
-        TableName: ACCOUNTS_TABLE,
-        Item: {
-          pk: `ACCT#${accountId}`,
-          sk: `SYSSIG#${timestamp}#${id}`,
-          id,
-          signalLookupId: id,
-          accountId,
-          type: "reply_target_suppression",
-          fromAddress,
-          replyToAddress,
-          recipientAddress,
-          description,
-          createdAt: timestamp,
-          ttl,
-        },
-      }));
+      const result = await this.signalStore.saveSignal(signal);
+      if (result.isErr()) {
+        this.logger.warn("Failed to save system signal.", {
+          code: "system_signal.write_failed",
+          accountId: opts.accountId,
+          type: opts.type,
+          error: result.error,
+        });
+      }
     } catch (e) {
-      // Best-effort — don't fail processing if notification write fails
-      this.logger.warn("Failed to create system signal for reply-target suppression.", {
+      this.logger.warn("Failed to save system signal.", {
         code: "system_signal.write_failed",
-        accountId,
-        fromAddress,
-        replyToAddress,
-        recipientAddress,
+        accountId: opts.accountId,
+        type: opts.type,
         error: e,
       });
     }

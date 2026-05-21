@@ -29,7 +29,6 @@ function makeSentSignal(overrides: Partial<Signal> = {}): Signal {
     workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
     spamScore: 0,
     summary: "",
-    classificationModelId: "",
     s3Key: "",
     receivedAt: "2024-06-01T12:00:00.000Z",
     createdAt: "2024-06-01T12:00:00.000Z",
@@ -121,7 +120,7 @@ describe("FeedbackProcessor — bounce handling for user-sent signals", () => {
     expect(savedSignal.id).toMatch(/^sgn-/);
     expect(savedSignal.arcId).toBe("arc-001");
     expect(savedSignal.accountId).toBe("acct-001");
-    expect(savedSignal.source).toBe("deliverability");
+    expect(savedSignal.source).toBe("ses_feedback");
     expect(savedSignal.status).toBe("active");
     expect(savedSignal.from).toEqual({ address: "system@deliverability" });
     expect(savedSignal.relatedSignalId).toBe("sgn-signal001");

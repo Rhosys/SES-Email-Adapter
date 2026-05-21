@@ -187,7 +187,6 @@ const validClassification: ClassificationOutput = {
   spamScore: 0.05,
   summary: "A test personal email.",
   labels: [],
-  classificationModelId: "us.anthropic.claude-opus-4-5-20251101-v1:0",
 };
 
 function makeRule(overrides: Partial<Rule> = {}): Rule {
@@ -1273,7 +1272,6 @@ describe("SignalProcessor", () => {
         workflow: "conversation",
         workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
         spamScore: 0.05, summary: "test", labels: [],
-        classificationModelId: "us.anthropic.claude-opus-4-5-20251101-v1:0",
         ...classification,
       };
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(full);
@@ -1303,7 +1301,7 @@ describe("SignalProcessor", () => {
       }))));
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
         workflow: "conversation", workflowData: { workflow: "conversation", isReply: true, sentiment: "neutral", requiresReply: false },
-        spamScore: 0.05, summary: "test", labels: [], classificationModelId: "us.anthropic.claude-opus-4-5-20251101-v1:0",
+        spamScore: 0.05, summary: "test", labels: [],
       });
       await processor.processRecord(makeMessage({ sesMessageId: randomUUID() }), 1);
       const signal = vi.mocked(arcDb.saveSignal).mock.calls.at(-1)![0] as Signal;
@@ -1383,7 +1381,6 @@ describe("SignalProcessor", () => {
       spamScore: 0.02,
       summary: "Welcome to Acme App.",
       labels: [],
-      classificationModelId: "us.anthropic.claude-opus-4-5-20251101-v1:0",
     };
 
     it("processes onboarding emails as active when no blocking rule is configured", async () => {
@@ -1486,7 +1483,6 @@ describe("SignalProcessor", () => {
     spamScore: 0.0,
     summary: "Privacy policy update from Google.",
     labels: [],
-    classificationModelId: "us.anthropic.claude-opus-4-5-20251101-v1:0",
   };
 
   describe("notice workflow arc behavior", () => {
@@ -1543,7 +1539,6 @@ describe("SignalProcessor", () => {
     spamScore: 0.0,
     summary: "Test email from account owner.",
     labels: [],
-    classificationModelId: "us.anthropic.claude-opus-4-5-20251101-v1:0",
   };
 
   describe("pong auto-reply", () => {
@@ -1644,7 +1639,6 @@ describe("SignalProcessor", () => {
     spamScore: 0.0,
     summary: "Meeting invite for Team Standup on Feb 1.",
     labels: [],
-    classificationModelId: "us.anthropic.claude-opus-4-5-20251101-v1:0",
   };
 
   // -------------------------------------------------------------------------

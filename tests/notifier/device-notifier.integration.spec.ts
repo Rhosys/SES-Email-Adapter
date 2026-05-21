@@ -105,7 +105,6 @@ function makeClassifier(): Pick<SignalClassifier, "classify"> {
     spamScore: 0.05,
     summary: "Test email.",
     labels: [],
-    classificationModelId: "us.anthropic.claude-opus-4-5-20251101-v1:0",
   }) };
 }
 
@@ -172,7 +171,6 @@ function makeSignal(overrides: Partial<Signal> = {}): Signal {
     workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
     spamScore: 0.05,
     summary: "Test email.",
-    classificationModelId: "us.anthropic.claude-opus-4-5-20251101-v1:0",
     s3Key: "emails/msg-notifier-001",
     status: "active",
     createdAt: "2024-01-15T10:00:00Z",

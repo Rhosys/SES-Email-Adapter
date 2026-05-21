@@ -162,7 +162,7 @@ describe("API route error mapping consistency", () => {
             to: [{ address: "user@example.com" }], cc: [], subject: "Test", attachments: [], headers: {},
             recipientAddress: "user@example.com", workflow: "conversation",
             workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
-            spamScore: 0.02, summary: "A test signal.", classificationModelId: "model-1",
+            spamScore: 0.02, summary: "A test signal.",
             s3Key: "emails/msg-001", status: "active", createdAt: "2024-01-15T10:00:00Z",
           } as any));
           break;

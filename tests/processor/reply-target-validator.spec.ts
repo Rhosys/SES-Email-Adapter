@@ -20,7 +20,6 @@ function makeSignal(overrides: Partial<Pick<Signal, "from" | "replyTo">> = {}): 
     workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
     spamScore: 0.1,
     summary: "",
-    classificationModelId: "test",
     s3Key: "test/key",
     status: "active",
     createdAt: "2024-01-01T00:00:00Z",

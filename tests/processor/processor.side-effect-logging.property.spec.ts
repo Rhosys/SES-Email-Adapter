@@ -127,7 +127,6 @@ describe("Side effect caller logging", () => {
       workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
       spamScore: 0.05,
       summary: "A test email.",
-      classificationModelId: "us.anthropic.claude-opus-4-5-20251101-v1:0",
       s3Key: "emails/test-msg",
       status: "active",
       createdAt: "2024-01-15T10:00:00Z",
@@ -158,7 +157,7 @@ describe("Side effect caller logging", () => {
     const processor = new SignalProcessor({
       ...makeStore(),
       contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com",
-      classifier: { classify: vi.fn().mockResolvedValue({ workflow: "conversation", workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false }, spamScore: 0.05, summary: "A test email.", labels: [], classificationModelId: "us.anthropic.claude-opus-4-5-20251101-v1:0" }) },
+      classifier: { classify: vi.fn().mockResolvedValue({ workflow: "conversation", workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false }, spamScore: 0.05, summary: "A test email.", labels: [] }) },
       embeddingGenerator: makeEmbeddingGenerator(),
       auroraWriter: makeAuroraWriter(),
       arcMatcher: makeArcMatcher(),
@@ -191,7 +190,7 @@ describe("Side effect caller logging", () => {
     const processor = new SignalProcessor({
       ...makeStore(),
       contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com",
-      classifier: { classify: vi.fn().mockResolvedValue({ workflow: "conversation", workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false }, spamScore: 0.05, summary: "A test email.", labels: [], classificationModelId: "us.anthropic.claude-opus-4-5-20251101-v1:0" }) },
+      classifier: { classify: vi.fn().mockResolvedValue({ workflow: "conversation", workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false }, spamScore: 0.05, summary: "A test email.", labels: [] }) },
       embeddingGenerator: makeEmbeddingGenerator(),
       auroraWriter: makeAuroraWriter(),
       arcMatcher: makeArcMatcher(),
@@ -222,7 +221,7 @@ describe("Side effect caller logging", () => {
     const processor = new SignalProcessor({
       ...makeStore(),
       contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com",
-      classifier: { classify: vi.fn().mockResolvedValue({ workflow: "conversation", workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false }, spamScore: 0.05, summary: "A test email.", labels: [], classificationModelId: "us.anthropic.claude-opus-4-5-20251101-v1:0" }) },
+      classifier: { classify: vi.fn().mockResolvedValue({ workflow: "conversation", workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false }, spamScore: 0.05, summary: "A test email.", labels: [] }) },
       embeddingGenerator: makeEmbeddingGenerator(),
       auroraWriter: makeAuroraWriter(),
       arcMatcher: makeArcMatcher(),

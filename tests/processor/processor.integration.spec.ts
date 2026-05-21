@@ -71,7 +71,6 @@ const validClassification: ClassificationOutput = {
   spamScore: 0.05,
   summary: "Integration test email.",
   labels: [],
-  classificationModelId: "us.anthropic.claude-opus-4-5-20251101-v1:0",
 };
 
 // ---------------------------------------------------------------------------
@@ -208,7 +207,6 @@ function makeExistingSignal(overrides: Partial<Signal> = {}): Signal {
     workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
     spamScore: 0.05,
     summary: "Integration test email.",
-    classificationModelId: "us.anthropic.claude-opus-4-5-20251101-v1:0",
     s3Key: `emails/${SES_MESSAGE_ID}`,
     status: "active",
     createdAt: "2024-01-15T10:00:00Z",

@@ -101,7 +101,6 @@ function makeSignal(overrides: Partial<Signal> = {}): Signal {
     workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
     spamScore: 0.05,
     summary: "A webhook test signal.",
-    classificationModelId: "model-v3",
     s3Key: "emails/webhook-test.eml",
     status: "active",
     createdAt: "2024-06-15T10:30:00.000Z",
