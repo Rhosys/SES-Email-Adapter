@@ -86,24 +86,15 @@ jobs:
 
       - name: Provision DynamoDB tables via Tofu
         run: |
-          mkdir -p /tmp/itf
-          # Copy only the files needed for DynamoDB provisioning — avoids
-          # encryption.tf (references a secrets file that doesn't exist in CI)
-          # and other resources that MiniStack can't apply.
+          mkdir -p /tmp/itf/secrets
+          cp deploy/*.tf /tmp/itf/
           cp deploy/integration/providers.tf /tmp/itf/providers.tf
-          cp deploy/variables.tf /tmp/itf/
-          cp deploy/outputs.tf /tmp/itf/
-          cp deploy/storage.tf /tmp/itf/
-          # Strip features MiniStack doesn't support
-          sed -i '/^\s*replica {/d' /tmp/itf/storage.tf
-          sed -i '/^\s*point_in_time_recovery {/d' /tmp/itf/storage.tf
-          sed -i '/deletion_protection_enabled/d' /tmp/itf/storage.tf
-          sed -i '/stream_enabled\|stream_view_type/d' /tmp/itf/storage.tf
+          echo -n "dummy" > /tmp/itf/secrets/dkim-private-key.kms
           tofu -chdir=/tmp/itf init -reconfigure -input=false
-          tofu -chdir=/tmp/itf apply -auto-approve -input=false \
-            -var="aws_account_id=000000000000" \
+          tofu -chdir=/tmp/itf apply -auto-approve -input=false -refresh=false \
             -target=aws_dynamodb_table.accounts \
             -target=aws_dynamodb_table.signals \
+            -target=aws_dynamodb_table.processing \
             -target=aws_dynamodb_table.audit
         env:
           AWS_ACCESS_KEY_ID: ministack-test
@@ -112,8 +103,9 @@ jobs:
       - name: Read resource names from Tofu outputs
         id: tofu_outputs
         run: |
-          tofu -chdir=/tmp/itf output -json | \
-            jq -r 'to_entries[] | "\(.key)=\(.value.value)"' >> $GITHUB_OUTPUT
+          echo "ACCOUNTS_TABLE=$(tofu -chdir=/tmp/itf output -raw dynamodb_accounts_table)" >> $GITHUB_OUTPUT
+          echo "SIGNALS_TABLE=$(tofu -chdir=/tmp/itf output -raw dynamodb_signals_table)" >> $GITHUB_OUTPUT
+          echo "AUDIT_TABLE=$(tofu -chdir=/tmp/itf output -raw dynamodb_audit_table)" >> $GITHUB_OUTPUT
         env:
           AWS_ACCESS_KEY_ID: ministack-test
           AWS_SECRET_ACCESS_KEY: ministack-test
