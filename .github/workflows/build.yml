@@ -89,6 +89,11 @@ jobs:
           mkdir -p /tmp/itf
           cp deploy/*.tf /tmp/itf/
           cp deploy/integration/providers.tf /tmp/itf/providers.tf
+          # Strip features MiniStack doesn't support
+          sed -i '/^\s*replica {/d' /tmp/itf/storage.tf
+          sed -i '/^\s*point_in_time_recovery {/d' /tmp/itf/storage.tf
+          sed -i '/deletion_protection_enabled/d' /tmp/itf/storage.tf
+          sed -i '/stream_enabled\|stream_view_type/d' /tmp/itf/storage.tf
           tofu -chdir=/tmp/itf init -backend=false -reconfigure -input=false
           tofu -chdir=/tmp/itf apply -backend=false -auto-approve -input=false \
             -var="aws_account_id=000000000000" \
