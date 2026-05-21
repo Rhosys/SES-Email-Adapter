@@ -21,6 +21,7 @@ import { ApiDatabaseAdapter } from '../../src/database/adapters.js';
 import { AuthressAuthService } from '../../src/api/authress-auth.js';
 import { createApp } from '../../src/api/app.js';
 import { createMockLogger } from '../helpers/mock-logger.js';
+import type { MockLogger } from '../helpers/mock-logger.js';
 import { ok } from '../../src/errors.js';
 import type { AccessService } from '../../src/api/app.js';
 import { startMockAuthressServer } from './mock-authress.js';
@@ -35,6 +36,8 @@ export interface IntegrationHarness {
   mockAuthress: MockAuthressServer;
   /** Mutable stub — tests may reassign individual methods between calls. */
   access: AccessService;
+  /** Captured log calls — inspect after a failed assertion to diagnose server errors. */
+  logger: MockLogger;
   teardown(): Promise<void>;
 }
 
@@ -80,6 +83,7 @@ export async function createHarness(): Promise<IntegrationHarness> {
     app,
     mockAuthress,
     access,
+    logger,
     async teardown() {
       mockAuthress.close();
     },

@@ -123,9 +123,9 @@ jobs:
           AWS_ACCESS_KEY_ID: ministack-test
           AWS_SECRET_ACCESS_KEY: ministack-test
           AWS_REGION: eu-central-1
-          ACCOUNTS_TABLE: ${{ steps.tofu_outputs.outputs.dynamodb_accounts_table }}
-          SIGNALS_TABLE: ${{ steps.tofu_outputs.outputs.dynamodb_signals_table }}
-          AUDIT_TABLE: ${{ steps.tofu_outputs.outputs.dynamodb_audit_table }}
+          ACCOUNTS_TABLE: ${{ steps.tofu_outputs.outputs.ACCOUNTS_TABLE }}
+          SIGNALS_TABLE: ${{ steps.tofu_outputs.outputs.SIGNALS_TABLE }}
+          AUDIT_TABLE: ${{ steps.tofu_outputs.outputs.AUDIT_TABLE }}
           AUTHRESS_API_URL: http://localhost:4500
         run: npx tsx tests/integration/post-accounts.ts
 
