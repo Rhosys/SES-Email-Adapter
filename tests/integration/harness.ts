@@ -17,7 +17,6 @@
 import { AccountDatabase } from '../../src/database/account-database.js';
 import { ArcDatabase } from '../../src/database/arc-database.js';
 import { AuditDatabase } from '../../src/database/audit-database.js';
-import { ApiDatabaseAdapter } from '../../src/database/adapters.js';
 import { AuthressAuthService } from '../../src/api/authress-auth.js';
 import { createApp } from '../../src/api/app.js';
 import { createConsoleLogger } from './logger.js';
@@ -56,7 +55,6 @@ export async function createHarness(): Promise<IntegrationHarness> {
   const accountDb = new AccountDatabase();
   const arcDb = new ArcDatabase(logger);
   const auditDb = new AuditDatabase();
-  const store = new ApiDatabaseAdapter(arcDb, accountDb, auditDb);
 
   // Mutable stub — individual tests can override specific methods.
   const access: AccessService = {
@@ -70,7 +68,9 @@ export async function createHarness(): Promise<IntegrationHarness> {
   };
 
   const app = createApp({
-    store,
+    arcDb,
+    accountDb,
+    auditDb,
     auth: new AuthressAuthService(),
     access,
     logger,
