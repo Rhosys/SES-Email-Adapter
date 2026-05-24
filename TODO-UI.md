@@ -54,6 +54,8 @@ Surfaces: **Website** · **Extension** · **Mobile** · **CLI/Desktop**
   - Website
 - [ ] **Workflow-specific structured data cards** — `workflowData` fields should render as rich cards (tracking links, OTP codes, invoice amounts, flight details) instead of raw text
   - Website · Mobile
+- [ ] **Calendar invite card (from calendar signal)** — when an arc contains a calendar signal (`source: "signal"`, CalendarData present), render a calendar card in the signal thread. The card is driven by the **calendar signal** (not the email signal). Shows: event title, date/time, location, organizer display name, attendees. Includes accept/decline/tentative buttons that call the RSVP endpoint. Current RSVP state derived from the most recent `calendar_response` signal on the arc. CANCEL signals show a "cancelled" badge. The email signal renders normally as the email body — the calendar card appears as a separate signal card in the thread linked via `linkedSignalId`.
+  - Website · Mobile
 
 ---
 
