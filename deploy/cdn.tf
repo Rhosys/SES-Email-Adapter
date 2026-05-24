@@ -118,6 +118,17 @@ resource "aws_cloudfront_distribution" "api" {
     compress               = true
   }
 
+  # /.well-known/* — public metadata, routed to API Gateway (no auth)
+  ordered_cache_behavior {
+    path_pattern           = "/.well-known/*"
+    allowed_methods        = ["GET", "HEAD"]
+    cached_methods         = ["GET", "HEAD"]
+    target_origin_id       = local.api_gateway_origin_id
+    cache_policy_id        = aws_cloudfront_cache_policy.api_cache.id
+    viewer_protocol_policy = "redirect-to-https"
+    compress               = true
+  }
+
   # /api/* — API Gateway origin (all methods, no caching by default)
   ordered_cache_behavior {
     path_pattern           = "/api/*"

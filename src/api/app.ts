@@ -181,7 +181,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     return { valid: true };
   }
 
-  app.doc("/openapi.json", {
+  app.doc("/.well-known/openapi", {
     openapi: "3.1.0",
     info: { title: "SES Email Adapter", version: "1.0.0" },
   });
@@ -192,7 +192,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     c.res.headers.set("x-request-id", logger.getInvocationId());
   });
 
-  app.get("/", (c) => c.redirect("/api/openapi.json", 301));
+  app.get("/", (c) => c.redirect("/.well-known/openapi", 301));
 
   function err(c: Context<AppEnv>, status: number, title: string, errorCode?: string, details?: unknown) {
     return c.json(
