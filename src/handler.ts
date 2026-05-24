@@ -431,6 +431,12 @@ function wsDeny(methodArn: string): WsAuthorizerResult {
 
 // ---------------------------------------------------------------------------
 // HTTP API authorizer  (payload format 2.0 — simple response)
+//
+// ⚠️  NEVER add path-based logic to this authorizer. The authorizer's caching
+// key is the Authorization header ONLY. If you branch on rawPath here, API
+// Gateway will cache the first result and apply it to ALL paths with the same
+// token — including paths you intended to deny. Public routes MUST be excluded
+// from the authorizer at the API Gateway route level (Terraform), not here.
 // ---------------------------------------------------------------------------
 
 type HttpAuthorizerEvent = {

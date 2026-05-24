@@ -53,6 +53,17 @@ resource "aws_apigatewayv2_route" "catch_all" {
 }
 
 # ---------------------------------------------------------------------------
+# Public routes — no authorizer (discoverable metadata)
+# ---------------------------------------------------------------------------
+
+resource "aws_apigatewayv2_route" "well_known" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "GET /.well-known/{path+}"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda.id}"
+  # No authorization_type — public
+}
+
+# ---------------------------------------------------------------------------
 # Reindex operator API routes
 # ---------------------------------------------------------------------------
 
