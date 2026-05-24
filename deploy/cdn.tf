@@ -124,7 +124,7 @@ resource "aws_cloudfront_distribution" "api" {
     allowed_methods        = ["GET", "HEAD"]
     cached_methods         = ["GET", "HEAD"]
     target_origin_id       = local.api_gateway_origin_id
-    cache_policy_id        = aws_cloudfront_cache_policy.api_cache.id
+    cache_policy_id        = aws_cloudfront_cache_policy.content_cache.id
     viewer_protocol_policy = "redirect-to-https"
     compress               = true
   }

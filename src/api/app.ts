@@ -182,6 +182,10 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
   }
 
   // RFC 9727 — Well-Known URI for API Catalog
+  app.use("/.well-known/*", async (c, next) => {
+    await next();
+    c.res.headers.set("Cache-Control", "public, max-age=3600");
+  });
   app.doc("/.well-known/api-catalog", {
     openapi: "3.1.0",
     info: { title: "SES Email Adapter", version: "1.0.0" },
