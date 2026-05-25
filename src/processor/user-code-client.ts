@@ -1,5 +1,4 @@
 import { InvokeCommand, LambdaClient } from "@aws-sdk/client-lambda";
-import type { Signal, Arc } from "../types/index.js";
 import type { AstValidationResult } from "../isolated/ast-validator.js";
 
 // ---------------------------------------------------------------------------
@@ -10,10 +9,7 @@ export interface UserCodeRequest {
   tenantId: string;
   purpose: "rule_condition" | "template_function";
   functionCode: string;
-  executionContext: {
-    signal: Partial<Signal>;
-    arc: Partial<Arc>;
-  };
+  executionContext: Record<string, unknown>;
 }
 
 export interface ValidateAstRequest {

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ok } from "neverthrow";
-import { JsonLogicRuleEvaluator, stripSensitive } from "../../src/processor/rule-evaluator.js";
+import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
 import type { RuleAnnotationStore } from "../../src/processor/rule-evaluator.js";
 import type { UserCodeExecutorClient, UserCodeResponse } from "../../src/processor/user-code-client.js";
 import type { Rule, Signal, Arc } from "../../src/types/index.js";
@@ -261,93 +261,70 @@ describe("JsonLogicRuleEvaluator — JS condition path", () => {
  * Property 2: Context preparation produces exactly the specified fields
  * Validates: Requirements 4.1, 4.2, 4.4
  */
-describe("stripSensitive — Property 2: context preparation produces exactly the specified fields", () => {
+describe("JS rule context — Property 2: context preparation produces exactly the specified fields", () => {
   const EXPECTED_SIGNAL_KEYS = ["id", "from", "subject", "summary", "spamScore", "workflow", "recipientAddress", "workflowData"];
   const EXPECTED_ARC_KEYS = ["id", "labels", "urgency", "summary", "workflow", "status"];
 
-  const signalCases = [
-    {
-      label: "full Signal → output has exactly the 8 specified fields",
-      input: () => makeSignal({
-        data: {
-          s3Key: "emails/msg.eml",
-          embeddings: { "model-v1": [0.1, 0.2] },
-          headers: { "x-custom": "value" },
-        },
-      }),
-      expectedKeys: EXPECTED_SIGNAL_KEYS,
-      expectedValues: (signal: Signal) => ({
-        id: signal.id,
-        from: signal.data.from,
-        subject: signal.data.subject,
-        summary: signal.data.summary,
-        spamScore: signal.data.spamScore,
-        workflow: signal.data.workflow,
-        recipientAddress: signal.data.recipientAddress,
-        workflowData: signal.data.workflowData,
-      }),
-      absentKeys: ["s3Key", "embeddings", "headers", "accountId", "source", "receivedAt", "to", "cc", "textBody", "attachments", "status", "createdAt"],
-    },
-    {
-      label: "Signal with s3Key/embeddings/headers → none appear in output",
-      input: () => makeSignal({
-        data: {
-          s3Key: "secret/path.eml",
-          embeddings: { "model": [1, 2, 3] },
-          headers: { "x-mailer": "test", "dkim-signature": "abc" },
-        },
-      }),
-      expectedKeys: EXPECTED_SIGNAL_KEYS,
-      expectedValues: (signal: Signal) => ({
-        id: signal.id,
-        from: signal.data.from,
-        subject: signal.data.subject,
-        summary: signal.data.summary,
-        spamScore: signal.data.spamScore,
-        workflow: signal.data.workflow,
-        recipientAddress: signal.data.recipientAddress,
-        workflowData: signal.data.workflowData,
-      }),
-      absentKeys: ["s3Key", "embeddings", "headers"],
-    },
-  ] as const;
+  it("executionContext.signal has exactly the 8 specified fields — sensitive fields excluded", async () => {
+    const mockExecutor = { invoke: vi.fn().mockResolvedValue({ success: true, purpose: "rule_condition", result: false }), validateAst: vi.fn(), validateAstBatch: vi.fn() };
+    const evaluator = new JsonLogicRuleEvaluator(createMockLogger(), mockExecutor);
 
-  it.each(signalCases)("$label", ({ input, expectedKeys, expectedValues, absentKeys }) => {
-    const signal = input();
-    const stripped = stripSensitive(signal);
+    const signal = makeSignal({
+      data: {
+        s3Key: "emails/msg.eml",
+        embeddings: { "model-v1": [0.1, 0.2] },
+        headers: { "x-custom": "value" },
+      },
+    });
+    const arc = makeArc({ labels: ["important", "billing"], urgency: "high" });
+    const rule: Rule = { id: "r-1", accountId: "acc-1", name: "test", condition: "return false", conditionType: "js", actions: [], status: "enabled", priorityOrder: 1, createdAt: "", updatedAt: "" };
 
-    expect(Object.keys(stripped).sort()).toEqual([...expectedKeys].sort());
-    expect(stripped).toEqual(expectedValues(signal));
-    for (const key of absentKeys) {
-      expect(stripped).not.toHaveProperty(key);
-    }
+    await evaluator.evaluate(rule, { signal, arc, isMatchedArc: false });
+
+    const ctx = mockExecutor.invoke.mock.calls[0]![0].executionContext;
+    expect(Object.keys(ctx.signal).sort()).toEqual([...EXPECTED_SIGNAL_KEYS].sort());
+    expect(ctx.signal).toEqual({
+      id: signal.id,
+      from: signal.data.from,
+      subject: signal.data.subject,
+      summary: signal.data.summary,
+      spamScore: signal.data.spamScore,
+      workflow: signal.data.workflow,
+      recipientAddress: signal.data.recipientAddress,
+      workflowData: signal.data.workflowData,
+    });
+    // Sensitive fields must not leak
+    expect(ctx.signal).not.toHaveProperty("s3Key");
+    expect(ctx.signal).not.toHaveProperty("embeddings");
+    expect(ctx.signal).not.toHaveProperty("headers");
+    expect(ctx.signal).not.toHaveProperty("accountId");
+    expect(ctx.signal).not.toHaveProperty("textBody");
+    expect(ctx.signal).not.toHaveProperty("attachments");
   });
 
-  const arcCases = [
-    {
-      label: "full Arc → output has exactly {id, labels, urgency, summary, workflow, status}",
-      input: () => makeArc({ labels: ["important", "billing"], urgency: "high" }),
-      expectedKeys: EXPECTED_ARC_KEYS,
-      expectedValues: (arc: Arc) => ({
-        id: arc.id,
-        labels: arc.labels,
-        urgency: arc.urgency,
-        summary: arc.summary,
-        workflow: arc.workflow,
-        status: arc.status,
-      }),
-      absentKeys: ["accountId", "lastSignalAt", "createdAt", "updatedAt"],
-    },
-  ] as const;
+  it("executionContext.arc has exactly {id, labels, urgency, summary, workflow, status}", async () => {
+    const mockExecutor = { invoke: vi.fn().mockResolvedValue({ success: true, purpose: "rule_condition", result: false }), validateAst: vi.fn(), validateAstBatch: vi.fn() };
+    const evaluator = new JsonLogicRuleEvaluator(createMockLogger(), mockExecutor);
 
-  it.each(arcCases)("$label", ({ input, expectedKeys, expectedValues, absentKeys }) => {
-    const arc = input();
-    const stripped = stripSensitive(arc);
+    const signal = makeSignal({});
+    const arc = makeArc({ labels: ["important", "billing"], urgency: "high" });
+    const rule: Rule = { id: "r-1", accountId: "acc-1", name: "test", condition: "return false", conditionType: "js", actions: [], status: "enabled", priorityOrder: 1, createdAt: "", updatedAt: "" };
 
-    expect(Object.keys(stripped).sort()).toEqual([...expectedKeys].sort());
-    expect(stripped).toEqual(expectedValues(arc));
-    for (const key of absentKeys) {
-      expect(stripped).not.toHaveProperty(key);
-    }
+    await evaluator.evaluate(rule, { signal, arc, isMatchedArc: false });
+
+    const ctx = mockExecutor.invoke.mock.calls[0]![0].executionContext;
+    expect(Object.keys(ctx.arc).sort()).toEqual([...EXPECTED_ARC_KEYS].sort());
+    expect(ctx.arc).toEqual({
+      id: arc.id,
+      labels: arc.labels,
+      urgency: arc.urgency,
+      summary: arc.summary,
+      workflow: arc.workflow,
+      status: arc.status,
+    });
+    expect(ctx.arc).not.toHaveProperty("accountId");
+    expect(ctx.arc).not.toHaveProperty("lastSignalAt");
+    expect(ctx.arc).not.toHaveProperty("createdAt");
+    expect(ctx.arc).not.toHaveProperty("updatedAt");
   });
 });
