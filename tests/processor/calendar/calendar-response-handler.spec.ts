@@ -8,11 +8,23 @@ import { buildProxyUid } from "../../../src/processor/calendar/proxy-uid.js";
 import { generateId, generateAccountId } from "../../../src/utils/id.js";
 
 // ---------------------------------------------------------------------------
+// Mock hmac-secret.ts — deterministic HMAC for tests without real KMS
+// ---------------------------------------------------------------------------
+
+import { createHmac } from "node:crypto";
+
+vi.mock("../../../src/processor/calendar/hmac-secret.js", () => ({
+  computeHmac16: (payload: string) =>
+    Promise.resolve(createHmac("sha256", new Uint8Array(32)).update(payload).digest("base64url").slice(0, 16)),
+  validateHmac16: (payload: string, hmac16: string) =>
+    Promise.resolve(createHmac("sha256", new Uint8Array(32)).update(payload).digest("base64url").slice(0, 16) === hmac16),
+}));
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 const SERVICE_DOMAIN = "platform.email.rhosys.cloud";
-const HMAC_SECRET = new Uint8Array(32); // 32 zero bytes — deterministic for tests
 
 // Valid IDs generated with the real algorithm from utils/id.ts
 const VALID_ARC_ID = generateId("arc-");
@@ -45,7 +57,6 @@ function makeMessage(destination: string[]): InboundSignalMessage {
 
 function makeDeps(overrides: Partial<CalendarResponseHandlerDeps> = {}): CalendarResponseHandlerDeps {
   return {
-    hmacSecret: HMAC_SECRET,
     serviceDomain: SERVICE_DOMAIN,
     arcDatabase: {
       getArc: vi.fn().mockResolvedValue(ok({
@@ -124,11 +135,10 @@ describe("validateId — address pattern routing", () => {
   ])("$reason", async ({ recipient, routed }) => {
     const deps = makeDeps();
     const logger = makeLogger();
-    const proxyUid = buildProxyUid({
+    const proxyUid = await buildProxyUid({
       accountId: VALID_ACC_ID,
       arcId: VALID_ARC_ID,
       originalVeventUid: "uid-original-123",
-      hmacSecret: HMAC_SECRET,
       serviceDomain: SERVICE_DOMAIN,
     });
     const icsBytes = buildReplyIcsBytes(proxyUid);
@@ -189,22 +199,16 @@ describe("handleCalendarResponse — stateless validation gate", () => {
     // Build .ics with valid or tampered HMAC
     let proxyUid: string;
     if (hmacValid) {
-      proxyUid = buildProxyUid({
+      proxyUid = await buildProxyUid({
         accountId: accId,
         arcId,
         originalVeventUid: "uid-original-123",
-        hmacSecret: HMAC_SECRET,
         serviceDomain: SERVICE_DOMAIN,
       });
     } else {
-      // Tampered HMAC — use wrong secret
-      proxyUid = buildProxyUid({
-        accountId: accId,
-        arcId,
-        originalVeventUid: "uid-original-123",
-        hmacSecret: new Uint8Array(32).fill(0xFF),
-        serviceDomain: SERVICE_DOMAIN,
-      });
+      // Tampered HMAC — manually construct UID with wrong HMAC suffix
+      const payload = `${accId}.${arcId}.uid-original-123`;
+      proxyUid = `${payload}.AAAAAAAAAAAAAAAA@${SERVICE_DOMAIN}`;
     }
 
     const icsBytes = buildReplyIcsBytes(proxyUid);
@@ -242,11 +246,10 @@ describe("handleCalendarResponse — happy path", () => {
     const deps = makeDeps();
     const logger = makeLogger();
 
-    const proxyUid = buildProxyUid({
+    const proxyUid = await buildProxyUid({
       accountId: VALID_ACC_ID,
       arcId: VALID_ARC_ID,
       originalVeventUid: "uid-original-123",
-      hmacSecret: HMAC_SECRET,
       serviceDomain: SERVICE_DOMAIN,
     });
 
