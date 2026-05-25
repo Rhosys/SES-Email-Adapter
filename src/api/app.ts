@@ -10,7 +10,8 @@ import { computeUndoWindowSeconds } from "./undo-window.js";
 import type { AuditEvent, AuditDatabase } from "../database/audit-database.js";
 import type { Result } from "neverthrow";
 import type { DbError, NotFoundError, AuthressServiceError, AuthError } from "../errors.js";
-import type { Arc, Signal, View, Label, Rule, Domain, DnsRecord, Account, Page, PageParams, ArcStatus, Workflow, WorkflowData, Alias, AliasSender, SenderPolicy, VerifiedForwardingAddress, Pagination, EmailTemplate } from "../types/index.js";
+import type { Arc, Signal, View, Label, Rule, Domain, DnsRecord, Account, Page, PageParams, ArcStatus, Workflow, WorkflowData, Alias, AliasSender, SenderPolicy, VerifiedForwardingAddress, Pagination, EmailTemplate, CalendarEventData, CalendarResponseData, DomainMisconfigurationData } from "../types/index.js";
+import { isCalendarEventSignal } from "../types/index.js";
 import type { UpdateArcFields, ArcDatabase } from "../database/arc-database.js";
 import type { AccountDatabase } from "../database/account-database.js";
 import type { Logger } from "../logger.js";
@@ -25,6 +26,10 @@ import type { BillingPlan } from "../embedding/retention-tier.js";
 import { parseStatsRow } from "../database/stats-writer.js";
 import { isValidEmail } from "../email/validate-email.js";
 import type { DraftSendDispatcher } from "../processor/draft-send-dispatcher.js";
+import type { EmailService } from "../email/email-service.js";
+import type { sendRsvp as SendRsvpFn } from "../processor/calendar/rsvp-composer.js";
+import type { PostApprovalCalendarHandlerDeps } from "../processor/calendar/post-approval-handler.js";
+import { handlePostApprovalCalendar } from "../processor/calendar/post-approval-handler.js";
 
 // ---------------------------------------------------------------------------
 // Job Dispatcher interface (used by reindex route)
@@ -49,6 +54,7 @@ import {
   InviteUserRequest, UpdateUserRequest,
   CreateSenderRequest, CreateTemplateRequest, ReplaceTemplateRequest, UpdateTemplateRequest,
   CreateDraftSignalRequest, ReplaceDraftSignalRequest,
+  RsvpRequest,
 } from "./requests.js";
 
 // ---------------------------------------------------------------------------
@@ -123,6 +129,9 @@ interface AppDeps {
   appBaseUrl?: string;
   astValidator?: UserCodeExecutorClient;
   billingHandler?: BillingHandler;
+  emailService?: EmailService;
+  rsvpComposer?: typeof SendRsvpFn;
+  postApprovalCalendarDeps?: PostApprovalCalendarHandlerDeps;
 }
 
 type AppEnv = { Variables: { auth: AuthContext; authorizationVerified?: boolean } };
@@ -135,7 +144,7 @@ function page<K extends string, T>(key: K, items: T[], nextCursor?: string): Rec
   return { [key]: items, pagination: { cursor: nextCursor ?? null } } as Record<K, T[]> & { pagination: Pagination };
 }
 
-export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, verificationMailer, jobDispatcher, draftSendDispatcher, accountCreationStarter, appBaseUrl, astValidator, billingHandler }: AppDeps) {
+export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, verificationMailer, jobDispatcher, draftSendDispatcher, accountCreationStarter, appBaseUrl, astValidator, billingHandler, emailService, rsvpComposer, postApprovalCalendarDeps }: AppDeps) {
   const app = new OpenAPIHono<AppEnv>().basePath('/api');
 
   // Helper: validate code AST via the isolated Lambda
@@ -574,6 +583,19 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
       if (saveSenderResult.isErr()) return err(c, 500, "Internal Server Error");
     }
 
+    // Post-approval calendar forwarding — process .ics attachment and forward if present
+    if (postApprovalCalendarDeps) {
+      const approvedSignal: Signal = { ...signal, status: "active", arcId: arc.id };
+      handlePostApprovalCalendar(approvedSignal, arc, postApprovalCalendarDeps).catch(e => {
+        logger.warn("Post-approval calendar handler threw unexpectedly.", {
+          code: "api.quarantine_response.calendar_error",
+          accountId,
+          signalId: signal.id,
+          error: e,
+        });
+      });
+    }
+
     return c.json({ arc, signal: { ...signal, status: "active", arcId: arc.id } });
   });
 
@@ -669,6 +691,117 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     const deleteResult = await arcDb.deleteSignal(accountId, signal.signalLookupId);
     if (deleteResult.isErr()) return err(c, 500, "Internal Server Error");
     return new Response(null, { status: 204 });
+  });
+
+  // -------------------------------------------------------------------------
+  // Calendar RSVP  —  /accounts/:accountId/arcs/:arcId/signals/:id/rsvp
+  // -------------------------------------------------------------------------
+
+  app.post("/accounts/:accountId/arcs/:arcId/signals/:id/rsvp", authz("signals:write", c => `accounts/${c.req.param("accountId")}/arcs/${c.req.param("arcId")}/signals/${c.req.param("id")}`), async (c) => {
+    const { accountId } = c.get("auth");
+    if (!emailService || !rsvpComposer) return err(c, 501, "RSVP not configured");
+
+    // Validate arc
+    const arcResult = await arcDb.getArc(accountId, c.req.param("arcId"));
+    if (arcResult.isErr()) return err(c, 500, "Internal Server Error");
+    const arc = arcResult.value;
+    if (!arc) return err(c, 404, "Arc not found", "ARC_NOT_FOUND");
+    if (arc.accountId !== accountId) return err(c, 403, "Forbidden");
+
+    // Validate signal — must be a calendar_event signal
+    const signalResult = await arcDb.getSignalById(accountId, c.req.param("id"), c.req.param("arcId"));
+    if (signalResult.isErr()) return err(c, 500, "Internal Server Error");
+    const signal = signalResult.value;
+    if (!signal) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
+    if (signal.arcId !== arc.id) return err(c, 400, "Signal does not belong to this arc", "SIGNAL_ARC_MISMATCH");
+    if (!isCalendarEventSignal(signal)) return err(c, 400, "Signal is not a calendar event", "NOT_CALENDAR_EVENT");
+
+    const calendarData = signal.data;
+    const body = await zParse(RsvpRequest, c.req.raw);
+
+    // Determine alias address — the recipientAddress from the originating email signal
+    // The alias is the address that received the original invite
+    const aliasAddress = calendarData.organizer ? `${arc.id}@${accountId}.${process.env["CALENDAR_SERVICE_DOMAIN"] ?? "cal.numaeel.com"}` : "";
+
+    // Look up the originating email signal to get the actual alias address
+    const emailSignalResult = await arcDb.getSignalById(accountId, calendarData.linkedSignalId, arc.id);
+    const emailSignal = emailSignalResult.isOk() ? emailSignalResult.value : null;
+    const recipientAddress = emailSignal?.data && "recipientAddress" in emailSignal.data ? (emailSignal.data as { recipientAddress: string }).recipientAddress : "";
+
+    if (!recipientAddress) return err(c, 400, "Cannot determine alias address for RSVP", "NO_ALIAS_ADDRESS");
+
+    // Check domain sender setup (DKIM + SPF) — domain misconfiguration check
+    const aliasDomain = recipientAddress.split("@")[1] ?? "";
+    const domainResult = await accountDb.getDomainByName(accountId, aliasDomain);
+    if (domainResult.isErr()) return err(c, 500, "Internal Server Error");
+    const domain = domainResult.value;
+
+    if (!domain?.senderSetupComplete) {
+      // Domain misconfiguration — create domain_misconfiguration signal, return 422
+      const now = DateTime.utc().toISO()!;
+      const misconfigSignalId = generateId("sgn-");
+      const misconfigSignal: Signal<DomainMisconfigurationData> = {
+        id: misconfigSignalId,
+        signalLookupId: misconfigSignalId,
+        arcId: arc.id,
+        accountId,
+        source: "signal",
+        type: "domain_misconfiguration",
+        status: "active",
+        createdAt: now,
+        data: {
+          reason: "DKIM + SPF not configured for alias domain",
+          linkedSignalId: signal.id,
+          aliasAddress: recipientAddress,
+          domain: aliasDomain,
+        },
+      };
+      await arcDb.saveSignal(misconfigSignal);
+      return c.json({ title: "Domain misconfiguration", errorCode: "DOMAIN_MISCONFIGURATION", details: { domain: aliasDomain, reason: "DKIM + SPF not configured for alias domain" } }, 422);
+    }
+
+    // Send-first: call RSVP_Composer
+    const rsvpResult = await rsvpComposer(
+      {
+        decision: body.decision,
+        originalCalendarData: calendarData,
+        aliasAddress: recipientAddress,
+        organizerAddress: calendarData.organizer,
+        fromAddress: recipientAddress,
+      },
+      { emailService },
+    );
+
+    // On send failure: return error, do NOT create signal (Property 13)
+    if (rsvpResult.isErr()) {
+      return c.json({ title: "Failed to send RSVP", errorCode: "RSVP_SEND_FAILED" }, 502);
+    }
+
+    // On success: create calendar_response signal
+    const now = DateTime.utc().toISO()!;
+    const responseSignalId = generateId("sgn-");
+    const responseSignal: Signal<CalendarResponseData> = {
+      id: responseSignalId,
+      signalLookupId: responseSignalId,
+      arcId: arc.id,
+      accountId,
+      source: "user",
+      type: "calendar_response",
+      status: "active",
+      createdAt: now,
+      data: {
+        decision: body.decision,
+        respondedAt: now,
+        veventUid: calendarData.originalVeventUid,
+        linkedSignalId: signal.id,
+        sendStatus: "sent",
+      },
+    };
+
+    const saveResult = await arcDb.saveSignal(responseSignal);
+    if (saveResult.isErr()) return err(c, 500, "Internal Server Error");
+
+    return c.json(responseSignal);
   });
 
   // -------------------------------------------------------------------------

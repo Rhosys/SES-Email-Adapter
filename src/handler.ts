@@ -50,6 +50,7 @@ import type { ReindexSegmentMessage } from "./jobs/reindex/reindex-dispatcher.js
 import { DraftSendDispatcher } from "./processor/draft-send-dispatcher.js";
 import type { DraftSendPayload } from "./processor/draft-send-dispatcher.js";
 import { DraftSendWorker } from "./processor/draft-send-worker.js";
+import { sendRsvp } from "./processor/calendar/rsvp-composer.js";
 import { RequestLogger } from "./logger.js";
 import { DateTime } from "luxon";
 
@@ -210,6 +211,8 @@ const app = createApp({
   accountCreationStarter,
   appBaseUrl: APP_BASE_URL,
   astValidator: new LambdaUserCodeExecutor(lambda, USER_CODE_EXECUTOR_ARN),
+  emailService,
+  rsvpComposer: sendRsvp,
 });
 
 // ---------------------------------------------------------------------------

@@ -252,6 +252,13 @@ export const VerifyForwardingAddressRequest = z.object({
 });
 export type VerifyForwardingAddressRequest = z.infer<typeof VerifyForwardingAddressRequest>;
 
+// ---- Calendar RSVP ----
+
+export const RsvpRequest = z.object({
+  decision: z.enum(["accepted", "declined", "tentative"]),
+});
+export type RsvpRequest = z.infer<typeof RsvpRequest>;
+
 // ---- Users ----
 
 export const InviteUserRequest = z.object({
