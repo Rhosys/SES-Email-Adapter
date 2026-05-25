@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { createHash } from "node:crypto";
-import { generateId } from "../../src/utils/id.js";
+import { generateId, generateAccountId, validateAccountId } from "../../src/utils/id.js";
 
 const FLICKR_BASE58 = "123456789abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ";
 const BASE58_SET = new Set(FLICKR_BASE58);
@@ -94,6 +94,58 @@ describe("generateId", () => {
       const corruptedCheckChars = [...hash].filter(c => BASE58_SET.has(c)).slice(0, 3).join("");
 
       expect(corruptedCheckChars).not.toBe(originalCheckChars);
+    });
+  });
+});
+
+describe("validateAccountId", () => {
+  describe("roundtrip: generateAccountId → validateAccountId", () => {
+    it("validates a freshly generated account ID", () => {
+      const id = generateAccountId();
+      expect(validateAccountId(id)).toBe(true);
+    });
+  });
+
+  describe("static known-good ID", () => {
+    it("validates a hardcoded account ID", () => {
+      expect(validateAccountId("acc-znwghtnifmqsx")).toBe(true);
+    });
+  });
+
+  describe("tampered checksum", () => {
+    it("rejects an account ID with modified check chars", () => {
+      const id = generateAccountId();
+      const tampered = id.slice(0, -3) + "zzz";
+      expect(validateAccountId(tampered)).toBe(false);
+    });
+  });
+
+  describe("wrong prefix", () => {
+    it("rejects an ID that does not start with acc-", () => {
+      const id = generateAccountId();
+      const withoutPrefix = id.slice(4);
+      expect(validateAccountId(`arc-${withoutPrefix}`)).toBe(false);
+    });
+  });
+
+  describe("wrong length", () => {
+    it.each([
+      { label: "too short (prefix + 12 chars)", id: "acc-abcdefghij12" },
+      { label: "too long (prefix + 14 chars)", id: "acc-abcdefghij1234" },
+      { label: "just prefix", id: "acc-" },
+      { label: "empty string", id: "" },
+    ])("rejects $label", ({ id }) => {
+      expect(validateAccountId(id)).toBe(false);
+    });
+  });
+
+  describe("invalid chars", () => {
+    it.each([
+      { label: "uppercase letter", id: "acc-Abcdefghij123" },
+      { label: "special character", id: "acc-abcdefghi!123" },
+      { label: "space", id: "acc-abcdefghi 123" },
+    ])("rejects ID with $label", ({ id }) => {
+      expect(validateAccountId(id)).toBe(false);
     });
   });
 });

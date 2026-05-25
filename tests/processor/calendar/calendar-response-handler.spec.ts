@@ -5,7 +5,7 @@ import type { InboundSignalMessage } from "../../../src/processor/processor.js";
 import type { Logger } from "../../../src/logger.js";
 import { ok } from "../../../src/errors.js";
 import { buildProxyUid } from "../../../src/processor/calendar/proxy-uid.js";
-import { generateId } from "../../../src/utils/id.js";
+import { generateId, generateAccountId } from "../../../src/utils/id.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -16,7 +16,7 @@ const HMAC_SECRET = new Uint8Array(32); // 32 zero bytes — deterministic for t
 
 // Valid IDs generated with the real algorithm from utils/id.ts
 const VALID_ARC_ID = generateId("arc-");
-const VALID_ACC_ID = generateId("acc-");
+const VALID_ACC_ID = generateAccountId();
 
 function makeLogger(): Logger {
   return {
