@@ -265,7 +265,7 @@ describe("SignalProcessor", () => {
       const saved = vi.mocked(arcDb.saveSignal).mock.calls[0]![0] as Signal;
       expect(saved.id).toMatch(/^sgn-/);
       expect(saved.source).toBe("email");
-      expect(saved.workflow).toBe("conversation");
+      expect(saved.data.workflow).toBe("conversation");
       expect(saved.accountId).toBe(TEST_ACCOUNT_ID);
     });
 
@@ -328,15 +328,15 @@ describe("SignalProcessor", () => {
       await processor.processRecord(makeMessage(), 1);
 
       const signal = vi.mocked(arcDb.saveSignal).mock.calls[0]![0] as Signal;
-      expect(signal.from.address).toBe("sender@example.com");
-      expect(signal.subject).toBe("Test email");
+      expect(signal.data.from.address).toBe("sender@example.com");
+      expect(signal.data.subject).toBe("Test email");
     });
 
     it("sets recipientAddress from the SQS destination field", async () => {
       await processor.processRecord(makeMessage({ destination: ["inbox@customer.com"] }), 1);
 
       const signal = vi.mocked(arcDb.saveSignal).mock.calls[0]![0] as Signal;
-      expect(signal.recipientAddress).toBe("inbox@customer.com");
+      expect(signal.data.recipientAddress).toBe("inbox@customer.com");
     });
   });
 
@@ -501,10 +501,10 @@ describe("SignalProcessor", () => {
       await processor.processRecord(makeMessage(), 1);
 
       const signal = vi.mocked(arcDb.saveSignal).mock.calls[0]![0] as Signal;
-      expect(signal.matchedRules).toHaveLength(1);
-      expect(signal.matchedRules![0]!.ruleId).toBe("rule-label");
-      expect(signal.matchedRules![0]!.labelsAdded).toContain("billing");
-      expect(signal.matchedRules![0]!.statusChange).toBeUndefined();
+      expect(signal.data.matchedRules).toHaveLength(1);
+      expect(signal.data.matchedRules![0]!.ruleId).toBe("rule-label");
+      expect(signal.data.matchedRules![0]!.labelsAdded).toContain("billing");
+      expect(signal.data.matchedRules![0]!.statusChange).toBeUndefined();
     });
 
     it("writes statusChange on the matching rule for a quarantined signal", async () => {
@@ -529,8 +529,8 @@ describe("SignalProcessor", () => {
 
       const signal = vi.mocked(arcDb.saveSignal).mock.calls[0]![0] as Signal;
       expect(signal.status).toBe("quarantine_visible");
-      expect(signal.matchedRules).toHaveLength(1);
-      expect(signal.matchedRules![0]!.statusChange).toBe("quarantine_visible");
+      expect(signal.data.matchedRules).toHaveLength(1);
+      expect(signal.data.matchedRules![0]!.statusChange).toBe("quarantine_visible");
     });
 
     it("does not include rules that did not match", async () => {
@@ -541,7 +541,7 @@ describe("SignalProcessor", () => {
       await processor.processRecord(makeMessage(), 1);
 
       const signal = vi.mocked(arcDb.saveSignal).mock.calls[0]![0] as Signal;
-      expect(signal.matchedRules?.map((r) => r.ruleId)).toEqual(["r-match"]);
+      expect(signal.data.matchedRules?.map((r) => r.ruleId)).toEqual(["r-match"]);
     });
   });
 
@@ -575,7 +575,7 @@ describe("SignalProcessor", () => {
 
       expect(sqsDispatcher.sendMessage).toHaveBeenCalledOnce();
       const payload = vi.mocked(sqsDispatcher.sendMessage).mock.calls[0]![0];
-      const forwardActions = payload.signal.matchedRules?.flatMap((r) => r.actions.filter((a) => a.type === "forward"));
+      const forwardActions = payload.signal.data.matchedRules?.flatMap((r) => r.actions.filter((a) => a.type === "forward"));
       expect(forwardActions).toContainEqual({ type: "forward", value: "backup@personal.com" });
     });
 
@@ -600,7 +600,7 @@ describe("SignalProcessor", () => {
 
       expect(sqsDispatcher.sendMessage).toHaveBeenCalledOnce();
       const payload = vi.mocked(sqsDispatcher.sendMessage).mock.calls[0]![0];
-      const forwardActions = payload.signal.matchedRules?.flatMap((r) => r.actions.filter((a) => a.type === "forward"));
+      const forwardActions = payload.signal.data.matchedRules?.flatMap((r) => r.actions.filter((a) => a.type === "forward"));
       expect(forwardActions).toContainEqual({ type: "forward", value: "first@example.com" });
       expect(forwardActions).toContainEqual({ type: "forward", value: "second@example.com" });
     });
@@ -623,7 +623,7 @@ describe("SignalProcessor", () => {
 
       expect(sqsDispatcher.sendMessage).toHaveBeenCalledOnce();
       const payload = vi.mocked(sqsDispatcher.sendMessage).mock.calls[0]![0];
-      const forwardActions = payload.signal.matchedRules?.flatMap((r) => r.actions.filter((a) => a.type === "forward")) ?? [];
+      const forwardActions = payload.signal.data.matchedRules?.flatMap((r) => r.actions.filter((a) => a.type === "forward")) ?? [];
       expect(forwardActions).toHaveLength(0);
     });
 

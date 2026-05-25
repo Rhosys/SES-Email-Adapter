@@ -108,31 +108,36 @@ describe("Side effect caller logging", () => {
     return { findMatch: vi.fn().mockReturnValue(Promise.resolve(ok(null))), upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) };
   }
 
-  function makeSignal(overrides: Partial<Signal> = {}): Signal {
+  function makeSignal(overrides: { data?: Partial<Signal["data"]> } & Partial<Omit<Signal, "data">> = {}): Signal {
+    const { data: dataOverrides, ...baseOverrides } = overrides;
     return {
       id: "sgn-testmsg001",
       signalLookupId: "ses-test-msg",
       accountId: TEST_ACCOUNT_ID,
       source: "email",
-      receivedAt: "2024-01-15T10:00:00Z",
-      from: { address: "sender@example.com", name: "Sender" },
-      to: [{ address: "user@example.com" }],
-      cc: [],
-      subject: "Test email",
-      textBody: "Hello world",
-      attachments: [],
-      headers: {},
-      recipientAddress: "user@example.com",
-      workflow: "conversation",
-      workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
-      spamScore: 0.05,
-      summary: "A test email.",
-      s3Key: "emails/test-msg",
+      type: "email",
       status: "active",
       createdAt: "2024-01-15T10:00:00Z",
-      matchedRules: [],
-      ...overrides,
-    };
+      ...baseOverrides,
+      data: {
+        receivedAt: "2024-01-15T10:00:00Z",
+        from: { address: "sender@example.com", name: "Sender" },
+        to: [{ address: "user@example.com" }],
+        cc: [],
+        subject: "Test email",
+        textBody: "Hello world",
+        attachments: [],
+        headers: {},
+        recipientAddress: "user@example.com",
+        workflow: "conversation",
+        workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
+        spamScore: 0.05,
+        summary: "A test email.",
+        s3Key: "emails/test-msg",
+        matchedRules: [],
+        ...dataOverrides,
+      },
+    } as Signal;
   }
 
   function makeArc(): Arc {
@@ -237,7 +242,7 @@ describe("Side effect caller logging", () => {
 
     // Signal with a forward action in matchedRules
     const signal = makeSignal({
-      matchedRules: [{ ruleId: "rule-fwd", actions: [{ type: "forward", value: "fwd@example.com" }], labelsAdded: [] }],
+      data: { matchedRules: [{ ruleId: "rule-fwd", actions: [{ type: "forward", value: "fwd@example.com" }], labelsAdded: [] }] },
     });
     const payload: SideEffectPayload = { signal, arc: makeArc() };
     await processor.processSideEffect(payload);

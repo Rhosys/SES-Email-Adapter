@@ -382,17 +382,17 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
       if (signalsResult.isErr()) return err(c, 500, "Internal Server Error");
       const signal = signalsResult.value.items[0];
       if (signal) {
-        const senderDomain = signal.from.address.includes("@") ? signal.from.address.split("@").pop()! : signal.from.address;
+        const senderDomain = signal.data.from.address.includes("@") ? signal.data.from.address.split("@").pop()! : signal.data.from.address;
         const senderETLD1 = getDomain(senderDomain) ?? senderDomain;
-        const saveSenderResult = await accountDb.saveSender(accountId, signal.recipientAddress, senderETLD1, "violate_report");
+        const saveSenderResult = await accountDb.saveSender(accountId, signal.data.recipientAddress, senderETLD1, "violate_report");
         if (saveSenderResult.isErr()) return err(c, 500, "Internal Server Error");
         logger.track("Arc reported as GDPR violation. Sender domain blocked with violate_report policy and arc deleted.", {
           code: "api.arc.violate_report",
           accountId,
           arcId: arc.id,
           senderDomain: senderETLD1,
-          recipientAddress: signal.recipientAddress,
-          fromAddress: signal.from.address,
+          recipientAddress: signal.data.recipientAddress,
+          fromAddress: signal.data.from.address,
         });
       }
       // Persist as deleted — violate_report is the user intent, deleted is the arc state
@@ -448,22 +448,25 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
       arcId: arc.id,
       accountId,
       source: "user",
-      receivedAt: now,
-      from: body.from as Signal["from"],
-      to: body.to as Signal["to"],
-      cc: [],
-      subject: body.subject,
-      ...(body.textBody != null ? { textBody: body.textBody } : {}),
-      attachments: [],
-      headers: {},
-      recipientAddress: body.from.address,
-      workflow: arc.workflow,
-      workflowData: { workflow: arc.workflow } as Signal["workflowData"],
-      spamScore: 0,
-      summary: "",
-      s3Key: "",
+      type: "email",
       status: "draft",
       createdAt: now,
+      data: {
+        receivedAt: now,
+        from: body.from as Signal["data"]["from"],
+        to: body.to as Signal["data"]["to"],
+        cc: [],
+        subject: body.subject,
+        ...(body.textBody != null ? { textBody: body.textBody } : {}),
+        attachments: [],
+        headers: {},
+        recipientAddress: body.from.address,
+        workflow: arc.workflow,
+        workflowData: { workflow: arc.workflow } as Signal["data"]["workflowData"],
+        spamScore: 0,
+        summary: "",
+        s3Key: "",
+      },
     };
     const createResult = await arcDb.createSignal(signal);
     if (createResult.isErr()) return err(c, 500, "Internal Server Error");
@@ -486,8 +489,8 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     if (signal.status !== "draft") return err(c, 400, "Only draft signals can be replaced", "SIGNAL_NOT_DRAFT");
     const body = await zParse(ReplaceDraftSignalRequest, c.req.raw);
     const updateResult = await arcDb.updateSignal(accountId, signal.signalLookupId, {
-      from: body.from as Signal["from"],
-      to: body.to as Signal["to"],
+      from: body.from as Signal["data"]["from"],
+      to: body.to as Signal["data"]["to"],
       subject: body.subject,
       ...(body.textBody != null ? { textBody: body.textBody } : {}),
     });
@@ -528,7 +531,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     const body = await zParse(UpdateSignalStatusRequest, c.req.raw);
 
     // Determine if quarantine was caused by unknown sender (no status-changing rule fired)
-    const wasQuarantinedByUnknownSender = !(signal.matchedRules ?? []).some(r => r.statusChange);
+    const wasQuarantinedByUnknownSender = !(signal.data.matchedRules ?? []).some(r => r.statusChange);
 
     if (body.status === "block_hidden" || body.status === "block_reject" || body.status === "violate_report") {
       const blockResult = await arcDb.updateSignalStatus(accountId, signal.signalLookupId, body.status);
@@ -536,9 +539,9 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
 
       // When quarantined by unknown sender, persist sender disposition for future auto-blocking
       if (wasQuarantinedByUnknownSender) {
-        const senderDomain = signal.from.address.includes("@") ? signal.from.address.split("@").pop()! : signal.from.address;
+        const senderDomain = signal.data.from.address.includes("@") ? signal.data.from.address.split("@").pop()! : signal.data.from.address;
         const senderETLD1 = getDomain(senderDomain) ?? senderDomain;
-        const saveSenderResult = await accountDb.saveSender(accountId, signal.recipientAddress, senderETLD1, body.status);
+        const saveSenderResult = await accountDb.saveSender(accountId, signal.data.recipientAddress, senderETLD1, body.status);
         if (saveSenderResult.isErr()) return err(c, 500, "Internal Server Error");
       }
 
@@ -546,9 +549,9 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     }
 
     // status === "active": find existing arc or create one, bypassing rule evaluation
-    const senderDomain = signal.from.address.includes("@") ? signal.from.address.split("@").pop()! : signal.from.address;
+    const senderDomain = signal.data.from.address.includes("@") ? signal.data.from.address.split("@").pop()! : signal.data.from.address;
     const senderETLD1 = getDomain(senderDomain) ?? senderDomain;
-    const groupingKey = deriveGroupingKey(signal.workflow, signal.workflowData, signal.recipientAddress, senderETLD1);
+    const groupingKey = deriveGroupingKey(signal.data.workflow, signal.data.workflowData, signal.data.recipientAddress, senderETLD1);
     const matchedArcResult = groupingKey ? await arcDb.fastFindArcByAlternativeLookupKey(accountId, groupingKey) : null;
     if (matchedArcResult && matchedArcResult.isErr()) return err(c, 500, "Internal Server Error");
     const matchedArc = matchedArcResult ? matchedArcResult.value : null;
@@ -556,18 +559,18 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     const now = DateTime.utc().toISO()!;
     let arc: Arc;
     if (matchedArc) {
-      const updateResult = await arcDb.updateArc(accountId, matchedArc.id, "active", signal.receivedAt, {});
+      const updateResult = await arcDb.updateArc(accountId, matchedArc.id, "active", signal.data.receivedAt, {});
       if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
       arc = updateResult.value;
     } else {
       arc = {
         id: generateId("arc-"),
         accountId,
-        workflow: signal.workflow,
+        workflow: signal.data.workflow,
         labels: [],
         status: "active",
-        summary: signal.summary,
-        lastSignalAt: signal.receivedAt,
+        summary: signal.data.summary,
+        lastSignalAt: signal.data.receivedAt,
         createdAt: now,
         updatedAt: now,
         ...(groupingKey ? { groupingKey } : {}),
@@ -581,7 +584,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
 
     // When quarantined by unknown sender, approve the sender for future emails
     if (wasQuarantinedByUnknownSender) {
-      const saveSenderResult = await accountDb.saveSender(accountId, signal.recipientAddress, senderETLD1, "allow");
+      const saveSenderResult = await accountDb.saveSender(accountId, signal.data.recipientAddress, senderETLD1, "allow");
       if (saveSenderResult.isErr()) return err(c, 500, "Internal Server Error");
     }
 
@@ -646,13 +649,13 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     if (signal.status !== "draft") return err(c, 400, "Only draft signals can be sent", "SIGNAL_NOT_DRAFT");
 
     // MX validation
-    const mxResult = await validateRecipientMx(signal.to);
+    const mxResult = await validateRecipientMx(signal.data.to);
     if (!mxResult.valid) {
       return c.json({ title: "Invalid recipient domain", errorCode: "INVALID_RECIPIENT_DOMAIN", details: { invalidDomains: mxResult.invalidDomains } }, 422);
     }
 
     // Compute undo window
-    const undoWindowSeconds = computeUndoWindowSeconds(signal.textBody);
+    const undoWindowSeconds = computeUndoWindowSeconds(signal.data.textBody);
     const sendInitiatedAt = DateTime.utc().toISO()!;
     const undoExpiresAt = DateTime.utc().plus({ seconds: undoWindowSeconds }).toISO()!;
 

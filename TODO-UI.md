@@ -56,6 +56,8 @@ Surfaces: **Website** · **Extension** · **Mobile** · **CLI/Desktop**
   - Website · Mobile
 - [ ] **Calendar invite card (from calendar signal)** — when an arc contains a calendar signal (`source: "signal"`, CalendarData present), render a calendar card in the signal thread. The card is driven by the **calendar signal** (not the email signal). Shows: event title, date/time, location, organizer display name, attendees. Includes accept/decline/tentative buttons that call the RSVP endpoint. Current RSVP state derived from the most recent `calendar_response` signal on the arc. CANCEL signals show a "cancelled" badge. The email signal renders normally as the email body — the calendar card appears as a separate signal card in the thread linked via `linkedSignalId`.
   - Website · Mobile
+- [ ] **Retry Send action on failed outbound signals** — when a signal has `type: "domain_misconfiguration"` or `send_failed` status, render a "Retry Send" button on the signal card. The button calls a retry endpoint that re-attempts the send. Show: why the send failed (e.g. "Domain DKIM/SPF not configured"), what action the user needs to take to fix it (link to domain settings), and the retry button. After retry succeeds, update the signal state. Also surface `domain_misconfiguration` signals as a warning banner in account settings → domains when any domain is incomplete.
+  - Website · Mobile
 
 ---
 

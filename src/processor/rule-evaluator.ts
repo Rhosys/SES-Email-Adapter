@@ -13,23 +13,23 @@ import type { RuleEvalResult } from "./interpret-rule-result.js";
 // Strip sensitive fields before passing to user code (allowlist approach)
 // ---------------------------------------------------------------------------
 
-export type StrippedSignal = Pick<Signal, "id" | "from" | "subject" | "summary" | "spamScore" | "workflow" | "recipientAddress" | "workflowData">;
+export type StrippedSignal = Pick<Signal["data"], "from" | "subject" | "summary" | "spamScore" | "workflow" | "recipientAddress" | "workflowData"> & Pick<Signal, "id">;
 export type StrippedArc = Pick<Arc, "id" | "labels" | "urgency" | "summary" | "workflow" | "status">;
 
 export function stripSensitive(signal: Signal): StrippedSignal;
 export function stripSensitive(arc: Arc): StrippedArc;
 export function stripSensitive(obj: Signal | Arc): StrippedSignal | StrippedArc {
-  if ("from" in obj && "subject" in obj) {
+  if ("data" in obj && "from" in (obj as Signal).data) {
     const signal = obj as Signal;
     return {
       id: signal.id,
-      from: signal.from,
-      subject: signal.subject,
-      summary: signal.summary,
-      spamScore: signal.spamScore,
-      workflow: signal.workflow,
-      recipientAddress: signal.recipientAddress,
-      workflowData: signal.workflowData,
+      from: signal.data.from,
+      subject: signal.data.subject,
+      summary: signal.data.summary,
+      spamScore: signal.data.spamScore,
+      workflow: signal.data.workflow,
+      recipientAddress: signal.data.recipientAddress,
+      workflowData: signal.data.workflowData,
     };
   }
   const arc = obj as Arc;

@@ -246,7 +246,7 @@ export type StatsCategory = (typeof STATS_CATEGORIES)[number];
 export const SIGNAL_SOURCES = ["email", "user", "ses_feedback"] as const;
 export type SignalSource = (typeof SIGNAL_SOURCES)[number];
 
-export const SIGNAL_TYPES = ["deliverability", "invalid_rule_function", "invalid_template_function", "auto_send_blocked"] as const;
+export const SIGNAL_TYPES = ["email", "deliverability", "invalid_rule_function", "invalid_template_function", "auto_send_blocked"] as const;
 export type SignalType = (typeof SIGNAL_TYPES)[number];
 
 // interrupt = push notification popup; ambient = badge only; silent = no push
@@ -372,12 +372,84 @@ export interface MatchedRuleResult {
 }
 
 // ---------------------------------------------------------------------------
-// Signal (immutable inbound email event)
+// Signal data payload interfaces
+// ---------------------------------------------------------------------------
+
+export interface EmailSignalData {
+  receivedAt: string;      // ISO datetime
+  summary: string;
+  urgency?: ArcUrgency;
+  // Embedding cache, keyed by Bedrock model ID
+  // Absent on quarantined/blocked signals (no Aurora write happened).
+  // Partially populated if individual Bedrock calls failed (logged at WARN level).
+  embeddings?: Record<string, number[]>;
+  from: EmailAddress;
+  to: EmailAddress[];
+  cc: EmailAddress[];
+  replyTo?: EmailAddress;
+  subject: string;
+  sentAt?: string;
+  textBody?: string;
+  htmlBody?: string;
+  attachments: Attachment[];
+  headers: Record<string, string>;
+  // Envelope recipient — the address that actually received this email
+  recipientAddress: string;
+  workflow: Workflow;
+  workflowData: WorkflowData;
+  spamScore: number;
+  s3Key: string;
+  matchedRules?: MatchedRuleResult[];
+  // SES message ID — dual purpose:
+  // • Inbound (source: "email"): raw SES message ID from the inbound notification; used to construct signalLookupId ("ses-{sesMessageId}") for dedup.
+  // • Outbound (source: "user"): SES message ID assigned after successful delivery via SES.
+  sesMessageId?: string;
+  // Send flow fields (only present on source: "user" signals)
+  sendInitiatedAt?: string;    // ISO 8601 — when POST /send was called
+  sendFailureReason?: string;  // "all_recipients_bounced" | "ses_permanent_failure"
+  // Deliverability-related fields (kept here for backward compat during migration)
+  relatedSignalId?: string;    // ID of the sent signal this bounce relates to
+  bouncedRecipients?: Array<{
+    address: string;
+    bounceType: "permanent" | "transient";
+    reason?: string;
+  }>;
+}
+
+export interface DeliverabilitySignalData {
+  relatedSignalId: string;
+  bouncedRecipients: Array<{
+    address: string;
+    bounceType: "permanent" | "transient";
+    reason?: string;
+  }>;
+  subject: string;
+}
+
+export interface InvalidRuleFunctionData {
+  resourceName: string;
+  issue: string;
+}
+
+export interface InvalidTemplateFunctionData {
+  resourceName: string;
+  functionName: string;
+  issue: string;
+}
+
+export interface AutoSendBlockedData {
+  fromAddress: string;
+  replyToAddress: string;
+  recipientAddress: string;
+}
+
+// ---------------------------------------------------------------------------
+// Signal (immutable inbound event — generic over data payload)
 // ---------------------------------------------------------------------------
 
 export type UserDisplayedRetention = '1 year' | '5 years' | 'forever';
 
-export interface Signal {
+export interface SignalBase {
   // External-facing ID — always a `sgn-` prefixed ID (e.g. "sgn-mRk3oCMDhFXGF7CzHBt22Xabc")
   id: string;
   // Internal storage key used as the DynamoDB table PK suffix.
@@ -385,63 +457,46 @@ export interface Signal {
   // User/system signals: same as `id` (the sgn- prefixed ID).
   signalLookupId: string;
   arcId?: string;        // Undefined while signal is blocked pending user action
-  matchedRules?: MatchedRuleResult[];
   accountId: string;
   source: SignalSource;
-  type?: SignalType;
-  receivedAt: string;      // ISO datetime
-
-  from: EmailAddress;
-  to: EmailAddress[];
-  cc: EmailAddress[];
-  replyTo?: EmailAddress;
-  subject: string;
-  sentAt?: string;
-
-  textBody?: string;
-  htmlBody?: string;
-  attachments: Attachment[];
-  headers: Record<string, string>;
-
-  // Envelope recipient — the address that actually received this email
-  recipientAddress: string;
-
-  workflow: Workflow;
-  workflowData: WorkflowData;
-  spamScore: number;
-  summary: string;
-
-  s3Key: string;
+  type: SignalType;
   status: SignalStatus;
-  urgency?: ArcUrgency;
   createdAt: string;
   ttl?: number;   // DynamoDB TTL (epoch seconds) — computed from retentionDuration at write time; absent = never expire
-
-  // Send flow fields (only present on source: "user" signals)
-  sendInitiatedAt?: string;    // ISO 8601 — when POST /send was called
-  // SES message ID — dual purpose:
-  // • Inbound (source: "email"): raw SES message ID from the inbound notification; used to construct signalLookupId ("ses-{sesMessageId}") for dedup.
-  // • Outbound (source: "user"): SES message ID assigned after successful delivery via SES.
-  sesMessageId?: string;
-  sendFailureReason?: string;  // "all_recipients_bounced" | "ses_permanent_failure"
-
-  // Deliverability signal fields (only present on source: "ses_feedback" signals)
-  relatedSignalId?: string;    // ID of the sent signal this bounce relates to
-  bouncedRecipients?: Array<{
-    address: string;
-    bounceType: "permanent" | "transient";
-    reason?: string;
-  }>;
-
-  // Embedding cache, keyed by Bedrock model ID
-  // Absent on quarantined/blocked signals (no Aurora write happened).
-  // Partially populated if individual Bedrock calls failed (logged at WARN level).
-  embeddings?: Record<string, number[]>;
-
   // ISO 8601 retention duration — the ONLY retention field stored in DynamoDB.
   // Drives DynamoDB TTL (computed at write time) and S3 lifecycle tagging.
   // userDisplayedRetention is NEVER stored — derived at API response time via getUserDisplayedRetention().
   retentionDuration?: import("../processor/retention.js").RetentionDuration;
+}
+
+export type Signal<T = EmailSignalData> = SignalBase & { data: T };
+
+export type AnySignal =
+  | Signal<EmailSignalData>
+  | Signal<DeliverabilitySignalData>
+  | Signal<InvalidRuleFunctionData>
+  | Signal<InvalidTemplateFunctionData>
+  | Signal<AutoSendBlockedData>;
+
+// Type guard functions for narrowing AnySignal by type field
+export function isEmailSignal(signal: AnySignal): signal is Signal<EmailSignalData> {
+  return signal.type === "email";
+}
+
+export function isDeliverabilitySignal(signal: AnySignal): signal is Signal<DeliverabilitySignalData> {
+  return signal.type === "deliverability";
+}
+
+export function isInvalidRuleFunctionSignal(signal: AnySignal): signal is Signal<InvalidRuleFunctionData> {
+  return signal.type === "invalid_rule_function";
+}
+
+export function isInvalidTemplateFunctionSignal(signal: AnySignal): signal is Signal<InvalidTemplateFunctionData> {
+  return signal.type === "invalid_template_function";
+}
+
+export function isAutoSendBlockedSignal(signal: AnySignal): signal is Signal<AutoSendBlockedData> {
+  return signal.type === "auto_send_blocked";
 }
 
 // ---------------------------------------------------------------------------

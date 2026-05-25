@@ -15,7 +15,7 @@ import { generateEmbeddingFromS3 } from "../../embedding/generate-embedding-from
 import { BedrockEmbeddingGenerator } from "../../embedding/embedding-generator.js";
 import { BedrockRuntimeClient } from "@aws-sdk/client-bedrock-runtime";
 import { ArcDatabase } from "../../database/arc-database.js";
-import type { Signal } from "../../types/index.js";
+import type { Signal, EmailSignalData } from "../../types/index.js";
 import type { DbError, ReindexSegmentProcessingError, Result } from "../../errors.js";
 import { ok, err, dbError, reindexSegmentProcessingError } from "../../errors.js";
 import type { Logger } from "../../logger.js";
@@ -115,8 +115,8 @@ export class ReindexWorker {
     targetRegistryId: string,
     modelId: string,
   ): Promise<Result<void, { signalId: string; reason: string }>> {
-    const signal = item as unknown as Pick<Signal, "id" | "signalLookupId" | "accountId" | "arcId" | "recipientAddress" | "embeddings" | "s3Key">;
-    const embeddings = signal.embeddings;
+    const signal = item as unknown as Pick<Signal, "id" | "signalLookupId" | "accountId" | "arcId"> & { data: Pick<EmailSignalData, "recipientAddress" | "embeddings" | "s3Key"> };
+    const embeddings = signal.data.embeddings;
 
     const vector = embeddings?.[modelId];
     if (vector && Array.isArray(vector)) {
@@ -131,7 +131,7 @@ export class ReindexWorker {
   // ---------------------------------------------------------------------------
 
   private async pureCopyToAurora(
-    signal: Pick<Signal, "id" | "accountId" | "arcId" | "recipientAddress">,
+    signal: Pick<Signal, "id" | "accountId" | "arcId"> & { data: Pick<EmailSignalData, "recipientAddress"> },
     vector: number[],
     targetRegistryId: string,
   ): Promise<Result<void, { signalId: string; reason: string }>> {
@@ -139,7 +139,7 @@ export class ReindexWorker {
       registryId: targetRegistryId,
       arcId: signal.arcId!,
       accountId: signal.accountId,
-      recipientAddress: signal.recipientAddress,
+      recipientAddress: signal.data.recipientAddress,
       embedding: vector,
     });
     if (upsertResult.isErr()) {
@@ -153,18 +153,18 @@ export class ReindexWorker {
   // ---------------------------------------------------------------------------
 
   private async regenerateFromS3(
-    signal: Pick<Signal, "id" | "signalLookupId" | "accountId" | "arcId" | "recipientAddress" | "s3Key">,
+    signal: Pick<Signal, "id" | "signalLookupId" | "accountId" | "arcId"> & { data: Pick<EmailSignalData, "recipientAddress" | "s3Key"> },
     targetRegistryId: string,
     modelId: string,
   ): Promise<Result<void, { signalId: string; reason: string }>> {
-    if (!signal.s3Key) {
+    if (!signal.data.s3Key) {
       return err({ signalId: signal.id, reason: "no s3Key on signal record" });
     }
 
     const result = await generateEmbeddingFromS3({
-      s3Key: signal.s3Key,
+      s3Key: signal.data.s3Key,
       accountId: signal.accountId,
-      recipientAddress: signal.recipientAddress,
+      recipientAddress: signal.data.recipientAddress,
       modelId,
       embeddingGenerator,
     });
@@ -186,7 +186,7 @@ export class ReindexWorker {
       registryId: targetRegistryId,
       arcId: signal.arcId!,
       accountId: signal.accountId,
-      recipientAddress: signal.recipientAddress,
+      recipientAddress: signal.data.recipientAddress,
       embedding: result.value.vector,
     });
     if (upsertResult.isErr()) {

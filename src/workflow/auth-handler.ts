@@ -30,7 +30,7 @@ export class AuthWorkflowHandler implements WorkflowHandler {
   ) {}
 
   async execute(signal: Signal, arc: Arc, accountId: string): Promise<Result<void, DbError>> {
-    const workflowData = signal.workflowData as AuthData;
+    const workflowData = signal.data.workflowData as AuthData;
 
     if (!workflowData.code) {
       return ok(undefined);
@@ -57,8 +57,8 @@ export class AuthWorkflowHandler implements WorkflowHandler {
       code: data.code!,
       authType: data.authType,
       ...(data.expiresInMinutes !== undefined ? { expiresInMinutes: data.expiresInMinutes } : {}),
-      originDomain: getETLD1(signal.from.address),
-      subject: signal.subject,
+      originDomain: getETLD1(signal.data.from.address),
+      subject: signal.data.subject,
     };
   }
 

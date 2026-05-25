@@ -181,7 +181,7 @@ async function applyRules(
         await systemSignalCreator.createInvalidRuleFunctionSignal({
           accountId: rule.accountId,
           arcId: context.arc.id,
-          recipientAddress: context.signal.recipientAddress,
+          recipientAddress: context.signal.data.recipientAddress,
           resourceName: rule.name,
           issue: evalResult.warnings.join("; "),
         });
@@ -247,8 +247,8 @@ function deriveOutcome(matchedRules: MatchedRuleResult[]): ProcessingOutcome {
 // ---------------------------------------------------------------------------
 
 const in_ = (label: string) => ({ "in": [label, { "var": "arc.labels" }] });
-const wf_ = (w: string) => ({ "==": [{ "var": "signal.workflow" }, w] });
-const wfData_ = (field: string) => ({ "var": `signal.workflowData.${field}` });
+const wf_ = (w: string) => ({ "==": [{ "var": "signal.data.workflow" }, w] });
+const wfData_ = (field: string) => ({ "var": `signal.data.workflowData.${field}` });
 
 export const SYSTEM_RULES: Rule[] = [
   // --- Sender / content gating (1–8) ----------------------------------------
@@ -385,7 +385,7 @@ export class SignalProcessor {
         if (!arc) return err(dbError("arc not found on retry"));
 
         // Fetch account context (needed for S3 retention)
-        const accountCtxResult = await this.accountDb.getProcessorAccountContext(message.accountId, signal.recipientAddress);
+        const accountCtxResult = await this.accountDb.getProcessorAccountContext(message.accountId, signal.data.recipientAddress);
         if (accountCtxResult.isErr()) return err(accountCtxResult.error);
         const accountCtx = accountCtxResult.value;
 
@@ -434,12 +434,12 @@ export class SignalProcessor {
     }
 
     // Re-derive outcome from persisted matchedRules
-    const outcome = deriveOutcome(signal.matchedRules ?? []);
+    const outcome = deriveOutcome(signal.data.matchedRules ?? []);
 
     this.logger.trackPoint("side_effect_received");
 
     // Determine which effect types will execute
-    const autoDraftActions = (signal.matchedRules ?? []).flatMap(r => r.actions.filter(a => a.type === "auto_draft" && a.value));
+    const autoDraftActions = (signal.data.matchedRules ?? []).flatMap(r => r.actions.filter(a => a.type === "auto_draft" && a.value));
     const effectTypes: string[] = [];
     if (outcome.forwardAddresses.length > 0) effectTypes.push("forward");
     if (!outcome.suppressNotification) effectTypes.push("notify");
@@ -456,7 +456,7 @@ export class SignalProcessor {
       for (const toAddress of outcome.forwardAddresses) {
         try {
           this.logger.trackPoint("side_effect_forward_start");
-          const forwardResult = await this.forwarder.forward(signal.s3Key, toAddress, accountId, {
+          const forwardResult = await this.forwarder.forward(signal.data.s3Key, toAddress, accountId, {
             signalId: signal.id,
             arcId: arc.id,
           });
@@ -501,17 +501,17 @@ export class SignalProcessor {
     if (outcome.doPong) {
       try {
         this.logger.trackPoint("side_effect_pong_start");
-        const recipientDomain = signal.recipientAddress.split("@")[1] ?? "";
+        const recipientDomain = signal.data.recipientAddress.split("@")[1] ?? "";
         const domainResult = await this.accountDb.getDomainByName(accountId, recipientDomain);
         const domain = domainResult.isOk() ? domainResult.value : null;
         const from = domain?.senderSetupComplete
-          ? signal.recipientAddress
-          : (process.env["NOTIFICATION_FROM"] ?? signal.recipientAddress);
+          ? signal.data.recipientAddress
+          : (process.env["NOTIFICATION_FROM"] ?? signal.data.recipientAddress);
         await this.replySender.sendReply({
-          to: signal.from.address,
+          to: signal.data.from.address,
           from,
-          subject: signal.subject ?? "",
-          body: signal.textBody ?? "",
+          subject: signal.data.subject ?? "",
+          body: signal.data.textBody ?? "",
           inReplyTo: signal.id,
           accountId,
           signalId: signal.id,
@@ -529,15 +529,15 @@ export class SignalProcessor {
       try {
         this.logger.trackPoint("side_effect_auto_draft_start");
         const now = DateTime.utc().toISO()!;
-        const recipientDomain = signal.recipientAddress.split("@")[1] ?? "";
+        const recipientDomain = signal.data.recipientAddress.split("@")[1] ?? "";
         const domainResult = await this.accountDb.getDomainByName(accountId, recipientDomain);
         const senderSetupComplete = domainResult.isOk() && !!domainResult.value?.senderSetupComplete;
 
         const vars: Record<string, string> = {
-          "signal.subject": signal.subject ?? "",
-          "sender.name": signal.from.name ?? "",
-          "sender.address": signal.from.address,
-          "arc.workflow": signal.workflow ?? "",
+          "signal.subject": signal.data.subject ?? "",
+          "sender.name": signal.data.from.name ?? "",
+          "sender.address": signal.data.from.address,
+          "arc.workflow": signal.data.workflow ?? "",
         };
 
         for (const action of autoDraftActions) {
@@ -576,7 +576,7 @@ export class SignalProcessor {
                   await this.systemSignalCreator.createInvalidTemplateFunctionSignal({
                     accountId,
                     arcId: arc.id,
-                    recipientAddress: signal.recipientAddress,
+                    recipientAddress: signal.data.recipientAddress,
                     resourceName: tmpl.name,
                     functionName: fn.name,
                     issue,
@@ -603,7 +603,7 @@ export class SignalProcessor {
                     await this.systemSignalCreator.createInvalidTemplateFunctionSignal({
                       accountId,
                       arcId: arc.id,
-                      recipientAddress: signal.recipientAddress,
+                      recipientAddress: signal.data.recipientAddress,
                       resourceName: tmpl.name,
                       functionName: fn.name,
                       issue,
@@ -621,9 +621,9 @@ export class SignalProcessor {
           let shouldAutoSend = autoSend && senderSetupComplete && !preventAutoSend;
 
           // Reply-To safety gate — suppress auto-send if Reply-To domain is untrusted
-          if (shouldAutoSend && signal.replyTo) {
-            const replyToETLD1 = getETLD1(signal.replyTo.address);
-            const senderResult = await this.accountDb.getSender(accountId, signal.recipientAddress, replyToETLD1);
+          if (shouldAutoSend && signal.data.replyTo) {
+            const replyToETLD1 = getETLD1(signal.data.replyTo.address);
+            const senderResult = await this.accountDb.getSender(accountId, signal.data.recipientAddress, replyToETLD1);
             const approvedDomains = senderResult.isOk() && senderResult.value?.policy === "allow"
               ? [senderResult.value.domain]
               : [];
@@ -633,17 +633,17 @@ export class SignalProcessor {
               this.logger.track("Auto-send suppressed — Reply-To domain mismatch.", {
                 code: "processor.side_effect.reply_target_suppressed",
                 accountId,
-                fromAddress: signal.from.address,
-                replyToAddress: signal.replyTo.address,
-                recipientAddress: signal.recipientAddress,
+                fromAddress: signal.data.from.address,
+                replyToAddress: signal.data.replyTo.address,
+                recipientAddress: signal.data.recipientAddress,
               });
               if (this.systemSignalCreator) {
                 await this.systemSignalCreator.createAutoSendBlockedSignal({
                   accountId,
                   arcId: arc.id,
-                  recipientAddress: signal.recipientAddress,
-                  fromAddress: signal.from.address,
-                  replyToAddress: signal.replyTo.address,
+                  recipientAddress: signal.data.recipientAddress,
+                  fromAddress: signal.data.from.address,
+                  replyToAddress: signal.data.replyTo.address,
                 });
               }
             }
@@ -658,23 +658,26 @@ export class SignalProcessor {
             arcId: arc.id,
             accountId,
             source: "user",
+            type: "email",
             status: shouldAutoSend ? "pending_send" : "draft",
-            receivedAt: now,
-            from: { address: signal.recipientAddress },
-            to: [signal.from],
-            cc: [],
-            subject: renderTemplate(tmpl.subject, actionVars),
-            textBody: renderTemplate(tmpl.body, actionVars),
-            attachments: [],
-            headers: {},
-            recipientAddress: signal.from.address,
-            workflow: signal.workflow,
-            workflowData: signal.workflowData,
-            spamScore: 0,
-            summary: "",
-            s3Key: "",
             createdAt: now,
-            ...(sendInitiatedAt ? { sendInitiatedAt } : {}),
+            data: {
+              receivedAt: now,
+              from: { address: signal.data.recipientAddress },
+              to: [signal.data.from],
+              cc: [],
+              subject: renderTemplate(tmpl.subject, actionVars),
+              textBody: renderTemplate(tmpl.body, actionVars),
+              attachments: [],
+              headers: {},
+              recipientAddress: signal.data.from.address,
+              workflow: signal.data.workflow,
+              workflowData: signal.data.workflowData,
+              spamScore: 0,
+              summary: "",
+              s3Key: "",
+              ...(sendInitiatedAt ? { sendInitiatedAt } : {}),
+            },
           };
 
           const draftSaveResult = await this.arcDb.saveSignal(draft);
@@ -706,10 +709,10 @@ export class SignalProcessor {
     }
 
     // Webhook (best-effort — never blocks or retries)
-    const webhookActions = (signal.matchedRules ?? [])
+    const webhookActions = (signal.data.matchedRules ?? [])
       .flatMap(r => r.actions.filter(a => a.type === "webhook" && a.value));
     if (webhookActions.length > 0) {
-      const accountCtxResult = await this.accountDb.getProcessorAccountContext(accountId, signal.recipientAddress);
+      const accountCtxResult = await this.accountDb.getProcessorAccountContext(accountId, signal.data.recipientAddress);
       const accountPlan = accountCtxResult.isOk() ? accountCtxResult.value.billingPlan : "Free";
 
       if (!this.billingHandler.isFeatureEnabled(accountPlan, "webhook")) {
@@ -757,25 +760,28 @@ export class SignalProcessor {
       const signal: Signal = {
         id: signalId,
         signalLookupId: "ses-" + sesMessageId,
-        sesMessageId,
         accountId,
         status: "block_reject",
         source: "email",
-        s3Key,
-        recipientAddress: destination[0] ?? "",
-        receivedAt: timestamp,
+        type: "email",
         createdAt: DateTime.utc().toISO()!,
-        from: { address: "" },
-        to: [],
-        cc: [],
-        subject: "",
-        textBody: "",
-        attachments: [],
-        headers: {},
-        workflow: "status",
-        workflowData: { workflow: "status", statusType: "other", provider: "" } as const,
-        spamScore: 0,
-        summary: "",
+        data: {
+          sesMessageId,
+          s3Key,
+          recipientAddress: destination[0] ?? "",
+          receivedAt: timestamp,
+          from: { address: "" },
+          to: [],
+          cc: [],
+          subject: "",
+          textBody: "",
+          attachments: [],
+          headers: {},
+          workflow: "status",
+          workflowData: { workflow: "status", statusType: "other", provider: "" } as const,
+          spamScore: 0,
+          summary: "",
+        },
       };
       const saveResult = await this.arcDb.saveSignal(signal);
       if (saveResult.isErr()) return err(saveResult.error);
@@ -1048,7 +1054,8 @@ export class SignalProcessor {
     const buildArgs = { accountId, sesMessageId, recipientAddress, parsed, classification, s3Key, receivedAt: timestamp, now, ...(ttl !== undefined ? { ttl } : {}) };
 
     if (outcome.blockDisposition) {
-      const saveResult = await this.arcDb.saveSignal({ ...buildSignal({ status: outcome.blockDisposition, ...buildArgs }), matchedRules });
+      const blockSignal = buildSignal({ status: outcome.blockDisposition, ...buildArgs });
+      const saveResult = await this.arcDb.saveSignal({ ...blockSignal, data: { ...blockSignal.data, matchedRules } });
       if (saveResult.isErr()) return err(saveResult.error);
       const repResult = await this.processingDb.updateGlobalReputation(senderETLD1, { wasSpam: classification.spamScore >= spamScoreThreshold, wasBlocked: true });
       if (repResult.isErr()) {
@@ -1067,7 +1074,8 @@ export class SignalProcessor {
     // approveSender overrides quarantine — SR-14 (auto-approve on matched conversation) fires before SR-02
     if (outcome.quarantine && !outcome.approveSender) {
       const quarantineStatus = outcome.quarantineHidden ? "quarantine_hidden" : "quarantine_visible";
-      const quarantinedSignal: Signal = { ...buildSignal({ status: quarantineStatus, ...buildArgs }), matchedRules };
+      const quarantineBase = buildSignal({ status: quarantineStatus, ...buildArgs });
+      const quarantinedSignal: Signal = { ...quarantineBase, data: { ...quarantineBase.data, matchedRules } };
       const saveResult = await this.arcDb.saveSignal(quarantinedSignal);
       if (saveResult.isErr()) return err(saveResult.error);
       const repResult = await this.processingDb.updateGlobalReputation(senderETLD1, { wasSpam: classification.spamScore >= spamScoreThreshold, wasBlocked: true });
@@ -1101,7 +1109,7 @@ export class SignalProcessor {
     const signalUrgency = outcome.urgency ?? arc.urgency ?? "normal";
     if (!matchedArc) arc.urgency = signalUrgency;
 
-    const signal: Signal = { ...signalShell, arcId: arc.id, matchedRules, urgency: signalUrgency };
+    const signal: Signal = { ...signalShell, arcId: arc.id, data: { ...signalShell.data, matchedRules, urgency: signalUrgency } };
     this.logger.trackPoint("arc_updated", { arcId: arc.id });
 
     // 12. Pong — handled entirely in side-effect SQS handler (processSideEffect)
@@ -1121,7 +1129,7 @@ export class SignalProcessor {
     for (const result of secondaryResults) {
       if (result.isOk()) embeddings[result.value.modelId] = result.value.vector;
     }
-    signal.embeddings = embeddings;
+    signal.data.embeddings = embeddings;
 
     // Save arc (leaf node) before signal (dependent node) — guarantees arc exists whenever signal exists
     if (matchedArc) {
@@ -1195,7 +1203,7 @@ export class SignalProcessor {
 
     const results = await Promise.all(
       activeClusters.map(async (cluster) => {
-        const embedding = signal.embeddings?.[cluster.modelId];
+        const embedding = signal.data.embeddings?.[cluster.modelId];
         if (!embedding) {
           this.logger.info("Aurora upsert skipped for cluster — no embedding available for the cluster's model. This is expected when the embedding generator did not produce a vector for this model (e.g. Bedrock failure for that model).", { code: "processor.aurora_upsert_skipped", accountId: signal.accountId, registryId: cluster.registryId, modelId: cluster.modelId });
           return { cluster, success: true as const };
@@ -1206,7 +1214,7 @@ export class SignalProcessor {
           registryId: cluster.registryId,
           arcId: arc.id,
           accountId: signal.accountId,
-          recipientAddress: signal.recipientAddress,
+          recipientAddress: signal.data.recipientAddress,
           embedding,
         });
 
@@ -1262,7 +1270,7 @@ export class SignalProcessor {
       const retention = getRetentionForPlan(accountCtx.billingPlan);
       let retentionApplyResult: Result<{ s3Key: string }, DbError>;
       try {
-        const retentionValue = await this.retentionService.applyPlanRetention(signal.s3Key, {
+        const retentionValue = await this.retentionService.applyPlanRetention(signal.data.s3Key, {
           s3Tag: retention.s3Tag,
           copyToSaved: retention.copyToSaved,
         });
@@ -1278,10 +1286,10 @@ export class SignalProcessor {
       const { s3Key: updatedS3Key } = retentionApplyResult.value;
 
       // Persist retention metadata on the signal record
-      const retentionUpdate: Partial<Pick<Signal, "s3Key" | "retentionDuration">> = {
+      const retentionUpdate: { retentionDuration?: RetentionDuration; s3Key?: string } = {
         retentionDuration: retention.retentionDuration as RetentionDuration,
       };
-      if (updatedS3Key !== signal.s3Key) {
+      if (updatedS3Key !== signal.data.s3Key) {
         retentionUpdate.s3Key = updatedS3Key;
       }
       const retentionSaveResult = await this.arcDb.updateSignalRetention(signal.accountId, signal.signalLookupId, retentionUpdate);
@@ -1373,31 +1381,34 @@ function buildSignal(opts: {
   const signal: Signal = {
     id: signalId,
     signalLookupId: "ses-" + sesMessageId,
-    sesMessageId,
     accountId,
     source: "email",
-    receivedAt,
-    from: parsed.from,
-    to: parsed.to,
-    cc: parsed.cc,
-    subject: parsed.subject,
-    attachments: parsed.attachments,
-    headers: parsed.headers,
-    recipientAddress,
-    workflow: classification.workflow,
-    workflowData: classification.workflowData,
-    spamScore: classification.spamScore,
-    summary: classification.summary,
-    s3Key,
+    type: "email",
     status,
     createdAt: now,
+    data: {
+      sesMessageId,
+      receivedAt,
+      from: parsed.from,
+      to: parsed.to,
+      cc: parsed.cc,
+      subject: parsed.subject,
+      attachments: parsed.attachments,
+      headers: parsed.headers,
+      recipientAddress,
+      workflow: classification.workflow,
+      workflowData: classification.workflowData,
+      spamScore: classification.spamScore,
+      summary: classification.summary,
+      s3Key,
+      ...(parsed.replyTo !== undefined ? { replyTo: parsed.replyTo } : {}),
+      ...(parsed.textBody !== undefined ? { textBody: parsed.textBody } : {}),
+      ...(parsed.htmlBody != null ? { htmlBody: parsed.htmlBody } : {}),
+      ...(parsed.sentAt !== undefined ? { sentAt: parsed.sentAt } : {}),
+    },
   };
 
   if (arcId !== undefined) signal.arcId = arcId;
-  if (parsed.replyTo !== undefined) signal.replyTo = parsed.replyTo;
-  if (parsed.textBody !== undefined) signal.textBody = parsed.textBody;
-  if (parsed.htmlBody != null) signal.htmlBody = parsed.htmlBody;
-  if (parsed.sentAt !== undefined) signal.sentAt = parsed.sentAt;
   if (ttl !== undefined) signal.ttl = ttl;
 
   return signal;
