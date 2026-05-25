@@ -16,7 +16,7 @@ import { handleCalendarResponse } from "../../../src/processor/calendar/calendar
 import type { CalendarResponseHandlerDeps } from "../../../src/processor/calendar/calendar-response-handler.js";
 import { handlePostApprovalCalendar } from "../../../src/processor/calendar/post-approval-handler.js";
 import type { PostApprovalCalendarHandlerDeps } from "../../../src/processor/calendar/post-approval-handler.js";
-import { buildProxyUid, validateProxyUid } from "../../../src/processor/calendar/proxy-uid.js";
+import { buildProxyUid } from "../../../src/processor/calendar/proxy-uid.js";
 import { buildCalendarSignalLookupId } from "../../../src/processor/calendar/signal-lookup.js";
 import type { CalendarEventData, CalendarResponseData } from "../../../src/types/calendar.js";
 import type { Signal, Arc, Attachment } from "../../../src/types/index.js";
@@ -28,11 +28,25 @@ import { createMockLogger } from "../../helpers/mock-logger.js";
 import ICAL from "ical.js";
 
 // ---------------------------------------------------------------------------
+// Mock hmac-secret.ts — deterministic HMAC for tests without real KMS
+// ---------------------------------------------------------------------------
+
+import { createHmac } from "node:crypto";
+
+const TEST_SECRET = new Uint8Array(32); // 32 zero bytes — deterministic for tests
+
+vi.mock("../../../src/processor/calendar/hmac-secret.js", () => ({
+  computeHmac16: (payload: string) =>
+    Promise.resolve(createHmac("sha256", TEST_SECRET).update(payload).digest("base64url").slice(0, 16)),
+  validateHmac16: (payload: string, hmac16: string) =>
+    Promise.resolve(createHmac("sha256", TEST_SECRET).update(payload).digest("base64url").slice(0, 16) === hmac16),
+}));
+
+// ---------------------------------------------------------------------------
 // Static test fixtures — deterministic, no random generation
 // ---------------------------------------------------------------------------
 
 const SERVICE_DOMAIN = "platform.email.rhosys.cloud";
-const HMAC_SECRET = new Uint8Array(32); // 32 zero bytes — deterministic for tests
 const VALID_ARC_ID = generateId("arc-");
 const VALID_ACC_ID = generateAccountId();
 const FORWARDING_ADDRESS = "user-real-calendar@gmail.com";
@@ -81,7 +95,6 @@ function makeCalendarSignal(overrides: Partial<CalendarEventData> = {}): Signal<
 function makeForwarderDeps(emailService?: EmailService): CalendarForwarderDeps {
   return {
     emailService: emailService ?? makeEmailService(),
-    hmacSecret: HMAC_SECRET,
     serviceDomain: SERVICE_DOMAIN,
   };
 }
@@ -118,7 +131,6 @@ function buildReplyIcsString(proxyUid: string, partstat = "ACCEPTED"): string {
 
 function makeResponseHandlerDeps(overrides: Partial<CalendarResponseHandlerDeps> = {}): CalendarResponseHandlerDeps {
   return {
-    hmacSecret: HMAC_SECRET,
     serviceDomain: SERVICE_DOMAIN,
     arcDatabase: {
       getArc: vi.fn().mockResolvedValue(ok({
@@ -214,11 +226,10 @@ describe("Scenario: cancellation is forwarded so user's calendar removes the eve
     // Verify the proxy UID is deterministic (same inputs → same UID as REQUEST)
     const vevent = comp.getFirstSubcomponent("vevent")!;
     const uid = vevent.getFirstPropertyValue("uid") as string;
-    const expectedProxyUid = buildProxyUid({
+    const expectedProxyUid = await buildProxyUid({
       accountId: VALID_ACC_ID,
       arcId: VALID_ARC_ID,
       originalVeventUid: VEVENT_UID,
-      hmacSecret: HMAC_SECRET,
       serviceDomain: SERVICE_DOMAIN,
     });
     expect(uid).toBe(expectedProxyUid);
@@ -340,11 +351,10 @@ describe("Scenario: native calendar REPLY is validated and forwarded to organize
     const logger = createMockLogger();
 
     // Build a valid proxy UID for the .ics
-    const proxyUid = buildProxyUid({
+    const proxyUid = await buildProxyUid({
       accountId: VALID_ACC_ID,
       arcId: VALID_ARC_ID,
       originalVeventUid: VEVENT_UID,
-      hmacSecret: HMAC_SECRET,
       serviceDomain: SERVICE_DOMAIN,
     });
 
@@ -398,13 +408,9 @@ describe("Scenario: invalid HMAC REPLY is silently dropped to prevent spoofing",
     const logger = createMockLogger();
 
     // Build a proxy UID with a WRONG secret (simulates attacker guessing)
-    const tamperedProxyUid = buildProxyUid({
-      accountId: VALID_ACC_ID,
-      arcId: VALID_ARC_ID,
-      originalVeventUid: VEVENT_UID,
-      hmacSecret: new Uint8Array(32).fill(0xFF), // wrong secret
-      serviceDomain: SERVICE_DOMAIN,
-    });
+    // Manually construct a UID with an invalid HMAC suffix
+    const payload = `${VALID_ACC_ID}.${VALID_ARC_ID}.${VEVENT_UID}`;
+    const tamperedProxyUid = `${payload}.AAAAAAAAAAAAAAAA@${SERVICE_DOMAIN}`;
 
     const icsContent = buildReplyIcsString(tamperedProxyUid, "ACCEPTED");
     const icsBytes = new TextEncoder().encode(icsContent);
@@ -452,11 +458,10 @@ describe("Scenario: invalid accountId checksum REPLY is dropped before HMAC chec
     const logger = createMockLogger();
 
     // Use a valid proxy UID (would pass HMAC if it got that far)
-    const proxyUid = buildProxyUid({
+    const proxyUid = await buildProxyUid({
       accountId: VALID_ACC_ID,
       arcId: VALID_ARC_ID,
       originalVeventUid: VEVENT_UID,
-      hmacSecret: HMAC_SECRET,
       serviceDomain: SERVICE_DOMAIN,
     });
 
@@ -536,7 +541,6 @@ describe("Scenario: approving quarantined email triggers calendar forwarding", (
     const calendarForwarderEmailService = makeEmailService();
     const calendarForwarderDeps: CalendarForwarderDeps = {
       emailService: calendarForwarderEmailService,
-      hmacSecret: HMAC_SECRET,
       serviceDomain: SERVICE_DOMAIN,
     };
 
@@ -669,11 +673,10 @@ describe("Scenario: most recent RSVP decision is recorded as calendar_response s
     const deps = makeResponseHandlerDeps();
     const logger = createMockLogger();
 
-    const proxyUid = buildProxyUid({
+    const proxyUid = await buildProxyUid({
       accountId: VALID_ACC_ID,
       arcId: VALID_ARC_ID,
       originalVeventUid: VEVENT_UID,
-      hmacSecret: HMAC_SECRET,
       serviceDomain: SERVICE_DOMAIN,
     });
 

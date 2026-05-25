@@ -3,7 +3,6 @@ import type { Context } from "aws-lambda";
 
 // Env vars required by handler.ts at module load time
 process.env["MAIL_DOMAIN"] = "platform.email.rhosys.cloud";
-process.env["CALENDAR_HMAC_SECRET"] = Buffer.from(new Uint8Array(32)).toString("base64");
 
 // ---------------------------------------------------------------------------
 // Mock heavy dependencies so the handler module can load without real AWS SDK
@@ -200,12 +199,12 @@ function makeSfnEvent(stateName: string, input?: { accountId: string; email: str
   return {
     context: {
       Execution: {
-        Id: "arn:aws:states:eu-central-1:342695602194:execution:email-catcher-AccountCreation:acc-123",
+        Id: "arn:aws:states:eu-central-1:123456789012:execution:email-catcher-AccountCreation:acc-123",
         Input: input ?? { accountId: "acc-123", email: "user@test.com" },
         Name: "acc-123",
       },
       StateMachine: {
-        Id: "arn:aws:states:eu-central-1:342695602194:stateMachine:email-catcher-AccountCreation",
+        Id: "arn:aws:states:eu-central-1:123456789012:stateMachine:email-catcher-AccountCreation",
         Name: "email-catcher-AccountCreation",
       },
       State: {
@@ -262,12 +261,12 @@ describe("Handler: Step Function event routing", () => {
     const event = {
       context: {
         Execution: {
-          Id: "arn:aws:states:eu-central-1:342695602194:execution:email-catcher-AccountCreation:acc-123",
+          Id: "arn:aws:states:eu-central-1:123456789012:execution:email-catcher-AccountCreation:acc-123",
           Input: null,
           Name: "acc-123",
         },
         StateMachine: {
-          Id: "arn:aws:states:eu-central-1:342695602194:stateMachine:email-catcher-AccountCreation",
+          Id: "arn:aws:states:eu-central-1:123456789012:stateMachine:email-catcher-AccountCreation",
           Name: "email-catcher-AccountCreation",
         },
         State: {

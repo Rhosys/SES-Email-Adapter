@@ -6,12 +6,12 @@ describe("isStepFunctionTaskEvent", () => {
   const validEvent: StepFunctionTaskEvent = {
     context: {
       Execution: {
-        Id: "arn:aws:states:eu-central-1:342695602194:execution:email-catcher-AccountCreation:acc-abc123xyz",
+        Id: "arn:aws:states:eu-central-1:123456789012:execution:email-catcher-AccountCreation:acc-abc123xyz",
         Input: { accountId: "acc-abc123xyz", email: "user@example.com" },
         Name: "acc-abc123xyz",
       },
       StateMachine: {
-        Id: "arn:aws:states:eu-central-1:342695602194:stateMachine:email-catcher-AccountCreation",
+        Id: "arn:aws:states:eu-central-1:123456789012:stateMachine:email-catcher-AccountCreation",
         Name: "email-catcher-AccountCreation",
       },
       State: {

@@ -1,8 +1,19 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeAll } from "vitest";
 import { buildProxyUid, validateProxyUid } from "../../src/processor/calendar/proxy-uid.js";
 
-// Static 32-byte HMAC secret for deterministic tests
-const TEST_SECRET = new Uint8Array(32).fill(0xAB);
+// ---------------------------------------------------------------------------
+// Mock hmac-secret.ts — deterministic HMAC for tests without real KMS
+// ---------------------------------------------------------------------------
+
+import { createHmac } from "node:crypto";
+
+vi.mock("../../src/processor/calendar/hmac-secret.js", () => ({
+  computeHmac16: (payload: string) =>
+    Promise.resolve(createHmac("sha256", new Uint8Array(32).fill(0xAB)).update(payload).digest("base64url").slice(0, 16)),
+  validateHmac16: (payload: string, hmac16: string) =>
+    Promise.resolve(createHmac("sha256", new Uint8Array(32).fill(0xAB)).update(payload).digest("base64url").slice(0, 16) === hmac16),
+}));
+
 const SERVICE_DOMAIN = "platform.email.rhosys.cloud";
 
 // ---------------------------------------------------------------------------
@@ -26,12 +37,11 @@ describe("buildProxyUid — construction format and determinism (Property 9)", (
     },
   ] as const;
 
-  it.each(cases)("$label", ({ accountId, arcId, originalVeventUid }) => {
-    const result = buildProxyUid({
+  it.each(cases)("$label", async ({ accountId, arcId, originalVeventUid }) => {
+    const result = await buildProxyUid({
       accountId,
       arcId,
       originalVeventUid,
-      hmacSecret: TEST_SECRET,
       serviceDomain: SERVICE_DOMAIN,
     });
 
@@ -60,10 +70,10 @@ describe("buildProxyUid — construction format and determinism (Property 9)", (
     expect(uidSegments.join(".")).toBe(originalVeventUid);
   });
 
-  it.each(cases)("$label — deterministic across calls", ({ accountId, arcId, originalVeventUid }) => {
-    const opts = { accountId, arcId, originalVeventUid, hmacSecret: TEST_SECRET, serviceDomain: SERVICE_DOMAIN };
-    const first = buildProxyUid(opts);
-    const second = buildProxyUid(opts);
+  it.each(cases)("$label — deterministic across calls", async ({ accountId, arcId, originalVeventUid }) => {
+    const opts = { accountId, arcId, originalVeventUid, serviceDomain: SERVICE_DOMAIN };
+    const first = await buildProxyUid(opts);
+    const second = await buildProxyUid(opts);
     expect(first).toBe(second);
   });
 });
@@ -75,74 +85,48 @@ describe("buildProxyUid — construction format and determinism (Property 9)", (
 
 describe("validateProxyUid — HMAC validation (Property 12 partial)", () => {
   // Build a valid proxy UID to use as baseline
-  const validProxyUid = buildProxyUid({
-    accountId: "acc-abc123",
-    arcId: "arc-def456",
-    originalVeventUid: "uid-789",
-    hmacSecret: TEST_SECRET,
-    serviceDomain: SERVICE_DOMAIN,
+  let validProxyUid: string;
+
+  beforeAll(async () => {
+    validProxyUid = await buildProxyUid({
+      accountId: "acc-abc123",
+      arcId: "arc-def456",
+      originalVeventUid: "uid-789",
+      serviceDomain: SERVICE_DOMAIN,
+    });
   });
 
-  const validCases = [
-    {
-      label: "valid proxy UID → ok with correct decomposed parts",
-      proxyUid: validProxyUid,
-      hmacSecret: TEST_SECRET,
-      serviceDomain: SERVICE_DOMAIN,
-      expected: { accountId: "acc-abc123", arcId: "arc-def456", originalVeventUid: "uid-789" },
-    },
-  ] as const;
-
-  it.each(validCases)("$label", ({ proxyUid, hmacSecret, serviceDomain, expected }) => {
-    const result = validateProxyUid({ proxyUid, hmacSecret, serviceDomain });
+  it("valid proxy UID → ok with correct decomposed parts", async () => {
+    const result = await validateProxyUid({ proxyUid: validProxyUid, serviceDomain: SERVICE_DOMAIN });
     expect(result.isOk()).toBe(true);
-    expect(result._unsafeUnwrap()).toEqual(expected);
+    expect(result._unsafeUnwrap()).toEqual({ accountId: "acc-abc123", arcId: "arc-def456", originalVeventUid: "uid-789" });
   });
 
-  const invalidCases = [
-    {
-      label: "tampered HMAC → err",
-      proxyUid: validProxyUid.replace(
-        validProxyUid.slice(validProxyUid.lastIndexOf(".") + 1, validProxyUid.lastIndexOf("@")),
-        "AAAAAAAAAAAAAAAA",
-      ),
-      hmacSecret: TEST_SECRET,
-      serviceDomain: SERVICE_DOMAIN,
-      expectedError: "hmac mismatch",
-    },
-    {
-      label: "wrong secret → err",
-      proxyUid: validProxyUid,
-      hmacSecret: new Uint8Array(32).fill(0xFF),
-      serviceDomain: SERVICE_DOMAIN,
-      expectedError: "hmac mismatch",
-    },
-    {
-      label: "missing @ → err",
-      proxyUid: validProxyUid.replace("@", "."),
-      hmacSecret: TEST_SECRET,
-      serviceDomain: SERVICE_DOMAIN,
-      expectedError: "missing @ separator",
-    },
-    {
-      label: "wrong domain → err",
-      proxyUid: validProxyUid.replace(SERVICE_DOMAIN, "evil.example.com"),
-      hmacSecret: TEST_SECRET,
-      serviceDomain: SERVICE_DOMAIN,
-      expectedError: "domain mismatch",
-    },
-    {
-      label: "insufficient segments → err",
-      proxyUid: `onlytwo.segments@${SERVICE_DOMAIN}`,
-      hmacSecret: TEST_SECRET,
-      serviceDomain: SERVICE_DOMAIN,
-      expectedError: "insufficient segments in local-part",
-    },
-  ] as const;
-
-  it.each(invalidCases)("$label", ({ proxyUid, hmacSecret, serviceDomain, expectedError }) => {
-    const result = validateProxyUid({ proxyUid, hmacSecret, serviceDomain });
+  it("tampered HMAC → err", async () => {
+    const tampered = validProxyUid.replace(
+      validProxyUid.slice(validProxyUid.lastIndexOf(".") + 1, validProxyUid.lastIndexOf("@")),
+      "AAAAAAAAAAAAAAAA",
+    );
+    const result = await validateProxyUid({ proxyUid: tampered, serviceDomain: SERVICE_DOMAIN });
     expect(result.isErr()).toBe(true);
-    expect(result._unsafeUnwrapErr()).toBe(expectedError);
+    expect(result._unsafeUnwrapErr()).toBe("hmac mismatch");
+  });
+
+  it("missing @ → err", async () => {
+    const result = await validateProxyUid({ proxyUid: validProxyUid.replace("@", "."), serviceDomain: SERVICE_DOMAIN });
+    expect(result.isErr()).toBe(true);
+    expect(result._unsafeUnwrapErr()).toBe("missing @ separator");
+  });
+
+  it("wrong domain → err", async () => {
+    const result = await validateProxyUid({ proxyUid: validProxyUid.replace(SERVICE_DOMAIN, "evil.example.com"), serviceDomain: SERVICE_DOMAIN });
+    expect(result.isErr()).toBe(true);
+    expect(result._unsafeUnwrapErr()).toBe("domain mismatch");
+  });
+
+  it("insufficient segments → err", async () => {
+    const result = await validateProxyUid({ proxyUid: `onlytwo.segments@${SERVICE_DOMAIN}`, serviceDomain: SERVICE_DOMAIN });
+    expect(result.isErr()).toBe(true);
+    expect(result._unsafeUnwrapErr()).toBe("insufficient segments in local-part");
   });
 });

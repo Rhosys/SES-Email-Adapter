@@ -6,7 +6,7 @@ import { createMockLogger } from "../helpers/mock-logger.js";
 
 const sfnMock = mockClient(SFNClient);
 
-const STATE_MACHINE_ARN = "arn:aws:states:eu-central-1:342695602194:stateMachine:email-catcher-AccountCreation";
+const STATE_MACHINE_ARN = "arn:aws:states:eu-central-1:123456789012:stateMachine:email-catcher-AccountCreation";
 
 describe("SfnAccountCreationStarter", () => {
   let starter: SfnAccountCreationStarter;

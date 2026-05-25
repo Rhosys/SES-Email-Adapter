@@ -4,7 +4,6 @@ import { ok, err } from "neverthrow";
 
 // Env vars required by handler.ts at module load time
 process.env["MAIL_DOMAIN"] = "platform.email.rhosys.cloud";
-process.env["CALENDAR_HMAC_SECRET"] = Buffer.from(new Uint8Array(32)).toString("base64");
 
 // ---------------------------------------------------------------------------
 // Mock heavy dependencies so the handler module can load without real AWS SDK
@@ -193,12 +192,12 @@ function makeHttpAuthorizerEvent(headers: Record<string, string> = {}) {
   return {
     version: "2.0" as const,
     type: "REQUEST" as const,
-    routeArn: "arn:aws:execute-api:eu-central-1:342695602194:abc123/prod/GET/api/accounts",
+    routeArn: "arn:aws:execute-api:eu-central-1:123456789012:abc123/prod/GET/api/accounts",
     routeKey: "GET /api/accounts/{accountId}",
     rawPath: "/api/accounts/acc-123",
     headers,
     requestContext: {
-      accountId: "342695602194",
+      accountId: "123456789012",
       apiId: "abc123",
       domainName: "api.example.com",
       http: { method: "GET", path: "/api/accounts/acc-123" },
@@ -339,7 +338,7 @@ describe("HTTP Authorizer: event discrimination", () => {
 
     const event = {
       type: "REQUEST",
-      methodArn: "arn:aws:execute-api:eu-central-1:342695602194:ws-api/prod/$connect",
+      methodArn: "arn:aws:execute-api:eu-central-1:123456789012:ws-api/prod/$connect",
       requestContext: { path: "/api/accounts/acc-ws" },
       headers: {},
       queryStringParameters: { token: "ws-jwt-token", accountId: "acc-ws" },

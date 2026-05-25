@@ -10,6 +10,19 @@ import { ok } from "../../../src/errors.js";
 import { createMockLogger } from "../../helpers/mock-logger.js";
 
 // ---------------------------------------------------------------------------
+// Mock hmac-secret.ts — deterministic HMAC for tests without real KMS
+// ---------------------------------------------------------------------------
+
+import { createHmac } from "node:crypto";
+
+vi.mock("../../../src/processor/calendar/hmac-secret.js", () => ({
+  computeHmac16: (payload: string) =>
+    Promise.resolve(createHmac("sha256", new Uint8Array(32)).update(payload).digest("base64url").slice(0, 16)),
+  validateHmac16: (payload: string, hmac16: string) =>
+    Promise.resolve(createHmac("sha256", new Uint8Array(32)).update(payload).digest("base64url").slice(0, 16) === hmac16),
+}));
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
@@ -102,7 +115,6 @@ function makeAccountDb(calendarForwardingAddress = "user@gmail.com") {
 function makeCalendarForwarderDeps(): CalendarForwarderDeps {
   return {
     emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-fwd-001" })) } as never,
-    hmacSecret: new Uint8Array(32),
     serviceDomain: "platform.email.rhosys.cloud",
   };
 }
