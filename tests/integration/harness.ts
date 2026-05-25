@@ -22,6 +22,9 @@ import { createApp } from '../../src/api/app.js';
 import { createConsoleLogger } from './logger.js';
 import { ok } from '../../src/errors.js';
 import type { AccessService } from '../../src/api/app.js';
+import type { EmailService } from '../../src/email/email-service.js';
+import type { sendRsvp } from '../../src/processor/calendar/rsvp-composer.js';
+import type { PostApprovalCalendarHandlerDeps } from '../../src/processor/calendar/post-approval-handler.js';
 import { startMockAuthressServer } from './mock-authress.js';
 import type { MockAuthressServer } from './mock-authress.js';
 
@@ -74,6 +77,10 @@ export async function createHarness(): Promise<IntegrationHarness> {
     auth: new AuthressAuthService(),
     access,
     logger,
+    emailService: { send: async () => ok({ messageId: "ses-cal-001" }), sendRaw: async () => {} } as unknown as EmailService,
+    rsvpComposer: (async () => ok(undefined)) as unknown as typeof sendRsvp,
+    postApprovalCalendarDeps: { accountDb: {} as never, emailService: {} as never, hmacSecret: new Uint8Array(32), serviceDomain: "cal.numaeel.com" } as unknown as PostApprovalCalendarHandlerDeps,
+    calendarServiceDomain: "cal.numaeel.com",
   });
 
   return {

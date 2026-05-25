@@ -7,6 +7,9 @@ import type { ArcDatabase } from "../../src/database/arc-database.js";
 import type { AccountDatabase } from "../../src/database/account-database.js";
 import type { AuditDatabase } from "../../src/database/audit-database.js";
 import { ok } from "neverthrow";
+import type { EmailService } from "../../src/email/email-service.js";
+import type { sendRsvp } from "../../src/processor/calendar/rsvp-composer.js";
+import type { PostApprovalCalendarHandlerDeps } from "../../src/processor/calendar/post-approval-handler.js";
 import { createMockLogger } from "../helpers/mock-logger.js";
 
 vi.mock("../../src/dns/mx-validator.js", () => ({
@@ -187,6 +190,10 @@ describe("GET /accounts/:accountId/arcs/:arcId/signals — calendar signal enric
       access: makeAccess(),
       logger: createMockLogger(),
       verificationMailer,
+      emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService,
+      rsvpComposer: vi.fn().mockResolvedValue(ok(undefined)) as unknown as typeof sendRsvp,
+      postApprovalCalendarDeps: { accountDb: {} as never, emailService: {} as never, hmacSecret: new Uint8Array(32), serviceDomain: "cal.numaeel.com" } as unknown as PostApprovalCalendarHandlerDeps,
+      calendarServiceDomain: "cal.numaeel.com",
     });
   });
 

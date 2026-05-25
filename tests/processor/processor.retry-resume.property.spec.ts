@@ -5,6 +5,7 @@ import type { ArcMatcher, InboundSignalMessage, SqsDispatcher } from "../../src/
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
 import { makeArcDbMock, makeAccountDbMock, makeProcessingDbMock } from "./_helpers.js";
 import type { ArcDatabase } from "../../src/database/arc-database.js";
+import type { EmailService } from "../../src/email/email-service.js";
 import type { ContentSanitizerClient } from "../../src/processor/content-sanitizer-client.js";
 import type { SignalClassifier } from "../../src/classifier/classifier.js";
 import type { EmbeddingGenerator } from "../../src/embedding/embedding-generator.js";
@@ -272,6 +273,7 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
       replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "mock-reply-id" }) },
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
+      calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, hmacSecret: new Uint8Array(32), serviceDomain: "cal.numaeel.com" },
     });
 
     await processor.processRecord(makeMessage(sesMessageId), receiveCount);
@@ -298,6 +300,7 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
       replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "mock-reply-id" }) },
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
+      calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, hmacSecret: new Uint8Array(32), serviceDomain: "cal.numaeel.com" },
     });
 
     await processor.processRecord(makeMessage(sesMessageId), receiveCount);
@@ -325,6 +328,7 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
       replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "mock-reply-id" }) },
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
+      calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, hmacSecret: new Uint8Array(32), serviceDomain: "cal.numaeel.com" },
     });
 
     await processor.processRecord(makeMessage(sesMessageId), receiveCount);
@@ -351,6 +355,7 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
       replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "mock-reply-id" }) },
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
+      calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, hmacSecret: new Uint8Array(32), serviceDomain: "cal.numaeel.com" },
     });
 
     await processor.processRecord(makeMessage(sesMessageId), receiveCount);
@@ -384,6 +389,7 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
       replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "mock-reply-id" }) },
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
+      calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, hmacSecret: new Uint8Array(32), serviceDomain: "cal.numaeel.com" },
     });
 
     await processor.processRecord(makeMessage(sesMessageId), receiveCount);
@@ -411,6 +417,7 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
       replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "mock-reply-id" }) },
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
+      calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, hmacSecret: new Uint8Array(32), serviceDomain: "cal.numaeel.com" },
     });
 
     const result = await processor.processRecord(makeMessage(sesMessageId), receiveCount);
@@ -482,6 +489,7 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
       replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "mock-reply-id" }) },
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
+      calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, hmacSecret: new Uint8Array(32), serviceDomain: "cal.numaeel.com" },
     });
 
     const result = await processor.processRecord(makeMessage("msg-no-arc"), 2);
@@ -657,6 +665,7 @@ describe("Feature: signal-processor-retry-resilience, Property 3: DDB read failu
       replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "mock-reply-id" }) },
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
+      calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, hmacSecret: new Uint8Array(32), serviceDomain: "cal.numaeel.com" },
     });
 
     const result = await processor.processRecord(makeRetryMessage(sesMessageId), receiveCount);
@@ -690,6 +699,7 @@ describe("Feature: signal-processor-retry-resilience, Property 3: DDB read failu
       replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "mock-reply-id" }) },
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
+      calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, hmacSecret: new Uint8Array(32), serviceDomain: "cal.numaeel.com" },
     });
 
     const result = await processor.processRecord(makeRetryMessage(sesMessageId), receiveCount);
@@ -844,6 +854,7 @@ describe("Feature: signal-processor-retry-resilience, Property 2: Missing signal
       replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "mock-reply-id" }) },
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
+      calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, hmacSecret: new Uint8Array(32), serviceDomain: "cal.numaeel.com" },
     });
 
     await processor.processRecord(makeMessage(sesMessageId), receiveCount);
@@ -868,6 +879,7 @@ describe("Feature: signal-processor-retry-resilience, Property 2: Missing signal
       replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "mock-reply-id" }) },
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
+      calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, hmacSecret: new Uint8Array(32), serviceDomain: "cal.numaeel.com" },
     });
 
     await processor.processRecord(makeMessage(sesMessageId), receiveCount);
@@ -892,6 +904,7 @@ describe("Feature: signal-processor-retry-resilience, Property 2: Missing signal
       replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "mock-reply-id" }) },
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
+      calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, hmacSecret: new Uint8Array(32), serviceDomain: "cal.numaeel.com" },
     });
 
     await processor.processRecord(makeMessage(sesMessageId), receiveCount);
@@ -915,6 +928,7 @@ describe("Feature: signal-processor-retry-resilience, Property 2: Missing signal
       replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "mock-reply-id" }) },
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
+      calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, hmacSecret: new Uint8Array(32), serviceDomain: "cal.numaeel.com" },
     });
 
     const result = await processor.processRecord(makeMessage(sesMessageId), receiveCount);
@@ -1108,6 +1122,7 @@ describe("Feature: signal-processor-retry-resilience, Property 8: Outcome re-der
       forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
       draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
+      calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, hmacSecret: new Uint8Array(32), serviceDomain: "cal.numaeel.com" },
     });
 
     await processor.processRecord(makeMessage(), receiveCount);
@@ -1145,6 +1160,7 @@ describe("Feature: signal-processor-retry-resilience, Property 8: Outcome re-der
       forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
       draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
+      calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, hmacSecret: new Uint8Array(32), serviceDomain: "cal.numaeel.com" },
     });
 
     await processor.processRecord(makeMessage(), receiveCount);

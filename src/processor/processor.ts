@@ -34,6 +34,8 @@ import { BillingHandler } from "../billing/billing-handler.js";
 import type { HandlerRegistry } from "../workflow/registry.js";
 import { findCalendarAttachment, parseIcs } from "./calendar/ics-parser.js";
 import { buildCalendarSignalLookupId } from "./calendar/signal-lookup.js";
+import { forwardCalendarInvite } from "./calendar/calendar-forwarder.js";
+import type { CalendarForwarderDeps } from "./calendar/calendar-forwarder.js";
 import type { CalendarEventData, CalendarInviteInvalidData } from "../types/calendar.js";
 
 // ---------------------------------------------------------------------------
@@ -280,6 +282,8 @@ export const SYSTEM_RULES: Rule[] = [
   // ticket_opened/resolved/closed are passive lifecycle events — low unless urgency field says otherwise (fired after priority rules so those win)
   { id: "SR-24", accountId: "SYSTEM", name: "Support: low urgency for passive lifecycle events", condition: JSON.stringify({ "and": [wf_("support"), { "in": [wfData_("eventType"), ["ticket_opened", "ticket_resolved", "ticket_closed"]] }, { "!": [in_("system:replied")] }] }), actions: [{ type: "set_urgency", value: "low" }], status: "enabled", priorityOrder: 18, createdAt: "", updatedAt: "" },
   { id: "SR-13", accountId: "SYSTEM", name: "Auto-reply to test emails (pong)", condition: JSON.stringify(in_("system:test")), actions: [{ type: "pong" }], status: "enabled", priorityOrder: 19, createdAt: "", updatedAt: "" },
+  // --- Calendar forwarding (20) ----------------------------------------
+  { id: "SR-26", accountId: "SYSTEM", name: "Forward calendar invite to user's real calendar", condition: JSON.stringify(in_("system:calendar")), actions: [{ type: "forwardCalendarInvite" }], status: "enabled", priorityOrder: 20, createdAt: "", updatedAt: "" },
 ];
 
 // ---------------------------------------------------------------------------
@@ -306,6 +310,7 @@ interface SignalProcessorOptions {
   draftSendDispatcher: DraftSendDispatch;
   billingHandler?: BillingHandler;
   handlerRegistry?: HandlerRegistry;
+  calendarForwarderDeps: CalendarForwarderDeps;
   s3Client: S3Client;
   emailBucket: string;
   contentBucket: string;
@@ -332,6 +337,7 @@ export class SignalProcessor {
   private readonly draftSendDispatcher: DraftSendDispatch;
   private readonly billingHandler: BillingHandler;
   private readonly handlerRegistry: HandlerRegistry | undefined;
+  private readonly calendarForwarderDeps: CalendarForwarderDeps;
   private readonly s3Client: S3Client;
   private readonly emailBucket: string;
   private readonly contentBucket: string;
@@ -357,6 +363,7 @@ export class SignalProcessor {
     this.draftSendDispatcher = opts.draftSendDispatcher;
     this.billingHandler = opts.billingHandler ?? new BillingHandler();
     this.handlerRegistry = opts.handlerRegistry;
+    this.calendarForwarderDeps = opts.calendarForwarderDeps;
     this.s3Client = opts.s3Client;
     this.emailBucket = opts.emailBucket;
     this.contentBucket = opts.contentBucket;
@@ -726,6 +733,49 @@ export class SignalProcessor {
           }
           await deliverWebhook(configResult.value.url, payload, this.logger);
         }
+      }
+    }
+
+    // Calendar forwarding (critical — user expects invite in their calendar)
+    const calendarForwardActions = (signal.data.matchedRules ?? [])
+      .flatMap(r => r.actions.filter(a => a.type === "forwardCalendarInvite"));
+    if (calendarForwardActions.length > 0) {
+      try {
+        this.logger.trackPoint("side_effect_calendar_forward_start");
+
+        // Resolve calendarForwardingAddress from account config
+        const accountResult = await this.accountDb.getAccount(accountId);
+        const calendarForwardingAddress = accountResult.isOk() ? accountResult.value?.calendarForwardingAddress ?? "" : "";
+
+        // Find the calendar signal linked to this email signal
+        const calendarSignalResult = await this.arcDb.getLinkedCalendarSignal(accountId, arc.id, signal.id);
+        if (calendarSignalResult.isErr()) {
+          this.logger.track("Calendar forward failed — could not find linked calendar signal.", { code: "processor.side_effect.calendar_forward_no_signal", accountId, signalId: signal.id, arcId: arc.id, error: calendarSignalResult.error });
+        } else if (!calendarSignalResult.value) {
+          this.logger.track("Calendar forward skipped — no linked calendar signal found.", { code: "processor.side_effect.calendar_forward_no_signal", accountId, signalId: signal.id, arcId: arc.id });
+        } else {
+          const calendarSignal = calendarSignalResult.value;
+          const forwardResult = await forwardCalendarInvite(
+            {
+              calendarSignal,
+              calendarForwardingAddress,
+              accountId,
+              arcId: arc.id,
+              aliasAddress: signal.data.recipientAddress,
+            },
+            this.calendarForwarderDeps,
+            this.logger,
+          );
+          if (forwardResult.isErr()) {
+            this.logger.track("Calendar forward failed — will force retry.", { code: "processor.side_effect.calendar_forward_failed", accountId, signalId: signal.id, error: forwardResult.error });
+            criticalFailure = forwardResult.error;
+          } else {
+            this.logger.trackPoint("side_effect_calendar_forward_complete");
+          }
+        }
+      } catch (e) {
+        this.logger.track("Calendar forward threw unexpectedly — will force retry.", { code: "processor.side_effect.calendar_forward_error", accountId, error: e });
+        criticalFailure = e;
       }
     }
 
@@ -1400,6 +1450,18 @@ export class SignalProcessor {
       if (updateResult.isErr()) {
         this.logger.warn("Failed to apply system:calendar label to arc.", { code: "processor.calendar.label_failed", accountId, arcId: arc.id, error: updateResult.error });
       }
+    }
+
+    // Inject forwardCalendarInvite action into the signal's matchedRules so the
+    // side-effect handler triggers forwarding. The system rule (SR-26) won't match
+    // on the first signal because the label is applied after rule evaluation.
+    const existingRules = signal.data.matchedRules ?? [];
+    const hasCalendarForward = existingRules.some(r => r.actions.some(a => a.type === "forwardCalendarInvite"));
+    if (!hasCalendarForward) {
+      signal.data.matchedRules = [
+        ...existingRules,
+        { ruleId: "SR-26", actions: [{ type: "forwardCalendarInvite" }], labelsAdded: [] },
+      ];
     }
 
     this.logger.info("Calendar signal created from .ics attachment.", { code: "processor.calendar.signal_created", accountId, calendarSignalId, emailSignalId: signal.id, arcId: arc.id, method: calendarData.method, veventUid: calendarData.veventUid });

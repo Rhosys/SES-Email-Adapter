@@ -6,6 +6,9 @@ import type { ArcDatabase } from "../../src/database/arc-database.js";
 import type { AccountDatabase } from "../../src/database/account-database.js";
 import type { AuditDatabase } from "../../src/database/audit-database.js";
 import { ok, err } from "neverthrow";
+import type { EmailService } from "../../src/email/email-service.js";
+import type { sendRsvp } from "../../src/processor/calendar/rsvp-composer.js";
+import type { PostApprovalCalendarHandlerDeps } from "../../src/processor/calendar/post-approval-handler.js";
 import { createMockLogger } from "../helpers/mock-logger.js";
 import { authError } from "../../src/errors.js";
 import type { DraftSendDispatcher } from "../../src/processor/draft-send-dispatcher.js";
@@ -296,7 +299,7 @@ describe("API", () => {
       validateAst: vi.fn().mockResolvedValue({ success: true, purpose: "validate_ast", result: { valid: true } }),
       validateAstBatch: vi.fn().mockResolvedValue({ success: true, purpose: "validate_ast_batch", results: [] }),
     };
-    app = createApp({ arcDb: arcDb as unknown as ArcDatabase, accountDb: accountDb as unknown as AccountDatabase, auditDb: auditDb as unknown as AuditDatabase, auth, access, logger: createMockLogger(), verificationMailer, draftSendDispatcher, astValidator });
+    app = createApp({ arcDb: arcDb as unknown as ArcDatabase, accountDb: accountDb as unknown as AccountDatabase, auditDb: auditDb as unknown as AuditDatabase, auth, access, logger: createMockLogger(), verificationMailer, draftSendDispatcher, astValidator, emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, rsvpComposer: vi.fn().mockResolvedValue(ok(undefined)) as unknown as typeof sendRsvp, postApprovalCalendarDeps: { accountDb: {} as never, emailService: {} as never, hmacSecret: new Uint8Array(32), serviceDomain: "cal.numaeel.com" } as unknown as PostApprovalCalendarHandlerDeps, calendarServiceDomain: "cal.numaeel.com" });
   });
 
   // -------------------------------------------------------------------------
@@ -1001,7 +1004,7 @@ describe("API", () => {
     });
 
     it("returns 501 when access service is not configured", async () => {
-      app = createApp({ arcDb: arcDb as unknown as ArcDatabase, accountDb: accountDb as unknown as AccountDatabase, auditDb: auditDb as unknown as AuditDatabase, auth, logger: createMockLogger() });
+      app = createApp({ arcDb: arcDb as unknown as ArcDatabase, accountDb: accountDb as unknown as AccountDatabase, auditDb: auditDb as unknown as AuditDatabase, auth, logger: createMockLogger(), emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, rsvpComposer: vi.fn().mockResolvedValue(ok(undefined)) as unknown as typeof sendRsvp, postApprovalCalendarDeps: { accountDb: {} as never, emailService: {} as never, hmacSecret: new Uint8Array(32), serviceDomain: "cal.numaeel.com" } as unknown as PostApprovalCalendarHandlerDeps, calendarServiceDomain: "cal.numaeel.com" });
       const res = await req(app, "GET", `${A}/users`);
       expect(res.status).toBe(501);
     });
@@ -1042,7 +1045,7 @@ describe("API", () => {
     });
 
     it("returns 501 when access service is not configured", async () => {
-      app = createApp({ arcDb: arcDb as unknown as ArcDatabase, accountDb: accountDb as unknown as AccountDatabase, auditDb: auditDb as unknown as AuditDatabase, auth, logger: createMockLogger() });
+      app = createApp({ arcDb: arcDb as unknown as ArcDatabase, accountDb: accountDb as unknown as AccountDatabase, auditDb: auditDb as unknown as AuditDatabase, auth, logger: createMockLogger(), emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, rsvpComposer: vi.fn().mockResolvedValue(ok(undefined)) as unknown as typeof sendRsvp, postApprovalCalendarDeps: { accountDb: {} as never, emailService: {} as never, hmacSecret: new Uint8Array(32), serviceDomain: "cal.numaeel.com" } as unknown as PostApprovalCalendarHandlerDeps, calendarServiceDomain: "cal.numaeel.com" });
       const res = await req(app, "POST", `${A}/users`, { body: { email: "user@example.com", role: "member" } });
       expect(res.status).toBe(501);
     });

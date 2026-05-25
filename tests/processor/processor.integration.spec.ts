@@ -10,6 +10,7 @@ import type { EmbeddingGenerator, EmbeddingResult } from "../../src/embedding/em
 import type { MultiClusterAuroraWriter } from "../../src/database/multi-cluster-aurora-writer.js";
 import type { S3RetentionService } from "../../src/embedding/s3-retention-service.js";
 import type { Signal, Arc, Alias } from "../../src/types/index.js";
+import type { EmailService } from "../../src/email/email-service.js";
 import { dbError } from "../../src/errors.js";
 import { createMockLogger, type MockLogger } from "../helpers/mock-logger.js";
 
@@ -288,6 +289,7 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
       forwarder,
       replySender,
       draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
+      calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, hmacSecret: new Uint8Array(32), serviceDomain: "cal.numaeel.com" },
     });
   });
 

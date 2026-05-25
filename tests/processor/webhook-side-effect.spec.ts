@@ -12,6 +12,7 @@ import type { MultiClusterAuroraWriter } from "../../src/database/multi-cluster-
 import type { S3RetentionService } from "../../src/embedding/s3-retention-service.js";
 import type { Signal, Arc, Alias } from "../../src/types/index.js";
 import { BillingHandler } from "../../src/billing/billing-handler.js";
+import type { EmailService } from "../../src/email/email-service.js";
 import { createMockLogger, type MockLogger } from "../helpers/mock-logger.js";
 
 // ---------------------------------------------------------------------------
@@ -146,6 +147,7 @@ function makeProcessor(opts: { store: ReturnType<typeof makeStore>; logger: Mock
     forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) } as unknown as Forwarder,
     replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "msg-001" }) } as unknown as ReplySender,
     draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
+    calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, hmacSecret: new Uint8Array(32), serviceDomain: "cal.numaeel.com" },
     billingHandler: opts.billingHandler ?? new BillingHandler(),
     s3Client: {} as never,
     emailBucket: "test-bucket",
@@ -194,6 +196,7 @@ describe("processSideEffect — webhook delivery", () => {
       forwarder: forwarder as unknown as Forwarder,
       replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "msg-001" }) } as unknown as ReplySender,
       draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
+      calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, hmacSecret: new Uint8Array(32), serviceDomain: "cal.numaeel.com" },
       billingHandler: new BillingHandler(),
       s3Client: {} as never,
       emailBucket: "test-bucket",
