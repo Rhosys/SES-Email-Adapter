@@ -6,7 +6,6 @@
 // stateless checksum + HMAC before any database I/O occurs.
 // ---------------------------------------------------------------------------
 
-import { createHash } from "node:crypto";
 import { DateTime } from "luxon";
 import { ok, err } from "../../errors.js";
 import type { DbError, Result } from "../../errors.js";
@@ -18,6 +17,7 @@ import type { EmailService } from "../../email/email-service.js";
 import { validateProxyUid } from "./proxy-uid.js";
 import { parseIcs } from "./ics-parser.js";
 import type { sendRsvp } from "./rsvp-composer.js";
+import { validateId } from "../../utils/id.js";
 
 // ---------------------------------------------------------------------------
 // Dependencies (injected at cold start)
@@ -30,39 +30,6 @@ export interface CalendarResponseHandlerDeps {
   rsvpComposer: typeof sendRsvp;
   signalStore: { saveSignal(signal: Signal<CalendarResponseData>): Promise<Result<void, DbError>> };
   emailService: EmailService;
-}
-
-// ---------------------------------------------------------------------------
-// Base58 alphabet (excludes 0, O, I, l)
-// ---------------------------------------------------------------------------
-
-const BASE58_CHARS = new Set(
-  "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz",
-);
-
-/**
- * Validate an ID's trailing checksum.
- *
- * Algorithm:
- * 1. Take the string without the last 3 characters (the "prefix")
- * 2. Compute SHA-256 of that prefix
- * 3. Take the first 3 characters of the hex digest
- * 4. Filter through base58 alphabet (remove 0, O, I, l)
- * 5. Compare with the last 3 characters of the original string
- */
-export function validateIdChecksum(id: string): boolean {
-  if (id.length <= 3) return false;
-
-  const prefix = id.slice(0, -3);
-  const expectedChecksum = id.slice(-3);
-
-  const hash = createHash("sha256").update(prefix).digest("hex");
-  const first3Hex = hash.slice(0, 3);
-
-  // Filter through base58 alphabet
-  const filtered = [...first3Hex].filter((c) => BASE58_CHARS.has(c)).join("");
-
-  return filtered === expectedChecksum;
 }
 
 // ---------------------------------------------------------------------------
@@ -157,7 +124,7 @@ export async function handleCalendarResponse(
   }
 
   // --- Step 2: Validate accountId checksum ---
-  if (!validateIdChecksum(accountId)) {
+  if (!validateId(accountId, "acc-")) {
     logger.warn("Calendar response handler: accountId checksum failed.", {
       code: "processor.calendar_response.checksum_failed",
       recipient,
@@ -167,7 +134,7 @@ export async function handleCalendarResponse(
   }
 
   // --- Step 3: Validate arcId checksum ---
-  if (!validateIdChecksum(arcId)) {
+  if (!validateId(arcId, "arc-")) {
     logger.warn("Calendar response handler: arcId checksum failed.", {
       code: "processor.calendar_response.checksum_failed",
       recipient,
