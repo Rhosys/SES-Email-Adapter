@@ -92,6 +92,11 @@ program
       outfile: 'dist/main/handler.js',
     });
 
+    // Bundle KMS-encrypted secrets alongside the handler
+    const { mkdirSync, copyFileSync } = await import('node:fs');
+    mkdirSync('dist/main/processor/calendar', { recursive: true });
+    copyFileSync('src/processor/calendar/calendar-hmac.kms', 'dist/main/processor/calendar/calendar-hmac.kms');
+
     console.log(`Building ${userCodeExecutorFunctionName} v${version}...`);
     await esbuild.build({
       ...esbuildDefaults,
