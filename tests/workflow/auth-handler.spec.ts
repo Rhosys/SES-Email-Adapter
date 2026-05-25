@@ -16,27 +16,32 @@ function makeDevice(token: string): Device {
   return { accountId: "acc-1", token, type: "websocket", createdAt: "2024-01-01T00:00:00Z", updatedAt: "2024-01-01T00:00:00Z" };
 }
 
-function makeSignal(overrides: Partial<Signal> & { from: Signal["from"]; workflowData: AuthData }): Signal {
+function makeSignal(overrides: { data?: Partial<Signal["data"]> } & Partial<Omit<Signal, "data">> & { data: { from: Signal["data"]["from"]; workflowData: AuthData } }): Signal {
+  const { data: dataOverrides, ...baseOverrides } = overrides;
   return {
     id: "sgn-test-001",
     signalLookupId: "sgn-test-001",
     accountId: "acc-1",
     source: "email",
-    receivedAt: "2024-01-01T00:00:00Z",
-    to: [{ address: "me@mydomain.com" }],
-    cc: [],
-    subject: "Your verification code",
-    attachments: [],
-    headers: {},
-    recipientAddress: "me@mydomain.com",
-    workflow: "auth",
-    spamScore: 0,
-    summary: "OTP code",
-    s3Key: "signals/test.eml",
+    type: "email",
     status: "active",
     createdAt: "2024-01-01T00:00:00Z",
-    ...overrides,
-  };
+    ...baseOverrides,
+    data: {
+      receivedAt: "2024-01-01T00:00:00Z",
+      to: [{ address: "me@mydomain.com" }],
+      cc: [],
+      subject: "Your verification code",
+      attachments: [],
+      headers: {},
+      recipientAddress: "me@mydomain.com",
+      workflow: "auth",
+      spamScore: 0,
+      summary: "OTP code",
+      s3Key: "signals/test.eml",
+      ...dataOverrides,
+    },
+  } as Signal;
 }
 
 const stubArc: Arc = {
@@ -105,7 +110,7 @@ describe("AuthWorkflowHandler", () => {
       vi.mocked(mocks.deliverer.deliver).mockResolvedValue({ status: "delivered" });
 
       const workflowData: AuthData = { workflow: "auth", authType, code, service: "TestService", ...(expiresInMinutes !== undefined ? { expiresInMinutes } : {}) };
-      const signal = makeSignal({ from: { address: domain }, workflowData });
+      const signal = makeSignal({ data: { from: { address: domain }, workflowData } });
 
       const result = await handler.execute(signal, stubArc, "acc-1");
 
@@ -119,7 +124,7 @@ describe("AuthWorkflowHandler", () => {
         authType,
         ...(expiresInMinutes !== undefined ? { expiresInMinutes } : {}),
         originDomain: expectedOrigin,
-        subject: signal.subject,
+        subject: signal.data.subject,
       };
 
       for (let i = 0; i < devices; i++) {
@@ -139,7 +144,7 @@ describe("AuthWorkflowHandler", () => {
       { label: "listDevices fails", listDevicesFails: true, results: [] as const },
     ])("returns ok() regardless of delivery outcome — $label", async ({ results, listDevicesFails }) => {
       const workflowData: AuthData = { workflow: "auth", authType: "otp", code: "111111", service: "Svc" };
-      const signal = makeSignal({ from: { address: "noreply@example.com" }, workflowData });
+      const signal = makeSignal({ data: { from: { address: "noreply@example.com" }, workflowData } });
 
       if (listDevicesFails) {
         vi.mocked(mocks.deviceStore.listDevices).mockResolvedValue(err({ kind: "db_error", cause: "timeout" }));
@@ -164,7 +169,7 @@ describe("AuthWorkflowHandler", () => {
 
   it("skips push when workflowData.code is undefined", async () => {
     const workflowData: AuthData = { workflow: "auth", authType: "otp", service: "Svc" };
-    const signal = makeSignal({ from: { address: "noreply@example.com" }, workflowData });
+    const signal = makeSignal({ data: { from: { address: "noreply@example.com" }, workflowData } });
 
     const result = await handler.execute(signal, stubArc, "acc-1");
 
@@ -182,7 +187,7 @@ describe("AuthWorkflowHandler", () => {
     vi.mocked(mocks.deviceStore.deleteDevice).mockResolvedValue(ok(undefined));
 
     const workflowData: AuthData = { workflow: "auth", authType: "otp", code: "999999", service: "Svc" };
-    const signal = makeSignal({ from: { address: "noreply@example.com" }, workflowData });
+    const signal = makeSignal({ data: { from: { address: "noreply@example.com" }, workflowData } });
 
     await handler.execute(signal, stubArc, "acc-1");
 
@@ -196,7 +201,7 @@ describe("AuthWorkflowHandler", () => {
     vi.mocked(mocks.deliverer.deliver).mockResolvedValue({ status: "delivered" });
 
     const workflowData: AuthData = { workflow: "auth", authType: "otp", code: "123456", service: "Svc" };
-    const signal = makeSignal({ from: { address: "noreply@example.com" }, workflowData });
+    const signal = makeSignal({ data: { from: { address: "noreply@example.com" }, workflowData } });
 
     await handler.execute(signal, stubArc, "acc-1");
 
@@ -212,7 +217,7 @@ describe("AuthWorkflowHandler", () => {
     vi.mocked(mocks.arcDatabase.updateArc).mockResolvedValue(err(dbErr));
 
     const workflowData: AuthData = { workflow: "auth", authType: "otp", code: "123456", service: "Svc" };
-    const signal = makeSignal({ from: { address: "noreply@example.com" }, workflowData });
+    const signal = makeSignal({ data: { from: { address: "noreply@example.com" }, workflowData } });
 
     const result = await handler.execute(signal, stubArc, "acc-1");
 

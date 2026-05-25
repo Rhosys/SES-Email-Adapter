@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { DynamoSystemSignalCreator } from "../../src/processor/system-signal-creator.js";
 import { createMockLogger, type MockLogger } from "../helpers/mock-logger.js";
 import { ok, err } from "../../src/errors.js";
-import type { Signal } from "../../src/types/index.js";
+import type { Signal, InvalidRuleFunctionData, InvalidTemplateFunctionData, AutoSendBlockedData } from "../../src/types/index.js";
 
 describe("DynamoSystemSignalCreator", () => {
   let logger: MockLogger;
@@ -26,13 +26,13 @@ describe("DynamoSystemSignalCreator", () => {
       });
 
       expect(mockSaveSignal).toHaveBeenCalledTimes(1);
-      const signal: Signal = mockSaveSignal.mock.calls[0]![0];
+      const signal = mockSaveSignal.mock.calls[0]![0] as Signal<InvalidRuleFunctionData>;
 
       expect(signal.accountId).toBe("acc_123");
       expect(signal.arcId).toBe("arc_456");
-      expect(signal.recipientAddress).toBe("inbox@example.com");
+      expect(signal.data.resourceName).toBe("My Rule");
+      expect(signal.data.issue).toBe("Invalid action type: unknown_action");
       expect(signal.type).toBe("invalid_rule_function");
-      expect(signal.subject).toBe('rule "My Rule": Invalid action type: unknown_action');
       expect(signal.source).toBe("email");
       expect(signal.status).toBe("active");
       expect(signal.id).toMatch(/^sgn-/);
@@ -72,12 +72,14 @@ describe("DynamoSystemSignalCreator", () => {
       });
 
       expect(mockSaveSignal).toHaveBeenCalledTimes(1);
-      const signal: Signal = mockSaveSignal.mock.calls[0]![0];
+      const signal = mockSaveSignal.mock.calls[0]![0] as Signal<InvalidTemplateFunctionData>;
 
       expect(signal.accountId).toBe("acc_456");
       expect(signal.arcId).toBe("arc_789");
       expect(signal.type).toBe("invalid_template_function");
-      expect(signal.subject).toBe('template "Welcome Template" function "greeting": Function returned non-string value');
+      expect(signal.data.resourceName).toBe("Welcome Template");
+      expect(signal.data.functionName).toBe("greeting");
+      expect(signal.data.issue).toBe("Function returned non-string value");
     });
   });
 
@@ -92,13 +94,14 @@ describe("DynamoSystemSignalCreator", () => {
       });
 
       expect(mockSaveSignal).toHaveBeenCalledTimes(1);
-      const signal: Signal = mockSaveSignal.mock.calls[0]![0];
+      const signal = mockSaveSignal.mock.calls[0]![0] as Signal<AutoSendBlockedData>;
 
       expect(signal.accountId).toBe("acc_111");
       expect(signal.arcId).toBe("arc_222");
       expect(signal.type).toBe("auto_send_blocked");
-      expect(signal.subject).toContain("Auto-send suppressed");
-      expect(signal.subject).toContain("phish@evil.com");
+      expect(signal.data.fromAddress).toBe("sender@legit.com");
+      expect(signal.data.replyToAddress).toBe("phish@evil.com");
+      expect(signal.data.recipientAddress).toBe("inbox@example.com");
     });
   });
 });

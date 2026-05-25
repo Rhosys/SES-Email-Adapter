@@ -115,15 +115,20 @@ export class ReindexWorker {
     targetRegistryId: string,
     modelId: string,
   ): Promise<Result<void, { signalId: string; reason: string }>> {
-    const signal = item as unknown as Pick<Signal, "id" | "signalLookupId" | "accountId" | "arcId"> & { data: Pick<EmailSignalData, "recipientAddress" | "embeddings" | "s3Key"> };
+    const signal = item as unknown as Pick<Signal, "id" | "signalLookupId" | "accountId" | "arcId"> & { data?: Pick<EmailSignalData, "recipientAddress" | "embeddings" | "s3Key"> };
+
+    if (!signal.data) {
+      return err({ signalId: signal.id ?? "unknown", reason: "no data property on item" });
+    }
+
     const embeddings = signal.data.embeddings;
 
     const vector = embeddings?.[modelId];
     if (vector && Array.isArray(vector)) {
-      return this.pureCopyToAurora(signal, vector, targetRegistryId);
+      return this.pureCopyToAurora(signal as Pick<Signal, "id" | "accountId" | "arcId"> & { data: Pick<EmailSignalData, "recipientAddress"> }, vector, targetRegistryId);
     }
 
-    return this.regenerateFromS3(signal, targetRegistryId, modelId);
+    return this.regenerateFromS3(signal as Pick<Signal, "id" | "signalLookupId" | "accountId" | "arcId"> & { data: Pick<EmailSignalData, "recipientAddress" | "s3Key"> }, targetRegistryId, modelId);
   }
 
   // ---------------------------------------------------------------------------

@@ -63,22 +63,25 @@ const signal: Signal = {
   signalLookupId: "ses-msg-001",
   accountId: "acct-1",
   source: "email",
-  receivedAt: "2024-06-01T12:00:00Z",
-  from: { address: "alice@example.com", name: "Alice" },
-  to: [{ address: "me@mydomain.com" }],
-  cc: [],
-  subject: "Your order has shipped",
-  attachments: [],
-  headers: {},
-  recipientAddress: "me@mydomain.com",
-  workflow: "package",
-  workflowData: { workflow: "package", packageType: "shipping", retailer: "Amazon" },
-  spamScore: 0,
-  summary: "Order shipped",
-  s3Key: "emails/msg-001",
+  type: "email",
   status: "active",
   createdAt: "2024-06-01T12:00:00Z",
-};
+  data: {
+    receivedAt: "2024-06-01T12:00:00Z",
+    from: { address: "alice@example.com", name: "Alice" },
+    to: [{ address: "me@mydomain.com" }],
+    cc: [],
+    subject: "Your order has shipped",
+    attachments: [],
+    headers: {},
+    recipientAddress: "me@mydomain.com",
+    workflow: "package",
+    workflowData: { workflow: "package", packageType: "shipping", retailer: "Amazon" },
+    spamScore: 0,
+    summary: "Order shipped",
+    s3Key: "emails/msg-001",
+  },
+} as Signal;
 
 const wsDevice: Device = { accountId: "acct-1", token: "ws-conn-1", type: "websocket", createdAt: "2024-01-01T00:00:00Z", updatedAt: "2024-01-01T00:00:00Z" };
 const fcmDevice: Device = { accountId: "acct-1", token: "fcm-token-1", type: "fcm", createdAt: "2024-01-01T00:00:00Z", updatedAt: "2024-01-01T00:00:00Z" };
@@ -249,7 +252,7 @@ describe("DeviceNotifier", () => {
     });
 
     it("uses address as senderName when name is not provided", async () => {
-      const signalNoName: Signal = { ...signal, from: { address: "bob@example.com" } };
+      const signalNoName: Signal = { ...signal, data: { ...signal.data, from: { address: "bob@example.com" } } };
       const wsDeliverer = mockDeliverer();
       const store = mockDeviceStore({ listDevices: vi.fn(async () => ok([wsDevice])) });
       const notifier = new DeviceNotifier({

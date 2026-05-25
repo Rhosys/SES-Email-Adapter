@@ -122,9 +122,11 @@ function makeSignalItem(opts: {
     signalLookupId: lookupId,
     accountId: opts.accountId,
     arcId: opts.arcId,
-    recipientAddress: opts.recipientAddress,
-    embeddings: opts.embeddings,
-    ...(opts.s3Key ? { s3Key: opts.s3Key } : {}),
+    data: {
+      recipientAddress: opts.recipientAddress,
+      embeddings: opts.embeddings,
+      ...(opts.s3Key ? { s3Key: opts.s3Key } : {}),
+    },
   };
 }
 

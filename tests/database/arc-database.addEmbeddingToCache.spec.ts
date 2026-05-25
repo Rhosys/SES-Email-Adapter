@@ -38,8 +38,8 @@ describe("ArcDatabase.addEmbeddingToCache", () => {
       pk: `ACCT#${accountId}#SIG#${signalId}`,
       sk: "#",
     });
-    expect(input.UpdateExpression).toBe("SET embeddings.#mid = :v");
-    expect(input.ExpressionAttributeNames).toEqual({ "#mid": modelId });
+    expect(input.UpdateExpression).toBe("SET #data.embeddings.#mid = :v");
+    expect(input.ExpressionAttributeNames).toEqual({ "#mid": modelId, "#data": "data" });
     expect(input.ExpressionAttributeValues).toEqual({ ":v": vector });
   });
 

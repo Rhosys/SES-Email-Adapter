@@ -103,28 +103,31 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
       signal: {
         id: "sgn-validEmb000000000000abc",
         signalLookupId: "ses-msg-valid-emb",
-        sesMessageId: "msg-valid-emb",
         arcId: "arc-valid-emb",
         accountId: TEST_ACCOUNT_ID,
         source: "email" as const,
-        receivedAt: "2024-01-15T10:00:00Z",
-        from: { address: "sender@external.com", name: "Sender" },
-        to: [{ address: "user@example.com" }],
-        cc: [],
-        subject: "Test email",
-        textBody: "Hello world",
-        attachments: [],
-        headers: {},
-        recipientAddress: "user@example.com",
-        workflow: "conversation" as Workflow,
-        workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false } as const,
-        spamScore: 0.01,
-        summary: "A test email.",
-        s3Key: "emails/msg-valid-emb",
+        type: "email" as const,
         status: "active" as const,
         createdAt: "2024-01-15T10:00:00Z",
-        embeddings: { "amazon.titan-embed-text-v2:0": [0.1, -0.5, 0.3] },
-        matchedRules: [],
+        data: {
+          sesMessageId: "msg-valid-emb",
+          receivedAt: "2024-01-15T10:00:00Z",
+          from: { address: "sender@external.com", name: "Sender" },
+          to: [{ address: "user@example.com" }],
+          cc: [],
+          subject: "Test email",
+          textBody: "Hello world",
+          attachments: [],
+          headers: {},
+          recipientAddress: "user@example.com",
+          workflow: "conversation" as Workflow,
+          workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false } as const,
+          spamScore: 0.01,
+          summary: "A test email.",
+          s3Key: "emails/msg-valid-emb",
+          embeddings: { "amazon.titan-embed-text-v2:0": [0.1, -0.5, 0.3] },
+          matchedRules: [],
+        },
       } as Signal,
     },
     {
@@ -132,27 +135,30 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
       signal: {
         id: "sgn-noEmb0000000000000000abc",
         signalLookupId: "ses-msg-no-emb",
-        sesMessageId: "msg-no-emb",
         arcId: "arc-no-emb",
         accountId: TEST_ACCOUNT_ID,
         source: "email" as const,
-        receivedAt: "2024-01-15T10:00:00Z",
-        from: { address: "sender@external.com", name: "Sender" },
-        to: [{ address: "user@example.com" }],
-        cc: [],
-        subject: "Test email",
-        textBody: "Hello world",
-        attachments: [],
-        headers: {},
-        recipientAddress: "user@example.com",
-        workflow: "conversation" as Workflow,
-        workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false } as const,
-        spamScore: 0.01,
-        summary: "A test email.",
-        s3Key: "emails/msg-no-emb",
+        type: "email" as const,
         status: "active" as const,
         createdAt: "2024-01-15T10:00:00Z",
-        matchedRules: [],
+        data: {
+          sesMessageId: "msg-no-emb",
+          receivedAt: "2024-01-15T10:00:00Z",
+          from: { address: "sender@external.com", name: "Sender" },
+          to: [{ address: "user@example.com" }],
+          cc: [],
+          subject: "Test email",
+          textBody: "Hello world",
+          attachments: [],
+          headers: {},
+          recipientAddress: "user@example.com",
+          workflow: "conversation" as Workflow,
+          workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false } as const,
+          spamScore: 0.01,
+          summary: "A test email.",
+          s3Key: "emails/msg-no-emb",
+          matchedRules: [],
+        },
       } as unknown as Signal,
     },
     {
@@ -160,28 +166,31 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
       signal: {
         id: "sgn-wrongModel00000000000abc",
         signalLookupId: "ses-msg-wrong-model",
-        sesMessageId: "msg-wrong-model",
         arcId: "arc-wrong-model",
         accountId: TEST_ACCOUNT_ID,
         source: "email" as const,
-        receivedAt: "2024-01-15T10:00:00Z",
-        from: { address: "sender@external.com", name: "Sender" },
-        to: [{ address: "user@example.com" }],
-        cc: [],
-        subject: "Test email",
-        textBody: "Hello world",
-        attachments: [],
-        headers: {},
-        recipientAddress: "user@example.com",
-        workflow: "conversation" as Workflow,
-        workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false } as const,
-        spamScore: 0.01,
-        summary: "A test email.",
-        s3Key: "emails/msg-wrong-model",
+        type: "email" as const,
         status: "active" as const,
         createdAt: "2024-01-15T10:00:00Z",
-        embeddings: { "cohere.embed-english-v3": [0.1, 0.2, 0.3] },
-        matchedRules: [],
+        data: {
+          sesMessageId: "msg-wrong-model",
+          receivedAt: "2024-01-15T10:00:00Z",
+          from: { address: "sender@external.com", name: "Sender" },
+          to: [{ address: "user@example.com" }],
+          cc: [],
+          subject: "Test email",
+          textBody: "Hello world",
+          attachments: [],
+          headers: {},
+          recipientAddress: "user@example.com",
+          workflow: "conversation" as Workflow,
+          workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false } as const,
+          spamScore: 0.01,
+          summary: "A test email.",
+          s3Key: "emails/msg-wrong-model",
+          embeddings: { "cohere.embed-english-v3": [0.1, 0.2, 0.3] },
+          matchedRules: [],
+        },
       } as Signal,
     },
   ];
@@ -199,13 +208,13 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
     return {
       id: signal.arcId!,
       accountId: signal.accountId,
-      workflow: signal.workflow,
+      workflow: signal.data.workflow,
       labels: [],
       status: "active",
-      summary: signal.summary,
-      lastSignalAt: signal.receivedAt,
-      createdAt: signal.receivedAt,
-      updatedAt: signal.receivedAt,
+      summary: signal.data.summary,
+      lastSignalAt: signal.data.receivedAt,
+      createdAt: signal.data.receivedAt,
+      updatedAt: signal.data.receivedAt,
     };
   }
 
@@ -245,7 +254,7 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
 
   it.each(RETRY_CASES)("MIME parser is NOT called on retry when signal exists in DDB ($label)", async ({ signal, receiveCount }) => {
     const arc = arbArcForSignal(signal);
-    const sesMessageId = signal.sesMessageId!;
+    const sesMessageId = signal.data.sesMessageId!;
     const contentSanitizer: ContentSanitizerClient = { invoke: vi.fn() };
 
     const processor = new SignalProcessor({
@@ -271,7 +280,7 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
 
   it.each(RETRY_CASES)("classifier is NOT called on retry when signal exists in DDB ($label)", async ({ signal, receiveCount }) => {
     const arc = arbArcForSignal(signal);
-    const sesMessageId = signal.sesMessageId!;
+    const sesMessageId = signal.data.sesMessageId!;
     const classifier: Pick<SignalClassifier, "classify"> = { classify: vi.fn() };
 
     const processor = new SignalProcessor({
@@ -297,7 +306,7 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
 
   it.each(RETRY_CASES)("rule evaluation is NOT called on retry when signal exists in DDB ($label)", async ({ signal, receiveCount }) => {
     const arc = arbArcForSignal(signal);
-    const sesMessageId = signal.sesMessageId!;
+    const sesMessageId = signal.data.sesMessageId!;
     const ruleEvaluator = new JsonLogicRuleEvaluator(mockLogger);
     const evaluateSpy = vi.spyOn(ruleEvaluator, "evaluate");
 
@@ -322,9 +331,9 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
     expect(evaluateSpy).not.toHaveBeenCalled();
   });
 
-  it.each(RETRY_CASES.filter(c => c.signal.embeddings?.["amazon.titan-embed-text-v2:0"]))("Aurora upserts ARE called with the signal's cached embeddings on retry ($label)", async ({ signal, receiveCount }) => {
+  it.each(RETRY_CASES.filter(c => c.signal.data.embeddings?.["amazon.titan-embed-text-v2:0"]))("Aurora upserts ARE called with the signal's cached embeddings on retry ($label)", async ({ signal, receiveCount }) => {
     const arc = arbArcForSignal(signal);
-    const sesMessageId = signal.sesMessageId!;
+    const sesMessageId = signal.data.sesMessageId!;
     const auroraWriter = makeAuroraWriter();
 
     const processor = new SignalProcessor({
@@ -351,13 +360,13 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
     expect(call[0]).toMatchObject({
       arcId: arc.id,
       accountId: signal.accountId,
-      embedding: signal.embeddings!["amazon.titan-embed-text-v2:0"],
+      embedding: signal.data.embeddings!["amazon.titan-embed-text-v2:0"],
     });
   });
 
-  it.each(RETRY_CASES.filter(c => !c.signal.embeddings?.["amazon.titan-embed-text-v2:0"]))("Aurora upsert is SKIPPED when embedding is missing for cluster model ($label)", async ({ signal, receiveCount }) => {
+  it.each(RETRY_CASES.filter(c => !c.signal.data.embeddings?.["amazon.titan-embed-text-v2:0"]))("Aurora upsert is SKIPPED when embedding is missing for cluster model ($label)", async ({ signal, receiveCount }) => {
     const arc = arbArcForSignal(signal);
-    const sesMessageId = signal.sesMessageId!;
+    const sesMessageId = signal.data.sesMessageId!;
     const auroraWriter = makeAuroraWriter();
 
     const processor = new SignalProcessor({
@@ -385,7 +394,7 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
 
   it.each(RETRY_CASES)("result is NOT a batchItemFailure on retry when signal exists in DDB ($label)", async ({ signal, receiveCount }) => {
     const arc = arbArcForSignal(signal);
-    const sesMessageId = signal.sesMessageId!;
+    const sesMessageId = signal.data.sesMessageId!;
 
     const processor = new SignalProcessor({
       ...makeStore(signal, arc),
@@ -422,28 +431,31 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
     const signal: Signal = {
       id: "sgn-noArc000000000000000abc",
       signalLookupId: "ses-msg-no-arc",
-      sesMessageId: "msg-no-arc",
       arcId: arcId as string | undefined,
       accountId: TEST_ACCOUNT_ID,
       source: "email" as const,
-      receivedAt: "2024-01-15T10:00:00Z",
-      from: { address: "sender@external.com", name: "Sender" },
-      to: [{ address: "user@example.com" }],
-      cc: [],
-      subject: "Test email",
-      textBody: "Hello world",
-      attachments: [],
-      headers: {},
-      recipientAddress: "user@example.com",
-      workflow: "conversation" as Workflow,
-      workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false } as const,
-      spamScore: 0.01,
-      summary: "A test email.",
-      s3Key: "emails/msg-no-arc",
+      type: "email" as const,
       status: "active" as const,
       createdAt: "2024-01-15T10:00:00Z",
-      embeddings: { "amazon.titan-embed-text-v2:0": [0.1, 0.2] },
-      matchedRules: [],
+      data: {
+        sesMessageId: "msg-no-arc",
+        receivedAt: "2024-01-15T10:00:00Z",
+        from: { address: "sender@external.com", name: "Sender" },
+        to: [{ address: "user@example.com" }],
+        cc: [],
+        subject: "Test email",
+        textBody: "Hello world",
+        attachments: [],
+        headers: {},
+        recipientAddress: "user@example.com",
+        workflow: "conversation" as Workflow,
+        workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false } as const,
+        spamScore: 0.01,
+        summary: "A test email.",
+        s3Key: "emails/msg-no-arc",
+        embeddings: { "amazon.titan-embed-text-v2:0": [0.1, 0.2] },
+        matchedRules: [],
+      },
     } as Signal;
 
     const arcDb = {
@@ -543,30 +555,29 @@ describe("Feature: signal-processor-retry-resilience, Property 3: DDB read failu
       id: `sgn-${sesMessageId}`,
       signalLookupId: `ses-${sesMessageId}`,
       accountId: TEST_ACCOUNT_ID,
-      sesMessageId,
       arcId: "arc-existing",
       source: "email",
-      from: { address: "sender@external.com", name: "Sender" },
-      to: [{ address: "user@example.com" }],
-      cc: [],
-      attachments: [],
-      headers: {},
-      recipientAddress: "user@example.com",
-      senderAddress: "sender@external.com",
-      senderName: "Sender",
-      subject: "Test email",
-      workflow: "conversation",
-      workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
-      spamScore: 0.01,
-      summary: "A test email.",
-      labels: [],
+      type: "email",
       status: "active",
-      s3Key: `emails/${sesMessageId}`,
-      matchedRules: [],
-      receivedAt: "2024-01-15T10:00:00Z",
       createdAt: "2024-01-15T10:00:01Z",
-      updatedAt: "2024-01-15T10:00:01Z",
-      embeddings: { "amazon.titan-embed-text-v2:0": new Array(10).fill(0.1) },
+      data: {
+        sesMessageId,
+        from: { address: "sender@external.com", name: "Sender" },
+        to: [{ address: "user@example.com" }],
+        cc: [],
+        attachments: [],
+        headers: {},
+        recipientAddress: "user@example.com",
+        subject: "Test email",
+        workflow: "conversation",
+        workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
+        spamScore: 0.01,
+        summary: "A test email.",
+        s3Key: `emails/${sesMessageId}`,
+        matchedRules: [],
+        receivedAt: "2024-01-15T10:00:00Z",
+        embeddings: { "amazon.titan-embed-text-v2:0": new Array(10).fill(0.1) },
+      },
     } as Signal;
   }
 
@@ -1012,28 +1023,31 @@ describe("Feature: signal-processor-retry-resilience, Property 8: Outcome re-der
     return {
       id: "sgn-prop8000000000000000abc",
       signalLookupId: "ses-msg-prop8",
-      sesMessageId: "msg-prop8",
       arcId: "arc-prop8",
       accountId: TEST_ACCOUNT_ID,
       source: "email" as const,
-      receivedAt: "2024-01-15T10:00:00Z",
-      from: { address: "sender@external.com", name: "Sender" },
-      to: [{ address: "user@example.com" }],
-      cc: [],
-      subject: "Test email with rules",
-      textBody: "Hello world",
-      attachments: [],
-      headers: {},
-      recipientAddress: "user@example.com",
-      workflow: "conversation" as Workflow,
-      workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false } as const,
-      spamScore: 0.01,
-      summary: "A test email.",
-      s3Key: "emails/msg-prop8",
+      type: "email" as const,
       status: "active" as const,
       createdAt: "2024-01-15T10:00:00Z",
-      embeddings: { "amazon.titan-embed-text-v2:0": [0.1, -0.5, 0.3] },
-      matchedRules: matchedRules as Signal["matchedRules"],
+      data: {
+        sesMessageId: "msg-prop8",
+        receivedAt: "2024-01-15T10:00:00Z",
+        from: { address: "sender@external.com", name: "Sender" },
+        to: [{ address: "user@example.com" }],
+        cc: [],
+        subject: "Test email with rules",
+        textBody: "Hello world",
+        attachments: [],
+        headers: {},
+        recipientAddress: "user@example.com",
+        workflow: "conversation" as Workflow,
+        workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false } as const,
+        spamScore: 0.01,
+        summary: "A test email.",
+        s3Key: "emails/msg-prop8",
+        embeddings: { "amazon.titan-embed-text-v2:0": [0.1, -0.5, 0.3] },
+        matchedRules: matchedRules as Signal["data"]["matchedRules"],
+      },
     } as Signal;
   }
 
@@ -1137,6 +1151,6 @@ describe("Feature: signal-processor-retry-resilience, Property 8: Outcome re-der
 
     expect(sqsDispatcher.sendMessage).toHaveBeenCalledTimes(1);
     const payload = vi.mocked(sqsDispatcher.sendMessage).mock.calls[0]![0];
-    expect(payload.signal.matchedRules).toEqual(signal.matchedRules);
+    expect(payload.signal.data.matchedRules).toEqual(signal.data.matchedRules);
   });
 });

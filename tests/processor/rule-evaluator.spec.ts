@@ -10,7 +10,8 @@ import { createMockLogger, type MockLogger } from "../helpers/mock-logger.js";
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeSignal(overrides: Partial<Signal> = {}): Signal {
+function makeSignal(overrides: Partial<Omit<Signal, "data">> & { data?: Partial<Signal["data"]> } = {}): Signal {
+  const { data: dataOverrides, ...baseOverrides } = overrides;
   return {
     id: "SES#test-msg-001",
     accountId: "acc_123",
@@ -18,7 +19,7 @@ function makeSignal(overrides: Partial<Signal> = {}): Signal {
     type: "email",
     status: "active",
     createdAt: "2024-01-15T10:00:00Z",
-    ...overrides,
+    ...baseOverrides,
     data: {
       receivedAt: "2024-01-15T10:00:00Z",
       from: { address: "sender@example.com" },
@@ -35,6 +36,7 @@ function makeSignal(overrides: Partial<Signal> = {}): Signal {
       summary: "A test email.",
       s3Key: "emails/test-msg-001.eml",
       embeddings: { "model-v1": [0.1, 0.2, 0.3] },
+      ...dataOverrides,
     },
   } as Signal;
 }
@@ -267,9 +269,11 @@ describe("stripSensitive — Property 2: context preparation produces exactly th
     {
       label: "full Signal → output has exactly the 8 specified fields",
       input: () => makeSignal({
-        s3Key: "emails/msg.eml",
-        embeddings: { "model-v1": [0.1, 0.2] },
-        headers: { "x-custom": "value" },
+        data: {
+          s3Key: "emails/msg.eml",
+          embeddings: { "model-v1": [0.1, 0.2] },
+          headers: { "x-custom": "value" },
+        },
       }),
       expectedKeys: EXPECTED_SIGNAL_KEYS,
       expectedValues: (signal: Signal) => ({
@@ -287,9 +291,11 @@ describe("stripSensitive — Property 2: context preparation produces exactly th
     {
       label: "Signal with s3Key/embeddings/headers → none appear in output",
       input: () => makeSignal({
-        s3Key: "secret/path.eml",
-        embeddings: { "model": [1, 2, 3] },
-        headers: { "x-mailer": "test", "dkim-signature": "abc" },
+        data: {
+          s3Key: "secret/path.eml",
+          embeddings: { "model": [1, 2, 3] },
+          headers: { "x-mailer": "test", "dkim-signature": "abc" },
+        },
       }),
       expectedKeys: EXPECTED_SIGNAL_KEYS,
       expectedValues: (signal: Signal) => ({

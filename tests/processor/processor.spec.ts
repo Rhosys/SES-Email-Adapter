@@ -965,9 +965,9 @@ describe("SignalProcessor", () => {
       await processor.processRecord(makeMessage(), 1);
 
       const saved = vi.mocked(arcDb.saveSignal).mock.calls[0]![0] as Signal;
-      expect(saved.workflow).toBe(validClassification.workflow);
-      expect(saved.summary).toBe(validClassification.summary);
-      expect(saved.spamScore).toBe(validClassification.spamScore);
+      expect(saved.data.workflow).toBe(validClassification.workflow);
+      expect(saved.data.summary).toBe(validClassification.summary);
+      expect(saved.data.spamScore).toBe(validClassification.spamScore);
     });
 
     it("quarantines new address when newAddressHandling is block_until_approved (default disposition)", async () => {
@@ -1305,7 +1305,7 @@ describe("SignalProcessor", () => {
       });
       await processor.processRecord(makeMessage({ sesMessageId: randomUUID() }), 1);
       const signal = vi.mocked(arcDb.saveSignal).mock.calls.at(-1)![0] as Signal;
-      expect(signal.urgency).toBe("normal");
+      expect(signal.data.urgency).toBe("normal");
     });
 
     it("SR-17: crm + contract → high urgency", async () => {
@@ -1392,7 +1392,7 @@ describe("SignalProcessor", () => {
       expect(arcDb.saveArc).toHaveBeenCalledOnce();
       const saved = vi.mocked(arcDb.saveSignal).mock.calls[0]![0] as Signal;
       expect(saved.status).toBe("active");
-      expect(saved.workflow).toBe("onboarding");
+      expect(saved.data.workflow).toBe("onboarding");
     });
 
     it("blocks onboarding emails when a block rule targeting system:workflow:onboarding is active", async () => {
@@ -1443,8 +1443,8 @@ describe("SignalProcessor", () => {
       await processor.processRecord(makeMessage(), 1);
 
       const signal = vi.mocked(arcDb.saveSignal).mock.calls[0]![0] as Signal;
-      expect(signal.workflow).toBe("test");
-      expect(signal.workflowData).toMatchObject({ workflow: "test", triggeredBy: "user" });
+      expect(signal.data.workflow).toBe("test");
+      expect(signal.data.workflowData).toMatchObject({ workflow: "test", triggeredBy: "user" });
     });
 
     it("overrides workflow to 'test' when from-address exactly matches a userEmail (case-insensitive)", async () => {
@@ -1456,7 +1456,7 @@ describe("SignalProcessor", () => {
       await processor.processRecord(makeMessage(), 1);
 
       const signal = vi.mocked(arcDb.saveSignal).mock.calls[0]![0] as Signal;
-      expect(signal.workflow).toBe("test");
+      expect(signal.data.workflow).toBe("test");
     });
 
     it("does not override workflow when from-domain is not in registeredDomains and address not in userEmails", async () => {
@@ -1469,7 +1469,7 @@ describe("SignalProcessor", () => {
       await processor.processRecord(makeMessage(), 1);
 
       const signal = vi.mocked(arcDb.saveSignal).mock.calls[0]![0] as Signal;
-      expect(signal.workflow).toBe("conversation"); // unchanged from validClassification mock
+      expect(signal.data.workflow).toBe("conversation"); // unchanged from validClassification mock
     });
   });
 
@@ -1501,7 +1501,7 @@ describe("SignalProcessor", () => {
       expect(arcDb.saveArc).not.toHaveBeenCalled();
       const signal = vi.mocked(arcDb.saveSignal).mock.calls[0]![0] as Signal;
       expect(signal.status).toBe("block_hidden");
-      expect(signal.workflow).toBe("status");
+      expect(signal.data.workflow).toBe("status");
     });
 
     it("does not call notifier for a blocked status email", async () => {
@@ -1556,7 +1556,7 @@ describe("SignalProcessor", () => {
 
       expect(sqsDispatcher.sendMessage).toHaveBeenCalledOnce();
       const payload = vi.mocked(sqsDispatcher.sendMessage).mock.calls[0]![0];
-      const pongActions = payload.signal.matchedRules?.flatMap((r) => r.actions.filter((a) => a.type === "pong")) ?? [];
+      const pongActions = payload.signal.data.matchedRules?.flatMap((r) => r.actions.filter((a) => a.type === "pong")) ?? [];
       expect(pongActions.length).toBeGreaterThan(0);
     });
 
@@ -1567,9 +1567,9 @@ describe("SignalProcessor", () => {
 
       const payload = vi.mocked(sqsDispatcher.sendMessage).mock.calls[0]![0];
       // Default mime parser mock: from.address = "sender@example.com", subject = "Test email"
-      expect(payload.signal.from.address).toBe("sender@example.com");
-      expect(payload.signal.subject).toBe("Test email");
-      expect(payload.signal.textBody).toBe("Hello world");
+      expect(payload.signal.data.from.address).toBe("sender@example.com");
+      expect(payload.signal.data.subject).toBe("Test email");
+      expect(payload.signal.data.textBody).toBe("Hello world");
     });
 
     it("dispatches side-effect with recipientAddress for pong from-address resolution", async () => {
@@ -1578,7 +1578,7 @@ describe("SignalProcessor", () => {
       await processor.processRecord(makeMessage(), 1);
 
       const payload = vi.mocked(sqsDispatcher.sendMessage).mock.calls[0]![0];
-      expect(payload.signal.recipientAddress).toBe("user@example.com");
+      expect(payload.signal.data.recipientAddress).toBe("user@example.com");
     });
 
     it("dispatches side-effect with signal.id as sgn- prefixed ID for inReplyTo", async () => {
@@ -1596,7 +1596,7 @@ describe("SignalProcessor", () => {
 
       expect(sqsDispatcher.sendMessage).toHaveBeenCalledOnce();
       const payload = vi.mocked(sqsDispatcher.sendMessage).mock.calls[0]![0];
-      const pongActions = payload.signal.matchedRules?.flatMap((r) => r.actions.filter((a) => a.type === "pong")) ?? [];
+      const pongActions = payload.signal.data.matchedRules?.flatMap((r) => r.actions.filter((a) => a.type === "pong")) ?? [];
       expect(pongActions).toHaveLength(0);
     });
 
@@ -1615,7 +1615,7 @@ describe("SignalProcessor", () => {
       await processor.processRecord(makeMessage({ destination: ["me@custom-domain.com"] }), 1);
 
       const payload = vi.mocked(sqsDispatcher.sendMessage).mock.calls[0]![0];
-      expect(payload.signal.recipientAddress).toBe("me@custom-domain.com");
+      expect(payload.signal.data.recipientAddress).toBe("me@custom-domain.com");
     });
   });
 

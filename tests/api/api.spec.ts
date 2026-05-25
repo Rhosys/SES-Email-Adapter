@@ -163,30 +163,35 @@ function makeArc(overrides: Partial<Arc> = {}): Arc {
   };
 }
 
-function makeSignal(overrides: Partial<Signal> = {}): Signal {
+function makeSignal(overrides: Partial<Omit<Signal, "data">> & { data?: Partial<Signal["data"]> } = {}): Signal {
+  const { data: dataOverrides, ...baseOverrides } = overrides;
   return {
     id: "SES#msg-001",
     signalLookupId: "SES#msg-001",
     arcId: "arc-001",
     accountId: TEST_ACCOUNT_ID,
     source: "email" as const,
-    receivedAt: "2024-01-15T10:00:00Z",
-    from: { address: "sender@example.com", name: "Sender" },
-    to: [{ address: "user@example.com" }],
-    cc: [],
-    subject: "Test email",
-    attachments: [],
-    headers: {},
-    recipientAddress: "user@example.com",
-    workflow: "conversation",
-    workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
-    spamScore: 0.02,
-    summary: "A test signal.",
-    s3Key: "emails/msg-001",
+    type: "email",
     status: "active",
     createdAt: "2024-01-15T10:00:00Z",
-    ...overrides,
-  };
+    ...baseOverrides,
+    data: {
+      receivedAt: "2024-01-15T10:00:00Z",
+      from: { address: "sender@example.com", name: "Sender" },
+      to: [{ address: "user@example.com" }],
+      cc: [],
+      subject: "Test email",
+      attachments: [],
+      headers: {},
+      recipientAddress: "user@example.com",
+      workflow: "conversation",
+      workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
+      spamScore: 0.02,
+      summary: "A test signal.",
+      s3Key: "emails/msg-001",
+      ...dataOverrides,
+    },
+  } as Signal;
 }
 
 function makeView(overrides: Partial<View> = {}): View {
@@ -480,14 +485,14 @@ describe("API", () => {
       const res = await req(app, "POST", `${A}/signals/SES%23msg-001/quarantineResponse`, { body: { status: "active" } });
       expect(res.status).toBe(200);
       const body = await res.json() as { arc: Arc; signal: Signal };
-      expect(body.arc.workflow).toBe(s.workflow);
+      expect(body.arc.workflow).toBe(s.data.workflow);
       expect(body.signal.status).toBe("active");
       expect(arcDb.createArc).toHaveBeenCalledOnce();
       expect(arcDb.unblockSignal).toHaveBeenCalledWith(TEST_ACCOUNT_ID, s.signalLookupId, body.arc.id);
     });
 
     it("allows a quarantined signal — attaches to existing arc when grouping key matches", async () => {
-      const s = makeSignal({ status: "quarantine_visible", workflow: "auth" });
+      const s = makeSignal({ status: "quarantine_visible", data: { workflow: "auth" } });
       const existingArc = makeArc();
       vi.mocked(arcDb.getSignalById).mockResolvedValueOnce(ok(s));
       vi.mocked(arcDb.fastFindArcByAlternativeLookupKey).mockResolvedValueOnce(ok(existingArc));
@@ -519,12 +524,12 @@ describe("API", () => {
 
   describe("GET /accounts/:accountId/signals/:id", () => {
     it("returns full Signal detail", async () => {
-      vi.mocked(arcDb.getSignalById).mockResolvedValueOnce(ok(makeSignal({ textBody: "Hello world" })));
+      vi.mocked(arcDb.getSignalById).mockResolvedValueOnce(ok(makeSignal({ data: { textBody: "Hello world" } })));
       const res = await req(app, "GET", `${A}/signals/SES%23msg-001`);
       expect(res.status).toBe(200);
       const body = await res.json() as Signal;
       expect(body.id).toBe("SES#msg-001");
-      expect(body.textBody).toBe("Hello world");
+      expect(body.data.textBody).toBe("Hello world");
     });
 
     it("returns 404 for unknown Signal", async () => {
@@ -543,11 +548,11 @@ describe("API", () => {
     it("updates a draft signal and returns 200 + full resource", async () => {
       const draft = makeSignal({ status: "draft" });
       vi.mocked(arcDb.getSignalById).mockResolvedValueOnce(ok(draft));
-      vi.mocked(arcDb.updateSignal).mockResolvedValueOnce(ok({ ...draft, subject: "Updated subject" }));
+      vi.mocked(arcDb.updateSignal).mockResolvedValueOnce(ok({ ...draft, data: { ...draft.data, subject: "Updated subject" } }));
       const res = await req(app, "PATCH", `${A}/signals/SES%23msg-001`, { body: { subject: "Updated subject" } });
       expect(res.status).toBe(200);
       const body = await res.json() as Signal;
-      expect(body.subject).toBe("Updated subject");
+      expect(body.data.subject).toBe("Updated subject");
       expect(arcDb.updateSignal).toHaveBeenCalledWith(TEST_ACCOUNT_ID, draft.signalLookupId, expect.objectContaining({ subject: "Updated subject" }));
     });
 
