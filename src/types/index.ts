@@ -463,7 +463,11 @@ export type AnySignal =
   | Signal<DeliverabilitySignalData>
   | Signal<InvalidRuleFunctionData>
   | Signal<InvalidTemplateFunctionData>
-  | Signal<AutoSendBlockedData>;
+  | Signal<AutoSendBlockedData>
+  | Signal<import("./calendar.js").CalendarEventData>
+  | Signal<import("./calendar.js").CalendarResponseData>
+  | Signal<import("./calendar.js").CalendarInviteInvalidData>
+  | Signal<import("./calendar.js").DomainMisconfigurationData>;
 
 // Type guard functions for narrowing AnySignal by type field
 export function isEmailSignal(signal: AnySignal): signal is Signal<EmailSignalData> {
@@ -751,3 +755,22 @@ export interface SesFeedback {
   };
   mail: { messageId: string; source: string; tags?: Record<string, string> };
 }
+
+// ---------------------------------------------------------------------------
+// Calendar signal types (re-exported from calendar.ts)
+// ---------------------------------------------------------------------------
+
+export type {
+  CalendarEventData,
+  CalendarAttendee,
+  CalendarResponseData,
+  CalendarInviteInvalidData,
+  DomainMisconfigurationData,
+} from "./calendar.js";
+
+export {
+  isCalendarEventSignal,
+  isCalendarResponseSignal,
+  isCalendarInviteInvalidSignal,
+  isDomainMisconfigurationSignal,
+} from "./calendar.js";
