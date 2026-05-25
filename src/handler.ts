@@ -96,6 +96,9 @@ const deviceStore = new DynamoDeviceStore();
 const NOTIFICATION_FROM = process.env["NOTIFICATION_FROM"] ?? "";
 const CONFIG_SET = process.env["SES_CONFIGURATION_SET"] ?? "";
 const MAIL_DOMAIN = process.env["MAIL_DOMAIN"]!;
+
+// Calendar HMAC secret — source of truth is src/secrets/calendar-hmac.kms (KMS-encrypted).
+// CI decrypts it and passes as CALENDAR_HMAC_SECRET env var (base64-encoded).
 const calendarHmacSecret = Buffer.from(process.env["CALENDAR_HMAC_SECRET"]!, "base64");
 
 const emailService = new EmailService(sesv2, { from: NOTIFICATION_FROM, configSet: CONFIG_SET });
