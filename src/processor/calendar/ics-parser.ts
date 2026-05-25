@@ -151,6 +151,9 @@ export function parseIcs(icsBytes: Uint8Array): Result<IcsParseResult, IcsParseE
   }
 
   // --- Nesting depth check ---
+  if (!Array.isArray(jCalData) || jCalData.length < 3) {
+    return err({ reason: "Malformed iCal structure: invalid jCal data" });
+  }
   if (!checkNestingDepth(jCalData as unknown[], 1)) {
     return err({ reason: "Excessive nesting depth" });
   }
