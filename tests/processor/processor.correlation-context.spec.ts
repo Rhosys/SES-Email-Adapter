@@ -52,31 +52,36 @@ describe("processSideEffect — correlation context", () => {
     return { arcDb, accountDb, processingDb };
   }
 
-  function makeSignal(overrides: Partial<Signal> = {}): Signal {
+  function makeSignal(overrides: { data?: Partial<Signal["data"]> } & Partial<Omit<Signal, "data">> = {}): Signal {
+    const { data: dataOverrides, ...baseOverrides } = overrides;
     return {
       id: "sgn-corr-001",
       signalLookupId: "ses-corr-msg",
       accountId: TEST_ACCOUNT_ID,
       source: "email",
-      receivedAt: "2024-01-15T10:00:00Z",
-      from: { address: "sender@example.com", name: "Sender" },
-      to: [{ address: "user@example.com" }],
-      cc: [],
-      subject: "Test email",
-      textBody: "Hello world",
-      attachments: [],
-      headers: {},
-      recipientAddress: "user@example.com",
-      workflow: "test",
-      workflowData: { workflow: "test", triggeredBy: "user" },
-      spamScore: 0.0,
-      summary: "A test email.",
-      s3Key: "emails/corr-msg",
+      type: "email",
       status: "active",
       createdAt: "2024-01-15T10:00:00Z",
-      matchedRules: [],
-      ...overrides,
-    };
+      ...baseOverrides,
+      data: {
+        receivedAt: "2024-01-15T10:00:00Z",
+        from: { address: "sender@example.com", name: "Sender" },
+        to: [{ address: "user@example.com" }],
+        cc: [],
+        subject: "Test email",
+        textBody: "Hello world",
+        attachments: [],
+        headers: {},
+        recipientAddress: "user@example.com",
+        workflow: "test",
+        workflowData: { workflow: "test", triggeredBy: "user" },
+        spamScore: 0.0,
+        summary: "A test email.",
+        s3Key: "emails/corr-msg",
+        matchedRules: [],
+        ...dataOverrides,
+      },
+    } as Signal;
   }
 
   function makeArc(overrides: Partial<Arc> = {}): Arc {
@@ -130,7 +135,7 @@ describe("processSideEffect — correlation context", () => {
 
       const signal = makeSignal({
         id: "sgn-pong-123",
-        matchedRules: [{ ruleId: "SR-13", actions: [{ type: "pong" }], labelsAdded: [] }],
+        data: { matchedRules: [{ ruleId: "SR-13", actions: [{ type: "pong" }], labelsAdded: [] }] },
       });
       const arc = makeArc({ id: "arc-pong-456" });
       const payload: SideEffectPayload = { signal, arc };
@@ -157,8 +162,10 @@ describe("processSideEffect — correlation context", () => {
 
       const signal = makeSignal({
         id: "sgn-fwd-789",
-        s3Key: "emails/fwd-msg",
-        matchedRules: [{ ruleId: "rule-fwd", actions: [{ type: "forward", value: "backup@personal.com" }], labelsAdded: [] }],
+        data: {
+          s3Key: "emails/fwd-msg",
+          matchedRules: [{ ruleId: "rule-fwd", actions: [{ type: "forward", value: "backup@personal.com" }], labelsAdded: [] }],
+        },
       });
       const arc = makeArc({ id: "arc-fwd-012" });
       const payload: SideEffectPayload = { signal, arc };

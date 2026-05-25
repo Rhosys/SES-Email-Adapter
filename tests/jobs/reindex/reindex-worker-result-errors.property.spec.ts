@@ -159,9 +159,11 @@ describe("Property 7: Reindex worker propagates Result errors", () => {
       id: signalId,
       accountId: "acct-test",
       arcId: "arc-test",
-      recipientAddress: "test@example.com",
-      embeddings: {},
-      s3Key: "inbox/2025/test.eml",
+      data: {
+        recipientAddress: "test@example.com",
+        embeddings: {},
+        s3Key: "inbox/2025/test.eml",
+      },
     };
 
     ddbMock.on(ScanCommand).resolves({ Items: [signal], LastEvaluatedKey: undefined });

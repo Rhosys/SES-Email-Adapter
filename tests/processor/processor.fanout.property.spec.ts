@@ -211,11 +211,11 @@ arcDb, accountDb, processingDb,
     expect(saveSignalCalls.length).toBeGreaterThanOrEqual(1);
     const savedSignal = saveSignalCalls[0]![0] as Signal;
 
-    expect(savedSignal.embeddings).toBeDefined();
-    expect(Object.keys(savedSignal.embeddings!)).toHaveLength(clusters.length);
+    expect(savedSignal.data.embeddings).toBeDefined();
+    expect(Object.keys(savedSignal.data.embeddings!)).toHaveLength(clusters.length);
     for (const cluster of clusters) {
-      expect(savedSignal.embeddings![cluster.modelId]).toBeDefined();
-      expect(savedSignal.embeddings![cluster.modelId]).toHaveLength(cluster.dimensions);
+      expect(savedSignal.data.embeddings![cluster.modelId]).toBeDefined();
+      expect(savedSignal.data.embeddings![cluster.modelId]).toHaveLength(cluster.dimensions);
     }
   });
 
@@ -329,7 +329,7 @@ arcDb, accountDb, processingDb,
     const saveSignalCalls = (arcDb.saveSignal as ReturnType<typeof vi.fn>).mock.calls;
     const savedSignal = saveSignalCalls[0]![0] as Signal;
 
-    const embeddingsKeys = Object.keys(savedSignal.embeddings!).sort();
+    const embeddingsKeys = Object.keys(savedSignal.data.embeddings!).sort();
     const expectedKeys = clusters.map((c) => c.modelId).sort();
     expect(embeddingsKeys).toEqual(expectedKeys);
   });

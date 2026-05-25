@@ -183,9 +183,9 @@ arcDb, accountDb, processingDb,
     expect(saveSignalCalls.length).toBeGreaterThanOrEqual(1);
     const savedSignal = saveSignalCalls[0]![0] as Signal;
 
-    expect(savedSignal.embeddings).toBeDefined();
-    expect(savedSignal.embeddings!["amazon.titan-embed-text-v2:0"]).toEqual(VECTOR_A);
-    expect(savedSignal.embeddings!["amazon.titan-embed-text-v3:0"]).toEqual(VECTOR_B);
+    expect(savedSignal.data.embeddings).toBeDefined();
+    expect(savedSignal.data.embeddings!["amazon.titan-embed-text-v2:0"]).toEqual(VECTOR_A);
+    expect(savedSignal.data.embeddings!["amazon.titan-embed-text-v3:0"]).toEqual(VECTOR_B);
   });
 
   it.each(failureCases)("$label — non-failing cluster still receives its upsert", async ({ failingClusterId, succeedingClusterId }) => {

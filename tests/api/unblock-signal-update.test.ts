@@ -36,30 +36,35 @@ function makeArc(overrides: Partial<Arc> = {}): Arc {
   };
 }
 
-function makeSignal(overrides: Partial<Signal> = {}): Signal {
+function makeSignal(overrides: { data?: Partial<Signal["data"]> } & Partial<Omit<Signal, "data">> = {}): Signal {
+  const { data: dataOverrides, ...baseOverrides } = overrides;
   return {
     id: "SES#msg-001",
     signalLookupId: "SES#msg-001",
     arcId: "arc-001",
     accountId: TEST_ACCOUNT_ID,
     source: "email" as const,
-    receivedAt: "2024-01-20T12:00:00Z",
-    from: { address: "sender@example.com", name: "Sender" },
-    to: [{ address: "user@example.com" }],
-    cc: [],
-    subject: "Test email",
-    attachments: [],
-    headers: {},
-    recipientAddress: "user@example.com",
-    workflow: "conversation",
-    workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
-    spamScore: 0.02,
-    summary: "A test signal.",
-    s3Key: "emails/msg-001",
+    type: "email",
     status: "quarantine_visible",
     createdAt: "2024-01-20T12:00:00Z",
-    ...overrides,
-  };
+    ...baseOverrides,
+    data: {
+      receivedAt: "2024-01-20T12:00:00Z",
+      from: { address: "sender@example.com", name: "Sender" },
+      to: [{ address: "user@example.com" }],
+      cc: [],
+      subject: "Test email",
+      attachments: [],
+      headers: {},
+      recipientAddress: "user@example.com",
+      workflow: "conversation",
+      workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
+      spamScore: 0.02,
+      summary: "A test signal.",
+      s3Key: "emails/msg-001",
+      ...dataOverrides,
+    },
+  } as Signal;
 }
 
 function makeArcDb() {
@@ -198,14 +203,16 @@ describe("POST /signals/:id/quarantineResponse — updateArcDirect usage", () =>
     const existingArc = makeArc({ id: "arc-existing", lastSignalAt: "2024-01-10T00:00:00Z" });
     // Use "auth" workflow so deriveGroupingKey returns a non-null key
     const signal = makeSignal({
-      receivedAt: "2024-01-20T12:00:00Z",
-      workflow: "auth",
-      workflowData: { workflow: "auth", authType: "otp", service: "example.com" },
+      data: {
+        receivedAt: "2024-01-20T12:00:00Z",
+        workflow: "auth",
+        workflowData: { workflow: "auth", authType: "otp", service: "example.com" },
+      },
     });
 
     vi.mocked(arcDb.getSignalById).mockResolvedValueOnce(ok(signal));
     vi.mocked(arcDb.fastFindArcByAlternativeLookupKey).mockResolvedValueOnce(ok(existingArc));
-    vi.mocked(arcDb.updateArc).mockResolvedValueOnce(ok({ ...existingArc, lastSignalAt: signal.receivedAt }));
+    vi.mocked(arcDb.updateArc).mockResolvedValueOnce(ok({ ...existingArc, lastSignalAt: signal.data.receivedAt }));
 
     const res = await req(app, "POST", `${A}/signals/SES%23msg-001/quarantineResponse`, { body: { status: "active" } });
     expect(res.status).toBe(200);
@@ -218,9 +225,11 @@ describe("POST /signals/:id/quarantineResponse — updateArcDirect usage", () =>
   it("no matched arc → calls createArc (PutItem), not updateArc", async () => {
     // Use "auth" workflow so deriveGroupingKey returns a non-null key and fastFindArcByAlternativeLookupKey is called
     const signal = makeSignal({
-      receivedAt: "2024-01-20T12:00:00Z",
-      workflow: "auth",
-      workflowData: { workflow: "auth", authType: "otp", service: "example.com" },
+      data: {
+        receivedAt: "2024-01-20T12:00:00Z",
+        workflow: "auth",
+        workflowData: { workflow: "auth", authType: "otp", service: "example.com" },
+      },
     });
 
     vi.mocked(arcDb.getSignalById).mockResolvedValueOnce(ok(signal));

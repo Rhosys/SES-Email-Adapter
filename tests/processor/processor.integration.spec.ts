@@ -187,33 +187,38 @@ function makeSideEffectPayload(payload: { signal: Signal; arc: Arc }): SideEffec
 /**
  * Build a realistic Signal as it would exist in DDB after first-attempt processing.
  */
-function makeExistingSignal(overrides: Partial<Signal> = {}): Signal {
+function makeExistingSignal(overrides: Partial<Omit<Signal, "data">> & { data?: Partial<Signal["data"]> } = {}): Signal {
+  const { data: dataOverrides, ...baseOverrides } = overrides;
   return {
     id: "sgn-integration001",
     signalLookupId: `ses-${SES_MESSAGE_ID}`,
     arcId: "arc-integration-001",
     accountId: TEST_ACCOUNT_ID,
     source: "email",
-    receivedAt: "2024-01-15T10:00:00Z",
-    from: { address: "sender@example.com", name: "Sender" },
-    to: [{ address: "user@example.com" }],
-    cc: [],
-    subject: "Integration test email",
-    textBody: "Hello from integration test",
-    attachments: [],
-    headers: {},
-    recipientAddress: "user@example.com",
-    workflow: "conversation",
-    workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
-    spamScore: 0.05,
-    summary: "Integration test email.",
-    s3Key: `emails/${SES_MESSAGE_ID}`,
+    type: "email",
     status: "active",
     createdAt: "2024-01-15T10:00:00Z",
-    embeddings: { "amazon.titan-embed-text-v2:0": new Array(1024).fill(0.1) },
-    matchedRules: [],
-    ...overrides,
-  };
+    ...baseOverrides,
+    data: {
+      receivedAt: "2024-01-15T10:00:00Z",
+      from: { address: "sender@example.com", name: "Sender" },
+      to: [{ address: "user@example.com" }],
+      cc: [],
+      subject: "Integration test email",
+      textBody: "Hello from integration test",
+      attachments: [],
+      headers: {},
+      recipientAddress: "user@example.com",
+      workflow: "conversation",
+      workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
+      spamScore: 0.05,
+      summary: "Integration test email.",
+      s3Key: `emails/${SES_MESSAGE_ID}`,
+      embeddings: { "amazon.titan-embed-text-v2:0": new Array(1024).fill(0.1) },
+      matchedRules: [],
+      ...dataOverrides,
+    },
+  } as Signal;
 }
 
 function makeExistingArc(overrides: Partial<Arc> = {}): Arc {
@@ -441,13 +446,15 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
   describe("side-effect message processing", () => {
     it("derives outcome from matchedRules and executes forward + notify", async () => {
       const signal = makeExistingSignal({
-        matchedRules: [
-          {
-            ruleId: "rule-fwd",
-            actions: [{ type: "forward", value: "backup@personal.com" }],
-            labelsAdded: [],
-          },
-        ],
+        data: {
+          matchedRules: [
+            {
+              ruleId: "rule-fwd",
+              actions: [{ type: "forward", value: "backup@personal.com" }],
+              labelsAdded: [],
+            },
+          ],
+        },
       });
       const arc = makeExistingArc();
 
@@ -461,7 +468,7 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
       // Forward was called with the address from matchedRules
       expect(forwarder.forward).toHaveBeenCalledOnce();
       expect(forwarder.forward).toHaveBeenCalledWith(
-        signal.s3Key,
+        signal.data.s3Key,
         "backup@personal.com",
         TEST_ACCOUNT_ID,
         { signalId: signal.id, arcId: arc.id },
@@ -474,13 +481,15 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
 
     it("executes pong when doPong action is present", async () => {
       const signal = makeExistingSignal({
-        matchedRules: [
-          {
-            ruleId: "rule-pong",
-            actions: [{ type: "pong" }],
-            labelsAdded: [],
-          },
-        ],
+        data: {
+          matchedRules: [
+            {
+              ruleId: "rule-pong",
+              actions: [{ type: "pong" }],
+              labelsAdded: [],
+            },
+          ],
+        },
       });
       const arc = makeExistingArc();
 
@@ -491,20 +500,22 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
       expect(result.isOk()).toBe(true);
       expect(replySender.sendReply).toHaveBeenCalledOnce();
       expect(replySender.sendReply).toHaveBeenCalledWith(expect.objectContaining({
-        to: signal.from.address,
-        from: signal.recipientAddress,
+        to: signal.data.from.address,
+        from: signal.data.recipientAddress,
       }));
     });
 
     it("suppresses notification when suppress_notification action is present", async () => {
       const signal = makeExistingSignal({
-        matchedRules: [
-          {
-            ruleId: "rule-suppress",
-            actions: [{ type: "suppress_notification" }],
-            labelsAdded: [],
-          },
-        ],
+        data: {
+          matchedRules: [
+            {
+              ruleId: "rule-suppress",
+              actions: [{ type: "suppress_notification" }],
+              labelsAdded: [],
+            },
+          ],
+        },
       });
       const arc = makeExistingArc();
 

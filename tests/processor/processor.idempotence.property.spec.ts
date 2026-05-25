@@ -215,8 +215,8 @@ describe("Cross-layer idempotence — live writes + cache + Aurora", () => {
     await processor.processRecord(message, 1);
 
     expect(savedSignals.length).toBe(2);
-    expect(savedSignals[0]!.embeddings).toEqual(savedSignals[1]!.embeddings);
-    expect(savedSignals[0]!.embeddings!["amazon.titan-embed-text-v2:0"]).toEqual(VECTOR);
+    expect(savedSignals[0]!.data.embeddings).toEqual(savedSignals[1]!.data.embeddings);
+    expect(savedSignals[0]!.data.embeddings!["amazon.titan-embed-text-v2:0"]).toEqual(VECTOR);
 
     expect(auroraUpsertCalls.length).toBe(2);
     expect(auroraUpsertCalls[0]!.registryId).toBe(auroraUpsertCalls[1]!.registryId);

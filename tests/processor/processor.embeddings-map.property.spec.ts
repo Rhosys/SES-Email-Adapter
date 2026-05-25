@@ -246,7 +246,7 @@ arcDb, accountDb, processingDb,
     // Extract signal.embeddings from the saveSignal call
     expect(arcDb.saveSignal).toHaveBeenCalledOnce();
     const savedSignal = (arcDb.saveSignal as ReturnType<typeof vi.fn>).mock.calls[0]![0] as Signal;
-    const embeddings = savedSignal.embeddings;
+    const embeddings = savedSignal.data.embeddings;
 
     expect(embeddings).toBeDefined();
 

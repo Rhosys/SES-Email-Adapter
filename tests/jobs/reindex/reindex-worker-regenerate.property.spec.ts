@@ -117,9 +117,11 @@ const cachedSignal1 = {
   id: "SES#cached1",
   accountId: "acct-1",
   arcId: "arc-c1",
-  recipientAddress: "cached1@example.com",
-  embeddings: { [TARGET_MODEL_ID]: [0.1, 0.2, 0.3] },
-  s3Key: "inbox/2025/cached1.eml",
+  data: {
+    recipientAddress: "cached1@example.com",
+    embeddings: { [TARGET_MODEL_ID]: [0.1, 0.2, 0.3] },
+    s3Key: "inbox/2025/cached1.eml",
+  },
 };
 
 const cachedSignal2 = {
@@ -128,9 +130,11 @@ const cachedSignal2 = {
   id: "SES#cached2",
   accountId: "acct-2",
   arcId: "arc-c2",
-  recipientAddress: "cached2@example.com",
-  embeddings: { [TARGET_MODEL_ID]: [0.4, 0.5, 0.6] },
-  s3Key: "inbox/2025/cached2.eml",
+  data: {
+    recipientAddress: "cached2@example.com",
+    embeddings: { [TARGET_MODEL_ID]: [0.4, 0.5, 0.6] },
+    s3Key: "inbox/2025/cached2.eml",
+  },
 };
 
 // S3-retrievable signals (regeneration path) — no target model embedding, but S3 key works
@@ -140,9 +144,11 @@ const s3Signal1 = {
   id: "SES#s3regen1",
   accountId: "acct-3",
   arcId: "arc-s1",
-  recipientAddress: "s3regen1@example.com",
-  embeddings: { "amazon.titan-embed-text-v3:0": [0.9, 0.8] },
-  s3Key: "inbox/2025/s3regen1.eml",
+  data: {
+    recipientAddress: "s3regen1@example.com",
+    embeddings: { "amazon.titan-embed-text-v3:0": [0.9, 0.8] },
+    s3Key: "inbox/2025/s3regen1.eml",
+  },
 };
 
 const s3Signal2 = {
@@ -151,9 +157,11 @@ const s3Signal2 = {
   id: "SES#s3regen2",
   accountId: "acct-4",
   arcId: "arc-s2",
-  recipientAddress: "s3regen2@example.com",
-  embeddings: { "amazon.titan-embed-text-v3:0": [0.7, 0.8] },
-  s3Key: "inbox/2025/s3regen2.eml",
+  data: {
+    recipientAddress: "s3regen2@example.com",
+    embeddings: { "amazon.titan-embed-text-v3:0": [0.7, 0.8] },
+    s3Key: "inbox/2025/s3regen2.eml",
+  },
 };
 
 // Unrecoverable signals — no target model embedding AND no retrievable S3 object
@@ -163,8 +171,10 @@ const unrecoverableNoS3Key = {
   id: "SES#unrec1",
   accountId: "acct-5",
   arcId: "arc-u1",
-  recipientAddress: "unrec1@example.com",
-  embeddings: {},
+  data: {
+    recipientAddress: "unrec1@example.com",
+    embeddings: {},
+  },
   // no s3Key
 };
 
@@ -174,9 +184,11 @@ const unrecoverableExpiredS3 = {
   id: "SES#unrec2",
   accountId: "acct-6",
   arcId: "arc-u2",
-  recipientAddress: "unrec2@example.com",
-  embeddings: {},
-  s3Key: "inbox/2025/expired.eml", // S3 will return NoSuchKey
+  data: {
+    recipientAddress: "unrec2@example.com",
+    embeddings: {},
+    s3Key: "inbox/2025/expired.eml", // S3 will return NoSuchKey
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -269,7 +281,7 @@ describe("Property 12: Backfill targets exactly the signals missing the new mode
     ];
 
     const retrievableS3Keys = new Set(
-      s3Retrievable.map((s) => s.s3Key),
+      s3Retrievable.map((s) => s.data.s3Key),
     );
 
     ddbMock.on(ScanCommand).resolves({ Items: allSignals, LastEvaluatedKey: undefined });

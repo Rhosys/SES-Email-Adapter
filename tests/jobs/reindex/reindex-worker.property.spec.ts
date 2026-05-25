@@ -68,8 +68,10 @@ function makeSignal(id: string, accountId: string, arcId: string, email: string,
     id,
     accountId,
     arcId,
-    recipientAddress: email,
-    embeddings: { "amazon.titan-embed-text-v2:0": embedding },
+    data: {
+      recipientAddress: email,
+      embeddings: { "amazon.titan-embed-text-v2:0": embedding },
+    },
   };
 }
 
@@ -137,12 +139,12 @@ describe("Property 11: Reindex worker uses cache exclusively and never calls Bed
     expect(mockUpsertEmbedding).toHaveBeenCalledTimes(signals.length);
 
     for (const signal of signals) {
-      const expectedVector = signal.embeddings["amazon.titan-embed-text-v2:0"];
+      const expectedVector = signal.data.embeddings["amazon.titan-embed-text-v2:0"];
       expect(mockUpsertEmbedding).toHaveBeenCalledWith({
         registryId: "aurora-prod-titan-v2",
         arcId: signal.arcId,
         accountId: signal.accountId,
-        recipientAddress: signal.recipientAddress,
+        recipientAddress: signal.data.recipientAddress,
         embedding: expectedVector,
       });
     }

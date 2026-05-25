@@ -7,7 +7,7 @@ import type { DbError, Result } from "../errors.js";
 import type { Logger } from "../logger.js";
 import type { ArcMatcher } from "../processor/processor.js";
 import type { ListArcsParams } from "../api/app.js";
-import type { Arc, Signal, EmailSignalData, Page, PageParams, ArcStatus, ArcUrgency, Workflow } from "../types/index.js";
+import type { Arc, Signal, AnySignal, EmailSignalData, Page, PageParams, ArcStatus, ArcUrgency, Workflow } from "../types/index.js";
 
 // ---------------------------------------------------------------------------
 // Aurora Data API client (stateless — no connection pool needed)
@@ -112,7 +112,7 @@ export class ArcDatabase implements ArcMatcher {
     }
   }
 
-  async saveSignal(signal: Signal): Promise<Result<void, DbError>> {
+  async saveSignal(signal: AnySignal): Promise<Result<void, DbError>> {
     let gsi1pk: string;
     if (signal.arcId) {
       gsi1pk = `ACCT#${signal.accountId}#ARC#${signal.arcId}`;

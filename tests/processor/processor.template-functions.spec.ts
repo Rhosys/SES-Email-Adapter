@@ -38,24 +38,27 @@ function makeSignal(overrides: Partial<Signal> = {}): Signal {
     id: "SES#tmpl-test-001",
     accountId: TEST_ACCOUNT_ID,
     source: "inbound",
-    receivedAt: "2024-01-15T10:00:00Z",
-    from: { address: "sender@external.com", name: "Sender" },
-    to: [{ address: "user@example.com" }],
-    cc: [],
-    subject: "Test email",
-    textBody: "Hello world",
-    attachments: [],
-    headers: {},
-    recipientAddress: "user@example.com",
-    workflow: "conversation",
-    workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
-    spamScore: 0.01,
-    summary: "A test email.",
-    s3Key: "emails/tmpl-test-001.eml",
+    type: "email",
     status: "active",
     createdAt: "2024-01-15T10:00:00Z",
-    matchedRules: [{ ruleId: "rule_draft", actions: [{ type: "auto_draft", value: "tmpl_001" }] }],
     ...overrides,
+    data: {
+      receivedAt: "2024-01-15T10:00:00Z",
+      from: { address: "sender@external.com", name: "Sender" },
+      to: [{ address: "user@example.com" }],
+      cc: [],
+      subject: "Test email",
+      textBody: "Hello world",
+      attachments: [],
+      headers: {},
+      recipientAddress: "user@example.com",
+      workflow: "conversation",
+      workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
+      spamScore: 0.01,
+      summary: "A test email.",
+      s3Key: "emails/tmpl-test-001.eml",
+      matchedRules: [{ ruleId: "rule_draft", actions: [{ type: "auto_draft", value: "tmpl_001" }], labelsAdded: [] }],
+    },
   } as Signal;
 }
 
@@ -179,8 +182,8 @@ describe("Template function resolution via User Code Executor", () => {
     const saveSignalCalls = vi.mocked(store.arcDb.saveSignal).mock.calls;
     expect(saveSignalCalls.length).toBe(1);
     const draft = saveSignalCalls[0]![0] as Signal;
-    expect(draft.subject).toBe("Re: Test email — Hello");
-    expect(draft.textBody).toBe("Hi Sender, Thanks for your email about Test email");
+    expect(draft.data.subject).toBe("Re: Test email — Hello");
+    expect(draft.data.textBody).toBe("Hi Sender, Thanks for your email about Test email");
     expect(draft.status).toBe("draft");
   });
 
@@ -198,7 +201,7 @@ describe("Template function resolution via User Code Executor", () => {
     const saveSignalCalls = vi.mocked(store.arcDb.saveSignal).mock.calls;
     expect(saveSignalCalls.length).toBe(1);
     const draft = saveSignalCalls[0]![0] as Signal;
-    expect(draft.subject).toBe("Re: Test email — ");
+    expect(draft.data.subject).toBe("Re: Test email — ");
     expect(draft.status).toBe("draft");
 
     // annotateTemplateError should be called for the null result
@@ -228,7 +231,7 @@ describe("Template function resolution via User Code Executor", () => {
     const saveSignalCalls = vi.mocked(store.arcDb.saveSignal).mock.calls;
     expect(saveSignalCalls.length).toBe(1);
     const draft = saveSignalCalls[0]![0] as Signal;
-    expect(draft.subject).toBe("Re: Test email — ");
+    expect(draft.data.subject).toBe("Re: Test email — ");
     expect(draft.status).toBe("draft");
 
     // annotateTemplateError called with timeout error
@@ -258,7 +261,7 @@ describe("Template function resolution via User Code Executor", () => {
     const saveSignalCalls = vi.mocked(store.arcDb.saveSignal).mock.calls;
     expect(saveSignalCalls.length).toBe(1);
     const draft = saveSignalCalls[0]![0] as Signal;
-    expect(draft.textBody).toBe("Hi Sender, ");
+    expect(draft.data.textBody).toBe("Hi Sender, ");
     expect(draft.status).toBe("draft");
 
     // annotateTemplateError called with runtime error
@@ -287,7 +290,7 @@ describe("Template function resolution via User Code Executor", () => {
     const saveSignalCalls = vi.mocked(storeNoFns.arcDb.saveSignal).mock.calls;
     expect(saveSignalCalls.length).toBe(1);
     const draft = saveSignalCalls[0]![0] as Signal;
-    expect(draft.subject).toBe("Re: Test email — ");
+    expect(draft.data.subject).toBe("Re: Test email — ");
   });
 
   it("logs at WARN level with template name, function name, and error details on execution error", async () => {
@@ -384,7 +387,7 @@ describe("Template function resolution via User Code Executor", () => {
     const saveSignalCalls = vi.mocked(store.arcDb.saveSignal).mock.calls;
     expect(saveSignalCalls.length).toBe(1);
     const draft = saveSignalCalls[0]![0] as Signal;
-    expect(draft.subject).toBe("Re: Test email — ");
+    expect(draft.data.subject).toBe("Re: Test email — ");
     expect(draft.status).toBe("draft");
 
     // annotateTemplateError should be called

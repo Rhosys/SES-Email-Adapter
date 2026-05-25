@@ -127,14 +127,11 @@ describe("FeedbackProcessor — bounce handling for user-sent signals", () => {
     expect(savedSignal.accountId).toBe("acct-001");
     expect(savedSignal.source).toBe("ses_feedback");
     expect(savedSignal.status).toBe("active");
-    expect(savedSignal.data.from).toEqual({ address: "system@deliverability" });
     expect(savedSignal.data.relatedSignalId).toBe("sgn-signal001");
     expect(savedSignal.data.bouncedRecipients).toEqual([
       { address: "recipient@example.com", bounceType: "permanent", reason: "5.1.1" },
     ]);
     expect(savedSignal.data.subject).toBe("Delivery failure: 1 recipient(s) bounced");
-    expect(savedSignal.data.workflow).toBe("conversation");
-    expect(savedSignal.data.recipientAddress).toBe("me@example.com");
   });
 
   it("reverts original signal to draft when ALL recipients permanently bounced", async () => {

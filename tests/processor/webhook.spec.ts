@@ -7,38 +7,43 @@ import type { Signal, Arc } from "../../src/types/index.js";
 // Fixtures
 // ---------------------------------------------------------------------------
 
-function makeSignal(overrides: Partial<Signal> = {}): Signal {
+function makeSignal(overrides: Partial<Omit<Signal, "data">> & { data?: Partial<Signal["data"]> } = {}): Signal {
+  const { data: dataOverrides, ...baseOverrides } = overrides;
   return {
     id: "sgn-test123",
     signalLookupId: "ses-abc123",
     arcId: "arc-xyz",
     accountId: "acct-001",
     source: "email",
-    receivedAt: "2024-06-15T10:30:00.000Z",
-    from: { address: "sender@example.com", name: "Alice" },
-    to: [{ address: "me@myalias.com" }],
-    cc: [{ address: "cc@other.com", name: "Bob" }],
-    replyTo: { address: "reply@example.com" },
-    subject: "Test Subject",
-    recipientAddress: "me@myalias.com",
-    workflow: "crm",
-    workflowData: { workflow: "crm", crmType: "client_message", urgency: "high", requiresReply: true },
-    spamScore: 0.1,
-    summary: "A test signal summary",
-    s3Key: "emails/2024/06/test.eml",
+    type: "email",
     status: "active",
     createdAt: "2024-06-15T10:30:00.000Z",
-    attachments: [],
-    headers: { "message-id": "<abc@example.com>" },
-    textBody: "Hello world",
-    htmlBody: "<p>Hello world</p>",
-    embeddings: { "model-v3": [0.1, 0.2, 0.3] },
-    matchedRules: [{ ruleId: "rule-1", actions: [{ type: "webhook", value: '{"url":"https://hook.example.com"}' }], labelsAdded: [] }],
     ttl: 1700000000,
-    sesMessageId: "ses-msg-id-123",
     retentionDuration: "P1Y",
-    ...overrides,
-  };
+    ...baseOverrides,
+    data: {
+      receivedAt: "2024-06-15T10:30:00.000Z",
+      from: { address: "sender@example.com", name: "Alice" },
+      to: [{ address: "me@myalias.com" }],
+      cc: [{ address: "cc@other.com", name: "Bob" }],
+      replyTo: { address: "reply@example.com" },
+      subject: "Test Subject",
+      recipientAddress: "me@myalias.com",
+      workflow: "crm",
+      workflowData: { workflow: "crm", crmType: "client_message", urgency: "high", requiresReply: true },
+      spamScore: 0.1,
+      summary: "A test signal summary",
+      s3Key: "emails/2024/06/test.eml",
+      attachments: [],
+      headers: { "message-id": "<abc@example.com>" },
+      textBody: "Hello world",
+      htmlBody: "<p>Hello world</p>",
+      embeddings: { "model-v3": [0.1, 0.2, 0.3] },
+      matchedRules: [{ ruleId: "rule-1", actions: [{ type: "webhook", value: '{"url":"https://hook.example.com"}' }], labelsAdded: [] }],
+      sesMessageId: "ses-msg-id-123",
+      ...dataOverrides,
+    },
+  } as Signal;
 }
 
 function makeArc(overrides: Partial<Arc> = {}): Arc {
@@ -114,17 +119,20 @@ describe("buildWebhookPayload", () => {
   });
 
   it("omits replyTo when signal has no replyTo", () => {
-    const { replyTo: _, ...rest } = makeSignal();
-    const signal = rest as Signal;
+    const base = makeSignal();
+    const { replyTo: _, ...dataWithoutReplyTo } = base.data;
+    const signal = { ...base, data: dataWithoutReplyTo } as Signal;
     const payload = buildWebhookPayload(signal, makeArc());
     expect("replyTo" in payload).toBe(false);
   });
 
   it("omits name from address objects when name is absent", () => {
     const signal = makeSignal({
-      from: { address: "no-name@example.com" },
-      to: [{ address: "to@example.com" }],
-      cc: [{ address: "cc@example.com" }],
+      data: {
+        from: { address: "no-name@example.com" },
+        to: [{ address: "to@example.com" }],
+        cc: [{ address: "cc@example.com" }],
+      },
     });
     const payload = buildWebhookPayload(signal, makeArc());
     expect(payload.from).toEqual({ address: "no-name@example.com" });
