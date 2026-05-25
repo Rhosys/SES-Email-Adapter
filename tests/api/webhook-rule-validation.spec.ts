@@ -191,8 +191,7 @@ describe("API — webhook rule validation", () => {
       astValidator,
       emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService,
       rsvpComposer: vi.fn().mockResolvedValue(ok(undefined)) as unknown as typeof sendRsvp,
-      postApprovalCalendarDeps: { accountDb: {} as never, emailService: {} as never, hmacSecret: new Uint8Array(32), serviceDomain: "cal.numaeel.com" } as unknown as PostApprovalCalendarHandlerDeps,
-      calendarServiceDomain: "cal.numaeel.com",
+      postApprovalCalendarDeps: { accountDb: {} as never, emailService: {} as never, hmacSecret: new Uint8Array(32), serviceDomain: "platform.email.rhosys.cloud" } as unknown as PostApprovalCalendarHandlerDeps,
     });
   });
 

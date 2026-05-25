@@ -3,7 +3,7 @@ import type { Context } from "aws-lambda";
 import { ok, err } from "neverthrow";
 
 // Env vars required by handler.ts at module load time
-process.env["CALENDAR_SERVICE_DOMAIN"] = "cal.numaeel.com";
+process.env["MAIL_DOMAIN"] = "platform.email.rhosys.cloud";
 process.env["CALENDAR_HMAC_SECRET"] = Buffer.from(new Uint8Array(32)).toString("base64");
 
 // ---------------------------------------------------------------------------

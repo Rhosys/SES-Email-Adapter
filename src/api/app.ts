@@ -132,7 +132,6 @@ interface AppDeps {
   emailService: EmailService;
   rsvpComposer: typeof SendRsvpFn;
   postApprovalCalendarDeps: PostApprovalCalendarHandlerDeps;
-  calendarServiceDomain: string;
 }
 
 type AppEnv = { Variables: { auth: AuthContext; authorizationVerified?: boolean } };
@@ -145,7 +144,7 @@ function page<K extends string, T>(key: K, items: T[], nextCursor?: string): Rec
   return { [key]: items, pagination: { cursor: nextCursor ?? null } } as Record<K, T[]> & { pagination: Pagination };
 }
 
-export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, verificationMailer, jobDispatcher, draftSendDispatcher, accountCreationStarter, appBaseUrl, astValidator, billingHandler, emailService, rsvpComposer, postApprovalCalendarDeps, calendarServiceDomain }: AppDeps) {
+export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, verificationMailer, jobDispatcher, draftSendDispatcher, accountCreationStarter, appBaseUrl, astValidator, billingHandler, emailService, rsvpComposer, postApprovalCalendarDeps }: AppDeps) {
   const app = new OpenAPIHono<AppEnv>().basePath('/api');
 
   // Helper: validate code AST via the isolated Lambda
@@ -750,7 +749,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
 
     // Determine alias address — the recipientAddress from the originating email signal
     // The alias is the address that received the original invite
-    const aliasAddress = calendarData.organizer ? `${arc.id}@${accountId}.${calendarServiceDomain}` : "";
+    const aliasAddress = calendarData.organizer ? `${arc.id}@${accountId}.${MAIL_DOMAIN}` : "";
 
     // Look up the originating email signal to get the actual alias address
     const emailSignalResult = await arcDb.getSignalById(accountId, calendarData.linkedSignalId, arc.id);

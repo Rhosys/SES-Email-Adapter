@@ -95,7 +95,7 @@ const deviceStore = new DynamoDeviceStore();
 
 const NOTIFICATION_FROM = process.env["NOTIFICATION_FROM"] ?? "";
 const CONFIG_SET = process.env["SES_CONFIGURATION_SET"] ?? "";
-const CALENDAR_SERVICE_DOMAIN = process.env["CALENDAR_SERVICE_DOMAIN"]!;
+const MAIL_DOMAIN = process.env["MAIL_DOMAIN"]!;
 const calendarHmacSecret = Buffer.from(process.env["CALENDAR_HMAC_SECRET"]!, "base64");
 
 const emailService = new EmailService(sesv2, { from: NOTIFICATION_FROM, configSet: CONFIG_SET });
@@ -134,7 +134,7 @@ const processor = new SignalProcessor({
   sqsDispatcher: new SqsDispatcherImpl(SIGNAL_QUEUE_URL, sqs, logger),
   draftSendDispatcher,
   handlerRegistry,
-  calendarForwarderDeps: { emailService, hmacSecret: calendarHmacSecret, serviceDomain: CALENDAR_SERVICE_DOMAIN },
+  calendarForwarderDeps: { emailService, hmacSecret: calendarHmacSecret, serviceDomain: MAIL_DOMAIN },
   logger,
   s3Client: s3,
   emailBucket: S3_BUCKET,
@@ -210,7 +210,7 @@ const postApprovalCalendarDeps: PostApprovalCalendarHandlerDeps = {
   calendarForwarderDeps: {
     emailService,
     hmacSecret: calendarHmacSecret,
-    serviceDomain: CALENDAR_SERVICE_DOMAIN,
+    serviceDomain: MAIL_DOMAIN,
   },
   logger,
 };
@@ -231,7 +231,6 @@ const app = createApp({
   emailService,
   rsvpComposer: sendRsvp,
   postApprovalCalendarDeps,
-  calendarServiceDomain: CALENDAR_SERVICE_DOMAIN,
 });
 
 // ---------------------------------------------------------------------------

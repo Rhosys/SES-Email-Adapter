@@ -32,8 +32,8 @@ describe("buildForwardIcs — field preservation", () => {
   const calendarData = makeCalendarData();
   const ics = buildForwardIcs({
     calendarData,
-    proxyUid: "acc-abc123.arc-def456.uid-original-123.hmac1234567890ab@cal.numaeel.com",
-    proxyOrganizer: "mailto:arc-def456@acc-abc123.cal.numaeel.com",
+    proxyUid: "acc-abc123.arc-def456.uid-original-123.hmac1234567890ab@platform.email.rhosys.cloud",
+    proxyOrganizer: "mailto:arc-def456@acc-abc123.platform.email.rhosys.cloud",
     organizerCn: "Alice Smith",
     attendeeAddress: "user@gmail.com",
   });
@@ -89,12 +89,12 @@ describe("buildReplyIcs — uses original UID not proxy UID", () => {
   it.each([
     {
       originalUid: "uid-original-123",
-      proxyUid: "acc.arc.uid-original-123.hmac@cal.numaeel.com",
+      proxyUid: "acc.arc.uid-original-123.hmac@platform.email.rhosys.cloud",
       reason: "standard UID preserved in REPLY",
     },
     {
       originalUid: "event-abc",
-      proxyUid: "acc.arc.event-abc.hmac@cal.numaeel.com",
+      proxyUid: "acc.arc.event-abc.hmac@platform.email.rhosys.cloud",
       reason: "short UID preserved in REPLY",
     },
   ])("$reason", ({ originalUid, proxyUid }) => {
@@ -124,8 +124,8 @@ describe("buildForwardIcs — proxy ORGANIZER format and CN", () => {
   it("ORGANIZER is mailto:{arcId}@{accountId}.{serviceDomain} with original CN", () => {
     const ics = buildForwardIcs({
       calendarData: makeCalendarData(),
-      proxyUid: "acc-abc123.arc-def456.uid-original-123.hmac1234567890ab@cal.numaeel.com",
-      proxyOrganizer: "mailto:arc-def456@acc-abc123.cal.numaeel.com",
+      proxyUid: "acc-abc123.arc-def456.uid-original-123.hmac1234567890ab@platform.email.rhosys.cloud",
+      proxyOrganizer: "mailto:arc-def456@acc-abc123.platform.email.rhosys.cloud",
       organizerCn: "Alice Smith",
       attendeeAddress: "user@gmail.com",
     });
@@ -136,7 +136,7 @@ describe("buildForwardIcs — proxy ORGANIZER format and CN", () => {
     const vevent = comp.getFirstSubcomponent("vevent")!;
     const organizer = vevent.getFirstProperty("organizer")!;
 
-    expect(organizer.getFirstValue()).toBe("mailto:arc-def456@acc-abc123.cal.numaeel.com");
+    expect(organizer.getFirstValue()).toBe("mailto:arc-def456@acc-abc123.platform.email.rhosys.cloud");
     expect(organizer.getParameter("cn")).toBe("Alice Smith");
   });
 });

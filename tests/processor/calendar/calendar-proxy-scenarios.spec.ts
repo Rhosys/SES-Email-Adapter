@@ -31,7 +31,7 @@ import ICAL from "ical.js";
 // Static test fixtures — deterministic, no random generation
 // ---------------------------------------------------------------------------
 
-const SERVICE_DOMAIN = "cal.numaeel.com";
+const SERVICE_DOMAIN = "platform.email.rhosys.cloud";
 const HMAC_SECRET = new Uint8Array(32); // 32 zero bytes — deterministic for tests
 const VALID_ARC_ID = generateId("arc-");
 const VALID_ACC_ID = generateAccountId();
