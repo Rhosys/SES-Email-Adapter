@@ -30,7 +30,7 @@ describe("Account report grouping correctness", () => {
       { id: "arc-1", accountId: "acct-1", lastSignalAt: "2024-03-01T00:00:00Z", urgency: "normal", workflow: "conversation" },
       { id: "arc-2", accountId: "acct-2", lastSignalAt: "2024-01-15T00:00:00Z", urgency: "critical", workflow: "alert" },
       { id: "arc-3", accountId: "acct-1", lastSignalAt: "2024-02-01T00:00:00Z", urgency: "high", workflow: "payments" },
-      { id: "arc-4", accountId: "acct-3", lastSignalAt: "2024-05-01T00:00:00Z", urgency: undefined, workflow: "scheduling" },
+      { id: "arc-4", accountId: "acct-3", lastSignalAt: "2024-05-01T00:00:00Z", urgency: undefined, workflow: "travel" },
     ];
     const reports = buildAccountReports(arcs);
     expect(reports).toHaveLength(3);

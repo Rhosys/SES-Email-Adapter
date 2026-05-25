@@ -14,7 +14,7 @@ const AccountRole = z.enum(["admin", "member", "viewer"]);
 const RuleActionType = z.enum([
   "assign_label", "assign_workflow", "archive", "forward",
   "block_hidden", "block_reject", "quarantine", "quarantine_hidden", "set_urgency", "suppress_notification", "pong", "approve_sender",
-  "auto_draft", "webhook",
+  "auto_draft", "webhook", "forwardCalendarInvite",
 ]);
 const RuleStatus = z.enum(["enabled", "disabled"]);
 

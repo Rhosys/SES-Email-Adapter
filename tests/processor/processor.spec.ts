@@ -1620,28 +1620,6 @@ describe("SignalProcessor", () => {
   });
 
   // -------------------------------------------------------------------------
-  // Scheduling signal synthesis
-  // -------------------------------------------------------------------------
-
-  const schedulingClassification: ClassificationOutput = {
-    workflow: "scheduling",
-    workflowData: {
-      workflow: "scheduling",
-      eventType: "meeting_invite",
-      title: "Team Standup",
-      startTime: "2024-02-01T09:00:00Z",
-      endTime: "2024-02-01T09:30:00Z",
-      location: "Zoom",
-      organizer: "boss@company.com",
-      attendees: [],
-      requiresResponse: true,
-    },
-    spamScore: 0.0,
-    summary: "Meeting invite for Team Standup on Feb 1.",
-    labels: [],
-  };
-
-  // -------------------------------------------------------------------------
   // Spam threshold — per-address and account-level overrides
   // -------------------------------------------------------------------------
 

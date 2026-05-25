@@ -8,7 +8,6 @@ export const WORKFLOWS = [
   "crm",           // Sales outreach, proposals, client emails, follow-ups — reply or dismiss
   "package",       // Order confirmations, shipping, delivery tracking — track or file
   "travel",        // Flights, hotels, itineraries, boarding passes — date-triggered actions
-  "scheduling",    // Calendar invites, appointment confirmations — accept or decline
   "payments",      // Invoices, receipts, subscriptions, tax, bank statements — pay or file
   "alert",         // Security events, fraud, CI failures, infra alerts — investigate now
   "content",       // Newsletters, promotions, social digests — read or unsubscribe
@@ -39,7 +38,6 @@ export type WorkflowData =
   | CrmData
   | PackageData
   | TravelData
-  | SchedulingData
   | PaymentsData
   | AlertData
   | ContentData
@@ -110,18 +108,7 @@ export interface TravelData {
   currency?: string;
 }
 
-export interface SchedulingData {
-  workflow: "scheduling";
-  eventType: "meeting_invite" | "appointment" | "reminder" | "cancellation" | "reschedule" | "confirmation";
-  title: string;
-  startTime?: string;
-  endTime?: string;
-  location?: string;
-  organizer?: string;
-  attendees?: string[];
-  calendarUrl?: string;
-  requiresResponse: boolean;
-}
+
 
 export interface PaymentsData {
   workflow: "payments";
@@ -243,10 +230,10 @@ export const STATS_CATEGORIES = ["allowed", "blocked", "quarantined", "violation
 export type StatsCategory = (typeof STATS_CATEGORIES)[number];
 
 // "email" = inbound SES email; "user" = user-created; "ses_feedback" = bounce/delivery notification
-export const SIGNAL_SOURCES = ["email", "user", "ses_feedback"] as const;
+export const SIGNAL_SOURCES = ["email", "user", "ses_feedback", "signal"] as const;
 export type SignalSource = (typeof SIGNAL_SOURCES)[number];
 
-export const SIGNAL_TYPES = ["email", "deliverability", "invalid_rule_function", "invalid_template_function", "auto_send_blocked"] as const;
+export const SIGNAL_TYPES = ["email", "deliverability", "invalid_rule_function", "invalid_template_function", "auto_send_blocked", "calendar_event", "calendar_response", "calendar_invite_invalid", "domain_misconfiguration"] as const;
 export type SignalType = (typeof SIGNAL_TYPES)[number];
 
 // interrupt = push notification popup; ambient = badge only; silent = no push
@@ -573,7 +560,7 @@ export const RULE_ACTION_TYPES = [
   "assign_label", "assign_workflow", "archive", "forward",
   "block_hidden", "block_reject", "quarantine", "quarantine_hidden",
   "set_urgency", "suppress_notification", "pong", "approve_sender",
-  "auto_draft", "webhook",
+  "auto_draft", "webhook", "forwardCalendarInvite",
 ] as const;
 export type RuleActionType = (typeof RULE_ACTION_TYPES)[number];
 
@@ -581,7 +568,7 @@ export type RuleActionType = (typeof RULE_ACTION_TYPES)[number];
 // The compile-time gate: assignSystemLabels() returns SystemLabel[], so any unlisted label is a type error.
 export type SystemLabel =
   | "system:workflow:auth" | "system:workflow:conversation" | "system:workflow:crm"
-  | "system:workflow:package" | "system:workflow:travel" | "system:workflow:scheduling"
+  | "system:workflow:package" | "system:workflow:travel"
   | "system:workflow:payments" | "system:workflow:alert" | "system:workflow:content"
   | "system:workflow:onboarding" | "system:workflow:status" | "system:workflow:healthcare"
   | "system:workflow:job" | "system:workflow:support" | "system:workflow:test"
@@ -590,7 +577,8 @@ export type SystemLabel =
   | "system:sender:untrusted"
   | "system:replied"
   | "system:test"
-  | "system:auth:security_alert";
+  | "system:auth:security_alert"
+  | "system:calendar";
 
 export interface RuleAction {
   type: RuleActionType;
@@ -668,6 +656,7 @@ export interface Account {
   onboarding?: AccountOnboarding;
   billingPlan?: import("../embedding/retention-tier.js").BillingPlan;
   afterSendAction?: "archive" | "keep_active";
+  calendarForwardingAddress?: string;
   createdAt: string;
   updatedAt: string;
 }
