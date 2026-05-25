@@ -1,4 +1,4 @@
-import type { S3Client } from "@aws-sdk/client-s3";
+import { GetObjectCommand, PutObjectCommand, type S3Client } from "@aws-sdk/client-s3";
 import { DateTime } from "luxon";
 import { generateId } from "../utils/id.js";
 import type { Logger } from "../logger.js";
@@ -32,6 +32,9 @@ import { buildWebhookPayload, deliverWebhook } from "./webhook.js";
 import { parseWebhookConfig } from "../api/validate-webhook-config.js";
 import { BillingHandler } from "../billing/billing-handler.js";
 import type { HandlerRegistry } from "../workflow/registry.js";
+import { findCalendarAttachment, parseIcs } from "./calendar/ics-parser.js";
+import { buildCalendarSignalLookupId } from "./calendar/signal-lookup.js";
+import type { CalendarEventData, CalendarInviteInvalidData } from "../types/calendar.js";
 
 // ---------------------------------------------------------------------------
 // Message types
@@ -1154,6 +1157,10 @@ export class SignalProcessor {
       }
     }
 
+    // 12b. Calendar attachment processing — detect .ics, parse, create calendar signal
+    // Unexpected exceptions propagate to the caller (SQS retry). Only IcsParseError is caught.
+    await this.processCalendarAttachment(signal, arc, accountId, ttl);
+
     // 13. S3 retention — fire-and-forget (idempotent, always attempted)
     await this.attemptS3Retention(signal, accountCtx, arc);
 
@@ -1292,6 +1299,111 @@ export class SignalProcessor {
     } catch (e) {
       this.logger.warn("S3 retention threw an unexpected error. The signal will use the default lifecycle rule. Processing continues unaffected.", { code: "processor.s3_retention_unexpected", accountId: signal.accountId, error: e });
     }
+  }
+
+  /**
+   * Detect and process calendar (.ics) attachments on an email signal.
+   *
+   * On valid parse: creates a calendar signal (source: "signal", type: "calendar_event"),
+   * stores raw .ics as S3 attachment, applies system:calendar label to the arc.
+   *
+   * On parse rejection (IcsParseError): creates a calendar_invite_invalid signal with reason.
+   *
+   * On unexpected crash: does NOT catch — lets the exception propagate so SQS retries naturally.
+   */
+  private async processCalendarAttachment(signal: Signal, arc: Arc, accountId: string, ttl?: number): Promise<void> {
+    const attachments = signal.data.attachments ?? [];
+    const calendarAttachment = findCalendarAttachment(attachments, this.logger);
+    if (!calendarAttachment) return;
+
+    this.logger.trackPoint("calendar_attachment_found", { filename: calendarAttachment.filename, mimeType: calendarAttachment.mimeType });
+
+    // Fetch .ics bytes from S3
+    const getResult = await this.s3Client.send(new GetObjectCommand({
+      Bucket: this.contentBucket,
+      Key: calendarAttachment.s3Key,
+    }));
+    const icsBytes = await getResult.Body!.transformToByteArray();
+
+    // Parse .ics
+    const parseResult = parseIcs(new Uint8Array(icsBytes));
+
+    if (parseResult.isErr()) {
+      // Parse rejection — create calendar_invite_invalid signal
+      const invalidId = generateId("sgn-");
+      const invalidTimestamp = DateTime.utc().toISO()!;
+      const invalidSignal: Signal<CalendarInviteInvalidData> = {
+        id: invalidId,
+        signalLookupId: invalidId,
+        arcId: arc.id,
+        accountId,
+        source: "signal",
+        type: "calendar_invite_invalid",
+        status: "active",
+        createdAt: invalidTimestamp,
+        ...(ttl !== undefined ? { ttl } : {}),
+        data: {
+          reason: parseResult.error.reason,
+          linkedSignalId: signal.id,
+        },
+      };
+      const saveInvalidResult = await this.arcDb.saveSignal(invalidSignal);
+      if (saveInvalidResult.isErr()) {
+        this.logger.warn("Failed to save calendar_invite_invalid signal.", { code: "system_signal.write_failed", accountId, type: "calendar_invite_invalid", error: saveInvalidResult.error });
+      }
+      this.logger.warn("Calendar attachment rejected by ICS parser.", { code: "processor.calendar.parse_rejected", accountId, signalId: signal.id, reason: parseResult.error.reason });
+      return;
+    }
+
+    // Valid parse — create calendar signal
+    const { calendarData, rawIcsContent } = parseResult.value;
+    const calendarSignalId = generateId("sgn-");
+    const calendarTimestamp = DateTime.utc().toISO()!;
+    const signalLookupId = buildCalendarSignalLookupId(calendarData.organizer, calendarData.veventUid);
+
+    // Store raw .ics as S3 attachment on the calendar signal
+    const icsS3Key = `accounts/${accountId}/calendar/${calendarSignalId}/invite.ics`;
+    await this.s3Client.send(new PutObjectCommand({
+      Bucket: this.contentBucket,
+      Key: icsS3Key,
+      Body: Buffer.from(rawIcsContent, "utf-8"),
+      ContentType: "text/calendar",
+    }));
+
+    // Build calendar signal with linkedSignalId pointing to the email signal
+    const calendarSignal: Signal<CalendarEventData> = {
+      id: calendarSignalId,
+      signalLookupId,
+      arcId: arc.id,
+      accountId,
+      source: "signal",
+      type: "calendar_event",
+      status: "active",
+      createdAt: calendarTimestamp,
+      ...(ttl !== undefined ? { ttl } : {}),
+      data: {
+        ...calendarData,
+        linkedSignalId: signal.id,
+      },
+    };
+
+    const saveCalResult = await this.arcDb.saveSignal(calendarSignal);
+    if (saveCalResult.isErr()) {
+      this.logger.warn("Failed to save calendar_event signal.", { code: "system_signal.write_failed", accountId, type: "calendar_event", error: saveCalResult.error });
+      return;
+    }
+
+    // Apply system:calendar label to the arc
+    if (!arc.labels.includes("system:calendar")) {
+      arc.labels = [...arc.labels, "system:calendar"];
+      const updateResult = await this.arcDb.updateArc(accountId, arc.id, arc.status, arc.lastSignalAt!, { labels: arc.labels });
+      if (updateResult.isErr()) {
+        this.logger.warn("Failed to apply system:calendar label to arc.", { code: "processor.calendar.label_failed", accountId, arcId: arc.id, error: updateResult.error });
+      }
+    }
+
+    this.logger.info("Calendar signal created from .ics attachment.", { code: "processor.calendar.signal_created", accountId, calendarSignalId, emailSignalId: signal.id, arcId: arc.id, method: calendarData.method, veventUid: calendarData.veventUid });
+    this.logger.trackPoint("calendar_signal_created", { calendarSignalId });
   }
 
   private async autoApprove(
