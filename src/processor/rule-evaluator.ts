@@ -13,26 +13,23 @@ import type { RuleEvalResult } from "./interpret-rule-result.js";
 // Strip sensitive fields before passing to user code (allowlist approach)
 // ---------------------------------------------------------------------------
 
-export type StrippedSignal = Pick<Signal["data"], "from" | "subject" | "summary" | "spamScore" | "workflow" | "recipientAddress" | "workflowData"> & Pick<Signal, "id">;
-export type StrippedArc = Pick<Arc, "id" | "labels" | "urgency" | "summary" | "workflow" | "status">;
+type StrippedSignal = Pick<Signal["data"], "from" | "subject" | "summary" | "spamScore" | "workflow" | "recipientAddress" | "workflowData"> & Pick<Signal, "id">;
+type StrippedArc = Pick<Arc, "id" | "labels" | "urgency" | "summary" | "workflow" | "status">;
 
-export function stripSensitive(signal: Signal): StrippedSignal;
-export function stripSensitive(arc: Arc): StrippedArc;
-export function stripSensitive(obj: Signal | Arc): StrippedSignal | StrippedArc {
-  if ("data" in obj && "from" in (obj as Signal).data) {
-    const signal = obj as Signal;
-    return {
-      id: signal.id,
-      from: signal.data.from,
-      subject: signal.data.subject,
-      summary: signal.data.summary,
-      spamScore: signal.data.spamScore,
-      workflow: signal.data.workflow,
-      recipientAddress: signal.data.recipientAddress,
-      workflowData: signal.data.workflowData,
-    };
-  }
-  const arc = obj as Arc;
+function stripSignalForUserCode(signal: Signal): StrippedSignal {
+  return {
+    id: signal.id,
+    from: signal.data.from,
+    subject: signal.data.subject,
+    summary: signal.data.summary,
+    spamScore: signal.data.spamScore,
+    workflow: signal.data.workflow,
+    recipientAddress: signal.data.recipientAddress,
+    workflowData: signal.data.workflowData,
+  };
+}
+
+function stripArcForUserCode(arc: Arc): StrippedArc {
   return {
     id: arc.id,
     labels: arc.labels,
@@ -86,7 +83,7 @@ export class JsonLogicRuleEvaluator implements RuleEvaluator {
         tenantId: context.signal.accountId,
         purpose: "rule_condition",
         functionCode: rule.condition,
-        executionContext: { signal: stripSensitive(context.signal), arc: stripSensitive(context.arc) },
+        executionContext: { signal: stripSignalForUserCode(context.signal), arc: stripArcForUserCode(context.arc) },
       });
 
       if (!response.success) {

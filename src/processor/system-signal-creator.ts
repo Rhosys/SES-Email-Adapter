@@ -12,6 +12,8 @@ import { generateId } from "../utils/id.js";
 // in the same table and appear in the arc's signal thread.
 // ---------------------------------------------------------------------------
 
+const SYSTEM_SIGNAL_TTL_SECONDS = 90 * 24 * 60 * 60; // 90 days
+
 export interface SignalStore {
   saveSignal(signal: Signal<InvalidRuleFunctionData> | Signal<InvalidTemplateFunctionData> | Signal<AutoSendBlockedData>): Promise<Result<void, DbError>>;
 }
@@ -61,7 +63,7 @@ export class DynamoSystemSignalCreator implements SystemSignalCreator {
   }): Promise<void> {
     const id = generateId("sgn-");
     const timestamp = DateTime.utc().toISO()!;
-    const ttl = Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60; // 30 days
+    const ttl = Math.floor(Date.now() / 1000) + SYSTEM_SIGNAL_TTL_SECONDS;
 
     const signal: Signal<InvalidRuleFunctionData> = {
       id,
@@ -92,7 +94,7 @@ export class DynamoSystemSignalCreator implements SystemSignalCreator {
   }): Promise<void> {
     const id = generateId("sgn-");
     const timestamp = DateTime.utc().toISO()!;
-    const ttl = Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60; // 30 days
+    const ttl = Math.floor(Date.now() / 1000) + SYSTEM_SIGNAL_TTL_SECONDS;
 
     const signal: Signal<InvalidTemplateFunctionData> = {
       id,
@@ -123,7 +125,7 @@ export class DynamoSystemSignalCreator implements SystemSignalCreator {
   }): Promise<void> {
     const id = generateId("sgn-");
     const timestamp = DateTime.utc().toISO()!;
-    const ttl = Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60; // 30 days
+    const ttl = Math.floor(Date.now() / 1000) + SYSTEM_SIGNAL_TTL_SECONDS;
 
     const signal: Signal<AutoSendBlockedData> = {
       id,

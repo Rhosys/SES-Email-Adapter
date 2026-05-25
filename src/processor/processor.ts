@@ -9,7 +9,6 @@ import type { Signal, Arc, Rule, Workflow, WorkflowData, Alias, AliasSender, Sen
 import type { ParsedMime } from "./mime.js";
 import type { ContentSanitizerClient } from "./content-sanitizer-client.js";
 import type { UserCodeExecutorClient, TemplateParameterResult } from "./user-code-client.js";
-import { stripSensitive } from "./rule-evaluator.js";
 import type { RuleEvalResult } from "./interpret-rule-result.js";
 import { buildEmbedText, extractEmbedTextInput } from "../embedding/embed-text.js";
 import type { SignalClassifier } from "../classifier/classifier.js";
@@ -558,7 +557,10 @@ export class SignalProcessor {
                 tenantId: accountId,
                 purpose: "template_function",
                 functionCode: fn.code,
-                executionContext: { signal: stripSensitive(signal), arc: stripSensitive(arc) },
+                executionContext: {
+                  signal: { id: signal.id, from: signal.data.from, subject: signal.data.subject, summary: signal.data.summary, spamScore: signal.data.spamScore, workflow: signal.data.workflow, recipientAddress: signal.data.recipientAddress, workflowData: signal.data.workflowData },
+                  arc: { id: arc.id, labels: arc.labels, ...(arc.urgency !== undefined ? { urgency: arc.urgency } : {}), summary: arc.summary, workflow: arc.workflow, status: arc.status },
+                },
               });
               if (!response.success) {
                 // Execution error (timeout, runtime_error, sandbox_violation)
