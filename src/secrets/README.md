@@ -8,13 +8,11 @@ KMS-encrypted secrets bundled with the repo. Decrypted by CI and passed as Lambd
 
 **Generate:**
 ```bash
-head -c 32 /dev/urandom | base64 -w0 > /tmp/hmac-plaintext.b64
 cd /home/warren/git/claude/_tools
-npx tsx src/kms-encrypt.ts --key-alias alias/default --string "$(cat /tmp/hmac-plaintext.b64)" > /home/warren/git/claude/email-catcher/backend/src/secrets/calendar-hmac.kms
-rm /tmp/hmac-plaintext.b64
+npx tsx src/kms-encrypt.ts --key-alias alias/default --origin "$(git -C /home/warren/git/claude/email-catcher/backend remote get-url origin)" --string "$(head -c 32 /dev/urandom | base64 -w0)" > /home/warren/git/claude/email-catcher/backend/src/secrets/calendar-hmac.kms
 ```
 
-Requires `kms:Encrypt` on the email-catcher infrastructure KMS key (`alias/default` in account REDACTED).
+Requires `kms:Encrypt` on the email-catcher infrastructure KMS key (`alias/default` in account REDACTED). The `--origin` flag passes the email-catcher git remote so the tool authenticates against the correct AWS account.
 
 **CI decryption** (in `.gitlab-ci.yml` or Terraform):
 ```bash
