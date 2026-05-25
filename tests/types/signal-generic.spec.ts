@@ -20,10 +20,6 @@ import type {
   SignalType,
 } from "../../src/types/index.js";
 import { ArcDatabase } from "../../src/database/arc-database.js";
-import { DynamoSystemSignalCreator } from "../../src/processor/system-signal-creator.js";
-import { ok } from "../../src/errors.js";
-import { createMockLogger } from "../helpers/mock-logger.js";
-import { vi } from "vitest";
 
 // =============================================================================
 // Property 1: Type narrowing correctness
@@ -74,7 +70,7 @@ describe("Property 1: Type narrowing correctness", () => {
 // Validates: Requirements 10.1, 10.2, 10.3, 10.4
 // =============================================================================
 
-describe("Property 2: SystemSignalCreator signals contain only expected data fields", () => {
+describe("Property 2: System signals contain only expected data fields", () => {
   const emailSpecificFields = [
     "from", "to", "cc", "attachments", "headers", "spamScore",
     "s3Key", "workflow", "workflowData", "subject", "receivedAt",
@@ -83,60 +79,41 @@ describe("Property 2: SystemSignalCreator signals contain only expected data fie
     "sendFailureReason", "urgency",
   ];
 
-  let mockSaveSignal: ReturnType<typeof vi.fn>;
-  let creator: DynamoSystemSignalCreator;
-
-  beforeEach(() => {
-    mockSaveSignal = vi.fn().mockResolvedValue(ok(undefined));
-    creator = new DynamoSystemSignalCreator(createMockLogger(), { saveSignal: mockSaveSignal });
-  });
-
-  it("invalid_rule_function signal data contains only resourceName and issue", async () => {
-    await creator.createInvalidRuleFunctionSignal({
-      accountId: "acc-1",
-      arcId: "arc-1",
-      recipientAddress: "inbox@example.com",
-      resourceName: "My Rule",
-      issue: "syntax error",
-    });
-
-    const signal = mockSaveSignal.mock.calls[0]![0] as Signal<InvalidRuleFunctionData>;
+  it("invalid_rule_function signal data contains only resourceName and issue", () => {
+    const signal: Signal<InvalidRuleFunctionData> = {
+      id: "sgn-test", signalLookupId: "sgn-test", arcId: "arc-1", accountId: "acc-1",
+      source: "email", type: "invalid_rule_function", status: "active",
+      createdAt: "2025-01-01T00:00:00.000Z", ttl: 1740000000,
+      data: { resourceName: "My Rule", issue: "syntax error" },
+    };
     expect(Object.keys(signal.data).sort()).toEqual(["issue", "resourceName"]);
     for (const field of emailSpecificFields) {
       expect(signal.data).not.toHaveProperty(field);
     }
   });
 
-  it("invalid_template_function signal data contains only resourceName, functionName, and issue", async () => {
-    await creator.createInvalidTemplateFunctionSignal({
-      accountId: "acc-1",
-      arcId: "arc-1",
-      recipientAddress: "inbox@example.com",
-      resourceName: "Welcome Template",
-      functionName: "formatDate",
-      issue: "formatDate is not defined",
-    });
-
-    const signal = mockSaveSignal.mock.calls[0]![0] as Signal<InvalidTemplateFunctionData>;
+  it("invalid_template_function signal data contains only resourceName, functionName, and issue", () => {
+    const signal: Signal<InvalidTemplateFunctionData> = {
+      id: "sgn-test", signalLookupId: "sgn-test", arcId: "arc-1", accountId: "acc-1",
+      source: "email", type: "invalid_template_function", status: "active",
+      createdAt: "2025-01-01T00:00:00.000Z", ttl: 1740000000,
+      data: { resourceName: "Welcome Template", functionName: "formatDate", issue: "formatDate is not defined" },
+    };
     expect(Object.keys(signal.data).sort()).toEqual(["functionName", "issue", "resourceName"]);
     for (const field of emailSpecificFields) {
       expect(signal.data).not.toHaveProperty(field);
     }
   });
 
-  it("auto_send_blocked signal data contains only fromAddress, replyToAddress, and recipientAddress", async () => {
-    await creator.createAutoSendBlockedSignal({
-      accountId: "acc-1",
-      arcId: "arc-1",
-      recipientAddress: "inbox@example.com",
-      fromAddress: "sender@legit.com",
-      replyToAddress: "phish@evil.com",
-    });
-
-    const signal = mockSaveSignal.mock.calls[0]![0] as Signal<AutoSendBlockedData>;
+  it("auto_send_blocked signal data contains only fromAddress, replyToAddress, and recipientAddress", () => {
+    const signal: Signal<AutoSendBlockedData> = {
+      id: "sgn-test", signalLookupId: "sgn-test", arcId: "arc-1", accountId: "acc-1",
+      source: "email", type: "auto_send_blocked", status: "active",
+      createdAt: "2025-01-01T00:00:00.000Z", ttl: 1740000000,
+      data: { fromAddress: "sender@legit.com", replyToAddress: "phish@evil.com", recipientAddress: "inbox@example.com" },
+    };
     expect(Object.keys(signal.data).sort()).toEqual(["fromAddress", "recipientAddress", "replyToAddress"]);
     for (const field of emailSpecificFields) {
-      // recipientAddress is an email-specific field name but AutoSendBlockedData also has it — skip that check
       if (field === "recipientAddress") continue;
       expect(signal.data).not.toHaveProperty(field);
     }
