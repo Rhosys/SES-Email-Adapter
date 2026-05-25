@@ -9,6 +9,7 @@ import type { EmbeddingGenerator } from "../../src/embedding/embedding-generator
 import type { MultiClusterAuroraWriter } from "../../src/database/multi-cluster-aurora-writer.js";
 import type { Signal, Arc, Alias, AliasSender } from "../../src/types/index.js";
 import { dbError } from "../../src/errors.js";
+import type { EmailService } from "../../src/email/email-service.js";
 import { createMockLogger, type MockLogger } from "../helpers/mock-logger.js";
 
 vi.mock("../../src/embedding/cluster-registry.js", () => {
@@ -174,6 +175,7 @@ describe("Side effect caller logging", () => {
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       logger: mockLogger,
       draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
+      calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, hmacSecret: new Uint8Array(32), serviceDomain: "cal.numaeel.com" },
     });
 
     // Side-effects are now executed via processSideEffect, not processRecord
@@ -207,6 +209,7 @@ describe("Side effect caller logging", () => {
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       logger: mockLogger,
       draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
+      calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, hmacSecret: new Uint8Array(32), serviceDomain: "cal.numaeel.com" },
     });
 
     const payload: SideEffectPayload = { signal: makeSignal(), arc: makeArc() };
@@ -238,6 +241,7 @@ describe("Side effect caller logging", () => {
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       logger: mockLogger,
       draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
+      calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, hmacSecret: new Uint8Array(32), serviceDomain: "cal.numaeel.com" },
     });
 
     // Signal with a forward action in matchedRules

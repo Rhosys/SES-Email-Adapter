@@ -20,6 +20,7 @@ import type { Alias, AliasSender } from "../../src/types/index.js";
 import { bedrockError } from "../../src/errors.js";
 import type { BedrockError } from "../../src/errors.js";
 import type { Result } from "../../src/errors.js";
+import type { EmailService } from "../../src/email/email-service.js";
 import { createMockLogger, type MockLogger } from "../helpers/mock-logger.js";
 
 // ---------------------------------------------------------------------------
@@ -213,6 +214,7 @@ describe("Feature: split-embedding-pipeline, Property 3: Secondary failures are 
       replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) },
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
+      calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, hmacSecret: new Uint8Array(32), serviceDomain: "cal.numaeel.com" },
     });
 
     const result = await processor.processRecord(makeMessage("test-msg-secondary-fail"), 1);

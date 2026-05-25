@@ -6,6 +6,9 @@ import type { AccountDatabase } from "../../src/database/account-database.js";
 import type { AuditDatabase } from "../../src/database/audit-database.js";
 import type { Account, Rule } from "../../src/types/index.js";
 import { ok } from "neverthrow";
+import type { EmailService } from "../../src/email/email-service.js";
+import type { sendRsvp } from "../../src/processor/calendar/rsvp-composer.js";
+import type { PostApprovalCalendarHandlerDeps } from "../../src/processor/calendar/post-approval-handler.js";
 import { createMockLogger } from "../helpers/mock-logger.js";
 import { BillingHandler } from "../../src/billing/billing-handler.js";
 import type { DraftSendDispatcher } from "../../src/processor/draft-send-dispatcher.js";
@@ -186,6 +189,10 @@ describe("API — webhook rule validation", () => {
       logger: createMockLogger(),
       billingHandler: new BillingHandler(),
       astValidator,
+      emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService,
+      rsvpComposer: vi.fn().mockResolvedValue(ok(undefined)) as unknown as typeof sendRsvp,
+      postApprovalCalendarDeps: { accountDb: {} as never, emailService: {} as never, hmacSecret: new Uint8Array(32), serviceDomain: "cal.numaeel.com" } as unknown as PostApprovalCalendarHandlerDeps,
+      calendarServiceDomain: "cal.numaeel.com",
     });
   });
 

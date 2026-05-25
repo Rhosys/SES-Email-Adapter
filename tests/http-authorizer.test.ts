@@ -2,6 +2,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { Context } from "aws-lambda";
 import { ok, err } from "neverthrow";
 
+// Env vars required by handler.ts at module load time
+process.env["CALENDAR_SERVICE_DOMAIN"] = "cal.numaeel.com";
+process.env["CALENDAR_HMAC_SECRET"] = Buffer.from(new Uint8Array(32)).toString("base64");
+
 // ---------------------------------------------------------------------------
 // Mock heavy dependencies so the handler module can load without real AWS SDK
 // ---------------------------------------------------------------------------

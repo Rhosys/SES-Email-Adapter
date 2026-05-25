@@ -10,6 +10,7 @@ import type { SignalClassifier, ClassificationOutput } from "../../src/classifie
 import type { EmbeddingGenerator } from "../../src/embedding/embedding-generator.js";
 import type { MultiClusterAuroraWriter } from "../../src/database/multi-cluster-aurora-writer.js";
 import type { Signal, Alias, AliasSender } from "../../src/types/index.js";
+import type { EmailService } from "../../src/email/email-service.js";
 import { createMockLogger } from "../helpers/mock-logger.js";
 
 vi.mock("../../src/embedding/cluster-registry.js", () => {
@@ -155,6 +156,7 @@ describe("Cross-layer idempotence — live writes + cache + Aurora", () => {
       replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) },
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
+      calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, hmacSecret: new Uint8Array(32), serviceDomain: "cal.numaeel.com" },
     });
 
     const message = makeMessage("test-msg-001");
@@ -208,6 +210,7 @@ describe("Cross-layer idempotence — live writes + cache + Aurora", () => {
       replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) },
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
+      calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, hmacSecret: new Uint8Array(32), serviceDomain: "cal.numaeel.com" },
     });
 
     const message = makeMessage("test-msg-001");

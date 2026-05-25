@@ -10,6 +10,7 @@ import type { SignalClassifier, ClassificationOutput } from "../../src/classifie
 import type { EmbeddingGenerator } from "../../src/embedding/embedding-generator.js";
 import type { MultiClusterAuroraWriter } from "../../src/database/multi-cluster-aurora-writer.js";
 import type { Arc, Rule, Alias, AliasSender } from "../../src/types/index.js";
+import type { EmailService } from "../../src/email/email-service.js";
 import { createMockLogger, type MockLogger } from "../helpers/mock-logger.js";
 
 vi.mock("../../src/embedding/cluster-registry.js", () => {
@@ -173,6 +174,7 @@ function buildProcessor(arcDb: ReturnType<typeof makeArcDbMock>, accountDb: Retu
     replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) },
     sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
     draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
+    calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, hmacSecret: new Uint8Array(32), serviceDomain: "cal.numaeel.com" },
   });
 }
 

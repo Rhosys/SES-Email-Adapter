@@ -17,6 +17,7 @@ import type { ClassificationOutput } from "../../src/classifier/classifier.js";
 import type { EmbeddingGenerator, EmbeddingResult } from "../../src/embedding/embedding-generator.js";
 import type { MultiClusterAuroraWriter } from "../../src/database/multi-cluster-aurora-writer.js";
 import type { Alias, AliasSender, Signal } from "../../src/types/index.js";
+import type { EmailService } from "../../src/email/email-service.js";
 import { bedrockError } from "../../src/errors.js";
 import type { Result } from "../../src/errors.js";
 import type { BedrockError } from "../../src/errors.js";
@@ -236,6 +237,7 @@ arcDb, accountDb, processingDb,
       replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) },
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
+      calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, hmacSecret: new Uint8Array(32), serviceDomain: "cal.numaeel.com" },
     });
 
     const result = await processor.processRecord(makeMessage("ses-prop4-test"), 1);
