@@ -1,15 +1,6 @@
-import { createHmac } from "node:crypto";
+import { computeHmac16, validateHmac16 } from "./hmac-secret.js";
 import type { Result } from "neverthrow";
 import { ok, err } from "neverthrow";
-
-/**
- * Compute HMAC-SHA256 over the payload and return the first 16 characters
- * of the base64url-encoded output (no padding).
- */
-function computeHmac16(payload: string, secret: Uint8Array): string {
-  const hmac = createHmac("sha256", secret).update(payload).digest("base64url");
-  return hmac.slice(0, 16);
-}
 
 /**
  * Construct a proxy UID for forwarding calendar invites.
@@ -17,17 +8,16 @@ function computeHmac16(payload: string, secret: Uint8Array): string {
  * Format: {accountId}.{arcId}.{originalVeventUid}.{hmac16}@{serviceDomain}
  *
  * The HMAC is computed over "{accountId}.{arcId}.{originalVeventUid}" using
- * the provided 32-byte secret, then truncated to 16 chars of base64url (no padding).
+ * the encapsulated 32-byte secret, then truncated to 16 chars of base64url (no padding).
  */
-export function buildProxyUid(opts: {
+export async function buildProxyUid(opts: {
   accountId: string;
   arcId: string;
   originalVeventUid: string;
-  hmacSecret: Uint8Array;
   serviceDomain: string;
-}): string {
+}): Promise<string> {
   const payload = `${opts.accountId}.${opts.arcId}.${opts.originalVeventUid}`;
-  const hmac16 = computeHmac16(payload, opts.hmacSecret);
+  const hmac16 = await computeHmac16(payload);
   return `${payload}.${hmac16}@${opts.serviceDomain}`;
 }
 
@@ -38,11 +28,10 @@ export function buildProxyUid(opts: {
  * the first 16 characters. Returns the decomposed parts on success,
  * or an error string on failure.
  */
-export function validateProxyUid(opts: {
+export async function validateProxyUid(opts: {
   proxyUid: string;
-  hmacSecret: Uint8Array;
   serviceDomain: string;
-}): Result<{ accountId: string; arcId: string; originalVeventUid: string }, string> {
+}): Promise<Result<{ accountId: string; arcId: string; originalVeventUid: string }, string>> {
   // Split on @ to separate local-part from domain
   const atIndex = opts.proxyUid.lastIndexOf("@");
   if (atIndex === -1) {
@@ -76,9 +65,9 @@ export function validateProxyUid(opts: {
 
   // Recompute HMAC and compare
   const payload = `${accountId}.${arcId}.${originalVeventUid}`;
-  const expectedHmac16 = computeHmac16(payload, opts.hmacSecret);
+  const valid = await validateHmac16(payload, hmac16);
 
-  if (hmac16 !== expectedHmac16) {
+  if (!valid) {
     return err("hmac mismatch");
   }
 

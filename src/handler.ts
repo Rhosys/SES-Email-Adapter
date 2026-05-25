@@ -97,10 +97,6 @@ const NOTIFICATION_FROM = process.env["NOTIFICATION_FROM"] ?? "";
 const CONFIG_SET = process.env["SES_CONFIGURATION_SET"] ?? "";
 const MAIL_DOMAIN = process.env["MAIL_DOMAIN"]!;
 
-// Calendar HMAC secret — source of truth is src/secrets/calendar-hmac.kms (KMS-encrypted).
-// CI decrypts it and passes as CALENDAR_HMAC_SECRET env var (base64-encoded).
-const calendarHmacSecret = Buffer.from(process.env["CALENDAR_HMAC_SECRET"]!, "base64");
-
 const emailService = new EmailService(sesv2, { from: NOTIFICATION_FROM, configSet: CONFIG_SET });
 
 const externalEmailHandler = new ExternalEmailSignalHandler(emailService, s3, logger, S3_BUCKET);
@@ -137,7 +133,7 @@ const processor = new SignalProcessor({
   sqsDispatcher: new SqsDispatcherImpl(SIGNAL_QUEUE_URL, sqs, logger),
   draftSendDispatcher,
   handlerRegistry,
-  calendarForwarderDeps: { emailService, hmacSecret: calendarHmacSecret, serviceDomain: MAIL_DOMAIN },
+  calendarForwarderDeps: { emailService, serviceDomain: MAIL_DOMAIN },
   logger,
   s3Client: s3,
   emailBucket: S3_BUCKET,
@@ -212,7 +208,6 @@ const postApprovalCalendarDeps: PostApprovalCalendarHandlerDeps = {
   contentBucket: CONTENT_BUCKET,
   calendarForwarderDeps: {
     emailService,
-    hmacSecret: calendarHmacSecret,
     serviceDomain: MAIL_DOMAIN,
   },
   logger,

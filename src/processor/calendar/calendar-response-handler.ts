@@ -24,7 +24,6 @@ import { validateId, validateAccountId } from "../../utils/id.js";
 // ---------------------------------------------------------------------------
 
 export interface CalendarResponseHandlerDeps {
-  hmacSecret: Uint8Array;
   serviceDomain: string;
   arcDatabase: ArcDatabase;
   rsvpComposer: typeof sendRsvp;
@@ -78,7 +77,7 @@ export async function handleCalendarResponse(
   logger: Logger,
   icsBytes: Uint8Array,
 ): Promise<Result<void, DbError>> {
-  const { hmacSecret, serviceDomain, arcDatabase, rsvpComposer, signalStore, emailService } = deps;
+  const { serviceDomain, arcDatabase, rsvpComposer, signalStore, emailService } = deps;
 
   // --- Step 1: Extract arcId and accountId from recipient address ---
   // Pattern: {arcId}@{accountId}.{serviceDomain}
@@ -172,9 +171,8 @@ export async function handleCalendarResponse(
   const proxyUid = calendarData.veventUid;
 
   // --- Step 5: Validate proxy UID HMAC ---
-  const uidResult = validateProxyUid({
+  const uidResult = await validateProxyUid({
     proxyUid,
-    hmacSecret,
     serviceDomain,
   });
 

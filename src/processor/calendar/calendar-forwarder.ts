@@ -18,7 +18,6 @@ import { buildForwardIcs } from "./ics-builder.js";
 
 export interface CalendarForwarderDeps {
   emailService: EmailService;
-  hmacSecret: Uint8Array;
   serviceDomain: string;
 }
 
@@ -44,7 +43,7 @@ export async function forwardCalendarInvite(
   logger: Logger,
 ): Promise<Result<void, DbError>> {
   const { calendarSignal, calendarForwardingAddress, accountId, arcId } = opts;
-  const { emailService, hmacSecret, serviceDomain } = deps;
+  const { emailService, serviceDomain } = deps;
   const calendarData = calendarSignal.data;
 
   // No-op if calendarForwardingAddress is empty
@@ -58,11 +57,10 @@ export async function forwardCalendarInvite(
   }
 
   // Build proxy UID
-  const proxyUid = buildProxyUid({
+  const proxyUid = await buildProxyUid({
     accountId,
     arcId,
     originalVeventUid: calendarData.originalVeventUid,
-    hmacSecret,
     serviceDomain,
   });
 
