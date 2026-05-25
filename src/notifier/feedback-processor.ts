@@ -1,6 +1,6 @@
 import type { SQSEvent } from "aws-lambda";
 import { DateTime } from "luxon";
-import type { SesFeedback, Signal, SuppressedAddress } from "../types/index.js";
+import type { DeliverabilitySignalData, SesFeedback, Signal, SuppressedAddress } from "../types/index.js";
 import { generateId } from "../utils/id.js";
 import type { ProcessingDatabase } from "../database/processing-database.js";
 import type { AccountDatabase } from "../database/account-database.js";
@@ -136,7 +136,7 @@ export class FeedbackProcessor {
             const resolvedArcId = tagArcId || sentSignal.arcId;
 
             const id = generateId("sgn-");
-            const deliverabilitySignal: Signal = {
+            const deliverabilitySignal: Signal<DeliverabilitySignalData> = {
               id,
               signalLookupId: id,
               ...(resolvedArcId ? { arcId: resolvedArcId } : {}),
@@ -144,28 +144,18 @@ export class FeedbackProcessor {
               source: "ses_feedback",
               type: "deliverability",
               status: "active",
-              receivedAt: DateTime.utc().toISO()!,
-              from: { address: "system@deliverability" },
-              to: [],
-              cc: [],
-              subject: `Delivery failure: ${bouncedRecipients.length} recipient(s) bounced`,
-              attachments: [],
-              headers: {},
-              recipientAddress: sentSignal.from.address,
-              workflow: sentSignal.workflow,
-              workflowData: sentSignal.workflowData,
-              spamScore: 0,
-              summary: "",
-              s3Key: "",
               createdAt: DateTime.utc().toISO()!,
-              relatedSignalId: sentSignal.id,
-              bouncedRecipients,
+              data: {
+                relatedSignalId: sentSignal.id,
+                bouncedRecipients,
+                subject: `Delivery failure: ${bouncedRecipients.length} recipient(s) bounced`,
+              },
             };
-            await this.signalStore.saveSignal(deliverabilitySignal);
+            await this.signalStore.saveSignal(deliverabilitySignal as Signal);
 
             // If ALL recipients permanently bounced → revert sent signal to draft
             if (isPermanent) {
-              const allTo = sentSignal.to.map(t => t.address.toLowerCase());
+              const allTo = sentSignal.data.to.map(t => t.address.toLowerCase());
               const allBounced = allTo.every(addr =>
                 bouncedRecipients.some(b => b.address.toLowerCase() === addr && b.bounceType === "permanent")
               );

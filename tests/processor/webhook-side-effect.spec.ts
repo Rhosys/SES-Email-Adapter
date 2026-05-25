@@ -81,33 +81,38 @@ function makeStore(billingPlan: "Paid" | "Free" | "Trial" = "Paid") {
   return { arcDb, accountDb, processingDb };
 }
 
-function makeSignal(overrides: Partial<Signal> = {}): Signal {
+function makeSignal(overrides: { data?: Partial<Signal["data"]> } & Partial<Omit<Signal, "data">> = {}): Signal {
+  const { data: dataOverrides, ...baseOverrides } = overrides;
   return {
     id: "sgn-webhook-test-001",
     signalLookupId: "ses-webhook-msg-001",
     arcId: "arc-webhook-001",
     accountId: TEST_ACCOUNT_ID,
     source: "email",
-    receivedAt: "2024-06-15T10:30:00.000Z",
-    from: { address: "sender@example.com", name: "Alice" },
-    to: [{ address: "user@example.com" }],
-    cc: [],
-    subject: "Webhook test email",
-    textBody: "Hello from webhook test",
-    attachments: [],
-    headers: {},
-    recipientAddress: "user@example.com",
-    workflow: "conversation",
-    workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
-    spamScore: 0.05,
-    summary: "A webhook test signal.",
-    s3Key: "emails/webhook-test.eml",
+    type: "email",
     status: "active",
     createdAt: "2024-06-15T10:30:00.000Z",
-    embeddings: {},
-    matchedRules: [],
-    ...overrides,
-  };
+    ...baseOverrides,
+    data: {
+      receivedAt: "2024-06-15T10:30:00.000Z",
+      from: { address: "sender@example.com", name: "Alice" },
+      to: [{ address: "user@example.com" }],
+      cc: [],
+      subject: "Webhook test email",
+      textBody: "Hello from webhook test",
+      attachments: [],
+      headers: {},
+      recipientAddress: "user@example.com",
+      workflow: "conversation",
+      workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
+      spamScore: 0.05,
+      summary: "A webhook test signal.",
+      s3Key: "emails/webhook-test.eml",
+      embeddings: {},
+      matchedRules: [],
+      ...dataOverrides,
+    },
+  } as Signal;
 }
 
 function makeArc(overrides: Partial<Arc> = {}): Arc {
@@ -197,10 +202,12 @@ describe("processSideEffect — webhook delivery", () => {
     });
 
     const signal = makeSignal({
-      matchedRules: [
-        { ruleId: "rule-fwd", actions: [{ type: "forward", value: "backup@personal.com" }], labelsAdded: [] },
-        { ruleId: "rule-hook", actions: [{ type: "webhook", value: '{"url":"https://hook.example.com/events"}' }], labelsAdded: [] },
-      ],
+      data: {
+        matchedRules: [
+          { ruleId: "rule-fwd", actions: [{ type: "forward", value: "backup@personal.com" }], labelsAdded: [] },
+          { ruleId: "rule-hook", actions: [{ type: "webhook", value: '{"url":"https://hook.example.com/events"}' }], labelsAdded: [] },
+        ],
+      },
     });
     const arc = makeArc();
     const payload: SideEffectPayload = { signal, arc };
@@ -230,7 +237,7 @@ describe("processSideEffect — webhook delivery", () => {
     // Verify payload shape contains expected signal fields
     const body = JSON.parse(opts.body as string);
     expect(body.id).toBe(signal.id);
-    expect(body.alias).toBe(signal.recipientAddress);
+    expect(body.alias).toBe(signal.data.recipientAddress);
     expect(body.labels).toEqual(arc.labels);
   });
 
@@ -239,9 +246,11 @@ describe("processSideEffect — webhook delivery", () => {
     const processor = makeProcessor({ store, logger: mockLogger });
 
     const signal = makeSignal({
-      matchedRules: [
-        { ruleId: "rule-hook", actions: [{ type: "webhook", value: '{"url":"https://hook.example.com/events"}' }], labelsAdded: [] },
-      ],
+      data: {
+        matchedRules: [
+          { ruleId: "rule-hook", actions: [{ type: "webhook", value: '{"url":"https://hook.example.com/events"}' }], labelsAdded: [] },
+        ],
+      },
     });
     const arc = makeArc();
     const payload: SideEffectPayload = { signal, arc };
@@ -267,10 +276,12 @@ describe("processSideEffect — webhook delivery", () => {
     const processor = makeProcessor({ store, logger: mockLogger });
 
     const signal = makeSignal({
-      matchedRules: [
-        { ruleId: "rule-hook-1", actions: [{ type: "webhook", value: '{"url":"https://first.example.com/hook"}' }], labelsAdded: [] },
-        { ruleId: "rule-hook-2", actions: [{ type: "webhook", value: '{"url":"https://second.example.com/hook"}' }], labelsAdded: [] },
-      ],
+      data: {
+        matchedRules: [
+          { ruleId: "rule-hook-1", actions: [{ type: "webhook", value: '{"url":"https://first.example.com/hook"}' }], labelsAdded: [] },
+          { ruleId: "rule-hook-2", actions: [{ type: "webhook", value: '{"url":"https://second.example.com/hook"}' }], labelsAdded: [] },
+        ],
+      },
     });
     const arc = makeArc();
     const payload: SideEffectPayload = { signal, arc };
@@ -291,9 +302,11 @@ describe("processSideEffect — webhook delivery", () => {
     const processor = makeProcessor({ store, logger: mockLogger });
 
     const signal = makeSignal({
-      matchedRules: [
-        { ruleId: "rule-bad", actions: [{ type: "webhook", value: "not valid json {{{" }], labelsAdded: [] },
-      ],
+      data: {
+        matchedRules: [
+          { ruleId: "rule-bad", actions: [{ type: "webhook", value: "not valid json {{{" }], labelsAdded: [] },
+        ],
+      },
     });
     const arc = makeArc();
     const payload: SideEffectPayload = { signal, arc };

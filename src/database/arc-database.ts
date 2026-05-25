@@ -7,7 +7,7 @@ import type { DbError, Result } from "../errors.js";
 import type { Logger } from "../logger.js";
 import type { ArcMatcher } from "../processor/processor.js";
 import type { ListArcsParams } from "../api/app.js";
-import type { Arc, Signal, Page, PageParams, ArcStatus, ArcUrgency, Workflow } from "../types/index.js";
+import type { Arc, Signal, EmailSignalData, Page, PageParams, ArcStatus, ArcUrgency, Workflow } from "../types/index.js";
 
 // ---------------------------------------------------------------------------
 // Aurora Data API client (stateless — no connection pool needed)
@@ -333,16 +333,16 @@ export class ArcDatabase implements ArcMatcher {
     }
   }
 
-  async updateSignal(accountId: string, signalLookupId: string, update: Partial<Pick<Signal, "subject" | "textBody" | "from" | "to">>): Promise<Result<Signal, DbError>> {
+  async updateSignal(accountId: string, signalLookupId: string, update: Partial<Pick<EmailSignalData, "subject" | "textBody" | "from" | "to">>): Promise<Result<Signal, DbError>> {
     const now = DateTime.utc().toISO()!;
     const setParts: string[] = ["updatedAt = :now"];
     const exprValues: Record<string, unknown> = { ":now": now };
     const exprNames: Record<string, string> = {};
 
-    if (update.subject !== undefined) { setParts.push("#subject = :subject"); exprValues[":subject"] = update.subject; exprNames["#subject"] = "subject"; }
-    if (update.textBody !== undefined) { setParts.push("textBody = :textBody"); exprValues[":textBody"] = update.textBody; }
-    if (update.from !== undefined) { setParts.push("#from = :from"); exprValues[":from"] = update.from; exprNames["#from"] = "from"; }
-    if (update.to !== undefined) { setParts.push("#to = :to"); exprValues[":to"] = update.to; exprNames["#to"] = "to"; }
+    if (update.subject !== undefined) { setParts.push("#data.#subject = :subject"); exprValues[":subject"] = update.subject; exprNames["#subject"] = "subject"; exprNames["#data"] = "data"; }
+    if (update.textBody !== undefined) { setParts.push("#data.textBody = :textBody"); exprValues[":textBody"] = update.textBody; exprNames["#data"] = "data"; }
+    if (update.from !== undefined) { setParts.push("#data.#from = :from"); exprValues[":from"] = update.from; exprNames["#from"] = "from"; exprNames["#data"] = "data"; }
+    if (update.to !== undefined) { setParts.push("#data.#to = :to"); exprValues[":to"] = update.to; exprNames["#to"] = "to"; exprNames["#data"] = "data"; }
 
     try {
       const result = await dynamo.send(new UpdateCommand({
@@ -372,19 +372,19 @@ export class ArcDatabase implements ArcMatcher {
   ): Promise<Result<Signal, DbError>> {
     const setParts: string[] = ["#status = :status", "updatedAt = :now"];
     const exprValues: Record<string, unknown> = { ":status": update.status, ":now": DateTime.utc().toISO()! };
-    const exprNames: Record<string, string> = { "#status": "status" };
+    const exprNames: Record<string, string> = { "#status": "status", "#data": "data" };
     const removeParts: string[] = [];
 
     if (update.sendInitiatedAt === null) {
-      removeParts.push("sendInitiatedAt");
+      removeParts.push("#data.sendInitiatedAt");
     } else if (update.sendInitiatedAt !== undefined) {
-      setParts.push("sendInitiatedAt = :sia");
+      setParts.push("#data.sendInitiatedAt = :sia");
       exprValues[":sia"] = update.sendInitiatedAt;
     }
 
-    if (update.sentAt !== undefined) { setParts.push("sentAt = :sentAt"); exprValues[":sentAt"] = update.sentAt; }
-    if (update.sesMessageId !== undefined) { setParts.push("sesMessageId = :smid"); exprValues[":smid"] = update.sesMessageId; }
-    if (update.sendFailureReason !== undefined) { setParts.push("sendFailureReason = :sfr"); exprValues[":sfr"] = update.sendFailureReason; }
+    if (update.sentAt !== undefined) { setParts.push("#data.sentAt = :sentAt"); exprValues[":sentAt"] = update.sentAt; }
+    if (update.sesMessageId !== undefined) { setParts.push("#data.sesMessageId = :smid"); exprValues[":smid"] = update.sesMessageId; }
+    if (update.sendFailureReason !== undefined) { setParts.push("#data.sendFailureReason = :sfr"); exprValues[":sfr"] = update.sendFailureReason; }
 
     let updateExpr = `SET ${setParts.join(", ")}`;
     if (removeParts.length > 0) updateExpr += ` REMOVE ${removeParts.join(", ")}`;
@@ -618,8 +618,8 @@ export class ArcDatabase implements ArcMatcher {
       await dynamo.send(new UpdateCommand({
         TableName: SIGNALS_TABLE,
         Key: { pk: sigPk(accountId, signalLookupId), sk: ITEM_SK },
-        UpdateExpression: "SET embeddings.#mid = :v",
-        ExpressionAttributeNames: { "#mid": modelId },
+        UpdateExpression: "SET #data.embeddings.#mid = :v",
+        ExpressionAttributeNames: { "#data": "data", "#mid": modelId },
         ExpressionAttributeValues: { ":v": vector },
       }));
       return ok(undefined);
@@ -631,14 +631,16 @@ export class ArcDatabase implements ArcMatcher {
   async updateSignalRetention(
     accountId: string,
     signalLookupId: string,
-    update: Partial<Pick<Signal, "s3Key" | "retentionDuration">>,
+    update: { s3Key?: string; retentionDuration?: string },
   ): Promise<Result<void, DbError>> {
     const setParts: string[] = [];
     const exprValues: Record<string, unknown> = {};
+    const exprNames: Record<string, string> = {};
 
     if (update.s3Key !== undefined) {
-      setParts.push("s3Key = :s3Key");
+      setParts.push("#data.s3Key = :s3Key");
       exprValues[":s3Key"] = update.s3Key;
+      exprNames["#data"] = "data";
     }
     if (update.retentionDuration !== undefined) {
       setParts.push("retentionDuration = :rd");
@@ -653,6 +655,7 @@ export class ArcDatabase implements ArcMatcher {
         Key: { pk: sigPk(accountId, signalLookupId), sk: ITEM_SK },
         UpdateExpression: `SET ${setParts.join(", ")}`,
         ExpressionAttributeValues: exprValues,
+        ...(Object.keys(exprNames).length ? { ExpressionAttributeNames: exprNames } : {}),
       }));
       return ok(undefined);
     } catch (e) {

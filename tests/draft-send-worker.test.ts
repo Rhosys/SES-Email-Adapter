@@ -7,32 +7,37 @@ import type { DraftSendPayload } from "../src/processor/draft-send-dispatcher.js
 import type { Signal } from "../src/types/index.js";
 import { createMockLogger } from "./helpers/mock-logger.js";
 
-function makeSignal(overrides: Partial<Signal> = {}): Signal {
+function makeSignal(overrides: { data?: Partial<Signal["data"]> } & Partial<Omit<Signal, "data">> = {}): Signal {
+  const { data: dataOverrides, ...baseOverrides } = overrides;
   return {
     id: "USR#signal-001",
     signalLookupId: "USR#signal-001",
     arcId: "arc-001",
     accountId: "acct-001",
     source: "user",
+    type: "email",
     status: "pending_send",
-    sendInitiatedAt: "2024-06-01T12:00:00.000Z",
-    from: { address: "me@example.com" },
-    to: [{ address: "recipient@example.com" }],
-    cc: [],
-    subject: "Hello",
-    textBody: "Hi there",
-    attachments: [],
-    headers: {},
-    recipientAddress: "me@example.com",
-    workflow: "conversation",
-    workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
-    spamScore: 0,
-    summary: "",
-    s3Key: "",
-    receivedAt: "2024-06-01T12:00:00.000Z",
     createdAt: "2024-06-01T12:00:00.000Z",
-    ...overrides,
-  };
+    ...baseOverrides,
+    data: {
+      sendInitiatedAt: "2024-06-01T12:00:00.000Z",
+      from: { address: "me@example.com" },
+      to: [{ address: "recipient@example.com" }],
+      cc: [],
+      subject: "Hello",
+      textBody: "Hi there",
+      attachments: [],
+      headers: {},
+      recipientAddress: "me@example.com",
+      workflow: "conversation",
+      workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
+      spamScore: 0,
+      summary: "",
+      s3Key: "",
+      receivedAt: "2024-06-01T12:00:00.000Z",
+      ...dataOverrides,
+    },
+  } as Signal;
 }
 
 function makeStore(): DraftSendStore {
@@ -89,7 +94,7 @@ describe("DraftSendWorker", () => {
   });
 
   it("discards when sendInitiatedAt does not match payload (stale message)", async () => {
-    vi.mocked(store.getSignalById).mockResolvedValueOnce(ok(makeSignal({ sendInitiatedAt: "2024-06-01T13:00:00.000Z" })));
+    vi.mocked(store.getSignalById).mockResolvedValueOnce(ok(makeSignal({ data: { sendInitiatedAt: "2024-06-01T13:00:00.000Z" } })));
 
     const result = await worker.process(PAYLOAD);
 
@@ -139,7 +144,7 @@ describe("DraftSendWorker", () => {
 
   it("joins multiple recipients in the to field", async () => {
     vi.mocked(store.getSignalById).mockResolvedValueOnce(ok(makeSignal({
-      to: [{ address: "a@example.com" }, { address: "b@example.com" }],
+      data: { to: [{ address: "a@example.com" }, { address: "b@example.com" }] },
     })));
 
     const result = await worker.process(PAYLOAD);

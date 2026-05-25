@@ -96,9 +96,9 @@ function buildPayload(arc: Arc, signal: Signal, urgency: ArcUrgency): Notificati
     type: "signal",
     signalId: signal.id,
     arcId: arc.id,
-    sender: signal.from.address,
-    senderName: signal.from.name ?? signal.from.address,
-    subject: signal.subject,
+    sender: signal.data.from.address,
+    senderName: signal.data.from.name ?? signal.data.from.address,
+    subject: signal.data.subject,
     workflow: arc.workflow,
     urgency,
   };

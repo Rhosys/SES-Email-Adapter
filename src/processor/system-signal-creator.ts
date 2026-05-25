@@ -1,5 +1,5 @@
 import { DateTime } from "luxon";
-import type { Signal, SignalType } from "../types/index.js";
+import type { Signal, SignalType, InvalidRuleFunctionData, InvalidTemplateFunctionData, AutoSendBlockedData } from "../types/index.js";
 import type { Logger } from "../logger.js";
 import type { Result } from "neverthrow";
 import type { DbError } from "../errors.js";
@@ -13,7 +13,7 @@ import { generateId } from "../utils/id.js";
 // ---------------------------------------------------------------------------
 
 export interface SignalStore {
-  saveSignal(signal: Signal): Promise<Result<void, DbError>>;
+  saveSignal(signal: Signal<InvalidRuleFunctionData> | Signal<InvalidTemplateFunctionData> | Signal<AutoSendBlockedData>): Promise<Result<void, DbError>>;
 }
 
 export interface SystemSignalCreator {
@@ -59,14 +59,27 @@ export class DynamoSystemSignalCreator implements SystemSignalCreator {
     resourceName: string;
     issue: string;
   }): Promise<void> {
-    const description = `rule "${opts.resourceName}": ${opts.issue}`;
-    await this.saveSystemSignal({
-      type: "invalid_rule_function",
-      accountId: opts.accountId,
+    const id = generateId("sgn-");
+    const timestamp = DateTime.utc().toISO()!;
+    const ttl = Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60; // 30 days
+
+    const signal: Signal<InvalidRuleFunctionData> = {
+      id,
+      signalLookupId: id,
       arcId: opts.arcId,
-      recipientAddress: opts.recipientAddress,
-      subject: description,
-    });
+      accountId: opts.accountId,
+      source: "email",
+      type: "invalid_rule_function",
+      status: "active",
+      createdAt: timestamp,
+      ttl,
+      data: {
+        resourceName: opts.resourceName,
+        issue: opts.issue,
+      },
+    };
+
+    await this.saveSystemSignal(signal, opts.accountId, "invalid_rule_function");
   }
 
   async createInvalidTemplateFunctionSignal(opts: {
@@ -77,14 +90,28 @@ export class DynamoSystemSignalCreator implements SystemSignalCreator {
     functionName: string;
     issue: string;
   }): Promise<void> {
-    const description = `template "${opts.resourceName}" function "${opts.functionName}": ${opts.issue}`;
-    await this.saveSystemSignal({
-      type: "invalid_template_function",
-      accountId: opts.accountId,
+    const id = generateId("sgn-");
+    const timestamp = DateTime.utc().toISO()!;
+    const ttl = Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60; // 30 days
+
+    const signal: Signal<InvalidTemplateFunctionData> = {
+      id,
+      signalLookupId: id,
       arcId: opts.arcId,
-      recipientAddress: opts.recipientAddress,
-      subject: description,
-    });
+      accountId: opts.accountId,
+      source: "email",
+      type: "invalid_template_function",
+      status: "active",
+      createdAt: timestamp,
+      ttl,
+      data: {
+        resourceName: opts.resourceName,
+        functionName: opts.functionName,
+        issue: opts.issue,
+      },
+    };
+
+    await this.saveSystemSignal(signal, opts.accountId, "invalid_template_function");
   }
 
   async createAutoSendBlockedSignal(opts: {
@@ -94,67 +121,50 @@ export class DynamoSystemSignalCreator implements SystemSignalCreator {
     fromAddress: string;
     replyToAddress: string;
   }): Promise<void> {
-    const description = `Auto-send suppressed for ${opts.recipientAddress}: Reply-To ${opts.replyToAddress} does not match From ${opts.fromAddress} and is not in approved senders`;
-    await this.saveSystemSignal({
-      type: "auto_send_blocked",
-      accountId: opts.accountId,
-      arcId: opts.arcId,
-      recipientAddress: opts.recipientAddress,
-      subject: description,
-    });
-  }
-
-  private async saveSystemSignal(opts: {
-    type: SignalType;
-    accountId: string;
-    arcId: string;
-    recipientAddress: string;
-    subject: string;
-  }): Promise<void> {
     const id = generateId("sgn-");
     const timestamp = DateTime.utc().toISO()!;
     const ttl = Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60; // 30 days
 
-    const signal: Signal = {
+    const signal: Signal<AutoSendBlockedData> = {
       id,
       signalLookupId: id,
       arcId: opts.arcId,
       accountId: opts.accountId,
       source: "email",
-      type: opts.type,
+      type: "auto_send_blocked",
       status: "active",
-      receivedAt: timestamp,
-      from: { address: "system@internal" },
-      to: [],
-      cc: [],
-      subject: opts.subject,
-      attachments: [],
-      headers: {},
-      recipientAddress: opts.recipientAddress,
-      workflow: "alert",
-      workflowData: { workflow: "alert", eventType: "system_notification", service: "email-catcher", severity: "warning", requiresAction: false } as never,
-      spamScore: 0,
-      summary: "",
-      s3Key: "",
       createdAt: timestamp,
       ttl,
+      data: {
+        fromAddress: opts.fromAddress,
+        replyToAddress: opts.replyToAddress,
+        recipientAddress: opts.recipientAddress,
+      },
     };
 
+    await this.saveSystemSignal(signal, opts.accountId, "auto_send_blocked");
+  }
+
+  private async saveSystemSignal(
+    signal: Signal<InvalidRuleFunctionData> | Signal<InvalidTemplateFunctionData> | Signal<AutoSendBlockedData>,
+    accountId: string,
+    type: SignalType,
+  ): Promise<void> {
     try {
       const result = await this.signalStore.saveSignal(signal);
       if (result.isErr()) {
         this.logger.warn("Failed to save system signal.", {
           code: "system_signal.write_failed",
-          accountId: opts.accountId,
-          type: opts.type,
+          accountId,
+          type,
           error: result.error,
         });
       }
     } catch (e) {
       this.logger.warn("Failed to save system signal.", {
         code: "system_signal.write_failed",
-        accountId: opts.accountId,
-        type: opts.type,
+        accountId,
+        type,
         error: e,
       });
     }

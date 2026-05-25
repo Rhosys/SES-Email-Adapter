@@ -8,32 +8,37 @@ import type { SesFeedback, Signal } from "../src/types/index.js";
 import { createMockLogger } from "./helpers/mock-logger.js";
 import { TAG_ACCOUNT_ID, TAG_TYPE, TAG_SIGNAL_ID, TAG_ARC_ID } from "../src/email/ses-tags.js";
 
-function makeSentSignal(overrides: Partial<Signal> = {}): Signal {
+function makeSentSignal(overrides: { data?: Partial<Signal["data"]> } & Partial<Omit<Signal, "data">> = {}): Signal {
+  const { data: dataOverrides, ...baseOverrides } = overrides;
   return {
     id: "sgn-signal001",
     signalLookupId: "sgn-signal001",
     arcId: "arc-001",
     accountId: "acct-001",
     source: "user",
+    type: "email",
     status: "sent",
-    sesMessageId: "ses-msg-abc",
-    from: { address: "me@example.com" },
-    to: [{ address: "recipient@example.com" }],
-    cc: [],
-    subject: "Hello",
-    textBody: "Hi there",
-    attachments: [],
-    headers: {},
-    recipientAddress: "me@example.com",
-    workflow: "conversation",
-    workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
-    spamScore: 0,
-    summary: "",
-    s3Key: "",
-    receivedAt: "2024-06-01T12:00:00.000Z",
     createdAt: "2024-06-01T12:00:00.000Z",
-    ...overrides,
-  };
+    ...baseOverrides,
+    data: {
+      sesMessageId: "ses-msg-abc",
+      from: { address: "me@example.com" },
+      to: [{ address: "recipient@example.com" }],
+      cc: [],
+      subject: "Hello",
+      textBody: "Hi there",
+      attachments: [],
+      headers: {},
+      recipientAddress: "me@example.com",
+      workflow: "conversation",
+      workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
+      spamScore: 0,
+      summary: "",
+      s3Key: "",
+      receivedAt: "2024-06-01T12:00:00.000Z",
+      ...dataOverrides,
+    },
+  } as Signal;
 }
 
 function makeBounceFeedback(overrides: Partial<SesFeedback> = {}): SesFeedback {
@@ -122,14 +127,14 @@ describe("FeedbackProcessor — bounce handling for user-sent signals", () => {
     expect(savedSignal.accountId).toBe("acct-001");
     expect(savedSignal.source).toBe("ses_feedback");
     expect(savedSignal.status).toBe("active");
-    expect(savedSignal.from).toEqual({ address: "system@deliverability" });
-    expect(savedSignal.relatedSignalId).toBe("sgn-signal001");
-    expect(savedSignal.bouncedRecipients).toEqual([
+    expect(savedSignal.data.from).toEqual({ address: "system@deliverability" });
+    expect(savedSignal.data.relatedSignalId).toBe("sgn-signal001");
+    expect(savedSignal.data.bouncedRecipients).toEqual([
       { address: "recipient@example.com", bounceType: "permanent", reason: "5.1.1" },
     ]);
-    expect(savedSignal.subject).toBe("Delivery failure: 1 recipient(s) bounced");
-    expect(savedSignal.workflow).toBe("conversation");
-    expect(savedSignal.recipientAddress).toBe("me@example.com");
+    expect(savedSignal.data.subject).toBe("Delivery failure: 1 recipient(s) bounced");
+    expect(savedSignal.data.workflow).toBe("conversation");
+    expect(savedSignal.data.recipientAddress).toBe("me@example.com");
   });
 
   it("reverts original signal to draft when ALL recipients permanently bounced", async () => {
@@ -145,7 +150,7 @@ describe("FeedbackProcessor — bounce handling for user-sent signals", () => {
 
   it("does not revert original signal when only some recipients bounced (partial bounce)", async () => {
     vi.mocked(signalStore.getSignalByMessageId).mockResolvedValueOnce(ok(makeSentSignal({
-      to: [{ address: "recipient@example.com" }, { address: "other@example.com" }],
+      data: { to: [{ address: "recipient@example.com" }, { address: "other@example.com" }] },
     })));
 
     const result = await processor.processNotification(makeBounceFeedback());
@@ -173,7 +178,7 @@ describe("FeedbackProcessor — bounce handling for user-sent signals", () => {
     // Deliverability signal created with transient bounceType
     expect(signalStore.saveSignal).toHaveBeenCalledTimes(1);
     const savedSignal = vi.mocked(signalStore.saveSignal).mock.calls[0]![0];
-    expect(savedSignal.bouncedRecipients).toEqual([
+    expect(savedSignal.data.bouncedRecipients).toEqual([
       { address: "recipient@example.com", bounceType: "transient", reason: "4.2.2" },
     ]);
     // Original NOT reverted — transient bounces don't trigger revert
