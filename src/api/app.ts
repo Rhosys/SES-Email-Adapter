@@ -424,7 +424,33 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     };
     const result = await arcDb.listSignals(accountId, arc.id, params);
     if (result.isErr()) return err(c, 500, "Internal Server Error");
-    return c.json(page("signals", result.value.items, result.value.nextCursor));
+
+    // Enrich calendar_event signals with the most recent calendar_response decision
+    const signals = result.value.items as unknown as import("../types/index.js").AnySignal[];
+    const calendarEventSignals = signals.filter(isCalendarEventSignal);
+    const enrichments = new Map<string, { decision: CalendarResponseData["decision"]; respondedAt: string }>();
+
+    if (calendarEventSignals.length > 0) {
+      // Collect unique veventUids from calendar_event signals
+      const veventUids = new Set(calendarEventSignals.map(s => s.data.veventUid));
+      for (const veventUid of veventUids) {
+        const responseResult = await arcDb.getLatestCalendarResponse(accountId, arc.id, veventUid);
+        if (responseResult.isOk() && responseResult.value) {
+          const resp = responseResult.value.data;
+          enrichments.set(veventUid, { decision: resp.decision, respondedAt: resp.respondedAt });
+        }
+      }
+    }
+
+    // Build enriched response — calendar_event signals get latestResponse field
+    const enrichedSignals = signals.map(signal => {
+      if (isCalendarEventSignal(signal) && enrichments.has(signal.data.veventUid)) {
+        return { ...signal, latestResponse: enrichments.get(signal.data.veventUid) };
+      }
+      return signal;
+    });
+
+    return c.json(page("signals", enrichedSignals, result.value.nextCursor));
   });
 
   app.post("/accounts/:accountId/arcs/:arcId/signals", authz("signals:write", c => `accounts/${c.req.param("accountId")}/arcs/${c.req.param("arcId")}/signals`), async (c) => {
