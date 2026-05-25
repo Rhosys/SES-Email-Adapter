@@ -103,7 +103,7 @@ function makeCalendarForwarderDeps(): CalendarForwarderDeps {
   return {
     emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-fwd-001" })) } as never,
     hmacSecret: new Uint8Array(32),
-    serviceDomain: "cal.numaeel.com",
+    serviceDomain: "platform.email.rhosys.cloud",
   };
 }
 

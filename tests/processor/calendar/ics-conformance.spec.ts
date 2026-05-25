@@ -504,7 +504,7 @@ describe("ICS conformance — REPLY round-trip via ical.js", () => {
       decision: "TENTATIVE" as const,
       veventUid: "040000008200E00074C5B7101A82E00800000000ABCDEF@google.com",
       sequence: 5,
-      attendeeAddress: "arc-xyz@acc-123.cal.numaeel.com",
+      attendeeAddress: "arc-xyz@acc-123.platform.email.rhosys.cloud",
       organizerAddress: "alice@bigcorp.com",
       reason: "TENTATIVE reply with Outlook-style UID and high sequence",
     },

@@ -62,7 +62,7 @@ function makeDeps(emailService?: EmailService): CalendarForwarderDeps {
   return {
     emailService: emailService ?? makeEmailService(),
     hmacSecret: new Uint8Array(32),
-    serviceDomain: "cal.numaeel.com",
+    serviceDomain: "platform.email.rhosys.cloud",
   };
 }
 

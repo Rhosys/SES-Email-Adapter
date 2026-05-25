@@ -3,7 +3,7 @@ import { buildProxyUid, validateProxyUid } from "../../src/processor/calendar/pr
 
 // Static 32-byte HMAC secret for deterministic tests
 const TEST_SECRET = new Uint8Array(32).fill(0xAB);
-const SERVICE_DOMAIN = "cal.numaeel.com";
+const SERVICE_DOMAIN = "platform.email.rhosys.cloud";
 
 // ---------------------------------------------------------------------------
 // Property 9: Proxy UID construction is deterministic and correctly formatted

@@ -11,7 +11,7 @@ import { generateId, generateAccountId } from "../../../src/utils/id.js";
 // Helpers
 // ---------------------------------------------------------------------------
 
-const SERVICE_DOMAIN = "cal.numaeel.com";
+const SERVICE_DOMAIN = "platform.email.rhosys.cloud";
 const HMAC_SECRET = new Uint8Array(32); // 32 zero bytes — deterministic for tests
 
 // Valid IDs generated with the real algorithm from utils/id.ts

@@ -100,12 +100,12 @@ describe("sendRsvp — REPLY uses original UID not proxy UID", () => {
   it.each([
     {
       originalUid: "uid-original-123",
-      proxyUid: "acc.arc.uid-original-123.hmac1234567890ab@cal.numaeel.com",
+      proxyUid: "acc.arc.uid-original-123.hmac1234567890ab@platform.email.rhosys.cloud",
       reason: "standard UID — REPLY contains original, not proxy",
     },
     {
       originalUid: "event-abc",
-      proxyUid: "acc.arc.event-abc.hmac1234567890ab@cal.numaeel.com",
+      proxyUid: "acc.arc.event-abc.hmac1234567890ab@platform.email.rhosys.cloud",
       reason: "short UID — REPLY contains original, not proxy",
     },
   ])("$reason", async ({ originalUid, proxyUid }) => {

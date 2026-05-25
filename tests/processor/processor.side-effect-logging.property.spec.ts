@@ -175,7 +175,7 @@ describe("Side effect caller logging", () => {
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       logger: mockLogger,
       draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
-      calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, hmacSecret: new Uint8Array(32), serviceDomain: "cal.numaeel.com" },
+      calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, hmacSecret: new Uint8Array(32), serviceDomain: "platform.email.rhosys.cloud" },
     });
 
     // Side-effects are now executed via processSideEffect, not processRecord
@@ -209,7 +209,7 @@ describe("Side effect caller logging", () => {
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       logger: mockLogger,
       draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
-      calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, hmacSecret: new Uint8Array(32), serviceDomain: "cal.numaeel.com" },
+      calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, hmacSecret: new Uint8Array(32), serviceDomain: "platform.email.rhosys.cloud" },
     });
 
     const payload: SideEffectPayload = { signal: makeSignal(), arc: makeArc() };
@@ -241,7 +241,7 @@ describe("Side effect caller logging", () => {
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       logger: mockLogger,
       draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
-      calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, hmacSecret: new Uint8Array(32), serviceDomain: "cal.numaeel.com" },
+      calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, hmacSecret: new Uint8Array(32), serviceDomain: "platform.email.rhosys.cloud" },
     });
 
     // Signal with a forward action in matchedRules

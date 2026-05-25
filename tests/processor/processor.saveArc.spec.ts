@@ -204,7 +204,7 @@ describe("Single saveArc call with complete mutations", () => {
       forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       retentionService: retentionService ?? { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "emails/test-ses-id" }) },
       draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
-      calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, hmacSecret: new Uint8Array(32), serviceDomain: "cal.numaeel.com" },
+      calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, hmacSecret: new Uint8Array(32), serviceDomain: "platform.email.rhosys.cloud" },
     });
 
     await processor.processRecord(makeMessage("test-ses-id", recipientEmail), 1);
