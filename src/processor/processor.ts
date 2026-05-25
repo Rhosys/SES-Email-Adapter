@@ -5,7 +5,7 @@ import type { Logger } from "../logger.js";
 import type { Result } from "neverthrow";
 import { ok, err, dbError } from "../errors.js";
 import type { DbError, InvalidResponseError } from "../errors.js";
-import type { Signal, Arc, Rule, Workflow, WorkflowData, Alias, AliasSender, SenderPolicy, AccountFilteringConfig, SignalSource, SignalStatus, Domain, ArcStatus, ArcUrgency, UnknownSenderPolicy, MatchedRuleResult } from "../types/index.js";
+import type { Signal, Arc, Rule, Workflow, WorkflowData, Alias, AliasSender, SenderPolicy, AccountFilteringConfig, SignalSource, SignalStatus, Domain, ArcStatus, ArcUrgency, UnknownSenderPolicy, MatchedRuleResult, InvalidRuleFunctionData, InvalidTemplateFunctionData, AutoSendBlockedData } from "../types/index.js";
 import type { ParsedMime } from "./mime.js";
 import type { ContentSanitizerClient } from "./content-sanitizer-client.js";
 import type { UserCodeExecutorClient, TemplateParameterResult } from "./user-code-client.js";
@@ -27,7 +27,6 @@ import { getPrimaryArcMatcherRegistry, getActiveClusters } from "../embedding/cl
 import { getETLD1, assignSystemLabels, DEFAULT_SPAM_SCORE_THRESHOLD } from "./filter.js";
 import { statusToCategory } from "../database/stats-writer.js";
 import type { DraftSendDispatch } from "./draft-send-dispatcher.js";
-import type { SystemSignalCreator } from "./system-signal-creator.js";
 import { isReplyTargetSafe } from "./reply-target-validator.js";
 import { buildWebhookPayload, deliverWebhook } from "./webhook.js";
 import { parseWebhookConfig } from "../api/validate-webhook-config.js";
@@ -160,7 +159,7 @@ async function applyRules(
   context: { signal: Signal; arc: Arc; isMatchedArc: boolean },
   evaluator: RuleEvaluator,
   logger: Logger,
-  systemSignalCreator?: SystemSignalCreator,
+  saveSignal: (signal: Signal<InvalidRuleFunctionData>) => Promise<Result<void, DbError>>,
 ): Promise<MatchedRuleResult[]> {
   const matchedRules: MatchedRuleResult[] = [];
   for (const rule of rules) {
@@ -176,14 +175,17 @@ async function applyRules(
         accountId: rule.accountId,
         warnings: evalResult.warnings,
       });
-      if (systemSignalCreator) {
-        await systemSignalCreator.createInvalidRuleFunctionSignal({
-          accountId: rule.accountId,
-          arcId: context.arc.id,
-          recipientAddress: context.signal.data.recipientAddress,
-          resourceName: rule.name,
-          issue: evalResult.warnings.join("; "),
-        });
+      const id = generateId("sgn-");
+      const timestamp = DateTime.utc().toISO()!;
+      const ttl = Math.floor(Date.now() / 1000) + 90 * 24 * 60 * 60;
+      const result = await saveSignal({
+        id, signalLookupId: id, arcId: context.arc.id, accountId: rule.accountId,
+        source: "email", type: "invalid_rule_function", status: "active",
+        createdAt: timestamp, ttl,
+        data: { resourceName: rule.name, issue: evalResult.warnings.join("; ") },
+      });
+      if (result.isErr()) {
+        logger.warn("Failed to save invalid_rule_function signal.", { code: "system_signal.write_failed", accountId: rule.accountId, type: "invalid_rule_function", error: result.error });
       }
     }
 
@@ -299,7 +301,6 @@ interface SignalProcessorOptions {
   replySender: ReplySender;
   sqsDispatcher: SqsDispatcher;
   draftSendDispatcher: DraftSendDispatch;
-  systemSignalCreator?: SystemSignalCreator;
   billingHandler?: BillingHandler;
   handlerRegistry?: HandlerRegistry;
   s3Client: S3Client;
@@ -326,7 +327,6 @@ export class SignalProcessor {
   private readonly retentionService: S3RetentionService;
   private readonly sqsDispatcher: SqsDispatcher;
   private readonly draftSendDispatcher: DraftSendDispatch;
-  private readonly systemSignalCreator: SystemSignalCreator | undefined;
   private readonly billingHandler: BillingHandler;
   private readonly handlerRegistry: HandlerRegistry | undefined;
   private readonly s3Client: S3Client;
@@ -352,7 +352,6 @@ export class SignalProcessor {
     this.retentionService = opts.retentionService;
     this.sqsDispatcher = opts.sqsDispatcher;
     this.draftSendDispatcher = opts.draftSendDispatcher;
-    this.systemSignalCreator = opts.systemSignalCreator;
     this.billingHandler = opts.billingHandler ?? new BillingHandler();
     this.handlerRegistry = opts.handlerRegistry;
     this.s3Client = opts.s3Client;
@@ -574,15 +573,10 @@ export class SignalProcessor {
                   errorType: response.error.type,
                   errorMessage: response.error.message,
                 });
-                if (this.systemSignalCreator) {
-                  await this.systemSignalCreator.createInvalidTemplateFunctionSignal({
-                    accountId,
-                    arcId: arc.id,
-                    recipientAddress: signal.data.recipientAddress,
-                    resourceName: tmpl.name,
-                    functionName: fn.name,
-                    issue,
-                  });
+                {
+                  const sigId = generateId("sgn-");
+                  const sigTs = DateTime.utc().toISO()!;
+                  await this.arcDb.saveSignal({ id: sigId, signalLookupId: sigId, arcId: arc.id, accountId, source: "email", type: "invalid_template_function", status: "active", createdAt: sigTs, ttl: Math.floor(Date.now() / 1000) + 90 * 24 * 60 * 60, data: { resourceName: tmpl.name, functionName: fn.name, issue } });
                 }
                 actionVars[`fn.${fn.name}`] = "";
                 preventAutoSend = true;
@@ -601,15 +595,10 @@ export class SignalProcessor {
                     functionName: fn.name,
                     issue,
                   });
-                  if (this.systemSignalCreator) {
-                    await this.systemSignalCreator.createInvalidTemplateFunctionSignal({
-                      accountId,
-                      arcId: arc.id,
-                      recipientAddress: signal.data.recipientAddress,
-                      resourceName: tmpl.name,
-                      functionName: fn.name,
-                      issue,
-                    });
+                  {
+                    const sigId = generateId("sgn-");
+                    const sigTs = DateTime.utc().toISO()!;
+                    await this.arcDb.saveSignal({ id: sigId, signalLookupId: sigId, arcId: arc.id, accountId, source: "email", type: "invalid_template_function", status: "active", createdAt: sigTs, ttl: Math.floor(Date.now() / 1000) + 90 * 24 * 60 * 60, data: { resourceName: tmpl.name, functionName: fn.name, issue } });
                   }
                   actionVars[`fn.${fn.name}`] = "";
                   preventAutoSend = true;
@@ -639,14 +628,10 @@ export class SignalProcessor {
                 replyToAddress: signal.data.replyTo.address,
                 recipientAddress: signal.data.recipientAddress,
               });
-              if (this.systemSignalCreator) {
-                await this.systemSignalCreator.createAutoSendBlockedSignal({
-                  accountId,
-                  arcId: arc.id,
-                  recipientAddress: signal.data.recipientAddress,
-                  fromAddress: signal.data.from.address,
-                  replyToAddress: signal.data.replyTo.address,
-                });
+              {
+                const sigId = generateId("sgn-");
+                const sigTs = DateTime.utc().toISO()!;
+                await this.arcDb.saveSignal({ id: sigId, signalLookupId: sigId, arcId: arc.id, accountId, source: "email", type: "auto_send_blocked", status: "active", createdAt: sigTs, ttl: Math.floor(Date.now() / 1000) + 90 * 24 * 60 * 60, data: { fromAddress: signal.data.from.address, replyToAddress: signal.data.replyTo.address, recipientAddress: signal.data.recipientAddress } });
               }
             }
           }
@@ -1036,7 +1021,7 @@ export class SignalProcessor {
     const rulesResult = await this.accountDb.listEnabledRules(accountId);
     if (rulesResult.isErr()) return err(rulesResult.error);
     const rules = rulesResult.value;
-    const matchedRules = await applyRules(rules, { signal: signalShell, arc, isMatchedArc }, this.ruleEvaluator, this.logger, this.systemSignalCreator);
+    const matchedRules = await applyRules(rules, { signal: signalShell, arc, isMatchedArc }, this.ruleEvaluator, this.logger, (s) => this.arcDb.saveSignal(s));
     const outcome = deriveOutcome(matchedRules);
     this.logger.trackPoint("rules_evaluated", { matchedRuleCount: matchedRules.length });
 

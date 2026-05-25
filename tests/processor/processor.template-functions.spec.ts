@@ -10,7 +10,6 @@ import type { Signal, Arc, Alias, EmailTemplate } from "../../src/types/index.js
 import type { EmbeddingGenerator } from "../../src/embedding/embedding-generator.js";
 import type { MultiClusterAuroraWriter } from "../../src/database/multi-cluster-aurora-writer.js";
 import type { S3RetentionService } from "../../src/embedding/s3-retention-service.js";
-import type { SystemSignalCreator } from "../../src/processor/system-signal-creator.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
 import { createMockLogger, type MockLogger } from "../helpers/mock-logger.js";
 
@@ -109,9 +108,8 @@ function makeProcessor(opts: {
   store: ReturnType<typeof makeStore>;
   userCodeExecutor: UserCodeExecutorClient;
   logger: MockLogger;
-  systemSignalCreator?: SystemSignalCreator;
 }): SignalProcessor {
-  const { store, userCodeExecutor, logger, systemSignalCreator } = opts;
+  const { store, userCodeExecutor, logger } = opts;
   return new SignalProcessor({
     ...store,
     userCodeExecutor,
@@ -132,7 +130,6 @@ function makeProcessor(opts: {
     contentBucket: "test-content-bucket",
     contentCdnBaseUrl: "https://cdn.example.com",
     draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
-    ...(systemSignalCreator ? { systemSignalCreator } : {}),
   });
 }
 
@@ -143,16 +140,14 @@ function makeProcessor(opts: {
 describe("Template function resolution via User Code Executor", () => {
   let mockLogger: MockLogger;
   let mockExecutor: UserCodeExecutorClient;
-  let mockSystemSignalCreator: SystemSignalCreator;
   let store: ReturnType<typeof makeStore>;
   let processor: SignalProcessor;
 
   beforeEach(() => {
     mockLogger = createMockLogger();
     mockExecutor = { invoke: vi.fn(), validateAst: vi.fn(), validateAstBatch: vi.fn() };
-    mockSystemSignalCreator = { createInvalidRuleFunctionSignal: vi.fn().mockResolvedValue(undefined), createInvalidTemplateFunctionSignal: vi.fn().mockResolvedValue(undefined), createAutoSendBlockedSignal: vi.fn().mockResolvedValue(undefined) };
     store = makeStore();
-    processor = makeProcessor({ store, userCodeExecutor: mockExecutor, logger: mockLogger, systemSignalCreator: mockSystemSignalCreator });
+    processor = makeProcessor({ store, userCodeExecutor: mockExecutor, logger: mockLogger });
   });
 
   it("resolves template functions and substitutes values into draft subject and body", async () => {
@@ -199,8 +194,8 @@ describe("Template function resolution via User Code Executor", () => {
 
     // Draft should still be saved but with empty string for the null function
     const saveSignalCalls = vi.mocked(store.arcDb.saveSignal).mock.calls;
-    expect(saveSignalCalls.length).toBe(1);
-    const draft = saveSignalCalls[0]![0] as Signal;
+    expect(saveSignalCalls.length).toBe(2);
+    const draft = saveSignalCalls.map(c => c[0] as Signal).find(s => s.source === "user")!;
     expect(draft.data.subject).toBe("Re: Test email — ");
     expect(draft.status).toBe("draft");
 
@@ -229,8 +224,8 @@ describe("Template function resolution via User Code Executor", () => {
 
     // Draft saved with empty string for timed-out function
     const saveSignalCalls = vi.mocked(store.arcDb.saveSignal).mock.calls;
-    expect(saveSignalCalls.length).toBe(1);
-    const draft = saveSignalCalls[0]![0] as Signal;
+    expect(saveSignalCalls.length).toBe(2);
+    const draft = saveSignalCalls.map(c => c[0] as Signal).find(s => s.source === "user")!;
     expect(draft.data.subject).toBe("Re: Test email — ");
     expect(draft.status).toBe("draft");
 
@@ -259,8 +254,8 @@ describe("Template function resolution via User Code Executor", () => {
 
     // Draft saved with empty string for errored function
     const saveSignalCalls = vi.mocked(store.arcDb.saveSignal).mock.calls;
-    expect(saveSignalCalls.length).toBe(1);
-    const draft = saveSignalCalls[0]![0] as Signal;
+    expect(saveSignalCalls.length).toBe(2);
+    const draft = saveSignalCalls.map(c => c[0] as Signal).find(s => s.source === "user")!;
     expect(draft.data.textBody).toBe("Hi Sender, ");
     expect(draft.status).toBe("draft");
 
@@ -276,7 +271,7 @@ describe("Template function resolution via User Code Executor", () => {
   it("skips template function resolution when template has no functions", async () => {
     const templateWithoutFunctions = makeTemplate({ functions: [] });
     const storeNoFns = makeStore(templateWithoutFunctions);
-    const proc = makeProcessor({ store: storeNoFns, userCodeExecutor: mockExecutor, logger: mockLogger, systemSignalCreator: mockSystemSignalCreator });
+    const proc = makeProcessor({ store: storeNoFns, userCodeExecutor: mockExecutor, logger: mockLogger });
 
     const signal = makeSignal();
     const arc = makeArc();
@@ -345,10 +340,10 @@ describe("Template function resolution via User Code Executor", () => {
 
     await processor.processSideEffect({ signal: makeSignal(), arc: makeArc() });
 
-    expect(mockSystemSignalCreator.createInvalidTemplateFunctionSignal).toHaveBeenCalledWith({
-      accountId: TEST_ACCOUNT_ID,
-      arcId: "arc_tmpl_001",
-      recipientAddress: "user@example.com",
+    const saveSignalCalls = vi.mocked(store.arcDb.saveSignal).mock.calls;
+    const templateSignal = saveSignalCalls.find(([s]) => s.type === "invalid_template_function");
+    expect(templateSignal).toBeDefined();
+    expect(templateSignal![0].data).toEqual({
       resourceName: "Auto-draft template",
       functionName: "greeting",
       issue: "[runtime_error] ReferenceError: x is not defined",
@@ -363,10 +358,10 @@ describe("Template function resolution via User Code Executor", () => {
 
     await processor.processSideEffect({ signal: makeSignal(), arc: makeArc() });
 
-    expect(mockSystemSignalCreator.createInvalidTemplateFunctionSignal).toHaveBeenCalledWith({
-      accountId: TEST_ACCOUNT_ID,
-      arcId: "arc_tmpl_001",
-      recipientAddress: "user@example.com",
+    const saveSignalCalls = vi.mocked(store.arcDb.saveSignal).mock.calls;
+    const templateSignal = saveSignalCalls.find(([s]) => s.type === "invalid_template_function");
+    expect(templateSignal).toBeDefined();
+    expect(templateSignal![0].data).toEqual({
       resourceName: "Auto-draft template",
       functionName: "greeting",
       issue: "Function returned non-string value (type: number)",
@@ -385,8 +380,8 @@ describe("Template function resolution via User Code Executor", () => {
     await processor.processSideEffect({ signal, arc });
 
     const saveSignalCalls = vi.mocked(store.arcDb.saveSignal).mock.calls;
-    expect(saveSignalCalls.length).toBe(1);
-    const draft = saveSignalCalls[0]![0] as Signal;
+    expect(saveSignalCalls.length).toBe(2);
+    const draft = saveSignalCalls.map(c => c[0] as Signal).find(s => s.source === "user")!;
     expect(draft.data.subject).toBe("Re: Test email — ");
     expect(draft.status).toBe("draft");
 
