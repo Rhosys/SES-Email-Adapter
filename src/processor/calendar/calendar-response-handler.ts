@@ -17,7 +17,7 @@ import type { EmailService } from "../../email/email-service.js";
 import { validateProxyUid } from "./proxy-uid.js";
 import { parseIcs } from "./ics-parser.js";
 import type { sendRsvp } from "./rsvp-composer.js";
-import { validateId } from "../../utils/id.js";
+import { validateId, validateAccountId } from "../../utils/id.js";
 
 // ---------------------------------------------------------------------------
 // Dependencies (injected at cold start)
@@ -124,7 +124,7 @@ export async function handleCalendarResponse(
   }
 
   // --- Step 2: Validate accountId checksum ---
-  if (!validateId(accountId, "acc-")) {
+  if (!validateAccountId(accountId)) {
     logger.warn("Calendar response handler: accountId checksum failed.", {
       code: "processor.calendar_response.checksum_failed",
       recipient,

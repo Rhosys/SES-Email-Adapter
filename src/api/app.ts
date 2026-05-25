@@ -2,7 +2,7 @@ import { OpenAPIHono } from "@hono/zod-openapi";
 import type { Context } from "hono";
 import { randomUUID, createHash, randomBytes } from "crypto";
 import { DateTime } from "luxon";
-import { generateId } from "../utils/id.js";
+import { generateId, generateAccountId } from "../utils/id.js";
 import { getDomain } from "tldts";
 import { checkDomain } from "../dns/dns-checker.js";
 import { validateRecipientMx } from "../dns/mx-validator.js";
@@ -133,20 +133,6 @@ type AppEnv = { Variables: { auth: AuthContext; authorizationVerified?: boolean 
 
 function page<K extends string, T>(key: K, items: T[], nextCursor?: string): Record<K, T[]> & { pagination: Pagination } {
   return { [key]: items, pagination: { cursor: nextCursor ?? null } } as Record<K, T[]> & { pagination: Pagination };
-}
-
-const ACCOUNT_ID_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789";
-
-function generateAccountId(): string {
-  const bytes = randomBytes(10);
-  let rawId = "";
-  for (let i = 0; i < 10; i++) {
-    rawId += ACCOUNT_ID_ALPHABET[bytes[i]! % ACCOUNT_ID_ALPHABET.length];
-  }
-  const checkBits = createHash("sha256").update(rawId).digest("base64")
-    .replace(/[^abcdefghijklmnopqrstuvwxyz0123456789]/g, "")
-    .slice(0, 3);
-  return `acc-${rawId}${checkBits}`;
 }
 
 export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, verificationMailer, jobDispatcher, draftSendDispatcher, accountCreationStarter, appBaseUrl, astValidator, billingHandler }: AppDeps) {
