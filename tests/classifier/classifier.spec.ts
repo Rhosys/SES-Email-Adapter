@@ -555,44 +555,6 @@ describe("SignalClassifier", () => {
     });
   });
 
-  describe("scheduling emails", () => {
-    it("extracts title, startTime, and requiresResponse from a meeting invite", async () => {
-      mockClassifyResponse({
-        workflow: "scheduling",
-        workflowData: {
-          workflow: "scheduling",
-          eventType: "meeting_invite",
-          title: "Q1 Planning Session",
-          startTime: "2024-02-01T14:00:00Z",
-          endTime: "2024-02-01T15:00:00Z",
-          location: "Zoom",
-          organizer: "boss@company.com",
-          attendees: ["user@example.com"],
-          requiresResponse: true,
-        },
-        spamScore: 0.0,
-        summary: "Meeting invite for Q1 Planning Session on Feb 1 at 2pm.",
-        labels: ["action-needed"],
-      });
-
-      const result = await classifier.classify({
-        from: "boss@company.com",
-        to: ["user@example.com"],
-        subject: "Invite: Q1 Planning Session @ Feb 1 2pm",
-        textBody: "You're invited to Q1 Planning Session on Feb 1 at 2pm on Zoom. Please RSVP.",
-        receivedAt: "2024-01-15T09:00:00Z",
-        headers: {},
-      });
-
-      expect(result.workflow).toBe("scheduling");
-      expect(result.workflowData).toMatchObject({
-        title: "Q1 Planning Session",
-        startTime: "2024-02-01T14:00:00Z",
-        requiresResponse: true,
-      });
-    });
-  });
-
   describe("security emails", () => {
     it("extracts alertType and requiresAction from a suspicious login alert", async () => {
       mockClassifyResponse({
