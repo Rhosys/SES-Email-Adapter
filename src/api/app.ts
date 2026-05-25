@@ -586,14 +586,16 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     // Post-approval calendar forwarding — process .ics attachment and forward if present
     if (postApprovalCalendarDeps) {
       const approvedSignal: Signal = { ...signal, status: "active", arcId: arc.id };
-      handlePostApprovalCalendar(approvedSignal, arc, postApprovalCalendarDeps).catch(e => {
+      try {
+        await handlePostApprovalCalendar(approvedSignal, arc, postApprovalCalendarDeps);
+      } catch (e) {
         logger.warn("Post-approval calendar handler threw unexpectedly.", {
           code: "api.quarantine_response.calendar_error",
           accountId,
           signalId: signal.id,
           error: e,
         });
-      });
+      }
     }
 
     return c.json({ arc, signal: { ...signal, status: "active", arcId: arc.id } });
