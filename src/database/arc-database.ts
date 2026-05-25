@@ -8,6 +8,7 @@ import type { Logger } from "../logger.js";
 import type { ArcMatcher } from "../processor/processor.js";
 import type { ListArcsParams } from "../api/app.js";
 import type { Arc, Signal, AnySignal, EmailSignalData, Page, PageParams, ArcStatus, ArcUrgency, Workflow } from "../types/index.js";
+import type { CalendarEventData } from "../types/calendar.js";
 
 // ---------------------------------------------------------------------------
 // Aurora Data API client (stateless — no connection pool needed)
@@ -678,6 +679,59 @@ export class ArcDatabase implements ArcMatcher {
         Select: "COUNT",
       }));
       return ok((res.Count ?? 0) > 0);
+    } catch (e) {
+      return err(dbError(e));
+    }
+  }
+
+  /**
+   * Find the calendar_event signal on an arc that is linked to a given email signal.
+   * Returns null if no linked calendar signal exists.
+   */
+  async getLinkedCalendarSignal(accountId: string, arcId: string, emailSignalId: string): Promise<Result<Signal<CalendarEventData> | null, DbError>> {
+    try {
+      const res = await dynamo.send(new QueryCommand({
+        TableName: SIGNALS_TABLE,
+        IndexName: "gsi1",
+        KeyConditionExpression: "gsi1pk = :pk",
+        ExpressionAttributeValues: { ":pk": `ACCT#${accountId}#ARC#${arcId}` },
+        ScanIndexForward: false,
+      }));
+      const signals = (res.Items ?? []) as unknown[];
+      const calendarSignal = signals.find(
+        (s) => {
+          const sig = s as { type?: string; data?: { linkedSignalId?: string } };
+          return sig.type === "calendar_event" && sig.data?.linkedSignalId === emailSignalId;
+        },
+      );
+      return ok(calendarSignal ? (calendarSignal as unknown as Signal<CalendarEventData>) : null);
+    } catch (e) {
+      return err(dbError(e));
+    }
+  }
+
+  /**
+   * Find the most recent calendar_response signal on an arc for a given veventUid.
+   * Returns the decision from the most recent response, or null if none exists.
+   */
+  async getLatestCalendarResponse(accountId: string, arcId: string, veventUid: string): Promise<Result<Signal<import("../types/calendar.js").CalendarResponseData> | null, DbError>> {
+    try {
+      // Query all signals on the arc (sorted newest-first via ScanIndexForward: false)
+      const res = await dynamo.send(new QueryCommand({
+        TableName: SIGNALS_TABLE,
+        IndexName: "gsi1",
+        KeyConditionExpression: "gsi1pk = :pk",
+        ExpressionAttributeValues: { ":pk": `ACCT#${accountId}#ARC#${arcId}` },
+        ScanIndexForward: false,
+      }));
+      const signals = (res.Items ?? []) as unknown[];
+      const responseSignal = signals.find(
+        (s) => {
+          const sig = s as { type?: string; data?: { veventUid?: string } };
+          return sig.type === "calendar_response" && sig.data?.veventUid === veventUid;
+        },
+      );
+      return ok(responseSignal ? (responseSignal as unknown as Signal<import("../types/calendar.js").CalendarResponseData>) : null);
     } catch (e) {
       return err(dbError(e));
     }
