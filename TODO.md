@@ -57,7 +57,8 @@ Compared the frontend's expected API surface against the actual backend implemen
 ### ❌ Backend TODOs (from contract comparison)
 
 - [ ] **Billing endpoints** — `GET /accounts/:id/billing` → `BillingInfo`, `POST /accounts/:id/billing/checkout-session` → Stripe Checkout URL, `POST /accounts/:id/billing/portal-session` → Stripe Portal URL. Requires Stripe integration.
-- [ ] **Migrate all routes to `app.openapi()` with `createRoute()` + zod schemas** — all routes in `src/api/app.ts` are currently registered with plain `app.get/post/patch/delete()`, which means `app.doc("/.well-known/api-catalog")` generates an empty spec (no paths, no schemas). Each route needs a `createRoute({ method, path, request: { params, query, body }, responses })` definition using zod schemas, then registered via `app.openapi(route, handler)` instead. Side benefit: request validation becomes free (bad params/body return 400 automatically). Migrate incrementally — one resource at a time (accounts → arcs → signals → views → labels → rules → domains → aliases → users → templates → forwarding-addresses). Combine with the existing TODO to document error response codes.
+- [ ] **Migrate all routes to `app.openapi()` with `createRoute()` + zod schemas** — routes registered with plain `app.get/post/etc` are invisible to `app.doc()`; the spec will have no paths or schemas until they are migrated.
+- [ ] **Document error response codes in OpenAPI spec** — add `responses` entries for 400, 409, 412, and 422 status codes to every API route definition (via `@hono/zod-openapi` route config). Each endpoint should declare which error codes it can return and under what conditions, so that `npm run openapi` produces a spec with full error documentation. Audit each handler for the error paths it actually uses, define shared zod schemas for error response bodies (e.g. `{ errorCode: string, message: string }`), and wire them into the route's `responses` map.
 
 ---
 
