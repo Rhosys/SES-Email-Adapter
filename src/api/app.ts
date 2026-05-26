@@ -145,7 +145,7 @@ function page<K extends string, T>(key: K, items: T[], nextCursor?: string): Rec
 }
 
 export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, verificationMailer, jobDispatcher, draftSendDispatcher, accountCreationStarter, appBaseUrl, astValidator, billingHandler, emailService, rsvpComposer, postApprovalCalendarDeps }: AppDeps) {
-  const app = new OpenAPIHono<AppEnv>().basePath('/api');
+  const app = new OpenAPIHono<AppEnv>();
 
   // Helper: validate code AST via the isolated Lambda
   async function validateCodeAst(code: string): Promise<AstValidationResult> {
@@ -185,14 +185,13 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     openapi: "3.1.0",
     info: { title: "SES Email Adapter", version: "1.0.0" },
   });
+  app.get("/", (c) => c.redirect("/.well-known/api-catalog", 301));
 
   // Attach x-request-id to every response
   app.use("*", async (c, next) => {
     await next();
     c.res.headers.set("x-request-id", logger.getInvocationId());
   });
-
-  app.get("/", (c) => c.redirect("/.well-known/api-catalog", 301));
 
   function err(c: Context<AppEnv>, status: number, title: string, errorCode?: string, details?: unknown) {
     return c.json(

@@ -144,7 +144,7 @@ describe("API route error mapping consistency", () => {
       }
 
       const app = makeApp(arcDb);
-      const res = await app.fetch(new Request(`http://localhost/api/accounts/${TEST_ACCOUNT_ID}/arcs/arc-001`, {
+      const res = await app.fetch(new Request(`http://localhost/accounts/${TEST_ACCOUNT_ID}/arcs/arc-001`, {
         headers: { Authorization: "Bearer valid-token" },
       }));
       expect(res.status).toBe(expectedStatus);
@@ -178,7 +178,7 @@ describe("API route error mapping consistency", () => {
       }
 
       const app = makeApp(arcDb);
-      const res = await app.fetch(new Request(`http://localhost/api/accounts/${TEST_ACCOUNT_ID}/signals/SES%23msg-001`, {
+      const res = await app.fetch(new Request(`http://localhost/accounts/${TEST_ACCOUNT_ID}/signals/SES%23msg-001`, {
         headers: { Authorization: "Bearer valid-token" },
       }));
       expect(res.status).toBe(expectedStatus);
@@ -201,7 +201,7 @@ describe("API route error mapping consistency", () => {
       }
 
       const app = makeApp(arcDb);
-      const res = await app.fetch(new Request(`http://localhost/api/accounts/${TEST_ACCOUNT_ID}/arcs`, {
+      const res = await app.fetch(new Request(`http://localhost/accounts/${TEST_ACCOUNT_ID}/arcs`, {
         headers: { Authorization: "Bearer valid-token" },
       }));
       expect(res.status).toBe(expectedStatus);

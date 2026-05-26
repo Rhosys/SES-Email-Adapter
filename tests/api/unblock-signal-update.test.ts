@@ -166,7 +166,7 @@ async function req(
 ): Promise<Response> {
   const { body, token = "valid-token" } = options;
   return app.fetch(
-    new Request(`http://localhost/api${path}`, {
+    new Request(`http://localhost${path}`, {
       method,
       headers: {
         "Content-Type": "application/json",
