@@ -162,7 +162,7 @@ function makeCalendarResponseSignal(overrides: Partial<Signal<CalendarResponseDa
 }
 
 async function req(app: ReturnType<typeof createApp>, method: string, path: string) {
-  return app.fetch(new Request(`http://localhost/api${path}`, {
+  return app.fetch(new Request(`http://localhost${path}`, {
     method,
     headers: { Authorization: "Bearer valid-token" },
   }));

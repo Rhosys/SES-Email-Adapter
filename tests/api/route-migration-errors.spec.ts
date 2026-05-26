@@ -151,7 +151,7 @@ async function req(
 ): Promise<Response> {
   const { body, token = "valid-token" } = options;
   return app.fetch(
-    new Request(`http://localhost/api${path}`, {
+    new Request(`http://localhost${path}`, {
       method,
       headers: {
         "Content-Type": "application/json",
@@ -346,7 +346,7 @@ describe("API route error mapping — unit tests", () => {
       vi.mocked(arcDb.getArc).mockResolvedValueOnce(ok(makeArc()));
       // Send a request with non-JSON body to trigger zParse failure
       const res = await app.fetch(
-        new Request(`http://localhost/api${A}/arcs/arc-001`, {
+        new Request(`http://localhost${A}/arcs/arc-001`, {
           method: "PATCH",
           headers: {
             "Content-Type": "application/json",
