@@ -47,15 +47,15 @@ async function assertStatus(res: Response, expected: number, label: string): Pro
 
 // ── Missing Authorization header returns 401 ──────────────────────────────
 {
-  console.log('\nTest: POST /api/accounts — no Authorization header');
-  const res = await h.app.request('/api/accounts', { method: 'POST' });
+  console.log('\nTest: POST /accounts — no Authorization header');
+  const res = await h.app.request('/accounts', { method: 'POST' });
   await assertStatus(res, 401, 'returns 401');
 }
 
 // ── Invalid token returns 401 ─────────────────────────────────────────────
 {
-  console.log('\nTest: POST /api/accounts — invalid token');
-  const res = await h.app.request('/api/accounts', {
+  console.log('\nTest: POST /accounts — invalid token');
+  const res = await h.app.request('/accounts', {
     method: 'POST',
     headers: { Authorization: 'Bearer not-a-valid-jwt' },
   });
@@ -64,9 +64,9 @@ async function assertStatus(res: Response, expected: number, label: string): Pro
 
 // ── Valid token creates an account ────────────────────────────────────────
 {
-  console.log('\nTest: POST /api/accounts — valid JWT creates account');
+  console.log('\nTest: POST /accounts — valid JWT creates account');
   const token = await h.mockAuthress.createToken('user-it-001');
-  const res = await h.app.request('/api/accounts', {
+  const res = await h.app.request('/accounts', {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -82,14 +82,14 @@ async function assertStatus(res: Response, expected: number, label: string): Pro
 
 // ── Second call with the same user returns 409 if user already has account ─
 {
-  console.log('\nTest: POST /api/accounts — 409 when user already has an account');
+  console.log('\nTest: POST /accounts — 409 when user already has an account');
   const token = await h.mockAuthress.createToken('user-it-002');
 
   // Override: pretend user already has account 'acc-existing'
   const original = h.access.listAccountsForUser;
   h.access.listAccountsForUser = async () => ok(['acc-existing-001']);
 
-  const res = await h.app.request('/api/accounts', {
+  const res = await h.app.request('/accounts', {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
   });
