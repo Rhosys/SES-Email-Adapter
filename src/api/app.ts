@@ -176,23 +176,11 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     return { valid: true };
   }
 
-  // RFC 9727 — Well-Known URI for API Catalog
-  app.use("/.well-known/*", async (c, next) => {
-    await next();
-    c.res.headers.set("Cache-Control", "public, max-age=3600");
-  });
-  app.doc("/.well-known/api-catalog", {
-    openapi: "3.1.0",
-    info: { title: "SES Email Adapter", version: "1.0.0" },
-  });
-
   // Attach x-request-id to every response
   app.use("*", async (c, next) => {
     await next();
     c.res.headers.set("x-request-id", logger.getInvocationId());
   });
-
-  app.get("/", (c) => c.redirect("/.well-known/api-catalog", 301));
 
   function err(c: Context<AppEnv>, status: number, title: string, errorCode?: string, details?: unknown) {
     return c.json(
@@ -1559,7 +1547,19 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     });
   }
 
-  return app;
+  // Root wrapper — serves /.well-known/* and / outside the /api basePath
+  const root = new OpenAPIHono<AppEnv>();
+  root.use("/.well-known/*", async (c, next) => {
+    await next();
+    c.res.headers.set("Cache-Control", "public, max-age=3600");
+  });
+  root.doc("/.well-known/api-catalog", {
+    openapi: "3.1.0",
+    info: { title: "SES Email Adapter", version: "1.0.0" },
+  });
+  root.get("/", (c) => c.redirect("/.well-known/api-catalog", 301));
+  root.route("/", app);
+  return root;
 }
 
 // ---------------------------------------------------------------------------
