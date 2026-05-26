@@ -58,7 +58,7 @@ resource "aws_rds_cluster" "aurora" {
   cluster_identifier              = "${lower(var.service_name)}-${each.key}"
   engine                          = "aurora-postgresql"
   engine_mode                     = "provisioned"
-  engine_version                  = "17.4"
+  engine_version                  = "17.7"
   database_name                   = "signals"
   master_username                 = "master_admin"
   manage_master_user_password     = true
