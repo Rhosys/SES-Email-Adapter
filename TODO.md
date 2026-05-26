@@ -671,6 +671,12 @@ Allow users to bulk-import historical emails from Gmail or Outlook via OAuth, cl
 
 ---
 
+## DEVELOPMENT STRATEGY
+
+- [ ] **Update engineering process docs** — document the bug/test-failure investigation protocol: when a bug or failing test is found, first identify *holistically* why the failure happened in the first place (root cause, not just the symptom). Then scan the entire codebase for every similar pattern — even locations that have no failing test — and fix them proactively. If no tests are failing for a similar pattern, treat that absence as a red flag and investigate why the coverage gap exists: is the pattern untested, or is the test itself wrong?
+
+---
+
 ## PRODUCT STRATEGY
 
 Competitive analysis vs. Addy.io, SimpleLogin, ForwardEmail, Firefox Relay, Mailbox.org, Mailfence, Mailvelope, Thexyz, and others.
