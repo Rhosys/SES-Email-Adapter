@@ -145,7 +145,7 @@ function page<K extends string, T>(key: K, items: T[], nextCursor?: string): Rec
 }
 
 export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, verificationMailer, jobDispatcher, draftSendDispatcher, accountCreationStarter, appBaseUrl, astValidator, billingHandler, emailService, rsvpComposer, postApprovalCalendarDeps }: AppDeps) {
-  const app = new OpenAPIHono<AppEnv>().basePath('/api');
+  const app = new OpenAPIHono<AppEnv>();
 
   // Helper: validate code AST via the isolated Lambda
   async function validateCodeAst(code: string): Promise<AstValidationResult> {
@@ -175,6 +175,17 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     }
     return { valid: true };
   }
+
+  // RFC 9727 — Well-Known URI for API Catalog
+  app.use("/.well-known/*", async (c, next) => {
+    await next();
+    c.res.headers.set("Cache-Control", "public, max-age=3600");
+  });
+  app.doc("/.well-known/api-catalog", {
+    openapi: "3.1.0",
+    info: { title: "SES Email Adapter", version: "1.0.0" },
+  });
+  app.get("/", (c) => c.redirect("/.well-known/api-catalog", 301));
 
   // Attach x-request-id to every response
   app.use("*", async (c, next) => {
@@ -1547,19 +1558,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     });
   }
 
-  // Root wrapper — serves /.well-known/* and / outside the /api basePath
-  const root = new OpenAPIHono<AppEnv>();
-  root.use("/.well-known/*", async (c, next) => {
-    await next();
-    c.res.headers.set("Cache-Control", "public, max-age=3600");
-  });
-  root.doc("/.well-known/api-catalog", {
-    openapi: "3.1.0",
-    info: { title: "SES Email Adapter", version: "1.0.0" },
-  });
-  root.get("/", (c) => c.redirect("/.well-known/api-catalog", 301));
-  root.route("/", app);
-  return root;
+  return app;
 }
 
 // ---------------------------------------------------------------------------
