@@ -249,6 +249,14 @@ resource "aws_apigatewayv2_domain_name" "http" {
 }
 
 resource "aws_apigatewayv2_api_mapping" "http" {
+  api_id          = aws_apigatewayv2_api.main.id
+  domain_name     = aws_apigatewayv2_domain_name.http.id
+  stage           = aws_apigatewayv2_stage.main.id
+  api_mapping_key = "api"
+}
+
+# Root mapping — catches /.well-known/* and GET / (no /api prefix, no stripping)
+resource "aws_apigatewayv2_api_mapping" "http_root" {
   api_id      = aws_apigatewayv2_api.main.id
   domain_name = aws_apigatewayv2_domain_name.http.id
   stage       = aws_apigatewayv2_stage.main.id
