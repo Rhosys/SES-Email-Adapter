@@ -1309,27 +1309,7 @@ describe("SignalProcessor", () => {
       expect(signal.data.urgency).toBe("normal");
     });
 
-    it("SR-17: crm + contract → high urgency", async () => {
-      const arc = await processWithWorkflow({ workflow: "crm", workflowData: { workflow: "crm" } });
-      expect(arc.urgency).toBe("high");
-    });
-
-    it("SR-17: crm + proposal → high urgency", async () => {
-      const arc = await processWithWorkflow({ workflow: "crm", workflowData: { workflow: "crm" } });
-      expect(arc.urgency).toBe("high");
-    });
-
-    it("SR-18: crm + urgency:high → high urgency", async () => {
-      const arc = await processWithWorkflow({ workflow: "crm", workflowData: { workflow: "crm" } });
-      expect(arc.urgency).toBe("high");
-    });
-
-    it("SR-19: crm + urgency:low → low urgency", async () => {
-      const arc = await processWithWorkflow({ workflow: "crm", workflowData: { workflow: "crm" } });
-      expect(arc.urgency).toBe("low");
-    });
-
-    it("crm + urgency:medium → normal urgency (label fallback)", async () => {
+    it("crm → normal urgency (crmType/urgency fields removed)", async () => {
       const arc = await processWithWorkflow({ workflow: "crm", workflowData: { workflow: "crm" } });
       expect(arc.urgency).toBe("normal");
     });

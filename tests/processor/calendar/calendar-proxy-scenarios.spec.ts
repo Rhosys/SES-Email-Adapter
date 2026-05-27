@@ -535,7 +535,7 @@ describe("Scenario: approving quarantined email triggers calendar forwarding", (
     } as unknown as PostApprovalCalendarHandlerDeps["arcDb"];
 
     const accountDb = {
-      getAccount: vi.fn().mockResolvedValue(ok({ calendarForwardingAddress: FORWARDING_ADDRESS })),
+      getAccount: vi.fn().mockResolvedValue(ok({ defaultCalendarInviteForwardingAddress: FORWARDING_ADDRESS })),
     } as unknown as PostApprovalCalendarHandlerDeps["accountDb"];
 
     const calendarForwarderEmailService = makeEmailService();
