@@ -146,12 +146,12 @@ export class FeedbackProcessor {
               status: "active",
               createdAt: DateTime.utc().toISO()!,
               data: {
-                relatedSignalId: sentSignal.id,
+                linkedSignalId: sentSignal.id,
                 bouncedRecipients,
                 subject: `Delivery failure: ${bouncedRecipients.length} recipient(s) bounced`,
               },
             };
-            await this.signalStore.saveSignal(deliverabilitySignal as Signal);
+            await this.signalStore.saveSignal(deliverabilitySignal as unknown as Signal);
 
             // If ALL recipients permanently bounced → revert sent signal to draft
             if (isPermanent) {

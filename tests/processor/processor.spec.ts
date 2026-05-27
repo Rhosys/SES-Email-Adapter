@@ -181,7 +181,6 @@ const validClassification: ClassificationOutput = {
   workflow: "conversation",
   workflowData: {
     workflow: "conversation",
-    isReply: false,
     sentiment: "neutral",
     requiresReply: false,
   },
@@ -1142,7 +1141,7 @@ describe("SignalProcessor", () => {
     });
 
     it("returns null for conversation (vector search)", () => {
-      expect(deriveGroupingKey("conversation", { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false }, "me@example.com", "friend.com"))
+      expect(deriveGroupingKey("conversation", { workflow: "conversation", sentiment: "neutral", requiresReply: false }, "me@example.com", "friend.com"))
         .toBeNull();
     });
 
@@ -1244,7 +1243,7 @@ describe("SignalProcessor", () => {
     });
 
     it("onboarding is always silent", () => {
-      expect(baseUrgency("onboarding", { workflow: "onboarding", onboardingType: "welcome", service: "Acme" })).toBe("silent");
+      expect(baseUrgency("onboarding", { workflow: "onboarding", onboardingType: "welcome", service: "Acme" } as unknown as import("../../src/types/index.js").WorkflowData)).toBe("silent");
     });
 
     it("travel is normal (no special urgency boost)", () => {
@@ -1252,15 +1251,15 @@ describe("SignalProcessor", () => {
     });
 
     it("conversation falls through to normal (urgency handled by system rules SR-15–SR-16)", () => {
-      expect(baseUrgency("conversation", { workflow: "conversation", isReply: false, sentiment: "urgent", requiresReply: true })).toBe("normal");
-      expect(baseUrgency("conversation", { workflow: "conversation", isReply: false, sentiment: "positive", requiresReply: false })).toBe("normal");
-      expect(baseUrgency("conversation", { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false })).toBe("normal");
+      expect(baseUrgency("conversation", { workflow: "conversation", sentiment: "urgent", requiresReply: true })).toBe("normal");
+      expect(baseUrgency("conversation", { workflow: "conversation", sentiment: "positive", requiresReply: false })).toBe("normal");
+      expect(baseUrgency("conversation", { workflow: "conversation", sentiment: "neutral", requiresReply: false })).toBe("normal");
     });
 
     it("crm falls through to normal (urgency handled by system rules SR-17–SR-19)", () => {
-      expect(baseUrgency("crm", { workflow: "crm", crmType: "contract", urgency: "low", requiresReply: false })).toBe("normal");
-      expect(baseUrgency("crm", { workflow: "crm", crmType: "sales_outreach", urgency: "high", requiresReply: true })).toBe("normal");
-      expect(baseUrgency("crm", { workflow: "crm", crmType: "follow_up", urgency: "medium", requiresReply: false })).toBe("normal");
+      expect(baseUrgency("crm", { workflow: "crm" })).toBe("normal");
+      expect(baseUrgency("crm", { workflow: "crm" })).toBe("normal");
+      expect(baseUrgency("crm", { workflow: "crm" })).toBe("normal");
     });
   });
 
@@ -1272,7 +1271,7 @@ describe("SignalProcessor", () => {
     async function processWithWorkflow(classification: Partial<ClassificationOutput>): Promise<Arc> {
       const full: ClassificationOutput = {
         workflow: "conversation",
-        workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
+        workflowData: { workflow: "conversation", sentiment: "neutral", requiresReply: false },
         spamScore: 0.05, summary: "test", labels: [],
         ...classification,
       };
@@ -1282,17 +1281,17 @@ describe("SignalProcessor", () => {
     }
 
     it("SR-15: conversation + requiresReply + urgent sentiment → high urgency", async () => {
-      const arc = await processWithWorkflow({ workflow: "conversation", workflowData: { workflow: "conversation", isReply: false, sentiment: "urgent", requiresReply: true } });
+      const arc = await processWithWorkflow({ workflow: "conversation", workflowData: { workflow: "conversation", sentiment: "urgent", requiresReply: true } });
       expect(arc.urgency).toBe("high");
     });
 
     it("SR-15: conversation + requiresReply + negative sentiment → high urgency", async () => {
-      const arc = await processWithWorkflow({ workflow: "conversation", workflowData: { workflow: "conversation", isReply: false, sentiment: "negative", requiresReply: true } });
+      const arc = await processWithWorkflow({ workflow: "conversation", workflowData: { workflow: "conversation", sentiment: "negative", requiresReply: true } });
       expect(arc.urgency).toBe("high");
     });
 
     it("SR-16: conversation with no prior replies → low urgency", async () => {
-      const arc = await processWithWorkflow({ workflow: "conversation", workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false } });
+      const arc = await processWithWorkflow({ workflow: "conversation", workflowData: { workflow: "conversation", sentiment: "neutral", requiresReply: false } });
       expect(arc.urgency).toBe("low");
     });
 
@@ -1302,7 +1301,7 @@ describe("SignalProcessor", () => {
         sentMessageIds: ["<prior-msg@example.com>"],
       }))));
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-        workflow: "conversation", workflowData: { workflow: "conversation", isReply: true, sentiment: "neutral", requiresReply: false },
+        workflow: "conversation", workflowData: { workflow: "conversation", sentiment: "neutral", requiresReply: false },
         spamScore: 0.05, summary: "test", labels: [],
       });
       await processor.processRecord(makeMessage({ sesMessageId: randomUUID() }), 1);
@@ -1310,28 +1309,8 @@ describe("SignalProcessor", () => {
       expect(signal.data.urgency).toBe("normal");
     });
 
-    it("SR-17: crm + contract → high urgency", async () => {
-      const arc = await processWithWorkflow({ workflow: "crm", workflowData: { workflow: "crm", crmType: "contract", urgency: "low", requiresReply: false } });
-      expect(arc.urgency).toBe("high");
-    });
-
-    it("SR-17: crm + proposal → high urgency", async () => {
-      const arc = await processWithWorkflow({ workflow: "crm", workflowData: { workflow: "crm", crmType: "proposal", urgency: "low", requiresReply: false } });
-      expect(arc.urgency).toBe("high");
-    });
-
-    it("SR-18: crm + urgency:high → high urgency", async () => {
-      const arc = await processWithWorkflow({ workflow: "crm", workflowData: { workflow: "crm", crmType: "sales_outreach", urgency: "high", requiresReply: true } });
-      expect(arc.urgency).toBe("high");
-    });
-
-    it("SR-19: crm + urgency:low → low urgency", async () => {
-      const arc = await processWithWorkflow({ workflow: "crm", workflowData: { workflow: "crm", crmType: "sales_outreach", urgency: "low", requiresReply: false } });
-      expect(arc.urgency).toBe("low");
-    });
-
-    it("crm + urgency:medium → normal urgency (label fallback)", async () => {
-      const arc = await processWithWorkflow({ workflow: "crm", workflowData: { workflow: "crm", crmType: "follow_up", urgency: "medium", requiresReply: false } });
+    it("crm → normal urgency (crmType/urgency fields removed)", async () => {
+      const arc = await processWithWorkflow({ workflow: "crm", workflowData: { workflow: "crm" } });
       expect(arc.urgency).toBe("normal");
     });
 
@@ -1378,8 +1357,8 @@ describe("SignalProcessor", () => {
 
   describe("onboarding workflow", () => {
     const onboardingClassification: ClassificationOutput = {
-      workflow: "onboarding",
-      workflowData: { workflow: "onboarding", onboardingType: "welcome", service: "Acme App" },
+      workflow: "onboarding" as import("../../src/types/index.js").Workflow,
+      workflowData: { workflow: "onboarding", onboardingType: "welcome", service: "Acme App" } as unknown as import("../../src/types/index.js").WorkflowData,
       spamScore: 0.02,
       summary: "Welcome to Acme App.",
       labels: [],

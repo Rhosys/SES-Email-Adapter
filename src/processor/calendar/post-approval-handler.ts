@@ -176,7 +176,7 @@ export async function handlePostApprovalCalendar(
   // Forward the calendar invite
   const accountResult = await accountDb.getAccount(accountId);
   const calendarForwardingAddress = accountResult.isOk()
-    ? accountResult.value?.calendarForwardingAddress ?? ""
+    ? accountResult.value?.defaultCalendarInviteForwardingAddress ?? ""
     : "";
 
   const forwardResult = await forwardCalendarInvite(
