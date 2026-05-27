@@ -41,7 +41,6 @@ export type WorkflowData =
   | PaymentsData
   | AlertData
   | ContentData
-  | OnboardingData
   | StatusData
   | HealthcareData
   | JobData
@@ -63,22 +62,14 @@ export interface AuthData {
 
 export interface ConversationData {
   workflow: "conversation";
-  senderName?: string;
-  isReply: boolean;
-  threadLength?: number;
   sentiment: "positive" | "neutral" | "negative" | "urgent";
   requiresReply: boolean;
 }
 
 export interface CrmData {
   workflow: "crm";
-  crmType: "sales_outreach" | "follow_up" | "client_message" | "proposal" | "contract" | "support";
   senderCompany?: string;
   senderRole?: string;
-  dealValue?: number;
-  currency?: string;
-  urgency: "low" | "medium" | "high";
-  requiresReply: boolean;
 }
 
 export interface PackageData {
@@ -103,7 +94,7 @@ export interface TravelData {
   returnDate?: string;
   origin?: string;
   destination?: string;
-  passengerName?: string;
+  passengers?: Array<{ name: string }>;
   totalAmount?: number;
   currency?: string;
 }
@@ -264,7 +255,7 @@ export type SenderPolicy = (typeof SENDER_POLICIES)[number];
 export interface AliasSender {
   accountId: string;
   aliasAddress: string;
-  domain: string;   // eTLD+1
+  domain: string;   // eTLD+1 (stored in DB; API exposes as full sender email via transform)
   policy: SenderPolicy;
   addedAt: string;
 }
@@ -394,17 +385,10 @@ export interface EmailSignalData {
   // Send flow fields (only present on source: "user" signals)
   sendInitiatedAt?: string;    // ISO 8601 — when POST /send was called
   sendFailureReason?: string;  // "all_recipients_bounced" | "ses_permanent_failure"
-  // Deliverability-related fields (kept here for backward compat during migration)
-  relatedSignalId?: string;    // ID of the sent signal this bounce relates to
-  bouncedRecipients?: Array<{
-    address: string;
-    bounceType: "permanent" | "transient";
-    reason?: string;
-  }>;
 }
 
 export interface DeliverabilitySignalData {
-  relatedSignalId: string;
+  linkedSignalId: string;
   bouncedRecipients: Array<{
     address: string;
     bounceType: "permanent" | "transient";
@@ -425,9 +409,8 @@ export interface InvalidTemplateFunctionData {
 }
 
 export interface AutoSendBlockedData {
-  fromAddress: string;
-  replyToAddress: string;
   recipientAddress: string;
+  reason?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -660,7 +643,7 @@ export interface Account {
   onboarding?: AccountOnboarding;
   billingPlan?: import("../embedding/retention-tier.js").BillingPlan;
   afterSendAction?: "archive" | "keep_active";
-  calendarForwardingAddress?: string;
+  defaultCalendarInviteForwardingAddress?: string;
   createdAt: string;
   updatedAt: string;
 }

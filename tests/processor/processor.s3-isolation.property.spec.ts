@@ -87,7 +87,7 @@ describe("Property 9: S3 retention failure is isolated and non-fatal", () => {
 
   const validClassification: ClassificationOutput = {
     workflow: "conversation",
-    workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
+    workflowData: { workflow: "conversation", sentiment: "neutral", requiresReply: false },
     spamScore: 0.01,
     summary: "A test email.",
     labels: [],

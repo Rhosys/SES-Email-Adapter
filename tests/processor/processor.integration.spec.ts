@@ -68,7 +68,7 @@ const DEFAULT_CTX = {
 
 const validClassification: ClassificationOutput = {
   workflow: "conversation",
-  workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
+  workflowData: { workflow: "conversation", sentiment: "neutral", requiresReply: false },
   spamScore: 0.05,
   summary: "Integration test email.",
   labels: [],
@@ -211,7 +211,7 @@ function makeExistingSignal(overrides: Partial<Omit<Signal, "data">> & { data?: 
       headers: {},
       recipientAddress: "user@example.com",
       workflow: "conversation",
-      workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
+      workflowData: { workflow: "conversation", sentiment: "neutral", requiresReply: false },
       spamScore: 0.05,
       summary: "Integration test email.",
       s3Key: `emails/${SES_MESSAGE_ID}`,

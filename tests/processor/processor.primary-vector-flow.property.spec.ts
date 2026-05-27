@@ -84,7 +84,7 @@ const DEFAULT_CTX = {
 // which forces the processor to use arc matcher similarity search.
 const CLASSIFICATION: ClassificationOutput = {
   workflow: "conversation",
-  workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
+  workflowData: { workflow: "conversation", sentiment: "neutral", requiresReply: false },
   spamScore: 0.05,
   summary: "Test email.",
   labels: [],

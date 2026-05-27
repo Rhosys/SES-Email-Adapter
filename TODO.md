@@ -57,7 +57,8 @@ Compared the frontend's expected API surface against the actual backend implemen
 ### ❌ Backend TODOs (from contract comparison)
 
 - [ ] **Billing endpoints** — `GET /accounts/:id/billing` → `BillingInfo`, `POST /accounts/:id/billing/checkout-session` → Stripe Checkout URL, `POST /accounts/:id/billing/portal-session` → Stripe Portal URL. Requires Stripe integration.
-- [ ] **Migrate all routes to `app.openapi()` with `createRoute()` + zod schemas** — routes registered with plain `app.get/post/etc` are invisible to `app.doc()`; the spec will have no paths or schemas until they are migrated.
+- [ ] **Migrate all routes to `app.openapi()` with `createRoute()` + zod schemas** — routes registered with plain `app.get/post/etc` are invisible to `app.doc()`; the spec will have no paths or schemas until they are migrated. Full property-exposure spec and DB cleanup tasks tracked in plan file.
+- [ ] **User attachment upload for outbound signals (replies/compose)** — drafts currently have `attachments: []` hardcoded; no upload endpoint exists. Needed: `POST /accounts/:accountId/attachments` → presigned S3 PUT URL + `attachmentId`; client uploads directly to S3; draft creation/update references `attachmentId` values; send logic fetches from S3. Also needs TTL-based cleanup for unreferenced uploads.
 - [ ] **Document error response codes in OpenAPI spec** — add `responses` entries for 400, 409, 412, and 422 status codes to every API route definition (via `@hono/zod-openapi` route config). Each endpoint should declare which error codes it can return and under what conditions, so that `npm run openapi` produces a spec with full error documentation. Audit each handler for the error paths it actually uses, define shared zod schemas for error response bodies (e.g. `{ errorCode: string, message: string }`), and wire them into the route's `responses` map.
 
 ---

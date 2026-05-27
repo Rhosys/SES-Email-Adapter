@@ -101,7 +101,7 @@ describe("Feature: signal-processor-retry-resilience, Property 4: Arc saved befo
 
   const validClassification: ClassificationOutput = {
     workflow: "conversation",
-    workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
+    workflowData: { workflow: "conversation", sentiment: "neutral", requiresReply: false },
     spamScore: 0.05,
     summary: "A test email.",
     labels: [],
@@ -321,7 +321,7 @@ describe("Feature: signal-processor-retry-resilience, Property 6: Aurora failure
 
   const validClassification: ClassificationOutput = {
     workflow: "conversation",
-    workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
+    workflowData: { workflow: "conversation", sentiment: "neutral", requiresReply: false },
     spamScore: 0.05,
     summary: "A test email.",
     labels: [],
@@ -599,7 +599,7 @@ describe("Feature: signal-processor-retry-resilience, Property 5: Side-effects d
 
   const validClassification: ClassificationOutput = {
     workflow: "conversation",
-    workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
+    workflowData: { workflow: "conversation", sentiment: "neutral", requiresReply: false },
     spamScore: 0.05,
     summary: "A test email.",
     labels: [],
@@ -876,7 +876,7 @@ describe("Feature: signal-processor-retry-resilience, Property 7: Partial Aurora
 
   const validClassification: ClassificationOutput = {
     workflow: "conversation",
-    workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
+    workflowData: { workflow: "conversation", sentiment: "neutral", requiresReply: false },
     spamScore: 0.05,
     summary: "A test email.",
     labels: [],
