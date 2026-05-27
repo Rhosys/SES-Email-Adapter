@@ -5,7 +5,7 @@ import { describe, it, expect } from "vitest";
 // ${local.site_version} is replaced with the literal value "main/2026"
 // ---------------------------------------------------------------------------
 
-const MAIN_PREFIX = "/main/2026";
+const APP_PREFIX = "/a/main/2026";
 
 interface CfRequest {
   uri: string;
@@ -14,6 +14,18 @@ interface CfRequest {
 function handler(event: { request: CfRequest }): CfRequest {
   const request = event.request;
   const uri = request.uri;
+
+  // App base path /a/ — strip /a prefix, then apply SPA rewrite
+  if (uri === "/a" || uri.startsWith("/a/")) {
+    const path = uri.length > 2 ? uri.substring(2) : "/";
+    const lastSeg = path.substring(path.lastIndexOf("/") + 1);
+    if (!lastSeg.includes(".")) {
+      request.uri = APP_PREFIX + "/index.html";
+    } else {
+      request.uri = APP_PREFIX + path;
+    }
+    return request;
+  }
 
   // Bare /pr with no trailing slash — pass through unchanged
   if (uri === "/pr") {
@@ -45,14 +57,6 @@ function handler(event: { request: CfRequest }): CfRequest {
 
     request.uri = "/pr/" + slug + "/index.html";
     return request;
-  }
-
-  // Root-level requests: prepend site_version prefix
-  const lastSeg = uri.substring(uri.lastIndexOf("/") + 1);
-  if (!lastSeg.includes(".")) {
-    request.uri = MAIN_PREFIX + "/index.html";
-  } else {
-    request.uri = MAIN_PREFIX + uri;
   }
 
   return request;
@@ -91,27 +95,28 @@ describe("CloudFront SPA rewrite function", () => {
     });
   });
 
-  describe("Root-level SPA routing", () => {
+  describe("App base path /a/ routing", () => {
     const spaRouteCases = [
-      { scenario: "bare root", uri: "/", expected: "/main/2026/index.html" },
-      { scenario: "single segment route", uri: "/dashboard", expected: "/main/2026/index.html" },
-      { scenario: "nested route", uri: "/settings/domains", expected: "/main/2026/index.html" },
-      { scenario: "deeply nested route", uri: "/accounts/abc/rules/new", expected: "/main/2026/index.html" },
+      { scenario: "bare /a no slash", uri: "/a", expected: "/a/main/2026/index.html" },
+      { scenario: "bare /a/ with slash", uri: "/a/", expected: "/a/main/2026/index.html" },
+      { scenario: "single segment route", uri: "/a/dashboard", expected: "/a/main/2026/index.html" },
+      { scenario: "nested route", uri: "/a/settings/domains", expected: "/a/main/2026/index.html" },
+      { scenario: "deeply nested route", uri: "/a/accounts/abc/rules/new", expected: "/a/main/2026/index.html" },
     ];
 
-    it.each(spaRouteCases)("rewrites root SPA route: $scenario", ({ uri, expected }) => {
+    it.each(spaRouteCases)("rewrites /a/ SPA route: $scenario", ({ uri, expected }) => {
       expect(rewrite(uri)).toBe(expected);
     });
 
-    const rootStaticCases = [
-      { scenario: "favicon.ico", uri: "/favicon.ico", expected: "/main/2026/favicon.ico" },
-      { scenario: "robots.txt", uri: "/robots.txt", expected: "/main/2026/robots.txt" },
-      { scenario: "JS bundle in assets/", uri: "/assets/index-abc123.js", expected: "/main/2026/assets/index-abc123.js" },
-      { scenario: "CSS file", uri: "/assets/style.css", expected: "/main/2026/assets/style.css" },
-      { scenario: "SVG icon", uri: "/icons/logo.svg", expected: "/main/2026/icons/logo.svg" },
+    const appStaticCases = [
+      { scenario: "favicon.ico", uri: "/a/favicon.ico", expected: "/a/main/2026/favicon.ico" },
+      { scenario: "robots.txt", uri: "/a/robots.txt", expected: "/a/main/2026/robots.txt" },
+      { scenario: "JS bundle in assets/", uri: "/a/assets/index-abc123.js", expected: "/a/main/2026/assets/index-abc123.js" },
+      { scenario: "CSS file", uri: "/a/assets/style.css", expected: "/a/main/2026/assets/style.css" },
+      { scenario: "SVG icon", uri: "/a/icons/logo.svg", expected: "/a/main/2026/icons/logo.svg" },
     ];
 
-    it.each(rootStaticCases)("prepends /main/2026 to root static file: $scenario", ({ uri, expected }) => {
+    it.each(appStaticCases)("prepends /a/main/2026 to app static file: $scenario", ({ uri, expected }) => {
       expect(rewrite(uri)).toBe(expected);
     });
   });
