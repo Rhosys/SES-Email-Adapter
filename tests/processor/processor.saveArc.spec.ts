@@ -79,7 +79,7 @@ describe("Single saveArc call with complete mutations", () => {
       workflow: testCase.workflow,
       workflowData: testCase.workflow === "test"
         ? { workflow: "test", triggeredBy: "user" }
-        : { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
+        : { workflow: "conversation", sentiment: "neutral", requiresReply: false },
       spamScore: 0.01,
       summary: "Test signal.",
       labels: [],

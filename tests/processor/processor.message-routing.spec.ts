@@ -51,7 +51,7 @@ const DEFAULT_CTX = {
 
 const validClassification: ClassificationOutput = {
   workflow: "conversation",
-  workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
+  workflowData: { workflow: "conversation", sentiment: "neutral", requiresReply: false },
   spamScore: 0.05,
   summary: "A test email.",
   labels: [],

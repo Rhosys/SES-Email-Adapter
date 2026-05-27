@@ -69,7 +69,7 @@ describe("Blocked/quarantined signals never trigger saveArc", () => {
     return {
       classify: vi.fn().mockResolvedValue({
         workflow: "conversation" as Workflow,
-        workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
+        workflowData: { workflow: "conversation", sentiment: "neutral", requiresReply: false },
         spamScore: 0.05,
         summary: "A test email.",
         labels: [],
@@ -133,7 +133,7 @@ describe("Blocked/quarantined signals never trigger saveArc", () => {
     },
     {
       label: "onboarding workflow → SR-01 blocks",
-      classifier: makeClassifier({ workflow: "onboarding", workflowData: { workflow: "onboarding", service: "acme.com", onboardingType: "welcome" } }),
+      classifier: makeClassifier({ workflow: "onboarding" as import("../../src/types/index.js").Workflow, workflowData: { workflow: "onboarding", service: "acme.com", onboardingType: "welcome" } as unknown as import("../../src/types/index.js").WorkflowData }),
       contentSanitizer: makeContentSanitizer("acme.com"),
       unknownSenderPolicy: "quarantine_visible",
       senderEntry: { accountId: TEST_ACCOUNT_ID, aliasAddress: "user@example.com", domain: "acme.com", policy: "allow", addedAt: "2024-01-01T00:00:00Z" },

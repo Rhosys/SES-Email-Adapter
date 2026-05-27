@@ -9,7 +9,7 @@ const HIGH_SPAM = DEFAULT_SPAM_SCORE_THRESHOLD + 0.01;
 function makeCtx(overrides: Partial<SystemLabelContext> = {}): SystemLabelContext {
   return {
     workflow: "conversation",
-    workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
+    workflowData: { workflow: "conversation", sentiment: "neutral", requiresReply: false },
     spamScore: LOW_SPAM,
     spamScoreThreshold: DEFAULT_SPAM_SCORE_THRESHOLD,
     senderETLD1: "amazon.com",

@@ -122,13 +122,14 @@ describe("FeedbackProcessor — bounce handling for user-sent signals", () => {
     expect(signalStore.saveSignal).toHaveBeenCalledTimes(1);
 
     const savedSignal = vi.mocked(signalStore.saveSignal).mock.calls[0]![0];
+    const deliverabilityData = savedSignal.data as unknown as import("../src/types/index.js").DeliverabilitySignalData;
     expect(savedSignal.id).toMatch(/^sgn-/);
     expect(savedSignal.arcId).toBe("arc-001");
     expect(savedSignal.accountId).toBe("acct-001");
     expect(savedSignal.source).toBe("ses_feedback");
     expect(savedSignal.status).toBe("active");
-    expect(savedSignal.data.relatedSignalId).toBe("sgn-signal001");
-    expect(savedSignal.data.bouncedRecipients).toEqual([
+    expect(deliverabilityData.linkedSignalId).toBe("sgn-signal001");
+    expect(deliverabilityData.bouncedRecipients).toEqual([
       { address: "recipient@example.com", bounceType: "permanent", reason: "5.1.1" },
     ]);
     expect(savedSignal.data.subject).toBe("Delivery failure: 1 recipient(s) bounced");
@@ -175,7 +176,8 @@ describe("FeedbackProcessor — bounce handling for user-sent signals", () => {
     // Deliverability signal created with transient bounceType
     expect(signalStore.saveSignal).toHaveBeenCalledTimes(1);
     const savedSignal = vi.mocked(signalStore.saveSignal).mock.calls[0]![0];
-    expect(savedSignal.data.bouncedRecipients).toEqual([
+    const deliverabilityData2 = savedSignal.data as unknown as import("../src/types/index.js").DeliverabilitySignalData;
+    expect(deliverabilityData2.bouncedRecipients).toEqual([
       { address: "recipient@example.com", bounceType: "transient", reason: "4.2.2" },
     ]);
     // Original NOT reverted — transient bounces don't trigger revert
