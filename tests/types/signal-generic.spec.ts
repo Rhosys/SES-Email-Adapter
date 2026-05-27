@@ -105,14 +105,14 @@ describe("Property 2: System signals contain only expected data fields", () => {
     }
   });
 
-  it("auto_send_blocked signal data contains only fromAddress, replyToAddress, and recipientAddress", () => {
+  it("auto_send_blocked signal data contains only recipientAddress", () => {
     const signal: Signal<AutoSendBlockedData> = {
       id: "sgn-test", signalLookupId: "sgn-test", arcId: "arc-1", accountId: "acc-1",
       source: "email", type: "auto_send_blocked", status: "active",
       createdAt: "2025-01-01T00:00:00.000Z", ttl: 1740000000,
-      data: { fromAddress: "sender@legit.com", replyToAddress: "phish@evil.com", recipientAddress: "inbox@example.com" },
+      data: { recipientAddress: "inbox@example.com" },
     };
-    expect(Object.keys(signal.data).sort()).toEqual(["fromAddress", "recipientAddress", "replyToAddress"]);
+    expect(Object.keys(signal.data).sort()).toEqual(["recipientAddress"]);
     for (const field of emailSpecificFields) {
       if (field === "recipientAddress") continue;
       expect(signal.data).not.toHaveProperty(field);
@@ -134,7 +134,7 @@ describe("Property 2: FeedbackProcessor deliverability signals contain only expe
     "sendFailureReason", "urgency",
   ];
 
-  it("deliverability signal data contains only relatedSignalId, bouncedRecipients, and subject", () => {
+  it("deliverability signal data contains only linkedSignalId, bouncedRecipients, and subject", () => {
     // Construct a deliverability signal the same way FeedbackProcessor does
     const signal: Signal<DeliverabilitySignalData> = {
       id: "sgn-deliv-001",
@@ -146,13 +146,13 @@ describe("Property 2: FeedbackProcessor deliverability signals contain only expe
       status: "active",
       createdAt: "2025-01-01T00:00:00.000Z",
       data: {
-        relatedSignalId: "sgn-original-001",
+        linkedSignalId: "sgn-original-001",
         bouncedRecipients: [{ address: "bounce@example.com", bounceType: "permanent", reason: "5.1.1" }],
         subject: "Delivery failure: 1 recipient(s) bounced",
       },
     };
 
-    expect(Object.keys(signal.data).sort()).toEqual(["bouncedRecipients", "relatedSignalId", "subject"]);
+    expect(Object.keys(signal.data).sort()).toEqual(["bouncedRecipients", "linkedSignalId", "subject"]);
     for (const field of emailSpecificFields) {
       expect(signal.data).not.toHaveProperty(field);
     }
@@ -196,7 +196,7 @@ describe("Property 3: DynamoDB round-trip fidelity", () => {
           headers: { "message-id": "<abc@example.com>" },
           recipientAddress: "me@mydomain.com",
           workflow: "conversation",
-          workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
+          workflowData: { workflow: "conversation", sentiment: "neutral", requiresReply: false },
           spamScore: 0.1,
           s3Key: "emails/abc.eml",
         },
@@ -214,7 +214,7 @@ describe("Property 3: DynamoDB round-trip fidelity", () => {
         status: "active",
         createdAt: "2025-01-01T00:00:00.000Z",
         data: {
-          relatedSignalId: "sgn-original-001",
+          linkedSignalId: "sgn-original-001",
           bouncedRecipients: [{ address: "bounce@example.com", bounceType: "permanent", reason: "5.1.1" }],
           subject: "Delivery failure: 1 recipient(s) bounced",
         },
@@ -267,8 +267,6 @@ describe("Property 3: DynamoDB round-trip fidelity", () => {
         status: "active",
         createdAt: "2025-01-01T00:00:00.000Z",
         data: {
-          fromAddress: "me@mydomain.com",
-          replyToAddress: "other@example.com",
           recipientAddress: "recipient@example.com",
         },
       } as Signal<AutoSendBlockedData>,
@@ -328,7 +326,7 @@ describe("Property 4: Type parameter default", () => {
         headers: {},
         recipientAddress: "me@example.com",
         workflow: "conversation",
-        workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
+        workflowData: { workflow: "conversation", sentiment: "neutral", requiresReply: false },
         spamScore: 0,
         s3Key: "emails/test.eml",
       },
