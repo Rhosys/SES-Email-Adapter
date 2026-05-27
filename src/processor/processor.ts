@@ -270,10 +270,7 @@ export const SYSTEM_RULES: Rule[] = [
   // conversation: high when reply is needed and tone is urgent/negative
   { id: "SR-15", accountId: "SYSTEM", name: "Conversation: high urgency when reply needed and urgent/negative", condition: JSON.stringify({ "and": [wf_("conversation"), { "==": [wfData_("requiresReply"), true] }, { "in": [wfData_("sentiment"), ["urgent", "negative"]] }] }), actions: [{ type: "set_urgency", value: "high" }], status: "enabled", priorityOrder: 9, createdAt: "", updatedAt: "" },
   { id: "SR-16", accountId: "SYSTEM", name: "Conversation: low urgency when user has never replied", condition: JSON.stringify({ "and": [wf_("conversation"), { "!": [in_("system:replied")] }] }), actions: [{ type: "set_urgency", value: "low" }], status: "enabled", priorityOrder: 10, createdAt: "", updatedAt: "" },
-  // crm: contract/proposal always warrant a decision — treat as high regardless of urgency field
-  { id: "SR-17", accountId: "SYSTEM", name: "CRM: high urgency for contracts and proposals", condition: JSON.stringify({ "and": [wf_("crm"), { "in": [wfData_("crmType"), ["contract", "proposal"]] }] }), actions: [{ type: "set_urgency", value: "high" }], status: "enabled", priorityOrder: 11, createdAt: "", updatedAt: "" },
-  { id: "SR-18", accountId: "SYSTEM", name: "CRM: high urgency when urgency field is high", condition: JSON.stringify({ "and": [wf_("crm"), { "==": [wfData_("urgency"), "high"] }] }), actions: [{ type: "set_urgency", value: "high" }], status: "enabled", priorityOrder: 12, createdAt: "", updatedAt: "" },
-  { id: "SR-19", accountId: "SYSTEM", name: "CRM: low urgency for low-priority outreach", condition: JSON.stringify({ "and": [wf_("crm"), { "==": [wfData_("urgency"), "low"] }, { "!": [in_("system:replied")] }] }), actions: [{ type: "set_urgency", value: "low" }], status: "enabled", priorityOrder: 13, createdAt: "", updatedAt: "" },
+  { id: "SR-17", accountId: "SYSTEM", name: "CRM: requires reply", condition: JSON.stringify({ "and": [wf_("crm")] }), actions: [{ type: "set_urgency", value: "normal" }], status: "enabled", priorityOrder: 11, createdAt: "", updatedAt: "" },
   // support: priority field drives urgency; urgent > priority-based > awaiting_response > lifecycle
   { id: "SR-20", accountId: "SYSTEM", name: "Support: critical urgency for urgent-priority tickets", condition: JSON.stringify({ "and": [wf_("support"), { "==": [wfData_("priority"), "urgent"] }] }), actions: [{ type: "set_urgency", value: "critical" }], status: "enabled", priorityOrder: 14, createdAt: "", updatedAt: "" },
   { id: "SR-21", accountId: "SYSTEM", name: "Support: high urgency for high-priority tickets", condition: JSON.stringify({ "and": [wf_("support"), { "==": [wfData_("priority"), "high"] }] }), actions: [{ type: "set_urgency", value: "high" }], status: "enabled", priorityOrder: 15, createdAt: "", updatedAt: "" },
@@ -641,7 +638,7 @@ export class SignalProcessor {
               {
                 const sigId = generateId("sgn-");
                 const sigTs = DateTime.utc().toISO()!;
-                await this.arcDb.saveSignal({ id: sigId, signalLookupId: sigId, arcId: arc.id, accountId, source: "email", type: "auto_send_blocked", status: "active", createdAt: sigTs, ttl: Math.floor(Date.now() / 1000) + 90 * 24 * 60 * 60, data: { fromAddress: signal.data.from.address, replyToAddress: signal.data.replyTo.address, recipientAddress: signal.data.recipientAddress } });
+                await this.arcDb.saveSignal({ id: sigId, signalLookupId: sigId, arcId: arc.id, accountId, source: "email", type: "auto_send_blocked", status: "active", createdAt: sigTs, ttl: Math.floor(Date.now() / 1000) + 90 * 24 * 60 * 60, data: { recipientAddress: signal.data.recipientAddress } });
               }
             }
           }
@@ -745,7 +742,7 @@ export class SignalProcessor {
 
         // Resolve calendarForwardingAddress from account config
         const accountResult = await this.accountDb.getAccount(accountId);
-        const calendarForwardingAddress = accountResult.isOk() ? accountResult.value?.calendarForwardingAddress ?? "" : "";
+        const calendarForwardingAddress = accountResult.isOk() ? accountResult.value?.defaultCalendarInviteForwardingAddress ?? "" : "";
 
         // Find the calendar signal linked to this email signal
         const calendarSignalResult = await this.arcDb.getLinkedCalendarSignal(accountId, arc.id, signal.id);
