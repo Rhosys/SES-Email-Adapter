@@ -416,7 +416,12 @@ export class SignalProcessor {
       this.logger.error("processMessage threw an unhandled exception. This should not happen — all errors should be returned as Result types. The message will be retried.", { code: "processor.unhandled_exception", error: e, accountId: message.accountId, sesMessageId: message.sesMessageId });
       return err(dbError(e));
     }
-    if (processResult.isErr()) return err(dbError(processResult.error));
+    if (processResult.isErr()) {
+      const e = processResult.error;
+      // Pass DbError through unchanged. InvalidResponseError is a programming error
+      // at an inner boundary — wrap it once here so the caller only sees DbError.
+      return err(e.kind === 'db_error' ? e : dbError(e));
+    }
 
     return ok(undefined);
   }
