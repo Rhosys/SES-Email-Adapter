@@ -232,7 +232,7 @@ export async function createProcessorHarness(): Promise<ProcessorHarness> {
     };
 
     const result = await processor.processRecord(message, 1);
-    if (result.isErr()) throw new Error(`processRecord failed: ${String(result.error.cause)}`);
+    if (result.isErr()) throw new Error(`processRecord failed: ${JSON.stringify(result.error, null, 2)}`);
 
     await sqs.send(new DeleteMessageCommand({
       QueueUrl: QUEUE_URL,
