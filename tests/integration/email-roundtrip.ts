@@ -256,7 +256,7 @@ async function getSignals(accountId: string, arcId: string): Promise<Record<stri
     const bob = attendees.find(a => (a['address'] as string)?.includes('bob@'));
     assert(!!bob, 'attendee bob@example.com found');
 
-    const emailSignalId = emailSignal['signalId'] as string;
+    const emailSignalId = emailSignal['id'] as string;
     assert(calData['linkedSignalId'] === emailSignalId, `calendar linkedSignalId matches email signal (${emailSignalId})`);
   }
 }
