@@ -112,6 +112,7 @@ jobs:
         run: |
           echo "ACCOUNTS_TABLE=$(tofu -chdir=/tmp/itf output -raw dynamodb_accounts_table)" >> $GITHUB_OUTPUT
           echo "SIGNALS_TABLE=$(tofu -chdir=/tmp/itf output -raw dynamodb_signals_table)" >> $GITHUB_OUTPUT
+          echo "PROCESSING_TABLE=$(tofu -chdir=/tmp/itf output -raw dynamodb_processing_table)" >> $GITHUB_OUTPUT
           echo "AUDIT_TABLE=$(tofu -chdir=/tmp/itf output -raw dynamodb_audit_table)" >> $GITHUB_OUTPUT
         env:
           AWS_ACCESS_KEY_ID: ministack-test
@@ -125,9 +126,16 @@ jobs:
           AWS_REGION: eu-central-1
           ACCOUNTS_TABLE: ${{ steps.tofu_outputs.outputs.ACCOUNTS_TABLE }}
           SIGNALS_TABLE: ${{ steps.tofu_outputs.outputs.SIGNALS_TABLE }}
+          PROCESSING_TABLE: ${{ steps.tofu_outputs.outputs.PROCESSING_TABLE }}
           AUDIT_TABLE: ${{ steps.tofu_outputs.outputs.AUDIT_TABLE }}
           AUTHRESS_API_URL: http://localhost:4500
-        run: npx tsx tests/integration/post-accounts.ts
+          EMAIL_BUCKET: ses-it-email
+          CONTENT_BUCKET: ses-it-content
+          SIGNAL_QUEUE_URL: http://localhost:4566/000000000000/ses-it-signals
+          CONTENT_CDN_BASE_URL: http://localhost:4566/ses-it-content
+        run: |
+          npx tsx tests/integration/post-accounts.ts
+          npx tsx tests/integration/email-roundtrip.ts
 
   # ==========================================
   # PATH B: PRODUCTION BUILD & PLAN
