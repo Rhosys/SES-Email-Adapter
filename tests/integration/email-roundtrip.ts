@@ -156,7 +156,7 @@ async function getSignals(accountId: string, arcId: string): Promise<Record<stri
     const sigs = await getSignals(h.accountId, arcId);
     for (const sig of sigs) {
       const sigData = sig['data'] as Record<string, unknown>;
-      const body = sigData['body'] as string | undefined;
+      const body = sigData['htmlBody'] as string | undefined;
       if (body?.includes('data:image/png;base64,')) {
         cidSignal = sig;
       }
@@ -168,7 +168,7 @@ async function getSignals(accountId: string, arcId: string): Promise<Record<stri
     const data = cidSignal['data'] as Record<string, unknown>;
     const attachments = data['attachments'] as unknown[] ?? [];
     assert(attachments.length === 0, `no attachments in signal (CID image was inlined) — got ${attachments.length}`);
-    const body = data['body'] as string | undefined;
+    const body = data['htmlBody'] as string | undefined;
     assert(typeof body === 'string' && body.includes('data:image/png;base64,'), 'body contains data: URI for CID image');
   }
 }
@@ -193,7 +193,7 @@ async function getSignals(accountId: string, arcId: string): Promise<Record<stri
     const sigs = await getSignals(h.accountId, arcId);
     for (const sig of sigs) {
       const sigData = sig['data'] as Record<string, unknown>;
-      const body = sigData['body'] as string | undefined;
+      const body = sigData['htmlBody'] as string | undefined;
       if (body?.includes('<img')) {
         imgSignal = sig;
       }
@@ -205,7 +205,7 @@ async function getSignals(accountId: string, arcId: string): Promise<Record<stri
     const data = imgSignal['data'] as Record<string, unknown>;
     const attachments = data['attachments'] as unknown[] ?? [];
     assert(attachments.length === 0, `no attachments (linked images are not attachments) — got ${attachments.length}`);
-    const body = data['body'] as string | undefined;
+    const body = data['htmlBody'] as string | undefined;
     assert(typeof body === 'string' && body.includes('<img'), 'body contains <img> tag');
   }
 }
