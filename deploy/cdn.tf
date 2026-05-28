@@ -6,7 +6,7 @@
 locals {
   api_gateway_origin_id = "api-gateway"
   s3_site_origin_id     = "s3-site"
-  s3_assets_origin_id   = "s3-site-assets"
+  s3_landing_origin_id  = "s3-landing"
   site_version          = "main/2026"
 }
 
@@ -59,11 +59,10 @@ resource "aws_cloudfront_distribution" "api" {
     origin_access_control_id = aws_cloudfront_origin_access_control.s3.id
   }
 
-  # S3 origin — versioned assets with origin_path (no function needed)
+  # S3 origin — landing page bucket
   origin {
-    domain_name              = aws_s3_bucket.web.bucket_regional_domain_name
-    origin_id                = local.s3_assets_origin_id
-    origin_path              = "/${local.site_version}"
+    domain_name              = aws_s3_bucket.landing.bucket_regional_domain_name
+    origin_id                = local.s3_landing_origin_id
     origin_access_control_id = aws_cloudfront_origin_access_control.s3.id
   }
 
@@ -92,8 +91,35 @@ resource "aws_cloudfront_distribution" "api" {
     }
   }
 
-  # Default behavior — S3 static site with SPA rewrite
+  # Default behavior — landing page bucket (no rewrite function needed)
   default_cache_behavior {
+    allowed_methods        = ["GET", "HEAD"]
+    cached_methods         = ["GET", "HEAD"]
+    target_origin_id       = local.s3_landing_origin_id
+    cache_policy_id        = aws_cloudfront_cache_policy.s3_cache.id
+    viewer_protocol_policy = "redirect-to-https"
+    compress               = true
+  }
+
+  # /a/assets/* — immutable hashed app assets (must be before /a/*)
+  ordered_cache_behavior {
+    path_pattern           = "/a/assets/*"
+    allowed_methods        = ["GET", "HEAD"]
+    cached_methods         = ["GET", "HEAD"]
+    target_origin_id       = local.s3_site_origin_id
+    cache_policy_id        = aws_cloudfront_cache_policy.assets_cache.id
+    viewer_protocol_policy = "redirect-to-https"
+    compress               = true
+
+    function_association {
+      event_type   = "viewer-request"
+      function_arn = aws_cloudfront_function.spa_rewrite.arn
+    }
+  }
+
+  # /a/* — app SPA routing
+  ordered_cache_behavior {
+    path_pattern           = "/a/*"
     allowed_methods        = ["GET", "HEAD"]
     cached_methods         = ["GET", "HEAD"]
     target_origin_id       = local.s3_site_origin_id
@@ -107,15 +133,20 @@ resource "aws_cloudfront_distribution" "api" {
     }
   }
 
-  # /assets/* — S3 immutable hashed assets (no SPA rewrite)
+  # /pr/* — PR preview SPA routing
   ordered_cache_behavior {
-    path_pattern           = "/assets/*"
+    path_pattern           = "/pr/*"
     allowed_methods        = ["GET", "HEAD"]
     cached_methods         = ["GET", "HEAD"]
-    target_origin_id       = local.s3_assets_origin_id
-    cache_policy_id        = aws_cloudfront_cache_policy.assets_cache.id
+    target_origin_id       = local.s3_site_origin_id
+    cache_policy_id        = aws_cloudfront_cache_policy.s3_cache.id
     viewer_protocol_policy = "redirect-to-https"
     compress               = true
+
+    function_association {
+      event_type   = "viewer-request"
+      function_arn = aws_cloudfront_function.spa_rewrite.arn
+    }
   }
 
   # /.well-known/* — public metadata, routed to API Gateway (no auth)
@@ -287,6 +318,61 @@ resource "aws_s3_bucket_policy" "web" {
 }
 
 # ---------------------------------------------------------------------------
+# S3 — landing page bucket
+# ---------------------------------------------------------------------------
+
+resource "aws_s3_bucket" "landing" {
+  bucket           = "${lower(var.service_name)}-landing-${var.aws_account_id}-eu-central-1-an"
+  bucket_namespace = "account-regional"
+}
+
+resource "aws_s3_bucket_public_access_block" "landing" {
+  bucket                  = aws_s3_bucket.landing.id
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "landing" {
+  bucket = aws_s3_bucket.landing.id
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
+resource "aws_s3_bucket_lifecycle_configuration" "landing" {
+  bucket = aws_s3_bucket.landing.id
+
+  rule {
+    id     = "abort-incomplete-multipart-uploads"
+    status = "Enabled"
+    filter {}
+    abort_incomplete_multipart_upload { days_after_initiation = 7 }
+  }
+}
+
+resource "aws_s3_bucket_policy" "landing" {
+  bucket = aws_s3_bucket.landing.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid       = "AllowCloudFrontOAC"
+      Effect    = "Allow"
+      Principal = { Service = "cloudfront.amazonaws.com" }
+      Action    = "s3:GetObject"
+      Resource  = "${aws_s3_bucket.landing.arn}/*"
+      Condition = {
+        StringEquals = { "AWS:SourceArn" = aws_cloudfront_distribution.api.arn }
+      }
+    }]
+  })
+}
+
+# ---------------------------------------------------------------------------
 # CloudFront Cache Policies
 # ---------------------------------------------------------------------------
 
@@ -388,7 +474,19 @@ resource "aws_cloudfront_function" "spa_rewrite" {
 function handler(event) {
   var request = event.request;
   var uri = request.uri;
-  var MAIN_PREFIX = '/${local.site_version}';
+  var APP_PREFIX = '/a/${local.site_version}';
+
+  // App base path /a/ — strip /a prefix, then apply SPA rewrite
+  if (uri === '/a' || uri.startsWith('/a/')) {
+    var path = uri.length > 2 ? uri.substring(2) : '/';
+    var lastSeg = path.substring(path.lastIndexOf('/') + 1);
+    if (!lastSeg.includes('.')) {
+      request.uri = APP_PREFIX + '/index.html';
+    } else {
+      request.uri = APP_PREFIX + path;
+    }
+    return request;
+  }
 
   // Bare /pr with no trailing slash — pass through unchanged
   if (uri === '/pr') {
@@ -398,16 +496,12 @@ function handler(event) {
   // PR preview prefix — rewrite SPA routes to prefix-scoped index.html
   if (uri.startsWith('/pr/')) {
     var segments = uri.split('/');
-    // segments: ['', 'pr', slug, ...rest]
     var slug = segments[2];
 
     if (!slug) {
       return request;
     }
 
-    // Bare prefix: /pr/{slug} or /pr/{slug}/ — always rewrite regardless of dot in slug
-    // segments for /pr/{slug} = ['', 'pr', slug] (length 3)
-    // segments for /pr/{slug}/ = ['', 'pr', slug, ''] (length 4, last is empty)
     if (segments.length === 3 || (segments.length === 4 && segments[3] === '')) {
       request.uri = '/pr/' + slug + '/index.html';
       return request;
@@ -420,14 +514,6 @@ function handler(event) {
 
     request.uri = '/pr/' + slug + '/index.html';
     return request;
-  }
-
-  // Root-level requests: prepend site_version prefix
-  var lastSeg = uri.substring(uri.lastIndexOf('/') + 1);
-  if (!lastSeg.includes('.')) {
-    request.uri = MAIN_PREFIX + '/index.html';
-  } else {
-    request.uri = MAIN_PREFIX + uri;
   }
 
   return request;

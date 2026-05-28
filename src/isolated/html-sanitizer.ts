@@ -7,8 +7,6 @@ import DOMPurify from "dompurify";
 
 export interface SanitizeResult {
   html: string;
-  externalImageUrls: string[];
-  cidReferences: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -105,22 +103,7 @@ export function sanitizeHtml(rawHtml: string): SanitizeResult {
     }
   }
 
-  // Extract external image URLs (HTTP/HTTPS, excluding data: and cid:)
-  const externalImageUrls: string[] = [];
-  const cidReferences: string[] = [];
-
-  const imgElements = doc.querySelectorAll("img[src]");
-  for (const img of imgElements) {
-    const src = img.getAttribute("src") ?? "";
-    if (src.startsWith("cid:")) {
-      cidReferences.push(src.slice(4)); // strip "cid:" prefix
-    } else if (/^https?:\/\//i.test(src)) {
-      externalImageUrls.push(src);
-    }
-    // data: URIs and relative paths are left as-is
-  }
-
   const html = doc.body.innerHTML;
 
-  return { html, externalImageUrls, cidReferences };
+  return { html };
 }

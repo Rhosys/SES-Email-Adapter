@@ -17,8 +17,6 @@ interface AttachmentRef {
   mimeType: string;
   sizeBytes: number;
   s3Key: string;
-  cdnUrl: string;
-  contentId?: string;
 }
 
 export interface ContentSanitizeRequest {
@@ -29,7 +27,6 @@ export interface ContentSanitizeRequest {
   };
   accountId: string;
   senderEtld1: string;
-  contentBaseUrl: string;
   keyPrefix: string;
   retentionTag: S3RetentionTag;
 }
@@ -48,7 +45,6 @@ export interface ContentSanitizeResponse {
     headers: Record<string, string>;
     sentAt?: string;
   };
-  urlMapping: Record<string, string>;
 }
 
 // ---------------------------------------------------------------------------

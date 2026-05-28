@@ -161,7 +161,6 @@ function buildProcessor(arcDb: ReturnType<typeof makeArcDbMock>, accountDb: Retu
     s3Client: {} as never,
     emailBucket: "test-bucket",
     contentBucket: "test-content-bucket",
-    contentCdnBaseUrl: "https://cdn.example.com",
     classifier,
     embeddingGenerator: makeEmbeddingGenerator(),
     auroraWriter: makeAuroraWriter(),

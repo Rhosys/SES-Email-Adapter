@@ -98,6 +98,7 @@ export const Attachment = z.object({
   filename: z.string(),
   mimeType: z.string(),
   sizeBytes: z.number(),
+  url: z.string().optional(),
 });
 
 export const MatchedRuleAction = z.object({

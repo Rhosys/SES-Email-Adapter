@@ -276,7 +276,7 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
     replySender = makeReplySender();
     processor = new SignalProcessor({
       arcDb, accountDb, processingDb,
-      contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com",
+      contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
       classifier,
       embeddingGenerator,
       auroraWriter,

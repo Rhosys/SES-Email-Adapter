@@ -187,7 +187,7 @@ describe("Feature: split-embedding-pipeline, Property 2: Primary vector flows to
 
     const processor = new SignalProcessor({
       ...makeStore(),
-      contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com",
+      contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
       classifier: { classify: vi.fn().mockResolvedValue({ ...CLASSIFICATION }) },
       embeddingGenerator,
       auroraWriter,
