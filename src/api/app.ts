@@ -17,7 +17,7 @@ import type { AccountDatabase } from "../database/account-database.js";
 import type { Logger } from "../logger.js";
 import { deriveGroupingKey } from "../processor/processor.js";
 import { zParse } from "./validate.js";
-import { toApiArc, toApiSignal } from "./transform.js";
+import { toApiArc } from "./transform.js";
 import { validateRuleCondition } from "./validate-rule-condition.js";
 import { validateWebhookConfig } from "./validate-webhook-config.js";
 import type { AstValidationResult } from "../isolated/ast-validator.js";
@@ -451,11 +451,10 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     // Build enriched response — calendar_event signals get latestResponse field
     const enrichedSignals = signals.map(signal => {
       const withUrls = contentCdnBaseUrl ? withAttachmentUrls(signal, contentCdnBaseUrl) : signal;
-      const apiSignal = toApiSignal(withUrls);
       if (isCalendarEventSignal(withUrls) && enrichments.has(withUrls.data.veventUid)) {
-        return { ...apiSignal, latestResponse: enrichments.get(withUrls.data.veventUid) };
+        return { ...withUrls, latestResponse: enrichments.get(withUrls.data.veventUid) };
       }
-      return apiSignal;
+      return withUrls;
     });
 
     return c.json(page("signals", enrichedSignals, result.value.nextCursor));
