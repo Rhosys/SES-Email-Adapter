@@ -47,7 +47,6 @@ export class MailparserMimeParser {
       mimeType: a.contentType,
       sizeBytes: a.size,
       s3Key: "",
-      ...(a.contentId ? { contentId: a.contentId } : {}),
     }));
 
     const headers: Record<string, string> = {};

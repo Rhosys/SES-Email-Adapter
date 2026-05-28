@@ -68,6 +68,7 @@ const sfn = new SFNClient({});
 
 const S3_BUCKET = process.env["EMAIL_BUCKET"]!;
 const CONTENT_BUCKET = process.env["CONTENT_BUCKET"]!;
+const CONTENT_CDN_BASE_URL = process.env["CONTENT_CDN_BASE_URL"]!;
 const CONTENT_SANITIZER_ARN = process.env["CONTENT_SANITIZER_ARN"]!;
 const USER_CODE_EXECUTOR_ARN = process.env["USER_CODE_EXECUTOR_ARN"]!;
 const SIGNAL_QUEUE_URL = process.env["SIGNAL_QUEUE_URL"]!;
@@ -137,6 +138,7 @@ const processor = new SignalProcessor({
   s3Client: s3,
   emailBucket: S3_BUCKET,
   contentBucket: CONTENT_BUCKET,
+  contentCdnBaseUrl: CONTENT_CDN_BASE_URL,
 });
 
 const feedbackProcessor = new FeedbackProcessor(processingDb, accountDb, logger, {

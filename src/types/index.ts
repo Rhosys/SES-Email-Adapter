@@ -321,7 +321,7 @@ export interface Attachment {
   mimeType: string;
   sizeBytes: number;
   s3Key: string;
-  contentId?: string;
+  url?: string;
 }
 
 // ---------------------------------------------------------------------------
