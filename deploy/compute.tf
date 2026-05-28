@@ -212,7 +212,7 @@ resource "aws_lambda_function" "main" {
       USER_CODE_EXECUTOR_ARN   = aws_lambda_function.user_code_executor.arn
       CONTENT_SANITIZER_ARN    = aws_lambda_function.content_sanitizer.arn
       CONTENT_BUCKET           = aws_s3_bucket.extracted_content.bucket
-      CONTENT_CDN_BASE_URL     = "https://${aws_cloudfront_distribution.api.domain_name}/content"
+      CONTENT_CDN_BASE_URL     = "https://${aws_cloudfront_distribution.api.domain_name}"
       NODE_OPTIONS             = "--enable-source-maps"
     }
   }

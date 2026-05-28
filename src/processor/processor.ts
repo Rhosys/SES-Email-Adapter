@@ -311,6 +311,7 @@ interface SignalProcessorOptions {
   s3Client: S3Client;
   emailBucket: string;
   contentBucket: string;
+  contentCdnBaseUrl: string;
 }
 
 export class SignalProcessor {
@@ -337,6 +338,7 @@ export class SignalProcessor {
   private readonly s3Client: S3Client;
   private readonly emailBucket: string;
   private readonly contentBucket: string;
+  private readonly contentCdnBaseUrl: string;
 
   constructor(opts: SignalProcessorOptions) {
     this.arcDb = opts.arcDb;
@@ -362,6 +364,7 @@ export class SignalProcessor {
     this.s3Client = opts.s3Client;
     this.emailBucket = opts.emailBucket;
     this.contentBucket = opts.contentBucket;
+    this.contentCdnBaseUrl = opts.contentCdnBaseUrl;
   }
 
   async processRecord(message: InboundSignalMessage, receiveCount: number): Promise<Result<void, DbError>> {
@@ -842,7 +845,7 @@ export class SignalProcessor {
     const retentionDuration = resolveRetention({}, null);
     const s3Tag = retentionToS3Tag(retentionDuration);
     const signalId = sesMessageId;
-    const keyPrefix = `accounts/${accountId}/extracted/${signalId}/`;
+    const keyPrefix = `content/accounts/${accountId}/extracted/${signalId}/`;
 
     const [presignedGet, presignedPost] = await Promise.all([
       generatePresignedGet(this.s3Client, this.emailBucket, s3Key),
@@ -872,6 +875,7 @@ export class SignalProcessor {
         mimeType: a.mimeType,
         sizeBytes: a.sizeBytes,
         s3Key: a.s3Key,
+        url: `${this.contentCdnBaseUrl}/${a.s3Key}`,
       })),
       headers: sanitizedParsed.headers,
       ...(sanitizedParsed.replyTo ? { replyTo: sanitizedParsed.replyTo } : {}),
@@ -1397,7 +1401,7 @@ export class SignalProcessor {
     const signalLookupId = buildCalendarSignalLookupId(calendarData.organizer, calendarData.veventUid);
 
     // Store raw .ics as S3 attachment on the calendar signal
-    const icsS3Key = `accounts/${accountId}/calendar/${calendarSignalId}/invite.ics`;
+    const icsS3Key = `content/accounts/${accountId}/calendar/${calendarSignalId}/invite.ics`;
     await this.s3Client.send(new PutObjectCommand({
       Bucket: this.contentBucket,
       Key: icsS3Key,
