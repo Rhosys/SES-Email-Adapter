@@ -108,7 +108,6 @@ describe("processSideEffect — correlation context", () => {
       s3Client: {} as never,
       emailBucket: "test-bucket",
       contentBucket: "test-content-bucket",
-      contentCdnBaseUrl: "https://cdn.example.com",
       classifier: { classify: vi.fn() },
       embeddingGenerator: { generateForModel: vi.fn(), generateForSecondaryClusters: vi.fn() } as unknown as EmbeddingGenerator,
       auroraWriter: { upsertEmbedding: vi.fn(), findMatch: vi.fn() } as unknown as MultiClusterAuroraWriter,

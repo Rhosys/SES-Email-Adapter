@@ -143,7 +143,7 @@ describe("Cross-layer idempotence — live writes + cache + Aurora", () => {
     const mockLogger = createMockLogger();
     const processor = new SignalProcessor({
       arcDb, accountDb, processingDb,
-      contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com",
+      contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
       classifier: makeClassifier(),
       embeddingGenerator,
       auroraWriter,
@@ -197,7 +197,7 @@ describe("Cross-layer idempotence — live writes + cache + Aurora", () => {
     const mockLogger = createMockLogger();
     const processor = new SignalProcessor({
       arcDb, accountDb, processingDb,
-      contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com",
+      contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
       classifier: makeClassifier(),
       embeddingGenerator,
       auroraWriter,

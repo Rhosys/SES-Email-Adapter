@@ -152,7 +152,6 @@ function makeProcessor(opts: { store: ReturnType<typeof makeStore>; logger: Mock
     s3Client: {} as never,
     emailBucket: "test-bucket",
     contentBucket: "test-content-bucket",
-    contentCdnBaseUrl: "https://cdn.example.com",
   });
 }
 
@@ -201,7 +200,6 @@ describe("processSideEffect — webhook delivery", () => {
       s3Client: {} as never,
       emailBucket: "test-bucket",
       contentBucket: "test-content-bucket",
-      contentCdnBaseUrl: "https://cdn.example.com",
     });
 
     const signal = makeSignal({

@@ -191,7 +191,7 @@ describe("Single saveArc call with complete mutations", () => {
     const mockLogger = createMockLogger();
     const processor = new SignalProcessor({
       arcDb, accountDb, processingDb,
-      contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com",
+      contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
       classifier: { classify: vi.fn().mockResolvedValue(classification) },
       embeddingGenerator,
       auroraWriter,
