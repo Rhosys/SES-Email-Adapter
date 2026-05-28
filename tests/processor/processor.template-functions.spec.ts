@@ -129,7 +129,6 @@ function makeProcessor(opts: {
     s3Client: {} as never,
     emailBucket: "test-bucket",
     contentBucket: "test-content-bucket",
-    contentCdnBaseUrl: "https://cdn.example.com",
     draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
     calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud" },
   });

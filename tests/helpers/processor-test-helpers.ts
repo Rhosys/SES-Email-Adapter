@@ -57,5 +57,5 @@ export const DEFAULT_PROCESSOR_EXTRAS = {
   s3Client: stubS3Client,
   emailBucket: "test-email-bucket",
   contentBucket: "test-content-bucket",
-  contentCdnBaseUrl: "https://cdn.example.com",
+  
 } as const;

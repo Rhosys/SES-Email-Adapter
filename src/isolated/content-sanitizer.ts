@@ -15,8 +15,6 @@ interface AttachmentRef {
   mimeType: string;
   sizeBytes: number;
   s3Key: string;
-  cdnUrl: string;
-  contentId?: string;
 }
 
 interface ContentSanitizeRequest {
@@ -27,7 +25,6 @@ interface ContentSanitizeRequest {
   };
   accountId: string;
   senderEtld1: string;
-  contentBaseUrl: string;
   keyPrefix: string;
   retentionTag: "365" | "3650" | null;
 }
@@ -46,7 +43,6 @@ interface ContentSanitizeResponse {
     headers: Record<string, string>;
     sentAt?: string;
   };
-  urlMapping: Record<string, string>;
 }
 
 interface ContentSanitizeError {
@@ -64,8 +60,6 @@ interface ContentSanitizeError {
 const MAX_ATTACHMENTS = 50;
 const MAX_TOTAL_ATTACHMENT_SIZE = 25 * 1024 * 1024; // 25MB
 const MAX_SINGLE_ATTACHMENT_SIZE = 10 * 1024 * 1024; // 10MB
-const MAX_IMAGE_SIZE = 5 * 1024 * 1024; // 5MB
-const IMAGE_DOWNLOAD_TIMEOUT_MS = 3000;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -124,33 +118,6 @@ async function uploadViaPresignedPost(
   }
 }
 
-async function downloadImage(url: string): Promise<Buffer | null> {
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), IMAGE_DOWNLOAD_TIMEOUT_MS);
-
-    const response = await fetch(url, {
-      signal: controller.signal,
-      redirect: "follow",
-    });
-
-    clearTimeout(timeout);
-
-    if (!response.ok) return null;
-
-    const contentLength = response.headers.get("content-length");
-    if (contentLength && parseInt(contentLength, 10) > MAX_IMAGE_SIZE) {
-      return null;
-    }
-
-    const buffer = Buffer.from(await response.arrayBuffer());
-    if (buffer.length > MAX_IMAGE_SIZE) return null;
-
-    return buffer;
-  } catch {
-    return null;
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Handler
@@ -212,89 +179,46 @@ export async function handler(event: ContentSanitizeRequest): Promise<ContentSan
     };
   }
 
-  // 5. Extract attachments: upload each via pre-signed POST
+  // 5. Build CID map for inline images and upload real attachments to S3
   let uploadIndex = 0;
   const attachmentRefs: AttachmentRef[] = [];
+  const cidMap: Record<string, string> = {};
 
   for (const attachment of attachments) {
-    // Skip attachments > 10MB
     if (attachment.size > MAX_SINGLE_ATTACHMENT_SIZE) {
       continue;
     }
 
-    const s3Key = `${event.keyPrefix}${uploadIndex}`;
     const contentType = attachment.contentType || "application/octet-stream";
 
-    const uploaded = await uploadViaPresignedPost(
-      event.presignedPost,
-      s3Key,
-      attachment.content,
-      contentType,
-      event.retentionTag,
-    );
-
-    if (!uploaded) {
-      // Skip on upload failure
-      uploadIndex++;
+    if (attachment.contentId) {
+      // Inline image — embed as data URI, no S3 upload needed
+      cidMap[attachment.contentId] = `data:${contentType};base64,${attachment.content.toString("base64")}`;
       continue;
     }
 
-    const ref: AttachmentRef = {
-      filename: attachment.filename ?? `attachment-${uploadIndex}`,
-      mimeType: contentType,
-      sizeBytes: attachment.size,
-      s3Key,
-      cdnUrl: `${event.contentBaseUrl}/content/${s3Key}`,
-    };
+    const s3Key = `${event.keyPrefix}${uploadIndex}`;
+    const uploaded = await uploadViaPresignedPost(event.presignedPost, s3Key, attachment.content, contentType, event.retentionTag);
 
-    if (attachment.contentId) {
-      ref.contentId = attachment.contentId;
+    if (uploaded) {
+      attachmentRefs.push({
+        filename: attachment.filename ?? `attachment-${uploadIndex}`,
+        mimeType: contentType,
+        sizeBytes: attachment.size,
+        s3Key,
+      });
     }
 
-    attachmentRefs.push(ref);
     uploadIndex++;
   }
 
-  // 6. Sanitize HTML
-  const urlMapping: Record<string, string> = {};
+  // 6. Sanitize HTML and inline CID images
   let htmlBody: string | undefined;
 
   if (parsed.html) {
     const htmlInput = typeof parsed.html === "string" ? parsed.html : "";
     const sanitized = sanitizeHtml(htmlInput);
-    htmlBody = sanitized.html;
-
-    // 7. Download external images and upload via pre-signed POST
-    for (const imageUrl of sanitized.externalImageUrls) {
-      const imageBuffer = await downloadImage(imageUrl);
-      if (!imageBuffer) {
-        // Failed to download or too large — skip
-        continue;
-      }
-
-      const s3Key = `${event.keyPrefix}${uploadIndex}`;
-      const uploaded = await uploadViaPresignedPost(
-        event.presignedPost,
-        s3Key,
-        imageBuffer,
-        "image/png", // default content type for downloaded images
-        event.retentionTag,
-      );
-
-      if (uploaded) {
-        urlMapping[imageUrl] = `/content/${s3Key}`;
-      }
-
-      uploadIndex++;
-    }
-
-    // 8. Map cid: references to corresponding attachment CDN paths
-    for (const cidRef of sanitized.cidReferences) {
-      const matchingAttachment = attachmentRefs.find(a => a.contentId === cidRef);
-      if (matchingAttachment) {
-        urlMapping[`cid:${cidRef}`] = `/content/${matchingAttachment.s3Key}`;
-      }
-    }
+    htmlBody = sanitized.html.replace(/cid:([^"'\s>]+)/g, (_, id: string) => cidMap[id] ?? "");
   }
 
   // 9. Build response
@@ -325,7 +249,6 @@ export async function handler(event: ContentSanitizeRequest): Promise<ContentSan
       attachments: attachmentRefs,
       headers,
     },
-    urlMapping,
   };
 
   // Add optional fields only if present

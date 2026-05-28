@@ -217,7 +217,7 @@ describe("Blocked/quarantined signals never trigger saveArc", () => {
       arcDb,
       accountDb,
       processingDb,
-      contentSanitizer: strategy.contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com",
+      contentSanitizer: strategy.contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
       classifier: strategy.classifier,
       embeddingGenerator: makeEmbeddingGenerator(),
       auroraWriter: makeAuroraWriter(),

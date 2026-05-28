@@ -3,8 +3,8 @@ import { DateTime } from "luxon";
 import { generateId } from "../utils/id.js";
 import type { Logger } from "../logger.js";
 import type { Result } from "neverthrow";
-import { ok, err, dbError } from "../errors.js";
-import type { DbError, InvalidResponseError } from "../errors.js";
+import { ok, err, dbError, processorError } from "../errors.js";
+import type { DbError, InvalidResponseError, ProcessorError } from "../errors.js";
 import type { Signal, Arc, Rule, Workflow, WorkflowData, Alias, AliasSender, SenderPolicy, AccountFilteringConfig, SignalSource, SignalStatus, Domain, ArcStatus, ArcUrgency, UnknownSenderPolicy, MatchedRuleResult, InvalidRuleFunctionData, InvalidTemplateFunctionData, AutoSendBlockedData } from "../types/index.js";
 import type { ParsedMime } from "./mime.js";
 import type { ContentSanitizerClient } from "./content-sanitizer-client.js";
@@ -311,7 +311,6 @@ interface SignalProcessorOptions {
   s3Client: S3Client;
   emailBucket: string;
   contentBucket: string;
-  contentCdnBaseUrl: string;
 }
 
 export class SignalProcessor {
@@ -338,7 +337,6 @@ export class SignalProcessor {
   private readonly s3Client: S3Client;
   private readonly emailBucket: string;
   private readonly contentBucket: string;
-  private readonly contentCdnBaseUrl: string;
 
   constructor(opts: SignalProcessorOptions) {
     this.arcDb = opts.arcDb;
@@ -364,16 +362,15 @@ export class SignalProcessor {
     this.s3Client = opts.s3Client;
     this.emailBucket = opts.emailBucket;
     this.contentBucket = opts.contentBucket;
-    this.contentCdnBaseUrl = opts.contentCdnBaseUrl;
   }
 
-  async processRecord(message: InboundSignalMessage, receiveCount: number): Promise<Result<void, DbError>> {
+  async processRecord(message: InboundSignalMessage, receiveCount: number): Promise<Result<void, ProcessorError>> {
     // On redelivery, check DDB for existing signal before doing expensive work
     if (receiveCount > 1) {
       this.logger.info("Retry path activated — checking DDB for existing signal state before re-processing.", { code: "processor.retry_path_activated", receiveCount, accountId: message.accountId, sesMessageId: message.sesMessageId });
 
       const existingResult = await this.arcDb.getSignalByMessageId(message.accountId, message.sesMessageId);
-      if (existingResult.isErr()) return err(existingResult.error);
+      if (existingResult.isErr()) return err(processorError(existingResult.error));
       this.logger.trackPoint("retry_signal_lookup");
 
       if (existingResult.value) {
@@ -382,16 +379,16 @@ export class SignalProcessor {
 
         // Signal exists — arc is guaranteed to exist (arc saved before signal).
         // Load arc to resume from the convergence point.
-        if (!signal.arcId) return err(dbError("signal missing arcId on retry"));
+        if (!signal.arcId) return err(processorError("signal missing arcId on retry"));
         const arcResult = await this.arcDb.getArc(message.accountId, signal.arcId);
-        if (arcResult.isErr()) return err(arcResult.error);
+        if (arcResult.isErr()) return err(processorError(arcResult.error));
         this.logger.trackPoint("retry_arc_lookup");
         const arc = arcResult.value;
-        if (!arc) return err(dbError("arc not found on retry"));
+        if (!arc) return err(processorError("arc not found on retry"));
 
         // Fetch account context (needed for S3 retention)
         const accountCtxResult = await this.accountDb.getProcessorAccountContext(message.accountId, signal.data.recipientAddress);
-        if (accountCtxResult.isErr()) return err(accountCtxResult.error);
+        if (accountCtxResult.isErr()) return err(processorError(accountCtxResult.error));
         const accountCtx = accountCtxResult.value;
 
         // S3 retention — always attempt, fire-and-forget (idempotent)
@@ -399,11 +396,11 @@ export class SignalProcessor {
 
         // Aurora upserts — always run (idempotent). Gates side-effect dispatch.
         const auroraResult = await this.executeAuroraUpserts(signal, arc);
-        if (auroraResult.isErr()) return err(dbError("Aurora upsert failed on retry"));
+        if (auroraResult.isErr()) return err(processorError(auroraResult.error));
 
         // Dispatch side-effects via SQS after Aurora succeeds
         const dispatchResult = await this.dispatchSideEffects(signal, arc);
-        if (dispatchResult.isErr()) return err(dbError("side-effect dispatch failed on retry"));
+        if (dispatchResult.isErr()) return err(processorError(dispatchResult.error));
 
         return ok(undefined);
       }
@@ -417,14 +414,14 @@ export class SignalProcessor {
       processResult = await this.processMessage(message);
     } catch (e) {
       this.logger.error("processMessage threw an unhandled exception. This should not happen — all errors should be returned as Result types. The message will be retried.", { code: "processor.unhandled_exception", error: e, accountId: message.accountId, sesMessageId: message.sesMessageId });
-      return err(dbError(e));
+      return err(processorError(e));
     }
-    if (processResult.isErr()) return err(dbError(processResult.error));
+    if (processResult.isErr()) return err(processorError(processResult.error));
 
     return ok(undefined);
   }
 
-  async processSideEffect(payload: SideEffectPayload, receiveCount = 1): Promise<Result<void, DbError>> {
+  async processSideEffect(payload: SideEffectPayload, receiveCount = 1): Promise<Result<void, ProcessorError>> {
     const { signal, arc: payloadArc } = payload;
     const accountId = signal.accountId;
 
@@ -432,7 +429,7 @@ export class SignalProcessor {
     let arc: Arc;
     if (receiveCount > 1) {
       const arcResult = await this.arcDb.getArc(accountId, payloadArc.id);
-      if (arcResult.isErr()) return err(arcResult.error);
+      if (arcResult.isErr()) return err(processorError(arcResult.error));
       arc = arcResult.value ?? payloadArc;
     } else {
       arc = payloadArc;
@@ -778,7 +775,7 @@ export class SignalProcessor {
 
     this.logger.trackPoint("side_effect_all_complete");
     if (criticalFailure) {
-      return err(dbError(criticalFailure));
+      return err(processorError(criticalFailure));
     }
     return ok(undefined);
   }
@@ -845,7 +842,7 @@ export class SignalProcessor {
     const retentionDuration = resolveRetention({}, null);
     const s3Tag = retentionToS3Tag(retentionDuration);
     const signalId = sesMessageId;
-    const keyPrefix = `accounts/${accountId}/extracted/${signalId}/`;
+    const keyPrefix = `content/accounts/${accountId}/extracted/${signalId}/`;
 
     const [presignedGet, presignedPost] = await Promise.all([
       generatePresignedGet(this.s3Client, this.emailBucket, s3Key),
@@ -856,21 +853,13 @@ export class SignalProcessor {
       presignedGetUrl: presignedGet,
       presignedPost,
       accountId,
-      senderEtld1: "", // derived after parse — content sanitizer uses keyPrefix for uploads
-      contentBaseUrl: this.contentCdnBaseUrl,
+      senderEtld1: "",
       keyPrefix,
       retentionTag: s3Tag,
     });
 
     if (sanitizeResult.isErr()) return err(sanitizeResult.error);
-    const { parsed: sanitizedParsed, urlMapping } = sanitizeResult.value;
-
-    // Apply URL replacements (caller-side, safe string operations)
-    if (sanitizedParsed.htmlBody) {
-      for (const [originalUrl, cdnPath] of Object.entries(urlMapping)) {
-        sanitizedParsed.htmlBody = sanitizedParsed.htmlBody.replaceAll(originalUrl, `${this.contentCdnBaseUrl}${cdnPath}`);
-      }
-    }
+    const { parsed: sanitizedParsed } = sanitizeResult.value;
 
     // Map sanitized response to ParsedMime for downstream compatibility
     const parsed: ParsedMime = {
@@ -883,7 +872,6 @@ export class SignalProcessor {
         mimeType: a.mimeType,
         sizeBytes: a.sizeBytes,
         s3Key: a.s3Key,
-        ...(a.contentId ? { contentId: a.contentId } : {}),
       })),
       headers: sanitizedParsed.headers,
       ...(sanitizedParsed.replyTo ? { replyTo: sanitizedParsed.replyTo } : {}),
@@ -1409,7 +1397,7 @@ export class SignalProcessor {
     const signalLookupId = buildCalendarSignalLookupId(calendarData.organizer, calendarData.veventUid);
 
     // Store raw .ics as S3 attachment on the calendar signal
-    const icsS3Key = `accounts/${accountId}/calendar/${calendarSignalId}/invite.ics`;
+    const icsS3Key = `content/accounts/${accountId}/calendar/${calendarSignalId}/invite.ics`;
     await this.s3Client.send(new PutObjectCommand({
       Bucket: this.contentBucket,
       Key: icsS3Key,
