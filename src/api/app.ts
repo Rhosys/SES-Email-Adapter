@@ -17,6 +17,7 @@ import type { AccountDatabase } from "../database/account-database.js";
 import type { Logger } from "../logger.js";
 import { deriveGroupingKey } from "../processor/processor.js";
 import { zParse } from "./validate.js";
+import { toApiArc, toApiSignal } from "./transform.js";
 import { validateRuleCondition } from "./validate-rule-condition.js";
 import { validateWebhookConfig } from "./validate-webhook-config.js";
 import type { AstValidationResult } from "../isolated/ast-validator.js";
@@ -343,7 +344,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
       };
       const result = await arcDb.searchArcs(accountId, q, params);
       if (result.isErr()) return err(c, 500, "Internal Server Error");
-      return c.json(page("arcs", result.value.items, result.value.nextCursor));
+      return c.json(page("arcs", result.value.items.map(toApiArc), result.value.nextCursor));
     }
     const params: ListArcsParams = {
       ...(query["workflow"] ? { workflow: query["workflow"] as Workflow } : {}),
@@ -354,7 +355,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     };
     const result = await arcDb.listArcs(accountId, params);
     if (result.isErr()) return err(c, 500, "Internal Server Error");
-    return c.json(page("arcs", result.value.items, result.value.nextCursor));
+    return c.json(page("arcs", result.value.items.map(toApiArc), result.value.nextCursor));
   });
 
   app.get("/accounts/:accountId/arcs/:id", authz("arcs:read", c => `accounts/${c.req.param("accountId")}/arcs/${c.req.param("id")}`), async (c) => {
@@ -450,10 +451,11 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     // Build enriched response — calendar_event signals get latestResponse field
     const enrichedSignals = signals.map(signal => {
       const withUrls = contentCdnBaseUrl ? withAttachmentUrls(signal, contentCdnBaseUrl) : signal;
+      const apiSignal = toApiSignal(withUrls);
       if (isCalendarEventSignal(withUrls) && enrichments.has(withUrls.data.veventUid)) {
-        return { ...withUrls, latestResponse: enrichments.get(withUrls.data.veventUid) };
+        return { ...apiSignal, latestResponse: enrichments.get(withUrls.data.veventUid) };
       }
-      return withUrls;
+      return apiSignal;
     });
 
     return c.json(page("signals", enrichedSignals, result.value.nextCursor));
