@@ -418,8 +418,9 @@ export class SignalProcessor {
     }
     if (processResult.isErr()) {
       const e = processResult.error;
-      // Pass DbError through unchanged. InvalidResponseError is a programming error
-      // at an inner boundary — wrap it once here so the caller only sees DbError.
+      // DbError passes through unchanged — wrapping it in another dbError() would nest
+      // {kind:db_error} inside {kind:db_error}, obscuring the real cause.
+      // InvalidResponseError is a different kind, so convert it here at the type boundary.
       return err(e.kind === 'db_error' ? e : dbError(e));
     }
 
