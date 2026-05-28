@@ -311,7 +311,6 @@ interface SignalProcessorOptions {
   s3Client: S3Client;
   emailBucket: string;
   contentBucket: string;
-  contentCdnBaseUrl: string;
 }
 
 export class SignalProcessor {
@@ -338,7 +337,6 @@ export class SignalProcessor {
   private readonly s3Client: S3Client;
   private readonly emailBucket: string;
   private readonly contentBucket: string;
-  private readonly contentCdnBaseUrl: string;
 
   constructor(opts: SignalProcessorOptions) {
     this.arcDb = opts.arcDb;
@@ -364,7 +362,6 @@ export class SignalProcessor {
     this.s3Client = opts.s3Client;
     this.emailBucket = opts.emailBucket;
     this.contentBucket = opts.contentBucket;
-    this.contentCdnBaseUrl = opts.contentCdnBaseUrl;
   }
 
   async processRecord(message: InboundSignalMessage, receiveCount: number): Promise<Result<void, DbError>> {
@@ -856,21 +853,13 @@ export class SignalProcessor {
       presignedGetUrl: presignedGet,
       presignedPost,
       accountId,
-      senderEtld1: "", // derived after parse — content sanitizer uses keyPrefix for uploads
-      contentBaseUrl: this.contentCdnBaseUrl,
+      senderEtld1: "",
       keyPrefix,
       retentionTag: s3Tag,
     });
 
     if (sanitizeResult.isErr()) return err(sanitizeResult.error);
-    const { parsed: sanitizedParsed, urlMapping } = sanitizeResult.value;
-
-    // Apply URL replacements (caller-side, safe string operations)
-    if (sanitizedParsed.htmlBody) {
-      for (const [originalUrl, cdnPath] of Object.entries(urlMapping)) {
-        sanitizedParsed.htmlBody = sanitizedParsed.htmlBody.replaceAll(originalUrl, `${this.contentCdnBaseUrl}${cdnPath}`);
-      }
-    }
+    const { parsed: sanitizedParsed } = sanitizeResult.value;
 
     // Map sanitized response to ParsedMime for downstream compatibility
     const parsed: ParsedMime = {
@@ -883,7 +872,6 @@ export class SignalProcessor {
         mimeType: a.mimeType,
         sizeBytes: a.sizeBytes,
         s3Key: a.s3Key,
-        ...(a.contentId ? { contentId: a.contentId } : {}),
       })),
       headers: sanitizedParsed.headers,
       ...(sanitizedParsed.replyTo ? { replyTo: sanitizedParsed.replyTo } : {}),
