@@ -311,7 +311,6 @@ interface SignalProcessorOptions {
   s3Client: S3Client;
   emailBucket: string;
   contentBucket: string;
-  contentCdnBaseUrl: string;
 }
 
 export class SignalProcessor {
@@ -338,7 +337,6 @@ export class SignalProcessor {
   private readonly s3Client: S3Client;
   private readonly emailBucket: string;
   private readonly contentBucket: string;
-  private readonly contentCdnBaseUrl: string;
 
   constructor(opts: SignalProcessorOptions) {
     this.arcDb = opts.arcDb;
@@ -364,7 +362,6 @@ export class SignalProcessor {
     this.s3Client = opts.s3Client;
     this.emailBucket = opts.emailBucket;
     this.contentBucket = opts.contentBucket;
-    this.contentCdnBaseUrl = opts.contentCdnBaseUrl;
   }
 
   async processRecord(message: InboundSignalMessage, receiveCount: number): Promise<Result<void, DbError>> {
@@ -875,7 +872,6 @@ export class SignalProcessor {
         mimeType: a.mimeType,
         sizeBytes: a.sizeBytes,
         s3Key: a.s3Key,
-        url: `${this.contentCdnBaseUrl}/${a.s3Key}`,
       })),
       headers: sanitizedParsed.headers,
       ...(sanitizedParsed.replyTo ? { replyTo: sanitizedParsed.replyTo } : {}),
