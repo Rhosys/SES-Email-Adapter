@@ -61,7 +61,7 @@ function toApiEmailSignalData(data: EmailSignalData): Api.InboundEmailSignalData
       subject: data.subject,
       ...(data.htmlBody ? { body: data.htmlBody } : {}),
       attachments: (data.attachments ?? []).map(a => ({
-        attachmentId: a.contentId ?? a.filename,
+        attachmentId: a.filename,
         filename: a.filename,
         mimeType: a.mimeType,
         sizeBytes: a.sizeBytes,
@@ -85,7 +85,7 @@ function toApiEmailSignalData(data: EmailSignalData): Api.InboundEmailSignalData
     subject: data.subject,
     ...(data.htmlBody ? { body: data.htmlBody } : {}),
     attachments: (data.attachments ?? []).map(a => ({
-      attachmentId: a.contentId ?? a.filename,
+      attachmentId: a.filename,
       filename: a.filename,
       mimeType: a.mimeType,
       sizeBytes: a.sizeBytes,

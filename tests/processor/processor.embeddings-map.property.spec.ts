@@ -224,7 +224,7 @@ describe("Feature: split-embedding-pipeline, Property 4: Embeddings map composit
 
     const processor = new SignalProcessor({
 arcDb, accountDb, processingDb,
-      contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", contentCdnBaseUrl: "https://cdn.example.com",
+      contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
       classifier: { classify: vi.fn().mockResolvedValue({ ...CLASSIFICATION }) },
       embeddingGenerator,
       auroraWriter: makeAuroraWriter(),
