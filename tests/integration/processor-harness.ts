@@ -126,7 +126,10 @@ export async function createProcessorHarness(): Promise<ProcessorHarness> {
     },
     embeddingGenerator: stubEmbeddingGenerator,
     auroraWriter: stubAuroraWriter,
-    arcMatcher: arcDb,
+    arcMatcher: {
+      findMatch: async () => ok(null),
+      upsertEmbedding: async () => ok(undefined),
+    },
     ruleEvaluator: new JsonLogicRuleEvaluator(logger),
     notifier: { notify: async () => ok(undefined) },
     forwarder: { forward: async () => ok(undefined) },
