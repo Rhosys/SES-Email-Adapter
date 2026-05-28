@@ -65,7 +65,7 @@ const TINY_PDF = Buffer.from('%PDF-1.0\n1 0 obj<</Type /Catalog>>endobj\nxref\n0
 const h = await createProcessorHarness();
 const token = await h.mockAuthress.createToken(`user-rt-${h.accountId}`);
 
-function apiReq(method: string, path: string, body?: unknown): Promise<Response> {
+async function apiReq(method: string, path: string, body?: unknown): Promise<Response> {
   return h.app.request(path, {
     method,
     headers: {
@@ -80,7 +80,7 @@ async function getArc(accountId: string): Promise<Record<string, unknown>> {
   const res = await apiReq('GET', `/accounts/${accountId}/arcs`);
   const json = await res.json() as { arcs: Record<string, unknown>[] };
   if (!json.arcs?.length) throw new Error('No arcs found');
-  return json.arcs[0];
+  return json.arcs[0]!;
 }
 
 async function getSignals(accountId: string, arcId: string): Promise<Record<string, unknown>[]> {

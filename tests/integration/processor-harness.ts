@@ -20,7 +20,6 @@ import { ProcessingDatabase } from '../../src/database/processing-database.js';
 import { SignalProcessor } from '../../src/processor/processor.js';
 import type { InboundSignalMessage, SideEffectPayload, SesVerdict } from '../../src/processor/processor.js';
 import { JsonLogicRuleEvaluator } from '../../src/processor/rule-evaluator.js';
-import { S3RetentionServiceImpl } from '../../src/embedding/s3-retention-service.js';
 import { createApp } from '../../src/api/app.js';
 import { AuthressAuthService } from '../../src/api/authress-auth.js';
 import { startMockAuthressServer } from './mock-authress.js';
@@ -86,12 +85,17 @@ export async function createProcessorHarness(): Promise<ProcessorHarness> {
 
   const logger = createConsoleLogger();
 
-  const s3 = new S3Client({});
+  // forcePathStyle is required for MiniStack/LocalStack so presigned URLs use
+  // http://localhost:4566/{bucket}/... rather than http://{bucket}.localhost:4566/...
+  const isLocal = ENDPOINT.includes('localhost') || ENDPOINT.includes('127.0.0.1');
+  const s3 = new S3Client(isLocal ? { forcePathStyle: true } : {});
   const sqs = new SQSClient({});
 
   // Provision S3 buckets and SQS queue (idempotent — CreateBucket is a no-op if it exists)
-  await s3.send(new CreateBucketCommand({ Bucket: EMAIL_BUCKET })).catch(() => undefined);
-  await s3.send(new CreateBucketCommand({ Bucket: CONTENT_BUCKET })).catch(() => undefined);
+  const region = process.env['AWS_REGION'] ?? 'eu-central-1';
+  const bucketConfig = region !== 'us-east-1' ? { CreateBucketConfiguration: { LocationConstraint: region as 'eu-central-1' } } : {};
+  await s3.send(new CreateBucketCommand({ Bucket: EMAIL_BUCKET, ...bucketConfig })).catch(() => undefined);
+  await s3.send(new CreateBucketCommand({ Bucket: CONTENT_BUCKET, ...bucketConfig })).catch(() => undefined);
   await sqs.send(new CreateQueueCommand({ QueueName: 'ses-it-signals' })).catch(() => undefined);
 
   const accountDb = new AccountDatabase();
@@ -117,7 +121,7 @@ export async function createProcessorHarness(): Promise<ProcessorHarness> {
     processingDb,
     contentSanitizer: new InProcessContentSanitizer(),
     classifier: {
-      classify: async () => ({ workflow: 'other' as const, workflowData: {} as never, spamScore: 0 }),
+      classify: async () => ({ workflow: 'other' as const, workflowData: {} as never, spamScore: 0, summary: '', labels: [] }),
     },
     embeddingGenerator: stubEmbeddingGenerator,
     auroraWriter: stubAuroraWriter,
@@ -207,7 +211,7 @@ export async function createProcessorHarness(): Promise<ProcessorHarness> {
 
     if (!Messages?.length) throw new Error('No SQS message received within timeout');
 
-    const record = Messages[0];
+    const record = Messages[0]!;
     const outer = JSON.parse(record.Body!) as { Message: string };
     const inner = JSON.parse(outer.Message) as {
       notificationType: string;
@@ -227,7 +231,7 @@ export async function createProcessorHarness(): Promise<ProcessorHarness> {
     };
 
     const result = await processor.processRecord(message, 1);
-    if (result.isErr()) throw new Error(`processRecord failed: ${result.error.message}`);
+    if (result.isErr()) throw new Error(`processRecord failed: ${String(result.error.cause)}`);
 
     await sqs.send(new DeleteMessageCommand({
       QueueUrl: QUEUE_URL,
