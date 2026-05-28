@@ -34,6 +34,7 @@ import type { sendRsvp } from '../../src/processor/calendar/rsvp-composer.js';
 import type { PostApprovalCalendarHandlerDeps } from '../../src/processor/calendar/post-approval-handler.js';
 import type { EmbeddingGenerator } from '../../src/embedding/embedding-generator.js';
 import type { MultiClusterAuroraWriter } from '../../src/database/multi-cluster-aurora-writer.js';
+import type { WorkflowData } from '../../src/types/index.js';
 
 const ENDPOINT = process.env['AWS_ENDPOINT_URL'] ?? 'http://localhost:4566';
 const EMAIL_BUCKET = process.env['EMAIL_BUCKET'] ?? 'ses-it-email';
@@ -121,7 +122,7 @@ export async function createProcessorHarness(): Promise<ProcessorHarness> {
     processingDb,
     contentSanitizer: new InProcessContentSanitizer(),
     classifier: {
-      classify: async () => ({ workflow: 'other' as const, workflowData: {} as never, spamScore: 0, summary: '', labels: [] }),
+      classify: async () => ({ workflow: 'other' as const, workflowData: {} as unknown as WorkflowData, spamScore: 0, summary: '', labels: [] as string[] }),
     },
     embeddingGenerator: stubEmbeddingGenerator,
     auroraWriter: stubAuroraWriter,
