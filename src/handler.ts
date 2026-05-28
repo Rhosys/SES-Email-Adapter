@@ -138,7 +138,6 @@ const processor = new SignalProcessor({
   s3Client: s3,
   emailBucket: S3_BUCKET,
   contentBucket: CONTENT_BUCKET,
-  contentCdnBaseUrl: CONTENT_CDN_BASE_URL,
 });
 
 const feedbackProcessor = new FeedbackProcessor(processingDb, accountDb, logger, {
@@ -225,6 +224,7 @@ const app = createApp({
   draftSendDispatcher,
   accountCreationStarter,
   appBaseUrl: APP_BASE_URL,
+  contentCdnBaseUrl: CONTENT_CDN_BASE_URL,
   astValidator: new LambdaUserCodeExecutor(lambda, USER_CODE_EXECUTOR_ARN),
   emailService,
   rsvpComposer: sendRsvp,

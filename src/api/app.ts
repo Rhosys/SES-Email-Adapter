@@ -10,8 +10,8 @@ import { computeUndoWindowSeconds } from "./undo-window.js";
 import type { AuditEvent, AuditDatabase } from "../database/audit-database.js";
 import type { Result } from "neverthrow";
 import type { DbError, NotFoundError, AuthressServiceError, AuthError } from "../errors.js";
-import type { Arc, Signal, View, Label, Rule, Domain, DnsRecord, Account, Page, PageParams, ArcStatus, Workflow, WorkflowData, Alias, AliasSender, SenderPolicy, VerifiedForwardingAddress, Pagination, EmailTemplate, CalendarEventData, CalendarResponseData, DomainMisconfigurationData } from "../types/index.js";
-import { isCalendarEventSignal } from "../types/index.js";
+import type { Arc, Signal, AnySignal, Attachment, View, Label, Rule, Domain, DnsRecord, Account, Page, PageParams, ArcStatus, Workflow, WorkflowData, Alias, AliasSender, SenderPolicy, VerifiedForwardingAddress, Pagination, EmailTemplate, CalendarEventData, CalendarResponseData, DomainMisconfigurationData } from "../types/index.js";
+import { isCalendarEventSignal, isEmailSignal } from "../types/index.js";
 import type { UpdateArcFields, ArcDatabase } from "../database/arc-database.js";
 import type { AccountDatabase } from "../database/account-database.js";
 import type { Logger } from "../logger.js";
@@ -127,6 +127,7 @@ interface AppDeps {
   draftSendDispatcher?: DraftSendDispatcher;
   accountCreationStarter?: { start(accountId: string, email: string): Promise<void> };
   appBaseUrl?: string;
+  contentCdnBaseUrl?: string;
   astValidator?: UserCodeExecutorClient;
   billingHandler?: BillingHandler;
   emailService: EmailService;
@@ -144,7 +145,12 @@ function page<K extends string, T>(key: K, items: T[], nextCursor?: string): Rec
   return { [key]: items, pagination: { cursor: nextCursor ?? null } } as Record<K, T[]> & { pagination: Pagination };
 }
 
-export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, verificationMailer, jobDispatcher, draftSendDispatcher, accountCreationStarter, appBaseUrl, astValidator, billingHandler, emailService, rsvpComposer, postApprovalCalendarDeps }: AppDeps) {
+function withAttachmentUrls<T extends AnySignal>(signal: T, cdnBase: string): T {
+  if (!isEmailSignal(signal)) return signal;
+  return { ...signal, data: { ...signal.data, attachments: signal.data.attachments.map((a: Attachment) => ({ ...a, url: `${cdnBase}/${a.s3Key}` })) } };
+}
+
+export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, verificationMailer, jobDispatcher, draftSendDispatcher, accountCreationStarter, appBaseUrl, contentCdnBaseUrl, astValidator, billingHandler, emailService, rsvpComposer, postApprovalCalendarDeps }: AppDeps) {
   const app = new OpenAPIHono<AppEnv>();
 
   // Helper: validate code AST via the isolated Lambda
@@ -443,10 +449,11 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
 
     // Build enriched response — calendar_event signals get latestResponse field
     const enrichedSignals = signals.map(signal => {
-      if (isCalendarEventSignal(signal) && enrichments.has(signal.data.veventUid)) {
-        return { ...signal, latestResponse: enrichments.get(signal.data.veventUid) };
+      const withUrls = contentCdnBaseUrl ? withAttachmentUrls(signal, contentCdnBaseUrl) : signal;
+      if (isCalendarEventSignal(withUrls) && enrichments.has(withUrls.data.veventUid)) {
+        return { ...withUrls, latestResponse: enrichments.get(withUrls.data.veventUid) };
       }
-      return signal;
+      return withUrls;
     });
 
     return c.json(page("signals", enrichedSignals, result.value.nextCursor));
@@ -534,7 +541,8 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     const items = (status === "quarantine_visible" || status === "quarantine_hidden")
       ? result.value.items.filter(s => s.status === status)
       : result.value.items;
-    return c.json(page("signals", items, result.value.nextCursor));
+    const itemsWithUrls = contentCdnBaseUrl ? items.map(s => withAttachmentUrls(s, contentCdnBaseUrl)) : items;
+    return c.json(page("signals", itemsWithUrls, result.value.nextCursor));
   });
 
   app.post("/accounts/:accountId/signals/:id/quarantineResponse", authz("signals:write", c => `accounts/${c.req.param("accountId")}/signals/${c.req.param("id")}`), async (c) => {
@@ -623,7 +631,8 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
       }
     }
 
-    return c.json({ arc, signal: { ...signal, status: "active", arcId: arc.id } });
+    const signalWithUrls = contentCdnBaseUrl ? withAttachmentUrls(signal, contentCdnBaseUrl) : signal;
+    return c.json({ arc, signal: { ...signalWithUrls, status: "active", arcId: arc.id } });
   });
 
   app.get("/accounts/:accountId/signals/:id", authz("signals:read", c => `accounts/${c.req.param("accountId")}/signals/${c.req.param("id")}`), async (c) => {
@@ -633,7 +642,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     const signal = signalResult.value;
     if (!signal) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
     if (signal.accountId !== accountId) return err(c, 403, "Forbidden");
-    return c.json(signal);
+    return c.json(contentCdnBaseUrl ? withAttachmentUrls(signal, contentCdnBaseUrl) : signal);
   });
 
   app.patch("/accounts/:accountId/signals/:id", authz("signals:write", c => `accounts/${c.req.param("accountId")}/signals/${c.req.param("id")}`), async (c) => {
