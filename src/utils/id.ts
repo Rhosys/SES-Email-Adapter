@@ -1,8 +1,8 @@
 import { v7 as uuidv7 } from "uuid";
-import { constants, createTranslator } from "short-uuid";
+import shortUuid from "short-uuid";
 import { createHash, randomBytes } from "node:crypto";
 
-const translator = createTranslator(constants.flickrBase58);
+const translator = shortUuid.createTranslator(shortUuid.constants.flickrBase58);
 
 const FLICKR_BASE58 = "123456789abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ";
 const BASE58_SET = new Set(FLICKR_BASE58);

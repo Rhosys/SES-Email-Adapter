@@ -16,6 +16,7 @@ export const WORKFLOWS = [
   "healthcare",    // Appointments, test results, prescriptions, insurance
   "job",           // Applications, interviews, offers, rejections — career pipeline
   "support",       // Helpdesk tickets with threaded conversation and ticket ID
+  "events",        // Ticketed events: concerts, conferences, sports, theatre — venue + date + seats
   "test",          // Emails sent by the account owner to their own domain — triggers pong
   // NOTE: spam is NOT a workflow. It is expressed via Signal.spamScore (0–1).
   // A phishing email pretending to be a bank login is workflow:"auth" + spamScore:0.95.
@@ -45,6 +46,7 @@ export type WorkflowData =
   | HealthcareData
   | JobData
   | SupportData
+  | EventsData
   | TestData;
 
 // ---------------------------------------------------------------------------
@@ -97,6 +99,9 @@ export interface TravelData {
   passengers?: Array<{ name: string }>;
   totalAmount?: number;
   currency?: string;
+  flightNumber?: string;
+  seatNumber?: string;
+  boardingTime?: string;
 }
 
 
@@ -113,6 +118,7 @@ export interface PaymentsData {
   accountLastFour?: string;
   downloadUrl?: string;
   managementUrl?: string;
+  paymentUrl?: string;
 }
 
 export interface AlertData {
@@ -171,6 +177,7 @@ export interface HealthcareData {
   location?: string;
   requiresAction: boolean;
   portalUrl?: string;
+  patientName?: string;
 }
 
 export interface JobData {
@@ -183,6 +190,8 @@ export interface JobData {
   interviewDate?: string;
   applicationStatus?: "submitted" | "reviewing" | "interview" | "offer" | "rejected";
   actionUrl?: string;
+  contactName?: string;
+  contactEmail?: string;
 }
 
 export interface SupportData {
@@ -193,6 +202,23 @@ export interface SupportData {
   priority?: "low" | "normal" | "high" | "urgent";
   agentName?: string;
   responseUrl?: string;
+}
+
+export interface EventsData {
+  workflow: "events";
+  eventType: "ticket_confirmation" | "reminder" | "update" | "cancellation" | "venue_change";
+  eventName: string;
+  venueName?: string;
+  venueAddress?: string;
+  eventStartDatetime?: string;
+  eventEndDatetime?: string;
+  performer?: string;
+  ticketReference?: string;
+  seatDetails?: string;
+  ticketCount?: number;
+  ticketUrl?: string;
+  totalAmount?: number;
+  currency?: string;
 }
 
 export interface TestData {
@@ -557,7 +583,7 @@ export type SystemLabel =
   | "system:workflow:package" | "system:workflow:travel"
   | "system:workflow:payments" | "system:workflow:alert" | "system:workflow:content"
   | "system:workflow:onboarding" | "system:workflow:status" | "system:workflow:healthcare"
-  | "system:workflow:job" | "system:workflow:support" | "system:workflow:test"
+  | "system:workflow:job" | "system:workflow:support" | "system:workflow:events" | "system:workflow:test"
   | "system:spam:high"
   | "system:spam:medium"
   | "system:sender:untrusted"
