@@ -12,6 +12,7 @@
 
 import { createHarness } from './harness.js';
 import { ok } from '../../src/errors.js';
+import type { Account } from '../../src/api/schemas.js';
 
 const h = await createHarness();
 
@@ -73,10 +74,10 @@ async function assertStatus(res: Response, expected: number, label: string): Pro
   await assertStatus(res, 201, 'returns 201');
 
   if (res.status === 201) {
-    const body = await res.json() as Record<string, unknown>;
-    assert(typeof body['id'] === 'string' && (body['id'] as string).startsWith('acc-'), `account id starts with 'acc-' (got ${body['id']})`);
-    assert(body['billingPlan'] === 'Trial', `billingPlan is Trial (got ${body['billingPlan']})`);
-    assert(body['onboarding'] !== undefined, 'onboarding field is present');
+    const body = await res.json() as Account;
+    assert(typeof body.accountId === 'string' && body.accountId.startsWith('acc-'), `account id starts with 'acc-' (got ${body.accountId})`);
+    assert(body.billingPlan === 'Trial', `billingPlan is Trial (got ${body.billingPlan})`);
+    assert(body.onboarding !== undefined, 'onboarding field is present');
   }
 }
 
