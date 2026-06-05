@@ -25,6 +25,8 @@ export interface ClassificationInput {
   receivedAt: string;
   headers: Record<string, string>;
   allowedLabels: string[];
+  signalId?: string;
+  accountId?: string;
 }
 
 export interface ClassificationOutput {
@@ -41,6 +43,30 @@ interface RawClassificationResponse {
   spamScore: number;
   summary: string;
   labels: string[];
+}
+
+// Bedrock Guardrail trace types (when trace: "ENABLED" is set on InvokeModel)
+interface GuardrailFilter {
+  type: string;
+  confidence: string;
+  action: string;
+}
+
+interface GuardrailAssessment {
+  contentPolicy?: { filters?: GuardrailFilter[] };
+}
+
+interface GuardrailTrace {
+  guardrail?: {
+    inputAssessment?: Record<string, GuardrailAssessment>;
+    outputAssessment?: Record<string, GuardrailAssessment>;
+  };
+}
+
+interface BedrockResponseWithTrace {
+  content: Array<{ type: string; text: string }>;
+  "amazon-bedrock-guardrailAction"?: string;
+  "amazon-bedrock-trace"?: GuardrailTrace;
 }
 
 export class SignalClassifier {
@@ -77,13 +103,16 @@ export class SignalClassifier {
     const responseBody = new TextDecoder().decode(response.body);
 
     // Parse outer Bedrock response
-    let result: { content: Array<{ type: string; text: string }> };
+    let result: BedrockResponseWithTrace;
     try {
-      result = JSON.parse(responseBody) as { content: Array<{ type: string; text: string }> };
+      result = JSON.parse(responseBody) as BedrockResponseWithTrace;
     } catch {
       this.logger.error("Classifier received invalid JSON from Bedrock response envelope.", { code: "classifier.parse_failed", input, rawResponse: responseBody });
       return err(classificationError("Invalid JSON in Bedrock response envelope"));
     }
+
+    // Handle guardrail trace — observe only, never blocks classification
+    this.handleGuardrailTrace(result, input.signalId, input.accountId);
 
     const text = result.content.find((c) => c.type === "text")?.text ?? "";
 
@@ -117,5 +146,35 @@ export class SignalClassifier {
       summary: raw.summary,
       labels,
     });
+  }
+
+  private handleGuardrailTrace(response: BedrockResponseWithTrace, signalId?: string, accountId?: string): void {
+    const trace = response["amazon-bedrock-trace"];
+    if (!trace?.guardrail) return;
+
+    const assessments = [
+      ...Object.values(trace.guardrail.inputAssessment ?? {}),
+      ...Object.values(trace.guardrail.outputAssessment ?? {}),
+    ];
+
+    for (const assessment of assessments) {
+      const filters = assessment.contentPolicy?.filters;
+      if (!filters) continue;
+
+      for (const filter of filters) {
+        // Only log filters that actually detected something (action !== "NONE" or confidence reported)
+        if (filter.confidence === "NONE") continue;
+
+        const detectionType = filter.type === "PROMPT_ATTACK" ? "PROMPT_ATTACK" : "CONTENT_FILTER";
+        this.logger.track("classifier.guardrail_detection", {
+          code: "classifier.guardrail_detection",
+          signalId,
+          accountId,
+          detectionType,
+          category: filter.type,
+          confidence: filter.confidence,
+        });
+      }
+    }
   }
 }
