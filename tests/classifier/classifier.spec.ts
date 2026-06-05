@@ -10,48 +10,53 @@ const githubOtpEmail: ClassificationInput = {
   from: "noreply@github.com",
   to: ["user@example.com"],
   subject: "Your GitHub launch code",
-  textBody: "Your authentication code is 483921. This code will expire in 15 minutes.",
+  body: "Your authentication code is 483921. This code will expire in 15 minutes.",
   receivedAt: "2024-01-15T10:30:00Z",
   headers: {
     "authentication-results": "spf=pass dkim=pass dmarc=pass",
     "dkim-signature": "v=1; a=rsa-sha256; d=github.com",
   },
+  allowedLabels: [],
 };
 
 const stripeInvoiceEmail: ClassificationInput = {
   from: "receipts+abc123@stripe.com",
   to: ["user@example.com"],
   subject: "Your receipt from Acme Corp",
-  textBody: `Invoice #INV-2024-001\nAmount due: $149.00 USD\nDue date: February 1, 2024`,
+  body: `Invoice #INV-2024-001\nAmount due: $149.00 USD\nDue date: February 1, 2024`,
   receivedAt: "2024-01-15T09:00:00Z",
   headers: { "authentication-results": "spf=pass dkim=pass" },
+  allowedLabels: ["billing"],
 };
 
 const recruiterEmail: ClassificationInput = {
   from: "sarah.recruiter@techcorp.com",
   to: ["user@example.com"],
   subject: "Exciting Senior Software Engineer opportunity at TechCorp",
-  textBody: `Hi,\n\nSenior Software Engineer role at TechCorp. $180k-$220k in San Francisco.\n\nBest, Sarah`,
+  body: `Hi,\n\nSenior Software Engineer role at TechCorp. $180k-$220k in San Francisco.\n\nBest, Sarah`,
   receivedAt: "2024-01-15T14:00:00Z",
   headers: { "authentication-results": "spf=pass dkim=pass" },
+  allowedLabels: ["recruiting"],
 };
 
 const phishingEmail: ClassificationInput = {
   from: "security@paypa1.com",
   to: ["user@example.com"],
   subject: "⚠️ URGENT: Your account has been suspended",
-  textBody: `Your PayPal account has been suspended. Click: http://paypal-restore.ru/login`,
+  body: `Your PayPal account has been suspended. Click: http://paypal-restore.ru/login`,
   receivedAt: "2024-01-15T08:00:00Z",
   headers: { "authentication-results": "spf=fail dkim=fail" },
+  allowedLabels: [],
 };
 
 const shippingEmail: ClassificationInput = {
   from: "tracking@amazon.com",
   to: ["user@example.com"],
   subject: "Your package is out for delivery today",
-  textBody: `Order #112-3456789\nTracking: 1Z999AA10123456784\nDelivery: Today by 8pm`,
+  body: `Order #112-3456789\nTracking: 1Z999AA10123456784\nDelivery: Today by 8pm`,
   receivedAt: "2024-01-15T07:00:00Z",
   headers: { "authentication-results": "spf=pass dkim=pass" },
+  allowedLabels: [],
 };
 
 // ---------------------------------------------------------------------------
@@ -322,7 +327,7 @@ describe("SignalClassifier", () => {
         labels: [],
       });
 
-      await classifier.classify({ ...githubOtpEmail, textBody: "x".repeat(10_000) });
+      await classifier.classify({ ...githubOtpEmail, body: "x".repeat(10_000) });
 
       const callArgs = mockSend.mock.calls[0]![0] as { body: Uint8Array };
       const body = JSON.parse(new TextDecoder().decode(callArgs.body)) as {
@@ -338,7 +343,7 @@ describe("SignalClassifier", () => {
   // -------------------------------------------------------------------------
 
   describe("content formatting", () => {
-    it("uses stripped HTML body when textBody is absent", async () => {
+    it("passes body content through to the Bedrock message", async () => {
       mockClassifyResponse({
         workflow: "conversation",
         workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
@@ -351,18 +356,16 @@ describe("SignalClassifier", () => {
         from: "noreply@service.com",
         to: ["user@example.com"],
         subject: "HTML only",
-        htmlBody: "<p><b>Important</b> content with <a href='#'>links</a> and <script>evil()</script> inline.</p>",
+        body: "Important content with links and inline.",
         receivedAt: "2024-01-15T10:00:00Z",
         headers: {},
+        allowedLabels: [],
       });
 
       const callArgs = mockSend.mock.calls[0]![0] as { body: Uint8Array };
       const payload = JSON.parse(new TextDecoder().decode(callArgs.body)) as { messages: Array<{ content: string }> };
       const content = payload.messages[0]!.content;
       expect(content).toContain("Important content with links");
-      expect(content).not.toContain("<b>");
-      expect(content).not.toContain("<script>");
-      expect(content).not.toContain("evil()");
     });
 
     it("includes only RELEVANT_HEADERS in the Bedrock message — irrelevant headers are stripped", async () => {
@@ -378,21 +381,22 @@ describe("SignalClassifier", () => {
         from: "noreply@service.com",
         to: ["user@example.com"],
         subject: "Header test",
-        textBody: "body",
+        body: "body",
         receivedAt: "2024-01-15T10:00:00Z",
         headers: {
-          "dkim-signature": "v=1; keep_me",      // relevant
           "authentication-results": "spf=pass",  // relevant
+          "list-unsubscribe": "<mailto:unsub@example.com>",  // relevant
           "x-custom-crm-id": "abc123",           // not relevant
           "user-agent": "Mozilla/5.0",           // not relevant
         },
+        allowedLabels: [],
       });
 
       const callArgs = mockSend.mock.calls[0]![0] as { body: Uint8Array };
       const payload = JSON.parse(new TextDecoder().decode(callArgs.body)) as { messages: Array<{ content: string }> };
       const content = payload.messages[0]!.content;
-      expect(content).toContain("dkim-signature");
       expect(content).toContain("authentication-results");
+      expect(content).toContain("list-unsubscribe");
       expect(content).not.toContain("x-custom-crm-id");
       expect(content).not.toContain("user-agent");
     });
@@ -410,9 +414,10 @@ describe("SignalClassifier", () => {
         from: "newsletter@service.com",
         to: ["user@example.com"],
         subject: "Long body",
-        textBody: "x".repeat(4001),
+        body: "x".repeat(4001),
         receivedAt: "2024-01-15T10:00:00Z",
         headers: {},
+        allowedLabels: [],
       });
 
       const callArgs = mockSend.mock.calls[0]![0] as { body: Uint8Array };
@@ -433,9 +438,10 @@ describe("SignalClassifier", () => {
         from: "newsletter@service.com",
         to: ["user@example.com"],
         subject: "Exact length body",
-        textBody: "y".repeat(4000),
+        body: "y".repeat(4000),
         receivedAt: "2024-01-15T10:00:00Z",
         headers: {},
+        allowedLabels: [],
       });
 
       const callArgs = mockSend.mock.calls[0]![0] as { body: Uint8Array };
@@ -465,9 +471,10 @@ describe("SignalClassifier", () => {
         from: "friend@example.com",
         to: ["user@example.com"],
         subject: "Hello 👋 from Tokyo 🗼",
-        textBody: "希望你一切都好！😊",
+        body: "希望你一切都好！😊",
         receivedAt: "2024-01-15T10:00:00Z",
         headers: {},
+        allowedLabels: [],
       });
 
       const callArgs = mockSend.mock.calls[0]![0] as { body: Uint8Array };
@@ -503,9 +510,10 @@ describe("SignalClassifier", () => {
         from: "alerts@chase.com",
         to: ["user@example.com"],
         subject: "Unusual activity on your Chase account",
-        textBody: "We noticed a $2,499.99 charge at an unknown merchant. If this wasn't you, call us.",
+        body: "We noticed a $2,499.99 charge at an unknown merchant. If this wasn't you, call us.",
         receivedAt: "2024-01-15T08:00:00Z",
         headers: { "authentication-results": "spf=pass dkim=pass" },
+        allowedLabels: ["urgent", "action-needed"],
       });
 
       expect(result.workflow).toBe("alert");
@@ -540,9 +548,10 @@ describe("SignalClassifier", () => {
         from: "confirmation@delta.com",
         to: ["user@example.com"],
         subject: "Your flight confirmation DELTA123",
-        textBody: "Flight JFK → LHR on March 15. Confirmation: DELTA123.",
+        body: "Flight JFK → LHR on March 15. Confirmation: DELTA123.",
         receivedAt: "2024-01-15T12:00:00Z",
         headers: { "authentication-results": "spf=pass dkim=pass" },
+        allowedLabels: [],
       });
 
       expect(result.workflow).toBe("travel");
@@ -578,9 +587,10 @@ describe("SignalClassifier", () => {
         from: "security@github.com",
         to: ["user@example.com"],
         subject: "Suspicious sign-in attempt on your GitHub account",
-        textBody: "We detected a login from 203.0.113.42 in Moscow, Russia. Was this you?",
+        body: "We detected a login from 203.0.113.42 in Moscow, Russia. Was this you?",
         receivedAt: "2024-01-15T03:00:00Z",
         headers: { "authentication-results": "spf=pass dkim=pass" },
+        allowedLabels: ["action-needed", "urgent"],
       });
 
       expect(result.workflow).toBe("alert");
@@ -603,9 +613,10 @@ describe("SignalClassifier", () => {
         from: "me@mydomain.com",
         to: ["me@mydomain.com"],
         subject: "test",
-        textBody: "testing 123",
+        body: "testing 123",
         receivedAt: "2024-01-15T10:00:00Z",
         headers: {},
+        allowedLabels: [],
       });
 
       expect(result.workflow).toBe("test");
