@@ -896,6 +896,8 @@ export class SignalProcessor {
       headers: parsed.headers,
       receivedAt: timestamp,
       allowedLabels,
+      signalId,
+      accountId,
     });
 
     if (classification.isErr()) {
