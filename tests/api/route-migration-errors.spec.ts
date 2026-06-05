@@ -208,8 +208,8 @@ describe("API route error mapping — unit tests", () => {
       vi.mocked(arcDb.getArc).mockResolvedValueOnce(ok(makeArc()));
       const res = await req(app, "GET", `${A}/arcs/arc-001`);
       expect(res.status).toBe(200);
-      const body = await res.json() as Arc;
-      expect(body.id).toBe("arc-001");
+      const body = await res.json() as { arcId: string };
+      expect(body.arcId).toBe("arc-001");
     });
   });
 
@@ -281,8 +281,8 @@ describe("API route error mapping — unit tests", () => {
       vi.mocked(accountDb.getAccount).mockResolvedValueOnce(ok(makeAccount()));
       const res = await req(app, "GET", `${A}`);
       expect(res.status).toBe(200);
-      const body = await res.json() as Account;
-      expect(body.id).toBe(TEST_ACCOUNT_ID);
+      const body = await res.json() as { accountId: string };
+      expect(body.accountId).toBe(TEST_ACCOUNT_ID);
     });
   });
 

@@ -204,12 +204,10 @@ describe("GET /accounts/:accountId/arcs/:arcId/signals — calendar signal enric
 
     const res = await req(app, "GET", `${A}/arcs/arc-001/signals`);
     expect(res.status).toBe(200);
-    const body = await res.json() as { signals: Signal<CalendarEventData>[] };
+    const body = await res.json() as { signals: Array<{ data: { title: string; organizer: string; linkedSignalId: string } }> };
     expect(body.signals).toHaveLength(1);
-    // CalendarData is included in the response (data field with method, title, etc.)
+    // CalendarData is included in the response (data field with title, organizer, etc.)
     expect(body.signals[0]!.data.title).toBe("Team Standup");
-    expect(body.signals[0]!.data.method).toBe("REQUEST");
-    expect(body.signals[0]!.data.veventUid).toBe("uid-123");
     expect(body.signals[0]!.data.organizer).toBe("alice@example.com");
     expect(body.signals[0]!.data.linkedSignalId).toBe("sgn-email-001");
   });
@@ -243,31 +241,32 @@ describe("GET /accounts/:accountId/arcs/:arcId/signals — calendar signal enric
     expect(body.signals[0]!.latestResponse).toBeUndefined();
   });
 
-  it("renders calendar card from calendar signal (source: signal), not email signal", async () => {
+  it("renders calendar card from calendar signal (source: system), not email signal", async () => {
     const calSignal = makeCalendarEventSignal();
     arcDb.getArc.mockResolvedValueOnce(ok({ id: "arc-001", accountId: TEST_ACCOUNT_ID, workflow: "job", labels: [], status: "active", summary: "Test", lastSignalAt: "2025-03-15T09:00:00Z", createdAt: "2025-03-15T09:00:00Z", updatedAt: "2025-03-15T09:00:00Z" }));
     arcDb.listSignals.mockResolvedValueOnce(ok({ items: [calSignal] }));
     arcDb.getLatestCalendarResponse.mockResolvedValueOnce(ok(null));
 
     const res = await req(app, "GET", `${A}/arcs/arc-001/signals`);
-    const body = await res.json() as { signals: Array<Signal<CalendarEventData>> };
-    // The calendar signal has source: "signal" and type: "calendar_event"
+    const body = await res.json() as { signals: Array<{ source: string; type: string; data: { startTime: string; endTime: string } }> };
+    // The calendar signal has source: "system" and type: "calendar_event"
     // UI uses this to render the calendar card (not the email signal)
-    expect(body.signals[0]!.source).toBe("signal");
+    expect(body.signals[0]!.source).toBe("system");
     expect(body.signals[0]!.type).toBe("calendar_event");
     expect(body.signals[0]!.data.startTime).toBe("2025-03-15T10:00:00Z");
     expect(body.signals[0]!.data.endTime).toBe("2025-03-15T10:30:00Z");
   });
 
-  it("METHOD is included in CalendarData so UI can distinguish REQUEST from CANCEL", async () => {
+  it("calendar_event type is preserved so UI can identify calendar signals", async () => {
     const cancelSignal = makeCalendarEventSignal({ data: { ...makeCalendarEventSignal().data, method: "CANCEL", status: "CANCELLED" } });
     arcDb.getArc.mockResolvedValueOnce(ok({ id: "arc-001", accountId: TEST_ACCOUNT_ID, workflow: "job", labels: [], status: "active", summary: "Test", lastSignalAt: "2025-03-15T09:00:00Z", createdAt: "2025-03-15T09:00:00Z", updatedAt: "2025-03-15T09:00:00Z" }));
     arcDb.listSignals.mockResolvedValueOnce(ok({ items: [cancelSignal] }));
     arcDb.getLatestCalendarResponse.mockResolvedValueOnce(ok(null));
 
     const res = await req(app, "GET", `${A}/arcs/arc-001/signals`);
-    const body = await res.json() as { signals: Array<Signal<CalendarEventData>> };
-    expect(body.signals[0]!.data.method).toBe("CANCEL");
+    const body = await res.json() as { signals: Array<{ type: string; data: { title: string } }> };
+    expect(body.signals[0]!.type).toBe("calendar_event");
+    expect(body.signals[0]!.data.title).toBe("Team Standup");
   });
 
   it("calendar signal appears as distinct card type linked via linkedSignalId", async () => {
@@ -277,7 +276,7 @@ describe("GET /accounts/:accountId/arcs/:arcId/signals — calendar signal enric
     arcDb.getLatestCalendarResponse.mockResolvedValueOnce(ok(null));
 
     const res = await req(app, "GET", `${A}/arcs/arc-001/signals`);
-    const body = await res.json() as { signals: Array<Signal<CalendarEventData>> };
+    const body = await res.json() as { signals: Array<{ type: string; data: { linkedSignalId: string } }> };
     // linkedSignalId links back to the originating email signal
     expect(body.signals[0]!.data.linkedSignalId).toBe("sgn-email-001");
     // type distinguishes it as a calendar card

@@ -17,7 +17,7 @@ import type { AccountDatabase } from "../database/account-database.js";
 import type { Logger } from "../logger.js";
 import { deriveGroupingKey } from "../processor/processor.js";
 import { zParse } from "./validate.js";
-import { toApiArc } from "./transform.js";
+import { toApiArc, toApiAccount, toApiSignal, toApiDomain, toApiDomainWithRecords, toApiAlias, toApiAliasSender, toApiLabel, toApiRule, toApiView, toApiTemplate, toApiForwardingAddress } from "./transform.js";
 import { validateRuleCondition } from "./validate-rule-condition.js";
 import { validateWebhookConfig } from "./validate-webhook-config.js";
 import type { AstValidationResult } from "../isolated/ast-validator.js";
@@ -66,7 +66,7 @@ import {
   ListArcsResponse, ListSignalsResponse, ListViewsResponse, ListLabelsResponse,
   ListRulesResponse, ListDomainsResponse, ListAliasesResponse, ListSendersResponse,
   ListTemplatesResponse, ListForwardingAddressesResponse,
-  ErrorResponse, Pagination as PaginationSchema,
+  ErrorResponse, ErrorCode, Pagination as PaginationSchema,
 } from "./schemas.js";
 
 // ---------------------------------------------------------------------------
@@ -211,13 +211,6 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     c.res.headers.set("x-request-id", logger.getInvocationId());
   });
 
-  function err(c: Context<AppEnv>, status: number, title: string, errorCode?: string, details?: unknown) {
-    return c.json(
-      { title, ...(errorCode ? { errorCode } : {}), ...(details !== undefined ? { details } : {}), errorId: logger.getInvocationId() },
-      status as 400 | 401 | 403 | 404 | 409 | 501,
-    );
-  }
-
   // CloudFront origin verification — reject requests that bypass CloudFront
   const CF_ORIGIN_SECRET = process.env["CF_ORIGIN_SECRET"];
   if (CF_ORIGIN_SECRET) {
@@ -278,21 +271,37 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     403: { content: { "application/json": { schema: ErrorResponse } }, description: "Forbidden" },
     404: { content: { "application/json": { schema: ErrorResponse } }, description: "Not found" },
     409: { content: { "application/json": { schema: ErrorResponse } }, description: "Conflict" },
+    422: { content: { "application/json": { schema: ErrorResponse } }, description: "Unprocessable entity" },
     500: { content: { "application/json": { schema: ErrorResponse } }, description: "Internal server error" },
     501: { content: { "application/json": { schema: ErrorResponse } }, description: "Not implemented" },
+    503: { content: { "application/json": { schema: ErrorResponse } }, description: "Service unavailable" },
   } as const;
 
-  // Wrapper: registers an OpenAPI route without enforcing strict handler return types.
-  // Handlers return error branches (via err()) that don't match the declared success schema —
-  // this is intentional and safe since the response schemas document the contract, not enforce it at compile time.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const apiRoute = (config: Parameters<typeof createRoute>[0], handler: any) => app.openapi(createRoute(config) as any, handler);
+  type ErrorStatus = 400 | 401 | 403 | 404 | 409 | 422 | 500 | 501 | 503;
+  type ErrorCodeLiteral = z.infer<typeof ErrorCode>;
+  type ErrorBody = { title: string; errorCode?: ErrorCodeLiteral; details?: unknown; errorId: string };
+
+  function err<S extends ErrorStatus>(c: Context<AppEnv>, status: S, title: string, errorCode?: ErrorCodeLiteral, details?: unknown) {
+    return c.json(
+      { title, ...(errorCode ? { errorCode } : {}), ...(details !== undefined ? { details } : {}), errorId: logger.getInvocationId() } as ErrorBody,
+      status,
+    );
+  }
+
+  // Route helper: wraps createRoute to auto-merge shared error responses into every route definition.
+  // Keeps error responses in the type-level config so Hono infers the full return union (success | errors).
+  // This preserves compile-time validation of the success response shape.
+  // NOTE: requires explicit status codes on success returns (e.g. c.json(data, 200)) and
+  // response shapes that match the zod schema exactly.
+  const route = <const R extends Parameters<typeof createRoute>[0]>(config: R) =>
+    createRoute({ ...config, responses: { ...errResponses, ...config.responses } } as unknown as R & { responses: R["responses"] & typeof errResponses });
+
 
   // -------------------------------------------------------------------------
   // Accounts  —  /accounts
   // -------------------------------------------------------------------------
 
-  app.openapi(createRoute({
+  app.openapi(route({
     method: "get",
     path: "/accounts",
     tags: ["Accounts"],
@@ -314,16 +323,15 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
       if (accountResult.value) accounts.push(accountResult.value);
     }
 
-    return c.json({ accounts });
+    return c.json({ accounts: accounts.map(toApiAccount) }, 200);
   });
 
-  app.openapi(createRoute({
+  app.openapi(route({
     method: "post",
     path: "/accounts",
     tags: ["Accounts"],
     responses: {
       201: { content: { "application/json": { schema: AccountSchema } }, description: "Account created" },
-      409: { content: { "application/json": { schema: ErrorResponse } }, description: "Account already exists" },
     },
   }), async (c) => {
     const { userId } = c.get("auth");
@@ -367,14 +375,14 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
       await accountCreationStarter.start(account.id, userId);
     }
 
-    return c.json(account, 201);
+    return c.json(toApiAccount(account), 201);
   });
 
   // -------------------------------------------------------------------------
   // Arcs  —  /accounts/:accountId/arcs
   // -------------------------------------------------------------------------
 
-  app.openapi(createRoute({
+  app.openapi(route({
     method: "get",
     path: "/accounts/{accountId}/arcs",
     tags: ["Arcs"],
@@ -382,7 +390,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
       params: z.object({ accountId: z.string() }),
       query: z.object({ workflow: z.string().optional(), label: z.string().optional(), status: z.string().optional(), cursor: z.string().optional(), limit: z.string().optional(), q: z.string().optional() }),
     },
-    middleware: [authz("arcs:read", c => `accounts/${c.req.param("accountId")}/arcs`)] as const,
+    middleware: [authz("arcs:read", c => `accounts/${c.req.param("accountId")!}/arcs`)] as const,
     responses: { 200: { content: { "application/json": { schema: ListArcsResponse } }, description: "List arcs" } },
   }), async (c) => {
     const { accountId } = c.get("auth");
@@ -395,7 +403,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
       };
       const result = await arcDb.searchArcs(accountId, q, params);
       if (result.isErr()) return err(c, 500, "Internal Server Error");
-      return c.json(page("arcs", result.value.items.map(toApiArc), result.value.nextCursor));
+      return c.json(page("arcs", result.value.items.map(toApiArc), result.value.nextCursor), 200);
     }
     const params: ListArcsParams = {
       ...(query["workflow"] ? { workflow: query["workflow"] as Workflow } : {}),
@@ -406,36 +414,36 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     };
     const result = await arcDb.listArcs(accountId, params);
     if (result.isErr()) return err(c, 500, "Internal Server Error");
-    return c.json(page("arcs", result.value.items.map(toApiArc), result.value.nextCursor));
+    return c.json(page("arcs", result.value.items.map(toApiArc), result.value.nextCursor), 200);
   });
 
-  app.openapi(createRoute({
+  app.openapi(route({
     method: "get",
     path: "/accounts/{accountId}/arcs/{id}",
     tags: ["Arcs"],
     request: { params: z.object({ accountId: z.string(), id: z.string() }) },
-    middleware: [authz("arcs:read", c => `accounts/${c.req.param("accountId")}/arcs/${c.req.param("id")}`)] as const,
+    middleware: [authz("arcs:read", c => `accounts/${c.req.param("accountId")!}/arcs/${c.req.param("id")!}`)] as const,
     responses: { 200: { content: { "application/json": { schema: ArcSchema } }, description: "Get arc" } },
   }), async (c) => {
     const { accountId } = c.get("auth");
-    const arcResult = await arcDb.getArc(accountId, c.req.param("id"));
+    const arcResult = await arcDb.getArc(accountId, c.req.param("id")!);
     if (arcResult.isErr()) return err(c, 500, "Internal Server Error");
     const arc = arcResult.value;
     if (!arc) return err(c, 404, "Arc not found", "ARC_NOT_FOUND");
     if (arc.accountId !== accountId) return err(c, 403, "Forbidden");
-    return c.json(arc);
+    return c.json(toApiArc(arc), 200);
   });
 
-  app.openapi(createRoute({
+  app.openapi(route({
     method: "patch",
     path: "/accounts/{accountId}/arcs/{id}",
     tags: ["Arcs"],
     request: { params: z.object({ accountId: z.string(), id: z.string() }) },
-    middleware: [authz("arcs:write", c => `accounts/${c.req.param("accountId")}/arcs/${c.req.param("id")}`)] as const,
+    middleware: [authz("arcs:write", c => `accounts/${c.req.param("accountId")!}/arcs/${c.req.param("id")!}`)] as const,
     responses: { 200: { content: { "application/json": { schema: ArcSchema } }, description: "Update arc" } },
   }), async (c) => {
     const { accountId } = c.get("auth");
-    const arcResult = await arcDb.getArc(accountId, c.req.param("id"));
+    const arcResult = await arcDb.getArc(accountId, c.req.param("id")!);
     if (arcResult.isErr()) return err(c, 500, "Internal Server Error");
     const arc = arcResult.value;
     if (!arc) return err(c, 404, "Arc not found", "ARC_NOT_FOUND");
@@ -464,7 +472,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
       // Persist as deleted — violate_report is the user intent, deleted is the arc state
       const updateResult = await arcDb.updateArc(accountId, arc.id, "deleted", arc.lastSignalAt, {});
       if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
-      return c.json(updateResult.value);
+      return c.json(toApiArc(updateResult.value), 200);
     }
 
     const fields: UpdateArcFields = {};
@@ -474,14 +482,14 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     const lastSignalAt = body.lastSignalAt ?? arc.lastSignalAt;
     const updateResult = await arcDb.updateArc(accountId, arc.id, status, lastSignalAt, fields);
     if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
-    return c.json(updateResult.value);
+    return c.json(toApiArc(updateResult.value), 200);
   });
 
   // -------------------------------------------------------------------------
   // Signals  —  /accounts/:accountId/arcs/:arcId/signals  &  /signals/:id
   // -------------------------------------------------------------------------
 
-  app.openapi(createRoute({
+  app.openapi(route({
     method: "get",
     path: "/accounts/{accountId}/arcs/{arcId}/signals",
     tags: ["Signals"],
@@ -489,11 +497,11 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
       params: z.object({ accountId: z.string(), arcId: z.string() }),
       query: z.object({ cursor: z.string().optional(), limit: z.string().optional() }),
     },
-    middleware: [authz("signals:read", c => `accounts/${c.req.param("accountId")}/arcs/${c.req.param("arcId")}/signals`)] as const,
+    middleware: [authz("signals:read", c => `accounts/${c.req.param("accountId")!}/arcs/${c.req.param("arcId")!}/signals`)] as const,
     responses: { 200: { content: { "application/json": { schema: ListSignalsResponse } }, description: "List signals for arc" } },
   }), async (c) => {
     const { accountId } = c.get("auth");
-    const arcResult = await arcDb.getArc(accountId, c.req.param("arcId"));
+    const arcResult = await arcDb.getArc(accountId, c.req.param("arcId")!);
     if (arcResult.isErr()) return err(c, 500, "Internal Server Error");
     const arc = arcResult.value;
     if (!arc) return err(c, 404, "Arc not found", "ARC_NOT_FOUND");
@@ -526,25 +534,26 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     // Build enriched response — calendar_event signals get latestResponse field
     const enrichedSignals = signals.map(signal => {
       const withUrls = contentCdnBaseUrl ? withAttachmentUrls(signal, contentCdnBaseUrl) : signal;
+      const apiSignal = toApiSignal(withUrls);
       if (isCalendarEventSignal(withUrls) && enrichments.has(withUrls.data.veventUid)) {
-        return { ...withUrls, latestResponse: enrichments.get(withUrls.data.veventUid) };
+        return { ...apiSignal, latestResponse: enrichments.get(withUrls.data.veventUid) };
       }
-      return withUrls;
+      return apiSignal;
     });
 
-    return c.json(page("signals", enrichedSignals, result.value.nextCursor));
+    return c.json(page("signals", enrichedSignals, result.value.nextCursor), 200);
   });
 
-  app.openapi(createRoute({
+  app.openapi(route({
     method: "post",
     path: "/accounts/{accountId}/arcs/{arcId}/signals",
     tags: ["Signals"],
     request: { params: z.object({ accountId: z.string(), arcId: z.string() }) },
-    middleware: [authz("signals:write", c => `accounts/${c.req.param("accountId")}/arcs/${c.req.param("arcId")}/signals`)] as const,
+    middleware: [authz("signals:write", c => `accounts/${c.req.param("accountId")!}/arcs/${c.req.param("arcId")!}/signals`)] as const,
     responses: { 201: { content: { "application/json": { schema: SignalSchema } }, description: "Create draft signal" } },
   }), async (c) => {
     const { accountId } = c.get("auth");
-    const arcResult = await arcDb.getArc(accountId, c.req.param("arcId"));
+    const arcResult = await arcDb.getArc(accountId, c.req.param("arcId")!);
     if (arcResult.isErr()) return err(c, 500, "Internal Server Error");
     const arc = arcResult.value;
     if (!arc) return err(c, 404, "Arc not found", "ARC_NOT_FOUND");
@@ -580,24 +589,24 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     };
     const createResult = await arcDb.createSignal(signal);
     if (createResult.isErr()) return err(c, 500, "Internal Server Error");
-    return c.json(createResult.value, 201);
+    return c.json(toApiSignal(createResult.value), 201);
   });
 
-  app.openapi(createRoute({
+  app.openapi(route({
     method: "put",
     path: "/accounts/{accountId}/arcs/{arcId}/signals/{id}",
     tags: ["Signals"],
     request: { params: z.object({ accountId: z.string(), arcId: z.string(), id: z.string() }) },
-    middleware: [authz("signals:write", c => `accounts/${c.req.param("accountId")}/arcs/${c.req.param("arcId")}/signals/${c.req.param("id")}`)] as const,
+    middleware: [authz("signals:write", c => `accounts/${c.req.param("accountId")!}/arcs/${c.req.param("arcId")!}/signals/${c.req.param("id")!}`)] as const,
     responses: { 200: { content: { "application/json": { schema: SignalSchema } }, description: "Replace draft signal" } },
   }), async (c) => {
     const { accountId } = c.get("auth");
-    const arcResult = await arcDb.getArc(accountId, c.req.param("arcId"));
+    const arcResult = await arcDb.getArc(accountId, c.req.param("arcId")!);
     if (arcResult.isErr()) return err(c, 500, "Internal Server Error");
     const arc = arcResult.value;
     if (!arc) return err(c, 404, "Arc not found", "ARC_NOT_FOUND");
     if (arc.accountId !== accountId) return err(c, 403, "Forbidden");
-    const signalResult = await arcDb.getSignalById(accountId, c.req.param("id"), c.req.param("arcId"));
+    const signalResult = await arcDb.getSignalById(accountId, c.req.param("id")!, c.req.param("arcId")!);
     if (signalResult.isErr()) return err(c, 500, "Internal Server Error");
     const signal = signalResult.value;
     if (!signal) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
@@ -612,10 +621,10 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
       ...(body.textBody != null ? { textBody: body.textBody } : {}),
     });
     if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
-    return c.json(updateResult.value);
+    return c.json(toApiSignal(updateResult.value), 200);
   });
 
-  app.openapi(createRoute({
+  app.openapi(route({
     method: "get",
     path: "/accounts/{accountId}/signals",
     tags: ["Signals"],
@@ -623,7 +632,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
       params: z.object({ accountId: z.string() }),
       query: z.object({ status: z.string(), cursor: z.string().optional(), limit: z.string().optional() }),
     },
-    middleware: [authz("signals:read", c => `accounts/${c.req.param("accountId")}/signals`)] as const,
+    middleware: [authz("signals:read", c => `accounts/${c.req.param("accountId")!}/signals`)] as const,
     responses: { 200: { content: { "application/json": { schema: ListSignalsResponse } }, description: "List quarantined signals" } },
   }), async (c) => {
     const { accountId } = c.get("auth");
@@ -642,19 +651,19 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
       ? result.value.items.filter(s => s.status === status)
       : result.value.items;
     const itemsWithUrls = contentCdnBaseUrl ? items.map(s => withAttachmentUrls(s, contentCdnBaseUrl)) : items;
-    return c.json(page("signals", itemsWithUrls, result.value.nextCursor));
+    return c.json(page("signals", itemsWithUrls.map(toApiSignal), result.value.nextCursor), 200);
   });
 
-  app.openapi(createRoute({
+  app.openapi(route({
     method: "post",
     path: "/accounts/{accountId}/signals/{id}/quarantineResponse",
     tags: ["Signals"],
     request: { params: z.object({ accountId: z.string(), id: z.string() }) },
-    middleware: [authz("signals:write", c => `accounts/${c.req.param("accountId")}/signals/${c.req.param("id")}`)] as const,
+    middleware: [authz("signals:write", c => `accounts/${c.req.param("accountId")!}/signals/${c.req.param("id")!}`)] as const,
     responses: { 200: { content: { "application/json": { schema: z.object({}) } }, description: "Quarantine response" } },
   }), async (c) => {
     const { accountId } = c.get("auth");
-    const signalResult = await arcDb.getSignalById(accountId, c.req.param("id"));
+    const signalResult = await arcDb.getSignalById(accountId, c.req.param("id")!);
     if (signalResult.isErr()) return err(c, 500, "Internal Server Error");
     const signal = signalResult.value;
     if (!signal) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
@@ -680,7 +689,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
         if (saveSenderResult.isErr()) return err(c, 500, "Internal Server Error");
       }
 
-      return c.json(blockResult.value);
+      return c.json(blockResult.value, 200);
     }
 
     // status === "active": find existing arc or create one, bypassing rule evaluation
@@ -739,36 +748,37 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     }
 
     const signalWithUrls = contentCdnBaseUrl ? withAttachmentUrls(signal, contentCdnBaseUrl) : signal;
-    return c.json({ arc, signal: { ...signalWithUrls, status: "active", arcId: arc.id } });
+    return c.json({ arc: toApiArc(arc), signal: toApiSignal({ ...signalWithUrls, status: "active", arcId: arc.id }) }, 200);
   });
 
-  app.openapi(createRoute({
+  app.openapi(route({
     method: "get",
     path: "/accounts/{accountId}/signals/{id}",
     tags: ["Signals"],
     request: { params: z.object({ accountId: z.string(), id: z.string() }) },
-    middleware: [authz("signals:read", c => `accounts/${c.req.param("accountId")}/signals/${c.req.param("id")}`)] as const,
+    middleware: [authz("signals:read", c => `accounts/${c.req.param("accountId")!}/signals/${c.req.param("id")!}`)] as const,
     responses: { 200: { content: { "application/json": { schema: SignalSchema } }, description: "Get signal" } },
   }), async (c) => {
     const { accountId } = c.get("auth");
-    const signalResult = await arcDb.getSignalById(accountId, c.req.param("id"));
+    const signalResult = await arcDb.getSignalById(accountId, c.req.param("id")!);
     if (signalResult.isErr()) return err(c, 500, "Internal Server Error");
     const signal = signalResult.value;
     if (!signal) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
     if (signal.accountId !== accountId) return err(c, 403, "Forbidden");
-    return c.json(contentCdnBaseUrl ? withAttachmentUrls(signal, contentCdnBaseUrl) : signal);
+    const withUrls = contentCdnBaseUrl ? withAttachmentUrls(signal, contentCdnBaseUrl) : signal;
+    return c.json(toApiSignal(withUrls), 200);
   });
 
-  app.openapi(createRoute({
+  app.openapi(route({
     method: "patch",
     path: "/accounts/{accountId}/signals/{id}",
     tags: ["Signals"],
     request: { params: z.object({ accountId: z.string(), id: z.string() }) },
-    middleware: [authz("signals:write", c => `accounts/${c.req.param("accountId")}/signals/${c.req.param("id")}`)] as const,
+    middleware: [authz("signals:write", c => `accounts/${c.req.param("accountId")!}/signals/${c.req.param("id")!}`)] as const,
     responses: { 200: { content: { "application/json": { schema: SignalSchema } }, description: "Update signal" } },
   }), async (c) => {
     const { accountId } = c.get("auth");
-    const signalResult = await arcDb.getSignalById(accountId, c.req.param("id"));
+    const signalResult = await arcDb.getSignalById(accountId, c.req.param("id")!);
     if (signalResult.isErr()) return err(c, 500, "Internal Server Error");
     const signal = signalResult.value;
     if (!signal) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
@@ -785,34 +795,34 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
       if (body.status !== "draft") return err(c, 400, "Pending signals can only be reverted to draft", "INVALID_STATUS_TRANSITION");
       const updateResult = await arcDb.updateSignalSendStatus(accountId, signal.signalLookupId, { status: "draft", sendInitiatedAt: null });
       if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
-      return c.json(updateResult.value);
+      return c.json(toApiSignal(updateResult.value), 200);
     }
 
     // Normal draft edit (subject, textBody, from, to)
     const updateResult = await arcDb.updateSignal(accountId, signal.signalLookupId, body as Parameters<typeof arcDb.updateSignal>[2]);
     if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
-    return c.json(updateResult.value);
+    return c.json(toApiSignal(updateResult.value), 200);
   });
 
-  app.openapi(createRoute({
+  app.openapi(route({
     method: "post",
     path: "/accounts/{accountId}/arcs/{arcId}/signals/{id}/send",
     tags: ["Signals"],
     request: { params: z.object({ accountId: z.string(), arcId: z.string(), id: z.string() }) },
-    middleware: [authz("signals:write", c => `accounts/${c.req.param("accountId")}/arcs/${c.req.param("arcId")}/signals/${c.req.param("id")}`)] as const,
+    middleware: [authz("signals:write", c => `accounts/${c.req.param("accountId")!}/arcs/${c.req.param("arcId")!}/signals/${c.req.param("id")!}`)] as const,
     responses: { 200: { content: { "application/json": { schema: z.object({}) } }, description: "Send draft signal" } },
   }), async (c) => {
     const { accountId } = c.get("auth");
 
     // Arc validation
-    const arcResult = await arcDb.getArc(accountId, c.req.param("arcId"));
+    const arcResult = await arcDb.getArc(accountId, c.req.param("arcId")!);
     if (arcResult.isErr()) return err(c, 500, "Internal Server Error");
     const arc = arcResult.value;
     if (!arc) return err(c, 404, "Arc not found", "ARC_NOT_FOUND");
     if (arc.accountId !== accountId) return err(c, 403, "Forbidden");
 
     // Signal validation
-    const signalResult = await arcDb.getSignalById(accountId, c.req.param("id"), c.req.param("arcId"));
+    const signalResult = await arcDb.getSignalById(accountId, c.req.param("id")!, c.req.param("arcId")!);
     if (signalResult.isErr()) return err(c, 500, "Internal Server Error");
     const signal = signalResult.value;
     if (!signal) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
@@ -823,7 +833,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     // MX validation
     const mxResult = await validateRecipientMx(signal.data.to);
     if (!mxResult.valid) {
-      return c.json({ title: "Invalid recipient domain", errorCode: "INVALID_RECIPIENT_DOMAIN", details: { invalidDomains: mxResult.invalidDomains } }, 422);
+      return err(c, 422, "Invalid recipient domain", "INVALID_RECIPIENT_DOMAIN", { invalidDomains: mxResult.invalidDomains });
     }
 
     // Compute undo window
@@ -840,19 +850,19 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     const updateResult = await arcDb.updateSignalSendStatus(accountId, signal.signalLookupId, { status: "pending_send", sendInitiatedAt });
     if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
 
-    return c.json({ ...updateResult.value, undoWindowSeconds, undoExpiresAt });
+    return c.json({ ...toApiSignal(updateResult.value), undoWindowSeconds, undoExpiresAt }, 200);
   });
 
-  app.openapi(createRoute({
+  app.openapi(route({
     method: "delete",
     path: "/accounts/{accountId}/signals/{id}",
     tags: ["Signals"],
     request: { params: z.object({ accountId: z.string(), id: z.string() }) },
-    middleware: [authz("signals:write", c => `accounts/${c.req.param("accountId")}/signals/${c.req.param("id")}`)] as const,
+    middleware: [authz("signals:write", c => `accounts/${c.req.param("accountId")!}/signals/${c.req.param("id")!}`)] as const,
     responses: { 204: { description: "Signal deleted" } },
   }), async (c) => {
     const { accountId } = c.get("auth");
-    const signalResult = await arcDb.getSignalById(accountId, c.req.param("id"));
+    const signalResult = await arcDb.getSignalById(accountId, c.req.param("id")!);
     if (signalResult.isErr()) return err(c, 500, "Internal Server Error");
     const signal = signalResult.value;
     if (!signal) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
@@ -868,26 +878,26 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
   // Calendar RSVP  —  /accounts/:accountId/arcs/:arcId/signals/:id/rsvp
   // -------------------------------------------------------------------------
 
-  app.openapi(createRoute({
+  app.openapi(route({
     method: "post",
     path: "/accounts/{accountId}/arcs/{arcId}/signals/{id}/rsvp",
     tags: ["Signals"],
     request: { params: z.object({ accountId: z.string(), arcId: z.string(), id: z.string() }) },
-    middleware: [authz("signals:write", c => `accounts/${c.req.param("accountId")}/arcs/${c.req.param("arcId")}/signals/${c.req.param("id")}`)] as const,
+    middleware: [authz("signals:write", c => `accounts/${c.req.param("accountId")!}/arcs/${c.req.param("arcId")!}/signals/${c.req.param("id")!}`)] as const,
     responses: { 200: { content: { "application/json": { schema: SignalSchema } }, description: "RSVP to calendar invite" } },
   }), async (c) => {
     const { accountId } = c.get("auth");
     if (!emailService || !rsvpComposer) return err(c, 501, "RSVP not configured");
 
     // Validate arc
-    const arcResult = await arcDb.getArc(accountId, c.req.param("arcId"));
+    const arcResult = await arcDb.getArc(accountId, c.req.param("arcId")!);
     if (arcResult.isErr()) return err(c, 500, "Internal Server Error");
     const arc = arcResult.value;
     if (!arc) return err(c, 404, "Arc not found", "ARC_NOT_FOUND");
     if (arc.accountId !== accountId) return err(c, 403, "Forbidden");
 
     // Validate signal — must be a calendar_event signal
-    const signalResult = await arcDb.getSignalById(accountId, c.req.param("id"), c.req.param("arcId"));
+    const signalResult = await arcDb.getSignalById(accountId, c.req.param("id")!, c.req.param("arcId")!);
     if (signalResult.isErr()) return err(c, 500, "Internal Server Error");
     const signal = signalResult.value;
     if (!signal) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
@@ -935,7 +945,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
         },
       };
       await arcDb.saveSignal(misconfigSignal);
-      return c.json({ title: "Domain misconfiguration", errorCode: "DOMAIN_MISCONFIGURATION", details: { domain: aliasDomain, reason: "DKIM + SPF not configured for alias domain" } }, 422);
+      return err(c, 422, "Domain misconfiguration", "DOMAIN_MISCONFIGURATION", { domain: aliasDomain, reason: "DKIM + SPF not configured for alias domain" });
     }
 
     // Send-first: call RSVP_Composer
@@ -952,7 +962,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
 
     // On send failure: return error, do NOT create signal (Property 13)
     if (rsvpResult.isErr()) {
-      return c.json({ title: "Failed to send RSVP", errorCode: "RSVP_SEND_FAILED" }, 502);
+      return err(c, 422, "Failed to send RSVP", "RSVP_SEND_FAILED");
     }
 
     // On success: create calendar_response signal
@@ -979,71 +989,71 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     const saveResult = await arcDb.saveSignal(responseSignal);
     if (saveResult.isErr()) return err(c, 500, "Internal Server Error");
 
-    return c.json(responseSignal);
+    return c.json(toApiSignal(responseSignal), 200);
   });
 
   // -------------------------------------------------------------------------
   // Views  —  /accounts/:accountId/views
   // -------------------------------------------------------------------------
 
-  app.openapi(createRoute({
+  app.openapi(route({
     method: "get",
     path: "/accounts/{accountId}/views",
     tags: ["Views"],
     request: { params: z.object({ accountId: z.string() }) },
-    middleware: [authz("views:read", c => `accounts/${c.req.param("accountId")}/views`)] as const,
+    middleware: [authz("views:read", c => `accounts/${c.req.param("accountId")!}/views`)] as const,
     responses: { 200: { content: { "application/json": { schema: ListViewsResponse } }, description: "List views" } },
   }), async (c) => {
     const { accountId } = c.get("auth");
     const viewsResult = await accountDb.listViews(accountId);
     if (viewsResult.isErr()) return err(c, 500, "Internal Server Error");
-    return c.json(page("views", viewsResult.value));
+    return c.json({ views: viewsResult.value.map(toApiView) }, 200);
   });
 
-  app.openapi(createRoute({
+  app.openapi(route({
     method: "post",
     path: "/accounts/{accountId}/views",
     tags: ["Views"],
     request: { params: z.object({ accountId: z.string() }) },
-    middleware: [authz("views:write", c => `accounts/${c.req.param("accountId")}/views`)] as const,
+    middleware: [authz("views:write", c => `accounts/${c.req.param("accountId")!}/views`)] as const,
     responses: { 201: { content: { "application/json": { schema: ViewSchema } }, description: "View created" } },
   }), async (c) => {
     const { accountId } = c.get("auth");
     const body = await zParse(CreateViewRequest, c.req.raw);
     const viewResult = await accountDb.createView(accountId, body);
     if (viewResult.isErr()) return err(c, 500, "Internal Server Error");
-    return c.json(viewResult.value, 201);
+    return c.json(toApiView(viewResult.value), 201);
   });
 
-  app.openapi(createRoute({
+  app.openapi(route({
     method: "patch",
     path: "/accounts/{accountId}/views/{id}",
     tags: ["Views"],
     request: { params: z.object({ accountId: z.string(), id: z.string() }) },
-    middleware: [authz("views:write", c => `accounts/${c.req.param("accountId")}/views/${c.req.param("id")}`)] as const,
+    middleware: [authz("views:write", c => `accounts/${c.req.param("accountId")!}/views/${c.req.param("id")!}`)] as const,
     responses: { 200: { content: { "application/json": { schema: ViewSchema } }, description: "Update view" } },
   }), async (c) => {
     const { accountId } = c.get("auth");
-    const viewResult = await accountDb.getView(accountId, c.req.param("id"));
+    const viewResult = await accountDb.getView(accountId, c.req.param("id")!);
     if (viewResult.isErr()) return err(c, 500, "Internal Server Error");
     const view = viewResult.value;
     if (!view) return err(c, 404, "View not found", "VIEW_NOT_FOUND");
     const body = await zParse(UpdateViewRequest, c.req.raw);
     const updateResult = await accountDb.updateView(accountId, view.id, body);
     if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
-    return c.json(updateResult.value);
+    return c.json(toApiView(updateResult.value), 200);
   });
 
-  app.openapi(createRoute({
+  app.openapi(route({
     method: "delete",
     path: "/accounts/{accountId}/views/{id}",
     tags: ["Views"],
     request: { params: z.object({ accountId: z.string(), id: z.string() }) },
-    middleware: [authz("views:write", c => `accounts/${c.req.param("accountId")}/views/${c.req.param("id")}`)] as const,
+    middleware: [authz("views:write", c => `accounts/${c.req.param("accountId")!}/views/${c.req.param("id")!}`)] as const,
     responses: { 204: { description: "View deleted" } },
   }), async (c) => {
     const { accountId } = c.get("auth");
-    const viewResult = await accountDb.getView(accountId, c.req.param("id"));
+    const viewResult = await accountDb.getView(accountId, c.req.param("id")!);
     if (viewResult.isErr()) return err(c, 500, "Internal Server Error");
     const view = viewResult.value;
     if (!view) return err(c, 404, "View not found", "VIEW_NOT_FOUND");
@@ -1056,66 +1066,66 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
   // Labels  —  /accounts/:accountId/labels
   // -------------------------------------------------------------------------
 
-  app.openapi(createRoute({
+  app.openapi(route({
     method: "get",
     path: "/accounts/{accountId}/labels",
     tags: ["Labels"],
     request: { params: z.object({ accountId: z.string() }) },
-    middleware: [authz("labels:read", c => `accounts/${c.req.param("accountId")}/labels`)] as const,
+    middleware: [authz("labels:read", c => `accounts/${c.req.param("accountId")!}/labels`)] as const,
     responses: { 200: { content: { "application/json": { schema: ListLabelsResponse } }, description: "List labels" } },
   }), async (c) => {
     const { accountId } = c.get("auth");
     const labelsResult = await accountDb.listLabels(accountId);
     if (labelsResult.isErr()) return err(c, 500, "Internal Server Error");
-    return c.json(page("labels", labelsResult.value));
+    return c.json({ labels: labelsResult.value.map(toApiLabel) }, 200);
   });
 
-  app.openapi(createRoute({
+  app.openapi(route({
     method: "post",
     path: "/accounts/{accountId}/labels",
     tags: ["Labels"],
     request: { params: z.object({ accountId: z.string() }) },
-    middleware: [authz("labels:write", c => `accounts/${c.req.param("accountId")}/labels`)] as const,
+    middleware: [authz("labels:write", c => `accounts/${c.req.param("accountId")!}/labels`)] as const,
     responses: { 201: { content: { "application/json": { schema: LabelSchema } }, description: "Label created" } },
   }), async (c) => {
     const { accountId } = c.get("auth");
     const body = await zParse(CreateLabelRequest, c.req.raw);
     const labelResult = await accountDb.createLabel(accountId, body);
     if (labelResult.isErr()) return err(c, 500, "Internal Server Error");
-    return c.json(labelResult.value, 201);
+    return c.json(toApiLabel(labelResult.value), 201);
   });
 
-  app.openapi(createRoute({
+  app.openapi(route({
     method: "patch",
     path: "/accounts/{accountId}/labels/{id}",
     tags: ["Labels"],
     request: { params: z.object({ accountId: z.string(), id: z.string() }) },
-    middleware: [authz("labels:write", c => `accounts/${c.req.param("accountId")}/labels/${c.req.param("id")}`)] as const,
+    middleware: [authz("labels:write", c => `accounts/${c.req.param("accountId")!}/labels/${c.req.param("id")!}`)] as const,
     responses: { 200: { content: { "application/json": { schema: LabelSchema } }, description: "Update label" } },
   }), async (c) => {
     const { accountId } = c.get("auth");
     const labelsResult = await accountDb.listLabels(accountId);
     if (labelsResult.isErr()) return err(c, 500, "Internal Server Error");
-    const label = labelsResult.value.find((l) => l.id === c.req.param("id"));
+    const label = labelsResult.value.find((l) => l.id === c.req.param("id")!);
     if (!label) return err(c, 404, "Label not found", "LABEL_NOT_FOUND");
     const body = await zParse(UpdateLabelRequest, c.req.raw);
     const updateResult = await accountDb.updateLabel(accountId, label.id, body);
     if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
-    return c.json(updateResult.value);
+    return c.json(toApiLabel(updateResult.value), 200);
   });
 
-  app.openapi(createRoute({
+  app.openapi(route({
     method: "delete",
     path: "/accounts/{accountId}/labels/{id}",
     tags: ["Labels"],
     request: { params: z.object({ accountId: z.string(), id: z.string() }) },
-    middleware: [authz("labels:write", c => `accounts/${c.req.param("accountId")}/labels/${c.req.param("id")}`)] as const,
+    middleware: [authz("labels:write", c => `accounts/${c.req.param("accountId")!}/labels/${c.req.param("id")!}`)] as const,
     responses: { 204: { description: "Label deleted" } },
   }), async (c) => {
     const { accountId } = c.get("auth");
     const labelsResult = await accountDb.listLabels(accountId);
     if (labelsResult.isErr()) return err(c, 500, "Internal Server Error");
-    const label = labelsResult.value.find((l) => l.id === c.req.param("id"));
+    const label = labelsResult.value.find((l) => l.id === c.req.param("id")!);
     if (!label) return err(c, 404, "Label not found", "LABEL_NOT_FOUND");
     const deleteResult = await accountDb.deleteLabel(accountId, label.id);
     if (deleteResult.isErr()) return err(c, 500, "Internal Server Error");
@@ -1126,26 +1136,26 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
   // Rules  —  /accounts/:accountId/rules
   // -------------------------------------------------------------------------
 
-  app.openapi(createRoute({
+  app.openapi(route({
     method: "get",
     path: "/accounts/{accountId}/rules",
     tags: ["Rules"],
     request: { params: z.object({ accountId: z.string() }) },
-    middleware: [authz("rules:read", c => `accounts/${c.req.param("accountId")}/rules`)] as const,
+    middleware: [authz("rules:read", c => `accounts/${c.req.param("accountId")!}/rules`)] as const,
     responses: { 200: { content: { "application/json": { schema: ListRulesResponse } }, description: "List rules" } },
   }), async (c) => {
     const { accountId } = c.get("auth");
     const rulesResult = await accountDb.listRules(accountId);
     if (rulesResult.isErr()) return err(c, 500, "Internal Server Error");
-    return c.json(page("rules", rulesResult.value));
+    return c.json({ rules: rulesResult.value.map(toApiRule) }, 200);
   });
 
-  app.openapi(createRoute({
+  app.openapi(route({
     method: "post",
     path: "/accounts/{accountId}/rules",
     tags: ["Rules"],
     request: { params: z.object({ accountId: z.string() }) },
-    middleware: [authz("rules:write", c => `accounts/${c.req.param("accountId")}/rules`)] as const,
+    middleware: [authz("rules:write", c => `accounts/${c.req.param("accountId")!}/rules`)] as const,
     responses: { 201: { content: { "application/json": { schema: RuleSchema } }, description: "Rule created" } },
   }), async (c) => {
     const { accountId } = c.get("auth");
@@ -1186,21 +1196,21 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     }
     const ruleResult = await accountDb.createRule(accountId, body as Parameters<typeof accountDb.createRule>[1]);
     if (ruleResult.isErr()) return err(c, 500, "Internal Server Error");
-    return c.json(ruleResult.value, 201);
+    return c.json(toApiRule(ruleResult.value), 201);
   });
 
-  app.openapi(createRoute({
+  app.openapi(route({
     method: "patch",
     path: "/accounts/{accountId}/rules/{id}",
     tags: ["Rules"],
     request: { params: z.object({ accountId: z.string(), id: z.string() }) },
-    middleware: [authz("rules:write", c => `accounts/${c.req.param("accountId")}/rules/${c.req.param("id")}`)] as const,
+    middleware: [authz("rules:write", c => `accounts/${c.req.param("accountId")!}/rules/${c.req.param("id")!}`)] as const,
     responses: { 200: { content: { "application/json": { schema: RuleSchema } }, description: "Update rule" } },
   }), async (c) => {
     const { accountId } = c.get("auth");
     const rulesResult = await accountDb.listRules(accountId);
     if (rulesResult.isErr()) return err(c, 500, "Internal Server Error");
-    const rule = rulesResult.value.find((r) => r.id === c.req.param("id"));
+    const rule = rulesResult.value.find((r) => r.id === c.req.param("id")!);
     if (!rule) return err(c, 404, "Rule not found", "RULE_NOT_FOUND");
     const body = await zParse(UpdateRuleRequest, c.req.raw);
     const effectiveConditionType = body.conditionType ?? rule.conditionType ?? "json_logic";
@@ -1254,21 +1264,21 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     }
     const updateResult = await accountDb.updateRule(accountId, rule.id, updateData);
     if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
-    return c.json(updateResult.value);
+    return c.json(toApiRule(updateResult.value), 200);
   });
 
-  app.openapi(createRoute({
+  app.openapi(route({
     method: "delete",
     path: "/accounts/{accountId}/rules/{id}",
     tags: ["Rules"],
     request: { params: z.object({ accountId: z.string(), id: z.string() }) },
-    middleware: [authz("rules:write", c => `accounts/${c.req.param("accountId")}/rules/${c.req.param("id")}`)] as const,
+    middleware: [authz("rules:write", c => `accounts/${c.req.param("accountId")!}/rules/${c.req.param("id")!}`)] as const,
     responses: { 204: { description: "Rule deleted" } },
   }), async (c) => {
     const { accountId } = c.get("auth");
     const rulesResult = await accountDb.listRules(accountId);
     if (rulesResult.isErr()) return err(c, 500, "Internal Server Error");
-    const rule = rulesResult.value.find((r) => r.id === c.req.param("id"));
+    const rule = rulesResult.value.find((r) => r.id === c.req.param("id")!);
     if (!rule) return err(c, 404, "Rule not found", "RULE_NOT_FOUND");
     const deleteResult = await accountDb.deleteRule(accountId, rule.id);
     if (deleteResult.isErr()) return err(c, 500, "Internal Server Error");
@@ -1279,63 +1289,63 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
   // Domains  —  /accounts/:accountId/domains
   // -------------------------------------------------------------------------
 
-  app.openapi(createRoute({
+  app.openapi(route({
     method: "get",
     path: "/accounts/{accountId}/domains",
     tags: ["Domains"],
     request: { params: z.object({ accountId: z.string() }) },
-    middleware: [authz("domains:read", c => `accounts/${c.req.param("accountId")}/domains`)] as const,
+    middleware: [authz("domains:read", c => `accounts/${c.req.param("accountId")!}/domains`)] as const,
     responses: { 200: { content: { "application/json": { schema: ListDomainsResponse } }, description: "List domains" } },
   }), async (c) => {
     const { accountId } = c.get("auth");
     const domainsResult = await accountDb.listDomains(accountId);
     if (domainsResult.isErr()) return err(c, 500, "Internal Server Error");
-    return c.json(page("domains", domainsResult.value));
+    return c.json({ domains: domainsResult.value.map(toApiDomain) }, 200);
   });
 
-  app.openapi(createRoute({
+  app.openapi(route({
     method: "post",
     path: "/accounts/{accountId}/domains",
     tags: ["Domains"],
     request: { params: z.object({ accountId: z.string() }) },
-    middleware: [authz("domains:write", c => `accounts/${c.req.param("accountId")}/domains`)] as const,
+    middleware: [authz("domains:write", c => `accounts/${c.req.param("accountId")!}/domains`)] as const,
     responses: { 201: { content: { "application/json": { schema: DomainSchema } }, description: "Domain created" } },
   }), async (c) => {
     const { accountId } = c.get("auth");
     const body = await zParse(CreateDomainRequest, c.req.raw);
     const domainResult = await accountDb.createDomain(accountId, body.domain);
     if (domainResult.isErr()) return err(c, 500, "Internal Server Error");
-    return c.json(domainResult.value, 201);
+    return c.json(toApiDomain(domainResult.value), 201);
   });
 
-  app.openapi(createRoute({
+  app.openapi(route({
     method: "get",
     path: "/accounts/{accountId}/domains/{id}",
     tags: ["Domains"],
     request: { params: z.object({ accountId: z.string(), id: z.string() }) },
-    middleware: [authz("domains:read", c => `accounts/${c.req.param("accountId")}/domains/${c.req.param("id")}`)] as const,
+    middleware: [authz("domains:read", c => `accounts/${c.req.param("accountId")!}/domains/${c.req.param("id")!}`)] as const,
     responses: { 200: { content: { "application/json": { schema: DomainWithRecordsSchema } }, description: "Get domain with DNS records" } },
   }), async (c) => {
     const { accountId } = c.get("auth");
-    const domainResult = await accountDb.getDomain(accountId, c.req.param("id"));
+    const domainResult = await accountDb.getDomain(accountId, c.req.param("id")!);
     if (domainResult.isErr()) return err(c, 500, "Internal Server Error");
     const domain = domainResult.value;
     if (!domain) return err(c, 404, "Domain not found", "DOMAIN_NOT_FOUND");
     if (domain.accountId !== accountId) return err(c, 403, "Forbidden");
     const records = buildDnsRecords(domain);
-    return c.json({ ...domain, records });
+    return c.json(toApiDomainWithRecords(domain, records), 200);
   });
 
-  app.openapi(createRoute({
+  app.openapi(route({
     method: "patch",
     path: "/accounts/{accountId}/domains/{id}",
     tags: ["Domains"],
     request: { params: z.object({ accountId: z.string(), id: z.string() }) },
-    middleware: [authz("domains:write", c => `accounts/${c.req.param("accountId")}/domains/${c.req.param("id")}`)] as const,
+    middleware: [authz("domains:write", c => `accounts/${c.req.param("accountId")!}/domains/${c.req.param("id")!}`)] as const,
     responses: { 200: { content: { "application/json": { schema: DomainWithRecordsSchema } }, description: "Verify/refresh domain" } },
   }), async (c) => {
     const { accountId } = c.get("auth");
-    const domainResult = await accountDb.getDomain(accountId, c.req.param("id"));
+    const domainResult = await accountDb.getDomain(accountId, c.req.param("id")!);
     if (domainResult.isErr()) return err(c, 500, "Internal Server Error");
     const domain = domainResult.value;
     if (!domain) return err(c, 404, "Domain not found", "DOMAIN_NOT_FOUND");
@@ -1355,19 +1365,19 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     if (healthResult.isErr()) return err(c, 500, "Internal Server Error");
     const updatedResult = await accountDb.getDomain(accountId, domain.id);
     if (updatedResult.isErr()) return err(c, 500, "Internal Server Error");
-    return c.json({ ...updatedResult.value, records });
+    return c.json(toApiDomainWithRecords(updatedResult.value!, records), 200);
   });
 
-  app.openapi(createRoute({
+  app.openapi(route({
     method: "delete",
     path: "/accounts/{accountId}/domains/{id}",
     tags: ["Domains"],
     request: { params: z.object({ accountId: z.string(), id: z.string() }) },
-    middleware: [authz("domains:write", c => `accounts/${c.req.param("accountId")}/domains/${c.req.param("id")}`)] as const,
+    middleware: [authz("domains:write", c => `accounts/${c.req.param("accountId")!}/domains/${c.req.param("id")!}`)] as const,
     responses: { 204: { description: "Domain deleted" } },
   }), async (c) => {
     const { accountId } = c.get("auth");
-    const domainResult = await accountDb.getDomain(accountId, c.req.param("id"));
+    const domainResult = await accountDb.getDomain(accountId, c.req.param("id")!);
     if (domainResult.isErr()) return err(c, 500, "Internal Server Error");
     const domain = domainResult.value;
     if (!domain) return err(c, 404, "Domain not found", "DOMAIN_NOT_FOUND");
@@ -1381,12 +1391,12 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
   // Account  —  /accounts/:accountId
   // -------------------------------------------------------------------------
 
-  app.openapi(createRoute({
+  app.openapi(route({
     method: "get",
     path: "/accounts/{accountId}",
     tags: ["Accounts"],
     request: { params: z.object({ accountId: z.string() }) },
-    middleware: [authz("accounts:read", c => `accounts/${c.req.param("accountId")}`)] as const,
+    middleware: [authz("accounts:read", c => `accounts/${c.req.param("accountId")!}`)] as const,
     responses: { 200: { content: { "application/json": { schema: AccountSchema } }, description: "Get account" } },
   }), async (c) => {
     const { accountId } = c.get("auth");
@@ -1394,48 +1404,48 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     if (accountResult.isErr()) return err(c, 500, "Internal Server Error");
     const account = accountResult.value;
     if (!account) return err(c, 404, "Account not found", "ACCOUNT_NOT_FOUND");
-    return c.json(account);
+    return c.json(toApiAccount(account), 200);
   });
 
-  app.openapi(createRoute({
+  app.openapi(route({
     method: "patch",
     path: "/accounts/{accountId}",
     tags: ["Accounts"],
     request: { params: z.object({ accountId: z.string() }) },
-    middleware: [authz("accounts:write", c => `accounts/${c.req.param("accountId")}`)] as const,
+    middleware: [authz("accounts:write", c => `accounts/${c.req.param("accountId")!}`)] as const,
     responses: { 200: { content: { "application/json": { schema: AccountSchema } }, description: "Update account" } },
   }), async (c) => {
     const { accountId } = c.get("auth");
     const body = await zParse(UpdateAccountRequest, c.req.raw);
     const updateResult = await accountDb.updateAccount(accountId, body as Partial<Pick<Account, "name" | "deletionRetentionDays" | "notifications" | "filtering" | "onboarding" | "afterSendAction">>);
     if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
-    return c.json(updateResult.value);
+    return c.json(toApiAccount(updateResult.value), 200);
   });
 
-  app.openapi(createRoute({
+  app.openapi(route({
     method: "get",
     path: "/accounts/{accountId}/stats",
     tags: ["Accounts"],
     request: { params: z.object({ accountId: z.string() }) },
-    middleware: [authz("stats:read", c => `accounts/${c.req.param("accountId")}/stats`)] as const,
+    middleware: [authz("stats:read", c => `accounts/${c.req.param("accountId")!}/stats`)] as const,
     responses: { 200: { content: { "application/json": { schema: z.object({}) } }, description: "Get stats" } },
   }), async (c) => {
     const { accountId } = c.get("auth");
     const statsResult = await accountDb.getStats(accountId);
     if (statsResult.isErr()) return err(c, 500, "Internal Server Error");
-    return c.json(parseStatsRow(statsResult.value));
+    return c.json(parseStatsRow(statsResult.value), 200);
   });
 
   // -------------------------------------------------------------------------
   // Account users  —  /accounts/:accountId/users
   // -------------------------------------------------------------------------
 
-  app.openapi(createRoute({
+  app.openapi(route({
     method: "get",
     path: "/accounts/{accountId}/users",
     tags: ["Users"],
     request: { params: z.object({ accountId: z.string() }) },
-    middleware: [authz("users:read", c => `accounts/${c.req.param("accountId")}/users`)] as const,
+    middleware: [authz("users:read", c => `accounts/${c.req.param("accountId")!}/users`)] as const,
     responses: { 200: { content: { "application/json": { schema: z.object({ users: z.array(z.object({ userId: z.string(), role: z.string() })), pagination: PaginationSchema }) } }, description: "List users" } },
   }), async (c) => {
     if (!access) return err(c, 501, "Not implemented");
@@ -1445,15 +1455,15 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
       logger.warn("Authress service unavailable while listing account users.", { code: "api.authress_unavailable", accountId, error: result.error });
       return err(c, 503, "Service temporarily unavailable");
     }
-    return c.json(page("users", result.value));
+    return c.json(page("users", result.value), 200);
   });
 
-  app.openapi(createRoute({
+  app.openapi(route({
     method: "post",
     path: "/accounts/{accountId}/users",
     tags: ["Users"],
     request: { params: z.object({ accountId: z.string() }) },
-    middleware: [authz("accounts:read", c => `accounts/${c.req.param("accountId")}`)] as const,
+    middleware: [authz("accounts:read", c => `accounts/${c.req.param("accountId")!}`)] as const,
     responses: { 201: { description: "User invited" } },
   }), async (c) => {
     if (!access) return err(c, 501, "Not implemented");
@@ -1489,38 +1499,38 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     return new Response(null, { status: 201 });
   });
 
-  app.openapi(createRoute({
+  app.openapi(route({
     method: "patch",
     path: "/accounts/{accountId}/users/{userId}",
     tags: ["Users"],
     request: { params: z.object({ accountId: z.string(), userId: z.string() }) },
-    middleware: [authz("users:write", c => `accounts/${c.req.param("accountId")}/users/${c.req.param("userId")}`)] as const,
+    middleware: [authz("users:write", c => `accounts/${c.req.param("accountId")!}/users/${c.req.param("userId")!}`)] as const,
     responses: { 200: { content: { "application/json": { schema: z.object({ userId: z.string(), role: z.string() }) } }, description: "Update user role" } },
   }), async (c) => {
     if (!access) return err(c, 501, "Not implemented");
     const { accountId } = c.get("auth");
     const body = await zParse(UpdateUserRequest, c.req.raw);
-    const result = await access.updateUserRole(accountId, c.req.param("userId"), body.role);
+    const result = await access.updateUserRole(accountId, c.req.param("userId")!, body.role);
     if (result.isErr()) {
-      logger.warn("Authress service unavailable while updating user role.", { code: "api.authress_unavailable", accountId, userId: c.req.param("userId"), error: result.error });
+      logger.warn("Authress service unavailable while updating user role.", { code: "api.authress_unavailable", accountId, userId: c.req.param("userId")!, error: result.error });
       return err(c, 503, "Service temporarily unavailable");
     }
-    return c.json({ userId: c.req.param("userId"), role: body.role });
+    return c.json({ userId: c.req.param("userId")!, role: body.role }, 200);
   });
 
-  app.openapi(createRoute({
+  app.openapi(route({
     method: "delete",
     path: "/accounts/{accountId}/users/{userId}",
     tags: ["Users"],
     request: { params: z.object({ accountId: z.string(), userId: z.string() }) },
-    middleware: [authz("users:write", c => `accounts/${c.req.param("accountId")}/users/${c.req.param("userId")}`)] as const,
+    middleware: [authz("users:write", c => `accounts/${c.req.param("accountId")!}/users/${c.req.param("userId")!}`)] as const,
     responses: { 204: { description: "User removed" } },
   }), async (c) => {
     if (!access) return err(c, 501, "Not implemented");
     const { accountId } = c.get("auth");
-    const result = await access.removeUser(accountId, c.req.param("userId"));
+    const result = await access.removeUser(accountId, c.req.param("userId")!);
     if (result.isErr()) {
-      logger.warn("Authress service unavailable while removing user.", { code: "api.authress_unavailable", accountId, userId: c.req.param("userId"), error: result.error });
+      logger.warn("Authress service unavailable while removing user.", { code: "api.authress_unavailable", accountId, userId: c.req.param("userId")!, error: result.error });
       return err(c, 503, "Service temporarily unavailable");
     }
     return new Response(null, { status: 204 });
@@ -1530,7 +1540,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
   // Aliases  —  /accounts/:accountId/aliases
   // -------------------------------------------------------------------------
 
-  app.openapi(createRoute({
+  app.openapi(route({
     method: "get",
     path: "/accounts/{accountId}/aliases",
     tags: ["Aliases"],
@@ -1538,7 +1548,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
       params: z.object({ accountId: z.string() }),
       query: z.object({ domain: z.string().optional() }),
     },
-    middleware: [authz("aliases:read", c => `accounts/${c.req.param("accountId")}/aliases`)] as const,
+    middleware: [authz("aliases:read", c => `accounts/${c.req.param("accountId")!}/aliases`)] as const,
     responses: { 200: { content: { "application/json": { schema: ListAliasesResponse } }, description: "List aliases" } },
   }), async (c) => {
     const { accountId } = c.get("auth");
@@ -1547,32 +1557,32 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     if (aliasesResult.isErr()) return err(c, 500, "Internal Server Error");
     let aliases = aliasesResult.value;
     if (domain) aliases = aliases.filter(a => a.createdForOrigin?.includes(domain));
-    return c.json(page("aliases", aliases));
+    return c.json({ aliases: aliases.map(toApiAlias) }, 200);
   });
 
-  app.openapi(createRoute({
+  app.openapi(route({
     method: "get",
     path: "/accounts/{accountId}/aliases/{address}",
     tags: ["Aliases"],
     request: { params: z.object({ accountId: z.string(), address: z.string() }) },
-    middleware: [authz("aliases:read", c => `accounts/${c.req.param("accountId")}/aliases/${c.req.param("address")}`)] as const,
+    middleware: [authz("aliases:read", c => `accounts/${c.req.param("accountId")!}/aliases/${c.req.param("address")!}`)] as const,
     responses: { 200: { content: { "application/json": { schema: AliasSchema } }, description: "Get alias" } },
   }), async (c) => {
     const { accountId } = c.get("auth");
-    const address = decodeURIComponent(c.req.param("address"));
+    const address = decodeURIComponent(c.req.param("address")!);
     const aliasResult = await accountDb.getAlias(accountId, address);
     if (aliasResult.isErr()) return err(c, 500, "Internal Server Error");
     const alias = aliasResult.value;
     if (!alias) return err(c, 404, "Alias not found", "ALIAS_NOT_FOUND");
-    return c.json(alias);
+    return c.json(toApiAlias(alias), 200);
   });
 
-  app.openapi(createRoute({
+  app.openapi(route({
     method: "post",
     path: "/accounts/{accountId}/aliases",
     tags: ["Aliases"],
     request: { params: z.object({ accountId: z.string() }) },
-    middleware: [authz("aliases:write", c => `accounts/${c.req.param("accountId")}/aliases`)] as const,
+    middleware: [authz("aliases:write", c => `accounts/${c.req.param("accountId")!}/aliases`)] as const,
     responses: { 201: { content: { "application/json": { schema: AliasSchema } }, description: "Alias created" } },
   }), async (c) => {
     const { accountId } = c.get("auth");
@@ -1591,19 +1601,19 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
       updatedAt: now,
     });
     if (createResult.isErr()) return err(c, 500, "Internal Server Error");
-    return c.json(createResult.value, 201);
+    return c.json(toApiAlias(createResult.value), 201);
   });
 
-  app.openapi(createRoute({
+  app.openapi(route({
     method: "patch",
     path: "/accounts/{accountId}/aliases/{address}",
     tags: ["Aliases"],
     request: { params: z.object({ accountId: z.string(), address: z.string() }) },
-    middleware: [authz("aliases:write", c => `accounts/${c.req.param("accountId")}/aliases/${c.req.param("address")}`)] as const,
+    middleware: [authz("aliases:write", c => `accounts/${c.req.param("accountId")!}/aliases/${c.req.param("address")!}`)] as const,
     responses: { 200: { content: { "application/json": { schema: AliasSchema } }, description: "Update alias" } },
   }), async (c) => {
     const { accountId } = c.get("auth");
-    const address = decodeURIComponent(c.req.param("address"));
+    const address = decodeURIComponent(c.req.param("address")!);
     const body = await zParse(UpdateAliasRequest, c.req.raw);
     if (body.newAddress) {
       const renameResult = await accountDb.renameAlias(accountId, address, body.newAddress);
@@ -1611,7 +1621,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
         if (renameResult.error.kind === "not_found") return err(c, 404, "Alias not found", "ALIAS_NOT_FOUND");
         return err(c, 500, "Internal Server Error");
       }
-      return c.json(renameResult.value);
+      return c.json(toApiAlias(renameResult.value), 200);
     }
     const existingResult = await accountDb.getAlias(accountId, address);
     if (existingResult.isErr()) return err(c, 500, "Internal Server Error");
@@ -1628,19 +1638,19 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
       updatedAt: now,
     });
     if (upsertResult.isErr()) return err(c, 500, "Internal Server Error");
-    return c.json(upsertResult.value);
+    return c.json(toApiAlias(upsertResult.value), 200);
   });
 
-  app.openapi(createRoute({
+  app.openapi(route({
     method: "delete",
     path: "/accounts/{accountId}/aliases/{address}",
     tags: ["Aliases"],
     request: { params: z.object({ accountId: z.string(), address: z.string() }) },
-    middleware: [authz("aliases:write", c => `accounts/${c.req.param("accountId")}/aliases/${c.req.param("address")}`)] as const,
+    middleware: [authz("aliases:write", c => `accounts/${c.req.param("accountId")!}/aliases/${c.req.param("address")!}`)] as const,
     responses: { 204: { description: "Alias deleted" } },
   }), async (c) => {
     const { accountId } = c.get("auth");
-    const address = decodeURIComponent(c.req.param("address"));
+    const address = decodeURIComponent(c.req.param("address")!);
     const deleteResult = await accountDb.deleteAlias(accountId, address);
     if (deleteResult.isErr()) return err(c, 500, "Internal Server Error");
     return new Response(null, { status: 204 });
@@ -1650,48 +1660,48 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
   // Alias Senders  —  /accounts/:accountId/aliases/:address/senders
   // -------------------------------------------------------------------------
 
-  app.openapi(createRoute({
+  app.openapi(route({
     method: "get",
     path: "/accounts/{accountId}/aliases/{address}/senders",
     tags: ["Alias Senders"],
     request: { params: z.object({ accountId: z.string(), address: z.string() }) },
-    middleware: [authz("aliases:read", c => `accounts/${c.req.param("accountId")}/aliases/${c.req.param("address")}/senders`)] as const,
+    middleware: [authz("aliases:read", c => `accounts/${c.req.param("accountId")!}/aliases/${c.req.param("address")!}/senders`)] as const,
     responses: { 200: { content: { "application/json": { schema: ListSendersResponse } }, description: "List senders" } },
   }), async (c) => {
     const { accountId } = c.get("auth");
-    const address = decodeURIComponent(c.req.param("address"));
+    const address = decodeURIComponent(c.req.param("address")!);
     const sendersResult = await accountDb.listSenders(accountId, address);
     if (sendersResult.isErr()) return err(c, 500, "Internal Server Error");
-    return c.json({ senders: sendersResult.value });
+    return c.json({ senders: sendersResult.value.map(toApiAliasSender) }, 200);
   });
 
-  app.openapi(createRoute({
+  app.openapi(route({
     method: "post",
     path: "/accounts/{accountId}/aliases/{address}/senders",
     tags: ["Alias Senders"],
     request: { params: z.object({ accountId: z.string(), address: z.string() }) },
-    middleware: [authz("aliases:write", c => `accounts/${c.req.param("accountId")}/aliases/${c.req.param("address")}/senders`)] as const,
+    middleware: [authz("aliases:write", c => `accounts/${c.req.param("accountId")!}/aliases/${c.req.param("address")!}/senders`)] as const,
     responses: { 201: { description: "Sender added" } },
   }), async (c) => {
     const { accountId } = c.get("auth");
-    const address = decodeURIComponent(c.req.param("address"));
+    const address = decodeURIComponent(c.req.param("address")!);
     const body = await zParse(CreateSenderRequest, c.req.raw);
     const saveResult = await accountDb.saveSender(accountId, address, body.domain, body.policy);
     if (saveResult.isErr()) return err(c, 500, "Internal Server Error");
     return new Response(null, { status: 201 });
   });
 
-  app.openapi(createRoute({
+  app.openapi(route({
     method: "delete",
     path: "/accounts/{accountId}/aliases/{address}/senders/{domain}",
     tags: ["Alias Senders"],
     request: { params: z.object({ accountId: z.string(), address: z.string(), domain: z.string() }) },
-    middleware: [authz("aliases:write", c => `accounts/${c.req.param("accountId")}/aliases/${c.req.param("address")}/senders/${c.req.param("domain")}`)] as const,
+    middleware: [authz("aliases:write", c => `accounts/${c.req.param("accountId")!}/aliases/${c.req.param("address")!}/senders/${c.req.param("domain")!}`)] as const,
     responses: { 204: { description: "Sender removed" } },
   }), async (c) => {
     const { accountId } = c.get("auth");
-    const address = decodeURIComponent(c.req.param("address"));
-    const domain = decodeURIComponent(c.req.param("domain"));
+    const address = decodeURIComponent(c.req.param("address")!);
+    const domain = decodeURIComponent(c.req.param("domain")!);
     const removeResult = await accountDb.removeSender(accountId, address, domain);
     if (removeResult.isErr()) return err(c, 500, "Internal Server Error");
     return new Response(null, { status: 204 });
@@ -1701,26 +1711,26 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
   // Email Templates  —  /accounts/:accountId/templates
   // -------------------------------------------------------------------------
 
-  app.openapi(createRoute({
+  app.openapi(route({
     method: "get",
     path: "/accounts/{accountId}/templates",
     tags: ["Templates"],
     request: { params: z.object({ accountId: z.string() }) },
-    middleware: [authz("templates:read", c => `accounts/${c.req.param("accountId")}/templates`)] as const,
+    middleware: [authz("templates:read", c => `accounts/${c.req.param("accountId")!}/templates`)] as const,
     responses: { 200: { content: { "application/json": { schema: ListTemplatesResponse } }, description: "List templates" } },
   }), async (c) => {
     const { accountId } = c.get("auth");
     const templatesResult = await accountDb.listTemplates(accountId);
     if (templatesResult.isErr()) return err(c, 500, "Internal Server Error");
-    return c.json({ templates: templatesResult.value });
+    return c.json({ templates: templatesResult.value.map(toApiTemplate) }, 200);
   });
 
-  app.openapi(createRoute({
+  app.openapi(route({
     method: "post",
     path: "/accounts/{accountId}/templates",
     tags: ["Templates"],
     request: { params: z.object({ accountId: z.string() }) },
-    middleware: [authz("templates:write", c => `accounts/${c.req.param("accountId")}/templates`)] as const,
+    middleware: [authz("templates:write", c => `accounts/${c.req.param("accountId")!}/templates`)] as const,
     responses: { 201: { content: { "application/json": { schema: EmailTemplateSchema } }, description: "Template created" } },
   }), async (c) => {
     const { accountId } = c.get("auth");
@@ -1749,22 +1759,22 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
         createdAt: now, updatedAt: now,
       });
       if (templateResult.isErr()) return err(c, 500, "Internal Server Error");
-      return c.json(templateResult.value, 201);
+      return c.json(toApiTemplate(templateResult.value), 201);
     }
     const templateResult = await accountDb.createTemplate({
       id: generateId("tpl-"), accountId, name: body.name, subject: body.subject, body: body.body,
       createdAt: now, updatedAt: now,
     });
     if (templateResult.isErr()) return err(c, 500, "Internal Server Error");
-    return c.json(templateResult.value, 201);
+    return c.json(toApiTemplate(templateResult.value), 201);
   });
 
-  app.openapi(createRoute({
+  app.openapi(route({
     method: "patch",
     path: "/accounts/{accountId}/templates/{id}",
     tags: ["Templates"],
     request: { params: z.object({ accountId: z.string(), id: z.string() }) },
-    middleware: [authz("templates:write", c => `accounts/${c.req.param("accountId")}/templates/${c.req.param("id")}`)] as const,
+    middleware: [authz("templates:write", c => `accounts/${c.req.param("accountId")!}/templates/${c.req.param("id")!}`)] as const,
     responses: { 200: { content: { "application/json": { schema: EmailTemplateSchema } }, description: "Update template" } },
   }), async (c) => {
     const { accountId } = c.get("auth");
@@ -1775,32 +1785,32 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
         return err(c, 400, `Invalid code in function '${astResult.name}': ${astResult.error}`, "INVALID_CODE", astResult.location ? { location: astResult.location } : undefined);
       }
     }
-    const existingResult = await accountDb.getTemplate(accountId, c.req.param("id"));
+    const existingResult = await accountDb.getTemplate(accountId, c.req.param("id")!);
     if (existingResult.isErr()) return err(c, 500, "Internal Server Error");
     if (!existingResult.value) return err(c, 404, "Template not found", "TEMPLATE_NOT_FOUND");
     // Audit: write functions change event before persisting (best-effort)
     if (body.functions) {
       const { userId } = c.get("auth");
       const auditResult = await auditDb.saveAuditEvent({
-        accountId, userId, action: "updated", resourceType: "template", resourceId: c.req.param("id"),
+        accountId, userId, action: "updated", resourceType: "template", resourceId: c.req.param("id")!,
         before: { functions: existingResult.value.functions ?? null },
         after: { functions: body.functions },
       });
       if (auditResult.isErr()) {
-        logger.warn("Audit write failed for template update, proceeding with resource write", { code: "api.audit.template_update_failed", accountId, templateId: c.req.param("id"), error: auditResult.error });
+        logger.warn("Audit write failed for template update, proceeding with resource write", { code: "api.audit.template_update_failed", accountId, templateId: c.req.param("id")!, error: auditResult.error });
       }
     }
-    const updateResult = await accountDb.updateTemplate(accountId, c.req.param("id"), body as Parameters<typeof accountDb.updateTemplate>[2]);
+    const updateResult = await accountDb.updateTemplate(accountId, c.req.param("id")!, body as Parameters<typeof accountDb.updateTemplate>[2]);
     if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
-    return c.json(updateResult.value);
+    return c.json(toApiTemplate(updateResult.value), 200);
   });
 
-  app.openapi(createRoute({
+  app.openapi(route({
     method: "put",
     path: "/accounts/{accountId}/templates/{id}",
     tags: ["Templates"],
     request: { params: z.object({ accountId: z.string(), id: z.string() }) },
-    middleware: [authz("templates:write", c => `accounts/${c.req.param("accountId")}/templates/${c.req.param("id")}`)] as const,
+    middleware: [authz("templates:write", c => `accounts/${c.req.param("accountId")!}/templates/${c.req.param("id")!}`)] as const,
     responses: { 200: { content: { "application/json": { schema: EmailTemplateSchema } }, description: "Replace template" } },
   }), async (c) => {
     const { accountId } = c.get("auth");
@@ -1811,39 +1821,39 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
         return err(c, 400, `Invalid code in function '${astResult.name}': ${astResult.error}`, "INVALID_CODE", astResult.location ? { location: astResult.location } : undefined);
       }
     }
-    const existingResult = await accountDb.getTemplate(accountId, c.req.param("id"));
+    const existingResult = await accountDb.getTemplate(accountId, c.req.param("id")!);
     if (existingResult.isErr()) return err(c, 500, "Internal Server Error");
     if (!existingResult.value) return err(c, 404, "Template not found", "TEMPLATE_NOT_FOUND");
     // Audit: write functions change event before persisting (best-effort)
     if (body.functions) {
       const { userId } = c.get("auth");
       const auditResult = await auditDb.saveAuditEvent({
-        accountId, userId, action: "updated", resourceType: "template", resourceId: c.req.param("id"),
+        accountId, userId, action: "updated", resourceType: "template", resourceId: c.req.param("id")!,
         before: { functions: existingResult.value.functions ?? null },
         after: { functions: body.functions },
       });
       if (auditResult.isErr()) {
-        logger.warn("Audit write failed for template replace, proceeding with resource write", { code: "api.audit.template_replace_failed", accountId, templateId: c.req.param("id"), error: auditResult.error });
+        logger.warn("Audit write failed for template replace, proceeding with resource write", { code: "api.audit.template_replace_failed", accountId, templateId: c.req.param("id")!, error: auditResult.error });
       }
     }
-    const updateResult = await accountDb.updateTemplate(accountId, c.req.param("id"), { name: body.name, subject: body.subject, body: body.body, ...(body.functions ? { functions: body.functions } : {}) });
+    const updateResult = await accountDb.updateTemplate(accountId, c.req.param("id")!, { name: body.name, subject: body.subject, body: body.body, ...(body.functions ? { functions: body.functions } : {}) });
     if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
-    return c.json(updateResult.value);
+    return c.json(toApiTemplate(updateResult.value), 200);
   });
 
-  app.openapi(createRoute({
+  app.openapi(route({
     method: "delete",
     path: "/accounts/{accountId}/templates/{id}",
     tags: ["Templates"],
     request: { params: z.object({ accountId: z.string(), id: z.string() }) },
-    middleware: [authz("templates:write", c => `accounts/${c.req.param("accountId")}/templates/${c.req.param("id")}`)] as const,
+    middleware: [authz("templates:write", c => `accounts/${c.req.param("accountId")!}/templates/${c.req.param("id")!}`)] as const,
     responses: { 204: { description: "Template deleted" } },
   }), async (c) => {
     const { accountId } = c.get("auth");
-    const existingResult = await accountDb.getTemplate(accountId, c.req.param("id"));
+    const existingResult = await accountDb.getTemplate(accountId, c.req.param("id")!);
     if (existingResult.isErr()) return err(c, 500, "Internal Server Error");
     if (!existingResult.value) return err(c, 404, "Template not found", "TEMPLATE_NOT_FOUND");
-    const deleteResult = await accountDb.deleteTemplate(accountId, c.req.param("id"));
+    const deleteResult = await accountDb.deleteTemplate(accountId, c.req.param("id")!);
     if (deleteResult.isErr()) return err(c, 500, "Internal Server Error");
     return new Response(null, { status: 204 });
   });
@@ -1853,26 +1863,26 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
   // Verified forwarding addresses  —  /accounts/:accountId/forwarding-addresses
   // -------------------------------------------------------------------------
 
-  app.openapi(createRoute({
+  app.openapi(route({
     method: "get",
     path: "/accounts/{accountId}/forwarding-addresses",
     tags: ["Forwarding Addresses"],
     request: { params: z.object({ accountId: z.string() }) },
-    middleware: [authz("forwarding-addresses:read", c => `accounts/${c.req.param("accountId")}/forwarding-addresses`)] as const,
+    middleware: [authz("forwarding-addresses:read", c => `accounts/${c.req.param("accountId")!}/forwarding-addresses`)] as const,
     responses: { 200: { content: { "application/json": { schema: ListForwardingAddressesResponse } }, description: "List forwarding addresses" } },
   }), async (c) => {
     const { accountId } = c.get("auth");
     const addressesResult = await accountDb.listVerifiedForwardingAddresses(accountId);
     if (addressesResult.isErr()) return err(c, 500, "Internal Server Error");
-    return c.json(page("forwardingAddresses", addressesResult.value));
+    return c.json({ forwardingAddresses: addressesResult.value.map(toApiForwardingAddress) }, 200);
   });
 
-  app.openapi(createRoute({
+  app.openapi(route({
     method: "post",
     path: "/accounts/{accountId}/forwarding-addresses",
     tags: ["Forwarding Addresses"],
     request: { params: z.object({ accountId: z.string() }) },
-    middleware: [authz("forwarding-addresses:write", c => `accounts/${c.req.param("accountId")}/forwarding-addresses`)] as const,
+    middleware: [authz("forwarding-addresses:write", c => `accounts/${c.req.param("accountId")!}/forwarding-addresses`)] as const,
     responses: { 201: { content: { "application/json": { schema: VerifiedForwardingAddressSchema } }, description: "Forwarding address created" } },
   }), async (c) => {
     const { accountId } = c.get("auth");
@@ -1881,7 +1891,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     const existingResult = await accountDb.getVerifiedForwardingAddress(accountId, body.address);
     if (existingResult.isErr()) return err(c, 500, "Internal Server Error");
     const existing = existingResult.value;
-    if (existing?.status === "verified") return c.json(existing, 200);
+    if (existing?.status === "verified") return c.json(toApiForwardingAddress(existing), 201);
 
     const now = DateTime.utc().toISO()!;
     const addr: VerifiedForwardingAddress = {
@@ -1904,44 +1914,44 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
       }
     }
 
-    return c.json(addr, 201);
+    return c.json(toApiForwardingAddress(addr), 201);
   });
 
-  app.openapi(createRoute({
+  app.openapi(route({
     method: "post",
     path: "/accounts/{accountId}/forwarding-addresses/{address}/verify",
     tags: ["Forwarding Addresses"],
     request: { params: z.object({ accountId: z.string(), address: z.string() }) },
-    middleware: [authz("forwarding-addresses:write", c => `accounts/${c.req.param("accountId")}/forwarding-addresses/${c.req.param("address")}`)] as const,
+    middleware: [authz("forwarding-addresses:write", c => `accounts/${c.req.param("accountId")!}/forwarding-addresses/${c.req.param("address")!}`)] as const,
     responses: { 200: { content: { "application/json": { schema: VerifiedForwardingAddressSchema } }, description: "Address verified" } },
   }), async (c) => {
     const { accountId } = c.get("auth");
-    const address = decodeURIComponent(c.req.param("address"));
+    const address = decodeURIComponent(c.req.param("address")!);
     const body = await zParse(VerifyForwardingAddressRequest, c.req.raw);
 
     const existingResult = await accountDb.getVerifiedForwardingAddress(accountId, address);
     if (existingResult.isErr()) return err(c, 500, "Internal Server Error");
     const existing = existingResult.value;
     if (!existing) return err(c, 404, "Forwarding address not found", "FORWARDING_ADDRESS_NOT_FOUND");
-    if (existing.status === "verified") return c.json(existing);
+    if (existing.status === "verified") return c.json(toApiForwardingAddress(existing), 200);
     if (existing.token !== body.token) return err(c, 400, "Invalid token", "INVALID_TOKEN");
 
     const verified: VerifiedForwardingAddress = { ...existing, status: "verified", verifiedAt: DateTime.utc().toISO()! };
     const saveResult = await accountDb.saveVerifiedForwardingAddress(verified);
     if (saveResult.isErr()) return err(c, 500, "Internal Server Error");
-    return c.json(verified);
+    return c.json(toApiForwardingAddress(verified), 200);
   });
 
-  app.openapi(createRoute({
+  app.openapi(route({
     method: "delete",
     path: "/accounts/{accountId}/forwarding-addresses/{address}",
     tags: ["Forwarding Addresses"],
     request: { params: z.object({ accountId: z.string(), address: z.string() }) },
-    middleware: [authz("forwarding-addresses:write", c => `accounts/${c.req.param("accountId")}/forwarding-addresses/${c.req.param("address")}`)] as const,
+    middleware: [authz("forwarding-addresses:write", c => `accounts/${c.req.param("accountId")!}/forwarding-addresses/${c.req.param("address")!}`)] as const,
     responses: { 204: { description: "Forwarding address deleted" } },
   }), async (c) => {
     const { accountId } = c.get("auth");
-    const address = decodeURIComponent(c.req.param("address"));
+    const address = decodeURIComponent(c.req.param("address")!);
     const deleteResult = await accountDb.deleteVerifiedForwardingAddress(accountId, address);
     if (deleteResult.isErr()) return err(c, 500, "Internal Server Error");
     return new Response(null, { status: 204 });
@@ -1951,7 +1961,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
   // Audit  —  /accounts/:accountId/audit
   // -------------------------------------------------------------------------
 
-  app.openapi(createRoute({
+  app.openapi(route({
     method: "get",
     path: "/accounts/{accountId}/audit",
     tags: ["Audit"],
@@ -1959,7 +1969,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
       params: z.object({ accountId: z.string() }),
       query: z.object({ cursor: z.string().optional(), limit: z.string().optional() }),
     },
-    middleware: [authz("audit:read", c => `accounts/${c.req.param("accountId")}/audit`)] as const,
+    middleware: [authz("audit:read", c => `accounts/${c.req.param("accountId")!}/audit`)] as const,
     responses: { 200: { content: { "application/json": { schema: z.object({}) } }, description: "List audit events" } },
   }), async (c) => {
     const { accountId } = c.get("auth");
@@ -1968,7 +1978,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     const params: PageParams = { ...(cursor ? { cursor } : {}), ...(rawLimit ? { limit: parseInt(rawLimit, 10) } : {}) };
     const result = await auditDb.listAuditEvents(accountId, params);
     if (result.isErr()) return err(c, 500, "Internal Server Error");
-    return c.json(result.value);
+    return c.json(result.value, 200);
   });
 
   // ---------------------------------------------------------------------------
@@ -2038,7 +2048,7 @@ function validateWebhookActions(
   actions: Rule["actions"],
   accountPlan: BillingPlan,
   billing: BillingHandler,
-): { message: string; code: string } | null {
+): { message: string; code: z.infer<typeof ErrorCode> } | null {
   const webhookActions = actions.filter((a) => a.type === "webhook");
   if (webhookActions.length === 0) return null;
 

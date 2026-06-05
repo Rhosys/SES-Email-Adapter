@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { SignalClassifier, CLASSIFICATION_MODEL_ID } from "../../src/classifier/classifier.js";
 import type { ClassificationInput } from "../../src/classifier/classifier.js";
+import { createMockLogger } from "../helpers/mock-logger.js";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -83,10 +84,12 @@ function mockClassifyResponse(raw: object) {
 
 describe("SignalClassifier", () => {
   let classifier: SignalClassifier;
+  let logger: ReturnType<typeof createMockLogger>;
 
   beforeEach(() => {
     vi.clearAllMocks();
-    classifier = new SignalClassifier();
+    logger = createMockLogger();
+    classifier = new SignalClassifier(undefined, logger);
   });
 
   // -------------------------------------------------------------------------
@@ -111,14 +114,16 @@ describe("SignalClassifier", () => {
 
       const result = await classifier.classify(githubOtpEmail);
 
-      expect(result.workflow).toBe("auth");
-      expect(result.workflowData).toMatchObject({
+      expect(result.isOk()).toBe(true);
+      const output = result._unsafeUnwrap();
+      expect(output.workflow).toBe("auth");
+      expect(output.workflowData).toMatchObject({
         workflow: "auth",
         authType: "otp",
         code: "483921",
         service: "GitHub",
       });
-      expect(result.spamScore).toBeLessThan(0.1);
+      expect(output.spamScore).toBeLessThan(0.1);
     });
   });
 
@@ -146,9 +151,11 @@ describe("SignalClassifier", () => {
 
       const result = await classifier.classify(stripeInvoiceEmail);
 
-      expect(result.workflow).toBe("payments");
-      expect(result.workflowData).toMatchObject({ vendor: "Acme Corp", amount: 149.0 });
-      expect(result.labels).toContain("billing");
+      expect(result.isOk()).toBe(true);
+      const output = result._unsafeUnwrap();
+      expect(output.workflow).toBe("payments");
+      expect(output.workflowData).toMatchObject({ vendor: "Acme Corp", amount: 149.0 });
+      expect(output.labels).toContain("billing");
     });
   });
 
@@ -175,8 +182,10 @@ describe("SignalClassifier", () => {
 
       const result = await classifier.classify(recruiterEmail);
 
-      expect(result.workflow).toBe("job");
-      expect(result.workflowData).toMatchObject({ jobType: "recruiter_outreach", company: "TechCorp" });
+      expect(result.isOk()).toBe(true);
+      const output = result._unsafeUnwrap();
+      expect(output.workflow).toBe("job");
+      expect(output.workflowData).toMatchObject({ jobType: "recruiter_outreach", company: "TechCorp" });
     });
   });
 
@@ -203,8 +212,10 @@ describe("SignalClassifier", () => {
 
       const result = await classifier.classify(phishingEmail);
 
-      expect(result.spamScore).toBeGreaterThan(0.9);
-      expect(result.workflow).toBe("auth");
+      expect(result.isOk()).toBe(true);
+      const output = result._unsafeUnwrap();
+      expect(output.spamScore).toBeGreaterThan(0.9);
+      expect(output.workflow).toBe("auth");
     });
   });
 
@@ -232,8 +243,10 @@ describe("SignalClassifier", () => {
 
       const result = await classifier.classify(shippingEmail);
 
-      expect(result.workflow).toBe("package");
-      expect(result.workflowData).toMatchObject({
+      expect(result.isOk()).toBe(true);
+      const output = result._unsafeUnwrap();
+      expect(output.workflow).toBe("package");
+      expect(output.workflowData).toMatchObject({
         packageType: "shipping",
         retailer: "Amazon",
         trackingNumber: "1Z999AA10123456784",
@@ -257,7 +270,9 @@ describe("SignalClassifier", () => {
 
       const result = await classifier.classify(githubOtpEmail);
 
-      expect(result.labels).toEqual(["action-needed", "important"]);
+      expect(result.isOk()).toBe(true);
+      // allowedLabels is [] so all labels get filtered out
+      expect(result._unsafeUnwrap().labels).toEqual([]);
     });
 
     it("returns empty labels array when classifier suggests none", async () => {
@@ -271,7 +286,8 @@ describe("SignalClassifier", () => {
 
       const result = await classifier.classify(githubOtpEmail);
 
-      expect(result.labels).toEqual([]);
+      expect(result.isOk()).toBe(true);
+      expect(result._unsafeUnwrap().labels).toEqual([]);
     });
   });
 
@@ -449,13 +465,16 @@ describe("SignalClassifier", () => {
       expect(payload.messages[0]!.content).not.toContain("[... truncated]");
     });
 
-    it("throws when Bedrock returns non-JSON text content", async () => {
+    it("returns err when Bedrock returns non-JSON text content", async () => {
       const malformed = new TextEncoder().encode(
         JSON.stringify({ content: [{ type: "text", text: "not valid json {{{{" }] }),
       );
       mockSend.mockResolvedValueOnce({ body: malformed });
 
-      await expect(classifier.classify(githubOtpEmail)).rejects.toThrow();
+      const result = await classifier.classify(githubOtpEmail);
+
+      expect(result.isErr()).toBe(true);
+      expect(result._unsafeUnwrapErr().kind).toBe("classification_error");
     });
 
     it("preserves emoji and unicode characters in the Bedrock message content", async () => {
@@ -516,9 +535,11 @@ describe("SignalClassifier", () => {
         allowedLabels: ["urgent", "action-needed"],
       });
 
-      expect(result.workflow).toBe("alert");
-      expect(result.workflowData).toMatchObject({ alertType: "fraud_alert", requiresAction: true });
-      expect(result.labels).toContain("urgent");
+      expect(result.isOk()).toBe(true);
+      const output = result._unsafeUnwrap();
+      expect(output.workflow).toBe("alert");
+      expect(output.workflowData).toMatchObject({ alertType: "fraud_alert", requiresAction: true });
+      expect(output.labels).toContain("urgent");
     });
   });
 
@@ -554,8 +575,10 @@ describe("SignalClassifier", () => {
         allowedLabels: [],
       });
 
-      expect(result.workflow).toBe("travel");
-      expect(result.workflowData).toMatchObject({
+      expect(result.isOk()).toBe(true);
+      const output = result._unsafeUnwrap();
+      expect(output.workflow).toBe("travel");
+      expect(output.workflowData).toMatchObject({
         travelType: "flight",
         provider: "Delta Airlines",
         confirmationNumber: "DELTA123",
@@ -593,9 +616,11 @@ describe("SignalClassifier", () => {
         allowedLabels: ["action-needed", "urgent"],
       });
 
-      expect(result.workflow).toBe("alert");
-      expect(result.workflowData).toMatchObject({ alertType: "suspicious_login", requiresAction: true });
-      expect(result.spamScore).toBeLessThan(0.3); // legitimate alert from github.com
+      expect(result.isOk()).toBe(true);
+      const output = result._unsafeUnwrap();
+      expect(output.workflow).toBe("alert");
+      expect(output.workflowData).toMatchObject({ alertType: "suspicious_login", requiresAction: true });
+      expect(output.spamScore).toBeLessThan(0.3); // legitimate alert from github.com
     });
   });
 
@@ -619,9 +644,11 @@ describe("SignalClassifier", () => {
         allowedLabels: [],
       });
 
-      expect(result.workflow).toBe("test");
-      expect(result.workflowData).toMatchObject({ triggeredBy: "user" });
-      expect(result.spamScore).toBe(0.0);
+      expect(result.isOk()).toBe(true);
+      const output = result._unsafeUnwrap();
+      expect(output.workflow).toBe("test");
+      expect(output.workflowData).toMatchObject({ triggeredBy: "user" });
+      expect(output.spamScore).toBe(0.0);
     });
   });
 });
