@@ -1,18 +1,5 @@
 import type { WorkflowDefinition } from "./workflow-registry.js";
-
-/**
- * Future-shaped classification input. The processor resolves HTML-first body
- * and passes allowed labels from the account's label set.
- */
-export interface ClassificationInput {
-  from: string;
-  to: string[];
-  subject: string;
-  body: string;
-  receivedAt: string;
-  headers: Record<string, string>;
-  allowedLabels: string[];
-}
+import type { ClassificationInput } from "./classifier.js";
 
 const RELEVANT_HEADERS = new Set([
   "authentication-results",
