@@ -3,15 +3,15 @@ import { DateTime } from "luxon";
 import { generateId } from "../utils/id.js";
 import type { Logger } from "../logger.js";
 import type { Result } from "neverthrow";
-import { ok, err, dbError, processorError } from "../errors.js";
+import { ok, err, dbError, processorError, invalidResponseError } from "../errors.js";
 import type { DbError, InvalidResponseError, ProcessorError } from "../errors.js";
 import type { Signal, Arc, Rule, Workflow, WorkflowData, Alias, AliasSender, SenderPolicy, AccountFilteringConfig, SignalSource, SignalStatus, Domain, ArcStatus, ArcUrgency, UnknownSenderPolicy, MatchedRuleResult, InvalidRuleFunctionData, InvalidTemplateFunctionData, AutoSendBlockedData } from "../types/index.js";
 import type { ParsedMime } from "./mime.js";
 import type { ContentSanitizerClient } from "./content-sanitizer-client.js";
 import type { UserCodeExecutorClient, TemplateParameterResult } from "./user-code-client.js";
 import type { RuleEvalResult } from "./interpret-rule-result.js";
-import { buildEmbedText, extractEmbedTextInput } from "../embedding/embed-text.js";
-import type { SignalClassifier } from "../classifier/classifier.js";
+import { buildEmbedText } from "../embedding/embed-text.js";
+import type { SignalClassifier, ClassificationOutput } from "../classifier/classifier.js";
 import type { EmbeddingGenerator } from "../embedding/embedding-generator.js";
 import type { MultiClusterAuroraWriter } from "../database/multi-cluster-aurora-writer.js";
 import type { ArcDatabase, UpdateArcFields } from "../database/arc-database.js";
@@ -883,26 +883,32 @@ export class SignalProcessor {
 
     const senderETLD1 = getETLD1(parsed.from.address);
 
-    // 3. Build EmbedTextInput and construct embed text
-    // Reuses existing MIME parser; ensures from / reply-to / return-path / subject / text body extraction
-    const embedTextInput = extractEmbedTextInput(parsed, accountId, recipientAddress);
-    const embedText = buildEmbedText(embedTextInput);
+    // 3. Fetch account labels for closed-set label selection
+    const labelsResult = await this.accountDb.listLabels(accountId);
+    const allowedLabels = labelsResult.isOk() ? labelsResult.value.map(l => l.name) : [];
+
+    // 4. Classify email (must complete before embedding — sequential dependency)
+    const classification = await this.classifier.classify({
+      from: parsed.from.address,
+      to: parsed.to.map((a) => a.address),
+      subject: parsed.subject,
+      body: parsed.htmlBody != null ? stripHtmlForClassifier(parsed.htmlBody) : (parsed.textBody ?? ""),
+      headers: parsed.headers,
+      receivedAt: timestamp,
+      allowedLabels,
+    });
+
+    if (classification.isErr()) {
+      return err(invalidResponseError());
+    }
+    const classificationOutput = classification.value;
+
+    // 5. Build embed text from classification output (attacker-free content)
+    const embedText = buildEmbedText(classificationOutput);
 
     // Phase 1: Primary embedding (fail-hard) — must succeed for arc matching
     const readCluster = getPrimaryArcMatcherRegistry();
-    const [primaryResult, classification] = await Promise.all([
-      this.embeddingGenerator.generateForModel(embedText, readCluster.modelId),
-      this.classifier.classify({
-        from: parsed.from.address,
-        to: parsed.to.map((a) => a.address),
-        subject: parsed.subject,
-        // TODO: task 6.1 — fetch account labels and pass as allowedLabels
-        body: parsed.htmlBody != null ? stripHtmlForClassifier(parsed.htmlBody) : (parsed.textBody ?? ""),
-        headers: parsed.headers,
-        receivedAt: timestamp,
-        allowedLabels: [],
-      }),
-    ]);
+    const primaryResult = await this.embeddingGenerator.generateForModel(embedText, readCluster.modelId);
 
     if (primaryResult.isErr()) {
       this.logger.error("Primary embedding generation failed. The Bedrock InvokeModel call for the read cluster returned an error. Arc matching cannot proceed without a valid vector — the message will be retried via batch item failure.", { code: "embedding.primary_failed", modelId: readCluster.modelId, error: primaryResult.error });
@@ -927,8 +933,8 @@ export class SignalProcessor {
       accountCtx.registeredDomains.includes(fromDomain) ||
       accountCtx.userEmails.map((e) => e.toLowerCase()).includes(parsed.from.address.toLowerCase());
     if (isTestEmail) {
-      classification.workflow = "test";
-      classification.workflowData = { workflow: "test", triggeredBy: "user" };
+      classificationOutput.workflow = "test";
+      classificationOutput.workflowData = { workflow: "test", triggeredBy: "user" };
     }
 
     const spamScoreThreshold =
@@ -937,7 +943,7 @@ export class SignalProcessor {
       DEFAULT_SPAM_SCORE_THRESHOLD;
 
     // 6. Arc matching
-    const groupingKey = deriveGroupingKey(classification.workflow, classification.workflowData, recipientAddress, senderETLD1);
+    const groupingKey = deriveGroupingKey(classificationOutput.workflow, classificationOutput.workflowData, recipientAddress, senderETLD1);
     this.logger.trackPoint("arc_matcher_values_generated");
     let matchedArc: Arc | null;
     this.logger.trackPoint("arc_match_search");
@@ -965,8 +971,8 @@ export class SignalProcessor {
     if (matchedArc) {
       arc = {
         ...matchedArc,
-        workflow: classification.workflow,
-        summary: classification.summary,
+        workflow: classificationOutput.workflow,
+        summary: classificationOutput.summary,
         updatedAt: now,
       };
       this.logger.info("Existing arc matched.", { code: "processor.arc_matched", arcId: arc.id, matchMethod: groupingKey ? "groupingKey" : "similarity", accountId, sesMessageId });
@@ -975,10 +981,10 @@ export class SignalProcessor {
         id: generateId("arc-"),
         accountId,
         ...(groupingKey ? { groupingKey } : {}),
-        workflow: classification.workflow,
+        workflow: classificationOutput.workflow,
         labels: [],
         status: "active",
-        summary: classification.summary,
+        summary: classificationOutput.summary,
         lastSignalAt: timestamp,
         createdAt: now,
         updatedAt: now,
@@ -1000,10 +1006,10 @@ export class SignalProcessor {
     // Explicit sender block — if the sender has been explicitly blocked for this alias, short-circuit
     if (effectiveSenderEntry && effectiveSenderEntry.policy !== "allow") {
       const blockStatus = effectiveSenderEntry.policy; // block_hidden | block_reject | violate_report
-      const blockedSignal = buildSignal({ status: blockStatus, accountId, sesMessageId, recipientAddress, parsed, classification, s3Key, receivedAt: timestamp, now, ...(ttl !== undefined ? { ttl } : {}) });
+      const blockedSignal = buildSignal({ status: blockStatus, accountId, sesMessageId, recipientAddress, parsed, classification: classificationOutput, s3Key, receivedAt: timestamp, now, ...(ttl !== undefined ? { ttl } : {}) });
       const saveResult = await this.arcDb.saveSignal(blockedSignal);
       if (saveResult.isErr()) return err(saveResult.error);
-      const repResult = await this.processingDb.updateGlobalReputation(senderETLD1, { wasSpam: classification.spamScore >= spamScoreThreshold, wasBlocked: true });
+      const repResult = await this.processingDb.updateGlobalReputation(senderETLD1, { wasSpam: classificationOutput.spamScore >= spamScoreThreshold, wasBlocked: true });
       if (repResult.isErr()) {
         this.logger.warn("Failed to update global sender reputation after signal processing. The DynamoDB update returned an error. Reputation data may be stale for this domain.", { code: "processor.reputation_update_failed", accountId, error: repResult.error });
       }
@@ -1018,9 +1024,9 @@ export class SignalProcessor {
     }
 
     const systemLabels = assignSystemLabels({
-      workflow: classification.workflow,
-      workflowData: classification.workflowData,
-      spamScore: classification.spamScore,
+      workflow: classificationOutput.workflow,
+      workflowData: classificationOutput.workflowData,
+      spamScore: classificationOutput.spamScore,
       spamScoreThreshold,
       senderETLD1,
       senderEntry: effectiveSenderEntry,
@@ -1028,7 +1034,7 @@ export class SignalProcessor {
       hasSentMessages: (arc.sentMessageIds?.length ?? 0) > 0,
     });
 
-    for (const label of [...systemLabels, ...classification.labels]) {
+    for (const label of [...systemLabels, ...classificationOutput.labels]) {
       if (!arc.labels.includes(label)) arc.labels = [...arc.labels, label];
     }
 
@@ -1049,7 +1055,7 @@ export class SignalProcessor {
       sesMessageId,
       recipientAddress,
       parsed,
-      classification,
+      classification: classificationOutput,
       s3Key,
       receivedAt: timestamp,
       now,
@@ -1077,13 +1083,13 @@ export class SignalProcessor {
       }
     }
 
-    const buildArgs = { accountId, sesMessageId, recipientAddress, parsed, classification, s3Key, receivedAt: timestamp, now, ...(ttl !== undefined ? { ttl } : {}) };
+    const buildArgs = { accountId, sesMessageId, recipientAddress, parsed, classification: classificationOutput, s3Key, receivedAt: timestamp, now, ...(ttl !== undefined ? { ttl } : {}) };
 
     if (outcome.blockDisposition) {
       const blockSignal = buildSignal({ status: outcome.blockDisposition, ...buildArgs });
       const saveResult = await this.arcDb.saveSignal({ ...blockSignal, data: { ...blockSignal.data, matchedRules } });
       if (saveResult.isErr()) return err(saveResult.error);
-      const repResult = await this.processingDb.updateGlobalReputation(senderETLD1, { wasSpam: classification.spamScore >= spamScoreThreshold, wasBlocked: true });
+      const repResult = await this.processingDb.updateGlobalReputation(senderETLD1, { wasSpam: classificationOutput.spamScore >= spamScoreThreshold, wasBlocked: true });
       if (repResult.isErr()) {
         this.logger.warn("Failed to update global sender reputation after signal processing. The DynamoDB update returned an error. Reputation data may be stale for this domain.", { code: "processor.reputation_update_failed", accountId, error: repResult.error });
       }
@@ -1104,7 +1110,7 @@ export class SignalProcessor {
       const quarantinedSignal: Signal = { ...quarantineBase, data: { ...quarantineBase.data, matchedRules } };
       const saveResult = await this.arcDb.saveSignal(quarantinedSignal);
       if (saveResult.isErr()) return err(saveResult.error);
-      const repResult = await this.processingDb.updateGlobalReputation(senderETLD1, { wasSpam: classification.spamScore >= spamScoreThreshold, wasBlocked: true });
+      const repResult = await this.processingDb.updateGlobalReputation(senderETLD1, { wasSpam: classificationOutput.spamScore >= spamScoreThreshold, wasBlocked: true });
       if (repResult.isErr()) {
         this.logger.warn("Failed to update global sender reputation after signal processing. The DynamoDB update returned an error. Reputation data may be stale for this domain.", { code: "processor.reputation_update_failed", accountId, error: repResult.error });
       }
@@ -1211,7 +1217,7 @@ export class SignalProcessor {
     // Side-effects (forward, auto-reply, auto-draft, notify) are handled by processSideEffect via SQS dispatch.
 
     const finalRepResult = await this.processingDb.updateGlobalReputation(senderETLD1, {
-      wasSpam: classification.spamScore >= spamScoreThreshold,
+      wasSpam: classificationOutput.spamScore >= spamScoreThreshold,
       wasBlocked: false,
     });
     if (finalRepResult.isErr()) {
@@ -1517,7 +1523,7 @@ function buildSignal(opts: {
   sesMessageId: string;
   recipientAddress: string;
   parsed: ParsedMime;
-  classification: Awaited<ReturnType<SignalClassifier["classify"]>>;
+  classification: ClassificationOutput;
   s3Key: string;
   receivedAt: string;
   now: string;
