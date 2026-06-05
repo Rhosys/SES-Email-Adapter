@@ -67,14 +67,14 @@ describe("Blocked/quarantined signals never trigger saveArc", () => {
 
   function makeClassifier(overrides: Partial<ClassificationOutput> = {}): Pick<SignalClassifier, "classify"> {
     return {
-      classify: vi.fn().mockResolvedValue({
+      classify: vi.fn().mockResolvedValue(ok({
         workflow: "conversation" as Workflow,
         workflowData: { workflow: "conversation", sentiment: "neutral", requiresReply: false },
         spamScore: 0.05,
         summary: "A test email.",
         labels: [],
         ...overrides,
-      }),
+      })),
     };
   }
 

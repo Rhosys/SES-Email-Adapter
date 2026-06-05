@@ -4,6 +4,7 @@
 // ---------------------------------------------------------------------------
 
 import type { ParsedMime } from "../processor/mime.js";
+import type { ClassificationOutput } from "../classifier/classifier.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -154,7 +155,7 @@ function buildBodyContent(sanitizedBody: string): string {
 // ---------------------------------------------------------------------------
 
 /**
- * Builds the embed text from input data.
+ * Builds the embed text from MIME input data (legacy path — used by reindex worker).
  *
  * 1. Sanitizes rawTextBody (strip CSS, HTML tags, <img>, alt text)
  * 2. Reduces links to "domain/firstPathSegment"
@@ -163,7 +164,7 @@ function buildBodyContent(sanitizedBody: string): string {
  *        : sanitized
  * 4. Joins header lines + body with '\n'
  */
-export function buildEmbedText(input: EmbedTextInput): string {
+export function buildMimeEmbedText(input: EmbedTextInput): string {
   const sanitizedBody = sanitizeBody(input.rawTextBody);
   const bodyContent = buildBodyContent(sanitizedBody);
 
@@ -183,6 +184,29 @@ export function buildEmbedText(input: EmbedTextInput): string {
   headerLines.push(input.subject);
 
   return [...headerLines, bodyContent].join("\n");
+}
+
+/**
+ * Builds embed text from classification output (sequential pipeline).
+ *
+ * Format: "{workflow}\n{summary}\n{key1}={value1}\n{key2}={value2}..."
+ * Only non-null workflowData fields are included (excluding the `workflow` discriminator).
+ * Compact, deterministic, free of attacker-controlled content.
+ */
+export function buildEmbedText(classification: ClassificationOutput): string {
+  const lines: string[] = [
+    classification.workflow,
+    classification.summary,
+  ];
+
+  const data = classification.workflowData;
+  for (const [key, value] of Object.entries(data)) {
+    if (key === "workflow") continue;
+    if (value == null) continue;
+    lines.push(`${key}=${String(value)}`);
+  }
+
+  return lines.join("\n");
 }
 
 // ---------------------------------------------------------------------------

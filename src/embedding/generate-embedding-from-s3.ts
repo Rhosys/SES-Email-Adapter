@@ -5,7 +5,7 @@
 
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 import { MailparserMimeParser } from "../processor/mime.js";
-import { buildEmbedText, extractEmbedTextInput } from "./embed-text.js";
+import { buildMimeEmbedText, extractEmbedTextInput } from "./embed-text.js";
 import type { EmbeddingGenerator, EmbeddingResult } from "./embedding-generator.js";
 import type { BedrockError, DbError, Result } from "../errors.js";
 import { ok, err, dbError } from "../errors.js";
@@ -44,7 +44,7 @@ export async function generateEmbeddingFromS3(opts: GenerateEmbeddingFromS3Opts)
 
   // 3. Build embed text
   const embedTextInput = extractEmbedTextInput(parsed, accountId, recipientAddress);
-  const embedText = buildEmbedText(embedTextInput);
+  const embedText = buildMimeEmbedText(embedTextInput);
 
   // 4. Generate embedding vector
   const result = await embeddingGenerator.generateForModel(embedText, modelId);

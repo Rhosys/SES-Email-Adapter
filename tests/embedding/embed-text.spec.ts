@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildEmbedText, reduceLink, type EmbedTextInput } from "../../src/embedding/embed-text.js";
+import { buildMimeEmbedText, reduceLink, type EmbedTextInput } from "../../src/embedding/embed-text.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -23,7 +23,7 @@ function makeInput(overrides: Partial<EmbedTextInput> = {}): EmbedTextInput {
 describe("buildEmbedText", () => {
   describe("header lines", () => {
     it("includes accountId, from, recipientAddress, subject on separate lines", () => {
-      const result = buildEmbedText(makeInput());
+      const result = buildMimeEmbedText(makeInput());
       const lines = result.split("\n");
       expect(lines[0]).toBe("acct-123");
       expect(lines[1]).toBe("sender@example.com");
@@ -32,32 +32,32 @@ describe("buildEmbedText", () => {
     });
 
     it("includes replyTo when present", () => {
-      const result = buildEmbedText(makeInput({ replyTo: "reply@example.com" }));
+      const result = buildMimeEmbedText(makeInput({ replyTo: "reply@example.com" }));
       const lines = result.split("\n");
       expect(lines).toContain("reply@example.com");
     });
 
     it("includes returnPath when present", () => {
-      const result = buildEmbedText(makeInput({ returnPath: "bounce@example.com" }));
+      const result = buildMimeEmbedText(makeInput({ returnPath: "bounce@example.com" }));
       const lines = result.split("\n");
       expect(lines).toContain("bounce@example.com");
     });
 
     it("omits replyTo line when undefined", () => {
-      const result = buildEmbedText(makeInput());
+      const result = buildMimeEmbedText(makeInput());
       const lines = result.split("\n");
       // Should be: accountId, from, recipientAddress, subject, body
       expect(lines.length).toBe(5);
     });
 
     it("omits returnPath line when empty string", () => {
-      const result = buildEmbedText(makeInput({ returnPath: "" }));
+      const result = buildMimeEmbedText(makeInput({ returnPath: "" }));
       const lines = result.split("\n");
       expect(lines.length).toBe(5);
     });
 
     it("includes both replyTo and returnPath when both present", () => {
-      const result = buildEmbedText(makeInput({
+      const result = buildMimeEmbedText(makeInput({
         replyTo: "reply@example.com",
         returnPath: "bounce@example.com",
       }));
@@ -75,7 +75,7 @@ describe("buildEmbedText", () => {
 
   describe("sanitization — CSS removal", () => {
     it("removes <style> blocks and their content", () => {
-      const result = buildEmbedText(makeInput({
+      const result = buildMimeEmbedText(makeInput({
         rawTextBody: "before <style>.foo { color: red; }</style> after",
       }));
       expect(result).toContain("before");
@@ -85,7 +85,7 @@ describe("buildEmbedText", () => {
     });
 
     it("removes multiline <style> blocks", () => {
-      const result = buildEmbedText(makeInput({
+      const result = buildMimeEmbedText(makeInput({
         rawTextBody: "text <style type=\"text/css\">\n.a { margin: 0; }\n.b { padding: 0; }\n</style> more",
       }));
       expect(result).not.toContain("margin");
@@ -99,7 +99,7 @@ describe("buildEmbedText", () => {
 
   describe("sanitization — HTML tag removal", () => {
     it("removes all HTML tags", () => {
-      const result = buildEmbedText(makeInput({
+      const result = buildMimeEmbedText(makeInput({
         rawTextBody: "<div><p>Hello</p><span>World</span></div>",
       }));
       expect(result).toContain("Hello");
@@ -110,7 +110,7 @@ describe("buildEmbedText", () => {
     });
 
     it("removes self-closing tags", () => {
-      const result = buildEmbedText(makeInput({
+      const result = buildMimeEmbedText(makeInput({
         rawTextBody: "before <br/> after <hr /> end",
       }));
       expect(result).not.toContain("<br");
@@ -124,7 +124,7 @@ describe("buildEmbedText", () => {
 
   describe("sanitization — image removal", () => {
     it("removes <img> tags entirely", () => {
-      const result = buildEmbedText(makeInput({
+      const result = buildMimeEmbedText(makeInput({
         rawTextBody: 'before <img src="photo.jpg" alt="A photo"> after',
       }));
       expect(result).not.toContain("<img");
@@ -135,7 +135,7 @@ describe("buildEmbedText", () => {
     });
 
     it("removes self-closing <img/> tags", () => {
-      const result = buildEmbedText(makeInput({
+      const result = buildMimeEmbedText(makeInput({
         rawTextBody: 'text <img src="x.png" /> more',
       }));
       expect(result).not.toContain("<img");
@@ -149,7 +149,7 @@ describe("buildEmbedText", () => {
 
   describe("sanitization — link reduction", () => {
     it("reduces full URL to domain + first path segment", () => {
-      const result = buildEmbedText(makeInput({
+      const result = buildMimeEmbedText(makeInput({
         rawTextBody: "Visit https://amazon.com/products/foo/bar?ref=x for details",
       }));
       expect(result).toContain("amazon.com/products");
@@ -158,7 +158,7 @@ describe("buildEmbedText", () => {
     });
 
     it("reduces URL with no path to just domain", () => {
-      const result = buildEmbedText(makeInput({
+      const result = buildMimeEmbedText(makeInput({
         rawTextBody: "Visit https://example.com for details",
       }));
       expect(result).toContain("example.com");
@@ -166,7 +166,7 @@ describe("buildEmbedText", () => {
     });
 
     it("reduces URL with query string only to domain", () => {
-      const result = buildEmbedText(makeInput({
+      const result = buildMimeEmbedText(makeInput({
         rawTextBody: "Visit https://example.com?query=1 for details",
       }));
       expect(result).toContain("example.com");
@@ -174,7 +174,7 @@ describe("buildEmbedText", () => {
     });
 
     it("reduces URL with fragment to domain + first path", () => {
-      const result = buildEmbedText(makeInput({
+      const result = buildMimeEmbedText(makeInput({
         rawTextBody: "See https://docs.example.com/guide/section#heading here",
       }));
       expect(result).toContain("docs.example.com/guide");
@@ -183,7 +183,7 @@ describe("buildEmbedText", () => {
     });
 
     it("handles multiple URLs in the same text", () => {
-      const result = buildEmbedText(makeInput({
+      const result = buildMimeEmbedText(makeInput({
         rawTextBody: "Link1: https://a.com/path1/sub Link2: https://b.com/path2/sub",
       }));
       expect(result).toContain("a.com/path1");
@@ -199,7 +199,7 @@ describe("buildEmbedText", () => {
   describe("body bounding", () => {
     it("passes through body ≤ 4000 chars unchanged", () => {
       const body = "x".repeat(4000);
-      const result = buildEmbedText(makeInput({ rawTextBody: body }));
+      const result = buildMimeEmbedText(makeInput({ rawTextBody: body }));
       const lines = result.split("\n");
       const bodyLine = lines[lines.length - 1]!;
       expect(bodyLine.length).toBe(4000);
@@ -208,7 +208,7 @@ describe("buildEmbedText", () => {
     it("applies 3000+1000 split when body > 4000 chars", () => {
       // Create a body that after sanitization is > 4000 chars
       const body = "a".repeat(3000) + "b".repeat(2000) + "c".repeat(1000);
-      const result = buildEmbedText(makeInput({ rawTextBody: body }));
+      const result = buildMimeEmbedText(makeInput({ rawTextBody: body }));
       const lines = result.split("\n");
       const bodyLine = lines[lines.length - 1]!;
       expect(bodyLine.length).toBe(4000);
@@ -220,7 +220,7 @@ describe("buildEmbedText", () => {
 
     it("body portion never exceeds 4000 chars", () => {
       const body = "x".repeat(10000);
-      const result = buildEmbedText(makeInput({ rawTextBody: body }));
+      const result = buildMimeEmbedText(makeInput({ rawTextBody: body }));
       const lines = result.split("\n");
       const bodyLine = lines[lines.length - 1]!;
       expect(bodyLine.length).toBe(4000);
@@ -236,8 +236,8 @@ describe("buildEmbedText", () => {
       const input = makeInput({
         rawTextBody: '<div><style>.x{}</style><img alt="pic">Hello https://example.com/a/b/c</div>',
       });
-      const result1 = buildEmbedText(input);
-      const result2 = buildEmbedText(input);
+      const result1 = buildMimeEmbedText(input);
+      const result2 = buildMimeEmbedText(input);
       expect(result1).toBe(result2);
     });
   });

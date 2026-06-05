@@ -118,7 +118,7 @@ describe("Property 9: S3 retention failure is isolated and non-fatal", () => {
   }
 
   function makeClassifier(): Pick<SignalClassifier, "classify"> {
-    return { classify: vi.fn().mockResolvedValue({ ...validClassification }) };
+    return { classify: vi.fn().mockResolvedValue(ok({ ...validClassification })) };
   }
 
   function makeEmbeddingGenerator(): EmbeddingGenerator {

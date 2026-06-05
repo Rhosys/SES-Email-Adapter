@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildEmbedText, reduceLink, type EmbedTextInput } from "../../src/embedding/embed-text.js";
+import { buildMimeEmbedText, reduceLink, type EmbedTextInput } from "../../src/embedding/embed-text.js";
 
 function makeInput(overrides: Partial<EmbedTextInput> = {}): EmbedTextInput {
   return {
@@ -15,19 +15,19 @@ function makeInput(overrides: Partial<EmbedTextInput> = {}): EmbedTextInput {
 describe("Embed text is deterministic, bounded, and contains all input fields", () => {
   it("same input always produces same output", () => {
     const input = makeInput({ rawTextBody: "Some content with https://example.com/path/deep" });
-    expect(buildEmbedText(input)).toBe(buildEmbedText(input));
+    expect(buildMimeEmbedText(input)).toBe(buildMimeEmbedText(input));
   });
 
   it("body portion is at most 4000 characters for short input", () => {
     const input = makeInput({ rawTextBody: "x".repeat(3000) });
-    const lines = buildEmbedText(input).split("\n");
+    const lines = buildMimeEmbedText(input).split("\n");
     const bodyLine = lines[lines.length - 1]!;
     expect(bodyLine.length).toBeLessThanOrEqual(4000);
   });
 
   it("body portion is at most 4000 characters for long input", () => {
     const input = makeInput({ rawTextBody: "x".repeat(6000) });
-    const lines = buildEmbedText(input).split("\n");
+    const lines = buildMimeEmbedText(input).split("\n");
     const bodyLine = lines[lines.length - 1]!;
     expect(bodyLine.length).toBe(4000);
   });
@@ -35,7 +35,7 @@ describe("Embed text is deterministic, bounded, and contains all input fields", 
   it("applies first 3000 + last 1000 rule when sanitized body > 4000", () => {
     const body = "a".repeat(3000) + "b".repeat(2000) + "c".repeat(1000);
     const input = makeInput({ rawTextBody: body });
-    const lines = buildEmbedText(input).split("\n");
+    const lines = buildMimeEmbedText(input).split("\n");
     const bodyLine = lines[lines.length - 1]!;
     expect(bodyLine.length).toBe(4000);
     expect(bodyLine.slice(0, 3000)).toBe("a".repeat(3000));
@@ -44,7 +44,7 @@ describe("Embed text is deterministic, bounded, and contains all input fields", 
 
   it("all required fields appear on their own line", () => {
     const input = makeInput();
-    const lines = buildEmbedText(input).split("\n");
+    const lines = buildMimeEmbedText(input).split("\n");
     expect(lines).toContain("acct-123");
     expect(lines).toContain("sender@example.com");
     expect(lines).toContain("recipient@example.com");
@@ -53,19 +53,19 @@ describe("Embed text is deterministic, bounded, and contains all input fields", 
 
   it("optional replyTo appears when present", () => {
     const input = makeInput({ replyTo: "reply@example.com" });
-    const lines = buildEmbedText(input).split("\n");
+    const lines = buildMimeEmbedText(input).split("\n");
     expect(lines).toContain("reply@example.com");
   });
 
   it("optional returnPath appears when present", () => {
     const input = makeInput({ returnPath: "bounce@example.com" });
-    const lines = buildEmbedText(input).split("\n");
+    const lines = buildMimeEmbedText(input).split("\n");
     expect(lines).toContain("bounce@example.com");
   });
 
   it("optional fields omitted when absent", () => {
     const input = makeInput();
-    const lines = buildEmbedText(input).split("\n");
+    const lines = buildMimeEmbedText(input).split("\n");
     // accountId, from, recipientAddress, subject, body = 5 lines
     expect(lines.length).toBe(5);
   });
@@ -92,23 +92,23 @@ describe("Sanitization removes all structural HTML/CSS/image artifacts", () => {
   ];
 
   it.each(htmlCases)("$label — no style blocks in output", ({ body }) => {
-    const result = buildEmbedText(makeInput({ rawTextBody: body }));
+    const result = buildMimeEmbedText(makeInput({ rawTextBody: body }));
     expect(result).not.toMatch(/<style[\s>]/i);
     expect(result).not.toMatch(/<\/style>/i);
   });
 
   it.each(htmlCases)("$label — no HTML tags in output", ({ body }) => {
-    const result = buildEmbedText(makeInput({ rawTextBody: body }));
+    const result = buildMimeEmbedText(makeInput({ rawTextBody: body }));
     expect(result).not.toMatch(/<[a-zA-Z]/);
   });
 
   it.each(htmlCases)("$label — no img references in output", ({ body }) => {
-    const result = buildEmbedText(makeInput({ rawTextBody: body }));
+    const result = buildMimeEmbedText(makeInput({ rawTextBody: body }));
     expect(result).not.toMatch(/<img/i);
   });
 
   it.each(htmlCases)("$label — no alt= content in output", ({ body }) => {
-    const result = buildEmbedText(makeInput({ rawTextBody: body }));
+    const result = buildMimeEmbedText(makeInput({ rawTextBody: body }));
     expect(result).not.toMatch(/alt=/i);
   });
 });
@@ -134,7 +134,7 @@ describe("Links reduce to domain plus first path segment", () => {
 
   it("buildEmbedText with embedded URL strips scheme and deep paths", () => {
     const input = makeInput({ rawTextBody: "Click here: https://amazon.com/products/foo/bar?ref=x for more" });
-    const result = buildEmbedText(input);
+    const result = buildMimeEmbedText(input);
     expect(result).toContain("amazon.com/products");
     expect(result).not.toContain("https://");
     expect(result).not.toContain("ref=x");

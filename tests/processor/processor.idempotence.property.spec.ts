@@ -96,7 +96,7 @@ describe("Cross-layer idempotence — live writes + cache + Aurora", () => {
   }
 
   function makeClassifier(): Pick<SignalClassifier, "classify"> {
-    return { classify: vi.fn().mockResolvedValue({ ...validClassification }) };
+    return { classify: vi.fn().mockResolvedValue(ok({ ...validClassification })) };
   }
 
   function makeArcMatcher(): ArcMatcher {

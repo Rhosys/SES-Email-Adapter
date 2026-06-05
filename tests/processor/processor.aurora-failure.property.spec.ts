@@ -164,7 +164,7 @@ describe("Aurora cluster failure preserves the DynamoDB cache entry", () => {
     const processor = new SignalProcessor({
 arcDb, accountDb, processingDb,
       contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
-      classifier: { classify: vi.fn().mockResolvedValue({ ...validClassification }) },
+      classifier: { classify: vi.fn().mockResolvedValue(ok({ ...validClassification })) },
       embeddingGenerator,
       auroraWriter,
       arcMatcher: makeArcMatcher(),
@@ -214,7 +214,7 @@ arcDb, accountDb, processingDb,
     const processor = new SignalProcessor({
 arcDb, accountDb, processingDb,
       contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
-      classifier: { classify: vi.fn().mockResolvedValue({ ...validClassification }) },
+      classifier: { classify: vi.fn().mockResolvedValue(ok({ ...validClassification })) },
       embeddingGenerator,
       auroraWriter,
       arcMatcher: makeArcMatcher(),

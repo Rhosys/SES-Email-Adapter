@@ -94,7 +94,7 @@ function makeContentSanitizer(): ContentSanitizerClient {
 }
 
 function makeClassifier(overrides: Partial<ClassificationOutput> = {}): Pick<SignalClassifier, "classify"> {
-  return { classify: vi.fn().mockResolvedValue({ ...validClassification, ...overrides }) };
+  return { classify: vi.fn().mockResolvedValue(ok({ ...validClassification, ...overrides })) };
 }
 
 function makeEmbeddingGenerator(): EmbeddingGenerator {
