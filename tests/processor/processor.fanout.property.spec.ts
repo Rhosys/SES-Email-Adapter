@@ -115,7 +115,7 @@ describe("Multi-cluster fanout writes vectors to every active target", () => {
   }
 
   function makeClassifier(): Pick<SignalClassifier, "classify"> {
-    return { classify: vi.fn().mockResolvedValue({ ...validClassification }) };
+    return { classify: vi.fn().mockResolvedValue(ok({ ...validClassification })) };
   }
 
   function makeArcMatcher(): ArcMatcher {

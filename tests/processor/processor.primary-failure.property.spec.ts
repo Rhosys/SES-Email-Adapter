@@ -180,7 +180,7 @@ describe("Property 1: Primary failure causes batch item failure", () => {
     const processor = new SignalProcessor({
       ...makeStore(),
       contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
-      classifier: { classify: vi.fn().mockResolvedValue({ ...validClassification }) },
+      classifier: { classify: vi.fn().mockResolvedValue(ok({ ...validClassification })) },
       embeddingGenerator,
       auroraWriter: makeAuroraWriter(),
       arcMatcher: makeArcMatcher(),

@@ -116,7 +116,7 @@ function makeContentSanitizer(): ContentSanitizerClient {
 
 function makeClassifier(): Pick<SignalClassifier, "classify"> {
   return {
-    classify: vi.fn().mockImplementation(() => Promise.resolve({ ...validClassification })),
+    classify: vi.fn().mockImplementation(() => Promise.resolve(ok({ ...validClassification }))),
   };
 }
 
@@ -302,7 +302,7 @@ describe("SignalProcessor", () => {
     });
 
     it("sets Arc workflow and summary from classification", async () => {
-      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok({
         ...validClassification,
         workflow: "payments",
         summary: "Receipt from Stripe for $99.",
@@ -314,7 +314,7 @@ describe("SignalProcessor", () => {
           amount: 99,
           currency: "USD",
         },
-      });
+      }));
 
       await processor.processRecord(makeMessage(), 1);
 
@@ -358,10 +358,10 @@ describe("SignalProcessor", () => {
     it("updates Arc summary and lastSignalAt from new classification", async () => {
       const existing = makeArc({ id: "arc-existing", summary: "Old summary." });
       vi.mocked(arcMatcher.findMatch).mockReturnValueOnce(Promise.resolve(ok(existing)));
-      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok({
         ...validClassification,
         summary: "Updated summary from new signal.",
-      });
+      }));
 
       await processor.processRecord(makeMessage(), 1);
 
@@ -713,7 +713,7 @@ describe("SignalProcessor", () => {
     it("continues processing remaining records when one fails", async () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>)
         .mockRejectedValueOnce(new Error("Bedrock error"))
-        .mockResolvedValueOnce(validClassification);
+        .mockResolvedValueOnce(ok(validClassification));
 
       const result1 = await processor.processRecord(makeMessage({ sesMessageId: "msg-fail" }), 1);
       const result2 = await processor.processRecord(makeMessage({ sesMessageId: "msg-ok" }), 1);
@@ -755,10 +755,10 @@ describe("SignalProcessor", () => {
     });
 
     it("does not dispatch side-effect when signal is blocked (spamScore >= 0.9 triggers system rule)", async () => {
-      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok({
         ...validClassification,
         spamScore: 0.95,
-      });
+      }));
 
       await processor.processRecord(makeMessage(), 1);
 
@@ -855,10 +855,10 @@ describe("SignalProcessor", () => {
         { ...DEFAULT_CTX, emailConfig: makeAlias() },
       )));
       // Approved sender → SR-03 fires on high spam → quarantine_hidden
-      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok({
         ...validClassification,
         spamScore: 0.95,
-      });
+      }));
 
       await processor.processRecord(makeMessage(), 1);
 
@@ -933,10 +933,10 @@ describe("SignalProcessor", () => {
         { ...DEFAULT_CTX, emailConfig: makeAlias({ unknownSenderPolicy: "quarantine_visible" }) },
       )));
       // Sender is known/approved but spam score is too high — SR-03 quarantines hidden independently of filter mode
-      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok({
         ...validClassification,
         spamScore: 0.95,
-      });
+      }));
 
       await processor.processRecord(makeMessage(), 1);
 
@@ -1019,10 +1019,10 @@ describe("SignalProcessor", () => {
     });
 
     it("marks wasSpam=true when spamScore >= 0.9", async () => {
-      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok({
         ...validClassification,
         spamScore: 0.97,
-      });
+      }));
 
       await processor.processRecord(makeMessage(), 1);
 
@@ -1047,11 +1047,11 @@ describe("SignalProcessor", () => {
 
   describe("arc grouping key", () => {
     it("uses deterministic key lookup for auth signals instead of vector search", async () => {
-      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok({
         ...validClassification,
         workflow: "auth",
         workflowData: { workflow: "auth", authType: "otp", code: "123456", service: "GitHub" },
-      });
+      }));
 
       await processor.processRecord(makeMessage(), 1);
 
@@ -1063,11 +1063,11 @@ describe("SignalProcessor", () => {
     });
 
     it("stores groupingKey on a newly created arc", async () => {
-      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok({
         ...validClassification,
         workflow: "auth",
         workflowData: { workflow: "auth", authType: "otp", code: "123456", service: "GitHub" },
-      });
+      }));
 
       await processor.processRecord(makeMessage(), 1);
 
@@ -1078,11 +1078,11 @@ describe("SignalProcessor", () => {
     it("reuses existing arc found by grouping key", async () => {
       const existing = makeArc({ id: "auth-arc", groupingKey: "user@example.com:auth:example.com" });
       vi.mocked(arcDb.fastFindArcByAlternativeLookupKey).mockReturnValueOnce(Promise.resolve(ok(existing)));
-      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok({
         ...validClassification,
         workflow: "auth",
         workflowData: { workflow: "auth", authType: "otp", code: "999999", service: "GitHub" },
-      });
+      }));
 
       await processor.processRecord(makeMessage(), 1);
 
@@ -1102,11 +1102,11 @@ describe("SignalProcessor", () => {
     });
 
     it("uses order number as grouping key when present", async () => {
-      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok({
         ...validClassification,
         workflow: "package",
         workflowData: { workflow: "package", packageType: "shipping", retailer: "Amazon", orderNumber: "112-999" },
-      });
+      }));
 
       await processor.processRecord(makeMessage(), 1);
 
@@ -1117,11 +1117,11 @@ describe("SignalProcessor", () => {
     });
 
     it("falls back to vector search for package without order number", async () => {
-      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok({
         ...validClassification,
         workflow: "package",
         workflowData: { workflow: "package", packageType: "shipping", retailer: "Amazon" },
-      });
+      }));
 
       await processor.processRecord(makeMessage(), 1);
 
@@ -1275,7 +1275,7 @@ describe("SignalProcessor", () => {
         spamScore: 0.05, summary: "test", labels: [],
         ...classification,
       };
-      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(full);
+      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok(full));
       await processor.processRecord(makeMessage({ sesMessageId: randomUUID() }), 1);
       return vi.mocked(arcDb.saveArc).mock.calls.at(-1)![0] as Arc;
     }
@@ -1300,10 +1300,10 @@ describe("SignalProcessor", () => {
         workflow: "conversation", labels: [], urgency: "normal",
         sentMessageIds: ["<prior-msg@example.com>"],
       }))));
-      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok({
         workflow: "conversation", workflowData: { workflow: "conversation", sentiment: "neutral", requiresReply: false },
         spamScore: 0.05, summary: "test", labels: [],
-      });
+      }));
       await processor.processRecord(makeMessage({ sesMessageId: randomUUID() }), 1);
       const signal = vi.mocked(arcDb.saveSignal).mock.calls.at(-1)![0] as Signal;
       expect(signal.data.urgency).toBe("normal");
@@ -1365,7 +1365,7 @@ describe("SignalProcessor", () => {
     };
 
     it("processes onboarding emails as active when no blocking rule is configured", async () => {
-      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(onboardingClassification);
+      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok(onboardingClassification));
       vi.mocked(accountDb.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([]))); // no system rules — SR-01 (block onboarding) is disabled
 
       await processor.processRecord(makeMessage(), 1);
@@ -1377,7 +1377,7 @@ describe("SignalProcessor", () => {
     });
 
     it("blocks onboarding emails when a block rule targeting system:workflow:onboarding is active", async () => {
-      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(onboardingClassification);
+      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok(onboardingClassification));
       vi.mocked(accountDb.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([
         makeRule({ condition: JSON.stringify({ "in": ["system:workflow:onboarding", { var: "arc.labels" }] }), actions: [{ type: "block_hidden" }] }),
       ])));
@@ -1392,7 +1392,7 @@ describe("SignalProcessor", () => {
     });
 
     it("quarantines onboarding emails when a quarantine rule is active", async () => {
-      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(onboardingClassification);
+      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok(onboardingClassification));
       vi.mocked(accountDb.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([
         makeRule({ condition: JSON.stringify({ "in": ["system:workflow:onboarding", { var: "arc.labels" }] }), actions: [{ type: "quarantine" }] }),
       ])));
@@ -1475,7 +1475,7 @@ describe("SignalProcessor", () => {
     });
 
     it("blocks status emails silently — no arc created, signal saved as blocked", async () => {
-      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(noticeClassification);
+      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok(noticeClassification));
 
       await processor.processRecord(makeMessage(), 1);
 
@@ -1486,7 +1486,7 @@ describe("SignalProcessor", () => {
     });
 
     it("does not call notifier for a blocked status email", async () => {
-      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(noticeClassification);
+      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok(noticeClassification));
 
       await processor.processRecord(makeMessage(), 1);
 
@@ -1494,7 +1494,7 @@ describe("SignalProcessor", () => {
     });
 
     it("blocks status emails from untrusted senders (SR-05 rule fires, fallback does not apply)", async () => {
-      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(noticeClassification);
+      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok(noticeClassification));
       // Untrusted sender: no approved sender entry — filter-mode fallback would quarantine, but SR-05 fires first
       vi.mocked(accountDb.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok({
         ...DEFAULT_CTX,
@@ -1531,7 +1531,7 @@ describe("SignalProcessor", () => {
     });
 
     it("dispatches side-effect with pong action when workflow is 'test'", async () => {
-      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(testClassification);
+      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok(testClassification));
 
       await processor.processRecord(makeMessage(), 1);
 
@@ -1542,7 +1542,7 @@ describe("SignalProcessor", () => {
     });
 
     it("dispatches side-effect payload with signal containing from address and subject for pong", async () => {
-      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(testClassification);
+      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok(testClassification));
 
       await processor.processRecord(makeMessage(), 1);
 
@@ -1554,7 +1554,7 @@ describe("SignalProcessor", () => {
     });
 
     it("dispatches side-effect with recipientAddress for pong from-address resolution", async () => {
-      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(testClassification);
+      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok(testClassification));
 
       await processor.processRecord(makeMessage(), 1);
 
@@ -1563,7 +1563,7 @@ describe("SignalProcessor", () => {
     });
 
     it("dispatches side-effect with signal.id as sgn- prefixed ID for inReplyTo", async () => {
-      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(testClassification);
+      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok(testClassification));
 
       await processor.processRecord(makeMessage({ sesMessageId: "original-ses-123" }), 1);
 
@@ -1583,7 +1583,7 @@ describe("SignalProcessor", () => {
 
     it("still dispatches side-effect when replySender is configured", async () => {
       const processorWithReplier = new SignalProcessor({ arcDb, accountDb, processingDb, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, logger: mockLogger, notifier: makeNotifier(), forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher, draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never, calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud" } });
-      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(testClassification);
+      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok(testClassification));
 
       const result = await processorWithReplier.processRecord(makeMessage(), 1);
       expect(result.isOk()).toBe(true);
@@ -1591,7 +1591,7 @@ describe("SignalProcessor", () => {
     });
 
     it("dispatches side-effect with signal.recipientAddress containing the domain for lookup", async () => {
-      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(testClassification);
+      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok(testClassification));
 
       await processor.processRecord(makeMessage({ destination: ["me@custom-domain.com"] }), 1);
 
@@ -1613,10 +1613,10 @@ describe("SignalProcessor", () => {
           spamScoreThreshold: 0.5,
         }),
       })));
-      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok({
         ...validClassification,
         spamScore: 0.7, // above per-address threshold (0.5), below default (0.9)
-      });
+      }));
 
       await processor.processRecord(makeMessage(), 1);
 
@@ -1631,10 +1631,10 @@ describe("SignalProcessor", () => {
         emailConfig: makeAlias({ unknownSenderPolicy: "quarantine_visible" }),
         filtering: { defaultUnknownSenderPolicy: "quarantine_visible", newAddressHandling: "auto_allow", spamScoreThreshold: 0.6 },
       })));
-      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok({
         ...validClassification,
         spamScore: 0.7, // above account threshold (0.6), below default (0.9)
-      });
+      }));
 
       await processor.processRecord(makeMessage(), 1);
 

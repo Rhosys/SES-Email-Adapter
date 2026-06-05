@@ -129,7 +129,7 @@ describe("Feature: signal-processor-retry-resilience, Property 4: Arc saved befo
 
   function makeClassifier(): Pick<SignalClassifier, "classify"> {
     return {
-      classify: vi.fn().mockResolvedValue({ ...validClassification }),
+      classify: vi.fn().mockResolvedValue(ok({ ...validClassification })),
     };
   }
 
@@ -353,7 +353,7 @@ describe("Feature: signal-processor-retry-resilience, Property 6: Aurora failure
 
   function makeClassifier(): Pick<SignalClassifier, "classify"> {
     return {
-      classify: vi.fn().mockResolvedValue({ ...validClassification }),
+      classify: vi.fn().mockResolvedValue(ok({ ...validClassification })),
     };
   }
 
@@ -627,7 +627,7 @@ describe("Feature: signal-processor-retry-resilience, Property 5: Side-effects d
 
   function makeClassifier(): Pick<SignalClassifier, "classify"> {
     return {
-      classify: vi.fn().mockResolvedValue({ ...validClassification }),
+      classify: vi.fn().mockResolvedValue(ok({ ...validClassification })),
     };
   }
 
@@ -904,7 +904,7 @@ describe("Feature: signal-processor-retry-resilience, Property 7: Partial Aurora
 
   function makeClassifier(): Pick<SignalClassifier, "classify"> {
     return {
-      classify: vi.fn().mockResolvedValue({ ...validClassification }),
+      classify: vi.fn().mockResolvedValue(ok({ ...validClassification })),
     };
   }
 

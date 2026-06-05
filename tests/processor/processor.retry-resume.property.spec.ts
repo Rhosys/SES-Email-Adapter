@@ -788,7 +788,7 @@ describe("Feature: signal-processor-retry-resilience, Property 2: Missing signal
   }
 
   function makeClassifier(): Pick<SignalClassifier, "classify"> {
-    return { classify: vi.fn().mockResolvedValue({ ...validClassification }) };
+    return { classify: vi.fn().mockResolvedValue(ok({ ...validClassification })) };
   }
 
   function makeEmbeddingGenerator(): EmbeddingGenerator {
