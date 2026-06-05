@@ -2,3 +2,4 @@ node_modules/
 dist/
 *.tsbuildinfo
 deploy/.terraform/
+openapi.json
