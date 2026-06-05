@@ -19,6 +19,7 @@ import {
   buildCalendarEmail,
   MINIMAL_ICS,
 } from './mime-builders.js';
+import type { Arc, Signal } from '../../src/api/schemas.js';
 
 // ---------------------------------------------------------------------------
 // Assertion helpers (same pattern as post-accounts.ts)
@@ -76,16 +77,16 @@ async function apiReq(method: string, path: string, body?: unknown): Promise<Res
   });
 }
 
-async function getArc(accountId: string): Promise<Record<string, unknown>> {
+async function getArc(accountId: string): Promise<Arc> {
   const res = await apiReq('GET', `/accounts/${accountId}/arcs`);
-  const json = await res.json() as { arcs: Record<string, unknown>[] };
+  const json = await res.json() as { arcs: Arc[] };
   if (!json.arcs?.length) throw new Error('No arcs found');
   return json.arcs[0]!;
 }
 
-async function getSignals(accountId: string, arcId: string): Promise<Record<string, unknown>[]> {
+async function getSignals(accountId: string, arcId: string): Promise<Signal[]> {
   const res = await apiReq('GET', `/accounts/${accountId}/arcs/${arcId}/signals`);
-  const json = await res.json() as { signals: Record<string, unknown>[] };
+  const json = await res.json() as { signals: Signal[] };
   return json.signals ?? [];
 }
 
@@ -101,32 +102,30 @@ async function getSignals(accountId: string, arcId: string): Promise<Record<stri
   await h.consumeAndProcess();
 
   const arc = await getArc(h.accountId);
-  const arcId = arc['arcId'] as string;
-  assert(typeof arcId === 'string', `arc created (arcId=${arcId})`);
+  assert(typeof arc.arcId === 'string', `arc created (arcId=${arc.arcId})`);
 
-  const signals = await getSignals(h.accountId, arcId);
+  const signals = await getSignals(h.accountId, arc.arcId);
   assert(signals.length === 1, `one signal created (got ${signals.length})`);
 
-  const signal = signals[0] as Record<string, unknown>;
-  assert(signal['type'] === 'email', `signal type is email (got ${signal['type']})`);
+  const signal = signals[0];
+  assert(signal?.type === 'email', `signal type is email (got ${signal?.type})`);
 
-  const data = signal['data'] as Record<string, unknown>;
-  const attachments = data['attachments'] as Record<string, unknown>[];
-  assert(attachments?.length === 2, `two attachments extracted (got ${attachments?.length})`);
+  if (signal?.type === 'email') {
+    const { attachments } = signal.data;
+    assert(attachments.length === 2, `two attachments extracted (got ${attachments.length})`);
 
-  if (attachments?.length === 2) {
-    const pdf = attachments.find(a => a['filename'] === 'document.pdf');
-    const png = attachments.find(a => a['filename'] === 'photo.png');
-    assert(!!pdf, 'PDF attachment present');
-    assert(pdf?.['mimeType'] === 'application/pdf', `PDF mimeType (got ${pdf?.['mimeType']})`);
-    assert(typeof pdf?.['sizeBytes'] === 'number' && (pdf['sizeBytes'] as number) > 0, 'PDF sizeBytes > 0');
-    assert(typeof pdf?.['url'] === 'string' && (pdf['url'] as string).includes('/content/accounts/'), `PDF url present (got ${pdf?.['url']})`);
-    assert(!!png, 'PNG attachment present');
-    assert(png?.['mimeType'] === 'image/png', `PNG mimeType (got ${png?.['mimeType']})`);
-    assert(typeof png?.['url'] === 'string' && (png['url'] as string).includes('/content/accounts/'), `PNG url present (got ${png?.['url']})`);
+    if (attachments.length === 2) {
+      const pdf = attachments.find(a => a.filename === 'document.pdf');
+      const png = attachments.find(a => a.filename === 'photo.png');
+      assert(!!pdf, 'PDF attachment present');
+      assert(pdf?.mimeType === 'application/pdf', `PDF mimeType (got ${pdf?.mimeType})`);
+      assert(typeof pdf?.sizeBytes === 'number' && pdf.sizeBytes > 0, 'PDF sizeBytes > 0');
+      assert(typeof pdf?.url === 'string' && pdf.url.includes('/content/accounts/'), `PDF url present (got ${pdf?.url})`);
+      assert(!!png, 'PNG attachment present');
+      assert(png?.mimeType === 'image/png', `PNG mimeType (got ${png?.mimeType})`);
+      assert(typeof png?.url === 'string' && png.url.includes('/content/accounts/'), `PNG url present (got ${png?.url})`);
+    }
   }
-
-  // clean up arcs between scenarios by checking we get a fresh arc per scenario
 }
 
 // ---------------------------------------------------------------------------
@@ -140,36 +139,23 @@ async function getSignals(accountId: string, arcId: string): Promise<Record<stri
   await h.sendEmail(sesId, mime);
   await h.consumeAndProcess();
 
-  // The new email creates a new arc (different sender/recipient match is based on embeddings
-  // which we stub; the processor will create a new arc or reuse — either is fine for assertion)
   const arcsRes = await apiReq('GET', `/accounts/${h.accountId}/arcs`);
-  const arcsJson = await arcsRes.json() as { arcs: Record<string, unknown>[] };
-  const latestArc = arcsJson.arcs?.find(a => {
-    // Find the arc whose lastSignalAt is most recent
-    return true;
-  }) as Record<string, unknown> | undefined;
+  const arcsJson = await arcsRes.json() as { arcs: Arc[] };
 
-  // Get signals for all arcs and find the one matching our sesId
-  let cidSignal: Record<string, unknown> | undefined;
+  let cidSignal: Signal | undefined;
   for (const arc of arcsJson.arcs ?? []) {
-    const arcId = arc['arcId'] as string;
-    const sigs = await getSignals(h.accountId, arcId);
+    const sigs = await getSignals(h.accountId, arc.arcId);
     for (const sig of sigs) {
-      const sigData = sig['data'] as Record<string, unknown>;
-      const body = sigData['htmlBody'] as string | undefined;
-      if (body?.includes('data:image/png;base64,')) {
+      if (sig.type === 'email' && sig.data.body?.includes('data:image/png;base64,')) {
         cidSignal = sig;
       }
     }
   }
 
   assert(!!cidSignal, 'CID email signal found');
-  if (cidSignal) {
-    const data = cidSignal['data'] as Record<string, unknown>;
-    const attachments = data['attachments'] as unknown[] ?? [];
-    assert(attachments.length === 0, `no attachments in signal (CID image was inlined) — got ${attachments.length}`);
-    const body = data['htmlBody'] as string | undefined;
-    assert(typeof body === 'string' && body.includes('data:image/png;base64,'), 'body contains data: URI for CID image');
+  if (cidSignal?.type === 'email') {
+    assert(cidSignal.data.attachments.length === 0, `no attachments in signal (CID image was inlined) — got ${cidSignal.data.attachments.length}`);
+    assert(typeof cidSignal.data.body === 'string' && cidSignal.data.body.includes('data:image/png;base64,'), 'body contains data: URI for CID image');
   }
 }
 
@@ -185,28 +171,22 @@ async function getSignals(accountId: string, arcId: string): Promise<Record<stri
   await h.consumeAndProcess();
 
   const arcsRes = await apiReq('GET', `/accounts/${h.accountId}/arcs`);
-  const arcsJson = await arcsRes.json() as { arcs: Record<string, unknown>[] };
+  const arcsJson = await arcsRes.json() as { arcs: Arc[] };
 
-  let imgSignal: Record<string, unknown> | undefined;
+  let imgSignal: Signal | undefined;
   for (const arc of arcsJson.arcs ?? []) {
-    const arcId = arc['arcId'] as string;
-    const sigs = await getSignals(h.accountId, arcId);
+    const sigs = await getSignals(h.accountId, arc.arcId);
     for (const sig of sigs) {
-      const sigData = sig['data'] as Record<string, unknown>;
-      const body = sigData['htmlBody'] as string | undefined;
-      if (body?.includes('<img')) {
+      if (sig.type === 'email' && sig.data.body?.includes('<img')) {
         imgSignal = sig;
       }
     }
   }
 
   assert(!!imgSignal, 'email signal with <img> tag found');
-  if (imgSignal) {
-    const data = imgSignal['data'] as Record<string, unknown>;
-    const attachments = data['attachments'] as unknown[] ?? [];
-    assert(attachments.length === 0, `no attachments (linked images are not attachments) — got ${attachments.length}`);
-    const body = data['htmlBody'] as string | undefined;
-    assert(typeof body === 'string' && body.includes('<img'), 'body contains <img> tag');
+  if (imgSignal?.type === 'email') {
+    assert(imgSignal.data.attachments.length === 0, `no attachments (linked images are not attachments) — got ${imgSignal.data.attachments.length}`);
+    assert(typeof imgSignal.data.body === 'string' && imgSignal.data.body.includes('<img'), 'body contains <img> tag');
   }
 }
 
@@ -225,20 +205,18 @@ async function getSignals(accountId: string, arcId: string): Promise<Record<stri
   await h.sendEmail(sesId, mime);
   await h.consumeAndProcess();
 
-  // Find the arc and signals for this scenario by looking for a calendar_event signal
   const arcsRes = await apiReq('GET', `/accounts/${h.accountId}/arcs`);
-  const arcsJson = await arcsRes.json() as { arcs: Record<string, unknown>[] };
+  const arcsJson = await arcsRes.json() as { arcs: Arc[] };
 
-  let emailSignal: Record<string, unknown> | undefined;
-  let calendarSignal: Record<string, unknown> | undefined;
+  let emailSignal: Signal | undefined;
+  let calendarSignal: Signal | undefined;
 
   for (const arc of arcsJson.arcs ?? []) {
-    const arcId = arc['arcId'] as string;
-    const sigs = await getSignals(h.accountId, arcId);
-    const calSig = sigs.find(s => s['type'] === 'calendar_event');
+    const sigs = await getSignals(h.accountId, arc.arcId);
+    const calSig = sigs.find(s => s.type === 'calendar_event');
     if (calSig) {
       calendarSignal = calSig;
-      emailSignal = sigs.find(s => s['type'] === 'email');
+      emailSignal = sigs.find(s => s.type === 'email');
       break;
     }
   }
@@ -246,18 +224,16 @@ async function getSignals(accountId: string, arcId: string): Promise<Record<stri
   assert(!!calendarSignal, 'calendar_event signal created');
   assert(!!emailSignal, 'email signal present alongside calendar_event');
 
-  if (calendarSignal && emailSignal) {
-    const calData = calendarSignal['data'] as Record<string, unknown>;
-    assert(calData['title'] === 'Team Standup', `calendar title (got ${calData['title']})`);
-    assert(typeof calData['startTime'] === 'string', `calendar startTime present (got ${calData['startTime']})`);
+  if (calendarSignal?.type === 'calendar_event' && emailSignal) {
+    const calData = calendarSignal.data;
+    assert(calData.title === 'Team Standup', `calendar title (got ${calData.title})`);
+    assert(typeof calData.startTime === 'string', `calendar startTime present (got ${calData.startTime})`);
 
-    const attendees = calData['attendees'] as Record<string, unknown>[] ?? [];
-    assert(attendees.length >= 1, `calendar has attendees (got ${attendees.length})`);
-    const bob = attendees.find(a => (a['address'] as string)?.includes('bob@'));
+    assert(calData.attendees.length >= 1, `calendar has attendees (got ${calData.attendees.length})`);
+    const bob = calData.attendees.find(a => a.address.includes('bob@'));
     assert(!!bob, 'attendee bob@example.com found');
 
-    const emailSignalId = emailSignal['id'] as string;
-    assert(calData['linkedSignalId'] === emailSignalId, `calendar linkedSignalId matches email signal (${emailSignalId})`);
+    assert(calData.linkedSignalId === emailSignal.signalId, `calendar linkedSignalId matches email signal (${emailSignal.signalId})`);
   }
 }
 
