@@ -42,6 +42,11 @@ output "site_bucket_name" {
   value       = aws_s3_bucket.web.bucket
 }
 
+output "landing_bucket_name" {
+  description = "S3 bucket name for landing page (for CI sync)"
+  value       = aws_s3_bucket.landing.bucket
+}
+
 output "site_bucket_arn" {
   description = "S3 bucket ARN for static site assets (for CI IAM policies)"
   value       = aws_s3_bucket.web.arn

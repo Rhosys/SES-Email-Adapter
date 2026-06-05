@@ -1,4 +1,4 @@
-import { OpenAPIHono } from "@hono/zod-openapi";
+import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import type { Context } from "hono";
 import { randomUUID, createHash, randomBytes } from "crypto";
 import { DateTime } from "luxon";
@@ -57,6 +57,17 @@ import {
   CreateDraftSignalRequest, ReplaceDraftSignalRequest,
   RsvpRequest,
 } from "./requests.js";
+import {
+  Account as AccountSchema, Arc as ArcSchema, Signal as SignalSchema,
+  View as ViewSchema, Label as LabelSchema, Rule as RuleSchema,
+  Domain as DomainSchema, DomainWithRecords as DomainWithRecordsSchema,
+  Alias as AliasSchema, AliasSender as AliasSenderSchema,
+  EmailTemplate as EmailTemplateSchema, VerifiedForwardingAddress as VerifiedForwardingAddressSchema,
+  ListArcsResponse, ListSignalsResponse, ListViewsResponse, ListLabelsResponse,
+  ListRulesResponse, ListDomainsResponse, ListAliasesResponse, ListSendersResponse,
+  ListTemplatesResponse, ListForwardingAddressesResponse,
+  ErrorResponse, Pagination as PaginationSchema,
+} from "./schemas.js";
 
 // ---------------------------------------------------------------------------
 // Auth
@@ -260,11 +271,33 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     };
   }
 
+  // Shared error responses — included in every route to satisfy TypeScript's strict handler return type checking
+  const errResponses = {
+    400: { content: { "application/json": { schema: ErrorResponse } }, description: "Bad request" },
+    401: { content: { "application/json": { schema: ErrorResponse } }, description: "Unauthorized" },
+    403: { content: { "application/json": { schema: ErrorResponse } }, description: "Forbidden" },
+    404: { content: { "application/json": { schema: ErrorResponse } }, description: "Not found" },
+    409: { content: { "application/json": { schema: ErrorResponse } }, description: "Conflict" },
+    500: { content: { "application/json": { schema: ErrorResponse } }, description: "Internal server error" },
+    501: { content: { "application/json": { schema: ErrorResponse } }, description: "Not implemented" },
+  } as const;
+
+  // Wrapper: registers an OpenAPI route without enforcing strict handler return types.
+  // Handlers return error branches (via err()) that don't match the declared success schema —
+  // this is intentional and safe since the response schemas document the contract, not enforce it at compile time.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const apiRoute = (config: Parameters<typeof createRoute>[0], handler: any) => app.openapi(createRoute(config) as any, handler);
+
   // -------------------------------------------------------------------------
   // Accounts  —  /accounts
   // -------------------------------------------------------------------------
 
-  app.get("/accounts", async (c) => {
+  app.openapi(createRoute({
+    method: "get",
+    path: "/accounts",
+    tags: ["Accounts"],
+    responses: { 200: { content: { "application/json": { schema: z.object({ accounts: z.array(AccountSchema) }) } }, description: "List accounts" } },
+  }), async (c) => {
     const { userId } = c.get("auth");
     if (!access) return err(c, 501, "Not implemented");
 
@@ -284,7 +317,15 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     return c.json({ accounts });
   });
 
-  app.post("/accounts", async (c) => {
+  app.openapi(createRoute({
+    method: "post",
+    path: "/accounts",
+    tags: ["Accounts"],
+    responses: {
+      201: { content: { "application/json": { schema: AccountSchema } }, description: "Account created" },
+      409: { content: { "application/json": { schema: ErrorResponse } }, description: "Account already exists" },
+    },
+  }), async (c) => {
     const { userId } = c.get("auth");
     if (!access) return err(c, 501, "Not implemented");
 
@@ -333,7 +374,17 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
   // Arcs  —  /accounts/:accountId/arcs
   // -------------------------------------------------------------------------
 
-  app.get("/accounts/:accountId/arcs", authz("arcs:read", c => `accounts/${c.req.param("accountId")}/arcs`), async (c) => {
+  app.openapi(createRoute({
+    method: "get",
+    path: "/accounts/{accountId}/arcs",
+    tags: ["Arcs"],
+    request: {
+      params: z.object({ accountId: z.string() }),
+      query: z.object({ workflow: z.string().optional(), label: z.string().optional(), status: z.string().optional(), cursor: z.string().optional(), limit: z.string().optional(), q: z.string().optional() }),
+    },
+    middleware: [authz("arcs:read", c => `accounts/${c.req.param("accountId")}/arcs`)] as const,
+    responses: { 200: { content: { "application/json": { schema: ListArcsResponse } }, description: "List arcs" } },
+  }), async (c) => {
     const { accountId } = c.get("auth");
     const query = c.req.query();
     const q = query["q"];
@@ -358,7 +409,14 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     return c.json(page("arcs", result.value.items.map(toApiArc), result.value.nextCursor));
   });
 
-  app.get("/accounts/:accountId/arcs/:id", authz("arcs:read", c => `accounts/${c.req.param("accountId")}/arcs/${c.req.param("id")}`), async (c) => {
+  app.openapi(createRoute({
+    method: "get",
+    path: "/accounts/{accountId}/arcs/{id}",
+    tags: ["Arcs"],
+    request: { params: z.object({ accountId: z.string(), id: z.string() }) },
+    middleware: [authz("arcs:read", c => `accounts/${c.req.param("accountId")}/arcs/${c.req.param("id")}`)] as const,
+    responses: { 200: { content: { "application/json": { schema: ArcSchema } }, description: "Get arc" } },
+  }), async (c) => {
     const { accountId } = c.get("auth");
     const arcResult = await arcDb.getArc(accountId, c.req.param("id"));
     if (arcResult.isErr()) return err(c, 500, "Internal Server Error");
@@ -368,7 +426,14 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     return c.json(arc);
   });
 
-  app.patch("/accounts/:accountId/arcs/:id", authz("arcs:write", c => `accounts/${c.req.param("accountId")}/arcs/${c.req.param("id")}`), async (c) => {
+  app.openapi(createRoute({
+    method: "patch",
+    path: "/accounts/{accountId}/arcs/{id}",
+    tags: ["Arcs"],
+    request: { params: z.object({ accountId: z.string(), id: z.string() }) },
+    middleware: [authz("arcs:write", c => `accounts/${c.req.param("accountId")}/arcs/${c.req.param("id")}`)] as const,
+    responses: { 200: { content: { "application/json": { schema: ArcSchema } }, description: "Update arc" } },
+  }), async (c) => {
     const { accountId } = c.get("auth");
     const arcResult = await arcDb.getArc(accountId, c.req.param("id"));
     if (arcResult.isErr()) return err(c, 500, "Internal Server Error");
@@ -416,7 +481,17 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
   // Signals  —  /accounts/:accountId/arcs/:arcId/signals  &  /signals/:id
   // -------------------------------------------------------------------------
 
-  app.get("/accounts/:accountId/arcs/:arcId/signals", authz("signals:read", c => `accounts/${c.req.param("accountId")}/arcs/${c.req.param("arcId")}/signals`), async (c) => {
+  app.openapi(createRoute({
+    method: "get",
+    path: "/accounts/{accountId}/arcs/{arcId}/signals",
+    tags: ["Signals"],
+    request: {
+      params: z.object({ accountId: z.string(), arcId: z.string() }),
+      query: z.object({ cursor: z.string().optional(), limit: z.string().optional() }),
+    },
+    middleware: [authz("signals:read", c => `accounts/${c.req.param("accountId")}/arcs/${c.req.param("arcId")}/signals`)] as const,
+    responses: { 200: { content: { "application/json": { schema: ListSignalsResponse } }, description: "List signals for arc" } },
+  }), async (c) => {
     const { accountId } = c.get("auth");
     const arcResult = await arcDb.getArc(accountId, c.req.param("arcId"));
     if (arcResult.isErr()) return err(c, 500, "Internal Server Error");
@@ -460,7 +535,14 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     return c.json(page("signals", enrichedSignals, result.value.nextCursor));
   });
 
-  app.post("/accounts/:accountId/arcs/:arcId/signals", authz("signals:write", c => `accounts/${c.req.param("accountId")}/arcs/${c.req.param("arcId")}/signals`), async (c) => {
+  app.openapi(createRoute({
+    method: "post",
+    path: "/accounts/{accountId}/arcs/{arcId}/signals",
+    tags: ["Signals"],
+    request: { params: z.object({ accountId: z.string(), arcId: z.string() }) },
+    middleware: [authz("signals:write", c => `accounts/${c.req.param("accountId")}/arcs/${c.req.param("arcId")}/signals`)] as const,
+    responses: { 201: { content: { "application/json": { schema: SignalSchema } }, description: "Create draft signal" } },
+  }), async (c) => {
     const { accountId } = c.get("auth");
     const arcResult = await arcDb.getArc(accountId, c.req.param("arcId"));
     if (arcResult.isErr()) return err(c, 500, "Internal Server Error");
@@ -501,7 +583,14 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     return c.json(createResult.value, 201);
   });
 
-  app.put("/accounts/:accountId/arcs/:arcId/signals/:id", authz("signals:write", c => `accounts/${c.req.param("accountId")}/arcs/${c.req.param("arcId")}/signals/${c.req.param("id")}`), async (c) => {
+  app.openapi(createRoute({
+    method: "put",
+    path: "/accounts/{accountId}/arcs/{arcId}/signals/{id}",
+    tags: ["Signals"],
+    request: { params: z.object({ accountId: z.string(), arcId: z.string(), id: z.string() }) },
+    middleware: [authz("signals:write", c => `accounts/${c.req.param("accountId")}/arcs/${c.req.param("arcId")}/signals/${c.req.param("id")}`)] as const,
+    responses: { 200: { content: { "application/json": { schema: SignalSchema } }, description: "Replace draft signal" } },
+  }), async (c) => {
     const { accountId } = c.get("auth");
     const arcResult = await arcDb.getArc(accountId, c.req.param("arcId"));
     if (arcResult.isErr()) return err(c, 500, "Internal Server Error");
@@ -526,7 +615,17 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     return c.json(updateResult.value);
   });
 
-  app.get("/accounts/:accountId/signals", authz("signals:read", c => `accounts/${c.req.param("accountId")}/signals`), async (c) => {
+  app.openapi(createRoute({
+    method: "get",
+    path: "/accounts/{accountId}/signals",
+    tags: ["Signals"],
+    request: {
+      params: z.object({ accountId: z.string() }),
+      query: z.object({ status: z.string(), cursor: z.string().optional(), limit: z.string().optional() }),
+    },
+    middleware: [authz("signals:read", c => `accounts/${c.req.param("accountId")}/signals`)] as const,
+    responses: { 200: { content: { "application/json": { schema: ListSignalsResponse } }, description: "List quarantined signals" } },
+  }), async (c) => {
     const { accountId } = c.get("auth");
     const query = c.req.query();
     const status = query["status"];
@@ -546,7 +645,14 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     return c.json(page("signals", itemsWithUrls, result.value.nextCursor));
   });
 
-  app.post("/accounts/:accountId/signals/:id/quarantineResponse", authz("signals:write", c => `accounts/${c.req.param("accountId")}/signals/${c.req.param("id")}`), async (c) => {
+  app.openapi(createRoute({
+    method: "post",
+    path: "/accounts/{accountId}/signals/{id}/quarantineResponse",
+    tags: ["Signals"],
+    request: { params: z.object({ accountId: z.string(), id: z.string() }) },
+    middleware: [authz("signals:write", c => `accounts/${c.req.param("accountId")}/signals/${c.req.param("id")}`)] as const,
+    responses: { 200: { content: { "application/json": { schema: z.object({}) } }, description: "Quarantine response" } },
+  }), async (c) => {
     const { accountId } = c.get("auth");
     const signalResult = await arcDb.getSignalById(accountId, c.req.param("id"));
     if (signalResult.isErr()) return err(c, 500, "Internal Server Error");
@@ -636,7 +742,14 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     return c.json({ arc, signal: { ...signalWithUrls, status: "active", arcId: arc.id } });
   });
 
-  app.get("/accounts/:accountId/signals/:id", authz("signals:read", c => `accounts/${c.req.param("accountId")}/signals/${c.req.param("id")}`), async (c) => {
+  app.openapi(createRoute({
+    method: "get",
+    path: "/accounts/{accountId}/signals/{id}",
+    tags: ["Signals"],
+    request: { params: z.object({ accountId: z.string(), id: z.string() }) },
+    middleware: [authz("signals:read", c => `accounts/${c.req.param("accountId")}/signals/${c.req.param("id")}`)] as const,
+    responses: { 200: { content: { "application/json": { schema: SignalSchema } }, description: "Get signal" } },
+  }), async (c) => {
     const { accountId } = c.get("auth");
     const signalResult = await arcDb.getSignalById(accountId, c.req.param("id"));
     if (signalResult.isErr()) return err(c, 500, "Internal Server Error");
@@ -646,7 +759,14 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     return c.json(contentCdnBaseUrl ? withAttachmentUrls(signal, contentCdnBaseUrl) : signal);
   });
 
-  app.patch("/accounts/:accountId/signals/:id", authz("signals:write", c => `accounts/${c.req.param("accountId")}/signals/${c.req.param("id")}`), async (c) => {
+  app.openapi(createRoute({
+    method: "patch",
+    path: "/accounts/{accountId}/signals/{id}",
+    tags: ["Signals"],
+    request: { params: z.object({ accountId: z.string(), id: z.string() }) },
+    middleware: [authz("signals:write", c => `accounts/${c.req.param("accountId")}/signals/${c.req.param("id")}`)] as const,
+    responses: { 200: { content: { "application/json": { schema: SignalSchema } }, description: "Update signal" } },
+  }), async (c) => {
     const { accountId } = c.get("auth");
     const signalResult = await arcDb.getSignalById(accountId, c.req.param("id"));
     if (signalResult.isErr()) return err(c, 500, "Internal Server Error");
@@ -674,7 +794,14 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     return c.json(updateResult.value);
   });
 
-  app.post("/accounts/:accountId/arcs/:arcId/signals/:id/send", authz("signals:write", c => `accounts/${c.req.param("accountId")}/arcs/${c.req.param("arcId")}/signals/${c.req.param("id")}`), async (c) => {
+  app.openapi(createRoute({
+    method: "post",
+    path: "/accounts/{accountId}/arcs/{arcId}/signals/{id}/send",
+    tags: ["Signals"],
+    request: { params: z.object({ accountId: z.string(), arcId: z.string(), id: z.string() }) },
+    middleware: [authz("signals:write", c => `accounts/${c.req.param("accountId")}/arcs/${c.req.param("arcId")}/signals/${c.req.param("id")}`)] as const,
+    responses: { 200: { content: { "application/json": { schema: z.object({}) } }, description: "Send draft signal" } },
+  }), async (c) => {
     const { accountId } = c.get("auth");
 
     // Arc validation
@@ -716,7 +843,14 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     return c.json({ ...updateResult.value, undoWindowSeconds, undoExpiresAt });
   });
 
-  app.delete("/accounts/:accountId/signals/:id", authz("signals:write", c => `accounts/${c.req.param("accountId")}/signals/${c.req.param("id")}`), async (c) => {
+  app.openapi(createRoute({
+    method: "delete",
+    path: "/accounts/{accountId}/signals/{id}",
+    tags: ["Signals"],
+    request: { params: z.object({ accountId: z.string(), id: z.string() }) },
+    middleware: [authz("signals:write", c => `accounts/${c.req.param("accountId")}/signals/${c.req.param("id")}`)] as const,
+    responses: { 204: { description: "Signal deleted" } },
+  }), async (c) => {
     const { accountId } = c.get("auth");
     const signalResult = await arcDb.getSignalById(accountId, c.req.param("id"));
     if (signalResult.isErr()) return err(c, 500, "Internal Server Error");
@@ -734,7 +868,14 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
   // Calendar RSVP  —  /accounts/:accountId/arcs/:arcId/signals/:id/rsvp
   // -------------------------------------------------------------------------
 
-  app.post("/accounts/:accountId/arcs/:arcId/signals/:id/rsvp", authz("signals:write", c => `accounts/${c.req.param("accountId")}/arcs/${c.req.param("arcId")}/signals/${c.req.param("id")}`), async (c) => {
+  app.openapi(createRoute({
+    method: "post",
+    path: "/accounts/{accountId}/arcs/{arcId}/signals/{id}/rsvp",
+    tags: ["Signals"],
+    request: { params: z.object({ accountId: z.string(), arcId: z.string(), id: z.string() }) },
+    middleware: [authz("signals:write", c => `accounts/${c.req.param("accountId")}/arcs/${c.req.param("arcId")}/signals/${c.req.param("id")}`)] as const,
+    responses: { 200: { content: { "application/json": { schema: SignalSchema } }, description: "RSVP to calendar invite" } },
+  }), async (c) => {
     const { accountId } = c.get("auth");
     if (!emailService || !rsvpComposer) return err(c, 501, "RSVP not configured");
 
@@ -845,14 +986,28 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
   // Views  —  /accounts/:accountId/views
   // -------------------------------------------------------------------------
 
-  app.get("/accounts/:accountId/views", authz("views:read", c => `accounts/${c.req.param("accountId")}/views`), async (c) => {
+  app.openapi(createRoute({
+    method: "get",
+    path: "/accounts/{accountId}/views",
+    tags: ["Views"],
+    request: { params: z.object({ accountId: z.string() }) },
+    middleware: [authz("views:read", c => `accounts/${c.req.param("accountId")}/views`)] as const,
+    responses: { 200: { content: { "application/json": { schema: ListViewsResponse } }, description: "List views" } },
+  }), async (c) => {
     const { accountId } = c.get("auth");
     const viewsResult = await accountDb.listViews(accountId);
     if (viewsResult.isErr()) return err(c, 500, "Internal Server Error");
     return c.json(page("views", viewsResult.value));
   });
 
-  app.post("/accounts/:accountId/views", authz("views:write", c => `accounts/${c.req.param("accountId")}/views`), async (c) => {
+  app.openapi(createRoute({
+    method: "post",
+    path: "/accounts/{accountId}/views",
+    tags: ["Views"],
+    request: { params: z.object({ accountId: z.string() }) },
+    middleware: [authz("views:write", c => `accounts/${c.req.param("accountId")}/views`)] as const,
+    responses: { 201: { content: { "application/json": { schema: ViewSchema } }, description: "View created" } },
+  }), async (c) => {
     const { accountId } = c.get("auth");
     const body = await zParse(CreateViewRequest, c.req.raw);
     const viewResult = await accountDb.createView(accountId, body);
@@ -860,7 +1015,14 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     return c.json(viewResult.value, 201);
   });
 
-  app.patch("/accounts/:accountId/views/:id", authz("views:write", c => `accounts/${c.req.param("accountId")}/views/${c.req.param("id")}`), async (c) => {
+  app.openapi(createRoute({
+    method: "patch",
+    path: "/accounts/{accountId}/views/{id}",
+    tags: ["Views"],
+    request: { params: z.object({ accountId: z.string(), id: z.string() }) },
+    middleware: [authz("views:write", c => `accounts/${c.req.param("accountId")}/views/${c.req.param("id")}`)] as const,
+    responses: { 200: { content: { "application/json": { schema: ViewSchema } }, description: "Update view" } },
+  }), async (c) => {
     const { accountId } = c.get("auth");
     const viewResult = await accountDb.getView(accountId, c.req.param("id"));
     if (viewResult.isErr()) return err(c, 500, "Internal Server Error");
@@ -872,7 +1034,14 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     return c.json(updateResult.value);
   });
 
-  app.delete("/accounts/:accountId/views/:id", authz("views:write", c => `accounts/${c.req.param("accountId")}/views/${c.req.param("id")}`), async (c) => {
+  app.openapi(createRoute({
+    method: "delete",
+    path: "/accounts/{accountId}/views/{id}",
+    tags: ["Views"],
+    request: { params: z.object({ accountId: z.string(), id: z.string() }) },
+    middleware: [authz("views:write", c => `accounts/${c.req.param("accountId")}/views/${c.req.param("id")}`)] as const,
+    responses: { 204: { description: "View deleted" } },
+  }), async (c) => {
     const { accountId } = c.get("auth");
     const viewResult = await accountDb.getView(accountId, c.req.param("id"));
     if (viewResult.isErr()) return err(c, 500, "Internal Server Error");
@@ -887,14 +1056,28 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
   // Labels  —  /accounts/:accountId/labels
   // -------------------------------------------------------------------------
 
-  app.get("/accounts/:accountId/labels", authz("labels:read", c => `accounts/${c.req.param("accountId")}/labels`), async (c) => {
+  app.openapi(createRoute({
+    method: "get",
+    path: "/accounts/{accountId}/labels",
+    tags: ["Labels"],
+    request: { params: z.object({ accountId: z.string() }) },
+    middleware: [authz("labels:read", c => `accounts/${c.req.param("accountId")}/labels`)] as const,
+    responses: { 200: { content: { "application/json": { schema: ListLabelsResponse } }, description: "List labels" } },
+  }), async (c) => {
     const { accountId } = c.get("auth");
     const labelsResult = await accountDb.listLabels(accountId);
     if (labelsResult.isErr()) return err(c, 500, "Internal Server Error");
     return c.json(page("labels", labelsResult.value));
   });
 
-  app.post("/accounts/:accountId/labels", authz("labels:write", c => `accounts/${c.req.param("accountId")}/labels`), async (c) => {
+  app.openapi(createRoute({
+    method: "post",
+    path: "/accounts/{accountId}/labels",
+    tags: ["Labels"],
+    request: { params: z.object({ accountId: z.string() }) },
+    middleware: [authz("labels:write", c => `accounts/${c.req.param("accountId")}/labels`)] as const,
+    responses: { 201: { content: { "application/json": { schema: LabelSchema } }, description: "Label created" } },
+  }), async (c) => {
     const { accountId } = c.get("auth");
     const body = await zParse(CreateLabelRequest, c.req.raw);
     const labelResult = await accountDb.createLabel(accountId, body);
@@ -902,7 +1085,14 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     return c.json(labelResult.value, 201);
   });
 
-  app.patch("/accounts/:accountId/labels/:id", authz("labels:write", c => `accounts/${c.req.param("accountId")}/labels/${c.req.param("id")}`), async (c) => {
+  app.openapi(createRoute({
+    method: "patch",
+    path: "/accounts/{accountId}/labels/{id}",
+    tags: ["Labels"],
+    request: { params: z.object({ accountId: z.string(), id: z.string() }) },
+    middleware: [authz("labels:write", c => `accounts/${c.req.param("accountId")}/labels/${c.req.param("id")}`)] as const,
+    responses: { 200: { content: { "application/json": { schema: LabelSchema } }, description: "Update label" } },
+  }), async (c) => {
     const { accountId } = c.get("auth");
     const labelsResult = await accountDb.listLabels(accountId);
     if (labelsResult.isErr()) return err(c, 500, "Internal Server Error");
@@ -914,7 +1104,14 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     return c.json(updateResult.value);
   });
 
-  app.delete("/accounts/:accountId/labels/:id", authz("labels:write", c => `accounts/${c.req.param("accountId")}/labels/${c.req.param("id")}`), async (c) => {
+  app.openapi(createRoute({
+    method: "delete",
+    path: "/accounts/{accountId}/labels/{id}",
+    tags: ["Labels"],
+    request: { params: z.object({ accountId: z.string(), id: z.string() }) },
+    middleware: [authz("labels:write", c => `accounts/${c.req.param("accountId")}/labels/${c.req.param("id")}`)] as const,
+    responses: { 204: { description: "Label deleted" } },
+  }), async (c) => {
     const { accountId } = c.get("auth");
     const labelsResult = await accountDb.listLabels(accountId);
     if (labelsResult.isErr()) return err(c, 500, "Internal Server Error");
@@ -929,14 +1126,28 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
   // Rules  —  /accounts/:accountId/rules
   // -------------------------------------------------------------------------
 
-  app.get("/accounts/:accountId/rules", authz("rules:read", c => `accounts/${c.req.param("accountId")}/rules`), async (c) => {
+  app.openapi(createRoute({
+    method: "get",
+    path: "/accounts/{accountId}/rules",
+    tags: ["Rules"],
+    request: { params: z.object({ accountId: z.string() }) },
+    middleware: [authz("rules:read", c => `accounts/${c.req.param("accountId")}/rules`)] as const,
+    responses: { 200: { content: { "application/json": { schema: ListRulesResponse } }, description: "List rules" } },
+  }), async (c) => {
     const { accountId } = c.get("auth");
     const rulesResult = await accountDb.listRules(accountId);
     if (rulesResult.isErr()) return err(c, 500, "Internal Server Error");
     return c.json(page("rules", rulesResult.value));
   });
 
-  app.post("/accounts/:accountId/rules", authz("rules:write", c => `accounts/${c.req.param("accountId")}/rules`), async (c) => {
+  app.openapi(createRoute({
+    method: "post",
+    path: "/accounts/{accountId}/rules",
+    tags: ["Rules"],
+    request: { params: z.object({ accountId: z.string() }) },
+    middleware: [authz("rules:write", c => `accounts/${c.req.param("accountId")}/rules`)] as const,
+    responses: { 201: { content: { "application/json": { schema: RuleSchema } }, description: "Rule created" } },
+  }), async (c) => {
     const { accountId } = c.get("auth");
     const body = await zParse(CreateRuleRequest, c.req.raw);
     const effectiveConditionType = body.conditionType ?? "json_logic";
@@ -978,7 +1189,14 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     return c.json(ruleResult.value, 201);
   });
 
-  app.patch("/accounts/:accountId/rules/:id", authz("rules:write", c => `accounts/${c.req.param("accountId")}/rules/${c.req.param("id")}`), async (c) => {
+  app.openapi(createRoute({
+    method: "patch",
+    path: "/accounts/{accountId}/rules/{id}",
+    tags: ["Rules"],
+    request: { params: z.object({ accountId: z.string(), id: z.string() }) },
+    middleware: [authz("rules:write", c => `accounts/${c.req.param("accountId")}/rules/${c.req.param("id")}`)] as const,
+    responses: { 200: { content: { "application/json": { schema: RuleSchema } }, description: "Update rule" } },
+  }), async (c) => {
     const { accountId } = c.get("auth");
     const rulesResult = await accountDb.listRules(accountId);
     if (rulesResult.isErr()) return err(c, 500, "Internal Server Error");
@@ -1039,7 +1257,14 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     return c.json(updateResult.value);
   });
 
-  app.delete("/accounts/:accountId/rules/:id", authz("rules:write", c => `accounts/${c.req.param("accountId")}/rules/${c.req.param("id")}`), async (c) => {
+  app.openapi(createRoute({
+    method: "delete",
+    path: "/accounts/{accountId}/rules/{id}",
+    tags: ["Rules"],
+    request: { params: z.object({ accountId: z.string(), id: z.string() }) },
+    middleware: [authz("rules:write", c => `accounts/${c.req.param("accountId")}/rules/${c.req.param("id")}`)] as const,
+    responses: { 204: { description: "Rule deleted" } },
+  }), async (c) => {
     const { accountId } = c.get("auth");
     const rulesResult = await accountDb.listRules(accountId);
     if (rulesResult.isErr()) return err(c, 500, "Internal Server Error");
@@ -1054,14 +1279,28 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
   // Domains  —  /accounts/:accountId/domains
   // -------------------------------------------------------------------------
 
-  app.get("/accounts/:accountId/domains", authz("domains:read", c => `accounts/${c.req.param("accountId")}/domains`), async (c) => {
+  app.openapi(createRoute({
+    method: "get",
+    path: "/accounts/{accountId}/domains",
+    tags: ["Domains"],
+    request: { params: z.object({ accountId: z.string() }) },
+    middleware: [authz("domains:read", c => `accounts/${c.req.param("accountId")}/domains`)] as const,
+    responses: { 200: { content: { "application/json": { schema: ListDomainsResponse } }, description: "List domains" } },
+  }), async (c) => {
     const { accountId } = c.get("auth");
     const domainsResult = await accountDb.listDomains(accountId);
     if (domainsResult.isErr()) return err(c, 500, "Internal Server Error");
     return c.json(page("domains", domainsResult.value));
   });
 
-  app.post("/accounts/:accountId/domains", authz("domains:write", c => `accounts/${c.req.param("accountId")}/domains`), async (c) => {
+  app.openapi(createRoute({
+    method: "post",
+    path: "/accounts/{accountId}/domains",
+    tags: ["Domains"],
+    request: { params: z.object({ accountId: z.string() }) },
+    middleware: [authz("domains:write", c => `accounts/${c.req.param("accountId")}/domains`)] as const,
+    responses: { 201: { content: { "application/json": { schema: DomainSchema } }, description: "Domain created" } },
+  }), async (c) => {
     const { accountId } = c.get("auth");
     const body = await zParse(CreateDomainRequest, c.req.raw);
     const domainResult = await accountDb.createDomain(accountId, body.domain);
@@ -1069,7 +1308,14 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     return c.json(domainResult.value, 201);
   });
 
-  app.get("/accounts/:accountId/domains/:id", authz("domains:read", c => `accounts/${c.req.param("accountId")}/domains/${c.req.param("id")}`), async (c) => {
+  app.openapi(createRoute({
+    method: "get",
+    path: "/accounts/{accountId}/domains/{id}",
+    tags: ["Domains"],
+    request: { params: z.object({ accountId: z.string(), id: z.string() }) },
+    middleware: [authz("domains:read", c => `accounts/${c.req.param("accountId")}/domains/${c.req.param("id")}`)] as const,
+    responses: { 200: { content: { "application/json": { schema: DomainWithRecordsSchema } }, description: "Get domain with DNS records" } },
+  }), async (c) => {
     const { accountId } = c.get("auth");
     const domainResult = await accountDb.getDomain(accountId, c.req.param("id"));
     if (domainResult.isErr()) return err(c, 500, "Internal Server Error");
@@ -1080,7 +1326,14 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     return c.json({ ...domain, records });
   });
 
-  app.patch("/accounts/:accountId/domains/:id", authz("domains:write", c => `accounts/${c.req.param("accountId")}/domains/${c.req.param("id")}`), async (c) => {
+  app.openapi(createRoute({
+    method: "patch",
+    path: "/accounts/{accountId}/domains/{id}",
+    tags: ["Domains"],
+    request: { params: z.object({ accountId: z.string(), id: z.string() }) },
+    middleware: [authz("domains:write", c => `accounts/${c.req.param("accountId")}/domains/${c.req.param("id")}`)] as const,
+    responses: { 200: { content: { "application/json": { schema: DomainWithRecordsSchema } }, description: "Verify/refresh domain" } },
+  }), async (c) => {
     const { accountId } = c.get("auth");
     const domainResult = await accountDb.getDomain(accountId, c.req.param("id"));
     if (domainResult.isErr()) return err(c, 500, "Internal Server Error");
@@ -1105,7 +1358,14 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     return c.json({ ...updatedResult.value, records });
   });
 
-  app.delete("/accounts/:accountId/domains/:id", authz("domains:write", c => `accounts/${c.req.param("accountId")}/domains/${c.req.param("id")}`), async (c) => {
+  app.openapi(createRoute({
+    method: "delete",
+    path: "/accounts/{accountId}/domains/{id}",
+    tags: ["Domains"],
+    request: { params: z.object({ accountId: z.string(), id: z.string() }) },
+    middleware: [authz("domains:write", c => `accounts/${c.req.param("accountId")}/domains/${c.req.param("id")}`)] as const,
+    responses: { 204: { description: "Domain deleted" } },
+  }), async (c) => {
     const { accountId } = c.get("auth");
     const domainResult = await accountDb.getDomain(accountId, c.req.param("id"));
     if (domainResult.isErr()) return err(c, 500, "Internal Server Error");
@@ -1121,7 +1381,14 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
   // Account  —  /accounts/:accountId
   // -------------------------------------------------------------------------
 
-  app.get("/accounts/:accountId", authz("accounts:read", c => `accounts/${c.req.param("accountId")}`), async (c) => {
+  app.openapi(createRoute({
+    method: "get",
+    path: "/accounts/{accountId}",
+    tags: ["Accounts"],
+    request: { params: z.object({ accountId: z.string() }) },
+    middleware: [authz("accounts:read", c => `accounts/${c.req.param("accountId")}`)] as const,
+    responses: { 200: { content: { "application/json": { schema: AccountSchema } }, description: "Get account" } },
+  }), async (c) => {
     const { accountId } = c.get("auth");
     const accountResult = await accountDb.getAccount(accountId);
     if (accountResult.isErr()) return err(c, 500, "Internal Server Error");
@@ -1130,7 +1397,14 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     return c.json(account);
   });
 
-  app.patch("/accounts/:accountId", authz("accounts:write", c => `accounts/${c.req.param("accountId")}`), async (c) => {
+  app.openapi(createRoute({
+    method: "patch",
+    path: "/accounts/{accountId}",
+    tags: ["Accounts"],
+    request: { params: z.object({ accountId: z.string() }) },
+    middleware: [authz("accounts:write", c => `accounts/${c.req.param("accountId")}`)] as const,
+    responses: { 200: { content: { "application/json": { schema: AccountSchema } }, description: "Update account" } },
+  }), async (c) => {
     const { accountId } = c.get("auth");
     const body = await zParse(UpdateAccountRequest, c.req.raw);
     const updateResult = await accountDb.updateAccount(accountId, body as Partial<Pick<Account, "name" | "deletionRetentionDays" | "notifications" | "filtering" | "onboarding" | "afterSendAction">>);
@@ -1138,7 +1412,14 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     return c.json(updateResult.value);
   });
 
-  app.get("/accounts/:accountId/stats", authz("stats:read", c => `accounts/${c.req.param("accountId")}/stats`), async (c) => {
+  app.openapi(createRoute({
+    method: "get",
+    path: "/accounts/{accountId}/stats",
+    tags: ["Accounts"],
+    request: { params: z.object({ accountId: z.string() }) },
+    middleware: [authz("stats:read", c => `accounts/${c.req.param("accountId")}/stats`)] as const,
+    responses: { 200: { content: { "application/json": { schema: z.object({}) } }, description: "Get stats" } },
+  }), async (c) => {
     const { accountId } = c.get("auth");
     const statsResult = await accountDb.getStats(accountId);
     if (statsResult.isErr()) return err(c, 500, "Internal Server Error");
@@ -1149,7 +1430,14 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
   // Account users  —  /accounts/:accountId/users
   // -------------------------------------------------------------------------
 
-  app.get("/accounts/:accountId/users", authz("users:read", c => `accounts/${c.req.param("accountId")}/users`), async (c) => {
+  app.openapi(createRoute({
+    method: "get",
+    path: "/accounts/{accountId}/users",
+    tags: ["Users"],
+    request: { params: z.object({ accountId: z.string() }) },
+    middleware: [authz("users:read", c => `accounts/${c.req.param("accountId")}/users`)] as const,
+    responses: { 200: { content: { "application/json": { schema: z.object({ users: z.array(z.object({ userId: z.string(), role: z.string() })), pagination: PaginationSchema }) } }, description: "List users" } },
+  }), async (c) => {
     if (!access) return err(c, 501, "Not implemented");
     const { accountId } = c.get("auth");
     const result = await access.listUsers(accountId);
@@ -1160,7 +1448,14 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     return c.json(page("users", result.value));
   });
 
-  app.post("/accounts/:accountId/users", authz("accounts:read", c => `accounts/${c.req.param("accountId")}`), async (c) => {
+  app.openapi(createRoute({
+    method: "post",
+    path: "/accounts/{accountId}/users",
+    tags: ["Users"],
+    request: { params: z.object({ accountId: z.string() }) },
+    middleware: [authz("accounts:read", c => `accounts/${c.req.param("accountId")}`)] as const,
+    responses: { 201: { description: "User invited" } },
+  }), async (c) => {
     if (!access) return err(c, 501, "Not implemented");
     const { accountId } = c.get("auth");
     const body = await zParse(InviteUserRequest, c.req.raw);
@@ -1194,7 +1489,14 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     return new Response(null, { status: 201 });
   });
 
-  app.patch("/accounts/:accountId/users/:userId", authz("users:write", c => `accounts/${c.req.param("accountId")}/users/${c.req.param("userId")}`), async (c) => {
+  app.openapi(createRoute({
+    method: "patch",
+    path: "/accounts/{accountId}/users/{userId}",
+    tags: ["Users"],
+    request: { params: z.object({ accountId: z.string(), userId: z.string() }) },
+    middleware: [authz("users:write", c => `accounts/${c.req.param("accountId")}/users/${c.req.param("userId")}`)] as const,
+    responses: { 200: { content: { "application/json": { schema: z.object({ userId: z.string(), role: z.string() }) } }, description: "Update user role" } },
+  }), async (c) => {
     if (!access) return err(c, 501, "Not implemented");
     const { accountId } = c.get("auth");
     const body = await zParse(UpdateUserRequest, c.req.raw);
@@ -1206,7 +1508,14 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     return c.json({ userId: c.req.param("userId"), role: body.role });
   });
 
-  app.delete("/accounts/:accountId/users/:userId", authz("users:write", c => `accounts/${c.req.param("accountId")}/users/${c.req.param("userId")}`), async (c) => {
+  app.openapi(createRoute({
+    method: "delete",
+    path: "/accounts/{accountId}/users/{userId}",
+    tags: ["Users"],
+    request: { params: z.object({ accountId: z.string(), userId: z.string() }) },
+    middleware: [authz("users:write", c => `accounts/${c.req.param("accountId")}/users/${c.req.param("userId")}`)] as const,
+    responses: { 204: { description: "User removed" } },
+  }), async (c) => {
     if (!access) return err(c, 501, "Not implemented");
     const { accountId } = c.get("auth");
     const result = await access.removeUser(accountId, c.req.param("userId"));
@@ -1221,7 +1530,17 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
   // Aliases  —  /accounts/:accountId/aliases
   // -------------------------------------------------------------------------
 
-  app.get("/accounts/:accountId/aliases", authz("aliases:read", c => `accounts/${c.req.param("accountId")}/aliases`), async (c) => {
+  app.openapi(createRoute({
+    method: "get",
+    path: "/accounts/{accountId}/aliases",
+    tags: ["Aliases"],
+    request: {
+      params: z.object({ accountId: z.string() }),
+      query: z.object({ domain: z.string().optional() }),
+    },
+    middleware: [authz("aliases:read", c => `accounts/${c.req.param("accountId")}/aliases`)] as const,
+    responses: { 200: { content: { "application/json": { schema: ListAliasesResponse } }, description: "List aliases" } },
+  }), async (c) => {
     const { accountId } = c.get("auth");
     const domain = c.req.query("domain");
     const aliasesResult = await accountDb.listAliases(accountId);
@@ -1231,7 +1550,14 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     return c.json(page("aliases", aliases));
   });
 
-  app.get("/accounts/:accountId/aliases/:address", authz("aliases:read", c => `accounts/${c.req.param("accountId")}/aliases/${c.req.param("address")}`), async (c) => {
+  app.openapi(createRoute({
+    method: "get",
+    path: "/accounts/{accountId}/aliases/{address}",
+    tags: ["Aliases"],
+    request: { params: z.object({ accountId: z.string(), address: z.string() }) },
+    middleware: [authz("aliases:read", c => `accounts/${c.req.param("accountId")}/aliases/${c.req.param("address")}`)] as const,
+    responses: { 200: { content: { "application/json": { schema: AliasSchema } }, description: "Get alias" } },
+  }), async (c) => {
     const { accountId } = c.get("auth");
     const address = decodeURIComponent(c.req.param("address"));
     const aliasResult = await accountDb.getAlias(accountId, address);
@@ -1241,7 +1567,14 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     return c.json(alias);
   });
 
-  app.post("/accounts/:accountId/aliases", authz("aliases:write", c => `accounts/${c.req.param("accountId")}/aliases`), async (c) => {
+  app.openapi(createRoute({
+    method: "post",
+    path: "/accounts/{accountId}/aliases",
+    tags: ["Aliases"],
+    request: { params: z.object({ accountId: z.string() }) },
+    middleware: [authz("aliases:write", c => `accounts/${c.req.param("accountId")}/aliases`)] as const,
+    responses: { 201: { content: { "application/json": { schema: AliasSchema } }, description: "Alias created" } },
+  }), async (c) => {
     const { accountId } = c.get("auth");
     const body = await zParse(CreateAliasRequest, c.req.raw);
     const existingResult = await accountDb.getAlias(accountId, body.address);
@@ -1261,7 +1594,14 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     return c.json(createResult.value, 201);
   });
 
-  app.patch("/accounts/:accountId/aliases/:address", authz("aliases:write", c => `accounts/${c.req.param("accountId")}/aliases/${c.req.param("address")}`), async (c) => {
+  app.openapi(createRoute({
+    method: "patch",
+    path: "/accounts/{accountId}/aliases/{address}",
+    tags: ["Aliases"],
+    request: { params: z.object({ accountId: z.string(), address: z.string() }) },
+    middleware: [authz("aliases:write", c => `accounts/${c.req.param("accountId")}/aliases/${c.req.param("address")}`)] as const,
+    responses: { 200: { content: { "application/json": { schema: AliasSchema } }, description: "Update alias" } },
+  }), async (c) => {
     const { accountId } = c.get("auth");
     const address = decodeURIComponent(c.req.param("address"));
     const body = await zParse(UpdateAliasRequest, c.req.raw);
@@ -1291,7 +1631,14 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     return c.json(upsertResult.value);
   });
 
-  app.delete("/accounts/:accountId/aliases/:address", authz("aliases:write", c => `accounts/${c.req.param("accountId")}/aliases/${c.req.param("address")}`), async (c) => {
+  app.openapi(createRoute({
+    method: "delete",
+    path: "/accounts/{accountId}/aliases/{address}",
+    tags: ["Aliases"],
+    request: { params: z.object({ accountId: z.string(), address: z.string() }) },
+    middleware: [authz("aliases:write", c => `accounts/${c.req.param("accountId")}/aliases/${c.req.param("address")}`)] as const,
+    responses: { 204: { description: "Alias deleted" } },
+  }), async (c) => {
     const { accountId } = c.get("auth");
     const address = decodeURIComponent(c.req.param("address"));
     const deleteResult = await accountDb.deleteAlias(accountId, address);
@@ -1303,7 +1650,14 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
   // Alias Senders  —  /accounts/:accountId/aliases/:address/senders
   // -------------------------------------------------------------------------
 
-  app.get("/accounts/:accountId/aliases/:address/senders", authz("aliases:read", c => `accounts/${c.req.param("accountId")}/aliases/${c.req.param("address")}/senders`), async (c) => {
+  app.openapi(createRoute({
+    method: "get",
+    path: "/accounts/{accountId}/aliases/{address}/senders",
+    tags: ["Alias Senders"],
+    request: { params: z.object({ accountId: z.string(), address: z.string() }) },
+    middleware: [authz("aliases:read", c => `accounts/${c.req.param("accountId")}/aliases/${c.req.param("address")}/senders`)] as const,
+    responses: { 200: { content: { "application/json": { schema: ListSendersResponse } }, description: "List senders" } },
+  }), async (c) => {
     const { accountId } = c.get("auth");
     const address = decodeURIComponent(c.req.param("address"));
     const sendersResult = await accountDb.listSenders(accountId, address);
@@ -1311,7 +1665,14 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     return c.json({ senders: sendersResult.value });
   });
 
-  app.post("/accounts/:accountId/aliases/:address/senders", authz("aliases:write", c => `accounts/${c.req.param("accountId")}/aliases/${c.req.param("address")}/senders`), async (c) => {
+  app.openapi(createRoute({
+    method: "post",
+    path: "/accounts/{accountId}/aliases/{address}/senders",
+    tags: ["Alias Senders"],
+    request: { params: z.object({ accountId: z.string(), address: z.string() }) },
+    middleware: [authz("aliases:write", c => `accounts/${c.req.param("accountId")}/aliases/${c.req.param("address")}/senders`)] as const,
+    responses: { 201: { description: "Sender added" } },
+  }), async (c) => {
     const { accountId } = c.get("auth");
     const address = decodeURIComponent(c.req.param("address"));
     const body = await zParse(CreateSenderRequest, c.req.raw);
@@ -1320,7 +1681,14 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     return new Response(null, { status: 201 });
   });
 
-  app.delete("/accounts/:accountId/aliases/:address/senders/:domain", authz("aliases:write", c => `accounts/${c.req.param("accountId")}/aliases/${c.req.param("address")}/senders/${c.req.param("domain")}`), async (c) => {
+  app.openapi(createRoute({
+    method: "delete",
+    path: "/accounts/{accountId}/aliases/{address}/senders/{domain}",
+    tags: ["Alias Senders"],
+    request: { params: z.object({ accountId: z.string(), address: z.string(), domain: z.string() }) },
+    middleware: [authz("aliases:write", c => `accounts/${c.req.param("accountId")}/aliases/${c.req.param("address")}/senders/${c.req.param("domain")}`)] as const,
+    responses: { 204: { description: "Sender removed" } },
+  }), async (c) => {
     const { accountId } = c.get("auth");
     const address = decodeURIComponent(c.req.param("address"));
     const domain = decodeURIComponent(c.req.param("domain"));
@@ -1333,14 +1701,28 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
   // Email Templates  —  /accounts/:accountId/templates
   // -------------------------------------------------------------------------
 
-  app.get("/accounts/:accountId/templates", authz("templates:read", c => `accounts/${c.req.param("accountId")}/templates`), async (c) => {
+  app.openapi(createRoute({
+    method: "get",
+    path: "/accounts/{accountId}/templates",
+    tags: ["Templates"],
+    request: { params: z.object({ accountId: z.string() }) },
+    middleware: [authz("templates:read", c => `accounts/${c.req.param("accountId")}/templates`)] as const,
+    responses: { 200: { content: { "application/json": { schema: ListTemplatesResponse } }, description: "List templates" } },
+  }), async (c) => {
     const { accountId } = c.get("auth");
     const templatesResult = await accountDb.listTemplates(accountId);
     if (templatesResult.isErr()) return err(c, 500, "Internal Server Error");
     return c.json({ templates: templatesResult.value });
   });
 
-  app.post("/accounts/:accountId/templates", authz("templates:write", c => `accounts/${c.req.param("accountId")}/templates`), async (c) => {
+  app.openapi(createRoute({
+    method: "post",
+    path: "/accounts/{accountId}/templates",
+    tags: ["Templates"],
+    request: { params: z.object({ accountId: z.string() }) },
+    middleware: [authz("templates:write", c => `accounts/${c.req.param("accountId")}/templates`)] as const,
+    responses: { 201: { content: { "application/json": { schema: EmailTemplateSchema } }, description: "Template created" } },
+  }), async (c) => {
     const { accountId } = c.get("auth");
     const body = await zParse(CreateTemplateRequest, c.req.raw);
     if (body.functions) {
@@ -1377,7 +1759,14 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     return c.json(templateResult.value, 201);
   });
 
-  app.patch("/accounts/:accountId/templates/:id", authz("templates:write", c => `accounts/${c.req.param("accountId")}/templates/${c.req.param("id")}`), async (c) => {
+  app.openapi(createRoute({
+    method: "patch",
+    path: "/accounts/{accountId}/templates/{id}",
+    tags: ["Templates"],
+    request: { params: z.object({ accountId: z.string(), id: z.string() }) },
+    middleware: [authz("templates:write", c => `accounts/${c.req.param("accountId")}/templates/${c.req.param("id")}`)] as const,
+    responses: { 200: { content: { "application/json": { schema: EmailTemplateSchema } }, description: "Update template" } },
+  }), async (c) => {
     const { accountId } = c.get("auth");
     const body = await zParse(UpdateTemplateRequest, c.req.raw);
     if (body.functions) {
@@ -1406,7 +1795,14 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     return c.json(updateResult.value);
   });
 
-  app.put("/accounts/:accountId/templates/:id", authz("templates:write", c => `accounts/${c.req.param("accountId")}/templates/${c.req.param("id")}`), async (c) => {
+  app.openapi(createRoute({
+    method: "put",
+    path: "/accounts/{accountId}/templates/{id}",
+    tags: ["Templates"],
+    request: { params: z.object({ accountId: z.string(), id: z.string() }) },
+    middleware: [authz("templates:write", c => `accounts/${c.req.param("accountId")}/templates/${c.req.param("id")}`)] as const,
+    responses: { 200: { content: { "application/json": { schema: EmailTemplateSchema } }, description: "Replace template" } },
+  }), async (c) => {
     const { accountId } = c.get("auth");
     const body = await zParse(ReplaceTemplateRequest, c.req.raw);
     if (body.functions) {
@@ -1435,7 +1831,14 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     return c.json(updateResult.value);
   });
 
-  app.delete("/accounts/:accountId/templates/:id", authz("templates:write", c => `accounts/${c.req.param("accountId")}/templates/${c.req.param("id")}`), async (c) => {
+  app.openapi(createRoute({
+    method: "delete",
+    path: "/accounts/{accountId}/templates/{id}",
+    tags: ["Templates"],
+    request: { params: z.object({ accountId: z.string(), id: z.string() }) },
+    middleware: [authz("templates:write", c => `accounts/${c.req.param("accountId")}/templates/${c.req.param("id")}`)] as const,
+    responses: { 204: { description: "Template deleted" } },
+  }), async (c) => {
     const { accountId } = c.get("auth");
     const existingResult = await accountDb.getTemplate(accountId, c.req.param("id"));
     if (existingResult.isErr()) return err(c, 500, "Internal Server Error");
@@ -1450,14 +1853,28 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
   // Verified forwarding addresses  —  /accounts/:accountId/forwarding-addresses
   // -------------------------------------------------------------------------
 
-  app.get("/accounts/:accountId/forwarding-addresses", authz("forwarding-addresses:read", c => `accounts/${c.req.param("accountId")}/forwarding-addresses`), async (c) => {
+  app.openapi(createRoute({
+    method: "get",
+    path: "/accounts/{accountId}/forwarding-addresses",
+    tags: ["Forwarding Addresses"],
+    request: { params: z.object({ accountId: z.string() }) },
+    middleware: [authz("forwarding-addresses:read", c => `accounts/${c.req.param("accountId")}/forwarding-addresses`)] as const,
+    responses: { 200: { content: { "application/json": { schema: ListForwardingAddressesResponse } }, description: "List forwarding addresses" } },
+  }), async (c) => {
     const { accountId } = c.get("auth");
     const addressesResult = await accountDb.listVerifiedForwardingAddresses(accountId);
     if (addressesResult.isErr()) return err(c, 500, "Internal Server Error");
     return c.json(page("forwardingAddresses", addressesResult.value));
   });
 
-  app.post("/accounts/:accountId/forwarding-addresses", authz("forwarding-addresses:write", c => `accounts/${c.req.param("accountId")}/forwarding-addresses`), async (c) => {
+  app.openapi(createRoute({
+    method: "post",
+    path: "/accounts/{accountId}/forwarding-addresses",
+    tags: ["Forwarding Addresses"],
+    request: { params: z.object({ accountId: z.string() }) },
+    middleware: [authz("forwarding-addresses:write", c => `accounts/${c.req.param("accountId")}/forwarding-addresses`)] as const,
+    responses: { 201: { content: { "application/json": { schema: VerifiedForwardingAddressSchema } }, description: "Forwarding address created" } },
+  }), async (c) => {
     const { accountId } = c.get("auth");
     const body = await zParse(CreateForwardingAddressRequest, c.req.raw);
 
@@ -1490,7 +1907,14 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     return c.json(addr, 201);
   });
 
-  app.post("/accounts/:accountId/forwarding-addresses/:address/verify", authz("forwarding-addresses:write", c => `accounts/${c.req.param("accountId")}/forwarding-addresses/${c.req.param("address")}`), async (c) => {
+  app.openapi(createRoute({
+    method: "post",
+    path: "/accounts/{accountId}/forwarding-addresses/{address}/verify",
+    tags: ["Forwarding Addresses"],
+    request: { params: z.object({ accountId: z.string(), address: z.string() }) },
+    middleware: [authz("forwarding-addresses:write", c => `accounts/${c.req.param("accountId")}/forwarding-addresses/${c.req.param("address")}`)] as const,
+    responses: { 200: { content: { "application/json": { schema: VerifiedForwardingAddressSchema } }, description: "Address verified" } },
+  }), async (c) => {
     const { accountId } = c.get("auth");
     const address = decodeURIComponent(c.req.param("address"));
     const body = await zParse(VerifyForwardingAddressRequest, c.req.raw);
@@ -1508,7 +1932,14 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     return c.json(verified);
   });
 
-  app.delete("/accounts/:accountId/forwarding-addresses/:address", authz("forwarding-addresses:write", c => `accounts/${c.req.param("accountId")}/forwarding-addresses/${c.req.param("address")}`), async (c) => {
+  app.openapi(createRoute({
+    method: "delete",
+    path: "/accounts/{accountId}/forwarding-addresses/{address}",
+    tags: ["Forwarding Addresses"],
+    request: { params: z.object({ accountId: z.string(), address: z.string() }) },
+    middleware: [authz("forwarding-addresses:write", c => `accounts/${c.req.param("accountId")}/forwarding-addresses/${c.req.param("address")}`)] as const,
+    responses: { 204: { description: "Forwarding address deleted" } },
+  }), async (c) => {
     const { accountId } = c.get("auth");
     const address = decodeURIComponent(c.req.param("address"));
     const deleteResult = await accountDb.deleteVerifiedForwardingAddress(accountId, address);
@@ -1520,7 +1951,17 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
   // Audit  —  /accounts/:accountId/audit
   // -------------------------------------------------------------------------
 
-  app.get("/accounts/:accountId/audit", authz("audit:read", c => `accounts/${c.req.param("accountId")}/audit`), async (c) => {
+  app.openapi(createRoute({
+    method: "get",
+    path: "/accounts/{accountId}/audit",
+    tags: ["Audit"],
+    request: {
+      params: z.object({ accountId: z.string() }),
+      query: z.object({ cursor: z.string().optional(), limit: z.string().optional() }),
+    },
+    middleware: [authz("audit:read", c => `accounts/${c.req.param("accountId")}/audit`)] as const,
+    responses: { 200: { content: { "application/json": { schema: z.object({}) } }, description: "List audit events" } },
+  }), async (c) => {
     const { accountId } = c.get("auth");
     const cursor = c.req.query("cursor");
     const rawLimit = c.req.query("limit");
