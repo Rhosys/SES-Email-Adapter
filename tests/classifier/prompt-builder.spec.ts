@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { buildSystemPrompt, buildUserMessage, type ClassificationInput } from "../../src/classifier/prompt-builder.js";
+import { buildSystemPrompt, buildUserMessage } from "../../src/classifier/prompt-builder.js";
+import type { ClassificationInput } from "../../src/classifier/classifier.js";
 import { WORKFLOW_REGISTRY } from "../../src/classifier/workflow-registry.js";
 
 // ---------------------------------------------------------------------------

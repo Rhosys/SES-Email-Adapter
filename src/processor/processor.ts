@@ -896,10 +896,11 @@ export class SignalProcessor {
         from: parsed.from.address,
         to: parsed.to.map((a) => a.address),
         subject: parsed.subject,
-        ...(parsed.textBody != null && { textBody: parsed.textBody }),
-        ...(parsed.htmlBody != null && { htmlBody: parsed.htmlBody }),
+        // TODO: task 6.1 — fetch account labels and pass as allowedLabels
+        body: parsed.htmlBody != null ? stripHtmlForClassifier(parsed.htmlBody) : (parsed.textBody ?? ""),
         headers: parsed.headers,
         receivedAt: timestamp,
+        allowedLabels: [],
       }),
     ]);
 
@@ -1558,6 +1559,16 @@ function buildSignal(opts: {
   if (ttl !== undefined) signal.ttl = ttl;
 
   return signal;
+}
+
+// TODO: task 6.1 — move to shared utility once processor body-resolution is refactored
+function stripHtmlForClassifier(html: string): string {
+  return html
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s{2,}/g, " ")
+    .trim();
 }
 
 // Extracts the original recipient address from forwarding headers, in priority order.
