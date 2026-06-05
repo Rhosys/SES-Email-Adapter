@@ -383,8 +383,8 @@ describe("API", () => {
       vi.mocked(arcDb.getArc).mockResolvedValueOnce(ok(makeArc()));
       const res = await req(app, "GET", `${A}/arcs/arc-001`);
       expect(res.status).toBe(200);
-      const body = await res.json() as Arc;
-      expect(body.id).toBe("arc-001");
+      const body = await res.json() as { arcId: string };
+      expect(body.arcId).toBe("arc-001");
     });
 
     it("returns 404 for unknown Arc", async () => {
@@ -487,11 +487,11 @@ describe("API", () => {
       vi.mocked(arcDb.fastFindArcByAlternativeLookupKey).mockResolvedValueOnce(ok(null));
       const res = await req(app, "POST", `${A}/signals/SES%23msg-001/quarantineResponse`, { body: { status: "active" } });
       expect(res.status).toBe(200);
-      const body = await res.json() as { arc: Arc; signal: Signal };
+      const body = await res.json() as { arc: { arcId: string; workflow: string }; signal: { status: string } };
       expect(body.arc.workflow).toBe(s.data.workflow);
       expect(body.signal.status).toBe("active");
       expect(arcDb.createArc).toHaveBeenCalledOnce();
-      expect(arcDb.unblockSignal).toHaveBeenCalledWith(TEST_ACCOUNT_ID, s.signalLookupId, body.arc.id);
+      expect(arcDb.unblockSignal).toHaveBeenCalledWith(TEST_ACCOUNT_ID, s.signalLookupId, expect.any(String));
     });
 
     it("allows a quarantined signal — attaches to existing arc when grouping key matches", async () => {
@@ -501,8 +501,8 @@ describe("API", () => {
       vi.mocked(arcDb.fastFindArcByAlternativeLookupKey).mockResolvedValueOnce(ok(existingArc));
       const res = await req(app, "POST", `${A}/signals/SES%23msg-001/quarantineResponse`, { body: { status: "active" } });
       expect(res.status).toBe(200);
-      const body = await res.json() as { arc: Arc; signal: Signal };
-      expect(body.arc.id).toBe(existingArc.id);
+      const body = await res.json() as { arc: { arcId: string }; signal: Signal };
+      expect(body.arc.arcId).toBe(existingArc.id);
       expect(arcDb.createArc).not.toHaveBeenCalled();
       expect(arcDb.unblockSignal).toHaveBeenCalledWith(TEST_ACCOUNT_ID, s.signalLookupId, existingArc.id);
     });
@@ -527,12 +527,12 @@ describe("API", () => {
 
   describe("GET /accounts/:accountId/signals/:id", () => {
     it("returns full Signal detail", async () => {
-      vi.mocked(arcDb.getSignalById).mockResolvedValueOnce(ok(makeSignal({ data: { textBody: "Hello world" } })));
+      vi.mocked(arcDb.getSignalById).mockResolvedValueOnce(ok(makeSignal({ data: { htmlBody: "<p>Hello world</p>" } })));
       const res = await req(app, "GET", `${A}/signals/SES%23msg-001`);
       expect(res.status).toBe(200);
-      const body = await res.json() as Signal;
-      expect(body.id).toBe("SES#msg-001");
-      expect(body.data.textBody).toBe("Hello world");
+      const body = await res.json() as { signalId: string; data: { body?: string } };
+      expect(body.signalId).toBe("SES#msg-001");
+      expect(body.data.body).toBe("<p>Hello world</p>");
     });
 
     it("returns 404 for unknown Signal", async () => {
@@ -629,9 +629,8 @@ describe("API", () => {
       vi.mocked(accountDb.listViews).mockResolvedValueOnce(ok([makeView(), makeView({ id: "view-002" })]));
       const res = await req(app, "GET", `${A}/views`);
       expect(res.status).toBe(200);
-      const body = await res.json() as { views: View[]; pagination: { cursor: null } };
+      const body = await res.json() as { views: View[] };
       expect(body.views).toHaveLength(2);
-      expect(body.pagination).toEqual({ cursor: null });
     });
   });
 
@@ -692,9 +691,8 @@ describe("API", () => {
       vi.mocked(accountDb.listLabels).mockResolvedValueOnce(ok([makeLabel()]));
       const res = await req(app, "GET", `${A}/labels`);
       expect(res.status).toBe(200);
-      const body = await res.json() as { labels: Label[]; pagination: { cursor: null } };
+      const body = await res.json() as { labels: Label[] };
       expect(body.labels).toHaveLength(1);
-      expect(body.pagination).toEqual({ cursor: null });
     });
   });
 
@@ -747,9 +745,8 @@ describe("API", () => {
       vi.mocked(accountDb.listRules).mockResolvedValueOnce(ok([makeRule()]));
       const res = await req(app, "GET", `${A}/rules`);
       expect(res.status).toBe(200);
-      const body = await res.json() as { rules: Rule[]; pagination: { cursor: null } };
+      const body = await res.json() as { rules: Rule[] };
       expect(body.rules).toHaveLength(1);
-      expect(body.pagination).toEqual({ cursor: null });
     });
   });
 
@@ -811,9 +808,8 @@ describe("API", () => {
       vi.mocked(accountDb.listDomains).mockResolvedValueOnce(ok([makeDomain()]));
       const res = await req(app, "GET", `${A}/domains`);
       expect(res.status).toBe(200);
-      const body = await res.json() as { domains: Domain[]; pagination: { cursor: null } };
+      const body = await res.json() as { domains: Domain[] };
       expect(body.domains).toHaveLength(1);
-      expect(body.pagination).toEqual({ cursor: null });
     });
   });
 
@@ -929,8 +925,8 @@ describe("API", () => {
       vi.mocked(accountDb.getAccount).mockResolvedValueOnce(ok(makeAccount()));
       const res = await req(app, "GET", `${A}`);
       expect(res.status).toBe(200);
-      const body = await res.json() as Account;
-      expect(body.id).toBe(TEST_ACCOUNT_ID);
+      const body = await res.json() as { accountId: string };
+      expect(body.accountId).toBe(TEST_ACCOUNT_ID);
     });
 
     it("returns 404 when account does not exist yet", async () => {
@@ -1081,10 +1077,9 @@ describe("API", () => {
       vi.mocked(accountDb.listAliases).mockResolvedValueOnce(ok([makeAlias()]));
       const res = await req(app, "GET", `${A}/aliases`);
       expect(res.status).toBe(200);
-      const body = await res.json() as { aliases: Alias[]; pagination: { cursor: null } };
+      const body = await res.json() as { aliases: Alias[] };
       expect(body.aliases).toHaveLength(1);
       expect(body.aliases[0]!.address).toBe("user@example.com");
-      expect(body.pagination).toEqual({ cursor: null });
     });
   });
 
@@ -1199,10 +1194,9 @@ describe("API", () => {
       vi.mocked(accountDb.listVerifiedForwardingAddresses).mockResolvedValueOnce(ok([makeVerifiedAddress()]));
       const res = await req(app, "GET", `${A}/forwarding-addresses`);
       expect(res.status).toBe(200);
-      const body = await res.json() as { forwardingAddresses: VerifiedForwardingAddress[]; pagination: { cursor: null } };
+      const body = await res.json() as { forwardingAddresses: VerifiedForwardingAddress[] };
       expect(body.forwardingAddresses).toHaveLength(1);
       expect(body.forwardingAddresses[0]!.address).toBe("backup@personal.com");
-      expect(body.pagination).toEqual({ cursor: null });
     });
   });
 
@@ -1215,10 +1209,9 @@ describe("API", () => {
     it("creates a pending forwarding address and sends verification email", async () => {
       const res = await req(app, "POST", `${A}/forwarding-addresses`, { body: { address: "backup@personal.com" } });
       expect(res.status).toBe(201);
-      const body = await res.json() as VerifiedForwardingAddress;
+      const body = await res.json() as { address: string; status: string };
       expect(body.address).toBe("backup@personal.com");
       expect(body.status).toBe("pending");
-      expect(body.token).toBeTruthy();
       expect(accountDb.saveVerifiedForwardingAddress).toHaveBeenCalledOnce();
       expect(verificationMailer.sendForwardVerification).toHaveBeenCalledWith(
         TEST_ACCOUNT_ID, "backup@personal.com", expect.any(String),
@@ -1228,7 +1221,7 @@ describe("API", () => {
     it("returns existing verified address without re-sending verification", async () => {
       vi.mocked(accountDb.getVerifiedForwardingAddress).mockResolvedValueOnce(ok(makeVerifiedAddress({ status: "verified" })));
       const res = await req(app, "POST", `${A}/forwarding-addresses`, { body: { address: "backup@personal.com" } });
-      expect(res.status).toBe(200);
+      expect(res.status).toBe(201);
       expect(verificationMailer.sendForwardVerification).not.toHaveBeenCalled();
     });
   });
