@@ -1,9 +1,21 @@
 import { BedrockRuntimeClient, InvokeModelCommand } from "@aws-sdk/client-bedrock-runtime";
+import type { Result } from "neverthrow";
+import { ok, err } from "neverthrow";
 import type { Workflow, WorkflowData } from "../types/index.js";
+import { WORKFLOWS } from "../types/index.js";
+import type { Logger } from "../logger.js";
 import { buildSystemPrompt, buildUserMessage } from "./prompt-builder.js";
 import { WORKFLOW_REGISTRY } from "./workflow-registry.js";
 
 export const CLASSIFICATION_MODEL_ID = "us.anthropic.claude-opus-4-5-20251101-v1:0";
+
+// Bedrock Guardrail — observe-only prompt injection + content detection.
+// Values come from `tofu output` after applying email-catcher/infrastructure.
+export const GUARDRAIL_ID = "PLACEHOLDER";
+export const GUARDRAIL_VERSION = "PLACEHOLDER";
+
+export type ClassificationError = { kind: "classification_error"; cause: string };
+export const classificationError = (cause: string): ClassificationError => ({ kind: "classification_error", cause });
 
 export interface ClassificationInput {
   from: string;
@@ -24,7 +36,7 @@ export interface ClassificationOutput {
 }
 
 interface RawClassificationResponse {
-  workflow: Workflow;
+  workflow: string;
   workflowData: Record<string, unknown>;
   spamScore: number;
   summary: string;
@@ -33,12 +45,14 @@ interface RawClassificationResponse {
 
 export class SignalClassifier {
   private readonly client: BedrockRuntimeClient;
+  private readonly logger: Logger;
 
-  constructor(client?: BedrockRuntimeClient) {
+  constructor(client?: BedrockRuntimeClient, logger?: Logger) {
     this.client = client ?? new BedrockRuntimeClient({});
+    this.logger = logger ?? console as unknown as Logger;
   }
 
-  async classify(input: ClassificationInput): Promise<ClassificationOutput> {
+  async classify(input: ClassificationInput): Promise<Result<ClassificationOutput, ClassificationError>> {
     const systemPrompt = buildSystemPrompt(WORKFLOW_REGISTRY);
     const userMessage = buildUserMessage(input);
     const requestBody = {
@@ -54,22 +68,54 @@ export class SignalClassifier {
         contentType: "application/json",
         accept: "application/json",
         body: new TextEncoder().encode(JSON.stringify(requestBody)),
+        guardrailIdentifier: GUARDRAIL_ID,
+        guardrailVersion: GUARDRAIL_VERSION,
+        trace: "ENABLED",
       }),
     );
 
-    const result = JSON.parse(new TextDecoder().decode(response.body)) as {
-      content: Array<{ type: string; text: string }>;
-    };
+    const responseBody = new TextDecoder().decode(response.body);
 
-    const text = result.content.find((c) => c.type === "text")?.text ?? "{}";
-    const raw = JSON.parse(text) as RawClassificationResponse;
+    // Parse outer Bedrock response
+    let result: { content: Array<{ type: string; text: string }> };
+    try {
+      result = JSON.parse(responseBody) as { content: Array<{ type: string; text: string }> };
+    } catch {
+      this.logger.error("Classifier received invalid JSON from Bedrock response envelope.", { code: "classifier.parse_failed", input, rawResponse: responseBody });
+      return err(classificationError("Invalid JSON in Bedrock response envelope"));
+    }
 
-    return {
-      workflow: raw.workflow,
+    const text = result.content.find((c) => c.type === "text")?.text ?? "";
+
+    // Parse classifier JSON output
+    let raw: RawClassificationResponse;
+    try {
+      raw = JSON.parse(text) as RawClassificationResponse;
+    } catch {
+      this.logger.error("Classifier received invalid JSON from model output.", { code: "classifier.parse_failed", input, rawResponse: text });
+      return err(classificationError("Invalid JSON in model output"));
+    }
+
+    // Validate workflow ∈ WORKFLOWS
+    if (!WORKFLOWS.includes(raw.workflow as Workflow)) {
+      this.logger.error("Classifier returned unknown workflow.", { code: "classifier.invalid_workflow", input, rawResponse: text, workflow: raw.workflow });
+      return err(classificationError(`Unknown workflow: ${raw.workflow}`));
+    }
+
+    // Clamp spamScore to [0, 1]
+    const spamScore = Math.max(0, Math.min(1, raw.spamScore));
+
+    // Filter labels to subset of allowedLabels
+    const labels = Array.isArray(raw.labels)
+      ? raw.labels.filter((l) => input.allowedLabels.includes(l))
+      : [];
+
+    return ok({
+      workflow: raw.workflow as Workflow,
       workflowData: raw.workflowData as unknown as WorkflowData,
-      spamScore: raw.spamScore,
+      spamScore,
       summary: raw.summary,
-      labels: raw.labels,
-    };
+      labels,
+    });
   }
 }
