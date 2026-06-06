@@ -64,6 +64,7 @@ resource "aws_cloudfront_distribution" "api" {
     domain_name              = aws_s3_bucket.landing.bucket_regional_domain_name
     origin_id                = local.s3_landing_origin_id
     origin_access_control_id = aws_cloudfront_origin_access_control.s3.id
+    origin_path              = "/v1"
   }
 
   # S3 origin — extracted content (images, attachments) via OAC
