@@ -19,6 +19,7 @@ env:
   TF_VAR_aws_account_id: "${{ secrets.AWS_ACCOUNT_ID }}"
   TF_VAR_service_name: "${{ github.event.repository.name }}"
   MINISTACK_VERSION: "1.3.59"
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 permissions:
   id-token: write
@@ -102,7 +103,7 @@ jobs:
           cache: 'npm'
 
       - name: Setup OpenTofu
-        uses: opentofu/setup-opentofu@v1
+        uses: opentofu/setup-opentofu@v2
         with:
           tofu_version: '1.8.8'
 
@@ -266,7 +267,7 @@ jobs:
   # ==========================================
   prod_deploy:
     name: Prod Deploy
-    needs: prod_build_and_plan
+    needs: [prod_build_and_plan, integration_test]
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     concurrency: production
