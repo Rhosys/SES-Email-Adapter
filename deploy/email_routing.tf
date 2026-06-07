@@ -37,7 +37,8 @@ resource "aws_ses_receipt_rule" "store_and_notify" {
 # ---------------------------------------------------------------------------
 
 resource "aws_sesv2_email_identity" "main" {
-  email_identity = data.aws_route53_zone.main.name
+  email_identity         = data.aws_route53_zone.main.name
+  configuration_set_name = aws_sesv2_configuration_set.sending.configuration_set_name
 
   # BYODKIM: one selector + private key works identically in every region.
   # Selector is "mail"; the matching public key is published via the CNAME below.
@@ -48,12 +49,24 @@ resource "aws_sesv2_email_identity" "main" {
 
 }
 
+# Platform subdomain identity — independent from the root so either can move
+# without breaking the other.
+resource "aws_sesv2_email_identity" "platform" {
+  email_identity         = "platform.${data.aws_route53_zone.main.name}"
+  configuration_set_name = aws_sesv2_configuration_set.sending.configuration_set_name
+
+  dkim_signing_attributes {
+    domain_signing_selector    = "mail"
+    domain_signing_private_key = data.aws_kms_secrets.dkim.plaintext["private_key"]
+  }
+}
+
 # Custom MAIL FROM: SPF lives on the bounce subdomain so customers only need
 # a CNAME (bounce.{their} → bounce.{ours}) instead of adding a TXT record.
 # DMARC relaxed alignment still passes because bounce.{their} and {their}
 # share the same organisational domain.
 resource "aws_sesv2_email_identity_mail_from_attributes" "main" {
-  email_identity   = aws_sesv2_email_identity.main.email_identity
+  email_identity   = aws_sesv2_email_identity.platform.email_identity
   mail_from_domain = "bounce.platform.${data.aws_route53_zone.main.name}"
 }
 
@@ -65,6 +78,17 @@ resource "aws_route53_record" "ses_dkim" {
   provider = aws.us_east_1
   zone_id  = data.aws_route53_zone.main.zone_id
   name     = "mail._domainkey.platform.${data.aws_route53_zone.main.name}"
+  type     = "CNAME"
+  ttl      = 300
+  records  = ["mail.platform.${data.aws_route53_zone.main.name}._domainkey.amazonses.com"]
+}
+
+# DKIM for the root domain identity (email.rhosys.cloud) — verifies the SES
+# identity so outbound mail from noreply@email.rhosys.cloud is DKIM-signed.
+resource "aws_route53_record" "ses_dkim_root" {
+  provider = aws.us_east_1
+  zone_id  = data.aws_route53_zone.main.zone_id
+  name     = "mail._domainkey.${data.aws_route53_zone.main.name}"
   type     = "CNAME"
   ttl      = 300
   records  = ["mail.${data.aws_route53_zone.main.name}._domainkey.amazonses.com"]
@@ -134,6 +158,11 @@ resource "aws_sesv2_configuration_set" "sending" {
     sending_enabled = true
   }
 
+  delivery_options {
+    tls_policy        = "REQUIRE"
+    sending_pool_name = aws_sesv2_dedicated_ip_pool.managed.pool_name
+  }
+
   # Auto-suppress addresses that hard-bounce or complain — belt + suspenders
   # alongside our DynamoDB suppression list.
   suppression_options {
@@ -158,4 +187,49 @@ resource "aws_sesv2_configuration_set_event_destination" "feedback" {
       topic_arn = aws_sns_topic.ses_feedback.arn
     }
   }
+}
+
+# ---------------------------------------------------------------------------
+# SES Dedicated IP Pool (managed) — SES auto-provisions and scales IPs based
+# on sending volume. Associated with the configuration set above so all
+# outbound mail routes through dedicated IPs.
+# ---------------------------------------------------------------------------
+
+resource "aws_sesv2_dedicated_ip_pool" "managed" {
+  pool_name    = "${var.service_name}-managed"
+  scaling_mode = "MANAGED"
+
+  tags = { Name = var.service_name }
+}
+
+# ---------------------------------------------------------------------------
+# SES Tenant — platform identity. All mail sent from our own domains
+# (noreply@, onboarding@) goes through this tenant. Customer domains get
+# their own tenant created dynamically by the Lambda.
+# ---------------------------------------------------------------------------
+
+resource "aws_sesv2_tenant" "platform" {
+  tenant_name = "${var.service_name}-platform"
+
+  tags = { Name = var.service_name }
+}
+
+# Associate our platform identities + configuration set with the platform tenant
+resource "aws_sesv2_tenant_resource_association" "platform_identity_main" {
+  tenant_name  = aws_sesv2_tenant.platform.tenant_name
+  resource_arn = "arn:aws:ses:eu-west-1:${var.aws_account_id}:identity/${data.aws_route53_zone.main.name}"
+
+  depends_on = [aws_sesv2_email_identity.main]
+}
+
+resource "aws_sesv2_tenant_resource_association" "platform_identity_subdomain" {
+  tenant_name  = aws_sesv2_tenant.platform.tenant_name
+  resource_arn = "arn:aws:ses:eu-west-1:${var.aws_account_id}:identity/platform.${data.aws_route53_zone.main.name}"
+
+  depends_on = [aws_sesv2_email_identity.platform]
+}
+
+resource "aws_sesv2_tenant_resource_association" "platform_config_set" {
+  tenant_name  = aws_sesv2_tenant.platform.tenant_name
+  resource_arn = aws_sesv2_configuration_set.sending.arn
 }

@@ -27,6 +27,7 @@ const DEFAULT_CTX: ProcessorAccountContext = {
   registeredDomains: ["example.com"],
   userEmails: ["user@example.com"],
   billingPlan: "Paid",
+  onboardingCompleted: true,
 };
 
 const SYSTEM_RULES = [

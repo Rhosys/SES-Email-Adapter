@@ -47,7 +47,7 @@ export class DomainHealthJob {
         const senderHealthy = records.filter((r) => r.type !== "MX").every((r) => r.status === "verified");
         const allHealthy = failingRecords.length === 0;
 
-        const updateResult = await this.db.updateDomainHealth(accountId, domain.id, {
+        const updateResult = await this.db.updateDomainHealth(accountId, domain.domain, {
           receivingHealthy,
           senderHealthy,
           failingRecords,
@@ -58,7 +58,7 @@ export class DomainHealthJob {
           this.logger.track("Failed to persist domain health check results. The DynamoDB update for the domain record returned an error. Health status won't be reflected in the UI until the next successful check. [Action Required] Check DynamoDB write capacity.", {
             code: "domain_health.update_health_failed",
             accountId,
-            domainId: domain.id,
+            domainId: domain.domain,
             error: updateResult.error,
           });
           continue;

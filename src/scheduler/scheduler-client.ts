@@ -20,7 +20,7 @@ export interface FollowupScheduleParams {
   arcId: string;
   fireAt: string;   // ISO 8601
   suffix: string;   // schedule name suffix
-  sqsMessageType?: string; // body-level messageType for routing (default: "signal_followup")
+  sqsMessageAttributeMessageType: string; // body-level routing discriminator (e.g. "signal_followup", "rsvp_reminder")
 }
 
 export interface SchedulerClient {
@@ -73,7 +73,7 @@ export class EventBridgeSchedulerClient implements SchedulerClient {
           Arn: this.queueArn,
           RoleArn: this.roleArn,
           Input: JSON.stringify({
-            sqsMessageAttributeMessageType: params.sqsMessageType ?? "signal_followup",
+            sqsMessageAttributeMessageType: params.sqsMessageAttributeMessageType,
             accountId: params.accountId,
             signalId: params.signalId,
             arcId: params.arcId,

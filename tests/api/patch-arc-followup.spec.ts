@@ -9,6 +9,7 @@ import type { SchedulerClient } from "../../src/scheduler/scheduler-client.js";
 import { ok, err } from "neverthrow";
 import { dbError } from "../../src/errors.js";
 import { createMockLogger } from "../helpers/mock-logger.js";
+import { BillingHandler } from "../../src/billing/billing-handler.js";
 import type { EmailService } from "../../src/email/email-service.js";
 import type { sendRsvp } from "../../src/processor/calendar/rsvp-composer.js";
 import type { PostApprovalCalendarHandlerDeps } from "../../src/processor/calendar/post-approval-handler.js";
@@ -210,7 +211,16 @@ describe("PATCH /accounts/:accountId/arcs/:id — followupAt handling", () => {
       auth: makeAuth(),
       access: makeAccess(),
       logger: createMockLogger(),
+      verificationMailer: { sendForwardVerification: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      jobDispatcher: { dispatchReindex: vi.fn(), dispatchSegment: vi.fn() } as never,
+      draftSendDispatcher: { dispatch: vi.fn().mockResolvedValue(ok(undefined)) } as never,
+      accountCreationStarter: { start: vi.fn() },
+      appBaseUrl: "http://localhost",
+      contentCdnBaseUrl: "https://cdn.test",
+      astValidator: { validateAstBatch: vi.fn().mockResolvedValue({ success: true, purpose: "validate_ast_batch", results: [] }) } as never,
+      billingHandler: new BillingHandler(),
       emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-001" })), sendRaw: vi.fn() } as unknown as EmailService,
+      domainIdentityService: { register: vi.fn().mockResolvedValue(ok(undefined)), deregister: vi.fn().mockResolvedValue(ok(undefined)), tenantNameForAccount: () => "customer-stub" },
       rsvpComposer: vi.fn().mockResolvedValue(ok(undefined)) as unknown as typeof sendRsvp,
       postApprovalCalendarDeps: { accountDb: {} as never, emailService: {} as never, serviceDomain: "test.example.com" } as unknown as PostApprovalCalendarHandlerDeps,
       schedulerClient: schedulerClient as unknown as SchedulerClient,

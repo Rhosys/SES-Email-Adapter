@@ -121,6 +121,7 @@ describe("Single saveArc call with complete mutations", () => {
         registeredDomains: testCase.doPong ? [recipientDomain] : [],
         userEmails: testCase.doPong ? [senderEmail] : [],
         billingPlan: "Paid",
+        onboardingCompleted: true,
       }))),
       getSender: vi.fn().mockReturnValue(Promise.resolve(ok({
         accountId: TEST_ACCOUNT_ID, aliasAddress: recipientEmail,

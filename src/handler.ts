@@ -53,6 +53,8 @@ import { EventBridgeSchedulerClient } from "./scheduler/scheduler-client.js";
 import { SchedulerClient as AwsSchedulerClient } from "@aws-sdk/client-scheduler";
 
 import { EmailService } from "./email/email-service.js";
+import { SesDomainIdentityService } from "./email/domain-identity-service.js";
+import { BillingHandler } from "./billing/billing-handler.js";
 import { ReindexDispatcher } from "./jobs/reindex/reindex-dispatcher.js";
 import type { ReindexSegmentMessage } from "./jobs/reindex/reindex-dispatcher.js";
 import { DraftSendDispatcher } from "./processor/draft-send-dispatcher.js";
@@ -105,11 +107,24 @@ const processingDb = new ProcessingDatabase();
 const auditDb = new AuditDatabase();
 const deviceStore = new DynamoDeviceStore();
 
-const NOTIFICATION_FROM = process.env["NOTIFICATION_FROM"] ?? "";
 const CONFIG_SET = process.env["SES_CONFIGURATION_SET"] ?? "";
 const MAIL_DOMAIN = process.env["MAIL_DOMAIN"]!;
+const NOTIFICATION_FROM = `noreply@${MAIL_DOMAIN}`;
+const DKIM_PRIVATE_KEY = process.env["DKIM_PRIVATE_KEY"] ?? "";
+
+if (!MAIL_DOMAIN) {
+  logger.error("MAIL_DOMAIN not set — cannot derive notification sender address", { code: "handler.env.mail_domain_missing" });
+}
+if (!DKIM_PRIVATE_KEY) {
+  logger.error("DKIM_PRIVATE_KEY not set — domain identity registration will fail", { code: "handler.env.dkim_key_missing" });
+}
 
 const emailService = new EmailService(sesv2, { from: NOTIFICATION_FROM, configSet: CONFIG_SET });
+const domainIdentityService = new SesDomainIdentityService(
+  sesv2, "mail", DKIM_PRIVATE_KEY, MAIL_DOMAIN, CONFIG_SET,
+  process.env["AWS_REGION"] ?? "eu-west-1",
+  process.env["AWS_ACCOUNT_ID"] ?? "",
+);
 
 const externalEmailHandler = new ExternalEmailSignalHandler(emailService, s3, logger, S3_BUCKET);
 
@@ -279,7 +294,9 @@ const app = createApp({
   appBaseUrl: APP_BASE_URL,
   contentCdnBaseUrl: CONTENT_CDN_BASE_URL,
   astValidator: new LambdaUserCodeExecutor(lambda, USER_CODE_EXECUTOR_ARN),
+  billingHandler: new BillingHandler(),
   emailService,
+  domainIdentityService,
   rsvpComposer: sendRsvp,
   postApprovalCalendarDeps,
   schedulerClient,

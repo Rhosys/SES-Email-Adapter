@@ -134,7 +134,7 @@ Add an AWS Step Functions onboarding workflow that starts automatically when a n
 - All tests use `it.each` with static labelled cases — no fast-check, no random generation
 - The design has no Correctness Properties section, so no property-based test tasks are included
 - Infrastructure tasks (7.x) are in a separate git repo (`email-catcher/infrastructure`) from backend tasks
-- The `NOTIFICATION_FROM` and `SES_CONFIGURATION_SET` env vars already exist in the Lambda (used by verification mailer)
+- The notification sender address is derived from `MAIL_DOMAIN` (as `noreply@${MAIL_DOMAIN}`) — no separate env var needed
 
 ## Task Dependency Graph
 

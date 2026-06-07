@@ -23,7 +23,6 @@ function makeAccount(overrides: Partial<Account> = {}): Account {
 
 function makeDomain(overrides: Partial<Domain> = {}): Domain {
   return {
-    id: "dom-1",
     accountId: "acc-test",
     domain: "example.com",
     receivingSetupComplete: true,
@@ -89,7 +88,7 @@ describe("OnboardingTaskHandler.handleFollowup", () => {
     });
   });
 
-  it("updates account when all complete and onboarding.completed is false", async () => {
+  it("marks testEmailReceived when signals exist and not yet marked", async () => {
     const store = createMockStore({
       getAccount: vi.fn().mockResolvedValue(ok(makeAccount({ onboarding: { completed: false } }))),
       listDomains: vi.fn().mockResolvedValue(ok([makeDomain({ senderSetupComplete: true })])),
@@ -101,13 +100,13 @@ describe("OnboardingTaskHandler.handleFollowup", () => {
 
     expect(result.isOk()).toBe(true);
     expect(store.updateAccount).toHaveBeenCalledWith("acc-test", {
-      onboarding: { completed: true, completedAt: "2025-06-15T12:00:00.000Z" },
+      onboarding: { completed: false, testEmailReceived: true, testEmailReceivedAt: "2025-06-15T12:00:00.000Z" },
     });
   });
 
-  it("does not update account when all complete but onboarding.completed already true", async () => {
+  it("does not update account when testEmailReceived already set", async () => {
     const store = createMockStore({
-      getAccount: vi.fn().mockResolvedValue(ok(makeAccount({ onboarding: { completed: true, completedAt: "2025-06-01T00:00:00Z" } }))),
+      getAccount: vi.fn().mockResolvedValue(ok(makeAccount({ onboarding: { completed: true, completedAt: "2025-06-01T00:00:00Z", testEmailReceived: true, testEmailReceivedAt: "2025-06-01T00:00:00Z" } }))),
       listDomains: vi.fn().mockResolvedValue(ok([makeDomain({ senderSetupComplete: true })])),
       hasSignals: vi.fn().mockResolvedValue(ok(true)),
     });

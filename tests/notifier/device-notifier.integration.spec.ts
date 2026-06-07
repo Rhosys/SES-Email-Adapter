@@ -71,6 +71,7 @@ function makeStore() {
     registeredDomains: [],
     userEmails: [],
     billingPlan: "Paid" as const,
+    onboardingCompleted: true,
   })));
   vi.mocked(accountDb.getSender).mockReturnValue(Promise.resolve(ok({
     accountId: TEST_ACCOUNT_ID, aliasAddress: "user@example.com",

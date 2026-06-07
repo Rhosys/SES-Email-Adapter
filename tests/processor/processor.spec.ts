@@ -58,7 +58,7 @@ const DEFAULT_EMAIL_CONFIG: Alias = {
 const DEFAULT_SENDER_ENTRY: import("../../src/types/index.js").AliasSender = {
   accountId: "acct-test-001", aliasAddress: "user@example.com", domain: "example.com", policy: "allow", addedAt: "2024-01-01T00:00:00Z",
 };
-const DEFAULT_CTX = { retentionDays: 0, filtering: null, emailConfig: DEFAULT_EMAIL_CONFIG, registeredDomains: [], userEmails: [], billingPlan: "Paid" as const };
+const DEFAULT_CTX = { retentionDays: 0, filtering: null, emailConfig: DEFAULT_EMAIL_CONFIG, registeredDomains: [], userEmails: [], billingPlan: "Paid" as const, onboardingCompleted: true };
 
 function makeStore() {
   const arcDb = makeArcDbMock();
@@ -979,6 +979,7 @@ describe("SignalProcessor", () => {
         registeredDomains: [],
         userEmails: [],
         billingPlan: "Paid",
+        onboardingCompleted: true,
       })));
 
       await processor.processRecord(makeMessage(), 1);

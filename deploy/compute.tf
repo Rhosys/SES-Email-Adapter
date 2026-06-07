@@ -85,6 +85,28 @@ resource "aws_iam_role_policy" "lambda_permissions" {
         Resource = "*"
       },
       {
+        Sid    = "SESIdentity"
+        Effect = "Allow"
+        Action = [
+          "ses:CreateEmailIdentity",
+          "ses:DeleteEmailIdentity",
+          "ses:PutEmailIdentityMailFromAttributes",
+        ]
+        Resource = "*"
+      },
+      {
+        Sid    = "SESTenant"
+        Effect = "Allow"
+        Action = [
+          "ses:CreateTenant",
+          "ses:DeleteTenant",
+          "ses:GetTenant",
+          "ses:CreateTenantResourceAssociation",
+          "ses:DeleteTenantResourceAssociation",
+        ]
+        Resource = "*"
+      },
+      {
         Sid    = "SESSuppression"
         Effect = "Allow"
         Action = [
@@ -219,10 +241,13 @@ resource "aws_lambda_function" "main" {
       AURORA_SECRET_ARN        = aws_rds_cluster.aurora["aurora-prod-titan-v2"].master_user_secret[0].secret_arn
       AURORA_DB_NAME           = "signals"
       SES_CONFIGURATION_SET    = aws_sesv2_configuration_set.sending.configuration_set_name
+      SES_TENANT_PLATFORM      = aws_sesv2_tenant.platform.tenant_name
+      AWS_ACCOUNT_ID           = var.aws_account_id
       WS_API_ENDPOINT          = "https://wss.${data.aws_route53_zone.main.name}"
       CF_ORIGIN_SECRET         = random_password.cf_origin_secret.result
       SIGNAL_QUEUE_URL         = aws_sqs_queue.signals.url
       MAIL_DOMAIN              = "platform.${data.aws_route53_zone.main.name}"
+      DKIM_PRIVATE_KEY         = data.aws_kms_secrets.dkim.plaintext["private_key"]
       # Hardcoded ARN — do NOT change to aws_sfn_state_machine.account_creation.arn.
       # The SFN calls the Lambda (main → sfn), so referencing the resource here
       # creates a circular dependency. Construct the ARN manually instead.

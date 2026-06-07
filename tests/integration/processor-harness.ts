@@ -35,6 +35,7 @@ import type { PostApprovalCalendarHandlerDeps } from '../../src/processor/calend
 import type { EmbeddingGenerator } from '../../src/embedding/embedding-generator.js';
 import type { MultiClusterAuroraWriter } from '../../src/database/multi-cluster-aurora-writer.js';
 import type { WorkflowData } from '../../src/types/index.js';
+import { BillingHandler } from '../../src/billing/billing-handler.js';
 
 const ENDPOINT = process.env['AWS_ENDPOINT_URL'] ?? 'http://localhost:4566';
 const EMAIL_BUCKET = process.env['EMAIL_BUCKET'] ?? 'ses-it-email';
@@ -164,10 +165,19 @@ export async function createProcessorHarness(): Promise<ProcessorHarness> {
     auth: new AuthressAuthService(),
     access,
     logger,
+    verificationMailer: { sendForwardVerification: async () => ok(undefined) },
+    jobDispatcher: { dispatchReindex: async () => {}, dispatchSegment: async () => {} } as never,
+    draftSendDispatcher: { dispatch: async () => ok(undefined) } as never,
+    accountCreationStarter: { start: async () => {} },
+    appBaseUrl: 'http://localhost:3000',
     contentCdnBaseUrl: CONTENT_CDN_BASE_URL,
+    astValidator: { validateAstBatch: async () => ({ success: true, purpose: 'validate_ast_batch', results: [] }) } as never,
+    billingHandler: new BillingHandler(),
     emailService: { send: async () => ok({ messageId: 'stub' }), sendRaw: async () => {} } as unknown as EmailService,
+    domainIdentityService: { register: async () => ok(undefined), deregister: async () => ok(undefined), tenantNameForAccount: (a: string) => a },
     rsvpComposer: (async () => ok(undefined)) as unknown as typeof sendRsvp,
     postApprovalCalendarDeps: { accountDb: {} as never, emailService: {} as never, serviceDomain: 'platform.email.rhosys.cloud' } as unknown as PostApprovalCalendarHandlerDeps,
+    schedulerClient: { scheduleMessage: async () => ok(undefined), deleteSchedule: async () => ok(undefined) } as never,
   });
 
   // ---------------------------------------------------------------------------

@@ -77,7 +77,6 @@ function makeArc(overrides: Partial<Arc> = {}): Arc {
 
 function makeDomain(overrides: Partial<Domain> = {}): Domain {
   return {
-    id: "example.com",
     accountId: "acct-1",
     domain: "example.com",
     receivingSetupComplete: true,
