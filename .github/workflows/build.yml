@@ -18,10 +18,12 @@ env:
   STATE_KEY: "${{ github.event.repository.name }}/terraform.tfstate"
   TF_VAR_aws_account_id: "${{ secrets.AWS_ACCOUNT_ID }}"
   TF_VAR_service_name: "${{ github.event.repository.name }}"
+  MINISTACK_VERSION: "1.3.59"
 
 permissions:
   id-token: write
   contents: read
+  packages: write
 
 jobs:
   # ==========================================
@@ -53,13 +55,39 @@ jobs:
   # ==========================================
   # PATH C: INTEGRATION TESTS (MiniStack)
   # ==========================================
+  mirror_ministack:
+    name: Mirror MiniStack to GHCR
+    runs-on: ubuntu-latest
+    steps:
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Mirror ministack (idempotent)
+        run: |
+          VERSIONED="ghcr.io/rhosys/ministack:${{ env.MINISTACK_VERSION }}"
+          if docker manifest inspect "$VERSIONED" > /dev/null 2>&1; then
+            echo "GHCR already has ${{ env.MINISTACK_VERSION }}, skipping"
+          else
+            docker pull "ministackorg/ministack:${{ env.MINISTACK_VERSION }}"
+            docker tag "ministackorg/ministack:${{ env.MINISTACK_VERSION }}" "$VERSIONED"
+            docker tag "ministackorg/ministack:${{ env.MINISTACK_VERSION }}" "ghcr.io/rhosys/ministack:latest"
+            docker push "$VERSIONED"
+            docker push "ghcr.io/rhosys/ministack:latest"
+          fi
+
   integration_test:
     name: Integration Test
+    needs: mirror_ministack
     runs-on: ubuntu-latest
 
     services:
       ministack:
-        image: ministackorg/ministack:latest
+        # Version controlled via MINISTACK_VERSION env var — update mirror_ministack job when bumping
+        image: ghcr.io/rhosys/ministack:latest
         ports:
           - 4566:4566
 
