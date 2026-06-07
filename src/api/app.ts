@@ -74,7 +74,6 @@ import {
 // ---------------------------------------------------------------------------
 
 export interface AuthContext {
-  accountId: string;
   userId: string;
 }
 
@@ -99,7 +98,7 @@ export interface AccessService {
   addUser(accountId: string, userId: string, role: AccountRole): Promise<Result<void, AuthressServiceError>>;
   updateUserRole(accountId: string, userId: string, role: AccountRole): Promise<Result<void, AuthressServiceError>>;
   removeUser(accountId: string, userId: string): Promise<Result<void, AuthressServiceError>>;
-  checkAccess(userId: string, accountId: string, permission: string): Promise<void>;
+  checkAccess(userId: string, resourceUri: string, permission: string): Promise<void>;
   createInvite(accountId: string, email: string, role: AccountRole): Promise<Result<{ inviteId: string }, AuthressServiceError>>;
 }
 
@@ -253,9 +252,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     if (verifyResult.isErr()) return err(c, 401, "Unauthorized");
     const { userId } = verifyResult.value;
 
-    // Extract accountId from URL path for account-scoped routes
-    const accountMatch = /\/accounts\/([^/]+)/.exec(c.req.path);
-    c.set("auth", { accountId: accountMatch?.[1] ?? "", userId });
+    c.set("auth", { userId });
 
     await next();
   });
@@ -407,7 +404,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     middleware: [authz("arcs:read", c => `accounts/${c.req.param("accountId")!}/arcs`)] as const,
     responses: { 200: { content: { "application/json": { schema: ListArcsResponse } }, description: "List arcs" } },
   }), async (c) => {
-    const { accountId } = c.get("auth");
+    const accountId = c.req.param("accountId")!;
     const query = c.req.query();
     const q = query["q"];
     if (q) {
@@ -439,7 +436,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     middleware: [authz("arcs:read", c => `accounts/${c.req.param("accountId")!}/arcs/${c.req.param("id")!}`)] as const,
     responses: { 200: { content: { "application/json": { schema: ArcSchema } }, description: "Get arc" } },
   }), async (c) => {
-    const { accountId } = c.get("auth");
+    const accountId = c.req.param("accountId")!;
     const arcResult = await arcDb.getArc(accountId, c.req.param("id")!);
     if (arcResult.isErr()) return err(c, 500, "Internal Server Error");
     const arc = arcResult.value;
@@ -455,7 +452,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     middleware: [authz("arcs:write", c => `accounts/${c.req.param("accountId")!}/arcs/${c.req.param("id")!}`)] as const,
     responses: { 200: { content: { "application/json": { schema: ArcSchema } }, description: "Update arc" } },
   }), async (c) => {
-    const { accountId } = c.get("auth");
+    const accountId = c.req.param("accountId")!;
     const arcResult = await arcDb.getArc(accountId, c.req.param("id")!);
     if (arcResult.isErr()) return err(c, 500, "Internal Server Error");
     const arc = arcResult.value;
@@ -512,7 +509,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     middleware: [authz("signals:read", c => `accounts/${c.req.param("accountId")!}/arcs/${c.req.param("arcId")!}/signals`)] as const,
     responses: { 200: { content: { "application/json": { schema: ListSignalsResponse } }, description: "List signals for arc" } },
   }), async (c) => {
-    const { accountId } = c.get("auth");
+    const accountId = c.req.param("accountId")!;
     const arcResult = await arcDb.getArc(accountId, c.req.param("arcId")!);
     if (arcResult.isErr()) return err(c, 500, "Internal Server Error");
     const arc = arcResult.value;
@@ -563,7 +560,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     middleware: [authz("signals:write", c => `accounts/${c.req.param("accountId")!}/arcs/${c.req.param("arcId")!}/signals`)] as const,
     responses: { 201: { content: { "application/json": { schema: SignalSchema } }, description: "Create draft signal" } },
   }), async (c) => {
-    const { accountId } = c.get("auth");
+    const accountId = c.req.param("accountId")!;
     const arcResult = await arcDb.getArc(accountId, c.req.param("arcId")!);
     if (arcResult.isErr()) return err(c, 500, "Internal Server Error");
     const arc = arcResult.value;
@@ -610,7 +607,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     middleware: [authz("signals:write", c => `accounts/${c.req.param("accountId")!}/arcs/${c.req.param("arcId")!}/signals/${c.req.param("id")!}`)] as const,
     responses: { 200: { content: { "application/json": { schema: SignalSchema } }, description: "Replace draft signal" } },
   }), async (c) => {
-    const { accountId } = c.get("auth");
+    const accountId = c.req.param("accountId")!;
     const arcResult = await arcDb.getArc(accountId, c.req.param("arcId")!);
     if (arcResult.isErr()) return err(c, 500, "Internal Server Error");
     const arc = arcResult.value;
@@ -644,7 +641,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     middleware: [authz("signals:read", c => `accounts/${c.req.param("accountId")!}/signals`)] as const,
     responses: { 200: { content: { "application/json": { schema: ListSignalsResponse } }, description: "List quarantined signals" } },
   }), async (c) => {
-    const { accountId } = c.get("auth");
+    const accountId = c.req.param("accountId")!;
     const query = c.req.query();
     const status = query["status"];
     if (status !== "quarantined" && status !== "quarantine_visible" && status !== "quarantine_hidden") {
@@ -671,7 +668,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     middleware: [authz("signals:write", c => `accounts/${c.req.param("accountId")!}/signals/${c.req.param("id")!}`)] as const,
     responses: { 200: { content: { "application/json": { schema: z.object({}) } }, description: "Quarantine response" } },
   }), async (c) => {
-    const { accountId } = c.get("auth");
+    const accountId = c.req.param("accountId")!;
     const signalResult = await arcDb.getSignalById(accountId, c.req.param("id")!);
     if (signalResult.isErr()) return err(c, 500, "Internal Server Error");
     const signal = signalResult.value;
@@ -767,7 +764,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     middleware: [authz("signals:read", c => `accounts/${c.req.param("accountId")!}/signals/${c.req.param("id")!}`)] as const,
     responses: { 200: { content: { "application/json": { schema: SignalSchema } }, description: "Get signal" } },
   }), async (c) => {
-    const { accountId } = c.get("auth");
+    const accountId = c.req.param("accountId")!;
     const signalResult = await arcDb.getSignalById(accountId, c.req.param("id")!);
     if (signalResult.isErr()) return err(c, 500, "Internal Server Error");
     const signal = signalResult.value;
@@ -784,7 +781,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     middleware: [authz("signals:write", c => `accounts/${c.req.param("accountId")!}/signals/${c.req.param("id")!}`)] as const,
     responses: { 200: { content: { "application/json": { schema: SignalSchema } }, description: "Update signal" } },
   }), async (c) => {
-    const { accountId } = c.get("auth");
+    const accountId = c.req.param("accountId")!;
     const signalResult = await arcDb.getSignalById(accountId, c.req.param("id")!);
     if (signalResult.isErr()) return err(c, 500, "Internal Server Error");
     const signal = signalResult.value;
@@ -818,7 +815,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     middleware: [authz("signals:write", c => `accounts/${c.req.param("accountId")!}/arcs/${c.req.param("arcId")!}/signals/${c.req.param("id")!}`)] as const,
     responses: { 200: { content: { "application/json": { schema: z.object({}) } }, description: "Send draft signal" } },
   }), async (c) => {
-    const { accountId } = c.get("auth");
+    const accountId = c.req.param("accountId")!;
 
     // Arc validation
     const arcResult = await arcDb.getArc(accountId, c.req.param("arcId")!);
@@ -865,7 +862,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     middleware: [authz("signals:write", c => `accounts/${c.req.param("accountId")!}/signals/${c.req.param("id")!}`)] as const,
     responses: { 204: { description: "Signal deleted" } },
   }), async (c) => {
-    const { accountId } = c.get("auth");
+    const accountId = c.req.param("accountId")!;
     const signalResult = await arcDb.getSignalById(accountId, c.req.param("id")!);
     if (signalResult.isErr()) return err(c, 500, "Internal Server Error");
     const signal = signalResult.value;
@@ -889,7 +886,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     middleware: [authz("signals:write", c => `accounts/${c.req.param("accountId")!}/arcs/${c.req.param("arcId")!}/signals/${c.req.param("id")!}`)] as const,
     responses: { 200: { content: { "application/json": { schema: SignalSchema } }, description: "RSVP to calendar invite" } },
   }), async (c) => {
-    const { accountId } = c.get("auth");
+    const accountId = c.req.param("accountId")!;
     if (!emailService || !rsvpComposer) return err(c, 501, "RSVP not configured");
 
     // Validate arc
@@ -1006,7 +1003,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     middleware: [authz("views:read", c => `accounts/${c.req.param("accountId")!}/views`)] as const,
     responses: { 200: { content: { "application/json": { schema: ListViewsResponse } }, description: "List views" } },
   }), async (c) => {
-    const { accountId } = c.get("auth");
+    const accountId = c.req.param("accountId")!;
     const viewsResult = await accountDb.listViews(accountId);
     if (viewsResult.isErr()) return err(c, 500, "Internal Server Error");
     return c.json({ views: viewsResult.value.map(toApiView) }, 200);
@@ -1020,7 +1017,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     middleware: [authz("views:write", c => `accounts/${c.req.param("accountId")!}/views`)] as const,
     responses: { 201: { content: { "application/json": { schema: ViewSchema } }, description: "View created" } },
   }), async (c) => {
-    const { accountId } = c.get("auth");
+    const accountId = c.req.param("accountId")!;
     const body = await zParse(CreateViewRequest, c.req.raw);
     const viewResult = await accountDb.createView(accountId, body);
     if (viewResult.isErr()) return err(c, 500, "Internal Server Error");
@@ -1035,7 +1032,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     middleware: [authz("views:write", c => `accounts/${c.req.param("accountId")!}/views/${c.req.param("id")!}`)] as const,
     responses: { 200: { content: { "application/json": { schema: ViewSchema } }, description: "Update view" } },
   }), async (c) => {
-    const { accountId } = c.get("auth");
+    const accountId = c.req.param("accountId")!;
     const viewResult = await accountDb.getView(accountId, c.req.param("id")!);
     if (viewResult.isErr()) return err(c, 500, "Internal Server Error");
     const view = viewResult.value;
@@ -1054,7 +1051,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     middleware: [authz("views:write", c => `accounts/${c.req.param("accountId")!}/views/${c.req.param("id")!}`)] as const,
     responses: { 204: { description: "View deleted" } },
   }), async (c) => {
-    const { accountId } = c.get("auth");
+    const accountId = c.req.param("accountId")!;
     const viewResult = await accountDb.getView(accountId, c.req.param("id")!);
     if (viewResult.isErr()) return err(c, 500, "Internal Server Error");
     const view = viewResult.value;
@@ -1076,7 +1073,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     middleware: [authz("labels:read", c => `accounts/${c.req.param("accountId")!}/labels`)] as const,
     responses: { 200: { content: { "application/json": { schema: ListLabelsResponse } }, description: "List labels" } },
   }), async (c) => {
-    const { accountId } = c.get("auth");
+    const accountId = c.req.param("accountId")!;
     const labelsResult = await accountDb.listLabels(accountId);
     if (labelsResult.isErr()) return err(c, 500, "Internal Server Error");
     return c.json({ labels: labelsResult.value.map(toApiLabel) }, 200);
@@ -1090,7 +1087,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     middleware: [authz("labels:write", c => `accounts/${c.req.param("accountId")!}/labels`)] as const,
     responses: { 201: { content: { "application/json": { schema: LabelSchema } }, description: "Label created" } },
   }), async (c) => {
-    const { accountId } = c.get("auth");
+    const accountId = c.req.param("accountId")!;
     const body = await zParse(CreateLabelRequest, c.req.raw);
     const labelResult = await accountDb.createLabel(accountId, body);
     if (labelResult.isErr()) return err(c, 500, "Internal Server Error");
@@ -1105,7 +1102,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     middleware: [authz("labels:write", c => `accounts/${c.req.param("accountId")!}/labels/${c.req.param("id")!}`)] as const,
     responses: { 200: { content: { "application/json": { schema: LabelSchema } }, description: "Update label" } },
   }), async (c) => {
-    const { accountId } = c.get("auth");
+    const accountId = c.req.param("accountId")!;
     const labelsResult = await accountDb.listLabels(accountId);
     if (labelsResult.isErr()) return err(c, 500, "Internal Server Error");
     const label = labelsResult.value.find((l) => l.id === c.req.param("id")!);
@@ -1124,7 +1121,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     middleware: [authz("labels:write", c => `accounts/${c.req.param("accountId")!}/labels/${c.req.param("id")!}`)] as const,
     responses: { 204: { description: "Label deleted" } },
   }), async (c) => {
-    const { accountId } = c.get("auth");
+    const accountId = c.req.param("accountId")!;
     const labelsResult = await accountDb.listLabels(accountId);
     if (labelsResult.isErr()) return err(c, 500, "Internal Server Error");
     const label = labelsResult.value.find((l) => l.id === c.req.param("id")!);
@@ -1146,7 +1143,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     middleware: [authz("rules:read", c => `accounts/${c.req.param("accountId")!}/rules`)] as const,
     responses: { 200: { content: { "application/json": { schema: ListRulesResponse } }, description: "List rules" } },
   }), async (c) => {
-    const { accountId } = c.get("auth");
+    const accountId = c.req.param("accountId")!;
     const rulesResult = await accountDb.listRules(accountId);
     if (rulesResult.isErr()) return err(c, 500, "Internal Server Error");
     return c.json({ rules: rulesResult.value.map(toApiRule) }, 200);
@@ -1160,7 +1157,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     middleware: [authz("rules:write", c => `accounts/${c.req.param("accountId")!}/rules`)] as const,
     responses: { 201: { content: { "application/json": { schema: RuleSchema } }, description: "Rule created" } },
   }), async (c) => {
-    const { accountId } = c.get("auth");
+    const accountId = c.req.param("accountId")!;
     const body = await zParse(CreateRuleRequest, c.req.raw);
     const effectiveConditionType = body.conditionType ?? "json_logic";
     if (effectiveConditionType === "js") {
@@ -1209,7 +1206,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     middleware: [authz("rules:write", c => `accounts/${c.req.param("accountId")!}/rules/${c.req.param("id")!}`)] as const,
     responses: { 200: { content: { "application/json": { schema: RuleSchema } }, description: "Update rule" } },
   }), async (c) => {
-    const { accountId } = c.get("auth");
+    const accountId = c.req.param("accountId")!;
     const rulesResult = await accountDb.listRules(accountId);
     if (rulesResult.isErr()) return err(c, 500, "Internal Server Error");
     const rule = rulesResult.value.find((r) => r.id === c.req.param("id")!);
@@ -1277,7 +1274,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     middleware: [authz("rules:write", c => `accounts/${c.req.param("accountId")!}/rules/${c.req.param("id")!}`)] as const,
     responses: { 204: { description: "Rule deleted" } },
   }), async (c) => {
-    const { accountId } = c.get("auth");
+    const accountId = c.req.param("accountId")!;
     const rulesResult = await accountDb.listRules(accountId);
     if (rulesResult.isErr()) return err(c, 500, "Internal Server Error");
     const rule = rulesResult.value.find((r) => r.id === c.req.param("id")!);
@@ -1299,7 +1296,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     middleware: [authz("domains:read", c => `accounts/${c.req.param("accountId")!}/domains`)] as const,
     responses: { 200: { content: { "application/json": { schema: ListDomainsResponse } }, description: "List domains" } },
   }), async (c) => {
-    const { accountId } = c.get("auth");
+    const accountId = c.req.param("accountId")!;
     const domainsResult = await accountDb.listDomains(accountId);
     if (domainsResult.isErr()) return err(c, 500, "Internal Server Error");
     return c.json({ domains: domainsResult.value.map(toApiDomain) }, 200);
@@ -1313,7 +1310,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     middleware: [authz("domains:write", c => `accounts/${c.req.param("accountId")!}/domains`)] as const,
     responses: { 201: { content: { "application/json": { schema: DomainSchema } }, description: "Domain created" } },
   }), async (c) => {
-    const { accountId } = c.get("auth");
+    const accountId = c.req.param("accountId")!;
     const body = await zParse(CreateDomainRequest, c.req.raw);
     const domainResult = await accountDb.createDomain(accountId, body.domain);
     if (domainResult.isErr()) return err(c, 500, "Internal Server Error");
@@ -1328,7 +1325,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     middleware: [authz("domains:read", c => `accounts/${c.req.param("accountId")!}/domains/${c.req.param("id")!}`)] as const,
     responses: { 200: { content: { "application/json": { schema: DomainWithRecordsSchema } }, description: "Get domain with DNS records" } },
   }), async (c) => {
-    const { accountId } = c.get("auth");
+    const accountId = c.req.param("accountId")!;
     const domainResult = await accountDb.getDomain(accountId, c.req.param("id")!);
     if (domainResult.isErr()) return err(c, 500, "Internal Server Error");
     const domain = domainResult.value;
@@ -1345,7 +1342,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     middleware: [authz("domains:write", c => `accounts/${c.req.param("accountId")!}/domains/${c.req.param("id")!}`)] as const,
     responses: { 200: { content: { "application/json": { schema: DomainWithRecordsSchema } }, description: "Verify/refresh domain" } },
   }), async (c) => {
-    const { accountId } = c.get("auth");
+    const accountId = c.req.param("accountId")!;
     const domainResult = await accountDb.getDomain(accountId, c.req.param("id")!);
     if (domainResult.isErr()) return err(c, 500, "Internal Server Error");
     const domain = domainResult.value;
@@ -1376,7 +1373,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     middleware: [authz("domains:write", c => `accounts/${c.req.param("accountId")!}/domains/${c.req.param("id")!}`)] as const,
     responses: { 204: { description: "Domain deleted" } },
   }), async (c) => {
-    const { accountId } = c.get("auth");
+    const accountId = c.req.param("accountId")!;
     const domainResult = await accountDb.getDomain(accountId, c.req.param("id")!);
     if (domainResult.isErr()) return err(c, 500, "Internal Server Error");
     const domain = domainResult.value;
@@ -1398,7 +1395,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     middleware: [authz("accounts:read", c => `accounts/${c.req.param("accountId")!}`)] as const,
     responses: { 200: { content: { "application/json": { schema: AccountSchema } }, description: "Get account" } },
   }), async (c) => {
-    const { accountId } = c.get("auth");
+    const accountId = c.req.param("accountId")!;
     const accountResult = await accountDb.getAccount(accountId);
     if (accountResult.isErr()) return err(c, 500, "Internal Server Error");
     const account = accountResult.value;
@@ -1414,7 +1411,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     middleware: [authz("accounts:write", c => `accounts/${c.req.param("accountId")!}`)] as const,
     responses: { 200: { content: { "application/json": { schema: AccountSchema } }, description: "Update account" } },
   }), async (c) => {
-    const { accountId } = c.get("auth");
+    const accountId = c.req.param("accountId")!;
     const body = await zParse(UpdateAccountRequest, c.req.raw);
     const updateResult = await accountDb.updateAccount(accountId, body as Partial<Pick<Account, "name" | "deletionRetentionDays" | "notifications" | "filtering" | "onboarding" | "afterSendAction">>);
     if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
@@ -1429,7 +1426,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     middleware: [authz("stats:read", c => `accounts/${c.req.param("accountId")!}/stats`)] as const,
     responses: { 200: { content: { "application/json": { schema: z.object({}) } }, description: "Get stats" } },
   }), async (c) => {
-    const { accountId } = c.get("auth");
+    const accountId = c.req.param("accountId")!;
     const statsResult = await accountDb.getStats(accountId);
     if (statsResult.isErr()) return err(c, 500, "Internal Server Error");
     return c.json(parseStatsRow(statsResult.value), 200);
@@ -1448,7 +1445,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     responses: { 200: { content: { "application/json": { schema: z.object({ users: z.array(z.object({ userId: z.string(), role: z.string() })), pagination: PaginationSchema }) } }, description: "List users" } },
   }), async (c) => {
     if (!access) return err(c, 501, "Not implemented");
-    const { accountId } = c.get("auth");
+    const accountId = c.req.param("accountId")!;
     const result = await access.listUsers(accountId);
     if (result.isErr()) {
       logger.warn("Authress service unavailable while listing account users.", { code: "api.authress_unavailable", accountId, error: result.error });
@@ -1466,7 +1463,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     responses: { 201: { description: "User invited" } },
   }), async (c) => {
     if (!access) return err(c, 501, "Not implemented");
-    const { accountId } = c.get("auth");
+    const accountId = c.req.param("accountId")!;
     const body = await zParse(InviteUserRequest, c.req.raw);
 
     if (!isValidEmail(body.email, logger)) {
@@ -1507,7 +1504,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     responses: { 200: { content: { "application/json": { schema: z.object({ userId: z.string(), role: z.string() }) } }, description: "Update user role" } },
   }), async (c) => {
     if (!access) return err(c, 501, "Not implemented");
-    const { accountId } = c.get("auth");
+    const accountId = c.req.param("accountId")!;
     const body = await zParse(UpdateUserRequest, c.req.raw);
     const result = await access.updateUserRole(accountId, c.req.param("userId")!, body.role);
     if (result.isErr()) {
@@ -1526,7 +1523,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     responses: { 204: { description: "User removed" } },
   }), async (c) => {
     if (!access) return err(c, 501, "Not implemented");
-    const { accountId } = c.get("auth");
+    const accountId = c.req.param("accountId")!;
     const result = await access.removeUser(accountId, c.req.param("userId")!);
     if (result.isErr()) {
       logger.warn("Authress service unavailable while removing user.", { code: "api.authress_unavailable", accountId, userId: c.req.param("userId")!, error: result.error });
@@ -1550,7 +1547,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     middleware: [authz("aliases:read", c => `accounts/${c.req.param("accountId")!}/aliases`)] as const,
     responses: { 200: { content: { "application/json": { schema: ListAliasesResponse } }, description: "List aliases" } },
   }), async (c) => {
-    const { accountId } = c.get("auth");
+    const accountId = c.req.param("accountId")!;
     const domain = c.req.query("domain");
     const aliasesResult = await accountDb.listAliases(accountId);
     if (aliasesResult.isErr()) return err(c, 500, "Internal Server Error");
@@ -1567,7 +1564,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     middleware: [authz("aliases:read", c => `accounts/${c.req.param("accountId")!}/aliases/${c.req.param("address")!}`)] as const,
     responses: { 200: { content: { "application/json": { schema: AliasSchema } }, description: "Get alias" } },
   }), async (c) => {
-    const { accountId } = c.get("auth");
+    const accountId = c.req.param("accountId")!;
     const address = decodeURIComponent(c.req.param("address")!);
     const aliasResult = await accountDb.getAlias(accountId, address);
     if (aliasResult.isErr()) return err(c, 500, "Internal Server Error");
@@ -1584,7 +1581,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     middleware: [authz("aliases:write", c => `accounts/${c.req.param("accountId")!}/aliases`)] as const,
     responses: { 201: { content: { "application/json": { schema: AliasSchema } }, description: "Alias created" } },
   }), async (c) => {
-    const { accountId } = c.get("auth");
+    const accountId = c.req.param("accountId")!;
     const body = await zParse(CreateAliasRequest, c.req.raw);
     const existingResult = await accountDb.getAlias(accountId, body.address);
     if (existingResult.isErr()) return err(c, 500, "Internal Server Error");
@@ -1611,7 +1608,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     middleware: [authz("aliases:write", c => `accounts/${c.req.param("accountId")!}/aliases/${c.req.param("address")!}`)] as const,
     responses: { 200: { content: { "application/json": { schema: AliasSchema } }, description: "Update alias" } },
   }), async (c) => {
-    const { accountId } = c.get("auth");
+    const accountId = c.req.param("accountId")!;
     const address = decodeURIComponent(c.req.param("address")!);
     const body = await zParse(UpdateAliasRequest, c.req.raw);
     if (body.newAddress) {
@@ -1648,7 +1645,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     middleware: [authz("aliases:write", c => `accounts/${c.req.param("accountId")!}/aliases/${c.req.param("address")!}`)] as const,
     responses: { 204: { description: "Alias deleted" } },
   }), async (c) => {
-    const { accountId } = c.get("auth");
+    const accountId = c.req.param("accountId")!;
     const address = decodeURIComponent(c.req.param("address")!);
     const deleteResult = await accountDb.deleteAlias(accountId, address);
     if (deleteResult.isErr()) return err(c, 500, "Internal Server Error");
@@ -1667,7 +1664,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     middleware: [authz("aliases:read", c => `accounts/${c.req.param("accountId")!}/aliases/${c.req.param("address")!}/senders`)] as const,
     responses: { 200: { content: { "application/json": { schema: ListSendersResponse } }, description: "List senders" } },
   }), async (c) => {
-    const { accountId } = c.get("auth");
+    const accountId = c.req.param("accountId")!;
     const address = decodeURIComponent(c.req.param("address")!);
     const sendersResult = await accountDb.listSenders(accountId, address);
     if (sendersResult.isErr()) return err(c, 500, "Internal Server Error");
@@ -1682,7 +1679,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     middleware: [authz("aliases:write", c => `accounts/${c.req.param("accountId")!}/aliases/${c.req.param("address")!}/senders`)] as const,
     responses: { 201: { description: "Sender added" } },
   }), async (c) => {
-    const { accountId } = c.get("auth");
+    const accountId = c.req.param("accountId")!;
     const address = decodeURIComponent(c.req.param("address")!);
     const body = await zParse(CreateSenderRequest, c.req.raw);
     const saveResult = await accountDb.saveSender(accountId, address, body.domain, body.policy);
@@ -1698,7 +1695,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     middleware: [authz("aliases:write", c => `accounts/${c.req.param("accountId")!}/aliases/${c.req.param("address")!}/senders/${c.req.param("domain")!}`)] as const,
     responses: { 204: { description: "Sender removed" } },
   }), async (c) => {
-    const { accountId } = c.get("auth");
+    const accountId = c.req.param("accountId")!;
     const address = decodeURIComponent(c.req.param("address")!);
     const domain = decodeURIComponent(c.req.param("domain")!);
     const removeResult = await accountDb.removeSender(accountId, address, domain);
@@ -1718,7 +1715,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     middleware: [authz("templates:read", c => `accounts/${c.req.param("accountId")!}/templates`)] as const,
     responses: { 200: { content: { "application/json": { schema: ListTemplatesResponse } }, description: "List templates" } },
   }), async (c) => {
-    const { accountId } = c.get("auth");
+    const accountId = c.req.param("accountId")!;
     const templatesResult = await accountDb.listTemplates(accountId);
     if (templatesResult.isErr()) return err(c, 500, "Internal Server Error");
     return c.json({ templates: templatesResult.value.map(toApiTemplate) }, 200);
@@ -1732,7 +1729,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     middleware: [authz("templates:write", c => `accounts/${c.req.param("accountId")!}/templates`)] as const,
     responses: { 201: { content: { "application/json": { schema: EmailTemplateSchema } }, description: "Template created" } },
   }), async (c) => {
-    const { accountId } = c.get("auth");
+    const accountId = c.req.param("accountId")!;
     const body = await zParse(CreateTemplateRequest, c.req.raw);
     if (body.functions) {
       const astResult = await validateFunctionsAst(body.functions);
@@ -1776,7 +1773,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     middleware: [authz("templates:write", c => `accounts/${c.req.param("accountId")!}/templates/${c.req.param("id")!}`)] as const,
     responses: { 200: { content: { "application/json": { schema: EmailTemplateSchema } }, description: "Update template" } },
   }), async (c) => {
-    const { accountId } = c.get("auth");
+    const accountId = c.req.param("accountId")!;
     const body = await zParse(UpdateTemplateRequest, c.req.raw);
     if (body.functions) {
       const astResult = await validateFunctionsAst(body.functions);
@@ -1812,7 +1809,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     middleware: [authz("templates:write", c => `accounts/${c.req.param("accountId")!}/templates/${c.req.param("id")!}`)] as const,
     responses: { 200: { content: { "application/json": { schema: EmailTemplateSchema } }, description: "Replace template" } },
   }), async (c) => {
-    const { accountId } = c.get("auth");
+    const accountId = c.req.param("accountId")!;
     const body = await zParse(ReplaceTemplateRequest, c.req.raw);
     if (body.functions) {
       const astResult = await validateFunctionsAst(body.functions);
@@ -1848,7 +1845,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     middleware: [authz("templates:write", c => `accounts/${c.req.param("accountId")!}/templates/${c.req.param("id")!}`)] as const,
     responses: { 204: { description: "Template deleted" } },
   }), async (c) => {
-    const { accountId } = c.get("auth");
+    const accountId = c.req.param("accountId")!;
     const existingResult = await accountDb.getTemplate(accountId, c.req.param("id")!);
     if (existingResult.isErr()) return err(c, 500, "Internal Server Error");
     if (!existingResult.value) return err(c, 404, "Template not found", "TEMPLATE_NOT_FOUND");
@@ -1870,7 +1867,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     middleware: [authz("forwarding-addresses:read", c => `accounts/${c.req.param("accountId")!}/forwarding-addresses`)] as const,
     responses: { 200: { content: { "application/json": { schema: ListForwardingAddressesResponse } }, description: "List forwarding addresses" } },
   }), async (c) => {
-    const { accountId } = c.get("auth");
+    const accountId = c.req.param("accountId")!;
     const addressesResult = await accountDb.listVerifiedForwardingAddresses(accountId);
     if (addressesResult.isErr()) return err(c, 500, "Internal Server Error");
     return c.json({ forwardingAddresses: addressesResult.value.map(toApiForwardingAddress) }, 200);
@@ -1884,7 +1881,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     middleware: [authz("forwarding-addresses:write", c => `accounts/${c.req.param("accountId")!}/forwarding-addresses`)] as const,
     responses: { 201: { content: { "application/json": { schema: VerifiedForwardingAddressSchema } }, description: "Forwarding address created" } },
   }), async (c) => {
-    const { accountId } = c.get("auth");
+    const accountId = c.req.param("accountId")!;
     const body = await zParse(CreateForwardingAddressRequest, c.req.raw);
 
     const existingResult = await accountDb.getVerifiedForwardingAddress(accountId, body.address);
@@ -1924,7 +1921,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     middleware: [authz("forwarding-addresses:write", c => `accounts/${c.req.param("accountId")!}/forwarding-addresses/${c.req.param("address")!}`)] as const,
     responses: { 200: { content: { "application/json": { schema: VerifiedForwardingAddressSchema } }, description: "Address verified" } },
   }), async (c) => {
-    const { accountId } = c.get("auth");
+    const accountId = c.req.param("accountId")!;
     const address = decodeURIComponent(c.req.param("address")!);
     const body = await zParse(VerifyForwardingAddressRequest, c.req.raw);
 
@@ -1949,7 +1946,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     middleware: [authz("forwarding-addresses:write", c => `accounts/${c.req.param("accountId")!}/forwarding-addresses/${c.req.param("address")!}`)] as const,
     responses: { 204: { description: "Forwarding address deleted" } },
   }), async (c) => {
-    const { accountId } = c.get("auth");
+    const accountId = c.req.param("accountId")!;
     const address = decodeURIComponent(c.req.param("address")!);
     const deleteResult = await accountDb.deleteVerifiedForwardingAddress(accountId, address);
     if (deleteResult.isErr()) return err(c, 500, "Internal Server Error");
@@ -1971,7 +1968,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     middleware: [authz("audit:read", c => `accounts/${c.req.param("accountId")!}/audit`)] as const,
     responses: { 200: { content: { "application/json": { schema: z.object({}) } }, description: "List audit events" } },
   }), async (c) => {
-    const { accountId } = c.get("auth");
+    const accountId = c.req.param("accountId")!;
     const cursor = c.req.query("cursor");
     const rawLimit = c.req.query("limit");
     const params: PageParams = { ...(cursor ? { cursor } : {}), ...(rawLimit ? { limit: parseInt(rawLimit, 10) } : {}) };

@@ -25,7 +25,7 @@ describe("Authorization middleware extracts account ID from path", () => {
     const access = makeAccess();
     const authorize = createAuthorize(access, createMockLogger());
     const app = new Hono<AppEnv>();
-    app.use("*", async (c, next) => { c.set("auth", { accountId: "acct-abc", userId: "user-xyz" }); await next(); });
+    app.use("*", async (c, next) => { c.set("auth", { userId: "user-xyz" }); await next(); });
     app.get("/accounts/:accountId", authorize("accounts:read", (c) => `accounts/${c.req.param("accountId")}`), (c) => c.json({ ok: true }));
 
     await app.request("/accounts/acct-abc");
@@ -36,7 +36,7 @@ describe("Authorization middleware extracts account ID from path", () => {
     const access = makeAccess();
     const authorize = createAuthorize(access, createMockLogger());
     const app = new Hono<AppEnv>();
-    app.use("*", async (c, next) => { c.set("auth", { accountId: "acct-abc", userId: "user-xyz" }); await next(); });
+    app.use("*", async (c, next) => { c.set("auth", { userId: "user-xyz" }); await next(); });
     app.get("/accounts/:accountId/arcs/:arcId", authorize("arcs:read", (c) => `accounts/${c.req.param("accountId")}/arcs/${c.req.param("arcId")}`), (c) => c.json({ ok: true }));
 
     await app.request("/accounts/acct-abc/arcs/arc-123");
@@ -51,7 +51,7 @@ describe("Authorization middleware enforces permission level", () => {
     const access = makeAccess();
     const authorize = createAuthorize(access, createMockLogger());
     const app = new Hono<AppEnv>();
-    app.use("*", async (c, next) => { c.set("auth", { accountId: "acct-1", userId: "user-1" }); await next(); });
+    app.use("*", async (c, next) => { c.set("auth", { userId: "user-1" }); await next(); });
     app.get("/accounts/:accountId", authorize(permission, (c) => `accounts/${c.req.param("accountId")}`), (c) => c.json({ ok: true }));
 
     await app.request("/accounts/acct-1");
@@ -67,7 +67,7 @@ describe("Authorization short-circuits on failure", () => {
     const handlerSpy = vi.fn((c: any) => c.json({ ok: true }));
 
     const app = new Hono<AppEnv>();
-    app.use("*", async (c, next) => { c.set("auth", { accountId: "acct-1", userId: "user-1" }); await next(); });
+    app.use("*", async (c, next) => { c.set("auth", { userId: "user-1" }); await next(); });
     app.get("/accounts/:accountId", authorize("accounts:read", (c) => `accounts/${c.req.param("accountId")}`), handlerSpy);
 
     await app.request("/accounts/acct-1");
@@ -80,7 +80,7 @@ describe("Authorization short-circuits on failure", () => {
     const handlerSpy = vi.fn((c: any) => c.json({ ok: true }));
 
     const app = new Hono<AppEnv>();
-    app.use("*", async (c, next) => { c.set("auth", { accountId: "acct-1", userId: "user-1" }); await next(); });
+    app.use("*", async (c, next) => { c.set("auth", { userId: "user-1" }); await next(); });
     app.get("/accounts/:accountId", authorize("accounts:read", (c) => `accounts/${c.req.param("accountId")}`), handlerSpy);
 
     await app.request("/accounts/acct-1");
@@ -95,7 +95,7 @@ describe("Authorization failure returns 403 with error code", () => {
     const authorize = createAuthorize(access, createMockLogger());
 
     const app = new Hono<AppEnv>();
-    app.use("*", async (c, next) => { c.set("auth", { accountId: "acct-1", userId: "user-1" }); await next(); });
+    app.use("*", async (c, next) => { c.set("auth", { userId: "user-1" }); await next(); });
     app.get("/accounts/:accountId", authorize("accounts:read", (c) => `accounts/${c.req.param("accountId")}`), (c) => c.json({ ok: true }));
 
     const res = await app.request("/accounts/acct-1");
@@ -114,7 +114,7 @@ describe("Authress SDK failure returns 500 with logged error", () => {
     const authorize = createAuthorize(access, logger);
 
     const app = new Hono<AppEnv>();
-    app.use("*", async (c, next) => { c.set("auth", { accountId: "acct-1", userId: "user-1" }); await next(); });
+    app.use("*", async (c, next) => { c.set("auth", { userId: "user-1" }); await next(); });
     app.get("/accounts/:accountId", authorize("accounts:read", (c) => `accounts/${c.req.param("accountId")}`), (c) => c.json({ ok: true }));
 
     const res = await app.request("/accounts/acct-1");
@@ -132,7 +132,7 @@ describe("Authress SDK failure returns 500 with logged error", () => {
     const authorize = createAuthorize(access, logger);
 
     const app = new Hono<AppEnv>();
-    app.use("*", async (c, next) => { c.set("auth", { accountId: "acct-1", userId: "user-1" }); await next(); });
+    app.use("*", async (c, next) => { c.set("auth", { userId: "user-1" }); await next(); });
     app.get("/accounts/:accountId", authorize("accounts:read", (c) => `accounts/${c.req.param("accountId")}`), (c) => c.json({ ok: true }));
 
     const res = await app.request("/accounts/acct-1");
@@ -152,7 +152,7 @@ describe("Authorization failures are logged", () => {
     const authorize = createAuthorize(access, logger);
 
     const app = new Hono<AppEnv>();
-    app.use("*", async (c, next) => { c.set("auth", { accountId: "acct-1", userId: "user-1" }); await next(); });
+    app.use("*", async (c, next) => { c.set("auth", { userId: "user-1" }); await next(); });
     app.get("/accounts/:accountId", authorize("accounts:read", (c) => `accounts/${c.req.param("accountId")}`), (c) => c.json({ ok: true }));
 
     await app.request("/accounts/acct-1");
@@ -180,7 +180,7 @@ describe("Error responses sanitize internal details", () => {
     const authorize = createAuthorize(access, createMockLogger());
 
     const app = new Hono<AppEnv>();
-    app.use("*", async (c, next) => { c.set("auth", { accountId: "acct-1", userId: "user-1" }); await next(); });
+    app.use("*", async (c, next) => { c.set("auth", { userId: "user-1" }); await next(); });
     app.get("/accounts/:accountId", authorize("accounts:read", (c) => `accounts/${c.req.param("accountId")}`), (c) => c.json({ ok: true }));
 
     const res = await app.request("/accounts/acct-1");
@@ -199,7 +199,7 @@ describe("Error responses sanitize internal details", () => {
     const authorize = createAuthorize(access, createMockLogger());
 
     const app = new Hono<AppEnv>();
-    app.use("*", async (c, next) => { c.set("auth", { accountId: "acct-1", userId: "user-1" }); await next(); });
+    app.use("*", async (c, next) => { c.set("auth", { userId: "user-1" }); await next(); });
     app.get("/accounts/:accountId", authorize("accounts:read", (c) => `accounts/${c.req.param("accountId")}`), (c) => c.json({ ok: true }));
 
     const res = await app.request("/accounts/acct-1");
