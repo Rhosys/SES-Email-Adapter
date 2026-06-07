@@ -25,7 +25,7 @@ Implement a team member invitation flow for the email-catcher backend, and intro
 #### Acceptance Criteria
 
 1. THE Backend SHALL have an `EmailService` class that wraps `SESv2Client` and exposes a `send()` method accepting: `to`, `subject`, `textBody`, and optional `htmlBody`
-2. THE `EmailService` SHALL read the sender address (`NOTIFICATION_FROM`) and configuration set (`SES_CONFIGURATION_SET`) from its constructor or environment, applying them to every `SendEmailCommand`
+2. THE `EmailService` SHALL derive the sender address from `MAIL_DOMAIN` (as `noreply@${MAIL_DOMAIN}`) and read the configuration set (`SES_CONFIGURATION_SET`) from its constructor, applying them to every `SendEmailCommand`
 3. THE `SesReplySender` and `SesForwarder` SHALL be merged into a single `ExternalEmailSignalHandler` class that implements both `ReplySender` and `Forwarder` interfaces, delegating all email sending to `EmailService`
 4. THE `ExternalEmailSignalHandler` SHALL NOT import any SES types — all SES knowledge lives exclusively in `EmailService`
 5. THE `sesVerificationMailer` inline implementation in `handler.ts` SHALL be refactored to call `EmailService.send()`

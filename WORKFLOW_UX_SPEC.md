@@ -2243,7 +2243,7 @@ This is the product's first impression. It must be executed with care.
 5. Two seconds later (give the user a moment to read), a second card slides up below the first. This is the pong reply:
    - The pong card has a distinct visual treatment: a slightly different background colour (muted teal tint), and a header line: "We replied →"
    - Below the header: the Bedrock-generated reply body. Short (≤3 sentences). Witty and warm — it riffs on whatever the user wrote, not a generic message.
-   - Below the body: the sender address the pong was sent from — either `signal.to` (if `senderSetupComplete: true`) or the system `NOTIFICATION_FROM` address (if not). If the pong was sent from the system address, include a small inline note: "Sent from our address — complete sender setup to reply from your domain →".
+   - Below the body: the sender address the pong was sent from — either `signal.to` (if `senderSetupComplete: true`) or the system `noreply@${MAIL_DOMAIN}` address (if not). If the pong was sent from the system address, include a small inline note: "Sent from our address — complete sender setup to reply from your domain →".
 
 6. After the user has had 3–4 seconds to read both cards, a CTA fades in below: **"Continue →"** — proceeds to Step 3 (sender setup) or Step 5 (you're ready), depending on whether sender records were already verified in Step 1.
 
@@ -2296,7 +2296,7 @@ The pong card layout:
 ┌──────────────────────────────────────────────┐
 │  ← We replied                                │
 │                                              │
-│  From: you@yourdomain.com (or NOTIFICATION_FROM) │
+│  From: you@yourdomain.com (or noreply@MAIL_DOMAIN) │
 │  To:   sender@gmail.com                      │
 │  Sent: 14 Jan, 3:42pm                        │
 │                                              │
@@ -2335,7 +2335,7 @@ Body: {signal.textBody}
 
 **Sender address logic:**
 - `domain.senderSetupComplete === true` → send pong from `signal.to` (the user's own domain address). This proves their sending setup works end-to-end.
-- `domain.senderSetupComplete === false` → send pong from `NOTIFICATION_FROM` (the platform's own address). Still sends a reply; just not from the user's domain. Include a sentence in the pong body acknowledging this: "P.S. — I replied from our address since your sending setup isn't complete yet. Finish that and I'll reply from yours."
+- `domain.senderSetupComplete === false` → send pong from `noreply@${MAIL_DOMAIN}` (the platform's own address). Still sends a reply; just not from the user's domain. Include a sentence in the pong body acknowledging this: "P.S. — I replied from our address since your sending setup isn't complete yet. Finish that and I'll reply from yours."
 
 **`arc.sentMessageIds` update:** The pong message ID is added to `arc.sentMessageIds`. This is correct behaviour — a reply was sent on this arc, even though it was system-generated. The priority calculator will promote urgency on the next inbound signal, which is correct (if the user replies to their own pong, that's an active test loop that deserves attention).
 

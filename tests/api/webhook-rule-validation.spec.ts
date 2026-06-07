@@ -187,11 +187,19 @@ describe("API — webhook rule validation", () => {
       auth: makeAuth(),
       access: makeAccess(),
       logger: createMockLogger(),
+      verificationMailer: { sendForwardVerification: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      jobDispatcher: { dispatchReindex: vi.fn(), dispatchSegment: vi.fn() } as never,
+      draftSendDispatcher: { dispatch: vi.fn().mockResolvedValue(ok(undefined)) } as never,
+      accountCreationStarter: { start: vi.fn() },
+      appBaseUrl: "http://localhost",
+      contentCdnBaseUrl: "https://cdn.test",
       billingHandler: new BillingHandler(),
       astValidator,
       emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService,
+      domainIdentityService: { register: vi.fn().mockResolvedValue(ok(undefined)), deregister: vi.fn().mockResolvedValue(ok(undefined)), tenantNameForAccount: () => "customer-stub" },
       rsvpComposer: vi.fn().mockResolvedValue(ok(undefined)) as unknown as typeof sendRsvp,
       postApprovalCalendarDeps: { accountDb: {} as never, emailService: {} as never, serviceDomain: "platform.email.rhosys.cloud" } as unknown as PostApprovalCalendarHandlerDeps,
+      schedulerClient: { scheduleMessage: vi.fn().mockResolvedValue(ok(undefined)), deleteSchedule: vi.fn().mockResolvedValue(ok(undefined)) } as never,
     });
   });
 

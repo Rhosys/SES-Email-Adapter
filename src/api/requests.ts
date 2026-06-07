@@ -229,6 +229,8 @@ const AccountFilteringConfigSchema = z.object({
 const AccountOnboardingSchema = z.object({
   completed: z.boolean(),
   completedAt: z.string().optional(),
+  testEmailReceived: z.boolean().optional(),
+  testEmailReceivedAt: z.string().optional(),
 }).passthrough();
 
 export const UpdateAccountRequest = z.object({

@@ -28,6 +28,7 @@ import { parseStatsRow } from "../database/stats-writer.js";
 import { isValidEmail } from "../email/validate-email.js";
 import type { DraftSendDispatcher } from "../processor/draft-send-dispatcher.js";
 import type { EmailService } from "../email/email-service.js";
+import type { DomainIdentityService } from "../email/domain-identity-service.js";
 import type { sendRsvp as SendRsvpFn } from "../processor/calendar/rsvp-composer.js";
 import type { PostApprovalCalendarHandlerDeps } from "../processor/calendar/post-approval-handler.js";
 import { handlePostApprovalCalendar } from "../processor/calendar/post-approval-handler.js";
@@ -129,25 +130,26 @@ export interface VerificationMailer {
 // App factory
 // ---------------------------------------------------------------------------
 
-interface AppDeps {
+export interface AppDeps {
   arcDb: ArcDatabase;
   accountDb: AccountDatabase;
   auditDb: AuditDatabase;
   auth: AuthService;
-  access?: AccessService;
+  access: AccessService;
   logger: Logger;
-  verificationMailer?: VerificationMailer;
-  jobDispatcher?: JobDispatcher;
-  draftSendDispatcher?: DraftSendDispatcher;
-  accountCreationStarter?: { start(accountId: string, email: string): Promise<void> };
-  appBaseUrl?: string;
-  contentCdnBaseUrl?: string;
-  astValidator?: UserCodeExecutorClient;
-  billingHandler?: BillingHandler;
+  verificationMailer: VerificationMailer;
+  jobDispatcher: JobDispatcher;
+  draftSendDispatcher: DraftSendDispatcher;
+  accountCreationStarter: { start(accountId: string, email: string): Promise<void> };
+  appBaseUrl: string;
+  contentCdnBaseUrl: string;
+  astValidator: UserCodeExecutorClient;
+  billingHandler: BillingHandler;
   emailService: EmailService;
+  domainIdentityService: DomainIdentityService;
   rsvpComposer: typeof SendRsvpFn;
   postApprovalCalendarDeps: PostApprovalCalendarHandlerDeps;
-  schedulerClient?: SchedulerClient;
+  schedulerClient: SchedulerClient;
 }
 
 type AppEnv = { Variables: { auth: AuthContext; authorizationVerified?: boolean } };
@@ -165,7 +167,7 @@ function withAttachmentUrls<T extends AnySignal>(signal: T, cdnBase: string): T 
   return { ...signal, data: { ...signal.data, attachments: signal.data.attachments.map((a: Attachment) => ({ ...a, url: `${cdnBase}/${a.s3Key}` })) } };
 }
 
-export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, verificationMailer, jobDispatcher, draftSendDispatcher, accountCreationStarter, appBaseUrl, contentCdnBaseUrl, astValidator, billingHandler, emailService, rsvpComposer, postApprovalCalendarDeps, schedulerClient }: AppDeps) {
+export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, verificationMailer, jobDispatcher, draftSendDispatcher, accountCreationStarter, appBaseUrl, contentCdnBaseUrl, astValidator, billingHandler, emailService, domainIdentityService, rsvpComposer, postApprovalCalendarDeps, schedulerClient }: AppDeps) {
   const app = new OpenAPIHono<AppEnv>();
 
   // Helper: validate code AST via the isolated Lambda
@@ -1241,12 +1243,10 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     }
     const forwardError = await validateForwardTargets(accountId, body.actions as Rule["actions"], accountDb);
     if (forwardError) return err(c, 400, forwardError, "UNVERIFIED_FORWARD_TARGET");
-    if (billingHandler) {
-      const accountResult = await accountDb.getAccount(accountId);
-      const accountPlan: BillingPlan = (accountResult.isOk() && accountResult.value?.billingPlan) || "Free";
-      const webhookError = validateWebhookActions(body.actions as Rule["actions"], accountPlan, billingHandler);
-      if (webhookError) return err(c, 400, webhookError.message, webhookError.code);
-    }
+    const accountResult = await accountDb.getAccount(accountId);
+    const accountPlan: BillingPlan = (accountResult.isOk() && accountResult.value?.billingPlan) || "Free";
+    const webhookError = validateWebhookActions(body.actions as Rule["actions"], accountPlan, billingHandler);
+    if (webhookError) return err(c, 400, webhookError.message, webhookError.code);
     // Audit: write code change event before persisting (best-effort)
     if (effectiveConditionType === "js") {
       const { userId } = c.get("auth");
@@ -1302,12 +1302,10 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     if (body.actions) {
       const forwardError = await validateForwardTargets(accountId, body.actions as Rule["actions"], accountDb);
       if (forwardError) return err(c, 400, forwardError, "UNVERIFIED_FORWARD_TARGET");
-      if (billingHandler) {
-        const accountResult = await accountDb.getAccount(accountId);
-        const accountPlan: BillingPlan = (accountResult.isOk() && accountResult.value?.billingPlan) || "Free";
-        const webhookError = validateWebhookActions(body.actions as Rule["actions"], accountPlan, billingHandler);
-        if (webhookError) return err(c, 400, webhookError.message, webhookError.code);
-      }
+      const accountResult = await accountDb.getAccount(accountId);
+      const accountPlan: BillingPlan = (accountResult.isOk() && accountResult.value?.billingPlan) || "Free";
+      const webhookError = validateWebhookActions(body.actions as Rule["actions"], accountPlan, billingHandler);
+      if (webhookError) return err(c, 400, webhookError.message, webhookError.code);
     }
     // Clear lastError when condition is updated on a JS rule
     const updateData: Parameters<typeof accountDb.updateRule>[2] = { ...body } as Parameters<typeof accountDb.updateRule>[2];
@@ -1377,8 +1375,18 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
   }), async (c) => {
     const accountId = c.req.param("accountId")!;
     const body = await zParse(CreateDomainRequest, c.req.raw);
+
+    // Register domain with SES first (idempotent — AlreadyExistsException is ok)
+    const sesResult = await domainIdentityService.register(body.domain, accountId);
+    if (sesResult.isErr()) {
+      logger.error("Failed to register domain SES identity", { code: "domain.ses_identity_failed", accountId, domain: body.domain, error: sesResult.error });
+      return err(c, 500, "Internal Server Error");
+    }
+
+    // DB write last — once this succeeds, the domain "exists" for all readers
     const domainResult = await accountDb.createDomain(accountId, body.domain);
     if (domainResult.isErr()) return err(c, 500, "Internal Server Error");
+
     return c.json(toApiDomain(domainResult.value), 201);
   });
 
@@ -1417,7 +1425,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     const failingRecords = records.filter((r) => r.status === "failing").map((r) => r.name);
     const receivingHealthy = records.find((r) => r.type === "MX")?.status === "verified";
     const senderHealthy = records.filter((r) => r.type !== "MX").every((r) => r.status === "verified");
-    const healthResult = await accountDb.updateDomainHealth(accountId, domain.id, {
+    const healthResult = await accountDb.updateDomainHealth(accountId, domain.domain, {
       receivingHealthy,
       senderHealthy,
       failingRecords,
@@ -1425,7 +1433,18 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
       ...(failingRecords.length === 0 ? { lastHealthyAt: now } : {}),
     });
     if (healthResult.isErr()) return err(c, 500, "Internal Server Error");
-    const updatedResult = await accountDb.getDomain(accountId, domain.id);
+
+    // Update setup flags to reflect current DNS state
+    const receivingChanged = (receivingHealthy ?? false) !== domain.receivingSetupComplete;
+    const senderChanged = senderHealthy !== domain.senderSetupComplete;
+    if (receivingChanged || senderChanged) {
+      await accountDb.updateDomainSetup(accountId, domain.domain, {
+        receivingSetupComplete: receivingHealthy ?? false,
+        senderSetupComplete: senderHealthy,
+      });
+    }
+
+    const updatedResult = await accountDb.getDomain(accountId, domain.domain);
     if (updatedResult.isErr()) return err(c, 500, "Internal Server Error");
     return c.json(toApiDomainWithRecords(updatedResult.value!, records), 200);
   });
@@ -1443,7 +1462,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     if (domainResult.isErr()) return err(c, 500, "Internal Server Error");
     const domain = domainResult.value;
     if (!domain) return err(c, 404, "Domain not found", "DOMAIN_NOT_FOUND");
-    const deleteResult = await accountDb.deleteDomain(accountId, domain.id);
+    const deleteResult = await accountDb.deleteDomain(accountId, domain.domain);
     if (deleteResult.isErr()) return err(c, 500, "Internal Server Error");
     return new Response(null, { status: 204 });
   });

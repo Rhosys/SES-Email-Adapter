@@ -68,6 +68,7 @@ export interface ProcessorAccountContext {
   registeredDomains: string[];
   userEmails: string[];
   billingPlan: BillingPlan;
+  onboardingCompleted: boolean;
 }
 
 export interface ArcMatcher {
@@ -514,7 +515,7 @@ export class SignalProcessor {
         const domain = domainResult.isOk() ? domainResult.value : null;
         const from = domain?.senderSetupComplete
           ? signal.data.recipientAddress
-          : (process.env["NOTIFICATION_FROM"] ?? signal.data.recipientAddress);
+          : `noreply@${process.env["MAIL_DOMAIN"] ?? "platform.email.rhosys.cloud"}`;
         await this.replySender.sendReply({
           to: signal.data.from.address,
           from,
@@ -943,6 +944,16 @@ export class SignalProcessor {
     if (isTestEmail) {
       classificationOutput.workflow = "test";
       classificationOutput.workflowData = { workflow: "test", triggeredBy: "user" };
+
+      // Auto-mark onboarding testEmailReceived if not yet completed
+      if (!accountCtx.onboardingCompleted) {
+        const onboardingResult = await this.accountDb.updateAccount(accountId, {
+          onboarding: { completed: false, testEmailReceived: true, testEmailReceivedAt: DateTime.utc().toISO()! },
+        });
+        if (onboardingResult.isErr()) {
+          this.logger.warn("Failed to mark onboarding testEmailReceived", { code: "processor.onboarding_mark_failed", accountId, error: onboardingResult.error });
+        }
+      }
     }
 
     const spamScoreThreshold =

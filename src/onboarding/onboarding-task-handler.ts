@@ -3,7 +3,7 @@ import { DateTime } from "luxon";
 import type { Result } from "neverthrow";
 import type { DbError } from "../errors.js";
 import type { Logger } from "../logger.js";
-import type { Account, Domain } from "../types/index.js";
+import type { Account, AccountOnboarding, Domain } from "../types/index.js";
 import type { OnboardingProgress } from "./compose-followup-email.js";
 import { composeFollowupEmail } from "./compose-followup-email.js";
 
@@ -13,7 +13,7 @@ import { composeFollowupEmail } from "./compose-followup-email.js";
 
 export interface OnboardingStore {
   getAccount(accountId: string): Promise<Result<Account | null, DbError>>;
-  updateAccount(accountId: string, updates: { onboarding: { completed: boolean; completedAt?: string } }): Promise<Result<Account, DbError>>;
+  updateAccount(accountId: string, updates: { onboarding: AccountOnboarding }): Promise<Result<Account, DbError>>;
   listDomains(accountId: string): Promise<Result<Domain[], DbError>>;
   hasSignals(accountId: string): Promise<Result<boolean, DbError>>;
 }
@@ -90,11 +90,10 @@ export class OnboardingTaskHandler {
     // 4. Compute progress
     const progress: OnboardingProgress = { domainAdded, senderSetupComplete, emailsReceived };
 
-    // 5. If all complete and onboarding not yet marked → update account
-    const allComplete = progress.domainAdded && progress.senderSetupComplete && progress.emailsReceived;
-    if (allComplete && !account.onboarding?.completed) {
+    // 5. If emails received and testEmailReceived not yet marked → update account
+    if (progress.emailsReceived && !account.onboarding?.testEmailReceived) {
       const updateResult = await this.store.updateAccount(accountId, {
-        onboarding: { completed: true, completedAt: DateTime.utc().toISO()! },
+        onboarding: { ...account.onboarding!, testEmailReceived: true, testEmailReceivedAt: DateTime.utc().toISO()! },
       });
       if (updateResult.isErr()) {
         return err(updateResult.error);

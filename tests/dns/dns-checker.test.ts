@@ -9,7 +9,6 @@ const mockedDns = vi.mocked(dns);
 
 function makeDomain(domain: string): Domain {
   return {
-    id: "dom_test",
     accountId: "acc_test",
     domain,
     receivingSetupComplete: false,

@@ -27,6 +27,7 @@ import type { sendRsvp } from '../../src/processor/calendar/rsvp-composer.js';
 import type { PostApprovalCalendarHandlerDeps } from '../../src/processor/calendar/post-approval-handler.js';
 import { startMockAuthressServer } from './mock-authress.js';
 import type { MockAuthressServer } from './mock-authress.js';
+import { BillingHandler } from '../../src/billing/billing-handler.js';
 
 // ---------------------------------------------------------------------------
 // Harness interface
@@ -77,9 +78,19 @@ export async function createHarness(): Promise<IntegrationHarness> {
     auth: new AuthressAuthService(),
     access,
     logger,
+    verificationMailer: { sendForwardVerification: async () => ok(undefined) },
+    jobDispatcher: { dispatchReindex: async () => {}, dispatchSegment: async () => {} } as never,
+    draftSendDispatcher: { dispatch: async () => ok(undefined) } as never,
+    accountCreationStarter: { start: async () => {} },
+    appBaseUrl: 'http://localhost',
+    contentCdnBaseUrl: 'https://cdn.test',
+    astValidator: { validateAstBatch: async () => ({ success: true, purpose: 'validate_ast_batch', results: [] }) } as never,
+    billingHandler: new BillingHandler(),
     emailService: { send: async () => ok({ messageId: "ses-cal-001" }), sendRaw: async () => {} } as unknown as EmailService,
+    domainIdentityService: { register: async () => ok(undefined), deregister: async () => ok(undefined), tenantNameForAccount: () => "customer-stub" },
     rsvpComposer: (async () => ok(undefined)) as unknown as typeof sendRsvp,
     postApprovalCalendarDeps: { accountDb: {} as never, emailService: {} as never, serviceDomain: "platform.email.rhosys.cloud" } as unknown as PostApprovalCalendarHandlerDeps,
+    schedulerClient: { scheduleMessage: async () => ok(undefined), deleteSchedule: async () => ok(undefined) } as never,
   });
 
   return {

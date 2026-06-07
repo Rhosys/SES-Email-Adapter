@@ -657,6 +657,8 @@ export interface NotificationSettings {
 export interface AccountOnboarding {
   completed: boolean;
   completedAt?: string;
+  testEmailReceived?: boolean;
+  testEmailReceivedAt?: string;
 }
 
 export interface Account {
@@ -686,12 +688,11 @@ export interface DnsRecord {
 }
 
 export interface Domain {
-  id: string;
   accountId: string;
   domain: string;
-  // Tier 1: MX record set up → can receive email
+  // All 4 DNS records (MX, DKIM, SPF, DMARC) verified — domain can receive and send
   receivingSetupComplete: boolean;
-  // Tier 2: DKIM + SPF + DMARC set up → can reply and forward
+  // DKIM + SPF + DMARC CNAMEs verified — domain can sign outbound mail
   senderSetupComplete: boolean;
   // Health state populated by the weekly DNS check job
   receivingHealthy?: boolean;

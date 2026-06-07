@@ -612,6 +612,8 @@ export const AccountFilteringConfig = z.object({
 export const AccountOnboarding = z.object({
   completed: z.boolean(),
   completedAt: z.string().optional(),
+  testEmailReceived: z.boolean().optional(),
+  testEmailReceivedAt: z.string().optional(),
 }).openapi("AccountOnboarding");
 
 export const Account = z.object({

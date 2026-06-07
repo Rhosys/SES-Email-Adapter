@@ -193,7 +193,7 @@ function toApiCalendarData(type: string, data: unknown): unknown {
 
 export function toApiDomain(domain: DbDomain): Api.Domain {
   return {
-    domainId: domain.id,
+    domainId: domain.domain,
     domain: domain.domain,
     receivingSetupComplete: domain.receivingSetupComplete,
     senderSetupComplete: domain.senderSetupComplete,

@@ -41,7 +41,7 @@
 
 ## Task 4: Refactor handler.ts composition root
 
-- [x] Instantiate `EmailService` in `handler.ts` with the existing `sesv2` client, `NOTIFICATION_FROM`, and `CONFIG_SET`
+- [x] Instantiate `EmailService` in `handler.ts` with the existing `sesv2` client, `noreply@${MAIL_DOMAIN}` (derived from `MAIL_DOMAIN`), and `CONFIG_SET`
 - [x] Replace `new SesReplySender(sesv2)` and `new SesForwarder(logger, sesv2, s3)` with a single `new ExternalEmailSignalHandler(emailService, s3, logger, EMAIL_BUCKET)`
 - [x] Wire `ExternalEmailSignalHandler` as both `replySender` and `forwarder` in the processor options
 - [x] Replace the inline `sesVerificationMailer` object with a version that calls `emailService.send()`

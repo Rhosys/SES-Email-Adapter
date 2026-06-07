@@ -262,7 +262,7 @@ export class AccountDatabase {
     return ok(accountResult.value?.deletionRetentionDays ?? 0);
   }
 
-  async getProcessorAccountContext(accountId: string, recipientAddress: string): Promise<Result<{ retentionDays: number; filtering: AccountFilteringConfig | null; emailConfig: Alias | null; registeredDomains: string[]; userEmails: string[]; billingPlan: import("../embedding/retention-tier.js").BillingPlan }, DbError>> {
+  async getProcessorAccountContext(accountId: string, recipientAddress: string): Promise<Result<{ retentionDays: number; filtering: AccountFilteringConfig | null; emailConfig: Alias | null; registeredDomains: string[]; userEmails: string[]; billingPlan: import("../embedding/retention-tier.js").BillingPlan; onboardingCompleted: boolean }, DbError>> {
     const accountResult = await this.getAccount(accountId);
     if (accountResult.isErr()) return err(accountResult.error);
     const account = accountResult.value;
@@ -282,6 +282,7 @@ export class AccountDatabase {
       registeredDomains: domains.map((d) => d.domain),
       userEmails: [],
       billingPlan: account?.billingPlan ?? "Paid",
+      onboardingCompleted: account?.onboarding?.completed ?? false,
     });
   }
 
@@ -683,7 +684,6 @@ export class AccountDatabase {
   async createDomain(accountId: string, domain: string): Promise<Result<Domain, DbError>> {
     const now = DateTime.utc().toISO()!;
     const item: Domain = {
-      id: domain,
       accountId,
       domain,
       receivingSetupComplete: false,
@@ -729,6 +729,33 @@ export class AccountDatabase {
           ":ua": health.lastCheckedAt,
           ...(health.lastHealthyAt ? { ":lha": health.lastHealthyAt } : {}),
         },
+      }));
+      return ok(undefined);
+    } catch (e) {
+      return err(dbError(e));
+    }
+  }
+
+  async updateDomainSetup(accountId: string, id: string, setup: {
+    receivingSetupComplete?: boolean;
+    senderSetupComplete?: boolean;
+  }): Promise<Result<void, DbError>> {
+    const parts: string[] = ["updatedAt = :ua"];
+    const values: Record<string, unknown> = { ":ua": DateTime.utc().toISO()! };
+    if (setup.receivingSetupComplete !== undefined) {
+      parts.push("receivingSetupComplete = :rsc");
+      values[":rsc"] = setup.receivingSetupComplete;
+    }
+    if (setup.senderSetupComplete !== undefined) {
+      parts.push("senderSetupComplete = :ssc");
+      values[":ssc"] = setup.senderSetupComplete;
+    }
+    try {
+      await dynamo.send(new UpdateCommand({
+        TableName: ACCOUNTS_TABLE,
+        Key: { pk: pk(accountId), sk: `DOMAIN#${id}` },
+        UpdateExpression: `SET ${parts.join(", ")}`,
+        ExpressionAttributeValues: values,
       }));
       return ok(undefined);
     } catch (e) {

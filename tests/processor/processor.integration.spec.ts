@@ -64,6 +64,7 @@ const DEFAULT_CTX = {
   registeredDomains: [],
   userEmails: [],
   billingPlan: "Paid" as const,
+  onboardingCompleted: true,
 };
 
 const validClassification: ClassificationOutput = {
@@ -503,7 +504,7 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
       expect(replySender.sendReply).toHaveBeenCalledOnce();
       expect(replySender.sendReply).toHaveBeenCalledWith(expect.objectContaining({
         to: signal.data.from.address,
-        from: signal.data.recipientAddress,
+        from: `noreply@${process.env["MAIL_DOMAIN"] ?? "platform.email.rhosys.cloud"}`,
       }));
     });
 

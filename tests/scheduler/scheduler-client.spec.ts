@@ -46,6 +46,7 @@ describe("EventBridgeSchedulerClient", () => {
         arcId: "arc-789",
         fireAt: "2025-08-01T10:00:00Z",
         suffix: "followup",
+        sqsMessageAttributeMessageType: "signal_followup",
       });
 
       expect(result.isOk()).toBe(true);
@@ -73,6 +74,7 @@ describe("EventBridgeSchedulerClient", () => {
         arcId: "arc-789",
         fireAt: "2025-08-01T10:00:00Z",
         suffix: "followup",
+        sqsMessageAttributeMessageType: "signal_followup",
       });
 
       const calls = schedulerMock.commandCalls(CreateScheduleCommand);
@@ -94,6 +96,7 @@ describe("EventBridgeSchedulerClient", () => {
         arcId: "arc-3",
         fireAt: "2025-12-25T08:00:00.000Z",
         suffix: "cal",
+        sqsMessageAttributeMessageType: "signal_followup",
       });
 
       const calls = schedulerMock.commandCalls(CreateScheduleCommand);
@@ -109,6 +112,7 @@ describe("EventBridgeSchedulerClient", () => {
         arcId: "arc-c",
         fireAt: "2025-09-01T12:00:00Z",
         suffix: "test",
+        sqsMessageAttributeMessageType: "signal_followup",
       });
 
       const warnCalls = logger.calls.filter((c) => c.method === "warn");
@@ -125,6 +129,7 @@ describe("EventBridgeSchedulerClient", () => {
         arcId: "arc-z",
         fireAt: "2025-09-01T12:00:00Z",
         suffix: "fail",
+        sqsMessageAttributeMessageType: "signal_followup",
       });
 
       expect(result.isErr()).toBe(true);

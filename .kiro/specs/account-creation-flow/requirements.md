@@ -76,7 +76,7 @@ Implement an AWS Step Functions workflow that triggers when a new account is cre
 1. WHEN the Onboarding_Task_Handler completes an onboarding progress check, THE Onboarding_Task_Handler SHALL send an email via SESv2 to the account owner's email address.
 2. THE SES_Followup_Email SHALL include one suggestion for each incomplete onboarding milestone: a suggestion to add a domain if no Domain record exists, a suggestion to complete sender setup if no Domain has `senderSetupComplete` set to true, and a suggestion to send a test email if no Signal records exist.
 3. IF all onboarding milestones are complete, THEN THE Onboarding_Task_Handler SHALL send a congratulatory email and skip further suggestions.
-4. THE SES_Followup_Email SHALL use the system notification sender address (NOTIFICATION_FROM environment variable) as the From address.
+4. THE SES_Followup_Email SHALL use the system notification sender address (derived as `noreply@${MAIL_DOMAIN}`) as the From address.
 5. IF the SES_CONFIGURATION_SET environment variable is non-empty, THEN THE SES_Followup_Email SHALL include the configuration set name in the SESv2 SendEmail request.
 6. IF the SESv2 SendEmail call fails, THEN THE Onboarding_Task_Handler SHALL log the error and return a failure result to the Step Function, allowing the state machine's built-in retry policy to handle retries.
 
