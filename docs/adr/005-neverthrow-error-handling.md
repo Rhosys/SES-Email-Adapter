@@ -112,7 +112,7 @@ Route handlers call store methods, check `isErr()`, and return HTTP responses di
 
 ```ts
 app.get("/accounts/:accountId/arcs/:id", async (c) => {
-  const { accountId } = c.get("auth");
+  const { accountId } = c.req.param("auth");
   const arcResult = await store.getArc(accountId, c.req.param("id"));
   if (arcResult.isErr()) return err(c, 500, "Internal Server Error");
   const arc = arcResult.value;

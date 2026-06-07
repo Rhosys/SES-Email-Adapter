@@ -30,7 +30,7 @@ export type Workflow = (typeof WORKFLOWS)[number];
 // SQS message types — discriminator for routing in the Lambda handler
 // ---------------------------------------------------------------------------
 
-export const SQS_MESSAGE_TYPES = ["reindex", "side_effect", "draft_send"] as const;
+export const SQS_MESSAGE_TYPES = ["reindex", "side_effect", "draft_send", "signal_followup"] as const;
 export type SqsMessageType = (typeof SQS_MESSAGE_TYPES)[number];
 
 export type WorkflowData =

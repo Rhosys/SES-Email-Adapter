@@ -3,7 +3,7 @@ import type { Result, DbError } from "../errors.js";
 import type { Logger } from "../logger.js";
 import type { Arc, ArcUrgency, Signal } from "../types/index.js";
 import type { DeviceStore } from "./device-store.js";
-import type { Deliverer, Device, DeviceType, Notifier, NotificationPayload } from "./types.js";
+import type { Deliverer, Device, DeviceType, Notifier, NotificationPayload, NotificationReason } from "./types.js";
 import { urgencyToPushPriority } from "./types.js";
 
 export class DeviceNotifier implements Notifier {
@@ -21,7 +21,7 @@ export class DeviceNotifier implements Notifier {
     this.logger = opts.logger;
   }
 
-  async notify(accountId: string, arc: Arc, signal: Signal, urgency?: ArcUrgency): Promise<Result<void, DbError>> {
+  async notify(accountId: string, arc: Arc, signal: Signal, urgency?: ArcUrgency, reason?: NotificationReason): Promise<Result<void, DbError>> {
     const effectiveUrgency: ArcUrgency = urgency ?? "normal";
     const priority = urgencyToPushPriority(effectiveUrgency);
 
@@ -35,7 +35,7 @@ export class DeviceNotifier implements Notifier {
       return ok(undefined);
     }
 
-    const payload = buildPayload(arc, signal, effectiveUrgency);
+    const payload = buildPayload(arc, signal, effectiveUrgency, reason);
 
     let successCount = 0;
     const staleTokens: string[] = [];
@@ -91,8 +91,8 @@ export class DeviceNotifier implements Notifier {
   }
 }
 
-function buildPayload(arc: Arc, signal: Signal, urgency: ArcUrgency): NotificationPayload {
-  return {
+function buildPayload(arc: Arc, signal: Signal, urgency: ArcUrgency, reason?: NotificationReason): NotificationPayload {
+  const payload: NotificationPayload = {
     type: "signal",
     signalId: signal.id,
     arcId: arc.id,
@@ -102,4 +102,8 @@ function buildPayload(arc: Arc, signal: Signal, urgency: ArcUrgency): Notificati
     workflow: arc.workflow,
     urgency,
   };
+  if (reason) {
+    payload.reason = reason;
+  }
+  return payload;
 }

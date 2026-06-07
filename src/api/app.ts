@@ -31,6 +31,8 @@ import type { EmailService } from "../email/email-service.js";
 import type { sendRsvp as SendRsvpFn } from "../processor/calendar/rsvp-composer.js";
 import type { PostApprovalCalendarHandlerDeps } from "../processor/calendar/post-approval-handler.js";
 import { handlePostApprovalCalendar } from "../processor/calendar/post-approval-handler.js";
+import type { SchedulerClient } from "../scheduler/scheduler-client.js";
+import { durationToSeconds } from "../processor/retention.js";
 
 // ---------------------------------------------------------------------------
 // Job Dispatcher interface (used by reindex route)
@@ -144,6 +146,7 @@ interface AppDeps {
   emailService: EmailService;
   rsvpComposer: typeof SendRsvpFn;
   postApprovalCalendarDeps: PostApprovalCalendarHandlerDeps;
+  schedulerClient?: SchedulerClient;
 }
 
 type AppEnv = { Variables: { auth: AuthContext; authorizationVerified?: boolean } };
@@ -161,7 +164,7 @@ function withAttachmentUrls<T extends AnySignal>(signal: T, cdnBase: string): T 
   return { ...signal, data: { ...signal.data, attachments: signal.data.attachments.map((a: Attachment) => ({ ...a, url: `${cdnBase}/${a.s3Key}` })) } };
 }
 
-export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, verificationMailer, jobDispatcher, draftSendDispatcher, accountCreationStarter, appBaseUrl, contentCdnBaseUrl, astValidator, billingHandler, emailService, rsvpComposer, postApprovalCalendarDeps }: AppDeps) {
+export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, verificationMailer, jobDispatcher, draftSendDispatcher, accountCreationStarter, appBaseUrl, contentCdnBaseUrl, astValidator, billingHandler, emailService, rsvpComposer, postApprovalCalendarDeps, schedulerClient }: AppDeps) {
   const app = new OpenAPIHono<AppEnv>();
 
   // Helper: validate code AST via the isolated Lambda
@@ -489,8 +492,53 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     if (body.labels !== undefined) fields.labels = body.labels;
     const status = body.status ?? arc.status;
     const lastSignalAt = body.lastSignalAt ?? arc.lastSignalAt;
+
+    // followupAt validation
+    if (body.followupAt) {
+      const followupTime = new Date(body.followupAt).getTime();
+      const now = Date.now();
+      if (followupTime <= now) {
+        return err(c, 400, "followupAt must be in the future");
+      }
+      if (arc.retentionDuration) {
+        const retentionSeconds = durationToSeconds(arc.retentionDuration);
+        if (retentionSeconds != null) {
+          const expiresAt = new Date(arc.createdAt).getTime() + retentionSeconds * 1000;
+          if (followupTime > expiresAt) {
+            return err(c, 400, "followupAt exceeds arc retention expiration");
+          }
+        }
+      }
+    }
+
+    // Apply status change (if any)
+    const statusChanged = body.status !== undefined && body.status !== arc.status;
     const updateResult = await arcDb.updateArc(accountId, arc.id, status, lastSignalAt, fields);
     if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
+
+    // Create followup schedule (if requested)
+    if (body.followupAt && schedulerClient) {
+      // Get the most recent signal for the arc to use as signalId
+      const signalsResult = await arcDb.listSignals(accountId, arc.id, { limit: 1 });
+      const signalId = signalsResult.isOk() ? signalsResult.value.items[0]?.id ?? arc.id : arc.id;
+
+      const scheduleResult = await schedulerClient.createFollowup({
+        accountId,
+        signalId,
+        arcId: arc.id,
+        fireAt: body.followupAt,
+        suffix: "followup",
+      });
+
+      if (scheduleResult.isErr()) {
+        // Rollback status change if one was applied
+        if (statusChanged) {
+          await arcDb.updateArc(accountId, arc.id, arc.status, arc.lastSignalAt, {});
+        }
+        return err(c, 500, "Failed to create followup schedule");
+      }
+    }
+
     return c.json(toApiArc(updateResult.value), 200);
   });
 

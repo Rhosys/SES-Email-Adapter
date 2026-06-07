@@ -11,7 +11,7 @@ import { OnboardingTaskHandler } from "./onboarding/onboarding-task-handler.js";
 import { SfnAccountCreationStarter } from "./onboarding/account-creation-starter.js";
 import type { AccountCreationStarter } from "./onboarding/account-creation-starter.js";
 
-const [MSG_TYPE_REINDEX, MSG_TYPE_SIDE_EFFECT, MSG_TYPE_DRAFT_SEND] = SQS_MESSAGE_TYPES;
+const [MSG_TYPE_REINDEX, MSG_TYPE_SIDE_EFFECT, MSG_TYPE_DRAFT_SEND, MSG_TYPE_SIGNAL_FOLLOWUP] = SQS_MESSAGE_TYPES;
 import { SignalClassifier } from "./classifier/classifier.js";
 import { SignalProcessor } from "./processor/processor.js";
 import type { InboundSignalMessage, SideEffectPayload, SesVerdict } from "./processor/processor.js";
@@ -43,6 +43,10 @@ import { S3RetentionServiceImpl } from "./embedding/s3-retention-service.js";
 import { ReindexWorker } from "./jobs/reindex/reindex-worker.js";
 import { AuthWorkflowHandler } from "./workflow/auth-handler.js";
 import { HandlerRegistry } from "./workflow/registry.js";
+import { FollowupHandler } from "./scheduler/followup-handler.js";
+import type { FollowupMessage } from "./scheduler/followup-handler.js";
+import { EventBridgeSchedulerClient } from "./scheduler/scheduler-client.js";
+import { SchedulerClient as AwsSchedulerClient } from "@aws-sdk/client-scheduler";
 
 import { EmailService } from "./email/email-service.js";
 import { ReindexDispatcher } from "./jobs/reindex/reindex-dispatcher.js";
@@ -77,6 +81,10 @@ const FCM_PROJECT_ID = process.env["FCM_PROJECT_ID"]!;
 const FCM_SERVICE_ACCOUNT = JSON.parse(process.env["FCM_SERVICE_ACCOUNT"] ?? "{}") as { client_email: string; private_key: string };
 const RETRY_TRACK_THRESHOLD = 30;
 
+const SCHEDULER_GROUP_NAME = process.env["SCHEDULER_GROUP_NAME"] ?? "signal-followups";
+const SCHEDULER_ROLE_ARN = process.env["SCHEDULER_ROLE_ARN"] ?? "";
+const SIGNAL_QUEUE_ARN = process.env["SIGNAL_QUEUE_ARN"] ?? "";
+
 // ---------------------------------------------------------------------------
 // Singletons
 // ---------------------------------------------------------------------------
@@ -107,6 +115,14 @@ const wsDeliverer = new WsDeliverer(new ApiGatewayManagementApiClient({ endpoint
 const authHandler = new AuthWorkflowHandler(deviceStore, wsDeliverer, arcDb, logger);
 const handlerRegistry = new HandlerRegistry([authHandler]);
 
+const schedulerClient = new EventBridgeSchedulerClient({
+  client: new AwsSchedulerClient({}),
+  groupName: SCHEDULER_GROUP_NAME,
+  roleArn: SCHEDULER_ROLE_ARN,
+  queueArn: SIGNAL_QUEUE_ARN,
+  logger,
+});
+
 const processor = new SignalProcessor({
   arcDb,
   accountDb,
@@ -134,6 +150,7 @@ const processor = new SignalProcessor({
   draftSendDispatcher,
   handlerRegistry,
   calendarForwarderDeps: { emailService, serviceDomain: MAIL_DOMAIN },
+  schedulerClient,
   logger,
   s3Client: s3,
   emailBucket: S3_BUCKET,
@@ -166,6 +183,22 @@ const draftSendWorker = new DraftSendWorker(
 );
 
 const domainHealthJob = new DomainHealthJob(accountDb, arcDb, logger);
+
+const followupHandler = new FollowupHandler({
+  arcDb,
+  arcUpdater: { updateArcStatus: (accountId, arcId, status, updatedAt) => arcDb.updateArc(accountId, arcId, status, updatedAt, {}).then(r => r.map(() => undefined)) },
+  signalDb: { getSignalById: (accountId, signalId, arcId) => arcDb.getSignalById(accountId, signalId, arcId) },
+  notifier: new DeviceNotifier({
+    deviceStore,
+    deliverers: {
+      websocket: wsDeliverer,
+      fcm: new FcmDeliverer(new HttpFcmClient({ projectId: FCM_PROJECT_ID, credentials: FCM_SERVICE_ACCOUNT, logger })),
+      apns: new FcmDeliverer(new HttpFcmClient({ projectId: FCM_PROJECT_ID, credentials: FCM_SERVICE_ACCOUNT, logger })),
+    },
+    logger,
+  }),
+  logger,
+});
 
 // ---------------------------------------------------------------------------
 // Onboarding (Step Function task handler + account creation starter)
@@ -229,6 +262,7 @@ const app = createApp({
   emailService,
   rsvpComposer: sendRsvp,
   postApprovalCalendarDeps,
+  schedulerClient,
 });
 
 // ---------------------------------------------------------------------------
@@ -319,6 +353,14 @@ async function handlerInner(
       } else if (messageType === MSG_TYPE_DRAFT_SEND) {
         const payload = body as DraftSendPayload;
         const result = await draftSendWorker.process(payload);
+        failed = result.isErr();
+      } else if (messageType === MSG_TYPE_SIGNAL_FOLLOWUP) {
+        const message = body as FollowupMessage;
+        if (!message.accountId || !message.signalId || !message.arcId) {
+          logger.error("Malformed signal_followup payload — missing required fields. Dropping message.", { code: "handler.sqs.malformed_followup", messageId: record.messageId });
+          continue;
+        }
+        const result = await followupHandler.process(message);
         failed = result.isErr();
       } else {
         // SNS envelope — unwrap and route by notificationType
