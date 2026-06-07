@@ -327,7 +327,6 @@ async function handlerInner(
 
     for (const record of event.Records) {
       const receiveCount = Number(record.attributes?.ApproximateReceiveCount ?? "1");
-      const messageType = record.messageAttributes?.["messageType"]?.stringValue;
 
       let body: unknown;
       try {
@@ -337,6 +336,8 @@ async function handlerInner(
         failures.push({ itemIdentifier: record.messageId });
         continue;
       }
+
+      const messageType = record.messageAttributes?.["messageType"]?.stringValue ?? (body as { sqsMessageAttributeMessageType?: string }).sqsMessageAttributeMessageType;
 
       let failed: boolean;
       if (messageType === MSG_TYPE_REINDEX) {

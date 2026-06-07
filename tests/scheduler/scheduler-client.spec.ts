@@ -78,6 +78,7 @@ describe("EventBridgeSchedulerClient", () => {
       const calls = schedulerMock.commandCalls(CreateScheduleCommand);
       const targetInput = JSON.parse(calls[0]!.args[0].input.Target!.Input!);
       expect(targetInput).toEqual({
+        sqsMessageAttributeMessageType: "signal_followup",
         accountId: "acc-123",
         signalId: "sgn-456",
         arcId: "arc-789",
