@@ -5,13 +5,15 @@ import { LambdaClient } from "@aws-sdk/client-lambda";
 import { SFNClient } from "@aws-sdk/client-sfn";
 import { SQSClient } from "@aws-sdk/client-sqs";
 import { SQS_MESSAGE_TYPES } from "./types/index.js";
+import type { Signal } from "./types/index.js";
 import { ok, err } from "./errors.js";
+import type { Result, DbError } from "./errors.js";
 import { isStepFunctionTaskEvent } from "./onboarding/types.js";
 import { OnboardingTaskHandler } from "./onboarding/onboarding-task-handler.js";
 import { SfnAccountCreationStarter } from "./onboarding/account-creation-starter.js";
 import type { AccountCreationStarter } from "./onboarding/account-creation-starter.js";
 
-const [MSG_TYPE_REINDEX, MSG_TYPE_SIDE_EFFECT, MSG_TYPE_DRAFT_SEND, MSG_TYPE_SIGNAL_FOLLOWUP] = SQS_MESSAGE_TYPES;
+const [MSG_TYPE_REINDEX, MSG_TYPE_SIDE_EFFECT, MSG_TYPE_DRAFT_SEND, MSG_TYPE_SIGNAL_FOLLOWUP, MSG_TYPE_RSVP_REMINDER] = SQS_MESSAGE_TYPES;
 import { SignalClassifier } from "./classifier/classifier.js";
 import { SignalProcessor } from "./processor/processor.js";
 import type { InboundSignalMessage, SideEffectPayload, SesVerdict } from "./processor/processor.js";
@@ -45,6 +47,8 @@ import { AuthWorkflowHandler } from "./workflow/auth-handler.js";
 import { HandlerRegistry } from "./workflow/registry.js";
 import { FollowupHandler } from "./scheduler/followup-handler.js";
 import type { FollowupMessage } from "./scheduler/followup-handler.js";
+import { RsvpReminderHandler } from "./scheduler/rsvp-reminder-handler.js";
+import type { RsvpReminderMessage } from "./scheduler/rsvp-reminder.js";
 import { EventBridgeSchedulerClient } from "./scheduler/scheduler-client.js";
 import { SchedulerClient as AwsSchedulerClient } from "@aws-sdk/client-scheduler";
 
@@ -188,6 +192,22 @@ const followupHandler = new FollowupHandler({
   arcDb,
   arcUpdater: { updateArcStatus: (accountId, arcId, status, updatedAt) => arcDb.updateArc(accountId, arcId, status, updatedAt, {}).then(r => r.map(() => undefined)) },
   signalDb: { getSignalById: (accountId, signalId, arcId) => arcDb.getSignalById(accountId, signalId, arcId) },
+  notifier: new DeviceNotifier({
+    deviceStore,
+    deliverers: {
+      websocket: wsDeliverer,
+      fcm: new FcmDeliverer(new HttpFcmClient({ projectId: FCM_PROJECT_ID, credentials: FCM_SERVICE_ACCOUNT, logger })),
+      apns: new FcmDeliverer(new HttpFcmClient({ projectId: FCM_PROJECT_ID, credentials: FCM_SERVICE_ACCOUNT, logger })),
+    },
+    logger,
+  }),
+  logger,
+});
+
+const rsvpReminderHandler = new RsvpReminderHandler({
+  signalDb: { getSignalById: (accountId, signalId, arcId) => arcDb.getSignalById(accountId, signalId, arcId) },
+  calendarDb: { getLatestCalendarResponse: (accountId, arcId, veventUid) => arcDb.getLatestCalendarResponse(accountId, arcId, veventUid) as Promise<Result<Signal | null, DbError>> },
+  arcDb: { getArc: (accountId, arcId) => arcDb.getArc(accountId, arcId) },
   notifier: new DeviceNotifier({
     deviceStore,
     deliverers: {
@@ -362,6 +382,14 @@ async function handlerInner(
           continue;
         }
         const result = await followupHandler.process(message);
+        failed = result.isErr();
+      } else if (messageType === MSG_TYPE_RSVP_REMINDER) {
+        const message = body as RsvpReminderMessage;
+        if (!message.accountId || !message.signalId || !message.arcId) {
+          logger.error("Malformed rsvp_reminder payload — missing required fields. Dropping message.", { code: "handler.sqs.malformed_rsvp_reminder", messageId: record.messageId });
+          continue;
+        }
+        const result = await rsvpReminderHandler.process(message);
         failed = result.isErr();
       } else {
         // SNS envelope — unwrap and route by notificationType
