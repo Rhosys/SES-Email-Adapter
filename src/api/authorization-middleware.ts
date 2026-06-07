@@ -52,7 +52,7 @@ export class AuthorizationMiddleware {
         if (status === 403) {
           this.logger.info("authorization.denied", { userId, resourceUri: resolvedResourceUri, permission, path });
           c.status(403);
-          return c.json({ title: "Forbidden", errorCode: "AccessDenied" });
+          return c.json({ title: `Entity ${userId} is missing permission '${permission}' on '${resolvedResourceUri}'.`, errorCode: "AccessDenied" });
         }
 
         if (status === 404) {
@@ -64,7 +64,7 @@ export class AuthorizationMiddleware {
             path,
           });
           c.status(403);
-          return c.json({ title: "Forbidden", errorCode: "AccessDenied" });
+          return c.json({ title: `Entity ${userId} is missing permission '${permission}' on '${resolvedResourceUri}'.`, errorCode: "AccessDenied" });
         }
 
         // Any non-2XX, non-404 status is an SDK/service failure

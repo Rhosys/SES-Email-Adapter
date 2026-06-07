@@ -95,7 +95,7 @@ describe("authorize() middleware", () => {
     const res = await app.request("/accounts/acct-123");
     expect(res.status).toBe(403);
     const body = await res.json();
-    expect(body).toEqual({ title: "Forbidden", errorCode: "AccessDenied" });
+    expect(body).toEqual({ title: "Entity user-456 is missing permission 'accounts:read' on 'accounts/acct-123'.", errorCode: "AccessDenied" });
   });
 
   it("returns 403 when error has status property directly (Authress SDK v3)", async () => {
@@ -106,7 +106,7 @@ describe("authorize() middleware", () => {
     const res = await app.request("/accounts/acct-123");
     expect(res.status).toBe(403);
     const body = await res.json();
-    expect(body).toEqual({ title: "Forbidden", errorCode: "AccessDenied" });
+    expect(body).toEqual({ title: "Entity user-456 is missing permission 'accounts:read' on 'accounts/acct-123'.", errorCode: "AccessDenied" });
   });
 
   it("returns 500 on SDK error (non-403)", async () => {

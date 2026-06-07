@@ -1,4 +1,5 @@
 import type { Context, MiddlewareHandler } from "hono";
+import type { Logger } from "../logger.js";
 
 /**
  * Global middleware that runs AFTER route handlers.
@@ -13,7 +14,7 @@ import type { Context, MiddlewareHandler } from "hono";
  * - OPTIONS * — CORS preflight requests
  * - GET / — OpenAPI specification
  */
-export function authorizationGuard(): MiddlewareHandler {
+export function authorizationGuard(logger?: Logger): MiddlewareHandler {
   return async (c, next) => {
     await next();
 
@@ -44,7 +45,13 @@ export function authorizationGuard(): MiddlewareHandler {
       return;
     }
 
-    // No authorization verified and not an exception — return 403
+    // No authorization verified and not an exception — a route is missing authorize() middleware
+    logger?.critical("Authorization guard fired — a route is missing the authorize() middleware. This request was rejected but the route must be fixed.", {
+      code: "authorization_guard.missing_middleware",
+      method,
+      path,
+    });
+
     c.res = new Response(
       JSON.stringify({ title: "Forbidden", errorCode: "AccessDenied" }),
       { status: 403, headers: { "Content-Type": "application/json" } },
