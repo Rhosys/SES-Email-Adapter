@@ -30,7 +30,7 @@ export interface Deliverer {
 
 // ─── Notification Payload ────────────────────────────────────────────────────
 
-export type NotificationReason = "new_signal" | "followup";
+export type NotificationReason = "new_signal" | "followup" | "rsvp_reminder";
 
 export interface NotificationPayload {
   type: "signal";
