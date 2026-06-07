@@ -37,6 +37,8 @@ import { buildCalendarSignalLookupId } from "./calendar/signal-lookup.js";
 import { forwardCalendarInvite } from "./calendar/calendar-forwarder.js";
 import type { CalendarForwarderDeps } from "./calendar/calendar-forwarder.js";
 import type { CalendarEventData, CalendarInviteInvalidData } from "../types/calendar.js";
+import type { SchedulerClient } from "../scheduler/scheduler-client.js";
+import { buildScheduleName } from "../scheduler/schedule-name.js";
 
 // ---------------------------------------------------------------------------
 // Message types
@@ -308,6 +310,7 @@ interface SignalProcessorOptions {
   billingHandler?: BillingHandler;
   handlerRegistry?: HandlerRegistry;
   calendarForwarderDeps: CalendarForwarderDeps;
+  schedulerClient?: SchedulerClient;
   s3Client: S3Client;
   emailBucket: string;
   contentBucket: string;
@@ -334,6 +337,7 @@ export class SignalProcessor {
   private readonly billingHandler: BillingHandler;
   private readonly handlerRegistry: HandlerRegistry | undefined;
   private readonly calendarForwarderDeps: CalendarForwarderDeps;
+  private readonly schedulerClient: SchedulerClient | undefined;
   private readonly s3Client: S3Client;
   private readonly emailBucket: string;
   private readonly contentBucket: string;
@@ -359,6 +363,7 @@ export class SignalProcessor {
     this.billingHandler = opts.billingHandler ?? new BillingHandler();
     this.handlerRegistry = opts.handlerRegistry;
     this.calendarForwarderDeps = opts.calendarForwarderDeps;
+    this.schedulerClient = opts.schedulerClient;
     this.s3Client = opts.s3Client;
     this.emailBucket = opts.emailBucket;
     this.contentBucket = opts.contentBucket;
@@ -1182,6 +1187,17 @@ export class SignalProcessor {
 
       const updateResult = await this.arcDb.updateArc(accountId, arc.id, arc.status, arc.lastSignalAt, fields);
       if (updateResult.isErr()) return err(updateResult.error);
+
+      // Cancel pending followup schedule when reactivating an archived arc
+      if (matchedArc.status === "archived" && arc.status === "active" && this.schedulerClient) {
+        const signalsResult = await this.arcDb.listSignals(accountId, arc.id, { limit: 1 });
+        const scheduleSignalId = signalsResult.isOk() ? signalsResult.value.items[0]?.id ?? arc.id : arc.id;
+        const scheduleName = buildScheduleName(accountId, scheduleSignalId, "followup");
+        const deleteResult = await this.schedulerClient.deleteFollowup(scheduleName);
+        if (deleteResult.isErr()) {
+          this.logger.warn("Failed to cancel followup schedule on arc reactivation — stale-fire will handle it.", { code: "processor.followup.cancel_failed", accountId, arcId: arc.id, scheduleName, error: deleteResult.error });
+        }
+      }
     } else {
       if (outcome.archive) arc.status = "archived";
       const saveArcResult = await this.arcDb.saveArc(arc);
@@ -1443,6 +1459,26 @@ export class SignalProcessor {
       const updateResult = await this.arcDb.updateArc(accountId, arc.id, arc.status, arc.lastSignalAt!, { labels: arc.labels });
       if (updateResult.isErr()) {
         this.logger.warn("Failed to apply system:calendar label to arc.", { code: "processor.calendar.label_failed", accountId, arcId: arc.id, error: updateResult.error });
+      }
+    }
+
+    // Schedule a day-of reminder if event startTime is in the future
+    if (this.schedulerClient && calendarData.startTime) {
+      const eventStart = DateTime.fromISO(calendarData.startTime, { zone: "utc" });
+      const now = DateTime.utc();
+      if (eventStart.isValid && eventStart > now) {
+        const fireAt = eventStart.startOf("day").set({ hour: 8 }).toISO()!;
+        const suffix = `calendar.${eventStart.toFormat("yyyyMMdd")}`;
+        const scheduleResult = await this.schedulerClient.createFollowup({
+          accountId,
+          signalId: calendarSignalId,
+          arcId: arc.id,
+          fireAt,
+          suffix,
+        });
+        if (scheduleResult.isErr()) {
+          this.logger.error("Failed to create calendar day-of schedule.", { code: "processor.calendar.schedule_failed", accountId, arcId: arc.id, signalId: calendarSignalId, fireAt, error: scheduleResult.error });
+        }
       }
     }
 

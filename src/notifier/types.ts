@@ -30,6 +30,8 @@ export interface Deliverer {
 
 // ─── Notification Payload ────────────────────────────────────────────────────
 
+export type NotificationReason = "new_signal" | "followup";
+
 export interface NotificationPayload {
   type: "signal";
   signalId: string;
@@ -39,12 +41,13 @@ export interface NotificationPayload {
   subject: string;
   workflow: string;
   urgency: ArcUrgency;
+  reason?: NotificationReason;
 }
 
 // ─── Notifier Interface ──────────────────────────────────────────────────────
 
 export interface Notifier {
-  notify(accountId: string, arc: Arc, signal: Signal, urgency: ArcUrgency): Promise<Result<void, DbError>>;
+  notify(accountId: string, arc: Arc, signal: Signal, urgency?: ArcUrgency, reason?: NotificationReason): Promise<Result<void, DbError>>;
   notifyBlocked(accountId: string, signal: Signal): Promise<Result<void, DbError>>;
 }
 

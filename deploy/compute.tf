@@ -146,6 +146,26 @@ resource "aws_iam_role_policy" "lambda_permissions" {
         Action   = ["s3:PutObject", "s3:PutObjectTagging"]
         Resource = "${aws_s3_bucket.extracted_content.arn}/*"
       },
+      {
+        Sid    = "EventBridgeScheduler"
+        Effect = "Allow"
+        Action = [
+          "scheduler:CreateSchedule",
+          "scheduler:DeleteSchedule",
+          "scheduler:GetSchedule",
+          "scheduler:ListSchedules",
+        ]
+        Resource = [
+          aws_scheduler_schedule_group.followups.arn,
+          "arn:aws:scheduler:${data.aws_region.current.name}:${var.aws_account_id}:schedule/signal-followups/*",
+        ]
+      },
+      {
+        Sid      = "PassSchedulerRole"
+        Effect   = "Allow"
+        Action   = ["iam:PassRole"]
+        Resource = aws_iam_role.scheduler_sqs.arn
+      },
     ]
   })
 }
@@ -213,6 +233,9 @@ resource "aws_lambda_function" "main" {
       CONTENT_SANITIZER_ARN    = aws_lambda_function.content_sanitizer.arn
       CONTENT_BUCKET           = aws_s3_bucket.extracted_content.bucket
       CONTENT_CDN_BASE_URL     = "https://${aws_cloudfront_distribution.api.domain_name}"
+      SCHEDULER_GROUP_NAME     = aws_scheduler_schedule_group.followups.name
+      SCHEDULER_ROLE_ARN       = aws_iam_role.scheduler_sqs.arn
+      SIGNAL_QUEUE_ARN         = aws_sqs_queue.signals.arn
       NODE_OPTIONS             = "--enable-source-maps"
     }
   }

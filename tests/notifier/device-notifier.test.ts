@@ -337,6 +337,72 @@ describe("DeviceNotifier", () => {
     });
   });
 
+  describe("Requirement 5.3, 5.4: reason parameter in notification payload", () => {
+    it("includes reason: 'followup' in payload when reason is provided", async () => {
+      const wsDeliverer = mockDeliverer();
+      const store = mockDeviceStore({ listDevices: vi.fn(async () => ok([wsDevice])) });
+      const notifier = new DeviceNotifier({
+        deviceStore: store,
+        deliverers: { websocket: wsDeliverer, fcm: mockDeliverer(), apns: mockDeliverer() },
+        logger: mockLogger(),
+      });
+
+      await notifier.notify("acct-1", arc, signal, "normal", "followup");
+
+      const call = wsDeliverer.deliver.mock.calls[0]!;
+      const deliveredPayload = call[1] as NotificationPayload;
+      expect(deliveredPayload.reason).toBe("followup");
+    });
+
+    it("includes reason: 'new_signal' in payload when explicitly passed", async () => {
+      const wsDeliverer = mockDeliverer();
+      const store = mockDeviceStore({ listDevices: vi.fn(async () => ok([wsDevice])) });
+      const notifier = new DeviceNotifier({
+        deviceStore: store,
+        deliverers: { websocket: wsDeliverer, fcm: mockDeliverer(), apns: mockDeliverer() },
+        logger: mockLogger(),
+      });
+
+      await notifier.notify("acct-1", arc, signal, "normal", "new_signal");
+
+      const call = wsDeliverer.deliver.mock.calls[0]!;
+      const deliveredPayload = call[1] as NotificationPayload;
+      expect(deliveredPayload.reason).toBe("new_signal");
+    });
+
+    it("omits reason field from payload when reason is not provided (backward compat)", async () => {
+      const wsDeliverer = mockDeliverer();
+      const store = mockDeviceStore({ listDevices: vi.fn(async () => ok([wsDevice])) });
+      const notifier = new DeviceNotifier({
+        deviceStore: store,
+        deliverers: { websocket: wsDeliverer, fcm: mockDeliverer(), apns: mockDeliverer() },
+        logger: mockLogger(),
+      });
+
+      await notifier.notify("acct-1", arc, signal, "normal");
+
+      const call = wsDeliverer.deliver.mock.calls[0]!;
+      const deliveredPayload = call[1] as NotificationPayload;
+      expect(deliveredPayload).not.toHaveProperty("reason");
+    });
+
+    it("omits reason field from payload when reason is undefined (backward compat)", async () => {
+      const wsDeliverer = mockDeliverer();
+      const store = mockDeviceStore({ listDevices: vi.fn(async () => ok([wsDevice])) });
+      const notifier = new DeviceNotifier({
+        deviceStore: store,
+        deliverers: { websocket: wsDeliverer, fcm: mockDeliverer(), apns: mockDeliverer() },
+        logger: mockLogger(),
+      });
+
+      await notifier.notify("acct-1", arc, signal, "normal", undefined);
+
+      const call = wsDeliverer.deliver.mock.calls[0]!;
+      const deliveredPayload = call[1] as NotificationPayload;
+      expect(deliveredPayload).not.toHaveProperty("reason");
+    });
+  });
+
   describe("error propagation", () => {
     it("returns Err when deviceStore.listDevices fails", async () => {
       const store = mockDeviceStore({ listDevices: vi.fn(async () => err(dbError("DynamoDB timeout"))) });

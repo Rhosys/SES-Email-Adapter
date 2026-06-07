@@ -32,8 +32,17 @@ function matches(expected: string, current: string | undefined): boolean {
   return normalize(expected) === normalize(current);
 }
 
+/** MX match: ignore priority number, compare exchange hostname only */
+function mxMatches(expected: string, current: string | undefined): boolean {
+  if (current === undefined) return false;
+  const expectedExchange = normalize(expected).replace(/^\d+\s+/, "");
+  const currentExchange = normalize(current).replace(/^\d+\s+/, "");
+  return expectedExchange === currentExchange;
+}
+
 function toRecord(name: string, type: DnsRecord["type"], value: string, current: string | undefined): DnsRecord {
-  const status: DnsRecord["status"] = matches(value, current) ? "verified" : current !== undefined ? "failing" : "pending";
+  const isMatch = type === "MX" ? mxMatches(value, current) : matches(value, current);
+  const status: DnsRecord["status"] = isMatch ? "verified" : current !== undefined ? "failing" : "pending";
   return current !== undefined
     ? { name, type, value, currentValue: current, status }
     : { name, type, value, status };

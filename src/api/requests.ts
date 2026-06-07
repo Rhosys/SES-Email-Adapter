@@ -36,6 +36,7 @@ export const UpdateArcRequest = z.object({
   urgency: ArcUrgency.optional(),
   labels: z.array(z.string()).optional(),
   lastSignalAt: z.string().optional(),
+  followupAt: z.string().datetime().optional(),
 });
 export type UpdateArcRequest = z.infer<typeof UpdateArcRequest>;
 

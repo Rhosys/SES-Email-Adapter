@@ -82,7 +82,7 @@ resource "aws_s3_bucket_policy" "emails" {
 
 resource "aws_sqs_queue" "signals" {
   name                       = "${var.service_name}-signals"
-  visibility_timeout_seconds = 900    # match expected worker runtime
+  visibility_timeout_seconds = 900     # match expected worker runtime
   message_retention_seconds  = 1209600 # 14 days (maximum)
 }
 
@@ -108,15 +108,58 @@ resource "aws_sqs_queue_policy" "signals_sns" {
 
   policy = jsonencode({
     Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "AllowSNSSend"
+        Effect    = "Allow"
+        Principal = { Service = "sns.amazonaws.com" }
+        Action    = "sqs:SendMessage"
+        Resource  = aws_sqs_queue.signals.arn
+        Condition = { ArnEquals = { "aws:SourceArn" = [
+          aws_sns_topic.ses_notifications.arn,
+          aws_sns_topic.ses_feedback.arn,
+        ] } }
+      },
+      {
+        Sid       = "AllowSchedulerSend"
+        Effect    = "Allow"
+        Principal = { Service = "scheduler.amazonaws.com" }
+        Action    = "sqs:SendMessage"
+        Resource  = aws_sqs_queue.signals.arn
+        Condition = { ArnEquals = { "aws:SourceArn" = "arn:aws:scheduler:${data.aws_region.current.name}:${var.aws_account_id}:schedule/signal-followups/*" } }
+      },
+    ]
+  })
+}
+
+# ---------------------------------------------------------------------------
+# EventBridge Scheduler — follow-up schedule group + IAM
+# ---------------------------------------------------------------------------
+
+resource "aws_scheduler_schedule_group" "followups" {
+  name = "signal-followups"
+}
+
+resource "aws_iam_role" "scheduler_sqs" {
+  name = "${var.service_name}-scheduler-sqs"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
     Statement = [{
       Effect    = "Allow"
-      Principal = { Service = "sns.amazonaws.com" }
-      Action    = "sqs:SendMessage"
-      Resource  = aws_sqs_queue.signals.arn
-      Condition = { ArnEquals = { "aws:SourceArn" = [
-        aws_sns_topic.ses_notifications.arn,
-        aws_sns_topic.ses_feedback.arn,
-      ] } }
+      Principal = { Service = "scheduler.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+    }]
+  })
+}
+
+resource "aws_iam_role_policy" "scheduler_sqs_send" {
+  role = aws_iam_role.scheduler_sqs.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["sqs:SendMessage"]
+      Resource = aws_sqs_queue.signals.arn
     }]
   })
 }
