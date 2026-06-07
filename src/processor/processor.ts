@@ -39,6 +39,7 @@ import type { CalendarForwarderDeps } from "./calendar/calendar-forwarder.js";
 import type { CalendarEventData, CalendarInviteInvalidData } from "../types/calendar.js";
 import type { SchedulerClient } from "../scheduler/scheduler-client.js";
 import { buildScheduleName } from "../scheduler/schedule-name.js";
+import { RSVP_REMINDER_HOURS_BEFORE } from "../scheduler/rsvp-reminder.js";
 
 // ---------------------------------------------------------------------------
 // Message types
@@ -1475,9 +1476,44 @@ export class SignalProcessor {
           arcId: arc.id,
           fireAt,
           suffix,
+          sqsMessageAttributeMessageType: "signal_followup",
         });
         if (scheduleResult.isErr()) {
           this.logger.error("Failed to create calendar day-of schedule.", { code: "processor.calendar.schedule_failed", accountId, arcId: arc.id, signalId: calendarSignalId, fireAt, error: scheduleResult.error });
+        }
+      }
+    }
+
+    // Schedule an RSVP reminder 24h before event start (only for REQUEST invites)
+    if (this.schedulerClient && calendarData.method?.toUpperCase() === "REQUEST") {
+      if (!calendarData.startTime) {
+        this.logger.warn("Calendar REQUEST missing startTime — skipping RSVP schedule.", { code: "processor.calendar.rsvp_missing_start_time", accountId, arcId: arc.id, signalId: calendarSignalId });
+      } else {
+        const eventStart = DateTime.fromISO(calendarData.startTime, { zone: "utc" });
+        if (!eventStart.isValid) {
+          this.logger.warn("Calendar REQUEST has invalid startTime — skipping RSVP schedule.", { code: "processor.calendar.rsvp_invalid_start_time", accountId, arcId: arc.id, signalId: calendarSignalId, startTime: calendarData.startTime });
+        } else {
+          const now = DateTime.utc();
+          const reminderTime = eventStart.minus({ hours: RSVP_REMINDER_HOURS_BEFORE });
+          if (reminderTime > now) {
+            const fireAt = reminderTime.toISO()!;
+            const suffix = `rsvp.${eventStart.toFormat("yyyyMMdd")}`;
+            const rsvpResult = await this.schedulerClient.createFollowup({
+              accountId,
+              signalId: calendarSignalId,
+              arcId: arc.id,
+              fireAt,
+              suffix,
+              sqsMessageAttributeMessageType: "rsvp_reminder",
+            });
+            if (rsvpResult.isErr()) {
+              this.logger.error("Failed to create RSVP reminder schedule.", {
+                code: "processor.calendar.rsvp_schedule_failed",
+                accountId, arcId: arc.id, signalId: calendarSignalId, fireAt,
+                error: rsvpResult.error,
+              });
+            }
+          }
         }
       }
     }

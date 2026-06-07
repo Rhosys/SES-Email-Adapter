@@ -232,7 +232,7 @@ describe("Feature: signal-followup-scheduler, Calendar scheduling integration", 
 
       await processor.processRecord(makeMessage("msg-cal-future"), 1);
 
-      expect(schedulerClient.createFollowup).toHaveBeenCalledOnce();
+      expect(schedulerClient.createFollowup).toHaveBeenCalledTimes(2);
       const call = schedulerClient.createFollowup.mock.calls[0]![0];
       expect(call.accountId).toBe(TEST_ACCOUNT_ID);
       expect(call.suffix).toBe("calendar.20250715");
@@ -418,7 +418,7 @@ describe("Feature: signal-followup-scheduler, Property 4: Calendar schedule fire
 
     await processor.processRecord(makeMessage(`msg-prop4-${startTime}`), 1);
 
-    expect(schedulerClient.createFollowup).toHaveBeenCalledOnce();
+    expect(schedulerClient.createFollowup).toHaveBeenCalled();
     const call = schedulerClient.createFollowup.mock.calls[0]![0];
     expect(call.fireAt).toBe(expectedFireAt);
     expect(call.suffix).toBe(expectedSuffix);
@@ -507,7 +507,7 @@ describe("Feature: signal-followup-scheduler, Property 5: Fire time floor — ne
 
     await processor.processRecord(makeMessage(`msg-prop5-safe-${startTime}`), 1);
 
-    expect(schedulerClient.createFollowup).toHaveBeenCalledOnce();
+    expect(schedulerClient.createFollowup).toHaveBeenCalled();
     const call = schedulerClient.createFollowup.mock.calls[0]![0];
     expect(call.fireAt).toBe(expectedFireAt);
     // Verify fire time is >= now
