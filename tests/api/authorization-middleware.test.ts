@@ -25,7 +25,7 @@ function createTestApp(access: AccessService, logger: MockLogger) {
 
   // Simulate JWT middleware setting auth context
   app.use("*", async (c, next) => {
-    c.set("auth", { accountId: "acct-123", userId: "user-456" });
+    c.set("auth", { userId: "user-456" });
     await next();
   });
 
@@ -162,7 +162,7 @@ describe("authorize() middleware", () => {
     const handlerSpy = vi.fn((c: any) => c.json({ ok: true }));
     const app = new Hono<AppEnv>();
     app.use("*", async (c, next) => {
-      c.set("auth", { accountId: "acct-123", userId: "user-456" });
+      c.set("auth", { userId: "user-456" });
       await next();
     });
     app.get("/test", authorize("test:read", "resource"), handlerSpy);

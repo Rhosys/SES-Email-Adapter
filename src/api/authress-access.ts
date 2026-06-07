@@ -145,8 +145,8 @@ export class AuthressAccessService implements AccessService {
     }
   }
 
-  async checkAccess(userId: string, accountId: string, permission: string): Promise<void> {
-    await this.client.userPermissions.authorizeUser(userId, `accounts/${accountId}`, permission);
+  async checkAccess(userId: string, resourceUri: string, permission: string): Promise<void> {
+    await this.client.userPermissions.authorizeUser(userId, resourceUri, permission);
   }
 
   async createInvite(accountId: string, email: string, role: AccountRole): Promise<Result<{ inviteId: string }, AuthressServiceError>> {

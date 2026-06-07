@@ -27,6 +27,8 @@ export class AuthorizationMiddleware {
    */
   authorize(permission: string, resourceUri: string | ((c: Context) => string)): MiddlewareHandler {
     return async (c, next) => {
+      c.set("authorizationVerified", true);
+
       const auth = c.get("auth") as AuthContext | undefined;
       if (!auth?.userId) {
         c.status(401);
@@ -42,8 +44,6 @@ export class AuthorizationMiddleware {
       try {
         await this.access.checkAccess(userId, resolvedResourceUri, permission);
         this.logger.trackPoint("authorization_check_passed");
-        // Authorization successful — set flag for guard to check
-        c.set("authorizationVerified", true);
         await next();
       } catch (error) {
         const status = (error as { status?: number }).status
