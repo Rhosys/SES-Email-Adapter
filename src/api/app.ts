@@ -32,6 +32,7 @@ import type { sendRsvp as SendRsvpFn } from "../processor/calendar/rsvp-composer
 import type { PostApprovalCalendarHandlerDeps } from "../processor/calendar/post-approval-handler.js";
 import { handlePostApprovalCalendar } from "../processor/calendar/post-approval-handler.js";
 import type { SchedulerClient } from "../scheduler/scheduler-client.js";
+import { buildScheduleName } from "../scheduler/schedule-name.js";
 import { durationToSeconds } from "../processor/retention.js";
 
 // ---------------------------------------------------------------------------
@@ -528,6 +529,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
         arcId: arc.id,
         fireAt: body.followupAt,
         suffix: "followup",
+        sqsMessageAttributeMessageType: "signal_followup",
       });
 
       if (scheduleResult.isErr()) {
@@ -1035,6 +1037,21 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
 
     const saveResult = await arcDb.saveSignal(responseSignal);
     if (saveResult.isErr()) return err(c, 500, "Internal Server Error");
+
+    // Non-blocking RSVP schedule cancellation
+    // The calendar_event signal is already loaded as `signal` (validated above)
+    if (schedulerClient && calendarData.startTime) {
+      const eventStart = DateTime.fromISO(calendarData.startTime, { zone: "utc" });
+      if (eventStart.isValid && eventStart > DateTime.utc()) {
+        const scheduleName = buildScheduleName(accountId, signal.id, `rsvp.${eventStart.toFormat("yyyyMMdd")}`);
+        const deleteResult = await schedulerClient.deleteFollowup(scheduleName);
+        if (deleteResult.isErr()) {
+          logger.warn("Failed to delete RSVP reminder schedule — fire-time check will handle.", { code: "rsvp.cancel.delete_failed", scheduleName, error: deleteResult.error });
+        }
+      }
+    } else if (schedulerClient && !calendarData.startTime) {
+      logger.track("Calendar event has no startTime — skipping RSVP schedule cancellation.", { code: "rsvp.cancel.no_start_time", accountId, arcId: arc.id, signalId: signal.id });
+    }
 
     return c.json(toApiSignal(responseSignal), 200);
   });
