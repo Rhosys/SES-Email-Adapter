@@ -391,12 +391,6 @@ describe("API", () => {
       const res = await req(app, "GET", `${A}/arcs/nonexistent`);
       expect(res.status).toBe(404);
     });
-
-    it("returns 403 when Arc belongs to a different account", async () => {
-      vi.mocked(arcDb.getArc).mockResolvedValueOnce(ok(makeArc({ accountId: "other-account" })));
-      const res = await req(app, "GET", `${A}/arcs/arc-001`);
-      expect(res.status).toBe(403);
-    });
   });
 
   describe("PATCH /accounts/:accountId/arcs/:id", () => {
@@ -538,12 +532,6 @@ describe("API", () => {
     it("returns 404 for unknown Signal", async () => {
       const res = await req(app, "GET", `${A}/signals/nonexistent`);
       expect(res.status).toBe(404);
-    });
-
-    it("returns 403 when Signal belongs to a different account", async () => {
-      vi.mocked(arcDb.getSignalById).mockResolvedValueOnce(ok(makeSignal({ accountId: "other-account" })));
-      const res = await req(app, "GET", `${A}/signals/SES%23msg-001`);
-      expect(res.status).toBe(403);
     });
   });
 

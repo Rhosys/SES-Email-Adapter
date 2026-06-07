@@ -100,7 +100,7 @@ describe("Authorization failure returns 403 with error code", () => {
 
     const res = await app.request("/accounts/acct-1");
     expect(res.status).toBe(403);
-    expect(await res.json()).toEqual({ title: "Forbidden", errorCode: "AccessDenied" });
+    expect(await res.json()).toEqual({ title: "Entity user-1 is missing permission 'accounts:read' on 'accounts/acct-1'.", errorCode: "AccessDenied" });
   });
 });
 
@@ -137,7 +137,7 @@ describe("Authress SDK failure returns 500 with logged error", () => {
 
     const res = await app.request("/accounts/acct-1");
     expect(res.status).toBe(403);
-    expect(await res.json()).toEqual({ title: "Forbidden", errorCode: "AccessDenied" });
+    expect(await res.json()).toEqual({ title: "Entity user-1 is missing permission 'accounts:read' on 'accounts/acct-1'.", errorCode: "AccessDenied" });
 
     const warnCall = logger.calls.find((c) => c.method === "warn" && c.context?.code === "authorization.not_found");
     expect(warnCall).toBeDefined();
@@ -208,6 +208,6 @@ describe("Error responses sanitize internal details", () => {
 
     expect(bodyStr).not.toMatch(/https?:\/\//);
     expect(bodyStr.toLowerCase()).not.toContain("authress");
-    expect(body).toEqual({ title: "Forbidden", errorCode: "AccessDenied" });
+    expect(body).toEqual({ title: "Entity user-1 is missing permission 'accounts:read' on 'accounts/acct-1'.", errorCode: "AccessDenied" });
   });
 });

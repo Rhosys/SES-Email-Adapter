@@ -205,10 +205,24 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
   });
   app.get("/", (c) => c.redirect("/.well-known/api-catalog", 301));
 
-  // Attach x-request-id to every response
+  // Attach x-request-id header to every response and errorId to 4XX/5XX JSON bodies
   app.use("*", async (c, next) => {
     await next();
-    c.res.headers.set("x-request-id", logger.getInvocationId());
+    const requestId = logger.getInvocationId();
+    c.res.headers.set("x-request-id", requestId);
+
+    // Enrich error response bodies with errorId when missing
+    const status = c.res.status;
+    if (status >= 400 && c.res.headers.get("content-type")?.includes("application/json")) {
+      const clone = c.res.clone();
+      const body = await clone.json();
+      if (body && typeof body === "object" && !("errorId" in body)) {
+        c.res = new Response(JSON.stringify({ ...body, errorId: requestId }), {
+          status,
+          headers: c.res.headers,
+        });
+      }
+    }
   });
 
   // CloudFront origin verification — reject requests that bypass CloudFront
@@ -247,7 +261,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
   });
 
   // Authorization guard — safety net for forgotten authorize() calls on account-scoped routes
-  app.use("/accounts/:accountId/*", authorizationGuard());
+  app.use("/accounts/:accountId/*", authorizationGuard(logger));
 
   // Per-route authorization middleware factory
   const authorize = access ? createAuthorize(access, logger) : null;
@@ -430,7 +444,6 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     if (arcResult.isErr()) return err(c, 500, "Internal Server Error");
     const arc = arcResult.value;
     if (!arc) return err(c, 404, "Arc not found", "ARC_NOT_FOUND");
-    if (arc.accountId !== accountId) return err(c, 403, "Forbidden");
     return c.json(toApiArc(arc), 200);
   });
 
@@ -447,7 +460,6 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     if (arcResult.isErr()) return err(c, 500, "Internal Server Error");
     const arc = arcResult.value;
     if (!arc) return err(c, 404, "Arc not found", "ARC_NOT_FOUND");
-    if (arc.accountId !== accountId) return err(c, 403, "Forbidden");
     const body = await zParse(UpdateArcRequest, c.req.raw);
 
     // violate_report: block the sender domain and delete the arc
@@ -505,7 +517,6 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     if (arcResult.isErr()) return err(c, 500, "Internal Server Error");
     const arc = arcResult.value;
     if (!arc) return err(c, 404, "Arc not found", "ARC_NOT_FOUND");
-    if (arc.accountId !== accountId) return err(c, 403, "Forbidden");
     const query = c.req.query();
     const params: PageParams = {
       ...(query["cursor"] ? { cursor: query["cursor"] } : {}),
@@ -557,7 +568,6 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     if (arcResult.isErr()) return err(c, 500, "Internal Server Error");
     const arc = arcResult.value;
     if (!arc) return err(c, 404, "Arc not found", "ARC_NOT_FOUND");
-    if (arc.accountId !== accountId) return err(c, 403, "Forbidden");
     const body = await zParse(CreateDraftSignalRequest, c.req.raw);
     const now = DateTime.utc().toISO()!;
     const id = generateId("sgn-");
@@ -605,7 +615,6 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     if (arcResult.isErr()) return err(c, 500, "Internal Server Error");
     const arc = arcResult.value;
     if (!arc) return err(c, 404, "Arc not found", "ARC_NOT_FOUND");
-    if (arc.accountId !== accountId) return err(c, 403, "Forbidden");
     const signalResult = await arcDb.getSignalById(accountId, c.req.param("id")!, c.req.param("arcId")!);
     if (signalResult.isErr()) return err(c, 500, "Internal Server Error");
     const signal = signalResult.value;
@@ -667,7 +676,6 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     if (signalResult.isErr()) return err(c, 500, "Internal Server Error");
     const signal = signalResult.value;
     if (!signal) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
-    if (signal.accountId !== accountId) return err(c, 403, "Forbidden");
     if (signal.status !== "quarantine_visible" && signal.status !== "quarantine_hidden") {
       return err(c, 400, "Only quarantined signals can have their status updated", "SIGNAL_NOT_REVIEWABLE");
     }
@@ -764,7 +772,6 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     if (signalResult.isErr()) return err(c, 500, "Internal Server Error");
     const signal = signalResult.value;
     if (!signal) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
-    if (signal.accountId !== accountId) return err(c, 403, "Forbidden");
     const withUrls = contentCdnBaseUrl ? withAttachmentUrls(signal, contentCdnBaseUrl) : signal;
     return c.json(toApiSignal(withUrls), 200);
   });
@@ -782,7 +789,6 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     if (signalResult.isErr()) return err(c, 500, "Internal Server Error");
     const signal = signalResult.value;
     if (!signal) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
-    if (signal.accountId !== accountId) return err(c, 403, "Forbidden");
     if (signal.status === "sent") return err(c, 400, "Signal already sent", "SIGNAL_ALREADY_SENT");
     if (signal.status !== "draft" && signal.status !== "pending_send") return err(c, 400, "Only draft or pending signals can be updated", "SIGNAL_NOT_EDITABLE");
 
@@ -819,14 +825,12 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     if (arcResult.isErr()) return err(c, 500, "Internal Server Error");
     const arc = arcResult.value;
     if (!arc) return err(c, 404, "Arc not found", "ARC_NOT_FOUND");
-    if (arc.accountId !== accountId) return err(c, 403, "Forbidden");
 
     // Signal validation
     const signalResult = await arcDb.getSignalById(accountId, c.req.param("id")!, c.req.param("arcId")!);
     if (signalResult.isErr()) return err(c, 500, "Internal Server Error");
     const signal = signalResult.value;
     if (!signal) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
-    if (signal.accountId !== accountId) return err(c, 403, "Forbidden");
     if (signal.arcId !== arc.id) return err(c, 400, "Signal does not belong to this arc", "SIGNAL_ARC_MISMATCH");
     if (signal.status !== "draft") return err(c, 400, "Only draft signals can be sent", "SIGNAL_NOT_DRAFT");
 
@@ -866,7 +870,6 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     if (signalResult.isErr()) return err(c, 500, "Internal Server Error");
     const signal = signalResult.value;
     if (!signal) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
-    if (signal.accountId !== accountId) return err(c, 403, "Forbidden");
     if (signal.status === "sent") return err(c, 400, "Signal already sent", "SIGNAL_ALREADY_SENT");
     if (signal.status !== "draft") return err(c, 400, "Only draft signals can be deleted", "SIGNAL_NOT_DRAFT");
     const deleteResult = await arcDb.deleteSignal(accountId, signal.signalLookupId);
@@ -894,7 +897,6 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     if (arcResult.isErr()) return err(c, 500, "Internal Server Error");
     const arc = arcResult.value;
     if (!arc) return err(c, 404, "Arc not found", "ARC_NOT_FOUND");
-    if (arc.accountId !== accountId) return err(c, 403, "Forbidden");
 
     // Validate signal — must be a calendar_event signal
     const signalResult = await arcDb.getSignalById(accountId, c.req.param("id")!, c.req.param("arcId")!);
@@ -1331,7 +1333,6 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     if (domainResult.isErr()) return err(c, 500, "Internal Server Error");
     const domain = domainResult.value;
     if (!domain) return err(c, 404, "Domain not found", "DOMAIN_NOT_FOUND");
-    if (domain.accountId !== accountId) return err(c, 403, "Forbidden");
     const records = buildDnsRecords(domain);
     return c.json(toApiDomainWithRecords(domain, records), 200);
   });
@@ -1349,7 +1350,6 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     if (domainResult.isErr()) return err(c, 500, "Internal Server Error");
     const domain = domainResult.value;
     if (!domain) return err(c, 404, "Domain not found", "DOMAIN_NOT_FOUND");
-    if (domain.accountId !== accountId) return err(c, 403, "Forbidden");
     const records = await checkDomain(domain);
     const now = DateTime.utc().toISO()!;
     const failingRecords = records.filter((r) => r.status === "failing").map((r) => r.name);
@@ -1381,7 +1381,6 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     if (domainResult.isErr()) return err(c, 500, "Internal Server Error");
     const domain = domainResult.value;
     if (!domain) return err(c, 404, "Domain not found", "DOMAIN_NOT_FOUND");
-    if (domain.accountId !== accountId) return err(c, 403, "Forbidden");
     const deleteResult = await accountDb.deleteDomain(accountId, domain.id);
     if (deleteResult.isErr()) return err(c, 500, "Internal Server Error");
     return new Response(null, { status: 204 });
