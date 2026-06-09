@@ -18,9 +18,7 @@ import type { DbError, Result } from "../errors.js";
 
 export interface DomainIdentityService {
   register(domain: string, accountId: string): Promise<Result<void, DbError>>;
-  deregister(domain: string, accountId: string): Promise<Result<void, DbError>>;
-  /** Derive the SES tenant name for a customer account. */
-  tenantNameForAccount(accountId: string): string;
+  deregister(domain: string): Promise<Result<void, DbError>>;
 }
 
 export class SesDomainIdentityService implements DomainIdentityService {
@@ -29,20 +27,22 @@ export class SesDomainIdentityService implements DomainIdentityService {
     private readonly dkimSelector: string,
     private readonly dkimPrivateKey: string,
     private readonly mailDomain: string,
-    private readonly configurationSetName?: string,
-    private readonly awsRegion?: string,
-    private readonly awsAccountId?: string,
+    private readonly configurationSetArn: string,
   ) {}
-
-  tenantNameForAccount(accountId: string): string {
-    return accountId;
-  }
 
   async register(domain: string, accountId: string): Promise<Result<void, DbError>> {
     try {
+      // Derive region, AWS account ID, and config set name from the ARN
+      // Format: arn:aws:ses:{region}:{accountId}:configuration-set/{name}
+      const arnParts = this.configurationSetArn.split(":");
+      const region = arnParts[3];
+      const awsAccountId = arnParts[4];
+      const configSetName = this.configurationSetArn.split("/").pop()!;
+
       await this.sesv2.send(new CreateEmailIdentityCommand({
         EmailIdentity: domain,
-        ConfigurationSetName: this.configurationSetName,
+        ConfigurationSetName: configSetName,
+        Tags: [{ Key: "AccountId", Value: accountId }],
         DkimSigningAttributes: {
           DomainSigningSelector: this.dkimSelector,
           DomainSigningPrivateKey: this.dkimPrivateKey,
@@ -56,18 +56,13 @@ export class SesDomainIdentityService implements DomainIdentityService {
         MailFromDomain: `bounce.${domain}`,
       }));
 
-      // Create SES tenant for reputation isolation (one per account)
-      const tenantName = this.tenantNameForAccount(accountId);
-      await this.createTenantIfNotExists(tenantName);
+      // Create SES tenant for reputation isolation (one per account, name = accountId)
+      await this.createTenantIfNotExists(accountId);
 
       // Associate the identity and configuration set with the tenant
-      const identityArn = `arn:aws:ses:${this.awsRegion}:${this.awsAccountId}:identity/${domain}`;
-      await this.associateResource(tenantName, identityArn);
-
-      if (this.configurationSetName) {
-        const configSetArn = `arn:aws:ses:${this.awsRegion}:${this.awsAccountId}:configuration-set/${this.configurationSetName}`;
-        await this.associateResource(tenantName, configSetArn);
-      }
+      const identityArn = `arn:aws:ses:${region}:${awsAccountId}:identity/${domain}`;
+      await this.associateResource(accountId, identityArn);
+      await this.associateResource(accountId, this.configurationSetArn);
 
       return ok(undefined);
     } catch (e: unknown) {
@@ -79,7 +74,7 @@ export class SesDomainIdentityService implements DomainIdentityService {
     }
   }
 
-  async deregister(domain: string, _accountId: string): Promise<Result<void, DbError>> {
+  async deregister(domain: string): Promise<Result<void, DbError>> {
     try {
       await this.sesv2.send(new DeleteEmailIdentityCommand({
         EmailIdentity: domain,
@@ -100,7 +95,10 @@ export class SesDomainIdentityService implements DomainIdentityService {
 
   private async createTenantIfNotExists(tenantName: string): Promise<void> {
     try {
-      await this.sesv2.send(new CreateTenantCommand({ TenantName: tenantName }));
+      await this.sesv2.send(new CreateTenantCommand({
+        TenantName: tenantName,
+        Tags: [{ Key: "AccountId", Value: tenantName }],
+      }));
     } catch (e: unknown) {
       // Tenant already exists — fine
       if (e instanceof Error && e.name === "AlreadyExistsException") return;

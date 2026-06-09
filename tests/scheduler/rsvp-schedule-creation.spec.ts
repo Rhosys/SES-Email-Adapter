@@ -13,6 +13,7 @@ import { ok } from "../../src/errors.js";
 import { SignalProcessor } from "../../src/processor/processor.js";
 import type { ArcMatcher, InboundSignalMessage } from "../../src/processor/processor.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
+import { makeSharedNewDeps, makeRuleEvaluator3 } from "../processor/_shared-new-deps.js";
 import { makeArcDbMock, makeAccountDbMock, makeProcessingDbMock } from "../processor/_helpers.js";
 import type { ArcDatabase } from "../../src/database/arc-database.js";
 import type { ContentSanitizerClient } from "../../src/processor/content-sanitizer-client.js";
@@ -159,6 +160,7 @@ function buildProcessor(opts: {
   }));
 
   return new SignalProcessor({
+    ...makeSharedNewDeps(),
     arcDb,
     accountDb,
     processingDb: makeProcessingDbMock(),
@@ -176,7 +178,7 @@ function buildProcessor(opts: {
       findMatch: vi.fn().mockResolvedValue(ok(null)),
     },
     arcMatcher: makeArcMatcher(),
-    ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
+    ruleEvaluator: makeRuleEvaluator3(mockLogger),
     logger: mockLogger,
     notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
     forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },

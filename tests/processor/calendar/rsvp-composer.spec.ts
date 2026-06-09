@@ -76,6 +76,7 @@ describe("sendRsvp — RSVP targets ORGANIZER mailto: address", () => {
         aliasAddress: "alias@proxy.com",
         organizerAddress: organizer,
         fromAddress: "alias@proxy.com",
+        accountId: "acct-test",
       },
       { emailService },
     );
@@ -119,6 +120,7 @@ describe("sendRsvp — REPLY uses original UID not proxy UID", () => {
         aliasAddress: "alias@proxy.com",
         organizerAddress: "organizer@example.com",
         fromAddress: "alias@proxy.com",
+        accountId: "acct-test",
       },
       { emailService },
     );

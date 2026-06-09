@@ -73,9 +73,9 @@ export class SignalClassifier {
   private readonly client: BedrockRuntimeClient;
   private readonly logger: Logger;
 
-  constructor(client?: BedrockRuntimeClient, logger?: Logger) {
-    this.client = client ?? new BedrockRuntimeClient({});
-    this.logger = logger ?? console as unknown as Logger;
+  constructor(client: BedrockRuntimeClient, logger: Logger) {
+    this.client = client;
+    this.logger = logger;
   }
 
   async classify(input: ClassificationInput): Promise<Result<ClassificationOutput, ClassificationError>> {

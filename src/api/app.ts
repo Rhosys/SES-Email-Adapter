@@ -1007,6 +1007,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
         aliasAddress: recipientAddress,
         organizerAddress: calendarData.organizer,
         fromAddress: recipientAddress,
+        accountId,
       },
       { emailService },
     );

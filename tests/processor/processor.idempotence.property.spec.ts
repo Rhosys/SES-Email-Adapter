@@ -3,6 +3,7 @@ import { ok } from "../../src/errors.js";
 import { SignalProcessor, SYSTEM_RULES } from "../../src/processor/processor.js";
 import type { ArcMatcher, InboundSignalMessage } from "../../src/processor/processor.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
+import { makeSharedNewDeps, makeRuleEvaluator3 } from "./_shared-new-deps.js";
 import { makeArcDbMock, makeAccountDbMock, makeProcessingDbMock } from "./_helpers.js";
 import type { ArcDatabase } from "../../src/database/arc-database.js";
 import type { ContentSanitizerClient } from "../../src/processor/content-sanitizer-client.js";
@@ -141,14 +142,14 @@ describe("Cross-layer idempotence — live writes + cache + Aurora", () => {
     };
 
     const mockLogger = createMockLogger();
-    const processor = new SignalProcessor({
+    const processor = new SignalProcessor({ ...makeSharedNewDeps(),
       arcDb, accountDb, processingDb,
       contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
       classifier: makeClassifier(),
       embeddingGenerator,
       auroraWriter,
       arcMatcher: makeArcMatcher(),
-      ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
+      ruleEvaluator: makeRuleEvaluator3(mockLogger),
       logger: mockLogger,
       notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
@@ -195,14 +196,14 @@ describe("Cross-layer idempotence — live writes + cache + Aurora", () => {
     };
 
     const mockLogger = createMockLogger();
-    const processor = new SignalProcessor({
+    const processor = new SignalProcessor({ ...makeSharedNewDeps(),
       arcDb, accountDb, processingDb,
       contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
       classifier: makeClassifier(),
       embeddingGenerator,
       auroraWriter,
       arcMatcher: makeArcMatcher(),
-      ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
+      ruleEvaluator: makeRuleEvaluator3(mockLogger),
       logger: mockLogger,
       notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },

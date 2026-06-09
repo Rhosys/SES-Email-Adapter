@@ -3,6 +3,7 @@ import { ok } from "../../src/errors.js";
 import { SignalProcessor, SYSTEM_RULES } from "../../src/processor/processor.js";
 import type { ArcMatcher, InboundSignalMessage } from "../../src/processor/processor.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
+import { makeSharedNewDeps, makeRuleEvaluator3 } from "./_shared-new-deps.js";
 import { makeArcDbMock, makeAccountDbMock, makeProcessingDbMock } from "./_helpers.js";
 import type { ContentSanitizerClient } from "../../src/processor/content-sanitizer-client.js";
 import type { SignalClassifier, ClassificationOutput } from "../../src/classifier/classifier.js";
@@ -174,14 +175,14 @@ describe("Property 9: S3 retention failure is isolated and non-fatal", () => {
       applyPlanRetention: vi.fn().mockRejectedValue(error),
     };
 
-    const processor = new SignalProcessor({
+    const processor = new SignalProcessor({ ...makeSharedNewDeps(),
       ...makeStore(),
       contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
       classifier: makeClassifier(),
       embeddingGenerator: makeEmbeddingGenerator(),
       auroraWriter: makeAuroraWriter(),
       arcMatcher: makeArcMatcher(),
-      ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
+      ruleEvaluator: makeRuleEvaluator3(mockLogger),
       logger: mockLogger,
       notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
@@ -203,14 +204,14 @@ describe("Property 9: S3 retention failure is isolated and non-fatal", () => {
       applyPlanRetention: vi.fn().mockRejectedValue(error),
     };
 
-    const processor = new SignalProcessor({
+    const processor = new SignalProcessor({ ...makeSharedNewDeps(),
       ...makeStore(),
       contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
       classifier: makeClassifier(),
       embeddingGenerator: makeEmbeddingGenerator(),
       auroraWriter,
       arcMatcher: makeArcMatcher(),
-      ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
+      ruleEvaluator: makeRuleEvaluator3(mockLogger),
       logger: mockLogger,
       notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
@@ -232,14 +233,14 @@ describe("Property 9: S3 retention failure is isolated and non-fatal", () => {
       applyPlanRetention: vi.fn().mockRejectedValue(error),
     };
 
-    const processor = new SignalProcessor({
+    const processor = new SignalProcessor({ ...makeSharedNewDeps(),
       ...makeStore(),
       contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
       classifier: makeClassifier(),
       embeddingGenerator: makeEmbeddingGenerator(),
       auroraWriter: makeAuroraWriter(),
       arcMatcher: makeArcMatcher(),
-      ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
+      ruleEvaluator: makeRuleEvaluator3(mockLogger),
       logger: mockLogger,
       notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
@@ -270,14 +271,14 @@ describe("Property 9: S3 retention failure is isolated and non-fatal", () => {
     };
     const logger1 = createMockLogger();
 
-    const processor1 = new SignalProcessor({
+    const processor1 = new SignalProcessor({ ...makeSharedNewDeps(),
       ...store1,
       contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
       classifier: makeClassifier(),
       embeddingGenerator: makeEmbeddingGenerator(),
       auroraWriter: auroraWriter1,
       arcMatcher: makeArcMatcher(),
-      ruleEvaluator: new JsonLogicRuleEvaluator(logger1),
+      ruleEvaluator: makeRuleEvaluator3(logger1),
       logger: logger1,
       notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
@@ -295,14 +296,14 @@ describe("Property 9: S3 retention failure is isolated and non-fatal", () => {
     const auroraWriter2 = makeAuroraWriter();
     const logger2 = createMockLogger();
 
-    const processor2 = new SignalProcessor({
+    const processor2 = new SignalProcessor({ ...makeSharedNewDeps(),
       ...store2,
       contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
       classifier: makeClassifier(),
       embeddingGenerator: makeEmbeddingGenerator(),
       auroraWriter: auroraWriter2,
       arcMatcher: makeArcMatcher(),
-      ruleEvaluator: new JsonLogicRuleEvaluator(logger2),
+      ruleEvaluator: makeRuleEvaluator3(logger2),
       logger: logger2,
       notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
@@ -336,14 +337,14 @@ describe("Property 9: S3 retention failure is isolated and non-fatal", () => {
   it("no retentionService configured — processing succeeds without any S3 interaction", async () => {
     const auroraWriter = makeAuroraWriter();
 
-    const processor = new SignalProcessor({
+    const processor = new SignalProcessor({ ...makeSharedNewDeps(),
       ...makeStore(),
       contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
       classifier: makeClassifier(),
       embeddingGenerator: makeEmbeddingGenerator(),
       auroraWriter,
       arcMatcher: makeArcMatcher(),
-      ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
+      ruleEvaluator: makeRuleEvaluator3(mockLogger),
       logger: mockLogger,
       notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
@@ -379,14 +380,14 @@ describe("Property 9: S3 retention failure is isolated and non-fatal", () => {
       }),
     };
 
-    const processor = new SignalProcessor({
+    const processor = new SignalProcessor({ ...makeSharedNewDeps(),
       ...makeStore(),
       contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
       classifier: makeClassifier(),
       embeddingGenerator: makeEmbeddingGenerator(),
       auroraWriter,
       arcMatcher: makeArcMatcher(),
-      ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
+      ruleEvaluator: makeRuleEvaluator3(mockLogger),
       logger: mockLogger,
       notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },

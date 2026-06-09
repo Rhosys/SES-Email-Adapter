@@ -8,6 +8,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { mockClient } from "aws-sdk-client-mock";
 import { BedrockRuntimeClient, InvokeModelCommand } from "@aws-sdk/client-bedrock-runtime";
 import { BedrockEmbeddingGenerator } from "../../src/embedding/embedding-generator.js";
+import { createMockLogger } from "../helpers/mock-logger.js";
 
 vi.mock("../../src/embedding/cluster-registry.js", () => ({
   CLUSTER_REGISTRY: Object.freeze([
@@ -79,7 +80,7 @@ describe("Property 5: generateForModel never throws", () => {
 
   beforeEach(() => {
     bedrockMock.reset();
-    generator = new BedrockEmbeddingGenerator(new BedrockRuntimeClient({}));
+    generator = new BedrockEmbeddingGenerator(new BedrockRuntimeClient({}), createMockLogger());
   });
 
   it.each(cases)("$scenario", async ({ embedText, modelId, bedrockBehavior }) => {

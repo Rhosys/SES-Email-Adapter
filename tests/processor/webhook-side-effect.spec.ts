@@ -3,6 +3,7 @@ import { ok } from "neverthrow";
 import { SignalProcessor, SYSTEM_RULES } from "../../src/processor/processor.js";
 import type { ArcMatcher, SqsDispatcher, Notifier, Forwarder, ReplySender, SideEffectPayload } from "../../src/processor/processor.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
+import { makeSharedNewDeps, makeRuleEvaluator3 } from "./_shared-new-deps.js";
 import { makeArcDbMock, makeAccountDbMock, makeProcessingDbMock } from "./_helpers.js";
 import type { AccountDatabase } from "../../src/database/account-database.js";
 import type { ContentSanitizerClient } from "../../src/processor/content-sanitizer-client.js";
@@ -132,14 +133,14 @@ function makeArc(overrides: Partial<Arc> = {}): Arc {
 }
 
 function makeProcessor(opts: { store: ReturnType<typeof makeStore>; logger: MockLogger; billingHandler?: BillingHandler }): SignalProcessor {
-  return new SignalProcessor({
+  return new SignalProcessor({ ...makeSharedNewDeps(),
     ...opts.store,
     contentSanitizer: { invoke: vi.fn() } as unknown as ContentSanitizerClient,
     classifier: { classify: vi.fn() } as unknown as Pick<SignalClassifier, "classify">,
     embeddingGenerator: { generateForModel: vi.fn(), generateForSecondaryClusters: vi.fn() } as unknown as EmbeddingGenerator,
     auroraWriter: { upsertEmbedding: vi.fn(), findMatch: vi.fn() } as unknown as MultiClusterAuroraWriter,
     arcMatcher: { findMatch: vi.fn(), upsertEmbedding: vi.fn() } as unknown as ArcMatcher,
-    ruleEvaluator: new JsonLogicRuleEvaluator(opts.logger),
+    ruleEvaluator: makeRuleEvaluator3(opts.logger),
     logger: opts.logger,
     retentionService: { applyPlanRetention: vi.fn() } as unknown as S3RetentionService,
     sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) } as unknown as SqsDispatcher,
@@ -180,14 +181,14 @@ describe("processSideEffect — webhook delivery", () => {
     const forwarder = { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) };
     const notifier = { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) };
 
-    const processor = new SignalProcessor({
+    const processor = new SignalProcessor({ ...makeSharedNewDeps(),
       ...store,
       contentSanitizer: { invoke: vi.fn() } as unknown as ContentSanitizerClient,
       classifier: { classify: vi.fn() } as unknown as Pick<SignalClassifier, "classify">,
       embeddingGenerator: { generateForModel: vi.fn(), generateForSecondaryClusters: vi.fn() } as unknown as EmbeddingGenerator,
       auroraWriter: { upsertEmbedding: vi.fn(), findMatch: vi.fn() } as unknown as MultiClusterAuroraWriter,
       arcMatcher: { findMatch: vi.fn(), upsertEmbedding: vi.fn() } as unknown as ArcMatcher,
-      ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
+      ruleEvaluator: makeRuleEvaluator3(mockLogger),
       logger: mockLogger,
       retentionService: { applyPlanRetention: vi.fn() } as unknown as S3RetentionService,
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) } as unknown as SqsDispatcher,

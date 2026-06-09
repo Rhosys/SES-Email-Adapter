@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { SignalClassifier } from "../../src/classifier/classifier.js";
 import type { ClassificationInput } from "../../src/classifier/classifier.js";
+import { BedrockRuntimeClient } from "@aws-sdk/client-bedrock-runtime";
 import { createMockLogger } from "../helpers/mock-logger.js";
 
 // ---------------------------------------------------------------------------
@@ -60,7 +61,7 @@ describe("SignalClassifier — guardrail trace handling", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     logger = createMockLogger();
-    classifier = new SignalClassifier(undefined, logger);
+    classifier = new SignalClassifier(new BedrockRuntimeClient({}), logger);
   });
 
   it("logs TRACK with detection metadata when guardrail detects prompt attack", async () => {

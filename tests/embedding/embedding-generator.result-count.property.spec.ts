@@ -8,6 +8,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { mockClient } from "aws-sdk-client-mock";
 import { BedrockRuntimeClient, InvokeModelCommand } from "@aws-sdk/client-bedrock-runtime";
 import type { ClusterRegistryEntry } from "../../src/embedding/cluster-registry.js";
+import { createMockLogger } from "../helpers/mock-logger.js";
 
 // ---------------------------------------------------------------------------
 // Hoisted mock state — allows dynamic secondary cluster count per test case
@@ -85,7 +86,7 @@ describe("Property 6: generateForSecondaryClusters result count", () => {
       body: new TextEncoder().encode(JSON.stringify({ embedding: [0.1, 0.2] })) as never,
     });
 
-    const generator = new BedrockEmbeddingGenerator(new BedrockRuntimeClient({}));
+    const generator = new BedrockEmbeddingGenerator(new BedrockRuntimeClient({}), createMockLogger());
     const results = await generator.generateForSecondaryClusters("test embedding text");
 
     // The property: result count === secondary cluster count

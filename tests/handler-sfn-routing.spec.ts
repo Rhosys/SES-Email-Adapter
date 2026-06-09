@@ -3,6 +3,7 @@ import type { Context } from "aws-lambda";
 
 // Env vars required by handler.ts at module load time
 process.env["MAIL_DOMAIN"] = "platform.email.rhosys.cloud";
+process.env["SES_CONFIGURATION_SET_ARN"] = "arn:aws:ses:eu-west-1:123456789012:configuration-set/test-config-set";
 
 // ---------------------------------------------------------------------------
 // Mock heavy dependencies so the handler module can load without real AWS SDK

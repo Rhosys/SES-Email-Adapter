@@ -296,7 +296,7 @@ interface SignalProcessorOptions {
   accountDb: AccountDatabase;
   processingDb: ProcessingDatabase;
   contentSanitizer: ContentSanitizerClient;
-  userCodeExecutor?: UserCodeExecutorClient;
+  userCodeExecutor: UserCodeExecutorClient;
   classifier: Pick<SignalClassifier, "classify">;
   embeddingGenerator: EmbeddingGenerator;
   auroraWriter: MultiClusterAuroraWriter;
@@ -309,10 +309,10 @@ interface SignalProcessorOptions {
   replySender: ReplySender;
   sqsDispatcher: SqsDispatcher;
   draftSendDispatcher: DraftSendDispatch;
-  billingHandler?: BillingHandler;
-  handlerRegistry?: HandlerRegistry;
+  billingHandler: BillingHandler;
+  handlerRegistry: HandlerRegistry;
   calendarForwarderDeps: CalendarForwarderDeps;
-  schedulerClient?: SchedulerClient;
+  schedulerClient: SchedulerClient;
   s3Client: S3Client;
   emailBucket: string;
   contentBucket: string;
@@ -337,9 +337,9 @@ export class SignalProcessor {
   private readonly sqsDispatcher: SqsDispatcher;
   private readonly draftSendDispatcher: DraftSendDispatch;
   private readonly billingHandler: BillingHandler;
-  private readonly handlerRegistry: HandlerRegistry | undefined;
+  private readonly handlerRegistry: HandlerRegistry;
   private readonly calendarForwarderDeps: CalendarForwarderDeps;
-  private readonly schedulerClient: SchedulerClient | undefined;
+  private readonly schedulerClient: SchedulerClient;
   private readonly s3Client: S3Client;
   private readonly emailBucket: string;
   private readonly contentBucket: string;
@@ -349,7 +349,7 @@ export class SignalProcessor {
     this.accountDb = opts.accountDb;
     this.processingDb = opts.processingDb;
     this.contentSanitizer = opts.contentSanitizer;
-    this.userCodeExecutor = opts.userCodeExecutor ?? { invoke: () => Promise.resolve({ success: true, purpose: "template_function", result: "" } as const), validateAst: () => Promise.resolve({ success: true, purpose: "validate_ast", result: { valid: true } } as const), validateAstBatch: () => Promise.resolve({ success: true, purpose: "validate_ast_batch", results: [] } as const) };
+    this.userCodeExecutor = opts.userCodeExecutor;
     this.classifier = opts.classifier;
     this.embeddingGenerator = opts.embeddingGenerator;
     this.auroraWriter = opts.auroraWriter;
@@ -362,7 +362,7 @@ export class SignalProcessor {
     this.retentionService = opts.retentionService;
     this.sqsDispatcher = opts.sqsDispatcher;
     this.draftSendDispatcher = opts.draftSendDispatcher;
-    this.billingHandler = opts.billingHandler ?? new BillingHandler();
+    this.billingHandler = opts.billingHandler;
     this.handlerRegistry = opts.handlerRegistry;
     this.calendarForwarderDeps = opts.calendarForwarderDeps;
     this.schedulerClient = opts.schedulerClient;
@@ -497,13 +497,11 @@ export class SignalProcessor {
     }
 
     // Workflow dispatch (critical — handler decides retriability)
-    if (this.handlerRegistry) {
-      this.logger.trackPoint("side_effect_workflow_start");
-      const dispatchResult = await this.handlerRegistry.dispatch(signal, arc, accountId);
-      this.logger.trackPoint("side_effect_workflow_complete");
-      if (dispatchResult.isErr()) {
-        criticalFailure = dispatchResult.error;
-      }
+    this.logger.trackPoint("side_effect_workflow_start");
+    const dispatchResult = await this.handlerRegistry.dispatch(signal, arc, accountId);
+    this.logger.trackPoint("side_effect_workflow_complete");
+    if (dispatchResult.isErr()) {
+      criticalFailure = dispatchResult.error;
     }
 
     // Pong (critical — the test confirmation is the product's first impression)
@@ -1475,7 +1473,7 @@ export class SignalProcessor {
     }
 
     // Schedule a day-of reminder if event startTime is in the future
-    if (this.schedulerClient && calendarData.startTime) {
+    if (calendarData.startTime) {
       const eventStart = DateTime.fromISO(calendarData.startTime, { zone: "utc" });
       const now = DateTime.utc();
       if (eventStart.isValid && eventStart > now) {
@@ -1496,7 +1494,7 @@ export class SignalProcessor {
     }
 
     // Schedule an RSVP reminder 24h before event start (only for REQUEST invites)
-    if (this.schedulerClient && calendarData.method?.toUpperCase() === "REQUEST") {
+    if (calendarData.method?.toUpperCase() === "REQUEST") {
       if (!calendarData.startTime) {
         this.logger.warn("Calendar REQUEST missing startTime — skipping RSVP schedule.", { code: "processor.calendar.rsvp_missing_start_time", accountId, arcId: arc.id, signalId: calendarSignalId });
       } else {

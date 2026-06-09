@@ -109,7 +109,7 @@ describe("domain-health-job staleness integration", () => {
     mockLogger = createMockLogger();
     const { AccountDatabase } = await import("../../src/database/account-database.js");
     const { ArcDatabase } = await import("../../src/database/arc-database.js");
-    job = new DomainHealthJob(new AccountDatabase() as any, new ArcDatabase() as any, mockLogger);
+    job = new DomainHealthJob(new AccountDatabase() as any, new ArcDatabase(mockLogger) as any, mockLogger);
   });
 
   afterEach(() => {

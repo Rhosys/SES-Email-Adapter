@@ -3,6 +3,7 @@ import { ok } from "../../src/errors.js";
 import { SignalProcessor, SYSTEM_RULES } from "../../src/processor/processor.js";
 import type { ArcMatcher, Notifier, Forwarder, ReplySender, SideEffectPayload } from "../../src/processor/processor.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
+import { makeSharedNewDeps, makeRuleEvaluator3 } from "./_shared-new-deps.js";
 import { makeArcDbMock, makeAccountDbMock, makeProcessingDbMock } from "./_helpers.js";
 import type { ContentSanitizerClient } from "../../src/processor/content-sanitizer-client.js";
 import type { EmbeddingGenerator } from "../../src/embedding/embedding-generator.js";
@@ -102,7 +103,7 @@ describe("processSideEffect — correlation context", () => {
 
   function makeProcessor(opts: { replySender: ReplySender; forwarder: Forwarder }) {
     mockLogger = createMockLogger();
-    return new SignalProcessor({
+    return new SignalProcessor({ ...makeSharedNewDeps(),
       ...makeStore(),
       contentSanitizer: { invoke: vi.fn() } as unknown as ContentSanitizerClient,
       s3Client: {} as never,
@@ -112,7 +113,7 @@ describe("processSideEffect — correlation context", () => {
       embeddingGenerator: { generateForModel: vi.fn(), generateForSecondaryClusters: vi.fn() } as unknown as EmbeddingGenerator,
       auroraWriter: { upsertEmbedding: vi.fn(), findMatch: vi.fn() } as unknown as MultiClusterAuroraWriter,
       arcMatcher: { findMatch: vi.fn(), upsertEmbedding: vi.fn() } as unknown as ArcMatcher,
-      ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
+      ruleEvaluator: makeRuleEvaluator3(mockLogger),
       notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       forwarder: opts.forwarder,
       retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },

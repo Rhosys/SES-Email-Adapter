@@ -33,7 +33,7 @@ export interface EmbeddingGenerator {
 export class BedrockEmbeddingGenerator implements EmbeddingGenerator {
   constructor(
     private readonly bedrock: BedrockRuntimeClient,
-    private readonly logger?: Logger,
+    private readonly logger: Logger,
   ) {}
 
   /**

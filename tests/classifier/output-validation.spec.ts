@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { SignalClassifier } from "../../src/classifier/classifier.js";
 import type { ClassificationInput } from "../../src/classifier/classifier.js";
+import { BedrockRuntimeClient } from "@aws-sdk/client-bedrock-runtime";
 import type { Logger } from "../../src/logger.js";
 
 // ---------------------------------------------------------------------------
@@ -59,7 +60,7 @@ describe("SignalClassifier — output validation", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    classifier = new SignalClassifier(undefined, mockLogger);
+    classifier = new SignalClassifier(new BedrockRuntimeClient({}), mockLogger);
   });
 
   // -------------------------------------------------------------------------

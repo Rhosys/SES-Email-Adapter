@@ -5,6 +5,7 @@ import { AccountDatabase } from "../../src/database/account-database.js";
 import { ArcDatabase } from "../../src/database/arc-database.js";
 import { ProcessingDatabase } from "../../src/database/processing-database.js";
 import { AuditDatabase } from "../../src/database/audit-database.js";
+import { createMockLogger } from "../helpers/mock-logger.js";
 
 const ddbMock = mockClient(DynamoDBDocumentClient);
 
@@ -130,7 +131,7 @@ describe("AccountDatabase", () => {
 
 describe("ArcDatabase", () => {
   let db: ArcDatabase;
-  beforeEach(() => { db = new ArcDatabase(); });
+  beforeEach(() => { db = new ArcDatabase(createMockLogger()); });
 
   describe("getSignalByMessageId", () => {
     it("returns ok(signal) when the signal exists", async () => {

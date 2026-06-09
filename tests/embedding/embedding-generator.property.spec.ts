@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { mockClient } from "aws-sdk-client-mock";
 import { BedrockRuntimeClient, InvokeModelCommand } from "@aws-sdk/client-bedrock-runtime";
 import { BedrockEmbeddingGenerator } from "../../src/embedding/embedding-generator.js";
+import { createMockLogger } from "../helpers/mock-logger.js";
 
 vi.mock("../../src/embedding/cluster-registry.js", () => ({
   CLUSTER_REGISTRY: Object.freeze([
@@ -26,7 +27,7 @@ describe("Active cluster set drives embedding generation", () => {
 
   beforeEach(() => {
     bedrockMock.reset();
-    generator = new BedrockEmbeddingGenerator(new BedrockRuntimeClient({}));
+    generator = new BedrockEmbeddingGenerator(new BedrockRuntimeClient({}), createMockLogger());
   });
 
   it("generateForModel returns ok with correct modelId and dimensions", async () => {

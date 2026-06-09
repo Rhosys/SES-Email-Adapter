@@ -12,6 +12,7 @@ import type { MultiClusterAuroraWriter } from "../../src/database/multi-cluster-
 import type { S3RetentionService } from "../../src/embedding/s3-retention-service.js";
 import type { EmailService } from "../../src/email/email-service.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
+import { makeSharedNewDeps, makeRuleEvaluator3 } from "./_shared-new-deps.js";
 import { createMockLogger, type MockLogger } from "../helpers/mock-logger.js";
 
 // ---------------------------------------------------------------------------
@@ -112,7 +113,7 @@ function makeProcessor(opts: {
   logger: MockLogger;
 }): SignalProcessor {
   const { store, userCodeExecutor, logger } = opts;
-  return new SignalProcessor({
+  return new SignalProcessor({ ...makeSharedNewDeps(),
     ...store,
     userCodeExecutor,
     contentSanitizer: { invoke: vi.fn() } as unknown as ContentSanitizerClient,
@@ -120,7 +121,7 @@ function makeProcessor(opts: {
     embeddingGenerator: { generateForModel: vi.fn(), generateForSecondaryClusters: vi.fn() } as unknown as EmbeddingGenerator,
     auroraWriter: { upsertEmbedding: vi.fn(), findMatch: vi.fn() } as unknown as MultiClusterAuroraWriter,
     arcMatcher: { findMatch: vi.fn().mockReturnValue(Promise.resolve(ok(null))), upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
-    ruleEvaluator: new JsonLogicRuleEvaluator(logger),
+    ruleEvaluator: makeRuleEvaluator3(logger),
     logger,
     notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
     forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },

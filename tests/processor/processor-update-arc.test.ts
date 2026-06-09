@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ok } from "neverthrow";
 import { SignalProcessor, SYSTEM_RULES } from "../../src/processor/processor.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
+import { makeSharedNewDeps } from "./_shared-new-deps.js";
 import type { ArcMatcher, RuleEvaluator, InboundSignalMessage, SqsDispatcher } from "../../src/processor/processor.js";
 import { makeArcDbMock, makeAccountDbMock, makeProcessingDbMock } from "./_helpers.js";
 import type { ContentSanitizerClient } from "../../src/processor/content-sanitizer-client.js";
@@ -154,6 +155,7 @@ function makeArc(overrides: Partial<Arc> = {}): Arc {
 
 function buildProcessor(arcDb: ReturnType<typeof makeArcDbMock>, accountDb: ReturnType<typeof makeAccountDbMock>, processingDb: ReturnType<typeof makeProcessingDbMock>, arcMatcher: ArcMatcher, classifier: Pick<SignalClassifier, "classify">, logger: MockLogger, ruleEvaluator: RuleEvaluator) {
   return new SignalProcessor({
+    ...makeSharedNewDeps(),
     arcDb,
     accountDb,
     processingDb,

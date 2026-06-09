@@ -300,6 +300,7 @@ describe("Scenario: UI RSVP sends masked reply to organizer preserving user priv
         aliasAddress: ALIAS_ADDRESS,
         organizerAddress: ORGANIZER_EMAIL,
         fromAddress: ALIAS_ADDRESS,
+        accountId: "acct-test",
       },
       { emailService },
     );

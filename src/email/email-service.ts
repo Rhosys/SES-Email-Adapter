@@ -14,23 +14,27 @@ export interface EmailSendOptions {
   headers?: Array<{ Name: string; Value: string }>;
   tags?: Array<{ Name: string; Value: string }>;
   fromOverride?: string;
+  /** Account sending on behalf of — maps to SES TenantName at the boundary. */
+  accountId: string;
 }
 
 export interface EmailRawOptions {
   to: string;
   rawData: Uint8Array;
   tags?: Array<{ Name: string; Value: string }>;
+  /** Account sending on behalf of — maps to SES TenantName at the boundary. */
+  accountId: string;
 }
 
 export class EmailService {
   private readonly sesv2: SESv2Client;
   private readonly from: string;
-  private readonly configSet: string;
+  private readonly configSetName: string;
 
-  constructor(sesv2: SESv2Client, opts: { from: string; configSet: string }) {
+  constructor(sesv2: SESv2Client, opts: { from: string; configSetName: string }) {
     this.sesv2 = sesv2;
     this.from = opts.from;
-    this.configSet = opts.configSet;
+    this.configSetName = opts.configSetName;
   }
 
   async send(opts: EmailSendOptions): Promise<Result<{ messageId: string }, DbError>> {
@@ -48,7 +52,8 @@ export class EmailService {
             ...(opts.headers?.length ? { Headers: opts.headers } : {}),
           },
         },
-        ...(this.configSet ? { ConfigurationSetName: this.configSet } : {}),
+        ConfigurationSetName: this.configSetName,
+        TenantName: opts.accountId,
         ...(opts.tags?.length ? { EmailTags: opts.tags } : {}),
       }));
       return ok({ messageId: result.MessageId ?? "" });
@@ -63,7 +68,8 @@ export class EmailService {
         FromEmailAddress: this.from,
         Destination: { ToAddresses: [opts.to] },
         Content: { Raw: { Data: opts.rawData } },
-        ...(this.configSet ? { ConfigurationSetName: this.configSet } : {}),
+        ConfigurationSetName: this.configSetName,
+        TenantName: opts.accountId,
         ...(opts.tags?.length ? { EmailTags: opts.tags } : {}),
       }));
       return ok({ messageId: result.MessageId ?? "" });

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { SignalClassifier, CLASSIFICATION_MODEL_ID } from "../../src/classifier/classifier.js";
 import type { ClassificationInput } from "../../src/classifier/classifier.js";
+import { BedrockRuntimeClient } from "@aws-sdk/client-bedrock-runtime";
 import { createMockLogger } from "../helpers/mock-logger.js";
 
 // ---------------------------------------------------------------------------
@@ -89,7 +90,7 @@ describe("SignalClassifier", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     logger = createMockLogger();
-    classifier = new SignalClassifier(undefined, logger);
+    classifier = new SignalClassifier(new BedrockRuntimeClient({}), logger);
   });
 
   // -------------------------------------------------------------------------

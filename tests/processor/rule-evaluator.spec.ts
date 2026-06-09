@@ -267,7 +267,7 @@ describe("JS rule context — Property 2: context preparation produces exactly t
 
   it("executionContext.signal has exactly the 8 specified fields — sensitive fields excluded", async () => {
     const mockExecutor = { invoke: vi.fn().mockResolvedValue({ success: true, purpose: "rule_condition", result: false }), validateAst: vi.fn(), validateAstBatch: vi.fn() };
-    const evaluator = new JsonLogicRuleEvaluator(createMockLogger(), mockExecutor);
+    const evaluator = new JsonLogicRuleEvaluator(createMockLogger(), mockExecutor, { annotateRuleError: vi.fn().mockResolvedValue(ok(undefined)) });
 
     const signal = makeSignal({
       data: {
@@ -304,7 +304,7 @@ describe("JS rule context — Property 2: context preparation produces exactly t
 
   it("executionContext.arc has exactly {id, labels, urgency, summary, workflow, status}", async () => {
     const mockExecutor = { invoke: vi.fn().mockResolvedValue({ success: true, purpose: "rule_condition", result: false }), validateAst: vi.fn(), validateAstBatch: vi.fn() };
-    const evaluator = new JsonLogicRuleEvaluator(createMockLogger(), mockExecutor);
+    const evaluator = new JsonLogicRuleEvaluator(createMockLogger(), mockExecutor, { annotateRuleError: vi.fn().mockResolvedValue(ok(undefined)) });
 
     const signal = makeSignal({});
     const arc = makeArc({ labels: ["important", "billing"], urgency: "high" });

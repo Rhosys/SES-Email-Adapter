@@ -41,6 +41,7 @@ describe("ExternalEmailSignalHandler.sendReply()", () => {
       subject: "Original Subject",
       body: "Reply body text",
       inReplyTo: "<original-id@mail.example.com>",
+      accountId: "acct-test",
     });
 
     expect(emailService.send).toHaveBeenCalledWith({
@@ -48,12 +49,14 @@ describe("ExternalEmailSignalHandler.sendReply()", () => {
       fromOverride: "sender@example.com",
       subject: "Re: Original Subject",
       textBody: "Reply body text",
+      accountId: "acct-test",
       headers: [
         { Name: "In-Reply-To", Value: "<original-id@mail.example.com>" },
         { Name: "References", Value: "<original-id@mail.example.com>" },
       ],
       tags: [
         { Name: "X-Numaeel-Type", Value: "reply" },
+        { Name: "X-Numaeel-AccountId", Value: "acct-test" },
       ],
     });
   });
@@ -67,6 +70,7 @@ describe("ExternalEmailSignalHandler.sendReply()", () => {
       subject: "Test",
       body: "Content",
       inReplyTo: "<abc@test.com>",
+      accountId: "acct-test",
     });
 
     expect(result).toEqual({ messageId: "ses-reply-456" });
@@ -101,6 +105,7 @@ describe("ExternalEmailSignalHandler.forward()", () => {
     expect(emailService.sendRaw).toHaveBeenCalledWith({
       to: "dest@example.com",
       rawData: rawBytes,
+      accountId: "acct-42",
       tags: [
         { Name: "X-Numaeel-Type", Value: "forward" },
         { Name: "X-Numaeel-AccountId", Value: "acct-42" },
@@ -143,11 +148,13 @@ describe("ExternalEmailSignalHandler tag integration", () => {
         subject: "Hi",
         body: "Hello",
         inReplyTo: "<ref@x.com>",
+        accountId: "acct-test",
       });
 
       const call = (emailService.send as ReturnType<typeof vi.fn>).mock.calls[0]![0];
       expect(call.tags).toEqual([
         { Name: TAG_TYPE, Value: "reply" },
+        { Name: TAG_ACCOUNT_ID, Value: "acct-test" },
       ]);
     });
 
