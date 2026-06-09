@@ -15,6 +15,9 @@ import type { Arc, Rule, Signal, Alias, AccountFilteringConfig } from "../../src
 import { dbError } from "../../src/errors.js";
 import type { EmailService } from "../../src/email/email-service.js";
 import { createMockLogger, type MockLogger } from "../helpers/mock-logger.js";
+import { BillingHandler } from "../../src/billing/billing-handler.js";
+import type { HandlerRegistry } from "../../src/workflow/registry.js";
+import type { SchedulerClient } from "../../src/scheduler/scheduler-client.js";
 
 // Mock cluster-registry so processor can resolve the read cluster
 vi.mock("../../src/embedding/cluster-registry.js", () => {
@@ -156,6 +159,13 @@ function makeNotifier(): Notifier {
   };
 }
 
+const SHARED_NEW_DEPS = {
+  userCodeExecutor: { invoke: vi.fn().mockResolvedValue({ success: true, result: undefined }), validateAst: vi.fn().mockResolvedValue({ success: true }), validateAstBatch: vi.fn().mockResolvedValue({ success: true }) } as unknown as UserCodeExecutorClient,
+  billingHandler: new BillingHandler(),
+  handlerRegistry: { dispatch: vi.fn().mockResolvedValue(ok(undefined)) } as unknown as HandlerRegistry,
+  schedulerClient: { createFollowup: vi.fn().mockResolvedValue(ok(undefined)), deleteFollowup: vi.fn().mockResolvedValue(ok(undefined)) } as unknown as SchedulerClient,
+};
+
 function makeMessage(opts: {
   accountId?: string;
   s3Key?: string;
@@ -246,7 +256,7 @@ describe("SignalProcessor", () => {
     auroraWriter = makeAuroraWriter();
     arcMatcher = makeArcMatcher();
     ruleEvaluator = makeRuleEvaluator(mockLogger);
-    processor = new SignalProcessor({ arcDb, accountDb, processingDb, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, logger: mockLogger, notifier: makeNotifier(), forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never, calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud" } });
+    processor = new SignalProcessor({ ...SHARED_NEW_DEPS, arcDb, accountDb, processingDb, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, logger: mockLogger, notifier: makeNotifier(), forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never, calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud" } });
   });
 
   afterEach(() => {
@@ -554,7 +564,7 @@ describe("SignalProcessor", () => {
 
     beforeEach(() => {
       sqsDispatcher = { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) };
-      processor = new SignalProcessor({ arcDb, accountDb, processingDb, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, sqsDispatcher, logger: mockLogger, notifier: makeNotifier(), forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never, calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud" } });
+      processor = new SignalProcessor({ ...SHARED_NEW_DEPS, arcDb, accountDb, processingDb, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, sqsDispatcher, logger: mockLogger, notifier: makeNotifier(), forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never, calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud" } });
     });
 
     it("dispatches side-effect with forward action in matchedRules when forward rule matches", async () => {
@@ -736,7 +746,7 @@ describe("SignalProcessor", () => {
 
     beforeEach(() => {
       sqsDispatcher = { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) };
-      processor = new SignalProcessor({ arcDb, accountDb, processingDb, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, sqsDispatcher, logger: mockLogger, notifier: makeNotifier(), forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never, calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud" } });
+      processor = new SignalProcessor({ ...SHARED_NEW_DEPS, arcDb, accountDb, processingDb, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, sqsDispatcher, logger: mockLogger, notifier: makeNotifier(), forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never, calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud" } });
     });
 
     it("dispatches side-effect after saving a new Signal", async () => {
@@ -780,6 +790,7 @@ describe("SignalProcessor", () => {
     it("dispatches side-effect even without explicit notifier configured", async () => {
       // Processor with default notifier — side-effect dispatch still happens
       const processorWithoutNotifier = new SignalProcessor({
+        ...SHARED_NEW_DEPS,
         arcDb, accountDb, processingDb, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, logger: mockLogger,
         notifier: makeNotifier(), forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
         replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher,
@@ -802,7 +813,7 @@ describe("SignalProcessor", () => {
 
     beforeEach(() => {
       notifier = makeNotifier();
-      processor = new SignalProcessor({ arcDb, accountDb, processingDb, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, notifier, logger: mockLogger, forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never, calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud" } });
+      processor = new SignalProcessor({ ...SHARED_NEW_DEPS, arcDb, accountDb, processingDb, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, notifier, logger: mockLogger, forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never, calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud" } });
     });
 
     it("allows signal on brand new address and auto-creates aliases with sender approved", async () => {
@@ -1384,7 +1395,7 @@ describe("SignalProcessor", () => {
       ])));
 
       const notifier = makeNotifier();
-      const proc = new SignalProcessor({ arcDb, accountDb, processingDb, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, notifier, logger: mockLogger, forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never, calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud" } });
+      const proc = new SignalProcessor({ ...SHARED_NEW_DEPS, arcDb, accountDb, processingDb, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, notifier, logger: mockLogger, forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never, calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud" } });
       await proc.processRecord(makeMessage(), 1);
 
       expect(arcDb.saveArc).not.toHaveBeenCalled();
@@ -1399,7 +1410,7 @@ describe("SignalProcessor", () => {
       ])));
 
       const notifier = makeNotifier();
-      const proc = new SignalProcessor({ arcDb, accountDb, processingDb, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, notifier, logger: mockLogger, forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never, calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud" } });
+      const proc = new SignalProcessor({ ...SHARED_NEW_DEPS, arcDb, accountDb, processingDb, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, notifier, logger: mockLogger, forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never, calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud" } });
       await proc.processRecord(makeMessage(), 1);
 
       expect(arcDb.saveArc).not.toHaveBeenCalled();
@@ -1472,7 +1483,7 @@ describe("SignalProcessor", () => {
 
     beforeEach(() => {
       notifier = makeNotifier();
-      processor = new SignalProcessor({ arcDb, accountDb, processingDb, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, notifier, logger: mockLogger, forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never, calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud" } });
+      processor = new SignalProcessor({ ...SHARED_NEW_DEPS, arcDb, accountDb, processingDb, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, notifier, logger: mockLogger, forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never, calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud" } });
     });
 
     it("blocks status emails silently — no arc created, signal saved as blocked", async () => {
@@ -1528,7 +1539,7 @@ describe("SignalProcessor", () => {
 
     beforeEach(() => {
       sqsDispatcher = { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) };
-      processor = new SignalProcessor({ arcDb, accountDb, processingDb, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, sqsDispatcher, logger: mockLogger, notifier: makeNotifier(), forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: makeReplySender(), draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never, calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud" } });
+      processor = new SignalProcessor({ ...SHARED_NEW_DEPS, arcDb, accountDb, processingDb, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, sqsDispatcher, logger: mockLogger, notifier: makeNotifier(), forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: makeReplySender(), draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never, calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud" } });
     });
 
     it("dispatches side-effect with pong action when workflow is 'test'", async () => {
@@ -1583,7 +1594,7 @@ describe("SignalProcessor", () => {
     });
 
     it("still dispatches side-effect when replySender is configured", async () => {
-      const processorWithReplier = new SignalProcessor({ arcDb, accountDb, processingDb, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, logger: mockLogger, notifier: makeNotifier(), forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher, draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never, calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud" } });
+      const processorWithReplier = new SignalProcessor({ ...SHARED_NEW_DEPS, arcDb, accountDb, processingDb, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, logger: mockLogger, notifier: makeNotifier(), forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-msg-id" }) }, sqsDispatcher, draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never, calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud" } });
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok(testClassification));
 
       const result = await processorWithReplier.processRecord(makeMessage(), 1);

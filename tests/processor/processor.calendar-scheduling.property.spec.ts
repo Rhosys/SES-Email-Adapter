@@ -3,6 +3,7 @@ import { ok, err } from "../../src/errors.js";
 import { SignalProcessor } from "../../src/processor/processor.js";
 import type { ArcMatcher, InboundSignalMessage, SqsDispatcher } from "../../src/processor/processor.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
+import { makeSharedNewDeps, makeRuleEvaluator3 } from "./_shared-new-deps.js";
 import { makeArcDbMock, makeAccountDbMock, makeProcessingDbMock } from "./_helpers.js";
 import type { ArcDatabase } from "../../src/database/arc-database.js";
 import type { EmailService } from "../../src/email/email-service.js";
@@ -170,7 +171,7 @@ function buildProcessor(opts: {
     return Promise.resolve({});
   });
 
-  return new SignalProcessor({
+  return new SignalProcessor({ ...makeSharedNewDeps(),
     arcDb: arcDb ?? makeArcDbMock(),
     accountDb: makeAccountDbMock(),
     processingDb: makeProcessingDbMock(),
@@ -188,7 +189,7 @@ function buildProcessor(opts: {
       findMatch: vi.fn().mockResolvedValue(ok(null)),
     },
     arcMatcher: arcMatcher ?? makeArcMatcher(),
-    ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
+    ruleEvaluator: makeRuleEvaluator3(mockLogger),
     logger: mockLogger,
     notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
     forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },

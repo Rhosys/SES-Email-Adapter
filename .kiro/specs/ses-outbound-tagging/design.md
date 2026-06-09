@@ -111,9 +111,9 @@ export interface ReplySender {
     body: string;
     inReplyTo: string;
     // New optional correlation context
-    accountId?: string;
-    signalId?: string;
-    arcId?: string;
+    accountId: string;
+    signalId: string;
+    arcId: string;
   }): Promise<{ messageId: string }>;
 }
 ```

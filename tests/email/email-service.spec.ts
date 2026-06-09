@@ -24,7 +24,7 @@ describe("EmailService.send()", () => {
   beforeEach(() => {
     mockSend = vi.fn();
     sesClient = { send: mockSend } as unknown as SESv2Client;
-    service = new EmailService(sesClient, { from: "noreply@example.com", configSet: "my-config-set" });
+    service = new EmailService(sesClient, { from: "noreply@example.com", configSetName: "my-config-set" });
   });
 
   it("successful send returns Ok with messageId", async () => {
@@ -34,6 +34,7 @@ describe("EmailService.send()", () => {
       to: "user@example.com",
       subject: "Welcome",
       textBody: "Hello there",
+      accountId: "acct-test",
     });
 
     expect(result.isOk()).toBe(true);
@@ -54,6 +55,7 @@ describe("EmailService.send()", () => {
       to: "user@example.com",
       subject: "Test",
       textBody: "Body",
+      accountId: "acct-test",
     });
 
     expect(result.isErr()).toBe(true);
@@ -63,18 +65,19 @@ describe("EmailService.send()", () => {
     });
   });
 
-  it("configSet omitted when empty string", async () => {
-    const serviceNoConfig = new EmailService(sesClient, { from: "noreply@example.com", configSet: "" });
+  it("configSet passes through when empty string", async () => {
+    const serviceNoConfig = new EmailService(sesClient, { from: "noreply@example.com", configSetName: "" });
     mockSend.mockResolvedValueOnce({ MessageId: "ses-msg-002" });
 
     await serviceNoConfig.send({
       to: "user@example.com",
       subject: "No config set",
       textBody: "Body",
+      accountId: "acct-test",
     });
 
     const command = mockSend.mock.calls[0]![0] as SendEmailCommand;
-    expect(command.input).not.toHaveProperty("ConfigurationSetName");
+    expect(command.input.ConfigurationSetName).toBe("");
   });
 
   it("fromOverride used when provided", async () => {
@@ -85,6 +88,7 @@ describe("EmailService.send()", () => {
       subject: "Reply",
       textBody: "Body",
       fromOverride: "custom-sender@example.com",
+      accountId: "acct-test",
     });
 
     const command = mockSend.mock.calls[0]![0] as SendEmailCommand;
@@ -98,6 +102,7 @@ describe("EmailService.send()", () => {
       to: "user@example.com",
       subject: "With headers",
       textBody: "Body",
+      accountId: "acct-test",
       headers: [
         { Name: "In-Reply-To", Value: "<original-msg-id@example.com>" },
         { Name: "References", Value: "<ref-1@example.com>" },
@@ -120,7 +125,7 @@ describe("EmailService.sendRaw()", () => {
   beforeEach(() => {
     mockSend = vi.fn();
     sesClient = { send: mockSend } as unknown as SESv2Client;
-    service = new EmailService(sesClient, { from: "noreply@example.com", configSet: "my-config-set" });
+    service = new EmailService(sesClient, { from: "noreply@example.com", configSetName: "my-config-set" });
   });
 
   it("successful raw send returns Ok with messageId and uses Content.Raw.Data", async () => {
@@ -130,6 +135,7 @@ describe("EmailService.sendRaw()", () => {
     const result = await service.sendRaw({
       to: "recipient@example.com",
       rawData,
+      accountId: "acct-test",
     });
 
     expect(result.isOk()).toBe(true);
@@ -148,6 +154,7 @@ describe("EmailService.sendRaw()", () => {
     const result = await service.sendRaw({
       to: "recipient@example.com",
       rawData: new Uint8Array([1, 2, 3]),
+      accountId: "acct-test",
     });
 
     expect(result.isErr()).toBe(true);

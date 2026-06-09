@@ -49,9 +49,9 @@ export interface UpdateArcFields {
 // ---------------------------------------------------------------------------
 
 export class ArcDatabase implements ArcMatcher {
-  private readonly logger: Logger | undefined;
+  private readonly logger: Logger;
 
-  constructor(logger?: Logger) {
+  constructor(logger: Logger) {
     this.logger = logger;
   }
 
@@ -498,7 +498,7 @@ export class ArcDatabase implements ArcMatcher {
       }));
       const fetchedItems = (res.Items ?? []) as Arc[];
       if (fetchedItems.length > 200) {
-        this.logger?.track("Arc search query returned an unusually large result set before client-side filtering. DynamoDB scan fetched more items than expected for this account. Repeated occurrences indicate the account's active arc count exceeds efficient scan limits. Consider adding a filtered GSI or prompting the user to archive old arcs.", {
+        this.logger.track("Arc search query returned an unusually large result set before client-side filtering. DynamoDB scan fetched more items than expected for this account. Repeated occurrences indicate the account's active arc count exceeds efficient scan limits. Consider adding a filtered GSI or prompting the user to archive old arcs.", {
           code: "arc_database.search_arcs.large_result_set",
           accountId,
           query,

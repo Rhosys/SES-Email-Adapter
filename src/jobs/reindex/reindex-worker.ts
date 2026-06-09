@@ -40,15 +40,18 @@ export interface ReindexSegmentMessage {
 // Shared clients for regeneration path
 // ---------------------------------------------------------------------------
 
-const embeddingGenerator = new BedrockEmbeddingGenerator(new BedrockRuntimeClient({}));
-const arcDatabase = new ArcDatabase();
-
 // ---------------------------------------------------------------------------
 // ReindexWorker
 // ---------------------------------------------------------------------------
 
 export class ReindexWorker {
-  constructor(private readonly logger: Logger) {}
+  private readonly embeddingGenerator: BedrockEmbeddingGenerator;
+  private readonly arcDatabase: ArcDatabase;
+
+  constructor(private readonly logger: Logger) {
+    this.embeddingGenerator = new BedrockEmbeddingGenerator(new BedrockRuntimeClient({}), logger);
+    this.arcDatabase = new ArcDatabase(logger);
+  }
 
   async processSegmentMessage(message: ReindexSegmentMessage): Promise<Result<void, DbError | ReindexSegmentProcessingError>> {
     const { segment, totalSegments, targetRegistryId, modelId } = message;
@@ -171,13 +174,13 @@ export class ReindexWorker {
       accountId: signal.accountId,
       recipientAddress: signal.data.recipientAddress,
       modelId,
-      embeddingGenerator,
+      embeddingGenerator: this.embeddingGenerator,
     });
     if (result.isErr()) {
       return err({ signalId: signal.id, reason: `Embedding generation failed: ${String(result.error.cause ?? result.error)}` });
     }
 
-    const cacheResult = await arcDatabase.addEmbeddingToCache(
+    const cacheResult = await this.arcDatabase.addEmbeddingToCache(
       signal.accountId,
       signal.signalLookupId,
       modelId,

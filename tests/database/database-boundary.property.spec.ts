@@ -5,6 +5,7 @@ import { AccountDatabase } from "../../src/database/account-database.js";
 import { ArcDatabase } from "../../src/database/arc-database.js";
 import { ProcessingDatabase } from "../../src/database/processing-database.js";
 import { AuditDatabase } from "../../src/database/audit-database.js";
+import { createMockLogger } from "../helpers/mock-logger.js";
 
 // ---------------------------------------------------------------------------
 // Property 1: Database boundary completeness
@@ -61,7 +62,7 @@ describe("Property 1: Database boundary completeness", () => {
     ddbMock.reset();
     ddbMock.rejectsOnce(sdkError);
 
-    const db = new ArcDatabase();
+    const db = new ArcDatabase(createMockLogger());
     const result = await db.getArc("any-account-id", "any-arc-id");
 
     expect(result.isOk() || result.isErr()).toBe(true);
@@ -75,7 +76,7 @@ describe("Property 1: Database boundary completeness", () => {
     ddbMock.reset();
     ddbMock.rejectsOnce(sdkError);
 
-    const db = new ArcDatabase();
+    const db = new ArcDatabase(createMockLogger());
     const result = await db.saveSignal({
       id: "sig-1",
       accountId: "acct-1",
@@ -161,7 +162,7 @@ describe("Property 1: Database boundary completeness", () => {
     ddbMock.resolves({ Item: undefined, Items: [] });
 
     const accountDb = new AccountDatabase();
-    const arcDb = new ArcDatabase();
+    const arcDb = new ArcDatabase(createMockLogger());
     const processingDb = new ProcessingDatabase();
     const auditDb = new AuditDatabase();
 

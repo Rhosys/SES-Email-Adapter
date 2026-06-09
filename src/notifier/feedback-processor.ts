@@ -28,10 +28,10 @@ export interface FeedbackSignalStore {
 export class FeedbackProcessor {
   private readonly processingDb: ProcessingDatabase;
   private readonly accountDb: AccountDatabase;
-  private readonly signalStore: FeedbackSignalStore | undefined;
+  private readonly signalStore: FeedbackSignalStore;
   private readonly logger: Logger;
 
-  constructor(processingDb: ProcessingDatabase, accountDb: AccountDatabase, logger: Logger, signalStore?: FeedbackSignalStore) {
+  constructor(processingDb: ProcessingDatabase, accountDb: AccountDatabase, logger: Logger, signalStore: FeedbackSignalStore) {
     this.processingDb = processingDb;
     this.accountDb = accountDb;
     this.signalStore = signalStore;
@@ -104,7 +104,7 @@ export class FeedbackProcessor {
       }
 
       // Check if this bounce is for a user-sent signal
-      if (this.signalStore) {
+      {
         const sesMessageId = feedback.mail.messageId;
         const signalId = feedback.mail.tags?.[TAG_SIGNAL_ID];
         // Prefixed tag takes priority; fall back to bare "accountId" for pre-migration emails

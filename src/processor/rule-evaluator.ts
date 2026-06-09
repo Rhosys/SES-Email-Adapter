@@ -57,10 +57,10 @@ export class JsonLogicRuleEvaluator implements RuleEvaluator {
   private readonly userCodeExecutor: UserCodeExecutorClient;
   private readonly accountDb: RuleAnnotationStore;
 
-  constructor(logger: Logger, userCodeExecutor?: UserCodeExecutorClient, accountDb?: RuleAnnotationStore) {
+  constructor(logger: Logger, userCodeExecutor: UserCodeExecutorClient, accountDb: RuleAnnotationStore) {
     this.logger = logger;
-    this.userCodeExecutor = userCodeExecutor ?? { invoke: () => Promise.resolve({ success: false, error: { message: "User code executor not configured", type: "runtime_error" } } as UserCodeResponse), validateAst: () => Promise.resolve({ success: false, error: { message: "User code executor not configured", type: "runtime_error" } }), validateAstBatch: () => Promise.resolve({ success: false, error: { message: "User code executor not configured", type: "runtime_error" } }) };
-    this.accountDb = accountDb ?? { annotateRuleError: () => Promise.resolve(ok(undefined)) };
+    this.userCodeExecutor = userCodeExecutor;
+    this.accountDb = accountDb;
   }
 
   async evaluate(rule: Rule, context: { signal: Signal; arc: Arc; isMatchedArc: boolean }): Promise<RuleEvalResult> {

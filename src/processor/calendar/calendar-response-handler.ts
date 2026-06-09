@@ -232,6 +232,7 @@ export async function handleCalendarResponse(
       aliasAddress,
       organizerAddress,
       fromAddress: aliasAddress,
+      accountId,
     },
     { emailService },
   );

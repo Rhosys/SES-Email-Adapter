@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mockClient } from "aws-sdk-client-mock";
 import { DynamoDBDocumentClient, QueryCommand } from "@aws-sdk/lib-dynamodb";
 import { ArcDatabase } from "../../src/database/arc-database.js";
+import { createMockLogger } from "../helpers/mock-logger.js";
 
 const ddbMock = mockClient(DynamoDBDocumentClient);
 
@@ -10,7 +11,7 @@ describe("ArcDatabase.listActiveArcsBefore", () => {
 
   beforeEach(() => {
     ddbMock.reset();
-    db = new ArcDatabase();
+    db = new ArcDatabase(createMockLogger());
   });
 
   afterEach(() => {

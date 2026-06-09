@@ -14,6 +14,7 @@ export interface RsvpComposeOpts {
   aliasAddress: string;
   organizerAddress: string;
   fromAddress: string;
+  accountId: string;
 }
 
 const PARTSTAT_MAP = {
@@ -51,6 +52,7 @@ export async function sendRsvp(
     subject: `Re: ${originalCalendarData.title}`,
     textBody: icsContent,
     fromOverride: fromAddress,
+    accountId: opts.accountId,
     headers: [
       { Name: "Content-Type", Value: "text/calendar; method=REPLY; charset=UTF-8" },
     ],

@@ -95,9 +95,9 @@ const SIGNAL_QUEUE_ARN = process.env["SIGNAL_QUEUE_ARN"] ?? "";
 // Singletons
 // ---------------------------------------------------------------------------
 
-const classifier = new SignalClassifier(bedrock);
-
 const logger = new RequestLogger();
+
+const classifier = new SignalClassifier(bedrock, logger);
 
 const embeddingGenerator = new BedrockEmbeddingGenerator(bedrock, logger);
 
@@ -107,7 +107,8 @@ const processingDb = new ProcessingDatabase();
 const auditDb = new AuditDatabase();
 const deviceStore = new DynamoDeviceStore();
 
-const CONFIG_SET = process.env["SES_CONFIGURATION_SET"] ?? "";
+const SES_CONFIG_SET_ARN = process.env["SES_CONFIGURATION_SET_ARN"]!;
+const SES_CONFIG_SET_NAME = SES_CONFIG_SET_ARN.split("/").pop()!;
 const MAIL_DOMAIN = process.env["MAIL_DOMAIN"]!;
 const NOTIFICATION_FROM = `noreply@${MAIL_DOMAIN}`;
 const DKIM_PRIVATE_KEY = process.env["DKIM_PRIVATE_KEY"] ?? "";
@@ -119,11 +120,9 @@ if (!DKIM_PRIVATE_KEY) {
   logger.error("DKIM_PRIVATE_KEY not set — domain identity registration will fail", { code: "handler.env.dkim_key_missing" });
 }
 
-const emailService = new EmailService(sesv2, { from: NOTIFICATION_FROM, configSet: CONFIG_SET });
+const emailService = new EmailService(sesv2, { from: NOTIFICATION_FROM, configSetName: SES_CONFIG_SET_NAME });
 const domainIdentityService = new SesDomainIdentityService(
-  sesv2, "mail", DKIM_PRIVATE_KEY, MAIL_DOMAIN, CONFIG_SET,
-  process.env["AWS_REGION"] ?? "eu-west-1",
-  process.env["AWS_ACCOUNT_ID"] ?? "",
+  sesv2, "mail", DKIM_PRIVATE_KEY, MAIL_DOMAIN, SES_CONFIG_SET_ARN,
 );
 
 const externalEmailHandler = new ExternalEmailSignalHandler(emailService, s3, logger, S3_BUCKET);
@@ -167,6 +166,7 @@ const processor = new SignalProcessor({
   replySender: externalEmailHandler,
   sqsDispatcher: new SqsDispatcherImpl(SIGNAL_QUEUE_URL, sqs, logger),
   draftSendDispatcher,
+  billingHandler: new BillingHandler(),
   handlerRegistry,
   calendarForwarderDeps: { emailService, serviceDomain: MAIL_DOMAIN },
   schedulerClient,
@@ -262,6 +262,7 @@ const sesVerificationMailer: VerificationMailer = {
       to: address,
       subject: "Verify your forwarding address",
       textBody: `Click the link below to verify that you want to receive forwarded emails at this address:\n\n${verifyUrl}\n\nIf you did not request this, you can ignore this email.`,
+      accountId,
     }).then(r => r.map(() => undefined));
   },
 };

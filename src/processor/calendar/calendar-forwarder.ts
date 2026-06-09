@@ -82,6 +82,7 @@ export async function forwardCalendarInvite(
       to: calendarForwardingAddress,
       subject: calendarData.title,
       textBody: icsContent,
+      accountId,
       headers: [
         { Name: "X-Numaeel-Calendar-Signal-Id", Value: calendarSignal.id },
         { Name: "Content-Type", Value: "text/calendar; method=" + calendarData.method },

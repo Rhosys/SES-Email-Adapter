@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { ok } from "../../src/errors.js";
 import { SignalProcessor, SYSTEM_RULES } from "../../src/processor/processor.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
+import { makeSharedNewDeps, makeRuleEvaluator3 } from "./_shared-new-deps.js";
 import { makeArcDbMock, makeAccountDbMock, makeProcessingDbMock } from "./_helpers.js";
 import type { ArcDatabase } from "../../src/database/arc-database.js";
 import type { AccountDatabase } from "../../src/database/account-database.js";
@@ -190,14 +191,14 @@ describe("Single saveArc call with complete mutations", () => {
       : undefined;
 
     const mockLogger = createMockLogger();
-    const processor = new SignalProcessor({
+    const processor = new SignalProcessor({ ...makeSharedNewDeps(),
       arcDb, accountDb, processingDb,
       contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
       classifier: { classify: vi.fn().mockResolvedValue(ok(classification)) },
       embeddingGenerator,
       auroraWriter,
       arcMatcher,
-      ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
+      ruleEvaluator: makeRuleEvaluator3(mockLogger),
       replySender,
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       logger: mockLogger,

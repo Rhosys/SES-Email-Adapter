@@ -20,6 +20,7 @@ import type {
   SignalType,
 } from "../../src/types/index.js";
 import { ArcDatabase } from "../../src/database/arc-database.js";
+import { createMockLogger } from "../helpers/mock-logger.js";
 
 // =============================================================================
 // Property 1: Type narrowing correctness
@@ -171,7 +172,7 @@ describe("Property 3: DynamoDB round-trip fidelity", () => {
   beforeEach(() => { ddbMock.reset(); });
   afterEach(() => { ddbMock.restore(); });
 
-  const db = new ArcDatabase();
+  const db = new ArcDatabase(createMockLogger());
 
   it.each([
     {

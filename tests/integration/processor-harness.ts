@@ -21,6 +21,7 @@ import { SignalProcessor } from '../../src/processor/processor.js';
 import type { InboundSignalMessage, SideEffectPayload, SesVerdict } from '../../src/processor/processor.js';
 import { JsonLogicRuleEvaluator } from '../../src/processor/rule-evaluator.js';
 import { createApp } from '../../src/api/app.js';
+import { makeAppDeps } from '../helpers/app-deps.js';
 import { AuthressAuthService } from '../../src/api/authress-auth.js';
 import { startMockAuthressServer } from './mock-authress.js';
 import type { MockAuthressServer } from './mock-authress.js';
@@ -36,6 +37,9 @@ import type { EmbeddingGenerator } from '../../src/embedding/embedding-generator
 import type { MultiClusterAuroraWriter } from '../../src/database/multi-cluster-aurora-writer.js';
 import type { WorkflowData } from '../../src/types/index.js';
 import { BillingHandler } from '../../src/billing/billing-handler.js';
+import type { UserCodeExecutorClient } from '../../src/processor/user-code-client.js';
+import type { HandlerRegistry } from '../../src/workflow/registry.js';
+import type { SchedulerClient } from '../../src/scheduler/scheduler-client.js';
 
 const ENDPOINT = process.env['AWS_ENDPOINT_URL'] ?? 'http://localhost:4566';
 const EMAIL_BUCKET = process.env['EMAIL_BUCKET'] ?? 'ses-it-email';
@@ -131,13 +135,17 @@ export async function createProcessorHarness(): Promise<ProcessorHarness> {
       findMatch: async () => ok(null),
       upsertEmbedding: async () => ok(undefined),
     },
-    ruleEvaluator: new JsonLogicRuleEvaluator(logger),
+    ruleEvaluator: new JsonLogicRuleEvaluator(logger, { invoke: async () => ({ success: true, result: undefined }) as never, validateAst: async () => ({ success: true }) as never, validateAstBatch: async () => ({ success: true }) as never } as unknown as UserCodeExecutorClient, { annotateRuleError: async () => ok(undefined) }),
     notifier: { notify: async () => ok(undefined) },
     forwarder: { forward: async () => ok(undefined) },
     retentionService: { applyPlanRetention: async (s3Key, _input) => ({ s3Key }) },
     replySender: { sendReply: async () => ({ messageId: 'stub-reply' }) },
     sqsDispatcher: { sendMessage: async (payload) => { sideEffects.push(payload); return ok(undefined); } },
     draftSendDispatcher: { dispatch: async () => ok(undefined) },
+    userCodeExecutor: { invoke: async () => ({ success: true, result: undefined }) as never, validateAst: async () => ({ success: true }) as never, validateAstBatch: async () => ({ success: true }) as never } as unknown as UserCodeExecutorClient,
+    billingHandler: new BillingHandler(),
+    handlerRegistry: { dispatch: async () => ok(undefined) } as unknown as HandlerRegistry,
+    schedulerClient: { createFollowup: async () => ok(undefined), deleteFollowup: async () => ok(undefined) } as unknown as SchedulerClient,
     calendarForwarderDeps: {
       emailService: { send: async () => ok({ messageId: 'stub-cal' }), sendRaw: async () => {} } as unknown as EmailService,
       serviceDomain: 'platform.email.rhosys.cloud',
@@ -158,7 +166,7 @@ export async function createProcessorHarness(): Promise<ProcessorHarness> {
     createInvite: async () => ok({ inviteId: 'mock-invite' }),
   };
 
-  const app = createApp({
+  const app = createApp(makeAppDeps({
     arcDb,
     accountDb,
     auditDb,
@@ -174,11 +182,11 @@ export async function createProcessorHarness(): Promise<ProcessorHarness> {
     astValidator: { validateAstBatch: async () => ({ success: true, purpose: 'validate_ast_batch', results: [] }) } as never,
     billingHandler: new BillingHandler(),
     emailService: { send: async () => ok({ messageId: 'stub' }), sendRaw: async () => {} } as unknown as EmailService,
-    domainIdentityService: { register: async () => ok(undefined), deregister: async () => ok(undefined), tenantNameForAccount: (a: string) => a },
+    domainIdentityService: { register: async () => ok(undefined), deregister: async () => ok(undefined) },
     rsvpComposer: (async () => ok(undefined)) as unknown as typeof sendRsvp,
     postApprovalCalendarDeps: { accountDb: {} as never, emailService: {} as never, serviceDomain: 'platform.email.rhosys.cloud' } as unknown as PostApprovalCalendarHandlerDeps,
     schedulerClient: { scheduleMessage: async () => ok(undefined), deleteSchedule: async () => ok(undefined) } as never,
-  });
+  }));
 
   // ---------------------------------------------------------------------------
   // Helpers

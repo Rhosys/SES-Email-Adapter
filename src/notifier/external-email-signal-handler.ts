@@ -31,7 +31,7 @@ export class ExternalEmailSignalHandler implements ReplySender, Forwarder {
     subject: string;
     body: string;
     inReplyTo: string;
-    accountId?: string;
+    accountId: string;
     signalId?: string;
     arcId?: string;
   }): Promise<{ messageId: string }> {
@@ -46,6 +46,7 @@ export class ExternalEmailSignalHandler implements ReplySender, Forwarder {
       fromOverride: opts.from,
       subject: `Re: ${opts.subject}`,
       textBody: opts.body,
+      accountId: opts.accountId,
       headers: [
         { Name: "In-Reply-To", Value: opts.inReplyTo },
         { Name: "References", Value: opts.inReplyTo },
@@ -70,6 +71,7 @@ export class ExternalEmailSignalHandler implements ReplySender, Forwarder {
       const result = await this.emailService.sendRaw({
         to: toAddress,
         rawData: rawBytes,
+        accountId,
         tags,
       });
 

@@ -19,6 +19,7 @@ import { ArcDatabase } from '../../src/database/arc-database.js';
 import { AuditDatabase } from '../../src/database/audit-database.js';
 import { AuthressAuthService } from '../../src/api/authress-auth.js';
 import { createApp } from '../../src/api/app.js';
+import { makeAppDeps } from '../helpers/app-deps.js';
 import { createConsoleLogger } from './logger.js';
 import { ok } from '../../src/errors.js';
 import type { AccessService } from '../../src/api/app.js';
@@ -71,7 +72,7 @@ export async function createHarness(): Promise<IntegrationHarness> {
     createInvite: async () => ok({ inviteId: 'mock-invite' }),
   };
 
-  const app = createApp({
+  const app = createApp(makeAppDeps({
     arcDb,
     accountDb,
     auditDb,
@@ -87,11 +88,11 @@ export async function createHarness(): Promise<IntegrationHarness> {
     astValidator: { validateAstBatch: async () => ({ success: true, purpose: 'validate_ast_batch', results: [] }) } as never,
     billingHandler: new BillingHandler(),
     emailService: { send: async () => ok({ messageId: "ses-cal-001" }), sendRaw: async () => {} } as unknown as EmailService,
-    domainIdentityService: { register: async () => ok(undefined), deregister: async () => ok(undefined), tenantNameForAccount: () => "customer-stub" },
+    domainIdentityService: { register: async () => ok(undefined), deregister: async () => ok(undefined) },
     rsvpComposer: (async () => ok(undefined)) as unknown as typeof sendRsvp,
     postApprovalCalendarDeps: { accountDb: {} as never, emailService: {} as never, serviceDomain: "platform.email.rhosys.cloud" } as unknown as PostApprovalCalendarHandlerDeps,
     schedulerClient: { scheduleMessage: async () => ok(undefined), deleteSchedule: async () => ok(undefined) } as never,
-  });
+  }));
 
   return {
     app,

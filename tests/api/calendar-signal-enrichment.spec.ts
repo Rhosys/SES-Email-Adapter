@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { Signal } from "../../src/types/index.js";
 import type { CalendarEventData, CalendarResponseData } from "../../src/types/calendar.js";
 import { createApp } from "../../src/api/app.js";
+import { makeAppDeps } from "../helpers/app-deps.js";
 import type { AuthService, AccessService, VerificationMailer } from "../../src/api/app.js";
 import type { ArcDatabase } from "../../src/database/arc-database.js";
 import type { AccountDatabase } from "../../src/database/account-database.js";
@@ -183,7 +184,7 @@ describe("GET /accounts/:accountId/arcs/:arcId/signals — calendar signal enric
     const accountDb = makeAccountDb();
     const auditDb = makeAuditDb();
     const verificationMailer: VerificationMailer = { sendForwardVerification: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) };
-    app = createApp({
+    app = createApp(makeAppDeps({
       arcDb: arcDb as unknown as ArcDatabase,
       accountDb: accountDb as unknown as AccountDatabase,
       auditDb: auditDb as unknown as AuditDatabase,
@@ -199,11 +200,11 @@ describe("GET /accounts/:accountId/arcs/:arcId/signals — calendar signal enric
       astValidator: { validateAstBatch: vi.fn().mockResolvedValue({ success: true, purpose: "validate_ast_batch", results: [] }) } as never,
       billingHandler: new BillingHandler(),
       emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService,
-      domainIdentityService: { register: vi.fn().mockResolvedValue(ok(undefined)), deregister: vi.fn().mockResolvedValue(ok(undefined)), tenantNameForAccount: () => "customer-stub" },
+      domainIdentityService: { register: vi.fn().mockResolvedValue(ok(undefined)), deregister: vi.fn().mockResolvedValue(ok(undefined)) },
       rsvpComposer: vi.fn().mockResolvedValue(ok(undefined)) as unknown as typeof sendRsvp,
       postApprovalCalendarDeps: { accountDb: {} as never, emailService: {} as never, serviceDomain: "platform.email.rhosys.cloud" } as unknown as PostApprovalCalendarHandlerDeps,
       schedulerClient: { scheduleMessage: vi.fn().mockResolvedValue(ok(undefined)), deleteSchedule: vi.fn().mockResolvedValue(ok(undefined)) } as never,
-    });
+    }));
   });
 
   it("includes CalendarData on calendar_event signal responses", async () => {

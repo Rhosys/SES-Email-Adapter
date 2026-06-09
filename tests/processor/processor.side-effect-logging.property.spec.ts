@@ -3,6 +3,7 @@ import { ok, err } from "../../src/errors.js";
 import { SignalProcessor, SYSTEM_RULES } from "../../src/processor/processor.js";
 import type { ArcMatcher, Notifier, Forwarder, SideEffectPayload } from "../../src/processor/processor.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
+import { makeSharedNewDeps, makeRuleEvaluator3 } from "./_shared-new-deps.js";
 import { makeArcDbMock, makeAccountDbMock, makeProcessingDbMock } from "./_helpers.js";
 import type { ContentSanitizerClient } from "../../src/processor/content-sanitizer-client.js";
 import type { EmbeddingGenerator } from "../../src/embedding/embedding-generator.js";
@@ -160,14 +161,14 @@ describe("Side effect caller logging", () => {
       notify: vi.fn().mockReturnValue(Promise.resolve(err(dbError(new Error("push failed"))))),
     };
 
-    const processor = new SignalProcessor({
+    const processor = new SignalProcessor({ ...makeSharedNewDeps(),
       ...makeStore(),
       contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
       classifier: { classify: vi.fn().mockResolvedValue(ok({ workflow: "conversation", workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false }, spamScore: 0.05, summary: "A test email.", labels: [] })) },
       embeddingGenerator: makeEmbeddingGenerator(),
       auroraWriter: makeAuroraWriter(),
       arcMatcher: makeArcMatcher(),
-      ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
+      ruleEvaluator: makeRuleEvaluator3(mockLogger),
       notifier,
       forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
@@ -194,14 +195,14 @@ describe("Side effect caller logging", () => {
       notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     };
 
-    const processor = new SignalProcessor({
+    const processor = new SignalProcessor({ ...makeSharedNewDeps(),
       ...makeStore(),
       contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
       classifier: { classify: vi.fn().mockResolvedValue(ok({ workflow: "conversation", workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false }, spamScore: 0.05, summary: "A test email.", labels: [] })) },
       embeddingGenerator: makeEmbeddingGenerator(),
       auroraWriter: makeAuroraWriter(),
       arcMatcher: makeArcMatcher(),
-      ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
+      ruleEvaluator: makeRuleEvaluator3(mockLogger),
       notifier,
       forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
@@ -226,14 +227,14 @@ describe("Side effect caller logging", () => {
       forward: vi.fn().mockReturnValue(Promise.resolve(err(dbError(new Error("forward failed"))))),
     };
 
-    const processor = new SignalProcessor({
+    const processor = new SignalProcessor({ ...makeSharedNewDeps(),
       ...makeStore(),
       contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
       classifier: { classify: vi.fn().mockResolvedValue(ok({ workflow: "conversation", workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false }, spamScore: 0.05, summary: "A test email.", labels: [] })) },
       embeddingGenerator: makeEmbeddingGenerator(),
       auroraWriter: makeAuroraWriter(),
       arcMatcher: makeArcMatcher(),
-      ruleEvaluator: new JsonLogicRuleEvaluator(mockLogger),
+      ruleEvaluator: makeRuleEvaluator3(mockLogger),
       forwarder,
       notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },

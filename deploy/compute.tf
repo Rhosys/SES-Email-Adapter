@@ -240,9 +240,7 @@ resource "aws_lambda_function" "main" {
       AURORA_CLUSTER_ARN       = aws_rds_cluster.aurora["aurora-prod-titan-v2"].arn
       AURORA_SECRET_ARN        = aws_rds_cluster.aurora["aurora-prod-titan-v2"].master_user_secret[0].secret_arn
       AURORA_DB_NAME           = "signals"
-      SES_CONFIGURATION_SET    = aws_sesv2_configuration_set.sending.configuration_set_name
-      SES_TENANT_PLATFORM      = aws_sesv2_tenant.platform.tenant_name
-      AWS_ACCOUNT_ID           = var.aws_account_id
+      SES_CONFIGURATION_SET_ARN = aws_sesv2_configuration_set.sending.arn
       WS_API_ENDPOINT          = "https://wss.${data.aws_route53_zone.main.name}"
       CF_ORIGIN_SECRET         = random_password.cf_origin_secret.result
       SIGNAL_QUEUE_URL         = aws_sqs_queue.signals.url

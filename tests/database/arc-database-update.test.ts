@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mockClient } from "aws-sdk-client-mock";
 import { DynamoDBDocumentClient, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { ArcDatabase } from "../../src/database/arc-database.js";
+import { createMockLogger } from "../helpers/mock-logger.js";
 
 const ddbMock = mockClient(DynamoDBDocumentClient);
 
@@ -12,7 +13,7 @@ describe("ArcDatabase.updateArc expression builder", () => {
     ddbMock.reset();
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2024-06-15T10:30:00.000Z"));
-    db = new ArcDatabase();
+    db = new ArcDatabase(createMockLogger());
   });
 
   afterEach(() => {
