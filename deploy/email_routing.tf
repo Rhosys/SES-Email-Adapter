@@ -217,14 +217,14 @@ resource "aws_sesv2_tenant" "platform" {
 # Associate our platform identities + configuration set with the platform tenant
 resource "aws_sesv2_tenant_resource_association" "platform_identity_main" {
   tenant_name  = aws_sesv2_tenant.platform.tenant_name
-  resource_arn = "arn:aws:ses:eu-west-1:${var.aws_account_id}:identity/${data.aws_route53_zone.main.name}"
+  resource_arn = "arn:aws:ses:${data.aws_region.current.name}:${var.aws_account_id}:identity/${data.aws_route53_zone.main.name}"
 
   depends_on = [aws_sesv2_email_identity.main]
 }
 
 resource "aws_sesv2_tenant_resource_association" "platform_identity_subdomain" {
   tenant_name  = aws_sesv2_tenant.platform.tenant_name
-  resource_arn = "arn:aws:ses:eu-west-1:${var.aws_account_id}:identity/platform.${data.aws_route53_zone.main.name}"
+  resource_arn = "arn:aws:ses:${data.aws_region.current.name}:${var.aws_account_id}:identity/platform.${data.aws_route53_zone.main.name}"
 
   depends_on = [aws_sesv2_email_identity.platform]
 }
