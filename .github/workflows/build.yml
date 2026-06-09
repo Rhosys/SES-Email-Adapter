@@ -19,7 +19,6 @@ env:
   TF_VAR_aws_account_id: "${{ secrets.AWS_ACCOUNT_ID }}"
   TF_VAR_service_name: "${{ github.event.repository.name }}"
   MINISTACK_VERSION: "1.3.59"
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 permissions:
   id-token: write
@@ -61,7 +60,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Login to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -252,7 +251,7 @@ jobs:
           ./tf-summarize -md deploy/plan.json >> $GITHUB_STEP_SUMMARY
 
       - name: Pass Artifacts to Deploy Job
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: prod-artifacts
           path: |
