@@ -196,7 +196,7 @@ resource "aws_sesv2_configuration_set_event_destination" "feedback" {
 # ---------------------------------------------------------------------------
 
 resource "aws_sesv2_dedicated_ip_pool" "managed" {
-  pool_name    = "${var.service_name}-managed"
+  pool_name    = "${lower(var.service_name)}-managed"
   scaling_mode = "MANAGED"
 
   tags = { Name = var.service_name }
