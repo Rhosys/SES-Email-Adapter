@@ -355,7 +355,9 @@ async function handlerInner(
   }
 
   if (isEventBridgeEvent(event)) {
-    if ((event as EventBridgeEvent<string, { source?: string }>).detail?.source === "domain-health-job") {
+    const ebEvent = event as EventBridgeEvent<string, unknown>;
+    const ruleName = ebEvent.resources?.[0]?.split("/").pop();
+    if (ruleName?.endsWith("-domain-health")) {
       await domainHealthJob.run();
     }
     return;
