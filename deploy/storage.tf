@@ -359,8 +359,6 @@ resource "aws_cloudwatch_event_target" "domain_health" {
   rule      = aws_cloudwatch_event_rule.domain_health.name
   target_id = "domain-health-lambda"
   arn       = aws_lambda_alias.production.arn
-
-  input = jsonencode({ source = "domain-health-job" })
 }
 
 resource "aws_lambda_permission" "domain_health_eventbridge" {
