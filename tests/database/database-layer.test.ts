@@ -57,7 +57,7 @@ describe("AccountDatabase", () => {
       // getAlias returns null (no item)
       ddbMock.on(GetCommand).resolves({ Item: undefined });
 
-      const result = await db.renameAlias("acct-1", { domain: "example.com", alias: "old" }, { domain: "example.com", alias: "new" });
+      const result = await db.renameAlias("acct-1", "old@example.com", "new@example.com");
 
       expect(result.isErr()).toBe(true);
       const error = result._unsafeUnwrapErr();
@@ -78,7 +78,7 @@ describe("AccountDatabase", () => {
       ddbMock.on(PutCommand).resolves({});
       ddbMock.on(DeleteCommand).resolves({});
 
-      const result = await db.renameAlias("acct-1", { domain: "example.com", alias: "old" }, { domain: "example.com", alias: "new" });
+      const result = await db.renameAlias("acct-1", "old@example.com", "new@example.com");
 
       expect(result.isOk()).toBe(true);
       const renamed = result._unsafeUnwrap();
@@ -93,7 +93,7 @@ describe("AccountDatabase", () => {
       ddbMock.on(QueryCommand).resolves({ Items: [] });
       ddbMock.on(PutCommand).rejects(new Error("InternalServerError"));
 
-      const result = await db.renameAlias("acct-1", { domain: "example.com", alias: "old" }, { domain: "example.com", alias: "new" });
+      const result = await db.renameAlias("acct-1", "old@example.com", "new@example.com");
     });
   });
 

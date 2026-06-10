@@ -832,7 +832,7 @@ describe("SignalProcessor", () => {
 
       const savedConfig = vi.mocked(accountDb.saveAlias).mock.calls[0]![0] as Alias;
       expect(savedConfig.unknownSenderPolicy).toBe("quarantine_visible");
-      expect(accountDb.saveSender).toHaveBeenCalledWith(TEST_ACCOUNT_ID, expect.objectContaining({ senderDomain: "example.com" }), "allow");
+      expect(accountDb.saveSender).toHaveBeenCalledWith(TEST_ACCOUNT_ID, expect.any(String), "example.com", "allow");
     });
 
     it("allows signal from a known sender (eTLD+1 in approved list)", async () => {
@@ -967,7 +967,7 @@ describe("SignalProcessor", () => {
       await processor.processRecord(makeMessage(), 1);
 
       expect(arcDb.saveArc).toHaveBeenCalledOnce();
-      expect(accountDb.saveSender).toHaveBeenCalledWith(TEST_ACCOUNT_ID, expect.objectContaining({ senderDomain: "example.com" }), "allow");
+      expect(accountDb.saveSender).toHaveBeenCalledWith(TEST_ACCOUNT_ID, expect.any(String), "example.com", "allow");
     });
 
     it("saves blocked signal with classification data for user review", async () => {

@@ -4,7 +4,7 @@ import { dynamo, ACCOUNTS_TABLE } from "./shared.js";
 import { dbError, notFoundError, ok, err } from "../errors.js";
 import type { Result, DbError, NotFoundError } from "../errors.js";
 import { generateId } from "../utils/id.js";
-import type { Account, View, Label, Rule, RuleStatus, Domain, Alias, AliasSender, SenderPolicy, AccountFilteringConfig, VerifiedForwardingAddress, EmailTemplate, WsConnection, AliasKey, SenderKey } from "../types/index.js";
+import type { Account, View, Label, Rule, RuleStatus, Domain, Alias, AliasSender, SenderPolicy, AccountFilteringConfig, VerifiedForwardingAddress, EmailTemplate, WsConnection } from "../types/index.js";
 import type { StatsCategory } from "../types/index.js";
 import type { CreateViewRequest, UpdateViewRequest, CreateLabelRequest, UpdateLabelRequest, CreateRuleRequest, UpdateRuleRequest } from "../api/app.js";
 import { buildStatsUpdateParams, buildPruneNames } from "./stats-writer.js";
@@ -14,6 +14,13 @@ import { buildStatsUpdateParams, buildPruneNames } from "./stats-writer.js";
 // ---------------------------------------------------------------------------
 
 const pk = (accountId: string) => `ACCT#${accountId}`;
+
+/** Split a full email address into domain + local part for DDB key construction. */
+function parseAddress(address: string): { domain: string; alias: string } {
+  const atIdx = address.lastIndexOf("@");
+  if (atIdx < 1) throw new Error(`Invalid email address: ${address}`);
+  return { alias: address.slice(0, atIdx), domain: address.slice(atIdx + 1) };
+}
 
 function ruleGsi1pk(accountId: string) { return `ACCT#${accountId}`; }
 function ruleGsi1sk(status: RuleStatus, priorityOrder: number, id: string) {
@@ -89,11 +96,12 @@ export class AccountDatabase {
   // GSI: gsi1pk = DOMAIN#{domain}#ALIAS#{alias}, gsi1sk = ACCT#{accountId}
   // ---------------------------------------------------------------------------
 
-  async getAlias(accountId: string, key: AliasKey): Promise<Result<Alias | null, DbError>> {
+  async getAlias(accountId: string, address: string): Promise<Result<Alias | null, DbError>> {
+    const { domain, alias } = parseAddress(address);
     try {
       const res = await dynamo.send(new GetCommand({
         TableName: ACCOUNTS_TABLE,
-        Key: { pk: pk(accountId), sk: `DOMAIN#${key.domain}#ALIAS#${key.alias}` },
+        Key: { pk: pk(accountId), sk: `DOMAIN#${domain}#ALIAS#${alias}` },
       }));
       return ok(res.Item ? (res.Item as Alias) : null);
     } catch (e) {
@@ -102,14 +110,16 @@ export class AccountDatabase {
   }
 
   async saveAlias(alias: Alias): Promise<Result<Alias, DbError>> {
+    const { domain, alias: localPart } = parseAddress(alias.address);
     try {
       await dynamo.send(new PutCommand({
         TableName: ACCOUNTS_TABLE,
         Item: {
           ...alias,
+          domain, alias: localPart,
           pk: pk(alias.accountId),
-          sk: `DOMAIN#${alias.domain}#ALIAS#${alias.alias}`,
-          gsi1pk: `DOMAIN#${alias.domain}#ALIAS#${alias.alias}`,
+          sk: `DOMAIN#${domain}#ALIAS#${localPart}`,
+          gsi1pk: `DOMAIN#${domain}#ALIAS#${localPart}`,
           gsi1sk: `ACCT#${alias.accountId}`,
         },
       }));
@@ -145,11 +155,12 @@ export class AccountDatabase {
     return this.saveAlias(alias);
   }
 
-  async deleteAlias(accountId: string, key: AliasKey): Promise<Result<void, DbError>> {
+  async deleteAlias(accountId: string, address: string): Promise<Result<void, DbError>> {
+    const { domain, alias } = parseAddress(address);
     try {
       await dynamo.send(new DeleteCommand({
         TableName: ACCOUNTS_TABLE,
-        Key: { pk: pk(accountId), sk: `DOMAIN#${key.domain}#ALIAS#${key.alias}` },
+        Key: { pk: pk(accountId), sk: `DOMAIN#${domain}#ALIAS#${alias}` },
       }));
       return ok(undefined);
     } catch (e) {
@@ -157,30 +168,31 @@ export class AccountDatabase {
     }
   }
 
-  async renameAlias(accountId: string, oldKey: AliasKey, newKey: AliasKey): Promise<Result<Alias, DbError | NotFoundError>> {
-    const oldResult = await this.getAlias(accountId, oldKey);
+  async renameAlias(accountId: string, oldAddress: string, newAddress: string): Promise<Result<Alias, DbError | NotFoundError>> {
+    const oldResult = await this.getAlias(accountId, oldAddress);
     if (oldResult.isErr()) return err(oldResult.error);
     const old = oldResult.value;
-    if (!old) return err(notFoundError("alias", `${oldKey.alias}@${oldKey.domain}`));
+    if (!old) return err(notFoundError("alias", oldAddress));
 
-    const sendersResult = await this.listSenders(accountId, oldKey);
+    const sendersResult = await this.listSenders(accountId, oldAddress);
     if (sendersResult.isErr()) return err(sendersResult.error);
     const senders = sendersResult.value;
 
-    const renamed: Alias = { ...old, domain: newKey.domain, alias: newKey.alias, address: `${newKey.alias}@${newKey.domain}`, updatedAt: DateTime.utc().toISO()! };
+    const { domain: newDomain, alias: newLocal } = parseAddress(newAddress);
+    const renamed: Alias = { ...old, address: newAddress, domain: newDomain, alias: newLocal, updatedAt: DateTime.utc().toISO()! };
     const saveResult = await this.saveAlias(renamed);
     if (saveResult.isErr()) return err(saveResult.error);
 
     for (const s of senders) {
-      const saveSenderResult = await this.saveSender(accountId, { domain: newKey.domain, alias: newKey.alias, senderDomain: s.senderDomain });
+      const saveSenderResult = await this.saveSender(accountId, newAddress, s.senderDomain);
       if (saveSenderResult.isErr()) return err(saveSenderResult.error);
     }
 
-    const deleteResult = await this.deleteAlias(accountId, oldKey);
+    const deleteResult = await this.deleteAlias(accountId, oldAddress);
     if (deleteResult.isErr()) return err(deleteResult.error);
 
     for (const s of senders) {
-      const removeResult = await this.removeSender(accountId, { domain: oldKey.domain, alias: oldKey.alias, senderDomain: s.senderDomain });
+      const removeResult = await this.removeSender(accountId, oldAddress, s.senderDomain);
       if (removeResult.isErr()) return err(removeResult.error);
     }
 
@@ -192,16 +204,17 @@ export class AccountDatabase {
   // GSI: gsi1pk = SENDER#{senderDomain}, gsi1sk = ACCT#{accountId}#DOMAIN#{domain}#ALIAS#{alias}
   // ---------------------------------------------------------------------------
 
-  async saveSender(accountId: string, key: SenderKey, policy?: SenderPolicy): Promise<Result<void, DbError>> {
+  async saveSender(accountId: string, address: string, senderDomain: string, policy?: SenderPolicy): Promise<Result<void, DbError>> {
+    const { domain, alias } = parseAddress(address);
     try {
       await dynamo.send(new PutCommand({
         TableName: ACCOUNTS_TABLE,
         Item: {
           pk: pk(accountId),
-          sk: `DOMAIN#${key.domain}#ALIAS#${key.alias}#SENDER#${key.senderDomain}`,
-          gsi1pk: `SENDER#${key.senderDomain}`,
-          gsi1sk: `ACCT#${accountId}#DOMAIN#${key.domain}#ALIAS#${key.alias}`,
-          accountId, aliasAddress: `${key.alias}@${key.domain}`, domain: key.domain, alias: key.alias, senderDomain: key.senderDomain,
+          sk: `DOMAIN#${domain}#ALIAS#${alias}#SENDER#${senderDomain}`,
+          gsi1pk: `SENDER#${senderDomain}`,
+          gsi1sk: `ACCT#${accountId}#DOMAIN#${domain}#ALIAS#${alias}`,
+          accountId, aliasAddress: address, domain, alias, senderDomain,
           policy: policy ?? "allow",
           addedAt: DateTime.utc().toISO()!,
         },
@@ -212,11 +225,12 @@ export class AccountDatabase {
     }
   }
 
-  async removeSender(accountId: string, key: SenderKey): Promise<Result<void, DbError>> {
+  async removeSender(accountId: string, address: string, senderDomain: string): Promise<Result<void, DbError>> {
+    const { domain, alias } = parseAddress(address);
     try {
       await dynamo.send(new DeleteCommand({
         TableName: ACCOUNTS_TABLE,
-        Key: { pk: pk(accountId), sk: `DOMAIN#${key.domain}#ALIAS#${key.alias}#SENDER#${key.senderDomain}` },
+        Key: { pk: pk(accountId), sk: `DOMAIN#${domain}#ALIAS#${alias}#SENDER#${senderDomain}` },
       }));
       return ok(undefined);
     } catch (e) {
@@ -224,11 +238,12 @@ export class AccountDatabase {
     }
   }
 
-  async getSender(accountId: string, key: SenderKey): Promise<Result<AliasSender | null, DbError>> {
+  async getSender(accountId: string, address: string, senderDomain: string): Promise<Result<AliasSender | null, DbError>> {
+    const { domain, alias } = parseAddress(address);
     try {
       const res = await dynamo.send(new GetCommand({
         TableName: ACCOUNTS_TABLE,
-        Key: { pk: pk(accountId), sk: `DOMAIN#${key.domain}#ALIAS#${key.alias}#SENDER#${key.senderDomain}` },
+        Key: { pk: pk(accountId), sk: `DOMAIN#${domain}#ALIAS#${alias}#SENDER#${senderDomain}` },
       }));
       return ok(res.Item ? (res.Item as AliasSender) : null);
     } catch (e) {
@@ -236,12 +251,13 @@ export class AccountDatabase {
     }
   }
 
-  async listSenders(accountId: string, key: AliasKey): Promise<Result<AliasSender[], DbError>> {
+  async listSenders(accountId: string, address: string): Promise<Result<AliasSender[], DbError>> {
+    const { domain, alias } = parseAddress(address);
     try {
       const res = await dynamo.send(new QueryCommand({
         TableName: ACCOUNTS_TABLE,
         KeyConditionExpression: "pk = :pk AND begins_with(sk, :prefix)",
-        ExpressionAttributeValues: { ":pk": pk(accountId), ":prefix": `DOMAIN#${key.domain}#ALIAS#${key.alias}#SENDER#` },
+        ExpressionAttributeValues: { ":pk": pk(accountId), ":prefix": `DOMAIN#${domain}#ALIAS#${alias}#SENDER#` },
       }));
       return ok((res.Items ?? []) as AliasSender[]);
     } catch (e) {
@@ -261,12 +277,12 @@ export class AccountDatabase {
     return ok(accountResult.value?.deletionRetentionDays ?? 0);
   }
 
-  async getProcessorAccountContext(accountId: string, recipientKey: AliasKey): Promise<Result<{ retentionDays: number; filtering: AccountFilteringConfig | null; emailConfig: Alias | null; registeredDomains: string[]; userEmails: string[]; billingPlan: import("../embedding/retention-tier.js").BillingPlan; onboardingCompleted: boolean }, DbError>> {
+  async getProcessorAccountContext(accountId: string, recipientAddress: string): Promise<Result<{ retentionDays: number; filtering: AccountFilteringConfig | null; emailConfig: Alias | null; registeredDomains: string[]; userEmails: string[]; billingPlan: import("../embedding/retention-tier.js").BillingPlan; onboardingCompleted: boolean }, DbError>> {
     const accountResult = await this.getAccount(accountId);
     if (accountResult.isErr()) return err(accountResult.error);
     const account = accountResult.value;
 
-    const emailConfigResult = await this.getAlias(accountId, recipientKey);
+    const emailConfigResult = await this.getAlias(accountId, recipientAddress);
     if (emailConfigResult.isErr()) return err(emailConfigResult.error);
     const emailConfig = emailConfigResult.value;
 
