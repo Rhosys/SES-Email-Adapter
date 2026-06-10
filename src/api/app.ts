@@ -1402,7 +1402,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     responses: { 200: { content: { "application/json": { schema: DomainWithRecordsSchema } }, description: "Get domain with DNS records" } },
   }), async (c) => {
     const accountId = c.req.param("accountId")!;
-    const domainResult = await accountDb.getDomain(accountId, c.req.param("id")!);
+    const domainResult = await accountDb.getDomain(accountId, c.req.param("id")!.toLowerCase());
     if (domainResult.isErr()) return err(c, 500, "Internal Server Error");
     const domain = domainResult.value;
     if (!domain) return err(c, 404, "Domain not found", "DOMAIN_NOT_FOUND");
@@ -1419,7 +1419,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     responses: { 200: { content: { "application/json": { schema: DomainWithRecordsSchema } }, description: "Verify/refresh domain" } },
   }), async (c) => {
     const accountId = c.req.param("accountId")!;
-    const domainResult = await accountDb.getDomain(accountId, c.req.param("id")!);
+    const domainResult = await accountDb.getDomain(accountId, c.req.param("id")!.toLowerCase());
     if (domainResult.isErr()) return err(c, 500, "Internal Server Error");
     const domain = domainResult.value;
     if (!domain) return err(c, 404, "Domain not found", "DOMAIN_NOT_FOUND");
@@ -1461,7 +1461,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     responses: { 204: { description: "Domain deleted" } },
   }), async (c) => {
     const accountId = c.req.param("accountId")!;
-    const domainResult = await accountDb.getDomain(accountId, c.req.param("id")!);
+    const domainResult = await accountDb.getDomain(accountId, c.req.param("id")!.toLowerCase());
     if (domainResult.isErr()) return err(c, 500, "Internal Server Error");
     const domain = domainResult.value;
     if (!domain) return err(c, 404, "Domain not found", "DOMAIN_NOT_FOUND");
@@ -1635,7 +1635,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     responses: { 200: { content: { "application/json": { schema: ListAliasesResponse } }, description: "List aliases" } },
   }), async (c) => {
     const accountId = c.req.param("accountId")!;
-    const domain = c.req.query("domain");
+    const domain = c.req.query("domain")?.toLowerCase();
     const aliasesResult = await accountDb.listAliases(accountId);
     if (aliasesResult.isErr()) return err(c, 500, "Internal Server Error");
     let aliases = aliasesResult.value;
@@ -1652,7 +1652,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     responses: { 200: { content: { "application/json": { schema: AliasSchema } }, description: "Get alias" } },
   }), async (c) => {
     const accountId = c.req.param("accountId")!;
-    const address = decodeURIComponent(c.req.param("address")!);
+    const address = decodeURIComponent(c.req.param("address")!).toLowerCase();
     const aliasResult = await accountDb.getAlias(accountId, address);
     if (aliasResult.isErr()) return err(c, 500, "Internal Server Error");
     const alias = aliasResult.value;
@@ -1670,6 +1670,10 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
   }), async (c) => {
     const accountId = c.req.param("accountId")!;
     const body = await zParse(CreateAliasRequest, c.req.raw);
+    const aliasDomain = body.address.split("@")[1]!;
+    const domainCheckResult = await accountDb.getDomain(accountId, aliasDomain);
+    if (domainCheckResult.isErr()) return err(c, 500, "Internal Server Error");
+    if (!domainCheckResult.value) return err(c, 422, "Domain not registered for this account", "DOMAIN_NOT_REGISTERED");
     const existingResult = await accountDb.getAlias(accountId, body.address);
     if (existingResult.isErr()) return err(c, 500, "Internal Server Error");
     if (existingResult.value) return err(c, 409, "Alias already exists", "ALIAS_EXISTS");
@@ -1698,9 +1702,13 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     responses: { 200: { content: { "application/json": { schema: AliasSchema } }, description: "Update alias" } },
   }), async (c) => {
     const accountId = c.req.param("accountId")!;
-    const address = decodeURIComponent(c.req.param("address")!);
+    const address = decodeURIComponent(c.req.param("address")!).toLowerCase();
     const body = await zParse(UpdateAliasRequest, c.req.raw);
     if (body.newAddress) {
+      const newDomain = body.newAddress.split("@")[1]!;
+      const domainCheckResult = await accountDb.getDomain(accountId, newDomain);
+      if (domainCheckResult.isErr()) return err(c, 500, "Internal Server Error");
+      if (!domainCheckResult.value) return err(c, 422, "Domain not registered for this account", "DOMAIN_NOT_REGISTERED");
       const renameResult = await accountDb.renameAlias(accountId, address, body.newAddress);
       if (renameResult.isErr()) {
         if (renameResult.error.kind === "not_found") return err(c, 404, "Alias not found", "ALIAS_NOT_FOUND");
@@ -1737,7 +1745,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     responses: { 204: { description: "Alias deleted" } },
   }), async (c) => {
     const accountId = c.req.param("accountId")!;
-    const address = decodeURIComponent(c.req.param("address")!);
+    const address = decodeURIComponent(c.req.param("address")!).toLowerCase();
     const deleteResult = await accountDb.deleteAlias(accountId, address);
     if (deleteResult.isErr()) return err(c, 500, "Internal Server Error");
     return new Response(null, { status: 204 });
@@ -1756,7 +1764,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     responses: { 200: { content: { "application/json": { schema: ListSendersResponse } }, description: "List senders" } },
   }), async (c) => {
     const accountId = c.req.param("accountId")!;
-    const address = decodeURIComponent(c.req.param("address")!);
+    const address = decodeURIComponent(c.req.param("address")!).toLowerCase();
     const sendersResult = await accountDb.listSenders(accountId, address);
     if (sendersResult.isErr()) return err(c, 500, "Internal Server Error");
     return c.json({ senders: sendersResult.value.map(toApiAliasSender) }, 200);
@@ -1771,7 +1779,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     responses: { 201: { description: "Sender added" } },
   }), async (c) => {
     const accountId = c.req.param("accountId")!;
-    const address = decodeURIComponent(c.req.param("address")!);
+    const address = decodeURIComponent(c.req.param("address")!).toLowerCase();
     const body = await zParse(CreateSenderRequest, c.req.raw);
     const saveResult = await accountDb.saveSender(accountId, address, body.domain, body.policy);
     if (saveResult.isErr()) return err(c, 500, "Internal Server Error");
@@ -1787,8 +1795,8 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     responses: { 204: { description: "Sender removed" } },
   }), async (c) => {
     const accountId = c.req.param("accountId")!;
-    const address = decodeURIComponent(c.req.param("address")!);
-    const senderDomain = decodeURIComponent(c.req.param("domain")!);
+    const address = decodeURIComponent(c.req.param("address")!).toLowerCase();
+    const senderDomain = decodeURIComponent(c.req.param("domain")!).toLowerCase();
     const removeResult = await accountDb.removeSender(accountId, address, senderDomain);
     if (removeResult.isErr()) return err(c, 500, "Internal Server Error");
     return new Response(null, { status: 204 });
@@ -2013,7 +2021,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     responses: { 200: { content: { "application/json": { schema: VerifiedForwardingAddressSchema } }, description: "Address verified" } },
   }), async (c) => {
     const accountId = c.req.param("accountId")!;
-    const address = decodeURIComponent(c.req.param("address")!);
+    const address = decodeURIComponent(c.req.param("address")!).toLowerCase();
     const body = await zParse(VerifyForwardingAddressRequest, c.req.raw);
 
     const existingResult = await accountDb.getVerifiedForwardingAddress(accountId, address);
@@ -2038,7 +2046,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     responses: { 204: { description: "Forwarding address deleted" } },
   }), async (c) => {
     const accountId = c.req.param("accountId")!;
-    const address = decodeURIComponent(c.req.param("address")!);
+    const address = decodeURIComponent(c.req.param("address")!).toLowerCase();
     const deleteResult = await accountDb.deleteVerifiedForwardingAddress(accountId, address);
     if (deleteResult.isErr()) return err(c, 500, "Internal Server Error");
     return new Response(null, { status: 204 });

@@ -1,9 +1,18 @@
 import { z } from "zod";
+import { emailRegex } from "../email/validate-email.js";
 import { WORKFLOWS } from "../types/index.js";
 
 // ---- Shared primitives ----
 
 const UnknownSenderPolicy = z.enum(["allow_all", "quarantine_visible", "quarantine_hidden", "block_hidden", "block_reject", "violate_report"]);
+
+// Lowercases + trims, then validates with both Zod's email check and the RFC regex.
+const lowerEmail = z.string()
+  .transform(s => s.toLowerCase().trim())
+  .pipe(z.string().email().regex(emailRegex, "Invalid email address"));
+
+// Lowercases + trims a domain string (no email-format validation).
+const lowerDomain = z.string().transform(s => s.toLowerCase().trim());
 const ArcStatus = z.enum(["active", "archived", "deleted", "violate_report"]);
 const ArcUrgency = z.enum(["critical", "high", "normal", "low", "silent"]);
 const Workflow = z.enum(WORKFLOWS);
@@ -142,21 +151,21 @@ export type UpdateRuleRequest = z.infer<typeof UpdateRuleRequest>;
 // ---- Domain ----
 
 export const CreateDomainRequest = z.object({
-  domain: z.string(),
+  domain: lowerDomain,
 });
 export type CreateDomainRequest = z.infer<typeof CreateDomainRequest>;
 
 // ---- Alias ----
 
 export const CreateAliasRequest = z.object({
-  address: z.string(),
+  address: lowerEmail,
   unknownSenderPolicy: UnknownSenderPolicy.optional(),
   createdForOrigin: z.string().optional(),
 });
 export type CreateAliasRequest = z.infer<typeof CreateAliasRequest>;
 
 export const UpdateAliasRequest = z.object({
-  newAddress: z.string().email().optional(),
+  newAddress: lowerEmail.optional(),
   unknownSenderPolicy: UnknownSenderPolicy.optional(),
   spamScoreThreshold: z.number().min(0).max(1).optional(),
   createdForOrigin: z.string().optional(),
@@ -166,7 +175,7 @@ export type UpdateAliasRequest = z.infer<typeof UpdateAliasRequest>;
 // ---- Alias Senders ----
 
 export const CreateSenderRequest = z.object({
-  domain: z.string(),
+  domain: lowerDomain,
   policy: z.enum(["allow", "block_hidden", "block_reject", "violate_report"]),
 });
 export type CreateSenderRequest = z.infer<typeof CreateSenderRequest>;
@@ -246,7 +255,7 @@ export type UpdateAccountRequest = z.infer<typeof UpdateAccountRequest>;
 // ---- Forwarding addresses ----
 
 export const CreateForwardingAddressRequest = z.object({
-  address: z.string(),
+  address: lowerEmail,
 });
 export type CreateForwardingAddressRequest = z.infer<typeof CreateForwardingAddressRequest>;
 
@@ -265,7 +274,8 @@ export type RsvpRequest = z.infer<typeof RsvpRequest>;
 // ---- Users ----
 
 export const InviteUserRequest = z.object({
-  email: z.string(),
+  // Only trim+lowercase — the handler calls isValidEmail() for structured error reporting.
+  email: z.string().transform(s => s.toLowerCase().trim()),
   role: z.enum(["admin", "member", "viewer"]),
 });
 export type InviteUserRequest = z.infer<typeof InviteUserRequest>;
