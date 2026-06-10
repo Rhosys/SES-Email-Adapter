@@ -230,6 +230,33 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     }
   });
 
+  // RequestLogger — log every API request/response
+  app.use("*", async (c, next) => {
+    const body = c.req.method !== "GET" && c.req.method !== "HEAD"
+      ? await c.req.raw.clone().text()
+      : undefined;
+
+    await next();
+
+    const status = c.res.status;
+    const logData: Record<string, unknown> = {
+      code: "api.request",
+      method: c.req.method,
+      path: c.req.path,
+      status,
+      requestHeaders: Object.fromEntries(c.req.raw.headers.entries()),
+      ...(body ? { requestBody: body } : {}),
+      responseHeaders: Object.fromEntries(c.res.headers.entries()),
+    };
+
+    if (status >= 400) {
+      logData["responseBody"] = await c.res.clone().text();
+      logger.warn("RequestLogger", logData);
+    } else {
+      logger.info("RequestLogger", logData);
+    }
+  });
+
   // CloudFront origin verification — reject requests that bypass CloudFront
   const CF_ORIGIN_SECRET = process.env["CF_ORIGIN_SECRET"];
   if (CF_ORIGIN_SECRET) {
