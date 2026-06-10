@@ -46,7 +46,6 @@ export class SesDomainIdentityService implements DomainIdentityService {
         DkimSigningAttributes: {
           DomainSigningSelector: this.dkimSelector,
           DomainSigningPrivateKey: this.dkimPrivateKey,
-          NextSigningKeyLength: "RSA_2048_BIT",
         },
       }));
 
