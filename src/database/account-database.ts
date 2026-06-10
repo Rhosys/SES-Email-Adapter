@@ -4,7 +4,7 @@ import { dynamo, ACCOUNTS_TABLE } from "./shared.js";
 import { dbError, notFoundError, ok, err } from "../errors.js";
 import type { Result, DbError, NotFoundError } from "../errors.js";
 import { generateId } from "../utils/id.js";
-import type { Account, View, Label, Rule, RuleStatus, Domain, Alias, AliasSender, SenderPolicy, AccountFilteringConfig, VerifiedForwardingAddress, EmailTemplate, WsConnection } from "../types/index.js";
+import type { Account, View, Label, Rule, RuleStatus, Domain, Alias, AliasSender, SenderPolicy, AccountFilteringConfig, VerifiedForwardingAddress, EmailTemplate, WsConnection, AliasKey, SenderKey } from "../types/index.js";
 import type { StatsCategory } from "../types/index.js";
 import type { CreateViewRequest, UpdateViewRequest, CreateLabelRequest, UpdateLabelRequest, CreateRuleRequest, UpdateRuleRequest } from "../api/app.js";
 import { buildStatsUpdateParams, buildPruneNames } from "./stats-writer.js";
@@ -85,14 +85,15 @@ export class AccountDatabase {
   }
 
   // ---------------------------------------------------------------------------
-  // Aliases (each stored as its own item: SK = ALIAS#${address})
+  // Aliases — SK = DOMAIN#{domain}#ALIAS#{alias}
+  // GSI: gsi1pk = DOMAIN#{domain}#ALIAS#{alias}, gsi1sk = ACCT#{accountId}
   // ---------------------------------------------------------------------------
 
-  async getAlias(accountId: string, address: string): Promise<Result<Alias | null, DbError>> {
+  async getAlias(accountId: string, key: AliasKey): Promise<Result<Alias | null, DbError>> {
     try {
       const res = await dynamo.send(new GetCommand({
         TableName: ACCOUNTS_TABLE,
-        Key: { pk: pk(accountId), sk: `ALIAS#${address}` },
+        Key: { pk: pk(accountId), sk: `DOMAIN#${key.domain}#ALIAS#${key.alias}` },
       }));
       return ok(res.Item ? (res.Item as Alias) : null);
     } catch (e) {
@@ -104,7 +105,13 @@ export class AccountDatabase {
     try {
       await dynamo.send(new PutCommand({
         TableName: ACCOUNTS_TABLE,
-        Item: { ...alias, pk: pk(alias.accountId), sk: `ALIAS#${alias.address}` },
+        Item: {
+          ...alias,
+          pk: pk(alias.accountId),
+          sk: `DOMAIN#${alias.domain}#ALIAS#${alias.alias}`,
+          gsi1pk: `DOMAIN#${alias.domain}#ALIAS#${alias.alias}`,
+          gsi1sk: `ACCT#${alias.accountId}`,
+        },
       }));
       return ok(alias);
     } catch (e) {
@@ -121,9 +128,14 @@ export class AccountDatabase {
       const res = await dynamo.send(new QueryCommand({
         TableName: ACCOUNTS_TABLE,
         KeyConditionExpression: "pk = :pk AND begins_with(sk, :prefix)",
-        ExpressionAttributeValues: { ":pk": pk(accountId), ":prefix": "ALIAS#" },
+        ExpressionAttributeValues: { ":pk": pk(accountId), ":prefix": "DOMAIN#" },
       }));
-      return ok((res.Items ?? []) as Alias[]);
+      // Filter to only alias items (contain #ALIAS# but not #SENDER#)
+      const aliases = (res.Items ?? []).filter((item) => {
+        const sk = item["sk"] as string;
+        return sk.includes("#ALIAS#") && !sk.includes("#SENDER#");
+      });
+      return ok(aliases as Alias[]);
     } catch (e) {
       return err(dbError(e));
     }
@@ -133,11 +145,11 @@ export class AccountDatabase {
     return this.saveAlias(alias);
   }
 
-  async deleteAlias(accountId: string, address: string): Promise<Result<void, DbError>> {
+  async deleteAlias(accountId: string, key: AliasKey): Promise<Result<void, DbError>> {
     try {
       await dynamo.send(new DeleteCommand({
         TableName: ACCOUNTS_TABLE,
-        Key: { pk: pk(accountId), sk: `ALIAS#${address}` },
+        Key: { pk: pk(accountId), sk: `DOMAIN#${key.domain}#ALIAS#${key.alias}` },
       }));
       return ok(undefined);
     } catch (e) {
@@ -145,30 +157,30 @@ export class AccountDatabase {
     }
   }
 
-  async renameAlias(accountId: string, oldAddress: string, newAddress: string): Promise<Result<Alias, DbError | NotFoundError>> {
-    const oldResult = await this.getAlias(accountId, oldAddress);
+  async renameAlias(accountId: string, oldKey: AliasKey, newKey: AliasKey): Promise<Result<Alias, DbError | NotFoundError>> {
+    const oldResult = await this.getAlias(accountId, oldKey);
     if (oldResult.isErr()) return err(oldResult.error);
     const old = oldResult.value;
-    if (!old) return err(notFoundError("alias", oldAddress));
+    if (!old) return err(notFoundError("alias", `${oldKey.alias}@${oldKey.domain}`));
 
-    const sendersResult = await this.listSenders(accountId, oldAddress);
+    const sendersResult = await this.listSenders(accountId, oldKey);
     if (sendersResult.isErr()) return err(sendersResult.error);
     const senders = sendersResult.value;
 
-    const renamed: Alias = { ...old, address: newAddress, updatedAt: DateTime.utc().toISO()! };
+    const renamed: Alias = { ...old, domain: newKey.domain, alias: newKey.alias, address: `${newKey.alias}@${newKey.domain}`, updatedAt: DateTime.utc().toISO()! };
     const saveResult = await this.saveAlias(renamed);
     if (saveResult.isErr()) return err(saveResult.error);
 
     for (const s of senders) {
-      const saveSenderResult = await this.saveSender(accountId, newAddress, s.domain, s.policy);
+      const saveSenderResult = await this.saveSender(accountId, { domain: newKey.domain, alias: newKey.alias, senderDomain: s.senderDomain });
       if (saveSenderResult.isErr()) return err(saveSenderResult.error);
     }
 
-    const deleteResult = await this.deleteAlias(accountId, oldAddress);
+    const deleteResult = await this.deleteAlias(accountId, oldKey);
     if (deleteResult.isErr()) return err(deleteResult.error);
 
     for (const s of senders) {
-      const removeResult = await this.removeSender(accountId, oldAddress, s.domain);
+      const removeResult = await this.removeSender(accountId, { domain: oldKey.domain, alias: oldKey.alias, senderDomain: s.senderDomain });
       if (removeResult.isErr()) return err(removeResult.error);
     }
 
@@ -176,20 +188,21 @@ export class AccountDatabase {
   }
 
   // ---------------------------------------------------------------------------
-  // Alias Senders (per-alias allowed/blocked sender domains)
-  // sk = SENDER#${address}#${domain}  — distinct prefix from alias items
+  // Alias Senders — SK = DOMAIN#{domain}#ALIAS#{alias}#SENDER#{senderDomain}
+  // GSI: gsi1pk = SENDER#{senderDomain}, gsi1sk = ACCT#{accountId}#DOMAIN#{domain}#ALIAS#{alias}
   // ---------------------------------------------------------------------------
 
-  async saveSender(accountId: string, address: string, domain: string, policy: SenderPolicy): Promise<Result<void, DbError>> {
+  async saveSender(accountId: string, key: SenderKey, policy?: SenderPolicy): Promise<Result<void, DbError>> {
     try {
       await dynamo.send(new PutCommand({
         TableName: ACCOUNTS_TABLE,
         Item: {
           pk: pk(accountId),
-          sk: `SENDER#${address}#${domain}`,
-          gsi1pk: `SENDERS#${accountId}#${domain}`,
-          gsi1sk: `ALIAS#${address}`,
-          accountId, aliasAddress: address, domain, policy,
+          sk: `DOMAIN#${key.domain}#ALIAS#${key.alias}#SENDER#${key.senderDomain}`,
+          gsi1pk: `SENDER#${key.senderDomain}`,
+          gsi1sk: `ACCT#${accountId}#DOMAIN#${key.domain}#ALIAS#${key.alias}`,
+          accountId, aliasAddress: `${key.alias}@${key.domain}`, domain: key.domain, alias: key.alias, senderDomain: key.senderDomain,
+          policy: policy ?? "allow",
           addedAt: DateTime.utc().toISO()!,
         },
       }));
@@ -199,11 +212,11 @@ export class AccountDatabase {
     }
   }
 
-  async removeSender(accountId: string, address: string, domain: string): Promise<Result<void, DbError>> {
+  async removeSender(accountId: string, key: SenderKey): Promise<Result<void, DbError>> {
     try {
       await dynamo.send(new DeleteCommand({
         TableName: ACCOUNTS_TABLE,
-        Key: { pk: pk(accountId), sk: `SENDER#${address}#${domain}` },
+        Key: { pk: pk(accountId), sk: `DOMAIN#${key.domain}#ALIAS#${key.alias}#SENDER#${key.senderDomain}` },
       }));
       return ok(undefined);
     } catch (e) {
@@ -211,11 +224,11 @@ export class AccountDatabase {
     }
   }
 
-  async getSender(accountId: string, address: string, domain: string): Promise<Result<AliasSender | null, DbError>> {
+  async getSender(accountId: string, key: SenderKey): Promise<Result<AliasSender | null, DbError>> {
     try {
       const res = await dynamo.send(new GetCommand({
         TableName: ACCOUNTS_TABLE,
-        Key: { pk: pk(accountId), sk: `SENDER#${address}#${domain}` },
+        Key: { pk: pk(accountId), sk: `DOMAIN#${key.domain}#ALIAS#${key.alias}#SENDER#${key.senderDomain}` },
       }));
       return ok(res.Item ? (res.Item as AliasSender) : null);
     } catch (e) {
@@ -223,26 +236,12 @@ export class AccountDatabase {
     }
   }
 
-  async listSenders(accountId: string, address: string): Promise<Result<AliasSender[], DbError>> {
+  async listSenders(accountId: string, key: AliasKey): Promise<Result<AliasSender[], DbError>> {
     try {
       const res = await dynamo.send(new QueryCommand({
         TableName: ACCOUNTS_TABLE,
         KeyConditionExpression: "pk = :pk AND begins_with(sk, :prefix)",
-        ExpressionAttributeValues: { ":pk": pk(accountId), ":prefix": `SENDER#${address}#` },
-      }));
-      return ok((res.Items ?? []) as AliasSender[]);
-    } catch (e) {
-      return err(dbError(e));
-    }
-  }
-
-  async listAliasesForDomain(accountId: string, domain: string): Promise<Result<AliasSender[], DbError>> {
-    try {
-      const res = await dynamo.send(new QueryCommand({
-        TableName: ACCOUNTS_TABLE,
-        IndexName: "gsi1",
-        KeyConditionExpression: "gsi1pk = :pk",
-        ExpressionAttributeValues: { ":pk": `SENDERS#${accountId}#${domain}` },
+        ExpressionAttributeValues: { ":pk": pk(accountId), ":prefix": `DOMAIN#${key.domain}#ALIAS#${key.alias}#SENDER#` },
       }));
       return ok((res.Items ?? []) as AliasSender[]);
     } catch (e) {
@@ -262,12 +261,12 @@ export class AccountDatabase {
     return ok(accountResult.value?.deletionRetentionDays ?? 0);
   }
 
-  async getProcessorAccountContext(accountId: string, recipientAddress: string): Promise<Result<{ retentionDays: number; filtering: AccountFilteringConfig | null; emailConfig: Alias | null; registeredDomains: string[]; userEmails: string[]; billingPlan: import("../embedding/retention-tier.js").BillingPlan; onboardingCompleted: boolean }, DbError>> {
+  async getProcessorAccountContext(accountId: string, recipientKey: AliasKey): Promise<Result<{ retentionDays: number; filtering: AccountFilteringConfig | null; emailConfig: Alias | null; registeredDomains: string[]; userEmails: string[]; billingPlan: import("../embedding/retention-tier.js").BillingPlan; onboardingCompleted: boolean }, DbError>> {
     const accountResult = await this.getAccount(accountId);
     if (accountResult.isErr()) return err(accountResult.error);
     const account = accountResult.value;
 
-    const emailConfigResult = await this.getAlias(accountId, recipientAddress);
+    const emailConfigResult = await this.getAlias(accountId, recipientKey);
     if (emailConfigResult.isErr()) return err(emailConfigResult.error);
     const emailConfig = emailConfigResult.value;
 
@@ -644,7 +643,8 @@ export class AccountDatabase {
   }
 
   // ---------------------------------------------------------------------------
-  // Domains
+  // Domains — SK = DOMAIN#{domain}
+  // GSI: gsi1pk = DOMAIN#{domain}, gsi1sk = ACCT#{accountId}
   // ---------------------------------------------------------------------------
 
   async listDomains(accountId: string): Promise<Result<Domain[], DbError>> {
@@ -654,15 +654,20 @@ export class AccountDatabase {
         KeyConditionExpression: "pk = :pk AND begins_with(sk, :prefix)",
         ExpressionAttributeValues: { ":pk": pk(accountId), ":prefix": "DOMAIN#" },
       }));
-      return ok((res.Items ?? []) as Domain[]);
+      // Filter to only bare domain items (SK = DOMAIN#{domain}, no #ALIAS# suffix)
+      const domains = (res.Items ?? []).filter((item) => {
+        const sk = item["sk"] as string;
+        return !sk.includes("#ALIAS#");
+      });
+      return ok(domains as Domain[]);
     } catch (e) {
       return err(dbError(e));
     }
   }
 
-  async getDomain(accountId: string, id: string): Promise<Result<Domain | null, DbError>> {
+  async getDomain(accountId: string, domainName: string): Promise<Result<Domain | null, DbError>> {
     try {
-      const res = await dynamo.send(new GetCommand({ TableName: ACCOUNTS_TABLE, Key: { pk: pk(accountId), sk: `DOMAIN#${id}` } }));
+      const res = await dynamo.send(new GetCommand({ TableName: ACCOUNTS_TABLE, Key: { pk: pk(accountId), sk: `DOMAIN#${domainName}` } }));
       return ok(res.Item ? res.Item as unknown as Domain : null);
     } catch (e) {
       return err(dbError(e));
@@ -670,15 +675,7 @@ export class AccountDatabase {
   }
 
   async getDomainByName(accountId: string, domainName: string): Promise<Result<Domain | null, DbError>> {
-    try {
-      const res = await dynamo.send(new GetCommand({
-        TableName: ACCOUNTS_TABLE,
-        Key: { pk: pk(accountId), sk: `DOMAIN#${domainName}` },
-      }));
-      return ok(res.Item ? res.Item as unknown as Domain : null);
-    } catch (e) {
-      return err(dbError(e));
-    }
+    return this.getDomain(accountId, domainName);
   }
 
   async createDomain(accountId: string, domain: string): Promise<Result<Domain, DbError>> {
@@ -692,23 +689,58 @@ export class AccountDatabase {
       updatedAt: now,
     };
     try {
-      await dynamo.send(new PutCommand({ TableName: ACCOUNTS_TABLE, Item: { ...item, pk: pk(accountId), sk: `DOMAIN#${domain}` } }));
+      await dynamo.send(new PutCommand({
+        TableName: ACCOUNTS_TABLE,
+        Item: {
+          ...item,
+          pk: pk(accountId),
+          sk: `DOMAIN#${domain}`,
+          gsi1pk: `DOMAIN#${domain}`,
+          gsi1sk: `ACCT#${accountId}`,
+        },
+        ConditionExpression: "attribute_not_exists(sk)",
+      }));
       return ok(item);
     } catch (e) {
+      // ConditionalCheckFailedException = domain already exists for this account (idempotent)
+      if (e instanceof Error && e.name === "ConditionalCheckFailedException") {
+        const existing = await this.getDomain(accountId, domain);
+        if (existing.isErr()) return err(existing.error);
+        if (existing.value) return ok(existing.value);
+      }
       return err(dbError(e));
     }
   }
 
-  async deleteDomain(accountId: string, id: string): Promise<Result<void, DbError>> {
+  async deleteDomain(accountId: string, domainName: string): Promise<Result<void, DbError>> {
     try {
-      await dynamo.send(new DeleteCommand({ TableName: ACCOUNTS_TABLE, Key: { pk: pk(accountId), sk: `DOMAIN#${id}` } }));
+      await dynamo.send(new DeleteCommand({ TableName: ACCOUNTS_TABLE, Key: { pk: pk(accountId), sk: `DOMAIN#${domainName}` } }));
       return ok(undefined);
     } catch (e) {
       return err(dbError(e));
     }
   }
 
-  async updateDomainHealth(accountId: string, id: string, health: {
+  /** Resolve which account owns a domain. Returns the accountId of the oldest registrant. */
+  async resolveAccountForDomain(domain: string): Promise<Result<string | null, DbError>> {
+    try {
+      const res = await dynamo.send(new QueryCommand({
+        TableName: ACCOUNTS_TABLE,
+        IndexName: "gsi1",
+        KeyConditionExpression: "gsi1pk = :pk",
+        ExpressionAttributeValues: { ":pk": `DOMAIN#${domain}` },
+      }));
+      const items = (res.Items ?? []) as Domain[];
+      if (items.length === 0) return ok(null);
+      // Sort by createdAt ascending — oldest registrant wins
+      items.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+      return ok(items[0]!.accountId);
+    } catch (e) {
+      return err(dbError(e));
+    }
+  }
+
+  async updateDomainHealth(accountId: string, domainName: string, health: {
     receivingHealthy: boolean;
     senderHealthy: boolean;
     failingRecords: string[];
@@ -718,7 +750,7 @@ export class AccountDatabase {
     try {
       await dynamo.send(new UpdateCommand({
         TableName: ACCOUNTS_TABLE,
-        Key: { pk: pk(accountId), sk: `DOMAIN#${id}` },
+        Key: { pk: pk(accountId), sk: `DOMAIN#${domainName}` },
         UpdateExpression: "SET receivingHealthy = :rh, senderHealthy = :sh, failingRecords = :fr, lastCheckedAt = :lc, updatedAt = :ua" +
           (health.lastHealthyAt ? ", lastHealthyAt = :lha" : ""),
         ExpressionAttributeValues: {
@@ -736,7 +768,7 @@ export class AccountDatabase {
     }
   }
 
-  async updateDomainSetup(accountId: string, id: string, setup: {
+  async updateDomainSetup(accountId: string, domainName: string, setup: {
     receivingSetupComplete?: boolean;
     senderSetupComplete?: boolean;
   }): Promise<Result<void, DbError>> {
@@ -753,7 +785,7 @@ export class AccountDatabase {
     try {
       await dynamo.send(new UpdateCommand({
         TableName: ACCOUNTS_TABLE,
-        Key: { pk: pk(accountId), sk: `DOMAIN#${id}` },
+        Key: { pk: pk(accountId), sk: `DOMAIN#${domainName}` },
         UpdateExpression: `SET ${parts.join(", ")}`,
         ExpressionAttributeValues: values,
       }));
@@ -772,8 +804,8 @@ export class AccountDatabase {
       do {
         const res = await dynamo.send(new ScanCommand({
           TableName: ACCOUNTS_TABLE,
-          FilterExpression: "begins_with(sk, :prefix)",
-          ExpressionAttributeValues: { ":prefix": "DOMAIN#" },
+          FilterExpression: "begins_with(sk, :prefix) AND NOT contains(sk, :aliasMarker)",
+          ExpressionAttributeValues: { ":prefix": "DOMAIN#", ":aliasMarker": "#ALIAS#" },
           ...(lastKey ? { ExclusiveStartKey: lastKey } : {}),
         }));
         for (const item of res.Items ?? []) {

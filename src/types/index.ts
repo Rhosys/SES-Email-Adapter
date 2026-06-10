@@ -260,11 +260,40 @@ export type PushPriority = (typeof PUSH_PRIORITIES)[number];
 export const ARC_URGENCIES = ["critical", "high", "normal", "low", "silent"] as const;
 export type ArcUrgency = (typeof ARC_URGENCIES)[number];
 
+// ---------------------------------------------------------------------------
+// Key types for DynamoDB hierarchical schema
+// ---------------------------------------------------------------------------
+
+/** Identifies an alias within the DOMAIN#{domain}#ALIAS#{alias} hierarchy */
+export interface AliasKey {
+  domain: string;  // Full domain, e.g. "acme.com"
+  alias: string;   // Local part before @, e.g. "me"
+}
+
+/** Identifies a sender entry within the DOMAIN#{domain}#ALIAS#{alias}#SENDER#{senderDomain} hierarchy */
+export interface SenderKey extends AliasKey {
+  senderDomain: string; // eTLD+1 of sender, e.g. "github.com"
+}
+
+/** Compute full email address from alias key */
+export function aliasAddress(key: AliasKey): string {
+  return `${key.alias}@${key.domain}`;
+}
+
+/** Parse a full email address into an AliasKey */
+export function parseAliasAddress(address: string): AliasKey {
+  const atIdx = address.lastIndexOf("@");
+  if (atIdx < 1) throw new Error(`Invalid email address: ${address}`);
+  return { alias: address.slice(0, atIdx), domain: address.slice(atIdx + 1) };
+}
+
 // Per-recipient-address configuration (an "alias" is any address on a custom domain routed into the system)
 export interface Alias {
   id: string;
   accountId: string;
-  address: string;              // The recipient address, e.g. me@mydomain.com
+  address: string;              // The full recipient address, e.g. me@mydomain.com
+  domain: string;               // Full domain, e.g. "acme.com"
+  alias: string;                // Local part before @, e.g. "me"
   unknownSenderPolicy: UnknownSenderPolicy;
   // Spam score at which a signal is treated as spam (0–1). Overrides account default when set.
   spamScoreThreshold?: number;
@@ -280,8 +309,10 @@ export type SenderPolicy = (typeof SENDER_POLICIES)[number];
 
 export interface AliasSender {
   accountId: string;
-  aliasAddress: string;
-  domain: string;   // eTLD+1 (stored in DB; API exposes as full sender email via transform)
+  aliasAddress: string;   // Full alias email address (e.g. "me@acme.com")
+  domain: string;         // Alias's domain (e.g. "acme.com")
+  alias: string;          // Alias's local part (e.g. "me")
+  senderDomain: string;   // eTLD+1 of sender (e.g. "github.com")
   policy: SenderPolicy;
   addedAt: string;
 }

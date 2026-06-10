@@ -72,6 +72,8 @@ function makeAlias(overrides: Partial<Alias> = {}): Alias {
     id: "alias-001",
     accountId: TEST_ACCOUNT_ID,
     address: "user@example.com",
+    domain: "example.com",
+    alias: "user",
     unknownSenderPolicy: "quarantine_visible",
     createdAt: "2024-01-01T00:00:00Z",
     updatedAt: "2024-01-01T00:00:00Z",
@@ -319,13 +321,13 @@ describe("API route error mapping — unit tests", () => {
 
     it("returns HTTP 200 when renameAlias succeeds", async () => {
       vi.mocked(accountDb.renameAlias).mockResolvedValueOnce(
-        ok(makeAlias({ address: "new@example.com" })),
+        ok(makeAlias({ domain: "example.com", alias: "new", address: "new@example.com" })),
       );
       const res = await req(app, "PATCH", `${A}/aliases/old%40example.com`, {
         body: { newAddress: "new@example.com" },
       });
       expect(res.status).toBe(200);
-      const body = await res.json() as Alias;
+      const body = await res.json() as { address: string };
       expect(body.address).toBe("new@example.com");
     });
 

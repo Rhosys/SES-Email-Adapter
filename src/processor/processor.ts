@@ -5,7 +5,8 @@ import type { Logger } from "../logger.js";
 import type { Result } from "neverthrow";
 import { ok, err, dbError, processorError, invalidResponseError } from "../errors.js";
 import type { DbError, InvalidResponseError, ProcessorError } from "../errors.js";
-import type { Signal, Arc, Rule, Workflow, WorkflowData, Alias, AliasSender, SenderPolicy, AccountFilteringConfig, SignalSource, SignalStatus, Domain, ArcStatus, ArcUrgency, UnknownSenderPolicy, MatchedRuleResult, InvalidRuleFunctionData, InvalidTemplateFunctionData, AutoSendBlockedData } from "../types/index.js";
+import type { Signal, Arc, Rule, Workflow, WorkflowData, Alias, AliasSender, SenderPolicy, AccountFilteringConfig, SignalSource, SignalStatus, Domain, ArcStatus, ArcUrgency, UnknownSenderPolicy, MatchedRuleResult, InvalidRuleFunctionData, InvalidTemplateFunctionData, AutoSendBlockedData, AliasKey, SenderKey } from "../types/index.js";
+import { parseAliasAddress } from "../types/index.js";
 import type { ParsedMime } from "./mime.js";
 import type { ContentSanitizerClient } from "./content-sanitizer-client.js";
 import type { UserCodeExecutorClient, TemplateParameterResult } from "./user-code-client.js";
@@ -394,7 +395,7 @@ export class SignalProcessor {
         if (!arc) return err(processorError("arc not found on retry"));
 
         // Fetch account context (needed for S3 retention)
-        const accountCtxResult = await this.accountDb.getProcessorAccountContext(message.accountId, signal.data.recipientAddress);
+        const accountCtxResult = await this.accountDb.getProcessorAccountContext(message.accountId, parseAliasAddress(signal.data.recipientAddress));
         if (accountCtxResult.isErr()) return err(processorError(accountCtxResult.error));
         const accountCtx = accountCtxResult.value;
 
@@ -623,9 +624,10 @@ export class SignalProcessor {
           // Reply-To safety gate — suppress auto-send if Reply-To domain is untrusted
           if (shouldAutoSend && signal.data.replyTo) {
             const replyToETLD1 = getETLD1(signal.data.replyTo.address);
-            const senderResult = await this.accountDb.getSender(accountId, signal.data.recipientAddress, replyToETLD1);
+            const recipientKey = parseAliasAddress(signal.data.recipientAddress);
+            const senderResult = await this.accountDb.getSender(accountId, { ...recipientKey, senderDomain: replyToETLD1 });
             const approvedDomains = senderResult.isOk() && senderResult.value?.policy === "allow"
-              ? [senderResult.value.domain]
+              ? [senderResult.value.senderDomain]
               : [];
             const replyTargetResult = isReplyTargetSafe(signal, approvedDomains);
             if (!replyTargetResult.safe) {
@@ -708,7 +710,7 @@ export class SignalProcessor {
     const webhookActions = (signal.data.matchedRules ?? [])
       .flatMap(r => r.actions.filter(a => a.type === "webhook" && a.value));
     if (webhookActions.length > 0) {
-      const accountCtxResult = await this.accountDb.getProcessorAccountContext(accountId, signal.data.recipientAddress);
+      const accountCtxResult = await this.accountDb.getProcessorAccountContext(accountId, parseAliasAddress(signal.data.recipientAddress));
       const accountPlan = accountCtxResult.isOk() ? accountCtxResult.value.billingPlan : "Free";
 
       if (!this.billingHandler.isFeatureEnabled(accountPlan, "webhook")) {
@@ -837,9 +839,10 @@ export class SignalProcessor {
 
     // 2. Content Sanitizer — fetch, parse, sanitize, extract
     const recipientAddress = destination[0] ?? "";
+    const recipientKey = parseAliasAddress(recipientAddress);
 
     // Fetch account context early (needed for retention resolution before content sanitizer)
-    const accountCtxResult = await this.accountDb.getProcessorAccountContext(accountId, recipientAddress);
+    const accountCtxResult = await this.accountDb.getProcessorAccountContext(accountId, recipientKey);
     if (accountCtxResult.isErr()) return err(accountCtxResult.error);
     const accountCtx = accountCtxResult.value;
 
@@ -927,7 +930,7 @@ export class SignalProcessor {
     const now = DateTime.utc().toISO()!;
 
     // 4. Fetch sender entry (account context already fetched for retention resolution)
-    const senderEntryResult = await this.accountDb.getSender(accountId, recipientAddress, senderETLD1);
+    const senderEntryResult = await this.accountDb.getSender(accountId, { ...recipientKey, senderDomain: senderETLD1 });
     if (senderEntryResult.isErr()) return err(senderEntryResult.error);
     const senderEntry = senderEntryResult.value;
     const ttl = accountCtx.retentionDays > 0
@@ -1552,17 +1555,21 @@ export class SignalProcessor {
   ): Promise<Result<void, DbError>> {
     const now = DateTime.utc().toISO()!;
     if (!existing) {
+      const key = parseAliasAddress(address);
       const aliasResult = await this.accountDb.saveAlias({
         id: address,
         accountId,
         address,
+        domain: key.domain,
+        alias: key.alias,
         unknownSenderPolicy: defaultUnknownSenderPolicy,
         createdAt: now,
         updatedAt: now,
       });
       if (aliasResult.isErr()) return err(aliasResult.error);
     }
-    const senderResult = await this.accountDb.saveSender(accountId, address, senderETLD1, "allow");
+    const senderKey = parseAliasAddress(address);
+    const senderResult = await this.accountDb.saveSender(accountId, { ...senderKey, senderDomain: senderETLD1 }, "allow");
     if (senderResult.isErr()) return err(senderResult.error);
     return ok(undefined);
   }

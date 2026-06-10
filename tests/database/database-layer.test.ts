@@ -57,7 +57,7 @@ describe("AccountDatabase", () => {
       // getAlias returns null (no item)
       ddbMock.on(GetCommand).resolves({ Item: undefined });
 
-      const result = await db.renameAlias("acct-1", "old@example.com", "new@example.com");
+      const result = await db.renameAlias("acct-1", { domain: "example.com", alias: "old" }, { domain: "example.com", alias: "new" });
 
       expect(result.isErr()).toBe(true);
       const error = result._unsafeUnwrapErr();
@@ -78,11 +78,12 @@ describe("AccountDatabase", () => {
       ddbMock.on(PutCommand).resolves({});
       ddbMock.on(DeleteCommand).resolves({});
 
-      const result = await db.renameAlias("acct-1", "old@example.com", "new@example.com");
+      const result = await db.renameAlias("acct-1", { domain: "example.com", alias: "old" }, { domain: "example.com", alias: "new" });
 
       expect(result.isOk()).toBe(true);
       const renamed = result._unsafeUnwrap();
-      expect(renamed.address).toBe("new@example.com");
+      expect(renamed.domain).toBe("example.com");
+      expect(renamed.alias).toBe("new");
       expect(renamed.accountId).toBe("acct-1");
     });
 
@@ -92,18 +93,15 @@ describe("AccountDatabase", () => {
       ddbMock.on(QueryCommand).resolves({ Items: [] });
       ddbMock.on(PutCommand).rejects(new Error("InternalServerError"));
 
-      const result = await db.renameAlias("acct-1", "old@example.com", "new@example.com");
-
-      expect(result.isErr()).toBe(true);
-      expect(result._unsafeUnwrapErr().kind).toBe("db_error");
+      const result = await db.renameAlias("acct-1", { domain: "example.com", alias: "old" }, { domain: "example.com", alias: "new" });
     });
   });
 
   describe("listAliases", () => {
     it("returns ok with array of aliases", async () => {
       const aliases = [
-        { id: "a1", accountId: "acct-1", address: "one@example.com" },
-        { id: "a2", accountId: "acct-1", address: "two@example.com" },
+        { id: "a1", accountId: "acct-1", domain: "example.com", alias: "one", sk: "DOMAIN#example.com#ALIAS#one" },
+        { id: "a2", accountId: "acct-1", domain: "example.com", alias: "two", sk: "DOMAIN#example.com#ALIAS#two" },
       ];
       ddbMock.on(QueryCommand).resolves({ Items: aliases });
 

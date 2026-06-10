@@ -129,7 +129,7 @@ describe("Blocked/quarantined signals never trigger saveArc", () => {
       classifier: makeClassifier({ spamScore: 0.95, workflow: "conversation" }),
       contentSanitizer: makeContentSanitizer("spammer.com"),
       unknownSenderPolicy: "quarantine_visible",
-      senderEntry: { accountId: TEST_ACCOUNT_ID, aliasAddress: "user@example.com", domain: "spammer.com", policy: "allow", addedAt: "2024-01-01T00:00:00Z" },
+      senderEntry: { accountId: TEST_ACCOUNT_ID, aliasAddress: "user@example.com", domain: "example.com", alias: "user", senderDomain: "spammer.com", policy: "allow", addedAt: "2024-01-01T00:00:00Z" },
       rules: SYSTEM_RULES,
     },
     {
@@ -137,7 +137,7 @@ describe("Blocked/quarantined signals never trigger saveArc", () => {
       classifier: makeClassifier({ workflow: "onboarding" as import("../../src/types/index.js").Workflow, workflowData: { workflow: "onboarding", service: "acme.com", onboardingType: "welcome" } as unknown as import("../../src/types/index.js").WorkflowData }),
       contentSanitizer: makeContentSanitizer("acme.com"),
       unknownSenderPolicy: "quarantine_visible",
-      senderEntry: { accountId: TEST_ACCOUNT_ID, aliasAddress: "user@example.com", domain: "acme.com", policy: "allow", addedAt: "2024-01-01T00:00:00Z" },
+      senderEntry: { accountId: TEST_ACCOUNT_ID, aliasAddress: "user@example.com", domain: "example.com", alias: "user", senderDomain: "acme.com", policy: "allow", addedAt: "2024-01-01T00:00:00Z" },
       rules: SYSTEM_RULES,
     },
     {
@@ -145,7 +145,7 @@ describe("Blocked/quarantined signals never trigger saveArc", () => {
       classifier: makeClassifier({ workflow: "status", workflowData: { workflow: "status", statusType: "terms_update", provider: "gov.uk" } }),
       contentSanitizer: makeContentSanitizer("gov.uk"),
       unknownSenderPolicy: "quarantine_visible",
-      senderEntry: { accountId: TEST_ACCOUNT_ID, aliasAddress: "user@example.com", domain: "gov.uk", policy: "allow", addedAt: "2024-01-01T00:00:00Z" },
+      senderEntry: { accountId: TEST_ACCOUNT_ID, aliasAddress: "user@example.com", domain: "example.com", alias: "user", senderDomain: "gov.uk", policy: "allow", addedAt: "2024-01-01T00:00:00Z" },
       rules: SYSTEM_RULES,
     },
     {
@@ -169,7 +169,7 @@ describe("Blocked/quarantined signals never trigger saveArc", () => {
       classifier: makeClassifier({ workflow: "conversation" }),
       contentSanitizer: makeContentSanitizer("example.com"),
       unknownSenderPolicy: "allow_all",
-      senderEntry: { accountId: TEST_ACCOUNT_ID, aliasAddress: "user@example.com", domain: "example.com", policy: "allow", addedAt: "2024-01-01T00:00:00Z" },
+      senderEntry: { accountId: TEST_ACCOUNT_ID, aliasAddress: "user@example.com", domain: "example.com", alias: "user", senderDomain: "example.com", policy: "allow", addedAt: "2024-01-01T00:00:00Z" },
       rules: [{
         id: "custom-block", accountId: TEST_ACCOUNT_ID, name: "Block all",
         condition: "true", actions: [{ type: "block_hidden" }], status: "enabled",
@@ -181,7 +181,7 @@ describe("Blocked/quarantined signals never trigger saveArc", () => {
       classifier: makeClassifier({ workflow: "conversation" }),
       contentSanitizer: makeContentSanitizer("example.com"),
       unknownSenderPolicy: "allow_all",
-      senderEntry: { accountId: TEST_ACCOUNT_ID, aliasAddress: "user@example.com", domain: "example.com", policy: "allow", addedAt: "2024-01-01T00:00:00Z" },
+      senderEntry: { accountId: TEST_ACCOUNT_ID, aliasAddress: "user@example.com", domain: "example.com", alias: "user", senderDomain: "example.com", policy: "allow", addedAt: "2024-01-01T00:00:00Z" },
       rules: [{
         id: "custom-quarantine", accountId: TEST_ACCOUNT_ID, name: "Quarantine all",
         condition: "true", actions: [{ type: "quarantine" }], status: "enabled",
@@ -198,6 +198,8 @@ describe("Blocked/quarantined signals never trigger saveArc", () => {
       id: "cfg-prop2",
       accountId: TEST_ACCOUNT_ID,
       address: "user@example.com",
+      domain: "example.com",
+      alias: "user",
       unknownSenderPolicy: strategy.unknownSenderPolicy,
       createdAt: "2024-01-01T00:00:00Z",
       updatedAt: "2024-01-01T00:00:00Z",

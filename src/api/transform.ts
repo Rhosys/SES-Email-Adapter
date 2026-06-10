@@ -231,7 +231,7 @@ export function toApiAlias(alias: DbAlias): Api.Alias {
 export function toApiAliasSender(sender: DbAliasSender): Api.AliasSender {
   return {
     alias: sender.aliasAddress,
-    sender: sender.domain,  // DB stores eTLD+1; exposed as sender field
+    sender: sender.senderDomain,  // DB stores eTLD+1; exposed as sender field
     policy: sender.policy as Api.AliasSender["policy"],
     createdAt: sender.addedAt,
     updatedAt: sender.addedAt,  // DB doesn't have updatedAt yet

@@ -53,6 +53,8 @@ const DEFAULT_ALIAS: Alias = {
   id: "cfg-default",
   accountId: TEST_ACCOUNT_ID,
   address: "user@example.com",
+  domain: "example.com",
+  alias: "user",
   unknownSenderPolicy: "allow_all",
   createdAt: "2024-01-01T00:00:00Z",
   updatedAt: "2024-01-01T00:00:00Z",

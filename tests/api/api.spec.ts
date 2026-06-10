@@ -135,6 +135,8 @@ function makeAlias(overrides: Partial<Alias> = {}): Alias {
     id: "cfg-001",
     accountId: TEST_ACCOUNT_ID,
     address: "user@example.com",
+    domain: "example.com",
+    alias: "user",
     unknownSenderPolicy: "quarantine_visible",
     createdAt: "2024-01-01T00:00:00Z",
     updatedAt: "2024-01-01T00:00:00Z",
@@ -1066,7 +1068,7 @@ describe("API", () => {
       vi.mocked(accountDb.listAliases).mockResolvedValueOnce(ok([makeAlias()]));
       const res = await req(app, "GET", `${A}/aliases`);
       expect(res.status).toBe(200);
-      const body = await res.json() as { aliases: Alias[] };
+      const body = await res.json() as { aliases: Array<{ address: string }> };
       expect(body.aliases).toHaveLength(1);
       expect(body.aliases[0]!.address).toBe("user@example.com");
     });
@@ -1089,15 +1091,15 @@ describe("API", () => {
 
   describe("POST /accounts/:accountId/aliases", () => {
     it("creates an alias and returns 201 + full resource", async () => {
-      vi.mocked(accountDb.createAlias).mockResolvedValueOnce(ok(makeAlias({ address: "me@mydomain.com" })));
+      vi.mocked(accountDb.createAlias).mockResolvedValueOnce(ok(makeAlias({ domain: "mydomain.com", alias: "me", address: "me@mydomain.com" })));
       const res = await req(app, "POST", `${A}/aliases`, {
         body: { address: "me@mydomain.com", unknownSenderPolicy: "block_hidden" },
       });
       expect(res.status).toBe(201);
-      const body = await res.json() as Alias;
+      const body = await res.json() as { address: string };
       expect(body.address).toBe("me@mydomain.com");
       expect(accountDb.createAlias).toHaveBeenCalledWith(
-        expect.objectContaining({ accountId: TEST_ACCOUNT_ID, address: "me@mydomain.com", unknownSenderPolicy: "block_hidden" }),
+        expect.objectContaining({ accountId: TEST_ACCOUNT_ID, domain: "mydomain.com", alias: "me", unknownSenderPolicy: "block_hidden" }),
       );
     });
 
@@ -1135,7 +1137,7 @@ describe("API", () => {
       const body = await res.json() as Alias;
       expect(body.unknownSenderPolicy).toBe("block_hidden");
       expect(accountDb.upsertAlias).toHaveBeenCalledWith(
-        expect.objectContaining({ accountId: TEST_ACCOUNT_ID, address: "me@mydomain.com", unknownSenderPolicy: "block_hidden" }),
+        expect.objectContaining({ accountId: TEST_ACCOUNT_ID, domain: "mydomain.com", alias: "me", unknownSenderPolicy: "block_hidden" }),
       );
     });
 
@@ -1170,7 +1172,7 @@ describe("API", () => {
     it("deletes the alias and returns 204", async () => {
       const res = await req(app, "DELETE", `${A}/aliases/me%40mydomain.com`);
       expect(res.status).toBe(204);
-      expect(accountDb.deleteAlias).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "me@mydomain.com");
+      expect(accountDb.deleteAlias).toHaveBeenCalledWith(TEST_ACCOUNT_ID, { domain: "mydomain.com", alias: "me" });
     });
   });
 

@@ -10,8 +10,8 @@ import { computeUndoWindowSeconds } from "./undo-window.js";
 import type { AuditEvent, AuditDatabase } from "../database/audit-database.js";
 import type { Result } from "neverthrow";
 import type { DbError, NotFoundError, AuthressServiceError, AuthError } from "../errors.js";
-import type { Arc, Signal, AnySignal, Attachment, View, Label, Rule, Domain, DnsRecord, Account, Page, PageParams, ArcStatus, Workflow, WorkflowData, Alias, AliasSender, SenderPolicy, VerifiedForwardingAddress, Pagination, EmailTemplate, CalendarEventData, CalendarResponseData, DomainMisconfigurationData } from "../types/index.js";
-import { isCalendarEventSignal, isEmailSignal } from "../types/index.js";
+import type { Arc, Signal, AnySignal, Attachment, View, Label, Rule, Domain, DnsRecord, Account, Page, PageParams, ArcStatus, Workflow, WorkflowData, Alias, AliasSender, SenderPolicy, VerifiedForwardingAddress, Pagination, EmailTemplate, CalendarEventData, CalendarResponseData, DomainMisconfigurationData, AliasKey, SenderKey } from "../types/index.js";
+import { isCalendarEventSignal, isEmailSignal, parseAliasAddress } from "../types/index.js";
 import type { UpdateArcFields, ArcDatabase } from "../database/arc-database.js";
 import type { AccountDatabase } from "../database/account-database.js";
 import type { Logger } from "../logger.js";
@@ -473,7 +473,8 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
       if (signal) {
         const senderDomain = signal.data.from.address.includes("@") ? signal.data.from.address.split("@").pop()! : signal.data.from.address;
         const senderETLD1 = getDomain(senderDomain) ?? senderDomain;
-        const saveSenderResult = await accountDb.saveSender(accountId, signal.data.recipientAddress, senderETLD1, "violate_report");
+        const recipientKey = parseAliasAddress(signal.data.recipientAddress);
+        const saveSenderResult = await accountDb.saveSender(accountId, { ...recipientKey, senderDomain: senderETLD1 }, "violate_report");
         if (saveSenderResult.isErr()) return err(c, 500, "Internal Server Error");
         logger.track("Arc reported as GDPR violation. Sender domain blocked with violate_report policy and arc deleted.", {
           code: "api.arc.violate_report",
@@ -742,7 +743,8 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
       if (wasQuarantinedByUnknownSender) {
         const senderDomain = signal.data.from.address.includes("@") ? signal.data.from.address.split("@").pop()! : signal.data.from.address;
         const senderETLD1 = getDomain(senderDomain) ?? senderDomain;
-        const saveSenderResult = await accountDb.saveSender(accountId, signal.data.recipientAddress, senderETLD1, body.status);
+        const recipientKey = parseAliasAddress(signal.data.recipientAddress);
+        const saveSenderResult = await accountDb.saveSender(accountId, { ...recipientKey, senderDomain: senderETLD1 }, body.status);
         if (saveSenderResult.isErr()) return err(c, 500, "Internal Server Error");
       }
 
@@ -785,7 +787,8 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
 
     // When quarantined by unknown sender, approve the sender for future emails
     if (wasQuarantinedByUnknownSender) {
-      const saveSenderResult = await accountDb.saveSender(accountId, signal.data.recipientAddress, senderETLD1, "allow");
+      const recipientKey = parseAliasAddress(signal.data.recipientAddress);
+      const saveSenderResult = await accountDb.saveSender(accountId, { ...recipientKey, senderDomain: senderETLD1 }, "allow");
       if (saveSenderResult.isErr()) return err(c, 500, "Internal Server Error");
     }
 
@@ -1651,7 +1654,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
   }), async (c) => {
     const accountId = c.req.param("accountId")!;
     const address = decodeURIComponent(c.req.param("address")!);
-    const aliasResult = await accountDb.getAlias(accountId, address);
+    const aliasResult = await accountDb.getAlias(accountId, parseAliasAddress(address));
     if (aliasResult.isErr()) return err(c, 500, "Internal Server Error");
     const alias = aliasResult.value;
     if (!alias) return err(c, 404, "Alias not found", "ALIAS_NOT_FOUND");
@@ -1668,7 +1671,8 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
   }), async (c) => {
     const accountId = c.req.param("accountId")!;
     const body = await zParse(CreateAliasRequest, c.req.raw);
-    const existingResult = await accountDb.getAlias(accountId, body.address);
+    const key = parseAliasAddress(body.address);
+    const existingResult = await accountDb.getAlias(accountId, key);
     if (existingResult.isErr()) return err(c, 500, "Internal Server Error");
     if (existingResult.value) return err(c, 409, "Alias already exists", "ALIAS_EXISTS");
     const now = DateTime.utc().toISO()!;
@@ -1676,6 +1680,8 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
       id: body.address,
       accountId,
       address: body.address,
+      domain: key.domain,
+      alias: key.alias,
       unknownSenderPolicy: body.unknownSenderPolicy ?? "quarantine_visible",
       ...(body.createdForOrigin !== undefined ? { createdForOrigin: body.createdForOrigin } : {}),
       createdAt: now,
@@ -1695,16 +1701,18 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
   }), async (c) => {
     const accountId = c.req.param("accountId")!;
     const address = decodeURIComponent(c.req.param("address")!);
+    const key = parseAliasAddress(address);
     const body = await zParse(UpdateAliasRequest, c.req.raw);
     if (body.newAddress) {
-      const renameResult = await accountDb.renameAlias(accountId, address, body.newAddress);
+      const newKey = parseAliasAddress(body.newAddress);
+      const renameResult = await accountDb.renameAlias(accountId, key, newKey);
       if (renameResult.isErr()) {
         if (renameResult.error.kind === "not_found") return err(c, 404, "Alias not found", "ALIAS_NOT_FOUND");
         return err(c, 500, "Internal Server Error");
       }
       return c.json(toApiAlias(renameResult.value), 200);
     }
-    const existingResult = await accountDb.getAlias(accountId, address);
+    const existingResult = await accountDb.getAlias(accountId, key);
     if (existingResult.isErr()) return err(c, 500, "Internal Server Error");
     const existing = existingResult.value;
     const now = DateTime.utc().toISO()!;
@@ -1712,6 +1720,8 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
       id: address,
       accountId,
       address,
+      domain: key.domain,
+      alias: key.alias,
       unknownSenderPolicy: body.unknownSenderPolicy ?? existing?.unknownSenderPolicy ?? "quarantine_visible",
       ...(body.spamScoreThreshold !== undefined ? { spamScoreThreshold: body.spamScoreThreshold } : existing?.spamScoreThreshold !== undefined ? { spamScoreThreshold: existing.spamScoreThreshold } : {}),
       ...(body.createdForOrigin !== undefined ? { createdForOrigin: body.createdForOrigin } : existing?.createdForOrigin !== undefined ? { createdForOrigin: existing.createdForOrigin } : {}),
@@ -1732,7 +1742,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
   }), async (c) => {
     const accountId = c.req.param("accountId")!;
     const address = decodeURIComponent(c.req.param("address")!);
-    const deleteResult = await accountDb.deleteAlias(accountId, address);
+    const deleteResult = await accountDb.deleteAlias(accountId, parseAliasAddress(address));
     if (deleteResult.isErr()) return err(c, 500, "Internal Server Error");
     return new Response(null, { status: 204 });
   });
@@ -1751,7 +1761,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
   }), async (c) => {
     const accountId = c.req.param("accountId")!;
     const address = decodeURIComponent(c.req.param("address")!);
-    const sendersResult = await accountDb.listSenders(accountId, address);
+    const sendersResult = await accountDb.listSenders(accountId, parseAliasAddress(address));
     if (sendersResult.isErr()) return err(c, 500, "Internal Server Error");
     return c.json({ senders: sendersResult.value.map(toApiAliasSender) }, 200);
   });
@@ -1767,7 +1777,8 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     const accountId = c.req.param("accountId")!;
     const address = decodeURIComponent(c.req.param("address")!);
     const body = await zParse(CreateSenderRequest, c.req.raw);
-    const saveResult = await accountDb.saveSender(accountId, address, body.domain, body.policy);
+    const key = parseAliasAddress(address);
+    const saveResult = await accountDb.saveSender(accountId, { ...key, senderDomain: body.domain }, body.policy);
     if (saveResult.isErr()) return err(c, 500, "Internal Server Error");
     return new Response(null, { status: 201 });
   });
@@ -1782,8 +1793,9 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
   }), async (c) => {
     const accountId = c.req.param("accountId")!;
     const address = decodeURIComponent(c.req.param("address")!);
-    const domain = decodeURIComponent(c.req.param("domain")!);
-    const removeResult = await accountDb.removeSender(accountId, address, domain);
+    const senderDomain = decodeURIComponent(c.req.param("domain")!);
+    const key = parseAliasAddress(address);
+    const removeResult = await accountDb.removeSender(accountId, { ...key, senderDomain });
     if (removeResult.isErr()) return err(c, 500, "Internal Server Error");
     return new Response(null, { status: 204 });
   });
