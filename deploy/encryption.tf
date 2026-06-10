@@ -14,15 +14,30 @@ data "aws_kms_secrets" "dkim" {
   }
 }
 
+# Derive DKIM public key from the private key at plan time.
+# Used to publish the TXT record at mail._domainkey.platform.{domain}.
+data "tls_public_key" "dkim" {
+  private_key_pem = data.aws_kms_secrets.dkim.plaintext["private_key"]
+}
+
+locals {
+  # Strip PEM headers/footers and newlines to get raw base64 DER for DKIM TXT record.
+  dkim_public_key_der = replace(replace(replace(
+    data.tls_public_key.dkim.public_key_pem,
+    "/-----[A-Z ]+-----/", ""),
+    "\n", ""),
+  "\r", "")
+}
+
 # ---------------------------------------------------------------------------
 # Authress service client — Ed25519 signing key (private key never leaves KMS)
 # ---------------------------------------------------------------------------
 
 resource "aws_kms_key" "authress_service_client" {
-  description             = "Authress service client Ed25519 signing key"
-  key_usage               = "SIGN_VERIFY"
+  description              = "Authress service client Ed25519 signing key"
+  key_usage                = "SIGN_VERIFY"
   customer_master_key_spec = "ECC_NIST_EDWARDS25519"
-  deletion_window_in_days = 30
+  deletion_window_in_days  = 30
 }
 
 resource "aws_kms_alias" "authress_service_client" {
