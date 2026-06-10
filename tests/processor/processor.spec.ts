@@ -52,14 +52,14 @@ const TEST_ACCOUNT_ID = "acct-001";
 // Default context: sender example.com is pre-approved so most tests exercise the happy path without triggering the filter-mode fallback.
 // Tests that specifically test sender filtering use explicit mockResolvedValueOnce overrides.
 const DEFAULT_EMAIL_CONFIG: Alias = {
-  id: "cfg-default", accountId: "acct-test-001", address: "user@example.com",
+  id: "cfg-default", accountId: "acct-test-001", address: "user@example.com", domain: "example.com", alias: "user",
   unknownSenderPolicy: "quarantine_visible",
   createdAt: "2024-01-01T00:00:00Z", updatedAt: "2024-01-01T00:00:00Z",
 };
 
 // Default AliasSender: marks example.com as an allowed sender for the default alias.
 const DEFAULT_SENDER_ENTRY: import("../../src/types/index.js").AliasSender = {
-  accountId: "acct-test-001", aliasAddress: "user@example.com", domain: "example.com", policy: "allow", addedAt: "2024-01-01T00:00:00Z",
+  accountId: "acct-test-001", aliasAddress: "user@example.com", domain: "example.com", alias: "user", senderDomain: "example.com", policy: "allow", addedAt: "2024-01-01T00:00:00Z",
 };
 const DEFAULT_CTX = { retentionDays: 0, filtering: null, emailConfig: DEFAULT_EMAIL_CONFIG, registeredDomains: [], userEmails: [], billingPlan: "Paid" as const, onboardingCompleted: true };
 
@@ -85,6 +85,8 @@ function makeAlias(overrides: Partial<Alias> = {}): Alias {
     id: "cfg-001",
     accountId: TEST_ACCOUNT_ID,
     address: "user@example.com",
+    domain: "example.com",
+    alias: "user",
     unknownSenderPolicy: "quarantine_visible",
     createdAt: "2024-01-01T00:00:00Z",
     updatedAt: "2024-01-01T00:00:00Z",
@@ -94,7 +96,7 @@ function makeAlias(overrides: Partial<Alias> = {}): Alias {
 
 // Helper to make an AliasSender entry (approved sender for a given alias+domain).
 function makeSenderEntry(domain: string, aliasAddress = "user@example.com"): import("../../src/types/index.js").AliasSender {
-  return { accountId: TEST_ACCOUNT_ID, aliasAddress, domain, policy: "allow", addedAt: "2024-01-01T00:00:00Z" };
+  return { accountId: TEST_ACCOUNT_ID, aliasAddress, domain: "example.com", alias: "user", senderDomain: domain, policy: "allow", addedAt: "2024-01-01T00:00:00Z" };
 }
 
 function makeContentSanitizer(): ContentSanitizerClient {
@@ -830,7 +832,7 @@ describe("SignalProcessor", () => {
 
       const savedConfig = vi.mocked(accountDb.saveAlias).mock.calls[0]![0] as Alias;
       expect(savedConfig.unknownSenderPolicy).toBe("quarantine_visible");
-      expect(accountDb.saveSender).toHaveBeenCalledWith(TEST_ACCOUNT_ID, expect.any(String), "example.com", "allow");
+      expect(accountDb.saveSender).toHaveBeenCalledWith(TEST_ACCOUNT_ID, expect.objectContaining({ senderDomain: "example.com" }), "allow");
     });
 
     it("allows signal from a known sender (eTLD+1 in approved list)", async () => {
@@ -965,7 +967,7 @@ describe("SignalProcessor", () => {
       await processor.processRecord(makeMessage(), 1);
 
       expect(arcDb.saveArc).toHaveBeenCalledOnce();
-      expect(accountDb.saveSender).toHaveBeenCalledWith(TEST_ACCOUNT_ID, expect.any(String), "example.com", "allow");
+      expect(accountDb.saveSender).toHaveBeenCalledWith(TEST_ACCOUNT_ID, expect.objectContaining({ senderDomain: "example.com" }), "allow");
     });
 
     it("saves blocked signal with classification data for user review", async () => {

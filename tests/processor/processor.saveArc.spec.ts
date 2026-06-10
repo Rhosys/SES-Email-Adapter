@@ -116,7 +116,7 @@ describe("Single saveArc call with complete mutations", () => {
         retentionDays: 0,
         filtering: null,
         emailConfig: {
-          id: "cfg-001", accountId: TEST_ACCOUNT_ID, address: recipientEmail,
+          id: "cfg-001", accountId: TEST_ACCOUNT_ID, address: `user@${recipientDomain}`, domain: recipientDomain, alias: "user",
           unknownSenderPolicy: "allow_all", createdAt: "2024-01-01T00:00:00Z", updatedAt: "2024-01-01T00:00:00Z",
         } satisfies Alias,
         registeredDomains: testCase.doPong ? [recipientDomain] : [],
@@ -125,8 +125,8 @@ describe("Single saveArc call with complete mutations", () => {
         onboardingCompleted: true,
       }))),
       getSender: vi.fn().mockReturnValue(Promise.resolve(ok({
-        accountId: TEST_ACCOUNT_ID, aliasAddress: recipientEmail,
-        domain: "external.com", policy: "allow", addedAt: "2024-01-01T00:00:00Z",
+        accountId: TEST_ACCOUNT_ID, domain: recipientDomain,
+        alias: "user", senderDomain: "external.com", policy: "allow", addedAt: "2024-01-01T00:00:00Z",
       }))),
       getTemplate: vi.fn().mockImplementation((_accountId: string, id: string) =>
         Promise.resolve(ok({

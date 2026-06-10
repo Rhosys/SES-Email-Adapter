@@ -46,6 +46,8 @@ describe("Cross-layer idempotence — live writes + cache + Aurora", () => {
     id: "cfg-default",
     accountId: TEST_ACCOUNT_ID,
     address: "user@example.com",
+    domain: "example.com",
+    alias: "user",
     unknownSenderPolicy: "quarantine_visible",
     createdAt: "2024-01-01T00:00:00Z",
     updatedAt: "2024-01-01T00:00:00Z",
@@ -55,6 +57,8 @@ describe("Cross-layer idempotence — live writes + cache + Aurora", () => {
     accountId: TEST_ACCOUNT_ID,
     aliasAddress: "user@example.com",
     domain: "example.com",
+    alias: "user",
+    senderDomain: "example.com",
     policy: "allow",
     addedAt: "2024-01-01T00:00:00Z",
   };
