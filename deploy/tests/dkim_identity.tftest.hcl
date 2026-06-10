@@ -184,6 +184,68 @@ run "dkim_txt_no_pem_headers" {
   }
 }
 
+# DKIM TXT value must be split into <=255-char character-strings to avoid
+# Route53's CharacterStringTooLong error. The single record value holds multiple
+# adjacent strings joined by the escaped "" separator. With the 2048-bit test
+# key the value (410 chars incl. the "v=DKIM1; k=rsa; p=" prefix) splits into 2.
+run "dkim_2048_splits_into_two_chunks" {
+  command = plan
+
+  assert {
+    condition     = length(split("\"\"", aws_route53_record.ses_dkim.records[0])) == 2
+    error_message = "2048-bit DKIM key must split into exactly 2 character-strings"
+  }
+
+  assert {
+    condition     = alltrue([for c in split("\"\"", aws_route53_record.ses_dkim.records[0]) : length(c) <= 255])
+    error_message = "Every DKIM character-string must be <= 255 chars (RFC 1035)"
+  }
+
+  assert {
+    condition     = startswith(join("", split("\"\"", aws_route53_record.ses_dkim.records[0])), "v=DKIM1; k=rsa; p=")
+    error_message = "Reassembled DKIM value must start with the DKIM prefix"
+  }
+
+  assert {
+    condition     = !strcontains(join("", split("\"\"", aws_route53_record.ses_dkim.records[0])), "\"")
+    error_message = "Reassembled DKIM value must contain no stray quote characters"
+  }
+}
+
+# The chunking must scale to larger keys. A 4096-bit key produces a 754-char
+# value that must split into 3 character-strings (255 + 255 + 244), proving the
+# logic is key-size agnostic rather than hardcoded to a single split point.
+run "dkim_4096_splits_into_three_chunks" {
+  command = plan
+
+  override_data {
+    target = data.tls_public_key.dkim
+    values = {
+      public_key_pem = "-----BEGIN PUBLIC KEY-----\nMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEAn3x+hsVwNxIJ9CfcnBYO\nHNLu9evm5AOQoyutLw5iOFFsQyoz/IuydftI4ENBUZO9/fgLlgOg2el23HAYLH7i\n9Bf2k0ROPBDgqoDnTtZonuLRvo1sMrX4rlQ6EIBJ+qcVOOnPa34FDmOeJG94shbe\nd6thKrffw0p9g2xlnFFwiA5Qj4HsEjzqPBh8BOWOqDYGsDB2iyAXNAy8w0DJf7Ol\na85oU6wFHkK+oEyC4NNxIh7LSUejGzKkoOiz9lIAkxEW9uHUkPyHlI6bTykwPTn5\nNhQDbjceZ+mh1UkiqL+C0OFss3s7x4JFQn2OM6MnAF8Ya/B7iIegh2YiQg85Xnoq\nnKF6dDN4dpwfiQOtpn4ijucs8qyP3/o6IhJpzXqpgyNAK+OziHp8dCRgnHAIgMpx\nygt59/Pygoerq7JvSfJaiHp74wfRnqIrJK09ORr/WfXI9juLBRATUTc/6TJ9lNnH\nB6uNxSCN8i3WXN7hm4PKNewbQPInzQYtdajrVzmRcRatYC0fLLoCWlXuMa8BURvh\nGi9RtX6BDavUKjBXnysK8OmmfCme0CWh2Pyi/ptmr68d8GICdu2S6TaGFcKPU8nR\nG4vbFx2QWHlbxhK7pEnsVvlCLYTUlnH5/KHI2kfwSjVqL09toEWcVcTHFpeWy9pM\nwijcwbX0zKfzpAvU3BtQvdsCAwEAAQ==\n-----END PUBLIC KEY-----\n"
+    }
+  }
+
+  assert {
+    condition     = length(split("\"\"", aws_route53_record.ses_dkim.records[0])) == 3
+    error_message = "4096-bit DKIM key must split into exactly 3 character-strings"
+  }
+
+  assert {
+    condition     = alltrue([for c in split("\"\"", aws_route53_record.ses_dkim.records[0]) : length(c) <= 255])
+    error_message = "Every DKIM character-string must be <= 255 chars even for a 4096-bit key"
+  }
+
+  assert {
+    condition     = startswith(join("", split("\"\"", aws_route53_record.ses_dkim.records[0])), "v=DKIM1; k=rsa; p=")
+    error_message = "Reassembled 4096-bit DKIM value must start with the DKIM prefix"
+  }
+
+  assert {
+    condition     = !strcontains(aws_route53_record.ses_dkim.records[0], "-----")
+    error_message = "DKIM TXT record must not contain PEM header/footer markers"
+  }
+}
+
 # Root identity must have Custom MAIL FROM configured
 run "root_identity_has_mail_from" {
   command = plan
