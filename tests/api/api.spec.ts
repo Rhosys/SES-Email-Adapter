@@ -1172,7 +1172,7 @@ describe("API", () => {
     it("deletes the alias and returns 204", async () => {
       const res = await req(app, "DELETE", `${A}/aliases/me%40mydomain.com`);
       expect(res.status).toBe(204);
-      expect(accountDb.deleteAlias).toHaveBeenCalledWith(TEST_ACCOUNT_ID, { domain: "mydomain.com", alias: "me" });
+      expect(accountDb.deleteAlias).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "me@mydomain.com");
     });
   });
 
