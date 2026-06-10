@@ -1091,6 +1091,7 @@ describe("API", () => {
 
   describe("POST /accounts/:accountId/aliases", () => {
     it("creates an alias and returns 201 + full resource", async () => {
+      vi.mocked(accountDb.getDomain).mockResolvedValueOnce(ok(makeDomain({ domain: "mydomain.com" })));
       vi.mocked(accountDb.createAlias).mockResolvedValueOnce(ok(makeAlias({ domain: "mydomain.com", alias: "me", address: "me@mydomain.com" })));
       const res = await req(app, "POST", `${A}/aliases`, {
         body: { address: "me@mydomain.com", unknownSenderPolicy: "block_hidden" },
@@ -1103,7 +1104,15 @@ describe("API", () => {
       );
     });
 
+    it("returns 422 when the address domain is not registered for the account", async () => {
+      const res = await req(app, "POST", `${A}/aliases`, { body: { address: "me@unregistered.com" } });
+      expect(res.status).toBe(422);
+      const body = await res.json() as { errorCode: string };
+      expect(body.errorCode).toBe("DOMAIN_NOT_REGISTERED");
+    });
+
     it("returns 409 when alias already exists", async () => {
+      vi.mocked(accountDb.getDomain).mockResolvedValueOnce(ok(makeDomain()));
       vi.mocked(accountDb.getAlias).mockResolvedValueOnce(ok(makeAlias()));
       const res = await req(app, "POST", `${A}/aliases`, { body: { address: "user@example.com" } });
       expect(res.status).toBe(409);
@@ -1117,6 +1126,7 @@ describe("API", () => {
     });
 
     it("stores createdForOrigin when provided", async () => {
+      vi.mocked(accountDb.getDomain).mockResolvedValueOnce(ok(makeDomain({ domain: "mydomain.com" })));
       vi.mocked(accountDb.createAlias).mockResolvedValueOnce(ok(makeAlias()));
       await req(app, "POST", `${A}/aliases`, {
         body: { address: "me@mydomain.com", createdForOrigin: "github.com" },
@@ -1165,6 +1175,27 @@ describe("API", () => {
       });
       const saved = vi.mocked(accountDb.upsertAlias).mock.calls[0]![0] as Alias;
       expect(saved.spamScoreThreshold).toBeUndefined();
+    });
+
+    it("renames alias when newAddress domain is registered", async () => {
+      vi.mocked(accountDb.getDomain).mockResolvedValueOnce(ok(makeDomain({ domain: "newdomain.com" })));
+      vi.mocked(accountDb.renameAlias).mockResolvedValueOnce(ok(makeAlias({ address: "me@newdomain.com", domain: "newdomain.com", alias: "me" })));
+      const res = await req(app, "PATCH", `${A}/aliases/me%40mydomain.com`, {
+        body: { newAddress: "me@newdomain.com" },
+      });
+      expect(res.status).toBe(200);
+      expect(accountDb.getDomain).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "newdomain.com");
+      expect(accountDb.renameAlias).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "me@mydomain.com", "me@newdomain.com");
+    });
+
+    it("returns 422 when newAddress domain is not registered", async () => {
+      const res = await req(app, "PATCH", `${A}/aliases/me%40mydomain.com`, {
+        body: { newAddress: "me@unregistered.com" },
+      });
+      expect(res.status).toBe(422);
+      const body = await res.json() as { errorCode: string };
+      expect(body.errorCode).toBe("DOMAIN_NOT_REGISTERED");
+      expect(accountDb.renameAlias).not.toHaveBeenCalled();
     });
   });
 
@@ -1280,6 +1311,7 @@ describe("API", () => {
 
     describe("POST /accounts/:accountId/aliases — body address normalisation", () => {
       it("lowercases and trims the address before storing", async () => {
+        vi.mocked(accountDb.getDomain).mockResolvedValueOnce(ok(makeDomain({ domain: "mydomain.com" })));
         vi.mocked(accountDb.createAlias).mockResolvedValueOnce(ok(makeAlias({ domain: "mydomain.com", alias: "me", address: "me@mydomain.com" })));
         const res = await req(app, "POST", `${A}/aliases`, { body: { address: "  ME@MYDOMAIN.COM  " } });
         expect(res.status).toBe(201);

@@ -1670,6 +1670,10 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
   }), async (c) => {
     const accountId = c.req.param("accountId")!;
     const body = await zParse(CreateAliasRequest, c.req.raw);
+    const aliasDomain = body.address.split("@")[1]!;
+    const domainCheckResult = await accountDb.getDomain(accountId, aliasDomain);
+    if (domainCheckResult.isErr()) return err(c, 500, "Internal Server Error");
+    if (!domainCheckResult.value) return err(c, 422, "Domain not registered for this account", "DOMAIN_NOT_REGISTERED");
     const existingResult = await accountDb.getAlias(accountId, body.address);
     if (existingResult.isErr()) return err(c, 500, "Internal Server Error");
     if (existingResult.value) return err(c, 409, "Alias already exists", "ALIAS_EXISTS");
@@ -1701,6 +1705,10 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     const address = decodeURIComponent(c.req.param("address")!).toLowerCase();
     const body = await zParse(UpdateAliasRequest, c.req.raw);
     if (body.newAddress) {
+      const newDomain = body.newAddress.split("@")[1]!;
+      const domainCheckResult = await accountDb.getDomain(accountId, newDomain);
+      if (domainCheckResult.isErr()) return err(c, 500, "Internal Server Error");
+      if (!domainCheckResult.value) return err(c, 422, "Domain not registered for this account", "DOMAIN_NOT_REGISTERED");
       const renameResult = await accountDb.renameAlias(accountId, address, body.newAddress);
       if (renameResult.isErr()) {
         if (renameResult.error.kind === "not_found") return err(c, 404, "Alias not found", "ALIAS_NOT_FOUND");
