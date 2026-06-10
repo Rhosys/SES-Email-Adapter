@@ -111,7 +111,7 @@ resource "aws_route53_record" "ses_mx_host" {
   name     = "mx.platform.${data.aws_route53_zone.main.name}"
   type     = "CNAME"
   ttl      = 300
-  records  = ["inbound-smtp.${data.aws_region.current.id}.amazonaws.com"]
+  records  = ["inbound-smtp.eu-central-1.amazonaws.com"]
 }
 
 # ---------------------------------------------------------------------------
@@ -126,7 +126,7 @@ resource "aws_route53_record" "bounce_mx" {
   name     = "bounce.platform.${data.aws_route53_zone.main.name}"
   type     = "MX"
   ttl      = 300
-  records  = ["10 feedback-smtp.${data.aws_region.current.id}.amazonses.com"]
+  records  = ["10 feedback-smtp.eu-central-1.amazonses.com"]
 }
 
 # SPF on the bounce subdomain — SES is the only authorised sender
@@ -149,7 +149,7 @@ resource "aws_route53_record" "bounce_mx_root" {
   name     = "bounce.${data.aws_route53_zone.main.name}"
   type     = "MX"
   ttl      = 300
-  records  = ["10 feedback-smtp.${data.aws_region.current.id}.amazonses.com"]
+  records  = ["10 feedback-smtp.eu-central-1.amazonses.com"]
 }
 
 resource "aws_route53_record" "bounce_spf_root" {
@@ -246,14 +246,14 @@ resource "aws_sesv2_tenant" "platform" {
 # Associate our platform identities + configuration set with the platform tenant
 resource "aws_sesv2_tenant_resource_association" "platform_identity_main" {
   tenant_name  = aws_sesv2_tenant.platform.tenant_name
-  resource_arn = "arn:aws:ses:${data.aws_region.current.name}:${var.aws_account_id}:identity/${data.aws_route53_zone.main.name}"
+  resource_arn = aws_sesv2_email_identity.main.arn
 
   depends_on = [aws_sesv2_email_identity.main]
 }
 
 resource "aws_sesv2_tenant_resource_association" "platform_identity_subdomain" {
   tenant_name  = aws_sesv2_tenant.platform.tenant_name
-  resource_arn = "arn:aws:ses:${data.aws_region.current.name}:${var.aws_account_id}:identity/platform.${data.aws_route53_zone.main.name}"
+  resource_arn = aws_sesv2_email_identity.platform.arn
 
   depends_on = [aws_sesv2_email_identity.platform]
 }

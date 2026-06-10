@@ -76,6 +76,77 @@ variables {
   service_name   = "test-svc"
 }
 
+override_data {
+  target = data.tls_public_key.dkim
+  values = {
+    public_key_pem = "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA\n-----END PUBLIC KEY-----\n"
+  }
+}
+
+override_resource {
+  target = aws_sesv2_email_identity.main
+  values = {
+    arn = "arn:aws:ses:eu-central-1:123456789012:identity/email.rhosys.cloud"
+  }
+}
+
+override_resource {
+  target = aws_sesv2_email_identity.platform
+  values = {
+    arn = "arn:aws:ses:eu-central-1:123456789012:identity/platform.email.rhosys.cloud"
+  }
+}
+
+override_resource {
+  target = aws_acm_certificate.api_gateways
+  values = {
+    arn = "arn:aws:acm:us-east-1:123456789012:certificate/test-cert-gw"
+    domain_validation_options = [
+      {
+        domain_name           = "api.email.rhosys.cloud"
+        resource_record_name  = "_mock.api.email.rhosys.cloud."
+        resource_record_type  = "CNAME"
+        resource_record_value = "_mock.acm-validations.aws."
+      },
+      {
+        domain_name           = "wss.email.rhosys.cloud"
+        resource_record_name  = "_mock.wss.email.rhosys.cloud."
+        resource_record_type  = "CNAME"
+        resource_record_value = "_mock.acm-validations.aws."
+      }
+    ]
+  }
+}
+
+override_resource {
+  target = aws_acm_certificate.api
+  values = {
+    arn = "arn:aws:acm:us-east-1:123456789012:certificate/test-cert-api"
+    domain_validation_options = [
+      {
+        domain_name           = "email.rhosys.cloud"
+        resource_record_name  = "_mock.email.rhosys.cloud."
+        resource_record_type  = "CNAME"
+        resource_record_value = "_mock.acm-validations.aws."
+      }
+    ]
+  }
+}
+
+override_resource {
+  target = aws_sesv2_configuration_set.sending
+  values = {
+    arn = "arn:aws:ses:eu-central-1:123456789012:configuration-set/test-svc-sending"
+  }
+}
+
+override_resource {
+  target = aws_sfn_state_machine.account_creation
+  values = {
+    arn = "arn:aws:states:eu-central-1:123456789012:stateMachine:test-svc-AccountCreation"
+  }
+}
+
 # Site bucket must use account regional namespace — name ends with -an suffix
 run "site_bucket_name_uses_account_regional_format" {
   command = plan

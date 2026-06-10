@@ -126,7 +126,7 @@ resource "aws_sqs_queue_policy" "signals_sns" {
         Principal = { Service = "scheduler.amazonaws.com" }
         Action    = "sqs:SendMessage"
         Resource  = aws_sqs_queue.signals.arn
-        Condition = { ArnEquals = { "aws:SourceArn" = "arn:aws:scheduler:${data.aws_region.current.name}:${var.aws_account_id}:schedule/signal-followups/*" } }
+        Condition = { ArnEquals = { "aws:SourceArn" = "arn:aws:scheduler:*:${var.aws_account_id}:schedule/signal-followups/*" } }
       },
     ]
   })

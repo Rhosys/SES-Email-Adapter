@@ -18,7 +18,7 @@ data "aws_kms_secrets" "dkim" {
 # Used to publish the TXT record at mail._domainkey.platform.{domain}.
 # KMS stores the key as raw base64 DER — wrap in PEM for the tls provider.
 data "tls_public_key" "dkim" {
-  private_key_pem = "-----BEGIN RSA PRIVATE KEY-----\n${data.aws_kms_secrets.dkim.plaintext["private_key"]}\n-----END RSA PRIVATE KEY-----"
+  private_key_pem = "-----BEGIN PRIVATE KEY-----\n${data.aws_kms_secrets.dkim.plaintext["private_key"]}\n-----END PRIVATE KEY-----"
 }
 
 locals {
