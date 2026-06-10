@@ -65,6 +65,9 @@ Surfaces: **Website** · **Extension** · **Mobile** · **CLI/Desktop**
 
 The extension is currently alias-generation only. These are features that would make it a fuller companion:
 
+- [ ] **AsyncButton for login** — import `useAsyncAction` from the site's composable (or copy it — extension uses Tailwind v3, different build). Apply to the "Log In to SES" button in `action-popup.vue` (currently uses manual `loginPending` ref + text toggle). The composable handles min 100ms spinner + 500ms checkmark. The extension doesn't need the full `AsyncButton.vue` component since it uses different styling — just the composable driving a local `state` ref with conditional SVG spinner/checkmark in the template.
+  - Extension
+
 - [ ] **OTP autofill** — receive auth codes via WebSocket/Web Push, match to active tab, inject into focused input
   - Extension
 - [ ] **WebSocket connection** — connect to WS for real-time signal notifications (at minimum for auth/OTP workflow)
