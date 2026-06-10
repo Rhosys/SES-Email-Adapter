@@ -8,7 +8,7 @@ import type { AuditDatabase } from "../../src/database/audit-database.js";
 import { ok, err } from "neverthrow";
 import type { DbError, NotFoundError } from "../../src/errors.js";
 import { dbError, notFoundError } from "../../src/errors.js";
-import type { Arc, Account, Alias } from "../../src/types/index.js";
+import type { Arc, Account, Alias, Domain } from "../../src/types/index.js";
 import type { EmailService } from "../../src/email/email-service.js";
 import type { sendRsvp } from "../../src/processor/calendar/rsvp-composer.js";
 import type { PostApprovalCalendarHandlerDeps } from "../../src/processor/calendar/post-approval-handler.js";
@@ -75,6 +75,18 @@ function makeAlias(overrides: Partial<Alias> = {}): Alias {
     domain: "example.com",
     alias: "user",
     unknownSenderPolicy: "quarantine_visible",
+    createdAt: "2024-01-01T00:00:00Z",
+    updatedAt: "2024-01-01T00:00:00Z",
+    ...overrides,
+  };
+}
+
+function makeDomain(overrides: Partial<Domain> = {}): Domain {
+  return {
+    accountId: TEST_ACCOUNT_ID,
+    domain: "example.com",
+    receivingSetupComplete: false,
+    senderSetupComplete: false,
     createdAt: "2024-01-01T00:00:00Z",
     updatedAt: "2024-01-01T00:00:00Z",
     ...overrides,
@@ -296,6 +308,7 @@ describe("API route error mapping — unit tests", () => {
 
   describe("PATCH /accounts/:accountId/aliases/:address — rename", () => {
     it("returns HTTP 404 when renameAlias returns err({ kind: 'not_found' })", async () => {
+      vi.mocked(accountDb.getDomain).mockResolvedValueOnce(ok(makeDomain({ domain: "example.com" })));
       vi.mocked(accountDb.renameAlias).mockResolvedValueOnce(
         err(notFoundError("alias", "old@example.com")),
       );
@@ -308,6 +321,7 @@ describe("API route error mapping — unit tests", () => {
     });
 
     it("returns HTTP 500 when renameAlias returns err({ kind: 'db_error' })", async () => {
+      vi.mocked(accountDb.getDomain).mockResolvedValueOnce(ok(makeDomain({ domain: "example.com" })));
       vi.mocked(accountDb.renameAlias).mockResolvedValueOnce(
         err(dbError(new Error("transact write failed"))),
       );
@@ -320,6 +334,7 @@ describe("API route error mapping — unit tests", () => {
     });
 
     it("returns HTTP 200 when renameAlias succeeds", async () => {
+      vi.mocked(accountDb.getDomain).mockResolvedValueOnce(ok(makeDomain({ domain: "example.com" })));
       vi.mocked(accountDb.renameAlias).mockResolvedValueOnce(
         ok(makeAlias({ domain: "example.com", alias: "new", address: "new@example.com" })),
       );
