@@ -112,10 +112,7 @@ resource "aws_cloudwatch_log_group" "aurora" {
   retention_in_days = 365
 }
 
-import {
-  to = aws_cloudwatch_log_group.aurora["aurora-prod-titan-v2"]
-  id = "/aws/rds/cluster/ses-email-adapter-aurora-prod-titan-v2/postgresql"
-}
+
 
 # ---------------------------------------------------------------------------
 # Per-cluster bootstrap SQL — composite PK schema + HNSW index + RLS

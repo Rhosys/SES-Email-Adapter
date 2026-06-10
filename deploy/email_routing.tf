@@ -70,17 +70,24 @@ resource "aws_sesv2_email_identity_mail_from_attributes" "main" {
   mail_from_domain = "bounce.platform.${data.aws_route53_zone.main.name}"
 }
 
+# Custom MAIL FROM for the root identity (email.rhosys.cloud) — ensures
+# noreply@email.rhosys.cloud passes SPF alignment via bounce.email.rhosys.cloud.
+resource "aws_sesv2_email_identity_mail_from_attributes" "root" {
+  email_identity   = aws_sesv2_email_identity.main.email_identity
+  mail_from_domain = "bounce.${data.aws_route53_zone.main.name}"
+}
+
 # Shared DKIM terminus — all customer domains CNAME here instead of directly to
 # amazonses.com. Because every customer domain is registered with the same BYODKIM
 # private key, the public key served at this endpoint is valid for all of them.
-# Customer creates: mail._domainkey.{their_domain} CNAME mail._domainkey.{mail_domain}
+# Customer creates: mail._domainkey.{their_domain} CNAME mail._domainkey.platform.{our_domain}
 resource "aws_route53_record" "ses_dkim" {
   provider = aws.us_east_1
   zone_id  = data.aws_route53_zone.main.zone_id
   name     = "mail._domainkey.platform.${data.aws_route53_zone.main.name}"
-  type     = "CNAME"
+  type     = "TXT"
   ttl      = 300
-  records  = ["mail.platform.${data.aws_route53_zone.main.name}._domainkey.amazonses.com"]
+  records  = ["v=DKIM1; k=rsa; p=${local.dkim_public_key_der}"]
 }
 
 # DKIM for the root domain identity (email.rhosys.cloud) — verifies the SES
@@ -89,9 +96,9 @@ resource "aws_route53_record" "ses_dkim_root" {
   provider = aws.us_east_1
   zone_id  = data.aws_route53_zone.main.zone_id
   name     = "mail._domainkey.${data.aws_route53_zone.main.name}"
-  type     = "CNAME"
+  type     = "TXT"
   ttl      = 300
-  records  = ["mail.${data.aws_route53_zone.main.name}._domainkey.amazonses.com"]
+  records  = ["v=DKIM1; k=rsa; p=${local.dkim_public_key_der}"]
 }
 
 # Branded MX hostname — customers point their MX here instead of directly to
@@ -133,6 +140,28 @@ resource "aws_route53_record" "bounce_spf" {
 }
 
 # ---------------------------------------------------------------------------
+# Bounce subdomain — root identity (bounce.email.rhosys.cloud)
+# ---------------------------------------------------------------------------
+
+resource "aws_route53_record" "bounce_mx_root" {
+  provider = aws.us_east_1
+  zone_id  = data.aws_route53_zone.main.zone_id
+  name     = "bounce.${data.aws_route53_zone.main.name}"
+  type     = "MX"
+  ttl      = 300
+  records  = ["10 feedback-smtp.${data.aws_region.current.id}.amazonses.com"]
+}
+
+resource "aws_route53_record" "bounce_spf_root" {
+  provider = aws.us_east_1
+  zone_id  = data.aws_route53_zone.main.zone_id
+  name     = "bounce.${data.aws_route53_zone.main.name}"
+  type     = "TXT"
+  ttl      = 300
+  records  = ["v=spf1 include:amazonses.com ~all"]
+}
+
+# ---------------------------------------------------------------------------
 # DMARC — shared terminus; customers CNAME _dmarc.{their} → _dmarc.{ours}
 # Resolvers follow CNAME chains for TXT queries, so no TXT record needed per customer.
 # ---------------------------------------------------------------------------
@@ -143,7 +172,7 @@ resource "aws_route53_record" "dmarc" {
   name     = "_dmarc.platform.${data.aws_route53_zone.main.name}"
   type     = "TXT"
   ttl      = 300
-  records = ["v=DMARC1;p=reject;pct=100"]
+  records  = ["v=DMARC1;p=reject;pct=100"]
 }
 
 # ---------------------------------------------------------------------------
