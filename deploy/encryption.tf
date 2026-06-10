@@ -28,6 +28,17 @@ locals {
     "/-----[A-Z ]+-----/", ""),
     "\n", ""),
   "\r", "")
+
+  # Full DKIM TXT value (prefix + base64 DER public key), before chunking.
+  dkim_txt_value = "v=DKIM1; k=rsa; p=${local.dkim_public_key_der}"
+
+  # DNS TXT character-strings are capped at 255 chars (RFC 1035). Split the full
+  # value into 255-char windows and rejoin with an escaped "" separator so Route53
+  # stores multiple adjacent character-strings in one record; resolvers concatenate
+  # them for DKIM verification. regexall yields ceil(len/255) chunks, so this works
+  # for any key size (2048 -> 2 strings, 4096 -> 3, etc.). Terraform supplies the
+  # outer quotes; only the mid-string "" separator is escaped here.
+  dkim_txt_record = join("\"\"", regexall(".{1,255}", local.dkim_txt_value))
 }
 
 # ---------------------------------------------------------------------------

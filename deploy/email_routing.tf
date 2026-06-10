@@ -87,7 +87,7 @@ resource "aws_route53_record" "ses_dkim" {
   name     = "mail._domainkey.platform.${data.aws_route53_zone.main.name}"
   type     = "TXT"
   ttl      = 300
-  records  = ["v=DKIM1; k=rsa; p=${local.dkim_public_key_der}"]
+  records  = [local.dkim_txt_record]
 }
 
 # DKIM for the root domain identity (email.rhosys.cloud) — verifies the SES
@@ -98,7 +98,7 @@ resource "aws_route53_record" "ses_dkim_root" {
   name     = "mail._domainkey.${data.aws_route53_zone.main.name}"
   type     = "TXT"
   ttl      = 300
-  records  = ["v=DKIM1; k=rsa; p=${local.dkim_public_key_der}"]
+  records  = [local.dkim_txt_record]
 }
 
 # Branded MX hostname — customers point their MX here instead of directly to
