@@ -1256,6 +1256,91 @@ describe("API", () => {
   });
 
   // -------------------------------------------------------------------------
+  // Input normalisation — domains, aliases, forwarding addresses
+  // -------------------------------------------------------------------------
+
+  describe("domain / alias / forwarding-address normalisation", () => {
+    describe("POST /accounts/:accountId/domains — body domain normalisation", () => {
+      it("lowercases and trims the domain before storing", async () => {
+        vi.mocked(accountDb.createDomain).mockResolvedValueOnce(ok(makeDomain({ domain: "example.com" }) as never));
+        const res = await req(app, "POST", `${A}/domains`, { body: { domain: "  EXAMPLE.COM  " } });
+        expect(res.status).toBe(201);
+        expect(accountDb.createDomain).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "example.com");
+      });
+    });
+
+    describe("GET /accounts/:accountId/domains/:id — path param normalisation", () => {
+      it("lowercases the domain id path param before lookup", async () => {
+        vi.mocked(accountDb.getDomain).mockResolvedValueOnce(ok(makeDomain()));
+        const res = await req(app, "GET", `${A}/domains/EXAMPLE.COM`);
+        expect(res.status).toBe(200);
+        expect(accountDb.getDomain).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "example.com");
+      });
+    });
+
+    describe("POST /accounts/:accountId/aliases — body address normalisation", () => {
+      it("lowercases and trims the address before storing", async () => {
+        vi.mocked(accountDb.createAlias).mockResolvedValueOnce(ok(makeAlias({ domain: "mydomain.com", alias: "me", address: "me@mydomain.com" })));
+        const res = await req(app, "POST", `${A}/aliases`, { body: { address: "  ME@MYDOMAIN.COM  " } });
+        expect(res.status).toBe(201);
+        expect(accountDb.createAlias).toHaveBeenCalledWith(
+          expect.objectContaining({ address: "me@mydomain.com", domain: "mydomain.com", alias: "me" }),
+        );
+      });
+
+      it("returns 400 for an invalid email address", async () => {
+        const res = await req(app, "POST", `${A}/aliases`, { body: { address: "not-an-email" } });
+        expect(res.status).toBe(400);
+      });
+
+      it("returns 400 when address is missing", async () => {
+        const res = await req(app, "POST", `${A}/aliases`, { body: {} });
+        expect(res.status).toBe(400);
+      });
+    });
+
+    describe("GET /accounts/:accountId/aliases/:address — path param normalisation", () => {
+      it("lowercases the address path param before lookup", async () => {
+        vi.mocked(accountDb.getAlias).mockResolvedValueOnce(ok(makeAlias()));
+        const res = await req(app, "GET", `${A}/aliases/${encodeURIComponent("USER@EXAMPLE.COM")}`);
+        expect(res.status).toBe(200);
+        expect(accountDb.getAlias).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "user@example.com");
+      });
+    });
+
+    describe("DELETE /accounts/:accountId/aliases/:address — path param normalisation", () => {
+      it("lowercases the address path param before deletion", async () => {
+        const res = await req(app, "DELETE", `${A}/aliases/${encodeURIComponent("ME@MYDOMAIN.COM")}`);
+        expect(res.status).toBe(204);
+        expect(accountDb.deleteAlias).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "me@mydomain.com");
+      });
+    });
+
+    describe("POST /accounts/:accountId/forwarding-addresses — body address normalisation", () => {
+      it("lowercases and trims the forwarding address before storing", async () => {
+        const res = await req(app, "POST", `${A}/forwarding-addresses`, { body: { address: "  BACKUP@PERSONAL.COM  " } });
+        expect(res.status).toBe(201);
+        const saved = vi.mocked(accountDb.saveVerifiedForwardingAddress).mock.calls[0]![0] as VerifiedForwardingAddress;
+        expect(saved.address).toBe("backup@personal.com");
+        expect(saved.id).toBe("backup@personal.com");
+      });
+
+      it("returns 400 for an invalid forwarding address", async () => {
+        const res = await req(app, "POST", `${A}/forwarding-addresses`, { body: { address: "not-valid" } });
+        expect(res.status).toBe(400);
+      });
+    });
+
+    describe("DELETE /accounts/:accountId/forwarding-addresses/:address — path param normalisation", () => {
+      it("lowercases the address path param before deletion", async () => {
+        const res = await req(app, "DELETE", `${A}/forwarding-addresses/${encodeURIComponent("BACKUP@PERSONAL.COM")}`);
+        expect(res.status).toBe(204);
+        expect(accountDb.deleteVerifiedForwardingAddress).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "backup@personal.com");
+      });
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // Account creation — billingPlan
   // -------------------------------------------------------------------------
 
