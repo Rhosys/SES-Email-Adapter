@@ -244,7 +244,10 @@ const onboardingHandler = new OnboardingTaskHandler(
   logger,
 );
 
-const ACCOUNT_CREATION_SFN_ARN = process.env["ACCOUNT_CREATION_SFN_ARN"] ?? "";
+const ACCOUNT_CREATION_SFN_NAME = process.env["ACCOUNT_CREATION_SFN_NAME"] ?? "";
+const ACCOUNT_CREATION_SFN_ARN = ACCOUNT_CREATION_SFN_NAME
+  ? `arn:aws:states:${process.env["AWS_REGION"]}:${process.env["AWS_ACCOUNT_ID"]}:stateMachine:${ACCOUNT_CREATION_SFN_NAME}`
+  : "";
 let accountCreationStarter: AccountCreationStarter;
 if (!ACCOUNT_CREATION_SFN_ARN) {
   logger.warn("ACCOUNT_CREATION_SFN_ARN not set — account creation Step Function will not start", { code: "handler.sfn.arn_missing" });

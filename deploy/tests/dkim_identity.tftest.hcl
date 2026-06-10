@@ -125,6 +125,20 @@ override_data {
   }
 }
 
+override_resource {
+  target = aws_sesv2_email_identity.main
+  values = {
+    arn = "arn:aws:ses:eu-central-1:123456789012:identity/email.rhosys.cloud"
+  }
+}
+
+override_resource {
+  target = aws_sesv2_email_identity.platform
+  values = {
+    arn = "arn:aws:ses:eu-central-1:123456789012:identity/platform.email.rhosys.cloud"
+  }
+}
+
 # DKIM record for platform subdomain must be TXT with public key
 run "platform_dkim_record_is_txt" {
   command = plan

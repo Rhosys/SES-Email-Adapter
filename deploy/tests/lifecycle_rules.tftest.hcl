@@ -42,12 +42,47 @@ mock_provider "aws" {
   mock_resource "aws_acm_certificate" {
     defaults = {
       arn = "arn:aws:acm:us-east-1:123456789012:certificate/mock"
+      domain_validation_options = [
+        {
+          domain_name           = "email.rhosys.cloud"
+          resource_record_name  = "_mock.email.rhosys.cloud."
+          resource_record_type  = "CNAME"
+          resource_record_value = "_mock.acm-validations.aws."
+        },
+        {
+          domain_name           = "api.email.rhosys.cloud"
+          resource_record_name  = "_mock.api.email.rhosys.cloud."
+          resource_record_type  = "CNAME"
+          resource_record_value = "_mock.acm-validations.aws."
+        },
+        {
+          domain_name           = "wss.email.rhosys.cloud"
+          resource_record_name  = "_mock.wss.email.rhosys.cloud."
+          resource_record_type  = "CNAME"
+          resource_record_value = "_mock.acm-validations.aws."
+        }
+      ]
+    }
+  }
+  mock_resource "aws_cloudfront_function" {
+    defaults = {
+      arn = "arn:aws:cloudfront::123456789012:function/test-svc-spa-rewrite"
+    }
+  }
+  mock_resource "aws_sesv2_configuration_set" {
+    defaults = {
+      arn = "arn:aws:ses:eu-central-1:123456789012:configuration-set/test-svc-sending"
+    }
+  }
+  mock_resource "aws_sfn_state_machine" {
+    defaults = {
+      arn = "arn:aws:states:eu-central-1:123456789012:stateMachine:test-svc-mock"
     }
   }
   mock_data "aws_kms_secrets" {
     defaults = {
       plaintext = {
-        private_key = "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0Z3VS5JJcds3xfn/ygWep4PAtGoRBh0o"
+        private_key = "MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQCemhl4SQBbfsaX6qpqPaT2FKGqk1QYkeGQ+o5+GeNDP2Skb905orsv1MEXL9QAGJN0Z/YRsEkW0NRb/V0UjJEJ7dgG/fEsBNzflDMcxxSidZ7bsbgs2IYCoTZ2F/BINKx30QiY0NNAFTAQzfTvHlPuRJAhUXm9q6bMtCkpqDJLpE2KaTechzdh9P+k3b4ET1tXc0bRrKnnlqp4FiH1zIX7kJI8QqRUkQomDtJ+4GoWphVGTaSiTQSltOcQQh5RaINEC+AdpbxOPftWVRIo2o51OKrfq7NuVTAcI+EQeGX6V+Y/+3zJ8QVnZqP4/cw30hbhSj000uFCsQMpL0OA6XsjAgMBAAECggEABsXAyaygWcfXlhwcq823EhT+dEi3QhdUoPq6A/N6C2CVHRpzwWbMBHZaynEt5dUm0sUvskCrVlCTiNwQUfTQqrJf06ibWExa3Cc5aYSswmUwY+Q6X5vdWRZmO3O5PHQXW0RvUAs2whlFhKoux9ktL1L5LpsKjklapYoZ6d/3SdiIh3nOp4Iz2iL12mAhy98bQ7oR3zaDJz8p03k4rKVBIp7Jprn67qH/dUJJOlIFln/uugiw0Sf8kR8nLVW2EHgomNwH70znG2UP0Ym4omi04aDZtw65VUFnxuj6MwnkOLUzp6sphsf9vojfLSlAfG2+v8UsBJzzB4KmvYsaI7rLBQKBgQDSfJJ93UjQEwh3Tzy45JMpabkmQ+ao3cn034xZ77O+N9skCQpQaOZt+ZviGrl1B+eDSIRvEiE9ur4AkyjHuZ2z6qhvbspGVdNE23sqSLQtEkhnCYNtm4aE9dGUEp9K4bPX78pXhOD2y4dB8ZUVnhg7I4Eg1adfriin8x8pUSP0TQKBgQDA5Xdk32lGBnH0HC6z+6f3ToaGV6zQcKMgSrtwrMaELIyPlo16mvGiUyrbHOn+72lWlGlPAghmiUrCCTUE+nnkV3SoIkVme8NhfPOYXqHZPLm2gxnruE1/zmNlpLHiR5NrZ06Jq+156OLW+uIXLy3ho+eXnJmh1GnHo9mzv0KlLwKBgQDP7Uc5FrOq+GJQmfG+I+5L5qiD6GefQRkT0RFwdp30tnDAND4AGOAom38l6Ihz148X3TcWEa7MsACpyLVsNyxWYuRoz+T5fibpynbs2k1CiOEFCBzQ1eYYykxyHcNF0Zg7JCGaOyWQJpZCykcfx8DgCr6wlN52YjC/WCfcRM9jsQKBgQCTCtj2ti+jx6n6MbmQTdf+d4eoxRDhW9ud9BnqjGpPuz3y/wseWRq1aLyUhvgA9DPSYhPcvGn279VjEG2wO9fLLreoq2dH9jQ8DmoKzqiF1vqinFGYFMhPEt9GTkOjgHhqOTfvTnYapmK1Ck5q6fYJuU4Djsa2TBvOqaJ8mOGO1QKBgFWLDmE5AF+4LM6rw1Illcss+/u9o61AGKVSU3oFewAejUNW1lCKT189FDwGns7Rl/23GpVz2V88fk9RwjOeT++0MFIErcgDQMF7Ra2QhkyudM1pnsIOcMzBXmzEt355SqHfaU2UXKhY2EppnOKjh2EcjkeVurlxkwS7nBhCKNP8"
       }
     }
   }
@@ -62,6 +97,14 @@ mock_provider "aws" {
   mock_resource "aws_acm_certificate" {
     defaults = {
       arn = "arn:aws:acm:us-east-1:123456789012:certificate/mock"
+      domain_validation_options = [
+        {
+          domain_name           = "email.rhosys.cloud"
+          resource_record_name  = "_mock.email.rhosys.cloud."
+          resource_record_type  = "CNAME"
+          resource_record_value = "_mock.acm-validations.aws."
+        }
+      ]
     }
   }
 }
@@ -69,6 +112,27 @@ mock_provider "aws" {
 variables {
   aws_account_id = "123456789012"
   service_name   = "test-svc"
+}
+
+override_data {
+  target = data.tls_public_key.dkim
+  values = {
+    public_key_pem = "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA\n-----END PUBLIC KEY-----\n"
+  }
+}
+
+override_resource {
+  target = aws_sesv2_email_identity.main
+  values = {
+    arn = "arn:aws:ses:eu-central-1:123456789012:identity/email.rhosys.cloud"
+  }
+}
+
+override_resource {
+  target = aws_sesv2_email_identity.platform
+  values = {
+    arn = "arn:aws:ses:eu-central-1:123456789012:identity/platform.email.rhosys.cloud"
+  }
 }
 
 # Verify exactly 2 lifecycle rules exist on the emails bucket
