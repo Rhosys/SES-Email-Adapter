@@ -64,6 +64,8 @@ resource "aws_iam_role_policy" "lambda_permissions" {
         Action = ["bedrock:InvokeModel"]
         Resource = [
           "arn:aws:bedrock:*::foundation-model/*",
+          # Cross-region inference profiles (eu.*/us.* model IDs) are account-scoped
+          # resources with a different ARN pattern than foundation models
           "arn:aws:bedrock:*:*:inference-profile/*"
         ]
       },
