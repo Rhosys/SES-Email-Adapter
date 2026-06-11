@@ -16,7 +16,7 @@ import type { sendRsvp } from "../../src/processor/calendar/rsvp-composer.js";
 import type { PostApprovalCalendarHandlerDeps } from "../../src/processor/calendar/post-approval-handler.js";
 
 vi.mock("../../src/dns/mx-validator.js", () => ({
-  validateRecipientMx: vi.fn().mockResolvedValue({ valid: true, invalidDomains: [] }),
+  validateRecipientMx: vi.fn().mockResolvedValue({ isOk: () => true, isErr: () => false, _unsafeUnwrap: () => undefined }),
 }));
 
 // ---------------------------------------------------------------------------

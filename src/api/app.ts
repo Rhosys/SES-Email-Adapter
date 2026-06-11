@@ -884,8 +884,8 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
 
     // MX validation
     const mxResult = await validateRecipientMx(signal.data.to);
-    if (!mxResult.valid) {
-      return err(c, 422, "Invalid recipient domain", "INVALID_RECIPIENT_DOMAIN", { invalidDomains: mxResult.invalidDomains });
+    if (mxResult.isErr()) {
+      return err(c, 422, "Invalid recipient domain", "INVALID_RECIPIENT_DOMAIN", { invalidDomains: mxResult.error.invalidDomains });
     }
 
     // Compute undo window

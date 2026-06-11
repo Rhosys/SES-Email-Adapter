@@ -31,7 +31,7 @@ describe("validateRecipientMx", () => {
       await vi.runAllTimersAsync();
       const result = await promise;
 
-      expect(result.valid).toBe(true);
+      expect(result.isOk()).toBe(true);
       // Should only resolve 2 unique domains, not 3
       expect(mockResolveMx).toHaveBeenCalledTimes(2);
       expect(mockResolveMx).toHaveBeenCalledWith("example.com");
@@ -47,7 +47,7 @@ describe("validateRecipientMx", () => {
       await vi.runAllTimersAsync();
       const result = await promise;
 
-      expect(result).toEqual({ valid: true, invalidDomains: [] });
+      expect(result.isOk()).toBe(true);
     });
 
     it("returns invalid when a domain has no MX and no A record", async () => {
@@ -58,7 +58,8 @@ describe("validateRecipientMx", () => {
       await vi.runAllTimersAsync();
       const result = await promise;
 
-      expect(result).toEqual({ valid: false, invalidDomains: ["nonexistent.invalid"] });
+      expect(result.isErr()).toBe(true);
+      expect(result._unsafeUnwrapErr().invalidDomains).toEqual(["nonexistent.invalid"]);
     });
 
     it("returns invalid when MX resolves to empty array and A also fails", async () => {
@@ -69,7 +70,8 @@ describe("validateRecipientMx", () => {
       await vi.runAllTimersAsync();
       const result = await promise;
 
-      expect(result).toEqual({ valid: false, invalidDomains: ["empty-mx.test"] });
+      expect(result.isErr()).toBe(true);
+      expect(result._unsafeUnwrapErr().invalidDomains).toEqual(["empty-mx.test"]);
     });
   });
 
@@ -82,7 +84,7 @@ describe("validateRecipientMx", () => {
       await vi.runAllTimersAsync();
       const result = await promise;
 
-      expect(result).toEqual({ valid: true, invalidDomains: [] });
+      expect(result.isOk()).toBe(true);
       expect(mockResolve4).toHaveBeenCalledWith("a-only.example");
     });
 
@@ -94,7 +96,7 @@ describe("validateRecipientMx", () => {
       await vi.runAllTimersAsync();
       const result = await promise;
 
-      expect(result).toEqual({ valid: true, invalidDomains: [] });
+      expect(result.isOk()).toBe(true);
     });
   });
 
@@ -107,7 +109,7 @@ describe("validateRecipientMx", () => {
       await vi.advanceTimersByTimeAsync(500);
       const result = await promise;
 
-      expect(result).toEqual({ valid: true, invalidDomains: [] });
+      expect(result.isOk()).toBe(true);
     });
 
     it("treats both MX and A timeout as invalid domain", async () => {
@@ -118,7 +120,8 @@ describe("validateRecipientMx", () => {
       await vi.advanceTimersByTimeAsync(1000); // enough for both timeouts
       const result = await promise;
 
-      expect(result).toEqual({ valid: false, invalidDomains: ["timeout.example"] });
+      expect(result.isErr()).toBe(true);
+      expect(result._unsafeUnwrapErr().invalidDomains).toEqual(["timeout.example"]);
     });
   });
 
@@ -137,8 +140,8 @@ describe("validateRecipientMx", () => {
       await vi.runAllTimersAsync();
       const result = await promise;
 
-      expect(result.valid).toBe(false);
-      expect(result.invalidDomains).toEqual(["bad.invalid"]);
+      expect(result.isErr()).toBe(true);
+      expect(result._unsafeUnwrapErr().invalidDomains).toEqual(["bad.invalid"]);
     });
   });
 });

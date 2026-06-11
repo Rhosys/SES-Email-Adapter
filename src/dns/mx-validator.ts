@@ -1,14 +1,21 @@
 import dns from "dns/promises";
+import { ok, err } from "../errors.js";
+import type { Result } from "../errors.js";
 
-export interface MxValidationResult {
-  valid: boolean;
+export interface MxValidationError {
+  kind: "mx_validation_failed";
   invalidDomains: string[];
 }
+
+export const mxValidationError = (invalidDomains: string[]): MxValidationError => ({
+  kind: "mx_validation_failed",
+  invalidDomains,
+});
 
 export async function validateRecipientMx(
   recipients: Array<{ address: string }>,
   timeoutMs: number = 2000,
-): Promise<MxValidationResult> {
+): Promise<Result<void, MxValidationError>> {
   const domains = [...new Set(recipients.map(r => r.address.split("@")[1]!))];
   const invalidDomains: string[] = [];
 
@@ -17,7 +24,10 @@ export async function validateRecipientMx(
     if (!hasMx) invalidDomains.push(domain);
   }));
 
-  return { valid: invalidDomains.length === 0, invalidDomains };
+  if (invalidDomains.length > 0) {
+    return err(mxValidationError(invalidDomains));
+  }
+  return ok(undefined);
 }
 
 async function resolveWithTimeout(domain: string, timeoutMs: number): Promise<boolean> {
