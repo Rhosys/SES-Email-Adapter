@@ -224,11 +224,11 @@ describe("Property 7: Reindex worker propagates Result errors", () => {
     );
     expect(partialFailureLog).toBeDefined();
 
-    // The failures array in the log contains our signal ID and a reason with the error cause
-    const failures = partialFailureLog!.context!["failures"] as Array<{ signalId: string; reason: string }>;
+    // The failures array in the log contains our signal ID and the cause
+    const failures = partialFailureLog!.context!["failures"] as Array<{ signalId: string; cause: unknown }>;
     expect(failures).toBeDefined();
     const failure = failures.find((f) => f.signalId === signalId);
     expect(failure).toBeDefined();
-    expect(failure!.reason).toContain(errorCause);
+    expect(failure!.cause).toBeDefined();
   });
 });

@@ -87,7 +87,7 @@ export class BedrockEmbeddingGenerator implements EmbeddingGenerator {
         dimensions: entry.dimensions,
       });
     } catch (error) {
-      return err(bedrockError(entry.modelId, error instanceof Error ? error : new Error(String(error))));
+      return err(bedrockError(entry.modelId, error));
     }
   }
 }

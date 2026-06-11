@@ -14,8 +14,8 @@ export const CLASSIFICATION_MODEL_ID = "eu.anthropic.claude-opus-4-5-20251101-v1
 export const GUARDRAIL_ID = "PLACEHOLDER";
 export const GUARDRAIL_VERSION = "PLACEHOLDER";
 
-export type ClassificationError = { kind: "classification_error"; cause: string };
-export const classificationError = (cause: string): ClassificationError => ({ kind: "classification_error", cause });
+export type ClassificationError = { kind: "classification_error"; cause: unknown };
+export const classificationError = (cause: unknown): ClassificationError => ({ kind: "classification_error", cause });
 
 export interface ClassificationInput {
   from: string;
@@ -96,15 +96,15 @@ export class SignalClassifier {
           contentType: "application/json",
           accept: "application/json",
           body: new TextEncoder().encode(JSON.stringify(requestBody)),
-          guardrailIdentifier: GUARDRAIL_ID,
-          guardrailVersion: GUARDRAIL_VERSION,
-          trace: "ENABLED",
+          // TODO: Re-enable once guardrail is deployed in email-catcher/infrastructure
+          // guardrailIdentifier: GUARDRAIL_ID,
+          // guardrailVersion: GUARDRAIL_VERSION,
+          // trace: "ENABLED",
         }),
       );
     } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
-      this.logger.error("Classifier Bedrock request failed.", { code: "classifier.bedrock_error", input, error: message });
-      return err(classificationError(`Bedrock request failed: ${message}`));
+      this.logger.error("Classifier Bedrock request failed.", { code: "classifier.bedrock_error", input, error: e });
+      return err(classificationError(e));
     }
 
     const responseBody = new TextDecoder().decode(response.body);

@@ -38,7 +38,7 @@ export function validateRuleCondition(condition: string): string | null {
   try {
     jsonLogic.apply(parsed as object, {});
   } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
+    const message = e instanceof Error ? e.message : "unknown error";
     return `Invalid JSONLogic condition: ${message}`;
   }
 

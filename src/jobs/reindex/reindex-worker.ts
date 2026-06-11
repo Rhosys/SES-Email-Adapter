@@ -70,7 +70,7 @@ export class ReindexWorker {
     modelId: string,
   ): Promise<Result<void, DbError | ReindexSegmentProcessingError>> {
     let lastEvaluatedKey: Record<string, unknown> | undefined;
-    const failures: Array<{ signalId: string; reason: string }> = [];
+    const failures: Array<{ signalId: string; cause: unknown }> = [];
 
     do {
       let res;
@@ -117,11 +117,11 @@ export class ReindexWorker {
     item: Record<string, unknown>,
     targetRegistryId: string,
     modelId: string,
-  ): Promise<Result<void, { signalId: string; reason: string }>> {
+  ): Promise<Result<void, { signalId: string; cause: unknown }>> {
     const signal = item as unknown as Pick<Signal, "id" | "signalLookupId" | "accountId" | "arcId"> & { data?: Pick<EmailSignalData, "recipientAddress" | "embeddings" | "s3Key"> };
 
     if (!signal.data) {
-      return err({ signalId: signal.id ?? "unknown", reason: "no data property on item" });
+      return err({ signalId: signal.id ?? "unknown", cause: "no data property on item" });
     }
 
     const embeddings = signal.data.embeddings;
@@ -142,7 +142,7 @@ export class ReindexWorker {
     signal: Pick<Signal, "id" | "accountId" | "arcId"> & { data: Pick<EmailSignalData, "recipientAddress"> },
     vector: number[],
     targetRegistryId: string,
-  ): Promise<Result<void, { signalId: string; reason: string }>> {
+  ): Promise<Result<void, { signalId: string; cause: unknown }>> {
     const upsertResult = await multiClusterWriter.upsertEmbedding({
       registryId: targetRegistryId,
       arcId: signal.arcId!,
@@ -151,7 +151,7 @@ export class ReindexWorker {
       embedding: vector,
     });
     if (upsertResult.isErr()) {
-      return err({ signalId: signal.id, reason: `Aurora upsert failed: ${String(upsertResult.error.cause)}` });
+      return err({ signalId: signal.id, cause: upsertResult.error });
     }
     return ok(undefined);
   }
@@ -164,9 +164,9 @@ export class ReindexWorker {
     signal: Pick<Signal, "id" | "signalLookupId" | "accountId" | "arcId"> & { data: Pick<EmailSignalData, "recipientAddress" | "s3Key"> },
     targetRegistryId: string,
     modelId: string,
-  ): Promise<Result<void, { signalId: string; reason: string }>> {
+  ): Promise<Result<void, { signalId: string; cause: unknown }>> {
     if (!signal.data.s3Key) {
-      return err({ signalId: signal.id, reason: "no s3Key on signal record" });
+      return err({ signalId: signal.id, cause: "no s3Key on signal record" });
     }
 
     const result = await generateEmbeddingFromS3({
@@ -177,7 +177,7 @@ export class ReindexWorker {
       embeddingGenerator: this.embeddingGenerator,
     });
     if (result.isErr()) {
-      return err({ signalId: signal.id, reason: `Embedding generation failed: ${String(result.error.cause ?? result.error)}` });
+      return err({ signalId: signal.id, cause: result.error });
     }
 
     const cacheResult = await this.arcDatabase.addEmbeddingToCache(
@@ -187,7 +187,7 @@ export class ReindexWorker {
       result.value.vector,
     );
     if (cacheResult.isErr()) {
-      return err({ signalId: signal.id, reason: `DDB cache write failed: ${String(cacheResult.error.cause)}` });
+      return err({ signalId: signal.id, cause: cacheResult.error });
     }
 
     const upsertResult = await multiClusterWriter.upsertEmbedding({
@@ -198,7 +198,7 @@ export class ReindexWorker {
       embedding: result.value.vector,
     });
     if (upsertResult.isErr()) {
-      return err({ signalId: signal.id, reason: `Aurora upsert failed: ${String(upsertResult.error.cause)}` });
+      return err({ signalId: signal.id, cause: upsertResult.error });
     }
 
     return ok(undefined);

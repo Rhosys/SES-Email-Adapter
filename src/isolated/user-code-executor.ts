@@ -158,7 +158,7 @@ export async function handler(event: unknown): Promise<UserCodeResponse> {
       const result = validateCodeAst(functionCode);
       return { success: true, purpose: "validate_ast", result };
     } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
+      const message = e instanceof Error ? e.message : "unknown error";
       return { success: false, error: { message, type: "runtime_error" } };
     }
   }
@@ -172,7 +172,7 @@ export async function handler(event: unknown): Promise<UserCodeResponse> {
       });
       return { success: true, purpose: "validate_ast_batch", results };
     } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
+      const message = e instanceof Error ? e.message : "unknown error";
       return { success: false, error: { message, type: "runtime_error" } };
     }
   }
@@ -197,9 +197,7 @@ export async function handler(event: unknown): Promise<UserCodeResponse> {
   }
 
   // template_function: result must be string or null
-  const templateResult = serialized == null ? null
-    : typeof serialized === "string" ? serialized
-    : String(serialized);
+  const templateResult = typeof serialized === "string" ? serialized : null;
 
   return { success: true, purpose: "template_function", result: templateResult };
 }

@@ -60,7 +60,7 @@ describe("user-code-executor", () => {
       });
     });
 
-    it("coerces non-string template_function result to string", async () => {
+    it("returns null for non-string template_function result", async () => {
       const result = await handler({
         ...validPayload,
         purpose: "template_function",
@@ -69,7 +69,7 @@ describe("user-code-executor", () => {
       expect(result).toEqual({
         success: true,
         purpose: "template_function",
-        result: "42",
+        result: null,
       });
     });
   });

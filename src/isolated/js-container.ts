@@ -49,9 +49,9 @@ export async function execute(code: string, context: SandboxContext): Promise<Co
       const errorVal = vm.dump(result.error);
       result.error.dispose();
 
-      const message = typeof errorVal === "object" && errorVal !== null && "message" in errorVal
-        ? String(errorVal.message)
-        : String(errorVal);
+      const message = typeof errorVal === "object" && errorVal !== null && "message" in errorVal && typeof (errorVal as Record<string, unknown>).message === "string"
+        ? (errorVal as Record<string, unknown>).message as string
+        : "unknown error";
 
       // QuickJS signals interrupt as InternalError: interrupted
       if (message === "interrupted") {
@@ -65,7 +65,7 @@ export async function execute(code: string, context: SandboxContext): Promise<Co
     result.value.dispose();
     return { success: true, value };
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = error instanceof Error ? error.message : "unknown error";
     if (message.includes("interrupted")) {
       return { success: false, type: "timeout", message: `Execution timed out after ${TIMEOUT_MS}ms` };
     }

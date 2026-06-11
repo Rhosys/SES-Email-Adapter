@@ -24,7 +24,7 @@ function parseAddress(address: string): { domain: string; alias: string } {
 
 function ruleGsi1pk(accountId: string) { return `ACCT#${accountId}`; }
 function ruleGsi1sk(status: RuleStatus, priorityOrder: number, id: string) {
-  return `RULE#${status}#${String(priorityOrder).padStart(6, "0")}#${id}`;
+  return `RULE#${status}#${priorityOrder.toString().padStart(6, "0")}#${id}`;
 }
 
 // ---------------------------------------------------------------------------

@@ -142,7 +142,7 @@ export function parseIcs(icsBytes: Uint8Array): Result<IcsParseResult, IcsParseE
   try {
     jCalData = ICAL.parse(rawIcsContent);
   } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
+    const message = e instanceof Error ? e.message : "unknown parse error";
     return err({ reason: `Malformed iCal structure: ${message}` });
   }
 

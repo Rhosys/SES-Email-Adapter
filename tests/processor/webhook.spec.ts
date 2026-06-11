@@ -222,17 +222,18 @@ describe("deliverWebhook", () => {
     expect(result).toEqual({ success: false, error: "The operation was aborted" });
     expect(logger.calls).toHaveLength(1);
     expect(logger.calls[0]!.method).toBe("track");
-    expect(logger.calls[0]!.context).toMatchObject({ error: "The operation was aborted" });
+    expect(logger.calls[0]!.context).toMatchObject({ error: abortError });
   });
 
   it("returns failure and logs at TRACK level on network error", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("getaddrinfo ENOTFOUND hook.example.com")));
+    const networkError = new Error("getaddrinfo ENOTFOUND hook.example.com");
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(networkError));
 
     const result = await deliverWebhook("https://hook.example.com/endpoint", testPayload, logger);
 
     expect(result).toEqual({ success: false, error: "getaddrinfo ENOTFOUND hook.example.com" });
     expect(logger.calls).toHaveLength(1);
     expect(logger.calls[0]!.method).toBe("track");
-    expect(logger.calls[0]!.context).toMatchObject({ error: "getaddrinfo ENOTFOUND hook.example.com" });
+    expect(logger.calls[0]!.context).toMatchObject({ error: networkError });
   });
 });
