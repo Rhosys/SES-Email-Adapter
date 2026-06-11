@@ -43,6 +43,10 @@ const SIMILARITY_THRESHOLD = 0.5;
 const MAX_ATTEMPTS = 3;
 const BASE_DELAY_MS = 1000;
 
+// Aurora auto-pause resume retry: exponential backoff up to 60s total
+const RESUME_MAX_ATTEMPTS = 8;
+const RESUME_BASE_DELAY_MS = 2000; // 2s, 4s, 8s, 8s, 8s, 8s, 8s, 8s = ~54s total
+
 // ---------------------------------------------------------------------------
 // Transient error detection
 // ---------------------------------------------------------------------------
@@ -66,7 +70,17 @@ function isTransientError(err: unknown): boolean {
   if (e.name === "NetworkingError") return true;
   if (e.message?.includes("Connection reset")) return true;
 
+  // Aurora Serverless auto-pause resuming
+  if (e.message?.includes("resuming after being auto-paused")) return true;
+
   return false;
+}
+
+/** Aurora resuming from auto-pause can take 25–45s. Detect this specific case. */
+function isAuroraResuming(err: unknown): boolean {
+  if (err == null || typeof err !== "object") return false;
+  const e = err as { message?: string };
+  return e.message?.includes("resuming after being auto-paused") === true;
 }
 
 // ---------------------------------------------------------------------------
@@ -75,15 +89,25 @@ function isTransientError(err: unknown): boolean {
 
 async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
   let lastError: unknown;
-  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+  let maxAttempts = MAX_ATTEMPTS;
+  let baseDelay = BASE_DELAY_MS;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
       return await fn();
     } catch (err) {
       lastError = err;
-      if (!isTransientError(err) || attempt === MAX_ATTEMPTS - 1) {
+
+      // On first encounter of auto-pause resume, switch to longer retry budget
+      if (isAuroraResuming(err) && maxAttempts === MAX_ATTEMPTS) {
+        maxAttempts = RESUME_MAX_ATTEMPTS;
+        baseDelay = RESUME_BASE_DELAY_MS;
+      }
+
+      if (!isTransientError(err) || attempt === maxAttempts - 1) {
         throw err;
       }
-      const delayMs = BASE_DELAY_MS * Math.pow(2, attempt); // 1s, 2s, 4s
+      const delayMs = Math.min(baseDelay * Math.pow(2, attempt), 8000);
       await sleep(delayMs);
     }
   }
@@ -216,8 +240,9 @@ export class MultiClusterAuroraWriterImpl implements MultiClusterAuroraWriter {
         secretArn: cluster.secretArn,
         database: cluster.databaseName,
         transactionId,
-        sql: "SET LOCAL app.current_account_id = :accountId",
-        parameters: [{ name: "accountId", value: { stringValue: accountId } }],
+        // SET LOCAL does not support parameterized values in PostgreSQL —
+        // accountId is an internal value from DDB (not user input), safe to interpolate.
+        sql: `SET LOCAL app.current_account_id = '${accountId.replace(/'/g, "''")}'`,
       }));
 
       const result = await fn(transactionId!);
