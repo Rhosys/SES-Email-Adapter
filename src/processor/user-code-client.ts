@@ -1,5 +1,4 @@
 import { InvokeCommand, LambdaClient } from "@aws-sdk/client-lambda";
-import type { AstValidationResult } from "../isolated/ast-validator.js";
 import type { Logger } from "../logger.js";
 import { ok, err } from "../errors.js";
 import type { Result } from "../errors.js";
@@ -18,6 +17,18 @@ export const userCodeError = (errorType: UserCodeError["errorType"], message: st
   kind: "user_code_error",
   errorType,
   message,
+});
+
+export interface AstValidationError {
+  kind: "ast_validation_error";
+  message: string;
+  location?: { line: number; column: number };
+}
+
+export const astValidationError = (message: string, location?: { line: number; column: number }): AstValidationError => ({
+  kind: "ast_validation_error",
+  message,
+  ...(location !== undefined ? { location } : {}),
 });
 
 // ---------------------------------------------------------------------------
@@ -56,8 +67,8 @@ type WireResponse = WireSuccess | WireError;
 
 export interface UserCodeExecutorClient {
   invoke(request: UserCodeRequest): Promise<Result<RuleExecutionResult | TemplateParameterResult, UserCodeError>>;
-  validateAst(code: string): Promise<Result<AstValidationResult, UserCodeError>>;
-  validateAstBatch(functions: Array<{ name: string; code: string }>): Promise<Result<Array<{ name: string } & AstValidationResult>, UserCodeError>>;
+  validateAst(code: string): Promise<Result<void, AstValidationError | UserCodeError>>;
+  validateAstBatch(functions: Array<{ name: string; code: string }>): Promise<Result<void, AstValidationError | UserCodeError>>;
 }
 
 export interface UserCodeRequest {
@@ -99,7 +110,7 @@ export class LambdaUserCodeExecutor implements UserCodeExecutorClient {
     return ok({ value: typeof result === "string" ? result : null });
   }
 
-  async validateAst(code: string): Promise<Result<AstValidationResult, UserCodeError>> {
+  async validateAst(code: string): Promise<Result<void, AstValidationError | UserCodeError>> {
     const wireResult = await this.callLambda({
       tenantId: "_system",
       purpose: "validate_ast",
@@ -112,10 +123,14 @@ export class LambdaUserCodeExecutor implements UserCodeExecutorClient {
     if (!wire.success) {
       return err(userCodeError(wire.error.type as UserCodeError["errorType"], wire.error.message));
     }
-    return ok(wire.result as AstValidationResult);
+    const result = wire.result as { valid: boolean; error?: string; location?: { line: number; column: number } };
+    if (!result.valid) {
+      return err(astValidationError(result.error ?? "invalid code", result.location));
+    }
+    return ok(undefined);
   }
 
-  async validateAstBatch(functions: Array<{ name: string; code: string }>): Promise<Result<Array<{ name: string } & AstValidationResult>, UserCodeError>> {
+  async validateAstBatch(functions: Array<{ name: string; code: string }>): Promise<Result<void, AstValidationError | UserCodeError>> {
     const wireResult = await this.callLambda({
       tenantId: "_system",
       purpose: "validate_ast_batch",
@@ -128,7 +143,12 @@ export class LambdaUserCodeExecutor implements UserCodeExecutorClient {
     if (!wire.success) {
       return err(userCodeError(wire.error.type as UserCodeError["errorType"], wire.error.message));
     }
-    return ok(wire.results as Array<{ name: string } & AstValidationResult>);
+    const results = wire.results as Array<{ name: string; valid: boolean; error?: string; location?: { line: number; column: number } }>;
+    const failed = results.find(r => !r.valid);
+    if (failed) {
+      return err(astValidationError(failed.error ?? "invalid code", failed.location));
+    }
+    return ok(undefined);
   }
 
   private async callLambda(payload: Record<string, unknown>): Promise<Result<WireResponse, UserCodeError>> {
