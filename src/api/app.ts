@@ -20,7 +20,6 @@ import { zParse } from "./validate.js";
 import { toApiArc, toApiAccount, toApiSignal, toApiDomain, toApiDomainWithRecords, toApiAlias, toApiAliasSender, toApiLabel, toApiRule, toApiView, toApiTemplate, toApiForwardingAddress } from "./transform.js";
 import { validateRuleCondition } from "./validate-rule-condition.js";
 import { validateWebhookConfig } from "./validate-webhook-config.js";
-import type { AstValidationResult } from "../isolated/ast-validator.js";
 import type { UserCodeExecutorClient } from "../processor/user-code-client.js";
 import type { BillingHandler } from "../billing/billing-handler.js";
 import type { BillingPlan } from "../embedding/retention-tier.js";
@@ -169,37 +168,6 @@ function withAttachmentUrls<T extends AnySignal>(signal: T, cdnBase: string): T 
 
 export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, verificationMailer, jobDispatcher, draftSendDispatcher, accountCreationStarter, appBaseUrl, contentCdnBaseUrl, astValidator, billingHandler, emailService, domainIdentityService, rsvpComposer, postApprovalCalendarDeps, schedulerClient }: AppDeps) {
   const app = new OpenAPIHono<AppEnv>();
-
-  // Helper: validate code AST via the isolated Lambda
-  async function validateCodeAst(code: string): Promise<AstValidationResult> {
-    if (!astValidator) {
-      // Fallback should never happen in production — fail closed
-      return { valid: false, error: "AST validator not configured" };
-    }
-    const response = await astValidator.validateAst(code);
-    if (response.isErr()) {
-      if (response.error.kind === "ast_validation_error") {
-        return { valid: false, error: response.error.message, ...(response.error.location ? { location: response.error.location } : {}) };
-      }
-      return { valid: false, error: response.error.message };
-    }
-    return { valid: true };
-  }
-
-  // Helper: validate multiple template functions in a single Lambda invocation
-  async function validateFunctionsAst(functions: Array<{ name: string; code: string }>): Promise<{ valid: true } | { valid: false; name: string; error: string; location?: { line: number; column: number } }> {
-    if (!astValidator) {
-      return { valid: false, name: functions[0]?.name ?? "", error: "AST validator not configured" };
-    }
-    const response = await astValidator.validateAstBatch(functions);
-    if (response.isErr()) {
-      if (response.error.kind === "ast_validation_error") {
-        return { valid: false, name: "", error: response.error.message, ...(response.error.location ? { location: response.error.location } : {}) };
-      }
-      return { valid: false, name: functions[0]?.name ?? "", error: response.error.message };
-    }
-    return { valid: true };
-  }
 
   // RFC 9727 — Well-Known URI for API Catalog
   app.use("/.well-known/*", async (c, next) => {
@@ -1263,9 +1231,12 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
       if (!body.condition || body.condition.trim().length === 0) {
         return err(c, 400, "condition field is required when conditionType is 'js'", "MISSING_CODE");
       }
-      const astResult = await validateCodeAst(body.condition);
-      if (!astResult.valid) {
-        return err(c, 400, astResult.error, "INVALID_CODE", astResult.location ? { location: astResult.location } : undefined);
+      const astResult = astValidator ? await astValidator.validateAst(body.condition) : undefined;
+      if (!astResult || astResult.isErr()) {
+        const e = astResult?.error;
+        const message = e?.kind === "ast_validation_error" ? e.message : (e?.message ?? "AST validator not configured");
+        const location = e?.kind === "ast_validation_error" ? e.location : undefined;
+        return err(c, 400, message, "INVALID_CODE", location ? { location } : undefined);
       }
     } else {
       if (body.condition) {
@@ -1316,9 +1287,12 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
         if (!body.condition || body.condition.trim().length === 0) {
           return err(c, 400, "condition field is required when conditionType is 'js'", "MISSING_CODE");
         }
-        const astResult = await validateCodeAst(body.condition);
-        if (!astResult.valid) {
-          return err(c, 400, astResult.error, "INVALID_CODE", astResult.location ? { location: astResult.location } : undefined);
+        const astResult = astValidator ? await astValidator.validateAst(body.condition) : undefined;
+        if (!astResult || astResult.isErr()) {
+          const e = astResult?.error;
+          const message = e?.kind === "ast_validation_error" ? e.message : (e?.message ?? "AST validator not configured");
+          const location = e?.kind === "ast_validation_error" ? e.location : undefined;
+          return err(c, 400, message, "INVALID_CODE", location ? { location } : undefined);
         }
       }
       // If switching to "js" conditionType without providing condition, require existing condition on the rule
@@ -1867,9 +1841,14 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     const accountId = c.req.param("accountId")!;
     const body = await zParse(CreateTemplateRequest, c.req.raw);
     if (body.functions) {
-      const astResult = await validateFunctionsAst(body.functions);
-      if (!astResult.valid) {
-        return err(c, 400, `Invalid code in function '${astResult.name}': ${astResult.error}`, "INVALID_CODE", astResult.location ? { location: astResult.location } : undefined);
+      if (astValidator) {
+        const astResult = await astValidator.validateAstBatch(body.functions);
+        if (astResult.isErr()) {
+          const e = astResult.error;
+          const message = e.kind === "ast_validation_error" ? e.message : e.message;
+          const location = e.kind === "ast_validation_error" ? e.location : undefined;
+          return err(c, 400, `Invalid code in function: ${message}`, "INVALID_CODE", location ? { location } : undefined);
+        }
       }
     }
     const now = DateTime.utc().toISO()!;
@@ -1911,9 +1890,14 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     const accountId = c.req.param("accountId")!;
     const body = await zParse(UpdateTemplateRequest, c.req.raw);
     if (body.functions) {
-      const astResult = await validateFunctionsAst(body.functions);
-      if (!astResult.valid) {
-        return err(c, 400, `Invalid code in function '${astResult.name}': ${astResult.error}`, "INVALID_CODE", astResult.location ? { location: astResult.location } : undefined);
+      if (astValidator) {
+        const astResult = await astValidator.validateAstBatch(body.functions);
+        if (astResult.isErr()) {
+          const e = astResult.error;
+          const message = e.kind === "ast_validation_error" ? e.message : e.message;
+          const location = e.kind === "ast_validation_error" ? e.location : undefined;
+          return err(c, 400, `Invalid code in function: ${message}`, "INVALID_CODE", location ? { location } : undefined);
+        }
       }
     }
     const existingResult = await accountDb.getTemplate(accountId, c.req.param("id")!);
@@ -1947,9 +1931,14 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     const accountId = c.req.param("accountId")!;
     const body = await zParse(ReplaceTemplateRequest, c.req.raw);
     if (body.functions) {
-      const astResult = await validateFunctionsAst(body.functions);
-      if (!astResult.valid) {
-        return err(c, 400, `Invalid code in function '${astResult.name}': ${astResult.error}`, "INVALID_CODE", astResult.location ? { location: astResult.location } : undefined);
+      if (astValidator) {
+        const astResult = await astValidator.validateAstBatch(body.functions);
+        if (astResult.isErr()) {
+          const e = astResult.error;
+          const message = e.kind === "ast_validation_error" ? e.message : e.message;
+          const location = e.kind === "ast_validation_error" ? e.location : undefined;
+          return err(c, 400, `Invalid code in function: ${message}`, "INVALID_CODE", location ? { location } : undefined);
+        }
       }
     }
     const existingResult = await accountDb.getTemplate(accountId, c.req.param("id")!);
