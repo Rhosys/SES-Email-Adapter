@@ -27,6 +27,7 @@ interface ContentSanitizeRequest {
   senderEtld1: string;
   keyPrefix: string;
   retentionTag: "365" | "3650" | null;
+  invocationId?: string;
 }
 
 interface ContentSanitizeResponse {
@@ -124,6 +125,10 @@ async function uploadViaPresignedPost(
 // ---------------------------------------------------------------------------
 
 export async function handler(event: ContentSanitizeRequest): Promise<ContentSanitizeResponse | ContentSanitizeError> {
+  if (event.invocationId) {
+    console.log({ level: "INFO", title: "content-sanitizer.invoked", invocationId: event.invocationId, accountId: event.accountId });
+  }
+
   // 1. Fetch raw MIME via presignedGetUrl
   let rawMime: Buffer;
   try {

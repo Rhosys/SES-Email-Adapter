@@ -81,8 +81,8 @@ program
       target: 'node24',
       format: 'esm' as const,
       external: ['@aws-sdk/*', 'pg-native'],
-      // CJS deps that call require() for Node built-ins need a real require in ESM context.
-      banner: { js: "import { createRequire } from 'module'; const require = createRequire(import.meta.url);" },
+      // CJS deps that call require() or reference __dirname/__filename need shims in ESM context.
+      banner: { js: "import { createRequire } from 'module'; import { fileURLToPath as __ef_furl } from 'url'; import { dirname as __ef_dir } from 'path'; const require = createRequire(import.meta.url); const __filename = __ef_furl(import.meta.url); const __dirname = __ef_dir(__filename);" },
     };
 
     console.log(`Building ${functionName} v${version}...`);

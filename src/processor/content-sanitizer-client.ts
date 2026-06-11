@@ -2,6 +2,7 @@ import { InvokeCommand, LambdaClient } from "@aws-sdk/client-lambda";
 import { ok, err, dbError } from "../errors.js";
 import type { DbError, Result } from "../errors.js";
 import type { S3RetentionTag } from "./retention.js";
+import type { Logger } from "../logger.js";
 
 // ---------------------------------------------------------------------------
 // Types (mirror the Content Sanitizer Lambda's request/response)
@@ -29,6 +30,7 @@ export interface ContentSanitizeRequest {
   senderEtld1: string;
   keyPrefix: string;
   retentionTag: S3RetentionTag;
+  invocationId?: string;
 }
 
 export interface ContentSanitizeResponse {
@@ -62,18 +64,21 @@ export interface ContentSanitizerClient {
 export class LambdaContentSanitizer implements ContentSanitizerClient {
   private readonly lambda: LambdaClient;
   private readonly functionArn: string;
+  private readonly logger: Logger;
 
-  constructor(lambda: LambdaClient, functionArn: string) {
+  constructor(lambda: LambdaClient, functionArn: string, logger: Logger) {
     this.lambda = lambda;
     this.functionArn = functionArn;
+    this.logger = logger;
   }
 
   async invoke(request: ContentSanitizeRequest): Promise<Result<ContentSanitizeResponse, DbError>> {
     try {
+      const invokePayload = { ...request, invocationId: this.logger.getInvocationId() };
       const response = await this.lambda.send(new InvokeCommand({
         FunctionName: this.functionArn,
         InvocationType: "RequestResponse",
-        Payload: new TextEncoder().encode(JSON.stringify(request)),
+        Payload: new TextEncoder().encode(JSON.stringify(invokePayload)),
       }));
 
       if (response.FunctionError) {
@@ -84,14 +89,14 @@ export class LambdaContentSanitizer implements ContentSanitizerClient {
         return err(dbError("Content Sanitizer Lambda returned empty payload"));
       }
 
-      const payload = JSON.parse(new TextDecoder().decode(response.Payload)) as ContentSanitizeResponse | { success: false; error: { message: string; type: string } };
+      const result = JSON.parse(new TextDecoder().decode(response.Payload)) as ContentSanitizeResponse | { success: false; error: { message: string; type: string } };
 
-      if (!payload.success) {
-        const errorPayload = payload as { success: false; error: { message: string; type: string } };
+      if (!result.success) {
+        const errorPayload = result as { success: false; error: { message: string; type: string } };
         return err(dbError(`Content Sanitizer: ${errorPayload.error.type} — ${errorPayload.error.message}`));
       }
 
-      return ok(payload as ContentSanitizeResponse);
+      return ok(result as ContentSanitizeResponse);
     } catch (e) {
       return err(dbError(e));
     }

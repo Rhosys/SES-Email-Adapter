@@ -25,7 +25,7 @@ resource "aws_iam_role_policy" "lambda_permissions" {
         Sid      = "CloudWatchLogs"
         Effect   = "Allow"
         Action   = ["logs:CreateLogStream", "logs:PutLogEvents"]
-        Resource = "${aws_cloudwatch_log_group.lambda.arn}:*"
+        Resource = "${aws_cloudwatch_log_group.shared.arn}:*"
       },
       {
         Sid      = "S3ReadEmails"
@@ -194,9 +194,16 @@ resource "aws_iam_role_policy" "lambda_permissions" {
 }
 
 # ---------------------------------------------------------------------------
-# CloudWatch log group — created before the function so we control retention
+# CloudWatch log group — shared by all Lambda functions in this service
+# (replaces per-function log groups; old groups left for manual deletion)
 # ---------------------------------------------------------------------------
 
+resource "aws_cloudwatch_log_group" "shared" {
+  name              = "/aws/lambda/${var.service_name}"
+  retention_in_days = 90
+}
+
+# TODO: DELETE resource from TF (old per-function log groups superseded by aws_cloudwatch_log_group.shared)
 resource "aws_cloudwatch_log_group" "lambda" {
   name              = "/aws/lambda/${var.service_name}-main"
   retention_in_days = 90
@@ -266,7 +273,7 @@ resource "aws_lambda_function" "main" {
   }
 
   logging_config {
-    log_group  = aws_cloudwatch_log_group.lambda.name
+    log_group  = aws_cloudwatch_log_group.shared.name
     log_format = "JSON"
   }
 
@@ -274,7 +281,7 @@ resource "aws_lambda_function" "main" {
     mode = "Active"
   }
 
-  depends_on = [aws_cloudwatch_log_group.lambda]
+  depends_on = [aws_cloudwatch_log_group.shared]
 
   # filename/source_code_hash are replaced by CI via aws-architect — tofu only manages the function skeleton
   lifecycle {
@@ -337,15 +344,10 @@ resource "aws_iam_role_policy" "user_code_executor" {
         Sid      = "CloudWatchLogs"
         Effect   = "Allow"
         Action   = ["logs:CreateLogStream", "logs:PutLogEvents"]
-        Resource = "${aws_cloudwatch_log_group.user_code_executor.arn}:*"
+        Resource = "${aws_cloudwatch_log_group.shared.arn}:*"
       },
     ]
   })
-}
-
-resource "aws_cloudwatch_log_group" "user_code_executor" {
-  name              = "/aws/lambda/${var.service_name}-user-code"
-  retention_in_days = 90
 }
 
 resource "aws_lambda_function" "user_code_executor" {
@@ -361,11 +363,11 @@ resource "aws_lambda_function" "user_code_executor" {
   source_code_hash = data.archive_file.lambda_stub.output_base64sha256
 
   logging_config {
-    log_group  = aws_cloudwatch_log_group.user_code_executor.name
+    log_group  = aws_cloudwatch_log_group.shared.name
     log_format = "JSON"
   }
 
-  depends_on = [aws_cloudwatch_log_group.user_code_executor]
+  depends_on = [aws_cloudwatch_log_group.shared]
 
   lifecycle {
     ignore_changes = [filename, source_code_hash]
@@ -399,15 +401,10 @@ resource "aws_iam_role_policy" "content_sanitizer" {
         Sid      = "CloudWatchLogs"
         Effect   = "Allow"
         Action   = ["logs:CreateLogStream", "logs:PutLogEvents"]
-        Resource = "${aws_cloudwatch_log_group.content_sanitizer.arn}:*"
+        Resource = "${aws_cloudwatch_log_group.shared.arn}:*"
       },
     ]
   })
-}
-
-resource "aws_cloudwatch_log_group" "content_sanitizer" {
-  name              = "/aws/lambda/${var.service_name}-content-sanitizer"
-  retention_in_days = 90
 }
 
 resource "aws_lambda_function" "content_sanitizer" {
@@ -423,11 +420,11 @@ resource "aws_lambda_function" "content_sanitizer" {
   source_code_hash = data.archive_file.lambda_stub.output_base64sha256
 
   logging_config {
-    log_group  = aws_cloudwatch_log_group.content_sanitizer.name
+    log_group  = aws_cloudwatch_log_group.shared.name
     log_format = "JSON"
   }
 
-  depends_on = [aws_cloudwatch_log_group.content_sanitizer]
+  depends_on = [aws_cloudwatch_log_group.shared]
 
   lifecycle {
     ignore_changes = [filename, source_code_hash]
