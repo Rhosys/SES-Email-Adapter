@@ -148,11 +148,10 @@ export async function deliverWebhook(url: string, payload: WebhookPayload, logge
 
     return { success: true, statusCode: response.status };
   } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
     logger.track("Webhook delivery failed — network error or timeout.", {
       code: "processor.side_effect.webhook_error",
       url,
-      error: message,
+      error: e,
     });
     return { success: false, error: message };
   }

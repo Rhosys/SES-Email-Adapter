@@ -924,7 +924,7 @@ export class SignalProcessor {
 
     if (primaryResult.isErr()) {
       this.logger.error("Primary embedding generation failed. The Bedrock InvokeModel call for the read cluster returned an error. Arc matching cannot proceed without a valid vector — the message will be retried via batch item failure.", { code: "embedding.primary_failed", modelId: readCluster.modelId, error: primaryResult.error });
-      return err(dbError(primaryResult.error.cause));
+      return err(dbError(primaryResult.error));
     }
     const embedding = primaryResult.value.vector;
     this.logger.trackPoint("email_processed");
