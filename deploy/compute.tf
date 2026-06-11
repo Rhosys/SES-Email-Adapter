@@ -203,12 +203,6 @@ resource "aws_cloudwatch_log_group" "shared" {
   retention_in_days = 90
 }
 
-# TODO: DELETE resource from TF (old per-function log groups superseded by aws_cloudwatch_log_group.shared)
-resource "aws_cloudwatch_log_group" "lambda" {
-  name              = "/aws/lambda/${var.service_name}-main"
-  retention_in_days = 90
-}
-
 # ---------------------------------------------------------------------------
 # Lambda function
 # publish = true enables versioning; code and alias version are managed by CI
