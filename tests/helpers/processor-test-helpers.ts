@@ -31,8 +31,8 @@ export function makeContentSanitizer(overrides?: Partial<{ parsed: Record<string
 export function makeUserCodeExecutor(): UserCodeExecutorClient {
   return {
     invoke: vi.fn().mockReturnValue(Promise.resolve(ok({ value: true }))),
-    validateAst: vi.fn().mockReturnValue(Promise.resolve(ok({ valid: true }))),
-    validateAstBatch: vi.fn().mockReturnValue(Promise.resolve(ok([]))),
+    validateAst: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+    validateAstBatch: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
   };
 }
 

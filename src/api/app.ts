@@ -178,9 +178,12 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     }
     const response = await astValidator.validateAst(code);
     if (response.isErr()) {
+      if (response.error.kind === "ast_validation_error") {
+        return { valid: false, error: response.error.message, ...(response.error.location ? { location: response.error.location } : {}) };
+      }
       return { valid: false, error: response.error.message };
     }
-    return response.value;
+    return { valid: true };
   }
 
   // Helper: validate multiple template functions in a single Lambda invocation
@@ -190,11 +193,10 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     }
     const response = await astValidator.validateAstBatch(functions);
     if (response.isErr()) {
+      if (response.error.kind === "ast_validation_error") {
+        return { valid: false, name: "", error: response.error.message, ...(response.error.location ? { location: response.error.location } : {}) };
+      }
       return { valid: false, name: functions[0]?.name ?? "", error: response.error.message };
-    }
-    const failed = response.value.find(r => !r.valid);
-    if (failed && !failed.valid) {
-      return { valid: false, name: failed.name, error: failed.error, ...(failed.location ? { location: failed.location } : {}) };
     }
     return { valid: true };
   }
