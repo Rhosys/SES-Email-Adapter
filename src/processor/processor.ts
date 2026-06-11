@@ -1278,7 +1278,7 @@ export class SignalProcessor {
         const embedding = signal.data.embeddings?.[cluster.modelId];
         if (!embedding) {
           this.logger.info("Aurora upsert skipped for cluster — no embedding available for the cluster's model. This is expected when the embedding generator did not produce a vector for this model (e.g. Bedrock failure for that model).", { code: "processor.aurora_upsert_skipped", accountId: signal.accountId, registryId: cluster.registryId, modelId: cluster.modelId });
-          return { cluster, result: ok(undefined) as Result<void, DbError> };
+          return ok({ cluster }) as Result<{ cluster: typeof cluster }, DbError & { cluster: typeof cluster }>;
         }
 
         const upsertResult = await this.auroraWriter.upsertEmbedding({
@@ -1289,17 +1289,19 @@ export class SignalProcessor {
           embedding,
         });
 
-        if (upsertResult.isOk()) {
-          this.logger.trackPoint("aurora_upsert_cluster_complete", { registryId: cluster.registryId });
+        if (upsertResult.isErr()) {
+          return err({ ...upsertResult.error, cluster }) as Result<{ cluster: typeof cluster }, DbError & { cluster: typeof cluster }>;
         }
-        return { cluster, result: upsertResult };
+        this.logger.trackPoint("aurora_upsert_cluster_complete", { registryId: cluster.registryId });
+        return ok({ cluster }) as Result<{ cluster: typeof cluster }, DbError & { cluster: typeof cluster }>;
       }),
     );
 
-    const failures = results.filter((r) => r.result.isErr());
+    const failures = results.filter((r) => r.isErr());
     if (failures.length > 0) {
       for (const failure of failures) {
-        this.logger.error("Failed to upsert embedding to Aurora cluster. The Data API call returned an error for the target cluster. This signal's embedding won't be searchable on that cluster until the next retry succeeds. Check Aurora cluster health in the AWS console.", { code: "processor.aurora_upsert_failed", accountId: signal.accountId, registryId: failure.cluster.registryId, error: failure.result._unsafeUnwrapErr() });
+        const e = failure._unsafeUnwrapErr();
+        this.logger.error("Failed to upsert embedding to Aurora cluster. The Data API call returned an error for the target cluster. This signal's embedding won't be searchable on that cluster until the next retry succeeds. Check Aurora cluster health in the AWS console.", { code: "processor.aurora_upsert_failed", accountId: signal.accountId, registryId: e.cluster.registryId, error: e });
       }
       return err(dbError("Aurora upsert failed for one or more clusters"));
     }

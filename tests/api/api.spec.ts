@@ -18,7 +18,7 @@ import type { UserCodeExecutorClient } from "../../src/processor/user-code-clien
 import { astValidationError } from "../../src/processor/user-code-client.js";
 
 vi.mock("../../src/dns/mx-validator.js", () => ({
-  validateRecipientMx: vi.fn().mockResolvedValue({ valid: true, invalidDomains: [] }),
+  validateRecipientMx: vi.fn().mockResolvedValue({ isOk: () => true, isErr: () => false, _unsafeUnwrap: () => undefined }),
 }));
 
 // ---------------------------------------------------------------------------

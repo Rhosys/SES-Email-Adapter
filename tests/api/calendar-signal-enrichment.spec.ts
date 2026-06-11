@@ -15,7 +15,7 @@ import { createMockLogger } from "../helpers/mock-logger.js";
 import { BillingHandler } from "../../src/billing/billing-handler.js";
 
 vi.mock("../../src/dns/mx-validator.js", () => ({
-  validateRecipientMx: vi.fn().mockResolvedValue({ valid: true, invalidDomains: [] }),
+  validateRecipientMx: vi.fn().mockResolvedValue({ isOk: () => true, isErr: () => false, _unsafeUnwrap: () => undefined }),
 }));
 
 // ---------------------------------------------------------------------------
