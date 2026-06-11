@@ -450,9 +450,9 @@ async function handlerInner(
 
       if (failed) {
         if (receiveCount > RETRY_TRACK_THRESHOLD) {
-          logger.error("SQS message failed after exceeding retry threshold. Message was redelivered " + receiveCount + " times without successful completion. Investigate earlier logs for this messageId.", { code: "handler.sqs.retry_threshold_exceeded", messageId: record.messageId, receiveCount });
+          logger.error("SQS message failed after exceeding retry threshold.", { code: "handler.sqs.retry_threshold_exceeded", messageId: record.messageId, receiveCount });
         } else {
-          logger.warn("SQS message processing failed on attempt " + receiveCount + ". Will be retried automatically.", { code: "handler.sqs.processing_failed", messageId: record.messageId, receiveCount });
+          logger.warn("SQS message processing failed. Will be retried automatically.", { code: "handler.sqs.processing_failed", messageId: record.messageId, receiveCount });
         }
         failures.push({ itemIdentifier: record.messageId });
       }
