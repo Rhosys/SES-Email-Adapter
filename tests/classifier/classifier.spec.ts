@@ -385,7 +385,7 @@ describe("SignalClassifier", () => {
       expect(content).toContain("Important content with links");
     });
 
-    it("includes only RELEVANT_HEADERS in the Bedrock message — irrelevant headers are stripped", async () => {
+    it("includes all provided headers in the Bedrock message (caller pre-filters)", async () => {
       mockClassifyResponse({
         workflow: "conversation",
         workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
@@ -401,10 +401,8 @@ describe("SignalClassifier", () => {
         body: "body",
         receivedAt: "2024-01-15T10:00:00Z",
         headers: {
-          "authentication-results": "spf=pass",  // relevant
-          "list-unsubscribe": "<mailto:unsub@example.com>",  // relevant
-          "x-custom-crm-id": "abc123",           // not relevant
-          "user-agent": "Mozilla/5.0",           // not relevant
+          "authentication-results": "spf=pass",
+          "received-spf": "pass",
         },
         allowedLabels: [],
       });
@@ -413,9 +411,7 @@ describe("SignalClassifier", () => {
       const payload = JSON.parse(new TextDecoder().decode(callArgs.body)) as { messages: Array<{ content: string }> };
       const content = payload.messages[0]!.content;
       expect(content).toContain("authentication-results");
-      expect(content).toContain("list-unsubscribe");
-      expect(content).not.toContain("x-custom-crm-id");
-      expect(content).not.toContain("user-agent");
+      expect(content).toContain("received-spf");
     });
 
     it("truncates body longer than 4000 characters and appends truncation marker", async () => {
