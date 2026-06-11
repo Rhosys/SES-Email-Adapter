@@ -63,7 +63,7 @@ export class DeviceNotifier implements Notifier {
           this.logger.warn("Device delivery failed", { code: "notifier.delivery_failed", deviceType: device.type, token: device.token, reason: result.reason, accountId });
         }
       } catch (e) {
-        this.logger.error("Unexpected error delivering to device", { code: "notifier.delivery_error", deviceType: device.type, token: device.token, accountId, error: String(e) });
+        this.logger.error("Unexpected error delivering to device", { code: "notifier.delivery_error", deviceType: device.type, token: device.token, accountId, error: e });
       }
     }
 

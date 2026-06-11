@@ -115,7 +115,7 @@ export class LambdaUserCodeExecutor implements UserCodeExecutorClient {
       return JSON.parse(new TextDecoder().decode(response.Payload)) as UserCodeResponse;
     } catch (e) {
       // Network-level timeout or SDK error
-      const message = e instanceof Error ? e.message : String(e);
+      const message = e instanceof Error ? e.message : "unknown error";
       if (message.includes("timed out") || message.includes("TimeoutError")) {
         return { success: false, error: { message: "User code execution timed out", type: "timeout" } };
       }
@@ -143,7 +143,7 @@ export class LambdaUserCodeExecutor implements UserCodeExecutorClient {
 
       return JSON.parse(new TextDecoder().decode(response.Payload)) as ValidateAstResponse;
     } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
+      const message = e instanceof Error ? e.message : "unknown error";
       return { success: false, error: { message, type: "runtime_error" } };
     }
   }
@@ -168,7 +168,7 @@ export class LambdaUserCodeExecutor implements UserCodeExecutorClient {
 
       return JSON.parse(new TextDecoder().decode(response.Payload)) as ValidateAstBatchResponse;
     } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
+      const message = e instanceof Error ? e.message : "unknown error";
       return { success: false, error: { message, type: "runtime_error" } };
     }
   }
