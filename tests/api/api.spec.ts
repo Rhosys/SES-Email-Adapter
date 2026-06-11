@@ -84,6 +84,7 @@ function makeAccountDb() {
     listDomains: vi.fn().mockResolvedValue(ok([])),
     getDomain: vi.fn().mockResolvedValue(ok(null)),
     createDomain: vi.fn().mockResolvedValue(ok(makeDomain())),
+    resolveAccountForDomain: vi.fn().mockResolvedValue(ok(null)),
     deleteDomain: vi.fn().mockResolvedValue(ok(undefined)),
     getAccount: vi.fn().mockResolvedValue(ok(null)),
     createAccount: vi.fn().mockImplementation((a) => Promise.resolve(ok(a))),

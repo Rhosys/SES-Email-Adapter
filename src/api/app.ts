@@ -1406,6 +1406,13 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     const accountId = c.req.param("accountId")!;
     const body = await zParse(CreateDomainRequest, c.req.raw);
 
+    // Cross-account ownership check — oldest registrant wins
+    const ownerResult = await accountDb.resolveAccountForDomain(body.domain);
+    if (ownerResult.isErr()) return err(c, 500, "Internal Server Error");
+    if (ownerResult.value && ownerResult.value !== accountId) {
+      return err(c, 409, "Domain already registered by another account", "DOMAIN_EXISTS");
+    }
+
     // Register domain with SES first (idempotent — AlreadyExistsException is ok)
     const sesResult = await domainIdentityService.register(body.domain, accountId);
     if (sesResult.isErr()) {
