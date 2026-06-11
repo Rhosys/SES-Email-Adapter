@@ -1,5 +1,6 @@
 import { InvokeCommand, LambdaClient } from "@aws-sdk/client-lambda";
 import type { AstValidationResult } from "../isolated/ast-validator.js";
+import type { Logger } from "../logger.js";
 
 // ---------------------------------------------------------------------------
 // Types (mirror the User Code Executor Lambda's request/response)
@@ -79,18 +80,21 @@ export interface UserCodeExecutorClient {
 export class LambdaUserCodeExecutor implements UserCodeExecutorClient {
   private readonly lambda: LambdaClient;
   private readonly functionArn: string;
+  private readonly logger: Logger;
 
-  constructor(lambda: LambdaClient, functionArn: string) {
+  constructor(lambda: LambdaClient, functionArn: string, logger: Logger) {
     this.lambda = lambda;
     this.functionArn = functionArn;
+    this.logger = logger;
   }
 
   async invoke(request: UserCodeRequest): Promise<UserCodeResponse> {
     try {
+      const payload = { ...request, invocationId: this.logger.getInvocationId() };
       const response = await this.lambda.send(new InvokeCommand({
         FunctionName: this.functionArn,
         InvocationType: "RequestResponse",
-        Payload: new TextEncoder().encode(JSON.stringify(request)),
+        Payload: new TextEncoder().encode(JSON.stringify(payload)),
       }));
 
       if (response.FunctionError) {
@@ -122,10 +126,11 @@ export class LambdaUserCodeExecutor implements UserCodeExecutorClient {
   async validateAst(code: string): Promise<ValidateAstResponse> {
     const request: ValidateAstRequest = { tenantId: "_system", purpose: "validate_ast", functionCode: code };
     try {
+      const payload = { ...request, invocationId: this.logger.getInvocationId() };
       const response = await this.lambda.send(new InvokeCommand({
         FunctionName: this.functionArn,
         InvocationType: "RequestResponse",
-        Payload: new TextEncoder().encode(JSON.stringify(request)),
+        Payload: new TextEncoder().encode(JSON.stringify(payload)),
       }));
 
       if (response.FunctionError) {
@@ -146,10 +151,11 @@ export class LambdaUserCodeExecutor implements UserCodeExecutorClient {
   async validateAstBatch(functions: Array<{ name: string; code: string }>): Promise<ValidateAstBatchResponse> {
     const request: ValidateAstBatchRequest = { tenantId: "_system", purpose: "validate_ast_batch", functions };
     try {
+      const payload = { ...request, invocationId: this.logger.getInvocationId() };
       const response = await this.lambda.send(new InvokeCommand({
         FunctionName: this.functionArn,
         InvocationType: "RequestResponse",
-        Payload: new TextEncoder().encode(JSON.stringify(request)),
+        Payload: new TextEncoder().encode(JSON.stringify(payload)),
       }));
 
       if (response.FunctionError) {

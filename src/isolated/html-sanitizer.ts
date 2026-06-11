@@ -1,4 +1,4 @@
-import { JSDOM } from "jsdom";
+import { Window } from "happy-dom";
 import DOMPurify from "dompurify";
 
 // ---------------------------------------------------------------------------
@@ -44,10 +44,12 @@ function stripExternalCssUrls(css: string): string {
  * Removes elements that are visually hidden via inline styles.
  * Targets: display:none, visibility:hidden, opacity:0, font-size:0, height:0/width:0
  */
-function removeHiddenElements(doc: Document): void {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function removeHiddenElements(doc: any): void {
   const allElements = doc.querySelectorAll("[style]");
-  for (const el of allElements) {
-    const style = (el as HTMLElement).getAttribute("style") ?? "";
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  for (const el of allElements as Iterable<any>) {
+    const style: string = el.getAttribute("style") ?? "";
     const lower = style.toLowerCase().replace(/\s/g, "");
     if (
       lower.includes("display:none") ||
@@ -67,9 +69,9 @@ function removeHiddenElements(doc: Document): void {
 // ---------------------------------------------------------------------------
 
 export function sanitizeHtml(rawHtml: string): SanitizeResult {
-  const window = new JSDOM("").window;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const purify = DOMPurify(window as any);
+  const window = new Window() as any;
+  const purify = DOMPurify(window);
 
   // Configure DOMPurify to strip dangerous elements
   const clean = purify.sanitize(rawHtml, {
@@ -79,31 +81,31 @@ export function sanitizeHtml(rawHtml: string): SanitizeResult {
     WHOLE_DOCUMENT: false,
   });
 
-  // Parse the sanitized HTML for further processing
-  const dom = new JSDOM(clean);
-  const doc = dom.window.document;
+  // Parse the sanitized HTML into a document for post-processing
+  const doc = new Window({ url: "about:blank" }).document;
+  doc.body.innerHTML = clean;
 
   // Remove hidden elements
   removeHiddenElements(doc);
 
   // Strip external CSS url() references from style attributes
-  const styledElements = doc.querySelectorAll("[style]");
-  for (const el of styledElements) {
-    const style = (el as HTMLElement).getAttribute("style") ?? "";
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  for (const el of doc.querySelectorAll("[style]") as Iterable<any>) {
+    const style: string = el.getAttribute("style") ?? "";
     if (/url\(/i.test(style)) {
-      (el as HTMLElement).setAttribute("style", stripExternalCssUrls(style));
+      el.setAttribute("style", stripExternalCssUrls(style));
     }
   }
 
   // Strip external CSS url() references from <style> elements
-  const styleElements = doc.querySelectorAll("style");
-  for (const styleEl of styleElements) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  for (const styleEl of doc.querySelectorAll("style") as Iterable<any>) {
     if (styleEl.textContent && /url\(/i.test(styleEl.textContent)) {
       styleEl.textContent = stripExternalCssUrls(styleEl.textContent);
     }
   }
 
-  const html = doc.body.innerHTML;
+  const html: string = doc.body.innerHTML;
 
   return { html };
 }

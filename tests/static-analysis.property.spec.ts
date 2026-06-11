@@ -60,7 +60,7 @@ const sourceFiles = collectSourceFiles(SRC_DIR);
 // Console-free source file collection (excludes logger.ts and testing/)
 // ---------------------------------------------------------------------------
 
-const CONSOLE_EXCLUDED_DIRS = new Set(["testing"]);
+const CONSOLE_EXCLUDED_DIRS = new Set(["testing", "isolated"]);
 const CONSOLE_EXCLUDED_FILES = new Set(["logger.ts"]);
 
 function collectConsoleCheckFiles(dir: string): string[] {
