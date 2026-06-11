@@ -7,7 +7,7 @@ import type { Logger } from "../logger.js";
 import { buildSystemPrompt, buildUserMessage } from "./prompt-builder.js";
 import { WORKFLOW_REGISTRY } from "./workflow-registry.js";
 
-export const CLASSIFICATION_MODEL_ID = "us.anthropic.claude-opus-4-5-20251101-v1:0";
+export const CLASSIFICATION_MODEL_ID = "eu.anthropic.claude-opus-4-5-20251101-v1:0";
 
 // Bedrock Guardrail — observe-only prompt injection + content detection.
 // Values come from `tofu output` after applying email-catcher/infrastructure.
@@ -88,17 +88,24 @@ export class SignalClassifier {
       messages: [{ role: "user", content: userMessage }],
     };
 
-    const response = await this.client.send(
-      new InvokeModelCommand({
-        modelId: CLASSIFICATION_MODEL_ID,
-        contentType: "application/json",
-        accept: "application/json",
-        body: new TextEncoder().encode(JSON.stringify(requestBody)),
-        guardrailIdentifier: GUARDRAIL_ID,
-        guardrailVersion: GUARDRAIL_VERSION,
-        trace: "ENABLED",
-      }),
-    );
+    let response;
+    try {
+      response = await this.client.send(
+        new InvokeModelCommand({
+          modelId: CLASSIFICATION_MODEL_ID,
+          contentType: "application/json",
+          accept: "application/json",
+          body: new TextEncoder().encode(JSON.stringify(requestBody)),
+          guardrailIdentifier: GUARDRAIL_ID,
+          guardrailVersion: GUARDRAIL_VERSION,
+          trace: "ENABLED",
+        }),
+      );
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      this.logger.error("Classifier Bedrock request failed.", { code: "classifier.bedrock_error", input, error: message });
+      return err(classificationError(`Bedrock request failed: ${message}`));
+    }
 
     const responseBody = new TextDecoder().decode(response.body);
 
