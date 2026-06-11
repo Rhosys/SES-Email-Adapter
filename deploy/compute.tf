@@ -63,8 +63,8 @@ resource "aws_iam_role_policy" "lambda_permissions" {
         Effect = "Allow"
         Action = ["bedrock:InvokeModel"]
         Resource = [
-          "arn:aws:bedrock:*::foundation-model/us.anthropic.claude-opus-4-5-20251101-v1:0",
-          "arn:aws:bedrock:*::foundation-model/amazon.titan-embed-text-v2:0"
+          "arn:aws:bedrock:*::foundation-model/*",
+          "arn:aws:bedrock:*:*:inference-profile/*"
         ]
       },
       {
@@ -422,5 +422,57 @@ resource "aws_lambda_function" "content_sanitizer" {
 
   lifecycle {
     ignore_changes = [filename, source_code_hash]
+  }
+}
+
+# ---------------------------------------------------------------------------
+# Bedrock Model Invocation Logging — captures all Bedrock API calls in region
+# ---------------------------------------------------------------------------
+
+resource "aws_cloudwatch_log_group" "bedrock" {
+  name              = "/aws/bedrock/${var.service_name}"
+  retention_in_days = 90
+}
+
+resource "aws_iam_role" "bedrock_logging" {
+  name = "${var.service_name}-bedrock-logging"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "bedrock.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+      Condition = {
+        StringEquals = { "aws:SourceAccount" = var.aws_account_id }
+      }
+    }]
+  })
+}
+
+resource "aws_iam_role_policy" "bedrock_logging" {
+  role = aws_iam_role.bedrock_logging.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["logs:CreateLogStream", "logs:PutLogEvents"]
+      Resource = "${aws_cloudwatch_log_group.bedrock.arn}:*"
+    }]
+  })
+}
+
+resource "aws_bedrock_model_invocation_logging_configuration" "main" {
+  logging_config {
+    embedding_data_delivery_enabled = true
+    image_data_delivery_enabled     = false
+    text_data_delivery_enabled      = true
+    video_data_delivery_enabled     = false
+
+    cloudwatch_config {
+      log_group_name = aws_cloudwatch_log_group.bedrock.name
+      role_arn       = aws_iam_role.bedrock_logging.arn
+    }
   }
 }
