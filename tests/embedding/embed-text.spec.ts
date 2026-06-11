@@ -288,9 +288,9 @@ describe("buildEmbedText (classification output)", () => {
       const lines = result.split("\n");
       expect(lines[0]).toBe("auth");
       expect(lines[1]).toBe("GitHub OTP code for login");
-      expect(lines).toContain("authType=otp");
-      expect(lines).toContain("code=123456");
-      expect(lines).toContain("service=GitHub");
+      expect(lines).toContain("workflowData.authType=otp");
+      expect(lines).toContain("workflowData.code=123456");
+      expect(lines).toContain("workflowData.service=GitHub");
     });
 
     it("excludes the workflow discriminator field from workflowData", () => {
@@ -305,8 +305,8 @@ describe("buildEmbedText (classification output)", () => {
       const lines = result.split("\n");
       // "workflow" from workflowData should NOT appear as a key=value line
       expect(lines.filter((l) => l.startsWith("workflow="))).toHaveLength(0);
-      expect(lines).toContain("packageType=shipping");
-      expect(lines).toContain("retailer=Amazon");
+      expect(lines).toContain("workflowData.packageType=shipping");
+      expect(lines).toContain("workflowData.retailer=Amazon");
     });
 
     it("includes numeric fields as string values", () => {
@@ -318,7 +318,7 @@ describe("buildEmbedText (classification output)", () => {
         labels: [],
       };
       const result = buildEmbedText(classification);
-      expect(result).toContain("expiresInMinutes=10");
+      expect(result).toContain("workflowData.expiresInMinutes=10");
     });
 
     it("includes boolean fields as string values", () => {
@@ -330,8 +330,8 @@ describe("buildEmbedText (classification output)", () => {
         labels: [],
       };
       const result = buildEmbedText(classification);
-      expect(result).toContain("requiresReply=true");
-      expect(result).toContain("sentiment=urgent");
+      expect(result).toContain("workflowData.requiresReply=true");
+      expect(result).toContain("workflowData.sentiment=urgent");
     });
   });
 
@@ -346,10 +346,10 @@ describe("buildEmbedText (classification output)", () => {
       };
       const result = buildEmbedText(classification);
       const lines = result.split("\n");
-      expect(lines.filter((l) => l.startsWith("code="))).toHaveLength(0);
-      expect(lines.filter((l) => l.startsWith("actionUrl="))).toHaveLength(0);
-      expect(lines).toContain("authType=otp");
-      expect(lines).toContain("service=GitHub");
+      expect(lines.filter((l) => l.startsWith("workflowData.code="))).toHaveLength(0);
+      expect(lines.filter((l) => l.startsWith("workflowData.actionUrl="))).toHaveLength(0);
+      expect(lines).toContain("workflowData.authType=otp");
+      expect(lines).toContain("workflowData.service=GitHub");
     });
 
     it("omits fields with undefined values", () => {
@@ -363,8 +363,8 @@ describe("buildEmbedText (classification output)", () => {
       const result = buildEmbedText(classification);
       const lines = result.split("\n");
       // Optional fields not present on the object should not appear
-      expect(lines.filter((l) => l.startsWith("code="))).toHaveLength(0);
-      expect(lines.filter((l) => l.startsWith("expiresInMinutes="))).toHaveLength(0);
+      expect(lines.filter((l) => l.startsWith("workflowData.code="))).toHaveLength(0);
+      expect(lines.filter((l) => l.startsWith("workflowData.expiresInMinutes="))).toHaveLength(0);
     });
   });
 
@@ -429,7 +429,7 @@ describe("buildEmbedText (classification output)", () => {
       expect(lines[1]).toBe("AWS security alert: unauthorized access attempt");
       // All remaining lines are key=value from workflowData
       for (const line of lines.slice(2)) {
-        expect(line).toMatch(/^[a-zA-Z]+=.+$/);
+        expect(line).toMatch(/^[a-zA-Z][a-zA-Z0-9.[\]]*=.+$/);
       }
     });
   });
