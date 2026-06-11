@@ -34,7 +34,6 @@ export interface ContentSanitizeRequest {
 }
 
 export interface ContentSanitizeResponse {
-  success: true;
   parsed: {
     from: EmailAddress;
     to: EmailAddress[];
@@ -89,14 +88,14 @@ export class LambdaContentSanitizer implements ContentSanitizerClient {
         return err(dbError("Content Sanitizer Lambda returned empty payload"));
       }
 
-      const result = JSON.parse(new TextDecoder().decode(response.Payload)) as ContentSanitizeResponse | { success: false; error: { message: string; type: string } };
+      const wireResult = JSON.parse(new TextDecoder().decode(response.Payload)) as { success: boolean; parsed?: ContentSanitizeResponse["parsed"]; error?: { message: string; type: string } };
 
-      if (!result.success) {
-        const errorPayload = result as { success: false; error: { message: string; type: string } };
-        return err(dbError(`Content Sanitizer: ${errorPayload.error.type} — ${errorPayload.error.message}`));
+      if (!wireResult.success || !wireResult.parsed) {
+        const errorPayload = wireResult.error;
+        return err(dbError(`Content Sanitizer: ${errorPayload?.type ?? "unknown"} — ${errorPayload?.message ?? "unknown error"}`));
       }
 
-      return ok(result as ContentSanitizeResponse);
+      return ok({ parsed: wireResult.parsed });
     } catch (e) {
       return err(dbError(e));
     }
