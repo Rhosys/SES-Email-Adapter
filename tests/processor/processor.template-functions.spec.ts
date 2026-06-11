@@ -1,10 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { ok } from "neverthrow";
+import { ok, err } from "neverthrow";
 import { SignalProcessor } from "../../src/processor/processor.js";
 import type { ProcessorAccountContext } from "../../src/processor/processor.js";
 import { makeArcDbMock, makeAccountDbMock, makeProcessingDbMock } from "./_helpers.js";
 import type { AccountDatabase } from "../../src/database/account-database.js";
-import type { UserCodeExecutorClient, UserCodeResponse } from "../../src/processor/user-code-client.js";
+import type { UserCodeExecutorClient } from "../../src/processor/user-code-client.js";
+import { userCodeError } from "../../src/processor/user-code-client.js";
 import type { ContentSanitizerClient } from "../../src/processor/content-sanitizer-client.js";
 import type { Signal, Arc, Alias, EmailTemplate } from "../../src/types/index.js";
 import type { EmbeddingGenerator } from "../../src/embedding/embedding-generator.js";
@@ -155,8 +156,8 @@ describe("Template function resolution via User Code Executor", () => {
 
   it("resolves template functions and substitutes values into draft subject and body", async () => {
     vi.mocked(mockExecutor.invoke)
-      .mockResolvedValueOnce({ success: true, purpose: "template_function", result: "Hello" })
-      .mockResolvedValueOnce({ success: true, purpose: "template_function", result: "Thanks for your email about Test email" });
+      .mockResolvedValueOnce(ok({ value: "Hello" }))
+      .mockResolvedValueOnce(ok({ value: "Thanks for your email about Test email" }));
 
     const signal = makeSignal();
     const arc = makeArc();
@@ -187,8 +188,8 @@ describe("Template function resolution via User Code Executor", () => {
 
   it("substitutes empty string and prevents auto-send when template function returns null", async () => {
     vi.mocked(mockExecutor.invoke)
-      .mockResolvedValueOnce({ success: true, purpose: "template_function", result: null })
-      .mockResolvedValueOnce({ success: true, purpose: "template_function", result: "body text" });
+      .mockResolvedValueOnce(ok({ value: null }))
+      .mockResolvedValueOnce(ok({ value: "body text" }));
 
     const signal = makeSignal();
     const arc = makeArc();
@@ -212,13 +213,9 @@ describe("Template function resolution via User Code Executor", () => {
   });
 
   it("substitutes empty string and annotates on timeout error", async () => {
-    const timeoutResponse: UserCodeResponse = {
-      success: false,
-      error: { message: "User code execution timed out", type: "timeout" },
-    };
     vi.mocked(mockExecutor.invoke)
-      .mockResolvedValueOnce(timeoutResponse)
-      .mockResolvedValueOnce({ success: true, purpose: "template_function", result: "ok" });
+      .mockResolvedValueOnce(err(userCodeError("timeout", "User code execution timed out")))
+      .mockResolvedValueOnce(ok({ value: "ok" }));
 
     const signal = makeSignal();
     const arc = makeArc();
@@ -242,13 +239,9 @@ describe("Template function resolution via User Code Executor", () => {
   });
 
   it("substitutes empty string and annotates on runtime error", async () => {
-    const runtimeErrorResponse: UserCodeResponse = {
-      success: false,
-      error: { message: "ReferenceError: foo is not defined", type: "runtime_error" },
-    };
     vi.mocked(mockExecutor.invoke)
-      .mockResolvedValueOnce({ success: true, purpose: "template_function", result: "Hello" })
-      .mockResolvedValueOnce(runtimeErrorResponse);
+      .mockResolvedValueOnce(ok({ value: "Hello" }))
+      .mockResolvedValueOnce(err(userCodeError("runtime_error", "ReferenceError: foo is not defined")));
 
     const signal = makeSignal();
     const arc = makeArc();
@@ -292,13 +285,9 @@ describe("Template function resolution via User Code Executor", () => {
   });
 
   it("logs at WARN level with template name, function name, and error details on execution error", async () => {
-    const timeoutResponse: UserCodeResponse = {
-      success: false,
-      error: { message: "User code execution timed out", type: "timeout" },
-    };
     vi.mocked(mockExecutor.invoke)
-      .mockResolvedValueOnce(timeoutResponse)
-      .mockResolvedValueOnce({ success: true, purpose: "template_function", result: "ok" });
+      .mockResolvedValueOnce(err(userCodeError("timeout", "User code execution timed out")))
+      .mockResolvedValueOnce(ok({ value: "ok" }));
 
     await processor.processSideEffect({ signal: makeSignal(), arc: makeArc() });
 
@@ -316,8 +305,8 @@ describe("Template function resolution via User Code Executor", () => {
 
   it("logs at WARN level with template name, function name, and issue on null return", async () => {
     vi.mocked(mockExecutor.invoke)
-      .mockResolvedValueOnce({ success: true, purpose: "template_function", result: null })
-      .mockResolvedValueOnce({ success: true, purpose: "template_function", result: "ok" });
+      .mockResolvedValueOnce(ok({ value: null }))
+      .mockResolvedValueOnce(ok({ value: "ok" }));
 
     await processor.processSideEffect({ signal: makeSignal(), arc: makeArc() });
 
@@ -333,13 +322,9 @@ describe("Template function resolution via User Code Executor", () => {
   });
 
   it("creates system signal on execution error with template name, function name, and issue", async () => {
-    const runtimeErrorResponse: UserCodeResponse = {
-      success: false,
-      error: { message: "ReferenceError: x is not defined", type: "runtime_error" },
-    };
     vi.mocked(mockExecutor.invoke)
-      .mockResolvedValueOnce(runtimeErrorResponse)
-      .mockResolvedValueOnce({ success: true, purpose: "template_function", result: "ok" });
+      .mockResolvedValueOnce(err(userCodeError("runtime_error", "ReferenceError: x is not defined")))
+      .mockResolvedValueOnce(ok({ value: "ok" }));
 
     await processor.processSideEffect({ signal: makeSignal(), arc: makeArc() });
 
@@ -356,8 +341,8 @@ describe("Template function resolution via User Code Executor", () => {
   it("creates system signal on non-string return with template name, function name, and type info", async () => {
     // Simulate a function returning a number (non-string) — cast to bypass TS type safety
     vi.mocked(mockExecutor.invoke)
-      .mockResolvedValueOnce({ success: true, purpose: "template_function", result: 42 } as unknown as UserCodeResponse)
-      .mockResolvedValueOnce({ success: true, purpose: "template_function", result: "ok" });
+      .mockResolvedValueOnce(ok({ value: 42 } as any))
+      .mockResolvedValueOnce(ok({ value: "ok" }));
 
     await processor.processSideEffect({ signal: makeSignal(), arc: makeArc() });
 
@@ -374,8 +359,8 @@ describe("Template function resolution via User Code Executor", () => {
   it("prevents auto-send and substitutes empty string when function returns non-string", async () => {
     // Simulate a function returning an object (non-string)
     vi.mocked(mockExecutor.invoke)
-      .mockResolvedValueOnce({ success: true, purpose: "template_function", result: { foo: "bar" } } as unknown as UserCodeResponse)
-      .mockResolvedValueOnce({ success: true, purpose: "template_function", result: "body text" });
+      .mockResolvedValueOnce(ok({ value: { foo: "bar" } } as any))
+      .mockResolvedValueOnce(ok({ value: "body text" }));
 
     const signal = makeSignal();
     const arc = makeArc();

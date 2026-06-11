@@ -1,5 +1,7 @@
 import type { Logger } from "../logger.js";
 import type { Signal, Arc } from "../types/index.js";
+import { ok, err } from "../errors.js";
+import type { Result } from "../errors.js";
 
 export interface WebhookPayload {
   id: string;
@@ -35,13 +37,14 @@ export function buildWebhookPayload(signal: Signal, arc: Arc | null): WebhookPay
   };
 }
 
-export interface WebhookDeliveryResult {
-  success: boolean;
-  statusCode?: number;
-  error?: string;
+export interface WebhookSuccess {
+  statusCode: number;
 }
 
-export async function deliverWebhook(url: string, payload: WebhookPayload, logger: Logger): Promise<WebhookDeliveryResult> {
+export type WebhookError = { kind: "webhook_error"; cause: unknown; statusCode?: number | undefined };
+export const webhookError = (cause: unknown, statusCode?: number): WebhookError => ({ kind: "webhook_error", cause, ...(statusCode !== undefined ? { statusCode } : {}) });
+
+export async function deliverWebhook(url: string, payload: WebhookPayload, logger: Logger): Promise<Result<WebhookSuccess, WebhookError>> {
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5000);
@@ -61,16 +64,16 @@ export async function deliverWebhook(url: string, payload: WebhookPayload, logge
         url,
         statusCode: response.status,
       });
-      return { success: false, statusCode: response.status };
+      return err(webhookError("non-2xx response", response.status));
     }
 
-    return { success: true, statusCode: response.status };
+    return ok({ statusCode: response.status });
   } catch (e) {
     logger.track("Webhook delivery failed — network error or timeout.", {
       code: "processor.side_effect.webhook_error",
       url,
       error: e,
     });
-    return { success: false, error: e instanceof Error ? e.message : "unknown error" };
+    return err(webhookError(e));
   }
 }

@@ -571,16 +571,16 @@ export class SignalProcessor {
                   arc: { id: arc.id, labels: arc.labels, ...(arc.urgency !== undefined ? { urgency: arc.urgency } : {}), summary: arc.summary, workflow: arc.workflow, status: arc.status },
                 },
               });
-              if (!response.success) {
+              if (response.isErr()) {
                 // Execution error (timeout, runtime_error, sandbox_violation)
-                const issue = `[${response.error.type}] ${response.error.message}`;
+                const issue = `[${response.error.errorType}] ${response.error.message}`;
                 await this.annotateTemplateError(accountId, tmpl.id, fn.name, response.error);
                 this.logger.warn("Template function execution failed.", {
                   code: "processor.template_function.error",
                   accountId,
                   templateName: tmpl.name,
                   functionName: fn.name,
-                  errorType: response.error.type,
+                  errorType: response.error.errorType,
                   errorMessage: response.error.message,
                 });
                 {
@@ -591,7 +591,7 @@ export class SignalProcessor {
                 actionVars[`fn.${fn.name}`] = "";
                 preventAutoSend = true;
               } else {
-                const result = (response as TemplateParameterResult).result;
+                const result = (response.value as TemplateParameterResult).value;
                 if (result == null || typeof result !== "string") {
                   // Non-string or null return — treat as failure
                   const issue = result == null
@@ -1577,9 +1577,9 @@ export class SignalProcessor {
     return ok(undefined);
   }
 
-  private async annotateTemplateError(accountId: string, templateId: string, functionName: string, error: { message: string; type: string } | null): Promise<void> {
+  private async annotateTemplateError(accountId: string, templateId: string, functionName: string, error: { message: string; errorType: string } | null): Promise<void> {
     const errorMessage = error
-      ? `[${error.type}] ${error.message}`
+      ? `[${error.errorType}] ${error.message}`
       : "Function returned no value";
     try {
       await this.accountDb.annotateTemplateError(accountId, templateId, functionName, errorMessage);

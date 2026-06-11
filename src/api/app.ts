@@ -177,10 +177,10 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
       return { valid: false, error: "AST validator not configured" };
     }
     const response = await astValidator.validateAst(code);
-    if (!response.success) {
+    if (response.isErr()) {
       return { valid: false, error: response.error.message };
     }
-    return response.result;
+    return response.value;
   }
 
   // Helper: validate multiple template functions in a single Lambda invocation
@@ -189,10 +189,10 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
       return { valid: false, name: functions[0]?.name ?? "", error: "AST validator not configured" };
     }
     const response = await astValidator.validateAstBatch(functions);
-    if (!response.success) {
+    if (response.isErr()) {
       return { valid: false, name: functions[0]?.name ?? "", error: response.error.message };
     }
-    const failed = response.results.find(r => !r.valid);
+    const failed = response.value.find(r => !r.valid);
     if (failed && !failed.valid) {
       return { valid: false, name: failed.name, error: failed.error, ...(failed.location ? { location: failed.location } : {}) };
     }

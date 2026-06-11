@@ -5,7 +5,7 @@
 import { vi } from "vitest";
 import { ok } from "neverthrow";
 import type { ContentSanitizerClient } from "../../src/processor/content-sanitizer-client.js";
-import type { UserCodeExecutorClient, UserCodeResponse } from "../../src/processor/user-code-client.js";
+import type { UserCodeExecutorClient } from "../../src/processor/user-code-client.js";
 
 export function makeContentSanitizer(overrides?: Partial<{ parsed: Record<string, unknown>; urlMapping: Record<string, string> }>): ContentSanitizerClient {
   return {
@@ -28,12 +28,11 @@ export function makeContentSanitizer(overrides?: Partial<{ parsed: Record<string
   };
 }
 
-export function makeUserCodeExecutor(response?: UserCodeResponse): UserCodeExecutorClient {
-  const defaultResponse: UserCodeResponse = { success: true, purpose: "rule_condition", result: true };
+export function makeUserCodeExecutor(): UserCodeExecutorClient {
   return {
-    invoke: vi.fn().mockReturnValue(Promise.resolve(response ?? defaultResponse)),
-    validateAst: vi.fn().mockReturnValue(Promise.resolve({ success: true, purpose: "validate_ast", result: { valid: true } })),
-    validateAstBatch: vi.fn().mockReturnValue(Promise.resolve({ success: true, purpose: "validate_ast_batch", results: [] })),
+    invoke: vi.fn().mockReturnValue(Promise.resolve(ok({ value: true }))),
+    validateAst: vi.fn().mockReturnValue(Promise.resolve(ok({ valid: true }))),
+    validateAstBatch: vi.fn().mockReturnValue(Promise.resolve(ok([]))),
   };
 }
 
