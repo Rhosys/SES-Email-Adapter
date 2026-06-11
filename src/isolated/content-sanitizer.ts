@@ -232,14 +232,14 @@ export async function handler(event: ContentSanitizeRequest): Promise<ContentSan
   const replyTo = parseAddress(parsed.replyTo);
   const subject = parsed.subject ?? "";
 
-  // Extract headers as flat Record<string, string>
+  // Extract headers as flat Record<string, string> — only include headers
+  // that are natively strings. Structured headers (address objects) are already
+  // captured as from/to/cc fields and must not be coerced.
   const headers: Record<string, string> = {};
   if (parsed.headers) {
     for (const [key, value] of parsed.headers) {
       if (typeof value === "string") {
         headers[key] = value;
-      } else if (value && typeof value === "object" && "value" in value) {
-        headers[key] = String(value.value);
       }
     }
   }
