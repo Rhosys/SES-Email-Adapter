@@ -31,7 +31,7 @@ vi.mock("@aws-sdk/client-bedrock-runtime", () => ({
 
 function mockBedrockResponse(text: string) {
   const body = new TextEncoder().encode(
-    JSON.stringify({ content: [{ type: "text", text }] }),
+    JSON.stringify({ choices: [{ message: { content: text } }] }),
   );
   mockSend.mockResolvedValueOnce({ body });
 }

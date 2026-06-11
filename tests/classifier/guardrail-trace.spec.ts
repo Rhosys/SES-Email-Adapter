@@ -41,7 +41,7 @@ vi.mock("@aws-sdk/client-bedrock-runtime", () => ({
 
 function mockBedrockResponse(classificationOutput: object, trace?: object) {
   const responseBody: Record<string, unknown> = {
-    content: [{ type: "text", text: JSON.stringify(classificationOutput) }],
+    choices: [{ message: { content: JSON.stringify(classificationOutput) } }],
   };
   if (trace) {
     responseBody["amazon-bedrock-trace"] = trace;

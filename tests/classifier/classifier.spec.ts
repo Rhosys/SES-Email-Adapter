@@ -74,7 +74,7 @@ vi.mock("@aws-sdk/client-bedrock-runtime", () => ({
 
 function mockClassifyResponse(raw: object) {
   const body = new TextEncoder().encode(
-    JSON.stringify({ content: [{ type: "text", text: JSON.stringify(raw) }] }),
+    JSON.stringify({ choices: [{ message: { content: JSON.stringify(raw) } }] }),
   );
   mockSend.mockResolvedValueOnce({ body });
 }
@@ -311,13 +311,12 @@ describe("SignalClassifier", () => {
       const callArgs = mockSend.mock.calls[0]![0] as { body: Uint8Array };
       const body = JSON.parse(new TextDecoder().decode(callArgs.body)) as {
         messages: Array<{ role: string; content: string }>;
-        system: string;
       };
 
-      expect(body.messages[0]?.content).toContain("noreply@github.com");
-      expect(body.messages[0]?.content).toContain("Your GitHub launch code");
-      expect(body.messages[0]?.content).toContain("483921");
-      expect(body.system).toBeTruthy();
+      expect(body.messages[1]?.content).toContain("noreply@github.com");
+      expect(body.messages[1]?.content).toContain("Your GitHub launch code");
+      expect(body.messages[1]?.content).toContain("483921");
+      expect(body.messages[0]?.role).toBe("system");
     });
 
     it("uses CLASSIFICATION_MODEL_ID", async () => {
@@ -350,8 +349,8 @@ describe("SignalClassifier", () => {
       const body = JSON.parse(new TextDecoder().decode(callArgs.body)) as {
         messages: Array<{ content: string }>;
       };
-      expect(body.messages[0]?.content.length).toBeLessThan(6000);
-      expect(body.messages[0]?.content).toContain("[... truncated]");
+      expect(body.messages[1]?.content.length).toBeLessThan(6000);
+      expect(body.messages[1]?.content).toContain("[... truncated]");
     });
   });
 
@@ -381,7 +380,7 @@ describe("SignalClassifier", () => {
 
       const callArgs = mockSend.mock.calls[0]![0] as { body: Uint8Array };
       const payload = JSON.parse(new TextDecoder().decode(callArgs.body)) as { messages: Array<{ content: string }> };
-      const content = payload.messages[0]!.content;
+      const content = payload.messages[1]!.content;
       expect(content).toContain("Important content with links");
     });
 
@@ -409,7 +408,7 @@ describe("SignalClassifier", () => {
 
       const callArgs = mockSend.mock.calls[0]![0] as { body: Uint8Array };
       const payload = JSON.parse(new TextDecoder().decode(callArgs.body)) as { messages: Array<{ content: string }> };
-      const content = payload.messages[0]!.content;
+      const content = payload.messages[1]!.content;
       expect(content).toContain("authentication-results");
       expect(content).toContain("received-spf");
     });
@@ -435,7 +434,7 @@ describe("SignalClassifier", () => {
 
       const callArgs = mockSend.mock.calls[0]![0] as { body: Uint8Array };
       const payload = JSON.parse(new TextDecoder().decode(callArgs.body)) as { messages: Array<{ content: string }> };
-      expect(payload.messages[0]!.content).toContain("[... truncated]");
+      expect(payload.messages[1]!.content).toContain("[... truncated]");
     });
 
     it("does not truncate body of exactly 4000 characters", async () => {
@@ -459,7 +458,7 @@ describe("SignalClassifier", () => {
 
       const callArgs = mockSend.mock.calls[0]![0] as { body: Uint8Array };
       const payload = JSON.parse(new TextDecoder().decode(callArgs.body)) as { messages: Array<{ content: string }> };
-      expect(payload.messages[0]!.content).not.toContain("[... truncated]");
+      expect(payload.messages[1]!.content).not.toContain("[... truncated]");
     });
 
     it("returns err when Bedrock returns non-JSON text content", async () => {
@@ -495,7 +494,7 @@ describe("SignalClassifier", () => {
 
       const callArgs = mockSend.mock.calls[0]![0] as { body: Uint8Array };
       const payload = JSON.parse(new TextDecoder().decode(callArgs.body)) as { messages: Array<{ content: string }> };
-      const content = payload.messages[0]!.content;
+      const content = payload.messages[1]!.content;
       expect(content).toContain("Hello 👋 from Tokyo 🗼");
       expect(content).toContain("希望你一切都好！😊");
     });
