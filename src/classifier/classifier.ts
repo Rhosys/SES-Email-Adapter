@@ -7,7 +7,7 @@ import type { Logger } from "../logger.js";
 import { buildSystemPrompt, buildUserMessage } from "./prompt-builder.js";
 import { WORKFLOW_REGISTRY } from "./workflow-registry.js";
 
-export const CLASSIFICATION_MODEL_ID = "eu.anthropic.claude-opus-4-5-20251101-v1:0";
+export const CLASSIFICATION_MODEL_ID = "qwen.qwen3-32b-v1:0";
 
 // Bedrock Guardrail — observe-only prompt injection + content detection.
 // Values come from `tofu output` after applying email-catcher/infrastructure.
@@ -64,7 +64,7 @@ interface GuardrailTrace {
 }
 
 interface BedrockResponseWithTrace {
-  content: Array<{ type: string; text: string }>;
+  choices: Array<{ message: { content: string } }>;
   "amazon-bedrock-guardrailAction"?: string;
   "amazon-bedrock-trace"?: GuardrailTrace;
 }
@@ -82,10 +82,14 @@ export class SignalClassifier {
     const systemPrompt = buildSystemPrompt(WORKFLOW_REGISTRY);
     const userMessage = buildUserMessage(input);
     const requestBody = {
-      anthropic_version: "bedrock-2023-05-31",
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userMessage },
+      ],
       max_tokens: 2048,
-      system: systemPrompt,
-      messages: [{ role: "user", content: userMessage }],
+      temperature: 0.1,
+      // Disable thinking mode — we want direct JSON output, not reasoning tokens
+      enable_thinking: false,
     };
 
     let response;
@@ -121,7 +125,7 @@ export class SignalClassifier {
     // Handle guardrail trace — observe only, never blocks classification
     this.handleGuardrailTrace(result, input.signalId, input.accountId);
 
-    const text = result.content.find((c) => c.type === "text")?.text ?? "";
+    const text = result.choices?.[0]?.message?.content ?? "";
 
     // Parse classifier JSON output
     let raw: RawClassificationResponse;
