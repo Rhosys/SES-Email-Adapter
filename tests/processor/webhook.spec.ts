@@ -175,7 +175,8 @@ describe("deliverWebhook", () => {
 
     const result = await deliverWebhook("https://hook.example.com/endpoint", testPayload, logger);
 
-    expect(result).toEqual({ success: true, statusCode: 200 });
+    expect(result.isOk()).toBe(true);
+    expect(result._unsafeUnwrap()).toEqual({ statusCode: 200 });
     expect(logger.calls).toEqual([]);
   });
 
@@ -206,7 +207,8 @@ describe("deliverWebhook", () => {
 
     const result = await deliverWebhook("https://hook.example.com/endpoint", testPayload, logger);
 
-    expect(result).toEqual({ success: false, statusCode: 500 });
+    expect(result.isErr()).toBe(true);
+    expect(result._unsafeUnwrapErr()).toMatchObject({ kind: "webhook_error", statusCode: 500 });
     expect(logger.calls).toHaveLength(1);
     expect(logger.calls[0]!.method).toBe("track");
     expect(logger.calls[0]!.context).toMatchObject({ statusCode: 500 });
@@ -219,7 +221,8 @@ describe("deliverWebhook", () => {
 
     const result = await deliverWebhook("https://hook.example.com/endpoint", testPayload, logger);
 
-    expect(result).toEqual({ success: false, error: "The operation was aborted" });
+    expect(result.isErr()).toBe(true);
+    expect(result._unsafeUnwrapErr()).toMatchObject({ kind: "webhook_error", cause: abortError });
     expect(logger.calls).toHaveLength(1);
     expect(logger.calls[0]!.method).toBe("track");
     expect(logger.calls[0]!.context).toMatchObject({ error: abortError });
@@ -231,7 +234,8 @@ describe("deliverWebhook", () => {
 
     const result = await deliverWebhook("https://hook.example.com/endpoint", testPayload, logger);
 
-    expect(result).toEqual({ success: false, error: "getaddrinfo ENOTFOUND hook.example.com" });
+    expect(result.isErr()).toBe(true);
+    expect(result._unsafeUnwrapErr()).toMatchObject({ kind: "webhook_error", cause: networkError });
     expect(logger.calls).toHaveLength(1);
     expect(logger.calls[0]!.method).toBe("track");
     expect(logger.calls[0]!.context).toMatchObject({ error: networkError });

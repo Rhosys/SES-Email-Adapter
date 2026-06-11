@@ -1,10 +1,9 @@
 import type { RuleEvaluator } from "./processor.js";
 import type { Rule, Signal, Arc } from "../types/index.js";
 import type { Logger } from "../logger.js";
-import type { UserCodeExecutorClient, UserCodeResponse, RuleExecutionResult } from "./user-code-client.js";
-import type { Result } from "neverthrow";
-import { ok } from "neverthrow";
+import type { UserCodeExecutorClient } from "./user-code-client.js";
 import type { DbError } from "../errors.js";
+import type { Result } from "../errors.js";
 import { evalCondition } from "./rule-engine.js";
 import { interpretRuleResult } from "./interpret-rule-result.js";
 import type { RuleEvalResult } from "./interpret-rule-result.js";
@@ -86,19 +85,19 @@ export class JsonLogicRuleEvaluator implements RuleEvaluator {
         executionContext: { signal: stripSignalForUserCode(context.signal), arc: stripArcForUserCode(context.arc) },
       });
 
-      if (!response.success) {
+      if (response.isErr()) {
         await this.annotateRuleError(rule, response.error);
         this.logger.track("User code execution failed for JS rule condition. The rule will be treated as non-matching.", {
           code: "rule_evaluator.js_condition.failed",
           ruleId: rule.id,
           accountId: context.signal.accountId,
-          errorType: response.error.type,
+          errorType: response.error.errorType,
           errorMessage: response.error.message,
         });
         return { matched: false, dynamicActions: [], warnings: [] };
       }
 
-      return interpretRuleResult((response as RuleExecutionResult).result);
+      return interpretRuleResult(response.value.value);
     } catch (e) {
       this.logger.track("Unexpected error invoking User Code Executor for JS rule condition.", {
         code: "rule_evaluator.js_condition.invoke_error",
@@ -110,9 +109,9 @@ export class JsonLogicRuleEvaluator implements RuleEvaluator {
     }
   }
 
-  async annotateRuleError(rule: Rule, error: { message: string; type: string }): Promise<void> {
+  async annotateRuleError(rule: Rule, error: { message: string; errorType: string }): Promise<void> {
     try {
-      await this.accountDb.annotateRuleError(rule.accountId, rule.id, `[${error.type}] ${error.message}`);
+      await this.accountDb.annotateRuleError(rule.accountId, rule.id, `[${error.errorType}] ${error.message}`);
     } catch {
       // Best-effort — don't fail rule evaluation if annotation fails
       this.logger.track("Failed to annotate rule error.", { code: "rule_evaluator.annotate_failed", ruleId: rule.id });

@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { ok } from "neverthrow";
+import { ok, err } from "neverthrow";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
 import type { RuleAnnotationStore } from "../../src/processor/rule-evaluator.js";
-import type { UserCodeExecutorClient, UserCodeResponse } from "../../src/processor/user-code-client.js";
+import type { UserCodeExecutorClient } from "../../src/processor/user-code-client.js";
+import { userCodeError } from "../../src/processor/user-code-client.js";
 import type { Rule, Signal, Arc } from "../../src/types/index.js";
 import { createMockLogger, type MockLogger } from "../helpers/mock-logger.js";
 
@@ -90,8 +91,7 @@ describe("JsonLogicRuleEvaluator — JS condition path", () => {
   });
 
   it("returns matched with no dynamic actions when user code returns a truthy result", async () => {
-    const response: UserCodeResponse = { success: true, purpose: "rule_condition", result: 42 };
-    vi.mocked(mockExecutor.invoke).mockResolvedValue(response);
+    vi.mocked(mockExecutor.invoke).mockResolvedValue(ok({ value: 42 }));
 
     const result = await evaluator.evaluate(
       makeJsRule(),
@@ -111,8 +111,7 @@ describe("JsonLogicRuleEvaluator — JS condition path", () => {
   });
 
   it("returns non-matching when user code returns null", async () => {
-    const response: UserCodeResponse = { success: true, purpose: "rule_condition", result: null };
-    vi.mocked(mockExecutor.invoke).mockResolvedValue(response);
+    vi.mocked(mockExecutor.invoke).mockResolvedValue(ok({ value: null }));
 
     const result = await evaluator.evaluate(
       makeJsRule(),
@@ -124,8 +123,7 @@ describe("JsonLogicRuleEvaluator — JS condition path", () => {
   });
 
   it("returns non-matching when user code returns undefined", async () => {
-    const response: UserCodeResponse = { success: true, purpose: "rule_condition", result: undefined };
-    vi.mocked(mockExecutor.invoke).mockResolvedValue(response);
+    vi.mocked(mockExecutor.invoke).mockResolvedValue(ok({ value: undefined }));
 
     const result = await evaluator.evaluate(
       makeJsRule(),
@@ -136,8 +134,7 @@ describe("JsonLogicRuleEvaluator — JS condition path", () => {
   });
 
   it("returns matched with dynamic actions when user code returns a RuleAction array", async () => {
-    const response: UserCodeResponse = { success: true, purpose: "rule_condition", result: [{ type: "archive" }, { type: "assign_label", value: "auto" }] };
-    vi.mocked(mockExecutor.invoke).mockResolvedValue(response);
+    vi.mocked(mockExecutor.invoke).mockResolvedValue(ok({ value: [{ type: "archive" }, { type: "assign_label", value: "auto" }] }));
 
     const result = await evaluator.evaluate(
       makeJsRule(),
@@ -150,8 +147,7 @@ describe("JsonLogicRuleEvaluator — JS condition path", () => {
   });
 
   it("returns non-matching and annotates rule on timeout", async () => {
-    const response: UserCodeResponse = { success: false, error: { message: "User code execution timed out", type: "timeout" } };
-    vi.mocked(mockExecutor.invoke).mockResolvedValue(response);
+    vi.mocked(mockExecutor.invoke).mockResolvedValue(err(userCodeError("timeout", "User code execution timed out")));
 
     const result = await evaluator.evaluate(
       makeJsRule({ id: "rule_timeout" }),
@@ -167,8 +163,7 @@ describe("JsonLogicRuleEvaluator — JS condition path", () => {
   });
 
   it("returns non-matching and annotates rule on runtime error", async () => {
-    const response: UserCodeResponse = { success: false, error: { message: "ReferenceError: foo is not defined", type: "runtime_error" } };
-    vi.mocked(mockExecutor.invoke).mockResolvedValue(response);
+    vi.mocked(mockExecutor.invoke).mockResolvedValue(err(userCodeError("runtime_error", "ReferenceError: foo is not defined")));
 
     const result = await evaluator.evaluate(
       makeJsRule({ id: "rule_runtime" }),
@@ -184,8 +179,7 @@ describe("JsonLogicRuleEvaluator — JS condition path", () => {
   });
 
   it("returns non-matching and logs on timeout", async () => {
-    const response: UserCodeResponse = { success: false, error: { message: "User code execution timed out", type: "timeout" } };
-    vi.mocked(mockExecutor.invoke).mockResolvedValue(response);
+    vi.mocked(mockExecutor.invoke).mockResolvedValue(err(userCodeError("timeout", "User code execution timed out")));
 
     await evaluator.evaluate(
       makeJsRule({ id: "rule_timeout_log" }),
@@ -196,8 +190,7 @@ describe("JsonLogicRuleEvaluator — JS condition path", () => {
   });
 
   it("returns non-matching and logs on runtime error", async () => {
-    const response: UserCodeResponse = { success: false, error: { message: "ReferenceError: x is not defined", type: "runtime_error" } };
-    vi.mocked(mockExecutor.invoke).mockResolvedValue(response);
+    vi.mocked(mockExecutor.invoke).mockResolvedValue(err(userCodeError("runtime_error", "ReferenceError: x is not defined")));
 
     await evaluator.evaluate(
       makeJsRule({ id: "rule_runtime_log" }),
@@ -208,16 +201,11 @@ describe("JsonLogicRuleEvaluator — JS condition path", () => {
   });
 
   it("returns matched with warnings when user code returns array with invalid actions (Zod validation failure)", async () => {
-    const response: UserCodeResponse = {
-      success: true,
-      purpose: "rule_condition",
-      result: [
-        { type: "archive" },
-        { type: "totally_invalid_action_type" },
-        { type: "assign_label", value: "valid" },
-      ],
-    };
-    vi.mocked(mockExecutor.invoke).mockResolvedValue(response);
+    vi.mocked(mockExecutor.invoke).mockResolvedValue(ok({ value: [
+      { type: "archive" },
+      { type: "totally_invalid_action_type" },
+      { type: "assign_label", value: "valid" },
+    ] }));
 
     const result = await evaluator.evaluate(
       makeJsRule(),
@@ -266,7 +254,7 @@ describe("JS rule context — Property 2: context preparation produces exactly t
   const EXPECTED_ARC_KEYS = ["id", "labels", "urgency", "summary", "workflow", "status"];
 
   it("executionContext.signal has exactly the 8 specified fields — sensitive fields excluded", async () => {
-    const mockExecutor = { invoke: vi.fn().mockResolvedValue({ success: true, purpose: "rule_condition", result: false }), validateAst: vi.fn(), validateAstBatch: vi.fn() };
+    const mockExecutor = { invoke: vi.fn().mockResolvedValue(ok({ value: false })), validateAst: vi.fn(), validateAstBatch: vi.fn() };
     const evaluator = new JsonLogicRuleEvaluator(createMockLogger(), mockExecutor, { annotateRuleError: vi.fn().mockResolvedValue(ok(undefined)) });
 
     const signal = makeSignal({
@@ -303,7 +291,7 @@ describe("JS rule context — Property 2: context preparation produces exactly t
   });
 
   it("executionContext.arc has exactly {id, labels, urgency, summary, workflow, status}", async () => {
-    const mockExecutor = { invoke: vi.fn().mockResolvedValue({ success: true, purpose: "rule_condition", result: false }), validateAst: vi.fn(), validateAstBatch: vi.fn() };
+    const mockExecutor = { invoke: vi.fn().mockResolvedValue(ok({ value: false })), validateAst: vi.fn(), validateAstBatch: vi.fn() };
     const evaluator = new JsonLogicRuleEvaluator(createMockLogger(), mockExecutor, { annotateRuleError: vi.fn().mockResolvedValue(ok(undefined)) });
 
     const signal = makeSignal({});
