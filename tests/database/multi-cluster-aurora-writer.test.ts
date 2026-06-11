@@ -104,11 +104,9 @@ describe("MultiClusterAuroraWriterImpl", () => {
 
       // SET LOCAL
       const setLocalInput = calls[1]!.args[0].input as { sql?: string; transactionId?: string; parameters?: unknown[] };
-      expect(setLocalInput.sql).toBe("SET LOCAL app.current_account_id = :accountId");
+      expect(setLocalInput.sql).toBe("SET LOCAL app.current_account_id = 'acct_1'");
       expect(setLocalInput.transactionId).toBe("txn-1");
-      expect(setLocalInput.parameters).toEqual([
-        { name: "accountId", value: { stringValue: "acct_1" } },
-      ]);
+      expect(setLocalInput.parameters).toBeUndefined();
 
       // INSERT ON CONFLICT
       const upsertInput = calls[2]!.args[0].input as { sql?: string; transactionId?: string; parameters?: unknown[] };
@@ -629,10 +627,8 @@ describe("MultiClusterAuroraWriterImpl", () => {
         };
         expect(calls[1]!.args[0]).toBeInstanceOf(ExecuteStatementCommand);
         expect(setLocalInput.transactionId).toBe(txnId);
-        expect(setLocalInput.sql).toBe("SET LOCAL app.current_account_id = :accountId");
-        expect(setLocalInput.parameters).toEqual([
-          { name: "accountId", value: { stringValue: accountId } },
-        ]);
+        expect(setLocalInput.sql).toBe(`SET LOCAL app.current_account_id = '${accountId}'`);
+        expect(setLocalInput.parameters).toBeUndefined();
 
         // Call 2: ExecuteStatement — INSERT ON CONFLICT with the same transactionId
         const upsertInput = calls[2]!.args[0].input as {
