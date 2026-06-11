@@ -12,23 +12,45 @@ function callLevel(logger: RequestLogger, level: LogLevel, message: string, cont
   logger[level](message, context);
 }
 
-function lastEntry(consoleSpy: ReturnType<typeof vi.spyOn>): Record<string, unknown> {
-  const calls = consoleSpy.mock.calls;
-  const lastCall = calls[calls.length - 1]!;
-  const value = lastCall[0];
-  // Logger now passes objects directly to console.log (Lambda JSON format)
-  if (typeof value === "string") return JSON.parse(value);
-  return value as Record<string, unknown>;
+function lastEntryFromSpies(...spies: Array<ReturnType<typeof vi.spyOn>>): Record<string, unknown> {
+  for (const spy of spies) {
+    const calls = spy.mock.calls;
+    if (calls.length > 0) {
+      const lastCall = calls[calls.length - 1]!;
+      const value = lastCall[0];
+      if (typeof value === "string") return JSON.parse(value);
+      return value as Record<string, unknown>;
+    }
+  }
+  throw new Error("No console calls recorded");
+}
+
+function allCallsFromSpies(...spies: Array<ReturnType<typeof vi.spyOn>>): Array<Record<string, unknown>> {
+  const results: Array<Record<string, unknown>> = [];
+  for (const spy of spies) {
+    for (const call of spy.mock.calls) {
+      const value = call[0];
+      if (typeof value === "string") results.push(JSON.parse(value));
+      else results.push(value as Record<string, unknown>);
+    }
+  }
+  return results;
 }
 
 describe("Log entry structural invariant", () => {
-  let consoleSpy: ReturnType<typeof vi.spyOn>;
+  let logSpy: ReturnType<typeof vi.spyOn>;
+  let warnSpy: ReturnType<typeof vi.spyOn>;
+  let errorSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
-    consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
   });
   afterEach(() => {
-    consoleSpy.mockRestore();
+    logSpy.mockRestore();
+    warnSpy.mockRestore();
+    errorSpy.mockRestore();
   });
 
   it.each(ALL_LEVELS.map((level) => ({ level })))(
@@ -38,7 +60,7 @@ describe("Log entry structural invariant", () => {
       logger.startInvocation("test-invocation");
       callLevel(logger, level, "test.msg", { extra: "data" });
 
-      const entry = lastEntry(consoleSpy);
+      const entry = lastEntryFromSpies(logSpy, warnSpy, errorSpy);
       expect(entry.level).toBe(level.toUpperCase());
       expect(entry.title).toBe("test.msg");
       expect(entry.containerId).toBe("test1234");
@@ -49,13 +71,19 @@ describe("Log entry structural invariant", () => {
 });
 
 describe("Context merge preserves required fields", () => {
-  let consoleSpy: ReturnType<typeof vi.spyOn>;
+  let logSpy: ReturnType<typeof vi.spyOn>;
+  let warnSpy: ReturnType<typeof vi.spyOn>;
+  let errorSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
-    consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
   });
   afterEach(() => {
-    consoleSpy.mockRestore();
+    logSpy.mockRestore();
+    warnSpy.mockRestore();
+    errorSpy.mockRestore();
   });
 
   it("context keys matching required field names cannot overwrite logger state", () => {
@@ -70,7 +98,7 @@ describe("Context merge preserves required fields", () => {
       containerId: "FAKE",
     });
 
-    const entry = lastEntry(consoleSpy);
+    const entry = lastEntryFromSpies(logSpy, warnSpy, errorSpy);
     expect(entry.level).toBe("INFO");
     expect(entry.title).toBe("real.message");
     expect(entry.containerId).toBe("test1234");
@@ -80,13 +108,19 @@ describe("Context merge preserves required fields", () => {
 });
 
 describe("Track points included for track/error/critical levels", () => {
-  let consoleSpy: ReturnType<typeof vi.spyOn>;
+  let logSpy: ReturnType<typeof vi.spyOn>;
+  let warnSpy: ReturnType<typeof vi.spyOn>;
+  let errorSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
-    consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
   });
   afterEach(() => {
-    consoleSpy.mockRestore();
+    logSpy.mockRestore();
+    warnSpy.mockRestore();
+    errorSpy.mockRestore();
   });
 
   it.each(TRACK_POINT_LEVELS.map((level) => ({ level })))(
@@ -98,7 +132,7 @@ describe("Track points included for track/error/critical levels", () => {
       logger.trackPoint("step.two");
       callLevel(logger, level, "test.msg");
 
-      const entry = lastEntry(consoleSpy);
+      const entry = lastEntryFromSpies(logSpy, warnSpy, errorSpy);
       expect(entry.trackPoints).toBeDefined();
       const tp = entry.trackPoints as Array<{ name: string; elapsedMs: number }>;
       expect(tp).toHaveLength(2);
@@ -116,20 +150,26 @@ describe("Track points included for track/error/critical levels", () => {
       logger.trackPoint("step.one");
       callLevel(logger, level, "test.msg");
 
-      const entry = lastEntry(consoleSpy);
+      const entry = lastEntryFromSpies(logSpy, warnSpy, errorSpy);
       expect(entry.trackPoints).toBeUndefined();
     },
   );
 });
 
 describe("Error and critical include stack trace", () => {
-  let consoleSpy: ReturnType<typeof vi.spyOn>;
+  let logSpy: ReturnType<typeof vi.spyOn>;
+  let warnSpy: ReturnType<typeof vi.spyOn>;
+  let errorSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
-    consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
   });
   afterEach(() => {
-    consoleSpy.mockRestore();
+    logSpy.mockRestore();
+    warnSpy.mockRestore();
+    errorSpy.mockRestore();
   });
 
   it.each(STACK_LEVELS.map((level) => ({ level })))(
@@ -139,7 +179,7 @@ describe("Error and critical include stack trace", () => {
       logger.startInvocation("test-invocation");
       callLevel(logger, level, "test.msg");
 
-      const entry = lastEntry(consoleSpy);
+      const entry = lastEntryFromSpies(logSpy, warnSpy, errorSpy);
       expect(typeof entry.stack).toBe("string");
       expect((entry.stack as string).length).toBeGreaterThan(0);
     },
@@ -152,20 +192,26 @@ describe("Error and critical include stack trace", () => {
       logger.startInvocation("test-invocation");
       callLevel(logger, level, "test.msg");
 
-      const entry = lastEntry(consoleSpy);
+      const entry = lastEntryFromSpies(logSpy, warnSpy, errorSpy);
       expect(entry.stack).toBeUndefined();
     },
   );
 });
 
 describe("startInvocation resets state and preserves container ID", () => {
-  let consoleSpy: ReturnType<typeof vi.spyOn>;
+  let logSpy: ReturnType<typeof vi.spyOn>;
+  let warnSpy: ReturnType<typeof vi.spyOn>;
+  let errorSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
-    consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
   });
   afterEach(() => {
-    consoleSpy.mockRestore();
+    logSpy.mockRestore();
+    warnSpy.mockRestore();
+    errorSpy.mockRestore();
   });
 
   it("after startInvocation, invocationId changes, track points cleared, containerId stable", () => {
@@ -174,14 +220,16 @@ describe("startInvocation resets state and preserves container ID", () => {
     logger.trackPoint("old.point");
     logger.track("before.reset");
 
-    const firstEntry = lastEntry(consoleSpy);
+    const firstEntry = lastEntryFromSpies(logSpy, warnSpy, errorSpy);
     expect(firstEntry.invocationId).toBe("first-invocation");
 
     logger.startInvocation("second-invocation");
-    consoleSpy.mockClear();
+    logSpy.mockClear();
+    warnSpy.mockClear();
+    errorSpy.mockClear();
     logger.track("after.reset");
 
-    const secondEntry = lastEntry(consoleSpy);
+    const secondEntry = lastEntryFromSpies(logSpy, warnSpy, errorSpy);
     expect(secondEntry.invocationId).toBe("second-invocation");
     expect(secondEntry.invocationId).not.toBe(firstEntry.invocationId);
     expect(secondEntry.trackPoints).toBeUndefined();
@@ -190,13 +238,19 @@ describe("startInvocation resets state and preserves container ID", () => {
 });
 
 describe("Recursive secret redaction", () => {
-  let consoleSpy: ReturnType<typeof vi.spyOn>;
+  let logSpy: ReturnType<typeof vi.spyOn>;
+  let warnSpy: ReturnType<typeof vi.spyOn>;
+  let errorSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
-    consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
   });
   afterEach(() => {
-    consoleSpy.mockRestore();
+    logSpy.mockRestore();
+    warnSpy.mockRestore();
+    errorSpy.mockRestore();
   });
 
   const redactionCases = [
@@ -213,7 +267,7 @@ describe("Recursive secret redaction", () => {
     logger.startInvocation("test-invocation");
     logger.info("test.redaction", { [key]: value });
 
-    const entry = lastEntry(consoleSpy);
+    const entry = lastEntryFromSpies(logSpy, warnSpy, errorSpy);
     expect(entry[key]).toBe(expected);
   });
 
@@ -222,19 +276,25 @@ describe("Recursive secret redaction", () => {
     logger.startInvocation("test-invocation");
     logger.info("test.nested", { outer: { inner: { apiSecret: "longvalue123456" } } });
 
-    const entry = lastEntry(consoleSpy);
+    const entry = lastEntryFromSpies(logSpy, warnSpy, errorSpy);
     expect((entry.outer as Record<string, unknown> & { inner: { apiSecret: string } }).inner.apiSecret).toBe("longvalu[REDACTED]");
   });
 });
 
 describe("Code field promotion and omission", () => {
-  let consoleSpy: ReturnType<typeof vi.spyOn>;
+  let logSpy: ReturnType<typeof vi.spyOn>;
+  let warnSpy: ReturnType<typeof vi.spyOn>;
+  let errorSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
-    consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
   });
   afterEach(() => {
-    consoleSpy.mockRestore();
+    logSpy.mockRestore();
+    warnSpy.mockRestore();
+    errorSpy.mockRestore();
   });
 
   it("string code in context is promoted to top-level field", () => {
@@ -242,7 +302,7 @@ describe("Code field promotion and omission", () => {
     logger.startInvocation("test-invocation");
     callLevel(logger, "info", "test.msg", { code: "auth.token_expired", extra: "data" });
 
-    const entry = lastEntry(consoleSpy);
+    const entry = lastEntryFromSpies(logSpy, warnSpy, errorSpy);
     expect(entry.code).toBe("auth.token_expired");
   });
 
@@ -251,7 +311,7 @@ describe("Code field promotion and omission", () => {
     logger.startInvocation("test-invocation");
     callLevel(logger, "warn", "test.msg", { code: "db.connection_failed" });
 
-    const entry = lastEntry(consoleSpy);
+    const entry = lastEntryFromSpies(logSpy, warnSpy, errorSpy);
     // code is promoted to top-level and removed from context spread — verify it exists once
     expect(entry.code).toBe("db.connection_failed");
     // Verify by serializing: code key should appear exactly once
@@ -273,7 +333,7 @@ describe("Code field promotion and omission", () => {
     logger.startInvocation("test-invocation");
     callLevel(logger, "info", "test.msg", { code } as Record<string, unknown>);
 
-    const entry = lastEntry(consoleSpy);
+    const entry = lastEntryFromSpies(logSpy, warnSpy, errorSpy);
     if ("code" in entry) {
       expect(typeof entry.code).not.toBe("string");
     }
@@ -284,19 +344,25 @@ describe("Code field promotion and omission", () => {
     logger.startInvocation("test-invocation");
     callLevel(logger, "info", "test.msg", { other: "data" });
 
-    const entry = lastEntry(consoleSpy);
+    const entry = lastEntryFromSpies(logSpy, warnSpy, errorSpy);
     expect(entry).not.toHaveProperty("code");
   });
 });
 
 describe("Payload truncation guard", () => {
-  let consoleSpy: ReturnType<typeof vi.spyOn>;
+  let logSpy: ReturnType<typeof vi.spyOn>;
+  let warnSpy: ReturnType<typeof vi.spyOn>;
+  let errorSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
-    consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
   });
   afterEach(() => {
-    consoleSpy.mockRestore();
+    logSpy.mockRestore();
+    warnSpy.mockRestore();
+    errorSpy.mockRestore();
   });
 
   it("entries exceeding 262,144 bytes are truncated with _truncated flag and a WARN entry", () => {
@@ -305,18 +371,17 @@ describe("Payload truncation guard", () => {
     const largeValue = "x".repeat(270_000);
     logger.info("test.large.payload", { data: largeValue });
 
-    const calls = consoleSpy.mock.calls;
-    expect(calls.length).toBe(2);
-
-    // First call is the warning
-    const warningEntry = calls[0]![0] as Record<string, unknown>;
+    // Warning is emitted via console.warn
+    expect(warnSpy.mock.calls.length).toBe(1);
+    const warningEntry = warnSpy.mock.calls[0]![0] as Record<string, unknown>;
     expect(warningEntry.level).toBe("WARN");
     expect(warningEntry.title).toBe("logger.payload_truncated");
     expect(warningEntry.originalTitle).toBe("test.large.payload");
     expect(warningEntry.originalSizeBytes).toBeGreaterThan(262_144);
 
-    // Second call is the truncated entry
-    const truncatedEntry = calls[1]![0] as Record<string, unknown>;
+    // Truncated entry emitted via console.log (since original level=info)
+    expect(logSpy.mock.calls.length).toBe(1);
+    const truncatedEntry = logSpy.mock.calls[0]![0] as Record<string, unknown>;
     expect(truncatedEntry._truncated).toBe(true);
     expect(truncatedEntry.level).toBe("INFO");
     expect(truncatedEntry.title).toBe("test.large.payload");

@@ -191,7 +191,8 @@ export class RequestLogger implements Logger {
       redacted = redact(entry as unknown as Record<string, unknown>);
     } catch {
       // Circular reference or other failure
-      console.log({
+      const fallbackEmitter = level === "error" || level === "critical" ? console.error : level === "warn" ? console.warn : console.log;
+      fallbackEmitter({
         level: level.toUpperCase(),
         title,
         timestamp: entry.timestamp,
@@ -205,7 +206,7 @@ export class RequestLogger implements Logger {
     const byteSize = Buffer.byteLength(JSON.stringify(redacted), "utf8");
     if (byteSize > PAYLOAD_LIMIT) {
       // Emit a separate warning about the truncation
-      console.log({
+      console.warn({
         level: "WARN",
         title: "logger.payload_truncated",
         timestamp: DateTime.utc().toISO()!,
@@ -216,7 +217,8 @@ export class RequestLogger implements Logger {
       });
 
       // Truncate: keep required fields + truncation marker
-      console.log({
+      const truncatedEmitter = level === "error" || level === "critical" ? console.error : level === "warn" ? console.warn : console.log;
+      truncatedEmitter({
         level: level.toUpperCase(),
         title,
         timestamp: entry.timestamp,
@@ -227,6 +229,7 @@ export class RequestLogger implements Logger {
       return;
     }
 
-    console.log(redacted);
+    const emit = level === "error" || level === "critical" ? console.error : level === "warn" ? console.warn : console.log;
+    emit(redacted);
   }
 }
