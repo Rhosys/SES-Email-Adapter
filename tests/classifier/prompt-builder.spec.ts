@@ -79,32 +79,24 @@ describe("buildUserMessage", () => {
     expect(message).toContain('Available labels: ["billing","urgent"]');
   });
 
-  it("filters headers to relevant set only", () => {
+  it("includes all provided headers (caller is responsible for pre-filtering)", () => {
     const input: ClassificationInput = {
       ...baseInput,
       headers: {
         "authentication-results": "spf=pass dkim=pass",
-        "x-custom-header": "should be excluded",
-        "list-unsubscribe": "<mailto:unsub@example.com>",
-        "x-spam-status": "No",
+        "received-spf": "pass",
       },
     };
 
     const message = buildUserMessage(input);
     expect(message).toContain("authentication-results: spf=pass dkim=pass");
-    expect(message).toContain("list-unsubscribe: <mailto:unsub@example.com>");
-    expect(message).toContain("x-spam-status: No");
-    expect(message).not.toContain("x-custom-header");
-    expect(message).not.toContain("should be excluded");
+    expect(message).toContain("received-spf: pass");
   });
 
-  it("excludes headers section when no relevant headers present", () => {
+  it("excludes headers section when headers record is empty", () => {
     const input: ClassificationInput = {
       ...baseInput,
-      headers: {
-        "x-custom-header": "irrelevant",
-        "content-type": "text/html",
-      },
+      headers: {},
     };
 
     const message = buildUserMessage(input);

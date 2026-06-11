@@ -12,6 +12,7 @@ import type { UserCodeExecutorClient, TemplateParameterResult } from "./user-cod
 import type { RuleEvalResult } from "./interpret-rule-result.js";
 import { buildEmbedText } from "../embedding/embed-text.js";
 import type { SignalClassifier, ClassificationOutput } from "../classifier/classifier.js";
+import { RELEVANT_HEADERS } from "../classifier/prompt-builder.js";
 import type { EmbeddingGenerator } from "../embedding/embedding-generator.js";
 import type { MultiClusterAuroraWriter } from "../database/multi-cluster-aurora-writer.js";
 import type { ArcDatabase, UpdateArcFields } from "../database/arc-database.js";
@@ -893,12 +894,16 @@ export class SignalProcessor {
     const allowedLabels = labelsResult.isOk() ? labelsResult.value.map(l => l.name) : [];
 
     // 4. Classify email (must complete before embedding — sequential dependency)
+    const classificationHeaders: Record<string, string> = {};
+    for (const [k, v] of Object.entries(parsed.headers)) {
+      if (RELEVANT_HEADERS.has(k.toLowerCase())) classificationHeaders[k] = v;
+    }
     const classification = await this.classifier.classify({
       from: parsed.from.address,
       to: parsed.to.map((a) => a.address),
       subject: parsed.subject,
       body: parsed.htmlBody != null ? stripHtmlForClassifier(parsed.htmlBody) : (parsed.textBody ?? ""),
-      headers: parsed.headers,
+      headers: classificationHeaders,
       receivedAt: timestamp,
       allowedLabels,
       signalId,

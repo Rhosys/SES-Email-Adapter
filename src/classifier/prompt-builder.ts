@@ -1,15 +1,10 @@
 import type { WorkflowDefinition } from "./workflow-registry.js";
 import type { ClassificationInput } from "./classifier.js";
 
-const RELEVANT_HEADERS = new Set([
+export const RELEVANT_HEADERS = new Set([
   "authentication-results",
   "received-spf",
   "dmarc",
-  "list-unsubscribe",
-  "precedence",
-  "x-mailer",
-  "x-spam-status",
-  "x-spam-score",
 ]);
 
 const MAX_BODY_LENGTH = 4000;
@@ -103,7 +98,6 @@ export function buildUserMessage(input: ClassificationInput): string {
     : input.body;
 
   const relevantHeaders = Object.entries(input.headers)
-    .filter(([k]) => RELEVANT_HEADERS.has(k.toLowerCase()))
     .map(([k, v]) => `${k}: ${v}`)
     .join("\n");
 
