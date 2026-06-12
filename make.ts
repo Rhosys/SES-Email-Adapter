@@ -23,14 +23,11 @@ const deploymentBucket = process.env['DEPLOYMENT_BUCKET']
   ?? `rhosys-deployments-artifacts-${AWS_ACCOUNT_ID}-${AWS_REGION}`;
 
 // Function name matches Tofu: "${app_name}-${env}-main"
-const functionName = process.env['LAMBDA_FUNCTION_NAME']
-  ?? `${packageMetadata.name}-${ENV}-main`;
+const functionName = process.env['LAMBDA_FUNCTION_NAME'];
 
 // Isolated Lambda function names (match Tofu resource names)
-const userCodeExecutorFunctionName = process.env['USER_CODE_EXECUTOR_FUNCTION_NAME']
-  ?? `${packageMetadata.name}-user-code`;
-const contentSanitizerFunctionName = process.env['CONTENT_SANITIZER_FUNCTION_NAME']
-  ?? `${packageMetadata.name}-content-sanitizer`;
+const userCodeExecutorFunctionName = process.env['USER_CODE_EXECUTOR_FUNCTION_NAME'];
+const contentSanitizerFunctionName = process.env['CONTENT_SANITIZER_FUNCTION_NAME'];
 
 // ---------------------------------------------------------------------------
 // CLI
@@ -173,12 +170,15 @@ program
     // -----------------------------------------------------------------------
     // Trigger database migrations via CodeBuild (non-blocking)
     // -----------------------------------------------------------------------
+    const codebuildProject = process.env['CODEBUILD_MIGRATE_PROJECT'];
+    if (!codebuildProject) throw new Error('CODEBUILD_MIGRATE_PROJECT is required');
+
     const { CodeBuildClient, StartBuildCommand } = await import('@aws-sdk/client-codebuild');
     const codebuild = new CodeBuildClient({});
     const sourceLocation = `${deploymentBucket}/${packageMetadata.name}/${version}/lambda.zip`;
     console.log(`Triggering migrations via CodeBuild (source: ${sourceLocation})...`);
     const buildResult = await codebuild.send(new StartBuildCommand({
-      projectName: `${packageMetadata.name}-migrate`,
+      projectName: codebuildProject,
       sourceLocationOverride: sourceLocation,
       sourceTypeOverride: 'S3',
     }));

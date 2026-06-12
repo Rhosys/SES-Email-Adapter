@@ -4,6 +4,7 @@ variable "aws_account_id" {
 }
 
 variable "service_name" {
-  description = "Service name — injected via TF_VAR_service_name (CI_PROJECT_NAME in CI)"
+  description = "Service name — canonical identity, matches deployed resource names"
   type        = string
+  default     = "SES-Email-Adapter"
 }
