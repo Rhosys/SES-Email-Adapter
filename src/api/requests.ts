@@ -236,7 +236,7 @@ const AccountFilteringConfigSchema = z.object({
 }).passthrough();
 
 const AccountOnboardingSchema = z.object({
-  completed: z.boolean(),
+  completed: z.boolean().optional(),
   completedAt: z.string().optional(),
   testEmailReceived: z.boolean().optional(),
   testEmailReceivedAt: z.string().optional(),

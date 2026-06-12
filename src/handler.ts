@@ -40,7 +40,7 @@ import { AuthressAuthService } from "./api/authress-auth.js";
 import { AuthressAccessService } from "./api/authress-access.js";
 import { createApp } from "./api/app.js";
 import { BedrockEmbeddingGenerator } from "./embedding/embedding-generator.js";
-import { searchDatabase } from "./database/arc-matcher.js";
+import { createSearchDatabase } from "./database/arc-matcher.js";
 import { S3RetentionServiceImpl } from "./embedding/s3-retention-service.js";
 import { ReindexWorker } from "./jobs/reindex/reindex-worker.js";
 import { AuthWorkflowHandler } from "./workflow/auth-handler.js";
@@ -140,6 +140,8 @@ const schedulerClient = new EventBridgeSchedulerClient({
   queueArn: SIGNAL_QUEUE_ARN,
   logger,
 });
+
+const searchDatabase = createSearchDatabase(logger);
 
 const processor = new SignalProcessor({
   arcDb,

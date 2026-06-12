@@ -16,6 +16,7 @@ import type { DbError, Result } from "../errors.js";
 import type { ArcMatcherPort } from "../processor/processor.js";
 import type { Arc } from "../types/index.js";
 import type { AwsDataApiPgDatabase } from "drizzle-orm/aws-data-api/pg";
+import type { Logger } from "../logger.js";
 
 // ---------------------------------------------------------------------------
 // Vector literal helper — RDS Data API cannot implicitly cast text → vector.
@@ -156,6 +157,11 @@ function getDbForCluster(cluster: ClusterRegistryEntry): AwsDataApiPgDatabase {
 // ---------------------------------------------------------------------------
 
 export class ArcMatcher implements ArcMatcherPort, MultiClusterAuroraWriter {
+  private readonly logger: Logger | undefined;
+
+  constructor(logger?: Logger) {
+    this.logger = logger;
+  }
 
   // ---------------------------------------------------------------------------
   // ArcMatcherPort — processor reads (uses primary cluster, returns full Arc)
@@ -206,7 +212,13 @@ export class ArcMatcher implements ArcMatcherPort, MultiClusterAuroraWriter {
         TableName: SIGNALS_TABLE,
         Key: { pk: arcPk(accountId, arcId), sk: ITEM_SK },
       }));
-      return ok(arcResult.Item ? (arcResult.Item as Arc) : null);
+
+      if (!arcResult.Item) {
+        this.logger?.track("Aurora matched arcId but DDB arc is missing — orphaned embedding. Treating as no match.", { code: "arc_matcher.ghost_arc", arcId, accountId, recipientAddress });
+        return ok(null);
+      }
+
+      return ok(arcResult.Item as Arc);
     } catch (e) {
       return err(dbError(e));
     }
@@ -316,7 +328,12 @@ export class ArcMatcher implements ArcMatcherPort, MultiClusterAuroraWriter {
 }
 
 // ---------------------------------------------------------------------------
-// Singleton export
+// Factory export — handler provides the logger
 // ---------------------------------------------------------------------------
 
+export function createSearchDatabase(logger?: Logger): ArcMatcher {
+  return new ArcMatcher(logger);
+}
+
+/** Default singleton (no logger) — used by reindex worker and test mocks. */
 export const searchDatabase = new ArcMatcher();
