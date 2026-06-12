@@ -141,6 +141,7 @@ vi.mock("../src/embedding/embedding-generator.js", () => ({
 
 vi.mock("../src/database/arc-matcher.js", () => ({
   searchDatabase: {},
+  createSearchDatabase: () => ({}),
 }));
 
 vi.mock("../src/embedding/s3-retention-service.js", () => ({
