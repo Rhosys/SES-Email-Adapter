@@ -22,7 +22,7 @@ runs:
         tofu_version: '1.8.8'
 
     - name: Configure AWS Credentials
-      uses: aws-actions/configure-aws-credentials@v5
+      uses: aws-actions/configure-aws-credentials@v6
       with:
         role-to-assume: arn:aws:iam::${{ inputs.aws_account_id }}:role/GitHubActionsRole
         aws-region: ${{ inputs.aws_region }}

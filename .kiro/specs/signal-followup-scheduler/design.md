@@ -243,7 +243,7 @@ Lambda role additions (new statement in `aws_iam_role_policy.lambda_permissions`
   ]
   Resource = [
     aws_scheduler_schedule_group.followups.arn,
-    "arn:aws:scheduler:${data.aws_region.current.name}:${var.aws_account_id}:schedule/signal-followups/*",
+    "arn:aws:scheduler:${data.aws_region.current.id}:${var.aws_account_id}:schedule/signal-followups/*",
   ]
 },
 {
@@ -270,7 +270,7 @@ resource "aws_sqs_queue_policy" "signals_sns" {
         Action    = "sqs:SendMessage"
         Resource  = aws_sqs_queue.signals.arn
         Condition = {
-          ArnEquals = { "aws:SourceArn" = "arn:aws:scheduler:${data.aws_region.current.name}:${var.aws_account_id}:schedule/signal-followups/*" }
+          ArnEquals = { "aws:SourceArn" = "arn:aws:scheduler:${data.aws_region.current.id}:${var.aws_account_id}:schedule/signal-followups/*" }
         }
       }
     ]

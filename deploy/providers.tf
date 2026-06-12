@@ -29,8 +29,16 @@ terraform {
   }
 }
 
+locals {
+  primary_region = "eu-central-1"
+}
+
+data "aws_availability_zones" "available" {
+  state = "available"
+}
+
 provider "aws" {
-  region              = "eu-central-1"
+  region              = local.primary_region
   allowed_account_ids = [var.aws_account_id]
 
   default_tags {
@@ -58,7 +66,3 @@ data "aws_route53_zone" "main" {
   name     = "email.rhosys.cloud"
 }
 
-data "aws_region" "current" {}
-data "aws_availability_zones" "available" {
-  state = "available"
-}
