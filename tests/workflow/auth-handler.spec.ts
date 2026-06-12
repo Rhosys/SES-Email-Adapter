@@ -147,7 +147,7 @@ describe("AuthWorkflowHandler", () => {
       const signal = makeSignal({ data: { from: { address: "noreply@example.com" }, workflowData } });
 
       if (listDevicesFails) {
-        vi.mocked(mocks.deviceStore.listDevices).mockResolvedValue(err({ kind: "db_error", cause: "timeout" }));
+        vi.mocked(mocks.deviceStore.listDevices).mockResolvedValue(err({ kind: "db_error", message: "timeout", cause: new Error("timeout") }));
       } else {
         const deviceList = results.map((_, i) => makeDevice(`token-${i}`));
         vi.mocked(mocks.deviceStore.listDevices).mockResolvedValue(ok(deviceList));
@@ -213,7 +213,7 @@ describe("AuthWorkflowHandler", () => {
   it("logs warning when arc archive fails but still returns ok()", async () => {
     vi.mocked(mocks.deviceStore.listDevices).mockResolvedValue(ok([makeDevice("t1")]));
     vi.mocked(mocks.deliverer.deliver).mockResolvedValue({ status: "delivered" });
-    const dbErr: DbError = { kind: "db_error", cause: "connection lost" };
+    const dbErr: DbError = { kind: "db_error", message: "connection lost", cause: new Error("connection lost") };
     vi.mocked(mocks.arcDatabase.updateArc).mockResolvedValue(err(dbErr));
 
     const workflowData: AuthData = { workflow: "auth", authType: "otp", code: "123456", service: "Svc" };

@@ -61,6 +61,7 @@ describe("EmailService.send()", () => {
     expect(result.isErr()).toBe(true);
     expect(result._unsafeUnwrapErr()).toEqual({
       kind: "db_error",
+      message: expect.any(String),
       cause: expect.any(Error),
     });
   });
@@ -160,6 +161,7 @@ describe("EmailService.sendRaw()", () => {
     expect(result.isErr()).toBe(true);
     expect(result._unsafeUnwrapErr()).toEqual({
       kind: "db_error",
+      message: expect.any(String),
       cause: expect.any(Error),
     });
   });

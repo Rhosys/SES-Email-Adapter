@@ -144,7 +144,7 @@ describe("API route error mapping consistency", () => {
       const arcDb = makeArcDb();
       switch (type) {
         case "db_error":
-          vi.mocked(arcDb.getArc).mockResolvedValue(err({ kind: "db_error", cause: new Error("timeout") } satisfies DbError));
+          vi.mocked(arcDb.getArc).mockResolvedValue(err({ kind: "db_error", message: "mock error", cause: new Error("timeout") } satisfies DbError));
           break;
         case "null_read":
           vi.mocked(arcDb.getArc).mockResolvedValue(ok(null));
@@ -167,7 +167,7 @@ describe("API route error mapping consistency", () => {
       const arcDb = makeArcDb();
       switch (type) {
         case "db_error":
-          vi.mocked(arcDb.getSignalById).mockResolvedValue(err({ kind: "db_error", cause: new Error("timeout") } satisfies DbError));
+          vi.mocked(arcDb.getSignalById).mockResolvedValue(err({ kind: "db_error", message: "mock error", cause: new Error("timeout") } satisfies DbError));
           break;
         case "null_read":
           vi.mocked(arcDb.getSignalById).mockResolvedValue(ok(null));
@@ -204,7 +204,7 @@ describe("API route error mapping consistency", () => {
       const arcDb = makeArcDb();
       switch (type) {
         case "db_error":
-          vi.mocked(arcDb.listArcs).mockResolvedValue(err({ kind: "db_error", cause: new Error("reset") } satisfies DbError));
+          vi.mocked(arcDb.listArcs).mockResolvedValue(err({ kind: "db_error", message: "mock error", cause: new Error("reset") } satisfies DbError));
           break;
         case "success":
           vi.mocked(arcDb.listArcs).mockResolvedValue(ok({ items: [makeArc()] }));

@@ -167,7 +167,7 @@ program
     // -----------------------------------------------------------------------
     // Trigger database migrations via CodeBuild (non-blocking)
     // -----------------------------------------------------------------------
-    const { CodeBuildClient, StartBuildCommand } = await import('@aws-sdk/client-codebuild');
+    const { CodeBuildClient, StartBuildCommand, BatchGetBuildsCommand } = await import('@aws-sdk/client-codebuild');
     const codebuild = new CodeBuildClient({});
     const sourceLocation = `${deploymentBucket}/${packageMetadata.name}/${version}/lambda.zip`;
     console.log(`Triggering migrations via CodeBuild (source: ${sourceLocation})...`);
@@ -176,7 +176,29 @@ program
       sourceLocationOverride: sourceLocation,
       sourceTypeOverride: 'S3',
     }));
-    console.log(`CodeBuild migration started: ${buildResult.build?.id}`);
+    const buildId = buildResult.build?.id;
+    console.log(`CodeBuild migration started: ${buildId}`);
+
+    // Poll for 30s to catch fast failures (IAM, source download, etc.)
+    if (buildId) {
+      const POLL_INTERVAL_MS = 5000;
+      const MAX_POLL_MS = 30000;
+      const start = Date.now();
+      while (Date.now() - start < MAX_POLL_MS) {
+        await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
+        const status = await codebuild.send(new BatchGetBuildsCommand({ ids: [buildId] }));
+        const build = status.builds?.[0];
+        const phase = build?.buildStatus;
+        if (phase === 'SUCCEEDED') {
+          console.log('CodeBuild migration completed successfully.');
+          break;
+        }
+        if (phase === 'FAILED' || phase === 'FAULT' || phase === 'STOPPED') {
+          throw new Error(`CodeBuild migration failed: ${phase} — ${build?.phases?.find(p => p.phaseStatus === 'FAILED')?.contexts?.[0]?.message ?? 'check CloudWatch logs'}`);
+        }
+      }
+      console.log('CodeBuild migration still running — will complete independently.');
+    }
   });
 
 program.on('*', () => {

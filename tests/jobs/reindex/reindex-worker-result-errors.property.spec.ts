@@ -188,6 +188,7 @@ describe("Property 7: Reindex worker propagates Result errors", () => {
     // generateForModel returns Err with the error cause
     const bedrockErr: BedrockError = {
       kind: "bedrock_error",
+      message: "mock error",
       modelId: TARGET_MODEL_ID,
       cause: new Error(errorCause),
     };
