@@ -16,7 +16,7 @@ resource "terraform_data" "bedrock_model_subscription" {
     interpreter = ["/bin/bash", "-c"]
     command     = <<-EOT
       set -euo pipefail
-      REGION="eu-central-1"
+      REGION="${data.aws_region.current.id}"
       MODEL_ID="${local.classification_model_id}"
 
       # 1. Skip if already entitled (subscription is account-scoped + one-time).

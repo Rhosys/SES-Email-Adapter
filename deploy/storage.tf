@@ -3,7 +3,7 @@
 # ---------------------------------------------------------------------------
 
 resource "aws_s3_bucket" "emails" {
-  bucket           = "${lower(var.service_name)}-emails-${var.aws_account_id}-eu-central-1-an"
+  bucket           = "${lower(var.service_name)}-emails-${var.aws_account_id}-${data.aws_region.current.id}-an"
   bucket_namespace = "account-regional"
 }
 

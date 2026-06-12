@@ -92,8 +92,30 @@ program
       outfile: 'dist/main/handler.js',
     });
 
+    // Migration runner — same zip, separate entry point for CodeBuild
+    console.log(`Building migration runner v${version}...`);
+    await esbuild.build({
+      ...esbuildDefaults,
+      entryPoints: ['src/migrations/migrate-handler.ts'],
+      outfile: 'dist/main/migrate.js',
+    });
+
+    // Copy migration SQL + meta files into the bundle (esbuild doesn't handle .sql/.json assets)
+    const { mkdirSync, copyFileSync, readdirSync } = await import('node:fs');
+    const migrationsSrcDir = 'src/migrations';
+    const migrationsDestDir = 'dist/main/migrations';
+    mkdirSync(migrationsDestDir, { recursive: true });
+    const metaDestDir = `${migrationsDestDir}/meta`;
+    mkdirSync(metaDestDir, { recursive: true });
+    for (const file of readdirSync(migrationsSrcDir).filter(f => f.endsWith('.sql'))) {
+      copyFileSync(`${migrationsSrcDir}/${file}`, `${migrationsDestDir}/${file}`);
+    }
+    const metaSrcDir = `${migrationsSrcDir}/meta`;
+    for (const file of readdirSync(metaSrcDir).filter(f => f.endsWith('.json'))) {
+      copyFileSync(`${metaSrcDir}/${file}`, `${metaDestDir}/${file}`);
+    }
+
     // Bundle KMS-encrypted secrets alongside the handler
-    const { mkdirSync, copyFileSync } = await import('node:fs');
     mkdirSync('dist/main/processor/calendar', { recursive: true });
     copyFileSync('src/processor/calendar/calendar-hmac.kms', 'dist/main/processor/calendar/calendar-hmac.kms');
 
