@@ -167,13 +167,12 @@ program
     // -----------------------------------------------------------------------
     // Trigger database migrations via CodeBuild (non-blocking)
     // -----------------------------------------------------------------------
-    const codebuildProject = process.env['CODEBUILD_MIGRATE_PROJECT'];
     const { CodeBuildClient, StartBuildCommand } = await import('@aws-sdk/client-codebuild');
     const codebuild = new CodeBuildClient({});
     const sourceLocation = `${deploymentBucket}/${packageMetadata.name}/${version}/lambda.zip`;
     console.log(`Triggering migrations via CodeBuild (source: ${sourceLocation})...`);
     const buildResult = await codebuild.send(new StartBuildCommand({
-      projectName: codebuildProject,
+      projectName: `${packageMetadata.name}-migrate`,
       sourceLocationOverride: sourceLocation,
       sourceTypeOverride: 'S3',
     }));

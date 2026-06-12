@@ -282,7 +282,7 @@ jobs:
           aws_region: ${{ env.AWS_DEFAULT_REGION }}
 
       - name: Retrieve Artifacts
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           name: prod-artifacts
 
@@ -308,7 +308,6 @@ jobs:
           LAMBDA_FUNCTION_NAME: ${{ steps.tofu_outputs.outputs.lambda_function_name }}
           USER_CODE_EXECUTOR_FUNCTION_NAME: ${{ steps.tofu_outputs.outputs.user_code_executor_function_name }}
           CONTENT_SANITIZER_FUNCTION_NAME: ${{ steps.tofu_outputs.outputs.content_sanitizer_function_name }}
-          CODEBUILD_MIGRATE_PROJECT: ${{ steps.tofu_outputs.outputs.codebuild_migrate_project_name }}
           AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
         run: npm run deploy
 
