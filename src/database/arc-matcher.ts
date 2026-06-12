@@ -18,6 +18,17 @@ import type { Arc } from "../types/index.js";
 import type { AwsDataApiPgDatabase } from "drizzle-orm/aws-data-api/pg";
 
 // ---------------------------------------------------------------------------
+// Vector literal helper — RDS Data API cannot implicitly cast text → vector.
+// All embedding values MUST go through this function. See static-analysis test.
+// ---------------------------------------------------------------------------
+
+/** Serialize number[] into a pg vector literal with explicit ::vector cast. */
+// toVector:
+export function toVector(embedding: number[]) {
+  return sql`${`[${embedding.join(",")}]`}::vector`;
+}
+
+// ---------------------------------------------------------------------------
 // Interface — re-exported so existing imports keep working
 // ---------------------------------------------------------------------------
 
@@ -180,9 +191,9 @@ export class ArcMatcher implements ArcMatcherPort, MultiClusterAuroraWriter {
             .where(and(
               eq(arcEmbeddings.accountId, accountId),
               eq(arcEmbeddings.recipientAddress, recipientAddress),
-              sql`${arcEmbeddings.embedding} <=> ${`[${embedding.join(",")}]`}::vector < ${SIMILARITY_THRESHOLD}`,
+              sql`${arcEmbeddings.embedding} <=> ${toVector(embedding)} < ${SIMILARITY_THRESHOLD}`,
             ))
-            .orderBy(sql`${arcEmbeddings.embedding} <=> ${`[${embedding.join(",")}]`}::vector`)
+            .orderBy(sql`${arcEmbeddings.embedding} <=> ${toVector(embedding)}`)
             .limit(1);
 
           return result[0]?.arcId ?? null;
@@ -222,9 +233,9 @@ export class ArcMatcher implements ArcMatcherPort, MultiClusterAuroraWriter {
             .where(and(
               eq(arcEmbeddings.accountId, opts.accountId),
               eq(arcEmbeddings.recipientAddress, opts.recipientAddress),
-              sql`${arcEmbeddings.embedding} <=> ${`[${opts.embedding.join(",")}]`}::vector < ${SIMILARITY_THRESHOLD}`,
+              sql`${arcEmbeddings.embedding} <=> ${toVector(opts.embedding)} < ${SIMILARITY_THRESHOLD}`,
             ))
-            .orderBy(sql`${arcEmbeddings.embedding} <=> ${`[${opts.embedding.join(",")}]`}::vector`)
+            .orderBy(sql`${arcEmbeddings.embedding} <=> ${toVector(opts.embedding)}`)
             .limit(1);
 
           const arcId = rows[0]?.arcId;
@@ -285,7 +296,7 @@ export class ArcMatcher implements ArcMatcherPort, MultiClusterAuroraWriter {
               arcId: opts.arcId,
               accountId: opts.accountId,
               recipientAddress: opts.recipientAddress,
-              embedding: opts.embedding,
+              embedding: toVector(opts.embedding),
               updatedAt: sql`now()`,
             })
             .onConflictDoUpdate({

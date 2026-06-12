@@ -131,3 +131,57 @@ describe("No direct console calls in source files", () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// Vector columns must use toVector() — RDS Data API cannot implicitly cast
+// ---------------------------------------------------------------------------
+
+describe("Vector column writes use explicit toVector() cast", () => {
+  it("arc-matcher.ts never assigns raw values to embedding column in DB operations", () => {
+    const arcMatcherPath = path.resolve(SRC_DIR, "database/arc-matcher.ts");
+    const content = fs.readFileSync(arcMatcherPath, "utf-8");
+    const lines = content.split("\n");
+
+    // Find all .values({ and .set({ blocks — these are Drizzle DB write sites
+    const violations: Violation[] = [];
+    let inDbWriteBlock = false;
+    let braceDepth = 0;
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i]!;
+
+      // Detect start of a Drizzle write block
+      if (/\.(values|set)\(\{/.test(line)) {
+        inDbWriteBlock = true;
+        braceDepth = 0;
+      }
+
+      if (inDbWriteBlock) {
+        for (const ch of line) {
+          if (ch === "{") braceDepth++;
+          if (ch === "}") braceDepth--;
+        }
+
+        // Check embedding assignments inside DB write blocks
+        if (/\bembedding\s*:/.test(line) && !/toVector\(/.test(line) && !/sql`/.test(line) && !/EXCLUDED/.test(line)) {
+          violations.push({
+            file: "database/arc-matcher.ts",
+            line: i + 1,
+            content: line.trim(),
+          });
+        }
+
+        if (braceDepth <= 0) inDbWriteBlock = false;
+      }
+    }
+
+    if (violations.length > 0) {
+      const details = violations
+        .map((v) => `  ${v.file}:${v.line} → ${v.content}`)
+        .join("\n");
+      expect.fail(
+        `Found ${violations.length} raw embedding assignment(s) without toVector() in DB write operations:\n${details}\n\nAll embedding writes must use toVector() to ensure explicit ::vector cast for RDS Data API compatibility.`,
+      );
+    }
+  });
+});
