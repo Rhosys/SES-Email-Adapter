@@ -126,7 +126,10 @@ async function uploadViaPresignedPost(
 
 export async function handler(event: ContentSanitizeRequest): Promise<ContentSanitizeResponse | ContentSanitizeError> {
   if (event.invocationId) {
-    console.log({ level: "INFO", title: "content-sanitizer.invoked", invocationId: event.invocationId, accountId: event.accountId });
+    const { RequestLogger } = await import("../logger.js");
+    const logger = new RequestLogger();
+    logger.startInvocation(event.invocationId);
+    logger.info("content-sanitizer.invoked", { code: "content_sanitizer.invoked", invocationId: event.invocationId, accountId: event.accountId });
   }
 
   // 1. Fetch raw MIME via presignedGetUrl
