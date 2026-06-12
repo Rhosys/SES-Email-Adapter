@@ -163,7 +163,7 @@ resource "aws_codebuild_project" "migration" {
   logs_config {
     cloudwatch_logs {
       group_name  = aws_cloudwatch_log_group.shared.name
-      stream_name = "migrate"
+      stream_name = "0000/00/00/CodeBuild-${var.service_name}-migration"
     }
   }
 
@@ -214,7 +214,7 @@ resource "aws_iam_role_policy" "codebuild_migration" {
         Action   = ["s3:GetObject", "s3:GetBucketLocation"]
         Resource = [
           "arn:aws:s3:::rhosys-deployments-artifacts-${var.aws_account_id}-${local.primary_region}",
-          "arn:aws:s3:::rhosys-deployments-artifacts-${var.aws_account_id}-${local.primary_region}/${var.service_name}/*"
+          "arn:aws:s3:::rhosys-deployments-artifacts-${var.aws_account_id}-${local.primary_region}/${lower(var.service_name)}/*"
         ]
       }
     ]

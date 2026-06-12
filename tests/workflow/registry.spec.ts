@@ -73,7 +73,7 @@ describe("HandlerRegistry", () => {
   });
 
   it("propagates err() from handler", async () => {
-    const dbErr: DbError = { kind: "db_error", cause: "connection lost" };
+    const dbErr: DbError = { kind: "db_error", message: "connection lost", cause: new Error("connection lost") };
     const execute = vi.fn().mockResolvedValue(err(dbErr));
     const handler: WorkflowHandler = { workflow: "auth", execute };
 

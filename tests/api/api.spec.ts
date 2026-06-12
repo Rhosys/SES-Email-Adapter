@@ -1025,7 +1025,7 @@ describe("API", () => {
 
     it("returns 422 with INVITE_CREATION_FAILED when Authress createInvite errors", async () => {
       vi.mocked(access.createInvite).mockReturnValueOnce(
-        Promise.resolve(err({ kind: "authress_service_error", cause: new Error("Authress API error") })),
+        Promise.resolve(err({ kind: "authress_service_error", message: "mock error", cause: new Error("Authress API error") })),
       );
       const res = await req(app, "POST", `${A}/users`, { body: { email: "valid@example.com", role: "admin" } });
       expect(res.status).toBe(422);
