@@ -169,6 +169,20 @@ program
       deploymentKeyName: `${packageMetadata.name}/${version}/lambda.zip`,
     });
     console.log(contentSanitizerResult);
+
+    // -----------------------------------------------------------------------
+    // Trigger database migrations via CodeBuild (non-blocking)
+    // -----------------------------------------------------------------------
+    const { CodeBuildClient, StartBuildCommand } = await import('@aws-sdk/client-codebuild');
+    const codebuild = new CodeBuildClient({});
+    const sourceLocation = `${deploymentBucket}/${packageMetadata.name}/${version}/lambda.zip`;
+    console.log(`Triggering migrations via CodeBuild (source: ${sourceLocation})...`);
+    const buildResult = await codebuild.send(new StartBuildCommand({
+      projectName: `${packageMetadata.name}-migrate`,
+      sourceLocationOverride: sourceLocation,
+      sourceTypeOverride: 'S3',
+    }));
+    console.log(`CodeBuild migration started: ${buildResult.build?.id}`);
   });
 
 program.on('*', () => {
