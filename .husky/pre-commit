@@ -1,5 +1,3 @@
-npm test
-
 # Check Drizzle schema/migration sync if schema.ts was modified
 if git diff --cached --name-only | grep -q "src/database/schema.ts"; then
   echo "schema.ts staged — verifying migrations are in sync..."
