@@ -123,76 +123,50 @@ program
     await esbuild.build({
       ...esbuildDefaults,
       entryPoints: ['src/isolated/user-code-executor.ts'],
-      outfile: 'dist/user-code-executor/user-code-executor.js',
+      outfile: 'dist/main/user-code-executor.js',
     });
 
     console.log(`Building ${contentSanitizerFunctionName} v${version}...`);
     await esbuild.build({
       ...esbuildDefaults,
       entryPoints: ['src/isolated/content-sanitizer.ts'],
-      outfile: 'dist/content-sanitizer/content-sanitizer.js',
+      outfile: 'dist/main/content-sanitizer.js',
     });
 
     // -----------------------------------------------------------------------
-    // Upload and deploy — Main Lambda
+    // Upload single artifact and deploy all Lambda functions from it
     // -----------------------------------------------------------------------
-    const mainArchitect = new AwsArchitect(packageMetadata, {
+    const architect = new AwsArchitect(packageMetadata, {
       deploymentBucket,
       sourceDirectory: path.join(process.cwd(), 'dist/main'),
       description: packageMetadata.description,
       regions: [AWS_REGION],
     });
 
-    console.log(`Uploading main artifact to s3://${deploymentBucket}...`);
-    await mainArchitect.publishLambdaArtifactPromise();
+    console.log(`Uploading artifact to s3://${deploymentBucket}...`);
+    await architect.publishLambdaArtifactPromise();
 
     console.log(`Deploying ${functionName} alias 'production'...`);
-    const result = await mainArchitect.publishAndDeployStagePromise({
+    const result = await architect.publishAndDeployStagePromise({
       stage: 'production',
       functionName,
       deploymentKeyName: `${packageMetadata.name}/${version}/lambda.zip`,
     });
     console.log(result);
 
-    // -----------------------------------------------------------------------
-    // Upload and deploy — User Code Executor
-    // -----------------------------------------------------------------------
-    const userCodeArchitect = new AwsArchitect(packageMetadata, {
-      deploymentBucket,
-      sourceDirectory: path.join(process.cwd(), 'dist/user-code-executor'),
-      description: 'User Code Executor — sandboxed JS execution',
-      regions: [AWS_REGION],
-    });
-
-    console.log(`Uploading user-code-executor artifact to s3://${deploymentBucket}...`);
-    await userCodeArchitect.publishLambdaArtifactPromise({ zipFileName: 'user-code-executor.zip' });
-
     console.log(`Deploying ${userCodeExecutorFunctionName} alias 'production'...`);
-    const userCodeResult = await userCodeArchitect.publishAndDeployStagePromise({
+    const userCodeResult = await architect.publishAndDeployStagePromise({
       stage: 'production',
       functionName: userCodeExecutorFunctionName,
-      deploymentKeyName: `${packageMetadata.name}/${version}/user-code-executor.zip`,
+      deploymentKeyName: `${packageMetadata.name}/${version}/lambda.zip`,
     });
     console.log(userCodeResult);
 
-    // -----------------------------------------------------------------------
-    // Upload and deploy — Content Sanitizer
-    // -----------------------------------------------------------------------
-    const contentSanitizerArchitect = new AwsArchitect(packageMetadata, {
-      deploymentBucket,
-      sourceDirectory: path.join(process.cwd(), 'dist/content-sanitizer'),
-      description: 'Content Sanitizer — MIME parsing and HTML sanitization',
-      regions: [AWS_REGION],
-    });
-
-    console.log(`Uploading content-sanitizer artifact to s3://${deploymentBucket}...`);
-    await contentSanitizerArchitect.publishLambdaArtifactPromise({ zipFileName: 'content-sanitizer.zip' });
-
     console.log(`Deploying ${contentSanitizerFunctionName} alias 'production'...`);
-    const contentSanitizerResult = await contentSanitizerArchitect.publishAndDeployStagePromise({
+    const contentSanitizerResult = await architect.publishAndDeployStagePromise({
       stage: 'production',
       functionName: contentSanitizerFunctionName,
-      deploymentKeyName: `${packageMetadata.name}/${version}/content-sanitizer.zip`,
+      deploymentKeyName: `${packageMetadata.name}/${version}/lambda.zip`,
     });
     console.log(contentSanitizerResult);
   });

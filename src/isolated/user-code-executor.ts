@@ -142,7 +142,10 @@ function trySerialize(value: unknown): unknown | null {
 export async function handler(event: unknown): Promise<UserCodeResponse> {
   const invocationId = (event as Record<string, unknown>)?.invocationId as string | undefined;
   if (invocationId) {
-    console.log({ level: "INFO", title: "user-code-executor.invoked", invocationId, purpose: (event as Record<string, unknown>)?.purpose });
+    const { RequestLogger } = await import("../logger.js");
+    const logger = new RequestLogger();
+    logger.startInvocation(invocationId);
+    logger.info("user-code-executor.invoked", { code: "user_code_executor.invoked", invocationId, purpose: (event as Record<string, unknown>)?.purpose });
   }
 
   const validated = validate(event);
