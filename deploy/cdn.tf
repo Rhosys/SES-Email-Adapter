@@ -250,7 +250,7 @@ resource "aws_secretsmanager_secret_version" "cf_origin_secret" {
 # ---------------------------------------------------------------------------
 
 resource "aws_s3_bucket" "web" {
-  bucket           = "${lower(var.service_name)}-web-${var.aws_account_id}-eu-central-1-an"
+  bucket           = "${lower(var.service_name)}-web-${var.aws_account_id}-${data.aws_region.current.id}-an"
   bucket_namespace = "account-regional"
 }
 
@@ -323,7 +323,7 @@ resource "aws_s3_bucket_policy" "web" {
 # ---------------------------------------------------------------------------
 
 resource "aws_s3_bucket" "landing" {
-  bucket           = "${lower(var.service_name)}-landing-${var.aws_account_id}-eu-central-1-an"
+  bucket           = "${lower(var.service_name)}-landing-${var.aws_account_id}-${data.aws_region.current.id}-an"
   bucket_namespace = "account-regional"
 }
 

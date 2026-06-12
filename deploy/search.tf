@@ -115,36 +115,105 @@ resource "aws_cloudwatch_log_group" "aurora" {
 
 
 # ---------------------------------------------------------------------------
-# Per-cluster bootstrap SQL — composite PK schema + HNSW index + RLS
-# Triggered once per cluster creation; CI migration script executes the SQL.
+# CodeBuild — migration runner (applies Drizzle migrations via Data API)
+# Triggered by CI after deploy. Non-blocking — CI fires and forgets.
 # ---------------------------------------------------------------------------
 
-resource "terraform_data" "pgvector_init" {
-  for_each = local.cluster_registry
+resource "aws_codebuild_project" "migrate" {
+  name         = "${var.service_name}-migrate"
+  service_role = aws_iam_role.codebuild_migrate.arn
 
-  triggers_replace = [aws_rds_cluster.aurora[each.key].id]
+  artifacts { type = "NO_ARTIFACTS" }
 
-  # Run once after cluster creation via CI migration script (requires VPC access):
-  #
-  # CREATE EXTENSION IF NOT EXISTS vector;
-  #
-  # CREATE TABLE arc_embeddings (
-  #   arc_id            TEXT NOT NULL,
-  #   account_id        TEXT NOT NULL,
-  #   recipient_address TEXT NOT NULL,
-  #   embedding         vector(${each.value.dimensions}) NOT NULL,
-  #   updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  #   PRIMARY KEY (arc_id, account_id, recipient_address)
-  # );
-  #
-  # CREATE INDEX ON arc_embeddings
-  #   USING hnsw (embedding vector_cosine_ops);
-  #
-  # -- Row-Level Security: Lambda must SET LOCAL app.current_account_id before
-  # -- any query. If unset, current_setting returns NULL and no rows are visible.
-  # ALTER TABLE arc_embeddings ENABLE ROW LEVEL SECURITY;
-  # ALTER TABLE arc_embeddings FORCE ROW LEVEL SECURITY;
-  # CREATE POLICY arc_tenant_isolation ON arc_embeddings
-  #   USING (account_id = current_setting('app.current_account_id', true))
-  #   WITH CHECK (account_id = current_setting('app.current_account_id', true));
+  source {
+    type     = "S3"
+    location = "rhosys-deployments-artifacts-${var.aws_account_id}-${data.aws_region.current.id}/${var.service_name}/"
+    buildspec = yamlencode({
+      version = "0.2"
+      phases = {
+        build = {
+          commands = ["node migrate.js"]
+        }
+      }
+    })
+  }
+
+  environment {
+    compute_type = "BUILD_GENERAL1_SMALL"
+    image        = "aws/codebuild/standard:7.0"
+    type         = "LINUX_CONTAINER"
+
+    environment_variable {
+      name  = "AURORA_CLUSTER_ARN"
+      value = aws_rds_cluster.aurora["aurora-prod-titan-v2"].arn
+    }
+    environment_variable {
+      name  = "AURORA_SECRET_ARN"
+      value = aws_rds_cluster.aurora["aurora-prod-titan-v2"].master_user_secret[0].secret_arn
+    }
+    environment_variable {
+      name  = "AURORA_DB_NAME"
+      value = "signals"
+    }
+  }
+
+  logs_config {
+    cloudwatch_logs {
+      group_name  = aws_cloudwatch_log_group.shared.name
+      stream_name = "migrate"
+    }
+  }
+
+  build_timeout = 30
+}
+
+resource "aws_iam_role" "codebuild_migrate" {
+  name = "${var.service_name}-codebuild-migrate"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "codebuild.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+    }]
+  })
+}
+
+resource "aws_iam_role_policy" "codebuild_migrate" {
+  name = "migrate"
+  role = aws_iam_role.codebuild_migrate.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid      = "RdsDataApi"
+        Effect   = "Allow"
+        Action   = ["rds-data:ExecuteStatement", "rds-data:BeginTransaction", "rds-data:CommitTransaction", "rds-data:RollbackTransaction", "rds-data:BatchExecuteStatement"]
+        Resource = aws_rds_cluster.aurora["aurora-prod-titan-v2"].arn
+      },
+      {
+        Sid      = "SecretsAccess"
+        Effect   = "Allow"
+        Action   = "secretsmanager:GetSecretValue"
+        Resource = aws_rds_cluster.aurora["aurora-prod-titan-v2"].master_user_secret[0].secret_arn
+      },
+      {
+        Sid      = "Logs"
+        Effect   = "Allow"
+        Action   = ["logs:CreateLogStream", "logs:PutLogEvents"]
+        Resource = "${aws_cloudwatch_log_group.shared.arn}:*"
+      },
+      {
+        Sid      = "S3Source"
+        Effect   = "Allow"
+        Action   = ["s3:GetObject", "s3:GetBucketLocation"]
+        Resource = [
+          "arn:aws:s3:::rhosys-deployments-artifacts-${var.aws_account_id}-${data.aws_region.current.id}",
+          "arn:aws:s3:::rhosys-deployments-artifacts-${var.aws_account_id}-${data.aws_region.current.id}/${var.service_name}/*"
+        ]
+      }
+    ]
+  })
 }

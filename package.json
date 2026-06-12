@@ -13,6 +13,8 @@
     "test:llm": "vitest run --config llm-tests/vitest.config.ts",
     "make": "tsx make.ts",
     "deploy": "tsx make.ts deploy",
+    "db:generate": "drizzle-kit generate --name",
+    "db:check": "drizzle-kit check",
     "openapi": "tsx scripts/openapi.ts"
   },
   "dependencies": {
@@ -34,6 +36,7 @@
     "@types/web-push": "^3.6.4",
     "acorn": "^8.16.0",
     "dompurify": "^3.4.3",
+    "drizzle-orm": "^0.45.2",
     "happy-dom": "^20.10.2",
     "hono": "^4.0.0",
     "ical.js": "^2.2.1",
@@ -60,6 +63,7 @@
     "aws-architect": "^6.7.159",
     "aws-sdk-client-mock": "^4.1.0",
     "commander": "^12.0.0",
+    "drizzle-kit": "^0.31.10",
     "esbuild": "^0.24.0",
     "tsx": "^4.0.0",
     "typescript": "^5.7.0",
