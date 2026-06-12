@@ -117,7 +117,7 @@ jobs:
           done
           echo "MiniStack ready."
 
-      - name: Provision DynamoDB tables via Tofu
+      - name: Provision Integration Test Infrastructure via Tofu
         run: |
           mkdir -p /tmp/itf/secrets
           cp deploy/*.tf /tmp/itf/

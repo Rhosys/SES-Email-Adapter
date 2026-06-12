@@ -111,7 +111,7 @@ resource "aws_route53_record" "ses_mx_host" {
   name     = "mx.platform.${data.aws_route53_zone.main.name}"
   type     = "CNAME"
   ttl      = 300
-  records  = ["inbound-smtp.${data.aws_region.current.id}.amazonaws.com"]
+  records  = ["inbound-smtp.${local.primary_region}.amazonaws.com"]
 }
 
 # ---------------------------------------------------------------------------
@@ -126,7 +126,7 @@ resource "aws_route53_record" "bounce_mx" {
   name     = "bounce.platform.${data.aws_route53_zone.main.name}"
   type     = "MX"
   ttl      = 300
-  records  = ["10 feedback-smtp.${data.aws_region.current.id}.amazonses.com"]
+  records  = ["10 feedback-smtp.${local.primary_region}.amazonses.com"]
 }
 
 # SPF on the bounce subdomain — SES is the only authorised sender
@@ -149,7 +149,7 @@ resource "aws_route53_record" "bounce_mx_root" {
   name     = "bounce.${data.aws_route53_zone.main.name}"
   type     = "MX"
   ttl      = 300
-  records  = ["10 feedback-smtp.${data.aws_region.current.id}.amazonses.com"]
+  records  = ["10 feedback-smtp.${local.primary_region}.amazonses.com"]
 }
 
 resource "aws_route53_record" "bounce_spf_root" {

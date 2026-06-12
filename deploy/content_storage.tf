@@ -3,7 +3,7 @@
 # ---------------------------------------------------------------------------
 
 resource "aws_s3_bucket" "extracted_content" {
-  bucket           = "${lower(var.service_name)}-content-${var.aws_account_id}-${data.aws_region.current.id}-an"
+  bucket           = "${lower(var.service_name)}-content-${var.aws_account_id}-${local.primary_region}-an"
   bucket_namespace = "account-regional"
 }
 

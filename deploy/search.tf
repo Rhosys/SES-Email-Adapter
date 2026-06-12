@@ -127,7 +127,7 @@ resource "aws_codebuild_project" "migrate" {
 
   source {
     type     = "S3"
-    location = "rhosys-deployments-artifacts-${var.aws_account_id}-${data.aws_region.current.id}/${var.service_name}/"
+    location = "rhosys-deployments-artifacts-${var.aws_account_id}-${local.primary_region}/${var.service_name}/"
     buildspec = yamlencode({
       version = "0.2"
       phases = {
@@ -210,8 +210,8 @@ resource "aws_iam_role_policy" "codebuild_migrate" {
         Effect   = "Allow"
         Action   = ["s3:GetObject", "s3:GetBucketLocation"]
         Resource = [
-          "arn:aws:s3:::rhosys-deployments-artifacts-${var.aws_account_id}-${data.aws_region.current.id}",
-          "arn:aws:s3:::rhosys-deployments-artifacts-${var.aws_account_id}-${data.aws_region.current.id}/${var.service_name}/*"
+          "arn:aws:s3:::rhosys-deployments-artifacts-${var.aws_account_id}-${local.primary_region}",
+          "arn:aws:s3:::rhosys-deployments-artifacts-${var.aws_account_id}-${local.primary_region}/${var.service_name}/*"
         ]
       }
     ]
