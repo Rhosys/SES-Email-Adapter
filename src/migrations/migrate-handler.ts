@@ -43,7 +43,7 @@ for (const file of sqlFiles) {
 }
 
 // ---------------------------------------------------------------------------
-// Apply pending migrations
+// Apply pending migrations (with retry for Aurora auto-pause resume)
 // ---------------------------------------------------------------------------
 
 logger.trackPoint("migrate_start");
@@ -55,11 +55,30 @@ const db = drizzle(client, {
   resourceArn: CLUSTER_ARN,
 });
 
-try {
-  await migrate(db, { migrationsFolder });
-  logger.trackPoint("migrate_complete");
-  logger.info("Migration complete", { migrationsChecked: sqlFiles.length });
-} catch (e) {
-  logger.error("Migration failed", { code: "migrate.failed", reason: e instanceof Error ? e.message : String(e) });
-  process.exit(1);
+const MAX_ATTEMPTS = 5;
+const BASE_DELAY_MS = 3000;
+
+for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+  try {
+    await migrate(db, { migrationsFolder });
+    logger.trackPoint("migrate_complete");
+    logger.info("Migration complete", { migrationsChecked: sqlFiles.length, attempts: attempt });
+    break;
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    const isResumingOrTransient = message.includes("resuming after being auto-paused")
+      || message.includes("Communications link failure")
+      || message.includes("Connection reset")
+      || message.includes("CREATE SCHEMA");
+
+    if (isResumingOrTransient && attempt < MAX_ATTEMPTS) {
+      const delayMs = BASE_DELAY_MS * Math.pow(2, attempt - 1);
+      logger.warn("Migration attempt failed — retrying", { code: "migrate.retry", attempt, maxAttempts: MAX_ATTEMPTS, reason: message, nextDelayMs: delayMs });
+      await new Promise(r => setTimeout(r, delayMs));
+      continue;
+    }
+
+    logger.error("Migration failed", { code: "migrate.failed", reason: message, attempts: attempt, error: e });
+    process.exit(1);
+  }
 }

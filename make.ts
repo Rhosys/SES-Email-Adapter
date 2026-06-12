@@ -197,6 +197,29 @@ program
         break;
       }
       if (phase === 'FAILED' || phase === 'FAULT' || phase === 'STOPPED') {
+        // Attempt to fetch the last 30 lines from CloudWatch for inline diagnosis
+        try {
+          const { CloudWatchLogsClient, GetLogEventsCommand } = await import('@aws-sdk/client-cloudwatch-logs');
+          const cwl = new CloudWatchLogsClient({});
+          const logGroup = build?.logs?.groupName;
+          const logStream = build?.logs?.streamName;
+          if (logGroup && logStream) {
+            const logEvents = await cwl.send(new GetLogEventsCommand({
+              logGroupName: logGroup,
+              logStreamName: logStream,
+              startFromHead: false,
+              limit: 30,
+            }));
+            const lines = logEvents.events?.map(e => e.message?.trimEnd()).filter(Boolean) ?? [];
+            if (lines.length > 0) {
+              console.error(`\n--- CodeBuild migration logs (last ${lines.length} lines) ---`);
+              for (const line of lines) console.error(line);
+              console.error('--- end logs ---\n');
+            }
+          }
+        } catch {
+          // Best-effort — don't mask the original error
+        }
         throw new Error(`CodeBuild migration failed: ${phase} — ${build?.phases?.find(p => p.phaseStatus === 'FAILED')?.contexts?.[0]?.message ?? 'check CloudWatch logs'}`);
       }
     }
