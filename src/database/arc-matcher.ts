@@ -1,23 +1,21 @@
 // ---------------------------------------------------------------------------
 // ArcMatcher — single owner for all pgvector/Aurora operations.
 // Implements both ArcMatcherPort (processor reads) and MultiClusterAuroraWriter
-// (processor + reindex writes). One class, one withAccountContext, one truth.
+// (processor + reindex writes). Uses Drizzle ORM for type-safe queries.
 // ---------------------------------------------------------------------------
 
-import {
-  RDSDataClient,
-  BeginTransactionCommand,
-  ExecuteStatementCommand,
-  CommitTransactionCommand,
-  RollbackTransactionCommand,
-} from "@aws-sdk/client-rds-data";
+import { RDSDataClient } from "@aws-sdk/client-rds-data";
+import { drizzle } from "drizzle-orm/aws-data-api/pg";
+import { eq, and, sql } from "drizzle-orm";
 import { GetCommand } from "@aws-sdk/lib-dynamodb";
 import { getRegistryById, getPrimaryArcMatcherRegistry, type ClusterRegistryEntry } from "../embedding/cluster-registry.js";
+import { arcEmbeddings } from "./schema.js";
 import { dynamo, SIGNALS_TABLE } from "./shared.js";
 import { ok, err, dbError } from "../errors.js";
 import type { DbError, Result } from "../errors.js";
 import type { ArcMatcherPort } from "../processor/processor.js";
 import type { Arc } from "../types/index.js";
+import type { AwsDataApiPgDatabase } from "drizzle-orm/aws-data-api/pg";
 
 // ---------------------------------------------------------------------------
 // Interface — re-exported so existing imports keep working
@@ -50,7 +48,7 @@ const BASE_DELAY_MS = 1000;
 
 // Aurora auto-pause resume retry: exponential backoff up to 60s total
 const RESUME_MAX_ATTEMPTS = 8;
-const RESUME_BASE_DELAY_MS = 2000; // 2s, 4s, 8s, 8s, 8s, 8s, 8s, 8s = ~54s total
+const RESUME_BASE_DELAY_MS = 2000;
 
 // ---------------------------------------------------------------------------
 // Key helpers
@@ -65,20 +63,20 @@ const ITEM_SK = "#";
 
 function isTransientError(e: unknown): boolean {
   if (e == null || typeof e !== "object") return false;
-  const err = e as { name?: string; message?: string; code?: string; $metadata?: { httpStatusCode?: number } };
+  const error = e as { name?: string; message?: string; code?: string; $metadata?: { httpStatusCode?: number } };
 
-  if (err.name === "StatementTimeoutException") return true;
-  if (err.name === "ServiceUnavailableError") return true;
-  if (err.name === "InternalServerErrorException") return true;
-  if (err.code === "ThrottlingException") return true;
-  if (err.name === "ThrottlingException") return true;
+  if (error.name === "StatementTimeoutException") return true;
+  if (error.name === "ServiceUnavailableError") return true;
+  if (error.name === "InternalServerErrorException") return true;
+  if (error.code === "ThrottlingException") return true;
+  if (error.name === "ThrottlingException") return true;
 
-  const status = err.$metadata?.httpStatusCode;
+  const status = error.$metadata?.httpStatusCode;
   if (status != null && (status >= 500 || status === 429)) return true;
 
-  if (err.name === "NetworkingError") return true;
-  if (err.message?.includes("Connection reset")) return true;
-  if (err.message?.includes("resuming after being auto-paused")) return true;
+  if (error.name === "NetworkingError") return true;
+  if (error.message?.includes("Connection reset")) return true;
+  if (error.message?.includes("resuming after being auto-paused")) return true;
 
   return false;
 }
@@ -123,18 +121,23 @@ function sleep(ms: number): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// Per-cluster client cache
+// Per-cluster Drizzle db instance cache
 // ---------------------------------------------------------------------------
 
-const clientCache = new Map<string, RDSDataClient>();
+const dbCache = new Map<string, AwsDataApiPgDatabase>();
 
-function getClientForCluster(registryId: string): RDSDataClient {
-  let client = clientCache.get(registryId);
-  if (!client) {
-    client = new RDSDataClient({});
-    clientCache.set(registryId, client);
+function getDbForCluster(cluster: ClusterRegistryEntry): AwsDataApiPgDatabase {
+  let db = dbCache.get(cluster.registryId);
+  if (!db) {
+    const client = new RDSDataClient({});
+    db = drizzle(client, {
+      database: cluster.databaseName,
+      secretArn: cluster.secretArn,
+      resourceArn: cluster.clusterArn,
+    });
+    dbCache.set(cluster.registryId, db);
   }
-  return client;
+  return db;
 }
 
 // ---------------------------------------------------------------------------
@@ -144,7 +147,7 @@ function getClientForCluster(registryId: string): RDSDataClient {
 export class ArcMatcher implements ArcMatcherPort, MultiClusterAuroraWriter {
 
   // ---------------------------------------------------------------------------
-  // ArcMatcher — processor reads (uses primary cluster, returns full Arc)
+  // ArcMatcherPort — processor reads (uses primary cluster, returns full Arc)
   // ---------------------------------------------------------------------------
 
   async findMatch(accountId: string, recipientAddress: string, embedding: number[]): Promise<Result<Arc | null, DbError>>;
@@ -154,7 +157,6 @@ export class ArcMatcher implements ArcMatcherPort, MultiClusterAuroraWriter {
     recipientAddress?: string,
     embedding?: number[],
   ): Promise<Result<Arc | null, DbError> | Result<{ arcId: string } | null, DbError>> {
-    // Dispatch based on call signature
     if (typeof accountIdOrOpts === "string") {
       return this.findMatchForArcMatcher(accountIdOrOpts, recipientAddress!, embedding!);
     }
@@ -163,29 +165,27 @@ export class ArcMatcher implements ArcMatcherPort, MultiClusterAuroraWriter {
 
   private async findMatchForArcMatcher(accountId: string, recipientAddress: string, embedding: number[]): Promise<Result<Arc | null, DbError>> {
     const cluster = getPrimaryArcMatcherRegistry();
-    const client = getClientForCluster(cluster.registryId);
+    const db = getDbForCluster(cluster);
 
     try {
       const arcId = await withRetry(async () => {
-        return this.withAccountContext(client, cluster, accountId, async (transactionId) => {
-          const res = await client.send(new ExecuteStatementCommand({
-            resourceArn: cluster.clusterArn,
-            secretArn: cluster.secretArn,
-            database: cluster.databaseName,
-            transactionId,
-            sql: `SELECT arc_id FROM arc_embeddings
-                  WHERE account_id = :accountId AND recipient_address = :recipient
-                    AND embedding <=> :embedding::vector < :threshold
-                  ORDER BY embedding <=> :embedding::vector
-                  LIMIT 1`,
-            parameters: [
-              { name: "accountId", value: { stringValue: accountId } },
-              { name: "recipient", value: { stringValue: recipientAddress } },
-              { name: "embedding", value: { stringValue: `[${embedding.join(",")}]` } },
-              { name: "threshold", value: { doubleValue: SIMILARITY_THRESHOLD } },
-            ],
-          }));
-          return res.records?.[0]?.[0]?.stringValue ?? null;
+        return db.transaction(async (tx) => {
+          // SET LOCAL does not support parameterized values in PostgreSQL —
+          // accountId is an internal value from DDB (not user input), safe to interpolate.
+          await tx.execute(sql.raw(`SET LOCAL app.current_account_id = '${accountId.replace(/'/g, "''")}'`));
+
+          const result = await tx
+            .select({ arcId: arcEmbeddings.arcId })
+            .from(arcEmbeddings)
+            .where(and(
+              eq(arcEmbeddings.accountId, accountId),
+              eq(arcEmbeddings.recipientAddress, recipientAddress),
+              sql`${arcEmbeddings.embedding} <=> ${`[${embedding.join(",")}]`}::vector < ${SIMILARITY_THRESHOLD}`,
+            ))
+            .orderBy(sql`${arcEmbeddings.embedding} <=> ${`[${embedding.join(",")}]`}::vector`)
+            .limit(1);
+
+          return result[0]?.arcId ?? null;
         });
       });
 
@@ -209,33 +209,28 @@ export class ArcMatcher implements ArcMatcherPort, MultiClusterAuroraWriter {
   }): Promise<Result<{ arcId: string } | null, DbError>> {
     const cluster = getRegistryById(opts.registryId);
     if (!cluster) return err(dbError(`Cluster "${opts.registryId}" not found in CLUSTER_REGISTRY`));
-    const client = getClientForCluster(opts.registryId);
+    const db = getDbForCluster(cluster);
 
     try {
       const result = await withRetry(async () => {
-        const res = await this.withAccountContext(client, cluster, opts.accountId, async (transactionId) => {
-          return client.send(new ExecuteStatementCommand({
-            resourceArn: cluster.clusterArn,
-            secretArn: cluster.secretArn,
-            database: cluster.databaseName,
-            transactionId,
-            sql: `SELECT arc_id FROM arc_embeddings
-                  WHERE account_id = :accountId AND recipient_address = :recipient
-                    AND embedding <=> :embedding::vector < :threshold
-                  ORDER BY embedding <=> :embedding::vector
-                  LIMIT 1`,
-            parameters: [
-              { name: "accountId", value: { stringValue: opts.accountId } },
-              { name: "recipient", value: { stringValue: opts.recipientAddress } },
-              { name: "embedding", value: { stringValue: `[${opts.embedding.join(",")}]` } },
-              { name: "threshold", value: { doubleValue: SIMILARITY_THRESHOLD } },
-            ],
-          }));
-        });
+        return db.transaction(async (tx) => {
+          await tx.execute(sql.raw(`SET LOCAL app.current_account_id = '${opts.accountId.replace(/'/g, "''")}'`));
 
-        const arcId = res.records?.[0]?.[0]?.stringValue;
-        if (!arcId) return null;
-        return { arcId };
+          const rows = await tx
+            .select({ arcId: arcEmbeddings.arcId })
+            .from(arcEmbeddings)
+            .where(and(
+              eq(arcEmbeddings.accountId, opts.accountId),
+              eq(arcEmbeddings.recipientAddress, opts.recipientAddress),
+              sql`${arcEmbeddings.embedding} <=> ${`[${opts.embedding.join(",")}]`}::vector < ${SIMILARITY_THRESHOLD}`,
+            ))
+            .orderBy(sql`${arcEmbeddings.embedding} <=> ${`[${opts.embedding.join(",")}]`}::vector`)
+            .limit(1);
+
+          const arcId = rows[0]?.arcId;
+          if (!arcId) return null;
+          return { arcId };
+        });
       });
       return ok(result);
     } catch (e) {
@@ -244,7 +239,7 @@ export class ArcMatcher implements ArcMatcherPort, MultiClusterAuroraWriter {
   }
 
   // ---------------------------------------------------------------------------
-  // ArcMatcher.upsertEmbedding — processor legacy interface (flat args, primary cluster)
+  // MultiClusterAuroraWriter — upserts
   // ---------------------------------------------------------------------------
 
   async upsertEmbedding(arcId: string, embedding: number[], accountId: string, recipientAddress: string): Promise<Result<void, DbError>>;
@@ -277,82 +272,34 @@ export class ArcMatcher implements ArcMatcherPort, MultiClusterAuroraWriter {
   }): Promise<Result<void, DbError>> {
     const cluster = getRegistryById(opts.registryId);
     if (!cluster) return err(dbError(`Cluster "${opts.registryId}" not found in CLUSTER_REGISTRY`));
-    const client = getClientForCluster(opts.registryId);
+    const db = getDbForCluster(cluster);
 
     try {
       await withRetry(async () => {
-        await this.withAccountContext(client, cluster, opts.accountId, async (transactionId) => {
-          await client.send(new ExecuteStatementCommand({
-            resourceArn: cluster.clusterArn,
-            secretArn: cluster.secretArn,
-            database: cluster.databaseName,
-            transactionId,
-            sql: `INSERT INTO arc_embeddings (arc_id, account_id, recipient_address, embedding, updated_at)
-                  VALUES (:arcId, :accountId, :recipient, :embedding::vector, NOW())
-                  ON CONFLICT (arc_id, account_id, recipient_address) DO UPDATE
-                    SET embedding = EXCLUDED.embedding, updated_at = NOW()`,
-            parameters: [
-              { name: "arcId", value: { stringValue: opts.arcId } },
-              { name: "accountId", value: { stringValue: opts.accountId } },
-              { name: "recipient", value: { stringValue: opts.recipientAddress } },
-              { name: "embedding", value: { stringValue: `[${opts.embedding.join(",")}]` } },
-            ],
-          }));
+        await db.transaction(async (tx) => {
+          await tx.execute(sql.raw(`SET LOCAL app.current_account_id = '${opts.accountId.replace(/'/g, "''")}'`));
+
+          await tx
+            .insert(arcEmbeddings)
+            .values({
+              arcId: opts.arcId,
+              accountId: opts.accountId,
+              recipientAddress: opts.recipientAddress,
+              embedding: opts.embedding,
+              updatedAt: sql`now()`,
+            })
+            .onConflictDoUpdate({
+              target: [arcEmbeddings.arcId, arcEmbeddings.accountId, arcEmbeddings.recipientAddress],
+              set: {
+                embedding: sql`EXCLUDED.embedding`,
+                updatedAt: sql`now()`,
+              },
+            });
         });
       });
       return ok(undefined);
     } catch (e) {
       return err(dbError(e));
-    }
-  }
-
-  // ---------------------------------------------------------------------------
-  // Transaction helper — BEGIN → SET LOCAL → fn → COMMIT (rollback on error)
-  // ---------------------------------------------------------------------------
-
-  private async withAccountContext<T>(
-    client: RDSDataClient,
-    cluster: ClusterRegistryEntry,
-    accountId: string,
-    fn: (transactionId: string) => Promise<T>,
-  ): Promise<T> {
-    const { transactionId } = await client.send(new BeginTransactionCommand({
-      resourceArn: cluster.clusterArn,
-      secretArn: cluster.secretArn,
-      database: cluster.databaseName,
-    }));
-
-    try {
-      await client.send(new ExecuteStatementCommand({
-        resourceArn: cluster.clusterArn,
-        secretArn: cluster.secretArn,
-        database: cluster.databaseName,
-        transactionId,
-        // SET LOCAL does not support parameterized values in PostgreSQL —
-        // accountId is an internal value from DDB (not user input), safe to interpolate.
-        sql: `SET LOCAL app.current_account_id = '${accountId.replace(/'/g, "''")}'`,
-      }));
-
-      const result = await fn(transactionId!);
-
-      await client.send(new CommitTransactionCommand({
-        resourceArn: cluster.clusterArn,
-        secretArn: cluster.secretArn,
-        transactionId,
-      }));
-
-      return result;
-    } catch (e) {
-      try {
-        await client.send(new RollbackTransactionCommand({
-          resourceArn: cluster.clusterArn,
-          secretArn: cluster.secretArn,
-          transactionId,
-        }));
-      } catch {
-        // Rollback best-effort — the original error is more important
-      }
-      throw e;
     }
   }
 }
