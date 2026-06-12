@@ -426,7 +426,7 @@ async function handlerInner(
           continue;
         }
 
-        const notification = inner as { notificationType?: string; mail?: { messageId: string; timestamp: string; destination: string[] }; receipt?: { dkimVerdict: { status: SesVerdict }; dmarcVerdict: { status: SesVerdict }; action: { objectKey: string } }; accountId?: string };
+        const notification = inner as { notificationType?: string; mail?: { messageId: string; timestamp: string; destination: string[] }; receipt?: { dkimVerdict: { status: SesVerdict }; dmarcVerdict: { status: SesVerdict }; action: { objectKey: string } } };
 
         if (notification.notificationType === "Bounce" || notification.notificationType === "Complaint") {
           await feedbackProcessor.processNotification(notification);
@@ -434,17 +434,29 @@ async function handlerInner(
         } else {
           const mail = notification.mail!;
           const receipt = notification.receipt!;
-          const message: InboundSignalMessage = {
-            accountId: notification.accountId ?? mail.destination[0]!,
-            s3Key: receipt.action.objectKey,
-            sesMessageId: mail.messageId,
-            timestamp: mail.timestamp,
-            destination: mail.destination,
-            dkimVerdict: receipt.dkimVerdict.status,
-            dmarcVerdict: receipt.dmarcVerdict.status,
-          };
-          const result = await processor.processRecord(message, receiveCount);
-          failed = result.isErr();
+          const recipientAddress = mail.destination[0]!;
+
+          // Resolve account ownership from recipient alias → domain
+          const accountResult = await accountDb.resolveAccountForRecipient(recipientAddress);
+          if (accountResult.isErr()) {
+            logger.error("Failed to resolve account for recipient — DB error. Retrying.", { code: "handler.sqs.account_resolve_failed", recipientAddress, destination: mail.destination, sesMessageId: mail.messageId, error: accountResult.error });
+            failed = true;
+          } else if (!accountResult.value) {
+            logger.track("No account owns this recipient address — dropping message.", { code: "handler.sqs.no_account_for_recipient", recipientAddress, destination: mail.destination, sesMessageId: mail.messageId, timestamp: mail.timestamp, s3Key: receipt.action.objectKey });
+            failed = false; // Don't retry — no account will ever own this
+          } else {
+            const message: InboundSignalMessage = {
+              accountId: accountResult.value,
+              s3Key: receipt.action.objectKey,
+              sesMessageId: mail.messageId,
+              timestamp: mail.timestamp,
+              destination: mail.destination,
+              dkimVerdict: receipt.dkimVerdict.status,
+              dmarcVerdict: receipt.dmarcVerdict.status,
+            };
+            const result = await processor.processRecord(message, receiveCount);
+            failed = result.isErr();
+          }
         }
       }
 
