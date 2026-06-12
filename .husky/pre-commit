@@ -1,0 +1,13 @@
+npm test
+
+# Check Drizzle schema/migration sync if schema.ts was modified
+if git diff --cached --name-only | grep -q "src/database/schema.ts"; then
+  echo "schema.ts staged — verifying migrations are in sync..."
+  npm run db:check || {
+    echo ""
+    echo "ERROR: Schema and migrations are out of sync."
+    echo "Run: npm run db:generate <migration-name>"
+    echo "Then stage the generated migration file."
+    exit 1
+  }
+fi

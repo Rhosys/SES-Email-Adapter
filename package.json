@@ -5,7 +5,7 @@
   "private": true,
   "scripts": {
     "build": "tsc",
-    "check": "tsc --noEmit && vitest run",
+    "check": "tsc --noEmit && drizzle-kit check && vitest run",
     "test": "tsc --noEmit -p tsconfig.check.json && vitest run",
     "dev": "tsc --watch",
     "test:watch": "vitest",
@@ -15,7 +15,8 @@
     "deploy": "tsx make.ts deploy",
     "db:generate": "drizzle-kit generate --name",
     "db:check": "drizzle-kit check",
-    "openapi": "tsx scripts/openapi.ts"
+    "openapi": "tsx scripts/openapi.ts",
+    "prepare": "husky"
   },
   "dependencies": {
     "@authress/sdk": "^3.2.269",
@@ -66,6 +67,7 @@
     "commander": "^12.0.0",
     "drizzle-kit": "^0.31.10",
     "esbuild": "^0.24.0",
+    "husky": "^9.1.7",
     "tsx": "^4.0.0",
     "typescript": "^5.7.0",
     "vitest": "^2.0.0"
