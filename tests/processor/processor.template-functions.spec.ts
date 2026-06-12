@@ -9,7 +9,7 @@ import { userCodeError } from "../../src/processor/user-code-client.js";
 import type { ContentSanitizerClient } from "../../src/processor/content-sanitizer-client.js";
 import type { Signal, Arc, Alias, EmailTemplate } from "../../src/types/index.js";
 import type { EmbeddingGenerator } from "../../src/embedding/embedding-generator.js";
-import type { MultiClusterAuroraWriter } from "../../src/database/multi-cluster-aurora-writer.js";
+import type { MultiClusterAuroraWriter } from "../../src/database/arc-matcher.js";
 import type { S3RetentionService } from "../../src/embedding/s3-retention-service.js";
 import type { EmailService } from "../../src/email/email-service.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";

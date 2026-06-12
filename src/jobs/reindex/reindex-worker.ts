@@ -9,7 +9,7 @@
 
 import { ScanCommand } from "@aws-sdk/lib-dynamodb";
 import { dynamo, SIGNALS_TABLE } from "../../database/shared.js";
-import { multiClusterWriter } from "../../database/multi-cluster-aurora-writer.js";
+import { searchDatabase } from "../../database/arc-matcher.js";
 import { getRegistryById } from "../../embedding/cluster-registry.js";
 import { generateEmbeddingFromS3 } from "../../embedding/generate-embedding-from-s3.js";
 import { BedrockEmbeddingGenerator } from "../../embedding/embedding-generator.js";
@@ -143,7 +143,7 @@ export class ReindexWorker {
     vector: number[],
     targetRegistryId: string,
   ): Promise<Result<void, { signalId: string; cause: unknown }>> {
-    const upsertResult = await multiClusterWriter.upsertEmbedding({
+    const upsertResult = await searchDatabase.upsertEmbedding({
       registryId: targetRegistryId,
       arcId: signal.arcId!,
       accountId: signal.accountId,
@@ -190,7 +190,7 @@ export class ReindexWorker {
       return err({ signalId: signal.id, cause: cacheResult.error });
     }
 
-    const upsertResult = await multiClusterWriter.upsertEmbedding({
+    const upsertResult = await searchDatabase.upsertEmbedding({
       registryId: targetRegistryId,
       arcId: signal.arcId!,
       accountId: signal.accountId,

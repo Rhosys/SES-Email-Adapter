@@ -14,7 +14,7 @@ import { buildEmbedText } from "../embedding/embed-text.js";
 import type { SignalClassifier, ClassificationOutput } from "../classifier/classifier.js";
 import { RELEVANT_HEADERS } from "../classifier/prompt-builder.js";
 import type { EmbeddingGenerator } from "../embedding/embedding-generator.js";
-import type { MultiClusterAuroraWriter } from "../database/multi-cluster-aurora-writer.js";
+import type { MultiClusterAuroraWriter } from "../database/arc-matcher.js";
 import type { ArcDatabase, UpdateArcFields } from "../database/arc-database.js";
 import type { AccountDatabase } from "../database/account-database.js";
 import type { ProcessingDatabase } from "../database/processing-database.js";
@@ -72,10 +72,13 @@ export interface ProcessorAccountContext {
   onboardingCompleted: boolean;
 }
 
-export interface ArcMatcher {
+export interface ArcMatcherPort {
   findMatch(accountId: string, recipientAddress: string, embedding: number[]): Promise<Result<Arc | null, DbError>>;
   upsertEmbedding(arcId: string, embedding: number[], accountId: string, recipientAddress: string): Promise<Result<void, DbError>>;
 }
+
+/** @deprecated Use ArcMatcherPort — retained for test backward compat during migration */
+export type { ArcMatcherPort as ArcMatcher };
 
 export interface RuleEvaluator {
   evaluate(rule: Rule, context: { signal: Signal; arc: Arc; isMatchedArc: boolean }): Promise<RuleEvalResult>;
@@ -301,7 +304,7 @@ interface SignalProcessorOptions {
   classifier: Pick<SignalClassifier, "classify">;
   embeddingGenerator: EmbeddingGenerator;
   auroraWriter: MultiClusterAuroraWriter;
-  arcMatcher: ArcMatcher;
+  arcMatcher: ArcMatcherPort;
   ruleEvaluator: RuleEvaluator;
   logger: Logger;
   notifier: Notifier;
@@ -328,7 +331,7 @@ export class SignalProcessor {
   private readonly classifier: Pick<SignalClassifier, "classify">;
   private readonly embeddingGenerator: EmbeddingGenerator;
   private readonly auroraWriter: MultiClusterAuroraWriter;
-  private readonly arcMatcher: ArcMatcher;
+  private readonly arcMatcher: ArcMatcherPort;
   private readonly ruleEvaluator: RuleEvaluator;
   private readonly logger: Logger;
   private readonly notifier: Notifier;

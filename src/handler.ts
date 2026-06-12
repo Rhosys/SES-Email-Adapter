@@ -40,7 +40,7 @@ import { AuthressAuthService } from "./api/authress-auth.js";
 import { AuthressAccessService } from "./api/authress-access.js";
 import { createApp } from "./api/app.js";
 import { BedrockEmbeddingGenerator } from "./embedding/embedding-generator.js";
-import { multiClusterWriter } from "./database/multi-cluster-aurora-writer.js";
+import { searchDatabase } from "./database/arc-matcher.js";
 import { S3RetentionServiceImpl } from "./embedding/s3-retention-service.js";
 import { ReindexWorker } from "./jobs/reindex/reindex-worker.js";
 import { AuthWorkflowHandler } from "./workflow/auth-handler.js";
@@ -149,8 +149,8 @@ const processor = new SignalProcessor({
   userCodeExecutor: new LambdaUserCodeExecutor(lambda, USER_CODE_EXECUTOR_ARN, logger),
   classifier,
   embeddingGenerator,
-  auroraWriter: multiClusterWriter,
-  arcMatcher: arcDb,
+  auroraWriter: searchDatabase,
+  arcMatcher: searchDatabase,
   ruleEvaluator: new JsonLogicRuleEvaluator(logger, new LambdaUserCodeExecutor(lambda, USER_CODE_EXECUTOR_ARN, logger), accountDb),
   notifier: new DeviceNotifier({
     deviceStore: new DynamoDeviceStore(),

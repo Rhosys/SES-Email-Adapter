@@ -128,8 +128,8 @@ vi.mock("../src/embedding/embedding-generator.js", () => ({
   BedrockEmbeddingGenerator: vi.fn().mockImplementation(() => ({})),
 }));
 
-vi.mock("../src/database/multi-cluster-aurora-writer.js", () => ({
-  multiClusterWriter: {},
+vi.mock("../src/database/arc-matcher.js", () => ({
+  searchDatabase: {},
 }));
 
 vi.mock("../src/embedding/s3-retention-service.js", () => ({

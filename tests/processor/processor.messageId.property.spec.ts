@@ -8,7 +8,7 @@ import { makeArcDbMock, makeAccountDbMock, makeProcessingDbMock } from "./_helpe
 import type { ContentSanitizerClient } from "../../src/processor/content-sanitizer-client.js";
 import type { SignalClassifier } from "../../src/classifier/classifier.js";
 import type { EmbeddingGenerator } from "../../src/embedding/embedding-generator.js";
-import type { MultiClusterAuroraWriter } from "../../src/database/multi-cluster-aurora-writer.js";
+import type { MultiClusterAuroraWriter } from "../../src/database/arc-matcher.js";
 import { dbError } from "../../src/errors.js";
 import type { EmailService } from "../../src/email/email-service.js";
 import { createMockLogger } from "../helpers/mock-logger.js";

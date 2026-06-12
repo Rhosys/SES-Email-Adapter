@@ -9,7 +9,7 @@ import type { AccountDatabase } from "../../src/database/account-database.js";
 import type { ContentSanitizerClient } from "../../src/processor/content-sanitizer-client.js";
 import type { SignalClassifier, ClassificationOutput } from "../../src/classifier/classifier.js";
 import type { EmbeddingGenerator, EmbeddingResult } from "../../src/embedding/embedding-generator.js";
-import type { MultiClusterAuroraWriter } from "../../src/database/multi-cluster-aurora-writer.js";
+import type { MultiClusterAuroraWriter } from "../../src/database/arc-matcher.js";
 import type { ArcMatcher } from "../../src/processor/processor.js";
 import type { S3RetentionService } from "../../src/embedding/s3-retention-service.js";
 import type { Arc, Alias, EmailTemplate, Rule } from "../../src/types/index.js";
