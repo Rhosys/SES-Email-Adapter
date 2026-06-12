@@ -843,3 +843,5 @@ These items are required by the frontend before certain UI features can ship.
   }
   ```
   Fields are optional because some users may not have profile data in Authress yet (e.g. pending invites).
+
+- [ ] **Include system rules in GET /accounts/:id/rules response** — the frontend Rules tab needs to display system rules (SR-01 through SR-26) as read-only cards that the user can enable/disable but not edit or delete. Currently `listRules` only returns user-created rules for the account. Include the system rules (from `SYSTEM_RULES` constant in `processor.ts`) in the response with a `system: true` boolean field on each rule object. User rules get `system: false`. The frontend will render system rules in a separate "System Rules" section with toggle-only UI (no edit/delete actions). The `PATCH /accounts/:id/rules/:ruleId` endpoint should accept status changes for system rules (storing the override per-account in DynamoDB) but reject any other field changes with a 403.
