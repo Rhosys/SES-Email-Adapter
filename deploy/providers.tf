@@ -29,14 +29,6 @@ terraform {
   }
 }
 
-locals {
-  primary_region = "eu-central-1"
-}
-
-data "aws_availability_zones" "available" {
-  state = "available"
-}
-
 provider "aws" {
   region              = local.primary_region
   allowed_account_ids = [var.aws_account_id]
