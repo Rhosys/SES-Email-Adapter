@@ -756,6 +756,31 @@ export class AccountDatabase {
     }
   }
 
+  /** Resolve accountId from a recipient email address. Checks alias first, then domain. */
+  async resolveAccountForRecipient(recipientAddress: string): Promise<Result<string | null, DbError>> {
+    const { domain, alias } = parseAddress(recipientAddress);
+
+    // 1. Try exact alias match via GSI
+    try {
+      const aliasRes = await dynamo.send(new QueryCommand({
+        TableName: ACCOUNTS_TABLE,
+        IndexName: "gsi1",
+        KeyConditionExpression: "gsi1pk = :pk",
+        ExpressionAttributeValues: { ":pk": `DOMAIN#${domain}#ALIAS#${alias}` },
+        Limit: 1,
+      }));
+      if (aliasRes.Items && aliasRes.Items.length > 0) {
+        const item = aliasRes.Items[0] as { accountId: string };
+        return ok(item.accountId);
+      }
+    } catch (e) {
+      return err(dbError(e));
+    }
+
+    // 2. Fall back to domain match
+    return this.resolveAccountForDomain(domain);
+  }
+
   async updateDomainHealth(accountId: string, domainName: string, health: {
     receivingHealthy: boolean;
     senderHealthy: boolean;
