@@ -806,3 +806,32 @@ Things competitors charge for that we include, plus things only we can offer:
 - [ ] **Image handling strategy for email signals** — Decide how to handle images in emails: (a) auto-download and cache images at signal creation time (privacy risk: sender knows you opened the email via tracking pixels), (b) proxy images through our server on-demand (hides user IP but still loads content), (c) block all remote images by default with a user toggle to load (safest, Gmail-style), (d) strip tracking pixels but allow content images. Also decide: should we store image thumbnails for the arc list preview? Should we scan images for phishing (fake login buttons, QR codes to malicious URLs)?
 
 - [ ] **Secure HTML email rendering** — Email HTML is untrusted content from arbitrary senders. The UI must render it safely without allowing XSS, script injection, CSS exfiltration, or form submission attacks. Options: (a) sandboxed iframe with `srcdoc` + restrictive CSP (`sandbox` attribute, no `allow-scripts`, no `allow-same-origin`), (b) server-side sanitization that strips all scripts, event handlers, forms, and dangerous CSS (e.g. `background-image: url()` for tracking) before storing/serving the HTML, (c) both — sanitize on ingest and sandbox on render. Also consider: should we rewrite all URLs to go through a redirect warning page? Should we strip `target="_blank"` or force all links to open in a new tab with `rel="noopener noreferrer"`? Should we offer a "view original" escape hatch that opens the raw HTML in a fully isolated tab?
+
+---
+
+## Frontend-Blocking Backend Changes (2026-06-12)
+
+These items are required by the frontend before certain UI features can ship.
+
+- [ ] **Include `senderAddress`, `recipientAddress`, and `subject` on Arc list responses** — the frontend inbox needs to display Sender Email, Recipient Alias, and Subject as primary columns on each arc row without fetching individual signals. The `GET /accounts/:id/arcs` response currently returns `Arc` objects with only `summary`, `workflow`, `labels`, `status`, `lastSignalAt`, `urgency`. Add three fields derived from the **latest inbound signal** on the arc:
+  - `senderAddress: string` — `signal.data.from.address` of the most recent inbound email signal
+  - `recipientAddress: string` — `signal.data.recipientAddress` of the most recent inbound email signal (this is the alias the email was sent to)
+  - `subject: string` — `signal.data.subject` of the most recent inbound email signal
+  
+  These should be denormalised onto the arc item in DynamoDB (updated each time a new inbound signal is added to the arc). The `GET /accounts/:id/arcs/:arcId` single-arc response should also include them. Update the wire type and zod schema accordingly. The frontend `Arc` TypeScript type will add these as optional fields until the backend ships them.
+
+- [ ] **Return user profile data on team member list** — the `GET /accounts/:id/users` response returns `{ userId, role }` per member. The frontend team tab needs to display each member's **name**, **email**, and **profile picture URL** alongside their role. Options:
+  1. Resolve from Authress user profiles server-side and include `name`, `email`, `picture` on the `TeamMember` response object.
+  2. Add a new endpoint `GET /users/:userId/profile` that the frontend calls per-member.
+  
+  Option 1 is preferred (single request, no N+1 on the frontend). The response shape should become:
+  ```ts
+  interface TeamMember {
+    userId: string
+    role: UserRole
+    name?: string
+    email?: string
+    picture?: string
+  }
+  ```
+  Fields are optional because some users may not have profile data in Authress yet (e.g. pending invites).
