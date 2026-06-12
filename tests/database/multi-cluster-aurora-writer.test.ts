@@ -8,6 +8,7 @@ import {
   RollbackTransactionCommand,
 } from "@aws-sdk/client-rds-data";
 import { ArcMatcher as MultiClusterAuroraWriterImpl } from "../../src/database/arc-matcher.js";
+import { createMockLogger } from "../helpers/mock-logger.js";
 
 // ---------------------------------------------------------------------------
 // Mock the cluster registry to avoid coupling to the real registry values
@@ -72,7 +73,7 @@ describe("MultiClusterAuroraWriterImpl", () => {
 
   beforeEach(() => {
     rdsMock.reset();
-    writer = new MultiClusterAuroraWriterImpl();
+    writer = new MultiClusterAuroraWriterImpl(createMockLogger());
   });
 
   describe("upsertEmbedding", () => {

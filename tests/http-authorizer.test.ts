@@ -124,8 +124,7 @@ vi.mock("../src/embedding/embedding-generator.js", () => ({
 }));
 
 vi.mock("../src/database/arc-matcher.js", () => ({
-  searchDatabase: {},
-  createSearchDatabase: () => ({}),
+  createSearchDatabase: () => ({ upsertEmbedding: vi.fn().mockResolvedValue({ isOk: () => true, value: undefined }) }),
 }));
 
 vi.mock("../src/embedding/s3-retention-service.js", () => ({

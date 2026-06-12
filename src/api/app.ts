@@ -1510,6 +1510,15 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
   }), async (c) => {
     const accountId = c.req.param("accountId")!;
     const body = await zParse(UpdateAccountRequest, c.req.raw);
+
+    // Merge onboarding sub-object with existing to avoid overwriting fields not sent
+    if (body.onboarding) {
+      const existingResult = await accountDb.getAccount(accountId);
+      if (existingResult.isErr()) return err(c, 500, "Internal Server Error");
+      const existing = existingResult.value;
+      body.onboarding = { ...existing?.onboarding, ...body.onboarding };
+    }
+
     const updateResult = await accountDb.updateAccount(accountId, body as Partial<Pick<Account, "name" | "deletionRetentionDays" | "notifications" | "filtering" | "onboarding" | "afterSendAction">>);
     if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
     return c.json(toApiAccount(updateResult.value), 200);

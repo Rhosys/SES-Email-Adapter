@@ -9,7 +9,7 @@
 
 import { ScanCommand } from "@aws-sdk/lib-dynamodb";
 import { dynamo, SIGNALS_TABLE } from "../../database/shared.js";
-import { searchDatabase } from "../../database/arc-matcher.js";
+import { createSearchDatabase } from "../../database/arc-matcher.js";
 import { getRegistryById } from "../../embedding/cluster-registry.js";
 import { generateEmbeddingFromS3 } from "../../embedding/generate-embedding-from-s3.js";
 import { BedrockEmbeddingGenerator } from "../../embedding/embedding-generator.js";
@@ -47,10 +47,12 @@ export interface ReindexSegmentMessage {
 export class ReindexWorker {
   private readonly embeddingGenerator: BedrockEmbeddingGenerator;
   private readonly arcDatabase: ArcDatabase;
+  private readonly searchDatabase: ReturnType<typeof createSearchDatabase>;
 
   constructor(private readonly logger: Logger) {
     this.embeddingGenerator = new BedrockEmbeddingGenerator(new BedrockRuntimeClient({}), logger);
     this.arcDatabase = new ArcDatabase(logger);
+    this.searchDatabase = createSearchDatabase(logger);
   }
 
   async processSegmentMessage(message: ReindexSegmentMessage): Promise<Result<void, DbError | ReindexSegmentProcessingError>> {
@@ -143,7 +145,7 @@ export class ReindexWorker {
     vector: number[],
     targetRegistryId: string,
   ): Promise<Result<void, { signalId: string; cause: unknown }>> {
-    const upsertResult = await searchDatabase.upsertEmbedding({
+    const upsertResult = await this.searchDatabase.upsertEmbedding({
       registryId: targetRegistryId,
       arcId: signal.arcId!,
       accountId: signal.accountId,
@@ -190,7 +192,7 @@ export class ReindexWorker {
       return err({ signalId: signal.id, cause: cacheResult.error });
     }
 
-    const upsertResult = await searchDatabase.upsertEmbedding({
+    const upsertResult = await this.searchDatabase.upsertEmbedding({
       registryId: targetRegistryId,
       arcId: signal.arcId!,
       accountId: signal.accountId,

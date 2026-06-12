@@ -23,9 +23,9 @@ import { ok } from "../../../src/errors.js";
 const mockUpsertEmbedding = vi.fn().mockResolvedValue(ok(undefined));
 
 vi.mock("../../../src/database/arc-matcher.js", () => ({
-  searchDatabase: {
+  createSearchDatabase: () => ({
     upsertEmbedding: (...args: unknown[]) => mockUpsertEmbedding(...args),
-  },
+  }),
 }));
 
 // ---------------------------------------------------------------------------

@@ -32,9 +32,9 @@ const { mockUpsertEmbedding, mockAddEmbeddingToCache, mockGenerateForModel, mock
 // ---------------------------------------------------------------------------
 
 vi.mock("../../../src/database/arc-matcher.js", () => ({
-  searchDatabase: {
+  createSearchDatabase: () => ({
     upsertEmbedding: (...args: unknown[]) => mockUpsertEmbedding(...args),
-  },
+  }),
 }));
 
 // ---------------------------------------------------------------------------
