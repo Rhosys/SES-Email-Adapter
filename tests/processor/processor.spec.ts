@@ -10,7 +10,7 @@ import type { ContentSanitizerClient } from "../../src/processor/content-sanitiz
 import type { UserCodeExecutorClient } from "../../src/processor/user-code-client.js";
 import type { SignalClassifier, ClassificationOutput } from "../../src/classifier/classifier.js";
 import type { EmbeddingGenerator, EmbeddingResult } from "../../src/embedding/embedding-generator.js";
-import type { MultiClusterAuroraWriter } from "../../src/database/multi-cluster-aurora-writer.js";
+import type { MultiClusterAuroraWriter } from "../../src/database/arc-matcher.js";
 import type { Arc, Rule, Signal, Alias, AccountFilteringConfig } from "../../src/types/index.js";
 import { dbError } from "../../src/errors.js";
 import type { EmailService } from "../../src/email/email-service.js";

@@ -1,25 +1,12 @@
-import { RDSDataClient, ExecuteStatementCommand, BeginTransactionCommand, CommitTransactionCommand, RollbackTransactionCommand } from "@aws-sdk/client-rds-data";
 import { DeleteCommand, GetCommand, PutCommand, QueryCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { DateTime } from "luxon";
 import { dynamo, SIGNALS_TABLE, encodeCursor, decodeCursor } from "./shared.js";
 import { ok, err, dbError } from "../errors.js";
 import type { DbError, Result } from "../errors.js";
 import type { Logger } from "../logger.js";
-import type { ArcMatcher } from "../processor/processor.js";
 import type { ListArcsParams } from "../api/app.js";
 import type { Arc, Signal, AnySignal, EmailSignalData, Page, PageParams, ArcStatus, ArcUrgency, Workflow } from "../types/index.js";
 import type { CalendarEventData } from "../types/calendar.js";
-
-// ---------------------------------------------------------------------------
-// Aurora Data API client (stateless — no connection pool needed)
-// ---------------------------------------------------------------------------
-
-const SIMILARITY_THRESHOLD = 0.5;
-const CLUSTER_ARN = process.env["AURORA_CLUSTER_ARN"] ?? "";
-const SECRET_ARN  = process.env["AURORA_SECRET_ARN"]  ?? "";
-const DB_NAME     = process.env["AURORA_DB_NAME"]      ?? "signals";
-
-const rdsData = new RDSDataClient({});
 
 // ---------------------------------------------------------------------------
 // Key helpers
@@ -45,10 +32,10 @@ export interface UpdateArcFields {
 
 // ---------------------------------------------------------------------------
 // ArcDatabase
-// Owns: Arcs and Signals in SIGNALS_TABLE, plus pgvector similarity search
+// Owns: Arcs and Signals in SIGNALS_TABLE (DynamoDB)
 // ---------------------------------------------------------------------------
 
-export class ArcDatabase implements ArcMatcher {
+export class ArcDatabase {
   private readonly logger: Logger;
 
   constructor(logger: Logger) {
@@ -513,93 +500,6 @@ export class ArcDatabase implements ArcMatcher {
       const page = items.slice(0, limit);
       const nextKey = items.length > limit && res.LastEvaluatedKey ? encodeCursor(res.LastEvaluatedKey) : null;
       return ok({ items: page, ...(nextKey ? { nextCursor: nextKey } : {}) } as Page<Arc>);
-    } catch (e) {
-      return err(dbError(e));
-    }
-  }
-
-  // ---------------------------------------------------------------------------
-  // ArcMatcher (pgvector via Aurora Data API)
-  // ---------------------------------------------------------------------------
-
-  // Wraps a Data API call in an explicit transaction so SET LOCAL is scoped
-  // to that transaction — required for the RLS policy to apply correctly.
-  private async withAccountContext<T>(accountId: string, fn: (transactionId: string) => Promise<T>): Promise<T> {
-    const { transactionId } = await rdsData.send(new BeginTransactionCommand({
-      resourceArn: CLUSTER_ARN, secretArn: SECRET_ARN, database: DB_NAME,
-    }));
-    try {
-      await rdsData.send(new ExecuteStatementCommand({
-        resourceArn: CLUSTER_ARN, secretArn: SECRET_ARN, database: DB_NAME,
-        transactionId,
-        sql: "SET LOCAL app.current_account_id = :accountId",
-        parameters: [{ name: "accountId", value: { stringValue: accountId } }],
-      }));
-      const result = await fn(transactionId!);
-      await rdsData.send(new CommitTransactionCommand({
-        resourceArn: CLUSTER_ARN, secretArn: SECRET_ARN, transactionId,
-      }));
-      return result;
-    } catch (err) {
-      try {
-        await rdsData.send(new RollbackTransactionCommand({
-          resourceArn: CLUSTER_ARN, secretArn: SECRET_ARN, transactionId,
-        }));
-      } catch { /* rollback best-effort */ }
-      throw err;
-    }
-  }
-
-  async findMatch(accountId: string, recipientAddress: string, embedding: number[]): Promise<Result<Arc | null, DbError>> {
-    try {
-      const res = await this.withAccountContext(accountId, (transactionId) =>
-        rdsData.send(new ExecuteStatementCommand({
-          resourceArn: CLUSTER_ARN, secretArn: SECRET_ARN, database: DB_NAME,
-          transactionId,
-          sql: `SELECT arc_id FROM arc_embeddings
-                WHERE account_id = :accountId AND recipient_address = :recipient
-                  AND embedding <=> :embedding::vector < :threshold
-                ORDER BY embedding <=> :embedding::vector
-                LIMIT 1`,
-          parameters: [
-            { name: "accountId",  value: { stringValue: accountId } },
-            { name: "recipient",  value: { stringValue: recipientAddress } },
-            { name: "embedding",  value: { stringValue: `[${embedding.join(",")}]` } },
-            { name: "threshold",  value: { doubleValue: SIMILARITY_THRESHOLD } },
-          ],
-        })),
-      );
-      const arcId = res.records?.[0]?.[0]?.stringValue;
-      if (!arcId) return ok(null);
-      const arcResult = await dynamo.send(new GetCommand({
-        TableName: SIGNALS_TABLE,
-        Key: { pk: arcPk(accountId, arcId), sk: ITEM_SK },
-      }));
-      return ok(arcResult.Item ? (arcResult.Item as Arc) : null);
-    } catch (e) {
-      return err(dbError(e));
-    }
-  }
-
-  async upsertEmbedding(arcId: string, embedding: number[], accountId: string, recipientAddress: string): Promise<Result<void, DbError>> {
-    try {
-      await this.withAccountContext(accountId, (transactionId) =>
-        rdsData.send(new ExecuteStatementCommand({
-          resourceArn: CLUSTER_ARN, secretArn: SECRET_ARN, database: DB_NAME,
-          transactionId,
-          sql: `INSERT INTO arc_embeddings (arc_id, account_id, recipient_address, embedding, updated_at)
-                VALUES (:arcId, :accountId, :recipient, :embedding::vector, NOW())
-                ON CONFLICT (arc_id) DO UPDATE
-                  SET embedding = EXCLUDED.embedding, updated_at = NOW()`,
-          parameters: [
-            { name: "arcId",     value: { stringValue: arcId } },
-            { name: "accountId", value: { stringValue: accountId } },
-            { name: "recipient", value: { stringValue: recipientAddress } },
-            { name: "embedding", value: { stringValue: `[${embedding.join(",")}]` } },
-          ],
-        })),
-      );
-      return ok(undefined);
     } catch (e) {
       return err(dbError(e));
     }

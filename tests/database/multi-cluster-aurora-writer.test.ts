@@ -7,7 +7,7 @@ import {
   CommitTransactionCommand,
   RollbackTransactionCommand,
 } from "@aws-sdk/client-rds-data";
-import { MultiClusterAuroraWriterImpl } from "../../src/database/multi-cluster-aurora-writer.js";
+import { ArcMatcher as MultiClusterAuroraWriterImpl } from "../../src/database/arc-matcher.js";
 
 // ---------------------------------------------------------------------------
 // Mock the cluster registry to avoid coupling to the real registry values

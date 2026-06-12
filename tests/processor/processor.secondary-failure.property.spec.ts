@@ -16,7 +16,7 @@ import { makeArcDbMock, makeAccountDbMock, makeProcessingDbMock } from "./_helpe
 import type { ContentSanitizerClient } from "../../src/processor/content-sanitizer-client.js";
 import type { ClassificationOutput } from "../../src/classifier/classifier.js";
 import type { EmbeddingGenerator, EmbeddingResult } from "../../src/embedding/embedding-generator.js";
-import type { MultiClusterAuroraWriter } from "../../src/database/multi-cluster-aurora-writer.js";
+import type { MultiClusterAuroraWriter } from "../../src/database/arc-matcher.js";
 import type { Alias, AliasSender } from "../../src/types/index.js";
 import { bedrockError } from "../../src/errors.js";
 import type { BedrockError } from "../../src/errors.js";

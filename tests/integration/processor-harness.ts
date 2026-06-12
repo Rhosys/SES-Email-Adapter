@@ -34,7 +34,7 @@ import type { EmailService } from '../../src/email/email-service.js';
 import type { sendRsvp } from '../../src/processor/calendar/rsvp-composer.js';
 import type { PostApprovalCalendarHandlerDeps } from '../../src/processor/calendar/post-approval-handler.js';
 import type { EmbeddingGenerator } from '../../src/embedding/embedding-generator.js';
-import type { MultiClusterAuroraWriter } from '../../src/database/multi-cluster-aurora-writer.js';
+import type { MultiClusterAuroraWriter } from '../../src/database/arc-matcher.js';
 import type { WorkflowData } from '../../src/types/index.js';
 import { BillingHandler } from '../../src/billing/billing-handler.js';
 import type { UserCodeExecutorClient } from '../../src/processor/user-code-client.js';

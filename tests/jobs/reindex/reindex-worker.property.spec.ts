@@ -22,8 +22,8 @@ import { ok } from "../../../src/errors.js";
 
 const mockUpsertEmbedding = vi.fn().mockResolvedValue(ok(undefined));
 
-vi.mock("../../../src/database/multi-cluster-aurora-writer.js", () => ({
-  multiClusterWriter: {
+vi.mock("../../../src/database/arc-matcher.js", () => ({
+  searchDatabase: {
     upsertEmbedding: (...args: unknown[]) => mockUpsertEmbedding(...args),
   },
 }));

@@ -31,8 +31,8 @@ const { mockUpsertEmbedding, mockAddEmbeddingToCache, mockGenerateForModel, mock
 // Mock MultiClusterAuroraWriter
 // ---------------------------------------------------------------------------
 
-vi.mock("../../../src/database/multi-cluster-aurora-writer.js", () => ({
-  multiClusterWriter: {
+vi.mock("../../../src/database/arc-matcher.js", () => ({
+  searchDatabase: {
     upsertEmbedding: (...args: unknown[]) => mockUpsertEmbedding(...args),
   },
 }));
