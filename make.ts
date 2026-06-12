@@ -12,10 +12,7 @@ const packageMetadata = require('./package.json') as { name: string; version: st
 // ---------------------------------------------------------------------------
 
 const AWS_ACCOUNT_ID = process.env['AWS_ACCOUNT_ID'];
-if (!AWS_ACCOUNT_ID) throw new Error('AWS_ACCOUNT_ID is required');
-
 const AWS_REGION = process.env['AWS_REGION'] ?? process.env['AWS_DEFAULT_REGION'] ?? 'eu-central-1';
-const ENV     = process.env['ENV'] ?? 'prod';
 const version = `0.0.${process.env['GITHUB_RUN_NUMBER'] ?? process.env['CI_PIPELINE_ID'] ?? '0'}`;
 
 // Bucket convention matches the rhosys deployments pattern; override via DEPLOYMENT_BUCKET if needed
@@ -171,8 +168,6 @@ program
     // Trigger database migrations via CodeBuild (non-blocking)
     // -----------------------------------------------------------------------
     const codebuildProject = process.env['CODEBUILD_MIGRATE_PROJECT'];
-    if (!codebuildProject) throw new Error('CODEBUILD_MIGRATE_PROJECT is required');
-
     const { CodeBuildClient, StartBuildCommand } = await import('@aws-sdk/client-codebuild');
     const codebuild = new CodeBuildClient({});
     const sourceLocation = `${deploymentBucket}/${packageMetadata.name}/${version}/lambda.zip`;
