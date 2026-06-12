@@ -10,7 +10,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { RequestLogger } from "../logger.js";
 
-const logger = new RequestLogger();
+const logger = new RequestLogger({ serialize: true });
 logger.startInvocation("migrate");
 
 const CLUSTER_ARN = process.env["AURORA_CLUSTER_ARN"];

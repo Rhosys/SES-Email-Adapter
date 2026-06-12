@@ -38,7 +38,7 @@ describe("logger edge cases", () => {
     });
 
     it("redacts cognito keys in full log context", () => {
-      const logger = new RequestLogger("test1234");
+      const logger = new RequestLogger({ containerId: "test1234" });
       logger.startInvocation("test-invocation");
       logger.info("auth.context", {
         cognitoIdentityId: "us-east-1:abc-123",
@@ -57,7 +57,7 @@ describe("logger edge cases", () => {
 
   describe("circular reference handling", () => {
     it("handles circular refs gracefully with _circular marker instead of crashing", () => {
-      const logger = new RequestLogger("test1234");
+      const logger = new RequestLogger({ containerId: "test1234" });
       logger.startInvocation("test-invocation");
 
       const circular: Record<string, unknown> = { name: "test" };
@@ -92,7 +92,7 @@ describe("logger edge cases", () => {
     });
 
     it("handles BigInt in full log context", () => {
-      const logger = new RequestLogger("test1234");
+      const logger = new RequestLogger({ containerId: "test1234" });
       logger.startInvocation("test-invocation");
       logger.info("big.number", { largeId: BigInt(123456789012345) });
 
@@ -101,7 +101,7 @@ describe("logger edge cases", () => {
     });
 
     it("handles function in full log context", () => {
-      const logger = new RequestLogger("test1234");
+      const logger = new RequestLogger({ containerId: "test1234" });
       logger.startInvocation("test-invocation");
       function processEmail() {}
       logger.info("fn.test", { handler: processEmail });
@@ -113,7 +113,7 @@ describe("logger edge cases", () => {
 
   describe("empty message identifier", () => {
     it("emits valid JSON with empty string message", () => {
-      const logger = new RequestLogger("test1234");
+      const logger = new RequestLogger({ containerId: "test1234" });
       logger.startInvocation("test-invocation");
       logger.info("");
 
@@ -128,7 +128,7 @@ describe("logger edge cases", () => {
 
   describe("trackPoint() called without startInvocation()", () => {
     it("produces valid JSON with large positive elapsedMs", () => {
-      const logger = new RequestLogger("test1234");
+      const logger = new RequestLogger({ containerId: "test1234" });
       // Do NOT call startInvocation — startTime remains 0
       logger.trackPoint("early.point");
       logger.track("timing.report");

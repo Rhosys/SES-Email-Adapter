@@ -56,7 +56,7 @@ describe("Log entry structural invariant", () => {
   it.each(ALL_LEVELS.map((level) => ({ level })))(
     "level=$level produces valid JSON with required fields",
     ({ level }) => {
-      const logger = new RequestLogger("test1234");
+      const logger = new RequestLogger({ containerId: "test1234" });
       logger.startInvocation("test-invocation");
       callLevel(logger, level, "test.msg", { extra: "data" });
 
@@ -87,7 +87,7 @@ describe("Context merge preserves required fields", () => {
   });
 
   it("context keys matching required field names cannot overwrite logger state", () => {
-    const logger = new RequestLogger("test1234");
+    const logger = new RequestLogger({ containerId: "test1234" });
     logger.startInvocation("test-invocation");
 
     callLevel(logger, "info", "real.message", {
@@ -126,7 +126,7 @@ describe("Track points included for track/error/critical levels", () => {
   it.each(TRACK_POINT_LEVELS.map((level) => ({ level })))(
     "level=$level includes trackPoints array",
     ({ level }) => {
-      const logger = new RequestLogger("test1234");
+      const logger = new RequestLogger({ containerId: "test1234" });
       logger.startInvocation("test-invocation");
       logger.trackPoint("step.one");
       logger.trackPoint("step.two");
@@ -145,7 +145,7 @@ describe("Track points included for track/error/critical levels", () => {
   it.each(NO_TRACK_POINT_LEVELS.map((level) => ({ level })))(
     "level=$level does NOT include trackPoints",
     ({ level }) => {
-      const logger = new RequestLogger("test1234");
+      const logger = new RequestLogger({ containerId: "test1234" });
       logger.startInvocation("test-invocation");
       logger.trackPoint("step.one");
       callLevel(logger, level, "test.msg");
@@ -175,7 +175,7 @@ describe("Error and critical include stack trace", () => {
   it.each(STACK_LEVELS.map((level) => ({ level })))(
     "level=$level has non-empty stack field",
     ({ level }) => {
-      const logger = new RequestLogger("test1234");
+      const logger = new RequestLogger({ containerId: "test1234" });
       logger.startInvocation("test-invocation");
       callLevel(logger, level, "test.msg");
 
@@ -188,7 +188,7 @@ describe("Error and critical include stack trace", () => {
   it.each(NO_STACK_LEVELS.map((level) => ({ level })))(
     "level=$level has no stack field",
     ({ level }) => {
-      const logger = new RequestLogger("test1234");
+      const logger = new RequestLogger({ containerId: "test1234" });
       logger.startInvocation("test-invocation");
       callLevel(logger, level, "test.msg");
 
@@ -215,7 +215,7 @@ describe("startInvocation resets state and preserves container ID", () => {
   });
 
   it("after startInvocation, invocationId changes, track points cleared, containerId stable", () => {
-    const logger = new RequestLogger("test1234");
+    const logger = new RequestLogger({ containerId: "test1234" });
     logger.startInvocation("first-invocation");
     logger.trackPoint("old.point");
     logger.track("before.reset");
@@ -263,7 +263,7 @@ describe("Recursive secret redaction", () => {
   ];
 
   it.each(redactionCases)("$label", ({ key, value, expected }) => {
-    const logger = new RequestLogger("test1234");
+    const logger = new RequestLogger({ containerId: "test1234" });
     logger.startInvocation("test-invocation");
     logger.info("test.redaction", { [key]: value });
 
@@ -272,7 +272,7 @@ describe("Recursive secret redaction", () => {
   });
 
   it("nested secret fields are redacted recursively", () => {
-    const logger = new RequestLogger("test1234");
+    const logger = new RequestLogger({ containerId: "test1234" });
     logger.startInvocation("test-invocation");
     logger.info("test.nested", { outer: { inner: { apiSecret: "longvalue123456" } } });
 
@@ -298,7 +298,7 @@ describe("Code field promotion and omission", () => {
   });
 
   it("string code in context is promoted to top-level field", () => {
-    const logger = new RequestLogger("test1234");
+    const logger = new RequestLogger({ containerId: "test1234" });
     logger.startInvocation("test-invocation");
     callLevel(logger, "info", "test.msg", { code: "auth.token_expired", extra: "data" });
 
@@ -307,7 +307,7 @@ describe("Code field promotion and omission", () => {
   });
 
   it("code appears exactly once in serialized output", () => {
-    const logger = new RequestLogger("test1234");
+    const logger = new RequestLogger({ containerId: "test1234" });
     logger.startInvocation("test-invocation");
     callLevel(logger, "warn", "test.msg", { code: "db.connection_failed" });
 
@@ -329,7 +329,7 @@ describe("Code field promotion and omission", () => {
   ];
 
   it.each(nonStringCases)("$label is not promoted to top-level string", ({ code }) => {
-    const logger = new RequestLogger("test1234");
+    const logger = new RequestLogger({ containerId: "test1234" });
     logger.startInvocation("test-invocation");
     callLevel(logger, "info", "test.msg", { code } as Record<string, unknown>);
 
@@ -340,7 +340,7 @@ describe("Code field promotion and omission", () => {
   });
 
   it("missing code in context results in no code field", () => {
-    const logger = new RequestLogger("test1234");
+    const logger = new RequestLogger({ containerId: "test1234" });
     logger.startInvocation("test-invocation");
     callLevel(logger, "info", "test.msg", { other: "data" });
 
@@ -366,7 +366,7 @@ describe("Payload truncation guard", () => {
   });
 
   it("entries exceeding 262,144 bytes are truncated with _truncated flag and a WARN entry", () => {
-    const logger = new RequestLogger("test1234");
+    const logger = new RequestLogger({ containerId: "test1234" });
     logger.startInvocation("test-invocation");
     const largeValue = "x".repeat(270_000);
     logger.info("test.large.payload", { data: largeValue });
