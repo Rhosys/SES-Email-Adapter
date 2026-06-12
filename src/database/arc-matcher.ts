@@ -157,9 +157,9 @@ function getDbForCluster(cluster: ClusterRegistryEntry): AwsDataApiPgDatabase {
 // ---------------------------------------------------------------------------
 
 export class ArcMatcher implements ArcMatcherPort, MultiClusterAuroraWriter {
-  private readonly logger: Logger | undefined;
+  private readonly logger: Logger;
 
-  constructor(logger?: Logger) {
+  constructor(logger: Logger) {
     this.logger = logger;
   }
 
@@ -214,7 +214,7 @@ export class ArcMatcher implements ArcMatcherPort, MultiClusterAuroraWriter {
       }));
 
       if (!arcResult.Item) {
-        this.logger?.track("Aurora matched arcId but DDB arc is missing — orphaned embedding. Treating as no match.", { code: "arc_matcher.ghost_arc", arcId, accountId, recipientAddress });
+        this.logger.track("Aurora matched arcId but DDB arc is missing — orphaned embedding. Treating as no match.", { code: "arc_matcher.ghost_arc", arcId, accountId, recipientAddress });
         return ok(null);
       }
 
@@ -331,9 +331,6 @@ export class ArcMatcher implements ArcMatcherPort, MultiClusterAuroraWriter {
 // Factory export — handler provides the logger
 // ---------------------------------------------------------------------------
 
-export function createSearchDatabase(logger?: Logger): ArcMatcher {
+export function createSearchDatabase(logger: Logger): ArcMatcher {
   return new ArcMatcher(logger);
 }
-
-/** Default singleton (no logger) — used by reindex worker and test mocks. */
-export const searchDatabase = new ArcMatcher();
