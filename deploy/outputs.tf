@@ -83,8 +83,3 @@ output "authress_service_client_public_key" {
   description = "Base64 DER public key for Authress service client registration (POST /v1/clients/{clientId}/access-keys)"
   value       = data.aws_kms_public_key.authress_service_client.public_key
 }
-
-output "codebuild_migrate_project_name" {
-  description = "CodeBuild project name for database migrations"
-  value       = aws_codebuild_project.migrate.name
-}

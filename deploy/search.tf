@@ -119,15 +119,17 @@ resource "aws_cloudwatch_log_group" "aurora" {
 # Triggered by CI after deploy. Non-blocking — CI fires and forgets.
 # ---------------------------------------------------------------------------
 
-resource "aws_codebuild_project" "migrate" {
-  name         = "${var.service_name}-migrate"
-  service_role = aws_iam_role.codebuild_migrate.arn
+resource "aws_codebuild_project" "migration" {
+  name                   = "${lower(var.service_name)}-migrate"
+  description            = "Applies Drizzle database migrations to the Aurora cluster via RDS Data API"
+  service_role           = aws_iam_role.codebuild_migration.arn
+  concurrent_build_limit = 1
+  badge_enabled          = true
 
   artifacts { type = "NO_ARTIFACTS" }
 
   source {
-    type     = "S3"
-    location = "rhosys-deployments-artifacts-${var.aws_account_id}-${local.primary_region}/${var.service_name}/"
+    type      = "NO_SOURCE"
     buildspec = yamlencode({
       version = "0.2"
       phases = {
@@ -140,7 +142,7 @@ resource "aws_codebuild_project" "migrate" {
 
   environment {
     compute_type = "BUILD_GENERAL1_SMALL"
-    image        = "aws/codebuild/standard:7.0"
+    image        = "aws/codebuild/standard:8.0"
     type         = "LINUX_CONTAINER"
 
     environment_variable {
@@ -167,8 +169,8 @@ resource "aws_codebuild_project" "migrate" {
   build_timeout = 30
 }
 
-resource "aws_iam_role" "codebuild_migrate" {
-  name = "${var.service_name}-codebuild-migrate"
+resource "aws_iam_role" "codebuild_migration" {
+  name = "${var.service_name}-codebuild-migration"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -180,9 +182,9 @@ resource "aws_iam_role" "codebuild_migrate" {
   })
 }
 
-resource "aws_iam_role_policy" "codebuild_migrate" {
+resource "aws_iam_role_policy" "codebuild_migration" {
   name = "migrate"
-  role = aws_iam_role.codebuild_migrate.id
+  role = aws_iam_role.codebuild_migration.id
 
   policy = jsonencode({
     Version = "2012-10-17"

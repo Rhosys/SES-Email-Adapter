@@ -56,6 +56,11 @@ mock_provider "aws" {
       }
     }
   }
+  mock_data "aws_availability_zones" {
+    defaults = {
+      names = ["eu-central-1a", "eu-central-1b", "eu-central-1c"]
+    }
+  }
   mock_data "aws_kms_alias" {
     defaults = {
       target_key_arn = "arn:aws:kms:eu-central-1:123456789012:key/mock-key"

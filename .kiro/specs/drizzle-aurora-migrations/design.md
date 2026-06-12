@@ -204,8 +204,8 @@ await db.transaction(async (tx) => {
 
 ```hcl
 # CodeBuild project for running migrations
-resource "aws_codebuild_project" "migrate" {
-  name         = "${var.service_name}-migrate"
+resource "aws_codebuild_project" "migration" {
+  name         = "${lower(var.service_name)}-migrate"
   service_role = aws_iam_role.codebuild_migrate.arn
 
   artifacts { type = "NO_ARTIFACTS" }
