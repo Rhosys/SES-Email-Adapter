@@ -1,4 +1,5 @@
 import { randomUUID } from "crypto";
+import stringify from "json-stringify-safe";
 import { DateTime } from "luxon";
 
 export type LogLevel = "info" | "track" | "warn" | "error" | "critical";
@@ -105,9 +106,11 @@ export class RequestLogger implements Logger {
   private startTime = 0;
   private trackPoints: TrackPoint[] = [];
   private readonly containerId: string;
+  private readonly serialize: boolean;
 
-  constructor(containerId?: string) {
+  constructor({ containerId, serialize }: { containerId?: string; serialize?: boolean } = {}) {
     this.containerId = containerId ?? CONTAINER_ID;
+    this.serialize = serialize ?? false;
   }
 
   startInvocation(invocationId: string): void {
@@ -192,21 +195,22 @@ export class RequestLogger implements Logger {
     } catch {
       // Circular reference or other failure
       const fallbackEmitter = level === "error" || level === "critical" ? console.error : level === "warn" ? console.warn : console.log;
-      fallbackEmitter({
+      const fallbackEntry = {
         level: level.toUpperCase(),
         title,
         timestamp: entry.timestamp,
         invocationId: this.invocationId,
         containerId: this.containerId,
         _serializationError: true,
-      });
+      };
+      fallbackEmitter(this.serialize ? stringify(fallbackEntry, null, 2) : fallbackEntry);
       return;
     }
 
     const byteSize = Buffer.byteLength(JSON.stringify(redacted), "utf8");
     if (byteSize > PAYLOAD_LIMIT) {
       // Emit a separate warning about the truncation
-      console.warn({
+      const truncationWarning = {
         level: "WARN",
         title: "logger.payload_truncated",
         timestamp: DateTime.utc().toISO()!,
@@ -214,22 +218,24 @@ export class RequestLogger implements Logger {
         containerId: this.containerId,
         originalTitle: title,
         originalSizeBytes: byteSize,
-      });
+      };
+      console.warn(this.serialize ? stringify(truncationWarning, null, 2) : truncationWarning);
 
       // Truncate: keep required fields + truncation marker
       const truncatedEmitter = level === "error" || level === "critical" ? console.error : level === "warn" ? console.warn : console.log;
-      truncatedEmitter({
+      const truncatedEntry = {
         level: level.toUpperCase(),
         title,
         timestamp: entry.timestamp,
         invocationId: this.invocationId,
         containerId: this.containerId,
         _truncated: true,
-      });
+      };
+      truncatedEmitter(this.serialize ? stringify(truncatedEntry, null, 2) : truncatedEntry);
       return;
     }
 
     const emit = level === "error" || level === "critical" ? console.error : level === "warn" ? console.warn : console.log;
-    emit(redacted);
+    emit(this.serialize ? stringify(redacted, null, 2) : redacted);
   }
 }
