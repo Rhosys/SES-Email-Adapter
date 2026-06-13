@@ -45,8 +45,8 @@ resource "aws_security_group" "aurora" {
 resource "aws_rds_cluster_parameter_group" "aurora" {
   for_each = local.cluster_registry
 
-  name   = "${lower(var.service_name)}-${each.key}-pg"
-  family = "aurora-postgresql18"
+  name_prefix = "${lower(var.service_name)}-${each.key}-pg-"
+  family      = "aurora-postgresql18"
 
   # pgvector does not require shared_preload_libraries — it is loaded
   # on-demand via CREATE EXTENSION vector; in the bootstrap migration.
@@ -138,6 +138,10 @@ resource "aws_rds_cluster_parameter_group" "aurora" {
   parameter {
     name  = "log_replication_commands"
     value = "0" # OFF — single-region, no logical replication in use
+  }
+
+  lifecycle {
+    create_before_destroy = true
   }
 }
 
