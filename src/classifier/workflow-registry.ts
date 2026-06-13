@@ -94,7 +94,7 @@ export const WORKFLOW_REGISTRY: WorkflowDefinition[] = [
   },
   {
     name: "alert",
-    description: "Security events, fraud, CI failures, infra alerts — investigate now",
+    description: "Security events specific to the user's account — suspicious login, fraud, CI failures, infra alerts — investigate now. NOT for mass-sent phishing awareness or 'think before you click' campaigns (use status:security_awareness).",
     fields: [
       { name: "alertType", type: "enum", required: true, enumValues: ["suspicious_login", "new_device", "password_changed", "breach_notice", "api_key_exposed", "account_locked", "fraud_alert", "ci_failure", "deployment_failed", "error_spike", "domain_expiry", "cert_expiry", "security_scan", "other"] },
       { name: "service", type: "string", required: true },
@@ -132,9 +132,9 @@ export const WORKFLOW_REGISTRY: WorkflowDefinition[] = [
   },
   {
     name: "status",
-    description: "ToS updates, service notices, government notices — passive informational",
+    description: "ToS updates, service notices, government notices, security awareness campaigns — passive informational, no action required. Use security_awareness for mass-sent phishing warnings, 'think before you click' emails, and generic credential-safety reminders from banks or service providers.",
     fields: [
-      { name: "statusType", type: "enum", required: true, enumValues: ["terms_update", "privacy_policy", "data_processor", "cookie_policy", "compliance", "service_notice", "government", "account_notification", "other"] },
+      { name: "statusType", type: "enum", required: true, enumValues: ["terms_update", "privacy_policy", "data_processor", "cookie_policy", "compliance", "service_notice", "government", "account_notification", "security_awareness", "other"] },
       { name: "provider", type: "string", required: true },
       { name: "effectiveDate", type: "string", required: false },
       { name: "referenceNumber", type: "string", required: false },

@@ -162,7 +162,7 @@ export interface StatusData {
   workflow: "status";
   statusType:
     | "terms_update" | "privacy_policy" | "data_processor" | "cookie_policy" | "compliance"
-    | "service_notice" | "government" | "account_notification" | "other";
+    | "service_notice" | "government" | "account_notification" | "security_awareness" | "other";
   provider: string;
   effectiveDate?: string;
   referenceNumber?: string;
