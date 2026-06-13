@@ -268,11 +268,11 @@ export const SYSTEM_RULES: Rule[] = [
   // --- Sender / content gating (1–8) ----------------------------------------
   { id: "SR-14", accountId: "SYSTEM", name: "Auto-approve sender on matched conversation", condition: JSON.stringify({ "and": [in_("system:workflow:conversation"), in_("system:sender:untrusted"), { "var": "isMatchedArc" }] }), actions: [{ type: "approve_sender" }], status: "enabled", priorityOrder: 1, createdAt: "", updatedAt: "" },
   { id: "SR-01", accountId: "SYSTEM", name: "Block onboarding emails", condition: JSON.stringify(in_("system:workflow:onboarding")), actions: [{ type: "block_hidden" }], status: "enabled", priorityOrder: 2, createdAt: "", updatedAt: "" },
-  { id: "SR-05", accountId: "SYSTEM", name: "Block status emails", condition: JSON.stringify(in_("system:workflow:status")), actions: [{ type: "block_hidden" }], status: "enabled", priorityOrder: 3, createdAt: "", updatedAt: "" },
+  { id: "SR-05", accountId: "SYSTEM", name: "Block notice emails", condition: JSON.stringify(in_("system:workflow:notice")), actions: [{ type: "block_hidden" }], status: "enabled", priorityOrder: 3, createdAt: "", updatedAt: "" },
   { id: "SR-03", accountId: "SYSTEM", name: "Quarantine high-spam signals", condition: JSON.stringify(in_("system:spam:high")), actions: [{ type: "quarantine_hidden" }], status: "enabled", priorityOrder: 4, createdAt: "", updatedAt: "" },
   { id: "SR-25", accountId: "SYSTEM", name: "Quarantine security alert emails", condition: JSON.stringify(in_("system:auth:security_alert")), actions: [{ type: "quarantine_hidden" }], status: "enabled", priorityOrder: 5, createdAt: "", updatedAt: "" },
   { id: "SR-04", accountId: "SYSTEM", name: "Quarantine medium spam", condition: JSON.stringify(in_("system:spam:medium")), actions: [{ type: "quarantine" }], status: "enabled", priorityOrder: 6, createdAt: "", updatedAt: "" },
-  { id: "SR-06", accountId: "SYSTEM", name: "Suppress notification for status emails", condition: JSON.stringify(in_("system:workflow:status")), actions: [{ type: "suppress_notification" }], status: "enabled", priorityOrder: 7, createdAt: "", updatedAt: "" },
+  { id: "SR-06", accountId: "SYSTEM", name: "Suppress notification for notice emails", condition: JSON.stringify(in_("system:workflow:notice")), actions: [{ type: "suppress_notification" }], status: "enabled", priorityOrder: 7, createdAt: "", updatedAt: "" },
   { id: "SR-07", accountId: "SYSTEM", name: "Suppress notification for content emails", condition: JSON.stringify(in_("system:workflow:content")), actions: [{ type: "suppress_notification" }], status: "enabled", priorityOrder: 8, createdAt: "", updatedAt: "" },
   // --- Workflow-specific urgency (9–18) ----------------------------------------
   // conversation: high when reply is needed and tone is urgent/negative
@@ -820,8 +820,8 @@ export class SignalProcessor {
           textBody: "",
           attachments: [],
           headers: {},
-          workflow: "status",
-          workflowData: { workflow: "status", statusType: "other", provider: "" } as const,
+          workflow: "notice",
+          workflowData: { workflow: "notice", noticeType: "other", provider: "" } as const,
           spamScore: 0,
           summary: "",
         },
@@ -1694,7 +1694,7 @@ export function deriveGroupingKey(
     case "auth":
     case "content":
     case "onboarding":
-    case "status":
+    case "notice":
     case "payments":
     case "alert":
     case "test":

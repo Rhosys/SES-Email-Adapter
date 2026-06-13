@@ -141,8 +141,8 @@ describe("Blocked/quarantined signals never trigger saveArc", () => {
       rules: SYSTEM_RULES,
     },
     {
-      label: "status workflow → SR-05 blocks",
-      classifier: makeClassifier({ workflow: "status", workflowData: { workflow: "status", statusType: "terms_update", provider: "gov.uk" } }),
+      label: "notice workflow → SR-05 blocks",
+      classifier: makeClassifier({ workflow: "notice", workflowData: { workflow: "notice", noticeType: "terms_update", provider: "gov.uk" } }),
       contentSanitizer: makeContentSanitizer("gov.uk"),
       unknownSenderPolicy: "quarantine_visible",
       senderEntry: { accountId: TEST_ACCOUNT_ID, aliasAddress: "user@example.com", domain: "example.com", alias: "user", senderDomain: "gov.uk", policy: "allow", addedAt: "2024-01-01T00:00:00Z" },

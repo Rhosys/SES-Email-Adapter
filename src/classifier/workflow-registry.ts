@@ -131,10 +131,10 @@ export const WORKFLOW_REGISTRY: WorkflowDefinition[] = [
     ],
   },
   {
-    name: "status",
+    name: "notice",
     description: "ToS updates, service notices, government notices, security awareness campaigns — passive informational, no action required. Use security_awareness for mass-sent phishing warnings, 'think before you click' emails, and generic credential-safety reminders from banks or service providers.",
     fields: [
-      { name: "statusType", type: "enum", required: true, enumValues: ["terms_update", "privacy_policy", "data_processor", "cookie_policy", "compliance", "service_notice", "government", "account_notification", "security_awareness", "other"] },
+      { name: "noticeType", type: "enum", required: true, enumValues: ["terms_update", "privacy_policy", "data_processor", "cookie_policy", "compliance", "service_notice", "government", "account_notification", "security_awareness", "other"] },
       { name: "provider", type: "string", required: true },
       { name: "effectiveDate", type: "string", required: false },
       { name: "referenceNumber", type: "string", required: false },

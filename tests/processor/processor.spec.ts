@@ -1164,9 +1164,9 @@ describe("SignalProcessor", () => {
         .toBe("me@example.com:test:mydomain.com");
     });
 
-    it("uses senderETLD1 grouping for status workflow (threads all notices from same sender)", () => {
-      expect(deriveGroupingKey("status", { workflow: "status", statusType: "privacy_policy", provider: "Google" }, "me@example.com", "google.com"))
-        .toBe("me@example.com:status:google.com");
+    it("uses senderETLD1 grouping for notice workflow (threads all notices from same sender)", () => {
+      expect(deriveGroupingKey("notice", { workflow: "notice", noticeType: "privacy_policy", provider: "Google" }, "me@example.com", "google.com"))
+        .toBe("me@example.com:notice:google.com");
     });
 
     it("uses senderETLD1 grouping for payments workflow", () => {
@@ -1251,9 +1251,9 @@ describe("SignalProcessor", () => {
       expect(baseUrgency("content", { workflow: "content", contentType: "promotion", publisher: "Nike" })).toBe("low");
     });
 
-    it("status is always silent", () => {
-      expect(baseUrgency("status", { workflow: "status", statusType: "privacy_policy", provider: "Google" })).toBe("silent");
-      expect(baseUrgency("status", { workflow: "status", statusType: "service_notice", provider: "Stripe" })).toBe("silent");
+    it("notice is always silent", () => {
+      expect(baseUrgency("notice", { workflow: "notice", noticeType: "privacy_policy", provider: "Google" })).toBe("silent");
+      expect(baseUrgency("notice", { workflow: "notice", noticeType: "service_notice", provider: "Stripe" })).toBe("silent");
     });
 
     it("onboarding is always silent", () => {
@@ -1473,8 +1473,8 @@ describe("SignalProcessor", () => {
   // -------------------------------------------------------------------------
 
   const noticeClassification: ClassificationOutput = {
-    workflow: "status",
-    workflowData: { workflow: "status", statusType: "privacy_policy", provider: "Google" },
+    workflow: "notice",
+    workflowData: { workflow: "notice", noticeType: "privacy_policy", provider: "Google" },
     spamScore: 0.0,
     summary: "Privacy policy update from Google.",
     labels: [],
@@ -1496,10 +1496,10 @@ describe("SignalProcessor", () => {
       expect(arcDb.saveArc).not.toHaveBeenCalled();
       const signal = vi.mocked(arcDb.saveSignal).mock.calls[0]![0] as Signal;
       expect(signal.status).toBe("block_hidden");
-      expect(signal.data.workflow).toBe("status");
+      expect(signal.data.workflow).toBe("notice");
     });
 
-    it("does not call notifier for a blocked status email", async () => {
+    it("does not call notifier for a blocked notice email", async () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok(noticeClassification));
 
       await processor.processRecord(makeMessage(), 1);
