@@ -53,16 +53,18 @@ resource "aws_rds_cluster_parameter_group" "aurora" {
 
   # -----------------------------------------------------------------------
   # Connection logging
-  # Aurora defaults both to ON; Data API cycles connections on every Lambda
-  # invocation — the dominant source of log volume.
+  # Aurora PG17 defaulted both to ON; PG18 changed log_connections from a
+  # boolean to an enum (receipt, authentication, authorization,
+  # setup_durations, all). Empty string disables it. log_disconnections
+  # remains a boolean.
   # -----------------------------------------------------------------------
   parameter {
     name  = "log_connections"
-    value = "0" # OFF — connection-per-invocation noise via Data API pool
+    value = "" # PG18 enum — empty string disables; "all" = log everything
   }
   parameter {
     name  = "log_disconnections"
-    value = "0" # OFF — same reason as log_connections
+    value = "0" # boolean — still off/0 in PG18
   }
   parameter {
     name  = "log_hostname"
