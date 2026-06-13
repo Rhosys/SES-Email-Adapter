@@ -111,11 +111,10 @@ resource "aws_rds_cluster_parameter_group" "aurora" {
 
   # -----------------------------------------------------------------------
   # Checkpoint logging
+  # log_checkpoints does not exist in the aurora-postgresql17 parameter
+  # family — Aurora uses a distributed storage layer with no traditional
+  # PostgreSQL WAL checkpoints, so the parameter is absent entirely.
   # -----------------------------------------------------------------------
-  parameter {
-    name  = "log_checkpoints"
-    value = "0" # OFF — Aurora Serverless manages checkpoints internally; not actionable
-  }
 
   # -----------------------------------------------------------------------
   # Autovacuum logging
