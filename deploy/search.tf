@@ -46,7 +46,7 @@ resource "aws_rds_cluster_parameter_group" "aurora" {
   for_each = local.cluster_registry
 
   name   = "${lower(var.service_name)}-${each.key}-pg"
-  family = "aurora-postgresql17"
+  family = "aurora-postgresql18"
 
   # pgvector does not require shared_preload_libraries — it is loaded
   # on-demand via CREATE EXTENSION vector; in the bootstrap migration.
@@ -111,7 +111,7 @@ resource "aws_rds_cluster_parameter_group" "aurora" {
 
   # -----------------------------------------------------------------------
   # Checkpoint logging
-  # log_checkpoints does not exist in the aurora-postgresql17 parameter
+  # log_checkpoints does not exist in the aurora-postgresql18 parameter
   # family — Aurora uses a distributed storage layer with no traditional
   # PostgreSQL WAL checkpoints, so the parameter is absent entirely.
   # -----------------------------------------------------------------------
@@ -147,7 +147,8 @@ resource "aws_rds_cluster" "aurora" {
   cluster_identifier              = "${lower(var.service_name)}-${each.key}"
   engine                          = "aurora-postgresql"
   engine_mode                     = "provisioned"
-  engine_version                  = "17.7"
+  engine_version                  = "18.3"
+  allow_major_version_upgrade     = true
   database_name                   = "signals"
   master_username                 = "master_admin"
   manage_master_user_password     = true
