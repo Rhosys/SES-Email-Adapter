@@ -2,6 +2,8 @@
 
 ## Infrastructure / Terraform
 
+- [ ] **Global Terraform/IaC rule: always validate parameter values against the live API spec before committing** — never assume a parameter's type or allowed values from training data or docs for an older version. Before writing any parameter value, web-search the exact parameter name + engine version to confirm the current type (boolean, enum, integer, string) and allowed values. Alternatively, use SDK/CLI validation: `aws rds describe-engine-default-cluster-parameters --db-parameter-group-family <family>` returns the authoritative allowed-values list for every parameter. Engine major versions can change parameter types entirely (e.g. `log_connections` changed from boolean to enum in PostgreSQL 18) which breaks applies with `InvalidParameterValue`.
+
 - [ ] **Global Terraform rule: always use `create_before_destroy` + `name_prefix` on replaceable resources** — any resource that may be force-replaced (parameter groups, security groups, IAM roles, ACM certs, etc.) must set `lifecycle { create_before_destroy = true }` and use `name_prefix` instead of `name`. Using a fixed `name` with `create_before_destroy` causes a duplicate-name conflict; `name_prefix` lets AWS append a unique suffix so the new resource can be created before the old one is deleted. Without this, OpenTofu deletes the old resource first, which fails when other resources (e.g. an RDS cluster) are still attached to it.
 
 ## Processing & Architecture
