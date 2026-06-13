@@ -356,11 +356,8 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     if (existingResult.isErr()) return err(c, 500, "Internal Server Error");
     if (existingResult.value.length > 0) return err(c, 409, "Account already exists", "ACCOUNT_EXISTS");
 
-    // Generate a unique account ID — cycle until DynamoDB conditional put succeeds.
-    // Authress is called before the DDB write (external before DB). On the
-    // vanishingly rare ID collision, removeUser cleans up the Authress record
-    // before the next attempt. generateAccountId uses randomBytes(10) → 36^10
-    // ≈ 3.6×10^15 space so collision is essentially impossible in practice.
+    // generateAccountId uses randomBytes(10) → collision space ≈ 3.6×10^15;
+    // retry loop is a safety net only.
     const now = DateTime.utc().toISO()!;
     let account: Account | null = null;
     for (let attempt = 0; attempt < 5; attempt++) {
@@ -374,27 +371,29 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
         updatedAt: now,
       };
 
-      // Authress first — external write before DDB commit
-      const accessResult = await access.addUser(candidate.id, userId, "admin");
-      if (accessResult.isErr()) {
-        logger.error("Failed to create Authress access record for new account.", { code: "api.account_create.authress_failed", userId, accountId: candidate.id, error: accessResult.error });
-        return err(c, 500, "Internal Server Error");
+      // Step Function first — self-healing: checks DDB account existence and
+      // Authress permissions on each retry, so an orphaned execution (from an ID
+      // collision below) fails cleanly when it finds no DDB record.
+      if (accountCreationStarter) {
+        await accountCreationStarter.start(candidate.id, userId);
       }
 
+      // DDB write — commit the account record
       const createResult = await accountDb.createAccount(candidate);
       if (createResult.isOk()) {
         account = candidate;
         break;
       }
-
-      // ConditionalCheckFailedException means ID collision — roll back Authress and retry
-      await access.removeUser(candidate.id, userId);
+      // ID collision — orphaned SFN execution will fail cleanly without a DDB record
     }
     if (!account) return err(c, 500, "Internal Server Error");
 
-    // Start onboarding Step Function (fire-and-forget — errors are swallowed internally)
-    if (accountCreationStarter) {
-      await accountCreationStarter.start(account.id, userId);
+    // Authress write — blocking so the user gets valid permissions on the 201 response
+    // (SFN also writes Authress as a self-healing fallback)
+    const accessResult = await access.addUser(account.id, userId, "admin");
+    if (accessResult.isErr()) {
+      logger.error("Failed to create Authress access record for new account.", { code: "api.account_create.authress_failed", userId, accountId: account.id, error: accessResult.error });
+      return err(c, 500, "Internal Server Error");
     }
 
     return c.json(toApiAccount(account), 201);
