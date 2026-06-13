@@ -50,6 +50,96 @@ resource "aws_rds_cluster_parameter_group" "aurora" {
 
   # pgvector does not require shared_preload_libraries — it is loaded
   # on-demand via CREATE EXTENSION vector; in the bootstrap migration.
+
+  # -----------------------------------------------------------------------
+  # Connection logging
+  # Aurora defaults both to ON; Data API cycles connections on every Lambda
+  # invocation — the dominant source of log volume.
+  # -----------------------------------------------------------------------
+  parameter {
+    name  = "log_connections"
+    value = "0" # OFF — connection-per-invocation noise via Data API pool
+  }
+  parameter {
+    name  = "log_disconnections"
+    value = "0" # OFF — same reason as log_connections
+  }
+  parameter {
+    name  = "log_hostname"
+    value = "0" # OFF — DNS lookup on every connection; irrelevant with Data API
+  }
+
+  # -----------------------------------------------------------------------
+  # Statement logging
+  # -----------------------------------------------------------------------
+  parameter {
+    name  = "log_statement"
+    value = "ddl" # DDL only — captures migrations/schema changes; skips embedding queries
+  }
+  parameter {
+    name  = "log_duration"
+    value = "0" # OFF — log_min_duration_statement handles selective slow-query logging
+  }
+  parameter {
+    name  = "log_min_duration_statement"
+    value = "5000" # 5 s — log only genuinely slow queries; -1 disables, 0 logs everything
+  }
+
+  # -----------------------------------------------------------------------
+  # Error / message severity
+  # -----------------------------------------------------------------------
+  parameter {
+    name  = "log_min_messages"
+    value = "WARNING" # Aurora default — INFO/DEBUG would be a firehose
+  }
+  parameter {
+    name  = "log_min_error_statement"
+    value = "ERROR" # log the SQL text that caused errors and above
+  }
+  parameter {
+    name  = "log_error_verbosity"
+    value = "default" # verbose adds stack traces; terse strips useful context
+  }
+
+  # -----------------------------------------------------------------------
+  # Lock / wait logging
+  # -----------------------------------------------------------------------
+  parameter {
+    name  = "log_lock_waits"
+    value = "1" # ON — lock waits are rare but signal contention; worth capturing
+  }
+
+  # -----------------------------------------------------------------------
+  # Checkpoint logging
+  # -----------------------------------------------------------------------
+  parameter {
+    name  = "log_checkpoints"
+    value = "0" # OFF — Aurora Serverless manages checkpoints internally; not actionable
+  }
+
+  # -----------------------------------------------------------------------
+  # Autovacuum logging
+  # -----------------------------------------------------------------------
+  parameter {
+    name  = "log_autovacuum_min_duration"
+    value = "1000" # 1 s — pgvector tables need regular vacuuming; slow runs indicate bloat
+  }
+
+  # -----------------------------------------------------------------------
+  # Temp file logging
+  # -----------------------------------------------------------------------
+  parameter {
+    name  = "log_temp_files"
+    value = "10240" # 10 MB threshold — large spills indicate memory pressure on vector queries
+  }
+
+  # -----------------------------------------------------------------------
+  # Replication logging
+  # -----------------------------------------------------------------------
+  parameter {
+    name  = "log_replication_commands"
+    value = "0" # OFF — single-region, no logical replication in use
+  }
 }
 
 resource "aws_rds_cluster" "aurora" {
