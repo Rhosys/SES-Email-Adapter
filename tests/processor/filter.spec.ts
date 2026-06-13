@@ -57,7 +57,7 @@ describe("assignSystemLabels — workflow label", () => {
   });
 
   it("emits correct label for every workflow", () => {
-    const workflows = ["conversation", "crm", "package", "travel", "payments", "alert", "content", "onboarding", "status", "healthcare", "job", "support", "test"] as const;
+    const workflows = ["conversation", "crm", "package", "travel", "payments", "alert", "content", "onboarding", "notice", "healthcare", "job", "support", "test"] as const;
     for (const workflow of workflows) {
       const labels = assignSystemLabels(makeCtx({ workflow, workflowData: { workflow } as never }));
       expect(labels).toContain(`system:workflow:${workflow}`);
