@@ -2032,9 +2032,8 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
       createdAt: existing?.createdAt ?? now,
       ...(existing?.verifiedAt !== undefined ? { verifiedAt: existing.verifiedAt } : {}),
     };
-    const saveResult = await accountDb.saveVerifiedForwardingAddress(addr);
-    if (saveResult.isErr()) return err(c, 500, "Internal Server Error");
-
+    // SES first — send verification email before persisting the address so a
+    // mailer failure never leaves a pending record the user can't re-trigger.
     if (verificationMailer) {
       const verifyResult = await verificationMailer.sendForwardVerification(accountId, addr.address, addr.token);
       if (verifyResult.isErr()) {
@@ -2042,6 +2041,9 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
         return err(c, 422, "Failed to send verification email. Please try again.");
       }
     }
+
+    const saveResult = await accountDb.saveVerifiedForwardingAddress(addr);
+    if (saveResult.isErr()) return err(c, 500, "Internal Server Error");
 
     return c.json(toApiForwardingAddress(addr), 201);
   });
