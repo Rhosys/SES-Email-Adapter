@@ -356,7 +356,11 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     if (existingResult.isErr()) return err(c, 500, "Internal Server Error");
     if (existingResult.value.length > 0) return err(c, 409, "Account already exists", "ACCOUNT_EXISTS");
 
-    // Generate a unique account ID — cycle until DynamoDB conditional put succeeds
+    // Generate a unique account ID — cycle until DynamoDB conditional put succeeds.
+    // Authress is called before the DDB write (external before DB). On the
+    // vanishingly rare ID collision, removeUser cleans up the Authress record
+    // before the next attempt. generateAccountId uses randomBytes(10) → 36^10
+    // ≈ 3.6×10^15 space so collision is essentially impossible in practice.
     const now = DateTime.utc().toISO()!;
     let account: Account | null = null;
     for (let attempt = 0; attempt < 5; attempt++) {
@@ -369,20 +373,24 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
         createdAt: now,
         updatedAt: now,
       };
+
+      // Authress first — external write before DDB commit
+      const accessResult = await access.addUser(candidate.id, userId, "admin");
+      if (accessResult.isErr()) {
+        logger.error("Failed to create Authress access record for new account.", { code: "api.account_create.authress_failed", userId, accountId: candidate.id, error: accessResult.error });
+        return err(c, 500, "Internal Server Error");
+      }
+
       const createResult = await accountDb.createAccount(candidate);
       if (createResult.isOk()) {
         account = candidate;
         break;
       }
-      // ConditionalCheckFailedException means ID collision — retry with a new ID
+
+      // ConditionalCheckFailedException means ID collision — roll back Authress and retry
+      await access.removeUser(candidate.id, userId);
     }
     if (!account) return err(c, 500, "Internal Server Error");
-
-    // Grant admin role in Authress
-    const accessResult = await access.addUser(account.id, userId, "admin");
-    if (accessResult.isErr()) {
-      logger.error("Failed to create Authress access record for new account. The account exists in DynamoDB but the user won't have permissions until this is resolved.", { code: "api.account_create.authress_failed", userId, accountId: account.id, error: accessResult.error });
-    }
 
     // Start onboarding Step Function (fire-and-forget — errors are swallowed internally)
     if (accountCreationStarter) {

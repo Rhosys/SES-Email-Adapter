@@ -148,32 +148,8 @@ export async function handlePostApprovalCalendar(
     },
   };
 
-  const saveCalResult = await arcDb.saveSignal(calendarSignal);
-  if (saveCalResult.isErr()) {
-    logger.warn("Post-approval calendar: failed to save calendar signal.", {
-      code: "processor.post_approval_calendar.save_failed",
-      accountId,
-      signalId: signal.id,
-      error: saveCalResult.error,
-    });
-    return;
-  }
-
-  // Apply system:calendar label to the arc
-  if (!arc.labels.includes("system:calendar")) {
-    arc.labels = [...arc.labels, "system:calendar"];
-    const updateResult = await arcDb.updateArc(accountId, arc.id, arc.status, arc.lastSignalAt!, { labels: arc.labels });
-    if (updateResult.isErr()) {
-      logger.warn("Post-approval calendar: failed to apply system:calendar label.", {
-        code: "processor.post_approval_calendar.label_failed",
-        accountId,
-        arcId: arc.id,
-        error: updateResult.error,
-      });
-    }
-  }
-
-  // Forward the calendar invite
+  // Forward first — external write before DB writes so a DDB failure never
+  // leaves a committed record pointing to a calendar invite that was never sent.
   const accountResult = await accountDb.getAccount(accountId);
   const calendarForwardingAddress = accountResult.isOk()
     ? accountResult.value?.defaultCalendarInviteForwardingAddress ?? ""
@@ -200,6 +176,31 @@ export async function handlePostApprovalCalendar(
       error: forwardResult.error,
     });
     return;
+  }
+
+  const saveCalResult = await arcDb.saveSignal(calendarSignal);
+  if (saveCalResult.isErr()) {
+    logger.warn("Post-approval calendar: failed to save calendar signal.", {
+      code: "processor.post_approval_calendar.save_failed",
+      accountId,
+      signalId: signal.id,
+      error: saveCalResult.error,
+    });
+    return;
+  }
+
+  // Apply system:calendar label to the arc
+  if (!arc.labels.includes("system:calendar")) {
+    arc.labels = [...arc.labels, "system:calendar"];
+    const updateResult = await arcDb.updateArc(accountId, arc.id, arc.status, arc.lastSignalAt!, { labels: arc.labels });
+    if (updateResult.isErr()) {
+      logger.warn("Post-approval calendar: failed to apply system:calendar label.", {
+        code: "processor.post_approval_calendar.label_failed",
+        accountId,
+        arcId: arc.id,
+        error: updateResult.error,
+      });
+    }
   }
 
   logger.info("Post-approval calendar: processed and forwarded.", {
