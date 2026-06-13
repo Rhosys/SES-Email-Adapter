@@ -50,6 +50,28 @@ resource "aws_rds_cluster_parameter_group" "aurora" {
 
   # pgvector does not require shared_preload_libraries — it is loaded
   # on-demand via CREATE EXTENSION vector; in the bootstrap migration.
+
+  # Aurora PostgreSQL defaults log_connections and log_disconnections to ON.
+  # The Data API maintains an internal connection pool, so every Lambda
+  # invocation triggers multiple connection/disconnection log entries — the
+  # dominant source of log volume. Turn them off; errors are still captured
+  # via log_min_messages (WARNING) which remains at its default.
+  parameter {
+    name  = "log_connections"
+    value = "0"
+  }
+
+  parameter {
+    name  = "log_disconnections"
+    value = "0"
+  }
+
+  # Log only statements that take longer than 10 seconds. This keeps slow
+  # query visibility without logging routine embedding/search queries.
+  parameter {
+    name  = "log_min_duration_statement"
+    value = "10000"
+  }
 }
 
 resource "aws_rds_cluster" "aurora" {
