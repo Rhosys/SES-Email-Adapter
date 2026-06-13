@@ -1,5 +1,9 @@
 # TODO
 
+## Infrastructure / Terraform
+
+- [ ] **Global Terraform rule: always use `create_before_destroy` + `name_prefix` on replaceable resources** — any resource that may be force-replaced (parameter groups, security groups, IAM roles, ACM certs, etc.) must set `lifecycle { create_before_destroy = true }` and use `name_prefix` instead of `name`. Using a fixed `name` with `create_before_destroy` causes a duplicate-name conflict; `name_prefix` lets AWS append a unique suffix so the new resource can be created before the old one is deleted. Without this, OpenTofu deletes the old resource first, which fails when other resources (e.g. an RDS cluster) are still attached to it.
+
 ## Processing & Architecture
 
 - [ ] **Audit multi-write endpoints for DB-last ordering (arch rule #28)** — review all API handlers that perform writes to multiple systems (SES, S3, SQS, external services) alongside a DynamoDB write. Ensure the DB write happens last in every case. Known endpoints to check: `POST /domains` (done), `POST /accounts` (creates account + starts SFN), `POST /signals/:id/send` (sends via SES then updates status), `POST /signals/:id/quarantineResponse`, forwarding address verification flow, RSVP send. For each: confirm external writes are idempotent, DB write is final.
