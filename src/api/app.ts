@@ -1316,10 +1316,10 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     if (rule.accountId === "SYSTEM") {
       const changedKeys = Object.keys(body).filter((k) => (body as Record<string, unknown>)[k] !== undefined);
       if (changedKeys.some((k) => k !== "status")) {
-        return err(c, 400, "System rules can only be enabled or disabled", "SYSTEM_RULE_IMMUTABLE");
+        return err(c, 403, "System rules can only be enabled or disabled", "SYSTEM_RULE_IMMUTABLE");
       }
       if (body.status === undefined) {
-        return err(c, 400, "System rules can only be enabled or disabled", "SYSTEM_RULE_IMMUTABLE");
+        return err(c, 403, "System rules can only be enabled or disabled", "SYSTEM_RULE_IMMUTABLE");
       }
       const result = await accountDb.upsertSystemRuleStatus(accountId, rule.id, body.status);
       if (result.isErr()) return err(c, 500, "Internal Server Error");
