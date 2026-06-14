@@ -1508,14 +1508,14 @@ export class SignalProcessor {
     }
 
     // Inject forwardCalendarInvite action into the signal's matchedRules so the
-    // side-effect handler triggers forwarding. The system rule (SR-17) won't match
+    // side-effect handler triggers forwarding. The system rule (SR-18) won't match
     // on the first signal because the label is applied after rule evaluation.
     const existingRules = signal.data.matchedRules ?? [];
     const hasCalendarForward = existingRules.some(r => r.actions.some(a => a.type === "forwardCalendarInvite"));
     if (!hasCalendarForward) {
       signal.data.matchedRules = [
         ...existingRules,
-        { ruleId: "SR-17", actions: [{ type: "forwardCalendarInvite" }], labelsAdded: [] },
+        { ruleId: "SR-18", actions: [{ type: "forwardCalendarInvite" }], labelsAdded: [] },
       ];
     }
 
