@@ -90,8 +90,8 @@ resource "aws_sfn_state_machine" "account_creation" {
         Next       = "SecondWait"
         Retry = [{
           ErrorEquals     = ["States.ALL"]
-          IntervalSeconds = 60
-          MaxAttempts     = 5
+          IntervalSeconds = 2
+          MaxAttempts     = 13
           BackoffRate     = 2
         }]
         Catch = [{
@@ -115,8 +115,8 @@ resource "aws_sfn_state_machine" "account_creation" {
         Next       = "TrialCheckWait"
         Retry = [{
           ErrorEquals     = ["States.ALL"]
-          IntervalSeconds = 60
-          MaxAttempts     = 5
+          IntervalSeconds = 2
+          MaxAttempts     = 13
           BackoffRate     = 2
         }]
         Catch = [{
@@ -140,8 +140,8 @@ resource "aws_sfn_state_machine" "account_creation" {
         Next       = "IsStillTrial"
         Retry = [{
           ErrorEquals     = ["States.ALL"]
-          IntervalSeconds = 60
-          MaxAttempts     = 5
+          IntervalSeconds = 2
+          MaxAttempts     = 13
           BackoffRate     = 2
         }]
         Catch = [{
