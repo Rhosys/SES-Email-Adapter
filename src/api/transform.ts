@@ -268,6 +268,7 @@ export function toApiRule(rule: DbRule): Api.Rule {
     actions: rule.actions,
     status: rule.status as Api.Rule["status"],
     priorityOrder: rule.priorityOrder,
+    ...(rule.accountId === "SYSTEM" ? { type: "IMMUTABLE" as const } : {}),
     createdAt: rule.createdAt,
     updatedAt: rule.updatedAt,
   };
