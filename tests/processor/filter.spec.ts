@@ -182,15 +182,15 @@ describe("assignSystemLabels — security_alert", () => {
 });
 
 // ---------------------------------------------------------------------------
-// SYSTEM_RULES — SR-25
+// SYSTEM_RULES — SR-04
 // ---------------------------------------------------------------------------
 
-describe("SYSTEM_RULES — SR-25", () => {
-  it("SR-25 exists with condition matching system:auth:security_alert and action quarantine_hidden", () => {
-    const sr25 = SYSTEM_RULES.find(r => r.id === "SR-25");
-    expect(sr25).toBeDefined();
-    expect(JSON.parse(sr25!.condition)).toEqual({ "in": ["system:auth:security_alert", { "var": "arc.labels" }] });
-    expect(sr25!.actions).toEqual([{ type: "quarantine_hidden" }]);
-    expect(sr25!.status).toBe("enabled");
+describe("SYSTEM_RULES — SR-04", () => {
+  it("SR-04 exists with condition matching system:auth:security_alert and action quarantine_hidden", () => {
+    const sr04 = SYSTEM_RULES.find(r => r.id === "SR-04");
+    expect(sr04).toBeDefined();
+    expect(JSON.parse(sr04!.condition)).toEqual({ "in": ["system:auth:security_alert", { "var": "arc.labels" }] });
+    expect(sr04!.actions).toEqual([{ type: "quarantine_hidden" }]);
+    expect(sr04!.status).toBe("enabled");
   });
 });

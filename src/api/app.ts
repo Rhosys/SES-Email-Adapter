@@ -1287,6 +1287,19 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     const rule = rulesResult.value.find((r) => r.id === c.req.param("id")!);
     if (!rule) return err(c, 404, "Rule not found", "RULE_NOT_FOUND");
     const body = await zParse(UpdateRuleRequest, c.req.raw);
+    // System rules (SR-*) are immutable except for enable/disable — only `status` may change.
+    if (rule.accountId === "SYSTEM") {
+      const changedKeys = Object.keys(body).filter((k) => (body as Record<string, unknown>)[k] !== undefined);
+      if (changedKeys.some((k) => k !== "status")) {
+        return err(c, 400, "System rules can only be enabled or disabled", "SYSTEM_RULE_IMMUTABLE");
+      }
+      if (body.status === undefined) {
+        return err(c, 400, "System rules can only be enabled or disabled", "SYSTEM_RULE_IMMUTABLE");
+      }
+      const result = await accountDb.upsertSystemRuleStatus(accountId, rule.id, body.status);
+      if (result.isErr()) return err(c, 500, "Internal Server Error");
+      return c.json(toApiRule({ ...rule, status: body.status }), 200);
+    }
     const effectiveConditionType = body.conditionType ?? rule.conditionType ?? "json_logic";
     if (effectiveConditionType === "js") {
       // If condition is being provided, validate it as JS
@@ -1355,6 +1368,10 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     if (rulesResult.isErr()) return err(c, 500, "Internal Server Error");
     const rule = rulesResult.value.find((r) => r.id === c.req.param("id")!);
     if (!rule) return err(c, 404, "Rule not found", "RULE_NOT_FOUND");
+    // System rules (SR-*) cannot be deleted — only enabled/disabled via PATCH.
+    if (rule.accountId === "SYSTEM") {
+      return err(c, 400, "System rules cannot be deleted", "SYSTEM_RULE_IMMUTABLE");
+    }
     const deleteResult = await accountDb.deleteRule(accountId, rule.id);
     if (deleteResult.isErr()) return err(c, 500, "Internal Server Error");
     return new Response(null, { status: 204 });
