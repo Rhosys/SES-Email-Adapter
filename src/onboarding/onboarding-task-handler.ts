@@ -36,18 +36,11 @@ export class OnboardingTaskHandler {
     return this.handleProgressTask(accountId, email, "onboarding.cleanup");
   }
 
-  async handleTrialCheck(accountId: string): Promise<{ accountIsTrial: boolean }> {
+  async handleTrialCheck(accountId: string): Promise<Result<{ accountIsTrial: boolean }, DbError>> {
     const accountResult = await this.store.getAccount(accountId);
-    if (accountResult.isErr()) {
-      throw new Error(`DynamoDB read failed for account ${accountId}: ${JSON.stringify(accountResult.error)}`);
-    }
-
+    if (accountResult.isErr()) return err(accountResult.error);
     const account = accountResult.value;
-    if (!account) {
-      return { accountIsTrial: false };
-    }
-
-    return { accountIsTrial: account.billingPlan === "Trial" };
+    return ok({ accountIsTrial: account?.billingPlan === "Trial" });
   }
 
   // ---------------------------------------------------------------------------

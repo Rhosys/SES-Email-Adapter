@@ -225,23 +225,23 @@ describe("OnboardingTaskHandler.handleTrialCheck", () => {
 
     const result = await handler.handleTrialCheck("acc-test");
 
-    expect(result).toEqual({ accountIsTrial: expected });
+    expect(result.isOk()).toBe(true);
+    expect(result._unsafeUnwrap()).toEqual({ accountIsTrial: expected });
   });
 
   it("missing billingPlan → accountIsTrial=false", async () => {
-    const account = makeAccount();
-    // Account without billingPlan set (field is optional on the type)
     const store = createMockStore({
-      getAccount: vi.fn().mockResolvedValue(ok(account)),
+      getAccount: vi.fn().mockResolvedValue(ok(makeAccount())),
     });
     const handler = new OnboardingTaskHandler(store, logger);
 
     const result = await handler.handleTrialCheck("acc-test");
 
-    expect(result).toEqual({ accountIsTrial: false });
+    expect(result.isOk()).toBe(true);
+    expect(result._unsafeUnwrap()).toEqual({ accountIsTrial: false });
   });
 
-  it("returns { accountIsTrial: false } when account deleted", async () => {
+  it("returns ok({ accountIsTrial: false }) when account not found", async () => {
     const store = createMockStore({
       getAccount: vi.fn().mockResolvedValue(ok(null)),
     });
@@ -249,15 +249,19 @@ describe("OnboardingTaskHandler.handleTrialCheck", () => {
 
     const result = await handler.handleTrialCheck("acc-deleted");
 
-    expect(result).toEqual({ accountIsTrial: false });
+    expect(result.isOk()).toBe(true);
+    expect(result._unsafeUnwrap()).toEqual({ accountIsTrial: false });
   });
 
-  it("throws when DynamoDB read fails (Step Function will retry)", async () => {
+  it("returns Err when DynamoDB read fails", async () => {
     const store = createMockStore({
       getAccount: vi.fn().mockResolvedValue(err(dbError(new Error("service unavailable")))),
     });
     const handler = new OnboardingTaskHandler(store, logger);
 
-    await expect(handler.handleTrialCheck("acc-test")).rejects.toThrow("DynamoDB read failed");
+    const result = await handler.handleTrialCheck("acc-test");
+
+    expect(result.isErr()).toBe(true);
+    expect(result._unsafeUnwrapErr().kind).toBe("db_error");
   });
 });
