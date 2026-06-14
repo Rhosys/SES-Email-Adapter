@@ -91,7 +91,7 @@ resource "aws_sfn_state_machine" "account_creation" {
         Retry = [{
           ErrorEquals     = ["States.ALL"]
           IntervalSeconds = 2
-          MaxAttempts     = 13
+          MaxAttempts     = 18
           BackoffRate     = 2
         }]
         Catch = [{
@@ -116,7 +116,7 @@ resource "aws_sfn_state_machine" "account_creation" {
         Retry = [{
           ErrorEquals     = ["States.ALL"]
           IntervalSeconds = 2
-          MaxAttempts     = 13
+          MaxAttempts     = 18
           BackoffRate     = 2
         }]
         Catch = [{
@@ -141,7 +141,7 @@ resource "aws_sfn_state_machine" "account_creation" {
         Retry = [{
           ErrorEquals     = ["States.ALL"]
           IntervalSeconds = 2
-          MaxAttempts     = 13
+          MaxAttempts     = 18
           BackoffRate     = 2
         }]
         Catch = [{
