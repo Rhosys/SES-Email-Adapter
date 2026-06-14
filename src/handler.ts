@@ -346,8 +346,14 @@ async function handlerInner(
     }
 
     const processors: Record<string, () => Promise<unknown>> = {
-      "email-catcher-AccountCreation|FirstFollowup": () => onboardingHandler.handleFollowup(payload.accountId, payload.email),
-      "email-catcher-AccountCreation|Cleanup": () => onboardingHandler.handleCleanup(payload.accountId, payload.email),
+      "email-catcher-AccountCreation|FirstFollowup": async () => {
+        const r = await onboardingHandler.handleFollowup(payload.accountId, payload.email);
+        if (r.isErr()) throw new Error(`Followup task failed for account ${payload.accountId}: ${JSON.stringify(r.error)}`);
+      },
+      "email-catcher-AccountCreation|Cleanup": async () => {
+        const r = await onboardingHandler.handleCleanup(payload.accountId, payload.email);
+        if (r.isErr()) throw new Error(`Cleanup task failed for account ${payload.accountId}: ${JSON.stringify(r.error)}`);
+      },
       "email-catcher-AccountCreation|TrialCheck": () => onboardingHandler.handleTrialCheck(payload.accountId),
     };
 
