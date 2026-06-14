@@ -574,7 +574,7 @@ describe("API", () => {
   describe("POST /accounts/:accountId/arcs/:arcId/signals/:id/send — send draft", () => {
     it("sends a draft signal and returns 200 + updated signal", async () => {
       vi.mocked(arcDb.getArc).mockResolvedValueOnce(ok(makeArc()));
-      vi.mocked(arcDb.getSignalById).mockResolvedValueOnce(ok(makeSignal({ status: "draft" })));
+      vi.mocked(arcDb.getSignalById).mockResolvedValueOnce(ok(makeSignal({ status: "draft", data: { from: { address: "user@example.com" } } })));
       const res = await req(app, "POST", `${A}/arcs/arc-001/signals/SES%23msg-001/send`);
       expect(res.status).toBe(200);
       expect(arcDb.updateSignalSendStatus).toHaveBeenCalledOnce();
