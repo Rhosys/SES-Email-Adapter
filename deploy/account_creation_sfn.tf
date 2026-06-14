@@ -24,12 +24,37 @@ resource "aws_iam_role_policy" "account_creation_sfn_invoke_lambda" {
 
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [{
-      Effect   = "Allow"
-      Action   = "lambda:InvokeFunction"
-      Resource = "${aws_lambda_function.main.arn}:production"
-    }]
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = "lambda:InvokeFunction"
+        Resource = "${aws_lambda_function.main.arn}:production"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogDelivery",
+          "logs:GetLogDelivery",
+          "logs:UpdateLogDelivery",
+          "logs:DeleteLogDelivery",
+          "logs:ListLogDeliveries",
+          "logs:PutResourcePolicy",
+          "logs:DescribeResourcePolicies",
+          "logs:DescribeLogGroups",
+        ]
+        Resource = "*"
+      },
+    ]
   })
+}
+
+# ---------------------------------------------------------------------------
+# CloudWatch log group — captures failed executions for diagnosis
+# ---------------------------------------------------------------------------
+
+resource "aws_cloudwatch_log_group" "account_creation_sfn" {
+  name              = "/aws/states/email-catcher-AccountCreation"
+  retention_in_days = 30
 }
 
 # ---------------------------------------------------------------------------
@@ -40,6 +65,12 @@ resource "aws_sfn_state_machine" "account_creation" {
   name     = "email-catcher-AccountCreation"
   role_arn = aws_iam_role.account_creation_sfn.arn
   type     = "STANDARD"
+
+  logging_configuration {
+    level                  = "ERROR"
+    include_execution_data = true
+    log_destination        = "${aws_cloudwatch_log_group.account_creation_sfn.arn}:*"
+  }
 
   definition = jsonencode({
     StartAt = "InitialWait"
@@ -63,6 +94,11 @@ resource "aws_sfn_state_machine" "account_creation" {
           MaxAttempts     = 5
           BackoffRate     = 2
         }]
+        Catch = [{
+          ErrorEquals = ["States.ALL"]
+          Next        = "TaskFailed"
+          ResultPath  = "$.error"
+        }]
       }
       SecondWait = {
         Type    = "Wait"
@@ -82,6 +118,11 @@ resource "aws_sfn_state_machine" "account_creation" {
           IntervalSeconds = 60
           MaxAttempts     = 5
           BackoffRate     = 2
+        }]
+        Catch = [{
+          ErrorEquals = ["States.ALL"]
+          Next        = "TaskFailed"
+          ResultPath  = "$.error"
         }]
       }
       TrialCheckWait = {
@@ -103,6 +144,11 @@ resource "aws_sfn_state_machine" "account_creation" {
           MaxAttempts     = 5
           BackoffRate     = 2
         }]
+        Catch = [{
+          ErrorEquals = ["States.ALL"]
+          Next        = "TaskFailed"
+          ResultPath  = "$.error"
+        }]
       }
       IsStillTrial = {
         Type = "Choice"
@@ -115,6 +161,11 @@ resource "aws_sfn_state_machine" "account_creation" {
       }
       Done = {
         Type = "Succeed"
+      }
+      TaskFailed = {
+        Type  = "Fail"
+        Error = "TaskFailed"
+        Cause = "Onboarding task failed after all retries — check CloudWatch Logs for details"
       }
     }
   })
