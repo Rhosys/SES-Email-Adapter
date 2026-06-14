@@ -104,6 +104,17 @@ export class AuthressAccessService implements AccessService {
     }
   }
 
+  async getUserProfile(userId: string): Promise<Result<{ name?: string; email?: string; picture?: string }, AuthressServiceError>> {
+    try {
+      const response = await this.client.users.getUser(userId);
+      const { name, email, picture } = response.data;
+      return ok({ ...(name ? { name } : {}), ...(email ? { email } : {}), ...(picture ? { picture } : {}) });
+    } catch (e) {
+      if (isNotFound(e)) return ok({});
+      return err(authressServiceError(e));
+    }
+  }
+
   async addUser(accountId: string, userId: string, role: AccountRole): Promise<Result<void, AuthressServiceError>> {
     try {
       await this._upsertUser(accountId, userId, role);

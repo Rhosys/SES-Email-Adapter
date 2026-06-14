@@ -38,6 +38,7 @@ function makeAuth(ctx: { userId: string } = validAuth): AuthService {
 function makeAccess(): AccessService {
   return {
     listUsers: vi.fn().mockReturnValue(Promise.resolve(ok([]))),
+    getUserProfile: vi.fn().mockReturnValue(Promise.resolve(ok({}))),
     listAccountsForUser: vi.fn().mockReturnValue(Promise.resolve(ok([]))),
     addUser: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     updateUserRole: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),

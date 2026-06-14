@@ -157,6 +157,8 @@ function makeAccess(): AccessService {
     removeUser: vi.fn().mockResolvedValue(ok(undefined)),
     checkAccess: vi.fn().mockResolvedValue(undefined),
     createInvite: vi.fn().mockResolvedValue(ok({ inviteId: "inv-test" })),
+    getUserProfile: vi.fn().mockReturnValue(Promise.resolve(ok({}))),
+    
   };
 }
 
