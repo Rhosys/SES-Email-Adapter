@@ -9,6 +9,7 @@ describe("isStepFunctionTaskEvent", () => {
         Id: "arn:aws:states:eu-central-1:123456789012:execution:email-catcher-AccountCreation:acc-abc123xyz",
         Input: { accountId: "acc-abc123xyz", email: "user@example.com" },
         Name: "acc-abc123xyz",
+        StartTime: "2026-01-01T00:00:00Z",
       },
       StateMachine: {
         Id: "arn:aws:states:eu-central-1:123456789012:stateMachine:email-catcher-AccountCreation",

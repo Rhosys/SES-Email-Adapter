@@ -348,8 +348,7 @@ async function handlerInner(
     const processors: Record<string, () => Promise<unknown>> = {
       "email-catcher-AccountCreation|FirstFollowup": () => onboardingHandler.handleFollowup(payload.accountId, payload.email),
       "email-catcher-AccountCreation|Cleanup": () => onboardingHandler.handleCleanup(payload.accountId, payload.email),
-      "email-catcher-AccountCreation|TrialCheck": () => onboardingHandler.handleTrialCheck(payload.accountId),
-      "email-catcher-AccountCreation|TrialExpired": () => onboardingHandler.handleTrialExpired(payload.accountId),
+      "email-catcher-AccountCreation|TrialCheck": () => onboardingHandler.handleTrialCheck(payload.accountId, context.Execution.StartTime),
     };
 
     const processor = processors[processorId];

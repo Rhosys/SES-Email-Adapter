@@ -36,16 +36,16 @@ export class OnboardingTaskHandler {
     return this.handleProgressTask(accountId, email, "onboarding.cleanup");
   }
 
-  async handleTrialExpired(accountId: string): Promise<Result<void, DbError>> {
-    this.logger.track("Trial account still active after 60 days", { code: "onboarding.trial_check_expired", accountId });
-    return ok(undefined);
-  }
-
-  async handleTrialCheck(accountId: string): Promise<Result<{ accountIsTrial: boolean }, DbError>> {
+  async handleTrialCheck(accountId: string, executionStartTime: string): Promise<Result<{ accountIsTrial: boolean; trialExpired: boolean }, DbError>> {
     const accountResult = await this.store.getAccount(accountId);
     if (accountResult.isErr()) return err(accountResult.error);
     const account = accountResult.value;
-    return ok({ accountIsTrial: account?.billingPlan === "Trial" });
+    const accountIsTrial = account?.billingPlan === "Trial";
+    const trialExpired = DateTime.utc().diff(DateTime.fromISO(executionStartTime), "days").days >= 60;
+    if (accountIsTrial && trialExpired) {
+      this.logger.track("Trial account still active after 60 days", { code: "onboarding.trial_check_expired", accountId });
+    }
+    return ok({ accountIsTrial, trialExpired });
   }
 
   // ---------------------------------------------------------------------------

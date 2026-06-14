@@ -112,7 +112,7 @@ resource "aws_sfn_state_machine" "account_creation" {
           "context.$" = "$$"
         }
         ResultPath = "$.cleanupResult"
-        Next       = "InitTrialCount"
+        Next       = "TrialCheckWait"
         Retry = [{
           ErrorEquals     = ["States.ALL"]
           IntervalSeconds = 2
@@ -124,12 +124,6 @@ resource "aws_sfn_state_machine" "account_creation" {
           Next        = "TaskFailed"
           ResultPath  = "$.error"
         }]
-      }
-      InitTrialCount = {
-        Type       = "Pass"
-        Result     = 0
-        ResultPath = "$.trialCheckCount"
-        Next       = "TrialCheckWait"
       }
       TrialCheckWait = {
         Type    = "Wait"
@@ -159,54 +153,13 @@ resource "aws_sfn_state_machine" "account_creation" {
       IsStillTrial = {
         Type = "Choice"
         Choices = [{
-          Variable      = "$.trialCheckResult.accountIsTrial"
-          BooleanEquals = true
-          Next          = "IncrementTrialCount"
+          And = [
+            { Variable = "$.trialCheckResult.accountIsTrial", BooleanEquals = true },
+            { Variable = "$.trialCheckResult.trialExpired", BooleanEquals = false },
+          ]
+          Next = "TrialCheckWait"
         }]
         Default = "Done"
-      }
-      IncrementTrialCount = {
-        Type = "Pass"
-        Parameters = {
-          "newCount.$" = "States.MathAdd($.trialCheckCount, 1)"
-        }
-        ResultPath = "$.increment"
-        Next       = "UpdateTrialCount"
-      }
-      UpdateTrialCount = {
-        Type       = "Pass"
-        InputPath  = "$.increment.newCount"
-        ResultPath = "$.trialCheckCount"
-        Next       = "CheckTrialExpiry"
-      }
-      CheckTrialExpiry = {
-        Type = "Choice"
-        Choices = [{
-          Variable                 = "$.trialCheckCount"
-          NumericGreaterThanEquals = 7
-          Next                     = "TrialExpired"
-        }]
-        Default = "TrialCheckWait"
-      }
-      TrialExpired = {
-        Type     = "Task"
-        Resource = "${aws_lambda_function.main.arn}:production"
-        Parameters = {
-          "context.$" = "$$"
-        }
-        ResultPath = "$.trialExpiredResult"
-        Next       = "Done"
-        Retry = [{
-          ErrorEquals     = ["States.ALL"]
-          IntervalSeconds = 2
-          MaxAttempts     = 18
-          BackoffRate     = 2
-        }]
-        Catch = [{
-          ErrorEquals = ["States.ALL"]
-          Next        = "TaskFailed"
-          ResultPath  = "$.error"
-        }]
       }
       Done = {
         Type = "Succeed"
