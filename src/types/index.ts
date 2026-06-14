@@ -555,9 +555,9 @@ export interface Arc {
   sentMessageIds?: string[];
   urgency?: ArcUrgency;
   // Denormalized from the latest inbound signal — used for arc list display
-  senderAddress?: string;
-  recipientAddress?: string;
-  subject?: string;
+  senderAddress: string;
+  recipientAddress: string;
+  subject: string;
 }
 
 // ---------------------------------------------------------------------------

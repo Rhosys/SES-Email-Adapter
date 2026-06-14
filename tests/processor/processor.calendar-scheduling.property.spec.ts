@@ -283,6 +283,9 @@ describe("Feature: signal-followup-scheduler, Calendar scheduling integration", 
         lastSignalAt: "2024-12-01T00:00:00Z",
         updatedAt: "2024-12-01T00:00:00Z",
         workflow: "conversation",
+        senderAddress: "sender@example.com",
+        recipientAddress: "user@example.com",
+        subject: "Test email",
       };
 
       const mostRecentSignalId = "sgn-latest-001";
@@ -335,6 +338,9 @@ describe("Feature: signal-followup-scheduler, Calendar scheduling integration", 
         lastSignalAt: "2024-12-01T00:00:00Z",
         updatedAt: "2024-12-01T00:00:00Z",
         workflow: "conversation",
+        senderAddress: "sender@example.com",
+        recipientAddress: "user@example.com",
+        subject: "Test email",
       };
 
       const arcDb = {
