@@ -125,7 +125,7 @@ describe("Blocked/quarantined signals never trigger saveArc", () => {
 
   const strategies: BlockStrategy[] = [
     {
-      label: "high spam score → SR-03 quarantines",
+      label: "high spam score → SR-04 quarantines",
       classifier: makeClassifier({ spamScore: 0.95, workflow: "conversation" }),
       contentSanitizer: makeContentSanitizer("spammer.com"),
       unknownSenderPolicy: "quarantine_visible",
@@ -138,6 +138,14 @@ describe("Blocked/quarantined signals never trigger saveArc", () => {
       contentSanitizer: makeContentSanitizer("acme.com"),
       unknownSenderPolicy: "quarantine_visible",
       senderEntry: { accountId: TEST_ACCOUNT_ID, aliasAddress: "user@example.com", domain: "example.com", alias: "user", senderDomain: "acme.com", policy: "allow", addedAt: "2024-01-01T00:00:00Z" },
+      rules: SYSTEM_RULES,
+    },
+    {
+      label: "notice workflow → SR-03 blocks",
+      classifier: makeClassifier({ workflow: "notice", workflowData: { workflow: "notice", noticeType: "terms_update", provider: "gov.uk" } }),
+      contentSanitizer: makeContentSanitizer("gov.uk"),
+      unknownSenderPolicy: "quarantine_visible",
+      senderEntry: { accountId: TEST_ACCOUNT_ID, aliasAddress: "user@example.com", domain: "example.com", alias: "user", senderDomain: "gov.uk", policy: "allow", addedAt: "2024-01-01T00:00:00Z" },
       rules: SYSTEM_RULES,
     },
     {
