@@ -137,7 +137,7 @@ describe("processSideEffect — correlation context", () => {
 
       const signal = makeSignal({
         id: "sgn-pong-123",
-        data: { matchedRules: [{ ruleId: "SR-13", actions: [{ type: "pong" }], labelsAdded: [] }] },
+        data: { matchedRules: [{ ruleId: "SR-16", actions: [{ type: "pong" }], labelsAdded: [] }] },
       });
       const arc = makeArc({ id: "arc-pong-456" });
       const payload: SideEffectPayload = { signal, arc };
