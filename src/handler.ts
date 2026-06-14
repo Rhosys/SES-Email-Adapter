@@ -345,20 +345,9 @@ async function handlerInner(
       return {};
     }
 
-    // Wraps a Result-returning SFN task: logs the error then throws so SFN retries fire.
-    const sfnTask = <T>(fn: () => Promise<{ isErr(): boolean; error: unknown } | T>) => async () => {
-      const r = await fn();
-      if (r && typeof r === "object" && "isErr" in r && (r as { isErr(): boolean }).isErr()) {
-        const error = (r as { error: unknown }).error;
-        logger.error("Step Function task failed", { code: "handler.sfn.task_failed", processorId, error });
-        throw new Error(`SFN task ${processorId} failed: ${JSON.stringify(error)}`);
-      }
-      return r;
-    };
-
     const processors: Record<string, () => Promise<unknown>> = {
-      "email-catcher-AccountCreation|FirstFollowup": sfnTask(() => onboardingHandler.handleFollowup(payload.accountId, payload.email)),
-      "email-catcher-AccountCreation|Cleanup": sfnTask(() => onboardingHandler.handleCleanup(payload.accountId, payload.email)),
+      "email-catcher-AccountCreation|FirstFollowup": () => onboardingHandler.handleFollowup(payload.accountId, payload.email),
+      "email-catcher-AccountCreation|Cleanup": () => onboardingHandler.handleCleanup(payload.accountId, payload.email),
       "email-catcher-AccountCreation|TrialCheck": () => onboardingHandler.handleTrialCheck(payload.accountId),
     };
 
@@ -367,7 +356,13 @@ async function handlerInner(
       logger.warn("Unknown Step Function task", { code: "handler.sfn.unknown_task", processorId });
       return {};
     }
-    return processor();
+    const result = await processor();
+    if (result && typeof result === "object" && "isErr" in result && (result as { isErr(): boolean }).isErr()) {
+      const error = (result as unknown as { error: unknown }).error;
+      logger.error("Step Function task failed", { code: "handler.sfn.task_failed", processorId, error });
+      throw new Error(`SFN task ${processorId} failed: ${JSON.stringify(error)}`);
+    }
+    return result;
   }
 
   if (isEventBridgeEvent(event)) {
