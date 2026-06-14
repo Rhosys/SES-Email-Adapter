@@ -554,6 +554,10 @@ export interface Arc {
   // Message-IDs of emails the user sent on this arc
   sentMessageIds?: string[];
   urgency?: ArcUrgency;
+  // Denormalized from the latest inbound signal — used for arc list display
+  senderAddress?: string;
+  recipientAddress?: string;
+  subject?: string;
 }
 
 // ---------------------------------------------------------------------------
