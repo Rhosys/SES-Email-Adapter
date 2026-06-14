@@ -51,6 +51,7 @@ export function makeAccountDbMock(): AccountDatabase {
     annotateRuleError: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     annotateTemplateError: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     listLabels: vi.fn().mockReturnValue(Promise.resolve(ok([]))),
+    upsertSystemRuleStatus: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
   } as unknown as AccountDatabase;
 }
 
