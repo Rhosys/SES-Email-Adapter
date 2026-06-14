@@ -223,10 +223,10 @@ describe("OnboardingTaskHandler.handleTrialCheck", () => {
     });
     const handler = new OnboardingTaskHandler(store, logger);
 
-    const result = await handler.handleTrialCheck("acc-test");
+    const result = await handler.handleTrialCheck("acc-test", new Date().toISOString());
 
     expect(result.isOk()).toBe(true);
-    expect(result._unsafeUnwrap()).toEqual({ accountIsTrial: expected });
+    expect(result._unsafeUnwrap()).toEqual({ accountIsTrial: expected, trialExpired: false });
   });
 
   it("missing billingPlan → accountIsTrial=false", async () => {
@@ -235,10 +235,10 @@ describe("OnboardingTaskHandler.handleTrialCheck", () => {
     });
     const handler = new OnboardingTaskHandler(store, logger);
 
-    const result = await handler.handleTrialCheck("acc-test");
+    const result = await handler.handleTrialCheck("acc-test", new Date().toISOString());
 
     expect(result.isOk()).toBe(true);
-    expect(result._unsafeUnwrap()).toEqual({ accountIsTrial: false });
+    expect(result._unsafeUnwrap()).toEqual({ accountIsTrial: false, trialExpired: false });
   });
 
   it("returns ok({ accountIsTrial: false }) when account not found", async () => {
@@ -247,10 +247,25 @@ describe("OnboardingTaskHandler.handleTrialCheck", () => {
     });
     const handler = new OnboardingTaskHandler(store, logger);
 
-    const result = await handler.handleTrialCheck("acc-deleted");
+    const result = await handler.handleTrialCheck("acc-deleted", new Date().toISOString());
 
     expect(result.isOk()).toBe(true);
-    expect(result._unsafeUnwrap()).toEqual({ accountIsTrial: false });
+    expect(result._unsafeUnwrap()).toEqual({ accountIsTrial: false, trialExpired: false });
+  });
+
+  it("sets trialExpired=true and logs TRACK when execution is over 60 days old", async () => {
+    const store = createMockStore({
+      getAccount: vi.fn().mockResolvedValue(ok(makeAccount({ billingPlan: "Trial" }))),
+    });
+    const handler = new OnboardingTaskHandler(store, logger);
+    const sixtyOneDaysAgo = new Date(Date.now() - 61 * 24 * 60 * 60 * 1000).toISOString();
+
+    const result = await handler.handleTrialCheck("acc-test", sixtyOneDaysAgo);
+
+    expect(result.isOk()).toBe(true);
+    expect(result._unsafeUnwrap()).toEqual({ accountIsTrial: true, trialExpired: true });
+    const trackLog = logger.calls.find(c => c.method === "track" && (c.context as { code?: string }).code === "onboarding.trial_check_expired");
+    expect(trackLog).toBeDefined();
   });
 
   it("returns Err when DynamoDB read fails", async () => {
@@ -259,7 +274,7 @@ describe("OnboardingTaskHandler.handleTrialCheck", () => {
     });
     const handler = new OnboardingTaskHandler(store, logger);
 
-    const result = await handler.handleTrialCheck("acc-test");
+    const result = await handler.handleTrialCheck("acc-test", new Date().toISOString());
 
     expect(result.isErr()).toBe(true);
     expect(result._unsafeUnwrapErr().kind).toBe("db_error");
