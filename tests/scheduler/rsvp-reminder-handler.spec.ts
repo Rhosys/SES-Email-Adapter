@@ -64,6 +64,9 @@ function makeArc(overrides: Partial<Arc> = {}): Arc {
     createdAt: "2024-06-01T12:00:00Z",
     updatedAt: "2024-06-01T12:00:00Z",
     urgency: "normal",
+    senderAddress: "sender@example.com",
+    recipientAddress: "user@example.com",
+    subject: "Test email",
     ...overrides,
   };
 }

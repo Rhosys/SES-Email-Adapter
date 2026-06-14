@@ -170,6 +170,9 @@ function makeArc(overrides: Partial<Arc> = {}): Arc {
     lastSignalAt: "2024-01-15T10:00:00Z",
     createdAt: "2024-01-15T10:00:00Z",
     updatedAt: "2024-01-15T10:00:00Z",
+    senderAddress: "sender@example.com",
+    recipientAddress: "user@example.com",
+    subject: "Test email",
     ...overrides,
   };
 }

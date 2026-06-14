@@ -39,7 +39,9 @@ function makeArc(overrides: Partial<Arc> = {}): Arc {
   return {
     id: "arc-001", accountId: TEST_ACCOUNT_ID, workflow: "conversation", labels: [], status: "active",
     summary: "A test arc.", lastSignalAt: "2024-01-15T10:00:00Z",
-    createdAt: "2024-01-15T10:00:00Z", updatedAt: "2024-01-15T10:00:00Z", ...overrides,
+    createdAt: "2024-01-15T10:00:00Z", updatedAt: "2024-01-15T10:00:00Z",
+    senderAddress: "sender@example.com", recipientAddress: "user@example.com", subject: "Test email",
+    ...overrides,
   };
 }
 
