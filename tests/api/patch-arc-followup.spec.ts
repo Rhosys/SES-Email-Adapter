@@ -44,6 +44,8 @@ function makeAccess(): AccessService {
     removeUser: vi.fn().mockResolvedValue(ok(undefined)),
     checkAccess: vi.fn().mockResolvedValue(undefined),
     createInvite: vi.fn().mockResolvedValue(ok({ inviteId: "inv-test" })),
+    getUserProfile: vi.fn().mockReturnValue(Promise.resolve(ok({}))),
+    
   };
 }
 
@@ -59,6 +61,9 @@ function makeArc(overrides: Partial<Arc> = {}): Arc {
     createdAt: new Date(Date.now() - 86_400_000).toISOString(), // 1 day ago — retention window is far in future
     updatedAt: "2024-06-01T12:00:00Z",
     retentionDuration: "P1Y",
+    senderAddress: "sender@example.com",
+    recipientAddress: "user@example.com",
+    subject: "Test email",
     ...overrides,
   };
 }

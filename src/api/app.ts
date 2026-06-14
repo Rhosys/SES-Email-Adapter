@@ -95,8 +95,17 @@ export interface AccountUser {
   role: AccountRole;
 }
 
+export interface UserProfile {
+  userId: string;
+  role: AccountRole;
+  name?: string;
+  email?: string;
+  picture?: string;
+}
+
 export interface AccessService {
   listUsers(accountId: string): Promise<Result<AccountUser[], AuthressServiceError>>;
+  getUserProfile(userId: string): Promise<Result<{ name?: string; email?: string; picture?: string }, AuthressServiceError>>;
   listAccountsForUser(userId: string): Promise<Result<string[], AuthressServiceError>>;
   addUser(accountId: string, userId: string, role: AccountRole): Promise<Result<void, AuthressServiceError>>;
   updateUserRole(accountId: string, userId: string, role: AccountRole): Promise<Result<void, AuthressServiceError>>;
@@ -356,7 +365,8 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     if (existingResult.isErr()) return err(c, 500, "Internal Server Error");
     if (existingResult.value.length > 0) return err(c, 409, "Account already exists", "ACCOUNT_EXISTS");
 
-    // Generate a unique account ID — cycle until DynamoDB conditional put succeeds
+    // generateAccountId uses randomBytes(10) → collision space ≈ 3.6×10^15;
+    // retry loop is a safety net only.
     const now = DateTime.utc().toISO()!;
     let account: Account | null = null;
     for (let attempt = 0; attempt < 5; attempt++) {
@@ -369,24 +379,30 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
         createdAt: now,
         updatedAt: now,
       };
+
+      // Step Function first — self-healing: checks DDB account existence and
+      // Authress permissions on each retry, so an orphaned execution (from an ID
+      // collision below) fails cleanly when it finds no DDB record.
+      if (accountCreationStarter) {
+        await accountCreationStarter.start(candidate.id, userId);
+      }
+
+      // DDB write — commit the account record
       const createResult = await accountDb.createAccount(candidate);
       if (createResult.isOk()) {
         account = candidate;
         break;
       }
-      // ConditionalCheckFailedException means ID collision — retry with a new ID
+      // ID collision — orphaned SFN execution will fail cleanly without a DDB record
     }
     if (!account) return err(c, 500, "Internal Server Error");
 
-    // Grant admin role in Authress
+    // Authress write — blocking so the user gets valid permissions on the 201 response
+    // (SFN also writes Authress as a self-healing fallback)
     const accessResult = await access.addUser(account.id, userId, "admin");
     if (accessResult.isErr()) {
-      logger.error("Failed to create Authress access record for new account. The account exists in DynamoDB but the user won't have permissions until this is resolved.", { code: "api.account_create.authress_failed", userId, accountId: account.id, error: accessResult.error });
-    }
-
-    // Start onboarding Step Function (fire-and-forget — errors are swallowed internally)
-    if (accountCreationStarter) {
-      await accountCreationStarter.start(account.id, userId);
+      logger.error("Failed to create Authress access record for new account.", { code: "api.account_create.authress_failed", userId, accountId: account.id, error: accessResult.error });
+      return err(c, 500, "Internal Server Error");
     }
 
     return c.json(toApiAccount(account), 201);
@@ -771,6 +787,9 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
         status: "active",
         summary: signal.data.summary,
         lastSignalAt: signal.data.receivedAt,
+        senderAddress: (signal.data as { from?: { address?: string } }).from?.address ?? "",
+        recipientAddress: (signal.data as { recipientAddress?: string }).recipientAddress ?? "",
+        subject: (signal.data as { subject?: string }).subject ?? "",
         createdAt: now,
         updatedAt: now,
         ...(groupingKey ? { groupingKey } : {}),
@@ -1280,6 +1299,19 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     const rule = rulesResult.value.find((r) => r.id === c.req.param("id")!);
     if (!rule) return err(c, 404, "Rule not found", "RULE_NOT_FOUND");
     const body = await zParse(UpdateRuleRequest, c.req.raw);
+    // System rules (SR-*) are immutable except for enable/disable — only `status` may change.
+    if (rule.accountId === "SYSTEM") {
+      const changedKeys = Object.keys(body).filter((k) => (body as Record<string, unknown>)[k] !== undefined);
+      if (changedKeys.some((k) => k !== "status")) {
+        return err(c, 400, "System rules can only be enabled or disabled", "SYSTEM_RULE_IMMUTABLE");
+      }
+      if (body.status === undefined) {
+        return err(c, 400, "System rules can only be enabled or disabled", "SYSTEM_RULE_IMMUTABLE");
+      }
+      const result = await accountDb.upsertSystemRuleStatus(accountId, rule.id, body.status);
+      if (result.isErr()) return err(c, 500, "Internal Server Error");
+      return c.json(toApiRule({ ...rule, status: body.status }), 200);
+    }
     const effectiveConditionType = body.conditionType ?? rule.conditionType ?? "json_logic";
     if (effectiveConditionType === "js") {
       // If condition is being provided, validate it as JS
@@ -1348,6 +1380,10 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     if (rulesResult.isErr()) return err(c, 500, "Internal Server Error");
     const rule = rulesResult.value.find((r) => r.id === c.req.param("id")!);
     if (!rule) return err(c, 404, "Rule not found", "RULE_NOT_FOUND");
+    // System rules (SR-*) cannot be deleted — only enabled/disabled via PATCH.
+    if (rule.accountId === "SYSTEM") {
+      return err(c, 400, "System rules cannot be deleted", "SYSTEM_RULE_IMMUTABLE");
+    }
     const deleteResult = await accountDb.deleteRule(accountId, rule.id);
     if (deleteResult.isErr()) return err(c, 500, "Internal Server Error");
     return new Response(null, { status: 204 });
@@ -1542,13 +1578,20 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
   // Account users  —  /accounts/:accountId/users
   // -------------------------------------------------------------------------
 
+  const TeamMemberSchema = z.object({
+    userId: z.string(),
+    role: z.string(),
+    name: z.string().optional(),
+    email: z.string().optional(),
+    picture: z.string().optional(),
+  });
   app.openapi(route({
     method: "get",
     path: "/accounts/{accountId}/users",
     tags: ["Users"],
     request: { params: z.object({ accountId: z.string() }) },
     middleware: [authz("users:read", c => `accounts/${c.req.param("accountId")!}/users`)] as const,
-    responses: { 200: { content: { "application/json": { schema: z.object({ users: z.array(z.object({ userId: z.string(), role: z.string() })), pagination: PaginationSchema }) } }, description: "List users" } },
+    responses: { 200: { content: { "application/json": { schema: z.object({ users: z.array(TeamMemberSchema), pagination: PaginationSchema }) } }, description: "List users" } },
   }), async (c) => {
     if (!access) return err(c, 501, "Not implemented");
     const accountId = c.req.param("accountId")!;
@@ -1557,7 +1600,14 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
       logger.warn("Authress service unavailable while listing account users.", { code: "api.authress_unavailable", accountId, error: result.error });
       return err(c, 503, "Service temporarily unavailable");
     }
-    return c.json(page("users", result.value), 200);
+    const users = result.value;
+    const profiles = await Promise.all(users.map(async (u) => {
+      const profileResult = await access.getUserProfile(u.userId);
+      if (profileResult.isErr()) return u;
+      const { name, email, picture } = profileResult.value;
+      return { ...u, ...(name ? { name } : {}), ...(email ? { email } : {}), ...(picture ? { picture } : {}) };
+    }));
+    return c.json(page("users", profiles), 200);
   });
 
   app.openapi(route({
@@ -2032,9 +2082,8 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
       createdAt: existing?.createdAt ?? now,
       ...(existing?.verifiedAt !== undefined ? { verifiedAt: existing.verifiedAt } : {}),
     };
-    const saveResult = await accountDb.saveVerifiedForwardingAddress(addr);
-    if (saveResult.isErr()) return err(c, 500, "Internal Server Error");
-
+    // SES first — send verification email before persisting the address so a
+    // mailer failure never leaves a pending record the user can't re-trigger.
     if (verificationMailer) {
       const verifyResult = await verificationMailer.sendForwardVerification(accountId, addr.address, addr.token);
       if (verifyResult.isErr()) {
@@ -2042,6 +2091,9 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
         return err(c, 422, "Failed to send verification email. Please try again.");
       }
     }
+
+    const saveResult = await accountDb.saveVerifiedForwardingAddress(addr);
+    if (saveResult.isErr()) return err(c, 500, "Internal Server Error");
 
     return c.json(toApiForwardingAddress(addr), 201);
   });

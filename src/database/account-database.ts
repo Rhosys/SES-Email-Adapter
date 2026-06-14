@@ -5,6 +5,7 @@ import { dbError, notFoundError, ok, err } from "../errors.js";
 import type { Result, DbError, NotFoundError } from "../errors.js";
 import { generateId } from "../utils/id.js";
 import type { Account, View, Label, Rule, RuleStatus, Domain, Alias, AliasSender, SenderPolicy, AccountFilteringConfig, VerifiedForwardingAddress, EmailTemplate, WsConnection } from "../types/index.js";
+import { SYSTEM_RULES } from "../processor/system-rules.js";
 import type { StatsCategory } from "../types/index.js";
 import type { CreateViewRequest, UpdateViewRequest, CreateLabelRequest, UpdateLabelRequest, CreateRuleRequest, UpdateRuleRequest } from "../api/app.js";
 import { buildStatsUpdateParams, buildPruneNames } from "./stats-writer.js";
@@ -508,21 +509,36 @@ export class AccountDatabase {
         KeyConditionExpression: "gsi1pk = :pk AND begins_with(gsi1sk, :prefix)",
         ExpressionAttributeValues: { ":pk": ruleGsi1pk(accountId), ":prefix": "RULE#" },
       }));
-      return ok((res.Items ?? []) as Rule[]);
+      const ddbRules = (res.Items ?? []) as Rule[];
+      // Merge SYSTEM_RULES (code-defined) with per-account status overrides stored in DDB
+      const overrideById = new Map(ddbRules.filter(r => r.id.startsWith("SR-")).map(r => [r.id, r.status]));
+      const systemRules = SYSTEM_RULES.map(sr => overrideById.has(sr.id) ? { ...sr, status: overrideById.get(sr.id)! } : sr);
+      const userRules = ddbRules.filter(r => !r.id.startsWith("SR-"));
+      return ok([...systemRules, ...userRules].sort((a, b) => a.priorityOrder - b.priorityOrder));
     } catch (e) {
       return err(dbError(e));
     }
   }
 
   async listEnabledRules(accountId: string): Promise<Result<Rule[], DbError>> {
+    const allResult = await this.listRules(accountId);
+    if (allResult.isErr()) return allResult;
+    return ok(allResult.value.filter(r => r.status === "enabled"));
+  }
+
+  async upsertSystemRuleStatus(accountId: string, ruleId: string, status: RuleStatus): Promise<Result<void, DbError>> {
+    const sr = SYSTEM_RULES.find(r => r.id === ruleId);
+    if (!sr) return err(dbError(new Error(`Unknown system rule: ${ruleId}`)));
     try {
-      const res = await dynamo.send(new QueryCommand({
+      await dynamo.send(new PutCommand({
         TableName: ACCOUNTS_TABLE,
-        IndexName: "gsi1",
-        KeyConditionExpression: "gsi1pk = :pk AND begins_with(gsi1sk, :prefix)",
-        ExpressionAttributeValues: { ":pk": ruleGsi1pk(accountId), ":prefix": "RULE#enabled#" },
+        Item: {
+          ...sr, accountId, status,
+          pk: pk(accountId), sk: `RULE#${ruleId}`,
+          gsi1pk: ruleGsi1pk(accountId), gsi1sk: ruleGsi1sk(status, sr.priorityOrder, ruleId),
+        },
       }));
-      return ok((res.Items ?? []) as Rule[]);
+      return ok(undefined);
     } catch (e) {
       return err(dbError(e));
     }

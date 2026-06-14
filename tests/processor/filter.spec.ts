@@ -57,7 +57,7 @@ describe("assignSystemLabels — workflow label", () => {
   });
 
   it("emits correct label for every workflow", () => {
-    const workflows = ["conversation", "crm", "package", "travel", "payments", "alert", "content", "onboarding", "status", "healthcare", "job", "support", "test"] as const;
+    const workflows = ["conversation", "crm", "package", "travel", "payments", "alert", "content", "onboarding", "notice", "healthcare", "job", "support", "test"] as const;
     for (const workflow of workflows) {
       const labels = assignSystemLabels(makeCtx({ workflow, workflowData: { workflow } as never }));
       expect(labels).toContain(`system:workflow:${workflow}`);
@@ -182,15 +182,15 @@ describe("assignSystemLabels — security_alert", () => {
 });
 
 // ---------------------------------------------------------------------------
-// SYSTEM_RULES — SR-25
+// SYSTEM_RULES — SR-05
 // ---------------------------------------------------------------------------
 
-describe("SYSTEM_RULES — SR-25", () => {
-  it("SR-25 exists with condition matching system:auth:security_alert and action quarantine_hidden", () => {
-    const sr25 = SYSTEM_RULES.find(r => r.id === "SR-25");
-    expect(sr25).toBeDefined();
-    expect(JSON.parse(sr25!.condition)).toEqual({ "in": ["system:auth:security_alert", { "var": "arc.labels" }] });
-    expect(sr25!.actions).toEqual([{ type: "quarantine_hidden" }]);
-    expect(sr25!.status).toBe("enabled");
+describe("SYSTEM_RULES — SR-05", () => {
+  it("SR-05 exists with condition matching system:auth:security_alert and action quarantine_hidden", () => {
+    const sr05 = SYSTEM_RULES.find(r => r.id === "SR-05");
+    expect(sr05).toBeDefined();
+    expect(JSON.parse(sr05!.condition)).toEqual({ "in": ["system:auth:security_alert", { "var": "arc.labels" }] });
+    expect(sr05!.actions).toEqual([{ type: "quarantine_hidden" }]);
+    expect(sr05!.status).toBe("enabled");
   });
 });

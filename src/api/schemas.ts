@@ -6,7 +6,7 @@ import { z } from "@hono/zod-openapi";
 
 export const Workflow = z.enum([
   "auth", "conversation", "crm", "package", "travel", "payments", "alert",
-  "content", "onboarding", "status", "healthcare", "job", "support", "test",
+  "content", "onboarding", "notice", "healthcare", "job", "support", "test",
 ]);
 
 export const ArcStatus = z.enum(["active", "archived", "deleted", "violate_report"]);
@@ -76,6 +76,7 @@ export const ErrorCode = z.enum([
   "PLAN_FEATURE_REQUIRED",
   "RSVP_SEND_FAILED",
   "RULE_NOT_FOUND",
+  "SYSTEM_RULE_IMMUTABLE",
   "SIGNAL_ALREADY_SENT",
   "SIGNAL_ARC_MISMATCH",
   "SIGNAL_NOT_DRAFT",
@@ -220,14 +221,14 @@ export const ContentData = z.object({
   unsubscribeUrl: z.string().optional(),
 }).openapi("ContentData");
 
-export const StatusData = z.object({
-  workflow: z.literal("status"),
-  statusType: z.enum(["terms_update", "privacy_policy", "data_processor", "cookie_policy", "compliance", "service_notice", "government", "account_notification", "other"]),
+export const NoticeData = z.object({
+  workflow: z.literal("notice"),
+  noticeType: z.enum(["terms_update", "privacy_policy", "data_processor", "cookie_policy", "compliance", "service_notice", "government", "account_notification", "security_awareness", "other"]),
   provider: z.string(),
   effectiveDate: z.string().optional(),
   referenceNumber: z.string().optional(),
   documentUrl: z.string().optional(),
-}).openapi("StatusData");
+}).openapi("NoticeData");
 
 export const HealthcareData = z.object({
   workflow: z.literal("healthcare"),
@@ -268,7 +269,7 @@ export const TestData = z.object({
 
 export const WorkflowData = z.discriminatedUnion("workflow", [
   AuthData, ConversationData, CrmData, PackageData, TravelData,
-  PaymentsData, AlertData, ContentData, StatusData,
+  PaymentsData, AlertData, ContentData, NoticeData,
   HealthcareData, JobData, SupportData, TestData,
 ]).openapi("WorkflowData");
 
@@ -481,6 +482,9 @@ export const Arc = z.object({
   updatedAt: z.string().readonly(),
   retentionDuration: RetentionDuration.optional().readonly(),
   urgency: ArcUrgency.optional(),
+  senderAddress: z.string(),
+  recipientAddress: z.string(),
+  subject: z.string(),
 }).openapi("Arc");
 
 // ---------------------------------------------------------------------------

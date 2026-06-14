@@ -37,6 +37,9 @@ function makeArc(overrides: Partial<Arc> = {}): Arc {
     lastSignalAt: "2024-01-15T10:00:00Z",
     createdAt: "2024-01-15T10:00:00Z",
     updatedAt: "2024-01-15T10:00:00Z",
+    senderAddress: "sender@example.com",
+    recipientAddress: "user@example.com",
+    subject: "Test email",
     ...overrides,
   };
 }
@@ -157,6 +160,8 @@ function makeAccess(): AccessService {
     removeUser: vi.fn().mockResolvedValue(ok(undefined)),
     checkAccess: vi.fn().mockResolvedValue(undefined),
     createInvite: vi.fn().mockResolvedValue(ok({ inviteId: "inv-test" })),
+    getUserProfile: vi.fn().mockReturnValue(Promise.resolve(ok({}))),
+    
   };
 }
 
