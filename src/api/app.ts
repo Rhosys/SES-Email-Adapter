@@ -907,12 +907,17 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
       return err(c, 422, "Invalid recipient domain", "INVALID_RECIPIENT_DOMAIN", { invalidDomains: mxResult.error.invalidDomains });
     }
 
-    // Verify the from domain is registered to this account (application-layer ownership check)
-    const fromDomain = signal.data.from.address.split("@")[1] ?? "";
-    const fromDomainResult = await accountDb.getDomainByName(accountId, fromDomain);
-    if (fromDomainResult.isErr()) return err(c, 500, "Internal Server Error");
-    if (!fromDomainResult.value) {
-      return err(c, 403, "Forbidden", "DOMAIN_NOT_REGISTERED", { domain: fromDomain });
+    // Verify the from address matches the arc's alias
+    if (signal.data.from.address !== arc.recipientAddress) {
+      logger.track("Draft send: from address does not match arc alias — rejecting.", {
+        code: "draft_send.from_address_mismatch",
+        accountId,
+        signalId: signal.id,
+        arcId: arc.id,
+        fromAddress: signal.data.from.address,
+        arcRecipientAddress: arc.recipientAddress,
+      });
+      return err(c, 422, "From address does not match arc alias");
     }
 
     // Compute undo window
