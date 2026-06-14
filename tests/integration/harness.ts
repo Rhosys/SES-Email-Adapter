@@ -64,6 +64,7 @@ export async function createHarness(): Promise<IntegrationHarness> {
   // Mutable stub — individual tests can override specific methods.
   const access: AccessService = {
     listUsers: async () => ok([]),
+    getUserProfile: async () => ok({}),
     listAccountsForUser: async () => ok([]),
     addUser: async () => ok(undefined),
     updateUserRole: async () => ok(undefined),

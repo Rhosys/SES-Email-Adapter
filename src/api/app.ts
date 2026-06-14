@@ -95,8 +95,17 @@ export interface AccountUser {
   role: AccountRole;
 }
 
+export interface UserProfile {
+  userId: string;
+  role: AccountRole;
+  name?: string;
+  email?: string;
+  picture?: string;
+}
+
 export interface AccessService {
   listUsers(accountId: string): Promise<Result<AccountUser[], AuthressServiceError>>;
+  getUserProfile(userId: string): Promise<Result<{ name?: string; email?: string; picture?: string }, AuthressServiceError>>;
   listAccountsForUser(userId: string): Promise<Result<string[], AuthressServiceError>>;
   addUser(accountId: string, userId: string, role: AccountRole): Promise<Result<void, AuthressServiceError>>;
   updateUserRole(accountId: string, userId: string, role: AccountRole): Promise<Result<void, AuthressServiceError>>;
@@ -1566,13 +1575,20 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
   // Account users  —  /accounts/:accountId/users
   // -------------------------------------------------------------------------
 
+  const TeamMemberSchema = z.object({
+    userId: z.string(),
+    role: z.string(),
+    name: z.string().optional(),
+    email: z.string().optional(),
+    picture: z.string().optional(),
+  });
   app.openapi(route({
     method: "get",
     path: "/accounts/{accountId}/users",
     tags: ["Users"],
     request: { params: z.object({ accountId: z.string() }) },
     middleware: [authz("users:read", c => `accounts/${c.req.param("accountId")!}/users`)] as const,
-    responses: { 200: { content: { "application/json": { schema: z.object({ users: z.array(z.object({ userId: z.string(), role: z.string() })), pagination: PaginationSchema }) } }, description: "List users" } },
+    responses: { 200: { content: { "application/json": { schema: z.object({ users: z.array(TeamMemberSchema), pagination: PaginationSchema }) } }, description: "List users" } },
   }), async (c) => {
     if (!access) return err(c, 501, "Not implemented");
     const accountId = c.req.param("accountId")!;
@@ -1581,7 +1597,14 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
       logger.warn("Authress service unavailable while listing account users.", { code: "api.authress_unavailable", accountId, error: result.error });
       return err(c, 503, "Service temporarily unavailable");
     }
-    return c.json(page("users", result.value), 200);
+    const users = result.value;
+    const profiles = await Promise.all(users.map(async (u) => {
+      const profileResult = await access.getUserProfile(u.userId);
+      if (profileResult.isErr()) return u;
+      const { name, email, picture } = profileResult.value;
+      return { ...u, ...(name ? { name } : {}), ...(email ? { email } : {}), ...(picture ? { picture } : {}) };
+    }));
+    return c.json(page("users", profiles), 200);
   });
 
   app.openapi(route({
