@@ -907,6 +907,19 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
       return err(c, 422, "Invalid recipient domain", "INVALID_RECIPIENT_DOMAIN", { invalidDomains: mxResult.error.invalidDomains });
     }
 
+    // Verify the from address matches the arc's alias
+    if (signal.data.from.address !== arc.recipientAddress) {
+      logger.track("Draft send: from address does not match arc alias — rejecting.", {
+        code: "draft_send.from_address_mismatch",
+        accountId,
+        signalId: signal.id,
+        arcId: arc.id,
+        fromAddress: signal.data.from.address,
+        arcRecipientAddress: arc.recipientAddress,
+      });
+      return err(c, 422, "From address does not match arc alias");
+    }
+
     // Compute undo window
     const undoWindowSeconds = computeUndoWindowSeconds(signal.data.textBody);
     const sendInitiatedAt = DateTime.utc().toISO()!;
@@ -1303,10 +1316,10 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     if (rule.accountId === "SYSTEM") {
       const changedKeys = Object.keys(body).filter((k) => (body as Record<string, unknown>)[k] !== undefined);
       if (changedKeys.some((k) => k !== "status")) {
-        return err(c, 400, "System rules can only be enabled or disabled", "SYSTEM_RULE_IMMUTABLE");
+        return err(c, 403, "System rules can only be enabled or disabled", "SYSTEM_RULE_IMMUTABLE");
       }
       if (body.status === undefined) {
-        return err(c, 400, "System rules can only be enabled or disabled", "SYSTEM_RULE_IMMUTABLE");
+        return err(c, 403, "System rules can only be enabled or disabled", "SYSTEM_RULE_IMMUTABLE");
       }
       const result = await accountDb.upsertSystemRuleStatus(accountId, rule.id, body.status);
       if (result.isErr()) return err(c, 500, "Internal Server Error");

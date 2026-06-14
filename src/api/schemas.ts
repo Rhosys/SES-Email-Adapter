@@ -567,6 +567,7 @@ export const Rule = z.object({
   actions: z.array(RuleAction),
   status: RuleStatus,
   priorityOrder: z.number(),
+  type: z.enum(["IMMUTABLE"]).optional(),
   createdAt: z.string().readonly(),
   updatedAt: z.string().readonly(),
 }).openapi("Rule");

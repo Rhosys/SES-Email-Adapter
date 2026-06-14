@@ -549,7 +549,7 @@ export class AccountDatabase {
     if (allRulesResult.isErr()) return err(allRulesResult.error);
     const allRules = allRulesResult.value;
 
-    const userRules = allRules.filter((r) => r.priorityOrder >= 100);
+    const userRules = allRules.filter((r) => !r.id.startsWith("SR-"));
     const now = DateTime.utc().toISO()!;
     const rule: Rule = {
       id: generateId("rule-"),
@@ -559,7 +559,7 @@ export class AccountDatabase {
       ...(data.conditionType !== undefined ? { conditionType: data.conditionType } : {}),
       actions: data.actions as Rule["actions"],
       status: "enabled",
-      priorityOrder: data.priorityOrder ?? (userRules.length > 0 ? Math.max(...userRules.map((r) => r.priorityOrder)) + 1 : 100),
+      priorityOrder: data.priorityOrder ?? (userRules.length > 0 ? Math.max(...userRules.map((r) => r.priorityOrder)) + 1 : 1801),
       ...(data.tags !== undefined ? { tags: data.tags } : {}),
       createdAt: now,
       updatedAt: now,
