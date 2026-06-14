@@ -10,7 +10,7 @@
 
 ## Processing & Architecture
 
-- [ ] **Review Step Function catch handlers and logging** — audit the account-creation (and any other) Step Function state machines: verify that all catch/retry blocks log enough context to diagnose failures, that errors are classified correctly (retryable vs. non-retryable), and that the SFN self-heals correctly when the DDB account record or Authress permission record is missing (e.g., due to a partial failure in `POST /accounts`).
+- [x] **Review Step Function catch handlers and logging** — fixed: handler now throws on err() so SFN retries fire; added Catch blocks to all Task states routing to a TaskFailed terminal; added CloudWatch log group at ERROR level; IAM role updated with logs delivery permissions.
 - [x] **Audit multi-write endpoints for DB-last ordering (arch rule #28)** — review all API handlers that perform writes to multiple systems (SES, S3, SQS, external services) alongside a DynamoDB write. Ensure the DB write happens last in every case. Known endpoints to check: `POST /domains` (done), `POST /accounts` (creates account + starts SFN), `POST /signals/:id/send` (sends via SES then updates status), `POST /signals/:id/quarantineResponse`, forwarding address verification flow, RSVP send. For each: confirm external writes are idempotent, DB write is final.
 - [ ] **WebSocket signal stream** — implement the `/accounts/:id/signals/stream` WebSocket endpoint. The frontend already connects and falls back to polling on failure. Once implemented: authenticate the WS handshake (Authress token in query param or first message), emit `signal:created` events, and let the onboarding flow react in real-time instead of 3s-interval polling.
 - [x] **Auto-block "think before you click" warning emails from service providers** — classified as `notice:security_awareness`; SR-03 (`block_hidden`) fires on all `system:workflow:notice` signals. Added `security_awareness` to `NoticeData.noticeType` and the workflow registry; sharpened the `notice` description to explicitly name these; annotated `alert` to exclude mass-sent awareness campaigns.
@@ -816,27 +816,8 @@ Things competitors charge for that we include, plus things only we can offer:
 
 These items are required by the frontend before certain UI features can ship.
 
-- [ ] **Include `senderAddress`, `recipientAddress`, and `subject` on Arc list responses** — the frontend inbox needs to display Sender Email, Recipient Alias, and Subject as primary columns on each arc row without fetching individual signals. The `GET /accounts/:id/arcs` response currently returns `Arc` objects with only `summary`, `workflow`, `labels`, `status`, `lastSignalAt`, `urgency`. Add three fields derived from the **latest inbound signal** on the arc:
-  - `senderAddress: string` — `signal.data.from.address` of the most recent inbound email signal
-  - `recipientAddress: string` — `signal.data.recipientAddress` of the most recent inbound email signal (this is the alias the email was sent to)
-  - `subject: string` — `signal.data.subject` of the most recent inbound email signal
-  
-  These should be denormalised onto the arc item in DynamoDB (updated each time a new inbound signal is added to the arc). The `GET /accounts/:id/arcs/:arcId` single-arc response should also include them. Update the wire type and zod schema accordingly. The frontend `Arc` TypeScript type will add these as optional fields until the backend ships them.
+- [x] **Include `senderAddress`, `recipientAddress`, and `subject` on Arc list responses** — denormalized onto the Arc DynamoDB item from each inbound signal; exposed as optional fields on the API Arc schema.
 
-- [ ] **Return user profile data on team member list** — the `GET /accounts/:id/users` response returns `{ userId, role }` per member. The frontend team tab needs to display each member's **name**, **email**, and **profile picture URL** alongside their role. Options:
-  1. Resolve from Authress user profiles server-side and include `name`, `email`, `picture` on the `TeamMember` response object.
-  2. Add a new endpoint `GET /users/:userId/profile` that the frontend calls per-member.
-  
-  Option 1 is preferred (single request, no N+1 on the frontend). The response shape should become:
-  ```ts
-  interface TeamMember {
-    userId: string
-    role: UserRole
-    name?: string
-    email?: string
-    picture?: string
-  }
-  ```
-  Fields are optional because some users may not have profile data in Authress yet (e.g. pending invites).
+- [x] **Return user profile data on team member list** — `GET /accounts/:id/users` now resolves `name`, `email`, `picture` from Authress `GET /v1/users/:userId` in parallel and merges into the response.
 
 - [ ] **Include system rules in GET /accounts/:id/rules response** — the frontend Rules tab needs to display system rules (SR-01 through SR-26) as read-only cards that the user can enable/disable but not edit or delete. Currently `listRules` only returns user-created rules for the account. Include the system rules (from `SYSTEM_RULES` constant in `processor.ts`) in the response with a `system: true` boolean field on each rule object. User rules get `system: false`. The frontend will render system rules in a separate "System Rules" section with toggle-only UI (no edit/delete actions). The `PATCH /accounts/:id/rules/:ruleId` endpoint should accept status changes for system rules (storing the override per-account in DynamoDB) but reject any other field changes with a 403.
