@@ -482,9 +482,9 @@ export const Arc = z.object({
   updatedAt: z.string().readonly(),
   retentionDuration: RetentionDuration.optional().readonly(),
   urgency: ArcUrgency.optional(),
-  senderAddress: z.string().optional(),
-  recipientAddress: z.string().optional(),
-  subject: z.string().optional(),
+  senderAddress: z.string(),
+  recipientAddress: z.string(),
+  subject: z.string(),
 }).openapi("Arc");
 
 // ---------------------------------------------------------------------------
