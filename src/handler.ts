@@ -357,10 +357,13 @@ async function handlerInner(
       return {};
     }
     const result = await processor();
-    if (result && typeof result === "object" && "isErr" in result && (result as { isErr(): boolean }).isErr()) {
-      const error = (result as unknown as { error: unknown }).error;
-      logger.error("Step Function task failed", { code: "handler.sfn.task_failed", processorId, error });
-      throw new Error(`SFN task ${processorId} failed: ${JSON.stringify(error)}`);
+    if (result && typeof result === "object" && "isErr" in result) {
+      if ((result as { isErr(): boolean }).isErr()) {
+        const error = (result as unknown as { error: unknown }).error;
+        logger.error("Step Function task failed", { code: "handler.sfn.task_failed", processorId, error });
+        throw new Error(`SFN task ${processorId} failed: ${JSON.stringify(error)}`);
+      }
+      return (result as unknown as { value: unknown }).value;
     }
     return result;
   }
