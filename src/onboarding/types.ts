@@ -4,6 +4,7 @@ export interface StepFunctionTaskEvent {
       Id: string;
       Input: { accountId: string; email: string };
       Name: string;
+      StartTime: string;
     };
     StateMachine: {
       Id: string;

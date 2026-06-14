@@ -38,6 +38,7 @@ function makeAuth(ctx: { userId: string } = validAuth): AuthService {
 function makeAccess(): AccessService {
   return {
     listUsers: vi.fn().mockReturnValue(Promise.resolve(ok([]))),
+    getUserProfile: vi.fn().mockReturnValue(Promise.resolve(ok({}))),
     listAccountsForUser: vi.fn().mockReturnValue(Promise.resolve(ok([]))),
     addUser: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     updateUserRole: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
@@ -82,6 +83,7 @@ function makeAccountDb() {
     createRule: vi.fn().mockResolvedValue(ok(makeRule())),
     updateRule: vi.fn().mockResolvedValue(ok(makeRule())),
     deleteRule: vi.fn().mockResolvedValue(ok(undefined)),
+    upsertSystemRuleStatus: vi.fn().mockResolvedValue(ok(undefined)),
     listDomains: vi.fn().mockResolvedValue(ok([])),
     getDomain: vi.fn().mockResolvedValue(ok(null)),
     createDomain: vi.fn().mockResolvedValue(ok(makeDomain())),
@@ -168,6 +170,9 @@ function makeArc(overrides: Partial<Arc> = {}): Arc {
     lastSignalAt: "2024-01-15T10:00:00Z",
     createdAt: "2024-01-15T10:00:00Z",
     updatedAt: "2024-01-15T10:00:00Z",
+    senderAddress: "sender@example.com",
+    recipientAddress: "user@example.com",
+    subject: "Test email",
     ...overrides,
   };
 }
@@ -781,6 +786,23 @@ describe("API", () => {
       const res = await req(app, "PATCH", `${A}/rules/nonexistent`, { body: { name: "x" } });
       expect(res.status).toBe(404);
     });
+
+    it("enables/disables a system rule via status without touching updateRule", async () => {
+      vi.mocked(accountDb.listRules).mockResolvedValueOnce(ok([makeRule({ id: "SR-02", accountId: "SYSTEM" })]));
+      const res = await req(app, "PATCH", `${A}/rules/SR-02`, { body: { status: "disabled" } });
+      expect(res.status).toBe(200);
+      expect(accountDb.upsertSystemRuleStatus).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "SR-02", "disabled");
+      expect(accountDb.updateRule).not.toHaveBeenCalled();
+    });
+
+    it("rejects mutating a system rule's non-status fields", async () => {
+      vi.mocked(accountDb.listRules).mockResolvedValueOnce(ok([makeRule({ id: "SR-02", accountId: "SYSTEM" })]));
+      const res = await req(app, "PATCH", `${A}/rules/SR-02`, { body: { name: "Hijacked" } });
+      expect(res.status).toBe(400);
+      const body = await res.json() as { errorCode?: string };
+      expect(body.errorCode).toBe("SYSTEM_RULE_IMMUTABLE");
+      expect(accountDb.upsertSystemRuleStatus).not.toHaveBeenCalled();
+    });
   });
 
   describe("DELETE /accounts/:accountId/rules/:id", () => {
@@ -789,6 +811,15 @@ describe("API", () => {
       const res = await req(app, "DELETE", `${A}/rules/rule-001`);
       expect(res.status).toBe(204);
       expect(accountDb.deleteRule).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "rule-001");
+    });
+
+    it("refuses to delete a system rule", async () => {
+      vi.mocked(accountDb.listRules).mockResolvedValueOnce(ok([makeRule({ id: "SR-02", accountId: "SYSTEM" })]));
+      const res = await req(app, "DELETE", `${A}/rules/SR-02`);
+      expect(res.status).toBe(400);
+      const body = await res.json() as { errorCode?: string };
+      expect(body.errorCode).toBe("SYSTEM_RULE_IMMUTABLE");
+      expect(accountDb.deleteRule).not.toHaveBeenCalled();
     });
   });
 

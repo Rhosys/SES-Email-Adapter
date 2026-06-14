@@ -12,7 +12,7 @@ export const WORKFLOWS = [
   "alert",         // Security events, fraud, CI failures, infra alerts — investigate now
   "content",       // Newsletters, promotions, social digests — read or unsubscribe
   "onboarding",    // Welcome emails, account creation, getting-started — new service signup
-  "status",        // ToS updates, service notices, government notices — passive informational
+  "notice",        // ToS updates, service notices, government notices, security awareness — passive informational
   "healthcare",    // Appointments, test results, prescriptions, insurance
   "job",           // Applications, interviews, offers, rejections — career pipeline
   "support",       // Helpdesk tickets with threaded conversation and ticket ID
@@ -42,7 +42,7 @@ export type WorkflowData =
   | PaymentsData
   | AlertData
   | ContentData
-  | StatusData
+  | NoticeData
   | HealthcareData
   | JobData
   | SupportData
@@ -158,11 +158,11 @@ export interface OnboardingData {
   actionUrl?: string;
 }
 
-export interface StatusData {
-  workflow: "status";
-  statusType:
+export interface NoticeData {
+  workflow: "notice";
+  noticeType:
     | "terms_update" | "privacy_policy" | "data_processor" | "cookie_policy" | "compliance"
-    | "service_notice" | "government" | "account_notification" | "other";
+    | "service_notice" | "government" | "account_notification" | "security_awareness" | "other";
   provider: string;
   effectiveDate?: string;
   referenceNumber?: string;
@@ -554,6 +554,10 @@ export interface Arc {
   // Message-IDs of emails the user sent on this arc
   sentMessageIds?: string[];
   urgency?: ArcUrgency;
+  // Denormalized from the latest inbound signal — used for arc list display
+  senderAddress: string;
+  recipientAddress: string;
+  subject: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -613,7 +617,7 @@ export type SystemLabel =
   | "system:workflow:auth" | "system:workflow:conversation" | "system:workflow:crm"
   | "system:workflow:package" | "system:workflow:travel"
   | "system:workflow:payments" | "system:workflow:alert" | "system:workflow:content"
-  | "system:workflow:onboarding" | "system:workflow:status" | "system:workflow:healthcare"
+  | "system:workflow:onboarding" | "system:workflow:notice" | "system:workflow:healthcare"
   | "system:workflow:job" | "system:workflow:support" | "system:workflow:events" | "system:workflow:test"
   | "system:spam:high"
   | "system:spam:medium"

@@ -28,6 +28,9 @@ export interface UpdateArcFields {
   workflow?: Workflow;
   retentionDuration?: string;
   sentMessageIds?: string[];
+  senderAddress?: string;
+  recipientAddress?: string;
+  subject?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -305,6 +308,9 @@ export class ArcDatabase {
     if (update.workflow !== undefined) { setParts.push("workflow = :workflow"); exprValues[":workflow"] = update.workflow; }
     if (update.retentionDuration !== undefined) { setParts.push("retentionDuration = :rd"); exprValues[":rd"] = update.retentionDuration; }
     if (update.sentMessageIds !== undefined) { setParts.push("sentMessageIds = :smids"); exprValues[":smids"] = update.sentMessageIds; }
+    if (update.senderAddress !== undefined) { setParts.push("senderAddress = :senderAddress"); exprValues[":senderAddress"] = update.senderAddress; }
+    if (update.recipientAddress !== undefined) { setParts.push("recipientAddress = :recipientAddress"); exprValues[":recipientAddress"] = update.recipientAddress; }
+    if (update.subject !== undefined) { setParts.push("#subject = :subject"); exprValues[":subject"] = update.subject; exprNames["#subject"] = "subject"; }
 
     try {
       const result = await dynamo.send(new UpdateCommand({

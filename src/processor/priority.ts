@@ -17,9 +17,9 @@ export function baseUrgency(workflow: Workflow, data: WorkflowData): ArcUrgency 
     case "content":
       return "low";
 
-    // onboarding and status emails are silent — passive, never interrupt
+    // onboarding and notice emails are silent — passive, never interrupt
     case "onboarding":
-    case "status":
+    case "notice":
       return "silent";
 
     // test emails are high — user is actively waiting for confirmation

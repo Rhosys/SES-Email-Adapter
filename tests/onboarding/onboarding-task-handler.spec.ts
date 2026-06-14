@@ -223,41 +223,60 @@ describe("OnboardingTaskHandler.handleTrialCheck", () => {
     });
     const handler = new OnboardingTaskHandler(store, logger);
 
-    const result = await handler.handleTrialCheck("acc-test");
+    const result = await handler.handleTrialCheck("acc-test", new Date().toISOString());
 
-    expect(result).toEqual({ accountIsTrial: expected });
+    expect(result.isOk()).toBe(true);
+    expect(result._unsafeUnwrap()).toEqual({ accountIsTrial: expected, trialExpired: false });
   });
 
   it("missing billingPlan → accountIsTrial=false", async () => {
-    const account = makeAccount();
-    // Account without billingPlan set (field is optional on the type)
     const store = createMockStore({
-      getAccount: vi.fn().mockResolvedValue(ok(account)),
+      getAccount: vi.fn().mockResolvedValue(ok(makeAccount())),
     });
     const handler = new OnboardingTaskHandler(store, logger);
 
-    const result = await handler.handleTrialCheck("acc-test");
+    const result = await handler.handleTrialCheck("acc-test", new Date().toISOString());
 
-    expect(result).toEqual({ accountIsTrial: false });
+    expect(result.isOk()).toBe(true);
+    expect(result._unsafeUnwrap()).toEqual({ accountIsTrial: false, trialExpired: false });
   });
 
-  it("returns { accountIsTrial: false } when account deleted", async () => {
+  it("returns ok({ accountIsTrial: false }) when account not found", async () => {
     const store = createMockStore({
       getAccount: vi.fn().mockResolvedValue(ok(null)),
     });
     const handler = new OnboardingTaskHandler(store, logger);
 
-    const result = await handler.handleTrialCheck("acc-deleted");
+    const result = await handler.handleTrialCheck("acc-deleted", new Date().toISOString());
 
-    expect(result).toEqual({ accountIsTrial: false });
+    expect(result.isOk()).toBe(true);
+    expect(result._unsafeUnwrap()).toEqual({ accountIsTrial: false, trialExpired: false });
   });
 
-  it("throws when DynamoDB read fails (Step Function will retry)", async () => {
+  it("sets trialExpired=true and logs TRACK when execution is over 60 days old", async () => {
+    const store = createMockStore({
+      getAccount: vi.fn().mockResolvedValue(ok(makeAccount({ billingPlan: "Trial" }))),
+    });
+    const handler = new OnboardingTaskHandler(store, logger);
+    const sixtyOneDaysAgo = new Date(Date.now() - 61 * 24 * 60 * 60 * 1000).toISOString();
+
+    const result = await handler.handleTrialCheck("acc-test", sixtyOneDaysAgo);
+
+    expect(result.isOk()).toBe(true);
+    expect(result._unsafeUnwrap()).toEqual({ accountIsTrial: true, trialExpired: true });
+    const trackLog = logger.calls.find(c => c.method === "track" && (c.context as { code?: string }).code === "onboarding.trial_check_expired");
+    expect(trackLog).toBeDefined();
+  });
+
+  it("returns Err when DynamoDB read fails", async () => {
     const store = createMockStore({
       getAccount: vi.fn().mockResolvedValue(err(dbError(new Error("service unavailable")))),
     });
     const handler = new OnboardingTaskHandler(store, logger);
 
-    await expect(handler.handleTrialCheck("acc-test")).rejects.toThrow("DynamoDB read failed");
+    const result = await handler.handleTrialCheck("acc-test", new Date().toISOString());
+
+    expect(result.isErr()).toBe(true);
+    expect(result._unsafeUnwrapErr().kind).toBe("db_error");
   });
 });

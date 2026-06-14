@@ -203,6 +203,7 @@ function makeSfnEvent(stateName: string, input?: { accountId: string; email: str
         Id: "arn:aws:states:eu-central-1:123456789012:execution:email-catcher-AccountCreation:acc-123",
         Input: input ?? { accountId: "acc-123", email: "user@test.com" },
         Name: "acc-123",
+        StartTime: "2025-06-01T00:00:00Z",
       },
       StateMachine: {
         Id: "arn:aws:states:eu-central-1:123456789012:stateMachine:email-catcher-AccountCreation",
@@ -237,7 +238,7 @@ describe("Handler: Step Function event routing", () => {
     const fn = expectedFn();
     expect(fn).toHaveBeenCalledTimes(1);
     if (stateName === "TrialCheck") {
-      expect(fn).toHaveBeenCalledWith("acc-123");
+      expect(fn).toHaveBeenCalledWith("acc-123", "2025-06-01T00:00:00Z");
     } else {
       expect(fn).toHaveBeenCalledWith("acc-123", "user@test.com");
     }

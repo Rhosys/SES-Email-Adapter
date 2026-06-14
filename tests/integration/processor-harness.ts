@@ -158,6 +158,7 @@ export async function createProcessorHarness(): Promise<ProcessorHarness> {
 
   const access: AccessService = {
     listUsers: async () => ok([]),
+    getUserProfile: async () => ok({}),
     listAccountsForUser: async () => ok([]),
     addUser: async () => ok(undefined),
     updateUserRole: async () => ok(undefined),

@@ -54,14 +54,12 @@ resource "aws_rds_cluster_parameter_group" "aurora" {
   # -----------------------------------------------------------------------
   # Connection logging
   # Aurora PG17 defaulted both to ON; PG18 changed log_connections from a
-  # boolean to an enum (receipt, authentication, authorization,
-  # setup_durations, all). Empty string disables it. log_disconnections
-  # remains a boolean.
+  # boolean to a list enum (receipt, authentication, authorization,
+  # setup_durations, all). The Aurora parameter group API rejects an empty
+  # string for list-type parameters — the only way to disable it is to omit
+  # the parameter entirely and rely on the default (empty list = no logging).
+  # log_disconnections remains a boolean.
   # -----------------------------------------------------------------------
-  parameter {
-    name  = "log_connections"
-    value = "" # PG18 enum — empty string disables; "all" = log everything
-  }
   parameter {
     name  = "log_disconnections"
     value = "0" # boolean — still off/0 in PG18

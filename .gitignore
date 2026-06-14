@@ -3,3 +3,4 @@ dist/
 *.tsbuildinfo
 deploy/.terraform/
 openapi.json
+.claude/
