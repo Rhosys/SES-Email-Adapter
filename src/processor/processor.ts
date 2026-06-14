@@ -969,6 +969,9 @@ export class SignalProcessor {
         ...matchedArc,
         workflow: classificationOutput.workflow,
         summary: classificationOutput.summary,
+        senderAddress: parsed.from.address,
+        recipientAddress,
+        subject: parsed.subject,
         updatedAt: now,
       };
       this.logger.info("Existing arc matched.", { code: "processor.arc_matched", arcId: arc.id, matchMethod: groupingKey ? "groupingKey" : "similarity", accountId, sesMessageId });
@@ -982,6 +985,9 @@ export class SignalProcessor {
         status: "active",
         summary: classificationOutput.summary,
         lastSignalAt: timestamp,
+        senderAddress: parsed.from.address,
+        recipientAddress,
+        subject: parsed.subject,
         createdAt: now,
         updatedAt: now,
         ...(ttl !== undefined ? { ttl } : {}),
@@ -1176,6 +1182,10 @@ export class SignalProcessor {
       if (arc.retentionDuration !== undefined && arc.retentionDuration !== matchedArc.retentionDuration) fields.retentionDuration = arc.retentionDuration;
       if (JSON.stringify(arc.labels) !== JSON.stringify(matchedArc.labels)) fields.labels = arc.labels;
       if (arc.sentMessageIds !== undefined && JSON.stringify(arc.sentMessageIds) !== JSON.stringify(matchedArc.sentMessageIds)) fields.sentMessageIds = arc.sentMessageIds;
+      // Always update denormalized display fields from the latest inbound signal
+      if (arc.senderAddress !== undefined) fields.senderAddress = arc.senderAddress;
+      if (arc.recipientAddress !== undefined) fields.recipientAddress = arc.recipientAddress;
+      if (arc.subject !== undefined) fields.subject = arc.subject;
 
       const updateResult = await this.arcDb.updateArc(accountId, arc.id, arc.status, arc.lastSignalAt, fields);
       if (updateResult.isErr()) return err(updateResult.error);

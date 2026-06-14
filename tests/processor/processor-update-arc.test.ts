@@ -221,7 +221,9 @@ describe("Processor delta computation — updateArc vs saveArc", () => {
     expect(arcId).toBe("arc-existing");
     expect(status).toBe("active");
     expect(lastSignalAt).toBe("2024-01-15T10:00:00Z");
-    expect(fields).toEqual({});
+    // Denormalized display fields are always refreshed from the latest inbound signal
+    const denormalized = { senderAddress: "sender@example.com", recipientAddress: "user@example.com", subject: "Test email" };
+    expect(fields).toEqual(denormalized);
     expect(arcDb.saveArc).not.toHaveBeenCalled();
   });
 
@@ -239,7 +241,7 @@ describe("Processor delta computation — updateArc vs saveArc", () => {
     const [, , status, lastSignalAt, fields] = vi.mocked(arcDb.updateArc).mock.calls[0]!;
     expect(status).toBe("active");
     expect(lastSignalAt).toBe("2024-01-15T10:00:00Z");
-    expect(fields).toEqual({});
+    expect(fields).toEqual({ senderAddress: "sender@example.com", recipientAddress: "user@example.com", subject: "Test email" });
   });
 
   it("existing arc with archive rule → updateArc called with archived status", async () => {
@@ -262,7 +264,7 @@ describe("Processor delta computation — updateArc vs saveArc", () => {
     expect(arcDb.updateArc).toHaveBeenCalledOnce();
     const [, , status, , fields] = vi.mocked(arcDb.updateArc).mock.calls[0]!;
     expect(status).toBe("archived");
-    expect(fields).toEqual({});
+    expect(fields).toEqual({ senderAddress: "sender@example.com", recipientAddress: "user@example.com", subject: "Test email" });
   });
 
   it("existing arc with changed labels → updateArc includes labels in delta", async () => {
@@ -286,7 +288,7 @@ describe("Processor delta computation — updateArc vs saveArc", () => {
     expect(arcDb.updateArc).toHaveBeenCalledOnce();
     const [, , status, , fields] = vi.mocked(arcDb.updateArc).mock.calls[0]!;
     expect(status).toBe("active");
-    expect(fields).toEqual({ labels: ["system:workflow:conversation", "billing"] });
+    expect(fields).toEqual({ labels: ["system:workflow:conversation", "billing"], senderAddress: "sender@example.com", recipientAddress: "user@example.com", subject: "Test email" });
   });
 
   it("new arc (matchedArc is null) → saveArc called, not updateArc", async () => {
