@@ -798,7 +798,7 @@ describe("API", () => {
     it("rejects mutating a system rule's non-status fields", async () => {
       vi.mocked(accountDb.listRules).mockResolvedValueOnce(ok([makeRule({ id: "SR-02", accountId: "SYSTEM" })]));
       const res = await req(app, "PATCH", `${A}/rules/SR-02`, { body: { name: "Hijacked" } });
-      expect(res.status).toBe(400);
+      expect(res.status).toBe(403);
       const body = await res.json() as { errorCode?: string };
       expect(body.errorCode).toBe("SYSTEM_RULE_IMMUTABLE");
       expect(accountDb.upsertSystemRuleStatus).not.toHaveBeenCalled();
