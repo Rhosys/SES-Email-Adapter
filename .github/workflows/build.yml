@@ -48,10 +48,6 @@ jobs:
       - name: Tofu Init
         run: tofu -chdir=deploy init -input=false -backend-config="bucket=${STATE_BUCKET}" -backend-config="key=${STATE_KEY}"
 
-      # TODO: REMOVE after first successful apply
-      - name: Clear deposed parameter group objects from state
-        run: tofu -chdir=deploy state rm 'aws_rds_cluster_parameter_group.aurora["aurora-prod-titan-v2"]' || true
-
       - name: Tofu Plan
         run: tofu -chdir=deploy plan -input=false -out=plan.cache
 
@@ -200,13 +196,6 @@ jobs:
 
       - name: Tofu Init
         run: tofu -chdir=deploy init -input=false -backend-config="bucket=${STATE_BUCKET}" -backend-config="key=${STATE_KEY}"
-
-      # TODO: REMOVE after first successful apply — clears deposed parameter
-      # group objects left by the PG17→18 upgrade. The removed blocks in
-      # search.tf handle the current instances; this clears the deposed ones
-      # that removed blocks cannot reach.
-      - name: Clear deposed parameter group objects from state
-        run: tofu -chdir=deploy state rm 'aws_rds_cluster_parameter_group.aurora["aurora-prod-titan-v2"]' || true
 
       - name: Tofu Plan
         id: plan
