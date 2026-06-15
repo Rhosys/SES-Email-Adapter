@@ -19,7 +19,7 @@ runs:
     - name: Setup OpenTofu
       uses: opentofu/setup-opentofu@v2
       with:
-        tofu_version: '1.8.8'
+        tofu_version: '1.12.0'
 
     - name: Configure AWS Credentials
       uses: aws-actions/configure-aws-credentials@v6
