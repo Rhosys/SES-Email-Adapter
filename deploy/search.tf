@@ -172,6 +172,7 @@ resource "aws_rds_cluster" "aurora" {
 
   enabled_cloudwatch_logs_exports = ["postgresql"]
   enable_http_endpoint            = true # Aurora Data API
+  iam_database_authentication_enabled = true
 
   lifecycle {
     prevent_destroy = true
