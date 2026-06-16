@@ -968,8 +968,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     request: { params: z.object({ accountId: z.string(), arcId: z.string() }) },
     middleware: [authz("signals:write", c => `accounts/${c.req.param("accountId")!}/arcs/${c.req.param("arcId")!}`)] as const,
     responses: {
-      200: { content: { "application/json": { schema: z.object({ status: z.string() }) } }, description: "Unsubscribe successful" },
-      202: { content: { "application/json": { schema: z.object({ status: z.string() }) } }, description: "Unsubscribe pending (mailto)" },
+      200: { content: { "application/json": { schema: z.object({ status: z.string(), url: z.string().optional() }) } }, description: "Unsubscribe initiated and arc archived" },
     },
   }), async (c) => {
     const accountId = c.req.param("accountId")!;
@@ -989,58 +988,61 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
 
     const unsubscribe = emailSignal.data.unsubscribe!;
 
-    if (unsubscribe.type === "website") {
-      return err(c, 400, "Website unsubscribe must be opened in browser");
+    // Attempt server-side unsubscribe for "server" type
+    if (unsubscribe.type === "server") {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 10000);
+      try {
+        const response = await fetch(unsubscribe.url, {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: "List-Unsubscribe=One-Click",
+          signal: controller.signal,
+        });
+        clearTimeout(timeout);
+
+        if (!response.ok) {
+          logger.warn("Unsubscribe POST returned non-2xx.", {
+            code: "unsubscribe.post_failed",
+            accountId,
+            arcId: arc.id,
+            signalId: emailSignal.id,
+            url: unsubscribe.url,
+            statusCode: response.status,
+          });
+          return err(c, 503, "Unsubscribe endpoint returned an error");
+        }
+      } catch (e) {
+        clearTimeout(timeout);
+        logger.warn("Unsubscribe POST failed — network error or timeout.", {
+          code: "unsubscribe.post_error",
+          accountId,
+          arcId: arc.id,
+          signalId: emailSignal.id,
+          url: unsubscribe.url,
+          error: e,
+        });
+        return err(c, 503, "Failed to reach unsubscribe endpoint");
+      }
     }
 
     if (unsubscribe.type === "mailto") {
-      logger.track("Unsubscribe via mailto requested — not yet implemented.", {
+      logger.track("Unsubscribe via mailto — user must complete externally.", {
         code: "unsubscribe.mailto_pending",
         accountId,
         arcId: arc.id,
         signalId: emailSignal.id,
         url: unsubscribe.url,
       });
-      return c.json({ status: "pending" }, 202);
     }
 
-    // type === "server" — fire RFC 8058 one-click POST
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10000);
-    try {
-      const response = await fetch(unsubscribe.url, {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: "List-Unsubscribe=One-Click",
-        signal: controller.signal,
-      });
-      clearTimeout(timeout);
+    // Archive the arc regardless of unsubscribe type
+    const archiveResult = await arcDb.updateArc(accountId, arc.id, "archived", arc.lastSignalAt, {});
+    if (archiveResult.isErr()) return err(c, 500, "Internal Server Error");
 
-      if (!response.ok) {
-        logger.warn("Unsubscribe POST returned non-2xx.", {
-          code: "unsubscribe.post_failed",
-          accountId,
-          arcId: arc.id,
-          signalId: emailSignal.id,
-          url: unsubscribe.url,
-          statusCode: response.status,
-        });
-        return err(c, 503, "Unsubscribe endpoint returned an error");
-      }
-
-      return c.json({ status: "unsubscribed" }, 200);
-    } catch (e) {
-      clearTimeout(timeout);
-      logger.warn("Unsubscribe POST failed — network error or timeout.", {
-        code: "unsubscribe.post_error",
-        accountId,
-        arcId: arc.id,
-        signalId: emailSignal.id,
-        url: unsubscribe.url,
-        error: e,
-      });
-      return err(c, 503, "Failed to reach unsubscribe endpoint");
-    }
+    // Return url for website/mailto so frontend can open it if needed
+    const responseUrl = unsubscribe.type !== "server" ? unsubscribe.url : undefined;
+    return c.json({ status: "unsubscribed", ...(responseUrl ? { url: responseUrl } : {}) }, 200);
   });
 
   // -------------------------------------------------------------------------
