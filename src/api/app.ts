@@ -958,6 +958,92 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
   });
 
   // -------------------------------------------------------------------------
+  // Unsubscribe  —  /accounts/:accountId/arcs/:arcId/unsubscribe
+  // -------------------------------------------------------------------------
+
+  app.openapi(route({
+    method: "post",
+    path: "/accounts/{accountId}/arcs/{arcId}/unsubscribe",
+    tags: ["Signals"],
+    request: { params: z.object({ accountId: z.string(), arcId: z.string() }) },
+    middleware: [authz("signals:write", c => `accounts/${c.req.param("accountId")!}/arcs/${c.req.param("arcId")!}`)] as const,
+    responses: {
+      200: { content: { "application/json": { schema: z.object({ status: z.string() }) } }, description: "Unsubscribe successful" },
+      202: { content: { "application/json": { schema: z.object({ status: z.string() }) } }, description: "Unsubscribe pending (mailto)" },
+    },
+  }), async (c) => {
+    const accountId = c.req.param("accountId")!;
+    const arcResult = await arcDb.getArc(accountId, c.req.param("arcId")!);
+    if (arcResult.isErr()) return err(c, 500, "Internal Server Error");
+    const arc = arcResult.value;
+    if (!arc) return err(c, 404, "Arc not found", "ARC_NOT_FOUND");
+
+    // Find the latest email signal on this arc with unsubscribe info
+    const signalsResult = await arcDb.listSignals(accountId, arc.id, { limit: 20 });
+    if (signalsResult.isErr()) return err(c, 500, "Internal Server Error");
+
+    const emailSignal = signalsResult.value.items.find(
+      (s): s is Signal => s.type === "email" && s.source === "email" && Boolean((s.data as Signal["data"]).unsubscribe),
+    );
+    if (!emailSignal) return err(c, 400, "No unsubscribe info available for this arc");
+
+    const unsubscribe = emailSignal.data.unsubscribe!;
+
+    if (unsubscribe.type === "website") {
+      return err(c, 400, "Website unsubscribe must be opened in browser");
+    }
+
+    if (unsubscribe.type === "mailto") {
+      logger.track("Unsubscribe via mailto requested — not yet implemented.", {
+        code: "unsubscribe.mailto_pending",
+        accountId,
+        arcId: arc.id,
+        signalId: emailSignal.id,
+        url: unsubscribe.url,
+      });
+      return c.json({ status: "pending" }, 202);
+    }
+
+    // type === "server" — fire RFC 8058 one-click POST
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
+    try {
+      const response = await fetch(unsubscribe.url, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: "List-Unsubscribe=One-Click",
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+
+      if (!response.ok) {
+        logger.warn("Unsubscribe POST returned non-2xx.", {
+          code: "unsubscribe.post_failed",
+          accountId,
+          arcId: arc.id,
+          signalId: emailSignal.id,
+          url: unsubscribe.url,
+          statusCode: response.status,
+        });
+        return err(c, 503, "Unsubscribe endpoint returned an error");
+      }
+
+      return c.json({ status: "unsubscribed" }, 200);
+    } catch (e) {
+      clearTimeout(timeout);
+      logger.warn("Unsubscribe POST failed — network error or timeout.", {
+        code: "unsubscribe.post_error",
+        accountId,
+        arcId: arc.id,
+        signalId: emailSignal.id,
+        url: unsubscribe.url,
+        error: e,
+      });
+      return err(c, 503, "Failed to reach unsubscribe endpoint");
+    }
+  });
+
+  // -------------------------------------------------------------------------
   // Calendar RSVP  —  /accounts/:accountId/arcs/:arcId/signals/:id/rsvp
   // -------------------------------------------------------------------------
 

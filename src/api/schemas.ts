@@ -218,7 +218,6 @@ export const ContentData = z.object({
   discountCode: z.string().optional(),
   discountAmount: z.string().optional(),
   expiryDate: z.string().optional(),
-  unsubscribeUrl: z.string().optional(),
 }).openapi("ContentData");
 
 export const NoticeData = z.object({
@@ -277,6 +276,11 @@ export const WorkflowData = z.discriminatedUnion("workflow", [
 // Signal data payloads
 // ---------------------------------------------------------------------------
 
+export const UnsubscribeInfo = z.object({
+  type: z.enum(["server", "website", "mailto"]),
+  url: z.string(),
+}).openapi("UnsubscribeInfo");
+
 export const InboundEmailSignalData = z.object({
   receivedAt: z.string(),
   summary: z.string(),
@@ -294,6 +298,7 @@ export const InboundEmailSignalData = z.object({
   workflowData: WorkflowData.optional(),
   spamScore: z.number(),
   matchedRules: z.array(MatchedRuleResult).optional(),
+  unsubscribe: UnsubscribeInfo.optional(),
 }).openapi("InboundEmailSignalData");
 
 export const OutboundEmailSignalData = z.object({

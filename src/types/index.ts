@@ -148,7 +148,6 @@ export interface ContentData {
   discountCode?: string;
   discountAmount?: string;
   expiryDate?: string;
-  unsubscribeUrl?: string;
 }
 
 export interface OnboardingData {
@@ -409,6 +408,13 @@ export interface MatchedRuleResult {
 // Signal data payload interfaces
 // ---------------------------------------------------------------------------
 
+export type UnsubscribeMethod = "server" | "website" | "mailto";
+
+export interface UnsubscribeInfo {
+  type: UnsubscribeMethod;
+  url: string;
+}
+
 export interface EmailSignalData {
   receivedAt: string;      // ISO datetime
   summary: string;
@@ -441,6 +447,8 @@ export interface EmailSignalData {
   // Send flow fields (only present on source: "user" signals)
   sendInitiatedAt?: string;    // ISO 8601 — when POST /send was called
   sendFailureReason?: string;  // "all_recipients_bounced" | "ses_permanent_failure"
+  // Unsubscribe info derived from List-Unsubscribe / List-Unsubscribe-Post headers
+  unsubscribe?: UnsubscribeInfo;
 }
 
 export interface DeliverabilitySignalData {
