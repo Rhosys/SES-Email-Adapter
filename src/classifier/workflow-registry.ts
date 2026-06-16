@@ -118,7 +118,6 @@ export const WORKFLOW_REGISTRY: WorkflowDefinition[] = [
       { name: "discountCode", type: "string", required: false },
       { name: "discountAmount", type: "string", required: false },
       { name: "expiryDate", type: "string", required: false },
-      { name: "unsubscribeUrl", type: "string", required: false },
     ],
   },
   {

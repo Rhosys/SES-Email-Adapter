@@ -5,7 +5,7 @@ import type { Logger } from "../logger.js";
 import type { Result } from "neverthrow";
 import { ok, err, dbError, processorError, invalidResponseError } from "../errors.js";
 import type { DbError, InvalidResponseError, ProcessorError } from "../errors.js";
-import type { Signal, Arc, Rule, Workflow, WorkflowData, Alias, AliasSender, SenderPolicy, AccountFilteringConfig, SignalSource, SignalStatus, Domain, ArcStatus, ArcUrgency, UnknownSenderPolicy, MatchedRuleResult, InvalidRuleFunctionData, InvalidTemplateFunctionData, AutoSendBlockedData } from "../types/index.js";
+import type { Signal, Arc, Rule, Workflow, WorkflowData, Alias, AliasSender, SenderPolicy, AccountFilteringConfig, SignalSource, SignalStatus, Domain, ArcStatus, ArcUrgency, UnknownSenderPolicy, MatchedRuleResult, InvalidRuleFunctionData, InvalidTemplateFunctionData, AutoSendBlockedData, UnsubscribeInfo } from "../types/index.js";
 import type { ParsedMime } from "./mime.js";
 import type { ContentSanitizerClient } from "./content-sanitizer-client.js";
 import type { UserCodeExecutorClient, TemplateParameterResult } from "./user-code-client.js";
@@ -65,7 +65,7 @@ export interface ProcessorAccountContext {
   retentionDays: number;
   retentionDuration?: RetentionDuration;
   filtering: AccountFilteringConfig | null;
-  emailConfig: Alias | null;
+  aliasConfig: Alias | null;
   registeredDomains: string[];
   userEmails: string[];
   billingPlan: BillingPlan;
@@ -863,6 +863,64 @@ export class SignalProcessor {
 
     const senderETLD1 = getETLD1(parsed.from.address);
 
+    // 2b. Early sender block — skip classify/embed when sender is explicitly blocked for this alias
+    const aliasConfig = accountCtx.aliasConfig;
+    const aliasSenderResult = await this.accountDb.getSender(accountId, recipientAddress, senderETLD1);
+    if (aliasSenderResult.isErr()) return err(aliasSenderResult.error);
+    const aliasSenderConfig = aliasSenderResult.value;
+    const effectiveAliasSenderConfig = aliasConfig ? aliasSenderConfig : null;
+
+    if (effectiveAliasSenderConfig && effectiveAliasSenderConfig.policy !== "allow") {
+      const blockStatus = effectiveAliasSenderConfig.policy; // block_hidden | block_reject | violate_report
+      const now = DateTime.utc().toISO()!;
+      const ttl = accountCtx.retentionDays > 0
+        ? Math.floor(Date.now() / 1000) + accountCtx.retentionDays * 86400
+        : undefined;
+      const signalId = generateId("sgn-");
+      const signal: Signal = {
+        id: signalId,
+        signalLookupId: "ses-" + sesMessageId,
+        accountId,
+        status: blockStatus,
+        source: "email",
+        type: "email",
+        createdAt: now,
+        data: {
+          sesMessageId,
+          s3Key,
+          recipientAddress,
+          receivedAt: timestamp,
+          from: parsed.from,
+          to: parsed.to,
+          cc: parsed.cc,
+          subject: parsed.subject,
+          textBody: parsed.textBody ?? "",
+          attachments: parsed.attachments,
+          headers: parsed.headers,
+          workflow: "notice",
+          workflowData: { workflow: "notice", noticeType: "other", provider: "" } as const,
+          spamScore: 0,
+          summary: "",
+        },
+        ...(ttl !== undefined ? { ttl } : {}),
+      };
+      const saveResult = await this.arcDb.saveSignal(signal);
+      if (saveResult.isErr()) return err(saveResult.error);
+      this.logger.track("Blocked email — sender explicitly blocked for this alias (pre-classify fast path).", { code: "processor.sender_block_early", accountId, sesMessageId, recipientAddress, senderETLD1, policy: blockStatus });
+      const repResult = await this.processingDb.updateGlobalReputation(senderETLD1, { wasSpam: false, wasBlocked: true });
+      if (repResult.isErr()) {
+        this.logger.warn("Failed to update global sender reputation after signal processing. The DynamoDB update returned an error. Reputation data may be stale for this domain.", { code: "processor.reputation_update_failed", accountId, error: repResult.error });
+      }
+      const senderBlockCat = statusToCategory(blockStatus);
+      if (senderBlockCat) {
+        const statsResult = await this.accountDb.incrementStats(accountId, senderBlockCat);
+        if (statsResult.isErr()) {
+          this.logger.warn("Stats increment failed — dashboard may be slightly behind.", { code: "processor.stats_increment_failed", accountId, error: statsResult.error });
+        }
+      }
+      return ok(undefined);
+    }
+
     // 3. Fetch account labels for closed-set label selection
     const labelsResult = await this.accountDb.listLabels(accountId);
     const allowedLabels = labelsResult.isOk() ? labelsResult.value.map(l => l.name) : [];
@@ -905,10 +963,6 @@ export class SignalProcessor {
 
     const now = DateTime.utc().toISO()!;
 
-    // 4. Fetch sender entry (account context already fetched for retention resolution)
-    const senderEntryResult = await this.accountDb.getSender(accountId, recipientAddress, senderETLD1);
-    if (senderEntryResult.isErr()) return err(senderEntryResult.error);
-    const senderEntry = senderEntryResult.value;
     const ttl = accountCtx.retentionDays > 0
       ? Math.floor(Date.now() / 1000) + accountCtx.retentionDays * 86400
       : undefined;
@@ -934,7 +988,7 @@ export class SignalProcessor {
     }
 
     const spamScoreThreshold =
-      accountCtx.emailConfig?.spamScoreThreshold ??
+      accountCtx.aliasConfig?.spamScoreThreshold ??
       accountCtx.filtering?.spamScoreThreshold ??
       DEFAULT_SPAM_SCORE_THRESHOLD;
 
@@ -996,18 +1050,16 @@ export class SignalProcessor {
     }
 
     // 8. Assign system labels and merge classifier labels
-    const emailConfig = accountCtx.emailConfig;
-    const effectiveFilterMode: UnknownSenderPolicy = emailConfig
-      ? emailConfig.unknownSenderPolicy
+    const effectiveFilterMode: UnknownSenderPolicy = aliasConfig
+      ? aliasConfig.unknownSenderPolicy
       : accountCtx.filtering?.newAddressHandling === "block_until_approved"
         ? "quarantine_visible"
         : "allow_all";
-    // When no alias exists for the recipient, sender entries don't apply — treat as no entry
-    const effectiveSenderEntry = emailConfig ? senderEntry : null;
 
     // Explicit sender block — if the sender has been explicitly blocked for this alias, short-circuit
-    if (effectiveSenderEntry && effectiveSenderEntry.policy !== "allow") {
-      const blockStatus = effectiveSenderEntry.policy; // block_hidden | block_reject | violate_report
+    // (post-classify path: preserves classification data on blocked signal for audit/review)
+    if (effectiveAliasSenderConfig && effectiveAliasSenderConfig.policy !== "allow") {
+      const blockStatus = effectiveAliasSenderConfig.policy; // block_hidden | block_reject | violate_report
       const blockedSignal = buildSignal({ status: blockStatus, accountId, sesMessageId, recipientAddress, parsed, classification: classificationOutput, s3Key, receivedAt: timestamp, now, ...(ttl !== undefined ? { ttl } : {}) });
       const saveResult = await this.arcDb.saveSignal(blockedSignal);
       if (saveResult.isErr()) return err(saveResult.error);
@@ -1032,7 +1084,7 @@ export class SignalProcessor {
       spamScore: classificationOutput.spamScore,
       spamScoreThreshold,
       senderETLD1,
-      senderEntry: effectiveSenderEntry,
+      aliasSenderConfig: effectiveAliasSenderConfig,
       unknownSenderPolicy: effectiveFilterMode,
       hasSentMessages: (arc.sentMessageIds?.length ?? 0) > 0,
     });
@@ -1131,7 +1183,7 @@ export class SignalProcessor {
 
     // Auto-approve: sender gets added to approvedSenders when approve_sender fires, allow_all mode, or brand-new address with auto-allow policy
     if (outcome.approveSender || effectiveFilterMode === "allow_all") {
-      const approveResult = await this.autoApprove(accountId, recipientAddress, senderETLD1, emailConfig, accountCtx.filtering?.defaultUnknownSenderPolicy);
+      const approveResult = await this.autoApprove(accountId, recipientAddress, senderETLD1, aliasConfig, accountCtx.filtering?.defaultUnknownSenderPolicy);
       if (approveResult.isErr()) return err(approveResult.error);
     }
 
@@ -1591,6 +1643,34 @@ function parseAutoDraftValue(value: string): { templateId: string; autoSend: boo
   }
 }
 
+// Derive unsubscribe info from RFC 2369 List-Unsubscribe and RFC 8058 List-Unsubscribe-Post headers
+function parseUnsubscribeHeaders(headers: Record<string, string>): UnsubscribeInfo | undefined {
+  const listUnsubscribe = headers["list-unsubscribe"];
+  if (!listUnsubscribe) return undefined;
+
+  const hasPost = Boolean(headers["list-unsubscribe-post"]);
+
+  // Extract URLs from angle-bracket delimited list: <https://...>, <mailto:...>
+  const urls: string[] = [];
+  for (const match of listUnsubscribe.matchAll(/<([^>]+)>/g)) {
+    if (match[1]) urls.push(match[1]);
+  }
+
+  const httpsUrl = urls.find(u => u.startsWith("https://"));
+  const mailtoUrl = urls.find(u => u.startsWith("mailto:"));
+
+  if (hasPost && httpsUrl) {
+    return { type: "server", url: httpsUrl };
+  }
+  if (httpsUrl) {
+    return { type: "website", url: httpsUrl };
+  }
+  if (mailtoUrl) {
+    return { type: "mailto", url: mailtoUrl };
+  }
+  return undefined;
+}
+
 function buildSignal(opts: {
   arcId?: string;
   status: Signal["status"];
@@ -1606,6 +1686,10 @@ function buildSignal(opts: {
 }): Signal {
   const { arcId, status, accountId, sesMessageId, recipientAddress, parsed, classification, s3Key, receivedAt, now, ttl } = opts;
   const signalId = generateId("sgn-");
+
+  // Extract unsubscribe info from List-Unsubscribe / List-Unsubscribe-Post headers
+  const unsubscribe = parseUnsubscribeHeaders(parsed.headers);
+
   const signal: Signal = {
     id: signalId,
     signalLookupId: "ses-" + sesMessageId,
@@ -1633,6 +1717,7 @@ function buildSignal(opts: {
       ...(parsed.textBody !== undefined ? { textBody: parsed.textBody } : {}),
       ...(parsed.htmlBody != null ? { htmlBody: parsed.htmlBody } : {}),
       ...(parsed.sentAt !== undefined ? { sentAt: parsed.sentAt } : {}),
+      ...(unsubscribe !== undefined ? { unsubscribe } : {}),
     },
   };
 

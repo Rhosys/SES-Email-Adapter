@@ -101,6 +101,7 @@ function toApiEmailSignalData(data: EmailSignalData): Api.InboundEmailSignalData
     ...(data.workflowData ? { workflowData: data.workflowData as Api.InboundEmailSignalData["workflowData"] } : {}),
     spamScore: data.spamScore,
     ...(data.matchedRules ? { matchedRules: data.matchedRules as Api.InboundEmailSignalData["matchedRules"] } : {}),
+    ...(data.unsubscribe ? { unsubscribe: data.unsubscribe } : {}),
   };
   return inbound;
 }
