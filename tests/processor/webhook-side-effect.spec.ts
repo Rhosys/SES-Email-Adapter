@@ -71,7 +71,7 @@ function makeStore(billingPlan: "Paid" | "Free" | "Trial" = "Paid") {
     getProcessorAccountContext: vi.fn().mockReturnValue(Promise.resolve(ok({
       retentionDays: 30,
       filtering: null,
-      emailConfig: DEFAULT_ALIAS,
+      aliasConfig: DEFAULT_ALIAS,
       registeredDomains: [],
       userEmails: [],
       billingPlan,

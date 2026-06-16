@@ -65,7 +65,7 @@ const DEFAULT_EMAIL_CONFIG: Alias = {
 const DEFAULT_CTX = {
   retentionDays: 0,
   filtering: null,
-  emailConfig: DEFAULT_EMAIL_CONFIG,
+  aliasConfig: DEFAULT_EMAIL_CONFIG,
   registeredDomains: [],
   userEmails: [],
   billingPlan: "Paid" as const,

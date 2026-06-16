@@ -117,9 +117,11 @@ function parseInterfaceFields(body: string): ParsedField[] {
 // ---------------------------------------------------------------------------
 
 describe("workflow registry ↔ TypeScript type alignment", () => {
-  it("registry covers every workflow in WORKFLOWS", () => {
+  it("registry covers every workflow in WORKFLOWS (except system-only workflows)", () => {
     const registryNames = WORKFLOW_REGISTRY.map((w) => w.name);
+    const systemOnlyWorkflows = new Set(["unspecified"]);
     for (const workflow of WORKFLOWS) {
+      if (systemOnlyWorkflows.has(workflow)) continue;
       expect(registryNames).toContain(workflow);
     }
   });

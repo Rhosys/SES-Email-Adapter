@@ -84,7 +84,7 @@ describe("Property 9: S3 retention failure is isolated and non-fatal", () => {
   const DEFAULT_CTX = {
     retentionDays: 0,
     filtering: null,
-    emailConfig: DEFAULT_ALIAS,
+    aliasConfig: DEFAULT_ALIAS,
     registeredDomains: [],
     userEmails: [],
     billingPlan: "Paid" as const,

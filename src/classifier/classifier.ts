@@ -14,8 +14,8 @@ export const CLASSIFICATION_MODEL_ID = "qwen.qwen3-32b-v1:0";
 export const GUARDRAIL_ID = "PLACEHOLDER";
 export const GUARDRAIL_VERSION = "PLACEHOLDER";
 
-export type ClassificationError = { kind: "classification_error"; cause: unknown };
-export const classificationError = (cause: unknown): ClassificationError => ({ kind: "classification_error", cause });
+export type ClassificationError = { kind: "classification_error"; cause: unknown; rawText?: string };
+export const classificationError = (cause: unknown, rawText?: string): ClassificationError => ({ kind: "classification_error", cause, ...(rawText !== undefined ? { rawText } : {}) });
 
 export interface ClassificationInput {
   from: string;
@@ -117,9 +117,9 @@ export class SignalClassifier {
     let result: BedrockResponseWithTrace;
     try {
       result = JSON.parse(responseBody) as BedrockResponseWithTrace;
-    } catch {
-      this.logger.error("Classifier received invalid JSON from Bedrock response envelope.", { code: "classifier.parse_failed", input, rawResponse: responseBody });
-      return err(classificationError("Invalid JSON in Bedrock response envelope"));
+    } catch (e) {
+      this.logger.error("Classifier received invalid JSON from Bedrock response envelope.", { code: "classifier.parse_failed", input, rawResponse: responseBody, error: e });
+      return err(classificationError(e, responseBody));
     }
 
     // Handle guardrail trace — observe only, never blocks classification
@@ -127,19 +127,20 @@ export class SignalClassifier {
 
     const text = result.choices?.[0]?.message?.content ?? "";
 
-    // Parse classifier JSON output
+    // Parse classifier JSON output — strip markdown fences if model wraps output
+    const jsonText = text.replace(/^```(?:json)?\s*\n?/i, "").replace(/\n?```\s*$/i, "").trim();
     let raw: RawClassificationResponse;
     try {
-      raw = JSON.parse(text) as RawClassificationResponse;
-    } catch {
-      this.logger.error("Classifier received invalid JSON from model output.", { code: "classifier.parse_failed", input, rawResponse: text });
-      return err(classificationError("Invalid JSON in model output"));
+      raw = JSON.parse(jsonText) as RawClassificationResponse;
+    } catch (e) {
+      this.logger.error("Classifier received invalid JSON from model output.", { code: "classifier.parse_failed", input, rawResponse: text, error: e });
+      return err(classificationError(e, text));
     }
 
     // Validate workflow ∈ WORKFLOWS
     if (!WORKFLOWS.includes(raw.workflow as Workflow)) {
-      this.logger.error("Classifier returned unknown workflow.", { code: "classifier.invalid_workflow", input, rawResponse: text, workflow: raw.workflow });
-      return err(classificationError(`Unknown workflow: ${raw.workflow}`));
+      this.logger.error("Classifier returned unknown workflow.", { code: "classifier.invalid_workflow", input, rawResponse: jsonText, workflow: raw.workflow });
+      return err(classificationError(`Unknown workflow: ${raw.workflow}`, jsonText));
     }
 
     // Clamp spamScore to [0, 1]

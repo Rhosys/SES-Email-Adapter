@@ -91,11 +91,11 @@ export interface RetentionEmailConfig {
  */
 export function resolveRetention(
   accountCtx: RetentionAccountContext,
-  emailConfig: RetentionEmailConfig | null,
+  aliasConfig: RetentionEmailConfig | null,
   ruleOverride?: RetentionDuration,
 ): RetentionDuration {
   if (ruleOverride) return ruleOverride;
-  if (emailConfig?.retentionDuration) return emailConfig.retentionDuration;
+  if (aliasConfig?.retentionDuration) return aliasConfig.retentionDuration;
   if (accountCtx.retentionDuration) return accountCtx.retentionDuration;
   return "P1Y";
 }

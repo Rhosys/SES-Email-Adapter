@@ -278,14 +278,14 @@ export class AccountDatabase {
     return ok(accountResult.value?.deletionRetentionDays ?? 0);
   }
 
-  async getProcessorAccountContext(accountId: string, recipientAddress: string): Promise<Result<{ retentionDays: number; filtering: AccountFilteringConfig | null; emailConfig: Alias | null; registeredDomains: string[]; userEmails: string[]; billingPlan: import("../embedding/retention-tier.js").BillingPlan; onboardingCompleted: boolean }, DbError>> {
+  async getProcessorAccountContext(accountId: string, recipientAddress: string): Promise<Result<{ retentionDays: number; filtering: AccountFilteringConfig | null; aliasConfig: Alias | null; registeredDomains: string[]; userEmails: string[]; billingPlan: import("../embedding/retention-tier.js").BillingPlan; onboardingCompleted: boolean }, DbError>> {
     const accountResult = await this.getAccount(accountId);
     if (accountResult.isErr()) return err(accountResult.error);
     const account = accountResult.value;
 
-    const emailConfigResult = await this.getAlias(accountId, recipientAddress);
-    if (emailConfigResult.isErr()) return err(emailConfigResult.error);
-    const emailConfig = emailConfigResult.value;
+    const aliasConfigResult = await this.getAlias(accountId, recipientAddress);
+    if (aliasConfigResult.isErr()) return err(aliasConfigResult.error);
+    const aliasConfig = aliasConfigResult.value;
 
     const domainsResult = await this.listDomains(accountId);
     if (domainsResult.isErr()) return err(domainsResult.error);
@@ -294,7 +294,7 @@ export class AccountDatabase {
     return ok({
       retentionDays: account?.deletionRetentionDays ?? 0,
       filtering: account?.filtering ?? null,
-      emailConfig,
+      aliasConfig,
       registeredDomains: domains.map((d) => d.domain),
       userEmails: [],
       billingPlan: account?.billingPlan ?? "Paid",

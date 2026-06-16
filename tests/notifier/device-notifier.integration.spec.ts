@@ -70,7 +70,7 @@ function makeStore() {
   vi.mocked(accountDb.getProcessorAccountContext).mockReturnValue(Promise.resolve(ok({
     retentionDays: 30,
     filtering: null,
-    emailConfig: DEFAULT_ALIAS,
+    aliasConfig: DEFAULT_ALIAS,
     registeredDomains: [],
     userEmails: [],
     billingPlan: "Paid" as const,

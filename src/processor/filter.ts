@@ -17,7 +17,7 @@ export interface SystemLabelContext {
   spamScore: number;
   spamScoreThreshold: number;
   senderETLD1: string;
-  senderEntry: AliasSender | null;  // pre-fetched allow/block entry for this (alias, sender domain) pair
+  aliasSenderConfig: AliasSender | null;  // pre-fetched allow/block entry for this (alias, sender domain) pair
   unknownSenderPolicy: UnknownSenderPolicy;
   hasSentMessages: boolean;
 }
@@ -34,7 +34,7 @@ export function assignSystemLabels(ctx: SystemLabelContext): SystemLabel[] {
   else if (ctx.spamScore >= 0.4) labels.push("system:spam:medium");
 
   const senderTrusted =
-    ctx.senderEntry?.policy === "allow" ||
+    ctx.aliasSenderConfig?.policy === "allow" ||
     ctx.unknownSenderPolicy === "allow_all";
   if (!senderTrusted) labels.push("system:sender:untrusted");
 

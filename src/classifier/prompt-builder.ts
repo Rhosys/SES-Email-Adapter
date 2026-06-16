@@ -1,11 +1,7 @@
 import type { WorkflowDefinition } from "./workflow-registry.js";
 import type { ClassificationInput } from "./classifier.js";
 
-export const RELEVANT_HEADERS = new Set([
-  "authentication-results",
-  "received-spf",
-  "dmarc",
-]);
+export const RELEVANT_HEADERS = new Set<string>([]);
 
 const MAX_BODY_LENGTH = 4000;
 
@@ -66,9 +62,7 @@ Score ranges:
 - 0.0–0.2: Clearly legitimate
 - 0.2–0.5: Somewhat suspicious
 - 0.5–0.8: Likely spam/unwanted
-- 0.8–1.0: Definite spam, phishing, or malware
-
-Consider authentication headers (DKIM, SPF, DMARC pass/fail) as spam scoring inputs.`);
+- 0.8–1.0: Definite spam, phishing, or malware`);
 
   // Summary rules
   sections.push(`## Summary

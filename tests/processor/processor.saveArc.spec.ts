@@ -115,7 +115,7 @@ describe("Single saveArc call with complete mutations", () => {
       getProcessorAccountContext: vi.fn().mockReturnValue(Promise.resolve(ok({
         retentionDays: 0,
         filtering: null,
-        emailConfig: {
+        aliasConfig: {
           id: "cfg-001", accountId: TEST_ACCOUNT_ID, address: `user@${recipientDomain}`, domain: recipientDomain, alias: "user",
           unknownSenderPolicy: "allow_all", createdAt: "2024-01-01T00:00:00Z", updatedAt: "2024-01-01T00:00:00Z",
         } satisfies Alias,

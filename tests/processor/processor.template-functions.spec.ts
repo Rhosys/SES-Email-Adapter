@@ -25,7 +25,7 @@ const TEST_ACCOUNT_ID = "acc_tmpl_test";
 const DEFAULT_CTX: ProcessorAccountContext = {
   retentionDays: 365,
   filtering: null,
-  emailConfig: null,
+  aliasConfig: null,
   registeredDomains: ["example.com"],
   userEmails: ["user@example.com"],
   billingPlan: "Paid",
