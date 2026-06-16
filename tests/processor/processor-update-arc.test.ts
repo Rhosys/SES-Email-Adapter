@@ -53,7 +53,7 @@ const DEFAULT_SENDER_ENTRY: AliasSender = {
   accountId: TEST_ACCOUNT_ID, aliasAddress: "user@example.com", domain: "example.com", alias: "user", senderDomain: "example.com", policy: "allow", addedAt: "2024-01-01T00:00:00Z",
 };
 
-const DEFAULT_CTX = { retentionDays: 0, filtering: null, emailConfig: DEFAULT_ALIAS, registeredDomains: [], userEmails: [], billingPlan: "Paid" as const, onboardingCompleted: true };
+const DEFAULT_CTX = { retentionDays: 0, filtering: null, aliasConfig: DEFAULT_ALIAS, registeredDomains: [], userEmails: [], billingPlan: "Paid" as const, onboardingCompleted: true };
 
 const validClassification: ClassificationOutput = {
   workflow: "conversation",

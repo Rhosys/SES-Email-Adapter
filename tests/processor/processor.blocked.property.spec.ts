@@ -119,7 +119,7 @@ describe("Blocked/quarantined signals never trigger saveArc", () => {
     classifier: Pick<SignalClassifier, "classify">;
     contentSanitizer: ContentSanitizerClient;
     unknownSenderPolicy: UnknownSenderPolicy;
-    senderEntry: AliasSender | null;
+    aliasSenderConfig: AliasSender | null;
     rules: Rule[];
   }
 
@@ -129,7 +129,7 @@ describe("Blocked/quarantined signals never trigger saveArc", () => {
       classifier: makeClassifier({ spamScore: 0.95, workflow: "conversation" }),
       contentSanitizer: makeContentSanitizer("spammer.com"),
       unknownSenderPolicy: "quarantine_visible",
-      senderEntry: { accountId: TEST_ACCOUNT_ID, aliasAddress: "user@example.com", domain: "example.com", alias: "user", senderDomain: "spammer.com", policy: "allow", addedAt: "2024-01-01T00:00:00Z" },
+      aliasSenderConfig: { accountId: TEST_ACCOUNT_ID, aliasAddress: "user@example.com", domain: "example.com", alias: "user", senderDomain: "spammer.com", policy: "allow", addedAt: "2024-01-01T00:00:00Z" },
       rules: SYSTEM_RULES,
     },
     {
@@ -137,7 +137,7 @@ describe("Blocked/quarantined signals never trigger saveArc", () => {
       classifier: makeClassifier({ workflow: "onboarding" as import("../../src/types/index.js").Workflow, workflowData: { workflow: "onboarding", service: "acme.com", onboardingType: "welcome" } as unknown as import("../../src/types/index.js").WorkflowData }),
       contentSanitizer: makeContentSanitizer("acme.com"),
       unknownSenderPolicy: "quarantine_visible",
-      senderEntry: { accountId: TEST_ACCOUNT_ID, aliasAddress: "user@example.com", domain: "example.com", alias: "user", senderDomain: "acme.com", policy: "allow", addedAt: "2024-01-01T00:00:00Z" },
+      aliasSenderConfig: { accountId: TEST_ACCOUNT_ID, aliasAddress: "user@example.com", domain: "example.com", alias: "user", senderDomain: "acme.com", policy: "allow", addedAt: "2024-01-01T00:00:00Z" },
       rules: SYSTEM_RULES,
     },
     {
@@ -145,7 +145,7 @@ describe("Blocked/quarantined signals never trigger saveArc", () => {
       classifier: makeClassifier({ workflow: "notice", workflowData: { workflow: "notice", noticeType: "terms_update", provider: "gov.uk" } }),
       contentSanitizer: makeContentSanitizer("gov.uk"),
       unknownSenderPolicy: "quarantine_visible",
-      senderEntry: { accountId: TEST_ACCOUNT_ID, aliasAddress: "user@example.com", domain: "example.com", alias: "user", senderDomain: "gov.uk", policy: "allow", addedAt: "2024-01-01T00:00:00Z" },
+      aliasSenderConfig: { accountId: TEST_ACCOUNT_ID, aliasAddress: "user@example.com", domain: "example.com", alias: "user", senderDomain: "gov.uk", policy: "allow", addedAt: "2024-01-01T00:00:00Z" },
       rules: SYSTEM_RULES,
     },
     {
@@ -153,7 +153,7 @@ describe("Blocked/quarantined signals never trigger saveArc", () => {
       classifier: makeClassifier({ workflow: "conversation" }),
       contentSanitizer: makeContentSanitizer("unknown-sender.com"),
       unknownSenderPolicy: "block_hidden",
-      senderEntry: null,
+      aliasSenderConfig: null,
       rules: SYSTEM_RULES,
     },
     {
@@ -161,7 +161,7 @@ describe("Blocked/quarantined signals never trigger saveArc", () => {
       classifier: makeClassifier({ workflow: "conversation" }),
       contentSanitizer: makeContentSanitizer("unknown-sender.com"),
       unknownSenderPolicy: "quarantine_visible",
-      senderEntry: null,
+      aliasSenderConfig: null,
       rules: SYSTEM_RULES,
     },
     {
@@ -169,7 +169,7 @@ describe("Blocked/quarantined signals never trigger saveArc", () => {
       classifier: makeClassifier({ workflow: "conversation" }),
       contentSanitizer: makeContentSanitizer("example.com"),
       unknownSenderPolicy: "allow_all",
-      senderEntry: { accountId: TEST_ACCOUNT_ID, aliasAddress: "user@example.com", domain: "example.com", alias: "user", senderDomain: "example.com", policy: "allow", addedAt: "2024-01-01T00:00:00Z" },
+      aliasSenderConfig: { accountId: TEST_ACCOUNT_ID, aliasAddress: "user@example.com", domain: "example.com", alias: "user", senderDomain: "example.com", policy: "allow", addedAt: "2024-01-01T00:00:00Z" },
       rules: [{
         id: "custom-block", accountId: TEST_ACCOUNT_ID, name: "Block all",
         condition: "true", actions: [{ type: "block_hidden" }], status: "enabled",
@@ -181,7 +181,7 @@ describe("Blocked/quarantined signals never trigger saveArc", () => {
       classifier: makeClassifier({ workflow: "conversation" }),
       contentSanitizer: makeContentSanitizer("example.com"),
       unknownSenderPolicy: "allow_all",
-      senderEntry: { accountId: TEST_ACCOUNT_ID, aliasAddress: "user@example.com", domain: "example.com", alias: "user", senderDomain: "example.com", policy: "allow", addedAt: "2024-01-01T00:00:00Z" },
+      aliasSenderConfig: { accountId: TEST_ACCOUNT_ID, aliasAddress: "user@example.com", domain: "example.com", alias: "user", senderDomain: "example.com", policy: "allow", addedAt: "2024-01-01T00:00:00Z" },
       rules: [{
         id: "custom-quarantine", accountId: TEST_ACCOUNT_ID, name: "Quarantine all",
         condition: "true", actions: [{ type: "quarantine" }], status: "enabled",
@@ -194,7 +194,7 @@ describe("Blocked/quarantined signals never trigger saveArc", () => {
     const mockLogger = createMockLogger();
     const { arcDb, accountDb, processingDb } = makeStore();
 
-    const emailConfig: Alias = {
+    const aliasConfig: Alias = {
       id: "cfg-prop2",
       accountId: TEST_ACCOUNT_ID,
       address: "user@example.com",
@@ -208,12 +208,12 @@ describe("Blocked/quarantined signals never trigger saveArc", () => {
     (accountDb.getProcessorAccountContext as ReturnType<typeof vi.fn>).mockReturnValue(Promise.resolve(ok({
       retentionDays: 0,
       filtering: null,
-      emailConfig,
+      aliasConfig,
       registeredDomains: [],
       userEmails: [],
       billingPlan: "Paid" as const,
     })));
-    (accountDb.getSender as ReturnType<typeof vi.fn>).mockReturnValue(Promise.resolve(ok(strategy.senderEntry)));
+    (accountDb.getSender as ReturnType<typeof vi.fn>).mockReturnValue(Promise.resolve(ok(strategy.aliasSenderConfig)));
     (accountDb.listEnabledRules as ReturnType<typeof vi.fn>).mockReturnValue(Promise.resolve(ok(strategy.rules)));
 
     const processor = new SignalProcessor({ ...makeSharedNewDeps(),

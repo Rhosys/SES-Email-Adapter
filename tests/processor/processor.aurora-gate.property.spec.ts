@@ -98,7 +98,7 @@ describe("Feature: signal-processor-retry-resilience, Property 4: Arc saved befo
   const DEFAULT_CTX = {
     retentionDays: 0,
     filtering: null,
-    emailConfig: DEFAULT_EMAIL_CONFIG,
+    aliasConfig: DEFAULT_EMAIL_CONFIG,
     registeredDomains: [],
     userEmails: [],
     billingPlan: "Paid" as const,
@@ -322,7 +322,7 @@ describe("Feature: signal-processor-retry-resilience, Property 6: Aurora failure
   const DEFAULT_CTX = {
     retentionDays: 0,
     filtering: null,
-    emailConfig: DEFAULT_EMAIL_CONFIG,
+    aliasConfig: DEFAULT_EMAIL_CONFIG,
     registeredDomains: [],
     userEmails: [],
     billingPlan: "Paid" as const,
@@ -604,7 +604,7 @@ describe("Feature: signal-processor-retry-resilience, Property 5: Side-effects d
   const DEFAULT_CTX = {
     retentionDays: 0,
     filtering: null,
-    emailConfig: DEFAULT_EMAIL_CONFIG,
+    aliasConfig: DEFAULT_EMAIL_CONFIG,
     registeredDomains: [],
     userEmails: [],
     billingPlan: "Paid" as const,
@@ -885,7 +885,7 @@ describe("Feature: signal-processor-retry-resilience, Property 7: Partial Aurora
   const DEFAULT_CTX = {
     retentionDays: 0,
     filtering: null,
-    emailConfig: DEFAULT_EMAIL_CONFIG,
+    aliasConfig: DEFAULT_EMAIL_CONFIG,
     registeredDomains: [],
     userEmails: [],
     billingPlan: "Paid" as const,

@@ -37,7 +37,7 @@ export function makeAccountDbMock(): AccountDatabase {
     getProcessorAccountContext: vi.fn().mockReturnValue(Promise.resolve(ok({
       retentionDays: 0,
       filtering: null,
-      emailConfig: null,
+      aliasConfig: null,
       registeredDomains: [],
       userEmails: [],
       billingPlan: "Paid" as const,

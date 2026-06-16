@@ -83,7 +83,7 @@ const DEFAULT_SENDER_ENTRY: AliasSender = {
 const DEFAULT_CTX = {
   retentionDays: 0,
   filtering: null,
-  emailConfig: DEFAULT_ALIAS,
+  aliasConfig: DEFAULT_ALIAS,
   registeredDomains: [],
   userEmails: [],
   billingPlan: "Paid" as const,

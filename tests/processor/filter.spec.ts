@@ -13,7 +13,7 @@ function makeCtx(overrides: Partial<SystemLabelContext> = {}): SystemLabelContex
     spamScore: LOW_SPAM,
     spamScoreThreshold: DEFAULT_SPAM_SCORE_THRESHOLD,
     senderETLD1: "amazon.com",
-    senderEntry: { accountId: "acct-001", aliasAddress: "user@example.com", domain: "example.com", alias: "user", senderDomain: "amazon.com", policy: "allow", addedAt: "2024-01-01T00:00:00Z" },
+    aliasSenderConfig: { accountId: "acct-001", aliasAddress: "user@example.com", domain: "example.com", alias: "user", senderDomain: "amazon.com", policy: "allow", addedAt: "2024-01-01T00:00:00Z" },
     unknownSenderPolicy: "quarantine_visible",
     hasSentMessages: false,
     ...overrides,
@@ -95,22 +95,22 @@ describe("assignSystemLabels — spam labels", () => {
 
 describe("assignSystemLabels — sender trust", () => {
   it("emits system:sender:untrusted when sender not in approvedSenders", () => {
-    const labels = assignSystemLabels(makeCtx({ senderETLD1: "unknown.com", senderEntry: null }));
+    const labels = assignSystemLabels(makeCtx({ senderETLD1: "unknown.com", aliasSenderConfig: null }));
     expect(labels).toContain("system:sender:untrusted");
   });
 
   it("does not emit system:sender:untrusted when sender is in approvedSenders", () => {
-    const labels = assignSystemLabels(makeCtx({ senderETLD1: "amazon.com", senderEntry: { accountId: "acct-001", aliasAddress: "user@example.com", domain: "example.com", alias: "user", senderDomain: "amazon.com", policy: "allow", addedAt: "2024-01-01T00:00:00Z" } }));
+    const labels = assignSystemLabels(makeCtx({ senderETLD1: "amazon.com", aliasSenderConfig: { accountId: "acct-001", aliasAddress: "user@example.com", domain: "example.com", alias: "user", senderDomain: "amazon.com", policy: "allow", addedAt: "2024-01-01T00:00:00Z" } }));
     expect(labels).not.toContain("system:sender:untrusted");
   });
 
   it("does not emit system:sender:untrusted in allow_all mode regardless of approvedSenders", () => {
-    const labels = assignSystemLabels(makeCtx({ senderETLD1: "unknown.com", senderEntry: null, unknownSenderPolicy: "allow_all" }));
+    const labels = assignSystemLabels(makeCtx({ senderETLD1: "unknown.com", aliasSenderConfig: null, unknownSenderPolicy: "allow_all" }));
     expect(labels).not.toContain("system:sender:untrusted");
   });
 
   it("emits system:sender:untrusted for matched arc if not in approvedSenders (trust is purely from approvedSenders)", () => {
-    const labels = assignSystemLabels(makeCtx({ senderETLD1: "unknown.com", senderEntry: null, workflow: "content", workflowData: { workflow: "content", contentType: "newsletter", publisher: "foo" } }));
+    const labels = assignSystemLabels(makeCtx({ senderETLD1: "unknown.com", aliasSenderConfig: null, workflow: "content", workflowData: { workflow: "content", contentType: "newsletter", publisher: "foo" } }));
     expect(labels).toContain("system:sender:untrusted");
   });
 });

@@ -769,7 +769,7 @@ export class SignalProcessor {
     if (existingResult.value) return ok(undefined);
 
     // 1b. Block emails that fail DKIM or DMARC — spoofed sender, reject immediately
-    if (msg.dkimVerdict !== "PASS" || msg.dmarcVerdict !== "PASS") {
+    if (msg.dkimVerdict === "FAIL" || msg.dmarcVerdict === "FAIL") {
       const signalId = generateId("sgn-");
       const signal: Signal = {
         id: signalId,
@@ -942,10 +942,13 @@ export class SignalProcessor {
       accountId,
     });
 
+    let classificationOutput: ClassificationOutput;
     if (classification.isErr()) {
-      return err(invalidResponseError());
+      this.logger.warn("Classification failed — proceeding with workflow:none fallback.", { code: "processor.classification_fallback", accountId, sesMessageId, error: classification.error });
+      classificationOutput = { workflow: "unspecified", workflowData: { workflow: "unspecified" }, spamScore: 0, summary: "", labels: [] };
+    } else {
+      classificationOutput = classification.value;
     }
-    const classificationOutput = classification.value;
 
     // 5. Build embed text from classification output (attacker-free content)
     const embedText = buildEmbedText(classificationOutput);

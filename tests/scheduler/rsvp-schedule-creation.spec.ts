@@ -155,7 +155,7 @@ function buildProcessor(opts: {
   (accountDb.getProcessorAccountContext as ReturnType<typeof vi.fn>).mockResolvedValue(ok({
     retentionDays: 0,
     filtering: null,
-    emailConfig: DEFAULT_EMAIL_CONFIG,
+    aliasConfig: DEFAULT_EMAIL_CONFIG,
     registeredDomains: [],
     userEmails: [],
     billingPlan: "Paid" as const,
