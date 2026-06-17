@@ -7,7 +7,7 @@
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 import type { ReplySender, Forwarder } from "../processor/processor.js";
 import type { EmailService } from "../email/email-service.js";
-import type { DbError, Result } from "../errors.js";
+import type { DbError, TransientSesError, Result } from "../errors.js";
 import { ok, err, dbError } from "../errors.js";
 import { buildOutboundTags } from "../email/ses-tags.js";
 import type { Logger } from "../logger.js";
@@ -61,7 +61,7 @@ export class ExternalEmailSignalHandler implements ReplySender, Forwarder {
     return { messageId: result.value.messageId };
   }
 
-  async forward(s3Key: string, toAddress: string, accountId: string, opts?: { signalId?: string; arcId?: string }): Promise<Result<void, DbError>> {
+  async forward(s3Key: string, toAddress: string, accountId: string, opts?: { signalId?: string; arcId?: string }): Promise<Result<void, DbError | TransientSesError>> {
     try {
       const res = await this.s3.send(new GetObjectCommand({ Bucket: this.emailBucket, Key: s3Key }));
       const rawBytes = await res.Body!.transformToByteArray();

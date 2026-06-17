@@ -8,7 +8,7 @@
 
 import { DateTime } from "luxon";
 import { ok, err } from "../../errors.js";
-import type { DbError, Result } from "../../errors.js";
+import type { DbError, TransientSesError, Result } from "../../errors.js";
 import type { InboundSignalMessage } from "../processor.js";
 import type { ArcDatabase } from "../../database/arc-database.js";
 import type { Logger } from "../../logger.js";
@@ -76,7 +76,7 @@ export async function handleCalendarResponse(
   deps: CalendarResponseHandlerDeps,
   logger: Logger,
   icsBytes: Uint8Array,
-): Promise<Result<void, DbError>> {
+): Promise<Result<void, DbError | TransientSesError>> {
   const { serviceDomain, arcDatabase, rsvpComposer, signalStore, emailService } = deps;
 
   // --- Step 1: Extract arcId and accountId from recipient address ---

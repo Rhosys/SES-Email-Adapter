@@ -4,7 +4,7 @@ import { generateId } from "../utils/id.js";
 import type { Logger } from "../logger.js";
 import type { Result } from "neverthrow";
 import { ok, err, dbError, processorError, invalidResponseError } from "../errors.js";
-import type { DbError, InvalidResponseError, ProcessorError } from "../errors.js";
+import type { DbError, InvalidResponseError, ProcessorError, TransientSesError } from "../errors.js";
 import type { Signal, Arc, Rule, Workflow, WorkflowData, Alias, AliasSender, SenderPolicy, AccountFilteringConfig, SignalSource, SignalStatus, Domain, ArcStatus, ArcUrgency, UnknownSenderPolicy, MatchedRuleResult, InvalidRuleFunctionData, InvalidTemplateFunctionData, AutoSendBlockedData, UnsubscribeInfo } from "../types/index.js";
 import type { ParsedMime } from "./mime.js";
 import type { ContentSanitizerClient } from "./content-sanitizer-client.js";
@@ -94,7 +94,7 @@ export interface Forwarder {
     toAddress: string,
     accountId: string,
     opts?: { signalId?: string; arcId?: string },
-  ): Promise<Result<void, DbError>>;
+  ): Promise<Result<void, DbError | TransientSesError>>;
 }
 
 export interface ReplySender {
@@ -1055,9 +1055,7 @@ export class SignalProcessor {
     // 8. Assign system labels and merge classifier labels
     const effectiveFilterMode: UnknownSenderPolicy = aliasConfig
       ? aliasConfig.unknownSenderPolicy
-      : accountCtx.filtering?.newAddressHandling === "block_until_approved"
-        ? "quarantine_visible"
-        : "allow_all";
+      : accountCtx.filtering?.defaultUnknownSenderPolicy ?? "allow_all";
 
     // Explicit sender block — if the sender has been explicitly blocked for this alias, short-circuit
     // (post-classify path: preserves classification data on blocked signal for audit/review)
