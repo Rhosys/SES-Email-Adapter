@@ -34,6 +34,21 @@ export interface UpdateArcFields {
 }
 
 // ---------------------------------------------------------------------------
+// Stale pending_send coercion — read-time only, DynamoDB record is NOT mutated
+// ---------------------------------------------------------------------------
+
+export const PENDING_SEND_STALE_HOURS = 4;
+
+export function coerceStaleStatus(signal: Signal): Signal {
+  if (signal.status !== "pending_send") return signal;
+  const sendInitiatedAt = (signal.data as { sendInitiatedAt?: string }).sendInitiatedAt;
+  if (!sendInitiatedAt) return { ...signal, status: "draft" };
+  const elapsed = DateTime.utc().diff(DateTime.fromISO(sendInitiatedAt), "hours").hours;
+  if (elapsed > PENDING_SEND_STALE_HOURS) return { ...signal, status: "draft" };
+  return signal;
+}
+
+// ---------------------------------------------------------------------------
 // ArcDatabase
 // Owns: Arcs and Signals in SIGNALS_TABLE (DynamoDB)
 // ---------------------------------------------------------------------------
@@ -60,7 +75,7 @@ export class ArcDatabase {
           ExpressionAttributeValues: { ":pk": `ACCT#${accountId}#ARC#${arcId}`, ":sk": signalId },
           Limit: 1,
         }));
-        return ok(res.Items?.[0] ? (res.Items[0] as Signal) : null);
+        return ok(res.Items?.[0] ? coerceStaleStatus(res.Items[0] as Signal) : null);
       }
 
       // No arcId — query across all three GSI PK patterns
@@ -77,7 +92,7 @@ export class ArcDatabase {
           ExpressionAttributeValues: { ":pk": pk, ":sk": signalId },
           Limit: 1,
         }));
-        if (res.Items?.[0]) return ok(res.Items[0] as Signal);
+        if (res.Items?.[0]) return ok(coerceStaleStatus(res.Items[0] as Signal));
       }
 
       // For user/system signals, signalLookupId === id — try direct table get
@@ -85,7 +100,7 @@ export class ArcDatabase {
         TableName: SIGNALS_TABLE,
         Key: { pk: sigPk(accountId, signalId), sk: ITEM_SK },
       }));
-      return ok(directRes.Item ? (directRes.Item as Signal) : null);
+      return ok(directRes.Item ? coerceStaleStatus(directRes.Item as Signal) : null);
     } catch (e) {
       return err(dbError(e));
     }
@@ -97,7 +112,7 @@ export class ArcDatabase {
         TableName: SIGNALS_TABLE,
         Key: { pk: sigPk(accountId, `ses-${sesMessageId}`), sk: ITEM_SK },
       }));
-      return ok(res.Item ? (res.Item as Signal) : null);
+      return ok(res.Item ? coerceStaleStatus(res.Item as Signal) : null);
     } catch (e) {
       return err(dbError(e));
     }
