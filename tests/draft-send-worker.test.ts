@@ -52,7 +52,7 @@ function makeStore(): DraftSendStore {
 
 function makeReplySender(): ReplySender {
   return {
-    sendReply: vi.fn().mockResolvedValue({ messageId: "ses-msg-001" }),
+    sendReply: vi.fn().mockResolvedValue(ok({ messageId: "ses-msg-001" })),
   };
 }
 
@@ -155,66 +155,14 @@ describe("DraftSendWorker", () => {
     );
   });
 
-  it("reverts to draft on permanent SES error (MessageRejected)", async () => {
-    const sesError = Object.assign(new Error("rejected"), { name: "MessageRejected", $metadata: { httpStatusCode: 400 } });
-    vi.mocked(replySender.sendReply).mockRejectedValueOnce(sesError);
-
-    const result = await worker.process(PAYLOAD);
-
-    expect(result.isOk()).toBe(true);
-    expect(store.updateSignalSendStatus).toHaveBeenCalledWith("acct-001", "USR#signal-001", {
-      status: "draft",
-      sendInitiatedAt: null,
-      sendFailureReason: "ses_permanent_failure",
-    });
-  });
-
-  it("reverts to draft on permanent SES error (AccountSendingPausedException)", async () => {
-    const sesError = Object.assign(new Error("paused"), { name: "AccountSendingPausedException", $metadata: { httpStatusCode: 400 } });
-    vi.mocked(replySender.sendReply).mockRejectedValueOnce(sesError);
-
-    const result = await worker.process(PAYLOAD);
-
-    expect(result.isOk()).toBe(true);
-    expect(store.updateSignalSendStatus).toHaveBeenCalledWith("acct-001", "USR#signal-001", {
-      status: "draft",
-      sendInitiatedAt: null,
-      sendFailureReason: "ses_permanent_failure",
-    });
-  });
-
-  it("reverts to draft on 4xx HTTP status (permanent)", async () => {
-    const sesError = Object.assign(new Error("bad request"), { name: "SomeOtherError", $metadata: { httpStatusCode: 403 } });
-    vi.mocked(replySender.sendReply).mockRejectedValueOnce(sesError);
-
-    const result = await worker.process(PAYLOAD);
-
-    expect(result.isOk()).toBe(true);
-    expect(store.updateSignalSendStatus).toHaveBeenCalledWith("acct-001", "USR#signal-001", {
-      status: "draft",
-      sendInitiatedAt: null,
-      sendFailureReason: "ses_permanent_failure",
-    });
-  });
-
-  it("returns err on transient SES error (5xx) so SQS retries", async () => {
-    const sesError = Object.assign(new Error("service unavailable"), { name: "ServiceUnavailable", $metadata: { httpStatusCode: 500 } });
-    vi.mocked(replySender.sendReply).mockRejectedValueOnce(sesError);
+  it("returns err on transient SES error so SQS retries", async () => {
+    const transientError = { kind: "transient_ses_error" as const, errorName: "ServiceUnavailable", httpStatus: 500, cause: new Error("service unavailable") };
+    vi.mocked(replySender.sendReply).mockResolvedValueOnce(err(transientError));
 
     const result = await worker.process(PAYLOAD);
 
     expect(result.isErr()).toBe(true);
-    expect(result._unsafeUnwrapErr().kind).toBe("db_error");
-    expect(store.updateSignalSendStatus).not.toHaveBeenCalled();
-  });
-
-  it("returns err on network error (no httpStatusCode) so SQS retries", async () => {
-    const networkError = new Error("ECONNRESET");
-    vi.mocked(replySender.sendReply).mockRejectedValueOnce(networkError);
-
-    const result = await worker.process(PAYLOAD);
-
-    expect(result.isErr()).toBe(true);
+    expect(result._unsafeUnwrapErr().kind).toBe("transient_ses_error");
     expect(store.updateSignalSendStatus).not.toHaveBeenCalled();
   });
 

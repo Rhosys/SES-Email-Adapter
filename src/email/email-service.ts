@@ -27,8 +27,6 @@ export interface EmailRawOptions {
   accountId: string;
 }
 
-const PERMANENT_ERROR_NAMES = new Set(["MessageRejected", "AccountSendingPausedException"]);
-
 export class EmailService {
   private readonly sesv2: SESv2Client;
   private readonly from: string;
@@ -94,8 +92,7 @@ export class EmailService {
     const httpStatus = error.$metadata?.httpStatusCode ?? 0;
 
     const isPermanent =
-      PERMANENT_ERROR_NAMES.has(errorName) ||
-      (httpStatus >= 400 && httpStatus < 500);
+      errorName === "MessageRejected" && errorMessage.includes("Email address is not verified");
 
     if (isPermanent) {
       this.logger.error(`SES permanent failure [${errorName}]: ${errorMessage}.`, {
