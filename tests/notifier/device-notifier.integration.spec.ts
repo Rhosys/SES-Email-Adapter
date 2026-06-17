@@ -153,7 +153,7 @@ function makeForwarder(): Forwarder {
 }
 
 function makeReplySender(): ReplySender {
-  return { sendReply: vi.fn().mockResolvedValue({ messageId: "reply-001" }) };
+  return { sendReply: vi.fn().mockResolvedValue(ok({ messageId: "reply-001" })) };
 }
 
 function makeSignal(overrides: Partial<Signal> = {}): Signal {

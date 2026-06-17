@@ -182,7 +182,7 @@ describe("Single saveArc call with complete mutations", () => {
     const replySender: ReplySender = {
       sendReply: vi.fn().mockImplementation(() => {
         pongMessageId = "pong-msg-001";
-        return Promise.resolve({ messageId: pongMessageId });
+        return Promise.resolve(ok({ messageId: pongMessageId }));
       }),
     };
 

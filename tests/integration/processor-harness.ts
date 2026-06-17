@@ -139,7 +139,7 @@ export async function createProcessorHarness(): Promise<ProcessorHarness> {
     notifier: { notify: async () => ok(undefined) },
     forwarder: { forward: async () => ok(undefined) },
     retentionService: { applyPlanRetention: async (s3Key, _input) => ({ s3Key }) },
-    replySender: { sendReply: async () => ({ messageId: 'stub-reply' }) },
+    replySender: { sendReply: async () => ok({ messageId: 'stub-reply' }) },
     sqsDispatcher: { sendMessage: async (payload) => { sideEffects.push(payload); return ok(undefined); } },
     draftSendDispatcher: { dispatch: async () => ok(undefined) },
     userCodeExecutor: { invoke: async () => ({ success: true, result: undefined }) as never, validateAst: async () => ({ success: true }) as never, validateAstBatch: async () => ({ success: true }) as never } as unknown as UserCodeExecutorClient,

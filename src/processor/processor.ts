@@ -107,7 +107,7 @@ export interface ReplySender {
     accountId?: string;
     signalId?: string;
     arcId?: string;
-  }): Promise<{ messageId: string }>;
+  }): Promise<Result<{ messageId: string }, TransientSesError>>;
 }
 
 export type SesVerdict = "PASS" | "FAIL" | "GRAY" | "PROCESSING_FAILED";
@@ -489,7 +489,7 @@ export class SignalProcessor {
         const from = domain?.senderSetupComplete
           ? signal.data.recipientAddress
           : `noreply@${process.env["MAIL_DOMAIN"] ?? "platform.email.rhosys.cloud"}`;
-        await this.replySender.sendReply({
+        const pongResult = await this.replySender.sendReply({
           to: signal.data.from.address,
           from,
           subject: signal.data.subject ?? "",
@@ -499,7 +499,12 @@ export class SignalProcessor {
           signalId: signal.id,
           arcId: arc.id,
         });
-        this.logger.trackPoint("side_effect_pong_complete");
+        if (pongResult.isErr()) {
+          this.logger.track("Side-effect pong failed — will force retry.", { code: "processor.side_effect.pong_failed", accountId, error: pongResult.error });
+          criticalFailure = pongResult.error;
+        } else {
+          this.logger.trackPoint("side_effect_pong_complete");
+        }
       } catch (e) {
         this.logger.track("Side-effect pong failed — will force retry.", { code: "processor.side_effect.pong_failed", accountId, error: e });
         criticalFailure = e;
