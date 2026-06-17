@@ -990,10 +990,10 @@ describe("SignalProcessor", () => {
       expect(saved.data.spamScore).toBe(validClassification.spamScore);
     });
 
-    it("quarantines new address when newAddressHandling is block_until_approved (default disposition)", async () => {
+    it("quarantines new address when defaultUnknownSenderPolicy is quarantine_visible and no alias exists", async () => {
       vi.mocked(accountDb.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok({
         retentionDays: 0,
-        filtering: { newAddressHandling: "block_until_approved", defaultUnknownSenderPolicy: "quarantine_visible" },
+        filtering: { defaultUnknownSenderPolicy: "quarantine_visible" },
         aliasConfig: null,
         registeredDomains: [],
         userEmails: [],
@@ -1005,7 +1005,7 @@ describe("SignalProcessor", () => {
 
       expect(arcDb.saveArc).not.toHaveBeenCalled();
       const saved = vi.mocked(arcDb.saveSignal).mock.calls[0]![0] as Signal;
-      // aliasConfig is null → effectiveSenderEntry = null → system:sender:untrusted → filter mode fallback (quarantine_visible)
+      // aliasConfig is null → uses defaultUnknownSenderPolicy directly → system:sender:untrusted → quarantine_visible
       expect(saved.status).toBe("quarantine_visible");
     });
   });
@@ -1649,7 +1649,7 @@ describe("SignalProcessor", () => {
       vi.mocked(accountDb.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok({
         ...DEFAULT_CTX,
         aliasConfig: makeAlias({ unknownSenderPolicy: "quarantine_visible" }),
-        filtering: { defaultUnknownSenderPolicy: "quarantine_visible", newAddressHandling: "auto_allow", spamScoreThreshold: 0.6 },
+        filtering: { defaultUnknownSenderPolicy: "quarantine_visible", spamScoreThreshold: 0.6 },
       })));
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok({
         ...validClassification,
