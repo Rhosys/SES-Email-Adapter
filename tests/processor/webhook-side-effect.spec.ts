@@ -330,7 +330,8 @@ describe("processSideEffect — webhook delivery", () => {
       c => c.method === "track" && c.context?.code === "processor.side_effect.webhook_invalid_config",
     );
     expect(invalidConfigLog).toBeDefined();
-    expect(invalidConfigLog!.context!.accountId).toBe(TEST_ACCOUNT_ID);
-    expect(invalidConfigLog!.context!.value).toBe("not valid json {{{");
+    const ctx = invalidConfigLog!.context as Record<string, unknown>;
+    expect((ctx.signal as { accountId: string }).accountId).toBe(TEST_ACCOUNT_ID);
+    expect(ctx.value).toBe("not valid json {{{");
   });
 });

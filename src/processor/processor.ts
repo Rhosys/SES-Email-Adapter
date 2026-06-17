@@ -433,7 +433,7 @@ export class SignalProcessor {
 
     // Critical side-effects (forward, pong) force retry on failure.
     // Best-effort side-effects (notify, auto-send) are logged and swallowed.
-    let criticalFailure: unknown = null;
+    const criticalFailures: unknown[] = [];
 
     // Forward (critical — recipient loses the email if this fails)
     if (outcome.forwardAddresses.length > 0) {
@@ -445,14 +445,14 @@ export class SignalProcessor {
             arcId: arc.id,
           });
           if (forwardResult.isErr()) {
-            this.logger.track("Side-effect forward failed — will force retry.", { code: "processor.side_effect.forward_failed", accountId, toAddress, error: forwardResult.error });
-            criticalFailure = forwardResult.error;
+            this.logger.track("Side-effect forward failed — will force retry.", { code: "processor.side_effect.forward_failed", signal, arc, payload, toAddress, error: forwardResult.error });
+            criticalFailures.push(forwardResult.error);
           } else {
             this.logger.trackPoint("side_effect_forward_complete");
           }
         } catch (e) {
-          this.logger.track("Side-effect forward threw unexpectedly — will force retry.", { code: "processor.side_effect.forward_error", accountId, toAddress, error: e });
-          criticalFailure = e;
+          this.logger.track("Side-effect forward threw unexpectedly — will force retry.", { code: "processor.side_effect.forward_error", signal, arc, payload, toAddress, error: e });
+          criticalFailures.push(e);
         }
       }
     }
@@ -463,11 +463,11 @@ export class SignalProcessor {
         this.logger.trackPoint("side_effect_notify_start");
         const notifyResult = await this.notifier.notify(accountId, arc, signal, arc.urgency ?? "normal");
         if (notifyResult.isErr()) {
-          this.logger.track("Side-effect notification failed.", { code: "processor.side_effect.notify_failed", accountId, error: notifyResult.error });
+          this.logger.track("Side-effect notification failed.", { code: "processor.side_effect.notify_failed", signal, arc, payload, error: notifyResult.error });
         }
         this.logger.trackPoint("side_effect_notify_complete");
       } catch (e) {
-        this.logger.error("Side-effect notification threw unexpectedly.", { code: "processor.side_effect.notify_error", accountId, error: e });
+        this.logger.error("Side-effect notification threw unexpectedly.", { code: "processor.side_effect.notify_error", signal, arc, payload, error: e });
       }
     }
 
@@ -476,7 +476,8 @@ export class SignalProcessor {
     const dispatchResult = await this.handlerRegistry.dispatch(signal, arc, accountId);
     this.logger.trackPoint("side_effect_workflow_complete");
     if (dispatchResult.isErr()) {
-      criticalFailure = dispatchResult.error;
+      this.logger.track("Side-effect workflow dispatch failed — will force retry.", { code: "processor.side_effect.workflow_dispatch_failed", signal, arc, payload, error: dispatchResult.error });
+      criticalFailures.push(dispatchResult.error);
     }
 
     // Pong (critical — the test confirmation is the product's first impression)
@@ -500,14 +501,14 @@ export class SignalProcessor {
           arcId: arc.id,
         });
         if (pongResult.isErr()) {
-          this.logger.track("Side-effect pong failed — will force retry.", { code: "processor.side_effect.pong_failed", accountId, error: pongResult.error });
-          criticalFailure = pongResult.error;
+          this.logger.track("Side-effect pong failed — will force retry.", { code: "processor.side_effect.pong_failed", signal, arc, payload, error: pongResult.error });
+          criticalFailures.push(pongResult.error);
         } else {
           this.logger.trackPoint("side_effect_pong_complete");
         }
       } catch (e) {
-        this.logger.track("Side-effect pong failed — will force retry.", { code: "processor.side_effect.pong_failed", accountId, error: e });
-        criticalFailure = e;
+        this.logger.track("Side-effect pong failed — will force retry.", { code: "processor.side_effect.pong_failed", signal, arc, payload, error: e });
+        criticalFailures.push(e);
       }
     }
 
@@ -556,11 +557,10 @@ export class SignalProcessor {
                 await this.annotateTemplateError(accountId, tmpl.id, fn.name, response.error);
                 this.logger.warn("Template function execution failed.", {
                   code: "processor.template_function.error",
-                  accountId,
+                  signal, arc, payload,
                   templateName: tmpl.name,
                   functionName: fn.name,
-                  errorType: response.error.errorType,
-                  errorMessage: response.error.message,
+                  error: response.error,
                 });
                 {
                   const sigId = generateId("sgn-");
@@ -579,7 +579,7 @@ export class SignalProcessor {
                   await this.annotateTemplateError(accountId, tmpl.id, fn.name, null);
                   this.logger.warn("Template function returned invalid value.", {
                     code: "processor.template_function.invalid_return",
-                    accountId,
+                    signal, arc, payload,
                     templateName: tmpl.name,
                     functionName: fn.name,
                     issue,
@@ -612,7 +612,7 @@ export class SignalProcessor {
               shouldAutoSend = false;
               this.logger.track("Auto-send suppressed — Reply-To domain mismatch.", {
                 code: "processor.side_effect.reply_target_suppressed",
-                accountId,
+                signal, arc, payload,
                 fromAddress: signal.data.from.address,
                 replyToAddress: signal.data.replyTo.address,
                 recipientAddress: signal.data.recipientAddress,
@@ -658,8 +658,8 @@ export class SignalProcessor {
 
           const draftSaveResult = await this.arcDb.saveSignal(draft);
           if (draftSaveResult.isErr()) {
-            this.logger.track("Side-effect auto-draft save failed — will force retry.", { code: "processor.side_effect.auto_draft_failed", accountId, error: draftSaveResult.error });
-            criticalFailure = draftSaveResult.error;
+            this.logger.track("Side-effect auto-draft save failed — will force retry.", { code: "processor.side_effect.auto_draft_failed", signal, arc, payload, error: draftSaveResult.error });
+            criticalFailures.push(draftSaveResult.error);
             continue;
           }
 
@@ -670,7 +670,7 @@ export class SignalProcessor {
               300,
             );
             if (dispatchResult.isErr()) {
-              this.logger.track("Side-effect auto-draft SQS dispatch failed — draft remains pending_send, will not send automatically.", { code: "processor.side_effect.auto_draft_dispatch_failed", accountId, signalId: draft.id, error: dispatchResult.error });
+              this.logger.track("Side-effect auto-draft SQS dispatch failed — draft remains pending_send, will not send automatically.", { code: "processor.side_effect.auto_draft_dispatch_failed", signal, arc, payload, signalId: draft.id, error: dispatchResult.error });
             }
           }
 
@@ -680,7 +680,7 @@ export class SignalProcessor {
         }
         this.logger.trackPoint("side_effect_auto_draft_complete");
       } catch (e) {
-        this.logger.track("Side-effect auto-draft threw unexpectedly.", { code: "processor.side_effect.auto_draft_error", accountId, error: e });
+        this.logger.track("Side-effect auto-draft threw unexpectedly.", { code: "processor.side_effect.auto_draft_error", signal, arc, payload, error: e });
       }
     }
 
@@ -698,19 +698,19 @@ export class SignalProcessor {
           plan: accountPlan,
         });
       } else {
-        const payload = buildWebhookPayload(signal, arc);
+        const webhookPayload = buildWebhookPayload(signal, arc);
         for (const action of webhookActions) {
           const configResult = parseWebhookConfig(action.value);
           if (configResult.isErr()) {
             this.logger.track("Webhook action skipped — invalid config at processing time.", {
               code: "processor.side_effect.webhook_invalid_config",
-              accountId,
+              signal, arc, payload,
               value: action.value,
               error: configResult.error,
             });
             continue;
           }
-          await deliverWebhook(configResult.value.url, payload, this.logger);
+          await deliverWebhook(configResult.value.url, webhookPayload, this.logger);
         }
       }
     }
@@ -729,9 +729,9 @@ export class SignalProcessor {
         // Find the calendar signal linked to this email signal
         const calendarSignalResult = await this.arcDb.getLinkedCalendarSignal(accountId, arc.id, signal.id);
         if (calendarSignalResult.isErr()) {
-          this.logger.track("Calendar forward failed — could not find linked calendar signal.", { code: "processor.side_effect.calendar_forward_no_signal", accountId, signalId: signal.id, arcId: arc.id, error: calendarSignalResult.error });
+          this.logger.track("Calendar forward failed — could not find linked calendar signal.", { code: "processor.side_effect.calendar_forward_no_signal", signal, arc, payload, error: calendarSignalResult.error });
         } else if (!calendarSignalResult.value) {
-          this.logger.track("Calendar forward skipped — no linked calendar signal found.", { code: "processor.side_effect.calendar_forward_no_signal", accountId, signalId: signal.id, arcId: arc.id });
+          this.logger.track("Calendar forward skipped — no linked calendar signal found.", { code: "processor.side_effect.calendar_forward_no_signal", signal, arc, payload });
         } else {
           const calendarSignal = calendarSignalResult.value;
           const forwardResult = await forwardCalendarInvite(
@@ -746,21 +746,23 @@ export class SignalProcessor {
             this.logger,
           );
           if (forwardResult.isErr()) {
-            this.logger.track("Calendar forward failed — will force retry.", { code: "processor.side_effect.calendar_forward_failed", accountId, signalId: signal.id, error: forwardResult.error });
-            criticalFailure = forwardResult.error;
+            this.logger.track("Calendar forward failed — will force retry.", { code: "processor.side_effect.calendar_forward_failed", signal, arc, payload, error: forwardResult.error });
+            criticalFailures.push(forwardResult.error);
           } else {
             this.logger.trackPoint("side_effect_calendar_forward_complete");
           }
         }
       } catch (e) {
-        this.logger.track("Calendar forward threw unexpectedly — will force retry.", { code: "processor.side_effect.calendar_forward_error", accountId, error: e });
-        criticalFailure = e;
+        this.logger.track("Calendar forward threw unexpectedly — will force retry.", { code: "processor.side_effect.calendar_forward_error", signal, arc, payload, error: e });
+        criticalFailures.push(e);
       }
     }
 
     this.logger.trackPoint("side_effect_all_complete");
-    if (criticalFailure) {
-      return err(processorError(criticalFailure));
+    if (criticalFailures.length > 0) {
+      const count = criticalFailures.length;
+      const message = `${count} critical side-effect failure${count > 1 ? "s" : ""}`;
+      return err(processorError(new AggregateError(criticalFailures, message)));
     }
     return ok(undefined);
   }
