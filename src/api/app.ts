@@ -9,7 +9,7 @@ import { validateRecipientMx } from "../dns/mx-validator.js";
 import { computeUndoWindowSeconds } from "./undo-window.js";
 import type { AuditEvent, AuditDatabase } from "../database/audit-database.js";
 import type { Result } from "neverthrow";
-import type { DbError, NotFoundError, AuthressServiceError, AuthError } from "../errors.js";
+import type { DbError, NotFoundError, AuthressServiceError, AuthError, TransientSesError } from "../errors.js";
 import type { Arc, Signal, AnySignal, Attachment, View, Label, Rule, Domain, DnsRecord, Account, Page, PageParams, ArcStatus, Workflow, WorkflowData, Alias, AliasSender, SenderPolicy, VerifiedForwardingAddress, Pagination, EmailTemplate, CalendarEventData, CalendarResponseData, DomainMisconfigurationData } from "../types/index.js";
 import { isCalendarEventSignal, isEmailSignal } from "../types/index.js";
 import type { UpdateArcFields, ArcDatabase } from "../database/arc-database.js";
@@ -131,7 +131,7 @@ export type { UpdateArcRequest, UpdateSignalStatusRequest, CreateViewRequest, Up
 // ---------------------------------------------------------------------------
 
 export interface VerificationMailer {
-  sendForwardVerification(accountId: string, address: string, token: string): Promise<Result<void, DbError>>;
+  sendForwardVerification(accountId: string, address: string, token: string): Promise<Result<void, TransientSesError>>;
 }
 
 // ---------------------------------------------------------------------------

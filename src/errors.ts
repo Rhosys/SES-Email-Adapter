@@ -10,6 +10,7 @@ export type AuthressServiceError = { kind: "authress_service_error"; message: st
 export type BedrockError = { kind: "bedrock_error"; message: string; modelId: string; cause: Error };
 export type AuthError = { kind: "auth_error"; message: string; cause: Error };
 export type ProcessorError = { kind: "processor_error"; message: string; cause: Error };
+export type TransientSesError = { kind: "transient_ses_error"; errorName: string; httpStatus: number; cause: unknown };
 
 export type ReindexSegmentProcessingError = { kind: "reindex_segment_processing_error"; segment: number; failureCount: number; failures: Array<{ signalId: string; cause: unknown }> };
 

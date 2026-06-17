@@ -3,8 +3,8 @@
 // ---------------------------------------------------------------------------
 
 import { buildReplyIcs } from "./ics-builder.js";
-import { ok, err, dbError } from "../../errors.js";
-import type { DbError, Result } from "../../errors.js";
+import { ok, err } from "../../errors.js";
+import type { TransientSesError, Result } from "../../errors.js";
 import type { EmailService } from "../../email/email-service.js";
 import type { CalendarEventData } from "../../types/calendar.js";
 
@@ -36,7 +36,7 @@ const PARTSTAT_MAP = {
 export async function sendRsvp(
   opts: RsvpComposeOpts,
   deps: { emailService: EmailService },
-): Promise<Result<{ messageId: string }, DbError>> {
+): Promise<Result<{ messageId: string }, TransientSesError>> {
   const { decision, originalCalendarData, aliasAddress, organizerAddress, fromAddress } = opts;
 
   const icsContent = buildReplyIcs({

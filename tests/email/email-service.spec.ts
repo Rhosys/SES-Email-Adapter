@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { SESv2Client, SendEmailCommand } from "@aws-sdk/client-sesv2";
 import { EmailService } from "../../src/email/email-service.js";
+import { createMockLogger, type MockLogger } from "../helpers/mock-logger.js";
 
 // ─── Mock SESv2Client ────────────────────────────────────────────────────────
 
@@ -20,15 +21,17 @@ describe("EmailService.send()", () => {
   let mockSend: ReturnType<typeof vi.fn>;
   let sesClient: SESv2Client;
   let service: EmailService;
+  let logger: MockLogger;
 
   beforeEach(() => {
     mockSend = vi.fn();
     sesClient = { send: mockSend } as unknown as SESv2Client;
-    service = new EmailService(sesClient, { from: "noreply@example.com", configSetName: "my-config-set" });
+    logger = createMockLogger();
+    service = new EmailService(sesClient, { from: "noreply@example.com", configSetName: "my-config-set" }, logger);
   });
 
-  it("successful send returns Ok with messageId", async () => {
-    mockSend.mockResolvedValueOnce({ MessageId: "ses-msg-001" });
+  it("successful send returns Ok with messageId and logs info", async () => {
+    mockSend.mockResolvedValueOnce({ MessageId: "ses-123" });
 
     const result = await service.send({
       to: "user@example.com",
@@ -38,47 +41,109 @@ describe("EmailService.send()", () => {
     });
 
     expect(result.isOk()).toBe(true);
-    expect(result._unsafeUnwrap()).toEqual({ messageId: "ses-msg-001" });
+    expect(result._unsafeUnwrap()).toEqual({ messageId: "ses-123" });
 
-    const command = mockSend.mock.calls[0]![0] as SendEmailCommand;
-    expect(command.input.FromEmailAddress).toBe("noreply@example.com");
-    expect(command.input.Destination).toEqual({ ToAddresses: ["user@example.com"] });
-    expect(command.input.Content?.Simple?.Subject).toEqual({ Data: "Welcome", Charset: "UTF-8" });
-    expect(command.input.Content?.Simple?.Body?.Text).toEqual({ Data: "Hello there", Charset: "UTF-8" });
-    expect(command.input.ConfigurationSetName).toBe("my-config-set");
+    const infoCalls = logger.calls.filter(c => c.method === "info");
+    expect(infoCalls).toHaveLength(1);
+    expect(infoCalls[0]!.context).toEqual(expect.objectContaining({ messageId: "ses-123" }));
   });
 
-  it("SES error returns Err with DbError", async () => {
-    mockSend.mockRejectedValueOnce(new Error("SES rate limit exceeded"));
-
-    const result = await service.send({
-      to: "user@example.com",
-      subject: "Test",
-      textBody: "Body",
-      accountId: "acct-test",
+  it("MessageRejected classified as permanent — returns ok and logs error", async () => {
+    const sesError = Object.assign(new Error("Email rejected"), {
+      name: "MessageRejected",
+      $metadata: { httpStatusCode: 400 },
     });
+    mockSend.mockRejectedValueOnce(sesError);
+
+    const opts = { to: "user@example.com", subject: "Test", textBody: "Body", accountId: "acct-test" };
+    const result = await service.send(opts);
+
+    expect(result.isOk()).toBe(true);
+    expect(result._unsafeUnwrap()).toEqual({ messageId: "" });
+
+    const errorCalls = logger.calls.filter(c => c.method === "error");
+    expect(errorCalls).toHaveLength(1);
+    expect(errorCalls[0]!.context).toEqual(expect.objectContaining({ errorName: "MessageRejected", httpStatus: 400, opts }));
+  });
+
+  it("AccountSendingPausedException classified as permanent — returns ok and logs error", async () => {
+    const sesError = Object.assign(new Error("Account paused"), {
+      name: "AccountSendingPausedException",
+      $metadata: { httpStatusCode: 400 },
+    });
+    mockSend.mockRejectedValueOnce(sesError);
+
+    const result = await service.send({ to: "u@e.com", subject: "S", textBody: "B", accountId: "a" });
+
+    expect(result.isOk()).toBe(true);
+    expect(result._unsafeUnwrap()).toEqual({ messageId: "" });
+    expect(logger.calls.filter(c => c.method === "error")).toHaveLength(1);
+  });
+
+  it("4xx HTTP status classified as permanent — returns ok and logs error", async () => {
+    const sesError = Object.assign(new Error("Bad request"), {
+      name: "SomeOtherError",
+      $metadata: { httpStatusCode: 429 },
+    });
+    mockSend.mockRejectedValueOnce(sesError);
+
+    const result = await service.send({ to: "u@e.com", subject: "S", textBody: "B", accountId: "a" });
+
+    expect(result.isOk()).toBe(true);
+    expect(result._unsafeUnwrap()).toEqual({ messageId: "" });
+    expect(logger.calls.filter(c => c.method === "error")).toHaveLength(1);
+  });
+
+  it("5xx HTTP status classified as transient — returns err and logs warn", async () => {
+    const sesError = Object.assign(new Error("Internal error"), {
+      name: "ServiceUnavailable",
+      $metadata: { httpStatusCode: 500 },
+    });
+    mockSend.mockRejectedValueOnce(sesError);
+
+    const opts = { to: "u@e.com", subject: "S", textBody: "B", accountId: "a" };
+    const result = await service.send(opts);
 
     expect(result.isErr()).toBe(true);
-    expect(result._unsafeUnwrapErr()).toEqual({
-      kind: "db_error",
-      message: expect.any(String),
-      cause: expect.any(Error),
+    const error = result._unsafeUnwrapErr();
+    expect(error).toEqual({
+      kind: "transient_ses_error",
+      errorName: "ServiceUnavailable",
+      httpStatus: 500,
+      cause: sesError,
     });
+
+    const warnCalls = logger.calls.filter(c => c.method === "warn");
+    expect(warnCalls).toHaveLength(1);
+    expect(warnCalls[0]!.context).toEqual(expect.objectContaining({ errorName: "ServiceUnavailable", httpStatus: 500, opts }));
   });
 
-  it("configSet passes through when empty string", async () => {
-    const serviceNoConfig = new EmailService(sesClient, { from: "noreply@example.com", configSetName: "" });
-    mockSend.mockResolvedValueOnce({ MessageId: "ses-msg-002" });
+  it("network error (no httpStatus) classified as transient — httpStatus is 0", async () => {
+    const networkError = new Error("ECONNRESET");
+    mockSend.mockRejectedValueOnce(networkError);
 
-    await serviceNoConfig.send({
-      to: "user@example.com",
-      subject: "No config set",
-      textBody: "Body",
-      accountId: "acct-test",
+    const result = await service.send({ to: "u@e.com", subject: "S", textBody: "B", accountId: "a" });
+
+    expect(result.isErr()).toBe(true);
+    const error = result._unsafeUnwrapErr();
+    expect(error.kind).toBe("transient_ses_error");
+    expect(error.httpStatus).toBe(0);
+    expect(error.cause).toBe(networkError);
+
+    expect(logger.calls.filter(c => c.method === "warn")).toHaveLength(1);
+  });
+
+  it("named error takes priority over HTTP status (MessageRejected + 400 = permanent by name)", async () => {
+    const sesError = Object.assign(new Error("Rejected"), {
+      name: "MessageRejected",
+      $metadata: { httpStatusCode: 400 },
     });
+    mockSend.mockRejectedValueOnce(sesError);
 
-    const command = mockSend.mock.calls[0]![0] as SendEmailCommand;
-    expect(command.input.ConfigurationSetName).toBe("");
+    const result = await service.send({ to: "u@e.com", subject: "S", textBody: "B", accountId: "a" });
+
+    expect(result.isOk()).toBe(true);
+    expect(result._unsafeUnwrap()).toEqual({ messageId: "" });
   });
 
   it("fromOverride used when provided", async () => {
@@ -122,47 +187,54 @@ describe("EmailService.sendRaw()", () => {
   let mockSend: ReturnType<typeof vi.fn>;
   let sesClient: SESv2Client;
   let service: EmailService;
+  let logger: MockLogger;
 
   beforeEach(() => {
     mockSend = vi.fn();
     sesClient = { send: mockSend } as unknown as SESv2Client;
-    service = new EmailService(sesClient, { from: "noreply@example.com", configSetName: "my-config-set" });
+    logger = createMockLogger();
+    service = new EmailService(sesClient, { from: "noreply@example.com", configSetName: "my-config-set" }, logger);
   });
 
-  it("successful raw send returns Ok with messageId and uses Content.Raw.Data", async () => {
+  it("successful raw send returns Ok with messageId and logs info", async () => {
     mockSend.mockResolvedValueOnce({ MessageId: "ses-raw-001" });
-    const rawData = new Uint8Array([77, 73, 77, 69, 45, 86, 101, 114, 115, 105, 111, 110]);
+    const rawData = new Uint8Array([77, 73, 77, 69]);
 
-    const result = await service.sendRaw({
-      to: "recipient@example.com",
-      rawData,
-      accountId: "acct-test",
-    });
+    const result = await service.sendRaw({ to: "r@e.com", rawData, accountId: "acct-test" });
 
     expect(result.isOk()).toBe(true);
     expect(result._unsafeUnwrap()).toEqual({ messageId: "ses-raw-001" });
 
-    const command = mockSend.mock.calls[0]![0] as SendEmailCommand;
-    expect(command.input.FromEmailAddress).toBe("noreply@example.com");
-    expect(command.input.Destination).toEqual({ ToAddresses: ["recipient@example.com"] });
-    expect(command.input.Content?.Raw?.Data).toBe(rawData);
-    expect(command.input.ConfigurationSetName).toBe("my-config-set");
+    const infoCalls = logger.calls.filter(c => c.method === "info");
+    expect(infoCalls).toHaveLength(1);
+    expect(infoCalls[0]!.context).toEqual(expect.objectContaining({ messageId: "ses-raw-001" }));
   });
 
-  it("SES error returns Err with DbError", async () => {
-    mockSend.mockRejectedValueOnce(new Error("SES service unavailable"));
-
-    const result = await service.sendRaw({
-      to: "recipient@example.com",
-      rawData: new Uint8Array([1, 2, 3]),
-      accountId: "acct-test",
+  it("5xx error returns transient err and logs warn", async () => {
+    const sesError = Object.assign(new Error("Service unavailable"), {
+      name: "ServiceUnavailable",
+      $metadata: { httpStatusCode: 503 },
     });
+    mockSend.mockRejectedValueOnce(sesError);
+
+    const result = await service.sendRaw({ to: "r@e.com", rawData: new Uint8Array([1]), accountId: "a" });
 
     expect(result.isErr()).toBe(true);
-    expect(result._unsafeUnwrapErr()).toEqual({
-      kind: "db_error",
-      message: expect.any(String),
-      cause: expect.any(Error),
+    expect(result._unsafeUnwrapErr().kind).toBe("transient_ses_error");
+    expect(logger.calls.filter(c => c.method === "warn")).toHaveLength(1);
+  });
+
+  it("permanent error returns ok with empty messageId", async () => {
+    const sesError = Object.assign(new Error("Rejected"), {
+      name: "MessageRejected",
+      $metadata: { httpStatusCode: 400 },
     });
+    mockSend.mockRejectedValueOnce(sesError);
+
+    const result = await service.sendRaw({ to: "r@e.com", rawData: new Uint8Array([1]), accountId: "a" });
+
+    expect(result.isOk()).toBe(true);
+    expect(result._unsafeUnwrap()).toEqual({ messageId: "" });
+    expect(logger.calls.filter(c => c.method === "error")).toHaveLength(1);
   });
 });

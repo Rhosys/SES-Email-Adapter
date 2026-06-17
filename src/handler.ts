@@ -120,7 +120,7 @@ if (!DKIM_PRIVATE_KEY) {
   logger.error("DKIM_PRIVATE_KEY not set — domain identity registration will fail", { code: "handler.env.dkim_key_missing" });
 }
 
-const emailService = new EmailService(sesv2, { from: NOTIFICATION_FROM, configSetName: SES_CONFIG_SET_NAME });
+const emailService = new EmailService(sesv2, { from: NOTIFICATION_FROM, configSetName: SES_CONFIG_SET_NAME }, logger);
 const domainIdentityService = new SesDomainIdentityService(
   sesv2, "mail", DKIM_PRIVATE_KEY, MAIL_DOMAIN, SES_CONFIG_SET_ARN,
 );
@@ -392,90 +392,13 @@ async function handlerInner(
       }
 
       const messageType = record.messageAttributes?.["messageType"]?.stringValue ?? (body as { sqsMessageAttributeMessageType?: string }).sqsMessageAttributeMessageType;
+      const result = await processSqsRecord(body, messageType, receiveCount, record.messageId);
 
-      let failed: boolean;
-      if (messageType === MSG_TYPE_REINDEX) {
-        const result = await reindexWorker.processSegmentMessage(body as ReindexSegmentMessage);
-        failed = result.isErr();
-      } else if (messageType === MSG_TYPE_SIDE_EFFECT) {
-        const payload = body as SideEffectPayload;
-        if (!payload.signal || !payload.arc) {
-          logger.error("Malformed side-effect payload — missing signal or arc. Dropping message.", { code: "handler.sqs.malformed_side_effect", messageId: record.messageId });
-          continue;
-        }
-        const result = await processor.processSideEffect(payload, receiveCount);
-        failed = result.isErr();
-      } else if (messageType === MSG_TYPE_DRAFT_SEND) {
-        const payload = body as DraftSendPayload;
-        const result = await draftSendWorker.process(payload);
-        failed = result.isErr();
-      } else if (messageType === MSG_TYPE_SIGNAL_FOLLOWUP) {
-        const message = body as FollowupMessage;
-        if (!message.accountId || !message.signalId || !message.arcId) {
-          logger.error("Malformed signal_followup payload — missing required fields. Dropping message.", { code: "handler.sqs.malformed_followup", messageId: record.messageId });
-          continue;
-        }
-        const result = await followupHandler.process(message);
-        failed = result.isErr();
-      } else if (messageType === MSG_TYPE_RSVP_REMINDER) {
-        const message = body as RsvpReminderMessage;
-        if (!message.accountId || !message.signalId || !message.arcId) {
-          logger.error("Malformed rsvp_reminder payload — missing required fields. Dropping message.", { code: "handler.sqs.malformed_rsvp_reminder", messageId: record.messageId });
-          continue;
-        }
-        const result = await rsvpReminderHandler.process(message);
-        failed = result.isErr();
-      } else {
-        // SNS envelope — unwrap and route by notificationType
-        const sns = body as { Message: string };
-        let inner: unknown;
-        try {
-          inner = JSON.parse(sns.Message);
-        } catch (e) {
-          logger.error("Failed to parse inner SNS message.", { code: "handler.sqs.parse_failed", messageId: record.messageId, error: e });
-          failures.push({ itemIdentifier: record.messageId });
-          continue;
-        }
-
-        const notification = inner as { notificationType?: string; mail?: { messageId: string; timestamp: string; destination: string[] }; receipt?: { dkimVerdict: { status: SesVerdict }; dmarcVerdict: { status: SesVerdict }; action: { objectKey: string } } };
-
-        if (notification.notificationType === "Bounce" || notification.notificationType === "Complaint") {
-          await feedbackProcessor.processNotification(notification);
-          failed = false;
-        } else {
-          const mail = notification.mail!;
-          const receipt = notification.receipt!;
-          const recipientAddress = mail.destination[0]!;
-
-          // Resolve account ownership from recipient alias → domain
-          const accountResult = await accountDb.resolveAccountForRecipient(recipientAddress);
-          if (accountResult.isErr()) {
-            logger.error("Failed to resolve account for recipient — DB error. Retrying.", { code: "handler.sqs.account_resolve_failed", recipientAddress, destination: mail.destination, sesMessageId: mail.messageId, error: accountResult.error });
-            failed = true;
-          } else if (!accountResult.value) {
-            logger.track("No account owns this recipient address — dropping message.", { code: "handler.sqs.no_account_for_recipient", recipientAddress, destination: mail.destination, sesMessageId: mail.messageId, timestamp: mail.timestamp, s3Key: receipt.action.objectKey });
-            failed = false; // Don't retry — no account will ever own this
-          } else {
-            const message: InboundSignalMessage = {
-              accountId: accountResult.value,
-              s3Key: receipt.action.objectKey,
-              sesMessageId: mail.messageId,
-              timestamp: mail.timestamp,
-              destination: mail.destination,
-              dkimVerdict: receipt.dkimVerdict.status,
-              dmarcVerdict: receipt.dmarcVerdict.status,
-            };
-            const result = await processor.processRecord(message, receiveCount);
-            failed = result.isErr();
-          }
-        }
-      }
-
-      if (failed) {
+      if (result.isErr()) {
         if (receiveCount > RETRY_TRACK_THRESHOLD) {
-          logger.error("SQS message failed after exceeding retry threshold.", { code: "handler.sqs.retry_threshold_exceeded", messageId: record.messageId, receiveCount });
+          logger.error("SQS message failed after exceeding retry threshold.", { code: "handler.sqs.retry_threshold_exceeded", messageId: record.messageId, receiveCount, messageType, error: result.error, record });
         } else {
-          logger.warn("SQS message processing failed. Will be retried automatically.", { code: "handler.sqs.processing_failed", messageId: record.messageId, receiveCount });
+          logger.warn("SQS message processing failed. Will be retried automatically.", { code: "handler.sqs.processing_failed", messageId: record.messageId, receiveCount, messageType, error: result.error, record });
         }
         failures.push({ itemIdentifier: record.messageId });
       }
@@ -498,6 +421,90 @@ async function handlerInner(
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+async function processSqsRecord(
+  body: unknown,
+  messageType: string | undefined,
+  receiveCount: number,
+  messageId: string,
+): Promise<Result<void, unknown>> {
+  if (messageType === MSG_TYPE_REINDEX) {
+    return reindexWorker.processSegmentMessage(body as ReindexSegmentMessage);
+  }
+
+  if (messageType === MSG_TYPE_SIDE_EFFECT) {
+    const payload = body as SideEffectPayload;
+    if (!payload.signal || !payload.arc) {
+      logger.error("Malformed side-effect payload — missing signal or arc. Dropping message.", { code: "handler.sqs.malformed_side_effect", messageId });
+      return ok(undefined);
+    }
+    return processor.processSideEffect(payload, receiveCount);
+  }
+
+  if (messageType === MSG_TYPE_DRAFT_SEND) {
+    return draftSendWorker.process(body as DraftSendPayload);
+  }
+
+  if (messageType === MSG_TYPE_SIGNAL_FOLLOWUP) {
+    const message = body as FollowupMessage;
+    if (!message.accountId || !message.signalId || !message.arcId) {
+      logger.error("Malformed signal_followup payload — missing required fields. Dropping message.", { code: "handler.sqs.malformed_followup", messageId });
+      return ok(undefined);
+    }
+    return followupHandler.process(message);
+  }
+
+  if (messageType === MSG_TYPE_RSVP_REMINDER) {
+    const message = body as RsvpReminderMessage;
+    if (!message.accountId || !message.signalId || !message.arcId) {
+      logger.error("Malformed rsvp_reminder payload — missing required fields. Dropping message.", { code: "handler.sqs.malformed_rsvp_reminder", messageId });
+      return ok(undefined);
+    }
+    return rsvpReminderHandler.process(message);
+  }
+
+  // SNS envelope — unwrap and route by notificationType
+  const sns = body as { Message: string };
+  let inner: unknown;
+  try {
+    inner = JSON.parse(sns.Message);
+  } catch (e) {
+    return err(e);
+  }
+
+  const notification = inner as { notificationType?: string; mail?: { messageId: string; timestamp: string; destination: string[] }; receipt?: { dkimVerdict: { status: SesVerdict }; dmarcVerdict: { status: SesVerdict }; action: { objectKey: string } } };
+
+  if (notification.notificationType === "Bounce" || notification.notificationType === "Complaint") {
+    await feedbackProcessor.processNotification(notification);
+    return ok(undefined);
+  }
+
+  const mail = notification.mail!;
+  const receipt = notification.receipt!;
+  const recipientAddress = mail.destination[0]!;
+
+  const accountResult = await accountDb.resolveAccountForRecipient(recipientAddress);
+  if (accountResult.isErr()) {
+    logger.error("Failed to resolve account for recipient — DB error. Retrying.", { code: "handler.sqs.account_resolve_failed", recipientAddress, destination: mail.destination, sesMessageId: mail.messageId, error: accountResult.error });
+    return err(accountResult.error);
+  }
+
+  if (!accountResult.value) {
+    logger.track("No account owns this recipient address — dropping message.", { code: "handler.sqs.no_account_for_recipient", recipientAddress, destination: mail.destination, sesMessageId: mail.messageId, timestamp: mail.timestamp, s3Key: receipt.action.objectKey });
+    return ok(undefined);
+  }
+
+  const message: InboundSignalMessage = {
+    accountId: accountResult.value,
+    s3Key: receipt.action.objectKey,
+    sesMessageId: mail.messageId,
+    timestamp: mail.timestamp,
+    destination: mail.destination,
+    dkimVerdict: receipt.dkimVerdict.status,
+    dmarcVerdict: receipt.dmarcVerdict.status,
+  };
+  return processor.processRecord(message, receiveCount);
+}
 
 // ---------------------------------------------------------------------------
 // WebSocket authorizer  (fires on $connect; injects accountId into context)

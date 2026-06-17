@@ -3,8 +3,9 @@
 // ---------------------------------------------------------------------------
 
 import { SESv2Client, SendEmailCommand } from "@aws-sdk/client-sesv2";
-import { ok, err, dbError } from "../errors.js";
-import type { DbError, Result } from "../errors.js";
+import { ok, err } from "../errors.js";
+import type { TransientSesError, Result } from "../errors.js";
+import type { Logger } from "../logger.js";
 
 export interface EmailSendOptions {
   to: string;
@@ -26,18 +27,22 @@ export interface EmailRawOptions {
   accountId: string;
 }
 
+const PERMANENT_ERROR_NAMES = new Set(["MessageRejected", "AccountSendingPausedException"]);
+
 export class EmailService {
   private readonly sesv2: SESv2Client;
   private readonly from: string;
   private readonly configSetName: string;
+  private readonly logger: Logger;
 
-  constructor(sesv2: SESv2Client, opts: { from: string; configSetName: string }) {
+  constructor(sesv2: SESv2Client, opts: { from: string; configSetName: string }, logger: Logger) {
     this.sesv2 = sesv2;
     this.from = opts.from;
     this.configSetName = opts.configSetName;
+    this.logger = logger;
   }
 
-  async send(opts: EmailSendOptions): Promise<Result<{ messageId: string }, DbError>> {
+  async send(opts: EmailSendOptions): Promise<Result<{ messageId: string }, TransientSesError>> {
     try {
       const result = await this.sesv2.send(new SendEmailCommand({
         FromEmailAddress: opts.fromOverride ?? this.from,
@@ -56,13 +61,15 @@ export class EmailService {
         TenantName: opts.accountId,
         ...(opts.tags?.length ? { EmailTags: opts.tags } : {}),
       }));
-      return ok({ messageId: result.MessageId ?? "" });
+      const messageId = result.MessageId ?? "";
+      this.logger.info("SES send succeeded.", { code: "email_service.send_success", messageId });
+      return ok({ messageId });
     } catch (e) {
-      return err(dbError(e));
+      return this.classifyError(e, opts);
     }
   }
 
-  async sendRaw(opts: EmailRawOptions): Promise<Result<{ messageId: string }, DbError>> {
+  async sendRaw(opts: EmailRawOptions): Promise<Result<{ messageId: string }, TransientSesError>> {
     try {
       const result = await this.sesv2.send(new SendEmailCommand({
         FromEmailAddress: this.from,
@@ -72,9 +79,42 @@ export class EmailService {
         TenantName: opts.accountId,
         ...(opts.tags?.length ? { EmailTags: opts.tags } : {}),
       }));
-      return ok({ messageId: result.MessageId ?? "" });
+      const messageId = result.MessageId ?? "";
+      this.logger.info("SES send succeeded.", { code: "email_service.send_success", messageId });
+      return ok({ messageId });
     } catch (e) {
-      return err(dbError(e));
+      return this.classifyError(e, opts);
     }
+  }
+
+  private classifyError(e: unknown, opts: EmailSendOptions | EmailRawOptions): Result<{ messageId: string }, TransientSesError> {
+    const error = e as { name?: string; message?: string; $metadata?: { httpStatusCode?: number } };
+    const errorName = error.name ?? "UnknownError";
+    const errorMessage = error.message ?? "unknown";
+    const httpStatus = error.$metadata?.httpStatusCode ?? 0;
+
+    const isPermanent =
+      PERMANENT_ERROR_NAMES.has(errorName) ||
+      (httpStatus >= 400 && httpStatus < 500);
+
+    if (isPermanent) {
+      this.logger.error(`SES permanent failure [${errorName}]: ${errorMessage}.`, {
+        code: "email_service.permanent_failure",
+        errorName,
+        httpStatus,
+        error: e,
+        opts,
+      });
+      return ok({ messageId: "" });
+    }
+
+    this.logger.warn(`SES transient failure [${errorName}]: ${errorMessage}.`, {
+      code: "email_service.transient_failure",
+      errorName,
+      httpStatus,
+      error: e,
+      opts,
+    });
+    return err({ kind: "transient_ses_error", errorName, httpStatus, cause: e });
   }
 }
