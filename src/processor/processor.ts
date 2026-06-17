@@ -41,6 +41,7 @@ import type { CalendarEventData, CalendarInviteInvalidData } from "../types/cale
 import type { SchedulerClient } from "../scheduler/scheduler-client.js";
 import { buildScheduleName } from "../scheduler/schedule-name.js";
 import { RSVP_REMINDER_HOURS_BEFORE } from "../scheduler/rsvp-reminder.js";
+import { extractMsgId, buildGsi2pk, extractFirstInReplyTo } from "./message-id.js";
 
 // ---------------------------------------------------------------------------
 // Message types
@@ -868,6 +869,11 @@ export class SignalProcessor {
     };
     this.logger.trackPoint("email_parsed");
 
+    // Extract Message-ID for GSI2 threading index (used by In-Reply-To arc matching)
+    const rawMessageId = parsed.headers["message-id"];
+    const msgId = rawMessageId ? extractMsgId(rawMessageId) : null;
+    const gsi2pk = msgId ? buildGsi2pk(accountId, msgId) : undefined;
+
     const senderETLD1 = getETLD1(parsed.from.address);
 
     // 2b. Early sender block — skip classify/embed when sender is explicitly blocked for this alias
@@ -892,6 +898,7 @@ export class SignalProcessor {
         source: "email",
         type: "email",
         createdAt: now,
+        ...(gsi2pk !== undefined ? { gsi2pk } : {}),
         data: {
           sesMessageId,
           s3Key,
@@ -1002,27 +1009,75 @@ export class SignalProcessor {
       accountCtx.filtering?.spamScoreThreshold ??
       DEFAULT_SPAM_SCORE_THRESHOLD;
 
-    // 6. Arc matching
+    // 6. Arc matching (parallel tiers)
     const groupingKey = deriveGroupingKey(classificationOutput.workflow, classificationOutput.workflowData, recipientAddress, senderETLD1);
     this.logger.trackPoint("arc_matcher_values_generated");
-    let matchedArc: Arc | null;
     this.logger.trackPoint("arc_match_search");
-    if (groupingKey) {
+
+    // Tier 1: Grouping key lookup
+    const tier1Promise = (async (): Promise<Arc | null> => {
+      if (!groupingKey) return null;
       this.logger.trackPoint("arc_matcher_grouping_key_lookup");
       const gkResult = await this.arcDb.fastFindArcByAlternativeLookupKey(accountId, groupingKey);
-      if (gkResult.isErr()) return err(gkResult.error);
-      matchedArc = gkResult.value;
-    } else {
+      if (gkResult.isErr()) return null;
+      return gkResult.value;
+    })();
+
+    // Tier 1.5: In-Reply-To GSI2 lookup
+    const tier15Promise = (async (): Promise<Arc | null> => {
+      const inReplyToHeader = parsed.headers["in-reply-to"];
+      if (!inReplyToHeader) return null;
+      const firstMsgId = extractFirstInReplyTo(inReplyToHeader);
+      if (!firstMsgId) return null;
+      const lookupKey = buildGsi2pk(accountId, firstMsgId);
+      const signalResult = await this.arcDb.findSignalByEmailMessageId(lookupKey);
+      if (signalResult.isErr()) {
+        this.logger.warn("GSI2 In-Reply-To lookup failed — treating as miss.", { code: "processor.in_reply_to.gsi2_error", accountId, sesMessageId, error: signalResult.error });
+        return null;
+      }
+      const foundSignal = signalResult.value;
+      if (!foundSignal || !foundSignal.arcId) return null;
+      const arcResult = await this.arcDb.getArc(accountId, foundSignal.arcId);
+      if (arcResult.isErr()) {
+        this.logger.warn("In-Reply-To arc fetch failed — treating as miss.", { code: "processor.in_reply_to.arc_fetch_error", accountId, sesMessageId, error: arcResult.error });
+        return null;
+      }
+      return arcResult.value;
+    })();
+
+    // Tier 2: Similarity search
+    const tier2Promise = (async (): Promise<Arc | null> => {
       this.logger.trackPoint("arc_matcher_similarity_search");
       const matchResult = await this.arcMatcher.findMatch(accountId, recipientAddress, embedding);
-      if (matchResult.isErr()) return err(matchResult.error);
-      matchedArc = matchResult.value;
-      if (matchedArc) {
-        this.logger.info("Similarity search returned match.", { code: "processor.arc_matcher.similarity_match", arcId: matchedArc.id, accountId, sesMessageId });
-      } else {
-        this.logger.info("Similarity search returned no match.", { code: "processor.arc_matcher.no_match", accountId, sesMessageId });
-      }
+      if (matchResult.isErr()) return null;
+      return matchResult.value;
+    })();
+
+    const [tier1Arc, tier15Arc, tier2Arc] = await Promise.all([tier1Promise, tier15Promise, tier2Promise]);
+
+    // Discrepancy detection — log when multiple tiers produce different results
+    const matchedArcs = [
+      ...(tier1Arc ? [{ tier: "groupingKey" as const, arcId: tier1Arc.id }] : []),
+      ...(tier15Arc ? [{ tier: "inReplyTo" as const, arcId: tier15Arc.id }] : []),
+      ...(tier2Arc ? [{ tier: "similarity" as const, arcId: tier2Arc.id }] : []),
+    ];
+    const uniqueArcIds = new Set(matchedArcs.map(m => m.arcId));
+    if (uniqueArcIds.size > 1) {
+      this.logger.track("Arc match discrepancy — multiple tiers returned different arcs.", {
+        code: "processor.arc_match_discrepancy",
+        accountId,
+        sesMessageId,
+        tier1ArcId: tier1Arc?.id ?? null,
+        tier15ArcId: tier15Arc?.id ?? null,
+        tier2ArcId: tier2Arc?.id ?? null,
+        selectedTier: tier1Arc ? "groupingKey" : tier15Arc ? "inReplyTo" : "similarity",
+      });
     }
+
+    // Select by priority: Tier 1 > Tier 1.5 > Tier 2
+    const matchedArc = tier1Arc ?? tier15Arc ?? tier2Arc;
+    const matchMethod: "groupingKey" | "inReplyTo" | "similarity" | "none" =
+      tier1Arc ? "groupingKey" : tier15Arc ? "inReplyTo" : tier2Arc ? "similarity" : "none";
 
     const isMatchedArc = matchedArc !== null;
 
@@ -1038,7 +1093,7 @@ export class SignalProcessor {
         subject: parsed.subject,
         updatedAt: now,
       };
-      this.logger.info("Existing arc matched.", { code: "processor.arc_matched", arcId: arc.id, matchMethod: groupingKey ? "groupingKey" : "similarity", accountId, sesMessageId });
+      this.logger.info("Existing arc matched.", { code: "processor.arc_matched", arcId: arc.id, matchMethod, accountId, sesMessageId });
     } else {
       arc = {
         id: generateId("arc-"),
@@ -1123,6 +1178,7 @@ export class SignalProcessor {
       receivedAt: timestamp,
       now,
       ...(ttl !== undefined ? { ttl } : {}),
+      ...(gsi2pk !== undefined ? { gsi2pk } : {}),
     });
 
     // 10. Evaluate all rules (system rules seeded at low position numbers, user rules at higher positions)
@@ -1146,7 +1202,7 @@ export class SignalProcessor {
       }
     }
 
-    const buildArgs = { accountId, sesMessageId, recipientAddress, parsed, classification: classificationOutput, s3Key, receivedAt: timestamp, now, ...(ttl !== undefined ? { ttl } : {}) };
+    const buildArgs = { accountId, sesMessageId, recipientAddress, parsed, classification: classificationOutput, s3Key, receivedAt: timestamp, now, ...(ttl !== undefined ? { ttl } : {}), ...(gsi2pk !== undefined ? { gsi2pk } : {}) };
 
     if (outcome.blockDisposition) {
       const blockSignal = buildSignal({ status: outcome.blockDisposition, ...buildArgs });
@@ -1691,8 +1747,9 @@ function buildSignal(opts: {
   receivedAt: string;
   now: string;
   ttl?: number;
+  gsi2pk?: string;
 }): Signal {
-  const { arcId, status, accountId, sesMessageId, recipientAddress, parsed, classification, s3Key, receivedAt, now, ttl } = opts;
+  const { arcId, status, accountId, sesMessageId, recipientAddress, parsed, classification, s3Key, receivedAt, now, ttl, gsi2pk } = opts;
   const signalId = generateId("sgn-");
 
   // Extract unsubscribe info from List-Unsubscribe / List-Unsubscribe-Post headers
@@ -1731,6 +1788,7 @@ function buildSignal(opts: {
 
   if (arcId !== undefined) signal.arcId = arcId;
   if (ttl !== undefined) signal.ttl = ttl;
+  if (gsi2pk !== undefined) signal.gsi2pk = gsi2pk;
 
   return signal;
 }

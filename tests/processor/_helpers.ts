@@ -21,6 +21,7 @@ export function makeArcDbMock(): ArcDatabase {
     updateSignalSendStatus: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     updateSignalRetention: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     getArc: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
+    findSignalByEmailMessageId: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
     fastFindArcByAlternativeLookupKey: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
     saveArc: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     updateArc: vi.fn().mockReturnValue(Promise.resolve(ok({ id: "arc-mock" }))),

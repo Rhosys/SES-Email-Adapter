@@ -492,6 +492,7 @@ export interface SignalBase {
   // User/system signals: same as `id` (the sgn- prefixed ID).
   signalLookupId: string;
   arcId?: string;        // Undefined while signal is blocked pending user action
+  gsi2pk?: string;       // GSI2 key for In-Reply-To lookup (ACCT#{accountId}#MSGID#{msgId})
   accountId: string;
   source: SignalSource;
   type: SignalType;

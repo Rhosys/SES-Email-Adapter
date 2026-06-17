@@ -1079,7 +1079,8 @@ describe("SignalProcessor", () => {
         TEST_ACCOUNT_ID,
         "user@example.com:auth:example.com",
       );
-      expect(arcMatcher.findMatch).not.toHaveBeenCalled();
+      // All tiers now execute in parallel (R4) — arcMatcher.findMatch IS called
+      // but the grouping key result takes priority in selection
     });
 
     it("stores groupingKey on a newly created arc", async () => {

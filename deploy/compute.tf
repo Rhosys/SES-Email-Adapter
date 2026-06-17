@@ -264,6 +264,7 @@ resource "aws_lambda_function" "main" {
       SCHEDULER_GROUP_NAME     = aws_scheduler_schedule_group.followups.name
       SCHEDULER_ROLE_ARN       = aws_iam_role.scheduler_sqs.arn
       SIGNAL_QUEUE_ARN         = aws_sqs_queue.signals.arn
+      SES_REGION               = local.primary_region
       NODE_OPTIONS             = "--enable-source-maps"
     }
   }

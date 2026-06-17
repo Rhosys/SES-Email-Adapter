@@ -236,6 +236,10 @@ resource "aws_dynamodb_table" "signals" {
     name = "gsi1sk"
     type = "S"
   }
+  attribute {
+    name = "gsi2pk"
+    type = "S"
+  }
 
   global_secondary_index {
     name            = "gsi1"
@@ -248,6 +252,17 @@ resource "aws_dynamodb_table" "signals" {
     key_schema {
       attribute_name = "gsi1sk"
       key_type       = "RANGE"
+    }
+  }
+
+  global_secondary_index {
+    name               = "gsi2"
+    projection_type    = "INCLUDE"
+    non_key_attributes = ["arcId", "accountId", "id", "signalLookupId", "source", "status", "type"]
+
+    key_schema {
+      attribute_name = "gsi2pk"
+      key_type       = "HASH"
     }
   }
 
