@@ -120,6 +120,7 @@ describe("DraftSendWorker", () => {
       status: "sent",
       sentAt: expect.any(String),
       sesMessageId: "ses-msg-001",
+      gsi2pk: "ACCT#acct-001#MSGID#ses-msg-001@eu-central-1.amazonses.com",
     });
   });
 

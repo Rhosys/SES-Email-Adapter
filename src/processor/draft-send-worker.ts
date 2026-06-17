@@ -5,6 +5,7 @@ import { ok, err } from "../errors.js";
 import type { Logger } from "../logger.js";
 import type { ReplySender } from "./processor.js";
 import type { DraftSendPayload } from "./draft-send-dispatcher.js";
+import { buildOutboundMsgId, buildGsi2pk } from "./message-id.js";
 
 export interface DraftSendStore {
   getSignalById(accountId: string, signalId: string): Promise<Result<Signal | null, DbError>>;
@@ -14,6 +15,7 @@ export interface DraftSendStore {
     sesMessageId?: string;
     sendFailureReason?: string;
     sendInitiatedAt?: string | null;
+    gsi2pk?: string;
   }): Promise<Result<Signal, DbError>>;
   getArc(accountId: string, id: string): Promise<Result<Arc | null, DbError>>;
   updateArcStatus(accountId: string, id: string, status: "archived"): Promise<Result<void, DbError>>;
@@ -78,12 +80,18 @@ export class DraftSendWorker {
 
     const { messageId } = sendResult.value;
 
+    // Compute outbound message ID for arc threading lookup
+    const SES_REGION = process.env.SES_REGION ?? 'eu-central-1';
+    const outboundMsgId = buildOutboundMsgId(messageId, SES_REGION);
+    const gsi2pk = buildGsi2pk(accountId, outboundMsgId);
+
     // Transition to sent
     const now = DateTime.utc().toISO()!;
     const updateResult = await this.store.updateSignalSendStatus(accountId, signal.signalLookupId, {
       status: "sent",
       sentAt: now,
       sesMessageId: messageId,
+      gsi2pk,
     });
     if (updateResult.isErr()) return err(updateResult.error);
 

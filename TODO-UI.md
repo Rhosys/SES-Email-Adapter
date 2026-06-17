@@ -33,12 +33,7 @@ Surfaces: **Website** · **Extension** · **Mobile** · **CLI/Desktop**
 ---
 
 ## Website — Missing / Partial
-
-- [ ] **Account settings: filtering config** — no UI for global `defaultUnknownSenderPolicy`, `newAddressHandling`, `spamScoreThreshold`
-  - Website
 - [ ] **Account settings: deletionRetentionDays** — no UI to configure how long deleted arcs are kept
-  - Website
-- [ ] **Account settings: afterSendAction** — no UI to choose archive vs keep_active after sending
   - Website
 - [ ] **Account stats dashboard** — `GET /accounts/:id/stats` endpoint exists, no UI
   - Website
@@ -53,8 +48,6 @@ Surfaces: **Website** · **Extension** · **Mobile** · **CLI/Desktop**
 - [ ] **Webhook rule action UI** — rule editor needs webhook action type in dropdown, URL input field with validation feedback, and delivery status display (future: show last delivery attempt result)
   - Website
 - [ ] **Workflow-specific structured data cards** — `workflowData` fields should render as rich cards (tracking links, OTP codes, invoice amounts, flight details) instead of raw text
-  - Website · Mobile
-- [ ] **Calendar invite card (from calendar signal)** — when an arc contains a calendar signal (`source: "signal"`, CalendarData present), render a calendar card in the signal thread. The card is driven by the **calendar signal** (not the email signal). Shows: event title, date/time, location, organizer display name, attendees. Includes accept/decline/tentative buttons that call the RSVP endpoint. Current RSVP state derived from the most recent `calendar_response` signal on the arc. CANCEL signals show a "cancelled" badge. The email signal renders normally as the email body — the calendar card appears as a separate signal card in the thread linked via `linkedSignalId`.
   - Website · Mobile
 - [ ] **Retry Send action on failed outbound signals** — when a signal has `type: "domain_misconfiguration"` or `send_failed` status, render a "Retry Send" button on the signal card. The button calls a retry endpoint that re-attempts the send. Show: why the send failed (e.g. "Domain DKIM/SPF not configured"), what action the user needs to take to fix it (link to domain settings), and the retry button. After retry succeeds, update the signal state. Also surface `domain_misconfiguration` signals as a warning banner in account settings → domains when any domain is incomplete.
   - Website · Mobile
@@ -178,8 +171,6 @@ Validations from the backend that could run client-side for instant feedback.
   - Website · Mobile
 - [ ] notification frequency enum — dropdown
   - Website · Mobile
-- [ ] newAddressHandling enum — toggle
-  - Website · Mobile
 
 ### Team
 - [ ] Invite email format — validate before submit
@@ -206,3 +197,6 @@ Validations from the backend that could run client-side for instant feedback.
   - Website
 - [ ] **Auto-send suppression indicator** — When auto-send is suppressed due to Reply-To domain mismatch, show explanation on the draft signal's compose page with the reason.
   - Website
+
+- [ ] **Post-send intent buttons** — after composing/sending a reply, surface two intent buttons: "Awaiting response" (keeps arc active, sets a followup reminder) and "No response expected" (archives the arc immediately). This replaces the global afterSendAction toggle with per-send intent. Backend already has followup scheduling and arc archival — this is a UI affordance that wires them to the send flow.
+  - Website · Mobile

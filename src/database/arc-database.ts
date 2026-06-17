@@ -118,6 +118,23 @@ export class ArcDatabase {
     }
   }
 
+  async findSignalByEmailMessageId(gsi2pk: string): Promise<Result<{ arcId?: string; id: string; signalLookupId: string; accountId: string; status: string; source: string; type: string } | null, DbError>> {
+    try {
+      const res = await dynamo.send(new QueryCommand({
+        TableName: SIGNALS_TABLE,
+        IndexName: "gsi2",
+        KeyConditionExpression: "gsi2pk = :val",
+        ExpressionAttributeValues: { ":val": gsi2pk },
+        Limit: 1,
+      }));
+      if (!res.Items || res.Items.length === 0) return ok(null);
+      const item = res.Items[0] as { arcId?: string; id: string; signalLookupId: string; accountId: string; status: string; source: string; type: string };
+      return ok(item);
+    } catch (e) {
+      return err(dbError(e));
+    }
+  }
+
   async saveSignal(signal: AnySignal): Promise<Result<void, DbError>> {
     let gsi1pk: string;
     if (signal.arcId) {
@@ -377,6 +394,7 @@ export class ArcDatabase {
       sentAt?: string;
       sesMessageId?: string;
       sendFailureReason?: string;
+      gsi2pk?: string;
     },
   ): Promise<Result<Signal, DbError>> {
     const setParts: string[] = ["#status = :status", "updatedAt = :now"];
@@ -394,6 +412,7 @@ export class ArcDatabase {
     if (update.sentAt !== undefined) { setParts.push("#data.sentAt = :sentAt"); exprValues[":sentAt"] = update.sentAt; }
     if (update.sesMessageId !== undefined) { setParts.push("#data.sesMessageId = :smid"); exprValues[":smid"] = update.sesMessageId; }
     if (update.sendFailureReason !== undefined) { setParts.push("#data.sendFailureReason = :sfr"); exprValues[":sfr"] = update.sendFailureReason; }
+    if (update.gsi2pk !== undefined) { setParts.push("gsi2pk = :gsi2pk"); exprValues[":gsi2pk"] = update.gsi2pk; }
 
     let updateExpr = `SET ${setParts.join(", ")}`;
     if (removeParts.length > 0) updateExpr += ` REMOVE ${removeParts.join(", ")}`;
