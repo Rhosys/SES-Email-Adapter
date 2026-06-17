@@ -617,7 +617,6 @@ export const NotificationSettings = z.object({
 
 export const AccountFilteringConfig = z.object({
   defaultUnknownSenderPolicy: UnknownSenderPolicy.optional(),
-  newAddressHandling: z.enum(["auto_allow", "block_until_approved"]).optional(),
   spamScoreThreshold: z.number().optional(),
 }).openapi("AccountFilteringConfig");
 

@@ -992,7 +992,7 @@ describe("API", () => {
 
     it("updates account-level spamScoreThreshold in filtering config", async () => {
       const res = await req(app, "PATCH", `${A}`, {
-        body: { filtering: { defaultFilterMode: "quarantine_visible", newAddressHandling: "auto_allow", spamScoreThreshold: 0.75 } },
+        body: { filtering: { defaultFilterMode: "quarantine_visible", spamScoreThreshold: 0.75 } },
       });
       expect(res.status).toBe(200);
       expect(accountDb.updateAccount).toHaveBeenCalledWith(

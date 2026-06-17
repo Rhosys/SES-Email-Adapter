@@ -236,10 +236,6 @@ export interface UnspecifiedData {
 // Filtering
 // ---------------------------------------------------------------------------
 
-export type NewAddressHandling =
-  | "auto_allow"           // First contact always allowed; sender eTLD+1 auto-approved (default)
-  | "block_until_approved"; // New addresses blocked until user explicitly approves via POST /arcs
-
 // Default disposition for emails from unknown senders, applied after rules run
 export const UNKNOWN_SENDER_POLICIES = ["allow_all", "quarantine_visible", "quarantine_hidden", "block_hidden", "block_reject", "violate_report"] as const;
 export type UnknownSenderPolicy = (typeof UNKNOWN_SENDER_POLICIES)[number];
@@ -351,7 +347,6 @@ export interface WsConnection {
 // Account-level filtering defaults
 export interface AccountFilteringConfig {
   defaultUnknownSenderPolicy: UnknownSenderPolicy;
-  newAddressHandling: NewAddressHandling;
   // Spam score at which a signal is treated as spam (0–1). Default: 0.9.
   // Per-address config can override this. Controls both filter blocking and notification suppression.
   spamScoreThreshold?: number;
