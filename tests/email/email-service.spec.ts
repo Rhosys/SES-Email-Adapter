@@ -48,8 +48,8 @@ describe("EmailService.send()", () => {
     expect(infoCalls[0]!.context).toEqual(expect.objectContaining({ messageId: "ses-123" }));
   });
 
-  it("MessageRejected classified as permanent — returns ok and logs error", async () => {
-    const sesError = Object.assign(new Error("Email rejected"), {
+  it("MessageRejected with 'Email address is not verified' classified as permanent — returns ok and logs error", async () => {
+    const sesError = Object.assign(new Error("Email address is not verified. The following identities failed the check in region EU-CENTRAL-1: user@example.com"), {
       name: "MessageRejected",
       $metadata: { httpStatusCode: 400 },
     });
@@ -66,7 +66,21 @@ describe("EmailService.send()", () => {
     expect(errorCalls[0]!.context).toEqual(expect.objectContaining({ errorName: "MessageRejected", httpStatus: 400, opts }));
   });
 
-  it("AccountSendingPausedException classified as permanent — returns ok and logs error", async () => {
+  it("MessageRejected without 'Email address is not verified' classified as transient", async () => {
+    const sesError = Object.assign(new Error("Email rejected for other reason"), {
+      name: "MessageRejected",
+      $metadata: { httpStatusCode: 400 },
+    });
+    mockSend.mockRejectedValueOnce(sesError);
+
+    const result = await service.send({ to: "u@e.com", subject: "S", textBody: "B", accountId: "a" });
+
+    expect(result.isErr()).toBe(true);
+    expect(result._unsafeUnwrapErr().kind).toBe("transient_ses_error");
+    expect(logger.calls.filter(c => c.method === "warn")).toHaveLength(1);
+  });
+
+  it("AccountSendingPausedException classified as transient — returns err", async () => {
     const sesError = Object.assign(new Error("Account paused"), {
       name: "AccountSendingPausedException",
       $metadata: { httpStatusCode: 400 },
@@ -75,12 +89,12 @@ describe("EmailService.send()", () => {
 
     const result = await service.send({ to: "u@e.com", subject: "S", textBody: "B", accountId: "a" });
 
-    expect(result.isOk()).toBe(true);
-    expect(result._unsafeUnwrap()).toEqual({ messageId: "" });
-    expect(logger.calls.filter(c => c.method === "error")).toHaveLength(1);
+    expect(result.isErr()).toBe(true);
+    expect(result._unsafeUnwrapErr().kind).toBe("transient_ses_error");
+    expect(logger.calls.filter(c => c.method === "warn")).toHaveLength(1);
   });
 
-  it("4xx HTTP status classified as permanent — returns ok and logs error", async () => {
+  it("4xx HTTP status classified as transient — returns err", async () => {
     const sesError = Object.assign(new Error("Bad request"), {
       name: "SomeOtherError",
       $metadata: { httpStatusCode: 429 },
@@ -89,9 +103,9 @@ describe("EmailService.send()", () => {
 
     const result = await service.send({ to: "u@e.com", subject: "S", textBody: "B", accountId: "a" });
 
-    expect(result.isOk()).toBe(true);
-    expect(result._unsafeUnwrap()).toEqual({ messageId: "" });
-    expect(logger.calls.filter(c => c.method === "error")).toHaveLength(1);
+    expect(result.isErr()).toBe(true);
+    expect(result._unsafeUnwrapErr().kind).toBe("transient_ses_error");
+    expect(logger.calls.filter(c => c.method === "warn")).toHaveLength(1);
   });
 
   it("5xx HTTP status classified as transient — returns err and logs warn", async () => {
@@ -133,8 +147,8 @@ describe("EmailService.send()", () => {
     expect(logger.calls.filter(c => c.method === "warn")).toHaveLength(1);
   });
 
-  it("named error takes priority over HTTP status (MessageRejected + 400 = permanent by name)", async () => {
-    const sesError = Object.assign(new Error("Rejected"), {
+  it("only 'Email address is not verified' MessageRejected is permanent — other MessageRejected errors are transient", async () => {
+    const sesError = Object.assign(new Error("Email address is not verified. The following identities failed the check in region EU-CENTRAL-1: x@x.com"), {
       name: "MessageRejected",
       $metadata: { httpStatusCode: 400 },
     });
@@ -224,8 +238,8 @@ describe("EmailService.sendRaw()", () => {
     expect(logger.calls.filter(c => c.method === "warn")).toHaveLength(1);
   });
 
-  it("permanent error returns ok with empty messageId", async () => {
-    const sesError = Object.assign(new Error("Rejected"), {
+  it("unverified identity error returns ok with empty messageId", async () => {
+    const sesError = Object.assign(new Error("Email address is not verified. The following identities failed the check in region EU-CENTRAL-1: x@x.com"), {
       name: "MessageRejected",
       $metadata: { httpStatusCode: 400 },
     });

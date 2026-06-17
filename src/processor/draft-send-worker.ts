@@ -1,7 +1,7 @@
 import { DateTime } from "luxon";
 import type { Signal, Arc } from "../types/index.js";
-import type { DbError, Result } from "../errors.js";
-import { ok, err, dbError } from "../errors.js";
+import type { DbError, TransientSesError, Result } from "../errors.js";
+import { ok, err } from "../errors.js";
 import type { Logger } from "../logger.js";
 import type { ReplySender } from "./processor.js";
 import type { DraftSendPayload } from "./draft-send-dispatcher.js";
@@ -31,7 +31,7 @@ export class DraftSendWorker {
     this.logger = logger;
   }
 
-  async process(payload: DraftSendPayload): Promise<Result<void, DbError>> {
+  async process(payload: DraftSendPayload): Promise<Result<void, DbError | TransientSesError>> {
     const { signalId, accountId, sendInitiatedAt } = payload;
 
     // Re-read signal — verify still pending_send
@@ -60,56 +60,41 @@ export class DraftSendWorker {
     const subject = signal.data.subject;
     const body = signal.data.textBody ?? "";
 
-    try {
-      const { messageId } = await this.replySender.sendReply({
-        to,
-        from,
-        subject,
-        body,
-        inReplyTo: signal.arcId ?? "",
-        accountId,
-        signalId: signal.id,
-        ...(signal.arcId ? { arcId: signal.arcId } : {}),
-      });
+    const sendResult = await this.replySender.sendReply({
+      to,
+      from,
+      subject,
+      body,
+      inReplyTo: signal.arcId ?? "",
+      accountId,
+      signalId: signal.id,
+      ...(signal.arcId ? { arcId: signal.arcId } : {}),
+    });
 
-      // Transition to sent
-      const now = DateTime.utc().toISO()!;
-      const updateResult = await this.store.updateSignalSendStatus(accountId, signal.signalLookupId, {
-        status: "sent",
-        sentAt: now,
-        sesMessageId: messageId,
-      });
-      if (updateResult.isErr()) return err(updateResult.error);
-
-      // Post-send arc archival
-      if (signal.arcId) {
-        const actionResult = await this.store.getAccountAfterSendAction(accountId);
-        if (actionResult.isOk() && actionResult.value === "archive") {
-          await this.store.updateArcStatus(accountId, signal.arcId, "archived");
-        }
-      }
-
-      return ok(undefined);
-    } catch (e) {
-      // Distinguish permanent vs transient SES errors
-      const error = e as { name?: string; $metadata?: { httpStatusCode?: number } };
-      const httpStatus = error.$metadata?.httpStatusCode ?? 0;
-      const isPermanent = error.name === "MessageRejected"
-        || error.name === "AccountSendingPausedException"
-        || (httpStatus >= 400 && httpStatus < 500);
-
-      if (isPermanent) {
-        this.logger.error("Draft send: SES permanent failure — reverting to draft.", { code: "draft_send.ses_permanent_failure", signalId, accountId, error: e });
-        await this.store.updateSignalSendStatus(accountId, signal.signalLookupId, {
-          status: "draft",
-          sendInitiatedAt: null,
-          sendFailureReason: "ses_permanent_failure",
-        });
-        return ok(undefined);
-      }
-
+    if (sendResult.isErr()) {
       // Transient — let SQS retry
-      return err(dbError(e));
+      return err(sendResult.error);
     }
+
+    const { messageId } = sendResult.value;
+
+    // Transition to sent
+    const now = DateTime.utc().toISO()!;
+    const updateResult = await this.store.updateSignalSendStatus(accountId, signal.signalLookupId, {
+      status: "sent",
+      sentAt: now,
+      sesMessageId: messageId,
+    });
+    if (updateResult.isErr()) return err(updateResult.error);
+
+    // Post-send arc archival
+    if (signal.arcId) {
+      const actionResult = await this.store.getAccountAfterSendAction(accountId);
+      if (actionResult.isOk() && actionResult.value === "archive") {
+        await this.store.updateArcStatus(accountId, signal.arcId, "archived");
+      }
+    }
+
+    return ok(undefined);
   }
 }
