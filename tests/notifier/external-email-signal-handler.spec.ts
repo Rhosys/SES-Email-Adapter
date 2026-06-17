@@ -73,7 +73,8 @@ describe("ExternalEmailSignalHandler.sendReply()", () => {
       accountId: "acct-test",
     });
 
-    expect(result).toEqual({ messageId: "ses-reply-456" });
+    expect(result.isOk()).toBe(true);
+    expect(result._unsafeUnwrap()).toEqual({ messageId: "ses-reply-456" });
   });
 });
 

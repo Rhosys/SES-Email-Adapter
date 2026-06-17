@@ -34,14 +34,14 @@ export class ExternalEmailSignalHandler implements ReplySender, Forwarder {
     accountId: string;
     signalId?: string;
     arcId?: string;
-  }): Promise<{ messageId: string }> {
+  }): Promise<Result<{ messageId: string }, TransientSesError>> {
     const tags = buildOutboundTags("reply", {
       accountId: opts.accountId,
       signalId: opts.signalId,
       arcId: opts.arcId,
     });
 
-    const result = await this.emailService.send({
+    return this.emailService.send({
       to: opts.to,
       fromOverride: opts.from,
       subject: `Re: ${opts.subject}`,
@@ -53,12 +53,6 @@ export class ExternalEmailSignalHandler implements ReplySender, Forwarder {
       ],
       tags,
     });
-
-    if (result.isErr()) {
-      throw result.error;
-    }
-
-    return { messageId: result.value.messageId };
   }
 
   async forward(s3Key: string, toAddress: string, accountId: string, opts?: { signalId?: string; arcId?: string }): Promise<Result<void, DbError | TransientSesError>> {

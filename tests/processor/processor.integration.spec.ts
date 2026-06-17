@@ -160,7 +160,7 @@ function makeForwarder(): Forwarder {
 
 function makeReplySender(): ReplySender {
   return {
-    sendReply: vi.fn().mockResolvedValue({ messageId: "pong-msg-001" }),
+    sendReply: vi.fn().mockResolvedValue(ok({ messageId: "pong-msg-001" })),
   };
 }
 
