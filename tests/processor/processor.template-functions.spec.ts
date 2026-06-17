@@ -301,8 +301,7 @@ describe("Template function resolution via User Code Executor", () => {
     expect(fnErrorWarn!.context).toMatchObject({
       templateName: "Auto-draft template",
       functionName: "greeting",
-      errorType: "timeout",
-      errorMessage: "User code execution timed out",
+      error: { errorType: "timeout", message: "User code execution timed out" },
     });
   });
 
