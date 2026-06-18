@@ -81,7 +81,7 @@ describe("Aurora cluster failure preserves the DynamoDB cache entry", () => {
   };
 
   const DEFAULT_CTX = {
-    retentionDays: 0,
+    retentionDuration: "P3M",
     filtering: null,
     aliasConfig: DEFAULT_EMAIL_CONFIG,
     registeredDomains: [],

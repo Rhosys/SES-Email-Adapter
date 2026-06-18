@@ -46,7 +46,7 @@ const DEFAULT_ALIAS: Alias = {
 };
 
 const DEFAULT_CTX = {
-  retentionDays: 0, filtering: null, aliasConfig: DEFAULT_ALIAS,
+  retentionDuration: "P3M", filtering: null, aliasConfig: DEFAULT_ALIAS,
   registeredDomains: [], userEmails: [], billingPlan: "Paid" as const,
 };
 

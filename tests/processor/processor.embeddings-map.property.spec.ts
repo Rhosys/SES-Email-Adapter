@@ -81,7 +81,7 @@ const DEFAULT_SENDER_ENTRY: AliasSender = {
 };
 
 const DEFAULT_CTX = {
-  retentionDays: 0,
+  retentionDuration: "P3M",
   filtering: null,
   aliasConfig: DEFAULT_ALIAS,
   registeredDomains: [],

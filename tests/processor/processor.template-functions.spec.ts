@@ -23,7 +23,7 @@ import { createMockLogger, type MockLogger } from "../helpers/mock-logger.js";
 const TEST_ACCOUNT_ID = "acc_tmpl_test";
 
 const DEFAULT_CTX: ProcessorAccountContext = {
-  retentionDays: 365,
+  retentionDuration: "P1Y",
   filtering: null,
   aliasConfig: null,
   registeredDomains: ["example.com"],

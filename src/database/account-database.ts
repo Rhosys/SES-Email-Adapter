@@ -64,14 +64,14 @@ export class AccountDatabase {
     }
   }
 
-  async updateAccount(accountId: string, update: Partial<Pick<Account, "name" | "deletionRetentionDays" | "notifications" | "filtering" | "onboarding" | "afterSendAction">>): Promise<Result<Account, DbError>> {
+  async updateAccount(accountId: string, update: Partial<Pick<Account, "name" | "retentionDuration" | "notifications" | "filtering" | "onboarding" | "afterSendAction">>): Promise<Result<Account, DbError>> {
     const now = DateTime.utc().toISO()!;
     const setParts: string[] = ["updatedAt = :now"];
     const exprValues: Record<string, unknown> = { ":now": now };
     const exprNames: Record<string, string> = {};
 
     if (update.name !== undefined) { setParts.push("#name = :name"); exprValues[":name"] = update.name; exprNames["#name"] = "name"; }
-    if (update.deletionRetentionDays !== undefined) { setParts.push("deletionRetentionDays = :drd"); exprValues[":drd"] = update.deletionRetentionDays; }
+    if (update.retentionDuration !== undefined) { setParts.push("retentionDuration = :rd"); exprValues[":rd"] = update.retentionDuration; }
     if (update.notifications !== undefined) { setParts.push("notifications = :notif"); exprValues[":notif"] = update.notifications; }
     if (update.filtering !== undefined) { setParts.push("filtering = :filtering"); exprValues[":filtering"] = update.filtering; }
     if (update.onboarding !== undefined) { setParts.push("onboarding = :onboarding"); exprValues[":onboarding"] = update.onboarding; }
@@ -272,13 +272,7 @@ export class AccountDatabase {
     return ok(accountResult.value?.filtering ?? null);
   }
 
-  async getAccountRetentionDays(accountId: string): Promise<Result<number, DbError>> {
-    const accountResult = await this.getAccount(accountId);
-    if (accountResult.isErr()) return err(accountResult.error);
-    return ok(accountResult.value?.deletionRetentionDays ?? 0);
-  }
-
-  async getProcessorAccountContext(accountId: string, recipientAddress: string): Promise<Result<{ retentionDays: number; filtering: AccountFilteringConfig | null; aliasConfig: Alias | null; registeredDomains: string[]; userEmails: string[]; billingPlan: import("../embedding/retention-tier.js").BillingPlan; onboardingCompleted: boolean }, DbError>> {
+  async getProcessorAccountContext(accountId: string, recipientAddress: string): Promise<Result<{ retentionDuration?: import("../processor/retention.js").RetentionDuration; filtering: AccountFilteringConfig | null; aliasConfig: Alias | null; registeredDomains: string[]; userEmails: string[]; billingPlan: import("../embedding/retention-tier.js").BillingPlan; onboardingCompleted: boolean }, DbError>> {
     const accountResult = await this.getAccount(accountId);
     if (accountResult.isErr()) return err(accountResult.error);
     const account = accountResult.value;
@@ -292,7 +286,7 @@ export class AccountDatabase {
     const domains = domainsResult.value;
 
     return ok({
-      retentionDays: account?.deletionRetentionDays ?? 0,
+      ...(account?.retentionDuration ? { retentionDuration: account.retentionDuration } : {}),
       filtering: account?.filtering ?? null,
       aliasConfig,
       registeredDomains: domains.map((d) => d.domain),

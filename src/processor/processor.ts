@@ -21,7 +21,7 @@ import type { ProcessingDatabase } from "../database/processing-database.js";
 import type { S3RetentionService } from "../embedding/s3-retention-service.js";
 import { getRetentionForPlan, retentionDurationToSeconds } from "../embedding/retention-tier.js";
 import type { BillingPlan } from "../embedding/retention-tier.js";
-import { resolveRetention, retentionToS3Tag } from "./retention.js";
+import { resolveRetention, retentionToS3Tag, durationToSeconds } from "./retention.js";
 import type { RetentionDuration } from "./retention.js";
 import { generatePresignedGet, generatePresignedPost } from "./presign.js";
 import { getPrimaryArcMatcherRegistry, getActiveClusters } from "../embedding/cluster-registry.js";
@@ -63,7 +63,6 @@ export interface SqsDispatcher {
 // ---------------------------------------------------------------------------
 
 export interface ProcessorAccountContext {
-  retentionDays: number;
   retentionDuration?: RetentionDuration;
   filtering: AccountFilteringConfig | null;
   aliasConfig: Alias | null;
@@ -886,8 +885,10 @@ export class SignalProcessor {
     if (effectiveAliasSenderConfig && effectiveAliasSenderConfig.policy !== "allow") {
       const blockStatus = effectiveAliasSenderConfig.policy; // block_hidden | block_reject | violate_report
       const now = DateTime.utc().toISO()!;
-      const ttl = accountCtx.retentionDays > 0
-        ? Math.floor(Date.now() / 1000) + accountCtx.retentionDays * 86400
+      const effectiveRetention = resolveRetention(accountCtx.retentionDuration ? { retentionDuration: accountCtx.retentionDuration } : {}, null);
+      const retentionSecs = durationToSeconds(effectiveRetention);
+      const ttl = retentionSecs != null
+        ? Math.floor(Date.now() / 1000) + retentionSecs
         : undefined;
       const signalId = generateId("sgn-");
       const signal: Signal = {
@@ -980,8 +981,10 @@ export class SignalProcessor {
 
     const now = DateTime.utc().toISO()!;
 
-    const ttl = accountCtx.retentionDays > 0
-      ? Math.floor(Date.now() / 1000) + accountCtx.retentionDays * 86400
+    const effectiveRetentionForTtl = resolveRetention(accountCtx.retentionDuration ? { retentionDuration: accountCtx.retentionDuration } : {}, null);
+    const retentionSecsForTtl = durationToSeconds(effectiveRetentionForTtl);
+    const ttl = retentionSecsForTtl != null
+      ? Math.floor(Date.now() / 1000) + retentionSecsForTtl
       : undefined;
 
     // 5. Test detection override

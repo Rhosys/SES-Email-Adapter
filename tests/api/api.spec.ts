@@ -152,7 +152,6 @@ function makeAccount(overrides: Partial<Account> = {}): Account {
   return {
     id: TEST_ACCOUNT_ID,
     name: "Test Account",
-    deletionRetentionDays: 30,
     createdAt: "2024-01-01T00:00:00Z",
     updatedAt: "2024-01-01T00:00:00Z",
     ...overrides,
@@ -971,11 +970,11 @@ describe("API", () => {
       );
     });
 
-    it("updates deletionRetentionDays", async () => {
-      const res = await req(app, "PATCH", `${A}`, { body: { deletionRetentionDays: 90 } });
+    it("updates retentionDuration", async () => {
+      const res = await req(app, "PATCH", `${A}`, { body: { retentionDuration: "P3M" } });
       expect(res.status).toBe(200);
       expect(accountDb.updateAccount).toHaveBeenCalledWith(
-        TEST_ACCOUNT_ID, expect.objectContaining({ deletionRetentionDays: 90 }),
+        TEST_ACCOUNT_ID, expect.objectContaining({ retentionDuration: "P3M" }),
       );
     });
 

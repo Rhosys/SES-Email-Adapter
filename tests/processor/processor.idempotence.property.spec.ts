@@ -64,7 +64,7 @@ describe("Cross-layer idempotence — live writes + cache + Aurora", () => {
   };
 
   const DEFAULT_CTX = {
-    retentionDays: 0,
+    retentionDuration: "P3M",
     filtering: null,
     aliasConfig: DEFAULT_EMAIL_CONFIG,
     registeredDomains: [],

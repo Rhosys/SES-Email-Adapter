@@ -22,7 +22,7 @@ describe("AccountDatabase", () => {
 
   describe("getAccount", () => {
     it("returns ok(Account) when the item exists", async () => {
-      const account = { id: "acct-1", name: "Test", deletionRetentionDays: 30 };
+      const account = { id: "acct-1", name: "Test", retentionDuration: "P3M" };
       ddbMock.on(GetCommand).resolves({ Item: account });
 
       const result = await db.getAccount("acct-1");

@@ -68,7 +68,7 @@ function makeStore() {
   const processingDb = makeProcessingDbMock();
   vi.mocked(accountDb.listEnabledRules).mockReturnValue(Promise.resolve(ok(SYSTEM_RULES)));
   vi.mocked(accountDb.getProcessorAccountContext).mockReturnValue(Promise.resolve(ok({
-    retentionDays: 30,
+    retentionDuration: "P3M",
     filtering: null,
     aliasConfig: DEFAULT_ALIAS,
     registeredDomains: [],

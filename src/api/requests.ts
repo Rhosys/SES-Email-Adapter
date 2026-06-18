@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { emailRegex } from "../email/validate-email.js";
 import { WORKFLOWS } from "../types/index.js";
+import { RetentionDuration } from "./schemas.js";
 
 // ---- Shared primitives ----
 
@@ -242,7 +243,7 @@ const AccountOnboardingSchema = z.object({
 
 export const UpdateAccountRequest = z.object({
   name: z.string().optional(),
-  deletionRetentionDays: z.number().int().positive().optional(),
+  retentionDuration: RetentionDuration.optional(),
   notifications: NotificationSettingsSchema.optional(),
   filtering: AccountFilteringConfigSchema.optional(),
   onboarding: AccountOnboardingSchema.optional(),

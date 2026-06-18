@@ -69,7 +69,7 @@ function makeStore(billingPlan: "Paid" | "Free" | "Trial" = "Paid") {
   const accountDb = {
     ...makeAccountDbMock(),
     getProcessorAccountContext: vi.fn().mockReturnValue(Promise.resolve(ok({
-      retentionDays: 30,
+      retentionDuration: "P3M",
       filtering: null,
       aliasConfig: DEFAULT_ALIAS,
       registeredDomains: [],

@@ -206,7 +206,7 @@ describe("Blocked/quarantined signals never trigger saveArc", () => {
     };
 
     (accountDb.getProcessorAccountContext as ReturnType<typeof vi.fn>).mockReturnValue(Promise.resolve(ok({
-      retentionDays: 0,
+      retentionDuration: "P3M",
       filtering: null,
       aliasConfig,
       registeredDomains: [],

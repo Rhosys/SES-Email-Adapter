@@ -36,7 +36,7 @@ export function makeAccountDbMock(): AccountDatabase {
   return {
     listEnabledRules: vi.fn().mockReturnValue(Promise.resolve(ok([]))),
     getProcessorAccountContext: vi.fn().mockReturnValue(Promise.resolve(ok({
-      retentionDays: 0,
+      retentionDuration: "P3M",
       filtering: null,
       aliasConfig: null,
       registeredDomains: [],
