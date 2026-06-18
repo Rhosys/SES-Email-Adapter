@@ -96,7 +96,7 @@ describe("Feature: signal-processor-retry-resilience, Property 4: Arc saved befo
   };
 
   const DEFAULT_CTX = {
-    retentionDays: 0,
+    retentionDuration: "P3M",
     filtering: null,
     aliasConfig: DEFAULT_EMAIL_CONFIG,
     registeredDomains: [],
@@ -320,7 +320,7 @@ describe("Feature: signal-processor-retry-resilience, Property 6: Aurora failure
   };
 
   const DEFAULT_CTX = {
-    retentionDays: 0,
+    retentionDuration: "P3M",
     filtering: null,
     aliasConfig: DEFAULT_EMAIL_CONFIG,
     registeredDomains: [],
@@ -602,7 +602,7 @@ describe("Feature: signal-processor-retry-resilience, Property 5: Side-effects d
   };
 
   const DEFAULT_CTX = {
-    retentionDays: 0,
+    retentionDuration: "P3M",
     filtering: null,
     aliasConfig: DEFAULT_EMAIL_CONFIG,
     registeredDomains: [],
@@ -883,7 +883,7 @@ describe("Feature: signal-processor-retry-resilience, Property 7: Partial Aurora
   };
 
   const DEFAULT_CTX = {
-    retentionDays: 0,
+    retentionDuration: "P3M",
     filtering: null,
     aliasConfig: DEFAULT_EMAIL_CONFIG,
     registeredDomains: [],

@@ -153,7 +153,7 @@ function buildProcessor(opts: {
 
   const accountDb = makeAccountDbMock();
   (accountDb.getProcessorAccountContext as ReturnType<typeof vi.fn>).mockResolvedValue(ok({
-    retentionDays: 0,
+    retentionDuration: "P3M",
     filtering: null,
     aliasConfig: DEFAULT_EMAIL_CONFIG,
     registeredDomains: [],

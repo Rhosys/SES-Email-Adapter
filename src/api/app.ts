@@ -373,7 +373,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
       const candidate: Account = {
         id: generateAccountId(),
         name: "",
-        deletionRetentionDays: 0,
+        retentionDuration: "P3M",
         billingPlan: "Trial",
         onboarding: { completed: false },
         createdAt: now,
@@ -1657,7 +1657,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
       body.onboarding = { ...existing?.onboarding, ...body.onboarding };
     }
 
-    const updateResult = await accountDb.updateAccount(accountId, body as Partial<Pick<Account, "name" | "deletionRetentionDays" | "notifications" | "filtering" | "onboarding" | "afterSendAction">>);
+    const updateResult = await accountDb.updateAccount(accountId, body as Partial<Pick<Account, "name" | "retentionDuration" | "notifications" | "filtering" | "onboarding" | "afterSendAction">>);
     if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
     return c.json(toApiAccount(updateResult.value), 200);
   });

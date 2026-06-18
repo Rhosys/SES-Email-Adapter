@@ -82,7 +82,7 @@ describe("Property 9: S3 retention failure is isolated and non-fatal", () => {
   };
 
   const DEFAULT_CTX = {
-    retentionDays: 0,
+    retentionDuration: "P3M",
     filtering: null,
     aliasConfig: DEFAULT_ALIAS,
     registeredDomains: [],

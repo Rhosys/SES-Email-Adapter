@@ -14,7 +14,6 @@ function makeAccount(overrides: Partial<Account> = {}): Account {
   return {
     id: "acc-test",
     name: "Test Account",
-    deletionRetentionDays: 30,
     createdAt: "2025-01-01T00:00:00Z",
     updatedAt: "2025-01-01T00:00:00Z",
     ...overrides,

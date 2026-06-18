@@ -3,7 +3,7 @@ import { ok } from "neverthrow";
 import { SignalProcessor, SYSTEM_RULES } from "../../src/processor/processor.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
 import { makeSharedNewDeps } from "./_shared-new-deps.js";
-import type { ArcMatcher, RuleEvaluator, InboundSignalMessage, SqsDispatcher } from "../../src/processor/processor.js";
+import type { ArcMatcher, RuleEvaluator, InboundSignalMessage, SqsDispatcher, ProcessorAccountContext } from "../../src/processor/processor.js";
 import { makeArcDbMock, makeAccountDbMock, makeProcessingDbMock } from "./_helpers.js";
 import type { ContentSanitizerClient } from "../../src/processor/content-sanitizer-client.js";
 import type { UserCodeExecutorClient } from "../../src/processor/user-code-client.js";
@@ -53,7 +53,7 @@ const DEFAULT_SENDER_ENTRY: AliasSender = {
   accountId: TEST_ACCOUNT_ID, aliasAddress: "user@example.com", domain: "example.com", alias: "user", senderDomain: "example.com", policy: "allow", addedAt: "2024-01-01T00:00:00Z",
 };
 
-const DEFAULT_CTX = { retentionDays: 0, filtering: null, aliasConfig: DEFAULT_ALIAS, registeredDomains: [], userEmails: [], billingPlan: "Paid" as const, onboardingCompleted: true };
+const DEFAULT_CTX = { retentionDuration: "P3M", filtering: null, aliasConfig: DEFAULT_ALIAS, registeredDomains: [], userEmails: [], billingPlan: "Paid" as const, onboardingCompleted: true } satisfies ProcessorAccountContext;
 
 const validClassification: ClassificationOutput = {
   workflow: "conversation",

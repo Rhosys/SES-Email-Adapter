@@ -97,5 +97,5 @@ export function resolveRetention(
   if (ruleOverride) return ruleOverride;
   if (aliasConfig?.retentionDuration) return aliasConfig.retentionDuration;
   if (accountCtx.retentionDuration) return accountCtx.retentionDuration;
-  return "P1Y";
+  return "P3M";
 }

@@ -711,7 +711,7 @@ export interface AccountOnboarding {
 export interface Account {
   id: string;
   name: string;
-  deletionRetentionDays: number;
+  retentionDuration?: import("../processor/retention.js").RetentionDuration;
   notifications?: NotificationSettings;
   filtering?: AccountFilteringConfig;
   onboarding?: AccountOnboarding;

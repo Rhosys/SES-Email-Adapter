@@ -114,7 +114,6 @@ export async function createProcessorHarness(): Promise<ProcessorHarness> {
   await accountDb.createAccount({
     id: accountId,
     name: 'Integration Test Account',
-    deletionRetentionDays: 0,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   });

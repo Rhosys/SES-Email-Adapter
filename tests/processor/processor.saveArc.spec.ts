@@ -113,7 +113,7 @@ describe("Single saveArc call with complete mutations", () => {
       ...makeAccountDbMock(),
       listEnabledRules: vi.fn().mockReturnValue(Promise.resolve(ok([...SYSTEM_RULES, ...userRules]))),
       getProcessorAccountContext: vi.fn().mockReturnValue(Promise.resolve(ok({
-        retentionDays: 0,
+        retentionDuration: "P3M",
         filtering: null,
         aliasConfig: {
           id: "cfg-001", accountId: TEST_ACCOUNT_ID, address: `user@${recipientDomain}`, domain: recipientDomain, alias: "user",

@@ -81,7 +81,7 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
   };
 
   const DEFAULT_CTX = {
-    retentionDays: 0,
+    retentionDuration: "P3M",
     filtering: null,
     aliasConfig: DEFAULT_ALIAS,
     registeredDomains: [],
@@ -550,7 +550,7 @@ describe("Feature: signal-processor-retry-resilience, Property 3: DDB read failu
   };
 
   const DEFAULT_CTX = {
-    retentionDays: 0,
+    retentionDuration: "P3M",
     filtering: null,
     aliasConfig: DEFAULT_ALIAS,
     registeredDomains: [],
@@ -763,7 +763,7 @@ describe("Feature: signal-processor-retry-resilience, Property 2: Missing signal
   };
 
   const DEFAULT_CTX = {
-    retentionDays: 0,
+    retentionDuration: "P3M",
     filtering: null,
     aliasConfig: DEFAULT_ALIAS,
     registeredDomains: [],
@@ -993,7 +993,7 @@ describe("Feature: signal-processor-retry-resilience, Property 8: Outcome re-der
   };
 
   const DEFAULT_CTX = {
-    retentionDays: 0,
+    retentionDuration: "P3M",
     filtering: null,
     aliasConfig: DEFAULT_ALIAS,
     registeredDomains: [],
