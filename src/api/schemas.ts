@@ -487,6 +487,7 @@ export const Arc = z.object({
   updatedAt: z.string().readonly(),
   retentionDuration: RetentionDuration.optional().readonly(),
   urgency: ArcUrgency.optional(),
+  followupAt: z.string().datetime().optional().readonly(),
   senderAddress: z.string(),
   recipientAddress: z.string(),
   subject: z.string(),

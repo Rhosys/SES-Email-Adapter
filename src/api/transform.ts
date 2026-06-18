@@ -38,6 +38,7 @@ export function toApiArc(arc: DbArc): Api.Arc {
     updatedAt: arc.updatedAt,
     ...(arc.retentionDuration ? { retentionDuration: arc.retentionDuration as Api.Arc["retentionDuration"] } : {}),
     ...(arc.urgency ? { urgency: arc.urgency as Api.Arc["urgency"] } : {}),
+    ...(arc.followupAt ? { followupAt: arc.followupAt } : {}),
     senderAddress: arc.senderAddress ?? "",
     recipientAddress: arc.recipientAddress ?? "",
     subject: arc.subject ?? "",

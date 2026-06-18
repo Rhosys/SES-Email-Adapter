@@ -564,6 +564,8 @@ export interface Arc {
   // Message-IDs of emails the user sent on this arc
   sentMessageIds?: string[];
   urgency?: ArcUrgency;
+  // ISO 8601 datetime — when the user wants to be reminded about this arc
+  followupAt?: string;
   // Denormalized from the latest inbound signal — used for arc list display
   senderAddress: string;
   recipientAddress: string;
