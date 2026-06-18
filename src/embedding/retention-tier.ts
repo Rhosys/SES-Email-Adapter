@@ -27,7 +27,7 @@ export type UserDisplayedRetention = '1 year' | '5 years' | 'forever';
 // Plan types
 // ---------------------------------------------------------------------------
 
-export type BillingPlan = 'Trial' | 'Free' | 'Beta' | 'Paid' | 'Lifetime' | 'Premium' | 'Internal';
+export type BillingPlan = 'Trial' | 'Free' | 'Beta' | 'Paid' | 'Lifetime' | 'Premium' | 'Internal' | 'Enterprise';
 
 // ---------------------------------------------------------------------------
 // RetentionForPlan — the new interface
@@ -69,6 +69,7 @@ export function getRetentionForPlan(plan: BillingPlan): RetentionForPlan {
       };
     case 'Premium':
     case 'Internal':
+    case 'Enterprise':
       return {
         s3Tag: null,
         retentionDuration: 'P1000Y',
@@ -131,6 +132,7 @@ const PLAN_MAX_TIER: Record<BillingPlan, RetentionDuration> = {
   Lifetime: 'P5Y',
   Premium: 'P1000Y',
   Internal: 'P1000Y',
+  Enterprise: 'P1000Y',
 };
 
 /**

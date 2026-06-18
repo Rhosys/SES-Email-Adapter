@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { getRetentionForPlan, getUserDisplayedRetention, type BillingPlan } from "../../src/embedding/retention-tier.js";
 
-const ALL_PLANS: BillingPlan[] = ["Free", "Beta", "Paid", "Lifetime", "Premium", "Internal"];
+const ALL_PLANS: BillingPlan[] = ["Free", "Beta", "Paid", "Lifetime", "Premium", "Internal", "Enterprise"];
 
 describe("Retention tier on S3 tag and DynamoDB record always agree", () => {
   it.each(ALL_PLANS.map((plan) => ({ plan })))("plan=$plan — retentionDuration matches plan-to-retention mapping", ({ plan }) => {
@@ -15,7 +15,7 @@ describe("Retention tier on S3 tag and DynamoDB record always agree", () => {
       expect(retention.retentionDuration).toBe("P5Y");
       expect(retention.s3Tag).toBeNull();
     }
-    if (plan === "Premium" || plan === "Internal") {
+    if (plan === "Premium" || plan === "Internal" || plan === "Enterprise") {
       expect(retention.retentionDuration).toBe("P1000Y");
       expect(retention.s3Tag).toBeNull();
       expect(retention.copyToSaved).toBe(true);
