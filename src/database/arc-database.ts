@@ -31,6 +31,7 @@ export interface UpdateArcFields {
   senderAddress?: string;
   recipientAddress?: string;
   subject?: string;
+  followupAt?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -343,6 +344,7 @@ export class ArcDatabase {
     if (update.senderAddress !== undefined) { setParts.push("senderAddress = :senderAddress"); exprValues[":senderAddress"] = update.senderAddress; }
     if (update.recipientAddress !== undefined) { setParts.push("recipientAddress = :recipientAddress"); exprValues[":recipientAddress"] = update.recipientAddress; }
     if (update.subject !== undefined) { setParts.push("#subject = :subject"); exprValues[":subject"] = update.subject; exprNames["#subject"] = "subject"; }
+    if (update.followupAt !== undefined) { setParts.push("followupAt = :followupAt"); exprValues[":followupAt"] = update.followupAt; }
 
     try {
       const result = await dynamo.send(new UpdateCommand({

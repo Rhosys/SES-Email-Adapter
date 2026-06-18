@@ -247,7 +247,7 @@ describe("PATCH /accounts/:accountId/arcs/:id — followupAt handling", () => {
     expect(res.status).toBe(200);
     // Arc status should remain active (updateArc called with original status)
     expect(arcDb.updateArc).toHaveBeenCalledWith(
-      TEST_ACCOUNT_ID, ARC_ID, "active", arc.lastSignalAt, {},
+      TEST_ACCOUNT_ID, ARC_ID, "active", arc.lastSignalAt, { followupAt: futureDate },
     );
     // Schedule should be created
     expect(schedulerClient.createFollowup).toHaveBeenCalledWith(
@@ -275,7 +275,7 @@ describe("PATCH /accounts/:accountId/arcs/:id — followupAt handling", () => {
 
     expect(res.status).toBe(200);
     expect(arcDb.updateArc).toHaveBeenCalledWith(
-      TEST_ACCOUNT_ID, ARC_ID, "archived", arc.lastSignalAt, {},
+      TEST_ACCOUNT_ID, ARC_ID, "archived", arc.lastSignalAt, { followupAt: futureDate },
     );
     expect(schedulerClient.createFollowup).toHaveBeenCalledWith(
       expect.objectContaining({

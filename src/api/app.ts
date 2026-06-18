@@ -507,6 +507,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     const fields: UpdateArcFields = {};
     if (body.urgency !== undefined) fields.urgency = body.urgency;
     if (body.labels !== undefined) fields.labels = body.labels;
+    if (body.followupAt !== undefined) fields.followupAt = body.followupAt;
     const status = body.status ?? arc.status;
     const lastSignalAt = body.lastSignalAt ?? arc.lastSignalAt;
 
