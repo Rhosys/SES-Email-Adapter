@@ -19,7 +19,7 @@ import type { ArcDatabase, UpdateArcFields } from "../database/arc-database.js";
 import type { AccountDatabase } from "../database/account-database.js";
 import type { ProcessingDatabase } from "../database/processing-database.js";
 import type { S3RetentionService } from "../embedding/s3-retention-service.js";
-import { getRetentionForPlan, retentionDurationToSeconds } from "../embedding/retention-tier.js";
+import { getRetentionForPlan } from "../embedding/retention-tier.js";
 import type { BillingPlan } from "../embedding/retention-tier.js";
 import { resolveRetention, retentionToS3Tag, durationToSeconds } from "./retention.js";
 import type { RetentionDuration } from "./retention.js";
@@ -1458,22 +1458,14 @@ export class SignalProcessor {
 
       const { s3Key: updatedS3Key } = retentionApplyResult.value;
 
-      // Persist retention metadata on the signal record
-      const retentionUpdate: { retentionDuration?: RetentionDuration; s3Key?: string } = {
-        retentionDuration: retention.retentionDuration as RetentionDuration,
-      };
+      // Persist updated s3Key if copy-to-saved changed it
       if (updatedS3Key !== signal.data.s3Key) {
-        retentionUpdate.s3Key = updatedS3Key;
-      }
-      const retentionSaveResult = await this.arcDb.updateSignalRetention(signal.accountId, signal.signalLookupId, retentionUpdate);
-      if (retentionSaveResult.isErr()) {
-        this.logger.warn("Failed to persist retention metadata on signal record. The DynamoDB update returned an error. The S3 retention is applied but the signal record won't reflect the retention duration.", { code: "processor.retention_metadata_save_failed", accountId: signal.accountId, error: retentionSaveResult.error });
+        const retentionSaveResult = await this.arcDb.updateSignalRetention(signal.accountId, signal.signalLookupId, { s3Key: updatedS3Key });
+        if (retentionSaveResult.isErr()) {
+          this.logger.warn("Failed to persist updated s3Key on signal record. The DynamoDB update returned an error. The S3 retention is applied but the signal record won't reflect the new key.", { code: "processor.retention_metadata_save_failed", accountId: signal.accountId, error: retentionSaveResult.error });
+        }
       }
 
-      // Set TTL on the arc based on retentionDuration
-      const ttlSeconds = retentionDurationToSeconds(retention.retentionDuration);
-      const arcTtl = Math.floor(Date.now() / 1000) + ttlSeconds;
-      arc.ttl = arcTtl;
       this.logger.trackPoint("s3_retention_complete");
     } catch (e) {
       this.logger.warn("S3 retention threw an unexpected error. The signal will use the default lifecycle rule. Processing continues unaffected.", { code: "processor.s3_retention_unexpected", accountId: signal.accountId, error: e });

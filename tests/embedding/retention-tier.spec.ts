@@ -209,11 +209,11 @@ describe("isWithinPlanLimit", () => {
 // ---------------------------------------------------------------------------
 
 describe("Tier requests above plan max are rejected", () => {
-  const ALL_PLANS: BillingPlan[] = ["Trial", "Free", "Beta", "Paid", "Lifetime", "Premium", "Internal"];
+  const ALL_PLANS: BillingPlan[] = ["Trial", "Free", "Beta", "Paid", "Lifetime", "Premium", "Internal", "Enterprise"];
   const ALL_DURATIONS: RetentionDuration[] = ["P1Y", "P5Y", "P1000Y"];
 
   const planMaxMap: Record<BillingPlan, RetentionDuration> = {
-    Trial: "P1Y", Free: "P1Y", Beta: "P1Y", Paid: "P5Y", Lifetime: "P5Y", Premium: "P1000Y", Internal: "P1000Y",
+    Trial: "P1Y", Free: "P1Y", Beta: "P1Y", Paid: "P5Y", Lifetime: "P5Y", Premium: "P1000Y", Internal: "P1000Y", Enterprise: "P1000Y",
   };
 
   const cases = ALL_PLANS.flatMap((plan) =>
@@ -230,7 +230,7 @@ describe("Tier requests above plan max are rejected", () => {
 });
 
 describe("Determinism: getRetentionForPlan is pure", () => {
-  const ALL_PLANS: BillingPlan[] = ["Trial", "Free", "Beta", "Paid", "Lifetime", "Premium", "Internal"];
+  const ALL_PLANS: BillingPlan[] = ["Trial", "Free", "Beta", "Paid", "Lifetime", "Premium", "Internal", "Enterprise"];
 
   it.each(ALL_PLANS.map((plan) => ({ plan })))("plan=$plan returns same result on repeated calls", ({ plan }) => {
     expect(JSON.stringify(getRetentionForPlan(plan))).toBe(JSON.stringify(getRetentionForPlan(plan)));
@@ -238,7 +238,7 @@ describe("Determinism: getRetentionForPlan is pure", () => {
 });
 
 describe("Consistency: getUserDisplayedRetention matches getRetentionForPlan", () => {
-  const ALL_PLANS: BillingPlan[] = ["Trial", "Free", "Beta", "Paid", "Lifetime", "Premium", "Internal"];
+  const ALL_PLANS: BillingPlan[] = ["Trial", "Free", "Beta", "Paid", "Lifetime", "Premium", "Internal", "Enterprise"];
 
   it.each(ALL_PLANS.map((plan) => ({ plan })))("plan=$plan produces valid display string", ({ plan }) => {
     const retention = getRetentionForPlan(plan);

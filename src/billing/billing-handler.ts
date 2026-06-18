@@ -11,6 +11,7 @@ export class BillingHandler {
     Lifetime: new Set(["webhook"]),
     Premium: new Set(["webhook"]),
     Internal: new Set(["webhook"]),
+    Enterprise: new Set(["webhook"]),
   };
 
   isFeatureEnabled(accountPlan: BillingPlan, feature: Feature): boolean {
