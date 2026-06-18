@@ -1,7 +1,7 @@
 import { getDomain } from "tldts";
 import type { Workflow, WorkflowData, UnknownSenderPolicy, SystemLabel, AliasSender, AuthData } from "../types/index.js";
 
-export const DEFAULT_SPAM_SCORE_THRESHOLD = 0.9;
+export const DEFAULT_SPAM_SCORE_THRESHOLD = 9;
 
 // Extract eTLD+1 from an email address or domain string
 export function getETLD1(emailOrDomain: string): string {
@@ -30,7 +30,7 @@ export function assignSystemLabels(ctx: SystemLabelContext): SystemLabel[] {
 
   labels.push(`system:workflow:${ctx.workflow}` as SystemLabel);
 
-  if (ctx.spamScore >= ctx.spamScoreThreshold) labels.push("system:spam:high");
+  if (ctx.spamScore >= ctx.spamScoreThreshold / 10) labels.push("system:spam:high");
   else if (ctx.spamScore >= 0.4) labels.push("system:spam:medium");
 
   const senderTrusted =

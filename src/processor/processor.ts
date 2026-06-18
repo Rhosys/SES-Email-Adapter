@@ -1130,7 +1130,7 @@ export class SignalProcessor {
       const saveResult = await this.arcDb.saveSignal(blockedSignal);
       if (saveResult.isErr()) return err(saveResult.error);
       this.logger.track("Blocked email — sender explicitly blocked for this alias.", { code: "processor.sender_block", accountId, sesMessageId, recipientAddress, senderETLD1, policy: blockStatus });
-      const repResult = await this.processingDb.updateGlobalReputation(senderETLD1, { wasSpam: classificationOutput.spamScore >= spamScoreThreshold, wasBlocked: true });
+      const repResult = await this.processingDb.updateGlobalReputation(senderETLD1, { wasSpam: classificationOutput.spamScore >= spamScoreThreshold / 10, wasBlocked: true });
       if (repResult.isErr()) {
         this.logger.warn("Failed to update global sender reputation after signal processing. The DynamoDB update returned an error. Reputation data may be stale for this domain.", { code: "processor.reputation_update_failed", accountId, error: repResult.error });
       }
@@ -1212,7 +1212,7 @@ export class SignalProcessor {
       const saveResult = await this.arcDb.saveSignal({ ...blockSignal, data: { ...blockSignal.data, matchedRules } });
       if (saveResult.isErr()) return err(saveResult.error);
       this.logger.track("Blocked email — rule matched with block disposition.", { code: "processor.rule_block", accountId, sesMessageId, recipientAddress, disposition: outcome.blockDisposition, matchedRules: matchedRules.map(r => r.ruleId) });
-      const repResult = await this.processingDb.updateGlobalReputation(senderETLD1, { wasSpam: classificationOutput.spamScore >= spamScoreThreshold, wasBlocked: true });
+      const repResult = await this.processingDb.updateGlobalReputation(senderETLD1, { wasSpam: classificationOutput.spamScore >= spamScoreThreshold / 10, wasBlocked: true });
       if (repResult.isErr()) {
         this.logger.warn("Failed to update global sender reputation after signal processing. The DynamoDB update returned an error. Reputation data may be stale for this domain.", { code: "processor.reputation_update_failed", accountId, error: repResult.error });
       }
@@ -1234,7 +1234,7 @@ export class SignalProcessor {
       const saveResult = await this.arcDb.saveSignal(quarantinedSignal);
       if (saveResult.isErr()) return err(saveResult.error);
       this.logger.track("Quarantined email — rule or sender filter matched.", { code: "processor.quarantine", accountId, sesMessageId, recipientAddress, status: quarantineStatus, matchedRules: matchedRules.map(r => r.ruleId) });
-      const repResult = await this.processingDb.updateGlobalReputation(senderETLD1, { wasSpam: classificationOutput.spamScore >= spamScoreThreshold, wasBlocked: true });
+      const repResult = await this.processingDb.updateGlobalReputation(senderETLD1, { wasSpam: classificationOutput.spamScore >= spamScoreThreshold / 10, wasBlocked: true });
       if (repResult.isErr()) {
         this.logger.warn("Failed to update global sender reputation after signal processing. The DynamoDB update returned an error. Reputation data may be stale for this domain.", { code: "processor.reputation_update_failed", accountId, error: repResult.error });
       }
@@ -1356,7 +1356,7 @@ export class SignalProcessor {
     // Side-effects (forward, auto-reply, auto-draft, notify) are handled by processSideEffect via SQS dispatch.
 
     const finalRepResult = await this.processingDb.updateGlobalReputation(senderETLD1, {
-      wasSpam: classificationOutput.spamScore >= spamScoreThreshold,
+      wasSpam: classificationOutput.spamScore >= spamScoreThreshold / 10,
       wasBlocked: false,
     });
     if (finalRepResult.isErr()) {

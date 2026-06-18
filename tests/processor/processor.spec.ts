@@ -1631,7 +1631,7 @@ describe("SignalProcessor", () => {
         ...DEFAULT_CTX,
         aliasConfig: makeAlias({
           unknownSenderPolicy: "quarantine_visible",
-          spamScoreThreshold: 0.5,
+          spamScoreThreshold: 5,
         }),
       })));
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok({
@@ -1650,7 +1650,7 @@ describe("SignalProcessor", () => {
       vi.mocked(accountDb.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok({
         ...DEFAULT_CTX,
         aliasConfig: makeAlias({ unknownSenderPolicy: "quarantine_visible" }),
-        filtering: { defaultUnknownSenderPolicy: "quarantine_visible", spamScoreThreshold: 0.6 },
+        filtering: { defaultUnknownSenderPolicy: "quarantine_visible", spamScoreThreshold: 6 },
       })));
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok({
         ...validClassification,

@@ -296,7 +296,7 @@ export interface Alias {
   domain: string;               // Full domain, e.g. "acme.com"
   alias: string;                // Local part before @, e.g. "me"
   unknownSenderPolicy: UnknownSenderPolicy;
-  // Spam score at which a signal is treated as spam (0–1). Overrides account default when set.
+  // Spam score threshold (1–10 integer). Overrides account default when set.
   spamScoreThreshold?: number;
   // eTLD+1 of the site this alias was created for (set by the extension on alias generation)
   createdForOrigin?: string;
@@ -347,7 +347,7 @@ export interface WsConnection {
 // Account-level filtering defaults
 export interface AccountFilteringConfig {
   defaultUnknownSenderPolicy: UnknownSenderPolicy;
-  // Spam score at which a signal is treated as spam (0–1). Default: 0.9.
+  // Spam score threshold (1–10 integer). Default: 9.
   // Per-address config can override this. Controls both filter blocking and notification suppression.
   spamScoreThreshold?: number;
 }
