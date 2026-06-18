@@ -72,11 +72,11 @@ describe("resolveRetention", () => {
     )).toBe("P2Y");
   });
 
-  it("returns default P1Y when nothing is configured", () => {
-    expect(resolveRetention({}, null)).toBe("P1Y");
+  it("returns default P3M when nothing is configured", () => {
+    expect(resolveRetention({}, null)).toBe("P3M");
   });
 
-  it("returns default P1Y when account and alias have no retention", () => {
-    expect(resolveRetention({}, {})).toBe("P1Y");
+  it("returns default P3M when account and alias have no retention", () => {
+    expect(resolveRetention({}, {})).toBe("P3M");
   });
 });

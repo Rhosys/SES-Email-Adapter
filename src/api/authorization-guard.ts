@@ -45,6 +45,11 @@ export function authorizationGuard(logger?: Logger): MiddlewareHandler {
       return;
     }
 
+    // Exception 4: Account list and creation — authentication alone is sufficient
+    if (path === "/accounts" && (method === "GET" || method === "POST")) {
+      return;
+    }
+
     // No authorization verified and not an exception — a route is missing authorize() middleware
     logger?.critical("Authorization guard fired — a route is missing the authorize() middleware. This request was rejected but the route must be fixed.", {
       code: "authorization_guard.missing_middleware",

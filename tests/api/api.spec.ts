@@ -1739,4 +1739,16 @@ describe("API", () => {
       expect(accountDb.updateTemplate).toHaveBeenCalledOnce();
     });
   });
+
+  // -------------------------------------------------------------------------
+  // POST /reindex (admin)
+  // -------------------------------------------------------------------------
+
+  describe("POST /reindex", () => {
+    it("returns 403 when user lacks accounts:write permission", async () => {
+      vi.mocked(access.checkAccess).mockRejectedValueOnce(Object.assign(new Error("Forbidden"), { status: 403 }));
+      const res = await req(app, "POST", "/reindex", { body: { targetRegistryId: "primary" } });
+      expect(res.status).toBe(403);
+    });
+  });
 });

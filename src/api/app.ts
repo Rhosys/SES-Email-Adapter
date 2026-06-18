@@ -269,8 +269,8 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     await next();
   });
 
-  // Authorization guard — safety net for forgotten authorize() calls on account-scoped routes
-  app.use("/accounts/:accountId/*", authorizationGuard(logger));
+  // Authorization guard — safety net for forgotten authorize() calls on any route
+  app.use("*", authorizationGuard(logger));
 
   // Per-route authorization middleware factory
   const authorize = access ? createAuthorize(access, logger) : null;
@@ -2268,39 +2268,32 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
   // Reindex jobs (admin)
   // ---------------------------------------------------------------------------
 
-  if (jobDispatcher) {
-    const MIN_SEGMENT_COUNT = 1;
-    const MAX_SEGMENT_COUNT = 256;
-
-    app.post("/reindex", async (c) => {
-      let body: Record<string, unknown> | null;
-      try {
-        body = await c.req.json<Record<string, unknown>>();
-      } catch {
-        body = null;
-      }
-      if (!body || typeof body !== "object" || Array.isArray(body)) {
-        return err(c, 400, "Request body must be a JSON object");
-      }
-
-      const { targetRegistryId, segmentCount } = body;
-      if (!targetRegistryId || typeof targetRegistryId !== "string") {
-        return err(c, 400, "targetRegistryId is required and must be a string");
-      }
-      if (segmentCount !== undefined) {
-        if (typeof segmentCount !== "number" || !Number.isInteger(segmentCount)) {
-          return err(c, 400, "segmentCount must be an integer");
-        }
-        if (segmentCount < MIN_SEGMENT_COUNT || segmentCount > MAX_SEGMENT_COUNT) {
-          return err(c, 400, `segmentCount must be between ${MIN_SEGMENT_COUNT} and ${MAX_SEGMENT_COUNT}`);
-        }
-      }
-
-      const result = await jobDispatcher.dispatch(targetRegistryId, segmentCount as number | undefined);
-      if (result.isErr()) return err(c, 404, `Cluster "${targetRegistryId}" not found`);
-      return c.json(result.value, 202);
-    });
-  }
+  app.openapi(route({
+    method: "post",
+    path: "/reindex",
+    tags: ["Admin"],
+    request: {
+      body: { content: { "application/json": { schema: z.object({
+        targetRegistryId: z.string(),
+        segmentCount: z.number().int().min(1).max(256).optional(),
+      }) } } },
+    },
+    middleware: [authz("accounts:write", "accounts")] as const,
+    responses: {
+      202: { content: { "application/json": { schema: z.object({
+        jobId: z.string(),
+        targetRegistryId: z.string(),
+        modelId: z.string(),
+        segmentCount: z.number(),
+        startedAt: z.string(),
+      }) } }, description: "Reindex job dispatched" },
+    },
+  }), async (c) => {
+    const body = c.req.valid("json");
+    const result = await jobDispatcher.dispatch(body.targetRegistryId, body.segmentCount);
+    if (result.isErr()) return err(c, 404, "Cluster not found");
+    return c.json(result.value, 202);
+  });
 
   return app;
 }
