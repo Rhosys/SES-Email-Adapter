@@ -167,7 +167,7 @@ export type CreateAliasRequest = z.infer<typeof CreateAliasRequest>;
 export const UpdateAliasRequest = z.object({
   newAddress: lowerEmail.optional(),
   unknownSenderPolicy: UnknownSenderPolicy.optional(),
-  spamScoreThreshold: z.number().min(0).max(1).optional(),
+  spamScoreThreshold: z.number().int().min(1).max(10).optional(),
   createdForOrigin: z.string().optional(),
 });
 export type UpdateAliasRequest = z.infer<typeof UpdateAliasRequest>;
@@ -231,7 +231,7 @@ const NotificationSettingsSchema = z.object({
 
 const AccountFilteringConfigSchema = z.object({
   defaultUnknownSenderPolicy: UnknownSenderPolicy.optional(),
-  spamScoreThreshold: z.number().min(0).max(1).optional(),
+  spamScoreThreshold: z.number().int().min(1).max(10).optional(),
 }).passthrough();
 
 const AccountOnboardingSchema = z.object({

@@ -991,13 +991,13 @@ describe("API", () => {
 
     it("updates account-level spamScoreThreshold in filtering config", async () => {
       const res = await req(app, "PATCH", `${A}`, {
-        body: { filtering: { defaultFilterMode: "quarantine_visible", spamScoreThreshold: 0.75 } },
+        body: { filtering: { defaultFilterMode: "quarantine_visible", spamScoreThreshold: 7 } },
       });
       expect(res.status).toBe(200);
       expect(accountDb.updateAccount).toHaveBeenCalledWith(
         TEST_ACCOUNT_ID,
         expect.objectContaining({
-          filtering: expect.objectContaining({ spamScoreThreshold: 0.75 }),
+          filtering: expect.objectContaining({ spamScoreThreshold: 7 }),
         }),
       );
     });
@@ -1195,10 +1195,10 @@ describe("API", () => {
 
     it("stores spamScoreThreshold when included in the request body", async () => {
       await req(app, "PATCH", `${A}/aliases/me%40mydomain.com`, {
-        body: { unknownSenderPolicy: "block_hidden", spamScoreThreshold: 0.7 },
+        body: { unknownSenderPolicy: "block_hidden", spamScoreThreshold: 7 },
       });
       const saved = vi.mocked(accountDb.upsertAlias).mock.calls[0]![0] as Alias;
-      expect(saved.spamScoreThreshold).toBe(0.7);
+      expect(saved.spamScoreThreshold).toBe(7);
     });
 
     it("does not set spamScoreThreshold when absent from request body", async () => {
