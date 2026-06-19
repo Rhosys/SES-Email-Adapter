@@ -180,6 +180,11 @@ export const CreateSenderRequest = z.object({
 });
 export type CreateSenderRequest = z.infer<typeof CreateSenderRequest>;
 
+export const UpdateSenderRequest = z.object({
+  policy: z.enum(["allow", "block_hidden", "block_reject", "violate_report"]),
+});
+export type UpdateSenderRequest = z.infer<typeof UpdateSenderRequest>;
+
 // ---- Email Templates ----
 
 export const TemplateFunctionSchema = z.object({
