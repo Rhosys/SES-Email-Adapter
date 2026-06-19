@@ -56,7 +56,7 @@ import {
   UpdateAccountRequest,
   CreateForwardingAddressRequest, VerifyForwardingAddressRequest,
   InviteUserRequest, UpdateUserRequest,
-  CreateSenderRequest, CreateTemplateRequest, ReplaceTemplateRequest, UpdateTemplateRequest,
+  CreateSenderRequest, UpdateSenderRequest, CreateTemplateRequest, ReplaceTemplateRequest, UpdateTemplateRequest,
   CreateDraftSignalRequest, ReplaceDraftSignalRequest,
   RsvpRequest,
 } from "./requests.js";
@@ -1947,14 +1947,46 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     tags: ["Alias Senders"],
     request: { params: z.object({ accountId: z.string(), address: z.string() }) },
     middleware: [authz("aliases:write", c => `accounts/${c.req.param("accountId")!}/aliases/${c.req.param("address")!}/senders`)] as const,
-    responses: { 201: { description: "Sender added" } },
+    responses: { 201: { content: { "application/json": { schema: AliasSenderSchema } }, description: "Sender created" } },
   }), async (c) => {
     const accountId = c.req.param("accountId")!;
     const address = decodeURIComponent(c.req.param("address")!).toLowerCase();
     const body = await zParse(CreateSenderRequest, c.req.raw);
+    const existingResult = await accountDb.getSender(accountId, address, body.domain);
+    if (existingResult.isErr()) return err(c, 500, "Internal Server Error");
+    if (existingResult.value) {
+      if (existingResult.value.policy === body.policy) {
+        return c.json(toApiAliasSender(existingResult.value), 201);
+      }
+      return err(c, 409, "Sender already exists with a different policy", "SENDER_EXISTS");
+    }
     const saveResult = await accountDb.saveSender(accountId, address, body.domain, body.policy);
     if (saveResult.isErr()) return err(c, 500, "Internal Server Error");
-    return new Response(null, { status: 201 });
+    const createdResult = await accountDb.getSender(accountId, address, body.domain);
+    if (createdResult.isErr() || !createdResult.value) return err(c, 500, "Internal Server Error");
+    return c.json(toApiAliasSender(createdResult.value), 201);
+  });
+
+  app.openapi(route({
+    method: "put",
+    path: "/accounts/{accountId}/aliases/{address}/senders/{domain}",
+    tags: ["Alias Senders"],
+    request: { params: z.object({ accountId: z.string(), address: z.string(), domain: z.string() }) },
+    middleware: [authz("aliases:write", c => `accounts/${c.req.param("accountId")!}/aliases/${c.req.param("address")!}/senders/${c.req.param("domain")!}`)] as const,
+    responses: { 200: { content: { "application/json": { schema: AliasSenderSchema } }, description: "Sender updated" } },
+  }), async (c) => {
+    const accountId = c.req.param("accountId")!;
+    const address = decodeURIComponent(c.req.param("address")!).toLowerCase();
+    const senderDomain = decodeURIComponent(c.req.param("domain")!).toLowerCase();
+    const body = await zParse(UpdateSenderRequest, c.req.raw);
+    const existingResult = await accountDb.getSender(accountId, address, senderDomain);
+    if (existingResult.isErr()) return err(c, 500, "Internal Server Error");
+    if (!existingResult.value) return err(c, 404, "Sender not found", "SENDER_NOT_FOUND");
+    const saveResult = await accountDb.saveSender(accountId, address, senderDomain, body.policy);
+    if (saveResult.isErr()) return err(c, 500, "Internal Server Error");
+    const updatedResult = await accountDb.getSender(accountId, address, senderDomain);
+    if (updatedResult.isErr() || !updatedResult.value) return err(c, 500, "Internal Server Error");
+    return c.json(toApiAliasSender(updatedResult.value), 200);
   });
 
   app.openapi(route({
