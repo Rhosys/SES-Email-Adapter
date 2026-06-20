@@ -187,16 +187,18 @@ export function buildMimeEmbedText(input: EmbedTextInput): string {
 }
 
 /**
- * Builds embed text from classification output (sequential pipeline).
+ * Builds embed text from classification output.
  *
- * Format: "{workflow}\n{summary}\n{key1}={value1}\n{key2}={value2}..."
- * Only non-null workflowData fields are included (excluding the `workflow` discriminator).
- * Compact, deterministic, free of attacker-controlled content.
+ * Line order: senderDomain, workflow, summary, labels (comma-joined or empty string),
+ * then flattened workflowData key=value pairs (excluding `workflow` discriminator, skipping nulls).
+ * spamScore is intentionally excluded.
  */
-export function buildEmbedText(classification: ClassificationOutput): string {
+export function buildEmbedText(senderDomain: string, classification: ClassificationOutput): string {
   const lines: string[] = [
+    senderDomain,
     classification.workflow,
     classification.summary,
+    classification.labels.join(","),
   ];
 
   const data = classification.workflowData;
