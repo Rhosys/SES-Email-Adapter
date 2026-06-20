@@ -3,7 +3,7 @@ import { ok } from "../../src/errors.js";
 import type { ArcDatabase } from "../../src/database/arc-database.js";
 import type { AccountDatabase } from "../../src/database/account-database.js";
 import type { ProcessingDatabase } from "../../src/database/processing-database.js";
-import type { Alias } from "../../src/types/index.js";
+import type { Alias, UnknownSenderPolicy } from "../../src/types/index.js";
 
 // ---------------------------------------------------------------------------
 // Shared mock factories for processor tests.
@@ -33,6 +33,21 @@ export function makeArcDbMock(): ArcDatabase {
  * methods used by the processor.
  */
 export function makeAccountDbMock(): AccountDatabase {
+  const saveAlias = vi.fn().mockImplementation((a: Alias) => Promise.resolve(ok(a)));
+  const ensureAlias = vi.fn().mockImplementation((accountId: string, address: string, defaultUnknownSenderPolicy: UnknownSenderPolicy, existing?: Alias | null) => {
+    if (existing) return Promise.resolve(ok(existing));
+    const now = new Date().toISOString();
+    return saveAlias({
+      id: address,
+      accountId,
+      address,
+      domain: address.split("@")[1]!,
+      alias: address.split("@")[0]!,
+      unknownSenderPolicy: defaultUnknownSenderPolicy,
+      createdAt: now,
+      updatedAt: now,
+    });
+  });
   return {
     listEnabledRules: vi.fn().mockReturnValue(Promise.resolve(ok([]))),
     getProcessorAccountContext: vi.fn().mockReturnValue(Promise.resolve(ok({
@@ -43,7 +58,8 @@ export function makeAccountDbMock(): AccountDatabase {
       userEmails: [],
       billingPlan: "Paid" as const,
     }))),
-    saveAlias: vi.fn().mockImplementation((a: Alias) => Promise.resolve(ok(a))),
+    saveAlias,
+    ensureAlias,
     getSender: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
     saveSender: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     getTemplate: vi.fn().mockReturnValue(Promise.resolve(ok(null))),

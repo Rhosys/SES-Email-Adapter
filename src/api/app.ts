@@ -179,26 +179,12 @@ function withAttachmentUrls<T extends AnySignal>(signal: T, cdnBase: string): T 
 // Mirrors processor.ts's autoApprove — a sender disposition recorded for an address
 // implies that address is a recognised alias, so the Alias record must exist alongside it.
 async function ensureAliasExists(accountDb: AccountDatabase, accountId: string, address: string): Promise<Result<void, DbError>> {
-  const existingResult = await accountDb.getAlias(accountId, address);
-  if (existingResult.isErr()) return neverthrowErr(existingResult.error);
-  if (existingResult.value) return neverthrowOk(undefined);
-
   const filteringResult = await accountDb.getAccountFilteringConfig(accountId);
   if (filteringResult.isErr()) return neverthrowErr(filteringResult.error);
   const defaultUnknownSenderPolicy = filteringResult.value?.defaultUnknownSenderPolicy ?? "quarantine_visible";
 
-  const now = DateTime.utc().toISO()!;
-  const saveResult = await accountDb.saveAlias({
-    id: address,
-    accountId,
-    address,
-    domain: address.split("@")[1]!,
-    alias: address.split("@")[0]!,
-    unknownSenderPolicy: defaultUnknownSenderPolicy,
-    createdAt: now,
-    updatedAt: now,
-  });
-  if (saveResult.isErr()) return neverthrowErr(saveResult.error);
+  const aliasResult = await accountDb.ensureAlias(accountId, address, defaultUnknownSenderPolicy);
+  if (aliasResult.isErr()) return neverthrowErr(aliasResult.error);
   return neverthrowOk(undefined);
 }
 

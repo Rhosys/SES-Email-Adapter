@@ -121,6 +121,7 @@ function makeAccountDb() {
     getAlias: vi.fn().mockResolvedValue(ok(null)),
     createAlias: vi.fn().mockResolvedValue(ok({} as never)),
     saveAlias: vi.fn().mockResolvedValue(ok({} as never)),
+    ensureAlias: vi.fn().mockResolvedValue(ok({} as never)),
     upsertAlias: vi.fn().mockResolvedValue(ok({} as never)),
     deleteAlias: vi.fn().mockResolvedValue(ok(undefined)),
     getAccountFilteringConfig: vi.fn().mockResolvedValue(ok(null)),
