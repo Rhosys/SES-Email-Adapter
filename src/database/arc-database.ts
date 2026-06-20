@@ -222,7 +222,7 @@ export class ArcDatabase {
     }
   }
 
-  async updateSignalStatus(accountId: string, signalLookupId: string, status: "block_hidden" | "block_reject" | "violate_report"): Promise<Result<Signal, DbError>> {
+  async updateSignalStatus(accountId: string, signalLookupId: string, status: "block_hidden" | "block_reject" | "report_violation"): Promise<Result<Signal, DbError>> {
     try {
       const result = await dynamo.send(new UpdateCommand({
         TableName: SIGNALS_TABLE,

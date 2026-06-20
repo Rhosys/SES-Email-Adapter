@@ -8,7 +8,7 @@ describe("statusToCategory", () => {
     { status: "active", expected: "allowed" },
     { status: "block_hidden", expected: "blocked" },
     { status: "block_reject", expected: "blocked" },
-    { status: "violate_report", expected: "violationReport" },
+    { status: "report_violation", expected: "violationReport" },
     { status: "quarantine_visible", expected: "quarantined" },
     { status: "quarantine_hidden", expected: "quarantined" },
   ] as const)("maps $status → $expected", ({ status, expected }) => {

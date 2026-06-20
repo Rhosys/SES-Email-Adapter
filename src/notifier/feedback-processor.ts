@@ -95,9 +95,13 @@ export class FeedbackProcessor {
         const accountId = feedback.mail.tags?.[TAG_ACCOUNT_ID];
         if (accountId && feedback.mail.tags?.[TAG_TYPE] === "forward") {
           for (const r of feedback.bounce!.bouncedRecipients) {
-            const disableResult = await this.accountDb.disableForwardActions(accountId, r.emailAddress);
+            const disableResult = await this.accountDb.disableRulesForwardingTo(accountId, r.emailAddress);
             if (disableResult.isErr()) {
-              this.logger.track("Failed to disable forward actions after permanent bounce. The DynamoDB update for the forward rule returned an error. Emails may continue to be forwarded to the bouncing address.", { code: "feedback.disable_forward_failed", accountId, address: r.emailAddress, error: disableResult.error });
+              this.logger.track("Failed to disable rules forwarding to bounced address. The DynamoDB update returned an error. Emails may continue to be forwarded to the bouncing address.", { code: "feedback.disable_forward_failed", accountId, address: r.emailAddress, error: disableResult.error });
+            } else {
+              for (const ruleId of disableResult.value) {
+                this.logger.track("Rule disabled due to permanent forward bounce", { code: "feedback.rule_disabled_on_bounce", accountId, ruleId, bouncedAddress: r.emailAddress });
+              }
             }
           }
         }

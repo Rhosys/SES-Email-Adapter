@@ -336,9 +336,9 @@ describe("FollowupHandler", () => {
       },
     );
 
-    it("violate_report status → discard without modification", async () => {
+    it("report_violation status → discard without modification", async () => {
       const { handler, arcDb, arcUpdater, signalDb, notifier } = setup();
-      arcDb.getArc.mockResolvedValue(ok(makeArc({ status: "violate_report" as ArcStatus })));
+      arcDb.getArc.mockResolvedValue(ok(makeArc({ status: "report_violation" as ArcStatus })));
       signalDb.getSignalById.mockResolvedValue(ok(makeSignal()));
 
       const result = await handler.process(MESSAGE);

@@ -453,26 +453,6 @@ describe("SignalProcessor", () => {
       expect(arc.status).toBe("active");
     });
 
-    it("skips disabled actions", async () => {
-      const rule: Rule = {
-        id: "rule-disabled",
-        accountId: TEST_ACCOUNT_ID,
-        name: "Disabled label rule",
-        condition: "true",
-        actions: [{ type: "assign_label", value: "important", disabled: true }],
-        status: "enabled",
-        priorityOrder: 0,
-        createdAt: "2024-01-01T00:00:00Z",
-        updatedAt: "2024-01-01T00:00:00Z",
-      };
-      vi.mocked(accountDb.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([rule])));
-
-      await processor.processRecord(makeMessage(), 1);
-
-      const arc = vi.mocked(arcDb.saveArc).mock.calls[0]![0] as Arc;
-      expect(arc.labels).not.toContain("important");
-    });
-
     it("collects forward addresses from matching rules but does not call forwarder when none configured", async () => {
       const rule: Rule = {
         id: "rule-fwd",

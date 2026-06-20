@@ -491,8 +491,8 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     if (!arc) return err(c, 404, "Arc not found", "ARC_NOT_FOUND");
     const body = await zParse(UpdateArcRequest, c.req.raw);
 
-    // violate_report: block the sender domain and delete the arc
-    if (body.status === "violate_report") {
+    // report_violation: block the sender domain and delete the arc
+    if (body.status === "report_violation") {
       const signalsResult = await arcDb.listSignals(accountId, arc.id, { limit: 1 });
       if (signalsResult.isErr()) return err(c, 500, "Internal Server Error");
       const signal = signalsResult.value.items[0];
@@ -500,10 +500,10 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
         const senderDomain = signal.data.from.address.includes("@") ? signal.data.from.address.split("@").pop()! : signal.data.from.address;
         const senderETLD1 = getDomain(senderDomain) ?? senderDomain;
         const recipientAddress = signal.data.recipientAddress;
-        const saveSenderResult = await accountDb.saveSender(accountId, recipientAddress, senderETLD1, "violate_report");
+        const saveSenderResult = await accountDb.saveSender(accountId, recipientAddress, senderETLD1, "report_violation");
         if (saveSenderResult.isErr()) return err(c, 500, "Internal Server Error");
-        logger.track("Arc reported as GDPR violation. Sender domain blocked with violate_report policy and arc deleted.", {
-          code: "api.arc.violate_report",
+        logger.track("Arc reported as GDPR violation. Sender domain blocked with report_violation policy and arc deleted.", {
+          code: "api.arc.report_violation",
           accountId,
           arcId: arc.id,
           senderDomain: senderETLD1,
@@ -511,7 +511,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
           fromAddress: signal.data.from.address,
         });
       }
-      // Persist as deleted — violate_report is the user intent, deleted is the arc state
+      // Persist as deleted — report_violation is the user intent, deleted is the arc state
       const updateResult = await arcDb.updateArc(accountId, arc.id, "deleted", arc.lastSignalAt, {});
       if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
       return c.json(toApiArc(updateResult.value), 200);
@@ -763,7 +763,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     // Determine if quarantine was caused by unknown sender (no status-changing rule fired)
     const wasQuarantinedByUnknownSender = !(signal.data.matchedRules ?? []).some(r => r.statusChange);
 
-    if (body.status === "block_hidden" || body.status === "block_reject" || body.status === "violate_report") {
+    if (body.status === "block_hidden" || body.status === "block_reject" || body.status === "report_violation") {
       const blockResult = await arcDb.updateSignalStatus(accountId, signal.signalLookupId, body.status);
       if (blockResult.isErr()) return err(c, 500, "Internal Server Error");
 

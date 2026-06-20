@@ -5,7 +5,7 @@ const STATUS_TO_CATEGORY: Record<Exclude<SignalStatus, "draft" | "pending_send" 
   active: "allowed",
   block_hidden: "blocked",
   block_reject: "blocked",
-  violate_report: "violationReport",
+  report_violation: "violationReport",
   quarantine_visible: "quarantined",
   quarantine_hidden: "quarantined",
 } satisfies Record<Exclude<SignalStatus, "draft" | "pending_send" | "sent">, StatsCategory>;

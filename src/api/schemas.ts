@@ -9,11 +9,11 @@ export const Workflow = z.enum([
   "content", "onboarding", "notice", "healthcare", "job", "support", "test",
 ]);
 
-export const ArcStatus = z.enum(["active", "archived", "deleted", "violate_report"]);
+export const ArcStatus = z.enum(["active", "archived", "deleted", "report_violation"]);
 export const ArcUrgency = z.enum(["critical", "high", "normal", "low", "silent"]);
 
 export const SignalStatus = z.enum([
-  "active", "block_hidden", "block_reject", "violate_report",
+  "active", "block_hidden", "block_reject", "report_violation",
   "quarantine_visible", "quarantine_hidden", "draft", "pending_send", "sent",
 ]);
 
@@ -28,10 +28,10 @@ export const SignalType = z.enum([
 
 export const UnknownSenderPolicy = z.enum([
   "allow_all", "quarantine_visible", "quarantine_hidden",
-  "block_hidden", "block_reject", "violate_report",
+  "block_hidden", "block_reject", "report_violation",
 ]);
 
-export const SenderPolicy = z.enum(["allow", "block_hidden", "block_reject", "violate_report"]);
+export const SenderPolicy = z.enum(["allow", "block_hidden", "block_reject", "report_violation"]);
 
 export const RuleActionType = z.enum([
   "assign_label", "assign_workflow", "archive", "forward",
@@ -562,7 +562,6 @@ export const Label = z.object({
 export const RuleAction = z.object({
   type: RuleActionType,
   value: z.string().optional(),
-  disabled: z.boolean().optional(),
 }).openapi("RuleAction");
 
 export const Rule = z.object({
