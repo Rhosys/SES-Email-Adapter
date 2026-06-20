@@ -27,7 +27,7 @@ vi.mock("../../../src/processor/calendar/hmac-secret.js", () => ({
 const SERVICE_DOMAIN = "platform.email.rhosys.cloud";
 
 // Valid IDs generated with the real algorithm from utils/id.ts
-const VALID_ARC_ID = generateId("arc-");
+const VALID_ARC_ID = generateId("thr-");
 const VALID_ACC_ID = generateAccountId();
 
 function makeLogger(): Logger {

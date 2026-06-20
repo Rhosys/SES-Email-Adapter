@@ -2,13 +2,13 @@ import { describe, it, expect } from "vitest";
 import { createHash } from "node:crypto";
 import { generateId, generateAccountId, validateAccountId } from "../../src/utils/id.js";
 
-const FLICKR_BASE58 = "123456789abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ";
-const BASE58_SET = new Set(FLICKR_BASE58);
+const BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+const BASE58_SET = new Set(BASE58_ALPHABET);
 
 describe("generateId", () => {
   describe("format validation", () => {
     it.each([
-      { prefix: "arc-", reason: "4-char prefix for arcs" },
+      { prefix: "thr-", reason: "4-char prefix for arcs (threads)" },
       { prefix: "view-", reason: "5-char prefix for views" },
       { prefix: "rule-", reason: "5-char prefix for rules" },
       { prefix: "tpl-", reason: "4-char prefix for templates" },
@@ -36,33 +36,35 @@ describe("generateId", () => {
 
   describe("uniqueness", () => {
     it("1000 IDs with the same prefix are all distinct", () => {
-      const ids = Array.from({ length: 1000 }, () => generateId("arc-"));
+      const ids = Array.from({ length: 1000 }, () => generateId("thr-"));
       const unique = new Set(ids);
       expect(unique.size).toBe(1000);
     });
   });
 
   describe("time ordering", () => {
-    it("base58 body of earlier ID is numerically less than later ID", async () => {
-      const first = generateId("arc-");
+    it("base58 body of earlier ID sorts before later ID under plain ASCII string comparison", async () => {
+      // The alphabet is ordered digits < uppercase < lowercase, matching ASCII byte
+      // order, so plain string comparison (the same comparison DynamoDB applies to
+      // sort keys) must agree with generation order without any custom comparator.
+      const first = generateId("thr-");
       await new Promise(resolve => setTimeout(resolve, 10));
-      const second = generateId("arc-");
+      const second = generateId("thr-");
 
       const firstBody = first.slice(4, 4 + 22);
       const secondBody = second.slice(4, 4 + 22);
 
-      // Compare using base58 alphabet ordering (not ASCII)
-      const FLICKR_BASE58_ALPHABET = "123456789abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ";
-      function base58Compare(a: string, b: string): number {
-        for (let i = 0; i < a.length; i++) {
-          const ai = FLICKR_BASE58_ALPHABET.indexOf(a[i]!);
-          const bi = FLICKR_BASE58_ALPHABET.indexOf(b[i]!);
-          if (ai !== bi) return ai - bi;
-        }
-        return 0;
-      }
+      expect(firstBody < secondBody).toBe(true);
+    });
 
-      expect(base58Compare(firstBody, secondBody)).toBeLessThan(0);
+    it("plain string sort of many IDs matches generation order", async () => {
+      const ids: string[] = [];
+      for (let i = 0; i < 50; i++) {
+        ids.push(generateId("sgn-"));
+        if (i % 5 === 0) await new Promise(resolve => setTimeout(resolve, 2));
+      }
+      const sorted = [...ids].sort();
+      expect(sorted).toEqual(ids);
     });
   });
 

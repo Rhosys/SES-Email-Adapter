@@ -47,7 +47,7 @@ vi.mock("../../../src/processor/calendar/hmac-secret.js", () => ({
 // ---------------------------------------------------------------------------
 
 const SERVICE_DOMAIN = "platform.email.rhosys.cloud";
-const VALID_ARC_ID = generateId("arc-");
+const VALID_ARC_ID = generateId("thr-");
 const VALID_ACC_ID = generateAccountId();
 const FORWARDING_ADDRESS = "user-real-calendar@gmail.com";
 const ALIAS_ADDRESS = "contact@alias.example.com";

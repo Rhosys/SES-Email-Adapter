@@ -1099,7 +1099,7 @@ export class SignalProcessor {
       this.logger.info("Existing arc matched.", { code: "processor.arc_matched", arcId: arc.id, matchMethod, accountId, sesMessageId });
     } else {
       arc = {
-        id: generateId("arc-"),
+        id: generateId("thr-"),
         accountId,
         ...(groupingKey ? { groupingKey } : {}),
         workflow: classificationOutput.workflow,
