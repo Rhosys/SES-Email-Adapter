@@ -133,7 +133,7 @@ export async function handleCalendarResponse(
   }
 
   // --- Step 3: Validate arcId checksum ---
-  if (!validateId(arcId, "arc-")) {
+  if (!validateId(arcId, "thr-")) {
     logger.warn("Calendar response handler: arcId checksum failed.", {
       code: "processor.calendar_response.checksum_failed",
       recipient,

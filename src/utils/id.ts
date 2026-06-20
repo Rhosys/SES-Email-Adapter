@@ -2,10 +2,15 @@ import { v7 as uuidv7 } from "uuid";
 import shortUuid from "short-uuid";
 import { createHash, randomBytes } from "node:crypto";
 
-const translator = shortUuid.createTranslator(shortUuid.constants.flickrBase58);
+// Digits < uppercase < lowercase, matching ASCII byte order, so that plain string
+// comparison (e.g. DynamoDB sort-key comparison) of the encoded body preserves the
+// chronological order encoded in UUIDv7's leading timestamp bits. The preset
+// `flickrBase58` alphabet orders lowercase before uppercase, which does NOT match
+// ASCII order and silently breaks time-sortability.
+const BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+const translator = shortUuid.createTranslator(BASE58_ALPHABET);
 
-const FLICKR_BASE58 = "123456789abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ";
-const BASE58_SET = new Set(FLICKR_BASE58);
+const BASE58_SET = new Set(BASE58_ALPHABET);
 
 export function generateId(prefix: string): string {
   const uuid = uuidv7();

@@ -797,7 +797,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
       arc = updateResult.value;
     } else {
       arc = {
-        id: generateId("arc-"),
+        id: generateId("thr-"),
         accountId,
         workflow: signal.data.workflow,
         labels: [],
