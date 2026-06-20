@@ -280,6 +280,17 @@ resource "aws_s3_bucket_lifecycle_configuration" "web" {
     filter {}
     abort_incomplete_multipart_upload { days_after_initiation = 7 }
   }
+
+  rule {
+    id     = "expire-pr-previews"
+    status = "Enabled"
+    filter {
+      prefix = "pr/"
+    }
+    expiration {
+      days = 30
+    }
+  }
 }
 
 # ---------------------------------------------------------------------------
