@@ -583,7 +583,7 @@ describe("Scenario: approving quarantined email triggers calendar forwarding", (
         recipientAddress: ALIAS_ADDRESS,
         workflow: "job",
         workflowData: { workflow: "job", isReply: false, sentiment: "neutral", requiresReply: false, jobType: "interview_request" },
-        spamScore: 0.01,
+        tags: [],
         summary: "Quarterly Planning",
         s3Key: "emails/quarantined-001",
       },

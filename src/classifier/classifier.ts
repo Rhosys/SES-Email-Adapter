@@ -6,6 +6,7 @@ import { WORKFLOWS } from "../types/index.js";
 import type { Logger } from "../logger.js";
 import { buildSystemPrompt, buildUserMessage } from "./prompt-builder.js";
 import { WORKFLOW_REGISTRY } from "./workflow-registry.js";
+import { SPAM_TAGS } from "./tags.js";
 
 export const CLASSIFICATION_MODEL_ID = "qwen.qwen3-32b-v1:0";
 
@@ -32,7 +33,7 @@ export interface ClassificationInput {
 export interface ClassificationOutput {
   workflow: Workflow;
   workflowData: WorkflowData;
-  spamScore: number;
+  tags: string[];
   summary: string;
   labels: string[];
 }
@@ -40,7 +41,8 @@ export interface ClassificationOutput {
 interface RawClassificationResponse {
   workflow: string;
   workflowData: Record<string, unknown>;
-  spamScore: number;
+  tags?: string[];
+  spamScore?: unknown;
   summary: string;
   labels: string[];
 }
@@ -143,8 +145,20 @@ export class SignalClassifier {
       return err(classificationError(`Unknown workflow: ${raw.workflow}`, jsonText));
     }
 
-    // Clamp spamScore to [0, 1]
-    const spamScore = Math.max(0, Math.min(1, raw.spamScore));
+    // Validate and filter tags to recognized vocabulary
+    const TAG_FORMAT = /^[a-z0-9][a-z0-9-]{0,38}[a-z0-9]$/;
+    const rawTags = Array.isArray(raw.tags) ? raw.tags : [];
+    const validTags: string[] = [];
+    for (const tag of rawTags) {
+      if (typeof tag !== "string") continue;
+      if (!TAG_FORMAT.test(tag) || tag.length < 2 || tag.length > 40) continue;
+      if ((SPAM_TAGS as readonly string[]).includes(tag)) {
+        validTags.push(tag);
+      } else {
+        this.logger.track("Classifier received unknown tag from LLM — potential vocabulary expansion candidate.", { code: "classifier.unknown_tag", tag, signalId: input.signalId, accountId: input.accountId });
+      }
+    }
+    const tags = validTags.slice(0, 10);
 
     // Filter labels to subset of allowedLabels
     const labels = Array.isArray(raw.labels)
@@ -154,7 +168,7 @@ export class SignalClassifier {
     return ok({
       workflow: raw.workflow as Workflow,
       workflowData: raw.workflowData as unknown as WorkflowData,
-      spamScore,
+      tags,
       summary: raw.summary,
       labels,
     });

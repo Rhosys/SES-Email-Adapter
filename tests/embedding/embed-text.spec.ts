@@ -280,7 +280,7 @@ describe("buildEmbedText (classification output)", () => {
       const classification: ClassificationOutput = {
         workflow: "payments",
         workflowData: { workflow: "payments", paymentType: "invoice", vendor: "Stripe", amount: "29.99", currency: "USD" } as unknown as ClassificationOutput["workflowData"],
-        spamScore: 0.0,
+        tags: [],
         summary: "Your Stripe invoice for June is ready",
         labels: ["system:workflow:payments", "invoice"],
       };
@@ -303,7 +303,7 @@ describe("buildEmbedText (classification output)", () => {
       const classification: ClassificationOutput = {
         workflow: "auth",
         workflowData: { workflow: "auth", authType: "otp", service: "GitHub" },
-        spamScore: 0.1,
+        tags: [],
         summary: "GitHub OTP code",
         labels: [],
       };
@@ -317,7 +317,7 @@ describe("buildEmbedText (classification output)", () => {
       const classification: ClassificationOutput = {
         workflow: "auth",
         workflowData: { workflow: "auth", authType: "otp", service: "Slack" },
-        spamScore: 0.0,
+        tags: [],
         summary: "Slack OTP",
         labels: ["action-needed", "system:workflow:auth"],
       };
@@ -330,7 +330,7 @@ describe("buildEmbedText (classification output)", () => {
       const classification: ClassificationOutput = {
         workflow: "package",
         workflowData: { workflow: "package", packageType: "shipping", retailer: "Amazon" },
-        spamScore: 0.0,
+        tags: [],
         summary: "Amazon package shipped",
         labels: [],
       };
@@ -345,7 +345,7 @@ describe("buildEmbedText (classification output)", () => {
       const classification: ClassificationOutput = {
         workflow: "package",
         workflowData: { workflow: "package", packageType: "shipping", retailer: "Amazon" },
-        spamScore: 0.0,
+        tags: [],
         summary: "Amazon package shipped",
         labels: [],
       };
@@ -360,7 +360,7 @@ describe("buildEmbedText (classification output)", () => {
       const classification: ClassificationOutput = {
         workflow: "auth",
         workflowData: { workflow: "auth", authType: "otp", service: "Slack", expiresInMinutes: 10 },
-        spamScore: 0.05,
+        tags: [],
         summary: "Slack OTP expiring in 10 minutes",
         labels: [],
       };
@@ -372,7 +372,7 @@ describe("buildEmbedText (classification output)", () => {
       const classification: ClassificationOutput = {
         workflow: "conversation",
         workflowData: { workflow: "conversation", sentiment: "urgent", requiresReply: true },
-        spamScore: 0.0,
+        tags: [],
         summary: "Urgent message requiring reply",
         labels: [],
       };
@@ -385,7 +385,7 @@ describe("buildEmbedText (classification output)", () => {
       const classification: ClassificationOutput = {
         workflow: "auth",
         workflowData: { workflow: "auth", authType: "otp", code: null as unknown as string, service: "GitHub", actionUrl: null as unknown as string },
-        spamScore: 0.1,
+        tags: [],
         summary: "GitHub OTP",
         labels: [],
       };
@@ -398,18 +398,18 @@ describe("buildEmbedText (classification output)", () => {
     });
   });
 
-  describe("spamScore excluded", () => {
-    it("does not include spamScore in the output", () => {
+  describe("tags excluded", () => {
+    it("does not include tags in the output", () => {
       const classification: ClassificationOutput = {
         workflow: "content",
         workflowData: { workflow: "content", contentType: "newsletter", publisher: "TechCrunch" } as unknown as ClassificationOutput["workflowData"],
-        spamScore: 0.3,
+        tags: ["phishing"],
         summary: "TechCrunch daily newsletter",
         labels: ["newsletter"],
       };
       const result = buildEmbedText("techcrunch.com", classification);
-      expect(result).not.toContain("0.3");
-      expect(result).not.toContain("spamScore");
+      expect(result).not.toContain("phishing");
+      expect(result).not.toContain("tags");
     });
   });
 
@@ -418,7 +418,7 @@ describe("buildEmbedText (classification output)", () => {
       const classification: ClassificationOutput = {
         workflow: "travel",
         workflowData: { workflow: "travel", travelType: "flight", carrier: "United", departureDate: "2025-03-15", flightNumber: "UA123" } as unknown as ClassificationOutput["workflowData"],
-        spamScore: 0.0,
+        tags: [],
         summary: "United flight UA123 on Mar 15",
         labels: ["travel"],
       };

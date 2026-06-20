@@ -191,7 +191,7 @@ export function buildMimeEmbedText(input: EmbedTextInput): string {
  *
  * Line order: senderDomain, workflow, summary, labels (comma-joined or empty string),
  * then flattened workflowData key=value pairs (excluding `workflow` discriminator, skipping nulls).
- * spamScore is intentionally excluded.
+ * tags are intentionally excluded from embedding text.
  */
 export function buildEmbedText(senderDomain: string, classification: ClassificationOutput): string {
   const lines: string[] = [

@@ -170,7 +170,7 @@ function buildProcessor(opts: {
     s3Client: { send: s3Send } as never,
     emailBucket: "test-bucket",
     contentBucket: "test-content-bucket",
-    classifier: { classify: vi.fn().mockResolvedValue(ok({ workflow: "conversation", workflowData: { workflow: "conversation", sentiment: "neutral", requiresReply: false }, spamScore: 0.05, summary: "A calendar event.", labels: [] })) },
+    classifier: { classify: vi.fn().mockResolvedValue(ok({ workflow: "conversation", workflowData: { workflow: "conversation", sentiment: "neutral", requiresReply: false }, tags: [], summary: "A calendar event.", labels: [] })) },
     embeddingGenerator: {
       generateForModel: vi.fn().mockResolvedValue(ok({ modelId: "amazon.titan-embed-text-v2:0", vector: [0.1], dimensions: 1024 })),
       generateForSecondaryClusters: vi.fn().mockResolvedValue([]),

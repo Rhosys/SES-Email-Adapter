@@ -121,7 +121,7 @@ describe("Feature: in-reply-to-arc-threading, Parallel arc matching tier selecti
     const output: ClassificationOutput = {
       workflow: "notice",
       workflowData: { workflow: "notice", noticeType: "service_notice", provider: "google.com" },
-      spamScore: 0.02,
+      tags: [],
       summary: "Auth code notice",
       labels: [],
     };
@@ -133,7 +133,7 @@ describe("Feature: in-reply-to-arc-threading, Parallel arc matching tier selecti
     const output: ClassificationOutput = {
       workflow: "conversation",
       workflowData: { workflow: "conversation", sentiment: "neutral", requiresReply: false },
-      spamScore: 0.05,
+      tags: [],
       summary: "A reply email",
       labels: [],
     };

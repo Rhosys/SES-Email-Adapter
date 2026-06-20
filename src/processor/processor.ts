@@ -25,7 +25,7 @@ import { resolveRetention, retentionToS3Tag, durationToSeconds } from "./retenti
 import type { RetentionDuration } from "./retention.js";
 import { generatePresignedGet, generatePresignedPost } from "./presign.js";
 import { getPrimaryArcMatcherRegistry, getActiveClusters } from "../embedding/cluster-registry.js";
-import { getETLD1, assignSystemLabels, DEFAULT_SPAM_SCORE_THRESHOLD } from "./filter.js";
+import { getETLD1, assignSystemLabels } from "./filter.js";
 import { statusToCategory } from "../database/stats-writer.js";
 import type { DraftSendDispatch } from "./draft-send-dispatcher.js";
 import { isReplyTargetSafe } from "./reply-target-validator.js";
@@ -548,7 +548,7 @@ export class SignalProcessor {
                 purpose: "template_function",
                 functionCode: fn.code,
                 executionContext: {
-                  signal: { id: signal.id, from: signal.data.from, subject: signal.data.subject, summary: signal.data.summary, spamScore: signal.data.spamScore, workflow: signal.data.workflow, recipientAddress: signal.data.recipientAddress, workflowData: signal.data.workflowData },
+                  signal: { id: signal.id, from: signal.data.from, subject: signal.data.subject, summary: signal.data.summary, workflow: signal.data.workflow, recipientAddress: signal.data.recipientAddress, workflowData: signal.data.workflowData },
                   arc: { id: arc.id, labels: arc.labels, ...(arc.urgency !== undefined ? { urgency: arc.urgency } : {}), summary: arc.summary, workflow: arc.workflow, status: arc.status },
                 },
               });
@@ -651,7 +651,7 @@ export class SignalProcessor {
               recipientAddress: signal.data.from.address,
               workflow: signal.data.workflow,
               workflowData: signal.data.workflowData,
-              spamScore: 0,
+              tags: [],
               summary: "",
               s3Key: "",
               ...(sendInitiatedAt ? { sendInitiatedAt } : {}),
@@ -803,7 +803,7 @@ export class SignalProcessor {
           headers: {},
           workflow: "notice",
           workflowData: { workflow: "notice", noticeType: "other", provider: "" } as const,
-          spamScore: 0,
+          tags: [],
           summary: "",
         },
       };
@@ -918,7 +918,7 @@ export class SignalProcessor {
           headers: parsed.headers,
           workflow: "notice",
           workflowData: { workflow: "notice", noticeType: "other", provider: "" } as const,
-          spamScore: 0,
+          tags: [],
           summary: "",
         },
         ...(ttl !== undefined ? { ttl } : {}),
@@ -964,7 +964,7 @@ export class SignalProcessor {
     let classificationOutput: ClassificationOutput;
     if (classification.isErr()) {
       this.logger.warn("Classification failed — proceeding with workflow:none fallback.", { code: "processor.classification_fallback", accountId, sesMessageId, error: classification.error });
-      classificationOutput = { workflow: "unspecified", workflowData: { workflow: "unspecified" }, spamScore: 0, summary: "", labels: [] };
+      classificationOutput = { workflow: "unspecified", workflowData: { workflow: "unspecified" }, tags: [], summary: "", labels: [] };
     } else {
       classificationOutput = classification.value;
     }
@@ -1011,11 +1011,6 @@ export class SignalProcessor {
         }
       }
     }
-
-    const spamScoreThreshold =
-      accountCtx.aliasConfig?.spamScoreThreshold ??
-      accountCtx.filtering?.spamScoreThreshold ??
-      DEFAULT_SPAM_SCORE_THRESHOLD;
 
     // 6. Arc matching (parallel tiers)
     const groupingKey = deriveGroupingKey(classificationOutput.workflow, classificationOutput.workflowData, recipientAddress, senderETLD1);
@@ -1135,7 +1130,7 @@ export class SignalProcessor {
       const saveResult = await this.arcDb.saveSignal(blockedSignal);
       if (saveResult.isErr()) return err(saveResult.error);
       this.logger.track("Blocked email — sender explicitly blocked for this alias.", { code: "processor.sender_block", accountId, sesMessageId, recipientAddress, senderETLD1, policy: blockStatus });
-      const repResult = await this.processingDb.updateGlobalReputation(senderETLD1, { wasSpam: classificationOutput.spamScore >= spamScoreThreshold / 10, wasBlocked: true });
+      const repResult = await this.processingDb.updateGlobalReputation(senderETLD1, { wasSpam: true, wasBlocked: true });
       if (repResult.isErr()) {
         this.logger.warn("Failed to update global sender reputation after signal processing. The DynamoDB update returned an error. Reputation data may be stale for this domain.", { code: "processor.reputation_update_failed", accountId, error: repResult.error });
       }
@@ -1152,8 +1147,7 @@ export class SignalProcessor {
     const systemLabels = assignSystemLabels({
       workflow: classificationOutput.workflow,
       workflowData: classificationOutput.workflowData,
-      spamScore: classificationOutput.spamScore,
-      spamScoreThreshold,
+      tags: classificationOutput.tags,
       senderETLD1,
       aliasSenderConfig: effectiveAliasSenderConfig,
       unknownSenderPolicy: effectiveFilterMode,
@@ -1217,7 +1211,7 @@ export class SignalProcessor {
       const saveResult = await this.arcDb.saveSignal({ ...blockSignal, data: { ...blockSignal.data, matchedRules } });
       if (saveResult.isErr()) return err(saveResult.error);
       this.logger.track("Blocked email — rule matched with block disposition.", { code: "processor.rule_block", accountId, sesMessageId, recipientAddress, disposition: outcome.blockDisposition, matchedRules: matchedRules.map(r => r.ruleId) });
-      const repResult = await this.processingDb.updateGlobalReputation(senderETLD1, { wasSpam: classificationOutput.spamScore >= spamScoreThreshold / 10, wasBlocked: true });
+      const repResult = await this.processingDb.updateGlobalReputation(senderETLD1, { wasSpam: true, wasBlocked: true });
       if (repResult.isErr()) {
         this.logger.warn("Failed to update global sender reputation after signal processing. The DynamoDB update returned an error. Reputation data may be stale for this domain.", { code: "processor.reputation_update_failed", accountId, error: repResult.error });
       }
@@ -1239,7 +1233,7 @@ export class SignalProcessor {
       const saveResult = await this.arcDb.saveSignal(quarantinedSignal);
       if (saveResult.isErr()) return err(saveResult.error);
       this.logger.track("Quarantined email — rule or sender filter matched.", { code: "processor.quarantine", accountId, sesMessageId, recipientAddress, status: quarantineStatus, matchedRules: matchedRules.map(r => r.ruleId) });
-      const repResult = await this.processingDb.updateGlobalReputation(senderETLD1, { wasSpam: classificationOutput.spamScore >= spamScoreThreshold / 10, wasBlocked: true });
+      const repResult = await this.processingDb.updateGlobalReputation(senderETLD1, { wasSpam: true, wasBlocked: true });
       if (repResult.isErr()) {
         this.logger.warn("Failed to update global sender reputation after signal processing. The DynamoDB update returned an error. Reputation data may be stale for this domain.", { code: "processor.reputation_update_failed", accountId, error: repResult.error });
       }
@@ -1361,7 +1355,7 @@ export class SignalProcessor {
     // Side-effects (forward, auto-reply, auto-draft, notify) are handled by processSideEffect via SQS dispatch.
 
     const finalRepResult = await this.processingDb.updateGlobalReputation(senderETLD1, {
-      wasSpam: classificationOutput.spamScore >= spamScoreThreshold / 10,
+      wasSpam: false,
       wasBlocked: false,
     });
     if (finalRepResult.isErr()) {
@@ -1766,7 +1760,7 @@ function buildSignal(opts: {
       recipientAddress,
       workflow: classification.workflow,
       workflowData: classification.workflowData,
-      spamScore: classification.spamScore,
+      tags: classification.tags.slice(0, 50),
       summary: classification.summary,
       s3Key,
       ...(parsed.replyTo !== undefined ? { replyTo: parsed.replyTo } : {}),

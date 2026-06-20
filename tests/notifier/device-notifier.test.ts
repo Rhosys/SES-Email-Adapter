@@ -81,7 +81,7 @@ const signal: Signal = {
     recipientAddress: "me@mydomain.com",
     workflow: "package",
     workflowData: { workflow: "package", packageType: "shipping", retailer: "Amazon" },
-    spamScore: 0,
+    tags: [],
     summary: "Order shipped",
     s3Key: "emails/msg-001",
   },

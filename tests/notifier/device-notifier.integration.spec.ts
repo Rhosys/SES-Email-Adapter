@@ -107,7 +107,7 @@ function makeClassifier(): Pick<SignalClassifier, "classify"> {
   return { classify: vi.fn().mockResolvedValue({
     workflow: "conversation",
     workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
-    spamScore: 0.05,
+    tags: [],
     summary: "Test email.",
     labels: [],
   }) };
@@ -179,7 +179,7 @@ function makeSignal(overrides: Partial<Signal> = {}): Signal {
       recipientAddress: "user@example.com",
       workflow: "conversation",
       workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
-      spamScore: 0.05,
+      tags: [],
       summary: "Test email.",
       s3Key: "emails/msg-notifier-001",
       matchedRules: [],

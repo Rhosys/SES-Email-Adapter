@@ -1,5 +1,6 @@
 import type { WorkflowDefinition } from "./workflow-registry.js";
 import type { ClassificationInput } from "./classifier.js";
+import { SPAM_TAGS } from "./tags.js";
 
 export const RELEVANT_HEADERS = new Set<string>([]);
 
@@ -27,7 +28,7 @@ Return ONLY valid JSON matching this structure:
 {
   "workflow": "<one of the workflow names below>",
   "workflowData": { <fields for the assigned workflow> },
-  "spamScore": <number 0.0–1.0>,
+  "tags": ["<zero or more from the tag vocabulary below>"],
   "summary": "<one sentence, under 150 characters>",
   "labels": ["<label from the provided list>"]
 }`);
@@ -50,19 +51,19 @@ ${workflow.description}
 ${fieldRows.join("\n")}`);
   }
 
-  // Spam scoring rules
-  sections.push(`## Spam Scoring
+  // Tags section
+  sections.push(`## Tags
 
-spamScore is ALWAYS required and is orthogonal to workflow. Assign the real workflow even for spam:
-- A phishing email pretending to be a bank login → workflow:"auth", spamScore:0.95
-- Unsolicited bulk marketing → workflow:"content", spamScore:0.7
-- A legitimate newsletter → workflow:"content", spamScore:0.05
+tags captures spam-related attributes detected in the email. Include zero or more tags from this vocabulary:
 
-Score ranges:
-- 0.0–0.2: Clearly legitimate
-- 0.2–0.5: Somewhat suspicious
-- 0.5–0.8: Likely spam/unwanted
-- 0.8–1.0: Definite spam, phishing, or malware`);
+${SPAM_TAGS.map((t) => `- "${t}"`).join("\n")}
+
+Tags are orthogonal to workflow — assign the real workflow even for spam:
+- A phishing email pretending to be a bank login → workflow:"auth", tags:["phishing","credential-harvest"]
+- Unsolicited bulk marketing → workflow:"content", tags:["bulk-unsolicited"]
+- A legitimate newsletter → workflow:"content", tags:[]
+
+Only include tags when the attribute is clearly present. Return an empty array for legitimate emails.`);
 
   // Summary rules
   sections.push(`## Summary

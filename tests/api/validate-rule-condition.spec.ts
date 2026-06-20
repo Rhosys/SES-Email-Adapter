@@ -5,8 +5,8 @@ describe("validateRuleCondition", () => {
   describe("valid JSONLogic conditions", () => {
     const validCases = [
       { scenario: "simple equality", condition: '{"==":[{"var":"signal.workflow"},"payments"]}' },
-      { scenario: "numeric comparison", condition: '{">":[{"var":"signal.spamScore"},0.8]}' },
-      { scenario: "nested AND with multiple fields", condition: '{"and":[{"==":[{"var":"signal.workflow"},"auth"]},{"<":[{"var":"signal.spamScore"},0.3]}]}' },
+      { scenario: "numeric comparison", condition: '{">":[{"var":"signal.workflow"},0.8]}' },
+      { scenario: "nested AND with multiple fields", condition: '{"and":[{"==":[{"var":"signal.workflow"},"auth"]},{"<":[{"var":"signal.workflow"},0.3]}]}' },
       { scenario: "boolean true (always matches)", condition: "true" },
       { scenario: "in operator with array", condition: '{"in":[{"var":"signal.workflow"},["payments","travel","package"]]}' },
     ];
@@ -49,7 +49,7 @@ describe("validateRuleCondition", () => {
 
   describe("JS conditions (js: prefix)", () => {
     it("accepts non-empty JS code", () => {
-      expect(validateRuleCondition("js:return ctx.signal.spamScore > 0.5;")).toBeNull();
+      expect(validateRuleCondition("js:return ctx.signal.workflow === 'content';")).toBeNull();
     });
 
     it("rejects empty JS code after prefix", () => {

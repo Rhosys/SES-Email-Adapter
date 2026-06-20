@@ -73,7 +73,7 @@ const DEFAULT_CTX = {
 const validClassification: ClassificationOutput = {
   workflow: "conversation",
   workflowData: { workflow: "conversation", sentiment: "neutral", requiresReply: false },
-  spamScore: 0.05,
+  tags: [],
   summary: "Integration test email.",
   labels: [],
 };
@@ -216,7 +216,7 @@ function makeExistingSignal(overrides: Partial<Omit<Signal, "data">> & { data?: 
       recipientAddress: "user@example.com",
       workflow: "conversation",
       workflowData: { workflow: "conversation", sentiment: "neutral", requiresReply: false },
-      spamScore: 0.05,
+      tags: [],
       summary: "Integration test email.",
       s3Key: `emails/${SES_MESSAGE_ID}`,
       embeddings: { "amazon.titan-embed-text-v2:0": new Array(1024).fill(0.1) },

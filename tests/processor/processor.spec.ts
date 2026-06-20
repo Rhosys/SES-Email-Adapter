@@ -196,7 +196,7 @@ const validClassification: ClassificationOutput = {
     sentiment: "neutral",
     requiresReply: false,
   },
-  spamScore: 0.05,
+  tags: [],
   summary: "A test personal email.",
   labels: [],
 };
@@ -769,10 +769,10 @@ describe("SignalProcessor", () => {
       expect(payload.signal.arcId).toBe(payload.arc.id);
     });
 
-    it("does not dispatch side-effect when signal is blocked (spamScore >= 0.9 triggers system rule)", async () => {
+    it("does not dispatch side-effect when signal is blocked (tags contain phishing triggers system rule)", async () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok({
         ...validClassification,
-        spamScore: 0.95,
+        tags: ["phishing"],
       }));
 
       await processor.processRecord(makeMessage(), 1);
@@ -873,7 +873,7 @@ describe("SignalProcessor", () => {
       // Approved sender → SR-04 fires on high spam → quarantine_hidden
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok({
         ...validClassification,
-        spamScore: 0.95,
+        tags: ["phishing"],
       }));
 
       await processor.processRecord(makeMessage(), 1);
@@ -947,14 +947,14 @@ describe("SignalProcessor", () => {
       expect(saved.status).toBe("active");
     });
 
-    it("quarantines a known sender with high spam score (SR-04 fires regardless of filter mode)", async () => {
+    it("quarantines a known sender with phishing tags (SR-04 fires regardless of filter mode)", async () => {
       vi.mocked(accountDb.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok(
         { ...DEFAULT_CTX, aliasConfig: makeAlias({ unknownSenderPolicy: "quarantine_visible" }) },
       )));
-      // Sender is known/approved but spam score is too high — SR-04 quarantines hidden independently of filter mode
+      // Sender is known/approved but tagged as phishing — SR-04 quarantines hidden independently of filter mode
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok({
         ...validClassification,
-        spamScore: 0.95,
+        tags: ["phishing"],
       }));
 
       await processor.processRecord(makeMessage(), 1);
@@ -987,7 +987,7 @@ describe("SignalProcessor", () => {
       const saved = vi.mocked(arcDb.saveSignal).mock.calls[0]![0] as Signal;
       expect(saved.data.workflow).toBe(validClassification.workflow);
       expect(saved.data.summary).toBe(validClassification.summary);
-      expect(saved.data.spamScore).toBe(validClassification.spamScore);
+      expect(saved.data.tags).toEqual(validClassification.tags);
     });
 
     it("quarantines new address when defaultUnknownSenderPolicy is quarantine_visible and no alias exists", async () => {
@@ -1038,10 +1038,10 @@ describe("SignalProcessor", () => {
       );
     });
 
-    it("marks wasSpam=true when spamScore >= 0.9", async () => {
+    it("marks wasSpam=true when tags contain phishing", async () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok({
         ...validClassification,
-        spamScore: 0.97,
+        tags: ["phishing"],
       }));
 
       await processor.processRecord(makeMessage(), 1);
@@ -1293,7 +1293,7 @@ describe("SignalProcessor", () => {
       const full: ClassificationOutput = {
         workflow: "conversation",
         workflowData: { workflow: "conversation", sentiment: "neutral", requiresReply: false },
-        spamScore: 0.05, summary: "test", labels: [],
+        tags: [], summary: "test", labels: [],
         ...classification,
       };
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok(full));
@@ -1323,7 +1323,7 @@ describe("SignalProcessor", () => {
       }))));
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok({
         workflow: "conversation", workflowData: { workflow: "conversation", sentiment: "neutral", requiresReply: false },
-        spamScore: 0.05, summary: "test", labels: [],
+        tags: [], summary: "test", labels: [],
       }));
       await processor.processRecord(makeMessage({ sesMessageId: randomUUID() }), 1);
       const signal = vi.mocked(arcDb.saveSignal).mock.calls.at(-1)![0] as Signal;
@@ -1380,7 +1380,7 @@ describe("SignalProcessor", () => {
     const onboardingClassification: ClassificationOutput = {
       workflow: "onboarding" as import("../../src/types/index.js").Workflow,
       workflowData: { workflow: "onboarding", onboardingType: "welcome", service: "Acme App" } as unknown as import("../../src/types/index.js").WorkflowData,
-      spamScore: 0.02,
+      tags: [],
       summary: "Welcome to Acme App.",
       labels: [],
     };
@@ -1482,7 +1482,7 @@ describe("SignalProcessor", () => {
   const noticeClassification: ClassificationOutput = {
     workflow: "notice",
     workflowData: { workflow: "notice", noticeType: "privacy_policy", provider: "Google" },
-    spamScore: 0.0,
+    tags: [],
     summary: "Privacy policy update from Google.",
     labels: [],
   };
@@ -1538,7 +1538,7 @@ describe("SignalProcessor", () => {
   const testClassification: ClassificationOutput = {
     workflow: "test",
     workflowData: { workflow: "test", triggeredBy: "user" },
-    spamScore: 0.0,
+    tags: [],
     summary: "Test email from account owner.",
     labels: [],
   };
@@ -1618,50 +1618,6 @@ describe("SignalProcessor", () => {
 
       const payload = vi.mocked(sqsDispatcher.sendMessage).mock.calls[0]![0];
       expect(payload.signal.data.recipientAddress).toBe("me@custom-domain.com");
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // Spam threshold — per-address and account-level overrides
-  // -------------------------------------------------------------------------
-
-  describe("spam threshold override", () => {
-    it("quarantines signal when per-address spamScoreThreshold is lower than default and score exceeds it", async () => {
-      vi.mocked(accountDb.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok({
-        ...DEFAULT_CTX,
-        aliasConfig: makeAlias({
-          unknownSenderPolicy: "quarantine_visible",
-          spamScoreThreshold: 5,
-        }),
-      })));
-      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok({
-        ...validClassification,
-        spamScore: 0.7, // above per-address threshold (0.5), below default (0.9)
-      }));
-
-      await processor.processRecord(makeMessage(), 1);
-
-      // DEFAULT_SENDER_ENTRY is approved → SR-04 fires → quarantine_hidden
-      const saved = vi.mocked(arcDb.saveSignal).mock.calls[0]![0] as Signal;
-      expect(saved.status).toBe("quarantine_hidden");
-    });
-
-    it("uses account-level spamScoreThreshold when no per-address override is set", async () => {
-      vi.mocked(accountDb.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok({
-        ...DEFAULT_CTX,
-        aliasConfig: makeAlias({ unknownSenderPolicy: "quarantine_visible" }),
-        filtering: { defaultUnknownSenderPolicy: "quarantine_visible", spamScoreThreshold: 6 },
-      })));
-      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok({
-        ...validClassification,
-        spamScore: 0.7, // above account threshold (0.6), below default (0.9)
-      }));
-
-      await processor.processRecord(makeMessage(), 1);
-
-      // DEFAULT_SENDER_ENTRY is approved → SR-04 fires → quarantine_hidden
-      const saved = vi.mocked(arcDb.saveSignal).mock.calls[0]![0] as Signal;
-      expect(saved.status).toBe("quarantine_hidden");
     });
   });
 

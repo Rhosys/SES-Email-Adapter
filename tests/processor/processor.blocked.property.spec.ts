@@ -71,7 +71,7 @@ describe("Blocked/quarantined signals never trigger saveArc", () => {
       classify: vi.fn().mockResolvedValue(ok({
         workflow: "conversation" as Workflow,
         workflowData: { workflow: "conversation", sentiment: "neutral", requiresReply: false },
-        spamScore: 0.05,
+        tags: [],
         summary: "A test email.",
         labels: [],
         ...overrides,
@@ -125,8 +125,8 @@ describe("Blocked/quarantined signals never trigger saveArc", () => {
 
   const strategies: BlockStrategy[] = [
     {
-      label: "high spam score → SR-04 quarantines",
-      classifier: makeClassifier({ spamScore: 0.95, workflow: "conversation" }),
+      label: "spam tags present → SR-04 quarantines",
+      classifier: makeClassifier({ tags: ["phishing"], workflow: "conversation" }),
       contentSanitizer: makeContentSanitizer("spammer.com"),
       unknownSenderPolicy: "quarantine_visible",
       aliasSenderConfig: { accountId: TEST_ACCOUNT_ID, aliasAddress: "user@example.com", domain: "example.com", alias: "user", senderDomain: "spammer.com", policy: "allow", addedAt: "2024-01-01T00:00:00Z" },

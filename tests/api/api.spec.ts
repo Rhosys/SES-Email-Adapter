@@ -214,7 +214,7 @@ function makeSignal(overrides: Partial<Omit<Signal, "data">> & { data?: Partial<
       recipientAddress: "user@example.com",
       workflow: "conversation",
       workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
-      spamScore: 0.02,
+      tags: [],
       summary: "A test signal.",
       s3Key: "emails/msg-001",
       ...dataOverrides,
@@ -1043,18 +1043,6 @@ describe("API", () => {
       );
     });
 
-    it("updates account-level spamScoreThreshold in filtering config", async () => {
-      const res = await req(app, "PATCH", `${A}`, {
-        body: { filtering: { defaultFilterMode: "quarantine_visible", spamScoreThreshold: 7 } },
-      });
-      expect(res.status).toBe(200);
-      expect(accountDb.updateAccount).toHaveBeenCalledWith(
-        TEST_ACCOUNT_ID,
-        expect.objectContaining({
-          filtering: expect.objectContaining({ spamScoreThreshold: 7 }),
-        }),
-      );
-    });
   });
 
   // -------------------------------------------------------------------------
@@ -1245,22 +1233,6 @@ describe("API", () => {
       const saved = vi.mocked(accountDb.upsertAlias).mock.calls[0]![0] as Alias;
       expect(saved.id).toBe("user@example.com");
       expect(saved.unknownSenderPolicy).toBe("allow_all");
-    });
-
-    it("stores spamScoreThreshold when included in the request body", async () => {
-      await req(app, "PATCH", `${A}/aliases/me%40mydomain.com`, {
-        body: { unknownSenderPolicy: "block_hidden", spamScoreThreshold: 7 },
-      });
-      const saved = vi.mocked(accountDb.upsertAlias).mock.calls[0]![0] as Alias;
-      expect(saved.spamScoreThreshold).toBe(7);
-    });
-
-    it("does not set spamScoreThreshold when absent from request body", async () => {
-      await req(app, "PATCH", `${A}/aliases/me%40mydomain.com`, {
-        body: { unknownSenderPolicy: "quarantine_visible" },
-      });
-      const saved = vi.mocked(accountDb.upsertAlias).mock.calls[0]![0] as Alias;
-      expect(saved.spamScoreThreshold).toBeUndefined();
     });
 
     it("renames alias when newAddress domain is registered", async () => {
@@ -1522,13 +1494,13 @@ describe("API", () => {
 
   describe("POST /accounts/:accountId/rules — conditionType/code validation", () => {
     it("creates a JS rule with valid code and returns 201", async () => {
-      vi.mocked(accountDb.createRule).mockResolvedValueOnce(ok(makeRule({ conditionType: "js", condition: "(signal) => signal.spamScore > 0.5" }) as never));
+      vi.mocked(accountDb.createRule).mockResolvedValueOnce(ok(makeRule({ conditionType: "js", condition: "(signal) => signal.workflow === 'content'" }) as never));
       const res = await req(app, "POST", `${A}/rules`, {
-        body: { name: "Spam filter", conditionType: "js", condition: "(signal) => signal.spamScore > 0.5", actions: [{ type: "archive" }] },
+        body: { name: "Spam filter", conditionType: "js", condition: "(signal) => signal.workflow === 'content'", actions: [{ type: "archive" }] },
       });
       expect(res.status).toBe(201);
       expect(accountDb.createRule).toHaveBeenCalledWith(
-        TEST_ACCOUNT_ID, expect.objectContaining({ conditionType: "js", condition: "(signal) => signal.spamScore > 0.5" }),
+        TEST_ACCOUNT_ID, expect.objectContaining({ conditionType: "js", condition: "(signal) => signal.workflow === 'content'" }),
       );
     });
 
@@ -1650,9 +1622,9 @@ describe("API", () => {
     });
 
     it("audit event contains before: null and after with conditionType/code for creation", async () => {
-      vi.mocked(accountDb.createRule).mockResolvedValueOnce(ok(makeRule({ conditionType: "js", condition: "(signal) => signal.spamScore > 0.8" }) as never));
+      vi.mocked(accountDb.createRule).mockResolvedValueOnce(ok(makeRule({ conditionType: "js", condition: "(signal) => signal.workflow === 'content'" }) as never));
       await req(app, "POST", `${A}/rules`, {
-        body: { name: "Spam rule", conditionType: "js", condition: "(signal) => signal.spamScore > 0.8", actions: [{ type: "archive" }] },
+        body: { name: "Spam rule", conditionType: "js", condition: "(signal) => signal.workflow === 'content'", actions: [{ type: "archive" }] },
       });
       expect(auditDb.saveAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
         accountId: TEST_ACCOUNT_ID,
@@ -1660,7 +1632,7 @@ describe("API", () => {
         action: "created",
         resourceType: "rule",
         before: null,
-        after: { conditionType: "js", condition: "(signal) => signal.spamScore > 0.8" },
+        after: { conditionType: "js", condition: "(signal) => signal.workflow === 'content'" },
       }));
     });
 
@@ -1677,11 +1649,11 @@ describe("API", () => {
 
   describe("PATCH /accounts/:accountId/rules/:id — audit for JS rule update", () => {
     it("audit event contains before/after code values when code is updated", async () => {
-      const existingRule = makeRule({ conditionType: "js", condition: "(signal) => signal.spamScore > 0.5" });
+      const existingRule = makeRule({ conditionType: "js", condition: "(signal) => signal.workflow === 'content'" });
       vi.mocked(accountDb.listRules).mockResolvedValueOnce(ok([existingRule]));
-      vi.mocked(accountDb.updateRule).mockResolvedValueOnce(ok(makeRule({ conditionType: "js", condition: "(signal) => signal.spamScore > 0.9" })));
+      vi.mocked(accountDb.updateRule).mockResolvedValueOnce(ok(makeRule({ conditionType: "js", condition: "(signal) => signal.workflow === 'content'" })));
       await req(app, "PATCH", `${A}/rules/rule-001`, {
-        body: { condition: "(signal) => signal.spamScore > 0.9" },
+        body: { condition: "(signal) => signal.workflow === 'content'" },
       });
       expect(auditDb.saveAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
         accountId: TEST_ACCOUNT_ID,
@@ -1689,8 +1661,8 @@ describe("API", () => {
         action: "updated",
         resourceType: "rule",
         resourceId: "rule-001",
-        before: { conditionType: "js", condition: "(signal) => signal.spamScore > 0.5" },
-        after: { conditionType: "js", condition: "(signal) => signal.spamScore > 0.9" },
+        before: { conditionType: "js", condition: "(signal) => signal.workflow === 'content'" },
+        after: { conditionType: "js", condition: "(signal) => signal.workflow === 'content'" },
       }));
     });
 

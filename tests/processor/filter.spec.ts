@@ -1,17 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { assignSystemLabels, getETLD1, DEFAULT_SPAM_SCORE_THRESHOLD, type SystemLabelContext } from "../../src/processor/filter.js";
+import { assignSystemLabels, getETLD1, type SystemLabelContext } from "../../src/processor/filter.js";
 import { SYSTEM_RULES } from "../../src/processor/processor.js";
-
-const LOW_SPAM = 0.1;
-const MED_SPAM = 0.5;
-const HIGH_SPAM = DEFAULT_SPAM_SCORE_THRESHOLD + 0.01;
 
 function makeCtx(overrides: Partial<SystemLabelContext> = {}): SystemLabelContext {
   return {
     workflow: "conversation",
     workflowData: { workflow: "conversation", sentiment: "neutral", requiresReply: false },
-    spamScore: LOW_SPAM,
-    spamScoreThreshold: DEFAULT_SPAM_SCORE_THRESHOLD,
+    tags: [],
     senderETLD1: "amazon.com",
     aliasSenderConfig: { accountId: "acct-001", aliasAddress: "user@example.com", domain: "example.com", alias: "user", senderDomain: "amazon.com", policy: "allow", addedAt: "2024-01-01T00:00:00Z" },
     unknownSenderPolicy: "quarantine_visible",
@@ -70,22 +65,14 @@ describe("assignSystemLabels — workflow label", () => {
 // ---------------------------------------------------------------------------
 
 describe("assignSystemLabels — spam labels", () => {
-  it("emits system:spam:high when spamScore >= threshold", () => {
-    const labels = assignSystemLabels(makeCtx({ spamScore: HIGH_SPAM }));
-    expect(labels).toContain("system:spam:high");
-    expect(labels).not.toContain("system:spam:medium");
+  it("emits system:spam when tags contain phishing", () => {
+    const labels = assignSystemLabels(makeCtx({ tags: ["phishing"] }));
+    expect(labels).toContain("system:spam");
   });
 
-  it("emits system:spam:medium when spamScore >= 0.4 but < threshold", () => {
-    const labels = assignSystemLabels(makeCtx({ spamScore: MED_SPAM }));
-    expect(labels).toContain("system:spam:medium");
-    expect(labels).not.toContain("system:spam:high");
-  });
-
-  it("emits no spam label for low spam score", () => {
-    const labels = assignSystemLabels(makeCtx({ spamScore: LOW_SPAM }));
-    expect(labels).not.toContain("system:spam:high");
-    expect(labels).not.toContain("system:spam:medium");
+  it("emits no spam label when tags are empty", () => {
+    const labels = assignSystemLabels(makeCtx({ tags: [] }));
+    expect(labels).not.toContain("system:spam");
   });
 });
 
@@ -144,9 +131,6 @@ describe("assignSystemLabels — replied and test labels", () => {
 
 describe("assignSystemLabels — no unlisted labels", () => {
   it("returns only values assignable to SystemLabel (TypeScript enforces this at compile time)", () => {
-    // The compile-time contract: assignSystemLabels() is declared to return SystemLabel[].
-    // Any string pushed inside the function that is not in the SystemLabel union is a type error.
-    // This runtime test just confirms the function returns an array — the type checker does the real work.
     const labels: import("../../src/types/index.js").SystemLabel[] = assignSystemLabels(makeCtx());
     expect(Array.isArray(labels)).toBe(true);
   });

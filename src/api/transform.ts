@@ -100,7 +100,6 @@ function toApiEmailSignalData(data: EmailSignalData): Api.InboundEmailSignalData
     recipientAddress: data.recipientAddress,
     workflow: data.workflow as Api.InboundEmailSignalData["workflow"],
     ...(data.workflowData ? { workflowData: data.workflowData as Api.InboundEmailSignalData["workflowData"] } : {}),
-    spamScore: data.spamScore,
     ...(data.matchedRules ? { matchedRules: data.matchedRules as Api.InboundEmailSignalData["matchedRules"] } : {}),
     ...(data.unsubscribe ? { unsubscribe: data.unsubscribe } : {}),
   };
@@ -223,7 +222,6 @@ export function toApiAlias(alias: DbAlias): Api.Alias {
     alias: alias.id,
     address: alias.address,
     unknownSenderPolicy: alias.unknownSenderPolicy as Api.Alias["unknownSenderPolicy"],
-    ...(alias.spamScoreThreshold !== undefined ? { spamScoreThreshold: alias.spamScoreThreshold } : {}),
     createdAt: alias.createdAt,
     updatedAt: alias.updatedAt,
   };

@@ -108,7 +108,7 @@ describe("SignalClassifier", () => {
           expiresInMinutes: 15,
           service: "GitHub",
         },
-        spamScore: 0.0,
+        tags: [],
         summary: "GitHub authentication code 483921, expires in 15 minutes.",
         labels: [],
       });
@@ -124,7 +124,7 @@ describe("SignalClassifier", () => {
         code: "483921",
         service: "GitHub",
       });
-      expect(output.spamScore).toBeLessThan(0.1);
+      expect(output.tags).toEqual([]);
     });
   });
 
@@ -145,7 +145,7 @@ describe("SignalClassifier", () => {
           invoiceNumber: "INV-2024-001",
           dueDate: "2024-02-01",
         },
-        spamScore: 0.0,
+        tags: [],
         summary: "Receipt from Acme Corp for $149.00.",
         labels: ["billing"],
       });
@@ -176,7 +176,7 @@ describe("SignalClassifier", () => {
           location: "San Francisco",
           salary: "$180k-$220k",
         },
-        spamScore: 0.05,
+        tags: [],
         summary: "Recruiter outreach from TechCorp for Senior Software Engineer, $180k-$220k.",
         labels: ["recruiting"],
       });
@@ -195,7 +195,7 @@ describe("SignalClassifier", () => {
   // -------------------------------------------------------------------------
 
   describe("spam detection", () => {
-    it("flags phishing email with high spam score (auth workflow, high spamScore)", async () => {
+    it("flags phishing email with tags (auth workflow)", async () => {
       mockClassifyResponse({
         workflow: "auth",
         workflowData: {
@@ -206,7 +206,7 @@ describe("SignalClassifier", () => {
           service: "PayPal",
           actionUrl: "http://paypal-restore.ru/login",
         },
-        spamScore: 0.97,
+        tags: ["phishing"],
         summary: "Phishing email impersonating PayPal login.",
         labels: ["phishing"],
       });
@@ -215,7 +215,7 @@ describe("SignalClassifier", () => {
 
       expect(result.isOk()).toBe(true);
       const output = result._unsafeUnwrap();
-      expect(output.spamScore).toBeGreaterThan(0.9);
+      expect(output.tags).toContain("phishing");
       expect(output.workflow).toBe("auth");
     });
   });
@@ -237,7 +237,7 @@ describe("SignalClassifier", () => {
           trackingUrl: "https://amazon.com/track/1Z999AA10123456784",
           estimatedDelivery: "2024-01-15",
         },
-        spamScore: 0.0,
+        tags: [],
         summary: "Amazon package out for delivery, tracking 1Z999AA10123456784.",
         labels: [],
       });
@@ -264,7 +264,7 @@ describe("SignalClassifier", () => {
       mockClassifyResponse({
         workflow: "conversation",
         workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: true },
-        spamScore: 0.0,
+        tags: [],
         summary: "A personal email.",
         labels: ["action-needed", "important"],
       });
@@ -280,7 +280,7 @@ describe("SignalClassifier", () => {
       mockClassifyResponse({
         workflow: "content",
         workflowData: { workflow: "content", publisher: "Test" },
-        spamScore: 0.1,
+        tags: [],
         summary: "Newsletter.",
         labels: [],
       });
@@ -301,7 +301,7 @@ describe("SignalClassifier", () => {
       mockClassifyResponse({
         workflow: "conversation",
         workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
-        spamScore: 0.0,
+        tags: [],
         summary: "A personal email.",
         labels: [],
       });
@@ -323,7 +323,7 @@ describe("SignalClassifier", () => {
       mockClassifyResponse({
         workflow: "conversation",
         workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
-        spamScore: 0.0,
+        tags: [],
         summary: "A personal email.",
         labels: [],
       });
@@ -338,7 +338,7 @@ describe("SignalClassifier", () => {
       mockClassifyResponse({
         workflow: "content",
         workflowData: { workflow: "content", publisher: "Test" },
-        spamScore: 0.1,
+        tags: [],
         summary: "Newsletter.",
         labels: [],
       });
@@ -363,7 +363,7 @@ describe("SignalClassifier", () => {
       mockClassifyResponse({
         workflow: "conversation",
         workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
-        spamScore: 0.0,
+        tags: [],
         summary: "Email.",
         labels: [],
       });
@@ -388,7 +388,7 @@ describe("SignalClassifier", () => {
       mockClassifyResponse({
         workflow: "conversation",
         workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
-        spamScore: 0.0,
+        tags: [],
         summary: "Email.",
         labels: [],
       });
@@ -417,7 +417,7 @@ describe("SignalClassifier", () => {
       mockClassifyResponse({
         workflow: "content",
         workflowData: { workflow: "content", publisher: "Test" },
-        spamScore: 0.1,
+        tags: [],
         summary: "Newsletter.",
         labels: [],
       });
@@ -441,7 +441,7 @@ describe("SignalClassifier", () => {
       mockClassifyResponse({
         workflow: "content",
         workflowData: { workflow: "content", publisher: "Test" },
-        spamScore: 0.0,
+        tags: [],
         summary: "Newsletter.",
         labels: [],
       });
@@ -477,7 +477,7 @@ describe("SignalClassifier", () => {
       mockClassifyResponse({
         workflow: "conversation",
         workflowData: { workflow: "conversation", isReply: false, sentiment: "positive", requiresReply: false },
-        spamScore: 0.0,
+        tags: [],
         summary: "Personal email.",
         labels: [],
       });
@@ -516,7 +516,7 @@ describe("SignalClassifier", () => {
           requiresAction: true,
           accountLastFour: "4242",
         },
-        spamScore: 0.0,
+        tags: [],
         summary: "Fraud alert from Chase Bank — unusual $2,499.99 charge.",
         labels: ["urgent", "action-needed"],
       });
@@ -556,7 +556,7 @@ describe("SignalClassifier", () => {
           totalAmount: 850.0,
           currency: "USD",
         },
-        spamScore: 0.0,
+        tags: [],
         summary: "Delta Airlines flight JFK → LHR departing March 15. Confirmation: DELTA123.",
         labels: [],
       });
@@ -597,7 +597,7 @@ describe("SignalClassifier", () => {
           requiresAction: true,
           actionUrl: "https://github.com/settings/security",
         },
-        spamScore: 0.0,
+        tags: [],
         summary: "GitHub detected a suspicious login from Moscow, Russia. Action required.",
         labels: ["action-needed", "urgent"],
       });
@@ -616,7 +616,7 @@ describe("SignalClassifier", () => {
       const output = result._unsafeUnwrap();
       expect(output.workflow).toBe("alert");
       expect(output.workflowData).toMatchObject({ alertType: "suspicious_login", requiresAction: true });
-      expect(output.spamScore).toBeLessThan(0.3); // legitimate alert from github.com
+      expect(output.tags).toEqual([]); // legitimate alert from github.com
     });
   });
 
@@ -625,7 +625,7 @@ describe("SignalClassifier", () => {
       mockClassifyResponse({
         workflow: "test",
         workflowData: { workflow: "test", triggeredBy: "user" },
-        spamScore: 0.0,
+        tags: [],
         summary: "User sent a test email to verify inbox delivery.",
         labels: [],
       });
@@ -644,7 +644,7 @@ describe("SignalClassifier", () => {
       const output = result._unsafeUnwrap();
       expect(output.workflow).toBe("test");
       expect(output.workflowData).toMatchObject({ triggeredBy: "user" });
-      expect(output.spamScore).toBe(0.0);
+      expect(output.tags).toEqual([]);
     });
   });
 });
