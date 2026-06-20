@@ -251,6 +251,7 @@ export async function handleCalendarResponse(
     source: "user",
     type: "calendar_response",
     status: "active",
+    labels: [],
     createdAt: now,
     data: {
       decision,

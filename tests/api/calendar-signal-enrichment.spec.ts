@@ -127,6 +127,7 @@ function makeCalendarEventSignal(overrides: Partial<Signal<CalendarEventData>> =
     source: "signal",
     type: "calendar_event",
     status: "active",
+    labels: [],
     createdAt: "2025-03-15T09:00:00Z",
     data: {
       title: "Team Standup",
@@ -153,6 +154,7 @@ function makeCalendarResponseSignal(overrides: Partial<Signal<CalendarResponseDa
     source: "user",
     type: "calendar_response",
     status: "active",
+    labels: [],
     createdAt: "2025-03-15T11:00:00Z",
     data: {
       decision: "accepted",

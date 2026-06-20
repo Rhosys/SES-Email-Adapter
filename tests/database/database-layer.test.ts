@@ -138,7 +138,7 @@ describe("ArcDatabase", () => {
       const result = await db.getSignalByMessageId("acct-1", "msg-123");
 
       expect(result.isOk()).toBe(true);
-      expect(result._unsafeUnwrap()).toEqual({ id: "SES#msg-123" });
+      expect(result._unsafeUnwrap()).toEqual({ id: "SES#msg-123", labels: [] });
     });
 
     it("returns ok(null) when the signal does not exist", async () => {
@@ -207,7 +207,7 @@ describe("ArcDatabase", () => {
       const result = await db.getSignalById("acct-1", "sgn-abc123");
 
       expect(result.isOk()).toBe(true);
-      expect(result._unsafeUnwrap()).toEqual(signal);
+      expect(result._unsafeUnwrap()).toEqual({ ...signal, labels: [] });
     });
 
     it("returns ok(null) when the signal does not exist", async () => {

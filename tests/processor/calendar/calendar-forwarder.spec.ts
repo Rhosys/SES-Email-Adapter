@@ -54,6 +54,7 @@ function makeCalendarSignal(method: string): Signal<CalendarEventData> {
     source: "signal",
     type: "calendar_event",
     status: "active",
+    labels: [],
     createdAt: "2025-03-15T09:00:00Z",
     data: {
       title: "Team Standup",

@@ -144,6 +144,7 @@ export class FeedbackProcessor {
               source: "ses_feedback",
               type: "deliverability",
               status: "active",
+              labels: [],
               createdAt: DateTime.utc().toISO()!,
               data: {
                 linkedSignalId: sentSignal.id,

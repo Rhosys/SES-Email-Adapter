@@ -568,6 +568,7 @@ describe("Scenario: approving quarantined email triggers calendar forwarding", (
       source: "email",
       type: "email",
       status: "active",
+      labels: [],
       createdAt: "2025-03-15T09:00:00Z",
       data: {
         receivedAt: "2025-03-15T09:00:00Z",
