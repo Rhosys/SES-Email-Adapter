@@ -1651,20 +1651,8 @@ export class SignalProcessor {
     existing: Alias | null,
     defaultUnknownSenderPolicy: AccountFilteringConfig["defaultUnknownSenderPolicy"] = "quarantine_visible",
   ): Promise<Result<void, DbError>> {
-    const now = DateTime.utc().toISO()!;
-    if (!existing) {
-      const aliasResult = await this.accountDb.saveAlias({
-        id: address,
-        accountId,
-        address,
-        domain: address.split("@")[1]!,
-        alias: address.split("@")[0]!,
-        unknownSenderPolicy: defaultUnknownSenderPolicy,
-        createdAt: now,
-        updatedAt: now,
-      });
-      if (aliasResult.isErr()) return err(aliasResult.error);
-    }
+    const aliasResult = await this.accountDb.ensureAlias(accountId, address, defaultUnknownSenderPolicy, existing);
+    if (aliasResult.isErr()) return err(aliasResult.error);
     const senderResult = await this.accountDb.saveSender(accountId, address, senderETLD1, "allow");
     if (senderResult.isErr()) return err(senderResult.error);
     return ok(undefined);

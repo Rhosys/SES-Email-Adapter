@@ -4,7 +4,7 @@ import { dynamo, ACCOUNTS_TABLE } from "./shared.js";
 import { dbError, notFoundError, ok, err } from "../errors.js";
 import type { Result, DbError, NotFoundError } from "../errors.js";
 import { generateId } from "../utils/id.js";
-import type { Account, View, Label, Rule, RuleStatus, Domain, Alias, AliasSender, SenderPolicy, AccountFilteringConfig, VerifiedForwardingAddress, EmailTemplate, WsConnection } from "../types/index.js";
+import type { Account, View, Label, Rule, RuleStatus, Domain, Alias, AliasSender, SenderPolicy, AccountFilteringConfig, UnknownSenderPolicy, VerifiedForwardingAddress, EmailTemplate, WsConnection } from "../types/index.js";
 import { SYSTEM_RULES } from "../processor/system-rules.js";
 import type { StatsCategory } from "../types/index.js";
 import type { CreateViewRequest, UpdateViewRequest, CreateLabelRequest, UpdateLabelRequest, CreateRuleRequest, UpdateRuleRequest } from "../api/app.js";
@@ -132,6 +132,31 @@ export class AccountDatabase {
 
   async createAlias(alias: Alias): Promise<Result<Alias, DbError>> {
     return this.saveAlias(alias);
+  }
+
+  // A sender disposition recorded for an address implies that address is a recognised
+  // alias, so callers that approve/block a sender must ensure the Alias record exists too.
+  // Pass `existing` when the caller already has it (e.g. processor.ts) to skip the lookup.
+  async ensureAlias(accountId: string, address: string, defaultUnknownSenderPolicy: UnknownSenderPolicy, existing?: Alias | null): Promise<Result<Alias, DbError>> {
+    let alias = existing;
+    if (alias === undefined) {
+      const existingResult = await this.getAlias(accountId, address);
+      if (existingResult.isErr()) return err(existingResult.error);
+      alias = existingResult.value;
+    }
+    if (alias) return ok(alias);
+
+    const now = DateTime.utc().toISO()!;
+    return this.saveAlias({
+      id: address,
+      accountId,
+      address,
+      domain: address.split("@")[1]!,
+      alias: address.split("@")[0]!,
+      unknownSenderPolicy: defaultUnknownSenderPolicy,
+      createdAt: now,
+      updatedAt: now,
+    });
   }
 
   async listAliases(accountId: string): Promise<Result<Alias[], DbError>> {
