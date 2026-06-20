@@ -24,7 +24,7 @@ function makeSignal(overrides: { data?: Partial<Pick<Signal["data"], "from" | "r
       recipientAddress: "me@myalias.com",
       workflow: "conversation",
       workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
-      spamScore: 0.1,
+      tags: [],
       summary: "",
       s3Key: "test/key",
       ...dataOverrides,

@@ -23,7 +23,7 @@ const basicInput: ClassificationInput = {
 const classificationPayload = {
   workflow: "conversation",
   workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
-  spamScore: 0.0,
+  tags: [],
   summary: "A test email.",
   labels: [],
 };
@@ -181,7 +181,7 @@ describe("SignalClassifier — guardrail trace handling", () => {
     const output = result._unsafeUnwrap();
     expect(output.workflow).toBe("conversation");
     expect(output.summary).toBe("A test email.");
-    expect(output.spamScore).toBe(0.0);
+    expect(output.tags).toEqual([]);
   });
 
   it("logs multiple TRACK entries when multiple filters detect content", async () => {

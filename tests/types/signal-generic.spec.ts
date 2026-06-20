@@ -73,7 +73,7 @@ describe("Property 1: Type narrowing correctness", () => {
 
 describe("Property 2: System signals contain only expected data fields", () => {
   const emailSpecificFields = [
-    "from", "to", "cc", "attachments", "headers", "spamScore",
+    "from", "to", "cc", "attachments", "headers", "tags",
     "s3Key", "workflow", "workflowData", "subject", "receivedAt",
     "summary", "embeddings", "recipientAddress", "textBody", "htmlBody",
     "sentAt", "replyTo", "matchedRules", "sesMessageId", "sendInitiatedAt",
@@ -128,7 +128,7 @@ describe("Property 2: System signals contain only expected data fields", () => {
 
 describe("Property 2: FeedbackProcessor deliverability signals contain only expected data fields", () => {
   const emailSpecificFields = [
-    "from", "to", "cc", "attachments", "headers", "spamScore",
+    "from", "to", "cc", "attachments", "headers", "tags",
     "s3Key", "workflow", "workflowData", "receivedAt",
     "summary", "embeddings", "recipientAddress", "textBody", "htmlBody",
     "sentAt", "replyTo", "matchedRules", "sesMessageId", "sendInitiatedAt",
@@ -200,7 +200,7 @@ describe("Property 3: DynamoDB round-trip fidelity", () => {
           recipientAddress: "me@mydomain.com",
           workflow: "conversation",
           workflowData: { workflow: "conversation", sentiment: "neutral", requiresReply: false },
-          spamScore: 0.1,
+          tags: [],
           s3Key: "emails/abc.eml",
         },
       } as Signal<EmailSignalData>,
@@ -331,7 +331,7 @@ describe("Property 4: Type parameter default", () => {
         recipientAddress: "me@example.com",
         workflow: "conversation",
         workflowData: { workflow: "conversation", sentiment: "neutral", requiresReply: false },
-        spamScore: 0,
+        tags: [],
         s3Key: "emails/test.eml",
       },
     };

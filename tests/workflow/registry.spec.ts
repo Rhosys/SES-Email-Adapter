@@ -29,7 +29,7 @@ const stubSignal: Signal = {
     recipientAddress: "me@mydomain.com",
     workflow: "auth",
     workflowData: { workflow: "auth", authType: "otp", code: "123456", service: "Example" },
-    spamScore: 0,
+    tags: [],
     summary: "Test",
     s3Key: "signals/test.eml",
   },

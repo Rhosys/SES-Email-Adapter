@@ -67,7 +67,7 @@ function makeSignal(overrides: { data?: Partial<Signal["data"]> } & Partial<Omit
       recipientAddress: "user@example.com",
       workflow: "conversation",
       workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
-      spamScore: 0.02,
+      tags: [],
       summary: "A test signal.",
       s3Key: "emails/msg-001",
       ...dataOverrides,

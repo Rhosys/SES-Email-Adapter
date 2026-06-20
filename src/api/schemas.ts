@@ -298,7 +298,6 @@ export const InboundEmailSignalData = z.object({
   recipientAddress: z.string(),
   workflow: Workflow,
   workflowData: WorkflowData.optional(),
-  spamScore: z.number(),
   matchedRules: z.array(MatchedRuleResult).optional(),
   unsubscribe: UnsubscribeInfo.optional(),
 }).openapi("InboundEmailSignalData");
@@ -528,7 +527,6 @@ export const Alias = z.object({
   alias: z.string().readonly(),
   address: z.string(),
   unknownSenderPolicy: UnknownSenderPolicy,
-  spamScoreThreshold: z.number().int().min(1).max(10).optional(),
   createdAt: z.string().readonly(),
   updatedAt: z.string().readonly(),
 }).openapi("Alias");
@@ -620,7 +618,6 @@ export const NotificationSettings = z.object({
 
 export const AccountFilteringConfig = z.object({
   defaultUnknownSenderPolicy: UnknownSenderPolicy.optional(),
-  spamScoreThreshold: z.number().int().min(1).max(10).optional(),
 }).openapi("AccountFilteringConfig");
 
 export const AccountOnboarding = z.object({

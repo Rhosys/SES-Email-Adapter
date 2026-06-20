@@ -83,7 +83,7 @@ describe("SignalClassifier — output validation", () => {
     mockClassifyResponse({
       workflow: "unknown_workflow",
       workflowData: { workflow: "unknown_workflow" },
-      spamScore: 0.1,
+      tags: [],
       summary: "Some email.",
       labels: [],
     });
@@ -94,14 +94,14 @@ describe("SignalClassifier — output validation", () => {
   });
 
   // -------------------------------------------------------------------------
-  // SpamScore 1.5 → clamped to 1.0
+  // Tag validation — unknown tags filtered out
   // -------------------------------------------------------------------------
 
-  it("clamps spamScore 1.5 to 1.0", async () => {
+  it("filters out unknown tags not in the allowed vocabulary", async () => {
     mockClassifyResponse({
       workflow: "content",
       workflowData: { workflow: "content", contentType: "newsletter", publisher: "Test" },
-      spamScore: 1.5,
+      tags: ["phishing", "totally-made-up-tag", "not-a-real-tag"],
       summary: "A newsletter.",
       labels: [],
     });
@@ -109,26 +109,29 @@ describe("SignalClassifier — output validation", () => {
     const result = await classifier.classify(baseInput);
 
     expect(result.isOk()).toBe(true);
-    expect(result._unsafeUnwrap().spamScore).toBe(1.0);
+    const output = result._unsafeUnwrap();
+    expect(output.tags).toContain("phishing");
+    expect(output.tags).not.toContain("totally-made-up-tag");
+    expect(output.tags).not.toContain("not-a-real-tag");
   });
 
   // -------------------------------------------------------------------------
-  // SpamScore -0.2 → clamped to 0.0
+  // Tag validation — valid tags pass through
   // -------------------------------------------------------------------------
 
-  it("clamps spamScore -0.2 to 0.0", async () => {
+  it("passes through valid tags from the allowed vocabulary", async () => {
     mockClassifyResponse({
       workflow: "content",
       workflowData: { workflow: "content", contentType: "newsletter", publisher: "Test" },
-      spamScore: -0.2,
-      summary: "A newsletter.",
+      tags: ["phishing"],
+      summary: "A suspicious newsletter.",
       labels: [],
     });
 
     const result = await classifier.classify(baseInput);
 
     expect(result.isOk()).toBe(true);
-    expect(result._unsafeUnwrap().spamScore).toBe(0.0);
+    expect(result._unsafeUnwrap().tags).toEqual(["phishing"]);
   });
 
   // -------------------------------------------------------------------------
@@ -139,7 +142,7 @@ describe("SignalClassifier — output validation", () => {
     mockClassifyResponse({
       workflow: "payments",
       workflowData: { workflow: "payments", paymentType: "invoice", vendor: "Acme" },
-      spamScore: 0.0,
+      tags: [],
       summary: "Invoice from Acme.",
       labels: ["billing", "invented"],
     });

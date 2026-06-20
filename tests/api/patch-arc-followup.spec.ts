@@ -90,7 +90,7 @@ function makeSignal(): Signal {
       recipientAddress: "user@example.com",
       workflow: "conversation",
       workflowData: { workflow: "conversation", sentiment: "neutral", requiresReply: false },
-      spamScore: 0,
+      tags: [],
       summary: "Test",
       s3Key: "emails/test.eml",
     },

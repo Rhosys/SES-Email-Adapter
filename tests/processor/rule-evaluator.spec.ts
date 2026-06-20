@@ -33,7 +33,7 @@ function makeSignal(overrides: Partial<Omit<Signal, "data">> & { data?: Partial<
       recipientAddress: "user@example.com",
       workflow: "conversation",
       workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
-      spamScore: 0.01,
+      tags: [],
       summary: "A test email.",
       s3Key: "emails/test-msg-001.eml",
       embeddings: { "model-v1": [0.1, 0.2, 0.3] },
@@ -65,7 +65,7 @@ function makeJsRule(overrides: Partial<Rule> = {}): Rule {
     id: "rule_js_001",
     accountId: "acc_123",
     name: "JS condition rule",
-    condition: "return signal.spamScore > 0.5;",
+    condition: "return signal.workflow === 'content';",
     conditionType: "js",
     actions: [{ type: "assign_label", value: "spam" }],
     status: "enabled",
@@ -105,7 +105,7 @@ describe("JsonLogicRuleEvaluator — JS condition path", () => {
     expect(mockExecutor.invoke).toHaveBeenCalledWith({
       tenantId: "acc_123",
       purpose: "rule_condition",
-      functionCode: "return signal.spamScore > 0.5;",
+      functionCode: "return signal.workflow === 'content';",
       executionContext: expect.objectContaining({
         signal: expect.not.objectContaining({ s3Key: expect.anything() }),
         arc: expect.objectContaining({ id: "arc_001" }),
@@ -253,10 +253,10 @@ describe("JsonLogicRuleEvaluator — JS condition path", () => {
  * Validates: Requirements 4.1, 4.2, 4.4
  */
 describe("JS rule context — Property 2: context preparation produces exactly the specified fields", () => {
-  const EXPECTED_SIGNAL_KEYS = ["id", "from", "subject", "summary", "spamScore", "workflow", "recipientAddress", "workflowData"];
+  const EXPECTED_SIGNAL_KEYS = ["id", "from", "subject", "summary", "workflow", "recipientAddress", "workflowData"];
   const EXPECTED_ARC_KEYS = ["id", "labels", "urgency", "summary", "workflow", "status"];
 
-  it("executionContext.signal has exactly the 8 specified fields — sensitive fields excluded", async () => {
+  it("executionContext.signal has exactly the 7 specified fields — sensitive fields excluded", async () => {
     const mockExecutor = { invoke: vi.fn().mockResolvedValue(ok({ value: false })), validateAst: vi.fn(), validateAstBatch: vi.fn() };
     const evaluator = new JsonLogicRuleEvaluator(createMockLogger(), mockExecutor, { annotateRuleError: vi.fn().mockResolvedValue(ok(undefined)) });
 
@@ -279,7 +279,6 @@ describe("JS rule context — Property 2: context preparation produces exactly t
       from: signal.data.from,
       subject: signal.data.subject,
       summary: signal.data.summary,
-      spamScore: signal.data.spamScore,
       workflow: signal.data.workflow,
       recipientAddress: signal.data.recipientAddress,
       workflowData: signal.data.workflowData,

@@ -109,7 +109,7 @@ function makeSignal(overrides: { data?: Partial<Signal["data"]> } & Partial<Omit
       recipientAddress: "user@example.com",
       workflow: "conversation",
       workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
-      spamScore: 0.05,
+      tags: [],
       summary: "A webhook test signal.",
       s3Key: "emails/webhook-test.eml",
       embeddings: {},

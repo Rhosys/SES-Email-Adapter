@@ -12,7 +12,7 @@ import type { RuleEvalResult } from "./interpret-rule-result.js";
 // Strip sensitive fields before passing to user code (allowlist approach)
 // ---------------------------------------------------------------------------
 
-type StrippedSignal = Pick<Signal["data"], "from" | "subject" | "summary" | "spamScore" | "workflow" | "recipientAddress" | "workflowData"> & Pick<Signal, "id">;
+type StrippedSignal = Pick<Signal["data"], "from" | "subject" | "summary" | "workflow" | "recipientAddress" | "workflowData"> & Pick<Signal, "id">;
 type StrippedArc = Pick<Arc, "id" | "labels" | "urgency" | "summary" | "workflow" | "status">;
 
 function stripSignalForUserCode(signal: Signal): StrippedSignal {
@@ -21,7 +21,6 @@ function stripSignalForUserCode(signal: Signal): StrippedSignal {
     from: signal.data.from,
     subject: signal.data.subject,
     summary: signal.data.summary,
-    spamScore: signal.data.spamScore,
     workflow: signal.data.workflow,
     recipientAddress: signal.data.recipientAddress,
     workflowData: signal.data.workflowData,

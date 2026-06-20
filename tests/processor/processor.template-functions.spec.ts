@@ -57,7 +57,7 @@ function makeSignal(overrides: Partial<Signal> = {}): Signal {
       recipientAddress: "user@example.com",
       workflow: "conversation",
       workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
-      spamScore: 0.01,
+      tags: [],
       summary: "A test email.",
       s3Key: "emails/tmpl-test-001.eml",
       matchedRules: [{ ruleId: "rule_draft", actions: [{ type: "auto_draft", value: "tmpl_001" }], labelsAdded: [] }],

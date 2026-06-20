@@ -36,7 +36,7 @@ function makeSignal(overrides: { data?: Partial<Signal["data"]> } & Partial<Omit
       headers: {},
       recipientAddress: "me@mydomain.com",
       workflow: "auth",
-      spamScore: 0,
+      tags: [],
       summary: "OTP code",
       s3Key: "signals/test.eml",
       ...dataOverrides,

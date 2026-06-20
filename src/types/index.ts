@@ -19,9 +19,9 @@ export const WORKFLOWS = [
   "events",        // Ticketed events: concerts, conferences, sports, theatre — venue + date + seats
   "test",          // Emails sent by the account owner to their own domain — triggers pong
   "unspecified",   // Classification failed or was skipped — email is unclassified
-  // NOTE: spam is NOT a workflow. It is expressed via Signal.spamScore (0–1).
-  // A phishing email pretending to be a bank login is workflow:"auth" + spamScore:0.95.
-  // The processor blocks high-spamScore signals; the workflow captures what kind of
+  // NOTE: spam is NOT a workflow. It is expressed via Signal.data.tags (e.g. ["phishing", "credential-harvest"]).
+  // A phishing email pretending to be a bank login is workflow:"auth" + tags:["phishing","credential-harvest"].
+  // The processor quarantines tagged signals; the workflow captures what kind of
   // email it is (or is pretending to be), which is more actionable than just "spam".
 ] as const;
 
@@ -296,8 +296,6 @@ export interface Alias {
   domain: string;               // Full domain, e.g. "acme.com"
   alias: string;                // Local part before @, e.g. "me"
   unknownSenderPolicy: UnknownSenderPolicy;
-  // Spam score threshold (1–10 integer). Overrides account default when set.
-  spamScoreThreshold?: number;
   // eTLD+1 of the site this alias was created for (set by the extension on alias generation)
   createdForOrigin?: string;
   createdAt: string;
@@ -347,9 +345,6 @@ export interface WsConnection {
 // Account-level filtering defaults
 export interface AccountFilteringConfig {
   defaultUnknownSenderPolicy: UnknownSenderPolicy;
-  // Spam score threshold (1–10 integer). Default: 9.
-  // Per-address config can override this. Controls both filter blocking and notification suppression.
-  spamScoreThreshold?: number;
 }
 
 // Global sender reputation — aggregated across all accounts, keyed by eTLD+1
@@ -424,7 +419,7 @@ export interface EmailSignalData {
   recipientAddress: string;
   workflow: Workflow;
   workflowData: WorkflowData;
-  spamScore: number;
+  tags: string[];
   s3Key: string;
   matchedRules?: MatchedRuleResult[];
   // SES message ID — dual purpose:
@@ -618,8 +613,7 @@ export type SystemLabel =
   | "system:workflow:payments" | "system:workflow:alert" | "system:workflow:content"
   | "system:workflow:onboarding" | "system:workflow:notice" | "system:workflow:healthcare"
   | "system:workflow:job" | "system:workflow:support" | "system:workflow:events" | "system:workflow:test"
-  | "system:spam:high"
-  | "system:spam:medium"
+  | "system:spam"
   | "system:sender:untrusted"
   | "system:replied"
   | "system:test"

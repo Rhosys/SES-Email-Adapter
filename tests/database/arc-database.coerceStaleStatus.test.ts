@@ -15,7 +15,7 @@ const baseData: EmailSignalData = {
   recipientAddress: "c@d.com",
   workflow: "unspecified",
   workflowData: { workflow: "unspecified" },
-  spamScore: 0,
+  tags: [],
   s3Key: "test-key",
 };
 

@@ -4,11 +4,11 @@ import { validateCodeAst } from "../../src/isolated/ast-validator.js";
 describe("validateCodeAst", () => {
   describe("allowed constructs — accepted when wrapped in a valid function", () => {
     const acceptedCases = [
-      { scenario: "arrow function with expression body", code: "(signal, arc) => signal.spamScore > 0.5" },
-      { scenario: "arrow function with block body", code: "(signal, arc) => { return signal.spamScore > 0.5; }" },
-      { scenario: "function expression", code: "function(signal, arc) { return signal.spamScore > 0.5; }" },
-      { scenario: "conditional expression (ternary)", code: "(signal) => signal.spamScore > 0.5 ? true : null" },
-      { scenario: "logical operators (&&, ||, ??)", code: "(signal) => signal.workflow === 'payments' && signal.spamScore < 0.3 || null" },
+      { scenario: "arrow function with expression body", code: "(signal, arc) => signal.workflow === 'content'" },
+      { scenario: "arrow function with block body", code: "(signal, arc) => { return signal.workflow === 'content'; }" },
+      { scenario: "function expression", code: "function(signal, arc) { return signal.workflow === 'content'; }" },
+      { scenario: "conditional expression (ternary)", code: "(signal) => signal.workflow === 'content' ? true : null" },
+      { scenario: "logical operators (&&, ||, ??)", code: "(signal) => signal.workflow === 'payments' && signal.workflow !== 'content' || null" },
       { scenario: "property access on signal", code: "(signal) => signal.from.address" },
       { scenario: "property access on arc", code: "(signal, arc) => arc.labels.includes('important')" },
       { scenario: "string method call", code: "(signal) => signal.subject.toLowerCase().includes('invoice')" },
@@ -17,7 +17,7 @@ describe("validateCodeAst", () => {
       { scenario: "object expression", code: "(signal) => ({ type: 'archive', value: signal.id })" },
       { scenario: "array expression", code: "(signal) => [signal.id, signal.subject]" },
       { scenario: "const declaration", code: "(signal) => { const score = signal.spamScore; return score > 0.5; }" },
-      { scenario: "let declaration", code: "(signal) => { let result = null; if (signal.spamScore > 0.5) { result = true; } return result; }" },
+      { scenario: "let declaration", code: "(signal) => { let result = null; if (signal.workflow === 'content') { result = true; } return result; }" },
       { scenario: "if/else statement", code: "(signal) => { if (signal.workflow === 'payments') { return true; } else { return null; } }" },
       { scenario: "destructuring (object pattern)", code: "({ from, subject }) => from.address.endsWith('@bank.com')" },
       { scenario: "destructuring with default (AssignmentPattern)", code: "({ spamScore = 0 }) => spamScore > 0.5" },

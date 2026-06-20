@@ -184,7 +184,7 @@ describe("API route error mapping consistency", () => {
               to: [{ address: "user@example.com" }], cc: [], subject: "Test", attachments: [], headers: {},
               recipientAddress: "user@example.com", workflow: "conversation",
               workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
-              spamScore: 0.02, summary: "A test signal.",
+              tags: [], summary: "A test signal.",
               s3Key: "emails/msg-001",
             },
           } as any));

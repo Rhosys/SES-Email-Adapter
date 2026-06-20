@@ -31,7 +31,7 @@ function makeSignal(overrides: Partial<Omit<Signal, "data">> & { data?: Partial<
       recipientAddress: "me@myalias.com",
       workflow: "crm",
       workflowData: { workflow: "crm", crmType: "client_message", urgency: "high", requiresReply: true },
-      spamScore: 0.1,
+      tags: [],
       summary: "A test signal summary",
       s3Key: "emails/2024/06/test.eml",
       attachments: [],
