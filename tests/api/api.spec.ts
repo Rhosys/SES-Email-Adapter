@@ -69,6 +69,18 @@ function makeArcDb() {
 }
 
 function makeAccountDb() {
+  const getAlias = vi.fn().mockResolvedValue(ok(null));
+  const saveAlias = vi.fn().mockResolvedValue(ok(makeAlias()));
+  const ensureAlias = vi.fn().mockImplementation(async (accountId: string, address: string, defaultUnknownSenderPolicy: string, existing?: unknown) => {
+    let alias = existing;
+    if (alias === undefined) {
+      const existingResult = await getAlias(accountId, address);
+      if (existingResult.isErr()) return existingResult;
+      alias = existingResult.value;
+    }
+    if (alias) return ok(alias);
+    return saveAlias({ id: address, accountId, address, domain: address.split("@")[1], alias: address.split("@")[0], unknownSenderPolicy: defaultUnknownSenderPolicy, createdAt: "", updatedAt: "" });
+  });
   return {
     listViews: vi.fn().mockResolvedValue(ok([])),
     getView: vi.fn().mockResolvedValue(ok(null)),
@@ -93,9 +105,10 @@ function makeAccountDb() {
     createAccount: vi.fn().mockImplementation((a) => Promise.resolve(ok(a))),
     updateAccount: vi.fn().mockResolvedValue(ok(makeAccount())),
     listAliases: vi.fn().mockResolvedValue(ok([])),
-    getAlias: vi.fn().mockResolvedValue(ok(null)),
+    getAlias,
     createAlias: vi.fn().mockResolvedValue(ok(makeAlias())),
-    saveAlias: vi.fn().mockResolvedValue(ok(makeAlias())),
+    saveAlias,
+    ensureAlias,
     upsertAlias: vi.fn().mockResolvedValue(ok(makeAlias())),
     deleteAlias: vi.fn().mockResolvedValue(ok(undefined)),
     getAccountFilteringConfig: vi.fn().mockResolvedValue(ok(null)),
