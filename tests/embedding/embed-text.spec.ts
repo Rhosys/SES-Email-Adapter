@@ -271,28 +271,76 @@ describe("reduceLink", () => {
 });
 
 // ---------------------------------------------------------------------------
-// buildEmbedText — classification-output-driven embedding
+// buildEmbedText — classification-output-driven embedding (new format)
 // ---------------------------------------------------------------------------
 
 describe("buildEmbedText (classification output)", () => {
-  describe("format includes workflow, summary, workflowData fields", () => {
-    it("first line is workflow, second line is summary, remaining are key=value pairs", () => {
+  describe("line order", () => {
+    it("produces senderDomain, workflow, summary, labels, workflowData lines in order", () => {
+      const classification: ClassificationOutput = {
+        workflow: "payments",
+        workflowData: { workflow: "payments", paymentType: "invoice", vendor: "Stripe", amount: "29.99", currency: "USD" } as unknown as ClassificationOutput["workflowData"],
+        spamScore: 0.0,
+        summary: "Your Stripe invoice for June is ready",
+        labels: ["system:workflow:payments", "invoice"],
+      };
+      const result = buildEmbedText("marketing.stripe.com", classification);
+      const lines = result.split("\n");
+      expect(lines[0]).toBe("marketing.stripe.com");
+      expect(lines[1]).toBe("payments");
+      expect(lines[2]).toBe("Your Stripe invoice for June is ready");
+      expect(lines[3]).toBe("system:workflow:payments,invoice");
+      expect(lines[4]).toBe("workflowData.paymentType=invoice");
+      expect(lines[5]).toBe("workflowData.vendor=Stripe");
+      expect(lines[6]).toBe("workflowData.amount=29.99");
+      expect(lines[7]).toBe("workflowData.currency=USD");
+      expect(lines).toHaveLength(8);
+    });
+  });
+
+  describe("senderDomain appears first", () => {
+    it("first line is the senderDomain argument", () => {
       const classification: ClassificationOutput = {
         workflow: "auth",
-        workflowData: { workflow: "auth", authType: "otp", code: "123456", service: "GitHub" },
+        workflowData: { workflow: "auth", authType: "otp", service: "GitHub" },
         spamScore: 0.1,
-        summary: "GitHub OTP code for login",
-        labels: ["action-needed"],
+        summary: "GitHub OTP code",
+        labels: [],
       };
-      const result = buildEmbedText(classification);
+      const result = buildEmbedText("github.com", classification);
+      expect(result.split("\n")[0]).toBe("github.com");
+    });
+  });
+
+  describe("labels line", () => {
+    it("comma-joins labels with no spaces when populated", () => {
+      const classification: ClassificationOutput = {
+        workflow: "auth",
+        workflowData: { workflow: "auth", authType: "otp", service: "Slack" },
+        spamScore: 0.0,
+        summary: "Slack OTP",
+        labels: ["action-needed", "system:workflow:auth"],
+      };
+      const result = buildEmbedText("slack.com", classification);
       const lines = result.split("\n");
-      expect(lines[0]).toBe("auth");
-      expect(lines[1]).toBe("GitHub OTP code for login");
-      expect(lines).toContain("workflowData.authType=otp");
-      expect(lines).toContain("workflowData.code=123456");
-      expect(lines).toContain("workflowData.service=GitHub");
+      expect(lines[3]).toBe("action-needed,system:workflow:auth");
     });
 
+    it("emits empty string for labels line when labels array is empty", () => {
+      const classification: ClassificationOutput = {
+        workflow: "package",
+        workflowData: { workflow: "package", packageType: "shipping", retailer: "Amazon" },
+        spamScore: 0.0,
+        summary: "Amazon package shipped",
+        labels: [],
+      };
+      const result = buildEmbedText("amazon.com", classification);
+      const lines = result.split("\n");
+      expect(lines[3]).toBe("");
+    });
+  });
+
+  describe("workflowData flattening", () => {
     it("excludes the workflow discriminator field from workflowData", () => {
       const classification: ClassificationOutput = {
         workflow: "package",
@@ -301,10 +349,9 @@ describe("buildEmbedText (classification output)", () => {
         summary: "Amazon package shipped",
         labels: [],
       };
-      const result = buildEmbedText(classification);
+      const result = buildEmbedText("amazon.com", classification);
       const lines = result.split("\n");
-      // "workflow" from workflowData should NOT appear as a key=value line
-      expect(lines.filter((l) => l.startsWith("workflow="))).toHaveLength(0);
+      expect(lines.filter((l) => l === "workflowData.workflow=package")).toHaveLength(0);
       expect(lines).toContain("workflowData.packageType=shipping");
       expect(lines).toContain("workflowData.retailer=Amazon");
     });
@@ -317,7 +364,7 @@ describe("buildEmbedText (classification output)", () => {
         summary: "Slack OTP expiring in 10 minutes",
         labels: [],
       };
-      const result = buildEmbedText(classification);
+      const result = buildEmbedText("slack.com", classification);
       expect(result).toContain("workflowData.expiresInMinutes=10");
     });
 
@@ -329,13 +376,11 @@ describe("buildEmbedText (classification output)", () => {
         summary: "Urgent message requiring reply",
         labels: [],
       };
-      const result = buildEmbedText(classification);
+      const result = buildEmbedText("company.com", classification);
       expect(result).toContain("workflowData.requiresReply=true");
       expect(result).toContain("workflowData.sentiment=urgent");
     });
-  });
 
-  describe("null/undefined fields are omitted", () => {
     it("omits fields with null values", () => {
       const classification: ClassificationOutput = {
         workflow: "auth",
@@ -344,32 +389,32 @@ describe("buildEmbedText (classification output)", () => {
         summary: "GitHub OTP",
         labels: [],
       };
-      const result = buildEmbedText(classification);
+      const result = buildEmbedText("github.com", classification);
       const lines = result.split("\n");
       expect(lines.filter((l) => l.startsWith("workflowData.code="))).toHaveLength(0);
       expect(lines.filter((l) => l.startsWith("workflowData.actionUrl="))).toHaveLength(0);
       expect(lines).toContain("workflowData.authType=otp");
       expect(lines).toContain("workflowData.service=GitHub");
     });
+  });
 
-    it("omits fields with undefined values", () => {
+  describe("spamScore excluded", () => {
+    it("does not include spamScore in the output", () => {
       const classification: ClassificationOutput = {
-        workflow: "auth",
-        workflowData: { workflow: "auth", authType: "magic_link", service: "Notion" },
-        spamScore: 0.0,
-        summary: "Notion magic link",
-        labels: [],
+        workflow: "content",
+        workflowData: { workflow: "content", contentType: "newsletter", publisher: "TechCrunch" } as unknown as ClassificationOutput["workflowData"],
+        spamScore: 0.3,
+        summary: "TechCrunch daily newsletter",
+        labels: ["newsletter"],
       };
-      const result = buildEmbedText(classification);
-      const lines = result.split("\n");
-      // Optional fields not present on the object should not appear
-      expect(lines.filter((l) => l.startsWith("workflowData.code="))).toHaveLength(0);
-      expect(lines.filter((l) => l.startsWith("workflowData.expiresInMinutes="))).toHaveLength(0);
+      const result = buildEmbedText("techcrunch.com", classification);
+      expect(result).not.toContain("0.3");
+      expect(result).not.toContain("spamScore");
     });
   });
 
-  describe("determinism — same input produces same output", () => {
-    it("produces identical output for identical classification input", () => {
+  describe("determinism", () => {
+    it("produces identical output for identical inputs", () => {
       const classification: ClassificationOutput = {
         workflow: "travel",
         workflowData: { workflow: "travel", travelType: "flight", carrier: "United", departureDate: "2025-03-15", flightNumber: "UA123" } as unknown as ClassificationOutput["workflowData"],
@@ -377,60 +422,9 @@ describe("buildEmbedText (classification output)", () => {
         summary: "United flight UA123 on Mar 15",
         labels: ["travel"],
       };
-      const result1 = buildEmbedText(classification);
-      const result2 = buildEmbedText(classification);
+      const result1 = buildEmbedText("united.com", classification);
+      const result2 = buildEmbedText("united.com", classification);
       expect(result1).toBe(result2);
-    });
-
-    it("field order is stable across calls", () => {
-      const classification: ClassificationOutput = {
-        workflow: "payments",
-        workflowData: { workflow: "payments", paymentType: "invoice", amount: "500.00", currency: "USD", dueDate: "2025-04-01" } as unknown as ClassificationOutput["workflowData"],
-        spamScore: 0.2,
-        summary: "Invoice for $500 due Apr 1",
-        labels: ["billing"],
-      };
-      const lines1 = buildEmbedText(classification).split("\n");
-      const lines2 = buildEmbedText(classification).split("\n");
-      expect(lines1).toEqual(lines2);
-    });
-  });
-
-  describe("no raw email content in the output", () => {
-    it("output contains only workflow, summary, and workflowData — not spamScore or labels", () => {
-      const classification: ClassificationOutput = {
-        workflow: "content",
-        workflowData: { workflow: "content", contentType: "newsletter", publisher: "TechCrunch" } as unknown as ClassificationOutput["workflowData"],
-        spamScore: 0.3,
-        summary: "TechCrunch daily newsletter",
-        labels: ["newsletter", "tech"],
-      };
-      const result = buildEmbedText(classification);
-      // Should NOT contain spamScore or labels (those are metadata, not embedding content)
-      expect(result).not.toContain("0.3");
-      expect(result).not.toContain("spamScore");
-      expect(result).not.toContain("labels");
-      expect(result).not.toContain("newsletter,tech");
-    });
-
-    it("output does not contain email addresses, subjects, or body text", () => {
-      // The classification output is system-generated — verify no raw email leaks through
-      const classification: ClassificationOutput = {
-        workflow: "alert",
-        workflowData: { workflow: "alert", alertType: "security", severity: "high", service: "AWS" } as unknown as ClassificationOutput["workflowData"],
-        spamScore: 0.0,
-        summary: "AWS security alert: unauthorized access attempt",
-        labels: ["security"],
-      };
-      const result = buildEmbedText(classification);
-      // Only system-generated fields appear
-      const lines = result.split("\n");
-      expect(lines[0]).toBe("alert");
-      expect(lines[1]).toBe("AWS security alert: unauthorized access attempt");
-      // All remaining lines are key=value from workflowData
-      for (const line of lines.slice(2)) {
-        expect(line).toMatch(/^[a-zA-Z][a-zA-Z0-9.[\]]*=.+$/);
-      }
     });
   });
 });
