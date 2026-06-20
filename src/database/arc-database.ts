@@ -50,6 +50,16 @@ export function coerceStaleStatus(signal: Signal): Signal {
 }
 
 // ---------------------------------------------------------------------------
+// hydrateSignal — defaults fields that may be absent on legacy DDB items
+// ---------------------------------------------------------------------------
+
+function hydrateSignal<T>(item: T): T {
+  const record = item as Record<string, unknown>;
+  if (!record["labels"]) { return { ...item, labels: [] }; }
+  return item;
+}
+
+// ---------------------------------------------------------------------------
 // ArcDatabase
 // Owns: Arcs and Signals in SIGNALS_TABLE (DynamoDB)
 // ---------------------------------------------------------------------------
@@ -76,7 +86,7 @@ export class ArcDatabase {
           ExpressionAttributeValues: { ":pk": `ACCT#${accountId}#ARC#${arcId}`, ":sk": signalId },
           Limit: 1,
         }));
-        return ok(res.Items?.[0] ? coerceStaleStatus(res.Items[0] as Signal) : null);
+        return ok(res.Items?.[0] ? coerceStaleStatus(hydrateSignal(res.Items[0] as Signal)) : null);
       }
 
       // No arcId — query across all three GSI PK patterns
@@ -93,7 +103,7 @@ export class ArcDatabase {
           ExpressionAttributeValues: { ":pk": pk, ":sk": signalId },
           Limit: 1,
         }));
-        if (res.Items?.[0]) return ok(coerceStaleStatus(res.Items[0] as Signal));
+        if (res.Items?.[0]) return ok(coerceStaleStatus(hydrateSignal(res.Items[0] as Signal)));
       }
 
       // For user/system signals, signalLookupId === id — try direct table get
@@ -101,7 +111,7 @@ export class ArcDatabase {
         TableName: SIGNALS_TABLE,
         Key: { pk: sigPk(accountId, signalId), sk: ITEM_SK },
       }));
-      return ok(directRes.Item ? coerceStaleStatus(directRes.Item as Signal) : null);
+      return ok(directRes.Item ? coerceStaleStatus(hydrateSignal(directRes.Item as Signal)) : null);
     } catch (e) {
       return err(dbError(e));
     }
@@ -113,7 +123,7 @@ export class ArcDatabase {
         TableName: SIGNALS_TABLE,
         Key: { pk: sigPk(accountId, `ses-${sesMessageId}`), sk: ITEM_SK },
       }));
-      return ok(res.Item ? coerceStaleStatus(res.Item as Signal) : null);
+      return ok(res.Item ? coerceStaleStatus(hydrateSignal(res.Item as Signal)) : null);
     } catch (e) {
       return err(dbError(e));
     }
@@ -181,7 +191,7 @@ export class ArcDatabase {
         Limit: limit + 1,
         ...(params.cursor ? { ExclusiveStartKey: decodeCursor(params.cursor) } : {}),
       }));
-      const items = (res.Items ?? []) as Signal[];
+      const items = (res.Items ?? []).map(i => hydrateSignal(i as Signal));
       const page = items.slice(0, limit);
       const nextKey = items.length > limit && res.LastEvaluatedKey ? encodeCursor(res.LastEvaluatedKey) : null;
       return ok({ items: page, ...(nextKey ? { nextCursor: nextKey } : {}) } as Page<Signal>);
@@ -203,7 +213,7 @@ export class ArcDatabase {
         Limit: limit + 1,
         ...(params.cursor ? { ExclusiveStartKey: decodeCursor(params.cursor) } : {}),
       }));
-      const items = (res.Items ?? []) as Signal[];
+      const items = (res.Items ?? []).map(i => hydrateSignal(i as Signal));
       const page = items.slice(0, limit);
       const nextKey = items.length > limit && res.LastEvaluatedKey ? encodeCursor(res.LastEvaluatedKey) : null;
       return ok({ items: page, ...(nextKey ? { nextCursor: nextKey } : {}) } as Page<Signal>);
@@ -225,7 +235,7 @@ export class ArcDatabase {
         },
         ReturnValues: "ALL_NEW",
       }));
-      return ok(result.Attributes as unknown as Signal);
+      return ok(hydrateSignal(result.Attributes as unknown as Signal));
     } catch (e) {
       return err(dbError(e));
     }
@@ -381,7 +391,7 @@ export class ArcDatabase {
         ...(Object.keys(exprNames).length ? { ExpressionAttributeNames: exprNames } : {}),
         ReturnValues: "ALL_NEW",
       }));
-      return ok(result.Attributes as unknown as Signal);
+      return ok(hydrateSignal(result.Attributes as unknown as Signal));
     } catch (e) {
       return err(dbError(e));
     }
@@ -428,7 +438,7 @@ export class ArcDatabase {
         ExpressionAttributeNames: exprNames,
         ReturnValues: "ALL_NEW",
       }));
-      return ok(result.Attributes as unknown as Signal);
+      return ok(hydrateSignal(result.Attributes as unknown as Signal));
     } catch (e) {
       return err(dbError(e));
     }
@@ -646,7 +656,7 @@ export class ArcDatabase {
           return sig.type === "calendar_event" && sig.data?.linkedSignalId === emailSignalId;
         },
       );
-      return ok(calendarSignal ? (calendarSignal as unknown as Signal<CalendarEventData>) : null);
+      return ok(calendarSignal ? hydrateSignal(calendarSignal as unknown as Signal<CalendarEventData>) : null);
     } catch (e) {
       return err(dbError(e));
     }
@@ -673,7 +683,7 @@ export class ArcDatabase {
           return sig.type === "calendar_response" && sig.data?.veventUid === veventUid;
         },
       );
-      return ok(responseSignal ? (responseSignal as unknown as Signal<import("../types/calendar.js").CalendarResponseData>) : null);
+      return ok(responseSignal ? hydrateSignal(responseSignal as unknown as Signal<import("../types/calendar.js").CalendarResponseData>) : null);
     } catch (e) {
       return err(dbError(e));
     }
