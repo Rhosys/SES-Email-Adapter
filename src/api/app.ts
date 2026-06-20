@@ -9,6 +9,7 @@ import { validateRecipientMx } from "../dns/mx-validator.js";
 import { computeUndoWindowSeconds } from "./undo-window.js";
 import type { AuditEvent, AuditDatabase } from "../database/audit-database.js";
 import type { Result } from "neverthrow";
+import { ok as neverthrowOk, err as neverthrowErr } from "neverthrow";
 import type { DbError, NotFoundError, AuthressServiceError, AuthError, TransientSesError } from "../errors.js";
 import type { Arc, Signal, AnySignal, Attachment, View, Label, Rule, Domain, DnsRecord, Account, Page, PageParams, ArcStatus, Workflow, WorkflowData, Alias, AliasSender, SenderPolicy, VerifiedForwardingAddress, Pagination, EmailTemplate, CalendarEventData, CalendarResponseData, DomainMisconfigurationData } from "../types/index.js";
 import { isCalendarEventSignal, isEmailSignal } from "../types/index.js";
@@ -173,6 +174,32 @@ function page<K extends string, T>(key: K, items: T[], nextCursor?: string): Rec
 function withAttachmentUrls<T extends AnySignal>(signal: T, cdnBase: string): T {
   if (!isEmailSignal(signal)) return signal;
   return { ...signal, data: { ...signal.data, attachments: signal.data.attachments.map((a: Attachment) => ({ ...a, url: `${cdnBase}/${a.s3Key}` })) } };
+}
+
+// Mirrors processor.ts's autoApprove — a sender disposition recorded for an address
+// implies that address is a recognised alias, so the Alias record must exist alongside it.
+async function ensureAliasExists(accountDb: AccountDatabase, accountId: string, address: string): Promise<Result<void, DbError>> {
+  const existingResult = await accountDb.getAlias(accountId, address);
+  if (existingResult.isErr()) return neverthrowErr(existingResult.error);
+  if (existingResult.value) return neverthrowOk(undefined);
+
+  const filteringResult = await accountDb.getAccountFilteringConfig(accountId);
+  if (filteringResult.isErr()) return neverthrowErr(filteringResult.error);
+  const defaultUnknownSenderPolicy = filteringResult.value?.defaultUnknownSenderPolicy ?? "quarantine_visible";
+
+  const now = DateTime.utc().toISO()!;
+  const saveResult = await accountDb.saveAlias({
+    id: address,
+    accountId,
+    address,
+    domain: address.split("@")[1]!,
+    alias: address.split("@")[0]!,
+    unknownSenderPolicy: defaultUnknownSenderPolicy,
+    createdAt: now,
+    updatedAt: now,
+  });
+  if (saveResult.isErr()) return neverthrowErr(saveResult.error);
+  return neverthrowOk(undefined);
 }
 
 export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, verificationMailer, jobDispatcher, draftSendDispatcher, accountCreationStarter, appBaseUrl, contentCdnBaseUrl, astValidator, billingHandler, emailService, domainIdentityService, rsvpComposer, postApprovalCalendarDeps, schedulerClient }: AppDeps) {
@@ -758,6 +785,8 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
         const senderDomain = signal.data.from.address.includes("@") ? signal.data.from.address.split("@").pop()! : signal.data.from.address;
         const senderETLD1 = getDomain(senderDomain) ?? senderDomain;
         const recipientAddress = signal.data.recipientAddress;
+        const ensureAliasResult = await ensureAliasExists(accountDb, accountId, recipientAddress);
+        if (ensureAliasResult.isErr()) return err(c, 500, "Internal Server Error");
         const saveSenderResult = await accountDb.saveSender(accountId, recipientAddress, senderETLD1, body.status);
         if (saveSenderResult.isErr()) return err(c, 500, "Internal Server Error");
       }
@@ -804,6 +833,8 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
 
     // When quarantined by unknown sender, approve the sender for future emails
     if (wasQuarantinedByUnknownSender) {
+      const ensureAliasResult = await ensureAliasExists(accountDb, accountId, signal.data.recipientAddress);
+      if (ensureAliasResult.isErr()) return err(c, 500, "Internal Server Error");
       const saveSenderResult = await accountDb.saveSender(accountId, signal.data.recipientAddress, senderETLD1, "allow");
       if (saveSenderResult.isErr()) return err(c, 500, "Internal Server Error");
     }
