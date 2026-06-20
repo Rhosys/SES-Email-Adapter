@@ -194,6 +194,7 @@ async function applyRules(
       const result = await saveSignal({
         id, signalLookupId: id, arcId: context.arc.id, accountId: rule.accountId,
         source: "email", type: "invalid_rule_function", status: "active",
+        labels: [],
         createdAt: timestamp, ttl,
         data: { resourceName: rule.name, issue: evalResult.warnings.join("; ") },
       });
@@ -565,7 +566,7 @@ export class SignalProcessor {
                 {
                   const sigId = generateId("sgn-");
                   const sigTs = DateTime.utc().toISO()!;
-                  await this.arcDb.saveSignal({ id: sigId, signalLookupId: sigId, arcId: arc.id, accountId, source: "email", type: "invalid_template_function", status: "active", createdAt: sigTs, ttl: Math.floor(Date.now() / 1000) + 90 * 24 * 60 * 60, data: { resourceName: tmpl.name, functionName: fn.name, issue } });
+                  await this.arcDb.saveSignal({ id: sigId, signalLookupId: sigId, arcId: arc.id, accountId, source: "email", type: "invalid_template_function", status: "active", labels: [], createdAt: sigTs, ttl: Math.floor(Date.now() / 1000) + 90 * 24 * 60 * 60, data: { resourceName: tmpl.name, functionName: fn.name, issue } });
                 }
                 actionVars[`fn.${fn.name}`] = "";
                 preventAutoSend = true;
@@ -587,7 +588,7 @@ export class SignalProcessor {
                   {
                     const sigId = generateId("sgn-");
                     const sigTs = DateTime.utc().toISO()!;
-                    await this.arcDb.saveSignal({ id: sigId, signalLookupId: sigId, arcId: arc.id, accountId, source: "email", type: "invalid_template_function", status: "active", createdAt: sigTs, ttl: Math.floor(Date.now() / 1000) + 90 * 24 * 60 * 60, data: { resourceName: tmpl.name, functionName: fn.name, issue } });
+                    await this.arcDb.saveSignal({ id: sigId, signalLookupId: sigId, arcId: arc.id, accountId, source: "email", type: "invalid_template_function", status: "active", labels: [], createdAt: sigTs, ttl: Math.floor(Date.now() / 1000) + 90 * 24 * 60 * 60, data: { resourceName: tmpl.name, functionName: fn.name, issue } });
                   }
                   actionVars[`fn.${fn.name}`] = "";
                   preventAutoSend = true;
@@ -620,7 +621,7 @@ export class SignalProcessor {
               {
                 const sigId = generateId("sgn-");
                 const sigTs = DateTime.utc().toISO()!;
-                await this.arcDb.saveSignal({ id: sigId, signalLookupId: sigId, arcId: arc.id, accountId, source: "email", type: "auto_send_blocked", status: "active", createdAt: sigTs, ttl: Math.floor(Date.now() / 1000) + 90 * 24 * 60 * 60, data: { recipientAddress: signal.data.recipientAddress } });
+                await this.arcDb.saveSignal({ id: sigId, signalLookupId: sigId, arcId: arc.id, accountId, source: "email", type: "auto_send_blocked", status: "active", labels: [], createdAt: sigTs, ttl: Math.floor(Date.now() / 1000) + 90 * 24 * 60 * 60, data: { recipientAddress: signal.data.recipientAddress } });
               }
             }
           }
@@ -636,6 +637,7 @@ export class SignalProcessor {
             source: "user",
             type: "email",
             status: shouldAutoSend ? "pending_send" : "draft",
+            labels: [],
             createdAt: now,
             data: {
               receivedAt: now,
@@ -785,6 +787,7 @@ export class SignalProcessor {
         status: "block_reject",
         source: "email",
         type: "email",
+        labels: [],
         createdAt: DateTime.utc().toISO()!,
         data: {
           sesMessageId,
@@ -898,6 +901,7 @@ export class SignalProcessor {
         status: blockStatus,
         source: "email",
         type: "email",
+        labels: [],
         createdAt: now,
         ...(gsi2pk !== undefined ? { gsi2pk } : {}),
         data: {
@@ -966,7 +970,8 @@ export class SignalProcessor {
     }
 
     // 5. Build embed text from classification output (attacker-free content)
-    const embedText = buildEmbedText(classificationOutput);
+    const senderDomain = parsed.from.address.split("@").pop() ?? "";
+    const embedText = buildEmbedText(senderDomain, classificationOutput);
 
     // Phase 1: Primary embedding (fail-hard) — must succeed for arc matching
     const readCluster = getPrimaryArcMatcherRegistry();
@@ -1511,6 +1516,7 @@ export class SignalProcessor {
         source: "signal",
         type: "calendar_invite_invalid",
         status: "active",
+        labels: [],
         createdAt: invalidTimestamp,
         ...(ttl !== undefined ? { ttl } : {}),
         data: {
@@ -1550,6 +1556,7 @@ export class SignalProcessor {
       source: "signal",
       type: "calendar_event",
       status: "active",
+      labels: [],
       createdAt: calendarTimestamp,
       ...(ttl !== undefined ? { ttl } : {}),
       data: {
@@ -1745,6 +1752,7 @@ function buildSignal(opts: {
     source: "email",
     type: "email",
     status,
+    labels: [],
     createdAt: now,
     data: {
       sesMessageId,

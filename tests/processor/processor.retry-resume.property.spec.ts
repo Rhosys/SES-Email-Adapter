@@ -114,6 +114,7 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
         source: "email" as const,
         type: "email" as const,
         status: "active" as const,
+        labels: [],
         createdAt: "2024-01-15T10:00:00Z",
         data: {
           sesMessageId: "msg-valid-emb",
@@ -146,6 +147,7 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
         source: "email" as const,
         type: "email" as const,
         status: "active" as const,
+        labels: [],
         createdAt: "2024-01-15T10:00:00Z",
         data: {
           sesMessageId: "msg-no-emb",
@@ -177,6 +179,7 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
         source: "email" as const,
         type: "email" as const,
         status: "active" as const,
+        labels: [],
         createdAt: "2024-01-15T10:00:00Z",
         data: {
           sesMessageId: "msg-wrong-model",
@@ -451,6 +454,7 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
       source: "email" as const,
       type: "email" as const,
       status: "active" as const,
+      labels: [],
       createdAt: "2024-01-15T10:00:00Z",
       data: {
         sesMessageId: "msg-no-arc",
@@ -579,6 +583,7 @@ describe("Feature: signal-processor-retry-resilience, Property 3: DDB read failu
       source: "email",
       type: "email",
       status: "active",
+      labels: [],
       createdAt: "2024-01-15T10:00:01Z",
       data: {
         sesMessageId,
@@ -1062,6 +1067,7 @@ describe("Feature: signal-processor-retry-resilience, Property 8: Outcome re-der
       source: "email" as const,
       type: "email" as const,
       status: "active" as const,
+      labels: [],
       createdAt: "2024-01-15T10:00:00Z",
       data: {
         sesMessageId: "msg-prop8",

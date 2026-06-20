@@ -68,6 +68,7 @@ const signal: Signal = {
   source: "email",
   type: "email",
   status: "active",
+  labels: [],
   createdAt: "2024-06-01T12:00:00Z",
   data: {
     receivedAt: "2024-06-01T12:00:00Z",

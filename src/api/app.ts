@@ -656,6 +656,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
       source: "user",
       type: "email",
       status: "draft",
+      labels: [],
       createdAt: now,
       data: {
         receivedAt: now,
@@ -1124,6 +1125,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
         source: "signal",
         type: "domain_misconfiguration",
         status: "active",
+        labels: [],
         createdAt: now,
         data: {
           reason: "DKIM + SPF not configured for alias domain",
@@ -1165,6 +1167,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
       source: "user",
       type: "calendar_response",
       status: "active",
+      labels: [],
       createdAt: now,
       data: {
         decision: body.decision,

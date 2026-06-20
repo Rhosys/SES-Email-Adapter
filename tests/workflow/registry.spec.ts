@@ -16,6 +16,7 @@ const stubSignal: Signal = {
   source: "email",
   type: "email",
   status: "active",
+  labels: [],
   createdAt: "2024-01-01T00:00:00Z",
   data: {
     receivedAt: "2024-01-01T00:00:00Z",

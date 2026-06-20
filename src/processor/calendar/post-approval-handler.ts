@@ -91,6 +91,7 @@ export async function handlePostApprovalCalendar(
       source: "signal",
       type: "calendar_invite_invalid",
       status: "active",
+      labels: [],
       createdAt: invalidTimestamp,
       data: {
         reason: parseResult.error.reason,
@@ -141,6 +142,7 @@ export async function handlePostApprovalCalendar(
     source: "signal",
     type: "calendar_event",
     status: "active",
+    labels: [],
     createdAt: calendarTimestamp,
     data: {
       ...calendarData,

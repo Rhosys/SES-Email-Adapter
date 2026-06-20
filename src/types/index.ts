@@ -381,20 +381,6 @@ export interface Attachment {
 }
 
 // ---------------------------------------------------------------------------
-// EmbedTextInput — input to the embed-text builder
-// ---------------------------------------------------------------------------
-
-export interface EmbedTextInput {
-  accountId: string;
-  from: string;
-  replyTo?: string;
-  returnPath?: string;
-  recipientAddress: string;
-  subject: string;
-  rawTextBody: string;
-}
-
-// ---------------------------------------------------------------------------
 // MatchedRuleResult — per-rule trace written to Signal.matchedRules
 // ---------------------------------------------------------------------------
 
@@ -497,6 +483,7 @@ export interface SignalBase {
   source: SignalSource;
   type: SignalType;
   status: SignalStatus;
+  labels: string[];      // Full resolved label set (system + classifier + rule-assigned)
   createdAt: string;
   ttl?: number;   // DynamoDB TTL (epoch seconds) — computed from retentionDuration at write time; absent = never expire
   // ISO 8601 retention duration — the ONLY retention field stored in DynamoDB.

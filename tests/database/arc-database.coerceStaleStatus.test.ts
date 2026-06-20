@@ -27,6 +27,7 @@ function makeSignal(overrides: { status?: Signal["status"]; sendInitiatedAt?: st
     source: "user",
     type: "email",
     status: overrides.status ?? "pending_send",
+    labels: [],
     createdAt: "2024-01-01T00:00:00.000Z",
     data: { ...baseData, ...(overrides.sendInitiatedAt !== undefined ? { sendInitiatedAt: overrides.sendInitiatedAt } : {}) },
   };

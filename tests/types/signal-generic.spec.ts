@@ -83,7 +83,7 @@ describe("Property 2: System signals contain only expected data fields", () => {
   it("invalid_rule_function signal data contains only resourceName and issue", () => {
     const signal: Signal<InvalidRuleFunctionData> = {
       id: "sgn-test", signalLookupId: "sgn-test", arcId: "arc-1", accountId: "acc-1",
-      source: "email", type: "invalid_rule_function", status: "active",
+      source: "email", type: "invalid_rule_function", status: "active", labels: [],
       createdAt: "2025-01-01T00:00:00.000Z", ttl: 1740000000,
       data: { resourceName: "My Rule", issue: "syntax error" },
     };
@@ -96,7 +96,7 @@ describe("Property 2: System signals contain only expected data fields", () => {
   it("invalid_template_function signal data contains only resourceName, functionName, and issue", () => {
     const signal: Signal<InvalidTemplateFunctionData> = {
       id: "sgn-test", signalLookupId: "sgn-test", arcId: "arc-1", accountId: "acc-1",
-      source: "email", type: "invalid_template_function", status: "active",
+      source: "email", type: "invalid_template_function", status: "active", labels: [],
       createdAt: "2025-01-01T00:00:00.000Z", ttl: 1740000000,
       data: { resourceName: "Welcome Template", functionName: "formatDate", issue: "formatDate is not defined" },
     };
@@ -109,7 +109,7 @@ describe("Property 2: System signals contain only expected data fields", () => {
   it("auto_send_blocked signal data contains only recipientAddress", () => {
     const signal: Signal<AutoSendBlockedData> = {
       id: "sgn-test", signalLookupId: "sgn-test", arcId: "arc-1", accountId: "acc-1",
-      source: "email", type: "auto_send_blocked", status: "active",
+      source: "email", type: "auto_send_blocked", status: "active", labels: [],
       createdAt: "2025-01-01T00:00:00.000Z", ttl: 1740000000,
       data: { recipientAddress: "inbox@example.com" },
     };
@@ -145,6 +145,7 @@ describe("Property 2: FeedbackProcessor deliverability signals contain only expe
       source: "ses_feedback",
       type: "deliverability",
       status: "active",
+      labels: [],
       createdAt: "2025-01-01T00:00:00.000Z",
       data: {
         linkedSignalId: "sgn-original-001",
@@ -185,6 +186,7 @@ describe("Property 3: DynamoDB round-trip fidelity", () => {
         source: "email",
         type: "email",
         status: "active",
+        labels: [],
         createdAt: "2025-01-01T00:00:00.000Z",
         data: {
           receivedAt: "2025-01-01T00:00:00.000Z",
@@ -315,6 +317,7 @@ describe("Property 4: Type parameter default", () => {
       source: "email",
       type: "email",
       status: "active",
+      labels: [],
       createdAt: "2025-01-01T00:00:00.000Z",
       data: {
         receivedAt: "2025-01-01T00:00:00.000Z",
