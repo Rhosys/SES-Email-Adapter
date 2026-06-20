@@ -141,7 +141,7 @@ export interface InboundSignalMessage {
 // ---------------------------------------------------------------------------
 
 interface ProcessingOutcome {
-  blockDisposition: "block_hidden" | "block_reject" | "violate_report" | null;
+  blockDisposition: "block_hidden" | "block_reject" | "report_violation" | null;
   quarantine: boolean;
   quarantineHidden: boolean;  // true → quarantine_hidden status; false → quarantine_visible
   approveSender: boolean;
@@ -203,7 +203,7 @@ async function applyRules(
       }
     }
 
-    const staticActions = rule.actions.filter((a) => !a.disabled).map(({ type, value }) => ({ type, ...(value !== undefined ? { value } : {}) }));
+    const staticActions = rule.actions.map(({ type, value }) => ({ type, ...(value !== undefined ? { value } : {}) }));
     const dynamicActions = evalResult.dynamicActions.map(({ type, value }) => ({ type, ...(value !== undefined ? { value } : {}) }));
     const actions = [...staticActions, ...dynamicActions];
     const labelsAdded = actions.filter((a) => a.type === "assign_label" && a.value).map((a) => a.value!);
@@ -886,7 +886,7 @@ export class SignalProcessor {
     const effectiveAliasSenderConfig = aliasConfig ? aliasSenderConfig : null;
 
     if (effectiveAliasSenderConfig && effectiveAliasSenderConfig.policy !== "allow") {
-      const blockStatus = effectiveAliasSenderConfig.policy; // block_hidden | block_reject | violate_report
+      const blockStatus = effectiveAliasSenderConfig.policy; // block_hidden | block_reject | report_violation
       const now = DateTime.utc().toISO()!;
       const effectiveRetention = resolveRetention(accountCtx.retentionDuration ? { retentionDuration: accountCtx.retentionDuration } : {}, null);
       const retentionSecs = durationToSeconds(effectiveRetention);
@@ -1125,7 +1125,7 @@ export class SignalProcessor {
     // Explicit sender block — if the sender has been explicitly blocked for this alias, short-circuit
     // (post-classify path: preserves classification data on blocked signal for audit/review)
     if (effectiveAliasSenderConfig && effectiveAliasSenderConfig.policy !== "allow") {
-      const blockStatus = effectiveAliasSenderConfig.policy; // block_hidden | block_reject | violate_report
+      const blockStatus = effectiveAliasSenderConfig.policy; // block_hidden | block_reject | report_violation
       const blockedSignal = buildSignal({ status: blockStatus, accountId, sesMessageId, recipientAddress, parsed, classification: classificationOutput, s3Key, receivedAt: timestamp, now, ...(ttl !== undefined ? { ttl } : {}) });
       const saveResult = await this.arcDb.saveSignal(blockedSignal);
       if (saveResult.isErr()) return err(saveResult.error);
@@ -1197,7 +1197,7 @@ export class SignalProcessor {
       switch (effectiveFilterMode) {
         case "block_hidden":       outcome.blockDisposition = "block_hidden"; break;
         case "block_reject":       outcome.blockDisposition = "block_reject"; break;
-        case "violate_report":     outcome.blockDisposition = "violate_report"; break;
+        case "report_violation":     outcome.blockDisposition = "report_violation"; break;
         case "quarantine_hidden":  outcome.quarantine = true; outcome.quarantineHidden = true; break;
         case "quarantine_visible": outcome.quarantine = true; break;
         // "allow_all": signal proceeds as active

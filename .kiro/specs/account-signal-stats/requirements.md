@@ -8,7 +8,7 @@ Track per-account signal receiving statistics in the email-catcher backend. The 
 
 - **Stats_Writer**: The component that increments signal counters and prunes stale date-prefixed attributes in the ACCOUNTS_TABLE after the processor determines signal outcome.
 - **Stats_Reader**: The component that reads the stats row from DynamoDB and returns a structured response grouped by time granularity.
-- **Signal_Outcome**: The category a signal falls into after processing: `allowed` (status `active`), `quarantined` (status `quarantine_visible` or `quarantine_hidden`), `blocked` (status `block_hidden` or `block_reject`), or `violation_report` (status `violate_report`).
+- **Signal_Outcome**: The category a signal falls into after processing: `allowed` (status `active`), `quarantined` (status `quarantine_visible` or `quarantine_hidden`), `blocked` (status `block_hidden` or `block_reject`), or `violation_report` (status `report_violation`).
 - **Stats_Row**: The single DynamoDB item storing all counters for an account, keyed by `pk: ACCT#${accountId}`, `sk: STATS`.
 - **Lifetime_Counter**: An attribute tracking the all-time total for a given outcome category (e.g. `totalAllowed`, `totalBlocked`).
 - **Daily_Counter**: A date-prefixed attribute tracking signals for a single calendar day (e.g. `d_2025-01-15_allowed`). Retained for the last 7 days.
@@ -25,8 +25,8 @@ Track per-account signal receiving statistics in the email-catcher backend. The 
 
 #### Acceptance Criteria
 
-1. WHEN the Processor determines a Signal_Outcome for a signal with status `active`, `quarantine_visible`, `quarantine_hidden`, `block_hidden`, `block_reject`, or `violate_report`, THE Stats_Writer SHALL increment by 1 the corresponding Lifetime_Counter, Daily_Counter, Monthly_Counter, and Yearly_Counter in a single DynamoDB UpdateCommand, using the current UTC date at processing time to determine the Daily, Monthly, and Yearly attribute names.
-2. THE Stats_Writer SHALL map signal statuses to outcome categories as follows: `active` → `allowed`, `quarantine_visible` or `quarantine_hidden` → `quarantined`, `block_hidden` or `block_reject` → `blocked`, `violate_report` → `violationReport`.
+1. WHEN the Processor determines a Signal_Outcome for a signal with status `active`, `quarantine_visible`, `quarantine_hidden`, `block_hidden`, `block_reject`, or `report_violation`, THE Stats_Writer SHALL increment by 1 the corresponding Lifetime_Counter, Daily_Counter, Monthly_Counter, and Yearly_Counter in a single DynamoDB UpdateCommand, using the current UTC date at processing time to determine the Daily, Monthly, and Yearly attribute names.
+2. THE Stats_Writer SHALL map signal statuses to outcome categories as follows: `active` → `allowed`, `quarantine_visible` or `quarantine_hidden` → `quarantined`, `block_hidden` or `block_reject` → `blocked`, `report_violation` → `violationReport`.
 3. THE Stats_Writer SHALL increment the `totalSignals` Lifetime_Counter by 1 for every processed signal with a non-draft status, regardless of outcome category.
 4. THE Stats_Writer SHALL use DynamoDB `ADD` expressions for all counter increments, which initializes non-existent attributes to 0 before adding.
 5. IF a signal has status `draft`, THEN THE Stats_Writer SHALL NOT increment any counters.

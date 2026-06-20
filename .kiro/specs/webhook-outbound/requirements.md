@@ -58,7 +58,7 @@ Outbound webhooks allow users to pipe signal data into external automation tools
 2. WHEN multiple condition types are specified on a single Webhook_Filter, THE System SHALL require all condition types to match (AND logic across types, OR logic within each type) before triggering delivery.
 3. WHEN no Webhook_Filter is attached to a Webhook_Endpoint, THE System SHALL deliver all non-blocked signals to that endpoint.
 4. WHEN a signal is processed, THE System SHALL evaluate the Webhook_Filter for each enabled Webhook_Endpoint and deliver only to endpoints whose filter matches.
-5. THE System SHALL NOT deliver signals with a status of `block_hidden`, `block_reject`, or `violate_report` to any Webhook_Endpoint regardless of filter configuration.
+5. THE System SHALL NOT deliver signals with a status of `block_hidden`, `block_reject`, or `report_violation` to any Webhook_Endpoint regardless of filter configuration.
 6. IF a Webhook_Filter attach or update request specifies a workflow value not present in the Workflow enum, THEN THE System SHALL reject the request with a validation error indicating the invalid workflow value.
 
 ### Requirement 4: Webhook Payload Format

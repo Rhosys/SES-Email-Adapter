@@ -69,7 +69,7 @@ function makeProcessingDb(): ProcessingDatabase {
 
 function makeAccountDb(): AccountDatabase {
   return {
-    disableForwardActions: vi.fn().mockResolvedValue(ok(undefined)),
+    disableRulesForwardingTo: vi.fn().mockResolvedValue(ok(["rule-fwd-001"])),
   } as unknown as AccountDatabase;
 }
 
@@ -191,13 +191,15 @@ describe("FeedbackProcessor — prefixed tag reading", () => {
   let accountDb: AccountDatabase;
   let signalStore: FeedbackSignalStore;
   let processor: FeedbackProcessor;
+  let logger: ReturnType<typeof createMockLogger>;
 
   beforeEach(() => {
     vi.clearAllMocks();
     processingDb = makeProcessingDb();
     accountDb = makeAccountDb();
     signalStore = makeSignalStore();
-    processor = new FeedbackProcessor(processingDb, accountDb, createMockLogger(), signalStore);
+    logger = createMockLogger();
+    processor = new FeedbackProcessor(processingDb, accountDb, logger, signalStore);
   });
 
   it("disables forward rules when X-Numaeel-AccountId and X-Numaeel-Type=forward are present", async () => {
@@ -212,7 +214,12 @@ describe("FeedbackProcessor — prefixed tag reading", () => {
     const result = await processor.processNotification(feedback);
 
     expect(result.isOk()).toBe(true);
-    expect(accountDb.disableForwardActions).toHaveBeenCalledWith("acct-001", "recipient@example.com");
+    expect(accountDb.disableRulesForwardingTo).toHaveBeenCalledWith("acct-001", "recipient@example.com");
+    expect(logger.calls).toContainEqual({
+      method: "track",
+      message: "Rule disabled due to permanent forward bounce",
+      context: { code: "feedback.rule_disabled_on_bounce", accountId: "acct-001", ruleId: "rule-fwd-001", bouncedAddress: "recipient@example.com" },
+    });
   });
 
   it("skips account-specific correlation when X-Numaeel-AccountId is absent — suppression only", async () => {
@@ -230,7 +237,7 @@ describe("FeedbackProcessor — prefixed tag reading", () => {
     // Address suppression still happens
     expect(processingDb.suppressAddress).toHaveBeenCalledTimes(1);
     // Forward-rule disabling skipped (no accountId)
-    expect(accountDb.disableForwardActions).not.toHaveBeenCalled();
+    expect(accountDb.disableRulesForwardingTo).not.toHaveBeenCalled();
     // Signal lookup skipped (no accountId)
     expect(signalStore.getSignalById).not.toHaveBeenCalled();
     expect(signalStore.getSignalByMessageId).not.toHaveBeenCalled();

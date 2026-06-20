@@ -91,7 +91,7 @@ export class FollowupHandler {
       return this.notifier.notify(accountId, reactivatedArc, signal, reactivatedArc.urgency ?? "normal", reason);
     }
 
-    // 6. Any other status (e.g. violate_report) → discard without action
+    // 6. Any other status (e.g. report_violation) → discard without action
     this.logger.track("Followup: arc in unexpected status, discarding.", {
       code: "followup.unexpected_status",
       accountId,

@@ -237,11 +237,11 @@ export interface UnspecifiedData {
 // ---------------------------------------------------------------------------
 
 // Default disposition for emails from unknown senders, applied after rules run
-export const UNKNOWN_SENDER_POLICIES = ["allow_all", "quarantine_visible", "quarantine_hidden", "block_hidden", "block_reject", "violate_report"] as const;
+export const UNKNOWN_SENDER_POLICIES = ["allow_all", "quarantine_visible", "quarantine_hidden", "block_hidden", "block_reject", "report_violation"] as const;
 export type UnknownSenderPolicy = (typeof UNKNOWN_SENDER_POLICIES)[number];
 
-// active = visible in inbox; quarantine_visible = surfaced in review queue; quarantine_hidden = stored but not shown in queue; block_hidden = accepted, silently discarded; block_reject = bounced; violate_report = bounced + reported; draft = user-authored, unsent; pending_send = send initiated, within undo window; sent = delivered via SES
-export const SIGNAL_STATUSES = ["active", "block_hidden", "block_reject", "violate_report", "quarantine_visible", "quarantine_hidden", "draft", "pending_send", "sent"] as const;
+// active = visible in inbox; quarantine_visible = surfaced in review queue; quarantine_hidden = stored but not shown in queue; block_hidden = accepted, silently discarded; block_reject = bounced; report_violation = bounced + reported; draft = user-authored, unsent; pending_send = send initiated, within undo window; sent = delivered via SES
+export const SIGNAL_STATUSES = ["active", "block_hidden", "block_reject", "report_violation", "quarantine_visible", "quarantine_hidden", "draft", "pending_send", "sent"] as const;
 export type SignalStatus = (typeof SIGNAL_STATUSES)[number];
 
 export const STATS_CATEGORIES = ["allowed", "blocked", "quarantined", "violationReport"] as const;
@@ -303,7 +303,7 @@ export interface Alias {
 }
 
 // Approved/blocked sender domain per alias — stored as individual DynamoDB items
-export const SENDER_POLICIES = ["allow", "block_hidden", "block_reject", "violate_report"] as const;
+export const SENDER_POLICIES = ["allow", "block_hidden", "block_reject", "report_violation"] as const;
 export type SenderPolicy = (typeof SENDER_POLICIES)[number];
 
 export interface AliasSender {
@@ -383,7 +383,7 @@ export interface MatchedRuleResult {
   ruleId: string;
   actions: Array<Pick<RuleAction, "type" | "value">>;
   labelsAdded: string[];
-  statusChange?: "block_hidden" | "block_reject" | "violate_report" | "quarantine_visible" | "quarantine_hidden" | "archived" | "deleted";
+  statusChange?: "block_hidden" | "block_reject" | "report_violation" | "quarantine_visible" | "quarantine_hidden" | "archived" | "deleted";
 }
 
 // ---------------------------------------------------------------------------
@@ -525,7 +525,7 @@ export function isAutoSendBlockedSignal(signal: AnySignal): signal is Signal<Aut
 // Arc (materialized aggregate of related Signals)
 // ---------------------------------------------------------------------------
 
-export const ARC_STATUSES = ["active", "archived", "deleted", "violate_report"] as const;
+export const ARC_STATUSES = ["active", "archived", "deleted", "report_violation"] as const;
 export type ArcStatus = (typeof ARC_STATUSES)[number];
 
 export interface Arc {
@@ -623,7 +623,6 @@ export type SystemLabel =
 export interface RuleAction {
   type: RuleActionType;
   value?: string;
-  disabled?: boolean;  // auto-set when forward target bounces permanently
 }
 
 // ---------------------------------------------------------------------------

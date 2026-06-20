@@ -103,7 +103,7 @@ interface SignalBase {
 }
 
 type SignalStatus =
-  | 'active' | 'block_hidden' | 'block_reject' | 'violate_report'
+  | 'active' | 'block_hidden' | 'block_reject' | 'report_violation'
   | 'quarantine_visible' | 'quarantine_hidden'
   | 'draft' | 'pending_send' | 'sent'
 

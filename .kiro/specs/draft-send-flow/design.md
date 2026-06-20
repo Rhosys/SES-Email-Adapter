@@ -86,7 +86,7 @@ export interface Signal {
 ```typescript
 // Updated SIGNAL_STATUSES
 export const SIGNAL_STATUSES = [
-  "active", "block_hidden", "block_reject", "violate_report",
+  "active", "block_hidden", "block_reject", "report_violation",
   "quarantine_visible", "quarantine_hidden",
   "draft", "pending_send", "sent"
 ] as const;
@@ -553,7 +553,7 @@ const STATUS_TO_CATEGORY: Record<Exclude<SignalStatus, "draft" | "pending_send" 
   active: "allowed",
   block_hidden: "blocked",
   block_reject: "blocked",
-  violate_report: "blocked",
+  report_violation: "blocked",
   quarantine_visible: "quarantined",
   quarantine_hidden: "quarantined",
 };

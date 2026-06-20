@@ -5,7 +5,7 @@ import { RetentionDuration } from "./schemas.js";
 
 // ---- Shared primitives ----
 
-const UnknownSenderPolicy = z.enum(["allow_all", "quarantine_visible", "quarantine_hidden", "block_hidden", "block_reject", "violate_report"]);
+const UnknownSenderPolicy = z.enum(["allow_all", "quarantine_visible", "quarantine_hidden", "block_hidden", "block_reject", "report_violation"]);
 
 // Lowercases + trims, then validates with both Zod's email check and the RFC regex.
 const lowerEmail = z.string()
@@ -14,7 +14,7 @@ const lowerEmail = z.string()
 
 // Lowercases + trims a domain string (no email-format validation).
 const lowerDomain = z.string().transform(s => s.toLowerCase().trim());
-const ArcStatus = z.enum(["active", "archived", "deleted", "violate_report"]);
+const ArcStatus = z.enum(["active", "archived", "deleted", "report_violation"]);
 const ArcUrgency = z.enum(["critical", "high", "normal", "low", "silent"]);
 const Workflow = z.enum(WORKFLOWS);
 const SortField = z.enum(["lastSignalAt", "createdAt"]);
@@ -35,7 +35,6 @@ const EmailAddressSchema = z.object({
 const RuleActionSchema = z.object({
   type: RuleActionType,
   value: z.string().optional(),
-  disabled: z.boolean().optional(),
 });
 
 // ---- Arc ----
@@ -52,7 +51,7 @@ export type UpdateArcRequest = z.infer<typeof UpdateArcRequest>;
 // ---- Signal ----
 
 export const UpdateSignalStatusRequest = z.object({
-  status: z.enum(["active", "block_hidden", "block_reject", "violate_report"]),
+  status: z.enum(["active", "block_hidden", "block_reject", "report_violation"]),
 });
 export type UpdateSignalStatusRequest = z.infer<typeof UpdateSignalStatusRequest>;
 
@@ -175,12 +174,12 @@ export type UpdateAliasRequest = z.infer<typeof UpdateAliasRequest>;
 
 export const CreateSenderRequest = z.object({
   domain: lowerDomain,
-  policy: z.enum(["allow", "block_hidden", "block_reject", "violate_report"]),
+  policy: z.enum(["allow", "block_hidden", "block_reject", "report_violation"]),
 });
 export type CreateSenderRequest = z.infer<typeof CreateSenderRequest>;
 
 export const UpdateSenderRequest = z.object({
-  policy: z.enum(["allow", "block_hidden", "block_reject", "violate_report"]),
+  policy: z.enum(["allow", "block_hidden", "block_reject", "report_violation"]),
 });
 export type UpdateSenderRequest = z.infer<typeof UpdateSenderRequest>;
 

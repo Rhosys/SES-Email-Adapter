@@ -956,21 +956,19 @@ export class AccountDatabase {
     }
   }
 
-  async disableForwardActions(accountId: string, toAddress: string): Promise<Result<void, DbError>> {
+  async disableRulesForwardingTo(accountId: string, toAddress: string): Promise<Result<string[], DbError>> {
     const rulesResult = await this.listRules(accountId);
     if (rulesResult.isErr()) return err(rulesResult.error);
     const rules = rulesResult.value;
 
-    const affected = rules.filter((r) => r.actions.some((a) => a.type === "forward" && a.value === toAddress && !a.disabled));
+    const affected = rules.filter((r) => r.actions.some((a) => a.type === "forward" && a.value === toAddress));
+    const disabledRuleIds: string[] = [];
     for (const r of affected) {
-      const updateResult = await this.updateRule(accountId, r.id, {
-        actions: r.actions.map((a) =>
-          a.type === "forward" && a.value === toAddress ? { ...a, disabled: true } : a,
-        ),
-      });
+      const updateResult = await this.updateRule(accountId, r.id, { status: "disabled" });
       if (updateResult.isErr()) return err(updateResult.error);
+      disabledRuleIds.push(r.id);
     }
-    return ok(undefined);
+    return ok(disabledRuleIds);
   }
 
   // ---------------------------------------------------------------------------

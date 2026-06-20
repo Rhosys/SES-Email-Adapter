@@ -43,7 +43,7 @@ Surfaces: **Website** · **Extension** · **Mobile** · **CLI/Desktop**
   - Website
 - [ ] **Web Push service worker** — notifications only work while tab is open (via WebSocket). Need: service worker registration, push subscription management, background notifications
   - Website
-- [ ] **Unapproved sender breach hint** — when viewing a quarantined signal (or any arc/signal from an unapproved sender), fetch the alias's approved senders list and display them. Surface a suggestion: "One of these approved senders likely shared or sold your address." Recommend `violate_report` as the primary action. Applies to quarantine review and arc detail for signals from unknown senders.
+- [ ] **Unapproved sender breach hint** — when viewing a quarantined signal (or any arc/signal from an unapproved sender), fetch the alias's approved senders list and display them. Surface a suggestion: "One of these approved senders likely shared or sold your address." Recommend `report_violation` as the primary action. Applies to quarantine review and arc detail for signals from unknown senders.
   - Website
 - [ ] **Webhook rule action UI** — rule editor needs webhook action type in dropdown, URL input field with validation feedback, and delivery status display (future: show last delivery attempt result)
   - Website

@@ -70,7 +70,7 @@ updatedAt: S
 | `quarantine_hidden` | `quarantined` |
 | `block_hidden` | `blocked` |
 | `block_reject` | `blocked` |
-| `violate_report` | `violationReport` |
+| `report_violation` | `violationReport` |
 | `draft` | (skip — no increment) |
 
 Enforced exhaustively via TypeScript `satisfies Record<Exclude<SignalStatus, 'draft'>, StatsCategory>`.
