@@ -95,8 +95,10 @@ function makeAccountDb() {
     listAliases: vi.fn().mockResolvedValue(ok([])),
     getAlias: vi.fn().mockResolvedValue(ok(null)),
     createAlias: vi.fn().mockResolvedValue(ok(makeAlias())),
+    saveAlias: vi.fn().mockResolvedValue(ok(makeAlias())),
     upsertAlias: vi.fn().mockResolvedValue(ok(makeAlias())),
     deleteAlias: vi.fn().mockResolvedValue(ok(undefined)),
+    getAccountFilteringConfig: vi.fn().mockResolvedValue(ok(null)),
     listVerifiedForwardingAddresses: vi.fn().mockResolvedValue(ok([])),
     getVerifiedForwardingAddress: vi.fn().mockResolvedValue(ok(null)),
     saveVerifiedForwardingAddress: vi.fn().mockResolvedValue(ok(undefined)),
@@ -484,6 +486,24 @@ describe("API", () => {
       expect(arcDb.updateSignalStatus).toHaveBeenCalledWith(TEST_ACCOUNT_ID, s.signalLookupId, "block_hidden");
     });
 
+    it("creates the alias when denying a quarantined signal for a brand-new address", async () => {
+      const s = makeSignal({ status: "quarantine_visible" });
+      vi.mocked(arcDb.getSignalById).mockResolvedValueOnce(ok(s));
+      vi.mocked(accountDb.getAlias).mockResolvedValueOnce(ok(null));
+      const res = await req(app, "POST", `${A}/signals/SES%23msg-001/quarantineResponse`, { body: { status: "block_hidden" } });
+      expect(res.status).toBe(200);
+      expect(accountDb.saveAlias).toHaveBeenCalledWith(expect.objectContaining({ accountId: TEST_ACCOUNT_ID, address: s.data.recipientAddress }));
+    });
+
+    it("does not recreate the alias when denying a quarantined signal for a known address", async () => {
+      const s = makeSignal({ status: "quarantine_visible" });
+      vi.mocked(arcDb.getSignalById).mockResolvedValueOnce(ok(s));
+      vi.mocked(accountDb.getAlias).mockResolvedValueOnce(ok(makeAlias({ address: s.data.recipientAddress })));
+      const res = await req(app, "POST", `${A}/signals/SES%23msg-001/quarantineResponse`, { body: { status: "block_hidden" } });
+      expect(res.status).toBe(200);
+      expect(accountDb.saveAlias).not.toHaveBeenCalled();
+    });
+
     it("allows a quarantined signal — creates new arc when no grouping key match", async () => {
       const s = makeSignal({ status: "quarantine_visible" });
       vi.mocked(arcDb.getSignalById).mockResolvedValueOnce(ok(s));
@@ -495,6 +515,27 @@ describe("API", () => {
       expect(body.signal.status).toBe("active");
       expect(arcDb.createArc).toHaveBeenCalledOnce();
       expect(arcDb.unblockSignal).toHaveBeenCalledWith(TEST_ACCOUNT_ID, s.signalLookupId, expect.any(String));
+    });
+
+    it("creates the alias when approving a quarantined signal for a brand-new address", async () => {
+      const s = makeSignal({ status: "quarantine_visible" });
+      vi.mocked(arcDb.getSignalById).mockResolvedValueOnce(ok(s));
+      vi.mocked(arcDb.fastFindArcByAlternativeLookupKey).mockResolvedValueOnce(ok(null));
+      vi.mocked(accountDb.getAlias).mockResolvedValueOnce(ok(null));
+      const res = await req(app, "POST", `${A}/signals/SES%23msg-001/quarantineResponse`, { body: { status: "active" } });
+      expect(res.status).toBe(200);
+      expect(accountDb.saveAlias).toHaveBeenCalledWith(expect.objectContaining({ accountId: TEST_ACCOUNT_ID, address: s.data.recipientAddress }));
+      expect(accountDb.saveSender).toHaveBeenCalledWith(TEST_ACCOUNT_ID, s.data.recipientAddress, expect.any(String), "allow");
+    });
+
+    it("does not recreate the alias when approving a quarantined signal for a known address", async () => {
+      const s = makeSignal({ status: "quarantine_visible" });
+      vi.mocked(arcDb.getSignalById).mockResolvedValueOnce(ok(s));
+      vi.mocked(arcDb.fastFindArcByAlternativeLookupKey).mockResolvedValueOnce(ok(null));
+      vi.mocked(accountDb.getAlias).mockResolvedValueOnce(ok(makeAlias({ address: s.data.recipientAddress })));
+      const res = await req(app, "POST", `${A}/signals/SES%23msg-001/quarantineResponse`, { body: { status: "active" } });
+      expect(res.status).toBe(200);
+      expect(accountDb.saveAlias).not.toHaveBeenCalled();
     });
 
     it("allows a quarantined signal — attaches to existing arc when grouping key matches", async () => {
