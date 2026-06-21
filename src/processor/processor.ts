@@ -1232,7 +1232,7 @@ export class SignalProcessor {
       const quarantinedSignal: Signal = { ...quarantineBase, data: { ...quarantineBase.data, matchedRules } };
       const saveResult = await this.arcDb.saveSignal(quarantinedSignal);
       if (saveResult.isErr()) return err(saveResult.error);
-      this.logger.track("Quarantined email — rule or sender filter matched.", { code: "processor.quarantine", accountId, sesMessageId, recipientAddress, status: quarantineStatus, matchedRules: matchedRules.map(r => r.ruleId) });
+      this.logger.info("Quarantined email — rule or sender filter matched.", { code: "processor.quarantine", accountId, sesMessageId, recipientAddress, status: quarantineStatus, matchedRules: matchedRules.map(r => r.ruleId) });
       const repResult = await this.processingDb.updateGlobalReputation(senderETLD1, { wasSpam: true, wasBlocked: true });
       if (repResult.isErr()) {
         this.logger.warn("Failed to update global sender reputation after signal processing. The DynamoDB update returned an error. Reputation data may be stale for this domain.", { code: "processor.reputation_update_failed", accountId, error: repResult.error });

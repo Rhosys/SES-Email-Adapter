@@ -214,6 +214,11 @@ resource "aws_cloudwatch_log_group" "aurora" {
 # Triggered by CI after deploy. Non-blocking — CI fires and forgets.
 # ---------------------------------------------------------------------------
 
+resource "aws_cloudwatch_log_group" "codebuild_migrate" {
+  name              = "/aws/codebuild/${lower(var.service_name)}-migrate"
+  retention_in_days = 3653
+}
+
 resource "aws_codebuild_project" "migration" {
   name                   = "${lower(var.service_name)}-migrate"
   description            = "Applies Drizzle database migrations to the Aurora cluster via RDS Data API"
@@ -257,8 +262,7 @@ resource "aws_codebuild_project" "migration" {
 
   logs_config {
     cloudwatch_logs {
-      group_name  = aws_cloudwatch_log_group.shared.name
-      stream_name = "0000/00/00/CodeBuild-${var.service_name}-migration"
+      group_name = aws_cloudwatch_log_group.codebuild_migrate.name
     }
   }
 
@@ -301,7 +305,7 @@ resource "aws_iam_role_policy" "codebuild_migration" {
         Sid      = "Logs"
         Effect   = "Allow"
         Action   = ["logs:CreateLogStream", "logs:PutLogEvents"]
-        Resource = "${aws_cloudwatch_log_group.shared.arn}:*"
+        Resource = "${aws_cloudwatch_log_group.codebuild_migrate.arn}:*"
       },
       {
         Sid      = "S3Source"
