@@ -170,11 +170,17 @@ program
     const { CodeBuildClient, StartBuildCommand, BatchGetBuildsCommand } = await import('@aws-sdk/client-codebuild');
     const codebuild = new CodeBuildClient({});
     const sourceLocation = `${deploymentBucket}/${packageMetadata.name}/${version}/lambda.zip`;
+    const commitSha = (process.env['GITHUB_SHA'] ?? process.env['CI_COMMIT_SHA'] ?? 'unknown').slice(0, 7);
+    const runNumber = process.env['GITHUB_RUN_NUMBER'] ?? process.env['CI_PIPELINE_IID'] ?? '0';
+    const streamPrefix = `${new Date().toISOString().slice(0, 10)} - ${commitSha} - ${runNumber}`;
     console.log(`Triggering migrations via CodeBuild (source: ${sourceLocation})...`);
     const buildResult = await codebuild.send(new StartBuildCommand({
       projectName: `${packageMetadata.name}-migrate`,
       sourceLocationOverride: sourceLocation,
       sourceTypeOverride: 'S3',
+      logsConfigOverride: {
+        cloudWatchLogs: { status: 'ENABLED', streamName: streamPrefix },
+      },
     }));
     const buildId = buildResult.build?.id;
     if (!buildId) {
