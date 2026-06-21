@@ -13,7 +13,7 @@ import { OnboardingTaskHandler } from "./onboarding/onboarding-task-handler.js";
 import { SfnAccountCreationStarter } from "./onboarding/account-creation-starter.js";
 import type { AccountCreationStarter } from "./onboarding/account-creation-starter.js";
 
-const [MSG_TYPE_REINDEX, MSG_TYPE_SIDE_EFFECT, MSG_TYPE_DRAFT_SEND, MSG_TYPE_SIGNAL_FOLLOWUP, MSG_TYPE_RSVP_REMINDER] = SQS_MESSAGE_TYPES;
+const [MSG_TYPE_REINDEX, MSG_TYPE_SIDE_EFFECT, MSG_TYPE_DRAFT_SEND, MSG_TYPE_SIGNAL_FOLLOWUP, MSG_TYPE_RSVP_REMINDER, MSG_TYPE_DIGEST_DISPATCH, MSG_TYPE_DIGEST_SEND] = SQS_MESSAGE_TYPES;
 import { SignalClassifier } from "./classifier/classifier.js";
 import { SignalProcessor } from "./processor/processor.js";
 import type { InboundSignalMessage, SideEffectPayload, SesVerdict } from "./processor/processor.js";
@@ -54,6 +54,9 @@ import { SchedulerClient as AwsSchedulerClient } from "@aws-sdk/client-scheduler
 
 import { EmailService } from "./email/email-service.js";
 import { SesDomainIdentityService } from "./email/domain-identity-service.js";
+import { DigestDispatcher } from "./digest/digest-dispatcher.js";
+import { DigestWorker } from "./digest/digest-worker.js";
+import type { IDigestSendMessage } from "./digest/digest-worker.js";
 import { BillingHandler } from "./billing/billing-handler.js";
 import { ReindexDispatcher } from "./jobs/reindex/reindex-dispatcher.js";
 import type { ReindexSegmentMessage } from "./jobs/reindex/reindex-dispatcher.js";
@@ -238,12 +241,32 @@ const rsvpReminderHandler = new RsvpReminderHandler({
 });
 
 // ---------------------------------------------------------------------------
+// Digest (dispatch + worker)
+// ---------------------------------------------------------------------------
+
+const digestDispatcher = new DigestDispatcher({
+  accountDb: { queryAllAccountMetas: () => accountDb.queryAllAccountMetas() },
+  sqsClient: sqs,
+  queueUrl: SIGNAL_QUEUE_URL,
+  logger,
+});
+
+const digestWorker = new DigestWorker({
+  accountDb: { getAccount: (id) => accountDb.getAccount(id), getVerifiedForwardingAddress: (accountId, address) => accountDb.getVerifiedForwardingAddress(accountId, address) },
+  arcDb: { listActiveArcs: (accountId, limit) => arcDb.listActiveArcs(accountId, limit) },
+  signalDb: { countQuarantined: (accountId) => arcDb.countQuarantined(accountId) },
+  emailService,
+  logger,
+});
+
+// ---------------------------------------------------------------------------
 // Onboarding (Step Function task handler + account creation starter)
 // ---------------------------------------------------------------------------
 
 const onboardingHandler = new OnboardingTaskHandler(
   { getAccount: (id) => accountDb.getAccount(id), updateAccount: (id, u) => accountDb.updateAccount(id, u), listDomains: (id) => accountDb.listDomains(id), hasSignals: (id) => arcDb.hasSignals(id) },
   logger,
+  emailService,
 );
 
 const ACCOUNT_CREATION_SFN_NAME = process.env["ACCOUNT_CREATION_SFN_NAME"] ?? "";
@@ -461,6 +484,19 @@ async function processSqsRecord(
       return ok(undefined);
     }
     return rsvpReminderHandler.process(message);
+  }
+
+  if (messageType === MSG_TYPE_DIGEST_DISPATCH) {
+    return digestDispatcher.dispatch();
+  }
+
+  if (messageType === MSG_TYPE_DIGEST_SEND) {
+    const message = body as IDigestSendMessage;
+    if (!message.accountId) {
+      logger.error("Malformed digest_send payload — missing accountId. Dropping message.", { code: "handler.sqs.malformed_digest_send", messageId });
+      return ok(undefined);
+    }
+    return digestWorker.process(message);
   }
 
   // SNS envelope — unwrap and route by notificationType

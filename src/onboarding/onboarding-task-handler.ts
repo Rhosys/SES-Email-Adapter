@@ -1,11 +1,16 @@
 import { ok, err } from "neverthrow";
 import { DateTime } from "luxon";
 import type { Result } from "neverthrow";
-import type { DbError } from "../errors.js";
+import type { DbError, TransientSesError } from "../errors.js";
 import type { Logger } from "../logger.js";
+import type { EmailService } from "../email/email-service.js";
 import type { Account, AccountOnboarding, Domain } from "../types/index.js";
 import type { OnboardingProgress } from "./compose-followup-email.js";
 import { composeFollowupEmail } from "./compose-followup-email.js";
+import { renderTemplate } from "../email/template-renderer.js";
+import { buildEmailTags } from "../email/tag-sanitizer.js";
+import { buildUnsubscribeHeaders } from "../email/unsubscribe-headers.js";
+import { generateUnsubscribeToken } from "../email/unsubscribe-token.js";
 
 // ---------------------------------------------------------------------------
 // Store interface — minimal surface needed by this handler
@@ -19,6 +24,16 @@ export interface OnboardingStore {
 }
 
 // ---------------------------------------------------------------------------
+// Environment
+// ---------------------------------------------------------------------------
+
+const MAIL_DOMAIN = process.env["MAIL_DOMAIN"] ?? ""
+const APP_BASE_URL = process.env["APP_BASE_URL"] ?? ""
+const API_DOMAIN = process.env["API_DOMAIN"] ?? ""
+const KMS_KEY_ARN = process.env["AUTHRESS_KMS_KEY_ARN"] ?? ""
+const KEY_ID = process.env["AUTHRESS_KEY_ID"] ?? ""
+
+// ---------------------------------------------------------------------------
 // OnboardingTaskHandler
 // ---------------------------------------------------------------------------
 
@@ -26,13 +41,14 @@ export class OnboardingTaskHandler {
   constructor(
     private readonly store: OnboardingStore,
     private readonly logger: Logger,
+    private readonly emailService: EmailService,
   ) {}
 
-  async handleFollowup(accountId: string, email: string): Promise<Result<void, DbError>> {
+  async handleFollowup(accountId: string, email: string): Promise<Result<void, DbError | TransientSesError>> {
     return this.handleProgressTask(accountId, email, "onboarding.followup");
   }
 
-  async handleCleanup(accountId: string, email: string): Promise<Result<void, DbError>> {
+  async handleCleanup(accountId: string, email: string): Promise<Result<void, DbError | TransientSesError>> {
     return this.handleProgressTask(accountId, email, "onboarding.cleanup");
   }
 
@@ -52,7 +68,7 @@ export class OnboardingTaskHandler {
   // Shared progress-check logic for followup and cleanup
   // ---------------------------------------------------------------------------
 
-  private async handleProgressTask(accountId: string, email: string, code: string): Promise<Result<void, DbError>> {
+  private async handleProgressTask(accountId: string, email: string, code: string): Promise<Result<void, DbError | TransientSesError>> {
     // 1. Read account
     const accountResult = await this.store.getAccount(accountId);
     if (accountResult.isErr()) {
@@ -98,10 +114,16 @@ export class OnboardingTaskHandler {
       }
     }
 
-    // 6. Compose email content (for TRACK log — actual sending deferred to later)
+    // 6. Suppress if all onboarding steps complete — no send needed
+    if (progress.domainAdded && progress.senderSetupComplete && progress.emailsReceived) {
+      this.logger.info("Onboarding email suppressed — all steps complete", { code, accountId });
+      return ok(undefined);
+    }
+
+    // 7. Compose email content
     const emailContent = composeFollowupEmail(progress);
 
-    // 7. Log TRACK with progress and composed email
+    // 8. Log TRACK with progress and composed email (before send — send is terminal)
     this.logger.track("Onboarding progress checked", {
       code: code,
       accountId,
@@ -109,6 +131,59 @@ export class OnboardingTaskHandler {
       progress,
       emailContent,
     });
+
+    // 9. Derive step from code for triggerId
+    const step = code === "onboarding.followup" ? "followup" : "cleanup";
+    const triggerId = `onboarding-${accountId}-${step}`;
+    const fullDate = DateTime.utc().toISODate()!;
+
+    // 10. Generate unsubscribe token
+    const unsubscribeCode = await generateUnsubscribeToken({
+      accountId,
+      forwardingTargetId: accountId,
+      emailType: "onboarding",
+      apiDomain: API_DOMAIN,
+      kmsKeyArn: KMS_KEY_ARN,
+      keyId: KEY_ID,
+    });
+
+    // 11. Render template
+    const htmlBody = await renderTemplate("onboarding-followup", {
+      domainAdded: progress.domainAdded,
+      senderSetupComplete: progress.senderSetupComplete,
+      emailsReceived: progress.emailsReceived,
+      domainIcon: progress.domainAdded ? "✅" : "❌",
+      senderIcon: progress.senderSetupComplete ? "✅" : "❌",
+      emailsIcon: progress.emailsReceived ? "✅" : "❌",
+      unsubscribeCode,
+      domain: APP_BASE_URL.replace(/^https?:\/\//, ""),
+      emailType: "onboarding",
+      appBaseUrl: APP_BASE_URL,
+    });
+
+    // 12. Build tags and headers
+    const tags = buildEmailTags({
+      accountId,
+      fullDate,
+      invocationId: this.logger.getInvocationId(),
+      triggerId,
+    });
+    const headers = buildUnsubscribeHeaders(accountId, API_DOMAIN, unsubscribeCode);
+
+    // 13. Send via EmailService — terminal operation, no DB writes after send
+    const textBody = `${emailContent.textBody}\n\nView your account: ${APP_BASE_URL}/a/`;
+    const sendResult = await this.emailService.send({
+      to: email,
+      subject: "The Next Step",
+      textBody,
+      htmlBody,
+      headers,
+      tags,
+      fromOverride: `"Numaeel" <noreply@${MAIL_DOMAIN}>`,
+      accountId,
+    });
+
+    if (sendResult.isErr()) return err(sendResult.error);
 
     return ok(undefined);
   }
