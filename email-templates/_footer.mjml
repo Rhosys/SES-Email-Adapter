@@ -1,0 +1,9 @@
+<mj-section background-color="#DEE2E6">
+  <mj-column padding="0 10px">
+    <mj-spacer height="20px" />
+    <mj-text mj-class="footer">You're getting these notifications because you're part of an active Numaeel account.</mj-text>
+    <mj-text mj-class="footer">Rhosys AG · Wülflingerstrasse 151c · 8408 Winterthur · Switzerland</mj-text>
+    <mj-text mj-class="footer">You think you got this email by mistake? Reply to this email or contact <a href="https://{{domain}}/a/support">{{domain}}/a/support</a></mj-text>
+    <mj-text mj-class="footer"><a href="https://{{domain}}/a/unsubscribe?code={{unsubscribeCode}}&type={{emailType}}">Unsubscribe</a></mj-text>
+  </mj-column>
+</mj-section>

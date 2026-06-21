@@ -1,0 +1,26 @@
+<mjml>
+  <mj-head>
+    <mj-attributes>
+      <mj-all font-family="Arial, sans-serif" />
+      <mj-text font-size="14px" color="#333333" line-height="1.5" />
+      <mj-class name="footer" font-size="12px" color="#6c757d" />
+    </mj-attributes>
+  </mj-head>
+  <mj-body background-color="#f8f9fa">
+    <mj-section background-color="#ffffff" padding="20px">
+      <mj-column>
+        <mj-text font-size="22px" font-weight="bold" color="#212529">You've been invited!</mj-text>
+        <mj-text>{{inviterName}} has invited you to join <strong>{{accountName}}</strong> on Numaeel.</mj-text>
+      </mj-column>
+    </mj-section>
+
+    <mj-section background-color="#ffffff" padding="0 20px 20px">
+      <mj-column>
+        <mj-text>Click below to accept the invitation and get started.</mj-text>
+        <mj-button background-color="#0d6efd" color="#ffffff" href="{{inviteUrl}}">Accept Invitation</mj-button>
+      </mj-column>
+    </mj-section>
+
+    <mj-include path="./_footer.mjml" />
+  </mj-body>
+</mjml>
