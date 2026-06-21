@@ -35,7 +35,7 @@ import { createHmac } from "node:crypto";
 
 const TEST_SECRET = new Uint8Array(32); // 32 zero bytes — deterministic for tests
 
-vi.mock("../../../src/processor/calendar/hmac-secret.js", () => ({
+vi.mock("../../../src/crypto/hmac-secret.js", () => ({
   computeHmac16: (payload: string) =>
     Promise.resolve(createHmac("sha256", TEST_SECRET).update(payload).digest("base64url").slice(0, 16)),
   validateHmac16: (payload: string, hmac16: string) =>
