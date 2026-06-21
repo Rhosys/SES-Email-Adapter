@@ -1013,14 +1013,15 @@ describe("API", () => {
   });
 
   describe("PATCH /accounts/:accountId", () => {
-    it("updates notification email settings", async () => {
+    it("updates digest settings when forwarding target is verified", async () => {
+      vi.mocked(accountDb.getVerifiedForwardingAddress).mockResolvedValueOnce(ok(makeVerifiedAddress({ status: "verified" })));
       const res = await req(app, "PATCH", `${A}`, {
-        body: { notifications: { email: { enabled: true, address: "alerts@example.com", frequency: "instant" } } },
+        body: { digest: { frequency: "daily", forwardingTargetId: "fwd-123" } },
       });
       expect(res.status).toBe(200);
       expect(accountDb.updateAccount).toHaveBeenCalledWith(
         TEST_ACCOUNT_ID,
-        expect.objectContaining({ notifications: { email: { enabled: true, address: "alerts@example.com", frequency: "instant" } } }),
+        expect.objectContaining({ digest: { frequency: "daily", forwardingTargetId: "fwd-123" } }),
       );
     });
 
