@@ -113,6 +113,18 @@ program
     mkdirSync('dist/main/processor/calendar', { recursive: true });
     copyFileSync('src/processor/calendar/calendar-hmac.kms', 'dist/main/processor/calendar/calendar-hmac.kms');
 
+    // Compile MJML email templates → HTML (preserves {{...}} Mustache placeholders)
+    const mjml = (await import('mjml')).default;
+    const { readFileSync, writeFileSync } = await import('node:fs');
+    const emailTemplatesOutDir = 'dist/main/email-templates';
+    mkdirSync(emailTemplatesOutDir, { recursive: true });
+    for (const file of readdirSync('email-templates').filter(f => f.endsWith('.mjml') && !f.startsWith('_'))) {
+      const content = readFileSync(`email-templates/${file}`, 'utf-8');
+      const { html } = mjml(content, { filePath: `email-templates/${file}` });
+      writeFileSync(`${emailTemplatesOutDir}/${file.replace(/\.mjml$/, '.html')}`, html);
+      console.log(`  Compiled ${file}`);
+    }
+
     console.log(`Building ${userCodeExecutorFunctionName} v${version}...`);
     await esbuild.build({
       ...esbuildDefaults,
