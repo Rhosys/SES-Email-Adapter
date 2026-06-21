@@ -1669,6 +1669,15 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     const accountId = c.req.param("accountId")!;
     const body = await zParse(UpdateAccountRequest, c.req.raw);
 
+    // Validate forwardingTargetId references a verified forwarding address
+    if (body.digest) {
+      const targetResult = await accountDb.getVerifiedForwardingAddress(accountId, body.digest.forwardingTargetId);
+      if (targetResult.isErr()) return err(c, 500, "Internal Server Error");
+      if (!targetResult.value || targetResult.value.status !== "verified") {
+        return err(c, 422, "Forwarding target not found or not verified", "UNVERIFIED_FORWARD_TARGET");
+      }
+    }
+
     // Merge onboarding sub-object with existing to avoid overwriting fields not sent
     if (body.onboarding) {
       const existingResult = await accountDb.getAccount(accountId);
@@ -1677,7 +1686,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
       body.onboarding = { ...existing?.onboarding, ...body.onboarding };
     }
 
-    const updateResult = await accountDb.updateAccount(accountId, body as Partial<Pick<Account, "name" | "retentionDuration" | "notifications" | "filtering" | "onboarding" | "afterSendAction">>);
+    const updateResult = await accountDb.updateAccount(accountId, body as Partial<Pick<Account, "name" | "retentionDuration" | "digest" | "filtering" | "onboarding" | "afterSendAction">>);
     if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
     return c.json(toApiAccount(updateResult.value), 200);
   });

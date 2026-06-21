@@ -217,21 +217,6 @@ export type UpdateTemplateRequest = z.infer<typeof UpdateTemplateRequest>;
 
 // ---- Account ----
 
-const EmailNotificationSettingsSchema = z.object({
-  enabled: z.boolean(),
-  address: z.string(),
-  frequency: z.enum(["instant", "hourly", "daily"]),
-});
-
-const PushNotificationSettingsSchema = z.object({
-  enabled: z.boolean(),
-});
-
-const NotificationSettingsSchema = z.object({
-  email: EmailNotificationSettingsSchema.optional(),
-  push: PushNotificationSettingsSchema.optional(),
-});
-
 const AccountFilteringConfigSchema = z.object({
   defaultUnknownSenderPolicy: UnknownSenderPolicy.optional(),
 }).passthrough();
@@ -243,10 +228,15 @@ const AccountOnboardingSchema = z.object({
   testEmailReceivedAt: z.string().optional(),
 }).passthrough();
 
+const DigestSchema = z.object({
+  frequency: z.enum(["daily", "weekly", "monthly"]),
+  forwardingTargetId: z.string(),
+}).nullable().optional();
+
 export const UpdateAccountRequest = z.object({
   name: z.string().optional(),
   retentionDuration: RetentionDuration.optional(),
-  notifications: NotificationSettingsSchema.optional(),
+  digest: DigestSchema,
   filtering: AccountFilteringConfigSchema.optional(),
   onboarding: AccountOnboardingSchema.optional(),
   afterSendAction: z.enum(["archive", "keep_active"]).optional(),
