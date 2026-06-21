@@ -55,7 +55,7 @@ export class AccountDatabase {
     try {
       await dynamo.send(new PutCommand({
         TableName: ACCOUNTS_TABLE,
-        Item: { ...account, pk: pk(account.id), sk: "META" },
+        Item: { ...account, pk: pk(account.id), sk: "META", gsi1pk: "META", gsi1sk: `ACCT#${account.id}` },
         ConditionExpression: "attribute_not_exists(pk)",
       }));
       return ok(account);
@@ -64,24 +64,29 @@ export class AccountDatabase {
     }
   }
 
-  async updateAccount(accountId: string, update: Partial<Pick<Account, "name" | "retentionDuration" | "notifications" | "filtering" | "onboarding" | "afterSendAction">>): Promise<Result<Account, DbError>> {
+  async updateAccount(accountId: string, update: Partial<Pick<Account, "name" | "retentionDuration" | "digest" | "filtering" | "onboarding" | "afterSendAction">>): Promise<Result<Account, DbError>> {
     const now = DateTime.utc().toISO()!;
-    const setParts: string[] = ["updatedAt = :now"];
-    const exprValues: Record<string, unknown> = { ":now": now };
+    const setParts: string[] = ["updatedAt = :now", "gsi1pk = :g1pk", "gsi1sk = :g1sk"];
+    const exprValues: Record<string, unknown> = { ":now": now, ":g1pk": "META", ":g1sk": `ACCT#${accountId}` };
     const exprNames: Record<string, string> = {};
+    const removeParts: string[] = [];
 
     if (update.name !== undefined) { setParts.push("#name = :name"); exprValues[":name"] = update.name; exprNames["#name"] = "name"; }
     if (update.retentionDuration !== undefined) { setParts.push("retentionDuration = :rd"); exprValues[":rd"] = update.retentionDuration; }
-    if (update.notifications !== undefined) { setParts.push("notifications = :notif"); exprValues[":notif"] = update.notifications; }
+    if (update.digest === null) { removeParts.push("digest"); }
+    else if (update.digest !== undefined) { setParts.push("digest = :digest"); exprValues[":digest"] = update.digest; }
     if (update.filtering !== undefined) { setParts.push("filtering = :filtering"); exprValues[":filtering"] = update.filtering; }
     if (update.onboarding !== undefined) { setParts.push("onboarding = :onboarding"); exprValues[":onboarding"] = update.onboarding; }
     if (update.afterSendAction !== undefined) { setParts.push("afterSendAction = :asa"); exprValues[":asa"] = update.afterSendAction; }
+
+    let updateExpression = `SET ${setParts.join(", ")}`;
+    if (removeParts.length > 0) { updateExpression += ` REMOVE ${removeParts.join(", ")}`; }
 
     try {
       const res = await dynamo.send(new UpdateCommand({
         TableName: ACCOUNTS_TABLE,
         Key: { pk: pk(accountId), sk: "META" },
-        UpdateExpression: `SET ${setParts.join(", ")}`,
+        UpdateExpression: updateExpression,
         ExpressionAttributeValues: exprValues,
         ...(Object.keys(exprNames).length ? { ExpressionAttributeNames: exprNames } : {}),
         ReturnValues: "ALL_NEW",
@@ -1085,6 +1090,33 @@ export class AccountDatabase {
         Key: { pk: pk(accountId), sk: `CONN#${connectionId}` },
       }));
       return ok(undefined);
+    } catch (e) {
+      return err(dbError(e));
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Account Metas (GSI1 query for digest dispatcher)
+  // ---------------------------------------------------------------------------
+
+  async queryAllAccountMetas(): Promise<Result<Array<{ id: string; digest?: { frequency: string; forwardingTargetId: string } | null }>, DbError>> {
+    const items: Array<{ id: string; digest?: { frequency: string; forwardingTargetId: string } | null }> = [];
+    let exclusiveStartKey: Record<string, unknown> | undefined;
+    try {
+      do {
+        const res = await dynamo.send(new QueryCommand({
+          TableName: ACCOUNTS_TABLE,
+          IndexName: "gsi1",
+          KeyConditionExpression: "gsi1pk = :pk",
+          ExpressionAttributeValues: { ":pk": "META" },
+          ...(exclusiveStartKey ? { ExclusiveStartKey: exclusiveStartKey } : {}),
+        }));
+        for (const item of res.Items ?? []) {
+          items.push({ id: item["id"] as string, ...(item["digest"] !== undefined ? { digest: item["digest"] as { frequency: string; forwardingTargetId: string } | null } : {}) });
+        }
+        exclusiveStartKey = res.LastEvaluatedKey as Record<string, unknown> | undefined;
+      } while (exclusiveStartKey);
+      return ok(items);
     } catch (e) {
       return err(dbError(e));
     }
