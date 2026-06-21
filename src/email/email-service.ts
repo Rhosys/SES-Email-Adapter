@@ -92,7 +92,9 @@ export class EmailService {
     const httpStatus = error.$metadata?.httpStatusCode ?? 0;
 
     const isPermanent =
-      errorName === "MessageRejected" && errorMessage.includes("Email address is not verified");
+      (errorName === "MessageRejected" && errorMessage.includes("Email address is not verified")) ||
+      errorName === "ConfigurationSetSendingPausedException" ||
+      errorName === "ConfigurationSetDoesNotExistException";
 
     if (isPermanent) {
       this.logger.error(`SES permanent failure [${errorName}]: ${errorMessage}.`, {
