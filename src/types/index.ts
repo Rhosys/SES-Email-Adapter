@@ -658,26 +658,6 @@ export interface Rule {
 }
 
 // ---------------------------------------------------------------------------
-// Notifications
-// ---------------------------------------------------------------------------
-
-export interface EmailNotificationSettings {
-  enabled: boolean;
-  address: string;              // Address to send notifications to
-  frequency: "instant" | "hourly" | "daily";
-}
-
-export interface PushNotificationSettings {
-  enabled: boolean;
-  // Device tokens registered separately via push registration endpoint
-}
-
-export interface NotificationSettings {
-  email?: EmailNotificationSettings;
-  push?: PushNotificationSettings;
-}
-
-// ---------------------------------------------------------------------------
 // Account
 // ---------------------------------------------------------------------------
 
@@ -692,12 +672,14 @@ export interface Account {
   id: string;
   name: string;
   retentionDuration?: import("../processor/retention.js").RetentionDuration;
-  notifications?: NotificationSettings;
+  digest?: { frequency: "daily" | "weekly" | "monthly"; forwardingTargetId: string } | null;
   filtering?: AccountFilteringConfig;
   onboarding?: AccountOnboarding;
   billingPlan?: import("../embedding/retention-tier.js").BillingPlan;
   afterSendAction?: "archive" | "keep_active";
   defaultCalendarInviteForwardingAddress?: string;
+  gsi1pk?: string;
+  gsi1sk?: string;
   createdAt: string;
   updatedAt: string;
 }
