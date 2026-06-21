@@ -1,4 +1,4 @@
-import { computeHmac16, validateHmac16 } from "./hmac-secret.js";
+import { computeHmac16, validateHmac16 } from "../../crypto/hmac-secret.js";
 import type { Result } from "neverthrow";
 import { ok, err } from "neverthrow";
 
