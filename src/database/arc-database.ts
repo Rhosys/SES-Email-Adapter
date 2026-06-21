@@ -688,4 +688,35 @@ export class ArcDatabase {
       return err(dbError(e));
     }
   }
+
+  async listActiveArcs(accountId: string, limit: number): Promise<Result<Arc[], DbError>> {
+    try {
+      const res = await dynamo.send(new QueryCommand({
+        TableName: SIGNALS_TABLE,
+        IndexName: "gsi1",
+        KeyConditionExpression: "gsi1pk = :pk AND begins_with(gsi1sk, :prefix)",
+        ExpressionAttributeValues: { ":pk": `ACCT#${accountId}`, ":prefix": "LASTACT#active#" },
+        ScanIndexForward: false,
+        Limit: limit,
+      }));
+      return ok((res.Items ?? []) as Arc[]);
+    } catch (e) {
+      return err(dbError(e));
+    }
+  }
+
+  async countQuarantined(accountId: string): Promise<Result<number, DbError>> {
+    try {
+      const res = await dynamo.send(new QueryCommand({
+        TableName: SIGNALS_TABLE,
+        IndexName: "gsi1",
+        KeyConditionExpression: "gsi1pk = :pk",
+        ExpressionAttributeValues: { ":pk": `ACCT#${accountId}#QUARANTINED` },
+        Select: "COUNT",
+      }));
+      return ok(res.Count ?? 0);
+    } catch (e) {
+      return err(dbError(e));
+    }
+  }
 }
