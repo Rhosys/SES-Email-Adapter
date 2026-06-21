@@ -4,7 +4,7 @@ import { generateId, validateId } from "./id.js";
 describe("validateId", () => {
   describe("roundtrip: generateId → validateId", () => {
     it.each([
-      { prefix: "arc-" },
+      { prefix: "thr-" },
       { prefix: "sgn-" },
       { prefix: "view-" },
       { prefix: "rule-" },
@@ -18,7 +18,7 @@ describe("validateId", () => {
   describe("static known-good IDs", () => {
     // Generate a few IDs and hardcode them for deterministic regression tests
     const knownGood = [
-      { id: generateId("arc-"), prefix: "arc-" },
+      { id: generateId("thr-"), prefix: "thr-" },
       { id: generateId("sgn-"), prefix: "sgn-" },
       { id: generateId("rule-"), prefix: "rule-" },
     ];
@@ -30,10 +30,10 @@ describe("validateId", () => {
 
   describe("tampered checksum", () => {
     it("rejects an ID with modified check chars", () => {
-      const id = generateId("arc-");
+      const id = generateId("thr-");
       // Replace last 3 chars with something different
       const tampered = id.slice(0, -3) + "zzz";
-      expect(validateId(tampered, "arc-")).toBe(false);
+      expect(validateId(tampered, "thr-")).toBe(false);
     });
 
     it("rejects an ID with a single flipped check char", () => {
@@ -46,24 +46,24 @@ describe("validateId", () => {
   });
 
   describe("wrong prefix", () => {
-    it("rejects a valid arc- ID when validated with sgn- prefix", () => {
-      const id = generateId("arc-");
+    it("rejects a valid thr- ID when validated with sgn- prefix", () => {
+      const id = generateId("thr-");
       expect(validateId(id, "sgn-")).toBe(false);
     });
 
-    it("rejects a valid sgn- ID when validated with arc- prefix", () => {
+    it("rejects a valid sgn- ID when validated with thr- prefix", () => {
       const id = generateId("sgn-");
-      expect(validateId(id, "arc-")).toBe(false);
+      expect(validateId(id, "thr-")).toBe(false);
     });
   });
 
   describe("too short", () => {
     it.each([
-      { label: "just prefix", id: "arc-", prefix: "arc-" },
-      { label: "prefix + 1 char", id: "arc-a", prefix: "arc-" },
-      { label: "prefix + 2 chars", id: "arc-ab", prefix: "arc-" },
-      { label: "prefix + 3 chars (body is exactly 3 — no encoded part)", id: "arc-abc", prefix: "arc-" },
-      { label: "empty string", id: "", prefix: "arc-" },
+      { label: "just prefix", id: "thr-", prefix: "thr-" },
+      { label: "prefix + 1 char", id: "thr-a", prefix: "thr-" },
+      { label: "prefix + 2 chars", id: "thr-ab", prefix: "thr-" },
+      { label: "prefix + 3 chars (body is exactly 3 — no encoded part)", id: "thr-abc", prefix: "thr-" },
+      { label: "empty string", id: "", prefix: "thr-" },
     ])("rejects $label", ({ id, prefix }) => {
       expect(validateId(id, prefix)).toBe(false);
     });
@@ -71,7 +71,7 @@ describe("validateId", () => {
 
   describe("missing prefix", () => {
     it("rejects an ID that does not start with the expected prefix", () => {
-      expect(validateId("noprefixhere", "arc-")).toBe(false);
+      expect(validateId("noprefixhere", "thr-")).toBe(false);
     });
   });
 });
