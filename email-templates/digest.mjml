@@ -1,0 +1,59 @@
+<mjml>
+  <mj-head>
+    <mj-attributes>
+      <mj-all font-family="Arial, sans-serif" />
+      <mj-text font-size="14px" color="#333333" line-height="1.5" />
+      <mj-class name="footer" font-size="12px" color="#6c757d" />
+    </mj-attributes>
+  </mj-head>
+  <mj-body background-color="#f8f9fa">
+    <mj-section background-color="#ffffff" padding="20px">
+      <mj-column>
+        <mj-text font-size="22px" font-weight="bold" color="#212529">{{subject}}</mj-text>
+        <mj-text>Here's your latest activity summary.</mj-text>
+      </mj-column>
+    </mj-section>
+
+    <mj-section background-color="#ffffff" padding="0 20px">
+      <mj-column>
+        <mj-table>
+          <tr style="background-color:#f1f3f5;font-size:12px;text-transform:uppercase;color:#6c757d;">
+            <th style="padding:8px;">Urgency</th>
+            <th style="padding:8px;">Type</th>
+            <th style="padding:8px;">From</th>
+            <th style="padding:8px;">Summary</th>
+            <th style="padding:8px;">Labels</th>
+            <th style="padding:8px;">Last Signal</th>
+          </tr>
+          {{#arcs}}
+          <tr style="border-bottom:1px solid #dee2e6;">
+            <td style="padding:8px;"><span style="background-color:{{urgencyColor}};color:#fff;padding:2px 6px;border-radius:3px;font-size:11px;">{{urgency}}</span></td>
+            <td style="padding:8px;">{{workflowIcon}}</td>
+            <td style="padding:8px;">{{sender}}</td>
+            <td style="padding:8px;">{{summary}}</td>
+            <td style="padding:8px;font-size:11px;">{{labels}}</td>
+            <td style="padding:8px;font-size:12px;color:#6c757d;">{{timestamp}}</td>
+          </tr>
+          {{/arcs}}
+        </mj-table>
+      </mj-column>
+    </mj-section>
+
+    {{#quarantineCount}}
+    <mj-section background-color="#fff3cd" padding="10px 20px">
+      <mj-column>
+        <mj-text color="#856404">⚠️ You have {{quarantineCount}} emails awaiting review in quarantine.</mj-text>
+        <mj-button background-color="#856404" color="#ffffff" href="https://{{domain}}/a/quarantine">Review Quarantine</mj-button>
+      </mj-column>
+    </mj-section>
+    {{/quarantineCount}}
+
+    <mj-section background-color="#ffffff" padding="20px">
+      <mj-column>
+        <mj-button background-color="#0d6efd" color="#ffffff" href="https://{{domain}}/a/">Open Dashboard</mj-button>
+      </mj-column>
+    </mj-section>
+
+    <mj-include path="./_footer.mjml" />
+  </mj-body>
+</mjml>
