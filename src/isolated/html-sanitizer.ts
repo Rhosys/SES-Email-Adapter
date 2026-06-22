@@ -42,7 +42,12 @@ function stripExternalCssUrls(css: string): string {
 
 /**
  * Removes elements that are visually hidden via inline styles.
- * Targets: display:none, visibility:hidden, opacity:0, font-size:0, height:0/width:0
+ * Targets: display:none, visibility:hidden, opacity:0, font-size:0 (leaf only), height:0/width:0
+ *
+ * font-size:0 is only treated as hidden when the element has no child elements.
+ * MJML-based emails use font-size:0 on container elements (td, div) to prevent
+ * inline-block gaps — children override with their own font-size. Removing
+ * containers destroys legitimate content.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function removeHiddenElements(doc: any): void {
@@ -55,7 +60,7 @@ function removeHiddenElements(doc: any): void {
       lower.includes("display:none") ||
       lower.includes("visibility:hidden") ||
       lower.includes("opacity:0") ||
-      lower.includes("font-size:0") ||
+      (lower.includes("font-size:0") && el.children.length === 0) ||
       (lower.includes("height:0") && lower.includes("overflow:hidden")) ||
       (lower.includes("width:0") && lower.includes("overflow:hidden"))
     ) {
