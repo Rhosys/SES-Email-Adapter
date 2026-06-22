@@ -11,7 +11,7 @@ export function makeAppDeps(overrides: Partial<AppDeps>): AppDeps {
     auth: {} as never,
     access: { removeUser: async () => ok(undefined), checkAccess: async () => {}, createInvite: async () => ok({ inviteId: "mock" }) } as never,
     logger: {} as never,
-    verificationMailer: { sendForwardVerification: async () => ok(undefined) } as never,
+    verificationMailer: { sendForwardVerification: async () => ok(undefined), sendCalendarForwardVerification: async () => ok(undefined) } as never,
     jobDispatcher: { dispatch: async () => ok({ jobId: "j", targetRegistryId: "r", modelId: "m", segmentCount: 1, startedAt: "2025-01-01T00:00:00Z" }) } as never,
     draftSendDispatcher: { dispatch: async () => ok(undefined) } as never,
     accountCreationStarter: { start: async () => {} },

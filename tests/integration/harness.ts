@@ -80,7 +80,7 @@ export async function createHarness(): Promise<IntegrationHarness> {
     auth: new AuthressAuthService(),
     access,
     logger,
-    verificationMailer: { sendForwardVerification: async () => ok(undefined) },
+    verificationMailer: { sendForwardVerification: async () => ok(undefined), sendCalendarForwardVerification: async () => ok(undefined) },
     jobDispatcher: { dispatchReindex: async () => {}, dispatchSegment: async () => {} } as never,
     draftSendDispatcher: { dispatch: async () => ok(undefined) } as never,
     accountCreationStarter: { start: async () => {} },

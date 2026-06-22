@@ -54,6 +54,8 @@ import { SchedulerClient as AwsSchedulerClient } from "@aws-sdk/client-scheduler
 
 import { EmailService } from "./email/email-service.js";
 import { SesDomainIdentityService } from "./email/domain-identity-service.js";
+import { renderTemplate } from "./email/template-renderer.js";
+import { buildEmailTags } from "./email/tag-sanitizer.js";
 import { DigestDispatcher } from "./digest/digest-dispatcher.js";
 import { DigestWorker } from "./digest/digest-worker.js";
 import type { IDigestSendMessage } from "./digest/digest-worker.js";
@@ -290,6 +292,34 @@ const sesVerificationMailer: VerificationMailer = {
       to: address,
       subject: "Verify your forwarding address",
       textBody: `Click the link below to verify that you want to receive forwarded emails at this address:\n\n${verifyUrl}\n\nIf you did not request this, you can ignore this email.`,
+      accountId,
+    }).then(r => r.map(() => undefined));
+  },
+
+  async sendCalendarForwardVerification(accountId: string, address: string, token: string) {
+    const verifyUrl = `${APP_BASE_URL}/accounts/${accountId}/calendar-forwarding/${encodeURIComponent(address)}/verify?token=${token}`;
+    const fullDate = DateTime.utc().toISODate()!;
+    const triggerId = `calverify-${accountId}-${address}`;
+
+    const htmlBody = await renderTemplate("calendar-verify", {
+      address,
+      verifyUrl,
+    });
+
+    const tags = buildEmailTags({
+      accountId,
+      fullDate,
+      invocationId: logger.getInvocationId(),
+      triggerId,
+    });
+
+    return emailService.send({
+      to: address,
+      subject: "Verify your calendar forwarding address",
+      textBody: `Click the link below to verify that you want to receive calendar forwarding at this address:\n\n${verifyUrl}\n\nIf you did not request this, you can ignore this email.`,
+      htmlBody,
+      tags,
+      fromOverride: `"Numaeel" <noreply@${MAIL_DOMAIN}>`,
       accountId,
     }).then(r => r.map(() => undefined));
   },
