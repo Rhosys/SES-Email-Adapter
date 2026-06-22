@@ -69,15 +69,13 @@ const MESSAGE: FollowupMessage = { accountId: ACCOUNT_ID, signalId: SIGNAL_ID, a
 // ---------------------------------------------------------------------------
 
 function setup() {
-  const arcDb = { getArc: vi.fn() };
-  const arcUpdater = { updateArcStatus: vi.fn() };
-  const signalDb = { getSignalById: vi.fn() };
+  const arcDb = { getArc: vi.fn(), updateArc: vi.fn(), getSignalById: vi.fn() };
   const notifier: Notifier = { notify: vi.fn(), notifyBlocked: vi.fn() };
   const logger = createMockLogger();
 
-  const handler = new FollowupHandler({ arcDb, arcUpdater, signalDb, notifier, logger });
+  const handler = new FollowupHandler({ arcDb, notifier, logger });
 
-  return { handler, arcDb, arcUpdater, signalDb, notifier, logger };
+  return { handler, arcDb, notifier, logger };
 }
 
 // ---------------------------------------------------------------------------
@@ -87,13 +85,13 @@ function setup() {
 describe("FollowupHandler", () => {
   describe("arc state: null → discard", () => {
     it("discards message when arc is not found", async () => {
-      const { handler, arcDb, signalDb, notifier } = setup();
+      const { handler, arcDb, notifier } = setup();
       arcDb.getArc.mockResolvedValue(ok(null));
 
       const result = await handler.process(MESSAGE);
 
       expect(result.isOk()).toBe(true);
-      expect(signalDb.getSignalById).not.toHaveBeenCalled();
+      expect(arcDb.getSignalById).not.toHaveBeenCalled();
       expect(notifier.notify).not.toHaveBeenCalled();
     });
 
@@ -111,13 +109,13 @@ describe("FollowupHandler", () => {
 
   describe("arc state: deleted → discard", () => {
     it("discards message when arc status is deleted", async () => {
-      const { handler, arcDb, signalDb, notifier } = setup();
+      const { handler, arcDb, notifier } = setup();
       arcDb.getArc.mockResolvedValue(ok(makeArc({ status: "deleted" })));
 
       const result = await handler.process(MESSAGE);
 
       expect(result.isOk()).toBe(true);
-      expect(signalDb.getSignalById).not.toHaveBeenCalled();
+      expect(arcDb.getSignalById).not.toHaveBeenCalled();
       expect(notifier.notify).not.toHaveBeenCalled();
     });
 
@@ -135,23 +133,23 @@ describe("FollowupHandler", () => {
 
   describe("arc state: active → notify only", () => {
     it("sends notification without changing arc status", async () => {
-      const { handler, arcDb, arcUpdater, signalDb, notifier } = setup();
+      const { handler, arcDb, notifier } = setup();
       const arc = makeArc({ status: "active", urgency: "high" });
       arcDb.getArc.mockResolvedValue(ok(arc));
-      signalDb.getSignalById.mockResolvedValue(ok(makeSignal()));
+      arcDb.getSignalById.mockResolvedValue(ok(makeSignal()));
       vi.mocked(notifier.notify).mockResolvedValue(ok(undefined));
 
       const result = await handler.process(MESSAGE);
 
       expect(result.isOk()).toBe(true);
-      expect(arcUpdater.updateArcStatus).not.toHaveBeenCalled();
+      expect(arcDb.updateArc).not.toHaveBeenCalled();
       expect(notifier.notify).toHaveBeenCalledOnce();
     });
 
     it("passes reason: followup to notifier", async () => {
-      const { handler, arcDb, signalDb, notifier } = setup();
+      const { handler, arcDb, notifier } = setup();
       arcDb.getArc.mockResolvedValue(ok(makeArc({ status: "active" })));
-      signalDb.getSignalById.mockResolvedValue(ok(makeSignal()));
+      arcDb.getSignalById.mockResolvedValue(ok(makeSignal()));
       vi.mocked(notifier.notify).mockResolvedValue(ok(undefined));
 
       await handler.process(MESSAGE);
@@ -168,26 +166,26 @@ describe("FollowupHandler", () => {
 
   describe("arc state: archived → reactivate + notify", () => {
     it("updates arc status to active and sends notification", async () => {
-      const { handler, arcDb, arcUpdater, signalDb, notifier } = setup();
+      const { handler, arcDb, notifier } = setup();
       arcDb.getArc.mockResolvedValue(ok(makeArc({ status: "archived" })));
-      signalDb.getSignalById.mockResolvedValue(ok(makeSignal()));
-      arcUpdater.updateArcStatus.mockResolvedValue(ok(undefined));
+      arcDb.getSignalById.mockResolvedValue(ok(makeSignal()));
+      arcDb.updateArc.mockResolvedValue(ok(makeArc({ status: "active" })));
       vi.mocked(notifier.notify).mockResolvedValue(ok(undefined));
 
       const result = await handler.process(MESSAGE);
 
       expect(result.isOk()).toBe(true);
-      expect(arcUpdater.updateArcStatus).toHaveBeenCalledWith(
-        ACCOUNT_ID, ARC_ID, "active", expect.any(String),
+      expect(arcDb.updateArc).toHaveBeenCalledWith(
+        ACCOUNT_ID, ARC_ID, "active", expect.any(String), {},
       );
       expect(notifier.notify).toHaveBeenCalledOnce();
     });
 
     it("passes reason: followup to notifier after reactivation", async () => {
-      const { handler, arcDb, arcUpdater, signalDb, notifier } = setup();
+      const { handler, arcDb, notifier } = setup();
       arcDb.getArc.mockResolvedValue(ok(makeArc({ status: "archived" })));
-      signalDb.getSignalById.mockResolvedValue(ok(makeSignal()));
-      arcUpdater.updateArcStatus.mockResolvedValue(ok(undefined));
+      arcDb.getSignalById.mockResolvedValue(ok(makeSignal()));
+      arcDb.updateArc.mockResolvedValue(ok(makeArc({ status: "active" })));
       vi.mocked(notifier.notify).mockResolvedValue(ok(undefined));
 
       await handler.process(MESSAGE);
@@ -201,11 +199,11 @@ describe("FollowupHandler", () => {
       );
     });
 
-    it("returns error if updateArcStatus fails", async () => {
-      const { handler, arcDb, arcUpdater, signalDb, notifier } = setup();
+    it("returns error if updateArc fails", async () => {
+      const { handler, arcDb, notifier } = setup();
       arcDb.getArc.mockResolvedValue(ok(makeArc({ status: "archived" })));
-      signalDb.getSignalById.mockResolvedValue(ok(makeSignal()));
-      arcUpdater.updateArcStatus.mockResolvedValue(err(dbError("DynamoDB timeout")));
+      arcDb.getSignalById.mockResolvedValue(ok(makeSignal()));
+      arcDb.updateArc.mockResolvedValue(err(dbError("DynamoDB timeout")));
 
       const result = await handler.process(MESSAGE);
 
@@ -230,9 +228,9 @@ describe("FollowupHandler", () => {
     });
 
     it("returns error when getSignalById fails", async () => {
-      const { handler, arcDb, signalDb } = setup();
+      const { handler, arcDb } = setup();
       arcDb.getArc.mockResolvedValue(ok(makeArc({ status: "active" })));
-      signalDb.getSignalById.mockResolvedValue(err(dbError("timeout")));
+      arcDb.getSignalById.mockResolvedValue(err(dbError("timeout")));
 
       const result = await handler.process(MESSAGE);
 
@@ -240,9 +238,9 @@ describe("FollowupHandler", () => {
     });
 
     it("discards when signal is not found (stale reference)", async () => {
-      const { handler, arcDb, signalDb, notifier } = setup();
+      const { handler, arcDb, notifier } = setup();
       arcDb.getArc.mockResolvedValue(ok(makeArc({ status: "active" })));
-      signalDb.getSignalById.mockResolvedValue(ok(null));
+      arcDb.getSignalById.mockResolvedValue(ok(null));
 
       const result = await handler.process(MESSAGE);
 
@@ -257,9 +255,9 @@ describe("FollowupHandler", () => {
 
   describe("reason: followup in all notification paths", () => {
     it("active arc → reason is followup", async () => {
-      const { handler, arcDb, signalDb, notifier } = setup();
+      const { handler, arcDb, notifier } = setup();
       arcDb.getArc.mockResolvedValue(ok(makeArc({ status: "active" })));
-      signalDb.getSignalById.mockResolvedValue(ok(makeSignal()));
+      arcDb.getSignalById.mockResolvedValue(ok(makeSignal()));
       vi.mocked(notifier.notify).mockResolvedValue(ok(undefined));
 
       await handler.process(MESSAGE);
@@ -269,10 +267,10 @@ describe("FollowupHandler", () => {
     });
 
     it("archived arc → reason is followup", async () => {
-      const { handler, arcDb, arcUpdater, signalDb, notifier } = setup();
+      const { handler, arcDb, notifier } = setup();
       arcDb.getArc.mockResolvedValue(ok(makeArc({ status: "archived" })));
-      signalDb.getSignalById.mockResolvedValue(ok(makeSignal()));
-      arcUpdater.updateArcStatus.mockResolvedValue(ok(undefined));
+      arcDb.getSignalById.mockResolvedValue(ok(makeSignal()));
+      arcDb.updateArc.mockResolvedValue(ok(makeArc({ status: "active" })));
       vi.mocked(notifier.notify).mockResolvedValue(ok(undefined));
 
       await handler.process(MESSAGE);
@@ -307,10 +305,10 @@ describe("FollowupHandler", () => {
     it.each(arcStates)(
       "arc state=$label → reactivate=$shouldReactivate, notify=$shouldNotify",
       async ({ arc, shouldReactivate, shouldNotify }) => {
-        const { handler, arcDb, arcUpdater, signalDb, notifier } = setup();
+        const { handler, arcDb, notifier } = setup();
         arcDb.getArc.mockResolvedValue(ok(arc));
-        signalDb.getSignalById.mockResolvedValue(ok(makeSignal()));
-        arcUpdater.updateArcStatus.mockResolvedValue(ok(undefined));
+        arcDb.getSignalById.mockResolvedValue(ok(makeSignal()));
+        arcDb.updateArc.mockResolvedValue(ok(makeArc({ status: "active" })));
         vi.mocked(notifier.notify).mockResolvedValue(ok(undefined));
 
         const result = await handler.process(MESSAGE);
@@ -318,11 +316,11 @@ describe("FollowupHandler", () => {
         expect(result.isOk()).toBe(true);
 
         if (shouldReactivate) {
-          expect(arcUpdater.updateArcStatus).toHaveBeenCalledWith(
-            ACCOUNT_ID, ARC_ID, "active", expect.any(String),
+          expect(arcDb.updateArc).toHaveBeenCalledWith(
+            ACCOUNT_ID, ARC_ID, "active", expect.any(String), {},
           );
         } else {
-          expect(arcUpdater.updateArcStatus).not.toHaveBeenCalled();
+          expect(arcDb.updateArc).not.toHaveBeenCalled();
         }
 
         if (shouldNotify) {
@@ -337,14 +335,14 @@ describe("FollowupHandler", () => {
     );
 
     it("report_violation status → discard without modification", async () => {
-      const { handler, arcDb, arcUpdater, signalDb, notifier } = setup();
+      const { handler, arcDb, notifier } = setup();
       arcDb.getArc.mockResolvedValue(ok(makeArc({ status: "report_violation" as ArcStatus })));
-      signalDb.getSignalById.mockResolvedValue(ok(makeSignal()));
+      arcDb.getSignalById.mockResolvedValue(ok(makeSignal()));
 
       const result = await handler.process(MESSAGE);
 
       expect(result.isOk()).toBe(true);
-      expect(arcUpdater.updateArcStatus).not.toHaveBeenCalled();
+      expect(arcDb.updateArc).not.toHaveBeenCalled();
       expect(notifier.notify).not.toHaveBeenCalled();
     });
   });

@@ -188,17 +188,8 @@ const feedbackProcessor = new FeedbackProcessor(processingDb, accountDb, logger,
 const reindexWorker = new ReindexWorker(logger);
 
 const draftSendWorker = new DraftSendWorker(
-  {
-    getSignalById: (accountId, id) => arcDb.getSignalById(accountId, id),
-    updateSignalSendStatus: (accountId, signalLookupId, update) => arcDb.updateSignalSendStatus(accountId, signalLookupId, update),
-    getArc: (accountId, id) => arcDb.getArc(accountId, id),
-    updateArcStatus: (accountId, id, status) => arcDb.updateArc(accountId, id, status, DateTime.utc().toISO()!, {}).then(r => r.map(() => undefined)),
-    getAccountAfterSendAction: async (accountId) => {
-      const result = await accountDb.getAccount(accountId);
-      if (result.isErr()) return err(result.error);
-      return ok(result.value?.afterSendAction ?? "keep_active");
-    },
-  },
+  arcDb,
+  accountDb,
   externalEmailHandler,
   logger,
 );
@@ -207,8 +198,6 @@ const domainHealthJob = new DomainHealthJob(accountDb, arcDb, logger);
 
 const followupHandler = new FollowupHandler({
   arcDb,
-  arcUpdater: { updateArcStatus: (accountId, arcId, status, updatedAt) => arcDb.updateArc(accountId, arcId, status, updatedAt, {}).then(r => r.map(() => undefined)) },
-  signalDb: arcDb,
   notifier: new DeviceNotifier({
     deviceStore,
     deliverers: {
@@ -222,8 +211,6 @@ const followupHandler = new FollowupHandler({
 });
 
 const rsvpReminderHandler = new RsvpReminderHandler({
-  signalDb: arcDb,
-  calendarDb: { getLatestCalendarResponse: (accountId, arcId, veventUid) => arcDb.getLatestCalendarResponse(accountId, arcId, veventUid) as Promise<Result<Signal | null, DbError>> },
   arcDb,
   notifier: new DeviceNotifier({
     deviceStore,
@@ -356,6 +343,8 @@ const app = createApp({
   rsvpComposer: sendRsvp,
   postApprovalCalendarDeps,
   schedulerClient,
+  s3Client: s3,
+  emailBucket: S3_BUCKET,
 });
 
 // ---------------------------------------------------------------------------

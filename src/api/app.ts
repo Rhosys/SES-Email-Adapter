@@ -2,6 +2,7 @@ import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import type { Context } from "hono";
 import { randomUUID, createHash, randomBytes } from "crypto";
 import type { S3Client } from "@aws-sdk/client-s3";
+import { GetObjectCommand } from "@aws-sdk/client-s3";
 import { DateTime } from "luxon";
 import { generateId, generateAccountId } from "../utils/id.js";
 import { getDomain } from "tldts";
@@ -175,6 +176,8 @@ export interface AppDeps {
   rsvpComposer: typeof SendRsvpFn;
   postApprovalCalendarDeps: PostApprovalCalendarHandlerDeps;
   schedulerClient: SchedulerClient;
+  s3Client: S3Client;
+  emailBucket: string;
 }
 
 type AppEnv = { Variables: { auth: AuthContext; authorizationVerified?: boolean; [ROUTE_NOT_FOUND_KEY]?: boolean } };
@@ -204,7 +207,7 @@ async function ensureAliasExists(accountDb: AccountDatabase, accountId: string, 
   return neverthrowOk(undefined);
 }
 
-export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, verificationMailer, jobDispatcher, signalReprocessor, draftSendDispatcher, accountCreationStarter, appBaseUrl, contentCdnBaseUrl, astValidator, billingHandler, emailService, domainIdentityService, rsvpComposer, postApprovalCalendarDeps, schedulerClient }: AppDeps) {
+export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, verificationMailer, jobDispatcher, signalReprocessor, draftSendDispatcher, accountCreationStarter, appBaseUrl, contentCdnBaseUrl, astValidator, billingHandler, emailService, domainIdentityService, rsvpComposer, postApprovalCalendarDeps, schedulerClient, s3Client, emailBucket }: AppDeps) {
   const app = new OpenAPIHono<AppEnv>();
 
   // RFC 9727 — Well-Known URI for API Catalog
@@ -877,6 +880,37 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     if (!signal) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
     const withUrls = contentCdnBaseUrl ? withAttachmentUrls(signal, contentCdnBaseUrl) : signal;
     return c.json(toApiSignal(withUrls), 200);
+  });
+
+  // Raw email source — streams the original .eml from S3
+  app.openapi(route({
+    method: "get",
+    path: "/accounts/{accountId}/signals/{id}/raw",
+    tags: ["Signals"],
+    request: { params: z.object({ accountId: z.string(), id: z.string() }) },
+    middleware: [authz("signals:read", c => `accounts/${c.req.param("accountId")!}/signals/${c.req.param("id")!}`)] as const,
+    responses: { 200: { description: "Raw email source (message/rfc822)" } },
+  }), async (c) => {
+    const accountId = c.req.param("accountId")!;
+    const signalResult = await arcDb.getSignalById(accountId, c.req.param("id")!);
+    if (signalResult.isErr()) return err(c, 500, "Internal Server Error");
+    const signal = signalResult.value;
+    if (!signal) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
+    if (!isEmailSignal(signal)) return err(c, 400, "Signal is not an email", "SIGNAL_NOT_FOUND");
+    if (!signal.data.s3Key) return err(c, 404, "Raw email not available", "SIGNAL_NOT_FOUND");
+
+    const s3Result = await s3Client.send(new GetObjectCommand({ Bucket: emailBucket, Key: signal.data.s3Key }));
+    if (!s3Result.Body) return err(c, 404, "Raw email not available", "SIGNAL_NOT_FOUND");
+
+    const bytes = await s3Result.Body.transformToByteArray();
+    return new Response(bytes, {
+      status: 200,
+      headers: {
+        "Content-Type": "message/rfc822",
+        "Content-Disposition": `inline; filename="${signal.id}.eml"`,
+        "Cache-Control": "private, max-age=3600",
+      },
+    });
   });
 
   app.openapi(route({

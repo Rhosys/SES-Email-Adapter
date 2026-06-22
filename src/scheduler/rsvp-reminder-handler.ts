@@ -3,7 +3,7 @@ import { DateTime } from "luxon";
 import { ok, err } from "../errors.js";
 import type { Result, DbError } from "../errors.js";
 import type { Signal, Arc } from "../types/index.js";
-import type { CalendarEventData } from "../types/calendar.js";
+import type { CalendarEventData, CalendarResponseData } from "../types/calendar.js";
 import type { Notifier, NotificationReason } from "../notifier/types.js";
 import type { Logger } from "../logger.js";
 import type { RsvpReminderMessage } from "./rsvp-reminder.js";
@@ -12,22 +12,22 @@ import type { RsvpReminderMessage } from "./rsvp-reminder.js";
 // Handler
 // ---------------------------------------------------------------------------
 
+export interface IRsvpReminderArcDb {
+  getSignalById(accountId: string, signalId: string, arcId?: string): Promise<Result<Signal | null, DbError>>;
+  getLatestCalendarResponse(accountId: string, arcId: string, veventUid: string): Promise<Result<Signal<CalendarResponseData> | null, DbError>>;
+  getArc(accountId: string, arcId: string): Promise<Result<Arc | null, DbError>>;
+}
+
 export class RsvpReminderHandler {
-  private readonly signalDb: { getSignalById(accountId: string, signalId: string, arcId?: string): Promise<Result<Signal | null, DbError>> };
-  private readonly calendarDb: { getLatestCalendarResponse(accountId: string, arcId: string, veventUid: string): Promise<Result<Signal | null, DbError>> };
-  private readonly arcDb: { getArc(accountId: string, arcId: string): Promise<Result<Arc | null, DbError>> };
+  private readonly arcDb: IRsvpReminderArcDb;
   private readonly notifier: Notifier;
   private readonly logger: Logger;
 
   constructor(deps: {
-    signalDb: { getSignalById(accountId: string, signalId: string, arcId?: string): Promise<Result<Signal | null, DbError>> };
-    calendarDb: { getLatestCalendarResponse(accountId: string, arcId: string, veventUid: string): Promise<Result<Signal | null, DbError>> };
-    arcDb: { getArc(accountId: string, arcId: string): Promise<Result<Arc | null, DbError>> };
+    arcDb: IRsvpReminderArcDb;
     notifier: Notifier;
     logger: Logger;
   }) {
-    this.signalDb = deps.signalDb;
-    this.calendarDb = deps.calendarDb;
     this.arcDb = deps.arcDb;
     this.notifier = deps.notifier;
     this.logger = deps.logger;
@@ -37,7 +37,7 @@ export class RsvpReminderHandler {
     const { accountId, signalId, arcId } = message;
 
     // 1. Fetch signal
-    const signalResult = await this.signalDb.getSignalById(accountId, signalId, arcId);
+    const signalResult = await this.arcDb.getSignalById(accountId, signalId, arcId);
     if (signalResult.isErr()) return err(signalResult.error);
 
     const signal = signalResult.value;
@@ -64,7 +64,7 @@ export class RsvpReminderHandler {
     }
 
     // 4. Check if user has already responded
-    const responseResult = await this.calendarDb.getLatestCalendarResponse(accountId, arcId, veventUid);
+    const responseResult = await this.arcDb.getLatestCalendarResponse(accountId, arcId, veventUid);
     if (responseResult.isErr()) return err(responseResult.error);
 
     if (responseResult.value) {
