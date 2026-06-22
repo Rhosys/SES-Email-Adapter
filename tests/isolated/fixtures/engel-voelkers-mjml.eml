@@ -1,0 +1,1207 @@
+Return-Path: <bounce+1fb3bf.d1a95-engel=vortex.link@mail-search.engelvoelkers.com>
+Received: from v58.v5ed9ac7d.euw1.send.eu.mailgun.net (v58.v5ed9ac7d.euw1.send.eu.mailgun.net [141.193.32.8])
+ by inbound-smtp.eu-central-1.amazonaws.com with SMTP id 5il0poa7tli3if6v9o8ao2nr1fl4gad6ane4kt01
+ for engel@vortex.link;
+ Mon, 22 Jun 2026 07:39:12 +0000 (UTC)
+X-SES-Spam-Verdict: PASS
+X-SES-Virus-Verdict: PASS
+Received-SPF: pass (spfCheck: domain of mail-search.engelvoelkers.com designates 141.193.32.8 as permitted sender) client-ip=141.193.32.8; envelope-from=bounce+1fb3bf.d1a95-engel=vortex.link@mail-search.engelvoelkers.com; helo=v58.v5ed9ac7d.euw1.send.eu.mailgun.net;
+Authentication-Results: amazonses.com;
+ spf=pass (spfCheck: domain of mail-search.engelvoelkers.com designates 141.193.32.8 as permitted sender) client-ip=141.193.32.8; envelope-from=bounce+1fb3bf.d1a95-engel=vortex.link@mail-search.engelvoelkers.com; helo=v58.v5ed9ac7d.euw1.send.eu.mailgun.net;
+ dkim=pass header.i=@mail-search.engelvoelkers.com;
+ dmarc=pass header.from=mail-search.engelvoelkers.com;
+X-SES-RECEIPT: AEFBQUFBQUFBQUFHUER1a24wa0NXeXZqRHM4Z2dEQVFYeVNyTGxKdkJxT3E1UTAwMWhlS1daMUhMY3E0VzNicWg0blk0UDVMNVQ3MVNML0RCMDR2ajFoVk95NGNORG0vZS9VN2JyNWJQNUs3dWtISUZEdDNWRUJIeTI5RXNIcVR2SmxBQ1A5aXhZUEFDbWNicGFuWnF2QlpSem5LV0VneFFhR1pGeGpHb3EzZEh5WjFHNU9qTjE4RCt0SnRRWE9hMEk3SGtBTVUxZExBQnh6Mm1aeDV2YlhmWlZDL0lRSnhMd3RnY1I1TDdEV0RNOXdSZFMxenFNMXVQZ0ZVcVFEcWcvZ3NxWGh2RzhzK0U2b1NuVjBXcWU4M2dIeXZTVXI2ME5FQ3p1bVdSZHZENXJ4amc1aisxYnJDNXJMeDE4MFZCYnI1bUdETyt1bCtXYURPdVFpQm9Wbit6SXVMZ0xOdmc3a2dsWlFhcXZxZEVZYTltN092czdBPT0=
+X-SES-DKIM-SIGNATURE: a=rsa-sha256; q=dns/txt; b=R9WM8BGcKyS0P6eBnUyRm1JxLPbpNm0xhcnj495NbrmYaMJ4XsDToRWAlbhghOEaCfMmbdaKa+v7p1d6C7OEpyWdu+DXiJ08TnlvBWLVdz1X9BLFZEuAsLdz5KxM6izKPI2LRH5woPjkMlLn9onqTX+BXltrYXDq7wnBKRcTQxg=; c=relaxed/simple; s=sokbgaaqhfgd6qjht2wmdajpuuanpimv; d=amazonses.com; t=1782113953; v=1; bh=uAKs1gp93Ff1oPfglHvwbUDuBqNfvp90r/UO6IYpxvk=; h=From:To:Cc:Bcc:Subject:Date:Message-ID:MIME-Version:Content-Type:X-SES-RECEIPT;
+DKIM-Signature: a=rsa-sha256; v=1; c=relaxed/relaxed; d=mail-search.engelvoelkers.com; q=dns/txt; s=email; t=1782113952; x=1782121152;
+ h=Content-Type: Content-Transfer-Encoding: Message-Id: To: To: From: From: Subject: Subject: Mime-Version: Date: Sender: Sender;
+ bh=HlxWORhlzSyyIyMEjjkrJmxLAWACscmi3iRzGlMrII8=;
+ b=hrkQ7E6TTnYlmCESYfiv9OdUq16HY8vyCvpCOeCg3PGuaXOR4l15glBkwmTXpb9BsxRwO+TDKXPXzT4inO3T7+Ub/iHwjWn9sZOIxiNa2b0P2Ycn4V9OT0ooCFM1J5qRy/w+kkGBio9wjS82+u/pVqcyOBJcYwjYWxsZBxePWo54tMftxuhpQ93AZ808vD3sWccN57osvGNn7be5vFmIqrl/hzPsKQ1Ua6nBQFkz+IjreC6cvaCHaqxCoYMJCDyTxPo1dtk13lfPINlILRW2/UlC1qBBjc+/ScvCs9pLj66AdxGUx4i+TMvQR8Yv1N3r8QJqRfvvryq+l5oGYljtqg==
+X-Mailgun-Sid: WyI2NDc2ZiIsImVuZ2VsQHZvcnRleC5saW5rIiwiZDFhOTUiXQ==
+Received: by 4532cefe8a2cca42d71519a8112e6c527c21a1a55ee6554925dc5f6d67057fe2 with HTTP
+ id 6a38e6a0b43765a84eab2e41; Mon, 22 Jun 2026 07:39:12 GMT
+X-Mailgun-Sending-Ip: 141.193.32.8
+Sender: noreply@mail-search.engelvoelkers.com
+Date: Mon, 22 Jun 2026 07:39:12 +0000
+Mime-Version: 1.0
+Subject: Saved search: Buy a home in Winterthur, Zurich
+From: Engel & Voelkers <noreply@mail-search.engelvoelkers.com>
+To: engel@vortex.link
+X-Mailgun-Tag: search-bff
+X-Mailgun-Tag: bff-listing-alert
+Message-Id: <20260622073912.3e744989f6ffd2f4@mail-search.engelvoelkers.com>
+Content-Transfer-Encoding: quoted-printable
+Content-Type: text/html; charset="utf-8"
+
+<!doctype html>
+<html lang=3D"und" dir=3D"auto" xmlns=3D"http://www.w3.org/1999/xhtml" xmln=
+s:v=3D"urn:schemas-microsoft-com:vml" xmlns:o=3D"urn:schemas-microsoft-com:=
+office:office">
+  <head>
+    <title>Saved search</title>
+    <!--[if !mso]><!-->
+    <meta http-equiv=3D"X-UA-Compatible" content=3D"IE=3Dedge">
+    <!--<![endif]-->
+    <meta http-equiv=3D"Content-Type" content=3D"text/html; charset=3DUTF-8=
+">
+    <meta name=3D"viewport" content=3D"width=3Ddevice-width, initial-scale=
+=3D1">
+    <style type=3D"text/css">
+      #outlook a { padding:0; }
+      body { margin:0;padding:0;-webkit-text-size-adjust:100%;-ms-text-size=
+-adjust:100%; }
+      table, td { border-collapse:collapse;mso-table-lspace:0pt;mso-table-r=
+space:0pt; }
+      img { border:0;height:auto;line-height:100%; outline:none;text-decora=
+tion:none;-ms-interpolation-mode:bicubic; }
+      p { display:block;margin:13px 0; }
+    </style>
+    <!--[if mso]>
+    <noscript>
+    <xml>
+    <o:OfficeDocumentSettings>
+      <o:AllowPNG/>
+      <o:PixelsPerInch>96</o:PixelsPerInch>
+    </o:OfficeDocumentSettings>
+    </xml>
+    </noscript>
+    <![endif]-->
+    <!--[if lte mso 11]>
+    <style type=3D"text/css">
+      .mj-outlook-group-fix { width:100% !important; }
+    </style>
+    <![endif]-->
+   =20
+      <!--[if !mso]><!-->
+        <link href=3D"https://fonts.googleapis.com/css?family=3DUbuntu:300,=
+400,500,700" rel=3D"stylesheet" type=3D"text/css">
+        <style type=3D"text/css">
+          @import url(https://fonts.googleapis.com/css?family=3DUbuntu:300,=
+400,500,700);
+        </style>
+      <!--<![endif]-->
+
+   =20
+   =20
+    <style type=3D"text/css">
+      @media only screen and (min-width:480px) {
+        .mj-column-per-100 { width:100% !important; max-width: 100%; }
+=2Emj-column-px-200 { width:200px !important; max-width: 200px; }
+      }
+    </style>
+    <style media=3D"screen and (min-width:480px)">
+      .moz-text-html .mj-column-per-100 { width:100% !important; max-width:=
+ 100%; }
+=2Emoz-text-html .mj-column-px-200 { wi=
+dth:200px !important; max-width: 200px=
+; }
+    </style>
+   =20
+   =20
+ =20
+   =20
+    <style type=3D"text/css">
+
+    @media only screen and (max-width:479px) {
+      table.mj-full-width-mobile { width: 100% !important; }
+      td.mj-full-width-mobile { width: auto !important; }
+    }
+ =20
+    </style>
+    =20
+    <style type=3D"text/css">
+@font-face {
+              font-family: "Engel Voelkers Text";
+              src: url("https://fonts.engelvoelkers.com/EngelVoelkersText_W=
+_Wght.woff2") format("woff2");
+              font-weight: normal;
+              font-style: normal;
+              font-display: swap;
+          }
+
+          .heading {
+            word-break: break-all;
+          }
+
+          .footer-logo {
+            width: 242px !important;
+            height: 100px !important;
+          }
+
+          .text_align_center {
+              text-align: center !important;
+          }
+
+          .text_align_center_div div {
+              text-align: center !important;
+          }
+
+          @media screen and (max-width: 320px) {
+            .footer-logo {
+              width: 168px !important;
+              height: 72px !important;
+            }
+          }
+
+          .no_stack_mj_column_per_10 {
+            width: 10% !important;
+            vertical-align: top !important;
+          }
+
+          .no_stack_mj_column_per_90 {
+            width: 90% !important;
+            vertical-align: top !important;
+          }
+
+          .expose_preview_image img {
+                    object-fit: cover;
+                    object-position: center;
+            }
+
+          .expose_preview_image td, .expose_preview_image table {
+                width: 100% !important;
+          }
+
+          .expose_preview_text_column {
+            display: block !important;
+          }
+
+          .section {
+            padding-left: 40px !important;
+            padding-right: 40px !important; =20
+          }
+
+          /* This will likely not work in most of the email clients */
+          @media screen and (max-width: 480px) {
+              .section {
+                  padding-left: 16px !important;
+                  padding-right: 16px !important;
+              }
+             =20
+            .expose_list_image {
+              width: 100% !important;
+              margin-right: 0 !important;
+            }
+
+            .expose_preview_text_column, .expose_preview_image_column {
+              display: block;
+              width: 100%;
+            }
+          }
+    </style>
+   =20
+  </head>
+  <body style=3D"word-spacing:normal;background-color:#ffffff;">
+   =20
+    <div style=3D"display:none;font-size:1px;color:#ffffff;line-height:1px;=
+max-height:0px;max-width:0px;opacity:0;overflow:hidden;">Saved search</div>
+ =20
+   =20
+      <div
+         aria-label=3D"Saved search" aria-roledescription=3D"email" style=
+=3D"background-color:#ffffff;" role=3D"article" lang=3D"und" dir=3D"auto"
+      >
+       =20
+      <div
+         style=3D"height:24px;line-height:24px;"
+      >&#8202;</div>
+   =20
+      <table
+         align=3D"center" border=3D"0" cellpadding=3D"0" cellspacing=3D"0" =
+role=3D"presentation" style=3D"width:100%;"
+      >
+        <tbody>
+          <tr>
+            <td>
+             =20
+       =20
+      <!--[if mso | IE]><table align=3D"center" border=3D"0" cellpadding=3D=
+"0" cellspacing=3D"0" class=3D"" role=3D"presentation" style=3D"width:730px=
+;" width=3D"730" ><tr><td style=3D"line-height:0px;font-size:0px;mso-line-h=
+eight-rule:exactly;"><![endif]-->
+   =20
+       =20
+      <div  style=3D"margin:0px auto;max-width:730px;">
+       =20
+        <table
+           align=3D"center" border=3D"0" cellpadding=3D"0" cellspacing=3D"0=
+" role=3D"presentation" style=3D"width:100%;"
+        >
+          <tbody>
+            <tr>
+              <td
+                 style=3D"border:1px solid #E5E5E5;direction:ltr;font-size:=
+0px;padding:0px;text-align:center;"
+              >
+                <!--[if mso | IE]><table role=3D"presentation" border=3D"0"=
+ cellpadding=3D"0" cellspacing=3D"0"><tr><td class=3D"section-outlook -outl=
+ook" width=3D"730px" ><table align=3D"center" border=3D"0" cellpadding=3D"0=
+" cellspacing=3D"0" class=3D"section-outlook -outlook" role=3D"presentation=
+" style=3D"width:728px;" width=3D"728" bgcolor=3D"#ffffff" ><tr><td style=
+=3D"line-height:0px;font-size:0px;mso-line-height-rule:exactly;"><![endif]-=
+->
+   =20
+     =20
+      <div  class=3D"section " style=3D"background:#ffffff;background-color=
+:#ffffff;margin:0px auto;max-width:728px;">
+       =20
+        <table
+           align=3D"center" border=3D"0" cellpadding=3D"0" cellspacing=3D"0=
+" role=3D"presentation" style=3D"background:#ffffff;background-color:#fffff=
+f;width:100%;"
+        >
+          <tbody>
+            <tr>
+              <td
+                 style=3D"direction:ltr;font-size:0px;padding:20px 0;paddin=
+g-bottom:72px;padding-top:12px;text-align:center;"
+              >
+                <!--[if mso | IE]><table role=3D"presentation" border=3D"0"=
+ cellpadding=3D"0" cellspacing=3D"0"><tr><td class=3D"" style=3D"vertical-a=
+lign:top;width:728px;" ><![endif]-->
+           =20
+      <div
+         class=3D"mj-column-per-100 mj-outlook-group-fix" style=3D"font-siz=
+e:0px;text-align:left;direction:ltr;display:inline-block;vertical-align:top=
+;width:100%;"
+      >
+       =20
+      <table
+         border=3D"0" cellpadding=3D"0" cellspacing=3D"0" role=3D"presentat=
+ion" width=3D"100%"
+      >
+        <tbody>
+          <tr>
+            <td  style=3D"vertical-align:top;padding-bottom:32px;">
+             =20
+      <table
+         border=3D"0" cellpadding=3D"0" cellspacing=3D"0" role=3D"presentat=
+ion" style=3D"" width=3D"100%"
+      >
+        <tbody>
+         =20
+              <tr>
+                <td
+                   style=3D"font-size:0px;padding:0px;word-break:break-word=
+;"
+                >
+                 =20
+      <div
+         class=3D"mj-column-per-100 mj-outlook-group-fix" style=3D"font-siz=
+e:0px;text-align:left;direction:ltr;display:inline-block;vertical-align:top=
+;width:100%;"
+      >
+       =20
+      <table
+         border=3D"0" cellpadding=3D"0" cellspacing=3D"0" role=3D"presentat=
+ion" width=3D"100%"
+      >
+        <tbody>
+          <tr>
+            <td  style=3D"vertical-align:top;padding:0px;">
+             =20
+      <table
+         border=3D"0" cellpadding=3D"0" cellspacing=3D"0" role=3D"presentat=
+ion" style=3D"" width=3D"100%"
+      >
+        <tbody>
+         =20
+              <tr>
+                <td
+                   align=3D"center" style=3D"font-size:0px;padding:0px;word=
+-break:break-word;"
+                >
+                 =20
+      <table
+         border=3D"0" cellpadding=3D"0" cellspacing=3D"0" role=3D"presentat=
+ion" style=3D"border-collapse:collapse;border-spacing:0px;"
+      >
+        <tbody>
+          <tr>
+            <td  style=3D"width:264px;">
+             =20
+      <img
+         alt=3D"Engel &amp; V=C3=B6lkers" src=3D"https://uploadcare.engelvo=
+elkers.com/6cbd9be9-9e27-43b5-b497-ef467968991a/-/format/auto/-/resize/264x=
+/-/stretch/off/" style=3D"border:0;display:block;outline:none;text-decorati=
+on:none;height:57.6px;width:100%;font-size:13px;" width=3D"264" height=3D"5=
+7"
+      />
+   =20
+            </td>
+          </tr>
+        </tbody>
+      </table>
+   =20
+                </td>
+              </tr>
+           =20
+        </tbody>
+      </table>
+   =20
+            </td>
+          </tr>
+        </tbody>
+      </table>
+   =20
+      </div>
+   =20
+                </td>
+              </tr>
+           =20
+        </tbody>
+      </table>
+   =20
+            </td>
+          </tr>
+        </tbody>
+      </table>
+   =20
+      </div>
+   =20
+          <!--[if mso | IE]></td><td class=3D"" style=3D"" ><![endif]-->
+           =20
+      <div
+         style=3D"height:24px;line-height:24px;"
+      >&#8202;</div>
+   =20
+          <!--[if mso | IE]></td><td align=3D"center" class=3D"" style=3D""=
+ ><![endif]-->
+           =20
+      <div
+         style=3D"font-family:Engel Voelkers Text, Helvetica Neue, Arial, s=
+ans-serif;font-size:12px;font-weight:400;letter-spacing:2px;line-height:20p=
+x;text-align:center;text-transform:uppercase;color:#666666;"
+      >Saved search</div>
+   =20
+          <!--[if mso | IE]></td><td align=3D"center" class=3D"" style=3D""=
+ ><![endif]-->
+           =20
+      <div
+         style=3D"font-family:Georgia;font-size:28px;font-weight:400;letter=
+-spacing:0%;line-height:40px;text-align:center;color:#0D0D0D;"
+      ><mj-text font-family=3D"&#x27;Engel Voelkers Text&#x27;, Helvetica N=
+eue, Arial, sans-serif" font-size=3D"16px" font-weight=3D"400" line-height=
+=3D"26px" padding=3D"0px" letter-spacing=3D"0.03em" color=3D"#404040">New p=
+roperty</mj-text></div>
+   =20
+          <!--[if mso | IE]></td><td class=3D"" style=3D"vertical-align:top=
+;width:728px;" ><![endif]-->
+           =20
+      <div
+         class=3D"mj-column-per-100 mj-outlook-group-fix" style=3D"font-siz=
+e:0px;text-align:left;direction:ltr;display:inline-block;vertical-align:top=
+;width:100%;"
+      >
+       =20
+      <table
+         border=3D"0" cellpadding=3D"0" cellspacing=3D"0" role=3D"presentat=
+ion" width=3D"100%"
+      >
+        <tbody>
+          <tr>
+            <td  style=3D"vertical-align:top;padding:16px 0px;padding-botto=
+m:48px;">
+             =20
+      <table
+         border=3D"0" cellpadding=3D"0" cellspacing=3D"0" role=3D"presentat=
+ion" style=3D"" width=3D"100%"
+      >
+        <tbody>
+         =20
+              <tr>
+                <td
+                   align=3D"center" style=3D"font-size:0px;padding:0px;word=
+-break:break-word;"
+                >
+                 =20
+      <div
+         style=3D"font-family:&#x27;Engel Voelkers Text&#x27;, Helvetica Ne=
+ue, Arial, sans-serif;font-size:16px;font-weight:400;letter-spacing:0.03em;=
+line-height:26px;text-align:center;color:#404040;"
+      ><div style=3D"word-break:keep-all"><mj-text font-family=3D"&#x27;Eng=
+el Voelkers Text&#x27;, Helvetica Neue, Arial, sans-serif" font-size=3D"16p=
+x" font-weight=3D"400" line-height=3D"26px" padding=3D"0px" letter-spacing=
+=3D"0.03em" color=3D"#404040">We have</mj-text>=C2=A0<span style=3D"font-we=
+ight:700">1</span>=C2=A0<mj-raw><span style=3D"font-weight:700">new propert=
+y</span></mj-raw><mj-text font-family=3D"&#x27;Engel Voelkers Text&#x27;, H=
+elvetica Neue, Arial, sans-serif" font-size=3D"16px" font-weight=3D"400" li=
+ne-height=3D"26px" padding=3D"0px" letter-spacing=3D"0.03em" color=3D"#4040=
+40"> matching your search criteria:</mj-text><br/><span style=3D"word-wrap:=
+break-word;display:inline-block;font-weight:700;max-width:568px">Buy a home=
+ in Winterthur, Zurich</span>=C2=A0</div></div>
+   =20
+                </td>
+              </tr>
+           =20
+        </tbody>
+      </table>
+   =20
+            </td>
+          </tr>
+        </tbody>
+      </table>
+   =20
+      </div>
+   =20
+          <!--[if mso | IE]></td><td align=3D"center" class=3D"" style=3D""=
+ ><![endif]-->
+           =20
+      <div
+         style=3D"font-family:&#x27;Engel Voelkers Text&#x27;, Helvetica Ne=
+ue, Arial, sans-serif;font-size:16px;font-weight:400;letter-spacing:0.03em;=
+line-height:26px;text-align:center;color:#404040;"
+      ><ul style=3D"list-style:none;padding:0;margin:0"><li style=3D"paddin=
+g:24px 0;display:inline-block;margin:0 !important"><table style=3D"width:10=
+0%"><tr><td style=3D"vertical-align:top" class=3D"expose_preview_image_colu=
+mn"><div style=3D"position:relative;display:inline-block"><a href=3D"https:=
+//www.engelvoelkers.com/ch/en/exposes/929a65b8-579b-5fe6-b44b-9fc3b1ff4f58?=
+utm_medium&#x3D;email&amp;utm_source&#x3D;search_alert&amp;utm_campaign&#x3=
+D;newsletter"><img src=3D"https://uploadcare.engelvoelkers.com/6ad1388c-bd2=
+6-41f3-9d41-5583d670f3c7/-/resize/273x182/" style=3D"height:182px;margin-ri=
+ght:24px;align-self:left;object-fit:cover;width:273px;min-width:147px;max-w=
+idth:312px;cursor:pointer" class=3D"expose_list_image" alt=3D"Expose Image"=
+/></a></div></td><td style=3D"vertical-align:top" class=3D"expose_preview_t=
+ext_column"><mj-raw><p style=3D"margin:0;color:#666666;font-weight:400;font=
+-size:14px;line-height:24px;letter-spacing:0.03em;font-family:&#x27;Engel V=
+oelkers Text&#x27;, Helvetica Neue, Arial, sans-serif;width:100%;text-overf=
+low:ellipsis;overflow:hidden;white-space:nowrap;text-align:left;max-width:3=
+12px;margin-bottom:2px">Zell, Zurich, Switzerland</p></mj-raw><mj-raw><p st=
+yle=3D"margin:0;color:#0D0D0D;font-weight:400;font-size:16px;line-height:24=
+px;letter-spacing:0.03em;font-family:Georgia, Helvetica Neue, Arial, sans-s=
+erif;width:100%;text-overflow:ellipsis;overflow:hidden;white-space:nowrap;m=
+ax-width:312px;text-align:left;margin-bottom:8px">Charming single-family ho=
+me in a quiet, natural setting</p></mj-raw><mj-raw><p style=3D"margin:0;col=
+or:#0D0D0D;font-weight:400;font-size:18px;line-height:32px;letter-spacing:0=
+=2E03em;font-family:&#x27;Engel Voelker=
+s Text&#x27;, Helvetica Neue, Arial, s=
+ans-serif;width:100%;text-overflow:ellipsis;overflow:hidden;white-space:now=
+rap;max-width:312px;text-align:left;margin-bottom:12px">1,302,558 =E2=82=AC=
+</p></mj-raw><mj-raw><p style=3D"margin:0;color:#666666;font-weight:400;fon=
+t-size:14px;line-height:24px;letter-spacing:0.03em;font-family:&#x27;Engel =
+Voelkers Text&#x27;, Helvetica Neue, Arial, sans-serif;width:312px;text-ove=
+rflow:ellipsis;overflow:hidden;white-space:nowrap;max-width:312px;text-alig=
+n:left;margin-bottom:8px">4 rooms =E2=80=A2 ~130 m=C2=B2 Living area =E2=80=
+=A2 ~565 m=C2=B2 Plot surface</p></mj-raw><mj-raw><a href=3D"https://www.en=
+gelvoelkers.com/ch/en/exposes/929a65b8-579b-5fe6-b44b-9fc3b1ff4f58?utm_medi=
+um&#x3D;email&amp;utm_source&#x3D;search_alert&amp;utm_campaign&#x3D;newsle=
+tter" style=3D"display:inline-block;width:100%;height:48px;border:1px solid=
+ #0D0D0D;background-color:#ffffff;border-radius:2px;padding:0;color:#0D0D0D=
+;text-decoration:none;box-sizing:border-box"><div style=3D"padding:10px 24p=
+x;font-family:&#x27;Engel Voelkers Text&#x27;, Helvetica Neue, Arial, sans-=
+serif;font-size:16px;line-height:28px;letter-spacing:0.03em;text-align:cent=
+er;height:100%;box-sizing:border-box">See details</div></a></mj-raw></td></=
+tr></table></li></ul></div>
+   =20
+          <!--[if mso | IE]></td><td class=3D"" style=3D"vertical-align:top=
+;width:728px;" ><![endif]-->
+           =20
+      <div
+         class=3D"mj-column-per-100 mj-outlook-group-fix" style=3D"font-siz=
+e:0px;text-align:left;direction:ltr;display:inline-block;vertical-align:top=
+;width:100%;"
+      >
+       =20
+      <table
+         border=3D"0" cellpadding=3D"0" cellspacing=3D"0" role=3D"presentat=
+ion" width=3D"100%"
+      >
+        <tbody>
+          <tr>
+            <td  style=3D"vertical-align:top;padding-top:24px;">
+             =20
+      <table
+         border=3D"0" cellpadding=3D"0" cellspacing=3D"0" role=3D"presentat=
+ion" style=3D"" width=3D"100%"
+      >
+        <tbody>
+         =20
+              <tr>
+                <td
+                   align=3D"center" style=3D"font-size:0px;padding:0px;word=
+-break:break-word;"
+                >
+                 =20
+      <table
+         border=3D"0" cellpadding=3D"0" cellspacing=3D"0" role=3D"presentat=
+ion" style=3D"border-collapse:separate;width:fit-content;line-height:100%;"
+      >
+        <tbody>
+          <tr>
+            <td
+               align=3D"center" bgcolor=3D"#C80000" role=3D"presentation" s=
+tyle=3D"border:none;border-radius:2px;cursor:auto;height:48px;mso-padding-a=
+lt:10px 25px;background:#C80000;" valign=3D"middle"
+            >
+              <a
+                 href=3D"https://www.engelvoelkers.com/ch/en/search-alerts/=
+fa71124e-b154-4b1c-a93b-03921e8313e2?authKey&#x3D;3f0def80-fce5-4c58-b8c9-0=
+5145f5632e3&amp;open&#x3D;34b1b85b-b134-4526-86ff-606b6791403e&amp;utm_medi=
+um&#x3D;email&amp;utm_source&#x3D;search_alert&amp;utm_campaign&#x3D;newsle=
+tter" style=3D"display:inline-block;background:#C80000;color:#ffffff;font-f=
+amily:Engel Voelkers Text, Helvetica Neue, Arial, sans-serif;font-size:16px=
+;font-weight:normal;line-height:120%;margin:0;text-decoration:none;text-tra=
+nsform:none;padding:10px 25px;mso-padding-alt:0px;border-radius:2px;" targe=
+t=3D"_blank"
+              >
+                <mj-text padding=3D"10px 24px" font-size=3D"16px" line-heig=
+ht=3D"28px" letter-spacing=3D"0.03em">View all matching properties</mj-text=
+>
+              </a>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+   =20
+                </td>
+              </tr>
+           =20
+        </tbody>
+      </table>
+   =20
+            </td>
+          </tr>
+        </tbody>
+      </table>
+   =20
+      </div>
+   =20
+          <!--[if mso | IE]></td><td class=3D"" style=3D"vertical-align:top=
+;width:728px;" ><![endif]-->
+           =20
+      <div
+         class=3D"mj-column-per-100 mj-outlook-group-fix" style=3D"font-siz=
+e:0px;text-align:left;direction:ltr;display:inline-block;vertical-align:top=
+;width:100%;"
+      >
+       =20
+      <table
+         border=3D"0" cellpadding=3D"0" cellspacing=3D"0" role=3D"presentat=
+ion" style=3D"vertical-align:top;" width=3D"100%"
+      >
+        <tbody>
+         =20
+              <tr>
+                <td
+                   align=3D"center" style=3D"font-size:0px;padding:0px;padd=
+ing-top:72px;word-break:break-word;"
+                >
+                 =20
+      <div
+         style=3D"font-family:Georgia, Helvetica Neue, Arial, sans-serif;fo=
+nt-size:20px;font-weight:400;letter-spacing:0.03em;line-height:28px;text-al=
+ign:center;color:#0D0D0D;"
+      >Did not find the perfect properties?</div>
+   =20
+                </td>
+              </tr>
+           =20
+              <tr>
+                <td
+                   align=3D"center" style=3D"font-size:0px;padding:0px;padd=
+ing-top:16px;word-break:break-word;"
+                >
+                 =20
+      <div
+         style=3D"font-family:&#x27;Engel Voelkers Text&#x27;, Helvetica Ne=
+ue, Arial, sans-serif;font-size:16px;font-weight:400;letter-spacing:0.03em;=
+line-height:26px;text-align:center;color:#404040;"
+      >Fine-tune your saved searches on Engel &amp; V=C3=B6lkers to receive=
+ real estate updates tailored to your unique preferences or delete your sav=
+ed searches.</div>
+   =20
+                </td>
+              </tr>
+           =20
+              <tr>
+                <td
+                   align=3D"center" style=3D"font-size:0px;padding:0px;padd=
+ing-top:32px;padding-bottom:0px;word-break:break-word;"
+                >
+                 =20
+      <table
+         border=3D"0" cellpadding=3D"0" cellspacing=3D"0" role=3D"presentat=
+ion" style=3D"border-collapse:separate;width:fit-content;line-height:100%;"
+      >
+        <tbody>
+          <tr>
+            <td
+               align=3D"center" bgcolor=3D"#0D0D0D" role=3D"presentation" s=
+tyle=3D"border:1px solid #000;border-radius:2px;cursor:auto;height:48px;mso=
+-padding-alt:10px 25px;background:#0D0D0D;" valign=3D"middle"
+            >
+              <a
+                 href=3D"https://www.engelvoelkers.com/ch/en/account/saved-=
+searches" style=3D"display:inline-block;background:#0D0D0D;color:#ffffff;fo=
+nt-family:Engel Voelkers Text, Helvetica Neue, Arial, sans-serif;font-size:=
+16px;font-weight:normal;line-height:120%;margin:0;text-decoration:none;text=
+-transform:none;padding:10px 25px;mso-padding-alt:0px;border-radius:2px;" t=
+arget=3D"_blank"
+              >
+                <mj-text padding=3D"10px 24px" font-size=3D"16px" line-heig=
+ht=3D"28px" letter-spacing=3D"0.03em">Manage saved searches</mj-text>
+              </a>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+   =20
+                </td>
+              </tr>
+           =20
+        </tbody>
+      </table>
+   =20
+      </div>
+   =20
+          <!--[if mso | IE]></td><td class=3D"" style=3D"vertical-align:top=
+;width:728px;" ><![endif]-->
+           =20
+      <div
+         class=3D"mj-column-per-100 mj-outlook-group-fix" style=3D"font-siz=
+e:0px;text-align:left;direction:ltr;display:inline-block;vertical-align:top=
+;width:100%;"
+      >
+       =20
+      <table
+         border=3D"0" cellpadding=3D"0" cellspacing=3D"0" role=3D"presentat=
+ion" style=3D"vertical-align:top;" width=3D"100%"
+      >
+        <tbody>
+          <hr style=3D"display:block;border:none;border-top:1px solid #E5E5=
+E5;margin-top:72px"/><p style=3D"display:block;color:#666666;margin-top:24p=
+x;font-size:12px;line-height:20px;font-family:Engel Voelkers Text, Helvetic=
+a Neue, Arial, sans-serif;font-weight:400;letter-spacing:2px;text-transform=
+:uppercase;text-align:center">User Acount</p><p style=3D"display:block;padd=
+ing-top:0;padding-bottom:0;color:#0D0D0D;font-size:28px;line-height:40px;fo=
+nt-family:Georgia, Helvetica Neue, Arial, sans-serif;font-weight:400;text-a=
+lign:center">Your properties, all in one place</p><img style=3D"display:blo=
+ck;padding-top:27px;padding-bottom:0;width:570px;height:244px;text-align:ce=
+nter;margin:0 auto" alt=3D"User Account Diagram" src=3D"https://uploadcare.=
+engelvoelkers.com/d9e94291-d4ce-46b9-ace0-c02defccb013/-/format/auto/-/resi=
+ze/570x244/-/stretch/off/"/><p style=3D"display:block;margin-top:40px;color=
+:#404040;font-size:16px;line-height:28px;font-family:Georgia, Helvetica Neu=
+e, Arial, sans-serif;font-weight:400;text-align:center">Create account to m=
+anage saved searches, save properties you love, and personalize your search=
+ experience.</p><a style=3D"display:block;width:fit-content;height:48px;bor=
+der:1px solid #0D0D0D;background-color:#ffffff;border-radius:2px;padding:0;=
+color:#0D0D0D;text-decoration:none;box-sizing:border-box;text-align:center;=
+margin:40px auto 0 auto" href=3D"https://www.engelvoelkers.com/ch/en/accoun=
+t/sign-in"><div style=3D"padding:10px 24px;font-family:&#x27;Engel Voelkers=
+ Text&#x27;, Helvetica Neue, Arial, sans-serif;font-size:16px;line-height:2=
+8px;letter-spacing:0.03em;text-align:center;height:100%;box-sizing:border-b=
+ox">Create account</div></a>
+              <tr>
+                <td
+                   align=3D"left" style=3D"font-size:0px;padding:0px;word-b=
+reak:break-word;"
+                >
+                 =20
+      <div
+         style=3D"font-family:Ubuntu, Helvetica, Arial, sans-serif;font-siz=
+e:1px;line-height:1;text-align:left;color:transparent;"
+      >2026-06-22T07:39:12.200807870Z</div>
+   =20
+                </td>
+              </tr>
+           =20
+        </tbody>
+      </table>
+   =20
+      </div>
+   =20
+          <!--[if mso | IE]></td><td align=3D"left" class=3D"" style=3D"" >=
+<![endif]-->
+           =20
+      <div
+         style=3D"font-family:Ubuntu, Helvetica, Arial, sans-serif;font-siz=
+e:1px;line-height:1;text-align:left;color:transparent;"
+      >2026-06-22T07:39:12.200807870Z</div>
+   =20
+          <!--[if mso | IE]></td></tr></table><![endif]-->
+              </td>
+            </tr>
+          </tbody>
+        </table>
+       =20
+      </div>
+   =20
+     =20
+      <!--[if mso | IE]></td></tr></table></td></tr><tr><td class=3D"sectio=
+n-outlook -outlook" width=3D"730px" ><table align=3D"center" border=3D"0" c=
+ellpadding=3D"0" cellspacing=3D"0" class=3D"section-outlook -outlook" role=
+=3D"presentation" style=3D"width:728px;" width=3D"728" bgcolor=3D"#F6F6F4" =
+><tr><td style=3D"line-height:0px;font-size:0px;mso-line-height-rule:exactl=
+y;"><![endif]-->
+   =20
+     =20
+      <div  class=3D"section " style=3D"background:#F6F6F4;background-color=
+:#F6F6F4;margin:0px auto;max-width:728px;">
+       =20
+        <table
+           align=3D"center" border=3D"0" cellpadding=3D"0" cellspacing=3D"0=
+" role=3D"presentation" style=3D"background:#F6F6F4;background-color:#F6F6F=
+4;width:100%;"
+        >
+          <tbody>
+            <tr>
+              <td
+                 style=3D"direction:ltr;font-size:0px;padding:20px 0;paddin=
+g-bottom:56px;padding-top:56px;text-align:center;"
+              >
+                <!--[if mso | IE]><table role=3D"presentation" border=3D"0"=
+ cellpadding=3D"0" cellspacing=3D"0"><tr><td class=3D"" style=3D"vertical-a=
+lign:top;width:728px;" ><![endif]-->
+           =20
+      <div
+         class=3D"mj-column-per-100 mj-outlook-group-fix" style=3D"font-siz=
+e:0px;text-align:left;direction:ltr;display:inline-block;vertical-align:top=
+;width:100%;"
+      >
+       =20
+      <table
+         border=3D"0" cellpadding=3D"0" cellspacing=3D"0" role=3D"presentat=
+ion" width=3D"100%"
+      >
+        <tbody>
+          <tr>
+            <td  style=3D"vertical-align:top;padding:0px;">
+             =20
+      <table
+         border=3D"0" cellpadding=3D"0" cellspacing=3D"0" role=3D"presentat=
+ion" style=3D"" width=3D"100%"
+      >
+        <tbody>
+         =20
+              <tr>
+                <td
+                   align=3D"center" style=3D"font-size:0px;padding:0px;word=
+-break:break-word;"
+                >
+                 =20
+      <table
+         border=3D"0" cellpadding=3D"0" cellspacing=3D"0" role=3D"presentat=
+ion" style=3D"border-collapse:collapse;border-spacing:0px;"
+      >
+        <tbody>
+          <tr>
+            <td  style=3D"width:72px;">
+             =20
+      <img
+         alt=3D"Engel &amp; Voelkers Logo" src=3D"https://uploadcare.engelv=
+oelkers.com/1e46185b-d28b-4af5-9235-b30ed0208143/-/format/auto/-/resize/72x=
+/-/stretch/off/" style=3D"border:0;border-radius:50px;display:block;outline=
+:none;text-decoration:none;height:72px;width:100%;font-size:13px;" width=3D=
+"72" height=3D"72"
+      />
+   =20
+            </td>
+          </tr>
+        </tbody>
+      </table>
+   =20
+                </td>
+              </tr>
+           =20
+        </tbody>
+      </table>
+   =20
+            </td>
+          </tr>
+        </tbody>
+      </table>
+   =20
+      </div>
+   =20
+          <!--[if mso | IE]></td><td class=3D"" style=3D"vertical-align:top=
+;width:728px;" ><![endif]-->
+           =20
+      <div
+         class=3D"mj-column-per-100 mj-outlook-group-fix" style=3D"font-siz=
+e:0px;text-align:left;direction:ltr;display:inline-block;vertical-align:top=
+;width:100%;"
+      >
+       =20
+      <table
+         border=3D"0" cellpadding=3D"0" cellspacing=3D"0" role=3D"presentat=
+ion" width=3D"100%"
+      >
+        <tbody>
+          <tr>
+            <td  style=3D"vertical-align:top;padding-top:32px;padding-botto=
+m:16px;">
+             =20
+      <table
+         border=3D"0" cellpadding=3D"0" cellspacing=3D"0" role=3D"presentat=
+ion" style=3D"" width=3D"100%"
+      >
+        <tbody>
+         =20
+              <tr>
+                <td
+                   align=3D"center" style=3D"font-size:0px;padding:0px;word=
+-break:break-word;"
+                >
+                 =20
+      <div
+         style=3D"font-family:&#x27;Engel Voelkers Text&#x27;, Helvetica Ne=
+ue, Arial, sans-serif;font-size:16px;font-weight:400;letter-spacing:0.03em;=
+line-height:26px;text-align:center;color:#404040;"
+      >Engel &amp; V=C3=B6lkers GmbH<br/>Vancouverstra=C3=9Fe 2a<br/>20457 =
+Hamburg<br/>Tel +49 (0)40 36131-0</div>
+   =20
+                </td>
+              </tr>
+           =20
+        </tbody>
+      </table>
+   =20
+            </td>
+          </tr>
+        </tbody>
+      </table>
+   =20
+      </div>
+   =20
+          <!--[if mso | IE]></td><td class=3D"" style=3D"vertical-align:top=
+;width:728px;" ><![endif]-->
+           =20
+      <div
+         class=3D"mj-column-per-100 mj-outlook-group-fix" style=3D"font-siz=
+e:0px;text-align:left;direction:ltr;display:inline-block;vertical-align:top=
+;width:100%;"
+      >
+       =20
+      <table
+         border=3D"0" cellpadding=3D"0" cellspacing=3D"0" role=3D"presentat=
+ion" width=3D"100%"
+      >
+        <tbody>
+          <tr>
+            <td  style=3D"vertical-align:top;padding-bottom:32px;">
+             =20
+      <table
+         border=3D"0" cellpadding=3D"0" cellspacing=3D"0" role=3D"presentat=
+ion" style=3D"" width=3D"100%"
+      >
+        <tbody>
+         =20
+              <tr>
+                <td
+                   align=3D"center" style=3D"font-size:0px;padding:0px;word=
+-break:break-word;"
+                >
+                 =20
+      <div
+         style=3D"font-family:&#x27;Engel Voelkers Text&#x27;, Helvetica Ne=
+ue, Arial, sans-serif;font-size:16px;font-weight:400;letter-spacing:0.03em;=
+line-height:26px;text-align:center;color:#404040;"
+      >Engel &amp; V=C3=B6lkers GmbH | HRB172452 | Hamburg | Managing Direc=
+tors: Jawed Barna (Chair), Dr. Rainer Klipp, Frederik von Pistohlkors, Stef=
+an Eck, Till-Fabian Zalewski, Ricardo Arends</div>
+   =20
+                </td>
+              </tr>
+           =20
+        </tbody>
+      </table>
+   =20
+            </td>
+          </tr>
+        </tbody>
+      </table>
+   =20
+      </div>
+   =20
+          <!--[if mso | IE]></td><td class=3D"" style=3D"vertical-align:mid=
+dle;width:200px;" ><![endif]-->
+           =20
+      <div
+         class=3D"mj-column-px-200 mj-outlook-group-fix" style=3D"font-size=
+:0px;text-align:left;direction:ltr;display:inline-block;vertical-align:midd=
+le;width:100%;"
+      >
+       =20
+      <table
+         border=3D"0" cellpadding=3D"0" cellspacing=3D"0" role=3D"presentat=
+ion" width=3D"100%"
+      >
+        <tbody>
+          <tr>
+            <td  style=3D"vertical-align:middle;padding-bottom:40px;">
+             =20
+      <table
+         border=3D"0" cellpadding=3D"0" cellspacing=3D"0" role=3D"presentat=
+ion" style=3D"" width=3D"100%"
+      >
+        <tbody>
+         =20
+              <tr>
+                <td
+                   align=3D"left" class=3D"text_align_center text_align_cen=
+ter_div" style=3D"font-size:0px;padding:0px;word-break:break-word;"
+                >
+                 =20
+      <div
+         style=3D"font-family:&#x27;Engel Voelkers Text&#x27;, Helvetica Ne=
+ue, Arial, sans-serif;font-size:16px;font-weight:400;letter-spacing:0.03em;=
+line-height:26px;text-align:left;text-decoration:underline;color:#444444;"
+      ><a href=3D"https://www.engelvoelkers.com/de/en/imprint" target=3D"_b=
+lank" style=3D"color:#0D0D0D;font-weight:400;font-size:16px;line-height:28p=
+x;letter-spacing:0.03em" rel=3D"noreferrer">Imprint</a></div>
+   =20
+                </td>
+              </tr>
+           =20
+        </tbody>
+      </table>
+   =20
+            </td>
+          </tr>
+        </tbody>
+      </table>
+   =20
+      </div>
+   =20
+          <!--[if mso | IE]></td><td class=3D"" style=3D"vertical-align:top=
+;width:200px;" ><![endif]-->
+           =20
+      <div
+         class=3D"mj-column-px-200 mj-outlook-group-fix" style=3D"font-size=
+:0px;text-align:left;direction:ltr;display:inline-block;vertical-align:top;=
+width:100%;"
+      >
+       =20
+      <table
+         border=3D"0" cellpadding=3D"0" cellspacing=3D"0" role=3D"presentat=
+ion" width=3D"100%"
+      >
+        <tbody>
+          <tr>
+            <td  style=3D"vertical-align:top;padding-bottom:40px;">
+             =20
+      <table
+         border=3D"0" cellpadding=3D"0" cellspacing=3D"0" role=3D"presentat=
+ion" style=3D"" width=3D"100%"
+      >
+        <tbody>
+         =20
+              <tr>
+                <td
+                   align=3D"left" class=3D"text_align_center text_align_cen=
+ter_div" style=3D"font-size:0px;padding:0px;word-break:break-word;"
+                >
+                 =20
+      <div
+         style=3D"font-family:&#x27;Engel Voelkers Text&#x27;, Helvetica Ne=
+ue, Arial, sans-serif;font-size:16px;font-weight:400;letter-spacing:0.03em;=
+line-height:26px;text-align:left;text-decoration:underline;color:#444444;"
+      ><a href=3D"https://www.engelvoelkers.com/de/en/privacy-policy" targe=
+t=3D"_blank" style=3D"color:#0D0D0D;font-weight:400;font-size:16px;line-hei=
+ght:28px;letter-spacing:0.03em" rel=3D"noreferrer">Privacy policy</a></div>
+   =20
+                </td>
+              </tr>
+           =20
+        </tbody>
+      </table>
+   =20
+            </td>
+          </tr>
+        </tbody>
+      </table>
+   =20
+      </div>
+   =20
+          <!--[if mso | IE]></td><td align=3D"center" class=3D"" style=3D""=
+ ><![endif]-->
+           =20
+      <p
+         style=3D"border-top:solid 1px #F0F0F0;font-size:1px;margin:0px aut=
+o;width:100%;"
+      >
+      </p>
+     =20
+      <!--[if mso | IE]><table align=3D"center" border=3D"0" cellpadding=3D=
+"0" cellspacing=3D"0" style=3D"border-top:solid 1px #F0F0F0;font-size:1px;m=
+argin:0px auto;width:678px;" role=3D"presentation" width=3D"678px" ><tr><td=
+ style=3D"height:0;line-height:0;"> &nbsp;
+</td></tr></table></td><td class=3D"" style=3D"vertical-align:middle;width:=
+728px;" ><![endif]-->
+           =20
+      <div
+         class=3D"mj-column-per-100 mj-outlook-group-fix" style=3D"font-siz=
+e:0px;text-align:left;direction:ltr;display:inline-block;vertical-align:mid=
+dle;width:100%;"
+      >
+       =20
+      <table
+         border=3D"0" cellpadding=3D"0" cellspacing=3D"0" role=3D"presentat=
+ion" width=3D"100%"
+      >
+        <tbody>
+          <tr>
+            <td  style=3D"vertical-align:middle;padding-top:40px;padding-bo=
+ttom:40px;">
+             =20
+      <table
+         border=3D"0" cellpadding=3D"0" cellspacing=3D"0" role=3D"presentat=
+ion" style=3D"" width=3D"100%"
+      >
+        <tbody>
+         =20
+              <tr>
+                <td
+                   align=3D"center" style=3D"font-size:0px;padding:0px;word=
+-break:break-word;"
+                >
+                 =20
+      <table
+         border=3D"0" cellpadding=3D"0" cellspacing=3D"0" role=3D"presentat=
+ion" style=3D"border-collapse:collapse;border-spacing:0px;"
+      >
+        <tbody>
+          <tr>
+            <td  style=3D"width:242px;">
+             =20
+      <img
+         alt=3D"E&amp;V Logo" src=3D"https://uploadcare.engelvoelkers.com/9=
+db91d7d-27e5-49df-93cc-e4b344a8e8ac/-/format/auto/-/resize/242x/-/stretch/o=
+ff/" style=3D"border:0;display:block;outline:none;text-decoration:none;heig=
+ht:100px;width:100%;font-size:13px;" width=3D"242" height=3D"100"
+      />
+   =20
+            </td>
+          </tr>
+        </tbody>
+      </table>
+   =20
+                </td>
+              </tr>
+           =20
+              <tr>
+                <td
+                   align=3D"left" class=3D"text_align_center text_align_cen=
+ter_div" style=3D"font-size:0px;padding:0px;padding-top:40px;word-break:bre=
+ak-word;"
+                >
+                 =20
+      <div
+         style=3D"font-family:&#x27;Engel Voelkers Text&#x27;, Helvetica Ne=
+ue, Arial, sans-serif;font-size:16px;font-weight:400;letter-spacing:0.03em;=
+line-height:26px;text-align:left;color:#404040;"
+      ><a href=3D"https://www.engelvoelkers.com/ch/en/propertysearch?delete=
+Alert&#x3D;34b1b85b-b134-4526-86ff-606b6791403e&amp;authKey&#x3D;3f0def80-f=
+ce5-4c58-b8c9-05145f5632e3" target=3D"_blank" style=3D"color:#0D0D0D;font-w=
+eight:400;font-size:16px;line-height:28px;letter-spacing:0.03em" rel=3D"nor=
+eferrer">Unsubscribe</a></div>
+   =20
+                </td>
+              </tr>
+           =20
+        </tbody>
+      </table>
+   =20
+            </td>
+          </tr>
+        </tbody>
+      </table>
+   =20
+      </div>
+   =20
+          <!--[if mso | IE]></td><td align=3D"center" class=3D"" style=3D""=
+ ><![endif]-->
+           =20
+      <p
+         style=3D"border-top:solid 1px #F0F0F0;font-size:1px;margin:0px aut=
+o;width:100%;"
+      >
+      </p>
+     =20
+      <!--[if mso | IE]><table align=3D"center" border=3D"0" cellpadding=3D=
+"0" cellspacing=3D"0" style=3D"border-top:solid 1px #F0F0F0;font-size:1px;m=
+argin:0px auto;width:678px;" role=3D"presentation" width=3D"678px" ><tr><td=
+ style=3D"height:0;line-height:0;"> &nbsp;
+</td></tr></table></td><td class=3D"section-outlook -outlook" style=3D"" ><=
+table align=3D"center" border=3D"0" cellpadding=3D"0" cellspacing=3D"0" cla=
+ss=3D"section-outlook -outlook" role=3D"presentation" style=3D"width:728px;=
+" width=3D"728" bgcolor=3D"#F6F6F4" ><tr><td style=3D"line-height:0px;font-=
+size:0px;mso-line-height-rule:exactly;"><![endif]-->
+   =20
+     =20
+      <div  class=3D"section " style=3D"background:#F6F6F4;background-color=
+:#F6F6F4;margin:0px auto;max-width:728px;">
+       =20
+        <table
+           align=3D"center" border=3D"0" cellpadding=3D"0" cellspacing=3D"0=
+" role=3D"presentation" style=3D"background:#F6F6F4;background-color:#F6F6F=
+4;width:100%;"
+        >
+          <tbody>
+            <tr>
+              <td
+                 style=3D"direction:ltr;font-size:0px;padding:0px;padding-b=
+ottom:0px;padding-top:40px;text-align:center;"
+              >
+                <!--[if mso | IE]><table role=3D"presentation" border=3D"0"=
+ cellpadding=3D"0" cellspacing=3D"0"><tr><![endif]-->
+      <span style=3D"color:#404040;font-weight:700;font-size:16px;line-heig=
+ht:26px;text-align:right;font-family:&#x27;Engel Voelkers Text&#x27;, Helve=
+tica Neue, Arial, sans-serif;letter-spacing:0.03em;padding:0;padding-right:=
+2px">=C2=A9 2026 E&amp;V</span><span style=3D"color:#404040;font-size:16px;=
+line-height:26px;font-family:&#x27;Engel Voelkers Text&#x27;, Helvetica Neu=
+e, Arial, sans-serif;letter-spacing:0.03em;padding:0;font-weight:400;text-a=
+lign:left">All rights reserved.</span>
+
+      <!--[if mso | IE]></tr></table><![endif]-->
+              </td>
+            </tr>
+          </tbody>
+        </table>
+       =20
+      </div>
+   =20
+     =20
+      <!--[if mso | IE]></td></tr></table></td><td align=3D"left" class=3D"=
+" style=3D"" ><![endif]-->
+           =20
+      <div
+         style=3D"font-family:&#x27;Engel Voelkers Text&#x27;, Helvetica Ne=
+ue, Arial, sans-serif;font-size:1px;font-weight:400;letter-spacing:0.03em;l=
+ine-height:26px;text-align:left;color:transparent;"
+      >2026-06-16T12:33:30.491Z</div>
+   =20
+          <!--[if mso | IE]></td></tr></table><![endif]-->
+              </td>
+            </tr>
+          </tbody>
+        </table>
+       =20
+      </div>
+   =20
+     =20
+      <!--[if mso | IE]></td></tr></table></td></tr></table><![endif]-->
+              </td>
+            </tr>
+          </tbody>
+        </table>
+       =20
+      </div>
+   =20
+       =20
+      <!--[if mso | IE]></td></tr></table><![endif]-->
+   =20
+     =20
+            </td>
+          </tr>
+        </tbody>
+      </table>
+   =20
+      <div
+         style=3D"height:24px;line-height:24px;"
+      >&#8202;</div>
+   =20
+      </div>
+   =20
+  </body>
+</html>
+ =20
