@@ -120,7 +120,7 @@ program
     mkdirSync(emailTemplatesOutDir, { recursive: true });
     for (const file of readdirSync('email-templates').filter(f => f.endsWith('.mjml') && !f.startsWith('_'))) {
       const content = readFileSync(`email-templates/${file}`, 'utf-8');
-      const { html } = mjml(content, { filePath: `email-templates/${file}` });
+      const { html } = await mjml(content, { filePath: `email-templates/${file}` });
       writeFileSync(`${emailTemplatesOutDir}/${file.replace(/\.mjml$/, '.html')}`, html);
       console.log(`  Compiled ${file}`);
     }
