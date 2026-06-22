@@ -128,6 +128,7 @@ export const MatchedRuleResult = z.object({
   actions: z.array(MatchedRuleAction),
   labelsAdded: z.array(z.string()),
   statusChange: z.string().optional(),
+  text: z.string().optional(),
 }).openapi("MatchedRuleResult");
 
 // ---------------------------------------------------------------------------
