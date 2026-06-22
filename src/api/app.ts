@@ -243,18 +243,26 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
 
   // RequestLogger — log every API request/response
   app.use("*", async (c, next) => {
+    const start = Date.now();
     const body = c.req.method !== "GET" && c.req.method !== "HEAD"
       ? await c.req.raw.clone().text()
       : undefined;
 
     await next();
 
+    const elapsed = Date.now() - start;
     const status = c.res.status;
+
+    if (elapsed > 25_000) {
+      logger.error("Request exceeded 25s — at risk of Lambda timeout.", { code: "api.slow_request", method: c.req.method, path: c.req.path, status, elapsedMs: elapsed });
+    }
+
     const logData: Record<string, unknown> = {
       code: "api.request",
       method: c.req.method,
       path: c.req.path,
       status,
+      elapsedMs: elapsed,
       requestHeaders: Object.fromEntries(c.req.raw.headers.entries()),
       ...(body ? { requestBody: body } : {}),
       responseHeaders: Object.fromEntries(c.res.headers.entries()),
@@ -2424,7 +2432,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     request: {
       params: z.object({ accountId: z.string(), id: z.string() }),
     },
-    middleware: [authz("accounts:write", "accounts")] as const,
+    middleware: [authz("management:write", "reindex")] as const,
     responses: {
       200: { content: { "application/json": { schema: SignalSchema } }, description: "Signal reprocessed" },
     },
