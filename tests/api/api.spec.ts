@@ -21,6 +21,14 @@ vi.mock("../../src/dns/mx-validator.js", () => ({
   validateRecipientMx: vi.fn().mockResolvedValue({ isOk: () => true, isErr: () => false, _unsafeUnwrap: () => undefined }),
 }));
 
+vi.mock("../../src/email/unsubscribe-token.js", () => ({
+  generateUnsubscribeToken: vi.fn().mockResolvedValue("mock-jwt-token"),
+}));
+
+vi.mock("../../src/email/template-renderer.js", () => ({
+  renderTemplate: vi.fn().mockResolvedValue("<html>mock</html>"),
+}));
+
 // ---------------------------------------------------------------------------
 // Test doubles
 // ---------------------------------------------------------------------------
