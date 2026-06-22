@@ -228,7 +228,7 @@ resource "aws_lambda_function" "main" {
   handler       = "handler.handler"
   runtime       = "nodejs24.x"
   memory_size   = 1024
-  timeout       = 30
+  timeout       = 60
   publish       = true
 
   filename         = data.archive_file.lambda_stub.output_path
