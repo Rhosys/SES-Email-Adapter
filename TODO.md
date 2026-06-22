@@ -49,6 +49,7 @@
 - [ ] **Mobile app** — native mobile client.
 - [ ] **Deploy Bedrock guardrail and re-enable in classifier** — create `aws_bedrock_guardrail` resource in infrastructure, uncomment in classifier.
 - [ ] **Strip tracking pixels from HTML email bodies at ingestion** — ADR 007 heuristics. Remove tracker `<img>` elements at processing time.
+- [ ] **Automatically seed sample arcs during onboarding for new users** — new accounts land in an empty inbox until the user's own test email arrives in Step 2. Auto-create a small set of system-generated example arcs (e.g. a sample `package`, `payments`, and `auth` arc with realistic `workflowData`) at account creation so the inbox UI, workflow cards, and smart action buttons aren't demoed against a blank state. Tag these arcs distinctly (e.g. `workflow: "test"` or a dedicated `sample`/`demo` flag) so they're clearly distinguishable from real mail and can be bulk-dismissed or auto-expired once the user has received their first real signal.
 
 ---
 
