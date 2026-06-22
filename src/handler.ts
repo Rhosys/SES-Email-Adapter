@@ -183,12 +183,7 @@ const processor = new SignalProcessor({
   contentBucket: CONTENT_BUCKET,
 });
 
-const feedbackProcessor = new FeedbackProcessor(processingDb, accountDb, logger, {
-  getSignalById: (accountId, signalId) => arcDb.getSignalById(accountId, signalId),
-  getSignalByMessageId: (accountId, sesMessageId) => arcDb.getSignalByMessageId(accountId, sesMessageId),
-  saveSignal: (signal) => arcDb.saveSignal(signal),
-  updateSignalSendStatus: (accountId, signalLookupId, update) => arcDb.updateSignalSendStatus(accountId, signalLookupId, update),
-});
+const feedbackProcessor = new FeedbackProcessor(processingDb, accountDb, logger, arcDb);
 
 const reindexWorker = new ReindexWorker(logger);
 
@@ -213,7 +208,7 @@ const domainHealthJob = new DomainHealthJob(accountDb, arcDb, logger);
 const followupHandler = new FollowupHandler({
   arcDb,
   arcUpdater: { updateArcStatus: (accountId, arcId, status, updatedAt) => arcDb.updateArc(accountId, arcId, status, updatedAt, {}).then(r => r.map(() => undefined)) },
-  signalDb: { getSignalById: (accountId, signalId, arcId) => arcDb.getSignalById(accountId, signalId, arcId) },
+  signalDb: arcDb,
   notifier: new DeviceNotifier({
     deviceStore,
     deliverers: {
@@ -227,9 +222,9 @@ const followupHandler = new FollowupHandler({
 });
 
 const rsvpReminderHandler = new RsvpReminderHandler({
-  signalDb: { getSignalById: (accountId, signalId, arcId) => arcDb.getSignalById(accountId, signalId, arcId) },
+  signalDb: arcDb,
   calendarDb: { getLatestCalendarResponse: (accountId, arcId, veventUid) => arcDb.getLatestCalendarResponse(accountId, arcId, veventUid) as Promise<Result<Signal | null, DbError>> },
-  arcDb: { getArc: (accountId, arcId) => arcDb.getArc(accountId, arcId) },
+  arcDb,
   notifier: new DeviceNotifier({
     deviceStore,
     deliverers: {
@@ -247,16 +242,16 @@ const rsvpReminderHandler = new RsvpReminderHandler({
 // ---------------------------------------------------------------------------
 
 const digestDispatcher = new DigestDispatcher({
-  accountDb: { queryAllAccountMetas: () => accountDb.queryAllAccountMetas() },
+  accountDb,
   sqsClient: sqs,
   queueUrl: SIGNAL_QUEUE_URL,
   logger,
 });
 
 const digestWorker = new DigestWorker({
-  accountDb: { getAccount: (id) => accountDb.getAccount(id), getVerifiedForwardingAddress: (accountId, address) => accountDb.getVerifiedForwardingAddress(accountId, address) },
-  arcDb: { listActiveArcs: (accountId, limit) => arcDb.listActiveArcs(accountId, limit) },
-  signalDb: { countQuarantined: (accountId) => arcDb.countQuarantined(accountId) },
+  accountDb,
+  arcDb,
+  signalDb: arcDb,
   emailService,
   logger,
 });
@@ -266,7 +261,8 @@ const digestWorker = new DigestWorker({
 // ---------------------------------------------------------------------------
 
 const onboardingHandler = new OnboardingTaskHandler(
-  { getAccount: (id) => accountDb.getAccount(id), updateAccount: (id, u) => accountDb.updateAccount(id, u), listDomains: (id) => accountDb.listDomains(id), hasSignals: (id) => arcDb.hasSignals(id) },
+  accountDb,
+  arcDb,
   logger,
   emailService,
 );
@@ -348,6 +344,7 @@ const app = createApp({
   logger,
   verificationMailer: sesVerificationMailer,
   jobDispatcher: new ReindexDispatcher({ logger }),
+  signalReprocessor: processor,
   draftSendDispatcher,
   accountCreationStarter,
   appBaseUrl: APP_BASE_URL,
