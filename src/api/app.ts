@@ -137,6 +137,7 @@ export type { UpdateArcRequest, UpdateSignalStatusRequest, CreateViewRequest, Up
 
 export interface VerificationMailer {
   sendForwardVerification(accountId: string, address: string, token: string): Promise<Result<void, TransientSesError>>;
+  sendCalendarForwardVerification(accountId: string, address: string, token: string): Promise<Result<void, TransientSesError>>;
 }
 
 // ---------------------------------------------------------------------------
