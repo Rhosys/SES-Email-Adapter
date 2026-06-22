@@ -1205,6 +1205,19 @@ export class SignalProcessor {
         case "quarantine_visible": outcome.quarantine = true; break;
         // "allow_all": signal proceeds as active
       }
+      // SR-00: synthetic rule explaining why the unknown sender policy triggered
+      if (effectiveFilterMode !== "allow_all") {
+        const policySource = aliasConfig ? `alias ${recipientAddress}` : "account default";
+        const ACTION_MAP = { quarantine_visible: "quarantine", quarantine_hidden: "quarantine_hidden", block_hidden: "block_hidden", block_reject: "block_reject", report_violation: "block_reject" } as const;
+        const sr00StatusChange = outcome.quarantineHidden ? "quarantine_hidden" as const : outcome.quarantine ? "quarantine_visible" as const : outcome.blockDisposition;
+        matchedRules.push({
+          ruleId: "SR-00",
+          actions: [{ type: ACTION_MAP[effectiveFilterMode as keyof typeof ACTION_MAP] }],
+          labelsAdded: [],
+          ...(sr00StatusChange ? { statusChange: sr00StatusChange } : {}),
+          text: `Sender ${senderETLD1} is not in approved senders (${policySource} policy: ${effectiveFilterMode})`,
+        });
+      }
     }
 
     const buildArgs = { accountId, sesMessageId, recipientAddress, parsed, classification: classificationOutput, s3Key, receivedAt: timestamp, now, ...(ttl !== undefined ? { ttl } : {}), ...(gsi2pk !== undefined ? { gsi2pk } : {}), ...(opts?.forceSignalId !== undefined ? { forceSignalId: opts.forceSignalId } : {}) };

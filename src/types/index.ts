@@ -384,6 +384,8 @@ export interface MatchedRuleResult {
   actions: Array<Pick<RuleAction, "type" | "value">>;
   labelsAdded: string[];
   statusChange?: "block_hidden" | "block_reject" | "report_violation" | "quarantine_visible" | "quarantine_hidden" | "archived" | "deleted";
+  /** Human-readable explanation — used for synthetic rules (e.g. SR-00) where no DB rule record exists. */
+  text?: string;
 }
 
 // ---------------------------------------------------------------------------
