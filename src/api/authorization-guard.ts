@@ -2,6 +2,14 @@ import type { Context, MiddlewareHandler } from "hono";
 import type { Logger } from "../logger.js";
 
 /**
+ * Context variable key set by the notFound handler to signal that no route matched.
+ * Used by the authorization guard to distinguish "route missing authorize()" from
+ * "request hit a non-existent path" — the former is a 403, the latter a 404/405
+ * already handled by notFound.
+ */
+export const ROUTE_NOT_FOUND_KEY = "routeNotFound" as const;
+
+/**
  * Global middleware that runs AFTER route handlers.
  * For any route, verifies that the authorization middleware was executed
  * (by checking the context flag). If not, returns 403.
@@ -17,6 +25,11 @@ import type { Logger } from "../logger.js";
 export function authorizationGuard(logger?: Logger): MiddlewareHandler {
   return async (c, next) => {
     await next();
+
+    // If the notFound handler already produced a 404/405 response, don't override it
+    if (c.get(ROUTE_NOT_FOUND_KEY)) {
+      return;
+    }
 
     // Check if authorization was verified by the authorize() middleware
     const authorizationVerified = c.get("authorizationVerified");

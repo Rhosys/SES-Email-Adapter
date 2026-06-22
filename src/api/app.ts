@@ -49,7 +49,7 @@ export interface JobDispatcher {
     jobId: string; targetRegistryId: string; modelId: string; segmentCount: number; startedAt: string;
   }, NotFoundError>>;
 }
-import { authorizationGuard } from "./authorization-guard.js";
+import { authorizationGuard, ROUTE_NOT_FOUND_KEY } from "./authorization-guard.js";
 import { createAuthorize } from "./authorization-middleware.js";
 import {
   UpdateArcRequest, UpdateSignalRequest, UpdateSignalStatusRequest,
@@ -166,7 +166,7 @@ export interface AppDeps {
   schedulerClient: SchedulerClient;
 }
 
-type AppEnv = { Variables: { auth: AuthContext; authorizationVerified?: boolean } };
+type AppEnv = { Variables: { auth: AuthContext; authorizationVerified?: boolean; [ROUTE_NOT_FOUND_KEY]?: boolean } };
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -649,7 +649,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     const arcResult = await arcDb.getArc(accountId, c.req.param("arcId")!);
     if (arcResult.isErr()) return err(c, 500, "Internal Server Error");
     const arc = arcResult.value;
-    if (!arc) return err(c, 404, "Arc not found", "ARC_NOT_FOUND");
+    if (!arc || arc.status === "deleted") return err(c, 404, "Arc not found", "ARC_NOT_FOUND");
     const body = await zParse(CreateDraftSignalRequest, c.req.raw);
     const now = DateTime.utc().toISO()!;
     const id = generateId("sgn-");
@@ -682,6 +682,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     };
     const createResult = await arcDb.createSignal(signal);
     if (createResult.isErr()) return err(c, 500, "Internal Server Error");
+    await arcDb.updateArc(accountId, arc.id, arc.status, now, {});
     return c.json(toApiSignal(createResult.value), 201);
   });
 
@@ -2406,6 +2407,34 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     const result = await jobDispatcher.dispatch(body.targetRegistryId, body.segmentCount);
     if (result.isErr()) return err(c, 404, "Cluster not found");
     return c.json(result.value, 202);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Not Found & Method Not Allowed — must be registered after all routes
+  // ---------------------------------------------------------------------------
+
+  app.notFound((c) => {
+    c.set(ROUTE_NOT_FOUND_KEY, true);
+
+    const requestMethod = c.req.method;
+    const requestPath = c.req.path;
+
+    // Check if this path matches any registered route with a different method (→ 405)
+    const registeredMethods = new Set<string>();
+    for (const r of app.routes) {
+      if (r.method === "ALL") continue;
+      // Convert Hono path template :param to regex for matching
+      const pattern = new RegExp("^" + r.path.replace(/:[^/]+/g, "[^/]+") + "$");
+      if (pattern.test(requestPath) && r.method !== requestMethod) {
+        registeredMethods.add(r.method);
+      }
+    }
+
+    if (registeredMethods.size > 0) {
+      return c.json({ title: "Method Not Allowed" }, 405);
+    }
+
+    return c.json({ title: "Not Found" }, 404);
   });
 
   return app;
