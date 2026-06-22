@@ -79,6 +79,12 @@ mock_provider "aws" {
       arn = "arn:aws:states:eu-central-1:123456789012:stateMachine:test-svc-mock"
     }
   }
+  mock_resource "aws_sqs_queue" {
+    defaults = {
+      arn = "arn:aws:sqs:eu-central-1:123456789012:test-svc-signals"
+      url = "https://sqs.eu-central-1.amazonaws.com/123456789012/test-svc-signals"
+    }
+  }
   mock_data "aws_kms_secrets" {
     defaults = {
       plaintext = {
@@ -197,22 +203,22 @@ run "dkim_2048_splits_into_two_chunks" {
   command = plan
 
   assert {
-    condition     = length(split("\"\"", aws_route53_record.ses_dkim.records[0])) == 2
+    condition     = length(split("\"\"", one(aws_route53_record.ses_dkim.records))) == 2
     error_message = "2048-bit DKIM key must split into exactly 2 character-strings"
   }
 
   assert {
-    condition     = alltrue([for c in split("\"\"", aws_route53_record.ses_dkim.records[0]) : length(c) <= 255])
+    condition     = alltrue([for c in split("\"\"", one(aws_route53_record.ses_dkim.records)) : length(c) <= 255])
     error_message = "Every DKIM character-string must be <= 255 chars (RFC 1035)"
   }
 
   assert {
-    condition     = startswith(join("", split("\"\"", aws_route53_record.ses_dkim.records[0])), "v=DKIM1; k=rsa; p=")
+    condition     = startswith(join("", split("\"\"", one(aws_route53_record.ses_dkim.records))), "v=DKIM1; k=rsa; p=")
     error_message = "Reassembled DKIM value must start with the DKIM prefix"
   }
 
   assert {
-    condition     = !strcontains(join("", split("\"\"", aws_route53_record.ses_dkim.records[0])), "\"")
+    condition     = !strcontains(join("", split("\"\"", one(aws_route53_record.ses_dkim.records))), "\"")
     error_message = "Reassembled DKIM value must contain no stray quote characters"
   }
 }
@@ -231,22 +237,22 @@ run "dkim_4096_splits_into_three_chunks" {
   }
 
   assert {
-    condition     = length(split("\"\"", aws_route53_record.ses_dkim.records[0])) == 3
+    condition     = length(split("\"\"", one(aws_route53_record.ses_dkim.records))) == 3
     error_message = "4096-bit DKIM key must split into exactly 3 character-strings"
   }
 
   assert {
-    condition     = alltrue([for c in split("\"\"", aws_route53_record.ses_dkim.records[0]) : length(c) <= 255])
+    condition     = alltrue([for c in split("\"\"", one(aws_route53_record.ses_dkim.records)) : length(c) <= 255])
     error_message = "Every DKIM character-string must be <= 255 chars even for a 4096-bit key"
   }
 
   assert {
-    condition     = startswith(join("", split("\"\"", aws_route53_record.ses_dkim.records[0])), "v=DKIM1; k=rsa; p=")
+    condition     = startswith(join("", split("\"\"", one(aws_route53_record.ses_dkim.records))), "v=DKIM1; k=rsa; p=")
     error_message = "Reassembled 4096-bit DKIM value must start with the DKIM prefix"
   }
 
   assert {
-    condition     = !strcontains(aws_route53_record.ses_dkim.records[0], "-----")
+    condition     = !strcontains(one(aws_route53_record.ses_dkim.records), "-----")
     error_message = "DKIM TXT record must not contain PEM header/footer markers"
   }
 }
