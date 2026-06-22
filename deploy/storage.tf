@@ -82,7 +82,7 @@ resource "aws_s3_bucket_policy" "emails" {
 
 resource "aws_sqs_queue" "signals" {
   name                       = "${var.service_name}-signals"
-  visibility_timeout_seconds = 900     # match expected worker runtime
+  visibility_timeout_seconds = 120     # 2× Lambda timeout (60s)
   message_retention_seconds  = 1209600 # 14 days (maximum)
 }
 
