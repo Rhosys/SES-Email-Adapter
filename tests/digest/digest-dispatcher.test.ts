@@ -1,209 +1,191 @@
-import { describe, it, expect, beforeEach } from "vitest";
-import { mockClient } from "aws-sdk-client-mock";
-import { SQSClient, SendMessageBatchCommand } from "@aws-sdk/client-sqs";
-import { DateTime } from "luxon";
+import { describe, it, expect, vi } from "vitest"
+import { DateTime } from "luxon"
+import { ok } from "neverthrow"
+import { DigestDispatcher } from "../../src/digest/digest-dispatcher.js"
+import type { IAccountMetaRow, IDigestDispatcherDeps } from "../../src/digest/digest-dispatcher.js"
+import { dbError } from "../../src/errors.js"
+import { createMockLogger, type MockLogger } from "../helpers/mock-logger.js"
 
-import { ok, err, dbError } from "../../src/errors.js";
-import { DigestDispatcher } from "../../src/digest/digest-dispatcher.js";
-import type { IAccountMetaRow, IDigestDispatcherDeps } from "../../src/digest/digest-dispatcher.js";
-import { createMockLogger } from "../helpers/mock-logger.js";
+// Monday — daily dispatches, weekly does NOT, monthly does NOT (22nd)
+const monday = DateTime.fromISO("2026-06-22")
 
-// ---------------------------------------------------------------------------
-// Mocks
-// ---------------------------------------------------------------------------
-
-const sqsMock = mockClient(SQSClient);
-
-function makeDeps(accounts: IAccountMetaRow[]): IDigestDispatcherDeps {
-  return {
-    accountDb: { queryAllAccountMetas: async () => ok(accounts) },
-    sqsClient: sqsMock as unknown as SQSClient,
-    queueUrl: "https://sqs.eu-central-1.amazonaws.com/123456789/signals",
-    logger: createMockLogger(),
-  };
+interface TestDeps extends IDigestDispatcherDeps {
+  mockSqsSend: ReturnType<typeof vi.fn>
+  logger: MockLogger
 }
 
-// Sunday 2026-06-21 — weekly dispatches on Sundays
-const SUNDAY = DateTime.fromISO("2026-06-21", { zone: "utc" });
-// Monday 2026-06-22 — NOT Sunday, NOT 1st
-const MONDAY = DateTime.fromISO("2026-06-22", { zone: "utc" });
-// 1st of month (Wednesday 2026-07-01)
-const FIRST_OF_MONTH = DateTime.fromISO("2026-07-01", { zone: "utc" });
+function buildDeps(overrides?: Partial<IDigestDispatcherDeps>): TestDeps {
+  const logger = createMockLogger()
+  const mockSqsSend = vi.fn().mockResolvedValue({ Successful: [{ Id: "0" }], Failed: [] })
+  const base: TestDeps = {
+    accountDb: { queryAllAccountMetas: vi.fn().mockResolvedValue(ok([])) },
+    sqsClient: { send: mockSqsSend } as unknown as IDigestDispatcherDeps["sqsClient"],
+    queueUrl: "https://sqs.eu-central-1.amazonaws.com/123456789/signals",
+    logger,
+    mockSqsSend,
+  }
+  if (overrides) {
+    Object.assign(base, overrides)
+  }
+  return base
+}
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
+describe("DigestDispatcher — REQ-1.3", () => {
+  describe("filtering accounts by digest state", () => {
+    it("only enqueues daily accounts on a Monday (weekly + null excluded)", async () => {
+      const accounts: IAccountMetaRow[] = [
+        { id: "acct_daily1", digest: { frequency: "daily", forwardingTargetId: "t1" } },
+        { id: "acct_daily2", digest: { frequency: "daily", forwardingTargetId: "t2" } },
+        { id: "acct_weekly", digest: { frequency: "weekly", forwardingTargetId: "t3" } },
+        { id: "acct_monthly", digest: { frequency: "monthly", forwardingTargetId: "t4" } },
+        { id: "acct_null", digest: null },
+        { id: "acct_undef" },
+      ]
 
-describe("DigestDispatcher", () => {
-  beforeEach(() => {
-    sqsMock.reset();
-    sqsMock.on(SendMessageBatchCommand).resolves({ Successful: [], Failed: [] });
-  });
+      const deps = buildDeps({
+        accountDb: { queryAllAccountMetas: vi.fn().mockResolvedValue(ok(accounts)) },
+      })
+      const dispatcher = new DigestDispatcher(deps)
 
-  it("enqueues only accounts with matching frequency on Sunday (daily + weekly qualify)", async () => {
-    const accounts: IAccountMetaRow[] = [
-      { id: "acct-daily", digest: { frequency: "daily", forwardingTargetId: "t1" } },
-      { id: "acct-weekly", digest: { frequency: "weekly", forwardingTargetId: "t2" } },
-      { id: "acct-monthly", digest: { frequency: "monthly", forwardingTargetId: "t3" } },
-      { id: "acct-none", digest: null },
-      { id: "acct-undefined" },
-    ];
+      const result = await dispatcher.dispatch(monday)
 
-    const dispatcher = new DigestDispatcher(makeDeps(accounts));
-    const result = await dispatcher.dispatch(SUNDAY);
+      expect(result.isOk()).toBe(true)
+      expect(deps.mockSqsSend).toHaveBeenCalledTimes(1)
 
-    expect(result.isOk()).toBe(true);
+      const command = deps.mockSqsSend.mock.calls[0]![0]
+      const entries = command.input.Entries
+      expect(entries).toHaveLength(2)
+      expect(JSON.parse(entries[0].MessageBody)).toEqual({ accountId: "acct_daily1" })
+      expect(JSON.parse(entries[1].MessageBody)).toEqual({ accountId: "acct_daily2" })
+    })
+  })
 
-    const calls = sqsMock.commandCalls(SendMessageBatchCommand);
-    expect(calls).toHaveLength(1);
+  describe("zero qualifying accounts", () => {
+    it("returns ok without sending to SQS", async () => {
+      const accounts: IAccountMetaRow[] = [
+        { id: "acct_weekly", digest: { frequency: "weekly", forwardingTargetId: "t1" } },
+        { id: "acct_null", digest: null },
+      ]
 
-    const entries = calls[0]!.args[0].input.Entries!;
-    expect(entries).toHaveLength(2);
+      const deps = buildDeps({
+        accountDb: { queryAllAccountMetas: vi.fn().mockResolvedValue(ok(accounts)) },
+      })
+      const dispatcher = new DigestDispatcher(deps)
 
-    const bodies = entries.map((e) => JSON.parse(e.MessageBody!));
-    expect(bodies).toEqual([
-      { accountId: "acct-daily" },
-      { accountId: "acct-weekly" },
-    ]);
-  });
+      const result = await dispatcher.dispatch(monday)
 
-  it("enqueues only daily accounts on a non-Sunday, non-1st day", async () => {
-    const accounts: IAccountMetaRow[] = [
-      { id: "acct-daily", digest: { frequency: "daily", forwardingTargetId: "t1" } },
-      { id: "acct-weekly", digest: { frequency: "weekly", forwardingTargetId: "t2" } },
-      { id: "acct-monthly", digest: { frequency: "monthly", forwardingTargetId: "t3" } },
-    ];
+      expect(result.isOk()).toBe(true)
+      expect(deps.mockSqsSend).not.toHaveBeenCalled()
+    })
+  })
 
-    const dispatcher = new DigestDispatcher(makeDeps(accounts));
-    const result = await dispatcher.dispatch(MONDAY);
+  describe("SQS batch send throws", () => {
+    it("returns err when sqsClient.send throws", async () => {
+      const accounts: IAccountMetaRow[] = [
+        { id: "acct_daily", digest: { frequency: "daily", forwardingTargetId: "t1" } },
+      ]
 
-    expect(result.isOk()).toBe(true);
+      const deps = buildDeps({
+        accountDb: { queryAllAccountMetas: vi.fn().mockResolvedValue(ok(accounts)) },
+      })
+      deps.mockSqsSend.mockRejectedValueOnce(new Error("SQS unavailable"))
+      const dispatcher = new DigestDispatcher(deps)
 
-    const calls = sqsMock.commandCalls(SendMessageBatchCommand);
-    expect(calls).toHaveLength(1);
+      const result = await dispatcher.dispatch(monday)
 
-    const entries = calls[0]!.args[0].input.Entries!;
-    expect(entries).toHaveLength(1);
-    expect(JSON.parse(entries[0]!.MessageBody!)).toEqual({ accountId: "acct-daily" });
-  });
+      expect(result.isErr()).toBe(true)
+      expect(result._unsafeUnwrapErr().kind).toBe("db_error")
+    })
+  })
 
-  it("enqueues daily + monthly on the 1st of month", async () => {
-    const accounts: IAccountMetaRow[] = [
-      { id: "acct-daily", digest: { frequency: "daily", forwardingTargetId: "t1" } },
-      { id: "acct-weekly", digest: { frequency: "weekly", forwardingTargetId: "t2" } },
-      { id: "acct-monthly", digest: { frequency: "monthly", forwardingTargetId: "t3" } },
-    ];
+  describe("SQS batch partial failure", () => {
+    it("returns err when result.Failed is non-empty", async () => {
+      const accounts: IAccountMetaRow[] = [
+        { id: "acct_daily", digest: { frequency: "daily", forwardingTargetId: "t1" } },
+      ]
 
-    const dispatcher = new DigestDispatcher(makeDeps(accounts));
-    const result = await dispatcher.dispatch(FIRST_OF_MONTH);
+      const deps = buildDeps({
+        accountDb: { queryAllAccountMetas: vi.fn().mockResolvedValue(ok(accounts)) },
+      })
+      deps.mockSqsSend.mockResolvedValueOnce({
+        Successful: [],
+        Failed: [{ Id: "0", Code: "InternalError", Message: "Something went wrong", SenderFault: false }],
+      })
+      const dispatcher = new DigestDispatcher(deps)
 
-    expect(result.isOk()).toBe(true);
+      const result = await dispatcher.dispatch(monday)
 
-    const calls = sqsMock.commandCalls(SendMessageBatchCommand);
-    expect(calls).toHaveLength(1);
+      expect(result.isErr()).toBe(true)
+      expect(result._unsafeUnwrapErr().kind).toBe("db_error")
+      expect(result._unsafeUnwrapErr().message).toContain("partial failure")
+    })
+  })
 
-    const entries = calls[0]!.args[0].input.Entries!;
-    const bodies = entries.map((e) => JSON.parse(e.MessageBody!));
-    expect(bodies).toEqual([
-      { accountId: "acct-daily" },
-      { accountId: "acct-monthly" },
-    ]);
-  });
+  describe("happy path — multiple accounts batched correctly", () => {
+    it("enqueues correct messages with messageType attribute and accountId body", async () => {
+      const accounts: IAccountMetaRow[] = Array.from({ length: 3 }, (_, i) => ({
+        id: `acct_${i}`,
+        digest: { frequency: "daily" as const, forwardingTargetId: `t${i}` },
+      }))
 
-  it("returns ok and makes no SQS calls when no accounts qualify", async () => {
-    const accounts: IAccountMetaRow[] = [
-      { id: "acct-none", digest: null },
-      { id: "acct-undefined" },
-      { id: "acct-weekly", digest: { frequency: "weekly", forwardingTargetId: "t1" } },
-    ];
+      const deps = buildDeps({
+        accountDb: { queryAllAccountMetas: vi.fn().mockResolvedValue(ok(accounts)) },
+      })
+      const dispatcher = new DigestDispatcher(deps)
 
-    const dispatcher = new DigestDispatcher(makeDeps(accounts));
-    // Monday — weekly doesn't qualify
-    const result = await dispatcher.dispatch(MONDAY);
+      const result = await dispatcher.dispatch(monday)
 
-    expect(result.isOk()).toBe(true);
-    expect(sqsMock.commandCalls(SendMessageBatchCommand)).toHaveLength(0);
-  });
+      expect(result.isOk()).toBe(true)
+      expect(deps.mockSqsSend).toHaveBeenCalledTimes(1)
 
-  it("returns err when SQS batch send throws", async () => {
-    sqsMock.reset();
-    sqsMock.on(SendMessageBatchCommand).rejects(new Error("SQS unavailable"));
+      const command = deps.mockSqsSend.mock.calls[0]![0]
+      const entries = command.input.Entries
+      expect(entries).toHaveLength(3)
 
-    const accounts: IAccountMetaRow[] = [
-      { id: "acct-daily", digest: { frequency: "daily", forwardingTargetId: "t1" } },
-    ];
+      for (let i = 0; i < 3; i++) {
+        expect(entries[i].Id).toBe(`${i}`)
+        expect(JSON.parse(entries[i].MessageBody)).toEqual({ accountId: `acct_${i}` })
+        expect(entries[i].MessageAttributes.messageType).toEqual({
+          DataType: "String",
+          StringValue: "digest_send",
+        })
+      }
+    })
 
-    const dispatcher = new DigestDispatcher(makeDeps(accounts));
-    const result = await dispatcher.dispatch(SUNDAY);
+    it("batches in groups of 10 when more than 10 qualifying accounts", async () => {
+      const accounts: IAccountMetaRow[] = Array.from({ length: 12 }, (_, i) => ({
+        id: `acct_${i}`,
+        digest: { frequency: "daily" as const, forwardingTargetId: `t${i}` },
+      }))
 
-    expect(result.isErr()).toBe(true);
-    expect(result._unsafeUnwrapErr().kind).toBe("db_error");
-  });
+      const deps = buildDeps({
+        accountDb: { queryAllAccountMetas: vi.fn().mockResolvedValue(ok(accounts)) },
+      })
+      const dispatcher = new DigestDispatcher(deps)
 
-  it("returns err when SQS batch has partial failures", async () => {
-    sqsMock.reset();
-    sqsMock.on(SendMessageBatchCommand).resolves({
-      Successful: [{ Id: "0", MessageId: "msg-0", MD5OfMessageBody: "abc" }],
-      Failed: [{ Id: "1", Code: "InternalError", SenderFault: false, Message: "Something went wrong" }],
-    });
+      const result = await dispatcher.dispatch(monday)
 
-    const accounts: IAccountMetaRow[] = [
-      { id: "acct-1", digest: { frequency: "daily", forwardingTargetId: "t1" } },
-      { id: "acct-2", digest: { frequency: "daily", forwardingTargetId: "t2" } },
-    ];
+      expect(result.isOk()).toBe(true)
+      expect(deps.mockSqsSend).toHaveBeenCalledTimes(2)
 
-    const dispatcher = new DigestDispatcher(makeDeps(accounts));
-    const result = await dispatcher.dispatch(SUNDAY);
+      const firstBatch = deps.mockSqsSend.mock.calls[0]![0].input.Entries
+      const secondBatch = deps.mockSqsSend.mock.calls[1]![0].input.Entries
+      expect(firstBatch).toHaveLength(10)
+      expect(secondBatch).toHaveLength(2)
+    })
+  })
 
-    expect(result.isErr()).toBe(true);
-    expect(result._unsafeUnwrapErr().kind).toBe("db_error");
-    expect(result._unsafeUnwrapErr().message).toContain("partial failure");
-  });
+  describe("queryAllAccountMetas failure", () => {
+    it("propagates db error from account query", async () => {
+      const deps = buildDeps()
+      const queryMock = vi.fn().mockResolvedValue({ isErr: () => true, isOk: () => false, error: dbError(new Error("DDB timeout")) })
+      deps.accountDb = { queryAllAccountMetas: queryMock }
+      const dispatcher = new DigestDispatcher(deps)
 
-  it("returns err when accountDb query fails", async () => {
-    const deps: IDigestDispatcherDeps = {
-      accountDb: { queryAllAccountMetas: async () => err(dbError("connection timeout")) },
-      sqsClient: sqsMock as unknown as SQSClient,
-      queueUrl: "https://sqs.eu-central-1.amazonaws.com/123456789/signals",
-      logger: createMockLogger(),
-    };
+      const result = await dispatcher.dispatch(monday)
 
-    const dispatcher = new DigestDispatcher(deps);
-    const result = await dispatcher.dispatch(SUNDAY);
-
-    expect(result.isErr()).toBe(true);
-    expect(result._unsafeUnwrapErr().kind).toBe("db_error");
-  });
-
-  it("batches accounts into groups of 10 for SQS", async () => {
-    const accounts: IAccountMetaRow[] = Array.from({ length: 12 }, (_, i) => ({
-      id: `acct-${i}`,
-      digest: { frequency: "daily" as const, forwardingTargetId: `t${i}` },
-    }));
-
-    const dispatcher = new DigestDispatcher(makeDeps(accounts));
-    const result = await dispatcher.dispatch(SUNDAY);
-
-    expect(result.isOk()).toBe(true);
-
-    const calls = sqsMock.commandCalls(SendMessageBatchCommand);
-    expect(calls).toHaveLength(2);
-    expect(calls[0]!.args[0].input.Entries!).toHaveLength(10);
-    expect(calls[1]!.args[0].input.Entries!).toHaveLength(2);
-  });
-
-  it("sets messageType attribute to digest_send on enqueued messages", async () => {
-    const accounts: IAccountMetaRow[] = [
-      { id: "acct-daily", digest: { frequency: "daily", forwardingTargetId: "t1" } },
-    ];
-
-    const dispatcher = new DigestDispatcher(makeDeps(accounts));
-    await dispatcher.dispatch(SUNDAY);
-
-    const calls = sqsMock.commandCalls(SendMessageBatchCommand);
-    const entry = calls[0]!.args[0].input.Entries![0]!;
-    expect(entry.MessageAttributes).toEqual({
-      messageType: { DataType: "String", StringValue: "digest_send" },
-    });
-  });
-});
+      expect(result.isErr()).toBe(true)
+      expect(deps.mockSqsSend).not.toHaveBeenCalled()
+    })
+  })
+})
