@@ -56,6 +56,18 @@ resource "aws_s3_bucket_public_access_block" "emails" {
   restrict_public_buckets = true
 }
 
+resource "aws_s3_bucket_cors_configuration" "emails" {
+  bucket = aws_s3_bucket.emails.id
+
+  cors_rule {
+    allowed_headers = ["*"]
+    allowed_methods = ["GET"]
+    allowed_origins = ["https://email.rhosys.cloud"]
+    expose_headers  = ["Content-Type"]
+    max_age_seconds = 3600
+  }
+}
+
 # Allow SES to write to the bucket
 resource "aws_s3_bucket_policy" "emails" {
   bucket = aws_s3_bucket.emails.id
