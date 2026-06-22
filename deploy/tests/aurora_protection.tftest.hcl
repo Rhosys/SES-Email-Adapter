@@ -79,6 +79,12 @@ mock_provider "aws" {
       arn = "arn:aws:states:eu-central-1:123456789012:stateMachine:test-svc-mock"
     }
   }
+  mock_resource "aws_sqs_queue" {
+    defaults = {
+      arn = "arn:aws:sqs:eu-central-1:123456789012:test-svc-signals"
+      url = "https://sqs.eu-central-1.amazonaws.com/123456789012/test-svc-signals"
+    }
+  }
   mock_data "aws_kms_secrets" {
     defaults = {
       plaintext = {

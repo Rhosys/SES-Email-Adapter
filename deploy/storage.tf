@@ -126,7 +126,10 @@ resource "aws_sqs_queue_policy" "signals_sns" {
         Principal = { Service = "scheduler.amazonaws.com" }
         Action    = "sqs:SendMessage"
         Resource  = aws_sqs_queue.signals.arn
-        Condition = { ArnEquals = { "aws:SourceArn" = "arn:aws:scheduler:*:${var.aws_account_id}:schedule/signal-followups/*" } }
+        Condition = { ArnEquals = { "aws:SourceArn" = [
+          "arn:aws:scheduler:*:${var.aws_account_id}:schedule/signal-followups/*",
+          aws_scheduler_schedule.digest_dispatch.arn,
+        ] } }
       },
     ]
   })
@@ -162,6 +165,31 @@ resource "aws_iam_role_policy" "scheduler_sqs_send" {
       Resource = aws_sqs_queue.signals.arn
     }]
   })
+}
+
+# ---------------------------------------------------------------------------
+# EventBridge Scheduler — daily digest dispatch (08:00 UTC)
+# ---------------------------------------------------------------------------
+
+resource "aws_scheduler_schedule" "digest_dispatch" {
+  name       = "${var.service_name}-digest-dispatch"
+  group_name = "default"
+
+  flexible_time_window {
+    mode = "OFF"
+  }
+
+  schedule_expression          = "cron(0 8 * * ? *)"
+  schedule_expression_timezone = "UTC"
+
+  target {
+    arn      = aws_sqs_queue.signals.arn
+    role_arn = aws_iam_role.scheduler_sqs.arn
+
+    input = jsonencode({
+      sqsMessageAttributeMessageType = "digest_dispatch"
+    })
+  }
 }
 
 # ---------------------------------------------------------------------------
