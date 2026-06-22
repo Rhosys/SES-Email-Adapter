@@ -769,16 +769,18 @@ export class SignalProcessor {
     return ok(undefined);
   }
 
-  private async processMessage(msg: InboundSignalMessage): Promise<Result<void, DbError | InvalidResponseError>> {
+  private async processMessage(msg: InboundSignalMessage, opts?: { force?: boolean; unsafeSkipDmarc?: boolean; forceSignalId?: string }): Promise<Result<void, DbError | InvalidResponseError>> {
     const { accountId, s3Key, sesMessageId, timestamp, destination } = msg;
 
     // 1. Dedup
-    const existingResult = await this.arcDb.getSignalByMessageId(accountId, sesMessageId);
-    if (existingResult.isErr()) return err(existingResult.error);
-    if (existingResult.value) return ok(undefined);
+    if (!opts?.force) {
+      const existingResult = await this.arcDb.getSignalByMessageId(accountId, sesMessageId);
+      if (existingResult.isErr()) return err(existingResult.error);
+      if (existingResult.value) return ok(undefined);
+    }
 
     // 1b. Block emails that fail DKIM or DMARC — spoofed sender, reject immediately
-    if (msg.dkimVerdict === "FAIL" || msg.dmarcVerdict === "FAIL") {
+    if (!opts?.unsafeSkipDmarc && (msg.dkimVerdict === "FAIL" || msg.dmarcVerdict === "FAIL")) {
       const signalId = generateId("sgn-");
       const signal: Signal = {
         id: signalId,
@@ -1181,6 +1183,7 @@ export class SignalProcessor {
       now,
       ...(ttl !== undefined ? { ttl } : {}),
       ...(gsi2pk !== undefined ? { gsi2pk } : {}),
+      ...(opts?.forceSignalId !== undefined ? { forceSignalId: opts.forceSignalId } : {}),
     });
 
     // 10. Evaluate all rules (system rules seeded at low position numbers, user rules at higher positions)
@@ -1204,7 +1207,7 @@ export class SignalProcessor {
       }
     }
 
-    const buildArgs = { accountId, sesMessageId, recipientAddress, parsed, classification: classificationOutput, s3Key, receivedAt: timestamp, now, ...(ttl !== undefined ? { ttl } : {}), ...(gsi2pk !== undefined ? { gsi2pk } : {}) };
+    const buildArgs = { accountId, sesMessageId, recipientAddress, parsed, classification: classificationOutput, s3Key, receivedAt: timestamp, now, ...(ttl !== undefined ? { ttl } : {}), ...(gsi2pk !== undefined ? { gsi2pk } : {}), ...(opts?.forceSignalId !== undefined ? { forceSignalId: opts.forceSignalId } : {}) };
 
     if (outcome.blockDisposition) {
       const blockSignal = buildSignal({ status: outcome.blockDisposition, ...buildArgs });
@@ -1645,6 +1648,44 @@ export class SignalProcessor {
     this.logger.trackPoint("calendar_signal_created", { calendarSignalId });
   }
 
+  // ---------------------------------------------------------------------------
+  // Reprocess — thin wrapper that calls processMessage with force flags
+  // ---------------------------------------------------------------------------
+
+  async reprocessSignal(accountId: string, signalId: string): Promise<Result<Signal, ProcessorError>> {
+    const existingResult = await this.arcDb.getSignalById(accountId, signalId);
+    if (existingResult.isErr()) return err(processorError(existingResult.error));
+    const existing = existingResult.value;
+    if (!existing) return err(processorError("Signal not found"));
+    if (existing.type !== "email") return err(processorError("Only email signals can be reprocessed"));
+
+    const s3Key = existing.data.s3Key;
+    if (!s3Key) return err(processorError("Signal has no s3Key — cannot reprocess"));
+
+    const sesMessageId = existing.data.sesMessageId ?? existing.signalLookupId.replace(/^ses-/, "");
+    const recipientAddress = existing.data.recipientAddress;
+    const timestamp = existing.data.receivedAt ?? existing.createdAt;
+
+    const msg: InboundSignalMessage = {
+      accountId,
+      s3Key,
+      sesMessageId,
+      timestamp,
+      destination: [recipientAddress],
+      dkimVerdict: "PASS",
+      dmarcVerdict: "PASS",
+    };
+
+    const result = await this.processMessage(msg, { force: true, unsafeSkipDmarc: true, forceSignalId: existing.id });
+    if (result.isErr()) return err(processorError(result.error));
+
+    // Re-fetch the signal (it was just overwritten by processMessage)
+    const freshResult = await this.arcDb.getSignalById(accountId, signalId);
+    if (freshResult.isErr()) return err(processorError(freshResult.error));
+    if (!freshResult.value) return err(processorError("Signal not found after reprocess"));
+    return ok(freshResult.value);
+  }
+
   private async autoApprove(
     accountId: string,
     address: string,
@@ -1732,9 +1773,10 @@ function buildSignal(opts: {
   now: string;
   ttl?: number;
   gsi2pk?: string;
+  forceSignalId?: string;
 }): Signal {
-  const { arcId, status, accountId, sesMessageId, recipientAddress, parsed, classification, s3Key, receivedAt, now, ttl, gsi2pk } = opts;
-  const signalId = generateId("sgn-");
+  const { arcId, status, accountId, sesMessageId, recipientAddress, parsed, classification, s3Key, receivedAt, now, ttl, gsi2pk, forceSignalId } = opts;
+  const signalId = forceSignalId ?? generateId("sgn-");
 
   // Extract unsubscribe info from List-Unsubscribe / List-Unsubscribe-Post headers
   const unsubscribe = parseUnsubscribeHeaders(parsed.headers);

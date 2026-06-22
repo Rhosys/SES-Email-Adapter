@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { ok, err } from "neverthrow";
 import { OnboardingTaskHandler } from "../../src/onboarding/onboarding-task-handler.js";
-import type { OnboardingStore } from "../../src/onboarding/onboarding-task-handler.js";
+import type { IOnboardingAccountDb, IOnboardingArcDb } from "../../src/onboarding/onboarding-task-handler.js";
 import { createMockLogger } from "../helpers/mock-logger.js";
 import type { Account, Domain } from "../../src/types/index.js";
 import type { EmailService } from "../../src/email/email-service.js";
@@ -41,13 +41,16 @@ function makeDomain(overrides: Partial<Domain> = {}): Domain {
   };
 }
 
-function createMockStore(overrides: Partial<OnboardingStore> = {}): OnboardingStore {
+function createMockStore(overrides: Partial<IOnboardingAccountDb & IOnboardingArcDb> = {}): { accountDb: IOnboardingAccountDb; arcDb: IOnboardingArcDb } {
   return {
-    getAccount: vi.fn().mockResolvedValue(ok(makeAccount())),
-    updateAccount: vi.fn().mockResolvedValue(ok(makeAccount())),
-    listDomains: vi.fn().mockResolvedValue(ok([])),
-    hasSignals: vi.fn().mockResolvedValue(ok(false)),
-    ...overrides,
+    accountDb: {
+      getAccount: overrides.getAccount ?? vi.fn().mockResolvedValue(ok(makeAccount())),
+      updateAccount: overrides.updateAccount ?? vi.fn().mockResolvedValue(ok(makeAccount())),
+      listDomains: overrides.listDomains ?? vi.fn().mockResolvedValue(ok([])),
+    },
+    arcDb: {
+      hasSignals: overrides.hasSignals ?? vi.fn().mockResolvedValue(ok(false)),
+    },
   };
 }
 
@@ -75,7 +78,7 @@ describe("OnboardingTaskHandler.handleFollowup", () => {
 
   it("sends email with TRACK log when no milestones complete", async () => {
     const store = createMockStore();
-    const handler = new OnboardingTaskHandler(store, logger, emailService);
+    const handler = new OnboardingTaskHandler(store.accountDb, store.arcDb, logger, emailService);
 
     const result = await handler.handleFollowup("acc-test", "user@example.com");
 
@@ -98,7 +101,7 @@ describe("OnboardingTaskHandler.handleFollowup", () => {
     const store = createMockStore({
       listDomains: vi.fn().mockResolvedValue(ok([makeDomain()])),
     });
-    const handler = new OnboardingTaskHandler(store, logger, emailService);
+    const handler = new OnboardingTaskHandler(store.accountDb, store.arcDb, logger, emailService);
 
     const result = await handler.handleFollowup("acc-test", "user@example.com");
 
@@ -116,12 +119,12 @@ describe("OnboardingTaskHandler.handleFollowup", () => {
       listDomains: vi.fn().mockResolvedValue(ok([makeDomain({ senderSetupComplete: true })])),
       hasSignals: vi.fn().mockResolvedValue(ok(true)),
     });
-    const handler = new OnboardingTaskHandler(store, logger, emailService);
+    const handler = new OnboardingTaskHandler(store.accountDb, store.arcDb, logger, emailService);
 
     const result = await handler.handleFollowup("acc-test", "user@example.com");
 
     expect(result.isOk()).toBe(true);
-    expect(store.updateAccount).toHaveBeenCalledWith("acc-test", {
+    expect(store.accountDb.updateAccount).toHaveBeenCalledWith("acc-test", {
       onboarding: { completed: false, testEmailReceived: true, testEmailReceivedAt: "2025-06-15T12:00:00.000Z" },
     });
   });
@@ -132,12 +135,12 @@ describe("OnboardingTaskHandler.handleFollowup", () => {
       listDomains: vi.fn().mockResolvedValue(ok([makeDomain({ senderSetupComplete: true })])),
       hasSignals: vi.fn().mockResolvedValue(ok(true)),
     });
-    const handler = new OnboardingTaskHandler(store, logger, emailService);
+    const handler = new OnboardingTaskHandler(store.accountDb, store.arcDb, logger, emailService);
 
     const result = await handler.handleFollowup("acc-test", "user@example.com");
 
     expect(result.isOk()).toBe(true);
-    expect(store.updateAccount).not.toHaveBeenCalled();
+    expect(store.accountDb.updateAccount).not.toHaveBeenCalled();
     expect((emailService.send as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
   });
 
@@ -145,7 +148,7 @@ describe("OnboardingTaskHandler.handleFollowup", () => {
     const store = createMockStore({
       getAccount: vi.fn().mockResolvedValue(ok(null)),
     });
-    const handler = new OnboardingTaskHandler(store, logger, emailService);
+    const handler = new OnboardingTaskHandler(store.accountDb, store.arcDb, logger, emailService);
 
     const result = await handler.handleFollowup("acc-missing", "user@example.com");
 
@@ -153,14 +156,14 @@ describe("OnboardingTaskHandler.handleFollowup", () => {
     const infoLog = logger.calls.find(c => c.method === "info");
     expect(infoLog).toBeDefined();
     expect(infoLog!.context).toMatchObject({ code: "onboarding.followup", accountId: "acc-missing" });
-    expect(store.listDomains).not.toHaveBeenCalled();
+    expect(store.accountDb.listDomains).not.toHaveBeenCalled();
   });
 
   it("treats domainAdded as false when listDomains fails", async () => {
     const store = createMockStore({
       listDomains: vi.fn().mockResolvedValue(err(dbError(new Error("timeout")))),
     });
-    const handler = new OnboardingTaskHandler(store, logger, emailService);
+    const handler = new OnboardingTaskHandler(store.accountDb, store.arcDb, logger, emailService);
 
     const result = await handler.handleFollowup("acc-test", "user@example.com");
 
@@ -178,7 +181,7 @@ describe("OnboardingTaskHandler.handleFollowup", () => {
       listDomains: vi.fn().mockResolvedValue(ok([makeDomain({ senderSetupComplete: true })])),
       hasSignals: vi.fn().mockResolvedValue(err(dbError(new Error("timeout")))),
     });
-    const handler = new OnboardingTaskHandler(store, logger, emailService);
+    const handler = new OnboardingTaskHandler(store.accountDb, store.arcDb, logger, emailService);
 
     const result = await handler.handleFollowup("acc-test", "user@example.com");
 
@@ -193,7 +196,7 @@ describe("OnboardingTaskHandler.handleFollowup", () => {
     const store = createMockStore({
       getAccount: vi.fn().mockResolvedValue(err(dbError(new Error("connection reset")))),
     });
-    const handler = new OnboardingTaskHandler(store, logger, emailService);
+    const handler = new OnboardingTaskHandler(store.accountDb, store.arcDb, logger, emailService);
 
     const result = await handler.handleFollowup("acc-test", "user@example.com");
 
@@ -217,7 +220,7 @@ describe("OnboardingTaskHandler.handleCleanup", () => {
 
   it("sends email with TRACK code onboarding.cleanup", async () => {
     const store = createMockStore();
-    const handler = new OnboardingTaskHandler(store, logger, emailService);
+    const handler = new OnboardingTaskHandler(store.accountDb, store.arcDb, logger, emailService);
 
     const result = await handler.handleCleanup("acc-test", "user@example.com");
 
@@ -249,7 +252,7 @@ describe("OnboardingTaskHandler.handleTrialCheck", () => {
     const store = createMockStore({
       getAccount: vi.fn().mockResolvedValue(ok(makeAccount({ billingPlan }))),
     });
-    const handler = new OnboardingTaskHandler(store, logger, emailService);
+    const handler = new OnboardingTaskHandler(store.accountDb, store.arcDb, logger, emailService);
 
     const result = await handler.handleTrialCheck("acc-test", new Date().toISOString());
 
@@ -261,7 +264,7 @@ describe("OnboardingTaskHandler.handleTrialCheck", () => {
     const store = createMockStore({
       getAccount: vi.fn().mockResolvedValue(ok(makeAccount())),
     });
-    const handler = new OnboardingTaskHandler(store, logger, emailService);
+    const handler = new OnboardingTaskHandler(store.accountDb, store.arcDb, logger, emailService);
 
     const result = await handler.handleTrialCheck("acc-test", new Date().toISOString());
 
@@ -273,7 +276,7 @@ describe("OnboardingTaskHandler.handleTrialCheck", () => {
     const store = createMockStore({
       getAccount: vi.fn().mockResolvedValue(ok(null)),
     });
-    const handler = new OnboardingTaskHandler(store, logger, emailService);
+    const handler = new OnboardingTaskHandler(store.accountDb, store.arcDb, logger, emailService);
 
     const result = await handler.handleTrialCheck("acc-deleted", new Date().toISOString());
 
@@ -285,7 +288,7 @@ describe("OnboardingTaskHandler.handleTrialCheck", () => {
     const store = createMockStore({
       getAccount: vi.fn().mockResolvedValue(ok(makeAccount({ billingPlan: "Trial" }))),
     });
-    const handler = new OnboardingTaskHandler(store, logger, emailService);
+    const handler = new OnboardingTaskHandler(store.accountDb, store.arcDb, logger, emailService);
     const sixtyOneDaysAgo = new Date(Date.now() - 61 * 24 * 60 * 60 * 1000).toISOString();
 
     const result = await handler.handleTrialCheck("acc-test", sixtyOneDaysAgo);
@@ -300,7 +303,7 @@ describe("OnboardingTaskHandler.handleTrialCheck", () => {
     const store = createMockStore({
       getAccount: vi.fn().mockResolvedValue(err(dbError(new Error("service unavailable")))),
     });
-    const handler = new OnboardingTaskHandler(store, logger, emailService);
+    const handler = new OnboardingTaskHandler(store.accountDb, store.arcDb, logger, emailService);
 
     const result = await handler.handleTrialCheck("acc-test", new Date().toISOString());
 

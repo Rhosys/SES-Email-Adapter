@@ -13,13 +13,16 @@ import { buildUnsubscribeHeaders } from "../email/unsubscribe-headers.js";
 import { generateUnsubscribeToken } from "../email/unsubscribe-token.js";
 
 // ---------------------------------------------------------------------------
-// Store interface — minimal surface needed by this handler
+// Store interfaces — one per backing class
 // ---------------------------------------------------------------------------
 
-export interface OnboardingStore {
+export interface IOnboardingAccountDb {
   getAccount(accountId: string): Promise<Result<Account | null, DbError>>;
   updateAccount(accountId: string, updates: { onboarding: AccountOnboarding }): Promise<Result<Account, DbError>>;
   listDomains(accountId: string): Promise<Result<Domain[], DbError>>;
+}
+
+export interface IOnboardingArcDb {
   hasSignals(accountId: string): Promise<Result<boolean, DbError>>;
 }
 
@@ -39,7 +42,8 @@ const KEY_ID = process.env["AUTHRESS_KEY_ID"] ?? ""
 
 export class OnboardingTaskHandler {
   constructor(
-    private readonly store: OnboardingStore,
+    private readonly accountDb: IOnboardingAccountDb,
+    private readonly arcDb: IOnboardingArcDb,
     private readonly logger: Logger,
     private readonly emailService: EmailService,
   ) {}
@@ -53,7 +57,7 @@ export class OnboardingTaskHandler {
   }
 
   async handleTrialCheck(accountId: string, executionStartTime: string): Promise<Result<{ accountIsTrial: boolean; trialExpired: boolean }, DbError>> {
-    const accountResult = await this.store.getAccount(accountId);
+    const accountResult = await this.accountDb.getAccount(accountId);
     if (accountResult.isErr()) return err(accountResult.error);
     const account = accountResult.value;
     const accountIsTrial = account?.billingPlan === "Trial";
@@ -70,7 +74,7 @@ export class OnboardingTaskHandler {
 
   private async handleProgressTask(accountId: string, email: string, code: string): Promise<Result<void, DbError | TransientSesError>> {
     // 1. Read account
-    const accountResult = await this.store.getAccount(accountId);
+    const accountResult = await this.accountDb.getAccount(accountId);
     if (accountResult.isErr()) {
       return err(accountResult.error);
     }
@@ -83,7 +87,7 @@ export class OnboardingTaskHandler {
     // 2. Query domains (failure → treat as incomplete)
     let domainAdded = false;
     let senderSetupComplete = false;
-    const domainsResult = await this.store.listDomains(accountId);
+    const domainsResult = await this.accountDb.listDomains(accountId);
     if (domainsResult.isOk()) {
       const domains = domainsResult.value;
       domainAdded = domains.length > 0;
@@ -94,7 +98,7 @@ export class OnboardingTaskHandler {
 
     // 3. Query signals (failure → treat as incomplete)
     let emailsReceived = false;
-    const signalsResult = await this.store.hasSignals(accountId);
+    const signalsResult = await this.arcDb.hasSignals(accountId);
     if (signalsResult.isOk()) {
       emailsReceived = signalsResult.value;
     } else {
@@ -106,7 +110,7 @@ export class OnboardingTaskHandler {
 
     // 5. If emails received and testEmailReceived not yet marked → update account
     if (progress.emailsReceived && !account.onboarding?.testEmailReceived) {
-      const updateResult = await this.store.updateAccount(accountId, {
+      const updateResult = await this.accountDb.updateAccount(accountId, {
         onboarding: { ...account.onboarding!, testEmailReceived: true, testEmailReceivedAt: DateTime.utc().toISO()! },
       });
       if (updateResult.isErr()) {

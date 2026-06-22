@@ -1,6 +1,7 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import type { Context } from "hono";
 import { randomUUID, createHash, randomBytes } from "crypto";
+import type { S3Client } from "@aws-sdk/client-s3";
 import { DateTime } from "luxon";
 import { generateId, generateAccountId } from "../utils/id.js";
 import { getDomain } from "tldts";
@@ -49,6 +50,15 @@ export interface JobDispatcher {
     jobId: string; targetRegistryId: string; modelId: string; segmentCount: number; startedAt: string;
   }, NotFoundError>>;
 }
+
+// ---------------------------------------------------------------------------
+// Signal Reprocessor interface (used by reprocess route)
+// ---------------------------------------------------------------------------
+
+export interface SignalReprocessor {
+  reprocessSignal(accountId: string, signalId: string): Promise<Result<Signal, import("../errors.js").ProcessorError>>;
+}
+
 import { authorizationGuard, ROUTE_NOT_FOUND_KEY } from "./authorization-guard.js";
 import { createAuthorize } from "./authorization-middleware.js";
 import {
@@ -153,6 +163,7 @@ export interface AppDeps {
   logger: Logger;
   verificationMailer: VerificationMailer;
   jobDispatcher: JobDispatcher;
+  signalReprocessor: SignalReprocessor;
   draftSendDispatcher: DraftSendDispatcher;
   accountCreationStarter: { start(accountId: string, email: string): Promise<void> };
   appBaseUrl: string;
@@ -193,7 +204,7 @@ async function ensureAliasExists(accountDb: AccountDatabase, accountId: string, 
   return neverthrowOk(undefined);
 }
 
-export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, verificationMailer, jobDispatcher, draftSendDispatcher, accountCreationStarter, appBaseUrl, contentCdnBaseUrl, astValidator, billingHandler, emailService, domainIdentityService, rsvpComposer, postApprovalCalendarDeps, schedulerClient }: AppDeps) {
+export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, verificationMailer, jobDispatcher, signalReprocessor, draftSendDispatcher, accountCreationStarter, appBaseUrl, contentCdnBaseUrl, astValidator, billingHandler, emailService, domainIdentityService, rsvpComposer, postApprovalCalendarDeps, schedulerClient }: AppDeps) {
   const app = new OpenAPIHono<AppEnv>();
 
   // RFC 9727 — Well-Known URI for API Catalog
@@ -2376,6 +2387,28 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     const result = await auditDb.listAuditEvents(accountId, params);
     if (result.isErr()) return err(c, 500, "Internal Server Error");
     return c.json(result.value, 200);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Signal reprocess (admin)
+  // ---------------------------------------------------------------------------
+
+  app.openapi(route({
+    method: "post",
+    path: "/accounts/{accountId}/signals/{id}/reprocess",
+    tags: ["Admin"],
+    request: {
+      params: z.object({ accountId: z.string(), id: z.string() }),
+    },
+    middleware: [authz("accounts:write", "accounts")] as const,
+    responses: {
+      200: { content: { "application/json": { schema: SignalSchema } }, description: "Signal reprocessed" },
+    },
+  }), async (c) => {
+    const { accountId, id } = c.req.valid("param");
+    const result = await signalReprocessor.reprocessSignal(accountId, id);
+    if (result.isErr()) return err(c, 500, "Reprocess failed");
+    return c.json(toApiSignal(result.value), 200);
   });
 
   // ---------------------------------------------------------------------------
