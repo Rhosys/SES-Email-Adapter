@@ -44,6 +44,19 @@ describe("ArcDatabase.updateArc expression builder", () => {
     expect(input.ReturnValues).toBe("ALL_NEW");
   });
 
+  it("CRITICAL: empty update fields still writes status + lastSignalAt — callers depend on this for arc archival", async () => {
+    ddbMock.on(UpdateCommand).resolves({ Attributes: { id: "arc-001", status: "archived", lastSignalAt: "2024-06-15T10:00:00Z" } });
+
+    const result = await db.updateArc("acct-1", "arc-001", "archived", "2024-06-15T10:00:00Z", {});
+
+    expect(result.isOk()).toBe(true);
+    const calls = ddbMock.commandCalls(UpdateCommand);
+    expect(calls).toHaveLength(1);
+    const values = calls[0]!.args[0].input.ExpressionAttributeValues!;
+    expect(values[":status"]).toBe("archived");
+    expect(values[":lastSignalAt"]).toBe("2024-06-15T10:00:00Z");
+  });
+
   it("status + lastSignalAt + labels → labels set alongside required fields", async () => {
     ddbMock.on(UpdateCommand).resolves({ Attributes: {} });
 

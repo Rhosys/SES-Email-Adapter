@@ -3,6 +3,7 @@ import type { Result, DbError } from "../errors.js";
 import type { Arc, ArcStatus, Signal } from "../types/index.js";
 import type { Notifier, NotificationReason } from "../notifier/types.js";
 import type { Logger } from "../logger.js";
+import type { UpdateArcFields } from "../database/arc-database.js";
 
 // ---------------------------------------------------------------------------
 // Message shape (what EventBridge Scheduler sends via SQS)
@@ -18,23 +19,23 @@ export interface FollowupMessage {
 // Handler
 // ---------------------------------------------------------------------------
 
+export interface IFollowupArcDb {
+  getArc(accountId: string, arcId: string): Promise<Result<Arc | null, DbError>>;
+  updateArc(accountId: string, id: string, status: ArcStatus, lastSignalAt: string, update: UpdateArcFields): Promise<Result<Arc, DbError>>;
+  getSignalById(accountId: string, signalId: string, arcId?: string): Promise<Result<Signal | null, DbError>>;
+}
+
 export class FollowupHandler {
-  private readonly arcDb: { getArc(accountId: string, arcId: string): Promise<Result<Arc | null, DbError>> };
-  private readonly arcUpdater: { updateArcStatus(accountId: string, arcId: string, status: ArcStatus, updatedAt: string): Promise<Result<void, DbError>> };
-  private readonly signalDb: { getSignalById(accountId: string, signalId: string, arcId?: string): Promise<Result<Signal | null, DbError>> };
+  private readonly arcDb: IFollowupArcDb;
   private readonly notifier: Notifier;
   private readonly logger: Logger;
 
   constructor(deps: {
-    arcDb: { getArc(accountId: string, arcId: string): Promise<Result<Arc | null, DbError>> };
-    arcUpdater: { updateArcStatus(accountId: string, arcId: string, status: ArcStatus, updatedAt: string): Promise<Result<void, DbError>> };
-    signalDb: { getSignalById(accountId: string, signalId: string, arcId?: string): Promise<Result<Signal | null, DbError>> };
+    arcDb: IFollowupArcDb;
     notifier: Notifier;
     logger: Logger;
   }) {
     this.arcDb = deps.arcDb;
-    this.arcUpdater = deps.arcUpdater;
-    this.signalDb = deps.signalDb;
     this.notifier = deps.notifier;
     this.logger = deps.logger;
   }
@@ -60,7 +61,7 @@ export class FollowupHandler {
     }
 
     // 3. Fetch signal for notification payload
-    const signalResult = await this.signalDb.getSignalById(accountId, signalId, arcId);
+    const signalResult = await this.arcDb.getSignalById(accountId, signalId, arcId);
     if (signalResult.isErr()) return err(signalResult.error);
 
     const signal = signalResult.value;
@@ -84,8 +85,8 @@ export class FollowupHandler {
     // 5. Archived → reactivate + notify
     if (arc.status === "archived") {
       const now = new Date().toISOString();
-      const updateResult = await this.arcUpdater.updateArcStatus(accountId, arcId, "active", now);
-      if (updateResult.isErr()) return updateResult;
+      const updateResult = await this.arcDb.updateArc(accountId, arcId, "active", now, {});
+      if (updateResult.isErr()) return err(updateResult.error);
 
       const reactivatedArc: Arc = { ...arc, status: "active", updatedAt: now };
       return this.notifier.notify(accountId, reactivatedArc, signal, reactivatedArc.urgency ?? "normal", reason);
