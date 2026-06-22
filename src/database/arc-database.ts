@@ -147,6 +147,9 @@ export class ArcDatabase {
   }
 
   async saveSignal(signal: AnySignal): Promise<Result<void, DbError>> {
+    if (signal.status === "draft" && !signal.arcId) {
+      return err(dbError(new Error("Draft signals must belong to an arc")));
+    }
     let gsi1pk: string;
     if (signal.arcId) {
       gsi1pk = `ACCT#${signal.accountId}#ARC#${signal.arcId}`;

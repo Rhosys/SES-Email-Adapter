@@ -682,6 +682,8 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     };
     const createResult = await arcDb.createSignal(signal);
     if (createResult.isErr()) return err(c, 500, "Internal Server Error");
+    const updateArcResult = await arcDb.updateArc(accountId, arc.id, arc.status, now, {});
+    if (updateArcResult.isErr()) return err(c, 500, "Internal Server Error");
     return c.json(toApiSignal(createResult.value), 201);
   });
 
