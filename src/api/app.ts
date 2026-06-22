@@ -35,6 +35,10 @@ import { handlePostApprovalCalendar } from "../processor/calendar/post-approval-
 import type { SchedulerClient } from "../scheduler/scheduler-client.js";
 import { buildScheduleName } from "../scheduler/schedule-name.js";
 import { durationToSeconds } from "../processor/retention.js";
+import { renderTemplate } from "../email/template-renderer.js";
+import { buildEmailTags } from "../email/tag-sanitizer.js";
+import { buildUnsubscribeHeaders } from "../email/unsubscribe-headers.js";
+import { generateUnsubscribeToken } from "../email/unsubscribe-token.js";
 
 // ---------------------------------------------------------------------------
 // Job Dispatcher interface (used by reindex route)
@@ -1771,13 +1775,61 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     const { inviteId } = inviteResult.value;
     const inviteUrl = `${appBaseUrl}/invite?inviteId=${inviteId}`;
 
-    logger.track("Team invite created. SES email sending not yet implemented — wire EmailService.send() here when ready.", {
-      code: "invite.email_pending_implementation",
+    // Load account for name in subject
+    const accountResult = await accountDb.getAccount(accountId);
+    if (accountResult.isErr()) return err(c, 500, "Internal Server Error");
+    const account = accountResult.value;
+    const accountName = account?.name ?? accountId;
+
+    const fullDate = DateTime.utc().toISODate()!;
+    const triggerId = `invite-${inviteId}`;
+
+    const unsubscribeCode = await generateUnsubscribeToken({
       accountId,
-      email: body.email,
-      inviteId,
-      inviteUrl,
+      forwardingTargetId: accountId,
+      emailType: "team-invite",
+      apiDomain: API_DOMAIN,
+      kmsKeyArn: KMS_KEY_ARN,
+      keyId: KEY_ID,
     });
+
+    const htmlBody = await renderTemplate("team-invite", {
+      accountName,
+      inviteUrl,
+      unsubscribeCode,
+      domain: appBaseUrl.replace(/^https?:\/\//, ""),
+      emailType: "team-invite",
+    });
+
+    const tags = buildEmailTags({
+      accountId,
+      fullDate,
+      invocationId: logger.getInvocationId(),
+      triggerId,
+    });
+    const headers = buildUnsubscribeHeaders(accountId, API_DOMAIN, unsubscribeCode);
+
+    const textBody = `You've been invited to join ${accountName} on Numaeel.\n\nAccept your invite: ${inviteUrl}\n\nView your account: ${appBaseUrl}/a/`;
+    const sendResult = await emailService.send({
+      to: body.email,
+      subject: `You've been invited to join ${accountName} on Numaeel`,
+      textBody,
+      htmlBody,
+      headers,
+      tags,
+      fromOverride: `"Numaeel" <noreply@${MAIL_DOMAIN}>`,
+      accountId,
+    });
+
+    if (sendResult.isErr()) {
+      logger.warn("Team invite email send failed (transient SES error).", {
+        code: "invite.email_send_failed",
+        accountId,
+        email: body.email,
+        inviteId,
+      });
+      return err(c, 503, "Email delivery temporarily unavailable");
+    }
 
     return new Response(null, { status: 201 });
   });
@@ -2402,6 +2454,9 @@ function validateWebhookActions(
 
 const DKIM_SELECTOR = "mail";
 const MAIL_DOMAIN = process.env["MAIL_DOMAIN"] ?? "platform.email.rhosys.cloud";
+const API_DOMAIN = process.env["API_DOMAIN"] ?? "";
+const KMS_KEY_ARN = process.env["AUTHRESS_KMS_KEY_ARN"] ?? "";
+const KEY_ID = process.env["AUTHRESS_KEY_ID"] ?? "";
 
 // Always returns all 4 DNS records for a domain regardless of setup tier.
 // The status field on each record reflects the last health check result.
