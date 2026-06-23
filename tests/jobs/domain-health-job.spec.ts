@@ -16,12 +16,16 @@ import type { MockLogger } from "../helpers/mock-logger.js";
 const mockScanAllDomains = vi.fn();
 const mockGetAccount = vi.fn();
 const mockUpdateDomainHealth = vi.fn();
+const mockGetStats = vi.fn();
+const mockWriteSnapshot = vi.fn();
 
 vi.mock("../../src/database/account-database.js", () => ({
   AccountDatabase: vi.fn().mockImplementation(() => ({
     scanAllDomains: mockScanAllDomains,
     getAccount: mockGetAccount,
     updateDomainHealth: mockUpdateDomainHealth,
+    getStats: mockGetStats,
+    writeSnapshot: mockWriteSnapshot,
   })),
 }));
 
@@ -93,6 +97,8 @@ function makeDomain(overrides: Partial<Domain> = {}): Domain {
 function setupDefaultMocks() {
   mockGetAccount.mockReturnValue(Promise.resolve(ok({ id: "acct-1", name: "Test", createdAt: "2025-01-01T00:00:00.000Z", updatedAt: "2025-01-01T00:00:00.000Z" } as Account)));
   mockUpdateDomainHealth.mockReturnValue(Promise.resolve(ok(undefined)));
+  mockGetStats.mockReturnValue(Promise.resolve(ok([])));
+  mockWriteSnapshot.mockReturnValue(Promise.resolve(ok(undefined)));
 }
 
 // ---------------------------------------------------------------------------
@@ -122,6 +128,8 @@ describe("domain-health-job staleness integration", () => {
     mockUpdateDomainHealth.mockReset();
     mockListActiveArcsBefore.mockReset();
     mockCheckDomain.mockReset();
+    mockGetStats.mockReset();
+    mockWriteSnapshot.mockReset();
     mockCheckDomain.mockResolvedValue([]);
   });
 

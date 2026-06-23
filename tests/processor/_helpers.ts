@@ -65,6 +65,7 @@ export function makeAccountDbMock(): AccountDatabase {
     getTemplate: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
     getDomainByName: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
     incrementStats: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+    incrementStatMetric: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     annotateRuleError: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     annotateTemplateError: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     listLabels: vi.fn().mockReturnValue(Promise.resolve(ok([]))),
