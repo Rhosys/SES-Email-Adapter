@@ -182,6 +182,7 @@ function makeMessage(opts: {
     accountId: opts.accountId ?? TEST_ACCOUNT_ID,
     s3Key: opts.s3Key ?? `emails/${sesMessageId}`,
     sesMessageId,
+    idempotencyKey: "test-idempotency-key",
     timestamp: opts.timestamp ?? "2024-01-15T10:00:00Z",
     destination: opts.destination ?? ["user@example.com"],
     dkimVerdict: opts.dkimVerdict ?? "PASS",
@@ -508,7 +509,7 @@ describe("SignalProcessor", () => {
         accountId: TEST_ACCOUNT_ID,
         name: "Quarantine unknown",
         condition: "true",
-        actions: [{ type: "quarantine" }],
+        actions: [{ type: "quarantine_visible" }],
         status: "enabled",
         priorityOrder: 100,
         createdAt: "2024-01-01T00:00:00Z",
@@ -846,11 +847,11 @@ describe("SignalProcessor", () => {
       expect(saved.arcId).toBeUndefined();
     });
 
-    it("quarantines high-spam signal from approved sender (SR-04 fires)", async () => {
+    it("quarantines high-spam signal from approved sender (SR-05 fires)", async () => {
       vi.mocked(accountDb.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok(
         { ...DEFAULT_CTX, aliasConfig: makeAlias() },
       )));
-      // Approved sender → SR-04 fires on high spam → quarantine_hidden
+      // Approved sender → SR-05 fires on high spam → quarantine_hidden
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok({
         ...validClassification,
         tags: ["phishing"],
@@ -927,11 +928,11 @@ describe("SignalProcessor", () => {
       expect(saved.status).toBe("active");
     });
 
-    it("quarantines a known sender with phishing tags (SR-04 fires regardless of filter mode)", async () => {
+    it("quarantines a known sender with phishing tags (SR-05 fires regardless of filter mode)", async () => {
       vi.mocked(accountDb.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok(
         { ...DEFAULT_CTX, aliasConfig: makeAlias({ unknownSenderPolicy: "quarantine_visible" }) },
       )));
-      // Sender is known/approved but tagged as phishing — SR-04 quarantines hidden independently of filter mode
+      // Sender is known/approved but tagged as phishing — SR-05 quarantines hidden independently of filter mode
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok({
         ...validClassification,
         tags: ["phishing"],
@@ -1227,7 +1228,7 @@ describe("SignalProcessor", () => {
       expect(baseUrgency("test", { workflow: "test", triggeredBy: "user" })).toBe("high");
     });
 
-    it("support falls through to normal (urgency handled by system rules SR-12–SR-16)", () => {
+    it("support falls through to normal (urgency handled by system rules SR-13–SR-17)", () => {
       expect(baseUrgency("support", { workflow: "support", eventType: "ticket_updated", service: "Zendesk", priority: "urgent" })).toBe("normal");
       expect(baseUrgency("support", { workflow: "support", eventType: "awaiting_response", service: "Zendesk" })).toBe("normal");
       expect(baseUrgency("support", { workflow: "support", eventType: "ticket_opened", service: "Zendesk" })).toBe("normal");
@@ -1251,13 +1252,13 @@ describe("SignalProcessor", () => {
       expect(baseUrgency("travel", { workflow: "travel", travelType: "flight", provider: "Delta" })).toBe("normal");
     });
 
-    it("conversation falls through to normal (urgency handled by system rules SR-09–SR-10)", () => {
+    it("conversation falls through to normal (urgency handled by system rules SR-10–SR-11)", () => {
       expect(baseUrgency("conversation", { workflow: "conversation", sentiment: "urgent", requiresReply: true })).toBe("normal");
       expect(baseUrgency("conversation", { workflow: "conversation", sentiment: "positive", requiresReply: false })).toBe("normal");
       expect(baseUrgency("conversation", { workflow: "conversation", sentiment: "neutral", requiresReply: false })).toBe("normal");
     });
 
-    it("crm falls through to normal (urgency handled by system rule SR-11)", () => {
+    it("crm falls through to normal (urgency handled by system rule SR-12)", () => {
       expect(baseUrgency("crm", { workflow: "crm" })).toBe("normal");
       expect(baseUrgency("crm", { workflow: "crm" })).toBe("normal");
       expect(baseUrgency("crm", { workflow: "crm" })).toBe("normal");
@@ -1265,7 +1266,7 @@ describe("SignalProcessor", () => {
   });
 
   // -------------------------------------------------------------------------
-  // Workflow-specific urgency rules (SR-09–SR-16)
+  // Workflow-specific urgency rules (SR-10–SR-17)
   // -------------------------------------------------------------------------
 
   describe("workflow urgency system rules", () => {
@@ -1281,22 +1282,22 @@ describe("SignalProcessor", () => {
       return vi.mocked(arcDb.saveArc).mock.calls.at(-1)![0] as Arc;
     }
 
-    it("SR-09: conversation + requiresReply + urgent sentiment → high urgency", async () => {
+    it("SR-10: conversation + requiresReply + urgent sentiment → high urgency", async () => {
       const arc = await processWithWorkflow({ workflow: "conversation", workflowData: { workflow: "conversation", sentiment: "urgent", requiresReply: true } });
       expect(arc.urgency).toBe("high");
     });
 
-    it("SR-09: conversation + requiresReply + negative sentiment → high urgency", async () => {
+    it("SR-10: conversation + requiresReply + negative sentiment → high urgency", async () => {
       const arc = await processWithWorkflow({ workflow: "conversation", workflowData: { workflow: "conversation", sentiment: "negative", requiresReply: true } });
       expect(arc.urgency).toBe("high");
     });
 
-    it("SR-10: conversation with no prior replies → low urgency", async () => {
+    it("SR-11: conversation with no prior replies → low urgency", async () => {
       const arc = await processWithWorkflow({ workflow: "conversation", workflowData: { workflow: "conversation", sentiment: "neutral", requiresReply: false } });
       expect(arc.urgency).toBe("low");
     });
 
-    it("SR-10: conversation with prior replies (system:replied) → not low (falls back to arc urgency)", async () => {
+    it("SR-11: conversation with prior replies (system:replied) → not low (falls back to arc urgency)", async () => {
       vi.mocked(arcMatcher.findMatch).mockReturnValueOnce(Promise.resolve(ok(makeArc({
         workflow: "conversation", labels: [], urgency: "normal",
         sentMessageIds: ["<prior-msg@example.com>"],
@@ -1315,37 +1316,37 @@ describe("SignalProcessor", () => {
       expect(arc.urgency).toBe("normal");
     });
 
-    it("SR-12: support + priority:urgent → critical urgency", async () => {
+    it("SR-13: support + priority:urgent → critical urgency", async () => {
       const arc = await processWithWorkflow({ workflow: "support", workflowData: { workflow: "support", eventType: "ticket_updated", service: "Zendesk", priority: "urgent" } });
       expect(arc.urgency).toBe("critical");
     });
 
-    it("SR-13: support + priority:high → high urgency", async () => {
+    it("SR-14: support + priority:high → high urgency", async () => {
       const arc = await processWithWorkflow({ workflow: "support", workflowData: { workflow: "support", eventType: "ticket_updated", service: "Zendesk", priority: "high" } });
       expect(arc.urgency).toBe("high");
     });
 
-    it("SR-14: support + awaiting_response → high urgency", async () => {
+    it("SR-15: support + awaiting_response → high urgency", async () => {
       const arc = await processWithWorkflow({ workflow: "support", workflowData: { workflow: "support", eventType: "awaiting_response", service: "Zendesk" } });
       expect(arc.urgency).toBe("high");
     });
 
-    it("SR-15: support + priority:low → low urgency", async () => {
+    it("SR-16: support + priority:low → low urgency", async () => {
       const arc = await processWithWorkflow({ workflow: "support", workflowData: { workflow: "support", eventType: "ticket_updated", service: "Zendesk", priority: "low" } });
       expect(arc.urgency).toBe("low");
     });
 
-    it("SR-16: support + ticket_opened → low urgency", async () => {
+    it("SR-17: support + ticket_opened → low urgency", async () => {
       const arc = await processWithWorkflow({ workflow: "support", workflowData: { workflow: "support", eventType: "ticket_opened", service: "Zendesk" } });
       expect(arc.urgency).toBe("low");
     });
 
-    it("SR-16: support + ticket_resolved → low urgency", async () => {
+    it("SR-17: support + ticket_resolved → low urgency", async () => {
       const arc = await processWithWorkflow({ workflow: "support", workflowData: { workflow: "support", eventType: "ticket_resolved", service: "Zendesk" } });
       expect(arc.urgency).toBe("low");
     });
 
-    it("SR-12 wins over SR-16: support + priority:urgent + ticket_opened → critical (first-rule-wins)", async () => {
+    it("SR-13 wins over SR-17: support + priority:urgent + ticket_opened → critical (first-rule-wins)", async () => {
       const arc = await processWithWorkflow({ workflow: "support", workflowData: { workflow: "support", eventType: "ticket_opened", service: "Zendesk", priority: "urgent" } });
       expect(arc.urgency).toBe("critical");
     });
@@ -1367,7 +1368,7 @@ describe("SignalProcessor", () => {
 
     it("processes onboarding emails as active when no blocking rule is configured", async () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok(onboardingClassification));
-      vi.mocked(accountDb.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([]))); // no system rules — SR-02 (block onboarding) is disabled
+      vi.mocked(accountDb.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([]))); // no system rules — SR-03 (block onboarding) is disabled
 
       await processor.processRecord(makeMessage(), 1);
 
@@ -1395,7 +1396,7 @@ describe("SignalProcessor", () => {
     it("quarantines onboarding emails when a quarantine rule is active", async () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok(onboardingClassification));
       vi.mocked(accountDb.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([
-        makeRule({ condition: JSON.stringify({ "in": ["system:workflow:onboarding", { var: "arc.labels" }] }), actions: [{ type: "quarantine" }] }),
+        makeRule({ condition: JSON.stringify({ "in": ["system:workflow:onboarding", { var: "arc.labels" }] }), actions: [{ type: "quarantine_visible" }] }),
       ])));
 
       const notifier = makeNotifier();
@@ -1494,9 +1495,9 @@ describe("SignalProcessor", () => {
       expect(notifier.notify).not.toHaveBeenCalled();
     });
 
-    it("blocks notice emails from untrusted senders (SR-03 rule fires, fallback does not apply)", async () => {
+    it("blocks notice emails from untrusted senders (SR-04 rule fires, fallback does not apply)", async () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok(noticeClassification));
-      // Untrusted sender: no approved sender entry — filter-mode fallback would quarantine, but SR-03 fires first
+      // Untrusted sender: no approved sender entry — filter-mode fallback would quarantine, but SR-04 fires first
       vi.mocked(accountDb.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok({
         ...DEFAULT_CTX,
         aliasConfig: makeAlias(),
@@ -1506,7 +1507,7 @@ describe("SignalProcessor", () => {
       await processor.processRecord(makeMessage(), 1);
 
       const signal = vi.mocked(arcDb.saveSignal).mock.calls[0]![0] as Signal;
-      expect(signal.status).toBe("block_hidden"); // SR-03 sets status → fallback skipped (hasStatusOutcome = true)
+      expect(signal.status).toBe("block_hidden"); // SR-04 sets status → fallback skipped (hasStatusOutcome = true)
       expect(arcDb.saveArc).not.toHaveBeenCalled();
     });
   });
