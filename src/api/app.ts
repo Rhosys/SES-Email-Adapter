@@ -19,7 +19,7 @@ import type { AccountDatabase } from "../database/account-database.js";
 import type { Logger } from "../logger.js";
 import { deriveGroupingKey } from "../processor/processor.js";
 import { zParse } from "./validate.js";
-import { toApiArc, toApiAccount, toApiSignal, toApiDomain, toApiDomainWithRecords, toApiAlias, toApiAliasSender, toApiLabel, toApiRule, toApiView, toApiTemplate, toApiForwardingAddress } from "./transform.js";
+import { toApiArc, toApiAccount, toApiSignal, toApiDomain, toApiDomainWithRecords, toApiAlias, toApiAliasSender, toApiRule, toApiView, toApiTemplate, toApiForwardingAddress } from "./transform.js";
 import { generatePresignedGet } from "../processor/presign.js";
 import { validateRuleCondition } from "./validate-rule-condition.js";
 import { validateWebhookConfig } from "./validate-webhook-config.js";
@@ -42,6 +42,7 @@ import { buildEmailTags } from "../email/tag-sanitizer.js";
 import { buildUnsubscribeHeaders } from "../email/unsubscribe-headers.js";
 import { generateUnsubscribeToken } from "../email/unsubscribe-token.js";
 import { registerViewsRoutes } from "./viewsApi.js";
+import { registerLabelsRoutes } from "./labelsApi.js";
 
 // ---------------------------------------------------------------------------
 // Job Dispatcher interface (used by reindex route)
@@ -79,11 +80,11 @@ import {
 } from "./requests.js";
 import {
   Account as AccountSchema, Arc as ArcSchema, Signal as SignalSchema,
-  View as ViewSchema, Label as LabelSchema, Rule as RuleSchema,
+  View as ViewSchema, Rule as RuleSchema,
   Domain as DomainSchema, DomainWithRecords as DomainWithRecordsSchema,
   Alias as AliasSchema, AliasSender as AliasSenderSchema,
   EmailTemplate as EmailTemplateSchema, VerifiedForwardingAddress as VerifiedForwardingAddressSchema,
-  ListArcsResponse, ListSignalsResponse, ListViewsResponse, ListLabelsResponse,
+  ListArcsResponse, ListSignalsResponse, ListViewsResponse,
   ListRulesResponse, ListDomainsResponse, ListAliasesResponse, ListSendersResponse,
   ListTemplatesResponse, ListForwardingAddressesResponse,
   ErrorResponse, ErrorCode, Pagination as PaginationSchema,
@@ -1250,72 +1251,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
   // -------------------------------------------------------------------------
   // Labels  —  /accounts/:accountId/labels
   // -------------------------------------------------------------------------
-
-  app.openapi(route({
-    method: "get",
-    path: "/accounts/{accountId}/labels",
-    tags: ["Labels"],
-    request: { params: z.object({ accountId: z.string() }) },
-    middleware: [authz("labels:read", c => `accounts/${c.req.param("accountId")!}/labels`)] as const,
-    responses: { 200: { content: { "application/json": { schema: ListLabelsResponse } }, description: "List labels" } },
-  }), async (c) => {
-    const accountId = c.req.param("accountId")!;
-    const labelsResult = await accountDb.listLabels(accountId);
-    if (labelsResult.isErr()) return err(c, 500, "Internal Server Error");
-    return c.json({ labels: labelsResult.value.map(toApiLabel) }, 200);
-  });
-
-  app.openapi(route({
-    method: "post",
-    path: "/accounts/{accountId}/labels",
-    tags: ["Labels"],
-    request: { params: z.object({ accountId: z.string() }) },
-    middleware: [authz("labels:write", c => `accounts/${c.req.param("accountId")!}/labels`)] as const,
-    responses: { 201: { content: { "application/json": { schema: LabelSchema } }, description: "Label created" } },
-  }), async (c) => {
-    const accountId = c.req.param("accountId")!;
-    const body = await zParse(CreateLabelRequest, c.req.raw);
-    const labelResult = await accountDb.createLabel(accountId, body);
-    if (labelResult.isErr()) return err(c, 500, "Internal Server Error");
-    return c.json(toApiLabel(labelResult.value), 201);
-  });
-
-  app.openapi(route({
-    method: "patch",
-    path: "/accounts/{accountId}/labels/{id}",
-    tags: ["Labels"],
-    request: { params: z.object({ accountId: z.string(), id: z.string() }) },
-    middleware: [authz("labels:write", c => `accounts/${c.req.param("accountId")!}/labels/${c.req.param("id")!}`)] as const,
-    responses: { 200: { content: { "application/json": { schema: LabelSchema } }, description: "Update label" } },
-  }), async (c) => {
-    const accountId = c.req.param("accountId")!;
-    const labelsResult = await accountDb.listLabels(accountId);
-    if (labelsResult.isErr()) return err(c, 500, "Internal Server Error");
-    const label = labelsResult.value.find((l) => l.id === c.req.param("id")!);
-    if (!label) return err(c, 404, "Label not found", "LABEL_NOT_FOUND");
-    const body = await zParse(UpdateLabelRequest, c.req.raw);
-    const updateResult = await accountDb.updateLabel(accountId, label.id, body);
-    if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
-    return c.json(toApiLabel(updateResult.value), 200);
-  });
-
-  app.openapi(route({
-    method: "delete",
-    path: "/accounts/{accountId}/labels/{id}",
-    tags: ["Labels"],
-    request: { params: z.object({ accountId: z.string(), id: z.string() }) },
-    middleware: [authz("labels:write", c => `accounts/${c.req.param("accountId")!}/labels/${c.req.param("id")!}`)] as const,
-    responses: { 204: { description: "Label deleted" } },
-  }), async (c) => {
-    const accountId = c.req.param("accountId")!;
-    const labelsResult = await accountDb.listLabels(accountId);
-    if (labelsResult.isErr()) return err(c, 500, "Internal Server Error");
-    const label = labelsResult.value.find((l) => l.id === c.req.param("id")!);
-    if (!label) return err(c, 404, "Label not found", "LABEL_NOT_FOUND");
-    const deleteResult = await accountDb.deleteLabel(accountId, label.id);
-    if (deleteResult.isErr()) return err(c, 500, "Internal Server Error");
-    return new Response(null, { status: 204 });
-  });
+  registerLabelsRoutes(app, { accountDb, authz, err, route });
 
   // -------------------------------------------------------------------------
   // Rules  —  /accounts/:accountId/rules
