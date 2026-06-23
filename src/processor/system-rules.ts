@@ -11,7 +11,7 @@ const wfData_ = (field: string) => ({ "var": `signal.data.workflowData.${field}`
 export const SYSTEM_RULES: Rule[] = [
   // --- Sender / content gating (1–8) ----------------------------------------
   { id: "SR-01", accountId: "SYSTEM", name: "Auto-approve sender on matched conversation", condition: JSON.stringify({ "and": [in_("system:workflow:conversation"), in_("system:sender:untrusted"), { "var": "isMatchedArc" }] }), actions: [{ type: "approve_sender" }], status: "enabled", priorityOrder: 100, createdAt: "", updatedAt: "" },
-  { id: "SR-02", accountId: "SYSTEM", name: "Block onboarding emails", condition: JSON.stringify(in_("system:workflow:onboarding")), actions: [{ type: "block_hidden" }], status: "enabled", priorityOrder: 200, createdAt: "", updatedAt: "" },
+  { id: "SR-02", accountId: "SYSTEM", name: "Block onboarding emails", condition: JSON.stringify(in_("system:workflow:onboarding")), actions: [{ type: "quarantine_hidden" }], status: "enabled", priorityOrder: 200, createdAt: "", updatedAt: "" },
   { id: "SR-03", accountId: "SYSTEM", name: "Block notice emails", condition: JSON.stringify(in_("system:workflow:notice")), actions: [{ type: "block_hidden" }], status: "enabled", priorityOrder: 300, createdAt: "", updatedAt: "" },
   { id: "SR-04", accountId: "SYSTEM", name: "Quarantine spam-tagged signals", condition: JSON.stringify(in_("system:spam")), actions: [{ type: "quarantine_hidden" }], status: "enabled", priorityOrder: 400, createdAt: "", updatedAt: "" },
   { id: "SR-05", accountId: "SYSTEM", name: "Quarantine security alert emails", condition: JSON.stringify(in_("system:auth:security_alert")), actions: [{ type: "quarantine_hidden" }], status: "enabled", priorityOrder: 500, createdAt: "", updatedAt: "" },

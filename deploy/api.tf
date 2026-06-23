@@ -44,6 +44,13 @@ resource "aws_lambda_permission" "http_authorizer" {
   source_arn    = "${aws_apigatewayv2_api.main.execution_arn}/authorizers/*"
 }
 
+resource "aws_apigatewayv2_route" "options_preflight" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "OPTIONS /{proxy+}"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda.id}"
+  # No authorization_type — CORS preflight must pass without credentials
+}
+
 resource "aws_apigatewayv2_route" "catch_all" {
   api_id             = aws_apigatewayv2_api.main.id
   route_key          = "$default"
