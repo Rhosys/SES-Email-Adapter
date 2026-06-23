@@ -48,7 +48,7 @@ export class DeviceNotifier implements Notifier {
 
       const deliverer = this.deliverers[device.type];
       if (!deliverer) {
-        this.logger.warn("No deliverer registered for device type", { code: "notifier.no_deliverer", deviceType: device.type, accountId });
+        this.logger.warn("No deliverer registered for device type", { code: "notifier.no_deliverer", signal, arc, deviceType: device.type });
         continue;
       }
 
@@ -60,10 +60,10 @@ export class DeviceNotifier implements Notifier {
         } else if (result.status === "stale") {
           staleTokens.push(device.token);
         } else {
-          this.logger.warn("Device delivery failed", { code: "notifier.delivery_failed", deviceType: device.type, token: device.token, reason: result.reason, accountId });
+          this.logger.warn("Device delivery failed", { code: "notifier.delivery_failed", signal, arc, deviceType: device.type, token: device.token, reason: result.reason });
         }
       } catch (e) {
-        this.logger.error("Unexpected error delivering to device", { code: "notifier.delivery_error", deviceType: device.type, token: device.token, accountId, error: e });
+        this.logger.error("Unexpected error delivering to device", { code: "notifier.delivery_error", signal, arc, deviceType: device.type, token: device.token, error: e });
       }
     }
 
@@ -71,7 +71,7 @@ export class DeviceNotifier implements Notifier {
     for (const token of staleTokens) {
       const deleteResult = await this.deviceStore.deleteDevice(accountId, token);
       if (deleteResult.isErr()) {
-        this.logger.warn("Failed to delete stale device", { code: "notifier.stale_delete_failed", token, accountId });
+        this.logger.warn("Failed to delete stale device", { code: "notifier.stale_delete_failed", signal, arc, token });
       }
     }
 

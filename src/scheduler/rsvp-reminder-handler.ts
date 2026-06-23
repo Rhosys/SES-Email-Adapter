@@ -58,7 +58,7 @@ export class RsvpReminderHandler {
     if (!eventStart.isValid || eventStart <= DateTime.utc()) {
       this.logger.track("RSVP reminder: event has passed, discarding.", {
         code: "rsvp_reminder.event_passed",
-        accountId, signalId, arcId, startTime,
+        signal, startTime,
       });
       return ok(undefined);
     }
@@ -70,7 +70,7 @@ export class RsvpReminderHandler {
     if (responseResult.value) {
       this.logger.track("RSVP reminder: user already responded, discarding.", {
         code: "rsvp_reminder.already_responded",
-        accountId, signalId, arcId, veventUid,
+        signal, veventUid,
       });
       return ok(undefined);
     }
@@ -83,6 +83,7 @@ export class RsvpReminderHandler {
     if (!arc) {
       this.logger.track("RSVP reminder: arc not found, discarding.", {
         code: "rsvp_reminder.arc_missing",
+        signal,
         accountId, signalId, arcId,
       });
       return ok(undefined);

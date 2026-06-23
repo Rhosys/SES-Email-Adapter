@@ -531,11 +531,8 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
         if (saveSenderResult.isErr()) return err(c, 500, "Internal Server Error");
         logger.track("Arc reported as GDPR violation. Sender domain blocked with report_violation policy and arc deleted.", {
           code: "api.arc.report_violation",
-          accountId,
-          arcId: arc.id,
+          signal, arc,
           senderDomain: senderETLD1,
-          recipientAddress: signal.data.recipientAddress,
-          fromAddress: signal.data.from.address,
         });
       }
       // Persist as deleted — report_violation is the user intent, deleted is the arc state
@@ -862,8 +859,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
       } catch (e) {
         logger.warn("Post-approval calendar handler threw unexpectedly.", {
           code: "api.quarantine_response.calendar_error",
-          accountId,
-          signalId: signal.id,
+          signal, arc,
           error: e,
         });
       }
@@ -979,9 +975,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     if (signal.data.from.address !== arc.recipientAddress) {
       logger.track("Draft send: from address does not match arc alias — rejecting.", {
         code: "draft_send.from_address_mismatch",
-        accountId,
-        signalId: signal.id,
-        arcId: arc.id,
+        signal, arc,
         fromAddress: signal.data.from.address,
         arcRecipientAddress: arc.recipientAddress,
       });
@@ -1072,9 +1066,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
         if (!response.ok) {
           logger.warn("Unsubscribe POST returned non-2xx.", {
             code: "unsubscribe.post_failed",
-            accountId,
-            arcId: arc.id,
-            signalId: emailSignal.id,
+            signal: emailSignal, arc,
             url: unsubscribe.url,
             statusCode: response.status,
           });
@@ -1084,9 +1076,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
         clearTimeout(timeout);
         logger.warn("Unsubscribe POST failed — network error or timeout.", {
           code: "unsubscribe.post_error",
-          accountId,
-          arcId: arc.id,
-          signalId: emailSignal.id,
+          signal: emailSignal, arc,
           url: unsubscribe.url,
           error: e,
         });
@@ -1097,9 +1087,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     if (unsubscribe.type === "mailto") {
       logger.track("Unsubscribe via mailto — user must complete externally.", {
         code: "unsubscribe.mailto_pending",
-        accountId,
-        arcId: arc.id,
-        signalId: emailSignal.id,
+        signal: emailSignal, arc,
         url: unsubscribe.url,
       });
     }
@@ -1238,11 +1226,11 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
         const scheduleName = buildScheduleName(accountId, signal.id, `rsvp.${eventStart.toFormat("yyyyMMdd")}`);
         const deleteResult = await schedulerClient.deleteFollowup(scheduleName);
         if (deleteResult.isErr()) {
-          logger.warn("Failed to delete RSVP reminder schedule — fire-time check will handle.", { code: "rsvp.cancel.delete_failed", scheduleName, error: deleteResult.error });
+          logger.warn("Failed to delete RSVP reminder schedule — fire-time check will handle.", { code: "rsvp.cancel.delete_failed", signal, arc, scheduleName, error: deleteResult.error });
         }
       }
     } else if (schedulerClient && !calendarData.startTime) {
-      logger.track("Calendar event has no startTime — skipping RSVP schedule cancellation.", { code: "rsvp.cancel.no_start_time", accountId, arcId: arc.id, signalId: signal.id });
+      logger.track("Calendar event has no startTime — skipping RSVP schedule cancellation.", { code: "rsvp.cancel.no_start_time", signal, arc });
     }
 
     return c.json(toApiSignal(responseSignal), 200);
