@@ -95,9 +95,7 @@ export class FollowupHandler {
     // 6. Any other status (e.g. report_violation) → discard without action
     this.logger.track("Followup: arc in unexpected status, discarding.", {
       code: "followup.unexpected_status",
-      accountId,
-      arcId,
-      status: arc.status,
+      signal, arc,
     });
     return ok(undefined);
   }

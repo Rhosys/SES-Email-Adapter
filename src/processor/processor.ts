@@ -183,6 +183,7 @@ async function applyRules(
     if (evalResult.warnings.length > 0) {
       logger.warn("Rule returned invalid dynamic actions — discarded entries that failed Zod validation.", {
         code: "processor.rule.invalid_dynamic_actions",
+        signal: context.signal, arc: context.arc,
         ruleId: rule.id,
         ruleName: rule.name,
         accountId: rule.accountId,
@@ -199,7 +200,7 @@ async function applyRules(
         data: { resourceName: rule.name, issue: evalResult.warnings.join("; ") },
       });
       if (result.isErr()) {
-        logger.warn("Failed to save invalid_rule_function signal.", { code: "system_signal.write_failed", accountId: rule.accountId, type: "invalid_rule_function", error: result.error });
+        logger.warn("Failed to save invalid_rule_function signal.", { code: "system_signal.write_failed", signal: context.signal, arc: context.arc, accountId: rule.accountId, type: "invalid_rule_function", error: result.error });
       }
     }
 
@@ -677,7 +678,7 @@ export class SignalProcessor {
           }
 
           if (preventAutoSend && autoSend) {
-            this.logger.info("Auto-send skipped — template function returned null or errored.", { code: "processor.side_effect.auto_draft_prevent_send", accountId, templateId });
+            this.logger.info("Auto-send skipped — template function returned null or errored.", { code: "processor.side_effect.auto_draft_prevent_send", accountId, signalId: signal.id, arcId: arc.id, templateId });
           }
         }
         this.logger.trackPoint("side_effect_auto_draft_complete");
@@ -697,6 +698,8 @@ export class SignalProcessor {
         this.logger.info("Webhook action skipped — feature not enabled for plan.", {
           code: "processor.side_effect.webhook_plan_gated",
           accountId,
+          signalId: signal.id,
+          arcId: arc.id,
           plan: accountPlan,
         });
       } else {
@@ -811,12 +814,12 @@ export class SignalProcessor {
       };
       const saveResult = await this.arcDb.saveSignal(signal);
       if (saveResult.isErr()) return err(saveResult.error);
-      this.logger.track("Blocked email — DKIM or DMARC verification failed.", { code: "processor.dkim_dmarc_block", accountId, sesMessageId, dkimVerdict: msg.dkimVerdict, dmarcVerdict: msg.dmarcVerdict });
+      this.logger.track("Blocked email — DKIM or DMARC verification failed.", { code: "processor.dkim_dmarc_block", signal, dkimVerdict: msg.dkimVerdict, dmarcVerdict: msg.dmarcVerdict });
       const dkimCat = statusToCategory(signal.status);
       if (dkimCat) {
         const statsResult = await this.accountDb.incrementStats(accountId, dkimCat);
         if (statsResult.isErr()) {
-          this.logger.warn("Stats increment failed — dashboard may be slightly behind.", { code: "processor.stats_increment_failed", accountId, error: statsResult.error });
+          this.logger.warn("Stats increment failed — dashboard may be slightly behind.", { code: "processor.stats_increment_failed", signal, error: statsResult.error });
         }
       }
       return ok(undefined);
@@ -927,16 +930,16 @@ export class SignalProcessor {
       };
       const saveResult = await this.arcDb.saveSignal(signal);
       if (saveResult.isErr()) return err(saveResult.error);
-      this.logger.track("Blocked email — sender explicitly blocked for this alias (pre-classify fast path).", { code: "processor.sender_block_early", accountId, sesMessageId, recipientAddress, senderETLD1, policy: blockStatus });
+      this.logger.track("Blocked email — sender explicitly blocked for this alias (pre-classify fast path).", { code: "processor.sender_block_early", signal, senderETLD1, policy: blockStatus });
       const repResult = await this.processingDb.updateGlobalReputation(senderETLD1, { wasSpam: false, wasBlocked: true });
       if (repResult.isErr()) {
-        this.logger.warn("Failed to update global sender reputation after signal processing. The DynamoDB update returned an error. Reputation data may be stale for this domain.", { code: "processor.reputation_update_failed", accountId, error: repResult.error });
+        this.logger.warn("Failed to update global sender reputation after signal processing. The DynamoDB update returned an error. Reputation data may be stale for this domain.", { code: "processor.reputation_update_failed", signal, error: repResult.error });
       }
       const senderBlockCat = statusToCategory(blockStatus);
       if (senderBlockCat) {
         const statsResult = await this.accountDb.incrementStats(accountId, senderBlockCat);
         if (statsResult.isErr()) {
-          this.logger.warn("Stats increment failed — dashboard may be slightly behind.", { code: "processor.stats_increment_failed", accountId, error: statsResult.error });
+          this.logger.warn("Stats increment failed — dashboard may be slightly behind.", { code: "processor.stats_increment_failed", signal, error: statsResult.error });
         }
       }
       return ok(undefined);
@@ -1130,16 +1133,16 @@ export class SignalProcessor {
       const blockedSignal = buildSignal({ status: blockStatus, accountId, sesMessageId, recipientAddress, parsed, classification: classificationOutput, s3Key, receivedAt: timestamp, now, ...(ttl !== undefined ? { ttl } : {}) });
       const saveResult = await this.arcDb.saveSignal(blockedSignal);
       if (saveResult.isErr()) return err(saveResult.error);
-      this.logger.track("Blocked email — sender explicitly blocked for this alias.", { code: "processor.sender_block", accountId, sesMessageId, recipientAddress, senderETLD1, policy: blockStatus });
+      this.logger.track("Blocked email — sender explicitly blocked for this alias.", { code: "processor.sender_block", signal: blockedSignal, arc, senderETLD1, policy: blockStatus });
       const repResult = await this.processingDb.updateGlobalReputation(senderETLD1, { wasSpam: true, wasBlocked: true });
       if (repResult.isErr()) {
-        this.logger.warn("Failed to update global sender reputation after signal processing. The DynamoDB update returned an error. Reputation data may be stale for this domain.", { code: "processor.reputation_update_failed", accountId, error: repResult.error });
+        this.logger.warn("Failed to update global sender reputation after signal processing. The DynamoDB update returned an error. Reputation data may be stale for this domain.", { code: "processor.reputation_update_failed", signal: blockedSignal, arc, error: repResult.error });
       }
       const senderBlockCat = statusToCategory(blockStatus);
       if (senderBlockCat) {
         const statsResult = await this.accountDb.incrementStats(accountId, senderBlockCat);
         if (statsResult.isErr()) {
-          this.logger.warn("Stats increment failed — dashboard may be slightly behind.", { code: "processor.stats_increment_failed", accountId, error: statsResult.error });
+          this.logger.warn("Stats increment failed — dashboard may be slightly behind.", { code: "processor.stats_increment_failed", signal: blockedSignal, arc, error: statsResult.error });
         }
       }
       return ok(undefined);
@@ -1225,16 +1228,16 @@ export class SignalProcessor {
       const blockSignal = buildSignal({ status: outcome.blockDisposition, ...buildArgs });
       const saveResult = await this.arcDb.saveSignal({ ...blockSignal, data: { ...blockSignal.data, matchedRules } });
       if (saveResult.isErr()) return err(saveResult.error);
-      this.logger.track("Blocked email — rule matched with block disposition.", { code: "processor.rule_block", accountId, sesMessageId, recipientAddress, disposition: outcome.blockDisposition, matchedRules: matchedRules.map(r => r.ruleId) });
+      this.logger.track("Blocked email — rule matched with block disposition.", { code: "processor.rule_block", signal: blockSignal, arc, disposition: outcome.blockDisposition, matchedRules: matchedRules.map(r => r.ruleId) });
       const repResult = await this.processingDb.updateGlobalReputation(senderETLD1, { wasSpam: true, wasBlocked: true });
       if (repResult.isErr()) {
-        this.logger.warn("Failed to update global sender reputation after signal processing. The DynamoDB update returned an error. Reputation data may be stale for this domain.", { code: "processor.reputation_update_failed", accountId, error: repResult.error });
+        this.logger.warn("Failed to update global sender reputation after signal processing. The DynamoDB update returned an error. Reputation data may be stale for this domain.", { code: "processor.reputation_update_failed", signal: blockSignal, arc, error: repResult.error });
       }
       const blockCat = statusToCategory(outcome.blockDisposition);
       if (blockCat) {
         const statsResult = await this.accountDb.incrementStats(accountId, blockCat);
         if (statsResult.isErr()) {
-          this.logger.warn("Stats increment failed — dashboard may be slightly behind.", { code: "processor.stats_increment_failed", accountId, error: statsResult.error });
+          this.logger.warn("Stats increment failed — dashboard may be slightly behind.", { code: "processor.stats_increment_failed", signal: blockSignal, arc, error: statsResult.error });
         }
       }
       return ok(undefined);
@@ -1247,16 +1250,16 @@ export class SignalProcessor {
       const quarantinedSignal: Signal = { ...quarantineBase, data: { ...quarantineBase.data, matchedRules } };
       const saveResult = await this.arcDb.saveSignal(quarantinedSignal);
       if (saveResult.isErr()) return err(saveResult.error);
-      this.logger.info("Quarantined email — rule or sender filter matched.", { code: "processor.quarantine", accountId, sesMessageId, recipientAddress, status: quarantineStatus, matchedRules: matchedRules.map(r => r.ruleId) });
+      this.logger.info("Quarantined email — rule or sender filter matched.", { code: "processor.quarantine", accountId, arcId: arc.id, signalId: quarantinedSignal.id, status: quarantineStatus, matchedRules: matchedRules.map(r => r.ruleId) });
       const repResult = await this.processingDb.updateGlobalReputation(senderETLD1, { wasSpam: true, wasBlocked: true });
       if (repResult.isErr()) {
-        this.logger.warn("Failed to update global sender reputation after signal processing. The DynamoDB update returned an error. Reputation data may be stale for this domain.", { code: "processor.reputation_update_failed", accountId, error: repResult.error });
+        this.logger.warn("Failed to update global sender reputation after signal processing. The DynamoDB update returned an error. Reputation data may be stale for this domain.", { code: "processor.reputation_update_failed", signal: quarantinedSignal, arc, error: repResult.error });
       }
       const quarantineCat = statusToCategory(quarantineStatus);
       if (quarantineCat) {
         const statsResult = await this.accountDb.incrementStats(accountId, quarantineCat);
         if (statsResult.isErr()) {
-          this.logger.warn("Stats increment failed — dashboard may be slightly behind.", { code: "processor.stats_increment_failed", accountId, error: statsResult.error });
+          this.logger.warn("Stats increment failed — dashboard may be slightly behind.", { code: "processor.stats_increment_failed", signal: quarantinedSignal, arc, error: statsResult.error });
         }
       }
       return ok(undefined);
@@ -1288,7 +1291,7 @@ export class SignalProcessor {
     const secondaryResults = await this.embeddingGenerator.generateForSecondaryClusters(embedText);
     for (const result of secondaryResults) {
       if (result.isErr()) {
-        this.logger.warn("Secondary embedding generation failed. We will run the full re-index anyway before switching over — revalidate all WARNINGS to check for failures in generating Aurora embeddings.", { code: "embedding.secondary_failed", modelId: result.error.modelId, error: result.error });
+        this.logger.warn("Secondary embedding generation failed. We will run the full re-index anyway before switching over — revalidate all WARNINGS to check for failures in generating Aurora embeddings.", { code: "embedding.secondary_failed", signal, arc, modelId: result.error.modelId, error: result.error });
       }
     }
 
@@ -1330,7 +1333,7 @@ export class SignalProcessor {
         const scheduleName = buildScheduleName(accountId, scheduleSignalId, "followup");
         const deleteResult = await this.schedulerClient.deleteFollowup(scheduleName);
         if (deleteResult.isErr()) {
-          this.logger.warn("Failed to cancel followup schedule on arc reactivation — stale-fire will handle it.", { code: "processor.followup.cancel_failed", accountId, arcId: arc.id, scheduleName, error: deleteResult.error });
+          this.logger.warn("Failed to cancel followup schedule on arc reactivation — stale-fire will handle it.", { code: "processor.followup.cancel_failed", signal, arc, scheduleName, error: deleteResult.error });
         }
       }
     } else {
@@ -1349,7 +1352,7 @@ export class SignalProcessor {
     if (allowedCat) {
       const statsResult = await this.accountDb.incrementStats(accountId, allowedCat);
       if (statsResult.isErr()) {
-        this.logger.warn("Stats increment failed — dashboard may be slightly behind.", { code: "processor.stats_increment_failed", accountId, error: statsResult.error });
+        this.logger.warn("Stats increment failed — dashboard may be slightly behind.", { code: "processor.stats_increment_failed", signal, arc, error: statsResult.error });
       }
     }
 
@@ -1375,7 +1378,7 @@ export class SignalProcessor {
       wasBlocked: false,
     });
     if (finalRepResult.isErr()) {
-      this.logger.warn("Failed to update global sender reputation after signal processing. The DynamoDB update returned an error. Reputation data may be stale for this domain.", { code: "processor.reputation_update_failed", accountId, error: finalRepResult.error });
+      this.logger.warn("Failed to update global sender reputation after signal processing. The DynamoDB update returned an error. Reputation data may be stale for this domain.", { code: "processor.reputation_update_failed", signal, arc, error: finalRepResult.error });
     }
 
     return ok(undefined);
@@ -1395,7 +1398,7 @@ export class SignalProcessor {
       activeClusters.map(async (cluster) => {
         const embedding = signal.data.embeddings?.[cluster.modelId];
         if (!embedding) {
-          this.logger.info("Aurora upsert skipped for cluster — no embedding available for the cluster's model. This is expected when the embedding generator did not produce a vector for this model (e.g. Bedrock failure for that model).", { code: "processor.aurora_upsert_skipped", accountId: signal.accountId, registryId: cluster.registryId, modelId: cluster.modelId });
+          this.logger.info("Aurora upsert skipped for cluster — no embedding available for the cluster's model. This is expected when the embedding generator did not produce a vector for this model (e.g. Bedrock failure for that model).", { code: "processor.aurora_upsert_skipped", accountId: signal.accountId, signalId: signal.id, arcId: arc.id, registryId: cluster.registryId, modelId: cluster.modelId });
           return ok({ cluster }) as Result<{ cluster: typeof cluster }, DbError & { cluster: typeof cluster }>;
         }
 
@@ -1419,7 +1422,7 @@ export class SignalProcessor {
     if (failures.length > 0) {
       for (const failure of failures) {
         const e = failure._unsafeUnwrapErr();
-        this.logger.error("Failed to upsert embedding to Aurora cluster. The Data API call returned an error for the target cluster. This signal's embedding won't be searchable on that cluster until the next retry succeeds. Check Aurora cluster health in the AWS console.", { code: "processor.aurora_upsert_failed", accountId: signal.accountId, registryId: e.cluster.registryId, error: e });
+        this.logger.error("Failed to upsert embedding to Aurora cluster. The Data API call returned an error for the target cluster. This signal's embedding won't be searchable on that cluster until the next retry succeeds. Check Aurora cluster health in the AWS console.", { code: "processor.aurora_upsert_failed", signal, arc, registryId: e.cluster.registryId, error: e });
       }
       return err(dbError("Aurora upsert failed for one or more clusters"));
     }
@@ -1438,7 +1441,7 @@ export class SignalProcessor {
     const payload: SideEffectPayload = { signal, arc };
     const sendResult = await this.sqsDispatcher.sendMessage(payload);
     if (sendResult.isErr()) {
-      this.logger.error("Failed to dispatch side-effect SQS message. Aurora upserts succeeded but side-effects won't fire until the message is retried and dispatch succeeds. Check SQS queue health and permissions.", { code: "processor.side_effect_dispatch_failed", accountId: signal.accountId, signalId: signal.id, arcId: arc.id, error: sendResult.error });
+      this.logger.error("Failed to dispatch side-effect SQS message. Aurora upserts succeeded but side-effects won't fire until the message is retried and dispatch succeeds. Check SQS queue health and permissions.", { code: "processor.side_effect_dispatch_failed", signal, arc, error: sendResult.error });
       return err(sendResult.error);
     }
 
@@ -1467,7 +1470,7 @@ export class SignalProcessor {
         retentionApplyResult = err(dbError(e));
       }
       if (retentionApplyResult.isErr()) {
-        this.logger.warn("Failed to apply S3 retention policy to signal object. The S3 tagging or copy operation returned an error. The signal is saved but will use the default 5-year lifecycle rule instead of the plan-specific retention.", { code: "processor.s3_retention_failed", accountId: signal.accountId, error: retentionApplyResult.error });
+        this.logger.warn("Failed to apply S3 retention policy to signal object. The S3 tagging or copy operation returned an error. The signal is saved but will use the default 5-year lifecycle rule instead of the plan-specific retention.", { code: "processor.s3_retention_failed", signal, arc, error: retentionApplyResult.error });
         return;
       }
 
@@ -1477,13 +1480,13 @@ export class SignalProcessor {
       if (updatedS3Key !== signal.data.s3Key) {
         const retentionSaveResult = await this.arcDb.updateSignalRetention(signal.accountId, signal.signalLookupId, { s3Key: updatedS3Key });
         if (retentionSaveResult.isErr()) {
-          this.logger.warn("Failed to persist updated s3Key on signal record. The DynamoDB update returned an error. The S3 retention is applied but the signal record won't reflect the new key.", { code: "processor.retention_metadata_save_failed", accountId: signal.accountId, error: retentionSaveResult.error });
+          this.logger.warn("Failed to persist updated s3Key on signal record. The DynamoDB update returned an error. The S3 retention is applied but the signal record won't reflect the new key.", { code: "processor.retention_metadata_save_failed", signal, arc, error: retentionSaveResult.error });
         }
       }
 
       this.logger.trackPoint("s3_retention_complete");
     } catch (e) {
-      this.logger.warn("S3 retention threw an unexpected error. The signal will use the default lifecycle rule. Processing continues unaffected.", { code: "processor.s3_retention_unexpected", accountId: signal.accountId, error: e });
+      this.logger.warn("S3 retention threw an unexpected error. The signal will use the default lifecycle rule. Processing continues unaffected.", { code: "processor.s3_retention_unexpected", signal, arc, error: e });
     }
   }
 
@@ -1536,9 +1539,9 @@ export class SignalProcessor {
       };
       const saveInvalidResult = await this.arcDb.saveSignal(invalidSignal);
       if (saveInvalidResult.isErr()) {
-        this.logger.warn("Failed to save calendar_invite_invalid signal.", { code: "system_signal.write_failed", accountId, type: "calendar_invite_invalid", error: saveInvalidResult.error });
+        this.logger.warn("Failed to save calendar_invite_invalid signal.", { code: "system_signal.write_failed", signal, arc, accountId, type: "calendar_invite_invalid", error: saveInvalidResult.error });
       }
-      this.logger.warn("Calendar attachment rejected by ICS parser.", { code: "processor.calendar.parse_rejected", accountId, signalId: signal.id, reason: parseResult.error.reason });
+      this.logger.warn("Calendar attachment rejected by ICS parser.", { code: "processor.calendar.parse_rejected", signal, arc, reason: parseResult.error.reason });
       return;
     }
 
@@ -1577,7 +1580,7 @@ export class SignalProcessor {
 
     const saveCalResult = await this.arcDb.saveSignal(calendarSignal);
     if (saveCalResult.isErr()) {
-      this.logger.warn("Failed to save calendar_event signal.", { code: "system_signal.write_failed", accountId, type: "calendar_event", error: saveCalResult.error });
+      this.logger.warn("Failed to save calendar_event signal.", { code: "system_signal.write_failed", signal, arc, accountId, type: "calendar_event", error: saveCalResult.error });
       return;
     }
 
@@ -1586,7 +1589,7 @@ export class SignalProcessor {
       arc.labels = [...arc.labels, "system:calendar"];
       const updateResult = await this.arcDb.updateArc(accountId, arc.id, arc.status, arc.lastSignalAt!, { labels: arc.labels });
       if (updateResult.isErr()) {
-        this.logger.warn("Failed to apply system:calendar label to arc.", { code: "processor.calendar.label_failed", accountId, arcId: arc.id, error: updateResult.error });
+        this.logger.warn("Failed to apply system:calendar label to arc.", { code: "processor.calendar.label_failed", signal, arc, error: updateResult.error });
       }
     }
 
@@ -1606,7 +1609,7 @@ export class SignalProcessor {
           sqsMessageAttributeMessageType: "signal_followup",
         });
         if (scheduleResult.isErr()) {
-          this.logger.error("Failed to create calendar day-of schedule.", { code: "processor.calendar.schedule_failed", accountId, arcId: arc.id, signalId: calendarSignalId, fireAt, error: scheduleResult.error });
+          this.logger.error("Failed to create calendar day-of schedule.", { code: "processor.calendar.schedule_failed", signal, arc, calendarSignalId, fireAt, error: scheduleResult.error });
         }
       }
     }
@@ -1614,11 +1617,11 @@ export class SignalProcessor {
     // Schedule an RSVP reminder 24h before event start (only for REQUEST invites)
     if (calendarData.method?.toUpperCase() === "REQUEST") {
       if (!calendarData.startTime) {
-        this.logger.warn("Calendar REQUEST missing startTime — skipping RSVP schedule.", { code: "processor.calendar.rsvp_missing_start_time", accountId, arcId: arc.id, signalId: calendarSignalId });
+        this.logger.warn("Calendar REQUEST missing startTime — skipping RSVP schedule.", { code: "processor.calendar.rsvp_missing_start_time", signal, arc });
       } else {
         const eventStart = DateTime.fromISO(calendarData.startTime, { zone: "utc" });
         if (!eventStart.isValid) {
-          this.logger.warn("Calendar REQUEST has invalid startTime — skipping RSVP schedule.", { code: "processor.calendar.rsvp_invalid_start_time", accountId, arcId: arc.id, signalId: calendarSignalId, startTime: calendarData.startTime });
+          this.logger.warn("Calendar REQUEST has invalid startTime — skipping RSVP schedule.", { code: "processor.calendar.rsvp_invalid_start_time", signal, arc, startTime: calendarData.startTime });
         } else {
           const now = DateTime.utc();
           const reminderTime = eventStart.minus({ hours: RSVP_REMINDER_HOURS_BEFORE });
@@ -1636,7 +1639,7 @@ export class SignalProcessor {
             if (rsvpResult.isErr()) {
               this.logger.error("Failed to create RSVP reminder schedule.", {
                 code: "processor.calendar.rsvp_schedule_failed",
-                accountId, arcId: arc.id, signalId: calendarSignalId, fireAt,
+                signal, arc, calendarSignalId, fireAt,
                 error: rsvpResult.error,
               });
             }
@@ -1657,7 +1660,7 @@ export class SignalProcessor {
       ];
     }
 
-    this.logger.info("Calendar signal created from .ics attachment.", { code: "processor.calendar.signal_created", accountId, calendarSignalId, emailSignalId: signal.id, arcId: arc.id, method: calendarData.method, veventUid: calendarData.veventUid });
+    this.logger.info("Calendar signal created from .ics attachment.", { code: "processor.calendar.signal_created", accountId, arcId: arc.id, signalId: signal.id, calendarSignalId, method: calendarData.method, veventUid: calendarData.veventUid });
     this.logger.trackPoint("calendar_signal_created", { calendarSignalId });
   }
 
