@@ -134,7 +134,9 @@ function makeAccountDb() {
     updateTemplate: vi.fn().mockResolvedValue(ok(undefined)),
     deleteTemplate: vi.fn().mockResolvedValue(ok(undefined)),
     listTemplates: vi.fn().mockResolvedValue(ok([])),
-    getStats: vi.fn().mockResolvedValue(ok(null)),
+    getStats: vi.fn().mockResolvedValue(ok([])),
+    incrementStatMetric: vi.fn().mockResolvedValue(ok(undefined)),
+    writeSnapshot: vi.fn().mockResolvedValue(ok(undefined)),
   };
 }
 

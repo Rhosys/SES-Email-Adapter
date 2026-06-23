@@ -1711,6 +1711,9 @@ export class SignalProcessor {
   ): Promise<Result<void, DbError>> {
     const aliasResult = await this.accountDb.ensureAlias(accountId, address, defaultUnknownSenderPolicy, existing);
     if (aliasResult.isErr()) return err(aliasResult.error);
+    if (!existing) {
+      await this.accountDb.incrementStatMetric(accountId, "totalAliases", 1);
+    }
     const senderResult = await this.accountDb.saveSender(accountId, address, senderETLD1, "allow");
     if (senderResult.isErr()) return err(senderResult.error);
     return ok(undefined);

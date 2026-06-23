@@ -1,153 +1,302 @@
-import { DateTime } from "luxon";
-import type { SignalStatus, StatsCategory } from "../types/index.js";
+// ---------------------------------------------------------------------------
+// Stats Writer — row-per-day diff design with monthly snapshots
+// ---------------------------------------------------------------------------
 
-const STATUS_TO_CATEGORY: Record<Exclude<SignalStatus, "draft" | "pending_send" | "sent">, StatsCategory> = {
+import { DateTime } from "luxon";
+import type { SignalStatus } from "../types/index.js";
+
+// ---------------------------------------------------------------------------
+// Metric Registry — all tracked metrics. New metrics are added here.
+// If a metric is missing from a snapshot, it defaults to zero.
+// ---------------------------------------------------------------------------
+
+export const STATS_METRICS = ["allowed", "blocked", "quarantined", "violationReport", "totalAliases"] as const;
+export type StatsMetric = (typeof STATS_METRICS)[number];
+
+// ---------------------------------------------------------------------------
+// Status → Metric mapping (signal processing)
+// ---------------------------------------------------------------------------
+
+const STATUS_TO_METRIC: Record<Exclude<SignalStatus, "draft" | "pending_send" | "sent">, StatsMetric> = {
   active: "allowed",
   block_hidden: "blocked",
   block_reject: "blocked",
   report_violation: "violationReport",
   quarantine_visible: "quarantined",
   quarantine_hidden: "quarantined",
-} satisfies Record<Exclude<SignalStatus, "draft" | "pending_send" | "sent">, StatsCategory>;
+};
 
-export function statusToCategory(status: SignalStatus): StatsCategory | null {
+export function statusToMetric(status: SignalStatus): StatsMetric | null {
   if (status === "draft" || status === "pending_send" || status === "sent") return null;
-  return STATUS_TO_CATEGORY[status];
+  return STATUS_TO_METRIC[status];
 }
 
-export interface StatsUpdateParams {
+/** @deprecated Use statusToMetric — kept for backward compat during migration */
+export const statusToCategory = statusToMetric;
+
+// ---------------------------------------------------------------------------
+// DynamoDB row types
+// ---------------------------------------------------------------------------
+
+/** A daily diff row: `sk = STATS#YYYY-MM-DD` */
+export interface StatsDiffRow {
+  pk: string;
+  sk: string;
+  /** Diff values for each metric that changed this day */
+  metrics: Partial<Record<StatsMetric, number>>;
+  /** DynamoDB TTL — epoch seconds, 5 years from creation */
+  ttl: number;
+}
+
+/** A monthly snapshot row: `sk = STATS#YYYY-MM-DD-SNAPSHOT` where DD is always 00 */
+export interface StatsSnapshotRow {
+  pk: string;
+  sk: string;
+  /** Cumulative totals through end of previous month */
+  metrics: Record<StatsMetric, number>;
+}
+
+export type StatsRow = StatsDiffRow | StatsSnapshotRow;
+
+// ---------------------------------------------------------------------------
+// SK helpers
+// ---------------------------------------------------------------------------
+
+export function buildDiffSk(date: string): string {
+  return `STATS#${date}`;
+}
+
+export function buildSnapshotSk(yearMonth: string): string {
+  return `STATS#${yearMonth}-00-SNAPSHOT`;
+}
+
+export function isDiffRow(row: StatsRow): row is StatsDiffRow {
+  return !row.sk.endsWith("-SNAPSHOT");
+}
+
+export function isSnapshotRow(row: StatsRow): row is StatsSnapshotRow {
+  return row.sk.endsWith("-SNAPSHOT");
+}
+
+/** Extract the date string from a diff SK: `STATS#2026-06-15` → `2026-06-15` */
+export function dateFromDiffSk(sk: string): string {
+  return sk.slice(6); // "STATS#".length = 6
+}
+
+/** Extract the year-month from a snapshot SK: `STATS#2026-06-00-SNAPSHOT` → `2026-06` */
+export function monthFromSnapshotSk(sk: string): string {
+  return sk.slice(6, 13); // "STATS#YYYY-MM"
+}
+
+// ---------------------------------------------------------------------------
+// Build DynamoDB params for diff row writes (three-level conditional strategy)
+// ---------------------------------------------------------------------------
+
+export interface DiffKey {
   TableName: string;
   Key: { pk: string; sk: string };
+}
+
+export interface DiffUpdateParams extends DiffKey {
   UpdateExpression: string;
   ExpressionAttributeNames: Record<string, string>;
   ExpressionAttributeValues: Record<string, unknown>;
+  ConditionExpression: string;
 }
 
-export function buildStatsUpdateParams(accountId: string, category: StatsCategory, now: DateTime, tableName: string): StatsUpdateParams {
-  const today = now.toISODate()!; // YYYY-MM-DD
-  const month = today.slice(0, 7); // YYYY-MM
-  const year = today.slice(0, 4); // YYYY
+export interface DiffPutParams extends DiffKey {
+  Item: Record<string, unknown>;
+  ConditionExpression: string;
+}
 
-  const totalAttr = `total${category[0]!.toUpperCase()}${category.slice(1)}`;
-
-  const dayAttr = `d_${today}_${category}`;
-  const monthAttr = `m_${month}_${category}`;
-  const yearAttr = `y_${year}_${category}`;
+/**
+ * Step 1: UpdateItem with condition that the row already exists.
+ * ADD increments the metric on the existing nested map.
+ */
+export function buildDiffUpdateParams(
+  accountId: string,
+  metric: StatsMetric,
+  delta: number,
+  now: DateTime,
+  tableName: string,
+): DiffUpdateParams {
+  const today = now.toISODate()!;
 
   return {
     TableName: tableName,
-    Key: { pk: `ACCT#${accountId}`, sk: "STATS" },
-    UpdateExpression: `ADD totalSignals :one, #totalCat :one, #day :one, #month :one, #year :one SET updatedAt = :now`,
+    Key: { pk: `ACCT#${accountId}`, sk: buildDiffSk(today) },
+    UpdateExpression: "ADD #metric :delta",
     ExpressionAttributeNames: {
-      "#totalCat": totalAttr,
-      "#day": dayAttr,
-      "#month": monthAttr,
-      "#year": yearAttr,
+      "#metric": `metrics.${metric}`,
     },
     ExpressionAttributeValues: {
-      ":one": 1,
-      ":now": now.toISO()!,
+      ":delta": delta,
     },
+    ConditionExpression: "attribute_exists(pk)",
   };
 }
 
+/**
+ * Step 2: PutItem to create the row (first signal of the day).
+ * Condition: row must NOT exist (another Lambda might have created it concurrently).
+ */
+export function buildDiffPutParams(
+  accountId: string,
+  metric: StatsMetric,
+  delta: number,
+  now: DateTime,
+  tableName: string,
+): DiffPutParams {
+  const today = now.toISODate()!;
+  const fiveYearsFromNow = now.plus({ years: 5 }).toUnixInteger();
 
-export function buildPruneNames(now: DateTime): { names: Record<string, string>; expression: string } {
-  const categories: StatsCategory[] = ["allowed", "blocked", "quarantined", "violationReport"];
-  const names: Record<string, string> = {};
-  let idx = 0;
-
-  // Prune daily: day-8 through day-14
-  for (let offset = 8; offset <= 14; offset++) {
-    const dateStr = now.minus({ days: offset }).toISODate()!;
-    for (const cat of categories) {
-      names[`#prune${idx}`] = `d_${dateStr}_${cat}`;
-      idx++;
-    }
-  }
-
-  // Prune monthly: month-3 and month-4
-  for (let offset = 3; offset <= 4; offset++) {
-    const monthStr = now.minus({ months: offset }).toFormat("yyyy-MM");
-    for (const cat of categories) {
-      names[`#prune${idx}`] = `m_${monthStr}_${cat}`;
-      idx++;
-    }
-  }
-
-  const expression = idx > 0 ? `REMOVE ${Object.keys(names).join(", ")}` : "";
-  return { names, expression };
-}
-
-
-export interface StatsResponse {
-  lifetime: { totalSignals: number; totalAllowed: number; totalBlocked: number; totalQuarantined: number; totalViolationReport: number };
-  daily: Array<{ date: string; allowed: number; blocked: number; quarantined: number; violationReport: number }>;
-  monthly: Array<{ month: string; allowed: number; blocked: number; quarantined: number; violationReport: number }>;
-  yearly: Array<{ year: string; allowed: number; blocked: number; quarantined: number; violationReport: number }>;
-}
-
-export function parseStatsRow(item: Record<string, unknown> | null): StatsResponse {
-  if (!item) {
-    return {
-      lifetime: { totalSignals: 0, totalAllowed: 0, totalBlocked: 0, totalQuarantined: 0, totalViolationReport: 0 },
-      daily: [],
-      monthly: [],
-      yearly: [],
-    };
-  }
-
-  const lifetime = {
-    totalSignals: (item["totalSignals"] as number) ?? 0,
-    totalAllowed: (item["totalAllowed"] as number) ?? 0,
-    totalBlocked: (item["totalBlocked"] as number) ?? 0,
-    totalQuarantined: (item["totalQuarantined"] as number) ?? 0,
-    totalViolationReport: (item["totalViolationReport"] as number) ?? 0,
+  return {
+    TableName: tableName,
+    Key: { pk: `ACCT#${accountId}`, sk: buildDiffSk(today) },
+    Item: {
+      pk: `ACCT#${accountId}`,
+      sk: buildDiffSk(today),
+      metrics: { [metric]: delta },
+      ttl: fiveYearsFromNow,
+    },
+    ConditionExpression: "attribute_not_exists(pk)",
   };
+}
 
-  const dailyMap = new Map<string, { allowed: number; blocked: number; quarantined: number; violationReport: number }>();
-  const monthlyMap = new Map<string, { allowed: number; blocked: number; quarantined: number; violationReport: number }>();
-  const yearlyMap = new Map<string, { allowed: number; blocked: number; quarantined: number; violationReport: number }>();
+// ---------------------------------------------------------------------------
+// Snapshot computation — sums a base snapshot (or zeros) + all diffs
+// ---------------------------------------------------------------------------
 
-  for (const [key, value] of Object.entries(item)) {
-    if (key.startsWith("d_")) {
-      // d_YYYY-MM-DD_category
-      const parts = key.slice(2); // YYYY-MM-DD_category
-      const date = parts.slice(0, 10);
-      const category = parts.slice(11);
-      if (!dailyMap.has(date)) dailyMap.set(date, { allowed: 0, blocked: 0, quarantined: 0, violationReport: 0 });
-      const entry = dailyMap.get(date)!;
-      if (category in entry) (entry as Record<string, number>)[category] = value as number;
-    } else if (key.startsWith("m_")) {
-      // m_YYYY-MM_category
-      const parts = key.slice(2); // YYYY-MM_category
-      const month = parts.slice(0, 7);
-      const category = parts.slice(8);
-      if (!monthlyMap.has(month)) monthlyMap.set(month, { allowed: 0, blocked: 0, quarantined: 0, violationReport: 0 });
-      const entry = monthlyMap.get(month)!;
-      if (category in entry) (entry as Record<string, number>)[category] = value as number;
-    } else if (key.startsWith("y_")) {
-      // y_YYYY_category
-      const parts = key.slice(2); // YYYY_category
-      const year = parts.slice(0, 4);
-      const category = parts.slice(5);
-      if (!yearlyMap.has(year)) yearlyMap.set(year, { allowed: 0, blocked: 0, quarantined: 0, violationReport: 0 });
-      const entry = yearlyMap.get(year)!;
-      if (category in entry) (entry as Record<string, number>)[category] = value as number;
+export function emptyMetrics(): Record<StatsMetric, number> {
+  const m: Record<string, number> = {};
+  for (const metric of STATS_METRICS) {
+    m[metric] = 0;
+  }
+  return m as Record<StatsMetric, number>;
+}
+
+/**
+ * Compute a new snapshot by applying diffs to a base.
+ * If baseSnapshot is null, starts from all zeros.
+ * Diffs are applied in chronological order (ascending SK).
+ */
+export function computeSnapshot(
+  baseSnapshot: Record<StatsMetric, number> | null,
+  diffs: Array<Partial<Record<StatsMetric, number>>>,
+): Record<StatsMetric, number> {
+  const result = baseSnapshot ? { ...baseSnapshot } : emptyMetrics();
+
+  // Ensure all current metrics exist (handles metrics added after the snapshot was created)
+  for (const metric of STATS_METRICS) {
+    if (!(metric in result)) {
+      (result as Record<string, number>)[metric] = 0;
     }
   }
 
-  const daily = [...dailyMap.entries()]
-    .sort((a, b) => b[0].localeCompare(a[0]))
-    .map(([date, counts]) => ({ date, ...counts }));
+  for (const diff of diffs) {
+    for (const metric of STATS_METRICS) {
+      if (metric in diff) {
+        result[metric] += diff[metric]!;
+      }
+    }
+  }
 
-  const monthly = [...monthlyMap.entries()]
-    .sort((a, b) => b[0].localeCompare(a[0]))
-    .map(([month, counts]) => ({ month, ...counts }));
+  return result;
+}
 
-  const yearly = [...yearlyMap.entries()]
-    .sort((a, b) => b[0].localeCompare(a[0]))
-    .map(([year, counts]) => ({ year, ...counts }));
+// ---------------------------------------------------------------------------
+// API response types — matches the site's expected contract
+// ---------------------------------------------------------------------------
 
-  return { lifetime, daily, monthly, yearly };
+export interface ApiStatsTotals {
+  allowed: number;
+  quarantined: number;
+  blocked: number;
+  totalAliases: number;
+}
+
+export interface ApiStatsDailyBucket {
+  date: string;
+  allowed: number;
+  quarantined: number;
+  blocked: number;
+}
+
+export interface ApiStatsResponse {
+  totals: ApiStatsTotals;
+  daily: ApiStatsDailyBucket[];
+  monthly: ApiStatsDailyBucket[];
+}
+
+// ---------------------------------------------------------------------------
+// Aggregate raw stats rows into the API response shape
+// ---------------------------------------------------------------------------
+
+/**
+ * Given a set of stats rows (snapshots + diffs) sorted ascending by SK,
+ * produces the API response with totals, daily breakdowns, and monthly rollups.
+ *
+ * The rows should span at least the last 365 days of diffs.
+ * The latest snapshot (if any) provides the base for totals computation.
+ */
+export function aggregateStatsRows(rows: StatsRow[]): ApiStatsResponse {
+  // Defensive sort: correctness depends on ascending SK order.
+  // DDB query returns ascending when ScanIndexForward=true, but we don't trust callers.
+  const sorted = [...rows].sort((a, b) => a.sk.localeCompare(b.sk));
+
+  // Find the latest snapshot (rows are ascending by SK, snapshot sorts before same-month diffs)
+  let latestSnapshot: Record<StatsMetric, number> | null = null;
+  let snapshotMonth: string | null = null;
+  const diffs: Array<{ date: string; metrics: Partial<Record<StatsMetric, number>> }> = [];
+
+  for (const row of sorted) {
+    if (isSnapshotRow(row)) {
+      latestSnapshot = row.metrics;
+      snapshotMonth = monthFromSnapshotSk(row.sk);
+    } else {
+      diffs.push({ date: dateFromDiffSk(row.sk), metrics: row.metrics });
+    }
+  }
+
+  // Compute totals: snapshot + all diffs after the snapshot
+  // If no snapshot exists, sum all diffs from zero
+  const diffsAfterSnapshot = snapshotMonth
+    ? diffs.filter(d => d.date.slice(0, 7) >= snapshotMonth!)
+    : diffs;
+
+  const totals = computeSnapshot(latestSnapshot, diffsAfterSnapshot.map(d => d.metrics));
+
+  // Build daily breakdown (all diffs, regardless of snapshot)
+  const daily: ApiStatsDailyBucket[] = diffs.map(d => ({
+    date: d.date,
+    allowed: d.metrics.allowed ?? 0,
+    quarantined: d.metrics.quarantined ?? 0,
+    blocked: d.metrics.blocked ?? 0,
+  })).sort((a, b) => b.date.localeCompare(a.date)); // descending
+
+  // Build monthly rollups from diffs
+  const monthlyMap = new Map<string, { allowed: number; quarantined: number; blocked: number }>();
+  for (const d of diffs) {
+    const month = d.date.slice(0, 7);
+    const existing = monthlyMap.get(month) ?? { allowed: 0, quarantined: 0, blocked: 0 };
+    existing.allowed += d.metrics.allowed ?? 0;
+    existing.quarantined += d.metrics.quarantined ?? 0;
+    existing.blocked += d.metrics.blocked ?? 0;
+    monthlyMap.set(month, existing);
+  }
+
+  const monthly: ApiStatsDailyBucket[] = [...monthlyMap.entries()]
+    .sort((a, b) => b[0].localeCompare(a[0]))
+    .map(([month, counts]) => ({ date: month, ...counts }));
+
+  return {
+    totals: {
+      allowed: totals.allowed,
+      quarantined: totals.quarantined,
+      blocked: totals.blocked,
+      totalAliases: totals.totalAliases,
+    },
+    daily,
+    monthly,
+  };
 }

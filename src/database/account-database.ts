@@ -6,9 +6,9 @@ import type { Result, DbError, NotFoundError } from "../errors.js";
 import { generateId } from "../utils/id.js";
 import type { Account, View, Label, Rule, RuleStatus, Domain, Alias, AliasSender, SenderPolicy, AccountFilteringConfig, UnknownSenderPolicy, VerifiedForwardingAddress, EmailTemplate, WsConnection } from "../types/index.js";
 import { SYSTEM_RULES } from "../processor/system-rules.js";
-import type { StatsCategory } from "../types/index.js";
 import type { CreateViewRequest, UpdateViewRequest, CreateLabelRequest, UpdateLabelRequest, CreateRuleRequest, UpdateRuleRequest } from "../api/app.js";
-import { buildStatsUpdateParams, buildPruneNames } from "./stats-writer.js";
+import { buildDiffUpdateParams, buildDiffPutParams, buildSnapshotSk } from "./stats-writer.js";
+import type { StatsMetric, StatsRow } from "./stats-writer.js";
 
 // ---------------------------------------------------------------------------
 // Key helpers
@@ -142,17 +142,17 @@ export class AccountDatabase {
   // A sender disposition recorded for an address implies that address is a recognised
   // alias, so callers that approve/block a sender must ensure the Alias record exists too.
   // Pass `existing` when the caller already has it (e.g. processor.ts) to skip the lookup.
-  async ensureAlias(accountId: string, address: string, defaultUnknownSenderPolicy: UnknownSenderPolicy, existing?: Alias | null): Promise<Result<Alias, DbError>> {
+  async ensureAlias(accountId: string, address: string, defaultUnknownSenderPolicy: UnknownSenderPolicy, existing?: Alias | null): Promise<Result<{ alias: Alias; created: boolean }, DbError>> {
     let alias = existing;
     if (alias === undefined) {
       const existingResult = await this.getAlias(accountId, address);
       if (existingResult.isErr()) return err(existingResult.error);
       alias = existingResult.value;
     }
-    if (alias) return ok(alias);
+    if (alias) return ok({ alias, created: false });
 
     const now = DateTime.utc().toISO()!;
-    return this.saveAlias({
+    const saveResult = await this.saveAlias({
       id: address,
       accountId,
       address,
@@ -162,6 +162,8 @@ export class AccountDatabase {
       createdAt: now,
       updatedAt: now,
     });
+    if (saveResult.isErr()) return err(saveResult.error);
+    return ok({ alias: saveResult.value, created: true });
   }
 
   async listAliases(accountId: string): Promise<Result<Alias[], DbError>> {
@@ -1126,32 +1128,89 @@ export class AccountDatabase {
   // Stats
   // ---------------------------------------------------------------------------
 
-  async incrementStats(accountId: string, category: StatsCategory): Promise<Result<void, DbError>> {
+  /**
+   * Three-level conditional write for diff rows:
+   * 1. UpdateItem (attribute_exists) — fast path, row already exists today
+   * 2. PutItem (attribute_not_exists) — first signal of the day, create row
+   * 3. UpdateItem (attribute_exists) — retry if another Lambda raced us on step 2
+   */
+  private async writeDiffMetric(accountId: string, metric: StatsMetric, delta: number): Promise<Result<void, DbError>> {
     const now = DateTime.utc();
-    const params = buildStatsUpdateParams(accountId, category, now, ACCOUNTS_TABLE);
-    const pruneResult = buildPruneNames(now);
-    const finalExpression = pruneResult.expression
-      ? `${params.UpdateExpression} ${pruneResult.expression}`
-      : params.UpdateExpression;
+    const updateParams = buildDiffUpdateParams(accountId, metric, delta, now, ACCOUNTS_TABLE);
+    const putParams = buildDiffPutParams(accountId, metric, delta, now, ACCOUNTS_TABLE);
+
+    // Step 1: try to ADD to existing row
     try {
-      await dynamo.send(new UpdateCommand({
-        ...params,
-        UpdateExpression: finalExpression,
-        ExpressionAttributeNames: { ...params.ExpressionAttributeNames, ...pruneResult.names },
-      }));
+      await dynamo.send(new UpdateCommand(updateParams));
+      return ok(undefined);
+    } catch (e) {
+      if (!(e instanceof Error && e.name === "ConditionalCheckFailedException")) {
+        return err(dbError(e));
+      }
+    }
+
+    // Step 2: row doesn't exist — create it
+    try {
+      await dynamo.send(new PutCommand(putParams));
+      return ok(undefined);
+    } catch (e) {
+      if (!(e instanceof Error && e.name === "ConditionalCheckFailedException")) {
+        return err(dbError(e));
+      }
+    }
+
+    // Step 3: another Lambda created it between steps 1 and 2 — retry update
+    try {
+      await dynamo.send(new UpdateCommand(updateParams));
       return ok(undefined);
     } catch (e) {
       return err(dbError(e));
     }
   }
 
-  async getStats(accountId: string): Promise<Result<Record<string, unknown> | null, DbError>> {
+  async incrementStats(accountId: string, category: StatsMetric): Promise<Result<void, DbError>> {
+    return this.writeDiffMetric(accountId, category, 1);
+  }
+
+  async incrementStatMetric(accountId: string, metric: StatsMetric, delta: number): Promise<Result<void, DbError>> {
+    return this.writeDiffMetric(accountId, metric, delta);
+  }
+
+  async getStats(accountId: string, fromSk?: string): Promise<Result<StatsRow[], DbError>> {
     try {
-      const res = await dynamo.send(new GetCommand({
+      const keyCondition = fromSk
+        ? "pk = :pk AND sk >= :from"
+        : "pk = :pk AND begins_with(sk, :prefix)";
+      const exprValues: Record<string, string> = fromSk
+        ? { ":pk": `ACCT#${accountId}`, ":from": fromSk }
+        : { ":pk": `ACCT#${accountId}`, ":prefix": "STATS#" };
+
+      const res = await dynamo.send(new QueryCommand({
         TableName: ACCOUNTS_TABLE,
-        Key: { pk: `ACCT#${accountId}`, sk: "STATS" },
+        KeyConditionExpression: keyCondition,
+        ExpressionAttributeValues: exprValues,
+        ScanIndexForward: fromSk ? true : false,
+        ...(!fromSk ? { Limit: 400 } : {}),
       }));
-      return ok(res.Item ? (res.Item as Record<string, unknown>) : null);
+      const items = (res.Items ?? []) as StatsRow[];
+      // When using reverse scan (no fromSk), flip to ascending for aggregation
+      return ok(fromSk ? items : items.reverse());
+    } catch (e) {
+      return err(dbError(e));
+    }
+  }
+
+  async writeSnapshot(accountId: string, yearMonth: string, metrics: Record<StatsMetric, number>): Promise<Result<void, DbError>> {
+    try {
+      await dynamo.send(new PutCommand({
+        TableName: ACCOUNTS_TABLE,
+        Item: {
+          pk: `ACCT#${accountId}`,
+          sk: buildSnapshotSk(yearMonth),
+          metrics,
+        },
+      }));
+      return ok(undefined);
     } catch (e) {
       return err(dbError(e));
     }
