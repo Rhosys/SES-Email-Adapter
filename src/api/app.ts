@@ -19,7 +19,7 @@ import type { AccountDatabase } from "../database/account-database.js";
 import type { Logger } from "../logger.js";
 import { deriveGroupingKey } from "../processor/processor.js";
 import { zParse } from "./validate.js";
-import { toApiArc, toApiAccount, toApiSignal, toApiDomain, toApiDomainWithRecords, toApiAlias, toApiAliasSender, toApiRule, toApiView, toApiTemplate, toApiForwardingAddress } from "./transform.js";
+import { toApiArc, toApiAccount, toApiSignal, toApiDomain, toApiDomainWithRecords, toApiAlias, toApiAliasSender, toApiRule, toApiView, toApiForwardingAddress } from "./transform.js";
 import { generatePresignedGet } from "../processor/presign.js";
 import { validateRuleCondition } from "./validate-rule-condition.js";
 import { validateWebhookConfig } from "./validate-webhook-config.js";
@@ -43,6 +43,7 @@ import { buildUnsubscribeHeaders } from "../email/unsubscribe-headers.js";
 import { generateUnsubscribeToken } from "../email/unsubscribe-token.js";
 import { registerViewsRoutes } from "./viewsApi.js";
 import { registerLabelsRoutes } from "./labelsApi.js";
+import { registerTemplatesRoutes } from "./templatesApi.js";
 
 // ---------------------------------------------------------------------------
 // Job Dispatcher interface (used by reindex route)
@@ -74,7 +75,7 @@ import {
   UpdateAccountRequest,
   CreateForwardingAddressRequest, VerifyForwardingAddressRequest,
   InviteUserRequest, UpdateUserRequest,
-  CreateSenderRequest, UpdateSenderRequest, CreateTemplateRequest, ReplaceTemplateRequest, UpdateTemplateRequest,
+  CreateSenderRequest, UpdateSenderRequest,
   CreateDraftSignalRequest, ReplaceDraftSignalRequest,
   RsvpRequest,
 } from "./requests.js";
@@ -83,10 +84,10 @@ import {
   View as ViewSchema, Rule as RuleSchema,
   Domain as DomainSchema, DomainWithRecords as DomainWithRecordsSchema,
   Alias as AliasSchema, AliasSender as AliasSenderSchema,
-  EmailTemplate as EmailTemplateSchema, VerifiedForwardingAddress as VerifiedForwardingAddressSchema,
+  VerifiedForwardingAddress as VerifiedForwardingAddressSchema,
   ListArcsResponse, ListSignalsResponse, ListViewsResponse,
   ListRulesResponse, ListDomainsResponse, ListAliasesResponse, ListSendersResponse,
-  ListTemplatesResponse, ListForwardingAddressesResponse,
+  ListForwardingAddressesResponse,
   ErrorResponse, ErrorCode, Pagination as PaginationSchema,
 } from "./schemas.js";
 
@@ -2000,169 +2001,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
   // -------------------------------------------------------------------------
   // Email Templates  —  /accounts/:accountId/templates
   // -------------------------------------------------------------------------
-
-  app.openapi(route({
-    method: "get",
-    path: "/accounts/{accountId}/templates",
-    tags: ["Templates"],
-    request: { params: z.object({ accountId: z.string() }) },
-    middleware: [authz("templates:read", c => `accounts/${c.req.param("accountId")!}/templates`)] as const,
-    responses: { 200: { content: { "application/json": { schema: ListTemplatesResponse } }, description: "List templates" } },
-  }), async (c) => {
-    const accountId = c.req.param("accountId")!;
-    const templatesResult = await accountDb.listTemplates(accountId);
-    if (templatesResult.isErr()) return err(c, 500, "Internal Server Error");
-    return c.json({ templates: templatesResult.value.map(toApiTemplate) }, 200);
-  });
-
-  app.openapi(route({
-    method: "post",
-    path: "/accounts/{accountId}/templates",
-    tags: ["Templates"],
-    request: { params: z.object({ accountId: z.string() }) },
-    middleware: [authz("templates:write", c => `accounts/${c.req.param("accountId")!}/templates`)] as const,
-    responses: { 201: { content: { "application/json": { schema: EmailTemplateSchema } }, description: "Template created" } },
-  }), async (c) => {
-    const accountId = c.req.param("accountId")!;
-    const body = await zParse(CreateTemplateRequest, c.req.raw);
-    if (body.functions) {
-      if (astValidator) {
-        const astResult = await astValidator.validateAstBatch(body.functions);
-        if (astResult.isErr()) {
-          const e = astResult.error;
-          const message = e.kind === "ast_validation_error" ? e.message : e.message;
-          const location = e.kind === "ast_validation_error" ? e.location : undefined;
-          return err(c, 400, `Invalid code in function: ${message}`, "INVALID_CODE", location ? { location } : undefined);
-        }
-      }
-    }
-    const now = DateTime.utc().toISO()!;
-    // Audit: write functions change event before persisting (best-effort)
-    if (body.functions) {
-      const { userId } = c.get("auth");
-      const templateId = generateId("tpl-");
-      const auditResult = await auditDb.saveAuditEvent({
-        accountId, userId, action: "created", resourceType: "template", resourceId: templateId,
-        before: null, after: { functions: body.functions },
-      });
-      if (auditResult.isErr()) {
-        logger.warn("Audit write failed for template creation, proceeding with resource write", { code: "api.audit.template_create_failed", accountId, error: auditResult.error });
-      }
-      const templateResult = await accountDb.createTemplate({
-        id: templateId, accountId, name: body.name, subject: body.subject, body: body.body,
-        functions: body.functions,
-        createdAt: now, updatedAt: now,
-      });
-      if (templateResult.isErr()) return err(c, 500, "Internal Server Error");
-      return c.json(toApiTemplate(templateResult.value), 201);
-    }
-    const templateResult = await accountDb.createTemplate({
-      id: generateId("tpl-"), accountId, name: body.name, subject: body.subject, body: body.body,
-      createdAt: now, updatedAt: now,
-    });
-    if (templateResult.isErr()) return err(c, 500, "Internal Server Error");
-    return c.json(toApiTemplate(templateResult.value), 201);
-  });
-
-  app.openapi(route({
-    method: "patch",
-    path: "/accounts/{accountId}/templates/{id}",
-    tags: ["Templates"],
-    request: { params: z.object({ accountId: z.string(), id: z.string() }) },
-    middleware: [authz("templates:write", c => `accounts/${c.req.param("accountId")!}/templates/${c.req.param("id")!}`)] as const,
-    responses: { 200: { content: { "application/json": { schema: EmailTemplateSchema } }, description: "Update template" } },
-  }), async (c) => {
-    const accountId = c.req.param("accountId")!;
-    const body = await zParse(UpdateTemplateRequest, c.req.raw);
-    if (body.functions) {
-      if (astValidator) {
-        const astResult = await astValidator.validateAstBatch(body.functions);
-        if (astResult.isErr()) {
-          const e = astResult.error;
-          const message = e.kind === "ast_validation_error" ? e.message : e.message;
-          const location = e.kind === "ast_validation_error" ? e.location : undefined;
-          return err(c, 400, `Invalid code in function: ${message}`, "INVALID_CODE", location ? { location } : undefined);
-        }
-      }
-    }
-    const existingResult = await accountDb.getTemplate(accountId, c.req.param("id")!);
-    if (existingResult.isErr()) return err(c, 500, "Internal Server Error");
-    if (!existingResult.value) return err(c, 404, "Template not found", "TEMPLATE_NOT_FOUND");
-    // Audit: write functions change event before persisting (best-effort)
-    if (body.functions) {
-      const { userId } = c.get("auth");
-      const auditResult = await auditDb.saveAuditEvent({
-        accountId, userId, action: "updated", resourceType: "template", resourceId: c.req.param("id")!,
-        before: { functions: existingResult.value.functions ?? null },
-        after: { functions: body.functions },
-      });
-      if (auditResult.isErr()) {
-        logger.warn("Audit write failed for template update, proceeding with resource write", { code: "api.audit.template_update_failed", accountId, templateId: c.req.param("id")!, error: auditResult.error });
-      }
-    }
-    const updateResult = await accountDb.updateTemplate(accountId, c.req.param("id")!, body as Parameters<typeof accountDb.updateTemplate>[2]);
-    if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
-    return c.json(toApiTemplate(updateResult.value), 200);
-  });
-
-  app.openapi(route({
-    method: "put",
-    path: "/accounts/{accountId}/templates/{id}",
-    tags: ["Templates"],
-    request: { params: z.object({ accountId: z.string(), id: z.string() }) },
-    middleware: [authz("templates:write", c => `accounts/${c.req.param("accountId")!}/templates/${c.req.param("id")!}`)] as const,
-    responses: { 200: { content: { "application/json": { schema: EmailTemplateSchema } }, description: "Replace template" } },
-  }), async (c) => {
-    const accountId = c.req.param("accountId")!;
-    const body = await zParse(ReplaceTemplateRequest, c.req.raw);
-    if (body.functions) {
-      if (astValidator) {
-        const astResult = await astValidator.validateAstBatch(body.functions);
-        if (astResult.isErr()) {
-          const e = astResult.error;
-          const message = e.kind === "ast_validation_error" ? e.message : e.message;
-          const location = e.kind === "ast_validation_error" ? e.location : undefined;
-          return err(c, 400, `Invalid code in function: ${message}`, "INVALID_CODE", location ? { location } : undefined);
-        }
-      }
-    }
-    const existingResult = await accountDb.getTemplate(accountId, c.req.param("id")!);
-    if (existingResult.isErr()) return err(c, 500, "Internal Server Error");
-    if (!existingResult.value) return err(c, 404, "Template not found", "TEMPLATE_NOT_FOUND");
-    // Audit: write functions change event before persisting (best-effort)
-    if (body.functions) {
-      const { userId } = c.get("auth");
-      const auditResult = await auditDb.saveAuditEvent({
-        accountId, userId, action: "updated", resourceType: "template", resourceId: c.req.param("id")!,
-        before: { functions: existingResult.value.functions ?? null },
-        after: { functions: body.functions },
-      });
-      if (auditResult.isErr()) {
-        logger.warn("Audit write failed for template replace, proceeding with resource write", { code: "api.audit.template_replace_failed", accountId, templateId: c.req.param("id")!, error: auditResult.error });
-      }
-    }
-    const updateResult = await accountDb.updateTemplate(accountId, c.req.param("id")!, { name: body.name, subject: body.subject, body: body.body, ...(body.functions ? { functions: body.functions } : {}) });
-    if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
-    return c.json(toApiTemplate(updateResult.value), 200);
-  });
-
-  app.openapi(route({
-    method: "delete",
-    path: "/accounts/{accountId}/templates/{id}",
-    tags: ["Templates"],
-    request: { params: z.object({ accountId: z.string(), id: z.string() }) },
-    middleware: [authz("templates:write", c => `accounts/${c.req.param("accountId")!}/templates/${c.req.param("id")!}`)] as const,
-    responses: { 204: { description: "Template deleted" } },
-  }), async (c) => {
-    const accountId = c.req.param("accountId")!;
-    const existingResult = await accountDb.getTemplate(accountId, c.req.param("id")!);
-    if (existingResult.isErr()) return err(c, 500, "Internal Server Error");
-    if (!existingResult.value) return err(c, 404, "Template not found", "TEMPLATE_NOT_FOUND");
-    const deleteResult = await accountDb.deleteTemplate(accountId, c.req.param("id")!);
-    if (deleteResult.isErr()) return err(c, 500, "Internal Server Error");
-    return new Response(null, { status: 204 });
-  });
-
+  registerTemplatesRoutes(app, { accountDb, auditDb, authz, err, route, astValidator, logger });
 
   // -------------------------------------------------------------------------
   // Verified forwarding addresses  —  /accounts/:accountId/forwarding-addresses
