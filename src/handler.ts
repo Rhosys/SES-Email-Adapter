@@ -106,7 +106,7 @@ const classifier = new SignalClassifier(bedrock, logger);
 
 const embeddingGenerator = new BedrockEmbeddingGenerator(bedrock, logger);
 
-const accountDb = new AccountDatabase();
+const accountDb = new AccountDatabase(logger);
 const arcDb = new ArcDatabase(logger);
 const processingDb = new ProcessingDatabase();
 const auditDb = new AuditDatabase();

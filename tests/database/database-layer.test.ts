@@ -18,7 +18,7 @@ afterEach(() => { ddbMock.restore(); });
 
 describe("AccountDatabase", () => {
   let db: AccountDatabase;
-  beforeEach(() => { db = new AccountDatabase(); });
+  beforeEach(() => { db = new AccountDatabase(createMockLogger()); });
 
   describe("getAccount", () => {
     it("returns ok(Account) when the item exists", async () => {

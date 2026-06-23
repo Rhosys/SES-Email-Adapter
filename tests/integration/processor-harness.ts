@@ -104,7 +104,7 @@ export async function createProcessorHarness(): Promise<ProcessorHarness> {
   await s3.send(new CreateBucketCommand({ Bucket: CONTENT_BUCKET, ...bucketConfig })).catch(() => undefined);
   await sqs.send(new CreateQueueCommand({ QueueName: 'ses-it-signals' })).catch(() => undefined);
 
-  const accountDb = new AccountDatabase();
+  const accountDb = new AccountDatabase(logger);
   const arcDb = new ArcDatabase(logger);
   const auditDb = new AuditDatabase();
   const processingDb = new ProcessingDatabase();

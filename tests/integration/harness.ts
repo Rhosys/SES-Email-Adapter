@@ -57,7 +57,7 @@ export async function createHarness(): Promise<IntegrationHarness> {
 
   // All three databases connect to MiniStack via AWS_ENDPOINT_URL.
   // Tables were provisioned by `tofu apply` before the test runs.
-  const accountDb = new AccountDatabase();
+  const accountDb = new AccountDatabase(logger);
   const arcDb = new ArcDatabase(logger);
   const auditDb = new AuditDatabase();
 
