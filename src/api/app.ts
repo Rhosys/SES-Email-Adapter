@@ -26,7 +26,7 @@ import { validateWebhookConfig } from "./validate-webhook-config.js";
 import type { UserCodeExecutorClient } from "../processor/user-code-client.js";
 import type { BillingHandler } from "../billing/billing-handler.js";
 import type { BillingPlan } from "../embedding/retention-tier.js";
-import { parseStatsRow } from "../database/stats-writer.js";
+import { aggregateStatsRows } from "../database/stats-writer.js";
 import { isValidEmail } from "../email/validate-email.js";
 import type { DraftSendDispatcher } from "../processor/draft-send-dispatcher.js";
 import type { EmailService } from "../email/email-service.js";
@@ -202,8 +202,15 @@ async function ensureAliasExists(accountDb: AccountDatabase, accountId: string, 
   if (filteringResult.isErr()) return neverthrowErr(filteringResult.error);
   const defaultUnknownSenderPolicy = filteringResult.value?.defaultUnknownSenderPolicy ?? "quarantine_visible";
 
-  const aliasResult = await accountDb.ensureAlias(accountId, address, defaultUnknownSenderPolicy);
+  const existingResult = await accountDb.getAlias(accountId, address);
+  if (existingResult.isErr()) return neverthrowErr(existingResult.error);
+  const existed = existingResult.value !== null;
+
+  const aliasResult = await accountDb.ensureAlias(accountId, address, defaultUnknownSenderPolicy, existingResult.value);
   if (aliasResult.isErr()) return neverthrowErr(aliasResult.error);
+  if (!existed) {
+    await accountDb.incrementStatMetric(accountId, "totalAliases", 1);
+  }
   return neverthrowOk(undefined);
 }
 
@@ -270,10 +277,8 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
 
     if (status >= 400) {
       logData["responseBody"] = await c.res.clone().text();
-      logger.warn("RequestLogger", logData);
-    } else {
-      logger.info("RequestLogger", logData);
     }
+    logger.info("RequestLogger", logData);
   });
 
   // CloudFront origin verification — reject requests that bypass CloudFront
@@ -1739,7 +1744,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     const accountId = c.req.param("accountId")!;
     const statsResult = await accountDb.getStats(accountId);
     if (statsResult.isErr()) return err(c, 500, "Internal Server Error");
-    return c.json(parseStatsRow(statsResult.value), 200);
+    return c.json(aggregateStatsRows(statsResult.value), 200);
   });
 
   // -------------------------------------------------------------------------
@@ -1975,6 +1980,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
       updatedAt: now,
     });
     if (createResult.isErr()) return err(c, 500, "Internal Server Error");
+    await accountDb.incrementStatMetric(accountId, "totalAliases", 1);
     return c.json(toApiAlias(createResult.value), 201);
   });
 
@@ -2032,6 +2038,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     const address = decodeURIComponent(c.req.param("address")!).toLowerCase();
     const deleteResult = await accountDb.deleteAlias(accountId, address);
     if (deleteResult.isErr()) return err(c, 500, "Internal Server Error");
+    await accountDb.incrementStatMetric(accountId, "totalAliases", -1);
     return new Response(null, { status: 204 });
   });
 
