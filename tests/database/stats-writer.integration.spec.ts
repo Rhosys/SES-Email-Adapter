@@ -20,6 +20,11 @@ function condCheckFailed(): Error {
   return e;
 }
 
+/** trimHistory GetItem returning short history (no REMOVE needed) */
+function trimHistoryGet() {
+  return { Item: { history: [] } };
+}
+
 describe("stats-writer integration (row-per-day design)", () => {
   const mockSend = dynamo.send as ReturnType<typeof vi.fn>;
   let db: AccountDatabase;
@@ -30,122 +35,152 @@ describe("stats-writer integration (row-per-day design)", () => {
   });
 
   // ---------------------------------------------------------------------------
-  // Three-level conditional write (incrementStats / incrementStatMetric)
+  // Three-level conditional write with idempotency (incrementStats)
   // ---------------------------------------------------------------------------
 
-  describe("incrementStats — three-level fallback", () => {
-    it("step 1 succeeds: UpdateItem with attribute_exists passes (row already exists)", async () => {
-      mockSend.mockResolvedValueOnce({}); // Step 1 succeeds
-
-      const result = await db.incrementStats("acc-test", "allowed");
-
-      expect(result.isOk()).toBe(true);
-      expect(mockSend).toHaveBeenCalledTimes(1);
-      const input = mockSend.mock.calls[0]![0].input;
-      expect(input.ConditionExpression).toBe("attribute_exists(pk)");
-      expect(input.UpdateExpression).toContain("ADD #metric :delta");
-      expect(input.ExpressionAttributeNames["#metric"]).toBe("metrics.allowed");
-      expect(input.ExpressionAttributeValues[":delta"]).toBe(1);
-    });
-
-    it("step 1 fails, step 2 succeeds: PutItem creates the row (first signal of day)", async () => {
+  describe("incrementStats — three-level fallback with idempotency", () => {
+    it("step 1 succeeds: UpdateItem passes (row exists, key not in history)", async () => {
       mockSend
-        .mockRejectedValueOnce(condCheckFailed()) // Step 1 fails
-        .mockResolvedValueOnce({}); // Step 2 succeeds
+        .mockResolvedValueOnce({}) // Step 1 UpdateItem succeeds
+        .mockResolvedValueOnce(trimHistoryGet()); // trimHistory GetItem
 
-      const result = await db.incrementStats("acc-test", "blocked");
+      const result = await db.incrementStats("acc-test", "allowed", "idem-key-1");
 
       expect(result.isOk()).toBe(true);
       expect(mockSend).toHaveBeenCalledTimes(2);
-
-      // Step 2 is a PutCommand
-      const putInput = mockSend.mock.calls[1]![0].input;
-      expect(putInput.ConditionExpression).toBe("attribute_not_exists(pk)");
-      expect(putInput.Item.metrics).toEqual({ blocked: 1 });
-      expect(putInput.Item.ttl).toBeTypeOf("number");
-      expect(putInput.Item.sk).toMatch(/^STATS#\d{4}-\d{2}-\d{2}$/);
+      const input = mockSend.mock.calls[0]![0].input;
+      expect(input.ConditionExpression).toBe("attribute_exists(pk) AND NOT contains(history, :key)");
+      expect(input.UpdateExpression).toContain("ADD #metric :delta");
+      expect(input.UpdateExpression).toContain("list_append(history, :keyList)");
+      expect(input.ExpressionAttributeNames["#metric"]).toBe("metrics.allowed");
+      expect(input.ExpressionAttributeValues[":delta"]).toBe(1);
+      expect(input.ExpressionAttributeValues[":key"]).toBe("idem-key-1");
+      expect(input.ExpressionAttributeValues[":keyList"]).toEqual(["idem-key-1"]);
     });
 
-    it("steps 1+2 fail, step 3 succeeds: race condition resolved by retry", async () => {
+    it("step 1 fails, GetItem shows row exists but key NOT in history → retry UpdateItem succeeds", async () => {
       mockSend
         .mockRejectedValueOnce(condCheckFailed()) // Step 1 fails
-        .mockRejectedValueOnce(condCheckFailed()) // Step 2 fails (race)
-        .mockResolvedValueOnce({}); // Step 3 succeeds
+        .mockResolvedValueOnce({ Item: { history: ["other-key"] } }) // GetItem: row exists, key not in history
+        .mockResolvedValueOnce({}) // Retry UpdateItem succeeds
+        .mockResolvedValueOnce(trimHistoryGet()); // trimHistory GetItem
 
-      const result = await db.incrementStats("acc-test", "quarantined");
+      const result = await db.incrementStats("acc-test", "blocked", "idem-key-2");
+
+      expect(result.isOk()).toBe(true);
+      expect(mockSend).toHaveBeenCalledTimes(4);
+      // Retry UpdateItem has same condition
+      const retryInput = mockSend.mock.calls[2]![0].input;
+      expect(retryInput.ConditionExpression).toBe("attribute_exists(pk) AND NOT contains(history, :key)");
+      expect(retryInput.ExpressionAttributeValues[":key"]).toBe("idem-key-2");
+    });
+
+    it("step 1 fails, GetItem shows key already in history → deduplicated, returns ok", async () => {
+      mockSend
+        .mockRejectedValueOnce(condCheckFailed()) // Step 1 fails
+        .mockResolvedValueOnce({ Item: { history: ["idem-key-dup"] } }); // GetItem: key in history
+
+      const result = await db.incrementStats("acc-test", "allowed", "idem-key-dup");
+
+      expect(result.isOk()).toBe(true);
+      expect(mockSend).toHaveBeenCalledTimes(2); // No further writes
+    });
+
+    it("step 1 fails, GetItem returns no Item → PutItem succeeds (row doesn't exist)", async () => {
+      mockSend
+        .mockRejectedValueOnce(condCheckFailed()) // Step 1 fails
+        .mockResolvedValueOnce({ Item: undefined }) // GetItem: no row
+        .mockResolvedValueOnce({}); // PutItem succeeds
+
+      const result = await db.incrementStats("acc-test", "quarantined", "idem-key-new");
 
       expect(result.isOk()).toBe(true);
       expect(mockSend).toHaveBeenCalledTimes(3);
-
-      // Step 3 is the same UpdateCommand as step 1
-      const retryInput = mockSend.mock.calls[2]![0].input;
-      expect(retryInput.ConditionExpression).toBe("attribute_exists(pk)");
-      expect(retryInput.ExpressionAttributeNames["#metric"]).toBe("metrics.quarantined");
+      // PutItem includes history
+      const putInput = mockSend.mock.calls[2]![0].input;
+      expect(putInput.ConditionExpression).toBe("attribute_not_exists(pk)");
+      expect(putInput.Item.history).toEqual(["idem-key-new"]);
+      expect(putInput.Item.metrics).toEqual({ quarantined: 1 });
+      expect(putInput.Item.ttl).toBeTypeOf("number");
     });
 
-    it("step 1 fails with non-conditional error → returns err immediately", async () => {
-      mockSend.mockRejectedValueOnce(new Error("DDB timeout"));
-
-      const result = await db.incrementStats("acc-test", "allowed");
-
-      expect(result.isErr()).toBe(true);
-      expect(mockSend).toHaveBeenCalledTimes(1); // No fallback
-    });
-
-    it("step 2 fails with non-conditional error → returns err immediately", async () => {
+    it("step 1 fails, GetItem returns no Item, PutItem fails (race) → final retry UpdateItem succeeds", async () => {
       mockSend
         .mockRejectedValueOnce(condCheckFailed()) // Step 1 fails
-        .mockRejectedValueOnce(new Error("DDB throttle")); // Step 2 non-conditional
+        .mockResolvedValueOnce({ Item: undefined }) // GetItem: no row
+        .mockRejectedValueOnce(condCheckFailed()) // PutItem fails (race)
+        .mockResolvedValueOnce({}) // Final retry UpdateItem succeeds
+        .mockResolvedValueOnce(trimHistoryGet()); // trimHistory GetItem
 
-      const result = await db.incrementStats("acc-test", "allowed");
+      const result = await db.incrementStats("acc-test", "allowed", "idem-key-race");
 
-      expect(result.isErr()).toBe(true);
-      expect(mockSend).toHaveBeenCalledTimes(2); // Stops at step 2
+      expect(result.isOk()).toBe(true);
+      expect(mockSend).toHaveBeenCalledTimes(5);
+      // Final retry is UpdateItem with idempotency condition
+      const retryInput = mockSend.mock.calls[3]![0].input;
+      expect(retryInput.ConditionExpression).toBe("attribute_exists(pk) AND NOT contains(history, :key)");
+      expect(retryInput.ExpressionAttributeValues[":key"]).toBe("idem-key-race");
     });
 
-    it("step 3 fails → returns err", async () => {
-      mockSend
-        .mockRejectedValueOnce(condCheckFailed())
-        .mockRejectedValueOnce(condCheckFailed())
-        .mockRejectedValueOnce(new Error("DDB timeout"));
+    it("step 1 fails with non-ConditionalCheckFailed error → returns err immediately", async () => {
+      mockSend.mockRejectedValueOnce(new Error("DDB timeout"));
 
-      const result = await db.incrementStats("acc-test", "allowed");
+      const result = await db.incrementStats("acc-test", "allowed", "idem-key-x");
 
       expect(result.isErr()).toBe(true);
-      expect(mockSend).toHaveBeenCalledTimes(3);
+      expect(mockSend).toHaveBeenCalledTimes(1);
+    });
+
+    it("deduplication: same key already in history → ok returned, no metric increment", async () => {
+      mockSend
+        .mockRejectedValueOnce(condCheckFailed()) // Step 1 fails (key already there)
+        .mockResolvedValueOnce({ Item: { history: ["already-seen"] } }); // GetItem confirms dedup
+
+      const result = await db.incrementStats("acc-test", "allowed", "already-seen");
+
+      expect(result.isOk()).toBe(true);
+      expect(mockSend).toHaveBeenCalledTimes(2); // No further writes after dedup
     });
 
     it("PutItem sets TTL to approximately 5 years from now", async () => {
       mockSend
-        .mockRejectedValueOnce(condCheckFailed())
-        .mockResolvedValueOnce({});
+        .mockRejectedValueOnce(condCheckFailed()) // Step 1 fails
+        .mockResolvedValueOnce({ Item: undefined }) // GetItem: no row
+        .mockResolvedValueOnce({}); // PutItem succeeds
 
-      await db.incrementStats("acc-test", "allowed");
-      const putInput = mockSend.mock.calls[1]![0].input;
+      await db.incrementStats("acc-test", "allowed", "idem-ttl");
+      const putInput = mockSend.mock.calls[2]![0].input;
       const ttl = putInput.Item.ttl as number;
       const fiveYearsFromNow = Math.floor(Date.now() / 1000) + 5 * 365 * 24 * 3600;
-      // Within 2 days tolerance (accounts for leap years and timing)
+      // Within 2 days tolerance
       expect(Math.abs(ttl - fiveYearsFromNow)).toBeLessThan(172800);
     });
   });
 
   // ---------------------------------------------------------------------------
-  // incrementStatMetric — verifies delta and metric forwarding
+  // incrementStatMetric — verifies delta and idempotencyKey forwarding
   // ---------------------------------------------------------------------------
 
   describe("incrementStatMetric", () => {
     it("sends positive delta for totalAliases", async () => {
-      mockSend.mockResolvedValueOnce({});
-      const result = await db.incrementStatMetric("acc-test", "totalAliases", 1);
+      mockSend
+        .mockResolvedValueOnce({}) // UpdateItem succeeds
+        .mockResolvedValueOnce(trimHistoryGet()); // trimHistory
+
+      const result = await db.incrementStatMetric("acc-test", "totalAliases", 1, "idem-pos");
       expect(result.isOk()).toBe(true);
       const input = mockSend.mock.calls[0]![0].input;
       expect(input.ExpressionAttributeNames["#metric"]).toBe("metrics.totalAliases");
       expect(input.ExpressionAttributeValues[":delta"]).toBe(1);
+      expect(input.ExpressionAttributeValues[":key"]).toBe("idem-pos");
     });
 
     it("sends negative delta for totalAliases decrement", async () => {
-      mockSend.mockResolvedValueOnce({});
-      const result = await db.incrementStatMetric("acc-test", "totalAliases", -1);
+      mockSend
+        .mockResolvedValueOnce({}) // UpdateItem succeeds
+        .mockResolvedValueOnce(trimHistoryGet()); // trimHistory
+
+      const result = await db.incrementStatMetric("acc-test", "totalAliases", -1, "idem-neg");
       expect(result.isOk()).toBe(true);
       const input = mockSend.mock.calls[0]![0].input;
       expect(input.ExpressionAttributeValues[":delta"]).toBe(-1);
@@ -153,12 +188,26 @@ describe("stats-writer integration (row-per-day design)", () => {
 
     it("falls through to PutItem when row doesn't exist", async () => {
       mockSend
-        .mockRejectedValueOnce(condCheckFailed())
-        .mockResolvedValueOnce({});
-      const result = await db.incrementStatMetric("acc-test", "totalAliases", 3);
+        .mockRejectedValueOnce(condCheckFailed()) // Step 1 fails
+        .mockResolvedValueOnce({ Item: undefined }) // GetItem: no row
+        .mockResolvedValueOnce({}); // PutItem succeeds
+
+      const result = await db.incrementStatMetric("acc-test", "totalAliases", 3, "idem-put");
       expect(result.isOk()).toBe(true);
-      const putInput = mockSend.mock.calls[1]![0].input;
+      const putInput = mockSend.mock.calls[2]![0].input;
       expect(putInput.Item.metrics).toEqual({ totalAliases: 3 });
+      expect(putInput.Item.history).toEqual(["idem-put"]);
+    });
+
+    it("idempotencyKey is forwarded correctly", async () => {
+      mockSend
+        .mockResolvedValueOnce({}) // UpdateItem succeeds
+        .mockResolvedValueOnce(trimHistoryGet()); // trimHistory
+
+      await db.incrementStatMetric("acc-test", "blocked", 5, "custom-key-123");
+      const input = mockSend.mock.calls[0]![0].input;
+      expect(input.ExpressionAttributeValues[":key"]).toBe("custom-key-123");
+      expect(input.ExpressionAttributeValues[":keyList"]).toEqual(["custom-key-123"]);
     });
   });
 
@@ -167,7 +216,7 @@ describe("stats-writer integration (row-per-day design)", () => {
   // ---------------------------------------------------------------------------
 
   describe("getStats", () => {
-    it("queries with ScanIndexForward=false and reverses result to ascending", async () => {
+    it("queries with ScanIndexForward=false and reverses result to ascending (no fromSk)", async () => {
       const rows: StatsRow[] = [
         { pk: "ACCT#x", sk: "STATS#2026-06-15", metrics: { allowed: 5 }, ttl: 99 },
         { pk: "ACCT#x", sk: "STATS#2026-06-14", metrics: { allowed: 3 }, ttl: 99 },
@@ -188,6 +237,27 @@ describe("stats-writer integration (row-per-day design)", () => {
       const input = mockSend.mock.calls[0]![0].input;
       expect(input.ScanIndexForward).toBe(false);
       expect(input.Limit).toBe(400);
+    });
+
+    it("queries with ScanIndexForward=true when fromSk provided, no reverse", async () => {
+      const rows: StatsRow[] = [
+        { pk: "ACCT#x", sk: "STATS#2026-06-14", metrics: { allowed: 3 }, ttl: 99 },
+        { pk: "ACCT#x", sk: "STATS#2026-06-15", metrics: { allowed: 5 }, ttl: 99 },
+      ];
+      mockSend.mockResolvedValueOnce({ Items: rows });
+
+      const result = await db.getStats("acc-test", "STATS#2026-06-14");
+
+      expect(result.isOk()).toBe(true);
+      if (result.isOk()) {
+        // Not reversed — already ascending
+        expect(result.value[0]!.sk).toBe("STATS#2026-06-14");
+        expect(result.value[1]!.sk).toBe("STATS#2026-06-15");
+      }
+
+      const input = mockSend.mock.calls[0]![0].input;
+      expect(input.ScanIndexForward).toBe(true);
+      expect(input.Limit).toBeUndefined();
     });
 
     it("returns empty array when no stats rows exist", async () => {
@@ -279,7 +349,6 @@ describe("stats-writer integration (row-per-day design)", () => {
     });
 
     it("account with missing current month snapshot uses previous month snapshot", async () => {
-      // It's July, but only May snapshot exists + June & July diffs
       const rows: StatsRow[] = [
         { pk: "ACCT#x", sk: "STATS#2026-07-01", metrics: { allowed: 3 }, ttl: 99 },
         { pk: "ACCT#x", sk: "STATS#2026-06-10", metrics: { allowed: 30, blocked: 5 }, ttl: 99 },

@@ -550,6 +550,7 @@ async function processSqsRecord(
     accountId: accountResult.value,
     s3Key: receipt.action.objectKey,
     sesMessageId: mail.messageId,
+    idempotencyKey: messageId,
     timestamp: mail.timestamp,
     destination: mail.destination,
     dkimVerdict: receipt.dkimVerdict.status,
