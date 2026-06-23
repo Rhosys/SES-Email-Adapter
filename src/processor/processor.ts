@@ -130,6 +130,7 @@ export interface InboundSignalMessage {
   accountId: string;
   s3Key: string;
   sesMessageId: string;
+  idempotencyKey: string;
   timestamp: string;
   destination: string[];
   dkimVerdict: SesVerdict;
@@ -212,7 +213,7 @@ async function applyRules(
       actions.some((a) => a.type === "block_reject")      ? "block_reject"      :
       actions.some((a) => a.type === "block_hidden")      ? "block_hidden"      :
       actions.some((a) => a.type === "quarantine_hidden") ? "quarantine_hidden"  :
-      actions.some((a) => a.type === "quarantine")        ? "quarantine_visible" :
+      actions.some((a) => a.type === "quarantine_visible") ? "quarantine_visible" :
       actions.some((a) => a.type === "archive")           ? "archived"           :
       undefined
     );
@@ -237,7 +238,7 @@ function deriveOutcome(matchedRules: MatchedRuleResult[]): ProcessingOutcome {
         case "block_reject":
           if (!statusSet) { outcome.blockDisposition = "block_reject"; statusSet = true; }
           break;
-        case "quarantine":
+        case "quarantine_visible":
           if (!statusSet) { outcome.quarantine = true; statusSet = true; }
           break;
         case "quarantine_hidden":
@@ -773,7 +774,7 @@ export class SignalProcessor {
   }
 
   private async processMessage(msg: InboundSignalMessage, opts?: { force?: boolean; unsafeSkipDmarc?: boolean; forceSignalId?: string }): Promise<Result<void, DbError | InvalidResponseError>> {
-    const { accountId, s3Key, sesMessageId, timestamp, destination } = msg;
+    const { accountId, s3Key, sesMessageId, idempotencyKey, timestamp, destination } = msg;
 
     // 1. Dedup
     if (!opts?.force) {
@@ -817,7 +818,7 @@ export class SignalProcessor {
       this.logger.track("Blocked email — DKIM or DMARC verification failed.", { code: "processor.dkim_dmarc_block", signal, dkimVerdict: msg.dkimVerdict, dmarcVerdict: msg.dmarcVerdict });
       const dkimCat = statusToCategory(signal.status);
       if (dkimCat) {
-        const statsResult = await this.accountDb.incrementStats(accountId, dkimCat);
+        const statsResult = await this.accountDb.incrementStats(accountId, dkimCat, idempotencyKey);
         if (statsResult.isErr()) {
           this.logger.warn("Stats increment failed — dashboard may be slightly behind.", { code: "processor.stats_increment_failed", signal, error: statsResult.error });
         }
@@ -937,7 +938,7 @@ export class SignalProcessor {
       }
       const senderBlockCat = statusToCategory(blockStatus);
       if (senderBlockCat) {
-        const statsResult = await this.accountDb.incrementStats(accountId, senderBlockCat);
+        const statsResult = await this.accountDb.incrementStats(accountId, senderBlockCat, idempotencyKey);
         if (statsResult.isErr()) {
           this.logger.warn("Stats increment failed — dashboard may be slightly behind.", { code: "processor.stats_increment_failed", signal, error: statsResult.error });
         }
@@ -1140,7 +1141,7 @@ export class SignalProcessor {
       }
       const senderBlockCat = statusToCategory(blockStatus);
       if (senderBlockCat) {
-        const statsResult = await this.accountDb.incrementStats(accountId, senderBlockCat);
+        const statsResult = await this.accountDb.incrementStats(accountId, senderBlockCat, idempotencyKey);
         if (statsResult.isErr()) {
           this.logger.warn("Stats increment failed — dashboard may be slightly behind.", { code: "processor.stats_increment_failed", signal: blockedSignal, arc, error: statsResult.error });
         }
@@ -1210,7 +1211,7 @@ export class SignalProcessor {
       // SR-00: synthetic rule explaining why the unknown sender policy triggered
       if (effectiveFilterMode !== "allow_all") {
         const policySource = aliasConfig ? `alias ${recipientAddress}` : "account default";
-        const ACTION_MAP = { quarantine_visible: "quarantine", quarantine_hidden: "quarantine_hidden", block_hidden: "block_hidden", block_reject: "block_reject", report_violation: "block_reject" } as const;
+        const ACTION_MAP = { quarantine_visible: "quarantine_visible", quarantine_hidden: "quarantine_hidden", block_hidden: "block_hidden", block_reject: "block_reject", report_violation: "block_reject" } as const;
         const sr00StatusChange = outcome.quarantineHidden ? "quarantine_hidden" as const : outcome.quarantine ? "quarantine_visible" as const : outcome.blockDisposition;
         matchedRules.push({
           ruleId: "SR-00",
@@ -1235,7 +1236,7 @@ export class SignalProcessor {
       }
       const blockCat = statusToCategory(outcome.blockDisposition);
       if (blockCat) {
-        const statsResult = await this.accountDb.incrementStats(accountId, blockCat);
+        const statsResult = await this.accountDb.incrementStats(accountId, blockCat, idempotencyKey);
         if (statsResult.isErr()) {
           this.logger.warn("Stats increment failed — dashboard may be slightly behind.", { code: "processor.stats_increment_failed", signal: blockSignal, arc, error: statsResult.error });
         }
@@ -1243,7 +1244,7 @@ export class SignalProcessor {
       return ok(undefined);
     }
 
-    // approveSender overrides quarantine — SR-01 (auto-approve on matched conversation) fires before SR-03
+    // approveSender overrides quarantine — SR-01 (auto-approve on matched conversation) fires before SR-03/SR-04
     if (outcome.quarantine && !outcome.approveSender) {
       const quarantineStatus = outcome.quarantineHidden ? "quarantine_hidden" : "quarantine_visible";
       const quarantineBase = buildSignal({ status: quarantineStatus, ...buildArgs });
@@ -1257,7 +1258,7 @@ export class SignalProcessor {
       }
       const quarantineCat = statusToCategory(quarantineStatus);
       if (quarantineCat) {
-        const statsResult = await this.accountDb.incrementStats(accountId, quarantineCat);
+        const statsResult = await this.accountDb.incrementStats(accountId, quarantineCat, idempotencyKey);
         if (statsResult.isErr()) {
           this.logger.warn("Stats increment failed — dashboard may be slightly behind.", { code: "processor.stats_increment_failed", signal: quarantinedSignal, arc, error: statsResult.error });
         }
@@ -1267,7 +1268,7 @@ export class SignalProcessor {
 
     // Auto-approve: sender gets added to approvedSenders when approve_sender fires, allow_all mode, or brand-new address with auto-allow policy
     if (outcome.approveSender || effectiveFilterMode === "allow_all") {
-      const approveResult = await this.autoApprove(accountId, recipientAddress, senderETLD1, aliasConfig, accountCtx.filtering?.defaultUnknownSenderPolicy);
+      const approveResult = await this.autoApprove(accountId, recipientAddress, senderETLD1, aliasConfig, accountCtx.filtering?.defaultUnknownSenderPolicy, idempotencyKey);
       if (approveResult.isErr()) return err(approveResult.error);
     }
 
@@ -1350,7 +1351,7 @@ export class SignalProcessor {
 
     const allowedCat = statusToCategory(signal.status);
     if (allowedCat) {
-      const statsResult = await this.accountDb.incrementStats(accountId, allowedCat);
+      const statsResult = await this.accountDb.incrementStats(accountId, allowedCat, idempotencyKey);
       if (statsResult.isErr()) {
         this.logger.warn("Stats increment failed — dashboard may be slightly behind.", { code: "processor.stats_increment_failed", signal, arc, error: statsResult.error });
       }
@@ -1649,14 +1650,14 @@ export class SignalProcessor {
     }
 
     // Inject forwardCalendarInvite action into the signal's matchedRules so the
-    // side-effect handler triggers forwarding. The system rule (SR-18) won't match
+    // side-effect handler triggers forwarding. The system rule (SR-19) won't match
     // on the first signal because the label is applied after rule evaluation.
     const existingRules = signal.data.matchedRules ?? [];
     const hasCalendarForward = existingRules.some(r => r.actions.some(a => a.type === "forwardCalendarInvite"));
     if (!hasCalendarForward) {
       signal.data.matchedRules = [
         ...existingRules,
-        { ruleId: "SR-18", actions: [{ type: "forwardCalendarInvite" }], labelsAdded: [] },
+        { ruleId: "SR-19", actions: [{ type: "forwardCalendarInvite" }], labelsAdded: [] },
       ];
     }
 
@@ -1686,6 +1687,7 @@ export class SignalProcessor {
       accountId,
       s3Key,
       sesMessageId,
+      idempotencyKey: existing.id,
       timestamp,
       destination: [recipientAddress],
       dkimVerdict: "PASS",
@@ -1708,11 +1710,12 @@ export class SignalProcessor {
     senderETLD1: string,
     existing: Alias | null,
     defaultUnknownSenderPolicy: AccountFilteringConfig["defaultUnknownSenderPolicy"] = "quarantine_visible",
+    idempotencyKey: string,
   ): Promise<Result<void, DbError>> {
     const aliasResult = await this.accountDb.ensureAlias(accountId, address, defaultUnknownSenderPolicy, existing);
     if (aliasResult.isErr()) return err(aliasResult.error);
     if (!existing) {
-      await this.accountDb.incrementStatMetric(accountId, "totalAliases", 1);
+      await this.accountDb.incrementStatMetric(accountId, "totalAliases", 1, idempotencyKey + ".alias");
     }
     const senderResult = await this.accountDb.saveSender(accountId, address, senderETLD1, "allow");
     if (senderResult.isErr()) return err(senderResult.error);

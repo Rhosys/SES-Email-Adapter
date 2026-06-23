@@ -35,7 +35,7 @@ export const SenderPolicy = z.enum(["allow", "block_hidden", "block_reject", "re
 
 export const RuleActionType = z.enum([
   "assign_label", "assign_workflow", "archive", "forward",
-  "block_hidden", "block_reject", "quarantine", "quarantine_hidden",
+  "block_hidden", "block_reject", "quarantine_visible", "quarantine_hidden",
   "set_urgency", "suppress_notification", "pong", "approve_sender",
   "auto_draft", "webhook", "forwardCalendarInvite",
 ]);
