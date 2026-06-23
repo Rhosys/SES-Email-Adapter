@@ -107,6 +107,7 @@ describe("Blocked/quarantined signals never trigger saveArc", () => {
       accountId: TEST_ACCOUNT_ID,
       s3Key: `emails/${sesMessageId}`,
       sesMessageId,
+      idempotencyKey: "test-idempotency-key",
       timestamp: "2024-01-15T10:00:00Z",
       destination: ["user@example.com"],
       dkimVerdict: "PASS",
@@ -184,7 +185,7 @@ describe("Blocked/quarantined signals never trigger saveArc", () => {
       aliasSenderConfig: { accountId: TEST_ACCOUNT_ID, aliasAddress: "user@example.com", domain: "example.com", alias: "user", senderDomain: "example.com", policy: "allow", addedAt: "2024-01-01T00:00:00Z" },
       rules: [{
         id: "custom-quarantine", accountId: TEST_ACCOUNT_ID, name: "Quarantine all",
-        condition: "true", actions: [{ type: "quarantine" }], status: "enabled",
+        condition: "true", actions: [{ type: "quarantine_visible" }], status: "enabled",
         priorityOrder: 0, createdAt: "2024-01-01T00:00:00Z", updatedAt: "2024-01-01T00:00:00Z",
       }],
     },

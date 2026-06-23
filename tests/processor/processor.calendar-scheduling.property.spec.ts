@@ -125,6 +125,7 @@ function makeMessage(sesMessageId: string): InboundSignalMessage {
     accountId: TEST_ACCOUNT_ID,
     s3Key: `emails/${sesMessageId}`,
     sesMessageId,
+    idempotencyKey: "test-idempotency-key",
     timestamp: "2024-01-15T10:00:00Z",
     destination: ["user@example.com"],
     dkimVerdict: "PASS",

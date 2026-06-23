@@ -46,6 +46,7 @@ describe("ProcessError on database failure", () => {
       accountId: "acct-test",
       s3Key: "emails/ses-msg-1",
       sesMessageId: "ses-msg-1",
+      idempotencyKey: "test-idempotency-key",
       timestamp: "2024-01-15T10:00:00Z",
       destination: ["u@x.com"],
       dkimVerdict: "PASS",

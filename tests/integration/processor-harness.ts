@@ -246,6 +246,7 @@ export async function createProcessorHarness(): Promise<ProcessorHarness> {
       accountId: inner.accountId ?? inner.mail.destination[0]!,
       s3Key: inner.receipt.action.objectKey,
       sesMessageId: inner.mail.messageId,
+      idempotencyKey: inner.mail.messageId,
       timestamp: inner.mail.timestamp,
       destination: inner.mail.destination,
       dkimVerdict: inner.receipt.dkimVerdict.status,

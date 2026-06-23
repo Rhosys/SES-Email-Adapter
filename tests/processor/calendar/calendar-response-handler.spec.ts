@@ -48,6 +48,7 @@ function makeMessage(destination: string[]): InboundSignalMessage {
     accountId: VALID_ACC_ID,
     s3Key: "emails/test.eml",
     sesMessageId: "ses-msg-001",
+    idempotencyKey: "test-idempotency-key",
     timestamp: "2025-03-15T10:00:00Z",
     destination,
     dkimVerdict: "PASS",
