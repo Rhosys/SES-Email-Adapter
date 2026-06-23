@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mockClient } from "aws-sdk-client-mock";
 import { DynamoDBDocumentClient, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { AccountDatabase } from "../../src/database/account-database.js";
+import { createMockLogger } from "../helpers/mock-logger.js";
 
 const ddbMock = mockClient(DynamoDBDocumentClient);
 
@@ -10,7 +11,7 @@ afterEach(() => { ddbMock.restore(); });
 
 describe("AccountDatabase.updateAccount – digest PATCH semantics", () => {
   let db: AccountDatabase;
-  beforeEach(() => { db = new AccountDatabase(); });
+  beforeEach(() => { db = new AccountDatabase(createMockLogger()); });
 
   it("digest undefined → no-op (digest field unchanged)", async () => {
     const returned = { id: "acct-1", name: "Test", digest: { frequency: "daily", forwardingTargetId: "fwd-1" } };
@@ -67,7 +68,6 @@ import type { AuditDatabase } from "../../src/database/audit-database.js";
 import type { EmailService } from "../../src/email/email-service.js";
 import type { sendRsvp } from "../../src/processor/calendar/rsvp-composer.js";
 import type { PostApprovalCalendarHandlerDeps } from "../../src/processor/calendar/post-approval-handler.js";
-import { createMockLogger } from "../helpers/mock-logger.js";
 import { BillingHandler } from "../../src/billing/billing-handler.js";
 
 vi.mock("../../src/dns/mx-validator.js", () => ({

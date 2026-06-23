@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { AccountDatabase } from "../../src/database/account-database.js";
 import { aggregateStatsRows, buildDiffSk, buildSnapshotSk } from "../../src/database/stats-writer.js";
 import type { StatsRow, StatsMetric } from "../../src/database/stats-writer.js";
+import { createMockLogger } from "../helpers/mock-logger.js";
 
 // Mock the DynamoDB shared module
 vi.mock("../../src/database/shared.js", () => ({
@@ -31,20 +32,20 @@ describe("stats-writer integration (row-per-day design)", () => {
 
   beforeEach(() => {
     mockSend.mockReset();
-    db = new AccountDatabase();
+    db = new AccountDatabase(createMockLogger());
   });
 
   // ---------------------------------------------------------------------------
-  // Three-level conditional write with idempotency (incrementStats)
+  // Three-level conditional write with idempotency (incrementStatMetric)
   // ---------------------------------------------------------------------------
 
-  describe("incrementStats — three-level fallback with idempotency", () => {
+  describe("incrementStatMetric — three-level fallback with idempotency", () => {
     it("step 1 succeeds: UpdateItem passes (row exists, key not in history)", async () => {
       mockSend
         .mockResolvedValueOnce({}) // Step 1 UpdateItem succeeds
         .mockResolvedValueOnce(trimHistoryGet()); // trimHistory GetItem
 
-      const result = await db.incrementStats("acc-test", "allowed", "idem-key-1");
+      const result = await db.incrementStatMetric("acc-test", "allowed", 1, "idem-key-1");
 
       expect(result.isOk()).toBe(true);
       expect(mockSend).toHaveBeenCalledTimes(2);
@@ -65,7 +66,7 @@ describe("stats-writer integration (row-per-day design)", () => {
         .mockResolvedValueOnce({}) // Retry UpdateItem succeeds
         .mockResolvedValueOnce(trimHistoryGet()); // trimHistory GetItem
 
-      const result = await db.incrementStats("acc-test", "blocked", "idem-key-2");
+      const result = await db.incrementStatMetric("acc-test", "blocked", 1, "idem-key-2");
 
       expect(result.isOk()).toBe(true);
       expect(mockSend).toHaveBeenCalledTimes(4);
@@ -80,7 +81,7 @@ describe("stats-writer integration (row-per-day design)", () => {
         .mockRejectedValueOnce(condCheckFailed()) // Step 1 fails
         .mockResolvedValueOnce({ Item: { history: ["idem-key-dup"] } }); // GetItem: key in history
 
-      const result = await db.incrementStats("acc-test", "allowed", "idem-key-dup");
+      const result = await db.incrementStatMetric("acc-test", "allowed", 1, "idem-key-dup");
 
       expect(result.isOk()).toBe(true);
       expect(mockSend).toHaveBeenCalledTimes(2); // No further writes
@@ -92,7 +93,7 @@ describe("stats-writer integration (row-per-day design)", () => {
         .mockResolvedValueOnce({ Item: undefined }) // GetItem: no row
         .mockResolvedValueOnce({}); // PutItem succeeds
 
-      const result = await db.incrementStats("acc-test", "quarantined", "idem-key-new");
+      const result = await db.incrementStatMetric("acc-test", "quarantined", 1, "idem-key-new");
 
       expect(result.isOk()).toBe(true);
       expect(mockSend).toHaveBeenCalledTimes(3);
@@ -112,7 +113,7 @@ describe("stats-writer integration (row-per-day design)", () => {
         .mockResolvedValueOnce({}) // Final retry UpdateItem succeeds
         .mockResolvedValueOnce(trimHistoryGet()); // trimHistory GetItem
 
-      const result = await db.incrementStats("acc-test", "allowed", "idem-key-race");
+      const result = await db.incrementStatMetric("acc-test", "allowed", 1, "idem-key-race");
 
       expect(result.isOk()).toBe(true);
       expect(mockSend).toHaveBeenCalledTimes(5);
@@ -125,7 +126,7 @@ describe("stats-writer integration (row-per-day design)", () => {
     it("step 1 fails with non-ConditionalCheckFailed error → returns err immediately", async () => {
       mockSend.mockRejectedValueOnce(new Error("DDB timeout"));
 
-      const result = await db.incrementStats("acc-test", "allowed", "idem-key-x");
+      const result = await db.incrementStatMetric("acc-test", "allowed", 1, "idem-key-x");
 
       expect(result.isErr()).toBe(true);
       expect(mockSend).toHaveBeenCalledTimes(1);
@@ -136,7 +137,7 @@ describe("stats-writer integration (row-per-day design)", () => {
         .mockRejectedValueOnce(condCheckFailed()) // Step 1 fails (key already there)
         .mockResolvedValueOnce({ Item: { history: ["already-seen"] } }); // GetItem confirms dedup
 
-      const result = await db.incrementStats("acc-test", "allowed", "already-seen");
+      const result = await db.incrementStatMetric("acc-test", "allowed", 1, "already-seen");
 
       expect(result.isOk()).toBe(true);
       expect(mockSend).toHaveBeenCalledTimes(2); // No further writes after dedup
@@ -148,7 +149,7 @@ describe("stats-writer integration (row-per-day design)", () => {
         .mockResolvedValueOnce({ Item: undefined }) // GetItem: no row
         .mockResolvedValueOnce({}); // PutItem succeeds
 
-      await db.incrementStats("acc-test", "allowed", "idem-ttl");
+      await db.incrementStatMetric("acc-test", "allowed", 1, "idem-ttl");
       const putInput = mockSend.mock.calls[2]![0].input;
       const ttl = putInput.Item.ttl as number;
       const fiveYearsFromNow = Math.floor(Date.now() / 1000) + 5 * 365 * 24 * 3600;

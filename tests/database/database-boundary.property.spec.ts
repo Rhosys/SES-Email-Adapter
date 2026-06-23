@@ -34,7 +34,7 @@ describe("Property 1: Database boundary completeness", () => {
     ddbMock.reset();
     ddbMock.rejectsOnce(sdkError);
 
-    const db = new AccountDatabase();
+    const db = new AccountDatabase(createMockLogger());
     const result = await db.getAccount("any-account-id");
 
     expect(result.isOk() || result.isErr()).toBe(true);
@@ -48,7 +48,7 @@ describe("Property 1: Database boundary completeness", () => {
     ddbMock.reset();
     ddbMock.rejectsOnce(sdkError);
 
-    const db = new AccountDatabase();
+    const db = new AccountDatabase(createMockLogger());
     const result = await db.listAliases("any-account-id");
 
     expect(result.isOk() || result.isErr()).toBe(true);
@@ -161,7 +161,7 @@ describe("Property 1: Database boundary completeness", () => {
     ddbMock.reset();
     ddbMock.resolves({ Item: undefined, Items: [] });
 
-    const accountDb = new AccountDatabase();
+    const accountDb = new AccountDatabase(createMockLogger());
     const arcDb = new ArcDatabase(createMockLogger());
     const processingDb = new ProcessingDatabase();
     const auditDb = new AuditDatabase();

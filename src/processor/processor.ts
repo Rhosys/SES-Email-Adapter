@@ -818,7 +818,7 @@ export class SignalProcessor {
       this.logger.track("Blocked email — DKIM or DMARC verification failed.", { code: "processor.dkim_dmarc_block", signal, dkimVerdict: msg.dkimVerdict, dmarcVerdict: msg.dmarcVerdict });
       const dkimCat = statusToCategory(signal.status);
       if (dkimCat) {
-        const statsResult = await this.accountDb.incrementStats(accountId, dkimCat, idempotencyKey);
+        const statsResult = await this.accountDb.incrementStatMetric(accountId, dkimCat, 1, idempotencyKey);
         if (statsResult.isErr()) {
           this.logger.warn("Stats increment failed — dashboard may be slightly behind.", { code: "processor.stats_increment_failed", signal, error: statsResult.error });
         }
@@ -938,7 +938,7 @@ export class SignalProcessor {
       }
       const senderBlockCat = statusToCategory(blockStatus);
       if (senderBlockCat) {
-        const statsResult = await this.accountDb.incrementStats(accountId, senderBlockCat, idempotencyKey);
+        const statsResult = await this.accountDb.incrementStatMetric(accountId, senderBlockCat, 1, idempotencyKey);
         if (statsResult.isErr()) {
           this.logger.warn("Stats increment failed — dashboard may be slightly behind.", { code: "processor.stats_increment_failed", signal, error: statsResult.error });
         }
@@ -1141,7 +1141,7 @@ export class SignalProcessor {
       }
       const senderBlockCat = statusToCategory(blockStatus);
       if (senderBlockCat) {
-        const statsResult = await this.accountDb.incrementStats(accountId, senderBlockCat, idempotencyKey);
+        const statsResult = await this.accountDb.incrementStatMetric(accountId, senderBlockCat, 1, idempotencyKey);
         if (statsResult.isErr()) {
           this.logger.warn("Stats increment failed — dashboard may be slightly behind.", { code: "processor.stats_increment_failed", signal: blockedSignal, arc, error: statsResult.error });
         }
@@ -1236,7 +1236,7 @@ export class SignalProcessor {
       }
       const blockCat = statusToCategory(outcome.blockDisposition);
       if (blockCat) {
-        const statsResult = await this.accountDb.incrementStats(accountId, blockCat, idempotencyKey);
+        const statsResult = await this.accountDb.incrementStatMetric(accountId, blockCat, 1, idempotencyKey);
         if (statsResult.isErr()) {
           this.logger.warn("Stats increment failed — dashboard may be slightly behind.", { code: "processor.stats_increment_failed", signal: blockSignal, arc, error: statsResult.error });
         }
@@ -1258,7 +1258,7 @@ export class SignalProcessor {
       }
       const quarantineCat = statusToCategory(quarantineStatus);
       if (quarantineCat) {
-        const statsResult = await this.accountDb.incrementStats(accountId, quarantineCat, idempotencyKey);
+        const statsResult = await this.accountDb.incrementStatMetric(accountId, quarantineCat, 1, idempotencyKey);
         if (statsResult.isErr()) {
           this.logger.warn("Stats increment failed — dashboard may be slightly behind.", { code: "processor.stats_increment_failed", signal: quarantinedSignal, arc, error: statsResult.error });
         }
@@ -1351,7 +1351,7 @@ export class SignalProcessor {
 
     const allowedCat = statusToCategory(signal.status);
     if (allowedCat) {
-      const statsResult = await this.accountDb.incrementStats(accountId, allowedCat, idempotencyKey);
+      const statsResult = await this.accountDb.incrementStatMetric(accountId, allowedCat, 1, idempotencyKey);
       if (statsResult.isErr()) {
         this.logger.warn("Stats increment failed — dashboard may be slightly behind.", { code: "processor.stats_increment_failed", signal, arc, error: statsResult.error });
       }

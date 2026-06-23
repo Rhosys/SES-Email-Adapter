@@ -9,6 +9,7 @@ import { SYSTEM_RULES } from "../processor/system-rules.js";
 import type { CreateViewRequest, UpdateViewRequest, CreateLabelRequest, UpdateLabelRequest, CreateRuleRequest, UpdateRuleRequest } from "../api/app.js";
 import { buildDiffUpdateParams, buildDiffPutParams, buildSnapshotSk } from "./stats-writer.js";
 import type { StatsMetric, StatsRow } from "./stats-writer.js";
+import type { Logger } from "../logger.js";
 
 // ---------------------------------------------------------------------------
 // Key helpers
@@ -35,6 +36,12 @@ function ruleGsi1sk(status: RuleStatus, priorityOrder: number, id: string) {
 // ---------------------------------------------------------------------------
 
 export class AccountDatabase {
+  private readonly logger: Logger;
+
+  constructor(logger: Logger) {
+    this.logger = logger;
+  }
+
   // ---------------------------------------------------------------------------
   // Account
   // ---------------------------------------------------------------------------
@@ -1159,6 +1166,7 @@ export class AccountDatabase {
       return ok(undefined);
     } catch (e) {
       if (!(e instanceof Error && e.name === "ConditionalCheckFailedException")) {
+        this.logger.warn("writeDiffMetric step 1 failed with unexpected error", { code: "account_db.write_diff_metric_step1_error", accountId, metric, delta, idempotencyKey, error: e });
         return err(dbError(e));
       }
     }
@@ -1173,8 +1181,12 @@ export class AccountDatabase {
       if (existing.Item) {
         // Row exists — check if key is already in history (deduplicated)
         const history = (existing.Item["history"] as string[] | undefined) ?? [];
-        if (history.includes(idempotencyKey)) return ok(undefined);
+        if (history.includes(idempotencyKey)) {
+          this.logger.info("writeDiffMetric deduplicated — key already in history", { code: "account_db.write_diff_metric_dedup", accountId, metric, idempotencyKey });
+          return ok(undefined);
+        }
         // Key not in history — unexpected condition failure, retry update
+        this.logger.info("writeDiffMetric step 2 retry — row exists but key not in history", { code: "account_db.write_diff_metric_step2_retry", accountId, metric, delta, idempotencyKey });
         try {
           await dynamo.send(new UpdateCommand({
             ...updateParams,
@@ -1190,14 +1202,17 @@ export class AccountDatabase {
           return ok(undefined);
         } catch (retryErr) {
           if (retryErr instanceof Error && retryErr.name === "ConditionalCheckFailedException") return ok(undefined);
+          this.logger.warn("writeDiffMetric step 2 retry failed", { code: "account_db.write_diff_metric_step2_retry_error", accountId, metric, delta, idempotencyKey, error: retryErr });
           return err(dbError(retryErr));
         }
       }
     } catch (e) {
+      this.logger.warn("writeDiffMetric step 2 GetItem failed", { code: "account_db.write_diff_metric_step2_get_error", accountId, metric, delta, idempotencyKey, error: e });
       return err(dbError(e));
     }
 
     // Row doesn't exist — create it with history seeded
+    this.logger.info("writeDiffMetric step 3 — creating new diff row", { code: "account_db.write_diff_metric_step3_put", accountId, metric, delta, idempotencyKey });
     try {
       await dynamo.send(new PutCommand({
         ...putParams,
@@ -1206,11 +1221,13 @@ export class AccountDatabase {
       return ok(undefined);
     } catch (e) {
       if (!(e instanceof Error && e.name === "ConditionalCheckFailedException")) {
+        this.logger.warn("writeDiffMetric step 3 PutItem failed", { code: "account_db.write_diff_metric_step3_put_error", accountId, metric, delta, idempotencyKey, error: e });
         return err(dbError(e));
       }
     }
 
     // Race: another Lambda created it — retry update
+    this.logger.info("writeDiffMetric step 3 race — retrying update after PutItem conflict", { code: "account_db.write_diff_metric_step3_race_retry", accountId, metric, delta, idempotencyKey });
     try {
       await dynamo.send(new UpdateCommand({
         ...updateParams,
@@ -1226,6 +1243,7 @@ export class AccountDatabase {
       return ok(undefined);
     } catch (e) {
       if (e instanceof Error && e.name === "ConditionalCheckFailedException") return ok(undefined);
+      this.logger.warn("writeDiffMetric step 3 race retry failed", { code: "account_db.write_diff_metric_step3_race_error", accountId, metric, delta, idempotencyKey, error: e });
       return err(dbError(e));
     }
   }
@@ -1251,10 +1269,6 @@ export class AccountDatabase {
     } catch {
       // Fire-and-forget — trim failure is non-critical
     }
-  }
-
-  async incrementStats(accountId: string, category: StatsMetric, idempotencyKey: string): Promise<Result<void, DbError>> {
-    return this.writeDiffMetric(accountId, category, 1, idempotencyKey);
   }
 
   async incrementStatMetric(accountId: string, metric: StatsMetric, delta: number, idempotencyKey: string): Promise<Result<void, DbError>> {
