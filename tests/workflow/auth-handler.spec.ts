@@ -227,7 +227,7 @@ describe("AuthWorkflowHandler", () => {
     expect(result.isOk()).toBe(true);
     expect(mocks.logger.warn).toHaveBeenCalledWith(
       "Failed to archive auth arc after OTP push",
-      expect.objectContaining({ code: "workflow.auth.archive_failed", accountId: "acc-1", arcId: "arc-test-001" }),
+      expect.objectContaining({ code: "workflow.auth.archive_failed", signal, arc: stubArc }),
     );
   });
 });

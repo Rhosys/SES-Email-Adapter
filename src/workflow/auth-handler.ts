@@ -43,7 +43,7 @@ export class AuthWorkflowHandler implements WorkflowHandler {
     const archiveResult = await this.arcDatabase.updateArc(accountId, arc.id, "archived", arc.lastSignalAt, {});
     if (archiveResult.isErr()) {
       this.logger.warn("Failed to archive auth arc after OTP push", {
-        code: "workflow.auth.archive_failed", accountId, arcId: arc.id, error: archiveResult.error,
+        code: "workflow.auth.archive_failed", signal, arc, error: archiveResult.error,
       });
     }
 
