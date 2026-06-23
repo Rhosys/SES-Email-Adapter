@@ -80,6 +80,19 @@ Select from the provided list only. The user message includes an "Available labe
 
 For workflowData fields: extract only what is explicitly present in the email with high confidence. Omit optional fields rather than guess. If a value cannot be determined with certainty, leave it out.`);
 
+  // Language rules
+  sections.push(`## Language
+
+Classification rules apply regardless of email language. An OTP email in German is still workflow:"auth". A shipping notification in Japanese is still workflow:"package".
+
+Output constraints:
+- "workflow" must be one of the English workflow names defined above.
+- "workflowData" enum values must match the English enum values defined above (e.g. "otp", "shipping", "welcome") — never translated equivalents.
+- "workflowData" free-text fields (service, retailer, company names, etc.) should preserve the original language from the email.
+- "tags" must be from the English tag vocabulary above.
+- "labels" must match the provided allowedLabels list exactly as given — these may be in any language.
+- "summary" should be written in the same language as the email body.`);
+
   return sections.join("\n\n");
 }
 

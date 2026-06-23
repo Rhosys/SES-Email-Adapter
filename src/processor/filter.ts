@@ -40,5 +40,10 @@ export function assignSystemLabels(ctx: SystemLabelContext): SystemLabel[] {
     labels.push("system:auth:security_alert");
   }
 
+  const wd = ctx.workflowData as unknown as Record<string, unknown>;
+  if ("actionUrl" in wd && typeof wd.actionUrl === "string" && wd.actionUrl) {
+    labels.push("system:action");
+  }
+
   return labels;
 }

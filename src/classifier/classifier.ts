@@ -165,9 +165,22 @@ export class SignalClassifier {
       ? raw.labels.filter((l) => input.allowedLabels.includes(l))
       : [];
 
+    // Sanitize URL fields in workflowData — nullify non-URL values
+    const urlFields = ["actionUrl", "trackingUrl", "downloadUrl", "managementUrl", "paymentUrl", "documentUrl", "portalUrl", "responseUrl", "ticketUrl"] as const;
+    const workflowData = { ...raw.workflowData } as Record<string, unknown>;
+    for (const field of urlFields) {
+      if (field in workflowData && typeof workflowData[field] === "string") {
+        const value = workflowData[field] as string;
+        if (!isValidUrl(value)) {
+          this.logger.track("Classifier returned non-URL value for URL field — nullified.", { code: "classifier.invalid_url_field", field, value, signalId: input.signalId, accountId: input.accountId, workflow: raw.workflow });
+          workflowData[field] = null;
+        }
+      }
+    }
+
     return ok({
       workflow: raw.workflow as Workflow,
-      workflowData: raw.workflowData as unknown as WorkflowData,
+      workflowData: workflowData as unknown as WorkflowData,
       tags,
       summary: raw.summary,
       labels,
@@ -202,5 +215,14 @@ export class SignalClassifier {
         });
       }
     }
+  }
+}
+
+function isValidUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
   }
 }
