@@ -1116,7 +1116,6 @@ export class SignalProcessor {
         updatedAt: now,
         ...(ttl !== undefined ? { ttl } : {}),
       };
-      this.logger.info("New arc created.", { code: "processor.arc_created", arcId: arc.id, accountId, sesMessageId, ...(groupingKey ? { groupingKey } : {}) });
     }
 
     // 8. Assign system labels and merge classifier labels
@@ -1338,6 +1337,7 @@ export class SignalProcessor {
       if (outcome.archive) arc.status = "archived";
       const saveArcResult = await this.arcDb.saveArc(arc);
       if (saveArcResult.isErr()) return err(saveArcResult.error);
+      this.logger.info("New arc created.", { code: "processor.arc_created", arcId: arc.id, accountId, signalId: signal.id, sesMessageId, ...(groupingKey ? { groupingKey } : {}) });
     }
     this.logger.trackPoint("arc_saved", { arcId: arc.id });
 
