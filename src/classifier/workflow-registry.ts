@@ -23,7 +23,7 @@ export const WORKFLOW_REGISTRY: WorkflowDefinition[] = [
       { name: "code", type: "string", required: false },
       { name: "expiresInMinutes", type: "number", required: false },
       { name: "service", type: "string", required: true },
-      { name: "actionUrl", type: "string", required: false },
+      { name: "actionUrl", type: "string", required: false, notes: "Full URL (https://...) the user must click. Extract only actual URLs, never descriptive text like 'Click the link below'." },
     ],
   },
   {
@@ -100,7 +100,7 @@ export const WORKFLOW_REGISTRY: WorkflowDefinition[] = [
       { name: "service", type: "string", required: true },
       { name: "severity", type: "enum", required: false, enumValues: ["info", "warning", "critical"] },
       { name: "requiresAction", type: "boolean", required: true },
-      { name: "actionUrl", type: "string", required: false },
+      { name: "actionUrl", type: "string", required: false, notes: "Full URL (https://...) the user must click. Extract only actual URLs, never descriptive text." },
       { name: "ipAddress", type: "string", required: false },
       { name: "location", type: "string", required: false },
       { name: "deviceName", type: "string", required: false },
@@ -126,7 +126,7 @@ export const WORKFLOW_REGISTRY: WorkflowDefinition[] = [
     fields: [
       { name: "onboardingType", type: "enum", required: true, enumValues: ["welcome", "verification", "getting_started", "trial_started", "other"] },
       { name: "service", type: "string", required: true },
-      { name: "actionUrl", type: "string", required: false },
+      { name: "actionUrl", type: "string", required: false, notes: "Full URL (https://...) the user must click. Extract only actual URLs, never descriptive text." },
     ],
   },
   {
@@ -164,7 +164,7 @@ export const WORKFLOW_REGISTRY: WorkflowDefinition[] = [
       { name: "salary", type: "string", required: false },
       { name: "interviewDate", type: "string", required: false },
       { name: "applicationStatus", type: "enum", required: false, enumValues: ["submitted", "reviewing", "interview", "offer", "rejected"] },
-      { name: "actionUrl", type: "string", required: false },
+      { name: "actionUrl", type: "string", required: false, notes: "Full URL (https://...) the user must click. Extract only actual URLs, never descriptive text." },
       { name: "contactName", type: "string", required: false },
       { name: "contactEmail", type: "string", required: false },
     ],

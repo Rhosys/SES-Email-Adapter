@@ -620,6 +620,7 @@ export type SystemLabel =
   | "system:replied"
   | "system:test"
   | "system:auth:security_alert"
+  | "system:action"
   | "system:calendar";
 
 export interface RuleAction {
