@@ -197,7 +197,7 @@ function withAttachmentUrls<T extends AnySignal>(signal: T, cdnBase: string): T 
 
 // Mirrors processor.ts's autoApprove — a sender disposition recorded for an address
 // implies that address is a recognised alias, so the Alias record must exist alongside it.
-async function ensureAliasExists(accountDb: AccountDatabase, accountId: string, address: string): Promise<Result<void, DbError>> {
+async function ensureAliasExists(accountDb: AccountDatabase, accountId: string, address: string, idempotencyKey: string): Promise<Result<void, DbError>> {
   const filteringResult = await accountDb.getAccountFilteringConfig(accountId);
   if (filteringResult.isErr()) return neverthrowErr(filteringResult.error);
   const defaultUnknownSenderPolicy = filteringResult.value?.defaultUnknownSenderPolicy ?? "quarantine_visible";
@@ -209,7 +209,7 @@ async function ensureAliasExists(accountDb: AccountDatabase, accountId: string, 
   const aliasResult = await accountDb.ensureAlias(accountId, address, defaultUnknownSenderPolicy, existingResult.value);
   if (aliasResult.isErr()) return neverthrowErr(aliasResult.error);
   if (!existed) {
-    await accountDb.incrementStatMetric(accountId, "totalAliases", 1);
+    await accountDb.incrementStatMetric(accountId, "totalAliases", 1, idempotencyKey);
   }
   return neverthrowOk(undefined);
 }
@@ -802,7 +802,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
         const senderDomain = signal.data.from.address.includes("@") ? signal.data.from.address.split("@").pop()! : signal.data.from.address;
         const senderETLD1 = getDomain(senderDomain) ?? senderDomain;
         const recipientAddress = signal.data.recipientAddress;
-        const ensureAliasResult = await ensureAliasExists(accountDb, accountId, recipientAddress);
+        const ensureAliasResult = await ensureAliasExists(accountDb, accountId, recipientAddress, signal.id);
         if (ensureAliasResult.isErr()) return err(c, 500, "Internal Server Error");
         const saveSenderResult = await accountDb.saveSender(accountId, recipientAddress, senderETLD1, body.status);
         if (saveSenderResult.isErr()) return err(c, 500, "Internal Server Error");
@@ -850,7 +850,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
 
     // When quarantined by unknown sender, approve the sender for future emails
     if (wasQuarantinedByUnknownSender) {
-      const ensureAliasResult = await ensureAliasExists(accountDb, accountId, signal.data.recipientAddress);
+      const ensureAliasResult = await ensureAliasExists(accountDb, accountId, signal.data.recipientAddress, signal.id);
       if (ensureAliasResult.isErr()) return err(c, 500, "Internal Server Error");
       const saveSenderResult = await accountDb.saveSender(accountId, signal.data.recipientAddress, senderETLD1, "allow");
       if (saveSenderResult.isErr()) return err(c, 500, "Internal Server Error");
@@ -1980,7 +1980,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
       updatedAt: now,
     });
     if (createResult.isErr()) return err(c, 500, "Internal Server Error");
-    await accountDb.incrementStatMetric(accountId, "totalAliases", 1);
+    await accountDb.incrementStatMetric(accountId, "totalAliases", 1, logger.getInvocationId());
     return c.json(toApiAlias(createResult.value), 201);
   });
 
@@ -2038,7 +2038,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     const address = decodeURIComponent(c.req.param("address")!).toLowerCase();
     const deleteResult = await accountDb.deleteAlias(accountId, address);
     if (deleteResult.isErr()) return err(c, 500, "Internal Server Error");
-    await accountDb.incrementStatMetric(accountId, "totalAliases", -1);
+    await accountDb.incrementStatMetric(accountId, "totalAliases", -1, logger.getInvocationId());
     return new Response(null, { status: 204 });
   });
 

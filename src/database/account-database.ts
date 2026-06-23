@@ -1129,19 +1129,33 @@ export class AccountDatabase {
   // ---------------------------------------------------------------------------
 
   /**
-   * Three-level conditional write for diff rows:
-   * 1. UpdateItem (attribute_exists) — fast path, row already exists today
-   * 2. PutItem (attribute_not_exists) — first signal of the day, create row
-   * 3. UpdateItem (attribute_exists) — retry if another Lambda raced us on step 2
+   * Three-level conditional write for diff rows with idempotency:
+   * 1. UpdateItem (attribute_exists + NOT contains(history, key)) — fast path
+   * 2. If condition fails → GetItem to disambiguate:
+   *    - Row doesn't exist → PutItem with history seeded
+   *    - Row exists + key in history → return ok (deduplicated)
+   * 3. If PutItem condition fails (race) → retry UpdateItem
+   *
+   * Post-write: if history > 100 items, trim oldest 10 (fire-and-forget).
    */
-  private async writeDiffMetric(accountId: string, metric: StatsMetric, delta: number): Promise<Result<void, DbError>> {
+  private async writeDiffMetric(accountId: string, metric: StatsMetric, delta: number, idempotencyKey: string): Promise<Result<void, DbError>> {
     const now = DateTime.utc();
     const updateParams = buildDiffUpdateParams(accountId, metric, delta, now, ACCOUNTS_TABLE);
     const putParams = buildDiffPutParams(accountId, metric, delta, now, ACCOUNTS_TABLE);
 
-    // Step 1: try to ADD to existing row
+    // Step 1: try to ADD to existing row with idempotency check
     try {
-      await dynamo.send(new UpdateCommand(updateParams));
+      await dynamo.send(new UpdateCommand({
+        ...updateParams,
+        UpdateExpression: `${updateParams.UpdateExpression} SET history = list_append(history, :keyList)`,
+        ConditionExpression: "attribute_exists(pk) AND NOT contains(history, :key)",
+        ExpressionAttributeValues: {
+          ...updateParams.ExpressionAttributeValues,
+          ":key": idempotencyKey,
+          ":keyList": [idempotencyKey],
+        },
+      }));
+      await this.trimHistory(updateParams.Key);
       return ok(undefined);
     } catch (e) {
       if (!(e instanceof Error && e.name === "ConditionalCheckFailedException")) {
@@ -1149,9 +1163,46 @@ export class AccountDatabase {
       }
     }
 
-    // Step 2: row doesn't exist — create it
+    // Step 2: condition failed — disambiguate with GetItem
     try {
-      await dynamo.send(new PutCommand(putParams));
+      const existing = await dynamo.send(new GetCommand({
+        TableName: ACCOUNTS_TABLE,
+        Key: updateParams.Key,
+        ProjectionExpression: "history",
+      }));
+      if (existing.Item) {
+        // Row exists — check if key is already in history (deduplicated)
+        const history = (existing.Item["history"] as string[] | undefined) ?? [];
+        if (history.includes(idempotencyKey)) return ok(undefined);
+        // Key not in history — unexpected condition failure, retry update
+        try {
+          await dynamo.send(new UpdateCommand({
+            ...updateParams,
+            UpdateExpression: `${updateParams.UpdateExpression} SET history = list_append(history, :keyList)`,
+            ConditionExpression: "attribute_exists(pk) AND NOT contains(history, :key)",
+            ExpressionAttributeValues: {
+              ...updateParams.ExpressionAttributeValues,
+              ":key": idempotencyKey,
+              ":keyList": [idempotencyKey],
+            },
+          }));
+          await this.trimHistory(updateParams.Key);
+          return ok(undefined);
+        } catch (retryErr) {
+          if (retryErr instanceof Error && retryErr.name === "ConditionalCheckFailedException") return ok(undefined);
+          return err(dbError(retryErr));
+        }
+      }
+    } catch (e) {
+      return err(dbError(e));
+    }
+
+    // Row doesn't exist — create it with history seeded
+    try {
+      await dynamo.send(new PutCommand({
+        ...putParams,
+        Item: { ...putParams.Item, history: [idempotencyKey] },
+      }));
       return ok(undefined);
     } catch (e) {
       if (!(e instanceof Error && e.name === "ConditionalCheckFailedException")) {
@@ -1159,21 +1210,55 @@ export class AccountDatabase {
       }
     }
 
-    // Step 3: another Lambda created it between steps 1 and 2 — retry update
+    // Race: another Lambda created it — retry update
     try {
-      await dynamo.send(new UpdateCommand(updateParams));
+      await dynamo.send(new UpdateCommand({
+        ...updateParams,
+        UpdateExpression: `${updateParams.UpdateExpression} SET history = list_append(history, :keyList)`,
+        ConditionExpression: "attribute_exists(pk) AND NOT contains(history, :key)",
+        ExpressionAttributeValues: {
+          ...updateParams.ExpressionAttributeValues,
+          ":key": idempotencyKey,
+          ":keyList": [idempotencyKey],
+        },
+      }));
+      await this.trimHistory(updateParams.Key);
       return ok(undefined);
     } catch (e) {
+      if (e instanceof Error && e.name === "ConditionalCheckFailedException") return ok(undefined);
       return err(dbError(e));
     }
   }
 
-  async incrementStats(accountId: string, category: StatsMetric): Promise<Result<void, DbError>> {
-    return this.writeDiffMetric(accountId, category, 1);
+  /** Fire-and-forget: trim history list if over 100 items */
+  private async trimHistory(key: { pk: string; sk: string }): Promise<void> {
+    try {
+      const res = await dynamo.send(new GetCommand({
+        TableName: ACCOUNTS_TABLE,
+        Key: key,
+        ProjectionExpression: "history",
+      }));
+      const history = (res.Item?.["history"] as string[] | undefined) ?? [];
+      if (history.length <= 100) return;
+
+      // Remove first 10 elements by index
+      const removeExpr = Array.from({ length: 10 }, (_, i) => `history[${i}]`).join(", ");
+      await dynamo.send(new UpdateCommand({
+        TableName: ACCOUNTS_TABLE,
+        Key: key,
+        UpdateExpression: `REMOVE ${removeExpr}`,
+      }));
+    } catch {
+      // Fire-and-forget — trim failure is non-critical
+    }
   }
 
-  async incrementStatMetric(accountId: string, metric: StatsMetric, delta: number): Promise<Result<void, DbError>> {
-    return this.writeDiffMetric(accountId, metric, delta);
+  async incrementStats(accountId: string, category: StatsMetric, idempotencyKey: string): Promise<Result<void, DbError>> {
+    return this.writeDiffMetric(accountId, category, 1, idempotencyKey);
+  }
+
+  async incrementStatMetric(accountId: string, metric: StatsMetric, delta: number, idempotencyKey: string): Promise<Result<void, DbError>> {
+    return this.writeDiffMetric(accountId, metric, delta, idempotencyKey);
   }
 
   async getStats(accountId: string, fromSk?: string): Promise<Result<StatsRow[], DbError>> {
