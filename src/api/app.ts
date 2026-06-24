@@ -7,7 +7,7 @@ import { generateId } from "../utils/id.js";
 import { getDomain } from "tldts";
 import { validateRecipientMx } from "../dns/mx-validator.js";
 import { computeUndoWindowSeconds } from "./undo-window.js";
-import type { AuditEvent, AuditDatabase } from "../database/audit-database.js";
+import type { AuditDatabase } from "../database/audit-database.js";
 import type { Result } from "neverthrow";
 import { ok as neverthrowOk, err as neverthrowErr } from "neverthrow";
 import type { DbError, NotFoundError, AuthressServiceError, AuthError, TransientSesError } from "../errors.js";
@@ -38,6 +38,8 @@ import { registerTemplatesRoutes } from "./templatesApi.js";
 import { registerDomainsRoutes } from "./domainsApi.js";
 import { registerAliasesRoutes, ensureAliasExists } from "./aliasesApi.js";
 import { registerAccountsRoutes } from "./accountsApi.js";
+import { registerAuditRoutes } from "./auditApi.js";
+import { registerAdminRoutes } from "./adminApi.js";
 
 // ---------------------------------------------------------------------------
 // Job Dispatcher interface (used by reindex route)
@@ -1160,26 +1162,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
   // -------------------------------------------------------------------------
   // Audit  —  /accounts/:accountId/audit
   // -------------------------------------------------------------------------
-
-  app.openapi(route({
-    method: "get",
-    path: "/accounts/{accountId}/audit",
-    tags: ["Audit"],
-    request: {
-      params: z.object({ accountId: z.string() }),
-      query: z.object({ cursor: z.string().optional(), limit: z.string().optional() }),
-    },
-    middleware: [authz("audit:read", c => `accounts/${c.req.param("accountId")!}/audit`)] as const,
-    responses: { 200: { content: { "application/json": { schema: z.object({}) } }, description: "List audit events" } },
-  }), async (c) => {
-    const accountId = c.req.param("accountId")!;
-    const cursor = c.req.query("cursor");
-    const rawLimit = c.req.query("limit");
-    const params: PageParams = { ...(cursor ? { cursor } : {}), ...(rawLimit ? { limit: parseInt(rawLimit, 10) } : {}) };
-    const result = await auditDb.listAuditEvents(accountId, params);
-    if (result.isErr()) return err(c, 500, "Internal Server Error");
-    return c.json(result.value, 200);
-  });
+  registerAuditRoutes(app, { auditDb, authz, err, route });
 
   // ---------------------------------------------------------------------------
   // Signal reprocess (admin)
@@ -1206,33 +1189,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
   // ---------------------------------------------------------------------------
   // Reindex jobs (admin)
   // ---------------------------------------------------------------------------
-
-  app.openapi(route({
-    method: "post",
-    path: "/reindex",
-    tags: ["Admin"],
-    request: {
-      body: { content: { "application/json": { schema: z.object({
-        targetRegistryId: z.string(),
-        segmentCount: z.number().int().min(1).max(256).optional(),
-      }) } } },
-    },
-    middleware: [authz("accounts:write", "accounts")] as const,
-    responses: {
-      202: { content: { "application/json": { schema: z.object({
-        jobId: z.string(),
-        targetRegistryId: z.string(),
-        modelId: z.string(),
-        segmentCount: z.number(),
-        startedAt: z.string(),
-      }) } }, description: "Reindex job dispatched" },
-    },
-  }), async (c) => {
-    const body = c.req.valid("json");
-    const result = await jobDispatcher.dispatch(body.targetRegistryId, body.segmentCount);
-    if (result.isErr()) return err(c, 404, "Cluster not found");
-    return c.json(result.value, 202);
-  });
+  registerAdminRoutes(app, { jobDispatcher, authz, err, route });
 
   // ---------------------------------------------------------------------------
   // Not Found & Method Not Allowed — must be registered after all routes
