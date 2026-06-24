@@ -212,7 +212,7 @@ export interface ApiStatsTotals {
   allowed: number;
   quarantined: number;
   blocked: number;
-  totalAliases: number;
+  aliases: number;
 }
 
 export interface ApiStatsDailyBucket {
@@ -294,7 +294,7 @@ export function aggregateStatsRows(rows: StatsRow[]): ApiStatsResponse {
       allowed: totals.allowed,
       quarantined: totals.quarantined,
       blocked: totals.blocked,
-      totalAliases: totals.totalAliases,
+      aliases: totals.totalAliases,
     },
     daily,
     monthly,

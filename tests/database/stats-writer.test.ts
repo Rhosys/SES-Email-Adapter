@@ -257,7 +257,7 @@ describe("aggregateStatsRows", () => {
 
   it("empty rows → zeroed response", () => {
     const result = aggregateStatsRows([]);
-    expect(result.totals).toEqual({ allowed: 0, quarantined: 0, blocked: 0, totalAliases: 0 });
+    expect(result.totals).toEqual({ allowed: 0, quarantined: 0, blocked: 0, aliases: 0 });
     expect(result.daily).toEqual([]);
     expect(result.monthly).toEqual([]);
   });
@@ -268,7 +268,7 @@ describe("aggregateStatsRows", () => {
       makeDiff("2026-06-15", { allowed: 5, quarantined: 2, totalAliases: 1 }),
     ];
     const result = aggregateStatsRows(rows);
-    expect(result.totals).toEqual({ allowed: 8, quarantined: 2, blocked: 1, totalAliases: 1 });
+    expect(result.totals).toEqual({ allowed: 8, quarantined: 2, blocked: 1, aliases: 1 });
   });
 
   it("snapshot + diffs — totals = snapshot + diffs from snapshot month onward", () => {
@@ -283,7 +283,7 @@ describe("aggregateStatsRows", () => {
     ];
     const result = aggregateStatsRows(rows);
     // totals = snapshot(100,20,5,_,10) + may diffs(15,2,0,_,0) + june diffs(3,0,0,_,1)
-    expect(result.totals).toEqual({ allowed: 118, blocked: 22, quarantined: 5, totalAliases: 11 });
+    expect(result.totals).toEqual({ allowed: 118, blocked: 22, quarantined: 5, aliases: 11 });
   });
 
   it("daily breakdown is descending by date", () => {
@@ -341,7 +341,7 @@ describe("aggregateStatsRows", () => {
     ];
     const result = aggregateStatsRows(rows);
     // totals = latest snapshot(80,15,3,_,7) + diffs from 2026-05 onward(5+2, 0, 0, _, 0)
-    expect(result.totals).toEqual({ allowed: 87, blocked: 15, quarantined: 3, totalAliases: 7 });
+    expect(result.totals).toEqual({ allowed: 87, blocked: 15, quarantined: 3, aliases: 7 });
     // daily includes ALL diffs (even those before latest snapshot — they're historical display data)
     expect(result.daily).toHaveLength(3);
   });
@@ -367,7 +367,7 @@ describe("aggregateStatsRows", () => {
       makeDiff("2026-06-11", { totalAliases: 1 }),
     ];
     const result = aggregateStatsRows(rows);
-    expect(result.totals.totalAliases).toBe(8);
+    expect(result.totals.aliases).toBe(8);
   });
 
   it("handles a snapshot missing a newer metric (future-proofing)", () => {
@@ -382,7 +382,7 @@ describe("aggregateStatsRows", () => {
       makeDiff("2026-05-10", { totalAliases: 3, allowed: 2 }),
     ];
     const result = aggregateStatsRows(rows);
-    expect(result.totals.totalAliases).toBe(3);
+    expect(result.totals.aliases).toBe(3);
     expect(result.totals.allowed).toBe(102);
   });
 
@@ -406,7 +406,7 @@ describe("aggregateStatsRows", () => {
       makeDiff("2026-06-15", { allowed: 7, blocked: 2, quarantined: 1 }),
     ];
     const result = aggregateStatsRows(rows);
-    expect(result.totals).toEqual({ allowed: 7, quarantined: 1, blocked: 2, totalAliases: 0 });
+    expect(result.totals).toEqual({ allowed: 7, quarantined: 1, blocked: 2, aliases: 0 });
     expect(result.daily).toEqual([{ date: "2026-06-15", allowed: 7, quarantined: 1, blocked: 2 }]);
     expect(result.monthly).toEqual([{ date: "2026-06", allowed: 7, quarantined: 1, blocked: 2 }]);
   });
@@ -448,6 +448,6 @@ describe("aggregateStatsRows", () => {
     ];
     const result = aggregateStatsRows(rows);
     // snapshot(80,15,3,_,7) + diffs from 2026-05 onward (5+2+3, 0, 0, _, 0)
-    expect(result.totals).toEqual({ allowed: 90, blocked: 15, quarantined: 3, totalAliases: 7 });
+    expect(result.totals).toEqual({ allowed: 90, blocked: 15, quarantined: 3, aliases: 7 });
   });
 });
