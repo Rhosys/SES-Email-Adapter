@@ -5,7 +5,6 @@ import type { S3Client } from "@aws-sdk/client-s3";
 import { DateTime } from "luxon";
 import { generateId, generateAccountId } from "../utils/id.js";
 import { getDomain } from "tldts";
-import { checkDomain } from "../dns/dns-checker.js";
 import { validateRecipientMx } from "../dns/mx-validator.js";
 import { computeUndoWindowSeconds } from "./undo-window.js";
 import type { AuditEvent, AuditDatabase } from "../database/audit-database.js";
@@ -19,13 +18,10 @@ import type { AccountDatabase } from "../database/account-database.js";
 import type { Logger } from "../logger.js";
 import { deriveGroupingKey } from "../processor/processor.js";
 import { zParse } from "./validate.js";
-import { toApiArc, toApiAccount, toApiSignal, toApiDomain, toApiDomainWithRecords, toApiAlias, toApiAliasSender, toApiRule, toApiView, toApiForwardingAddress } from "./transform.js";
+import { toApiArc, toApiAccount, toApiSignal, toApiAlias, toApiAliasSender, toApiView, toApiForwardingAddress } from "./transform.js";
 import { generatePresignedGet } from "../processor/presign.js";
-import { validateRuleCondition } from "./validate-rule-condition.js";
-import { validateWebhookConfig } from "./validate-webhook-config.js";
 import type { UserCodeExecutorClient } from "../processor/user-code-client.js";
 import type { BillingHandler } from "../billing/billing-handler.js";
-import type { BillingPlan } from "../embedding/retention-tier.js";
 import { aggregateStatsRows } from "../database/stats-writer.js";
 import { isValidEmail } from "../email/validate-email.js";
 import type { DraftSendDispatcher } from "../processor/draft-send-dispatcher.js";
@@ -43,7 +39,9 @@ import { buildUnsubscribeHeaders } from "../email/unsubscribe-headers.js";
 import { generateUnsubscribeToken } from "../email/unsubscribe-token.js";
 import { registerViewsRoutes } from "./viewsApi.js";
 import { registerLabelsRoutes } from "./labelsApi.js";
+import { registerRulesRoutes } from "./rulesApi.js";
 import { registerTemplatesRoutes } from "./templatesApi.js";
+import { registerDomainsRoutes } from "./domainsApi.js";
 
 // ---------------------------------------------------------------------------
 // Job Dispatcher interface (used by reindex route)
@@ -70,7 +68,6 @@ import {
   CreateViewRequest, UpdateViewRequest,
   CreateLabelRequest, UpdateLabelRequest,
   CreateRuleRequest, UpdateRuleRequest,
-  CreateDomainRequest,
   CreateAliasRequest, UpdateAliasRequest,
   UpdateAccountRequest,
   CreateForwardingAddressRequest, VerifyForwardingAddressRequest,
@@ -81,12 +78,11 @@ import {
 } from "./requests.js";
 import {
   Account as AccountSchema, Arc as ArcSchema, Signal as SignalSchema,
-  View as ViewSchema, Rule as RuleSchema,
-  Domain as DomainSchema, DomainWithRecords as DomainWithRecordsSchema,
+  View as ViewSchema,
   Alias as AliasSchema, AliasSender as AliasSenderSchema,
   VerifiedForwardingAddress as VerifiedForwardingAddressSchema,
   ListArcsResponse, ListSignalsResponse, ListViewsResponse,
-  ListRulesResponse, ListDomainsResponse, ListAliasesResponse, ListSendersResponse,
+  ListAliasesResponse, ListSendersResponse,
   ListForwardingAddressesResponse,
   ErrorResponse, ErrorCode, Pagination as PaginationSchema,
 } from "./schemas.js";
@@ -1257,301 +1253,12 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
   // -------------------------------------------------------------------------
   // Rules  —  /accounts/:accountId/rules
   // -------------------------------------------------------------------------
-
-  app.openapi(route({
-    method: "get",
-    path: "/accounts/{accountId}/rules",
-    tags: ["Rules"],
-    request: { params: z.object({ accountId: z.string() }) },
-    middleware: [authz("rules:read", c => `accounts/${c.req.param("accountId")!}/rules`)] as const,
-    responses: { 200: { content: { "application/json": { schema: ListRulesResponse } }, description: "List rules" } },
-  }), async (c) => {
-    const accountId = c.req.param("accountId")!;
-    const rulesResult = await accountDb.listRules(accountId);
-    if (rulesResult.isErr()) return err(c, 500, "Internal Server Error");
-    return c.json({ rules: rulesResult.value.map(toApiRule) }, 200);
-  });
-
-  app.openapi(route({
-    method: "post",
-    path: "/accounts/{accountId}/rules",
-    tags: ["Rules"],
-    request: { params: z.object({ accountId: z.string() }) },
-    middleware: [authz("rules:write", c => `accounts/${c.req.param("accountId")!}/rules`)] as const,
-    responses: { 201: { content: { "application/json": { schema: RuleSchema } }, description: "Rule created" } },
-  }), async (c) => {
-    const accountId = c.req.param("accountId")!;
-    const body = await zParse(CreateRuleRequest, c.req.raw);
-    const effectiveConditionType = body.conditionType ?? "json_logic";
-    if (effectiveConditionType === "js") {
-      if (!body.condition || body.condition.trim().length === 0) {
-        return err(c, 400, "condition field is required when conditionType is 'js'", "MISSING_CODE");
-      }
-      const astResult = astValidator ? await astValidator.validateAst(body.condition) : undefined;
-      if (!astResult || astResult.isErr()) {
-        const e = astResult?.error;
-        const message = e?.kind === "ast_validation_error" ? e.message : (e?.message ?? "AST validator not configured");
-        const location = e?.kind === "ast_validation_error" ? e.location : undefined;
-        return err(c, 400, message, "INVALID_CODE", location ? { location } : undefined);
-      }
-    } else {
-      if (body.condition) {
-        const conditionError = validateRuleCondition(body.condition);
-        if (conditionError) return err(c, 400, conditionError, "INVALID_CONDITION");
-      }
-    }
-    const forwardError = await validateForwardTargets(accountId, body.actions as Rule["actions"], accountDb);
-    if (forwardError) return err(c, 400, forwardError, "UNVERIFIED_FORWARD_TARGET");
-    const accountResult = await accountDb.getAccount(accountId);
-    const accountPlan: BillingPlan = (accountResult.isOk() && accountResult.value?.billingPlan) || "Free";
-    const webhookError = validateWebhookActions(body.actions as Rule["actions"], accountPlan, billingHandler);
-    if (webhookError) return err(c, 400, webhookError.message, webhookError.code);
-    // Audit: write code change event before persisting (best-effort)
-    if (effectiveConditionType === "js") {
-      const { userId } = c.get("auth");
-      const auditResult = await auditDb.saveAuditEvent({
-        accountId, userId, action: "created", resourceType: "rule", resourceId: "",
-        before: null, after: { conditionType: "js", condition: body.condition },
-      });
-      if (auditResult.isErr()) {
-        logger.warn("Audit write failed for rule creation, proceeding with resource write", { code: "api.audit.rule_create_failed", accountId, error: auditResult.error });
-      }
-    }
-    const ruleResult = await accountDb.createRule(accountId, body as Parameters<typeof accountDb.createRule>[1]);
-    if (ruleResult.isErr()) return err(c, 500, "Internal Server Error");
-    return c.json(toApiRule(ruleResult.value), 201);
-  });
-
-  app.openapi(route({
-    method: "patch",
-    path: "/accounts/{accountId}/rules/{id}",
-    tags: ["Rules"],
-    request: { params: z.object({ accountId: z.string(), id: z.string() }) },
-    middleware: [authz("rules:write", c => `accounts/${c.req.param("accountId")!}/rules/${c.req.param("id")!}`)] as const,
-    responses: { 200: { content: { "application/json": { schema: RuleSchema } }, description: "Update rule" } },
-  }), async (c) => {
-    const accountId = c.req.param("accountId")!;
-    const rulesResult = await accountDb.listRules(accountId);
-    if (rulesResult.isErr()) return err(c, 500, "Internal Server Error");
-    const rule = rulesResult.value.find((r) => r.id === c.req.param("id")!);
-    if (!rule) return err(c, 404, "Rule not found", "RULE_NOT_FOUND");
-    const body = await zParse(UpdateRuleRequest, c.req.raw);
-    // System rules (SR-*) are immutable except for enable/disable — only `status` may change.
-    if (rule.accountId === "SYSTEM") {
-      const changedKeys = Object.keys(body).filter((k) => (body as Record<string, unknown>)[k] !== undefined);
-      if (changedKeys.some((k) => k !== "status")) {
-        return err(c, 403, "System rules can only be enabled or disabled", "SYSTEM_RULE_IMMUTABLE");
-      }
-      if (body.status === undefined) {
-        return err(c, 403, "System rules can only be enabled or disabled", "SYSTEM_RULE_IMMUTABLE");
-      }
-      const result = await accountDb.upsertSystemRuleStatus(accountId, rule.id, body.status);
-      if (result.isErr()) return err(c, 500, "Internal Server Error");
-      return c.json(toApiRule({ ...rule, status: body.status }), 200);
-    }
-    const effectiveConditionType = body.conditionType ?? rule.conditionType ?? "json_logic";
-    if (effectiveConditionType === "js") {
-      // If condition is being provided, validate it as JS
-      if (body.condition !== undefined) {
-        if (!body.condition || body.condition.trim().length === 0) {
-          return err(c, 400, "condition field is required when conditionType is 'js'", "MISSING_CODE");
-        }
-        const astResult = astValidator ? await astValidator.validateAst(body.condition) : undefined;
-        if (!astResult || astResult.isErr()) {
-          const e = astResult?.error;
-          const message = e?.kind === "ast_validation_error" ? e.message : (e?.message ?? "AST validator not configured");
-          const location = e?.kind === "ast_validation_error" ? e.location : undefined;
-          return err(c, 400, message, "INVALID_CODE", location ? { location } : undefined);
-        }
-      }
-      // If switching to "js" conditionType without providing condition, require existing condition on the rule
-      if (body.conditionType === "js" && body.condition === undefined && !rule.condition) {
-        return err(c, 400, "condition field is required when conditionType is 'js'", "MISSING_CODE");
-      }
-    } else {
-      if (body.condition) {
-        const conditionError = validateRuleCondition(body.condition);
-        if (conditionError) return err(c, 400, conditionError, "INVALID_CONDITION");
-      }
-    }
-    if (body.actions) {
-      const forwardError = await validateForwardTargets(accountId, body.actions as Rule["actions"], accountDb);
-      if (forwardError) return err(c, 400, forwardError, "UNVERIFIED_FORWARD_TARGET");
-      const accountResult = await accountDb.getAccount(accountId);
-      const accountPlan: BillingPlan = (accountResult.isOk() && accountResult.value?.billingPlan) || "Free";
-      const webhookError = validateWebhookActions(body.actions as Rule["actions"], accountPlan, billingHandler);
-      if (webhookError) return err(c, 400, webhookError.message, webhookError.code);
-    }
-    // Clear lastError when condition is updated on a JS rule
-    const updateData: Parameters<typeof accountDb.updateRule>[2] = { ...body } as Parameters<typeof accountDb.updateRule>[2];
-    if (effectiveConditionType === "js" && body.condition !== undefined) {
-      (updateData as Record<string, unknown>)["lastError"] = null;
-    }
-    // Audit: write code change event before persisting (best-effort)
-    if (effectiveConditionType === "js" && body.condition !== undefined) {
-      const { userId } = c.get("auth");
-      const auditResult = await auditDb.saveAuditEvent({
-        accountId, userId, action: "updated", resourceType: "rule", resourceId: rule.id,
-        before: { conditionType: rule.conditionType ?? "json_logic", condition: rule.condition },
-        after: { conditionType: effectiveConditionType, condition: body.condition },
-      });
-      if (auditResult.isErr()) {
-        logger.warn("Audit write failed for rule update, proceeding with resource write", { code: "api.audit.rule_update_failed", accountId, ruleId: rule.id, error: auditResult.error });
-      }
-    }
-    const updateResult = await accountDb.updateRule(accountId, rule.id, updateData);
-    if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
-    return c.json(toApiRule(updateResult.value), 200);
-  });
-
-  app.openapi(route({
-    method: "delete",
-    path: "/accounts/{accountId}/rules/{id}",
-    tags: ["Rules"],
-    request: { params: z.object({ accountId: z.string(), id: z.string() }) },
-    middleware: [authz("rules:write", c => `accounts/${c.req.param("accountId")!}/rules/${c.req.param("id")!}`)] as const,
-    responses: { 204: { description: "Rule deleted" } },
-  }), async (c) => {
-    const accountId = c.req.param("accountId")!;
-    const rulesResult = await accountDb.listRules(accountId);
-    if (rulesResult.isErr()) return err(c, 500, "Internal Server Error");
-    const rule = rulesResult.value.find((r) => r.id === c.req.param("id")!);
-    if (!rule) return err(c, 404, "Rule not found", "RULE_NOT_FOUND");
-    // System rules (SR-*) cannot be deleted — only enabled/disabled via PATCH.
-    if (rule.accountId === "SYSTEM") {
-      return err(c, 400, "System rules cannot be deleted", "SYSTEM_RULE_IMMUTABLE");
-    }
-    const deleteResult = await accountDb.deleteRule(accountId, rule.id);
-    if (deleteResult.isErr()) return err(c, 500, "Internal Server Error");
-    return new Response(null, { status: 204 });
-  });
+  registerRulesRoutes(app, { accountDb, auditDb, authz, err, route, astValidator, billingHandler, logger });
 
   // -------------------------------------------------------------------------
   // Domains  —  /accounts/:accountId/domains
   // -------------------------------------------------------------------------
-
-  app.openapi(route({
-    method: "get",
-    path: "/accounts/{accountId}/domains",
-    tags: ["Domains"],
-    request: { params: z.object({ accountId: z.string() }) },
-    middleware: [authz("domains:read", c => `accounts/${c.req.param("accountId")!}/domains`)] as const,
-    responses: { 200: { content: { "application/json": { schema: ListDomainsResponse } }, description: "List domains" } },
-  }), async (c) => {
-    const accountId = c.req.param("accountId")!;
-    const domainsResult = await accountDb.listDomains(accountId);
-    if (domainsResult.isErr()) return err(c, 500, "Internal Server Error");
-    return c.json({ domains: domainsResult.value.map(toApiDomain) }, 200);
-  });
-
-  app.openapi(route({
-    method: "post",
-    path: "/accounts/{accountId}/domains",
-    tags: ["Domains"],
-    request: { params: z.object({ accountId: z.string() }) },
-    middleware: [authz("domains:write", c => `accounts/${c.req.param("accountId")!}/domains`)] as const,
-    responses: { 201: { content: { "application/json": { schema: DomainSchema } }, description: "Domain created" } },
-  }), async (c) => {
-    const accountId = c.req.param("accountId")!;
-    const body = await zParse(CreateDomainRequest, c.req.raw);
-
-    // Cross-account ownership check — oldest registrant wins
-    const ownerResult = await accountDb.resolveAccountForDomain(body.domain);
-    if (ownerResult.isErr()) return err(c, 500, "Internal Server Error");
-    if (ownerResult.value && ownerResult.value !== accountId) {
-      return err(c, 409, "Domain already registered by another account", "DOMAIN_EXISTS");
-    }
-
-    // Register domain with SES first (idempotent — AlreadyExistsException is ok)
-    const sesResult = await domainIdentityService.register(body.domain, accountId);
-    if (sesResult.isErr()) {
-      logger.error("Failed to register domain SES identity", { code: "domain.ses_identity_failed", accountId, domain: body.domain, error: sesResult.error });
-      return err(c, 500, "Internal Server Error");
-    }
-
-    // DB write last — once this succeeds, the domain "exists" for all readers
-    const domainResult = await accountDb.createDomain(accountId, body.domain);
-    if (domainResult.isErr()) return err(c, 500, "Internal Server Error");
-
-    return c.json(toApiDomain(domainResult.value), 201);
-  });
-
-  app.openapi(route({
-    method: "get",
-    path: "/accounts/{accountId}/domains/{id}",
-    tags: ["Domains"],
-    request: { params: z.object({ accountId: z.string(), id: z.string() }) },
-    middleware: [authz("domains:read", c => `accounts/${c.req.param("accountId")!}/domains/${c.req.param("id")!}`)] as const,
-    responses: { 200: { content: { "application/json": { schema: DomainWithRecordsSchema } }, description: "Get domain with DNS records" } },
-  }), async (c) => {
-    const accountId = c.req.param("accountId")!;
-    const domainResult = await accountDb.getDomain(accountId, c.req.param("id")!.toLowerCase());
-    if (domainResult.isErr()) return err(c, 500, "Internal Server Error");
-    const domain = domainResult.value;
-    if (!domain) return err(c, 404, "Domain not found", "DOMAIN_NOT_FOUND");
-    const records = buildDnsRecords(domain);
-    return c.json(toApiDomainWithRecords(domain, records), 200);
-  });
-
-  app.openapi(route({
-    method: "patch",
-    path: "/accounts/{accountId}/domains/{id}",
-    tags: ["Domains"],
-    request: { params: z.object({ accountId: z.string(), id: z.string() }) },
-    middleware: [authz("domains:write", c => `accounts/${c.req.param("accountId")!}/domains/${c.req.param("id")!}`)] as const,
-    responses: { 200: { content: { "application/json": { schema: DomainWithRecordsSchema } }, description: "Verify/refresh domain" } },
-  }), async (c) => {
-    const accountId = c.req.param("accountId")!;
-    const domainResult = await accountDb.getDomain(accountId, c.req.param("id")!.toLowerCase());
-    if (domainResult.isErr()) return err(c, 500, "Internal Server Error");
-    const domain = domainResult.value;
-    if (!domain) return err(c, 404, "Domain not found", "DOMAIN_NOT_FOUND");
-    const records = await checkDomain(domain);
-    const now = DateTime.utc().toISO()!;
-    const failingRecords = records.filter((r) => r.status === "failing").map((r) => r.name);
-    const receivingHealthy = records.find((r) => r.type === "MX")?.status === "verified";
-    const senderHealthy = records.filter((r) => r.type !== "MX").every((r) => r.status === "verified");
-    const healthResult = await accountDb.updateDomainHealth(accountId, domain.domain, {
-      receivingHealthy,
-      senderHealthy,
-      failingRecords,
-      lastCheckedAt: now,
-      ...(failingRecords.length === 0 ? { lastHealthyAt: now } : {}),
-    });
-    if (healthResult.isErr()) return err(c, 500, "Internal Server Error");
-
-    // Update setup flags to reflect current DNS state
-    const receivingChanged = (receivingHealthy ?? false) !== domain.receivingSetupComplete;
-    const senderChanged = senderHealthy !== domain.senderSetupComplete;
-    if (receivingChanged || senderChanged) {
-      await accountDb.updateDomainSetup(accountId, domain.domain, {
-        receivingSetupComplete: receivingHealthy ?? false,
-        senderSetupComplete: senderHealthy,
-      });
-    }
-
-    const updatedResult = await accountDb.getDomain(accountId, domain.domain);
-    if (updatedResult.isErr()) return err(c, 500, "Internal Server Error");
-    return c.json(toApiDomainWithRecords(updatedResult.value!, records), 200);
-  });
-
-  app.openapi(route({
-    method: "delete",
-    path: "/accounts/{accountId}/domains/{id}",
-    tags: ["Domains"],
-    request: { params: z.object({ accountId: z.string(), id: z.string() }) },
-    middleware: [authz("domains:write", c => `accounts/${c.req.param("accountId")!}/domains/${c.req.param("id")!}`)] as const,
-    responses: { 204: { description: "Domain deleted" } },
-  }), async (c) => {
-    const accountId = c.req.param("accountId")!;
-    const domainResult = await accountDb.getDomain(accountId, c.req.param("id")!.toLowerCase());
-    if (domainResult.isErr()) return err(c, 500, "Internal Server Error");
-    const domain = domainResult.value;
-    if (!domain) return err(c, 404, "Domain not found", "DOMAIN_NOT_FOUND");
-    const deleteResult = await accountDb.deleteDomain(accountId, domain.domain);
-    if (deleteResult.isErr()) return err(c, 500, "Internal Server Error");
-    return new Response(null, { status: 204 });
-  });
+  registerDomainsRoutes(app, { accountDb, domainIdentityService, logger, authz, err, route });
 
   // -------------------------------------------------------------------------
   // Account  —  /accounts/:accountId
@@ -2215,91 +1922,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
 // Helpers
 // ---------------------------------------------------------------------------
 
-// Validate that all forward targets in a rule's actions are verified for this account.
-// Returns an error string if invalid, null if OK.
-async function validateForwardTargets(
-  accountId: string,
-  actions: Rule["actions"],
-  store: Pick<AccountDatabase, "listVerifiedForwardingAddresses">,
-): Promise<string | null> {
-  const forwardTargets = actions.filter((a) => a.type === "forward" && a.value).map((a) => a.value!);
-  if (forwardTargets.length === 0) return null;
-  const verifiedResult = await store.listVerifiedForwardingAddresses(accountId);
-  if (verifiedResult.isErr()) return "Internal error validating forward targets";
-  const verifiedSet = new Set(verifiedResult.value.filter((v) => v.status === "verified").map((v) => v.address));
-  const unverified = forwardTargets.filter((t) => !verifiedSet.has(t));
-  return unverified.length > 0 ? `Forward targets not verified: ${unverified.join(", ")}` : null;
-}
-
-// Validate webhook actions: config validity + plan feature gating.
-// Returns an error object if invalid, null if OK.
-function validateWebhookActions(
-  actions: Rule["actions"],
-  accountPlan: BillingPlan,
-  billing: BillingHandler,
-): { message: string; code: z.infer<typeof ErrorCode> } | null {
-  const webhookActions = actions.filter((a) => a.type === "webhook");
-  if (webhookActions.length === 0) return null;
-
-  for (const action of webhookActions) {
-    const configError = validateWebhookConfig(action.value);
-    if (configError) return { message: configError, code: "INVALID_WEBHOOK_CONFIG" };
-  }
-
-  if (!billing.isFeatureEnabled(accountPlan, "webhook")) {
-    return { message: "Webhook actions require a paid plan", code: "PLAN_FEATURE_REQUIRED" };
-  }
-
-  return null;
-}
-
-const DKIM_SELECTOR = "mail";
 const MAIL_DOMAIN = process.env["MAIL_DOMAIN"] ?? "platform.email.rhosys.cloud";
 const API_DOMAIN = process.env["API_DOMAIN"] ?? "";
 const KMS_KEY_ARN = process.env["AUTHRESS_KMS_KEY_ARN"] ?? "";
 const KEY_ID = process.env["AUTHRESS_KEY_ID"] ?? "";
-
-// Always returns all 4 DNS records for a domain regardless of setup tier.
-// The status field on each record reflects the last health check result.
-function buildDnsRecords(domain: Domain): DnsRecord[] {
-  const d = domain.domain;
-  const failing = new Set(domain.failingRecords ?? []);
-  const checked = domain.lastCheckedAt !== undefined;
-
-  function recordStatus(name: string): DnsRecord["status"] {
-    if (!checked) return "pending";
-    return failing.has(name) ? "failing" : "verified";
-  }
-
-  const mxName = d;
-  const dkimName = `${DKIM_SELECTOR}._domainkey.${d}`;
-  const spfName = `bounce.${d}`;
-  const dmarcName = `_dmarc.${d}`;
-
-  return [
-    {
-      name: mxName,
-      type: "MX",
-      value: `10 mx.${MAIL_DOMAIN}`,
-      status: recordStatus(mxName),
-    },
-    {
-      name: dkimName,
-      type: "CNAME",
-      value: `${DKIM_SELECTOR}._domainkey.${MAIL_DOMAIN}`,
-      status: recordStatus(dkimName),
-    },
-    {
-      name: spfName,
-      type: "CNAME",
-      value: `bounce.${MAIL_DOMAIN}`,
-      status: recordStatus(spfName),
-    },
-    {
-      name: dmarcName,
-      type: "CNAME",
-      value: `_dmarc.${MAIL_DOMAIN}`,
-      status: recordStatus(dmarcName),
-    },
-  ];
-}
