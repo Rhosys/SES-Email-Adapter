@@ -35,7 +35,6 @@ import { ExternalEmailSignalHandler } from "./notifier/external-email-signal-han
 import { DynamoDeviceStore } from "./notifier/device-store.js";
 import { FeedbackProcessor } from "./notifier/feedback-processor.js";
 import { DomainHealthJob } from "./jobs/domain-health-job.js";
-import type { VerificationMailer } from "./api/app.js";
 import { AuthressAuthService } from "./api/authress-auth.js";
 import { AuthressAccessService } from "./api/authress-access.js";
 import { createApp } from "./api/app.js";
@@ -54,8 +53,7 @@ import { SchedulerClient as AwsSchedulerClient } from "@aws-sdk/client-scheduler
 
 import { EmailService } from "./email/email-service.js";
 import { SesDomainIdentityService } from "./email/domain-identity-service.js";
-import { renderTemplate } from "./email/template-renderer.js";
-import { buildEmailTags } from "./email/tag-sanitizer.js";
+import { SesVerificationMailer } from "./email/verification-mailer.js";
 import { DigestDispatcher } from "./digest/digest-dispatcher.js";
 import { DigestWorker } from "./digest/digest-worker.js";
 import type { IDigestSendMessage } from "./digest/digest-worker.js";
@@ -268,45 +266,7 @@ if (!ACCOUNT_CREATION_SFN_ARN) {
 
 const APP_BASE_URL = process.env["APP_BASE_URL"] ?? "";
 
-const sesVerificationMailer: VerificationMailer = {
-  async sendForwardVerification(accountId: string, address: string, token: string) {
-    const verifyUrl = `${APP_BASE_URL}/accounts/${accountId}/forwarding-addresses/${encodeURIComponent(address)}/verify?token=${token}`;
-    return emailService.send({
-      to: address,
-      subject: "Verify your forwarding address",
-      textBody: `Click the link below to verify that you want to receive forwarded emails at this address:\n\n${verifyUrl}\n\nIf you did not request this, you can ignore this email.`,
-      accountId,
-    }).then(r => r.map(() => undefined));
-  },
-
-  async sendCalendarForwardVerification(accountId: string, address: string, token: string) {
-    const verifyUrl = `${APP_BASE_URL}/accounts/${accountId}/calendar-forwarding/${encodeURIComponent(address)}/verify?token=${token}`;
-    const fullDate = DateTime.utc().toISODate()!;
-    const triggerId = `calverify-${accountId}-${address}`;
-
-    const htmlBody = await renderTemplate("calendar-verify", {
-      address,
-      verifyUrl,
-    });
-
-    const tags = buildEmailTags({
-      accountId,
-      fullDate,
-      invocationId: logger.getInvocationId(),
-      triggerId,
-    });
-
-    return emailService.send({
-      to: address,
-      subject: "Verify your calendar forwarding address",
-      textBody: `Click the link below to verify that you want to receive calendar forwarding at this address:\n\n${verifyUrl}\n\nIf you did not request this, you can ignore this email.`,
-      htmlBody,
-      tags,
-      fromOverride: `"Numaeel" <noreply@${MAIL_DOMAIN}>`,
-      accountId,
-    }).then(r => r.map(() => undefined));
-  },
-};
+const sesVerificationMailer = new SesVerificationMailer(emailService, APP_BASE_URL, MAIL_DOMAIN, logger);
 
 const authService = new AuthressAuthService();
 
