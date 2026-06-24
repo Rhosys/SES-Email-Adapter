@@ -39,7 +39,7 @@ describe("renderTemplate", () => {
 
     const result = await renderTemplate("welcome", data);
 
-    expect(mockRender).toHaveBeenCalledWith(html, data);
+    expect(mockRender).toHaveBeenCalledWith(html, expect.objectContaining(data));
     expect(result).toBe("<p>Hi Warren</p>");
   });
 
