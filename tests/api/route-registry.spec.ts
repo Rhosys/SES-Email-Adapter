@@ -152,7 +152,7 @@ describe("Route Registry", () => {
       registeredRoutes.add(`${method} ${path}`);
     }
 
-    const expectedSet = new Set(EXPECTED_ROUTES);
+    const expectedSet = new Set<string>(EXPECTED_ROUTES);
     const extra: string[] = [];
     for (const registered of registeredRoutes) {
       if (!expectedSet.has(registered)) {

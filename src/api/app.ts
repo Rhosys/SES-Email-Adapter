@@ -2,9 +2,6 @@ import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import type { Context } from "hono";
 import type { S3Client } from "@aws-sdk/client-s3";
 import type { AuditDatabase } from "../database/audit-database.js";
-import type { Result } from "neverthrow";
-import type { NotFoundError, AuthressServiceError, AuthError, TransientSesError } from "../errors.js";
-import type { Signal, PageParams, ArcStatus, Workflow, Pagination } from "../types/index.js";
 import type { ArcDatabase } from "../database/arc-database.js";
 import type { AccountDatabase } from "../database/account-database.js";
 import type { Logger } from "../logger.js";
@@ -16,45 +13,36 @@ import type { DomainIdentityService } from "../email/domain-identity-service.js"
 import type { sendRsvp as SendRsvpFn } from "../processor/calendar/rsvp-composer.js";
 import type { PostApprovalCalendarHandlerDeps } from "../processor/calendar/post-approval-handler.js";
 import type { SchedulerClient } from "../scheduler/scheduler-client.js";
-import { registerViewsRoutes } from "./viewsApi.js";
-import { registerLabelsRoutes } from "./labelsApi.js";
-import { registerRulesRoutes } from "./rulesApi.js";
-import { registerTemplatesRoutes } from "./templatesApi.js";
-import { registerDomainsRoutes } from "./domainsApi.js";
-import { registerAliasesRoutes } from "./aliasesApi.js";
-import { registerAccountsRoutes } from "./accountsApi.js";
-import { registerAuditRoutes } from "./auditApi.js";
-import { registerAdminRoutes } from "./adminApi.js";
-import { registerArcsRoutes } from "./arcsApi.js";
+import type { Result } from "neverthrow";
+import type { AuthError } from "../errors.js";
 
-// ---------------------------------------------------------------------------
-// Job Dispatcher interface (used by reindex route)
-// ---------------------------------------------------------------------------
+import type { AccessService } from "./accountsApi.js";
+import type { JobDispatcher } from "./adminApi.js";
+import type { SignalReprocessor } from "./arcsApi.js";
+import type { VerificationMailer } from "./aliasesApi.js";
 
-export interface JobDispatcher {
-  dispatch(targetRegistryId: string, segmentCount?: number): Promise<Result<{
-    jobId: string; targetRegistryId: string; modelId: string; segmentCount: number; startedAt: string;
-  }, NotFoundError>>;
-}
-
-// ---------------------------------------------------------------------------
-// Signal Reprocessor interface (used by reprocess route)
-// ---------------------------------------------------------------------------
-
-export interface SignalReprocessor {
-  reprocessSignal(accountId: string, signalId: string): Promise<Result<Signal, import("../errors.js").ProcessorError>>;
-}
+import { WellKnownApi } from "./wellKnownApi.js";
+import { AccountsApi } from "./accountsApi.js";
+import { ArcsApi } from "./arcsApi.js";
+import { ViewsApi } from "./viewsApi.js";
+import { LabelsApi } from "./labelsApi.js";
+import { RulesApi } from "./rulesApi.js";
+import { DomainsApi } from "./domainsApi.js";
+import { AliasesApi } from "./aliasesApi.js";
+import { TemplatesApi } from "./templatesApi.js";
+import { AuditApi } from "./auditApi.js";
+import { AdminApi } from "./adminApi.js";
 
 import { authorizationGuard, ROUTE_NOT_FOUND_KEY } from "./authorization-guard.js";
 import { createAuthorize } from "./authorization-middleware.js";
-import {
-  CreateViewRequest, UpdateViewRequest,
-  CreateLabelRequest, UpdateLabelRequest,
-  CreateRuleRequest, UpdateRuleRequest,
-} from "./requests.js";
-import {
-  ErrorResponse, ErrorCode,
-} from "./schemas.js";
+import { ErrorResponse, ErrorCode } from "./schemas.js";
+
+export type { AppEnv } from "./route-helpers.js";
+export type { AccessService, AccountRole, AccountUser, UserProfile } from "./accountsApi.js";
+export type { JobDispatcher } from "./adminApi.js";
+export type { SignalReprocessor, ListArcsParams } from "./arcsApi.js";
+export type { VerificationMailer } from "./aliasesApi.js";
+export type { CreateViewRequest, UpdateViewRequest, CreateLabelRequest, UpdateLabelRequest, CreateRuleRequest, UpdateRuleRequest } from "./requests.js";
 
 // ---------------------------------------------------------------------------
 // Auth
@@ -66,57 +54,6 @@ export interface AuthContext {
 
 export interface AuthService {
   verify(token: string): Promise<Result<{ userId: string }, AuthError>>;
-}
-
-// ---------------------------------------------------------------------------
-// Access (Authress RBAC)
-// ---------------------------------------------------------------------------
-
-export type AccountRole = "admin" | "member" | "viewer";
-
-export interface AccountUser {
-  userId: string;
-  role: AccountRole;
-}
-
-export interface UserProfile {
-  userId: string;
-  role: AccountRole;
-  name?: string;
-  email?: string;
-  picture?: string;
-}
-
-export interface AccessService {
-  listUsers(accountId: string): Promise<Result<AccountUser[], AuthressServiceError>>;
-  getUserProfile(userId: string): Promise<Result<{ name?: string; email?: string; picture?: string }, AuthressServiceError>>;
-  listAccountsForUser(userId: string): Promise<Result<string[], AuthressServiceError>>;
-  addUser(accountId: string, userId: string, role: AccountRole): Promise<Result<void, AuthressServiceError>>;
-  updateUserRole(accountId: string, userId: string, role: AccountRole): Promise<Result<void, AuthressServiceError>>;
-  removeUser(accountId: string, userId: string): Promise<Result<void, AuthressServiceError>>;
-  checkAccess(userId: string, resourceUri: string, permission: string): Promise<void>;
-  createInvite(accountId: string, email: string, role: AccountRole): Promise<Result<{ inviteId: string }, AuthressServiceError>>;
-}
-
-// ---------------------------------------------------------------------------
-// Query params & re-exports
-// ---------------------------------------------------------------------------
-
-export interface ListArcsParams extends PageParams {
-  workflow?: Workflow;
-  label?: string;
-  status?: ArcStatus;
-}
-
-export type { CreateViewRequest, UpdateViewRequest, CreateLabelRequest, UpdateLabelRequest, CreateRuleRequest, UpdateRuleRequest };
-
-// ---------------------------------------------------------------------------
-// Verification mailer
-// ---------------------------------------------------------------------------
-
-export interface VerificationMailer {
-  sendForwardVerification(accountId: string, address: string, token: string): Promise<Result<void, TransientSesError>>;
-  sendCalendarForwardVerification(accountId: string, address: string, token: string): Promise<Result<void, TransientSesError>>;
 }
 
 // ---------------------------------------------------------------------------
@@ -148,22 +85,54 @@ export interface AppDeps {
   emailBucket: string;
 }
 
-export type AppEnv = { Variables: { auth: AuthContext; authorizationVerified?: boolean; [ROUTE_NOT_FOUND_KEY]?: boolean } };
-
-
 export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, verificationMailer, jobDispatcher, signalReprocessor, draftSendDispatcher, accountCreationStarter, appBaseUrl, contentCdnBaseUrl, astValidator, billingHandler, emailService, domainIdentityService, rsvpComposer, postApprovalCalendarDeps, schedulerClient, s3Client, emailBucket }: AppDeps) {
+  type AppEnv = { Variables: { auth: AuthContext; authorizationVerified?: boolean; [ROUTE_NOT_FOUND_KEY]?: boolean } };
   const app = new OpenAPIHono<AppEnv>();
 
-  // RFC 9727 — Well-Known URI for API Catalog
-  app.use("/.well-known/*", async (c, next) => {
-    await next();
-    c.res.headers.set("Cache-Control", "public, max-age=3600");
-  });
-  app.doc("/.well-known/api-catalog", {
-    openapi: "3.1.0",
-    info: { title: "SES Email Adapter", version: "1.0.0" },
-  });
-  app.get("/", (c) => c.redirect("/.well-known/api-catalog", 301));
+  // Shared error responses
+  const errResponses = {
+    400: { content: { "application/json": { schema: ErrorResponse } }, description: "Bad request" },
+    401: { content: { "application/json": { schema: ErrorResponse } }, description: "Unauthorized" },
+    403: { content: { "application/json": { schema: ErrorResponse } }, description: "Forbidden" },
+    404: { content: { "application/json": { schema: ErrorResponse } }, description: "Not found" },
+    409: { content: { "application/json": { schema: ErrorResponse } }, description: "Conflict" },
+    422: { content: { "application/json": { schema: ErrorResponse } }, description: "Unprocessable entity" },
+    500: { content: { "application/json": { schema: ErrorResponse } }, description: "Internal server error" },
+    501: { content: { "application/json": { schema: ErrorResponse } }, description: "Not implemented" },
+    503: { content: { "application/json": { schema: ErrorResponse } }, description: "Service unavailable" },
+  } as const;
+
+  type ErrorStatus = 400 | 401 | 403 | 404 | 409 | 422 | 500 | 501 | 503;
+  type ErrorCodeLiteral = z.infer<typeof ErrorCode>;
+  type ErrorBody = { title: string; errorCode?: ErrorCodeLiteral; details?: unknown; errorId: string };
+
+  function err<S extends ErrorStatus>(c: Context<AppEnv>, status: S, title: string, errorCode?: ErrorCodeLiteral, details?: unknown) {
+    return c.json(
+      { title, ...(errorCode ? { errorCode } : {}), ...(details !== undefined ? { details } : {}), errorId: logger.getInvocationId() } as ErrorBody,
+      status,
+    );
+  }
+
+  const route = <const R extends Parameters<typeof createRoute>[0]>(config: R) =>
+    createRoute({ ...config, responses: { ...errResponses, ...config.responses } } as unknown as R & { responses: R["responses"] & typeof errResponses });
+
+  // Per-route authorization middleware factory
+  const authorize = access ? createAuthorize(access, logger) : null;
+
+  function authz(permission: string, resourceUri: string | ((c: Context<AppEnv>) => string)): ReturnType<NonNullable<typeof authorize>> {
+    if (authorize) {
+      return authorize(permission, resourceUri as string | ((c: Context) => string));
+    }
+    return async (c, next) => {
+      c.set("authorizationVerified", true);
+      await next();
+    };
+  }
+
+  const helpers = { authz, err, route };
+
+  // Well-known routes (before auth middleware)
+  new WellKnownApi().register(app, helpers);
 
   // Attach x-request-id header to every response and errorId to 4XX/5XX JSON bodies
   app.use("*", async (c, next) => {
@@ -171,7 +140,6 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     const requestId = logger.getInvocationId();
     c.res.headers.set("x-request-id", requestId);
 
-    // Enrich error response bodies with errorId when missing
     const status = c.res.status;
     if (status >= 400 && c.res.headers.get("content-type")?.includes("application/json")) {
       const clone = c.res.clone();
@@ -254,104 +222,19 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
   // Authorization guard — safety net for forgotten authorize() calls on any route
   app.use("*", authorizationGuard(logger));
 
-  // Per-route authorization middleware factory
-  const authorize = access ? createAuthorize(access, logger) : null;
-
-  // Helper that returns the authorize middleware or a no-op if access service is unavailable
-  function authz(permission: string, resourceUri: string | ((c: Context<AppEnv>) => string)): ReturnType<NonNullable<typeof authorize>> {
-    if (authorize) {
-      return authorize(permission, resourceUri as string | ((c: Context) => string));
-    }
-    // When no access service, mark as authorized (backward compat for tests without access)
-    return async (c, next) => {
-      c.set("authorizationVerified", true);
-      await next();
-    };
-  }
-
-  // Shared error responses — included in every route to satisfy TypeScript's strict handler return type checking
-  const errResponses = {
-    400: { content: { "application/json": { schema: ErrorResponse } }, description: "Bad request" },
-    401: { content: { "application/json": { schema: ErrorResponse } }, description: "Unauthorized" },
-    403: { content: { "application/json": { schema: ErrorResponse } }, description: "Forbidden" },
-    404: { content: { "application/json": { schema: ErrorResponse } }, description: "Not found" },
-    409: { content: { "application/json": { schema: ErrorResponse } }, description: "Conflict" },
-    422: { content: { "application/json": { schema: ErrorResponse } }, description: "Unprocessable entity" },
-    500: { content: { "application/json": { schema: ErrorResponse } }, description: "Internal server error" },
-    501: { content: { "application/json": { schema: ErrorResponse } }, description: "Not implemented" },
-    503: { content: { "application/json": { schema: ErrorResponse } }, description: "Service unavailable" },
-  } as const;
-
-  type ErrorStatus = 400 | 401 | 403 | 404 | 409 | 422 | 500 | 501 | 503;
-  type ErrorCodeLiteral = z.infer<typeof ErrorCode>;
-  type ErrorBody = { title: string; errorCode?: ErrorCodeLiteral; details?: unknown; errorId: string };
-
-  function err<S extends ErrorStatus>(c: Context<AppEnv>, status: S, title: string, errorCode?: ErrorCodeLiteral, details?: unknown) {
-    return c.json(
-      { title, ...(errorCode ? { errorCode } : {}), ...(details !== undefined ? { details } : {}), errorId: logger.getInvocationId() } as ErrorBody,
-      status,
-    );
-  }
-
-  // Route helper: wraps createRoute to auto-merge shared error responses into every route definition.
-  // Keeps error responses in the type-level config so Hono infers the full return union (success | errors).
-  // This preserves compile-time validation of the success response shape.
-  // NOTE: requires explicit status codes on success returns (e.g. c.json(data, 200)) and
-  // response shapes that match the zod schema exactly.
-  const route = <const R extends Parameters<typeof createRoute>[0]>(config: R) =>
-    createRoute({ ...config, responses: { ...errResponses, ...config.responses } } as unknown as R & { responses: R["responses"] & typeof errResponses });
-
-
   // -------------------------------------------------------------------------
-  // Accounts & Users  —  /accounts, /accounts/:accountId, /accounts/:accountId/users
+  // Route registrations
   // -------------------------------------------------------------------------
-  registerAccountsRoutes(app, { accountDb, access, logger, accountCreationStarter, emailService, appBaseUrl, authz, err, route });
-
-  // -------------------------------------------------------------------------
-  // Arcs & Signals
-  // -------------------------------------------------------------------------
-  registerArcsRoutes(app, { arcDb, accountDb, logger, draftSendDispatcher, schedulerClient, emailService, rsvpComposer, postApprovalCalendarDeps, signalReprocessor, s3Client, emailBucket, contentCdnBaseUrl, authz, err, route });
-
-  // -------------------------------------------------------------------------
-  // Views  —  /accounts/:accountId/views
-  // -------------------------------------------------------------------------
-  registerViewsRoutes(app, { accountDb, authz, err, route });
-
-  // -------------------------------------------------------------------------
-  // Labels  —  /accounts/:accountId/labels
-  // -------------------------------------------------------------------------
-  registerLabelsRoutes(app, { accountDb, authz, err, route });
-
-  // -------------------------------------------------------------------------
-  // Rules  —  /accounts/:accountId/rules
-  // -------------------------------------------------------------------------
-  registerRulesRoutes(app, { accountDb, auditDb, authz, err, route, astValidator, billingHandler, logger });
-
-  // -------------------------------------------------------------------------
-  // Domains  —  /accounts/:accountId/domains
-  // -------------------------------------------------------------------------
-  registerDomainsRoutes(app, { accountDb, domainIdentityService, logger, authz, err, route });
-
-  // -------------------------------------------------------------------------
-  // Aliases, Alias Senders, Forwarding Addresses
-  // -------------------------------------------------------------------------
-  registerAliasesRoutes(app, { accountDb, logger, verificationMailer, authz, err, route });
-
-  // -------------------------------------------------------------------------
-  // Email Templates  —  /accounts/:accountId/templates
-  // -------------------------------------------------------------------------
-  registerTemplatesRoutes(app, { accountDb, auditDb, authz, err, route, astValidator, logger });
-
-
-  // -------------------------------------------------------------------------
-  // Audit  —  /accounts/:accountId/audit
-  // -------------------------------------------------------------------------
-  registerAuditRoutes(app, { auditDb, authz, err, route });
-
-  // ---------------------------------------------------------------------------
-  // Reindex jobs (admin)
-  // ---------------------------------------------------------------------------
-  registerAdminRoutes(app, { jobDispatcher, authz, err, route });
+  new AccountsApi(accountDb, access, logger, accountCreationStarter, emailService, appBaseUrl).register(app, helpers);
+  new ArcsApi(arcDb, accountDb, logger, draftSendDispatcher, schedulerClient, emailService, rsvpComposer, postApprovalCalendarDeps, signalReprocessor, s3Client, emailBucket, contentCdnBaseUrl).register(app, helpers);
+  new ViewsApi(accountDb).register(app, helpers);
+  new LabelsApi(accountDb).register(app, helpers);
+  new RulesApi(accountDb, auditDb, astValidator, billingHandler, logger).register(app, helpers);
+  new DomainsApi(accountDb, domainIdentityService, logger).register(app, helpers);
+  new AliasesApi(accountDb, logger, verificationMailer).register(app, helpers);
+  new TemplatesApi(accountDb, auditDb, astValidator, logger).register(app, helpers);
+  new AuditApi(auditDb).register(app, helpers);
+  new AdminApi(jobDispatcher).register(app, helpers);
 
   // ---------------------------------------------------------------------------
   // Not Found & Method Not Allowed — must be registered after all routes
@@ -363,11 +246,9 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
     const requestMethod = c.req.method;
     const requestPath = c.req.path;
 
-    // Check if this path matches any registered route with a different method (→ 405)
     const registeredMethods = new Set<string>();
     for (const r of app.routes) {
       if (r.method === "ALL") continue;
-      // Convert Hono path template :param to regex for matching
       const pattern = new RegExp("^" + r.path.replace(/:[^/]+/g, "[^/]+") + "$");
       if (pattern.test(requestPath) && r.method !== requestMethod) {
         registeredMethods.add(r.method);
