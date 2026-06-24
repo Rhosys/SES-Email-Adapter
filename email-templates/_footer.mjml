@@ -1,9 +1,14 @@
-<mj-section background-color="#DEE2E6">
-  <mj-column padding="0 10px">
-    <mj-spacer height="20px" />
-    <mj-text mj-class="footer">You're getting these notifications because you're part of an active Numaeel account.</mj-text>
-    <mj-text mj-class="footer">Rhosys AG · Wülflingerstrasse 151c · 8408 Winterthur · Switzerland</mj-text>
-    <mj-text mj-class="footer">You think you got this email by mistake? Reply to this email or contact <a href="https://{{domain}}/a/support">{{domain}}/a/support</a></mj-text>
-    <mj-text mj-class="footer"><a href="https://{{domain}}/a/unsubscribe?code={{unsubscribeCode}}&type={{emailType}}">Unsubscribe</a></mj-text>
+<mj-section background-color="{{theme.footerBg}}" padding="24px 20px">
+  <mj-column>
+    <mj-divider border-color="{{theme.divider}}" border-width="1px" padding="0 0 20px 0" />
+    <mj-text font-size="12px" color="{{theme.footerText}}" line-height="1.6" font-family="'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif">
+      You're receiving this because you're part of an active Numaeel account.
+    </mj-text>
+    <mj-text font-size="11px" color="{{theme.overlay}}" line-height="1.5" font-family="'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif">
+      Rhosys AG · Wülflingerstrasse 151c · 8408 Winterthur · Switzerland
+    </mj-text>
+    <mj-text font-size="11px" color="{{theme.overlay}}" line-height="1.5" padding-top="12px" font-family="'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif">
+      <a href="https://{{domain}}/a/support" style="color: {{theme.link}}; text-decoration: none;">Contact support</a>&nbsp;&nbsp;·&nbsp;&nbsp;<a href="https://{{domain}}/a/unsubscribe?code={{unsubscribeCode}}&type={{emailType}}" style="color: {{theme.link}}; text-decoration: none;">Unsubscribe</a>
+    </mj-text>
   </mj-column>
 </mj-section>
