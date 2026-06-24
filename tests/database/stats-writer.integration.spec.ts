@@ -327,7 +327,7 @@ describe("stats-writer integration (row-per-day design)", () => {
       assert(result.isOk());
       const response = aggregateStatsRows(result.value);
 
-      expect(response.totals).toEqual({ allowed: 6, blocked: 1, quarantined: 0, totalAliases: 1 });
+      expect(response.totals).toEqual({ allowed: 6, blocked: 1, quarantined: 0, aliases: 1 });
       expect(response.daily).toHaveLength(3);
       expect(response.daily[0]!.date).toBe("2026-06-15");
       expect(response.monthly).toHaveLength(1);
@@ -346,7 +346,7 @@ describe("stats-writer integration (row-per-day design)", () => {
       assert(result.isOk());
       const response = aggregateStatsRows(result.value);
 
-      expect(response.totals).toEqual({ allowed: 1015, blocked: 201, quarantined: 50, totalAliases: 32 });
+      expect(response.totals).toEqual({ allowed: 1015, blocked: 201, quarantined: 50, aliases: 32 });
     });
 
     it("account with missing current month snapshot uses previous month snapshot", async () => {
@@ -363,7 +363,7 @@ describe("stats-writer integration (row-per-day design)", () => {
       const response = aggregateStatsRows(result.value);
 
       // totals = snapshot(500,100,20,_,15) + diffs from 2026-05 onward (20+30+3, 5, 0, _, 0)
-      expect(response.totals).toEqual({ allowed: 553, blocked: 105, quarantined: 20, totalAliases: 15 });
+      expect(response.totals).toEqual({ allowed: 553, blocked: 105, quarantined: 20, aliases: 15 });
       expect(response.daily).toHaveLength(3);
       expect(response.monthly).toHaveLength(3); // May, June, July
     });
@@ -373,7 +373,7 @@ describe("stats-writer integration (row-per-day design)", () => {
       const result = await db.getStats("acc-empty");
       assert(result.isOk());
       const response = aggregateStatsRows(result.value);
-      expect(response.totals).toEqual({ allowed: 0, blocked: 0, quarantined: 0, totalAliases: 0 });
+      expect(response.totals).toEqual({ allowed: 0, blocked: 0, quarantined: 0, aliases: 0 });
       expect(response.daily).toEqual([]);
       expect(response.monthly).toEqual([]);
     });
