@@ -311,7 +311,7 @@ export class AccountDatabase {
     return ok(accountResult.value?.filtering ?? null);
   }
 
-  async getProcessorAccountContext(accountId: string, recipientAddress: string): Promise<Result<{ retentionDuration?: import("../processor/retention.js").RetentionDuration; filtering: AccountFilteringConfig | null; aliasConfig: Alias | null; registeredDomains: string[]; userEmails: string[]; billingPlan: import("../embedding/retention-tier.js").BillingPlan; onboardingCompleted: boolean }, DbError>> {
+  async getProcessorAccountContext(accountId: string, recipientAddress: string): Promise<Result<{ retentionDuration: import("../processor/retention.js").RetentionDuration; filtering: AccountFilteringConfig | null; aliasConfig: Alias | null; registeredDomains: string[]; userEmails: string[]; billingPlan: import("../embedding/retention-tier.js").BillingPlan; onboardingCompleted: boolean }, DbError>> {
     const accountResult = await this.getAccount(accountId);
     if (accountResult.isErr()) return err(accountResult.error);
     const account = accountResult.value;
@@ -325,7 +325,7 @@ export class AccountDatabase {
     const domains = domainsResult.value;
 
     return ok({
-      ...(account?.retentionDuration ? { retentionDuration: account.retentionDuration } : {}),
+      retentionDuration: account?.retentionDuration ?? "P3M",
       filtering: account?.filtering ?? null,
       aliasConfig,
       registeredDomains: domains.map((d) => d.domain),

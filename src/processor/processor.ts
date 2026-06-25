@@ -894,7 +894,7 @@ export class SignalProcessor {
     if (effectiveAliasSenderConfig && effectiveAliasSenderConfig.policy !== "allow") {
       const blockStatus = effectiveAliasSenderConfig.policy; // block_hidden | block_reject | report_violation
       const now = DateTime.utc().toISO()!;
-      const effectiveRetention = resolveRetention(accountCtx.retentionDuration ? { retentionDuration: accountCtx.retentionDuration } : {}, null);
+      const effectiveRetention = resolveRetention({ retentionDuration: accountCtx.retentionDuration }, null);
       const retentionSecs = durationToSeconds(effectiveRetention);
       const ttl = retentionSecs != null
         ? Math.floor(Date.now() / 1000) + retentionSecs
@@ -992,7 +992,7 @@ export class SignalProcessor {
 
     const now = DateTime.utc().toISO()!;
 
-    const effectiveRetentionForTtl = resolveRetention(accountCtx.retentionDuration ? { retentionDuration: accountCtx.retentionDuration } : {}, null);
+    const effectiveRetentionForTtl = resolveRetention({ retentionDuration: accountCtx.retentionDuration }, null);
     const retentionSecsForTtl = durationToSeconds(effectiveRetentionForTtl);
     const ttl = retentionSecsForTtl != null
       ? Math.floor(Date.now() / 1000) + retentionSecsForTtl
