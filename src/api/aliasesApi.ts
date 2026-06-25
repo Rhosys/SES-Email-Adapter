@@ -16,6 +16,7 @@ import {
   ListForwardingAddressesResponse,
 } from "./schemas.js";
 import type { AccountDatabase } from "../database/account-database.js";
+import type { AuditDatabase } from "../database/audit-database.js";
 import type { Logger } from "../logger.js";
 import type { AppEnv, RouteHelpers } from "./route-helpers.js";
 
@@ -50,12 +51,13 @@ export async function ensureAliasExists(accountDb: AccountDatabase, accountId: s
 export class AliasesApi {
   constructor(
     private readonly accountDb: AccountDatabase,
+    private readonly auditDb: AuditDatabase,
     private readonly logger: Logger,
     private readonly verificationMailer: VerificationMailer,
   ) {}
 
   register(app: OpenAPIHono<AppEnv>, { authz, err, route }: RouteHelpers): void {
-    const { accountDb, logger, verificationMailer } = this;
+    const { accountDb, auditDb, logger, verificationMailer } = this;
 
     // -------------------------------------------------------------------------
     // Aliases  —  /accounts/:accountId/aliases
@@ -187,6 +189,14 @@ export class AliasesApi {
       const deleteResult = await accountDb.deleteAlias(accountId, address);
       if (deleteResult.isErr()) return err(c, 500, "Internal Server Error");
       await accountDb.incrementStatMetric(accountId, "totalAliases", -1, logger.getInvocationId());
+      const { userId } = c.get("auth");
+      const auditResult = await auditDb.saveAuditEvent({
+        accountId, userId, action: "deleted", resourceType: "alias", resourceId: address,
+        before: { address }, after: null,
+      });
+      if (auditResult.isErr()) {
+        logger.warn("Audit write failed for alias deletion, proceeding", { code: "api.audit.alias_delete_failed", accountId, address, error: auditResult.error });
+      }
       return new Response(null, { status: 204 });
     });
 

@@ -230,8 +230,8 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
   new ViewsApi(accountDb).register(app, helpers);
   new LabelsApi(accountDb).register(app, helpers);
   new RulesApi(accountDb, auditDb, astValidator, billingHandler, logger).register(app, helpers);
-  new DomainsApi(accountDb, domainIdentityService, logger).register(app, helpers);
-  new AliasesApi(accountDb, logger, verificationMailer).register(app, helpers);
+  new DomainsApi(accountDb, auditDb, domainIdentityService, logger).register(app, helpers);
+  new AliasesApi(accountDb, auditDb, logger, verificationMailer).register(app, helpers);
   new TemplatesApi(accountDb, auditDb, astValidator, logger).register(app, helpers);
   new AuditApi(auditDb).register(app, helpers);
   new AdminApi(jobDispatcher).register(app, helpers);

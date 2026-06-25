@@ -10,6 +10,7 @@ import {
 } from "./schemas.js";
 import { checkDomain } from "../dns/dns-checker.js";
 import type { AccountDatabase } from "../database/account-database.js";
+import type { AuditDatabase } from "../database/audit-database.js";
 import type { DomainIdentityService } from "../email/domain-identity-service.js";
 import type { Logger } from "../logger.js";
 import type { Domain, DnsRecord } from "../types/index.js";
@@ -74,12 +75,13 @@ function buildDnsRecords(domain: Domain): DnsRecord[] {
 export class DomainsApi {
   constructor(
     private readonly accountDb: AccountDatabase,
+    private readonly auditDb: AuditDatabase,
     private readonly domainIdentityService: DomainIdentityService,
     private readonly logger: Logger,
   ) {}
 
   register(app: OpenAPIHono<AppEnv>, { authz, err, route }: RouteHelpers): void {
-    const { accountDb, domainIdentityService, logger } = this;
+    const { accountDb, auditDb, domainIdentityService, logger } = this;
 
     app.openapi(route({
       method: "get",
@@ -199,8 +201,43 @@ export class DomainsApi {
       if (domainResult.isErr()) return err(c, 500, "Internal Server Error");
       const domain = domainResult.value;
       if (!domain) return err(c, 404, "Domain not found", "DOMAIN_NOT_FOUND");
+
+      const { userId } = c.get("auth");
+
+      // Cascade: delete every alias (and its senders) registered under this domain
+      const aliasesResult = await accountDb.listAliasesForDomain(accountId, domain.domain);
+      if (aliasesResult.isErr()) return err(c, 500, "Internal Server Error");
+      const aliases = aliasesResult.value;
+      logger.info("Cascade-deleting aliases for domain", {
+        code: "api.domain_delete.cascade_aliases",
+        accountId,
+        domain: domain.domain,
+        aliases: aliases.map((a) => a.address),
+      });
+
+      for (const alias of aliases) {
+        const aliasDeleteResult = await accountDb.deleteAlias(accountId, alias.address);
+        if (aliasDeleteResult.isErr()) return err(c, 500, "Internal Server Error");
+        const aliasAuditResult = await auditDb.saveAuditEvent({
+          accountId, userId, action: "deleted", resourceType: "alias", resourceId: alias.address,
+          before: { address: alias.address }, after: null,
+        });
+        if (aliasAuditResult.isErr()) {
+          logger.warn("Audit write failed for cascaded alias deletion, proceeding", { code: "api.audit.alias_cascade_delete_failed", accountId, address: alias.address, error: aliasAuditResult.error });
+        }
+      }
+
       const deleteResult = await accountDb.deleteDomain(accountId, domain.domain);
       if (deleteResult.isErr()) return err(c, 500, "Internal Server Error");
+
+      const domainAuditResult = await auditDb.saveAuditEvent({
+        accountId, userId, action: "deleted", resourceType: "domain", resourceId: domain.domain,
+        before: { domain: domain.domain }, after: null,
+      });
+      if (domainAuditResult.isErr()) {
+        logger.warn("Audit write failed for domain deletion, proceeding", { code: "api.audit.domain_delete_failed", accountId, domain: domain.domain, error: domainAuditResult.error });
+      }
+
       return new Response(null, { status: 204 });
     });
   }
