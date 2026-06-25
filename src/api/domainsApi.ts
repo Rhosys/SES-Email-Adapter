@@ -108,7 +108,12 @@ export class DomainsApi {
       const accountId = c.req.param("accountId")!;
       const body = await zParse(CreateDomainRequest, c.req.raw);
 
-      // Cross-account ownership check — oldest registrant wins
+      // Cross-account ownership check — oldest registrant wins.
+      // NOTE: resolveAccountForDomain intentionally still matches against soft-deleted domains.
+      // This prevents "deleted domain takeover": if a different account could claim a domain
+      // the original account merely soft-deleted, the original owner would be permanently
+      // locked out of ever reviving it via POST. Ownership persists across soft-delete;
+      // only routability (resolveAccountForRecipient) is affected by status.
       const ownerResult = await accountDb.resolveAccountForDomain(body.domain);
       if (ownerResult.isErr()) return err(c, 500, "Internal Server Error");
       if (ownerResult.value && ownerResult.value !== accountId) {
