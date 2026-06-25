@@ -1,4 +1,4 @@
-import { DeleteCommand, GetCommand, PutCommand, QueryCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
+import { BatchWriteCommand, DeleteCommand, GetCommand, PutCommand, QueryCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { DateTime } from "luxon";
 import { dynamo, ACCOUNTS_TABLE } from "./shared.js";
 import { dbError, notFoundError, ok, err } from "../errors.js";
@@ -27,6 +27,16 @@ function parseAddress(address: string): { domain: string; alias: string } {
 function ruleGsi1pk(accountId: string) { return `ACCT#${accountId}`; }
 function ruleGsi1sk(status: RuleStatus, priorityOrder: number, id: string) {
   return `RULE#${status}#${priorityOrder.toString().padStart(6, "0")}#${id}`;
+}
+
+const BATCH_WRITE_LIMIT = 25;
+
+function chunk<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size));
+  }
+  return chunks;
 }
 
 // ---------------------------------------------------------------------------
@@ -191,12 +201,53 @@ export class AccountDatabase {
     }
   }
 
+  /** Lists all aliases registered under a specific domain for the account. */
+  async listAliasesForDomain(accountId: string, domain: string): Promise<Result<Alias[], DbError>> {
+    try {
+      const aliases: Alias[] = [];
+      let lastKey: Record<string, unknown> | undefined;
+      do {
+        const res = await dynamo.send(new QueryCommand({
+          TableName: ACCOUNTS_TABLE,
+          KeyConditionExpression: "pk = :pk AND begins_with(sk, :prefix)",
+          ExpressionAttributeValues: { ":pk": pk(accountId), ":prefix": `DOMAIN#${domain}#ALIAS#` },
+          ...(lastKey ? { ExclusiveStartKey: lastKey } : {}),
+        }));
+        // Filter to only alias items (exclude sender entries nested under each alias)
+        for (const item of res.Items ?? []) {
+          const sk = item["sk"] as string;
+          if (!sk.includes("#SENDER#")) aliases.push(item as Alias);
+        }
+        lastKey = res.LastEvaluatedKey as Record<string, unknown> | undefined;
+      } while (lastKey);
+      return ok(aliases);
+    } catch (e) {
+      return err(dbError(e));
+    }
+  }
+
   async upsertAlias(alias: Alias): Promise<Result<Alias, DbError>> {
     return this.saveAlias(alias);
   }
 
+  /** Deletes an alias along with every sender entry recorded for it. */
   async deleteAlias(accountId: string, address: string): Promise<Result<void, DbError>> {
     const { domain, alias } = parseAddress(address);
+
+    const sendersResult = await this.listSenders(accountId, address);
+    if (sendersResult.isErr()) return err(sendersResult.error);
+    const senders = sendersResult.value;
+
+    this.logger.info("Deleting alias and its senders", {
+      code: "account_db.delete_alias",
+      accountId,
+      address,
+      senders: senders.map((s) => s.senderDomain),
+    });
+
+    const batchDeleteResult = await this.batchDeleteSenders(accountId, senders);
+    if (batchDeleteResult.isErr()) return err(batchDeleteResult.error);
+
     try {
       await dynamo.send(new DeleteCommand({
         TableName: ACCOUNTS_TABLE,
@@ -205,6 +256,31 @@ export class AccountDatabase {
       return ok(undefined);
     } catch (e) {
       return err(dbError(e));
+    }
+  }
+
+  /** Batch-deletes sender entries in parallel, chunked to DynamoDB's 25-item BatchWriteItem limit. */
+  private async batchDeleteSenders(accountId: string, senders: AliasSender[]): Promise<Result<void, DbError>> {
+    if (senders.length === 0) return ok(undefined);
+    try {
+      await Promise.all(
+        chunk(senders, BATCH_WRITE_LIMIT).map((batch) => this.batchDeleteSenderChunk(accountId, batch)),
+      );
+      return ok(undefined);
+    } catch (e) {
+      return err(dbError(e));
+    }
+  }
+
+  private async batchDeleteSenderChunk(accountId: string, senders: AliasSender[]): Promise<void> {
+    let requestItems = senders.map((s) => ({
+      DeleteRequest: { Key: { pk: pk(accountId), sk: `DOMAIN#${s.domain}#ALIAS#${s.alias}#SENDER#${s.senderDomain}` } },
+    }));
+    while (requestItems.length > 0) {
+      const res = await dynamo.send(new BatchWriteCommand({
+        RequestItems: { [ACCOUNTS_TABLE]: requestItems },
+      }));
+      requestItems = (res.UnprocessedItems?.[ACCOUNTS_TABLE] ?? []) as typeof requestItems;
     }
   }
 
@@ -228,13 +304,9 @@ export class AccountDatabase {
       if (saveSenderResult.isErr()) return err(saveSenderResult.error);
     }
 
+    // deleteAlias cascades to remove oldAddress's sender entries too
     const deleteResult = await this.deleteAlias(accountId, oldAddress);
     if (deleteResult.isErr()) return err(deleteResult.error);
-
-    for (const s of senders) {
-      const removeResult = await this.removeSender(accountId, oldAddress, s.senderDomain);
-      if (removeResult.isErr()) return err(removeResult.error);
-    }
 
     return ok(renamed);
   }
@@ -294,12 +366,19 @@ export class AccountDatabase {
   async listSenders(accountId: string, address: string): Promise<Result<AliasSender[], DbError>> {
     const { domain, alias } = parseAddress(address);
     try {
-      const res = await dynamo.send(new QueryCommand({
-        TableName: ACCOUNTS_TABLE,
-        KeyConditionExpression: "pk = :pk AND begins_with(sk, :prefix)",
-        ExpressionAttributeValues: { ":pk": pk(accountId), ":prefix": `DOMAIN#${domain}#ALIAS#${alias}#SENDER#` },
-      }));
-      return ok((res.Items ?? []) as AliasSender[]);
+      const senders: AliasSender[] = [];
+      let lastKey: Record<string, unknown> | undefined;
+      do {
+        const res = await dynamo.send(new QueryCommand({
+          TableName: ACCOUNTS_TABLE,
+          KeyConditionExpression: "pk = :pk AND begins_with(sk, :prefix)",
+          ExpressionAttributeValues: { ":pk": pk(accountId), ":prefix": `DOMAIN#${domain}#ALIAS#${alias}#SENDER#` },
+          ...(lastKey ? { ExclusiveStartKey: lastKey } : {}),
+        }));
+        senders.push(...(res.Items ?? []) as AliasSender[]);
+        lastKey = res.LastEvaluatedKey as Record<string, unknown> | undefined;
+      } while (lastKey);
+      return ok(senders);
     } catch (e) {
       return err(dbError(e));
     }
@@ -311,7 +390,7 @@ export class AccountDatabase {
     return ok(accountResult.value?.filtering ?? null);
   }
 
-  async getProcessorAccountContext(accountId: string, recipientAddress: string): Promise<Result<{ retentionDuration?: import("../processor/retention.js").RetentionDuration; filtering: AccountFilteringConfig | null; aliasConfig: Alias | null; registeredDomains: string[]; userEmails: string[]; billingPlan: import("../embedding/retention-tier.js").BillingPlan; onboardingCompleted: boolean }, DbError>> {
+  async getProcessorAccountContext(accountId: string, recipientAddress: string): Promise<Result<{ retentionDuration: import("../processor/retention.js").RetentionDuration; filtering: AccountFilteringConfig | null; aliasConfig: Alias | null; registeredDomains: string[]; userEmails: string[]; billingPlan: import("../embedding/retention-tier.js").BillingPlan; onboardingCompleted: boolean }, DbError>> {
     const accountResult = await this.getAccount(accountId);
     if (accountResult.isErr()) return err(accountResult.error);
     const account = accountResult.value;
@@ -325,7 +404,7 @@ export class AccountDatabase {
     const domains = domainsResult.value;
 
     return ok({
-      ...(account?.retentionDuration ? { retentionDuration: account.retentionDuration } : {}),
+      retentionDuration: account?.retentionDuration ?? "P3M",
       filtering: account?.filtering ?? null,
       aliasConfig,
       registeredDomains: domains.map((d) => d.domain),

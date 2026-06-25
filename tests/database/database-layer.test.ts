@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mockClient } from "aws-sdk-client-mock";
-import { DynamoDBDocumentClient, GetCommand, PutCommand, QueryCommand, DeleteCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
+import { DynamoDBDocumentClient, GetCommand, PutCommand, QueryCommand, DeleteCommand, UpdateCommand, BatchWriteCommand } from "@aws-sdk/lib-dynamodb";
 import { AccountDatabase } from "../../src/database/account-database.js";
 import { ArcDatabase } from "../../src/database/arc-database.js";
 import { ProcessingDatabase } from "../../src/database/processing-database.js";
@@ -119,6 +119,105 @@ describe("AccountDatabase", () => {
       expect(result.isErr()).toBe(true);
       expect(result._unsafeUnwrapErr().kind).toBe("db_error");
       expect(result._unsafeUnwrapErr().cause).toBeInstanceOf(Error);
+    });
+  });
+
+  describe("deleteAlias", () => {
+    it("deletes the alias with no senders", async () => {
+      ddbMock.on(QueryCommand).resolves({ Items: [] });
+      ddbMock.on(DeleteCommand).resolves({});
+
+      const result = await db.deleteAlias("acct-1", "me@example.com");
+
+      expect(result.isOk()).toBe(true);
+      expect(ddbMock.commandCalls(BatchWriteCommand)).toHaveLength(0);
+      const deleteCalls = ddbMock.commandCalls(DeleteCommand);
+      expect(deleteCalls).toHaveLength(1);
+      expect(deleteCalls[0]!.args[0]!.input.Key).toEqual({ pk: "ACCT#acct-1", sk: "DOMAIN#example.com#ALIAS#me" });
+    });
+
+    it("paginates sender lookup and batch-deletes all senders across chunks in parallel", async () => {
+      const senders = Array.from({ length: 30 }, (_, i) => ({
+        accountId: "acct-1", aliasAddress: "me@example.com", domain: "example.com", alias: "me",
+        senderDomain: `sender${i}.com`, policy: "allow", addedAt: "2024-01-01",
+      }));
+      ddbMock.on(QueryCommand)
+        .resolvesOnce({ Items: senders.slice(0, 20), LastEvaluatedKey: { pk: "x", sk: "y" } })
+        .resolvesOnce({ Items: senders.slice(20) });
+      ddbMock.on(BatchWriteCommand).resolves({});
+      ddbMock.on(DeleteCommand).resolves({});
+
+      const result = await db.deleteAlias("acct-1", "me@example.com");
+
+      expect(result.isOk()).toBe(true);
+      // 30 senders chunked at 25 per BatchWriteItem call -> 2 parallel batches
+      const batchCalls = ddbMock.commandCalls(BatchWriteCommand);
+      expect(batchCalls).toHaveLength(2);
+      const batchSizes = batchCalls.map((c) => c.args[0]!.input.RequestItems!["ses-accounts"]!.length).sort((a, b) => a - b);
+      expect(batchSizes).toEqual([5, 25]);
+    });
+
+    it("retries unprocessed items from BatchWriteItem", async () => {
+      const senders = Array.from({ length: 3 }, (_, i) => ({
+        accountId: "acct-1", aliasAddress: "me@example.com", domain: "example.com", alias: "me",
+        senderDomain: `sender${i}.com`, policy: "allow", addedAt: "2024-01-01",
+      }));
+      ddbMock.on(QueryCommand).resolves({ Items: senders });
+      const unprocessedRequest = {
+        DeleteRequest: { Key: { pk: "ACCT#acct-1", sk: "DOMAIN#example.com#ALIAS#me#SENDER#sender1.com" } },
+      };
+      ddbMock.on(BatchWriteCommand)
+        .resolvesOnce({ UnprocessedItems: { "ses-accounts": [unprocessedRequest] } })
+        .resolvesOnce({});
+      ddbMock.on(DeleteCommand).resolves({});
+
+      const result = await db.deleteAlias("acct-1", "me@example.com");
+
+      expect(result.isOk()).toBe(true);
+      expect(ddbMock.commandCalls(BatchWriteCommand)).toHaveLength(2);
+    });
+
+    it("returns err with kind db_error when the sender lookup fails", async () => {
+      ddbMock.on(QueryCommand).rejects(new Error("ServiceUnavailable"));
+
+      const result = await db.deleteAlias("acct-1", "me@example.com");
+
+      expect(result.isErr()).toBe(true);
+      expect(result._unsafeUnwrapErr().kind).toBe("db_error");
+    });
+  });
+
+  describe("listAliasesForDomain", () => {
+    it("returns only alias items for the domain, excluding sender entries, across pages", async () => {
+      ddbMock.on(QueryCommand)
+        .resolvesOnce({
+          Items: [
+            { id: "a1", accountId: "acct-1", domain: "example.com", alias: "one", sk: "DOMAIN#example.com#ALIAS#one" },
+            { accountId: "acct-1", domain: "example.com", alias: "one", senderDomain: "s.com", sk: "DOMAIN#example.com#ALIAS#one#SENDER#s.com" },
+          ],
+          LastEvaluatedKey: { pk: "x", sk: "y" },
+        })
+        .resolvesOnce({
+          Items: [
+            { id: "a2", accountId: "acct-1", domain: "example.com", alias: "two", sk: "DOMAIN#example.com#ALIAS#two" },
+          ],
+        });
+
+      const result = await db.listAliasesForDomain("acct-1", "example.com");
+
+      expect(result.isOk()).toBe(true);
+      const aliases = result._unsafeUnwrap();
+      expect(aliases).toHaveLength(2);
+      expect(aliases.map((a) => a.id)).toEqual(["a1", "a2"]);
+    });
+
+    it("returns err with kind db_error on SDK failure", async () => {
+      ddbMock.on(QueryCommand).rejects(new Error("ServiceUnavailable"));
+
+      const result = await db.listAliasesForDomain("acct-1", "example.com");
+
+      expect(result.isErr()).toBe(true);
+      expect(result._unsafeUnwrapErr().kind).toBe("db_error");
     });
   });
 });
