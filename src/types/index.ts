@@ -702,6 +702,9 @@ export interface DnsRecord {
 export interface Domain {
   accountId: string;
   domain: string;
+  // Absent or "active" == live; "deleted" == soft-deleted (hidden from reads, still
+  // blocks other accounts from claiming it, and can be revived by the same account).
+  status?: "active" | "deleted";
   // All 4 DNS records (MX, DKIM, SPF, DMARC) verified — domain can receive and send
   receivingSetupComplete: boolean;
   // DKIM + SPF + DMARC CNAMEs verified — domain can sign outbound mail
