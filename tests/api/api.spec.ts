@@ -113,6 +113,7 @@ function makeAccountDb() {
     createAccount: vi.fn().mockImplementation((a) => Promise.resolve(ok(a))),
     updateAccount: vi.fn().mockResolvedValue(ok(makeAccount())),
     listAliases: vi.fn().mockResolvedValue(ok([])),
+    listAliasesForDomain: vi.fn().mockResolvedValue(ok([])),
     getAlias,
     createAlias: vi.fn().mockResolvedValue(ok(makeAlias())),
     saveAlias,
@@ -985,6 +986,30 @@ describe("API", () => {
       expect(res.status).toBe(204);
       expect(accountDb.deleteDomain).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "example.com");
     });
+
+    it("cascades to delete every alias on the domain and audits both deletions", async () => {
+      vi.mocked(accountDb.getDomain).mockResolvedValueOnce(ok(makeDomain()));
+      const aliasOne = makeAlias({ address: "one@example.com", alias: "one" });
+      const aliasTwo = makeAlias({ address: "two@example.com", alias: "two" });
+      vi.mocked(accountDb.listAliasesForDomain).mockResolvedValueOnce(ok([aliasOne, aliasTwo]));
+
+      const res = await req(app, "DELETE", `${A}/domains/example.com`);
+
+      expect(res.status).toBe(204);
+      expect(accountDb.listAliasesForDomain).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "example.com");
+      expect(accountDb.deleteAlias).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "one@example.com");
+      expect(accountDb.deleteAlias).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "two@example.com");
+      expect(accountDb.deleteDomain).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "example.com");
+      expect(auditDb.saveAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+        accountId: TEST_ACCOUNT_ID, action: "deleted", resourceType: "alias", resourceId: "one@example.com",
+      }));
+      expect(auditDb.saveAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+        accountId: TEST_ACCOUNT_ID, action: "deleted", resourceType: "alias", resourceId: "two@example.com",
+      }));
+      expect(auditDb.saveAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+        accountId: TEST_ACCOUNT_ID, action: "deleted", resourceType: "domain", resourceId: "example.com",
+      }));
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -1273,6 +1298,14 @@ describe("API", () => {
       const res = await req(app, "DELETE", `${A}/aliases/me%40mydomain.com`);
       expect(res.status).toBe(204);
       expect(accountDb.deleteAlias).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "me@mydomain.com");
+    });
+
+    it("records a deletion audit event", async () => {
+      const res = await req(app, "DELETE", `${A}/aliases/me%40mydomain.com`);
+      expect(res.status).toBe(204);
+      expect(auditDb.saveAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+        accountId: TEST_ACCOUNT_ID, action: "deleted", resourceType: "alias", resourceId: "me@mydomain.com",
+      }));
     });
   });
 
