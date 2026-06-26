@@ -109,7 +109,8 @@ export async function createProcessorHarness(): Promise<ProcessorHarness> {
   const auditDb = new AuditDatabase();
   const processingDb = new ProcessingDatabase();
 
-  // Seed a test account
+  // Seed a test account and register the recipient domain so the processor can resolve
+  // the owning account from the recipient address (recipient@${accountId}.example.com).
   const accountId = generateId('acc-');
   await accountDb.createAccount({
     id: accountId,
@@ -117,6 +118,9 @@ export async function createProcessorHarness(): Promise<ProcessorHarness> {
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   });
+  const recipientDomain = `${accountId}.example.com`;
+  const domainResult = await accountDb.createDomain(accountId, recipientDomain);
+  if (domainResult.isErr()) throw new Error(`createDomain failed: ${JSON.stringify(domainResult.error)}`);
 
   const sideEffects: SideEffectPayload[] = [];
 
