@@ -127,7 +127,12 @@ interface SesReceiptNotification {
 }
 
 export interface InboundSignalMessage {
-  accountId: string;
+  /**
+   * Optional sanity-check value. The pipeline always re-derives the owning accountId
+   * from the recipient address; if this is set and disagrees with the derived value,
+   * a track event is emitted and the derived value wins. Never used to skip the lookup.
+   */
+  expectedAccountId?: string;
   s3Key: string;
   sesMessageId: string;
   idempotencyKey: string;
@@ -350,60 +355,36 @@ export class SignalProcessor {
   }
 
   async processRecord(message: InboundSignalMessage, receiveCount: number): Promise<Result<void, ProcessorError>> {
-    // On redelivery, check DDB for existing signal before doing expensive work
-    if (receiveCount > 1) {
-      this.logger.info("Retry path activated — checking DDB for existing signal state before re-processing.", { code: "processor.retry_path_activated", receiveCount, accountId: message.accountId, sesMessageId: message.sesMessageId });
-
-      const existingResult = await this.arcDb.getSignalByMessageId(message.accountId, message.sesMessageId);
-      if (existingResult.isErr()) return err(processorError(existingResult.error));
-      this.logger.trackPoint("retry_signal_lookup");
-
-      if (existingResult.value) {
-        const signal = existingResult.value;
-        this.logger.info("Signal found in DDB on retry — resuming from Aurora upserts.", { code: "processor.retry_signal_found", signalId: signal.id, arcId: signal.arcId, accountId: message.accountId, sesMessageId: message.sesMessageId, receiveCount });
-
-        // Signal exists — arc is guaranteed to exist (arc saved before signal).
-        // Load arc to resume from the convergence point.
-        if (!signal.arcId) return err(processorError("signal missing arcId on retry"));
-        const arcResult = await this.arcDb.getArc(message.accountId, signal.arcId);
-        if (arcResult.isErr()) return err(processorError(arcResult.error));
-        this.logger.trackPoint("retry_arc_lookup");
-        const arc = arcResult.value;
-        if (!arc) return err(processorError("arc not found on retry"));
-
-        // Fetch account context (needed for S3 retention)
-        const accountCtxResult = await this.accountDb.getProcessorAccountContext(message.accountId, signal.data.recipientAddress);
-        if (accountCtxResult.isErr()) return err(processorError(accountCtxResult.error));
-        const accountCtx = accountCtxResult.value;
-
-        // S3 retention — always attempt, fire-and-forget (idempotent)
-        await this.attemptS3Retention(signal, accountCtx, arc);
-
-        // Aurora upserts — always run (idempotent). Gates side-effect dispatch.
-        const auroraResult = await this.executeAuroraUpserts(signal, arc);
-        if (auroraResult.isErr()) return err(processorError(auroraResult.error));
-
-        // Dispatch side-effects via SQS after Aurora succeeds
-        const dispatchResult = await this.dispatchSideEffects(signal, arc);
-        if (dispatchResult.isErr()) return err(processorError(dispatchResult.error));
-
-        return ok(undefined);
-      }
-
-      // Signal not found in DDB on retry — fall through to full pipeline
-      this.logger.info("Signal NOT found in DDB on retry — running full pipeline.", { code: "processor.retry_signal_not_found", accountId: message.accountId, sesMessageId: message.sesMessageId, receiveCount });
-    }
-
     let processResult: Result<void, DbError | InvalidResponseError>;
     try {
-      processResult = await this.processMessage(message);
+      processResult = await this.processMessage(message, receiveCount);
     } catch (e) {
-      this.logger.error("processMessage threw an unhandled exception. This should not happen — all errors should be returned as Result types. The message will be retried.", { code: "processor.unhandled_exception", error: e, accountId: message.accountId, sesMessageId: message.sesMessageId });
+      this.logger.error("processMessage threw an unhandled exception. This should not happen — all errors should be returned as Result types. The message will be retried.", { code: "processor.unhandled_exception", error: e, sesMessageId: message.sesMessageId });
       return err(processorError(e));
     }
     if (processResult.isErr()) return err(processorError(processResult.error));
 
     return ok(undefined);
+  }
+
+  /**
+   * Resolve which account owns a recipient address, plus the alias config if one exists.
+   * Alias match wins (single GSI read returns the full Alias via the ALL projection);
+   * otherwise falls back to the domain owner, with `aliasConfig: null`. Returns `null`
+   * when no active account owns the address (no alias and no non-deleted domain owner) —
+   * the caller drops the message.
+   */
+  private async resolveAccountIdAndAlias(recipientAddress: string): Promise<Result<{ accountId: string; aliasConfig: Alias | null } | null, DbError>> {
+    const aliasResult = await this.accountDb.getAliasByGlobalAddress(recipientAddress);
+    if (aliasResult.isErr()) return err(aliasResult.error);
+    if (aliasResult.value) return ok({ accountId: aliasResult.value.accountId, aliasConfig: aliasResult.value });
+
+    const domain = recipientAddress.split("@")[1] ?? "";
+    const ownerResult = await this.accountDb.getDomainOwner(domain);
+    if (ownerResult.isErr()) return err(ownerResult.error);
+    const owner = ownerResult.value;
+    if (!owner || owner.status === "deleted") return ok(null);
+    return ok({ accountId: owner.accountId, aliasConfig: null });
   }
 
   async processSideEffect(payload: SideEffectPayload, receiveCount = 1): Promise<Result<void, ProcessorError>> {
@@ -692,8 +673,8 @@ export class SignalProcessor {
     const webhookActions = (signal.data.matchedRules ?? [])
       .flatMap(r => r.actions.filter(a => a.type === "webhook" && a.value));
     if (webhookActions.length > 0) {
-      const accountCtxResult = await this.accountDb.getProcessorAccountContext(accountId, signal.data.recipientAddress);
-      const accountPlan = accountCtxResult.isOk() ? accountCtxResult.value.billingPlan : "Free";
+      const accountResult = await this.accountDb.getAccount(accountId);
+      const accountPlan = accountResult.isOk() ? (accountResult.value?.billingPlan ?? "Free") : "Free";
 
       if (!this.billingHandler.isFeatureEnabled(accountPlan, "webhook")) {
         this.logger.info("Webhook action skipped — feature not enabled for plan.", {
@@ -773,14 +754,61 @@ export class SignalProcessor {
     return ok(undefined);
   }
 
-  private async processMessage(msg: InboundSignalMessage, opts?: { force?: boolean; unsafeSkipDmarc?: boolean; forceSignalId?: string }): Promise<Result<void, DbError | InvalidResponseError>> {
-    const { accountId, s3Key, sesMessageId, idempotencyKey, timestamp, destination } = msg;
+  private async processMessage(msg: InboundSignalMessage, receiveCount: number, opts?: { force?: boolean; unsafeSkipDmarc?: boolean; forceSignalId?: string }): Promise<Result<void, DbError | InvalidResponseError>> {
+    const { s3Key, sesMessageId, idempotencyKey, timestamp, destination } = msg;
+    const recipientAddress = destination[0] ?? "";
 
-    // 1. Dedup
+    // 0. Resolve the owning account + alias from the recipient address. Single source of
+    // truth for accountId — always re-derived, never trusted from the message.
+    const resolved = await this.resolveAccountIdAndAlias(recipientAddress);
+    if (resolved.isErr()) return err(resolved.error);
+    if (!resolved.value) {
+      this.logger.track("No account owns this recipient address — dropping message.", { code: "processor.no_account_for_recipient", recipientAddress, sesMessageId, destination });
+      return ok(undefined);
+    }
+    const { accountId, aliasConfig } = resolved.value;
+    if (msg.expectedAccountId !== undefined && msg.expectedAccountId !== accountId) {
+      this.logger.track("Derived accountId does not match expectedAccountId on the message — proceeding with the derived value.", { code: "processor.account_id_mismatch", expectedAccountId: msg.expectedAccountId, derivedAccountId: accountId, recipientAddress, sesMessageId });
+    }
+
+    // 1. Dedup / retry-resume — a single signal lookup serves both. On force (reprocess)
+    // we skip it and always run the full pipeline.
     if (!opts?.force) {
       const existingResult = await this.arcDb.getSignalByMessageId(accountId, sesMessageId);
       if (existingResult.isErr()) return err(existingResult.error);
-      if (existingResult.value) return ok(undefined);
+      this.logger.trackPoint("signal_dedup_lookup");
+      const existing = existingResult.value;
+      if (existing) {
+        if (receiveCount > 1) {
+          // Retry after the signal was already saved — arc is guaranteed to exist (arc is
+          // saved before signal). Resume from the idempotent convergence point rather than
+          // re-running classify/embed/match.
+          this.logger.info("Signal found in DDB on retry — resuming from the convergence point.", { code: "processor.retry_signal_found", signalId: existing.id, arcId: existing.arcId, accountId, sesMessageId, receiveCount });
+          if (!existing.arcId) return err(dbError("signal missing arcId on retry"));
+          const arcResult = await this.arcDb.getArc(accountId, existing.arcId);
+          if (arcResult.isErr()) return err(arcResult.error);
+          this.logger.trackPoint("retry_arc_lookup");
+          const arc = arcResult.value;
+          if (!arc) return err(dbError("arc not found on retry"));
+
+          const accountResult = await this.accountDb.getAccount(accountId);
+          if (accountResult.isErr()) return err(accountResult.error);
+          const billingPlan = accountResult.value?.billingPlan ?? "Paid";
+
+          await this.attemptS3Retention(existing, billingPlan, arc);
+
+          const auroraResult = await this.executeAuroraUpserts(existing, arc);
+          if (auroraResult.isErr()) return err(auroraResult.error);
+
+          const dispatchResult = await this.dispatchSideEffects(existing, arc);
+          if (dispatchResult.isErr()) return err(dispatchResult.error);
+
+          return ok(undefined);
+        }
+        // First delivery seeing an existing signal — true duplicate, already fully
+        // processed (including dispatch). Dedup and return.
+        return ok(undefined);
+      }
     }
 
     // 1b. Block emails that fail DKIM or DMARC — spoofed sender, reject immediately
@@ -827,12 +855,15 @@ export class SignalProcessor {
     }
 
     // 2. Content Sanitizer — fetch, parse, sanitize, extract
-    const recipientAddress = destination[0] ?? "";
 
-    // Fetch account context early (needed for retention resolution before content sanitizer)
-    const accountCtxResult = await this.accountDb.getProcessorAccountContext(accountId, recipientAddress);
-    if (accountCtxResult.isErr()) return err(accountCtxResult.error);
-    const accountCtx = accountCtxResult.value;
+    // Fetch the account early (needed for retention resolution before content sanitizer).
+    const accountResult = await this.accountDb.getAccount(accountId);
+    if (accountResult.isErr()) return err(accountResult.error);
+    const account = accountResult.value;
+    const configuredRetentionDuration = account?.retentionDuration ?? "P3M";
+    const filtering = account?.filtering ?? null;
+    const billingPlan: BillingPlan = account?.billingPlan ?? "Paid";
+    const onboardingCompleted = account?.onboarding?.completed ?? false;
 
     // Resolve retention and generate pre-signed URLs for the content sanitizer
     const retentionDuration = resolveRetention({}, null);
@@ -885,7 +916,7 @@ export class SignalProcessor {
     const senderETLD1 = getETLD1(parsed.from.address);
 
     // 2b. Early sender block — skip classify/embed when sender is explicitly blocked for this alias
-    const aliasConfig = accountCtx.aliasConfig;
+    // (aliasConfig comes from the recipient resolution at the top of this method)
     const aliasSenderResult = await this.accountDb.getSender(accountId, recipientAddress, senderETLD1);
     if (aliasSenderResult.isErr()) return err(aliasSenderResult.error);
     const aliasSenderConfig = aliasSenderResult.value;
@@ -894,7 +925,7 @@ export class SignalProcessor {
     if (effectiveAliasSenderConfig && effectiveAliasSenderConfig.policy !== "allow") {
       const blockStatus = effectiveAliasSenderConfig.policy; // block_hidden | block_reject | report_violation
       const now = DateTime.utc().toISO()!;
-      const effectiveRetention = resolveRetention({ retentionDuration: accountCtx.retentionDuration }, null);
+      const effectiveRetention = resolveRetention({ retentionDuration: configuredRetentionDuration }, null);
       const retentionSecs = durationToSeconds(effectiveRetention);
       const ttl = retentionSecs != null
         ? Math.floor(Date.now() / 1000) + retentionSecs
@@ -992,23 +1023,23 @@ export class SignalProcessor {
 
     const now = DateTime.utc().toISO()!;
 
-    const effectiveRetentionForTtl = resolveRetention({ retentionDuration: accountCtx.retentionDuration }, null);
+    const effectiveRetentionForTtl = resolveRetention({ retentionDuration: configuredRetentionDuration }, null);
     const retentionSecsForTtl = durationToSeconds(effectiveRetentionForTtl);
     const ttl = retentionSecsForTtl != null
       ? Math.floor(Date.now() / 1000) + retentionSecsForTtl
       : undefined;
 
-    // 5. Test detection override
+    // 5. Test detection override — the account owner emailing one of their own registered
+    // domains. Single point-read on the sender's eTLD+1 rather than listing all domains.
     const fromDomain = getETLD1(parsed.from.address);
-    const isTestEmail =
-      accountCtx.registeredDomains.includes(fromDomain) ||
-      accountCtx.userEmails.map((e) => e.toLowerCase()).includes(parsed.from.address.toLowerCase());
+    const fromDomainResult = await this.accountDb.getDomainByName(accountId, fromDomain);
+    const isTestEmail = fromDomainResult.isOk() && fromDomainResult.value !== null;
     if (isTestEmail) {
       classificationOutput.workflow = "test";
       classificationOutput.workflowData = { workflow: "test", triggeredBy: "user" };
 
       // Auto-mark onboarding testEmailReceived if not yet completed
-      if (!accountCtx.onboardingCompleted) {
+      if (!onboardingCompleted) {
         const onboardingResult = await this.accountDb.updateAccount(accountId, {
           onboarding: { completed: false, testEmailReceived: true, testEmailReceivedAt: DateTime.utc().toISO()! },
         });
@@ -1125,7 +1156,7 @@ export class SignalProcessor {
     // 8. Assign system labels and merge classifier labels
     const effectiveFilterMode: UnknownSenderPolicy = aliasConfig
       ? aliasConfig.unknownSenderPolicy
-      : accountCtx.filtering?.defaultUnknownSenderPolicy ?? "allow_all";
+      : filtering?.defaultUnknownSenderPolicy ?? "allow_all";
 
     // Explicit sender block — if the sender has been explicitly blocked for this alias, short-circuit
     // (post-classify path: preserves classification data on blocked signal for audit/review)
@@ -1268,7 +1299,7 @@ export class SignalProcessor {
 
     // Auto-approve: sender gets added to approvedSenders when approve_sender fires, allow_all mode, or brand-new address with auto-allow policy
     if (outcome.approveSender || effectiveFilterMode === "allow_all") {
-      const approveResult = await this.autoApprove(accountId, recipientAddress, senderETLD1, aliasConfig, accountCtx.filtering?.defaultUnknownSenderPolicy, idempotencyKey);
+      const approveResult = await this.autoApprove(accountId, recipientAddress, senderETLD1, aliasConfig, filtering?.defaultUnknownSenderPolicy, idempotencyKey);
       if (approveResult.isErr()) return err(approveResult.error);
     }
 
@@ -1362,7 +1393,7 @@ export class SignalProcessor {
     await this.processCalendarAttachment(signal, arc, accountId, ttl);
 
     // 13. S3 retention — fire-and-forget (idempotent, always attempted)
-    await this.attemptS3Retention(signal, accountCtx, arc);
+    await this.attemptS3Retention(signal, billingPlan, arc);
 
     // 14. Aurora upserts — gates side-effect dispatch. All clusters must succeed.
     const auroraResult = await this.executeAuroraUpserts(signal, arc);
@@ -1456,10 +1487,10 @@ export class SignalProcessor {
    * Errors are logged at warn level and never propagate — S3 retention failure
    * must not alter the processing outcome or prevent Aurora/side-effect execution.
    */
-  async attemptS3Retention(signal: Signal, accountCtx: ProcessorAccountContext, arc: Arc): Promise<void> {
+  async attemptS3Retention(signal: Signal, billingPlan: BillingPlan, arc: Arc): Promise<void> {
     this.logger.trackPoint("s3_retention_start");
     try {
-      const retention = getRetentionForPlan(accountCtx.billingPlan);
+      const retention = getRetentionForPlan(billingPlan);
       let retentionApplyResult: Result<{ s3Key: string }, DbError>;
       try {
         const retentionValue = await this.retentionService.applyPlanRetention(signal.data.s3Key, {
@@ -1683,8 +1714,10 @@ export class SignalProcessor {
     const recipientAddress = existing.data.recipientAddress;
     const timestamp = existing.data.receivedAt ?? existing.createdAt;
 
+    // Pass the admin-supplied accountId as expectedAccountId only — processMessage
+    // re-derives the owning account from the recipient address (and tracks a mismatch).
     const msg: InboundSignalMessage = {
-      accountId,
+      expectedAccountId: accountId,
       s3Key,
       sesMessageId,
       idempotencyKey: existing.id,
@@ -1694,7 +1727,7 @@ export class SignalProcessor {
       dmarcVerdict: "PASS",
     };
 
-    const result = await this.processMessage(msg, { force: true, unsafeSkipDmarc: true, forceSignalId: existing.id });
+    const result = await this.processMessage(msg, 1, { force: true, unsafeSkipDmarc: true, forceSignalId: existing.id });
     if (result.isErr()) return err(processorError(result.error));
 
     // Re-fetch the signal (it was just overwritten by processMessage)
@@ -1712,9 +1745,11 @@ export class SignalProcessor {
     defaultUnknownSenderPolicy: AccountFilteringConfig["defaultUnknownSenderPolicy"] = "quarantine_visible",
     idempotencyKey: string,
   ): Promise<Result<void, DbError>> {
-    const aliasResult = await this.accountDb.ensureAlias(accountId, address, defaultUnknownSenderPolicy, existing);
-    if (aliasResult.isErr()) return err(aliasResult.error);
+    // Only create the alias when we don't already have it. A known alias (`existing`
+    // non-null, resolved at the top of the pipeline) needs no write.
     if (!existing) {
+      const aliasResult = await this.accountDb.ensureAlias(accountId, address, defaultUnknownSenderPolicy, null);
+      if (aliasResult.isErr()) return err(aliasResult.error);
       await this.accountDb.incrementStatMetric(accountId, "totalAliases", 1, idempotencyKey + ".alias");
     }
     const senderResult = await this.accountDb.saveSender(accountId, address, senderETLD1, "allow");

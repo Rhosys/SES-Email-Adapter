@@ -45,7 +45,6 @@ describe("Single saveArc call with complete mutations", () => {
 
   function makeMessage(sesMessageId: string, recipientEmail: string): InboundSignalMessage {
     return {
-      accountId: TEST_ACCOUNT_ID,
       s3Key: `emails/${sesMessageId}`,
       sesMessageId,
       idempotencyKey: "test-idempotency-key",
@@ -111,20 +110,13 @@ describe("Single saveArc call with complete mutations", () => {
       }),
     } as unknown as ArcDatabase;
     const accountDb = {
-      ...makeAccountDbMock(),
+      ...makeAccountDbMock(TEST_ACCOUNT_ID),
       listEnabledRules: vi.fn().mockReturnValue(Promise.resolve(ok([...SYSTEM_RULES, ...userRules]))),
-      getProcessorAccountContext: vi.fn().mockReturnValue(Promise.resolve(ok({
-        retentionDuration: "P3M",
-        filtering: null,
-        aliasConfig: {
-          id: "cfg-001", accountId: TEST_ACCOUNT_ID, address: `user@${recipientDomain}`, domain: recipientDomain, alias: "user",
-          unknownSenderPolicy: "allow_all", createdAt: "2024-01-01T00:00:00Z", updatedAt: "2024-01-01T00:00:00Z",
-        } satisfies Alias,
-        registeredDomains: testCase.doPong ? [recipientDomain] : [],
-        userEmails: testCase.doPong ? [senderEmail] : [],
-        billingPlan: "Paid",
-        onboardingCompleted: true,
-      }))),
+      // Recipient resolves to an allow_all alias for this account.
+      getAliasByGlobalAddress: vi.fn().mockReturnValue(Promise.resolve(ok({
+        id: "cfg-001", accountId: TEST_ACCOUNT_ID, address: `user@${recipientDomain}`, domain: recipientDomain, alias: "user",
+        unknownSenderPolicy: "allow_all", createdAt: "2024-01-01T00:00:00Z", updatedAt: "2024-01-01T00:00:00Z",
+      } satisfies Alias))),
       getSender: vi.fn().mockReturnValue(Promise.resolve(ok({
         accountId: TEST_ACCOUNT_ID, domain: recipientDomain,
         alias: "user", senderDomain: "external.com", policy: "allow", addedAt: "2024-01-01T00:00:00Z",

@@ -59,7 +59,7 @@ const validClassification: ClassificationOutput = {
 };
 
 function makeStore() {
-  return { arcDb: makeArcDbMock(), accountDb: makeAccountDbMock(), processingDb: makeProcessingDbMock() };
+  return { arcDb: makeArcDbMock(), accountDb: makeAccountDbMock(TEST_ACCOUNT_ID), processingDb: makeProcessingDbMock() };
 }
 
 function makeContentSanitizer(): ContentSanitizerClient {
@@ -115,7 +115,6 @@ function makeArcMatcher(): ArcMatcher {
 function makeMessage(): InboundSignalMessage {
   const sesMessageId = "msg-routing-test";
   return {
-    accountId: TEST_ACCOUNT_ID,
     s3Key: `emails/${sesMessageId}`,
     sesMessageId,
     idempotencyKey: "test-idempotency-key",

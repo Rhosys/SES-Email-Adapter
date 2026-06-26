@@ -98,7 +98,7 @@ describe("Aurora cluster failure preserves the DynamoDB cache entry", () => {
   };
 
   function makeStore() {
-    return { arcDb: makeArcDbMock(), accountDb: makeAccountDbMock(), processingDb: makeProcessingDbMock() };
+    return { arcDb: makeArcDbMock(), accountDb: makeAccountDbMock(TEST_ACCOUNT_ID), processingDb: makeProcessingDbMock() };
   }
 
   function makeContentSanitizer(): ContentSanitizerClient {
@@ -130,7 +130,6 @@ describe("Aurora cluster failure preserves the DynamoDB cache entry", () => {
 
   function makeMessage(sesMessageId: string): InboundSignalMessage {
     return {
-      accountId: TEST_ACCOUNT_ID,
       s3Key: `emails/${sesMessageId}`,
       sesMessageId,
       idempotencyKey: "test-idempotency-key",

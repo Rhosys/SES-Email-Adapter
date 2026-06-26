@@ -156,7 +156,6 @@ describe("Feature: in-reply-to-arc-threading, Parallel arc matching tier selecti
 
   function makeMessage(sesMessageId: string): InboundSignalMessage {
     return {
-      accountId: TEST_ACCOUNT_ID,
       s3Key: `emails/${sesMessageId}`,
       sesMessageId,
       idempotencyKey: "test-idempotency-key",
@@ -175,7 +174,7 @@ describe("Feature: in-reply-to-arc-threading, Parallel arc matching tier selecti
     arcMatcher?: ArcMatcher;
   }) {
     const arcDb = (overrides.arcDb ?? makeArcDbMock()) as ArcDatabase;
-    const accountDb = makeAccountDbMock();
+    const accountDb = makeAccountDbMock(TEST_ACCOUNT_ID);
     const processingDb = makeProcessingDbMock();
     return new SignalProcessor({
       ...makeSharedNewDeps(),

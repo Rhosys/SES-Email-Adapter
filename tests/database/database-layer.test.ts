@@ -375,27 +375,47 @@ describe("AccountDatabase", () => {
     });
   });
 
-  describe("resolveAccountForRecipient", () => {
-    it("domain fallback returns null when the matched domain is deleted (mail dropped)", async () => {
-      ddbMock.on(QueryCommand)
-        .resolvesOnce({ Items: [] }) // alias lookup misses
-        .resolvesOnce({ Items: [{ accountId: "acct-1", domain: "example.com", status: "deleted", createdAt: "2024-01-01T00:00:00Z" }] });
+  describe("getAliasByGlobalAddress", () => {
+    it("returns the full alias item on a hit (gsi1 ALL projection)", async () => {
+      const aliasItem = { accountId: "acct-1", address: "someone@example.com", domain: "example.com", alias: "someone", unknownSenderPolicy: "allow_all", createdAt: "2024-01-01T00:00:00Z", updatedAt: "2024-01-01T00:00:00Z" };
+      ddbMock.on(QueryCommand).resolvesOnce({ Items: [aliasItem] });
 
-      const result = await db.resolveAccountForRecipient("someone@example.com");
+      const result = await db.getAliasByGlobalAddress("someone@example.com");
+
+      expect(result.isOk()).toBe(true);
+      expect(result._unsafeUnwrap()).toEqual(aliasItem);
+    });
+
+    it("returns null when no alias matches", async () => {
+      ddbMock.on(QueryCommand).resolvesOnce({ Items: [] });
+
+      const result = await db.getAliasByGlobalAddress("someone@example.com");
 
       expect(result.isOk()).toBe(true);
       expect(result._unsafeUnwrap()).toBeNull();
     });
+  });
 
-    it("domain fallback returns the accountId when the matched domain is active", async () => {
-      ddbMock.on(QueryCommand)
-        .resolvesOnce({ Items: [] }) // alias lookup misses
-        .resolvesOnce({ Items: [{ accountId: "acct-1", domain: "example.com", status: "active", createdAt: "2024-01-01T00:00:00Z" }] });
+  describe("getDomainOwner", () => {
+    it("returns the oldest registrant, unfiltered by status (includes soft-deleted)", async () => {
+      ddbMock.on(QueryCommand).resolvesOnce({ Items: [
+        { accountId: "acct-newer", domain: "example.com", status: "active", createdAt: "2024-02-01T00:00:00Z" },
+        { accountId: "acct-owner", domain: "example.com", status: "deleted", createdAt: "2024-01-01T00:00:00Z" },
+      ] });
 
-      const result = await db.resolveAccountForRecipient("someone@example.com");
+      const result = await db.getDomainOwner("example.com");
 
       expect(result.isOk()).toBe(true);
-      expect(result._unsafeUnwrap()).toBe("acct-1");
+      expect(result._unsafeUnwrap()?.accountId).toBe("acct-owner");
+    });
+
+    it("returns null when the domain is unregistered", async () => {
+      ddbMock.on(QueryCommand).resolvesOnce({ Items: [] });
+
+      const result = await db.getDomainOwner("example.com");
+
+      expect(result.isOk()).toBe(true);
+      expect(result._unsafeUnwrap()).toBeNull();
     });
   });
 });

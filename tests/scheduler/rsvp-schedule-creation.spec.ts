@@ -14,7 +14,7 @@ import { SignalProcessor } from "../../src/processor/processor.js";
 import type { ArcMatcher, InboundSignalMessage } from "../../src/processor/processor.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
 import { makeSharedNewDeps, makeRuleEvaluator3 } from "../processor/_shared-new-deps.js";
-import { makeArcDbMock, makeAccountDbMock, makeProcessingDbMock } from "../processor/_helpers.js";
+import { makeArcDbMock, makeAccountDbMock, makeProcessingDbMock, applyCtx } from "../processor/_helpers.js";
 import type { ArcDatabase } from "../../src/database/arc-database.js";
 import type { ContentSanitizerClient } from "../../src/processor/content-sanitizer-client.js";
 import type { SchedulerClient } from "../../src/scheduler/scheduler-client.js";
@@ -104,7 +104,6 @@ function makeArcMatcher(): ArcMatcher {
 
 function makeMessage(sesMessageId: string): InboundSignalMessage {
   return {
-    accountId: TEST_ACCOUNT_ID,
     s3Key: `emails/${sesMessageId}`,
     sesMessageId,
     idempotencyKey: "test-idempotency-key",
@@ -152,15 +151,15 @@ function buildProcessor(opts: {
   const arcDb = makeArcDbMock();
   (arcDb.saveSignal as ReturnType<typeof vi.fn>).mockResolvedValue(ok(undefined));
 
-  const accountDb = makeAccountDbMock();
-  (accountDb.getProcessorAccountContext as ReturnType<typeof vi.fn>).mockResolvedValue(ok({
+  const accountDb = makeAccountDbMock(TEST_ACCOUNT_ID);
+  applyCtx(accountDb, {
     retentionDuration: "P3M",
     filtering: null,
     aliasConfig: DEFAULT_EMAIL_CONFIG,
     registeredDomains: [],
     userEmails: [],
     billingPlan: "Paid" as const,
-  }));
+  });
 
   return new SignalProcessor({
     ...makeSharedNewDeps(),
