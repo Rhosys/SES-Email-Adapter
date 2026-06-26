@@ -225,7 +225,7 @@ const verificationMailer: VerificationMailer = {
     return emailService.send({
       to: address,
       subject: "Verify your forwarding address",
-      textBody: `Click the link below to verify...\n\n${verifyUrl}\n\nIf you did not request this, you can ignore this email.`,
+      textBody: `Click the link below to verify...\n\n${verifyUrl}`,
     });
   },
 };

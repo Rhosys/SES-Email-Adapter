@@ -16,7 +16,9 @@
 - [ ] **Audit OpenAPI spec for missing zod constraints** — investigate why `@hono/zod-openapi` isn't propagating `.min()/.max()` to the generated spec.
 - [ ] **Define audit event response schema** — the `GET /accounts/:id/audit` endpoint returns `z.object({})` in the OpenAPI spec. Add a proper zod schema matching the response shape.
 - [ ] **Promotions: extract expiry date and auto-archive when the offer lapses** — classifier extracts `workflowData.offerExpiry` (ISO-8601). Auto-archive only if purely promotional. If mixed content, set `offerExpiry` but do not auto-archive.
+- [ ] **Auto-archive arcs on signal expiry (generic)** — any signal with a time-limited value (auth OTP `expiresInMinutes`, promo `offerExpiry`, password reset link) should auto-archive the arc when the expiry lapses, BUT only if the arc was not already active before this signal arrived. Logic: if the arc was archived/non-existent before the signal elevated or created it, auto-archive at expiry. If the arc was already active (user was interacting with it), do nothing — the user is engaged and manual control takes precedence. Applies to: `auth` (OTP/magic-link), `content` (promo codes with `expiryDate`), `payments` (time-limited offers). Computed from `signal.receivedAt + expiresInMinutes` or `expiryDate` directly. Scheduler or DynamoDB TTL-triggered cleanup.
 - [ ] **Retry Send for failed outbound messages** — UI must expose a "Retry Send" action on `domain_misconfiguration` or `send_failed` signals. Transient failures auto-retry via SES Feedback SQS loop; permanent failures require user action.
+- [ ] **AI-powered template auto-response** — extend templates with an optional `aiPrompt` field. When a signal matches a rule with `action: "auto_reply"` and the template has `aiPrompt` set, Bedrock generates a reply using the prompt as system instructions, the template body as structure/tone guide, and the inbound signal thread as context. The generated draft is either sent automatically (if the rule is configured for auto-send) or placed in the arc as a draft for user review. Template functions (`{{fn.*}}`) still execute — AI fills the unstructured parts, functions fill the deterministic parts. This also enables a "Draft a reply" button in arc detail that uses the account's default reply template + AI prompt to generate a contextual first draft.
 - [ ] **Gate `retentionDuration` setting by billing plan + handle downgrades** — validate against current plan on PATCH. Coerce on downgrade.
 - [ ] **Redesign stats storage for time-series** — daily granularity (last 365 days) and monthly rollups.
 - [ ] **Track alias count and approved-sender count in stats** — `totalAliases` and `totalApprovedSenders` atomic counters. Increment from API + processor. Decrement from API DELETE.
@@ -187,6 +189,80 @@ Built and Secured in Switzerland
 - **Extension fills the alias into the email field** — no copy-paste. The user clicks the extension icon (or the inline icon in the email field), chooses an alias, and the form is filled. Captures the site domain for labelling.
 - **Per-registration alias tracking** — the extension stores which alias was used for which site. In Settings → Email Addresses, the user sees `stripe-abc123@yourdomain.com — used at stripe.com — 4 emails received`. This is account-breach detection: if `stripe-abc123@` starts receiving phishing mail, the user knows Stripe's email list was compromised.
 - **One-click alias blocking** — if an alias starts receiving spam or the user no longer wants mail from that service, they block the alias in one tap from Settings. All future mail to that alias is silently dropped — no unsubscribe dance, no email bounced back to the sender, just silence.
+
+---
+
+### Workflow Intelligence — OTP & Auth
+
+- **In-app OTP banner (web + mobile)** — when a new auth signal arrives and the user already has the app open, a floating banner appears at the top of the screen — regardless of what view they're on — with the code pre-displayed and a copy button. No navigation to inbox required. The code is in the user's hand without a single tap on the email itself. The highest-friction moment in computing (copy a 6-digit code) becomes zero-friction.
+- **Auto-copy OTP to clipboard (mobile)** — on Android, when a one-time code arrives via push notification, the code is copied to the clipboard automatically before the user even unlocks. A system toast confirms: "Code copied from GitHub." On iOS, tapping the notification copies the code instantly — one tap, not six. Opt-in setting: "Automatically copy one-time codes when they arrive." The fastest possible path from email to login.
+
+---
+
+### AI-Powered Replies (Template + Prompt)
+
+- **"Draft a reply" with AI** — when a conversation or CRM email needs a response, one tap generates a first-person reply draft in the composer. The AI uses the account's reply template as a tone/structure guide and a custom prompt as system instructions. The user edits and sends. Not a canned response — a contextual, personalised draft that sounds like them.
+- **Rule-triggered auto-replies with AI** — templates can include an `aiPrompt` field. When a rule matches and the template has a prompt, Bedrock generates the reply body using the template structure + the inbound thread as context. Deterministic fields (template functions) stay deterministic; AI fills the human parts. Auto-send or draft-for-review — user's choice per rule.
+
+---
+
+### Time-Aware Surfacing — "The right email at the right moment"
+
+- **Knows when you need to act** — every signal is analysed for action deadlines: reply-needed conversations, invoice due dates, meeting RSVPs, expiring discount codes. The inbox surfaces them at the moment they become urgent — not when they arrived. An invoice due in 14 days doesn't interrupt Tuesday morning; it surfaces Wednesday of the due week.
+- **Configurable resurfacing** — users control when action-needed arcs reappear: "Surface unpaid invoices 3 days before due", "Remind me about unanswered conversations after 48 hours", "Show boarding passes 2 hours before departure." Per-workflow defaults with per-arc overrides.
+- **Meeting reminders + event QR codes at the door** — scheduling arcs with `startTime` automatically resurface with the joining link or venue QR code exactly when needed. A Zoom link surfaces 5 minutes before. A concert ticket QR surfaces when you arrive at the venue. The email you received 3 weeks ago becomes useful precisely when it matters.
+- **Bills surface on payday, not arrival day** — invoice and subscription renewal arcs can be snoozed to a user-configured "bill review day" (e.g. 1st of the month). All payment arcs accumulate silently and surface together as a batch for review. One session, all bills handled.
+- **Conversations that need a reply float back** — if a conversation is marked `requiresReply` and the user hasn't responded after a configurable delay, the arc silently re-elevates in the Default view. Not a notification. Not an alarm. Just gentle, persistent visibility until the user acts or dismisses.
+
+---
+
+### Package Intelligence — "Your deliveries, at a glance"
+
+- **Delivery day awareness** — on days when one or more packages are `out_for_delivery`, a subtle banner appears at the top of the inbox: "2 packages arriving today: AirPods Pro, USB-C Cables." Tapping it filters to those arcs. A morning delivery briefing — not an alert, just ambient awareness of what's coming today.
+
+---
+
+### CRM — "Your inbox is your CRM"
+
+- **TODO:** Define the CRM marketing story. The inbox automatically builds relationship context from email history — no manual data entry, no separate tool. Details TBD.
+
+---
+
+### Innovations — Pending Review
+
+Items from the WORKFLOW_UX_SPEC "Where to innovate" sections. Evaluate for inclusion in marketing site.
+
+#### Package
+- [ ] **Spend tracking** — rolling 30-day spend aggregated by retailer in package view header: "You've spent €847 at Amazon this month."
+- [ ] **One-tap return initiation** — deep-link return URL from `orderNumber` + retailer URL patterns. Start a return without navigating the retailer's site.
+
+#### Travel
+- [ ] **Boarding pass lock screen widget** — confirmation number / QR code persists as lock-screen notification on travel day. Never dig through apps at the gate.
+- [ ] **Proactive gate/delay alerts** — airline sends a change email → interrupt-push regardless of preferences. Gate changed? You know before the board updates.
+- [ ] **Multi-city trip linking** — flights + hotels with overlapping dates to the same destination grouped into a collapsible "London Jan 18–22" trip section.
+- [ ] **Expense extraction post-trip** — one-tap export of all trip costs (flight/hotel/car) as CSV after the trip auto-archives.
+
+#### Scheduling
+- [ ] **Conflict detection** — new invite overlaps existing scheduling arc → inline warning: "Conflict: you already have Q2 Review at 2pm."
+- [ ] **One-tap accept + add-to-calendar** — single tap: accept reply sent + .ics added to OS calendar + arc archived.
+- [ ] **Location intelligence** — physical address → one-tap Directions. Video URL → one-tap Join. On the arc row, not buried in detail.
+- [ ] **Smart decline suggestions** — when declining, suggest free time slots from existing scheduling arcs: "You're free Thursday 4–5pm — propose?"
+
+#### Payments
+- [ ] **Vendor spend aggregation** — monthly spend dashboard in Payments view: total + per-vendor breakdown. No spreadsheet, no bank login.
+- [ ] **Overdue invoice escalation** — invoice passes `dueDate` by 3 days with no receipt → escalate + "Have you paid this?" prompt.
+- [ ] **Subscription calendar** — all renewal arcs listed by upcoming date: "Adobe CC — Jan 30, €599 / AWS — Feb 1 / Notion — Feb 15, €96."
+- [ ] **One-tap pay confirmation** — after clicking Pay now and returning, prompt: "Did you complete the payment?" → [Yes, paid] archives + labels.
+
+#### Alert
+- [ ] **Automated threat context enrichment** — IP on suspicious login → threat intel lookup. Risk score, country, report count displayed inline.
+- [ ] **Security incident timeline** — multiple related security events linked visually: "Security incident — 3 events over 2 hours."
+- [ ] **CI failure summary** — "Failing since: commit 4a3b2c1. Last passing: 7f8d2e4 at 2:15pm." Parsed from email bodies.
+- [ ] **Security playbook** — "This wasn't me" → guided checklist: change password, review sessions, enable 2FA, revoke OAuth apps. Each tappable + trackable.
+
+#### Content
+- [ ] **Reading time estimate** — word count → "7 min read" on the arc row.
+- [ ] **AI digest of newsletters** — weekly briefing across all unread newsletters: 12 issues → 6 sentences, each deep-linking to the source arc.
 
 ---
 
