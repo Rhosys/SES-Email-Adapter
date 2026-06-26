@@ -32,6 +32,7 @@ import { AliasesApi } from "./aliasesApi.js";
 import { TemplatesApi } from "./templatesApi.js";
 import { AuditApi } from "./auditApi.js";
 import { AdminApi } from "./adminApi.js";
+import { ThreadsApi } from "./threadsApi.js";
 
 import { authorizationGuard, ROUTE_NOT_FOUND_KEY } from "./authorization-guard.js";
 import { createAuthorize } from "./authorization-middleware.js";
@@ -227,6 +228,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
   // -------------------------------------------------------------------------
   new AccountsApi(accountDb, access, logger, accountCreationStarter, emailService, appBaseUrl).register(app, helpers);
   new ArcsApi(arcDb, accountDb, logger, draftSendDispatcher, schedulerClient, emailService, rsvpComposer, postApprovalCalendarDeps, signalReprocessor, s3Client, emailBucket, contentCdnBaseUrl).register(app, helpers);
+  new ThreadsApi(arcDb, accountDb, logger, draftSendDispatcher, schedulerClient, emailService, rsvpComposer, postApprovalCalendarDeps, signalReprocessor, s3Client, emailBucket, contentCdnBaseUrl).register(app, helpers);
   new ViewsApi(accountDb).register(app, helpers);
   new LabelsApi(accountDb).register(app, helpers);
   new RulesApi(accountDb, auditDb, astValidator, billingHandler, logger).register(app, helpers);

@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ok, err } from "neverthrow";
 import { SignalProcessor } from "../../src/processor/processor.js";
-import type { ProcessorAccountContext } from "../../src/processor/processor.js";
 import { makeArcDbMock, makeAccountDbMock, makeProcessingDbMock } from "./_helpers.js";
+import type { CtxLike } from "./_helpers.js";
 import type { AccountDatabase } from "../../src/database/account-database.js";
 import type { UserCodeExecutorClient } from "../../src/processor/user-code-client.js";
 import { userCodeError } from "../../src/processor/user-code-client.js";
@@ -22,7 +22,7 @@ import { createMockLogger, type MockLogger } from "../helpers/mock-logger.js";
 
 const TEST_ACCOUNT_ID = "acc_tmpl_test";
 
-const DEFAULT_CTX: ProcessorAccountContext = {
+const DEFAULT_CTX: CtxLike = {
   retentionDuration: "P1Y",
   filtering: null,
   aliasConfig: null,

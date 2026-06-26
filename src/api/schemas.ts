@@ -388,6 +388,7 @@ export const DomainMisconfigurationData = z.object({
 const SignalBase = {
   signalId: z.string().readonly(),
   arcId: z.string().optional().readonly(),
+  threadId: z.string().optional().readonly(),
   source: SignalSource,
   status: SignalStatus,
   createdAt: z.string().readonly(),
@@ -479,6 +480,7 @@ export const DraftSignal = z.object({
 
 export const Arc = z.object({
   arcId: z.string().readonly(),
+  threadId: z.string().readonly(),
   workflow: Workflow,
   labels: z.array(z.string()),
   status: ArcStatus,

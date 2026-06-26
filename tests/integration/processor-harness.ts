@@ -28,7 +28,6 @@ import type { MockAuthressServer } from './mock-authress.js';
 import { InProcessContentSanitizer } from './in-process-content-sanitizer.js';
 import { createConsoleLogger } from './logger.js';
 import { ok } from '../../src/errors.js';
-import { generateId } from '../../src/utils/id.js';
 import type { AccessService } from '../../src/api/app.js';
 import type { EmailService } from '../../src/email/email-service.js';
 import type { sendRsvp } from '../../src/processor/calendar/rsvp-composer.js';
@@ -109,19 +108,6 @@ export async function createProcessorHarness(): Promise<ProcessorHarness> {
   const auditDb = new AuditDatabase();
   const processingDb = new ProcessingDatabase();
 
-  // Seed a test account and register the recipient domain so the processor can resolve
-  // the owning account from the recipient address (recipient@${accountId}.example.com).
-  const accountId = generateId('acc-');
-  await accountDb.createAccount({
-    id: accountId,
-    name: 'Integration Test Account',
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  });
-  const recipientDomain = `${accountId}.example.com`;
-  const domainResult = await accountDb.createDomain(accountId, recipientDomain);
-  if (domainResult.isErr()) throw new Error(`createDomain failed: ${JSON.stringify(domainResult.error)}`);
-
   const sideEffects: SideEffectPayload[] = [];
 
   const processor = new SignalProcessor({
@@ -191,6 +177,32 @@ export async function createProcessorHarness(): Promise<ProcessorHarness> {
     postApprovalCalendarDeps: { accountDb: {} as never, emailService: {} as never, serviceDomain: 'platform.email.rhosys.cloud' } as unknown as PostApprovalCalendarHandlerDeps,
     schedulerClient: { scheduleMessage: async () => ok(undefined), deleteSchedule: async () => ok(undefined) } as never,
   }));
+
+  // ---------------------------------------------------------------------------
+  // Seed account + domain via the API (never call DB directly in integration tests)
+  // ---------------------------------------------------------------------------
+
+  const seedUserId = `user-processor-harness-${Date.now()}`;
+  const seedToken = await mockAuthress.createToken(seedUserId);
+
+  const createAccountRes = await app.request('/accounts', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${seedToken}`, 'Content-Type': 'application/json' },
+  });
+  if (createAccountRes.status !== 201) {
+    throw new Error(`POST /accounts failed: ${createAccountRes.status} ${await createAccountRes.text()}`);
+  }
+  const { accountId } = await createAccountRes.json() as { accountId: string };
+
+  const recipientDomain = `${accountId}.example.com`;
+  const createDomainRes = await app.request(`/accounts/${accountId}/domains`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${seedToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ domain: recipientDomain }),
+  });
+  if (createDomainRes.status !== 201) {
+    throw new Error(`POST /accounts/${accountId}/domains failed: ${createDomainRes.status} ${await createDomainRes.text()}`);
+  }
 
   // ---------------------------------------------------------------------------
   // Helpers

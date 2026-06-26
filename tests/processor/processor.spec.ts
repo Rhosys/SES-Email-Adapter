@@ -4,8 +4,9 @@ import { ok, err } from "neverthrow";
 import { SignalProcessor, deriveGroupingKey, SYSTEM_RULES, extractForwardedAddress } from "../../src/processor/processor.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
 import { baseUrgency } from "../../src/processor/priority.js";
-import type { ArcMatcher, RuleEvaluator, Notifier, Forwarder, ReplySender, InboundSignalMessage, SqsDispatcher, ProcessorAccountContext } from "../../src/processor/processor.js";
+import type { ArcMatcher, RuleEvaluator, Notifier, Forwarder, ReplySender, InboundSignalMessage, SqsDispatcher } from "../../src/processor/processor.js";
 import { makeArcDbMock, makeAccountDbMock, makeProcessingDbMock, applyCtx } from "./_helpers.js";
+import type { CtxLike } from "./_helpers.js";
 import type { ContentSanitizerClient } from "../../src/processor/content-sanitizer-client.js";
 import type { UserCodeExecutorClient } from "../../src/processor/user-code-client.js";
 import type { SignalClassifier, ClassificationOutput } from "../../src/classifier/classifier.js";
@@ -61,7 +62,7 @@ const DEFAULT_EMAIL_CONFIG: Alias = {
 const DEFAULT_SENDER_ENTRY: import("../../src/types/index.js").AliasSender = {
   accountId: TEST_ACCOUNT_ID, aliasAddress: "user@example.com", domain: "example.com", alias: "user", senderDomain: "example.com", policy: "allow", addedAt: "2024-01-01T00:00:00Z",
 };
-const DEFAULT_CTX = { retentionDuration: "P3M", filtering: null, aliasConfig: DEFAULT_EMAIL_CONFIG, registeredDomains: [], userEmails: [], billingPlan: "Paid" as const, onboardingCompleted: true } satisfies ProcessorAccountContext;
+const DEFAULT_CTX = { retentionDuration: "P3M", filtering: null, aliasConfig: DEFAULT_EMAIL_CONFIG, registeredDomains: [], userEmails: [], billingPlan: "Paid" as const, onboardingCompleted: true } satisfies CtxLike;
 
 function makeStore() {
   const arcDb = makeArcDbMock();

@@ -110,8 +110,7 @@ export function mockRecipientDomainOwner(accountDb: AccountDatabase, accountId: 
 }
 
 /**
- * Compatibility shim for the old `getProcessorAccountContext` mock. Translates a
- * context-shaped object into the underlying calls the processor now makes:
+ * Translates a context-shaped object into the underlying calls the processor now makes:
  * `getAccount` (retention/filtering/billingPlan/onboarding) and
  * `getAliasByGlobalAddress` (aliasConfig). When `aliasConfig` is null, resolution falls
  * through to the domain-owner default wired in `makeAccountDbMock(accountId)`.
