@@ -67,14 +67,12 @@ const DEFAULT_ALIAS: Alias = {
 function makeStore(billingPlan: "Paid" | "Free" | "Trial" = "Paid") {
   const arcDb = makeArcDbMock();
   const accountDb = {
-    ...makeAccountDbMock(),
-    getProcessorAccountContext: vi.fn().mockReturnValue(Promise.resolve(ok({
+    ...makeAccountDbMock(TEST_ACCOUNT_ID),
+    getAccount: vi.fn().mockReturnValue(Promise.resolve(ok({
       retentionDuration: "P3M",
       filtering: null,
-      aliasConfig: DEFAULT_ALIAS,
-      registeredDomains: [],
-      userEmails: [],
       billingPlan,
+      onboarding: { completed: true },
     }))),
     getSender: vi.fn().mockReturnValue(Promise.resolve(ok({
       accountId: TEST_ACCOUNT_ID, aliasAddress: "user@example.com",

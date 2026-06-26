@@ -4,7 +4,7 @@ import { SignalProcessor, SYSTEM_RULES } from "../../src/processor/processor.js"
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
 import { makeSharedNewDeps } from "./_shared-new-deps.js";
 import type { ArcMatcher, RuleEvaluator, InboundSignalMessage, SqsDispatcher, ProcessorAccountContext } from "../../src/processor/processor.js";
-import { makeArcDbMock, makeAccountDbMock, makeProcessingDbMock } from "./_helpers.js";
+import { makeArcDbMock, makeAccountDbMock, makeProcessingDbMock, applyCtx } from "./_helpers.js";
 import type { ContentSanitizerClient } from "../../src/processor/content-sanitizer-client.js";
 import type { UserCodeExecutorClient } from "../../src/processor/user-code-client.js";
 import type { SignalClassifier, ClassificationOutput } from "../../src/classifier/classifier.js";
@@ -65,11 +65,11 @@ const validClassification: ClassificationOutput = {
 
 function makeStore() {
   const arcDb = makeArcDbMock();
-  const accountDb = makeAccountDbMock();
+  const accountDb = makeAccountDbMock(TEST_ACCOUNT_ID);
   const processingDb = makeProcessingDbMock();
   // Override defaults for this test file
   vi.mocked(accountDb.listEnabledRules).mockReturnValue(Promise.resolve(ok(SYSTEM_RULES)));
-  vi.mocked(accountDb.getProcessorAccountContext).mockReturnValue(Promise.resolve(ok(DEFAULT_CTX)));
+  applyCtx(accountDb, DEFAULT_CTX);
   vi.mocked(accountDb.getSender).mockReturnValue(Promise.resolve(ok(DEFAULT_SENDER_ENTRY)));
   return { arcDb, accountDb, processingDb };
 }
@@ -127,7 +127,6 @@ function makeRuleEvaluator(logger: MockLogger): RuleEvaluator {
 
 function makeMessage(opts: Partial<InboundSignalMessage> = {}): InboundSignalMessage {
   return {
-    accountId: TEST_ACCOUNT_ID,
     s3Key: "emails/msg-123",
     sesMessageId: "msg-123",
     idempotencyKey: "test-idempotency-key",

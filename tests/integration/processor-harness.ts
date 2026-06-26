@@ -243,7 +243,6 @@ export async function createProcessorHarness(): Promise<ProcessorHarness> {
     };
 
     const message: InboundSignalMessage = {
-      accountId: inner.accountId ?? inner.mail.destination[0]!,
       s3Key: inner.receipt.action.objectKey,
       sesMessageId: inner.mail.messageId,
       idempotencyKey: inner.mail.messageId,
