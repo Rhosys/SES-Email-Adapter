@@ -62,16 +62,6 @@ export interface SqsDispatcher {
 // Interfaces
 // ---------------------------------------------------------------------------
 
-export interface ProcessorAccountContext {
-  retentionDuration?: RetentionDuration;
-  filtering: AccountFilteringConfig | null;
-  aliasConfig: Alias | null;
-  registeredDomains: string[];
-  userEmails: string[];
-  billingPlan: BillingPlan;
-  onboardingCompleted: boolean;
-}
-
 export interface ArcMatcherPort {
   findMatch(accountId: string, recipientAddress: string, embedding: number[]): Promise<Result<Arc | null, DbError>>;
   upsertEmbedding(arcId: string, embedding: number[], accountId: string, recipientAddress: string): Promise<Result<void, DbError>>;

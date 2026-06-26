@@ -67,7 +67,7 @@ export function durationToSeconds(duration: RetentionDuration): number | null {
 }
 
 /**
- * Context needed to resolve retention — subset of ProcessorAccountContext.
+ * Context needed to resolve retention.
  */
 export interface RetentionAccountContext {
   /** Account-level default retention, if configured */

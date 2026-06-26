@@ -28,6 +28,7 @@ import type * as Api from "./schemas.js";
 export function toApiArc(arc: DbArc): Api.Arc {
   return {
     arcId: arc.id,
+    threadId: arc.id,
     workflow: arc.workflow as Api.Arc["workflow"],
     labels: arc.labels,
     status: arc.status as Api.Arc["status"],
@@ -109,7 +110,7 @@ function toApiEmailSignalData(data: EmailSignalData): Api.InboundEmailSignalData
 export function toApiSignal(signal: AnySignal): Api.Signal {
   const base = {
     signalId: signal.id,
-    ...(signal.arcId ? { arcId: signal.arcId } : {}),
+    ...(signal.arcId ? { arcId: signal.arcId, threadId: signal.arcId } : {}),
     source: toApiSource(signal.source),
     status: signal.status as Api.Signal["status"],
     createdAt: signal.createdAt,
