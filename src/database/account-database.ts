@@ -132,6 +132,27 @@ export class AccountDatabase {
     }
   }
 
+  /**
+   * Alias lookup by full recipient address, without a known accountId. Queries gsi1
+   * (which has an ALL projection), so the returned item is the complete Alias, not
+   * just its keys — callers get accountId and the full alias config in one read.
+   */
+  async getAliasByGlobalAddress(recipientAddress: string): Promise<Result<Alias | null, DbError>> {
+    const { domain, alias } = parseAddress(recipientAddress);
+    try {
+      const res = await dynamo.send(new QueryCommand({
+        TableName: ACCOUNTS_TABLE,
+        IndexName: "gsi1",
+        KeyConditionExpression: "gsi1pk = :pk",
+        ExpressionAttributeValues: { ":pk": `DOMAIN#${domain}#ALIAS#${alias}` },
+        Limit: 1,
+      }));
+      return ok(res.Items && res.Items.length > 0 ? (res.Items[0] as Alias) : null);
+    } catch (e) {
+      return err(dbError(e));
+    }
+  }
+
   async saveAlias(alias: Alias): Promise<Result<Alias, DbError>> {
     const { domain, alias: localPart } = parseAddress(alias.address);
     try {
@@ -390,29 +411,6 @@ export class AccountDatabase {
     return ok(accountResult.value?.filtering ?? null);
   }
 
-  async getProcessorAccountContext(accountId: string, recipientAddress: string): Promise<Result<{ retentionDuration: import("../processor/retention.js").RetentionDuration; filtering: AccountFilteringConfig | null; aliasConfig: Alias | null; registeredDomains: string[]; userEmails: string[]; billingPlan: import("../embedding/retention-tier.js").BillingPlan; onboardingCompleted: boolean }, DbError>> {
-    const accountResult = await this.getAccount(accountId);
-    if (accountResult.isErr()) return err(accountResult.error);
-    const account = accountResult.value;
-
-    const aliasConfigResult = await this.getAlias(accountId, recipientAddress);
-    if (aliasConfigResult.isErr()) return err(aliasConfigResult.error);
-    const aliasConfig = aliasConfigResult.value;
-
-    const domainsResult = await this.listDomains(accountId);
-    if (domainsResult.isErr()) return err(domainsResult.error);
-    const domains = domainsResult.value;
-
-    return ok({
-      retentionDuration: account?.retentionDuration ?? "P3M",
-      filtering: account?.filtering ?? null,
-      aliasConfig,
-      registeredDomains: domains.map((d) => d.domain),
-      userEmails: [],
-      billingPlan: account?.billingPlan ?? "Paid",
-      onboardingCompleted: account?.onboarding?.completed ?? false,
-    });
-  }
 
   // ---------------------------------------------------------------------------
   // Views
@@ -798,10 +796,10 @@ export class AccountDatabase {
         KeyConditionExpression: "pk = :pk AND begins_with(sk, :prefix)",
         ExpressionAttributeValues: { ":pk": pk(accountId), ":prefix": "DOMAIN#" },
       }));
-      // Filter to only bare domain items (SK = DOMAIN#{domain}, no #ALIAS# suffix)
+      // Filter to only bare, non-deleted domain items (SK = DOMAIN#{domain}, no #ALIAS# suffix)
       const domains = (res.Items ?? []).filter((item) => {
         const sk = item["sk"] as string;
-        return !sk.includes("#ALIAS#");
+        return !sk.includes("#ALIAS#") && item["status"] !== "deleted";
       });
       return ok(domains as Domain[]);
     } catch (e) {
@@ -812,7 +810,9 @@ export class AccountDatabase {
   async getDomain(accountId: string, domainName: string): Promise<Result<Domain | null, DbError>> {
     try {
       const res = await dynamo.send(new GetCommand({ TableName: ACCOUNTS_TABLE, Key: { pk: pk(accountId), sk: `DOMAIN#${domainName}` } }));
-      return ok(res.Item ? res.Item as unknown as Domain : null);
+      const item = res.Item ? res.Item as unknown as Domain : null;
+      if (item?.status === "deleted") return ok(null);
+      return ok(item);
     } catch (e) {
       return err(dbError(e));
     }
@@ -827,6 +827,7 @@ export class AccountDatabase {
     const item: Domain = {
       accountId,
       domain,
+      status: "active",
       receivingSetupComplete: false,
       senderSetupComplete: false,
       createdAt: now,
@@ -842,11 +843,15 @@ export class AccountDatabase {
           gsi1pk: `DOMAIN#${domain}`,
           gsi1sk: `ACCT#${accountId}`,
         },
-        ConditionExpression: "attribute_not_exists(sk)",
+        // Allow either a fresh create or reviving this account's own soft-deleted domain.
+        // pk is already account-scoped, so this can only collide with a row from this account.
+        ConditionExpression: "attribute_not_exists(sk) OR #status = :deleted",
+        ExpressionAttributeNames: { "#status": "status" },
+        ExpressionAttributeValues: { ":deleted": "deleted" },
       }));
       return ok(item);
     } catch (e) {
-      // ConditionalCheckFailedException = domain already exists for this account (idempotent)
+      // Falls here only when the row exists and is still active (idempotent re-POST)
       if (e instanceof Error && e.name === "ConditionalCheckFailedException") {
         const existing = await this.getDomain(accountId, domain);
         if (existing.isErr()) return err(existing.error);
@@ -858,15 +863,21 @@ export class AccountDatabase {
 
   async deleteDomain(accountId: string, domainName: string): Promise<Result<void, DbError>> {
     try {
-      await dynamo.send(new DeleteCommand({ TableName: ACCOUNTS_TABLE, Key: { pk: pk(accountId), sk: `DOMAIN#${domainName}` } }));
+      await dynamo.send(new UpdateCommand({
+        TableName: ACCOUNTS_TABLE,
+        Key: { pk: pk(accountId), sk: `DOMAIN#${domainName}` },
+        UpdateExpression: "SET #status = :deleted, updatedAt = :now",
+        ExpressionAttributeNames: { "#status": "status" },
+        ExpressionAttributeValues: { ":deleted": "deleted", ":now": DateTime.utc().toISO()! },
+      }));
       return ok(undefined);
     } catch (e) {
       return err(dbError(e));
     }
   }
 
-  /** Resolve which account owns a domain. Returns the accountId of the oldest registrant. */
-  async resolveAccountForDomain(domain: string): Promise<Result<string | null, DbError>> {
+  /** Winning domain registration (oldest registrant by createdAt), unfiltered by status. */
+  async getDomainOwner(domain: string): Promise<Result<Domain | null, DbError>> {
     try {
       const res = await dynamo.send(new QueryCommand({
         TableName: ACCOUNTS_TABLE,
@@ -878,35 +889,24 @@ export class AccountDatabase {
       if (items.length === 0) return ok(null);
       // Sort by createdAt ascending — oldest registrant wins
       items.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-      return ok(items[0]!.accountId);
+      return ok(items[0]!);
     } catch (e) {
       return err(dbError(e));
     }
   }
 
-  /** Resolve accountId from a recipient email address. Checks alias first, then domain. */
-  async resolveAccountForRecipient(recipientAddress: string): Promise<Result<string | null, DbError>> {
-    const { domain, alias } = parseAddress(recipientAddress);
-
-    // 1. Try exact alias match via GSI
-    try {
-      const aliasRes = await dynamo.send(new QueryCommand({
-        TableName: ACCOUNTS_TABLE,
-        IndexName: "gsi1",
-        KeyConditionExpression: "gsi1pk = :pk",
-        ExpressionAttributeValues: { ":pk": `DOMAIN#${domain}#ALIAS#${alias}` },
-        Limit: 1,
-      }));
-      if (aliasRes.Items && aliasRes.Items.length > 0) {
-        const item = aliasRes.Items[0] as { accountId: string };
-        return ok(item.accountId);
-      }
-    } catch (e) {
-      return err(dbError(e));
-    }
-
-    // 2. Fall back to domain match
-    return this.resolveAccountForDomain(domain);
+  /**
+   * Resolve which account owns a domain. Returns the accountId of the oldest registrant.
+   * Intentionally still matches soft-deleted domains — this prevents "deleted domain
+   * takeover": if a different account could claim a domain the original account merely
+   * soft-deleted, the original owner would be permanently locked out of reviving it via
+   * POST. Ownership persists across soft-delete; only routability is affected by status
+   * (see SignalProcessor.resolveAccountIdAndAlias).
+   */
+  async resolveAccountForDomain(domain: string): Promise<Result<string | null, DbError>> {
+    const ownerResult = await this.getDomainOwner(domain);
+    if (ownerResult.isErr()) return err(ownerResult.error);
+    return ok(ownerResult.value?.accountId ?? null);
   }
 
   async updateDomainHealth(accountId: string, domainName: string, health: {
@@ -973,8 +973,9 @@ export class AccountDatabase {
       do {
         const res = await dynamo.send(new ScanCommand({
           TableName: ACCOUNTS_TABLE,
-          FilterExpression: "begins_with(sk, :prefix) AND NOT contains(sk, :aliasMarker)",
-          ExpressionAttributeValues: { ":prefix": "DOMAIN#", ":aliasMarker": "#ALIAS#" },
+          FilterExpression: "begins_with(sk, :prefix) AND NOT contains(sk, :aliasMarker) AND (attribute_not_exists(#status) OR #status <> :deleted)",
+          ExpressionAttributeNames: { "#status": "status" },
+          ExpressionAttributeValues: { ":prefix": "DOMAIN#", ":aliasMarker": "#ALIAS#", ":deleted": "deleted" },
           ...(lastKey ? { ExclusiveStartKey: lastKey } : {}),
         }));
         for (const item of res.Items ?? []) {

@@ -493,21 +493,10 @@ async function processSqsRecord(
 
   const mail = notification.mail!;
   const receipt = notification.receipt!;
-  const recipientAddress = mail.destination[0]!;
 
-  const accountResult = await accountDb.resolveAccountForRecipient(recipientAddress);
-  if (accountResult.isErr()) {
-    logger.error("Failed to resolve account for recipient — DB error. Retrying.", { code: "handler.sqs.account_resolve_failed", recipientAddress, destination: mail.destination, sesMessageId: mail.messageId, error: accountResult.error });
-    return err(accountResult.error);
-  }
-
-  if (!accountResult.value) {
-    logger.track("No account owns this recipient address — dropping message.", { code: "handler.sqs.no_account_for_recipient", recipientAddress, destination: mail.destination, sesMessageId: mail.messageId, timestamp: mail.timestamp, s3Key: receipt.action.objectKey });
-    return ok(undefined);
-  }
-
+  // The owning account is resolved inside the processor from the recipient address —
+  // the handler is a thin SQS/SNS unwrapper and does no DB work here.
   const message: InboundSignalMessage = {
-    accountId: accountResult.value,
     s3Key: receipt.action.objectKey,
     sesMessageId: mail.messageId,
     idempotencyKey: messageId,

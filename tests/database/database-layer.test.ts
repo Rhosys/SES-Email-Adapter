@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mockClient } from "aws-sdk-client-mock";
-import { DynamoDBDocumentClient, GetCommand, PutCommand, QueryCommand, DeleteCommand, UpdateCommand, BatchWriteCommand } from "@aws-sdk/lib-dynamodb";
+import { DynamoDBDocumentClient, GetCommand, PutCommand, QueryCommand, DeleteCommand, UpdateCommand, BatchWriteCommand, ScanCommand } from "@aws-sdk/lib-dynamodb";
 import { AccountDatabase } from "../../src/database/account-database.js";
 import { ArcDatabase } from "../../src/database/arc-database.js";
 import { ProcessingDatabase } from "../../src/database/processing-database.js";
@@ -218,6 +218,204 @@ describe("AccountDatabase", () => {
 
       expect(result.isErr()).toBe(true);
       expect(result._unsafeUnwrapErr().kind).toBe("db_error");
+    });
+  });
+
+  describe("createDomain", () => {
+    it("creates a fresh domain with status active", async () => {
+      ddbMock.on(PutCommand).resolves({});
+
+      const result = await db.createDomain("acct-1", "example.com");
+
+      expect(result.isOk()).toBe(true);
+      expect(result._unsafeUnwrap().status).toBe("active");
+      const putCalls = ddbMock.commandCalls(PutCommand);
+      expect(putCalls).toHaveLength(1);
+      expect(putCalls[0]!.args[0]!.input.ConditionExpression).toBe("attribute_not_exists(sk) OR #status = :deleted");
+      expect(putCalls[0]!.args[0]!.input.ExpressionAttributeValues).toEqual({ ":deleted": "deleted" });
+    });
+
+    it("re-POST while active falls back to the existing record (idempotent)", async () => {
+      const existing = { accountId: "acct-1", domain: "example.com", status: "active", createdAt: "2024-01-01T00:00:00Z", updatedAt: "2024-01-01T00:00:00Z", receivingSetupComplete: true, senderSetupComplete: true };
+      ddbMock.on(PutCommand).rejects(Object.assign(new Error("ConditionalCheckFailedException"), { name: "ConditionalCheckFailedException" }));
+      ddbMock.on(GetCommand).resolves({ Item: existing });
+
+      const result = await db.createDomain("acct-1", "example.com");
+
+      expect(result.isOk()).toBe(true);
+      expect(result._unsafeUnwrap()).toEqual(existing);
+    });
+
+    it("re-POST while deleted succeeds via the Put itself and resets health/timestamp fields", async () => {
+      ddbMock.on(PutCommand).resolves({});
+
+      const result = await db.createDomain("acct-1", "example.com");
+
+      expect(result.isOk()).toBe(true);
+      const revived = result._unsafeUnwrap();
+      expect(revived.status).toBe("active");
+      expect(revived.receivingSetupComplete).toBe(false);
+      expect(revived.senderSetupComplete).toBe(false);
+      expect(revived.lastCheckedAt).toBeUndefined();
+      expect(revived.failingRecords).toBeUndefined();
+    });
+  });
+
+  describe("deleteDomain", () => {
+    it("issues an UpdateCommand setting status to deleted, not a DeleteCommand", async () => {
+      ddbMock.on(UpdateCommand).resolves({});
+
+      const result = await db.deleteDomain("acct-1", "example.com");
+
+      expect(result.isOk()).toBe(true);
+      expect(ddbMock.commandCalls(DeleteCommand)).toHaveLength(0);
+      const updateCalls = ddbMock.commandCalls(UpdateCommand);
+      expect(updateCalls).toHaveLength(1);
+      expect(updateCalls[0]!.args[0]!.input.Key).toEqual({ pk: "ACCT#acct-1", sk: "DOMAIN#example.com" });
+      expect(updateCalls[0]!.args[0]!.input.ExpressionAttributeValues).toMatchObject({ ":deleted": "deleted" });
+    });
+
+    it("returns err with kind db_error on SDK failure", async () => {
+      ddbMock.on(UpdateCommand).rejects(new Error("InternalServerError"));
+
+      const result = await db.deleteDomain("acct-1", "example.com");
+
+      expect(result.isErr()).toBe(true);
+      expect(result._unsafeUnwrapErr().kind).toBe("db_error");
+    });
+  });
+
+  describe("getDomain", () => {
+    it("returns null for a soft-deleted domain", async () => {
+      ddbMock.on(GetCommand).resolves({ Item: { accountId: "acct-1", domain: "example.com", status: "deleted" } });
+
+      const result = await db.getDomain("acct-1", "example.com");
+
+      expect(result.isOk()).toBe(true);
+      expect(result._unsafeUnwrap()).toBeNull();
+    });
+
+    it("returns the item when status is active", async () => {
+      const item = { accountId: "acct-1", domain: "example.com", status: "active" };
+      ddbMock.on(GetCommand).resolves({ Item: item });
+
+      const result = await db.getDomain("acct-1", "example.com");
+
+      expect(result.isOk()).toBe(true);
+      expect(result._unsafeUnwrap()).toEqual(item);
+    });
+
+    it("returns the item when status is absent (legacy row backward compat)", async () => {
+      const item = { accountId: "acct-1", domain: "example.com" };
+      ddbMock.on(GetCommand).resolves({ Item: item });
+
+      const result = await db.getDomain("acct-1", "example.com");
+
+      expect(result.isOk()).toBe(true);
+      expect(result._unsafeUnwrap()).toEqual(item);
+    });
+  });
+
+  describe("listDomains", () => {
+    it("excludes soft-deleted domains", async () => {
+      ddbMock.on(QueryCommand).resolves({
+        Items: [
+          { accountId: "acct-1", domain: "active.com", status: "active", sk: "DOMAIN#active.com" },
+          { accountId: "acct-1", domain: "gone.com", status: "deleted", sk: "DOMAIN#gone.com" },
+          { accountId: "acct-1", domain: "legacy.com", sk: "DOMAIN#legacy.com" },
+        ],
+      });
+
+      const result = await db.listDomains("acct-1");
+
+      expect(result.isOk()).toBe(true);
+      const domains = result._unsafeUnwrap();
+      expect(domains.map((d) => d.domain).sort()).toEqual(["active.com", "legacy.com"]);
+    });
+  });
+
+  describe("scanAllDomains", () => {
+    it("excludes soft-deleted domains via FilterExpression and groups by account", async () => {
+      ddbMock.on(ScanCommand).resolves({
+        Items: [
+          { accountId: "acct-1", domain: "active.com", status: "active" },
+          { accountId: "acct-2", domain: "legacy.com" },
+        ],
+      });
+
+      const result = await db.scanAllDomains();
+
+      expect(result.isOk()).toBe(true);
+      const grouped = result._unsafeUnwrap();
+      expect(grouped).toHaveLength(2);
+      const scanCalls = ddbMock.commandCalls(ScanCommand);
+      expect(scanCalls[0]!.args[0]!.input.FilterExpression).toContain("#status <> :deleted");
+    });
+  });
+
+  describe("resolveAccountForDomain", () => {
+    it("still resolves the accountId when the registrant's row is deleted (anti-takeover)", async () => {
+      ddbMock.on(QueryCommand).resolves({
+        Items: [{ accountId: "acct-1", domain: "example.com", status: "deleted", createdAt: "2024-01-01T00:00:00Z" }],
+      });
+
+      const result = await db.resolveAccountForDomain("example.com");
+
+      expect(result.isOk()).toBe(true);
+      expect(result._unsafeUnwrap()).toBe("acct-1");
+    });
+
+    it("returns null when no registrant exists", async () => {
+      ddbMock.on(QueryCommand).resolves({ Items: [] });
+
+      const result = await db.resolveAccountForDomain("example.com");
+
+      expect(result.isOk()).toBe(true);
+      expect(result._unsafeUnwrap()).toBeNull();
+    });
+  });
+
+  describe("getAliasByGlobalAddress", () => {
+    it("returns the full alias item on a hit (gsi1 ALL projection)", async () => {
+      const aliasItem = { accountId: "acct-1", address: "someone@example.com", domain: "example.com", alias: "someone", unknownSenderPolicy: "allow_all", createdAt: "2024-01-01T00:00:00Z", updatedAt: "2024-01-01T00:00:00Z" };
+      ddbMock.on(QueryCommand).resolvesOnce({ Items: [aliasItem] });
+
+      const result = await db.getAliasByGlobalAddress("someone@example.com");
+
+      expect(result.isOk()).toBe(true);
+      expect(result._unsafeUnwrap()).toEqual(aliasItem);
+    });
+
+    it("returns null when no alias matches", async () => {
+      ddbMock.on(QueryCommand).resolvesOnce({ Items: [] });
+
+      const result = await db.getAliasByGlobalAddress("someone@example.com");
+
+      expect(result.isOk()).toBe(true);
+      expect(result._unsafeUnwrap()).toBeNull();
+    });
+  });
+
+  describe("getDomainOwner", () => {
+    it("returns the oldest registrant, unfiltered by status (includes soft-deleted)", async () => {
+      ddbMock.on(QueryCommand).resolvesOnce({ Items: [
+        { accountId: "acct-newer", domain: "example.com", status: "active", createdAt: "2024-02-01T00:00:00Z" },
+        { accountId: "acct-owner", domain: "example.com", status: "deleted", createdAt: "2024-01-01T00:00:00Z" },
+      ] });
+
+      const result = await db.getDomainOwner("example.com");
+
+      expect(result.isOk()).toBe(true);
+      expect(result._unsafeUnwrap()?.accountId).toBe("acct-owner");
+    });
+
+    it("returns null when the domain is unregistered", async () => {
+      ddbMock.on(QueryCommand).resolvesOnce({ Items: [] });
+
+      const result = await db.getDomainOwner("example.com");
+
+      expect(result.isOk()).toBe(true);
+      expect(result._unsafeUnwrap()).toBeNull();
     });
   });
 });

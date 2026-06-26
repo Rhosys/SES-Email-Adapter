@@ -103,7 +103,7 @@ function makeTemplate(overrides: Partial<EmailTemplate> = {}): EmailTemplate {
 function makeStore(template: EmailTemplate | null = makeTemplate()) {
   const arcDb = makeArcDbMock();
   const accountDb = {
-    ...makeAccountDbMock(),
+    ...makeAccountDbMock(TEST_ACCOUNT_ID),
     getSender: vi.fn().mockReturnValue(Promise.resolve(ok({ policy: "allow", domain: "external.com", address: "sender@external.com" }))),
     getTemplate: vi.fn().mockReturnValue(Promise.resolve(ok(template))),
   } as unknown as AccountDatabase;

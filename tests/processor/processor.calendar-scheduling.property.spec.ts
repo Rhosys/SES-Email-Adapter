@@ -122,7 +122,6 @@ function makeSchedulerClientMock(): { [K in keyof SchedulerClient]: ReturnType<t
 
 function makeMessage(sesMessageId: string): InboundSignalMessage {
   return {
-    accountId: TEST_ACCOUNT_ID,
     s3Key: `emails/${sesMessageId}`,
     sesMessageId,
     idempotencyKey: "test-idempotency-key",
@@ -176,7 +175,7 @@ function buildProcessor(opts: {
 
   return new SignalProcessor({ ...makeSharedNewDeps(),
     arcDb: arcDb ?? makeArcDbMock(),
-    accountDb: makeAccountDbMock(),
+    accountDb: makeAccountDbMock(TEST_ACCOUNT_ID),
     processingDb: makeProcessingDbMock(),
     contentSanitizer: contentSanitizer ?? makeContentSanitizer(),
     s3Client: { send: s3Send } as never,

@@ -74,7 +74,7 @@ describe("Side effect caller logging", () => {
   afterEach(() => { vi.restoreAllMocks(); });
 
   function makeStore() {
-    return { arcDb: makeArcDbMock(), accountDb: makeAccountDbMock(), processingDb: makeProcessingDbMock() };
+    return { arcDb: makeArcDbMock(), accountDb: makeAccountDbMock(TEST_ACCOUNT_ID), processingDb: makeProcessingDbMock() };
   }
 
   function makeContentSanitizer(): ContentSanitizerClient {

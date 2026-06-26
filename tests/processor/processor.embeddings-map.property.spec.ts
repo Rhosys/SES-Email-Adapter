@@ -122,7 +122,7 @@ function makeContentSanitizer(): ContentSanitizerClient {
 }
 
 function makeStore() {
-  return { arcDb: makeArcDbMock(), accountDb: makeAccountDbMock(), processingDb: makeProcessingDbMock() };
+  return { arcDb: makeArcDbMock(), accountDb: makeAccountDbMock(TEST_ACCOUNT_ID), processingDb: makeProcessingDbMock() };
 }
 
 function makeArcMatcher(): ArcMatcher {
@@ -141,7 +141,6 @@ function makeAuroraWriter(): MultiClusterAuroraWriter {
 
 function makeMessage(sesMessageId: string): InboundSignalMessage {
   return {
-    accountId: TEST_ACCOUNT_ID,
     s3Key: `emails/${sesMessageId}`,
     sesMessageId,
     idempotencyKey: "test-idempotency-key",

@@ -364,7 +364,6 @@ describe("Scenario: native calendar REPLY is validated and forwarded to organize
 
     const recipient = `${VALID_ARC_ID}@${VALID_ACC_ID}.${SERVICE_DOMAIN}`;
     const message: InboundSignalMessage = {
-      accountId: VALID_ACC_ID,
       s3Key: "emails/native-reply.eml",
       sesMessageId: "ses-native-001",
       idempotencyKey: "test-idempotency-key",
@@ -419,7 +418,6 @@ describe("Scenario: invalid HMAC REPLY is silently dropped to prevent spoofing",
 
     const recipient = `${VALID_ARC_ID}@${VALID_ACC_ID}.${SERVICE_DOMAIN}`;
     const message: InboundSignalMessage = {
-      accountId: VALID_ACC_ID,
       s3Key: "emails/forged-reply.eml",
       sesMessageId: "ses-forged-001",
       idempotencyKey: "test-idempotency-key",
@@ -475,7 +473,6 @@ describe("Scenario: invalid accountId checksum REPLY is dropped before HMAC chec
     const badAccountId = "acc-xxxxxxxxxx000";
     const recipient = `${VALID_ARC_ID}@${badAccountId}.${SERVICE_DOMAIN}`;
     const message: InboundSignalMessage = {
-      accountId: VALID_ACC_ID,
       s3Key: "emails/bad-checksum.eml",
       sesMessageId: "ses-bad-001",
       idempotencyKey: "test-idempotency-key",
@@ -693,7 +690,6 @@ describe("Scenario: most recent RSVP decision is recorded as calendar_response s
 
     const recipient = `${VALID_ARC_ID}@${VALID_ACC_ID}.${SERVICE_DOMAIN}`;
     const message: InboundSignalMessage = {
-      accountId: VALID_ACC_ID,
       s3Key: "emails/tentative-reply.eml",
       sesMessageId: "ses-tentative-001",
       idempotencyKey: "test-idempotency-key",

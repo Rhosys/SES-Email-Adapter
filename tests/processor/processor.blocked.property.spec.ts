@@ -4,7 +4,7 @@ import { SignalProcessor, SYSTEM_RULES } from "../../src/processor/processor.js"
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
 import { makeSharedNewDeps, makeRuleEvaluator3 } from "./_shared-new-deps.js";
 import type { InboundSignalMessage, ArcMatcher } from "../../src/processor/processor.js";
-import { makeArcDbMock, makeAccountDbMock, makeProcessingDbMock } from "./_helpers.js";
+import { makeArcDbMock, makeAccountDbMock, makeProcessingDbMock, applyCtx } from "./_helpers.js";
 import type { ContentSanitizerClient } from "../../src/processor/content-sanitizer-client.js";
 import type { SignalClassifier, ClassificationOutput } from "../../src/classifier/classifier.js";
 import type { EmbeddingGenerator, EmbeddingResult } from "../../src/embedding/embedding-generator.js";
@@ -41,7 +41,7 @@ describe("Blocked/quarantined signals never trigger saveArc", () => {
 
   function makeStore() {
     const arcDb = makeArcDbMock();
-    const accountDb = makeAccountDbMock();
+    const accountDb = makeAccountDbMock(TEST_ACCOUNT_ID);
     const processingDb = makeProcessingDbMock();
     return { arcDb, accountDb, processingDb };
   }
@@ -104,7 +104,6 @@ describe("Blocked/quarantined signals never trigger saveArc", () => {
 
   function makeMessage(sesMessageId: string): InboundSignalMessage {
     return {
-      accountId: TEST_ACCOUNT_ID,
       s3Key: `emails/${sesMessageId}`,
       sesMessageId,
       idempotencyKey: "test-idempotency-key",
@@ -206,14 +205,14 @@ describe("Blocked/quarantined signals never trigger saveArc", () => {
       updatedAt: "2024-01-01T00:00:00Z",
     };
 
-    (accountDb.getProcessorAccountContext as ReturnType<typeof vi.fn>).mockReturnValue(Promise.resolve(ok({
+    applyCtx(accountDb, {
       retentionDuration: "P3M",
       filtering: null,
       aliasConfig,
       registeredDomains: [],
       userEmails: [],
       billingPlan: "Paid" as const,
-    })));
+    });
     (accountDb.getSender as ReturnType<typeof vi.fn>).mockReturnValue(Promise.resolve(ok(strategy.aliasSenderConfig)));
     (accountDb.listEnabledRules as ReturnType<typeof vi.fn>).mockReturnValue(Promise.resolve(ok(strategy.rules)));
 

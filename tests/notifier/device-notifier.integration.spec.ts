@@ -4,7 +4,7 @@ import { SignalProcessor, SYSTEM_RULES } from "../../src/processor/processor.js"
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
 import { makeSharedNewDeps, makeRuleEvaluator3 } from "../processor/_shared-new-deps.js";
 import type { ArcMatcher, SqsDispatcher, Notifier, Forwarder, ReplySender, SideEffectPayload } from "../../src/processor/processor.js";
-import { makeArcDbMock, makeAccountDbMock, makeProcessingDbMock } from "../processor/_helpers.js";
+import { makeArcDbMock, makeAccountDbMock, makeProcessingDbMock, applyCtx } from "../processor/_helpers.js";
 import type { ContentSanitizerClient } from "../../src/processor/content-sanitizer-client.js";
 import type { SignalClassifier } from "../../src/classifier/classifier.js";
 import type { EmbeddingGenerator } from "../../src/embedding/embedding-generator.js";
@@ -64,10 +64,10 @@ const DEFAULT_ALIAS: Alias = {
 
 function makeStore() {
   const arcDb = makeArcDbMock();
-  const accountDb = makeAccountDbMock();
+  const accountDb = makeAccountDbMock(TEST_ACCOUNT_ID);
   const processingDb = makeProcessingDbMock();
   vi.mocked(accountDb.listEnabledRules).mockReturnValue(Promise.resolve(ok(SYSTEM_RULES)));
-  vi.mocked(accountDb.getProcessorAccountContext).mockReturnValue(Promise.resolve(ok({
+  applyCtx(accountDb, {
     retentionDuration: "P3M",
     filtering: null,
     aliasConfig: DEFAULT_ALIAS,
@@ -75,7 +75,7 @@ function makeStore() {
     userEmails: [],
     billingPlan: "Paid" as const,
     onboardingCompleted: true,
-  })));
+  });
   vi.mocked(accountDb.getSender).mockReturnValue(Promise.resolve(ok({
     accountId: TEST_ACCOUNT_ID, aliasAddress: "user@example.com", domain: "example.com",
     alias: "user", senderDomain: "example.com", policy: "allow", addedAt: "2024-01-01T00:00:00Z",

@@ -36,14 +36,15 @@ vi.mock("../../src/processor/presign.js", () => ({
   generatePresignedPost: vi.fn().mockResolvedValue({ url: "https://presigned-post.example.com", fields: {} }),
 }));
 
+const TEST_ACCOUNT_ID = "acct-msgid";
+
 describe("ProcessError on database failure", () => {
   function makeStore() {
-    return { arcDb: makeArcDbMock(), accountDb: makeAccountDbMock(), processingDb: makeProcessingDbMock() };
+    return { arcDb: makeArcDbMock(), accountDb: makeAccountDbMock(TEST_ACCOUNT_ID), processingDb: makeProcessingDbMock() };
   }
 
   function makeMessage(): InboundSignalMessage {
     return {
-      accountId: "acct-test",
       s3Key: "emails/ses-msg-1",
       sesMessageId: "ses-msg-1",
       idempotencyKey: "test-idempotency-key",

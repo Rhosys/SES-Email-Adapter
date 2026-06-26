@@ -5,7 +5,7 @@ import { SignalProcessor, deriveGroupingKey, SYSTEM_RULES, extractForwardedAddre
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
 import { baseUrgency } from "../../src/processor/priority.js";
 import type { ArcMatcher, RuleEvaluator, Notifier, Forwarder, ReplySender, InboundSignalMessage, SqsDispatcher, ProcessorAccountContext } from "../../src/processor/processor.js";
-import { makeArcDbMock, makeAccountDbMock, makeProcessingDbMock } from "./_helpers.js";
+import { makeArcDbMock, makeAccountDbMock, makeProcessingDbMock, applyCtx } from "./_helpers.js";
 import type { ContentSanitizerClient } from "../../src/processor/content-sanitizer-client.js";
 import type { UserCodeExecutorClient } from "../../src/processor/user-code-client.js";
 import type { SignalClassifier, ClassificationOutput } from "../../src/classifier/classifier.js";
@@ -52,24 +52,24 @@ const TEST_ACCOUNT_ID = "acct-001";
 // Default context: sender example.com is pre-approved so most tests exercise the happy path without triggering the filter-mode fallback.
 // Tests that specifically test sender filtering use explicit mockResolvedValueOnce overrides.
 const DEFAULT_EMAIL_CONFIG: Alias = {
-  id: "cfg-default", accountId: "acct-test-001", address: "user@example.com", domain: "example.com", alias: "user",
+  id: "cfg-default", accountId: TEST_ACCOUNT_ID, address: "user@example.com", domain: "example.com", alias: "user",
   unknownSenderPolicy: "quarantine_visible",
   createdAt: "2024-01-01T00:00:00Z", updatedAt: "2024-01-01T00:00:00Z",
 };
 
 // Default AliasSender: marks example.com as an allowed sender for the default alias.
 const DEFAULT_SENDER_ENTRY: import("../../src/types/index.js").AliasSender = {
-  accountId: "acct-test-001", aliasAddress: "user@example.com", domain: "example.com", alias: "user", senderDomain: "example.com", policy: "allow", addedAt: "2024-01-01T00:00:00Z",
+  accountId: TEST_ACCOUNT_ID, aliasAddress: "user@example.com", domain: "example.com", alias: "user", senderDomain: "example.com", policy: "allow", addedAt: "2024-01-01T00:00:00Z",
 };
 const DEFAULT_CTX = { retentionDuration: "P3M", filtering: null, aliasConfig: DEFAULT_EMAIL_CONFIG, registeredDomains: [], userEmails: [], billingPlan: "Paid" as const, onboardingCompleted: true } satisfies ProcessorAccountContext;
 
 function makeStore() {
   const arcDb = makeArcDbMock();
-  const accountDb = makeAccountDbMock();
+  const accountDb = makeAccountDbMock(TEST_ACCOUNT_ID);
   const processingDb = makeProcessingDbMock();
   // Override defaults for this test file
   vi.mocked(accountDb.listEnabledRules).mockReturnValue(Promise.resolve(ok(SYSTEM_RULES)));
-  vi.mocked(accountDb.getProcessorAccountContext).mockReturnValue(Promise.resolve(ok(DEFAULT_CTX)));
+  applyCtx(accountDb, DEFAULT_CTX);
   vi.mocked(accountDb.getSender).mockReturnValue(Promise.resolve(ok(DEFAULT_SENDER_ENTRY)));
   return { arcDb, accountDb, processingDb };
 }
@@ -179,7 +179,6 @@ function makeMessage(opts: {
 } = {}): InboundSignalMessage {
   const sesMessageId = opts.sesMessageId ?? "msg-123";
   return {
-    accountId: opts.accountId ?? TEST_ACCOUNT_ID,
     s3Key: opts.s3Key ?? `emails/${sesMessageId}`,
     sesMessageId,
     idempotencyKey: "test-idempotency-key",
@@ -516,10 +515,10 @@ describe("SignalProcessor", () => {
         updatedAt: "2024-01-01T00:00:00Z",
       };
       vi.mocked(accountDb.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([rule])));
-      vi.mocked(accountDb.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok({
+      applyCtx(accountDb, {
         ...DEFAULT_CTX,
         aliasConfig: { ...DEFAULT_EMAIL_CONFIG, unknownSenderPolicy: "allow_all" },
-      })));
+      }, { once: true });
 
       await processor.processRecord(makeMessage(), 1);
 
@@ -803,9 +802,7 @@ describe("SignalProcessor", () => {
     });
 
     it("allows signal on brand new address and auto-creates aliases with sender approved", async () => {
-      vi.mocked(accountDb.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok(
-        { ...DEFAULT_CTX, aliasConfig: null },
-      )));
+      applyCtx(accountDb, { ...DEFAULT_CTX, aliasConfig: null }, { once: true });
       // No existing sender entry for a brand-new address
       vi.mocked(accountDb.getSender).mockReturnValueOnce(Promise.resolve(ok(null)));
       await processor.processRecord(makeMessage(), 1);
@@ -820,9 +817,7 @@ describe("SignalProcessor", () => {
     });
 
     it("allows signal from a known sender (eTLD+1 in approved list)", async () => {
-      vi.mocked(accountDb.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok(
-        { ...DEFAULT_CTX, aliasConfig: makeAlias() },
-      )));
+      applyCtx(accountDb, { ...DEFAULT_CTX, aliasConfig: makeAlias() }, { once: true });
       // getSender returns an approved entry for example.com (default mock already does this)
 
       await processor.processRecord(makeMessage(), 1);
@@ -833,9 +828,7 @@ describe("SignalProcessor", () => {
     });
 
     it("unknown sender with default filter mode → quarantine_visible (shown in review queue)", async () => {
-      vi.mocked(accountDb.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok(
-        { ...DEFAULT_CTX, aliasConfig: makeAlias() }, // default filterMode: quarantine_visible
-      )));
+      applyCtx(accountDb, { ...DEFAULT_CTX, aliasConfig: makeAlias() }, { once: true }); // default filterMode: quarantine_visible
       vi.mocked(accountDb.getSender).mockReturnValueOnce(Promise.resolve(ok(null)));
 
       await processor.processRecord(makeMessage(), 1);
@@ -848,9 +841,7 @@ describe("SignalProcessor", () => {
     });
 
     it("quarantines high-spam signal from approved sender (SR-05 fires)", async () => {
-      vi.mocked(accountDb.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok(
-        { ...DEFAULT_CTX, aliasConfig: makeAlias() },
-      )));
+      applyCtx(accountDb, { ...DEFAULT_CTX, aliasConfig: makeAlias() }, { once: true });
       // Approved sender → SR-05 fires on high spam → quarantine_hidden
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok({
         ...validClassification,
@@ -864,9 +855,7 @@ describe("SignalProcessor", () => {
     });
 
     it("filter mode quarantine_visible: unknown sender → quarantine_visible", async () => {
-      vi.mocked(accountDb.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok(
-        { ...DEFAULT_CTX, aliasConfig: makeAlias({ unknownSenderPolicy: "quarantine_visible" }) },
-      )));
+      applyCtx(accountDb, { ...DEFAULT_CTX, aliasConfig: makeAlias({ unknownSenderPolicy: "quarantine_visible" }) }, { once: true });
       vi.mocked(accountDb.getSender).mockReturnValueOnce(Promise.resolve(ok(null)));
 
       await processor.processRecord(makeMessage(), 1);
@@ -876,9 +865,7 @@ describe("SignalProcessor", () => {
     });
 
     it("filter mode quarantine_hidden: unknown sender → quarantine_hidden", async () => {
-      vi.mocked(accountDb.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok(
-        { ...DEFAULT_CTX, aliasConfig: makeAlias({ unknownSenderPolicy: "quarantine_hidden" }) },
-      )));
+      applyCtx(accountDb, { ...DEFAULT_CTX, aliasConfig: makeAlias({ unknownSenderPolicy: "quarantine_hidden" }) }, { once: true });
       vi.mocked(accountDb.getSender).mockReturnValueOnce(Promise.resolve(ok(null)));
 
       await processor.processRecord(makeMessage(), 1);
@@ -888,9 +875,7 @@ describe("SignalProcessor", () => {
     });
 
     it("silently blocks signal when a block_hidden rule matches", async () => {
-      vi.mocked(accountDb.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok(
-        { ...DEFAULT_CTX, aliasConfig: makeAlias() },
-      )));
+      applyCtx(accountDb, { ...DEFAULT_CTX, aliasConfig: makeAlias() }, { once: true });
       vi.mocked(accountDb.getSender).mockReturnValueOnce(Promise.resolve(ok(null)));
       vi.mocked(accountDb.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([
         makeRule({ condition: JSON.stringify({ "in": ["system:sender:untrusted", { var: "arc.labels" }] }), actions: [{ type: "block_hidden" }] }),
@@ -929,9 +914,7 @@ describe("SignalProcessor", () => {
     });
 
     it("quarantines a known sender with phishing tags (SR-05 fires regardless of filter mode)", async () => {
-      vi.mocked(accountDb.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok(
-        { ...DEFAULT_CTX, aliasConfig: makeAlias({ unknownSenderPolicy: "quarantine_visible" }) },
-      )));
+      applyCtx(accountDb, { ...DEFAULT_CTX, aliasConfig: makeAlias({ unknownSenderPolicy: "quarantine_visible" }) }, { once: true });
       // Sender is known/approved but tagged as phishing — SR-05 quarantines hidden independently of filter mode
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok({
         ...validClassification,
@@ -946,9 +929,7 @@ describe("SignalProcessor", () => {
     });
 
     it("allow_all mode auto-approves new sender without blocking", async () => {
-      vi.mocked(accountDb.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok(
-        { ...DEFAULT_CTX, aliasConfig: makeAlias({ unknownSenderPolicy: "allow_all" }) },
-      )));
+      applyCtx(accountDb, { ...DEFAULT_CTX, aliasConfig: makeAlias({ unknownSenderPolicy: "allow_all" }) }, { once: true });
       vi.mocked(accountDb.getSender).mockReturnValueOnce(Promise.resolve(ok(null))); // sender not yet in list
 
       await processor.processRecord(makeMessage(), 1);
@@ -958,9 +939,7 @@ describe("SignalProcessor", () => {
     });
 
     it("saves blocked signal with classification data for user review", async () => {
-      vi.mocked(accountDb.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok(
-        { ...DEFAULT_CTX, aliasConfig: makeAlias() },
-      )));
+      applyCtx(accountDb, { ...DEFAULT_CTX, aliasConfig: makeAlias() }, { once: true });
       vi.mocked(accountDb.getSender).mockReturnValueOnce(Promise.resolve(ok(null)));
 
       await processor.processRecord(makeMessage(), 1);
@@ -972,7 +951,7 @@ describe("SignalProcessor", () => {
     });
 
     it("quarantines new address when defaultUnknownSenderPolicy is quarantine_visible and no alias exists", async () => {
-      vi.mocked(accountDb.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok({
+      applyCtx(accountDb, {
         retentionDuration: "P3M",
         filtering: { defaultUnknownSenderPolicy: "quarantine_visible" },
         aliasConfig: null,
@@ -980,7 +959,7 @@ describe("SignalProcessor", () => {
         userEmails: [],
         billingPlan: "Paid",
         onboardingCompleted: true,
-      })));
+      }, { once: true });
 
       await processor.processRecord(makeMessage(), 1);
 
@@ -997,9 +976,7 @@ describe("SignalProcessor", () => {
 
   describe("global reputation tracking", () => {
     it("updates reputation with wasBlocked=true for blocked signals", async () => {
-      vi.mocked(accountDb.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok(
-        { ...DEFAULT_CTX, aliasConfig: makeAlias() },
-      )));
+      applyCtx(accountDb, { ...DEFAULT_CTX, aliasConfig: makeAlias() }, { once: true });
       vi.mocked(accountDb.getSender).mockReturnValueOnce(Promise.resolve(ok(null)));
 
       await processor.processRecord(makeMessage(), 1);
@@ -1415,13 +1392,12 @@ describe("SignalProcessor", () => {
   // -------------------------------------------------------------------------
 
   describe("test email detection", () => {
-    it("overrides workflow to 'test' when from-domain matches a registered account domain", async () => {
+    it("overrides workflow to 'test' when the from-domain is one the account owns", async () => {
       // Default mime parser mock returns from: { address: "sender@example.com" }
-      // getETLD1("sender@example.com") = "example.com"
-      vi.mocked(accountDb.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok({
-        ...DEFAULT_CTX,
-        registeredDomains: ["example.com"],
-      })));
+      // getETLD1("sender@example.com") = "example.com" — a domain owned by the account.
+      vi.mocked(accountDb.getDomainByName).mockReturnValueOnce(Promise.resolve(ok({
+        accountId: TEST_ACCOUNT_ID, domain: "example.com", status: "active", receivingSetupComplete: true, senderSetupComplete: true, createdAt: "2024-01-01T00:00:00Z", updatedAt: "2024-01-01T00:00:00Z",
+      } as never)));
 
       await processor.processRecord(makeMessage(), 1);
 
@@ -1430,29 +1406,94 @@ describe("SignalProcessor", () => {
       expect(signal.data.workflowData).toMatchObject({ workflow: "test", triggeredBy: "user" });
     });
 
-    it("overrides workflow to 'test' when from-address exactly matches a userEmail (case-insensitive)", async () => {
-      vi.mocked(accountDb.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok({
-        ...DEFAULT_CTX,
-        userEmails: ["SENDER@example.com"], // uppercase — must still match
-      })));
-
-      await processor.processRecord(makeMessage(), 1);
-
-      const signal = vi.mocked(arcDb.saveSignal).mock.calls[0]![0] as Signal;
-      expect(signal.data.workflow).toBe("test");
-    });
-
-    it("does not override workflow when from-domain is not in registeredDomains and address not in userEmails", async () => {
-      vi.mocked(accountDb.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok({
-        ...DEFAULT_CTX,
-        registeredDomains: ["otherdomain.com"],
-        userEmails: ["different@email.com"],
-      })));
-
+    it("does not override workflow when the from-domain is not owned by the account", async () => {
+      // Default getDomainByName mock returns null → sender domain is not the account's own.
       await processor.processRecord(makeMessage(), 1);
 
       const signal = vi.mocked(arcDb.saveSignal).mock.calls[0]![0] as Signal;
       expect(signal.data.workflow).toBe("conversation"); // unchanged from validClassification mock
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Recipient → account/alias resolution (done inside the processor)
+  // -------------------------------------------------------------------------
+
+  describe("recipient resolution", () => {
+    it("resolves via the alias when one matches (domain owner never consulted)", async () => {
+      vi.mocked(accountDb.getAliasByGlobalAddress).mockReturnValue(Promise.resolve(ok(DEFAULT_EMAIL_CONFIG)));
+
+      await processor.processRecord(makeMessage(), 1);
+
+      expect(accountDb.getDomainOwner).not.toHaveBeenCalled();
+      expect(arcDb.saveSignal).toHaveBeenCalledOnce();
+      const signal = vi.mocked(arcDb.saveSignal).mock.calls[0]![0] as Signal;
+      expect(signal.accountId).toBe(TEST_ACCOUNT_ID);
+    });
+
+    it("falls back to the domain owner when no alias matches", async () => {
+      vi.mocked(accountDb.getAliasByGlobalAddress).mockReturnValue(Promise.resolve(ok(null)));
+      vi.mocked(accountDb.getDomainOwner).mockReturnValue(Promise.resolve(ok({
+        accountId: TEST_ACCOUNT_ID, domain: "example.com", status: "active", receivingSetupComplete: true, senderSetupComplete: true, createdAt: "2024-01-01T00:00:00Z", updatedAt: "2024-01-01T00:00:00Z",
+      } as never)));
+
+      await processor.processRecord(makeMessage(), 1);
+
+      expect(accountDb.getDomainOwner).toHaveBeenCalledOnce();
+      expect(arcDb.saveSignal).toHaveBeenCalledOnce();
+      const signal = vi.mocked(arcDb.saveSignal).mock.calls[0]![0] as Signal;
+      expect(signal.accountId).toBe(TEST_ACCOUNT_ID);
+    });
+
+    it("drops the message when no alias and no active domain owner", async () => {
+      vi.mocked(accountDb.getAliasByGlobalAddress).mockReturnValue(Promise.resolve(ok(null)));
+      vi.mocked(accountDb.getDomainOwner).mockReturnValue(Promise.resolve(ok(null)));
+
+      const result = await processor.processRecord(makeMessage(), 1);
+
+      expect(result.isOk()).toBe(true);
+      expect(arcDb.saveSignal).not.toHaveBeenCalled();
+    });
+
+    it("drops the message when the only domain owner is soft-deleted", async () => {
+      vi.mocked(accountDb.getAliasByGlobalAddress).mockReturnValue(Promise.resolve(ok(null)));
+      vi.mocked(accountDb.getDomainOwner).mockReturnValue(Promise.resolve(ok({
+        accountId: TEST_ACCOUNT_ID, domain: "example.com", status: "deleted", receivingSetupComplete: true, senderSetupComplete: true, createdAt: "2024-01-01T00:00:00Z", updatedAt: "2024-01-01T00:00:00Z",
+      } as never)));
+
+      const result = await processor.processRecord(makeMessage(), 1);
+
+      expect(result.isOk()).toBe(true);
+      expect(arcDb.saveSignal).not.toHaveBeenCalled();
+    });
+
+    it("reprocessSignal re-derives the account/alias from the recipient rather than trusting its argument", async () => {
+      const storedSignal = {
+        id: "sgn-reprocess", signalLookupId: "ses-msg-reprocess", accountId: TEST_ACCOUNT_ID,
+        status: "active", source: "email", type: "email", labels: [], createdAt: "2024-01-15T10:00:00Z",
+        data: { sesMessageId: "msg-reprocess", s3Key: "emails/msg-reprocess", recipientAddress: "user@example.com", receivedAt: "2024-01-15T10:00:00Z" },
+      };
+      (arcDb as unknown as { getSignalById: ReturnType<typeof vi.fn> }).getSignalById =
+        vi.fn().mockReturnValue(Promise.resolve(ok(storedSignal)));
+      vi.mocked(accountDb.getAliasByGlobalAddress).mockReturnValue(Promise.resolve(ok(DEFAULT_EMAIL_CONFIG)));
+
+      const result = await processor.reprocessSignal(TEST_ACCOUNT_ID, "sgn-reprocess");
+
+      expect(result.isOk()).toBe(true);
+      // Re-derivation ran against the recipient address from the stored signal.
+      expect(accountDb.getAliasByGlobalAddress).toHaveBeenCalledWith("user@example.com");
+    });
+
+    it("tracks a mismatch but proceeds with the derived accountId when expectedAccountId disagrees", async () => {
+      vi.mocked(accountDb.getAliasByGlobalAddress).mockReturnValue(Promise.resolve(ok(DEFAULT_EMAIL_CONFIG)));
+
+      await processor.processRecord({ ...makeMessage(), expectedAccountId: "acct-someone-else" }, 1);
+
+      const signal = vi.mocked(arcDb.saveSignal).mock.calls[0]![0] as Signal;
+      expect(signal.accountId).toBe(TEST_ACCOUNT_ID); // derived value wins
+      const mismatchLog = mockLogger.calls.find(c => c.context?.code === "processor.account_id_mismatch");
+      expect(mismatchLog).toBeDefined();
+      expect(mismatchLog!.context).toMatchObject({ derivedAccountId: TEST_ACCOUNT_ID, expectedAccountId: "acct-someone-else" });
     });
   });
 
@@ -1498,10 +1539,10 @@ describe("SignalProcessor", () => {
     it("blocks notice emails from untrusted senders (SR-04 rule fires, fallback does not apply)", async () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok(noticeClassification));
       // Untrusted sender: no approved sender entry — filter-mode fallback would quarantine, but SR-04 fires first
-      vi.mocked(accountDb.getProcessorAccountContext).mockReturnValueOnce(Promise.resolve(ok({
+      applyCtx(accountDb, {
         ...DEFAULT_CTX,
         aliasConfig: makeAlias(),
-      })));
+      }, { once: true });
       vi.mocked(accountDb.getSender).mockReturnValueOnce(Promise.resolve(ok(null)));
 
       await processor.processRecord(makeMessage(), 1);
