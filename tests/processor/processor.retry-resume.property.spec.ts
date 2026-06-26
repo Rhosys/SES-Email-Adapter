@@ -232,7 +232,6 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
 
   function makeMessage(sesMessageId: string): InboundSignalMessage {
     return {
-      accountId: TEST_ACCOUNT_ID,
       s3Key: `emails/${sesMessageId}`,
       sesMessageId,
       idempotencyKey: "test-idempotency-key",
@@ -249,7 +248,7 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
       getSignalByMessageId: vi.fn().mockReturnValue(Promise.resolve(ok(signal))),
       getArc: vi.fn().mockReturnValue(Promise.resolve(ok(arc))),
     } as unknown as ArcDatabase;
-    const accountDb = makeAccountDbMock();
+    const accountDb = makeAccountDbMock(TEST_ACCOUNT_ID);
     const processingDb = makeProcessingDbMock();
     return { arcDb, accountDb, processingDb };
   }
@@ -482,7 +481,7 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
       ...makeArcDbMock(),
       getSignalByMessageId: vi.fn().mockReturnValue(Promise.resolve(ok(signal))),
     } as unknown as ArcDatabase;
-    const accountDb = makeAccountDbMock();
+    const accountDb = makeAccountDbMock(TEST_ACCOUNT_ID);
     const processingDb = makeProcessingDbMock();
 
     const auroraWriter = makeAuroraWriter();
@@ -565,7 +564,6 @@ describe("Feature: signal-processor-retry-resilience, Property 3: DDB read failu
 
   function makeRetryMessage(sesMessageId: string): InboundSignalMessage {
     return {
-      accountId: TEST_ACCOUNT_ID,
       s3Key: `emails/${sesMessageId}`,
       sesMessageId,
       idempotencyKey: "test-idempotency-key",
@@ -621,7 +619,7 @@ describe("Feature: signal-processor-retry-resilience, Property 3: DDB read failu
       ...(overrides.getSignalByMessageId ? { getSignalByMessageId: overrides.getSignalByMessageId } : {}),
       ...(overrides.getArc ? { getArc: overrides.getArc } : {}),
     } as unknown as ArcDatabase;
-    const accountDb = makeAccountDbMock();
+    const accountDb = makeAccountDbMock(TEST_ACCOUNT_ID);
     const processingDb = makeProcessingDbMock();
     return { arcDb, accountDb, processingDb };
   }
@@ -787,7 +785,7 @@ describe("Feature: signal-processor-retry-resilience, Property 2: Missing signal
   };
 
   function makeStore() {
-    return { arcDb: makeArcDbMock(), accountDb: makeAccountDbMock(), processingDb: makeProcessingDbMock() };
+    return { arcDb: makeArcDbMock(), accountDb: makeAccountDbMock(TEST_ACCOUNT_ID), processingDb: makeProcessingDbMock() };
   }
 
   function makeContentSanitizer(): ContentSanitizerClient {
@@ -839,7 +837,6 @@ describe("Feature: signal-processor-retry-resilience, Property 2: Missing signal
 
   function makeMessage(sesMessageId: string): InboundSignalMessage {
     return {
-      accountId: TEST_ACCOUNT_ID,
       s3Key: `emails/${sesMessageId}`,
       sesMessageId,
       idempotencyKey: "test-idempotency-key",
@@ -1113,7 +1110,6 @@ describe("Feature: signal-processor-retry-resilience, Property 8: Outcome re-der
 
   function makeMessage(): InboundSignalMessage {
     return {
-      accountId: TEST_ACCOUNT_ID,
       s3Key: "emails/msg-prop8",
       sesMessageId: "msg-prop8",
       idempotencyKey: "test-idempotency-key",
@@ -1133,7 +1129,7 @@ describe("Feature: signal-processor-retry-resilience, Property 8: Outcome re-der
       getSignalByMessageId: vi.fn().mockReturnValue(Promise.resolve(ok(signal))),
       getArc: vi.fn().mockReturnValue(Promise.resolve(ok(arc))),
     } as unknown as ArcDatabase;
-    const accountDb = makeAccountDbMock();
+    const accountDb = makeAccountDbMock(TEST_ACCOUNT_ID);
     const processingDb = makeProcessingDbMock();
 
     const sqsDispatcher: SqsDispatcher = {
@@ -1171,7 +1167,7 @@ describe("Feature: signal-processor-retry-resilience, Property 8: Outcome re-der
       getSignalByMessageId: vi.fn().mockReturnValue(Promise.resolve(ok(signal))),
       getArc: vi.fn().mockReturnValue(Promise.resolve(ok(arc))),
     } as unknown as ArcDatabase;
-    const accountDb = makeAccountDbMock();
+    const accountDb = makeAccountDbMock(TEST_ACCOUNT_ID);
     const processingDb = makeProcessingDbMock();
 
     const sqsDispatcher: SqsDispatcher = {

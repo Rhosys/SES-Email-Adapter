@@ -45,7 +45,6 @@ function makeLogger(): Logger {
 
 function makeMessage(destination: string[]): InboundSignalMessage {
   return {
-    accountId: VALID_ACC_ID,
     s3Key: "emails/test.eml",
     sesMessageId: "ses-msg-001",
     idempotencyKey: "test-idempotency-key",

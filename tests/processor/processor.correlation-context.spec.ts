@@ -48,7 +48,7 @@ describe("processSideEffect — correlation context", () => {
 
   function makeStore() {
     const arcDb = makeArcDbMock();
-    const accountDb = makeAccountDbMock();
+    const accountDb = makeAccountDbMock(TEST_ACCOUNT_ID);
     const processingDb = makeProcessingDbMock();
     vi.mocked(accountDb.getDomainByName).mockReturnValue(Promise.resolve(ok(null)));
     return { arcDb, accountDb, processingDb };

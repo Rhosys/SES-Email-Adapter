@@ -113,7 +113,6 @@ describe("Cross-layer idempotence — live writes + cache + Aurora", () => {
 
   function makeMessage(sesMessageId: string): InboundSignalMessage {
     return {
-      accountId: TEST_ACCOUNT_ID,
       s3Key: `emails/${sesMessageId}`,
       sesMessageId,
       idempotencyKey: "test-idempotency-key",
@@ -131,7 +130,7 @@ describe("Cross-layer idempotence — live writes + cache + Aurora", () => {
         .mockReturnValueOnce(Promise.resolve(ok(null)))
         .mockReturnValueOnce(Promise.resolve(ok({ id: "SES#test-msg-001" }))),
     } as unknown as ArcDatabase;
-    const accountDb = makeAccountDbMock();
+    const accountDb = makeAccountDbMock(TEST_ACCOUNT_ID);
     const processingDb = makeProcessingDbMock();
 
     const embeddingGenerator: EmbeddingGenerator = {
@@ -184,7 +183,7 @@ describe("Cross-layer idempotence — live writes + cache + Aurora", () => {
         return Promise.resolve(ok(undefined));
       }),
     } as unknown as ArcDatabase;
-    const accountDb = makeAccountDbMock();
+    const accountDb = makeAccountDbMock(TEST_ACCOUNT_ID);
     const processingDb = makeProcessingDbMock();
 
     const embeddingGenerator: EmbeddingGenerator = {

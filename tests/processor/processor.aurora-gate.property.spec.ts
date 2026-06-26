@@ -147,7 +147,6 @@ describe("Feature: signal-processor-retry-resilience, Property 4: Arc saved befo
 
   function makeMessage(sesMessageId: string): InboundSignalMessage {
     return {
-      accountId: TEST_ACCOUNT_ID,
       s3Key: `emails/${sesMessageId}`,
       sesMessageId,
       idempotencyKey: "test-idempotency-key",
@@ -181,7 +180,7 @@ describe("Feature: signal-processor-retry-resilience, Property 4: Arc saved befo
         return Promise.resolve(ok(undefined));
       }),
     } as unknown as ArcDatabase;
-    const accountDb = makeAccountDbMock();
+    const accountDb = makeAccountDbMock(TEST_ACCOUNT_ID);
     const processingDb = makeProcessingDbMock();
 
     const embeddingGenerator: EmbeddingGenerator = {
@@ -237,7 +236,7 @@ describe("Feature: signal-processor-retry-resilience, Property 4: Arc saved befo
       }),
       saveArc: vi.fn().mockReturnValue(Promise.resolve(err(dbError(new Error("DDB write failed"))))),
     } as unknown as ArcDatabase;
-    const accountDb = makeAccountDbMock();
+    const accountDb = makeAccountDbMock(TEST_ACCOUNT_ID);
     const processingDb = makeProcessingDbMock();
 
     const embeddingGenerator: EmbeddingGenerator = {
@@ -338,7 +337,7 @@ describe("Feature: signal-processor-retry-resilience, Property 6: Aurora failure
   };
 
   function makeStore() {
-    return { arcDb: makeArcDbMock(), accountDb: makeAccountDbMock(), processingDb: makeProcessingDbMock() };
+    return { arcDb: makeArcDbMock(), accountDb: makeAccountDbMock(TEST_ACCOUNT_ID), processingDb: makeProcessingDbMock() };
   }
 
   function makeContentSanitizer(): ContentSanitizerClient {
@@ -376,7 +375,6 @@ describe("Feature: signal-processor-retry-resilience, Property 6: Aurora failure
 
   function makeMessage(sesMessageId: string): InboundSignalMessage {
     return {
-      accountId: TEST_ACCOUNT_ID,
       s3Key: `emails/${sesMessageId}`,
       sesMessageId,
       idempotencyKey: "test-idempotency-key",
@@ -655,7 +653,6 @@ describe("Feature: signal-processor-retry-resilience, Property 5: Side-effects d
 
   function makeMessage(sesMessageId: string): InboundSignalMessage {
     return {
-      accountId: TEST_ACCOUNT_ID,
       s3Key: `emails/${sesMessageId}`,
       sesMessageId,
       idempotencyKey: "test-idempotency-key",
@@ -667,7 +664,7 @@ describe("Feature: signal-processor-retry-resilience, Property 5: Side-effects d
   }
 
   function makeStore() {
-    return { arcDb: makeArcDbMock(), accountDb: makeAccountDbMock(), processingDb: makeProcessingDbMock() };
+    return { arcDb: makeArcDbMock(), accountDb: makeAccountDbMock(TEST_ACCOUNT_ID), processingDb: makeProcessingDbMock() };
   }
 
   // -------------------------------------------------------------------------
@@ -937,7 +934,6 @@ describe("Feature: signal-processor-retry-resilience, Property 7: Partial Aurora
 
   function makeMessage(sesMessageId: string): InboundSignalMessage {
     return {
-      accountId: TEST_ACCOUNT_ID,
       s3Key: `emails/${sesMessageId}`,
       sesMessageId,
       idempotencyKey: "test-idempotency-key",
@@ -960,7 +956,7 @@ describe("Feature: signal-processor-retry-resilience, Property 7: Partial Aurora
     const completedUpserts: string[] = [];
 
     const arcDb = makeArcDbMock();
-    const accountDb = makeAccountDbMock();
+    const accountDb = makeAccountDbMock(TEST_ACCOUNT_ID);
     const processingDb = makeProcessingDbMock();
 
     const embeddingGenerator: EmbeddingGenerator = {

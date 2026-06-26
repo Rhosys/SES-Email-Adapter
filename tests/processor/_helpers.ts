@@ -3,7 +3,7 @@ import { ok } from "../../src/errors.js";
 import type { ArcDatabase } from "../../src/database/arc-database.js";
 import type { AccountDatabase } from "../../src/database/account-database.js";
 import type { ProcessingDatabase } from "../../src/database/processing-database.js";
-import type { Alias, UnknownSenderPolicy } from "../../src/types/index.js";
+import type { Account, Alias, Domain, UnknownSenderPolicy } from "../../src/types/index.js";
 
 // ---------------------------------------------------------------------------
 // Shared mock factories for processor tests.
@@ -32,7 +32,7 @@ export function makeArcDbMock(): ArcDatabase {
  * AccountDatabase mock — account, alias, rule, domain, sender, template, and stats
  * methods used by the processor.
  */
-export function makeAccountDbMock(): AccountDatabase {
+export function makeAccountDbMock(accountId = "acct-default", recipientAddress = "user@example.com"): AccountDatabase {
   const saveAlias = vi.fn().mockImplementation((a: Alias) => Promise.resolve(ok(a)));
   const ensureAlias = vi.fn().mockImplementation((accountId: string, address: string, defaultUnknownSenderPolicy: UnknownSenderPolicy, existing?: Alias | null) => {
     if (existing) return Promise.resolve(ok(existing));
@@ -50,13 +50,25 @@ export function makeAccountDbMock(): AccountDatabase {
   });
   return {
     listEnabledRules: vi.fn().mockReturnValue(Promise.resolve(ok([]))),
-    getProcessorAccountContext: vi.fn().mockReturnValue(Promise.resolve(ok({
+    getAccount: vi.fn().mockReturnValue(Promise.resolve(ok({
       retentionDuration: "P3M",
       filtering: null,
-      aliasConfig: null,
-      registeredDomains: [],
-      userEmails: [],
       billingPlan: "Paid" as const,
+      onboarding: { completed: true },
+    }))),
+    // Recipient resolution. Default: no alias row, but the recipient's domain is owned by
+    // the test account — mirrors the old default processor context where aliasConfig was
+    // null and the accountId came from the message. Tests exercising alias-scoped behaviour
+    // override getAliasByGlobalAddress (e.g. via mockRecipientAlias).
+    getAliasByGlobalAddress: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
+    getDomainOwner: vi.fn().mockReturnValue(Promise.resolve(ok({
+      accountId,
+      domain: recipientAddress.split("@")[1]!,
+      status: "active",
+      receivingSetupComplete: true,
+      senderSetupComplete: true,
+      createdAt: "2024-01-01T00:00:00Z",
+      updatedAt: "2024-01-01T00:00:00Z",
     }))),
     saveAlias,
     ensureAlias,
@@ -70,6 +82,67 @@ export function makeAccountDbMock(): AccountDatabase {
     listLabels: vi.fn().mockReturnValue(Promise.resolve(ok([]))),
     upsertSystemRuleStatus: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
   } as unknown as AccountDatabase;
+}
+
+/**
+ * Wire recipient resolution so processMessage derives `accountId` (with a non-null
+ * aliasConfig) for the given alias. Use for tests that exercise alias-scoped behaviour.
+ */
+export function mockRecipientAlias(accountDb: AccountDatabase, alias: Alias): void {
+  vi.mocked(accountDb.getAliasByGlobalAddress).mockReturnValue(Promise.resolve(ok(alias)));
+}
+
+/**
+ * Wire recipient resolution so processMessage derives `accountId` via the domain-owner
+ * fallback (aliasConfig is null — the catch-all path). Mirrors the previous default
+ * where the processor account context had `aliasConfig: null`.
+ */
+export function mockRecipientDomainOwner(accountDb: AccountDatabase, accountId: string, domain = "example.com"): void {
+  vi.mocked(accountDb.getDomainOwner).mockReturnValue(Promise.resolve(ok({
+    accountId,
+    domain,
+    status: "active",
+    receivingSetupComplete: true,
+    senderSetupComplete: true,
+    createdAt: "2024-01-01T00:00:00Z",
+    updatedAt: "2024-01-01T00:00:00Z",
+  } as Domain)));
+}
+
+/**
+ * Compatibility shim for the old `getProcessorAccountContext` mock. Translates a
+ * context-shaped object into the underlying calls the processor now makes:
+ * `getAccount` (retention/filtering/billingPlan/onboarding) and
+ * `getAliasByGlobalAddress` (aliasConfig). When `aliasConfig` is null, resolution falls
+ * through to the domain-owner default wired in `makeAccountDbMock(accountId)`.
+ */
+export interface CtxLike {
+  retentionDuration?: string;
+  filtering?: { defaultUnknownSenderPolicy?: UnknownSenderPolicy } | null;
+  aliasConfig?: Alias | null;
+  billingPlan?: string;
+  onboardingCompleted?: boolean;
+  /** Accepted but ignored — test-email detection now uses a getDomainByName point-read. */
+  registeredDomains?: string[];
+  /** Accepted but ignored — the userEmails test-detection clause was removed. */
+  userEmails?: string[];
+}
+
+export function applyCtx(accountDb: AccountDatabase, ctx: CtxLike, opts?: { once?: boolean }): void {
+  const account = ok({
+    retentionDuration: ctx.retentionDuration ?? "P3M",
+    filtering: ctx.filtering ?? null,
+    billingPlan: ctx.billingPlan ?? "Paid",
+    onboarding: { completed: ctx.onboardingCompleted ?? true },
+  } as unknown as Account);
+  const aliasRes = ok(ctx.aliasConfig ?? null);
+  if (opts?.once) {
+    vi.mocked(accountDb.getAccount).mockReturnValueOnce(Promise.resolve(account));
+    vi.mocked(accountDb.getAliasByGlobalAddress).mockReturnValueOnce(Promise.resolve(aliasRes));
+  } else {
+    vi.mocked(accountDb.getAccount).mockReturnValue(Promise.resolve(account));
+    vi.mocked(accountDb.getAliasByGlobalAddress).mockReturnValue(Promise.resolve(aliasRes));
+  }
 }
 
 /**
