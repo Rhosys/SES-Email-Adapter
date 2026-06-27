@@ -33,6 +33,7 @@ import { TemplatesApi } from "./templatesApi.js";
 import { AuditApi } from "./auditApi.js";
 import { AdminApi } from "./adminApi.js";
 import { ThreadsApi } from "./threadsApi.js";
+import { UserApi } from "./userApi.js";
 
 import { authorizationGuard, ROUTE_NOT_FOUND_KEY } from "./authorization-guard.js";
 import { createAuthorize } from "./authorization-middleware.js";
@@ -84,9 +85,10 @@ export interface AppDeps {
   schedulerClient: SchedulerClient;
   s3Client: S3Client;
   emailBucket: string;
+  triggerDigest: (accountId: string) => Promise<void>;
 }
 
-export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, forwardingService, jobDispatcher, signalReprocessor, draftSendDispatcher, accountCreationStarter, appBaseUrl, contentCdnBaseUrl, astValidator, billingHandler, emailService, domainIdentityService, rsvpComposer, postApprovalCalendarDeps, schedulerClient, s3Client, emailBucket }: AppDeps) {
+export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, forwardingService, jobDispatcher, signalReprocessor, draftSendDispatcher, accountCreationStarter, appBaseUrl, contentCdnBaseUrl, astValidator, billingHandler, emailService, domainIdentityService, rsvpComposer, postApprovalCalendarDeps, schedulerClient, s3Client, emailBucket, triggerDigest }: AppDeps) {
   type AppEnv = { Variables: { auth: AuthContext; authorizationVerified?: boolean; [ROUTE_NOT_FOUND_KEY]?: boolean } };
   const app = new OpenAPIHono<AppEnv>();
 
@@ -226,7 +228,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, for
   // -------------------------------------------------------------------------
   // Route registrations
   // -------------------------------------------------------------------------
-  new AccountsApi(accountDb, access, logger, accountCreationStarter, emailService, appBaseUrl).register(app, helpers);
+  new AccountsApi(accountDb, access, logger, accountCreationStarter, emailService, appBaseUrl, triggerDigest).register(app, helpers);
   new ArcsApi(arcDb, accountDb, logger, draftSendDispatcher, schedulerClient, emailService, rsvpComposer, postApprovalCalendarDeps, signalReprocessor, s3Client, emailBucket, contentCdnBaseUrl).register(app, helpers);
   new ThreadsApi(arcDb, accountDb, logger, draftSendDispatcher, schedulerClient, emailService, rsvpComposer, postApprovalCalendarDeps, signalReprocessor, s3Client, emailBucket, contentCdnBaseUrl).register(app, helpers);
   new ViewsApi(accountDb).register(app, helpers);
@@ -237,6 +239,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, for
   new TemplatesApi(accountDb, auditDb, astValidator, logger).register(app, helpers);
   new AuditApi(auditDb).register(app, helpers);
   new AdminApi(jobDispatcher).register(app, helpers);
+  new UserApi(accountDb).register(app, helpers);
 
   // ---------------------------------------------------------------------------
   // Not Found & Method Not Allowed — must be registered after all routes

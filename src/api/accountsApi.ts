@@ -67,6 +67,7 @@ export class AccountsApi {
     private readonly accountCreationStarter: { start(accountId: string, email: string): Promise<void> },
     private readonly emailService: EmailService,
     private readonly appBaseUrl: string,
+    private readonly triggerDigest: (accountId: string) => Promise<void>,
   ) {}
 
   register(app: OpenAPIHono<AppEnv>, { authz, err, route }: RouteHelpers): void {
@@ -173,6 +174,16 @@ export class AccountsApi {
           return err(c, 422, "Calendar forwarding address must be a verified forwarding address", "UNVERIFIED_CALENDAR_TARGET");
         }
       }
+
+      // Read existing digest to detect changes
+      let previousDigest: { frequency: string; forwardingTargetId: string } | null | undefined;
+      if (body.digest !== undefined) {
+        const existingResult = await accountDb.getAccount(accountId);
+        if (existingResult.isOk()) {
+          previousDigest = existingResult.value?.digest;
+        }
+      }
+
       if (body.onboarding) {
         const existingResult = await accountDb.getAccount(accountId);
         if (existingResult.isErr()) return err(c, 500, "Internal Server Error");
@@ -181,6 +192,17 @@ export class AccountsApi {
       }
       const updateResult = await accountDb.updateAccount(accountId, body as Partial<Pick<Account, "name" | "retentionDuration" | "digest" | "filtering" | "onboarding" | "defaultCalendarInviteForwardingAddress">>);
       if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
+
+      // Trigger immediate digest if frequency or target changed
+      if (body.digest && (
+        previousDigest?.frequency !== body.digest.frequency ||
+        previousDigest?.forwardingTargetId !== body.digest.forwardingTargetId
+      )) {
+        void this.triggerDigest(accountId).then(undefined, e => {
+          logger.warn("Failed to trigger immediate digest after config change", { code: "accounts.digest_trigger_failed", accountId, error: e });
+        });
+      }
+
       return c.json(toApiAccount(updateResult.value), 200);
     });
 

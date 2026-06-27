@@ -24,6 +24,7 @@ export function makeAppDeps(overrides: Partial<AppDeps>): AppDeps {
     rsvpComposer: (async () => ok(undefined)) as never,
     postApprovalCalendarDeps: { accountDb: {} as never, emailService: {} as never, serviceDomain: "platform.email.rhosys.cloud" } as never,
     schedulerClient: { scheduleMessage: async () => ok(undefined), deleteSchedule: async () => ok(undefined) } as never,
+    triggerDigest: async () => {},
     ...overrides,
   } as AppDeps;
 }
