@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { Arc, Signal, View, Label, Rule, Domain, Account, Alias, ForwardingTarget, EmailTemplate } from "../../src/types/index.js";
 import { createApp } from "../../src/api/app.js";
 import { makeAppDeps } from "../helpers/app-deps.js";
-import type { AuthService, AccessService, AccountUser, VerificationMailer } from "../../src/api/app.js";
+import type { AuthService, AccessService, AccountUser, IForwardingService } from "../../src/api/app.js";
 import type { ArcDatabase } from "../../src/database/arc-database.js";
 import type { AccountDatabase } from "../../src/database/account-database.js";
 import type { AuditDatabase } from "../../src/database/audit-database.js";
@@ -316,7 +316,7 @@ describe("API", () => {
   let auditDb: ReturnType<typeof makeAuditDb>;
   let auth: AuthService;
   let access: AccessService;
-  let verificationMailer: VerificationMailer;
+  let forwardingService: IForwardingService;
   let draftSendDispatcher: DraftSendDispatcher;
   let astValidator: UserCodeExecutorClient;
   let app: ReturnType<typeof createApp>;
@@ -328,14 +328,14 @@ describe("API", () => {
     auditDb = makeAuditDb();
     auth = makeAuth();
     access = makeAccess();
-    verificationMailer = { sendForwardVerification: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), sendCalendarForwardVerification: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), verifyWebhookTarget: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) };
+    forwardingService = { sendVerification: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), verifyWebhook: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) };
     draftSendDispatcher = { dispatch: vi.fn().mockResolvedValue(ok(undefined)) } as unknown as DraftSendDispatcher;
     astValidator = {
       invoke: vi.fn().mockResolvedValue(ok({ value: true })),
       validateAst: vi.fn().mockResolvedValue(ok(undefined)),
       validateAstBatch: vi.fn().mockResolvedValue(ok(undefined)),
     };
-    app = createApp(makeAppDeps({ arcDb: arcDb as unknown as ArcDatabase, accountDb: accountDb as unknown as AccountDatabase, auditDb: auditDb as unknown as AuditDatabase, auth, access, logger: createMockLogger(), verificationMailer, jobDispatcher: { dispatchReindex: vi.fn(), dispatchSegment: vi.fn() } as never, draftSendDispatcher, accountCreationStarter: { start: vi.fn() }, appBaseUrl: "http://localhost", contentCdnBaseUrl: "https://cdn.test", astValidator, billingHandler: new BillingHandler(), emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, domainIdentityService: { register: vi.fn().mockResolvedValue(ok(undefined)), deregister: vi.fn().mockResolvedValue(ok(undefined)) }, rsvpComposer: vi.fn().mockResolvedValue(ok(undefined)) as unknown as typeof sendRsvp, postApprovalCalendarDeps: { accountDb: {} as never, emailService: {} as never, serviceDomain: "platform.email.rhosys.cloud" } as unknown as PostApprovalCalendarHandlerDeps, schedulerClient: { scheduleMessage: vi.fn().mockResolvedValue(ok(undefined)), deleteSchedule: vi.fn().mockResolvedValue(ok(undefined)) } as never }));
+    app = createApp(makeAppDeps({ arcDb: arcDb as unknown as ArcDatabase, accountDb: accountDb as unknown as AccountDatabase, auditDb: auditDb as unknown as AuditDatabase, auth, access, logger: createMockLogger(), forwardingService, jobDispatcher: { dispatchReindex: vi.fn(), dispatchSegment: vi.fn() } as never, draftSendDispatcher, accountCreationStarter: { start: vi.fn() }, appBaseUrl: "http://localhost", contentCdnBaseUrl: "https://cdn.test", astValidator, billingHandler: new BillingHandler(), emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, domainIdentityService: { register: vi.fn().mockResolvedValue(ok(undefined)), deregister: vi.fn().mockResolvedValue(ok(undefined)) }, rsvpComposer: vi.fn().mockResolvedValue(ok(undefined)) as unknown as typeof sendRsvp, postApprovalCalendarDeps: { accountDb: {} as never, emailService: {} as never, serviceDomain: "platform.email.rhosys.cloud" } as unknown as PostApprovalCalendarHandlerDeps, schedulerClient: { scheduleMessage: vi.fn().mockResolvedValue(ok(undefined)), deleteSchedule: vi.fn().mockResolvedValue(ok(undefined)) } as never }));
   });
 
   // -------------------------------------------------------------------------
@@ -1102,7 +1102,7 @@ describe("API", () => {
     });
 
     it("returns 501 when access service is not configured", async () => {
-      app = createApp(makeAppDeps({ arcDb: arcDb as unknown as ArcDatabase, accountDb: accountDb as unknown as AccountDatabase, auditDb: auditDb as unknown as AuditDatabase, auth, access: undefined as never, logger: createMockLogger(), verificationMailer: { sendForwardVerification: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), sendCalendarForwardVerification: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), verifyWebhookTarget: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, jobDispatcher: { dispatchReindex: vi.fn(), dispatchSegment: vi.fn() } as never, draftSendDispatcher: { dispatch: vi.fn().mockResolvedValue(ok(undefined)) } as never, accountCreationStarter: { start: vi.fn() }, appBaseUrl: "http://localhost", contentCdnBaseUrl: "https://cdn.test", astValidator: { validateAstBatch: vi.fn().mockResolvedValue(ok(undefined)) } as never, billingHandler: new BillingHandler(), emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, domainIdentityService: { register: vi.fn().mockResolvedValue(ok(undefined)), deregister: vi.fn().mockResolvedValue(ok(undefined)) }, rsvpComposer: vi.fn().mockResolvedValue(ok(undefined)) as unknown as typeof sendRsvp, postApprovalCalendarDeps: { accountDb: {} as never, emailService: {} as never, serviceDomain: "platform.email.rhosys.cloud" } as unknown as PostApprovalCalendarHandlerDeps, schedulerClient: { scheduleMessage: vi.fn().mockResolvedValue(ok(undefined)), deleteSchedule: vi.fn().mockResolvedValue(ok(undefined)) } as never }));
+      app = createApp(makeAppDeps({ arcDb: arcDb as unknown as ArcDatabase, accountDb: accountDb as unknown as AccountDatabase, auditDb: auditDb as unknown as AuditDatabase, auth, access: undefined as never, logger: createMockLogger(), forwardingService: { sendVerification: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), verifyWebhook: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, jobDispatcher: { dispatchReindex: vi.fn(), dispatchSegment: vi.fn() } as never, draftSendDispatcher: { dispatch: vi.fn().mockResolvedValue(ok(undefined)) } as never, accountCreationStarter: { start: vi.fn() }, appBaseUrl: "http://localhost", contentCdnBaseUrl: "https://cdn.test", astValidator: { validateAstBatch: vi.fn().mockResolvedValue(ok(undefined)) } as never, billingHandler: new BillingHandler(), emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, domainIdentityService: { register: vi.fn().mockResolvedValue(ok(undefined)), deregister: vi.fn().mockResolvedValue(ok(undefined)) }, rsvpComposer: vi.fn().mockResolvedValue(ok(undefined)) as unknown as typeof sendRsvp, postApprovalCalendarDeps: { accountDb: {} as never, emailService: {} as never, serviceDomain: "platform.email.rhosys.cloud" } as unknown as PostApprovalCalendarHandlerDeps, schedulerClient: { scheduleMessage: vi.fn().mockResolvedValue(ok(undefined)), deleteSchedule: vi.fn().mockResolvedValue(ok(undefined)) } as never }));
       const res = await req(app, "GET", `${A}/users`);
       expect(res.status).toBe(501);
     });
@@ -1143,7 +1143,7 @@ describe("API", () => {
     });
 
     it("returns 501 when access service is not configured", async () => {
-      app = createApp(makeAppDeps({ arcDb: arcDb as unknown as ArcDatabase, accountDb: accountDb as unknown as AccountDatabase, auditDb: auditDb as unknown as AuditDatabase, auth, access: undefined as never, logger: createMockLogger(), verificationMailer: { sendForwardVerification: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), sendCalendarForwardVerification: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), verifyWebhookTarget: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, jobDispatcher: { dispatchReindex: vi.fn(), dispatchSegment: vi.fn() } as never, draftSendDispatcher: { dispatch: vi.fn().mockResolvedValue(ok(undefined)) } as never, accountCreationStarter: { start: vi.fn() }, appBaseUrl: "http://localhost", contentCdnBaseUrl: "https://cdn.test", astValidator: { validateAstBatch: vi.fn().mockResolvedValue(ok(undefined)) } as never, billingHandler: new BillingHandler(), emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, domainIdentityService: { register: vi.fn().mockResolvedValue(ok(undefined)), deregister: vi.fn().mockResolvedValue(ok(undefined)) }, rsvpComposer: vi.fn().mockResolvedValue(ok(undefined)) as unknown as typeof sendRsvp, postApprovalCalendarDeps: { accountDb: {} as never, emailService: {} as never, serviceDomain: "platform.email.rhosys.cloud" } as unknown as PostApprovalCalendarHandlerDeps, schedulerClient: { scheduleMessage: vi.fn().mockResolvedValue(ok(undefined)), deleteSchedule: vi.fn().mockResolvedValue(ok(undefined)) } as never }));
+      app = createApp(makeAppDeps({ arcDb: arcDb as unknown as ArcDatabase, accountDb: accountDb as unknown as AccountDatabase, auditDb: auditDb as unknown as AuditDatabase, auth, access: undefined as never, logger: createMockLogger(), forwardingService: { sendVerification: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), verifyWebhook: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, jobDispatcher: { dispatchReindex: vi.fn(), dispatchSegment: vi.fn() } as never, draftSendDispatcher: { dispatch: vi.fn().mockResolvedValue(ok(undefined)) } as never, accountCreationStarter: { start: vi.fn() }, appBaseUrl: "http://localhost", contentCdnBaseUrl: "https://cdn.test", astValidator: { validateAstBatch: vi.fn().mockResolvedValue(ok(undefined)) } as never, billingHandler: new BillingHandler(), emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, domainIdentityService: { register: vi.fn().mockResolvedValue(ok(undefined)), deregister: vi.fn().mockResolvedValue(ok(undefined)) }, rsvpComposer: vi.fn().mockResolvedValue(ok(undefined)) as unknown as typeof sendRsvp, postApprovalCalendarDeps: { accountDb: {} as never, emailService: {} as never, serviceDomain: "platform.email.rhosys.cloud" } as unknown as PostApprovalCalendarHandlerDeps, schedulerClient: { scheduleMessage: vi.fn().mockResolvedValue(ok(undefined)), deleteSchedule: vi.fn().mockResolvedValue(ok(undefined)) } as never }));
       const res = await req(app, "POST", `${A}/users`, { body: { email: "user@example.com", role: "member" } });
       expect(res.status).toBe(501);
     });
@@ -1338,8 +1338,8 @@ describe("API", () => {
       expect(body.target).toBe("backup@personal.com");
       expect(body.status).toBe("pending");
       expect(accountDb.saveForwardingTarget).toHaveBeenCalledOnce();
-      expect(verificationMailer.sendForwardVerification).toHaveBeenCalledWith(
-        TEST_ACCOUNT_ID, "backup@personal.com", expect.any(String),
+      expect(forwardingService.sendVerification).toHaveBeenCalledWith(
+        TEST_ACCOUNT_ID, expect.objectContaining({ target: "backup@personal.com", type: "email" }),
       );
     });
 
@@ -1347,7 +1347,7 @@ describe("API", () => {
       vi.mocked(accountDb.getForwardingTarget).mockResolvedValueOnce(ok(makeForwardingTarget({ status: "verified" })));
       const res = await req(app, "POST", `${A}/forwarding-addresses`, { body: { target: "backup@personal.com", type: "email" } });
       expect(res.status).toBe(201);
-      expect(verificationMailer.sendForwardVerification).not.toHaveBeenCalled();
+      expect(forwardingService.sendVerification).not.toHaveBeenCalled();
     });
   });
 

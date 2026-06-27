@@ -4,7 +4,7 @@ import { DateTime } from "luxon";
 import { randomUUID } from "crypto";
 import { ok as neverthrowOk, err as neverthrowErr } from "neverthrow";
 import type { Result } from "neverthrow";
-import type { DbError, TransientSesError } from "../errors.js";
+import type { DbError } from "../errors.js";
 import type { ForwardingTarget } from "../types/index.js";
 import { zParse } from "./validate.js";
 import { toApiAlias, toApiAliasSender, toApiForwardingTarget } from "./transform.js";
@@ -19,16 +19,7 @@ import type { AccountDatabase } from "../database/account-database.js";
 import type { AuditDatabase } from "../database/audit-database.js";
 import type { Logger } from "../logger.js";
 import type { AppEnv, RouteHelpers } from "./route-helpers.js";
-
-// ---------------------------------------------------------------------------
-// Verification mailer
-// ---------------------------------------------------------------------------
-
-export interface VerificationMailer {
-  sendForwardVerification(accountId: string, target: string, token: string): Promise<Result<void, TransientSesError>>;
-  sendCalendarForwardVerification(accountId: string, target: string, token: string): Promise<Result<void, TransientSesError>>;
-  verifyWebhookTarget(url: string): Promise<Result<void, TransientSesError>>;
-}
+import type { IForwardingService } from "../forwarding/forwarding-service.js";
 
 // Mirrors processor.ts's autoApprove — a sender disposition recorded for an address
 // implies that address is a recognised alias, so the Alias record must exist alongside it.
@@ -54,11 +45,11 @@ export class AliasesApi {
     private readonly accountDb: AccountDatabase,
     private readonly auditDb: AuditDatabase,
     private readonly logger: Logger,
-    private readonly verificationMailer: VerificationMailer,
+    private readonly forwardingService: IForwardingService,
   ) {}
 
   register(app: OpenAPIHono<AppEnv>, { authz, err, route }: RouteHelpers): void {
-    const { accountDb, auditDb, logger, verificationMailer } = this;
+    const { accountDb, auditDb, logger, forwardingService } = this;
 
     // -------------------------------------------------------------------------
     // Aliases  —  /accounts/:accountId/aliases
@@ -330,27 +321,20 @@ export class AliasesApi {
         ...(existing?.verifiedAt !== undefined ? { verifiedAt: existing.verifiedAt } : {}),
       };
 
-      // Verify based on type — email gets verification email, webhook gets HTTP test
-      if (body.type === "email") {
-        if (verificationMailer) {
-          const verifyResult = await verificationMailer.sendForwardVerification(accountId, addr.target, addr.token);
-          if (verifyResult.isErr()) {
-            logger.warn("Failed to send forwarding target verification email", { code: "forwarding.verification_email_failed", accountId, target: addr.target, error: verifyResult.error });
-            return err(c, 422, "Failed to send verification email. Please try again.");
-          }
+      // Verify based on type — ForwardingService dispatches by target type internally
+      const verifyResult = await forwardingService.sendVerification(accountId, addr);
+      if (verifyResult.isErr()) {
+        if (body.type === "webhook") {
+          logger.warn("Webhook target verification failed — URL did not return HTTP 200", { code: "forwarding.webhook_verification_failed", accountId, target: addr.target, error: verifyResult.error });
+          return err(c, 422, "Webhook URL did not respond with HTTP 200. Please check the URL and try again.");
         }
+        logger.warn("Failed to send forwarding target verification email", { code: "forwarding.verification_email_failed", accountId, target: addr.target, error: verifyResult.error });
+        return err(c, 422, "Failed to send verification email. Please try again.");
       }
       if (body.type === "webhook") {
-        if (verificationMailer) {
-          const verifyResult = await verificationMailer.verifyWebhookTarget(addr.target);
-          if (verifyResult.isErr()) {
-            logger.warn("Webhook target verification failed — URL did not return HTTP 200", { code: "forwarding.webhook_verification_failed", accountId, target: addr.target, error: verifyResult.error });
-            return err(c, 422, "Webhook URL did not respond with HTTP 200. Please check the URL and try again.");
-          }
-          // Webhooks are verified immediately on successful test request
-          addr.status = "verified";
-          addr.verifiedAt = now;
-        }
+        // Webhooks are verified immediately on successful test request
+        addr.status = "verified";
+        addr.verifiedAt = now;
       }
 
       const saveResult = await accountDb.saveForwardingTarget(addr);
