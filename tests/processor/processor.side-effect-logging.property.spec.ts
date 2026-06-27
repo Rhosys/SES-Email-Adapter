@@ -1,7 +1,8 @@
+import type { IForwardingService } from "../../src/forwarding/forwarding-service.js";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ok, err } from "../../src/errors.js";
 import { SignalProcessor, SYSTEM_RULES } from "../../src/processor/processor.js";
-import type { ArcMatcher, Notifier, Forwarder, SideEffectPayload } from "../../src/processor/processor.js";
+import type { ArcMatcher, Notifier,  SideEffectPayload } from "../../src/processor/processor.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
 import { makeSharedNewDeps, makeRuleEvaluator3 } from "./_shared-new-deps.js";
 import { makeArcDbMock, makeAccountDbMock, makeProcessingDbMock } from "./_helpers.js";
@@ -177,7 +178,7 @@ describe("Side effect caller logging", () => {
       arcMatcher: makeArcMatcher(),
       ruleEvaluator: makeRuleEvaluator3(mockLogger),
       notifier,
-      forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      forwardingService: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), sendVerification: vi.fn().mockResolvedValue(ok(undefined)), verifyWebhook: vi.fn().mockResolvedValue(ok(undefined)) },
       retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
       replySender: { sendReply: vi.fn().mockResolvedValue(ok({ messageId: "reply-msg-id" })) },
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
@@ -211,7 +212,7 @@ describe("Side effect caller logging", () => {
       arcMatcher: makeArcMatcher(),
       ruleEvaluator: makeRuleEvaluator3(mockLogger),
       notifier,
-      forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      forwardingService: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), sendVerification: vi.fn().mockResolvedValue(ok(undefined)), verifyWebhook: vi.fn().mockResolvedValue(ok(undefined)) },
       retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
       replySender: { sendReply: vi.fn().mockResolvedValue(ok({ messageId: "reply-msg-id" })) },
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
@@ -230,19 +231,21 @@ describe("Side effect caller logging", () => {
   });
 
   it("when forwarder.forward() returns err, caller logs at track level", async () => {
-    const forwarder: Forwarder = {
+    const forwardingService: IForwardingService = {
       forward: vi.fn().mockReturnValue(Promise.resolve(err(dbError(new Error("forward failed"))))),
+      sendVerification: vi.fn().mockResolvedValue(ok(undefined)),
+      verifyWebhook: vi.fn().mockResolvedValue(ok(undefined)),
     };
 
     const processor = new SignalProcessor({ ...makeSharedNewDeps(),
       ...makeStore(),
-      contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
+      contentSanitizer: makeContentSanitizer(), s3Client: { send: vi.fn().mockResolvedValue({ Body: { transformToByteArray: () => Promise.resolve(new Uint8Array([1, 2, 3])) } }) } as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
       classifier: { classify: vi.fn().mockResolvedValue(ok({ workflow: "conversation", workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false }, tags: [], summary: "A test email.", labels: [] })) },
       embeddingGenerator: makeEmbeddingGenerator(),
       auroraWriter: makeAuroraWriter(),
       arcMatcher: makeArcMatcher(),
       ruleEvaluator: makeRuleEvaluator3(mockLogger),
-      forwarder,
+      forwardingService,
       notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
       replySender: { sendReply: vi.fn().mockResolvedValue(ok({ messageId: "reply-msg-id" })) },

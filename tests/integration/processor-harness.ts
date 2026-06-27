@@ -1,3 +1,4 @@
+import type { IForwardingService } from "../../src/forwarding/forwarding-service.js";
 // Processor integration harness.
 //
 // Extends the base harness with real S3, SQS, and SignalProcessor wired to
@@ -126,7 +127,7 @@ export async function createProcessorHarness(): Promise<ProcessorHarness> {
     },
     ruleEvaluator: new JsonLogicRuleEvaluator(logger, { invoke: async () => ({ success: true, result: undefined }) as never, validateAst: async () => ({ success: true }) as never, validateAstBatch: async () => ({ success: true }) as never } as unknown as UserCodeExecutorClient, { annotateRuleError: async () => ok(undefined) }),
     notifier: { notify: async () => ok(undefined) },
-    forwarder: { forward: async () => ok(undefined) },
+    forwardingService: { forward: async () => ok(undefined), sendVerification: async () => ok(undefined), verifyWebhook: async () => ok(undefined) },
     retentionService: { applyPlanRetention: async (s3Key, _input) => ({ s3Key }) },
     replySender: { sendReply: async () => ok({ messageId: 'stub-reply' }) },
     sqsDispatcher: { sendMessage: async (payload) => { sideEffects.push(payload); return ok(undefined); } },

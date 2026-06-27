@@ -1,3 +1,4 @@
+import type { IForwardingService } from "../../../src/forwarding/forwarding-service.js";
 import { describe, it, expect, vi } from "vitest";
 import { forwardCalendarInvite } from "../../../src/processor/calendar/calendar-forwarder.js";
 import type { CalendarForwarderDeps, ForwardCalendarInviteOpts } from "../../../src/processor/calendar/calendar-forwarder.js";

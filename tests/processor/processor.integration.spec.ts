@@ -1,7 +1,8 @@
+import type { IForwardingService } from "../../src/forwarding/forwarding-service.js";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ok, err } from "neverthrow";
 import { SignalProcessor, SYSTEM_RULES } from "../../src/processor/processor.js";
-import type { ArcMatcher, InboundSignalMessage, SqsDispatcher, Notifier, Forwarder, ReplySender, SideEffectPayload } from "../../src/processor/processor.js";
+import type { ArcMatcher, InboundSignalMessage, SqsDispatcher, Notifier,  ReplySender, SideEffectPayload } from "../../src/processor/processor.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
 import { makeSharedNewDeps, makeRuleEvaluator3 } from "./_shared-new-deps.js";
 import { makeArcDbMock, makeAccountDbMock, makeProcessingDbMock } from "./_helpers.js";
@@ -152,9 +153,11 @@ function makeNotifier(): Notifier {
   };
 }
 
-function makeForwarder(): Forwarder {
+function makeForwarder(): IForwardingService {
   return {
     forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+    sendVerification: vi.fn().mockResolvedValue(ok(undefined)),
+    verifyWebhook: vi.fn().mockResolvedValue(ok(undefined)),
   };
 }
 
@@ -262,7 +265,7 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
   let retentionService: S3RetentionService;
   let sqsDispatcher: SqsDispatcher;
   let notifier: Notifier;
-  let forwarder: Forwarder;
+  let forwardingService: IForwardingService;
   let replySender: ReplySender;
   let mockLogger: MockLogger;
   let processor: SignalProcessor;
@@ -279,11 +282,11 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
     retentionService = makeRetentionService();
     sqsDispatcher = makeSqsDispatcher();
     notifier = makeNotifier();
-    forwarder = makeForwarder();
+    forwardingService = makeForwarder();
     replySender = makeReplySender();
     processor = new SignalProcessor({ ...makeSharedNewDeps(),
       arcDb, accountDb, processingDb,
-      contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
+      contentSanitizer, s3Client: { send: vi.fn().mockResolvedValue({ Body: { transformToByteArray: () => Promise.resolve(new Uint8Array([1, 2, 3])) } }) } as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
       classifier,
       embeddingGenerator,
       auroraWriter,
@@ -293,7 +296,7 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
       retentionService,
       sqsDispatcher,
       notifier,
-      forwarder,
+      forwardingService,
       replySender,
       draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
       calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud" },
@@ -475,12 +478,11 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
       expect(result.isOk()).toBe(true);
 
       // Forward was called with the address from matchedRules
-      expect(forwarder.forward).toHaveBeenCalledOnce();
-      expect(forwarder.forward).toHaveBeenCalledWith(
-        signal.data.s3Key,
+      expect(forwardingService.forward).toHaveBeenCalledOnce();
+      expect(forwardingService.forward).toHaveBeenCalledWith(
         "backup@personal.com",
-        TEST_ACCOUNT_ID,
-        { signalId: signal.id, arcId: arc.id },
+        { type: "email", rawData: expect.any(Uint8Array) },
+        { accountId: TEST_ACCOUNT_ID, signalId: signal.id, arcId: arc.id },
       );
 
       // Notification was sent (no suppress_notification action)

@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { S3Client } from "@aws-sdk/client-s3";
 import { ExternalEmailSignalHandler } from "../../src/notifier/external-email-signal-handler.js";
 import type { EmailService } from "../../src/email/email-service.js";
 import { ok } from "../../src/errors.js";
@@ -28,8 +27,7 @@ describe("ExternalEmailSignalHandler.sendReply()", () => {
 
   beforeEach(() => {
     emailService = makeEmailService();
-    const s3 = {} as S3Client;
-    handler = new ExternalEmailSignalHandler(emailService, s3, makeLogger(), "test-bucket");
+    handler = new ExternalEmailSignalHandler(emailService, makeLogger());
   });
 
   it("calls emailService.send with correct options", async () => {
@@ -78,54 +76,7 @@ describe("ExternalEmailSignalHandler.sendReply()", () => {
   });
 });
 
-// ─── forward ─────────────────────────────────────────────────────────────────
 
-describe("ExternalEmailSignalHandler.forward()", () => {
-  let emailService: EmailService;
-  let s3: S3Client;
-  let handler: ExternalEmailSignalHandler;
-
-  beforeEach(() => {
-    emailService = makeEmailService();
-    s3 = { send: vi.fn() } as unknown as S3Client;
-    handler = new ExternalEmailSignalHandler(emailService, s3, makeLogger(), "my-email-bucket");
-  });
-
-  it("fetches from S3 with correct bucket/key and calls emailService.sendRaw with raw bytes and tags", async () => {
-    const rawBytes = new Uint8Array([72, 101, 108, 108, 111]);
-    (s3.send as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      Body: { transformToByteArray: () => Promise.resolve(rawBytes) },
-    });
-    (emailService.sendRaw as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok({ messageId: "fwd-001" }));
-
-    await handler.forward("emails/abc-123", "dest@example.com", "acct-42");
-
-    expect(s3.send).toHaveBeenCalledWith(
-      expect.objectContaining({ input: { Bucket: "my-email-bucket", Key: "emails/abc-123" } }),
-    );
-    expect(emailService.sendRaw).toHaveBeenCalledWith({
-      to: "dest@example.com",
-      rawData: rawBytes,
-      accountId: "acct-42",
-      tags: [
-        { Name: "X-Numaeel-Type", Value: "forward" },
-        { Name: "X-Numaeel-AccountId", Value: "acct-42" },
-      ],
-    });
-  });
-
-  it("returns Ok on success", async () => {
-    const rawBytes = new Uint8Array([1, 2, 3]);
-    (s3.send as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      Body: { transformToByteArray: () => Promise.resolve(rawBytes) },
-    });
-    (emailService.sendRaw as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok({ messageId: "fwd-002" }));
-
-    const result = await handler.forward("emails/xyz-789", "user@test.com", "acct-99");
-
-    expect(result.isOk()).toBe(true);
-  });
-});
 
 // ─── Tag Integration ─────────────────────────────────────────────────────────
 
@@ -135,8 +86,7 @@ describe("ExternalEmailSignalHandler tag integration", () => {
 
   beforeEach(() => {
     emailService = makeEmailService();
-    const s3 = { send: vi.fn() } as unknown as S3Client;
-    handler = new ExternalEmailSignalHandler(emailService, s3, makeLogger(), "test-bucket");
+    handler = new ExternalEmailSignalHandler(emailService, makeLogger());
   });
 
   describe("sendReply tags", () => {
@@ -183,43 +133,4 @@ describe("ExternalEmailSignalHandler tag integration", () => {
     });
   });
 
-  describe("forward tags", () => {
-    it("without opts → tags = [Type:forward, AccountId:X]", async () => {
-      const rawBytes = new Uint8Array([1, 2]);
-      const s3 = { send: vi.fn() } as unknown as S3Client;
-      const h = new ExternalEmailSignalHandler(emailService, s3, makeLogger(), "bucket");
-      (s3.send as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-        Body: { transformToByteArray: () => Promise.resolve(rawBytes) },
-      });
-      (emailService.sendRaw as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok({ messageId: "f-1" }));
-
-      await h.forward("key/1", "to@x.com", "acct-7");
-
-      const call = (emailService.sendRaw as ReturnType<typeof vi.fn>).mock.calls[0]![0];
-      expect(call.tags).toEqual([
-        { Name: TAG_TYPE, Value: "forward" },
-        { Name: TAG_ACCOUNT_ID, Value: "acct-7" },
-      ]);
-    });
-
-    it("with signalId + arcId → tags include all four", async () => {
-      const rawBytes = new Uint8Array([3, 4]);
-      const s3 = { send: vi.fn() } as unknown as S3Client;
-      const h = new ExternalEmailSignalHandler(emailService, s3, makeLogger(), "bucket");
-      (s3.send as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-        Body: { transformToByteArray: () => Promise.resolve(rawBytes) },
-      });
-      (emailService.sendRaw as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok({ messageId: "f-2" }));
-
-      await h.forward("key/2", "to@y.com", "acct-8", { signalId: "sig-5", arcId: "arc-6" });
-
-      const call = (emailService.sendRaw as ReturnType<typeof vi.fn>).mock.calls[0]![0];
-      expect(call.tags).toEqual([
-        { Name: TAG_TYPE, Value: "forward" },
-        { Name: TAG_ACCOUNT_ID, Value: "acct-8" },
-        { Name: TAG_SIGNAL_ID, Value: "sig-5" },
-        { Name: TAG_ARC_ID, Value: "arc-6" },
-      ]);
-    });
-  });
 });

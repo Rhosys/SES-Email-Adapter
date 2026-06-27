@@ -54,6 +54,7 @@ import { SchedulerClient as AwsSchedulerClient } from "@aws-sdk/client-scheduler
 import { EmailService } from "./email/email-service.js";
 import { SesDomainIdentityService } from "./email/domain-identity-service.js";
 import { SesVerificationMailer } from "./email/verification-mailer.js";
+import { ForwardingService } from "./forwarding/forwarding-service.js";
 import { DigestDispatcher } from "./digest/digest-dispatcher.js";
 import { DigestWorker } from "./digest/digest-worker.js";
 import type { IDigestSendMessage } from "./digest/digest-worker.js";
@@ -128,7 +129,10 @@ const domainIdentityService = new SesDomainIdentityService(
   sesv2, "mail", DKIM_PRIVATE_KEY, MAIL_DOMAIN, SES_CONFIG_SET_ARN,
 );
 
-const externalEmailHandler = new ExternalEmailSignalHandler(emailService, s3, logger, S3_BUCKET);
+const externalEmailHandler = new ExternalEmailSignalHandler(emailService, logger);
+
+const APP_BASE_URL = process.env["APP_BASE_URL"] ?? "";
+const forwardingService = new ForwardingService(emailService, accountDb, APP_BASE_URL, MAIL_DOMAIN, logger);
 
 const draftSendDispatcher = new DraftSendDispatcher(SIGNAL_QUEUE_URL, sqs, logger);
 
@@ -166,7 +170,7 @@ const processor = new SignalProcessor({
     },
     logger,
   }),
-  forwarder: externalEmailHandler,
+  forwardingService,
   retentionService: new S3RetentionServiceImpl(s3),
   replySender: externalEmailHandler,
   sqsDispatcher: new SqsDispatcherImpl(SIGNAL_QUEUE_URL, sqs, logger),
@@ -262,8 +266,6 @@ if (!ACCOUNT_CREATION_SFN_ARN) {
 } else {
   accountCreationStarter = new SfnAccountCreationStarter(sfn, ACCOUNT_CREATION_SFN_ARN, logger);
 }
-
-const APP_BASE_URL = process.env["APP_BASE_URL"] ?? "";
 
 const sesVerificationMailer = new SesVerificationMailer(emailService, APP_BASE_URL, MAIL_DOMAIN, logger);
 

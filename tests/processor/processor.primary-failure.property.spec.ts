@@ -1,3 +1,4 @@
+import type { IForwardingService } from "../../src/forwarding/forwarding-service.js";
 // Feature: split-embedding-pipeline, Property 1: Primary failure causes batch item failure
 // **Validates: Requirements 1.2**
 //
@@ -192,7 +193,7 @@ describe("Property 1: Primary failure causes batch item failure", () => {
       ruleEvaluator: makeRuleEvaluator3(mockLogger),
       logger: mockLogger,
       notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
-      forwarder: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      forwardingService: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), sendVerification: vi.fn().mockResolvedValue(ok(undefined)), verifyWebhook: vi.fn().mockResolvedValue(ok(undefined)) },
       retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
       replySender: { sendReply: vi.fn().mockResolvedValue(ok({ messageId: "reply-msg-id" })) },
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },

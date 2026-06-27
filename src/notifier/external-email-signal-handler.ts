@@ -1,28 +1,21 @@
 // ---------------------------------------------------------------------------
-// ExternalEmailSignalHandler — unified reply sender + forwarder via EmailService
-// Replaces ses-reply-sender.ts and ses-forwarder.ts with a single class that
-// delegates all SES knowledge to EmailService.
+// ExternalEmailSignalHandler — reply sender via EmailService
 // ---------------------------------------------------------------------------
 
-import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
-import type { ReplySender, Forwarder } from "../processor/processor.js";
+import type { ReplySender } from "../processor/processor.js";
 import type { EmailService } from "../email/email-service.js";
-import type { DbError, TransientSesError, Result } from "../errors.js";
-import { ok, err, dbError } from "../errors.js";
+import type { TransientSesError } from "../errors.js";
+import type { Result } from "../errors.js";
 import { buildOutboundTags } from "../email/ses-tags.js";
 import type { Logger } from "../logger.js";
 
-export class ExternalEmailSignalHandler implements ReplySender, Forwarder {
+export class ExternalEmailSignalHandler implements ReplySender {
   private readonly emailService: EmailService;
-  private readonly s3: S3Client;
   private readonly logger: Logger;
-  private readonly emailBucket: string;
 
-  constructor(emailService: EmailService, s3: S3Client, logger: Logger, emailBucket: string) {
+  constructor(emailService: EmailService, logger: Logger) {
     this.emailService = emailService;
-    this.s3 = s3;
     this.logger = logger;
-    this.emailBucket = emailBucket;
   }
 
   async sendReply(opts: {
@@ -53,29 +46,5 @@ export class ExternalEmailSignalHandler implements ReplySender, Forwarder {
       ],
       tags,
     });
-  }
-
-  async forward(s3Key: string, toAddress: string, accountId: string, opts?: { signalId?: string; arcId?: string }): Promise<Result<void, DbError | TransientSesError>> {
-    try {
-      const res = await this.s3.send(new GetObjectCommand({ Bucket: this.emailBucket, Key: s3Key }));
-      const rawBytes = await res.Body!.transformToByteArray();
-
-      const tags = buildOutboundTags("forward", { accountId, signalId: opts?.signalId, arcId: opts?.arcId });
-
-      const result = await this.emailService.sendRaw({
-        to: toAddress,
-        rawData: rawBytes,
-        accountId,
-        tags,
-      });
-
-      if (result.isErr()) {
-        return err(result.error);
-      }
-
-      return ok(undefined);
-    } catch (e) {
-      return err(dbError(e));
-    }
   }
 }
