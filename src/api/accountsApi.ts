@@ -179,7 +179,7 @@ export class AccountsApi {
         const existing = existingResult.value;
         body.onboarding = { ...existing?.onboarding, ...body.onboarding };
       }
-      const updateResult = await accountDb.updateAccount(accountId, body as Partial<Pick<Account, "name" | "retentionDuration" | "digest" | "filtering" | "onboarding" | "afterSendAction" | "defaultCalendarInviteForwardingAddress">>);
+      const updateResult = await accountDb.updateAccount(accountId, body as Partial<Pick<Account, "name" | "retentionDuration" | "digest" | "filtering" | "onboarding" | "defaultCalendarInviteForwardingAddress">>);
       if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
       return c.json(toApiAccount(updateResult.value), 200);
     });

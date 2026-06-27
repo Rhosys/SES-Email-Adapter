@@ -1,12 +1,11 @@
 import { DateTime } from "luxon";
-import type { Signal, Arc, ArcStatus } from "../types/index.js";
+import type { Signal } from "../types/index.js";
 import type { DbError, TransientSesError, Result } from "../errors.js";
 import { ok, err } from "../errors.js";
 import type { Logger } from "../logger.js";
 import type { ReplySender } from "./processor.js";
 import type { DraftSendPayload } from "./draft-send-dispatcher.js";
 import { buildOutboundMsgId, buildGsi2pk } from "./message-id.js";
-import type { UpdateArcFields } from "../database/arc-database.js";
 
 export interface IDraftSendArcDb {
   getSignalById(accountId: string, signalId: string): Promise<Result<Signal | null, DbError>>;
@@ -18,23 +17,15 @@ export interface IDraftSendArcDb {
     sendInitiatedAt?: string | null;
     gsi2pk?: string;
   }): Promise<Result<Signal, DbError>>;
-  getArc(accountId: string, id: string): Promise<Result<Arc | null, DbError>>;
-  updateArc(accountId: string, id: string, status: ArcStatus, lastSignalAt: string, update: UpdateArcFields): Promise<Result<Arc, DbError>>;
-}
-
-export interface IDraftSendAccountDb {
-  getAccount(accountId: string): Promise<Result<{ afterSendAction?: "archive" | "keep_active" } | null, DbError>>;
 }
 
 export class DraftSendWorker {
   private readonly arcDb: IDraftSendArcDb;
-  private readonly accountDb: IDraftSendAccountDb;
   private readonly replySender: ReplySender;
   private readonly logger: Logger;
 
-  constructor(arcDb: IDraftSendArcDb, accountDb: IDraftSendAccountDb, replySender: ReplySender, logger: Logger) {
+  constructor(arcDb: IDraftSendArcDb, replySender: ReplySender, logger: Logger) {
     this.arcDb = arcDb;
-    this.accountDb = accountDb;
     this.replySender = replySender;
     this.logger = logger;
   }
@@ -100,14 +91,6 @@ export class DraftSendWorker {
       gsi2pk,
     });
     if (updateResult.isErr()) return err(updateResult.error);
-
-    // Post-send arc archival
-    if (signal.arcId) {
-      const accountResult = await this.accountDb.getAccount(accountId);
-      if (accountResult.isOk() && (accountResult.value?.afterSendAction ?? "keep_active") === "archive") {
-        await this.arcDb.updateArc(accountId, signal.arcId, "archived", now, {});
-      }
-    }
 
     return ok(undefined);
   }

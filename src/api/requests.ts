@@ -239,7 +239,6 @@ export const UpdateAccountRequest = z.object({
   digest: DigestSchema,
   filtering: AccountFilteringConfigSchema.optional(),
   onboarding: AccountOnboardingSchema.optional(),
-  afterSendAction: z.enum(["archive", "keep_active"]).optional(),
   defaultCalendarInviteForwardingAddress: z.string().nullable().optional(),
 });
 export type UpdateAccountRequest = z.infer<typeof UpdateAccountRequest>;
