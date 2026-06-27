@@ -19,7 +19,7 @@ import type { AuthError } from "../errors.js";
 import type { AccessService } from "./accountsApi.js";
 import type { JobDispatcher } from "./adminApi.js";
 import type { SignalReprocessor } from "./arcsApi.js";
-import type { VerificationMailer } from "./aliasesApi.js";
+import type { IForwardingService } from "../forwarding/forwarding-service.js";
 
 import { WellKnownApi } from "./wellKnownApi.js";
 import { AccountsApi } from "./accountsApi.js";
@@ -42,7 +42,7 @@ export type { AppEnv } from "./route-helpers.js";
 export type { AccessService, AccountRole, AccountUser, UserProfile } from "./accountsApi.js";
 export type { JobDispatcher } from "./adminApi.js";
 export type { SignalReprocessor, ListArcsParams } from "./arcsApi.js";
-export type { VerificationMailer } from "./aliasesApi.js";
+export type { IForwardingService } from "../forwarding/forwarding-service.js";
 export type { CreateViewRequest, UpdateViewRequest, CreateLabelRequest, UpdateLabelRequest, CreateRuleRequest, UpdateRuleRequest } from "./requests.js";
 
 // ---------------------------------------------------------------------------
@@ -68,7 +68,7 @@ export interface AppDeps {
   auth: AuthService;
   access: AccessService;
   logger: Logger;
-  verificationMailer: VerificationMailer;
+  forwardingService: IForwardingService;
   jobDispatcher: JobDispatcher;
   signalReprocessor: SignalReprocessor;
   draftSendDispatcher: DraftSendDispatcher;
@@ -86,7 +86,7 @@ export interface AppDeps {
   emailBucket: string;
 }
 
-export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, verificationMailer, jobDispatcher, signalReprocessor, draftSendDispatcher, accountCreationStarter, appBaseUrl, contentCdnBaseUrl, astValidator, billingHandler, emailService, domainIdentityService, rsvpComposer, postApprovalCalendarDeps, schedulerClient, s3Client, emailBucket }: AppDeps) {
+export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, forwardingService, jobDispatcher, signalReprocessor, draftSendDispatcher, accountCreationStarter, appBaseUrl, contentCdnBaseUrl, astValidator, billingHandler, emailService, domainIdentityService, rsvpComposer, postApprovalCalendarDeps, schedulerClient, s3Client, emailBucket }: AppDeps) {
   type AppEnv = { Variables: { auth: AuthContext; authorizationVerified?: boolean; [ROUTE_NOT_FOUND_KEY]?: boolean } };
   const app = new OpenAPIHono<AppEnv>();
 
@@ -233,7 +233,7 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, ver
   new LabelsApi(accountDb).register(app, helpers);
   new RulesApi(accountDb, auditDb, astValidator, billingHandler, logger).register(app, helpers);
   new DomainsApi(accountDb, auditDb, domainIdentityService, logger).register(app, helpers);
-  new AliasesApi(accountDb, auditDb, logger, verificationMailer).register(app, helpers);
+  new AliasesApi(accountDb, auditDb, logger, forwardingService).register(app, helpers);
   new TemplatesApi(accountDb, auditDb, astValidator, logger).register(app, helpers);
   new AuditApi(auditDb).register(app, helpers);
   new AdminApi(jobDispatcher).register(app, helpers);

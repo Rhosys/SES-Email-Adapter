@@ -53,7 +53,6 @@ import { SchedulerClient as AwsSchedulerClient } from "@aws-sdk/client-scheduler
 
 import { EmailService } from "./email/email-service.js";
 import { SesDomainIdentityService } from "./email/domain-identity-service.js";
-import { SesVerificationMailer } from "./email/verification-mailer.js";
 import { ForwardingService } from "./forwarding/forwarding-service.js";
 import { DigestDispatcher } from "./digest/digest-dispatcher.js";
 import { DigestWorker } from "./digest/digest-worker.js";
@@ -267,8 +266,6 @@ if (!ACCOUNT_CREATION_SFN_ARN) {
   accountCreationStarter = new SfnAccountCreationStarter(sfn, ACCOUNT_CREATION_SFN_ARN, logger);
 }
 
-const sesVerificationMailer = new SesVerificationMailer(emailService, APP_BASE_URL, MAIL_DOMAIN, logger);
-
 const authService = new AuthressAuthService();
 
 const postApprovalCalendarDeps: PostApprovalCalendarHandlerDeps = {
@@ -290,7 +287,7 @@ const app = createApp({
   auth: authService,
   access: new AuthressAccessService(),
   logger,
-  verificationMailer: sesVerificationMailer,
+  forwardingService,
   jobDispatcher: new ReindexDispatcher({ logger }),
   signalReprocessor: processor,
   draftSendDispatcher,

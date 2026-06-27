@@ -3,7 +3,7 @@ import type { Signal } from "../../src/types/index.js";
 import type { CalendarEventData, CalendarResponseData } from "../../src/types/calendar.js";
 import { createApp } from "../../src/api/app.js";
 import { makeAppDeps } from "../helpers/app-deps.js";
-import type { AuthService, AccessService, VerificationMailer } from "../../src/api/app.js";
+import type { AuthService, AccessService, IForwardingService } from "../../src/api/app.js";
 import type { ArcDatabase } from "../../src/database/arc-database.js";
 import type { AccountDatabase } from "../../src/database/account-database.js";
 import type { AuditDatabase } from "../../src/database/audit-database.js";
@@ -187,7 +187,7 @@ describe("GET /accounts/:accountId/arcs/:arcId/signals — calendar signal enric
     arcDb = makeArcDb();
     const accountDb = makeAccountDb();
     const auditDb = makeAuditDb();
-    const verificationMailer: VerificationMailer = { sendForwardVerification: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), sendCalendarForwardVerification: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), verifyWebhookTarget: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) };
+    const forwardingService: IForwardingService = { sendVerification: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), verifyWebhook: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) };
     app = createApp(makeAppDeps({
       arcDb: arcDb as unknown as ArcDatabase,
       accountDb: accountDb as unknown as AccountDatabase,
@@ -195,7 +195,7 @@ describe("GET /accounts/:accountId/arcs/:arcId/signals — calendar signal enric
       auth: makeAuth(),
       access: makeAccess(),
       logger: createMockLogger(),
-      verificationMailer,
+      forwardingService,
       jobDispatcher: { dispatchReindex: vi.fn(), dispatchSegment: vi.fn() } as never,
       draftSendDispatcher: { dispatch: vi.fn().mockResolvedValue(ok(undefined)) } as never,
       accountCreationStarter: { start: vi.fn() },

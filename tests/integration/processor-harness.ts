@@ -164,7 +164,7 @@ export async function createProcessorHarness(): Promise<ProcessorHarness> {
     auth: new AuthressAuthService(),
     access,
     logger,
-    verificationMailer: { sendForwardVerification: async () => ok(undefined), sendCalendarForwardVerification: async () => ok(undefined), verifyWebhookTarget: async () => ok(undefined) },
+    forwardingService: { sendVerification: async () => ok(undefined), verifyWebhook: async () => ok(undefined), forward: async () => ok(undefined) },
     jobDispatcher: { dispatchReindex: async () => {}, dispatchSegment: async () => {} } as never,
     draftSendDispatcher: { dispatch: async () => ok(undefined) } as never,
     accountCreationStarter: { start: async () => {} },
