@@ -708,7 +708,7 @@ export class SignalProcessor {
 
         // Resolve calendarForwardingAddress from account config
         const accountResult = await this.accountDb.getAccount(accountId);
-        const calendarForwardingAddress = accountResult.isOk() ? accountResult.value?.defaultCalendarInviteForwardingAddress ?? "" : "";
+        const calendarForwardingAddress = accountResult.isOk() ? accountResult.value?.defaultCalendarInviteForwardingTargetId ?? "" : "";
 
         // Find the calendar signal linked to this email signal
         const calendarSignalResult = await this.arcDb.getLinkedCalendarSignal(accountId, arc.id, signal.id);

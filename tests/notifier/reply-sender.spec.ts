@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { ExternalEmailSignalHandler } from "../../src/notifier/external-email-signal-handler.js";
+import { ReplySenderService } from "../../src/notifier/reply-sender.js";
 import type { EmailService } from "../../src/email/email-service.js";
 import { ok } from "../../src/errors.js";
 import type { Logger } from "../../src/logger.js";
@@ -21,13 +21,13 @@ function makeLogger(): Logger {
 
 // ─── sendReply ───────────────────────────────────────────────────────────────
 
-describe("ExternalEmailSignalHandler.sendReply()", () => {
+describe("ReplySenderService.sendReply()", () => {
   let emailService: EmailService;
-  let handler: ExternalEmailSignalHandler;
+  let handler: ReplySenderService;
 
   beforeEach(() => {
     emailService = makeEmailService();
-    handler = new ExternalEmailSignalHandler(emailService, makeLogger());
+    handler = new ReplySenderService(emailService, makeLogger());
   });
 
   it("calls emailService.send with correct options", async () => {
@@ -80,13 +80,13 @@ describe("ExternalEmailSignalHandler.sendReply()", () => {
 
 // ─── Tag Integration ─────────────────────────────────────────────────────────
 
-describe("ExternalEmailSignalHandler tag integration", () => {
+describe("ReplySenderService tag integration", () => {
   let emailService: EmailService;
-  let handler: ExternalEmailSignalHandler;
+  let handler: ReplySenderService;
 
   beforeEach(() => {
     emailService = makeEmailService();
-    handler = new ExternalEmailSignalHandler(emailService, makeLogger());
+    handler = new ReplySenderService(emailService, makeLogger());
   });
 
   describe("sendReply tags", () => {

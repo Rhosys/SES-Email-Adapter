@@ -82,7 +82,7 @@ export class AccountDatabase {
     }
   }
 
-  async updateAccount(accountId: string, update: Partial<Pick<Account, "name" | "retentionDuration" | "digest" | "filtering" | "onboarding" | "defaultCalendarInviteForwardingAddress">>): Promise<Result<Account, DbError>> {
+  async updateAccount(accountId: string, update: Partial<Pick<Account, "name" | "retentionDuration" | "digest" | "filtering" | "onboarding" | "defaultCalendarInviteForwardingTargetId">>): Promise<Result<Account, DbError>> {
     const now = DateTime.utc().toISO()!;
     const setParts: string[] = ["updatedAt = :now", "gsi1pk = :g1pk", "gsi1sk = :g1sk"];
     const exprValues: Record<string, unknown> = { ":now": now, ":g1pk": "META", ":g1sk": `ACCT#${accountId}` };
@@ -95,8 +95,8 @@ export class AccountDatabase {
     else if (update.digest !== undefined) { setParts.push("digest = :digest"); exprValues[":digest"] = update.digest; }
     if (update.filtering !== undefined) { setParts.push("filtering = :filtering"); exprValues[":filtering"] = update.filtering; }
     if (update.onboarding !== undefined) { setParts.push("onboarding = :onboarding"); exprValues[":onboarding"] = update.onboarding; }
-    if (update.defaultCalendarInviteForwardingAddress === null) { removeParts.push("defaultCalendarInviteForwardingAddress"); }
-    else if (update.defaultCalendarInviteForwardingAddress !== undefined) { setParts.push("defaultCalendarInviteForwardingAddress = :dcifa"); exprValues[":dcifa"] = update.defaultCalendarInviteForwardingAddress; }
+    if (update.defaultCalendarInviteForwardingTargetId === null) { removeParts.push("defaultCalendarInviteForwardingTargetId"); }
+    else if (update.defaultCalendarInviteForwardingTargetId !== undefined) { setParts.push("defaultCalendarInviteForwardingTargetId = :dcifa"); exprValues[":dcifa"] = update.defaultCalendarInviteForwardingTargetId; }
 
     let updateExpression = `SET ${setParts.join(", ")}`;
     if (removeParts.length > 0) { updateExpression += ` REMOVE ${removeParts.join(", ")}`; }

@@ -24,7 +24,7 @@ function makeAccount(overrides: Partial<Account> = {}): Account {
     id: "acc-test",
     name: "Test Account",
     digest: { frequency: "monthly", forwardingTargetId: "test@example.com" },
-    defaultCalendarInviteForwardingAddress: "test@example.com",
+    defaultCalendarInviteForwardingTargetId: "test@example.com",
     createdAt: "2025-01-01T00:00:00Z",
     updatedAt: "2025-01-01T00:00:00Z",
     ...overrides,

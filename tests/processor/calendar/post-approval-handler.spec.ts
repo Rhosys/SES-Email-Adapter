@@ -112,7 +112,7 @@ function makeArcDb() {
 
 function makeAccountDb(calendarForwardingAddress = "user@gmail.com") {
   return {
-    getAccount: vi.fn().mockResolvedValue(ok({ defaultCalendarInviteForwardingAddress: calendarForwardingAddress })),
+    getAccount: vi.fn().mockResolvedValue(ok({ defaultCalendarInviteForwardingTargetId: calendarForwardingAddress })),
   } as unknown as AccountDatabase;
 }
 

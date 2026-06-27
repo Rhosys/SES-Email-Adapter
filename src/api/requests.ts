@@ -239,7 +239,7 @@ export const UpdateAccountRequest = z.object({
   digest: DigestSchema,
   filtering: AccountFilteringConfigSchema.optional(),
   onboarding: AccountOnboardingSchema.optional(),
-  defaultCalendarInviteForwardingAddress: z.string().nullable().optional(),
+  defaultCalendarInviteForwardingTargetId: z.string().nullable().optional(),
 });
 export type UpdateAccountRequest = z.infer<typeof UpdateAccountRequest>;
 

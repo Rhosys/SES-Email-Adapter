@@ -167,8 +167,8 @@ export class AccountsApi {
           return err(c, 422, "Forwarding target not found or not verified", "UNVERIFIED_FORWARD_TARGET");
         }
       }
-      if (body.defaultCalendarInviteForwardingAddress) {
-        const targetResult = await accountDb.getForwardingTarget(accountId, body.defaultCalendarInviteForwardingAddress);
+      if (body.defaultCalendarInviteForwardingTargetId) {
+        const targetResult = await accountDb.getForwardingTarget(accountId, body.defaultCalendarInviteForwardingTargetId);
         if (targetResult.isErr()) return err(c, 500, "Internal Server Error");
         if (!targetResult.value || targetResult.value.status !== "verified") {
           return err(c, 422, "Calendar forwarding address must be a verified forwarding address", "UNVERIFIED_CALENDAR_TARGET");
@@ -190,7 +190,7 @@ export class AccountsApi {
         const existing = existingResult.value;
         body.onboarding = { ...existing?.onboarding, ...body.onboarding };
       }
-      const updateResult = await accountDb.updateAccount(accountId, body as Partial<Pick<Account, "name" | "retentionDuration" | "digest" | "filtering" | "onboarding" | "defaultCalendarInviteForwardingAddress">>);
+      const updateResult = await accountDb.updateAccount(accountId, body as Partial<Pick<Account, "name" | "retentionDuration" | "digest" | "filtering" | "onboarding" | "defaultCalendarInviteForwardingTargetId">>);
       if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
 
       // Trigger immediate digest only on frequency increase or target change
@@ -250,7 +250,10 @@ export class AccountsApi {
       const users = result.value;
       const profiles = await Promise.all(users.map(async (u) => {
         const profileResult = await access.getUserProfile(u.userId);
-        if (profileResult.isErr()) return u;
+        if (profileResult.isErr()) {
+          logger.track("Failed to fetch user profile from Authress — returning user without profile data", { code: "accounts.authress_profile_fetch_failed", userId: u.userId, error: profileResult.error });
+          return u;
+        }
         const { name, email, picture } = profileResult.value;
         return { ...u, ...(name ? { name } : {}), ...(email ? { email } : {}), ...(picture ? { picture } : {}) };
       }));

@@ -19,7 +19,7 @@ import { generateUnsubscribeToken } from "../email/unsubscribe-token.js";
 
 export interface IOnboardingAccountDb {
   getAccount(accountId: string): Promise<Result<Account | null, DbError>>;
-  updateAccount(accountId: string, updates: Partial<Pick<Account, "onboarding" | "digest" | "defaultCalendarInviteForwardingAddress">>): Promise<Result<Account, DbError>>;
+  updateAccount(accountId: string, updates: Partial<Pick<Account, "onboarding" | "digest" | "defaultCalendarInviteForwardingTargetId">>): Promise<Result<Account, DbError>>;
   listDomains(accountId: string): Promise<Result<Domain[], DbError>>;
   getForwardingTarget(accountId: string, target: string): Promise<Result<ForwardingTarget | null, DbError>>;
   saveForwardingTarget(target: ForwardingTarget): Promise<Result<void, DbError>>;
@@ -120,12 +120,12 @@ export class OnboardingTaskHandler {
     if (!account) return;
 
     // Only set defaults if not already configured
-    const updates: Partial<Pick<Account, "digest" | "defaultCalendarInviteForwardingAddress">> = {};
+    const updates: Partial<Pick<Account, "digest" | "defaultCalendarInviteForwardingTargetId">> = {};
     if (!account.digest) {
       updates.digest = { frequency: "monthly", forwardingTargetId };
     }
-    if (!account.defaultCalendarInviteForwardingAddress) {
-      updates.defaultCalendarInviteForwardingAddress = forwardingTargetId;
+    if (!account.defaultCalendarInviteForwardingTargetId) {
+      updates.defaultCalendarInviteForwardingTargetId = forwardingTargetId;
     }
 
     if (Object.keys(updates).length === 0) return;
