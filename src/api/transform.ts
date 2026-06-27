@@ -305,6 +305,7 @@ export function toApiAccount(account: DbAccount): Api.Account {
     accountId: account.id,
     name: account.name,
     ...(account.retentionDuration ? { retentionDuration: account.retentionDuration as Api.Account["retentionDuration"] } : {}),
+    ...(account.digest !== undefined ? { digest: account.digest } : {}),
     ...(account.filtering ? { filtering: account.filtering as Api.Account["filtering"] } : {}),
     ...(account.onboarding ? { onboarding: account.onboarding } : {}),
     ...(account.billingPlan ? { billingPlan: account.billingPlan } : {}),
