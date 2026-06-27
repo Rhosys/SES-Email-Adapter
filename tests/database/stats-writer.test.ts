@@ -304,7 +304,7 @@ describe("aggregateStatsRows", () => {
       makeDiff("2026-06-15", { allowed: 5 }),
     ];
     const result = aggregateStatsRows(rows);
-    expect(result.daily[0]).toEqual({ date: "2026-06-15", allowed: 5, quarantined: 0, blocked: 0 });
+    expect(result.daily[0]).toEqual({ date: "2026-06-15", allowed: 5, quarantined: 0, blocked: 0, aliases: 0 });
   });
 
   it("monthly rollup sums all diffs within the same month", () => {
@@ -316,8 +316,8 @@ describe("aggregateStatsRows", () => {
     const result = aggregateStatsRows(rows);
     expect(result.monthly).toHaveLength(2);
     // Descending order
-    expect(result.monthly[0]).toEqual({ date: "2026-06", allowed: 1, quarantined: 0, blocked: 0 });
-    expect(result.monthly[1]).toEqual({ date: "2026-05", allowed: 10, quarantined: 2, blocked: 1 });
+    expect(result.monthly[0]).toEqual({ date: "2026-06", allowed: 1, quarantined: 0, blocked: 0, aliases: 0 });
+    expect(result.monthly[1]).toEqual({ date: "2026-05", allowed: 10, quarantined: 2, blocked: 1, aliases: 0 });
   });
 
   it("snapshot is not included in daily or monthly breakdown", () => {
@@ -407,8 +407,8 @@ describe("aggregateStatsRows", () => {
     ];
     const result = aggregateStatsRows(rows);
     expect(result.totals).toEqual({ allowed: 7, quarantined: 1, blocked: 2, aliases: 0 });
-    expect(result.daily).toEqual([{ date: "2026-06-15", allowed: 7, quarantined: 1, blocked: 2 }]);
-    expect(result.monthly).toEqual([{ date: "2026-06", allowed: 7, quarantined: 1, blocked: 2 }]);
+    expect(result.daily).toEqual([{ date: "2026-06-15", allowed: 7, quarantined: 1, blocked: 2, aliases: 0 }]);
+    expect(result.monthly).toEqual([{ date: "2026-06", allowed: 7, quarantined: 1, blocked: 2, aliases: 0 }]);
   });
 
   it("violationReport is tracked in totals but not exposed in daily/monthly buckets", () => {
@@ -417,7 +417,7 @@ describe("aggregateStatsRows", () => {
     ];
     const result = aggregateStatsRows(rows);
     // violationReport contributes to internal computation but API totals don't expose it
-    expect(result.daily[0]).toEqual({ date: "2026-06-15", allowed: 1, quarantined: 0, blocked: 0 });
+    expect(result.daily[0]).toEqual({ date: "2026-06-15", allowed: 1, quarantined: 0, blocked: 0, aliases: 0 });
     // totals only include allowed, quarantined, blocked, totalAliases
     expect("violationReport" in result.totals).toBe(false);
   });
