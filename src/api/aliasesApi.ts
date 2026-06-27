@@ -25,8 +25,9 @@ import type { AppEnv, RouteHelpers } from "./route-helpers.js";
 // ---------------------------------------------------------------------------
 
 export interface VerificationMailer {
-  sendForwardVerification(accountId: string, address: string, token: string): Promise<Result<void, TransientSesError>>;
-  sendCalendarForwardVerification(accountId: string, address: string, token: string): Promise<Result<void, TransientSesError>>;
+  sendForwardVerification(accountId: string, target: string, token: string): Promise<Result<void, TransientSesError>>;
+  sendCalendarForwardVerification(accountId: string, target: string, token: string): Promise<Result<void, TransientSesError>>;
+  verifyWebhookTarget(url: string): Promise<Result<void, TransientSesError>>;
 }
 
 // Mirrors processor.ts's autoApprove — a sender disposition recorded for an address
@@ -284,30 +285,30 @@ export class AliasesApi {
     });
 
     // -------------------------------------------------------------------------
-    // Verified forwarding addresses  —  /accounts/:accountId/forwarding-addresses
+    // Forwarding targets  —  /accounts/:accountId/forwarding-addresses
     // -------------------------------------------------------------------------
 
     app.openapi(route({
       method: "get",
       path: "/accounts/{accountId}/forwarding-addresses",
-      tags: ["Forwarding Addresses"],
+      tags: ["Forwarding Targets"],
       request: { params: z.object({ accountId: z.string() }) },
       middleware: [authz("forwarding-addresses:read", c => `accounts/${c.req.param("accountId")!}/forwarding-addresses`)] as const,
-      responses: { 200: { content: { "application/json": { schema: ListForwardingTargetsResponse } }, description: "List forwarding addresses" } },
+      responses: { 200: { content: { "application/json": { schema: ListForwardingTargetsResponse } }, description: "List forwarding targets" } },
     }), async (c) => {
       const accountId = c.req.param("accountId")!;
-      const addressesResult = await accountDb.listForwardingTargets(accountId);
-      if (addressesResult.isErr()) return err(c, 500, "Internal Server Error");
-      return c.json({ forwardingAddresses: addressesResult.value.map(toApiForwardingTarget) }, 200);
+      const targetsResult = await accountDb.listForwardingTargets(accountId);
+      if (targetsResult.isErr()) return err(c, 500, "Internal Server Error");
+      return c.json({ forwardingTargets: targetsResult.value.map(toApiForwardingTarget) }, 200);
     });
 
     app.openapi(route({
       method: "post",
       path: "/accounts/{accountId}/forwarding-addresses",
-      tags: ["Forwarding Addresses"],
+      tags: ["Forwarding Targets"],
       request: { params: z.object({ accountId: z.string() }) },
       middleware: [authz("forwarding-addresses:write", c => `accounts/${c.req.param("accountId")!}/forwarding-addresses`)] as const,
-      responses: { 201: { content: { "application/json": { schema: ForwardingTargetSchema } }, description: "Forwarding address created" } },
+      responses: { 201: { content: { "application/json": { schema: ForwardingTargetSchema } }, description: "Forwarding target created" } },
     }), async (c) => {
       const accountId = c.req.param("accountId")!;
       const body = await zParse(CreateForwardingTargetRequest, c.req.raw);
@@ -328,13 +329,27 @@ export class AliasesApi {
         createdAt: existing?.createdAt ?? now,
         ...(existing?.verifiedAt !== undefined ? { verifiedAt: existing.verifiedAt } : {}),
       };
-      // SES first — send verification email before persisting the address so a
-      // mailer failure never leaves a pending record the user can't re-trigger.
-      if (verificationMailer) {
-        const verifyResult = await verificationMailer.sendForwardVerification(accountId, addr.target, addr.token);
-        if (verifyResult.isErr()) {
-          logger.warn("Failed to send forwarding address verification email. The SES send call returned an error. The user won't receive the verification link.", { code: "forwarding.verification_email_failed", accountId, address: addr.target, error: verifyResult.error });
-          return err(c, 422, "Failed to send verification email. Please try again.");
+
+      // Verify based on type — email gets verification email, webhook gets HTTP test
+      if (body.type === "email") {
+        if (verificationMailer) {
+          const verifyResult = await verificationMailer.sendForwardVerification(accountId, addr.target, addr.token);
+          if (verifyResult.isErr()) {
+            logger.warn("Failed to send forwarding target verification email", { code: "forwarding.verification_email_failed", accountId, target: addr.target, error: verifyResult.error });
+            return err(c, 422, "Failed to send verification email. Please try again.");
+          }
+        }
+      }
+      if (body.type === "webhook") {
+        if (verificationMailer) {
+          const verifyResult = await verificationMailer.verifyWebhookTarget(addr.target);
+          if (verifyResult.isErr()) {
+            logger.warn("Webhook target verification failed — URL did not return HTTP 200", { code: "forwarding.webhook_verification_failed", accountId, target: addr.target, error: verifyResult.error });
+            return err(c, 422, "Webhook URL did not respond with HTTP 200. Please check the URL and try again.");
+          }
+          // Webhooks are verified immediately on successful test request
+          addr.status = "verified";
+          addr.verifiedAt = now;
         }
       }
 
@@ -347,10 +362,10 @@ export class AliasesApi {
     app.openapi(route({
       method: "post",
       path: "/accounts/{accountId}/forwarding-addresses/{address}/verify",
-      tags: ["Forwarding Addresses"],
+      tags: ["Forwarding Targets"],
       request: { params: z.object({ accountId: z.string(), address: z.string() }) },
       middleware: [authz("forwarding-addresses:write", c => `accounts/${c.req.param("accountId")!}/forwarding-addresses/${c.req.param("address")!}`)] as const,
-      responses: { 200: { content: { "application/json": { schema: ForwardingTargetSchema } }, description: "Address verified" } },
+      responses: { 200: { content: { "application/json": { schema: ForwardingTargetSchema } }, description: "Target verified" } },
     }), async (c) => {
       const accountId = c.req.param("accountId")!;
       const address = decodeURIComponent(c.req.param("address")!).toLowerCase();
@@ -359,7 +374,7 @@ export class AliasesApi {
       const existingResult = await accountDb.getForwardingTarget(accountId, address);
       if (existingResult.isErr()) return err(c, 500, "Internal Server Error");
       const existing = existingResult.value;
-      if (!existing) return err(c, 404, "Forwarding address not found", "FORWARDING_ADDRESS_NOT_FOUND");
+      if (!existing) return err(c, 404, "Forwarding target not found", "FORWARDING_ADDRESS_NOT_FOUND");
       if (existing.status === "verified") return c.json(toApiForwardingTarget(existing), 200);
       if (existing.token !== body.token) return err(c, 400, "Invalid token", "INVALID_TOKEN");
 
@@ -372,13 +387,30 @@ export class AliasesApi {
     app.openapi(route({
       method: "delete",
       path: "/accounts/{accountId}/forwarding-addresses/{address}",
-      tags: ["Forwarding Addresses"],
+      tags: ["Forwarding Targets"],
       request: { params: z.object({ accountId: z.string(), address: z.string() }) },
       middleware: [authz("forwarding-addresses:write", c => `accounts/${c.req.param("accountId")!}/forwarding-addresses/${c.req.param("address")!}`)] as const,
-      responses: { 204: { description: "Forwarding address deleted" } },
+      responses: { 204: { description: "Forwarding target deleted" } },
     }), async (c) => {
       const accountId = c.req.param("accountId")!;
       const address = decodeURIComponent(c.req.param("address")!).toLowerCase();
+
+      // Reject delete if target is referenced by digest or rules
+      const accountResult = await accountDb.getAccount(accountId);
+      if (accountResult.isErr()) return err(c, 500, "Internal Server Error");
+      if (accountResult.value?.digest?.forwardingTargetId === address) {
+        return err(c, 409, "Cannot delete target — currently used for digest emails", "TARGET_IN_USE");
+      }
+
+      const rulesResult = await accountDb.listRules(accountId);
+      if (rulesResult.isErr()) return err(c, 500, "Internal Server Error");
+      const referencingRule = rulesResult.value.find(r =>
+        r.actions.some(a => a.type === "forward" && a.value === address),
+      );
+      if (referencingRule) {
+        return err(c, 409, "Cannot delete target — referenced by rule: " + referencingRule.name, "TARGET_IN_USE");
+      }
+
       const deleteResult = await accountDb.deleteForwardingTarget(accountId, address);
       if (deleteResult.isErr()) return err(c, 500, "Internal Server Error");
       return new Response(null, { status: 204 });

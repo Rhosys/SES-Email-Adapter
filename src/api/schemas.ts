@@ -88,6 +88,7 @@ export const ErrorCode = z.enum([
   "TEMPLATE_NOT_FOUND",
   "UNVERIFIED_FORWARD_TARGET",
   "UNVERIFIED_CALENDAR_TARGET",
+  "TARGET_IN_USE",
   "VIEW_NOT_FOUND",
 ]);
 
@@ -670,7 +671,7 @@ export const EmailTemplate = z.object({
 export const ForwardingTarget = z.object({
   target: z.string(),
   type: z.enum(["email", "webhook"]),
-  status: z.enum(["pending", "verified"]),
+  status: z.enum(["pending", "verified", "disabled"]),
   createdAt: z.string().readonly(),
   verifiedAt: z.string().optional().readonly(),
 }).openapi("ForwardingTarget");
@@ -688,7 +689,7 @@ export const ListDomainsResponse = z.object({ domains: z.array(Domain) });
 export const ListAliasesResponse = z.object({ aliases: z.array(Alias) });
 export const ListSendersResponse = z.object({ senders: z.array(AliasSender) });
 export const ListTemplatesResponse = z.object({ templates: z.array(EmailTemplate) });
-export const ListForwardingTargetsResponse = z.object({ forwardingAddresses: z.array(ForwardingTarget) });
+export const ListForwardingTargetsResponse = z.object({ forwardingTargets: z.array(ForwardingTarget) });
 
 export const SignalSendResponse = Signal.and(z.object({
   undoWindowSeconds: z.number().readonly(),

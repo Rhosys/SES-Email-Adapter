@@ -1,4 +1,5 @@
 import { DateTime } from "luxon";
+import { ok, err } from "neverthrow";
 import type { Result, TransientSesError } from "../errors.js";
 import type { Logger } from "../logger.js";
 import type { VerificationMailer } from "../api/aliasesApi.js";
@@ -58,6 +59,18 @@ export class SesVerificationMailer implements VerificationMailer {
       fromOverride: `"Numaeel" <noreply@${this.mailDomain}>`,
       accountId,
     }).then(r => r.map(() => undefined));
+  }
+
+  async verifyWebhookTarget(url: string): Promise<Result<void, TransientSesError>> {
+    try {
+      const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "verification_test" }), signal: AbortSignal.timeout(10_000) });
+      if (!response.ok) {
+        return err({ kind: "transient_ses_error" as const, errorName: "WebhookVerificationFailed", httpStatus: response.status, cause: new Error(`Webhook returned HTTP ${response.status}`) });
+      }
+      return ok(undefined);
+    } catch (e) {
+      return err({ kind: "transient_ses_error" as const, errorName: "WebhookVerificationFailed", httpStatus: 0, cause: e });
+    }
   }
 
   private buildTags(accountId: string, triggerId: string): Array<{ Name: string; Value: string }> {

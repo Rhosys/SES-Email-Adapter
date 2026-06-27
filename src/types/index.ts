@@ -640,7 +640,7 @@ export interface ForwardingTarget {
   accountId: string;
   target: string;
   type: ForwardingTargetType;
-  status: "pending" | "verified";
+  status: "pending" | "verified" | "disabled";
   token: string;       // verification token sent to the target
   createdAt: string;
   verifiedAt?: string;
