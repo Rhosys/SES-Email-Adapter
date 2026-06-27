@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ok, err, dbError } from "../src/errors.js";
 import { DraftSendWorker } from "../src/processor/draft-send-worker.js";
-import type { IDraftSendArcDb, IDraftSendAccountDb } from "../src/processor/draft-send-worker.js";
+import type { IDraftSendArcDb } from "../src/processor/draft-send-worker.js";
 import type { ReplySender } from "../src/processor/processor.js";
 import type { DraftSendPayload } from "../src/processor/draft-send-dispatcher.js";
 import type { Signal } from "../src/types/index.js";
@@ -44,14 +44,6 @@ function makeArcDb(): IDraftSendArcDb {
   return {
     getSignalById: vi.fn().mockResolvedValue(ok(makeSignal())),
     updateSignalSendStatus: vi.fn().mockResolvedValue(ok(makeSignal({ status: "sent" }))),
-    getArc: vi.fn().mockResolvedValue(ok({ id: "arc-001", accountId: "acct-001", status: "active" })),
-    updateArc: vi.fn().mockResolvedValue(ok({ id: "arc-001", accountId: "acct-001", status: "archived" })),
-  };
-}
-
-function makeAccountDb(): IDraftSendAccountDb {
-  return {
-    getAccount: vi.fn().mockResolvedValue(ok({ afterSendAction: "keep_active" })),
   };
 }
 
@@ -69,16 +61,14 @@ const PAYLOAD: DraftSendPayload = {
 
 describe("DraftSendWorker", () => {
   let arcDb: IDraftSendArcDb;
-  let accountDb: IDraftSendAccountDb;
   let replySender: ReplySender;
   let worker: DraftSendWorker;
 
   beforeEach(() => {
     vi.clearAllMocks();
     arcDb = makeArcDb();
-    accountDb = makeAccountDb();
     replySender = makeReplySender();
-    worker = new DraftSendWorker(arcDb, accountDb, replySender, createMockLogger());
+    worker = new DraftSendWorker(arcDb, replySender, createMockLogger());
   });
 
   it("discards when signal not found (returns ok)", async () => {
@@ -172,25 +162,6 @@ describe("DraftSendWorker", () => {
     expect(result.isErr()).toBe(true);
     expect(result._unsafeUnwrapErr().kind).toBe("transient_ses_error");
     expect(arcDb.updateSignalSendStatus).not.toHaveBeenCalled();
-  });
-
-  it("archives arc after successful send when afterSendAction is 'archive'", async () => {
-    vi.mocked(accountDb.getAccount).mockResolvedValueOnce(ok({ afterSendAction: "archive" }));
-
-    const result = await worker.process(PAYLOAD);
-
-    expect(result.isOk()).toBe(true);
-    expect(accountDb.getAccount).toHaveBeenCalledWith("acct-001");
-    expect(arcDb.updateArc).toHaveBeenCalledWith("acct-001", "arc-001", "archived", expect.any(String), {});
-  });
-
-  it("does not archive arc when afterSendAction is 'keep_active'", async () => {
-    vi.mocked(accountDb.getAccount).mockResolvedValueOnce(ok({ afterSendAction: "keep_active" }));
-
-    const result = await worker.process(PAYLOAD);
-
-    expect(result.isOk()).toBe(true);
-    expect(arcDb.updateArc).not.toHaveBeenCalled();
   });
 
   it("propagates store error when getSignal fails", async () => {

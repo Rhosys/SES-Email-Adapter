@@ -187,7 +187,6 @@ const reindexWorker = new ReindexWorker(logger);
 
 const draftSendWorker = new DraftSendWorker(
   arcDb,
-  accountDb,
   externalEmailHandler,
   logger,
 );
