@@ -1,3 +1,4 @@
+import type { IForwardingService } from "../../../src/forwarding/forwarding-service.js";
 // ---------------------------------------------------------------------------
 // Calendar Proxy Scenario Tests
 //
@@ -539,9 +540,9 @@ describe("Scenario: approving quarantined email triggers calendar forwarding", (
       getAccount: vi.fn().mockResolvedValue(ok({ defaultCalendarInviteForwardingAddress: FORWARDING_ADDRESS })),
     } as unknown as PostApprovalCalendarHandlerDeps["accountDb"];
 
-    const calendarForwarderEmailService = makeEmailService();
+    const calendarIForwardingServiceEmailService = makeEmailService();
     const calendarForwarderDeps: CalendarForwarderDeps = {
-      emailService: calendarForwarderEmailService,
+      emailService: calendarIForwardingServiceEmailService,
       serviceDomain: SERVICE_DOMAIN,
     };
 
@@ -616,7 +617,7 @@ describe("Scenario: approving quarantined email triggers calendar forwarding", (
     expect(savedSignal.data.linkedSignalId).toBe("sgn-email-quarantined-001");
 
     // Calendar invite was forwarded
-    const emailSend = calendarForwarderEmailService.send as ReturnType<typeof vi.fn>;
+    const emailSend = calendarIForwardingServiceEmailService.send as ReturnType<typeof vi.fn>;
     expect(emailSend).toHaveBeenCalledOnce();
     const sendArgs = emailSend.mock.calls[0]![0];
     expect(sendArgs.to).toBe(FORWARDING_ADDRESS);

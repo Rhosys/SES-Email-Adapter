@@ -1,7 +1,8 @@
+import type { IForwardingService } from "../../src/forwarding/forwarding-service.js";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { ok } from "../../src/errors.js";
 import { SignalProcessor, SYSTEM_RULES } from "../../src/processor/processor.js";
-import type { ArcMatcher, Notifier, Forwarder, ReplySender, SideEffectPayload } from "../../src/processor/processor.js";
+import type { ArcMatcher, Notifier,  ReplySender, SideEffectPayload } from "../../src/processor/processor.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
 import { makeSharedNewDeps, makeRuleEvaluator3 } from "./_shared-new-deps.js";
 import { makeArcDbMock, makeAccountDbMock, makeProcessingDbMock } from "./_helpers.js";
@@ -104,12 +105,12 @@ describe("processSideEffect — correlation context", () => {
     };
   }
 
-  function makeProcessor(opts: { replySender: ReplySender; forwarder: Forwarder }) {
+  function makeProcessor(opts: { replySender: ReplySender; forwardingService: IForwardingService }) {
     mockLogger = createMockLogger();
     return new SignalProcessor({ ...makeSharedNewDeps(),
       ...makeStore(),
       contentSanitizer: { invoke: vi.fn() } as unknown as ContentSanitizerClient,
-      s3Client: {} as never,
+      s3Client: { send: vi.fn().mockResolvedValue({ Body: { transformToByteArray: () => Promise.resolve(new Uint8Array([1, 2, 3])) } }) } as never,
       emailBucket: "test-bucket",
       contentBucket: "test-content-bucket",
       classifier: { classify: vi.fn() },
@@ -118,7 +119,7 @@ describe("processSideEffect — correlation context", () => {
       arcMatcher: { findMatch: vi.fn(), upsertEmbedding: vi.fn() } as unknown as ArcMatcher,
       ruleEvaluator: makeRuleEvaluator3(mockLogger),
       notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
-      forwarder: opts.forwarder,
+      forwardingService: opts.forwardingService,
       retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
       replySender: opts.replySender,
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
@@ -135,8 +136,8 @@ describe("processSideEffect — correlation context", () => {
   describe("pong side-effect", () => {
     it("calls sendReply with accountId, signalId, and arcId", async () => {
       const replySender: ReplySender = { sendReply: vi.fn().mockResolvedValue(ok({ messageId: "pong-msg-001" })) };
-      const forwarder: Forwarder = { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) };
-      const processor = makeProcessor({ replySender, forwarder });
+      const forwardingService: IForwardingService = { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), sendVerification: vi.fn().mockResolvedValue(ok(undefined)), verifyWebhook: vi.fn().mockResolvedValue(ok(undefined)) };
+      const processor = makeProcessor({ replySender, forwardingService });
 
       const signal = makeSignal({
         id: "sgn-pong-123",
@@ -162,8 +163,8 @@ describe("processSideEffect — correlation context", () => {
   describe("forward side-effect", () => {
     it("calls forwarder.forward with signalId and arcId in opts", async () => {
       const replySender: ReplySender = { sendReply: vi.fn().mockResolvedValue(ok({ messageId: "reply-msg-id" })) };
-      const forwarder: Forwarder = { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) };
-      const processor = makeProcessor({ replySender, forwarder });
+      const forwardingService: IForwardingService = { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), sendVerification: vi.fn().mockResolvedValue(ok(undefined)), verifyWebhook: vi.fn().mockResolvedValue(ok(undefined)) };
+      const processor = makeProcessor({ replySender, forwardingService });
 
       const signal = makeSignal({
         id: "sgn-fwd-789",
@@ -177,12 +178,12 @@ describe("processSideEffect — correlation context", () => {
 
       await processor.processSideEffect(payload);
 
-      expect(forwarder.forward).toHaveBeenCalledOnce();
-      const [s3Key, toAddress, accountId, opts] = vi.mocked(forwarder.forward).mock.calls[0]!;
-      expect(s3Key).toBe("emails/fwd-msg");
-      expect(toAddress).toBe("backup@personal.com");
-      expect(accountId).toBe(TEST_ACCOUNT_ID);
-      expect(opts).toEqual({ signalId: "sgn-fwd-789", arcId: "arc-fwd-012" });
+      expect(forwardingService.forward).toHaveBeenCalledOnce();
+      const [forwardingTargetId, payload2, context] = vi.mocked(forwardingService.forward).mock.calls[0]!;
+      expect(forwardingTargetId).toBe("backup@personal.com");
+      expect(context.accountId).toBe(TEST_ACCOUNT_ID);
+      expect(context.signalId).toBe("sgn-fwd-789");
+      expect(context.arcId).toBe("arc-fwd-012");
     });
   });
 });

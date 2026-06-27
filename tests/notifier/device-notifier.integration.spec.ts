@@ -1,9 +1,10 @@
+import type { IForwardingService } from "../../src/forwarding/forwarding-service.js";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ok } from "neverthrow";
 import { SignalProcessor, SYSTEM_RULES } from "../../src/processor/processor.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
 import { makeSharedNewDeps, makeRuleEvaluator3 } from "../processor/_shared-new-deps.js";
-import type { ArcMatcher, SqsDispatcher, Notifier, Forwarder, ReplySender, SideEffectPayload } from "../../src/processor/processor.js";
+import type { ArcMatcher, SqsDispatcher, Notifier,  ReplySender, SideEffectPayload } from "../../src/processor/processor.js";
 import { makeArcDbMock, makeAccountDbMock, makeProcessingDbMock, applyCtx } from "../processor/_helpers.js";
 import type { ContentSanitizerClient } from "../../src/processor/content-sanitizer-client.js";
 import type { SignalClassifier } from "../../src/classifier/classifier.js";
@@ -148,8 +149,8 @@ function makeNotifier(): Notifier {
   return { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) };
 }
 
-function makeForwarder(): Forwarder {
-  return { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) };
+function makeForwarder(): IForwardingService {
+  return { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), sendVerification: vi.fn().mockResolvedValue(ok(undefined)), verifyWebhook: vi.fn().mockResolvedValue(ok(undefined)) };
 }
 
 function makeReplySender(): ReplySender {
@@ -232,7 +233,7 @@ describe("DeviceNotifier wiring: processor invokes notifier with urgency", () =>
       retentionService: makeRetentionService(),
       sqsDispatcher: makeSqsDispatcher(),
       notifier,
-      forwarder: makeForwarder(),
+      forwardingService: makeForwarder(),
       replySender: makeReplySender(),
       draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
       calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud" },
@@ -356,7 +357,7 @@ describe("DeviceNotifier wiring: handler instantiates with correct dependencies"
       retentionService: makeRetentionService(),
       sqsDispatcher: makeSqsDispatcher(),
       notifier,
-      forwarder: makeForwarder(),
+      forwardingService: makeForwarder(),
       replySender: makeReplySender(),
       draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
       calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud" },

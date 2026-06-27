@@ -1,3 +1,4 @@
+import type { IForwardingService } from "../../../src/forwarding/forwarding-service.js";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { handlePostApprovalCalendar } from "../../../src/processor/calendar/post-approval-handler.js";
 import type { PostApprovalCalendarHandlerDeps } from "../../../src/processor/calendar/post-approval-handler.js";

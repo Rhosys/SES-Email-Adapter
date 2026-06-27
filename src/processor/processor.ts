@@ -3,6 +3,7 @@ import { DateTime } from "luxon";
 import { generateId } from "../utils/id.js";
 import type { Logger } from "../logger.js";
 import type { Result } from "neverthrow";
+import type { IForwardingService, ForwardPayload } from "../forwarding/forwarding-service.js";
 import { ok, err, dbError, processorError, invalidResponseError } from "../errors.js";
 import type { DbError, InvalidResponseError, ProcessorError, TransientSesError } from "../errors.js";
 import type { Signal, Arc, Rule, Workflow, WorkflowData, Alias, AliasSender, SenderPolicy, AccountFilteringConfig, SignalSource, SignalStatus, Domain, ArcStatus, ArcUrgency, UnknownSenderPolicy, MatchedRuleResult, InvalidRuleFunctionData, InvalidTemplateFunctionData, AutoSendBlockedData, UnsubscribeInfo } from "../types/index.js";
@@ -78,14 +79,6 @@ export interface Notifier {
   notify(accountId: string, arc: Arc, signal: Signal, urgency: ArcUrgency): Promise<Result<void, DbError>>;
 }
 
-export interface Forwarder {
-  forward(
-    s3Key: string,
-    toAddress: string,
-    accountId: string,
-    opts?: { signalId?: string; arcId?: string },
-  ): Promise<Result<void, DbError | TransientSesError>>;
-}
 
 export interface ReplySender {
   sendReply(opts: {
@@ -277,7 +270,7 @@ interface SignalProcessorOptions {
   ruleEvaluator: RuleEvaluator;
   logger: Logger;
   notifier: Notifier;
-  forwarder: Forwarder;
+  forwardingService: IForwardingService;
   retentionService: S3RetentionService;
   replySender: ReplySender;
   sqsDispatcher: SqsDispatcher;
@@ -304,7 +297,7 @@ export class SignalProcessor {
   private readonly ruleEvaluator: RuleEvaluator;
   private readonly logger: Logger;
   private readonly notifier: Notifier;
-  private readonly forwarder: Forwarder;
+  private readonly forwardingService: IForwardingService;
   private readonly replySender: ReplySender;
   private readonly retentionService: S3RetentionService;
   private readonly sqsDispatcher: SqsDispatcher;
@@ -330,7 +323,7 @@ export class SignalProcessor {
     this.ruleEvaluator = opts.ruleEvaluator;
     this.logger = opts.logger;
     this.notifier = opts.notifier;
-    this.forwarder = opts.forwarder;
+    this.forwardingService = opts.forwardingService;
     this.replySender = opts.replySender;
     this.retentionService = opts.retentionService;
     this.sqsDispatcher = opts.sqsDispatcher;
@@ -411,22 +404,36 @@ export class SignalProcessor {
 
     // Forward (critical — recipient loses the email if this fails)
     if (outcome.forwardAddresses.length > 0) {
-      for (const toAddress of outcome.forwardAddresses) {
-        try {
-          this.logger.trackPoint("side_effect_forward_start");
-          const forwardResult = await this.forwarder.forward(signal.data.s3Key, toAddress, accountId, {
-            signalId: signal.id,
-            arcId: arc.id,
-          });
-          if (forwardResult.isErr()) {
-            this.logger.track("Side-effect forward failed — will force retry.", { code: "processor.side_effect.forward_failed", signal, arc, payload, toAddress, error: forwardResult.error });
-            criticalFailures.push(forwardResult.error);
-          } else {
-            this.logger.trackPoint("side_effect_forward_complete");
+      // Resolve raw email bytes from S3 once for all forward targets
+      let rawData: Uint8Array | undefined;
+      try {
+        const s3Res = await this.s3Client.send(new GetObjectCommand({ Bucket: this.emailBucket, Key: signal.data.s3Key }));
+        rawData = await s3Res.Body!.transformToByteArray();
+      } catch (e) {
+        this.logger.track("Failed to resolve S3 email for forwarding — all forwards will fail.", { code: "processor.side_effect.s3_resolve_failed", signal, arc, payload, error: e });
+        criticalFailures.push(e);
+      }
+
+      if (rawData) {
+        const forwardPayload: ForwardPayload = { type: "email", rawData };
+        for (const toAddress of outcome.forwardAddresses) {
+          try {
+            this.logger.trackPoint("side_effect_forward_start");
+            const forwardResult = await this.forwardingService.forward(toAddress, forwardPayload, {
+              accountId,
+              signalId: signal.id,
+              arcId: arc.id,
+            });
+            if (forwardResult.isErr()) {
+              this.logger.track("Side-effect forward failed — will force retry.", { code: "processor.side_effect.forward_failed", signal, arc, payload, toAddress, error: forwardResult.error });
+              criticalFailures.push(forwardResult.error);
+            } else {
+              this.logger.trackPoint("side_effect_forward_complete");
+            }
+          } catch (e) {
+            this.logger.track("Side-effect forward threw unexpectedly — will force retry.", { code: "processor.side_effect.forward_error", signal, arc, payload, toAddress, error: e });
+            criticalFailures.push(e);
           }
-        } catch (e) {
-          this.logger.track("Side-effect forward threw unexpectedly — will force retry.", { code: "processor.side_effect.forward_error", signal, arc, payload, toAddress, error: e });
-          criticalFailures.push(e);
         }
       }
     }
