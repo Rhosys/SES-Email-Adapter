@@ -179,11 +179,11 @@ describe("processSideEffect — correlation context", () => {
       await processor.processSideEffect(payload);
 
       expect(forwardingService.forward).toHaveBeenCalledOnce();
-      const [forwardingTargetId, payload2, context] = vi.mocked(forwardingService.forward).mock.calls[0]!;
+      const [forwardingTargetId, fwdSignal, fwdArc] = vi.mocked(forwardingService.forward).mock.calls[0]!;
       expect(forwardingTargetId).toBe("backup@personal.com");
-      expect(context.accountId).toBe(TEST_ACCOUNT_ID);
-      expect(context.signalId).toBe("sgn-fwd-789");
-      expect(context.arcId).toBe("arc-fwd-012");
+      expect(fwdSignal.id).toBe("sgn-fwd-789");
+      expect(fwdArc.accountId).toBe(TEST_ACCOUNT_ID);
+      expect(fwdArc.id).toBe("arc-fwd-012");
     });
   });
 });

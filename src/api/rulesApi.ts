@@ -8,12 +8,10 @@ import type { AccountDatabase } from "../database/account-database.js";
 import type { AuditDatabase } from "../database/audit-database.js";
 import type { UserCodeExecutorClient } from "../processor/user-code-client.js";
 import type { BillingHandler } from "../billing/billing-handler.js";
-import type { BillingPlan } from "../embedding/retention-tier.js";
 import type { Logger } from "../logger.js";
 import type { Rule } from "../types/index.js";
 import type { AppEnv, RouteHelpers } from "./route-helpers.js";
 import { validateRuleCondition } from "./validate-rule-condition.js";
-import { validateWebhookConfig } from "./validate-webhook-config.js";
 
 async function validateForwardTargets(
   accountId: string,
@@ -27,28 +25,6 @@ async function validateForwardTargets(
   const verifiedSet = new Set(verifiedResult.value.filter((v) => v.status === "verified").map((v) => v.target));
   const unverified = forwardTargets.filter((t) => !verifiedSet.has(t));
   return unverified.length > 0 ? `Forward targets not verified: ${unverified.join(", ")}` : null;
-}
-
-// Validate webhook actions: config validity + plan feature gating.
-// Returns an error object if invalid, null if OK.
-function validateWebhookActions(
-  actions: Rule["actions"],
-  accountPlan: BillingPlan,
-  billing: BillingHandler,
-): { message: string; code: z.infer<typeof ErrorCode> } | null {
-  const webhookActions = actions.filter((a) => a.type === "webhook");
-  if (webhookActions.length === 0) return null;
-
-  for (const action of webhookActions) {
-    const configError = validateWebhookConfig(action.value);
-    if (configError) return { message: configError, code: "INVALID_WEBHOOK_CONFIG" };
-  }
-
-  if (!billing.isFeatureEnabled(accountPlan, "webhook")) {
-    return { message: "Webhook actions require a paid plan", code: "PLAN_FEATURE_REQUIRED" };
-  }
-
-  return null;
 }
 
 export class RulesApi {
@@ -107,10 +83,6 @@ export class RulesApi {
       }
       const forwardError = await validateForwardTargets(accountId, body.actions as Rule["actions"], accountDb);
       if (forwardError) return err(c, 400, forwardError, "UNVERIFIED_FORWARD_TARGET");
-      const accountResult = await accountDb.getAccount(accountId);
-      const accountPlan: BillingPlan = (accountResult.isOk() && accountResult.value?.billingPlan) || "Free";
-      const webhookError = validateWebhookActions(body.actions as Rule["actions"], accountPlan, billingHandler);
-      if (webhookError) return err(c, 400, webhookError.message, webhookError.code);
       // Audit: write code change event before persisting (best-effort)
       if (effectiveConditionType === "js") {
         const { userId } = c.get("auth");
@@ -182,10 +154,6 @@ export class RulesApi {
       if (body.actions) {
         const forwardError = await validateForwardTargets(accountId, body.actions as Rule["actions"], accountDb);
         if (forwardError) return err(c, 400, forwardError, "UNVERIFIED_FORWARD_TARGET");
-        const accountResult = await accountDb.getAccount(accountId);
-        const accountPlan: BillingPlan = (accountResult.isOk() && accountResult.value?.billingPlan) || "Free";
-        const webhookError = validateWebhookActions(body.actions as Rule["actions"], accountPlan, billingHandler);
-        if (webhookError) return err(c, 400, webhookError.message, webhookError.code);
       }
       // Clear lastError when condition is updated on a JS rule
       const updateData: Parameters<typeof accountDb.updateRule>[2] = { ...body } as Parameters<typeof accountDb.updateRule>[2];

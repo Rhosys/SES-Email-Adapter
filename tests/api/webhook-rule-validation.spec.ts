@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createApp } from "../../src/api/app.js";
 import { makeAppDeps } from "../helpers/app-deps.js";
-import type { AuthService, AccessService, IForwardingService } from "../../src/api/app.js";
+import type { AuthService, AccessService } from "../../src/api/app.js";
 import type { ArcDatabase } from "../../src/database/arc-database.js";
 import type { AccountDatabase } from "../../src/database/account-database.js";
 import type { AuditDatabase } from "../../src/database/audit-database.js";
@@ -12,7 +12,6 @@ import type { sendRsvp } from "../../src/processor/calendar/rsvp-composer.js";
 import type { PostApprovalCalendarHandlerDeps } from "../../src/processor/calendar/post-approval-handler.js";
 import { createMockLogger } from "../helpers/mock-logger.js";
 import { BillingHandler } from "../../src/billing/billing-handler.js";
-import type { DraftSendDispatcher } from "../../src/processor/draft-send-dispatcher.js";
 import type { UserCodeExecutorClient } from "../../src/processor/user-code-client.js";
 
 vi.mock("../../src/dns/mx-validator.js", () => ({
@@ -59,9 +58,9 @@ function makeRule(overrides: Partial<Rule> = {}): Rule {
   return {
     id: "rule-001",
     accountId: TEST_ACCOUNT_ID,
-    name: "Webhook rule",
+    name: "Forward rule",
     condition: '{"==": [1, 1]}',
-    actions: [{ type: "webhook", value: '{"url":"https://example.com/hook"}' }],
+    actions: [{ type: "forward", value: "backup@example.com" }],
     status: "enabled",
     priorityOrder: 100,
     createdAt: "2024-01-01T00:00:00Z",
@@ -165,7 +164,7 @@ async function req(
 // Tests
 // ---------------------------------------------------------------------------
 
-describe("API — webhook rule validation", () => {
+describe("API — webhook action type rejected from rule creation", () => {
   let arcDb: ReturnType<typeof makeArcDb>;
   let accountDb: ReturnType<typeof makeAccountDb>;
   let auditDb: ReturnType<typeof makeAuditDb>;
@@ -205,49 +204,7 @@ describe("API — webhook rule validation", () => {
     }));
   });
 
-  it("accepts a webhook action on a paid plan", async () => {
-    vi.mocked(accountDb.getAccount).mockResolvedValueOnce(ok(makeAccount({ billingPlan: "Paid" })));
-    vi.mocked(accountDb.createRule).mockResolvedValueOnce(ok(makeRule() as never));
-
-    const res = await req(app, "POST", `${A}/rules`, {
-      body: {
-        name: "Notify CRM",
-        condition: '{"==": [1, 1]}',
-        actions: [{ type: "webhook", value: '{"url":"https://example.com/hook"}' }],
-      },
-    });
-
-    expect(res.status).toBe(201);
-  });
-
-  it.each([
-    { label: "missing value field", value: undefined, expectedFragment: "requires a value field" },
-    { label: "invalid JSON", value: "not-json", expectedFragment: "must be valid JSON" },
-    { label: "missing url in config", value: '{"endpoint":"https://x.com"}', expectedFragment: "must contain a non-empty 'url' field" },
-    { label: "non-http protocol", value: '{"url":"ftp://files.example.com/hook"}', expectedFragment: "must use http or https" },
-  ])("rejects invalid config — $label", async ({ value, expectedFragment }) => {
-    vi.mocked(accountDb.getAccount).mockResolvedValueOnce(ok(makeAccount({ billingPlan: "Paid" })));
-
-    const res = await req(app, "POST", `${A}/rules`, {
-      body: {
-        name: "Bad webhook",
-        condition: '{"==": [1, 1]}',
-        actions: [{ type: "webhook", value }],
-      },
-    });
-
-    expect(res.status).toBe(400);
-    const body = await res.json() as { title: string; errorCode: string };
-    expect(body.errorCode).toBe("INVALID_WEBHOOK_CONFIG");
-    expect(body.title).toContain(expectedFragment);
-  });
-
-  it.each([
-    { label: "Free plan", plan: "Free" as const },
-    { label: "Trial plan", plan: "Trial" as const },
-  ])("rejects webhook on $label with PLAN_FEATURE_REQUIRED", async ({ plan }) => {
-    vi.mocked(accountDb.getAccount).mockResolvedValueOnce(ok(makeAccount({ billingPlan: plan })));
-
+  it("rejects webhook as an invalid action type at schema validation", async () => {
     const res = await req(app, "POST", `${A}/rules`, {
       body: {
         name: "Webhook rule",
@@ -256,8 +213,7 @@ describe("API — webhook rule validation", () => {
       },
     });
 
+    // Schema validation rejects "webhook" — not a valid RuleActionType
     expect(res.status).toBe(400);
-    const body = await res.json() as { title: string; errorCode: string };
-    expect(body.errorCode).toBe("PLAN_FEATURE_REQUIRED");
   });
 });

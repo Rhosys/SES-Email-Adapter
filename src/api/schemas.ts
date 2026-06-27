@@ -37,7 +37,7 @@ export const RuleActionType = z.enum([
   "assign_label", "assign_workflow", "archive", "forward",
   "block_hidden", "block_reject", "quarantine_visible", "quarantine_hidden",
   "set_urgency", "suppress_notification", "pong", "approve_sender",
-  "auto_draft", "webhook", "forwardCalendarInvite",
+  "auto_draft", "forwardCalendarInvite",
 ]);
 
 export const RuleStatus = z.enum(["enabled", "disabled"]);
@@ -701,7 +701,7 @@ export const SignalSendResponse = Signal.and(z.object({
 // ---------------------------------------------------------------------------
 
 export const UserConfiguration = z.object({
-  afterSendAction: z.enum(["archive", "keep_active"]),
+  postSendView: z.enum(["return_to_inbox", "stay_on_thread"]),
 });
 
 // ---------------------------------------------------------------------------

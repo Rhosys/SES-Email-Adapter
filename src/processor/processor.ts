@@ -3,7 +3,7 @@ import { DateTime } from "luxon";
 import { generateId } from "../utils/id.js";
 import type { Logger } from "../logger.js";
 import type { Result } from "neverthrow";
-import type { IForwardingService, ForwardPayload } from "../forwarding/forwarding-service.js";
+import type { IForwardingService } from "../forwarding/forwarding-service.js";
 import { ok, err, dbError, processorError, invalidResponseError } from "../errors.js";
 import type { DbError, InvalidResponseError, ProcessorError, TransientSesError } from "../errors.js";
 import type { Signal, Arc, Rule, Workflow, WorkflowData, Alias, AliasSender, SenderPolicy, AccountFilteringConfig, SignalSource, SignalStatus, Domain, ArcStatus, ArcUrgency, UnknownSenderPolicy, MatchedRuleResult, InvalidRuleFunctionData, InvalidTemplateFunctionData, AutoSendBlockedData, UnsubscribeInfo } from "../types/index.js";
@@ -30,8 +30,6 @@ import { getETLD1, assignSystemLabels } from "./filter.js";
 import { statusToCategory } from "../database/stats-writer.js";
 import type { DraftSendDispatch } from "./draft-send-dispatcher.js";
 import { isReplyTargetSafe } from "./reply-target-validator.js";
-import { buildWebhookPayload, deliverWebhook } from "./webhook.js";
-import { parseWebhookConfig } from "../api/validate-webhook-config.js";
 import { BillingHandler } from "../billing/billing-handler.js";
 import type { HandlerRegistry } from "../workflow/registry.js";
 import { findCalendarAttachment, parseIcs } from "./calendar/ics-parser.js";
@@ -404,36 +402,19 @@ export class SignalProcessor {
 
     // Forward (critical — recipient loses the email if this fails)
     if (outcome.forwardAddresses.length > 0) {
-      // Resolve raw email bytes from S3 once for all forward targets
-      let rawData: Uint8Array | undefined;
-      try {
-        const s3Res = await this.s3Client.send(new GetObjectCommand({ Bucket: this.emailBucket, Key: signal.data.s3Key }));
-        rawData = await s3Res.Body!.transformToByteArray();
-      } catch (e) {
-        this.logger.track("Failed to resolve S3 email for forwarding — all forwards will fail.", { code: "processor.side_effect.s3_resolve_failed", signal, arc, payload, error: e });
-        criticalFailures.push(e);
-      }
-
-      if (rawData) {
-        const forwardPayload: ForwardPayload = { type: "email", rawData };
-        for (const toAddress of outcome.forwardAddresses) {
-          try {
-            this.logger.trackPoint("side_effect_forward_start");
-            const forwardResult = await this.forwardingService.forward(toAddress, forwardPayload, {
-              accountId,
-              signalId: signal.id,
-              arcId: arc.id,
-            });
-            if (forwardResult.isErr()) {
-              this.logger.track("Side-effect forward failed — will force retry.", { code: "processor.side_effect.forward_failed", signal, arc, payload, toAddress, error: forwardResult.error });
-              criticalFailures.push(forwardResult.error);
-            } else {
-              this.logger.trackPoint("side_effect_forward_complete");
-            }
-          } catch (e) {
-            this.logger.track("Side-effect forward threw unexpectedly — will force retry.", { code: "processor.side_effect.forward_error", signal, arc, payload, toAddress, error: e });
-            criticalFailures.push(e);
+      for (const toAddress of outcome.forwardAddresses) {
+        try {
+          this.logger.trackPoint("side_effect_forward_start");
+          const forwardResult = await this.forwardingService.forward(toAddress, signal, arc);
+          if (forwardResult.isErr()) {
+            this.logger.track("Side-effect forward failed — will force retry.", { code: "processor.side_effect.forward_failed", signal, arc, payload, toAddress, error: forwardResult.error });
+            criticalFailures.push(forwardResult.error);
+          } else {
+            this.logger.trackPoint("side_effect_forward_complete");
           }
+        } catch (e) {
+          this.logger.track("Side-effect forward threw unexpectedly — will force retry.", { code: "processor.side_effect.forward_error", signal, arc, payload, toAddress, error: e });
+          criticalFailures.push(e);
         }
       }
     }
@@ -663,39 +644,6 @@ export class SignalProcessor {
         this.logger.trackPoint("side_effect_auto_draft_complete");
       } catch (e) {
         this.logger.track("Side-effect auto-draft threw unexpectedly.", { code: "processor.side_effect.auto_draft_error", signal, arc, payload, error: e });
-      }
-    }
-
-    // Webhook (best-effort — never blocks or retries)
-    const webhookActions = (signal.data.matchedRules ?? [])
-      .flatMap(r => r.actions.filter(a => a.type === "webhook" && a.value));
-    if (webhookActions.length > 0) {
-      const accountResult = await this.accountDb.getAccount(accountId);
-      const accountPlan = accountResult.isOk() ? (accountResult.value?.billingPlan ?? "Free") : "Free";
-
-      if (!this.billingHandler.isFeatureEnabled(accountPlan, "webhook")) {
-        this.logger.info("Webhook action skipped — feature not enabled for plan.", {
-          code: "processor.side_effect.webhook_plan_gated",
-          accountId,
-          signalId: signal.id,
-          arcId: arc.id,
-          plan: accountPlan,
-        });
-      } else {
-        const webhookPayload = buildWebhookPayload(signal, arc);
-        for (const action of webhookActions) {
-          const configResult = parseWebhookConfig(action.value);
-          if (configResult.isErr()) {
-            this.logger.track("Webhook action skipped — invalid config at processing time.", {
-              code: "processor.side_effect.webhook_invalid_config",
-              signal, arc, payload,
-              value: action.value,
-              error: configResult.error,
-            });
-            continue;
-          }
-          await deliverWebhook(configResult.value.url, webhookPayload, this.logger);
-        }
       }
     }
 

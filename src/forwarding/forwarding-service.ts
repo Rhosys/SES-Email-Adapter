@@ -6,27 +6,19 @@
 import { ok, err } from "neverthrow"
 import type { Result } from "neverthrow"
 import type { DbError, TransientSesError } from "../errors.js"
-import type { ForwardingTarget } from "../types/index.js"
+import type { ForwardingTarget, Signal, Arc } from "../types/index.js"
 import type { EmailService } from "../email/email-service.js"
+import type { IEmailSignalStore } from "../database/email-signal-store.js"
 import type { Logger } from "../logger.js"
 import { buildOutboundTags } from "../email/ses-tags.js"
 import { renderTemplate } from "../email/template-renderer.js"
 import { buildEmailTags } from "../email/tag-sanitizer.js"
+import { buildWebhookPayload, type WebhookPayload } from "../processor/webhook.js"
 import { DateTime } from "luxon"
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-
-export type ForwardPayload =
-  | { type: "email"; rawData: Uint8Array }
-  | { type: "webhook"; data: Record<string, unknown> }
-
-export interface ForwardContext {
-  accountId: string
-  signalId?: string
-  arcId?: string
-}
 
 export type WebhookForwardError = { kind: "webhook_forward_error"; cause: unknown; statusCode?: number }
 
@@ -47,7 +39,7 @@ export interface IForwardingTargetStore {
 export interface IForwardingService {
   sendVerification(accountId: string, target: ForwardingTarget): Promise<Result<void, TransientSesError>>
   verifyWebhook(url: string): Promise<Result<void, TransientSesError>>
-  forward(forwardingTargetId: string, payload: ForwardPayload, context: ForwardContext): Promise<Result<void, ForwardError>>
+  forward(forwardingTargetId: string, signal: Signal, arc: Arc): Promise<Result<void, ForwardError>>
 }
 
 // ---------------------------------------------------------------------------
@@ -58,6 +50,7 @@ export class ForwardingService implements IForwardingService {
   constructor(
     private readonly emailService: EmailService,
     private readonly targetStore: IForwardingTargetStore,
+    private readonly emailSignalStore: IEmailSignalStore,
     private readonly appBaseUrl: string,
     private readonly mailDomain: string,
     private readonly logger: Logger,
@@ -87,34 +80,31 @@ export class ForwardingService implements IForwardingService {
     }
   }
 
-  async forward(forwardingTargetId: string, payload: ForwardPayload, context: ForwardContext): Promise<Result<void, ForwardError>> {
-    const targetResult = await this.targetStore.getForwardingTarget(context.accountId, forwardingTargetId)
+  async forward(forwardingTargetId: string, signal: Signal, arc: Arc): Promise<Result<void, ForwardError>> {
+    const accountId = arc.accountId
+    const targetResult = await this.targetStore.getForwardingTarget(accountId, forwardingTargetId)
     if (targetResult.isErr()) return err(targetResult.error)
     const target = targetResult.value
     if (!target || target.status !== "verified") {
       this.logger.warn("Forward skipped — target not found or not verified", {
         code: "forwarding.target_invalid",
         forwardingTargetId,
-        accountId: context.accountId,
+        accountId,
         status: target?.status,
       })
       return ok(undefined)
     }
 
-    if (target.type === "email" && payload.type === "email") {
-      return this.forwardEmail(target.target, payload.rawData, context)
+    if (target.type === "email") {
+      const rawResult = await this.emailSignalStore.getOriginalEmail(signal.data.s3Key)
+      if (rawResult.isErr()) return err(rawResult.error)
+      return this.forwardEmail(target.target, rawResult.value, { accountId, signalId: signal.id, arcId: arc.id })
     }
-    if (target.type === "webhook" && payload.type === "webhook") {
-      return this.forwardWebhook(target.target, payload.data, context)
+    if (target.type === "webhook") {
+      const payload = buildWebhookPayload(signal, arc)
+      return this.forwardWebhook(target.target, payload, { accountId, signalId: signal.id, arcId: arc.id })
     }
 
-    this.logger.warn("Forwarding target type mismatch with payload type — skipping", {
-      code: "forwarding.type_mismatch",
-      targetType: target.type,
-      payloadType: payload.type,
-      forwardingTargetId,
-      accountId: context.accountId,
-    })
     return ok(undefined)
   }
 
@@ -154,7 +144,7 @@ export class ForwardingService implements IForwardingService {
   // Private — email forwarding (raw SES send)
   // ---------------------------------------------------------------------------
 
-  private async forwardEmail(toAddress: string, rawData: Uint8Array, context: ForwardContext): Promise<Result<void, ForwardError>> {
+  private async forwardEmail(toAddress: string, rawData: Uint8Array, context: { accountId: string; signalId: string; arcId: string }): Promise<Result<void, ForwardError>> {
     const tags = buildOutboundTags("forward", { accountId: context.accountId, signalId: context.signalId, arcId: context.arcId })
 
     const result = await this.emailService.sendRaw({
@@ -172,7 +162,7 @@ export class ForwardingService implements IForwardingService {
   // Private — webhook forwarding (HTTP POST)
   // ---------------------------------------------------------------------------
 
-  private async forwardWebhook(url: string, data: Record<string, unknown>, context: ForwardContext): Promise<Result<void, ForwardError>> {
+  private async forwardWebhook(url: string, data: WebhookPayload, context: { accountId: string; signalId: string; arcId: string }): Promise<Result<void, ForwardError>> {
     try {
       const response = await fetch(url, {
         method: "POST",

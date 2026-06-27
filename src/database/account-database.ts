@@ -1420,7 +1420,7 @@ export class AccountDatabase {
     const setParts: string[] = ["updatedAt = :now"];
     const exprValues: Record<string, unknown> = { ":now": now };
 
-    if (update.afterSendAction !== undefined) { setParts.push("afterSendAction = :asa"); exprValues[":asa"] = update.afterSendAction; }
+    if (update.postSendView !== undefined) { setParts.push("postSendView = :psv"); exprValues[":psv"] = update.postSendView; }
 
     try {
       const res = await dynamo.send(new UpdateCommand({
