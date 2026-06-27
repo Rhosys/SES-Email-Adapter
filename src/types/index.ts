@@ -635,12 +635,15 @@ export interface RuleAction {
 export const FORWARDING_TARGET_TYPES = ["email", "webhook"] as const;
 export type ForwardingTargetType = (typeof FORWARDING_TARGET_TYPES)[number];
 
+export const FORWARDING_TARGET_STATUSES = ["pending", "verified", "disabled"] as const;
+export type ForwardingTargetStatus = (typeof FORWARDING_TARGET_STATUSES)[number];
+
 export interface ForwardingTarget {
   id: string;
   accountId: string;
   target: string;
   type: ForwardingTargetType;
-  status: "pending" | "verified" | "disabled";
+  status: ForwardingTargetStatus;
   token: string;       // verification token sent to the target
   createdAt: string;
   verifiedAt?: string;
