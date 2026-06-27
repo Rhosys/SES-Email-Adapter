@@ -193,10 +193,11 @@ export class AccountsApi {
       const updateResult = await accountDb.updateAccount(accountId, body as Partial<Pick<Account, "name" | "retentionDuration" | "digest" | "filtering" | "onboarding" | "defaultCalendarInviteForwardingAddress">>);
       if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
 
-      // Trigger immediate digest if frequency or target changed
+      // Trigger immediate digest only on frequency increase or target change
+      const FREQ_RANK: Record<string, number> = { monthly: 0, weekly: 1, daily: 2 };
       if (body.digest && (
-        previousDigest?.frequency !== body.digest.frequency ||
-        previousDigest?.forwardingTargetId !== body.digest.forwardingTargetId
+        previousDigest?.forwardingTargetId !== body.digest.forwardingTargetId ||
+        (FREQ_RANK[body.digest.frequency] ?? 0) > (FREQ_RANK[previousDigest?.frequency ?? ""] ?? 0)
       )) {
         void this.triggerDigest(accountId).then(undefined, e => {
           logger.warn("Failed to trigger immediate digest after config change", { code: "accounts.digest_trigger_failed", accountId, error: e });
