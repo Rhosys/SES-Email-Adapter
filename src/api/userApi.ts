@@ -42,7 +42,6 @@ export class UserApi {
       path: "/user/{userId}/configuration",
       request: {
         params: z.object({ userId: z.string() }),
-        body: { content: { "application/json": { schema: UpdateUserConfigurationRequest } } },
       },
       responses: {
         200: { content: { "application/json": { schema: UserConfiguration } }, description: "Updated user configuration" },
