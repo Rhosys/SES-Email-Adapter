@@ -87,6 +87,7 @@ export const ErrorCode = z.enum([
   "SIGNAL_NOT_REVIEWABLE",
   "TEMPLATE_NOT_FOUND",
   "UNVERIFIED_FORWARD_TARGET",
+  "UNVERIFIED_CALENDAR_TARGET",
   "VIEW_NOT_FOUND",
 ]);
 
@@ -664,15 +665,16 @@ export const EmailTemplate = z.object({
 }).openapi("EmailTemplate");
 
 // ---------------------------------------------------------------------------
-// VerifiedForwardingAddress
+// ForwardingTarget
 // ---------------------------------------------------------------------------
 
-export const VerifiedForwardingAddress = z.object({
-  address: z.string(),
+export const ForwardingTarget = z.object({
+  target: z.string(),
+  type: z.enum(["email", "webhook"]),
   status: z.enum(["pending", "verified"]),
   createdAt: z.string().readonly(),
   verifiedAt: z.string().optional().readonly(),
-}).openapi("VerifiedForwardingAddress");
+}).openapi("ForwardingTarget");
 
 // ---------------------------------------------------------------------------
 // Response wrappers
@@ -687,7 +689,7 @@ export const ListDomainsResponse = z.object({ domains: z.array(Domain) });
 export const ListAliasesResponse = z.object({ aliases: z.array(Alias) });
 export const ListSendersResponse = z.object({ senders: z.array(AliasSender) });
 export const ListTemplatesResponse = z.object({ templates: z.array(EmailTemplate) });
-export const ListForwardingAddressesResponse = z.object({ forwardingAddresses: z.array(VerifiedForwardingAddress) });
+export const ListForwardingTargetsResponse = z.object({ forwardingAddresses: z.array(ForwardingTarget) });
 
 export const SignalSendResponse = Signal.and(z.object({
   undoWindowSeconds: z.number().readonly(),
@@ -725,4 +727,4 @@ export type Rule = z.infer<typeof Rule>;
 export type View = z.infer<typeof View>;
 export type Account = z.infer<typeof Account>;
 export type EmailTemplate = z.infer<typeof EmailTemplate>;
-export type VerifiedForwardingAddress = z.infer<typeof VerifiedForwardingAddress>;
+export type ForwardingTarget = z.infer<typeof ForwardingTarget>;

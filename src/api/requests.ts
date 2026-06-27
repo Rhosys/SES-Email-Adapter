@@ -240,20 +240,22 @@ export const UpdateAccountRequest = z.object({
   filtering: AccountFilteringConfigSchema.optional(),
   onboarding: AccountOnboardingSchema.optional(),
   afterSendAction: z.enum(["archive", "keep_active"]).optional(),
+  defaultCalendarInviteForwardingAddress: z.string().nullable().optional(),
 });
 export type UpdateAccountRequest = z.infer<typeof UpdateAccountRequest>;
 
-// ---- Forwarding addresses ----
+// ---- Forwarding targets ----
 
-export const CreateForwardingAddressRequest = z.object({
-  address: lowerEmail,
+export const CreateForwardingTargetRequest = z.object({
+  target: lowerEmail,
+  type: z.enum(["email", "webhook"]).default("email"),
 });
-export type CreateForwardingAddressRequest = z.infer<typeof CreateForwardingAddressRequest>;
+export type CreateForwardingTargetRequest = z.infer<typeof CreateForwardingTargetRequest>;
 
-export const VerifyForwardingAddressRequest = z.object({
+export const VerifyForwardingTargetRequest = z.object({
   token: z.string(),
 });
-export type VerifyForwardingAddressRequest = z.infer<typeof VerifyForwardingAddressRequest>;
+export type VerifyForwardingTargetRequest = z.infer<typeof VerifyForwardingTargetRequest>;
 
 // ---- Calendar RSVP ----
 

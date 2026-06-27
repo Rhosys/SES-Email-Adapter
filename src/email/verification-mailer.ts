@@ -15,7 +15,7 @@ export class SesVerificationMailer implements VerificationMailer {
   ) {}
 
   async sendForwardVerification(accountId: string, address: string, token: string): Promise<Result<void, TransientSesError>> {
-    const verifyUrl = `${this.appBaseUrl}/accounts/${accountId}/forwarding-addresses/${encodeURIComponent(address)}/verify?token=${token}`;
+    const verifyUrl = `${this.appBaseUrl}/settings?tab=forwarding&verifyAddress=${encodeURIComponent(address)}&token=${token}&accountId=${accountId}`;
     const triggerId = `fwdverify-${accountId}-${address}`;
     const tags = this.buildTags(accountId, triggerId);
 

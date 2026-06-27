@@ -629,15 +629,19 @@ export interface RuleAction {
 }
 
 // ---------------------------------------------------------------------------
-// Verified forwarding addresses
+// Forwarding targets
 // ---------------------------------------------------------------------------
 
-export interface VerifiedForwardingAddress {
+export const FORWARDING_TARGET_TYPES = ["email", "webhook"] as const;
+export type ForwardingTargetType = (typeof FORWARDING_TARGET_TYPES)[number];
+
+export interface ForwardingTarget {
   id: string;
   accountId: string;
-  address: string;
+  target: string;
+  type: ForwardingTargetType;
   status: "pending" | "verified";
-  token: string;       // verification token sent to the address
+  token: string;       // verification token sent to the target
   createdAt: string;
   verifiedAt?: string;
 }

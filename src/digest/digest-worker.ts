@@ -11,7 +11,7 @@ import { ok, err } from "../errors.js"
 import type { DbError, Result, TransientSesError } from "../errors.js"
 import type { Logger } from "../logger.js"
 import type { EmailService } from "../email/email-service.js"
-import type { Arc, Account, VerifiedForwardingAddress } from "../types/index.js"
+import type { Arc, Account, ForwardingTarget } from "../types/index.js"
 import { shouldDispatchDigest, buildDigestSubject } from "./digest-frequency-filter.js"
 import type { DigestFrequency } from "./digest-frequency-filter.js"
 import { generateUnsubscribeToken } from "../email/unsubscribe-token.js"
@@ -30,7 +30,7 @@ export interface IDigestSendMessage {
 export interface IDigestWorkerDeps {
   accountDb: {
     getAccount(accountId: string): Promise<Result<Account | null, DbError>>
-    getVerifiedForwardingAddress(accountId: string, address: string): Promise<Result<VerifiedForwardingAddress | null, DbError>>
+    getForwardingTarget(accountId: string, target: string): Promise<Result<ForwardingTarget | null, DbError>>
   }
   arcDb: {
     listActiveArcs(accountId: string, limit: number): Promise<Result<Arc[], DbError>>
@@ -86,7 +86,7 @@ export class DigestWorker {
     }
 
     // 4. Resolve forwardingTarget → get verified email address
-    const targetResult = await accountDb.getVerifiedForwardingAddress(accountId, account.digest.forwardingTargetId)
+    const targetResult = await accountDb.getForwardingTarget(accountId, account.digest.forwardingTargetId)
     if (targetResult.isErr()) return err(targetResult.error)
     const target = targetResult.value
     if (!target || target.status !== "verified") {
@@ -150,7 +150,7 @@ export class DigestWorker {
     // 10. Send via EmailService — terminal operation, no post-send writes
     const textBody = `Your ${frequency} Numaeel digest is ready. ${arcs.length} active conversations.${quarantineCount > 0 ? ` ${quarantineCount} emails awaiting review in quarantine.` : ""} View your dashboard: ${APP_BASE_URL}/a/`
     const sendResult = await emailService.send({
-      to: target.address,
+      to: target.target,
       subject,
       textBody,
       htmlBody,
