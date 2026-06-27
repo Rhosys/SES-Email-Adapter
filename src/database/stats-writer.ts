@@ -220,6 +220,7 @@ export interface ApiStatsDailyBucket {
   allowed: number;
   quarantined: number;
   blocked: number;
+  aliases: number;
 }
 
 export interface ApiStatsResponse {
@@ -272,16 +273,18 @@ export function aggregateStatsRows(rows: StatsRow[]): ApiStatsResponse {
     allowed: d.metrics.allowed ?? 0,
     quarantined: d.metrics.quarantined ?? 0,
     blocked: d.metrics.blocked ?? 0,
+    aliases: d.metrics.totalAliases ?? 0,
   })).sort((a, b) => b.date.localeCompare(a.date)); // descending
 
   // Build monthly rollups from diffs
-  const monthlyMap = new Map<string, { allowed: number; quarantined: number; blocked: number }>();
+  const monthlyMap = new Map<string, { allowed: number; quarantined: number; blocked: number; aliases: number }>();
   for (const d of diffs) {
     const month = d.date.slice(0, 7);
-    const existing = monthlyMap.get(month) ?? { allowed: 0, quarantined: 0, blocked: 0 };
+    const existing = monthlyMap.get(month) ?? { allowed: 0, quarantined: 0, blocked: 0, aliases: 0 };
     existing.allowed += d.metrics.allowed ?? 0;
     existing.quarantined += d.metrics.quarantined ?? 0;
     existing.blocked += d.metrics.blocked ?? 0;
+    existing.aliases += d.metrics.totalAliases ?? 0;
     monthlyMap.set(month, existing);
   }
 
