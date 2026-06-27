@@ -18,13 +18,13 @@ import { validateWebhookConfig } from "./validate-webhook-config.js";
 async function validateForwardTargets(
   accountId: string,
   actions: Rule["actions"],
-  store: Pick<AccountDatabase, "listVerifiedForwardingAddresses">,
+  store: Pick<AccountDatabase, "listForwardingTargets">,
 ): Promise<string | null> {
   const forwardTargets = actions.filter((a) => a.type === "forward" && a.value).map((a) => a.value!);
   if (forwardTargets.length === 0) return null;
-  const verifiedResult = await store.listVerifiedForwardingAddresses(accountId);
+  const verifiedResult = await store.listForwardingTargets(accountId);
   if (verifiedResult.isErr()) return "Internal error validating forward targets";
-  const verifiedSet = new Set(verifiedResult.value.filter((v) => v.status === "verified").map((v) => v.address));
+  const verifiedSet = new Set(verifiedResult.value.filter((v) => v.status === "verified").map((v) => v.target));
   const unverified = forwardTargets.filter((t) => !verifiedSet.has(t));
   return unverified.length > 0 ? `Forward targets not verified: ${unverified.join(", ")}` : null;
 }

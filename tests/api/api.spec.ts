@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { Arc, Signal, View, Label, Rule, Domain, Account, Alias, VerifiedForwardingAddress, EmailTemplate } from "../../src/types/index.js";
+import type { Arc, Signal, View, Label, Rule, Domain, Account, Alias, ForwardingTarget, EmailTemplate } from "../../src/types/index.js";
 import { createApp } from "../../src/api/app.js";
 import { makeAppDeps } from "../helpers/app-deps.js";
 import type { AuthService, AccessService, AccountUser, VerificationMailer } from "../../src/api/app.js";
@@ -121,10 +121,10 @@ function makeAccountDb() {
     upsertAlias: vi.fn().mockResolvedValue(ok(makeAlias())),
     deleteAlias: vi.fn().mockResolvedValue(ok(undefined)),
     getAccountFilteringConfig: vi.fn().mockResolvedValue(ok(null)),
-    listVerifiedForwardingAddresses: vi.fn().mockResolvedValue(ok([])),
-    getVerifiedForwardingAddress: vi.fn().mockResolvedValue(ok(null)),
-    saveVerifiedForwardingAddress: vi.fn().mockResolvedValue(ok(undefined)),
-    deleteVerifiedForwardingAddress: vi.fn().mockResolvedValue(ok(undefined)),
+    listForwardingTargets: vi.fn().mockResolvedValue(ok([])),
+    getForwardingTarget: vi.fn().mockResolvedValue(ok(null)),
+    saveForwardingTarget: vi.fn().mockResolvedValue(ok(undefined)),
+    deleteForwardingTarget: vi.fn().mockResolvedValue(ok(undefined)),
     updateDomainHealth: vi.fn().mockResolvedValue(ok(undefined)),
     renameAlias: vi.fn().mockResolvedValue(ok(makeAlias())),
     saveSender: vi.fn().mockResolvedValue(ok(undefined)),
@@ -148,11 +148,12 @@ function makeAuditDb() {
   };
 }
 
-function makeVerifiedAddress(overrides: Partial<VerifiedForwardingAddress> = {}): VerifiedForwardingAddress {
+function makeForwardingTarget(overrides: Partial<ForwardingTarget> = {}): ForwardingTarget {
   return {
     id: "fwdaddr-001",
     accountId: TEST_ACCOUNT_ID,
-    address: "backup@personal.com",
+    target: "backup@personal.com",
+    type: "email",
     status: "verified",
     token: "tok-abc123",
     createdAt: "2024-01-01T00:00:00Z",
@@ -1049,7 +1050,7 @@ describe("API", () => {
 
   describe("PATCH /accounts/:accountId", () => {
     it("updates digest settings when forwarding target is verified", async () => {
-      vi.mocked(accountDb.getVerifiedForwardingAddress).mockResolvedValueOnce(ok(makeVerifiedAddress({ status: "verified" })));
+      vi.mocked(accountDb.getForwardingTarget).mockResolvedValueOnce(ok(makeForwardingTarget({ status: "verified" })));
       const res = await req(app, "PATCH", `${A}`, {
         body: { digest: { frequency: "daily", forwardingTargetId: "fwd-123" } },
       });
@@ -1315,12 +1316,12 @@ describe("API", () => {
 
   describe("GET /accounts/:accountId/forwarding-addresses", () => {
     it("returns forwarding addresses in named envelope", async () => {
-      vi.mocked(accountDb.listVerifiedForwardingAddresses).mockResolvedValueOnce(ok([makeVerifiedAddress()]));
+      vi.mocked(accountDb.listForwardingTargets).mockResolvedValueOnce(ok([makeForwardingTarget()]));
       const res = await req(app, "GET", `${A}/forwarding-addresses`);
       expect(res.status).toBe(200);
-      const body = await res.json() as { forwardingAddresses: VerifiedForwardingAddress[] };
+      const body = await res.json() as { forwardingAddresses: ForwardingTarget[] };
       expect(body.forwardingAddresses).toHaveLength(1);
-      expect(body.forwardingAddresses[0]!.address).toBe("backup@personal.com");
+      expect(body.forwardingAddresses[0]!.target).toBe("backup@personal.com");
     });
   });
 
@@ -1331,20 +1332,20 @@ describe("API", () => {
     });
 
     it("creates a pending forwarding address and sends verification email", async () => {
-      const res = await req(app, "POST", `${A}/forwarding-addresses`, { body: { address: "backup@personal.com" } });
+      const res = await req(app, "POST", `${A}/forwarding-addresses`, { body: { target: "backup@personal.com" } });
       expect(res.status).toBe(201);
-      const body = await res.json() as { address: string; status: string };
-      expect(body.address).toBe("backup@personal.com");
+      const body = await res.json() as { target: string; status: string };
+      expect(body.target).toBe("backup@personal.com");
       expect(body.status).toBe("pending");
-      expect(accountDb.saveVerifiedForwardingAddress).toHaveBeenCalledOnce();
+      expect(accountDb.saveForwardingTarget).toHaveBeenCalledOnce();
       expect(verificationMailer.sendForwardVerification).toHaveBeenCalledWith(
         TEST_ACCOUNT_ID, "backup@personal.com", expect.any(String),
       );
     });
 
     it("returns existing verified address without re-sending verification", async () => {
-      vi.mocked(accountDb.getVerifiedForwardingAddress).mockResolvedValueOnce(ok(makeVerifiedAddress({ status: "verified" })));
-      const res = await req(app, "POST", `${A}/forwarding-addresses`, { body: { address: "backup@personal.com" } });
+      vi.mocked(accountDb.getForwardingTarget).mockResolvedValueOnce(ok(makeForwardingTarget({ status: "verified" })));
+      const res = await req(app, "POST", `${A}/forwarding-addresses`, { body: { target: "backup@personal.com" } });
       expect(res.status).toBe(201);
       expect(verificationMailer.sendForwardVerification).not.toHaveBeenCalled();
     });
@@ -1352,7 +1353,7 @@ describe("API", () => {
 
   describe("POST /accounts/:accountId/forwarding-addresses/:address/verify", () => {
     it("returns 400 when token is missing", async () => {
-      vi.mocked(accountDb.getVerifiedForwardingAddress).mockResolvedValueOnce(ok(makeVerifiedAddress({ status: "pending" })));
+      vi.mocked(accountDb.getForwardingTarget).mockResolvedValueOnce(ok(makeForwardingTarget({ status: "pending" })));
       const res = await req(app, "POST", `${A}/forwarding-addresses/backup%40personal.com/verify`, { body: {} });
       expect(res.status).toBe(400);
     });
@@ -1363,19 +1364,19 @@ describe("API", () => {
     });
 
     it("returns 400 when token is wrong", async () => {
-      vi.mocked(accountDb.getVerifiedForwardingAddress).mockResolvedValueOnce(ok(makeVerifiedAddress({ status: "pending", token: "correct-token" })));
+      vi.mocked(accountDb.getForwardingTarget).mockResolvedValueOnce(ok(makeForwardingTarget({ status: "pending", token: "correct-token" })));
       const res = await req(app, "POST", `${A}/forwarding-addresses/backup%40personal.com/verify`, { body: { token: "wrong-token" } });
       expect(res.status).toBe(400);
     });
 
     it("marks address as verified when token matches", async () => {
-      vi.mocked(accountDb.getVerifiedForwardingAddress).mockResolvedValueOnce(ok(makeVerifiedAddress({ status: "pending", token: "tok-abc123" })));
+      vi.mocked(accountDb.getForwardingTarget).mockResolvedValueOnce(ok(makeForwardingTarget({ status: "pending", token: "tok-abc123" })));
       const res = await req(app, "POST", `${A}/forwarding-addresses/backup%40personal.com/verify`, { body: { token: "tok-abc123" } });
       expect(res.status).toBe(200);
-      const body = await res.json() as VerifiedForwardingAddress;
+      const body = await res.json() as ForwardingTarget;
       expect(body.status).toBe("verified");
       expect(body.verifiedAt).toBeTruthy();
-      const saved = vi.mocked(accountDb.saveVerifiedForwardingAddress).mock.calls[0]![0] as VerifiedForwardingAddress;
+      const saved = vi.mocked(accountDb.saveForwardingTarget).mock.calls[0]![0] as ForwardingTarget;
       expect(saved.status).toBe("verified");
     });
   });
@@ -1384,7 +1385,7 @@ describe("API", () => {
     it("deletes the forwarding address and returns 204", async () => {
       const res = await req(app, "DELETE", `${A}/forwarding-addresses/backup%40personal.com`);
       expect(res.status).toBe(204);
-      expect(accountDb.deleteVerifiedForwardingAddress).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "backup@personal.com");
+      expect(accountDb.deleteForwardingTarget).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "backup@personal.com");
     });
   });
 
@@ -1452,15 +1453,15 @@ describe("API", () => {
 
     describe("POST /accounts/:accountId/forwarding-addresses — body address normalisation", () => {
       it("lowercases and trims the forwarding address before storing", async () => {
-        const res = await req(app, "POST", `${A}/forwarding-addresses`, { body: { address: "  BACKUP@PERSONAL.COM  " } });
+        const res = await req(app, "POST", `${A}/forwarding-addresses`, { body: { target: "  BACKUP@PERSONAL.COM  " } });
         expect(res.status).toBe(201);
-        const saved = vi.mocked(accountDb.saveVerifiedForwardingAddress).mock.calls[0]![0] as VerifiedForwardingAddress;
-        expect(saved.address).toBe("backup@personal.com");
+        const saved = vi.mocked(accountDb.saveForwardingTarget).mock.calls[0]![0] as ForwardingTarget;
+        expect(saved.target).toBe("backup@personal.com");
         expect(saved.id).toBe("backup@personal.com");
       });
 
       it("returns 400 for an invalid forwarding address", async () => {
-        const res = await req(app, "POST", `${A}/forwarding-addresses`, { body: { address: "not-valid" } });
+        const res = await req(app, "POST", `${A}/forwarding-addresses`, { body: { target: "not-valid" } });
         expect(res.status).toBe(400);
       });
     });
@@ -1469,7 +1470,7 @@ describe("API", () => {
       it("lowercases the address path param before deletion", async () => {
         const res = await req(app, "DELETE", `${A}/forwarding-addresses/${encodeURIComponent("BACKUP@PERSONAL.COM")}`);
         expect(res.status).toBe(204);
-        expect(accountDb.deleteVerifiedForwardingAddress).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "backup@personal.com");
+        expect(accountDb.deleteForwardingTarget).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "backup@personal.com");
       });
     });
   });
@@ -1505,7 +1506,7 @@ describe("API", () => {
 
   describe("POST /accounts/:accountId/rules — forward target validation", () => {
     it("rejects a rule with an unverified forward target", async () => {
-      vi.mocked(accountDb.listVerifiedForwardingAddresses).mockResolvedValueOnce(ok([]));
+      vi.mocked(accountDb.listForwardingTargets).mockResolvedValueOnce(ok([]));
       const res = await req(app, "POST", `${A}/rules`, {
         body: { name: "Forward rule", actions: [{ type: "forward", value: "backup@personal.com" }] },
       });
@@ -1516,7 +1517,7 @@ describe("API", () => {
     });
 
     it("accepts a rule when forward target is verified", async () => {
-      vi.mocked(accountDb.listVerifiedForwardingAddresses).mockResolvedValueOnce(ok([makeVerifiedAddress({ status: "verified" })]));
+      vi.mocked(accountDb.listForwardingTargets).mockResolvedValueOnce(ok([makeForwardingTarget({ status: "verified" })]));
       const res = await req(app, "POST", `${A}/rules`, {
         body: { name: "Forward rule", actions: [{ type: "forward", value: "backup@personal.com" }] },
       });
@@ -1528,7 +1529,7 @@ describe("API", () => {
         body: { name: "Label rule", actions: [{ type: "assign_label", value: "important" }] },
       });
       expect(res.status).toBe(201);
-      expect(accountDb.listVerifiedForwardingAddresses).not.toHaveBeenCalled();
+      expect(accountDb.listForwardingTargets).not.toHaveBeenCalled();
     });
   });
 

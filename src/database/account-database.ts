@@ -4,7 +4,7 @@ import { dynamo, ACCOUNTS_TABLE } from "./shared.js";
 import { dbError, notFoundError, ok, err } from "../errors.js";
 import type { Result, DbError, NotFoundError } from "../errors.js";
 import { generateId } from "../utils/id.js";
-import type { Account, View, Label, Rule, RuleStatus, Domain, Alias, AliasSender, SenderPolicy, AccountFilteringConfig, UnknownSenderPolicy, VerifiedForwardingAddress, EmailTemplate, WsConnection } from "../types/index.js";
+import type { Account, View, Label, Rule, RuleStatus, Domain, Alias, AliasSender, SenderPolicy, AccountFilteringConfig, UnknownSenderPolicy, ForwardingTarget, EmailTemplate, WsConnection } from "../types/index.js";
 import { SYSTEM_RULES } from "../processor/system-rules.js";
 import type { CreateViewRequest, UpdateViewRequest, CreateLabelRequest, UpdateLabelRequest, CreateRuleRequest, UpdateRuleRequest } from "../api/app.js";
 import { buildDiffUpdateParams, buildDiffPutParams, buildSnapshotSk } from "./stats-writer.js";
@@ -81,7 +81,7 @@ export class AccountDatabase {
     }
   }
 
-  async updateAccount(accountId: string, update: Partial<Pick<Account, "name" | "retentionDuration" | "digest" | "filtering" | "onboarding" | "afterSendAction">>): Promise<Result<Account, DbError>> {
+  async updateAccount(accountId: string, update: Partial<Pick<Account, "name" | "retentionDuration" | "digest" | "filtering" | "onboarding" | "afterSendAction" | "defaultCalendarInviteForwardingAddress">>): Promise<Result<Account, DbError>> {
     const now = DateTime.utc().toISO()!;
     const setParts: string[] = ["updatedAt = :now", "gsi1pk = :g1pk", "gsi1sk = :g1sk"];
     const exprValues: Record<string, unknown> = { ":now": now, ":g1pk": "META", ":g1sk": `ACCT#${accountId}` };
@@ -95,6 +95,8 @@ export class AccountDatabase {
     if (update.filtering !== undefined) { setParts.push("filtering = :filtering"); exprValues[":filtering"] = update.filtering; }
     if (update.onboarding !== undefined) { setParts.push("onboarding = :onboarding"); exprValues[":onboarding"] = update.onboarding; }
     if (update.afterSendAction !== undefined) { setParts.push("afterSendAction = :asa"); exprValues[":asa"] = update.afterSendAction; }
+    if (update.defaultCalendarInviteForwardingAddress === null) { removeParts.push("defaultCalendarInviteForwardingAddress"); }
+    else if (update.defaultCalendarInviteForwardingAddress !== undefined) { setParts.push("defaultCalendarInviteForwardingAddress = :dcifa"); exprValues[":dcifa"] = update.defaultCalendarInviteForwardingAddress; }
 
     let updateExpression = `SET ${setParts.join(", ")}`;
     if (removeParts.length > 0) { updateExpression += ` REMOVE ${removeParts.join(", ")}`; }
@@ -998,39 +1000,39 @@ export class AccountDatabase {
   }
 
   // ---------------------------------------------------------------------------
-  // Verified forwarding addresses
+  // Forwarding targets
   // ---------------------------------------------------------------------------
 
-  async listVerifiedForwardingAddresses(accountId: string): Promise<Result<VerifiedForwardingAddress[], DbError>> {
+  async listForwardingTargets(accountId: string): Promise<Result<ForwardingTarget[], DbError>> {
     try {
       const res = await dynamo.send(new QueryCommand({
         TableName: ACCOUNTS_TABLE,
         KeyConditionExpression: "pk = :pk AND begins_with(sk, :prefix)",
         ExpressionAttributeValues: { ":pk": pk(accountId), ":prefix": "FWDADDR#" },
       }));
-      return ok((res.Items ?? []) as VerifiedForwardingAddress[]);
+      return ok((res.Items ?? []) as ForwardingTarget[]);
     } catch (e) {
       return err(dbError(e));
     }
   }
 
-  async getVerifiedForwardingAddress(accountId: string, address: string): Promise<Result<VerifiedForwardingAddress | null, DbError>> {
+  async getForwardingTarget(accountId: string, target: string): Promise<Result<ForwardingTarget | null, DbError>> {
     try {
       const res = await dynamo.send(new GetCommand({
         TableName: ACCOUNTS_TABLE,
-        Key: { pk: pk(accountId), sk: `FWDADDR#${address}` },
+        Key: { pk: pk(accountId), sk: `FWDADDR#${target}` },
       }));
-      return ok(res.Item ? (res.Item as VerifiedForwardingAddress) : null);
+      return ok(res.Item ? (res.Item as ForwardingTarget) : null);
     } catch (e) {
       return err(dbError(e));
     }
   }
 
-  async saveVerifiedForwardingAddress(addr: VerifiedForwardingAddress): Promise<Result<void, DbError>> {
+  async saveForwardingTarget(addr: ForwardingTarget): Promise<Result<void, DbError>> {
     try {
       await dynamo.send(new PutCommand({
         TableName: ACCOUNTS_TABLE,
-        Item: { ...addr, pk: pk(addr.accountId), sk: `FWDADDR#${addr.address}` },
+        Item: { ...addr, pk: pk(addr.accountId), sk: `FWDADDR#${addr.target}` },
       }));
       return ok(undefined);
     } catch (e) {
@@ -1038,11 +1040,11 @@ export class AccountDatabase {
     }
   }
 
-  async deleteVerifiedForwardingAddress(accountId: string, address: string): Promise<Result<void, DbError>> {
+  async deleteForwardingTarget(accountId: string, target: string): Promise<Result<void, DbError>> {
     try {
       await dynamo.send(new DeleteCommand({
         TableName: ACCOUNTS_TABLE,
-        Key: { pk: pk(accountId), sk: `FWDADDR#${address}` },
+        Key: { pk: pk(accountId), sk: `FWDADDR#${target}` },
       }));
       return ok(undefined);
     } catch (e) {

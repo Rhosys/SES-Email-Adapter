@@ -160,10 +160,17 @@ export class AccountsApi {
       const accountId = c.req.param("accountId")!;
       const body = await zParse(UpdateAccountRequest, c.req.raw);
       if (body.digest) {
-        const targetResult = await accountDb.getVerifiedForwardingAddress(accountId, body.digest.forwardingTargetId);
+        const targetResult = await accountDb.getForwardingTarget(accountId, body.digest.forwardingTargetId);
         if (targetResult.isErr()) return err(c, 500, "Internal Server Error");
         if (!targetResult.value || targetResult.value.status !== "verified") {
           return err(c, 422, "Forwarding target not found or not verified", "UNVERIFIED_FORWARD_TARGET");
+        }
+      }
+      if (body.defaultCalendarInviteForwardingAddress) {
+        const targetResult = await accountDb.getForwardingTarget(accountId, body.defaultCalendarInviteForwardingAddress);
+        if (targetResult.isErr()) return err(c, 500, "Internal Server Error");
+        if (!targetResult.value || targetResult.value.status !== "verified") {
+          return err(c, 422, "Calendar forwarding address must be a verified forwarding address", "UNVERIFIED_CALENDAR_TARGET");
         }
       }
       if (body.onboarding) {
@@ -172,7 +179,7 @@ export class AccountsApi {
         const existing = existingResult.value;
         body.onboarding = { ...existing?.onboarding, ...body.onboarding };
       }
-      const updateResult = await accountDb.updateAccount(accountId, body as Partial<Pick<Account, "name" | "retentionDuration" | "digest" | "filtering" | "onboarding" | "afterSendAction">>);
+      const updateResult = await accountDb.updateAccount(accountId, body as Partial<Pick<Account, "name" | "retentionDuration" | "digest" | "filtering" | "onboarding" | "afterSendAction" | "defaultCalendarInviteForwardingAddress">>);
       if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
       return c.json(toApiAccount(updateResult.value), 200);
     });

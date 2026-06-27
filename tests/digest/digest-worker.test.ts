@@ -4,7 +4,7 @@ import { ok } from "neverthrow"
 import { DigestWorker } from "../../src/digest/digest-worker.js"
 import type { IDigestWorkerDeps, IDigestSendMessage } from "../../src/digest/digest-worker.js"
 import { createMockLogger, type MockLogger } from "../helpers/mock-logger.js"
-import type { Account, Arc, VerifiedForwardingAddress } from "../../src/types/index.js"
+import type { Account, Arc, ForwardingTarget } from "../../src/types/index.js"
 
 vi.mock("../../src/email/unsubscribe-token.js", () => ({
   generateUnsubscribeToken: vi.fn().mockResolvedValue("mock-jwt-token"),
@@ -45,11 +45,12 @@ function buildArc(id: string): Arc {
   }
 }
 
-function buildTarget(overrides?: Partial<VerifiedForwardingAddress>): VerifiedForwardingAddress {
+function buildTarget(overrides?: Partial<ForwardingTarget>): ForwardingTarget {
   return {
     id: "fwd_target1",
     accountId: "acct_test1",
-    address: "user@example.com",
+    target: "user@example.com",
+    type: "email",
     status: "verified",
     token: "tok_abc",
     createdAt: "2026-01-01T00:00:00Z",
@@ -69,7 +70,7 @@ function buildDeps(): TestDeps {
   return {
     accountDb: {
       getAccount: vi.fn().mockResolvedValue(ok(buildAccount())),
-      getVerifiedForwardingAddress: vi.fn().mockResolvedValue(ok(buildTarget())),
+      getForwardingTarget: vi.fn().mockResolvedValue(ok(buildTarget())),
     },
     arcDb: {
       listActiveArcs: vi.fn().mockResolvedValue(ok([buildArc("arc_1"), buildArc("arc_2")])),
@@ -174,7 +175,7 @@ describe("DigestWorker — REQ-1.1, REQ-1.4, REQ-0.7", () => {
   describe("forwarding target not found", () => {
     it("suppresses with warning when target is null", async () => {
       const deps = buildDeps()
-      vi.mocked(deps.accountDb.getVerifiedForwardingAddress).mockResolvedValue(ok(null))
+      vi.mocked(deps.accountDb.getForwardingTarget).mockResolvedValue(ok(null))
       const worker = new DigestWorker(deps)
 
       const result = await worker.process(message, sunday)
@@ -186,7 +187,7 @@ describe("DigestWorker — REQ-1.1, REQ-1.4, REQ-0.7", () => {
 
     it("suppresses with warning when target is unverified", async () => {
       const deps = buildDeps()
-      vi.mocked(deps.accountDb.getVerifiedForwardingAddress).mockResolvedValue(ok(buildTarget({ status: "pending" })))
+      vi.mocked(deps.accountDb.getForwardingTarget).mockResolvedValue(ok(buildTarget({ status: "pending" })))
       const worker = new DigestWorker(deps)
 
       const result = await worker.process(message, sunday)

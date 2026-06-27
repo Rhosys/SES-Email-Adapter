@@ -5,15 +5,15 @@ import { randomUUID } from "crypto";
 import { ok as neverthrowOk, err as neverthrowErr } from "neverthrow";
 import type { Result } from "neverthrow";
 import type { DbError, TransientSesError } from "../errors.js";
-import type { VerifiedForwardingAddress } from "../types/index.js";
+import type { ForwardingTarget } from "../types/index.js";
 import { zParse } from "./validate.js";
-import { toApiAlias, toApiAliasSender, toApiForwardingAddress } from "./transform.js";
-import { CreateAliasRequest, UpdateAliasRequest, CreateSenderRequest, UpdateSenderRequest, CreateForwardingAddressRequest, VerifyForwardingAddressRequest } from "./requests.js";
+import { toApiAlias, toApiAliasSender, toApiForwardingTarget } from "./transform.js";
+import { CreateAliasRequest, UpdateAliasRequest, CreateSenderRequest, UpdateSenderRequest, CreateForwardingTargetRequest, VerifyForwardingTargetRequest } from "./requests.js";
 import {
   Alias as AliasSchema, AliasSender as AliasSenderSchema,
-  VerifiedForwardingAddress as VerifiedForwardingAddressSchema,
+  ForwardingTarget as ForwardingTargetSchema,
   ListAliasesResponse, ListSendersResponse,
-  ListForwardingAddressesResponse,
+  ListForwardingTargetsResponse,
 } from "./schemas.js";
 import type { AccountDatabase } from "../database/account-database.js";
 import type { AuditDatabase } from "../database/audit-database.js";
@@ -293,12 +293,12 @@ export class AliasesApi {
       tags: ["Forwarding Addresses"],
       request: { params: z.object({ accountId: z.string() }) },
       middleware: [authz("forwarding-addresses:read", c => `accounts/${c.req.param("accountId")!}/forwarding-addresses`)] as const,
-      responses: { 200: { content: { "application/json": { schema: ListForwardingAddressesResponse } }, description: "List forwarding addresses" } },
+      responses: { 200: { content: { "application/json": { schema: ListForwardingTargetsResponse } }, description: "List forwarding addresses" } },
     }), async (c) => {
       const accountId = c.req.param("accountId")!;
-      const addressesResult = await accountDb.listVerifiedForwardingAddresses(accountId);
+      const addressesResult = await accountDb.listForwardingTargets(accountId);
       if (addressesResult.isErr()) return err(c, 500, "Internal Server Error");
-      return c.json({ forwardingAddresses: addressesResult.value.map(toApiForwardingAddress) }, 200);
+      return c.json({ forwardingAddresses: addressesResult.value.map(toApiForwardingTarget) }, 200);
     });
 
     app.openapi(route({
@@ -307,21 +307,22 @@ export class AliasesApi {
       tags: ["Forwarding Addresses"],
       request: { params: z.object({ accountId: z.string() }) },
       middleware: [authz("forwarding-addresses:write", c => `accounts/${c.req.param("accountId")!}/forwarding-addresses`)] as const,
-      responses: { 201: { content: { "application/json": { schema: VerifiedForwardingAddressSchema } }, description: "Forwarding address created" } },
+      responses: { 201: { content: { "application/json": { schema: ForwardingTargetSchema } }, description: "Forwarding address created" } },
     }), async (c) => {
       const accountId = c.req.param("accountId")!;
-      const body = await zParse(CreateForwardingAddressRequest, c.req.raw);
+      const body = await zParse(CreateForwardingTargetRequest, c.req.raw);
 
-      const existingResult = await accountDb.getVerifiedForwardingAddress(accountId, body.address);
+      const existingResult = await accountDb.getForwardingTarget(accountId, body.target);
       if (existingResult.isErr()) return err(c, 500, "Internal Server Error");
       const existing = existingResult.value;
-      if (existing?.status === "verified") return c.json(toApiForwardingAddress(existing), 201);
+      if (existing?.status === "verified") return c.json(toApiForwardingTarget(existing), 201);
 
       const now = DateTime.utc().toISO()!;
-      const addr: VerifiedForwardingAddress = {
-        id: body.address,
+      const addr: ForwardingTarget = {
+        id: body.target,
         accountId,
-        address: body.address,
+        target: body.target,
+        type: body.type,
         status: "pending",
         token: randomUUID(),
         createdAt: existing?.createdAt ?? now,
@@ -330,17 +331,17 @@ export class AliasesApi {
       // SES first — send verification email before persisting the address so a
       // mailer failure never leaves a pending record the user can't re-trigger.
       if (verificationMailer) {
-        const verifyResult = await verificationMailer.sendForwardVerification(accountId, addr.address, addr.token);
+        const verifyResult = await verificationMailer.sendForwardVerification(accountId, addr.target, addr.token);
         if (verifyResult.isErr()) {
-          logger.warn("Failed to send forwarding address verification email. The SES send call returned an error. The user won't receive the verification link.", { code: "forwarding.verification_email_failed", accountId, address: addr.address, error: verifyResult.error });
+          logger.warn("Failed to send forwarding address verification email. The SES send call returned an error. The user won't receive the verification link.", { code: "forwarding.verification_email_failed", accountId, address: addr.target, error: verifyResult.error });
           return err(c, 422, "Failed to send verification email. Please try again.");
         }
       }
 
-      const saveResult = await accountDb.saveVerifiedForwardingAddress(addr);
+      const saveResult = await accountDb.saveForwardingTarget(addr);
       if (saveResult.isErr()) return err(c, 500, "Internal Server Error");
 
-      return c.json(toApiForwardingAddress(addr), 201);
+      return c.json(toApiForwardingTarget(addr), 201);
     });
 
     app.openapi(route({
@@ -349,23 +350,23 @@ export class AliasesApi {
       tags: ["Forwarding Addresses"],
       request: { params: z.object({ accountId: z.string(), address: z.string() }) },
       middleware: [authz("forwarding-addresses:write", c => `accounts/${c.req.param("accountId")!}/forwarding-addresses/${c.req.param("address")!}`)] as const,
-      responses: { 200: { content: { "application/json": { schema: VerifiedForwardingAddressSchema } }, description: "Address verified" } },
+      responses: { 200: { content: { "application/json": { schema: ForwardingTargetSchema } }, description: "Address verified" } },
     }), async (c) => {
       const accountId = c.req.param("accountId")!;
       const address = decodeURIComponent(c.req.param("address")!).toLowerCase();
-      const body = await zParse(VerifyForwardingAddressRequest, c.req.raw);
+      const body = await zParse(VerifyForwardingTargetRequest, c.req.raw);
 
-      const existingResult = await accountDb.getVerifiedForwardingAddress(accountId, address);
+      const existingResult = await accountDb.getForwardingTarget(accountId, address);
       if (existingResult.isErr()) return err(c, 500, "Internal Server Error");
       const existing = existingResult.value;
       if (!existing) return err(c, 404, "Forwarding address not found", "FORWARDING_ADDRESS_NOT_FOUND");
-      if (existing.status === "verified") return c.json(toApiForwardingAddress(existing), 200);
+      if (existing.status === "verified") return c.json(toApiForwardingTarget(existing), 200);
       if (existing.token !== body.token) return err(c, 400, "Invalid token", "INVALID_TOKEN");
 
-      const verified: VerifiedForwardingAddress = { ...existing, status: "verified", verifiedAt: DateTime.utc().toISO()! };
-      const saveResult = await accountDb.saveVerifiedForwardingAddress(verified);
+      const verified: ForwardingTarget = { ...existing, status: "verified", verifiedAt: DateTime.utc().toISO()! };
+      const saveResult = await accountDb.saveForwardingTarget(verified);
       if (saveResult.isErr()) return err(c, 500, "Internal Server Error");
-      return c.json(toApiForwardingAddress(verified), 200);
+      return c.json(toApiForwardingTarget(verified), 200);
     });
 
     app.openapi(route({
@@ -378,7 +379,7 @@ export class AliasesApi {
     }), async (c) => {
       const accountId = c.req.param("accountId")!;
       const address = decodeURIComponent(c.req.param("address")!).toLowerCase();
-      const deleteResult = await accountDb.deleteVerifiedForwardingAddress(accountId, address);
+      const deleteResult = await accountDb.deleteForwardingTarget(accountId, address);
       if (deleteResult.isErr()) return err(c, 500, "Internal Server Error");
       return new Response(null, { status: 204 });
     });

@@ -17,7 +17,7 @@ import type {
   View as DbView,
   Account as DbAccount,
   EmailTemplate as DbEmailTemplate,
-  VerifiedForwardingAddress as DbVerifiedForwardingAddress,
+  ForwardingTarget as DbForwardingTarget,
 } from "../types/index.js";
 import type * as Api from "./schemas.js";
 
@@ -332,12 +332,13 @@ export function toApiTemplate(template: DbEmailTemplate): Api.EmailTemplate {
 }
 
 // ---------------------------------------------------------------------------
-// VerifiedForwardingAddress
+// ForwardingTarget
 // ---------------------------------------------------------------------------
 
-export function toApiForwardingAddress(fa: DbVerifiedForwardingAddress): Api.VerifiedForwardingAddress {
+export function toApiForwardingTarget(fa: DbForwardingTarget): Api.ForwardingTarget {
   return {
-    address: fa.address,
+    target: fa.target,
+    type: fa.type,
     status: fa.status,
     createdAt: fa.createdAt,
     ...(fa.verifiedAt ? { verifiedAt: fa.verifiedAt } : {}),

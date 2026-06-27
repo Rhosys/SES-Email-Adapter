@@ -108,10 +108,10 @@ function makeAccountDbMock() {
     upsertAlias: vi.fn().mockResolvedValue(ok({})),
     deleteAlias: vi.fn().mockResolvedValue(ok(undefined)),
     getAccountFilteringConfig: vi.fn().mockResolvedValue(ok(null)),
-    listVerifiedForwardingAddresses: vi.fn().mockResolvedValue(ok([])),
-    getVerifiedForwardingAddress: vi.fn().mockResolvedValue(ok(null)),
-    saveVerifiedForwardingAddress: vi.fn().mockResolvedValue(ok(undefined)),
-    deleteVerifiedForwardingAddress: vi.fn().mockResolvedValue(ok(undefined)),
+    listForwardingTargets: vi.fn().mockResolvedValue(ok([])),
+    getForwardingTarget: vi.fn().mockResolvedValue(ok(null)),
+    saveForwardingTarget: vi.fn().mockResolvedValue(ok(undefined)),
+    deleteForwardingTarget: vi.fn().mockResolvedValue(ok(undefined)),
     updateDomainHealth: vi.fn().mockResolvedValue(ok(undefined)),
     renameAlias: vi.fn().mockResolvedValue(ok({})),
     saveSender: vi.fn().mockResolvedValue(ok(undefined)),
@@ -129,8 +129,8 @@ function makeAccountDbMock() {
 describe("PATCH /accounts/:id – digest forwardingTargetId validation", () => {
   it("returns 422 when forwardingTargetId references unverified target", async () => {
     const accountDb = makeAccountDbMock();
-    // getVerifiedForwardingAddress returns a pending (unverified) target
-    accountDb.getVerifiedForwardingAddress.mockResolvedValueOnce(ok({ status: "pending", address: "x@y.com" }));
+    // getForwardingTarget returns a pending (unverified) target
+    accountDb.getForwardingTarget.mockResolvedValueOnce(ok({ status: "pending", address: "x@y.com" }));
 
     const auth: AuthService = { verify: vi.fn().mockResolvedValue(ok({ userId: "usr-1" })) };
     const access: AccessService = {
@@ -173,8 +173,8 @@ describe("PATCH /accounts/:id – digest forwardingTargetId validation", () => {
 
   it("returns 422 when forwardingTargetId references non-existent target", async () => {
     const accountDb = makeAccountDbMock();
-    // getVerifiedForwardingAddress returns null (target doesn't exist)
-    accountDb.getVerifiedForwardingAddress.mockResolvedValueOnce(ok(null));
+    // getForwardingTarget returns null (target doesn't exist)
+    accountDb.getForwardingTarget.mockResolvedValueOnce(ok(null));
 
     const auth: AuthService = { verify: vi.fn().mockResolvedValue(ok({ userId: "usr-1" })) };
     const access: AccessService = {
