@@ -189,7 +189,7 @@ describe("API — webhook rule validation", () => {
       auth: makeAuth(),
       access: makeAccess(),
       logger: createMockLogger(),
-      verificationMailer: { sendForwardVerification: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), sendCalendarForwardVerification: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      verificationMailer: { sendForwardVerification: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), sendCalendarForwardVerification: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), verifyWebhookTarget: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       jobDispatcher: { dispatchReindex: vi.fn(), dispatchSegment: vi.fn() } as never,
       draftSendDispatcher: { dispatch: vi.fn().mockResolvedValue(ok(undefined)) } as never,
       accountCreationStarter: { start: vi.fn() },

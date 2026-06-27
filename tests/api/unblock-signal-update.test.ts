@@ -204,7 +204,7 @@ describe("POST /signals/:id/quarantineResponse — updateArcDirect usage", () =>
     arcDb = makeArcDb();
     accountDb = makeAccountDb();
     auditDb = makeAuditDb();
-    const verificationMailer: VerificationMailer = { sendForwardVerification: vi.fn().mockResolvedValue(ok(undefined)), sendCalendarForwardVerification: vi.fn().mockResolvedValue(ok(undefined)) };
+    const verificationMailer: VerificationMailer = { sendForwardVerification: vi.fn().mockResolvedValue(ok(undefined)), sendCalendarForwardVerification: vi.fn().mockResolvedValue(ok(undefined)), verifyWebhookTarget: vi.fn().mockResolvedValue(ok(undefined)) };
     const draftSendDispatcher = { dispatch: vi.fn().mockResolvedValue(ok(undefined)) } as unknown as DraftSendDispatcher;
     const astValidator = {
       invoke: vi.fn().mockResolvedValue({ success: true, purpose: "rule_condition", result: true }),

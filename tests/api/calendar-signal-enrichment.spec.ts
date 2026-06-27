@@ -187,7 +187,7 @@ describe("GET /accounts/:accountId/arcs/:arcId/signals — calendar signal enric
     arcDb = makeArcDb();
     const accountDb = makeAccountDb();
     const auditDb = makeAuditDb();
-    const verificationMailer: VerificationMailer = { sendForwardVerification: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), sendCalendarForwardVerification: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) };
+    const verificationMailer: VerificationMailer = { sendForwardVerification: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), sendCalendarForwardVerification: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), verifyWebhookTarget: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) };
     app = createApp(makeAppDeps({
       arcDb: arcDb as unknown as ArcDatabase,
       accountDb: accountDb as unknown as AccountDatabase,

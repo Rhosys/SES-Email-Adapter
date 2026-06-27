@@ -245,10 +245,10 @@ export type UpdateAccountRequest = z.infer<typeof UpdateAccountRequest>;
 
 // ---- Forwarding targets ----
 
-export const CreateForwardingTargetRequest = z.object({
-  target: lowerEmail,
-  type: z.enum(["email", "webhook"]).default("email"),
-});
+export const CreateForwardingTargetRequest = z.discriminatedUnion("type", [
+  z.object({ target: lowerEmail, type: z.literal("email") }),
+  z.object({ target: z.string().url(), type: z.literal("webhook") }),
+]);
 export type CreateForwardingTargetRequest = z.infer<typeof CreateForwardingTargetRequest>;
 
 export const VerifyForwardingTargetRequest = z.object({
