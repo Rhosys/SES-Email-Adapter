@@ -692,7 +692,6 @@ export const ListTemplatesResponse = z.object({ templates: z.array(EmailTemplate
 export const ListForwardingTargetsResponse = z.object({ forwardingTargets: z.array(ForwardingTarget) });
 
 export const SignalSendResponse = Signal.and(z.object({
-  undoWindowSeconds: z.number().readonly(),
   undoExpiresAt: z.string().readonly(),
 }));
 
