@@ -379,6 +379,10 @@ export class ThreadsApi {
         return err(c, 422, "From address does not match arc alias");
       }
 
+      // ── Undo-send mechanism ──────────────────────────────────────────────
+      // See arcsApi.ts send handler for full explanation of the flow.
+      // TL;DR: SQS delay = undo window. If user cancels (PATCHes back to draft),
+      // the delayed SQS message fires but DraftSendWorker discards it.
       const undoWindowSeconds = computeUndoWindowSeconds(signal.data.textBody);
       const sendInitiatedAt = DateTime.utc().toISO()!;
       const undoExpiresAt = DateTime.utc().plus({ seconds: undoWindowSeconds }).toISO()!;
@@ -390,7 +394,7 @@ export class ThreadsApi {
       const updateResult = await arcDb.updateSignalSendStatus(accountId, signal.signalLookupId, { status: "pending_send", sendInitiatedAt });
       if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
 
-      return c.json({ ...toApiSignal(updateResult.value), undoWindowSeconds, undoExpiresAt }, 200);
+      return c.json({ ...toApiSignal(updateResult.value), undoExpiresAt }, 200);
     });
 
     // -------------------------------------------------------------------------

@@ -607,7 +607,24 @@ export class ArcsApi {
         return err(c, 422, "From address does not match arc alias");
       }
 
-      // Compute undo window
+      // ── Undo-send mechanism ──────────────────────────────────────────────
+      // The undo window is computed from email body length (longer emails get
+      // longer windows: 10s/60s/180s/300s — see undo-window.ts).
+      //
+      // Flow:
+      // 1. Compute undoExpiresAt (absolute timestamp = now + window duration)
+      // 2. Enqueue SQS message with DelaySeconds = window duration. The message
+      //    won't be delivered to the DraftSendWorker until the delay elapses.
+      // 3. Write signal status → "pending_send" with sendInitiatedAt timestamp.
+      // 4. Return undoExpiresAt to the frontend (drives countdown display).
+      //
+      // If the user cancels: frontend PATCHes signal back to "draft". When the
+      // SQS message fires, DraftSendWorker sees status !== "pending_send" and
+      // discards. No email is sent.
+      //
+      // If the user doesn't cancel: SQS message fires after delay, worker sees
+      // "pending_send" + matching sendInitiatedAt, sends via SES, transitions
+      // to "sent".
       const undoWindowSeconds = computeUndoWindowSeconds(signal.data.textBody);
       const sendInitiatedAt = DateTime.utc().toISO()!;
       const undoExpiresAt = DateTime.utc().plus({ seconds: undoWindowSeconds }).toISO()!;
@@ -621,7 +638,7 @@ export class ArcsApi {
       const updateResult = await arcDb.updateSignalSendStatus(accountId, signal.signalLookupId, { status: "pending_send", sendInitiatedAt });
       if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
 
-      return c.json({ ...toApiSignal(updateResult.value), undoWindowSeconds, undoExpiresAt }, 200);
+      return c.json({ ...toApiSignal(updateResult.value), undoExpiresAt }, 200);
     });
 
     app.openapi(route({
