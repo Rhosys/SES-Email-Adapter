@@ -481,8 +481,8 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
       expect(forwardingService.forward).toHaveBeenCalledOnce();
       expect(forwardingService.forward).toHaveBeenCalledWith(
         "backup@personal.com",
-        { type: "email", rawData: expect.any(Uint8Array) },
-        { accountId: TEST_ACCOUNT_ID, signalId: signal.id, arcId: arc.id },
+        expect.objectContaining({ id: signal.id, accountId: TEST_ACCOUNT_ID }),
+        expect.objectContaining({ id: arc.id, accountId: TEST_ACCOUNT_ID }),
       );
 
       // Notification was sent (no suppress_notification action)

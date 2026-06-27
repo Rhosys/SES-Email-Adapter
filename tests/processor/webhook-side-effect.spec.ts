@@ -136,7 +136,7 @@ function makeArc(overrides: Partial<Arc> = {}): Arc {
   };
 }
 
-function makeProcessor(opts: { store: ReturnType<typeof makeStore>; logger: MockLogger; billingHandler?: BillingHandler }): SignalProcessor {
+function makeProcessor(opts: { store: ReturnType<typeof makeStore>; logger: MockLogger; forwardingService?: IForwardingService }): SignalProcessor {
   return new SignalProcessor({ ...makeSharedNewDeps(),
     ...opts.store,
     contentSanitizer: { invoke: vi.fn() } as unknown as ContentSanitizerClient,
@@ -149,11 +149,11 @@ function makeProcessor(opts: { store: ReturnType<typeof makeStore>; logger: Mock
     retentionService: { applyPlanRetention: vi.fn() } as unknown as S3RetentionService,
     sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) } as unknown as SqsDispatcher,
     notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) } as unknown as Notifier,
-    forwardingService: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), sendVerification: vi.fn().mockResolvedValue(ok(undefined)), verifyWebhook: vi.fn().mockResolvedValue(ok(undefined)) } as unknown as IForwardingService,
+    forwardingService: opts.forwardingService ?? { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), sendVerification: vi.fn().mockResolvedValue(ok(undefined)), verifyWebhook: vi.fn().mockResolvedValue(ok(undefined)) } as unknown as IForwardingService,
     replySender: { sendReply: vi.fn().mockResolvedValue(ok({ messageId: "msg-001" })) } as unknown as ReplySender,
     draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
     calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud" },
-    billingHandler: opts.billingHandler ?? new BillingHandler(),
+    billingHandler: new BillingHandler(),
     s3Client: {} as never,
     emailBucket: "test-bucket",
     contentBucket: "test-content-bucket",
@@ -161,26 +161,23 @@ function makeProcessor(opts: { store: ReturnType<typeof makeStore>; logger: Mock
 }
 
 // ---------------------------------------------------------------------------
-// Integration tests: Webhook in processSideEffect
+// Tests: Forward action dispatches through ForwardingService
+// (Webhook delivery is now internal to ForwardingService)
 // ---------------------------------------------------------------------------
 
-describe("processSideEffect — webhook delivery", () => {
+describe("processSideEffect — forward dispatches to ForwardingService", () => {
   let mockLogger: MockLogger;
-  let mockFetch: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     vi.clearAllMocks();
     mockLogger = createMockLogger();
-    mockFetch = vi.fn().mockResolvedValue({ ok: true, status: 200 });
-    vi.stubGlobal("fetch", mockFetch);
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
-    vi.unstubAllGlobals();
   });
 
-  it("webhook fires after other side-effects (forward + notify complete first)", async () => {
+  it("forward fires after notify completes", async () => {
     const store = makeStore("Paid");
     const forwarder = { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), sendVerification: vi.fn().mockResolvedValue(ok(undefined)), verifyWebhook: vi.fn().mockResolvedValue(ok(undefined)) };
     const notifier = { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) };
@@ -202,7 +199,7 @@ describe("processSideEffect — webhook delivery", () => {
       draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
       calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud" },
       billingHandler: new BillingHandler(),
-      s3Client: { send: vi.fn().mockResolvedValue({ Body: { transformToByteArray: () => Promise.resolve(new Uint8Array([1, 2, 3])) } }) } as never,
+      s3Client: {} as never,
       emailBucket: "test-bucket",
       contentBucket: "test-content-bucket",
     });
@@ -211,7 +208,6 @@ describe("processSideEffect — webhook delivery", () => {
       data: {
         matchedRules: [
           { ruleId: "rule-fwd", actions: [{ type: "forward", value: "backup@personal.com" }], labelsAdded: [] },
-          { ruleId: "rule-hook", actions: [{ type: "webhook", value: '{"url":"https://hook.example.com/events"}' }], labelsAdded: [] },
         ],
       },
     });
@@ -226,66 +222,23 @@ describe("processSideEffect — webhook delivery", () => {
     expect(forwarder.forward).toHaveBeenCalledOnce();
     expect(notifier.notify).toHaveBeenCalledOnce();
 
-    // Webhook was called
-    expect(mockFetch).toHaveBeenCalledOnce();
-    const [url, opts] = mockFetch.mock.calls[0]!;
-    expect(url).toBe("https://hook.example.com/events");
-    expect(opts.method).toBe("POST");
-    expect(opts.headers["Content-Type"]).toBe("application/json");
-
-    // Verify webhook was called AFTER forward and notify (invocation order)
-    const forwardOrder = forwarder.forward.mock.invocationCallOrder[0]!;
-    const notifyOrder = notifier.notify.mock.invocationCallOrder[0]!;
-    const fetchOrder = mockFetch.mock.invocationCallOrder[0]!;
-    expect(fetchOrder).toBeGreaterThan(forwardOrder);
-    expect(fetchOrder).toBeGreaterThan(notifyOrder);
-
-    // Verify payload shape contains expected signal fields
-    const body = JSON.parse(opts.body as string);
-    expect(body.id).toBe(signal.id);
-    expect(body.alias).toBe(signal.data.recipientAddress);
-    expect(body.labels).toEqual(arc.labels);
+    // Verify forward was called with signal and arc
+    const [targetId, fwdSignal, fwdArc] = forwarder.forward.mock.calls[0]!;
+    expect(targetId).toBe("backup@personal.com");
+    expect(fwdSignal.id).toBe(signal.id);
+    expect(fwdArc.id).toBe(arc.id);
   });
 
-  it("webhook skipped when plan-gated — INFO log with correct code", async () => {
-    const store = makeStore("Free");
-    const processor = makeProcessor({ store, logger: mockLogger });
-
-    const signal = makeSignal({
-      data: {
-        matchedRules: [
-          { ruleId: "rule-hook", actions: [{ type: "webhook", value: '{"url":"https://hook.example.com/events"}' }], labelsAdded: [] },
-        ],
-      },
-    });
-    const arc = makeArc();
-    const payload: SideEffectPayload = { signal, arc };
-
-    const result = await processor.processSideEffect(payload);
-
-    expect(result.isOk()).toBe(true);
-
-    // Webhook was NOT called
-    expect(mockFetch).not.toHaveBeenCalled();
-
-    // INFO log emitted with plan-gated code
-    const planGatedLog = mockLogger.calls.find(
-      c => c.method === "info" && c.context?.code === "processor.side_effect.webhook_plan_gated",
-    );
-    expect(planGatedLog).toBeDefined();
-    expect(planGatedLog!.context!.plan).toBe("Free");
-    expect(planGatedLog!.context!.accountId).toBe(TEST_ACCOUNT_ID);
-  });
-
-  it("multiple webhook actions on same signal all fire", async () => {
+  it("multiple forward actions on same signal all fire", async () => {
     const store = makeStore("Paid");
-    const processor = makeProcessor({ store, logger: mockLogger });
+    const forwarder = { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), sendVerification: vi.fn().mockResolvedValue(ok(undefined)), verifyWebhook: vi.fn().mockResolvedValue(ok(undefined)) };
+    const processor = makeProcessor({ store, logger: mockLogger, forwardingService: forwarder as unknown as IForwardingService });
 
     const signal = makeSignal({
       data: {
         matchedRules: [
-          { ruleId: "rule-hook-1", actions: [{ type: "webhook", value: '{"url":"https://first.example.com/hook"}' }], labelsAdded: [] },
-          { ruleId: "rule-hook-2", actions: [{ type: "webhook", value: '{"url":"https://second.example.com/hook"}' }], labelsAdded: [] },
+          { ruleId: "rule-fwd-1", actions: [{ type: "forward", value: "first@example.com" }], labelsAdded: [] },
+          { ruleId: "rule-fwd-2", actions: [{ type: "forward", value: "second@example.com" }], labelsAdded: [] },
         ],
       },
     });
@@ -296,21 +249,22 @@ describe("processSideEffect — webhook delivery", () => {
 
     expect(result.isOk()).toBe(true);
 
-    // Both webhooks were called
-    expect(mockFetch).toHaveBeenCalledTimes(2);
-    const urls = mockFetch.mock.calls.map((c: unknown[]) => c[0]);
-    expect(urls).toContain("https://first.example.com/hook");
-    expect(urls).toContain("https://second.example.com/hook");
+    // Both forwards were called
+    expect(forwarder.forward).toHaveBeenCalledTimes(2);
+    const targets = forwarder.forward.mock.calls.map((c: unknown[]) => c[0]);
+    expect(targets).toContain("first@example.com");
+    expect(targets).toContain("second@example.com");
   });
 
-  it("invalid config at processing time logged at TRACK level and skipped", async () => {
+  it("no forward actions — forwardingService.forward not called", async () => {
     const store = makeStore("Paid");
-    const processor = makeProcessor({ store, logger: mockLogger });
+    const forwarder = { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), sendVerification: vi.fn().mockResolvedValue(ok(undefined)), verifyWebhook: vi.fn().mockResolvedValue(ok(undefined)) };
+    const processor = makeProcessor({ store, logger: mockLogger, forwardingService: forwarder as unknown as IForwardingService });
 
     const signal = makeSignal({
       data: {
         matchedRules: [
-          { ruleId: "rule-bad", actions: [{ type: "webhook", value: "not valid json {{{" }], labelsAdded: [] },
+          { ruleId: "rule-label", actions: [{ type: "assign_label", value: "important" }], labelsAdded: ["important"] },
         ],
       },
     });
@@ -320,17 +274,6 @@ describe("processSideEffect — webhook delivery", () => {
     const result = await processor.processSideEffect(payload);
 
     expect(result.isOk()).toBe(true);
-
-    // Webhook was NOT called (invalid config)
-    expect(mockFetch).not.toHaveBeenCalled();
-
-    // TRACK log emitted with invalid config code
-    const invalidConfigLog = mockLogger.calls.find(
-      c => c.method === "track" && c.context?.code === "processor.side_effect.webhook_invalid_config",
-    );
-    expect(invalidConfigLog).toBeDefined();
-    const ctx = invalidConfigLog!.context as Record<string, unknown>;
-    expect((ctx.signal as { accountId: string }).accountId).toBe(TEST_ACCOUNT_ID);
-    expect(ctx.value).toBe("not valid json {{{");
+    expect(forwarder.forward).not.toHaveBeenCalled();
   });
 });

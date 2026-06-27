@@ -51,18 +51,18 @@ describe("User Configuration API", () => {
       });
       expect(res.status).toBe(200);
       const body = await res.json();
-      expect(body).toEqual({ afterSendAction: "keep_active" });
+      expect(body).toEqual({ postSendView: "return_to_inbox" });
     });
 
     it("returns stored config when it exists", async () => {
-      const accountDb = makeAccountDb({ afterSendAction: "archive" });
+      const accountDb = makeAccountDb({ postSendView: "stay_on_thread" });
       const { app } = buildApp({ accountDb });
       const res = await app.request(`/user/${TEST_USER_ID}/configuration`, {
         headers: { Authorization: "Bearer valid-token" },
       });
       expect(res.status).toBe(200);
       const body = await res.json();
-      expect(body).toEqual({ afterSendAction: "archive" });
+      expect(body).toEqual({ postSendView: "stay_on_thread" });
     });
 
     it("returns 403 when path userId does not match JWT userId", async () => {
@@ -81,18 +81,18 @@ describe("User Configuration API", () => {
   });
 
   describe("PATCH /user/:userId/configuration", () => {
-    it("updates afterSendAction and returns full config", async () => {
+    it("updates postSendView and returns full config", async () => {
       const accountDb = makeAccountDb();
       const { app } = buildApp({ accountDb });
       const res = await app.request(`/user/${TEST_USER_ID}/configuration`, {
         method: "PATCH",
         headers: { Authorization: "Bearer valid-token", "Content-Type": "application/json" },
-        body: JSON.stringify({ afterSendAction: "archive" }),
+        body: JSON.stringify({ postSendView: "stay_on_thread" }),
       });
       expect(res.status).toBe(200);
       const body = await res.json();
-      expect(body).toEqual({ afterSendAction: "archive" });
-      expect(accountDb.updateUserConfiguration).toHaveBeenCalledWith(TEST_USER_ID, { afterSendAction: "archive" });
+      expect(body).toEqual({ postSendView: "stay_on_thread" });
+      expect(accountDb.updateUserConfiguration).toHaveBeenCalledWith(TEST_USER_ID, { postSendView: "stay_on_thread" });
     });
 
     it("returns 403 when path userId does not match JWT userId", async () => {
@@ -100,17 +100,17 @@ describe("User Configuration API", () => {
       const res = await app.request("/user/other-user-id/configuration", {
         method: "PATCH",
         headers: { Authorization: "Bearer valid-token", "Content-Type": "application/json" },
-        body: JSON.stringify({ afterSendAction: "archive" }),
+        body: JSON.stringify({ postSendView: "stay_on_thread" }),
       });
       expect(res.status).toBe(403);
     });
 
-    it("returns 400 for invalid afterSendAction value", async () => {
+    it("returns 400 for invalid postSendView value", async () => {
       const { app } = buildApp();
       const res = await app.request(`/user/${TEST_USER_ID}/configuration`, {
         method: "PATCH",
         headers: { Authorization: "Bearer valid-token", "Content-Type": "application/json" },
-        body: JSON.stringify({ afterSendAction: "invalid_value" }),
+        body: JSON.stringify({ postSendView: "invalid_value" }),
       });
       expect(res.status).toBe(400);
     });

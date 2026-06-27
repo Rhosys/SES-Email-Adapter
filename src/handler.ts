@@ -54,6 +54,7 @@ import { SchedulerClient as AwsSchedulerClient } from "@aws-sdk/client-scheduler
 import { EmailService } from "./email/email-service.js";
 import { SesDomainIdentityService } from "./email/domain-identity-service.js";
 import { ForwardingService } from "./forwarding/forwarding-service.js";
+import { EmailSignalStore } from "./database/email-signal-store.js";
 import { DigestDispatcher } from "./digest/digest-dispatcher.js";
 import { DigestWorker } from "./digest/digest-worker.js";
 import type { IDigestSendMessage } from "./digest/digest-worker.js";
@@ -131,7 +132,8 @@ const domainIdentityService = new SesDomainIdentityService(
 const externalEmailHandler = new ReplySenderService(emailService, logger);
 
 const APP_BASE_URL = process.env["APP_BASE_URL"] ?? "";
-const forwardingService = new ForwardingService(emailService, accountDb, APP_BASE_URL, MAIL_DOMAIN, logger);
+const emailSignalStore = new EmailSignalStore(s3, S3_BUCKET);
+const forwardingService = new ForwardingService(emailService, accountDb, emailSignalStore, APP_BASE_URL, MAIL_DOMAIN, logger);
 
 const draftSendDispatcher = new DraftSendDispatcher(SIGNAL_QUEUE_URL, sqs, logger);
 

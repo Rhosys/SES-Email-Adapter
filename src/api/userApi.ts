@@ -56,7 +56,7 @@ export class UserApi {
 
       const body = await zParse(UpdateUserConfigurationRequest, c.req.raw);
       const update: Partial<IUserConfiguration> = {};
-      if (body.afterSendAction !== undefined) { update.afterSendAction = body.afterSendAction; }
+      if (body.postSendView !== undefined) { update.postSendView = body.postSendView; }
       const result = await this.accountDb.updateUserConfiguration(jwtUserId, update);
       if (result.isErr()) return err(c, 500, "Internal server error");
       return c.json(result.value, 200);

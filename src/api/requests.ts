@@ -23,7 +23,7 @@ const AccountRole = z.enum(["admin", "member", "viewer"]);
 const RuleActionType = z.enum([
   "assign_label", "assign_workflow", "archive", "forward",
   "block_hidden", "block_reject", "quarantine", "quarantine_hidden", "set_urgency", "suppress_notification", "pong", "approve_sender",
-  "auto_draft", "webhook", "forwardCalendarInvite",
+  "auto_draft", "forwardCalendarInvite",
 ]);
 const RuleStatus = z.enum(["enabled", "disabled"]);
 
@@ -280,6 +280,6 @@ export type UpdateUserRequest = z.infer<typeof UpdateUserRequest>;
 // ---- User Configuration ----
 
 export const UpdateUserConfigurationRequest = z.object({
-  afterSendAction: z.enum(["archive", "keep_active"]).optional(),
+  postSendView: z.enum(["return_to_inbox", "stay_on_thread"]).optional(),
 });
 export type UpdateUserConfigurationRequest = z.infer<typeof UpdateUserConfigurationRequest>;

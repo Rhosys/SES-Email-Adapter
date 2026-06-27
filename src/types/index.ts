@@ -603,7 +603,7 @@ export const RULE_ACTION_TYPES = [
   "assign_label", "assign_workflow", "archive", "forward",
   "block_hidden", "block_reject", "quarantine_visible", "quarantine_hidden",
   "set_urgency", "suppress_notification", "pong", "approve_sender",
-  "auto_draft", "webhook", "forwardCalendarInvite",
+  "auto_draft", "forwardCalendarInvite",
 ] as const;
 export type RuleActionType = (typeof RULE_ACTION_TYPES)[number];
 
@@ -694,15 +694,15 @@ export interface Account {
 // User Configuration (per-user, global — not account-scoped)
 // ---------------------------------------------------------------------------
 
-export const AFTER_SEND_ACTIONS = ["archive", "keep_active"] as const;
-export type AfterSendAction = (typeof AFTER_SEND_ACTIONS)[number];
+export const POST_SEND_VIEWS = ["return_to_inbox", "stay_on_thread"] as const;
+export type PostSendView = (typeof POST_SEND_VIEWS)[number];
 
 export interface IUserConfiguration {
-  afterSendAction: AfterSendAction;
+  postSendView: PostSendView;
 }
 
 export const USER_CONFIGURATION_DEFAULTS: IUserConfiguration = {
-  afterSendAction: "keep_active",
+  postSendView: "return_to_inbox",
 };
 
 // ---------------------------------------------------------------------------
