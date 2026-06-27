@@ -4,7 +4,8 @@ import { dynamo, ACCOUNTS_TABLE } from "./shared.js";
 import { dbError, notFoundError, ok, err } from "../errors.js";
 import type { Result, DbError, NotFoundError } from "../errors.js";
 import { generateId } from "../utils/id.js";
-import type { Account, View, Label, Rule, RuleStatus, Domain, Alias, AliasSender, SenderPolicy, AccountFilteringConfig, UnknownSenderPolicy, ForwardingTarget, EmailTemplate, WsConnection } from "../types/index.js";
+import type { Account, View, Label, Rule, RuleStatus, Domain, Alias, AliasSender, SenderPolicy, AccountFilteringConfig, UnknownSenderPolicy, ForwardingTarget, EmailTemplate, WsConnection, IUserConfiguration } from "../types/index.js";
+import { USER_CONFIGURATION_DEFAULTS } from "../types/index.js";
 import { SYSTEM_RULES } from "../processor/system-rules.js";
 import type { CreateViewRequest, UpdateViewRequest, CreateLabelRequest, UpdateLabelRequest, CreateRuleRequest, UpdateRuleRequest } from "../api/app.js";
 import { buildDiffUpdateParams, buildDiffPutParams, buildSnapshotSk } from "./stats-writer.js";
@@ -1391,6 +1392,46 @@ export class AccountDatabase {
         },
       }));
       return ok(undefined);
+    } catch (e) {
+      return err(dbError(e));
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // User Configuration — PK = USER#{userId}, SK = CONFIG
+  // ---------------------------------------------------------------------------
+
+  async getUserConfiguration(userId: string): Promise<Result<IUserConfiguration, DbError>> {
+    try {
+      const res = await dynamo.send(new GetCommand({
+        TableName: ACCOUNTS_TABLE,
+        Key: { pk: `USER#${userId}`, sk: "CONFIG" },
+      }));
+      if (!res.Item) return ok({ ...USER_CONFIGURATION_DEFAULTS });
+      const { pk: _pk, sk: _sk, userId: _uid, createdAt: _c, updatedAt: _u, ...config } = res.Item as Record<string, unknown>;
+      return ok({ ...USER_CONFIGURATION_DEFAULTS, ...config } as IUserConfiguration);
+    } catch (e) {
+      return err(dbError(e));
+    }
+  }
+
+  async updateUserConfiguration(userId: string, update: Partial<IUserConfiguration>): Promise<Result<IUserConfiguration, DbError>> {
+    const now = DateTime.utc().toISO()!;
+    const setParts: string[] = ["updatedAt = :now"];
+    const exprValues: Record<string, unknown> = { ":now": now };
+
+    if (update.afterSendAction !== undefined) { setParts.push("afterSendAction = :asa"); exprValues[":asa"] = update.afterSendAction; }
+
+    try {
+      const res = await dynamo.send(new UpdateCommand({
+        TableName: ACCOUNTS_TABLE,
+        Key: { pk: `USER#${userId}`, sk: "CONFIG" },
+        UpdateExpression: `SET ${setParts.join(", ")}, userId = if_not_exists(userId, :uid), createdAt = if_not_exists(createdAt, :now)`,
+        ExpressionAttributeValues: { ...exprValues, ":uid": userId },
+        ReturnValues: "ALL_NEW",
+      }));
+      const { pk: _pk, sk: _sk, userId: _uid, createdAt: _c, updatedAt: _u, ...config } = res.Attributes! as Record<string, unknown>;
+      return ok({ ...USER_CONFIGURATION_DEFAULTS, ...config } as IUserConfiguration);
     } catch (e) {
       return err(dbError(e));
     }

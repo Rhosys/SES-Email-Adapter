@@ -691,6 +691,21 @@ export interface Account {
 }
 
 // ---------------------------------------------------------------------------
+// User Configuration (per-user, global — not account-scoped)
+// ---------------------------------------------------------------------------
+
+export const AFTER_SEND_ACTIONS = ["archive", "keep_active"] as const;
+export type AfterSendAction = (typeof AFTER_SEND_ACTIONS)[number];
+
+export interface IUserConfiguration {
+  afterSendAction: AfterSendAction;
+}
+
+export const USER_CONFIGURATION_DEFAULTS: IUserConfiguration = {
+  afterSendAction: "keep_active",
+};
+
+// ---------------------------------------------------------------------------
 // Domain
 // ---------------------------------------------------------------------------
 
