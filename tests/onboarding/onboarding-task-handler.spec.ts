@@ -23,6 +23,8 @@ function makeAccount(overrides: Partial<Account> = {}): Account {
   return {
     id: "acc-test",
     name: "Test Account",
+    digest: { frequency: "monthly", forwardingTargetId: "test@example.com" },
+    defaultCalendarInviteForwardingAddress: "test@example.com",
     createdAt: "2025-01-01T00:00:00Z",
     updatedAt: "2025-01-01T00:00:00Z",
     ...overrides,
@@ -47,6 +49,8 @@ function createMockStore(overrides: Partial<IOnboardingAccountDb & IOnboardingAr
       getAccount: overrides.getAccount ?? vi.fn().mockResolvedValue(ok(makeAccount())),
       updateAccount: overrides.updateAccount ?? vi.fn().mockResolvedValue(ok(makeAccount())),
       listDomains: overrides.listDomains ?? vi.fn().mockResolvedValue(ok([])),
+      getForwardingTarget: overrides.getForwardingTarget ?? vi.fn().mockResolvedValue(ok(null)),
+      saveForwardingTarget: overrides.saveForwardingTarget ?? vi.fn().mockResolvedValue(ok(undefined)),
     },
     arcDb: {
       hasSignals: overrides.hasSignals ?? vi.fn().mockResolvedValue(ok(false)),
@@ -153,7 +157,7 @@ describe("OnboardingTaskHandler.handleFollowup", () => {
     const result = await handler.handleFollowup("acc-missing", "user@example.com");
 
     expect(result.isOk()).toBe(true);
-    const infoLog = logger.calls.find(c => c.method === "info");
+    const infoLog = logger.calls.find(c => c.method === "info" && c.context?.code === "onboarding.followup");
     expect(infoLog).toBeDefined();
     expect(infoLog!.context).toMatchObject({ code: "onboarding.followup", accountId: "acc-missing" });
     expect(store.accountDb.listDomains).not.toHaveBeenCalled();

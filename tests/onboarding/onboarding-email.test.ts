@@ -46,6 +46,8 @@ function createMockStore(overrides: Partial<IOnboardingAccountDb & IOnboardingAr
       getAccount: overrides.getAccount ?? vi.fn().mockResolvedValue(ok(makeAccount())),
       updateAccount: overrides.updateAccount ?? vi.fn().mockResolvedValue(ok(makeAccount())),
       listDomains: overrides.listDomains ?? vi.fn().mockResolvedValue(ok([])),
+      getForwardingTarget: overrides.getForwardingTarget ?? vi.fn().mockResolvedValue(ok(null)),
+      saveForwardingTarget: overrides.saveForwardingTarget ?? vi.fn().mockResolvedValue(ok(undefined)),
     },
     arcDb: {
       hasSignals: overrides.hasSignals ?? vi.fn().mockResolvedValue(ok(false)),

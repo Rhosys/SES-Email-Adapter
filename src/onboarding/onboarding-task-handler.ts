@@ -1,10 +1,11 @@
 import { ok, err } from "neverthrow";
 import { DateTime } from "luxon";
+import { randomUUID } from "node:crypto";
 import type { Result } from "neverthrow";
 import type { DbError, TransientSesError } from "../errors.js";
 import type { Logger } from "../logger.js";
 import type { EmailService } from "../email/email-service.js";
-import type { Account, AccountOnboarding, Domain } from "../types/index.js";
+import type { Account, AccountOnboarding, Domain, ForwardingTarget } from "../types/index.js";
 import type { OnboardingProgress } from "./compose-followup-email.js";
 import { composeFollowupEmail } from "./compose-followup-email.js";
 import { renderTemplate } from "../email/template-renderer.js";
@@ -18,8 +19,10 @@ import { generateUnsubscribeToken } from "../email/unsubscribe-token.js";
 
 export interface IOnboardingAccountDb {
   getAccount(accountId: string): Promise<Result<Account | null, DbError>>;
-  updateAccount(accountId: string, updates: { onboarding: AccountOnboarding }): Promise<Result<Account, DbError>>;
+  updateAccount(accountId: string, updates: Partial<Pick<Account, "onboarding" | "digest" | "defaultCalendarInviteForwardingAddress">>): Promise<Result<Account, DbError>>;
   listDomains(accountId: string): Promise<Result<Domain[], DbError>>;
+  getForwardingTarget(accountId: string, target: string): Promise<Result<ForwardingTarget | null, DbError>>;
+  saveForwardingTarget(target: ForwardingTarget): Promise<Result<void, DbError>>;
 }
 
 export interface IOnboardingArcDb {
@@ -49,6 +52,8 @@ export class OnboardingTaskHandler {
   ) {}
 
   async handleFollowup(accountId: string, email: string): Promise<Result<void, DbError | TransientSesError>> {
+    // Auto-create verified forwarding target for the user's email (idempotent)
+    await this.ensureDefaultForwardingTarget(accountId, email);
     return this.handleProgressTask(accountId, email, "onboarding.followup");
   }
 
@@ -66,6 +71,72 @@ export class OnboardingTaskHandler {
       this.logger.track("Trial account still active after 60 days", { code: "onboarding.trial_check_expired", accountId });
     }
     return ok({ accountIsTrial, trialExpired });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Auto-create verified forwarding target + set digest/calendar defaults
+  // ---------------------------------------------------------------------------
+
+  private async ensureDefaultForwardingTarget(accountId: string, email: string): Promise<void> {
+    const existingResult = await this.accountDb.getForwardingTarget(accountId, email);
+    if (existingResult.isErr()) {
+      this.logger.track("Failed to check existing forwarding target during onboarding — continuing without setup", { code: "onboarding.forwarding_target_check_failed", accountId, email, error: existingResult.error });
+      return;
+    }
+
+    if (existingResult.value?.status === "verified") {
+      // Target already exists and is verified — ensure account defaults are set
+      await this.setAccountForwardingDefaults(accountId, email);
+      return;
+    }
+
+    // Create verified target (we trust Authress as the identity source — no verification email needed)
+    const now = DateTime.utc().toISO()!;
+    const target: ForwardingTarget = {
+      id: email,
+      accountId,
+      target: email,
+      type: "email",
+      status: "verified",
+      token: randomUUID(),
+      createdAt: now,
+      verifiedAt: now,
+    };
+
+    const saveResult = await this.accountDb.saveForwardingTarget(target);
+    if (saveResult.isErr()) {
+      this.logger.track("Failed to create default forwarding target during onboarding — continuing without setup", { code: "onboarding.forwarding_target_save_failed", accountId, email, error: saveResult.error });
+      return;
+    }
+
+    this.logger.info("Auto-created verified forwarding target from Authress email", { code: "onboarding.forwarding_target_created", accountId, email });
+    await this.setAccountForwardingDefaults(accountId, email);
+  }
+
+  private async setAccountForwardingDefaults(accountId: string, forwardingTargetId: string): Promise<void> {
+    const accountResult = await this.accountDb.getAccount(accountId);
+    if (accountResult.isErr()) return;
+    const account = accountResult.value;
+    if (!account) return;
+
+    // Only set defaults if not already configured
+    const updates: Partial<Pick<Account, "digest" | "defaultCalendarInviteForwardingAddress">> = {};
+    if (!account.digest) {
+      updates.digest = { frequency: "monthly", forwardingTargetId };
+    }
+    if (!account.defaultCalendarInviteForwardingAddress) {
+      updates.defaultCalendarInviteForwardingAddress = forwardingTargetId;
+    }
+
+    if (Object.keys(updates).length === 0) return;
+
+    const updateResult = await this.accountDb.updateAccount(accountId, updates);
+    if (updateResult.isErr()) {
+      this.logger.track("Failed to set account forwarding defaults during onboarding", { code: "onboarding.account_defaults_failed", accountId, forwardingTargetId, error: updateResult.error });
+      return;
+    }
+
+    this.logger.info("Set account forwarding defaults", { code: "onboarding.account_defaults_set", accountId, forwardingTargetId, updates });
   }
 
   // ---------------------------------------------------------------------------
