@@ -639,7 +639,7 @@ export const Account = z.object({
   filtering: AccountFilteringConfig.optional(),
   onboarding: AccountOnboarding.optional(),
   billingPlan: z.string().optional(),
-  defaultCalendarInviteForwardingAddress: z.string().optional(),
+  defaultCalendarInviteForwardingTargetId: z.string().optional(),
   createdAt: z.string().readonly(),
   updatedAt: z.string().readonly(),
 }).openapi("Account");

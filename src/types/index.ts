@@ -683,7 +683,7 @@ export interface Account {
   filtering?: AccountFilteringConfig;
   onboarding?: AccountOnboarding;
   billingPlan?: import("../embedding/retention-tier.js").BillingPlan;
-  defaultCalendarInviteForwardingAddress?: string;
+  defaultCalendarInviteForwardingTargetId?: string;
   gsi1pk?: string;
   gsi1sk?: string;
   createdAt: string;

@@ -31,7 +31,7 @@ import { DeviceNotifier } from "./notifier/device-notifier.js";
 import { WsDeliverer } from "./notifier/ws-deliverer.js";
 import { FcmDeliverer } from "./notifier/fcm-deliverer.js";
 import { HttpFcmClient } from "./notifier/fcm-client.js";
-import { ExternalEmailSignalHandler } from "./notifier/external-email-signal-handler.js";
+import { ReplySenderService } from "./notifier/reply-sender.js";
 import { DynamoDeviceStore } from "./notifier/device-store.js";
 import { FeedbackProcessor } from "./notifier/feedback-processor.js";
 import { DomainHealthJob } from "./jobs/domain-health-job.js";
@@ -128,7 +128,7 @@ const domainIdentityService = new SesDomainIdentityService(
   sesv2, "mail", DKIM_PRIVATE_KEY, MAIL_DOMAIN, SES_CONFIG_SET_ARN,
 );
 
-const externalEmailHandler = new ExternalEmailSignalHandler(emailService, logger);
+const externalEmailHandler = new ReplySenderService(emailService, logger);
 
 const APP_BASE_URL = process.env["APP_BASE_URL"] ?? "";
 const forwardingService = new ForwardingService(emailService, accountDb, APP_BASE_URL, MAIL_DOMAIN, logger);

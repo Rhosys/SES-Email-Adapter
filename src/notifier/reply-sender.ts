@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// ExternalEmailSignalHandler — reply sender via EmailService
+// ReplySenderService — reply sender via EmailService
 // ---------------------------------------------------------------------------
 
 import type { ReplySender } from "../processor/processor.js";
@@ -9,7 +9,7 @@ import type { Result } from "../errors.js";
 import { buildOutboundTags } from "../email/ses-tags.js";
 import type { Logger } from "../logger.js";
 
-export class ExternalEmailSignalHandler implements ReplySender {
+export class ReplySenderService implements ReplySender {
   private readonly emailService: EmailService;
   private readonly logger: Logger;
 

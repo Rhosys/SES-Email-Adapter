@@ -308,7 +308,7 @@ export function toApiAccount(account: DbAccount): Api.Account {
     ...(account.filtering ? { filtering: account.filtering as Api.Account["filtering"] } : {}),
     ...(account.onboarding ? { onboarding: account.onboarding } : {}),
     ...(account.billingPlan ? { billingPlan: account.billingPlan } : {}),
-    ...(account.defaultCalendarInviteForwardingAddress ? { defaultCalendarInviteForwardingAddress: account.defaultCalendarInviteForwardingAddress } : {}),
+    ...(account.defaultCalendarInviteForwardingTargetId ? { defaultCalendarInviteForwardingTargetId: account.defaultCalendarInviteForwardingTargetId } : {}),
     createdAt: account.createdAt,
     updatedAt: account.updatedAt,
   };

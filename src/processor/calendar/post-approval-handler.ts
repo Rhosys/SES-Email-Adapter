@@ -154,7 +154,7 @@ export async function handlePostApprovalCalendar(
   // leaves a committed record pointing to a calendar invite that was never sent.
   const accountResult = await accountDb.getAccount(accountId);
   const calendarForwardingAddress = accountResult.isOk()
-    ? accountResult.value?.defaultCalendarInviteForwardingAddress ?? ""
+    ? accountResult.value?.defaultCalendarInviteForwardingTargetId ?? ""
     : "";
 
   const forwardResult = await forwardCalendarInvite(
