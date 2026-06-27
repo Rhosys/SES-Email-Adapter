@@ -276,3 +276,10 @@ export const UpdateUserRequest = z.object({
   role: AccountRole,
 });
 export type UpdateUserRequest = z.infer<typeof UpdateUserRequest>;
+
+// ---- User Configuration ----
+
+export const UpdateUserConfigurationRequest = z.object({
+  afterSendAction: z.enum(["archive", "keep_active"]).optional(),
+});
+export type UpdateUserConfigurationRequest = z.infer<typeof UpdateUserConfigurationRequest>;

@@ -697,6 +697,14 @@ export const SignalSendResponse = Signal.and(z.object({
 }));
 
 // ---------------------------------------------------------------------------
+// User Configuration
+// ---------------------------------------------------------------------------
+
+export const UserConfiguration = z.object({
+  afterSendAction: z.enum(["archive", "keep_active"]),
+});
+
+// ---------------------------------------------------------------------------
 // TypeScript types (inferred from zod schemas — value + type share same name)
 // ---------------------------------------------------------------------------
 

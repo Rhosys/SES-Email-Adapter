@@ -101,6 +101,8 @@ const EXPECTED_ROUTES = [
   "POST /reindex",
   "GET /",
   "GET /.well-known/api-catalog",
+  "GET /user/{userId}/configuration",
+  "PATCH /user/{userId}/configuration",
 ] as const;
 
 describe("Route Registry", () => {
