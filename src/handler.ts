@@ -3,7 +3,7 @@ import { BedrockRuntimeClient } from "@aws-sdk/client-bedrock-runtime";
 import { S3Client } from "@aws-sdk/client-s3";
 import { LambdaClient } from "@aws-sdk/client-lambda";
 import { SFNClient } from "@aws-sdk/client-sfn";
-import { SQSClient } from "@aws-sdk/client-sqs";
+import { SQSClient, SendMessageCommand } from "@aws-sdk/client-sqs";
 import { SQS_MESSAGE_TYPES } from "./types/index.js";
 import type { Signal } from "./types/index.js";
 import { ok, err } from "./errors.js";
@@ -303,6 +303,13 @@ const app = createApp({
   schedulerClient,
   s3Client: s3,
   emailBucket: S3_BUCKET,
+  triggerDigest: async (accountId: string) => {
+    await sqs.send(new SendMessageCommand({
+      QueueUrl: SIGNAL_QUEUE_URL,
+      MessageBody: JSON.stringify({ accountId }),
+      MessageAttributes: { messageType: { DataType: "String", StringValue: "digest_send" } },
+    }));
+  },
 });
 
 // ---------------------------------------------------------------------------
