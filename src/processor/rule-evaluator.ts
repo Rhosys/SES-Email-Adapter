@@ -7,36 +7,7 @@ import type { Result } from "../errors.js";
 import { evalCondition } from "./rule-engine.js";
 import { interpretRuleResult } from "./interpret-rule-result.js";
 import type { RuleEvalResult } from "./interpret-rule-result.js";
-
-// ---------------------------------------------------------------------------
-// Strip sensitive fields before passing to user code (allowlist approach)
-// ---------------------------------------------------------------------------
-
-type StrippedSignal = Pick<Signal["data"], "from" | "subject" | "summary" | "workflow" | "recipientAddress" | "workflowData"> & Pick<Signal, "id">;
-type StrippedArc = Pick<Arc, "id" | "labels" | "urgency" | "summary" | "workflow" | "status">;
-
-function stripSignalForUserCode(signal: Signal): StrippedSignal {
-  return {
-    id: signal.id,
-    from: signal.data.from,
-    subject: signal.data.subject,
-    summary: signal.data.summary,
-    workflow: signal.data.workflow,
-    recipientAddress: signal.data.recipientAddress,
-    workflowData: signal.data.workflowData,
-  };
-}
-
-function stripArcForUserCode(arc: Arc): StrippedArc {
-  return {
-    id: arc.id,
-    labels: arc.labels,
-    ...(arc.urgency !== undefined ? { urgency: arc.urgency } : {}),
-    summary: arc.summary,
-    workflow: arc.workflow,
-    status: arc.status,
-  };
-}
+import { toRuleSignalContext, toRuleArcContext } from "./rule-context.js";
 
 // ---------------------------------------------------------------------------
 // Store interface for rule error annotation
@@ -67,7 +38,8 @@ export class JsonLogicRuleEvaluator implements RuleEvaluator {
     }
 
     try {
-      const matched = await evalCondition(rule.condition, context);
+      const ruleContext = { signal: toRuleSignalContext(context.signal), arc: toRuleArcContext(context.arc), isMatchedArc: context.isMatchedArc };
+      const matched = await evalCondition(rule.condition, ruleContext);
       return { matched, dynamicActions: [], warnings: [] };
     } catch {
       this.logger.track("Rule condition evaluation threw an exception. The json-logic engine failed to evaluate the condition expression. The rule will be treated as non-matching and processing continues.", { code: "rule_evaluator.condition.failed", ruleId: rule.id, condition: rule.condition });
@@ -81,7 +53,7 @@ export class JsonLogicRuleEvaluator implements RuleEvaluator {
         tenantId: context.signal.accountId,
         purpose: "rule_condition",
         functionCode: rule.condition,
-        executionContext: { signal: stripSignalForUserCode(context.signal), arc: stripArcForUserCode(context.arc) },
+        executionContext: { signal: toRuleSignalContext(context.signal), arc: toRuleArcContext(context.arc) },
       });
 
       if (response.isErr()) {

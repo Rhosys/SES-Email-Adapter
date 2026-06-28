@@ -1357,10 +1357,10 @@ describe("SignalProcessor", () => {
       expect(saved.data.workflow).toBe("onboarding");
     });
 
-    it("blocks onboarding emails when a block rule targeting system:workflow:onboarding is active", async () => {
+    it("blocks onboarding emails when a block rule targeting the onboarding workflow is active", async () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok(onboardingClassification));
       vi.mocked(accountDb.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([
-        makeRule({ condition: JSON.stringify({ "in": ["system:workflow:onboarding", { var: "arc.labels" }] }), actions: [{ type: "block_hidden" }] }),
+        makeRule({ condition: JSON.stringify({ "==": [{ var: "signal.workflow" }, "onboarding"] }), actions: [{ type: "block_hidden" }] }),
       ])));
 
       const notifier = makeNotifier();
@@ -1375,7 +1375,7 @@ describe("SignalProcessor", () => {
     it("quarantines onboarding emails when a quarantine rule is active", async () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok(onboardingClassification));
       vi.mocked(accountDb.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([
-        makeRule({ condition: JSON.stringify({ "in": ["system:workflow:onboarding", { var: "arc.labels" }] }), actions: [{ type: "quarantine_visible" }] }),
+        makeRule({ condition: JSON.stringify({ "==": [{ var: "signal.workflow" }, "onboarding"] }), actions: [{ type: "quarantine_visible" }] }),
       ])));
 
       const notifier = makeNotifier();
