@@ -98,13 +98,14 @@ describe("buildDiffUpdateParams", () => {
 
   it("ADD expression targets the correct metric path", () => {
     const params = buildDiffUpdateParams(accountId, "blocked", 1, now, tableName);
-    expect(params.ExpressionAttributeNames["#metric"]).toBe("metrics.blocked");
+    expect(params.UpdateExpression).toBe("ADD metrics.#metricName :delta");
+    expect(params.ExpressionAttributeNames["#metricName"]).toBe("blocked");
   });
 
   it("supports negative delta for decrements", () => {
     const params = buildDiffUpdateParams(accountId, "totalAliases", -1, now, tableName);
     expect(params.ExpressionAttributeValues[":delta"]).toBe(-1);
-    expect(params.ExpressionAttributeNames["#metric"]).toBe("metrics.totalAliases");
+    expect(params.ExpressionAttributeNames["#metricName"]).toBe("totalAliases");
   });
 
   it("includes attribute_exists condition (row must exist)", () => {
@@ -115,7 +116,7 @@ describe("buildDiffUpdateParams", () => {
   it("each metric produces a distinct attribute name", () => {
     for (const metric of STATS_METRICS) {
       const params = buildDiffUpdateParams(accountId, metric, 1, now, tableName);
-      expect(params.ExpressionAttributeNames["#metric"]).toBe(`metrics.${metric}`);
+      expect(params.ExpressionAttributeNames["#metricName"]).toBe(metric);
     }
   });
 });
