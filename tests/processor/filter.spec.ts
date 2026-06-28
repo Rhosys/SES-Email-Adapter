@@ -42,25 +42,6 @@ describe("getETLD1", () => {
 });
 
 // ---------------------------------------------------------------------------
-// assignSystemLabels — workflow mirror
-// ---------------------------------------------------------------------------
-
-describe("assignSystemLabels — workflow label", () => {
-  it("always emits system:workflow:<workflow>", () => {
-    const labels = assignSystemLabels(makeCtx({ workflow: "auth", workflowData: { workflow: "auth", authType: "otp", service: "github.com" } }));
-    expect(labels).toContain("system:workflow:auth");
-  });
-
-  it("emits correct label for every workflow", () => {
-    const workflows = ["conversation", "crm", "package", "travel", "payments", "alert", "content", "onboarding", "notice", "healthcare", "job", "support", "test"] as const;
-    for (const workflow of workflows) {
-      const labels = assignSystemLabels(makeCtx({ workflow, workflowData: { workflow } as never }));
-      expect(labels).toContain(`system:workflow:${workflow}`);
-    }
-  });
-});
-
-// ---------------------------------------------------------------------------
 // assignSystemLabels — spam labels
 // ---------------------------------------------------------------------------
 
@@ -103,25 +84,16 @@ describe("assignSystemLabels — sender trust", () => {
 });
 
 // ---------------------------------------------------------------------------
-// assignSystemLabels — replied and test labels
+// assignSystemLabels — replied
 // ---------------------------------------------------------------------------
 
-describe("assignSystemLabels — replied and test labels", () => {
+describe("assignSystemLabels — replied", () => {
   it("emits system:replied when hasSentMessages is true", () => {
     expect(assignSystemLabels(makeCtx({ hasSentMessages: true }))).toContain("system:replied");
   });
 
   it("does not emit system:replied when hasSentMessages is false", () => {
     expect(assignSystemLabels(makeCtx({ hasSentMessages: false }))).not.toContain("system:replied");
-  });
-
-  it("emits system:test for test workflow", () => {
-    const labels = assignSystemLabels(makeCtx({ workflow: "test", workflowData: { workflow: "test", triggeredBy: "user" } }));
-    expect(labels).toContain("system:test");
-  });
-
-  it("does not emit system:test for non-test workflow", () => {
-    expect(assignSystemLabels(makeCtx())).not.toContain("system:test");
   });
 });
 

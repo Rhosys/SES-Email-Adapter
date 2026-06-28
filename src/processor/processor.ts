@@ -27,6 +27,7 @@ import type { RetentionDuration } from "./retention.js";
 import { generatePresignedGet, generatePresignedPost } from "./presign.js";
 import { getPrimaryArcMatcherRegistry, getActiveClusters } from "../embedding/cluster-registry.js";
 import { getETLD1, assignSystemLabels } from "./filter.js";
+import { toRuleSignalContext, toRuleArcContext } from "./rule-context.js";
 import { statusToCategory } from "../database/stats-writer.js";
 import type { DraftSendDispatch } from "./draft-send-dispatcher.js";
 import { isReplyTargetSafe } from "./reply-target-validator.js";
@@ -509,8 +510,8 @@ export class SignalProcessor {
                 purpose: "template_function",
                 functionCode: fn.code,
                 executionContext: {
-                  signal: { id: signal.id, from: signal.data.from, subject: signal.data.subject, summary: signal.data.summary, workflow: signal.data.workflow, recipientAddress: signal.data.recipientAddress, workflowData: signal.data.workflowData },
-                  arc: { id: arc.id, labels: arc.labels, ...(arc.urgency !== undefined ? { urgency: arc.urgency } : {}), summary: arc.summary, workflow: arc.workflow, status: arc.status },
+                  signal: toRuleSignalContext(signal),
+                  arc: toRuleArcContext(arc),
                 },
               });
               if (response.isErr()) {

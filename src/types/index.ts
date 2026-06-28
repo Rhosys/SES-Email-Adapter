@@ -610,15 +610,9 @@ export type RuleActionType = (typeof RULE_ACTION_TYPES)[number];
 // System-assigned labels. Return type of assignSystemLabels() — adding here requires explicit approval.
 // The compile-time gate: assignSystemLabels() returns SystemLabel[], so any unlisted label is a type error.
 export type SystemLabel =
-  | "system:workflow:auth" | "system:workflow:conversation" | "system:workflow:crm"
-  | "system:workflow:package" | "system:workflow:travel"
-  | "system:workflow:payments" | "system:workflow:alert" | "system:workflow:content"
-  | "system:workflow:onboarding" | "system:workflow:notice" | "system:workflow:healthcare"
-  | "system:workflow:job" | "system:workflow:support" | "system:workflow:events" | "system:workflow:test"
   | "system:spam"
   | "system:sender:untrusted"
   | "system:replied"
-  | "system:test"
   | "system:auth:security_alert"
   | "system:action"
   | "system:calendar";
