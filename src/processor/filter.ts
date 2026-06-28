@@ -25,8 +25,6 @@ export interface SystemLabelContext {
 export function assignSystemLabels(ctx: SystemLabelContext): SystemLabel[] {
   const labels: SystemLabel[] = [];
 
-  labels.push(`system:workflow:${ctx.workflow}` as SystemLabel);
-
   if (ctx.tags.length > 0) labels.push("system:spam");
 
   const senderTrusted =
@@ -35,7 +33,6 @@ export function assignSystemLabels(ctx: SystemLabelContext): SystemLabel[] {
   if (!senderTrusted) labels.push("system:sender:untrusted");
 
   if (ctx.hasSentMessages) labels.push("system:replied");
-  if (ctx.workflow === "test") labels.push("system:test");
   if (ctx.workflow === "auth" && (ctx.workflowData as AuthData).authType === "security_alert") {
     labels.push("system:auth:security_alert");
   }
