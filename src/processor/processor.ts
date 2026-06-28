@@ -28,7 +28,7 @@ import { generatePresignedGet, generatePresignedPost } from "./presign.js";
 import { getPrimaryArcMatcherRegistry, getActiveClusters } from "../embedding/cluster-registry.js";
 import { getETLD1, assignSystemLabels } from "./filter.js";
 import { toRuleSignalContext, toRuleArcContext } from "./rule-context.js";
-import { statusToCategory } from "../database/stats-writer.js";
+import { statusToMetric } from "../database/stats-writer.js";
 import type { DraftSendDispatch } from "./draft-send-dispatcher.js";
 import { isReplyTargetSafe } from "./reply-target-validator.js";
 import { BillingHandler } from "../billing/billing-handler.js";
@@ -790,7 +790,7 @@ export class SignalProcessor {
       const saveResult = await this.arcDb.saveSignal(signal);
       if (saveResult.isErr()) return err(saveResult.error);
       this.logger.track("Blocked email — DKIM or DMARC verification failed.", { code: "processor.dkim_dmarc_block", signal, dkimVerdict: msg.dkimVerdict, dmarcVerdict: msg.dmarcVerdict });
-      const dkimCat = statusToCategory(signal.status);
+      const dkimCat = statusToMetric(signal.status);
       if (dkimCat) {
         const statsResult = await this.accountDb.incrementStatMetric(accountId, dkimCat, 1, idempotencyKey);
         if (statsResult.isErr()) {
@@ -913,7 +913,7 @@ export class SignalProcessor {
       if (repResult.isErr()) {
         this.logger.warn("Failed to update global sender reputation after signal processing. The DynamoDB update returned an error. Reputation data may be stale for this domain.", { code: "processor.reputation_update_failed", signal, error: repResult.error });
       }
-      const senderBlockCat = statusToCategory(blockStatus);
+      const senderBlockCat = statusToMetric(blockStatus);
       if (senderBlockCat) {
         const statsResult = await this.accountDb.incrementStatMetric(accountId, senderBlockCat, 1, idempotencyKey);
         if (statsResult.isErr()) {
@@ -1116,7 +1116,7 @@ export class SignalProcessor {
       if (repResult.isErr()) {
         this.logger.warn("Failed to update global sender reputation after signal processing. The DynamoDB update returned an error. Reputation data may be stale for this domain.", { code: "processor.reputation_update_failed", signal: blockedSignal, arc, error: repResult.error });
       }
-      const senderBlockCat = statusToCategory(blockStatus);
+      const senderBlockCat = statusToMetric(blockStatus);
       if (senderBlockCat) {
         const statsResult = await this.accountDb.incrementStatMetric(accountId, senderBlockCat, 1, idempotencyKey);
         if (statsResult.isErr()) {
@@ -1211,7 +1211,7 @@ export class SignalProcessor {
       if (repResult.isErr()) {
         this.logger.warn("Failed to update global sender reputation after signal processing. The DynamoDB update returned an error. Reputation data may be stale for this domain.", { code: "processor.reputation_update_failed", signal: blockSignal, arc, error: repResult.error });
       }
-      const blockCat = statusToCategory(outcome.blockDisposition);
+      const blockCat = statusToMetric(outcome.blockDisposition);
       if (blockCat) {
         const statsResult = await this.accountDb.incrementStatMetric(accountId, blockCat, 1, idempotencyKey);
         if (statsResult.isErr()) {
@@ -1233,7 +1233,7 @@ export class SignalProcessor {
       if (repResult.isErr()) {
         this.logger.warn("Failed to update global sender reputation after signal processing. The DynamoDB update returned an error. Reputation data may be stale for this domain.", { code: "processor.reputation_update_failed", signal: quarantinedSignal, arc, error: repResult.error });
       }
-      const quarantineCat = statusToCategory(quarantineStatus);
+      const quarantineCat = statusToMetric(quarantineStatus);
       if (quarantineCat) {
         const statsResult = await this.accountDb.incrementStatMetric(accountId, quarantineCat, 1, idempotencyKey);
         if (statsResult.isErr()) {
@@ -1326,7 +1326,7 @@ export class SignalProcessor {
     if (saveSignalResult.isErr()) return err(saveSignalResult.error);
     this.logger.trackPoint("signal_saved", { signalId: signal.id, arcId: arc.id });
 
-    const allowedCat = statusToCategory(signal.status);
+    const allowedCat = statusToMetric(signal.status);
     if (allowedCat) {
       const statsResult = await this.accountDb.incrementStatMetric(accountId, allowedCat, 1, idempotencyKey);
       if (statsResult.isErr()) {

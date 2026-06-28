@@ -31,9 +31,6 @@ export function statusToMetric(status: SignalStatus): StatsMetric | null {
   return STATUS_TO_METRIC[status];
 }
 
-/** @deprecated Use statusToMetric — kept for backward compat during migration */
-export const statusToCategory = statusToMetric;
-
 // ---------------------------------------------------------------------------
 // DynamoDB row types
 // ---------------------------------------------------------------------------
