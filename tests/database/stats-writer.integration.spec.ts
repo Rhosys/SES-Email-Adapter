@@ -51,9 +51,9 @@ describe("stats-writer integration (row-per-day design)", () => {
       expect(mockSend).toHaveBeenCalledTimes(2);
       const input = mockSend.mock.calls[0]![0].input;
       expect(input.ConditionExpression).toBe("attribute_exists(pk) AND NOT contains(history, :key)");
-      expect(input.UpdateExpression).toContain("ADD #metric :delta");
+      expect(input.UpdateExpression).toContain("ADD metrics.#metricName :delta");
       expect(input.UpdateExpression).toContain("list_append(history, :keyList)");
-      expect(input.ExpressionAttributeNames["#metric"]).toBe("metrics.allowed");
+      expect(input.ExpressionAttributeNames["#metricName"]).toBe("allowed");
       expect(input.ExpressionAttributeValues[":delta"]).toBe(1);
       expect(input.ExpressionAttributeValues[":key"]).toBe("idem-key-1");
       expect(input.ExpressionAttributeValues[":keyList"]).toEqual(["idem-key-1"]);
@@ -171,7 +171,7 @@ describe("stats-writer integration (row-per-day design)", () => {
       const result = await db.incrementStatMetric("acc-test", "totalAliases", 1, "idem-pos");
       expect(result.isOk()).toBe(true);
       const input = mockSend.mock.calls[0]![0].input;
-      expect(input.ExpressionAttributeNames["#metric"]).toBe("metrics.totalAliases");
+      expect(input.ExpressionAttributeNames["#metricName"]).toBe("totalAliases");
       expect(input.ExpressionAttributeValues[":delta"]).toBe(1);
       expect(input.ExpressionAttributeValues[":key"]).toBe("idem-pos");
     });
