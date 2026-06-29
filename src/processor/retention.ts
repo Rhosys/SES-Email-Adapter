@@ -87,7 +87,7 @@ export interface RetentionEmailConfig {
  *   1. Rule action override (explicit per-signal)
  *   2. Alias-level retention (per receiving address)
  *   3. Account-level default
- *   4. System default: P1Y
+ *   4. System default: P3M
  */
 export function resolveRetention(
   accountCtx: RetentionAccountContext,
