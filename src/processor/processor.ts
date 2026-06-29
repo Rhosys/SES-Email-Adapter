@@ -22,7 +22,7 @@ import type { ProcessingDatabase } from "../database/processing-database.js";
 import type { S3RetentionService } from "../embedding/s3-retention-service.js";
 import { getRetentionForPlan } from "../embedding/retention-tier.js";
 import type { BillingPlan } from "../embedding/retention-tier.js";
-import { resolveRetention, retentionToS3Tag, durationToSeconds } from "./retention.js";
+import { resolveRetention, retentionToS3Tag, durationToSeconds, longerRetention } from "./retention.js";
 import type { RetentionDuration } from "./retention.js";
 import { generatePresignedGet, generatePresignedPost } from "./presign.js";
 import { getPrimaryArcMatcherRegistry, getActiveClusters } from "../embedding/cluster-registry.js";
@@ -812,7 +812,7 @@ export class SignalProcessor {
     const onboardingCompleted = account?.onboarding?.completed ?? false;
 
     // Resolve retention and generate pre-signed URLs for the content sanitizer
-    const retentionDuration = resolveRetention({}, null);
+    const retentionDuration = resolveRetention({ retentionDuration: configuredRetentionDuration }, null);
     const s3Tag = retentionToS3Tag(retentionDuration);
     const signalId = sesMessageId;
     const keyPrefix = `content/accounts/${accountId}/extracted/${signalId}/`;
@@ -886,6 +886,7 @@ export class SignalProcessor {
         type: "email",
         labels: [],
         createdAt: now,
+        retentionDuration: effectiveRetention,
         ...(gsi2pk !== undefined ? { gsi2pk } : {}),
         data: {
           sesMessageId,
@@ -1078,6 +1079,11 @@ export class SignalProcessor {
         recipientAddress,
         subject: parsed.subject,
         updatedAt: now,
+        // Arc retention reflects the longest retention of any signal it contains —
+        // a new message must not shorten retention already promised to older signals.
+        retentionDuration: matchedArc.retentionDuration
+          ? longerRetention(matchedArc.retentionDuration, effectiveRetentionForTtl)
+          : effectiveRetentionForTtl,
       };
       this.logger.info("Existing arc matched.", { code: "processor.arc_matched", arcId: arc.id, matchMethod, accountId, sesMessageId });
     } else {
@@ -1095,6 +1101,7 @@ export class SignalProcessor {
         subject: parsed.subject,
         createdAt: now,
         updatedAt: now,
+        retentionDuration: effectiveRetentionForTtl,
         ...(ttl !== undefined ? { ttl } : {}),
       };
     }
@@ -1108,7 +1115,7 @@ export class SignalProcessor {
     // (post-classify path: preserves classification data on blocked signal for audit/review)
     if (effectiveAliasSenderConfig && effectiveAliasSenderConfig.policy !== "allow") {
       const blockStatus = effectiveAliasSenderConfig.policy; // block_hidden | block_reject | report_violation
-      const blockedSignal = buildSignal({ status: blockStatus, accountId, sesMessageId, recipientAddress, parsed, classification: classificationOutput, s3Key, receivedAt: timestamp, now, ...(ttl !== undefined ? { ttl } : {}) });
+      const blockedSignal = buildSignal({ status: blockStatus, accountId, sesMessageId, recipientAddress, parsed, classification: classificationOutput, s3Key, receivedAt: timestamp, now, retentionDuration: effectiveRetentionForTtl, ...(ttl !== undefined ? { ttl } : {}) });
       const saveResult = await this.arcDb.saveSignal(blockedSignal);
       if (saveResult.isErr()) return err(saveResult.error);
       this.logger.track("Blocked email — sender explicitly blocked for this alias.", { code: "processor.sender_block", signal: blockedSignal, arc, senderETLD1, policy: blockStatus });
@@ -1161,6 +1168,7 @@ export class SignalProcessor {
       s3Key,
       receivedAt: timestamp,
       now,
+      retentionDuration: effectiveRetentionForTtl,
       ...(ttl !== undefined ? { ttl } : {}),
       ...(gsi2pk !== undefined ? { gsi2pk } : {}),
       ...(opts?.forceSignalId !== undefined ? { forceSignalId: opts.forceSignalId } : {}),
@@ -1200,7 +1208,7 @@ export class SignalProcessor {
       }
     }
 
-    const buildArgs = { accountId, sesMessageId, recipientAddress, parsed, classification: classificationOutput, s3Key, receivedAt: timestamp, now, ...(ttl !== undefined ? { ttl } : {}), ...(gsi2pk !== undefined ? { gsi2pk } : {}), ...(opts?.forceSignalId !== undefined ? { forceSignalId: opts.forceSignalId } : {}) };
+    const buildArgs = { accountId, sesMessageId, recipientAddress, parsed, classification: classificationOutput, s3Key, receivedAt: timestamp, now, retentionDuration: effectiveRetentionForTtl, ...(ttl !== undefined ? { ttl } : {}), ...(gsi2pk !== undefined ? { gsi2pk } : {}), ...(opts?.forceSignalId !== undefined ? { forceSignalId: opts.forceSignalId } : {}) };
 
     if (outcome.blockDisposition) {
       const blockSignal = buildSignal({ status: outcome.blockDisposition, ...buildArgs });
@@ -1775,10 +1783,11 @@ function buildSignal(opts: {
   receivedAt: string;
   now: string;
   ttl?: number;
+  retentionDuration?: RetentionDuration;
   gsi2pk?: string;
   forceSignalId?: string;
 }): Signal {
-  const { arcId, status, accountId, sesMessageId, recipientAddress, parsed, classification, s3Key, receivedAt, now, ttl, gsi2pk, forceSignalId } = opts;
+  const { arcId, status, accountId, sesMessageId, recipientAddress, parsed, classification, s3Key, receivedAt, now, ttl, retentionDuration, gsi2pk, forceSignalId } = opts;
   const signalId = forceSignalId ?? generateId("sgn-");
 
   // Extract unsubscribe info from List-Unsubscribe / List-Unsubscribe-Post headers
@@ -1818,6 +1827,7 @@ function buildSignal(opts: {
 
   if (arcId !== undefined) signal.arcId = arcId;
   if (ttl !== undefined) signal.ttl = ttl;
+  if (retentionDuration !== undefined) signal.retentionDuration = retentionDuration;
   if (gsi2pk !== undefined) signal.gsi2pk = gsi2pk;
 
   return signal;
