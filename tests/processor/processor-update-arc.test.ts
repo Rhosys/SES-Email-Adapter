@@ -226,10 +226,28 @@ describe("Processor delta computation — updateArc vs saveArc", () => {
     expect(arcId).toBe("arc-existing");
     expect(status).toBe("active");
     expect(lastSignalAt).toBe("2024-01-15T10:00:00Z");
-    // Denormalized display fields are always refreshed from the latest inbound signal
-    const denormalized = { senderAddress: "sender@example.com", recipientAddress: "user@example.com", subject: "Test email" };
+    // Denormalized display fields are always refreshed from the latest inbound signal.
+    // retentionDuration is backfilled from the account's configured retention since the
+    // existing arc fixture predates retention tracking (no retentionDuration of its own).
+    const denormalized = { senderAddress: "sender@example.com", recipientAddress: "user@example.com", subject: "Test email", retentionDuration: "P3M" };
     expect(fields).toEqual(denormalized);
     expect(arcDb.saveArc).not.toHaveBeenCalled();
+  });
+
+  it("existing arc with its own longer retention → updateArc keeps the longer retention", async () => {
+    // Arc already carries a longer retention (e.g. from a prior rule override) than the
+    // account default — a new message must not shorten it.
+    const existing = makeArc({ id: "arc-existing", workflow: "conversation", summary: "A test email.", labels: ["system:workflow:conversation"], retentionDuration: "P5Y" });
+    vi.mocked(arcMatcher.findMatch).mockReturnValueOnce(Promise.resolve(ok(existing)));
+
+    const classifier = makeClassifier({ workflow: "conversation", summary: "A test email." });
+    const processor = buildProcessor(arcDb, accountDb, processingDb, arcMatcher, classifier, mockLogger, ruleEvaluator);
+
+    await processor.processRecord(makeMessage(), 1);
+
+    expect(arcDb.updateArc).toHaveBeenCalledOnce();
+    const [, , , , fields] = vi.mocked(arcDb.updateArc).mock.calls[0]!;
+    expect(fields.retentionDuration).toBeUndefined();
   });
 
   it("existing archived arc → updateArc reactivates to active", async () => {
@@ -246,7 +264,7 @@ describe("Processor delta computation — updateArc vs saveArc", () => {
     const [, , status, lastSignalAt, fields] = vi.mocked(arcDb.updateArc).mock.calls[0]!;
     expect(status).toBe("active");
     expect(lastSignalAt).toBe("2024-01-15T10:00:00Z");
-    expect(fields).toEqual({ senderAddress: "sender@example.com", recipientAddress: "user@example.com", subject: "Test email" });
+    expect(fields).toEqual({ senderAddress: "sender@example.com", recipientAddress: "user@example.com", subject: "Test email", retentionDuration: "P3M" });
   });
 
   it("existing arc with archive rule → updateArc called with archived status", async () => {
@@ -269,7 +287,7 @@ describe("Processor delta computation — updateArc vs saveArc", () => {
     expect(arcDb.updateArc).toHaveBeenCalledOnce();
     const [, , status, , fields] = vi.mocked(arcDb.updateArc).mock.calls[0]!;
     expect(status).toBe("archived");
-    expect(fields).toEqual({ senderAddress: "sender@example.com", recipientAddress: "user@example.com", subject: "Test email" });
+    expect(fields).toEqual({ senderAddress: "sender@example.com", recipientAddress: "user@example.com", subject: "Test email", retentionDuration: "P3M" });
   });
 
   it("existing arc with changed labels → updateArc includes labels in delta", async () => {
@@ -293,7 +311,7 @@ describe("Processor delta computation — updateArc vs saveArc", () => {
     expect(arcDb.updateArc).toHaveBeenCalledOnce();
     const [, , status, , fields] = vi.mocked(arcDb.updateArc).mock.calls[0]!;
     expect(status).toBe("active");
-    expect(fields).toEqual({ labels: ["system:workflow:conversation", "billing"], senderAddress: "sender@example.com", recipientAddress: "user@example.com", subject: "Test email" });
+    expect(fields).toEqual({ labels: ["system:workflow:conversation", "billing"], senderAddress: "sender@example.com", recipientAddress: "user@example.com", subject: "Test email", retentionDuration: "P3M" });
   });
 
   it("new arc (matchedArc is null) → saveArc called, not updateArc", async () => {
