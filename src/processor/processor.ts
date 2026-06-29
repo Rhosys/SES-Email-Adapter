@@ -22,7 +22,7 @@ import type { ProcessingDatabase } from "../database/processing-database.js";
 import type { S3RetentionService } from "../embedding/s3-retention-service.js";
 import { getRetentionForPlan } from "../embedding/retention-tier.js";
 import type { BillingPlan } from "../embedding/retention-tier.js";
-import { resolveRetention, retentionToS3Tag, durationToSeconds, longerRetention } from "./retention.js";
+import { resolveRetention, retentionToS3Tag, durationToSeconds } from "./retention.js";
 import type { RetentionDuration } from "./retention.js";
 import { generatePresignedGet, generatePresignedPost } from "./presign.js";
 import { getPrimaryArcMatcherRegistry, getActiveClusters } from "../embedding/cluster-registry.js";
@@ -812,7 +812,8 @@ export class SignalProcessor {
     const onboardingCompleted = account?.onboarding?.completed ?? false;
 
     // Resolve retention and generate pre-signed URLs for the content sanitizer
-    const retentionDuration = resolveRetention({ retentionDuration: configuredRetentionDuration }, null);
+    // (S3 lifecycle tagging for extracted content is independent of account/DDB retention config)
+    const retentionDuration = resolveRetention({}, null);
     const s3Tag = retentionToS3Tag(retentionDuration);
     const signalId = sesMessageId;
     const keyPrefix = `content/accounts/${accountId}/extracted/${signalId}/`;
@@ -1079,11 +1080,9 @@ export class SignalProcessor {
         recipientAddress,
         subject: parsed.subject,
         updatedAt: now,
-        // Arc retention reflects the longest retention of any signal it contains —
-        // a new message must not shorten retention already promised to older signals.
-        retentionDuration: matchedArc.retentionDuration
-          ? longerRetention(matchedArc.retentionDuration, effectiveRetentionForTtl)
-          : effectiveRetentionForTtl,
+        // Arc retention reflects the most recently received signal's retention,
+        // so it tracks current account/alias config rather than sticking to a stale value.
+        retentionDuration: effectiveRetentionForTtl,
       };
       this.logger.info("Existing arc matched.", { code: "processor.arc_matched", arcId: arc.id, matchMethod, accountId, sesMessageId });
     } else {

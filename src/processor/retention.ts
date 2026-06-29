@@ -99,16 +99,3 @@ export function resolveRetention(
   if (accountCtx.retentionDuration) return accountCtx.retentionDuration;
   return "P3M";
 }
-
-/**
- * Returns whichever of two retention durations is longer-lived.
- * Used when an arc's effective retention must reflect the longest retention
- * of any signal it contains (e.g. a prior rule override shouldn't be shortened
- * by a later signal that resolves to the account default).
- */
-export function longerRetention(a: RetentionDuration, b: RetentionDuration): RetentionDuration {
-  if (a === "Infinity" || b === "Infinity") return "Infinity";
-  const secondsA = durationToSeconds(a)!;
-  const secondsB = durationToSeconds(b)!;
-  return secondsA >= secondsB ? a : b;
-}

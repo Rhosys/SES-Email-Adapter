@@ -543,7 +543,7 @@ export interface Arc {
   createdAt: string;
   updatedAt: string;
   ttl?: number;   // DynamoDB TTL (epoch seconds) — computed from retentionDuration at write time; absent = never expire
-  // ISO 8601 retention duration — longest of any signal in the arc
+  // ISO 8601 retention duration — from the most recently received signal in the arc
   retentionDuration?: import("../processor/retention.js").RetentionDuration;
   // Message-IDs of emails the user sent on this arc
   sentMessageIds?: string[];

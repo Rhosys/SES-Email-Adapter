@@ -234,9 +234,9 @@ describe("Processor delta computation — updateArc vs saveArc", () => {
     expect(arcDb.saveArc).not.toHaveBeenCalled();
   });
 
-  it("existing arc with its own longer retention → updateArc keeps the longer retention", async () => {
-    // Arc already carries a longer retention (e.g. from a prior rule override) than the
-    // account default — a new message must not shorten it.
+  it("existing arc with a stale retention → updateArc refreshes to the most recently resolved retention", async () => {
+    // Arc carries a retention from an earlier signal (e.g. before the account's
+    // configured retention changed) — the new signal's resolved retention takes over.
     const existing = makeArc({ id: "arc-existing", workflow: "conversation", summary: "A test email.", labels: ["system:workflow:conversation"], retentionDuration: "P5Y" });
     vi.mocked(arcMatcher.findMatch).mockReturnValueOnce(Promise.resolve(ok(existing)));
 
@@ -247,7 +247,7 @@ describe("Processor delta computation — updateArc vs saveArc", () => {
 
     expect(arcDb.updateArc).toHaveBeenCalledOnce();
     const [, , , , fields] = vi.mocked(arcDb.updateArc).mock.calls[0]!;
-    expect(fields.retentionDuration).toBeUndefined();
+    expect(fields.retentionDuration).toBe("P3M");
   });
 
   it("existing archived arc → updateArc reactivates to active", async () => {
