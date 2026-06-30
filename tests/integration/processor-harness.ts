@@ -205,6 +205,18 @@ export async function createProcessorHarness(): Promise<ProcessorHarness> {
     throw new Error(`POST /accounts/${accountId}/domains failed: ${createDomainRes.status} ${await createDomainRes.text()}`);
   }
 
+  // This harness exercises content round-tripping (attachments, CID images, calendar
+  // invites), not the unknown-sender quarantine policy — allow_all keeps scenario emails
+  // out of quarantine so they land in an active arc the way the assertions below expect.
+  const updateFilteringRes = await app.request(`/accounts/${accountId}`, {
+    method: 'PATCH',
+    headers: { Authorization: `Bearer ${seedToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ filtering: { defaultUnknownSenderPolicy: 'allow_all' } }),
+  });
+  if (updateFilteringRes.status !== 200) {
+    throw new Error(`PATCH /accounts/${accountId} failed: ${updateFilteringRes.status} ${await updateFilteringRes.text()}`);
+  }
+
   // ---------------------------------------------------------------------------
   // Helpers
   // ---------------------------------------------------------------------------
