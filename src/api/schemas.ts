@@ -621,7 +621,8 @@ export const NotificationSettings = z.object({
 }).openapi("NotificationSettings");
 
 export const AccountFilteringConfig = z.object({
-  defaultUnknownSenderPolicy: UnknownSenderPolicy.optional(),
+  defaultUnknownSenderPolicy: UnknownSenderPolicy
+    .describe("Disposition applied to emails from senders not explicitly allowed, for any alias on this account that has no alias-level override. Defaults to \"quarantine_visible\" for accounts that have never explicitly set this value."),
 }).openapi("AccountFilteringConfig");
 
 export const AccountOnboarding = z.object({
@@ -636,7 +637,7 @@ export const Account = z.object({
   name: z.string(),
   retentionDuration: RetentionDuration.optional(),
   digest: z.object({ frequency: z.enum(["daily", "weekly", "monthly"]), forwardingTargetId: z.string() }).nullable().optional(),
-  filtering: AccountFilteringConfig.optional(),
+  filtering: AccountFilteringConfig,
   onboarding: AccountOnboarding.optional(),
   billingPlan: z.string().optional(),
   afterSendAction: z.enum(["archive", "keep_active"]).optional(),

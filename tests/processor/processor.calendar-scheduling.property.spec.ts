@@ -5,7 +5,7 @@ import { SignalProcessor } from "../../src/processor/processor.js";
 import type { ArcMatcher, InboundSignalMessage, SqsDispatcher } from "../../src/processor/processor.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
 import { makeSharedNewDeps, makeRuleEvaluator3 } from "./_shared-new-deps.js";
-import { makeArcDbMock, makeAccountDbMock, makeProcessingDbMock } from "./_helpers.js";
+import { makeArcDbMock, makeAccountDbMock, makeProcessingDbMock, applyCtx } from "./_helpers.js";
 import type { ArcDatabase } from "../../src/database/arc-database.js";
 import type { EmailService } from "../../src/email/email-service.js";
 import type { ContentSanitizerClient } from "../../src/processor/content-sanitizer-client.js";
@@ -174,9 +174,12 @@ function buildProcessor(opts: {
     return Promise.resolve({});
   });
 
+  const accountDb = makeAccountDbMock(TEST_ACCOUNT_ID);
+  applyCtx(accountDb, DEFAULT_CTX);
+
   return new SignalProcessor({ ...makeSharedNewDeps(),
     arcDb: arcDb ?? makeArcDbMock(),
-    accountDb: makeAccountDbMock(TEST_ACCOUNT_ID),
+    accountDb,
     processingDb: makeProcessingDbMock(),
     contentSanitizer: contentSanitizer ?? makeContentSanitizer(),
     s3Client: { send: s3Send } as never,

@@ -6,6 +6,7 @@ import { ok as neverthrowOk, err as neverthrowErr } from "neverthrow";
 import type { Result } from "neverthrow";
 import type { DbError } from "../errors.js";
 import type { ForwardingTarget } from "../types/index.js";
+import { DEFAULT_UNKNOWN_SENDER_POLICY } from "../types/index.js";
 import { zParse } from "./validate.js";
 import { toApiAlias, toApiAliasSender, toApiForwardingTarget } from "./transform.js";
 import { CreateAliasRequest, UpdateAliasRequest, CreateSenderRequest, UpdateSenderRequest, CreateForwardingTargetRequest, VerifyForwardingTargetRequest } from "./requests.js";
@@ -26,7 +27,7 @@ import type { IForwardingService } from "../forwarding/forwarding-service.js";
 export async function ensureAliasExists(accountDb: AccountDatabase, accountId: string, address: string, idempotencyKey: string): Promise<Result<void, DbError>> {
   const filteringResult = await accountDb.getAccountFilteringConfig(accountId);
   if (filteringResult.isErr()) return neverthrowErr(filteringResult.error);
-  const defaultUnknownSenderPolicy = filteringResult.value?.defaultUnknownSenderPolicy ?? "quarantine_visible";
+  const defaultUnknownSenderPolicy = filteringResult.value?.defaultUnknownSenderPolicy ?? DEFAULT_UNKNOWN_SENDER_POLICY;
 
   const existingResult = await accountDb.getAlias(accountId, address);
   if (existingResult.isErr()) return neverthrowErr(existingResult.error);

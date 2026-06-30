@@ -803,19 +803,21 @@ describe("SignalProcessor", () => {
       processor = new SignalProcessor({ ...SHARED_NEW_DEPS, arcDb, accountDb, processingDb, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", classifier, embeddingGenerator, auroraWriter, arcMatcher, ruleEvaluator, notifier, logger: mockLogger, forwardingService: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), sendVerification: vi.fn().mockResolvedValue(ok(undefined)), verifyWebhook: vi.fn().mockResolvedValue(ok(undefined)) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue(ok({ messageId: "reply-msg-id" })) }, sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never, calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud" } });
     });
 
-    it("allows signal on brand new address and auto-creates aliases with sender approved", async () => {
+    it("quarantines signal on brand new address when account filtering was never configured, and does not auto-create the alias", async () => {
+      // No alias and no account-level filtering config saved (filtering: null in DEFAULT_CTX) — the
+      // platform default (quarantine_visible) must apply rather than silently falling through to allow_all.
       applyCtx(accountDb, { ...DEFAULT_CTX, aliasConfig: null }, { once: true });
       // No existing sender entry for a brand-new address
       vi.mocked(accountDb.getSender).mockReturnValueOnce(Promise.resolve(ok(null)));
       await processor.processRecord(makeMessage(), 1);
 
       expect(arcDb.saveSignal).toHaveBeenCalledOnce();
-      expect(arcDb.saveArc).toHaveBeenCalledOnce();
-      expect(accountDb.saveAlias).toHaveBeenCalledOnce();
+      expect(arcDb.saveArc).not.toHaveBeenCalled();
+      expect(accountDb.saveAlias).not.toHaveBeenCalled();
+      expect(accountDb.saveSender).not.toHaveBeenCalled();
 
-      const savedConfig = vi.mocked(accountDb.saveAlias).mock.calls[0]![0] as Alias;
-      expect(savedConfig.unknownSenderPolicy).toBe("quarantine_visible");
-      expect(accountDb.saveSender).toHaveBeenCalledWith(TEST_ACCOUNT_ID, expect.any(String), "example.com", "allow");
+      const saved = vi.mocked(arcDb.saveSignal).mock.calls[0]![0] as Signal;
+      expect(saved.status).toBe("quarantine_visible");
     });
 
     it("allows signal from a known sender (eTLD+1 in approved list)", async () => {
