@@ -93,7 +93,7 @@ export class AccountDatabase {
     if (update.retentionDuration !== undefined) { setParts.push("retentionDuration = :rd"); exprValues[":rd"] = update.retentionDuration; }
     if (update.digest === null) { removeParts.push("digest"); }
     else if (update.digest !== undefined) { setParts.push("digest = :digest"); exprValues[":digest"] = update.digest; }
-    if (update.filtering !== undefined) { setParts.push("filtering = :filtering"); exprValues[":filtering"] = update.filtering; }
+    if (update.filtering !== undefined) { setParts.push("#filtering = :filtering"); exprValues[":filtering"] = update.filtering; exprNames["#filtering"] = "filtering"; }
     if (update.onboarding !== undefined) { setParts.push("onboarding = :onboarding"); exprValues[":onboarding"] = update.onboarding; }
     if (update.defaultCalendarInviteForwardingTargetId === null) { removeParts.push("defaultCalendarInviteForwardingTargetId"); }
     else if (update.defaultCalendarInviteForwardingTargetId !== undefined) { setParts.push("defaultCalendarInviteForwardingTargetId = :dcifa"); exprValues[":dcifa"] = update.defaultCalendarInviteForwardingTargetId; }

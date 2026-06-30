@@ -7,6 +7,7 @@ import type { IForwardingService } from "../forwarding/forwarding-service.js";
 import { ok, err, dbError, processorError, invalidResponseError } from "../errors.js";
 import type { DbError, InvalidResponseError, ProcessorError, TransientSesError } from "../errors.js";
 import type { Signal, Arc, Rule, Workflow, WorkflowData, Alias, AliasSender, SenderPolicy, AccountFilteringConfig, SignalSource, SignalStatus, Domain, ArcStatus, ArcUrgency, UnknownSenderPolicy, MatchedRuleResult, InvalidRuleFunctionData, InvalidTemplateFunctionData, AutoSendBlockedData, UnsubscribeInfo } from "../types/index.js";
+import { DEFAULT_UNKNOWN_SENDER_POLICY } from "../types/index.js";
 import type { ParsedMime } from "./mime.js";
 import type { ContentSanitizerClient } from "./content-sanitizer-client.js";
 import type { UserCodeExecutorClient, TemplateParameterResult } from "./user-code-client.js";
@@ -1108,7 +1109,7 @@ export class SignalProcessor {
     // 8. Assign system labels and merge classifier labels
     const effectiveFilterMode: UnknownSenderPolicy = aliasConfig
       ? aliasConfig.unknownSenderPolicy
-      : filtering?.defaultUnknownSenderPolicy ?? "allow_all";
+      : filtering?.defaultUnknownSenderPolicy ?? DEFAULT_UNKNOWN_SENDER_POLICY;
 
     // Explicit sender block — if the sender has been explicitly blocked for this alias, short-circuit
     // (post-classify path: preserves classification data on blocked signal for audit/review)
@@ -1695,7 +1696,7 @@ export class SignalProcessor {
     address: string,
     senderETLD1: string,
     existing: Alias | null,
-    defaultUnknownSenderPolicy: AccountFilteringConfig["defaultUnknownSenderPolicy"] = "quarantine_visible",
+    defaultUnknownSenderPolicy: AccountFilteringConfig["defaultUnknownSenderPolicy"] = DEFAULT_UNKNOWN_SENDER_POLICY,
     idempotencyKey: string,
   ): Promise<Result<void, DbError>> {
     // Only create the alias when we don't already have it. A known alias (`existing`

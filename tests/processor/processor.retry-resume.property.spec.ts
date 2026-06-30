@@ -5,7 +5,7 @@ import { SignalProcessor, SYSTEM_RULES } from "../../src/processor/processor.js"
 import type { ArcMatcher, InboundSignalMessage, SqsDispatcher } from "../../src/processor/processor.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
 import { makeSharedNewDeps, makeRuleEvaluator3 } from "./_shared-new-deps.js";
-import { makeArcDbMock, makeAccountDbMock, makeProcessingDbMock } from "./_helpers.js";
+import { makeArcDbMock, makeAccountDbMock, makeProcessingDbMock, applyCtx } from "./_helpers.js";
 import type { ArcDatabase } from "../../src/database/arc-database.js";
 import type { EmailService } from "../../src/email/email-service.js";
 import type { ContentSanitizerClient } from "../../src/processor/content-sanitizer-client.js";
@@ -250,6 +250,7 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
       getArc: vi.fn().mockReturnValue(Promise.resolve(ok(arc))),
     } as unknown as ArcDatabase;
     const accountDb = makeAccountDbMock(TEST_ACCOUNT_ID);
+    applyCtx(accountDb, DEFAULT_CTX);
     const processingDb = makeProcessingDbMock();
     return { arcDb, accountDb, processingDb };
   }
@@ -483,6 +484,7 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
       getSignalByMessageId: vi.fn().mockReturnValue(Promise.resolve(ok(signal))),
     } as unknown as ArcDatabase;
     const accountDb = makeAccountDbMock(TEST_ACCOUNT_ID);
+    applyCtx(accountDb, DEFAULT_CTX);
     const processingDb = makeProcessingDbMock();
 
     const auroraWriter = makeAuroraWriter();
@@ -621,6 +623,7 @@ describe("Feature: signal-processor-retry-resilience, Property 3: DDB read failu
       ...(overrides.getArc ? { getArc: overrides.getArc } : {}),
     } as unknown as ArcDatabase;
     const accountDb = makeAccountDbMock(TEST_ACCOUNT_ID);
+    applyCtx(accountDb, DEFAULT_CTX);
     const processingDb = makeProcessingDbMock();
     return { arcDb, accountDb, processingDb };
   }
@@ -786,7 +789,9 @@ describe("Feature: signal-processor-retry-resilience, Property 2: Missing signal
   };
 
   function makeStore() {
-    return { arcDb: makeArcDbMock(), accountDb: makeAccountDbMock(TEST_ACCOUNT_ID), processingDb: makeProcessingDbMock() };
+    const accountDb = makeAccountDbMock(TEST_ACCOUNT_ID);
+    applyCtx(accountDb, DEFAULT_CTX);
+    return { arcDb: makeArcDbMock(), accountDb, processingDb: makeProcessingDbMock() };
   }
 
   function makeContentSanitizer(): ContentSanitizerClient {
@@ -1131,6 +1136,7 @@ describe("Feature: signal-processor-retry-resilience, Property 8: Outcome re-der
       getArc: vi.fn().mockReturnValue(Promise.resolve(ok(arc))),
     } as unknown as ArcDatabase;
     const accountDb = makeAccountDbMock(TEST_ACCOUNT_ID);
+    applyCtx(accountDb, DEFAULT_CTX);
     const processingDb = makeProcessingDbMock();
 
     const sqsDispatcher: SqsDispatcher = {
@@ -1169,6 +1175,7 @@ describe("Feature: signal-processor-retry-resilience, Property 8: Outcome re-der
       getArc: vi.fn().mockReturnValue(Promise.resolve(ok(arc))),
     } as unknown as ArcDatabase;
     const accountDb = makeAccountDbMock(TEST_ACCOUNT_ID);
+    applyCtx(accountDb, DEFAULT_CTX);
     const processingDb = makeProcessingDbMock();
 
     const sqsDispatcher: SqsDispatcher = {
