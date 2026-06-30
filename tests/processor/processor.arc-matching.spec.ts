@@ -4,7 +4,7 @@ import { ok, err } from "../../src/errors.js";
 import { SignalProcessor } from "../../src/processor/processor.js";
 import type { ArcMatcher, InboundSignalMessage } from "../../src/processor/processor.js";
 import { makeSharedNewDeps, makeRuleEvaluator3 } from "./_shared-new-deps.js";
-import { makeArcDbMock, makeAccountDbMock, makeProcessingDbMock } from "./_helpers.js";
+import { makeArcDbMock, makeAccountDbMock, makeProcessingDbMock, mockRecipientAlias } from "./_helpers.js";
 import type { ArcDatabase } from "../../src/database/arc-database.js";
 import type { EmailService } from "../../src/email/email-service.js";
 import type { ContentSanitizerClient } from "../../src/processor/content-sanitizer-client.js";
@@ -176,6 +176,7 @@ describe("Feature: in-reply-to-arc-threading, Parallel arc matching tier selecti
   }) {
     const arcDb = (overrides.arcDb ?? makeArcDbMock()) as ArcDatabase;
     const accountDb = makeAccountDbMock(TEST_ACCOUNT_ID);
+    mockRecipientAlias(accountDb, DEFAULT_EMAIL_CONFIG);
     const processingDb = makeProcessingDbMock();
     return new SignalProcessor({
       ...makeSharedNewDeps(),

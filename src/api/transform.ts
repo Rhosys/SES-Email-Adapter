@@ -19,6 +19,7 @@ import type {
   EmailTemplate as DbEmailTemplate,
   ForwardingTarget as DbForwardingTarget,
 } from "../types/index.js";
+import { DEFAULT_UNKNOWN_SENDER_POLICY } from "../types/index.js";
 import type * as Api from "./schemas.js";
 
 // ---------------------------------------------------------------------------
@@ -306,7 +307,9 @@ export function toApiAccount(account: DbAccount): Api.Account {
     name: account.name,
     ...(account.retentionDuration ? { retentionDuration: account.retentionDuration as Api.Account["retentionDuration"] } : {}),
     ...(account.digest !== undefined ? { digest: account.digest } : {}),
-    ...(account.filtering ? { filtering: account.filtering as Api.Account["filtering"] } : {}),
+    // Always populated — accounts that never explicitly saved a filtering preference fall back to the
+    // platform default so the API never implies "no filtering" when an unknown-sender policy is in effect.
+    filtering: { defaultUnknownSenderPolicy: account.filtering?.defaultUnknownSenderPolicy ?? DEFAULT_UNKNOWN_SENDER_POLICY },
     ...(account.onboarding ? { onboarding: account.onboarding } : {}),
     ...(account.billingPlan ? { billingPlan: account.billingPlan } : {}),
     ...(account.defaultCalendarInviteForwardingTargetId ? { defaultCalendarInviteForwardingTargetId: account.defaultCalendarInviteForwardingTargetId } : {}),
