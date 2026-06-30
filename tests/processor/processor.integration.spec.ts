@@ -5,7 +5,7 @@ import { SignalProcessor, SYSTEM_RULES } from "../../src/processor/processor.js"
 import type { ArcMatcher, InboundSignalMessage, SqsDispatcher, Notifier,  ReplySender, SideEffectPayload } from "../../src/processor/processor.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
 import { makeSharedNewDeps, makeRuleEvaluator3 } from "./_shared-new-deps.js";
-import { makeArcDbMock, makeAccountDbMock, makeProcessingDbMock } from "./_helpers.js";
+import { makeArcDbMock, makeAccountDbMock, makeProcessingDbMock, applyCtx } from "./_helpers.js";
 import type { ContentSanitizerClient } from "../../src/processor/content-sanitizer-client.js";
 import type { SignalClassifier, ClassificationOutput } from "../../src/classifier/classifier.js";
 import type { EmbeddingGenerator, EmbeddingResult } from "../../src/embedding/embedding-generator.js";
@@ -84,7 +84,9 @@ const validClassification: ClassificationOutput = {
 // ---------------------------------------------------------------------------
 
 function makeStore() {
-  return { arcDb: makeArcDbMock(), accountDb: makeAccountDbMock(TEST_ACCOUNT_ID), processingDb: makeProcessingDbMock() };
+  const accountDb = makeAccountDbMock(TEST_ACCOUNT_ID);
+  applyCtx(accountDb, DEFAULT_CTX);
+  return { arcDb: makeArcDbMock(), accountDb, processingDb: makeProcessingDbMock() };
 }
 
 function makeContentSanitizer(): ContentSanitizerClient {

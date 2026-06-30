@@ -240,6 +240,11 @@ export interface UnspecifiedData {
 export const UNKNOWN_SENDER_POLICIES = ["allow_all", "quarantine_visible", "quarantine_hidden", "block_hidden", "block_reject", "report_violation"] as const;
 export type UnknownSenderPolicy = (typeof UNKNOWN_SENDER_POLICIES)[number];
 
+// The policy applied when an account has never explicitly configured AccountFilteringConfig.defaultUnknownSenderPolicy.
+// Every place that resolves this "unset" case (processor disposition, alias auto-creation, the API response) must
+// agree on this value — divergence here lets a brand-new alias's first email bypass the account's intended default.
+export const DEFAULT_UNKNOWN_SENDER_POLICY: UnknownSenderPolicy = "quarantine_visible";
+
 // active = visible in inbox; quarantine_visible = surfaced in review queue; quarantine_hidden = stored but not shown in queue; block_hidden = accepted, silently discarded; block_reject = bounced; report_violation = bounced + reported; draft = user-authored, unsent; pending_send = send initiated, within undo window; sent = delivered via SES
 export const SIGNAL_STATUSES = ["active", "block_hidden", "block_reject", "report_violation", "quarantine_visible", "quarantine_hidden", "draft", "pending_send", "sent"] as const;
 export type SignalStatus = (typeof SIGNAL_STATUSES)[number];
