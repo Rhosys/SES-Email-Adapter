@@ -161,15 +161,14 @@ describe("EventBridgeSchedulerClient", () => {
       expect(result.isOk()).toBe(true);
     });
 
-    it("logs TRACK on ResourceNotFoundException", async () => {
+    it("logs WARN on ResourceNotFoundException", async () => {
       const error = new ResourceNotFoundException({ message: "Schedule not found", Message: "Schedule not found", $metadata: {} });
       schedulerMock.on(DeleteScheduleCommand).rejects(error);
 
       await client.deleteFollowup("acc-123.sgn-456.gone");
 
-      const trackCalls = logger.calls.filter((c) => c.method === "track");
-      expect(trackCalls).toHaveLength(1);
-      expect(trackCalls[0]!.context).toMatchObject({ code: "scheduler.delete.not_found" });
+      const warnCalls = logger.calls.filter((c) => c.method === "warn" && c.context?.code === "scheduler.delete.not_found");
+      expect(warnCalls).toHaveLength(1);
     });
 
     it("logs WARN on every deleteFollowup call", async () => {
@@ -189,6 +188,15 @@ describe("EventBridgeSchedulerClient", () => {
 
       expect(result.isErr()).toBe(true);
       expect(result._unsafeUnwrapErr().kind).toBe("db_error");
+    });
+
+    it("logs TRACK on non-ResourceNotFoundException failures", async () => {
+      schedulerMock.on(DeleteScheduleCommand).rejects(new Error("Access denied"));
+
+      await client.deleteFollowup("acc-123.sgn-456.denied");
+
+      const trackCalls = logger.calls.filter((c) => c.method === "track" && c.context?.code === "scheduler.delete.failed");
+      expect(trackCalls).toHaveLength(1);
     });
   });
 
