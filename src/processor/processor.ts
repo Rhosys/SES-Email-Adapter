@@ -4,8 +4,8 @@ import { generateId } from "../utils/id.js";
 import type { Logger } from "../logger.js";
 import type { Result } from "neverthrow";
 import type { IForwardingService } from "../forwarding/forwarding-service.js";
-import { ok, err, dbError, processorError, invalidResponseError } from "../errors.js";
-import type { DbError, InvalidResponseError, ProcessorError, TransientSesError } from "../errors.js";
+import { ok, err, dbError, processorError, invalidResponseError, notFoundError } from "../errors.js";
+import type { DbError, InvalidResponseError, NotFoundError, ProcessorError, TransientSesError } from "../errors.js";
 import type { Signal, Arc, Rule, Workflow, WorkflowData, Alias, AliasSender, SenderPolicy, AccountFilteringConfig, SignalSource, SignalStatus, Domain, ArcStatus, ArcUrgency, UnknownSenderPolicy, MatchedRuleResult, InvalidRuleFunctionData, InvalidTemplateFunctionData, AutoSendBlockedData, UnsubscribeInfo } from "../types/index.js";
 import { DEFAULT_UNKNOWN_SENDER_POLICY } from "../types/index.js";
 import type { ParsedMime } from "./mime.js";
@@ -1654,11 +1654,11 @@ export class SignalProcessor {
   // Reprocess — thin wrapper that calls processMessage with force flags
   // ---------------------------------------------------------------------------
 
-  async reprocessSignal(accountId: string, signalId: string): Promise<Result<Signal, ProcessorError>> {
+  async reprocessSignal(accountId: string, signalId: string): Promise<Result<Signal, ProcessorError | NotFoundError>> {
     const existingResult = await this.arcDb.getSignalById(accountId, signalId);
     if (existingResult.isErr()) return err(processorError(existingResult.error));
     const existing = existingResult.value;
-    if (!existing) return err(processorError("Signal not found"));
+    if (!existing) return err(notFoundError("signal", signalId));
     if (existing.type !== "email") return err(processorError("Only email signals can be reprocessed"));
 
     const s3Key = existing.data.s3Key;
