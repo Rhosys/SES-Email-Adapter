@@ -100,12 +100,17 @@ export class EventBridgeSchedulerClient implements SchedulerClient {
       return ok(undefined);
     } catch (e) {
       if (e instanceof ResourceNotFoundException) {
-        this.logger.track("Schedule not found (already fired or never existed)", {
+        this.logger.warn("Schedule not found (already fired or never existed)", {
           code: "scheduler.delete.not_found",
           scheduleName,
         });
         return ok(undefined);
       }
+      this.logger.track("DeleteSchedule failed", {
+        code: "scheduler.delete.failed",
+        scheduleName,
+        error: e,
+      });
       return err(dbError(e));
     }
   }

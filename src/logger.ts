@@ -2,7 +2,11 @@ import { randomUUID } from "crypto";
 import stringify from "json-stringify-safe";
 import { DateTime } from "luxon";
 
-export type LogLevel = "info" | "track" | "warn" | "error" | "critical";
+// TRACK sits between WARN and ERROR: it always means "investigate," but never urgently.
+// WARN = system compensated, alert only if volume crosses a threshold.
+// TRACK = worth a human looking at eventually (batched daily); no alerting on its own.
+// ERROR = this specific operation failed, needs attention now.
+export type LogLevel = "info" | "warn" | "track" | "error" | "critical";
 
 export interface TrackPoint {
   name: string;
