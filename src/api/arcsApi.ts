@@ -26,7 +26,7 @@ import type { EmailService } from "../email/email-service.js";
 import type { sendRsvp as SendRsvpFn } from "../processor/calendar/rsvp-composer.js";
 import type { PostApprovalCalendarHandlerDeps } from "../processor/calendar/post-approval-handler.js";
 import type { SchedulerClient } from "../scheduler/scheduler-client.js";
-import type { ProcessorError } from "../errors.js";
+import type { NotFoundError, ProcessorError } from "../errors.js";
 import {
   UpdateArcRequest, UpdateSignalRequest, UpdateSignalStatusRequest,
   CreateDraftSignalRequest, ReplaceDraftSignalRequest,
@@ -39,7 +39,7 @@ import {
 import type { AppEnv, RouteHelpers } from "./route-helpers.js";
 
 export interface SignalReprocessor {
-  reprocessSignal(accountId: string, signalId: string): Promise<Result<Signal, ProcessorError>>;
+  reprocessSignal(accountId: string, signalId: string): Promise<Result<Signal, ProcessorError | NotFoundError>>;
 }
 
 export interface ListArcsParams extends PageParams {
@@ -881,7 +881,14 @@ export class ArcsApi {
       const accountId = c.req.param("accountId")!;
       const id = c.req.param("id")!;
       const result = await signalReprocessor.reprocessSignal(accountId, id);
-      if (result.isErr()) return err(c, 500, "Reprocess failed");
+      if (result.isErr()) {
+        const { error } = result;
+        if (error.kind === "not_found") return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
+        if (error.message === "Only email signals can be reprocessed" || error.message === "Signal has no s3Key — cannot reprocess") {
+          return err(c, 400, error.message);
+        }
+        return err(c, 500, "Reprocess failed", undefined, error.message);
+      }
       return c.json(toApiSignal(result.value), 200);
     });
   }
