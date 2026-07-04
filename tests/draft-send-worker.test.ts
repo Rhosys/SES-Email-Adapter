@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ok, err, dbError } from "../src/errors.js";
 import { DraftSendWorker } from "../src/processor/draft-send-worker.js";
-import type { IDraftSendArcDb } from "../src/processor/draft-send-worker.js";
+import type { IDraftSendThreadDb } from "../src/processor/draft-send-worker.js";
 import type { ReplySender } from "../src/processor/processor.js";
 import type { DraftSendPayload } from "../src/processor/draft-send-dispatcher.js";
 import type { Signal } from "../src/types/index.js";
@@ -12,7 +12,7 @@ function makeSignal(overrides: { data?: Partial<Signal["data"]> } & Partial<Omit
   return {
     id: "USR#signal-001",
     signalLookupId: "USR#signal-001",
-    arcId: "arc-001",
+    threadId: "arc-001",
     accountId: "acct-001",
     source: "user",
     type: "email",
@@ -40,7 +40,7 @@ function makeSignal(overrides: { data?: Partial<Signal["data"]> } & Partial<Omit
   } as Signal;
 }
 
-function makeArcDb(): IDraftSendArcDb {
+function makeThreadDb(): IDraftSendThreadDb {
   return {
     getSignalById: vi.fn().mockResolvedValue(ok(makeSignal())),
     updateSignalSendStatus: vi.fn().mockResolvedValue(ok(makeSignal({ status: "sent" }))),
@@ -60,29 +60,29 @@ const PAYLOAD: DraftSendPayload = {
 };
 
 describe("DraftSendWorker", () => {
-  let arcDb: IDraftSendArcDb;
+  let threadDb: IDraftSendThreadDb;
   let replySender: ReplySender;
   let worker: DraftSendWorker;
 
   beforeEach(() => {
     vi.clearAllMocks();
-    arcDb = makeArcDb();
+    threadDb = makeThreadDb();
     replySender = makeReplySender();
-    worker = new DraftSendWorker(arcDb, replySender, createMockLogger());
+    worker = new DraftSendWorker(threadDb, replySender, createMockLogger());
   });
 
   it("discards when signal not found (returns ok)", async () => {
-    vi.mocked(arcDb.getSignalById).mockResolvedValueOnce(ok(null));
+    vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(null));
 
     const result = await worker.process(PAYLOAD);
 
     expect(result.isOk()).toBe(true);
     expect(replySender.sendReply).not.toHaveBeenCalled();
-    expect(arcDb.updateSignalSendStatus).not.toHaveBeenCalled();
+    expect(threadDb.updateSignalSendStatus).not.toHaveBeenCalled();
   });
 
   it("discards when signal status is no longer pending_send", async () => {
-    vi.mocked(arcDb.getSignalById).mockResolvedValueOnce(ok(makeSignal({ status: "draft" })));
+    vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(makeSignal({ status: "draft" })));
 
     const result = await worker.process(PAYLOAD);
 
@@ -91,7 +91,7 @@ describe("DraftSendWorker", () => {
   });
 
   it("discards when sendInitiatedAt does not match payload (stale message)", async () => {
-    vi.mocked(arcDb.getSignalById).mockResolvedValueOnce(ok(makeSignal({ data: { sendInitiatedAt: "2024-06-01T13:00:00.000Z" } })));
+    vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(makeSignal({ data: { sendInitiatedAt: "2024-06-01T13:00:00.000Z" } })));
 
     const result = await worker.process(PAYLOAD);
 
@@ -111,20 +111,21 @@ describe("DraftSendWorker", () => {
       inReplyTo: "arc-001",
       accountId: "acct-001",
       signalId: "USR#signal-001",
-      arcId: "arc-001",
+      threadId: "arc-001",
     });
-    expect(arcDb.updateSignalSendStatus).toHaveBeenCalledWith("acct-001", "USR#signal-001", {
+    expect(threadDb.updateSignalSendStatus).toHaveBeenCalledWith("acct-001", "USR#signal-001", {
       status: "sent",
       sentAt: expect.any(String),
       sesMessageId: "ses-msg-001",
-      gsi2pk: "ACCT#acct-001#MSGID#ses-msg-001@eu-central-1.amazonses.com",
+      gsi3pk: "ACCT#acct-001#MSGID#ses-msg-001@eu-central-1.amazonses.com",
+      threadId: "arc-001",
     });
   });
 
-  it("omits arcId from sendReply opts when signal has no arcId", async () => {
-    const signalWithoutArc = makeSignal();
-    delete signalWithoutArc.arcId;
-    vi.mocked(arcDb.getSignalById).mockResolvedValueOnce(ok(signalWithoutArc));
+  it("omits threadId from sendReply opts when signal has no threadId", async () => {
+    const signalWithoutThread = makeSignal();
+    delete signalWithoutThread.threadId;
+    vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(signalWithoutThread));
 
     const result = await worker.process(PAYLOAD);
 
@@ -141,7 +142,7 @@ describe("DraftSendWorker", () => {
   });
 
   it("joins multiple recipients in the to field", async () => {
-    vi.mocked(arcDb.getSignalById).mockResolvedValueOnce(ok(makeSignal({
+    vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(makeSignal({
       data: { to: [{ address: "a@example.com" }, { address: "b@example.com" }] },
     })));
 
@@ -161,11 +162,11 @@ describe("DraftSendWorker", () => {
 
     expect(result.isErr()).toBe(true);
     expect(result._unsafeUnwrapErr().kind).toBe("transient_ses_error");
-    expect(arcDb.updateSignalSendStatus).not.toHaveBeenCalled();
+    expect(threadDb.updateSignalSendStatus).not.toHaveBeenCalled();
   });
 
   it("propagates store error when getSignal fails", async () => {
-    vi.mocked(arcDb.getSignalById).mockResolvedValueOnce(err(dbError("connection lost")));
+    vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(err(dbError("connection lost")));
 
     const result = await worker.process(PAYLOAD);
 
@@ -174,7 +175,7 @@ describe("DraftSendWorker", () => {
   });
 
   it("propagates store error when updateSignalSendStatus fails after send", async () => {
-    vi.mocked(arcDb.updateSignalSendStatus).mockResolvedValueOnce(err(dbError("write failed")));
+    vi.mocked(threadDb.updateSignalSendStatus).mockResolvedValueOnce(err(dbError("write failed")));
 
     const result = await worker.process(PAYLOAD);
 
