@@ -3,7 +3,7 @@
  * These strip internal fields, rename properties, and simplify values for the public API.
  */
 import type {
-  Arc as DbArc,
+  Thread as DbArc,
   Signal as DbSignal,
   AnySignal,
   EmailSignalData,
@@ -23,23 +23,22 @@ import { DEFAULT_UNKNOWN_SENDER_POLICY } from "../types/index.js";
 import type * as Api from "./schemas.js";
 
 // ---------------------------------------------------------------------------
-// Arc
+// Thread
 // ---------------------------------------------------------------------------
 
-export function toApiArc(arc: DbArc): Api.Arc {
+export function toApiThread(arc: DbArc): Api.Thread {
   return {
-    arcId: arc.id,
     threadId: arc.id,
-    workflow: arc.workflow as Api.Arc["workflow"],
+    workflow: arc.workflow as Api.Thread["workflow"],
     labels: arc.labels,
-    status: arc.status as Api.Arc["status"],
+    status: arc.status as Api.Thread["status"],
     summary: arc.summary,
     lastSignalAt: arc.lastSignalAt,
     ...(arc.deletedAt ? { deletedAt: arc.deletedAt } : {}),
     createdAt: arc.createdAt,
     updatedAt: arc.updatedAt,
-    ...(arc.retentionDuration ? { retentionDuration: arc.retentionDuration as Api.Arc["retentionDuration"] } : {}),
-    ...(arc.urgency ? { urgency: arc.urgency as Api.Arc["urgency"] } : {}),
+    ...(arc.retentionDuration ? { retentionDuration: arc.retentionDuration as Api.Thread["retentionDuration"] } : {}),
+    ...(arc.urgency ? { urgency: arc.urgency as Api.Thread["urgency"] } : {}),
     ...(arc.followupAt ? { followupAt: arc.followupAt } : {}),
     senderAddress: arc.senderAddress ?? "",
     recipientAddress: arc.recipientAddress ?? "",
@@ -111,7 +110,7 @@ function toApiEmailSignalData(data: EmailSignalData): Api.InboundEmailSignalData
 export function toApiSignal(signal: AnySignal): Api.Signal {
   const base = {
     signalId: signal.id,
-    ...(signal.arcId ? { arcId: signal.arcId, threadId: signal.arcId } : {}),
+    threadId: signal.threadId ?? null,
     source: toApiSource(signal.source),
     status: signal.status as Api.Signal["status"],
     createdAt: signal.createdAt,
