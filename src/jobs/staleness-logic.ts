@@ -1,21 +1,21 @@
-import type { Arc, ArcUrgency, Workflow } from "../types/index.js";
+import type { Thread, ThreadUrgency, Workflow } from "../types/index.js";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-export interface OutstandingArc {
+export interface OutstandingThread {
   id: string;
   accountId: string;
   lastSignalAt: string;
-  urgency: ArcUrgency | undefined;
+  urgency: ThreadUrgency | undefined;
   workflow: Workflow;
 }
 
 export interface AccountStalenessReport {
   accountId: string;
-  outstandingArcCount: number;
-  oldestArcLastSignalAt: string;
+  outstandingThreadCount: number;
+  oldestThreadLastSignalAt: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -23,57 +23,57 @@ export interface AccountStalenessReport {
 // ---------------------------------------------------------------------------
 
 /**
- * Determine if an arc qualifies as outstanding.
- * An arc is outstanding when ALL of:
+ * Determine if a thread qualifies as outstanding.
+ * A thread is outstanding when ALL of:
  * 1. status === "active"
  * 2. urgency !== "silent" (undefined treated as "normal")
  * 3. lastSignalAt < cutoffDate
  */
-export function isOutstandingArc(arc: Arc, cutoffDate: string): boolean {
-  if (arc.status !== "active") return false;
-  if (arc.urgency === "silent") return false;
-  if (arc.lastSignalAt >= cutoffDate) return false;
+export function isOutstandingThread(thread: Thread, cutoffDate: string): boolean {
+  if (thread.status !== "active") return false;
+  if (thread.urgency === "silent") return false;
+  if (thread.lastSignalAt >= cutoffDate) return false;
   return true;
 }
 
-/** Group outstanding arcs by accountId and compute per-account report. */
-export function buildAccountReports(arcs: OutstandingArc[]): AccountStalenessReport[] {
-  const grouped = new Map<string, OutstandingArc[]>();
-  for (const arc of arcs) {
-    const existing = grouped.get(arc.accountId);
+/** Group outstanding threads by accountId and compute per-account report. */
+export function buildAccountReports(threads: OutstandingThread[]): AccountStalenessReport[] {
+  const grouped = new Map<string, OutstandingThread[]>();
+  for (const thread of threads) {
+    const existing = grouped.get(thread.accountId);
     if (existing) {
-      existing.push(arc);
+      existing.push(thread);
     } else {
-      grouped.set(arc.accountId, [arc]);
+      grouped.set(thread.accountId, [thread]);
     }
   }
 
   const reports: AccountStalenessReport[] = [];
-  for (const [accountId, accountArcs] of grouped) {
-    let oldest = accountArcs[0]!.lastSignalAt;
-    for (let i = 1; i < accountArcs.length; i++) {
-      if (accountArcs[i]!.lastSignalAt < oldest) {
-        oldest = accountArcs[i]!.lastSignalAt;
+  for (const [accountId, accountThreads] of grouped) {
+    let oldest = accountThreads[0]!.lastSignalAt;
+    for (let i = 1; i < accountThreads.length; i++) {
+      if (accountThreads[i]!.lastSignalAt < oldest) {
+        oldest = accountThreads[i]!.lastSignalAt;
       }
     }
     reports.push({
       accountId,
-      outstandingArcCount: accountArcs.length,
-      oldestArcLastSignalAt: oldest,
+      outstandingThreadCount: accountThreads.length,
+      oldestThreadLastSignalAt: oldest,
     });
   }
 
   return reports;
 }
 
-/** Build the TRACK-level log entry for an account with outstanding arcs. */
+/** Build the TRACK-level log entry for an account with outstanding threads. */
 export function buildAccountLogEntry(report: AccountStalenessReport, timestamp: string): object {
   return {
     level: "track",
-    message: "staleness_checker.outstanding_arcs",
+    message: "staleness_checker.outstanding_threads",
     accountId: report.accountId,
-    outstandingArcCount: report.outstandingArcCount,
-    oldestArcLastSignalAt: report.oldestArcLastSignalAt,
+    outstandingThreadCount: report.outstandingThreadCount,
+    oldestThreadLastSignalAt: report.oldestThreadLastSignalAt,
     timestamp,
   };
 }
@@ -84,16 +84,16 @@ export function buildRunCompleteLogEntry(
   durationMs: number,
   timestamp: string,
 ): object {
-  let totalOutstandingArcs = 0;
+  let totalOutstandingThreads = 0;
   for (const report of reports) {
-    totalOutstandingArcs += report.outstandingArcCount;
+    totalOutstandingThreads += report.outstandingThreadCount;
   }
 
   return {
     level: "info",
     message: "staleness_checker.run_complete",
-    accountsWithOutstandingArcs: reports.length,
-    totalOutstandingArcs,
+    accountsWithOutstandingThreads: reports.length,
+    totalOutstandingThreads,
     durationMs,
     timestamp,
   };

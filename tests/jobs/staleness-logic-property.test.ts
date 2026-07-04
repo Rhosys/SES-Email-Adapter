@@ -12,16 +12,16 @@ describe("Run-complete log entry structure", () => {
     },
     {
       label: "single account report",
-      reports: [{ accountId: "acc_001", outstandingArcCount: 3, oldestArcLastSignalAt: "2024-03-01T00:00:00.000Z" }],
+      reports: [{ accountId: "acc_001", outstandingThreadCount: 3, oldestThreadLastSignalAt: "2024-03-01T00:00:00.000Z" }],
       durationMs: 500,
       timestamp: "2024-06-01T12:00:00.000Z",
     },
     {
       label: "multiple account reports — totals sum correctly",
       reports: [
-        { accountId: "acc_001", outstandingArcCount: 5, oldestArcLastSignalAt: "2024-02-01T00:00:00.000Z" },
-        { accountId: "acc_002", outstandingArcCount: 12, oldestArcLastSignalAt: "2024-01-15T00:00:00.000Z" },
-        { accountId: "acc_003", outstandingArcCount: 1, oldestArcLastSignalAt: "2024-04-01T00:00:00.000Z" },
+        { accountId: "acc_001", outstandingThreadCount: 5, oldestThreadLastSignalAt: "2024-02-01T00:00:00.000Z" },
+        { accountId: "acc_002", outstandingThreadCount: 12, oldestThreadLastSignalAt: "2024-01-15T00:00:00.000Z" },
+        { accountId: "acc_003", outstandingThreadCount: 1, oldestThreadLastSignalAt: "2024-04-01T00:00:00.000Z" },
       ],
       durationMs: 2500,
       timestamp: "2024-06-15T08:30:00.000Z",
@@ -30,13 +30,13 @@ describe("Run-complete log entry structure", () => {
 
   it.each(cases)("$label", ({ reports, durationMs, timestamp }) => {
     const result = buildRunCompleteLogEntry(reports, durationMs, timestamp);
-    const expectedTotalArcs = reports.reduce((sum, r) => sum + r.outstandingArcCount, 0);
+    const expectedTotalThreads = reports.reduce((sum, r) => sum + r.outstandingThreadCount, 0);
 
     expect(result).toEqual({
       level: "info",
       message: "staleness_checker.run_complete",
-      accountsWithOutstandingArcs: reports.length,
-      totalOutstandingArcs: expectedTotalArcs,
+      accountsWithOutstandingThreads: reports.length,
+      totalOutstandingThreads: expectedTotalThreads,
       durationMs,
       timestamp,
     });

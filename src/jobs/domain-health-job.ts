@@ -2,7 +2,7 @@ import { DateTime } from "luxon";
 import { AccountDatabase } from "../database/account-database.js";
 import { ThreadDatabase } from "../database/thread-database.js";
 import { checkDomain } from "../dns/dns-checker.js";
-import { isOutstandingArc, buildAccountLogEntry, buildAccountReports, buildRunCompleteLogEntry } from "./staleness-logic.js";
+import { isOutstandingThread, buildAccountLogEntry, buildAccountReports, buildRunCompleteLogEntry } from "./staleness-logic.js";
 import type { AccountStalenessReport } from "./staleness-logic.js";
 import { computeSnapshot, isSnapshotRow, isDiffRow, monthFromSnapshotSk, dateFromDiffSk, buildSnapshotSk } from "../database/stats-writer.js";
 import type { StatsRow, StatsMetric } from "../database/stats-writer.js";
@@ -89,7 +89,7 @@ export class DomainHealthJob {
       }
 
       const staleArcs = staleArcsResult.value;
-      const outstanding = staleArcs.filter(arc => isOutstandingArc(arc, cutoffDate));
+      const outstanding = staleArcs.filter(arc => isOutstandingThread(arc, cutoffDate));
       if (outstanding.length > 0) {
         const [report] = buildAccountReports(outstanding.map(arc => ({
           id: arc.id,
