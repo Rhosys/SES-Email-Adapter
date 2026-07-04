@@ -5,9 +5,9 @@ import { ok, err } from "../errors.js";
 import type { Logger } from "../logger.js";
 import type { ReplySender } from "./processor.js";
 import type { DraftSendPayload } from "./draft-send-dispatcher.js";
-import { buildOutboundMsgId, buildGsi2pk } from "./message-id.js";
+import { buildOutboundMsgId, buildSignalGsi3pk } from "./message-id.js";
 
-export interface IDraftSendArcDb {
+export interface IDraftSendThreadDb {
   getSignalById(accountId: string, signalId: string): Promise<Result<Signal | null, DbError>>;
   updateSignalSendStatus(accountId: string, signalLookupId: string, update: {
     status: "sent" | "draft";
@@ -15,17 +15,18 @@ export interface IDraftSendArcDb {
     sesMessageId?: string;
     sendFailureReason?: string;
     sendInitiatedAt?: string | null;
-    gsi2pk?: string;
+    gsi3pk?: string;
+    threadId?: string;
   }): Promise<Result<Signal, DbError>>;
 }
 
 export class DraftSendWorker {
-  private readonly arcDb: IDraftSendArcDb;
+  private readonly threadDb: IDraftSendThreadDb;
   private readonly replySender: ReplySender;
   private readonly logger: Logger;
 
-  constructor(arcDb: IDraftSendArcDb, replySender: ReplySender, logger: Logger) {
-    this.arcDb = arcDb;
+  constructor(threadDb: IDraftSendThreadDb, replySender: ReplySender, logger: Logger) {
+    this.threadDb = threadDb;
     this.replySender = replySender;
     this.logger = logger;
   }
@@ -34,7 +35,7 @@ export class DraftSendWorker {
     const { signalId, accountId, sendInitiatedAt } = payload;
 
     // Re-read signal — verify still pending_send
-    const signalResult = await this.arcDb.getSignalById(accountId, signalId);
+    const signalResult = await this.threadDb.getSignalById(accountId, signalId);
     if (signalResult.isErr()) return err(signalResult.error);
     const signal = signalResult.value;
 
@@ -64,10 +65,10 @@ export class DraftSendWorker {
       from,
       subject,
       body,
-      inReplyTo: signal.arcId ?? "",
+      inReplyTo: signal.threadId ?? "",
       accountId,
       signalId: signal.id,
-      ...(signal.arcId ? { arcId: signal.arcId } : {}),
+      ...(signal.threadId ? { threadId: signal.threadId } : {}),
     });
 
     if (sendResult.isErr()) {
@@ -77,18 +78,19 @@ export class DraftSendWorker {
 
     const { messageId } = sendResult.value;
 
-    // Compute outbound message ID for arc threading lookup
+    // Compute outbound message ID for thread lookup
     const SES_REGION = process.env.SES_REGION ?? 'eu-central-1';
     const outboundMsgId = buildOutboundMsgId(messageId, SES_REGION);
-    const gsi2pk = buildGsi2pk(accountId, outboundMsgId);
+    const gsi3pk = buildSignalGsi3pk(accountId, outboundMsgId);
 
     // Transition to sent
     const now = DateTime.utc().toISO()!;
-    const updateResult = await this.arcDb.updateSignalSendStatus(accountId, signal.signalLookupId, {
+    const updateResult = await this.threadDb.updateSignalSendStatus(accountId, signal.signalLookupId, {
       status: "sent",
       sentAt: now,
       sesMessageId: messageId,
-      gsi2pk,
+      gsi3pk,
+      ...(signal.threadId ? { threadId: signal.threadId } : {}),
     });
     if (updateResult.isErr()) return err(updateResult.error);
 
