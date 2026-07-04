@@ -6,14 +6,14 @@ import { getDomain } from "tldts";
 import { validateRecipientMx } from "../dns/mx-validator.js";
 import { computeUndoWindowSeconds } from "./undo-window.js";
 import { zParse } from "./validate.js";
-import { toApiArc, toApiSignal } from "./transform.js";
+import { toApiThread, toApiSignal } from "./transform.js";
 import { buildScheduleName } from "../scheduler/schedule-name.js";
 import { durationToSeconds } from "../processor/retention.js";
 import { isCalendarEventSignal, isEmailSignal } from "../types/index.js";
 import type { S3Client } from "@aws-sdk/client-s3";
 import type { Arc, Signal, AnySignal, Attachment, PageParams, ArcStatus, Workflow } from "../types/index.js";
 import type { CalendarEventData, CalendarResponseData, DomainMisconfigurationData, Pagination } from "../types/index.js";
-import type { UpdateArcFields, ArcDatabase } from "../database/arc-database.js";
+import type { UpdateThreadFields, ThreadDatabase } from "../database/thread-database.js";
 import type { AccountDatabase } from "../database/account-database.js";
 import type { Logger } from "../logger.js";
 import type { DraftSendDispatcher } from "../processor/draft-send-dispatcher.js";
@@ -23,12 +23,12 @@ import type { PostApprovalCalendarHandlerDeps } from "../processor/calendar/post
 import type { SchedulerClient } from "../scheduler/scheduler-client.js";
 import type { ProcessorError } from "../errors.js";
 import {
-  UpdateArcRequest, ReplaceDraftSignalRequest,
+  UpdateThreadRequest, ReplaceDraftSignalRequest,
   CreateDraftSignalRequest, RsvpRequest,
 } from "./requests.js";
 import {
-  Arc as ArcSchema, Signal as SignalSchema,
-  ListArcsResponse, ListSignalsResponse,
+  Thread as ThreadSchema, Signal as SignalSchema,
+  ListThreadsResponse, ListSignalsResponse,
 } from "./schemas.js";
 import type { AppEnv, RouteHelpers } from "./route-helpers.js";
 import type { SignalReprocessor, ListArcsParams } from "./arcsApi.js";
@@ -44,7 +44,7 @@ function withAttachmentUrls<T extends AnySignal>(signal: T, cdnBase: string): T 
 
 export class ThreadsApi {
   constructor(
-    private readonly arcDb: ArcDatabase,
+    private readonly arcDb: ThreadDatabase,
     private readonly accountDb: AccountDatabase,
     private readonly logger: Logger,
     private readonly draftSendDispatcher: DraftSendDispatcher,
@@ -73,7 +73,7 @@ export class ThreadsApi {
         query: z.object({ workflow: z.string().optional(), label: z.string().optional(), status: z.string().optional(), cursor: z.string().optional(), limit: z.string().optional(), q: z.string().optional() }),
       },
       middleware: [authz("arcs:read", c => `accounts/${c.req.param("accountId")!}/arcs`)] as const,
-      responses: { 200: { content: { "application/json": { schema: ListArcsResponse } }, description: "List threads" } },
+      responses: { 200: { content: { "application/json": { schema: ListThreadsResponse } }, description: "List threads" } },
     }), async (c) => {
       const accountId = c.req.param("accountId")!;
       const query = c.req.query();
@@ -83,9 +83,9 @@ export class ThreadsApi {
           ...(query["cursor"] ? { cursor: query["cursor"] } : {}),
           ...(query["limit"] ? { limit: parseInt(query["limit"], 10) } : {}),
         };
-        const result = await arcDb.searchArcs(accountId, q, params);
+        const result = await arcDb.searchThreads(accountId, q, params);
         if (result.isErr()) return err(c, 500, "Internal Server Error");
-        return c.json(page("arcs", result.value.items.map(toApiArc), result.value.nextCursor), 200);
+        return c.json(page("arcs", result.value.items.map(toApiThread), result.value.nextCursor), 200);
       }
       const params: ListArcsParams = {
         ...(query["workflow"] ? { workflow: query["workflow"] as Workflow } : {}),
@@ -94,9 +94,9 @@ export class ThreadsApi {
         ...(query["cursor"] ? { cursor: query["cursor"] } : {}),
         ...(query["limit"] ? { limit: parseInt(query["limit"], 10) } : {}),
       };
-      const result = await arcDb.listArcs(accountId, params);
+      const result = await arcDb.listThreads(accountId, params);
       if (result.isErr()) return err(c, 500, "Internal Server Error");
-      return c.json(page("arcs", result.value.items.map(toApiArc), result.value.nextCursor), 200);
+      return c.json(page("arcs", result.value.items.map(toApiThread), result.value.nextCursor), 200);
     });
 
     // -------------------------------------------------------------------------
@@ -108,15 +108,15 @@ export class ThreadsApi {
       tags: ["Threads"],
       request: { params: z.object({ accountId: z.string(), threadId: z.string() }) },
       middleware: [authz("arcs:read", c => `accounts/${c.req.param("accountId")!}/arcs/${c.req.param("threadId")!}`)] as const,
-      responses: { 200: { content: { "application/json": { schema: ArcSchema } }, description: "Get thread" } },
+      responses: { 200: { content: { "application/json": { schema: ThreadSchema } }, description: "Get thread" } },
     }), async (c) => {
       const accountId = c.req.param("accountId")!;
       const threadId = c.req.param("threadId")!;
-      const arcResult = await arcDb.getArc(accountId, threadId);
+      const arcResult = await arcDb.getThread(accountId, threadId);
       if (arcResult.isErr()) return err(c, 500, "Internal Server Error");
       const arc = arcResult.value;
-      if (!arc) return err(c, 404, "Arc not found", "ARC_NOT_FOUND");
-      return c.json(toApiArc(arc), 200);
+      if (!arc) return err(c, 404, "Thread not found", "THREAD_NOT_FOUND");
+      return c.json(toApiThread(arc), 200);
     });
 
     // -------------------------------------------------------------------------
@@ -128,15 +128,15 @@ export class ThreadsApi {
       tags: ["Threads"],
       request: { params: z.object({ accountId: z.string(), threadId: z.string() }) },
       middleware: [authz("arcs:write", c => `accounts/${c.req.param("accountId")!}/arcs/${c.req.param("threadId")!}`)] as const,
-      responses: { 200: { content: { "application/json": { schema: ArcSchema } }, description: "Update thread" } },
+      responses: { 200: { content: { "application/json": { schema: ThreadSchema } }, description: "Update thread" } },
     }), async (c) => {
       const accountId = c.req.param("accountId")!;
       const threadId = c.req.param("threadId")!;
-      const arcResult = await arcDb.getArc(accountId, threadId);
+      const arcResult = await arcDb.getThread(accountId, threadId);
       if (arcResult.isErr()) return err(c, 500, "Internal Server Error");
       const arc = arcResult.value;
-      if (!arc) return err(c, 404, "Arc not found", "ARC_NOT_FOUND");
-      const body = await zParse(UpdateArcRequest, c.req.raw);
+      if (!arc) return err(c, 404, "Thread not found", "THREAD_NOT_FOUND");
+      const body = await zParse(UpdateThreadRequest, c.req.raw);
 
       if (body.status === "report_violation") {
         const signalsResult = await arcDb.listSignals(accountId, arc.id, { limit: 1 });
@@ -152,12 +152,12 @@ export class ThreadsApi {
             code: "api.arc.report_violation", signal, arc, senderDomain: senderETLD1,
           });
         }
-        const updateResult = await arcDb.updateArc(accountId, arc.id, "deleted", arc.lastSignalAt, {});
+        const updateResult = await arcDb.updateThread(accountId, arc.id, "deleted", arc.lastSignalAt, {});
         if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
-        return c.json(toApiArc(updateResult.value), 200);
+        return c.json(toApiThread(updateResult.value), 200);
       }
 
-      const fields: UpdateArcFields = {};
+      const fields: UpdateThreadFields = {};
       if (body.urgency !== undefined) fields.urgency = body.urgency;
       if (body.labels !== undefined) fields.labels = body.labels;
       if (body.followupAt !== undefined) fields.followupAt = body.followupAt;
@@ -178,7 +178,7 @@ export class ThreadsApi {
       }
 
       const statusChanged = body.status !== undefined && body.status !== arc.status;
-      const updateResult = await arcDb.updateArc(accountId, arc.id, status, lastSignalAt, fields);
+      const updateResult = await arcDb.updateThread(accountId, arc.id, status, lastSignalAt, fields);
       if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
 
       if (body.followupAt && schedulerClient) {
@@ -189,12 +189,12 @@ export class ThreadsApi {
           suffix: "followup", sqsMessageAttributeMessageType: "signal_followup",
         });
         if (scheduleResult.isErr()) {
-          if (statusChanged) await arcDb.updateArc(accountId, arc.id, arc.status, arc.lastSignalAt, {});
+          if (statusChanged) await arcDb.updateThread(accountId, arc.id, arc.status, arc.lastSignalAt, {});
           return err(c, 500, "Failed to create followup schedule");
         }
       }
 
-      return c.json(toApiArc(updateResult.value), 200);
+      return c.json(toApiThread(updateResult.value), 200);
     });
 
     // -------------------------------------------------------------------------
@@ -213,10 +213,10 @@ export class ThreadsApi {
     }), async (c) => {
       const accountId = c.req.param("accountId")!;
       const threadId = c.req.param("threadId")!;
-      const arcResult = await arcDb.getArc(accountId, threadId);
+      const arcResult = await arcDb.getThread(accountId, threadId);
       if (arcResult.isErr()) return err(c, 500, "Internal Server Error");
       const arc = arcResult.value;
-      if (!arc) return err(c, 404, "Arc not found", "ARC_NOT_FOUND");
+      if (!arc) return err(c, 404, "Thread not found", "THREAD_NOT_FOUND");
       const query = c.req.query();
       const params: PageParams = {
         ...(query["cursor"] ? { cursor: query["cursor"] } : {}),
@@ -265,17 +265,17 @@ export class ThreadsApi {
     }), async (c) => {
       const accountId = c.req.param("accountId")!;
       const threadId = c.req.param("threadId")!;
-      const arcResult = await arcDb.getArc(accountId, threadId);
+      const arcResult = await arcDb.getThread(accountId, threadId);
       if (arcResult.isErr()) return err(c, 500, "Internal Server Error");
       const arc = arcResult.value;
-      if (!arc || arc.status === "deleted") return err(c, 404, "Arc not found", "ARC_NOT_FOUND");
+      if (!arc || arc.status === "deleted") return err(c, 404, "Thread not found", "THREAD_NOT_FOUND");
       const body = await zParse(CreateDraftSignalRequest, c.req.raw);
       const now = DateTime.utc().toISO()!;
       const id = generateId("sgn-");
       const signal: Signal = {
         id,
         signalLookupId: id,
-        arcId: arc.id,
+        threadId: arc.id,
         accountId,
         source: "user",
         type: "email",
@@ -301,7 +301,7 @@ export class ThreadsApi {
       };
       const createResult = await arcDb.createSignal(signal);
       if (createResult.isErr()) return err(c, 500, "Internal Server Error");
-      await arcDb.updateArc(accountId, arc.id, arc.status, now, {});
+      await arcDb.updateThread(accountId, arc.id, arc.status, now, {});
       return c.json(toApiSignal(createResult.value), 201);
     });
 
@@ -318,15 +318,15 @@ export class ThreadsApi {
     }), async (c) => {
       const accountId = c.req.param("accountId")!;
       const threadId = c.req.param("threadId")!;
-      const arcResult = await arcDb.getArc(accountId, threadId);
+      const arcResult = await arcDb.getThread(accountId, threadId);
       if (arcResult.isErr()) return err(c, 500, "Internal Server Error");
       const arc = arcResult.value;
-      if (!arc) return err(c, 404, "Arc not found", "ARC_NOT_FOUND");
+      if (!arc) return err(c, 404, "Thread not found", "THREAD_NOT_FOUND");
       const signalResult = await arcDb.getSignalById(accountId, c.req.param("id")!, threadId);
       if (signalResult.isErr()) return err(c, 500, "Internal Server Error");
       const signal = signalResult.value;
       if (!signal) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
-      if (signal.arcId !== arc.id) return err(c, 400, "Signal does not belong to this arc", "SIGNAL_ARC_MISMATCH");
+      if (signal.threadId !== arc.id) return err(c, 400, "Signal does not belong to this thread", "SIGNAL_THREAD_MISMATCH");
       if (signal.status === "sent") return err(c, 400, "Signal already sent", "SIGNAL_ALREADY_SENT");
       if (signal.status !== "draft") return err(c, 400, "Only draft signals can be replaced", "SIGNAL_NOT_DRAFT");
       const body = await zParse(ReplaceDraftSignalRequest, c.req.raw);
@@ -354,16 +354,16 @@ export class ThreadsApi {
       const accountId = c.req.param("accountId")!;
       const threadId = c.req.param("threadId")!;
 
-      const arcResult = await arcDb.getArc(accountId, threadId);
+      const arcResult = await arcDb.getThread(accountId, threadId);
       if (arcResult.isErr()) return err(c, 500, "Internal Server Error");
       const arc = arcResult.value;
-      if (!arc) return err(c, 404, "Arc not found", "ARC_NOT_FOUND");
+      if (!arc) return err(c, 404, "Thread not found", "THREAD_NOT_FOUND");
 
       const signalResult = await arcDb.getSignalById(accountId, c.req.param("id")!, threadId);
       if (signalResult.isErr()) return err(c, 500, "Internal Server Error");
       const signal = signalResult.value;
       if (!signal) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
-      if (signal.arcId !== arc.id) return err(c, 400, "Signal does not belong to this arc", "SIGNAL_ARC_MISMATCH");
+      if (signal.threadId !== arc.id) return err(c, 400, "Signal does not belong to this thread", "SIGNAL_THREAD_MISMATCH");
       if (signal.status !== "draft") return err(c, 400, "Only draft signals can be sent", "SIGNAL_NOT_DRAFT");
 
       const mxResult = await validateRecipientMx(signal.data.to);
@@ -412,10 +412,10 @@ export class ThreadsApi {
     }), async (c) => {
       const accountId = c.req.param("accountId")!;
       const threadId = c.req.param("threadId")!;
-      const arcResult = await arcDb.getArc(accountId, threadId);
+      const arcResult = await arcDb.getThread(accountId, threadId);
       if (arcResult.isErr()) return err(c, 500, "Internal Server Error");
       const arc = arcResult.value;
-      if (!arc) return err(c, 404, "Arc not found", "ARC_NOT_FOUND");
+      if (!arc) return err(c, 404, "Thread not found", "THREAD_NOT_FOUND");
 
       const signalsResult = await arcDb.listSignals(accountId, arc.id, { limit: 20 });
       if (signalsResult.isErr()) return err(c, 500, "Internal Server Error");
@@ -459,7 +459,7 @@ export class ThreadsApi {
         });
       }
 
-      const archiveResult = await arcDb.updateArc(accountId, arc.id, "archived", arc.lastSignalAt, {});
+      const archiveResult = await arcDb.updateThread(accountId, arc.id, "archived", arc.lastSignalAt, {});
       if (archiveResult.isErr()) return err(c, 500, "Internal Server Error");
 
       const responseUrl = unsubscribe.type !== "server" ? unsubscribe.url : undefined;
@@ -481,16 +481,16 @@ export class ThreadsApi {
       const threadId = c.req.param("threadId")!;
       if (!emailService || !rsvpComposer) return err(c, 501, "RSVP not configured");
 
-      const arcResult = await arcDb.getArc(accountId, threadId);
+      const arcResult = await arcDb.getThread(accountId, threadId);
       if (arcResult.isErr()) return err(c, 500, "Internal Server Error");
       const arc = arcResult.value;
-      if (!arc) return err(c, 404, "Arc not found", "ARC_NOT_FOUND");
+      if (!arc) return err(c, 404, "Thread not found", "THREAD_NOT_FOUND");
 
       const signalResult = await arcDb.getSignalById(accountId, c.req.param("id")!, threadId);
       if (signalResult.isErr()) return err(c, 500, "Internal Server Error");
       const signal = signalResult.value;
       if (!signal) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
-      if (signal.arcId !== arc.id) return err(c, 400, "Signal does not belong to this arc", "SIGNAL_ARC_MISMATCH");
+      if (signal.threadId !== arc.id) return err(c, 400, "Signal does not belong to this thread", "SIGNAL_THREAD_MISMATCH");
       if (!isCalendarEventSignal(signal)) return err(c, 400, "Signal is not a calendar event", "NOT_CALENDAR_EVENT");
 
       const calendarData = signal.data;
@@ -513,7 +513,7 @@ export class ThreadsApi {
         const misconfigSignal: Signal<DomainMisconfigurationData> = {
           id: misconfigSignalId,
           signalLookupId: misconfigSignalId,
-          arcId: arc.id,
+          threadId: arc.id,
           accountId,
           source: "signal",
           type: "domain_misconfiguration",
@@ -550,7 +550,7 @@ export class ThreadsApi {
       const responseSignal: Signal<CalendarResponseData> = {
         id: responseSignalId,
         signalLookupId: responseSignalId,
-        arcId: arc.id,
+        threadId: arc.id,
         accountId,
         source: "user",
         type: "calendar_response",
