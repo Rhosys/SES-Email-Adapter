@@ -134,7 +134,7 @@ describe("processSideEffect — correlation context", () => {
   // -------------------------------------------------------------------------
 
   describe("pong side-effect", () => {
-    it("calls sendReply with accountId, signalId, and arcId", async () => {
+    it("calls sendReply with accountId, signalId, and threadId", async () => {
       const replySender: ReplySender = { sendReply: vi.fn().mockResolvedValue(ok({ messageId: "pong-msg-001" })) };
       const forwardingService: IForwardingService = { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), sendVerification: vi.fn().mockResolvedValue(ok(undefined)), verifyWebhook: vi.fn().mockResolvedValue(ok(undefined)) };
       const processor = makeProcessor({ replySender, forwardingService });
@@ -152,7 +152,7 @@ describe("processSideEffect — correlation context", () => {
       const opts = vi.mocked(replySender.sendReply).mock.calls[0]![0];
       expect(opts.accountId).toBe(TEST_ACCOUNT_ID);
       expect(opts.signalId).toBe("sgn-pong-123");
-      expect(opts.arcId).toBe("arc-pong-456");
+      expect(opts.threadId).toBe("arc-pong-456");
     });
   });
 

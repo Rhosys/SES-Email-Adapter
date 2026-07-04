@@ -22,7 +22,7 @@ import { LambdaContentSanitizer } from "./processor/content-sanitizer-client.js"
 import { JsonLogicRuleEvaluator } from "./processor/rule-evaluator.js";
 import { LambdaUserCodeExecutor } from "./processor/user-code-client.js";
 import { AccountDatabase } from "./database/account-database.js";
-import { ArcDatabase } from "./database/arc-database.js";
+import { ThreadDatabase } from "./database/thread-database.js";
 import { ProcessingDatabase } from "./database/processing-database.js";
 import { AuditDatabase } from "./database/audit-database.js";
 import { SESv2Client } from "@aws-sdk/client-sesv2";
@@ -106,7 +106,7 @@ const classifier = new SignalClassifier(bedrock, logger);
 const embeddingGenerator = new BedrockEmbeddingGenerator(bedrock, logger);
 
 const accountDb = new AccountDatabase(logger);
-const arcDb = new ArcDatabase(logger);
+const arcDb = new ThreadDatabase(logger);
 const processingDb = new ProcessingDatabase();
 const auditDb = new AuditDatabase();
 const deviceStore = new DynamoDeviceStore();
@@ -440,8 +440,8 @@ async function processSqsRecord(
 
   if (messageType === MSG_TYPE_SIDE_EFFECT) {
     const payload = body as SideEffectPayload;
-    if (!payload.signal || !payload.arc) {
-      logger.error("Malformed side-effect payload — missing signal or arc. Dropping message.", { code: "handler.sqs.malformed_side_effect", messageId });
+    if (!payload.signal || (!payload.thread && !payload.arc)) {
+      logger.error("Malformed side-effect payload — missing signal or thread. Dropping message.", { code: "handler.sqs.malformed_side_effect", messageId });
       return ok(undefined);
     }
     return processor.processSideEffect(payload, receiveCount);

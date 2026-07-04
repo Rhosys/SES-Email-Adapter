@@ -26,12 +26,12 @@ export class ReplySenderService implements ReplySender {
     inReplyTo: string;
     accountId: string;
     signalId?: string;
-    arcId?: string;
+    threadId?: string;
   }): Promise<Result<{ messageId: string }, TransientSesError>> {
     const tags = buildOutboundTags("reply", {
       accountId: opts.accountId,
       signalId: opts.signalId,
-      arcId: opts.arcId,
+      arcId: opts.threadId,
     });
 
     return this.emailService.send({

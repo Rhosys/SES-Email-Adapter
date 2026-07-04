@@ -202,7 +202,7 @@ function makeExistingSignal(overrides: Partial<Omit<Signal, "data">> & { data?: 
   return {
     id: "sgn-integration001",
     signalLookupId: `ses-${SES_MESSAGE_ID}`,
-    arcId: "arc-integration-001",
+    threadId: "arc-integration-001",
     accountId: TEST_ACCOUNT_ID,
     source: "email",
     type: "email",
@@ -333,14 +333,14 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
 
       // Arc was saved before signal
       const callOrder: string[] = [];
-      vi.mocked(arcDb.saveArc).mock.invocationCallOrder.forEach(() => callOrder.push("saveArc"));
+      vi.mocked(arcDb.saveThread).mock.invocationCallOrder.forEach(() => callOrder.push("saveArc"));
       vi.mocked(arcDb.saveSignal).mock.invocationCallOrder.forEach(() => callOrder.push("saveSignal"));
       // Verify saveArc was called
-      expect(arcDb.saveArc).toHaveBeenCalled();
+      expect(arcDb.saveThread).toHaveBeenCalled();
       // Verify saveSignal was called
       expect(arcDb.saveSignal).toHaveBeenCalled();
       // saveArc invocation order < saveSignal invocation order
-      const arcOrder = vi.mocked(arcDb.saveArc).mock.invocationCallOrder[0]!;
+      const arcOrder = vi.mocked(arcDb.saveThread).mock.invocationCallOrder[0]!;
       const signalOrder = vi.mocked(arcDb.saveSignal).mock.invocationCallOrder[0]!;
       expect(arcOrder).toBeLessThan(signalOrder);
 
@@ -358,17 +358,17 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
       expect(dispatchOrder).toBeGreaterThan(auroraOrder);
     });
 
-    it("dispatches side-effect payload containing signal and arc", async () => {
+    it("dispatches side-effect payload containing signal and thread", async () => {
       const message = makeMessage({});
 
       await processor.processRecord(message, 1);
 
       const payload = vi.mocked(sqsDispatcher.sendMessage).mock.calls[0]![0];
       expect(payload.signal).toBeDefined();
-      expect(payload.arc).toBeDefined();
+      expect(payload.thread).toBeDefined();
       expect(payload.signal.accountId).toBe(TEST_ACCOUNT_ID);
-      expect(payload.arc.accountId).toBe(TEST_ACCOUNT_ID);
-      expect(payload.signal.arcId).toBe(payload.arc.id);
+      expect(payload.thread!.accountId).toBe(TEST_ACCOUNT_ID);
+      expect(payload.signal.threadId).toBe(payload.thread!.id);
     });
   });
 
@@ -382,7 +382,7 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
 
     beforeEach(() => {
       vi.mocked(arcDb.getSignalByMessageId).mockReturnValue(Promise.resolve(ok(existingSignal)));
-      vi.mocked(arcDb.getArc).mockReturnValue(Promise.resolve(ok(existingArc)));
+      vi.mocked(arcDb.getThread).mockReturnValue(Promise.resolve(ok(existingArc)));
     });
 
     it("skips parse, classify, and embedding — resumes from S3 retention → Aurora → dispatch", async () => {
@@ -397,7 +397,7 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
       expect(arcDb.getSignalByMessageId).toHaveBeenCalledWith(TEST_ACCOUNT_ID, SES_MESSAGE_ID);
 
       // Arc was loaded from DDB
-      expect(arcDb.getArc).toHaveBeenCalledWith(TEST_ACCOUNT_ID, existingSignal.arcId);
+      expect(arcDb.getThread).toHaveBeenCalledWith(TEST_ACCOUNT_ID, existingSignal.threadId);
 
       // Expensive operations were NOT called
       expect(contentSanitizer.invoke).not.toHaveBeenCalled();
@@ -405,7 +405,7 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
       expect(embeddingGenerator.generateForModel).not.toHaveBeenCalled();
 
       // No new DDB saves (arc and signal already exist)
-      expect(arcDb.saveArc).not.toHaveBeenCalled();
+      expect(arcDb.saveThread).not.toHaveBeenCalled();
       expect(arcDb.saveSignal).not.toHaveBeenCalled();
 
       // S3 retention was attempted (idempotent, always runs)
@@ -418,7 +418,7 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
       expect(sqsDispatcher.sendMessage).toHaveBeenCalledOnce();
       const payload = vi.mocked(sqsDispatcher.sendMessage).mock.calls[0]![0];
       expect(payload.signal.id).toBe(existingSignal.id);
-      expect(payload.arc.id).toBe(existingArc.id);
+      expect(payload.thread!.id).toBe(existingArc.id);
     });
   });
 
@@ -432,7 +432,7 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
 
     beforeEach(() => {
       vi.mocked(arcDb.getSignalByMessageId).mockReturnValue(Promise.resolve(ok(existingSignal)));
-      vi.mocked(arcDb.getArc).mockReturnValue(Promise.resolve(ok(existingArc)));
+      vi.mocked(arcDb.getThread).mockReturnValue(Promise.resolve(ok(existingArc)));
       // Aurora fails
       vi.mocked(auroraWriter.upsertEmbedding).mockResolvedValue(err(dbError(new Error("Aurora cluster timeout"))));
     });

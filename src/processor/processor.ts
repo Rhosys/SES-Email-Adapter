@@ -17,7 +17,7 @@ import type { SignalClassifier, ClassificationOutput } from "../classifier/class
 import { RELEVANT_HEADERS } from "../classifier/prompt-builder.js";
 import type { EmbeddingGenerator } from "../embedding/embedding-generator.js";
 import type { MultiClusterAuroraWriter } from "../database/arc-matcher.js";
-import type { ArcDatabase, UpdateArcFields } from "../database/arc-database.js";
+import type { ThreadDatabase, UpdateThreadFields } from "../database/thread-database.js";
 import type { AccountDatabase } from "../database/account-database.js";
 import type { ProcessingDatabase } from "../database/processing-database.js";
 import type { S3RetentionService } from "../embedding/s3-retention-service.js";
@@ -42,7 +42,7 @@ import type { CalendarEventData, CalendarInviteInvalidData } from "../types/cale
 import type { SchedulerClient } from "../scheduler/scheduler-client.js";
 import { buildScheduleName } from "../scheduler/schedule-name.js";
 import { RSVP_REMINDER_HOURS_BEFORE } from "../scheduler/rsvp-reminder.js";
-import { extractMsgId, buildGsi2pk, extractFirstInReplyTo } from "./message-id.js";
+import { extractMsgId, buildSignalGsi3pk, extractFirstInReplyTo } from "./message-id.js";
 
 // ---------------------------------------------------------------------------
 // Message types
@@ -52,7 +52,10 @@ export type ProcessorMessageType = "inbound_signal" | "side_effect";
 
 export interface SideEffectPayload {
   signal: Signal;
-  arc: Arc;
+  /** Primary field — new messages use `thread` */
+  thread?: Arc;
+  /** @deprecated Retained for in-flight SQS backward compatibility during deploy */
+  arc?: Arc;
 }
 
 export interface SqsDispatcher {
@@ -89,7 +92,7 @@ export interface ReplySender {
     inReplyTo: string;
     accountId?: string;
     signalId?: string;
-    arcId?: string;
+    threadId?: string;
   }): Promise<Result<{ messageId: string }, TransientSesError>>;
 }
 
@@ -182,7 +185,7 @@ async function applyRules(
       const timestamp = DateTime.utc().toISO()!;
       const ttl = Math.floor(Date.now() / 1000) + 90 * 24 * 60 * 60;
       const result = await saveSignal({
-        id, signalLookupId: id, arcId: context.arc.id, accountId: rule.accountId,
+        id, signalLookupId: id, threadId: context.arc.id, accountId: rule.accountId,
         source: "email", type: "invalid_rule_function", status: "active",
         labels: [],
         createdAt: timestamp, ttl,
@@ -258,7 +261,7 @@ export { SYSTEM_RULES } from "./system-rules.js";
 // ---------------------------------------------------------------------------
 
 interface SignalProcessorOptions {
-  arcDb: ArcDatabase;
+  arcDb: ThreadDatabase;
   accountDb: AccountDatabase;
   processingDb: ProcessingDatabase;
   contentSanitizer: ContentSanitizerClient;
@@ -285,7 +288,7 @@ interface SignalProcessorOptions {
 }
 
 export class SignalProcessor {
-  private readonly arcDb: ArcDatabase;
+  private readonly arcDb: ThreadDatabase;
   private readonly accountDb: AccountDatabase;
   private readonly processingDb: ProcessingDatabase;
   private readonly contentSanitizer: ContentSanitizerClient;
@@ -371,17 +374,18 @@ export class SignalProcessor {
   }
 
   async processSideEffect(payload: SideEffectPayload, receiveCount = 1): Promise<Result<void, ProcessorError>> {
-    const { signal, arc: payloadArc } = payload;
+    const { signal, thread: payloadThread, arc: payloadArc } = payload;
+    const payloadArcResolved = payloadThread ?? payloadArc!;
     const accountId = signal.accountId;
 
     // On retries the payload arc snapshot may be stale — refetch from DDB
     let arc: Arc;
     if (receiveCount > 1) {
-      const arcResult = await this.arcDb.getArc(accountId, payloadArc.id);
+      const arcResult = await this.arcDb.getThread(accountId, payloadArcResolved.id);
       if (arcResult.isErr()) return err(processorError(arcResult.error));
-      arc = arcResult.value ?? payloadArc;
+      arc = arcResult.value ?? payloadArcResolved;
     } else {
-      arc = payloadArc;
+      arc = payloadArcResolved;
     }
 
     // Re-derive outcome from persisted matchedRules
@@ -396,7 +400,7 @@ export class SignalProcessor {
     if (!outcome.suppressNotification) effectTypes.push("notify");
     if (outcome.doPong) effectTypes.push("pong");
     if (autoDraftActions.length > 0) effectTypes.push("auto_draft");
-    this.logger.info("Outcome derived from matchedRules — executing side-effects.", { code: "processor.side_effect.outcome_derived", accountId, signalId: signal.id, arcId: arc.id, effectTypes });
+    this.logger.info("Outcome derived from matchedRules — executing side-effects.", { code: "processor.side_effect.outcome_derived", accountId, signalId: signal.id, threadId: arc.id, effectTypes });
 
     // Critical side-effects (forward, pong) force retry on failure.
     // Best-effort side-effects (notify, auto-send) are logged and swallowed.
@@ -462,7 +466,7 @@ export class SignalProcessor {
           inReplyTo: signal.id,
           accountId,
           signalId: signal.id,
-          arcId: arc.id,
+          threadId: arc.id,
         });
         if (pongResult.isErr()) {
           this.logger.track("Side-effect pong failed — will force retry.", { code: "processor.side_effect.pong_failed", signal, arc, payload, error: pongResult.error });
@@ -529,7 +533,7 @@ export class SignalProcessor {
                 {
                   const sigId = generateId("sgn-");
                   const sigTs = DateTime.utc().toISO()!;
-                  await this.arcDb.saveSignal({ id: sigId, signalLookupId: sigId, arcId: arc.id, accountId, source: "email", type: "invalid_template_function", status: "active", labels: [], createdAt: sigTs, ttl: Math.floor(Date.now() / 1000) + 90 * 24 * 60 * 60, data: { resourceName: tmpl.name, functionName: fn.name, issue } });
+                  await this.arcDb.saveSignal({ id: sigId, signalLookupId: sigId, threadId: arc.id, accountId, source: "email", type: "invalid_template_function", status: "active", labels: [], createdAt: sigTs, ttl: Math.floor(Date.now() / 1000) + 90 * 24 * 60 * 60, data: { resourceName: tmpl.name, functionName: fn.name, issue } });
                 }
                 actionVars[`fn.${fn.name}`] = "";
                 preventAutoSend = true;
@@ -551,7 +555,7 @@ export class SignalProcessor {
                   {
                     const sigId = generateId("sgn-");
                     const sigTs = DateTime.utc().toISO()!;
-                    await this.arcDb.saveSignal({ id: sigId, signalLookupId: sigId, arcId: arc.id, accountId, source: "email", type: "invalid_template_function", status: "active", labels: [], createdAt: sigTs, ttl: Math.floor(Date.now() / 1000) + 90 * 24 * 60 * 60, data: { resourceName: tmpl.name, functionName: fn.name, issue } });
+                    await this.arcDb.saveSignal({ id: sigId, signalLookupId: sigId, threadId: arc.id, accountId, source: "email", type: "invalid_template_function", status: "active", labels: [], createdAt: sigTs, ttl: Math.floor(Date.now() / 1000) + 90 * 24 * 60 * 60, data: { resourceName: tmpl.name, functionName: fn.name, issue } });
                   }
                   actionVars[`fn.${fn.name}`] = "";
                   preventAutoSend = true;
@@ -584,7 +588,7 @@ export class SignalProcessor {
               {
                 const sigId = generateId("sgn-");
                 const sigTs = DateTime.utc().toISO()!;
-                await this.arcDb.saveSignal({ id: sigId, signalLookupId: sigId, arcId: arc.id, accountId, source: "email", type: "auto_send_blocked", status: "active", labels: [], createdAt: sigTs, ttl: Math.floor(Date.now() / 1000) + 90 * 24 * 60 * 60, data: { recipientAddress: signal.data.recipientAddress } });
+                await this.arcDb.saveSignal({ id: sigId, signalLookupId: sigId, threadId: arc.id, accountId, source: "email", type: "auto_send_blocked", status: "active", labels: [], createdAt: sigTs, ttl: Math.floor(Date.now() / 1000) + 90 * 24 * 60 * 60, data: { recipientAddress: signal.data.recipientAddress } });
               }
             }
           }
@@ -595,7 +599,7 @@ export class SignalProcessor {
           const draft: Signal = {
             id: draftId,
             signalLookupId: draftId,
-            arcId: arc.id,
+            threadId: arc.id,
             accountId,
             source: "user",
             type: "email",
@@ -640,7 +644,7 @@ export class SignalProcessor {
           }
 
           if (preventAutoSend && autoSend) {
-            this.logger.info("Auto-send skipped — template function returned null or errored.", { code: "processor.side_effect.auto_draft_prevent_send", accountId, signalId: signal.id, arcId: arc.id, templateId });
+            this.logger.info("Auto-send skipped — template function returned null or errored.", { code: "processor.side_effect.auto_draft_prevent_send", accountId, signalId: signal.id, threadId: arc.id, templateId });
           }
         }
         this.logger.trackPoint("side_effect_auto_draft_complete");
@@ -730,9 +734,9 @@ export class SignalProcessor {
           // Retry after the signal was already saved — arc is guaranteed to exist (arc is
           // saved before signal). Resume from the idempotent convergence point rather than
           // re-running classify/embed/match.
-          this.logger.info("Signal found in DDB on retry — resuming from the convergence point.", { code: "processor.retry_signal_found", signalId: existing.id, arcId: existing.arcId, accountId, sesMessageId, receiveCount });
-          if (!existing.arcId) return err(dbError("signal missing arcId on retry"));
-          const arcResult = await this.arcDb.getArc(accountId, existing.arcId);
+          this.logger.info("Signal found in DDB on retry — resuming from the convergence point.", { code: "processor.retry_signal_found", signalId: existing.id, threadId: existing.threadId, accountId, sesMessageId, receiveCount });
+          if (!existing.threadId) return err(dbError("signal missing threadId on retry"));
+          const arcResult = await this.arcDb.getThread(accountId, existing.threadId);
           if (arcResult.isErr()) return err(arcResult.error);
           this.logger.trackPoint("retry_arc_lookup");
           const arc = arcResult.value;
@@ -856,10 +860,10 @@ export class SignalProcessor {
     };
     this.logger.trackPoint("email_parsed");
 
-    // Extract Message-ID for GSI2 threading index (used by In-Reply-To arc matching)
+    // Extract Message-ID for GSI3 threading index (used by In-Reply-To arc matching)
     const rawMessageId = parsed.headers["message-id"];
     const msgId = rawMessageId ? extractMsgId(rawMessageId) : null;
-    const gsi2pk = msgId ? buildGsi2pk(accountId, msgId) : undefined;
+    const gsi3pk = msgId ? buildSignalGsi3pk(accountId, msgId) : undefined;
 
     const senderETLD1 = getETLD1(parsed.from.address);
 
@@ -889,7 +893,7 @@ export class SignalProcessor {
         labels: [],
         createdAt: now,
         retentionDuration: effectiveRetention,
-        ...(gsi2pk !== undefined ? { gsi2pk } : {}),
+        ...(gsi3pk !== undefined ? { gsi3pk } : {}),
         data: {
           sesMessageId,
           s3Key,
@@ -1007,26 +1011,26 @@ export class SignalProcessor {
     const tier1Promise = (async (): Promise<Arc | null> => {
       if (!groupingKey) return null;
       this.logger.trackPoint("arc_matcher_grouping_key_lookup");
-      const gkResult = await this.arcDb.fastFindArcByAlternativeLookupKey(accountId, groupingKey);
+      const gkResult = await this.arcDb.findThreadByGroupingKey(accountId, groupingKey);
       if (gkResult.isErr()) return null;
       return gkResult.value;
     })();
 
-    // Tier 1.5: In-Reply-To GSI2 lookup
+    // Tier 1.5: In-Reply-To GSI3 lookup
     const tier15Promise = (async (): Promise<Arc | null> => {
       const inReplyToHeader = parsed.headers["in-reply-to"];
       if (!inReplyToHeader) return null;
       const firstMsgId = extractFirstInReplyTo(inReplyToHeader);
       if (!firstMsgId) return null;
-      const lookupKey = buildGsi2pk(accountId, firstMsgId);
+      const lookupKey = buildSignalGsi3pk(accountId, firstMsgId);
       const signalResult = await this.arcDb.findSignalByEmailMessageId(lookupKey);
       if (signalResult.isErr()) {
-        this.logger.warn("GSI2 In-Reply-To lookup failed — treating as miss.", { code: "processor.in_reply_to.gsi2_error", accountId, sesMessageId, error: signalResult.error });
+        this.logger.warn("GSI3 In-Reply-To lookup failed — treating as miss.", { code: "processor.in_reply_to.gsi3_error", accountId, sesMessageId, error: signalResult.error });
         return null;
       }
       const foundSignal = signalResult.value;
-      if (!foundSignal || !foundSignal.arcId) return null;
-      const arcResult = await this.arcDb.getArc(accountId, foundSignal.arcId);
+      if (!foundSignal || !foundSignal.threadId) return null;
+      const arcResult = await this.arcDb.getThread(accountId, foundSignal.threadId);
       if (arcResult.isErr()) {
         this.logger.warn("In-Reply-To arc fetch failed — treating as miss.", { code: "processor.in_reply_to.arc_fetch_error", accountId, sesMessageId, error: arcResult.error });
         return null;
@@ -1046,19 +1050,19 @@ export class SignalProcessor {
 
     // Discrepancy detection — log when multiple tiers produce different results
     const matchedArcs = [
-      ...(tier1Arc ? [{ tier: "groupingKey" as const, arcId: tier1Arc.id }] : []),
-      ...(tier15Arc ? [{ tier: "inReplyTo" as const, arcId: tier15Arc.id }] : []),
-      ...(tier2Arc ? [{ tier: "similarity" as const, arcId: tier2Arc.id }] : []),
+      ...(tier1Arc ? [{ tier: "groupingKey" as const, threadId: tier1Arc.id }] : []),
+      ...(tier15Arc ? [{ tier: "inReplyTo" as const, threadId: tier15Arc.id }] : []),
+      ...(tier2Arc ? [{ tier: "similarity" as const, threadId: tier2Arc.id }] : []),
     ];
-    const uniqueArcIds = new Set(matchedArcs.map(m => m.arcId));
-    if (uniqueArcIds.size > 1) {
+    const uniqueThreadIds = new Set(matchedArcs.map(m => m.threadId));
+    if (uniqueThreadIds.size > 1) {
       this.logger.track("Arc match discrepancy — multiple tiers returned different arcs.", {
         code: "processor.arc_match_discrepancy",
         accountId,
         sesMessageId,
-        tier1ArcId: tier1Arc?.id ?? null,
-        tier15ArcId: tier15Arc?.id ?? null,
-        tier2ArcId: tier2Arc?.id ?? null,
+        tier1ThreadId: tier1Arc?.id ?? null,
+        tier15ThreadId: tier15Arc?.id ?? null,
+        tier2ThreadId: tier2Arc?.id ?? null,
         selectedTier: tier1Arc ? "groupingKey" : tier15Arc ? "inReplyTo" : "similarity",
       });
     }
@@ -1085,7 +1089,7 @@ export class SignalProcessor {
         // so it tracks current account/alias config rather than sticking to a stale value.
         retentionDuration: effectiveRetentionForTtl,
       };
-      this.logger.info("Existing arc matched.", { code: "processor.arc_matched", arcId: arc.id, matchMethod, accountId, sesMessageId });
+      this.logger.info("Existing arc matched.", { code: "processor.arc_matched", threadId: arc.id, matchMethod, accountId, sesMessageId });
     } else {
       arc = {
         id: generateId("thr-"),
@@ -1158,7 +1162,7 @@ export class SignalProcessor {
 
     // 9. Build signal shell
     const signalShell = buildSignal({
-      arcId: arc.id,
+      threadId: arc.id,
       status: "active",
       accountId,
       sesMessageId,
@@ -1170,7 +1174,7 @@ export class SignalProcessor {
       now,
       retentionDuration: effectiveRetentionForTtl,
       ...(ttl !== undefined ? { ttl } : {}),
-      ...(gsi2pk !== undefined ? { gsi2pk } : {}),
+      ...(gsi3pk !== undefined ? { gsi3pk } : {}),
       ...(opts?.forceSignalId !== undefined ? { forceSignalId: opts.forceSignalId } : {}),
     });
 
@@ -1208,7 +1212,7 @@ export class SignalProcessor {
       }
     }
 
-    const buildArgs = { accountId, sesMessageId, recipientAddress, parsed, classification: classificationOutput, s3Key, receivedAt: timestamp, now, retentionDuration: effectiveRetentionForTtl, ...(ttl !== undefined ? { ttl } : {}), ...(gsi2pk !== undefined ? { gsi2pk } : {}), ...(opts?.forceSignalId !== undefined ? { forceSignalId: opts.forceSignalId } : {}) };
+    const buildArgs = { accountId, sesMessageId, recipientAddress, parsed, classification: classificationOutput, s3Key, receivedAt: timestamp, now, retentionDuration: effectiveRetentionForTtl, ...(ttl !== undefined ? { ttl } : {}), ...(gsi3pk !== undefined ? { gsi3pk } : {}), ...(opts?.forceSignalId !== undefined ? { forceSignalId: opts.forceSignalId } : {}) };
 
     if (outcome.blockDisposition) {
       const blockSignal = buildSignal({ status: outcome.blockDisposition, ...buildArgs });
@@ -1236,7 +1240,7 @@ export class SignalProcessor {
       const quarantinedSignal: Signal = { ...quarantineBase, data: { ...quarantineBase.data, matchedRules } };
       const saveResult = await this.arcDb.saveSignal(quarantinedSignal);
       if (saveResult.isErr()) return err(saveResult.error);
-      this.logger.info("Quarantined email — rule or sender filter matched.", { code: "processor.quarantine", accountId, arcId: arc.id, signalId: quarantinedSignal.id, status: quarantineStatus, matchedRules: matchedRules.map(r => r.ruleId) });
+      this.logger.info("Quarantined email — rule or sender filter matched.", { code: "processor.quarantine", accountId, threadId: arc.id, signalId: quarantinedSignal.id, status: quarantineStatus, matchedRules: matchedRules.map(r => r.ruleId) });
       const repResult = await this.processingDb.updateGlobalReputation(senderETLD1, { wasSpam: true, wasBlocked: true });
       if (repResult.isErr()) {
         this.logger.warn("Failed to update global sender reputation after signal processing. The DynamoDB update returned an error. Reputation data may be stale for this domain.", { code: "processor.reputation_update_failed", signal: quarantinedSignal, arc, error: repResult.error });
@@ -1268,8 +1272,8 @@ export class SignalProcessor {
     const signalUrgency = outcome.urgency ?? arc.urgency ?? "normal";
     if (!matchedArc) arc.urgency = signalUrgency;
 
-    const signal: Signal = { ...signalShell, arcId: arc.id, data: { ...signalShell.data, matchedRules, urgency: signalUrgency } };
-    this.logger.trackPoint("arc_updated", { arcId: arc.id });
+    const signal: Signal = { ...signalShell, threadId: arc.id, data: { ...signalShell.data, matchedRules, urgency: signalUrgency } };
+    this.logger.trackPoint("arc_updated", { threadId: arc.id });
 
     // 12. Pong — handled entirely in side-effect SQS handler (processSideEffect)
 
@@ -1297,7 +1301,7 @@ export class SignalProcessor {
       if (outcome.archive) arc.status = "archived";
 
       // Compute optional field delta
-      const fields: UpdateArcFields = {};
+      const fields: UpdateThreadFields = {};
       if (arc.summary !== matchedArc.summary) fields.summary = arc.summary;
       if (arc.workflow !== matchedArc.workflow) fields.workflow = arc.workflow;
       if (arc.urgency !== undefined && arc.urgency !== matchedArc.urgency) fields.urgency = arc.urgency;
@@ -1309,7 +1313,7 @@ export class SignalProcessor {
       if (arc.recipientAddress !== undefined) fields.recipientAddress = arc.recipientAddress;
       if (arc.subject !== undefined) fields.subject = arc.subject;
 
-      const updateResult = await this.arcDb.updateArc(accountId, arc.id, arc.status, arc.lastSignalAt, fields);
+      const updateResult = await this.arcDb.updateThread(accountId, arc.id, arc.status, arc.lastSignalAt, fields);
       if (updateResult.isErr()) return err(updateResult.error);
 
       // Cancel pending followup schedule when reactivating an archived arc
@@ -1324,15 +1328,15 @@ export class SignalProcessor {
       }
     } else {
       if (outcome.archive) arc.status = "archived";
-      const saveArcResult = await this.arcDb.saveArc(arc);
+      const saveArcResult = await this.arcDb.saveThread(arc);
       if (saveArcResult.isErr()) return err(saveArcResult.error);
-      this.logger.info("New arc created.", { code: "processor.arc_created", arcId: arc.id, accountId, signalId: signal.id, sesMessageId, ...(groupingKey ? { groupingKey } : {}) });
+      this.logger.info("New arc created.", { code: "processor.arc_created", threadId: arc.id, accountId, signalId: signal.id, sesMessageId, ...(groupingKey ? { groupingKey } : {}) });
     }
-    this.logger.trackPoint("arc_saved", { arcId: arc.id });
+    this.logger.trackPoint("arc_saved", { threadId: arc.id });
 
     const saveSignalResult = await this.arcDb.saveSignal(signal);
     if (saveSignalResult.isErr()) return err(saveSignalResult.error);
-    this.logger.trackPoint("signal_saved", { signalId: signal.id, arcId: arc.id });
+    this.logger.trackPoint("signal_saved", { signalId: signal.id, threadId: arc.id });
 
     const allowedCat = statusToMetric(signal.status);
     if (allowedCat) {
@@ -1384,7 +1388,7 @@ export class SignalProcessor {
       activeClusters.map(async (cluster) => {
         const embedding = signal.data.embeddings?.[cluster.modelId];
         if (!embedding) {
-          this.logger.info("Aurora upsert skipped for cluster — no embedding available for the cluster's model. This is expected when the embedding generator did not produce a vector for this model (e.g. Bedrock failure for that model).", { code: "processor.aurora_upsert_skipped", accountId: signal.accountId, signalId: signal.id, arcId: arc.id, registryId: cluster.registryId, modelId: cluster.modelId });
+          this.logger.info("Aurora upsert skipped for cluster — no embedding available for the cluster's model. This is expected when the embedding generator did not produce a vector for this model (e.g. Bedrock failure for that model).", { code: "processor.aurora_upsert_skipped", accountId: signal.accountId, signalId: signal.id, threadId: arc.id, registryId: cluster.registryId, modelId: cluster.modelId });
           return ok({ cluster }) as Result<{ cluster: typeof cluster }, DbError & { cluster: typeof cluster }>;
         }
 
@@ -1424,14 +1428,14 @@ export class SignalProcessor {
    */
   async dispatchSideEffects(signal: Signal, arc: Arc): Promise<Result<void, DbError>> {
     this.logger.trackPoint("side_effect_dispatch_start");
-    const payload: SideEffectPayload = { signal, arc };
+    const payload: SideEffectPayload = { signal, thread: arc };
     const sendResult = await this.sqsDispatcher.sendMessage(payload);
     if (sendResult.isErr()) {
       this.logger.error("Failed to dispatch side-effect SQS message. Aurora upserts succeeded but side-effects won't fire until the message is retried and dispatch succeeds. Check SQS queue health and permissions.", { code: "processor.side_effect_dispatch_failed", signal, arc, error: sendResult.error });
       return err(sendResult.error);
     }
 
-    this.logger.info("Side-effect SQS message dispatched.", { code: "processor.side_effect_dispatched", signalId: signal.id, arcId: arc.id, accountId: signal.accountId });
+    this.logger.info("Side-effect SQS message dispatched.", { code: "processor.side_effect_dispatched", signalId: signal.id, threadId: arc.id, accountId: signal.accountId });
     this.logger.trackPoint("side_effect_dispatch_complete");
     return ok(undefined);
   }
@@ -1510,7 +1514,7 @@ export class SignalProcessor {
       const invalidSignal: Signal<CalendarInviteInvalidData> = {
         id: invalidId,
         signalLookupId: invalidId,
-        arcId: arc.id,
+        threadId: arc.id,
         accountId,
         source: "signal",
         type: "calendar_invite_invalid",
@@ -1550,7 +1554,7 @@ export class SignalProcessor {
     const calendarSignal: Signal<CalendarEventData> = {
       id: calendarSignalId,
       signalLookupId,
-      arcId: arc.id,
+      threadId: arc.id,
       accountId,
       source: "signal",
       type: "calendar_event",
@@ -1573,7 +1577,7 @@ export class SignalProcessor {
     // Apply system:calendar label to the arc
     if (!arc.labels.includes("system:calendar")) {
       arc.labels = [...arc.labels, "system:calendar"];
-      const updateResult = await this.arcDb.updateArc(accountId, arc.id, arc.status, arc.lastSignalAt!, { labels: arc.labels });
+      const updateResult = await this.arcDb.updateThread(accountId, arc.id, arc.status, arc.lastSignalAt!, { labels: arc.labels });
       if (updateResult.isErr()) {
         this.logger.warn("Failed to apply system:calendar label to arc.", { code: "processor.calendar.label_failed", signal, arc, error: updateResult.error });
       }
@@ -1646,7 +1650,7 @@ export class SignalProcessor {
       ];
     }
 
-    this.logger.info("Calendar signal created from .ics attachment.", { code: "processor.calendar.signal_created", accountId, arcId: arc.id, signalId: signal.id, calendarSignalId, method: calendarData.method, veventUid: calendarData.veventUid });
+    this.logger.info("Calendar signal created from .ics attachment.", { code: "processor.calendar.signal_created", accountId, threadId: arc.id, signalId: signal.id, calendarSignalId, method: calendarData.method, veventUid: calendarData.veventUid });
     this.logger.trackPoint("calendar_signal_created", { calendarSignalId });
   }
 
@@ -1772,7 +1776,7 @@ function parseUnsubscribeHeaders(headers: Record<string, string>): UnsubscribeIn
 }
 
 function buildSignal(opts: {
-  arcId?: string;
+  threadId?: string;
   status: Signal["status"];
   accountId: string;
   sesMessageId: string;
@@ -1784,10 +1788,10 @@ function buildSignal(opts: {
   now: string;
   ttl?: number;
   retentionDuration?: RetentionDuration;
-  gsi2pk?: string;
+  gsi3pk?: string;
   forceSignalId?: string;
 }): Signal {
-  const { arcId, status, accountId, sesMessageId, recipientAddress, parsed, classification, s3Key, receivedAt, now, ttl, retentionDuration, gsi2pk, forceSignalId } = opts;
+  const { threadId, status, accountId, sesMessageId, recipientAddress, parsed, classification, s3Key, receivedAt, now, ttl, retentionDuration, gsi3pk, forceSignalId } = opts;
   const signalId = forceSignalId ?? generateId("sgn-");
 
   // Extract unsubscribe info from List-Unsubscribe / List-Unsubscribe-Post headers
@@ -1825,10 +1829,10 @@ function buildSignal(opts: {
     },
   };
 
-  if (arcId !== undefined) signal.arcId = arcId;
+  if (threadId !== undefined) signal.threadId = threadId;
   if (ttl !== undefined) signal.ttl = ttl;
   if (retentionDuration !== undefined) signal.retentionDuration = retentionDuration;
-  if (gsi2pk !== undefined) signal.gsi2pk = gsi2pk;
+  if (gsi3pk !== undefined) signal.gsi3pk = gsi3pk;
 
   return signal;
 }
