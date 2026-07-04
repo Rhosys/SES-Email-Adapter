@@ -263,8 +263,10 @@ export type SignalType = (typeof SIGNAL_TYPES)[number];
 export const PUSH_PRIORITIES = ["interrupt", "ambient", "silent"] as const;
 export type PushPriority = (typeof PUSH_PRIORITIES)[number];
 
-export const ARC_URGENCIES = ["critical", "high", "normal", "low", "silent"] as const;
-export type ArcUrgency = (typeof ARC_URGENCIES)[number];
+export const THREAD_URGENCIES = ["critical", "high", "normal", "low", "silent"] as const;
+export type ThreadUrgency = (typeof THREAD_URGENCIES)[number];
+
+
 
 // ---------------------------------------------------------------------------
 // Key types for DynamoDB hierarchical schema
@@ -332,7 +334,7 @@ export interface EmailTemplate {
   id: string;
   accountId: string;
   name: string;
-  subject: string;   // supports {{signal.subject}}, {{sender.name}}, {{sender.address}}, {{arc.workflow}}
+  subject: string;   // supports {{signal.subject}}, {{sender.name}}, {{sender.address}}, {{thread.workflow}}
   body: string;      // same interpolation; unrecognised tokens render as ""
   functions?: TemplateFunction[]; // user-authored JS functions for dynamic template values
   createdAt: string;
@@ -407,7 +409,7 @@ export interface UnsubscribeInfo {
 export interface EmailSignalData {
   receivedAt: string;      // ISO datetime
   summary: string;
-  urgency?: ArcUrgency;
+  urgency?: ThreadUrgency;
   // Embedding cache, keyed by Bedrock model ID
   // Absent on quarantined/blocked signals (no Aurora write happened).
   // Partially populated if individual Bedrock calls failed (logged at WARN level).
@@ -479,8 +481,8 @@ export interface SignalBase {
   // Inbound (SES) signals: "ses-{sesMessageId}" — enables O(1) dedup lookup.
   // User/system signals: same as `id` (the sgn- prefixed ID).
   signalLookupId: string;
-  arcId?: string;        // Undefined while signal is blocked pending user action
-  gsi2pk?: string;       // GSI2 key for In-Reply-To lookup (ACCT#{accountId}#MSGID#{msgId})
+  threadId?: string;        // Undefined while signal is blocked pending user action
+  gsi3pk?: string;       // GSI3 key for In-Reply-To lookup (ACCT#{accountId}#MSGID#{msgId})
   accountId: string;
   source: SignalSource;
   type: SignalType;
@@ -532,37 +534,41 @@ export function isAutoSendBlockedSignal(signal: AnySignal): signal is Signal<Aut
 // Arc (materialized aggregate of related Signals)
 // ---------------------------------------------------------------------------
 
-export const ARC_STATUSES = ["active", "archived", "deleted", "report_violation"] as const;
-export type ArcStatus = (typeof ARC_STATUSES)[number];
+export const THREAD_STATUSES = ["active", "archived", "deleted", "report_violation"] as const;
+export type ThreadStatus = (typeof THREAD_STATUSES)[number];
 
-export interface Arc {
+
+
+export interface Thread {
   id: string;
   accountId: string;
-  groupingKey?: string;     // deterministic lookup key; absent = vector-matched arc
+  groupingKey?: string;     // deterministic lookup key; absent = vector-matched thread
   workflow: Workflow;
   labels: string[];
-  status: ArcStatus;
+  status: ThreadStatus;
   summary: string;
   lastSignalAt: string;
   deletedAt?: string;
   createdAt: string;
   updatedAt: string;
   ttl?: number;   // DynamoDB TTL (epoch seconds) — computed from retentionDuration at write time; absent = never expire
-  // ISO 8601 retention duration — from the most recently received signal in the arc
+  // ISO 8601 retention duration — from the most recently received signal in the thread
   retentionDuration?: import("../processor/retention.js").RetentionDuration;
-  // Message-IDs of emails the user sent on this arc
+  // Message-IDs of emails the user sent on this thread
   sentMessageIds?: string[];
-  urgency?: ArcUrgency;
-  // ISO 8601 datetime — when the user wants to be reminded about this arc
+  urgency?: ThreadUrgency;
+  // ISO 8601 datetime — when the user wants to be reminded about this thread
   followupAt?: string;
-  // Denormalized from the latest inbound signal — used for arc list display
+  // Denormalized from the latest inbound signal — used for thread list display
   senderAddress: string;
   recipientAddress: string;
   subject: string;
 }
 
+
+
 // ---------------------------------------------------------------------------
-// View (configured filter over Arcs — replaces Tab)
+// View (configured filter over Threads — replaces Tab)
 // ---------------------------------------------------------------------------
 
 export const SORT_FIELDS = ["lastSignalAt", "createdAt"] as const;

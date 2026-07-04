@@ -5,7 +5,7 @@ import type { Signal, Arc, AuthData } from "../types/index.js";
 import type { WorkflowHandler } from "./types.js";
 import type { DeviceStore } from "../notifier/device-store.js";
 import type { Deliverer, DeliveryResult } from "../notifier/types.js";
-import type { ArcDatabase } from "../database/arc-database.js";
+import type { ThreadDatabase } from "../database/thread-database.js";
 import type { Logger } from "../logger.js";
 import { getETLD1 } from "../processor/filter.js";
 
@@ -25,7 +25,7 @@ export class AuthWorkflowHandler implements WorkflowHandler {
   constructor(
     private readonly deviceStore: DeviceStore,
     private readonly wsDeliverer: Deliverer,
-    private readonly arcDatabase: ArcDatabase,
+    private readonly threadDatabase: ThreadDatabase,
     private readonly logger: Logger,
   ) {}
 
@@ -39,10 +39,10 @@ export class AuthWorkflowHandler implements WorkflowHandler {
     const payload = this.buildOtpPayload(signal, workflowData);
     await this.deliverToAll(accountId, payload);
 
-    // Archive — auth arcs don't need to stay in the inbox
-    const archiveResult = await this.arcDatabase.updateArc(accountId, arc.id, "archived", arc.lastSignalAt, {});
+    // Archive — auth threads don't need to stay in the inbox
+    const archiveResult = await this.threadDatabase.updateThread(accountId, arc.id, "archived", arc.lastSignalAt, {});
     if (archiveResult.isErr()) {
-      this.logger.warn("Failed to archive auth arc after OTP push", {
+      this.logger.warn("Failed to archive auth thread after OTP push", {
         code: "workflow.auth.archive_failed", signal, arc, error: archiveResult.error,
       });
     }

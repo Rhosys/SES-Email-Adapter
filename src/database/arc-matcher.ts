@@ -36,7 +36,7 @@ export function toVector(embedding: number[]) {
 export interface MultiClusterAuroraWriter {
   upsertEmbedding(opts: {
     registryId: string;
-    arcId: string;
+    threadId: string;
     accountId: string;
     recipientAddress: string;
     embedding: number[];
@@ -47,7 +47,7 @@ export interface MultiClusterAuroraWriter {
     accountId: string;
     recipientAddress: string;
     embedding: number[];
-  }): Promise<Result<{ arcId: string } | null, DbError>>;
+  }): Promise<Result<{ threadId: string } | null, DbError>>;
 }
 
 // ---------------------------------------------------------------------------
@@ -168,12 +168,12 @@ export class ArcMatcher implements ArcMatcherPort, MultiClusterAuroraWriter {
   // ---------------------------------------------------------------------------
 
   async findMatch(accountId: string, recipientAddress: string, embedding: number[]): Promise<Result<Arc | null, DbError>>;
-  async findMatch(opts: { registryId: string; accountId: string; recipientAddress: string; embedding: number[] }): Promise<Result<{ arcId: string } | null, DbError>>;
+  async findMatch(opts: { registryId: string; accountId: string; recipientAddress: string; embedding: number[] }): Promise<Result<{ threadId: string } | null, DbError>>;
   async findMatch(
     accountIdOrOpts: string | { registryId: string; accountId: string; recipientAddress: string; embedding: number[] },
     recipientAddress?: string,
     embedding?: number[],
-  ): Promise<Result<Arc | null, DbError> | Result<{ arcId: string } | null, DbError>> {
+  ): Promise<Result<Arc | null, DbError> | Result<{ threadId: string } | null, DbError>> {
     if (typeof accountIdOrOpts === "string") {
       return this.findMatchForArcMatcher(accountIdOrOpts, recipientAddress!, embedding!);
     }
@@ -214,7 +214,7 @@ export class ArcMatcher implements ArcMatcherPort, MultiClusterAuroraWriter {
       }));
 
       if (!arcResult.Item) {
-        this.logger.track("Aurora matched arcId but DDB arc is missing — orphaned embedding. Treating as no match.", { code: "arc_matcher.ghost_arc", arcId, accountId, recipientAddress });
+        this.logger.track("Aurora matched threadId but DDB thread is missing — orphaned embedding. Treating as no match.", { code: "thread_matcher.ghost_thread", arcId, accountId, recipientAddress });
         return ok(null);
       }
 
@@ -229,7 +229,7 @@ export class ArcMatcher implements ArcMatcherPort, MultiClusterAuroraWriter {
     accountId: string;
     recipientAddress: string;
     embedding: number[];
-  }): Promise<Result<{ arcId: string } | null, DbError>> {
+  }): Promise<Result<{ threadId: string } | null, DbError>> {
     const cluster = getRegistryById(opts.registryId);
     if (!cluster) return err(dbError(`Cluster "${opts.registryId}" not found in CLUSTER_REGISTRY`));
     const db = getDbForCluster(cluster);
@@ -252,7 +252,7 @@ export class ArcMatcher implements ArcMatcherPort, MultiClusterAuroraWriter {
 
           const arcId = rows[0]?.arcId;
           if (!arcId) return null;
-          return { arcId };
+          return { threadId: arcId };
         });
       });
       return ok(result);
@@ -265,30 +265,30 @@ export class ArcMatcher implements ArcMatcherPort, MultiClusterAuroraWriter {
   // MultiClusterAuroraWriter — upserts
   // ---------------------------------------------------------------------------
 
-  async upsertEmbedding(arcId: string, embedding: number[], accountId: string, recipientAddress: string): Promise<Result<void, DbError>>;
-  async upsertEmbedding(opts: { registryId: string; arcId: string; accountId: string; recipientAddress: string; embedding: number[] }): Promise<Result<void, DbError>>;
+  async upsertEmbedding(threadId: string, embedding: number[], accountId: string, recipientAddress: string): Promise<Result<void, DbError>>;
+  async upsertEmbedding(opts: { registryId: string; threadId: string; accountId: string; recipientAddress: string; embedding: number[] }): Promise<Result<void, DbError>>;
   async upsertEmbedding(
-    arcIdOrOpts: string | { registryId: string; arcId: string; accountId: string; recipientAddress: string; embedding: number[] },
+    threadIdOrOpts: string | { registryId: string; threadId: string; accountId: string; recipientAddress: string; embedding: number[] },
     embedding?: number[],
     accountId?: string,
     recipientAddress?: string,
   ): Promise<Result<void, DbError>> {
-    if (typeof arcIdOrOpts === "string") {
+    if (typeof threadIdOrOpts === "string") {
       const cluster = getPrimaryArcMatcherRegistry();
       return this.upsertToCluster({
         registryId: cluster.registryId,
-        arcId: arcIdOrOpts,
+        threadId: threadIdOrOpts,
         accountId: accountId!,
         recipientAddress: recipientAddress!,
         embedding: embedding!,
       });
     }
-    return this.upsertToCluster(arcIdOrOpts);
+    return this.upsertToCluster(threadIdOrOpts);
   }
 
   private async upsertToCluster(opts: {
     registryId: string;
-    arcId: string;
+    threadId: string;
     accountId: string;
     recipientAddress: string;
     embedding: number[];
@@ -305,7 +305,7 @@ export class ArcMatcher implements ArcMatcherPort, MultiClusterAuroraWriter {
           await tx
             .insert(arcEmbeddings)
             .values({
-              arcId: opts.arcId,
+              arcId: opts.threadId,
               accountId: opts.accountId,
               recipientAddress: opts.recipientAddress,
               embedding: toVector(opts.embedding),

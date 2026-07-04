@@ -1,6 +1,6 @@
 import { DateTime } from "luxon";
 import { AccountDatabase } from "../database/account-database.js";
-import { ArcDatabase } from "../database/arc-database.js";
+import { ThreadDatabase } from "../database/thread-database.js";
 import { checkDomain } from "../dns/dns-checker.js";
 import { isOutstandingArc, buildAccountLogEntry, buildAccountReports, buildRunCompleteLogEntry } from "./staleness-logic.js";
 import type { AccountStalenessReport } from "./staleness-logic.js";
@@ -11,7 +11,7 @@ import type { Logger } from "../logger.js";
 export class DomainHealthJob {
   constructor(
     private readonly db: AccountDatabase,
-    private readonly arcDb: ArcDatabase,
+    private readonly threadDb: ThreadDatabase,
     private readonly logger: Logger,
   ) {}
 
@@ -78,9 +78,9 @@ export class DomainHealthJob {
 
       // Staleness check: identify outstanding arcs for this account
       const cutoffDate = DateTime.utc().minus({ days: 7 }).toISO()!;
-      const staleArcsResult = await this.arcDb.listActiveArcsBefore(accountId, cutoffDate);
+      const staleArcsResult = await this.threadDb.listActiveThreadsBefore(accountId, cutoffDate);
       if (staleArcsResult.isErr()) {
-        this.logger.track("Failed to query stale arcs for account during staleness check. The DynamoDB query returned an error. This account's staleness report will be skipped. [Action Required] Check DynamoDB read capacity.", {
+        this.logger.track("Failed to query stale threads for account during staleness check. The DynamoDB query returned an error. This account's staleness report will be skipped. [Action Required] Check DynamoDB read capacity.", {
           code: "staleness_checker.account_error",
           accountId,
           error: staleArcsResult.error,

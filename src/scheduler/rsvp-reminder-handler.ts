@@ -2,7 +2,7 @@ import { DateTime } from "luxon";
 
 import { ok, err } from "../errors.js";
 import type { Result, DbError } from "../errors.js";
-import type { Signal, Arc } from "../types/index.js";
+import type { Signal, Thread } from "../types/index.js";
 import type { CalendarEventData, CalendarResponseData } from "../types/calendar.js";
 import type { Notifier, NotificationReason } from "../notifier/types.js";
 import type { Logger } from "../logger.js";
@@ -13,38 +13,38 @@ import type { RsvpReminderMessage } from "./rsvp-reminder.js";
 // ---------------------------------------------------------------------------
 
 export interface IRsvpReminderArcDb {
-  getSignalById(accountId: string, signalId: string, arcId?: string): Promise<Result<Signal | null, DbError>>;
-  getLatestCalendarResponse(accountId: string, arcId: string, veventUid: string): Promise<Result<Signal<CalendarResponseData> | null, DbError>>;
-  getArc(accountId: string, arcId: string): Promise<Result<Arc | null, DbError>>;
+  getSignalById(accountId: string, signalId: string, threadId?: string): Promise<Result<Signal | null, DbError>>;
+  getLatestCalendarResponse(accountId: string, threadId: string, veventUid: string): Promise<Result<Signal<CalendarResponseData> | null, DbError>>;
+  getThread(accountId: string, threadId: string): Promise<Result<Thread | null, DbError>>;
 }
 
 export class RsvpReminderHandler {
-  private readonly arcDb: IRsvpReminderArcDb;
+  private readonly threadDb: IRsvpReminderArcDb;
   private readonly notifier: Notifier;
   private readonly logger: Logger;
 
   constructor(deps: {
-    arcDb: IRsvpReminderArcDb;
+    threadDb: IRsvpReminderArcDb;
     notifier: Notifier;
     logger: Logger;
   }) {
-    this.arcDb = deps.arcDb;
+    this.threadDb = deps.threadDb;
     this.notifier = deps.notifier;
     this.logger = deps.logger;
   }
 
   async process(message: RsvpReminderMessage): Promise<Result<void, DbError>> {
-    const { accountId, signalId, arcId } = message;
+    const { accountId, signalId, threadId } = message;
 
     // 1. Fetch signal
-    const signalResult = await this.arcDb.getSignalById(accountId, signalId, arcId);
+    const signalResult = await this.threadDb.getSignalById(accountId, signalId, threadId);
     if (signalResult.isErr()) return err(signalResult.error);
 
     const signal = signalResult.value;
     if (!signal) {
       this.logger.track("RSVP reminder: signal not found, discarding.", {
         code: "rsvp_reminder.signal_missing",
-        accountId, signalId, arcId,
+        accountId, signalId, threadId,
       });
       return ok(undefined);
     }
@@ -64,7 +64,7 @@ export class RsvpReminderHandler {
     }
 
     // 4. Check if user has already responded
-    const responseResult = await this.arcDb.getLatestCalendarResponse(accountId, arcId, veventUid);
+    const responseResult = await this.threadDb.getLatestCalendarResponse(accountId, threadId, veventUid);
     if (responseResult.isErr()) return err(responseResult.error);
 
     if (responseResult.value) {
@@ -75,22 +75,22 @@ export class RsvpReminderHandler {
       return ok(undefined);
     }
 
-    // 5. Fetch arc for notification
-    const arcResult = await this.arcDb.getArc(accountId, arcId);
-    if (arcResult.isErr()) return err(arcResult.error);
+    // 5. Fetch thread for notification
+    const threadResult = await this.threadDb.getThread(accountId, threadId);
+    if (threadResult.isErr()) return err(threadResult.error);
 
-    const arc = arcResult.value;
-    if (!arc) {
-      this.logger.track("RSVP reminder: arc not found, discarding.", {
-        code: "rsvp_reminder.arc_missing",
+    const thread = threadResult.value;
+    if (!thread) {
+      this.logger.track("RSVP reminder: thread not found, discarding.", {
+        code: "rsvp_reminder.thread_missing",
         signal,
-        accountId, signalId, arcId,
+        accountId, signalId, threadId,
       });
       return ok(undefined);
     }
 
     // 6. Notify — user has not responded and event is upcoming
     const reason: NotificationReason = "rsvp_reminder";
-    return this.notifier.notify(accountId, arc, signal, arc.urgency ?? "normal", reason);
+    return this.notifier.notify(accountId, thread, signal, thread.urgency ?? "normal", reason);
   }
 }
