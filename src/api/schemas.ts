@@ -9,8 +9,8 @@ export const Workflow = z.enum([
   "content", "onboarding", "notice", "healthcare", "job", "support", "test",
 ]);
 
-export const ArcStatus = z.enum(["active", "archived", "deleted", "report_violation"]);
-export const ArcUrgency = z.enum(["critical", "high", "normal", "low", "silent"]);
+export const ThreadStatus = z.enum(["active", "archived", "deleted", "report_violation"]);
+export const ThreadUrgency = z.enum(["critical", "high", "normal", "low", "silent"]);
 
 export const SignalStatus = z.enum([
   "active", "block_hidden", "block_reject", "report_violation",
@@ -54,7 +54,7 @@ export const ErrorCode = z.enum([
   "ACCOUNT_NOT_FOUND",
   "ALIAS_EXISTS",
   "ALIAS_NOT_FOUND",
-  "ARC_NOT_FOUND",
+  "THREAD_NOT_FOUND",
   "DOMAIN_EXISTS",
   "DOMAIN_MISCONFIGURATION",
   "DOMAIN_NOT_FOUND",
@@ -80,7 +80,7 @@ export const ErrorCode = z.enum([
   "SENDER_NOT_FOUND",
   "SYSTEM_RULE_IMMUTABLE",
   "SIGNAL_ALREADY_SENT",
-  "SIGNAL_ARC_MISMATCH",
+  "SIGNAL_THREAD_MISMATCH",
   "SIGNAL_NOT_DRAFT",
   "SIGNAL_NOT_EDITABLE",
   "SIGNAL_NOT_FOUND",
@@ -289,7 +289,7 @@ export const UnsubscribeInfo = z.object({
 export const InboundEmailSignalData = z.object({
   receivedAt: z.string(),
   summary: z.string(),
-  urgency: ArcUrgency.optional(),
+  urgency: ThreadUrgency.optional(),
   from: EmailAddress,
   to: z.array(EmailAddress),
   cc: z.array(EmailAddress),
@@ -389,8 +389,7 @@ export const DomainMisconfigurationData = z.object({
 
 const SignalBase = {
   signalId: z.string().readonly(),
-  arcId: z.string().optional().readonly(),
-  threadId: z.string().optional().readonly(),
+  threadId: z.string().nullable().readonly(),
   source: SignalSource,
   status: SignalStatus,
   createdAt: z.string().readonly(),
@@ -480,24 +479,23 @@ export const DraftSignal = z.object({
 // Arc
 // ---------------------------------------------------------------------------
 
-export const Arc = z.object({
-  arcId: z.string().readonly(),
+export const Thread = z.object({
   threadId: z.string().readonly(),
   workflow: Workflow,
   labels: z.array(z.string()),
-  status: ArcStatus,
+  status: ThreadStatus,
   summary: z.string(),
   lastSignalAt: z.string().readonly(),
   deletedAt: z.string().optional().readonly(),
   createdAt: z.string().readonly(),
   updatedAt: z.string().readonly(),
   retentionDuration: RetentionDuration.optional().readonly(),
-  urgency: ArcUrgency.optional(),
+  urgency: ThreadUrgency.optional(),
   followupAt: z.string().datetime().optional().readonly(),
   senderAddress: z.string(),
   recipientAddress: z.string(),
   subject: z.string(),
-}).openapi("Arc");
+}).openapi("Thread");
 
 // ---------------------------------------------------------------------------
 // Domain
@@ -682,7 +680,7 @@ export const ForwardingTarget = z.object({
 // Response wrappers
 // ---------------------------------------------------------------------------
 
-export const ListArcsResponse = z.object({ arcs: z.array(Arc), pagination: Pagination });
+export const ListThreadsResponse = z.object({ threads: z.array(Thread), pagination: Pagination });
 export const ListSignalsResponse = z.object({ signals: z.array(Signal), pagination: Pagination });
 export const ListViewsResponse = z.object({ views: z.array(View) });
 export const ListLabelsResponse = z.object({ labels: z.array(Label) });
@@ -710,8 +708,8 @@ export const UserConfiguration = z.object({
 // ---------------------------------------------------------------------------
 
 export type Workflow = z.infer<typeof Workflow>;
-export type ArcStatus = z.infer<typeof ArcStatus>;
-export type ArcUrgency = z.infer<typeof ArcUrgency>;
+export type ThreadStatus = z.infer<typeof ThreadStatus>;
+export type ThreadUrgency = z.infer<typeof ThreadUrgency>;
 export type SignalStatus = z.infer<typeof SignalStatus>;
 export type SignalSource = z.infer<typeof SignalSource>;
 export type SignalType = z.infer<typeof SignalType>;
@@ -723,7 +721,7 @@ export type Attachment = z.infer<typeof Attachment>;
 export type WorkflowData = z.infer<typeof WorkflowData>;
 export type InboundEmailSignalData = z.infer<typeof InboundEmailSignalData>;
 export type OutboundEmailSignalData = z.infer<typeof OutboundEmailSignalData>;
-export type Arc = z.infer<typeof Arc>;
+export type Thread = z.infer<typeof Thread>;
 export type Signal = z.infer<typeof Signal>;
 export type DraftSignal = z.infer<typeof DraftSignal>;
 export type Domain = z.infer<typeof Domain>;
