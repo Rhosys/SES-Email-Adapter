@@ -120,7 +120,7 @@ describe("ReplySenderService tag integration", () => {
         inReplyTo: "<ref@x.com>",
         accountId: "acct-1",
         signalId: "sig-2",
-        arcId: "arc-3",
+        threadId: "arc-3",
       });
 
       const call = (emailService.send as ReturnType<typeof vi.fn>).mock.calls[0]![0];
