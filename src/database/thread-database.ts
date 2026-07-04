@@ -5,7 +5,7 @@ import { ok, err, dbError } from "../errors.js";
 import type { DbError, Result } from "../errors.js";
 import type { Logger } from "../logger.js";
 import type { ListArcsParams } from "../api/app.js";
-import type { Arc, Signal, AnySignal, EmailSignalData, Page, PageParams, ArcStatus, ArcUrgency, Workflow } from "../types/index.js";
+import type { Thread, Signal, AnySignal, EmailSignalData, Page, PageParams, ThreadStatus, ThreadUrgency, Workflow } from "../types/index.js";
 import type { CalendarEventData } from "../types/calendar.js";
 
 // ---------------------------------------------------------------------------
@@ -22,7 +22,7 @@ const buildThreadGsi3pk = (accountId: string, groupingKey: string) => `ACCT#${ac
 // ---------------------------------------------------------------------------
 
 export interface UpdateThreadFields {
-  urgency?: ArcUrgency;
+  urgency?: ThreadUrgency;
   labels?: string[];
   summary?: string;
   workflow?: Workflow;
@@ -282,19 +282,19 @@ export class ThreadDatabase {
   // Arcs
   // ---------------------------------------------------------------------------
 
-  async getThread(accountId: string, id: string): Promise<Result<Arc | null, DbError>> {
+  async getThread(accountId: string, id: string): Promise<Result<Thread | null, DbError>> {
     try {
       const res = await dynamo.send(new GetCommand({
         TableName: SIGNALS_TABLE,
         Key: { pk: arcPk(accountId, id), sk: ITEM_SK },
       }));
-      return ok(res.Item ? hydrateThreadObject(res.Item as Arc) : null);
+      return ok(res.Item ? hydrateThreadObject(res.Item as Thread) : null);
     } catch (e) {
       return err(dbError(e));
     }
   }
 
-  async findThreadByGroupingKey(accountId: string, key: string): Promise<Result<Arc | null, DbError>> {
+  async findThreadByGroupingKey(accountId: string, key: string): Promise<Result<Thread | null, DbError>> {
     try {
       const res = await dynamo.send(new QueryCommand({
         TableName: SIGNALS_TABLE,
@@ -304,15 +304,15 @@ export class ThreadDatabase {
         Limit: 1,
       }));
       if (!res.Items || res.Items.length === 0) return ok(null);
-      return ok(hydrateThreadObject(res.Items[0] as Arc));
+      return ok(hydrateThreadObject(res.Items[0] as Thread));
     } catch (e) {
       return err(dbError(e));
     }
   }
 
-  async saveThread(arc: Arc): Promise<Result<void, DbError>> {
+  async saveThread(arc: Thread): Promise<Result<void, DbError>> {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { arcId: _arcId, ...rest } = arc as Arc & { arcId?: string };
+    const { arcId: _arcId, ...rest } = arc as Thread & { arcId?: string };
     try {
       const item: Record<string, unknown> = {
         ...rest,
@@ -337,11 +337,11 @@ export class ThreadDatabase {
     }
   }
 
-  async createThread(arc: Arc): Promise<Result<void, DbError>> {
+  async createThread(arc: Thread): Promise<Result<void, DbError>> {
     return this.saveThread(arc);
   }
 
-  async updateThread(accountId: string, id: string, status: ArcStatus, lastSignalAt: string, update: UpdateThreadFields): Promise<Result<Arc, DbError>> {
+  async updateThread(accountId: string, id: string, status: ThreadStatus, lastSignalAt: string, update: UpdateThreadFields): Promise<Result<Thread, DbError>> {
     const now = DateTime.utc().toISO()!;
     const setParts: string[] = [
       "updatedAt = :now",
@@ -379,7 +379,7 @@ export class ThreadDatabase {
         ExpressionAttributeNames: exprNames,
         ReturnValues: "ALL_NEW",
       }));
-      return ok(hydrateThreadObject(result.Attributes as unknown as Arc));
+      return ok(hydrateThreadObject(result.Attributes as unknown as Thread));
     } catch (e) {
       return err(dbError(e));
     }
@@ -472,12 +472,12 @@ export class ThreadDatabase {
     }
   }
 
-  async listThreads(accountId: string, params: ListArcsParams): Promise<Result<Page<Arc>, DbError>> {
+  async listThreads(accountId: string, params: ListArcsParams): Promise<Result<Page<Thread>, DbError>> {
     const limit = Math.min(params.limit ?? 20, 100);
     const gsi1pk = `ACCT#${accountId}`;
 
     try {
-      let items: Arc[];
+      let items: Thread[];
       let lastKey: Record<string, unknown> | undefined;
 
       if (params.status) {
@@ -490,7 +490,7 @@ export class ThreadDatabase {
           Limit: limit + 1,
           ...(params.cursor ? { ExclusiveStartKey: decodeCursor(params.cursor) } : {}),
         }));
-        items = (res.Items ?? []) as Arc[];
+        items = (res.Items ?? []) as Thread[];
         lastKey = res.LastEvaluatedKey;
       } else {
         const statuses: Array<"active" | "archived" | "deleted"> = ["active", "archived", "deleted"];
@@ -504,7 +504,7 @@ export class ThreadDatabase {
             Limit: limit + 1,
           }))
         ));
-        items = results.flatMap(r => (r.Items ?? []) as Arc[]);
+        items = results.flatMap(r => (r.Items ?? []) as Thread[]);
         items.sort((a, b) => b.lastSignalAt.localeCompare(a.lastSignalAt));
         lastKey = undefined;
       }
@@ -514,13 +514,13 @@ export class ThreadDatabase {
 
       const page = items.slice(0, limit).map(hydrateThreadObject);
       const nextKey = items.length > limit && lastKey ? encodeCursor(lastKey) : null;
-      return ok({ items: page, ...(nextKey ? { nextCursor: nextKey } : {}) } as Page<Arc>);
+      return ok({ items: page, ...(nextKey ? { nextCursor: nextKey } : {}) } as Page<Thread>);
     } catch (e) {
       return err(dbError(e));
     }
   }
 
-  async listActiveThreadsBefore(accountId: string, beforeDate: string): Promise<Result<Arc[], DbError>> {
+  async listActiveThreadsBefore(accountId: string, beforeDate: string): Promise<Result<Thread[], DbError>> {
     try {
       const res = await dynamo.send(new QueryCommand({
         TableName: SIGNALS_TABLE,
@@ -533,13 +533,13 @@ export class ThreadDatabase {
         },
         ScanIndexForward: true,
       }));
-      return ok((res.Items ?? []).map(i => hydrateThreadObject(i as Arc)));
+      return ok((res.Items ?? []).map(i => hydrateThreadObject(i as Thread)));
     } catch (e) {
       return err(dbError(e));
     }
   }
 
-  async searchThreads(accountId: string, query: string, params: PageParams): Promise<Result<Page<Arc>, DbError>> {
+  async searchThreads(accountId: string, query: string, params: PageParams): Promise<Result<Page<Thread>, DbError>> {
     const limit = Math.min(params.limit ?? 20, 100);
     try {
       const res = await dynamo.send(new QueryCommand({
@@ -551,10 +551,10 @@ export class ThreadDatabase {
         Limit: 500,
         ...(params.cursor ? { ExclusiveStartKey: decodeCursor(params.cursor) } : {}),
       }));
-      const fetchedItems = (res.Items ?? []) as Arc[];
+      const fetchedItems = (res.Items ?? []) as Thread[];
       if (fetchedItems.length > 200) {
-        this.logger.track("Arc search query returned an unusually large result set before client-side filtering. DynamoDB scan fetched more items than expected for this account. Repeated occurrences indicate the account's active arc count exceeds efficient scan limits. Consider adding a filtered GSI or prompting the user to archive old arcs.", {
-          code: "arc_database.search_arcs.large_result_set",
+        this.logger.track("Thread search query returned an unusually large result set before client-side filtering. DynamoDB scan fetched more items than expected for this account. Repeated occurrences indicate the account's active thread count exceeds efficient scan limits. Consider adding a filtered GSI or prompting the user to archive old threads.", {
+          code: "thread_database.search_threads.large_result_set",
           accountId,
           query,
           itemsFetched: fetchedItems.length,
@@ -567,7 +567,7 @@ export class ThreadDatabase {
       );
       const page = items.slice(0, limit).map(hydrateThreadObject);
       const nextKey = items.length > limit && res.LastEvaluatedKey ? encodeCursor(res.LastEvaluatedKey) : null;
-      return ok({ items: page, ...(nextKey ? { nextCursor: nextKey } : {}) } as Page<Arc>);
+      return ok({ items: page, ...(nextKey ? { nextCursor: nextKey } : {}) } as Page<Thread>);
     } catch (e) {
       return err(dbError(e));
     }
@@ -653,7 +653,7 @@ export class ThreadDatabase {
   }
 
   /**
-   * Find the calendar_event signal on an arc that is linked to a given email signal.
+   * Find the calendar_event signal on a thread that is linked to a given email signal.
    * Returns null if no linked calendar signal exists.
    */
   async getLinkedCalendarSignal(accountId: string, threadId: string, emailSignalId: string): Promise<Result<Signal<CalendarEventData> | null, DbError>> {
@@ -679,12 +679,12 @@ export class ThreadDatabase {
   }
 
   /**
-   * Find the most recent calendar_response signal on an arc for a given veventUid.
+   * Find the most recent calendar_response signal on a thread for a given veventUid.
    * Returns the decision from the most recent response, or null if none exists.
    */
   async getLatestCalendarResponse(accountId: string, threadId: string, veventUid: string): Promise<Result<Signal<import("../types/calendar.js").CalendarResponseData> | null, DbError>> {
     try {
-      // Query all signals on the arc (sorted newest-first via ScanIndexForward: false)
+      // Query all signals on the thread (sorted newest-first via ScanIndexForward: false)
       const res = await dynamo.send(new QueryCommand({
         TableName: SIGNALS_TABLE,
         IndexName: "gsi1",
@@ -705,7 +705,7 @@ export class ThreadDatabase {
     }
   }
 
-  async listActiveThreads(accountId: string, limit: number): Promise<Result<Arc[], DbError>> {
+  async listActiveThreads(accountId: string, limit: number): Promise<Result<Thread[], DbError>> {
     try {
       const res = await dynamo.send(new QueryCommand({
         TableName: SIGNALS_TABLE,
@@ -715,7 +715,7 @@ export class ThreadDatabase {
         ScanIndexForward: false,
         Limit: limit,
       }));
-      return ok((res.Items ?? []).map(i => hydrateThreadObject(i as Arc)));
+      return ok((res.Items ?? []).map(i => hydrateThreadObject(i as Thread)));
     } catch (e) {
       return err(dbError(e));
     }

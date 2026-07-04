@@ -11,7 +11,7 @@ import { ok, err } from "../errors.js"
 import type { DbError, Result, TransientSesError } from "../errors.js"
 import type { Logger } from "../logger.js"
 import type { EmailService } from "../email/email-service.js"
-import type { Arc, Account, ForwardingTarget } from "../types/index.js"
+import type { Thread, Account, ForwardingTarget } from "../types/index.js"
 import { shouldDispatchDigest, buildDigestSubject } from "./digest-frequency-filter.js"
 import type { DigestFrequency } from "./digest-frequency-filter.js"
 import { generateUnsubscribeToken } from "../email/unsubscribe-token.js"
@@ -32,8 +32,8 @@ export interface IDigestWorkerDeps {
     getAccount(accountId: string): Promise<Result<Account | null, DbError>>
     getForwardingTarget(accountId: string, target: string): Promise<Result<ForwardingTarget | null, DbError>>
   }
-  arcDb: {
-    listActiveArcs(accountId: string, limit: number): Promise<Result<Arc[], DbError>>
+  threadDb: {
+    listActiveThreads(accountId: string, limit: number): Promise<Result<Thread[], DbError>>
   }
   signalDb: {
     countQuarantined(accountId: string): Promise<Result<number, DbError>>
@@ -60,7 +60,7 @@ export class DigestWorker {
   }
 
   async process(message: IDigestSendMessage, today: DateTime = DateTime.utc()): Promise<Result<void, DbError | TransientSesError>> {
-    const { accountDb, arcDb, signalDb, emailService, logger } = this.deps
+    const { accountDb, threadDb, signalDb, emailService, logger } = this.deps
     const { accountId } = message
 
     // 1. Load account
@@ -99,13 +99,13 @@ export class DigestWorker {
     }
 
     // 5. Query top 100 active arcs (sorted by lastSignalAt desc)
-    const arcsResult = await arcDb.listActiveArcs(accountId, 100)
+    const arcsResult = await threadDb.listActiveThreads(accountId, 100)
     if (arcsResult.isErr()) return err(arcsResult.error)
     const arcs = arcsResult.value
 
     // Suppress if zero arcs
     if (arcs.length === 0) {
-      logger.info("Digest suppressed — zero active arcs", { code: "digest.worker.no_arcs", accountId })
+      logger.info("Digest suppressed — zero active threads", { code: "digest.worker.no_threads", accountId })
       return ok(undefined)
     }
 

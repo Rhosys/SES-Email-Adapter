@@ -16,7 +16,7 @@ import { ensureAliasExists } from "./aliasesApi.js";
 import { isCalendarEventSignal, isEmailSignal } from "../types/index.js";
 import type { S3Client } from "@aws-sdk/client-s3";
 import type { Result } from "neverthrow";
-import type { Arc, Signal, AnySignal, Attachment, PageParams, ArcStatus, Workflow } from "../types/index.js";
+import type { Thread, Signal, AnySignal, Attachment, PageParams, ThreadStatus, Workflow } from "../types/index.js";
 import type { CalendarEventData, CalendarResponseData, DomainMisconfigurationData, Pagination } from "../types/index.js";
 import type { UpdateThreadFields, ThreadDatabase } from "../database/thread-database.js";
 import type { AccountDatabase } from "../database/account-database.js";
@@ -45,7 +45,7 @@ export interface SignalReprocessor {
 export interface ListArcsParams extends PageParams {
   workflow?: Workflow;
   label?: string;
-  status?: ArcStatus;
+  status?: ThreadStatus;
 }
 
 const MAIL_DOMAIN = process.env["MAIL_DOMAIN"] ?? "platform.email.rhosys.cloud";
@@ -108,7 +108,7 @@ export class ArcsApi {
       const params: ListArcsParams = {
         ...(query["workflow"] ? { workflow: query["workflow"] as Workflow } : {}),
         ...(query["label"] ? { label: query["label"] } : {}),
-        ...(query["status"] ? { status: query["status"] as ArcStatus } : {}),
+        ...(query["status"] ? { status: query["status"] as ThreadStatus } : {}),
         ...(query["cursor"] ? { cursor: query["cursor"] } : {}),
         ...(query["limit"] ? { limit: parseInt(query["limit"], 10) } : {}),
       };
@@ -159,8 +159,8 @@ export class ArcsApi {
           const recipientAddress = signal.data.recipientAddress;
           const saveSenderResult = await accountDb.saveSender(accountId, recipientAddress, senderETLD1, "report_violation");
           if (saveSenderResult.isErr()) return err(c, 500, "Internal Server Error");
-          logger.track("Arc reported as GDPR violation. Sender domain blocked with report_violation policy and arc deleted.", {
-            code: "api.arc.report_violation",
+          logger.track("Thread reported as GDPR violation. Sender domain blocked with report_violation policy and thread deleted.", {
+            code: "api.thread.report_violation",
             signal, arc,
             senderDomain: senderETLD1,
           });
@@ -190,7 +190,7 @@ export class ArcsApi {
           if (retentionSeconds != null) {
             const expiresAt = new Date(arc.createdAt).getTime() + retentionSeconds * 1000;
             if (followupTime > expiresAt) {
-              return err(c, 400, "followupAt exceeds arc retention expiration");
+              return err(c, 400, "followupAt exceeds thread retention expiration");
             }
           }
         }
@@ -210,7 +210,7 @@ export class ArcsApi {
         const scheduleResult = await schedulerClient.createFollowup({
           accountId,
           signalId,
-          arcId: arc.id,
+          threadId: arc.id,
           fireAt: body.followupAt,
           suffix: "followup",
           sqsMessageAttributeMessageType: "signal_followup",
@@ -596,15 +596,15 @@ export class ArcsApi {
         return err(c, 422, "Invalid recipient domain", "INVALID_RECIPIENT_DOMAIN", { invalidDomains: mxResult.error.invalidDomains });
       }
 
-      // Verify the from address matches the arc's alias
+      // Verify the from address matches the thread's alias
       if (signal.data.from.address !== arc.recipientAddress) {
-        logger.track("Draft send: from address does not match arc alias — rejecting.", {
+        logger.track("Draft send: from address does not match thread alias — rejecting.", {
           code: "draft_send.from_address_mismatch",
           signal, arc,
           fromAddress: signal.data.from.address,
-          arcRecipientAddress: arc.recipientAddress,
+          threadRecipientAddress: arc.recipientAddress,
         });
-        return err(c, 422, "From address does not match arc alias");
+        return err(c, 422, "From address does not match thread alias");
       }
 
       // ── Undo-send mechanism ──────────────────────────────────────────────
@@ -687,7 +687,7 @@ export class ArcsApi {
       const emailSignal = signalsResult.value.items.find(
         (s): s is Signal => s.type === "email" && s.source === "email" && Boolean((s.data as Signal["data"]).unsubscribe),
       );
-      if (!emailSignal) return err(c, 400, "No unsubscribe info available for this arc");
+      if (!emailSignal) return err(c, 400, "No unsubscribe info available for this thread");
 
       const unsubscribe = emailSignal.data.unsubscribe!;
 

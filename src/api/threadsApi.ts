@@ -11,7 +11,7 @@ import { buildScheduleName } from "../scheduler/schedule-name.js";
 import { durationToSeconds } from "../processor/retention.js";
 import { isCalendarEventSignal, isEmailSignal } from "../types/index.js";
 import type { S3Client } from "@aws-sdk/client-s3";
-import type { Arc, Signal, AnySignal, Attachment, PageParams, ArcStatus, Workflow } from "../types/index.js";
+import type { Thread, Signal, AnySignal, Attachment, PageParams, ThreadStatus, Workflow } from "../types/index.js";
 import type { CalendarEventData, CalendarResponseData, DomainMisconfigurationData, Pagination } from "../types/index.js";
 import type { UpdateThreadFields, ThreadDatabase } from "../database/thread-database.js";
 import type { AccountDatabase } from "../database/account-database.js";
@@ -90,7 +90,7 @@ export class ThreadsApi {
       const params: ListArcsParams = {
         ...(query["workflow"] ? { workflow: query["workflow"] as Workflow } : {}),
         ...(query["label"] ? { label: query["label"] } : {}),
-        ...(query["status"] ? { status: query["status"] as ArcStatus } : {}),
+        ...(query["status"] ? { status: query["status"] as ThreadStatus } : {}),
         ...(query["cursor"] ? { cursor: query["cursor"] } : {}),
         ...(query["limit"] ? { limit: parseInt(query["limit"], 10) } : {}),
       };
@@ -148,8 +148,8 @@ export class ThreadsApi {
           const recipientAddress = signal.data.recipientAddress;
           const saveSenderResult = await accountDb.saveSender(accountId, recipientAddress, senderETLD1, "report_violation");
           if (saveSenderResult.isErr()) return err(c, 500, "Internal Server Error");
-          logger.track("Arc reported as GDPR violation. Sender domain blocked with report_violation policy and arc deleted.", {
-            code: "api.arc.report_violation", signal, arc, senderDomain: senderETLD1,
+          logger.track("Thread reported as GDPR violation. Sender domain blocked with report_violation policy and thread deleted.", {
+            code: "api.thread.report_violation", signal, arc, senderDomain: senderETLD1,
           });
         }
         const updateResult = await arcDb.updateThread(accountId, arc.id, "deleted", arc.lastSignalAt, {});
@@ -172,7 +172,7 @@ export class ThreadsApi {
           const retentionSeconds = durationToSeconds(arc.retentionDuration);
           if (retentionSeconds != null) {
             const expiresAt = new Date(arc.createdAt).getTime() + retentionSeconds * 1000;
-            if (followupTime > expiresAt) return err(c, 400, "followupAt exceeds arc retention expiration");
+            if (followupTime > expiresAt) return err(c, 400, "followupAt exceeds thread retention expiration");
           }
         }
       }
@@ -185,7 +185,7 @@ export class ThreadsApi {
         const signalsResult = await arcDb.listSignals(accountId, arc.id, { limit: 1 });
         const signalId = signalsResult.isOk() ? signalsResult.value.items[0]?.id ?? arc.id : arc.id;
         const scheduleResult = await schedulerClient.createFollowup({
-          accountId, signalId, arcId: arc.id, fireAt: body.followupAt,
+          accountId, signalId, threadId: arc.id, fireAt: body.followupAt,
           suffix: "followup", sqsMessageAttributeMessageType: "signal_followup",
         });
         if (scheduleResult.isErr()) {
@@ -372,11 +372,11 @@ export class ThreadsApi {
       }
 
       if (signal.data.from.address !== arc.recipientAddress) {
-        logger.track("Draft send: from address does not match arc alias — rejecting.", {
+        logger.track("Draft send: from address does not match thread alias — rejecting.", {
           code: "draft_send.from_address_mismatch", signal, arc,
-          fromAddress: signal.data.from.address, arcRecipientAddress: arc.recipientAddress,
+          fromAddress: signal.data.from.address, threadRecipientAddress: arc.recipientAddress,
         });
-        return err(c, 422, "From address does not match arc alias");
+        return err(c, 422, "From address does not match thread alias");
       }
 
       // ── Undo-send mechanism ──────────────────────────────────────────────
@@ -423,7 +423,7 @@ export class ThreadsApi {
       const emailSignal = signalsResult.value.items.find(
         (s): s is Signal => s.type === "email" && s.source === "email" && Boolean((s.data as Signal["data"]).unsubscribe),
       );
-      if (!emailSignal) return err(c, 400, "No unsubscribe info available for this arc");
+      if (!emailSignal) return err(c, 400, "No unsubscribe info available for this thread");
 
       const unsubscribe = emailSignal.data.unsubscribe!;
 

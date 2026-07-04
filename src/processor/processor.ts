@@ -6,7 +6,7 @@ import type { Result } from "neverthrow";
 import type { IForwardingService } from "../forwarding/forwarding-service.js";
 import { ok, err, dbError, processorError, invalidResponseError, notFoundError } from "../errors.js";
 import type { DbError, InvalidResponseError, NotFoundError, ProcessorError, TransientSesError } from "../errors.js";
-import type { Signal, Arc, Rule, Workflow, WorkflowData, Alias, AliasSender, SenderPolicy, AccountFilteringConfig, SignalSource, SignalStatus, Domain, ArcStatus, ArcUrgency, UnknownSenderPolicy, MatchedRuleResult, InvalidRuleFunctionData, InvalidTemplateFunctionData, AutoSendBlockedData, UnsubscribeInfo } from "../types/index.js";
+import type { Signal, Thread, Rule, Workflow, WorkflowData, Alias, AliasSender, SenderPolicy, AccountFilteringConfig, SignalSource, SignalStatus, Domain, ThreadStatus, ThreadUrgency, UnknownSenderPolicy, MatchedRuleResult, InvalidRuleFunctionData, InvalidTemplateFunctionData, AutoSendBlockedData, UnsubscribeInfo } from "../types/index.js";
 import { DEFAULT_UNKNOWN_SENDER_POLICY } from "../types/index.js";
 import type { ParsedMime } from "./mime.js";
 import type { ContentSanitizerClient } from "./content-sanitizer-client.js";
@@ -53,9 +53,9 @@ export type ProcessorMessageType = "inbound_signal" | "side_effect";
 export interface SideEffectPayload {
   signal: Signal;
   /** Primary field — new messages use `thread` */
-  thread?: Arc;
+  thread?: Thread;
   /** @deprecated Retained for in-flight SQS backward compatibility during deploy */
-  arc?: Arc;
+  arc?: Thread;
 }
 
 export interface SqsDispatcher {
@@ -67,19 +67,19 @@ export interface SqsDispatcher {
 // ---------------------------------------------------------------------------
 
 export interface ArcMatcherPort {
-  findMatch(accountId: string, recipientAddress: string, embedding: number[]): Promise<Result<Arc | null, DbError>>;
-  upsertEmbedding(arcId: string, embedding: number[], accountId: string, recipientAddress: string): Promise<Result<void, DbError>>;
+  findMatch(accountId: string, recipientAddress: string, embedding: number[]): Promise<Result<Thread | null, DbError>>;
+  upsertEmbedding(threadId: string, embedding: number[], accountId: string, recipientAddress: string): Promise<Result<void, DbError>>;
 }
 
 /** @deprecated Use ArcMatcherPort — retained for test backward compat during migration */
 export type { ArcMatcherPort as ArcMatcher };
 
 export interface RuleEvaluator {
-  evaluate(rule: Rule, context: { signal: Signal; arc: Arc; isMatchedArc: boolean }): Promise<RuleEvalResult>;
+  evaluate(rule: Rule, context: { signal: Signal; arc: Thread; isMatchedArc: boolean }): Promise<RuleEvalResult>;
 }
 
 export interface Notifier {
-  notify(accountId: string, arc: Arc, signal: Signal, urgency: ArcUrgency): Promise<Result<void, DbError>>;
+  notify(accountId: string, arc: Thread, signal: Signal, urgency: ThreadUrgency): Promise<Result<void, DbError>>;
 }
 
 
@@ -138,7 +138,7 @@ interface ProcessingOutcome {
   quarantineHidden: boolean;  // true → quarantine_hidden status; false → quarantine_visible
   approveSender: boolean;
   archive: boolean;
-  urgency?: ArcUrgency;
+  urgency?: ThreadUrgency;
   suppressNotification: boolean;
   forwardAddresses: string[];
   additionalLabels: string[];
@@ -161,7 +161,7 @@ function emptyOutcome(): ProcessingOutcome {
 
 async function applyRules(
   rules: Rule[],
-  context: { signal: Signal; arc: Arc; isMatchedArc: boolean },
+  context: { signal: Signal; arc: Thread; isMatchedArc: boolean },
   evaluator: RuleEvaluator,
   logger: Logger,
   saveSignal: (signal: Signal<InvalidRuleFunctionData>) => Promise<Result<void, DbError>>,
@@ -240,7 +240,7 @@ function deriveOutcome(matchedRules: MatchedRuleResult[]): ProcessingOutcome {
           break;
         case "approve_sender":        outcome.approveSender = true; break;
         case "suppress_notification": outcome.suppressNotification = true; break;
-        case "set_urgency":           if (!urgencySet && action.value) { outcome.urgency = action.value as ArcUrgency; urgencySet = true; } break;
+        case "set_urgency":           if (!urgencySet && action.value) { outcome.urgency = action.value as ThreadUrgency; urgencySet = true; } break;
         case "assign_label":          if (action.value) outcome.additionalLabels.push(action.value); break;
         case "forward":               if (action.value) outcome.forwardAddresses.push(action.value); break;
         case "pong":                  outcome.doPong = true; break;
@@ -379,7 +379,7 @@ export class SignalProcessor {
     const accountId = signal.accountId;
 
     // On retries the payload arc snapshot may be stale — refetch from DDB
-    let arc: Arc;
+    let arc: Thread;
     if (receiveCount > 1) {
       const arcResult = await this.arcDb.getThread(accountId, payloadArcResolved.id);
       if (arcResult.isErr()) return err(processorError(arcResult.error));
@@ -493,7 +493,7 @@ export class SignalProcessor {
           "signal.subject": signal.data.subject ?? "",
           "sender.name": signal.data.from.name ?? "",
           "sender.address": signal.data.from.address,
-          "arc.workflow": signal.data.workflow ?? "",
+          "thread.workflow": signal.data.workflow ?? "",
         };
 
         for (const action of autoDraftActions) {
@@ -677,7 +677,7 @@ export class SignalProcessor {
               calendarSignal,
               calendarForwardingAddress,
               accountId,
-              arcId: arc.id,
+              threadId: arc.id,
               aliasAddress: signal.data.recipientAddress,
             },
             this.calendarForwarderDeps,
@@ -738,9 +738,9 @@ export class SignalProcessor {
           if (!existing.threadId) return err(dbError("signal missing threadId on retry"));
           const arcResult = await this.arcDb.getThread(accountId, existing.threadId);
           if (arcResult.isErr()) return err(arcResult.error);
-          this.logger.trackPoint("retry_arc_lookup");
+          this.logger.trackPoint("retry_thread_lookup");
           const arc = arcResult.value;
-          if (!arc) return err(dbError("arc not found on retry"));
+          if (!arc) return err(dbError("thread not found on retry"));
 
           const accountResult = await this.accountDb.getAccount(accountId);
           if (accountResult.isErr()) return err(accountResult.error);
@@ -968,7 +968,7 @@ export class SignalProcessor {
     const primaryResult = await this.embeddingGenerator.generateForModel(embedText, readCluster.modelId);
 
     if (primaryResult.isErr()) {
-      this.logger.error("Primary embedding generation failed. The Bedrock InvokeModel call for the read cluster returned an error. Arc matching cannot proceed without a valid vector — the message will be retried via batch item failure.", { code: "embedding.primary_failed", modelId: readCluster.modelId, error: primaryResult.error });
+      this.logger.error("Primary embedding generation failed. The Bedrock InvokeModel call for the read cluster returned an error. Thread matching cannot proceed without a valid vector — the message will be retried via batch item failure.", { code: "embedding.primary_failed", modelId: readCluster.modelId, error: primaryResult.error });
       return err(dbError(primaryResult.error));
     }
     const embedding = primaryResult.value.vector;
@@ -1004,20 +1004,20 @@ export class SignalProcessor {
 
     // 6. Arc matching (parallel tiers)
     const groupingKey = deriveGroupingKey(classificationOutput.workflow, classificationOutput.workflowData, recipientAddress, senderETLD1);
-    this.logger.trackPoint("arc_matcher_values_generated");
-    this.logger.trackPoint("arc_match_search");
+    this.logger.trackPoint("thread_matcher_values_generated");
+    this.logger.trackPoint("thread_match_search");
 
     // Tier 1: Grouping key lookup
-    const tier1Promise = (async (): Promise<Arc | null> => {
+    const tier1Promise = (async (): Promise<Thread | null> => {
       if (!groupingKey) return null;
-      this.logger.trackPoint("arc_matcher_grouping_key_lookup");
+      this.logger.trackPoint("thread_matcher_grouping_key_lookup");
       const gkResult = await this.arcDb.findThreadByGroupingKey(accountId, groupingKey);
       if (gkResult.isErr()) return null;
       return gkResult.value;
     })();
 
     // Tier 1.5: In-Reply-To GSI3 lookup
-    const tier15Promise = (async (): Promise<Arc | null> => {
+    const tier15Promise = (async (): Promise<Thread | null> => {
       const inReplyToHeader = parsed.headers["in-reply-to"];
       if (!inReplyToHeader) return null;
       const firstMsgId = extractFirstInReplyTo(inReplyToHeader);
@@ -1032,15 +1032,15 @@ export class SignalProcessor {
       if (!foundSignal || !foundSignal.threadId) return null;
       const arcResult = await this.arcDb.getThread(accountId, foundSignal.threadId);
       if (arcResult.isErr()) {
-        this.logger.warn("In-Reply-To arc fetch failed — treating as miss.", { code: "processor.in_reply_to.arc_fetch_error", accountId, sesMessageId, error: arcResult.error });
+        this.logger.warn("In-Reply-To thread fetch failed — treating as miss.", { code: "processor.in_reply_to.thread_fetch_error", accountId, sesMessageId, error: arcResult.error });
         return null;
       }
       return arcResult.value;
     })();
 
     // Tier 2: Similarity search
-    const tier2Promise = (async (): Promise<Arc | null> => {
-      this.logger.trackPoint("arc_matcher_similarity_search");
+    const tier2Promise = (async (): Promise<Thread | null> => {
+      this.logger.trackPoint("thread_matcher_similarity_search");
       const matchResult = await this.arcMatcher.findMatch(accountId, recipientAddress, embedding);
       if (matchResult.isErr()) return null;
       return matchResult.value;
@@ -1056,8 +1056,8 @@ export class SignalProcessor {
     ];
     const uniqueThreadIds = new Set(matchedArcs.map(m => m.threadId));
     if (uniqueThreadIds.size > 1) {
-      this.logger.track("Arc match discrepancy — multiple tiers returned different arcs.", {
-        code: "processor.arc_match_discrepancy",
+      this.logger.track("Thread match discrepancy — multiple tiers returned different threads.", {
+        code: "processor.thread_match_discrepancy",
         accountId,
         sesMessageId,
         tier1ThreadId: tier1Arc?.id ?? null,
@@ -1075,7 +1075,7 @@ export class SignalProcessor {
     const isMatchedArc = matchedArc !== null;
 
     // 7. Build arc shell (lastSignalAt applied after rules — archive outcome suppresses it on existing arcs)
-    let arc: Arc;
+    let arc: Thread;
     if (matchedArc) {
       arc = {
         ...matchedArc,
@@ -1089,7 +1089,7 @@ export class SignalProcessor {
         // so it tracks current account/alias config rather than sticking to a stale value.
         retentionDuration: effectiveRetentionForTtl,
       };
-      this.logger.info("Existing arc matched.", { code: "processor.arc_matched", threadId: arc.id, matchMethod, accountId, sesMessageId });
+      this.logger.info("Existing thread matched.", { code: "processor.thread_matched", threadId: arc.id, matchMethod, accountId, sesMessageId });
     } else {
       arc = {
         id: generateId("thr-"),
@@ -1273,7 +1273,7 @@ export class SignalProcessor {
     if (!matchedArc) arc.urgency = signalUrgency;
 
     const signal: Signal = { ...signalShell, threadId: arc.id, data: { ...signalShell.data, matchedRules, urgency: signalUrgency } };
-    this.logger.trackPoint("arc_updated", { threadId: arc.id });
+    this.logger.trackPoint("thread_updated", { threadId: arc.id });
 
     // 12. Pong — handled entirely in side-effect SQS handler (processSideEffect)
 
@@ -1316,23 +1316,23 @@ export class SignalProcessor {
       const updateResult = await this.arcDb.updateThread(accountId, arc.id, arc.status, arc.lastSignalAt, fields);
       if (updateResult.isErr()) return err(updateResult.error);
 
-      // Cancel pending followup schedule when reactivating an archived arc
+      // Cancel pending followup schedule when reactivating an archived thread
       if (matchedArc.status === "archived" && arc.status === "active" && this.schedulerClient) {
         const signalsResult = await this.arcDb.listSignals(accountId, arc.id, { limit: 1 });
         const scheduleSignalId = signalsResult.isOk() ? signalsResult.value.items[0]?.id ?? arc.id : arc.id;
         const scheduleName = buildScheduleName(accountId, scheduleSignalId, "followup");
         const deleteResult = await this.schedulerClient.deleteFollowup(scheduleName);
         if (deleteResult.isErr()) {
-          this.logger.warn("Failed to cancel followup schedule on arc reactivation — stale-fire will handle it.", { code: "processor.followup.cancel_failed", signal, arc, scheduleName, error: deleteResult.error });
+          this.logger.warn("Failed to cancel followup schedule on thread reactivation — stale-fire will handle it.", { code: "processor.followup.cancel_failed", signal, arc, scheduleName, error: deleteResult.error });
         }
       }
     } else {
       if (outcome.archive) arc.status = "archived";
       const saveArcResult = await this.arcDb.saveThread(arc);
       if (saveArcResult.isErr()) return err(saveArcResult.error);
-      this.logger.info("New arc created.", { code: "processor.arc_created", threadId: arc.id, accountId, signalId: signal.id, sesMessageId, ...(groupingKey ? { groupingKey } : {}) });
+      this.logger.info("New thread created.", { code: "processor.thread_created", threadId: arc.id, accountId, signalId: signal.id, sesMessageId, ...(groupingKey ? { groupingKey } : {}) });
     }
-    this.logger.trackPoint("arc_saved", { threadId: arc.id });
+    this.logger.trackPoint("thread_saved", { threadId: arc.id });
 
     const saveSignalResult = await this.arcDb.saveSignal(signal);
     if (saveSignalResult.isErr()) return err(saveSignalResult.error);
@@ -1380,7 +1380,7 @@ export class SignalProcessor {
    * Logs ERROR for primary cluster failures, WARN for non-primary.
    * Upserts are idempotent (ON CONFLICT DO UPDATE) — safe to re-run on every attempt.
    */
-  async executeAuroraUpserts(signal: Signal, arc: Arc): Promise<Result<void, DbError>> {
+  async executeAuroraUpserts(signal: Signal, arc: Thread): Promise<Result<void, DbError>> {
     const activeClusters = getActiveClusters();
     this.logger.trackPoint("aurora_upsert_start", { clusterCount: activeClusters.length });
 
@@ -1394,7 +1394,7 @@ export class SignalProcessor {
 
         const upsertResult = await this.auroraWriter.upsertEmbedding({
           registryId: cluster.registryId,
-          arcId: arc.id,
+          threadId: arc.id,
           accountId: signal.accountId,
           recipientAddress: signal.data.recipientAddress,
           embedding,
@@ -1426,7 +1426,7 @@ export class SignalProcessor {
    * If the SQS send fails, returns err — this causes a batchItemFailure so the
    * message is retried (Aurora succeeded but side-effects won't fire without dispatch).
    */
-  async dispatchSideEffects(signal: Signal, arc: Arc): Promise<Result<void, DbError>> {
+  async dispatchSideEffects(signal: Signal, arc: Thread): Promise<Result<void, DbError>> {
     this.logger.trackPoint("side_effect_dispatch_start");
     const payload: SideEffectPayload = { signal, thread: arc };
     const sendResult = await this.sqsDispatcher.sendMessage(payload);
@@ -1445,7 +1445,7 @@ export class SignalProcessor {
    * Errors are logged at warn level and never propagate — S3 retention failure
    * must not alter the processing outcome or prevent Aurora/side-effect execution.
    */
-  async attemptS3Retention(signal: Signal, billingPlan: BillingPlan, arc: Arc): Promise<void> {
+  async attemptS3Retention(signal: Signal, billingPlan: BillingPlan, arc: Thread): Promise<void> {
     this.logger.trackPoint("s3_retention_start");
     try {
       const retention = getRetentionForPlan(billingPlan);
@@ -1490,7 +1490,7 @@ export class SignalProcessor {
    *
    * On unexpected crash: does NOT catch — lets the exception propagate so SQS retries naturally.
    */
-  private async processCalendarAttachment(signal: Signal, arc: Arc, accountId: string, ttl?: number): Promise<void> {
+  private async processCalendarAttachment(signal: Signal, arc: Thread, accountId: string, ttl?: number): Promise<void> {
     const attachments = signal.data.attachments ?? [];
     const calendarAttachment = findCalendarAttachment(attachments, this.logger);
     if (!calendarAttachment) return;
@@ -1579,7 +1579,7 @@ export class SignalProcessor {
       arc.labels = [...arc.labels, "system:calendar"];
       const updateResult = await this.arcDb.updateThread(accountId, arc.id, arc.status, arc.lastSignalAt!, { labels: arc.labels });
       if (updateResult.isErr()) {
-        this.logger.warn("Failed to apply system:calendar label to arc.", { code: "processor.calendar.label_failed", signal, arc, error: updateResult.error });
+        this.logger.warn("Failed to apply system:calendar label to thread.", { code: "processor.calendar.label_failed", signal, arc, error: updateResult.error });
       }
     }
 
@@ -1593,7 +1593,7 @@ export class SignalProcessor {
         const scheduleResult = await this.schedulerClient.createFollowup({
           accountId,
           signalId: calendarSignalId,
-          arcId: arc.id,
+          threadId: arc.id,
           fireAt,
           suffix,
           sqsMessageAttributeMessageType: "signal_followup",
@@ -1621,7 +1621,7 @@ export class SignalProcessor {
             const rsvpResult = await this.schedulerClient.createFollowup({
               accountId,
               signalId: calendarSignalId,
-              arcId: arc.id,
+              threadId: arc.id,
               fireAt,
               suffix,
               sqsMessageAttributeMessageType: "rsvp_reminder",
