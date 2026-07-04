@@ -145,13 +145,13 @@ export class ThreadDatabase {
     }
   }
 
-  async findSignalByEmailMessageId(gsi2pk: string): Promise<Result<{ threadId?: string; id: string; signalLookupId: string; accountId: string; status: string; source: string; type: string } | null, DbError>> {
+  async findSignalByEmailMessageId(gsi3pk: string): Promise<Result<{ threadId?: string; id: string; signalLookupId: string; accountId: string; status: string; source: string; type: string } | null, DbError>> {
     try {
       const res = await dynamo.send(new QueryCommand({
         TableName: SIGNALS_TABLE,
-        IndexName: "gsi2",
-        KeyConditionExpression: "gsi2pk = :val",
-        ExpressionAttributeValues: { ":val": gsi2pk },
+        IndexName: "gsi3",
+        KeyConditionExpression: "gsi3pk = :val",
+        ExpressionAttributeValues: { ":val": gsi3pk },
         Limit: 1,
       }));
       if (!res.Items || res.Items.length === 0) return ok(null);
