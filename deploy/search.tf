@@ -50,8 +50,6 @@ resource "aws_rds_cluster_parameter_group" "aurora" {
   name_prefix = "${lower(var.service_name)}-${each.key}-pg-"
   family      = "aurora-postgresql18"
 
-  # pgvector does not require shared_preload_libraries — it is loaded
-  # on-demand via CREATE EXTENSION vector; in the bootstrap migration.
   # pg_cron requires shared_preload_libraries to be loaded at startup.
   parameter {
     name         = "shared_preload_libraries"
@@ -62,8 +60,9 @@ resource "aws_rds_cluster_parameter_group" "aurora" {
   # pg_cron runs jobs in the configured database (default: postgres).
   # Point it at the application database so the TTL job can execute.
   parameter {
-    name  = "cron.database_name"
-    value = local.aurora_database_name
+    name         = "cron.database_name"
+    value        = local.aurora_database_name
+    apply_method = "pending-reboot"
   }
 
   # -----------------------------------------------------------------------
