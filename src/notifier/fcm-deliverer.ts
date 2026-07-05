@@ -33,7 +33,7 @@ function buildFcmMessage(token: string, payload: NotificationPayload, priority: 
     },
     data: {
       signalId: payload.signalId,
-      arcId: payload.arcId,
+      threadId: payload.threadId,
       senderName: payload.senderName,
       subject: payload.subject,
       workflow: payload.workflow,

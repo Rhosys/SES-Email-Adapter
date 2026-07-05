@@ -76,27 +76,27 @@ export class DomainHealthJob {
         }
       }
 
-      // Staleness check: identify outstanding arcs for this account
+      // Staleness check: identify outstanding threads for this account
       const cutoffDate = DateTime.utc().minus({ days: 7 }).toISO()!;
-      const staleArcsResult = await this.threadDb.listActiveThreadsBefore(accountId, cutoffDate);
-      if (staleArcsResult.isErr()) {
+      const staleThreadsResult = await this.threadDb.listActiveThreadsBefore(accountId, cutoffDate);
+      if (staleThreadsResult.isErr()) {
         this.logger.track("Failed to query stale threads for account during staleness check. The DynamoDB query returned an error. This account's staleness report will be skipped. [Action Required] Check DynamoDB read capacity.", {
           code: "staleness_checker.account_error",
           accountId,
-          error: staleArcsResult.error,
+          error: staleThreadsResult.error,
         });
         continue;
       }
 
-      const staleArcs = staleArcsResult.value;
-      const outstanding = staleArcs.filter(arc => isOutstandingThread(arc, cutoffDate));
+      const staleThreads = staleThreadsResult.value;
+      const outstanding = staleThreads.filter(thread => isOutstandingThread(thread, cutoffDate));
       if (outstanding.length > 0) {
-        const [report] = buildAccountReports(outstanding.map(arc => ({
-          id: arc.id,
-          accountId: arc.accountId,
-          lastSignalAt: arc.lastSignalAt,
-          urgency: arc.urgency,
-          workflow: arc.workflow,
+        const [report] = buildAccountReports(outstanding.map(thread => ({
+          id: thread.id,
+          accountId: thread.accountId,
+          lastSignalAt: thread.lastSignalAt,
+          urgency: thread.urgency,
+          workflow: thread.workflow,
         })));
         reports.push(report!);
         const logEntry = buildAccountLogEntry(report!, DateTime.utc().toISO()!);

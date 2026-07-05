@@ -19,7 +19,7 @@ import type {
   AutoSendBlockedData,
   SignalType,
 } from "../../src/types/index.js";
-import { ArcDatabase } from "../../src/database/arc-database.js";
+import { ThreadDatabase } from "../../src/database/thread-database.js";
 import { createMockLogger } from "../helpers/mock-logger.js";
 
 // =============================================================================
@@ -82,7 +82,7 @@ describe("Property 2: System signals contain only expected data fields", () => {
 
   it("invalid_rule_function signal data contains only resourceName and issue", () => {
     const signal: Signal<InvalidRuleFunctionData> = {
-      id: "sgn-test", signalLookupId: "sgn-test", arcId: "arc-1", accountId: "acc-1",
+      id: "sgn-test", signalLookupId: "sgn-test", threadId: "arc-1", accountId: "acc-1",
       source: "email", type: "invalid_rule_function", status: "active", labels: [],
       createdAt: "2025-01-01T00:00:00.000Z", ttl: 1740000000,
       data: { resourceName: "My Rule", issue: "syntax error" },
@@ -95,7 +95,7 @@ describe("Property 2: System signals contain only expected data fields", () => {
 
   it("invalid_template_function signal data contains only resourceName, functionName, and issue", () => {
     const signal: Signal<InvalidTemplateFunctionData> = {
-      id: "sgn-test", signalLookupId: "sgn-test", arcId: "arc-1", accountId: "acc-1",
+      id: "sgn-test", signalLookupId: "sgn-test", threadId: "arc-1", accountId: "acc-1",
       source: "email", type: "invalid_template_function", status: "active", labels: [],
       createdAt: "2025-01-01T00:00:00.000Z", ttl: 1740000000,
       data: { resourceName: "Welcome Template", functionName: "formatDate", issue: "formatDate is not defined" },
@@ -108,7 +108,7 @@ describe("Property 2: System signals contain only expected data fields", () => {
 
   it("auto_send_blocked signal data contains only recipientAddress", () => {
     const signal: Signal<AutoSendBlockedData> = {
-      id: "sgn-test", signalLookupId: "sgn-test", arcId: "arc-1", accountId: "acc-1",
+      id: "sgn-test", signalLookupId: "sgn-test", threadId: "arc-1", accountId: "acc-1",
       source: "email", type: "auto_send_blocked", status: "active", labels: [],
       createdAt: "2025-01-01T00:00:00.000Z", ttl: 1740000000,
       data: { recipientAddress: "inbox@example.com" },
@@ -140,7 +140,7 @@ describe("Property 2: FeedbackProcessor deliverability signals contain only expe
     const signal: Signal<DeliverabilitySignalData> = {
       id: "sgn-deliv-001",
       signalLookupId: "sgn-deliv-001",
-      arcId: "arc-001",
+      threadId: "arc-001",
       accountId: "acct-001",
       source: "ses_feedback",
       type: "deliverability",
@@ -173,7 +173,7 @@ describe("Property 3: DynamoDB round-trip fidelity", () => {
   beforeEach(() => { ddbMock.reset(); });
   afterEach(() => { ddbMock.restore(); });
 
-  const db = new ArcDatabase(createMockLogger());
+  const db = new ThreadDatabase(createMockLogger());
 
   it.each([
     {
@@ -181,7 +181,7 @@ describe("Property 3: DynamoDB round-trip fidelity", () => {
       signal: {
         id: "sgn-email-001",
         signalLookupId: "sgn-email-001",
-        arcId: "arc-001",
+        threadId: "arc-001",
         accountId: "acct-001",
         source: "email",
         type: "email",
@@ -210,7 +210,7 @@ describe("Property 3: DynamoDB round-trip fidelity", () => {
       signal: {
         id: "sgn-deliv-001",
         signalLookupId: "sgn-deliv-001",
-        arcId: "arc-001",
+        threadId: "arc-001",
         accountId: "acct-001",
         source: "ses_feedback",
         type: "deliverability",
@@ -228,7 +228,7 @@ describe("Property 3: DynamoDB round-trip fidelity", () => {
       signal: {
         id: "sgn-rule-001",
         signalLookupId: "sgn-rule-001",
-        arcId: "arc-001",
+        threadId: "arc-001",
         accountId: "acct-001",
         source: "email",
         type: "invalid_rule_function",
@@ -245,7 +245,7 @@ describe("Property 3: DynamoDB round-trip fidelity", () => {
       signal: {
         id: "sgn-tmpl-001",
         signalLookupId: "sgn-tmpl-001",
-        arcId: "arc-001",
+        threadId: "arc-001",
         accountId: "acct-001",
         source: "email",
         type: "invalid_template_function",
@@ -263,7 +263,7 @@ describe("Property 3: DynamoDB round-trip fidelity", () => {
       signal: {
         id: "sgn-block-001",
         signalLookupId: "sgn-block-001",
-        arcId: "arc-001",
+        threadId: "arc-001",
         accountId: "acct-001",
         source: "email",
         type: "auto_send_blocked",
@@ -312,7 +312,7 @@ describe("Property 4: Type parameter default", () => {
     const signal: Signal = {
       id: "sgn-default-001",
       signalLookupId: "sgn-default-001",
-      arcId: "arc-001",
+      threadId: "arc-001",
       accountId: "acct-001",
       source: "email",
       type: "email",

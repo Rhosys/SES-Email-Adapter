@@ -11,7 +11,7 @@
 // ---------------------------------------------------------------------------
 
 /**
- * ISO 8601 durations allowed for signal/arc retention.
+ * ISO 8601 durations allowed for signal/thread retention.
  * These map to S3 lifecycle tags on the extracted content bucket.
  */
 export type RetentionDuration =

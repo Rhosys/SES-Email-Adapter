@@ -7,7 +7,7 @@ import type { AccountDatabase } from "../database/account-database.js";
 import { ok, err, dbError } from "../errors.js";
 import type { DbError, Result } from "../errors.js";
 import type { Logger } from "../logger.js";
-import { TAG_ACCOUNT_ID, TAG_TYPE, TAG_SIGNAL_ID, TAG_ARC_ID } from "../email/ses-tags.js";
+import { TAG_ACCOUNT_ID, TAG_TYPE, TAG_SIGNAL_ID, TAG_THREAD_ID } from "../email/ses-tags.js";
 
 // 72 hours in seconds — soft bounces expire and can retry
 const SOFT_BOUNCE_TTL_SECONDS = 72 * 60 * 60;
@@ -134,16 +134,16 @@ export class FeedbackProcessor {
               ...(r.status ? { reason: r.status } : {}),
             }));
 
-            // Create deliverability signal in the same arc
-            // Direct arc assignment: TAG_ARC_ID takes precedence (no arc-matching needed)
-            const tagArcId = feedback.mail.tags?.[TAG_ARC_ID];
-            const resolvedArcId = tagArcId || sentSignal.arcId;
+            // Create deliverability signal in the same thread
+            // Direct thread assignment: TAG_THREAD_ID takes precedence (no thread-matching needed)
+            const tagThreadId = feedback.mail.tags?.[TAG_THREAD_ID];
+            const resolvedThreadId = tagThreadId || sentSignal.threadId;
 
             const id = generateId("sgn-");
             const deliverabilitySignal: Signal<DeliverabilitySignalData> = {
               id,
               signalLookupId: id,
-              ...(resolvedArcId ? { arcId: resolvedArcId } : {}),
+              ...(resolvedThreadId ? { threadId: resolvedThreadId } : {}),
               accountId: sentSignal.accountId,
               source: "ses_feedback",
               type: "deliverability",

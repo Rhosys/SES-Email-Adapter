@@ -2,18 +2,18 @@ import type { IForwardingService } from "../../src/forwarding/forwarding-service
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { ok, err } from "../../src/errors.js";
 import { SignalProcessor } from "../../src/processor/processor.js";
-import type { ArcMatcher, InboundSignalMessage, SqsDispatcher } from "../../src/processor/processor.js";
+import type { ThreadMatcherPort, InboundSignalMessage, SqsDispatcher } from "../../src/processor/processor.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
 import { makeSharedNewDeps, makeRuleEvaluator3 } from "./_shared-new-deps.js";
-import { makeArcDbMock, makeAccountDbMock, makeProcessingDbMock, applyCtx } from "./_helpers.js";
-import type { ArcDatabase } from "../../src/database/arc-database.js";
+import { makeThreadDbMock, makeAccountDbMock, makeProcessingDbMock, applyCtx } from "./_helpers.js";
+import type { ThreadDatabase } from "../../src/database/thread-database.js";
 import type { EmailService } from "../../src/email/email-service.js";
 import type { ContentSanitizerClient } from "../../src/processor/content-sanitizer-client.js";
 import type { SignalClassifier, ClassificationOutput } from "../../src/classifier/classifier.js";
 import type { EmbeddingGenerator } from "../../src/embedding/embedding-generator.js";
-import type { MultiClusterAuroraWriter } from "../../src/database/arc-matcher.js";
+import type { MultiClusterAuroraWriter } from "../../src/database/thread-matcher.js";
 import type { SchedulerClient } from "../../src/scheduler/scheduler-client.js";
-import type { Alias, AliasSender, Arc } from "../../src/types/index.js";
+import type { Alias, AliasSender, Thread } from "../../src/types/index.js";
 import { dbError } from "../../src/errors.js";
 import { buildScheduleName } from "../../src/scheduler/schedule-name.js";
 import { createMockLogger, type MockLogger } from "../helpers/mock-logger.js";
@@ -36,7 +36,7 @@ vi.mock("../../src/embedding/cluster-registry.js", () => {
     CLUSTER_REGISTRY: Object.freeze([clusterA]),
     getActiveClusters: () => [clusterA],
     getRegistryById: (id: string) => (id === "cluster-a" ? clusterA : null),
-    getPrimaryArcMatcherRegistry: () => clusterA,
+    getPrimaryThreadMatcherRegistry: () => clusterA,
     getSecondaryClusters: () => [],
   };
 });
@@ -106,7 +106,7 @@ function makeClassifier(): Pick<SignalClassifier, "classify"> {
   };
 }
 
-function makeArcMatcher(): ArcMatcher {
+function makeArcMatcher(): ThreadMatcherPort {
   return {
     findMatch: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
     upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
@@ -154,13 +154,13 @@ function makeIcsContent(startTime: string): string {
 
 function buildProcessor(opts: {
   mockLogger: MockLogger;
-  arcDb?: ArcDatabase;
+  threadDb?: ThreadDatabase;
   schedulerClient?: ReturnType<typeof makeSchedulerClientMock>;
   contentSanitizer?: ContentSanitizerClient;
-  arcMatcher?: ArcMatcher;
+  threadMatcher?: ThreadMatcherPort;
   icsContent?: string;
 }): SignalProcessor {
-  const { mockLogger, arcDb, schedulerClient, contentSanitizer, arcMatcher, icsContent } = opts;
+  const { mockLogger, threadDb, schedulerClient, contentSanitizer, threadMatcher, icsContent } = opts;
 
   // When ICS content is provided, mock S3 GetObject to return the bytes
   const s3Send = vi.fn().mockImplementation((cmd: unknown) => {
@@ -178,7 +178,7 @@ function buildProcessor(opts: {
   applyCtx(accountDb, DEFAULT_CTX);
 
   return new SignalProcessor({ ...makeSharedNewDeps(),
-    arcDb: arcDb ?? makeArcDbMock(),
+    threadDb: threadDb ?? makeThreadDbMock(),
     accountDb,
     processingDb: makeProcessingDbMock(),
     contentSanitizer: contentSanitizer ?? makeContentSanitizer(),
@@ -194,7 +194,7 @@ function buildProcessor(opts: {
       upsertEmbedding: vi.fn().mockResolvedValue(ok(undefined)),
       findMatch: vi.fn().mockResolvedValue(ok(null)),
     },
-    arcMatcher: arcMatcher ?? makeArcMatcher(),
+    threadMatcher: threadMatcher ?? makeArcMatcher(),
     ruleEvaluator: makeRuleEvaluator3(mockLogger),
     logger: mockLogger,
     notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
@@ -226,12 +226,12 @@ describe("Feature: signal-followup-scheduler, Calendar scheduling integration", 
       const icsContent = makeIcsContent("20250715T140000Z");
       const schedulerClient = makeSchedulerClientMock();
 
-      const arcDb = makeArcDbMock();
-      (arcDb.saveSignal as ReturnType<typeof vi.fn>).mockResolvedValue(ok(undefined));
+      const threadDb = makeThreadDbMock();
+      (threadDb.saveSignal as ReturnType<typeof vi.fn>).mockResolvedValue(ok(undefined));
 
       const processor = buildProcessor({
         mockLogger,
-        arcDb,
+        threadDb,
         schedulerClient,
         contentSanitizer: makeContentSanitizer(true),
         icsContent,
@@ -255,12 +255,12 @@ describe("Feature: signal-followup-scheduler, Calendar scheduling integration", 
       const icsContent = makeIcsContent("20250715T140000Z");
       const schedulerClient = makeSchedulerClientMock();
 
-      const arcDb = makeArcDbMock();
-      (arcDb.saveSignal as ReturnType<typeof vi.fn>).mockResolvedValue(ok(undefined));
+      const threadDb = makeThreadDbMock();
+      (threadDb.saveSignal as ReturnType<typeof vi.fn>).mockResolvedValue(ok(undefined));
 
       const processor = buildProcessor({
         mockLogger,
-        arcDb,
+        threadDb,
         schedulerClient,
         contentSanitizer: makeContentSanitizer(true),
         icsContent,
@@ -277,7 +277,7 @@ describe("Feature: signal-followup-scheduler, Calendar scheduling integration", 
       vi.setSystemTime(new Date("2025-01-10T12:00:00Z"));
 
       const schedulerClient = makeSchedulerClientMock();
-      const existingArc: Arc = {
+      const existingArc: Thread = {
         id: "arc-existing",
         accountId: TEST_ACCOUNT_ID,
         status: "archived",
@@ -294,27 +294,27 @@ describe("Feature: signal-followup-scheduler, Calendar scheduling integration", 
 
       const mostRecentSignalId = "sgn-latest-001";
 
-      const arcDb = {
-        ...makeArcDbMock(),
+      const threadDb = {
+        ...makeThreadDbMock(),
         getSignalByMessageId: vi.fn().mockResolvedValue(ok(null)),
         saveSignal: vi.fn().mockResolvedValue(ok(undefined)),
         saveArc: vi.fn().mockResolvedValue(ok(undefined)),
         getArc: vi.fn().mockResolvedValue(ok(null)),
         updateArc: vi.fn().mockResolvedValue(ok({ id: existingArc.id })),
         listSignals: vi.fn().mockResolvedValue(ok({ items: [{ id: mostRecentSignalId }], nextToken: undefined })),
-      } as unknown as ArcDatabase;
+      } as unknown as ThreadDatabase;
 
-      // ArcMatcher returns the existing archived arc
-      const arcMatcher: ArcMatcher = {
+      // ThreadMatcherPort returns the existing archived arc
+      const threadMatcher: ThreadMatcherPort = {
         findMatch: vi.fn().mockResolvedValue(ok(existingArc)),
         upsertEmbedding: vi.fn().mockResolvedValue(ok(undefined)),
       };
 
       const processor = buildProcessor({
         mockLogger,
-        arcDb,
+        threadDb,
         schedulerClient,
-        arcMatcher,
+        threadMatcher,
       });
 
       await processor.processRecord(makeMessage("msg-reactivate"), 1);
@@ -332,7 +332,7 @@ describe("Feature: signal-followup-scheduler, Calendar scheduling integration", 
       const schedulerClient = makeSchedulerClientMock();
       schedulerClient.deleteFollowup.mockResolvedValue(err(dbError("ResourceNotFoundException")));
 
-      const existingArc: Arc = {
+      const existingArc: Thread = {
         id: "arc-existing-2",
         accountId: TEST_ACCOUNT_ID,
         status: "archived",
@@ -347,26 +347,26 @@ describe("Feature: signal-followup-scheduler, Calendar scheduling integration", 
         subject: "Test email",
       };
 
-      const arcDb = {
-        ...makeArcDbMock(),
+      const threadDb = {
+        ...makeThreadDbMock(),
         getSignalByMessageId: vi.fn().mockResolvedValue(ok(null)),
         saveSignal: vi.fn().mockResolvedValue(ok(undefined)),
         saveArc: vi.fn().mockResolvedValue(ok(undefined)),
         getArc: vi.fn().mockResolvedValue(ok(null)),
         updateArc: vi.fn().mockResolvedValue(ok({ id: existingArc.id })),
         listSignals: vi.fn().mockResolvedValue(ok({ items: [{ id: "sgn-latest-002" }], nextToken: undefined })),
-      } as unknown as ArcDatabase;
+      } as unknown as ThreadDatabase;
 
-      const arcMatcher: ArcMatcher = {
+      const threadMatcher: ThreadMatcherPort = {
         findMatch: vi.fn().mockResolvedValue(ok(existingArc)),
         upsertEmbedding: vi.fn().mockResolvedValue(ok(undefined)),
       };
 
       const processor = buildProcessor({
         mockLogger,
-        arcDb,
+        threadDb,
         schedulerClient,
-        arcMatcher,
+        threadMatcher,
       });
 
       const result = await processor.processRecord(makeMessage("msg-delete-fail"), 1);
@@ -418,12 +418,12 @@ describe("Feature: signal-followup-scheduler, Property 4: Calendar schedule fire
     const icsContent = makeIcsContent(startTime);
     const schedulerClient = makeSchedulerClientMock();
 
-    const arcDb = makeArcDbMock();
-    (arcDb.saveSignal as ReturnType<typeof vi.fn>).mockResolvedValue(ok(undefined));
+    const threadDb = makeThreadDbMock();
+    (threadDb.saveSignal as ReturnType<typeof vi.fn>).mockResolvedValue(ok(undefined));
 
     const processor = buildProcessor({
       mockLogger,
-      arcDb,
+      threadDb,
       schedulerClient,
       contentSanitizer: makeContentSanitizer(true),
       icsContent,
@@ -450,12 +450,12 @@ describe("Feature: signal-followup-scheduler, Property 4: Calendar schedule fire
     const icsContent = makeIcsContent(startTime);
     const schedulerClient = makeSchedulerClientMock();
 
-    const arcDb = makeArcDbMock();
-    (arcDb.saveSignal as ReturnType<typeof vi.fn>).mockResolvedValue(ok(undefined));
+    const threadDb = makeThreadDbMock();
+    (threadDb.saveSignal as ReturnType<typeof vi.fn>).mockResolvedValue(ok(undefined));
 
     const processor = buildProcessor({
       mockLogger,
-      arcDb,
+      threadDb,
       schedulerClient,
       contentSanitizer: makeContentSanitizer(true),
       icsContent,
@@ -507,12 +507,12 @@ describe("Feature: signal-followup-scheduler, Property 5: Fire time floor — ne
     const icsContent = makeIcsContent(startTime);
     const schedulerClient = makeSchedulerClientMock();
 
-    const arcDb = makeArcDbMock();
-    (arcDb.saveSignal as ReturnType<typeof vi.fn>).mockResolvedValue(ok(undefined));
+    const threadDb = makeThreadDbMock();
+    (threadDb.saveSignal as ReturnType<typeof vi.fn>).mockResolvedValue(ok(undefined));
 
     const processor = buildProcessor({
       mockLogger,
-      arcDb,
+      threadDb,
       schedulerClient,
       contentSanitizer: makeContentSanitizer(true),
       icsContent,
@@ -541,12 +541,12 @@ describe("Feature: signal-followup-scheduler, Property 5: Fire time floor — ne
     const icsContent = makeIcsContent(startTime);
     const schedulerClient = makeSchedulerClientMock();
 
-    const arcDb = makeArcDbMock();
-    (arcDb.saveSignal as ReturnType<typeof vi.fn>).mockResolvedValue(ok(undefined));
+    const threadDb = makeThreadDbMock();
+    (threadDb.saveSignal as ReturnType<typeof vi.fn>).mockResolvedValue(ok(undefined));
 
     const processor = buildProcessor({
       mockLogger,
-      arcDb,
+      threadDb,
       schedulerClient,
       contentSanitizer: makeContentSanitizer(true),
       icsContent,
@@ -572,12 +572,12 @@ describe("Feature: signal-followup-scheduler, Property 5: Fire time floor — ne
     const icsContent = makeIcsContent(startTime);
     const schedulerClient = makeSchedulerClientMock();
 
-    const arcDb = makeArcDbMock();
-    (arcDb.saveSignal as ReturnType<typeof vi.fn>).mockResolvedValue(ok(undefined));
+    const threadDb = makeThreadDbMock();
+    (threadDb.saveSignal as ReturnType<typeof vi.fn>).mockResolvedValue(ok(undefined));
 
     const processor = buildProcessor({
       mockLogger,
-      arcDb,
+      threadDb,
       schedulerClient,
       contentSanitizer: makeContentSanitizer(true),
       icsContent,

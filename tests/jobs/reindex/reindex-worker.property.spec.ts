@@ -22,7 +22,7 @@ import { ok } from "../../../src/errors.js";
 
 const mockUpsertEmbedding = vi.fn().mockResolvedValue(ok(undefined));
 
-vi.mock("../../../src/database/arc-matcher.js", () => ({
+vi.mock("../../../src/database/thread-matcher.js", () => ({
   createSearchDatabase: () => ({
     upsertEmbedding: (...args: unknown[]) => mockUpsertEmbedding(...args),
   }),
@@ -61,13 +61,13 @@ const s3Mock = mockClient(S3Client);
 // Static test signals
 // ---------------------------------------------------------------------------
 
-function makeSignal(id: string, accountId: string, arcId: string, email: string, embedding: number[]) {
+function makeSignal(id: string, accountId: string, threadId: string, email: string, embedding: number[]) {
   return {
     pk: `ACCT#${accountId}#SIG#${id}`,
     sk: "#",
     id,
     accountId,
-    arcId,
+    threadId,
     data: {
       recipientAddress: email,
       embeddings: { "amazon.titan-embed-text-v2:0": embedding },
@@ -142,7 +142,7 @@ describe("Property 11: Reindex worker uses cache exclusively and never calls Bed
       const expectedVector = signal.data.embeddings["amazon.titan-embed-text-v2:0"];
       expect(mockUpsertEmbedding).toHaveBeenCalledWith({
         registryId: "aurora-prod-titan-v2",
-        arcId: signal.arcId,
+        threadId: signal.threadId,
         accountId: signal.accountId,
         recipientAddress: signal.data.recipientAddress,
         embedding: expectedVector,

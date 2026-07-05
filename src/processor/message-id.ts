@@ -1,6 +1,6 @@
-const GSI2_PREFIX = 'ACCT#'
+const GSI3_PREFIX = 'ACCT#'
 const MSGID_SEPARATOR = '#MSGID#'
-const MAX_GSI2PK_LENGTH = 1024
+const MAX_GSI3PK_LENGTH = 1024
 
 /** Extract msg-id from a raw Message-ID header value (strip angle brackets). */
 export function extractMsgId(raw: string): string | null {
@@ -10,10 +10,10 @@ export function extractMsgId(raw: string): string | null {
   return trimmed || null
 }
 
-/** Construct GSI2 partition key: ACCT#{accountId}#MSGID#{msgId}, truncated to 1024 chars. */
-export function buildGsi2pk(accountId: string, msgId: string): string {
-  const key = `${GSI2_PREFIX}${accountId}${MSGID_SEPARATOR}${msgId}`
-  return key.slice(0, MAX_GSI2PK_LENGTH)
+/** Construct GSI3 partition key for signals: ACCT#{accountId}#MSGID#{msgId}, truncated to 1024 chars. */
+export function buildSignalGsi3pk(accountId: string, msgId: string): string {
+  const key = `${GSI3_PREFIX}${accountId}${MSGID_SEPARATOR}${msgId}`
+  return key.slice(0, MAX_GSI3PK_LENGTH)
 }
 
 /** Build the outbound Message-ID that SES assigns. */

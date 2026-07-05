@@ -84,8 +84,8 @@ vi.mock("../src/database/account-database.js", () => ({
   })),
 }));
 
-vi.mock("../src/database/arc-database.js", () => ({
-  ArcDatabase: vi.fn().mockImplementation(() => ({
+vi.mock("../src/database/thread-database.js", () => ({
+  ThreadDatabase: vi.fn().mockImplementation(() => ({
     hasSignals: vi.fn(),
     getSignalById: vi.fn(),
     getSignalByMessageId: vi.fn(),
@@ -139,7 +139,7 @@ vi.mock("../src/embedding/embedding-generator.js", () => ({
   BedrockEmbeddingGenerator: vi.fn().mockImplementation(() => ({})),
 }));
 
-vi.mock("../src/database/arc-matcher.js", () => ({
+vi.mock("../src/database/thread-matcher.js", () => ({
   createSearchDatabase: () => ({ upsertEmbedding: vi.fn().mockResolvedValue({ isOk: () => true, value: undefined }) }),
 }));
 
@@ -237,7 +237,7 @@ describe("Handler: signal_followup SQS routing", () => {
   });
 
   it("routes messageType signal_followup to FollowupHandler.process()", async () => {
-    const body = { accountId: "acc-123", signalId: "sgn-456", arcId: "arc-789" };
+    const body = { accountId: "acc-123", signalId: "sgn-456", threadId: "arc-789" };
     mockFollowupProcess.mockResolvedValue(ok(undefined));
 
     const event = makeSqsEvent([makeSqsRecord(body, "signal_followup")]);
@@ -249,7 +249,7 @@ describe("Handler: signal_followup SQS routing", () => {
   });
 
   it("malformed body (missing required fields) is discarded without adding to batchItemFailures", async () => {
-    const malformedBody = { accountId: "acc-123" }; // missing signalId and arcId
+    const malformedBody = { accountId: "acc-123" }; // missing signalId and threadId
     mockFollowupProcess.mockResolvedValue(ok(undefined));
 
     const event = makeSqsEvent([makeSqsRecord(malformedBody, "signal_followup")]);
@@ -267,7 +267,7 @@ describe("Handler: signal_followup SQS routing", () => {
   });
 
   it("handler error adds message to batchItemFailures for retry", async () => {
-    const body = { accountId: "acc-123", signalId: "sgn-456", arcId: "arc-789" };
+    const body = { accountId: "acc-123", signalId: "sgn-456", threadId: "arc-789" };
     mockFollowupProcess.mockResolvedValue(err(dbError("DynamoDB timeout")));
 
     const event = makeSqsEvent([makeSqsRecord(body, "signal_followup")]);

@@ -15,7 +15,7 @@ export interface ClusterRegistryEntry {
   modelId: string;            // 'amazon.titan-embed-text-v2:0'
   dimensions: number;         // 1024
   active: boolean;            // false = stop writing, retain reads + cache
-  primary: boolean;           // true = the read cluster used for arc matching
+  primary: boolean;           // true = the read cluster used for thread matching
 }
 
 // ---------------------------------------------------------------------------
@@ -49,7 +49,7 @@ export function getRegistryById(registryId: string): ClusterRegistryEntry | null
   return CLUSTER_REGISTRY.find((c) => c.registryId === registryId) ?? null;
 }
 
-export function getPrimaryArcMatcherRegistry(): ClusterRegistryEntry {
+export function getPrimaryThreadMatcherRegistry(): ClusterRegistryEntry {
   return CLUSTER_REGISTRY.find((c) => c.primary)!;
 }
 

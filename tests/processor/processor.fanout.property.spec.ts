@@ -2,14 +2,14 @@ import type { IForwardingService } from "../../src/forwarding/forwarding-service
 import { describe, it, expect, vi } from "vitest";
 import { ok } from "../../src/errors.js";
 import { SignalProcessor, SYSTEM_RULES } from "../../src/processor/processor.js";
-import type { ArcMatcher, InboundSignalMessage } from "../../src/processor/processor.js";
+import type { ThreadMatcherPort, InboundSignalMessage } from "../../src/processor/processor.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
 import { makeSharedNewDeps, makeRuleEvaluator3 } from "./_shared-new-deps.js";
-import { makeArcDbMock, makeAccountDbMock, makeProcessingDbMock, applyCtx } from "./_helpers.js";
+import { makeThreadDbMock, makeAccountDbMock, makeProcessingDbMock, applyCtx } from "./_helpers.js";
 import type { ContentSanitizerClient } from "../../src/processor/content-sanitizer-client.js";
 import type { SignalClassifier, ClassificationOutput } from "../../src/classifier/classifier.js";
 import type { EmbeddingGenerator, EmbeddingResult } from "../../src/embedding/embedding-generator.js";
-import type { MultiClusterAuroraWriter } from "../../src/database/arc-matcher.js";
+import type { MultiClusterAuroraWriter } from "../../src/database/thread-matcher.js";
 import type { Signal, Alias, AliasSender } from "../../src/types/index.js";
 import type { EmailService } from "../../src/email/email-service.js";
 import { createMockLogger } from "../helpers/mock-logger.js";
@@ -43,7 +43,7 @@ vi.mock("../../src/embedding/cluster-registry.js", () => ({
   },
   getActiveClusters: () => mockState.clusters.filter((c) => c.active),
   getRegistryById: (id: string) => mockState.clusters.find((c) => c.registryId === id) ?? null,
-  getPrimaryArcMatcherRegistry: () => mockState.clusters.find((c) => c.active) ?? mockState.clusters[0],
+  getPrimaryThreadMatcherRegistry: () => mockState.clusters.find((c) => c.active) ?? mockState.clusters[0],
   getSecondaryClusters: () => {
     const primary = mockState.clusters.find((c) => c.active) ?? mockState.clusters[0];
     return mockState.clusters.filter((c) => c.active && c.registryId !== primary!.registryId);
@@ -100,7 +100,7 @@ describe("Multi-cluster fanout writes vectors to every active target", () => {
     const accountDb = makeAccountDbMock(TEST_ACCOUNT_ID);
     applyCtx(accountDb, DEFAULT_CTX);
     vi.mocked(accountDb.getSender).mockReturnValue(Promise.resolve(ok(DEFAULT_SENDER_ENTRY)));
-    return { arcDb: makeArcDbMock(), accountDb, processingDb: makeProcessingDbMock() };
+    return { threadDb: makeThreadDbMock(), accountDb, processingDb: makeProcessingDbMock() };
   }
 
   function makeContentSanitizer(): ContentSanitizerClient {
@@ -127,7 +127,7 @@ describe("Multi-cluster fanout writes vectors to every active target", () => {
     return { classify: vi.fn().mockResolvedValue(ok({ ...validClassification })) };
   }
 
-  function makeArcMatcher(): ArcMatcher {
+  function makeArcMatcher(): ThreadMatcherPort {
     return {
       findMatch: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
       upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
@@ -173,7 +173,7 @@ describe("Multi-cluster fanout writes vectors to every active target", () => {
   it.each(clusterConfigs)("$label — DynamoDB embeddings map has one entry per active cluster", async ({ clusters }) => {
     mockState.clusters = clusters;
 
-    const { arcDb, accountDb, processingDb } = makeStore();
+    const { threadDb, accountDb, processingDb } = makeStore();
     const embeddingResults: EmbeddingResult[] = clusters.map((cluster) => ({
       modelId: cluster.modelId,
       vector: Array.from({ length: cluster.dimensions }, (_, i) => (i + 1) / cluster.dimensions),
@@ -199,12 +199,12 @@ describe("Multi-cluster fanout writes vectors to every active target", () => {
 
     const mockLogger = createMockLogger();
     const processor = new SignalProcessor({ ...makeSharedNewDeps(),
-arcDb, accountDb, processingDb,
+threadDb, accountDb, processingDb,
       contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
       classifier: makeClassifier(),
       embeddingGenerator,
       auroraWriter,
-      arcMatcher: makeArcMatcher(),
+      threadMatcher: makeArcMatcher(),
       ruleEvaluator: makeRuleEvaluator3(mockLogger),
       logger: mockLogger,
       notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
@@ -218,7 +218,7 @@ arcDb, accountDb, processingDb,
 
     await processor.processRecord(makeMessage("ses-fanout-test"), 1);
 
-    const saveSignalCalls = (arcDb.saveSignal as ReturnType<typeof vi.fn>).mock.calls;
+    const saveSignalCalls = (threadDb.saveSignal as ReturnType<typeof vi.fn>).mock.calls;
     expect(saveSignalCalls.length).toBeGreaterThanOrEqual(1);
     const savedSignal = saveSignalCalls[0]![0] as Signal;
 
@@ -233,7 +233,7 @@ arcDb, accountDb, processingDb,
   it.each(clusterConfigs)("$label — each Aurora cluster receives exactly one upsert", async ({ clusters }) => {
     mockState.clusters = clusters;
 
-    const { arcDb, accountDb, processingDb } = makeStore();
+    const { threadDb, accountDb, processingDb } = makeStore();
     const embeddingResults: EmbeddingResult[] = clusters.map((cluster) => ({
       modelId: cluster.modelId,
       vector: Array.from({ length: cluster.dimensions }, (_, i) => (i + 1) / cluster.dimensions),
@@ -259,12 +259,12 @@ arcDb, accountDb, processingDb,
 
     const mockLogger = createMockLogger();
     const processor = new SignalProcessor({ ...makeSharedNewDeps(),
-arcDb, accountDb, processingDb,
+threadDb, accountDb, processingDb,
       contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
       classifier: makeClassifier(),
       embeddingGenerator,
       auroraWriter,
-      arcMatcher: makeArcMatcher(),
+      threadMatcher: makeArcMatcher(),
       ruleEvaluator: makeRuleEvaluator3(mockLogger),
       logger: mockLogger,
       notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
@@ -294,7 +294,7 @@ arcDb, accountDb, processingDb,
   it.each(clusterConfigs)("$label — embeddings map keys match cluster modelIds exactly", async ({ clusters }) => {
     mockState.clusters = clusters;
 
-    const { arcDb, accountDb, processingDb } = makeStore();
+    const { threadDb, accountDb, processingDb } = makeStore();
     const embeddingResults: EmbeddingResult[] = clusters.map((cluster) => ({
       modelId: cluster.modelId,
       vector: new Array(cluster.dimensions).fill(0.1),
@@ -320,12 +320,12 @@ arcDb, accountDb, processingDb,
 
     const mockLogger = createMockLogger();
     const processor = new SignalProcessor({ ...makeSharedNewDeps(),
-arcDb, accountDb, processingDb,
+threadDb, accountDb, processingDb,
       contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
       classifier: makeClassifier(),
       embeddingGenerator,
       auroraWriter,
-      arcMatcher: makeArcMatcher(),
+      threadMatcher: makeArcMatcher(),
       ruleEvaluator: makeRuleEvaluator3(mockLogger),
       logger: mockLogger,
       notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
@@ -339,7 +339,7 @@ arcDb, accountDb, processingDb,
 
     await processor.processRecord(makeMessage("ses-fanout-test"), 1);
 
-    const saveSignalCalls = (arcDb.saveSignal as ReturnType<typeof vi.fn>).mock.calls;
+    const saveSignalCalls = (threadDb.saveSignal as ReturnType<typeof vi.fn>).mock.calls;
     const savedSignal = saveSignalCalls[0]![0] as Signal;
 
     const embeddingsKeys = Object.keys(savedSignal.data.embeddings!).sort();

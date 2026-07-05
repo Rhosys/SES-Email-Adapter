@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { mockClient } from "aws-sdk-client-mock";
 import { DynamoDBDocumentClient, QueryCommand } from "@aws-sdk/lib-dynamodb";
-import { ArcDatabase } from "../../src/database/arc-database.js";
+import { ThreadDatabase } from "../../src/database/thread-database.js";
 import { createMockLogger } from "../helpers/mock-logger.js";
 
 /**
@@ -10,13 +10,13 @@ import { createMockLogger } from "../helpers/mock-logger.js";
  */
 describe("Feature: dynamodb-storage-optimization, Property 5: Search warning threshold is bidirectional", () => {
   const ddbMock = mockClient(DynamoDBDocumentClient);
-  let db: ArcDatabase;
+  let db: ThreadDatabase;
   let mockLogger: ReturnType<typeof createMockLogger>;
 
   beforeEach(() => {
     ddbMock.reset();
     mockLogger = createMockLogger();
-    db = new ArcDatabase(mockLogger);
+    db = new ThreadDatabase(mockLogger);
   });
 
   afterEach(() => {
@@ -57,7 +57,7 @@ describe("Feature: dynamodb-storage-optimization, Property 5: Search warning thr
 
     ddbMock.on(QueryCommand).resolves({ Items: makeFakeItems(itemCount) });
 
-    await db.searchArcs("acct-1", "test", { limit: 20 });
+    await db.searchThreads("acct-1", "test", { limit: 20 });
 
     const warningEmitted = mockLogger.calls.some(c => c.method === "track");
 

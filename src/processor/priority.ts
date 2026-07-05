@@ -1,6 +1,6 @@
-import type { ArcUrgency, PushPriority, Workflow, WorkflowData } from "../types/index.js";
+import type { ThreadUrgency, PushPriority, Workflow, WorkflowData } from "../types/index.js";
 
-export function baseUrgency(workflow: Workflow, data: WorkflowData): ArcUrgency {
+export function baseUrgency(workflow: Workflow, data: WorkflowData): ThreadUrgency {
   switch (workflow) {
     case "auth":
       return "critical";
@@ -31,8 +31,8 @@ export function baseUrgency(workflow: Workflow, data: WorkflowData): ArcUrgency 
   }
 }
 
-// Maps an ArcUrgency to the equivalent mobile push notification tier.
-export function urgencyToPushPriority(urgency: ArcUrgency): PushPriority {
+// Maps a ThreadUrgency to the equivalent mobile push notification tier.
+export function urgencyToPushPriority(urgency: ThreadUrgency): PushPriority {
   if (urgency === "critical" || urgency === "high") return "interrupt";
   if (urgency === "normal" || urgency === "low") return "ambient";
   return "silent";

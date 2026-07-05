@@ -31,7 +31,7 @@ export class ReplySenderService implements ReplySender {
     const tags = buildOutboundTags("reply", {
       accountId: opts.accountId,
       signalId: opts.signalId,
-      arcId: opts.threadId,
+      threadId: opts.threadId,
     });
 
     return this.emailService.send({

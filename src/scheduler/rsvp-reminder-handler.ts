@@ -12,19 +12,19 @@ import type { RsvpReminderMessage } from "./rsvp-reminder.js";
 // Handler
 // ---------------------------------------------------------------------------
 
-export interface IRsvpReminderArcDb {
+export interface IRsvpReminderThreadDb {
   getSignalById(accountId: string, signalId: string, threadId?: string): Promise<Result<Signal | null, DbError>>;
   getLatestCalendarResponse(accountId: string, threadId: string, veventUid: string): Promise<Result<Signal<CalendarResponseData> | null, DbError>>;
   getThread(accountId: string, threadId: string): Promise<Result<Thread | null, DbError>>;
 }
 
 export class RsvpReminderHandler {
-  private readonly threadDb: IRsvpReminderArcDb;
+  private readonly threadDb: IRsvpReminderThreadDb;
   private readonly notifier: Notifier;
   private readonly logger: Logger;
 
   constructor(deps: {
-    threadDb: IRsvpReminderArcDb;
+    threadDb: IRsvpReminderThreadDb;
     notifier: Notifier;
     logger: Logger;
   }) {

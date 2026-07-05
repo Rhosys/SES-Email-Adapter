@@ -26,26 +26,26 @@ describe("buildProxyUid — construction format and determinism (Property 9)", (
     {
       label: "standard IDs produce correct format",
       accountId: "acc-abc123",
-      arcId: "arc-def456",
+      threadId: "arc-def456",
       originalVeventUid: "uid-789",
     },
     {
       label: "short IDs with dashed UID produce correct format",
       accountId: "acc-xyz",
-      arcId: "arc-000",
+      threadId: "arc-000",
       originalVeventUid: "long-uid-with-dashes",
     },
   ] as const;
 
-  it.each(cases)("$label", async ({ accountId, arcId, originalVeventUid }) => {
+  it.each(cases)("$label", async ({ accountId, threadId, originalVeventUid }) => {
     const result = await buildProxyUid({
       accountId,
-      arcId,
+      threadId,
       originalVeventUid,
       serviceDomain: SERVICE_DOMAIN,
     });
 
-    // Format: {accountId}.{arcId}.{originalVeventUid}.{hmac16}@{serviceDomain}
+    // Format: {accountId}.{threadId}.{originalVeventUid}.{hmac16}@{serviceDomain}
     const atIndex = result.lastIndexOf("@");
     expect(atIndex).toBeGreaterThan(0);
 
@@ -55,23 +55,23 @@ describe("buildProxyUid — construction format and determinism (Property 9)", (
     const localPart = result.slice(0, atIndex);
     const segments = localPart.split(".");
 
-    // At least 4 segments: accountId, arcId, originalVeventUid (may contain dots), hmac16
+    // At least 4 segments: accountId, threadId, originalVeventUid (may contain dots), hmac16
     expect(segments.length).toBeGreaterThanOrEqual(4);
     expect(segments[0]).toBe(accountId);
-    expect(segments[1]).toBe(arcId);
+    expect(segments[1]).toBe(threadId);
 
     // HMAC is the last segment — exactly 16 chars of base64url (no padding)
     const hmac16 = segments[segments.length - 1]!;
     expect(hmac16).toHaveLength(16);
     expect(hmac16).toMatch(/^[A-Za-z0-9_-]+$/);
 
-    // originalVeventUid is everything between arcId and hmac16
+    // originalVeventUid is everything between threadId and hmac16
     const uidSegments = segments.slice(2, -1);
     expect(uidSegments.join(".")).toBe(originalVeventUid);
   });
 
-  it.each(cases)("$label — deterministic across calls", async ({ accountId, arcId, originalVeventUid }) => {
-    const opts = { accountId, arcId, originalVeventUid, serviceDomain: SERVICE_DOMAIN };
+  it.each(cases)("$label — deterministic across calls", async ({ accountId, threadId, originalVeventUid }) => {
+    const opts = { accountId, threadId, originalVeventUid, serviceDomain: SERVICE_DOMAIN };
     const first = await buildProxyUid(opts);
     const second = await buildProxyUid(opts);
     expect(first).toBe(second);
@@ -90,7 +90,7 @@ describe("validateProxyUid — HMAC validation (Property 12 partial)", () => {
   beforeAll(async () => {
     validProxyUid = await buildProxyUid({
       accountId: "acc-abc123",
-      arcId: "arc-def456",
+      threadId: "arc-def456",
       originalVeventUid: "uid-789",
       serviceDomain: SERVICE_DOMAIN,
     });
@@ -99,7 +99,7 @@ describe("validateProxyUid — HMAC validation (Property 12 partial)", () => {
   it("valid proxy UID → ok with correct decomposed parts", async () => {
     const result = await validateProxyUid({ proxyUid: validProxyUid, serviceDomain: SERVICE_DOMAIN });
     expect(result.isOk()).toBe(true);
-    expect(result._unsafeUnwrap()).toEqual({ accountId: "acc-abc123", arcId: "arc-def456", originalVeventUid: "uid-789" });
+    expect(result._unsafeUnwrap()).toEqual({ accountId: "acc-abc123", threadId: "arc-def456", originalVeventUid: "uid-789" });
   });
 
   it("tampered HMAC → err", async () => {

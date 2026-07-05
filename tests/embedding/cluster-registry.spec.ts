@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { CLUSTER_REGISTRY, getActiveClusters, getRegistryById, getPrimaryArcMatcherRegistry } from "../../src/embedding/cluster-registry.js";
+import { CLUSTER_REGISTRY, getActiveClusters, getRegistryById, getPrimaryThreadMatcherRegistry } from "../../src/embedding/cluster-registry.js";
 
 // ---------------------------------------------------------------------------
 // Test doubles
@@ -103,9 +103,9 @@ describe("getRegistryById", () => {
   });
 });
 
-describe("getPrimaryArcMatcherRegistry", () => {
+describe("getPrimaryThreadMatcherRegistry", () => {
   it("returns the first active cluster", () => {
-    const readCluster = getPrimaryArcMatcherRegistry();
+    const readCluster = getPrimaryThreadMatcherRegistry();
     const activeClusters = getActiveClusters();
     expect(readCluster).toBe(activeClusters[0]);
   });
@@ -113,7 +113,7 @@ describe("getPrimaryArcMatcherRegistry", () => {
   it("throws error when no active clusters exist", () => {
     // This test would require modifying the registry, which is readonly
     // So we just verify the function exists and works with the current registry
-    expect(() => getPrimaryArcMatcherRegistry()).not.toThrow();
+    expect(() => getPrimaryThreadMatcherRegistry()).not.toThrow();
   });
 });
 

@@ -5,12 +5,14 @@ export const TAG_PREFIX = "X-Numaeel-";
 export const TAG_TYPE = `${TAG_PREFIX}Type`;
 export const TAG_ACCOUNT_ID = `${TAG_PREFIX}AccountId`;
 export const TAG_SIGNAL_ID = `${TAG_PREFIX}SignalId`;
-export const TAG_ARC_ID = `${TAG_PREFIX}ArcId`;
+export const TAG_THREAD_ID = `${TAG_PREFIX}ThreadId`;
+
+
 
 export interface TagContext {
   accountId?: string | undefined;
   signalId?: string | undefined;
-  arcId?: string | undefined;
+  threadId?: string | undefined;
 }
 
 export type OutboundType = "reply" | "forward" | "draft-send";
@@ -33,8 +35,8 @@ export function buildOutboundTags(
   if (context?.signalId) {
     tags.push({ Name: TAG_SIGNAL_ID, Value: context.signalId });
   }
-  if (context?.arcId) {
-    tags.push({ Name: TAG_ARC_ID, Value: context.arcId });
+  if (context?.threadId) {
+    tags.push({ Name: TAG_THREAD_ID, Value: context.threadId });
   }
 
   return tags;

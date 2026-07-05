@@ -2,7 +2,7 @@
 // **Validates: Requirements 5.1, 5.2**
 //
 // For any cluster registry configuration, getSecondaryClusters() SHALL return exactly
-// getActiveClusters() minus getPrimaryArcMatcherRegistry() — i.e., every active cluster that is not
+// getActiveClusters() minus getPrimaryThreadMatcherRegistry() — i.e., every active cluster that is not
 // the read cluster, and no others.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -19,20 +19,20 @@ const { mockRegistry } = vi.hoisted(() => ({
 // Mock the module but let getSecondaryClusters use the real implementation logic.
 vi.mock("../../src/embedding/cluster-registry.js", () => {
   const getActiveClusters = () => mockRegistry.value.filter((c: ClusterRegistryEntry) => c.active);
-  const getPrimaryArcMatcherRegistry = () => {
+  const getPrimaryThreadMatcherRegistry = () => {
     const active = getActiveClusters();
     if (active.length === 0) throw new Error("No active clusters in CLUSTER_REGISTRY");
     return active[0]!;
   };
   // This is the REAL implementation from cluster-registry.ts — we're testing this logic
   const getSecondaryClusters = () => {
-    const primary = getPrimaryArcMatcherRegistry();
+    const primary = getPrimaryThreadMatcherRegistry();
     return getActiveClusters().filter((c: ClusterRegistryEntry) => c.registryId !== primary.registryId);
   };
   return {
     CLUSTER_REGISTRY: Object.freeze([]),
     getActiveClusters,
-    getPrimaryArcMatcherRegistry,
+    getPrimaryThreadMatcherRegistry,
     getSecondaryClusters,
     getRegistryById: (id: string) => mockRegistry.value.find((c: ClusterRegistryEntry) => c.registryId === id) ?? null,
   };
@@ -97,12 +97,12 @@ describe("Property 8: getSecondaryClusters is the set difference", () => {
   });
 
   it.each(setDifferenceCases)("$scenario", async ({ registry, expectedSecondaryIds }) => {
-    const { getActiveClusters, getPrimaryArcMatcherRegistry, getSecondaryClusters } = await import("../../src/embedding/cluster-registry.js");
+    const { getActiveClusters, getPrimaryThreadMatcherRegistry, getSecondaryClusters } = await import("../../src/embedding/cluster-registry.js");
 
     mockRegistry.value = registry;
 
     const active = getActiveClusters();
-    const primary = getPrimaryArcMatcherRegistry();
+    const primary = getPrimaryThreadMatcherRegistry();
     const secondary = getSecondaryClusters();
 
     // Property A: secondary contains no element equal to the primary cluster

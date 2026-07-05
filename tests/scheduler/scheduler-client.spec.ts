@@ -43,7 +43,7 @@ describe("EventBridgeSchedulerClient", () => {
       const result = await client.createFollowup({
         accountId: "acc-123",
         signalId: "sgn-456",
-        arcId: "arc-789",
+        threadId: "arc-789",
         fireAt: "2025-08-01T10:00:00Z",
         suffix: "followup",
         sqsMessageAttributeMessageType: "signal_followup",
@@ -65,13 +65,13 @@ describe("EventBridgeSchedulerClient", () => {
       });
     });
 
-    it("target input contains accountId, signalId, arcId as JSON", async () => {
+    it("target input contains accountId, signalId, threadId as JSON", async () => {
       schedulerMock.on(CreateScheduleCommand).resolves({});
 
       await client.createFollowup({
         accountId: "acc-123",
         signalId: "sgn-456",
-        arcId: "arc-789",
+        threadId: "arc-789",
         fireAt: "2025-08-01T10:00:00Z",
         suffix: "followup",
         sqsMessageAttributeMessageType: "signal_followup",
@@ -83,7 +83,7 @@ describe("EventBridgeSchedulerClient", () => {
         sqsMessageAttributeMessageType: "signal_followup",
         accountId: "acc-123",
         signalId: "sgn-456",
-        arcId: "arc-789",
+        threadId: "arc-789",
       });
     });
 
@@ -93,7 +93,7 @@ describe("EventBridgeSchedulerClient", () => {
       await client.createFollowup({
         accountId: "acc-1",
         signalId: "sgn-2",
-        arcId: "arc-3",
+        threadId: "arc-3",
         fireAt: "2025-12-25T08:00:00.000Z",
         suffix: "cal",
         sqsMessageAttributeMessageType: "signal_followup",
@@ -109,7 +109,7 @@ describe("EventBridgeSchedulerClient", () => {
       await client.createFollowup({
         accountId: "acc-a",
         signalId: "sgn-b",
-        arcId: "arc-c",
+        threadId: "arc-c",
         fireAt: "2025-09-01T12:00:00Z",
         suffix: "test",
         sqsMessageAttributeMessageType: "signal_followup",
@@ -126,7 +126,7 @@ describe("EventBridgeSchedulerClient", () => {
       const result = await client.createFollowup({
         accountId: "acc-x",
         signalId: "sgn-y",
-        arcId: "arc-z",
+        threadId: "arc-z",
         fireAt: "2025-09-01T12:00:00Z",
         suffix: "fail",
         sqsMessageAttributeMessageType: "signal_followup",

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { ok, err, dbError } from "../../src/errors.js";
 import type { Logger } from "../../src/logger.js";
-import type { Arc, ArcUrgency, Signal } from "../../src/types/index.js";
+import type { Thread, ThreadUrgency, Signal } from "../../src/types/index.js";
 import type { DeviceStore } from "../../src/notifier/device-store.js";
 import type { Deliverer, Device, DeviceType, DeliveryResult, NotificationPayload, PushPriority } from "../../src/notifier/types.js";
 import { DeviceNotifier } from "../../src/notifier/device-notifier.js";
@@ -46,7 +46,7 @@ function mockDeliverers(overrides: Partial<Record<DeviceType, Deliverer>> = {}):
 
 // ─── Test Fixtures ───────────────────────────────────────────────────────────
 
-const arc: Arc = {
+const arc: Thread = {
   id: "arc-001",
   accountId: "acct-1",
   workflow: "package",
@@ -96,11 +96,11 @@ const apnsDevice: Device = { accountId: "acct-1", token: "apns-token-1", type: "
 describe("DeviceNotifier", () => {
   describe("Property 1: channel selection by urgency", () => {
     it.each([
-      { label: "critical → ws delivered, push delivered", urgency: "critical" as ArcUrgency, expectPush: true },
-      { label: "high → ws delivered, push delivered", urgency: "high" as ArcUrgency, expectPush: true },
-      { label: "normal → ws delivered, push delivered", urgency: "normal" as ArcUrgency, expectPush: true },
-      { label: "low → ws delivered, push delivered", urgency: "low" as ArcUrgency, expectPush: true },
-      { label: "silent → ws delivered, push skipped", urgency: "silent" as ArcUrgency, expectPush: false },
+      { label: "critical → ws delivered, push delivered", urgency: "critical" as ThreadUrgency, expectPush: true },
+      { label: "high → ws delivered, push delivered", urgency: "high" as ThreadUrgency, expectPush: true },
+      { label: "normal → ws delivered, push delivered", urgency: "normal" as ThreadUrgency, expectPush: true },
+      { label: "low → ws delivered, push delivered", urgency: "low" as ThreadUrgency, expectPush: true },
+      { label: "silent → ws delivered, push skipped", urgency: "silent" as ThreadUrgency, expectPush: false },
     ])("$label", async ({ urgency, expectPush }) => {
       const wsDeliverer = mockDeliverer();
       const fcmDeliverer = mockDeliverer();
@@ -245,7 +245,7 @@ describe("DeviceNotifier", () => {
       const expectedPayload: NotificationPayload = {
         type: "signal",
         signalId: "sgn-msg001",
-        arcId: "arc-001",
+        threadId: "arc-001",
         sender: "alice@example.com",
         senderName: "Alice",
         subject: "Your order has shipped",

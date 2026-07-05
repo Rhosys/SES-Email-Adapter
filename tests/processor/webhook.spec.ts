@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { buildWebhookPayload, deliverWebhook, type WebhookPayload } from "../../src/processor/webhook.js";
 import { createMockLogger, type MockLogger } from "../helpers/mock-logger.js";
-import type { Signal, Arc } from "../../src/types/index.js";
+import type { Signal, Thread } from "../../src/types/index.js";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -12,7 +12,7 @@ function makeSignal(overrides: Partial<Omit<Signal, "data">> & { data?: Partial<
   return {
     id: "sgn-test123",
     signalLookupId: "ses-abc123",
-    arcId: "arc-xyz",
+    threadId: "arc-xyz",
     accountId: "acct-001",
     source: "email",
     type: "email",
@@ -46,7 +46,7 @@ function makeSignal(overrides: Partial<Omit<Signal, "data">> & { data?: Partial<
   } as Signal;
 }
 
-function makeArc(overrides: Partial<Arc> = {}): Arc {
+function makeThread(overrides: Partial<Thread> = {}): Thread {
   return {
     id: "arc-xyz",
     accountId: "acct-001",
@@ -71,12 +71,12 @@ function makeArc(overrides: Partial<Arc> = {}): Arc {
 describe("buildWebhookPayload", () => {
   it("projects the correct fields from signal and arc", () => {
     const signal = makeSignal();
-    const arc = makeArc();
+    const arc = makeThread();
     const payload = buildWebhookPayload(signal, arc);
 
     expect(payload).toEqual({
       id: "sgn-test123",
-      arcId: "arc-xyz",
+      threadId: "arc-xyz",
       receivedAt: "2024-06-15T10:30:00.000Z",
       from: { address: "sender@example.com", name: "Alice" },
       to: [{ address: "me@myalias.com" }],
@@ -102,7 +102,7 @@ describe("buildWebhookPayload", () => {
     "excludes internal field: $field",
     ({ field }) => {
       const signal = makeSignal();
-      const arc = makeArc();
+      const arc = makeThread();
       const payload = buildWebhookPayload(signal, arc) as unknown as Record<string, unknown>;
       expect(payload[field]).toBeUndefined();
     },
@@ -110,7 +110,7 @@ describe("buildWebhookPayload", () => {
 
   it("returns labels from arc", () => {
     const signal = makeSignal();
-    const arc = makeArc({ labels: ["custom-label", "another"] });
+    const arc = makeThread({ labels: ["custom-label", "another"] });
     const payload = buildWebhookPayload(signal, arc);
     expect(payload.labels).toEqual(["custom-label", "another"]);
   });
@@ -125,7 +125,7 @@ describe("buildWebhookPayload", () => {
     const base = makeSignal();
     const { replyTo: _, ...dataWithoutReplyTo } = base.data;
     const signal = { ...base, data: dataWithoutReplyTo } as Signal;
-    const payload = buildWebhookPayload(signal, makeArc());
+    const payload = buildWebhookPayload(signal, makeThread());
     expect("replyTo" in payload).toBe(false);
   });
 
@@ -137,7 +137,7 @@ describe("buildWebhookPayload", () => {
         cc: [{ address: "cc@example.com" }],
       },
     });
-    const payload = buildWebhookPayload(signal, makeArc());
+    const payload = buildWebhookPayload(signal, makeThread());
     expect(payload.from).toEqual({ address: "no-name@example.com" });
     expect(payload.to).toEqual([{ address: "to@example.com" }]);
     expect(payload.cc).toEqual([{ address: "cc@example.com" }]);
@@ -152,7 +152,7 @@ describe("deliverWebhook", () => {
   let logger: MockLogger;
   const testPayload: WebhookPayload = {
     id: "sgn-test123",
-    arcId: "arc-xyz",
+    threadId: "arc-xyz",
     receivedAt: "2024-06-15T10:30:00.000Z",
     from: { address: "sender@example.com" },
     to: [{ address: "me@myalias.com" }],

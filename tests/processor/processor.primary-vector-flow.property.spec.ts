@@ -10,14 +10,14 @@ import type { IForwardingService } from "../../src/forwarding/forwarding-service
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { ok } from "../../src/errors.js";
 import { SignalProcessor, SYSTEM_RULES } from "../../src/processor/processor.js";
-import type { ArcMatcher, InboundSignalMessage } from "../../src/processor/processor.js";
+import type { ThreadMatcherPort, InboundSignalMessage } from "../../src/processor/processor.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
 import { makeSharedNewDeps, makeRuleEvaluator3 } from "./_shared-new-deps.js";
-import { makeArcDbMock, makeAccountDbMock, makeProcessingDbMock } from "./_helpers.js";
+import { makeThreadDbMock, makeAccountDbMock, makeProcessingDbMock } from "./_helpers.js";
 import type { ContentSanitizerClient } from "../../src/processor/content-sanitizer-client.js";
 import type { SignalClassifier, ClassificationOutput } from "../../src/classifier/classifier.js";
 import type { EmbeddingGenerator } from "../../src/embedding/embedding-generator.js";
-import type { MultiClusterAuroraWriter } from "../../src/database/arc-matcher.js";
+import type { MultiClusterAuroraWriter } from "../../src/database/thread-matcher.js";
 import type { Alias, AliasSender } from "../../src/types/index.js";
 import type { EmailService } from "../../src/email/email-service.js";
 import { createMockLogger, type MockLogger } from "../helpers/mock-logger.js";
@@ -40,7 +40,7 @@ vi.mock("../../src/embedding/cluster-registry.js", () => {
     CLUSTER_REGISTRY: Object.freeze([entry]),
     getActiveClusters: () => [entry],
     getRegistryById: (id: string) => (id === entry.registryId ? entry : null),
-    getPrimaryArcMatcherRegistry: () => entry,
+    getPrimaryThreadMatcherRegistry: () => entry,
     getSecondaryClusters: () => [],
   };
 });
@@ -121,7 +121,7 @@ function makeContentSanitizer(): ContentSanitizerClient {
 }
 
 function makeStore() {
-  return { arcDb: makeArcDbMock(), accountDb: makeAccountDbMock(TEST_ACCOUNT_ID), processingDb: makeProcessingDbMock() };
+  return { threadDb: makeThreadDbMock(), accountDb: makeAccountDbMock(TEST_ACCOUNT_ID), processingDb: makeProcessingDbMock() };
 }
 
 function makeMessage(sesMessageId: string): InboundSignalMessage {
@@ -171,7 +171,7 @@ describe("Feature: split-embedding-pipeline, Property 2: Primary vector flows to
   it.each(cases)("$scenario", async ({ vector }) => {
     let receivedVector: number[] | undefined;
 
-    const arcMatcher: ArcMatcher = {
+    const threadMatcher: ThreadMatcherPort = {
       findMatch: vi.fn().mockImplementation((_accountId: string, _recipientAddress: string, embedding: number[]) => {
         receivedVector = embedding;
         return Promise.resolve(ok(null));
@@ -197,7 +197,7 @@ describe("Feature: split-embedding-pipeline, Property 2: Primary vector flows to
       classifier: { classify: vi.fn().mockResolvedValue(ok({ ...CLASSIFICATION })) },
       embeddingGenerator,
       auroraWriter,
-      arcMatcher,
+      threadMatcher,
       ruleEvaluator: makeRuleEvaluator3(mockLogger),
       logger: mockLogger,
       notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
@@ -212,7 +212,7 @@ describe("Feature: split-embedding-pipeline, Property 2: Primary vector flows to
     await processor.processRecord(makeMessage("ses-prop2-test"), 1);
 
     // Arc matcher must have been called
-    expect(arcMatcher.findMatch).toHaveBeenCalledOnce();
+    expect(threadMatcher.findMatch).toHaveBeenCalledOnce();
 
     // The vector passed to findMatch must be identical values
     expect(receivedVector).toBeDefined();

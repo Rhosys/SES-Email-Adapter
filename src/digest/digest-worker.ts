@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------------------
 // Digest Worker
 // Receives `digest_send` SQS message, re-validates frequency, queries top
-// active arcs, counts quarantined signals, renders template, sends via
+// active threads, counts quarantined signals, renders template, sends via
 // EmailService. Terminal operation — no post-send writes.
 // ---------------------------------------------------------------------------
 
@@ -98,13 +98,13 @@ export class DigestWorker {
       return ok(undefined)
     }
 
-    // 5. Query top 100 active arcs (sorted by lastSignalAt desc)
-    const arcsResult = await threadDb.listActiveThreads(accountId, 100)
-    if (arcsResult.isErr()) return err(arcsResult.error)
-    const arcs = arcsResult.value
+    // 5. Query top 100 active threads (sorted by lastSignalAt desc)
+    const threadsResult = await threadDb.listActiveThreads(accountId, 100)
+    if (threadsResult.isErr()) return err(threadsResult.error)
+    const threads = threadsResult.value
 
-    // Suppress if zero arcs
-    if (arcs.length === 0) {
+    // Suppress if zero threads
+    if (threads.length === 0) {
       logger.info("Digest suppressed — zero active threads", { code: "digest.worker.no_threads", accountId })
       return ok(undefined)
     }
@@ -128,7 +128,7 @@ export class DigestWorker {
     const subject = buildDigestSubject(frequency as DigestFrequency, today)
     const fullDate = today.toISODate()!
     const htmlBody = await renderTemplate("digest", {
-      arcs,
+      threads,
       quarantineCount,
       hasQuarantine: quarantineCount > 0,
       unsubscribeCode,
@@ -148,7 +148,7 @@ export class DigestWorker {
     const headers = buildUnsubscribeHeaders(accountId, API_DOMAIN, unsubscribeCode)
 
     // 10. Send via EmailService — terminal operation, no post-send writes
-    const textBody = `Your ${frequency} Numaeel digest is ready. ${arcs.length} active conversations.${quarantineCount > 0 ? ` ${quarantineCount} emails awaiting review in quarantine.` : ""} View your dashboard: ${APP_BASE_URL}/a/`
+    const textBody = `Your ${frequency} Numaeel digest is ready. ${threads.length} active conversations.${quarantineCount > 0 ? ` ${quarantineCount} emails awaiting review in quarantine.` : ""} View your dashboard: ${APP_BASE_URL}/a/`
     const sendResult = await emailService.send({
       to: target.target,
       subject,
@@ -166,7 +166,7 @@ export class DigestWorker {
       code: "digest.worker.sent",
       accountId,
       messageId: sendResult.value.messageId,
-      arcCount: arcs.length,
+      threadCount: threads.length,
       quarantineCount,
     })
 

@@ -79,8 +79,8 @@ vi.mock("../src/database/account-database.js", () => ({
   })),
 }));
 
-vi.mock("../src/database/arc-database.js", () => ({
-  ArcDatabase: vi.fn().mockImplementation(() => ({
+vi.mock("../src/database/thread-database.js", () => ({
+  ThreadDatabase: vi.fn().mockImplementation(() => ({
     hasSignals: vi.fn(),
   })),
 }));
@@ -128,7 +128,7 @@ vi.mock("../src/embedding/embedding-generator.js", () => ({
   BedrockEmbeddingGenerator: vi.fn().mockImplementation(() => ({})),
 }));
 
-vi.mock("../src/database/arc-matcher.js", () => ({
+vi.mock("../src/database/thread-matcher.js", () => ({
   createSearchDatabase: () => ({ upsertEmbedding: vi.fn().mockResolvedValue({ isOk: () => true, value: undefined }) }),
 }));
 

@@ -4,15 +4,15 @@ import { ok } from "neverthrow";
 import { SignalProcessor, SYSTEM_RULES } from "../../src/processor/processor.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
 import { makeSharedNewDeps } from "./_shared-new-deps.js";
-import type { ArcMatcher, RuleEvaluator, InboundSignalMessage, SqsDispatcher } from "../../src/processor/processor.js";
-import { makeArcDbMock, makeAccountDbMock, makeProcessingDbMock, applyCtx } from "./_helpers.js";
+import type { ThreadMatcherPort, RuleEvaluator, InboundSignalMessage, SqsDispatcher } from "../../src/processor/processor.js";
+import { makeThreadDbMock, makeAccountDbMock, makeProcessingDbMock, applyCtx } from "./_helpers.js";
 import type { CtxLike } from "./_helpers.js";
 import type { ContentSanitizerClient } from "../../src/processor/content-sanitizer-client.js";
 import type { UserCodeExecutorClient } from "../../src/processor/user-code-client.js";
 import type { SignalClassifier, ClassificationOutput } from "../../src/classifier/classifier.js";
 import type { EmbeddingGenerator } from "../../src/embedding/embedding-generator.js";
-import type { MultiClusterAuroraWriter } from "../../src/database/arc-matcher.js";
-import type { Arc, Rule, Alias, AliasSender } from "../../src/types/index.js";
+import type { MultiClusterAuroraWriter } from "../../src/database/thread-matcher.js";
+import type { Thread, Rule, Alias, AliasSender } from "../../src/types/index.js";
 import type { EmailService } from "../../src/email/email-service.js";
 import { createMockLogger, type MockLogger } from "../helpers/mock-logger.js";
 
@@ -30,7 +30,7 @@ vi.mock("../../src/embedding/cluster-registry.js", () => {
     CLUSTER_REGISTRY: Object.freeze([entry]),
     getActiveClusters: () => [entry],
     getRegistryById: (id: string) => (id === entry.registryId ? entry : null),
-    getPrimaryArcMatcherRegistry: () => entry,
+    getPrimaryThreadMatcherRegistry: () => entry,
   };
 });
 
@@ -66,14 +66,14 @@ const validClassification: ClassificationOutput = {
 };
 
 function makeStore() {
-  const arcDb = makeArcDbMock();
+  const threadDb = makeThreadDbMock();
   const accountDb = makeAccountDbMock(TEST_ACCOUNT_ID);
   const processingDb = makeProcessingDbMock();
   // Override defaults for this test file
   vi.mocked(accountDb.listEnabledRules).mockReturnValue(Promise.resolve(ok(SYSTEM_RULES)));
   applyCtx(accountDb, DEFAULT_CTX);
   vi.mocked(accountDb.getSender).mockReturnValue(Promise.resolve(ok(DEFAULT_SENDER_ENTRY)));
-  return { arcDb, accountDb, processingDb };
+  return { threadDb, accountDb, processingDb };
 }
 
 function makeContentSanitizer(): ContentSanitizerClient {
@@ -114,7 +114,7 @@ function makeAuroraWriter(): MultiClusterAuroraWriter {
   };
 }
 
-function makeArcMatcher(): ArcMatcher {
+function makeArcMatcher(): ThreadMatcherPort {
   return {
     findMatch: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
     upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
@@ -140,7 +140,7 @@ function makeMessage(opts: Partial<InboundSignalMessage> = {}): InboundSignalMes
   };
 }
 
-function makeArc(overrides: Partial<Arc> = {}): Arc {
+function makeThread(overrides: Partial<Thread> = {}): Thread {
   return {
     id: "arc-existing",
     accountId: TEST_ACCOUNT_ID,
@@ -158,10 +158,10 @@ function makeArc(overrides: Partial<Arc> = {}): Arc {
   };
 }
 
-function buildProcessor(arcDb: ReturnType<typeof makeArcDbMock>, accountDb: ReturnType<typeof makeAccountDbMock>, processingDb: ReturnType<typeof makeProcessingDbMock>, arcMatcher: ArcMatcher, classifier: Pick<SignalClassifier, "classify">, logger: MockLogger, ruleEvaluator: RuleEvaluator) {
+function buildProcessor(threadDb: ReturnType<typeof makeThreadDbMock>, accountDb: ReturnType<typeof makeAccountDbMock>, processingDb: ReturnType<typeof makeProcessingDbMock>, threadMatcher: ThreadMatcherPort, classifier: Pick<SignalClassifier, "classify">, logger: MockLogger, ruleEvaluator: RuleEvaluator) {
   return new SignalProcessor({
     ...makeSharedNewDeps(),
-    arcDb,
+    threadDb,
     accountDb,
     processingDb,
     contentSanitizer: makeContentSanitizer(),
@@ -171,7 +171,7 @@ function buildProcessor(arcDb: ReturnType<typeof makeArcDbMock>, accountDb: Retu
     classifier,
     embeddingGenerator: makeEmbeddingGenerator(),
     auroraWriter: makeAuroraWriter(),
-    arcMatcher,
+    threadMatcher,
     ruleEvaluator,
     logger,
     notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
@@ -190,18 +190,18 @@ function buildProcessor(arcDb: ReturnType<typeof makeArcDbMock>, accountDb: Retu
 // ---------------------------------------------------------------------------
 
 describe("Processor delta computation — updateArc vs saveArc", () => {
-  let arcDb: ReturnType<typeof makeArcDbMock>;
+  let threadDb: ReturnType<typeof makeThreadDbMock>;
   let accountDb: ReturnType<typeof makeAccountDbMock>;
   let processingDb: ReturnType<typeof makeProcessingDbMock>;
-  let arcMatcher: ArcMatcher;
+  let threadMatcher: ThreadMatcherPort;
   let mockLogger: MockLogger;
   let ruleEvaluator: RuleEvaluator;
 
   beforeEach(() => {
     vi.clearAllMocks();
     mockLogger = createMockLogger();
-    ({ arcDb, accountDb, processingDb } = makeStore());
-    arcMatcher = makeArcMatcher();
+    ({ threadDb, accountDb, processingDb } = makeStore());
+    threadMatcher = makeArcMatcher();
     ruleEvaluator = makeRuleEvaluator(mockLogger);
   });
 
@@ -212,16 +212,16 @@ describe("Processor delta computation — updateArc vs saveArc", () => {
   it("existing active arc, no field changes → updateArc called with empty delta", async () => {
     // Classification returns same workflow+summary as existing arc → no optional fields in delta
     // Arc already has the system label that gets assigned during processing
-    const existing = makeArc({ id: "arc-existing", workflow: "conversation", summary: "A test email.", labels: ["system:workflow:conversation"] });
-    vi.mocked(arcMatcher.findMatch).mockReturnValueOnce(Promise.resolve(ok(existing)));
+    const existing = makeThread({ id: "arc-existing", workflow: "conversation", summary: "A test email.", labels: ["system:workflow:conversation"] });
+    vi.mocked(threadMatcher.findMatch).mockReturnValueOnce(Promise.resolve(ok(existing)));
 
     const classifier = makeClassifier({ workflow: "conversation", summary: "A test email." });
-    const processor = buildProcessor(arcDb, accountDb, processingDb, arcMatcher, classifier, mockLogger, ruleEvaluator);
+    const processor = buildProcessor(threadDb, accountDb, processingDb, threadMatcher, classifier, mockLogger, ruleEvaluator);
 
     await processor.processRecord(makeMessage(), 1);
 
-    expect(arcDb.updateArc).toHaveBeenCalledOnce();
-    const [accountId, arcId, status, lastSignalAt, fields] = vi.mocked(arcDb.updateArc).mock.calls[0]!;
+    expect(threadDb.updateThread).toHaveBeenCalledOnce();
+    const [accountId, arcId, status, lastSignalAt, fields] = vi.mocked(threadDb.updateThread).mock.calls[0]!;
     expect(accountId).toBe(TEST_ACCOUNT_ID);
     expect(arcId).toBe("arc-existing");
     expect(status).toBe("active");
@@ -231,45 +231,45 @@ describe("Processor delta computation — updateArc vs saveArc", () => {
     // existing arc fixture predates retention tracking (no retentionDuration of its own).
     const denormalized = { senderAddress: "sender@example.com", recipientAddress: "user@example.com", subject: "Test email", retentionDuration: "P3M" };
     expect(fields).toEqual(denormalized);
-    expect(arcDb.saveArc).not.toHaveBeenCalled();
+    expect(threadDb.saveThread).not.toHaveBeenCalled();
   });
 
   it("existing arc with a stale retention → updateArc refreshes to the most recently resolved retention", async () => {
     // Arc carries a retention from an earlier signal (e.g. before the account's
     // configured retention changed) — the new signal's resolved retention takes over.
-    const existing = makeArc({ id: "arc-existing", workflow: "conversation", summary: "A test email.", labels: ["system:workflow:conversation"], retentionDuration: "P5Y" });
-    vi.mocked(arcMatcher.findMatch).mockReturnValueOnce(Promise.resolve(ok(existing)));
+    const existing = makeThread({ id: "arc-existing", workflow: "conversation", summary: "A test email.", labels: ["system:workflow:conversation"], retentionDuration: "P5Y" });
+    vi.mocked(threadMatcher.findMatch).mockReturnValueOnce(Promise.resolve(ok(existing)));
 
     const classifier = makeClassifier({ workflow: "conversation", summary: "A test email." });
-    const processor = buildProcessor(arcDb, accountDb, processingDb, arcMatcher, classifier, mockLogger, ruleEvaluator);
+    const processor = buildProcessor(threadDb, accountDb, processingDb, threadMatcher, classifier, mockLogger, ruleEvaluator);
 
     await processor.processRecord(makeMessage(), 1);
 
-    expect(arcDb.updateArc).toHaveBeenCalledOnce();
-    const [, , , , fields] = vi.mocked(arcDb.updateArc).mock.calls[0]!;
+    expect(threadDb.updateThread).toHaveBeenCalledOnce();
+    const [, , , , fields] = vi.mocked(threadDb.updateThread).mock.calls[0]!;
     expect(fields.retentionDuration).toBe("P3M");
   });
 
   it("existing archived arc → updateArc reactivates to active", async () => {
     // Arc was archived — new signal reactivates it
-    const existing = makeArc({ id: "arc-archived", status: "archived", workflow: "conversation", summary: "A test email.", labels: ["system:workflow:conversation"] });
-    vi.mocked(arcMatcher.findMatch).mockReturnValueOnce(Promise.resolve(ok(existing)));
+    const existing = makeThread({ id: "arc-archived", status: "archived", workflow: "conversation", summary: "A test email.", labels: ["system:workflow:conversation"] });
+    vi.mocked(threadMatcher.findMatch).mockReturnValueOnce(Promise.resolve(ok(existing)));
 
     const classifier = makeClassifier({ workflow: "conversation", summary: "A test email." });
-    const processor = buildProcessor(arcDb, accountDb, processingDb, arcMatcher, classifier, mockLogger, ruleEvaluator);
+    const processor = buildProcessor(threadDb, accountDb, processingDb, threadMatcher, classifier, mockLogger, ruleEvaluator);
 
     await processor.processRecord(makeMessage(), 1);
 
-    expect(arcDb.updateArc).toHaveBeenCalledOnce();
-    const [, , status, lastSignalAt, fields] = vi.mocked(arcDb.updateArc).mock.calls[0]!;
+    expect(threadDb.updateThread).toHaveBeenCalledOnce();
+    const [, , status, lastSignalAt, fields] = vi.mocked(threadDb.updateThread).mock.calls[0]!;
     expect(status).toBe("active");
     expect(lastSignalAt).toBe("2024-01-15T10:00:00Z");
     expect(fields).toEqual({ senderAddress: "sender@example.com", recipientAddress: "user@example.com", subject: "Test email", retentionDuration: "P3M" });
   });
 
   it("existing arc with archive rule → updateArc called with archived status", async () => {
-    const existing = makeArc({ id: "arc-to-archive", workflow: "conversation", summary: "A test email.", labels: ["system:workflow:conversation"] });
-    vi.mocked(arcMatcher.findMatch).mockReturnValueOnce(Promise.resolve(ok(existing)));
+    const existing = makeThread({ id: "arc-to-archive", workflow: "conversation", summary: "A test email.", labels: ["system:workflow:conversation"] });
+    vi.mocked(threadMatcher.findMatch).mockReturnValueOnce(Promise.resolve(ok(existing)));
 
     // Rule that archives the arc
     const archiveRule: Rule = {
@@ -280,20 +280,20 @@ describe("Processor delta computation — updateArc vs saveArc", () => {
     vi.mocked(accountDb.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([archiveRule])));
 
     const classifier = makeClassifier({ workflow: "conversation", summary: "A test email." });
-    const processor = buildProcessor(arcDb, accountDb, processingDb, arcMatcher, classifier, mockLogger, ruleEvaluator);
+    const processor = buildProcessor(threadDb, accountDb, processingDb, threadMatcher, classifier, mockLogger, ruleEvaluator);
 
     await processor.processRecord(makeMessage(), 1);
 
-    expect(arcDb.updateArc).toHaveBeenCalledOnce();
-    const [, , status, , fields] = vi.mocked(arcDb.updateArc).mock.calls[0]!;
+    expect(threadDb.updateThread).toHaveBeenCalledOnce();
+    const [, , status, , fields] = vi.mocked(threadDb.updateThread).mock.calls[0]!;
     expect(status).toBe("archived");
     expect(fields).toEqual({ senderAddress: "sender@example.com", recipientAddress: "user@example.com", subject: "Test email", retentionDuration: "P3M" });
   });
 
   it("existing arc with changed labels → updateArc includes labels in delta", async () => {
     // Arc starts with system label only; rule adds "billing"
-    const existing = makeArc({ id: "arc-labels", workflow: "conversation", summary: "A test email.", labels: ["system:workflow:conversation"] });
-    vi.mocked(arcMatcher.findMatch).mockReturnValueOnce(Promise.resolve(ok(existing)));
+    const existing = makeThread({ id: "arc-labels", workflow: "conversation", summary: "A test email.", labels: ["system:workflow:conversation"] });
+    vi.mocked(threadMatcher.findMatch).mockReturnValueOnce(Promise.resolve(ok(existing)));
 
     // Rule that adds a label
     const labelRule: Rule = {
@@ -304,32 +304,32 @@ describe("Processor delta computation — updateArc vs saveArc", () => {
     vi.mocked(accountDb.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([labelRule])));
 
     const classifier = makeClassifier({ workflow: "conversation", summary: "A test email." });
-    const processor = buildProcessor(arcDb, accountDb, processingDb, arcMatcher, classifier, mockLogger, ruleEvaluator);
+    const processor = buildProcessor(threadDb, accountDb, processingDb, threadMatcher, classifier, mockLogger, ruleEvaluator);
 
     await processor.processRecord(makeMessage(), 1);
 
-    expect(arcDb.updateArc).toHaveBeenCalledOnce();
-    const [, , status, , fields] = vi.mocked(arcDb.updateArc).mock.calls[0]!;
+    expect(threadDb.updateThread).toHaveBeenCalledOnce();
+    const [, , status, , fields] = vi.mocked(threadDb.updateThread).mock.calls[0]!;
     expect(status).toBe("active");
     expect(fields).toEqual({ labels: ["system:workflow:conversation", "billing"], senderAddress: "sender@example.com", recipientAddress: "user@example.com", subject: "Test email", retentionDuration: "P3M" });
   });
 
   it("new arc (matchedArc is null) → saveArc called, not updateArc", async () => {
-    // arcMatcher returns null (default) — no existing arc
+    // threadMatcher returns null (default) — no existing arc
     const classifier = makeClassifier();
-    const processor = buildProcessor(arcDb, accountDb, processingDb, arcMatcher, classifier, mockLogger, ruleEvaluator);
+    const processor = buildProcessor(threadDb, accountDb, processingDb, threadMatcher, classifier, mockLogger, ruleEvaluator);
 
     await processor.processRecord(makeMessage(), 1);
 
-    expect(arcDb.saveArc).toHaveBeenCalledOnce();
-    expect(arcDb.updateArc).not.toHaveBeenCalled();
+    expect(threadDb.saveThread).toHaveBeenCalledOnce();
+    expect(threadDb.updateThread).not.toHaveBeenCalled();
   });
 
   it("delete rule action type is not recognized — does not set arc status to deleted", async () => {
     // Verify that even if a rule somehow has type "delete", deriveOutcome ignores it
     // (the action type was removed from RuleActionType, but we test the processor's resilience)
-    const existing = makeArc({ id: "arc-no-delete", workflow: "conversation", summary: "A test email.", labels: ["system:workflow:conversation"] });
-    vi.mocked(arcMatcher.findMatch).mockReturnValueOnce(Promise.resolve(ok(existing)));
+    const existing = makeThread({ id: "arc-no-delete", workflow: "conversation", summary: "A test email.", labels: ["system:workflow:conversation"] });
+    vi.mocked(threadMatcher.findMatch).mockReturnValueOnce(Promise.resolve(ok(existing)));
 
     // Manually craft a rule with a "delete" action — simulates legacy data
     const deleteRule: Rule = {
@@ -340,12 +340,12 @@ describe("Processor delta computation — updateArc vs saveArc", () => {
     vi.mocked(accountDb.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([deleteRule])));
 
     const classifier = makeClassifier({ workflow: "conversation", summary: "A test email." });
-    const processor = buildProcessor(arcDb, accountDb, processingDb, arcMatcher, classifier, mockLogger, ruleEvaluator);
+    const processor = buildProcessor(threadDb, accountDb, processingDb, threadMatcher, classifier, mockLogger, ruleEvaluator);
 
     await processor.processRecord(makeMessage(), 1);
 
-    expect(arcDb.updateArc).toHaveBeenCalledOnce();
-    const [, , status] = vi.mocked(arcDb.updateArc).mock.calls[0]!;
+    expect(threadDb.updateThread).toHaveBeenCalledOnce();
+    const [, , status] = vi.mocked(threadDb.updateThread).mock.calls[0]!;
     // Status should be "active" (reactivation default) — NOT "deleted"
     expect(status).toBe("active");
     expect(status).not.toBe("deleted");

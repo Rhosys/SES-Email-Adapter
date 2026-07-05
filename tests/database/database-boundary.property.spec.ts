@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mockClient } from "aws-sdk-client-mock";
 import { DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
 import { AccountDatabase } from "../../src/database/account-database.js";
-import { ArcDatabase } from "../../src/database/arc-database.js";
+import { ThreadDatabase } from "../../src/database/thread-database.js";
 import { ProcessingDatabase } from "../../src/database/processing-database.js";
 import { AuditDatabase } from "../../src/database/audit-database.js";
 import { createMockLogger } from "../helpers/mock-logger.js";
@@ -58,12 +58,12 @@ describe("Property 1: Database boundary completeness", () => {
     }
   });
 
-  it("ArcDatabase.getArc never throws/rejects — SDK errors become DbError", async () => {
+  it("ThreadDatabase.getThread never throws/rejects — SDK errors become DbError", async () => {
     ddbMock.reset();
     ddbMock.rejectsOnce(sdkError);
 
-    const db = new ArcDatabase(createMockLogger());
-    const result = await db.getArc("any-account-id", "any-arc-id");
+    const db = new ThreadDatabase(createMockLogger());
+    const result = await db.getThread("any-account-id", "any-arc-id");
 
     expect(result.isOk() || result.isErr()).toBe(true);
     if (result.isErr()) {
@@ -72,11 +72,11 @@ describe("Property 1: Database boundary completeness", () => {
     }
   });
 
-  it("ArcDatabase.saveSignal never throws/rejects — SDK errors become DbError", async () => {
+  it("ThreadDatabase.saveSignal never throws/rejects — SDK errors become DbError", async () => {
     ddbMock.reset();
     ddbMock.rejectsOnce(sdkError);
 
-    const db = new ArcDatabase(createMockLogger());
+    const db = new ThreadDatabase(createMockLogger());
     const result = await db.saveSignal({
       id: "sig-1",
       accountId: "acct-1",
@@ -162,14 +162,14 @@ describe("Property 1: Database boundary completeness", () => {
     ddbMock.resolves({ Item: undefined, Items: [] });
 
     const accountDb = new AccountDatabase(createMockLogger());
-    const arcDb = new ArcDatabase(createMockLogger());
+    const threadDb = new ThreadDatabase(createMockLogger());
     const processingDb = new ProcessingDatabase();
     const auditDb = new AuditDatabase();
 
     const r1 = await accountDb.getAccount("acct-1");
     expect(r1.isOk()).toBe(true);
 
-    const r2 = await arcDb.getArc("acct-1", "arc-1");
+    const r2 = await threadDb.getThread("acct-1", "arc-1");
     expect(r2.isOk()).toBe(true);
 
     const r3 = await processingDb.isAddressSuppressed("x@y.com");

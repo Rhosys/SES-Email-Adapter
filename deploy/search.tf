@@ -15,6 +15,8 @@ locals {
       active     = true
     }
   }
+
+  aurora_database_name = "signals"
 }
 
 # Shared subnet group — all clusters live in the same VPC/subnets
@@ -50,6 +52,19 @@ resource "aws_rds_cluster_parameter_group" "aurora" {
 
   # pgvector does not require shared_preload_libraries — it is loaded
   # on-demand via CREATE EXTENSION vector; in the bootstrap migration.
+  # pg_cron requires shared_preload_libraries to be loaded at startup.
+  parameter {
+    name         = "shared_preload_libraries"
+    value        = "pg_cron"
+    apply_method = "pending-reboot"
+  }
+
+  # pg_cron runs jobs in the configured database (default: postgres).
+  # Point it at the application database so the TTL job can execute.
+  parameter {
+    name  = "cron.database_name"
+    value = local.aurora_database_name
+  }
 
   # -----------------------------------------------------------------------
   # Connection logging
@@ -153,7 +168,7 @@ resource "aws_rds_cluster" "aurora" {
   engine_mode                     = "provisioned"
   engine_version                  = "18.3"
   allow_major_version_upgrade     = true
-  database_name                   = "signals"
+  database_name                   = local.aurora_database_name
   master_username                 = "master_admin"
   manage_master_user_password     = true
   db_subnet_group_name            = aws_db_subnet_group.aurora.name
@@ -256,7 +271,7 @@ resource "aws_codebuild_project" "migration" {
     }
     environment_variable {
       name  = "AURORA_DB_NAME"
-      value = "signals"
+      value = local.aurora_database_name
     }
   }
 

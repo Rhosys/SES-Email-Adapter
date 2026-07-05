@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { ok, err } from "../../src/errors.js";
 import type { DbError } from "../../src/errors.js";
-import type { Signal, Arc } from "../../src/types/index.js";
+import type { Signal, Thread } from "../../src/types/index.js";
 import type { WorkflowHandler } from "../../src/workflow/types.js";
 import { HandlerRegistry } from "../../src/workflow/registry.js";
 
@@ -35,7 +35,7 @@ const stubSignal: Signal = {
   },
 } as Signal;
 
-const stubArc: Arc = {
+const stubArc: Thread = {
   id: "arc-test-001",
   accountId: "acc-1",
   workflow: "auth",
@@ -69,7 +69,7 @@ describe("HandlerRegistry", () => {
 
   it("returns ok() when no handler registered for the workflow", async () => {
     const registry = new HandlerRegistry([]);
-    const arc: Arc = { ...stubArc, workflow: "conversation" };
+    const arc: Thread = { ...stubArc, workflow: "conversation" };
 
     const result = await registry.dispatch(stubSignal, arc, "acc-1");
 

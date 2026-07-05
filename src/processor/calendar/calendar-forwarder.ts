@@ -29,7 +29,7 @@ export interface ForwardCalendarInviteOpts {
   calendarSignal: Signal<CalendarEventData>;
   calendarForwardingAddress: string;
   accountId: string;
-  arcId: string;
+  threadId: string;
   aliasAddress: string;
 }
 
@@ -42,7 +42,7 @@ export async function forwardCalendarInvite(
   deps: CalendarForwarderDeps,
   logger: Logger,
 ): Promise<Result<void, DbError | TransientSesError>> {
-  const { calendarSignal, calendarForwardingAddress, accountId, arcId } = opts;
+  const { calendarSignal, calendarForwardingAddress, accountId, threadId } = opts;
   const { emailService, serviceDomain } = deps;
   const calendarData = calendarSignal.data;
 
@@ -59,13 +59,13 @@ export async function forwardCalendarInvite(
   // Build proxy UID
   const proxyUid = await buildProxyUid({
     accountId,
-    arcId,
+    threadId,
     originalVeventUid: calendarData.originalVeventUid,
     serviceDomain,
   });
 
-  // Build proxy ORGANIZER: mailto:{arcId}@{accountId}.{serviceDomain}
-  const proxyOrganizer = `mailto:${arcId}@${accountId}.${serviceDomain}`;
+  // Build proxy ORGANIZER: mailto:{threadId}@{accountId}.{serviceDomain}
+  const proxyOrganizer = `mailto:${threadId}@${accountId}.${serviceDomain}`;
 
   // Construct the forwarding .ics
   const icsContent = buildForwardIcs({

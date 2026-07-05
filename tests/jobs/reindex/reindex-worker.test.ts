@@ -24,10 +24,10 @@ const { mockUpsertEmbedding, mockAddEmbeddingToCache, mockGenerateForModel, mock
 }));
 
 // ---------------------------------------------------------------------------
-// Mock ArcMatcher (Aurora upserts)
+// Mock ThreadMatcherPort (Aurora upserts)
 // ---------------------------------------------------------------------------
 
-vi.mock("../../../src/database/arc-matcher.js", () => ({
+vi.mock("../../../src/database/thread-matcher.js", () => ({
   createSearchDatabase: () => ({
     upsertEmbedding: (...args: unknown[]) => mockUpsertEmbedding(...args),
   }),
@@ -37,8 +37,8 @@ vi.mock("../../../src/database/arc-matcher.js", () => ({
 // Mock ArcDatabase (addEmbeddingToCache)
 // ---------------------------------------------------------------------------
 
-vi.mock("../../../src/database/arc-database.js", () => ({
-  ArcDatabase: class {
+vi.mock("../../../src/database/thread-database.js", () => ({
+  ThreadDatabase: class {
     addEmbeddingToCache = mockAddEmbeddingToCache;
   },
 }));
@@ -108,7 +108,7 @@ const s3Mock = mockClient(S3Client);
 function makeSignalItem(opts: {
   id: string;
   accountId: string;
-  arcId: string;
+  threadId: string;
   recipientAddress: string;
   embeddings?: Record<string, number[]>;
   s3Key?: string;
@@ -121,7 +121,7 @@ function makeSignalItem(opts: {
     id: opts.id,
     signalLookupId: lookupId,
     accountId: opts.accountId,
-    arcId: opts.arcId,
+    threadId: opts.threadId,
     data: {
       recipientAddress: opts.recipientAddress,
       embeddings: opts.embeddings,
@@ -157,7 +157,7 @@ describe("ReindexWorker — pure-copy mode", () => {
     const signal = makeSignalItem({
       id: "SES#abc123",
       accountId: "acct-1",
-      arcId: "arc-xyz",
+      threadId: "arc-xyz",
       recipientAddress: "me@example.com",
       embeddings: { "amazon.titan-embed-text-v2:0": [0.1, 0.2, 0.3] },
     });
@@ -177,7 +177,7 @@ describe("ReindexWorker — pure-copy mode", () => {
     expect(result.isOk()).toBe(true);
     expect(mockUpsertEmbedding).toHaveBeenCalledWith({
       registryId: "aurora-prod-titan-v2",
-      arcId: "arc-xyz",
+      threadId: "arc-xyz",
       accountId: "acct-1",
       recipientAddress: "me@example.com",
       embedding: [0.1, 0.2, 0.3],
@@ -188,7 +188,7 @@ describe("ReindexWorker — pure-copy mode", () => {
     const signal = makeSignalItem({
       id: "SES#abc123",
       accountId: "acct-1",
-      arcId: "arc-xyz",
+      threadId: "arc-xyz",
       recipientAddress: "me@example.com",
       embeddings: { "amazon.titan-embed-text-v3:0": [0.4, 0.5, 0.6] },
     });
@@ -216,7 +216,7 @@ describe("ReindexWorker — pure-copy mode", () => {
     const valid = makeSignalItem({
       id: "SES#good",
       accountId: "acct-1",
-      arcId: "arc-good",
+      threadId: "arc-good",
       recipientAddress: "good@example.com",
       embeddings: { "amazon.titan-embed-text-v2:0": [1.0, 2.0] },
     });
@@ -237,21 +237,21 @@ describe("ReindexWorker — pure-copy mode", () => {
     // but the valid signal is still upserted
     expect(result.isErr()).toBe(true);
     expect(mockUpsertEmbedding).toHaveBeenCalledTimes(1);
-    expect(mockUpsertEmbedding).toHaveBeenCalledWith(expect.objectContaining({ arcId: "arc-good" }));
+    expect(mockUpsertEmbedding).toHaveBeenCalledWith(expect.objectContaining({ threadId: "arc-good" }));
   });
 
   it("isolates per-signal Aurora failures without failing the segment", async () => {
     const signal1 = makeSignalItem({
       id: "SES#fail",
       accountId: "acct-1",
-      arcId: "arc-fail",
+      threadId: "arc-fail",
       recipientAddress: "fail@example.com",
       embeddings: { "amazon.titan-embed-text-v2:0": [0.1] },
     });
     const signal2 = makeSignalItem({
       id: "SES#ok",
       accountId: "acct-1",
-      arcId: "arc-ok",
+      threadId: "arc-ok",
       recipientAddress: "ok@example.com",
       embeddings: { "amazon.titan-embed-text-v2:0": [0.2] },
     });
@@ -283,14 +283,14 @@ describe("ReindexWorker — pure-copy mode", () => {
     const signal1 = makeSignalItem({
       id: "SES#page1",
       accountId: "acct-1",
-      arcId: "arc-1",
+      threadId: "arc-1",
       recipientAddress: "a@example.com",
       embeddings: { "amazon.titan-embed-text-v2:0": [0.1] },
     });
     const signal2 = makeSignalItem({
       id: "SES#page2",
       accountId: "acct-1",
-      arcId: "arc-2",
+      threadId: "arc-2",
       recipientAddress: "b@example.com",
       embeddings: { "amazon.titan-embed-text-v2:0": [0.2] },
     });
@@ -331,11 +331,11 @@ describe("ReindexWorker — pure-copy mode", () => {
 
   it("skips non-signal items (arcs, grouping keys) without error", async () => {
     const arcItem = { pk: "ACCT#a1#ARC#arc-1", sk: "#", id: "arc-1", accountId: "a1", workflow: "auth" };
-    const gkeyItem = { pk: "GKEY#a1#somekey", sk: "GKEY", arcId: "arc-1" };
+    const gkeyItem = { pk: "GKEY#a1#somekey", sk: "GKEY", threadId: "arc-1" };
     const signal = makeSignalItem({
       id: "SES#real",
       accountId: "acct-1",
-      arcId: "arc-real",
+      threadId: "arc-real",
       recipientAddress: "real@example.com",
       embeddings: { "amazon.titan-embed-text-v2:0": [0.5] },
     });
@@ -413,7 +413,7 @@ describe("ReindexWorker — regenerate-from-S3 mode", () => {
       id: "sgn-regen001",
       signalLookupId: "ses-regen1",
       accountId: "acct-1",
-      arcId: "arc-regen",
+      threadId: "arc-regen",
       recipientAddress: "regen@example.com",
       embeddings: { "amazon.titan-embed-text-v3:0": [0.9] }, // different model, not the target
       s3Key: "inbox/2025/01/regen1.eml",
@@ -478,7 +478,7 @@ describe("ReindexWorker — regenerate-from-S3 mode", () => {
     // Should upsert to Aurora
     expect(mockUpsertEmbedding).toHaveBeenCalledWith({
       registryId: "aurora-prod-titan-v2",
-      arcId: "arc-regen",
+      threadId: "arc-regen",
       accountId: "acct-1",
       recipientAddress: "regen@example.com",
       embedding: [0.1, 0.2, 0.3],
@@ -489,7 +489,7 @@ describe("ReindexWorker — regenerate-from-S3 mode", () => {
     const signal = makeSignalItem({
       id: "SES#cached",
       accountId: "acct-1",
-      arcId: "arc-cached",
+      threadId: "arc-cached",
       recipientAddress: "cached@example.com",
       embeddings: { "amazon.titan-embed-text-v2:0": [0.5, 0.6, 0.7] },
       s3Key: "inbox/2025/01/cached.eml",
@@ -516,7 +516,7 @@ describe("ReindexWorker — regenerate-from-S3 mode", () => {
     // Should upsert the cached vector directly
     expect(mockUpsertEmbedding).toHaveBeenCalledWith({
       registryId: "aurora-prod-titan-v2",
-      arcId: "arc-cached",
+      threadId: "arc-cached",
       accountId: "acct-1",
       recipientAddress: "cached@example.com",
       embedding: [0.5, 0.6, 0.7],
@@ -527,7 +527,7 @@ describe("ReindexWorker — regenerate-from-S3 mode", () => {
     const cachedSignal = makeSignalItem({
       id: "SES#hit",
       accountId: "acct-1",
-      arcId: "arc-hit",
+      threadId: "arc-hit",
       recipientAddress: "hit@example.com",
       embeddings: { "amazon.titan-embed-text-v2:0": [1.0] },
       s3Key: "inbox/hit.eml",
@@ -535,7 +535,7 @@ describe("ReindexWorker — regenerate-from-S3 mode", () => {
     const regenSignal = makeSignalItem({
       id: "SES#miss",
       accountId: "acct-1",
-      arcId: "arc-miss",
+      threadId: "arc-miss",
       recipientAddress: "miss@example.com",
       embeddings: {},
       s3Key: "inbox/miss.eml",
@@ -543,7 +543,7 @@ describe("ReindexWorker — regenerate-from-S3 mode", () => {
     const expiredSignal = makeSignalItem({
       id: "SES#gone",
       accountId: "acct-1",
-      arcId: "arc-gone",
+      threadId: "arc-gone",
       recipientAddress: "gone@example.com",
       embeddings: {},
       s3Key: "inbox/gone.eml",

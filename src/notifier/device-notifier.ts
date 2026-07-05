@@ -1,7 +1,7 @@
 import { ok, err, dbError } from "../errors.js";
 import type { Result, DbError } from "../errors.js";
 import type { Logger } from "../logger.js";
-import type { Arc, ArcUrgency, Signal } from "../types/index.js";
+import type { Thread, ThreadUrgency, Signal } from "../types/index.js";
 import type { DeviceStore } from "./device-store.js";
 import type { Deliverer, Device, DeviceType, Notifier, NotificationPayload, NotificationReason } from "./types.js";
 import { urgencyToPushPriority } from "./types.js";
@@ -21,8 +21,8 @@ export class DeviceNotifier implements Notifier {
     this.logger = opts.logger;
   }
 
-  async notify(accountId: string, arc: Arc, signal: Signal, urgency?: ArcUrgency, reason?: NotificationReason): Promise<Result<void, DbError>> {
-    const effectiveUrgency: ArcUrgency = urgency ?? "normal";
+  async notify(accountId: string, thread: Thread, signal: Signal, urgency?: ThreadUrgency, reason?: NotificationReason): Promise<Result<void, DbError>> {
+    const effectiveUrgency: ThreadUrgency = urgency ?? "normal";
     const priority = urgencyToPushPriority(effectiveUrgency);
 
     const devicesResult = await this.deviceStore.listDevices(accountId);
@@ -35,7 +35,7 @@ export class DeviceNotifier implements Notifier {
       return ok(undefined);
     }
 
-    const payload = buildPayload(arc, signal, effectiveUrgency, reason);
+    const payload = buildPayload(thread, signal, effectiveUrgency, reason);
 
     let successCount = 0;
     const staleTokens: string[] = [];
@@ -48,7 +48,7 @@ export class DeviceNotifier implements Notifier {
 
       const deliverer = this.deliverers[device.type];
       if (!deliverer) {
-        this.logger.warn("No deliverer registered for device type", { code: "notifier.no_deliverer", signal, arc, deviceType: device.type });
+        this.logger.warn("No deliverer registered for device type", { code: "notifier.no_deliverer", signal, thread, deviceType: device.type });
         continue;
       }
 
@@ -60,10 +60,10 @@ export class DeviceNotifier implements Notifier {
         } else if (result.status === "stale") {
           staleTokens.push(device.token);
         } else {
-          this.logger.warn("Device delivery failed", { code: "notifier.delivery_failed", signal, arc, deviceType: device.type, token: device.token, reason: result.reason });
+          this.logger.warn("Device delivery failed", { code: "notifier.delivery_failed", signal, thread, deviceType: device.type, token: device.token, reason: result.reason });
         }
       } catch (e) {
-        this.logger.error("Unexpected error delivering to device", { code: "notifier.delivery_error", signal, arc, deviceType: device.type, token: device.token, error: e });
+        this.logger.error("Unexpected error delivering to device", { code: "notifier.delivery_error", signal, thread, deviceType: device.type, token: device.token, error: e });
       }
     }
 
@@ -71,7 +71,7 @@ export class DeviceNotifier implements Notifier {
     for (const token of staleTokens) {
       const deleteResult = await this.deviceStore.deleteDevice(accountId, token);
       if (deleteResult.isErr()) {
-        this.logger.warn("Failed to delete stale device", { code: "notifier.stale_delete_failed", signal, arc, token });
+        this.logger.warn("Failed to delete stale device", { code: "notifier.stale_delete_failed", signal, thread, token });
       }
     }
 
@@ -91,15 +91,15 @@ export class DeviceNotifier implements Notifier {
   }
 }
 
-function buildPayload(arc: Arc, signal: Signal, urgency: ArcUrgency, reason?: NotificationReason): NotificationPayload {
+function buildPayload(thread: Thread, signal: Signal, urgency: ThreadUrgency, reason?: NotificationReason): NotificationPayload {
   const payload: NotificationPayload = {
     type: "signal",
     signalId: signal.id,
-    arcId: arc.id,
+    threadId: thread.id,
     sender: signal.data.from.address,
     senderName: signal.data.from.name ?? signal.data.from.address,
     subject: signal.data.subject,
-    workflow: arc.workflow,
+    workflow: thread.workflow,
     urgency,
   };
   if (reason) {

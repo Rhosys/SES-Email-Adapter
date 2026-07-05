@@ -2,14 +2,14 @@ import type { IForwardingService } from "../../src/forwarding/forwarding-service
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ok, err } from "../../src/errors.js";
 import { SignalProcessor, SYSTEM_RULES } from "../../src/processor/processor.js";
-import type { ArcMatcher, Notifier,  SideEffectPayload } from "../../src/processor/processor.js";
+import type { ThreadMatcherPort, Notifier,  SideEffectPayload } from "../../src/processor/processor.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
 import { makeSharedNewDeps, makeRuleEvaluator3 } from "./_shared-new-deps.js";
-import { makeArcDbMock, makeAccountDbMock, makeProcessingDbMock } from "./_helpers.js";
+import { makeThreadDbMock, makeAccountDbMock, makeProcessingDbMock } from "./_helpers.js";
 import type { ContentSanitizerClient } from "../../src/processor/content-sanitizer-client.js";
 import type { EmbeddingGenerator } from "../../src/embedding/embedding-generator.js";
-import type { MultiClusterAuroraWriter } from "../../src/database/arc-matcher.js";
-import type { Signal, Arc, Alias, AliasSender } from "../../src/types/index.js";
+import type { MultiClusterAuroraWriter } from "../../src/database/thread-matcher.js";
+import type { Signal, Thread, Alias, AliasSender } from "../../src/types/index.js";
 import { dbError } from "../../src/errors.js";
 import type { EmailService } from "../../src/email/email-service.js";
 import { createMockLogger, type MockLogger } from "../helpers/mock-logger.js";
@@ -28,7 +28,7 @@ vi.mock("../../src/embedding/cluster-registry.js", () => {
     CLUSTER_REGISTRY: Object.freeze([entry]),
     getActiveClusters: () => [entry],
     getRegistryById: (id: string) => (id === entry.registryId ? entry : null),
-    getPrimaryArcMatcherRegistry: () => entry,
+    getPrimaryThreadMatcherRegistry: () => entry,
   };
 });
 
@@ -75,7 +75,7 @@ describe("Side effect caller logging", () => {
   afterEach(() => { vi.restoreAllMocks(); });
 
   function makeStore() {
-    return { arcDb: makeArcDbMock(), accountDb: makeAccountDbMock(TEST_ACCOUNT_ID), processingDb: makeProcessingDbMock() };
+    return { threadDb: makeThreadDbMock(), accountDb: makeAccountDbMock(TEST_ACCOUNT_ID), processingDb: makeProcessingDbMock() };
   }
 
   function makeContentSanitizer(): ContentSanitizerClient {
@@ -111,7 +111,7 @@ describe("Side effect caller logging", () => {
     return { upsertEmbedding: vi.fn().mockResolvedValue(ok(undefined)), findMatch: vi.fn().mockResolvedValue(ok(null)) };
   }
 
-  function makeArcMatcher(): ArcMatcher {
+  function makeThreadMatcher(): ThreadMatcherPort {
     return { findMatch: vi.fn().mockReturnValue(Promise.resolve(ok(null))), upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) };
   }
 
@@ -147,7 +147,7 @@ describe("Side effect caller logging", () => {
     } as Signal;
   }
 
-  function makeArc(): Arc {
+  function makeThread(): Thread {
     return {
       id: "arc-test",
       accountId: TEST_ACCOUNT_ID,
@@ -175,7 +175,7 @@ describe("Side effect caller logging", () => {
       classifier: { classify: vi.fn().mockResolvedValue(ok({ workflow: "conversation", workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false }, tags: [], summary: "A test email.", labels: [] })) },
       embeddingGenerator: makeEmbeddingGenerator(),
       auroraWriter: makeAuroraWriter(),
-      arcMatcher: makeArcMatcher(),
+      threadMatcher: makeThreadMatcher(),
       ruleEvaluator: makeRuleEvaluator3(mockLogger),
       notifier,
       forwardingService: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), sendVerification: vi.fn().mockResolvedValue(ok(undefined)), verifyWebhook: vi.fn().mockResolvedValue(ok(undefined)) },
@@ -188,7 +188,7 @@ describe("Side effect caller logging", () => {
     });
 
     // Side-effects are now executed via processSideEffect, not processRecord
-    const payload: SideEffectPayload = { signal: makeSignal(), arc: makeArc() };
+    const payload: SideEffectPayload = { signal: makeSignal(), thread: makeThread() };
     await processor.processSideEffect(payload);
 
     const sideEffectLog = mockLogger.calls.find((call) =>
@@ -209,7 +209,7 @@ describe("Side effect caller logging", () => {
       classifier: { classify: vi.fn().mockResolvedValue(ok({ workflow: "conversation", workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false }, tags: [], summary: "A test email.", labels: [] })) },
       embeddingGenerator: makeEmbeddingGenerator(),
       auroraWriter: makeAuroraWriter(),
-      arcMatcher: makeArcMatcher(),
+      threadMatcher: makeThreadMatcher(),
       ruleEvaluator: makeRuleEvaluator3(mockLogger),
       notifier,
       forwardingService: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), sendVerification: vi.fn().mockResolvedValue(ok(undefined)), verifyWebhook: vi.fn().mockResolvedValue(ok(undefined)) },
@@ -221,7 +221,7 @@ describe("Side effect caller logging", () => {
       calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud" },
     });
 
-    const payload: SideEffectPayload = { signal: makeSignal(), arc: makeArc() };
+    const payload: SideEffectPayload = { signal: makeSignal(), thread: makeThread() };
     await processor.processSideEffect(payload);
 
     const sideEffectLog = mockLogger.calls.find((call) =>
@@ -243,7 +243,7 @@ describe("Side effect caller logging", () => {
       classifier: { classify: vi.fn().mockResolvedValue(ok({ workflow: "conversation", workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false }, tags: [], summary: "A test email.", labels: [] })) },
       embeddingGenerator: makeEmbeddingGenerator(),
       auroraWriter: makeAuroraWriter(),
-      arcMatcher: makeArcMatcher(),
+      threadMatcher: makeThreadMatcher(),
       ruleEvaluator: makeRuleEvaluator3(mockLogger),
       forwardingService,
       notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
@@ -259,7 +259,7 @@ describe("Side effect caller logging", () => {
     const signal = makeSignal({
       data: { matchedRules: [{ ruleId: "rule-fwd", actions: [{ type: "forward", value: "fwd@example.com" }], labelsAdded: [] }] },
     });
-    const payload: SideEffectPayload = { signal, arc: makeArc() };
+    const payload: SideEffectPayload = { signal, thread: makeThread() };
     await processor.processSideEffect(payload);
 
     const sideEffectLog = mockLogger.calls.find((call) =>

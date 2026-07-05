@@ -8,6 +8,13 @@
       "when": 1781259320131,
       "tag": "0000_init-arc-embeddings",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1783264860442,
+      "tag": "0001_thread-embeddings",
+      "breakpoints": true
     }
   ]
 }

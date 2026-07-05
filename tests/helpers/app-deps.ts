@@ -5,7 +5,7 @@ import type { AppDeps } from "../../src/api/app.js";
 /** Provides sensible no-op defaults for all AppDeps fields that tests don't exercise. */
 export function makeAppDeps(overrides: Partial<AppDeps>): AppDeps {
   return {
-    arcDb: {} as never,
+    threadDb: {} as never,
     accountDb: {} as never,
     auditDb: {} as never,
     auth: {} as never,
@@ -22,7 +22,7 @@ export function makeAppDeps(overrides: Partial<AppDeps>): AppDeps {
     emailService: { send: async () => ok({ messageId: "stub" }), sendRaw: async () => {} } as never,
     domainIdentityService: { register: async () => ok(undefined), deregister: async () => ok(undefined) },
     rsvpComposer: (async () => ok(undefined)) as never,
-    postApprovalCalendarDeps: { accountDb: {} as never, emailService: {} as never, serviceDomain: "platform.email.rhosys.cloud" } as never,
+    postApprovalCalendarDeps: { threadDb: {} as never, accountDb: {} as never, emailService: {} as never, serviceDomain: "platform.email.rhosys.cloud" } as never,
     schedulerClient: { scheduleMessage: async () => ok(undefined), deleteSchedule: async () => ok(undefined) } as never,
     triggerDigest: async () => {},
     ...overrides,

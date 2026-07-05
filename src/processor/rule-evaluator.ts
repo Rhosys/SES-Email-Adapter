@@ -1,5 +1,5 @@
 import type { RuleEvaluator } from "./processor.js";
-import type { Rule, Signal, Arc } from "../types/index.js";
+import type { Rule, Signal, Thread } from "../types/index.js";
 import type { Logger } from "../logger.js";
 import type { UserCodeExecutorClient } from "./user-code-client.js";
 import type { DbError } from "../errors.js";
@@ -7,7 +7,7 @@ import type { Result } from "../errors.js";
 import { evalCondition } from "./rule-engine.js";
 import { interpretRuleResult } from "./interpret-rule-result.js";
 import type { RuleEvalResult } from "./interpret-rule-result.js";
-import { toRuleSignalContext, toRuleArcContext } from "./rule-context.js";
+import { toRuleSignalContext, toRuleThreadContext } from "./rule-context.js";
 
 // ---------------------------------------------------------------------------
 // Store interface for rule error annotation
@@ -32,13 +32,13 @@ export class JsonLogicRuleEvaluator implements RuleEvaluator {
     this.accountDb = accountDb;
   }
 
-  async evaluate(rule: Rule, context: { signal: Signal; arc: Arc; isMatchedArc: boolean }): Promise<RuleEvalResult> {
+  async evaluate(rule: Rule, context: { signal: Signal; thread: Thread; isMatchedThread: boolean }): Promise<RuleEvalResult> {
     if (rule.conditionType === "js") {
       return this.evaluateJsCondition(rule, context);
     }
 
     try {
-      const ruleContext = { signal: toRuleSignalContext(context.signal), arc: toRuleArcContext(context.arc), isMatchedArc: context.isMatchedArc };
+      const ruleContext = { signal: toRuleSignalContext(context.signal), thread: toRuleThreadContext(context.thread), isMatchedThread: context.isMatchedThread };
       const matched = await evalCondition(rule.condition, ruleContext);
       return { matched, dynamicActions: [], warnings: [] };
     } catch {
@@ -47,13 +47,13 @@ export class JsonLogicRuleEvaluator implements RuleEvaluator {
     }
   }
 
-  private async evaluateJsCondition(rule: Rule, context: { signal: Signal; arc: Arc; isMatchedArc: boolean }): Promise<RuleEvalResult> {
+  private async evaluateJsCondition(rule: Rule, context: { signal: Signal; thread: Thread; isMatchedThread: boolean }): Promise<RuleEvalResult> {
     try {
       const response = await this.userCodeExecutor.invoke({
         tenantId: context.signal.accountId,
         purpose: "rule_condition",
         functionCode: rule.condition,
-        executionContext: { signal: toRuleSignalContext(context.signal), arc: toRuleArcContext(context.arc) },
+        executionContext: { signal: toRuleSignalContext(context.signal), thread: toRuleThreadContext(context.thread) },
       });
 
       if (response.isErr()) {

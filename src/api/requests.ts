@@ -14,8 +14,8 @@ const lowerEmail = z.string()
 
 // Lowercases + trims a domain string (no email-format validation).
 const lowerDomain = z.string().transform(s => s.toLowerCase().trim());
-const ArcStatus = z.enum(["active", "archived", "deleted", "report_violation"]);
-const ArcUrgency = z.enum(["critical", "high", "normal", "low", "silent"]);
+const ThreadStatus = z.enum(["active", "archived", "deleted", "report_violation"]);
+const ThreadUrgency = z.enum(["critical", "high", "normal", "low", "silent"]);
 const Workflow = z.enum(WORKFLOWS);
 const SortField = z.enum(["lastSignalAt", "createdAt"]);
 const SortDirection = z.enum(["asc", "desc"]);
@@ -37,16 +37,16 @@ const RuleActionSchema = z.object({
   value: z.string().optional(),
 });
 
-// ---- Arc ----
+// ---- Thread ----
 
-export const UpdateArcRequest = z.object({
-  status: ArcStatus.optional(),
-  urgency: ArcUrgency.optional(),
+export const UpdateThreadRequest = z.object({
+  status: ThreadStatus.optional(),
+  urgency: ThreadUrgency.optional(),
   labels: z.array(z.string()).optional(),
   lastSignalAt: z.string().optional(),
   followupAt: z.string().datetime().optional(),
 });
-export type UpdateArcRequest = z.infer<typeof UpdateArcRequest>;
+export type UpdateThreadRequest = z.infer<typeof UpdateThreadRequest>;
 
 // ---- Signal ----
 

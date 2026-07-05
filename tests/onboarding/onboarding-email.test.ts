@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { ok } from "neverthrow";
 import { OnboardingTaskHandler } from "../../src/onboarding/onboarding-task-handler.js";
-import type { IOnboardingAccountDb, IOnboardingArcDb } from "../../src/onboarding/onboarding-task-handler.js";
+import type { IOnboardingAccountDb, IOnboardingThreadDb } from "../../src/onboarding/onboarding-task-handler.js";
 import { createMockLogger } from "../helpers/mock-logger.js";
 import type { Account, Domain } from "../../src/types/index.js";
 import type { EmailService } from "../../src/email/email-service.js";
@@ -40,7 +40,7 @@ function makeDomain(overrides: Partial<Domain> = {}): Domain {
   };
 }
 
-function createMockStore(overrides: Partial<IOnboardingAccountDb & IOnboardingArcDb> = {}): { accountDb: IOnboardingAccountDb; arcDb: IOnboardingArcDb } {
+function createMockStore(overrides: Partial<IOnboardingAccountDb & IOnboardingThreadDb> = {}): { accountDb: IOnboardingAccountDb; threadDb: IOnboardingThreadDb } {
   return {
     accountDb: {
       getAccount: overrides.getAccount ?? vi.fn().mockResolvedValue(ok(makeAccount())),
@@ -49,7 +49,7 @@ function createMockStore(overrides: Partial<IOnboardingAccountDb & IOnboardingAr
       getForwardingTarget: overrides.getForwardingTarget ?? vi.fn().mockResolvedValue(ok(null)),
       saveForwardingTarget: overrides.saveForwardingTarget ?? vi.fn().mockResolvedValue(ok(undefined)),
     },
-    arcDb: {
+    threadDb: {
       hasSignals: overrides.hasSignals ?? vi.fn().mockResolvedValue(ok(false)),
     },
   };
@@ -85,7 +85,7 @@ describe("Onboarding email send", () => {
       listDomains: vi.fn().mockResolvedValue(ok([makeDomain({ senderSetupComplete: true })])),
       hasSignals: vi.fn().mockResolvedValue(ok(true)),
     });
-    const handler = new OnboardingTaskHandler(store.accountDb, store.arcDb, logger, emailService);
+    const handler = new OnboardingTaskHandler(store.accountDb, store.threadDb, logger, emailService);
 
     const result = await handler.handleFollowup("acc-test", "user@example.com");
 
@@ -99,7 +99,7 @@ describe("Onboarding email send", () => {
       listDomains: vi.fn().mockResolvedValue(ok([makeDomain({ senderSetupComplete: false })])),
       hasSignals: vi.fn().mockResolvedValue(ok(false)),
     });
-    const handler = new OnboardingTaskHandler(store.accountDb, store.arcDb, logger, emailService);
+    const handler = new OnboardingTaskHandler(store.accountDb, store.threadDb, logger, emailService);
 
     const result = await handler.handleFollowup("acc-test", "user@example.com");
 

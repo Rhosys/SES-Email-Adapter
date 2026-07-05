@@ -14,7 +14,7 @@ vi.mock("../../src/embedding/cluster-registry.js", () => ({
     { registryId: "cluster-a", clusterArn: "arn:aws:rds:eu-central-1:111:cluster:cluster-a", secretArn: "arn:aws:secretsmanager:eu-central-1:111:secret:cluster-a", databaseName: "signals", modelId: "amazon.titan-embed-text-v2:0", dimensions: 1024, active: true },
     { registryId: "cluster-b", clusterArn: "arn:aws:rds:eu-central-1:111:cluster:cluster-b", secretArn: "arn:aws:secretsmanager:eu-central-1:111:secret:cluster-b", databaseName: "signals", modelId: "amazon.titan-embed-text-v3:0", dimensions: 1536, active: true },
   ],
-  getPrimaryArcMatcherRegistry: () => ({ registryId: "cluster-a", clusterArn: "arn:aws:rds:eu-west-1:111:cluster:cluster-a", secretArn: "arn:aws:secretsmanager:eu-west-1:111:secret:cluster-a", databaseName: "signals", modelId: "amazon.titan-embed-text-v2:0", dimensions: 1024, active: true }),
+  getPrimaryThreadMatcherRegistry: () => ({ registryId: "cluster-a", clusterArn: "arn:aws:rds:eu-west-1:111:cluster:cluster-a", secretArn: "arn:aws:secretsmanager:eu-west-1:111:secret:cluster-a", databaseName: "signals", modelId: "amazon.titan-embed-text-v2:0", dimensions: 1024, active: true }),
   getSecondaryClusters: () => [
     { registryId: "cluster-b", clusterArn: "arn:aws:rds:eu-west-1:111:cluster:cluster-b", secretArn: "arn:aws:secretsmanager:eu-west-1:111:secret:cluster-b", databaseName: "signals", modelId: "amazon.titan-embed-text-v3:0", dimensions: 1536, active: true },
   ],

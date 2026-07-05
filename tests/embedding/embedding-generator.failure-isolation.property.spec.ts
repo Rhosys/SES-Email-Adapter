@@ -21,7 +21,7 @@ const { mockActiveClusters, mockReadCluster, mockSecondaryClusters } = vi.hoiste
 vi.mock("../../src/embedding/cluster-registry.js", () => ({
   CLUSTER_REGISTRY: Object.freeze(mockActiveClusters.value.map((c) => Object.freeze(c))),
   getActiveClusters: () => mockActiveClusters.value.filter((c) => c.active),
-  getPrimaryArcMatcherRegistry: () => mockReadCluster.value,
+  getPrimaryThreadMatcherRegistry: () => mockReadCluster.value,
   getSecondaryClusters: () => mockSecondaryClusters.value,
   getRegistryById: (id: string) => mockActiveClusters.value.find((c) => c.registryId === id) ?? null,
 }));

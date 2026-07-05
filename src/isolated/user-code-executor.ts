@@ -13,7 +13,7 @@ interface UserCodeRequest {
   functions?: Array<{ name: string; code: string }>;
   executionContext: {
     signal: unknown;
-    arc: unknown;
+    thread: unknown;
   };
 }
 
@@ -110,8 +110,8 @@ function validate(event: unknown): UserCodeRequest | UserCodeError {
   }
 
   const ctx = payload.executionContext as Record<string, unknown>;
-  if (!("signal" in ctx) || !("arc" in ctx)) {
-    return invalidInput("executionContext must contain signal and arc");
+  if (!("signal" in ctx) || !("thread" in ctx)) {
+    return invalidInput("executionContext must contain signal and thread");
   }
 
   return payload as unknown as UserCodeRequest;
@@ -182,7 +182,7 @@ export async function handler(event: unknown): Promise<UserCodeResponse> {
 
   const result = await execute(functionCode, {
     signal: executionContext.signal,
-    arc: executionContext.arc,
+    thread: executionContext.thread,
   });
 
   if (!result.success) {

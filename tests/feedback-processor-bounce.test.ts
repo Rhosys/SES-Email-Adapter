@@ -6,14 +6,14 @@ import type { ProcessingDatabase } from "../src/database/processing-database.js"
 import type { AccountDatabase } from "../src/database/account-database.js";
 import type { SesFeedback, Signal } from "../src/types/index.js";
 import { createMockLogger } from "./helpers/mock-logger.js";
-import { TAG_ACCOUNT_ID, TAG_TYPE, TAG_SIGNAL_ID, TAG_ARC_ID } from "../src/email/ses-tags.js";
+import { TAG_ACCOUNT_ID, TAG_TYPE, TAG_SIGNAL_ID, TAG_THREAD_ID } from "../src/email/ses-tags.js";
 
 function makeSentSignal(overrides: { data?: Partial<Signal["data"]> } & Partial<Omit<Signal, "data">> = {}): Signal {
   const { data: dataOverrides, ...baseOverrides } = overrides;
   return {
     id: "sgn-signal001",
     signalLookupId: "sgn-signal001",
-    arcId: "arc-001",
+    threadId: "arc-001",
     accountId: "acct-001",
     source: "user",
     type: "email",
@@ -124,7 +124,7 @@ describe("FeedbackProcessor — bounce handling for user-sent signals", () => {
     const savedSignal = vi.mocked(signalStore.saveSignal).mock.calls[0]![0];
     const deliverabilityData = savedSignal.data as unknown as import("../src/types/index.js").DeliverabilitySignalData;
     expect(savedSignal.id).toMatch(/^sgn-/);
-    expect(savedSignal.arcId).toBe("arc-001");
+    expect(savedSignal.threadId).toBe("arc-001");
     expect(savedSignal.accountId).toBe("acct-001");
     expect(savedSignal.source).toBe("ses_feedback");
     expect(savedSignal.status).toBe("active");
@@ -262,7 +262,7 @@ describe("FeedbackProcessor — prefixed tag reading", () => {
   });
 
   it("assigns deliverability signal to the arc from X-Numaeel-ArcId tag", async () => {
-    vi.mocked(signalStore.getSignalById).mockResolvedValueOnce(ok(makeSentSignal({ arcId: "arc-original" })));
+    vi.mocked(signalStore.getSignalById).mockResolvedValueOnce(ok(makeSentSignal({ threadId: "arc-original" })));
 
     const feedback = makeBounceFeedback({
       mail: {
@@ -271,7 +271,7 @@ describe("FeedbackProcessor — prefixed tag reading", () => {
         tags: {
           [TAG_ACCOUNT_ID]: "acct-001",
           [TAG_SIGNAL_ID]: "sgn-signal001",
-          [TAG_ARC_ID]: "arc-from-tag",
+          [TAG_THREAD_ID]: "arc-from-tag",
         },
       },
     });
@@ -282,7 +282,7 @@ describe("FeedbackProcessor — prefixed tag reading", () => {
     expect(signalStore.saveSignal).toHaveBeenCalledTimes(1);
     const savedSignal = vi.mocked(signalStore.saveSignal).mock.calls[0]![0];
     // Arc ID from the tag takes precedence over the signal's own arcId
-    expect(savedSignal.arcId).toBe("arc-from-tag");
+    expect(savedSignal.threadId).toBe("arc-from-tag");
   });
 
   it("falls back to getSignalByMessageId when no prefixed tags are present", async () => {

@@ -12,11 +12,11 @@ import type { IForwardingService } from "../../src/forwarding/forwarding-service
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { ok } from "../../src/errors.js";
 import { SignalProcessor } from "../../src/processor/processor.js";
-import type { ArcMatcher, InboundSignalMessage } from "../../src/processor/processor.js";
+import type { ThreadMatcherPort, InboundSignalMessage } from "../../src/processor/processor.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
 import { makeSharedNewDeps, makeRuleEvaluator3 } from "../processor/_shared-new-deps.js";
-import { makeArcDbMock, makeAccountDbMock, makeProcessingDbMock, applyCtx } from "../processor/_helpers.js";
-import type { ArcDatabase } from "../../src/database/arc-database.js";
+import { makeThreadDbMock, makeAccountDbMock, makeProcessingDbMock, applyCtx } from "../processor/_helpers.js";
+import type { ThreadDatabase } from "../../src/database/thread-database.js";
 import type { ContentSanitizerClient } from "../../src/processor/content-sanitizer-client.js";
 import type { SchedulerClient } from "../../src/scheduler/scheduler-client.js";
 import type { Alias } from "../../src/types/index.js";
@@ -41,7 +41,7 @@ vi.mock("../../src/embedding/cluster-registry.js", () => {
     CLUSTER_REGISTRY: Object.freeze([clusterA]),
     getActiveClusters: () => [clusterA],
     getRegistryById: (id: string) => (id === "cluster-a" ? clusterA : null),
-    getPrimaryArcMatcherRegistry: () => clusterA,
+    getPrimaryThreadMatcherRegistry: () => clusterA,
     getSecondaryClusters: () => [],
   };
 });
@@ -96,7 +96,7 @@ function makeSchedulerClientMock(): { [K in keyof SchedulerClient]: ReturnType<t
   };
 }
 
-function makeArcMatcher(): ArcMatcher {
+function makeArcMatcher(): ThreadMatcherPort {
   return {
     findMatch: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
     upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
@@ -149,8 +149,8 @@ function buildProcessor(opts: {
     });
   });
 
-  const arcDb = makeArcDbMock();
-  (arcDb.saveSignal as ReturnType<typeof vi.fn>).mockResolvedValue(ok(undefined));
+  const threadDb = makeThreadDbMock();
+  (threadDb.saveSignal as ReturnType<typeof vi.fn>).mockResolvedValue(ok(undefined));
 
   const accountDb = makeAccountDbMock(TEST_ACCOUNT_ID);
   applyCtx(accountDb, {
@@ -164,7 +164,7 @@ function buildProcessor(opts: {
 
   return new SignalProcessor({
     ...makeSharedNewDeps(),
-    arcDb,
+    threadDb,
     accountDb,
     processingDb: makeProcessingDbMock(),
     contentSanitizer: makeContentSanitizer(),
@@ -180,7 +180,7 @@ function buildProcessor(opts: {
       upsertEmbedding: vi.fn().mockResolvedValue(ok(undefined)),
       findMatch: vi.fn().mockResolvedValue(ok(null)),
     },
-    arcMatcher: makeArcMatcher(),
+    threadMatcher: makeArcMatcher(),
     ruleEvaluator: makeRuleEvaluator3(mockLogger),
     logger: mockLogger,
     notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },

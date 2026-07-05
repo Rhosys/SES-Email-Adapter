@@ -6,7 +6,7 @@
 import { ok, err } from "neverthrow"
 import type { Result } from "neverthrow"
 import type { DbError, TransientSesError } from "../errors.js"
-import type { ForwardingTarget, Signal, Arc } from "../types/index.js"
+import type { ForwardingTarget, Signal, Thread } from "../types/index.js"
 import type { EmailService } from "../email/email-service.js"
 import type { IEmailSignalStore } from "../database/email-signal-store.js"
 import type { Logger } from "../logger.js"
@@ -39,7 +39,7 @@ export interface IForwardingTargetStore {
 export interface IForwardingService {
   sendVerification(accountId: string, target: ForwardingTarget): Promise<Result<void, TransientSesError>>
   verifyWebhook(url: string): Promise<Result<void, TransientSesError>>
-  forward(forwardingTargetId: string, signal: Signal, arc: Arc): Promise<Result<void, ForwardError>>
+  forward(forwardingTargetId: string, signal: Signal, thread: Thread): Promise<Result<void, ForwardError>>
 }
 
 // ---------------------------------------------------------------------------
@@ -80,8 +80,8 @@ export class ForwardingService implements IForwardingService {
     }
   }
 
-  async forward(forwardingTargetId: string, signal: Signal, arc: Arc): Promise<Result<void, ForwardError>> {
-    const accountId = arc.accountId
+  async forward(forwardingTargetId: string, signal: Signal, thread: Thread): Promise<Result<void, ForwardError>> {
+    const accountId = thread.accountId
     const targetResult = await this.targetStore.getForwardingTarget(accountId, forwardingTargetId)
     if (targetResult.isErr()) return err(targetResult.error)
     const target = targetResult.value
@@ -98,11 +98,11 @@ export class ForwardingService implements IForwardingService {
     if (target.type === "email") {
       const rawResult = await this.emailSignalStore.getOriginalEmail(signal.data.s3Key)
       if (rawResult.isErr()) return err(rawResult.error)
-      return this.forwardEmail(target.target, rawResult.value, { accountId, signalId: signal.id, arcId: arc.id })
+      return this.forwardEmail(target.target, rawResult.value, { accountId, signalId: signal.id, threadId: thread.id })
     }
     if (target.type === "webhook") {
-      const payload = buildWebhookPayload(signal, arc)
-      return this.forwardWebhook(target.target, payload, { accountId, signalId: signal.id, arcId: arc.id })
+      const payload = buildWebhookPayload(signal, thread)
+      return this.forwardWebhook(target.target, payload, { accountId, signalId: signal.id, threadId: thread.id })
     }
 
     return ok(undefined)
@@ -144,8 +144,8 @@ export class ForwardingService implements IForwardingService {
   // Private — email forwarding (raw SES send)
   // ---------------------------------------------------------------------------
 
-  private async forwardEmail(toAddress: string, rawData: Uint8Array, context: { accountId: string; signalId: string; arcId: string }): Promise<Result<void, ForwardError>> {
-    const tags = buildOutboundTags("forward", { accountId: context.accountId, signalId: context.signalId, arcId: context.arcId })
+  private async forwardEmail(toAddress: string, rawData: Uint8Array, context: { accountId: string; signalId: string; threadId: string }): Promise<Result<void, ForwardError>> {
+    const tags = buildOutboundTags("forward", { accountId: context.accountId, signalId: context.signalId, threadId: context.threadId })
 
     const result = await this.emailService.sendRaw({
       to: toAddress,
@@ -162,7 +162,7 @@ export class ForwardingService implements IForwardingService {
   // Private — webhook forwarding (HTTP POST)
   // ---------------------------------------------------------------------------
 
-  private async forwardWebhook(url: string, data: WebhookPayload, context: { accountId: string; signalId: string; arcId: string }): Promise<Result<void, ForwardError>> {
+  private async forwardWebhook(url: string, data: WebhookPayload, context: { accountId: string; signalId: string; threadId: string }): Promise<Result<void, ForwardError>> {
     try {
       const response = await fetch(url, {
         method: "POST",

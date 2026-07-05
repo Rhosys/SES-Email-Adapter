@@ -4,7 +4,7 @@ import {
   TAG_TYPE,
   TAG_ACCOUNT_ID,
   TAG_SIGNAL_ID,
-  TAG_ARC_ID,
+  TAG_THREAD_ID,
   buildOutboundTags,
   type OutboundType,
   type TagContext,
@@ -37,12 +37,12 @@ describe("ses-tags", () => {
       {
         label: "reply with all three IDs → four tags",
         type: "reply" as OutboundType,
-        context: { accountId: "a", signalId: "s", arcId: "r" },
+        context: { accountId: "a", signalId: "s", threadId: "r" },
         expected: [
           { Name: TAG_TYPE, Value: "reply" },
           { Name: TAG_ACCOUNT_ID, Value: "a" },
           { Name: TAG_SIGNAL_ID, Value: "s" },
-          { Name: TAG_ARC_ID, Value: "r" },
+          { Name: TAG_THREAD_ID, Value: "r" },
         ],
       },
       {
@@ -52,7 +52,7 @@ describe("ses-tags", () => {
         expected: [{ Name: TAG_TYPE, Value: "reply" }],
       },
       {
-        label: "undefined arcId → ArcId tag absent",
+        label: "undefined threadId → ThreadId tag absent",
         type: "reply" as OutboundType,
         context: {} as TagContext,
         expected: [{ Name: TAG_TYPE, Value: "reply" }],
@@ -66,7 +66,7 @@ describe("ses-tags", () => {
     const types: OutboundType[] = ["reply", "forward", "draft-send"];
     const contexts: Array<{ label: string; ctx: TagContext | undefined }> = [
       { label: "no context", ctx: undefined },
-      { label: "all IDs present", ctx: { accountId: "a", signalId: "s", arcId: "r" } },
+      { label: "all IDs present", ctx: { accountId: "a", signalId: "s", threadId: "r" } },
       { label: "only accountId", ctx: { accountId: "x" } },
     ];
 
@@ -90,7 +90,7 @@ describe("ses-tags", () => {
     it.each([
       { label: "accountId present → TAG_ACCOUNT_ID tag", field: "accountId" as const, tagName: TAG_ACCOUNT_ID, value: "acc-123" },
       { label: "signalId present → TAG_SIGNAL_ID tag", field: "signalId" as const, tagName: TAG_SIGNAL_ID, value: "sig-456" },
-      { label: "arcId present → TAG_ARC_ID tag", field: "arcId" as const, tagName: TAG_ARC_ID, value: "arc-789" },
+      { label: "threadId present → TAG_THREAD_ID tag", field: "threadId" as const, tagName: TAG_THREAD_ID, value: "arc-789" },
     ])("$label", ({ field, tagName, value }) => {
       const context: TagContext = { [field]: value };
       const tags = buildOutboundTags("reply", context);
@@ -106,8 +106,8 @@ describe("ses-tags", () => {
       { label: "accountId undefined → TAG_ACCOUNT_ID absent", field: "accountId" as const, tagName: TAG_ACCOUNT_ID, value: undefined as string | undefined },
       { label: "signalId empty → TAG_SIGNAL_ID absent", field: "signalId" as const, tagName: TAG_SIGNAL_ID, value: "" as string | undefined },
       { label: "signalId undefined → TAG_SIGNAL_ID absent", field: "signalId" as const, tagName: TAG_SIGNAL_ID, value: undefined as string | undefined },
-      { label: "arcId empty → TAG_ARC_ID absent", field: "arcId" as const, tagName: TAG_ARC_ID, value: "" as string | undefined },
-      { label: "arcId undefined → TAG_ARC_ID absent", field: "arcId" as const, tagName: TAG_ARC_ID, value: undefined as string | undefined },
+      { label: "threadId empty → TAG_THREAD_ID absent", field: "threadId" as const, tagName: TAG_THREAD_ID, value: "" as string | undefined },
+      { label: "threadId undefined → TAG_THREAD_ID absent", field: "threadId" as const, tagName: TAG_THREAD_ID, value: undefined as string | undefined },
     ])("$label", ({ field, tagName, value }) => {
       const context = value === undefined ? {} : { [field]: value };
       const tags = buildOutboundTags("reply", context);

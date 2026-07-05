@@ -22,7 +22,7 @@ const { mockSecondaryClusters, mockRegistry } = vi.hoisted(() => ({
 vi.mock("../../src/embedding/cluster-registry.js", () => ({
   CLUSTER_REGISTRY: mockRegistry.value,
   getActiveClusters: () => mockRegistry.value.filter((c) => c.active),
-  getPrimaryArcMatcherRegistry: () => mockRegistry.value.find((c) => c.active)!,
+  getPrimaryThreadMatcherRegistry: () => mockRegistry.value.find((c) => c.active)!,
   getSecondaryClusters: () => mockSecondaryClusters.value,
 }));
 

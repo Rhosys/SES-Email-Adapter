@@ -58,8 +58,8 @@ function makeMessage(destination: string[]): InboundSignalMessage {
 function makeDeps(overrides: Partial<CalendarResponseHandlerDeps> = {}): CalendarResponseHandlerDeps {
   return {
     serviceDomain: SERVICE_DOMAIN,
-    arcDatabase: {
-      getArc: vi.fn().mockResolvedValue(ok({
+    threadDatabase: {
+      getThread: vi.fn().mockResolvedValue(ok({
         id: VALID_ARC_ID,
         accountId: VALID_ACC_ID,
         status: "active",
@@ -69,7 +69,7 @@ function makeDeps(overrides: Partial<CalendarResponseHandlerDeps> = {}): Calenda
         lastSignalAt: "2025-03-15T10:00:00Z",
         createdAt: "2025-03-15T09:00:00Z",
       })),
-    } as unknown as CalendarResponseHandlerDeps["arcDatabase"],
+    } as unknown as CalendarResponseHandlerDeps["threadDatabase"],
     rsvpComposer: vi.fn().mockResolvedValue(ok({ messageId: "ses-reply-001" })),
     signalStore: {
       saveSignal: vi.fn().mockResolvedValue(ok(undefined)),
@@ -137,7 +137,7 @@ describe("validateId — address pattern routing", () => {
     const logger = makeLogger();
     const proxyUid = await buildProxyUid({
       accountId: VALID_ACC_ID,
-      arcId: VALID_ARC_ID,
+      threadId: VALID_ARC_ID,
       originalVeventUid: "uid-original-123",
       serviceDomain: SERVICE_DOMAIN,
     });
@@ -148,10 +148,10 @@ describe("validateId — address pattern routing", () => {
 
     if (routed) {
       // DB was called → routing succeeded past validation
-      expect(deps.arcDatabase.getArc).toHaveBeenCalled();
+      expect(deps.threadDatabase.getThread).toHaveBeenCalled();
     } else {
       // DB was NOT called → routing rejected at validation
-      expect(deps.arcDatabase.getArc).not.toHaveBeenCalled();
+      expect(deps.threadDatabase.getThread).not.toHaveBeenCalled();
     }
   });
 });
@@ -201,7 +201,7 @@ describe("handleCalendarResponse — stateless validation gate", () => {
     if (hmacValid) {
       proxyUid = await buildProxyUid({
         accountId: accId,
-        arcId,
+        threadId: arcId,
         originalVeventUid: "uid-original-123",
         serviceDomain: SERVICE_DOMAIN,
       });
@@ -217,9 +217,9 @@ describe("handleCalendarResponse — stateless validation gate", () => {
     await handleCalendarResponse(message, deps, logger, icsBytes);
 
     if (dbCalled) {
-      expect(deps.arcDatabase.getArc).toHaveBeenCalled();
+      expect(deps.threadDatabase.getThread).toHaveBeenCalled();
     } else {
-      expect(deps.arcDatabase.getArc).not.toHaveBeenCalled();
+      expect(deps.threadDatabase.getThread).not.toHaveBeenCalled();
     }
 
     if (signalCreated) {
@@ -248,7 +248,7 @@ describe("handleCalendarResponse — happy path", () => {
 
     const proxyUid = await buildProxyUid({
       accountId: VALID_ACC_ID,
-      arcId: VALID_ARC_ID,
+      threadId: VALID_ARC_ID,
       originalVeventUid: "uid-original-123",
       serviceDomain: SERVICE_DOMAIN,
     });
@@ -277,7 +277,7 @@ describe("handleCalendarResponse — happy path", () => {
     const savedSignal = (deps.signalStore.saveSignal as ReturnType<typeof vi.fn>).mock.calls[0]![0];
     expect(savedSignal.type).toBe("calendar_response");
     expect(savedSignal.source).toBe("user");
-    expect(savedSignal.arcId).toBe(VALID_ARC_ID);
+    expect(savedSignal.threadId).toBe(VALID_ARC_ID);
     expect(savedSignal.accountId).toBe(VALID_ACC_ID);
     expect(savedSignal.data.decision).toBe("accepted");
     expect(savedSignal.data.veventUid).toBe("uid-original-123");

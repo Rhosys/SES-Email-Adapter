@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createApp } from "../../src/api/app.js";
 import { makeAppDeps } from "../helpers/app-deps.js";
 import type { AuthService, AccessService } from "../../src/api/app.js";
-import type { ArcDatabase } from "../../src/database/arc-database.js";
+import type { ThreadDatabase } from "../../src/database/thread-database.js";
 import type { AccountDatabase } from "../../src/database/account-database.js";
 import type { AuditDatabase } from "../../src/database/audit-database.js";
 import type { Account, Rule } from "../../src/types/index.js";
@@ -165,7 +165,7 @@ async function req(
 // ---------------------------------------------------------------------------
 
 describe("API — webhook action type rejected from rule creation", () => {
-  let arcDb: ReturnType<typeof makeArcDb>;
+  let threadDb: ReturnType<typeof makeArcDb>;
   let accountDb: ReturnType<typeof makeAccountDb>;
   let auditDb: ReturnType<typeof makeAuditDb>;
   let app: ReturnType<typeof createApp>;
@@ -173,7 +173,7 @@ describe("API — webhook action type rejected from rule creation", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    arcDb = makeArcDb();
+    threadDb = makeArcDb();
     accountDb = makeAccountDb();
     auditDb = makeAuditDb();
     astValidator = {
@@ -182,7 +182,7 @@ describe("API — webhook action type rejected from rule creation", () => {
       validateAstBatch: vi.fn().mockResolvedValue({ success: true, purpose: "validate_ast_batch", results: [] }),
     };
     app = createApp(makeAppDeps({
-      arcDb: arcDb as unknown as ArcDatabase,
+      threadDb: threadDb as unknown as ThreadDatabase,
       accountDb: accountDb as unknown as AccountDatabase,
       auditDb: auditDb as unknown as AuditDatabase,
       auth: makeAuth(),

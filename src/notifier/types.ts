@@ -1,5 +1,5 @@
 import type { Result } from "neverthrow";
-import type { Arc, ArcUrgency, PushPriority, Signal } from "../types/index.js";
+import type { Thread, ThreadUrgency, PushPriority, Signal } from "../types/index.js";
 import type { DbError } from "../errors.js";
 
 export { urgencyToPushPriority } from "../processor/priority.js";
@@ -35,20 +35,20 @@ export type NotificationReason = "new_signal" | "followup" | "rsvp_reminder";
 export interface NotificationPayload {
   type: "signal";
   signalId: string;
-  arcId: string;
+  threadId: string;
   sender: string;
   senderName: string;
   subject: string;
   workflow: string;
-  urgency: ArcUrgency;
+  urgency: ThreadUrgency;
   reason?: NotificationReason;
 }
 
 // ─── Notifier Interface ──────────────────────────────────────────────────────
 
 export interface Notifier {
-  notify(accountId: string, arc: Arc, signal: Signal, urgency?: ArcUrgency, reason?: NotificationReason): Promise<Result<void, DbError>>;
+  notify(accountId: string, thread: Thread, signal: Signal, urgency?: ThreadUrgency, reason?: NotificationReason): Promise<Result<void, DbError>>;
   notifyBlocked(accountId: string, signal: Signal): Promise<Result<void, DbError>>;
 }
 
-export type { ArcUrgency, PushPriority, Arc, Signal, DbError, Result };
+export type { ThreadUrgency, PushPriority, Thread, Signal, DbError, Result };

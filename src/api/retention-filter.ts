@@ -1,4 +1,4 @@
-import type { Signal, Arc } from "../types/index.js";
+import type { Signal, Thread } from "../types/index.js";
 import { durationToSeconds } from "../processor/retention.js";
 
 /**
@@ -17,12 +17,12 @@ export function isSignalVisible(signal: Signal, now: Date = new Date()): boolean
 }
 
 /**
- * Checks whether an arc is still visible to the user based on its TTL.
- * An arc is visible if its TTL is in the future or absent.
+ * Checks whether a thread is still visible to the user based on its TTL.
+ * A thread is visible if its TTL is in the future or absent.
  */
-export function isArcVisible(arc: Arc, now: Date = new Date()): boolean {
-  if (!arc.ttl) return true;
-  return arc.ttl * 1000 > now.getTime();
+export function isThreadVisible(thread: Thread, now: Date = new Date()): boolean {
+  if (!thread.ttl) return true;
+  return thread.ttl * 1000 > now.getTime();
 }
 
 /**
@@ -33,8 +33,8 @@ export function filterVisibleSignals(signals: Signal[], now: Date = new Date()):
 }
 
 /**
- * Filters a list of arcs to only those visible to the user.
+ * Filters a list of threads to only those visible to the user.
  */
-export function filterVisibleArcs(arcs: Arc[], now: Date = new Date()): Arc[] {
-  return arcs.filter((a) => isArcVisible(a, now));
+export function filterVisibleThreads(threads: Thread[], now: Date = new Date()): Thread[] {
+  return threads.filter((t) => isThreadVisible(t, now));
 }

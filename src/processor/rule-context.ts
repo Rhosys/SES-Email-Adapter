@@ -1,9 +1,9 @@
-import type { Signal, Arc } from "../types/index.js";
+import type { Signal, Thread } from "../types/index.js";
 
-// Curated signal/arc shape exposed to rule conditions and template functions.
-// Keep this an explicit allowlist — never widen by passing the raw Signal/Arc objects.
+// Curated signal/thread shape exposed to rule conditions and template functions.
+// Keep this an explicit allowlist — never widen by passing the raw Signal/Thread objects.
 export type RuleSignalContext = Pick<Signal["data"], "from" | "subject" | "summary" | "workflow" | "recipientAddress" | "workflowData"> & Pick<Signal, "id">;
-export type RuleArcContext = Pick<Arc, "id" | "labels" | "urgency" | "summary" | "workflow" | "status">;
+export type RuleThreadContext = Pick<Thread, "id" | "labels" | "urgency" | "summary" | "workflow" | "status">;
 
 export function toRuleSignalContext(signal: Signal): RuleSignalContext {
   return {
@@ -17,13 +17,13 @@ export function toRuleSignalContext(signal: Signal): RuleSignalContext {
   };
 }
 
-export function toRuleArcContext(arc: Arc): RuleArcContext {
+export function toRuleThreadContext(thread: Thread): RuleThreadContext {
   return {
-    id: arc.id,
-    labels: arc.labels,
-    ...(arc.urgency !== undefined ? { urgency: arc.urgency } : {}),
-    summary: arc.summary,
-    workflow: arc.workflow,
-    status: arc.status,
+    id: thread.id,
+    labels: thread.labels,
+    ...(thread.urgency !== undefined ? { urgency: thread.urgency } : {}),
+    summary: thread.summary,
+    workflow: thread.workflow,
+    status: thread.status,
   };
 }

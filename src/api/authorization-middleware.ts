@@ -9,7 +9,7 @@ import type { Logger } from "../logger.js";
  * Usage:
  *   const authzMiddleware = new AuthorizationMiddleware(access, logger);
  *   const authorize = authzMiddleware.authorize.bind(authzMiddleware);
- *   app.get("/accounts/:accountId/arcs", authorize("arcs:read", c => `accounts/${c.req.param("accountId")}/arcs`), handler);
+ *   app.get("/accounts/:accountId/threads", authorize("threads:read", c => `accounts/${c.req.param("accountId")}/threads`), handler);
  */
 export class AuthorizationMiddleware {
   constructor(
@@ -21,7 +21,7 @@ export class AuthorizationMiddleware {
    * Returns a Hono middleware that checks if the authenticated user has permission
    * to access a resource.
    *
-   * @param permission - The permission string to check (e.g., "arcs:read", "arcs:write", "accounts:read")
+   * @param permission - The permission string to check (e.g., "threads:read", "threads:write", "accounts:read")
    * @param resourceUri - Either a static resource URI string or a function that builds the URI from route params
    * @returns Hono middleware that performs authorization check
    */
@@ -90,7 +90,7 @@ export class AuthorizationMiddleware {
  *
  * Usage:
  *   const authorize = createAuthorize(access, logger);
- *   app.get("/accounts/:accountId/arcs", authorize("arcs:read", c => `accounts/${c.req.param("accountId")}/arcs`), handler);
+ *   app.get("/accounts/:accountId/threads", authorize("threads:read", c => `accounts/${c.req.param("accountId")}/threads`), handler);
  */
 export function createAuthorize(access: AccessService, logger: Logger) {
   const middleware = new AuthorizationMiddleware(access, logger);
