@@ -1,15 +1,15 @@
 {
-  "id": "bd18214e-4d7a-4174-80aa-6c355d5303cd",
-  "prevId": "00000000-0000-0000-0000-000000000000",
+  "id": "0eb9d290-4626-46ff-b252-ddbf94fef414",
+  "prevId": "bd18214e-4d7a-4174-80aa-6c355d5303cd",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
-    "public.arc_embeddings": {
-      "name": "arc_embeddings",
+    "public.thread_embeddings": {
+      "name": "thread_embeddings",
       "schema": "",
       "columns": {
-        "arc_id": {
-          "name": "arc_id",
+        "thread_id": {
+          "name": "thread_id",
           "type": "text",
           "primaryKey": false,
           "notNull": true
@@ -41,8 +41,8 @@
         }
       },
       "indexes": {
-        "arc_embeddings_hnsw_idx": {
-          "name": "arc_embeddings_hnsw_idx",
+        "thread_embeddings_hnsw_idx": {
+          "name": "thread_embeddings_hnsw_idx",
           "columns": [
             {
               "expression": "embedding",
@@ -60,10 +60,10 @@
       },
       "foreignKeys": {},
       "compositePrimaryKeys": {
-        "arc_embeddings_arc_id_account_id_recipient_address_pk": {
-          "name": "arc_embeddings_arc_id_account_id_recipient_address_pk",
+        "thread_embeddings_thread_id_account_id_recipient_address_pk": {
+          "name": "thread_embeddings_thread_id_account_id_recipient_address_pk",
           "columns": [
-            "arc_id",
+            "thread_id",
             "account_id",
             "recipient_address"
           ]

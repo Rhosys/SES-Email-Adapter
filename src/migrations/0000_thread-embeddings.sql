@@ -1,4 +1,5 @@
--- @allow-destructive
+CREATE EXTENSION IF NOT EXISTS vector;
+--> statement-breakpoint
 CREATE TABLE "thread_embeddings" (
 	"thread_id" text NOT NULL,
 	"account_id" text NOT NULL,
@@ -28,5 +29,3 @@ SELECT cron.schedule(
   '0 6 * * *',
   $$DELETE FROM thread_embeddings WHERE updated_at < NOW() - INTERVAL '5 years'$$
 );
---> statement-breakpoint
-DROP TABLE "arc_embeddings" CASCADE;
