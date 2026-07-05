@@ -13,7 +13,7 @@ import type { RsvpReminderMessage } from "./rsvp-reminder.js";
 // ---------------------------------------------------------------------------
 
 export interface IRsvpReminderThreadDb {
-  getSignalById(accountId: string, signalId: string, threadId?: string): Promise<Result<Signal | null, DbError>>;
+  getSignalById(accountId: string, signalId: string, threadId: string): Promise<Result<Signal | null, DbError>>;
   getLatestCalendarResponse(accountId: string, threadId: string, veventUid: string): Promise<Result<Signal<CalendarResponseData> | null, DbError>>;
   getThread(accountId: string, threadId: string): Promise<Result<Thread | null, DbError>>;
 }

@@ -1481,7 +1481,7 @@ describe("SignalProcessor", () => {
         vi.fn().mockReturnValue(Promise.resolve(ok(storedSignal)));
       vi.mocked(accountDb.getAliasByGlobalAddress).mockReturnValue(Promise.resolve(ok(DEFAULT_EMAIL_CONFIG)));
 
-      const result = await processor.reprocessSignal(TEST_ACCOUNT_ID, "sgn-reprocess");
+      const result = await processor.reprocessSignal(TEST_ACCOUNT_ID, "sgn-reprocess", "thr-test");
 
       expect(result.isOk()).toBe(true);
       // Re-derivation ran against the recipient address from the stored signal.

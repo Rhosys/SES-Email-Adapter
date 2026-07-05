@@ -250,14 +250,14 @@ describe("FeedbackProcessor — prefixed tag reading", () => {
       mail: {
         messageId: "ses-msg-abc",
         source: "me@example.com",
-        tags: { [TAG_ACCOUNT_ID]: "acct-001", [TAG_SIGNAL_ID]: "sgn-signal001" },
+        tags: { [TAG_ACCOUNT_ID]: "acct-001", [TAG_SIGNAL_ID]: "sgn-signal001", [TAG_THREAD_ID]: "thr-abc" },
       },
     });
 
     const result = await processor.processNotification(feedback);
 
     expect(result.isOk()).toBe(true);
-    expect(signalStore.getSignalById).toHaveBeenCalledWith("acct-001", "sgn-signal001");
+    expect(signalStore.getSignalById).toHaveBeenCalledWith("acct-001", "sgn-signal001", "thr-abc");
     expect(signalStore.getSignalByMessageId).not.toHaveBeenCalled();
   });
 
@@ -279,6 +279,7 @@ describe("FeedbackProcessor — prefixed tag reading", () => {
     const result = await processor.processNotification(feedback);
 
     expect(result.isOk()).toBe(true);
+    expect(signalStore.getSignalById).toHaveBeenCalledWith("acct-001", "sgn-signal001", "arc-from-tag");
     expect(signalStore.saveSignal).toHaveBeenCalledTimes(1);
     const savedSignal = vi.mocked(signalStore.saveSignal).mock.calls[0]![0];
     // Arc ID from the tag takes precedence over the signal's own arcId

@@ -13,7 +13,7 @@ import { TAG_ACCOUNT_ID, TAG_TYPE, TAG_SIGNAL_ID, TAG_THREAD_ID } from "../email
 const SOFT_BOUNCE_TTL_SECONDS = 72 * 60 * 60;
 
 export interface FeedbackSignalStore {
-  getSignalById(accountId: string, signalId: string): Promise<Result<Signal | null, DbError>>;
+  getSignalById(accountId: string, signalId: string, threadId: string): Promise<Result<Signal | null, DbError>>;
   getSignalByMessageId(accountId: string, sesMessageId: string): Promise<Result<Signal | null, DbError>>;
   saveSignal(signal: Signal): Promise<Result<void, DbError>>;
   updateSignalSendStatus(accountId: string, signalLookupId: string, update: {
@@ -116,12 +116,13 @@ export class FeedbackProcessor {
 
         // Requirement 5.6: if neither TAG_SIGNAL_ID nor TAG_ACCOUNT_ID is present, skip signal lookup
         // Requirement 5.3: if TAG_ACCOUNT_ID is absent, skip account-specific correlation
+        const tagThreadId = feedback.mail.tags?.[TAG_THREAD_ID];
         let sentSignalResult: Result<Signal | null, DbError> | undefined;
-        if (signalId && accountId) {
+        if (signalId && accountId && tagThreadId) {
           // Direct signal lookup via tag (skips SES message ID query)
-          sentSignalResult = await this.signalStore.getSignalById(accountId, signalId);
+          sentSignalResult = await this.signalStore.getSignalById(accountId, signalId, tagThreadId);
         } else if (accountId) {
-          // Fallback: look up by SES message ID (covers pre-migration emails without SignalId tag)
+          // Fallback: look up by SES message ID (covers pre-migration emails without SignalId tag or threadId tag)
           sentSignalResult = await this.signalStore.getSignalByMessageId(accountId, sesMessageId);
         }
 

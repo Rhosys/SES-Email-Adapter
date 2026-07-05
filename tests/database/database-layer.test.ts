@@ -498,10 +498,9 @@ describe("ThreadDatabase", () => {
   describe("getSignalById", () => {
     it("returns ok(Signal) when the signal exists", async () => {
       const signal = { id: "sgn-abc123", accountId: "acct-1", subject: "Hello" };
-      ddbMock.on(QueryCommand).resolves({ Items: [] });
-      ddbMock.on(GetCommand).resolves({ Item: signal });
+      ddbMock.on(QueryCommand).resolves({ Items: [signal] });
 
-      const result = await db.getSignalById("acct-1", "sgn-abc123");
+      const result = await db.getSignalById("acct-1", "sgn-abc123", "thr-001");
 
       expect(result.isOk()).toBe(true);
       expect(result._unsafeUnwrap()).toEqual({ ...signal, labels: [] });
@@ -509,9 +508,8 @@ describe("ThreadDatabase", () => {
 
     it("returns ok(null) when the signal does not exist", async () => {
       ddbMock.on(QueryCommand).resolves({ Items: [] });
-      ddbMock.on(GetCommand).resolves({ Item: undefined });
 
-      const result = await db.getSignalById("acct-1", "sgn-missing");
+      const result = await db.getSignalById("acct-1", "sgn-missing", "thr-001");
 
       expect(result.isOk()).toBe(true);
       expect(result._unsafeUnwrap()).toBeNull();

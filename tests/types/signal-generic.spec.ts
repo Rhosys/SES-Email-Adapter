@@ -284,15 +284,15 @@ describe("Property 3: DynamoDB round-trip fidelity", () => {
 
     // Mock GetCommand to return the saved item (simulating DynamoDB read-back)
     ddbMock.on(GetCommand).callsFake(() => ({ Item: savedItem }));
-    // Mock QueryCommand for getSignalById's arc-based lookup (returns empty so it falls through to GetCommand)
-    ddbMock.on(QueryCommand).resolves({ Items: [] });
+    // Mock QueryCommand for getSignalById's gsi1-based lookup
+    ddbMock.on(QueryCommand).callsFake(() => ({ Items: [savedItem] }));
 
     // Save
     const saveResult = await db.saveSignal(signal as AnySignal);
     expect(saveResult.isOk()).toBe(true);
 
     // Read back
-    const readResult = await db.getSignalById(signal.accountId, signal.id);
+    const readResult = await db.getSignalById(signal.accountId, signal.id, signal.threadId ?? "QUARANTINED");
     expect(readResult.isOk()).toBe(true);
 
     const readSignal = readResult._unsafeUnwrap() as AnySignal;

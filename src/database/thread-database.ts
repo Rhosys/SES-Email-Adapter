@@ -92,43 +92,20 @@ export class ThreadDatabase {
   // Signals
   // ---------------------------------------------------------------------------
 
-  async getSignalById(accountId: string, signalId: string, threadId?: string): Promise<Result<Signal | null, DbError>> {
+  async getSignalById(accountId: string, signalId: string, threadId: string): Promise<Result<Signal | null, DbError>> {
     try {
-      if (threadId) {
-        // Query the specific thread partition with gsi1sk = signalId
-        const res = await dynamo.send(new QueryCommand({
-          TableName: SIGNALS_TABLE,
-          IndexName: "gsi1",
-          KeyConditionExpression: "gsi1pk = :pk AND gsi1sk = :sk",
-          ExpressionAttributeValues: { ":pk": threadPk(accountId, threadId), ":sk": signalId },
-          Limit: 1,
-        }));
-        return ok(res.Items?.[0] ? coerceStaleStatus(hydrateSignal(res.Items[0] as Signal)) : null);
-      }
+      const gsi1pk = threadId === "QUARANTINED" ? `ACCT#${accountId}#QUARANTINED`
+        : threadId === "BLOCKED" ? `ACCT#${accountId}#BLOCKED`
+        : threadPk(accountId, threadId);
 
-      // No threadId — query across all three GSI PK patterns
-      const partitions = [
-        `ACCT#${accountId}#QUARANTINED`,
-        `ACCT#${accountId}#BLOCKED`,
-      ];
-
-      for (const pk of partitions) {
-        const res = await dynamo.send(new QueryCommand({
-          TableName: SIGNALS_TABLE,
-          IndexName: "gsi1",
-          KeyConditionExpression: "gsi1pk = :pk AND gsi1sk = :sk",
-          ExpressionAttributeValues: { ":pk": pk, ":sk": signalId },
-          Limit: 1,
-        }));
-        if (res.Items?.[0]) return ok(coerceStaleStatus(hydrateSignal(res.Items[0] as Signal)));
-      }
-
-      // For user/system signals, signalLookupId === id — try direct table get
-      const directRes = await dynamo.send(new GetCommand({
+      const res = await dynamo.send(new QueryCommand({
         TableName: SIGNALS_TABLE,
-        Key: { pk: sigPk(accountId, signalId), sk: ITEM_SK },
+        IndexName: "gsi1",
+        KeyConditionExpression: "gsi1pk = :pk AND gsi1sk = :sk",
+        ExpressionAttributeValues: { ":pk": gsi1pk, ":sk": signalId },
+        Limit: 1,
       }));
-      return ok(directRes.Item ? coerceStaleStatus(hydrateSignal(directRes.Item as Signal)) : null);
+      return ok(res.Items?.[0] ? coerceStaleStatus(hydrateSignal(res.Items[0] as Signal)) : null);
     } catch (e) {
       return err(dbError(e));
     }

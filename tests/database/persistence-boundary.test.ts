@@ -171,12 +171,11 @@ describe("Invariant 6: Universal read fallback resolves threadId ?? arcId", () =
       { desc: "both (threadId preferred)", record: { id: "sgn-3", signalLookupId: "ses-3", threadId: "thr-3", arcId: "old", accountId: "acct-1" }, expected: "thr-3" },
       { desc: "neither (blocked signal)", record: { id: "sgn-4", signalLookupId: "ses-4", accountId: "acct-1" }, expected: undefined },
     ])("$desc → threadId=$expected", async ({ record, expected }) => {
-      const { GetCommand, QueryCommand } = await import("@aws-sdk/lib-dynamodb");
-      // getSignalById first tries gsi1 query (with threadId param), then falls back to GetCommand
-      ddbMock.on(QueryCommand).resolves({ Items: [] });
-      ddbMock.on(GetCommand).resolves({ Item: record });
+      const { QueryCommand } = await import("@aws-sdk/lib-dynamodb");
+      // getSignalById queries gsi1 using the threadId partition
+      ddbMock.on(QueryCommand).resolves({ Items: [record] });
 
-      const result = await db.getSignalById("acct-1", record.id);
+      const result = await db.getSignalById("acct-1", record.id, expected ?? "QUARANTINED");
 
       expect(result.isOk()).toBe(true);
       const signal = result._unsafeUnwrap();
