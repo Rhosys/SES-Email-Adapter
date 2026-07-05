@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createApp } from "../../src/api/app.js";
 import { makeAppDeps } from "../helpers/app-deps.js";
 import type { AuthService, AccessService, IForwardingService } from "../../src/api/app.js";
-import type { ArcDatabase } from "../../src/database/arc-database.js";
+import type { ThreadDatabase } from "../../src/database/thread-database.js";
 import type { AccountDatabase } from "../../src/database/account-database.js";
 import type { AuditDatabase } from "../../src/database/audit-database.js";
 import { ok } from "neverthrow";
@@ -130,7 +130,7 @@ async function req(
 // ---------------------------------------------------------------------------
 
 describe("Route migration — backward compatibility", () => {
-  let arcDb: ReturnType<typeof makeArcDb>;
+  let threadDb: ReturnType<typeof makeArcDb>;
   let accountDb: ReturnType<typeof makeAccountDb>;
   let auditDb: ReturnType<typeof makeAuditDb>;
   let auth: AuthService;
@@ -140,13 +140,13 @@ describe("Route migration — backward compatibility", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    arcDb = makeArcDb();
+    threadDb = makeArcDb();
     accountDb = makeAccountDb();
     auditDb = makeAuditDb();
     auth = makeAuth();
     access = makeAccess();
     forwardingService = { sendVerification: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), verifyWebhook: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) };
-    app = createApp(makeAppDeps({ arcDb: arcDb as unknown as ArcDatabase, accountDb: accountDb as unknown as AccountDatabase, auditDb: auditDb as unknown as AuditDatabase, auth, access, logger: createMockLogger(), forwardingService, jobDispatcher: { dispatchReindex: vi.fn(), dispatchSegment: vi.fn() } as never, draftSendDispatcher: { dispatch: vi.fn().mockResolvedValue(ok(undefined)) } as never, accountCreationStarter: { start: vi.fn() }, appBaseUrl: "http://localhost", contentCdnBaseUrl: "https://cdn.test", astValidator: { validateAstBatch: vi.fn().mockResolvedValue({ success: true, purpose: "validate_ast_batch", results: [] }) } as never, billingHandler: new BillingHandler(), emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, domainIdentityService: { register: vi.fn().mockResolvedValue(ok(undefined)), deregister: vi.fn().mockResolvedValue(ok(undefined)) }, rsvpComposer: vi.fn().mockResolvedValue(ok(undefined)) as unknown as typeof sendRsvp, postApprovalCalendarDeps: { accountDb: {} as never, emailService: {} as never, serviceDomain: "platform.email.rhosys.cloud" } as unknown as PostApprovalCalendarHandlerDeps, schedulerClient: { scheduleMessage: vi.fn().mockResolvedValue(ok(undefined)), deleteSchedule: vi.fn().mockResolvedValue(ok(undefined)) } as never }));
+    app = createApp(makeAppDeps({ threadDb: threadDb as unknown as ThreadDatabase, accountDb: accountDb as unknown as AccountDatabase, auditDb: auditDb as unknown as AuditDatabase, auth, access, logger: createMockLogger(), forwardingService, jobDispatcher: { dispatchReindex: vi.fn(), dispatchSegment: vi.fn() } as never, draftSendDispatcher: { dispatch: vi.fn().mockResolvedValue(ok(undefined)) } as never, accountCreationStarter: { start: vi.fn() }, appBaseUrl: "http://localhost", contentCdnBaseUrl: "https://cdn.test", astValidator: { validateAstBatch: vi.fn().mockResolvedValue({ success: true, purpose: "validate_ast_batch", results: [] }) } as never, billingHandler: new BillingHandler(), emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, domainIdentityService: { register: vi.fn().mockResolvedValue(ok(undefined)), deregister: vi.fn().mockResolvedValue(ok(undefined)) }, rsvpComposer: vi.fn().mockResolvedValue(ok(undefined)) as unknown as typeof sendRsvp, postApprovalCalendarDeps: { accountDb: {} as never, emailService: {} as never, serviceDomain: "platform.email.rhosys.cloud" } as unknown as PostApprovalCalendarHandlerDeps, schedulerClient: { scheduleMessage: vi.fn().mockResolvedValue(ok(undefined)), deleteSchedule: vi.fn().mockResolvedValue(ok(undefined)) } as never }));
   });
 
   // -------------------------------------------------------------------------
@@ -154,16 +154,6 @@ describe("Route migration — backward compatibility", () => {
   // -------------------------------------------------------------------------
 
   describe("authorized users get 200 responses", () => {
-    it("GET /accounts/:accountId/arcs — returns 200 for authorized user", async () => {
-      const res = await req(app, "GET", `${A}/arcs`);
-      expect(res.status).toBe(200);
-      expect(access.checkAccess).toHaveBeenCalledWith(
-        TEST_USER_ID,
-        `accounts/${TEST_ACCOUNT_ID}/arcs`,
-        "arcs:read",
-      );
-    });
-
     it("GET /accounts/:accountId/views — returns 200 for authorized user", async () => {
       const res = await req(app, "GET", `${A}/views`);
       expect(res.status).toBe(200);
@@ -222,14 +212,6 @@ describe("Route migration — backward compatibility", () => {
   describe("unauthorized users get 403 from per-route middleware", () => {
     const forbidden = Object.assign(new Error("Forbidden"), { status: 403 });
 
-    it("GET /accounts/:accountId/arcs — returns 403 when access denied", async () => {
-      vi.mocked(access.checkAccess).mockRejectedValueOnce(forbidden);
-      const res = await req(app, "GET", `${A}/arcs`);
-      expect(res.status).toBe(403);
-      const body = await res.json() as { errorCode: string };
-      expect(body.errorCode).toBe("AccessDenied");
-    });
-
     it("GET /accounts/:accountId/views — returns 403 when access denied", async () => {
       vi.mocked(access.checkAccess).mockRejectedValueOnce(forbidden);
       const res = await req(app, "GET", `${A}/views`);
@@ -272,9 +254,9 @@ describe("Route migration — backward compatibility", () => {
 
     it("route handler is NOT called when authorization fails", async () => {
       vi.mocked(access.checkAccess).mockRejectedValueOnce(forbidden);
-      await req(app, "GET", `${A}/arcs`);
-      // arcDb.listArcs should not be called because the middleware short-circuits
-      expect(arcDb.listArcs).not.toHaveBeenCalled();
+      await req(app, "GET", `${A}/threads`);
+      // threadDb.listArcs should not be called because the middleware short-circuits
+      expect(threadDb.listArcs).not.toHaveBeenCalled();
     });
   });
 });
