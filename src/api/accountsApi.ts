@@ -80,9 +80,9 @@ export class AccountsApi {
       responses: { 200: { content: { "application/json": { schema: z.object({ accounts: z.array(AccountSchema) }) } }, description: "List accounts" } },
     }), async (c) => {
       const { userId } = c.get("auth");
-      if (!access) return err(c, 501, "Not implemented");
+      if (!access) { logger.error("Service dependency not available.", { code: "api.accounts.list.not_configured" }); return err(c, 501, "Not implemented"); }
       const usersResult = await access.listAccountsForUser(userId);
-      if (usersResult.isErr()) return err(c, 500, "Internal Server Error");
+      if (usersResult.isErr()) { logger.error("Failed to list accounts for user.", { code: "api.accounts.list_failed", error: usersResult.error }); return err(c, 500, "Internal Server Error"); }
       const accountIds = usersResult.value;
       const accounts: Account[] = [];
       for (const accountId of accountIds) {
@@ -100,9 +100,9 @@ export class AccountsApi {
       responses: { 201: { content: { "application/json": { schema: AccountSchema } }, description: "Account created" } },
     }), async (c) => {
       const { userId } = c.get("auth");
-      if (!access) return err(c, 501, "Not implemented");
+      if (!access) { logger.error("Service dependency not available.", { code: "api.accounts.create.not_configured" }); return err(c, 501, "Not implemented"); }
       const existingResult = await access.listAccountsForUser(userId);
-      if (existingResult.isErr()) return err(c, 500, "Internal Server Error");
+      if (existingResult.isErr()) { logger.error("Failed to list existing accounts for user.", { code: "api.accounts.create.list_existing_failed", error: existingResult.error }); return err(c, 500, "Internal Server Error"); }
       if (existingResult.value.length > 0) return err(c, 409, "Account already exists", "ACCOUNT_EXISTS");
       const now = DateTime.utc().toISO()!;
       let account: Account | null = null;
@@ -125,7 +125,7 @@ export class AccountsApi {
           break;
         }
       }
-      if (!account) return err(c, 500, "Internal Server Error");
+      if (!account) { logger.error("Failed to create account after 5 attempts.", { code: "api.accounts.create.exhausted_retries", userId }); return err(c, 500, "Internal Server Error"); }
       const accessResult = await access.addUser(account.id, userId, "admin");
       if (accessResult.isErr()) {
         logger.error("Failed to create Authress access record for new account.", { code: "api.account_create.authress_failed", userId, accountId: account.id, error: accessResult.error });
@@ -144,7 +144,7 @@ export class AccountsApi {
     }), async (c) => {
       const accountId = c.req.param("accountId")!;
       const accountResult = await accountDb.getAccount(accountId);
-      if (accountResult.isErr()) return err(c, 500, "Internal Server Error");
+      if (accountResult.isErr()) { logger.error("Failed to get account.", { code: "api.accounts.get_failed", accountId, error: accountResult.error }); return err(c, 500, "Internal Server Error"); }
       const account = accountResult.value;
       if (!account) return err(c, 404, "Account not found", "ACCOUNT_NOT_FOUND");
       return c.json(toApiAccount(account), 200);
@@ -162,14 +162,14 @@ export class AccountsApi {
       const body = await zParse(UpdateAccountRequest, c.req.raw);
       if (body.digest) {
         const targetResult = await accountDb.getForwardingTarget(accountId, body.digest.forwardingTargetId);
-        if (targetResult.isErr()) return err(c, 500, "Internal Server Error");
+        if (targetResult.isErr()) { logger.error("Failed to get forwarding target for digest.", { code: "api.accounts.patch.get_target_failed", accountId, error: targetResult.error }); return err(c, 500, "Internal Server Error"); }
         if (!targetResult.value || targetResult.value.status !== "verified") {
           return err(c, 422, "Forwarding target not found or not verified", "UNVERIFIED_FORWARD_TARGET");
         }
       }
       if (body.defaultCalendarInviteForwardingTargetId) {
         const targetResult = await accountDb.getForwardingTarget(accountId, body.defaultCalendarInviteForwardingTargetId);
-        if (targetResult.isErr()) return err(c, 500, "Internal Server Error");
+        if (targetResult.isErr()) { logger.error("Failed to get forwarding target for calendar.", { code: "api.accounts.patch.get_target_failed", accountId, error: targetResult.error }); return err(c, 500, "Internal Server Error"); }
         if (!targetResult.value || targetResult.value.status !== "verified") {
           return err(c, 422, "Calendar forwarding address must be a verified forwarding address", "UNVERIFIED_CALENDAR_TARGET");
         }
@@ -186,12 +186,12 @@ export class AccountsApi {
 
       if (body.onboarding) {
         const existingResult = await accountDb.getAccount(accountId);
-        if (existingResult.isErr()) return err(c, 500, "Internal Server Error");
+        if (existingResult.isErr()) { logger.error("Failed to get existing account for patch.", { code: "api.accounts.patch.get_existing_failed", accountId, error: existingResult.error }); return err(c, 500, "Internal Server Error"); }
         const existing = existingResult.value;
         body.onboarding = { ...existing?.onboarding, ...body.onboarding };
       }
       const updateResult = await accountDb.updateAccount(accountId, body as Partial<Pick<Account, "name" | "retentionDuration" | "digest" | "filtering" | "onboarding" | "defaultCalendarInviteForwardingTargetId">>);
-      if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
+      if (updateResult.isErr()) { logger.error("Failed to update account.", { code: "api.accounts.patch.update_failed", accountId, error: updateResult.error }); return err(c, 500, "Internal Server Error"); }
 
       // Trigger immediate digest only on frequency increase or target change
       const FREQ_RANK: Record<string, number> = { monthly: 0, weekly: 1, daily: 2 };
@@ -217,7 +217,7 @@ export class AccountsApi {
     }), async (c) => {
       const accountId = c.req.param("accountId")!;
       const statsResult = await accountDb.getStats(accountId);
-      if (statsResult.isErr()) return err(c, 500, "Internal Server Error");
+      if (statsResult.isErr()) { logger.error("Failed to get account stats.", { code: "api.accounts.stats_failed", accountId, error: statsResult.error }); return err(c, 500, "Internal Server Error"); }
       return c.json(aggregateStatsRows(statsResult.value), 200);
     });
 
@@ -240,7 +240,7 @@ export class AccountsApi {
       middleware: [authz("users:read", c => `accounts/${c.req.param("accountId")!}/users`)] as const,
       responses: { 200: { content: { "application/json": { schema: z.object({ users: z.array(TeamMemberSchema), pagination: PaginationSchema }) } }, description: "List users" } },
     }), async (c) => {
-      if (!access) return err(c, 501, "Not implemented");
+      if (!access) { logger.error("Service dependency not available.", { code: "api.users.list.not_configured" }); return err(c, 501, "Not implemented"); }
       const accountId = c.req.param("accountId")!;
       const result = await access.listUsers(accountId);
       if (result.isErr()) {
@@ -268,7 +268,7 @@ export class AccountsApi {
       middleware: [authz("accounts:read", c => `accounts/${c.req.param("accountId")!}`)] as const,
       responses: { 201: { description: "User invited" } },
     }), async (c) => {
-      if (!access) return err(c, 501, "Not implemented");
+      if (!access) { logger.error("Service dependency not available.", { code: "api.users.update.not_configured" }); return err(c, 501, "Not implemented"); }
       const accountId = c.req.param("accountId")!;
       const body = await zParse(InviteUserRequest, c.req.raw);
       if (!isValidEmail(body.email, logger)) {
@@ -282,7 +282,7 @@ export class AccountsApi {
       const { inviteId } = inviteResult.value;
       const inviteUrl = `${appBaseUrl}/invite?inviteId=${inviteId}`;
       const accountResult = await accountDb.getAccount(accountId);
-      if (accountResult.isErr()) return err(c, 500, "Internal Server Error");
+      if (accountResult.isErr()) { logger.error("Failed to get account for invite.", { code: "api.users.invite.get_account_failed", accountId, error: accountResult.error }); return err(c, 500, "Internal Server Error"); }
       const account = accountResult.value;
       const accountName = account?.name ?? accountId;
       const fullDate = DateTime.utc().toISODate()!;
@@ -308,7 +308,7 @@ export class AccountsApi {
       middleware: [authz("users:write", c => `accounts/${c.req.param("accountId")!}/users/${c.req.param("userId")!}`)] as const,
       responses: { 200: { content: { "application/json": { schema: z.object({ userId: z.string(), role: z.string() }) } }, description: "Update user role" } },
     }), async (c) => {
-      if (!access) return err(c, 501, "Not implemented");
+      if (!access) { logger.error("Service dependency not available.", { code: "api.users.update.not_configured" }); return err(c, 501, "Not implemented"); }
       const accountId = c.req.param("accountId")!;
       const body = await zParse(UpdateUserRequest, c.req.raw);
       const result = await access.updateUserRole(accountId, c.req.param("userId")!, body.role);
@@ -327,7 +327,7 @@ export class AccountsApi {
       middleware: [authz("users:write", c => `accounts/${c.req.param("accountId")!}/users/${c.req.param("userId")!}`)] as const,
       responses: { 204: { description: "User removed" } },
     }), async (c) => {
-      if (!access) return err(c, 501, "Not implemented");
+      if (!access) { logger.error("Service dependency not available.", { code: "api.users.delete.not_configured" }); return err(c, 501, "Not implemented"); }
       const accountId = c.req.param("accountId")!;
       const result = await access.removeUser(accountId, c.req.param("userId")!);
       if (result.isErr()) {

@@ -5,13 +5,14 @@ import { toApiLabel } from "./transform.js";
 import { CreateLabelRequest, UpdateLabelRequest } from "./requests.js";
 import { Label as LabelSchema, ListLabelsResponse } from "./schemas.js";
 import type { AccountDatabase } from "../database/account-database.js";
+import type { Logger } from "../logger.js";
 import type { AppEnv, RouteHelpers } from "./route-helpers.js";
 
 export class LabelsApi {
-  constructor(private readonly accountDb: AccountDatabase) {}
+  constructor(private readonly accountDb: AccountDatabase, private readonly logger: Logger) {}
 
   register(app: OpenAPIHono<AppEnv>, { authz, err, route }: RouteHelpers): void {
-    const { accountDb } = this;
+    const { accountDb, logger } = this;
 
     app.openapi(route({
       method: "get",
@@ -23,7 +24,7 @@ export class LabelsApi {
     }), async (c) => {
       const accountId = c.req.param("accountId")!;
       const labelsResult = await accountDb.listLabels(accountId);
-      if (labelsResult.isErr()) return err(c, 500, "Internal Server Error");
+      if (labelsResult.isErr()) { logger.error("Failed to list labels", { code: "api.labels.list_failed", error: labelsResult.error }); return err(c, 500, "Internal Server Error"); }
       return c.json({ labels: labelsResult.value.map(toApiLabel) }, 200);
     });
 
@@ -38,7 +39,7 @@ export class LabelsApi {
       const accountId = c.req.param("accountId")!;
       const body = await zParse(CreateLabelRequest, c.req.raw);
       const labelResult = await accountDb.createLabel(accountId, body);
-      if (labelResult.isErr()) return err(c, 500, "Internal Server Error");
+      if (labelResult.isErr()) { logger.error("Failed to create label", { code: "api.labels.create_failed", error: labelResult.error }); return err(c, 500, "Internal Server Error"); }
       return c.json(toApiLabel(labelResult.value), 201);
     });
 
@@ -52,12 +53,12 @@ export class LabelsApi {
     }), async (c) => {
       const accountId = c.req.param("accountId")!;
       const labelsResult = await accountDb.listLabels(accountId);
-      if (labelsResult.isErr()) return err(c, 500, "Internal Server Error");
+      if (labelsResult.isErr()) { logger.error("Failed to list labels for patch", { code: "api.labels.patch.list_failed", error: labelsResult.error }); return err(c, 500, "Internal Server Error"); }
       const label = labelsResult.value.find((l) => l.id === c.req.param("id")!);
       if (!label) return err(c, 404, "Label not found", "LABEL_NOT_FOUND");
       const body = await zParse(UpdateLabelRequest, c.req.raw);
       const updateResult = await accountDb.updateLabel(accountId, label.id, body);
-      if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
+      if (updateResult.isErr()) { logger.error("Failed to update label", { code: "api.labels.patch.update_failed", error: updateResult.error }); return err(c, 500, "Internal Server Error"); }
       return c.json(toApiLabel(updateResult.value), 200);
     });
 
@@ -71,11 +72,11 @@ export class LabelsApi {
     }), async (c) => {
       const accountId = c.req.param("accountId")!;
       const labelsResult = await accountDb.listLabels(accountId);
-      if (labelsResult.isErr()) return err(c, 500, "Internal Server Error");
+      if (labelsResult.isErr()) { logger.error("Failed to list labels for delete", { code: "api.labels.delete.list_failed", error: labelsResult.error }); return err(c, 500, "Internal Server Error"); }
       const label = labelsResult.value.find((l) => l.id === c.req.param("id")!);
       if (!label) return err(c, 404, "Label not found", "LABEL_NOT_FOUND");
       const deleteResult = await accountDb.deleteLabel(accountId, label.id);
-      if (deleteResult.isErr()) return err(c, 500, "Internal Server Error");
+      if (deleteResult.isErr()) { logger.error("Failed to delete label", { code: "api.labels.delete_failed", error: deleteResult.error }); return err(c, 500, "Internal Server Error"); }
       return new Response(null, { status: 204 });
     });
   }

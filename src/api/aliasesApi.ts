@@ -70,7 +70,7 @@ export class AliasesApi {
       const accountId = c.req.param("accountId")!;
       const domain = c.req.query("domain")?.toLowerCase();
       const aliasesResult = await accountDb.listAliases(accountId);
-      if (aliasesResult.isErr()) return err(c, 500, "Internal Server Error");
+      if (aliasesResult.isErr()) { logger.error("Failed to list aliases.", { code: "api.aliases.list_failed", accountId, error: aliasesResult.error }); return err(c, 500, "Internal Server Error"); }
       let aliases = aliasesResult.value;
       if (domain) aliases = aliases.filter(a => a.createdForOrigin?.includes(domain));
       return c.json({ aliases: aliases.map(toApiAlias) }, 200);
@@ -87,7 +87,7 @@ export class AliasesApi {
       const accountId = c.req.param("accountId")!;
       const address = decodeURIComponent(c.req.param("address")!).toLowerCase();
       const aliasResult = await accountDb.getAlias(accountId, address);
-      if (aliasResult.isErr()) return err(c, 500, "Internal Server Error");
+      if (aliasResult.isErr()) { logger.error("Failed to get alias.", { code: "api.aliases.get_failed", accountId, error: aliasResult.error }); return err(c, 500, "Internal Server Error"); }
       const alias = aliasResult.value;
       if (!alias) return err(c, 404, "Alias not found", "ALIAS_NOT_FOUND");
       return c.json(toApiAlias(alias), 200);
@@ -105,10 +105,10 @@ export class AliasesApi {
       const body = await zParse(CreateAliasRequest, c.req.raw);
       const aliasDomain = body.address.split("@")[1]!;
       const domainCheckResult = await accountDb.getDomain(accountId, aliasDomain);
-      if (domainCheckResult.isErr()) return err(c, 500, "Internal Server Error");
+      if (domainCheckResult.isErr()) { logger.error("Failed to check domain for alias creation.", { code: "api.aliases.create.check_domain_failed", accountId, error: domainCheckResult.error }); return err(c, 500, "Internal Server Error"); }
       if (!domainCheckResult.value) return err(c, 422, "Domain not registered for this account", "DOMAIN_NOT_REGISTERED");
       const existingResult = await accountDb.getAlias(accountId, body.address);
-      if (existingResult.isErr()) return err(c, 500, "Internal Server Error");
+      if (existingResult.isErr()) { logger.error("Failed to check existing alias.", { code: "api.aliases.create.check_existing_failed", accountId, error: existingResult.error }); return err(c, 500, "Internal Server Error"); }
       if (existingResult.value) return err(c, 409, "Alias already exists", "ALIAS_EXISTS");
       const now = DateTime.utc().toISO()!;
       const createResult = await accountDb.createAlias({
@@ -122,7 +122,7 @@ export class AliasesApi {
         createdAt: now,
         updatedAt: now,
       });
-      if (createResult.isErr()) return err(c, 500, "Internal Server Error");
+      if (createResult.isErr()) { logger.error("Failed to create alias.", { code: "api.aliases.create_failed", accountId, error: createResult.error }); return err(c, 500, "Internal Server Error"); }
       await accountDb.incrementStatMetric(accountId, "totalAliases", 1, logger.getInvocationId());
       return c.json(toApiAlias(createResult.value), 201);
     });
@@ -141,17 +141,18 @@ export class AliasesApi {
       if (body.newAddress) {
         const newDomain = body.newAddress.split("@")[1]!;
         const domainCheckResult = await accountDb.getDomain(accountId, newDomain);
-        if (domainCheckResult.isErr()) return err(c, 500, "Internal Server Error");
+        if (domainCheckResult.isErr()) { logger.error("Failed to check domain for alias rename.", { code: "api.aliases.patch.check_domain_failed", accountId, error: domainCheckResult.error }); return err(c, 500, "Internal Server Error"); }
         if (!domainCheckResult.value) return err(c, 422, "Domain not registered for this account", "DOMAIN_NOT_REGISTERED");
         const renameResult = await accountDb.renameAlias(accountId, address, body.newAddress);
         if (renameResult.isErr()) {
           if (renameResult.error.kind === "not_found") return err(c, 404, "Alias not found", "ALIAS_NOT_FOUND");
+          logger.error("Failed to rename alias.", { code: "api.aliases.patch.rename_failed", accountId, error: renameResult.error });
           return err(c, 500, "Internal Server Error");
         }
         return c.json(toApiAlias(renameResult.value), 200);
       }
       const existingResult = await accountDb.getAlias(accountId, address);
-      if (existingResult.isErr()) return err(c, 500, "Internal Server Error");
+      if (existingResult.isErr()) { logger.error("Failed to get existing alias for patch.", { code: "api.aliases.patch.get_existing_failed", accountId, error: existingResult.error }); return err(c, 500, "Internal Server Error"); }
       const existing = existingResult.value;
       const now = DateTime.utc().toISO()!;
       const upsertResult = await accountDb.upsertAlias({
@@ -165,7 +166,7 @@ export class AliasesApi {
         createdAt: existing?.createdAt ?? now,
         updatedAt: now,
       });
-      if (upsertResult.isErr()) return err(c, 500, "Internal Server Error");
+      if (upsertResult.isErr()) { logger.error("Failed to upsert alias.", { code: "api.aliases.patch.upsert_failed", accountId, error: upsertResult.error }); return err(c, 500, "Internal Server Error"); }
       return c.json(toApiAlias(upsertResult.value), 200);
     });
 
@@ -180,7 +181,7 @@ export class AliasesApi {
       const accountId = c.req.param("accountId")!;
       const address = decodeURIComponent(c.req.param("address")!).toLowerCase();
       const deleteResult = await accountDb.deleteAlias(accountId, address);
-      if (deleteResult.isErr()) return err(c, 500, "Internal Server Error");
+      if (deleteResult.isErr()) { logger.error("Failed to delete alias.", { code: "api.aliases.delete_failed", accountId, error: deleteResult.error }); return err(c, 500, "Internal Server Error"); }
       await accountDb.incrementStatMetric(accountId, "totalAliases", -1, logger.getInvocationId());
       const { userId } = c.get("auth");
       const auditResult = await auditDb.saveAuditEvent({
@@ -208,7 +209,7 @@ export class AliasesApi {
       const accountId = c.req.param("accountId")!;
       const address = decodeURIComponent(c.req.param("address")!).toLowerCase();
       const sendersResult = await accountDb.listSenders(accountId, address);
-      if (sendersResult.isErr()) return err(c, 500, "Internal Server Error");
+      if (sendersResult.isErr()) { logger.error("Failed to list senders.", { code: "api.senders.list_failed", accountId, error: sendersResult.error }); return err(c, 500, "Internal Server Error"); }
       return c.json({ senders: sendersResult.value.map(toApiAliasSender) }, 200);
     });
 
@@ -224,7 +225,7 @@ export class AliasesApi {
       const address = decodeURIComponent(c.req.param("address")!).toLowerCase();
       const body = await zParse(CreateSenderRequest, c.req.raw);
       const existingResult = await accountDb.getSender(accountId, address, body.domain);
-      if (existingResult.isErr()) return err(c, 500, "Internal Server Error");
+      if (existingResult.isErr()) { logger.error("Failed to check existing sender.", { code: "api.senders.create.check_existing_failed", accountId, error: existingResult.error }); return err(c, 500, "Internal Server Error"); }
       if (existingResult.value) {
         if (existingResult.value.policy === body.policy) {
           return c.json(toApiAliasSender(existingResult.value), 201);
@@ -232,9 +233,9 @@ export class AliasesApi {
         return err(c, 409, "Sender already exists with a different policy", "SENDER_EXISTS");
       }
       const saveResult = await accountDb.saveSender(accountId, address, body.domain, body.policy);
-      if (saveResult.isErr()) return err(c, 500, "Internal Server Error");
+      if (saveResult.isErr()) { logger.error("Failed to save sender.", { code: "api.senders.create.save_failed", accountId, error: saveResult.error }); return err(c, 500, "Internal Server Error"); }
       const createdResult = await accountDb.getSender(accountId, address, body.domain);
-      if (createdResult.isErr() || !createdResult.value) return err(c, 500, "Internal Server Error");
+      if (createdResult.isErr() || !createdResult.value) { logger.error("Failed to read back created sender.", { code: "api.senders.create.read_back_failed", accountId }); return err(c, 500, "Internal Server Error"); }
       return c.json(toApiAliasSender(createdResult.value), 201);
     });
 
@@ -251,12 +252,12 @@ export class AliasesApi {
       const senderDomain = decodeURIComponent(c.req.param("domain")!).toLowerCase();
       const body = await zParse(UpdateSenderRequest, c.req.raw);
       const existingResult = await accountDb.getSender(accountId, address, senderDomain);
-      if (existingResult.isErr()) return err(c, 500, "Internal Server Error");
+      if (existingResult.isErr()) { logger.error("Failed to get existing sender for update.", { code: "api.senders.update.get_existing_failed", accountId, error: existingResult.error }); return err(c, 500, "Internal Server Error"); }
       if (!existingResult.value) return err(c, 404, "Sender not found", "SENDER_NOT_FOUND");
       const saveResult = await accountDb.saveSender(accountId, address, senderDomain, body.policy);
-      if (saveResult.isErr()) return err(c, 500, "Internal Server Error");
+      if (saveResult.isErr()) { logger.error("Failed to save sender update.", { code: "api.senders.update.save_failed", accountId, error: saveResult.error }); return err(c, 500, "Internal Server Error"); }
       const updatedResult = await accountDb.getSender(accountId, address, senderDomain);
-      if (updatedResult.isErr() || !updatedResult.value) return err(c, 500, "Internal Server Error");
+      if (updatedResult.isErr() || !updatedResult.value) { logger.error("Failed to read back updated sender.", { code: "api.senders.update.read_back_failed", accountId }); return err(c, 500, "Internal Server Error"); }
       return c.json(toApiAliasSender(updatedResult.value), 200);
     });
 
@@ -272,7 +273,7 @@ export class AliasesApi {
       const address = decodeURIComponent(c.req.param("address")!).toLowerCase();
       const senderDomain = decodeURIComponent(c.req.param("domain")!).toLowerCase();
       const removeResult = await accountDb.removeSender(accountId, address, senderDomain);
-      if (removeResult.isErr()) return err(c, 500, "Internal Server Error");
+      if (removeResult.isErr()) { logger.error("Failed to remove sender.", { code: "api.senders.delete_failed", accountId, error: removeResult.error }); return err(c, 500, "Internal Server Error"); }
       return new Response(null, { status: 204 });
     });
 
@@ -290,7 +291,7 @@ export class AliasesApi {
     }), async (c) => {
       const accountId = c.req.param("accountId")!;
       const targetsResult = await accountDb.listForwardingTargets(accountId);
-      if (targetsResult.isErr()) return err(c, 500, "Internal Server Error");
+      if (targetsResult.isErr()) { logger.error("Failed to list forwarding targets.", { code: "api.forwarding.list_failed", accountId, error: targetsResult.error }); return err(c, 500, "Internal Server Error"); }
       return c.json({ forwardingTargets: targetsResult.value.map(toApiForwardingTarget) }, 200);
     });
 
@@ -306,7 +307,7 @@ export class AliasesApi {
       const body = await zParse(CreateForwardingTargetRequest, c.req.raw);
 
       const existingResult = await accountDb.getForwardingTarget(accountId, body.target);
-      if (existingResult.isErr()) return err(c, 500, "Internal Server Error");
+      if (existingResult.isErr()) { logger.error("Failed to check existing forwarding target.", { code: "api.forwarding.create.check_existing_failed", accountId, error: existingResult.error }); return err(c, 500, "Internal Server Error"); }
       const existing = existingResult.value;
       if (existing?.status === "verified") return c.json(toApiForwardingTarget(existing), 201);
 
@@ -339,7 +340,7 @@ export class AliasesApi {
       }
 
       const saveResult = await accountDb.saveForwardingTarget(addr);
-      if (saveResult.isErr()) return err(c, 500, "Internal Server Error");
+      if (saveResult.isErr()) { logger.error("Failed to save forwarding target.", { code: "api.forwarding.create.save_failed", accountId, error: saveResult.error }); return err(c, 500, "Internal Server Error"); }
 
       return c.json(toApiForwardingTarget(addr), 201);
     });
@@ -357,7 +358,7 @@ export class AliasesApi {
       const body = await zParse(VerifyForwardingTargetRequest, c.req.raw);
 
       const existingResult = await accountDb.getForwardingTarget(accountId, address);
-      if (existingResult.isErr()) return err(c, 500, "Internal Server Error");
+      if (existingResult.isErr()) { logger.error("Failed to get forwarding target for verification.", { code: "api.forwarding.verify.get_failed", accountId, error: existingResult.error }); return err(c, 500, "Internal Server Error"); }
       const existing = existingResult.value;
       if (!existing) return err(c, 404, "Forwarding target not found", "FORWARDING_ADDRESS_NOT_FOUND");
       if (existing.status === "verified") return c.json(toApiForwardingTarget(existing), 200);
@@ -365,7 +366,7 @@ export class AliasesApi {
 
       const verified: ForwardingTarget = { ...existing, status: "verified", verifiedAt: DateTime.utc().toISO()! };
       const saveResult = await accountDb.saveForwardingTarget(verified);
-      if (saveResult.isErr()) return err(c, 500, "Internal Server Error");
+      if (saveResult.isErr()) { logger.error("Failed to save verified forwarding target.", { code: "api.forwarding.verify.save_failed", accountId, error: saveResult.error }); return err(c, 500, "Internal Server Error"); }
       return c.json(toApiForwardingTarget(verified), 200);
     });
 
@@ -382,13 +383,13 @@ export class AliasesApi {
 
       // Reject delete if target is referenced by digest or rules
       const accountResult = await accountDb.getAccount(accountId);
-      if (accountResult.isErr()) return err(c, 500, "Internal Server Error");
+      if (accountResult.isErr()) { logger.error("Failed to get account for forwarding target delete.", { code: "api.forwarding.delete.get_account_failed", accountId, error: accountResult.error }); return err(c, 500, "Internal Server Error"); }
       if (accountResult.value?.digest?.forwardingTargetId === address) {
         return err(c, 409, "Cannot delete target — currently used for digest emails", "TARGET_IN_USE");
       }
 
       const rulesResult = await accountDb.listRules(accountId);
-      if (rulesResult.isErr()) return err(c, 500, "Internal Server Error");
+      if (rulesResult.isErr()) { logger.error("Failed to list rules for forwarding target delete.", { code: "api.forwarding.delete.list_rules_failed", accountId, error: rulesResult.error }); return err(c, 500, "Internal Server Error"); }
       const referencingRule = rulesResult.value.find(r =>
         r.actions.some(a => a.type === "forward" && a.value === address),
       );
@@ -397,7 +398,7 @@ export class AliasesApi {
       }
 
       const deleteResult = await accountDb.deleteForwardingTarget(accountId, address);
-      if (deleteResult.isErr()) return err(c, 500, "Internal Server Error");
+      if (deleteResult.isErr()) { logger.error("Failed to delete forwarding target.", { code: "api.forwarding.delete_failed", accountId, error: deleteResult.error }); return err(c, 500, "Internal Server Error"); }
       return new Response(null, { status: 204 });
     });
   }

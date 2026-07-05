@@ -5,13 +5,14 @@ import { toApiView } from "./transform.js";
 import { CreateViewRequest, UpdateViewRequest } from "./requests.js";
 import { View as ViewSchema, ListViewsResponse } from "./schemas.js";
 import type { AccountDatabase } from "../database/account-database.js";
+import type { Logger } from "../logger.js";
 import type { AppEnv, RouteHelpers } from "./route-helpers.js";
 
 export class ViewsApi {
-  constructor(private readonly accountDb: AccountDatabase) {}
+  constructor(private readonly accountDb: AccountDatabase, private readonly logger: Logger) {}
 
   register(app: OpenAPIHono<AppEnv>, { authz, err, route }: RouteHelpers): void {
-    const { accountDb } = this;
+    const { accountDb, logger } = this;
 
     app.openapi(route({
       method: "get",
@@ -23,7 +24,7 @@ export class ViewsApi {
     }), async (c) => {
       const accountId = c.req.param("accountId")!;
       const viewsResult = await accountDb.listViews(accountId);
-      if (viewsResult.isErr()) return err(c, 500, "Internal Server Error");
+      if (viewsResult.isErr()) { logger.error("Failed to list views", { code: "api.views.list_failed", error: viewsResult.error }); return err(c, 500, "Internal Server Error"); }
       return c.json({ views: viewsResult.value.map(toApiView) }, 200);
     });
 
@@ -38,7 +39,7 @@ export class ViewsApi {
       const accountId = c.req.param("accountId")!;
       const body = await zParse(CreateViewRequest, c.req.raw);
       const viewResult = await accountDb.createView(accountId, body);
-      if (viewResult.isErr()) return err(c, 500, "Internal Server Error");
+      if (viewResult.isErr()) { logger.error("Failed to create view", { code: "api.views.create_failed", error: viewResult.error }); return err(c, 500, "Internal Server Error"); }
       return c.json(toApiView(viewResult.value), 201);
     });
 
@@ -52,12 +53,12 @@ export class ViewsApi {
     }), async (c) => {
       const accountId = c.req.param("accountId")!;
       const viewResult = await accountDb.getView(accountId, c.req.param("id")!);
-      if (viewResult.isErr()) return err(c, 500, "Internal Server Error");
+      if (viewResult.isErr()) { logger.error("Failed to get view for patch", { code: "api.views.patch.get_failed", error: viewResult.error }); return err(c, 500, "Internal Server Error"); }
       const view = viewResult.value;
       if (!view) return err(c, 404, "View not found", "VIEW_NOT_FOUND");
       const body = await zParse(UpdateViewRequest, c.req.raw);
       const updateResult = await accountDb.updateView(accountId, view.id, body);
-      if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
+      if (updateResult.isErr()) { logger.error("Failed to update view", { code: "api.views.patch.update_failed", error: updateResult.error }); return err(c, 500, "Internal Server Error"); }
       return c.json(toApiView(updateResult.value), 200);
     });
 
@@ -71,11 +72,11 @@ export class ViewsApi {
     }), async (c) => {
       const accountId = c.req.param("accountId")!;
       const viewResult = await accountDb.getView(accountId, c.req.param("id")!);
-      if (viewResult.isErr()) return err(c, 500, "Internal Server Error");
+      if (viewResult.isErr()) { logger.error("Failed to get view for delete", { code: "api.views.delete.get_failed", error: viewResult.error }); return err(c, 500, "Internal Server Error"); }
       const view = viewResult.value;
       if (!view) return err(c, 404, "View not found", "VIEW_NOT_FOUND");
       const deleteResult = await accountDb.deleteView(accountId, view.id);
-      if (deleteResult.isErr()) return err(c, 500, "Internal Server Error");
+      if (deleteResult.isErr()) { logger.error("Failed to delete view", { code: "api.views.delete_failed", error: deleteResult.error }); return err(c, 500, "Internal Server Error"); }
       return new Response(null, { status: 204 });
     });
   }
