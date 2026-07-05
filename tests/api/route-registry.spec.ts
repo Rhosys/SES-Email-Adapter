@@ -30,21 +30,12 @@ vi.mock("../../src/email/template-renderer.js", () => ({
 const EXPECTED_ROUTES = [
   "GET /accounts",
   "POST /accounts",
-  "GET /accounts/{accountId}/arcs",
-  "GET /accounts/{accountId}/arcs/{id}",
-  "PATCH /accounts/{accountId}/arcs/{id}",
-  "GET /accounts/{accountId}/arcs/{arcId}/signals",
-  "POST /accounts/{accountId}/arcs/{arcId}/signals",
-  "PUT /accounts/{accountId}/arcs/{arcId}/signals/{id}",
   "GET /accounts/{accountId}/signals",
   "POST /accounts/{accountId}/signals/{id}/quarantineResponse",
   "GET /accounts/{accountId}/signals/{id}",
   "GET /accounts/{accountId}/signals/{id}/raw",
   "PATCH /accounts/{accountId}/signals/{id}",
-  "POST /accounts/{accountId}/arcs/{arcId}/signals/{id}/send",
   "DELETE /accounts/{accountId}/signals/{id}",
-  "POST /accounts/{accountId}/arcs/{arcId}/unsubscribe",
-  "POST /accounts/{accountId}/arcs/{arcId}/signals/{id}/rsvp",
   "GET /accounts/{accountId}/threads",
   "GET /accounts/{accountId}/threads/{threadId}",
   "PATCH /accounts/{accountId}/threads/{threadId}",
@@ -109,7 +100,7 @@ describe("Route Registry", () => {
   it("all expected routes are registered on the app", () => {
     const logger = createMockLogger();
     const app = createApp(makeAppDeps({
-      arcDb: makeMinimalMock(),
+      threadDb: makeMinimalMock(),
       accountDb: makeMinimalMock(),
       auditDb: makeMinimalMock(),
       auth: { verify: vi.fn().mockResolvedValue(ok({ userId: "u" })) },
@@ -145,7 +136,7 @@ describe("Route Registry", () => {
   it("no unexpected routes are registered (catches accidental duplicates)", () => {
     const logger = createMockLogger();
     const app = createApp(makeAppDeps({
-      arcDb: makeMinimalMock(),
+      threadDb: makeMinimalMock(),
       accountDb: makeMinimalMock(),
       auditDb: makeMinimalMock(),
       auth: { verify: vi.fn().mockResolvedValue(ok({ userId: "u" })) },

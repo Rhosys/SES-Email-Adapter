@@ -8,7 +8,7 @@ import type { AuditDatabase } from "../../src/database/audit-database.js";
 import { ok, err } from "neverthrow";
 import type { DbError, NotFoundError } from "../../src/errors.js";
 import { dbError, notFoundError } from "../../src/errors.js";
-import type { Arc, Account, Alias, Domain } from "../../src/types/index.js";
+import type { Thread, Account, Alias, Domain } from "../../src/types/index.js";
 import type { EmailService } from "../../src/email/email-service.js";
 import type { sendRsvp } from "../../src/processor/calendar/rsvp-composer.js";
 import type { PostApprovalCalendarHandlerDeps } from "../../src/processor/calendar/post-approval-handler.js";
@@ -43,7 +43,7 @@ function makeAccess(): AccessService {
   };
 }
 
-function makeArc(overrides: Partial<Arc> = {}): Arc {
+function makeThread(overrides: Partial<Thread> = {}): Thread {
   return {
     id: "arc-001",
     accountId: TEST_ACCOUNT_ID,
@@ -100,8 +100,11 @@ function makeDomain(overrides: Partial<Domain> = {}): Domain {
 function makeArcDb() {
   return {
     listArcs: vi.fn().mockResolvedValue(ok({ items: [] })),
+    listThreads: vi.fn().mockResolvedValue(ok({ items: [] })),
     getArc: vi.fn().mockResolvedValue(ok(null)),
-    updateArc: vi.fn().mockResolvedValue(ok(makeArc())),
+    getThread: vi.fn().mockResolvedValue(ok(null)),
+    updateArc: vi.fn().mockResolvedValue(ok(makeThread())),
+    updateThread: vi.fn().mockResolvedValue(ok(makeThread())),
     listSignals: vi.fn().mockResolvedValue(ok({ items: [] })),
     listPreArcSignals: vi.fn().mockResolvedValue(ok({ items: [] })),
     fastFindArcByAlternativeLookupKey: vi.fn().mockResolvedValue(ok(null)),
@@ -111,6 +114,7 @@ function makeArcDb() {
     unblockSignal: vi.fn().mockResolvedValue(ok(undefined)),
     createArc: vi.fn().mockResolvedValue(ok(undefined)),
     searchArcs: vi.fn().mockResolvedValue(ok({ items: [] })),
+    searchThreads: vi.fn().mockResolvedValue(ok({ items: [] })),
   };
 }
 
@@ -187,89 +191,89 @@ async function req(
 // ---------------------------------------------------------------------------
 
 describe("API route error mapping — unit tests", () => {
-  let arcDb: ReturnType<typeof makeArcDb>;
+  let threadDb: ReturnType<typeof makeArcDb>;
   let accountDb: ReturnType<typeof makeAccountDb>;
   let auditDb: ReturnType<typeof makeAuditDb>;
   let app: ReturnType<typeof createApp>;
 
   beforeEach(() => {
     vi.clearAllMocks();
-    arcDb = makeArcDb();
+    threadDb = makeArcDb();
     accountDb = makeAccountDb();
     auditDb = makeAuditDb();
     const auth = makeAuth();
     const access = makeAccess();
     const forwardingService: IForwardingService = { sendVerification: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), verifyWebhook: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) };
-    app = createApp(makeAppDeps({ arcDb: arcDb as unknown as ThreadDatabase, accountDb: accountDb as unknown as AccountDatabase, auditDb: auditDb as unknown as AuditDatabase, auth, access, logger: createMockLogger(), forwardingService, jobDispatcher: { dispatchReindex: vi.fn(), dispatchSegment: vi.fn() } as never, draftSendDispatcher: { dispatch: vi.fn().mockResolvedValue(ok(undefined)) } as never, accountCreationStarter: { start: vi.fn() }, appBaseUrl: "http://localhost", contentCdnBaseUrl: "https://cdn.test", astValidator: { validateAstBatch: vi.fn().mockResolvedValue({ success: true, purpose: "validate_ast_batch", results: [] }) } as never, billingHandler: new BillingHandler(), emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, domainIdentityService: { register: vi.fn().mockResolvedValue(ok(undefined)), deregister: vi.fn().mockResolvedValue(ok(undefined)) }, rsvpComposer: vi.fn().mockResolvedValue(ok(undefined)) as unknown as typeof sendRsvp, postApprovalCalendarDeps: { accountDb: {} as never, emailService: {} as never, serviceDomain: "platform.email.rhosys.cloud" } as unknown as PostApprovalCalendarHandlerDeps, schedulerClient: { scheduleMessage: vi.fn().mockResolvedValue(ok(undefined)), deleteSchedule: vi.fn().mockResolvedValue(ok(undefined)) } as never }));
+    app = createApp(makeAppDeps({ threadDb: threadDb as unknown as ThreadDatabase, accountDb: accountDb as unknown as AccountDatabase, auditDb: auditDb as unknown as AuditDatabase, auth, access, logger: createMockLogger(), forwardingService, jobDispatcher: { dispatchReindex: vi.fn(), dispatchSegment: vi.fn() } as never, draftSendDispatcher: { dispatch: vi.fn().mockResolvedValue(ok(undefined)) } as never, accountCreationStarter: { start: vi.fn() }, appBaseUrl: "http://localhost", contentCdnBaseUrl: "https://cdn.test", astValidator: { validateAstBatch: vi.fn().mockResolvedValue({ success: true, purpose: "validate_ast_batch", results: [] }) } as never, billingHandler: new BillingHandler(), emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, domainIdentityService: { register: vi.fn().mockResolvedValue(ok(undefined)), deregister: vi.fn().mockResolvedValue(ok(undefined)) }, rsvpComposer: vi.fn().mockResolvedValue(ok(undefined)) as unknown as typeof sendRsvp, postApprovalCalendarDeps: { accountDb: {} as never, emailService: {} as never, serviceDomain: "platform.email.rhosys.cloud" } as unknown as PostApprovalCalendarHandlerDeps, schedulerClient: { scheduleMessage: vi.fn().mockResolvedValue(ok(undefined)), deleteSchedule: vi.fn().mockResolvedValue(ok(undefined)) } as never }));
   });
 
   // -------------------------------------------------------------------------
-  // GET /accounts/:accountId/arcs/:id
+  // GET /accounts/:accountId/threads/:threadId
   // -------------------------------------------------------------------------
 
-  describe("GET /accounts/:accountId/arcs/:id", () => {
+  describe("GET /accounts/:accountId/threads/:threadId", () => {
     it("returns HTTP 500 when store returns err({ kind: 'db_error' })", async () => {
-      vi.mocked(arcDb.getArc).mockResolvedValueOnce(err(dbError(new Error("connection timeout"))));
-      const res = await req(app, "GET", `${A}/arcs/arc-001`);
+      vi.mocked(threadDb.getThread).mockResolvedValueOnce(err(dbError(new Error("connection timeout"))));
+      const res = await req(app, "GET", `${A}/threads/arc-001`);
       expect(res.status).toBe(500);
       const body = await res.json() as { title: string };
       expect(body.title).toBe("Internal Server Error");
     });
 
     it("returns HTTP 404 when store returns ok(null)", async () => {
-      vi.mocked(arcDb.getArc).mockResolvedValueOnce(ok(null));
-      const res = await req(app, "GET", `${A}/arcs/arc-001`);
+      vi.mocked(threadDb.getThread).mockResolvedValueOnce(ok(null));
+      const res = await req(app, "GET", `${A}/threads/arc-001`);
       expect(res.status).toBe(404);
       const body = await res.json() as { errorCode: string };
       expect(body.errorCode).toBe("THREAD_NOT_FOUND");
     });
 
     it("returns HTTP 200 when store returns ok(arc)", async () => {
-      vi.mocked(arcDb.getArc).mockResolvedValueOnce(ok(makeArc()));
-      const res = await req(app, "GET", `${A}/arcs/arc-001`);
+      vi.mocked(threadDb.getThread).mockResolvedValueOnce(ok(makeThread()));
+      const res = await req(app, "GET", `${A}/threads/arc-001`);
       expect(res.status).toBe(200);
-      const body = await res.json() as { arcId: string };
-      expect(body.arcId).toBe("arc-001");
+      const body = await res.json() as { threadId: string };
+      expect(body.threadId).toBe("arc-001");
     });
   });
 
   // -------------------------------------------------------------------------
-  // PATCH /accounts/:accountId/arcs/:id
+  // PATCH /accounts/:accountId/threads/:threadId
   // -------------------------------------------------------------------------
 
-  describe("PATCH /accounts/:accountId/arcs/:id", () => {
-    it("returns HTTP 500 when getArc returns err({ kind: 'db_error' })", async () => {
-      vi.mocked(arcDb.getArc).mockResolvedValueOnce(err(dbError(new Error("dynamo unavailable"))));
-      const res = await req(app, "PATCH", `${A}/arcs/arc-001`, { body: { status: "archived" } });
+  describe("PATCH /accounts/:accountId/threads/:threadId", () => {
+    it("returns HTTP 500 when getThread returns err({ kind: 'db_error' })", async () => {
+      vi.mocked(threadDb.getThread).mockResolvedValueOnce(err(dbError(new Error("dynamo unavailable"))));
+      const res = await req(app, "PATCH", `${A}/threads/arc-001`, { body: { status: "archived" } });
       expect(res.status).toBe(500);
     });
 
-    it("returns HTTP 404 when getArc returns ok(null)", async () => {
-      vi.mocked(arcDb.getArc).mockResolvedValueOnce(ok(null));
-      const res = await req(app, "PATCH", `${A}/arcs/arc-001`, { body: { status: "archived" } });
+    it("returns HTTP 404 when getThread returns ok(null)", async () => {
+      vi.mocked(threadDb.getThread).mockResolvedValueOnce(ok(null));
+      const res = await req(app, "PATCH", `${A}/threads/arc-001`, { body: { status: "archived" } });
       expect(res.status).toBe(404);
     });
 
-    it("returns HTTP 500 when updateArc returns err({ kind: 'db_error' })", async () => {
-      vi.mocked(arcDb.getArc).mockResolvedValueOnce(ok(makeArc()));
-      vi.mocked(arcDb.updateArc).mockResolvedValueOnce(err(dbError(new Error("write failed"))));
-      const res = await req(app, "PATCH", `${A}/arcs/arc-001`, { body: { status: "archived" } });
+    it("returns HTTP 500 when updateThread returns err({ kind: 'db_error' })", async () => {
+      vi.mocked(threadDb.getThread).mockResolvedValueOnce(ok(makeThread()));
+      vi.mocked(threadDb.updateThread).mockResolvedValueOnce(err(dbError(new Error("write failed"))));
+      const res = await req(app, "PATCH", `${A}/threads/arc-001`, { body: { status: "archived" } });
       expect(res.status).toBe(500);
     });
 
     it("returns HTTP 200 when update succeeds", async () => {
-      vi.mocked(arcDb.getArc).mockResolvedValueOnce(ok(makeArc()));
-      vi.mocked(arcDb.updateArc).mockResolvedValueOnce(ok(makeArc({ status: "archived" })));
-      const res = await req(app, "PATCH", `${A}/arcs/arc-001`, { body: { status: "archived" } });
+      vi.mocked(threadDb.getThread).mockResolvedValueOnce(ok(makeThread()));
+      vi.mocked(threadDb.updateThread).mockResolvedValueOnce(ok(makeThread({ status: "archived" })));
+      const res = await req(app, "PATCH", `${A}/threads/arc-001`, { body: { status: "archived" } });
       expect(res.status).toBe(200);
-      const body = await res.json() as Arc;
+      const body = await res.json() as Thread;
       expect(body.status).toBe("archived");
     });
 
     it("zParse throws HTTPException for invalid request body", async () => {
-      vi.mocked(arcDb.getArc).mockResolvedValueOnce(ok(makeArc()));
+      vi.mocked(threadDb.getThread).mockResolvedValueOnce(ok(makeThread()));
       // Send an invalid body — status must be one of "active" | "archived" | "deleted"
-      const res = await req(app, "PATCH", `${A}/arcs/arc-001`, { body: { status: "invalid_status" } });
+      const res = await req(app, "PATCH", `${A}/threads/arc-001`, { body: { status: "invalid_status" } });
       expect(res.status).toBe(400);
       const body = await res.json() as { errorCode: string };
       expect(body.errorCode).toBe("INVALID_REQUEST");
@@ -366,10 +370,10 @@ describe("API route error mapping — unit tests", () => {
 
   describe("zParse — HTTPException contract", () => {
     it("throws HTTPException with 400 status for completely invalid JSON", async () => {
-      vi.mocked(arcDb.getArc).mockResolvedValueOnce(ok(makeArc()));
+      vi.mocked(threadDb.getThread).mockResolvedValueOnce(ok(makeThread()));
       // Send a request with non-JSON body to trigger zParse failure
       const res = await app.fetch(
-        new Request(`http://localhost${A}/arcs/arc-001`, {
+        new Request(`http://localhost${A}/threads/arc-001`, {
           method: "PATCH",
           headers: {
             "Content-Type": "application/json",

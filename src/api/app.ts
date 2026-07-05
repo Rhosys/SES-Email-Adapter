@@ -18,12 +18,12 @@ import type { AuthError } from "../errors.js";
 
 import type { AccessService } from "./accountsApi.js";
 import type { JobDispatcher } from "./adminApi.js";
-import type { SignalReprocessor } from "./arcsApi.js";
+import type { SignalReprocessor } from "./signalsApi.js";
 import type { IForwardingService } from "../forwarding/forwarding-service.js";
 
 import { WellKnownApi } from "./wellKnownApi.js";
 import { AccountsApi } from "./accountsApi.js";
-import { ArcsApi } from "./arcsApi.js";
+
 import { ViewsApi } from "./viewsApi.js";
 import { LabelsApi } from "./labelsApi.js";
 import { RulesApi } from "./rulesApi.js";
@@ -33,6 +33,7 @@ import { TemplatesApi } from "./templatesApi.js";
 import { AuditApi } from "./auditApi.js";
 import { AdminApi } from "./adminApi.js";
 import { ThreadsApi } from "./threadsApi.js";
+import { SignalsApi } from "./signalsApi.js";
 import { UserApi } from "./userApi.js";
 
 import { authorizationGuard, ROUTE_NOT_FOUND_KEY } from "./authorization-guard.js";
@@ -42,7 +43,8 @@ import { ErrorResponse, ErrorCode } from "./schemas.js";
 export type { AppEnv } from "./route-helpers.js";
 export type { AccessService, AccountRole, AccountUser, UserProfile } from "./accountsApi.js";
 export type { JobDispatcher } from "./adminApi.js";
-export type { SignalReprocessor, ListThreadsParams } from "./arcsApi.js";
+export type { SignalReprocessor } from "./signalsApi.js";
+export type { ListThreadsParams } from "./threadsApi.js";
 export type { IForwardingService } from "../forwarding/forwarding-service.js";
 export type { CreateViewRequest, UpdateViewRequest, CreateLabelRequest, UpdateLabelRequest, CreateRuleRequest, UpdateRuleRequest } from "./requests.js";
 
@@ -229,8 +231,8 @@ export function createApp({ threadDb, accountDb, auditDb, auth, access, logger, 
   // Route registrations
   // -------------------------------------------------------------------------
   new AccountsApi(accountDb, access, logger, accountCreationStarter, emailService, appBaseUrl, triggerDigest).register(app, helpers);
-  new ArcsApi(threadDb, accountDb, logger, draftSendDispatcher, schedulerClient, emailService, rsvpComposer, postApprovalCalendarDeps, signalReprocessor, s3Client, emailBucket, contentCdnBaseUrl).register(app, helpers);
   new ThreadsApi(threadDb, accountDb, logger, draftSendDispatcher, schedulerClient, emailService, rsvpComposer, postApprovalCalendarDeps, signalReprocessor, s3Client, emailBucket, contentCdnBaseUrl).register(app, helpers);
+  new SignalsApi(threadDb, accountDb, logger, postApprovalCalendarDeps, signalReprocessor, s3Client, emailBucket, contentCdnBaseUrl).register(app, helpers);
   new ViewsApi(accountDb).register(app, helpers);
   new LabelsApi(accountDb).register(app, helpers);
   new RulesApi(accountDb, auditDb, astValidator, billingHandler, logger).register(app, helpers);
