@@ -4,7 +4,7 @@ import { dynamo, SIGNALS_TABLE, encodeCursor, decodeCursor } from "./shared.js";
 import { ok, err, dbError } from "../errors.js";
 import type { DbError, Result } from "../errors.js";
 import type { Logger } from "../logger.js";
-import type { ListArcsParams } from "../api/app.js";
+import type { ListThreadsParams } from "../api/app.js";
 import type { Thread, Signal, AnySignal, EmailSignalData, Page, PageParams, ThreadStatus, ThreadUrgency, Workflow } from "../types/index.js";
 import type { CalendarEventData } from "../types/calendar.js";
 
@@ -310,21 +310,21 @@ export class ThreadDatabase {
     }
   }
 
-  async saveThread(arc: Thread): Promise<Result<void, DbError>> {
+  async saveThread(thread: Thread): Promise<Result<void, DbError>> {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { arcId: _arcId, ...rest } = arc as Thread & { arcId?: string };
+    const { arcId: _arcId, ...rest } = thread as Thread & { arcId?: string };
     try {
       const item: Record<string, unknown> = {
         ...rest,
-        threadId: arc.id,
-        pk: arcPk(arc.accountId, arc.id),
+        threadId: thread.id,
+        pk: arcPk(thread.accountId, thread.id),
         sk: ITEM_SK,
-        gsi1pk: `ACCT#${arc.accountId}`,
-        gsi1sk: `LASTACT#${arc.status}#${arc.lastSignalAt}#${arc.id}`,
+        gsi1pk: `ACCT#${thread.accountId}`,
+        gsi1sk: `LASTACT#${thread.status}#${thread.lastSignalAt}#${thread.id}`,
       };
 
-      if (arc.groupingKey) {
-        item.gsi3pk = buildThreadGsi3pk(arc.accountId, arc.groupingKey);
+      if (thread.groupingKey) {
+        item.gsi3pk = buildThreadGsi3pk(thread.accountId, thread.groupingKey);
       }
 
       await dynamo.send(new PutCommand({
@@ -337,8 +337,8 @@ export class ThreadDatabase {
     }
   }
 
-  async createThread(arc: Thread): Promise<Result<void, DbError>> {
-    return this.saveThread(arc);
+  async createThread(thread: Thread): Promise<Result<void, DbError>> {
+    return this.saveThread(thread);
   }
 
   async updateThread(accountId: string, id: string, status: ThreadStatus, lastSignalAt: string, update: UpdateThreadFields): Promise<Result<Thread, DbError>> {
@@ -472,7 +472,7 @@ export class ThreadDatabase {
     }
   }
 
-  async listThreads(accountId: string, params: ListArcsParams): Promise<Result<Page<Thread>, DbError>> {
+  async listThreads(accountId: string, params: ListThreadsParams): Promise<Result<Page<Thread>, DbError>> {
     const limit = Math.min(params.limit ?? 20, 100);
     const gsi1pk = `ACCT#${accountId}`;
 

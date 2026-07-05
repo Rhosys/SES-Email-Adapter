@@ -42,11 +42,14 @@ export interface SignalReprocessor {
   reprocessSignal(accountId: string, signalId: string): Promise<Result<Signal, ProcessorError | NotFoundError>>;
 }
 
-export interface ListArcsParams extends PageParams {
+export interface ListThreadsParams extends PageParams {
   workflow?: Workflow;
   label?: string;
   status?: ThreadStatus;
 }
+
+/** @deprecated Use ListThreadsParams instead */
+export type ListArcsParams = ListThreadsParams;
 
 const MAIL_DOMAIN = process.env["MAIL_DOMAIN"] ?? "platform.email.rhosys.cloud";
 
@@ -440,7 +443,7 @@ export class ArcsApi {
       const matchedArc = matchedArcResult ? matchedArcResult.value : null;
 
       const now = DateTime.utc().toISO()!;
-      let arc: Arc;
+      let arc: Thread;
       if (matchedArc) {
         const updateResult = await arcDb.updateThread(accountId, matchedArc.id, "active", signal.data.receivedAt, {});
         if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
