@@ -406,7 +406,10 @@ export interface UnsubscribeInfo {
   url: string;
 }
 
-export interface EmailSignalData {
+// ---------------------------------------------------------------------------
+// Shared fields across inbound and outbound email signals
+// ---------------------------------------------------------------------------
+interface EmailSignalDataBase {
   receivedAt: string;      // ISO datetime
   summary: string;
   urgency?: ThreadUrgency;
@@ -420,8 +423,6 @@ export interface EmailSignalData {
   replyTo?: EmailAddress;
   subject: string;
   sentAt?: string;
-  textBody?: string;
-  htmlBody?: string;
   attachments: Attachment[];
   headers: Record<string, string>;
   // Envelope recipient — the address that actually received this email
@@ -435,12 +436,31 @@ export interface EmailSignalData {
   // • Inbound (source: "email"): raw SES message ID from the inbound notification; used to construct signalLookupId ("ses-{sesMessageId}") for dedup.
   // • Outbound (source: "user"): SES message ID assigned after successful delivery via SES.
   sesMessageId?: string;
-  // Send flow fields (only present on source: "user" signals)
-  sendInitiatedAt?: string;    // ISO 8601 — when POST /send was called
-  sendFailureReason?: string;  // "all_recipients_bounced" | "ses_permanent_failure"
   // Unsubscribe info derived from List-Unsubscribe / List-Unsubscribe-Post headers
   unsubscribe?: UnsubscribeInfo;
 }
+
+// ---------------------------------------------------------------------------
+// Inbound email signal (source: "email") — no textBody, htmlBody stored with truncation guard
+// ---------------------------------------------------------------------------
+export interface InboundEmailSignalData extends EmailSignalDataBase {
+  htmlBody?: string;
+  /** Set to true when htmlBody was truncated before storage. Full content recoverable from S3 via s3Key. */
+  htmlBodyTruncated?: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Outbound email signal (source: "user") — user-composed drafts and sent messages
+// ---------------------------------------------------------------------------
+export interface OutboundEmailSignalData extends EmailSignalDataBase {
+  textBody?: string;
+  htmlBody?: string;
+  sendInitiatedAt?: string;    // ISO 8601 — when POST /send was called
+  sendFailureReason?: string;  // "all_recipients_bounced" | "ses_permanent_failure"
+}
+
+// Union — used where either inbound or outbound email signals are accepted
+export type EmailSignalData = InboundEmailSignalData | OutboundEmailSignalData;
 
 export interface DeliverabilitySignalData {
   linkedSignalId: string;

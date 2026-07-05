@@ -1479,6 +1479,8 @@ describe("SignalProcessor", () => {
       };
       (threadDb as unknown as { getSignalById: ReturnType<typeof vi.fn> }).getSignalById =
         vi.fn().mockReturnValue(Promise.resolve(ok(storedSignal)));
+      (threadDb as unknown as { getSignalByMessageId: ReturnType<typeof vi.fn> }).getSignalByMessageId =
+        vi.fn().mockReturnValue(Promise.resolve(ok(storedSignal)));
       vi.mocked(accountDb.getAliasByGlobalAddress).mockReturnValue(Promise.resolve(ok(DEFAULT_EMAIL_CONFIG)));
 
       const result = await processor.reprocessSignal(TEST_ACCOUNT_ID, "sgn-reprocess", "thr-test");
@@ -1597,7 +1599,6 @@ describe("SignalProcessor", () => {
       // Default mime parser mock: from.address = "sender@example.com", subject = "Test email"
       expect(payload.signal.data.from.address).toBe("sender@example.com");
       expect(payload.signal.data.subject).toBe("Test email");
-      expect(payload.signal.data.textBody).toBe("Hello world");
     });
 
     it("dispatches side-effect with recipientAddress for pong from-address resolution", async () => {

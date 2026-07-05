@@ -8,7 +8,7 @@ import type { AccountDatabase } from "../../src/database/account-database.js";
 import type { UserCodeExecutorClient } from "../../src/processor/user-code-client.js";
 import { userCodeError } from "../../src/processor/user-code-client.js";
 import type { ContentSanitizerClient } from "../../src/processor/content-sanitizer-client.js";
-import type { Signal, Thread, Alias, EmailTemplate } from "../../src/types/index.js";
+import type { Signal, Thread, Alias, EmailTemplate, OutboundEmailSignalData } from "../../src/types/index.js";
 import type { EmbeddingGenerator } from "../../src/embedding/embedding-generator.js";
 import type { MultiClusterAuroraWriter } from "../../src/database/thread-matcher.js";
 import type { S3RetentionService } from "../../src/embedding/s3-retention-service.js";
@@ -186,7 +186,7 @@ describe("Template function resolution via User Code Executor", () => {
     expect(saveSignalCalls.length).toBe(1);
     const draft = saveSignalCalls[0]![0] as Signal;
     expect(draft.data.subject).toBe("Re: Test email — Hello");
-    expect(draft.data.textBody).toBe("Hi Sender, Thanks for your email about Test email");
+    expect((draft.data as OutboundEmailSignalData).textBody).toBe("Hi Sender, Thanks for your email about Test email");
     expect(draft.status).toBe("draft");
   });
 
@@ -256,7 +256,7 @@ describe("Template function resolution via User Code Executor", () => {
     const saveSignalCalls = vi.mocked(store.threadDb.saveSignal).mock.calls;
     expect(saveSignalCalls.length).toBe(2);
     const draft = saveSignalCalls.map(c => c[0] as Signal).find(s => s.source === "user")!;
-    expect(draft.data.textBody).toBe("Hi Sender, ");
+    expect((draft.data as OutboundEmailSignalData).textBody).toBe("Hi Sender, ");
     expect(draft.status).toBe("draft");
 
     // annotateTemplateError called with runtime error

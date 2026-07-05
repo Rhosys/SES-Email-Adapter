@@ -55,7 +55,7 @@ function toApiSource(source: DbSignal["source"]): "system" | "user" {
 }
 
 function toApiEmailSignalData(data: EmailSignalData): Api.InboundEmailSignalData | Api.OutboundEmailSignalData {
-  if (data.sendInitiatedAt !== undefined) {
+  if ("sendInitiatedAt" in data && data.sendInitiatedAt !== undefined) {
     // Outbound email (user-composed)
     const outbound: Api.OutboundEmailSignalData = {
       from: data.from,
@@ -119,7 +119,7 @@ export function toApiSignal(signal: AnySignal): Api.Signal {
   switch (signal.type) {
     case "email": {
       const emailData = signal.data as EmailSignalData;
-      if (emailData.sendInitiatedAt !== undefined) {
+      if ("sendInitiatedAt" in emailData && emailData.sendInitiatedAt !== undefined) {
         return {
           ...base,
           type: "email" as const,

@@ -49,7 +49,7 @@ export class DraftSendWorker {
       return ok(undefined);
     }
 
-    if (signal.data.sendInitiatedAt !== sendInitiatedAt) {
+    if (!("sendInitiatedAt" in signal.data) || signal.data.sendInitiatedAt !== sendInitiatedAt) {
       this.logger.info("Draft send: sendInitiatedAt mismatch — stale message, discarding.", { code: "draft_send.stale_message", signalId, accountId });
       return ok(undefined);
     }
@@ -58,7 +58,7 @@ export class DraftSendWorker {
     const from = signal.data.from.address;
     const to = signal.data.to.map(r => r.address).join(", ");
     const subject = signal.data.subject;
-    const body = signal.data.textBody ?? "";
+    const body = "textBody" in signal.data ? (signal.data.textBody ?? "") : "";
 
     const sendResult = await this.replySender.sendReply({
       to,
