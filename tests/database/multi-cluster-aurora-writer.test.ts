@@ -7,7 +7,7 @@ import {
   CommitTransactionCommand,
   RollbackTransactionCommand,
 } from "@aws-sdk/client-rds-data";
-import { ArcMatcher as MultiClusterAuroraWriterImpl } from "../../src/database/arc-matcher.js";
+import { ThreadMatcher as MultiClusterAuroraWriterImpl } from "../../src/database/thread-matcher.js";
 import { createMockLogger } from "../helpers/mock-logger.js";
 
 // ---------------------------------------------------------------------------
@@ -51,7 +51,7 @@ vi.mock("../../src/embedding/cluster-registry.js", () => ({
     }
     return null;
   },
-  getPrimaryArcMatcherRegistry: () => ({
+  getPrimaryThreadMatcherRegistry: () => ({
     registryId: "test-cluster-1",
     clusterArn: "arn:aws:rds:eu-central-1:111111111111:cluster:test-cluster-1",
     secretArn: "arn:aws:secretsmanager:eu-central-1:111111111111:secret:test-1",
@@ -85,7 +85,7 @@ describe("MultiClusterAuroraWriterImpl", () => {
 
       const result = await writer.upsertEmbedding({
         registryId: "test-cluster-1",
-        arcId: "arc_123",
+        threadId: "arc_123",
         accountId: "acct_1",
         recipientAddress: "user@example.com",
         embedding: [0.1, 0.2, 0.3],
@@ -110,7 +110,7 @@ describe("MultiClusterAuroraWriterImpl", () => {
 
       // INSERT ON CONFLICT
       const upsertInput = calls[2]!.args[0].input as { sql?: string; transactionId?: string; parameters?: unknown[] };
-      expect(upsertInput.sql).toContain("arc_embeddings");
+      expect(upsertInput.sql).toContain("thread_embeddings");
       expect(upsertInput.sql).toContain("on conflict");
       expect(upsertInput.transactionId).toBe("txn-1");
 
@@ -125,7 +125,7 @@ describe("MultiClusterAuroraWriterImpl", () => {
     it("returns err when registryId is not in the registry", async () => {
       const result = await writer.upsertEmbedding({
         registryId: "nonexistent-cluster",
-        arcId: "arc_1",
+        threadId: "arc_1",
         accountId: "acct_1",
         recipientAddress: "a@b.com",
         embedding: [1],
@@ -144,7 +144,7 @@ describe("MultiClusterAuroraWriterImpl", () => {
 
       const result = await writer.upsertEmbedding({
         registryId: "test-cluster-1",
-        arcId: "arc_1",
+        threadId: "arc_1",
         accountId: "acct_1",
         recipientAddress: "a@b.com",
         embedding: [1],
@@ -180,7 +180,7 @@ describe("MultiClusterAuroraWriterImpl", () => {
 
       const promise = writer.upsertEmbedding({
         registryId: "test-cluster-1",
-        arcId: "arc_1",
+        threadId: "arc_1",
         accountId: "acct_1",
         recipientAddress: "a@b.com",
         embedding: [1, 2],
@@ -206,7 +206,7 @@ describe("MultiClusterAuroraWriterImpl", () => {
 
       const result = await writer.upsertEmbedding({
         registryId: "test-cluster-1",
-        arcId: "arc_1",
+        threadId: "arc_1",
         accountId: "acct_1",
         recipientAddress: "a@b.com",
         embedding: [1],
@@ -226,7 +226,7 @@ describe("MultiClusterAuroraWriterImpl", () => {
 
       const result = await writer.upsertEmbedding({
         registryId: "test-cluster-1",
-        arcId: "arc_1",
+        threadId: "arc_1",
         accountId: "acct_1",
         recipientAddress: "a@b.com",
         embedding: [1],
@@ -241,7 +241,7 @@ describe("MultiClusterAuroraWriterImpl", () => {
   });
 
   describe("findMatch", () => {
-    it("returns arcId when a match is found within threshold", async () => {
+    it("returns threadId when a match is found within threshold", async () => {
       rdsMock
         .on(BeginTransactionCommand).resolves({ transactionId: "txn-find-1" })
         .on(ExecuteStatementCommand)
@@ -257,12 +257,12 @@ describe("MultiClusterAuroraWriterImpl", () => {
       });
 
       expect(result.isOk()).toBe(true);
-      expect(result._unsafeUnwrap()).toEqual({ arcId: "arc_match_1" });
+      expect(result._unsafeUnwrap()).toEqual({ threadId: "arc_match_1" });
 
       // Verify the SELECT query
       const execCalls = rdsMock.commandCalls(ExecuteStatementCommand);
       const selectInput = execCalls[1]!.args[0].input as { sql?: string; parameters?: unknown[] };
-      expect(selectInput.sql).toContain("arc_embeddings");
+      expect(selectInput.sql).toContain("thread_embeddings");
       expect(selectInput.sql).toContain("<=>");
       expect(selectInput.sql).toContain("limit");
     });
@@ -335,7 +335,7 @@ describe("MultiClusterAuroraWriterImpl", () => {
 
       const result = await promise;
       expect(result.isOk()).toBe(true);
-      expect(result._unsafeUnwrap()).toEqual({ arcId: "arc_retried" });
+      expect(result._unsafeUnwrap()).toEqual({ threadId: "arc_retried" });
       expect(beginCallCount).toBe(2);
 
       vi.useRealTimers();
@@ -376,7 +376,7 @@ describe("MultiClusterAuroraWriterImpl", () => {
 
           const result = await writer.upsertEmbedding({
             registryId: "test-cluster-1",
-            arcId: "arc-retry-test",
+            threadId: "arc-retry-test",
             accountId: "acct-retry-test",
             recipientAddress: "retry@example.com",
             embedding: [0.1, 0.2, 0.3],
@@ -436,7 +436,7 @@ describe("MultiClusterAuroraWriterImpl", () => {
           // Should succeed without error
           const result = await writer.upsertEmbedding({
             registryId: "test-cluster-1",
-            arcId: "arc-recovery",
+            threadId: "arc-recovery",
             accountId: "acct-recovery",
             recipientAddress: "recovery@example.com",
             embedding: [0.1, 0.2, 0.3],
@@ -482,7 +482,7 @@ describe("MultiClusterAuroraWriterImpl", () => {
 
         const result = await writer.upsertEmbedding({
           registryId: "test-cluster-1",
-          arcId: "arc-nontransient",
+          threadId: "arc-nontransient",
           accountId: "acct-nontransient",
           recipientAddress: "nontransient@example.com",
           embedding: [0.1, 0.2, 0.3],
@@ -517,7 +517,7 @@ describe("MultiClusterAuroraWriterImpl", () => {
           .on(ExecuteStatementCommand).resolves({})
           .on(CommitTransactionCommand).resolves({});
 
-        const arcId = "arc-idempotent";
+        const threadId = "arc-idempotent";
         const accountId = "acct-idempotent";
         const recipientAddress = "idempotent@example.com";
         const embedding = [0.1, 0.2, 0.3, -0.5, 0.0];
@@ -526,7 +526,7 @@ describe("MultiClusterAuroraWriterImpl", () => {
         for (let i = 0; i < repeatCount; i++) {
           await writer.upsertEmbedding({
             registryId: "test-cluster-1",
-            arcId,
+            threadId,
             accountId,
             recipientAddress,
             embedding,
@@ -551,7 +551,7 @@ describe("MultiClusterAuroraWriterImpl", () => {
         }
 
         // Verify the SQL uses ON CONFLICT with the correct composite key
-        expect(firstUpsert.sql).toContain("arc_embeddings");
+        expect(firstUpsert.sql).toContain("thread_embeddings");
         expect(firstUpsert.sql).toContain("on conflict");
 
         // Verify each upsert was committed (not rolled back)
@@ -575,14 +575,14 @@ describe("MultiClusterAuroraWriterImpl", () => {
           .on(ExecuteStatementCommand).resolves({})
           .on(CommitTransactionCommand).resolves({});
 
-        const arcId = "arc-rls";
+        const threadId = "arc-rls";
         const accountId = "acct-rls";
         const recipientAddress = "rls@example.com";
         const embedding = [0.1, 0.2, 0.3];
 
         await writer.upsertEmbedding({
           registryId: "test-cluster-1",
-          arcId,
+          threadId,
           accountId,
           recipientAddress,
           embedding,
@@ -622,7 +622,7 @@ describe("MultiClusterAuroraWriterImpl", () => {
         };
         expect(calls[2]!.args[0]).toBeInstanceOf(ExecuteStatementCommand);
         expect(upsertInput.transactionId).toBe(txnId);
-        expect(upsertInput.sql).toContain("arc_embeddings");
+        expect(upsertInput.sql).toContain("thread_embeddings");
         expect(upsertInput.sql).toContain("on conflict");
 
         // Call 3: CommitTransaction with the same transactionId

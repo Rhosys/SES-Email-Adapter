@@ -12,7 +12,7 @@ import type { CalendarEventData } from "../types/calendar.js";
 // Key helpers
 // ---------------------------------------------------------------------------
 
-const arcPk  = (accountId: string, id: string) => `ACCT#${accountId}#ARC#${id}`;
+const threadPk  = (accountId: string, id: string) => `ACCT#${accountId}#ARC#${id}`;
 const sigPk  = (accountId: string, signalLookupId: string) => `ACCT#${accountId}#SIG#${signalLookupId}`;
 const ITEM_SK = "#";
 const buildThreadGsi3pk = (accountId: string, groupingKey: string) => `ACCT#${accountId}#GKEY#${groupingKey}`;
@@ -53,6 +53,7 @@ export function coerceStaleStatus(signal: Signal): Signal {
 // Persistence boundary — threadId-only write + universal read fallback
 // ---------------------------------------------------------------------------
 
+/** Resolve the thread identifier from a DDB record, falling back to legacy arcId attribute. */
 function resolveThreadId(record: Record<string, unknown>): string | undefined {
   return (record.threadId as string | undefined) ?? (record.arcId as string | undefined);
 }
@@ -99,7 +100,7 @@ export class ThreadDatabase {
           TableName: SIGNALS_TABLE,
           IndexName: "gsi1",
           KeyConditionExpression: "gsi1pk = :pk AND gsi1sk = :sk",
-          ExpressionAttributeValues: { ":pk": `ACCT#${accountId}#ARC#${threadId}`, ":sk": signalId },
+          ExpressionAttributeValues: { ":pk": threadPk(accountId, threadId), ":sk": signalId },
           Limit: 1,
         }));
         return ok(res.Items?.[0] ? coerceStaleStatus(hydrateSignal(res.Items[0] as Signal)) : null);
@@ -165,7 +166,7 @@ export class ThreadDatabase {
   async saveSignal(signal: AnySignal): Promise<Result<void, DbError>> {
     let gsi1pk: string;
     if (signal.threadId) {
-      gsi1pk = `ACCT#${signal.accountId}#ARC#${signal.threadId}`;
+      gsi1pk = threadPk(signal.accountId, signal.threadId);
     } else if (signal.status === "quarantine_visible" || signal.status === "quarantine_hidden") {
       gsi1pk = `ACCT#${signal.accountId}#QUARANTINED`;
     } else {
@@ -204,7 +205,7 @@ export class ThreadDatabase {
         TableName: SIGNALS_TABLE,
         IndexName: "gsi1",
         KeyConditionExpression: "gsi1pk = :pk",
-        ExpressionAttributeValues: { ":pk": `ACCT#${accountId}#ARC#${threadId}` },
+        ExpressionAttributeValues: { ":pk": threadPk(accountId, threadId) },
         ScanIndexForward: false,
         Limit: limit + 1,
         ...(params.cursor ? { ExclusiveStartKey: decodeCursor(params.cursor) } : {}),
@@ -269,7 +270,7 @@ export class ThreadDatabase {
         ExpressionAttributeValues: {
           ":threadId": threadId,
           ":status": "active",
-          ":gsi1pk": `ACCT#${accountId}#ARC#${threadId}`,
+          ":gsi1pk": threadPk(accountId, threadId),
         },
       }));
       return ok(undefined);
@@ -279,14 +280,14 @@ export class ThreadDatabase {
   }
 
   // ---------------------------------------------------------------------------
-  // Arcs
+  // Threads
   // ---------------------------------------------------------------------------
 
   async getThread(accountId: string, id: string): Promise<Result<Thread | null, DbError>> {
     try {
       const res = await dynamo.send(new GetCommand({
         TableName: SIGNALS_TABLE,
-        Key: { pk: arcPk(accountId, id), sk: ITEM_SK },
+        Key: { pk: threadPk(accountId, id), sk: ITEM_SK },
       }));
       return ok(res.Item ? hydrateThreadObject(res.Item as Thread) : null);
     } catch (e) {
@@ -317,7 +318,7 @@ export class ThreadDatabase {
       const item: Record<string, unknown> = {
         ...rest,
         threadId: thread.id,
-        pk: arcPk(thread.accountId, thread.id),
+        pk: threadPk(thread.accountId, thread.id),
         sk: ITEM_SK,
         gsi1pk: `ACCT#${thread.accountId}`,
         gsi1sk: `LASTACT#${thread.status}#${thread.lastSignalAt}#${thread.id}`,
@@ -373,7 +374,7 @@ export class ThreadDatabase {
     try {
       const result = await dynamo.send(new UpdateCommand({
         TableName: SIGNALS_TABLE,
-        Key: { pk: arcPk(accountId, id), sk: ITEM_SK },
+        Key: { pk: threadPk(accountId, id), sk: ITEM_SK },
         UpdateExpression: `SET ${setParts.join(", ")}`,
         ExpressionAttributeValues: exprValues,
         ExpressionAttributeNames: exprNames,
@@ -662,7 +663,7 @@ export class ThreadDatabase {
         TableName: SIGNALS_TABLE,
         IndexName: "gsi1",
         KeyConditionExpression: "gsi1pk = :pk",
-        ExpressionAttributeValues: { ":pk": `ACCT#${accountId}#ARC#${threadId}` },
+        ExpressionAttributeValues: { ":pk": threadPk(accountId, threadId) },
         ScanIndexForward: false,
       }));
       const signals = (res.Items ?? []) as unknown[];
@@ -689,7 +690,7 @@ export class ThreadDatabase {
         TableName: SIGNALS_TABLE,
         IndexName: "gsi1",
         KeyConditionExpression: "gsi1pk = :pk",
-        ExpressionAttributeValues: { ":pk": `ACCT#${accountId}#ARC#${threadId}` },
+        ExpressionAttributeValues: { ":pk": threadPk(accountId, threadId) },
         ScanIndexForward: false,
       }));
       const signals = (res.Items ?? []) as unknown[];

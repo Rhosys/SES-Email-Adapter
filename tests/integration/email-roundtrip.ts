@@ -19,7 +19,7 @@ import {
   buildCalendarEmail,
   MINIMAL_ICS,
 } from './mime-builders.js';
-import type { Arc, Signal } from '../../src/api/schemas.js';
+import type { Thread, Signal } from '../../src/api/schemas.js';
 
 // ---------------------------------------------------------------------------
 // Assertion helpers (same pattern as post-accounts.ts)
@@ -77,15 +77,15 @@ async function apiReq(method: string, path: string, body?: unknown): Promise<Res
   });
 }
 
-async function getArc(accountId: string): Promise<Arc> {
-  const res = await apiReq('GET', `/accounts/${accountId}/arcs`);
-  const json = await res.json() as { arcs: Arc[] };
-  if (!json.arcs?.length) throw new Error('No arcs found');
-  return json.arcs[0]!;
+async function getThread(accountId: string): Promise<Thread> {
+  const res = await apiReq('GET', `/accounts/${accountId}/threads`);
+  const json = await res.json() as { threads: Thread[] };
+  if (!json.threads?.length) throw new Error('No threads found');
+  return json.threads[0]!;
 }
 
-async function getSignals(accountId: string, arcId: string): Promise<Signal[]> {
-  const res = await apiReq('GET', `/accounts/${accountId}/arcs/${arcId}/signals`);
+async function getSignals(accountId: string, threadId: string): Promise<Signal[]> {
+  const res = await apiReq('GET', `/accounts/${accountId}/threads/${threadId}/signals`);
   const json = await res.json() as { signals: Signal[] };
   return json.signals ?? [];
 }
@@ -101,10 +101,10 @@ async function getSignals(accountId: string, arcId: string): Promise<Signal[]> {
   await h.sendEmail(sesId, mime);
   await h.consumeAndProcess();
 
-  const arc = await getArc(h.accountId);
-  assert(typeof arc.arcId === 'string', `arc created (arcId=${arc.arcId})`);
+  const thread = await getThread(h.accountId);
+  assert(typeof thread.threadId === 'string', `thread created (threadId=${thread.threadId})`);
 
-  const signals = await getSignals(h.accountId, arc.arcId);
+  const signals = await getSignals(h.accountId, thread.threadId);
   assert(signals.length === 1, `one signal created (got ${signals.length})`);
 
   const signal = signals[0];
@@ -139,12 +139,12 @@ async function getSignals(accountId: string, arcId: string): Promise<Signal[]> {
   await h.sendEmail(sesId, mime);
   await h.consumeAndProcess();
 
-  const arcsRes = await apiReq('GET', `/accounts/${h.accountId}/arcs`);
-  const arcsJson = await arcsRes.json() as { arcs: Arc[] };
+  const threadsRes = await apiReq('GET', `/accounts/${h.accountId}/threads`);
+  const threadsJson = await threadsRes.json() as { threads: Thread[] };
 
   let cidSignal: Signal | undefined;
-  for (const arc of arcsJson.arcs ?? []) {
-    const sigs = await getSignals(h.accountId, arc.arcId);
+  for (const thread of threadsJson.threads ?? []) {
+    const sigs = await getSignals(h.accountId, thread.threadId);
     for (const sig of sigs) {
       if (sig.type === 'email' && sig.data.body?.includes('data:image/png;base64,')) {
         cidSignal = sig;
@@ -170,12 +170,12 @@ async function getSignals(accountId: string, arcId: string): Promise<Signal[]> {
   await h.sendEmail(sesId, mime);
   await h.consumeAndProcess();
 
-  const arcsRes = await apiReq('GET', `/accounts/${h.accountId}/arcs`);
-  const arcsJson = await arcsRes.json() as { arcs: Arc[] };
+  const threadsRes = await apiReq('GET', `/accounts/${h.accountId}/threads`);
+  const threadsJson = await threadsRes.json() as { threads: Thread[] };
 
   let imgSignal: Signal | undefined;
-  for (const arc of arcsJson.arcs ?? []) {
-    const sigs = await getSignals(h.accountId, arc.arcId);
+  for (const thread of threadsJson.threads ?? []) {
+    const sigs = await getSignals(h.accountId, thread.threadId);
     for (const sig of sigs) {
       if (sig.type === 'email' && sig.data.body?.includes('<img')) {
         imgSignal = sig;
@@ -205,14 +205,14 @@ async function getSignals(accountId: string, arcId: string): Promise<Signal[]> {
   await h.sendEmail(sesId, mime);
   await h.consumeAndProcess();
 
-  const arcsRes = await apiReq('GET', `/accounts/${h.accountId}/arcs`);
-  const arcsJson = await arcsRes.json() as { arcs: Arc[] };
+  const threadsRes = await apiReq('GET', `/accounts/${h.accountId}/threads`);
+  const threadsJson = await threadsRes.json() as { threads: Thread[] };
 
   let emailSignal: Signal | undefined;
   let calendarSignal: Signal | undefined;
 
-  for (const arc of arcsJson.arcs ?? []) {
-    const sigs = await getSignals(h.accountId, arc.arcId);
+  for (const thread of threadsJson.threads ?? []) {
+    const sigs = await getSignals(h.accountId, thread.threadId);
     const calSig = sigs.find(s => s.type === 'calendar_event');
     if (calSig) {
       calendarSignal = calSig;
