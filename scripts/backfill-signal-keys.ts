@@ -31,7 +31,7 @@ interface OldSignalItem {
   sk: string;
   id: string;
   accountId: string;
-  arcId?: string;
+  threadId?: string;
   status: string;
   gsi1pk?: string;
   gsi1sk?: string;
@@ -53,17 +53,17 @@ function deriveSignalLookupId(oldId: string, newSgnId: string): string {
 }
 
 function deriveNewGsi1pk(item: OldSignalItem): string {
-  const { accountId, arcId, status, gsi1pk } = item;
+  const { accountId, threadId, status, gsi1pk } = item;
 
   // If it already has the new ACCT# prefix format, leave it alone
   if (gsi1pk?.startsWith("ACCT#")) {
     return gsi1pk;
   }
 
-  // Old format: ARCSIG#{arcId} → New: ACCT#{accountId}#ARC#{arcId}
+  // Old format: ARCSIG#{threadId} → New: ACCT#{accountId}#ARC#{threadId}
   if (gsi1pk?.startsWith("ARCSIG#")) {
-    const oldArcId = gsi1pk.slice(7);
-    return `ACCT#${accountId}#ARC#${oldArcId}`;
+    const oldThreadId = gsi1pk.slice(7);
+    return `ACCT#${accountId}#ARC#${oldThreadId}`;
   }
 
   // Old format: QUARANTINED#{accountId} → New: ACCT#{accountId}#QUARANTINED
@@ -77,8 +77,8 @@ function deriveNewGsi1pk(item: OldSignalItem): string {
   }
 
   // Fallback: derive from current state
-  if (arcId) {
-    return `ACCT#${accountId}#ARC#${arcId}`;
+  if (threadId) {
+    return `ACCT#${accountId}#ARC#${threadId}`;
   }
   if (status === "quarantine_visible" || status === "quarantine_hidden") {
     return `ACCT#${accountId}#QUARANTINED`;
@@ -105,7 +105,7 @@ async function backfill(): Promise<void> {
     scanned += items.length;
 
     for (const item of items) {
-      // Skip non-signal items (arcs also live in this table)
+      // Skip non-signal items (threads also live in this table)
       if (!item.id || !item.accountId) {
         skipped++;
         continue;
