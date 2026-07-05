@@ -7,6 +7,7 @@ import { SQS_MESSAGE_TYPES } from "../types/index.js";
 export interface DraftSendPayload {
   signalId: string;
   accountId: string;
+  threadId: string;
   sendInitiatedAt: string;
 }
 

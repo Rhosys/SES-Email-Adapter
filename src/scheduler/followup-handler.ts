@@ -22,7 +22,7 @@ export interface FollowupMessage {
 export interface IFollowupThreadDb {
   getThread(accountId: string, threadId: string): Promise<Result<Thread | null, DbError>>;
   updateThread(accountId: string, id: string, status: ThreadStatus, lastSignalAt: string, update: UpdateThreadFields): Promise<Result<Thread, DbError>>;
-  getSignalById(accountId: string, signalId: string, threadId?: string): Promise<Result<Signal | null, DbError>>;
+  getSignalById(accountId: string, signalId: string, threadId: string): Promise<Result<Signal | null, DbError>>;
 }
 
 export class FollowupHandler {

@@ -594,10 +594,10 @@ describe("API", () => {
     });
   });
 
-  describe("GET /accounts/:accountId/signals/:id", () => {
+  describe("GET /accounts/:accountId/threads/:threadId/signals/:id", () => {
     it("returns full Signal detail", async () => {
       vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(makeSignal({ data: { htmlBody: "<p>Hello world</p>" } })));
-      const res = await req(app, "GET", `${A}/signals/SES%23msg-001`);
+      const res = await req(app, "GET", `${A}/threads/arc-001/signals/SES%23msg-001`);
       expect(res.status).toBe(200);
       const body = await res.json() as { signalId: string; data: { body?: string } };
       expect(body.signalId).toBe("SES#msg-001");
@@ -605,17 +605,17 @@ describe("API", () => {
     });
 
     it("returns 404 for unknown Signal", async () => {
-      const res = await req(app, "GET", `${A}/signals/nonexistent`);
+      const res = await req(app, "GET", `${A}/threads/arc-001/signals/nonexistent`);
       expect(res.status).toBe(404);
     });
   });
 
-  describe("PATCH /accounts/:accountId/signals/:id — draft update", () => {
+  describe("PATCH /accounts/:accountId/threads/:threadId/signals/:id — draft update", () => {
     it("updates a draft signal and returns 200 + full resource", async () => {
       const draft = makeSignal({ status: "draft" });
       vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(draft));
       vi.mocked(threadDb.updateSignal).mockResolvedValueOnce(ok({ ...draft, data: { ...draft.data, subject: "Updated subject" } }));
-      const res = await req(app, "PATCH", `${A}/signals/SES%23msg-001`, { body: { subject: "Updated subject" } });
+      const res = await req(app, "PATCH", `${A}/threads/arc-001/signals/SES%23msg-001`, { body: { subject: "Updated subject" } });
       expect(res.status).toBe(200);
       const body = await res.json() as Signal;
       expect(body.data.subject).toBe("Updated subject");
@@ -624,14 +624,14 @@ describe("API", () => {
 
     it("returns 400 when signal is not a draft", async () => {
       vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(makeSignal({ status: "active" })));
-      const res = await req(app, "PATCH", `${A}/signals/SES%23msg-001`, { body: { subject: "x" } });
+      const res = await req(app, "PATCH", `${A}/threads/arc-001/signals/SES%23msg-001`, { body: { subject: "x" } });
       expect(res.status).toBe(400);
       const body = await res.json() as { errorCode: string };
       expect(body.errorCode).toBe("SIGNAL_NOT_EDITABLE");
     });
 
     it("returns 404 for unknown signal", async () => {
-      const res = await req(app, "PATCH", `${A}/signals/nonexistent`, { body: { subject: "x" } });
+      const res = await req(app, "PATCH", `${A}/threads/arc-001/signals/nonexistent`, { body: { subject: "x" } });
       expect(res.status).toBe(404);
     });
   });
@@ -661,24 +661,24 @@ describe("API", () => {
     });
   });
 
-  describe("DELETE /accounts/:accountId/signals/:id — discard draft", () => {
+  describe("DELETE /accounts/:accountId/threads/:threadId/signals/:id — discard draft", () => {
     it("deletes a draft signal and returns 204", async () => {
       vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(makeSignal({ status: "draft" })));
-      const res = await req(app, "DELETE", `${A}/signals/SES%23msg-001`);
+      const res = await req(app, "DELETE", `${A}/threads/arc-001/signals/SES%23msg-001`);
       expect(res.status).toBe(204);
       expect(threadDb.deleteSignal).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "SES#msg-001");
     });
 
     it("returns 400 when signal is not a draft", async () => {
       vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(makeSignal({ status: "active" })));
-      const res = await req(app, "DELETE", `${A}/signals/SES%23msg-001`);
+      const res = await req(app, "DELETE", `${A}/threads/arc-001/signals/SES%23msg-001`);
       expect(res.status).toBe(400);
       const body = await res.json() as { errorCode: string };
       expect(body.errorCode).toBe("SIGNAL_NOT_DRAFT");
     });
 
     it("returns 404 for unknown signal", async () => {
-      const res = await req(app, "DELETE", `${A}/signals/nonexistent`);
+      const res = await req(app, "DELETE", `${A}/threads/arc-001/signals/nonexistent`);
       expect(res.status).toBe(404);
     });
   });

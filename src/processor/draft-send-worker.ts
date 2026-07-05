@@ -8,7 +8,7 @@ import type { DraftSendPayload } from "./draft-send-dispatcher.js";
 import { buildOutboundMsgId, buildSignalGsi3pk } from "./message-id.js";
 
 export interface IDraftSendThreadDb {
-  getSignalById(accountId: string, signalId: string): Promise<Result<Signal | null, DbError>>;
+  getSignalById(accountId: string, signalId: string, threadId: string): Promise<Result<Signal | null, DbError>>;
   updateSignalSendStatus(accountId: string, signalLookupId: string, update: {
     status: "sent" | "draft";
     sentAt?: string;
@@ -32,10 +32,10 @@ export class DraftSendWorker {
   }
 
   async process(payload: DraftSendPayload): Promise<Result<void, DbError | TransientSesError>> {
-    const { signalId, accountId, sendInitiatedAt } = payload;
+    const { signalId, accountId, threadId, sendInitiatedAt } = payload;
 
     // Re-read signal — verify still pending_send
-    const signalResult = await this.threadDb.getSignalById(accountId, signalId);
+    const signalResult = await this.threadDb.getSignalById(accountId, signalId, threadId);
     if (signalResult.isErr()) return err(signalResult.error);
     const signal = signalResult.value;
 

@@ -628,7 +628,7 @@ export class SignalProcessor {
           // Dispatch to SQS for delayed send (5 min undo window)
           if (shouldAutoSend) {
             const dispatchResult = await this.draftSendDispatcher.dispatch(
-              { signalId: draft.id, accountId, sendInitiatedAt: sendInitiatedAt! },
+              { signalId: draft.id, accountId, threadId: thread.id, sendInitiatedAt: sendInitiatedAt! },
               300,
             );
             if (dispatchResult.isErr()) {
@@ -1651,8 +1651,8 @@ export class SignalProcessor {
   // Reprocess — thin wrapper that calls processMessage with force flags
   // ---------------------------------------------------------------------------
 
-  async reprocessSignal(accountId: string, signalId: string): Promise<Result<Signal, ProcessorError | NotFoundError>> {
-    const existingResult = await this.threadDb.getSignalById(accountId, signalId);
+  async reprocessSignal(accountId: string, signalId: string, threadId: string): Promise<Result<Signal, ProcessorError | NotFoundError>> {
+    const existingResult = await this.threadDb.getSignalById(accountId, signalId, threadId);
     if (existingResult.isErr()) return err(processorError(existingResult.error));
     const existing = existingResult.value;
     if (!existing) return err(notFoundError("signal", signalId));
@@ -1682,7 +1682,7 @@ export class SignalProcessor {
     if (result.isErr()) return err(processorError(result.error));
 
     // Re-fetch the signal (it was just overwritten by processMessage)
-    const freshResult = await this.threadDb.getSignalById(accountId, signalId);
+    const freshResult = await this.threadDb.getSignalById(accountId, signalId, threadId);
     if (freshResult.isErr()) return err(processorError(freshResult.error));
     if (!freshResult.value) return err(processorError("Signal not found after reprocess"));
     return ok(freshResult.value);

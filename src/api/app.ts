@@ -18,7 +18,7 @@ import type { AuthError } from "../errors.js";
 
 import type { AccessService } from "./accountsApi.js";
 import type { JobDispatcher } from "./adminApi.js";
-import type { SignalReprocessor } from "./signalsApi.js";
+import type { SignalReprocessor } from "./threadsApi.js";
 import type { IForwardingService } from "../forwarding/forwarding-service.js";
 
 import { WellKnownApi } from "./wellKnownApi.js";
@@ -43,7 +43,7 @@ import { ErrorResponse, ErrorCode } from "./schemas.js";
 export type { AppEnv } from "./route-helpers.js";
 export type { AccessService, AccountRole, AccountUser, UserProfile } from "./accountsApi.js";
 export type { JobDispatcher } from "./adminApi.js";
-export type { SignalReprocessor } from "./signalsApi.js";
+export type { SignalReprocessor } from "./threadsApi.js";
 export type { ListThreadsParams } from "./threadsApi.js";
 export type { IForwardingService } from "../forwarding/forwarding-service.js";
 export type { CreateViewRequest, UpdateViewRequest, CreateLabelRequest, UpdateLabelRequest, CreateRuleRequest, UpdateRuleRequest } from "./requests.js";
@@ -232,7 +232,7 @@ export function createApp({ threadDb, accountDb, auditDb, auth, access, logger, 
   // -------------------------------------------------------------------------
   new AccountsApi(accountDb, access, logger, accountCreationStarter, emailService, appBaseUrl, triggerDigest).register(app, helpers);
   new ThreadsApi(threadDb, accountDb, logger, draftSendDispatcher, schedulerClient, emailService, rsvpComposer, postApprovalCalendarDeps, signalReprocessor, s3Client, emailBucket, contentCdnBaseUrl).register(app, helpers);
-  new SignalsApi(threadDb, accountDb, logger, postApprovalCalendarDeps, signalReprocessor, s3Client, emailBucket, contentCdnBaseUrl).register(app, helpers);
+  new SignalsApi(threadDb, accountDb, logger, postApprovalCalendarDeps, contentCdnBaseUrl).register(app, helpers);
   new ViewsApi(accountDb).register(app, helpers);
   new LabelsApi(accountDb).register(app, helpers);
   new RulesApi(accountDb, auditDb, astValidator, billingHandler, logger).register(app, helpers);

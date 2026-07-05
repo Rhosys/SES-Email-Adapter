@@ -165,7 +165,7 @@ describe("API route error mapping consistency", () => {
     });
   });
 
-  describe("GET /accounts/:accountId/signals/:id", () => {
+  describe("GET /accounts/:accountId/threads/:threadId/signals/:id", () => {
     it.each(scenarios)("$label", async ({ type, expectedStatus }) => {
       const threadDb = makeThreadDb();
       switch (type) {
@@ -192,7 +192,7 @@ describe("API route error mapping consistency", () => {
       }
 
       const app = makeApp(threadDb);
-      const res = await app.fetch(new Request(`http://localhost/accounts/${TEST_ACCOUNT_ID}/signals/SES%23msg-001`, {
+      const res = await app.fetch(new Request(`http://localhost/accounts/${TEST_ACCOUNT_ID}/threads/arc-001/signals/SES%23msg-001`, {
         headers: { Authorization: "Bearer valid-token" },
       }));
       expect(res.status).toBe(expectedStatus);

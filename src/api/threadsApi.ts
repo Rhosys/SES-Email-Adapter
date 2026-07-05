@@ -9,6 +9,7 @@ import { zParse } from "./validate.js";
 import { toApiThread, toApiSignal } from "./transform.js";
 import { buildScheduleName } from "../scheduler/schedule-name.js";
 import { durationToSeconds } from "../processor/retention.js";
+import { generatePresignedGet } from "../processor/presign.js";
 import { isCalendarEventSignal, isEmailSignal } from "../types/index.js";
 import type { S3Client } from "@aws-sdk/client-s3";
 import type { Thread, Signal, AnySignal, Attachment, PageParams, ThreadStatus, Workflow } from "../types/index.js";
@@ -25,7 +26,7 @@ import type { ProcessorError, NotFoundError } from "../errors.js";
 import type { Result } from "neverthrow";
 import {
   UpdateThreadRequest, ReplaceDraftSignalRequest,
-  CreateDraftSignalRequest, RsvpRequest,
+  CreateDraftSignalRequest, RsvpRequest, UpdateSignalRequest,
 } from "./requests.js";
 import {
   Thread as ThreadSchema, Signal as SignalSchema,
@@ -34,7 +35,7 @@ import {
 import type { AppEnv, RouteHelpers } from "./route-helpers.js";
 
 export interface SignalReprocessor {
-  reprocessSignal(accountId: string, signalId: string): Promise<Result<Signal, ProcessorError | NotFoundError>>;
+  reprocessSignal(accountId: string, signalId: string, threadId: string): Promise<Result<Signal, ProcessorError | NotFoundError>>;
 }
 
 export interface ListThreadsParams extends PageParams {
@@ -397,7 +398,7 @@ export class ThreadsApi {
       const undoExpiresAt = DateTime.utc().plus({ seconds: undoWindowSeconds }).toISO()!;
 
       if (!draftSendDispatcher) return err(c, 501, "Send not configured");
-      const sqsResult = await draftSendDispatcher.dispatch({ signalId: signal.id, accountId, sendInitiatedAt }, undoWindowSeconds);
+      const sqsResult = await draftSendDispatcher.dispatch({ signalId: signal.id, accountId, threadId, sendInitiatedAt }, undoWindowSeconds);
       if (sqsResult.isErr()) return err(c, 500, "Internal Server Error");
 
       const updateResult = await threadDb.updateSignalSendStatus(accountId, signal.signalLookupId, { status: "pending_send", sendInitiatedAt });
@@ -592,6 +593,139 @@ export class ThreadsApi {
       }
 
       return c.json(toApiSignal(responseSignal), 200);
+    });
+
+    // -------------------------------------------------------------------------
+    // 10. GET /accounts/{accountId}/threads/{threadId}/signals/{id} — get single signal
+    // -------------------------------------------------------------------------
+    app.openapi(route({
+      method: "get",
+      path: "/accounts/{accountId}/threads/{threadId}/signals/{id}",
+      tags: ["Threads"],
+      request: { params: z.object({ accountId: z.string(), threadId: z.string(), id: z.string() }) },
+      middleware: [authz("signals:read", c => `accounts/${c.req.param("accountId")!}/threads/${c.req.param("threadId")!}/signals/${c.req.param("id")!}`)] as const,
+      responses: { 200: { content: { "application/json": { schema: SignalSchema } }, description: "Get signal" } },
+    }), async (c) => {
+      const accountId = c.req.param("accountId")!;
+      const threadId = c.req.param("threadId")!;
+      const signalResult = await threadDb.getSignalById(accountId, c.req.param("id")!, threadId);
+      if (signalResult.isErr()) return err(c, 500, "Internal Server Error");
+      const signal = signalResult.value;
+      if (!signal) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
+      const withUrls = contentCdnBaseUrl ? withAttachmentUrls(signal, contentCdnBaseUrl) : signal;
+      return c.json(toApiSignal(withUrls), 200);
+    });
+
+    // -------------------------------------------------------------------------
+    // 11. GET /accounts/{accountId}/threads/{threadId}/signals/{id}/raw — raw email redirect
+    // -------------------------------------------------------------------------
+    app.openapi(route({
+      method: "get",
+      path: "/accounts/{accountId}/threads/{threadId}/signals/{id}/raw",
+      tags: ["Threads"],
+      request: { params: z.object({ accountId: z.string(), threadId: z.string(), id: z.string() }) },
+      middleware: [authz("signals:read", c => `accounts/${c.req.param("accountId")!}/threads/${c.req.param("threadId")!}/signals/${c.req.param("id")!}`)] as const,
+      responses: { 307: { description: "Redirect to presigned S3 URL for the raw email" } },
+    }), async (c) => {
+      const accountId = c.req.param("accountId")!;
+      const threadId = c.req.param("threadId")!;
+      const signalResult = await threadDb.getSignalById(accountId, c.req.param("id")!, threadId);
+      if (signalResult.isErr()) return err(c, 500, "Internal Server Error");
+      const signal = signalResult.value;
+      if (!signal) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
+      if (!isEmailSignal(signal)) return err(c, 400, "Signal is not an email", "SIGNAL_NOT_FOUND");
+      if (!signal.data.s3Key) return err(c, 404, "Raw email not available", "SIGNAL_NOT_FOUND");
+
+      const url = await generatePresignedGet(s3Client, emailBucket, signal.data.s3Key);
+      return c.redirect(url, 307);
+    });
+
+    // -------------------------------------------------------------------------
+    // 12. PATCH /accounts/{accountId}/threads/{threadId}/signals/{id} — update signal
+    // -------------------------------------------------------------------------
+    app.openapi(route({
+      method: "patch",
+      path: "/accounts/{accountId}/threads/{threadId}/signals/{id}",
+      tags: ["Threads"],
+      request: { params: z.object({ accountId: z.string(), threadId: z.string(), id: z.string() }) },
+      middleware: [authz("signals:write", c => `accounts/${c.req.param("accountId")!}/threads/${c.req.param("threadId")!}/signals/${c.req.param("id")!}`)] as const,
+      responses: { 200: { content: { "application/json": { schema: SignalSchema } }, description: "Update signal" } },
+    }), async (c) => {
+      const accountId = c.req.param("accountId")!;
+      const threadId = c.req.param("threadId")!;
+      const signalResult = await threadDb.getSignalById(accountId, c.req.param("id")!, threadId);
+      if (signalResult.isErr()) return err(c, 500, "Internal Server Error");
+      const signal = signalResult.value;
+      if (!signal) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
+      if (signal.status === "sent") return err(c, 400, "Signal already sent", "SIGNAL_ALREADY_SENT");
+      if (signal.status !== "draft" && signal.status !== "pending_send") return err(c, 400, "Only draft or pending signals can be updated", "SIGNAL_NOT_EDITABLE");
+
+      const body = await zParse(UpdateSignalRequest, c.req.raw);
+
+      // If pending_send, only status change to "draft" is allowed
+      if (signal.status === "pending_send") {
+        const hasContentFields = body.subject !== undefined || body.textBody !== undefined || body.from !== undefined || body.to !== undefined;
+        if (hasContentFields && body.status !== "draft") return err(c, 400, "Pending signals can only be reverted to draft", "INVALID_STATUS_TRANSITION");
+        if (body.status !== "draft") return err(c, 400, "Pending signals can only be reverted to draft", "INVALID_STATUS_TRANSITION");
+        const updateResult = await threadDb.updateSignalSendStatus(accountId, signal.signalLookupId, { status: "draft", sendInitiatedAt: null });
+        if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
+        return c.json(toApiSignal(updateResult.value), 200);
+      }
+
+      // Normal draft edit (subject, textBody, from, to)
+      const updateResult = await threadDb.updateSignal(accountId, signal.signalLookupId, body as Parameters<typeof threadDb.updateSignal>[2]);
+      if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
+      return c.json(toApiSignal(updateResult.value), 200);
+    });
+
+    // -------------------------------------------------------------------------
+    // 13. DELETE /accounts/{accountId}/threads/{threadId}/signals/{id} — delete signal
+    // -------------------------------------------------------------------------
+    app.openapi(route({
+      method: "delete",
+      path: "/accounts/{accountId}/threads/{threadId}/signals/{id}",
+      tags: ["Threads"],
+      request: { params: z.object({ accountId: z.string(), threadId: z.string(), id: z.string() }) },
+      middleware: [authz("signals:write", c => `accounts/${c.req.param("accountId")!}/threads/${c.req.param("threadId")!}/signals/${c.req.param("id")!}`)] as const,
+      responses: { 204: { description: "Signal deleted" } },
+    }), async (c) => {
+      const accountId = c.req.param("accountId")!;
+      const threadId = c.req.param("threadId")!;
+      const signalResult = await threadDb.getSignalById(accountId, c.req.param("id")!, threadId);
+      if (signalResult.isErr()) return err(c, 500, "Internal Server Error");
+      const signal = signalResult.value;
+      if (!signal) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
+      if (signal.status === "sent") return err(c, 400, "Signal already sent", "SIGNAL_ALREADY_SENT");
+      if (signal.status !== "draft") return err(c, 400, "Only draft signals can be deleted", "SIGNAL_NOT_DRAFT");
+      const deleteResult = await threadDb.deleteSignal(accountId, signal.signalLookupId);
+      if (deleteResult.isErr()) return err(c, 500, "Internal Server Error");
+      return new Response(null, { status: 204 });
+    });
+
+    // -------------------------------------------------------------------------
+    // 14. POST /accounts/{accountId}/threads/{threadId}/signals/{id}/reprocess
+    // -------------------------------------------------------------------------
+    app.openapi(route({
+      method: "post",
+      path: "/accounts/{accountId}/threads/{threadId}/signals/{id}/reprocess",
+      tags: ["Admin"],
+      request: { params: z.object({ accountId: z.string(), threadId: z.string(), id: z.string() }) },
+      middleware: [authz("management:write", "reindex")] as const,
+      responses: { 200: { content: { "application/json": { schema: SignalSchema } }, description: "Signal reprocessed" } },
+    }), async (c) => {
+      const accountId = c.req.param("accountId")!;
+      const threadId = c.req.param("threadId")!;
+      const id = c.req.param("id")!;
+      const result = await signalReprocessor.reprocessSignal(accountId, id, threadId);
+      if (result.isErr()) {
+        const { error } = result;
+        if (error.kind === "not_found") return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
+        if (error.message === "Only email signals can be reprocessed" || error.message === "Signal has no s3Key — cannot reprocess") {
+          return err(c, 400, error.message);
+        }
+        return err(c, 500, "Reprocess failed", undefined, error.message);
+      }
+      return c.json(toApiSignal(result.value), 200);
     });
   }
 }
