@@ -2,7 +2,7 @@ import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import type { Context } from "hono";
 import type { S3Client } from "@aws-sdk/client-s3";
 import type { AuditDatabase } from "../database/audit-database.js";
-import type { ArcDatabase } from "../database/arc-database.js";
+import type { ThreadDatabase } from "../database/thread-database.js";
 import type { AccountDatabase } from "../database/account-database.js";
 import type { Logger } from "../logger.js";
 import type { UserCodeExecutorClient } from "../processor/user-code-client.js";
@@ -42,7 +42,7 @@ import { ErrorResponse, ErrorCode } from "./schemas.js";
 export type { AppEnv } from "./route-helpers.js";
 export type { AccessService, AccountRole, AccountUser, UserProfile } from "./accountsApi.js";
 export type { JobDispatcher } from "./adminApi.js";
-export type { SignalReprocessor, ListArcsParams } from "./arcsApi.js";
+export type { SignalReprocessor, ListThreadsParams } from "./arcsApi.js";
 export type { IForwardingService } from "../forwarding/forwarding-service.js";
 export type { CreateViewRequest, UpdateViewRequest, CreateLabelRequest, UpdateLabelRequest, CreateRuleRequest, UpdateRuleRequest } from "./requests.js";
 
@@ -63,7 +63,7 @@ export interface AuthService {
 // ---------------------------------------------------------------------------
 
 export interface AppDeps {
-  arcDb: ArcDatabase;
+  threadDb: ThreadDatabase;
   accountDb: AccountDatabase;
   auditDb: AuditDatabase;
   auth: AuthService;
@@ -88,7 +88,7 @@ export interface AppDeps {
   triggerDigest: (accountId: string) => Promise<void>;
 }
 
-export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, forwardingService, jobDispatcher, signalReprocessor, draftSendDispatcher, accountCreationStarter, appBaseUrl, contentCdnBaseUrl, astValidator, billingHandler, emailService, domainIdentityService, rsvpComposer, postApprovalCalendarDeps, schedulerClient, s3Client, emailBucket, triggerDigest }: AppDeps) {
+export function createApp({ threadDb, accountDb, auditDb, auth, access, logger, forwardingService, jobDispatcher, signalReprocessor, draftSendDispatcher, accountCreationStarter, appBaseUrl, contentCdnBaseUrl, astValidator, billingHandler, emailService, domainIdentityService, rsvpComposer, postApprovalCalendarDeps, schedulerClient, s3Client, emailBucket, triggerDigest }: AppDeps) {
   type AppEnv = { Variables: { auth: AuthContext; authorizationVerified?: boolean; [ROUTE_NOT_FOUND_KEY]?: boolean } };
   const app = new OpenAPIHono<AppEnv>();
 
@@ -229,8 +229,8 @@ export function createApp({ arcDb, accountDb, auditDb, auth, access, logger, for
   // Route registrations
   // -------------------------------------------------------------------------
   new AccountsApi(accountDb, access, logger, accountCreationStarter, emailService, appBaseUrl, triggerDigest).register(app, helpers);
-  new ArcsApi(arcDb, accountDb, logger, draftSendDispatcher, schedulerClient, emailService, rsvpComposer, postApprovalCalendarDeps, signalReprocessor, s3Client, emailBucket, contentCdnBaseUrl).register(app, helpers);
-  new ThreadsApi(arcDb, accountDb, logger, draftSendDispatcher, schedulerClient, emailService, rsvpComposer, postApprovalCalendarDeps, signalReprocessor, s3Client, emailBucket, contentCdnBaseUrl).register(app, helpers);
+  new ArcsApi(threadDb, accountDb, logger, draftSendDispatcher, schedulerClient, emailService, rsvpComposer, postApprovalCalendarDeps, signalReprocessor, s3Client, emailBucket, contentCdnBaseUrl).register(app, helpers);
+  new ThreadsApi(threadDb, accountDb, logger, draftSendDispatcher, schedulerClient, emailService, rsvpComposer, postApprovalCalendarDeps, signalReprocessor, s3Client, emailBucket, contentCdnBaseUrl).register(app, helpers);
   new ViewsApi(accountDb).register(app, helpers);
   new LabelsApi(accountDb).register(app, helpers);
   new RulesApi(accountDb, auditDb, astValidator, billingHandler, logger).register(app, helpers);

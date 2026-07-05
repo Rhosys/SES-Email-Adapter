@@ -31,7 +31,7 @@ import {
   ListThreadsResponse, ListSignalsResponse,
 } from "./schemas.js";
 import type { AppEnv, RouteHelpers } from "./route-helpers.js";
-import type { SignalReprocessor, ListArcsParams } from "./arcsApi.js";
+import type { SignalReprocessor, ListThreadsParams } from "./arcsApi.js";
 
 function page<K extends string, T>(key: K, items: T[], nextCursor?: string): Record<K, T[]> & { pagination: Pagination } {
   return { [key]: items, pagination: { cursor: nextCursor ?? null } } as Record<K, T[]> & { pagination: Pagination };
@@ -44,7 +44,7 @@ function withAttachmentUrls<T extends AnySignal>(signal: T, cdnBase: string): T 
 
 export class ThreadsApi {
   constructor(
-    private readonly arcDb: ThreadDatabase,
+    private readonly threadDb: ThreadDatabase,
     private readonly accountDb: AccountDatabase,
     private readonly logger: Logger,
     private readonly draftSendDispatcher: DraftSendDispatcher,
@@ -59,7 +59,7 @@ export class ThreadsApi {
   ) {}
 
   register(app: OpenAPIHono<AppEnv>, { authz, err, route }: RouteHelpers): void {
-    const { arcDb, accountDb, logger, draftSendDispatcher, schedulerClient, emailService, rsvpComposer, postApprovalCalendarDeps, signalReprocessor, s3Client, emailBucket, contentCdnBaseUrl } = this;
+    const { threadDb, accountDb, logger, draftSendDispatcher, schedulerClient, emailService, rsvpComposer, postApprovalCalendarDeps, signalReprocessor, s3Client, emailBucket, contentCdnBaseUrl } = this;
 
     // -------------------------------------------------------------------------
     // 1. GET /accounts/{accountId}/threads — list threads
@@ -72,7 +72,7 @@ export class ThreadsApi {
         params: z.object({ accountId: z.string() }),
         query: z.object({ workflow: z.string().optional(), label: z.string().optional(), status: z.string().optional(), cursor: z.string().optional(), limit: z.string().optional(), q: z.string().optional() }),
       },
-      middleware: [authz("arcs:read", c => `accounts/${c.req.param("accountId")!}/arcs`)] as const,
+      middleware: [authz("threads:read", c => `accounts/${c.req.param("accountId")!}/threads`)] as const,
       responses: { 200: { content: { "application/json": { schema: ListThreadsResponse } }, description: "List threads" } },
     }), async (c) => {
       const accountId = c.req.param("accountId")!;
@@ -83,20 +83,20 @@ export class ThreadsApi {
           ...(query["cursor"] ? { cursor: query["cursor"] } : {}),
           ...(query["limit"] ? { limit: parseInt(query["limit"], 10) } : {}),
         };
-        const result = await arcDb.searchThreads(accountId, q, params);
+        const result = await threadDb.searchThreads(accountId, q, params);
         if (result.isErr()) return err(c, 500, "Internal Server Error");
-        return c.json(page("arcs", result.value.items.map(toApiThread), result.value.nextCursor), 200);
+        return c.json(page("threads", result.value.items.map(toApiThread), result.value.nextCursor), 200);
       }
-      const params: ListArcsParams = {
+      const params: ListThreadsParams = {
         ...(query["workflow"] ? { workflow: query["workflow"] as Workflow } : {}),
         ...(query["label"] ? { label: query["label"] } : {}),
         ...(query["status"] ? { status: query["status"] as ThreadStatus } : {}),
         ...(query["cursor"] ? { cursor: query["cursor"] } : {}),
         ...(query["limit"] ? { limit: parseInt(query["limit"], 10) } : {}),
       };
-      const result = await arcDb.listThreads(accountId, params);
+      const result = await threadDb.listThreads(accountId, params);
       if (result.isErr()) return err(c, 500, "Internal Server Error");
-      return c.json(page("arcs", result.value.items.map(toApiThread), result.value.nextCursor), 200);
+      return c.json(page("threads", result.value.items.map(toApiThread), result.value.nextCursor), 200);
     });
 
     // -------------------------------------------------------------------------
@@ -107,16 +107,16 @@ export class ThreadsApi {
       path: "/accounts/{accountId}/threads/{threadId}",
       tags: ["Threads"],
       request: { params: z.object({ accountId: z.string(), threadId: z.string() }) },
-      middleware: [authz("arcs:read", c => `accounts/${c.req.param("accountId")!}/arcs/${c.req.param("threadId")!}`)] as const,
+      middleware: [authz("threads:read", c => `accounts/${c.req.param("accountId")!}/threads/${c.req.param("threadId")!}`)] as const,
       responses: { 200: { content: { "application/json": { schema: ThreadSchema } }, description: "Get thread" } },
     }), async (c) => {
       const accountId = c.req.param("accountId")!;
       const threadId = c.req.param("threadId")!;
-      const arcResult = await arcDb.getThread(accountId, threadId);
-      if (arcResult.isErr()) return err(c, 500, "Internal Server Error");
-      const arc = arcResult.value;
-      if (!arc) return err(c, 404, "Thread not found", "THREAD_NOT_FOUND");
-      return c.json(toApiThread(arc), 200);
+      const threadResult = await threadDb.getThread(accountId, threadId);
+      if (threadResult.isErr()) return err(c, 500, "Internal Server Error");
+      const thread = threadResult.value;
+      if (!thread) return err(c, 404, "Thread not found", "THREAD_NOT_FOUND");
+      return c.json(toApiThread(thread), 200);
     });
 
     // -------------------------------------------------------------------------
@@ -127,19 +127,19 @@ export class ThreadsApi {
       path: "/accounts/{accountId}/threads/{threadId}",
       tags: ["Threads"],
       request: { params: z.object({ accountId: z.string(), threadId: z.string() }) },
-      middleware: [authz("arcs:write", c => `accounts/${c.req.param("accountId")!}/arcs/${c.req.param("threadId")!}`)] as const,
+      middleware: [authz("threads:write", c => `accounts/${c.req.param("accountId")!}/threads/${c.req.param("threadId")!}`)] as const,
       responses: { 200: { content: { "application/json": { schema: ThreadSchema } }, description: "Update thread" } },
     }), async (c) => {
       const accountId = c.req.param("accountId")!;
       const threadId = c.req.param("threadId")!;
-      const arcResult = await arcDb.getThread(accountId, threadId);
-      if (arcResult.isErr()) return err(c, 500, "Internal Server Error");
-      const arc = arcResult.value;
-      if (!arc) return err(c, 404, "Thread not found", "THREAD_NOT_FOUND");
+      const threadResult = await threadDb.getThread(accountId, threadId);
+      if (threadResult.isErr()) return err(c, 500, "Internal Server Error");
+      const thread = threadResult.value;
+      if (!thread) return err(c, 404, "Thread not found", "THREAD_NOT_FOUND");
       const body = await zParse(UpdateThreadRequest, c.req.raw);
 
       if (body.status === "report_violation") {
-        const signalsResult = await arcDb.listSignals(accountId, arc.id, { limit: 1 });
+        const signalsResult = await threadDb.listSignals(accountId, thread.id, { limit: 1 });
         if (signalsResult.isErr()) return err(c, 500, "Internal Server Error");
         const signal = signalsResult.value.items[0];
         if (signal) {
@@ -149,10 +149,10 @@ export class ThreadsApi {
           const saveSenderResult = await accountDb.saveSender(accountId, recipientAddress, senderETLD1, "report_violation");
           if (saveSenderResult.isErr()) return err(c, 500, "Internal Server Error");
           logger.track("Thread reported as GDPR violation. Sender domain blocked with report_violation policy and thread deleted.", {
-            code: "api.thread.report_violation", signal, arc, senderDomain: senderETLD1,
+            code: "api.thread.report_violation", signal, thread, senderDomain: senderETLD1,
           });
         }
-        const updateResult = await arcDb.updateThread(accountId, arc.id, "deleted", arc.lastSignalAt, {});
+        const updateResult = await threadDb.updateThread(accountId, thread.id, "deleted", thread.lastSignalAt, {});
         if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
         return c.json(toApiThread(updateResult.value), 200);
       }
@@ -161,35 +161,35 @@ export class ThreadsApi {
       if (body.urgency !== undefined) fields.urgency = body.urgency;
       if (body.labels !== undefined) fields.labels = body.labels;
       if (body.followupAt !== undefined) fields.followupAt = body.followupAt;
-      const status = body.status ?? arc.status;
-      const lastSignalAt = body.lastSignalAt ?? arc.lastSignalAt;
+      const status = body.status ?? thread.status;
+      const lastSignalAt = body.lastSignalAt ?? thread.lastSignalAt;
 
       if (body.followupAt) {
         const followupTime = new Date(body.followupAt).getTime();
         const now = Date.now();
         if (followupTime <= now) return err(c, 400, "followupAt must be in the future");
-        if (arc.retentionDuration) {
-          const retentionSeconds = durationToSeconds(arc.retentionDuration);
+        if (thread.retentionDuration) {
+          const retentionSeconds = durationToSeconds(thread.retentionDuration);
           if (retentionSeconds != null) {
-            const expiresAt = new Date(arc.createdAt).getTime() + retentionSeconds * 1000;
+            const expiresAt = new Date(thread.createdAt).getTime() + retentionSeconds * 1000;
             if (followupTime > expiresAt) return err(c, 400, "followupAt exceeds thread retention expiration");
           }
         }
       }
 
-      const statusChanged = body.status !== undefined && body.status !== arc.status;
-      const updateResult = await arcDb.updateThread(accountId, arc.id, status, lastSignalAt, fields);
+      const statusChanged = body.status !== undefined && body.status !== thread.status;
+      const updateResult = await threadDb.updateThread(accountId, thread.id, status, lastSignalAt, fields);
       if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
 
       if (body.followupAt && schedulerClient) {
-        const signalsResult = await arcDb.listSignals(accountId, arc.id, { limit: 1 });
-        const signalId = signalsResult.isOk() ? signalsResult.value.items[0]?.id ?? arc.id : arc.id;
+        const signalsResult = await threadDb.listSignals(accountId, thread.id, { limit: 1 });
+        const signalId = signalsResult.isOk() ? signalsResult.value.items[0]?.id ?? thread.id : thread.id;
         const scheduleResult = await schedulerClient.createFollowup({
-          accountId, signalId, threadId: arc.id, fireAt: body.followupAt,
+          accountId, signalId, threadId: thread.id, fireAt: body.followupAt,
           suffix: "followup", sqsMessageAttributeMessageType: "signal_followup",
         });
         if (scheduleResult.isErr()) {
-          if (statusChanged) await arcDb.updateThread(accountId, arc.id, arc.status, arc.lastSignalAt, {});
+          if (statusChanged) await threadDb.updateThread(accountId, thread.id, thread.status, thread.lastSignalAt, {});
           return err(c, 500, "Failed to create followup schedule");
         }
       }
@@ -208,21 +208,21 @@ export class ThreadsApi {
         params: z.object({ accountId: z.string(), threadId: z.string() }),
         query: z.object({ cursor: z.string().optional(), limit: z.string().optional() }),
       },
-      middleware: [authz("signals:read", c => `accounts/${c.req.param("accountId")!}/arcs/${c.req.param("threadId")!}/signals`)] as const,
+      middleware: [authz("signals:read", c => `accounts/${c.req.param("accountId")!}/threads/${c.req.param("threadId")!}/signals`)] as const,
       responses: { 200: { content: { "application/json": { schema: ListSignalsResponse } }, description: "List signals for thread" } },
     }), async (c) => {
       const accountId = c.req.param("accountId")!;
       const threadId = c.req.param("threadId")!;
-      const arcResult = await arcDb.getThread(accountId, threadId);
-      if (arcResult.isErr()) return err(c, 500, "Internal Server Error");
-      const arc = arcResult.value;
-      if (!arc) return err(c, 404, "Thread not found", "THREAD_NOT_FOUND");
+      const threadResult = await threadDb.getThread(accountId, threadId);
+      if (threadResult.isErr()) return err(c, 500, "Internal Server Error");
+      const thread = threadResult.value;
+      if (!thread) return err(c, 404, "Thread not found", "THREAD_NOT_FOUND");
       const query = c.req.query();
       const params: PageParams = {
         ...(query["cursor"] ? { cursor: query["cursor"] } : {}),
         ...(query["limit"] ? { limit: parseInt(query["limit"], 10) } : {}),
       };
-      const result = await arcDb.listSignals(accountId, arc.id, params);
+      const result = await threadDb.listSignals(accountId, thread.id, params);
       if (result.isErr()) return err(c, 500, "Internal Server Error");
 
       const signals = result.value.items as unknown as AnySignal[];
@@ -232,7 +232,7 @@ export class ThreadsApi {
       if (calendarEventSignals.length > 0) {
         const veventUids = new Set(calendarEventSignals.map(s => s.data.veventUid));
         for (const veventUid of veventUids) {
-          const responseResult = await arcDb.getLatestCalendarResponse(accountId, arc.id, veventUid);
+          const responseResult = await threadDb.getLatestCalendarResponse(accountId, thread.id, veventUid);
           if (responseResult.isOk() && responseResult.value) {
             const resp = responseResult.value.data;
             enrichments.set(veventUid, { decision: resp.decision, respondedAt: resp.respondedAt });
@@ -260,22 +260,22 @@ export class ThreadsApi {
       path: "/accounts/{accountId}/threads/{threadId}/signals",
       tags: ["Threads"],
       request: { params: z.object({ accountId: z.string(), threadId: z.string() }) },
-      middleware: [authz("signals:write", c => `accounts/${c.req.param("accountId")!}/arcs/${c.req.param("threadId")!}/signals`)] as const,
+      middleware: [authz("signals:write", c => `accounts/${c.req.param("accountId")!}/threads/${c.req.param("threadId")!}/signals`)] as const,
       responses: { 201: { content: { "application/json": { schema: SignalSchema } }, description: "Create draft signal" } },
     }), async (c) => {
       const accountId = c.req.param("accountId")!;
       const threadId = c.req.param("threadId")!;
-      const arcResult = await arcDb.getThread(accountId, threadId);
-      if (arcResult.isErr()) return err(c, 500, "Internal Server Error");
-      const arc = arcResult.value;
-      if (!arc || arc.status === "deleted") return err(c, 404, "Thread not found", "THREAD_NOT_FOUND");
+      const threadResult = await threadDb.getThread(accountId, threadId);
+      if (threadResult.isErr()) return err(c, 500, "Internal Server Error");
+      const thread = threadResult.value;
+      if (!thread || thread.status === "deleted") return err(c, 404, "Thread not found", "THREAD_NOT_FOUND");
       const body = await zParse(CreateDraftSignalRequest, c.req.raw);
       const now = DateTime.utc().toISO()!;
       const id = generateId("sgn-");
       const signal: Signal = {
         id,
         signalLookupId: id,
-        threadId: arc.id,
+        threadId: thread.id,
         accountId,
         source: "user",
         type: "email",
@@ -292,16 +292,16 @@ export class ThreadsApi {
           attachments: [],
           headers: {},
           recipientAddress: body.from.address,
-          workflow: arc.workflow,
-          workflowData: { workflow: arc.workflow } as Signal["data"]["workflowData"],
+          workflow: thread.workflow,
+          workflowData: { workflow: thread.workflow } as Signal["data"]["workflowData"],
           tags: [],
           summary: "",
           s3Key: "",
         },
       };
-      const createResult = await arcDb.createSignal(signal);
+      const createResult = await threadDb.createSignal(signal);
       if (createResult.isErr()) return err(c, 500, "Internal Server Error");
-      await arcDb.updateThread(accountId, arc.id, arc.status, now, {});
+      await threadDb.updateThread(accountId, thread.id, thread.status, now, {});
       return c.json(toApiSignal(createResult.value), 201);
     });
 
@@ -313,24 +313,24 @@ export class ThreadsApi {
       path: "/accounts/{accountId}/threads/{threadId}/signals/{id}",
       tags: ["Threads"],
       request: { params: z.object({ accountId: z.string(), threadId: z.string(), id: z.string() }) },
-      middleware: [authz("signals:write", c => `accounts/${c.req.param("accountId")!}/arcs/${c.req.param("threadId")!}/signals/${c.req.param("id")!}`)] as const,
+      middleware: [authz("signals:write", c => `accounts/${c.req.param("accountId")!}/threads/${c.req.param("threadId")!}/signals/${c.req.param("id")!}`)] as const,
       responses: { 200: { content: { "application/json": { schema: SignalSchema } }, description: "Replace draft signal" } },
     }), async (c) => {
       const accountId = c.req.param("accountId")!;
       const threadId = c.req.param("threadId")!;
-      const arcResult = await arcDb.getThread(accountId, threadId);
-      if (arcResult.isErr()) return err(c, 500, "Internal Server Error");
-      const arc = arcResult.value;
-      if (!arc) return err(c, 404, "Thread not found", "THREAD_NOT_FOUND");
-      const signalResult = await arcDb.getSignalById(accountId, c.req.param("id")!, threadId);
+      const threadResult = await threadDb.getThread(accountId, threadId);
+      if (threadResult.isErr()) return err(c, 500, "Internal Server Error");
+      const thread = threadResult.value;
+      if (!thread) return err(c, 404, "Thread not found", "THREAD_NOT_FOUND");
+      const signalResult = await threadDb.getSignalById(accountId, c.req.param("id")!, threadId);
       if (signalResult.isErr()) return err(c, 500, "Internal Server Error");
       const signal = signalResult.value;
       if (!signal) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
-      if (signal.threadId !== arc.id) return err(c, 400, "Signal does not belong to this thread", "SIGNAL_THREAD_MISMATCH");
+      if (signal.threadId !== thread.id) return err(c, 400, "Signal does not belong to this thread", "SIGNAL_THREAD_MISMATCH");
       if (signal.status === "sent") return err(c, 400, "Signal already sent", "SIGNAL_ALREADY_SENT");
       if (signal.status !== "draft") return err(c, 400, "Only draft signals can be replaced", "SIGNAL_NOT_DRAFT");
       const body = await zParse(ReplaceDraftSignalRequest, c.req.raw);
-      const updateResult = await arcDb.updateSignal(accountId, signal.signalLookupId, {
+      const updateResult = await threadDb.updateSignal(accountId, signal.signalLookupId, {
         from: body.from as Signal["data"]["from"],
         to: body.to as Signal["data"]["to"],
         subject: body.subject,
@@ -348,22 +348,22 @@ export class ThreadsApi {
       path: "/accounts/{accountId}/threads/{threadId}/signals/{id}/send",
       tags: ["Threads"],
       request: { params: z.object({ accountId: z.string(), threadId: z.string(), id: z.string() }) },
-      middleware: [authz("signals:write", c => `accounts/${c.req.param("accountId")!}/arcs/${c.req.param("threadId")!}/signals/${c.req.param("id")!}`)] as const,
+      middleware: [authz("signals:write", c => `accounts/${c.req.param("accountId")!}/threads/${c.req.param("threadId")!}/signals/${c.req.param("id")!}`)] as const,
       responses: { 200: { content: { "application/json": { schema: z.object({}) } }, description: "Send draft signal" } },
     }), async (c) => {
       const accountId = c.req.param("accountId")!;
       const threadId = c.req.param("threadId")!;
 
-      const arcResult = await arcDb.getThread(accountId, threadId);
-      if (arcResult.isErr()) return err(c, 500, "Internal Server Error");
-      const arc = arcResult.value;
-      if (!arc) return err(c, 404, "Thread not found", "THREAD_NOT_FOUND");
+      const threadResult = await threadDb.getThread(accountId, threadId);
+      if (threadResult.isErr()) return err(c, 500, "Internal Server Error");
+      const thread = threadResult.value;
+      if (!thread) return err(c, 404, "Thread not found", "THREAD_NOT_FOUND");
 
-      const signalResult = await arcDb.getSignalById(accountId, c.req.param("id")!, threadId);
+      const signalResult = await threadDb.getSignalById(accountId, c.req.param("id")!, threadId);
       if (signalResult.isErr()) return err(c, 500, "Internal Server Error");
       const signal = signalResult.value;
       if (!signal) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
-      if (signal.threadId !== arc.id) return err(c, 400, "Signal does not belong to this thread", "SIGNAL_THREAD_MISMATCH");
+      if (signal.threadId !== thread.id) return err(c, 400, "Signal does not belong to this thread", "SIGNAL_THREAD_MISMATCH");
       if (signal.status !== "draft") return err(c, 400, "Only draft signals can be sent", "SIGNAL_NOT_DRAFT");
 
       const mxResult = await validateRecipientMx(signal.data.to);
@@ -371,17 +371,16 @@ export class ThreadsApi {
         return err(c, 422, "Invalid recipient domain", "INVALID_RECIPIENT_DOMAIN", { invalidDomains: mxResult.error.invalidDomains });
       }
 
-      if (signal.data.from.address !== arc.recipientAddress) {
+      if (signal.data.from.address !== thread.recipientAddress) {
         logger.track("Draft send: from address does not match thread alias — rejecting.", {
-          code: "draft_send.from_address_mismatch", signal, arc,
-          fromAddress: signal.data.from.address, threadRecipientAddress: arc.recipientAddress,
+          code: "draft_send.from_address_mismatch", signal, thread,
+          fromAddress: signal.data.from.address, threadRecipientAddress: thread.recipientAddress,
         });
         return err(c, 422, "From address does not match thread alias");
       }
 
       // ── Undo-send mechanism ──────────────────────────────────────────────
-      // See arcsApi.ts send handler for full explanation of the flow.
-      // TL;DR: SQS delay = undo window. If user cancels (PATCHes back to draft),
+      // SQS delay = undo window. If user cancels (PATCHes back to draft),
       // the delayed SQS message fires but DraftSendWorker discards it.
       const undoWindowSeconds = computeUndoWindowSeconds(signal.data.textBody);
       const sendInitiatedAt = DateTime.utc().toISO()!;
@@ -391,7 +390,7 @@ export class ThreadsApi {
       const sqsResult = await draftSendDispatcher.dispatch({ signalId: signal.id, accountId, sendInitiatedAt }, undoWindowSeconds);
       if (sqsResult.isErr()) return err(c, 500, "Internal Server Error");
 
-      const updateResult = await arcDb.updateSignalSendStatus(accountId, signal.signalLookupId, { status: "pending_send", sendInitiatedAt });
+      const updateResult = await threadDb.updateSignalSendStatus(accountId, signal.signalLookupId, { status: "pending_send", sendInitiatedAt });
       if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
 
       return c.json({ ...toApiSignal(updateResult.value), undoExpiresAt }, 200);
@@ -405,19 +404,19 @@ export class ThreadsApi {
       path: "/accounts/{accountId}/threads/{threadId}/unsubscribe",
       tags: ["Threads"],
       request: { params: z.object({ accountId: z.string(), threadId: z.string() }) },
-      middleware: [authz("signals:write", c => `accounts/${c.req.param("accountId")!}/arcs/${c.req.param("threadId")!}`)] as const,
+      middleware: [authz("signals:write", c => `accounts/${c.req.param("accountId")!}/threads/${c.req.param("threadId")!}`)] as const,
       responses: {
         200: { content: { "application/json": { schema: z.object({ status: z.string(), url: z.string().optional() }) } }, description: "Unsubscribe initiated and thread archived" },
       },
     }), async (c) => {
       const accountId = c.req.param("accountId")!;
       const threadId = c.req.param("threadId")!;
-      const arcResult = await arcDb.getThread(accountId, threadId);
-      if (arcResult.isErr()) return err(c, 500, "Internal Server Error");
-      const arc = arcResult.value;
-      if (!arc) return err(c, 404, "Thread not found", "THREAD_NOT_FOUND");
+      const threadResult = await threadDb.getThread(accountId, threadId);
+      if (threadResult.isErr()) return err(c, 500, "Internal Server Error");
+      const thread = threadResult.value;
+      if (!thread) return err(c, 404, "Thread not found", "THREAD_NOT_FOUND");
 
-      const signalsResult = await arcDb.listSignals(accountId, arc.id, { limit: 20 });
+      const signalsResult = await threadDb.listSignals(accountId, thread.id, { limit: 20 });
       if (signalsResult.isErr()) return err(c, 500, "Internal Server Error");
 
       const emailSignal = signalsResult.value.items.find(
@@ -440,14 +439,14 @@ export class ThreadsApi {
           clearTimeout(timeout);
           if (!response.ok) {
             logger.warn("Unsubscribe POST returned non-2xx.", {
-              code: "unsubscribe.post_failed", signal: emailSignal, arc, url: unsubscribe.url, statusCode: response.status,
+              code: "unsubscribe.post_failed", signal: emailSignal, thread, url: unsubscribe.url, statusCode: response.status,
             });
             return err(c, 503, "Unsubscribe endpoint returned an error");
           }
         } catch (e) {
           clearTimeout(timeout);
           logger.warn("Unsubscribe POST failed — network error or timeout.", {
-            code: "unsubscribe.post_error", signal: emailSignal, arc, url: unsubscribe.url, error: e,
+            code: "unsubscribe.post_error", signal: emailSignal, thread, url: unsubscribe.url, error: e,
           });
           return err(c, 503, "Failed to reach unsubscribe endpoint");
         }
@@ -455,11 +454,11 @@ export class ThreadsApi {
 
       if (unsubscribe.type === "mailto") {
         logger.track("Unsubscribe via mailto — user must complete externally.", {
-          code: "unsubscribe.mailto_pending", signal: emailSignal, arc, url: unsubscribe.url,
+          code: "unsubscribe.mailto_pending", signal: emailSignal, thread, url: unsubscribe.url,
         });
       }
 
-      const archiveResult = await arcDb.updateThread(accountId, arc.id, "archived", arc.lastSignalAt, {});
+      const archiveResult = await threadDb.updateThread(accountId, thread.id, "archived", thread.lastSignalAt, {});
       if (archiveResult.isErr()) return err(c, 500, "Internal Server Error");
 
       const responseUrl = unsubscribe.type !== "server" ? unsubscribe.url : undefined;
@@ -474,29 +473,29 @@ export class ThreadsApi {
       path: "/accounts/{accountId}/threads/{threadId}/signals/{id}/rsvp",
       tags: ["Threads"],
       request: { params: z.object({ accountId: z.string(), threadId: z.string(), id: z.string() }) },
-      middleware: [authz("signals:write", c => `accounts/${c.req.param("accountId")!}/arcs/${c.req.param("threadId")!}/signals/${c.req.param("id")!}`)] as const,
+      middleware: [authz("signals:write", c => `accounts/${c.req.param("accountId")!}/threads/${c.req.param("threadId")!}/signals/${c.req.param("id")!}`)] as const,
       responses: { 200: { content: { "application/json": { schema: SignalSchema } }, description: "RSVP to calendar invite" } },
     }), async (c) => {
       const accountId = c.req.param("accountId")!;
       const threadId = c.req.param("threadId")!;
       if (!emailService || !rsvpComposer) return err(c, 501, "RSVP not configured");
 
-      const arcResult = await arcDb.getThread(accountId, threadId);
-      if (arcResult.isErr()) return err(c, 500, "Internal Server Error");
-      const arc = arcResult.value;
-      if (!arc) return err(c, 404, "Thread not found", "THREAD_NOT_FOUND");
+      const threadResult = await threadDb.getThread(accountId, threadId);
+      if (threadResult.isErr()) return err(c, 500, "Internal Server Error");
+      const thread = threadResult.value;
+      if (!thread) return err(c, 404, "Thread not found", "THREAD_NOT_FOUND");
 
-      const signalResult = await arcDb.getSignalById(accountId, c.req.param("id")!, threadId);
+      const signalResult = await threadDb.getSignalById(accountId, c.req.param("id")!, threadId);
       if (signalResult.isErr()) return err(c, 500, "Internal Server Error");
       const signal = signalResult.value;
       if (!signal) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
-      if (signal.threadId !== arc.id) return err(c, 400, "Signal does not belong to this thread", "SIGNAL_THREAD_MISMATCH");
+      if (signal.threadId !== thread.id) return err(c, 400, "Signal does not belong to this thread", "SIGNAL_THREAD_MISMATCH");
       if (!isCalendarEventSignal(signal)) return err(c, 400, "Signal is not a calendar event", "NOT_CALENDAR_EVENT");
 
       const calendarData = signal.data;
       const body = await zParse(RsvpRequest, c.req.raw);
 
-      const emailSignalResult = await arcDb.getSignalById(accountId, calendarData.linkedSignalId, arc.id);
+      const emailSignalResult = await threadDb.getSignalById(accountId, calendarData.linkedSignalId, thread.id);
       const emailSignal = emailSignalResult.isOk() ? emailSignalResult.value : null;
       const recipientAddress = emailSignal?.data && "recipientAddress" in emailSignal.data ? (emailSignal.data as { recipientAddress: string }).recipientAddress : "";
 
@@ -513,7 +512,7 @@ export class ThreadsApi {
         const misconfigSignal: Signal<DomainMisconfigurationData> = {
           id: misconfigSignalId,
           signalLookupId: misconfigSignalId,
-          threadId: arc.id,
+          threadId: thread.id,
           accountId,
           source: "signal",
           type: "domain_misconfiguration",
@@ -527,7 +526,7 @@ export class ThreadsApi {
             domain: aliasDomain,
           },
         };
-        await arcDb.saveSignal(misconfigSignal);
+        await threadDb.saveSignal(misconfigSignal);
         return err(c, 422, "Domain misconfiguration", "DOMAIN_MISCONFIGURATION", { domain: aliasDomain, reason: "DKIM + SPF not configured for alias domain" });
       }
 
@@ -550,7 +549,7 @@ export class ThreadsApi {
       const responseSignal: Signal<CalendarResponseData> = {
         id: responseSignalId,
         signalLookupId: responseSignalId,
-        threadId: arc.id,
+        threadId: thread.id,
         accountId,
         source: "user",
         type: "calendar_response",
@@ -566,7 +565,7 @@ export class ThreadsApi {
         },
       };
 
-      const saveResult = await arcDb.saveSignal(responseSignal);
+      const saveResult = await threadDb.saveSignal(responseSignal);
       if (saveResult.isErr()) return err(c, 500, "Internal Server Error");
 
       if (schedulerClient && calendarData.startTime) {
@@ -575,11 +574,11 @@ export class ThreadsApi {
           const scheduleName = buildScheduleName(accountId, signal.id, `rsvp.${eventStart.toFormat("yyyyMMdd")}`);
           const deleteResult = await schedulerClient.deleteFollowup(scheduleName);
           if (deleteResult.isErr()) {
-            logger.warn("Failed to delete RSVP reminder schedule — fire-time check will handle.", { code: "rsvp.cancel.delete_failed", signal, arc, scheduleName, error: deleteResult.error });
+            logger.warn("Failed to delete RSVP reminder schedule — fire-time check will handle.", { code: "rsvp.cancel.delete_failed", signal, thread, scheduleName, error: deleteResult.error });
           }
         }
       } else if (schedulerClient && !calendarData.startTime) {
-        logger.track("Calendar event has no startTime — skipping RSVP schedule cancellation.", { code: "rsvp.cancel.no_start_time", signal, arc });
+        logger.track("Calendar event has no startTime — skipping RSVP schedule cancellation.", { code: "rsvp.cancel.no_start_time", signal, thread });
       }
 
       return c.json(toApiSignal(responseSignal), 200);
