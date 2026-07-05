@@ -21,7 +21,8 @@ import type { EmailService } from "../email/email-service.js";
 import type { sendRsvp as SendRsvpFn } from "../processor/calendar/rsvp-composer.js";
 import type { PostApprovalCalendarHandlerDeps } from "../processor/calendar/post-approval-handler.js";
 import type { SchedulerClient } from "../scheduler/scheduler-client.js";
-import type { ProcessorError } from "../errors.js";
+import type { ProcessorError, NotFoundError } from "../errors.js";
+import type { Result } from "neverthrow";
 import {
   UpdateThreadRequest, ReplaceDraftSignalRequest,
   CreateDraftSignalRequest, RsvpRequest,
@@ -31,7 +32,16 @@ import {
   ListThreadsResponse, ListSignalsResponse,
 } from "./schemas.js";
 import type { AppEnv, RouteHelpers } from "./route-helpers.js";
-import type { SignalReprocessor, ListThreadsParams } from "./arcsApi.js";
+
+export interface SignalReprocessor {
+  reprocessSignal(accountId: string, signalId: string): Promise<Result<Signal, ProcessorError | NotFoundError>>;
+}
+
+export interface ListThreadsParams extends PageParams {
+  workflow?: Workflow;
+  label?: string;
+  status?: ThreadStatus;
+}
 
 function page<K extends string, T>(key: K, items: T[], nextCursor?: string): Record<K, T[]> & { pagination: Pagination } {
   return { [key]: items, pagination: { cursor: nextCursor ?? null } } as Record<K, T[]> & { pagination: Pagination };

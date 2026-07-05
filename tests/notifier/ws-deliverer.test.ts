@@ -21,7 +21,7 @@ const device: Device = {
 const payload: NotificationPayload = {
   type: "signal",
   signalId: "SES#msg-001",
-  arcId: "arc-uuid-1",
+  threadId: "arc-uuid-1",
   sender: "alice@example.com",
   senderName: "Alice",
   subject: "Test subject",

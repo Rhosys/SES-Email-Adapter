@@ -33,7 +33,7 @@ const { mockUpsertEmbedding, mockAddEmbeddingToCache, mockGenerateForModel, mock
 // Mock MultiClusterAuroraWriter
 // ---------------------------------------------------------------------------
 
-vi.mock("../../../src/database/arc-matcher.js", () => ({
+vi.mock("../../../src/database/thread-matcher.js", () => ({
   createSearchDatabase: () => ({
     upsertEmbedding: (...args: unknown[]) => mockUpsertEmbedding(...args),
   }),
@@ -43,8 +43,8 @@ vi.mock("../../../src/database/arc-matcher.js", () => ({
 // Mock ArcDatabase (addEmbeddingToCache)
 // ---------------------------------------------------------------------------
 
-vi.mock("../../../src/database/arc-database.js", () => ({
-  ArcDatabase: class {
+vi.mock("../../../src/database/thread-database.js", () => ({
+  ThreadDatabase: class {
     addEmbeddingToCache = mockAddEmbeddingToCache;
   },
 }));
@@ -116,7 +116,7 @@ const cachedSignal1 = {
   sk: "#",
   id: "SES#cached1",
   accountId: "acct-1",
-  arcId: "arc-c1",
+  threadId: "arc-c1",
   data: {
     recipientAddress: "cached1@example.com",
     embeddings: { [TARGET_MODEL_ID]: [0.1, 0.2, 0.3] },
@@ -129,7 +129,7 @@ const cachedSignal2 = {
   sk: "#",
   id: "SES#cached2",
   accountId: "acct-2",
-  arcId: "arc-c2",
+  threadId: "arc-c2",
   data: {
     recipientAddress: "cached2@example.com",
     embeddings: { [TARGET_MODEL_ID]: [0.4, 0.5, 0.6] },
@@ -143,7 +143,7 @@ const s3Signal1 = {
   sk: "#",
   id: "SES#s3regen1",
   accountId: "acct-3",
-  arcId: "arc-s1",
+  threadId: "arc-s1",
   data: {
     recipientAddress: "s3regen1@example.com",
     embeddings: { "amazon.titan-embed-text-v3:0": [0.9, 0.8] },
@@ -156,7 +156,7 @@ const s3Signal2 = {
   sk: "#",
   id: "SES#s3regen2",
   accountId: "acct-4",
-  arcId: "arc-s2",
+  threadId: "arc-s2",
   data: {
     recipientAddress: "s3regen2@example.com",
     embeddings: { "amazon.titan-embed-text-v3:0": [0.7, 0.8] },
@@ -170,7 +170,7 @@ const unrecoverableNoS3Key = {
   sk: "#",
   id: "SES#unrec1",
   accountId: "acct-5",
-  arcId: "arc-u1",
+  threadId: "arc-u1",
   data: {
     recipientAddress: "unrec1@example.com",
     embeddings: {},
@@ -183,7 +183,7 @@ const unrecoverableExpiredS3 = {
   sk: "#",
   id: "SES#unrec2",
   accountId: "acct-6",
-  arcId: "arc-u2",
+  threadId: "arc-u2",
   data: {
     recipientAddress: "unrec2@example.com",
     embeddings: {},

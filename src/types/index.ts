@@ -326,7 +326,7 @@ export interface AliasSender {
 // Email template for auto_draft rule actions
 export interface TemplateFunction {
   name: string;      // placeholder name used in subject/body as {{fn.name}}
-  code: string;      // user-authored JS: (signal, arc) => string
+  code: string;      // user-authored JS: (signal, thread) => string
   lastError?: string; // annotation written when execution fails
 }
 
@@ -531,7 +531,7 @@ export function isAutoSendBlockedSignal(signal: AnySignal): signal is Signal<Aut
 }
 
 // ---------------------------------------------------------------------------
-// Arc (materialized aggregate of related Signals)
+// Thread (materialized aggregate of related Signals)
 // ---------------------------------------------------------------------------
 
 export const THREAD_STATUSES = ["active", "archived", "deleted", "report_violation"] as const;
@@ -567,6 +567,8 @@ export interface Thread {
 
 
 
+
+
 // ---------------------------------------------------------------------------
 // View (configured filter over Threads — replaces Tab)
 // ---------------------------------------------------------------------------
@@ -584,7 +586,7 @@ export interface View {
   icon?: string;
   color?: string;
   workflow?: Workflow;    // undefined = all workflows
-  labels: string[];      // Arc must have ALL of these labels
+  labels: string[];      // Thread must have ALL of these labels
   sortField: SortField;
   sortDirection: SortDirection;
   position: number;

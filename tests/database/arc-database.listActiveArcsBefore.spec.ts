@@ -1,17 +1,17 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mockClient } from "aws-sdk-client-mock";
 import { DynamoDBDocumentClient, QueryCommand } from "@aws-sdk/lib-dynamodb";
-import { ArcDatabase } from "../../src/database/arc-database.js";
+import { ThreadDatabase } from "../../src/database/thread-database.js";
 import { createMockLogger } from "../helpers/mock-logger.js";
 
 const ddbMock = mockClient(DynamoDBDocumentClient);
 
-describe("ArcDatabase.listActiveArcsBefore", () => {
-  let db: ArcDatabase;
+describe("ThreadDatabase.listActiveThreadsBefore", () => {
+  let db: ThreadDatabase;
 
   beforeEach(() => {
     ddbMock.reset();
-    db = new ArcDatabase(createMockLogger());
+    db = new ThreadDatabase(createMockLogger());
   });
 
   afterEach(() => {
@@ -24,7 +24,7 @@ describe("ArcDatabase.listActiveArcsBefore", () => {
     const accountId = "acct-123";
     const beforeDate = "2025-05-04T00:00:00.000Z";
 
-    await db.listActiveArcsBefore(accountId, beforeDate);
+    await db.listActiveThreadsBefore(accountId, beforeDate);
 
     const calls = ddbMock.commandCalls(QueryCommand);
     expect(calls).toHaveLength(1);
@@ -43,7 +43,7 @@ describe("ArcDatabase.listActiveArcsBefore", () => {
   it("uses ScanIndexForward: true for ascending sort order", async () => {
     ddbMock.on(QueryCommand).resolves({ Items: [] });
 
-    await db.listActiveArcsBefore("acct-1", "2025-01-01T00:00:00.000Z");
+    await db.listActiveThreadsBefore("acct-1", "2025-01-01T00:00:00.000Z");
 
     const calls = ddbMock.commandCalls(QueryCommand);
     const input = calls[0]!.args[0].input;
@@ -57,7 +57,7 @@ describe("ArcDatabase.listActiveArcsBefore", () => {
     ];
     ddbMock.on(QueryCommand).resolves({ Items: fakeArcs });
 
-    const result = await db.listActiveArcsBefore("acct-1", "2025-05-01T00:00:00.000Z");
+    const result = await db.listActiveThreadsBefore("acct-1", "2025-05-01T00:00:00.000Z");
 
     expect(result.isOk()).toBe(true);
     expect(result._unsafeUnwrap()).toEqual(fakeArcs);
@@ -67,7 +67,7 @@ describe("ArcDatabase.listActiveArcsBefore", () => {
   it("returns empty array when no items match", async () => {
     ddbMock.on(QueryCommand).resolves({ Items: undefined });
 
-    const result = await db.listActiveArcsBefore("acct-1", "2025-01-01T00:00:00.000Z");
+    const result = await db.listActiveThreadsBefore("acct-1", "2025-01-01T00:00:00.000Z");
 
     expect(result.isOk()).toBe(true);
     expect(result._unsafeUnwrap()).toEqual([]);
@@ -76,7 +76,7 @@ describe("ArcDatabase.listActiveArcsBefore", () => {
   it("returns a DbError when DynamoDB fails", async () => {
     ddbMock.on(QueryCommand).rejects(new Error("ProvisionedThroughputExceededException"));
 
-    const result = await db.listActiveArcsBefore("acct-1", "2025-01-01T00:00:00.000Z");
+    const result = await db.listActiveThreadsBefore("acct-1", "2025-01-01T00:00:00.000Z");
 
     expect(result.isErr()).toBe(true);
     expect(result._unsafeUnwrapErr().kind).toBe("db_error");

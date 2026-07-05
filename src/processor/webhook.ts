@@ -1,11 +1,11 @@
 import type { Logger } from "../logger.js";
-import type { Signal, Arc } from "../types/index.js";
+import type { Signal, Thread } from "../types/index.js";
 import { ok, err } from "../errors.js";
 import type { Result } from "../errors.js";
 
 export interface WebhookPayload {
   id: string;
-  arcId: string | undefined;
+  threadId: string | undefined;
   receivedAt: string;
   from: { address: string; name?: string };
   to: Array<{ address: string; name?: string }>;
@@ -19,10 +19,10 @@ export interface WebhookPayload {
   labels: string[];
 }
 
-export function buildWebhookPayload(signal: Signal, arc: Arc | null): WebhookPayload {
+export function buildWebhookPayload(signal: Signal, thread: Thread | null): WebhookPayload {
   return {
     id: signal.id,
-    arcId: signal.arcId,
+    threadId: signal.threadId,
     receivedAt: signal.data.receivedAt,
     from: { address: signal.data.from.address, ...(signal.data.from.name ? { name: signal.data.from.name } : {}) },
     to: signal.data.to.map(a => ({ address: a.address, ...(a.name ? { name: a.name } : {}) })),
@@ -33,7 +33,7 @@ export function buildWebhookPayload(signal: Signal, arc: Arc | null): WebhookPay
     workflow: signal.data.workflow,
     workflowData: signal.data.workflowData as unknown as Record<string, unknown>,
     summary: signal.data.summary,
-    labels: arc?.labels ?? [],
+    labels: thread?.labels ?? [],
   };
 }
 

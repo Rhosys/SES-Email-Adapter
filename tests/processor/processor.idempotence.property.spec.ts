@@ -2,15 +2,15 @@ import type { IForwardingService } from "../../src/forwarding/forwarding-service
 import { describe, it, expect, vi } from "vitest";
 import { ok } from "../../src/errors.js";
 import { SignalProcessor, SYSTEM_RULES } from "../../src/processor/processor.js";
-import type { ArcMatcher, InboundSignalMessage } from "../../src/processor/processor.js";
+import type { ThreadMatcherPort, InboundSignalMessage } from "../../src/processor/processor.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
 import { makeSharedNewDeps, makeRuleEvaluator3 } from "./_shared-new-deps.js";
-import { makeArcDbMock, makeAccountDbMock, makeProcessingDbMock, applyCtx } from "./_helpers.js";
-import type { ArcDatabase } from "../../src/database/arc-database.js";
+import { makeThreadDbMock, makeAccountDbMock, makeProcessingDbMock, applyCtx } from "./_helpers.js";
+import type { ThreadDatabase } from "../../src/database/thread-database.js";
 import type { ContentSanitizerClient } from "../../src/processor/content-sanitizer-client.js";
 import type { SignalClassifier, ClassificationOutput } from "../../src/classifier/classifier.js";
 import type { EmbeddingGenerator } from "../../src/embedding/embedding-generator.js";
-import type { MultiClusterAuroraWriter } from "../../src/database/arc-matcher.js";
+import type { MultiClusterAuroraWriter } from "../../src/database/thread-matcher.js";
 import type { Signal, Alias, AliasSender } from "../../src/types/index.js";
 import type { EmailService } from "../../src/email/email-service.js";
 import { createMockLogger } from "../helpers/mock-logger.js";
@@ -29,7 +29,7 @@ vi.mock("../../src/embedding/cluster-registry.js", () => {
     CLUSTER_REGISTRY: Object.freeze([cluster]),
     getActiveClusters: () => [cluster],
     getRegistryById: (id: string) => (id === "cluster-a" ? cluster : null),
-    getPrimaryArcMatcherRegistry: () => cluster,
+    getPrimaryThreadMatcherRegistry: () => cluster,
     getSecondaryClusters: () => [],
   };
 });
@@ -105,7 +105,7 @@ describe("Cross-layer idempotence — live writes + cache + Aurora", () => {
     return { classify: vi.fn().mockResolvedValue(ok({ ...validClassification })) };
   }
 
-  function makeArcMatcher(): ArcMatcher {
+  function makeArcMatcher(): ThreadMatcherPort {
     return {
       findMatch: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
       upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
@@ -125,12 +125,12 @@ describe("Cross-layer idempotence — live writes + cache + Aurora", () => {
   }
 
   it("dedup path: second processing of same messageId is a no-op", async () => {
-    const arcDb = {
-      ...makeArcDbMock(),
+    const threadDb = {
+      ...makeThreadDbMock(),
       getSignalByMessageId: vi.fn()
         .mockReturnValueOnce(Promise.resolve(ok(null)))
         .mockReturnValueOnce(Promise.resolve(ok({ id: "SES#test-msg-001" }))),
-    } as unknown as ArcDatabase;
+    } as unknown as ThreadDatabase;
     const accountDb = makeAccountDbMock(TEST_ACCOUNT_ID);
     applyCtx(accountDb, DEFAULT_CTX);
     vi.mocked(accountDb.getSender).mockReturnValue(Promise.resolve(ok(DEFAULT_SENDER_ENTRY)));
@@ -150,12 +150,12 @@ describe("Cross-layer idempotence — live writes + cache + Aurora", () => {
 
     const mockLogger = createMockLogger();
     const processor = new SignalProcessor({ ...makeSharedNewDeps(),
-      arcDb, accountDb, processingDb,
+      threadDb, accountDb, processingDb,
       contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
       classifier: makeClassifier(),
       embeddingGenerator,
       auroraWriter,
-      arcMatcher: makeArcMatcher(),
+      threadMatcher: makeArcMatcher(),
       ruleEvaluator: makeRuleEvaluator3(mockLogger),
       logger: mockLogger,
       notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
@@ -171,21 +171,21 @@ describe("Cross-layer idempotence — live writes + cache + Aurora", () => {
     await processor.processRecord(message, 1);
     await processor.processRecord(message, 1);
 
-    expect(arcDb.getSignalByMessageId).toHaveBeenCalledTimes(2);
-    expect(arcDb.saveSignal).toHaveBeenCalledTimes(1);
+    expect(threadDb.getSignalByMessageId).toHaveBeenCalledTimes(2);
+    expect(threadDb.saveSignal).toHaveBeenCalledTimes(1);
     expect(auroraWriter.upsertEmbedding).toHaveBeenCalledTimes(1);
     expect(embeddingGenerator.generateForModel).toHaveBeenCalledTimes(1);
   });
 
   it("race condition: both runs produce identical embeddings and Aurora upsert params", async () => {
     const savedSignals: Signal[] = [];
-    const arcDb = {
-      ...makeArcDbMock(),
+    const threadDb = {
+      ...makeThreadDbMock(),
       saveSignal: vi.fn().mockImplementation((signal: Signal) => {
         savedSignals.push(signal);
         return Promise.resolve(ok(undefined));
       }),
-    } as unknown as ArcDatabase;
+    } as unknown as ThreadDatabase;
     const accountDb = makeAccountDbMock(TEST_ACCOUNT_ID);
     applyCtx(accountDb, DEFAULT_CTX);
     vi.mocked(accountDb.getSender).mockReturnValue(Promise.resolve(ok(DEFAULT_SENDER_ENTRY)));
@@ -206,12 +206,12 @@ describe("Cross-layer idempotence — live writes + cache + Aurora", () => {
 
     const mockLogger = createMockLogger();
     const processor = new SignalProcessor({ ...makeSharedNewDeps(),
-      arcDb, accountDb, processingDb,
+      threadDb, accountDb, processingDb,
       contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
       classifier: makeClassifier(),
       embeddingGenerator,
       auroraWriter,
-      arcMatcher: makeArcMatcher(),
+      threadMatcher: makeArcMatcher(),
       ruleEvaluator: makeRuleEvaluator3(mockLogger),
       logger: mockLogger,
       notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },

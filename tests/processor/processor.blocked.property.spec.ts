@@ -4,12 +4,12 @@ import { ok } from "../../src/errors.js";
 import { SignalProcessor, SYSTEM_RULES } from "../../src/processor/processor.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
 import { makeSharedNewDeps, makeRuleEvaluator3 } from "./_shared-new-deps.js";
-import type { InboundSignalMessage, ArcMatcher } from "../../src/processor/processor.js";
-import { makeArcDbMock, makeAccountDbMock, makeProcessingDbMock, applyCtx } from "./_helpers.js";
+import type { InboundSignalMessage, ThreadMatcherPort } from "../../src/processor/processor.js";
+import { makeThreadDbMock, makeAccountDbMock, makeProcessingDbMock, applyCtx } from "./_helpers.js";
 import type { ContentSanitizerClient } from "../../src/processor/content-sanitizer-client.js";
 import type { SignalClassifier, ClassificationOutput } from "../../src/classifier/classifier.js";
 import type { EmbeddingGenerator, EmbeddingResult } from "../../src/embedding/embedding-generator.js";
-import type { MultiClusterAuroraWriter } from "../../src/database/arc-matcher.js";
+import type { MultiClusterAuroraWriter } from "../../src/database/thread-matcher.js";
 import type { Alias, AliasSender, Rule, UnknownSenderPolicy, Workflow } from "../../src/types/index.js";
 import type { EmailService } from "../../src/email/email-service.js";
 import { createMockLogger } from "../helpers/mock-logger.js";
@@ -28,7 +28,7 @@ vi.mock("../../src/embedding/cluster-registry.js", () => {
     CLUSTER_REGISTRY: Object.freeze([entry]),
     getActiveClusters: () => [entry],
     getRegistryById: (id: string) => (id === entry.registryId ? entry : null),
-    getPrimaryArcMatcherRegistry: () => entry,
+    getPrimaryThreadMatcherRegistry: () => entry,
   };
 });
 
@@ -41,10 +41,10 @@ describe("Blocked/quarantined signals never trigger saveArc", () => {
   const TEST_ACCOUNT_ID = "acct-prop2";
 
   function makeStore() {
-    const arcDb = makeArcDbMock();
+    const threadDb = makeThreadDbMock();
     const accountDb = makeAccountDbMock(TEST_ACCOUNT_ID);
     const processingDb = makeProcessingDbMock();
-    return { arcDb, accountDb, processingDb };
+    return { threadDb, accountDb, processingDb };
   }
 
   function makeContentSanitizer(fromDomain: string): ContentSanitizerClient {
@@ -89,7 +89,7 @@ describe("Blocked/quarantined signals never trigger saveArc", () => {
     };
   }
 
-  function makeArcMatcher(): ArcMatcher {
+  function makeArcMatcher(): ThreadMatcherPort {
     return {
       findMatch: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
       upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
@@ -193,7 +193,7 @@ describe("Blocked/quarantined signals never trigger saveArc", () => {
 
   it.each(strategies)("$label — saveArc is never called", async (strategy) => {
     const mockLogger = createMockLogger();
-    const { arcDb, accountDb, processingDb } = makeStore();
+    const { threadDb, accountDb, processingDb } = makeStore();
 
     const aliasConfig: Alias = {
       id: "cfg-prop2",
@@ -218,14 +218,14 @@ describe("Blocked/quarantined signals never trigger saveArc", () => {
     (accountDb.listEnabledRules as ReturnType<typeof vi.fn>).mockReturnValue(Promise.resolve(ok(strategy.rules)));
 
     const processor = new SignalProcessor({ ...makeSharedNewDeps(),
-      arcDb,
+      threadDb,
       accountDb,
       processingDb,
       contentSanitizer: strategy.contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
       classifier: strategy.classifier,
       embeddingGenerator: makeEmbeddingGenerator(),
       auroraWriter: makeAuroraWriter(),
-      arcMatcher: makeArcMatcher(),
+      threadMatcher: makeArcMatcher(),
       ruleEvaluator: makeRuleEvaluator3(mockLogger),
       logger: mockLogger,
       notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
@@ -239,6 +239,6 @@ describe("Blocked/quarantined signals never trigger saveArc", () => {
 
     await processor.processRecord(makeMessage("msg-blocked-test"), 1);
 
-    expect(arcDb.saveArc).not.toHaveBeenCalled();
+    expect(threadDb.saveThread).not.toHaveBeenCalled();
   });
 });

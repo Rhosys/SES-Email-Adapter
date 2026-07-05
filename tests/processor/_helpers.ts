@@ -1,6 +1,6 @@
 import { vi } from "vitest";
 import { ok } from "../../src/errors.js";
-import type { ArcDatabase } from "../../src/database/arc-database.js";
+import type { ThreadDatabase } from "../../src/database/thread-database.js";
 import type { AccountDatabase } from "../../src/database/account-database.js";
 import type { ProcessingDatabase } from "../../src/database/processing-database.js";
 import type { Account, Alias, Domain, UnknownSenderPolicy } from "../../src/types/index.js";
@@ -12,20 +12,20 @@ import type { Account, Alias, Domain, UnknownSenderPolicy } from "../../src/type
 // ---------------------------------------------------------------------------
 
 /**
- * ArcDatabase mock — arc and signal persistence methods used by the processor.
+ * ThreadDatabase mock — thread and signal persistence methods used by the processor.
  */
-export function makeArcDbMock(): ArcDatabase {
+export function makeThreadDbMock(): ThreadDatabase {
   return {
     getSignalByMessageId: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
     saveSignal: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     updateSignalSendStatus: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     updateSignalRetention: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    getArc: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
+    getThread: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
     findSignalByEmailMessageId: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-    fastFindArcByAlternativeLookupKey: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
-    saveArc: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    updateArc: vi.fn().mockReturnValue(Promise.resolve(ok({ id: "arc-mock" }))),
-  } as unknown as ArcDatabase;
+    findThreadByGroupingKey: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
+    saveThread: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+    updateThread: vi.fn().mockReturnValue(Promise.resolve(ok({ id: "arc-mock" }))),
+  } as unknown as ThreadDatabase;
 }
 
 /**

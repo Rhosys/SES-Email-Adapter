@@ -5,18 +5,18 @@ import { ok, err } from "neverthrow";
 /**
  * Construct a proxy UID for forwarding calendar invites.
  *
- * Format: {accountId}.{arcId}.{originalVeventUid}.{hmac16}@{serviceDomain}
+ * Format: {accountId}.{threadId}.{originalVeventUid}.{hmac16}@{serviceDomain}
  *
- * The HMAC is computed over "{accountId}.{arcId}.{originalVeventUid}" using
+ * The HMAC is computed over "{accountId}.{threadId}.{originalVeventUid}" using
  * the encapsulated 32-byte secret, then truncated to 16 chars of base64url (no padding).
  */
 export async function buildProxyUid(opts: {
   accountId: string;
-  arcId: string;
+  threadId: string;
   originalVeventUid: string;
   serviceDomain: string;
 }): Promise<string> {
-  const payload = `${opts.accountId}.${opts.arcId}.${opts.originalVeventUid}`;
+  const payload = `${opts.accountId}.${opts.threadId}.${opts.originalVeventUid}`;
   const hmac16 = await computeHmac16(payload);
   return `${payload}.${hmac16}@${opts.serviceDomain}`;
 }
@@ -31,7 +31,7 @@ export async function buildProxyUid(opts: {
 export async function validateProxyUid(opts: {
   proxyUid: string;
   serviceDomain: string;
-}): Promise<Result<{ accountId: string; arcId: string; originalVeventUid: string }, string>> {
+}): Promise<Result<{ accountId: string; threadId: string; originalVeventUid: string }, string>> {
   // Split on @ to separate local-part from domain
   const atIndex = opts.proxyUid.lastIndexOf("@");
   if (atIndex === -1) {
@@ -45,9 +45,9 @@ export async function validateProxyUid(opts: {
     return err("domain mismatch");
   }
 
-  // Split local-part into segments: accountId, arcId, originalVeventUid, hmac16
+  // Split local-part into segments: accountId, threadId, originalVeventUid, hmac16
   // The originalVeventUid may contain dots, so we need at least 4 segments.
-  // The last segment is the hmac16, the first is accountId, the second is arcId,
+  // The last segment is the hmac16, the first is accountId, the second is threadId,
   // and everything in between is the originalVeventUid.
   const segments = localPart.split(".");
   if (segments.length < 4) {
@@ -55,21 +55,21 @@ export async function validateProxyUid(opts: {
   }
 
   const accountId = segments[0]!;
-  const arcId = segments[1]!;
+  const threadId = segments[1]!;
   const hmac16 = segments[segments.length - 1]!;
   const originalVeventUid = segments.slice(2, -1).join(".");
 
-  if (!accountId || !arcId || !originalVeventUid || !hmac16) {
+  if (!accountId || !threadId || !originalVeventUid || !hmac16) {
     return err("empty segment in proxy UID");
   }
 
   // Recompute HMAC and compare
-  const payload = `${accountId}.${arcId}.${originalVeventUid}`;
+  const payload = `${accountId}.${threadId}.${originalVeventUid}`;
   const valid = await validateHmac16(payload, hmac16);
 
   if (!valid) {
     return err("hmac mismatch");
   }
 
-  return ok({ accountId, arcId, originalVeventUid });
+  return ok({ accountId, threadId, originalVeventUid });
 }

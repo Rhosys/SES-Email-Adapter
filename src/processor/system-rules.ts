@@ -4,13 +4,13 @@ import type { Rule } from "../types/index.js";
 // System rules — applied to every account; users can enable/disable individually
 // ---------------------------------------------------------------------------
 
-const in_ = (label: string) => ({ "in": [label, { "var": "arc.labels" }] });
+const in_ = (label: string) => ({ "in": [label, { "var": "thread.labels" }] });
 const wf_ = (w: string) => ({ "==": [{ "var": "signal.workflow" }, w] });
 const wfData_ = (field: string) => ({ "var": `signal.workflowData.${field}` });
 
 export const SYSTEM_RULES: Rule[] = [
   // --- Sender / content gating (1–9) ----------------------------------------
-  { id: "SR-01", accountId: "SYSTEM", name: "Auto-approve sender on matched conversation", condition: JSON.stringify({ "and": [wf_("conversation"), in_("system:sender:untrusted"), { "var": "isMatchedArc" }] }), actions: [{ type: "approve_sender" }], status: "enabled", priorityOrder: 100, createdAt: "", updatedAt: "" },
+  { id: "SR-01", accountId: "SYSTEM", name: "Auto-approve sender on matched conversation", condition: JSON.stringify({ "and": [wf_("conversation"), in_("system:sender:untrusted"), { "var": "isMatchedThread" }] }), actions: [{ type: "approve_sender" }], status: "enabled", priorityOrder: 100, createdAt: "", updatedAt: "" },
   { id: "SR-02", accountId: "SYSTEM", name: "Show onboarding emails with action URL in quarantine", condition: JSON.stringify({ "and": [wf_("onboarding"), { "!!": [wfData_("actionUrl")] }] }), actions: [{ type: "quarantine_visible" }], status: "enabled", priorityOrder: 150, createdAt: "", updatedAt: "" },
   { id: "SR-03", accountId: "SYSTEM", name: "Block onboarding emails", condition: JSON.stringify(wf_("onboarding")), actions: [{ type: "quarantine_hidden" }], status: "enabled", priorityOrder: 200, createdAt: "", updatedAt: "" },
   { id: "SR-04", accountId: "SYSTEM", name: "Block notice emails", condition: JSON.stringify(wf_("notice")), actions: [{ type: "block_hidden" }], status: "enabled", priorityOrder: 300, createdAt: "", updatedAt: "" },

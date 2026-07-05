@@ -1,7 +1,7 @@
 import type { Result } from "neverthrow";
 import { ok } from "../errors.js";
 import type { DbError } from "../errors.js";
-import type { Signal, Arc, AuthData } from "../types/index.js";
+import type { Signal, Thread, AuthData } from "../types/index.js";
 import type { WorkflowHandler } from "./types.js";
 import type { DeviceStore } from "../notifier/device-store.js";
 import type { Deliverer, DeliveryResult } from "../notifier/types.js";
@@ -29,7 +29,7 @@ export class AuthWorkflowHandler implements WorkflowHandler {
     private readonly logger: Logger,
   ) {}
 
-  async execute(signal: Signal, arc: Arc, accountId: string): Promise<Result<void, DbError>> {
+  async execute(signal: Signal, thread: Thread, accountId: string): Promise<Result<void, DbError>> {
     const workflowData = signal.data.workflowData as AuthData;
 
     if (!workflowData.code) {
@@ -40,10 +40,10 @@ export class AuthWorkflowHandler implements WorkflowHandler {
     await this.deliverToAll(accountId, payload);
 
     // Archive — auth threads don't need to stay in the inbox
-    const archiveResult = await this.threadDatabase.updateThread(accountId, arc.id, "archived", arc.lastSignalAt, {});
+    const archiveResult = await this.threadDatabase.updateThread(accountId, thread.id, "archived", thread.lastSignalAt, {});
     if (archiveResult.isErr()) {
       this.logger.warn("Failed to archive auth thread after OTP push", {
-        code: "workflow.auth.archive_failed", signal, arc, error: archiveResult.error,
+        code: "workflow.auth.archive_failed", signal, thread, error: archiveResult.error,
       });
     }
 

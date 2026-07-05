@@ -46,7 +46,7 @@ function extractMessageType(record: MinimalSqsRecord, parsedBody: Record<string,
 
 function isValidRsvpReminderPayload(body: unknown): body is RsvpReminderMessage {
   const msg = body as Record<string, unknown>;
-  return Boolean(msg.accountId && msg.signalId && msg.arcId);
+  return Boolean(msg.accountId && msg.signalId && msg.threadId);
 }
 
 // ---------------------------------------------------------------------------
@@ -55,7 +55,7 @@ function isValidRsvpReminderPayload(body: unknown): body is RsvpReminderMessage 
 
 describe("Handler routing — rsvp_reminder", () => {
   it("routes via SQS message attribute messageType: rsvp_reminder", () => {
-    const body: RsvpReminderMessage = { accountId: "acc-001", signalId: "sgn-001", arcId: "arc-001" };
+    const body: RsvpReminderMessage = { accountId: "acc-001", signalId: "sgn-001", threadId: "arc-001" };
     const record = makeSqsRecord(body, {
       messageType: { stringValue: "rsvp_reminder", dataType: "String" },
     });
@@ -72,7 +72,7 @@ describe("Handler routing — rsvp_reminder", () => {
       sqsMessageAttributeMessageType: "rsvp_reminder",
       accountId: "acc-002",
       signalId: "sgn-002",
-      arcId: "arc-002",
+      threadId: "arc-002",
     };
     const record = makeSqsRecord(body); // no messageAttributes
 
@@ -88,7 +88,7 @@ describe("Handler routing — rsvp_reminder", () => {
       sqsMessageAttributeMessageType: "signal_followup", // wrong in body
       accountId: "acc-003",
       signalId: "sgn-003",
-      arcId: "arc-003",
+      threadId: "arc-003",
     };
     const record = makeSqsRecord(body, {
       messageType: { stringValue: "rsvp_reminder", dataType: "String" },
@@ -101,7 +101,7 @@ describe("Handler routing — rsvp_reminder", () => {
   });
 
   it("malformed payload (missing accountId) → validation fails", () => {
-    const body = { sqsMessageAttributeMessageType: "rsvp_reminder", signalId: "sgn-004", arcId: "arc-004" };
+    const body = { sqsMessageAttributeMessageType: "rsvp_reminder", signalId: "sgn-004", threadId: "arc-004" };
     const record = makeSqsRecord(body);
 
     const parsed = JSON.parse(record.body);
@@ -112,12 +112,12 @@ describe("Handler routing — rsvp_reminder", () => {
   });
 
   it("malformed payload (missing signalId) → validation fails", () => {
-    const body = { sqsMessageAttributeMessageType: "rsvp_reminder", accountId: "acc-005", arcId: "arc-005" };
+    const body = { sqsMessageAttributeMessageType: "rsvp_reminder", accountId: "acc-005", threadId: "arc-005" };
 
     expect(isValidRsvpReminderPayload(body)).toBe(false);
   });
 
-  it("malformed payload (missing arcId) → validation fails", () => {
+  it("malformed payload (missing threadId) → validation fails", () => {
     const body = { sqsMessageAttributeMessageType: "rsvp_reminder", accountId: "acc-006", signalId: "sgn-006" };
 
     expect(isValidRsvpReminderPayload(body)).toBe(false);

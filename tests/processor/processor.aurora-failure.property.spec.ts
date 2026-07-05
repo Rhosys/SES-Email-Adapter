@@ -2,14 +2,14 @@ import type { IForwardingService } from "../../src/forwarding/forwarding-service
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { ok, err, dbError } from "../../src/errors.js";
 import { SignalProcessor, SYSTEM_RULES } from "../../src/processor/processor.js";
-import type { ArcMatcher, InboundSignalMessage } from "../../src/processor/processor.js";
+import type { ThreadMatcherPort, InboundSignalMessage } from "../../src/processor/processor.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
 import { makeSharedNewDeps, makeRuleEvaluator3 } from "./_shared-new-deps.js";
-import { makeArcDbMock, makeAccountDbMock, makeProcessingDbMock, applyCtx } from "./_helpers.js";
+import { makeThreadDbMock, makeAccountDbMock, makeProcessingDbMock, applyCtx } from "./_helpers.js";
 import type { ContentSanitizerClient } from "../../src/processor/content-sanitizer-client.js";
 import type { SignalClassifier, ClassificationOutput } from "../../src/classifier/classifier.js";
 import type { EmbeddingGenerator } from "../../src/embedding/embedding-generator.js";
-import type { MultiClusterAuroraWriter } from "../../src/database/arc-matcher.js";
+import type { MultiClusterAuroraWriter } from "../../src/database/thread-matcher.js";
 import type { Signal, Alias, AliasSender } from "../../src/types/index.js";
 import type { EmailService } from "../../src/email/email-service.js";
 import { createMockLogger, type MockLogger } from "../helpers/mock-logger.js";
@@ -41,7 +41,7 @@ vi.mock("../../src/embedding/cluster-registry.js", () => {
       if (id === "cluster-b") return clusterB;
       return null;
     },
-    getPrimaryArcMatcherRegistry: () => clusterA,
+    getPrimaryThreadMatcherRegistry: () => clusterA,
     getSecondaryClusters: () => [clusterB],
   };
 });
@@ -102,7 +102,7 @@ describe("Aurora cluster failure preserves the DynamoDB cache entry", () => {
     const accountDb = makeAccountDbMock(TEST_ACCOUNT_ID);
     applyCtx(accountDb, DEFAULT_CTX);
     vi.mocked(accountDb.getSender).mockReturnValue(Promise.resolve(ok(DEFAULT_SENDER_ENTRY)));
-    return { arcDb: makeArcDbMock(), accountDb, processingDb: makeProcessingDbMock() };
+    return { threadDb: makeThreadDbMock(), accountDb, processingDb: makeProcessingDbMock() };
   }
 
   function makeContentSanitizer(): ContentSanitizerClient {
@@ -125,7 +125,7 @@ describe("Aurora cluster failure preserves the DynamoDB cache entry", () => {
     };
   }
 
-  function makeArcMatcher(): ArcMatcher {
+  function makeArcMatcher(): ThreadMatcherPort {
     return {
       findMatch: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
       upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
@@ -150,7 +150,7 @@ describe("Aurora cluster failure preserves the DynamoDB cache entry", () => {
   ];
 
   it.each(failureCases)("$label — DynamoDB cache still contains both models' vectors", async ({ failingClusterId }) => {
-    const { arcDb, accountDb, processingDb } = makeStore();
+    const { threadDb, accountDb, processingDb } = makeStore();
     const embeddingGenerator: EmbeddingGenerator = {
       generateForModel: vi.fn().mockResolvedValue(
         ok({ modelId: "amazon.titan-embed-text-v2:0", vector: VECTOR_A, dimensions: 1024 }),
@@ -171,12 +171,12 @@ describe("Aurora cluster failure preserves the DynamoDB cache entry", () => {
     };
 
     const processor = new SignalProcessor({ ...makeSharedNewDeps(),
-arcDb, accountDb, processingDb,
+threadDb, accountDb, processingDb,
       contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
       classifier: { classify: vi.fn().mockResolvedValue(ok({ ...validClassification })) },
       embeddingGenerator,
       auroraWriter,
-      arcMatcher: makeArcMatcher(),
+      threadMatcher: makeArcMatcher(),
       ruleEvaluator: makeRuleEvaluator3(mockLogger),
       logger: mockLogger,
       notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
@@ -190,7 +190,7 @@ arcDb, accountDb, processingDb,
 
     await processor.processRecord(makeMessage("test-msg-aurora"), 1);
 
-    const saveSignalCalls = (arcDb.saveSignal as ReturnType<typeof vi.fn>).mock.calls;
+    const saveSignalCalls = (threadDb.saveSignal as ReturnType<typeof vi.fn>).mock.calls;
     expect(saveSignalCalls.length).toBeGreaterThanOrEqual(1);
     const savedSignal = saveSignalCalls[0]![0] as Signal;
 
@@ -200,7 +200,7 @@ arcDb, accountDb, processingDb,
   });
 
   it.each(failureCases)("$label — non-failing cluster still receives its upsert", async ({ failingClusterId, succeedingClusterId }) => {
-    const { arcDb, accountDb, processingDb } = makeStore();
+    const { threadDb, accountDb, processingDb } = makeStore();
     const embeddingGenerator: EmbeddingGenerator = {
       generateForModel: vi.fn().mockResolvedValue(
         ok({ modelId: "amazon.titan-embed-text-v2:0", vector: VECTOR_A, dimensions: 1024 }),
@@ -221,12 +221,12 @@ arcDb, accountDb, processingDb,
     };
 
     const processor = new SignalProcessor({ ...makeSharedNewDeps(),
-arcDb, accountDb, processingDb,
+threadDb, accountDb, processingDb,
       contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
       classifier: { classify: vi.fn().mockResolvedValue(ok({ ...validClassification })) },
       embeddingGenerator,
       auroraWriter,
-      arcMatcher: makeArcMatcher(),
+      threadMatcher: makeArcMatcher(),
       ruleEvaluator: makeRuleEvaluator3(mockLogger),
       logger: mockLogger,
       notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mockClient } from "aws-sdk-client-mock";
 import { DynamoDBDocumentClient, GetCommand, PutCommand, QueryCommand, DeleteCommand, UpdateCommand, BatchWriteCommand, ScanCommand } from "@aws-sdk/lib-dynamodb";
 import { AccountDatabase } from "../../src/database/account-database.js";
-import { ArcDatabase } from "../../src/database/arc-database.js";
+import { ThreadDatabase } from "../../src/database/thread-database.js";
 import { ProcessingDatabase } from "../../src/database/processing-database.js";
 import { AuditDatabase } from "../../src/database/audit-database.js";
 import { createMockLogger } from "../helpers/mock-logger.js";
@@ -421,12 +421,12 @@ describe("AccountDatabase", () => {
 });
 
 // =============================================================================
-// ArcDatabase
+// ThreadDatabase
 // =============================================================================
 
-describe("ArcDatabase", () => {
-  let db: ArcDatabase;
-  beforeEach(() => { db = new ArcDatabase(createMockLogger()); });
+describe("ThreadDatabase", () => {
+  let db: ThreadDatabase;
+  beforeEach(() => { db = new ThreadDatabase(createMockLogger()); });
 
   describe("getSignalByMessageId", () => {
     it("returns ok(signal) when the signal exists", async () => {

@@ -33,7 +33,7 @@ vi.mock("../../src/embedding/cluster-registry.js", () => ({
       active: true,
     },
   ],
-  getPrimaryArcMatcherRegistry: () => ({
+  getPrimaryThreadMatcherRegistry: () => ({
     registryId: "cluster-a",
     modelId: "amazon.titan-embed-text-v2:0",
   }),

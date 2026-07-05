@@ -1,17 +1,17 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mockClient } from "aws-sdk-client-mock";
 import { DynamoDBDocumentClient, UpdateCommand } from "@aws-sdk/lib-dynamodb";
-import { ArcDatabase } from "../../src/database/arc-database.js";
+import { ThreadDatabase } from "../../src/database/thread-database.js";
 import { createMockLogger } from "../helpers/mock-logger.js";
 
 const ddbMock = mockClient(DynamoDBDocumentClient);
 
-describe("ArcDatabase.addEmbeddingToCache", () => {
-  let db: ArcDatabase;
+describe("ThreadDatabase.addEmbeddingToCache", () => {
+  let db: ThreadDatabase;
 
   beforeEach(() => {
     ddbMock.reset();
-    db = new ArcDatabase(createMockLogger());
+    db = new ThreadDatabase(createMockLogger());
   });
 
   afterEach(() => {

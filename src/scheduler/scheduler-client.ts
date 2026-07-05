@@ -17,7 +17,7 @@ import { buildScheduleName } from "./schedule-name.js";
 export interface FollowupScheduleParams {
   accountId: string;
   signalId: string;
-  arcId: string;
+  threadId: string;
   fireAt: string;   // ISO 8601
   suffix: string;   // schedule name suffix
   sqsMessageAttributeMessageType: string; // body-level routing discriminator (e.g. "signal_followup", "rsvp_reminder")
@@ -57,7 +57,7 @@ export class EventBridgeSchedulerClient implements SchedulerClient {
       code: "scheduler.create",
       scheduleName,
       accountId: params.accountId,
-      arcId: params.arcId,
+      threadId: params.threadId,
       fireAt: params.fireAt,
     });
 
@@ -76,7 +76,7 @@ export class EventBridgeSchedulerClient implements SchedulerClient {
             sqsMessageAttributeMessageType: params.sqsMessageAttributeMessageType,
             accountId: params.accountId,
             signalId: params.signalId,
-            arcId: params.arcId,
+            threadId: params.threadId,
           }),
         },
       }));

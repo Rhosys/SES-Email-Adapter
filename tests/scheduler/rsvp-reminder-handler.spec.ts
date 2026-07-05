@@ -5,7 +5,7 @@ import { describe, it, expect, vi } from "vitest";
 import { ok, err, dbError } from "../../src/errors.js";
 import { RsvpReminderHandler } from "../../src/scheduler/rsvp-reminder-handler.js";
 import { createMockLogger } from "../helpers/mock-logger.js";
-import type { Arc, Signal } from "../../src/types/index.js";
+import type { Thread, Signal } from "../../src/types/index.js";
 import type { Notifier } from "../../src/notifier/types.js";
 import type { RsvpReminderMessage } from "../../src/scheduler/rsvp-reminder.js";
 import type { CalendarEventData } from "../../src/types/calendar.js";
@@ -24,7 +24,7 @@ const FUTURE_START = "2099-07-15T14:00:00Z";
 /** A start time guaranteed to be in the past (year 2020). */
 const PAST_START = "2020-01-01T08:00:00Z";
 
-const MESSAGE: RsvpReminderMessage = { accountId: ACCOUNT_ID, signalId: SIGNAL_ID, arcId: ARC_ID };
+const MESSAGE: RsvpReminderMessage = { accountId: ACCOUNT_ID, signalId: SIGNAL_ID, threadId: ARC_ID };
 
 function makeCalendarSignal(overrides: Partial<{ startTime: string; veventUid: string }> = {}): Signal {
   const data: CalendarEventData = {
@@ -42,7 +42,7 @@ function makeCalendarSignal(overrides: Partial<{ startTime: string; veventUid: s
   return {
     id: SIGNAL_ID,
     signalLookupId: SIGNAL_ID,
-    arcId: ARC_ID,
+    threadId: ARC_ID,
     accountId: ACCOUNT_ID,
     source: "email",
     type: "calendar_event",
@@ -52,7 +52,7 @@ function makeCalendarSignal(overrides: Partial<{ startTime: string; veventUid: s
   } as unknown as Signal;
 }
 
-function makeArc(overrides: Partial<Arc> = {}): Arc {
+function makeThread(overrides: Partial<Thread> = {}): Thread {
   return {
     id: ARC_ID,
     accountId: ACCOUNT_ID,
@@ -75,7 +75,7 @@ function makeResponseSignal(): Signal {
   return {
     id: "sgn-resp-001",
     signalLookupId: "sgn-resp-001",
-    arcId: ARC_ID,
+    threadId: ARC_ID,
     accountId: ACCOUNT_ID,
     source: "user",
     type: "calendar_response",
@@ -90,13 +90,13 @@ function makeResponseSignal(): Signal {
 // ---------------------------------------------------------------------------
 
 function setup() {
-  const arcDb = { getSignalById: vi.fn(), getLatestCalendarResponse: vi.fn(), getArc: vi.fn() };
+  const threadDb = { getSignalById: vi.fn(), getLatestCalendarResponse: vi.fn(), getThread: vi.fn() };
   const notifier: Notifier = { notify: vi.fn(), notifyBlocked: vi.fn() };
   const logger = createMockLogger();
 
-  const handler = new RsvpReminderHandler({ arcDb, notifier, logger });
+  const handler = new RsvpReminderHandler({ threadDb, notifier, logger });
 
-  return { handler, arcDb, notifier, logger };
+  return { handler, threadDb, notifier, logger };
 }
 
 // ---------------------------------------------------------------------------
@@ -107,13 +107,13 @@ function setup() {
 describe("RsvpReminderHandler", () => {
   describe("Property 2: Fire-time notification decision", () => {
     it("Row 1: signal missing → discard (TRACK signal_missing)", async () => {
-      const { handler, arcDb, notifier, logger } = setup();
-      arcDb.getSignalById.mockResolvedValue(ok(null));
+      const { handler, threadDb, notifier, logger } = setup();
+      threadDb.getSignalById.mockResolvedValue(ok(null));
 
       const result = await handler.process(MESSAGE);
 
       expect(result.isOk()).toBe(true);
-      expect(arcDb.getLatestCalendarResponse).not.toHaveBeenCalled();
+      expect(threadDb.getLatestCalendarResponse).not.toHaveBeenCalled();
       expect(notifier.notify).not.toHaveBeenCalled();
 
       const trackCalls = logger.calls.filter((c) => c.method === "track");
@@ -122,13 +122,13 @@ describe("RsvpReminderHandler", () => {
     });
 
     it("Row 2: event passed → discard (TRACK event_passed)", async () => {
-      const { handler, arcDb, notifier, logger } = setup();
-      arcDb.getSignalById.mockResolvedValue(ok(makeCalendarSignal({ startTime: PAST_START })));
+      const { handler, threadDb, notifier, logger } = setup();
+      threadDb.getSignalById.mockResolvedValue(ok(makeCalendarSignal({ startTime: PAST_START })));
 
       const result = await handler.process(MESSAGE);
 
       expect(result.isOk()).toBe(true);
-      expect(arcDb.getLatestCalendarResponse).not.toHaveBeenCalled();
+      expect(threadDb.getLatestCalendarResponse).not.toHaveBeenCalled();
       expect(notifier.notify).not.toHaveBeenCalled();
 
       const trackCalls = logger.calls.filter((c) => c.method === "track");
@@ -137,9 +137,9 @@ describe("RsvpReminderHandler", () => {
     });
 
     it("Row 3: response exists → discard (TRACK already_responded)", async () => {
-      const { handler, arcDb, notifier, logger } = setup();
-      arcDb.getSignalById.mockResolvedValue(ok(makeCalendarSignal()));
-      arcDb.getLatestCalendarResponse.mockResolvedValue(ok(makeResponseSignal()));
+      const { handler, threadDb, notifier, logger } = setup();
+      threadDb.getSignalById.mockResolvedValue(ok(makeCalendarSignal()));
+      threadDb.getLatestCalendarResponse.mockResolvedValue(ok(makeResponseSignal()));
 
       const result = await handler.process(MESSAGE);
 
@@ -152,12 +152,12 @@ describe("RsvpReminderHandler", () => {
     });
 
     it("Row 4: no response → notify with reason rsvp_reminder", async () => {
-      const { handler, arcDb, notifier } = setup();
+      const { handler, threadDb, notifier } = setup();
       const signal = makeCalendarSignal();
-      const arc = makeArc();
-      arcDb.getSignalById.mockResolvedValue(ok(signal));
-      arcDb.getLatestCalendarResponse.mockResolvedValue(ok(null));
-      arcDb.getArc.mockResolvedValue(ok(arc));
+      const arc = makeThread();
+      threadDb.getSignalById.mockResolvedValue(ok(signal));
+      threadDb.getLatestCalendarResponse.mockResolvedValue(ok(null));
+      threadDb.getThread.mockResolvedValue(ok(arc));
       vi.mocked(notifier.notify).mockResolvedValue(ok(undefined));
 
       const result = await handler.process(MESSAGE);
@@ -180,8 +180,8 @@ describe("RsvpReminderHandler", () => {
 
   describe("error propagation", () => {
     it("DB error on getSignalById → returns err (SQS retry)", async () => {
-      const { handler, arcDb, notifier } = setup();
-      arcDb.getSignalById.mockResolvedValue(err(dbError("DynamoDB timeout")));
+      const { handler, threadDb, notifier } = setup();
+      threadDb.getSignalById.mockResolvedValue(err(dbError("DynamoDB timeout")));
 
       const result = await handler.process(MESSAGE);
 
@@ -191,9 +191,9 @@ describe("RsvpReminderHandler", () => {
     });
 
     it("DB error on getLatestCalendarResponse → returns err (SQS retry)", async () => {
-      const { handler, arcDb, notifier } = setup();
-      arcDb.getSignalById.mockResolvedValue(ok(makeCalendarSignal()));
-      arcDb.getLatestCalendarResponse.mockResolvedValue(err(dbError("Connection refused")));
+      const { handler, threadDb, notifier } = setup();
+      threadDb.getSignalById.mockResolvedValue(ok(makeCalendarSignal()));
+      threadDb.getLatestCalendarResponse.mockResolvedValue(err(dbError("Connection refused")));
 
       const result = await handler.process(MESSAGE);
 
@@ -203,10 +203,10 @@ describe("RsvpReminderHandler", () => {
     });
 
     it("DB error on getArc → returns err (SQS retry)", async () => {
-      const { handler, arcDb, notifier } = setup();
-      arcDb.getSignalById.mockResolvedValue(ok(makeCalendarSignal()));
-      arcDb.getLatestCalendarResponse.mockResolvedValue(ok(null));
-      arcDb.getArc.mockResolvedValue(err(dbError("throttled")));
+      const { handler, threadDb, notifier } = setup();
+      threadDb.getSignalById.mockResolvedValue(ok(makeCalendarSignal()));
+      threadDb.getLatestCalendarResponse.mockResolvedValue(ok(null));
+      threadDb.getThread.mockResolvedValue(err(dbError("throttled")));
 
       const result = await handler.process(MESSAGE);
 
@@ -216,10 +216,10 @@ describe("RsvpReminderHandler", () => {
     });
 
     it("arc not found → discard (TRACK arc_missing)", async () => {
-      const { handler, arcDb, notifier, logger } = setup();
-      arcDb.getSignalById.mockResolvedValue(ok(makeCalendarSignal()));
-      arcDb.getLatestCalendarResponse.mockResolvedValue(ok(null));
-      arcDb.getArc.mockResolvedValue(ok(null));
+      const { handler, threadDb, notifier, logger } = setup();
+      threadDb.getSignalById.mockResolvedValue(ok(makeCalendarSignal()));
+      threadDb.getLatestCalendarResponse.mockResolvedValue(ok(null));
+      threadDb.getThread.mockResolvedValue(ok(null));
 
       const result = await handler.process(MESSAGE);
 
@@ -228,7 +228,7 @@ describe("RsvpReminderHandler", () => {
 
       const trackCalls = logger.calls.filter((c) => c.method === "track");
       expect(trackCalls).toHaveLength(1);
-      expect(trackCalls[0]!.context).toMatchObject({ code: "rsvp_reminder.arc_missing" });
+      expect(trackCalls[0]!.context).toMatchObject({ code: "rsvp_reminder.thread_missing" });
     });
   });
 });

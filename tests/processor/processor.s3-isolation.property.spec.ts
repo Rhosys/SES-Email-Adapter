@@ -2,14 +2,14 @@ import type { IForwardingService } from "../../src/forwarding/forwarding-service
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ok } from "../../src/errors.js";
 import { SignalProcessor, SYSTEM_RULES } from "../../src/processor/processor.js";
-import type { ArcMatcher, InboundSignalMessage } from "../../src/processor/processor.js";
+import type { ThreadMatcherPort, InboundSignalMessage } from "../../src/processor/processor.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
 import { makeSharedNewDeps, makeRuleEvaluator3 } from "./_shared-new-deps.js";
-import { makeArcDbMock, makeAccountDbMock, makeProcessingDbMock, applyCtx } from "./_helpers.js";
+import { makeThreadDbMock, makeAccountDbMock, makeProcessingDbMock, applyCtx } from "./_helpers.js";
 import type { ContentSanitizerClient } from "../../src/processor/content-sanitizer-client.js";
 import type { SignalClassifier, ClassificationOutput } from "../../src/classifier/classifier.js";
 import type { EmbeddingGenerator } from "../../src/embedding/embedding-generator.js";
-import type { MultiClusterAuroraWriter } from "../../src/database/arc-matcher.js";
+import type { MultiClusterAuroraWriter } from "../../src/database/thread-matcher.js";
 import type { S3RetentionService } from "../../src/embedding/s3-retention-service.js";
 import type { Alias, AliasSender } from "../../src/types/index.js";
 import type { EmailService } from "../../src/email/email-service.js";
@@ -33,7 +33,7 @@ vi.mock("../../src/embedding/cluster-registry.js", () => {
     CLUSTER_REGISTRY: Object.freeze([cluster]),
     getActiveClusters: () => [cluster],
     getRegistryById: (id: string) => (id === cluster.registryId ? cluster : null),
-    getPrimaryArcMatcherRegistry: () => cluster,
+    getPrimaryThreadMatcherRegistry: () => cluster,
     getSecondaryClusters: () => [],
   };
 });
@@ -102,7 +102,7 @@ describe("Property 9: S3 retention failure is isolated and non-fatal", () => {
   function makeStore() {
     const accountDb = makeAccountDbMock(TEST_ACCOUNT_ID);
     applyCtx(accountDb, DEFAULT_CTX);
-    return { arcDb: makeArcDbMock(), accountDb, processingDb: makeProcessingDbMock() };
+    return { threadDb: makeThreadDbMock(), accountDb, processingDb: makeProcessingDbMock() };
   }
 
   function makeContentSanitizer(): ContentSanitizerClient {
@@ -145,7 +145,7 @@ describe("Property 9: S3 retention failure is isolated and non-fatal", () => {
     };
   }
 
-  function makeArcMatcher(): ArcMatcher {
+  function makeArcMatcher(): ThreadMatcherPort {
     return {
       findMatch: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
       upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
@@ -188,7 +188,7 @@ describe("Property 9: S3 retention failure is isolated and non-fatal", () => {
       classifier: makeClassifier(),
       embeddingGenerator: makeEmbeddingGenerator(),
       auroraWriter: makeAuroraWriter(),
-      arcMatcher: makeArcMatcher(),
+      threadMatcher: makeArcMatcher(),
       ruleEvaluator: makeRuleEvaluator3(mockLogger),
       logger: mockLogger,
       notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
@@ -217,7 +217,7 @@ describe("Property 9: S3 retention failure is isolated and non-fatal", () => {
       classifier: makeClassifier(),
       embeddingGenerator: makeEmbeddingGenerator(),
       auroraWriter,
-      arcMatcher: makeArcMatcher(),
+      threadMatcher: makeArcMatcher(),
       ruleEvaluator: makeRuleEvaluator3(mockLogger),
       logger: mockLogger,
       notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
@@ -246,7 +246,7 @@ describe("Property 9: S3 retention failure is isolated and non-fatal", () => {
       classifier: makeClassifier(),
       embeddingGenerator: makeEmbeddingGenerator(),
       auroraWriter: makeAuroraWriter(),
-      arcMatcher: makeArcMatcher(),
+      threadMatcher: makeArcMatcher(),
       ruleEvaluator: makeRuleEvaluator3(mockLogger),
       logger: mockLogger,
       notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
@@ -284,7 +284,7 @@ describe("Property 9: S3 retention failure is isolated and non-fatal", () => {
       classifier: makeClassifier(),
       embeddingGenerator: makeEmbeddingGenerator(),
       auroraWriter: auroraWriter1,
-      arcMatcher: makeArcMatcher(),
+      threadMatcher: makeArcMatcher(),
       ruleEvaluator: makeRuleEvaluator3(logger1),
       logger: logger1,
       notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
@@ -309,7 +309,7 @@ describe("Property 9: S3 retention failure is isolated and non-fatal", () => {
       classifier: makeClassifier(),
       embeddingGenerator: makeEmbeddingGenerator(),
       auroraWriter: auroraWriter2,
-      arcMatcher: makeArcMatcher(),
+      threadMatcher: makeArcMatcher(),
       ruleEvaluator: makeRuleEvaluator3(logger2),
       logger: logger2,
       notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
@@ -328,8 +328,8 @@ describe("Property 9: S3 retention failure is isolated and non-fatal", () => {
     expect(result1.isOk()).toBe(result2.isOk());
 
     // Both runs must call saveSignal (signal was persisted)
-    expect(store1.arcDb.saveSignal).toHaveBeenCalled();
-    expect(store2.arcDb.saveSignal).toHaveBeenCalled();
+    expect(store1.threadDb.saveSignal).toHaveBeenCalled();
+    expect(store2.threadDb.saveSignal).toHaveBeenCalled();
 
     // Both runs must call Aurora upsert
     expect(auroraWriter1.upsertEmbedding).toHaveBeenCalled();
@@ -350,7 +350,7 @@ describe("Property 9: S3 retention failure is isolated and non-fatal", () => {
       classifier: makeClassifier(),
       embeddingGenerator: makeEmbeddingGenerator(),
       auroraWriter,
-      arcMatcher: makeArcMatcher(),
+      threadMatcher: makeArcMatcher(),
       ruleEvaluator: makeRuleEvaluator3(mockLogger),
       logger: mockLogger,
       notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
@@ -393,7 +393,7 @@ describe("Property 9: S3 retention failure is isolated and non-fatal", () => {
       classifier: makeClassifier(),
       embeddingGenerator: makeEmbeddingGenerator(),
       auroraWriter,
-      arcMatcher: makeArcMatcher(),
+      threadMatcher: makeArcMatcher(),
       ruleEvaluator: makeRuleEvaluator3(mockLogger),
       logger: mockLogger,
       notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },

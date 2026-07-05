@@ -20,7 +20,7 @@ import type { PostApprovalCalendarHandlerDeps } from "../../../src/processor/cal
 import { buildProxyUid } from "../../../src/processor/calendar/proxy-uid.js";
 import { buildCalendarSignalLookupId } from "../../../src/processor/calendar/signal-lookup.js";
 import type { CalendarEventData, CalendarResponseData } from "../../../src/types/calendar.js";
-import type { Signal, Arc, Attachment } from "../../../src/types/index.js";
+import type { Signal, Thread, Attachment } from "../../../src/types/index.js";
 import type { InboundSignalMessage } from "../../../src/processor/processor.js";
 import type { EmailService } from "../../../src/email/email-service.js";
 import { ok } from "../../../src/errors.js";
@@ -68,7 +68,7 @@ function makeCalendarSignal(overrides: Partial<CalendarEventData> = {}): Signal<
     id: "sgn-cal-001",
     signalLookupId: buildCalendarSignalLookupId(ORGANIZER_EMAIL, VEVENT_UID),
     accountId: VALID_ACC_ID,
-    arcId: VALID_ARC_ID,
+    threadId: VALID_ARC_ID,
     source: "signal",
     type: "calendar_event",
     status: "active",
@@ -105,7 +105,7 @@ function makeForwarderOpts(overrides: Partial<ForwardCalendarInviteOpts> = {}): 
     calendarSignal: makeCalendarSignal(),
     calendarForwardingAddress: FORWARDING_ADDRESS,
     accountId: VALID_ACC_ID,
-    arcId: VALID_ARC_ID,
+    threadId: VALID_ARC_ID,
     aliasAddress: ALIAS_ADDRESS,
     ...overrides,
   };
@@ -133,8 +133,8 @@ function buildReplyIcsString(proxyUid: string, partstat = "ACCEPTED"): string {
 function makeResponseHandlerDeps(overrides: Partial<CalendarResponseHandlerDeps> = {}): CalendarResponseHandlerDeps {
   return {
     serviceDomain: SERVICE_DOMAIN,
-    arcDatabase: {
-      getArc: vi.fn().mockResolvedValue(ok({
+    threadDatabase: {
+      getThread: vi.fn().mockResolvedValue(ok({
         id: VALID_ARC_ID,
         accountId: VALID_ACC_ID,
         status: "active",
@@ -144,7 +144,7 @@ function makeResponseHandlerDeps(overrides: Partial<CalendarResponseHandlerDeps>
         lastSignalAt: "2025-03-15T09:00:00Z",
         createdAt: "2025-03-15T09:00:00Z",
       })),
-    } as unknown as CalendarResponseHandlerDeps["arcDatabase"],
+    } as unknown as CalendarResponseHandlerDeps["threadDatabase"],
     rsvpComposer: vi.fn().mockResolvedValue(ok({ messageId: "ses-reply-001" })),
     signalStore: {
       saveSignal: vi.fn().mockResolvedValue(ok(undefined)),
@@ -229,7 +229,7 @@ describe("Scenario: cancellation is forwarded so user's calendar removes the eve
     const uid = vevent.getFirstPropertyValue("uid") as string;
     const expectedProxyUid = await buildProxyUid({
       accountId: VALID_ACC_ID,
-      arcId: VALID_ARC_ID,
+      threadId: VALID_ARC_ID,
       originalVeventUid: VEVENT_UID,
       serviceDomain: SERVICE_DOMAIN,
     });
@@ -355,7 +355,7 @@ describe("Scenario: native calendar REPLY is validated and forwarded to organize
     // Build a valid proxy UID for the .ics
     const proxyUid = await buildProxyUid({
       accountId: VALID_ACC_ID,
-      arcId: VALID_ARC_ID,
+      threadId: VALID_ARC_ID,
       originalVeventUid: VEVENT_UID,
       serviceDomain: SERVICE_DOMAIN,
     });
@@ -431,7 +431,7 @@ describe("Scenario: invalid HMAC REPLY is silently dropped to prevent spoofing",
     await handleCalendarResponse(message, deps, logger, icsBytes);
 
     // No DB lookup occurred
-    expect(deps.arcDatabase.getArc).not.toHaveBeenCalled();
+    expect(deps.threadDatabase.getThread).not.toHaveBeenCalled();
 
     // No signal was created
     expect(deps.signalStore.saveSignal).not.toHaveBeenCalled();
@@ -462,7 +462,7 @@ describe("Scenario: invalid accountId checksum REPLY is dropped before HMAC chec
     // Use a valid proxy UID (would pass HMAC if it got that far)
     const proxyUid = await buildProxyUid({
       accountId: VALID_ACC_ID,
-      arcId: VALID_ARC_ID,
+      threadId: VALID_ARC_ID,
       originalVeventUid: VEVENT_UID,
       serviceDomain: SERVICE_DOMAIN,
     });
@@ -486,7 +486,7 @@ describe("Scenario: invalid accountId checksum REPLY is dropped before HMAC chec
     await handleCalendarResponse(message, deps, logger, icsBytes);
 
     // No DB lookup
-    expect(deps.arcDatabase.getArc).not.toHaveBeenCalled();
+    expect(deps.threadDatabase.getThread).not.toHaveBeenCalled();
 
     // No signal created
     expect(deps.signalStore.saveSignal).not.toHaveBeenCalled();
@@ -531,10 +531,10 @@ describe("Scenario: approving quarantined email triggers calendar forwarding", (
       "END:VCALENDAR",
     ].join("\r\n");
 
-    const arcDb = {
+    const threadDb = {
       saveSignal: vi.fn().mockResolvedValue(ok(undefined)),
-      updateArc: vi.fn().mockResolvedValue(ok(undefined)),
-    } as unknown as PostApprovalCalendarHandlerDeps["arcDb"];
+      updateThread: vi.fn().mockResolvedValue(ok(undefined)),
+    } as unknown as PostApprovalCalendarHandlerDeps["threadDb"];
 
     const accountDb = {
       getAccount: vi.fn().mockResolvedValue(ok({ defaultCalendarInviteForwardingTargetId: FORWARDING_ADDRESS })),
@@ -553,7 +553,7 @@ describe("Scenario: approving quarantined email triggers calendar forwarding", (
     } as unknown as PostApprovalCalendarHandlerDeps["s3Client"];
 
     const deps: PostApprovalCalendarHandlerDeps = {
-      arcDb,
+      threadDb,
       accountDb,
       s3Client,
       contentBucket: "test-bucket",
@@ -564,7 +564,7 @@ describe("Scenario: approving quarantined email triggers calendar forwarding", (
     const signal: Signal = {
       id: "sgn-email-quarantined-001",
       signalLookupId: "ses-quarantined-001",
-      arcId: "arc-001",
+      threadId: "arc-001",
       accountId: "acct-test-001",
       source: "email",
       type: "email",
@@ -590,7 +590,7 @@ describe("Scenario: approving quarantined email triggers calendar forwarding", (
       },
     } as Signal;
 
-    const arc: Arc = {
+    const arc: Thread = {
       id: "arc-001",
       accountId: "acct-test-001",
       workflow: "job",
@@ -608,8 +608,8 @@ describe("Scenario: approving quarantined email triggers calendar forwarding", (
     await handlePostApprovalCalendar(signal, arc, deps);
 
     // Calendar signal was saved
-    expect(arcDb.saveSignal).toHaveBeenCalledOnce();
-    const savedSignal = (arcDb.saveSignal as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    expect(threadDb.saveSignal).toHaveBeenCalledOnce();
+    const savedSignal = (threadDb.saveSignal as ReturnType<typeof vi.fn>).mock.calls[0]![0];
     expect(savedSignal.type).toBe("calendar_event");
     expect(savedSignal.source).toBe("signal");
     expect(savedSignal.data.organizer).toBe(ORGANIZER_EMAIL);
@@ -681,7 +681,7 @@ describe("Scenario: most recent RSVP decision is recorded as calendar_response s
 
     const proxyUid = await buildProxyUid({
       accountId: VALID_ACC_ID,
-      arcId: VALID_ARC_ID,
+      threadId: VALID_ARC_ID,
       originalVeventUid: VEVENT_UID,
       serviceDomain: SERVICE_DOMAIN,
     });
@@ -719,7 +719,7 @@ describe("Scenario: most recent RSVP decision is recorded as calendar_response s
     expect(savedSignal.data.linkedSignalId).toBeDefined();
 
     // Signal is on the same arc as the calendar signal
-    expect(savedSignal.arcId).toBe(VALID_ARC_ID);
+    expect(savedSignal.threadId).toBe(VALID_ARC_ID);
     expect(savedSignal.accountId).toBe(VALID_ACC_ID);
 
     // respondedAt is populated

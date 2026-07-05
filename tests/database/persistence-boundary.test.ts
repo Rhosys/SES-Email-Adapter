@@ -3,7 +3,7 @@ import { mockClient } from "aws-sdk-client-mock";
 import { DynamoDBDocumentClient, PutCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { ThreadDatabase } from "../../src/database/thread-database.js";
 import { createMockLogger } from "../helpers/mock-logger.js";
-import type { Arc, Signal } from "../../src/types/index.js";
+import type { Thread, Signal } from "../../src/types/index.js";
 
 const ddbMock = mockClient(DynamoDBDocumentClient);
 
@@ -23,13 +23,14 @@ describe("Invariant 5: threadId-only write — no arcId persisted on new writes"
 
   describe("saveThread", () => {
     it.each([
-      { desc: "thread with groupingKey", threadId: "thr-1", accountId: "acct-1", groupingKey: "order-123" },
-      { desc: "thread without groupingKey", threadId: "thr-2", accountId: "acct-2", groupingKey: undefined },
+      { desc: "thread with groupingKey", threadId: "thr-1", accountId: "acct-1", groupingKey: "order-123" as string | undefined },
+      { desc: "thread without groupingKey", threadId: "thr-2", accountId: "acct-2", groupingKey: undefined as string | undefined },
     ])("$desc — writes threadId, no arcId, pk = ACCT#...#ARC#...", async ({ threadId, accountId, groupingKey }) => {
       ddbMock.on(PutCommand).resolves({});
 
-      const arc: Arc = {
-        id: threadId, accountId, groupingKey,
+      const arc: Thread = {
+        id: threadId, accountId,
+        ...(groupingKey !== undefined ? { groupingKey } : {}),
         workflow: "conversation", labels: [], status: "active",
         summary: "Test", lastSignalAt: "2024-01-01T00:00:00Z",
         createdAt: "2024-01-01T00:00:00Z", updatedAt: "2024-01-01T00:00:00Z",
@@ -198,13 +199,14 @@ describe("Invariant 7: Key attributes unchanged after persistence boundary write
 
   describe("saveThread — key attributes retain ACCT#...#ARC#... format", () => {
     it.each([
-      { accountId: "acct-1", threadId: "thr-1", groupingKey: "gk-1" },
-      { accountId: "acct-2", threadId: "thr-2", groupingKey: undefined },
+      { accountId: "acct-1", threadId: "thr-1", groupingKey: "gk-1" as string | undefined },
+      { accountId: "acct-2", threadId: "thr-2", groupingKey: undefined as string | undefined },
     ])("accountId=$accountId threadId=$threadId — pk, sk, gsi1pk, gsi1sk unaltered", async ({ accountId, threadId, groupingKey }) => {
       ddbMock.on(PutCommand).resolves({});
 
-      const arc: Arc = {
-        id: threadId, accountId, groupingKey,
+      const arc: Thread = {
+        id: threadId, accountId,
+        ...(groupingKey !== undefined ? { groupingKey } : {}),
         workflow: "conversation", labels: [], status: "active",
         summary: "Test", lastSignalAt: "2024-06-01T12:00:00Z",
         createdAt: "2024-01-01T00:00:00Z", updatedAt: "2024-01-01T00:00:00Z",
@@ -285,7 +287,7 @@ describe("Invariant 8: gsi3pk written at correct write sites, no gsi2pk", () => 
     ])("groupingKey=$groupingKey → gsi3pk=$expectedGsi3pk, no gsi2pk", async ({ accountId, threadId, groupingKey, expectedGsi3pk }) => {
       ddbMock.on(PutCommand).resolves({});
 
-      const arc: Arc = {
+      const arc: Thread = {
         id: threadId, accountId, groupingKey,
         workflow: "conversation", labels: [], status: "active",
         summary: "Test", lastSignalAt: "2024-01-01T00:00:00Z",
@@ -305,8 +307,8 @@ describe("Invariant 8: gsi3pk written at correct write sites, no gsi2pk", () => 
     it("no groupingKey → no gsi3pk, no gsi2pk", async () => {
       ddbMock.on(PutCommand).resolves({});
 
-      const arc: Arc = {
-        id: "thr-no-gk", accountId: "acct-1", groupingKey: undefined,
+      const arc: Thread = {
+        id: "thr-no-gk", accountId: "acct-1",
         workflow: "conversation", labels: [], status: "active",
         summary: "Test", lastSignalAt: "2024-01-01T00:00:00Z",
         createdAt: "2024-01-01T00:00:00Z", updatedAt: "2024-01-01T00:00:00Z",

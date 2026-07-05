@@ -3,7 +3,7 @@
  * These strip internal fields, rename properties, and simplify values for the public API.
  */
 import type {
-  Thread as DbArc,
+  Thread as DbThread,
   Signal as DbSignal,
   AnySignal,
   EmailSignalData,
@@ -26,23 +26,23 @@ import type * as Api from "./schemas.js";
 // Thread
 // ---------------------------------------------------------------------------
 
-export function toApiThread(arc: DbArc): Api.Thread {
+export function toApiThread(thread: DbThread): Api.Thread {
   return {
-    threadId: arc.id,
-    workflow: arc.workflow as Api.Thread["workflow"],
-    labels: arc.labels,
-    status: arc.status as Api.Thread["status"],
-    summary: arc.summary,
-    lastSignalAt: arc.lastSignalAt,
-    ...(arc.deletedAt ? { deletedAt: arc.deletedAt } : {}),
-    createdAt: arc.createdAt,
-    updatedAt: arc.updatedAt,
-    ...(arc.retentionDuration ? { retentionDuration: arc.retentionDuration as Api.Thread["retentionDuration"] } : {}),
-    ...(arc.urgency ? { urgency: arc.urgency as Api.Thread["urgency"] } : {}),
-    ...(arc.followupAt ? { followupAt: arc.followupAt } : {}),
-    senderAddress: arc.senderAddress ?? "",
-    recipientAddress: arc.recipientAddress ?? "",
-    subject: arc.subject ?? "",
+    threadId: thread.id,
+    workflow: thread.workflow as Api.Thread["workflow"],
+    labels: thread.labels,
+    status: thread.status as Api.Thread["status"],
+    summary: thread.summary,
+    lastSignalAt: thread.lastSignalAt,
+    ...(thread.deletedAt ? { deletedAt: thread.deletedAt } : {}),
+    createdAt: thread.createdAt,
+    updatedAt: thread.updatedAt,
+    ...(thread.retentionDuration ? { retentionDuration: thread.retentionDuration as Api.Thread["retentionDuration"] } : {}),
+    ...(thread.urgency ? { urgency: thread.urgency as Api.Thread["urgency"] } : {}),
+    ...(thread.followupAt ? { followupAt: thread.followupAt } : {}),
+    senderAddress: thread.senderAddress ?? "",
+    recipientAddress: thread.recipientAddress ?? "",
+    subject: thread.subject ?? "",
   };
 }
 

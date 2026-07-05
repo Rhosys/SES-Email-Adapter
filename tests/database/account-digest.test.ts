@@ -62,7 +62,7 @@ import { ok } from "neverthrow";
 import { createApp } from "../../src/api/app.js";
 import { makeAppDeps } from "../helpers/app-deps.js";
 import type { AuthService, AccessService } from "../../src/api/app.js";
-import type { ArcDatabase } from "../../src/database/arc-database.js";
+import type { ThreadDatabase } from "../../src/database/thread-database.js";
 import type { AccountDatabase as AccountDatabaseType } from "../../src/database/account-database.js";
 import type { AuditDatabase } from "../../src/database/audit-database.js";
 import type { EmailService } from "../../src/email/email-service.js";
@@ -145,7 +145,7 @@ describe("PATCH /accounts/:id – digest forwardingTargetId validation", () => {
     };
 
     const app = createApp(makeAppDeps({
-      arcDb: {} as unknown as ArcDatabase,
+      threadDb: {} as unknown as ThreadDatabase,
       accountDb: accountDb as unknown as AccountDatabaseType,
       auditDb: {} as unknown as AuditDatabase,
       auth,
@@ -189,7 +189,7 @@ describe("PATCH /accounts/:id – digest forwardingTargetId validation", () => {
     };
 
     const app = createApp(makeAppDeps({
-      arcDb: {} as unknown as ArcDatabase,
+      threadDb: {} as unknown as ThreadDatabase,
       accountDb: accountDb as unknown as AccountDatabaseType,
       auditDb: {} as unknown as AuditDatabase,
       auth,

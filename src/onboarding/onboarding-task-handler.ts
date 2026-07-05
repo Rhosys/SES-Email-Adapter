@@ -25,7 +25,7 @@ export interface IOnboardingAccountDb {
   saveForwardingTarget(target: ForwardingTarget): Promise<Result<void, DbError>>;
 }
 
-export interface IOnboardingArcDb {
+export interface IOnboardingThreadDb {
   hasSignals(accountId: string): Promise<Result<boolean, DbError>>;
 }
 
@@ -46,7 +46,7 @@ const KEY_ID = process.env["AUTHRESS_KEY_ID"] ?? ""
 export class OnboardingTaskHandler {
   constructor(
     private readonly accountDb: IOnboardingAccountDb,
-    private readonly arcDb: IOnboardingArcDb,
+    private readonly threadDb: IOnboardingThreadDb,
     private readonly logger: Logger,
     private readonly emailService: EmailService,
   ) {}
@@ -169,7 +169,7 @@ export class OnboardingTaskHandler {
 
     // 3. Query signals (failure → treat as incomplete)
     let emailsReceived = false;
-    const signalsResult = await this.arcDb.hasSignals(accountId);
+    const signalsResult = await this.threadDb.hasSignals(accountId);
     if (signalsResult.isOk()) {
       emailsReceived = signalsResult.value;
     } else {

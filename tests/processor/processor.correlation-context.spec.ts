@@ -2,14 +2,14 @@ import type { IForwardingService } from "../../src/forwarding/forwarding-service
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { ok } from "../../src/errors.js";
 import { SignalProcessor, SYSTEM_RULES } from "../../src/processor/processor.js";
-import type { ArcMatcher, Notifier,  ReplySender, SideEffectPayload } from "../../src/processor/processor.js";
+import type { ThreadMatcherPort, Notifier,  ReplySender, SideEffectPayload } from "../../src/processor/processor.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
 import { makeSharedNewDeps, makeRuleEvaluator3 } from "./_shared-new-deps.js";
-import { makeArcDbMock, makeAccountDbMock, makeProcessingDbMock } from "./_helpers.js";
+import { makeThreadDbMock, makeAccountDbMock, makeProcessingDbMock } from "./_helpers.js";
 import type { ContentSanitizerClient } from "../../src/processor/content-sanitizer-client.js";
 import type { EmbeddingGenerator } from "../../src/embedding/embedding-generator.js";
-import type { MultiClusterAuroraWriter } from "../../src/database/arc-matcher.js";
-import type { Signal, Arc, Alias, AliasSender } from "../../src/types/index.js";
+import type { MultiClusterAuroraWriter } from "../../src/database/thread-matcher.js";
+import type { Signal, Thread, Alias, AliasSender } from "../../src/types/index.js";
 import type { EmailService } from "../../src/email/email-service.js";
 import { createMockLogger, type MockLogger } from "../helpers/mock-logger.js";
 
@@ -27,7 +27,7 @@ vi.mock("../../src/embedding/cluster-registry.js", () => {
     CLUSTER_REGISTRY: Object.freeze([entry]),
     getActiveClusters: () => [entry],
     getRegistryById: (id: string) => (id === entry.registryId ? entry : null),
-    getPrimaryArcMatcherRegistry: () => entry,
+    getPrimaryThreadMatcherRegistry: () => entry,
   };
 });
 
@@ -48,11 +48,11 @@ describe("processSideEffect — correlation context", () => {
   afterEach(() => { vi.restoreAllMocks(); });
 
   function makeStore() {
-    const arcDb = makeArcDbMock();
+    const threadDb = makeThreadDbMock();
     const accountDb = makeAccountDbMock(TEST_ACCOUNT_ID);
     const processingDb = makeProcessingDbMock();
     vi.mocked(accountDb.getDomainByName).mockReturnValue(Promise.resolve(ok(null)));
-    return { arcDb, accountDb, processingDb };
+    return { threadDb, accountDb, processingDb };
   }
 
   function makeSignal(overrides: { data?: Partial<Signal["data"]> } & Partial<Omit<Signal, "data">> = {}): Signal {
@@ -87,7 +87,7 @@ describe("processSideEffect — correlation context", () => {
     } as Signal;
   }
 
-  function makeArc(overrides: Partial<Arc> = {}): Arc {
+  function makeThread(overrides: Partial<Thread> = {}): Thread {
     return {
       id: "arc-corr-001",
       accountId: TEST_ACCOUNT_ID,
@@ -116,7 +116,7 @@ describe("processSideEffect — correlation context", () => {
       classifier: { classify: vi.fn() },
       embeddingGenerator: { generateForModel: vi.fn(), generateForSecondaryClusters: vi.fn() } as unknown as EmbeddingGenerator,
       auroraWriter: { upsertEmbedding: vi.fn(), findMatch: vi.fn() } as unknown as MultiClusterAuroraWriter,
-      arcMatcher: { findMatch: vi.fn(), upsertEmbedding: vi.fn() } as unknown as ArcMatcher,
+      threadMatcher: { findMatch: vi.fn(), upsertEmbedding: vi.fn() } as unknown as ThreadMatcherPort,
       ruleEvaluator: makeRuleEvaluator3(mockLogger),
       notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       forwardingService: opts.forwardingService,
@@ -143,8 +143,8 @@ describe("processSideEffect — correlation context", () => {
         id: "sgn-pong-123",
         data: { matchedRules: [{ ruleId: "SR-17", actions: [{ type: "pong" }], labelsAdded: [] }] },
       });
-      const arc = makeArc({ id: "arc-pong-456" });
-      const payload: SideEffectPayload = { signal, arc };
+      const thread = makeThread({ id: "arc-pong-456" });
+      const payload: SideEffectPayload = { signal, thread };
 
       await processor.processSideEffect(payload);
 
@@ -161,7 +161,7 @@ describe("processSideEffect — correlation context", () => {
   // -------------------------------------------------------------------------
 
   describe("forward side-effect", () => {
-    it("calls forwarder.forward with signalId and arcId in opts", async () => {
+    it("calls forwarder.forward with signalId and threadId in opts", async () => {
       const replySender: ReplySender = { sendReply: vi.fn().mockResolvedValue(ok({ messageId: "reply-msg-id" })) };
       const forwardingService: IForwardingService = { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), sendVerification: vi.fn().mockResolvedValue(ok(undefined)), verifyWebhook: vi.fn().mockResolvedValue(ok(undefined)) };
       const processor = makeProcessor({ replySender, forwardingService });
@@ -173,8 +173,8 @@ describe("processSideEffect — correlation context", () => {
           matchedRules: [{ ruleId: "rule-fwd", actions: [{ type: "forward", value: "backup@personal.com" }], labelsAdded: [] }],
         },
       });
-      const arc = makeArc({ id: "arc-fwd-012" });
-      const payload: SideEffectPayload = { signal, arc };
+      const thread = makeThread({ id: "arc-fwd-012" });
+      const payload: SideEffectPayload = { signal, thread };
 
       await processor.processSideEffect(payload);
 

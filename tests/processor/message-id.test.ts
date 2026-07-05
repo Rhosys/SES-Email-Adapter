@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { extractMsgId, buildGsi2pk, buildOutboundMsgId, extractFirstInReplyTo } from '../../src/processor/message-id.js'
+import { extractMsgId, buildSignalGsi3pk, buildOutboundMsgId, extractFirstInReplyTo } from '../../src/processor/message-id.js'
 
 describe('extractMsgId', () => {
   it.each([
@@ -14,20 +14,20 @@ describe('extractMsgId', () => {
   })
 })
 
-describe('buildGsi2pk', () => {
+describe('buildSignalGsi3pk', () => {
   it('constructs key with normal inputs', () => {
-    expect(buildGsi2pk('acct123', 'msg@example.com')).toBe('ACCT#acct123#MSGID#msg@example.com')
+    expect(buildSignalGsi3pk('acct123', 'msg@example.com')).toBe('ACCT#acct123#MSGID#msg@example.com')
   })
 
   it('truncates to 1024 chars when input is long', () => {
     const longId = 'x'.repeat(1100)
-    const result = buildGsi2pk(longId, 'msg@example.com')
+    const result = buildSignalGsi3pk(longId, 'msg@example.com')
     expect(result.length).toBe(1024)
     expect(result.startsWith('ACCT#')).toBe(true)
   })
 
   it('constructs key with empty accountId and msgId', () => {
-    expect(buildGsi2pk('', '')).toBe('ACCT##MSGID#')
+    expect(buildSignalGsi3pk('', '')).toBe('ACCT##MSGID#')
   })
 })
 

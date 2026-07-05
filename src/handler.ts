@@ -39,7 +39,7 @@ import { AuthressAuthService } from "./api/authress-auth.js";
 import { AuthressAccessService } from "./api/authress-access.js";
 import { createApp } from "./api/app.js";
 import { BedrockEmbeddingGenerator } from "./embedding/embedding-generator.js";
-import { createSearchDatabase } from "./database/arc-matcher.js";
+import { createSearchDatabase } from "./database/thread-matcher.js";
 import { S3RetentionServiceImpl } from "./embedding/s3-retention-service.js";
 import { ReindexWorker } from "./jobs/reindex/reindex-worker.js";
 import { AuthWorkflowHandler } from "./workflow/auth-handler.js";
@@ -106,7 +106,7 @@ const classifier = new SignalClassifier(bedrock, logger);
 const embeddingGenerator = new BedrockEmbeddingGenerator(bedrock, logger);
 
 const accountDb = new AccountDatabase(logger);
-const arcDb = new ThreadDatabase(logger);
+const threadDb = new ThreadDatabase(logger);
 const processingDb = new ProcessingDatabase();
 const auditDb = new AuditDatabase();
 const deviceStore = new DynamoDeviceStore();
@@ -138,7 +138,7 @@ const forwardingService = new ForwardingService(emailService, accountDb, emailSi
 const draftSendDispatcher = new DraftSendDispatcher(SIGNAL_QUEUE_URL, sqs, logger);
 
 const wsDeliverer = new WsDeliverer(new ApiGatewayManagementApiClient({ endpoint: WS_ENDPOINT }));
-const authHandler = new AuthWorkflowHandler(deviceStore, wsDeliverer, arcDb, logger);
+const authHandler = new AuthWorkflowHandler(deviceStore, wsDeliverer, threadDb, logger);
 const handlerRegistry = new HandlerRegistry([authHandler]);
 
 const schedulerClient = new EventBridgeSchedulerClient({
@@ -152,7 +152,7 @@ const schedulerClient = new EventBridgeSchedulerClient({
 const searchDatabase = createSearchDatabase(logger);
 
 const processor = new SignalProcessor({
-  arcDb,
+  threadDb,
   accountDb,
   processingDb,
   contentSanitizer: new LambdaContentSanitizer(lambda, CONTENT_SANITIZER_ARN, logger),
@@ -160,7 +160,7 @@ const processor = new SignalProcessor({
   classifier,
   embeddingGenerator,
   auroraWriter: searchDatabase,
-  arcMatcher: searchDatabase,
+  threadMatcher: searchDatabase,
   ruleEvaluator: new JsonLogicRuleEvaluator(logger, new LambdaUserCodeExecutor(lambda, USER_CODE_EXECUTOR_ARN, logger), accountDb),
   notifier: new DeviceNotifier({
     deviceStore: new DynamoDeviceStore(),
@@ -186,20 +186,20 @@ const processor = new SignalProcessor({
   contentBucket: CONTENT_BUCKET,
 });
 
-const feedbackProcessor = new FeedbackProcessor(processingDb, accountDb, logger, arcDb);
+const feedbackProcessor = new FeedbackProcessor(processingDb, accountDb, logger, threadDb);
 
 const reindexWorker = new ReindexWorker(logger);
 
 const draftSendWorker = new DraftSendWorker(
-  arcDb,
+  threadDb,
   externalEmailHandler,
   logger,
 );
 
-const domainHealthJob = new DomainHealthJob(accountDb, arcDb, logger);
+const domainHealthJob = new DomainHealthJob(accountDb, threadDb, logger);
 
 const followupHandler = new FollowupHandler({
-  arcDb,
+  threadDb,
   notifier: new DeviceNotifier({
     deviceStore,
     deliverers: {
@@ -213,7 +213,7 @@ const followupHandler = new FollowupHandler({
 });
 
 const rsvpReminderHandler = new RsvpReminderHandler({
-  arcDb,
+  threadDb,
   notifier: new DeviceNotifier({
     deviceStore,
     deliverers: {
@@ -239,8 +239,8 @@ const digestDispatcher = new DigestDispatcher({
 
 const digestWorker = new DigestWorker({
   accountDb,
-  arcDb,
-  signalDb: arcDb,
+  threadDb,
+  signalDb: threadDb,
   emailService,
   logger,
 });
@@ -251,7 +251,7 @@ const digestWorker = new DigestWorker({
 
 const onboardingHandler = new OnboardingTaskHandler(
   accountDb,
-  arcDb,
+  threadDb,
   logger,
   emailService,
 );
@@ -271,7 +271,7 @@ if (!ACCOUNT_CREATION_SFN_ARN) {
 const authService = new AuthressAuthService();
 
 const postApprovalCalendarDeps: PostApprovalCalendarHandlerDeps = {
-  arcDb,
+  threadDb,
   accountDb,
   s3Client: s3,
   contentBucket: CONTENT_BUCKET,
@@ -283,7 +283,7 @@ const postApprovalCalendarDeps: PostApprovalCalendarHandlerDeps = {
 };
 
 const app = createApp({
-  arcDb,
+  threadDb,
   accountDb,
   auditDb,
   auth: authService,
@@ -440,7 +440,7 @@ async function processSqsRecord(
 
   if (messageType === MSG_TYPE_SIDE_EFFECT) {
     const payload = body as SideEffectPayload;
-    if (!payload.signal || (!payload.thread && !payload.arc)) {
+    if (!payload.signal || !payload.thread) {
       logger.error("Malformed side-effect payload — missing signal or thread. Dropping message.", { code: "handler.sqs.malformed_side_effect", messageId });
       return ok(undefined);
     }
@@ -453,7 +453,7 @@ async function processSqsRecord(
 
   if (messageType === MSG_TYPE_SIGNAL_FOLLOWUP) {
     const message = body as FollowupMessage;
-    if (!message.accountId || !message.signalId || !message.arcId) {
+    if (!message.accountId || !message.signalId || !message.threadId) {
       logger.error("Malformed signal_followup payload — missing required fields. Dropping message.", { code: "handler.sqs.malformed_followup", messageId });
       return ok(undefined);
     }
@@ -462,7 +462,7 @@ async function processSqsRecord(
 
   if (messageType === MSG_TYPE_RSVP_REMINDER) {
     const message = body as RsvpReminderMessage;
-    if (!message.accountId || !message.signalId || !message.arcId) {
+    if (!message.accountId || !message.signalId || !message.threadId) {
       logger.error("Malformed rsvp_reminder payload — missing required fields. Dropping message.", { code: "handler.sqs.malformed_rsvp_reminder", messageId });
       return ok(undefined);
     }

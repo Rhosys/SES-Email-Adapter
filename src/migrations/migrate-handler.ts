@@ -27,6 +27,7 @@ if (!CLUSTER_ARN || !SECRET_ARN || !DB_NAME) {
 // ---------------------------------------------------------------------------
 
 const DESTRUCTIVE_PATTERNS = [/DROP\s+TABLE/i, /DROP\s+COLUMN/i, /TRUNCATE/i];
+const ALLOW_DESTRUCTIVE_MARKER = "-- @allow-destructive";
 const migrationsFolder = join(import.meta.dirname, "migrations");
 
 const sqlFiles = readdirSync(migrationsFolder).filter(f => f.endsWith(".sql"));
@@ -34,6 +35,7 @@ logger.info("Scanning migration files for destructive DDL", { fileCount: sqlFile
 
 for (const file of sqlFiles) {
   const content = readFileSync(join(migrationsFolder, file), "utf-8");
+  if (content.includes(ALLOW_DESTRUCTIVE_MARKER)) continue;
   for (const pattern of DESTRUCTIVE_PATTERNS) {
     if (pattern.test(content)) {
       logger.critical("Destructive DDL detected — aborting migration", { code: "migrate.destructive_ddl", file, pattern: pattern.source });

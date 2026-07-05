@@ -2,16 +2,16 @@ import type { IForwardingService } from "../../src/forwarding/forwarding-service
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ok, err } from "neverthrow";
 import { SignalProcessor, SYSTEM_RULES } from "../../src/processor/processor.js";
-import type { ArcMatcher, InboundSignalMessage, SqsDispatcher, Notifier,  ReplySender, SideEffectPayload } from "../../src/processor/processor.js";
+import type { ThreadMatcherPort, InboundSignalMessage, SqsDispatcher, Notifier,  ReplySender, SideEffectPayload } from "../../src/processor/processor.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
 import { makeSharedNewDeps, makeRuleEvaluator3 } from "./_shared-new-deps.js";
-import { makeArcDbMock, makeAccountDbMock, makeProcessingDbMock, applyCtx } from "./_helpers.js";
+import { makeThreadDbMock, makeAccountDbMock, makeProcessingDbMock, applyCtx } from "./_helpers.js";
 import type { ContentSanitizerClient } from "../../src/processor/content-sanitizer-client.js";
 import type { SignalClassifier, ClassificationOutput } from "../../src/classifier/classifier.js";
 import type { EmbeddingGenerator, EmbeddingResult } from "../../src/embedding/embedding-generator.js";
-import type { MultiClusterAuroraWriter } from "../../src/database/arc-matcher.js";
+import type { MultiClusterAuroraWriter } from "../../src/database/thread-matcher.js";
 import type { S3RetentionService } from "../../src/embedding/s3-retention-service.js";
-import type { Signal, Arc, Alias } from "../../src/types/index.js";
+import type { Signal, Thread, Alias } from "../../src/types/index.js";
 import type { EmailService } from "../../src/email/email-service.js";
 import { dbError } from "../../src/errors.js";
 import { createMockLogger, type MockLogger } from "../helpers/mock-logger.js";
@@ -34,7 +34,7 @@ vi.mock("../../src/embedding/cluster-registry.js", () => {
     CLUSTER_REGISTRY: Object.freeze([entry]),
     getActiveClusters: () => [entry],
     getRegistryById: (id: string) => (id === entry.registryId ? entry : null),
-    getPrimaryArcMatcherRegistry: () => entry,
+    getPrimaryThreadMatcherRegistry: () => entry,
   };
 });
 
@@ -86,7 +86,7 @@ const validClassification: ClassificationOutput = {
 function makeStore() {
   const accountDb = makeAccountDbMock(TEST_ACCOUNT_ID);
   applyCtx(accountDb, DEFAULT_CTX);
-  return { arcDb: makeArcDbMock(), accountDb, processingDb: makeProcessingDbMock() };
+  return { threadDb: makeThreadDbMock(), accountDb, processingDb: makeProcessingDbMock() };
 }
 
 function makeContentSanitizer(): ContentSanitizerClient {
@@ -129,7 +129,7 @@ function makeAuroraWriter(): MultiClusterAuroraWriter {
   };
 }
 
-function makeArcMatcher(): ArcMatcher {
+function makeArcMatcher(): ThreadMatcherPort {
   return {
     findMatch: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
     upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
@@ -190,8 +190,8 @@ function makeMessage(opts: {
 /**
  * Build a side-effect payload (dispatched by the processor itself).
  */
-function makeSideEffectPayload(payload: { signal: Signal; arc: Arc }): SideEffectPayload {
-  return payload;
+function makeSideEffectPayload(payload: { signal: Signal; arc: Thread }): SideEffectPayload {
+  return { signal: payload.signal, thread: payload.arc };
 }
 
 /**
@@ -231,7 +231,7 @@ function makeExistingSignal(overrides: Partial<Omit<Signal, "data">> & { data?: 
   } as Signal;
 }
 
-function makeExistingArc(overrides: Partial<Arc> = {}): Arc {
+function makeExistingArc(overrides: Partial<Thread> = {}): Thread {
   return {
     id: "arc-integration-001",
     accountId: TEST_ACCOUNT_ID,
@@ -256,14 +256,14 @@ function makeExistingArc(overrides: Partial<Arc> = {}): Arc {
 // ---------------------------------------------------------------------------
 
 describe("SignalProcessor integration: end-to-end retry flow", () => {
-  let arcDb: ReturnType<typeof makeArcDbMock>;
+  let threadDb: ReturnType<typeof makeThreadDbMock>;
   let accountDb: ReturnType<typeof makeAccountDbMock>;
   let processingDb: ReturnType<typeof makeProcessingDbMock>;
   let contentSanitizer: ContentSanitizerClient;
   let classifier: Pick<SignalClassifier, "classify">;
   let embeddingGenerator: EmbeddingGenerator;
   let auroraWriter: MultiClusterAuroraWriter;
-  let arcMatcher: ArcMatcher;
+  let threadMatcher: ThreadMatcherPort;
   let retentionService: S3RetentionService;
   let sqsDispatcher: SqsDispatcher;
   let notifier: Notifier;
@@ -275,24 +275,24 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockLogger = createMockLogger();
-    ({ arcDb, accountDb, processingDb } = makeStore());
+    ({ threadDb, accountDb, processingDb } = makeStore());
     contentSanitizer = makeContentSanitizer();
     classifier = makeClassifier();
     embeddingGenerator = makeEmbeddingGenerator();
     auroraWriter = makeAuroraWriter();
-    arcMatcher = makeArcMatcher();
+    threadMatcher = makeArcMatcher();
     retentionService = makeRetentionService();
     sqsDispatcher = makeSqsDispatcher();
     notifier = makeNotifier();
     forwardingService = makeForwarder();
     replySender = makeReplySender();
     processor = new SignalProcessor({ ...makeSharedNewDeps(),
-      arcDb, accountDb, processingDb,
+      threadDb, accountDb, processingDb,
       contentSanitizer, s3Client: { send: vi.fn().mockResolvedValue({ Body: { transformToByteArray: () => Promise.resolve(new Uint8Array([1, 2, 3])) } }) } as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
       classifier,
       embeddingGenerator,
       auroraWriter,
-      arcMatcher,
+      threadMatcher,
       ruleEvaluator: makeRuleEvaluator3(mockLogger),
       logger: mockLogger,
       retentionService,
@@ -333,15 +333,15 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
 
       // Arc was saved before signal
       const callOrder: string[] = [];
-      vi.mocked(arcDb.saveThread).mock.invocationCallOrder.forEach(() => callOrder.push("saveArc"));
-      vi.mocked(arcDb.saveSignal).mock.invocationCallOrder.forEach(() => callOrder.push("saveSignal"));
+      vi.mocked(threadDb.saveThread).mock.invocationCallOrder.forEach(() => callOrder.push("saveArc"));
+      vi.mocked(threadDb.saveSignal).mock.invocationCallOrder.forEach(() => callOrder.push("saveSignal"));
       // Verify saveArc was called
-      expect(arcDb.saveThread).toHaveBeenCalled();
+      expect(threadDb.saveThread).toHaveBeenCalled();
       // Verify saveSignal was called
-      expect(arcDb.saveSignal).toHaveBeenCalled();
+      expect(threadDb.saveSignal).toHaveBeenCalled();
       // saveArc invocation order < saveSignal invocation order
-      const arcOrder = vi.mocked(arcDb.saveThread).mock.invocationCallOrder[0]!;
-      const signalOrder = vi.mocked(arcDb.saveSignal).mock.invocationCallOrder[0]!;
+      const arcOrder = vi.mocked(threadDb.saveThread).mock.invocationCallOrder[0]!;
+      const signalOrder = vi.mocked(threadDb.saveSignal).mock.invocationCallOrder[0]!;
       expect(arcOrder).toBeLessThan(signalOrder);
 
       // S3 retention was attempted
@@ -381,8 +381,8 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
     const existingArc = makeExistingArc();
 
     beforeEach(() => {
-      vi.mocked(arcDb.getSignalByMessageId).mockReturnValue(Promise.resolve(ok(existingSignal)));
-      vi.mocked(arcDb.getThread).mockReturnValue(Promise.resolve(ok(existingArc)));
+      vi.mocked(threadDb.getSignalByMessageId).mockReturnValue(Promise.resolve(ok(existingSignal)));
+      vi.mocked(threadDb.getThread).mockReturnValue(Promise.resolve(ok(existingArc)));
     });
 
     it("skips parse, classify, and embedding — resumes from S3 retention → Aurora → dispatch", async () => {
@@ -394,10 +394,10 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
       expect(result.isOk()).toBe(true);
 
       // Signal was looked up from DDB
-      expect(arcDb.getSignalByMessageId).toHaveBeenCalledWith(TEST_ACCOUNT_ID, SES_MESSAGE_ID);
+      expect(threadDb.getSignalByMessageId).toHaveBeenCalledWith(TEST_ACCOUNT_ID, SES_MESSAGE_ID);
 
       // Arc was loaded from DDB
-      expect(arcDb.getThread).toHaveBeenCalledWith(TEST_ACCOUNT_ID, existingSignal.threadId);
+      expect(threadDb.getThread).toHaveBeenCalledWith(TEST_ACCOUNT_ID, existingSignal.threadId);
 
       // Expensive operations were NOT called
       expect(contentSanitizer.invoke).not.toHaveBeenCalled();
@@ -405,8 +405,8 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
       expect(embeddingGenerator.generateForModel).not.toHaveBeenCalled();
 
       // No new DDB saves (arc and signal already exist)
-      expect(arcDb.saveThread).not.toHaveBeenCalled();
-      expect(arcDb.saveSignal).not.toHaveBeenCalled();
+      expect(threadDb.saveThread).not.toHaveBeenCalled();
+      expect(threadDb.saveSignal).not.toHaveBeenCalled();
 
       // S3 retention was attempted (idempotent, always runs)
       expect(retentionService.applyPlanRetention).toHaveBeenCalledOnce();
@@ -431,8 +431,8 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
     const existingArc = makeExistingArc();
 
     beforeEach(() => {
-      vi.mocked(arcDb.getSignalByMessageId).mockReturnValue(Promise.resolve(ok(existingSignal)));
-      vi.mocked(arcDb.getThread).mockReturnValue(Promise.resolve(ok(existingArc)));
+      vi.mocked(threadDb.getSignalByMessageId).mockReturnValue(Promise.resolve(ok(existingSignal)));
+      vi.mocked(threadDb.getThread).mockReturnValue(Promise.resolve(ok(existingArc)));
       // Aurora fails
       vi.mocked(auroraWriter.upsertEmbedding).mockResolvedValue(err(dbError(new Error("Aurora cluster timeout"))));
     });
@@ -551,7 +551,7 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
       expect(contentSanitizer.invoke).not.toHaveBeenCalled();
       expect(classifier.classify).not.toHaveBeenCalled();
       expect(embeddingGenerator.generateForModel).not.toHaveBeenCalled();
-      expect(arcDb.getSignalByMessageId).not.toHaveBeenCalled();
+      expect(threadDb.getSignalByMessageId).not.toHaveBeenCalled();
       expect(auroraWriter.upsertEmbedding).not.toHaveBeenCalled();
     });
   });

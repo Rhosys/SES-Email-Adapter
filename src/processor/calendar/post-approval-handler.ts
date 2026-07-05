@@ -11,9 +11,9 @@ import type { S3Client } from "@aws-sdk/client-s3";
 import { GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 import { DateTime } from "luxon";
 
-import type { Signal, Arc, Attachment } from "../../types/index.js";
+import type { Signal, Thread, Attachment } from "../../types/index.js";
 import type { CalendarEventData, CalendarInviteInvalidData } from "../../types/calendar.js";
-import type { ArcDatabase } from "../../database/arc-database.js";
+import type { ThreadDatabase } from "../../database/thread-database.js";
 import type { AccountDatabase } from "../../database/account-database.js";
 import type { Logger } from "../../logger.js";
 import type { DbError, Result } from "../../errors.js";
@@ -28,7 +28,7 @@ import { forwardCalendarInvite, type CalendarForwarderDeps } from "./calendar-fo
 // ---------------------------------------------------------------------------
 
 export interface PostApprovalCalendarHandlerDeps {
-  arcDb: ArcDatabase;
+  threadDb: ThreadDatabase;
   accountDb: AccountDatabase;
   s3Client: S3Client;
   contentBucket: string;
@@ -37,17 +37,17 @@ export interface PostApprovalCalendarHandlerDeps {
 }
 
 /**
- * After a quarantined email signal is approved and placed on an arc,
+ * After a quarantined email signal is approved and placed on a thread,
  * process any .ics attachment and forward the calendar invite.
  *
  * Best-effort: failures are logged but do not fail the approval.
  */
 export async function handlePostApprovalCalendar(
   signal: Signal,
-  arc: Arc,
+  thread: Thread,
   deps: PostApprovalCalendarHandlerDeps,
 ): Promise<void> {
-  const { arcDb, accountDb, s3Client, contentBucket, calendarForwarderDeps, logger } = deps;
+  const { threadDb, accountDb, s3Client, contentBucket, calendarForwarderDeps, logger } = deps;
   const accountId = signal.accountId;
 
   // Check for calendar attachments
@@ -55,7 +55,7 @@ export async function handlePostApprovalCalendar(
   const calendarAttachment = findCalendarAttachment(attachments, logger);
   if (!calendarAttachment) return;
 
-  logger.trackPoint("post_approval_calendar_start", { signalId: signal.id, arcId: arc.id });
+  logger.trackPoint("post_approval_calendar_start", { signalId: signal.id, threadId: thread.id });
 
   // Fetch .ics bytes from S3
   let icsBytes: Uint8Array;
@@ -86,7 +86,7 @@ export async function handlePostApprovalCalendar(
     const invalidSignal: Signal<CalendarInviteInvalidData> = {
       id: invalidId,
       signalLookupId: invalidId,
-      arcId: arc.id,
+      threadId: thread.id,
       accountId,
       source: "signal",
       type: "calendar_invite_invalid",
@@ -98,7 +98,7 @@ export async function handlePostApprovalCalendar(
         linkedSignalId: signal.id,
       },
     };
-    await arcDb.saveSignal(invalidSignal);
+    await threadDb.saveSignal(invalidSignal);
     logger.warn("Post-approval calendar: .ics rejected by parser.", {
       code: "processor.post_approval_calendar.parse_rejected",
       accountId,
@@ -137,7 +137,7 @@ export async function handlePostApprovalCalendar(
   const calendarSignal: Signal<CalendarEventData> = {
     id: calendarSignalId,
     signalLookupId,
-    arcId: arc.id,
+    threadId: thread.id,
     accountId,
     source: "signal",
     type: "calendar_event",
@@ -162,7 +162,7 @@ export async function handlePostApprovalCalendar(
       calendarSignal,
       calendarForwardingAddress,
       accountId,
-      arcId: arc.id,
+      threadId: thread.id,
       aliasAddress: signal.data.recipientAddress,
     },
     calendarForwarderDeps,
@@ -180,7 +180,7 @@ export async function handlePostApprovalCalendar(
     return;
   }
 
-  const saveCalResult = await arcDb.saveSignal(calendarSignal);
+  const saveCalResult = await threadDb.saveSignal(calendarSignal);
   if (saveCalResult.isErr()) {
     logger.warn("Post-approval calendar: failed to save calendar signal.", {
       code: "processor.post_approval_calendar.save_failed",
@@ -191,15 +191,15 @@ export async function handlePostApprovalCalendar(
     return;
   }
 
-  // Apply system:calendar label to the arc
-  if (!arc.labels.includes("system:calendar")) {
-    arc.labels = [...arc.labels, "system:calendar"];
-    const updateResult = await arcDb.updateArc(accountId, arc.id, arc.status, arc.lastSignalAt!, { labels: arc.labels });
+  // Apply system:calendar label to the thread
+  if (!thread.labels.includes("system:calendar")) {
+    thread.labels = [...thread.labels, "system:calendar"];
+    const updateResult = await threadDb.updateThread(accountId, thread.id, thread.status, thread.lastSignalAt!, { labels: thread.labels });
     if (updateResult.isErr()) {
       logger.warn("Post-approval calendar: failed to apply system:calendar label.", {
         code: "processor.post_approval_calendar.label_failed",
         accountId,
-        arcId: arc.id,
+        threadId: thread.id,
         error: updateResult.error,
       });
     }
@@ -210,7 +210,7 @@ export async function handlePostApprovalCalendar(
     accountId,
     signalId: signal.id,
     calendarSignalId,
-    arcId: arc.id,
+    threadId: thread.id,
     method: calendarData.method,
   });
 }

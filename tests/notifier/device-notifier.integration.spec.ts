@@ -4,14 +4,14 @@ import { ok } from "neverthrow";
 import { SignalProcessor, SYSTEM_RULES } from "../../src/processor/processor.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
 import { makeSharedNewDeps, makeRuleEvaluator3 } from "../processor/_shared-new-deps.js";
-import type { ArcMatcher, SqsDispatcher, Notifier,  ReplySender, SideEffectPayload } from "../../src/processor/processor.js";
-import { makeArcDbMock, makeAccountDbMock, makeProcessingDbMock, applyCtx } from "../processor/_helpers.js";
+import type { ThreadMatcherPort, SqsDispatcher, Notifier,  ReplySender, SideEffectPayload } from "../../src/processor/processor.js";
+import { makeThreadDbMock, makeAccountDbMock, makeProcessingDbMock, applyCtx } from "../processor/_helpers.js";
 import type { ContentSanitizerClient } from "../../src/processor/content-sanitizer-client.js";
 import type { SignalClassifier } from "../../src/classifier/classifier.js";
 import type { EmbeddingGenerator } from "../../src/embedding/embedding-generator.js";
-import type { MultiClusterAuroraWriter } from "../../src/database/arc-matcher.js";
+import type { MultiClusterAuroraWriter } from "../../src/database/thread-matcher.js";
 import type { S3RetentionService } from "../../src/embedding/s3-retention-service.js";
-import type { Signal, Arc, Alias, ArcUrgency } from "../../src/types/index.js";
+import type { Signal, Thread, Alias, ThreadUrgency } from "../../src/types/index.js";
 import type { EmailService } from "../../src/email/email-service.js";
 import { createMockLogger, type MockLogger } from "../helpers/mock-logger.js";
 
@@ -33,7 +33,7 @@ vi.mock("../../src/embedding/cluster-registry.js", () => {
     CLUSTER_REGISTRY: Object.freeze([entry]),
     getActiveClusters: () => [entry],
     getRegistryById: (id: string) => (id === entry.registryId ? entry : null),
-    getPrimaryArcMatcherRegistry: () => entry,
+    getPrimaryThreadMatcherRegistry: () => entry,
   };
 });
 
@@ -64,7 +64,7 @@ const DEFAULT_ALIAS: Alias = {
 // ---------------------------------------------------------------------------
 
 function makeStore() {
-  const arcDb = makeArcDbMock();
+  const threadDb = makeThreadDbMock();
   const accountDb = makeAccountDbMock(TEST_ACCOUNT_ID);
   const processingDb = makeProcessingDbMock();
   vi.mocked(accountDb.listEnabledRules).mockReturnValue(Promise.resolve(ok(SYSTEM_RULES)));
@@ -81,7 +81,7 @@ function makeStore() {
     accountId: TEST_ACCOUNT_ID, aliasAddress: "user@example.com", domain: "example.com",
     alias: "user", senderDomain: "example.com", policy: "allow", addedAt: "2024-01-01T00:00:00Z",
   })));
-  return { arcDb, accountDb, processingDb };
+  return { threadDb, accountDb, processingDb };
 }
 
 function makeContentSanitizer(): ContentSanitizerClient {
@@ -130,7 +130,7 @@ function makeAuroraWriter(): MultiClusterAuroraWriter {
   };
 }
 
-function makeArcMatcher(): ArcMatcher {
+function makeArcMatcher(): ThreadMatcherPort {
   return {
     findMatch: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
     upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
@@ -161,7 +161,7 @@ function makeSignal(overrides: Partial<Signal> = {}): Signal {
   return {
     id: "sgn-notifier001",
     signalLookupId: "ses-msg-notifier-001",
-    arcId: "arc-notifier-001",
+    threadId: "arc-notifier-001",
     accountId: TEST_ACCOUNT_ID,
     source: "email",
     type: "email",
@@ -188,7 +188,7 @@ function makeSignal(overrides: Partial<Signal> = {}): Signal {
   } as Signal;
 }
 
-function makeArc(overrides: Partial<Arc> = {}): Arc {
+function makeThread(overrides: Partial<Thread> = {}): Thread {
   return {
     id: "arc-notifier-001",
     accountId: TEST_ACCOUNT_ID,
@@ -227,7 +227,7 @@ describe("DeviceNotifier wiring: processor invokes notifier with urgency", () =>
       classifier: makeClassifier(),
       embeddingGenerator: makeEmbeddingGenerator(),
       auroraWriter: makeAuroraWriter(),
-      arcMatcher: makeArcMatcher(),
+      threadMatcher: makeArcMatcher(),
       ruleEvaluator: makeRuleEvaluator3(mockLogger),
       logger: mockLogger,
       retentionService: makeRetentionService(),
@@ -245,39 +245,39 @@ describe("DeviceNotifier wiring: processor invokes notifier with urgency", () =>
   });
 
   it.each([
-    { label: "critical urgency on arc", urgency: "critical" as ArcUrgency },
-    { label: "high urgency on arc", urgency: "high" as ArcUrgency },
-    { label: "normal urgency on arc", urgency: "normal" as ArcUrgency },
-    { label: "low urgency on arc", urgency: "low" as ArcUrgency },
-    { label: "silent urgency on arc", urgency: "silent" as ArcUrgency },
+    { label: "critical urgency on thread", urgency: "critical" as ThreadUrgency },
+    { label: "high urgency on thread", urgency: "high" as ThreadUrgency },
+    { label: "normal urgency on thread", urgency: "normal" as ThreadUrgency },
+    { label: "low urgency on thread", urgency: "low" as ThreadUrgency },
+    { label: "silent urgency on thread", urgency: "silent" as ThreadUrgency },
   ])("$label → notifier.notify receives $urgency as 4th argument", async ({ urgency }) => {
     const signal = makeSignal();
-    const arc = makeArc({ urgency });
-    const payload: SideEffectPayload = { signal, arc };
+    const thread = makeThread({ urgency });
+    const payload: SideEffectPayload = { signal, thread };
 
     await processor.processSideEffect(payload);
 
     expect(notifier.notify).toHaveBeenCalledOnce();
     expect(notifier.notify).toHaveBeenCalledWith(
       TEST_ACCOUNT_ID,
-      arc,
+      thread,
       signal,
       urgency,
     );
   });
 
-  it("defaults to 'normal' when arc.urgency is undefined", async () => {
+  it("defaults to 'normal' when thread.urgency is undefined", async () => {
     const signal = makeSignal();
-    const arc = makeArc();
-    delete arc.urgency;
-    const payload: SideEffectPayload = { signal, arc };
+    const thread = makeThread();
+    delete thread.urgency;
+    const payload: SideEffectPayload = { signal, thread };
 
     await processor.processSideEffect(payload);
 
     expect(notifier.notify).toHaveBeenCalledOnce();
     expect(notifier.notify).toHaveBeenCalledWith(
       TEST_ACCOUNT_ID,
-      arc,
+      thread,
       signal,
       "normal",
     );
@@ -315,11 +315,11 @@ describe("DeviceNotifier wiring: handler instantiates with correct dependencies"
       logger: mockLogger,
     });
 
-    // Verify the notify method signature accepts 4 arguments (accountId, arc, signal, urgency)
+    // Verify the notify method signature accepts 4 arguments (accountId, thread, signal, urgency)
     const signal = makeSignal();
-    const arc = makeArc({ urgency: "high" });
+    const thread = makeThread({ urgency: "high" });
 
-    const result = await notifier.notify(TEST_ACCOUNT_ID, arc, signal, "high");
+    const result = await notifier.notify(TEST_ACCOUNT_ID, thread, signal, "high");
 
     // With empty device list, should return Ok
     expect(result.isOk()).toBe(true);
@@ -351,7 +351,7 @@ describe("DeviceNotifier wiring: handler instantiates with correct dependencies"
       classifier: makeClassifier(),
       embeddingGenerator: makeEmbeddingGenerator(),
       auroraWriter: makeAuroraWriter(),
-      arcMatcher: makeArcMatcher(),
+      threadMatcher: makeArcMatcher(),
       ruleEvaluator: makeRuleEvaluator3(mockLogger),
       logger: mockLogger,
       retentionService: makeRetentionService(),

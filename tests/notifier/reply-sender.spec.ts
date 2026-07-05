@@ -3,7 +3,7 @@ import { ReplySenderService } from "../../src/notifier/reply-sender.js";
 import type { EmailService } from "../../src/email/email-service.js";
 import { ok } from "../../src/errors.js";
 import type { Logger } from "../../src/logger.js";
-import { TAG_TYPE, TAG_ACCOUNT_ID, TAG_SIGNAL_ID, TAG_ARC_ID } from "../../src/email/ses-tags.js";
+import { TAG_TYPE, TAG_ACCOUNT_ID, TAG_SIGNAL_ID, TAG_THREAD_ID } from "../../src/email/ses-tags.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -109,7 +109,7 @@ describe("ReplySenderService tag integration", () => {
       ]);
     });
 
-    it("with all fields → tags include AccountId, SignalId, ArcId", async () => {
+    it("with all fields → tags include AccountId, SignalId, ThreadId", async () => {
       (emailService.send as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok({ messageId: "m-2" }));
 
       await handler.sendReply({
@@ -128,7 +128,7 @@ describe("ReplySenderService tag integration", () => {
         { Name: TAG_TYPE, Value: "reply" },
         { Name: TAG_ACCOUNT_ID, Value: "acct-1" },
         { Name: TAG_SIGNAL_ID, Value: "sig-2" },
-        { Name: TAG_ARC_ID, Value: "arc-3" },
+        { Name: TAG_THREAD_ID, Value: "arc-3" },
       ]);
     });
   });

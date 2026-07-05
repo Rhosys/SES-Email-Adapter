@@ -2,14 +2,14 @@ import type { IForwardingService } from "../../src/forwarding/forwarding-service
 import { describe, it, expect, vi } from "vitest";
 import { ok, err } from "neverthrow";
 import { SignalProcessor, SYSTEM_RULES } from "../../src/processor/processor.js";
-import type { ArcMatcher, InboundSignalMessage } from "../../src/processor/processor.js";
+import type { ThreadMatcherPort, InboundSignalMessage } from "../../src/processor/processor.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
 import { makeSharedNewDeps, makeRuleEvaluator3 } from "./_shared-new-deps.js";
-import { makeArcDbMock, makeAccountDbMock, makeProcessingDbMock } from "./_helpers.js";
+import { makeThreadDbMock, makeAccountDbMock, makeProcessingDbMock } from "./_helpers.js";
 import type { ContentSanitizerClient } from "../../src/processor/content-sanitizer-client.js";
 import type { SignalClassifier } from "../../src/classifier/classifier.js";
 import type { EmbeddingGenerator } from "../../src/embedding/embedding-generator.js";
-import type { MultiClusterAuroraWriter } from "../../src/database/arc-matcher.js";
+import type { MultiClusterAuroraWriter } from "../../src/database/thread-matcher.js";
 import { dbError } from "../../src/errors.js";
 import type { EmailService } from "../../src/email/email-service.js";
 import { createMockLogger } from "../helpers/mock-logger.js";
@@ -28,7 +28,7 @@ vi.mock("../../src/embedding/cluster-registry.js", () => {
     CLUSTER_REGISTRY: Object.freeze([cluster]),
     getActiveClusters: () => [cluster],
     getRegistryById: (id: string) => (id === "cluster-a" ? cluster : null),
-    getPrimaryArcMatcherRegistry: () => cluster,
+    getPrimaryThreadMatcherRegistry: () => cluster,
   };
 });
 
@@ -41,7 +41,7 @@ const TEST_ACCOUNT_ID = "acct-msgid";
 
 describe("ProcessError on database failure", () => {
   function makeStore() {
-    return { arcDb: makeArcDbMock(), accountDb: makeAccountDbMock(TEST_ACCOUNT_ID), processingDb: makeProcessingDbMock() };
+    return { threadDb: makeThreadDbMock(), accountDb: makeAccountDbMock(TEST_ACCOUNT_ID), processingDb: makeProcessingDbMock() };
   }
 
   function makeMessage(): InboundSignalMessage {
@@ -89,13 +89,13 @@ describe("ProcessError on database failure", () => {
       upsertEmbedding: vi.fn().mockResolvedValue(ok(undefined)),
       findMatch: vi.fn().mockResolvedValue(ok(null)),
     };
-    const arcMatcher: ArcMatcher = {
+    const threadMatcher: ThreadMatcherPort = {
       findMatch: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
       upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     };
     const mockLogger = createMockLogger();
     return new SignalProcessor({ ...makeSharedNewDeps(),
-      ...store, contentSanitizer, userCodeExecutor: { invoke: vi.fn(), validateAst: vi.fn(), validateAstBatch: vi.fn() }, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", classifier, embeddingGenerator, auroraWriter, arcMatcher,
+      ...store, contentSanitizer, userCodeExecutor: { invoke: vi.fn(), validateAst: vi.fn(), validateAstBatch: vi.fn() }, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", classifier, embeddingGenerator, auroraWriter, threadMatcher,
       ruleEvaluator: makeRuleEvaluator3(mockLogger), logger: mockLogger,
       notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       forwardingService: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), sendVerification: vi.fn().mockResolvedValue(ok(undefined)), verifyWebhook: vi.fn().mockResolvedValue(ok(undefined)) },
@@ -109,7 +109,7 @@ describe("ProcessError on database failure", () => {
 
   it("database failure on dedup check returns err with cause", async () => {
     const store = makeStore();
-    (store.arcDb.getSignalByMessageId as ReturnType<typeof vi.fn>).mockReturnValue(
+    (store.threadDb.getSignalByMessageId as ReturnType<typeof vi.fn>).mockReturnValue(
       Promise.resolve(err(dbError(new Error("connection timeout")))),
     );
 

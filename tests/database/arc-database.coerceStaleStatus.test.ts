@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { DateTime } from "luxon";
-import { coerceStaleStatus } from "../../src/database/arc-database.js";
+import { coerceStaleStatus } from "../../src/database/thread-database.js";
 import type { Signal, EmailSignalData } from "../../src/types/index.js";
 
 const baseData: EmailSignalData = {

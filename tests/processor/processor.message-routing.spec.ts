@@ -2,14 +2,14 @@ import type { IForwardingService } from "../../src/forwarding/forwarding-service
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ok } from "../../src/errors.js";
 import { SignalProcessor, SYSTEM_RULES } from "../../src/processor/processor.js";
-import type { ArcMatcher, InboundSignalMessage } from "../../src/processor/processor.js";
+import type { ThreadMatcherPort, InboundSignalMessage } from "../../src/processor/processor.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
 import { makeSharedNewDeps, makeRuleEvaluator3 } from "./_shared-new-deps.js";
-import { makeArcDbMock, makeAccountDbMock, makeProcessingDbMock } from "./_helpers.js";
+import { makeThreadDbMock, makeAccountDbMock, makeProcessingDbMock } from "./_helpers.js";
 import type { ContentSanitizerClient } from "../../src/processor/content-sanitizer-client.js";
 import type { SignalClassifier, ClassificationOutput } from "../../src/classifier/classifier.js";
 import type { EmbeddingGenerator, EmbeddingResult } from "../../src/embedding/embedding-generator.js";
-import type { MultiClusterAuroraWriter } from "../../src/database/arc-matcher.js";
+import type { MultiClusterAuroraWriter } from "../../src/database/thread-matcher.js";
 import type { Alias } from "../../src/types/index.js";
 import type { EmailService } from "../../src/email/email-service.js";
 import { createMockLogger, type MockLogger } from "../helpers/mock-logger.js";
@@ -29,7 +29,7 @@ vi.mock("../../src/embedding/cluster-registry.js", () => {
     CLUSTER_REGISTRY: Object.freeze([entry]),
     getActiveClusters: () => [entry],
     getRegistryById: (id: string) => (id === entry.registryId ? entry : null),
-    getPrimaryArcMatcherRegistry: () => entry,
+    getPrimaryThreadMatcherRegistry: () => entry,
   };
 });
 
@@ -60,7 +60,7 @@ const validClassification: ClassificationOutput = {
 };
 
 function makeStore() {
-  return { arcDb: makeArcDbMock(), accountDb: makeAccountDbMock(TEST_ACCOUNT_ID), processingDb: makeProcessingDbMock() };
+  return { threadDb: makeThreadDbMock(), accountDb: makeAccountDbMock(TEST_ACCOUNT_ID), processingDb: makeProcessingDbMock() };
 }
 
 function makeContentSanitizer(): ContentSanitizerClient {
@@ -103,7 +103,7 @@ function makeAuroraWriter(): MultiClusterAuroraWriter {
   };
 }
 
-function makeArcMatcher(): ArcMatcher {
+function makeArcMatcher(): ThreadMatcherPort {
   return {
     findMatch: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
     upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
@@ -132,7 +132,7 @@ function makeMessage(): InboundSignalMessage {
 // ---------------------------------------------------------------------------
 
 describe("SignalProcessor message routing", () => {
-  let arcDb: ReturnType<typeof makeArcDbMock>;
+  let threadDb: ReturnType<typeof makeThreadDbMock>;
   let accountDb: ReturnType<typeof makeAccountDbMock>;
   let processingDb: ReturnType<typeof makeProcessingDbMock>;
   let processor: SignalProcessor;
@@ -141,14 +141,14 @@ describe("SignalProcessor message routing", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockLogger = createMockLogger();
-    ({ arcDb, accountDb, processingDb } = makeStore());
+    ({ threadDb, accountDb, processingDb } = makeStore());
     processor = new SignalProcessor({ ...makeSharedNewDeps(),
-      arcDb, accountDb, processingDb,
+      threadDb, accountDb, processingDb,
       contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
       classifier: makeClassifier(),
       embeddingGenerator: makeEmbeddingGenerator(),
       auroraWriter: makeAuroraWriter(),
-      arcMatcher: makeArcMatcher(),
+      threadMatcher: makeArcMatcher(),
       ruleEvaluator: makeRuleEvaluator3(mockLogger),
       logger: mockLogger,
       notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
@@ -169,7 +169,7 @@ describe("SignalProcessor message routing", () => {
 
     // processRecord was called — observable via the store's dedup check
     expect(processRecordSpy).toHaveBeenCalledOnce();
-    expect(arcDb.getSignalByMessageId).toHaveBeenCalled();
+    expect(threadDb.getSignalByMessageId).toHaveBeenCalled();
   });
 
   it("routes to processRecord when messageType is 'inbound_signal'", async () => {
@@ -180,6 +180,6 @@ describe("SignalProcessor message routing", () => {
 
     // processRecord was called — observable via the store's dedup check
     expect(processRecordSpy).toHaveBeenCalledOnce();
-    expect(arcDb.getSignalByMessageId).toHaveBeenCalled();
+    expect(threadDb.getSignalByMessageId).toHaveBeenCalled();
   });
 });

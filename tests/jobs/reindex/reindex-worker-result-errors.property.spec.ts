@@ -31,7 +31,7 @@ const { mockUpsertEmbedding, mockAddEmbeddingToCache, mockGenerateForModel, mock
 // Mock MultiClusterAuroraWriter
 // ---------------------------------------------------------------------------
 
-vi.mock("../../../src/database/arc-matcher.js", () => ({
+vi.mock("../../../src/database/thread-matcher.js", () => ({
   createSearchDatabase: () => ({
     upsertEmbedding: (...args: unknown[]) => mockUpsertEmbedding(...args),
   }),
@@ -41,8 +41,8 @@ vi.mock("../../../src/database/arc-matcher.js", () => ({
 // Mock ArcDatabase
 // ---------------------------------------------------------------------------
 
-vi.mock("../../../src/database/arc-database.js", () => ({
-  ArcDatabase: class {
+vi.mock("../../../src/database/thread-database.js", () => ({
+  ThreadDatabase: class {
     addEmbeddingToCache = mockAddEmbeddingToCache;
   },
 }));
@@ -158,7 +158,7 @@ describe("Property 7: Reindex worker propagates Result errors", () => {
       sk: "#",
       id: signalId,
       accountId: "acct-test",
-      arcId: "arc-test",
+      threadId: "arc-test",
       data: {
         recipientAddress: "test@example.com",
         embeddings: {},

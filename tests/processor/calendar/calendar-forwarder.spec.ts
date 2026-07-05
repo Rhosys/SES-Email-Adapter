@@ -51,7 +51,7 @@ function makeCalendarSignal(method: string): Signal<CalendarEventData> {
     id: "sgn-cal-001",
     signalLookupId: "cal-alice@example.com-uid-123",
     accountId: "acc-abc123",
-    arcId: "arc-def456",
+    threadId: "arc-def456",
     source: "signal",
     type: "calendar_event",
     status: "active",
@@ -85,7 +85,7 @@ function makeOpts(overrides: Partial<ForwardCalendarInviteOpts> = {}): ForwardCa
     calendarSignal: makeCalendarSignal("REQUEST"),
     calendarForwardingAddress: "user@gmail.com",
     accountId: "acc-abc123",
-    arcId: "arc-def456",
+    threadId: "arc-def456",
     aliasAddress: "alias@domain.com",
     ...overrides,
   };

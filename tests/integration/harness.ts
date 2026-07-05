@@ -15,7 +15,7 @@
 //   AUTHRESS_API_URL   — mock JWKS server URL (http://localhost:4500)
 
 import { AccountDatabase } from '../../src/database/account-database.js';
-import { ArcDatabase } from '../../src/database/arc-database.js';
+import { ThreadDatabase } from '../../src/database/thread-database.js';
 import { AuditDatabase } from '../../src/database/audit-database.js';
 import { AuthressAuthService } from '../../src/api/authress-auth.js';
 import { createApp } from '../../src/api/app.js';
@@ -58,7 +58,7 @@ export async function createHarness(): Promise<IntegrationHarness> {
   // All three databases connect to MiniStack via AWS_ENDPOINT_URL.
   // Tables were provisioned by `tofu apply` before the test runs.
   const accountDb = new AccountDatabase(logger);
-  const arcDb = new ArcDatabase(logger);
+  const threadDb = new ThreadDatabase(logger);
   const auditDb = new AuditDatabase();
 
   // Mutable stub — individual tests can override specific methods.
@@ -74,7 +74,7 @@ export async function createHarness(): Promise<IntegrationHarness> {
   };
 
   const app = createApp(makeAppDeps({
-    arcDb,
+    threadDb,
     accountDb,
     auditDb,
     auth: new AuthressAuthService(),

@@ -49,7 +49,7 @@ vi.mock("../../src/embedding/cluster-registry.js", () => ({
       active: true,
     },
   ],
-  getPrimaryArcMatcherRegistry: () => ({
+  getPrimaryThreadMatcherRegistry: () => ({
     registryId: "cluster-a",
     clusterArn: "arn:aws:rds:eu-west-1:111:cluster:cluster-a",
     secretArn: "arn:aws:secretsmanager:eu-west-1:111:secret:cluster-a",

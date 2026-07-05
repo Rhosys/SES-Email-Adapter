@@ -15,7 +15,7 @@ import type { IForwardingService } from "../../src/forwarding/forwarding-service
 import { S3Client, CreateBucketCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { SQSClient, CreateQueueCommand, SendMessageCommand, ReceiveMessageCommand, DeleteMessageCommand } from '@aws-sdk/client-sqs';
 import { AccountDatabase } from '../../src/database/account-database.js';
-import { ArcDatabase } from '../../src/database/arc-database.js';
+import { ThreadDatabase } from '../../src/database/thread-database.js';
 import { AuditDatabase } from '../../src/database/audit-database.js';
 import { ProcessingDatabase } from '../../src/database/processing-database.js';
 import { SignalProcessor } from '../../src/processor/processor.js';
@@ -34,7 +34,7 @@ import type { EmailService } from '../../src/email/email-service.js';
 import type { sendRsvp } from '../../src/processor/calendar/rsvp-composer.js';
 import type { PostApprovalCalendarHandlerDeps } from '../../src/processor/calendar/post-approval-handler.js';
 import type { EmbeddingGenerator } from '../../src/embedding/embedding-generator.js';
-import type { MultiClusterAuroraWriter } from '../../src/database/arc-matcher.js';
+import type { MultiClusterAuroraWriter } from '../../src/database/thread-matcher.js';
 import type { WorkflowData } from '../../src/types/index.js';
 import { BillingHandler } from '../../src/billing/billing-handler.js';
 import type { UserCodeExecutorClient } from '../../src/processor/user-code-client.js';
@@ -105,14 +105,14 @@ export async function createProcessorHarness(): Promise<ProcessorHarness> {
   await sqs.send(new CreateQueueCommand({ QueueName: 'ses-it-signals' })).catch(() => undefined);
 
   const accountDb = new AccountDatabase(logger);
-  const arcDb = new ArcDatabase(logger);
+  const threadDb = new ThreadDatabase(logger);
   const auditDb = new AuditDatabase();
   const processingDb = new ProcessingDatabase();
 
   const sideEffects: SideEffectPayload[] = [];
 
   const processor = new SignalProcessor({
-    arcDb,
+    threadDb,
     accountDb,
     processingDb,
     contentSanitizer: new InProcessContentSanitizer(),
@@ -121,7 +121,7 @@ export async function createProcessorHarness(): Promise<ProcessorHarness> {
     },
     embeddingGenerator: stubEmbeddingGenerator,
     auroraWriter: stubAuroraWriter,
-    arcMatcher: {
+    threadMatcher: {
       findMatch: async () => ok(null),
       upsertEmbedding: async () => ok(undefined),
     },
@@ -158,7 +158,7 @@ export async function createProcessorHarness(): Promise<ProcessorHarness> {
   };
 
   const app = createApp(makeAppDeps({
-    arcDb,
+    threadDb,
     accountDb,
     auditDb,
     auth: new AuthressAuthService(),
