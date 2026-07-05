@@ -6,7 +6,7 @@ import type { Result } from "neverthrow";
 import type { IForwardingService } from "../forwarding/forwarding-service.js";
 import { ok, err, dbError, processorError, invalidResponseError, notFoundError } from "../errors.js";
 import type { DbError, InvalidResponseError, NotFoundError, ProcessorError, TransientSesError } from "../errors.js";
-import type { Signal, Thread, Rule, Workflow, WorkflowData, Alias, AliasSender, SenderPolicy, AccountFilteringConfig, SignalSource, SignalStatus, Domain, ThreadStatus, ThreadUrgency, UnknownSenderPolicy, MatchedRuleResult, InvalidRuleFunctionData, InvalidTemplateFunctionData, AutoSendBlockedData, UnsubscribeInfo } from "../types/index.js";
+import type { Signal, Thread, Rule, Workflow, WorkflowData, Alias, AliasSender, SenderPolicy, AccountFilteringConfig, SignalSource, SignalStatus, Domain, ThreadStatus, ThreadUrgency, UnknownSenderPolicy, MatchedRuleResult, InvalidRuleFunctionData, InvalidTemplateFunctionData, AutoSendBlockedData, UnsubscribeInfo, InboundEmailSignalData, OutboundEmailSignalData } from "../types/index.js";
 import { DEFAULT_UNKNOWN_SENDER_POLICY } from "../types/index.js";
 import type { ParsedMime } from "./mime.js";
 import type { ContentSanitizerClient } from "./content-sanitizer-client.js";
@@ -455,7 +455,7 @@ export class SignalProcessor {
           to: signal.data.from.address,
           from,
           subject: signal.data.subject ?? "",
-          body: signal.data.textBody ?? "",
+          body: "textBody" in signal.data ? (signal.data.textBody ?? "") : "",
           inReplyTo: signal.id,
           accountId,
           signalId: signal.id,
@@ -776,7 +776,6 @@ export class SignalProcessor {
           to: [],
           cc: [],
           subject: "",
-          textBody: "",
           attachments: [],
           headers: {},
           workflow: "notice",
@@ -896,7 +895,6 @@ export class SignalProcessor {
           to: parsed.to,
           cc: parsed.cc,
           subject: parsed.subject,
-          textBody: parsed.textBody ?? "",
           attachments: parsed.attachments,
           headers: parsed.headers,
           workflow: "notice",
@@ -1112,7 +1110,7 @@ export class SignalProcessor {
     // (post-classify path: preserves classification data on blocked signal for audit/review)
     if (effectiveAliasSenderConfig && effectiveAliasSenderConfig.policy !== "allow") {
       const blockStatus = effectiveAliasSenderConfig.policy; // block_hidden | block_reject | report_violation
-      const blockedSignal = buildSignal({ status: blockStatus, accountId, sesMessageId, recipientAddress, parsed, classification: classificationOutput, s3Key, receivedAt: timestamp, now, retentionDuration: effectiveRetentionForTtl, ...(ttl !== undefined ? { ttl } : {}) });
+      const blockedSignal = buildSignal({ status: blockStatus, accountId, sesMessageId, recipientAddress, parsed, classification: classificationOutput, s3Key, receivedAt: timestamp, now, retentionDuration: effectiveRetentionForTtl, ...(ttl !== undefined ? { ttl } : {}) }, this.logger);
       const saveResult = await this.threadDb.saveSignal(blockedSignal);
       if (saveResult.isErr()) return err(saveResult.error);
       this.logger.track("Blocked email — sender explicitly blocked for this alias.", { code: "processor.sender_block", signal: blockedSignal, thread, senderETLD1, policy: blockStatus });
@@ -1169,7 +1167,7 @@ export class SignalProcessor {
       ...(ttl !== undefined ? { ttl } : {}),
       ...(gsi3pk !== undefined ? { gsi3pk } : {}),
       ...(opts?.forceSignalId !== undefined ? { forceSignalId: opts.forceSignalId } : {}),
-    });
+    }, this.logger);
 
     // 10. Evaluate all rules (system rules seeded at low position numbers, user rules at higher positions)
     const rulesResult = await this.accountDb.listEnabledRules(accountId);
@@ -1208,7 +1206,7 @@ export class SignalProcessor {
     const buildArgs = { accountId, sesMessageId, recipientAddress, parsed, classification: classificationOutput, s3Key, receivedAt: timestamp, now, retentionDuration: effectiveRetentionForTtl, ...(ttl !== undefined ? { ttl } : {}), ...(gsi3pk !== undefined ? { gsi3pk } : {}), ...(opts?.forceSignalId !== undefined ? { forceSignalId: opts.forceSignalId } : {}) };
 
     if (outcome.blockDisposition) {
-      const blockSignal = buildSignal({ status: outcome.blockDisposition, ...buildArgs });
+      const blockSignal = buildSignal({ status: outcome.blockDisposition, ...buildArgs }, this.logger);
       const saveResult = await this.threadDb.saveSignal({ ...blockSignal, data: { ...blockSignal.data, matchedRules } });
       if (saveResult.isErr()) return err(saveResult.error);
       this.logger.track("Blocked email — rule matched with block disposition.", { code: "processor.rule_block", signal: blockSignal, thread, disposition: outcome.blockDisposition, matchedRules: matchedRules.map(r => r.ruleId) });
@@ -1229,7 +1227,7 @@ export class SignalProcessor {
     // approveSender overrides quarantine — SR-01 (auto-approve on matched conversation) fires before SR-03/SR-04
     if (outcome.quarantine && !outcome.approveSender) {
       const quarantineStatus = outcome.quarantineHidden ? "quarantine_hidden" : "quarantine_visible";
-      const quarantineBase = buildSignal({ status: quarantineStatus, ...buildArgs });
+      const quarantineBase = buildSignal({ status: quarantineStatus, ...buildArgs }, this.logger);
       const quarantinedSignal: Signal = { ...quarantineBase, data: { ...quarantineBase.data, matchedRules } };
       const saveResult = await this.threadDb.saveSignal(quarantinedSignal);
       if (saveResult.isErr()) return err(saveResult.error);
@@ -1681,8 +1679,9 @@ export class SignalProcessor {
     const result = await this.processMessage(msg, 1, { force: true, unsafeSkipDmarc: true, forceSignalId: existing.id });
     if (result.isErr()) return err(processorError(result.error));
 
-    // Re-fetch the signal (it was just overwritten by processMessage)
-    const freshResult = await this.threadDb.getSignalById(accountId, signalId, threadId);
+    // Re-fetch by primary key — reprocessing may reassign the signal to a different
+    // thread, so the GSI1-based getSignalById (scoped to the original threadId) would miss it.
+    const freshResult = await this.threadDb.getSignalByMessageId(accountId, sesMessageId);
     if (freshResult.isErr()) return err(processorError(freshResult.error));
     if (!freshResult.value) return err(processorError("Signal not found after reprocess"));
     return ok(freshResult.value);
@@ -1768,6 +1767,39 @@ function parseUnsubscribeHeaders(headers: Record<string, string>): UnsubscribeIn
   return undefined;
 }
 
+// ---------------------------------------------------------------------------
+// HTML truncation — cuts at closed block-level tags to preserve valid markup.
+// Full content always recoverable from S3 via s3Key.
+// ---------------------------------------------------------------------------
+const MAX_HTML_BODY_BYTES = 300_000; // 300 KB — leaves ~100 KB headroom for rest of DDB item
+
+function truncateHtml(html: string, maxBytes: number): { html: string; truncated: boolean } {
+  const encoded = Buffer.byteLength(html, "utf-8");
+  if (encoded <= maxBytes) return { html, truncated: false };
+
+  // Find the last block-level close tag that ends within the byte budget
+  const blockClosePattern = /<\/(div|tr|p|table|section|article|li|td|th|blockquote|header|footer)>/gi;
+  let lastSafeCut = 0;
+  let match: RegExpExecArray | null;
+  while ((match = blockClosePattern.exec(html)) !== null) {
+    const endPos = match.index + match[0].length;
+    if (Buffer.byteLength(html.slice(0, endPos), "utf-8") <= maxBytes) {
+      lastSafeCut = endPos;
+    } else {
+      break;
+    }
+  }
+
+  // Fallback: if no block-level tag found within budget, cut at last '>' within estimated char boundary
+  if (lastSafeCut === 0) {
+    const estimatedCharPos = (html.length * (maxBytes / encoded)) | 0;
+    lastSafeCut = html.lastIndexOf(">", estimatedCharPos);
+    if (lastSafeCut <= 0) lastSafeCut = estimatedCharPos;
+  }
+
+  return { html: html.slice(0, lastSafeCut), truncated: true };
+}
+
 function buildSignal(opts: {
   threadId?: string;
   status: Signal["status"];
@@ -1783,14 +1815,33 @@ function buildSignal(opts: {
   retentionDuration?: RetentionDuration;
   gsi3pk?: string;
   forceSignalId?: string;
-}): Signal {
+}, logger?: Logger): Signal<InboundEmailSignalData> {
   const { threadId, status, accountId, sesMessageId, recipientAddress, parsed, classification, s3Key, receivedAt, now, ttl, retentionDuration, gsi3pk, forceSignalId } = opts;
   const signalId = forceSignalId ?? generateId("sgn-");
 
   // Extract unsubscribe info from List-Unsubscribe / List-Unsubscribe-Post headers
   const unsubscribe = parseUnsubscribeHeaders(parsed.headers);
 
-  const signal: Signal = {
+  // Truncate HTML body if it exceeds DDB item headroom
+  let htmlBody = parsed.htmlBody ?? undefined;
+  let htmlBodyTruncated = false;
+  if (htmlBody != null) {
+    const result = truncateHtml(htmlBody, MAX_HTML_BODY_BYTES);
+    if (result.truncated) {
+      const originalBytes = Buffer.byteLength(htmlBody, "utf-8");
+      htmlBody = result.html;
+      htmlBodyTruncated = true;
+      logger?.track("HTML body truncated before DynamoDB storage — full content in S3.", {
+        code: "processor.html_body_truncated",
+        signalId,
+        originalBytes,
+        storedBytes: Buffer.byteLength(htmlBody, "utf-8"),
+        s3Key,
+      });
+    }
+  }
+
+  const signal: Signal<InboundEmailSignalData> = {
     id: signalId,
     signalLookupId: "ses-" + sesMessageId,
     accountId,
@@ -1815,8 +1866,8 @@ function buildSignal(opts: {
       summary: classification.summary,
       s3Key,
       ...(parsed.replyTo !== undefined ? { replyTo: parsed.replyTo } : {}),
-      ...(parsed.textBody !== undefined ? { textBody: parsed.textBody } : {}),
-      ...(parsed.htmlBody != null ? { htmlBody: parsed.htmlBody } : {}),
+      ...(htmlBody !== undefined ? { htmlBody } : {}),
+      ...(htmlBodyTruncated ? { htmlBodyTruncated: true } : {}),
       ...(parsed.sentAt !== undefined ? { sentAt: parsed.sentAt } : {}),
       ...(unsubscribe !== undefined ? { unsubscribe } : {}),
     },

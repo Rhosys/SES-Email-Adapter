@@ -5,7 +5,7 @@ import { ok, err, dbError } from "../errors.js";
 import type { DbError, Result } from "../errors.js";
 import type { Logger } from "../logger.js";
 import type { ListThreadsParams } from "../api/app.js";
-import type { Thread, Signal, AnySignal, EmailSignalData, Page, PageParams, ThreadStatus, ThreadUrgency, Workflow } from "../types/index.js";
+import type { Thread, Signal, AnySignal, EmailSignalData, OutboundEmailSignalData, Page, PageParams, ThreadStatus, ThreadUrgency, Workflow } from "../types/index.js";
 import type { CalendarEventData } from "../types/calendar.js";
 
 // ---------------------------------------------------------------------------
@@ -363,7 +363,7 @@ export class ThreadDatabase {
     }
   }
 
-  async updateSignal(accountId: string, signalLookupId: string, update: Partial<Pick<EmailSignalData, "subject" | "textBody" | "from" | "to">>): Promise<Result<Signal, DbError>> {
+  async updateSignal(accountId: string, signalLookupId: string, update: Partial<Pick<OutboundEmailSignalData, "subject" | "textBody" | "from" | "to">>): Promise<Result<Signal, DbError>> {
     const now = DateTime.utc().toISO()!;
     const setParts: string[] = ["updatedAt = :now"];
     const exprValues: Record<string, unknown> = { ":now": now };
