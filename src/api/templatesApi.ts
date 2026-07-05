@@ -33,7 +33,7 @@ export class TemplatesApi {
     }), async (c) => {
       const accountId = c.req.param("accountId")!;
       const templatesResult = await accountDb.listTemplates(accountId);
-      if (templatesResult.isErr()) return err(c, 500, "Internal Server Error");
+      if (templatesResult.isErr()) { logger.error("Failed to list templates", { code: "api.templates.list_failed", error: templatesResult.error }); return err(c, 500, "Internal Server Error"); }
       return c.json({ templates: templatesResult.value.map(toApiTemplate) }, 200);
     });
 
@@ -75,14 +75,14 @@ export class TemplatesApi {
           functions: body.functions,
           createdAt: now, updatedAt: now,
         });
-        if (templateResult.isErr()) return err(c, 500, "Internal Server Error");
+        if (templateResult.isErr()) { logger.error("Failed to create template", { code: "api.templates.create_failed", error: templateResult.error }); return err(c, 500, "Internal Server Error"); }
         return c.json(toApiTemplate(templateResult.value), 201);
       }
       const templateResult = await accountDb.createTemplate({
         id: generateId("tpl-"), accountId, name: body.name, subject: body.subject, body: body.body,
         createdAt: now, updatedAt: now,
       });
-      if (templateResult.isErr()) return err(c, 500, "Internal Server Error");
+      if (templateResult.isErr()) { logger.error("Failed to create template", { code: "api.templates.create_failed", error: templateResult.error }); return err(c, 500, "Internal Server Error"); }
       return c.json(toApiTemplate(templateResult.value), 201);
     });
 
@@ -108,7 +108,7 @@ export class TemplatesApi {
         }
       }
       const existingResult = await accountDb.getTemplate(accountId, c.req.param("id")!);
-      if (existingResult.isErr()) return err(c, 500, "Internal Server Error");
+      if (existingResult.isErr()) { logger.error("Failed to get template for patch", { code: "api.templates.patch.get_failed", error: existingResult.error }); return err(c, 500, "Internal Server Error"); }
       if (!existingResult.value) return err(c, 404, "Template not found", "TEMPLATE_NOT_FOUND");
       // Audit: write functions change event before persisting (best-effort)
       if (body.functions) {
@@ -123,7 +123,7 @@ export class TemplatesApi {
         }
       }
       const updateResult = await accountDb.updateTemplate(accountId, c.req.param("id")!, body as Parameters<typeof accountDb.updateTemplate>[2]);
-      if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
+      if (updateResult.isErr()) { logger.error("Failed to update template", { code: "api.templates.patch.update_failed", error: updateResult.error }); return err(c, 500, "Internal Server Error"); }
       return c.json(toApiTemplate(updateResult.value), 200);
     });
 
@@ -149,7 +149,7 @@ export class TemplatesApi {
         }
       }
       const existingResult = await accountDb.getTemplate(accountId, c.req.param("id")!);
-      if (existingResult.isErr()) return err(c, 500, "Internal Server Error");
+      if (existingResult.isErr()) { logger.error("Failed to get template for put", { code: "api.templates.put.get_failed", error: existingResult.error }); return err(c, 500, "Internal Server Error"); }
       if (!existingResult.value) return err(c, 404, "Template not found", "TEMPLATE_NOT_FOUND");
       // Audit: write functions change event before persisting (best-effort)
       if (body.functions) {
@@ -164,7 +164,7 @@ export class TemplatesApi {
         }
       }
       const updateResult = await accountDb.updateTemplate(accountId, c.req.param("id")!, { name: body.name, subject: body.subject, body: body.body, ...(body.functions ? { functions: body.functions } : {}) });
-      if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
+      if (updateResult.isErr()) { logger.error("Failed to replace template", { code: "api.templates.put.update_failed", error: updateResult.error }); return err(c, 500, "Internal Server Error"); }
       return c.json(toApiTemplate(updateResult.value), 200);
     });
 
@@ -178,10 +178,10 @@ export class TemplatesApi {
     }), async (c) => {
       const accountId = c.req.param("accountId")!;
       const existingResult = await accountDb.getTemplate(accountId, c.req.param("id")!);
-      if (existingResult.isErr()) return err(c, 500, "Internal Server Error");
+      if (existingResult.isErr()) { logger.error("Failed to get template for delete", { code: "api.templates.delete.get_failed", error: existingResult.error }); return err(c, 500, "Internal Server Error"); }
       if (!existingResult.value) return err(c, 404, "Template not found", "TEMPLATE_NOT_FOUND");
       const deleteResult = await accountDb.deleteTemplate(accountId, c.req.param("id")!);
-      if (deleteResult.isErr()) return err(c, 500, "Internal Server Error");
+      if (deleteResult.isErr()) { logger.error("Failed to delete template", { code: "api.templates.delete_failed", error: deleteResult.error }); return err(c, 500, "Internal Server Error"); }
       return new Response(null, { status: 204 });
     });
   }

@@ -233,15 +233,15 @@ export function createApp({ threadDb, accountDb, auditDb, auth, access, logger, 
   new AccountsApi(accountDb, access, logger, accountCreationStarter, emailService, appBaseUrl, triggerDigest).register(app, helpers);
   new ThreadsApi(threadDb, accountDb, logger, draftSendDispatcher, schedulerClient, emailService, rsvpComposer, postApprovalCalendarDeps, signalReprocessor, s3Client, emailBucket, contentCdnBaseUrl).register(app, helpers);
   new SignalsApi(threadDb, accountDb, logger, postApprovalCalendarDeps, contentCdnBaseUrl).register(app, helpers);
-  new ViewsApi(accountDb).register(app, helpers);
-  new LabelsApi(accountDb).register(app, helpers);
+  new ViewsApi(accountDb, logger).register(app, helpers);
+  new LabelsApi(accountDb, logger).register(app, helpers);
   new RulesApi(accountDb, auditDb, astValidator, billingHandler, logger).register(app, helpers);
   new DomainsApi(accountDb, auditDb, domainIdentityService, logger).register(app, helpers);
   new AliasesApi(accountDb, auditDb, logger, forwardingService).register(app, helpers);
   new TemplatesApi(accountDb, auditDb, astValidator, logger).register(app, helpers);
-  new AuditApi(auditDb).register(app, helpers);
+  new AuditApi(auditDb, logger).register(app, helpers);
   new AdminApi(jobDispatcher).register(app, helpers);
-  new UserApi(accountDb).register(app, helpers);
+  new UserApi(accountDb, logger).register(app, helpers);
 
   // ---------------------------------------------------------------------------
   // Not Found & Method Not Allowed — must be registered after all routes

@@ -1,6 +1,7 @@
 import type { OpenAPIHono } from "@hono/zod-openapi";
 import { z } from "@hono/zod-openapi";
 import type { AccountDatabase } from "../database/account-database.js";
+import type { Logger } from "../logger.js";
 import type { IUserConfiguration } from "../types/index.js";
 import type { AppEnv, RouteHelpers } from "./route-helpers.js";
 import { UserConfiguration } from "./schemas.js";
@@ -9,9 +10,11 @@ import { zParse } from "./validate.js";
 
 export class UserApi {
   private readonly accountDb: AccountDatabase;
+  private readonly logger: Logger;
 
-  constructor(accountDb: AccountDatabase) {
+  constructor(accountDb: AccountDatabase, logger: Logger) {
     this.accountDb = accountDb;
+    this.logger = logger;
   }
 
   register(app: OpenAPIHono<AppEnv>, { err, route }: RouteHelpers) {
@@ -32,7 +35,7 @@ export class UserApi {
       c.set("authorizationVerified", true);
 
       const result = await this.accountDb.getUserConfiguration(jwtUserId);
-      if (result.isErr()) return err(c, 500, "Internal server error");
+      if (result.isErr()) { this.logger.error("Failed to get user configuration", { code: "api.user.get_configuration_failed", error: result.error }); return err(c, 500, "Internal server error"); }
       return c.json(result.value, 200);
     });
 
@@ -58,7 +61,7 @@ export class UserApi {
       const update: Partial<IUserConfiguration> = {};
       if (body.postSendView !== undefined) { update.postSendView = body.postSendView; }
       const result = await this.accountDb.updateUserConfiguration(jwtUserId, update);
-      if (result.isErr()) return err(c, 500, "Internal server error");
+      if (result.isErr()) { this.logger.error("Failed to update user configuration", { code: "api.user.update_configuration_failed", error: result.error }); return err(c, 500, "Internal server error"); }
       return c.json(result.value, 200);
     });
   }

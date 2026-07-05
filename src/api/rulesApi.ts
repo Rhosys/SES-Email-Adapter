@@ -49,7 +49,7 @@ export class RulesApi {
     }), async (c) => {
       const accountId = c.req.param("accountId")!;
       const rulesResult = await accountDb.listRules(accountId);
-      if (rulesResult.isErr()) return err(c, 500, "Internal Server Error");
+      if (rulesResult.isErr()) { logger.error("Failed to list rules", { code: "api.rules.list_failed", error: rulesResult.error }); return err(c, 500, "Internal Server Error"); }
       return c.json({ rules: rulesResult.value.map(toApiRule) }, 200);
     });
 
@@ -95,7 +95,7 @@ export class RulesApi {
         }
       }
       const ruleResult = await accountDb.createRule(accountId, body as Parameters<typeof accountDb.createRule>[1]);
-      if (ruleResult.isErr()) return err(c, 500, "Internal Server Error");
+      if (ruleResult.isErr()) { logger.error("Failed to create rule", { code: "api.rules.create_failed", error: ruleResult.error }); return err(c, 500, "Internal Server Error"); }
       return c.json(toApiRule(ruleResult.value), 201);
     });
 
@@ -109,7 +109,7 @@ export class RulesApi {
     }), async (c) => {
       const accountId = c.req.param("accountId")!;
       const rulesResult = await accountDb.listRules(accountId);
-      if (rulesResult.isErr()) return err(c, 500, "Internal Server Error");
+      if (rulesResult.isErr()) { logger.error("Failed to list rules for patch", { code: "api.rules.patch.list_failed", error: rulesResult.error }); return err(c, 500, "Internal Server Error"); }
       const rule = rulesResult.value.find((r) => r.id === c.req.param("id")!);
       if (!rule) return err(c, 404, "Rule not found", "RULE_NOT_FOUND");
       const body = await zParse(UpdateRuleRequest, c.req.raw);
@@ -123,7 +123,7 @@ export class RulesApi {
           return err(c, 403, "System rules can only be enabled or disabled", "SYSTEM_RULE_IMMUTABLE");
         }
         const result = await accountDb.upsertSystemRuleStatus(accountId, rule.id, body.status);
-        if (result.isErr()) return err(c, 500, "Internal Server Error");
+        if (result.isErr()) { logger.error("Failed to upsert system rule status", { code: "api.rules.patch.system_status_failed", error: result.error }); return err(c, 500, "Internal Server Error"); }
         return c.json(toApiRule({ ...rule, status: body.status }), 200);
       }
       const effectiveConditionType = body.conditionType ?? rule.conditionType ?? "json_logic";
@@ -173,7 +173,7 @@ export class RulesApi {
         }
       }
       const updateResult = await accountDb.updateRule(accountId, rule.id, updateData);
-      if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
+      if (updateResult.isErr()) { logger.error("Failed to update rule", { code: "api.rules.patch.update_failed", error: updateResult.error }); return err(c, 500, "Internal Server Error"); }
       return c.json(toApiRule(updateResult.value), 200);
     });
 
@@ -187,7 +187,7 @@ export class RulesApi {
     }), async (c) => {
       const accountId = c.req.param("accountId")!;
       const rulesResult = await accountDb.listRules(accountId);
-      if (rulesResult.isErr()) return err(c, 500, "Internal Server Error");
+      if (rulesResult.isErr()) { logger.error("Failed to list rules for delete", { code: "api.rules.delete.list_failed", error: rulesResult.error }); return err(c, 500, "Internal Server Error"); }
       const rule = rulesResult.value.find((r) => r.id === c.req.param("id")!);
       if (!rule) return err(c, 404, "Rule not found", "RULE_NOT_FOUND");
       // System rules (SR-*) cannot be deleted — only enabled/disabled via PATCH.
@@ -195,7 +195,7 @@ export class RulesApi {
         return err(c, 400, "System rules cannot be deleted", "SYSTEM_RULE_IMMUTABLE");
       }
       const deleteResult = await accountDb.deleteRule(accountId, rule.id);
-      if (deleteResult.isErr()) return err(c, 500, "Internal Server Error");
+      if (deleteResult.isErr()) { logger.error("Failed to delete rule", { code: "api.rules.delete_failed", error: deleteResult.error }); return err(c, 500, "Internal Server Error"); }
       return new Response(null, { status: 204 });
     });
   }

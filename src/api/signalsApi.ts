@@ -71,7 +71,7 @@ export class SignalsApi {
         ...(query["limit"] ? { limit: parseInt(query["limit"], 10) } : {}),
       };
       const result = await threadDb.listPreThreadSignals(accountId, "quarantined", params);
-      if (result.isErr()) return err(c, 500, "Internal Server Error");
+      if (result.isErr()) { logger.error("Failed to list quarantined signals.", { code: "api.signals.list_quarantined_failed", error: result.error }); return err(c, 500, "Internal Server Error"); }
       const items = (status === "quarantine_visible" || status === "quarantine_hidden")
         ? result.value.items.filter(s => s.status === status)
         : result.value.items;
@@ -95,10 +95,10 @@ export class SignalsApi {
 
       // Signal is quarantined or blocked — try both partitions
       let signalResult = await threadDb.getSignalById(accountId, signalId, "QUARANTINED");
-      if (signalResult.isErr()) return err(c, 500, "Internal Server Error");
+      if (signalResult.isErr()) { logger.error("Failed to get quarantined signal.", { code: "api.quarantine_response.get_signal_failed", error: signalResult.error }); return err(c, 500, "Internal Server Error"); }
       if (!signalResult.value) {
         signalResult = await threadDb.getSignalById(accountId, signalId, "BLOCKED");
-        if (signalResult.isErr()) return err(c, 500, "Internal Server Error");
+        if (signalResult.isErr()) { logger.error("Failed to get blocked signal.", { code: "api.quarantine_response.get_signal_failed", error: signalResult.error }); return err(c, 500, "Internal Server Error"); }
       }
 
       const signal = signalResult.value;
@@ -112,16 +112,16 @@ export class SignalsApi {
 
       if (body.status === "block_hidden" || body.status === "block_reject" || body.status === "report_violation") {
         const blockResult = await threadDb.updateSignalStatus(accountId, signal.signalLookupId, body.status);
-        if (blockResult.isErr()) return err(c, 500, "Internal Server Error");
+        if (blockResult.isErr()) { logger.error("Failed to block signal.", { code: "api.quarantine_response.block_failed", error: blockResult.error }); return err(c, 500, "Internal Server Error"); }
 
         if (wasQuarantinedByUnknownSender) {
           const senderDomain = signal.data.from.address.includes("@") ? signal.data.from.address.split("@").pop()! : signal.data.from.address;
           const senderETLD1 = getDomain(senderDomain) ?? senderDomain;
           const recipientAddress = signal.data.recipientAddress;
           const ensureAliasResult = await ensureAliasExists(accountDb, accountId, recipientAddress, signal.id);
-          if (ensureAliasResult.isErr()) return err(c, 500, "Internal Server Error");
+          if (ensureAliasResult.isErr()) { logger.error("Failed to ensure alias for block.", { code: "api.quarantine_response.ensure_alias_failed", error: ensureAliasResult.error }); return err(c, 500, "Internal Server Error"); }
           const saveSenderResult = await accountDb.saveSender(accountId, recipientAddress, senderETLD1, body.status);
-          if (saveSenderResult.isErr()) return err(c, 500, "Internal Server Error");
+          if (saveSenderResult.isErr()) { logger.error("Failed to save sender disposition.", { code: "api.quarantine_response.save_sender_failed", error: saveSenderResult.error }); return err(c, 500, "Internal Server Error"); }
         }
 
         return c.json(blockResult.value, 200);
@@ -132,14 +132,14 @@ export class SignalsApi {
       const senderETLD1 = getDomain(senderDomain) ?? senderDomain;
       const groupingKey = deriveGroupingKey(signal.data.workflow, signal.data.workflowData, signal.data.recipientAddress, senderETLD1);
       const matchedThreadResult = groupingKey ? await threadDb.findThreadByGroupingKey(accountId, groupingKey) : null;
-      if (matchedThreadResult && matchedThreadResult.isErr()) return err(c, 500, "Internal Server Error");
+      if (matchedThreadResult && matchedThreadResult.isErr()) { logger.error("Failed to find thread by grouping key.", { code: "api.quarantine_response.find_thread_failed", error: matchedThreadResult.error }); return err(c, 500, "Internal Server Error"); }
       const matchedThread = matchedThreadResult ? matchedThreadResult.value : null;
 
       const now = DateTime.utc().toISO()!;
       let thread: Thread;
       if (matchedThread) {
         const updateResult = await threadDb.updateThread(accountId, matchedThread.id, "active", signal.data.receivedAt, {});
-        if (updateResult.isErr()) return err(c, 500, "Internal Server Error");
+        if (updateResult.isErr()) { logger.error("Failed to update thread for quarantine approval.", { code: "api.quarantine_response.update_thread_failed", error: updateResult.error }); return err(c, 500, "Internal Server Error"); }
         thread = updateResult.value;
       } else {
         thread = {
@@ -158,18 +158,18 @@ export class SignalsApi {
           ...(groupingKey ? { groupingKey } : {}),
         };
         const createResult = await threadDb.createThread(thread);
-        if (createResult.isErr()) return err(c, 500, "Internal Server Error");
+        if (createResult.isErr()) { logger.error("Failed to create thread for quarantine approval.", { code: "api.quarantine_response.create_thread_failed", error: createResult.error }); return err(c, 500, "Internal Server Error"); }
       }
 
       const unblockResult = await threadDb.unblockSignal(accountId, signal.signalLookupId, thread.id);
-      if (unblockResult.isErr()) return err(c, 500, "Internal Server Error");
+      if (unblockResult.isErr()) { logger.error("Failed to unblock signal.", { code: "api.quarantine_response.unblock_failed", error: unblockResult.error }); return err(c, 500, "Internal Server Error"); }
 
       // When quarantined by unknown sender, approve the sender for future emails
       if (wasQuarantinedByUnknownSender) {
         const ensureAliasResult = await ensureAliasExists(accountDb, accountId, signal.data.recipientAddress, signal.id);
-        if (ensureAliasResult.isErr()) return err(c, 500, "Internal Server Error");
+        if (ensureAliasResult.isErr()) { logger.error("Failed to ensure alias for approval.", { code: "api.quarantine_response.ensure_alias_failed", error: ensureAliasResult.error }); return err(c, 500, "Internal Server Error"); }
         const saveSenderResult = await accountDb.saveSender(accountId, signal.data.recipientAddress, senderETLD1, "allow");
-        if (saveSenderResult.isErr()) return err(c, 500, "Internal Server Error");
+        if (saveSenderResult.isErr()) { logger.error("Failed to save sender approval.", { code: "api.quarantine_response.save_sender_failed", error: saveSenderResult.error }); return err(c, 500, "Internal Server Error"); }
       }
 
       // Post-approval calendar forwarding

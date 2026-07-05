@@ -93,7 +93,7 @@ export class DomainsApi {
     }), async (c) => {
       const accountId = c.req.param("accountId")!;
       const domainsResult = await accountDb.listDomains(accountId);
-      if (domainsResult.isErr()) return err(c, 500, "Internal Server Error");
+      if (domainsResult.isErr()) { logger.error("Failed to list domains.", { code: "api.domains.list_failed", accountId, error: domainsResult.error }); return err(c, 500, "Internal Server Error"); }
       return c.json({ domains: domainsResult.value.map(toApiDomain) }, 200);
     });
 
@@ -115,7 +115,7 @@ export class DomainsApi {
       // locked out of ever reviving it via POST. Ownership persists across soft-delete;
       // only routability (see SignalProcessor.resolveAccountIdAndAlias) is affected by status.
       const ownerResult = await accountDb.resolveAccountForDomain(body.domain);
-      if (ownerResult.isErr()) return err(c, 500, "Internal Server Error");
+      if (ownerResult.isErr()) { logger.error("Failed to resolve account for domain.", { code: "api.domains.create.resolve_owner_failed", accountId, error: ownerResult.error }); return err(c, 500, "Internal Server Error"); }
       if (ownerResult.value && ownerResult.value !== accountId) {
         return err(c, 409, "Domain already registered by another account", "DOMAIN_EXISTS");
       }
@@ -129,7 +129,7 @@ export class DomainsApi {
 
       // DB write last — once this succeeds, the domain "exists" for all readers
       const domainResult = await accountDb.createDomain(accountId, body.domain);
-      if (domainResult.isErr()) return err(c, 500, "Internal Server Error");
+      if (domainResult.isErr()) { logger.error("Failed to create domain in database.", { code: "api.domains.create_failed", accountId, error: domainResult.error }); return err(c, 500, "Internal Server Error"); }
 
       return c.json(toApiDomain(domainResult.value), 201);
     });
@@ -144,7 +144,7 @@ export class DomainsApi {
     }), async (c) => {
       const accountId = c.req.param("accountId")!;
       const domainResult = await accountDb.getDomain(accountId, c.req.param("id")!.toLowerCase());
-      if (domainResult.isErr()) return err(c, 500, "Internal Server Error");
+      if (domainResult.isErr()) { logger.error("Failed to get domain.", { code: "api.domains.get_failed", accountId, error: domainResult.error }); return err(c, 500, "Internal Server Error"); }
       const domain = domainResult.value;
       if (!domain) return err(c, 404, "Domain not found", "DOMAIN_NOT_FOUND");
       const records = buildDnsRecords(domain);
@@ -161,7 +161,7 @@ export class DomainsApi {
     }), async (c) => {
       const accountId = c.req.param("accountId")!;
       const domainResult = await accountDb.getDomain(accountId, c.req.param("id")!.toLowerCase());
-      if (domainResult.isErr()) return err(c, 500, "Internal Server Error");
+      if (domainResult.isErr()) { logger.error("Failed to get domain for verification.", { code: "api.domains.verify.get_failed", accountId, error: domainResult.error }); return err(c, 500, "Internal Server Error"); }
       const domain = domainResult.value;
       if (!domain) return err(c, 404, "Domain not found", "DOMAIN_NOT_FOUND");
       const records = await checkDomain(domain);
@@ -176,7 +176,7 @@ export class DomainsApi {
         lastCheckedAt: now,
         ...(failingRecords.length === 0 ? { lastHealthyAt: now } : {}),
       });
-      if (healthResult.isErr()) return err(c, 500, "Internal Server Error");
+      if (healthResult.isErr()) { logger.error("Failed to update domain health.", { code: "api.domains.verify.update_health_failed", accountId, error: healthResult.error }); return err(c, 500, "Internal Server Error"); }
 
       // Update setup flags to reflect current DNS state
       const receivingChanged = (receivingHealthy ?? false) !== domain.receivingSetupComplete;
@@ -189,7 +189,7 @@ export class DomainsApi {
       }
 
       const updatedResult = await accountDb.getDomain(accountId, domain.domain);
-      if (updatedResult.isErr()) return err(c, 500, "Internal Server Error");
+      if (updatedResult.isErr()) { logger.error("Failed to get domain after health update.", { code: "api.domains.verify.get_updated_failed", accountId, error: updatedResult.error }); return err(c, 500, "Internal Server Error"); }
       return c.json(toApiDomainWithRecords(updatedResult.value!, records), 200);
     });
 
@@ -203,7 +203,7 @@ export class DomainsApi {
     }), async (c) => {
       const accountId = c.req.param("accountId")!;
       const domainResult = await accountDb.getDomain(accountId, c.req.param("id")!.toLowerCase());
-      if (domainResult.isErr()) return err(c, 500, "Internal Server Error");
+      if (domainResult.isErr()) { logger.error("Failed to get domain for deletion.", { code: "api.domains.delete.get_failed", accountId, error: domainResult.error }); return err(c, 500, "Internal Server Error"); }
       const domain = domainResult.value;
       if (!domain) return err(c, 404, "Domain not found", "DOMAIN_NOT_FOUND");
 
@@ -211,7 +211,7 @@ export class DomainsApi {
 
       // Cascade: delete every alias (and its senders) registered under this domain
       const aliasesResult = await accountDb.listAliasesForDomain(accountId, domain.domain);
-      if (aliasesResult.isErr()) return err(c, 500, "Internal Server Error");
+      if (aliasesResult.isErr()) { logger.error("Failed to list aliases for domain deletion cascade.", { code: "api.domains.delete.list_aliases_failed", accountId, error: aliasesResult.error }); return err(c, 500, "Internal Server Error"); }
       const aliases = aliasesResult.value;
       logger.info("Cascade-deleting aliases for domain", {
         code: "api.domain_delete.cascade_aliases",
@@ -222,7 +222,7 @@ export class DomainsApi {
 
       for (const alias of aliases) {
         const aliasDeleteResult = await accountDb.deleteAlias(accountId, alias.address);
-        if (aliasDeleteResult.isErr()) return err(c, 500, "Internal Server Error");
+        if (aliasDeleteResult.isErr()) { logger.error("Failed to cascade-delete alias.", { code: "api.domains.delete.cascade_alias_failed", accountId, address: alias.address, error: aliasDeleteResult.error }); return err(c, 500, "Internal Server Error"); }
         const aliasAuditResult = await auditDb.saveAuditEvent({
           accountId, userId, action: "deleted", resourceType: "alias", resourceId: alias.address,
           before: { address: alias.address }, after: null,
@@ -233,7 +233,7 @@ export class DomainsApi {
       }
 
       const deleteResult = await accountDb.deleteDomain(accountId, domain.domain);
-      if (deleteResult.isErr()) return err(c, 500, "Internal Server Error");
+      if (deleteResult.isErr()) { logger.error("Failed to delete domain.", { code: "api.domains.delete_failed", accountId, error: deleteResult.error }); return err(c, 500, "Internal Server Error"); }
 
       const domainAuditResult = await auditDb.saveAuditEvent({
         accountId, userId, action: "deleted", resourceType: "domain", resourceId: domain.domain,
