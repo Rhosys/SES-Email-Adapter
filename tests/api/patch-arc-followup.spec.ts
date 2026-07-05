@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import type { Arc, Signal } from "../../src/types/index.js";
+import type { Thread, Signal } from "../../src/types/index.js";
 import { createApp } from "../../src/api/app.js";
 import { makeAppDeps } from "../helpers/app-deps.js";
 import type { AuthService, AccessService } from "../../src/api/app.js";
-import type { ArcDatabase } from "../../src/database/arc-database.js";
+import type { ThreadDatabase } from "../../src/database/thread-database.js";
 import type { AccountDatabase } from "../../src/database/account-database.js";
 import type { AuditDatabase } from "../../src/database/audit-database.js";
 import type { SchedulerClient } from "../../src/scheduler/scheduler-client.js";
@@ -49,7 +49,7 @@ function makeAccess(): AccessService {
   };
 }
 
-function makeArc(overrides: Partial<Arc> = {}): Arc {
+function makeThread(overrides: Partial<Thread> = {}): Thread {
   return {
     id: ARC_ID,
     accountId: TEST_ACCOUNT_ID,
@@ -72,7 +72,7 @@ function makeSignal(): Signal {
   return {
     id: "sgn-001",
     signalLookupId: "sgn-001",
-    arcId: ARC_ID,
+    threadId: ARC_ID,
     accountId: TEST_ACCOUNT_ID,
     source: "email",
     type: "email",
@@ -97,25 +97,25 @@ function makeSignal(): Signal {
   } as Signal;
 }
 
-function makeArcDb() {
+function makeThreadDb() {
   return {
-    listArcs: vi.fn().mockResolvedValue(ok({ items: [] })),
-    getArc: vi.fn().mockResolvedValue(ok(null)),
-    updateArc: vi.fn().mockImplementation((_accountId, _arcId, status, _lastSignalAt, _fields) =>
-      Promise.resolve(ok(makeArc({ status }))),
+    listThreads: vi.fn().mockResolvedValue(ok({ items: [] })),
+    getThread: vi.fn().mockResolvedValue(ok(null)),
+    updateThread: vi.fn().mockImplementation((_accountId, _threadId, status, _lastSignalAt, _fields) =>
+      Promise.resolve(ok(makeThread({ status }))),
     ),
     listSignals: vi.fn().mockResolvedValue(ok({ items: [makeSignal()] })),
-    listPreArcSignals: vi.fn().mockResolvedValue(ok({ items: [] })),
+    listPreThreadSignals: vi.fn().mockResolvedValue(ok({ items: [] })),
     updateSignalStatus: vi.fn().mockResolvedValue(ok({ id: "sgn-001", status: "active" })),
-    fastFindArcByAlternativeLookupKey: vi.fn().mockResolvedValue(ok(null)),
+    findThreadByGroupingKey: vi.fn().mockResolvedValue(ok(null)),
     getSignalById: vi.fn().mockResolvedValue(ok(null)),
     createSignal: vi.fn().mockResolvedValue(ok(makeSignal())),
     updateSignal: vi.fn().mockResolvedValue(ok(makeSignal())),
     updateSignalSendStatus: vi.fn().mockResolvedValue(ok(makeSignal())),
     deleteSignal: vi.fn().mockResolvedValue(ok(undefined)),
     unblockSignal: vi.fn().mockResolvedValue(ok(undefined)),
-    createArc: vi.fn().mockResolvedValue(ok(undefined)),
-    searchArcs: vi.fn().mockResolvedValue(ok({ items: [] })),
+    createThread: vi.fn().mockResolvedValue(ok(undefined)),
+    searchThreads: vi.fn().mockResolvedValue(ok({ items: [] })),
   };
 }
 
@@ -202,17 +202,17 @@ async function req(
 // Tests
 // ---------------------------------------------------------------------------
 
-describe("PATCH /accounts/:accountId/arcs/:id — followupAt handling", () => {
-  let arcDb: ReturnType<typeof makeArcDb>;
+describe("PATCH /accounts/:accountId/threads/:id — followupAt handling", () => {
+  let threadDb: ReturnType<typeof makeThreadDb>;
   let schedulerClient: ReturnType<typeof makeSchedulerClient>;
   let app: ReturnType<typeof createApp>;
 
   beforeEach(() => {
     vi.clearAllMocks();
-    arcDb = makeArcDb();
+    threadDb = makeThreadDb();
     schedulerClient = makeSchedulerClient();
     app = createApp(makeAppDeps({
-      arcDb: arcDb as unknown as ArcDatabase,
+      threadDb: threadDb as unknown as ThreadDatabase,
       accountDb: makeAccountDb() as unknown as AccountDatabase,
       auditDb: makeAuditDb() as unknown as AuditDatabase,
       auth: makeAuth(),
@@ -239,22 +239,22 @@ describe("PATCH /accounts/:accountId/arcs/:id — followupAt handling", () => {
   // -------------------------------------------------------------------------
 
   it("followupAt alone → schedule created, arc status unchanged", async () => {
-    const arc = makeArc({ status: "active" });
-    arcDb.getArc.mockResolvedValue(ok(arc));
+    const arc = makeThread({ status: "active" });
+    threadDb.getThread.mockResolvedValue(ok(arc));
 
     const futureDate = new Date(Date.now() + 3600_000).toISOString();
-    const res = await req(app, "PATCH", `${A}/arcs/${ARC_ID}`, { body: { followupAt: futureDate } });
+    const res = await req(app, "PATCH", `${A}/threads/${ARC_ID}`, { body: { followupAt: futureDate } });
 
     expect(res.status).toBe(200);
     // Arc status should remain active (updateArc called with original status)
-    expect(arcDb.updateArc).toHaveBeenCalledWith(
+    expect(threadDb.updateThread).toHaveBeenCalledWith(
       TEST_ACCOUNT_ID, ARC_ID, "active", arc.lastSignalAt, { followupAt: futureDate },
     );
     // Schedule should be created
     expect(schedulerClient.createFollowup).toHaveBeenCalledWith(
       expect.objectContaining({
         accountId: TEST_ACCOUNT_ID,
-        arcId: ARC_ID,
+        threadId: ARC_ID,
         fireAt: futureDate,
         suffix: "followup",
       }),
@@ -266,22 +266,22 @@ describe("PATCH /accounts/:accountId/arcs/:id — followupAt handling", () => {
   // -------------------------------------------------------------------------
 
   it("followupAt + status: archived → arc archived and schedule created", async () => {
-    const arc = makeArc({ status: "active" });
-    arcDb.getArc.mockResolvedValue(ok(arc));
+    const arc = makeThread({ status: "active" });
+    threadDb.getThread.mockResolvedValue(ok(arc));
 
     const futureDate = new Date(Date.now() + 3600_000).toISOString();
-    const res = await req(app, "PATCH", `${A}/arcs/${ARC_ID}`, {
+    const res = await req(app, "PATCH", `${A}/threads/${ARC_ID}`, {
       body: { status: "archived", followupAt: futureDate },
     });
 
     expect(res.status).toBe(200);
-    expect(arcDb.updateArc).toHaveBeenCalledWith(
+    expect(threadDb.updateThread).toHaveBeenCalledWith(
       TEST_ACCOUNT_ID, ARC_ID, "archived", arc.lastSignalAt, { followupAt: futureDate },
     );
     expect(schedulerClient.createFollowup).toHaveBeenCalledWith(
       expect.objectContaining({
         accountId: TEST_ACCOUNT_ID,
-        arcId: ARC_ID,
+        threadId: ARC_ID,
         fireAt: futureDate,
       }),
     );
@@ -292,11 +292,11 @@ describe("PATCH /accounts/:accountId/arcs/:id — followupAt handling", () => {
   // -------------------------------------------------------------------------
 
   it("followupAt in the past → 400", async () => {
-    const arc = makeArc({ status: "active" });
-    arcDb.getArc.mockResolvedValue(ok(arc));
+    const arc = makeThread({ status: "active" });
+    threadDb.getThread.mockResolvedValue(ok(arc));
 
     const pastDate = new Date(Date.now() - 3600_000).toISOString();
-    const res = await req(app, "PATCH", `${A}/arcs/${ARC_ID}`, { body: { followupAt: pastDate } });
+    const res = await req(app, "PATCH", `${A}/threads/${ARC_ID}`, { body: { followupAt: pastDate } });
 
     expect(res.status).toBe(400);
     expect(schedulerClient.createFollowup).not.toHaveBeenCalled();
@@ -312,12 +312,12 @@ describe("PATCH /accounts/:accountId/arcs/:id — followupAt handling", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2024-06-15T12:00:00Z"));
 
-    const arc = makeArc({ createdAt: "2024-01-01T00:00:00Z", retentionDuration: "P1Y" });
-    arcDb.getArc.mockResolvedValue(ok(arc));
+    const arc = makeThread({ createdAt: "2024-01-01T00:00:00Z", retentionDuration: "P1Y" });
+    threadDb.getThread.mockResolvedValue(ok(arc));
 
     // Request a followup beyond retention (2025-06-01 > 2024-12-31)
     const beyondRetention = "2025-06-01T12:00:00Z";
-    const res = await req(app, "PATCH", `${A}/arcs/${ARC_ID}`, { body: { followupAt: beyondRetention } });
+    const res = await req(app, "PATCH", `${A}/threads/${ARC_ID}`, { body: { followupAt: beyondRetention } });
 
     expect(res.status).toBe(400);
     expect(schedulerClient.createFollowup).not.toHaveBeenCalled();
@@ -330,36 +330,36 @@ describe("PATCH /accounts/:accountId/arcs/:id — followupAt handling", () => {
   // -------------------------------------------------------------------------
 
   it("schedule creation failure with status change → 500 and arc rolled back", async () => {
-    const arc = makeArc({ status: "active" });
-    arcDb.getArc.mockResolvedValue(ok(arc));
+    const arc = makeThread({ status: "active" });
+    threadDb.getThread.mockResolvedValue(ok(arc));
     schedulerClient.createFollowup.mockResolvedValue(err(dbError("Scheduler API failure")));
 
     const futureDate = new Date(Date.now() + 3600_000).toISOString();
-    const res = await req(app, "PATCH", `${A}/arcs/${ARC_ID}`, {
+    const res = await req(app, "PATCH", `${A}/threads/${ARC_ID}`, {
       body: { status: "archived", followupAt: futureDate },
     });
 
     expect(res.status).toBe(500);
     // First call: archive the arc; second call: rollback to original status
-    expect(arcDb.updateArc).toHaveBeenCalledTimes(2);
-    expect(arcDb.updateArc).toHaveBeenLastCalledWith(
+    expect(threadDb.updateThread).toHaveBeenCalledTimes(2);
+    expect(threadDb.updateThread).toHaveBeenLastCalledWith(
       TEST_ACCOUNT_ID, ARC_ID, "active", arc.lastSignalAt, {},
     );
   });
 
   it("schedule creation failure without status change → 500, no rollback needed", async () => {
-    const arc = makeArc({ status: "active" });
-    arcDb.getArc.mockResolvedValue(ok(arc));
+    const arc = makeThread({ status: "active" });
+    threadDb.getThread.mockResolvedValue(ok(arc));
     schedulerClient.createFollowup.mockResolvedValue(err(dbError("Scheduler throttled")));
 
     const futureDate = new Date(Date.now() + 3600_000).toISOString();
-    const res = await req(app, "PATCH", `${A}/arcs/${ARC_ID}`, {
+    const res = await req(app, "PATCH", `${A}/threads/${ARC_ID}`, {
       body: { followupAt: futureDate },
     });
 
     expect(res.status).toBe(500);
     // Only one updateArc call (the initial no-op status write), no rollback
-    expect(arcDb.updateArc).toHaveBeenCalledTimes(1);
+    expect(threadDb.updateThread).toHaveBeenCalledTimes(1);
   });
 
   // ---------------------------------------------------------------------------
@@ -411,11 +411,11 @@ describe("PATCH /accounts/:accountId/arcs/:id — followupAt handling", () => {
     it.each(boundaries)(
       "$label → $expectedStatus",
       async ({ offsetFromNow, expectedStatus }) => {
-        const arc = makeArc({ createdAt: ARC_CREATED_AT, retentionDuration: RETENTION });
-        arcDb.getArc.mockResolvedValue(ok(arc));
+        const arc = makeThread({ createdAt: ARC_CREATED_AT, retentionDuration: RETENTION });
+        threadDb.getThread.mockResolvedValue(ok(arc));
 
         const followupAt = new Date(NOW + offsetFromNow).toISOString();
-        const res = await req(app, "PATCH", `${A}/arcs/${ARC_ID}`, { body: { followupAt } });
+        const res = await req(app, "PATCH", `${A}/threads/${ARC_ID}`, { body: { followupAt } });
 
         expect(res.status).toBe(expectedStatus);
 
@@ -427,8 +427,8 @@ describe("PATCH /accounts/:accountId/arcs/:id — followupAt handling", () => {
 
         // Reset mock for next iteration
         schedulerClient.createFollowup.mockClear();
-        arcDb.getArc.mockClear();
-        arcDb.updateArc.mockClear();
+        threadDb.getThread.mockClear();
+        threadDb.updateThread.mockClear();
       },
     );
 

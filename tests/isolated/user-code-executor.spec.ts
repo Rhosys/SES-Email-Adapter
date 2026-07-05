@@ -7,7 +7,7 @@ const validPayload = {
   functionCode: "return signal.subject === 'hello';",
   executionContext: {
     signal: { subject: "hello", from: { address: "a@b.com" } },
-    arc: { id: "arc_1", workflow: "conversation" },
+    thread: { id: "arc_1", workflow: "conversation" },
   },
 };
 
@@ -214,11 +214,11 @@ describe("user-code-executor", () => {
     it("rejects executionContext without signal", async () => {
       const result = await handler({
         ...validPayload,
-        executionContext: { arc: {} },
+        executionContext: { thread: {} },
       });
       expect(result).toEqual({
         success: false,
-        error: { message: expect.stringContaining("signal and arc"), type: "invalid_input" },
+        error: { message: expect.stringContaining("signal and thread"), type: "invalid_input" },
       });
     });
   });

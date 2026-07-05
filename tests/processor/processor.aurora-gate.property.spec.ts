@@ -2,16 +2,16 @@ import type { IForwardingService } from "../../src/forwarding/forwarding-service
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { ok, err } from "../../src/errors.js";
 import { SignalProcessor, SYSTEM_RULES } from "../../src/processor/processor.js";
-import type { ArcMatcher, InboundSignalMessage, SqsDispatcher } from "../../src/processor/processor.js";
+import type { ThreadMatcherPort, InboundSignalMessage, SqsDispatcher } from "../../src/processor/processor.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
 import { makeSharedNewDeps, makeRuleEvaluator3 } from "./_shared-new-deps.js";
-import { makeArcDbMock, makeAccountDbMock, makeProcessingDbMock, applyCtx } from "./_helpers.js";
-import type { ArcDatabase } from "../../src/database/arc-database.js";
+import { makeThreadDbMock, makeAccountDbMock, makeProcessingDbMock, applyCtx } from "./_helpers.js";
+import type { ThreadDatabase } from "../../src/database/thread-database.js";
 import type { EmailService } from "../../src/email/email-service.js";
 import type { ContentSanitizerClient } from "../../src/processor/content-sanitizer-client.js";
 import type { SignalClassifier, ClassificationOutput } from "../../src/classifier/classifier.js";
 import type { EmbeddingGenerator } from "../../src/embedding/embedding-generator.js";
-import type { MultiClusterAuroraWriter } from "../../src/database/arc-matcher.js";
+import type { MultiClusterAuroraWriter } from "../../src/database/thread-matcher.js";
 import type { Alias, AliasSender } from "../../src/types/index.js";
 import { dbError } from "../../src/errors.js";
 import { createMockLogger, type MockLogger } from "../helpers/mock-logger.js";
@@ -47,7 +47,7 @@ vi.mock("../../src/embedding/cluster-registry.js", () => {
       if (id === "cluster-b") return clusterB;
       return null;
     },
-    getPrimaryArcMatcherRegistry: () => clusterA,
+    getPrimaryThreadMatcherRegistry: () => clusterA,
     getSecondaryClusters: () => [clusterB],
   };
 });
@@ -139,7 +139,7 @@ describe("Feature: signal-processor-retry-resilience, Property 4: Arc saved befo
     };
   }
 
-  function makeArcMatcher(): ArcMatcher {
+  function makeArcMatcher(): ThreadMatcherPort {
     return {
       findMatch: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
       upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
@@ -167,20 +167,20 @@ describe("Feature: signal-processor-retry-resilience, Property 4: Arc saved befo
     { label: "single-element vectors (minimal valid embedding)", sesMessageId: "msg-order-minimal", vectorA: [0.5], vectorB: [-0.3] },
   ];
 
-  it.each(ORDER_CASES)("saveArc is always called before saveSignal on first-attempt processing ($label)", async ({ vectorA, vectorB, sesMessageId }) => {
+  it.each(ORDER_CASES)("saveThread is always called before saveSignal on first-attempt processing ($label)", async ({ vectorA, vectorB, sesMessageId }) => {
     const callOrder: string[] = [];
 
-    const arcDb = {
-      ...makeArcDbMock(),
+    const threadDb = {
+      ...makeThreadDbMock(),
       saveSignal: vi.fn().mockImplementation(() => {
         callOrder.push("saveSignal");
         return Promise.resolve(ok(undefined));
       }),
-      saveArc: vi.fn().mockImplementation(() => {
-        callOrder.push("saveArc");
+      saveThread: vi.fn().mockImplementation(() => {
+        callOrder.push("saveThread");
         return Promise.resolve(ok(undefined));
       }),
-    } as unknown as ArcDatabase;
+    } as unknown as ThreadDatabase;
     const accountDb = makeAccountDbMock(TEST_ACCOUNT_ID);
     applyCtx(accountDb, DEFAULT_CTX);
     const processingDb = makeProcessingDbMock();
@@ -200,12 +200,12 @@ describe("Feature: signal-processor-retry-resilience, Property 4: Arc saved befo
     };
 
     const processor = new SignalProcessor({ ...makeSharedNewDeps(),
-      arcDb, accountDb, processingDb,
+      threadDb, accountDb, processingDb,
       contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
       classifier: makeClassifier(),
       embeddingGenerator,
       auroraWriter,
-      arcMatcher: makeArcMatcher(),
+      threadMatcher: makeArcMatcher(),
       ruleEvaluator: makeRuleEvaluator3(mockLogger),
       logger: mockLogger,
       notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
@@ -219,25 +219,25 @@ describe("Feature: signal-processor-retry-resilience, Property 4: Arc saved befo
 
     await processor.processRecord(makeMessage(sesMessageId), 1);
 
-    const saveArcIdx = callOrder.indexOf("saveArc");
+    const saveThreadIdx = callOrder.indexOf("saveThread");
     const saveSignalIdx = callOrder.indexOf("saveSignal");
 
-    expect(saveArcIdx).toBeGreaterThanOrEqual(0);
+    expect(saveThreadIdx).toBeGreaterThanOrEqual(0);
     expect(saveSignalIdx).toBeGreaterThanOrEqual(0);
-    expect(saveArcIdx).toBeLessThan(saveSignalIdx);
+    expect(saveThreadIdx).toBeLessThan(saveSignalIdx);
   });
 
-  it.each(ORDER_CASES)("when saveArc fails, saveSignal is never called and the record is a batchItemFailure ($label)", async ({ vectorA, vectorB, sesMessageId }) => {
+  it.each(ORDER_CASES)("when saveThread fails, saveSignal is never called and the record is a batchItemFailure ($label)", async ({ vectorA, vectorB, sesMessageId }) => {
     let saveSignalCalled = false;
 
-    const arcDb = {
-      ...makeArcDbMock(),
+    const threadDb = {
+      ...makeThreadDbMock(),
       saveSignal: vi.fn().mockImplementation(() => {
         saveSignalCalled = true;
         return Promise.resolve(ok(undefined));
       }),
-      saveArc: vi.fn().mockReturnValue(Promise.resolve(err(dbError(new Error("DDB write failed"))))),
-    } as unknown as ArcDatabase;
+      saveThread: vi.fn().mockReturnValue(Promise.resolve(err(dbError(new Error("DDB write failed"))))),
+    } as unknown as ThreadDatabase;
     const accountDb = makeAccountDbMock(TEST_ACCOUNT_ID);
     applyCtx(accountDb, DEFAULT_CTX);
     const processingDb = makeProcessingDbMock();
@@ -257,12 +257,12 @@ describe("Feature: signal-processor-retry-resilience, Property 4: Arc saved befo
     };
 
     const processor = new SignalProcessor({ ...makeSharedNewDeps(),
-      arcDb, accountDb, processingDb,
+      threadDb, accountDb, processingDb,
       contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
       classifier: makeClassifier(),
       embeddingGenerator,
       auroraWriter,
-      arcMatcher: makeArcMatcher(),
+      threadMatcher: makeArcMatcher(),
       ruleEvaluator: makeRuleEvaluator3(mockLogger),
       logger: mockLogger,
       notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
@@ -342,7 +342,7 @@ describe("Feature: signal-processor-retry-resilience, Property 6: Aurora failure
   function makeStore() {
     const accountDb = makeAccountDbMock(TEST_ACCOUNT_ID);
     applyCtx(accountDb, DEFAULT_CTX);
-    return { arcDb: makeArcDbMock(), accountDb, processingDb: makeProcessingDbMock() };
+    return { threadDb: makeThreadDbMock(), accountDb, processingDb: makeProcessingDbMock() };
   }
 
   function makeContentSanitizer(): ContentSanitizerClient {
@@ -371,7 +371,7 @@ describe("Feature: signal-processor-retry-resilience, Property 6: Aurora failure
     };
   }
 
-  function makeArcMatcher(): ArcMatcher {
+  function makeArcMatcher(): ThreadMatcherPort {
     return {
       findMatch: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
       upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
@@ -435,7 +435,7 @@ describe("Feature: signal-processor-retry-resilience, Property 6: Aurora failure
       classifier: makeClassifier(),
       embeddingGenerator,
       auroraWriter,
-      arcMatcher: makeArcMatcher(),
+      threadMatcher: makeArcMatcher(),
       ruleEvaluator: makeRuleEvaluator3(mockLogger),
       logger: mockLogger,
       notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
@@ -488,7 +488,7 @@ describe("Feature: signal-processor-retry-resilience, Property 6: Aurora failure
       classifier: makeClassifier(),
       embeddingGenerator,
       auroraWriter,
-      arcMatcher: makeArcMatcher(),
+      threadMatcher: makeArcMatcher(),
       ruleEvaluator: makeRuleEvaluator3(mockLogger),
       logger: mockLogger,
       notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
@@ -541,7 +541,7 @@ describe("Feature: signal-processor-retry-resilience, Property 6: Aurora failure
       classifier: makeClassifier(),
       embeddingGenerator,
       auroraWriter,
-      arcMatcher: makeArcMatcher(),
+      threadMatcher: makeArcMatcher(),
       ruleEvaluator: makeRuleEvaluator3(mockLogger),
       logger: mockLogger,
       notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
@@ -649,7 +649,7 @@ describe("Feature: signal-processor-retry-resilience, Property 5: Side-effects d
     };
   }
 
-  function makeArcMatcher(): ArcMatcher {
+  function makeArcMatcher(): ThreadMatcherPort {
     return {
       findMatch: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
       upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
@@ -671,7 +671,7 @@ describe("Feature: signal-processor-retry-resilience, Property 5: Side-effects d
   function makeStore() {
     const accountDb = makeAccountDbMock(TEST_ACCOUNT_ID);
     applyCtx(accountDb, DEFAULT_CTX);
-    return { arcDb: makeArcDbMock(), accountDb, processingDb: makeProcessingDbMock() };
+    return { threadDb: makeThreadDbMock(), accountDb, processingDb: makeProcessingDbMock() };
   }
 
   // -------------------------------------------------------------------------
@@ -702,7 +702,7 @@ describe("Feature: signal-processor-retry-resilience, Property 5: Side-effects d
       classifier: makeClassifier(),
       embeddingGenerator,
       auroraWriter,
-      arcMatcher: makeArcMatcher(),
+      threadMatcher: makeArcMatcher(),
       ruleEvaluator: makeRuleEvaluator3(mockLogger),
       logger: mockLogger,
       sqsDispatcher,
@@ -720,9 +720,9 @@ describe("Feature: signal-processor-retry-resilience, Property 5: Side-effects d
     expect(sqsDispatcher.sendMessage).toHaveBeenCalled();
 
     const call = (sqsDispatcher.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0]!;
-    const payload = call[0] as { signal: unknown; arc: unknown };
+    const payload = call[0] as { signal: unknown; thread: unknown };
     expect(payload.signal).toBeDefined();
-    expect(payload.arc).toBeDefined();
+    expect(payload.thread).toBeDefined();
   });
 
   it("when any Aurora upsert fails, sqsDispatcher.sendMessage is NOT called and record is a batchItemFailure", async () => {
@@ -749,7 +749,7 @@ describe("Feature: signal-processor-retry-resilience, Property 5: Side-effects d
       classifier: makeClassifier(),
       embeddingGenerator,
       auroraWriter,
-      arcMatcher: makeArcMatcher(),
+      threadMatcher: makeArcMatcher(),
       ruleEvaluator: makeRuleEvaluator3(mockLogger),
       logger: mockLogger,
       sqsDispatcher,
@@ -787,7 +787,7 @@ describe("Feature: signal-processor-retry-resilience, Property 5: Side-effects d
       classifier: makeClassifier(),
       embeddingGenerator,
       auroraWriter,
-      arcMatcher: makeArcMatcher(),
+      threadMatcher: makeArcMatcher(),
       ruleEvaluator: makeRuleEvaluator3(mockLogger),
       logger: mockLogger,
       notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
@@ -829,7 +829,7 @@ describe("Feature: signal-processor-retry-resilience, Property 5: Side-effects d
       classifier: makeClassifier(),
       embeddingGenerator,
       auroraWriter,
-      arcMatcher: makeArcMatcher(),
+      threadMatcher: makeArcMatcher(),
       ruleEvaluator: makeRuleEvaluator3(mockLogger),
       logger: mockLogger,
       sqsDispatcher,
@@ -932,7 +932,7 @@ describe("Feature: signal-processor-retry-resilience, Property 7: Partial Aurora
     };
   }
 
-  function makeArcMatcher(): ArcMatcher {
+  function makeArcMatcher(): ThreadMatcherPort {
     return {
       findMatch: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
       upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
@@ -962,7 +962,7 @@ describe("Feature: signal-processor-retry-resilience, Property 7: Partial Aurora
   it.each(PARTIAL_SUCCESS_CASES)("primary cluster write is preserved when non-primary cluster fails, record returned as batchItemFailure, no side-effects dispatched ($label)", async ({ vector, sesMessageId }) => {
     const completedUpserts: string[] = [];
 
-    const arcDb = makeArcDbMock();
+    const threadDb = makeThreadDbMock();
     const accountDb = makeAccountDbMock(TEST_ACCOUNT_ID);
     applyCtx(accountDb, DEFAULT_CTX);
     const processingDb = makeProcessingDbMock();
@@ -993,12 +993,12 @@ describe("Feature: signal-processor-retry-resilience, Property 7: Partial Aurora
     };
 
     const processor = new SignalProcessor({ ...makeSharedNewDeps(),
-      arcDb, accountDb, processingDb,
+      threadDb, accountDb, processingDb,
       contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
       classifier: makeClassifier(),
       embeddingGenerator,
       auroraWriter,
-      arcMatcher: makeArcMatcher(),
+      threadMatcher: makeArcMatcher(),
       ruleEvaluator: makeRuleEvaluator3(mockLogger),
       logger: mockLogger,
       sqsDispatcher,

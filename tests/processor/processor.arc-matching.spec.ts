@@ -2,16 +2,16 @@ import type { IForwardingService } from "../../src/forwarding/forwarding-service
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { ok, err } from "../../src/errors.js";
 import { SignalProcessor } from "../../src/processor/processor.js";
-import type { ArcMatcher, InboundSignalMessage } from "../../src/processor/processor.js";
+import type { ThreadMatcherPort, InboundSignalMessage } from "../../src/processor/processor.js";
 import { makeSharedNewDeps, makeRuleEvaluator3 } from "./_shared-new-deps.js";
-import { makeArcDbMock, makeAccountDbMock, makeProcessingDbMock, mockRecipientAlias } from "./_helpers.js";
+import { makeThreadDbMock, makeAccountDbMock, makeProcessingDbMock, mockRecipientAlias } from "./_helpers.js";
 import type { ThreadDatabase } from "../../src/database/thread-database.js";
 import type { EmailService } from "../../src/email/email-service.js";
 import type { ContentSanitizerClient } from "../../src/processor/content-sanitizer-client.js";
 import type { SignalClassifier, ClassificationOutput } from "../../src/classifier/classifier.js";
 import type { EmbeddingGenerator } from "../../src/embedding/embedding-generator.js";
-import type { MultiClusterAuroraWriter } from "../../src/database/arc-matcher.js";
-import type { Alias, Arc } from "../../src/types/index.js";
+import type { MultiClusterAuroraWriter } from "../../src/database/thread-matcher.js";
+import type { Alias, Thread } from "../../src/types/index.js";
 import { dbError } from "../../src/errors.js";
 import { createMockLogger, type MockLogger } from "../helpers/mock-logger.js";
 
@@ -42,7 +42,7 @@ vi.mock("../../src/embedding/cluster-registry.js", () => {
       if (id === "cluster-b") return clusterB;
       return null;
     },
-    getPrimaryArcMatcherRegistry: () => clusterA,
+    getPrimaryThreadMatcherRegistry: () => clusterA,
     getSecondaryClusters: () => [clusterB],
   };
 });
@@ -87,10 +87,10 @@ describe("Feature: in-reply-to-arc-threading, Parallel arc matching tier selecti
     updatedAt: "2024-01-01T00:00:00Z",
   };
 
-  const TIER1_ARC: Arc = { id: "arc-tier1", workflow: "notice", ...SHARED_ARC_FIELDS };
-  const TIER15_ARC: Arc = { id: "arc-tier15", workflow: "conversation", ...SHARED_ARC_FIELDS };
-  const TIER2_ARC: Arc = { id: "arc-tier2", workflow: "conversation", ...SHARED_ARC_FIELDS };
-  const SAME_ARC: Arc = { id: "arc-same", workflow: "notice", ...SHARED_ARC_FIELDS };
+  const TIER1_ARC: Thread = { id: "arc-tier1", workflow: "notice", ...SHARED_ARC_FIELDS };
+  const TIER15_ARC: Thread = { id: "arc-tier15", workflow: "conversation", ...SHARED_ARC_FIELDS };
+  const TIER2_ARC: Thread = { id: "arc-tier2", workflow: "conversation", ...SHARED_ARC_FIELDS };
+  const SAME_ARC: Thread = { id: "arc-same", workflow: "notice", ...SHARED_ARC_FIELDS };
 
   /** Content sanitizer returning headers with in-reply-to */
   function makeContentSanitizer(opts?: { inReplyTo?: string | null }): ContentSanitizerClient {
@@ -148,7 +148,7 @@ describe("Feature: in-reply-to-arc-threading, Parallel arc matching tier selecti
     };
   }
 
-  function makeAuroraWriter(matchArc?: Arc | null): MultiClusterAuroraWriter {
+  function makeAuroraWriter(matchArc?: Thread | null): MultiClusterAuroraWriter {
     return {
       upsertEmbedding: vi.fn().mockResolvedValue(ok(undefined)),
       findMatch: vi.fn().mockResolvedValue(ok(matchArc ?? null)),
@@ -168,19 +168,19 @@ describe("Feature: in-reply-to-arc-threading, Parallel arc matching tier selecti
   }
 
   function buildProcessor(overrides: {
-    arcDb?: unknown;
+    threadDb?: unknown;
     classifier?: Pick<SignalClassifier, "classify">;
     contentSanitizer?: ContentSanitizerClient;
     auroraWriter?: MultiClusterAuroraWriter;
-    arcMatcher?: ArcMatcher;
+    threadMatcher?: ThreadMatcherPort;
   }) {
-    const arcDb = (overrides.arcDb ?? makeArcDbMock()) as ThreadDatabase;
+    const threadDb = (overrides.threadDb ?? makeThreadDbMock()) as ThreadDatabase;
     const accountDb = makeAccountDbMock(TEST_ACCOUNT_ID);
     mockRecipientAlias(accountDb, DEFAULT_EMAIL_CONFIG);
     const processingDb = makeProcessingDbMock();
     return new SignalProcessor({
       ...makeSharedNewDeps(),
-      arcDb,
+      threadDb,
       accountDb,
       processingDb,
       contentSanitizer: overrides.contentSanitizer ?? makeContentSanitizer(),
@@ -190,7 +190,7 @@ describe("Feature: in-reply-to-arc-threading, Parallel arc matching tier selecti
       classifier: overrides.classifier ?? makeConversationClassifier(),
       embeddingGenerator: makeEmbeddingGenerator(),
       auroraWriter: overrides.auroraWriter ?? makeAuroraWriter(),
-      arcMatcher: overrides.arcMatcher ?? { findMatch: vi.fn().mockReturnValue(Promise.resolve(ok(null))), upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) } as ArcMatcher,
+      threadMatcher: overrides.threadMatcher ?? { findMatch: vi.fn().mockReturnValue(Promise.resolve(ok(null))), upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) } as ThreadMatcherPort,
       ruleEvaluator: makeRuleEvaluator3(mockLogger),
       logger: mockLogger,
       notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
@@ -207,27 +207,27 @@ describe("Feature: in-reply-to-arc-threading, Parallel arc matching tier selecti
   // 1. All three tiers agree on same arc → no discrepancy log, arc used
   // -------------------------------------------------------------------------
   it("all three tiers agree on same arc → no discrepancy log, arc used", async () => {
-    const arcDb = {
-      ...makeArcDbMock(),
+    const threadDb = {
+      ...makeThreadDbMock(),
       findThreadByGroupingKey: vi.fn().mockReturnValue(Promise.resolve(ok(SAME_ARC))),
       findSignalByEmailMessageId: vi.fn().mockReturnValue(Promise.resolve(ok({ threadId: SAME_ARC.id, id: "sgn-1", signalLookupId: "ses-1", accountId: TEST_ACCOUNT_ID, status: "active", source: "email", type: "email" }))),
       getThread: vi.fn().mockReturnValue(Promise.resolve(ok(SAME_ARC))),
     };
 
     const processor = buildProcessor({
-      arcDb,
+      threadDb,
       classifier: makeNoticeClassifier(),
       contentSanitizer: makeContentSanitizer(),
-      arcMatcher: { findMatch: vi.fn().mockReturnValue(Promise.resolve(ok(SAME_ARC))), upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) } as ArcMatcher,
+      threadMatcher: { findMatch: vi.fn().mockReturnValue(Promise.resolve(ok(SAME_ARC))), upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) } as ThreadMatcherPort,
     });
 
     const result = await processor.processRecord(makeMessage("msg-all-agree"), 1);
     expect(result.isOk()).toBe(true);
 
-    const trackCalls = mockLogger.calls.filter(c => c.method === "track" && c.context?.code === "processor.arc_match_discrepancy");
+    const trackCalls = mockLogger.calls.filter(c => c.method === "track" && c.context?.code === "processor.thread_match_discrepancy");
     expect(trackCalls).toHaveLength(0);
 
-    const matchLog = mockLogger.calls.find(c => c.context?.code === "processor.arc_matched");
+    const matchLog = mockLogger.calls.find(c => c.context?.code === "processor.thread_matched");
     expect(matchLog).toBeDefined();
     expect(matchLog!.context!.threadId).toBe(SAME_ARC.id);
   });
@@ -236,15 +236,15 @@ describe("Feature: in-reply-to-arc-threading, Parallel arc matching tier selecti
   // 2. Tier 1 and Tier 1.5 disagree → TRACK logged, Tier 1 arc selected
   // -------------------------------------------------------------------------
   it("Tier 1 and Tier 1.5 disagree → TRACK logged, Tier 1 arc selected", async () => {
-    const arcDb = {
-      ...makeArcDbMock(),
+    const threadDb = {
+      ...makeThreadDbMock(),
       findThreadByGroupingKey: vi.fn().mockReturnValue(Promise.resolve(ok(TIER1_ARC))),
       findSignalByEmailMessageId: vi.fn().mockReturnValue(Promise.resolve(ok({ threadId: TIER15_ARC.id, id: "sgn-2", signalLookupId: "ses-2", accountId: TEST_ACCOUNT_ID, status: "active", source: "email", type: "email" }))),
       getThread: vi.fn().mockReturnValue(Promise.resolve(ok(TIER15_ARC))),
     };
 
     const processor = buildProcessor({
-      arcDb,
+      threadDb,
       classifier: makeNoticeClassifier(),
       contentSanitizer: makeContentSanitizer(),
       auroraWriter: makeAuroraWriter(null),
@@ -253,13 +253,13 @@ describe("Feature: in-reply-to-arc-threading, Parallel arc matching tier selecti
     const result = await processor.processRecord(makeMessage("msg-tier1-vs-tier15"), 1);
     expect(result.isOk()).toBe(true);
 
-    const trackCalls = mockLogger.calls.filter(c => c.method === "track" && c.context?.code === "processor.arc_match_discrepancy");
+    const trackCalls = mockLogger.calls.filter(c => c.method === "track" && c.context?.code === "processor.thread_match_discrepancy");
     expect(trackCalls).toHaveLength(1);
     expect(trackCalls[0]!.context!.tier1ThreadId).toBe(TIER1_ARC.id);
     expect(trackCalls[0]!.context!.tier15ThreadId).toBe(TIER15_ARC.id);
     expect(trackCalls[0]!.context!.selectedTier).toBe("groupingKey");
 
-    const matchLog = mockLogger.calls.find(c => c.context?.code === "processor.arc_matched");
+    const matchLog = mockLogger.calls.find(c => c.context?.code === "processor.thread_matched");
     expect(matchLog!.context!.threadId).toBe(TIER1_ARC.id);
   });
 
@@ -267,14 +267,14 @@ describe("Feature: in-reply-to-arc-threading, Parallel arc matching tier selecti
   // 3. Only Tier 1.5 matches → that arc used, no discrepancy
   // -------------------------------------------------------------------------
   it("only Tier 1.5 matches → that arc used, no discrepancy", async () => {
-    const arcDb = {
-      ...makeArcDbMock(),
+    const threadDb = {
+      ...makeThreadDbMock(),
       findSignalByEmailMessageId: vi.fn().mockReturnValue(Promise.resolve(ok({ threadId: TIER15_ARC.id, id: "sgn-3", signalLookupId: "ses-3", accountId: TEST_ACCOUNT_ID, status: "active", source: "email", type: "email" }))),
       getThread: vi.fn().mockReturnValue(Promise.resolve(ok(TIER15_ARC))),
     };
 
     const processor = buildProcessor({
-      arcDb,
+      threadDb,
       classifier: makeConversationClassifier(),
       contentSanitizer: makeContentSanitizer(),
       auroraWriter: makeAuroraWriter(null),
@@ -283,10 +283,10 @@ describe("Feature: in-reply-to-arc-threading, Parallel arc matching tier selecti
     const result = await processor.processRecord(makeMessage("msg-tier15-only"), 1);
     expect(result.isOk()).toBe(true);
 
-    const trackCalls = mockLogger.calls.filter(c => c.method === "track" && c.context?.code === "processor.arc_match_discrepancy");
+    const trackCalls = mockLogger.calls.filter(c => c.method === "track" && c.context?.code === "processor.thread_match_discrepancy");
     expect(trackCalls).toHaveLength(0);
 
-    const matchLog = mockLogger.calls.find(c => c.context?.code === "processor.arc_matched");
+    const matchLog = mockLogger.calls.find(c => c.context?.code === "processor.thread_matched");
     expect(matchLog).toBeDefined();
     expect(matchLog!.context!.threadId).toBe(TIER15_ARC.id);
     expect(matchLog!.context!.matchMethod).toBe("inReplyTo");
@@ -299,13 +299,13 @@ describe("Feature: in-reply-to-arc-threading, Parallel arc matching tier selecti
     const processor = buildProcessor({
       classifier: makeConversationClassifier(),
       contentSanitizer: makeContentSanitizer({ inReplyTo: null }),
-      arcMatcher: { findMatch: vi.fn().mockReturnValue(Promise.resolve(ok(TIER2_ARC))), upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) } as ArcMatcher,
+      threadMatcher: { findMatch: vi.fn().mockReturnValue(Promise.resolve(ok(TIER2_ARC))), upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) } as ThreadMatcherPort,
     });
 
     const result = await processor.processRecord(makeMessage("msg-tier2-only"), 1);
     expect(result.isOk()).toBe(true);
 
-    const matchLog = mockLogger.calls.find(c => c.context?.code === "processor.arc_matched");
+    const matchLog = mockLogger.calls.find(c => c.context?.code === "processor.thread_matched");
     expect(matchLog).toBeDefined();
     expect(matchLog!.context!.threadId).toBe(TIER2_ARC.id);
     expect(matchLog!.context!.matchMethod).toBe("similarity");
@@ -315,10 +315,10 @@ describe("Feature: in-reply-to-arc-threading, Parallel arc matching tier selecti
   // 5. No tier matches → new arc created
   // -------------------------------------------------------------------------
   it("no tier matches → new arc created", async () => {
-    const arcDb = makeArcDbMock();
+    const threadDb = makeThreadDbMock();
 
     const processor = buildProcessor({
-      arcDb,
+      threadDb,
       classifier: makeConversationClassifier(),
       contentSanitizer: makeContentSanitizer({ inReplyTo: null }),
       auroraWriter: makeAuroraWriter(null),
@@ -328,10 +328,10 @@ describe("Feature: in-reply-to-arc-threading, Parallel arc matching tier selecti
     expect(result.isOk()).toBe(true);
 
     // New arc was saved (saveThread called)
-    expect((arcDb as unknown as { saveThread: ReturnType<typeof vi.fn> }).saveThread).toHaveBeenCalled();
+    expect((threadDb as unknown as { saveThread: ReturnType<typeof vi.fn> }).saveThread).toHaveBeenCalled();
 
     // No "arc_matched" info log — instead a new arc is created
-    const matchLog = mockLogger.calls.find(c => c.context?.code === "processor.arc_matched");
+    const matchLog = mockLogger.calls.find(c => c.context?.code === "processor.thread_matched");
     expect(matchLog).toBeUndefined();
   });
 
@@ -339,13 +339,13 @@ describe("Feature: in-reply-to-arc-threading, Parallel arc matching tier selecti
   // 6. Tier 1.5 returns signal without threadId → treated as miss
   // -------------------------------------------------------------------------
   it("Tier 1.5 returns signal without threadId → treated as miss", async () => {
-    const arcDb = {
-      ...makeArcDbMock(),
+    const threadDb = {
+      ...makeThreadDbMock(),
       findSignalByEmailMessageId: vi.fn().mockReturnValue(Promise.resolve(ok({ id: "sgn-quarantined", signalLookupId: "ses-q", accountId: TEST_ACCOUNT_ID, status: "quarantined", source: "email", type: "email" }))),
     };
 
     const processor = buildProcessor({
-      arcDb,
+      threadDb,
       classifier: makeConversationClassifier(),
       contentSanitizer: makeContentSanitizer(),
       auroraWriter: makeAuroraWriter(null),
@@ -355,23 +355,23 @@ describe("Feature: in-reply-to-arc-threading, Parallel arc matching tier selecti
     expect(result.isOk()).toBe(true);
 
     // getThread should NOT have been called since the signal had no threadId
-    expect((arcDb as unknown as { getThread: ReturnType<typeof vi.fn> }).getThread).not.toHaveBeenCalled();
+    expect((threadDb as unknown as { getThread: ReturnType<typeof vi.fn> }).getThread).not.toHaveBeenCalled();
 
     // New arc created (no tier matched)
-    expect((arcDb as unknown as { saveThread: ReturnType<typeof vi.fn> }).saveThread).toHaveBeenCalled();
+    expect((threadDb as unknown as { saveThread: ReturnType<typeof vi.fn> }).saveThread).toHaveBeenCalled();
   });
 
   // -------------------------------------------------------------------------
   // 7. Tier 1.5 GSI3 query throws → treated as miss, falls through
   // -------------------------------------------------------------------------
   it("Tier 1.5 GSI3 query throws → treated as miss, falls through", async () => {
-    const arcDb = {
-      ...makeArcDbMock(),
+    const threadDb = {
+      ...makeThreadDbMock(),
       findSignalByEmailMessageId: vi.fn().mockReturnValue(Promise.resolve(err(dbError(new Error("DynamoDB timeout"))))),
     };
 
     const processor = buildProcessor({
-      arcDb,
+      threadDb,
       classifier: makeConversationClassifier(),
       contentSanitizer: makeContentSanitizer(),
       auroraWriter: makeAuroraWriter(null),
@@ -385,17 +385,17 @@ describe("Feature: in-reply-to-arc-threading, Parallel arc matching tier selecti
     expect(warnLogs).toHaveLength(1);
 
     // Fell through → new arc created (no other tiers matched)
-    expect((arcDb as unknown as { saveThread: ReturnType<typeof vi.fn> }).saveThread).toHaveBeenCalled();
+    expect((threadDb as unknown as { saveThread: ReturnType<typeof vi.fn> }).saveThread).toHaveBeenCalled();
   });
 
   // -------------------------------------------------------------------------
   // 8. In-Reply-To header absent → Tier 1.5 result is null, no query made
   // -------------------------------------------------------------------------
   it("In-Reply-To header absent → Tier 1.5 result is null, no query made", async () => {
-    const arcDb = makeArcDbMock();
+    const threadDb = makeThreadDbMock();
 
     const processor = buildProcessor({
-      arcDb,
+      threadDb,
       classifier: makeConversationClassifier(),
       contentSanitizer: makeContentSanitizer({ inReplyTo: null }),
       auroraWriter: makeAuroraWriter(null),
@@ -405,6 +405,6 @@ describe("Feature: in-reply-to-arc-threading, Parallel arc matching tier selecti
     expect(result.isOk()).toBe(true);
 
     // findSignalByEmailMessageId should NOT have been called
-    expect((arcDb as unknown as { findSignalByEmailMessageId: ReturnType<typeof vi.fn> }).findSignalByEmailMessageId).not.toHaveBeenCalled();
+    expect((threadDb as unknown as { findSignalByEmailMessageId: ReturnType<typeof vi.fn> }).findSignalByEmailMessageId).not.toHaveBeenCalled();
   });
 });

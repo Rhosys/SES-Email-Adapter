@@ -97,23 +97,19 @@ function makeDomain(overrides: Partial<Domain> = {}): Domain {
   };
 }
 
-function makeArcDb() {
+function makeThreadDb() {
   return {
-    listArcs: vi.fn().mockResolvedValue(ok({ items: [] })),
     listThreads: vi.fn().mockResolvedValue(ok({ items: [] })),
-    getArc: vi.fn().mockResolvedValue(ok(null)),
     getThread: vi.fn().mockResolvedValue(ok(null)),
-    updateArc: vi.fn().mockResolvedValue(ok(makeThread())),
     updateThread: vi.fn().mockResolvedValue(ok(makeThread())),
     listSignals: vi.fn().mockResolvedValue(ok({ items: [] })),
-    listPreArcSignals: vi.fn().mockResolvedValue(ok({ items: [] })),
-    fastFindArcByAlternativeLookupKey: vi.fn().mockResolvedValue(ok(null)),
+    listPreThreadSignals: vi.fn().mockResolvedValue(ok({ items: [] })),
+    findThreadByGroupingKey: vi.fn().mockResolvedValue(ok(null)),
     getSignalById: vi.fn().mockResolvedValue(ok(null)),
     updateSignal: vi.fn().mockResolvedValue(ok({})),
     deleteSignal: vi.fn().mockResolvedValue(ok(undefined)),
     unblockSignal: vi.fn().mockResolvedValue(ok(undefined)),
-    createArc: vi.fn().mockResolvedValue(ok(undefined)),
-    searchArcs: vi.fn().mockResolvedValue(ok({ items: [] })),
+    createThread: vi.fn().mockResolvedValue(ok(undefined)),
     searchThreads: vi.fn().mockResolvedValue(ok({ items: [] })),
   };
 }
@@ -191,14 +187,14 @@ async function req(
 // ---------------------------------------------------------------------------
 
 describe("API route error mapping — unit tests", () => {
-  let threadDb: ReturnType<typeof makeArcDb>;
+  let threadDb: ReturnType<typeof makeThreadDb>;
   let accountDb: ReturnType<typeof makeAccountDb>;
   let auditDb: ReturnType<typeof makeAuditDb>;
   let app: ReturnType<typeof createApp>;
 
   beforeEach(() => {
     vi.clearAllMocks();
-    threadDb = makeArcDb();
+    threadDb = makeThreadDb();
     accountDb = makeAccountDb();
     auditDb = makeAuditDb();
     const auth = makeAuth();

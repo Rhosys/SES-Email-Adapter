@@ -3,10 +3,10 @@ import { ok, err } from "neverthrow";
 import { createApp } from "../../src/api/app.js";
 import { makeAppDeps } from "../helpers/app-deps.js";
 import type { AuthService, AccessService } from "../../src/api/app.js";
-import type { ArcDatabase } from "../../src/database/arc-database.js";
+import type { ThreadDatabase } from "../../src/database/thread-database.js";
 import type { AccountDatabase } from "../../src/database/account-database.js";
 import type { AuditDatabase } from "../../src/database/audit-database.js";
-import type { Arc } from "../../src/types/index.js";
+import type { Thread } from "../../src/types/index.js";
 import type { DbError } from "../../src/errors.js";
 import type { EmailService } from "../../src/email/email-service.js";
 import type { sendRsvp } from "../../src/processor/calendar/rsvp-composer.js";
@@ -35,7 +35,7 @@ function makeAccess(): AccessService {
   };
 }
 
-function makeArc(overrides: Partial<Arc> = {}): Arc {
+function makeThread(overrides: Partial<Thread> = {}): Thread {
   return {
     id: "arc-001", accountId: TEST_ACCOUNT_ID, workflow: "conversation", labels: [], status: "active",
     summary: "A test arc.", lastSignalAt: "2024-01-15T10:00:00Z",
@@ -45,20 +45,20 @@ function makeArc(overrides: Partial<Arc> = {}): Arc {
   };
 }
 
-function makeArcDb() {
+function makeThreadDb() {
   return {
-    listArcs: vi.fn().mockResolvedValue(ok({ items: [] })),
-    getArc: vi.fn().mockResolvedValue(ok(null)),
-    updateArc: vi.fn().mockResolvedValue(ok(makeArc())),
+    listThreads: vi.fn().mockResolvedValue(ok({ items: [] })),
+    getThread: vi.fn().mockResolvedValue(ok(null)),
+    updateThread: vi.fn().mockResolvedValue(ok(makeThread())),
     listSignals: vi.fn().mockResolvedValue(ok({ items: [] })),
-    listPreArcSignals: vi.fn().mockResolvedValue(ok({ items: [] })),
-    fastFindArcByAlternativeLookupKey: vi.fn().mockResolvedValue(ok(null)),
+    listPreThreadSignals: vi.fn().mockResolvedValue(ok({ items: [] })),
+    findThreadByGroupingKey: vi.fn().mockResolvedValue(ok(null)),
     getSignalById: vi.fn().mockResolvedValue(ok(null)),
     updateSignal: vi.fn().mockResolvedValue(ok({})),
     deleteSignal: vi.fn().mockResolvedValue(ok(undefined)),
     unblockSignal: vi.fn().mockResolvedValue(ok(undefined)),
-    createArc: vi.fn().mockResolvedValue(ok(undefined)),
-    searchArcs: vi.fn().mockResolvedValue(ok({ items: [] })),
+    createThread: vi.fn().mockResolvedValue(ok(undefined)),
+    searchThreads: vi.fn().mockResolvedValue(ok({ items: [] })),
   };
 }
 
@@ -111,9 +111,9 @@ function makeAuditDb() {
   };
 }
 
-function makeApp(arcDb: ReturnType<typeof makeArcDb>, accountDb?: ReturnType<typeof makeAccountDb>, auditDb?: ReturnType<typeof makeAuditDb>) {
+function makeApp(threadDb: ReturnType<typeof makeThreadDb>, accountDb?: ReturnType<typeof makeAccountDb>, auditDb?: ReturnType<typeof makeAuditDb>) {
   return createApp(makeAppDeps({
-    arcDb: arcDb as unknown as ArcDatabase,
+    threadDb: threadDb as unknown as ThreadDatabase,
     accountDb: (accountDb ?? makeAccountDb()) as unknown as AccountDatabase,
     auditDb: (auditDb ?? makeAuditDb()) as unknown as AuditDatabase,
     auth: makeAuth(),
@@ -142,23 +142,23 @@ describe("API route error mapping consistency", () => {
     { label: "success → 200", type: "success" as const, expectedStatus: 200 },
   ];
 
-  describe("GET /accounts/:accountId/arcs/:id", () => {
+  describe("GET /accounts/:accountId/threads/:threadId", () => {
     it.each(scenarios)("$label", async ({ type, expectedStatus }) => {
-      const arcDb = makeArcDb();
+      const threadDb = makeThreadDb();
       switch (type) {
         case "db_error":
-          vi.mocked(arcDb.getArc).mockResolvedValue(err({ kind: "db_error", message: "mock error", cause: new Error("timeout") } satisfies DbError));
+          vi.mocked(threadDb.getThread).mockResolvedValue(err({ kind: "db_error", message: "mock error", cause: new Error("timeout") } satisfies DbError));
           break;
         case "null_read":
-          vi.mocked(arcDb.getArc).mockResolvedValue(ok(null));
+          vi.mocked(threadDb.getThread).mockResolvedValue(ok(null));
           break;
         case "success":
-          vi.mocked(arcDb.getArc).mockResolvedValue(ok(makeArc()));
+          vi.mocked(threadDb.getThread).mockResolvedValue(ok(makeThread()));
           break;
       }
 
-      const app = makeApp(arcDb);
-      const res = await app.fetch(new Request(`http://localhost/accounts/${TEST_ACCOUNT_ID}/arcs/arc-001`, {
+      const app = makeApp(threadDb);
+      const res = await app.fetch(new Request(`http://localhost/accounts/${TEST_ACCOUNT_ID}/threads/arc-001`, {
         headers: { Authorization: "Bearer valid-token" },
       }));
       expect(res.status).toBe(expectedStatus);
@@ -167,17 +167,17 @@ describe("API route error mapping consistency", () => {
 
   describe("GET /accounts/:accountId/signals/:id", () => {
     it.each(scenarios)("$label", async ({ type, expectedStatus }) => {
-      const arcDb = makeArcDb();
+      const threadDb = makeThreadDb();
       switch (type) {
         case "db_error":
-          vi.mocked(arcDb.getSignalById).mockResolvedValue(err({ kind: "db_error", message: "mock error", cause: new Error("timeout") } satisfies DbError));
+          vi.mocked(threadDb.getSignalById).mockResolvedValue(err({ kind: "db_error", message: "mock error", cause: new Error("timeout") } satisfies DbError));
           break;
         case "null_read":
-          vi.mocked(arcDb.getSignalById).mockResolvedValue(ok(null));
+          vi.mocked(threadDb.getSignalById).mockResolvedValue(ok(null));
           break;
         case "success":
-          vi.mocked(arcDb.getSignalById).mockResolvedValue(ok({
-            id: "SES#msg-001", arcId: "arc-001", accountId: TEST_ACCOUNT_ID, source: "email",
+          vi.mocked(threadDb.getSignalById).mockResolvedValue(ok({
+            id: "SES#msg-001", threadId: "arc-001", accountId: TEST_ACCOUNT_ID, source: "email",
             type: "email", status: "active", createdAt: "2024-01-15T10:00:00Z",
             data: {
               receivedAt: "2024-01-15T10:00:00Z", from: { address: "sender@example.com", name: "Sender" },
@@ -191,7 +191,7 @@ describe("API route error mapping consistency", () => {
           break;
       }
 
-      const app = makeApp(arcDb);
+      const app = makeApp(threadDb);
       const res = await app.fetch(new Request(`http://localhost/accounts/${TEST_ACCOUNT_ID}/signals/SES%23msg-001`, {
         headers: { Authorization: "Bearer valid-token" },
       }));
@@ -199,23 +199,23 @@ describe("API route error mapping consistency", () => {
     });
   });
 
-  describe("GET /accounts/:accountId/arcs (list)", () => {
+  describe("GET /accounts/:accountId/threads (list)", () => {
     it.each([
       { label: "db_error → 500", type: "db_error" as const, expectedStatus: 500 },
       { label: "success → 200", type: "success" as const, expectedStatus: 200 },
     ])("$label", async ({ type, expectedStatus }) => {
-      const arcDb = makeArcDb();
+      const threadDb = makeThreadDb();
       switch (type) {
         case "db_error":
-          vi.mocked(arcDb.listArcs).mockResolvedValue(err({ kind: "db_error", message: "mock error", cause: new Error("reset") } satisfies DbError));
+          vi.mocked(threadDb.listThreads).mockResolvedValue(err({ kind: "db_error", message: "mock error", cause: new Error("reset") } satisfies DbError));
           break;
         case "success":
-          vi.mocked(arcDb.listArcs).mockResolvedValue(ok({ items: [makeArc()] }));
+          vi.mocked(threadDb.listThreads).mockResolvedValue(ok({ items: [makeThread()] }));
           break;
       }
 
-      const app = makeApp(arcDb);
-      const res = await app.fetch(new Request(`http://localhost/accounts/${TEST_ACCOUNT_ID}/arcs`, {
+      const app = makeApp(threadDb);
+      const res = await app.fetch(new Request(`http://localhost/accounts/${TEST_ACCOUNT_ID}/threads`, {
         headers: { Authorization: "Bearer valid-token" },
       }));
       expect(res.status).toBe(expectedStatus);

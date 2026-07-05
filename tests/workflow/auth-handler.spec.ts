@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ok, err } from "../../src/errors.js";
 import type { DbError } from "../../src/errors.js";
-import type { Signal, Arc, AuthData } from "../../src/types/index.js";
+import type { Signal, Thread, AuthData } from "../../src/types/index.js";
 import type { DeviceStore } from "../../src/notifier/device-store.js";
 import type { Deliverer, DeliveryResult, Device } from "../../src/notifier/types.js";
-import type { ArcDatabase } from "../../src/database/arc-database.js";
+import type { ThreadDatabase } from "../../src/database/thread-database.js";
 import type { Logger } from "../../src/logger.js";
 import { AuthWorkflowHandler, type OtpPayload } from "../../src/workflow/auth-handler.js";
 
@@ -44,7 +44,7 @@ function makeSignal(overrides: { data?: Partial<Signal["data"]> } & Partial<Omit
   } as Signal;
 }
 
-const stubArc: Arc = {
+const stubArc: Thread = {
   id: "arc-test-001",
   accountId: "acc-1",
   workflow: "auth",
@@ -69,9 +69,9 @@ function makeMocks() {
   const deliverer: Deliverer = {
     deliver: vi.fn(),
   };
-  const arcDatabase = {
-    updateArc: vi.fn().mockResolvedValue(ok({} as Arc)),
-  } as unknown as ArcDatabase;
+  const threadDatabase = {
+    updateThread: vi.fn().mockResolvedValue(ok({} as Thread)),
+  } as unknown as ThreadDatabase;
   const logger: Logger = {
     startInvocation: vi.fn(),
     getInvocationId: vi.fn(),
@@ -82,7 +82,7 @@ function makeMocks() {
     error: vi.fn(),
     critical: vi.fn(),
   };
-  return { deviceStore, deliverer, arcDatabase, logger };
+  return { deviceStore, deliverer, threadDatabase, logger };
 }
 
 // ---------------------------------------------------------------------------
@@ -96,7 +96,7 @@ describe("AuthWorkflowHandler", () => {
 
   beforeEach(() => {
     mocks = makeMocks();
-    handler = new AuthWorkflowHandler(mocks.deviceStore, mocks.deliverer, mocks.arcDatabase, mocks.logger);
+    handler = new AuthWorkflowHandler(mocks.deviceStore, mocks.deliverer, mocks.threadDatabase, mocks.logger);
   });
 
   // ─── Property 2: OTP payload construction + fan-out ──────────────────────
@@ -208,7 +208,7 @@ describe("AuthWorkflowHandler", () => {
 
     await handler.execute(signal, stubArc, "acc-1");
 
-    expect(mocks.arcDatabase.updateArc).toHaveBeenCalledWith("acc-1", "arc-test-001", "archived", "2024-01-01T00:00:00Z", {});
+    expect(mocks.threadDatabase.updateThread).toHaveBeenCalledWith("acc-1", "arc-test-001", "archived", "2024-01-01T00:00:00Z", {});
   });
 
   // ─── Logs warning when arc archive fails but still returns ok() ──────────
@@ -217,7 +217,7 @@ describe("AuthWorkflowHandler", () => {
     vi.mocked(mocks.deviceStore.listDevices).mockResolvedValue(ok([makeDevice("t1")]));
     vi.mocked(mocks.deliverer.deliver).mockResolvedValue({ status: "delivered" });
     const dbErr: DbError = { kind: "db_error", message: "connection lost", cause: new Error("connection lost") };
-    vi.mocked(mocks.arcDatabase.updateArc).mockResolvedValue(err(dbErr));
+    vi.mocked(mocks.threadDatabase.updateThread).mockResolvedValue(err(dbErr));
 
     const workflowData: AuthData = { workflow: "auth", authType: "otp", code: "123456", service: "Svc" };
     const signal = makeSignal({ data: { from: { address: "noreply@example.com" }, workflowData } });
@@ -226,8 +226,8 @@ describe("AuthWorkflowHandler", () => {
 
     expect(result.isOk()).toBe(true);
     expect(mocks.logger.warn).toHaveBeenCalledWith(
-      "Failed to archive auth arc after OTP push",
-      expect.objectContaining({ code: "workflow.auth.archive_failed", signal, arc: stubArc }),
+      "Failed to archive auth thread after OTP push",
+      expect.objectContaining({ code: "workflow.auth.archive_failed", signal, thread: stubArc }),
     );
   });
 });

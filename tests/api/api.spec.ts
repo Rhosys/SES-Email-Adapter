@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { Arc, Signal, View, Label, Rule, Domain, Account, Alias, ForwardingTarget, EmailTemplate } from "../../src/types/index.js";
+import type { Thread, Signal, View, Label, Rule, Domain, Account, Alias, ForwardingTarget, EmailTemplate } from "../../src/types/index.js";
 import { createApp } from "../../src/api/app.js";
 import { makeAppDeps } from "../helpers/app-deps.js";
 import type { AuthService, AccessService, AccountUser, IForwardingService } from "../../src/api/app.js";
-import type { ArcDatabase } from "../../src/database/arc-database.js";
+import type { ThreadDatabase } from "../../src/database/thread-database.js";
 import type { AccountDatabase } from "../../src/database/account-database.js";
 import type { AuditDatabase } from "../../src/database/audit-database.js";
 import { ok, err } from "neverthrow";
@@ -56,23 +56,23 @@ function makeAccess(): AccessService {
   };
 }
 
-function makeArcDb() {
+function makeThreadDb() {
   return {
-    listArcs: vi.fn().mockResolvedValue(ok({ items: [] })),
-    getArc: vi.fn().mockResolvedValue(ok(null)),
-    updateArc: vi.fn().mockResolvedValue(ok(makeArc())),
+    listThreads: vi.fn().mockResolvedValue(ok({ items: [] })),
+    getThread: vi.fn().mockResolvedValue(ok(null)),
+    updateThread: vi.fn().mockResolvedValue(ok(makeThread())),
     listSignals: vi.fn().mockResolvedValue(ok({ items: [] })),
-    listPreArcSignals: vi.fn().mockResolvedValue(ok({ items: [] })),
+    listPreThreadSignals: vi.fn().mockResolvedValue(ok({ items: [] })),
     updateSignalStatus: vi.fn().mockImplementation((_, id, status) => Promise.resolve(ok({ id, status }))),
-    fastFindArcByAlternativeLookupKey: vi.fn().mockResolvedValue(ok(null)),
+    findThreadByGroupingKey: vi.fn().mockResolvedValue(ok(null)),
     getSignalById: vi.fn().mockResolvedValue(ok(null)),
     createSignal: vi.fn().mockImplementation((signal) => Promise.resolve(ok(signal))),
     updateSignal: vi.fn().mockResolvedValue(ok(makeSignal())),
     updateSignalSendStatus: vi.fn().mockResolvedValue(ok(makeSignal())),
     deleteSignal: vi.fn().mockResolvedValue(ok(undefined)),
     unblockSignal: vi.fn().mockResolvedValue(ok(undefined)),
-    createArc: vi.fn().mockResolvedValue(ok(undefined)),
-    searchArcs: vi.fn().mockResolvedValue(ok({ items: [] })),
+    createThread: vi.fn().mockResolvedValue(ok(undefined)),
+    searchThreads: vi.fn().mockResolvedValue(ok({ items: [] })),
   };
 }
 
@@ -185,7 +185,7 @@ function makeAccount(overrides: Partial<Account> = {}): Account {
   };
 }
 
-function makeArc(overrides: Partial<Arc> = {}): Arc {
+function makeThread(overrides: Partial<Thread> = {}): Thread {
   return {
     id: "arc-001",
     accountId: TEST_ACCOUNT_ID,
@@ -208,7 +208,7 @@ function makeSignal(overrides: Partial<Omit<Signal, "data">> & { data?: Partial<
   return {
     id: "SES#msg-001",
     signalLookupId: "SES#msg-001",
-    arcId: "arc-001",
+    threadId: "arc-001",
     accountId: TEST_ACCOUNT_ID,
     source: "email" as const,
     type: "email",
@@ -311,7 +311,7 @@ async function req(
 // ---------------------------------------------------------------------------
 
 describe("API", () => {
-  let arcDb: ReturnType<typeof makeArcDb>;
+  let threadDb: ReturnType<typeof makeThreadDb>;
   let accountDb: ReturnType<typeof makeAccountDb>;
   let auditDb: ReturnType<typeof makeAuditDb>;
   let auth: AuthService;
@@ -323,7 +323,7 @@ describe("API", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    arcDb = makeArcDb();
+    threadDb = makeThreadDb();
     accountDb = makeAccountDb();
     auditDb = makeAuditDb();
     auth = makeAuth();
@@ -335,7 +335,7 @@ describe("API", () => {
       validateAst: vi.fn().mockResolvedValue(ok(undefined)),
       validateAstBatch: vi.fn().mockResolvedValue(ok(undefined)),
     };
-    app = createApp(makeAppDeps({ arcDb: arcDb as unknown as ArcDatabase, accountDb: accountDb as unknown as AccountDatabase, auditDb: auditDb as unknown as AuditDatabase, auth, access, logger: createMockLogger(), forwardingService, jobDispatcher: { dispatchReindex: vi.fn(), dispatchSegment: vi.fn() } as never, draftSendDispatcher, accountCreationStarter: { start: vi.fn() }, appBaseUrl: "http://localhost", contentCdnBaseUrl: "https://cdn.test", astValidator, billingHandler: new BillingHandler(), emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, domainIdentityService: { register: vi.fn().mockResolvedValue(ok(undefined)), deregister: vi.fn().mockResolvedValue(ok(undefined)) }, rsvpComposer: vi.fn().mockResolvedValue(ok(undefined)) as unknown as typeof sendRsvp, postApprovalCalendarDeps: { accountDb: {} as never, emailService: {} as never, serviceDomain: "platform.email.rhosys.cloud" } as unknown as PostApprovalCalendarHandlerDeps, schedulerClient: { scheduleMessage: vi.fn().mockResolvedValue(ok(undefined)), deleteSchedule: vi.fn().mockResolvedValue(ok(undefined)) } as never }));
+    app = createApp(makeAppDeps({ threadDb: threadDb as unknown as ThreadDatabase, accountDb: accountDb as unknown as AccountDatabase, auditDb: auditDb as unknown as AuditDatabase, auth, access, logger: createMockLogger(), forwardingService, jobDispatcher: { dispatchReindex: vi.fn(), dispatchSegment: vi.fn() } as never, draftSendDispatcher, accountCreationStarter: { start: vi.fn() }, appBaseUrl: "http://localhost", contentCdnBaseUrl: "https://cdn.test", astValidator, billingHandler: new BillingHandler(), emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, domainIdentityService: { register: vi.fn().mockResolvedValue(ok(undefined)), deregister: vi.fn().mockResolvedValue(ok(undefined)) }, rsvpComposer: vi.fn().mockResolvedValue(ok(undefined)) as unknown as typeof sendRsvp, postApprovalCalendarDeps: { accountDb: {} as never, emailService: {} as never, serviceDomain: "platform.email.rhosys.cloud" } as unknown as PostApprovalCalendarHandlerDeps, schedulerClient: { scheduleMessage: vi.fn().mockResolvedValue(ok(undefined)), deleteSchedule: vi.fn().mockResolvedValue(ok(undefined)) } as never }));
   });
 
   // -------------------------------------------------------------------------
@@ -344,112 +344,112 @@ describe("API", () => {
 
   describe("authentication", () => {
     it("returns 401 when Authorization header is missing", async () => {
-      const res = await req(app, "GET", `${A}/arcs`, { token: "" });
+      const res = await req(app, "GET", `${A}/threads`, { token: "" });
       expect(res.status).toBe(401);
     });
 
     it("returns 401 when token is invalid", async () => {
       vi.mocked(auth.verify).mockReturnValueOnce(Promise.resolve(err(authError(new Error("Invalid token")))));
-      const res = await req(app, "GET", `${A}/arcs`, { token: "bad-token" });
+      const res = await req(app, "GET", `${A}/threads`, { token: "bad-token" });
       expect(res.status).toBe(401);
     });
 
     it("returns 403 when authorization check fails", async () => {
       // The authorize() middleware calls access.checkAccess which rejects with 403
       vi.mocked(access.checkAccess).mockRejectedValueOnce(Object.assign(new Error("Forbidden"), { status: 403 }));
-      const res = await req(app, "GET", `${A}/arcs`);
+      const res = await req(app, "GET", `${A}/threads`);
       expect(res.status).toBe(403);
     });
 
     it("extracts accountId from URL path into auth context", async () => {
-      await req(app, "GET", `${A}/arcs`);
+      await req(app, "GET", `${A}/threads`);
       // The auth.verify was called (authentication happened)
       expect(auth.verify).toHaveBeenCalledWith("valid-token");
     });
   });
 
   // -------------------------------------------------------------------------
-  // Arc routes
+  // Thread routes
   // -------------------------------------------------------------------------
 
-  describe("GET /accounts/:accountId/arcs", () => {
-    it("returns paginated Arc list in named envelope", async () => {
-      vi.mocked(arcDb.listArcs).mockResolvedValueOnce(ok({ items: [makeArc()] }));
-      const res = await req(app, "GET", `${A}/arcs`);
+  describe("GET /accounts/:accountId/threads", () => {
+    it("returns paginated Thread list in named envelope", async () => {
+      vi.mocked(threadDb.listThreads).mockResolvedValueOnce(ok({ items: [makeThread()] }));
+      const res = await req(app, "GET", `${A}/threads`);
       expect(res.status).toBe(200);
-      const body = await res.json() as { arcs: unknown[]; pagination: { cursor: string | null } };
-      expect(body.arcs).toHaveLength(1);
+      const body = await res.json() as { threads: unknown[]; pagination: { cursor: string | null } };
+      expect(body.threads).toHaveLength(1);
       expect(body.pagination).toEqual({ cursor: null });
     });
 
     it("passes workflow and label filters to the store", async () => {
-      await req(app, "GET", `${A}/arcs?workflow=payments&label=billing&limit=25`);
-      expect(arcDb.listArcs).toHaveBeenCalledWith(
+      await req(app, "GET", `${A}/threads?workflow=payments&label=billing&limit=25`);
+      expect(threadDb.listThreads).toHaveBeenCalledWith(
         TEST_ACCOUNT_ID,
         expect.objectContaining({ workflow: "payments", label: "billing", limit: 25 }),
       );
     });
 
     it("passes status filter to the store", async () => {
-      await req(app, "GET", `${A}/arcs?status=archived`);
-      expect(arcDb.listArcs).toHaveBeenCalledWith(
+      await req(app, "GET", `${A}/threads?status=archived`);
+      expect(threadDb.listThreads).toHaveBeenCalledWith(
         TEST_ACCOUNT_ID,
         expect.objectContaining({ status: "archived" }),
       );
     });
 
     it("passes cursor and limit pagination params to the store", async () => {
-      await req(app, "GET", `${A}/arcs?cursor=next-page-token&limit=10`);
-      expect(arcDb.listArcs).toHaveBeenCalledWith(
+      await req(app, "GET", `${A}/threads?cursor=next-page-token&limit=10`);
+      expect(threadDb.listThreads).toHaveBeenCalledWith(
         TEST_ACCOUNT_ID,
         expect.objectContaining({ cursor: "next-page-token", limit: 10 }),
       );
     });
 
     it("returns cursor in pagination envelope when store returns nextCursor", async () => {
-      vi.mocked(arcDb.listArcs).mockResolvedValueOnce(ok({ items: [makeArc()], nextCursor: "cursor-abc" }));
-      const res = await req(app, "GET", `${A}/arcs`);
+      vi.mocked(threadDb.listThreads).mockResolvedValueOnce(ok({ items: [makeThread()], nextCursor: "cursor-abc" }));
+      const res = await req(app, "GET", `${A}/threads`);
       const body = await res.json() as { pagination: { cursor: string } };
       expect(body.pagination.cursor).toBe("cursor-abc");
     });
   });
 
-  describe("GET /accounts/:accountId/arcs/:id", () => {
-    it("returns Arc detail", async () => {
-      vi.mocked(arcDb.getArc).mockResolvedValueOnce(ok(makeArc()));
-      const res = await req(app, "GET", `${A}/arcs/arc-001`);
+  describe("GET /accounts/:accountId/threads/:threadId", () => {
+    it("returns Thread detail", async () => {
+      vi.mocked(threadDb.getThread).mockResolvedValueOnce(ok(makeThread()));
+      const res = await req(app, "GET", `${A}/threads/arc-001`);
       expect(res.status).toBe(200);
-      const body = await res.json() as { arcId: string };
-      expect(body.arcId).toBe("arc-001");
+      const body = await res.json() as { threadId: string };
+      expect(body.threadId).toBe("arc-001");
     });
 
-    it("returns 404 for unknown Arc", async () => {
-      const res = await req(app, "GET", `${A}/arcs/nonexistent`);
+    it("returns 404 for unknown Thread", async () => {
+      const res = await req(app, "GET", `${A}/threads/nonexistent`);
       expect(res.status).toBe(404);
     });
   });
 
-  describe("PATCH /accounts/:accountId/arcs/:id", () => {
-    it("archives an Arc", async () => {
-      vi.mocked(arcDb.getArc).mockResolvedValueOnce(ok(makeArc()));
-      const res = await req(app, "PATCH", `${A}/arcs/arc-001`, { body: { status: "archived" } });
+  describe("PATCH /accounts/:accountId/threads/:threadId", () => {
+    it("archives a Thread", async () => {
+      vi.mocked(threadDb.getThread).mockResolvedValueOnce(ok(makeThread()));
+      const res = await req(app, "PATCH", `${A}/threads/arc-001`, { body: { status: "archived" } });
       expect(res.status).toBe(200);
-      expect(arcDb.updateArc).toHaveBeenCalledWith(
+      expect(threadDb.updateThread).toHaveBeenCalledWith(
         TEST_ACCOUNT_ID, "arc-001", "archived", "2024-01-15T10:00:00Z", {},
       );
     });
 
-    it("assigns labels to an Arc", async () => {
-      vi.mocked(arcDb.getArc).mockResolvedValueOnce(ok(makeArc()));
-      const res = await req(app, "PATCH", `${A}/arcs/arc-001`, { body: { labels: ["billing", "urgent"] } });
+    it("assigns labels to a Thread", async () => {
+      vi.mocked(threadDb.getThread).mockResolvedValueOnce(ok(makeThread()));
+      const res = await req(app, "PATCH", `${A}/threads/arc-001`, { body: { labels: ["billing", "urgent"] } });
       expect(res.status).toBe(200);
-      expect(arcDb.updateArc).toHaveBeenCalledWith(
+      expect(threadDb.updateThread).toHaveBeenCalledWith(
         TEST_ACCOUNT_ID, "arc-001", "active", "2024-01-15T10:00:00Z", { labels: ["billing", "urgent"] },
       );
     });
 
-    it("returns 404 for unknown Arc", async () => {
-      const res = await req(app, "PATCH", `${A}/arcs/nonexistent`, { body: { status: "archived" } });
+    it("returns 404 for unknown Thread", async () => {
+      const res = await req(app, "PATCH", `${A}/threads/nonexistent`, { body: { status: "archived" } });
       expect(res.status).toBe(404);
     });
   });
@@ -458,19 +458,19 @@ describe("API", () => {
   // Signal routes
   // -------------------------------------------------------------------------
 
-  describe("GET /accounts/:accountId/arcs/:arcId/signals", () => {
-    it("lists Signals for an Arc in named envelope", async () => {
-      vi.mocked(arcDb.getArc).mockResolvedValueOnce(ok(makeArc()));
-      vi.mocked(arcDb.listSignals).mockResolvedValueOnce(ok({ items: [makeSignal()] }));
-      const res = await req(app, "GET", `${A}/arcs/arc-001/signals`);
+  describe("GET /accounts/:accountId/threads/:threadId/signals", () => {
+    it("lists Signals for a Thread in named envelope", async () => {
+      vi.mocked(threadDb.getThread).mockResolvedValueOnce(ok(makeThread()));
+      vi.mocked(threadDb.listSignals).mockResolvedValueOnce(ok({ items: [makeSignal()] }));
+      const res = await req(app, "GET", `${A}/threads/arc-001/signals`);
       expect(res.status).toBe(200);
       const body = await res.json() as { signals: unknown[]; pagination: { cursor: string | null } };
       expect(body.signals).toHaveLength(1);
       expect(body.pagination).toEqual({ cursor: null });
     });
 
-    it("returns 404 when Arc does not exist", async () => {
-      const res = await req(app, "GET", `${A}/arcs/nonexistent/signals`);
+    it("returns 404 when Thread does not exist", async () => {
+      const res = await req(app, "GET", `${A}/threads/nonexistent/signals`);
       expect(res.status).toBe(404);
     });
   });
@@ -478,12 +478,12 @@ describe("API", () => {
   describe("GET /accounts/:accountId/signals?status=", () => {
     it("returns quarantined signals (both visible and hidden) when status=quarantined", async () => {
       const s = makeSignal({ status: "quarantine_visible" });
-      vi.mocked(arcDb.listPreArcSignals).mockResolvedValueOnce(ok({ items: [s] }));
+      vi.mocked(threadDb.listPreThreadSignals).mockResolvedValueOnce(ok({ items: [s] }));
       const res = await req(app, "GET", `${A}/signals?status=quarantined`);
       expect(res.status).toBe(200);
       const body = await res.json() as { signals: Signal[]; pagination: { cursor: string | null } };
       expect(body.signals).toHaveLength(1);
-      expect(arcDb.listPreArcSignals).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "quarantined", expect.any(Object));
+      expect(threadDb.listPreThreadSignals).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "quarantined", expect.any(Object));
     });
 
     it("returns 400 when status is blocked (no longer supported)", async () => {
@@ -505,15 +505,15 @@ describe("API", () => {
   describe("PUT /accounts/:accountId/signals/:id/quarantineResponse", () => {
     it("blocks a quarantined signal", async () => {
       const s = makeSignal({ status: "quarantine_visible" });
-      vi.mocked(arcDb.getSignalById).mockResolvedValueOnce(ok(s));
+      vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(s));
       const res = await req(app, "POST", `${A}/signals/SES%23msg-001/quarantineResponse`, { body: { status: "block_hidden" } });
       expect(res.status).toBe(200);
-      expect(arcDb.updateSignalStatus).toHaveBeenCalledWith(TEST_ACCOUNT_ID, s.signalLookupId, "block_hidden");
+      expect(threadDb.updateSignalStatus).toHaveBeenCalledWith(TEST_ACCOUNT_ID, s.signalLookupId, "block_hidden");
     });
 
     it("creates the alias when denying a quarantined signal for a brand-new address", async () => {
       const s = makeSignal({ status: "quarantine_visible" });
-      vi.mocked(arcDb.getSignalById).mockResolvedValueOnce(ok(s));
+      vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(s));
       vi.mocked(accountDb.getAlias).mockResolvedValueOnce(ok(null));
       const res = await req(app, "POST", `${A}/signals/SES%23msg-001/quarantineResponse`, { body: { status: "block_hidden" } });
       expect(res.status).toBe(200);
@@ -522,30 +522,30 @@ describe("API", () => {
 
     it("does not recreate the alias when denying a quarantined signal for a known address", async () => {
       const s = makeSignal({ status: "quarantine_visible" });
-      vi.mocked(arcDb.getSignalById).mockResolvedValueOnce(ok(s));
+      vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(s));
       vi.mocked(accountDb.getAlias).mockResolvedValueOnce(ok(makeAlias({ address: s.data.recipientAddress })));
       const res = await req(app, "POST", `${A}/signals/SES%23msg-001/quarantineResponse`, { body: { status: "block_hidden" } });
       expect(res.status).toBe(200);
       expect(accountDb.saveAlias).not.toHaveBeenCalled();
     });
 
-    it("allows a quarantined signal — creates new arc when no grouping key match", async () => {
+    it("allows a quarantined signal — creates new thread when no grouping key match", async () => {
       const s = makeSignal({ status: "quarantine_visible" });
-      vi.mocked(arcDb.getSignalById).mockResolvedValueOnce(ok(s));
-      vi.mocked(arcDb.fastFindArcByAlternativeLookupKey).mockResolvedValueOnce(ok(null));
+      vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(s));
+      vi.mocked(threadDb.findThreadByGroupingKey).mockResolvedValueOnce(ok(null));
       const res = await req(app, "POST", `${A}/signals/SES%23msg-001/quarantineResponse`, { body: { status: "active" } });
       expect(res.status).toBe(200);
-      const body = await res.json() as { arc: { arcId: string; workflow: string }; signal: { status: string } };
-      expect(body.arc.workflow).toBe(s.data.workflow);
+      const body = await res.json() as { thread: { threadId: string; workflow: string }; signal: { status: string } };
+      expect(body.thread.workflow).toBe(s.data.workflow);
       expect(body.signal.status).toBe("active");
-      expect(arcDb.createArc).toHaveBeenCalledOnce();
-      expect(arcDb.unblockSignal).toHaveBeenCalledWith(TEST_ACCOUNT_ID, s.signalLookupId, expect.any(String));
+      expect(threadDb.createThread).toHaveBeenCalledOnce();
+      expect(threadDb.unblockSignal).toHaveBeenCalledWith(TEST_ACCOUNT_ID, s.signalLookupId, expect.any(String));
     });
 
     it("creates the alias when approving a quarantined signal for a brand-new address", async () => {
       const s = makeSignal({ status: "quarantine_visible" });
-      vi.mocked(arcDb.getSignalById).mockResolvedValueOnce(ok(s));
-      vi.mocked(arcDb.fastFindArcByAlternativeLookupKey).mockResolvedValueOnce(ok(null));
+      vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(s));
+      vi.mocked(threadDb.findThreadByGroupingKey).mockResolvedValueOnce(ok(null));
       vi.mocked(accountDb.getAlias).mockResolvedValueOnce(ok(null));
       const res = await req(app, "POST", `${A}/signals/SES%23msg-001/quarantineResponse`, { body: { status: "active" } });
       expect(res.status).toBe(200);
@@ -555,35 +555,35 @@ describe("API", () => {
 
     it("does not recreate the alias when approving a quarantined signal for a known address", async () => {
       const s = makeSignal({ status: "quarantine_visible" });
-      vi.mocked(arcDb.getSignalById).mockResolvedValueOnce(ok(s));
-      vi.mocked(arcDb.fastFindArcByAlternativeLookupKey).mockResolvedValueOnce(ok(null));
+      vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(s));
+      vi.mocked(threadDb.findThreadByGroupingKey).mockResolvedValueOnce(ok(null));
       vi.mocked(accountDb.getAlias).mockResolvedValueOnce(ok(makeAlias({ address: s.data.recipientAddress })));
       const res = await req(app, "POST", `${A}/signals/SES%23msg-001/quarantineResponse`, { body: { status: "active" } });
       expect(res.status).toBe(200);
       expect(accountDb.saveAlias).not.toHaveBeenCalled();
     });
 
-    it("allows a quarantined signal — attaches to existing arc when grouping key matches", async () => {
+    it("allows a quarantined signal — attaches to existing thread when grouping key matches", async () => {
       const s = makeSignal({ status: "quarantine_visible", data: { workflow: "auth" } });
-      const existingArc = makeArc();
-      vi.mocked(arcDb.getSignalById).mockResolvedValueOnce(ok(s));
-      vi.mocked(arcDb.fastFindArcByAlternativeLookupKey).mockResolvedValueOnce(ok(existingArc));
+      const existingThread = makeThread();
+      vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(s));
+      vi.mocked(threadDb.findThreadByGroupingKey).mockResolvedValueOnce(ok(existingThread));
       const res = await req(app, "POST", `${A}/signals/SES%23msg-001/quarantineResponse`, { body: { status: "active" } });
       expect(res.status).toBe(200);
-      const body = await res.json() as { arc: { arcId: string }; signal: Signal };
-      expect(body.arc.arcId).toBe(existingArc.id);
-      expect(arcDb.createArc).not.toHaveBeenCalled();
-      expect(arcDb.unblockSignal).toHaveBeenCalledWith(TEST_ACCOUNT_ID, s.signalLookupId, existingArc.id);
+      const body = await res.json() as { thread: { threadId: string }; signal: Signal };
+      expect(body.thread.threadId).toBe(existingThread.id);
+      expect(threadDb.createThread).not.toHaveBeenCalled();
+      expect(threadDb.unblockSignal).toHaveBeenCalledWith(TEST_ACCOUNT_ID, s.signalLookupId, existingThread.id);
     });
 
     it("returns 400 when signal is already active", async () => {
-      vi.mocked(arcDb.getSignalById).mockResolvedValueOnce(ok(makeSignal({ status: "active" })));
+      vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(makeSignal({ status: "active" })));
       const res = await req(app, "POST", `${A}/signals/SES%23msg-001/quarantineResponse`, { body: { status: "active" } });
       expect(res.status).toBe(400);
     });
 
     it("returns 400 when body is missing status", async () => {
-      vi.mocked(arcDb.getSignalById).mockResolvedValueOnce(ok(makeSignal({ status: "quarantine_visible" })));
+      vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(makeSignal({ status: "quarantine_visible" })));
       const res = await req(app, "POST", `${A}/signals/SES%23msg-001/quarantineResponse`, { body: {} });
       expect(res.status).toBe(400);
     });
@@ -596,7 +596,7 @@ describe("API", () => {
 
   describe("GET /accounts/:accountId/signals/:id", () => {
     it("returns full Signal detail", async () => {
-      vi.mocked(arcDb.getSignalById).mockResolvedValueOnce(ok(makeSignal({ data: { htmlBody: "<p>Hello world</p>" } })));
+      vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(makeSignal({ data: { htmlBody: "<p>Hello world</p>" } })));
       const res = await req(app, "GET", `${A}/signals/SES%23msg-001`);
       expect(res.status).toBe(200);
       const body = await res.json() as { signalId: string; data: { body?: string } };
@@ -613,17 +613,17 @@ describe("API", () => {
   describe("PATCH /accounts/:accountId/signals/:id — draft update", () => {
     it("updates a draft signal and returns 200 + full resource", async () => {
       const draft = makeSignal({ status: "draft" });
-      vi.mocked(arcDb.getSignalById).mockResolvedValueOnce(ok(draft));
-      vi.mocked(arcDb.updateSignal).mockResolvedValueOnce(ok({ ...draft, data: { ...draft.data, subject: "Updated subject" } }));
+      vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(draft));
+      vi.mocked(threadDb.updateSignal).mockResolvedValueOnce(ok({ ...draft, data: { ...draft.data, subject: "Updated subject" } }));
       const res = await req(app, "PATCH", `${A}/signals/SES%23msg-001`, { body: { subject: "Updated subject" } });
       expect(res.status).toBe(200);
       const body = await res.json() as Signal;
       expect(body.data.subject).toBe("Updated subject");
-      expect(arcDb.updateSignal).toHaveBeenCalledWith(TEST_ACCOUNT_ID, draft.signalLookupId, expect.objectContaining({ subject: "Updated subject" }));
+      expect(threadDb.updateSignal).toHaveBeenCalledWith(TEST_ACCOUNT_ID, draft.signalLookupId, expect.objectContaining({ subject: "Updated subject" }));
     });
 
     it("returns 400 when signal is not a draft", async () => {
-      vi.mocked(arcDb.getSignalById).mockResolvedValueOnce(ok(makeSignal({ status: "active" })));
+      vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(makeSignal({ status: "active" })));
       const res = await req(app, "PATCH", `${A}/signals/SES%23msg-001`, { body: { subject: "x" } });
       expect(res.status).toBe(400);
       const body = await res.json() as { errorCode: string };
@@ -636,41 +636,41 @@ describe("API", () => {
     });
   });
 
-  describe("POST /accounts/:accountId/arcs/:arcId/signals/:id/send — send draft", () => {
+  describe("POST /accounts/:accountId/threads/:threadId/signals/:id/send — send draft", () => {
     it("sends a draft signal and returns 200 + updated signal", async () => {
-      vi.mocked(arcDb.getArc).mockResolvedValueOnce(ok(makeArc()));
-      vi.mocked(arcDb.getSignalById).mockResolvedValueOnce(ok(makeSignal({ status: "draft", data: { from: { address: "user@example.com" } } })));
-      const res = await req(app, "POST", `${A}/arcs/arc-001/signals/SES%23msg-001/send`);
+      vi.mocked(threadDb.getThread).mockResolvedValueOnce(ok(makeThread()));
+      vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(makeSignal({ status: "draft", data: { from: { address: "user@example.com" } } })));
+      const res = await req(app, "POST", `${A}/threads/arc-001/signals/SES%23msg-001/send`);
       expect(res.status).toBe(200);
-      expect(arcDb.updateSignalSendStatus).toHaveBeenCalledOnce();
+      expect(threadDb.updateSignalSendStatus).toHaveBeenCalledOnce();
     });
 
     it("returns 400 when signal is not a draft", async () => {
-      vi.mocked(arcDb.getArc).mockResolvedValueOnce(ok(makeArc()));
-      vi.mocked(arcDb.getSignalById).mockResolvedValueOnce(ok(makeSignal({ status: "active" })));
-      const res = await req(app, "POST", `${A}/arcs/arc-001/signals/SES%23msg-001/send`);
+      vi.mocked(threadDb.getThread).mockResolvedValueOnce(ok(makeThread()));
+      vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(makeSignal({ status: "active" })));
+      const res = await req(app, "POST", `${A}/threads/arc-001/signals/SES%23msg-001/send`);
       expect(res.status).toBe(400);
       const body = await res.json() as { errorCode: string };
       expect(body.errorCode).toBe("SIGNAL_NOT_DRAFT");
     });
 
     it("returns 404 for unknown signal", async () => {
-      vi.mocked(arcDb.getArc).mockResolvedValueOnce(ok(makeArc()));
-      const res = await req(app, "POST", `${A}/arcs/arc-001/signals/nonexistent/send`);
+      vi.mocked(threadDb.getThread).mockResolvedValueOnce(ok(makeThread()));
+      const res = await req(app, "POST", `${A}/threads/arc-001/signals/nonexistent/send`);
       expect(res.status).toBe(404);
     });
   });
 
   describe("DELETE /accounts/:accountId/signals/:id — discard draft", () => {
     it("deletes a draft signal and returns 204", async () => {
-      vi.mocked(arcDb.getSignalById).mockResolvedValueOnce(ok(makeSignal({ status: "draft" })));
+      vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(makeSignal({ status: "draft" })));
       const res = await req(app, "DELETE", `${A}/signals/SES%23msg-001`);
       expect(res.status).toBe(204);
-      expect(arcDb.deleteSignal).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "SES#msg-001");
+      expect(threadDb.deleteSignal).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "SES#msg-001");
     });
 
     it("returns 400 when signal is not a draft", async () => {
-      vi.mocked(arcDb.getSignalById).mockResolvedValueOnce(ok(makeSignal({ status: "active" })));
+      vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(makeSignal({ status: "active" })));
       const res = await req(app, "DELETE", `${A}/signals/SES%23msg-001`);
       expect(res.status).toBe(400);
       const body = await res.json() as { errorCode: string };
@@ -1017,15 +1017,15 @@ describe("API", () => {
   // Search
   // -------------------------------------------------------------------------
 
-  describe("GET /accounts/:accountId/arcs?q=", () => {
-    it("returns Arc search results in named envelope", async () => {
-      vi.mocked(arcDb.searchArcs).mockResolvedValueOnce(ok({ items: [makeArc()] }));
-      const res = await req(app, "GET", `${A}/arcs?q=invoice+from+stripe`);
+  describe("GET /accounts/:accountId/threads?q=", () => {
+    it("returns Thread search results in named envelope", async () => {
+      vi.mocked(threadDb.searchThreads).mockResolvedValueOnce(ok({ items: [makeThread()] }));
+      const res = await req(app, "GET", `${A}/threads?q=invoice+from+stripe`);
       expect(res.status).toBe(200);
-      const body = await res.json() as { arcs: unknown[]; pagination: { cursor: null } };
-      expect(body.arcs).toHaveLength(1);
+      const body = await res.json() as { threads: unknown[]; pagination: { cursor: null } };
+      expect(body.threads).toHaveLength(1);
       expect(body.pagination).toEqual({ cursor: null });
-      expect(arcDb.searchArcs).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "invoice from stripe", expect.any(Object));
+      expect(threadDb.searchThreads).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "invoice from stripe", expect.any(Object));
     });
   });
 
@@ -1102,7 +1102,7 @@ describe("API", () => {
     });
 
     it("returns 501 when access service is not configured", async () => {
-      app = createApp(makeAppDeps({ arcDb: arcDb as unknown as ArcDatabase, accountDb: accountDb as unknown as AccountDatabase, auditDb: auditDb as unknown as AuditDatabase, auth, access: undefined as never, logger: createMockLogger(), forwardingService: { sendVerification: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), verifyWebhook: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, jobDispatcher: { dispatchReindex: vi.fn(), dispatchSegment: vi.fn() } as never, draftSendDispatcher: { dispatch: vi.fn().mockResolvedValue(ok(undefined)) } as never, accountCreationStarter: { start: vi.fn() }, appBaseUrl: "http://localhost", contentCdnBaseUrl: "https://cdn.test", astValidator: { validateAstBatch: vi.fn().mockResolvedValue(ok(undefined)) } as never, billingHandler: new BillingHandler(), emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, domainIdentityService: { register: vi.fn().mockResolvedValue(ok(undefined)), deregister: vi.fn().mockResolvedValue(ok(undefined)) }, rsvpComposer: vi.fn().mockResolvedValue(ok(undefined)) as unknown as typeof sendRsvp, postApprovalCalendarDeps: { accountDb: {} as never, emailService: {} as never, serviceDomain: "platform.email.rhosys.cloud" } as unknown as PostApprovalCalendarHandlerDeps, schedulerClient: { scheduleMessage: vi.fn().mockResolvedValue(ok(undefined)), deleteSchedule: vi.fn().mockResolvedValue(ok(undefined)) } as never }));
+      app = createApp(makeAppDeps({ threadDb: threadDb as unknown as ThreadDatabase, accountDb: accountDb as unknown as AccountDatabase, auditDb: auditDb as unknown as AuditDatabase, auth, access: undefined as never, logger: createMockLogger(), forwardingService: { sendVerification: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), verifyWebhook: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, jobDispatcher: { dispatchReindex: vi.fn(), dispatchSegment: vi.fn() } as never, draftSendDispatcher: { dispatch: vi.fn().mockResolvedValue(ok(undefined)) } as never, accountCreationStarter: { start: vi.fn() }, appBaseUrl: "http://localhost", contentCdnBaseUrl: "https://cdn.test", astValidator: { validateAstBatch: vi.fn().mockResolvedValue(ok(undefined)) } as never, billingHandler: new BillingHandler(), emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, domainIdentityService: { register: vi.fn().mockResolvedValue(ok(undefined)), deregister: vi.fn().mockResolvedValue(ok(undefined)) }, rsvpComposer: vi.fn().mockResolvedValue(ok(undefined)) as unknown as typeof sendRsvp, postApprovalCalendarDeps: { accountDb: {} as never, emailService: {} as never, serviceDomain: "platform.email.rhosys.cloud" } as unknown as PostApprovalCalendarHandlerDeps, schedulerClient: { scheduleMessage: vi.fn().mockResolvedValue(ok(undefined)), deleteSchedule: vi.fn().mockResolvedValue(ok(undefined)) } as never }));
       const res = await req(app, "GET", `${A}/users`);
       expect(res.status).toBe(501);
     });
@@ -1143,7 +1143,7 @@ describe("API", () => {
     });
 
     it("returns 501 when access service is not configured", async () => {
-      app = createApp(makeAppDeps({ arcDb: arcDb as unknown as ArcDatabase, accountDb: accountDb as unknown as AccountDatabase, auditDb: auditDb as unknown as AuditDatabase, auth, access: undefined as never, logger: createMockLogger(), forwardingService: { sendVerification: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), verifyWebhook: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, jobDispatcher: { dispatchReindex: vi.fn(), dispatchSegment: vi.fn() } as never, draftSendDispatcher: { dispatch: vi.fn().mockResolvedValue(ok(undefined)) } as never, accountCreationStarter: { start: vi.fn() }, appBaseUrl: "http://localhost", contentCdnBaseUrl: "https://cdn.test", astValidator: { validateAstBatch: vi.fn().mockResolvedValue(ok(undefined)) } as never, billingHandler: new BillingHandler(), emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, domainIdentityService: { register: vi.fn().mockResolvedValue(ok(undefined)), deregister: vi.fn().mockResolvedValue(ok(undefined)) }, rsvpComposer: vi.fn().mockResolvedValue(ok(undefined)) as unknown as typeof sendRsvp, postApprovalCalendarDeps: { accountDb: {} as never, emailService: {} as never, serviceDomain: "platform.email.rhosys.cloud" } as unknown as PostApprovalCalendarHandlerDeps, schedulerClient: { scheduleMessage: vi.fn().mockResolvedValue(ok(undefined)), deleteSchedule: vi.fn().mockResolvedValue(ok(undefined)) } as never }));
+      app = createApp(makeAppDeps({ threadDb: threadDb as unknown as ThreadDatabase, accountDb: accountDb as unknown as AccountDatabase, auditDb: auditDb as unknown as AuditDatabase, auth, access: undefined as never, logger: createMockLogger(), forwardingService: { sendVerification: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), verifyWebhook: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, jobDispatcher: { dispatchReindex: vi.fn(), dispatchSegment: vi.fn() } as never, draftSendDispatcher: { dispatch: vi.fn().mockResolvedValue(ok(undefined)) } as never, accountCreationStarter: { start: vi.fn() }, appBaseUrl: "http://localhost", contentCdnBaseUrl: "https://cdn.test", astValidator: { validateAstBatch: vi.fn().mockResolvedValue(ok(undefined)) } as never, billingHandler: new BillingHandler(), emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, domainIdentityService: { register: vi.fn().mockResolvedValue(ok(undefined)), deregister: vi.fn().mockResolvedValue(ok(undefined)) }, rsvpComposer: vi.fn().mockResolvedValue(ok(undefined)) as unknown as typeof sendRsvp, postApprovalCalendarDeps: { accountDb: {} as never, emailService: {} as never, serviceDomain: "platform.email.rhosys.cloud" } as unknown as PostApprovalCalendarHandlerDeps, schedulerClient: { scheduleMessage: vi.fn().mockResolvedValue(ok(undefined)), deleteSchedule: vi.fn().mockResolvedValue(ok(undefined)) } as never }));
       const res = await req(app, "POST", `${A}/users`, { body: { email: "user@example.com", role: "member" } });
       expect(res.status).toBe(501);
     });

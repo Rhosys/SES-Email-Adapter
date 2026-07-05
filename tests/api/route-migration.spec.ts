@@ -40,20 +40,20 @@ function makeAccess(): AccessService {
   };
 }
 
-function makeArcDb() {
+function makeThreadDb() {
   return {
-    listArcs: vi.fn().mockResolvedValue(ok({ items: [] })),
-    getArc: vi.fn().mockResolvedValue(ok(null)),
-    updateArc: vi.fn().mockResolvedValue(ok({})),
+    listThreads: vi.fn().mockResolvedValue(ok({ items: [] })),
+    getThread: vi.fn().mockResolvedValue(ok(null)),
+    updateThread: vi.fn().mockResolvedValue(ok({})),
     listSignals: vi.fn().mockResolvedValue(ok({ items: [] })),
-    listPreArcSignals: vi.fn().mockResolvedValue(ok({ items: [] })),
-    fastFindArcByAlternativeLookupKey: vi.fn().mockResolvedValue(ok(null)),
+    listPreThreadSignals: vi.fn().mockResolvedValue(ok({ items: [] })),
+    findThreadByGroupingKey: vi.fn().mockResolvedValue(ok(null)),
     getSignalById: vi.fn().mockResolvedValue(ok(null)),
     updateSignal: vi.fn().mockResolvedValue(ok({})),
     deleteSignal: vi.fn().mockResolvedValue(ok(undefined)),
     unblockSignal: vi.fn().mockResolvedValue(ok(undefined)),
-    createArc: vi.fn().mockResolvedValue(ok(undefined)),
-    searchArcs: vi.fn().mockResolvedValue(ok({ items: [] })),
+    createThread: vi.fn().mockResolvedValue(ok(undefined)),
+    searchThreads: vi.fn().mockResolvedValue(ok({ items: [] })),
   };
 }
 
@@ -130,7 +130,7 @@ async function req(
 // ---------------------------------------------------------------------------
 
 describe("Route migration — backward compatibility", () => {
-  let threadDb: ReturnType<typeof makeArcDb>;
+  let threadDb: ReturnType<typeof makeThreadDb>;
   let accountDb: ReturnType<typeof makeAccountDb>;
   let auditDb: ReturnType<typeof makeAuditDb>;
   let auth: AuthService;
@@ -140,7 +140,7 @@ describe("Route migration — backward compatibility", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    threadDb = makeArcDb();
+    threadDb = makeThreadDb();
     accountDb = makeAccountDb();
     auditDb = makeAuditDb();
     auth = makeAuth();
@@ -255,8 +255,8 @@ describe("Route migration — backward compatibility", () => {
     it("route handler is NOT called when authorization fails", async () => {
       vi.mocked(access.checkAccess).mockRejectedValueOnce(forbidden);
       await req(app, "GET", `${A}/threads`);
-      // threadDb.listArcs should not be called because the middleware short-circuits
-      expect(threadDb.listArcs).not.toHaveBeenCalled();
+      // threadDb.listThreads should not be called because the middleware short-circuits
+      expect(threadDb.listThreads).not.toHaveBeenCalled();
     });
   });
 });
