@@ -145,7 +145,7 @@ describe("SYSTEM_RULES — SR-06", () => {
   it("SR-06 exists with condition matching system:auth:security_alert and action quarantine_hidden", () => {
     const sr06 = SYSTEM_RULES.find(r => r.id === "SR-06");
     expect(sr06).toBeDefined();
-    expect(JSON.parse(sr06!.condition)).toEqual({ "in": ["system:auth:security_alert", { "var": "arc.labels" }] });
+    expect(JSON.parse(sr06!.condition)).toEqual({ "in": ["system:auth:security_alert", { "var": "thread.labels" }] });
     expect(sr06!.actions).toEqual([{ type: "quarantine_hidden" }]);
     expect(sr06!.status).toBe("enabled");
   });

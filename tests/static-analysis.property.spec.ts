@@ -137,9 +137,9 @@ describe("No direct console calls in source files", () => {
 // ---------------------------------------------------------------------------
 
 describe("Vector column writes use explicit toVector() cast", () => {
-  it("arc-matcher.ts never assigns raw values to embedding column in DB operations", () => {
-    const arcMatcherPath = path.resolve(SRC_DIR, "database/arc-matcher.ts");
-    const content = fs.readFileSync(arcMatcherPath, "utf-8");
+  it("thread-matcher.ts never assigns raw values to embedding column in DB operations", () => {
+    const threadMatcherPath = path.resolve(SRC_DIR, "database/thread-matcher.ts");
+    const content = fs.readFileSync(threadMatcherPath, "utf-8");
     const lines = content.split("\n");
 
     // Find all .values({ and .set({ blocks — these are Drizzle DB write sites
@@ -165,7 +165,7 @@ describe("Vector column writes use explicit toVector() cast", () => {
         // Check embedding assignments inside DB write blocks
         if (/\bembedding\s*:/.test(line) && !/toVector\(/.test(line) && !/sql`/.test(line) && !/EXCLUDED/.test(line)) {
           violations.push({
-            file: "database/arc-matcher.ts",
+            file: "database/thread-matcher.ts",
             line: i + 1,
             content: line.trim(),
           });

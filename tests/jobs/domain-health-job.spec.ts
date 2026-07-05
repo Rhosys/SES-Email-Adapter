@@ -5,7 +5,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach, beforeAll } from "vitest";
 import { ok, err, dbError } from "../../src/errors.js";
-import type { Arc, Domain, Account } from "../../src/types/index.js";
+import type { Thread, Domain, Account } from "../../src/types/index.js";
 import { createMockLogger } from "../helpers/mock-logger.js";
 import type { MockLogger } from "../helpers/mock-logger.js";
 
@@ -29,11 +29,11 @@ vi.mock("../../src/database/account-database.js", () => ({
   })),
 }));
 
-const mockListActiveArcsBefore = vi.fn();
+const mockListActiveThreadsBefore = vi.fn();
 
-vi.mock("../../src/database/arc-database.js", () => ({
-  ArcDatabase: vi.fn().mockImplementation(() => ({
-    listActiveArcsBefore: mockListActiveArcsBefore,
+vi.mock("../../src/database/thread-database.js", () => ({
+  ThreadDatabase: vi.fn().mockImplementation(() => ({
+    listActiveThreadsBefore: mockListActiveThreadsBefore,
   })),
 }));
 
@@ -63,7 +63,7 @@ beforeAll(async () => {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeArc(overrides: Partial<Arc> = {}): Arc {
+function makeThread(overrides: Partial<Thread> = {}): Thread {
   return {
     id: "arc-1",
     accountId: "acct-1",
@@ -117,8 +117,8 @@ describe("domain-health-job staleness integration", () => {
 
     mockLogger = createMockLogger();
     const { AccountDatabase } = await import("../../src/database/account-database.js");
-    const { ArcDatabase } = await import("../../src/database/arc-database.js");
-    job = new DomainHealthJob(new AccountDatabase(mockLogger) as any, new ArcDatabase(mockLogger) as any, mockLogger);
+    const { ThreadDatabase } = await import("../../src/database/thread-database.js");
+    job = new DomainHealthJob(new AccountDatabase(mockLogger) as any, new ThreadDatabase(mockLogger) as any, mockLogger);
   });
 
   afterEach(() => {
@@ -126,7 +126,7 @@ describe("domain-health-job staleness integration", () => {
     mockScanAllDomains.mockReset();
     mockGetAccount.mockReset();
     mockUpdateDomainHealth.mockReset();
-    mockListActiveArcsBefore.mockReset();
+    mockListActiveThreadsBefore.mockReset();
     mockCheckDomain.mockReset();
     mockGetStats.mockReset();
     mockWriteSnapshot.mockReset();
@@ -142,24 +142,24 @@ describe("domain-health-job staleness integration", () => {
     mockScanAllDomains.mockReturnValue(Promise.resolve(ok([{ accountId: "acct-1", domains: [domain] }])));
 
     // Arc is stale: lastSignalAt is well before the 7-day cutoff
-    const staleArc = makeArc({
+    const staleArc = makeThread({
       id: "arc-stale",
       accountId: "acct-1",
       status: "active",
       urgency: "normal",
       lastSignalAt: "2025-04-01T00:00:00.000Z",
     });
-    mockListActiveArcsBefore.mockReturnValue(Promise.resolve(ok([staleArc])));
+    mockListActiveThreadsBefore.mockReturnValue(Promise.resolve(ok([staleArc])));
 
     await job.run();
 
-    const trackCalls = mockLogger.calls.filter(c => c.method === "track" && c.message === "staleness_checker.outstanding_arcs");
+    const trackCalls = mockLogger.calls.filter(c => c.method === "track" && c.message === "staleness_checker.outstanding_threads");
 
     expect(trackCalls).toHaveLength(1);
     expect(trackCalls[0]!.context).toMatchObject({
       accountId: "acct-1",
-      outstandingArcCount: 1,
-      oldestArcLastSignalAt: "2025-04-01T00:00:00.000Z",
+      outstandingThreadCount: 1,
+      oldestThreadLastSignalAt: "2025-04-01T00:00:00.000Z",
     });
   });
 
@@ -173,11 +173,11 @@ describe("domain-health-job staleness integration", () => {
     mockGetAccount.mockReturnValue(Promise.resolve(ok({ id: "acct-2", name: "Test", createdAt: "2025-01-01T00:00:00.000Z", updatedAt: "2025-01-01T00:00:00.000Z" } as Account)));
 
     // No stale arcs returned
-    mockListActiveArcsBefore.mockReturnValue(Promise.resolve(ok([])));
+    mockListActiveThreadsBefore.mockReturnValue(Promise.resolve(ok([])));
 
     await job.run();
 
-    const trackCalls = mockLogger.calls.filter(c => c.method === "track" && c.message === "staleness_checker.outstanding_arcs");
+    const trackCalls = mockLogger.calls.filter(c => c.method === "track" && c.message === "staleness_checker.outstanding_threads");
 
     expect(trackCalls).toHaveLength(0);
   });
@@ -188,18 +188,18 @@ describe("domain-health-job staleness integration", () => {
     mockGetAccount.mockReturnValue(Promise.resolve(ok({ id: "acct-3", name: "Test", createdAt: "2025-01-01T00:00:00.000Z", updatedAt: "2025-01-01T00:00:00.000Z" } as Account)));
 
     // Arc has urgency "silent" — should be filtered out by isOutstandingArc
-    const silentArc = makeArc({
+    const silentArc = makeThread({
       id: "arc-silent",
       accountId: "acct-3",
       status: "active",
       urgency: "silent",
       lastSignalAt: "2025-04-01T00:00:00.000Z",
     });
-    mockListActiveArcsBefore.mockReturnValue(Promise.resolve(ok([silentArc])));
+    mockListActiveThreadsBefore.mockReturnValue(Promise.resolve(ok([silentArc])));
 
     await job.run();
 
-    const trackCalls = mockLogger.calls.filter(c => c.method === "track" && c.message === "staleness_checker.outstanding_arcs");
+    const trackCalls = mockLogger.calls.filter(c => c.method === "track" && c.message === "staleness_checker.outstanding_threads");
 
     expect(trackCalls).toHaveLength(0);
   });
@@ -218,9 +218,9 @@ describe("domain-health-job staleness integration", () => {
     mockGetAccount.mockImplementation((id: string) => Promise.resolve(ok({ id, name: "Test", createdAt: "2025-01-01T00:00:00.000Z", updatedAt: "2025-01-01T00:00:00.000Z" } as Account)));
 
     // First account returns error on staleness query
-    mockListActiveArcsBefore.mockImplementation((accountId: string) => {
+    mockListActiveThreadsBefore.mockImplementation((accountId: string) => {
       if (accountId === "acct-fail") return Promise.resolve(err(new Error("DynamoDB timeout")));
-      return Promise.resolve(ok([makeArc({ id: "arc-ok", accountId: "acct-ok", status: "active", urgency: "high", lastSignalAt: "2025-04-01T00:00:00.000Z" })]));
+      return Promise.resolve(ok([makeThread({ id: "arc-ok", accountId: "acct-ok", status: "active", urgency: "high", lastSignalAt: "2025-04-01T00:00:00.000Z" })]));
     });
 
     await job.run();
@@ -233,11 +233,11 @@ describe("domain-health-job staleness integration", () => {
     });
 
     // TRACK log still emitted for the successful account
-    const trackCalls = mockLogger.calls.filter(c => c.method === "track" && c.message === "staleness_checker.outstanding_arcs");
+    const trackCalls = mockLogger.calls.filter(c => c.method === "track" && c.message === "staleness_checker.outstanding_threads");
     expect(trackCalls).toHaveLength(1);
     expect(trackCalls[0]!.context).toMatchObject({
       accountId: "acct-ok",
-      outstandingArcCount: 1,
+      outstandingThreadCount: 1,
     });
   });
 
@@ -254,11 +254,11 @@ describe("domain-health-job staleness integration", () => {
     ])));
     mockGetAccount.mockImplementation((id: string) => Promise.resolve(ok({ id, name: "Test", createdAt: "2025-01-01T00:00:00.000Z", updatedAt: "2025-01-01T00:00:00.000Z" } as Account)));
 
-    mockListActiveArcsBefore.mockImplementation((accountId: string) => {
+    mockListActiveThreadsBefore.mockImplementation((accountId: string) => {
       if (accountId === "acct-a") {
         return Promise.resolve(ok([
-          makeArc({ id: "arc-a1", accountId: "acct-a", status: "active", urgency: "normal", lastSignalAt: "2025-04-01T00:00:00.000Z" }),
-          makeArc({ id: "arc-a2", accountId: "acct-a", status: "active", urgency: "high", lastSignalAt: "2025-04-02T00:00:00.000Z" }),
+          makeThread({ id: "arc-a1", accountId: "acct-a", status: "active", urgency: "normal", lastSignalAt: "2025-04-01T00:00:00.000Z" }),
+          makeThread({ id: "arc-a2", accountId: "acct-a", status: "active", urgency: "high", lastSignalAt: "2025-04-02T00:00:00.000Z" }),
         ]));
       }
       return Promise.resolve(ok([]));
@@ -270,8 +270,8 @@ describe("domain-health-job staleness integration", () => {
 
     expect(infoCalls).toHaveLength(1);
     expect(infoCalls[0]!.context).toMatchObject({
-      accountsWithOutstandingArcs: 1,
-      totalOutstandingArcs: 2,
+      accountsWithOutstandingThreads: 1,
+      totalOutstandingThreads: 2,
     });
     // durationMs should be present and non-negative
     expect((infoCalls[0]!.context as any).durationMs).toBeGreaterThanOrEqual(0);
@@ -281,7 +281,7 @@ describe("domain-health-job staleness integration", () => {
     const domain = makeDomain({ accountId: "acct-clean" });
     mockScanAllDomains.mockReturnValue(Promise.resolve(ok([{ accountId: "acct-clean", domains: [domain] }])));
     mockGetAccount.mockReturnValue(Promise.resolve(ok({ id: "acct-clean", name: "Test", createdAt: "2025-01-01T00:00:00.000Z", updatedAt: "2025-01-01T00:00:00.000Z" } as Account)));
-    mockListActiveArcsBefore.mockReturnValue(Promise.resolve(ok([])));
+    mockListActiveThreadsBefore.mockReturnValue(Promise.resolve(ok([])));
 
     await job.run();
 
@@ -289,8 +289,8 @@ describe("domain-health-job staleness integration", () => {
 
     expect(infoCalls).toHaveLength(1);
     expect(infoCalls[0]!.context).toMatchObject({
-      accountsWithOutstandingArcs: 0,
-      totalOutstandingArcs: 0,
+      accountsWithOutstandingThreads: 0,
+      totalOutstandingThreads: 0,
     });
   });
 
@@ -298,7 +298,7 @@ describe("domain-health-job staleness integration", () => {
     const domain = makeDomain({ accountId: "acct-err" });
     mockScanAllDomains.mockReturnValue(Promise.resolve(ok([{ accountId: "acct-err", domains: [domain] }])));
     mockGetAccount.mockReturnValue(Promise.resolve(ok({ id: "acct-err", name: "Test", createdAt: "2025-01-01T00:00:00.000Z", updatedAt: "2025-01-01T00:00:00.000Z" } as Account)));
-    mockListActiveArcsBefore.mockReturnValue(Promise.resolve(err(new Error("Total failure"))));
+    mockListActiveThreadsBefore.mockReturnValue(Promise.resolve(err(new Error("Total failure"))));
 
     await job.run();
 
@@ -306,8 +306,8 @@ describe("domain-health-job staleness integration", () => {
 
     expect(infoCalls).toHaveLength(1);
     expect(infoCalls[0]!.context).toMatchObject({
-      accountsWithOutstandingArcs: 0,
-      totalOutstandingArcs: 0,
+      accountsWithOutstandingThreads: 0,
+      totalOutstandingThreads: 0,
     });
   });
 });

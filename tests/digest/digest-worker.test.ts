@@ -4,7 +4,7 @@ import { ok } from "neverthrow"
 import { DigestWorker } from "../../src/digest/digest-worker.js"
 import type { IDigestWorkerDeps, IDigestSendMessage } from "../../src/digest/digest-worker.js"
 import { createMockLogger, type MockLogger } from "../helpers/mock-logger.js"
-import type { Account, Arc, ForwardingTarget } from "../../src/types/index.js"
+import type { Account, Thread, ForwardingTarget } from "../../src/types/index.js"
 
 vi.mock("../../src/email/unsubscribe-token.js", () => ({
   generateUnsubscribeToken: vi.fn().mockResolvedValue("mock-jwt-token"),
@@ -28,7 +28,7 @@ function buildAccount(overrides?: Partial<Account>): Account {
   }
 }
 
-function buildArc(id: string): Arc {
+function buildArc(id: string): Thread {
   return {
     id,
     accountId: "acct_test1",
@@ -72,8 +72,8 @@ function buildDeps(): TestDeps {
       getAccount: vi.fn().mockResolvedValue(ok(buildAccount())),
       getForwardingTarget: vi.fn().mockResolvedValue(ok(buildTarget())),
     },
-    arcDb: {
-      listActiveArcs: vi.fn().mockResolvedValue(ok([buildArc("arc_1"), buildArc("arc_2")])),
+    threadDb: {
+      listActiveThreads: vi.fn().mockResolvedValue(ok([buildArc("arc_1"), buildArc("arc_2")])),
     },
     signalDb: {
       countQuarantined: vi.fn().mockResolvedValue(ok(3)),
@@ -94,14 +94,14 @@ describe("DigestWorker — REQ-1.1, REQ-1.4, REQ-0.7", () => {
   describe("suppression: zero active arcs", () => {
     it("does not send email when account has zero arcs", async () => {
       const deps = buildDeps()
-      vi.mocked(deps.arcDb.listActiveArcs).mockResolvedValue(ok([]))
+      vi.mocked(deps.threadDb.listActiveThreads).mockResolvedValue(ok([]))
       const worker = new DigestWorker(deps)
 
       const result = await worker.process(message, sunday)
 
       expect(result.isOk()).toBe(true)
       expect(deps.mockSend).not.toHaveBeenCalled()
-      expect(deps.logger.calls.some(c => c.context?.code === "digest.worker.no_arcs")).toBe(true)
+      expect(deps.logger.calls.some(c => c.context?.code === "digest.worker.no_threads")).toBe(true)
     })
   })
 
@@ -235,7 +235,7 @@ describe("DigestWorker — REQ-1.1, REQ-1.4, REQ-0.7", () => {
       await worker.process(message, sunday)
 
       expect(deps.logger.calls.some(c =>
-        c.context?.code === "digest.worker.sent" && c.context?.arcCount === 2 && c.context?.quarantineCount === 3,
+        c.context?.code === "digest.worker.sent" && c.context?.threadCount === 2 && c.context?.quarantineCount === 3,
       )).toBe(true)
     })
   })

@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { Arc, Signal } from "../../src/types/index.js";
+import type { Thread, Signal } from "../../src/types/index.js";
 import { createApp } from "../../src/api/app.js";
 import { makeAppDeps } from "../helpers/app-deps.js";
 import type { AuthService, AccessService, IForwardingService } from "../../src/api/app.js";
-import type { ArcDatabase } from "../../src/database/arc-database.js";
+import type { ThreadDatabase } from "../../src/database/thread-database.js";
 import type { AccountDatabase } from "../../src/database/account-database.js";
 import type { AuditDatabase } from "../../src/database/audit-database.js";
 import { ok } from "neverthrow";
@@ -26,7 +26,7 @@ vi.mock("../../src/dns/mx-validator.js", () => ({
 const TEST_ACCOUNT_ID = "acct-test-001";
 const A = `/accounts/${TEST_ACCOUNT_ID}`;
 
-function makeArc(overrides: Partial<Arc> = {}): Arc {
+function makeThread(overrides: Partial<Thread> = {}): Thread {
   return {
     id: "arc-001",
     accountId: TEST_ACCOUNT_ID,
@@ -49,7 +49,7 @@ function makeSignal(overrides: { data?: Partial<Signal["data"]> } & Partial<Omit
   return {
     id: "SES#msg-001",
     signalLookupId: "SES#msg-001",
-    arcId: "arc-001",
+    threadId: "arc-001",
     accountId: TEST_ACCOUNT_ID,
     source: "email" as const,
     type: "email",
@@ -75,23 +75,23 @@ function makeSignal(overrides: { data?: Partial<Signal["data"]> } & Partial<Omit
   } as Signal;
 }
 
-function makeArcDb() {
+function makeThreadDb() {
   return {
-    listArcs: vi.fn().mockResolvedValue(ok({ items: [] })),
-    getArc: vi.fn().mockResolvedValue(ok(null)),
-    updateArc: vi.fn().mockResolvedValue(ok(makeArc())),
+    listThreads: vi.fn().mockResolvedValue(ok({ items: [] })),
+    getThread: vi.fn().mockResolvedValue(ok(null)),
+    updateThread: vi.fn().mockResolvedValue(ok(makeThread())),
     listSignals: vi.fn().mockResolvedValue(ok({ items: [] })),
-    listPreArcSignals: vi.fn().mockResolvedValue(ok({ items: [] })),
+    listPreThreadSignals: vi.fn().mockResolvedValue(ok({ items: [] })),
     updateSignalStatus: vi.fn().mockImplementation((_, id, status) => Promise.resolve(ok({ id, status }))),
-    fastFindArcByAlternativeLookupKey: vi.fn().mockResolvedValue(ok(null)),
+    findThreadByGroupingKey: vi.fn().mockResolvedValue(ok(null)),
     getSignalById: vi.fn().mockResolvedValue(ok(null)),
     createSignal: vi.fn().mockImplementation((signal) => Promise.resolve(ok(signal))),
     updateSignal: vi.fn().mockResolvedValue(ok(makeSignal())),
     updateSignalSendStatus: vi.fn().mockResolvedValue(ok(makeSignal())),
     deleteSignal: vi.fn().mockResolvedValue(ok(undefined)),
     unblockSignal: vi.fn().mockResolvedValue(ok(undefined)),
-    createArc: vi.fn().mockResolvedValue(ok(undefined)),
-    searchArcs: vi.fn().mockResolvedValue(ok({ items: [] })),
+    createThread: vi.fn().mockResolvedValue(ok(undefined)),
+    searchThreads: vi.fn().mockResolvedValue(ok({ items: [] })),
   };
 }
 
@@ -99,8 +99,8 @@ function makeAccountDb() {
   return {
     listViews: vi.fn().mockResolvedValue(ok([])),
     getView: vi.fn().mockResolvedValue(ok(null)),
-    createView: vi.fn().mockResolvedValue(ok(makeArc())),
-    updateView: vi.fn().mockResolvedValue(ok(makeArc())),
+    createView: vi.fn().mockResolvedValue(ok(makeThread())),
+    updateView: vi.fn().mockResolvedValue(ok(makeThread())),
     deleteView: vi.fn().mockResolvedValue(ok(undefined)),
     listLabels: vi.fn().mockResolvedValue(ok([])),
     createLabel: vi.fn().mockResolvedValue(ok({ id: "l", accountId: TEST_ACCOUNT_ID, name: "x", color: "#000", createdAt: "" })),
@@ -190,18 +190,18 @@ async function req(
 }
 
 // ---------------------------------------------------------------------------
-// Tests — unblock-signal handler uses updateArcDirect for existing arcs
+// Tests — unblock-signal handler uses updateThread for existing threads
 // ---------------------------------------------------------------------------
 
-describe("POST /signals/:id/quarantineResponse — updateArcDirect usage", () => {
-  let arcDb: ReturnType<typeof makeArcDb>;
+describe("POST /signals/:id/quarantineResponse — updateThread usage", () => {
+  let threadDb: ReturnType<typeof makeThreadDb>;
   let accountDb: ReturnType<typeof makeAccountDb>;
   let auditDb: ReturnType<typeof makeAuditDb>;
   let app: ReturnType<typeof createApp>;
 
   beforeEach(() => {
     vi.clearAllMocks();
-    arcDb = makeArcDb();
+    threadDb = makeThreadDb();
     accountDb = makeAccountDb();
     auditDb = makeAuditDb();
     const forwardingService: IForwardingService = { sendVerification: vi.fn().mockResolvedValue(ok(undefined)), verifyWebhook: vi.fn().mockResolvedValue(ok(undefined)), forward: vi.fn().mockResolvedValue(ok(undefined)) };
@@ -211,11 +211,11 @@ describe("POST /signals/:id/quarantineResponse — updateArcDirect usage", () =>
       validateAst: vi.fn().mockResolvedValue({ success: true, purpose: "validate_ast", result: { valid: true } }),
       validateAstBatch: vi.fn().mockResolvedValue({ success: true, purpose: "validate_ast_batch", results: [] }),
     } as unknown as UserCodeExecutorClient;
-    app = createApp(makeAppDeps({ arcDb: arcDb as unknown as ArcDatabase, accountDb: accountDb as unknown as AccountDatabase, auditDb: auditDb as unknown as AuditDatabase, auth: makeAuth(), access: makeAccess(), logger: createMockLogger(), forwardingService, jobDispatcher: { dispatchReindex: vi.fn(), dispatchSegment: vi.fn() } as never, draftSendDispatcher, accountCreationStarter: { start: vi.fn() }, appBaseUrl: "http://localhost", contentCdnBaseUrl: "https://cdn.test", astValidator, billingHandler: new BillingHandler(), emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, domainIdentityService: { register: vi.fn().mockResolvedValue(ok(undefined)), deregister: vi.fn().mockResolvedValue(ok(undefined)) }, rsvpComposer: vi.fn().mockResolvedValue(ok(undefined)) as unknown as typeof sendRsvp, postApprovalCalendarDeps: { accountDb: {} as never, emailService: {} as never, serviceDomain: "platform.email.rhosys.cloud" } as unknown as PostApprovalCalendarHandlerDeps, schedulerClient: { scheduleMessage: vi.fn().mockResolvedValue(ok(undefined)), deleteSchedule: vi.fn().mockResolvedValue(ok(undefined)) } as never }));
+    app = createApp(makeAppDeps({ threadDb: threadDb as unknown as ThreadDatabase, accountDb: accountDb as unknown as AccountDatabase, auditDb: auditDb as unknown as AuditDatabase, auth: makeAuth(), access: makeAccess(), logger: createMockLogger(), forwardingService, jobDispatcher: { dispatchReindex: vi.fn(), dispatchSegment: vi.fn() } as never, draftSendDispatcher, accountCreationStarter: { start: vi.fn() }, appBaseUrl: "http://localhost", contentCdnBaseUrl: "https://cdn.test", astValidator, billingHandler: new BillingHandler(), emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, domainIdentityService: { register: vi.fn().mockResolvedValue(ok(undefined)), deregister: vi.fn().mockResolvedValue(ok(undefined)) }, rsvpComposer: vi.fn().mockResolvedValue(ok(undefined)) as unknown as typeof sendRsvp, postApprovalCalendarDeps: { accountDb: {} as never, emailService: {} as never, serviceDomain: "platform.email.rhosys.cloud" } as unknown as PostApprovalCalendarHandlerDeps, schedulerClient: { scheduleMessage: vi.fn().mockResolvedValue(ok(undefined)), deleteSchedule: vi.fn().mockResolvedValue(ok(undefined)) } as never }));
   });
 
-  it("matched arc → calls updateArc with (accountId, arcId, 'active', signal.receivedAt, {})", async () => {
-    const existingArc = makeArc({ id: "arc-existing", lastSignalAt: "2024-01-10T00:00:00Z" });
+  it("matched thread → calls updateThread with (accountId, threadId, 'active', signal.receivedAt, {})", async () => {
+    const existingThread = makeThread({ id: "arc-existing", lastSignalAt: "2024-01-10T00:00:00Z" });
     // Use "auth" workflow so deriveGroupingKey returns a non-null key
     const signal = makeSignal({
       data: {
@@ -225,20 +225,20 @@ describe("POST /signals/:id/quarantineResponse — updateArcDirect usage", () =>
       },
     });
 
-    vi.mocked(arcDb.getSignalById).mockResolvedValueOnce(ok(signal));
-    vi.mocked(arcDb.fastFindArcByAlternativeLookupKey).mockResolvedValueOnce(ok(existingArc));
-    vi.mocked(arcDb.updateArc).mockResolvedValueOnce(ok({ ...existingArc, lastSignalAt: signal.data.receivedAt }));
+    vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(signal));
+    vi.mocked(threadDb.findThreadByGroupingKey).mockResolvedValueOnce(ok(existingThread));
+    vi.mocked(threadDb.updateThread).mockResolvedValueOnce(ok({ ...existingThread, lastSignalAt: signal.data.receivedAt }));
 
     const res = await req(app, "POST", `${A}/signals/SES%23msg-001/quarantineResponse`, { body: { status: "active" } });
     expect(res.status).toBe(200);
 
-    expect(arcDb.updateArc).toHaveBeenCalledOnce();
-    expect(arcDb.updateArc).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "arc-existing", "active", "2024-01-20T12:00:00Z", {});
-    expect(arcDb.createArc).not.toHaveBeenCalled();
+    expect(threadDb.updateThread).toHaveBeenCalledOnce();
+    expect(threadDb.updateThread).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "arc-existing", "active", "2024-01-20T12:00:00Z", {});
+    expect(threadDb.createThread).not.toHaveBeenCalled();
   });
 
-  it("no matched arc → calls createArc (PutItem), not updateArc", async () => {
-    // Use "auth" workflow so deriveGroupingKey returns a non-null key and fastFindArcByAlternativeLookupKey is called
+  it("no matched thread → calls createThread (PutItem), not updateThread", async () => {
+    // Use "auth" workflow so deriveGroupingKey returns a non-null key and findThreadByGroupingKey is called
     const signal = makeSignal({
       data: {
         receivedAt: "2024-01-20T12:00:00Z",
@@ -247,13 +247,13 @@ describe("POST /signals/:id/quarantineResponse — updateArcDirect usage", () =>
       },
     });
 
-    vi.mocked(arcDb.getSignalById).mockResolvedValueOnce(ok(signal));
-    vi.mocked(arcDb.fastFindArcByAlternativeLookupKey).mockResolvedValueOnce(ok(null));
+    vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(signal));
+    vi.mocked(threadDb.findThreadByGroupingKey).mockResolvedValueOnce(ok(null));
 
     const res = await req(app, "POST", `${A}/signals/SES%23msg-001/quarantineResponse`, { body: { status: "active" } });
     expect(res.status).toBe(200);
 
-    expect(arcDb.createArc).toHaveBeenCalledOnce();
-    expect(arcDb.updateArc).not.toHaveBeenCalled();
+    expect(threadDb.createThread).toHaveBeenCalledOnce();
+    expect(threadDb.updateThread).not.toHaveBeenCalled();
   });
 });

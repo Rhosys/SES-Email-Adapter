@@ -4,16 +4,16 @@ import { ok } from "../../src/errors.js";
 import { SignalProcessor, SYSTEM_RULES } from "../../src/processor/processor.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
 import { makeSharedNewDeps, makeRuleEvaluator3 } from "./_shared-new-deps.js";
-import { makeArcDbMock, makeAccountDbMock, makeProcessingDbMock } from "./_helpers.js";
-import type { ArcDatabase } from "../../src/database/arc-database.js";
+import { makeThreadDbMock, makeAccountDbMock, makeProcessingDbMock } from "./_helpers.js";
+import type { ThreadDatabase } from "../../src/database/thread-database.js";
 import type { AccountDatabase } from "../../src/database/account-database.js";
 import type { ContentSanitizerClient } from "../../src/processor/content-sanitizer-client.js";
 import type { SignalClassifier, ClassificationOutput } from "../../src/classifier/classifier.js";
 import type { EmbeddingGenerator, EmbeddingResult } from "../../src/embedding/embedding-generator.js";
-import type { MultiClusterAuroraWriter } from "../../src/database/arc-matcher.js";
-import type { ArcMatcher } from "../../src/processor/processor.js";
+import type { MultiClusterAuroraWriter } from "../../src/database/thread-matcher.js";
+import type { ThreadMatcherPort } from "../../src/processor/processor.js";
 import type { S3RetentionService } from "../../src/embedding/s3-retention-service.js";
-import type { Arc, Alias, EmailTemplate, Rule } from "../../src/types/index.js";
+import type { Thread, Alias, EmailTemplate, Rule } from "../../src/types/index.js";
 import type { InboundSignalMessage, ReplySender } from "../../src/processor/processor.js";
 import type { EmailService } from "../../src/email/email-service.js";
 import { createMockLogger } from "../helpers/mock-logger.js";
@@ -32,7 +32,7 @@ vi.mock("../../src/embedding/cluster-registry.js", () => {
     CLUSTER_REGISTRY: Object.freeze([entry]),
     getActiveClusters: () => [entry],
     getRegistryById: (id: string) => (id === entry.registryId ? entry : null),
-    getPrimaryArcMatcherRegistry: () => entry,
+    getPrimaryThreadMatcherRegistry: () => entry,
   };
 });
 
@@ -41,7 +41,7 @@ vi.mock("../../src/processor/presign.js", () => ({
   generatePresignedPost: vi.fn().mockResolvedValue({ url: "https://presigned-post.example.com", fields: {} }),
 }));
 
-describe("Single saveArc call with complete mutations", () => {
+describe("Single saveThread call with complete mutations", () => {
   const TEST_ACCOUNT_ID = "acct-savearc";
 
   function makeMessage(sesMessageId: string, recipientEmail: string): InboundSignalMessage {
@@ -72,7 +72,7 @@ describe("Single saveArc call with complete mutations", () => {
     { label: "all features combined", workflow: "test", additionalLabels: ["important"], hasRetention: true, doPong: true },
   ];
 
-  it.each(cases)("$label — saveArc called exactly once with accumulated mutations", async (testCase) => {
+  it.each(cases)("$label — saveThread called exactly once with accumulated mutations", async (testCase) => {
     const recipientEmail = "user@testdomain.com";
     const senderEmail = "sender@external.com";
     const recipientDomain = "testdomain.com";
@@ -99,17 +99,17 @@ describe("Single saveArc call with complete mutations", () => {
       updatedAt: "2024-01-01T00:00:00Z",
     }));
 
-    let saveArcCallCount = 0;
-    let savedArc: Arc | null = null;
+    let saveThreadCallCount = 0;
+    let savedArc: Thread | null = null;
 
-    const arcDb = {
-      ...makeArcDbMock(),
-      saveArc: vi.fn().mockImplementation((arc: Arc) => {
-        saveArcCallCount++;
+    const threadDb = {
+      ...makeThreadDbMock(),
+      saveThread: vi.fn().mockImplementation((arc: Thread) => {
+        saveThreadCallCount++;
         savedArc = arc;
         return Promise.resolve(ok(undefined));
       }),
-    } as unknown as ArcDatabase;
+    } as unknown as ThreadDatabase;
     const accountDb = {
       ...makeAccountDbMock(TEST_ACCOUNT_ID),
       listEnabledRules: vi.fn().mockReturnValue(Promise.resolve(ok([...SYSTEM_RULES, ...userRules]))),
@@ -167,7 +167,7 @@ describe("Single saveArc call with complete mutations", () => {
       findMatch: vi.fn().mockResolvedValue(ok(null)),
     };
 
-    const arcMatcher: ArcMatcher = {
+    const threadMatcher: ThreadMatcherPort = {
       findMatch: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
       upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     };
@@ -186,12 +186,12 @@ describe("Single saveArc call with complete mutations", () => {
 
     const mockLogger = createMockLogger();
     const processor = new SignalProcessor({ ...makeSharedNewDeps(),
-      arcDb, accountDb, processingDb,
+      threadDb, accountDb, processingDb,
       contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
       classifier: { classify: vi.fn().mockResolvedValue(ok(classification)) },
       embeddingGenerator,
       auroraWriter,
-      arcMatcher,
+      threadMatcher,
       ruleEvaluator: makeRuleEvaluator3(mockLogger),
       replySender,
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
@@ -205,7 +205,7 @@ describe("Single saveArc call with complete mutations", () => {
 
     await processor.processRecord(makeMessage("test-ses-id", recipientEmail), 1);
 
-    expect(saveArcCallCount).toBe(1);
+    expect(saveThreadCallCount).toBe(1);
     expect(savedArc).not.toBeNull();
 
     const arc = savedArc!;
