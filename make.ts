@@ -215,8 +215,9 @@ program
         break;
       }
       if (phase === 'FAILED' || phase === 'FAULT' || phase === 'STOPPED') {
-        // Attempt to fetch the last 30 lines from CloudWatch for inline diagnosis
+        // Attempt to fetch build logs from CloudWatch for inline diagnosis
         try {
+          await new Promise(r => setTimeout(r, 3000)); // CloudWatch ingestion delay
           const { CloudWatchLogsClient, GetLogEventsCommand } = await import('@aws-sdk/client-cloudwatch-logs');
           const cwl = new CloudWatchLogsClient({});
           const logGroup = build?.logs?.groupName;
@@ -225,12 +226,15 @@ program
             const logEvents = await cwl.send(new GetLogEventsCommand({
               logGroupName: logGroup,
               logStreamName: logStream,
-              startFromHead: false,
-              limit: 30,
+              startFromHead: true,
             }));
-            const lines = logEvents.events?.map(e => e.message?.trimEnd()).filter(Boolean) ?? [];
+            const lines = logEvents.events?.map(e => {
+              const msg = e.message;
+              if (msg == null) return null;
+              return typeof msg === 'string' ? msg.trimEnd() : JSON.stringify(msg, null, 2);
+            }).filter(Boolean) as string[];
             if (lines.length > 0) {
-              console.error(`\n--- CodeBuild migration logs (last ${lines.length} lines) ---`);
+              console.error(`\n--- CodeBuild migration logs (${lines.length} events) ---`);
               for (const line of lines) console.error(line);
               console.error('--- end logs ---\n');
             }
