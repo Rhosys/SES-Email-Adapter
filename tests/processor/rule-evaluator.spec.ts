@@ -4,7 +4,7 @@ import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
 import type { RuleAnnotationStore } from "../../src/processor/rule-evaluator.js";
 import type { UserCodeExecutorClient } from "../../src/processor/user-code-client.js";
 import { userCodeError } from "../../src/processor/user-code-client.js";
-import type { Rule, Signal, Arc } from "../../src/types/index.js";
+import type { Rule, Signal, Thread } from "../../src/types/index.js";
 import { createMockLogger, type MockLogger } from "../helpers/mock-logger.js";
 
 // ---------------------------------------------------------------------------
@@ -42,7 +42,7 @@ function makeSignal(overrides: Partial<Omit<Signal, "data">> & { data?: Partial<
   } as Signal;
 }
 
-function makeArc(overrides: Partial<Arc> = {}): Arc {
+function makeThread(overrides: Partial<Thread> = {}): Thread {
   return {
     id: "arc_001",
     accountId: "acc_123",
@@ -57,7 +57,7 @@ function makeArc(overrides: Partial<Arc> = {}): Arc {
     recipientAddress: "user@example.com",
     subject: "Test email",
     ...overrides,
-  } as Arc;
+  } as Thread;
 }
 
 function makeJsRule(overrides: Partial<Rule> = {}): Rule {
@@ -98,7 +98,7 @@ describe("JsonLogicRuleEvaluator — JS condition path", () => {
 
     const result = await evaluator.evaluate(
       makeJsRule(),
-      { signal: makeSignal(), arc: makeArc(), isMatchedArc: false },
+      { signal: makeSignal(), thread: makeThread(), isMatchedThread: false },
     );
 
     expect(result).toEqual({ matched: true, dynamicActions: [], warnings: [] });
@@ -108,7 +108,7 @@ describe("JsonLogicRuleEvaluator — JS condition path", () => {
       functionCode: "return signal.workflow === 'content';",
       executionContext: expect.objectContaining({
         signal: expect.not.objectContaining({ s3Key: expect.anything() }),
-        arc: expect.objectContaining({ id: "arc_001" }),
+        thread: expect.objectContaining({ id: "arc_001" }),
       }),
     });
   });
@@ -118,7 +118,7 @@ describe("JsonLogicRuleEvaluator — JS condition path", () => {
 
     const result = await evaluator.evaluate(
       makeJsRule(),
-      { signal: makeSignal(), arc: makeArc(), isMatchedArc: false },
+      { signal: makeSignal(), thread: makeThread(), isMatchedThread: false },
     );
 
     expect(result).toEqual({ matched: false, dynamicActions: [], warnings: [] });
@@ -130,7 +130,7 @@ describe("JsonLogicRuleEvaluator — JS condition path", () => {
 
     const result = await evaluator.evaluate(
       makeJsRule(),
-      { signal: makeSignal(), arc: makeArc(), isMatchedArc: false },
+      { signal: makeSignal(), thread: makeThread(), isMatchedThread: false },
     );
 
     expect(result).toEqual({ matched: false, dynamicActions: [], warnings: [] });
@@ -141,7 +141,7 @@ describe("JsonLogicRuleEvaluator — JS condition path", () => {
 
     const result = await evaluator.evaluate(
       makeJsRule(),
-      { signal: makeSignal(), arc: makeArc(), isMatchedArc: false },
+      { signal: makeSignal(), thread: makeThread(), isMatchedThread: false },
     );
 
     expect(result.matched).toBe(true);
@@ -154,7 +154,7 @@ describe("JsonLogicRuleEvaluator — JS condition path", () => {
 
     const result = await evaluator.evaluate(
       makeJsRule({ id: "rule_timeout" }),
-      { signal: makeSignal(), arc: makeArc(), isMatchedArc: false },
+      { signal: makeSignal(), thread: makeThread(), isMatchedThread: false },
     );
 
     expect(result).toEqual({ matched: false, dynamicActions: [], warnings: [] });
@@ -170,7 +170,7 @@ describe("JsonLogicRuleEvaluator — JS condition path", () => {
 
     const result = await evaluator.evaluate(
       makeJsRule({ id: "rule_runtime" }),
-      { signal: makeSignal(), arc: makeArc(), isMatchedArc: false },
+      { signal: makeSignal(), thread: makeThread(), isMatchedThread: false },
     );
 
     expect(result).toEqual({ matched: false, dynamicActions: [], warnings: [] });
@@ -186,7 +186,7 @@ describe("JsonLogicRuleEvaluator — JS condition path", () => {
 
     await evaluator.evaluate(
       makeJsRule({ id: "rule_timeout_log" }),
-      { signal: makeSignal(), arc: makeArc(), isMatchedArc: false },
+      { signal: makeSignal(), thread: makeThread(), isMatchedThread: false },
     );
 
     expect(mockLogger.calls.some(c => c.method === "track" && c.context?.errorType === "timeout")).toBe(true);
@@ -197,7 +197,7 @@ describe("JsonLogicRuleEvaluator — JS condition path", () => {
 
     await evaluator.evaluate(
       makeJsRule({ id: "rule_runtime_log" }),
-      { signal: makeSignal(), arc: makeArc(), isMatchedArc: false },
+      { signal: makeSignal(), thread: makeThread(), isMatchedThread: false },
     );
 
     expect(mockLogger.calls.some(c => c.method === "track" && c.context?.errorType === "runtime_error")).toBe(true);
@@ -212,7 +212,7 @@ describe("JsonLogicRuleEvaluator — JS condition path", () => {
 
     const result = await evaluator.evaluate(
       makeJsRule(),
-      { signal: makeSignal(), arc: makeArc(), isMatchedArc: false },
+      { signal: makeSignal(), thread: makeThread(), isMatchedThread: false },
     );
 
     expect(result.matched).toBe(true);
@@ -230,7 +230,7 @@ describe("JsonLogicRuleEvaluator — JS condition path", () => {
       id: "rule_jl_001",
       accountId: "acc_123",
       name: "JSON Logic rule",
-      condition: JSON.stringify({ "==": [{ "var": "isMatchedArc" }, true] }),
+      condition: JSON.stringify({ "==": [{ "var": "isMatchedThread" }, true] }),
       actions: [{ type: "assign_label", value: "matched" }],
       status: "enabled",
       priorityOrder: 1,
@@ -240,7 +240,7 @@ describe("JsonLogicRuleEvaluator — JS condition path", () => {
 
     const result = await evaluator.evaluate(
       jsonLogicRule,
-      { signal: makeSignal(), arc: makeArc(), isMatchedArc: true },
+      { signal: makeSignal(), thread: makeThread(), isMatchedThread: true },
     );
 
     expect(result).toEqual({ matched: true, dynamicActions: [], warnings: [] });
@@ -254,7 +254,7 @@ describe("JsonLogicRuleEvaluator — JS condition path", () => {
  */
 describe("JS rule context — Property 2: context preparation produces exactly the specified fields", () => {
   const EXPECTED_SIGNAL_KEYS = ["id", "from", "subject", "summary", "workflow", "recipientAddress", "workflowData"];
-  const EXPECTED_ARC_KEYS = ["id", "labels", "urgency", "summary", "workflow", "status"];
+  const EXPECTED_THREAD_KEYS = ["id", "labels", "urgency", "summary", "workflow", "status"];
 
   it("executionContext.signal has exactly the 7 specified fields — sensitive fields excluded", async () => {
     const mockExecutor = { invoke: vi.fn().mockResolvedValue(ok({ value: false })), validateAst: vi.fn(), validateAstBatch: vi.fn() };
@@ -267,10 +267,10 @@ describe("JS rule context — Property 2: context preparation produces exactly t
         headers: { "x-custom": "value" },
       },
     });
-    const arc = makeArc({ labels: ["important", "billing"], urgency: "high" });
+    const thread = makeThread({ labels: ["important", "billing"], urgency: "high" });
     const rule: Rule = { id: "r-1", accountId: "acc-1", name: "test", condition: "return false", conditionType: "js", actions: [], status: "enabled", priorityOrder: 1, createdAt: "", updatedAt: "" };
 
-    await evaluator.evaluate(rule, { signal, arc, isMatchedArc: false });
+    await evaluator.evaluate(rule, { signal, thread, isMatchedThread: false });
 
     const ctx = mockExecutor.invoke.mock.calls[0]![0].executionContext;
     expect(Object.keys(ctx.signal).sort()).toEqual([...EXPECTED_SIGNAL_KEYS].sort());
@@ -292,29 +292,29 @@ describe("JS rule context — Property 2: context preparation produces exactly t
     expect(ctx.signal).not.toHaveProperty("attachments");
   });
 
-  it("executionContext.arc has exactly {id, labels, urgency, summary, workflow, status}", async () => {
+  it("executionContext.thread has exactly {id, labels, urgency, summary, workflow, status}", async () => {
     const mockExecutor = { invoke: vi.fn().mockResolvedValue(ok({ value: false })), validateAst: vi.fn(), validateAstBatch: vi.fn() };
     const evaluator = new JsonLogicRuleEvaluator(createMockLogger(), mockExecutor, { annotateRuleError: vi.fn().mockResolvedValue(ok(undefined)) });
 
     const signal = makeSignal({});
-    const arc = makeArc({ labels: ["important", "billing"], urgency: "high" });
+    const thread = makeThread({ labels: ["important", "billing"], urgency: "high" });
     const rule: Rule = { id: "r-1", accountId: "acc-1", name: "test", condition: "return false", conditionType: "js", actions: [], status: "enabled", priorityOrder: 1, createdAt: "", updatedAt: "" };
 
-    await evaluator.evaluate(rule, { signal, arc, isMatchedArc: false });
+    await evaluator.evaluate(rule, { signal, thread, isMatchedThread: false });
 
     const ctx = mockExecutor.invoke.mock.calls[0]![0].executionContext;
-    expect(Object.keys(ctx.arc).sort()).toEqual([...EXPECTED_ARC_KEYS].sort());
-    expect(ctx.arc).toEqual({
-      id: arc.id,
-      labels: arc.labels,
-      urgency: arc.urgency,
-      summary: arc.summary,
-      workflow: arc.workflow,
-      status: arc.status,
+    expect(Object.keys(ctx.thread).sort()).toEqual([...EXPECTED_THREAD_KEYS].sort());
+    expect(ctx.thread).toEqual({
+      id: thread.id,
+      labels: thread.labels,
+      urgency: thread.urgency,
+      summary: thread.summary,
+      workflow: thread.workflow,
+      status: thread.status,
     });
-    expect(ctx.arc).not.toHaveProperty("accountId");
-    expect(ctx.arc).not.toHaveProperty("lastSignalAt");
-    expect(ctx.arc).not.toHaveProperty("createdAt");
-    expect(ctx.arc).not.toHaveProperty("updatedAt");
+    expect(ctx.thread).not.toHaveProperty("accountId");
+    expect(ctx.thread).not.toHaveProperty("lastSignalAt");
+    expect(ctx.thread).not.toHaveProperty("createdAt");
+    expect(ctx.thread).not.toHaveProperty("updatedAt");
   });
 });

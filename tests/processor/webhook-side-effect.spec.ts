@@ -1,18 +1,18 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ok } from "neverthrow";
 import { SignalProcessor, SYSTEM_RULES } from "../../src/processor/processor.js";
-import type { ArcMatcher, SqsDispatcher, Notifier, ReplySender, SideEffectPayload } from "../../src/processor/processor.js";
+import type { ThreadMatcherPort, SqsDispatcher, Notifier, ReplySender, SideEffectPayload } from "../../src/processor/processor.js";
 import type { IForwardingService } from "../../src/forwarding/forwarding-service.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
 import { makeSharedNewDeps, makeRuleEvaluator3 } from "./_shared-new-deps.js";
-import { makeArcDbMock, makeAccountDbMock, makeProcessingDbMock } from "./_helpers.js";
+import { makeThreadDbMock, makeAccountDbMock, makeProcessingDbMock } from "./_helpers.js";
 import type { AccountDatabase } from "../../src/database/account-database.js";
 import type { ContentSanitizerClient } from "../../src/processor/content-sanitizer-client.js";
 import type { SignalClassifier } from "../../src/classifier/classifier.js";
 import type { EmbeddingGenerator } from "../../src/embedding/embedding-generator.js";
-import type { MultiClusterAuroraWriter } from "../../src/database/arc-matcher.js";
+import type { MultiClusterAuroraWriter } from "../../src/database/thread-matcher.js";
 import type { S3RetentionService } from "../../src/embedding/s3-retention-service.js";
-import type { Signal, Arc, Alias } from "../../src/types/index.js";
+import type { Signal, Thread, Alias } from "../../src/types/index.js";
 import { BillingHandler } from "../../src/billing/billing-handler.js";
 import type { EmailService } from "../../src/email/email-service.js";
 import { createMockLogger, type MockLogger } from "../helpers/mock-logger.js";
@@ -35,7 +35,7 @@ vi.mock("../../src/embedding/cluster-registry.js", () => {
     CLUSTER_REGISTRY: Object.freeze([entry]),
     getActiveClusters: () => [entry],
     getRegistryById: (id: string) => (id === entry.registryId ? entry : null),
-    getPrimaryArcMatcherRegistry: () => entry,
+    getPrimaryThreadMatcherRegistry: () => entry,
   };
 });
 
@@ -66,7 +66,7 @@ const DEFAULT_ALIAS: Alias = {
 // ---------------------------------------------------------------------------
 
 function makeStore(billingPlan: "Paid" | "Free" | "Trial" = "Paid") {
-  const arcDb = makeArcDbMock();
+  const threadDb = makeThreadDbMock();
   const accountDb = {
     ...makeAccountDbMock(TEST_ACCOUNT_ID),
     getAccount: vi.fn().mockReturnValue(Promise.resolve(ok({
@@ -81,7 +81,7 @@ function makeStore(billingPlan: "Paid" | "Free" | "Trial" = "Paid") {
     }))),
   } as unknown as AccountDatabase;
   const processingDb = makeProcessingDbMock();
-  return { arcDb, accountDb, processingDb };
+  return { threadDb, accountDb, processingDb };
 }
 
 function makeSignal(overrides: { data?: Partial<Signal["data"]> } & Partial<Omit<Signal, "data">> = {}): Signal {
@@ -89,7 +89,7 @@ function makeSignal(overrides: { data?: Partial<Signal["data"]> } & Partial<Omit
   return {
     id: "sgn-webhook-test-001",
     signalLookupId: "ses-webhook-msg-001",
-    arcId: "arc-webhook-001",
+    threadId: "arc-webhook-001",
     accountId: TEST_ACCOUNT_ID,
     source: "email",
     type: "email",
@@ -118,7 +118,7 @@ function makeSignal(overrides: { data?: Partial<Signal["data"]> } & Partial<Omit
   } as Signal;
 }
 
-function makeArc(overrides: Partial<Arc> = {}): Arc {
+function makeThread(overrides: Partial<Thread> = {}): Thread {
   return {
     id: "arc-webhook-001",
     accountId: TEST_ACCOUNT_ID,
@@ -143,7 +143,7 @@ function makeProcessor(opts: { store: ReturnType<typeof makeStore>; logger: Mock
     classifier: { classify: vi.fn() } as unknown as Pick<SignalClassifier, "classify">,
     embeddingGenerator: { generateForModel: vi.fn(), generateForSecondaryClusters: vi.fn() } as unknown as EmbeddingGenerator,
     auroraWriter: { upsertEmbedding: vi.fn(), findMatch: vi.fn() } as unknown as MultiClusterAuroraWriter,
-    arcMatcher: { findMatch: vi.fn(), upsertEmbedding: vi.fn() } as unknown as ArcMatcher,
+    threadMatcher: { findMatch: vi.fn(), upsertEmbedding: vi.fn() } as unknown as ThreadMatcherPort,
     ruleEvaluator: makeRuleEvaluator3(opts.logger),
     logger: opts.logger,
     retentionService: { applyPlanRetention: vi.fn() } as unknown as S3RetentionService,
@@ -188,7 +188,7 @@ describe("processSideEffect — forward dispatches to ForwardingService", () => 
       classifier: { classify: vi.fn() } as unknown as Pick<SignalClassifier, "classify">,
       embeddingGenerator: { generateForModel: vi.fn(), generateForSecondaryClusters: vi.fn() } as unknown as EmbeddingGenerator,
       auroraWriter: { upsertEmbedding: vi.fn(), findMatch: vi.fn() } as unknown as MultiClusterAuroraWriter,
-      arcMatcher: { findMatch: vi.fn(), upsertEmbedding: vi.fn() } as unknown as ArcMatcher,
+      threadMatcher: { findMatch: vi.fn(), upsertEmbedding: vi.fn() } as unknown as ThreadMatcherPort,
       ruleEvaluator: makeRuleEvaluator3(mockLogger),
       logger: mockLogger,
       retentionService: { applyPlanRetention: vi.fn() } as unknown as S3RetentionService,
@@ -211,8 +211,8 @@ describe("processSideEffect — forward dispatches to ForwardingService", () => 
         ],
       },
     });
-    const arc = makeArc();
-    const payload: SideEffectPayload = { signal, arc };
+    const thread = makeThread();
+    const payload: SideEffectPayload = { signal, thread };
 
     const result = await processor.processSideEffect(payload);
 
@@ -222,11 +222,11 @@ describe("processSideEffect — forward dispatches to ForwardingService", () => 
     expect(forwarder.forward).toHaveBeenCalledOnce();
     expect(notifier.notify).toHaveBeenCalledOnce();
 
-    // Verify forward was called with signal and arc
-    const [targetId, fwdSignal, fwdArc] = forwarder.forward.mock.calls[0]!;
+    // Verify forward was called with signal and thread
+    const [targetId, fwdSignal, fwdThread] = forwarder.forward.mock.calls[0]!;
     expect(targetId).toBe("backup@personal.com");
     expect(fwdSignal.id).toBe(signal.id);
-    expect(fwdArc.id).toBe(arc.id);
+    expect(fwdThread.id).toBe(thread.id);
   });
 
   it("multiple forward actions on same signal all fire", async () => {
@@ -242,8 +242,8 @@ describe("processSideEffect — forward dispatches to ForwardingService", () => 
         ],
       },
     });
-    const arc = makeArc();
-    const payload: SideEffectPayload = { signal, arc };
+    const thread = makeThread();
+    const payload: SideEffectPayload = { signal, thread };
 
     const result = await processor.processSideEffect(payload);
 
@@ -268,8 +268,8 @@ describe("processSideEffect — forward dispatches to ForwardingService", () => 
         ],
       },
     });
-    const arc = makeArc();
-    const payload: SideEffectPayload = { signal, arc };
+    const thread = makeThread();
+    const payload: SideEffectPayload = { signal, thread };
 
     const result = await processor.processSideEffect(payload);
 

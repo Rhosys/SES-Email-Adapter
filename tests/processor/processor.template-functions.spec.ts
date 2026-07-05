@@ -2,15 +2,15 @@ import type { IForwardingService } from "../../src/forwarding/forwarding-service
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ok, err } from "neverthrow";
 import { SignalProcessor } from "../../src/processor/processor.js";
-import { makeArcDbMock, makeAccountDbMock, makeProcessingDbMock } from "./_helpers.js";
+import { makeThreadDbMock, makeAccountDbMock, makeProcessingDbMock } from "./_helpers.js";
 import type { CtxLike } from "./_helpers.js";
 import type { AccountDatabase } from "../../src/database/account-database.js";
 import type { UserCodeExecutorClient } from "../../src/processor/user-code-client.js";
 import { userCodeError } from "../../src/processor/user-code-client.js";
 import type { ContentSanitizerClient } from "../../src/processor/content-sanitizer-client.js";
-import type { Signal, Arc, Alias, EmailTemplate } from "../../src/types/index.js";
+import type { Signal, Thread, Alias, EmailTemplate } from "../../src/types/index.js";
 import type { EmbeddingGenerator } from "../../src/embedding/embedding-generator.js";
-import type { MultiClusterAuroraWriter } from "../../src/database/arc-matcher.js";
+import type { MultiClusterAuroraWriter } from "../../src/database/thread-matcher.js";
 import type { S3RetentionService } from "../../src/embedding/s3-retention-service.js";
 import type { EmailService } from "../../src/email/email-service.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
@@ -66,7 +66,7 @@ function makeSignal(overrides: Partial<Signal> = {}): Signal {
   } as Signal;
 }
 
-function makeArc(overrides: Partial<Arc> = {}): Arc {
+function makeThread(overrides: Partial<Thread> = {}): Thread {
   return {
     id: "arc_tmpl_001",
     accountId: TEST_ACCOUNT_ID,
@@ -81,7 +81,7 @@ function makeArc(overrides: Partial<Arc> = {}): Arc {
     recipientAddress: "user@example.com",
     subject: "Test email",
     ...overrides,
-  } as Arc;
+  } as Thread;
 }
 
 function makeTemplate(overrides: Partial<EmailTemplate> = {}): EmailTemplate {
@@ -102,14 +102,14 @@ function makeTemplate(overrides: Partial<EmailTemplate> = {}): EmailTemplate {
 }
 
 function makeStore(template: EmailTemplate | null = makeTemplate()) {
-  const arcDb = makeArcDbMock();
+  const threadDb = makeThreadDbMock();
   const accountDb = {
     ...makeAccountDbMock(TEST_ACCOUNT_ID),
     getSender: vi.fn().mockReturnValue(Promise.resolve(ok({ policy: "allow", domain: "external.com", address: "sender@external.com" }))),
     getTemplate: vi.fn().mockReturnValue(Promise.resolve(ok(template))),
   } as unknown as AccountDatabase;
   const processingDb = makeProcessingDbMock();
-  return { arcDb, accountDb, processingDb };
+  return { threadDb, accountDb, processingDb };
 }
 
 function makeProcessor(opts: {
@@ -125,7 +125,7 @@ function makeProcessor(opts: {
     classifier: { classify: vi.fn() },
     embeddingGenerator: { generateForModel: vi.fn(), generateForSecondaryClusters: vi.fn() } as unknown as EmbeddingGenerator,
     auroraWriter: { upsertEmbedding: vi.fn(), findMatch: vi.fn() } as unknown as MultiClusterAuroraWriter,
-    arcMatcher: { findMatch: vi.fn().mockReturnValue(Promise.resolve(ok(null))), upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+    threadMatcher: { findMatch: vi.fn().mockReturnValue(Promise.resolve(ok(null))), upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
     ruleEvaluator: makeRuleEvaluator3(logger),
     logger,
     notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
@@ -164,9 +164,9 @@ describe("Template function resolution via User Code Executor", () => {
       .mockResolvedValueOnce(ok({ value: "Thanks for your email about Test email" }));
 
     const signal = makeSignal();
-    const arc = makeArc();
+    const thread = makeThread();
 
-    await processor.processSideEffect({ signal, arc });
+    await processor.processSideEffect({ signal, thread });
 
     // Verify User Code Executor was invoked for each template function
     expect(mockExecutor.invoke).toHaveBeenCalledTimes(2);
@@ -182,7 +182,7 @@ describe("Template function resolution via User Code Executor", () => {
     }));
 
     // Verify draft was saved with resolved template values
-    const saveSignalCalls = vi.mocked(store.arcDb.saveSignal).mock.calls;
+    const saveSignalCalls = vi.mocked(store.threadDb.saveSignal).mock.calls;
     expect(saveSignalCalls.length).toBe(1);
     const draft = saveSignalCalls[0]![0] as Signal;
     expect(draft.data.subject).toBe("Re: Test email — Hello");
@@ -196,12 +196,12 @@ describe("Template function resolution via User Code Executor", () => {
       .mockResolvedValueOnce(ok({ value: "body text" }));
 
     const signal = makeSignal();
-    const arc = makeArc();
+    const thread = makeThread();
 
-    await processor.processSideEffect({ signal, arc });
+    await processor.processSideEffect({ signal, thread });
 
     // Draft should still be saved but with empty string for the null function
-    const saveSignalCalls = vi.mocked(store.arcDb.saveSignal).mock.calls;
+    const saveSignalCalls = vi.mocked(store.threadDb.saveSignal).mock.calls;
     expect(saveSignalCalls.length).toBe(2);
     const draft = saveSignalCalls.map(c => c[0] as Signal).find(s => s.source === "user")!;
     expect(draft.data.subject).toBe("Re: Test email — ");
@@ -222,12 +222,12 @@ describe("Template function resolution via User Code Executor", () => {
       .mockResolvedValueOnce(ok({ value: "ok" }));
 
     const signal = makeSignal();
-    const arc = makeArc();
+    const thread = makeThread();
 
-    await processor.processSideEffect({ signal, arc });
+    await processor.processSideEffect({ signal, thread });
 
     // Draft saved with empty string for timed-out function
-    const saveSignalCalls = vi.mocked(store.arcDb.saveSignal).mock.calls;
+    const saveSignalCalls = vi.mocked(store.threadDb.saveSignal).mock.calls;
     expect(saveSignalCalls.length).toBe(2);
     const draft = saveSignalCalls.map(c => c[0] as Signal).find(s => s.source === "user")!;
     expect(draft.data.subject).toBe("Re: Test email — ");
@@ -248,12 +248,12 @@ describe("Template function resolution via User Code Executor", () => {
       .mockResolvedValueOnce(err(userCodeError("runtime_error", "ReferenceError: foo is not defined")));
 
     const signal = makeSignal();
-    const arc = makeArc();
+    const thread = makeThread();
 
-    await processor.processSideEffect({ signal, arc });
+    await processor.processSideEffect({ signal, thread });
 
     // Draft saved with empty string for errored function
-    const saveSignalCalls = vi.mocked(store.arcDb.saveSignal).mock.calls;
+    const saveSignalCalls = vi.mocked(store.threadDb.saveSignal).mock.calls;
     expect(saveSignalCalls.length).toBe(2);
     const draft = saveSignalCalls.map(c => c[0] as Signal).find(s => s.source === "user")!;
     expect(draft.data.textBody).toBe("Hi Sender, ");
@@ -274,15 +274,15 @@ describe("Template function resolution via User Code Executor", () => {
     const proc = makeProcessor({ store: storeNoFns, userCodeExecutor: mockExecutor, logger: mockLogger });
 
     const signal = makeSignal();
-    const arc = makeArc();
+    const thread = makeThread();
 
-    await proc.processSideEffect({ signal, arc });
+    await proc.processSideEffect({ signal, thread });
 
     // User Code Executor should NOT be invoked
     expect(mockExecutor.invoke).not.toHaveBeenCalled();
 
     // Draft should still be saved with standard variable substitution
-    const saveSignalCalls = vi.mocked(storeNoFns.arcDb.saveSignal).mock.calls;
+    const saveSignalCalls = vi.mocked(storeNoFns.threadDb.saveSignal).mock.calls;
     expect(saveSignalCalls.length).toBe(1);
     const draft = saveSignalCalls[0]![0] as Signal;
     expect(draft.data.subject).toBe("Re: Test email — ");
@@ -293,7 +293,7 @@ describe("Template function resolution via User Code Executor", () => {
       .mockResolvedValueOnce(err(userCodeError("timeout", "User code execution timed out")))
       .mockResolvedValueOnce(ok({ value: "ok" }));
 
-    await processor.processSideEffect({ signal: makeSignal(), arc: makeArc() });
+    await processor.processSideEffect({ signal: makeSignal(), thread: makeThread() });
 
     const warnCalls = mockLogger.calls.filter(c => c.method === "warn");
     const fnErrorWarn = warnCalls.find(c => c.context?.code === "processor.template_function.error");
@@ -311,7 +311,7 @@ describe("Template function resolution via User Code Executor", () => {
       .mockResolvedValueOnce(ok({ value: null }))
       .mockResolvedValueOnce(ok({ value: "ok" }));
 
-    await processor.processSideEffect({ signal: makeSignal(), arc: makeArc() });
+    await processor.processSideEffect({ signal: makeSignal(), thread: makeThread() });
 
     const warnCalls = mockLogger.calls.filter(c => c.method === "warn");
     const invalidReturnWarn = warnCalls.find(c => c.context?.code === "processor.template_function.invalid_return");
@@ -329,9 +329,9 @@ describe("Template function resolution via User Code Executor", () => {
       .mockResolvedValueOnce(err(userCodeError("runtime_error", "ReferenceError: x is not defined")))
       .mockResolvedValueOnce(ok({ value: "ok" }));
 
-    await processor.processSideEffect({ signal: makeSignal(), arc: makeArc() });
+    await processor.processSideEffect({ signal: makeSignal(), thread: makeThread() });
 
-    const saveSignalCalls = vi.mocked(store.arcDb.saveSignal).mock.calls;
+    const saveSignalCalls = vi.mocked(store.threadDb.saveSignal).mock.calls;
     const templateSignal = saveSignalCalls.find(([s]) => s.type === "invalid_template_function");
     expect(templateSignal).toBeDefined();
     expect(templateSignal![0].data).toEqual({
@@ -347,9 +347,9 @@ describe("Template function resolution via User Code Executor", () => {
       .mockResolvedValueOnce(ok({ value: 42 } as any))
       .mockResolvedValueOnce(ok({ value: "ok" }));
 
-    await processor.processSideEffect({ signal: makeSignal(), arc: makeArc() });
+    await processor.processSideEffect({ signal: makeSignal(), thread: makeThread() });
 
-    const saveSignalCalls = vi.mocked(store.arcDb.saveSignal).mock.calls;
+    const saveSignalCalls = vi.mocked(store.threadDb.saveSignal).mock.calls;
     const templateSignal = saveSignalCalls.find(([s]) => s.type === "invalid_template_function");
     expect(templateSignal).toBeDefined();
     expect(templateSignal![0].data).toEqual({
@@ -366,11 +366,11 @@ describe("Template function resolution via User Code Executor", () => {
       .mockResolvedValueOnce(ok({ value: "body text" }));
 
     const signal = makeSignal();
-    const arc = makeArc();
+    const thread = makeThread();
 
-    await processor.processSideEffect({ signal, arc });
+    await processor.processSideEffect({ signal, thread });
 
-    const saveSignalCalls = vi.mocked(store.arcDb.saveSignal).mock.calls;
+    const saveSignalCalls = vi.mocked(store.threadDb.saveSignal).mock.calls;
     expect(saveSignalCalls.length).toBe(2);
     const draft = saveSignalCalls.map(c => c[0] as Signal).find(s => s.source === "user")!;
     expect(draft.data.subject).toBe("Re: Test email — ");
