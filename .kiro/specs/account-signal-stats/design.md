@@ -41,13 +41,13 @@ totalSignals: N
 totalAllowed: N
 totalBlocked: N
 totalQuarantined: N
-totalViolationReport: N
+totalreported: N
 
 // Daily (last 7 days) — pruned on write
 d_2026-05-16_allowed: N
 d_2026-05-16_blocked: N
 d_2026-05-16_quarantined: N
-d_2026-05-16_violationReport: N
+d_2026-05-16_reported: N
 ...
 
 // Monthly (last 2 months) — pruned on write
@@ -70,7 +70,7 @@ updatedAt: S
 | `quarantine_hidden` | `quarantined` |
 | `block_hidden` | `blocked` |
 | `block_reject` | `blocked` |
-| `report_violation` | `violationReport` |
+| `report_violation` | `reported` |
 | `draft` | (skip — no increment) |
 
 Enforced exhaustively via TypeScript `satisfies Record<Exclude<SignalStatus, 'draft'>, StatsCategory>`.
@@ -104,11 +104,11 @@ interface StatsResponse {
     totalAllowed: number;
     totalBlocked: number;
     totalQuarantined: number;
-    totalViolationReport: number;
+    totalreported: number;
   };
-  daily: Array<{ date: string; allowed: number; blocked: number; quarantined: number; violationReport: number }>;
-  monthly: Array<{ month: string; allowed: number; blocked: number; quarantined: number; violationReport: number }>;
-  yearly: Array<{ year: string; allowed: number; blocked: number; quarantined: number; violationReport: number }>;
+  daily: Array<{ date: string; allowed: number; blocked: number; quarantined: number; reported: number }>;
+  monthly: Array<{ month: string; allowed: number; blocked: number; quarantined: number; reported: number }>;
+  yearly: Array<{ year: string; allowed: number; blocked: number; quarantined: number; reported: number }>;
 }
 ```
 
