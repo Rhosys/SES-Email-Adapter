@@ -115,12 +115,12 @@ describe("Single saveThread call with complete mutations", () => {
       listEnabledRules: vi.fn().mockReturnValue(Promise.resolve(ok([...SYSTEM_RULES, ...userRules]))),
       // Recipient resolves to an allow_all alias for this account.
       getAliasByGlobalAddress: vi.fn().mockReturnValue(Promise.resolve(ok({
-        id: "cfg-001", accountId: TEST_ACCOUNT_ID, address: `user@${recipientDomain}`, domain: recipientDomain, alias: "user",
+        id: "cfg-001", accountId: TEST_ACCOUNT_ID, aliasAddress: `user@${recipientDomain}`, domain: recipientDomain, aliasName: "user",
         unknownSenderPolicy: "allow_all", createdAt: "2024-01-01T00:00:00Z", updatedAt: "2024-01-01T00:00:00Z",
       } satisfies Alias))),
       getSender: vi.fn().mockReturnValue(Promise.resolve(ok({
         accountId: TEST_ACCOUNT_ID, domain: recipientDomain,
-        alias: "user", senderDomain: "external.com", policy: "allow", addedAt: "2024-01-01T00:00:00Z",
+        aliasName: "user", senderDomain: "external.com", policy: "allow", addedAt: "2024-01-01T00:00:00Z",
       }))),
       getTemplate: vi.fn().mockImplementation((_accountId: string, id: string) =>
         Promise.resolve(ok({

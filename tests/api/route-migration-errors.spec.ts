@@ -73,11 +73,11 @@ function makeAccount(overrides: Partial<Account> = {}): Account {
 
 function makeAlias(overrides: Partial<Alias> = {}): Alias {
   return {
-    id: "alias-001",
+    id: "user@example.com",
     accountId: TEST_ACCOUNT_ID,
-    address: "user@example.com",
+    aliasAddress: "user@example.com",
     domain: "example.com",
-    alias: "user",
+    aliasName: "user",
     unknownSenderPolicy: "quarantine_visible",
     createdAt: "2024-01-01T00:00:00Z",
     updatedAt: "2024-01-01T00:00:00Z",
@@ -340,14 +340,14 @@ describe("API route error mapping — unit tests", () => {
     it("returns HTTP 200 when renameAlias succeeds", async () => {
       vi.mocked(accountDb.getDomain).mockResolvedValueOnce(ok(makeDomain({ domain: "example.com" })));
       vi.mocked(accountDb.renameAlias).mockResolvedValueOnce(
-        ok(makeAlias({ domain: "example.com", alias: "new", address: "new@example.com" })),
+        ok(makeAlias({ id: "new@example.com", domain: "example.com", aliasName: "new", aliasAddress: "new@example.com" })),
       );
       const res = await req(app, "PATCH", `${A}/aliases/old%40example.com`, {
         body: { newAddress: "new@example.com" },
       });
       expect(res.status).toBe(200);
-      const body = await res.json() as { address: string };
-      expect(body.address).toBe("new@example.com");
+      const body = await res.json() as { alias: string };
+      expect(body.alias).toBe("new@example.com");
     });
 
     it("zParse throws HTTPException for invalid newAddress format", async () => {

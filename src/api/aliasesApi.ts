@@ -114,9 +114,9 @@ export class AliasesApi {
       const createResult = await accountDb.createAlias({
         id: body.address,
         accountId,
-        address: body.address,
+        aliasAddress: body.address,
         domain: body.address.split("@")[1]!,
-        alias: body.address.split("@")[0]!,
+        aliasName: body.address.split("@")[0]!,
         unknownSenderPolicy: body.unknownSenderPolicy ?? "quarantine_visible",
         ...(body.createdForOrigin !== undefined ? { createdForOrigin: body.createdForOrigin } : {}),
         createdAt: now,
@@ -158,9 +158,9 @@ export class AliasesApi {
       const upsertResult = await accountDb.upsertAlias({
         id: address,
         accountId,
-        address,
+        aliasAddress: address,
         domain: address.split("@")[1]!,
-        alias: address.split("@")[0]!,
+        aliasName: address.split("@")[0]!,
         unknownSenderPolicy: body.unknownSenderPolicy ?? existing?.unknownSenderPolicy ?? "quarantine_visible",
         ...(body.createdForOrigin !== undefined ? { createdForOrigin: body.createdForOrigin } : existing?.createdForOrigin !== undefined ? { createdForOrigin: existing.createdForOrigin } : {}),
         createdAt: existing?.createdAt ?? now,

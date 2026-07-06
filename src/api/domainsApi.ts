@@ -217,18 +217,18 @@ export class DomainsApi {
         code: "api.domain_delete.cascade_aliases",
         accountId,
         domain: domain.domain,
-        aliases: aliases.map((a) => a.address),
+        aliases: aliases.map((a) => a.aliasAddress),
       });
 
       for (const alias of aliases) {
-        const aliasDeleteResult = await accountDb.deleteAlias(accountId, alias.address);
-        if (aliasDeleteResult.isErr()) { logger.error("Failed to cascade-delete alias.", { code: "api.domains.delete.cascade_alias_failed", accountId, address: alias.address, error: aliasDeleteResult.error }); return err(c, 500, "Internal Server Error"); }
+        const aliasDeleteResult = await accountDb.deleteAlias(accountId, alias.aliasAddress);
+        if (aliasDeleteResult.isErr()) { logger.error("Failed to cascade-delete alias.", { code: "api.domains.delete.cascade_alias_failed", accountId, address: alias.aliasAddress, error: aliasDeleteResult.error }); return err(c, 500, "Internal Server Error"); }
         const aliasAuditResult = await auditDb.saveAuditEvent({
-          accountId, userId, action: "deleted", resourceType: "alias", resourceId: alias.address,
-          before: { address: alias.address }, after: null,
+          accountId, userId, action: "deleted", resourceType: "alias", resourceId: alias.aliasAddress,
+          before: { address: alias.aliasAddress }, after: null,
         });
         if (aliasAuditResult.isErr()) {
-          logger.warn("Audit write failed for cascaded alias deletion, proceeding", { code: "api.audit.alias_cascade_delete_failed", accountId, address: alias.address, error: aliasAuditResult.error });
+          logger.warn("Audit write failed for cascaded alias deletion, proceeding", { code: "api.audit.alias_cascade_delete_failed", accountId, address: alias.aliasAddress, error: aliasAuditResult.error });
         }
       }
 

@@ -83,7 +83,7 @@ describe("AccountDatabase", () => {
       expect(result.isOk()).toBe(true);
       const renamed = result._unsafeUnwrap();
       expect(renamed.domain).toBe("example.com");
-      expect(renamed.alias).toBe("new");
+      expect(renamed.aliasName).toBe("new");
       expect(renamed.accountId).toBe("acct-1");
     });
 

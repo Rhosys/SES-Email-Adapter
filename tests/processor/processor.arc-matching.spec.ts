@@ -66,9 +66,9 @@ describe("Feature: in-reply-to-arc-threading, Parallel arc matching tier selecti
   const DEFAULT_EMAIL_CONFIG: Alias = {
     id: "cfg-default",
     accountId: TEST_ACCOUNT_ID,
-    address: "user@example.com",
+    aliasAddress: "user@example.com",
     domain: "example.com",
-    alias: "user",
+    aliasName: "user",
     unknownSenderPolicy: "allow_all",
     createdAt: "2024-01-01T00:00:00Z",
     updatedAt: "2024-01-01T00:00:00Z",

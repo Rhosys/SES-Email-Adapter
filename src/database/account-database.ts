@@ -19,10 +19,10 @@ import type { Logger } from "../logger.js";
 const pk = (accountId: string) => `ACCT#${accountId}`;
 
 /** Split a full email address into domain + local part for DDB key construction. */
-function parseAddress(address: string): { domain: string; alias: string } {
+function parseAddress(address: string): { domain: string; aliasName: string } {
   const atIdx = address.lastIndexOf("@");
   if (atIdx < 1) throw new Error(`Invalid email address: ${address}`);
-  return { alias: address.slice(0, atIdx), domain: address.slice(atIdx + 1) };
+  return { aliasName: address.slice(0, atIdx), domain: address.slice(atIdx + 1) };
 }
 
 function ruleGsi1pk(accountId: string) { return `ACCT#${accountId}`; }
@@ -117,16 +117,16 @@ export class AccountDatabase {
   }
 
   // ---------------------------------------------------------------------------
-  // Aliases — SK = DOMAIN#{domain}#ALIAS#{alias}
-  // GSI: gsi1pk = DOMAIN#{domain}#ALIAS#{alias}, gsi1sk = ACCT#{accountId}
+  // Aliases — SK = DOMAIN#{domain}#ALIAS#{aliasName}
+  // GSI: gsi1pk = DOMAIN#{domain}#ALIAS#{aliasName}, gsi1sk = ACCT#{accountId}
   // ---------------------------------------------------------------------------
 
-  async getAlias(accountId: string, address: string): Promise<Result<Alias | null, DbError>> {
-    const { domain, alias } = parseAddress(address);
+  async getAlias(accountId: string, aliasAddress: string): Promise<Result<Alias | null, DbError>> {
+    const { domain, aliasName } = parseAddress(aliasAddress);
     try {
       const res = await dynamo.send(new GetCommand({
         TableName: ACCOUNTS_TABLE,
-        Key: { pk: pk(accountId), sk: `DOMAIN#${domain}#ALIAS#${alias}` },
+        Key: { pk: pk(accountId), sk: `DOMAIN#${domain}#ALIAS#${aliasName}` },
       }));
       return ok(res.Item ? (res.Item as Alias) : null);
     } catch (e) {
@@ -140,13 +140,13 @@ export class AccountDatabase {
    * just its keys — callers get accountId and the full alias config in one read.
    */
   async getAliasByGlobalAddress(recipientAddress: string): Promise<Result<Alias | null, DbError>> {
-    const { domain, alias } = parseAddress(recipientAddress);
+    const { domain, aliasName } = parseAddress(recipientAddress);
     try {
       const res = await dynamo.send(new QueryCommand({
         TableName: ACCOUNTS_TABLE,
         IndexName: "gsi1",
         KeyConditionExpression: "gsi1pk = :pk",
-        ExpressionAttributeValues: { ":pk": `DOMAIN#${domain}#ALIAS#${alias}` },
+        ExpressionAttributeValues: { ":pk": `DOMAIN#${domain}#ALIAS#${aliasName}` },
         Limit: 1,
       }));
       return ok(res.Items && res.Items.length > 0 ? (res.Items[0] as Alias) : null);
@@ -156,16 +156,16 @@ export class AccountDatabase {
   }
 
   async saveAlias(alias: Alias): Promise<Result<Alias, DbError>> {
-    const { domain, alias: localPart } = parseAddress(alias.address);
+    const { domain, aliasName } = parseAddress(alias.aliasAddress);
     try {
       await dynamo.send(new PutCommand({
         TableName: ACCOUNTS_TABLE,
         Item: {
           ...alias,
-          domain, alias: localPart,
+          domain, aliasName,
           pk: pk(alias.accountId),
-          sk: `DOMAIN#${domain}#ALIAS#${localPart}`,
-          gsi1pk: `DOMAIN#${domain}#ALIAS#${localPart}`,
+          sk: `DOMAIN#${domain}#ALIAS#${aliasName}`,
+          gsi1pk: `DOMAIN#${domain}#ALIAS#${aliasName}`,
           gsi1sk: `ACCT#${alias.accountId}`,
         },
       }));
@@ -182,10 +182,10 @@ export class AccountDatabase {
   // A sender disposition recorded for an address implies that address is a recognised
   // alias, so callers that approve/block a sender must ensure the Alias record exists too.
   // Pass `existing` when the caller already has it (e.g. processor.ts) to skip the lookup.
-  async ensureAlias(accountId: string, address: string, defaultUnknownSenderPolicy: UnknownSenderPolicy, existing?: Alias | null): Promise<Result<{ alias: Alias; created: boolean }, DbError>> {
+  async ensureAlias(accountId: string, aliasAddress: string, defaultUnknownSenderPolicy: UnknownSenderPolicy, existing?: Alias | null): Promise<Result<{ alias: Alias; created: boolean }, DbError>> {
     let alias = existing;
     if (alias === undefined) {
-      const existingResult = await this.getAlias(accountId, address);
+      const existingResult = await this.getAlias(accountId, aliasAddress);
       if (existingResult.isErr()) return err(existingResult.error);
       alias = existingResult.value;
     }
@@ -193,11 +193,11 @@ export class AccountDatabase {
 
     const now = DateTime.utc().toISO()!;
     const saveResult = await this.saveAlias({
-      id: address,
+      id: aliasAddress,
       accountId,
-      address,
-      domain: address.split("@")[1]!,
-      alias: address.split("@")[0]!,
+      aliasAddress,
+      domain: aliasAddress.split("@")[1]!,
+      aliasName: aliasAddress.split("@")[0]!,
       unknownSenderPolicy: defaultUnknownSenderPolicy,
       createdAt: now,
       updatedAt: now,
@@ -254,17 +254,17 @@ export class AccountDatabase {
   }
 
   /** Deletes an alias along with every sender entry recorded for it. */
-  async deleteAlias(accountId: string, address: string): Promise<Result<void, DbError>> {
-    const { domain, alias } = parseAddress(address);
+  async deleteAlias(accountId: string, aliasAddress: string): Promise<Result<void, DbError>> {
+    const { domain, aliasName } = parseAddress(aliasAddress);
 
-    const sendersResult = await this.listSenders(accountId, address);
+    const sendersResult = await this.listSenders(accountId, aliasAddress);
     if (sendersResult.isErr()) return err(sendersResult.error);
     const senders = sendersResult.value;
 
     this.logger.info("Deleting alias and its senders", {
       code: "account_db.delete_alias",
       accountId,
-      address,
+      aliasAddress,
       senders: senders.map((s) => s.senderDomain),
     });
 
@@ -274,7 +274,7 @@ export class AccountDatabase {
     try {
       await dynamo.send(new DeleteCommand({
         TableName: ACCOUNTS_TABLE,
-        Key: { pk: pk(accountId), sk: `DOMAIN#${domain}#ALIAS#${alias}` },
+        Key: { pk: pk(accountId), sk: `DOMAIN#${domain}#ALIAS#${aliasName}` },
       }));
       return ok(undefined);
     } catch (e) {
@@ -297,7 +297,7 @@ export class AccountDatabase {
 
   private async batchDeleteSenderChunk(accountId: string, senders: AliasSender[]): Promise<void> {
     let requestItems = senders.map((s) => ({
-      DeleteRequest: { Key: { pk: pk(accountId), sk: `DOMAIN#${s.domain}#ALIAS#${s.alias}#SENDER#${s.senderDomain}` } },
+      DeleteRequest: { Key: { pk: pk(accountId), sk: `DOMAIN#${s.domain}#ALIAS#${s.aliasName}#SENDER#${s.senderDomain}` } },
     }));
     while (requestItems.length > 0) {
       const res = await dynamo.send(new BatchWriteCommand({
@@ -317,8 +317,8 @@ export class AccountDatabase {
     if (sendersResult.isErr()) return err(sendersResult.error);
     const senders = sendersResult.value;
 
-    const { domain: newDomain, alias: newLocal } = parseAddress(newAddress);
-    const renamed: Alias = { ...old, address: newAddress, domain: newDomain, alias: newLocal, updatedAt: DateTime.utc().toISO()! };
+    const { domain: newDomain, aliasName: newAliasName } = parseAddress(newAddress);
+    const renamed: Alias = { ...old, aliasAddress: newAddress, domain: newDomain, aliasName: newAliasName, updatedAt: DateTime.utc().toISO()! };
     const saveResult = await this.saveAlias(renamed);
     if (saveResult.isErr()) return err(saveResult.error);
 
@@ -335,21 +335,21 @@ export class AccountDatabase {
   }
 
   // ---------------------------------------------------------------------------
-  // Alias Senders — SK = DOMAIN#{domain}#ALIAS#{alias}#SENDER#{senderDomain}
-  // GSI: gsi1pk = SENDER#{senderDomain}, gsi1sk = ACCT#{accountId}#DOMAIN#{domain}#ALIAS#{alias}
+  // Alias Senders — SK = DOMAIN#{domain}#ALIAS#{aliasName}#SENDER#{senderDomain}
+  // GSI: gsi1pk = SENDER#{senderDomain}, gsi1sk = ACCT#{accountId}#DOMAIN#{domain}#ALIAS#{aliasName}
   // ---------------------------------------------------------------------------
 
-  async saveSender(accountId: string, address: string, senderDomain: string, policy?: SenderPolicy): Promise<Result<void, DbError>> {
-    const { domain, alias } = parseAddress(address);
+  async saveSender(accountId: string, aliasAddress: string, senderDomain: string, policy?: SenderPolicy): Promise<Result<void, DbError>> {
+    const { domain, aliasName } = parseAddress(aliasAddress);
     try {
       await dynamo.send(new PutCommand({
         TableName: ACCOUNTS_TABLE,
         Item: {
           pk: pk(accountId),
-          sk: `DOMAIN#${domain}#ALIAS#${alias}#SENDER#${senderDomain}`,
+          sk: `DOMAIN#${domain}#ALIAS#${aliasName}#SENDER#${senderDomain}`,
           gsi1pk: `SENDER#${senderDomain}`,
-          gsi1sk: `ACCT#${accountId}#DOMAIN#${domain}#ALIAS#${alias}`,
-          accountId, aliasAddress: address, domain, alias, senderDomain,
+          gsi1sk: `ACCT#${accountId}#DOMAIN#${domain}#ALIAS#${aliasName}`,
+          accountId, aliasAddress, domain, aliasName, senderDomain,
           policy: policy ?? "allow",
           addedAt: DateTime.utc().toISO()!,
         },
@@ -360,12 +360,12 @@ export class AccountDatabase {
     }
   }
 
-  async removeSender(accountId: string, address: string, senderDomain: string): Promise<Result<void, DbError>> {
-    const { domain, alias } = parseAddress(address);
+  async removeSender(accountId: string, aliasAddress: string, senderDomain: string): Promise<Result<void, DbError>> {
+    const { domain, aliasName } = parseAddress(aliasAddress);
     try {
       await dynamo.send(new DeleteCommand({
         TableName: ACCOUNTS_TABLE,
-        Key: { pk: pk(accountId), sk: `DOMAIN#${domain}#ALIAS#${alias}#SENDER#${senderDomain}` },
+        Key: { pk: pk(accountId), sk: `DOMAIN#${domain}#ALIAS#${aliasName}#SENDER#${senderDomain}` },
       }));
       return ok(undefined);
     } catch (e) {
@@ -373,12 +373,12 @@ export class AccountDatabase {
     }
   }
 
-  async getSender(accountId: string, address: string, senderDomain: string): Promise<Result<AliasSender | null, DbError>> {
-    const { domain, alias } = parseAddress(address);
+  async getSender(accountId: string, aliasAddress: string, senderDomain: string): Promise<Result<AliasSender | null, DbError>> {
+    const { domain, aliasName } = parseAddress(aliasAddress);
     try {
       const res = await dynamo.send(new GetCommand({
         TableName: ACCOUNTS_TABLE,
-        Key: { pk: pk(accountId), sk: `DOMAIN#${domain}#ALIAS#${alias}#SENDER#${senderDomain}` },
+        Key: { pk: pk(accountId), sk: `DOMAIN#${domain}#ALIAS#${aliasName}#SENDER#${senderDomain}` },
       }));
       return ok(res.Item ? (res.Item as AliasSender) : null);
     } catch (e) {
@@ -386,8 +386,8 @@ export class AccountDatabase {
     }
   }
 
-  async listSenders(accountId: string, address: string): Promise<Result<AliasSender[], DbError>> {
-    const { domain, alias } = parseAddress(address);
+  async listSenders(accountId: string, aliasAddress: string): Promise<Result<AliasSender[], DbError>> {
+    const { domain, aliasName } = parseAddress(aliasAddress);
     try {
       const senders: AliasSender[] = [];
       let lastKey: Record<string, unknown> | undefined;
@@ -395,7 +395,7 @@ export class AccountDatabase {
         const res = await dynamo.send(new QueryCommand({
           TableName: ACCOUNTS_TABLE,
           KeyConditionExpression: "pk = :pk AND begins_with(sk, :prefix)",
-          ExpressionAttributeValues: { ":pk": pk(accountId), ":prefix": `DOMAIN#${domain}#ALIAS#${alias}#SENDER#` },
+          ExpressionAttributeValues: { ":pk": pk(accountId), ":prefix": `DOMAIN#${domain}#ALIAS#${aliasName}#SENDER#` },
           ...(lastKey ? { ExclusiveStartKey: lastKey } : {}),
         }));
         senders.push(...(res.Items ?? []) as AliasSender[]);

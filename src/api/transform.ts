@@ -221,7 +221,6 @@ export function toApiDomainWithRecords(domain: DbDomain, records: DnsRecord[]): 
 export function toApiAlias(alias: DbAlias): Api.Alias {
   return {
     alias: alias.id,
-    address: alias.address,
     unknownSenderPolicy: alias.unknownSenderPolicy as Api.Alias["unknownSenderPolicy"],
     createdAt: alias.createdAt,
     updatedAt: alias.updatedAt,
