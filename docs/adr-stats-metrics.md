@@ -140,7 +140,7 @@ Key properties:
 ### Metric Extensibility
 
 ```typescript
-export const STATS_METRICS = ["allowed", "blocked", "quarantined", "violationReport", "totalAliases"] as const;
+export const STATS_METRICS = ["allowed", "blocked", "quarantined", "reported", "totalAliases"] as const;
 ```
 
 Adding a new metric (e.g. `totalForwardedEmails`):

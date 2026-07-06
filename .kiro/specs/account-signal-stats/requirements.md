@@ -26,7 +26,7 @@ Track per-account signal receiving statistics in the email-catcher backend. The 
 #### Acceptance Criteria
 
 1. WHEN the Processor determines a Signal_Outcome for a signal with status `active`, `quarantine_visible`, `quarantine_hidden`, `block_hidden`, `block_reject`, or `report_violation`, THE Stats_Writer SHALL increment by 1 the corresponding Lifetime_Counter, Daily_Counter, Monthly_Counter, and Yearly_Counter in a single DynamoDB UpdateCommand, using the current UTC date at processing time to determine the Daily, Monthly, and Yearly attribute names.
-2. THE Stats_Writer SHALL map signal statuses to outcome categories as follows: `active` → `allowed`, `quarantine_visible` or `quarantine_hidden` → `quarantined`, `block_hidden` or `block_reject` → `blocked`, `report_violation` → `violationReport`.
+2. THE Stats_Writer SHALL map signal statuses to outcome categories as follows: `active` → `allowed`, `quarantine_visible` or `quarantine_hidden` → `quarantined`, `block_hidden` or `block_reject` → `blocked`, `report_violation` → `reported`.
 3. THE Stats_Writer SHALL increment the `totalSignals` Lifetime_Counter by 1 for every processed signal with a non-draft status, regardless of outcome category.
 4. THE Stats_Writer SHALL use DynamoDB `ADD` expressions for all counter increments, which initializes non-existent attributes to 0 before adding.
 5. IF a signal has status `draft`, THEN THE Stats_Writer SHALL NOT increment any counters.
@@ -50,10 +50,10 @@ Track per-account signal receiving statistics in the email-catcher backend. The 
 #### Acceptance Criteria
 
 1. THE Stats_Row SHALL be stored with `pk: ACCT#${accountId}` and `sk: STATS` in the ACCOUNTS_TABLE.
-2. THE Stats_Row SHALL store Lifetime_Counters as DynamoDB Number attributes named `totalSignals`, `totalAllowed`, `totalBlocked`, `totalQuarantined`, and `totalViolationReport`.
-3. THE Stats_Row SHALL store Daily_Counters as DynamoDB Number attributes named `d_YYYY-MM-DD_<category>` where the date is in UTC and category is one of `allowed`, `blocked`, `quarantined`, `violationReport`.
-4. THE Stats_Row SHALL store Monthly_Counters as DynamoDB Number attributes named `m_YYYY-MM_<category>` where the month is in UTC and category is one of `allowed`, `blocked`, `quarantined`, `violationReport`.
-5. THE Stats_Row SHALL store Yearly_Counters as DynamoDB Number attributes named `y_YYYY_<category>` where the year is in UTC and category is one of `allowed`, `blocked`, `quarantined`, `violationReport`.
+2. THE Stats_Row SHALL store Lifetime_Counters as DynamoDB Number attributes named `totalSignals`, `totalAllowed`, `totalBlocked`, `totalQuarantined`, and `totalreported`.
+3. THE Stats_Row SHALL store Daily_Counters as DynamoDB Number attributes named `d_YYYY-MM-DD_<category>` where the date is in UTC and category is one of `allowed`, `blocked`, `quarantined`, `reported`.
+4. THE Stats_Row SHALL store Monthly_Counters as DynamoDB Number attributes named `m_YYYY-MM_<category>` where the month is in UTC and category is one of `allowed`, `blocked`, `quarantined`, `reported`.
+5. THE Stats_Row SHALL store Yearly_Counters as DynamoDB Number attributes named `y_YYYY_<category>` where the year is in UTC and category is one of `allowed`, `blocked`, `quarantined`, `reported`.
 
 ### Requirement 4: Read Stats via API
 
@@ -62,7 +62,7 @@ Track per-account signal receiving statistics in the email-catcher backend. The 
 #### Acceptance Criteria
 
 1. WHEN a GET request is received at `/accounts/:accountId/stats`, THE Stats_Reader SHALL retrieve the Stats_Row using a single DynamoDB GetItem operation and return an HTTP 200 response.
-2. THE Stats_Reader SHALL return a JSON response with four top-level keys: `lifetime` (object containing `totalSignals`, `totalAllowed`, `totalBlocked`, `totalQuarantined`, `totalViolationReport`), `daily` (array of objects each containing `date` as `YYYY-MM-DD` string and `allowed`, `blocked`, `quarantined`, `violationReport` integer counters), `monthly` (array of objects each containing `month` as `YYYY-MM` string and the same four counters), and `yearly` (array of objects each containing `year` as `YYYY` string and the same four counters).
+2. THE Stats_Reader SHALL return a JSON response with four top-level keys: `lifetime` (object containing `totalSignals`, `totalAllowed`, `totalBlocked`, `totalQuarantined`, `totalreported`), `daily` (array of objects each containing `date` as `YYYY-MM-DD` string and `allowed`, `blocked`, `quarantined`, `reported` integer counters), `monthly` (array of objects each containing `month` as `YYYY-MM` string and the same four counters), and `yearly` (array of objects each containing `year` as `YYYY` string and the same four counters).
 3. IF the Stats_Row does not exist for the account, THEN THE Stats_Reader SHALL return an HTTP 200 response with all lifetime counters set to zero and empty arrays for daily, monthly, and yearly.
 4. THE Stats_Reader SHALL sort daily entries by date descending, monthly entries by month descending, and yearly entries by year descending.
 5. THE Stats_Reader SHALL require the same authorization as other account-scoped endpoints (`stats:read` permission on `accounts/${accountId}/stats`).
