@@ -58,7 +58,7 @@ function makeThreadDb() {
     deleteSignal: vi.fn().mockResolvedValue(ok(undefined)),
     unblockSignal: vi.fn().mockResolvedValue(ok(undefined)),
     createThread: vi.fn().mockResolvedValue(ok(undefined)),
-    searchThreads: vi.fn().mockResolvedValue(ok({ items: [] })),
+    batchGetThreads: vi.fn().mockResolvedValue(ok([])),
   };
 }
 

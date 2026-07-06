@@ -22,6 +22,9 @@ import type { EmailService } from "../email/email-service.js";
 import type { sendRsvp as SendRsvpFn } from "../processor/calendar/rsvp-composer.js";
 import type { PostApprovalCalendarHandlerDeps } from "../processor/calendar/post-approval-handler.js";
 import type { SchedulerClient } from "../scheduler/scheduler-client.js";
+import { getPrimaryThreadMatcherRegistry } from "../embedding/cluster-registry.js";
+import type { EmbeddingGenerator } from "../embedding/embedding-generator.js";
+import type { ThreadMatcher } from "../database/thread-matcher.js";
 import type { ProcessorError, NotFoundError } from "../errors.js";
 import type { Result } from "neverthrow";
 import {
@@ -67,10 +70,12 @@ export class ThreadsApi {
     private readonly s3Client: S3Client,
     private readonly emailBucket: string,
     private readonly contentCdnBaseUrl: string,
+    private readonly embeddingGenerator: EmbeddingGenerator,
+    private readonly threadMatcher: ThreadMatcher,
   ) {}
 
   register(app: OpenAPIHono<AppEnv>, { authz, err, route }: RouteHelpers): void {
-    const { threadDb, accountDb, logger, draftSendDispatcher, schedulerClient, emailService, rsvpComposer, postApprovalCalendarDeps, signalReprocessor, s3Client, emailBucket, contentCdnBaseUrl } = this;
+    const { threadDb, accountDb, logger, draftSendDispatcher, schedulerClient, emailService, rsvpComposer, postApprovalCalendarDeps, signalReprocessor, s3Client, emailBucket, contentCdnBaseUrl, embeddingGenerator, threadMatcher } = this;
 
     // -------------------------------------------------------------------------
     // 1. GET /accounts/{accountId}/threads — list threads
@@ -90,16 +95,37 @@ export class ThreadsApi {
       const query = c.req.query();
       const q = query["q"];
       if (q) {
-        const params: PageParams = {
-          ...(query["cursor"] ? { cursor: query["cursor"] } : {}),
-          ...(query["limit"] ? { limit: parseInt(query["limit"], 10) } : {}),
-        };
-        const result = await threadDb.searchThreads(accountId, q, params);
-        if (result.isErr()) {
-          logger.error("Failed to search threads.", { code: "api.threads.search_failed", error: result.error });
+        if (q.length < 3 || q.length > 64) {
+          return err(c, 400, "Query must be between 3 and 64 characters");
+        }
+
+        const embeddingResult = await embeddingGenerator.generateForModel(
+          q, getPrimaryThreadMatcherRegistry().modelId
+        );
+        if (embeddingResult.isErr()) {
+          logger.error("Embedding generation failed for search.", { code: "api.threads.search_embed_failed", error: embeddingResult.error });
+          return err(c, 503, "Search temporarily unavailable");
+        }
+
+        const threadIdsResult = await threadMatcher.searchByVector(
+          accountId, embeddingResult.value.vector, 10
+        );
+        if (threadIdsResult.isErr()) {
+          logger.error("Vector search failed.", { code: "api.threads.search_vector_failed", error: threadIdsResult.error });
+          return err(c, 503, "Search temporarily unavailable");
+        }
+
+        if (threadIdsResult.value.length === 0) {
+          return c.json(page("threads", [], undefined), 200);
+        }
+
+        const threadsResult = await threadDb.batchGetThreads(accountId, threadIdsResult.value);
+        if (threadsResult.isErr()) {
+          logger.error("Failed to hydrate search results.", { code: "api.threads.search_hydrate_failed", error: threadsResult.error });
           return err(c, 500, "Internal Server Error");
         }
-        return c.json(page("threads", result.value.items.map(toApiThread), result.value.nextCursor), 200);
+
+        return c.json(page("threads", threadsResult.value.map(toApiThread), undefined), 200);
       }
       const params: ListThreadsParams = {
         ...(query["workflow"] ? { workflow: query["workflow"] as Workflow } : {}),
