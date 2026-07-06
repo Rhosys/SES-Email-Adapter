@@ -54,14 +54,14 @@ const TEST_ACCOUNT_ID = "acct-001";
 // Default context: sender example.com is pre-approved so most tests exercise the happy path without triggering the filter-mode fallback.
 // Tests that specifically test sender filtering use explicit mockResolvedValueOnce overrides.
 const DEFAULT_EMAIL_CONFIG: Alias = {
-  id: "cfg-default", accountId: TEST_ACCOUNT_ID, address: "user@example.com", domain: "example.com", alias: "user",
+  id: "cfg-default", accountId: TEST_ACCOUNT_ID, aliasAddress: "user@example.com", domain: "example.com", aliasName: "user",
   unknownSenderPolicy: "quarantine_visible",
   createdAt: "2024-01-01T00:00:00Z", updatedAt: "2024-01-01T00:00:00Z",
 };
 
 // Default AliasSender: marks example.com as an allowed sender for the default alias.
 const DEFAULT_SENDER_ENTRY: import("../../src/types/index.js").AliasSender = {
-  accountId: TEST_ACCOUNT_ID, aliasAddress: "user@example.com", domain: "example.com", alias: "user", senderDomain: "example.com", policy: "allow", addedAt: "2024-01-01T00:00:00Z",
+  accountId: TEST_ACCOUNT_ID, aliasAddress: "user@example.com", domain: "example.com", aliasName: "user", senderDomain: "example.com", policy: "allow", addedAt: "2024-01-01T00:00:00Z",
 };
 const DEFAULT_CTX = { retentionDuration: "P3M", filtering: null, aliasConfig: DEFAULT_EMAIL_CONFIG, registeredDomains: [], userEmails: [], billingPlan: "Paid" as const, onboardingCompleted: true } satisfies CtxLike;
 
@@ -86,9 +86,9 @@ function makeAlias(overrides: Partial<Alias> = {}): Alias {
   return {
     id: "cfg-001",
     accountId: TEST_ACCOUNT_ID,
-    address: "user@example.com",
+    aliasAddress: "user@example.com",
     domain: "example.com",
-    alias: "user",
+    aliasName: "user",
     unknownSenderPolicy: "quarantine_visible",
     createdAt: "2024-01-01T00:00:00Z",
     updatedAt: "2024-01-01T00:00:00Z",
@@ -98,7 +98,7 @@ function makeAlias(overrides: Partial<Alias> = {}): Alias {
 
 // Helper to make an AliasSender entry (approved sender for a given alias+domain).
 function makeAliasSenderConfig(domain: string, aliasAddress = "user@example.com"): import("../../src/types/index.js").AliasSender {
-  return { accountId: TEST_ACCOUNT_ID, aliasAddress, domain: "example.com", alias: "user", senderDomain: domain, policy: "allow", addedAt: "2024-01-01T00:00:00Z" };
+  return { accountId: TEST_ACCOUNT_ID, aliasAddress, domain: "example.com", aliasName: "user", senderDomain: domain, policy: "allow", addedAt: "2024-01-01T00:00:00Z" };
 }
 
 function makeContentSanitizer(): ContentSanitizerClient {

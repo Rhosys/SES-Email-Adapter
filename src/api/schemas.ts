@@ -528,7 +528,6 @@ export const DomainWithRecords = Domain.extend({
 
 export const Alias = z.object({
   alias: z.string().readonly(),
-  address: z.string(),
   unknownSenderPolicy: UnknownSenderPolicy,
   createdAt: z.string().readonly(),
   updatedAt: z.string().readonly(),

@@ -79,15 +79,15 @@ function makeThreadDb() {
 function makeAccountDb() {
   const getAlias = vi.fn().mockResolvedValue(ok(null));
   const saveAlias = vi.fn().mockResolvedValue(ok(makeAlias()));
-  const ensureAlias = vi.fn().mockImplementation(async (accountId: string, address: string, defaultUnknownSenderPolicy: string, existing?: unknown) => {
+  const ensureAlias = vi.fn().mockImplementation(async (accountId: string, aliasAddress: string, defaultUnknownSenderPolicy: string, existing?: unknown) => {
     let alias = existing;
     if (alias === undefined) {
-      const existingResult = await getAlias(accountId, address);
+      const existingResult = await getAlias(accountId, aliasAddress);
       if (existingResult.isErr()) return existingResult;
       alias = existingResult.value;
     }
     if (alias) return ok(alias);
-    return saveAlias({ id: address, accountId, address, domain: address.split("@")[1], alias: address.split("@")[0], unknownSenderPolicy: defaultUnknownSenderPolicy, createdAt: "", updatedAt: "" });
+    return saveAlias({ id: aliasAddress, accountId, aliasAddress, domain: aliasAddress.split("@")[1], aliasName: aliasAddress.split("@")[0], unknownSenderPolicy: defaultUnknownSenderPolicy, createdAt: "", updatedAt: "" });
   });
   return {
     listViews: vi.fn().mockResolvedValue(ok([])),
@@ -163,11 +163,11 @@ function makeForwardingTarget(overrides: Partial<ForwardingTarget> = {}): Forwar
 
 function makeAlias(overrides: Partial<Alias> = {}): Alias {
   return {
-    id: "cfg-001",
+    id: "user@example.com",
     accountId: TEST_ACCOUNT_ID,
-    address: "user@example.com",
+    aliasAddress: "user@example.com",
     domain: "example.com",
-    alias: "user",
+    aliasName: "user",
     unknownSenderPolicy: "quarantine_visible",
     createdAt: "2024-01-01T00:00:00Z",
     updatedAt: "2024-01-01T00:00:00Z",
@@ -517,13 +517,13 @@ describe("API", () => {
       vi.mocked(accountDb.getAlias).mockResolvedValueOnce(ok(null));
       const res = await req(app, "POST", `${A}/signals/SES%23msg-001/quarantineResponse`, { body: { status: "block_hidden" } });
       expect(res.status).toBe(200);
-      expect(accountDb.saveAlias).toHaveBeenCalledWith(expect.objectContaining({ accountId: TEST_ACCOUNT_ID, address: s.data.recipientAddress }));
+      expect(accountDb.saveAlias).toHaveBeenCalledWith(expect.objectContaining({ accountId: TEST_ACCOUNT_ID, aliasAddress: s.data.recipientAddress }));
     });
 
     it("does not recreate the alias when denying a quarantined signal for a known address", async () => {
       const s = makeSignal({ status: "quarantine_visible" });
       vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(s));
-      vi.mocked(accountDb.getAlias).mockResolvedValueOnce(ok(makeAlias({ address: s.data.recipientAddress })));
+      vi.mocked(accountDb.getAlias).mockResolvedValueOnce(ok(makeAlias({ aliasAddress: s.data.recipientAddress })));
       const res = await req(app, "POST", `${A}/signals/SES%23msg-001/quarantineResponse`, { body: { status: "block_hidden" } });
       expect(res.status).toBe(200);
       expect(accountDb.saveAlias).not.toHaveBeenCalled();
@@ -549,7 +549,7 @@ describe("API", () => {
       vi.mocked(accountDb.getAlias).mockResolvedValueOnce(ok(null));
       const res = await req(app, "POST", `${A}/signals/SES%23msg-001/quarantineResponse`, { body: { status: "active" } });
       expect(res.status).toBe(200);
-      expect(accountDb.saveAlias).toHaveBeenCalledWith(expect.objectContaining({ accountId: TEST_ACCOUNT_ID, address: s.data.recipientAddress }));
+      expect(accountDb.saveAlias).toHaveBeenCalledWith(expect.objectContaining({ accountId: TEST_ACCOUNT_ID, aliasAddress: s.data.recipientAddress }));
       expect(accountDb.saveSender).toHaveBeenCalledWith(TEST_ACCOUNT_ID, s.data.recipientAddress, expect.any(String), "allow");
     });
 
@@ -557,7 +557,7 @@ describe("API", () => {
       const s = makeSignal({ status: "quarantine_visible" });
       vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(s));
       vi.mocked(threadDb.findThreadByGroupingKey).mockResolvedValueOnce(ok(null));
-      vi.mocked(accountDb.getAlias).mockResolvedValueOnce(ok(makeAlias({ address: s.data.recipientAddress })));
+      vi.mocked(accountDb.getAlias).mockResolvedValueOnce(ok(makeAlias({ aliasAddress: s.data.recipientAddress })));
       const res = await req(app, "POST", `${A}/signals/SES%23msg-001/quarantineResponse`, { body: { status: "active" } });
       expect(res.status).toBe(200);
       expect(accountDb.saveAlias).not.toHaveBeenCalled();
@@ -990,8 +990,8 @@ describe("API", () => {
 
     it("cascades to delete every alias on the domain and audits both deletions", async () => {
       vi.mocked(accountDb.getDomain).mockResolvedValueOnce(ok(makeDomain()));
-      const aliasOne = makeAlias({ address: "one@example.com", alias: "one" });
-      const aliasTwo = makeAlias({ address: "two@example.com", alias: "two" });
+      const aliasOne = makeAlias({ aliasAddress: "one@example.com", aliasName: "one" });
+      const aliasTwo = makeAlias({ aliasAddress: "two@example.com", aliasName: "two" });
       vi.mocked(accountDb.listAliasesForDomain).mockResolvedValueOnce(ok([aliasOne, aliasTwo]));
 
       const res = await req(app, "DELETE", `${A}/domains/example.com`);
@@ -1179,9 +1179,9 @@ describe("API", () => {
       vi.mocked(accountDb.listAliases).mockResolvedValueOnce(ok([makeAlias()]));
       const res = await req(app, "GET", `${A}/aliases`);
       expect(res.status).toBe(200);
-      const body = await res.json() as { aliases: Array<{ address: string }> };
+      const body = await res.json() as { aliases: Array<{ alias: string }> };
       expect(body.aliases).toHaveLength(1);
-      expect(body.aliases[0]!.address).toBe("user@example.com");
+      expect(body.aliases[0]!.alias).toBe("user@example.com");
     });
   });
 
@@ -1203,15 +1203,15 @@ describe("API", () => {
   describe("POST /accounts/:accountId/aliases", () => {
     it("creates an alias and returns 201 + full resource", async () => {
       vi.mocked(accountDb.getDomain).mockResolvedValueOnce(ok(makeDomain({ domain: "mydomain.com" })));
-      vi.mocked(accountDb.createAlias).mockResolvedValueOnce(ok(makeAlias({ domain: "mydomain.com", alias: "me", address: "me@mydomain.com" })));
+      vi.mocked(accountDb.createAlias).mockResolvedValueOnce(ok(makeAlias({ id: "me@mydomain.com", domain: "mydomain.com", aliasName: "me", aliasAddress: "me@mydomain.com" })));
       const res = await req(app, "POST", `${A}/aliases`, {
         body: { address: "me@mydomain.com", unknownSenderPolicy: "block_hidden" },
       });
       expect(res.status).toBe(201);
-      const body = await res.json() as { address: string };
-      expect(body.address).toBe("me@mydomain.com");
+      const body = await res.json() as { alias: string };
+      expect(body.alias).toBe("me@mydomain.com");
       expect(accountDb.createAlias).toHaveBeenCalledWith(
-        expect.objectContaining({ accountId: TEST_ACCOUNT_ID, domain: "mydomain.com", alias: "me", unknownSenderPolicy: "block_hidden" }),
+        expect.objectContaining({ accountId: TEST_ACCOUNT_ID, domain: "mydomain.com", aliasName: "me", unknownSenderPolicy: "block_hidden" }),
       );
     });
 
@@ -1258,7 +1258,7 @@ describe("API", () => {
       const body = await res.json() as Alias;
       expect(body.unknownSenderPolicy).toBe("block_hidden");
       expect(accountDb.upsertAlias).toHaveBeenCalledWith(
-        expect.objectContaining({ accountId: TEST_ACCOUNT_ID, domain: "mydomain.com", alias: "me", unknownSenderPolicy: "block_hidden" }),
+        expect.objectContaining({ accountId: TEST_ACCOUNT_ID, domain: "mydomain.com", aliasName: "me", unknownSenderPolicy: "block_hidden" }),
       );
     });
 
@@ -1274,7 +1274,7 @@ describe("API", () => {
 
     it("renames alias when newAddress domain is registered", async () => {
       vi.mocked(accountDb.getDomain).mockResolvedValueOnce(ok(makeDomain({ domain: "newdomain.com" })));
-      vi.mocked(accountDb.renameAlias).mockResolvedValueOnce(ok(makeAlias({ address: "me@newdomain.com", domain: "newdomain.com", alias: "me" })));
+      vi.mocked(accountDb.renameAlias).mockResolvedValueOnce(ok(makeAlias({ aliasAddress: "me@newdomain.com", domain: "newdomain.com", aliasName: "me" })));
       const res = await req(app, "PATCH", `${A}/aliases/me%40mydomain.com`, {
         body: { newAddress: "me@newdomain.com" },
       });
@@ -1415,11 +1415,11 @@ describe("API", () => {
     describe("POST /accounts/:accountId/aliases — body address normalisation", () => {
       it("lowercases and trims the address before storing", async () => {
         vi.mocked(accountDb.getDomain).mockResolvedValueOnce(ok(makeDomain({ domain: "mydomain.com" })));
-        vi.mocked(accountDb.createAlias).mockResolvedValueOnce(ok(makeAlias({ domain: "mydomain.com", alias: "me", address: "me@mydomain.com" })));
+        vi.mocked(accountDb.createAlias).mockResolvedValueOnce(ok(makeAlias({ domain: "mydomain.com", aliasName: "me", aliasAddress: "me@mydomain.com" })));
         const res = await req(app, "POST", `${A}/aliases`, { body: { address: "  ME@MYDOMAIN.COM  " } });
         expect(res.status).toBe(201);
         expect(accountDb.createAlias).toHaveBeenCalledWith(
-          expect.objectContaining({ address: "me@mydomain.com", domain: "mydomain.com", alias: "me" }),
+          expect.objectContaining({ aliasAddress: "me@mydomain.com", domain: "mydomain.com", aliasName: "me" }),
         );
       });
 

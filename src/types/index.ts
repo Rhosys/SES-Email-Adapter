@@ -249,7 +249,7 @@ export const DEFAULT_UNKNOWN_SENDER_POLICY: UnknownSenderPolicy = "quarantine_vi
 export const SIGNAL_STATUSES = ["active", "block_hidden", "block_reject", "report_violation", "quarantine_visible", "quarantine_hidden", "draft", "pending_send", "sent"] as const;
 export type SignalStatus = (typeof SIGNAL_STATUSES)[number];
 
-export const STATS_CATEGORIES = ["allowed", "blocked", "quarantined", "violationReport"] as const;
+export const STATS_CATEGORIES = ["allowed", "blocked", "quarantined", "reported"] as const;
 export type StatsCategory = (typeof STATS_CATEGORIES)[number];
 
 // "email" = inbound SES email; "user" = user-created; "ses_feedback" = bounce/delivery notification
@@ -272,36 +272,36 @@ export type ThreadUrgency = (typeof THREAD_URGENCIES)[number];
 // Key types for DynamoDB hierarchical schema
 // ---------------------------------------------------------------------------
 
-/** Identifies an alias within the DOMAIN#{domain}#ALIAS#{alias} hierarchy */
+/** Identifies an alias within the ALIAS#{domain}#{aliasAddress} hierarchy */
 export interface AliasKey {
-  domain: string;  // Full domain, e.g. "acme.com"
-  alias: string;   // Local part before @, e.g. "me"
+  domain: string;      // Full domain, e.g. "acme.com"
+  aliasName: string;   // Local part before @, e.g. "me"
 }
 
-/** Identifies a sender entry within the DOMAIN#{domain}#ALIAS#{alias}#SENDER#{senderDomain} hierarchy */
+/** Identifies a sender entry within the SENDER#{domain}#{aliasAddress}#{senderDomain} hierarchy */
 export interface SenderKey extends AliasKey {
   senderDomain: string; // eTLD+1 of sender, e.g. "github.com"
 }
 
 /** Compute full email address from alias key */
 export function aliasAddress(key: AliasKey): string {
-  return `${key.alias}@${key.domain}`;
+  return `${key.aliasName}@${key.domain}`;
 }
 
 /** Parse a full email address into an AliasKey */
 export function parseAliasAddress(address: string): AliasKey {
   const atIdx = address.lastIndexOf("@");
   if (atIdx < 1) throw new Error(`Invalid email address: ${address}`);
-  return { alias: address.slice(0, atIdx), domain: address.slice(atIdx + 1) };
+  return { aliasName: address.slice(0, atIdx), domain: address.slice(atIdx + 1) };
 }
 
 // Per-recipient-address configuration (an "alias" is any address on a custom domain routed into the system)
 export interface Alias {
   id: string;
   accountId: string;
-  address: string;              // The full recipient address, e.g. me@mydomain.com
+  aliasAddress: string;         // The full recipient address, e.g. me@mydomain.com
   domain: string;               // Full domain, e.g. "acme.com"
-  alias: string;                // Local part before @, e.g. "me"
+  aliasName: string;            // Local part before @, e.g. "me"
   unknownSenderPolicy: UnknownSenderPolicy;
   // eTLD+1 of the site this alias was created for (set by the extension on alias generation)
   createdForOrigin?: string;
@@ -317,7 +317,7 @@ export interface AliasSender {
   accountId: string;
   aliasAddress: string;   // Full alias email address (e.g. "me@acme.com")
   domain: string;         // Alias's domain (e.g. "acme.com")
-  alias: string;          // Alias's local part (e.g. "me")
+  aliasName: string;      // Alias's local part (e.g. "me")
   senderDomain: string;   // eTLD+1 of sender (e.g. "github.com")
   policy: SenderPolicy;
   addedAt: string;

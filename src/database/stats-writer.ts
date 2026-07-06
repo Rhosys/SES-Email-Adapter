@@ -10,7 +10,7 @@ import type { SignalStatus } from "../types/index.js";
 // If a metric is missing from a snapshot, it defaults to zero.
 // ---------------------------------------------------------------------------
 
-export const STATS_METRICS = ["allowed", "blocked", "quarantined", "violationReport", "totalAliases"] as const;
+export const STATS_METRICS = ["allowed", "blocked", "quarantined", "reported", "totalAliases"] as const;
 export type StatsMetric = (typeof STATS_METRICS)[number];
 
 // ---------------------------------------------------------------------------
@@ -21,7 +21,7 @@ const STATUS_TO_METRIC: Record<Exclude<SignalStatus, "draft" | "pending_send" | 
   active: "allowed",
   block_hidden: "blocked",
   block_reject: "blocked",
-  report_violation: "violationReport",
+  report_violation: "reported",
   quarantine_visible: "quarantined",
   quarantine_hidden: "quarantined",
 };

@@ -221,7 +221,7 @@ describe("stats-writer integration (row-per-day design)", () => {
       const rows: StatsRow[] = [
         { pk: "ACCT#x", sk: "STATS#2026-06-15", metrics: { allowed: 5 }, ttl: 99 },
         { pk: "ACCT#x", sk: "STATS#2026-06-14", metrics: { allowed: 3 }, ttl: 99 },
-        { pk: "ACCT#x", sk: "STATS#2026-06-00-SNAPSHOT", metrics: { allowed: 100, blocked: 20, quarantined: 5, violationReport: 1, totalAliases: 10 } },
+        { pk: "ACCT#x", sk: "STATS#2026-06-00-SNAPSHOT", metrics: { allowed: 100, blocked: 20, quarantined: 5, reported: 1, totalAliases: 10 } },
       ];
       mockSend.mockResolvedValueOnce({ Items: rows });
 
@@ -282,7 +282,7 @@ describe("stats-writer integration (row-per-day design)", () => {
   describe("writeSnapshot", () => {
     it("writes a snapshot with correct SK format and all metrics", async () => {
       mockSend.mockResolvedValueOnce({});
-      const metrics = { allowed: 500, blocked: 50, quarantined: 10, violationReport: 3, totalAliases: 25 } satisfies Record<StatsMetric, number>;
+      const metrics = { allowed: 500, blocked: 50, quarantined: 10, reported: 3, totalAliases: 25 } satisfies Record<StatsMetric, number>;
 
       const result = await db.writeSnapshot("acc-test", "2026-07", metrics);
 
@@ -295,7 +295,7 @@ describe("stats-writer integration (row-per-day design)", () => {
 
     it("snapshot rows have no TTL (kept indefinitely)", async () => {
       mockSend.mockResolvedValueOnce({});
-      const metrics = { allowed: 0, blocked: 0, quarantined: 0, violationReport: 0, totalAliases: 0 } satisfies Record<StatsMetric, number>;
+      const metrics = { allowed: 0, blocked: 0, quarantined: 0, reported: 0, totalAliases: 0 } satisfies Record<StatsMetric, number>;
       await db.writeSnapshot("acc-test", "2026-07", metrics);
       const input = mockSend.mock.calls[0]![0].input;
       expect(input.Item.ttl).toBeUndefined();
@@ -303,7 +303,7 @@ describe("stats-writer integration (row-per-day design)", () => {
 
     it("returns err on DynamoDB failure", async () => {
       mockSend.mockRejectedValueOnce(new Error("DDB timeout"));
-      const metrics = { allowed: 0, blocked: 0, quarantined: 0, violationReport: 0, totalAliases: 0 } satisfies Record<StatsMetric, number>;
+      const metrics = { allowed: 0, blocked: 0, quarantined: 0, reported: 0, totalAliases: 0 } satisfies Record<StatsMetric, number>;
       const result = await db.writeSnapshot("acc-test", "2026-07", metrics);
       expect(result.isErr()).toBe(true);
     });
@@ -338,7 +338,7 @@ describe("stats-writer integration (row-per-day design)", () => {
       const rows: StatsRow[] = [
         { pk: "ACCT#x", sk: "STATS#2026-06-15", metrics: { allowed: 5, blocked: 1 }, ttl: 99 },
         { pk: "ACCT#x", sk: "STATS#2026-06-01", metrics: { allowed: 10, totalAliases: 2 }, ttl: 99 },
-        { pk: "ACCT#x", sk: "STATS#2026-06-00-SNAPSHOT", metrics: { allowed: 1000, blocked: 200, quarantined: 50, violationReport: 5, totalAliases: 30 } },
+        { pk: "ACCT#x", sk: "STATS#2026-06-00-SNAPSHOT", metrics: { allowed: 1000, blocked: 200, quarantined: 50, reported: 5, totalAliases: 30 } },
       ];
       mockSend.mockResolvedValueOnce({ Items: rows });
 
@@ -354,7 +354,7 @@ describe("stats-writer integration (row-per-day design)", () => {
         { pk: "ACCT#x", sk: "STATS#2026-07-01", metrics: { allowed: 3 }, ttl: 99 },
         { pk: "ACCT#x", sk: "STATS#2026-06-10", metrics: { allowed: 30, blocked: 5 }, ttl: 99 },
         { pk: "ACCT#x", sk: "STATS#2026-05-15", metrics: { allowed: 20 }, ttl: 99 },
-        { pk: "ACCT#x", sk: "STATS#2026-05-00-SNAPSHOT", metrics: { allowed: 500, blocked: 100, quarantined: 20, violationReport: 2, totalAliases: 15 } },
+        { pk: "ACCT#x", sk: "STATS#2026-05-00-SNAPSHOT", metrics: { allowed: 500, blocked: 100, quarantined: 20, reported: 2, totalAliases: 15 } },
       ];
       mockSend.mockResolvedValueOnce({ Items: rows });
 

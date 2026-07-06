@@ -26,7 +26,7 @@ describe("statusToMetric", () => {
     { status: "active", expected: "allowed" },
     { status: "block_hidden", expected: "blocked" },
     { status: "block_reject", expected: "blocked" },
-    { status: "report_violation", expected: "violationReport" },
+    { status: "report_violation", expected: "reported" },
     { status: "quarantine_visible", expected: "quarantined" },
     { status: "quarantine_hidden", expected: "quarantined" },
   ] as const)("maps $status → $expected", ({ status, expected }) => {
@@ -190,12 +190,12 @@ describe("computeSnapshot", () => {
     expect(result.allowed).toBe(8);
     expect(result.blocked).toBe(2);
     expect(result.quarantined).toBe(1);
-    expect(result.violationReport).toBe(0);
+    expect(result.reported).toBe(0);
     expect(result.totalAliases).toBe(0);
   });
 
   it("applies diffs to an existing base snapshot", () => {
-    const base: Record<StatsMetric, number> = { allowed: 100, blocked: 20, quarantined: 5, violationReport: 1, totalAliases: 10 };
+    const base: Record<StatsMetric, number> = { allowed: 100, blocked: 20, quarantined: 5, reported: 1, totalAliases: 10 };
     const result = computeSnapshot(base, [
       { allowed: 10, totalAliases: 2 },
       { blocked: 3, totalAliases: -1 },
@@ -207,20 +207,20 @@ describe("computeSnapshot", () => {
   });
 
   it("handles negative diffs correctly (metrics can go negative)", () => {
-    const base: Record<StatsMetric, number> = { allowed: 2, blocked: 0, quarantined: 0, violationReport: 0, totalAliases: 3 };
+    const base: Record<StatsMetric, number> = { allowed: 2, blocked: 0, quarantined: 0, reported: 0, totalAliases: 3 };
     const result = computeSnapshot(base, [{ totalAliases: -5 }]);
     expect(result.totalAliases).toBe(-2);
   });
 
   it("empty diffs array returns the base unchanged (plus any missing metrics zeroed)", () => {
-    const base: Record<StatsMetric, number> = { allowed: 50, blocked: 10, quarantined: 3, violationReport: 0, totalAliases: 7 };
+    const base: Record<StatsMetric, number> = { allowed: 50, blocked: 10, quarantined: 3, reported: 0, totalAliases: 7 };
     const result = computeSnapshot(base, []);
     expect(result).toEqual(base);
   });
 
   it("handles a base snapshot missing a metric (future-proofing)", () => {
     // Simulate an old snapshot that doesn't have totalAliases
-    const oldBase = { allowed: 50, blocked: 10, quarantined: 3, violationReport: 0 } as unknown as Record<StatsMetric, number>;
+    const oldBase = { allowed: 50, blocked: 10, quarantined: 3, reported: 0 } as unknown as Record<StatsMetric, number>;
     const result = computeSnapshot(oldBase, [{ totalAliases: 5 }]);
     expect(result.totalAliases).toBe(5);
     expect(result.allowed).toBe(50);
@@ -275,7 +275,7 @@ describe("aggregateStatsRows", () => {
   it("snapshot + diffs — totals = snapshot + diffs from snapshot month onward", () => {
     const rows: StatsRow[] = [
       // May snapshot (cumulative through April)
-      makeSnapshot("2026-05", { allowed: 100, blocked: 20, quarantined: 5, violationReport: 1, totalAliases: 10 }),
+      makeSnapshot("2026-05", { allowed: 100, blocked: 20, quarantined: 5, reported: 1, totalAliases: 10 }),
       // May diffs (same month as snapshot — included in totals)
       makeDiff("2026-05-01", { allowed: 10 }),
       makeDiff("2026-05-15", { allowed: 5, blocked: 2 }),
@@ -323,7 +323,7 @@ describe("aggregateStatsRows", () => {
 
   it("snapshot is not included in daily or monthly breakdown", () => {
     const rows: StatsRow[] = [
-      makeSnapshot("2026-06", { allowed: 100, blocked: 20, quarantined: 5, violationReport: 1, totalAliases: 10 }),
+      makeSnapshot("2026-06", { allowed: 100, blocked: 20, quarantined: 5, reported: 1, totalAliases: 10 }),
       makeDiff("2026-06-15", { allowed: 3 }),
     ];
     const result = aggregateStatsRows(rows);
@@ -334,9 +334,9 @@ describe("aggregateStatsRows", () => {
 
   it("multiple snapshots — uses the latest one", () => {
     const rows: StatsRow[] = [
-      makeSnapshot("2026-04", { allowed: 50, blocked: 10, quarantined: 2, violationReport: 0, totalAliases: 5 }),
+      makeSnapshot("2026-04", { allowed: 50, blocked: 10, quarantined: 2, reported: 0, totalAliases: 5 }),
       makeDiff("2026-04-15", { allowed: 10 }),
-      makeSnapshot("2026-05", { allowed: 80, blocked: 15, quarantined: 3, violationReport: 0, totalAliases: 7 }),
+      makeSnapshot("2026-05", { allowed: 80, blocked: 15, quarantined: 3, reported: 0, totalAliases: 7 }),
       makeDiff("2026-05-10", { allowed: 5 }),
       makeDiff("2026-06-01", { allowed: 2 }),
     ];
@@ -350,7 +350,7 @@ describe("aggregateStatsRows", () => {
   it("diffs before the snapshot month are excluded from totals but included in daily/monthly", () => {
     const rows: StatsRow[] = [
       makeDiff("2026-04-20", { allowed: 50 }),
-      makeSnapshot("2026-05", { allowed: 200, blocked: 30, quarantined: 10, violationReport: 2, totalAliases: 12 }),
+      makeSnapshot("2026-05", { allowed: 200, blocked: 30, quarantined: 10, reported: 2, totalAliases: 12 }),
       makeDiff("2026-05-05", { allowed: 8 }),
     ];
     const result = aggregateStatsRows(rows);
@@ -363,7 +363,7 @@ describe("aggregateStatsRows", () => {
 
   it("handles negative diff values in totals", () => {
     const rows: StatsRow[] = [
-      makeSnapshot("2026-06", { allowed: 100, blocked: 20, quarantined: 5, violationReport: 0, totalAliases: 10 }),
+      makeSnapshot("2026-06", { allowed: 100, blocked: 20, quarantined: 5, reported: 0, totalAliases: 10 }),
       makeDiff("2026-06-10", { totalAliases: -3 }),
       makeDiff("2026-06-11", { totalAliases: 1 }),
     ];
@@ -376,7 +376,7 @@ describe("aggregateStatsRows", () => {
     const oldSnap: StatsSnapshotRow = {
       pk: "ACCT#x",
       sk: buildSnapshotSk("2026-05"),
-      metrics: { allowed: 100, blocked: 20, quarantined: 5, violationReport: 1 } as unknown as Record<StatsMetric, number>,
+      metrics: { allowed: 100, blocked: 20, quarantined: 5, reported: 1 } as unknown as Record<StatsMetric, number>,
     };
     const rows: StatsRow[] = [
       oldSnap,
@@ -412,20 +412,20 @@ describe("aggregateStatsRows", () => {
     expect(result.monthly).toEqual([{ date: "2026-06", allowed: 7, quarantined: 1, blocked: 2, aliases: 0 }]);
   });
 
-  it("violationReport is tracked in totals but not exposed in daily/monthly buckets", () => {
+  it("reported is tracked in totals but not exposed in daily/monthly buckets", () => {
     const rows: StatsRow[] = [
-      makeDiff("2026-06-15", { violationReport: 3, allowed: 1 }),
+      makeDiff("2026-06-15", { reported: 3, allowed: 1 }),
     ];
     const result = aggregateStatsRows(rows);
-    // violationReport contributes to internal computation but API totals don't expose it
+    // reported contributes to internal computation but API totals don't expose it
     expect(result.daily[0]).toEqual({ date: "2026-06-15", allowed: 1, quarantined: 0, blocked: 0, aliases: 0 });
     // totals only include allowed, quarantined, blocked, totalAliases
-    expect("violationReport" in result.totals).toBe(false);
+    expect("reported" in result.totals).toBe(false);
   });
 
   it("rows passed in descending order produce identical results to ascending (defensive sort)", () => {
     const ascending: StatsRow[] = [
-      makeSnapshot("2026-05", { allowed: 80, blocked: 15, quarantined: 3, violationReport: 0, totalAliases: 7 }),
+      makeSnapshot("2026-05", { allowed: 80, blocked: 15, quarantined: 3, reported: 0, totalAliases: 7 }),
       makeDiff("2026-05-10", { allowed: 5, totalAliases: 1 }),
       makeDiff("2026-06-01", { allowed: 2, blocked: 1 }),
       makeDiff("2026-06-15", { allowed: 3 }),
@@ -443,7 +443,7 @@ describe("aggregateStatsRows", () => {
   it("rows in random order still produce correct totals", () => {
     const rows: StatsRow[] = [
       makeDiff("2026-06-15", { allowed: 3 }),
-      makeSnapshot("2026-05", { allowed: 80, blocked: 15, quarantined: 3, violationReport: 0, totalAliases: 7 }),
+      makeSnapshot("2026-05", { allowed: 80, blocked: 15, quarantined: 3, reported: 0, totalAliases: 7 }),
       makeDiff("2026-05-10", { allowed: 5 }),
       makeDiff("2026-06-01", { allowed: 2 }),
     ];
