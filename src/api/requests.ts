@@ -22,7 +22,7 @@ const SortDirection = z.enum(["asc", "desc"]);
 const AccountRole = z.enum(["admin", "member", "viewer"]);
 const RuleActionType = z.enum([
   "assign_label", "assign_workflow", "archive", "forward",
-  "block_hidden", "block_reject", "quarantine", "quarantine_hidden", "set_urgency", "suppress_notification", "pong", "approve_sender",
+  "block_hidden", "block_reject", "quarantine_visible", "quarantine_hidden", "set_urgency", "suppress_notification", "pong", "approve_sender",
   "auto_draft", "forwardCalendarInvite",
 ]);
 const RuleStatus = z.enum(["enabled", "disabled"]);
