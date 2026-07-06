@@ -1,4 +1,4 @@
-import { DeleteCommand, GetCommand, PutCommand, QueryCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
+import { BatchGetCommand, DeleteCommand, GetCommand, PutCommand, QueryCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { DateTime } from "luxon";
 import { dynamo, SIGNALS_TABLE, encodeCursor, decodeCursor } from "./shared.js";
 import { ok, err, dbError } from "../errors.js";
@@ -517,39 +517,7 @@ export class ThreadDatabase {
     }
   }
 
-  async searchThreads(accountId: string, query: string, params: PageParams): Promise<Result<Page<Thread>, DbError>> {
-    const limit = Math.min(params.limit ?? 20, 100);
-    try {
-      const res = await dynamo.send(new QueryCommand({
-        TableName: SIGNALS_TABLE,
-        IndexName: "gsi1",
-        KeyConditionExpression: "gsi1pk = :pk AND begins_with(gsi1sk, :prefix)",
-        ExpressionAttributeValues: { ":pk": `ACCT#${accountId}`, ":prefix": "LASTACT#active#" },
-        ScanIndexForward: false,
-        Limit: 500,
-        ...(params.cursor ? { ExclusiveStartKey: decodeCursor(params.cursor) } : {}),
-      }));
-      const fetchedItems = (res.Items ?? []) as Thread[];
-      if (fetchedItems.length > 200) {
-        this.logger.track("Thread search query returned an unusually large result set before client-side filtering. DynamoDB scan fetched more items than expected for this account. Repeated occurrences indicate the account's active thread count exceeds efficient scan limits. Consider adding a filtered GSI or prompting the user to archive old threads.", {
-          code: "thread_database.search_threads.large_result_set",
-          accountId,
-          query,
-          itemsFetched: fetchedItems.length,
-        });
-      }
 
-      const q = query.toLowerCase();
-      const items = fetchedItems.filter(
-        (a) => a.summary.toLowerCase().includes(q) || a.workflow.toLowerCase().includes(q),
-      );
-      const page = items.slice(0, limit).map(hydrateThreadObject);
-      const nextKey = items.length > limit && res.LastEvaluatedKey ? encodeCursor(res.LastEvaluatedKey) : null;
-      return ok({ items: page, ...(nextKey ? { nextCursor: nextKey } : {}) } as Page<Thread>);
-    } catch (e) {
-      return err(dbError(e));
-    }
-  }
 
   // ---------------------------------------------------------------------------
   // Embedding Cache (DynamoDB partial update for backfill/reindex)
@@ -694,6 +662,20 @@ export class ThreadDatabase {
         Limit: limit,
       }));
       return ok((res.Items ?? []).map(i => hydrateThreadObject(i as Thread)));
+    } catch (e) {
+      return err(dbError(e));
+    }
+  }
+
+  async batchGetThreads(accountId: string, threadIds: string[]): Promise<Result<Thread[], DbError>> {
+    if (threadIds.length === 0) return ok([]);
+    try {
+      const keys = threadIds.map(id => ({ pk: threadPk(accountId, id), sk: ITEM_SK }));
+      const res = await dynamo.send(new BatchGetCommand({
+        RequestItems: { [SIGNALS_TABLE]: { Keys: keys } },
+      }));
+      const items = (res.Responses?.[SIGNALS_TABLE] ?? []) as Thread[];
+      return ok(items.map(hydrateThreadObject));
     } catch (e) {
       return err(dbError(e));
     }

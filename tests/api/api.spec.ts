@@ -25,6 +25,10 @@ vi.mock("../../src/email/unsubscribe-token.js", () => ({
   generateUnsubscribeToken: vi.fn().mockResolvedValue("mock-jwt-token"),
 }));
 
+vi.mock("../../src/embedding/cluster-registry.js", () => ({
+  getPrimaryThreadMatcherRegistry: vi.fn().mockReturnValue({ modelId: "amazon.titan-embed-text-v2:0" }),
+}));
+
 vi.mock("../../src/email/template-renderer.js", () => ({
   renderTemplate: vi.fn().mockResolvedValue("<html>mock</html>"),
 }));
@@ -72,7 +76,7 @@ function makeThreadDb() {
     deleteSignal: vi.fn().mockResolvedValue(ok(undefined)),
     unblockSignal: vi.fn().mockResolvedValue(ok(undefined)),
     createThread: vi.fn().mockResolvedValue(ok(undefined)),
-    searchThreads: vi.fn().mockResolvedValue(ok({ items: [] })),
+    batchGetThreads: vi.fn().mockResolvedValue(ok([])),
   };
 }
 
@@ -1017,15 +1021,68 @@ describe("API", () => {
   // Search
   // -------------------------------------------------------------------------
 
-  describe("GET /accounts/:accountId/threads?q=", () => {
-    it("returns Thread search results in named envelope", async () => {
-      vi.mocked(threadDb.searchThreads).mockResolvedValueOnce(ok({ items: [makeThread()] }));
-      const res = await req(app, "GET", `${A}/threads?q=invoice+from+stripe`);
+  // -------------------------------------------------------------------------
+  // Search (vector)
+  // -------------------------------------------------------------------------
+
+  describe("GET /accounts/:accountId/threads?q= (vector search)", () => {
+    let embeddingGenerator: { generateForModel: ReturnType<typeof vi.fn> };
+    let threadMatcherMock: { searchByVector: ReturnType<typeof vi.fn> };
+    let searchApp: ReturnType<typeof createApp>;
+
+    beforeEach(() => {
+      embeddingGenerator = { generateForModel: vi.fn().mockResolvedValue(ok({ modelId: "amazon.titan-embed-text-v2:0", vector: [0.1, 0.2], dimensions: 1024 })) };
+      threadMatcherMock = { searchByVector: vi.fn().mockResolvedValue(ok([])) };
+      searchApp = createApp(makeAppDeps({ threadDb: threadDb as unknown as ThreadDatabase, accountDb: accountDb as unknown as AccountDatabase, auditDb: auditDb as unknown as AuditDatabase, auth, access, logger: createMockLogger(), forwardingService, jobDispatcher: { dispatchReindex: vi.fn(), dispatchSegment: vi.fn() } as never, draftSendDispatcher, accountCreationStarter: { start: vi.fn() }, appBaseUrl: "http://localhost", contentCdnBaseUrl: "https://cdn.test", astValidator, billingHandler: new BillingHandler(), emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, domainIdentityService: { register: vi.fn().mockResolvedValue(ok(undefined)), deregister: vi.fn().mockResolvedValue(ok(undefined)) }, rsvpComposer: vi.fn().mockResolvedValue(ok(undefined)) as unknown as typeof sendRsvp, postApprovalCalendarDeps: { accountDb: {} as never, emailService: {} as never, serviceDomain: "platform.email.rhosys.cloud" } as unknown as PostApprovalCalendarHandlerDeps, schedulerClient: { scheduleMessage: vi.fn().mockResolvedValue(ok(undefined)), deleteSchedule: vi.fn().mockResolvedValue(ok(undefined)) } as never, embeddingGenerator: embeddingGenerator as never, threadMatcher: threadMatcherMock as never }));
+    });
+
+    it("returns 400 when query is shorter than 3 characters", async () => {
+      const res = await req(searchApp, "GET", `${A}/threads?q=ab`);
+      expect(res.status).toBe(400);
+    });
+
+    it("returns 400 when query is longer than 64 characters", async () => {
+      const longQuery = "a".repeat(65);
+      const res = await req(searchApp, "GET", `${A}/threads?q=${longQuery}`);
+      expect(res.status).toBe(400);
+    });
+
+    it("returns 503 when embedding generation fails", async () => {
+      embeddingGenerator.generateForModel.mockResolvedValueOnce(err({ kind: "bedrock_error", message: "timeout", modelId: "m", cause: new Error("timeout") }));
+      const res = await req(searchApp, "GET", `${A}/threads?q=invoice+from+stripe`);
+      expect(res.status).toBe(503);
+    });
+
+    it("returns 503 when vector search fails", async () => {
+      threadMatcherMock.searchByVector.mockResolvedValueOnce(err({ kind: "db_error", message: "conn reset", cause: new Error("conn reset") }));
+      const res = await req(searchApp, "GET", `${A}/threads?q=invoice+from+stripe`);
+      expect(res.status).toBe(503);
+    });
+
+    it("returns 500 when batchGetThreads fails", async () => {
+      threadMatcherMock.searchByVector.mockResolvedValueOnce(ok(["arc-001"]));
+      vi.mocked(threadDb.batchGetThreads).mockResolvedValueOnce(err({ kind: "db_error", message: "dynamo error", cause: new Error("dynamo error") }));
+      const res = await req(searchApp, "GET", `${A}/threads?q=invoice+from+stripe`);
+      expect(res.status).toBe(500);
+    });
+
+    it("returns 200 with empty results when vector search finds nothing", async () => {
+      threadMatcherMock.searchByVector.mockResolvedValueOnce(ok([]));
+      const res = await req(searchApp, "GET", `${A}/threads?q=invoice+from+stripe`);
+      expect(res.status).toBe(200);
+      const body = await res.json() as { threads: unknown[]; pagination: { cursor: null } };
+      expect(body.threads).toEqual([]);
+      expect(body.pagination).toEqual({ cursor: null });
+    });
+
+    it("returns 200 with hydrated results", async () => {
+      threadMatcherMock.searchByVector.mockResolvedValueOnce(ok(["arc-001"]));
+      vi.mocked(threadDb.batchGetThreads).mockResolvedValueOnce(ok([makeThread()]));
+      const res = await req(searchApp, "GET", `${A}/threads?q=invoice+from+stripe`);
       expect(res.status).toBe(200);
       const body = await res.json() as { threads: unknown[]; pagination: { cursor: null } };
       expect(body.threads).toHaveLength(1);
       expect(body.pagination).toEqual({ cursor: null });
-      expect(threadDb.searchThreads).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "invoice from stripe", expect.any(Object));
     });
   });
 

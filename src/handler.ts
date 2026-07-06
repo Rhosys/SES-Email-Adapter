@@ -312,6 +312,8 @@ const app = createApp({
       MessageAttributes: { messageType: { DataType: "String", StringValue: "digest_send" } },
     }));
   },
+  embeddingGenerator,
+  threadMatcher: searchDatabase,
 });
 
 // ---------------------------------------------------------------------------

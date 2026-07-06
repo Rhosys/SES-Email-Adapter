@@ -262,6 +262,37 @@ export class ThreadMatcher implements ThreadMatcherPort, MultiClusterAuroraWrite
   }
 
   // ---------------------------------------------------------------------------
+  // Vector search — account-scoped cosine similarity returning top-N threadIds
+  // ---------------------------------------------------------------------------
+
+  async searchByVector(accountId: string, embedding: number[], limit: number): Promise<Result<string[], DbError>> {
+    const cluster = getPrimaryThreadMatcherRegistry();
+    const db = getDbForCluster(cluster);
+
+    try {
+      const rows = await withRetry(async () => {
+        return db.transaction(async (tx) => {
+          await tx.execute(sql.raw(`SET LOCAL app.current_account_id = '${accountId.replace(/'/g, "''")}'`));
+
+          return tx
+            .select({ threadId: threadEmbeddings.threadId })
+            .from(threadEmbeddings)
+            .where(and(
+              eq(threadEmbeddings.accountId, accountId),
+              sql`${threadEmbeddings.embedding} <=> ${toVector(embedding)} < ${SIMILARITY_THRESHOLD}`,
+            ))
+            .orderBy(sql`${threadEmbeddings.embedding} <=> ${toVector(embedding)}`)
+            .limit(limit);
+        });
+      });
+
+      return ok(rows.map(r => r.threadId));
+    } catch (e) {
+      return err(dbError(e));
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // MultiClusterAuroraWriter — upserts
   // ---------------------------------------------------------------------------
 
