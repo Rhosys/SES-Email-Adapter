@@ -133,7 +133,7 @@ describe("AccountDatabase", () => {
       expect(ddbMock.commandCalls(BatchWriteCommand)).toHaveLength(0);
       const deleteCalls = ddbMock.commandCalls(DeleteCommand);
       expect(deleteCalls).toHaveLength(1);
-      expect(deleteCalls[0]!.args[0]!.input.Key).toEqual({ pk: "ACCT#acct-1", sk: "DOMAIN#example.com#ALIAS#me" });
+      expect(deleteCalls[0]!.args[0]!.input.Key).toEqual({ pk: "ACCT#acct-1", sk: "ALIAS#example.com#me@example.com" });
     });
 
     it("paginates sender lookup and batch-deletes all senders across chunks in parallel", async () => {
@@ -188,18 +188,17 @@ describe("AccountDatabase", () => {
   });
 
   describe("listAliasesForDomain", () => {
-    it("returns only alias items for the domain, excluding sender entries, across pages", async () => {
+    it("returns only alias items for the domain, across pages", async () => {
       ddbMock.on(QueryCommand)
         .resolvesOnce({
           Items: [
-            { id: "a1", accountId: "acct-1", domain: "example.com", alias: "one", sk: "DOMAIN#example.com#ALIAS#one" },
-            { accountId: "acct-1", domain: "example.com", alias: "one", senderDomain: "s.com", sk: "DOMAIN#example.com#ALIAS#one#SENDER#s.com" },
+            { id: "a1", accountId: "acct-1", domain: "example.com", aliasName: "one", sk: "ALIAS#example.com#one@example.com" },
           ],
           LastEvaluatedKey: { pk: "x", sk: "y" },
         })
         .resolvesOnce({
           Items: [
-            { id: "a2", accountId: "acct-1", domain: "example.com", alias: "two", sk: "DOMAIN#example.com#ALIAS#two" },
+            { id: "a2", accountId: "acct-1", domain: "example.com", aliasName: "two", sk: "ALIAS#example.com#two@example.com" },
           ],
         });
 
