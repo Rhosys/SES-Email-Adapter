@@ -275,31 +275,24 @@ export class ThreadMatcher implements ThreadMatcherPort, MultiClusterAuroraWrite
         return db.transaction(async (tx) => {
           await tx.execute(sql.raw(`SET LOCAL app.current_account_id = '${accountId.replace(/'/g, "''")}'`));
 
-          // Fetch all matches ordered by distance. With multi-row embeddings (one per signal),
-          // the same thread can appear multiple times — deduplicated below.
-          return tx
-            .select({ threadId: threadEmbeddings.threadId })
-            .from(threadEmbeddings)
-            .where(and(
-              eq(threadEmbeddings.accountId, accountId),
-              sql`${threadEmbeddings.embedding} <=> ${toVector(embedding)} < ${SIMILARITY_THRESHOLD}`,
-            ))
-            .orderBy(sql`${threadEmbeddings.embedding} <=> ${toVector(embedding)}`);
+          // With multi-row embeddings (one per signal), DISTINCT ON deduplicates at DB level:
+          // inner query picks closest embedding per thread, outer sorts by global distance.
+          const result = await tx.execute(sql`
+            SELECT thread_id FROM (
+              SELECT DISTINCT ON (thread_id) thread_id, embedding <=> ${toVector(embedding)} AS dist
+              FROM thread_embeddings
+              WHERE account_id = ${accountId}
+                AND embedding <=> ${toVector(embedding)} < ${SIMILARITY_THRESHOLD}
+              ORDER BY thread_id, embedding <=> ${toVector(embedding)}
+            ) sub
+            ORDER BY dist
+            LIMIT ${limit}
+          `);
+          return result.rows as Array<{ thread_id: string }>;
         });
       });
 
-      // Deduplicate by threadId — keep first occurrence (closest distance) per thread
-      const seen = new Set<string>();
-      const unique: string[] = [];
-      for (const r of rows) {
-        if (!seen.has(r.threadId)) {
-          seen.add(r.threadId);
-          unique.push(r.threadId);
-          if (unique.length === limit) break;
-        }
-      }
-
-      return ok(unique);
+      return ok(rows.map(r => r.thread_id));
     } catch (e) {
       return err(dbError(e));
     }
