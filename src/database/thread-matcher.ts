@@ -275,6 +275,8 @@ export class ThreadMatcher implements ThreadMatcherPort, MultiClusterAuroraWrite
         return db.transaction(async (tx) => {
           await tx.execute(sql.raw(`SET LOCAL app.current_account_id = '${accountId.replace(/'/g, "''")}'`));
 
+          // Fetch all matches ordered by distance. With multi-row embeddings (one per signal),
+          // the same thread can appear multiple times — deduplicated below.
           return tx
             .select({ threadId: threadEmbeddings.threadId })
             .from(threadEmbeddings)
@@ -282,14 +284,46 @@ export class ThreadMatcher implements ThreadMatcherPort, MultiClusterAuroraWrite
               eq(threadEmbeddings.accountId, accountId),
               sql`${threadEmbeddings.embedding} <=> ${toVector(embedding)} < ${SIMILARITY_THRESHOLD}`,
             ))
-            .orderBy(sql`${threadEmbeddings.embedding} <=> ${toVector(embedding)}`)
-            .limit(limit);
+            .orderBy(sql`${threadEmbeddings.embedding} <=> ${toVector(embedding)}`);
         });
       });
 
-      return ok(rows.map(r => r.threadId));
+      // Deduplicate by threadId — keep first occurrence (closest distance) per thread
+      const seen = new Set<string>();
+      const unique: string[] = [];
+      for (const r of rows) {
+        if (!seen.has(r.threadId)) {
+          seen.add(r.threadId);
+          unique.push(r.threadId);
+          if (unique.length === limit) break;
+        }
+      }
+
+      return ok(unique);
     } catch (e) {
       return err(dbError(e));
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Embedding existence check — used by healthcheck validation
+  // ---------------------------------------------------------------------------
+
+  async hasEmbedding(threadId: string): Promise<boolean> {
+    const cluster = getPrimaryThreadMatcherRegistry();
+    const db = getDbForCluster(cluster);
+
+    try {
+      const rows = await withRetry(async () => {
+        return db
+          .select({ threadId: threadEmbeddings.threadId })
+          .from(threadEmbeddings)
+          .where(eq(threadEmbeddings.threadId, threadId))
+          .limit(1);
+      });
+      return rows.length > 0;
+    } catch {
+      throw new Error(`Aurora connectivity error checking embedding for threadId: ${threadId}`);
     }
   }
 
