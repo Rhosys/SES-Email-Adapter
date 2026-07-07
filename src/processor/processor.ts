@@ -1,5 +1,5 @@
 import { GetObjectCommand, PutObjectCommand, type S3Client } from "@aws-sdk/client-s3";
-import { DateTime } from "luxon";
+import { DateTime, Duration } from "luxon";
 import { generateId } from "../utils/id.js";
 import type { Logger } from "../logger.js";
 import type { Result } from "neverthrow";
@@ -93,7 +93,7 @@ export interface ReplySender {
 
 export type SesVerdict = "PASS" | "FAIL" | "GRAY" | "PROCESSING_FAILED";
 
-const systemSignalDefaultRetentionDuration = 90 * 24 * 60 * 60;
+const systemSignalDefaultRetentionDuration = Math.floor(Duration.fromISO("P90D").as("seconds"));
 
 interface SesReceiptNotification {
   mail: {
