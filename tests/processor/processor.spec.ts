@@ -1716,6 +1716,79 @@ describe("SignalProcessor", () => {
       expect(arc.labels).toContain("archived-auto");
       expect(arc.status).toBe("archived");
     });
+
+    it("assign_workflow propagates to signal.data.workflow (C.1)", async () => {
+      vi.mocked(accountDb.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([{
+        id: "rw-propagate",
+        accountId: TEST_ACCOUNT_ID,
+        name: "Reclassify signal as content",
+        condition: "true",
+        actions: [{ type: "assign_workflow", value: "content" }],
+        status: "enabled",
+        priorityOrder: 0,
+        createdAt: "2024-01-01T00:00:00Z",
+        updatedAt: "2024-01-01T00:00:00Z",
+      }])));
+
+      await processor.processRecord(makeMessage(), 1);
+
+      const saved = vi.mocked(threadDb.saveSignal).mock.calls[0]![0] as Signal;
+      expect(saved.data.workflow).toBe("content");
+    });
+
+    it("assign_workflow still updates thread workflow during rule evaluation (C.2 — existing behavior)", async () => {
+      vi.mocked(accountDb.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([{
+        id: "rw-thread",
+        accountId: TEST_ACCOUNT_ID,
+        name: "Reclassify thread as content",
+        condition: "true",
+        actions: [{ type: "assign_workflow", value: "content" }],
+        status: "enabled",
+        priorityOrder: 0,
+        createdAt: "2024-01-01T00:00:00Z",
+        updatedAt: "2024-01-01T00:00:00Z",
+      }])));
+
+      await processor.processRecord(makeMessage(), 1);
+
+      const arc = vi.mocked(threadDb.saveThread).mock.calls[0]![0] as Thread;
+      expect(arc.workflow).toBe("content");
+    });
+
+    it("last assign_workflow wins when multiple rules fire (C.3)", async () => {
+      vi.mocked(accountDb.listEnabledRules).mockReturnValueOnce(Promise.resolve(ok([
+        {
+          id: "rw-first",
+          accountId: TEST_ACCOUNT_ID,
+          name: "Set content",
+          condition: "true",
+          actions: [{ type: "assign_workflow", value: "content" }],
+          status: "enabled",
+          priorityOrder: 0,
+          createdAt: "2024-01-01T00:00:00Z",
+          updatedAt: "2024-01-01T00:00:00Z",
+        },
+        {
+          id: "rw-second",
+          accountId: TEST_ACCOUNT_ID,
+          name: "Set notification",
+          condition: "true",
+          actions: [{ type: "assign_workflow", value: "notification" }],
+          status: "enabled",
+          priorityOrder: 1,
+          createdAt: "2024-01-01T00:00:00Z",
+          updatedAt: "2024-01-01T00:00:00Z",
+        },
+      ])));
+
+      await processor.processRecord(makeMessage(), 1);
+
+      const saved = vi.mocked(threadDb.saveSignal).mock.calls[0]![0] as Signal;
+      expect(saved.data.workflow).toBe("notification");
+      // Thread also gets last-wins
+      const arc = vi.mocked(threadDb.saveThread).mock.calls[0]![0] as Thread;
+      expect(arc.workflow).toBe("notification");
+    });
   });
 
   describe("forwarded email detection", () => {
