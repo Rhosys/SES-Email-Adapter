@@ -1180,6 +1180,15 @@ export class SignalProcessor {
     const outcome = deriveOutcome(matchedRules);
     this.logger.trackPoint("rules_evaluated", { matchedRuleCount: matchedRules.length });
 
+    // Propagate assign_workflow to signal data — the signal should reflect the final workflow after all rules
+    const finalWorkflowAction = matchedRules
+      .flatMap(r => r.actions)
+      .slice().reverse().find(a => a.type === "assign_workflow" && a.value);
+    if (finalWorkflowAction?.value) {
+      signalShell.data.workflow = finalWorkflowAction.value as Workflow;
+      signalShell.data.workflowData = { workflow: finalWorkflowAction.value } as WorkflowData;
+    }
+
     // Fallback: if no rule set a status, apply filter mode for untrusted senders
     const hasStatusOutcome = outcome.blockDisposition !== null || outcome.quarantine || outcome.archive;
     if (!hasStatusOutcome && thread.labels.includes("system:sender:untrusted")) {
