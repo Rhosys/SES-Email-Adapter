@@ -122,8 +122,9 @@ export function buildDiffUpdateParams(
   return {
     TableName: tableName,
     Key: { pk: `ACCT#${accountId}`, sk: buildDiffSk(today) },
-    UpdateExpression: "ADD metrics.#metricName :delta",
+    UpdateExpression: "ADD #metrics.#metricName :delta",
     ExpressionAttributeNames: {
+      "#metrics": "metrics",
       "#metricName": metric,
     },
     ExpressionAttributeValues: {

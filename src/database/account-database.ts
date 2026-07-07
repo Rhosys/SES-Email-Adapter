@@ -774,7 +774,8 @@ export class AccountDatabase {
       await dynamo.send(new UpdateCommand({
         TableName: ACCOUNTS_TABLE,
         Key: { pk: pk(accountId), sk: `TEMPLATE#${templateId}` },
-        UpdateExpression: "SET functions[0].lastError = :err, updatedAt = :now",
+        UpdateExpression: "SET #functions[0].lastError = :err, updatedAt = :now",
+        ExpressionAttributeNames: { "#functions": "functions" },
         ConditionExpression: "attribute_exists(pk)",
         ExpressionAttributeValues: { ":err": `[${functionName}] ${errorMessage}`, ":now": DateTime.utc().toISO()! },
       }));
@@ -1097,7 +1098,7 @@ export class AccountDatabase {
     if (update.name !== undefined) { setParts.push("#name = :name"); exprValues[":name"] = update.name; exprNames["#name"] = "name"; }
     if (update.subject !== undefined) { setParts.push("#subject = :subject"); exprValues[":subject"] = update.subject; exprNames["#subject"] = "subject"; }
     if (update.body !== undefined) { setParts.push("body = :body"); exprValues[":body"] = update.body; }
-    if (update.functions !== undefined) { setParts.push("functions = :functions"); exprValues[":functions"] = update.functions; }
+    if (update.functions !== undefined) { setParts.push("#functions = :functions"); exprValues[":functions"] = update.functions; exprNames["#functions"] = "functions"; }
 
     try {
       const res = await dynamo.send(new UpdateCommand({
