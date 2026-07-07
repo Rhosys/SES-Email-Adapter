@@ -1399,9 +1399,9 @@ describe("SignalProcessor", () => {
     it("overrides workflow to 'test' when the from-domain is one the account owns", async () => {
       // Default mime parser mock returns from: { address: "sender@example.com" }
       // getETLD1("sender@example.com") = "example.com" — a domain owned by the account.
-      vi.mocked(accountDb.getDomainByName).mockReturnValueOnce(Promise.resolve(ok({
+      vi.mocked(accountDb.listDomains).mockReturnValueOnce(Promise.resolve(ok([{
         accountId: TEST_ACCOUNT_ID, domain: "example.com", status: "active", receivingSetupComplete: true, senderSetupComplete: true, createdAt: "2024-01-01T00:00:00Z", updatedAt: "2024-01-01T00:00:00Z",
-      } as never)));
+      } as never])));
 
       await processor.processRecord(makeMessage(), 1);
 
@@ -1411,7 +1411,7 @@ describe("SignalProcessor", () => {
     });
 
     it("does not override workflow when the from-domain is not owned by the account", async () => {
-      // Default getDomainByName mock returns null → sender domain is not the account's own.
+      // Default listDomains mock returns [] → sender domain is not the account's own.
       await processor.processRecord(makeMessage(), 1);
 
       const signal = vi.mocked(threadDb.saveSignal).mock.calls[0]![0] as Signal;

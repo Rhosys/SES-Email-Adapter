@@ -76,6 +76,7 @@ export function makeAccountDbMock(accountId = "acct-default", recipientAddress =
     saveSender: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     getTemplate: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
     getDomainByName: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
+    listDomains: vi.fn().mockReturnValue(Promise.resolve(ok([]))),
     incrementStatMetric: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     annotateRuleError: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     annotateTemplateError: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),

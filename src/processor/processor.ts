@@ -976,10 +976,11 @@ export class SignalProcessor {
       : undefined;
 
     // 5. Test detection override — the account owner emailing one of their own registered
-    // domains. Single point-read on the sender's eTLD+1 rather than listing all domains.
-    const fromDomain = getETLD1(parsed.from.address);
-    const fromDomainResult = await this.accountDb.getDomainByName(accountId, fromDomain);
-    const isTestEmail = fromDomainResult.isOk() && fromDomainResult.value !== null;
+    // domains. Compares eTLD+1 of sender against eTLD+1 of each registered domain.
+    const fromETLD1 = getETLD1(parsed.from.address);
+    const domainsResult = await this.accountDb.listDomains(accountId);
+    const isTestEmail = domainsResult.isOk() &&
+      domainsResult.value.some(d => getETLD1(d.domain) === fromETLD1);
     if (isTestEmail) {
       classificationOutput.workflow = "test";
       classificationOutput.workflowData = { workflow: "test", triggeredBy: "user" };
