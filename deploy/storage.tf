@@ -423,3 +423,28 @@ resource "aws_lambda_permission" "domain_health_eventbridge" {
   principal     = "events.amazonaws.com"
   source_arn    = aws_cloudwatch_event_rule.domain_health.arn
 }
+
+# ---------------------------------------------------------------------------
+# EventBridge — daily pipeline healthcheck
+# ---------------------------------------------------------------------------
+
+resource "aws_cloudwatch_event_rule" "healthcheck" {
+  name                = "${var.service_name}-healthcheck"
+  description         = "Daily pipeline healthcheck — validates yesterday's signal and sends today's test email"
+  schedule_expression = "cron(0 6 * * ? *)"
+}
+
+resource "aws_cloudwatch_event_target" "healthcheck" {
+  rule      = aws_cloudwatch_event_rule.healthcheck.name
+  target_id = "healthcheck-lambda"
+  arn       = aws_lambda_alias.production.arn
+}
+
+resource "aws_lambda_permission" "healthcheck_eventbridge" {
+  statement_id  = "AllowHealthcheckEventBridge"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.main.function_name
+  qualifier     = aws_lambda_alias.production.name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.healthcheck.arn
+}
