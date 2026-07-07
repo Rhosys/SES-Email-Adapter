@@ -4,36 +4,24 @@
 
 ---
 
-## Out of Scope
-
-- **`gsi3pk` backfill of historical signal items** — historical signals written before the arc-to-thread migration carry no `gsi3pk` attribute and are therefore not matchable via the In-Reply-To tier (gsi3 Message-ID lookup). This is accepted as non-critical because other tiers (Subject+sender grouping key, References header) still match, and the index self-heals as new mail arrives (new signals always write `gsi3pk`). A one-off backfill script is optional and not planned.
-
----
-
-- [ ] **Move `updateGlobalReputation` into side-effects and make its save idempotent** — currently called inline in `processMessage` (multiple branches) and re-runs on every retry/reprocess, double-counting sender reputation. Move the reputation write into `processSideEffect` (derived from the persisted signal outcome) and make the save idempotent so retries can't inflate the counters.
-- [ ] **Document all data stores exhaustively** — write ADR-style docs (like `docs/adr-stats-metrics.md`) for every data store: DynamoDB accounts table (partition key design, GSI patterns, single-table item types, TTL strategies), DynamoDB arcs table (arc/signal item layout, GSI2 threading index, grouping key lookups), Aurora Serverless (schema, RLS via `SET LOCAL`, pgvector embeddings, connection pooling via Data API), S3 buckets (email storage lifecycle, content extraction prefix layout, retention tagging, presigned URL patterns), and the processing DynamoDB table (global reputation tracking, sender fingerprints). For each: document the access patterns, key design decisions, known limitations, and cost profile.
+- [ ] **Unified forwarding targets** — consolidate all forwarding-related work into a single resource: replace separate forwarding-addresses and webhook-URL concepts with a single `ForwardingTarget` resource (`/accounts/:id/targets`), update verification email URL format to deep-link to settings, add calendar forwarding address verification, and include loop detection (setup-time + runtime). **Active spec: `.kiro/specs/unified-forwarding-targets/`**
+- [ ] **Event / QR code extraction and time-based surfacing** — first-class tracking for event tickets, boarding passes, conference badges, restaurant reservations, and parking confirmations. Extract ticket/QR code URLs or base64 images from confirmation emails at processing time, store as structured `workflowData` (e.g. `ticketUrl`, `qrCodeUrl`, `venueAddress`, `eventTime`), and resurface the arc with QR/ticket prominently displayed at event proximity (time-based push or lock-screen widget). Covers: concerts, flights, conferences, restaurants, parking.
 - [ ] **Outbound recipient validation (malicious user)** — prevent a malicious account owner from using the platform to spam arbitrary addresses. When a user composes/sends an email, validate that all To/CC/BCC recipient domains are either: (a) in the alias's approved senders list, or (b) domains the user has previously received email from (existing arc with that sender domain). If not, require explicit confirmation and rate-limit outbound to new domains.
-- [ ] **Email forwarding loop detection and prevention** — forwarding rules can create infinite loops: if account A forwards to address X, and address X routes back into the same account (or another account that forwards back), signals will cycle forever. Two layers of protection needed: (1) **Setup-time**: when a user creates or edits a forwarding rule, check whether the rule's target address matches any domain registered to the same account — if it does, reject the rule with a clear error ("Forwarding to your own domain would create a loop"). Also check whether any existing rule already forwards *to* that same target from any label/alias that the new rule would also match. (2) **Runtime**: detect loops in-flight by inspecting the `References` / `X-Forwarded-To` / custom `X-SES-Loop` headers on inbound signals — if the message has already passed through this account or has been forwarded more than N times (e.g. 5), drop it with a non-retryable error and emit a `loop_detected` audit event.
 - [ ] **Background domain verification via Step Functions** — when a user adds a new domain, kick off a Step Functions state machine that polls DNS records (MX, DKIM, SPF, DMARC) on a schedule (e.g. every 30s for 5 min, then every 5 min for 1 hour, then hourly for 72 hours). Transitions domain status through `pending` → `verified` (or `failed` after timeout). We can also send an email to the account contact emails when this happens.
 - [ ] **Consider what happens when someone already has configured an alias** — do aliases need to be globally unique? Yes. Check on the backend using MX lookup (MX records are the source of truth).
 - [ ] **Review when `TemplateFunction.lastError` is cleared** — need to define when it gets cleared: on next successful execution? On template save?
-- [ ] **Audit OpenAPI spec for missing zod constraints** — investigate why `@hono/zod-openapi` isn't propagating `.min()/.max()` to the generated spec.
 - [ ] **Define audit event response schema** — the `GET /accounts/:id/audit` endpoint returns `z.object({})` in the OpenAPI spec. Add a proper zod schema matching the response shape.
 - [ ] **Promotions: extract expiry date and auto-archive when the offer lapses** — classifier extracts `workflowData.offerExpiry` (ISO-8601). Auto-archive only if purely promotional. If mixed content, set `offerExpiry` but do not auto-archive.
 - [ ] **Auto-archive arcs on signal expiry (generic)** — any signal with a time-limited value (auth OTP `expiresInMinutes`, promo `offerExpiry`, password reset link) should auto-archive the arc when the expiry lapses, BUT only if the arc was not already active before this signal arrived. Logic: if the arc was archived/non-existent before the signal elevated or created it, auto-archive at expiry. If the arc was already active (user was interacting with it), do nothing — the user is engaged and manual control takes precedence. Applies to: `auth` (OTP/magic-link), `content` (promo codes with `expiryDate`), `payments` (time-limited offers). Computed from `signal.receivedAt + expiresInMinutes` or `expiryDate` directly. Scheduler or DynamoDB TTL-triggered cleanup.
 - [ ] **Retry Send for failed outbound messages** — UI must expose a "Retry Send" action on `domain_misconfiguration` or `send_failed` signals. Transient failures auto-retry via SES Feedback SQS loop; permanent failures require user action.
 - [ ] **AI-powered template auto-response** — extend templates with an optional `aiPrompt` field. When a signal matches a rule with `action: "auto_reply"` and the template has `aiPrompt` set, Bedrock generates a reply using the prompt as system instructions, the template body as structure/tone guide, and the inbound signal thread as context. The generated draft is either sent automatically (if the rule is configured for auto-send) or placed in the arc as a draft for user review. Template functions (`{{fn.*}}`) still execute — AI fills the unstructured parts, functions fill the deterministic parts. This also enables a "Draft a reply" button in arc detail that uses the account's default reply template + AI prompt to generate a contextual first draft.
-- [ ] **Gate `retentionDuration` setting by billing plan + handle downgrades** — validate against current plan on PATCH. Coerce on downgrade.
-- [ ] **Update forwarding verification email URL format** — land directly on Settings forwarding tab which auto-submits verification on mount.
-- [ ] **Unify forwarding targets as a single resource (`/accounts/:id/targets`)** — replace the separate forwarding-addresses and webhook-URL concepts with a single `ForwardingTarget` resource. Types: `email` (validated via verification email, ID = the email address) and `webhook` (validated via HTTP 200 test request, ID = `uri-{generated-id}`). API: `GET/POST/DELETE /accounts/:id/targets`. POST starts validation (sends verification email or fires test request). Once verified, the target can be referenced in forwarding rules by its `forwardingTargetId`. Migrate existing verified forwarding addresses into the new resource. Reject rule saves that reference unverified or non-existent targets. Targets have a `status` field: `pending` → `verified` → can be `disabled` (on permanent bounce, system auto-disables). On bounce: iterate all account rules, find rules whose forward/webhook action references the failed target, disable the entire rule (set `status: "disabled"`). Targets cannot be deleted while any rule references them. Re-enabling a disabled target requires revalidation (re-sends verification email or re-fires test request) — cannot be re-enabled without proving it works.
-- [ ] **Calendar forwarding address verification** — verify the calendar forwarding address is reachable before storing it.
-- [ ] **Image handling strategy for email signals** — define how images in email bodies are loaded, proxied, and cached for display.
-- [ ] **Secure HTML email rendering** — define the sandboxing strategy for rendering untrusted HTML email bodies in the frontend.
+- [ ] **Audit OpenAPI spec for missing zod constraints** — investigate why `@hono/zod-openapi` isn't propagating `.min()/.max()` to the generated spec.
+- [ ] **Gate `retentionDuration` setting by billing plan + handle downgrades** — when a user sets `retentionDuration` via PATCH /accounts/:id, validate against their current plan using `isWithinPlanLimit()`. Reject with 403 if they request a tier above what their plan allows. On plan downgrade (webhook from billing provider or manual admin action), coerce any existing `retentionDuration` values that exceed the new plan's max tier down to the plan max. Existing signals already stored with longer retention keep their TTL (data already paid for) but new signals get the coerced default.
 - [ ] **Auto-block sender on unsubscribe** — persist `block_hidden` disposition for the sender eTLD+1 on the alias after unsubscribe succeeds.
 - [ ] **Auto-handle vacation responder signals** — auto-archive + set urgency `silent` on vacation auto-replies detected via `Auto-Submitted: auto-replied` header.
-- [ ] **Document error response codes in OpenAPI spec** — add `responses` entries for 400, 409, 412, and 422 to every route.
-- [ ] **Billing endpoints** — Stripe integration: `GET /billing`, `POST /checkout-session`, `POST /portal-session`.
-- [ ] **User attachment upload for outbound signals** — presigned S3 PUT URL + `attachmentId`. TTL-based cleanup for unreferenced uploads.
+- [ ] **Document error response codes in OpenAPI spec** — add `responses` entries for 400, 409, 412, and 422 status codes to every API route definition (via `@hono/zod-openapi` route config). Each endpoint should declare which error codes it can return and under what conditions, so that `npm run openapi` produces a spec with full error documentation. Audit each handler for the error paths it actually uses, define shared zod schemas for error response bodies (e.g. `{ errorCode: string, message: string }`), and wire them into the route's `responses` map.
+- [ ] **Billing endpoints** — `GET /accounts/:id/billing` → `BillingInfo`, `POST /accounts/:id/billing/checkout-session` → Stripe Checkout URL, `POST /accounts/:id/billing/portal-session` → Stripe Portal URL. Requires Stripe integration.
+- [ ] **User attachment upload for outbound signals (replies/compose)** — drafts currently have `attachments: []` hardcoded; no upload endpoint exists. Needed: `POST /accounts/:accountId/attachments` → presigned S3 PUT URL + `attachmentId`; client uploads directly to S3; draft creation/update references `attachmentId` values; send logic fetches from S3. TTL-based cleanup for unreferenced uploads.
 - [ ] **Review all locations where we might want to send emails to users** — define notification strategy before implementing.
   - [ ] **Team invite email via SES** — replace TRACK log with actual SES send.
 - [ ] **Wire up onboarding follow-up emails via SES** — replace TRACK logs in `OnboardingTaskHandler` with SESv2 calls.
@@ -47,15 +35,16 @@
 - [ ] **Snooze / remind me later** — hide an arc until a future time, then resurface it.
 - [ ] **Calendar sync** — bidirectional calendar integration (CalDAV, Google Calendar, Outlook).
 - [ ] **Webhook outbound** — user configures a URL; signals POST as JSON.
-- [ ] **Become FedCM identity provider** — register as a FedCM provider so other apps can log in.
-- [ ] **Submit to awesome-privacy-tools** — open a PR to add the project.
+- [ ] **Become FedCM identity provider** — meaning other apps log in via our app. Register as a FedCM provider so other apps can use our identity.
+- [ ] **Submit to awesome-privacy-tools** — open a PR at https://github.com/anondotli/awesome-privacy-tools/blob/main/CONTRIBUTING.md to add this project. Follow the contributing guidelines before submitting.
 - [ ] **OTP auto-fill + Web Push service worker** — tracked in `extension/TODO.md`.
 - [ ] **PGP / end-to-end encryption** — encrypt stored email content at rest with user-held keys.
-- [ ] **Browser extension** — full extension for alias management, OTP auto-fill, signup detection.
-- [ ] **Mobile app** — native mobile client.
 - [ ] **Deploy Bedrock guardrail and re-enable in classifier** — create `aws_bedrock_guardrail` resource in infrastructure, uncomment in classifier.
 - [ ] **Strip tracking pixels from HTML email bodies at ingestion** — ADR 007 heuristics. Remove tracker `<img>` elements at processing time.
 - [ ] **Automatically seed sample arcs during onboarding for new users** — new accounts land in an empty inbox until the user's own test email arrives in Step 2. Auto-create a small set of system-generated example arcs (e.g. a sample `package`, `payments`, and `auth` arc with realistic `workflowData`) at account creation so the inbox UI, workflow cards, and smart action buttons aren't demoed against a blank state. Tag these arcs distinctly (e.g. `workflow: "test"` or a dedicated `sample`/`demo` flag) so they're clearly distinguishable from real mail and can be bulk-dismissed or auto-expired once the user has received their first real signal.
+- [ ] **Move `updateGlobalReputation` into side-effects and make its save idempotent** — currently called inline in `processMessage` (multiple branches) and re-runs on every retry/reprocess, double-counting sender reputation. Move the reputation write into `processSideEffect` (derived from the persisted signal outcome) and make the save idempotent so retries can't inflate the counters.
+- [ ] **Document all data stores exhaustively** — write ADR-style docs (like `docs/adr-stats-metrics.md`) for every data store: DynamoDB accounts table (partition key design, GSI patterns, single-table item types, TTL strategies), DynamoDB arcs table (arc/signal item layout, GSI2 threading index, grouping key lookups), Aurora Serverless (schema, RLS via `SET LOCAL`, pgvector embeddings, connection pooling via Data API), S3 buckets (email storage lifecycle, content extraction prefix layout, retention tagging, presigned URL patterns), and the processing DynamoDB table (global reputation tracking, sender fingerprints). For each: document the access patterns, key design decisions, known limitations, and cost profile.
+- [ ] **Email forwarding loop detection and prevention** — covered by the unified forwarding targets spec (setup-time + runtime loop detection). Detailed design: forwarding rules can create infinite loops if account A forwards to address X that routes back. Two layers: (1) **Setup-time**: reject rules whose target address matches any domain registered to the same account. Also check whether any existing rule already forwards to that same target from any label/alias that the new rule would also match. (2) **Runtime**: inspect `References` / `X-Forwarded-To` / custom `X-SES-Loop` headers — if the message has already passed through this account or been forwarded more than N times (e.g. 5), drop with a non-retryable error and emit a `loop_detected` audit event.
 
 ---
 
@@ -82,14 +71,10 @@ Compared the frontend's expected API surface against the actual backend implemen
 
 ### ❌ Backend TODOs (from contract comparison)
 
-- [ ] **Billing endpoints** — `GET /accounts/:id/billing` → `BillingInfo`, `POST /accounts/:id/billing/checkout-session` → Stripe Checkout URL, `POST /accounts/:id/billing/portal-session` → Stripe Portal URL. Requires Stripe integration.
-- [ ] **User attachment upload for outbound signals (replies/compose)** — drafts currently have `attachments: []` hardcoded; no upload endpoint exists. Needed: `POST /accounts/:accountId/attachments` → presigned S3 PUT URL + `attachmentId`; client uploads directly to S3; draft creation/update references `attachmentId` values; send logic fetches from S3. Also needs TTL-based cleanup for unreferenced uploads.
-- [ ] **Document error response codes in OpenAPI spec** — add `responses` entries for 400, 409, 412, and 422 status codes to every API route definition (via `@hono/zod-openapi` route config). Each endpoint should declare which error codes it can return and under what conditions, so that `npm run openapi` produces a spec with full error documentation. Audit each handler for the error paths it actually uses, define shared zod schemas for error response bodies (e.g. `{ errorCode: string, message: string }`), and wire them into the route's `responses` map.
-
----
-
-- [ ] **Become FedCM identity provider** — meaning other apps log in via our app. This means registering as a FedCM provider so other apps can log in.
-- [ ] **Submit to awesome-privacy-tools** — open a PR at https://github.com/anondotli/awesome-privacy-tools/blob/main/CONTRIBUTING.md to add this project to the list. Follow the contributing guidelines before submitting.
+Items below are tracked in the main TODO list above with full detail:
+- Billing endpoints
+- User attachment upload for outbound signals
+- Document error response codes in OpenAPI spec
 
 ---
 
@@ -115,9 +100,7 @@ Free, publicly-verifiable trust signals that competitors (ForwardEmail, Addy.io)
 
 ## Extension Audit — Gaps vs. Backend Spec
 
-### What the extension needs to fix
-
-- [ ] **OTP auto-fill + Web Push service worker** — tracked in detail in `extension/TODO.md`.
+Items tracked in `extension/TODO.md` — see main list above for the OTP auto-fill + Web Push reference.
 
 ---
 
@@ -791,17 +774,17 @@ Competitive analysis vs. Addy.io, SimpleLogin, ForwardEmail, Firefox Relay, Mail
 ### Missing Features (gaps vs. competitors)
 
 **High priority:**
-- [ ] **PGP / end-to-end encryption** — Addy.io (paid), SimpleLogin, ForwardEmail, Mailvelope, and Mailfence all offer this. Privacy-conscious users treat it as table stakes. If added, must be free (see pricing strategy below).
-- [ ] **Browser extension** — Addy.io, SimpleLogin, Firefox Relay, and DuckDuckGo all have one. Alias generation at the point of signup is the core UX for alias-focused users; the extension is also a free acquisition channel.
-- [ ] **Mobile app** — Essential for the auth/OTP quick-copy workflow. Addy.io, SimpleLogin, and Firefox Relay all have apps. Without one, the OTP copy feature (our #1 differentiator) is only usable at a desktop.
+- **PGP / end-to-end encryption** *(tracked in main list)* — Addy.io (paid), SimpleLogin, ForwardEmail, Mailvelope, and Mailfence all offer this. Privacy-conscious users treat it as table stakes. If added, must be free (see pricing strategy below).
+- **Browser extension** — Addy.io, SimpleLogin, Firefox Relay, and DuckDuckGo all have one. Alias generation at the point of signup is the core UX for alias-focused users; the extension is also a free acquisition channel.
+- **Mobile app** — Essential for the auth/OTP quick-copy workflow. Addy.io, SimpleLogin, and Firefox Relay all have apps. Without one, the OTP copy feature (our #1 differentiator) is only usable at a desktop.
 
 **Medium priority:**
-- [ ] **On-demand alias generation** — Catch-all + custom domains covers this technically, but there's no UI shortcut for generating `random123@yourdomain.com` at a click. All alias services have this as their primary action.
-- [ ] **Snooze / remind me later** — Already in UI IDEAS above. Differentiates from pure forwarders; HEY and Superhuman both do this.
-- [ ] **Calendar sync** (travel + scheduling workflows) — Export `.ics` or sync via CalDAV for travel/scheduling arcs. Already in UI IDEAS above.
+- **On-demand alias generation** *(tracked in main list)* — Catch-all + custom domains covers this technically, but there's no UI shortcut for generating `random123@yourdomain.com` at a click. All alias services have this as their primary action.
+- **Snooze / remind me later** *(tracked in main list)* — Differentiates from pure forwarders; HEY and Superhuman both do this.
+- **Calendar sync** *(tracked in main list)* — Export `.ics` or sync via CalDAV for travel/scheduling arcs.
 
 **Low priority:**
-- [ ] **Webhook outbound** — Already in UI IDEAS above. Power users and devs want to pipe signals into Zapier, Make, or custom apps. ForwardEmail offers this.
+- **Webhook outbound** *(tracked in main list)* — Power users and devs want to pipe signals into Zapier, Make, or custom apps. ForwardEmail offers this.
 
 ---
 
@@ -906,15 +889,6 @@ Things competitors charge for that we include, plus things only we can offer:
 
 These items are required by the frontend before certain UI features can ship.
 
-
-
-
 - [ ] **Calendar forwarding address verification** — when `defaultCalendarInviteForwardingAddress` is set via `PATCH /accounts/:id`, should we verify that the email address is reachable before activating forwarding? Options: (1) send a verification email with a confirmation link (same as forwarding address verification), (2) require the address to already be in the verified forwarding addresses list, (3) no verification (trust the user). Also: should new accounts have a default value for this field, or is it always null until explicitly configured? Currently SR-26 fires `forwardCalendarInvite` whenever a calendar signal is detected — if the address is unset, the action silently does nothing. Decide: should we warn the user in the UI that calendar forwarding is inactive until they set an address?
-
-
-
-- [ ] **Gate `retentionDuration` setting by billing plan + handle downgrades** — when a user sets `retentionDuration` via PATCH /accounts/:id, validate against their current plan using `isWithinPlanLimit()`. Reject with 403 if they request a tier above what their plan allows. Additionally: when a plan downgrades (webhook from billing provider or manual admin action), coerce any existing `retentionDuration` values that exceed the new plan's max tier down to the plan max. Existing signals already stored with longer retention keep their TTL (data already paid for) but new signals get the coerced default.
-
-
 - [ ] **Update forwarding verification email URL format** — the verification email currently generates `${APP_BASE_URL}/accounts/${accountId}/forwarding-addresses/${address}/verify?token=${token}`. Change to `${APP_BASE_URL}/settings?tab=forwarding&verifyAddress=${address}&token=${token}&accountId=${accountId}` so it lands directly on the Settings forwarding tab which auto-submits verification on mount.
 - [ ] **Webhook rule save validation** — reject webhook rule saves unless a test request to the configured URL returns HTTP 200. The frontend sends a test request directly from the browser; the backend should also validate on save to prevent broken webhooks from being persisted.

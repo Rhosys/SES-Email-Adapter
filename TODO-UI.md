@@ -189,6 +189,13 @@ Validations from the backend that could run client-side for instant feedback.
 
 ---
 
+## Security & Trust — Iframe & Rendering
+
+- [ ] **Iframe sandbox security audit** — verify the `sandbox` attribute configuration on the email body rendering iframe actually prevents: script execution, form submissions, popups, top-navigation escape, and content injection via `srcdoc`. Confirm CSP headers (if any) are correctly scoped. Document what the current sandbox allows vs what it should allow.
+  - Website
+
+---
+
 ## Security & Trust — Outbound Validation
 
 - [ ] **Signal detail: show envelope metadata** — Display Return-Path, Reply-To, CC with trust indicators. Show warning if Reply-To domain ≠ From domain. Show warning if user was BCC'd (recipient not in To/CC).
