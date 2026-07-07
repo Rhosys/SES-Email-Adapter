@@ -176,6 +176,7 @@ describe("ThreadMatcher.searchByVector", () => {
       .on(ExecuteStatementCommand)
         .resolvesOnce({}) // SET LOCAL
         .resolvesOnce({
+          columnMetadata: [{ name: "thread_id" }],
           records: [
             [{ stringValue: "arc_thread_1" }],
             [{ stringValue: "arc_thread_2" }],
