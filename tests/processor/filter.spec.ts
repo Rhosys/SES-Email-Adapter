@@ -42,6 +42,54 @@ describe("getETLD1", () => {
 });
 
 // ---------------------------------------------------------------------------
+// getETLD1 — subdomain matching for test detection (B.3, B.4)
+// ---------------------------------------------------------------------------
+
+describe("getETLD1 — eTLD+1 comparison for test detection", () => {
+  // B.3: getETLD1(sender) matches getETLD1(registered domain) via eTLD+1 comparison
+  it("subdomain sender matches registered apex domain", () => {
+    // sender = mail.example.com, registered = example.com → both eTLD+1 = example.com
+    expect(getETLD1("user@mail.example.com")).toBe(getETLD1("example.com"));
+  });
+
+  it("deep subdomain sender matches registered apex domain", () => {
+    // sender = a.b.c.example.com, registered = example.com
+    expect(getETLD1("noreply@a.b.c.example.com")).toBe(getETLD1("example.com"));
+  });
+
+  it("subdomain sender matches registered subdomain of same apex", () => {
+    // sender = notifications.example.com, registered = app.example.com → both eTLD+1 = example.com
+    expect(getETLD1("user@notifications.example.com")).toBe(getETLD1("app.example.com"));
+  });
+
+  it("ccTLD subdomain sender matches registered ccTLD apex", () => {
+    // sender = mail.amazon.co.uk, registered = amazon.co.uk → both eTLD+1 = amazon.co.uk
+    expect(getETLD1("user@mail.amazon.co.uk")).toBe(getETLD1("amazon.co.uk"));
+  });
+
+  // B.4: non-matching domains do not produce false positives
+  it("different apex domains do not match", () => {
+    // sender = attacker.com, registered = example.com → different eTLD+1
+    expect(getETLD1("user@attacker.com")).not.toBe(getETLD1("example.com"));
+  });
+
+  it("subdomain of different apex does not match", () => {
+    // sender = mail.attacker.com, registered = example.com
+    expect(getETLD1("user@mail.attacker.com")).not.toBe(getETLD1("example.com"));
+  });
+
+  it("similar-looking domains with different eTLD+1 do not match", () => {
+    // sender = example.com.evil.com — eTLD+1 = evil.com, not example.com
+    expect(getETLD1("user@example.com.evil.com")).not.toBe(getETLD1("example.com"));
+  });
+
+  it("different ccTLD registrations do not match", () => {
+    // sender = amazon.co.uk, registered = amazon.com → different eTLD+1
+    expect(getETLD1("user@amazon.co.uk")).not.toBe(getETLD1("amazon.com"));
+  });
+});
+
+// ---------------------------------------------------------------------------
 // assignSystemLabels — spam labels
 // ---------------------------------------------------------------------------
 
