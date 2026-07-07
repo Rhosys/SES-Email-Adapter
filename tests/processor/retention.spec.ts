@@ -26,6 +26,7 @@ describe("retentionToS3Tag", () => {
 
 describe("durationToSeconds", () => {
   it.each([
+    ["P7D", 7 * 86400],
     ["P1M", 30 * 86400],
     ["P2M", 60 * 86400],
     ["P3M", 90 * 86400],
@@ -39,6 +40,12 @@ describe("durationToSeconds", () => {
     ["Infinity", null],
   ] as const)("%s → %s seconds", (duration, expected) => {
     expect(durationToSeconds(duration as RetentionDuration)).toBe(expected);
+  });
+
+  it("returns null for invalid ISO 8601 durations", () => {
+    expect(durationToSeconds("not-a-duration")).toBeNull();
+    expect(durationToSeconds("")).toBeNull();
+    expect(durationToSeconds("7D")).toBeNull();
   });
 });
 
