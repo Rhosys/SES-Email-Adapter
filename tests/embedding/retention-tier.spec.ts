@@ -131,6 +131,10 @@ describe("retentionDurationToSeconds", () => {
   it("returns 1000*365 days in seconds for P1000Y", () => {
     expect(retentionDurationToSeconds('P1000Y')).toBe(1000 * 365 * 24 * 60 * 60);
   });
+
+  it("throws for invalid ISO 8601 durations", () => {
+    expect(() => retentionDurationToSeconds("not-valid" as RetentionDuration)).toThrow("Invalid ISO 8601 duration");
+  });
 });
 
 // ---------------------------------------------------------------------------
