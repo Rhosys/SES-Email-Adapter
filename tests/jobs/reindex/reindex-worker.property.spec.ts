@@ -146,6 +146,7 @@ describe("Property 11: Reindex worker uses cache exclusively and never calls Bed
         accountId: signal.accountId,
         recipientAddress: signal.data.recipientAddress,
         embedding: expectedVector,
+        signalId: signal.id,
       });
     }
 

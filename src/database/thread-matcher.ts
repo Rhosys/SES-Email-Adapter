@@ -40,6 +40,7 @@ export interface MultiClusterAuroraWriter {
     accountId: string;
     recipientAddress: string;
     embedding: number[];
+    signalId: string;
   }): Promise<Result<void, DbError>>;
 
   findMatch(opts: {
@@ -296,13 +297,14 @@ export class ThreadMatcher implements ThreadMatcherPort, MultiClusterAuroraWrite
   // MultiClusterAuroraWriter — upserts
   // ---------------------------------------------------------------------------
 
-  async upsertEmbedding(threadId: string, embedding: number[], accountId: string, recipientAddress: string): Promise<Result<void, DbError>>;
-  async upsertEmbedding(opts: { registryId: string; threadId: string; accountId: string; recipientAddress: string; embedding: number[] }): Promise<Result<void, DbError>>;
+  async upsertEmbedding(threadId: string, embedding: number[], accountId: string, recipientAddress: string, signalId: string): Promise<Result<void, DbError>>;
+  async upsertEmbedding(opts: { registryId: string; threadId: string; accountId: string; recipientAddress: string; embedding: number[]; signalId: string }): Promise<Result<void, DbError>>;
   async upsertEmbedding(
-    threadIdOrOpts: string | { registryId: string; threadId: string; accountId: string; recipientAddress: string; embedding: number[] },
+    threadIdOrOpts: string | { registryId: string; threadId: string; accountId: string; recipientAddress: string; embedding: number[]; signalId: string },
     embedding?: number[],
     accountId?: string,
     recipientAddress?: string,
+    signalId?: string,
   ): Promise<Result<void, DbError>> {
     if (typeof threadIdOrOpts === "string") {
       const cluster = getPrimaryThreadMatcherRegistry();
@@ -312,6 +314,7 @@ export class ThreadMatcher implements ThreadMatcherPort, MultiClusterAuroraWrite
         accountId: accountId!,
         recipientAddress: recipientAddress!,
         embedding: embedding!,
+        signalId: signalId!,
       });
     }
     return this.upsertToCluster(threadIdOrOpts);
@@ -323,6 +326,7 @@ export class ThreadMatcher implements ThreadMatcherPort, MultiClusterAuroraWrite
     accountId: string;
     recipientAddress: string;
     embedding: number[];
+    signalId: string;
   }): Promise<Result<void, DbError>> {
     const cluster = getRegistryById(opts.registryId);
     if (!cluster) return err(dbError(`Cluster "${opts.registryId}" not found in CLUSTER_REGISTRY`));
@@ -336,18 +340,12 @@ export class ThreadMatcher implements ThreadMatcherPort, MultiClusterAuroraWrite
           await tx
             .insert(threadEmbeddings)
             .values({
+              signalId: opts.signalId,
               threadId: opts.threadId,
               accountId: opts.accountId,
               recipientAddress: opts.recipientAddress,
               embedding: toVector(opts.embedding),
               updatedAt: sql`now()`,
-            })
-            .onConflictDoUpdate({
-              target: [threadEmbeddings.threadId, threadEmbeddings.accountId, threadEmbeddings.recipientAddress],
-              set: {
-                embedding: sql`EXCLUDED.embedding`,
-                updatedAt: sql`now()`,
-              },
             });
         });
       });

@@ -77,7 +77,7 @@ describe("MultiClusterAuroraWriterImpl", () => {
   });
 
   describe("upsertEmbedding", () => {
-    it("runs BEGIN → SET LOCAL → INSERT ON CONFLICT → COMMIT in sequence", async () => {
+    it("runs BEGIN → SET LOCAL → INSERT → COMMIT in sequence", async () => {
       rdsMock
         .on(BeginTransactionCommand).resolves({ transactionId: "txn-1" })
         .on(ExecuteStatementCommand).resolves({ records: [] })
@@ -89,6 +89,7 @@ describe("MultiClusterAuroraWriterImpl", () => {
         accountId: "acct_1",
         recipientAddress: "user@example.com",
         embedding: [0.1, 0.2, 0.3],
+        signalId: "sig_123",
       });
 
       expect(result.isOk()).toBe(true);
@@ -108,10 +109,10 @@ describe("MultiClusterAuroraWriterImpl", () => {
       expect(setLocalInput.sql).toBe("SET LOCAL app.current_account_id = 'acct_1'");
       expect(setLocalInput.transactionId).toBe("txn-1");
 
-      // INSERT ON CONFLICT
+      // INSERT
       const upsertInput = calls[2]!.args[0].input as { sql?: string; transactionId?: string; parameters?: unknown[] };
       expect(upsertInput.sql).toContain("thread_embeddings");
-      expect(upsertInput.sql).toContain("on conflict");
+      expect(upsertInput.sql).not.toContain("on conflict");
       expect(upsertInput.transactionId).toBe("txn-1");
 
       // COMMIT
@@ -129,6 +130,7 @@ describe("MultiClusterAuroraWriterImpl", () => {
         accountId: "acct_1",
         recipientAddress: "a@b.com",
         embedding: [1],
+        signalId: "sig_1",
       });
 
       expect(result.isErr()).toBe(true);
@@ -148,6 +150,7 @@ describe("MultiClusterAuroraWriterImpl", () => {
         accountId: "acct_1",
         recipientAddress: "a@b.com",
         embedding: [1],
+        signalId: "sig_1",
       });
 
       expect(result.isErr()).toBe(true);
@@ -184,6 +187,7 @@ describe("MultiClusterAuroraWriterImpl", () => {
         accountId: "acct_1",
         recipientAddress: "a@b.com",
         embedding: [1, 2],
+        signalId: "sig_1",
       });
 
       // Advance past both retry delays (1s + 2s)
@@ -210,6 +214,7 @@ describe("MultiClusterAuroraWriterImpl", () => {
         accountId: "acct_1",
         recipientAddress: "a@b.com",
         embedding: [1],
+        signalId: "sig_1",
       });
 
       expect(result.isErr()).toBe(true);
@@ -230,6 +235,7 @@ describe("MultiClusterAuroraWriterImpl", () => {
         accountId: "acct_1",
         recipientAddress: "a@b.com",
         embedding: [1],
+        signalId: "sig_1",
       });
 
       expect(result.isErr()).toBe(true);
@@ -380,6 +386,7 @@ describe("MultiClusterAuroraWriterImpl", () => {
             accountId: "acct-retry-test",
             recipientAddress: "retry@example.com",
             embedding: [0.1, 0.2, 0.3],
+            signalId: "sig-retry-test",
           });
 
           // After 3 failed attempts, the result should be an error
@@ -440,6 +447,7 @@ describe("MultiClusterAuroraWriterImpl", () => {
             accountId: "acct-recovery",
             recipientAddress: "recovery@example.com",
             embedding: [0.1, 0.2, 0.3],
+            signalId: "sig-recovery",
           });
 
           expect(result.isOk()).toBe(true);
@@ -486,6 +494,7 @@ describe("MultiClusterAuroraWriterImpl", () => {
           accountId: "acct-nontransient",
           recipientAddress: "nontransient@example.com",
           embedding: [0.1, 0.2, 0.3],
+          signalId: "sig-nontransient",
         });
 
         expect(result.isErr()).toBe(true);
@@ -530,6 +539,7 @@ describe("MultiClusterAuroraWriterImpl", () => {
             accountId,
             recipientAddress,
             embedding,
+            signalId: "sig-idempotent",
           });
         }
 
@@ -550,9 +560,9 @@ describe("MultiClusterAuroraWriterImpl", () => {
           expect(nthUpsert.parameters).toEqual(firstUpsert.parameters);
         }
 
-        // Verify the SQL uses ON CONFLICT with the correct composite key
+        // Verify the SQL uses INSERT with the correct table
         expect(firstUpsert.sql).toContain("thread_embeddings");
-        expect(firstUpsert.sql).toContain("on conflict");
+        expect(firstUpsert.sql).not.toContain("on conflict");
 
         // Verify each upsert was committed (not rolled back)
         const commitCalls = rdsMock.commandCalls(CommitTransactionCommand);
@@ -564,7 +574,7 @@ describe("MultiClusterAuroraWriterImpl", () => {
     // Property 15: Aurora upserts run inside an RLS-scoped transaction
     // Validates: Requirements 6.2
     it(
-      "upserts execute BeginTransaction → SET LOCAL → INSERT ON CONFLICT → CommitTransaction on the same transactionId",
+      "upserts execute BeginTransaction → SET LOCAL → INSERT → CommitTransaction on the same transactionId",
       async () => {
         rdsMock.reset();
 
@@ -586,6 +596,7 @@ describe("MultiClusterAuroraWriterImpl", () => {
           accountId,
           recipientAddress,
           embedding,
+          signalId: "sig-rls",
         });
 
         const calls = rdsMock.calls();
@@ -614,7 +625,7 @@ describe("MultiClusterAuroraWriterImpl", () => {
         expect(setLocalInput.transactionId).toBe(txnId);
         expect(setLocalInput.sql).toBe(`SET LOCAL app.current_account_id = '${accountId}'`);
 
-        // Call 2: ExecuteStatement — INSERT ON CONFLICT with the same transactionId
+        // Call 2: ExecuteStatement — INSERT with the same transactionId
         const upsertInput = calls[2]!.args[0].input as {
           sql?: string;
           transactionId?: string;
@@ -623,7 +634,7 @@ describe("MultiClusterAuroraWriterImpl", () => {
         expect(calls[2]!.args[0]).toBeInstanceOf(ExecuteStatementCommand);
         expect(upsertInput.transactionId).toBe(txnId);
         expect(upsertInput.sql).toContain("thread_embeddings");
-        expect(upsertInput.sql).toContain("on conflict");
+        expect(upsertInput.sql).not.toContain("on conflict");
 
         // Call 3: CommitTransaction with the same transactionId
         const commitInput = calls[3]!.args[0].input as {

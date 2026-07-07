@@ -65,7 +65,7 @@ export interface SqsDispatcher {
 
 export interface ThreadMatcherPort {
   findMatch(accountId: string, recipientAddress: string, embedding: number[]): Promise<Result<Thread | null, DbError>>;
-  upsertEmbedding(threadId: string, embedding: number[], accountId: string, recipientAddress: string): Promise<Result<void, DbError>>;
+  upsertEmbedding(threadId: string, embedding: number[], accountId: string, recipientAddress: string, signalId: string): Promise<Result<void, DbError>>;
 }
 
 export interface RuleEvaluator {
@@ -91,6 +91,8 @@ export interface ReplySender {
 }
 
 export type SesVerdict = "PASS" | "FAIL" | "GRAY" | "PROCESSING_FAILED";
+
+const systemSignalDefaultRetentionDuration = 90 * 24 * 60 * 60;
 
 interface SesReceiptNotification {
   mail: {
@@ -177,7 +179,7 @@ async function applyRules(
       });
       const id = generateId("sgn-");
       const timestamp = DateTime.utc().toISO()!;
-      const ttl = Math.floor(Date.now() / 1000) + 90 * 24 * 60 * 60;
+      const ttl = Math.floor(Date.now() / 1000) + systemSignalDefaultRetentionDuration;
       const result = await saveSignal({
         id, signalLookupId: id, threadId: context.thread.id, accountId: rule.accountId,
         source: "email", type: "invalid_rule_function", status: "active",
@@ -526,7 +528,7 @@ export class SignalProcessor {
                 {
                   const sigId = generateId("sgn-");
                   const sigTs = DateTime.utc().toISO()!;
-                  await this.threadDb.saveSignal({ id: sigId, signalLookupId: sigId, threadId: thread.id, accountId, source: "email", type: "invalid_template_function", status: "active", labels: [], createdAt: sigTs, ttl: Math.floor(Date.now() / 1000) + 90 * 24 * 60 * 60, data: { resourceName: tmpl.name, functionName: fn.name, issue } });
+                  await this.threadDb.saveSignal({ id: sigId, signalLookupId: sigId, threadId: thread.id, accountId, source: "email", type: "invalid_template_function", status: "active", labels: [], createdAt: sigTs, ttl: Math.floor(Date.now() / 1000) + systemSignalDefaultRetentionDuration, data: { resourceName: tmpl.name, functionName: fn.name, issue } });
                 }
                 actionVars[`fn.${fn.name}`] = "";
                 preventAutoSend = true;
@@ -548,7 +550,7 @@ export class SignalProcessor {
                   {
                     const sigId = generateId("sgn-");
                     const sigTs = DateTime.utc().toISO()!;
-                    await this.threadDb.saveSignal({ id: sigId, signalLookupId: sigId, threadId: thread.id, accountId, source: "email", type: "invalid_template_function", status: "active", labels: [], createdAt: sigTs, ttl: Math.floor(Date.now() / 1000) + 90 * 24 * 60 * 60, data: { resourceName: tmpl.name, functionName: fn.name, issue } });
+                    await this.threadDb.saveSignal({ id: sigId, signalLookupId: sigId, threadId: thread.id, accountId, source: "email", type: "invalid_template_function", status: "active", labels: [], createdAt: sigTs, ttl: Math.floor(Date.now() / 1000) + systemSignalDefaultRetentionDuration, data: { resourceName: tmpl.name, functionName: fn.name, issue } });
                   }
                   actionVars[`fn.${fn.name}`] = "";
                   preventAutoSend = true;
@@ -581,7 +583,7 @@ export class SignalProcessor {
               {
                 const sigId = generateId("sgn-");
                 const sigTs = DateTime.utc().toISO()!;
-                await this.threadDb.saveSignal({ id: sigId, signalLookupId: sigId, threadId: thread.id, accountId, source: "email", type: "auto_send_blocked", status: "active", labels: [], createdAt: sigTs, ttl: Math.floor(Date.now() / 1000) + 90 * 24 * 60 * 60, data: { recipientAddress: signal.data.recipientAddress } });
+                await this.threadDb.saveSignal({ id: sigId, signalLookupId: sigId, threadId: thread.id, accountId, source: "email", type: "auto_send_blocked", status: "active", labels: [], createdAt: sigTs, ttl: Math.floor(Date.now() / 1000) + systemSignalDefaultRetentionDuration, data: { recipientAddress: signal.data.recipientAddress } });
               }
             }
           }
@@ -1366,10 +1368,10 @@ export class SignalProcessor {
   }
 
   /**
-   * Execute Aurora upserts for all active clusters in parallel.
+   * Execute Aurora inserts for all active clusters in parallel.
    * Returns ok if ALL clusters succeed, err if ANY cluster fails.
    * Logs ERROR for primary cluster failures, WARN for non-primary.
-   * Upserts are idempotent (ON CONFLICT DO UPDATE) — safe to re-run on every attempt.
+   * Inserts one row per signal per cluster — duplicates are prevented by the composite PK including signalId.
    */
   async executeAuroraUpserts(signal: Signal, thread: Thread): Promise<Result<void, DbError>> {
     const activeClusters = getActiveClusters();
@@ -1389,6 +1391,7 @@ export class SignalProcessor {
           accountId: signal.accountId,
           recipientAddress: signal.data.recipientAddress,
           embedding,
+          signalId: signal.id,
         });
 
         if (upsertResult.isErr()) {
