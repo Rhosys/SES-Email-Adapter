@@ -10,14 +10,14 @@
 // Separate from embedding/retention-tier.ts which handles the email inbox bucket.
 // ---------------------------------------------------------------------------
 
+import { Duration } from "luxon";
+
 /**
- * ISO 8601 durations allowed for signal/thread retention.
- * These map to S3 lifecycle tags on the extracted content bucket.
+ * Any valid ISO 8601 duration string, or "Infinity" for no expiration.
+ * The API schema (src/api/schemas.ts) has its own zod enum for validation —
+ * this internal type is intentionally open to support any parseable duration.
  */
-export type RetentionDuration =
-  | "P1M" | "P2M" | "P3M" | "P5M" | "P6M"
-  | "P1Y" | "P2Y" | "P5Y" | "P10Y"
-  | "P100Y" | "Infinity";
+export type RetentionDuration = string;
 
 /**
  * S3 lifecycle tag value for the extracted content bucket.
@@ -28,42 +28,30 @@ export type RetentionDuration =
 export type S3RetentionTag = "365" | "3650" | null;
 
 /**
- * Maps a retention duration to the appropriate S3 lifecycle tag.
- * Durations ≤ 1 year get the 365-day tag, 2–10 years get the 3650-day tag,
- * and 100Y/Infinity get no tag (live forever).
- */
-export function retentionToS3Tag(duration: RetentionDuration): S3RetentionTag {
-  switch (duration) {
-    case "P1M": case "P2M": case "P3M": case "P5M": case "P6M": case "P1Y":
-      return "365";
-    case "P2Y": case "P5Y": case "P10Y":
-      return "3650";
-    case "P100Y": case "Infinity":
-      return null;
-  }
-}
-
-// Approximate seconds per duration (uses 30-day months, 365-day years)
-const DURATION_SECONDS: Record<RetentionDuration, number | null> = {
-  "P1M": 30 * 24 * 60 * 60,
-  "P2M": 60 * 24 * 60 * 60,
-  "P3M": 90 * 24 * 60 * 60,
-  "P5M": 150 * 24 * 60 * 60,
-  "P6M": 180 * 24 * 60 * 60,
-  "P1Y": 365 * 24 * 60 * 60,
-  "P2Y": 2 * 365 * 24 * 60 * 60,
-  "P5Y": 5 * 365 * 24 * 60 * 60,
-  "P10Y": 10 * 365 * 24 * 60 * 60,
-  "P100Y": 100 * 365 * 24 * 60 * 60,
-  "Infinity": null,
-};
-
-/**
  * Converts a retention duration to seconds (for computing DynamoDB TTL).
- * Returns null for "Infinity" (item lives forever, no TTL set).
+ * Returns null for "Infinity" or unparseable durations (item lives forever, no TTL set).
  */
 export function durationToSeconds(duration: RetentionDuration): number | null {
-  return DURATION_SECONDS[duration];
+  if (duration === "Infinity") return null;
+  const d = Duration.fromISO(duration);
+  if (!d.isValid) return null;
+  return Math.floor(d.as("seconds"));
+}
+
+/**
+ * Maps a retention duration to the appropriate S3 lifecycle tag.
+ * Durations ≤ 1 year get the 365-day tag, 2–10 years get the 3650-day tag,
+ * and >10 years or Infinity get no tag (live forever).
+ */
+export function retentionToS3Tag(duration: RetentionDuration): S3RetentionTag {
+  if (duration === "Infinity") return null;
+  const seconds = durationToSeconds(duration);
+  if (seconds === null) return null;
+  const oneYear = 365 * 24 * 60 * 60;
+  const tenYears = 10 * oneYear;
+  if (seconds <= oneYear) return "365";
+  if (seconds <= tenYears) return "3650";
+  return null;
 }
 
 /**
