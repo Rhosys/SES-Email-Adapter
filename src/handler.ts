@@ -198,6 +198,9 @@ const draftSendWorker = new DraftSendWorker(
 
 const domainHealthJob = new DomainHealthJob(accountDb, threadDb, logger);
 
+// Placeholder — full instantiation in Task 13
+const healthcheckJob = { run: async () => { logger.warn("HealthcheckJob not yet wired", { code: "healthcheck.not_wired" }); } };
+
 const followupHandler = new FollowupHandler({
   threadDb,
   notifier: new DeviceNotifier({
@@ -379,9 +382,23 @@ async function handlerInner(
   if (isEventBridgeEvent(event)) {
     const ebEvent = event as EventBridgeEvent<string, unknown>;
     const ruleName = ebEvent.resources?.[0]?.split("/").pop();
+
     if (ruleName?.endsWith("-domain-health")) {
       await domainHealthJob.run();
+      return;
     }
+
+    if (ruleName?.endsWith("-healthcheck")) {
+      await healthcheckJob.run();
+      return;
+    }
+
+    // Unrecognised rule — log error and return without invoking any job
+    logger.error("EventBridge event received with unrecognised rule name. No job will be invoked.", {
+      code: "handler.eventbridge.unknown_rule",
+      ruleName: ruleName ?? null,
+      resources: ebEvent.resources,
+    });
     return;
   }
   if (isSqsEvent(event)) {
