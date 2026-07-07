@@ -1,3 +1,5 @@
+import { Duration } from 'luxon';
+
 // ---------------------------------------------------------------------------
 // Retention tiers
 // ---------------------------------------------------------------------------
@@ -91,15 +93,12 @@ export function getUserDisplayedRetention(retentionDuration: RetentionDuration):
 }
 
 /**
- * Converts an ISO 8601 duration to seconds.
- * Only supports the retention durations used in this system.
+ * Converts an ISO 8601 duration to seconds using luxon Duration parsing.
  */
 export function retentionDurationToSeconds(duration: RetentionDuration): number {
-  switch (duration) {
-    case 'P1Y': return 365 * 24 * 60 * 60;       // 31,536,000
-    case 'P5Y': return 5 * 365 * 24 * 60 * 60;   // 157,680,000
-    case 'P1000Y': return 1000 * 365 * 24 * 60 * 60; // 31,536,000,000
-  }
+  const d = Duration.fromISO(duration);
+  if (!d.isValid) throw new Error(`Invalid ISO 8601 duration: ${duration}`);
+  return Math.floor(d.as('seconds'));
 }
 
 // ---------------------------------------------------------------------------
