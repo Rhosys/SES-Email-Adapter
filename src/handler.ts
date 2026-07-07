@@ -35,6 +35,7 @@ import { ReplySenderService } from "./notifier/reply-sender.js";
 import { DynamoDeviceStore } from "./notifier/device-store.js";
 import { FeedbackProcessor } from "./notifier/feedback-processor.js";
 import { DomainHealthJob } from "./jobs/domain-health-job.js";
+import { HealthcheckJob } from "./jobs/healthcheck-job.js";
 import { AuthressAuthService } from "./api/authress-auth.js";
 import { AuthressAccessService } from "./api/authress-access.js";
 import { createApp } from "./api/app.js";
@@ -198,8 +199,13 @@ const draftSendWorker = new DraftSendWorker(
 
 const domainHealthJob = new DomainHealthJob(accountDb, threadDb, logger);
 
-// Placeholder — full instantiation in Task 13
-const healthcheckJob = { run: async () => { logger.warn("HealthcheckJob not yet wired", { code: "healthcheck.not_wired" }); } };
+const healthcheckJob = new HealthcheckJob({
+  threadDb,
+  emailService,
+  searchDatabase,
+  mailDomain: MAIL_DOMAIN,
+  logger,
+});
 
 const followupHandler = new FollowupHandler({
   threadDb,
