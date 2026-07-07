@@ -151,6 +151,7 @@ export class ReindexWorker {
       accountId: signal.accountId,
       recipientAddress: signal.data.recipientAddress,
       embedding: vector,
+      signalId: signal.id,
     });
     if (upsertResult.isErr()) {
       return err({ signalId: signal.id, cause: upsertResult.error });
@@ -198,6 +199,7 @@ export class ReindexWorker {
       accountId: signal.accountId,
       recipientAddress: signal.data.recipientAddress,
       embedding: result.value.vector,
+      signalId: signal.id,
     });
     if (upsertResult.isErr()) {
       return err({ signalId: signal.id, cause: upsertResult.error });

@@ -181,6 +181,7 @@ describe("ReindexWorker — pure-copy mode", () => {
       accountId: "acct-1",
       recipientAddress: "me@example.com",
       embedding: [0.1, 0.2, 0.3],
+      signalId: "SES#abc123",
     });
   });
 
@@ -482,6 +483,7 @@ describe("ReindexWorker — regenerate-from-S3 mode", () => {
       accountId: "acct-1",
       recipientAddress: "regen@example.com",
       embedding: [0.1, 0.2, 0.3],
+      signalId: "sgn-regen001",
     });
   });
 
@@ -520,6 +522,7 @@ describe("ReindexWorker — regenerate-from-S3 mode", () => {
       accountId: "acct-1",
       recipientAddress: "cached@example.com",
       embedding: [0.5, 0.6, 0.7],
+      signalId: "SES#cached",
     });
   });
 
