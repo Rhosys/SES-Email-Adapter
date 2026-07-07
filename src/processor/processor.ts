@@ -28,6 +28,7 @@ import type { RetentionDuration } from "./retention.js";
 import { generatePresignedGet, generatePresignedPost } from "./presign.js";
 import { getPrimaryThreadMatcherRegistry, getActiveClusters } from "../embedding/cluster-registry.js";
 import { getETLD1, assignSystemLabels } from "./filter.js";
+import { isSystemAccount } from "../database/system-account-db.js";
 import { toRuleSignalContext, toRuleThreadContext } from "./rule-context.js";
 import { statusToMetric } from "../database/stats-writer.js";
 import type { DraftSendDispatch } from "./draft-send-dispatcher.js";
@@ -994,6 +995,13 @@ export class SignalProcessor {
           this.logger.warn("Failed to mark onboarding testEmailReceived", { code: "processor.onboarding_mark_failed", accountId, error: onboardingResult.error });
         }
       }
+    }
+
+    // 5b. SYSTEM account override — healthcheck emails always get workflow "healthcheck"
+    // regardless of classifier output or test detection. Fires after isTestEmail so it takes precedence.
+    if (isSystemAccount(accountId)) {
+      classificationOutput.workflow = "healthcheck" as Workflow;
+      classificationOutput.workflowData = { workflow: "healthcheck" } as unknown as WorkflowData;
     }
 
     // 6. Thread matching (parallel tiers)
