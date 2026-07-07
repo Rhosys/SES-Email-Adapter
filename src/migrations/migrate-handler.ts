@@ -57,8 +57,8 @@ const db = drizzle(client, {
   resourceArn: CLUSTER_ARN,
 });
 
-const MAX_ATTEMPTS = 5;
-const BASE_DELAY_MS = 3000;
+const MAX_ATTEMPTS = 10;
+const BASE_DELAY_MS = 5000;
 
 async function migrationWrapper() {
   const errors = [];
@@ -78,7 +78,7 @@ async function migrationWrapper() {
 
       if (isResumingOrTransient && attempt < MAX_ATTEMPTS) {
         const delayMs = BASE_DELAY_MS * Math.pow(2, attempt - 1);
-        logger.info("Migration attempt failed — retrying", { code: "migrate.retry", attempt, maxAttempts: MAX_ATTEMPTS, reason: message, nextDelayMs: delayMs, error: e });
+        logger.warn("Migration attempt failed — retrying", { code: "migrate.retry", attempt, maxAttempts: MAX_ATTEMPTS, reason: message, nextDelayMs: delayMs, error: e });
         await new Promise(r => setTimeout(r, delayMs));
         continue;
       }
