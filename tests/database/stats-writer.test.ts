@@ -98,7 +98,8 @@ describe("buildDiffUpdateParams", () => {
 
   it("ADD expression targets the correct metric path", () => {
     const params = buildDiffUpdateParams(accountId, "blocked", 1, now, tableName);
-    expect(params.UpdateExpression).toBe("ADD metrics.#metricName :delta");
+    expect(params.UpdateExpression).toBe("ADD #metrics.#metricName :delta");
+    expect(params.ExpressionAttributeNames["#metrics"]).toBe("metrics");
     expect(params.ExpressionAttributeNames["#metricName"]).toBe("blocked");
   });
 

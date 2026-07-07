@@ -51,7 +51,7 @@ describe("stats-writer integration (row-per-day design)", () => {
       expect(mockSend).toHaveBeenCalledTimes(2);
       const input = mockSend.mock.calls[0]![0].input;
       expect(input.ConditionExpression).toBe("attribute_exists(pk) AND NOT contains(history, :key)");
-      expect(input.UpdateExpression).toContain("ADD metrics.#metricName :delta");
+      expect(input.UpdateExpression).toContain("ADD #metrics.#metricName :delta");
       expect(input.UpdateExpression).toContain("list_append(history, :keyList)");
       expect(input.ExpressionAttributeNames["#metricName"]).toBe("allowed");
       expect(input.ExpressionAttributeValues[":delta"]).toBe(1);
