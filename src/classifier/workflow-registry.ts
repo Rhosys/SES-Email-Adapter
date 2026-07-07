@@ -201,6 +201,11 @@ export const WORKFLOW_REGISTRY: WorkflowDefinition[] = [
     ],
   },
   {
+    name: "healthcheck",
+    description: "System-generated pipeline validation emails — daily automated checks",
+    fields: [],
+  },
+  {
     name: "test",
     description: "Emails sent by the account owner to their own domain — triggers pong",
     fields: [

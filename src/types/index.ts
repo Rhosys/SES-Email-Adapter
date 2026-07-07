@@ -17,6 +17,7 @@ export const WORKFLOWS = [
   "job",           // Applications, interviews, offers, rejections — career pipeline
   "support",       // Helpdesk tickets with threaded conversation and ticket ID
   "events",        // Ticketed events: concerts, conferences, sports, theatre — venue + date + seats
+  "healthcheck",   // System-generated pipeline validation emails — daily automated checks
   "test",          // Emails sent by the account owner to their own domain — triggers pong
   "unspecified",   // Classification failed or was skipped — email is unclassified
   // NOTE: spam is NOT a workflow. It is expressed via Signal.data.tags (e.g. ["phishing", "credential-harvest"]).
@@ -48,6 +49,7 @@ export type WorkflowData =
   | JobData
   | SupportData
   | EventsData
+  | HealthcheckData
   | TestData
   | UnspecifiedData;
 
@@ -220,6 +222,10 @@ export interface EventsData {
   ticketUrl?: string;
   totalAmount?: number;
   currency?: string;
+}
+
+export interface HealthcheckData {
+  workflow: "healthcheck";
 }
 
 export interface TestData {
