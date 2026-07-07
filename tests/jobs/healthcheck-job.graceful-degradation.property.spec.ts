@@ -1,0 +1,162 @@
+// Feature: weekly-healthcheck, Property 4: Graceful degradation — send always executes
+// **Validates: Requirements 4.1, 10.1, 10.2, 10.3, 10.4**
+//
+// For any outcome of the validation phase (success, failure, signal not found,
+// DynamoDB error, Aurora error), the job SHALL proceed to the send phase.
+// For any error occurring in the send phase, the job SHALL catch it and return
+// normally without re-throwing. The job NEVER throws.
+
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { ok, err, dbError } from "../../src/errors.js";
+import { HealthcheckJob } from "../../src/jobs/healthcheck-job.js";
+import type { HealthcheckJobDeps } from "../../src/jobs/healthcheck-job.js";
+import { createMockLogger } from "../helpers/mock-logger.js";
+import type { MockLogger } from "../helpers/mock-logger.js";
+
+// Mock the template renderer — we don't need real MJML in property tests
+vi.mock("../../src/email/template-renderer.js", () => ({
+  renderTemplate: vi.fn().mockResolvedValue("<html>healthcheck</html>"),
+}));
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+const MAIL_DOMAIN = "platform.email.rhosys.cloud";
+
+function makeSignal(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "sig-hc-yesterday",
+    signalLookupId: "ses-hc-yesterday",
+    accountId: "SYSTEM",
+    threadId: "thread-hc-1",
+    status: "active",
+    source: "email",
+    type: "email",
+    data: { workflow: "healthcheck" },
+    ...overrides,
+  };
+}
+
+function makeDeps(overrides: Partial<HealthcheckJobDeps> = {}): HealthcheckJobDeps {
+  return {
+    threadDb: { findSignalByEmailMessageId: vi.fn().mockResolvedValue(ok(makeSignal())) } as any,
+    emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-msg-1" })) } as any,
+    searchDatabase: { hasEmbedding: vi.fn().mockResolvedValue(true) },
+    mailDomain: MAIL_DOMAIN,
+    logger: createMockLogger(),
+    ...overrides,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Static test cases: validation phase outcomes that must NOT prevent send
+// ---------------------------------------------------------------------------
+
+const validationScenarios = [
+  {
+    scenario: "validation success — all checks pass",
+    setupThreadDb: () => vi.fn().mockResolvedValue(ok(makeSignal())),
+    setupSearchDb: () => vi.fn().mockResolvedValue(true),
+  },
+  {
+    scenario: "validation failure — wrong workflow",
+    setupThreadDb: () => vi.fn().mockResolvedValue(ok(makeSignal({ data: { workflow: "conversation" } }))),
+    setupSearchDb: () => vi.fn().mockResolvedValue(true),
+  },
+  {
+    scenario: "signal not found — GSI3 returns null",
+    setupThreadDb: () => vi.fn().mockResolvedValue(ok(null)),
+    setupSearchDb: () => vi.fn().mockResolvedValue(false),
+  },
+  {
+    scenario: "DynamoDB error — findSignalByEmailMessageId returns Err",
+    setupThreadDb: () => vi.fn().mockResolvedValue(err(dbError(new Error("DynamoDB timeout")))),
+    setupSearchDb: () => vi.fn().mockResolvedValue(false),
+  },
+  {
+    scenario: "Aurora error — hasEmbedding throws",
+    setupThreadDb: () => vi.fn().mockResolvedValue(ok(makeSignal())),
+    setupSearchDb: () => vi.fn().mockRejectedValue(new Error("Aurora connectivity timeout")),
+  },
+];
+
+// ---------------------------------------------------------------------------
+// Property 4: Graceful degradation — send always executes
+// ---------------------------------------------------------------------------
+
+describe("Property 4: Graceful degradation — send always executes", () => {
+  let mockLogger: MockLogger;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2025-07-08T06:00:00.000Z"));
+    mockLogger = createMockLogger();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  // --- Sub-property: send phase runs regardless of validation outcome ---
+
+  it.each(validationScenarios)("send phase runs after: $scenario", async ({ setupThreadDb, setupSearchDb }) => {
+    const emailSend = vi.fn().mockResolvedValue(ok({ messageId: "ses-msg-1" }));
+    const deps = makeDeps({
+      threadDb: { findSignalByEmailMessageId: setupThreadDb() } as any,
+      emailService: { send: emailSend } as any,
+      searchDatabase: { hasEmbedding: setupSearchDb() },
+      logger: mockLogger,
+    });
+
+    const job = new HealthcheckJob(deps);
+    await job.run();
+
+    // The property: emailService.send was called — send phase executed
+    expect(emailSend).toHaveBeenCalledTimes(1);
+  });
+
+  // --- Sub-property: job never throws, even when send phase fails ---
+
+  it("job completes without throwing when send phase returns Err result", async () => {
+    const deps = makeDeps({
+      emailService: { send: vi.fn().mockResolvedValue(err(dbError(new Error("SES throttle")))) } as any,
+      logger: mockLogger,
+    });
+
+    const job = new HealthcheckJob(deps);
+
+    // The property: run() resolves without throwing
+    await expect(job.run()).resolves.toBeUndefined();
+  });
+
+  it("job completes without throwing when send phase throws unexpected exception", async () => {
+    const deps = makeDeps({
+      emailService: { send: vi.fn().mockRejectedValue(new Error("Network unreachable")) } as any,
+      logger: mockLogger,
+    });
+
+    const job = new HealthcheckJob(deps);
+
+    // The property: run() resolves without throwing
+    await expect(job.run()).resolves.toBeUndefined();
+
+    // Verify it logged the error
+    const sendErrorLogs = mockLogger.calls.filter(c => c.context && (c.context as any).code === "healthcheck.send_error");
+    expect(sendErrorLogs.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("job completes without throwing when both validation AND send throw", async () => {
+    const deps = makeDeps({
+      threadDb: { findSignalByEmailMessageId: vi.fn().mockRejectedValue(new Error("DynamoDB catastrophic")) } as any,
+      emailService: { send: vi.fn().mockRejectedValue(new Error("SES catastrophic")) } as any,
+      searchDatabase: { hasEmbedding: vi.fn().mockRejectedValue(new Error("Aurora down")) },
+      logger: mockLogger,
+    });
+
+    const job = new HealthcheckJob(deps);
+
+    // The property: run() NEVER throws — Lambda always reports success to EventBridge
+    await expect(job.run()).resolves.toBeUndefined();
+  });
+});
