@@ -19,7 +19,7 @@ vi.mock("../../src/email/template-renderer.js", () => ({
 
 const MAIL_DOMAIN = "platform.email.rhosys.cloud";
 
-function makeSignal(overrides: { threadId?: string; workflow?: string } = {}) {
+function makeSignal(overrides: { threadId?: string | undefined; workflow?: string } = {}) {
   return {
     id: "sig-test",
     signalLookupId: "lookup-test",
