@@ -4,6 +4,7 @@ import type { ThreadDatabase } from "../database/thread-database.js";
 import type { EmailService } from "../email/email-service.js";
 import { buildSignalGsi3pk } from "../processor/message-id.js";
 import { SYSTEM_ACCOUNT_ID } from "../database/system-account-db.js";
+import { renderTemplate } from "../email/template-renderer.js";
 
 export interface HealthcheckJobDeps {
   threadDb: ThreadDatabase;
@@ -123,28 +124,22 @@ export class HealthcheckJob {
     const recipient = `healthcheck@${this.deps.mailDomain}`;
     const subject = `Healthcheck ${today}`;
 
-    // Build text body — placeholder until MJML template is created (Task 11)
-    const textBody = [
-      `Daily pipeline healthcheck — ${today}`,
-      "",
-      "This is an automated system-generated email to validate the email-catcher processing pipeline.",
-      "It exercises: SES receive → S3 → Lambda → MIME parse → classify → embed → Aurora pgvector upsert.",
-      "",
-      `Message-ID: ${messageId}`,
-      `Invocation: ${this.deps.logger.getInvocationId()}`,
-      `Timestamp: ${DateTime.utc().toISO()}`,
-      "",
-      "Validation results from today's run:",
-      this.lastValidationResults
-        ? JSON.stringify(this.lastValidationResults, null, 2)
-        : "No validation results (first run or validation error)",
-    ].join("\n");
+    const templateData: HealthcheckTemplateData = {
+      date: today,
+      messageId,
+      invocationId: this.deps.logger.getInvocationId(),
+      containerId: process.env["AWS_LAMBDA_LOG_STREAM_NAME"] ?? "unknown",
+      timestamp: DateTime.utc().toISO()!,
+      validationResults: this.lastValidationResults,
+    };
+    const { html, text } = await renderHealthcheckEmail(templateData, this.deps.mailDomain);
 
     try {
       const result = await this.deps.emailService.send({
         to: recipient,
         subject,
-        textBody,
+        textBody: text,
+        htmlBody: html,
         headers: [{ Name: "Message-ID", Value: `<${messageId}>` }],
         tags: [{ Name: "purpose", Value: "healthcheck" }],
         accountId: SYSTEM_ACCOUNT_ID,
@@ -172,4 +167,74 @@ export class HealthcheckJob {
       });
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Template rendering
+// ---------------------------------------------------------------------------
+
+export interface HealthcheckTemplateData {
+  date: string;
+  messageId: string;
+  invocationId: string;
+  containerId: string;
+  timestamp: string;
+  validationResults: ValidationChecks | null;
+}
+
+export async function renderHealthcheckEmail(data: HealthcheckTemplateData, mailDomain: string): Promise<{ html: string; text: string }> {
+  const checkIcon = (passed: boolean) => passed ? "✓" : "✗";
+  const checkLabel = (passed: boolean) => passed ? "pass" : "FAIL";
+
+  const templateVars: Record<string, unknown> = {
+    date: data.date,
+    messageId: data.messageId,
+    invocationId: data.invocationId,
+    containerId: data.containerId,
+    timestamp: data.timestamp,
+    domain: mailDomain,
+    hasValidationResults: data.validationResults !== null,
+    hasThreadIdIcon: data.validationResults ? checkIcon(data.validationResults.hasThreadId) : "",
+    hasThreadIdLabel: data.validationResults ? checkLabel(data.validationResults.hasThreadId) : "",
+    workflowIsHealthcheckIcon: data.validationResults ? checkIcon(data.validationResults.workflowIsHealthcheck) : "",
+    workflowIsHealthcheckLabel: data.validationResults ? checkLabel(data.validationResults.workflowIsHealthcheck) : "",
+    hasEmbeddingIcon: data.validationResults ? checkIcon(data.validationResults.hasEmbedding) : "",
+    hasEmbeddingLabel: data.validationResults ? checkLabel(data.validationResults.hasEmbedding) : "",
+    // Footer partial expects these
+    unsubscribeCode: "",
+    emailType: "healthcheck",
+  };
+
+  const html = await renderTemplate("healthcheck", templateVars);
+
+  const text = [
+    `Pipeline Healthcheck — ${data.date}`,
+    "",
+    "System-generated pipeline validation email (workflow: healthcheck).",
+    "This is an automated daily healthcheck that exercises the full email-catcher processing pipeline.",
+    "For: operations / automated monitoring. Account: SYSTEM.",
+    "",
+    "--- Execution Context ---",
+    `Run Date: ${data.date}`,
+    `Message-ID: ${data.messageId}`,
+    `Invocation ID: ${data.invocationId}`,
+    `Container ID: ${data.containerId}`,
+    `Timestamp: ${data.timestamp}`,
+    "",
+    "--- Validation Results (Yesterday) ---",
+    ...(data.validationResults
+      ? [
+          "Signal found: ✓",
+          `Thread ID present: ${checkIcon(data.validationResults.hasThreadId)} ${checkLabel(data.validationResults.hasThreadId)}`,
+          `Workflow is healthcheck: ${checkIcon(data.validationResults.workflowIsHealthcheck)} ${checkLabel(data.validationResults.workflowIsHealthcheck)}`,
+          `Embedding indexed: ${checkIcon(data.validationResults.hasEmbedding)} ${checkLabel(data.validationResults.hasEmbedding)}`,
+        ]
+      : ["No validation results — first run or validation error occurred."]),
+    "",
+    "---",
+    "This email is part of the daily pipeline healthcheck system.",
+    `Sent to healthcheck@${mailDomain} and processed through the full pipeline.`,
+  ].join("\n");
+
+  return { html, text };
 }

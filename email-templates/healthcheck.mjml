@@ -1,0 +1,83 @@
+<mjml>
+  <mj-head>
+    <mj-attributes>
+      <mj-all font-family="'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" />
+      <mj-text font-size="15px" color="{{theme.text}}" line-height="1.6" />
+    </mj-attributes>
+  </mj-head>
+  <mj-body background-color="{{theme.base}}">
+    <!-- Logo mark -->
+    <mj-section padding="32px 20px 0">
+      <mj-column>
+        <mj-image width="36px" height="36px" src="https://{{domain}}/favicon.svg" alt="Numaeel" align="left" />
+      </mj-column>
+    </mj-section>
+
+    <!-- Header — system-generated pipeline validation email (healthcheck workflow) -->
+    <mj-section background-color="{{theme.mantle}}" border-radius="12px 12px 0 0" padding="32px 28px 16px">
+      <mj-column>
+        <mj-text font-size="22px" font-weight="600" color="{{theme.text}}" padding-bottom="4px" letter-spacing="-0.02em">
+          Pipeline Healthcheck — {{date}}
+        </mj-text>
+        <mj-text font-size="14px" color="{{theme.subtext}}" padding-bottom="12px">
+          System-generated pipeline validation email. This is an automated daily healthcheck that exercises the full email-catcher processing pipeline end-to-end: SES receive → S3 → Lambda → MIME parse → LLM classify → Bedrock embed → Aurora pgvector upsert. It exists to confirm every stage of processing is functioning correctly in production.
+        </mj-text>
+        <mj-text font-size="13px" color="{{theme.overlay}}">
+          Workflow: <strong style="color: {{theme.text}};">healthcheck</strong> · For: operations / automated monitoring · Account: SYSTEM
+        </mj-text>
+      </mj-column>
+    </mj-section>
+
+    <!-- Execution context -->
+    <mj-section background-color="{{theme.mantle}}" padding="0 28px">
+      <mj-column>
+        <mj-divider border-color="{{theme.divider}}" border-width="1px" padding="0 0 16px 0" />
+        <mj-text font-size="13px" font-weight="600" color="{{theme.subtext}}" padding-bottom="8px" letter-spacing="0.04em" text-transform="uppercase">
+          Execution Context
+        </mj-text>
+        <mj-text font-size="13px" color="{{theme.text}}" line-height="1.8" font-family="'Geist Mono', monospace">
+          Run Date: {{date}}<br />
+          Message-ID: {{messageId}}<br />
+          Invocation ID: {{invocationId}}<br />
+          Container ID: {{containerId}}<br />
+          Timestamp: {{timestamp}}
+        </mj-text>
+      </mj-column>
+    </mj-section>
+
+    <!-- Validation results -->
+    <mj-section background-color="{{theme.mantle}}" padding="16px 28px">
+      <mj-column>
+        <mj-divider border-color="{{theme.divider}}" border-width="1px" padding="0 0 16px 0" />
+        <mj-text font-size="13px" font-weight="600" color="{{theme.subtext}}" padding-bottom="8px" letter-spacing="0.04em" text-transform="uppercase">
+          Validation Results (Yesterday)
+        </mj-text>
+        {{#hasValidationResults}}
+        <mj-text font-size="14px" color="{{theme.text}}" line-height="1.8">
+          Signal found: ✓<br />
+          Thread ID present: {{hasThreadIdIcon}} {{hasThreadIdLabel}}<br />
+          Workflow is healthcheck: {{workflowIsHealthcheckIcon}} {{workflowIsHealthcheckLabel}}<br />
+          Embedding indexed: {{hasEmbeddingIcon}} {{hasEmbeddingLabel}}
+        </mj-text>
+        {{/hasValidationResults}}
+        {{^hasValidationResults}}
+        <mj-text font-size="14px" color="{{theme.overlay}}">
+          No validation results — first run or validation error occurred.
+        </mj-text>
+        {{/hasValidationResults}}
+      </mj-column>
+    </mj-section>
+
+    <!-- Closing -->
+    <mj-section background-color="{{theme.mantle}}" border-radius="0 0 12px 12px" padding="8px 28px 32px">
+      <mj-column>
+        <mj-divider border-color="{{theme.divider}}" border-width="1px" padding="0 0 16px 0" />
+        <mj-text font-size="12px" color="{{theme.overlay}}">
+          This email is part of the daily pipeline healthcheck system. It is sent to healthcheck@{{domain}} and processed through the full pipeline. Tomorrow's healthcheck run will validate that this email was received, classified with workflow "healthcheck", threaded, and embedded in Aurora pgvector.
+        </mj-text>
+      </mj-column>
+    </mj-section>
+
+    <mj-include path="./_footer.mjml" />
+  </mj-body>
+</mjml>
