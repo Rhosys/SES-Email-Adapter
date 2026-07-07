@@ -7,6 +7,7 @@ import { generateId } from "../utils/id.js";
 import type { Account, View, Label, Rule, RuleStatus, Domain, Alias, AliasSender, SenderPolicy, AccountFilteringConfig, UnknownSenderPolicy, ForwardingTarget, EmailTemplate, WsConnection, IUserConfiguration } from "../types/index.js";
 import { USER_CONFIGURATION_DEFAULTS } from "../types/index.js";
 import { SYSTEM_RULES } from "../processor/system-rules.js";
+import { SystemAccountDb, isSystemAccount } from "./system-account-db.js";
 import type { CreateViewRequest, UpdateViewRequest, CreateLabelRequest, UpdateLabelRequest, CreateRuleRequest, UpdateRuleRequest } from "../api/app.js";
 import { buildDiffUpdateParams, buildDiffPutParams, buildSnapshotSk } from "./stats-writer.js";
 import type { StatsMetric, StatsRow } from "./stats-writer.js";
@@ -48,6 +49,7 @@ function chunk<T>(items: T[], size: number): T[][] {
 
 export class AccountDatabase {
   private readonly logger: Logger;
+  private readonly systemDb = new SystemAccountDb(process.env["MAIL_DOMAIN"] ?? "platform.email.rhosys.cloud");
 
   constructor(logger: Logger) {
     this.logger = logger;
@@ -58,6 +60,7 @@ export class AccountDatabase {
   // ---------------------------------------------------------------------------
 
   async getAccount(accountId: string): Promise<Result<Account | null, DbError>> {
+    if (isSystemAccount(accountId)) return this.systemDb.getAccount();
     try {
       const res = await dynamo.send(new GetCommand({
         TableName: ACCOUNTS_TABLE,
@@ -140,6 +143,8 @@ export class AccountDatabase {
    * just its keys — callers get accountId and the full alias config in one read.
    */
   async getAliasByGlobalAddress(recipientAddress: string): Promise<Result<Alias | null, DbError>> {
+    const systemResult = this.systemDb.getAliasByGlobalAddress(recipientAddress);
+    if (systemResult.isOk() && systemResult.value !== null) return systemResult;
     const { domain } = parseAddress(recipientAddress);
     try {
       const res = await dynamo.send(new QueryCommand({
@@ -372,6 +377,7 @@ export class AccountDatabase {
   }
 
   async getSender(accountId: string, aliasAddress: string, senderDomain: string): Promise<Result<AliasSender | null, DbError>> {
+    if (isSystemAccount(accountId)) return this.systemDb.getSender();
     const { domain } = parseAddress(aliasAddress);
     try {
       const res = await dynamo.send(new GetCommand({
@@ -631,6 +637,7 @@ export class AccountDatabase {
   }
 
   async listEnabledRules(accountId: string): Promise<Result<Rule[], DbError>> {
+    if (isSystemAccount(accountId)) return this.systemDb.listEnabledRules();
     const allResult = await this.listRules(accountId);
     if (allResult.isErr()) return allResult;
     return ok(allResult.value.filter(r => r.status === "enabled"));
@@ -791,6 +798,7 @@ export class AccountDatabase {
   // ---------------------------------------------------------------------------
 
   async listDomains(accountId: string): Promise<Result<Domain[], DbError>> {
+    if (isSystemAccount(accountId)) return this.systemDb.listDomains();
     try {
       const res = await dynamo.send(new QueryCommand({
         TableName: ACCOUNTS_TABLE,
@@ -816,6 +824,7 @@ export class AccountDatabase {
   }
 
   async getDomainByName(accountId: string, domainName: string): Promise<Result<Domain | null, DbError>> {
+    if (isSystemAccount(accountId)) return this.systemDb.getDomainByName(domainName);
     return this.getDomain(accountId, domainName);
   }
 
@@ -875,6 +884,8 @@ export class AccountDatabase {
 
   /** Winning domain registration (oldest registrant by createdAt), unfiltered by status. */
   async getDomainOwner(domain: string): Promise<Result<Domain | null, DbError>> {
+    const systemResult = this.systemDb.getDomainOwner(domain);
+    if (systemResult.isOk() && systemResult.value !== null) return systemResult;
     try {
       const res = await dynamo.send(new QueryCommand({
         TableName: ACCOUNTS_TABLE,
