@@ -1248,7 +1248,10 @@ export class SignalProcessor {
     if (outcome.quarantine && !outcome.approveSender) {
       const quarantineStatus = outcome.quarantineHidden ? "quarantine_hidden" : "quarantine_visible";
       const quarantineBase = buildSignal({ status: quarantineStatus, ...buildArgs }, this.logger);
-      const quarantinedSignal: Signal = { ...quarantineBase, data: { ...quarantineBase.data, matchedRules } };
+      // Persist the thread the matcher resolved so approving this quarantined signal reattaches
+      // to it instead of creating a duplicate. Only record an existing thread — a fresh shell is
+      // not persisted here, so the approval path creates the thread itself when there is no match.
+      const quarantinedSignal: Signal = { ...quarantineBase, data: { ...quarantineBase.data, matchedRules, ...(isMatchedThread ? { matchedThreadId: thread.id } : {}) } };
       const saveResult = await this.threadDb.saveSignal(quarantinedSignal);
       if (saveResult.isErr()) return err(saveResult.error);
       this.logger.info("Quarantined email — rule or sender filter matched.", { code: "processor.quarantine", accountId, threadId: thread.id, signalId: quarantinedSignal.id, status: quarantineStatus, matchedRules: matchedRules.map(r => r.ruleId) });
