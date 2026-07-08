@@ -316,6 +316,12 @@ export class AccountsApi {
         logger.warn("Authress service unavailable while updating user role.", { code: "api.authress_unavailable", accountId, userId: c.req.param("userId")!, error: result.error });
         return err(c, 503, "Service temporarily unavailable");
       }
+      // Role changes only mutate our canonical AccessRecord. If this user's access
+      // originated from an invite-accept flow, Authress may have granted them a separate,
+      // untracked AccessRecord — this change wouldn't reach it, so their effective
+      // permissions could silently diverge from what this endpoint reports. TRACK so this
+      // is investigable if a discrepancy is ever reported.
+      logger.track("User role updated on the canonical Authress access record.", { code: "accounts.user_role_updated", accountId, userId: c.req.param("userId")!, role: body.role });
       return c.json({ userId: c.req.param("userId")!, role: body.role }, 200);
     });
 
