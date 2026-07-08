@@ -280,7 +280,7 @@ export class AccountsApi {
         return err(c, 422, "Failed to create invite", "INVITE_CREATION_FAILED");
       }
       const { inviteId } = inviteResult.value;
-      const inviteUrl = `${appBaseUrl}/invite?inviteId=${inviteId}`;
+      const inviteUrl = `${appBaseUrl}/a/registration?inviteId=${inviteId}`;
       const accountResult = await accountDb.getAccount(accountId);
       if (accountResult.isErr()) { logger.error("Failed to get account for invite.", { code: "api.users.invite.get_account_failed", accountId, error: accountResult.error }); return err(c, 500, "Internal Server Error"); }
       const account = accountResult.value;
