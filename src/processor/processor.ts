@@ -1708,7 +1708,49 @@ export class SignalProcessor {
     const freshResult = await this.threadDb.getSignalByMessageId(accountId, sesMessageId);
     if (freshResult.isErr()) return err(processorError(freshResult.error));
     if (!freshResult.value) return err(processorError("Signal not found after reprocess"));
+
+    // If reprocessing moved the signal off its original thread (to a new thread, or to the
+    // quarantine/block partition where it no longer carries a threadId), the original thread's
+    // lastSignalAt may now point at a signal it no longer holds. Recompute it from the remaining
+    // signals; if none remain, fall back to the Unix epoch (lastSignalAt is part of the GSI1 sort
+    // key and cannot be null). Best-effort — never fail the reprocess on a recency-repair error.
+    if (freshResult.value.threadId !== threadId) {
+      await this.repairThreadRecency(accountId, threadId);
+    }
+
     return ok(freshResult.value);
+  }
+
+  /** Recompute a thread's lastSignalAt from its remaining signals (epoch if it has none left). */
+  private async repairThreadRecency(accountId: string, threadId: string): Promise<void> {
+    const EPOCH = new Date(0).toISOString(); // 1970-01-01T00:00:00.000Z
+    const threadResult = await this.threadDb.getThread(accountId, threadId);
+    if (threadResult.isErr() || !threadResult.value) {
+      if (threadResult.isErr()) this.logger.warn("Could not load thread to repair recency after reprocess.", { code: "processor.reprocess.recency_thread_lookup_failed", accountId, threadId, error: threadResult.error });
+      return;
+    }
+    const thread = threadResult.value;
+
+    // Signals are ordered newest-first (gsi1sk = time-sortable UUIDv7 id); take the max
+    // receivedAt over a page to stay correct even if a reprocessed signal carries a backdated one.
+    const signalsResult = await this.threadDb.listSignals(accountId, threadId, { limit: 50 });
+    if (signalsResult.isErr()) {
+      this.logger.warn("Could not list signals to repair thread recency after reprocess.", { code: "processor.reprocess.recency_list_failed", accountId, threadId, error: signalsResult.error });
+      return;
+    }
+    const newLastSignalAt = signalsResult.value.items.reduce<string>((max, s) => {
+      const t = s.data.receivedAt ?? s.createdAt;
+      return t > max ? t : max;
+    }, "") || EPOCH;
+
+    if (newLastSignalAt === thread.lastSignalAt) return;
+
+    const updateResult = await this.threadDb.updateThread(accountId, threadId, thread.status, newLastSignalAt, {});
+    if (updateResult.isErr()) {
+      this.logger.warn("Could not update thread recency after reprocess.", { code: "processor.reprocess.recency_update_failed", accountId, threadId, newLastSignalAt, error: updateResult.error });
+      return;
+    }
+    this.logger.info("Repaired thread recency after reprocess moved a signal off it.", { code: "processor.reprocess.recency_repaired", accountId, threadId, newLastSignalAt, emptied: signalsResult.value.items.length === 0 });
   }
 
   private async autoApprove(

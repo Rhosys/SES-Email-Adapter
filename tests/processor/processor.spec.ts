@@ -1504,6 +1504,61 @@ describe("SignalProcessor", () => {
   });
 
   // -------------------------------------------------------------------------
+  // Reprocess — original thread recency repair when a signal moves off it
+  // -------------------------------------------------------------------------
+  describe("reprocess thread recency repair", () => {
+    const OLD_THREAD = "thr-old";
+    // Signal returned by getSignalByMessageId after reprocess — reassigned to a new thread.
+    const reassignedSignal = {
+      id: "sgn-reprocess", signalLookupId: "ses-msg-reprocess", accountId: TEST_ACCOUNT_ID, threadId: "thr-new",
+      status: "active", source: "email", type: "email", labels: [], createdAt: "2024-01-15T10:00:00Z",
+      data: { sesMessageId: "msg-reprocess", s3Key: "emails/msg-reprocess", recipientAddress: "user@example.com", receivedAt: "2024-01-15T10:00:00Z" },
+    };
+
+    beforeEach(() => {
+      (threadDb as unknown as { getSignalById: ReturnType<typeof vi.fn> }).getSignalById =
+        vi.fn().mockReturnValue(Promise.resolve(ok(reassignedSignal)));
+      (threadDb as unknown as { getSignalByMessageId: ReturnType<typeof vi.fn> }).getSignalByMessageId =
+        vi.fn().mockReturnValue(Promise.resolve(ok(reassignedSignal)));
+      vi.mocked(accountDb.getAliasByGlobalAddress).mockReturnValue(Promise.resolve(ok(DEFAULT_EMAIL_CONFIG)));
+      vi.mocked(threadDb.getThread).mockReturnValue(Promise.resolve(ok({ id: OLD_THREAD, accountId: TEST_ACCOUNT_ID, status: "active", lastSignalAt: "2024-05-01T00:00:00Z" } as never)));
+    });
+
+    it("recomputes the old thread's lastSignalAt from its newest remaining signal", async () => {
+      vi.mocked(threadDb.listSignals).mockReturnValue(Promise.resolve(ok({ items: [
+        { data: { receivedAt: "2024-02-01T00:00:00Z" } },
+        { data: { receivedAt: "2024-04-10T00:00:00Z" } },
+        { data: { receivedAt: "2024-03-01T00:00:00Z" } },
+      ] } as never)));
+
+      const result = await processor.reprocessSignal(TEST_ACCOUNT_ID, "sgn-reprocess", OLD_THREAD);
+
+      expect(result.isOk()).toBe(true);
+      expect(threadDb.updateThread).toHaveBeenCalledWith(TEST_ACCOUNT_ID, OLD_THREAD, "active", "2024-04-10T00:00:00Z", {});
+    });
+
+    it("sets the old thread's lastSignalAt to the Unix epoch when no signals remain", async () => {
+      vi.mocked(threadDb.listSignals).mockReturnValue(Promise.resolve(ok({ items: [] } as never)));
+
+      const result = await processor.reprocessSignal(TEST_ACCOUNT_ID, "sgn-reprocess", OLD_THREAD);
+
+      expect(result.isOk()).toBe(true);
+      expect(threadDb.updateThread).toHaveBeenCalledWith(TEST_ACCOUNT_ID, OLD_THREAD, "active", "1970-01-01T00:00:00.000Z", {});
+    });
+
+    it("does not touch the old thread when the signal stays on it", async () => {
+      const sameThreadSignal = { ...reassignedSignal, threadId: OLD_THREAD };
+      (threadDb as unknown as { getSignalByMessageId: ReturnType<typeof vi.fn> }).getSignalByMessageId =
+        vi.fn().mockReturnValue(Promise.resolve(ok(sameThreadSignal)));
+
+      const result = await processor.reprocessSignal(TEST_ACCOUNT_ID, "sgn-reprocess", OLD_THREAD);
+
+      expect(result.isOk()).toBe(true);
+      expect(threadDb.updateThread).not.toHaveBeenCalled();
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // Notice workflow arc behavior
   // -------------------------------------------------------------------------
 
