@@ -811,6 +811,20 @@ export class SignalProcessor {
     const billingPlan: BillingPlan = account?.billingPlan ?? "Paid";
     const onboardingCompleted = account?.onboarding?.completed ?? false;
 
+    // Alias invariant: any accepted inbound email is addressed to a real address on a registered
+    // domain, so its alias record must exist regardless of the disposition (active / quarantine /
+    // block). aliasConfig (resolved at the top of the pipeline) is null exactly when no alias
+    // exists yet, so create it only then — cheaply, with no extra read. This is what makes an
+    // unknown-sender quarantine appear in the alias list.
+    if (!aliasConfig) {
+      const defaultPolicy = filtering?.defaultUnknownSenderPolicy ?? DEFAULT_UNKNOWN_SENDER_POLICY;
+      const ensureResult = await this.accountDb.ensureAlias(accountId, recipientAddress, defaultPolicy, null);
+      if (ensureResult.isErr()) return err(ensureResult.error);
+      if (ensureResult.value.created) {
+        await this.accountDb.incrementStatMetric(accountId, "totalAliases", 1, sesMessageId + ".alias");
+      }
+    }
+
     // Resolve retention and generate pre-signed URLs for the content sanitizer
     // (S3 lifecycle tagging for extracted content is independent of account/DDB retention config)
     const retentionDuration = resolveRetention({}, null);
@@ -1271,7 +1285,7 @@ export class SignalProcessor {
 
     // Auto-approve: sender gets added to approvedSenders when approve_sender fires, allow_all mode, or brand-new address with auto-allow policy
     if (outcome.approveSender || effectiveFilterMode === "allow_all") {
-      const approveResult = await this.autoApprove(accountId, recipientAddress, senderETLD1, aliasConfig, filtering?.defaultUnknownSenderPolicy, idempotencyKey);
+      const approveResult = await this.autoApprove(accountId, recipientAddress, senderETLD1);
       if (approveResult.isErr()) return err(approveResult.error);
     }
 
@@ -1757,17 +1771,9 @@ export class SignalProcessor {
     accountId: string,
     address: string,
     senderETLD1: string,
-    existing: Alias | null,
-    defaultUnknownSenderPolicy: AccountFilteringConfig["defaultUnknownSenderPolicy"] = DEFAULT_UNKNOWN_SENDER_POLICY,
-    idempotencyKey: string,
   ): Promise<Result<void, DbError>> {
-    // Only create the alias when we don't already have it. A known alias (`existing`
-    // non-null, resolved at the top of the pipeline) needs no write.
-    if (!existing) {
-      const aliasResult = await this.accountDb.ensureAlias(accountId, address, defaultUnknownSenderPolicy, null);
-      if (aliasResult.isErr()) return err(aliasResult.error);
-      await this.accountDb.incrementStatMetric(accountId, "totalAliases", 1, idempotencyKey + ".alias");
-    }
+    // The alias record is guaranteed to exist by the alias invariant near the top of the
+    // pipeline, so auto-approval only has to record the sender disposition.
     const senderResult = await this.accountDb.saveSender(accountId, address, senderETLD1, "allow");
     if (senderResult.isErr()) return err(senderResult.error);
     return ok(undefined);

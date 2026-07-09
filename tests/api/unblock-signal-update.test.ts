@@ -259,13 +259,12 @@ describe("POST /signals/:id/quarantineResponse — updateThread usage", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Regression: approving/blocking an unknown-sender quarantine must create the
-// alias + record the sender disposition even though the processor now attaches
-// a synthetic SR-00 matched rule (which carries a statusChange) to explain the
-// unknown-sender policy. That synthetic rule must not be mistaken for an
-// explicit content rule.
+// Quarantine response records the user's sender decision unconditionally and
+// never touches aliases — the alias is guaranteed to exist as an ingest
+// invariant, and reaching this handler means the signal was quarantined, so no
+// rule-evaluation (matchedRules / SR-00) is consulted.
 // ---------------------------------------------------------------------------
-describe("POST /signals/:id/quarantineResponse — unknown-sender alias creation (SR-00)", () => {
+describe("POST /signals/:id/quarantineResponse — sender disposition", () => {
   let threadDb: ReturnType<typeof makeThreadDb>;
   let accountDb: ReturnType<typeof makeAccountDb>;
   let auditDb: ReturnType<typeof makeAuditDb>;
@@ -295,33 +294,33 @@ describe("POST /signals/:id/quarantineResponse — unknown-sender alias creation
     },
   });
 
-  it("approve → ensures alias exists and records sender as allowed", async () => {
+  it("approve → records sender as allowed and never touches the alias", async () => {
     vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(sr00Signal()));
 
     const res = await req(app, "POST", `${A}/signals/SES%23msg-001/quarantineResponse`, { body: { status: "active" } });
     expect(res.status).toBe(200);
 
-    expect(accountDb.ensureAlias).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "user@example.com", expect.anything(), null);
     expect(accountDb.saveSender).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "user@example.com", "example.org", "allow");
+    expect(accountDb.ensureAlias).not.toHaveBeenCalled();
   });
 
-  it("block → ensures alias exists and records sender disposition", async () => {
+  it("block → records the block disposition and never touches the alias", async () => {
     vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(sr00Signal()));
 
     const res = await req(app, "POST", `${A}/signals/SES%23msg-001/quarantineResponse`, { body: { status: "block_hidden" } });
     expect(res.status).toBe(200);
 
-    expect(accountDb.ensureAlias).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "user@example.com", expect.anything(), null);
     expect(accountDb.saveSender).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "user@example.com", "example.org", "block_hidden");
+    expect(accountDb.ensureAlias).not.toHaveBeenCalled();
   });
 
-  it("approve → always ensures the alias even when quarantined by an explicit content rule (no sender allow)", async () => {
-    // Quarantined by a real rule (SR-05 spam) — sender must NOT be whitelisted, but the alias
-    // still has to appear in the list because the address is now active.
+  it("approve → records the sender allow unconditionally, even for a content-rule quarantine", async () => {
+    // Quarantined by a real content rule (SR-05 spam). The user explicitly approved this sender,
+    // so the sender is allowed regardless of why it was quarantined — no rule inspection.
     const signal = makeSignal({
       data: {
         recipientAddress: "user@example.com",
-        from: { address: "sender@spammy.example.org", name: "Sender" },
+        from: { address: "sender@spammy.com", name: "Sender" },
         matchedRules: [{ ruleId: "SR-05", actions: [{ type: "quarantine_hidden" }], labelsAdded: [], statusChange: "quarantine_hidden" }],
       },
     });
@@ -330,8 +329,8 @@ describe("POST /signals/:id/quarantineResponse — unknown-sender alias creation
     const res = await req(app, "POST", `${A}/signals/SES%23msg-001/quarantineResponse`, { body: { status: "active" } });
     expect(res.status).toBe(200);
 
-    expect(accountDb.ensureAlias).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "user@example.com", expect.anything(), null);
-    expect(accountDb.saveSender).not.toHaveBeenCalled();
+    expect(accountDb.saveSender).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "user@example.com", "spammy.com", "allow");
+    expect(accountDb.ensureAlias).not.toHaveBeenCalled();
   });
 
   it("approve → reuses the processor-matched thread (matchedThreadId) instead of creating a duplicate", async () => {

@@ -803,7 +803,7 @@ describe("SignalProcessor", () => {
       processor = new SignalProcessor({ ...SHARED_NEW_DEPS, threadDb, accountDb, processingDb, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", classifier, embeddingGenerator, auroraWriter, threadMatcher, ruleEvaluator, notifier, logger: mockLogger, forwardingService: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), sendVerification: vi.fn().mockResolvedValue(ok(undefined)), verifyWebhook: vi.fn().mockResolvedValue(ok(undefined)) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue(ok({ messageId: "reply-msg-id" })) }, sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never, calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud" } });
     });
 
-    it("quarantines signal on brand new address when account filtering was never configured, and does not auto-create the alias", async () => {
+    it("quarantines signal on brand new address when account filtering was never configured, and creates the alias (ingest invariant)", async () => {
       // No alias and no account-level filtering config saved (filtering: null in DEFAULT_CTX) — the
       // platform default (quarantine_visible) must apply rather than silently falling through to allow_all.
       applyCtx(accountDb, { ...DEFAULT_CTX, aliasConfig: null }, { once: true });
@@ -813,11 +813,25 @@ describe("SignalProcessor", () => {
 
       expect(threadDb.saveSignal).toHaveBeenCalledOnce();
       expect(threadDb.saveThread).not.toHaveBeenCalled();
-      expect(accountDb.saveAlias).not.toHaveBeenCalled();
+      // The address is real, so its alias must exist even though the signal is quarantined; but no
+      // sender disposition is recorded (the sender is unknown/pending until the user acts).
+      expect(accountDb.ensureAlias).toHaveBeenCalledWith("acct-001", "user@example.com", "quarantine_visible", null);
+      expect(accountDb.incrementStatMetric).toHaveBeenCalledWith("acct-001", "totalAliases", 1, expect.stringContaining(".alias"));
       expect(accountDb.saveSender).not.toHaveBeenCalled();
 
       const saved = vi.mocked(threadDb.saveSignal).mock.calls[0]![0] as Signal;
       expect(saved.status).toBe("quarantine_visible");
+    });
+
+    it("does not create the alias when it already exists (known recipient)", async () => {
+      applyCtx(accountDb, { ...DEFAULT_CTX, aliasConfig: makeAlias() }, { once: true });
+      vi.mocked(accountDb.getSender).mockReturnValueOnce(Promise.resolve(ok(null)));
+
+      await processor.processRecord(makeMessage(), 1);
+
+      // aliasConfig present → the invariant skips the write entirely.
+      expect(accountDb.ensureAlias).not.toHaveBeenCalled();
+      expect(accountDb.incrementStatMetric).not.toHaveBeenCalledWith("acct-001", "totalAliases", 1, expect.anything());
     });
 
     it("allows signal from a known sender (eTLD+1 in approved list)", async () => {

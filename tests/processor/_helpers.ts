@@ -35,10 +35,12 @@ export function makeThreadDbMock(): ThreadDatabase {
  */
 export function makeAccountDbMock(accountId = "acct-default", recipientAddress = "user@example.com"): AccountDatabase {
   const saveAlias = vi.fn().mockImplementation((a: Alias) => Promise.resolve(ok(a)));
-  const ensureAlias = vi.fn().mockImplementation((accountId: string, address: string, defaultUnknownSenderPolicy: UnknownSenderPolicy, existing?: Alias | null) => {
-    if (existing) return Promise.resolve(ok(existing));
+  // Mirrors AccountDatabase.ensureAlias: resolves to { alias, created }. `created` is false when
+  // an existing alias was passed, true when a new one was saved.
+  const ensureAlias = vi.fn().mockImplementation(async (accountId: string, address: string, defaultUnknownSenderPolicy: UnknownSenderPolicy, existing?: Alias | null) => {
+    if (existing) return ok({ alias: existing, created: false });
     const now = new Date().toISOString();
-    return saveAlias({
+    const saved = await saveAlias({
       id: address,
       accountId,
       address,
@@ -48,6 +50,7 @@ export function makeAccountDbMock(accountId = "acct-default", recipientAddress =
       createdAt: now,
       updatedAt: now,
     });
+    return saved.isErr() ? saved : ok({ alias: saved.value, created: true });
   });
   return {
     listEnabledRules: vi.fn().mockReturnValue(Promise.resolve(ok([]))),
