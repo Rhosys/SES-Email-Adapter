@@ -7,7 +7,6 @@ import { zParse } from "./validate.js";
 import { toApiThread, toApiSignal } from "./transform.js";
 import { deriveGroupingKey } from "../processor/processor.js";
 import { handlePostApprovalCalendar } from "../processor/calendar/post-approval-handler.js";
-import { ensureAliasExists } from "./aliasesApi.js";
 import { isEmailSignal } from "../types/index.js";
 import type { Result } from "neverthrow";
 import type { Thread, Signal, AnySignal, Attachment, PageParams } from "../types/index.js";
@@ -108,32 +107,41 @@ export class SignalsApi {
       }
 
       const body = await zParse(UpdateSignalStatusRequest, c.req.raw);
-      const wasQuarantinedByUnknownSender = !(signal.data.matchedRules ?? []).some(r => r.statusChange);
+      // Reaching this handler means the signal is quarantined, so the user is making an explicit
+      // sender decision — always record it. The alias record is guaranteed to exist (created as an
+      // invariant during ingest), so there is nothing to ensure and no rule-evaluation to consult.
+      const senderDomain = signal.data.from.address.includes("@") ? signal.data.from.address.split("@").pop()! : signal.data.from.address;
+      const senderETLD1 = getDomain(senderDomain) ?? senderDomain;
 
       if (body.status === "block_hidden" || body.status === "block_reject" || body.status === "report_violation") {
         const blockResult = await threadDb.updateSignalStatus(accountId, signal.signalLookupId, body.status);
         if (blockResult.isErr()) { logger.error("Failed to block signal.", { code: "api.quarantine_response.block_failed", error: blockResult.error }); return err(c, 500, "Internal Server Error"); }
 
-        if (wasQuarantinedByUnknownSender) {
-          const senderDomain = signal.data.from.address.includes("@") ? signal.data.from.address.split("@").pop()! : signal.data.from.address;
-          const senderETLD1 = getDomain(senderDomain) ?? senderDomain;
-          const recipientAddress = signal.data.recipientAddress;
-          const ensureAliasResult = await ensureAliasExists(accountDb, accountId, recipientAddress, signal.id);
-          if (ensureAliasResult.isErr()) { logger.error("Failed to ensure alias for block.", { code: "api.quarantine_response.ensure_alias_failed", error: ensureAliasResult.error }); return err(c, 500, "Internal Server Error"); }
-          const saveSenderResult = await accountDb.saveSender(accountId, recipientAddress, senderETLD1, body.status);
-          if (saveSenderResult.isErr()) { logger.error("Failed to save sender disposition.", { code: "api.quarantine_response.save_sender_failed", error: saveSenderResult.error }); return err(c, 500, "Internal Server Error"); }
-        }
+        const saveSenderResult = await accountDb.saveSender(accountId, signal.data.recipientAddress, senderETLD1, body.status);
+        if (saveSenderResult.isErr()) { logger.error("Failed to save sender disposition.", { code: "api.quarantine_response.save_sender_failed", error: saveSenderResult.error }); return err(c, 500, "Internal Server Error"); }
 
         return c.json(blockResult.value, 200);
       }
 
       // status === "active": find existing thread or create one
-      const senderDomain = signal.data.from.address.includes("@") ? signal.data.from.address.split("@").pop()! : signal.data.from.address;
-      const senderETLD1 = getDomain(senderDomain) ?? senderDomain;
+
+      // Prefer the thread the processor already resolved at receive time via full grouping-key /
+      // in-reply-to / similarity matching. Re-deriving here would only cover grouping-key matches
+      // (null for conversation/crm/etc.) and would spawn a duplicate thread for everything else.
+      let matchedThread: Thread | null = null;
+      if (signal.data.matchedThreadId) {
+        const byIdResult = await threadDb.getThread(accountId, signal.data.matchedThreadId);
+        if (byIdResult.isErr()) { logger.error("Failed to get matched thread for quarantine approval.", { code: "api.quarantine_response.get_matched_thread_failed", error: byIdResult.error }); return err(c, 500, "Internal Server Error"); }
+        matchedThread = byIdResult.value;
+      }
+
+      // Fallback grouping-key lookup — covers signals quarantined before matchedThreadId was recorded.
       const groupingKey = deriveGroupingKey(signal.data.workflow, signal.data.workflowData, signal.data.recipientAddress, senderETLD1);
-      const matchedThreadResult = groupingKey ? await threadDb.findThreadByGroupingKey(accountId, groupingKey) : null;
-      if (matchedThreadResult && matchedThreadResult.isErr()) { logger.error("Failed to find thread by grouping key.", { code: "api.quarantine_response.find_thread_failed", error: matchedThreadResult.error }); return err(c, 500, "Internal Server Error"); }
-      const matchedThread = matchedThreadResult ? matchedThreadResult.value : null;
+      if (!matchedThread && groupingKey) {
+        const matchedThreadResult = await threadDb.findThreadByGroupingKey(accountId, groupingKey);
+        if (matchedThreadResult.isErr()) { logger.error("Failed to find thread by grouping key.", { code: "api.quarantine_response.find_thread_failed", error: matchedThreadResult.error }); return err(c, 500, "Internal Server Error"); }
+        matchedThread = matchedThreadResult.value;
+      }
 
       const now = DateTime.utc().toISO()!;
       let thread: Thread;
@@ -164,13 +172,9 @@ export class SignalsApi {
       const unblockResult = await threadDb.unblockSignal(accountId, signal.signalLookupId, thread.id);
       if (unblockResult.isErr()) { logger.error("Failed to unblock signal.", { code: "api.quarantine_response.unblock_failed", error: unblockResult.error }); return err(c, 500, "Internal Server Error"); }
 
-      // When quarantined by unknown sender, approve the sender for future emails
-      if (wasQuarantinedByUnknownSender) {
-        const ensureAliasResult = await ensureAliasExists(accountDb, accountId, signal.data.recipientAddress, signal.id);
-        if (ensureAliasResult.isErr()) { logger.error("Failed to ensure alias for approval.", { code: "api.quarantine_response.ensure_alias_failed", error: ensureAliasResult.error }); return err(c, 500, "Internal Server Error"); }
-        const saveSenderResult = await accountDb.saveSender(accountId, signal.data.recipientAddress, senderETLD1, "allow");
-        if (saveSenderResult.isErr()) { logger.error("Failed to save sender approval.", { code: "api.quarantine_response.save_sender_failed", error: saveSenderResult.error }); return err(c, 500, "Internal Server Error"); }
-      }
+      // Record the user's explicit sender approval — always. The alias already exists (ingest invariant).
+      const saveSenderResult = await accountDb.saveSender(accountId, signal.data.recipientAddress, senderETLD1, "allow");
+      if (saveSenderResult.isErr()) { logger.error("Failed to save sender approval.", { code: "api.quarantine_response.save_sender_failed", error: saveSenderResult.error }); return err(c, 500, "Internal Server Error"); }
 
       // Post-approval calendar forwarding
       if (postApprovalCalendarDeps) {
