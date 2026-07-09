@@ -30,7 +30,8 @@
 - [ ] **Calendar invites created by user's calendar directly** — secured mechanism without revealing sender.
 - [ ] **WebSocket signal stream** — `/accounts/:id/signals/stream` endpoint. Authress token auth, `signal:created` events.
 - [ ] **ClamAV attachment scanning on S3** — scan attachments for malware. Tag objects with `scan-status`.
-- [ ] **JMAP support (RFC 8620 + RFC 8621)** — standards-compliant JMAP server. Separate API surface.
+- [ ] **JMAP support (RFC 8620 + RFC 8621 + RFC 9404)** — standards-compliant JMAP server, OAuth2-only auth via Authress, Mailbox/Thread/Email/Identity/EmailSubmission mapped onto the existing Arc/Signal/Alias/Domain model. **Active spec: `.kiro/specs/jmap-support/`**
+- [ ] **External mail ingestion (Gmail, Outlook/Graph, other JMAP servers)** — pull mail in from third-party services via OAuth-connected sync connectors, normalized into the existing Signal/Arc processing pipeline. Deferred, separate effort from JMAP server support above — needs its own spec (new `ExternalMailConnection` entity, KMS-encrypted OAuth tokens, per-provider sync adapters, polling infrastructure).
 - [ ] **On-demand alias generation** — browser extension or API generates unique aliases per-service.
 - [ ] **Snooze / remind me later** — hide an arc until a future time, then resurface it.
 - [ ] **Calendar sync** — bidirectional calendar integration (CalDAV, Google Calendar, Outlook).
