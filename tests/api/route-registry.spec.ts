@@ -90,6 +90,7 @@ const EXPECTED_ROUTES = [
   "DELETE /accounts/{accountId}/forwarding-addresses/{address}",
   "GET /accounts/{accountId}/audit",
   "POST /reindex",
+  "GET /healthcheck",
   "GET /",
   "GET /.well-known/api-catalog",
   "GET /user/{userId}/configuration",
