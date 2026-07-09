@@ -1,16 +1,18 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ok } from "neverthrow";
+import { DateTime } from "luxon";
 import { HealthcheckJob, type HealthcheckJobDeps } from "../../src/jobs/healthcheck-job.js";
 import { createMockLogger, type MockLogger } from "../helpers/mock-logger.js";
 
 // ---------------------------------------------------------------------------
-// Task 10.4: Property 3 — Validation failure detection
-// Validates: Requirements 3.3, 3.4, 3.5, 3.7
+// Property 3 — Validation failure detection (thread-based)
 //
-// For any signal returned from GSI3 that is missing a non-empty threadId,
-// OR has a workflow other than "healthcheck", OR lacks an embedding in
-// Aurora pgvector, the job SHALL log a track-level message with code
-// `healthcheck.validation_failed` including which specific checks failed.
+// Validation lists the SYSTEM account's threads and looks for the one created
+// on the target day. For a thread whose workflow is not "healthcheck", OR that
+// lacks an embedding in Aurora pgvector, the job SHALL log a track-level message
+// with code `healthcheck.validation_failed` including which specific checks
+// failed. When no thread was created for the day it logs
+// `healthcheck.thread_not_found` instead.
 // ---------------------------------------------------------------------------
 
 vi.mock("../../src/email/template-renderer.js", () => ({
@@ -18,31 +20,36 @@ vi.mock("../../src/email/template-renderer.js", () => ({
 }));
 
 const MAIL_DOMAIN = "platform.email.rhosys.cloud";
+const YESTERDAY = DateTime.utc().minus({ days: 1 }).toFormat("yyyy-MM-dd");
 
-function makeSignal(overrides: { threadId?: string | undefined; workflow?: string } = {}) {
+function makeThread(overrides: { id?: string; workflow?: string; createdAt?: string } = {}) {
+  const createdAt = overrides.createdAt ?? `${YESTERDAY}T06:00:00.000Z`;
   return {
-    id: "sig-test",
-    signalLookupId: "lookup-test",
+    id: overrides.id ?? "thr-hc",
     accountId: "SYSTEM",
+    workflow: overrides.workflow ?? "healthcheck",
+    labels: [],
     status: "active",
-    source: "email",
-    type: "email",
-    threadId: overrides.threadId,
-    data: { workflow: overrides.workflow },
+    summary: "Healthcheck",
+    lastSignalAt: createdAt,
+    createdAt,
+    updatedAt: createdAt,
+    senderAddress: `healthcheck@${MAIL_DOMAIN}`,
+    recipientAddress: `healthcheck@${MAIL_DOMAIN}`,
+    subject: `Healthcheck ${YESTERDAY}`,
   };
 }
 
 function makeDeps(overrides: {
-  signal?: ReturnType<typeof makeSignal> | null;
+  threads?: ReturnType<typeof makeThread>[];
   hasEmbedding?: boolean;
   logger?: MockLogger;
 } = {}): { deps: HealthcheckJobDeps; logger: MockLogger } {
   const logger = overrides.logger ?? createMockLogger();
-  const signal = overrides.signal === undefined ? makeSignal({ threadId: "thread-1", workflow: "healthcheck" }) : overrides.signal;
 
   const deps: HealthcheckJobDeps = {
     threadDb: {
-      findSignalByEmailMessageId: vi.fn().mockResolvedValue(ok(signal)),
+      listThreads: vi.fn().mockResolvedValue(ok({ items: overrides.threads ?? [makeThread()] })),
     } as unknown as HealthcheckJobDeps["threadDb"],
     emailService: {
       send: vi.fn().mockResolvedValue(ok({ messageId: "ses-msg-id" })),
@@ -58,86 +65,40 @@ function makeDeps(overrides: {
 }
 
 // ---------------------------------------------------------------------------
-// Parameterized test: all failure combinations
+// Parameterized test: all failure combinations for a thread that WAS created
 // ---------------------------------------------------------------------------
 
 interface ValidationScenario {
   label: string;
-  threadId: string | undefined;
   workflow: string;
   hasEmbedding: boolean;
   expectedChecks: { hasThreadId: boolean; workflowIsHealthcheck: boolean; hasEmbedding: boolean };
 }
 
 const failureScenarios: ValidationScenario[] = [
-  // Single failures
-  {
-    label: "missing threadId (undefined)",
-    threadId: undefined,
-    workflow: "healthcheck",
-    hasEmbedding: true,
-    expectedChecks: { hasThreadId: false, workflowIsHealthcheck: true, hasEmbedding: false },
-    // hasEmbedding is false because embedding lookup is skipped when threadId is missing
-  },
-  {
-    label: "missing threadId (empty string)",
-    threadId: "",
-    workflow: "healthcheck",
-    hasEmbedding: true,
-    expectedChecks: { hasThreadId: false, workflowIsHealthcheck: true, hasEmbedding: false },
-  },
   {
     label: "wrong workflow (conversation)",
-    threadId: "thread-abc",
     workflow: "conversation",
     hasEmbedding: true,
     expectedChecks: { hasThreadId: true, workflowIsHealthcheck: false, hasEmbedding: true },
   },
   {
     label: "wrong workflow (test)",
-    threadId: "thread-abc",
     workflow: "test",
     hasEmbedding: true,
     expectedChecks: { hasThreadId: true, workflowIsHealthcheck: false, hasEmbedding: true },
   },
   {
     label: "missing embedding",
-    threadId: "thread-abc",
     workflow: "healthcheck",
     hasEmbedding: false,
     expectedChecks: { hasThreadId: true, workflowIsHealthcheck: true, hasEmbedding: false },
   },
-
-  // Double failures
-  {
-    label: "missing threadId + wrong workflow",
-    threadId: undefined,
-    workflow: "payments",
-    hasEmbedding: true,
-    expectedChecks: { hasThreadId: false, workflowIsHealthcheck: false, hasEmbedding: false },
-  },
-  {
-    label: "missing threadId + missing embedding",
-    threadId: undefined,
-    workflow: "healthcheck",
-    hasEmbedding: false,
-    expectedChecks: { hasThreadId: false, workflowIsHealthcheck: true, hasEmbedding: false },
-  },
   {
     label: "wrong workflow + missing embedding",
-    threadId: "thread-abc",
     workflow: "alert",
     hasEmbedding: false,
     expectedChecks: { hasThreadId: true, workflowIsHealthcheck: false, hasEmbedding: false },
-  },
-
-  // Triple failure
-  {
-    label: "all checks fail (no threadId, wrong workflow, no embedding)",
-    threadId: undefined,
-    workflow: "unspecified",
-    hasEmbedding: false,
-    expectedChecks: { hasThreadId: false, workflowIsHealthcheck: false, hasEmbedding: false },
   },
 ];
 
@@ -147,8 +108,8 @@ describe("Property 3: Validation failure detection", () => {
   });
 
   it.each(failureScenarios)("$label → logs healthcheck.validation_failed with correct checks", async (scenario) => {
-    const signal = makeSignal({ threadId: scenario.threadId, workflow: scenario.workflow });
-    const { deps, logger } = makeDeps({ signal, hasEmbedding: scenario.hasEmbedding });
+    const thread = makeThread({ workflow: scenario.workflow });
+    const { deps, logger } = makeDeps({ threads: [thread], hasEmbedding: scenario.hasEmbedding });
 
     const job = new HealthcheckJob(deps);
     await job.run();
@@ -163,8 +124,7 @@ describe("Property 3: Validation failure detection", () => {
 
   // Positive case: all checks pass → validation_passed (not validation_failed)
   it("all checks pass → logs healthcheck.validation_passed (not validation_failed)", async () => {
-    const signal = makeSignal({ threadId: "thread-valid", workflow: "healthcheck" });
-    const { deps, logger } = makeDeps({ signal, hasEmbedding: true });
+    const { deps, logger } = makeDeps({ threads: [makeThread({ workflow: "healthcheck" })], hasEmbedding: true });
 
     const job = new HealthcheckJob(deps);
     await job.run();
@@ -180,10 +140,10 @@ describe("Property 3: Validation failure detection", () => {
     expect(ctx.checks).toEqual({ hasThreadId: true, workflowIsHealthcheck: true, hasEmbedding: true });
   });
 
-  // Verify the log includes which checks failed (signal state context)
-  it("validation_failed log includes signalState with threadId and workflow", async () => {
-    const signal = makeSignal({ threadId: undefined, workflow: "conversation" });
-    const { deps, logger } = makeDeps({ signal, hasEmbedding: false });
+  // Verify the log includes which thread failed
+  it("validation_failed log includes threadState with id and workflow", async () => {
+    const thread = makeThread({ id: "thr-bad", workflow: "conversation" });
+    const { deps, logger } = makeDeps({ threads: [thread], hasEmbedding: false });
 
     const job = new HealthcheckJob(deps);
     await job.run();
@@ -192,10 +152,23 @@ describe("Property 3: Validation failure detection", () => {
     expect(failedLog).toBeDefined();
 
     const ctx = failedLog!.context as Record<string, unknown>;
-    expect(ctx.signalState).toBeDefined();
-    const signalState = ctx.signalState as Record<string, unknown>;
-    expect(signalState.id).toBe("sig-test");
-    expect(signalState.threadId).toBeUndefined();
-    expect(signalState.workflow).toBe("conversation");
+    expect(ctx.threadState).toBeDefined();
+    const threadState = ctx.threadState as Record<string, unknown>;
+    expect(threadState.id).toBe("thr-bad");
+    expect(threadState.workflow).toBe("conversation");
+  });
+
+  // No thread created for the day → thread_not_found (not validation_failed)
+  it("no thread created for the day → logs healthcheck.thread_not_found", async () => {
+    // A thread exists, but it was created several days earlier.
+    const stale = makeThread({ createdAt: "2020-01-01T06:00:00.000Z" });
+    const { deps, logger } = makeDeps({ threads: [stale] });
+
+    const job = new HealthcheckJob(deps);
+    await job.run();
+
+    const notFoundLog = logger.calls.find(c => c.context && (c.context as Record<string, unknown>).code === "healthcheck.thread_not_found");
+    expect(notFoundLog).toBeDefined();
+    expect(notFoundLog!.method).toBe("track");
   });
 });

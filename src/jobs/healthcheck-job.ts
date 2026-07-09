@@ -22,7 +22,6 @@ export class HealthcheckJob {
     this.validator = new HealthcheckValidator({
       threadDb: deps.threadDb,
       searchDatabase: deps.searchDatabase,
-      mailDomain: deps.mailDomain,
       logger: deps.logger,
     });
   }
@@ -62,17 +61,20 @@ export class HealthcheckJob {
         subject,
         textBody: text,
         htmlBody: html,
-        headers: [{ Name: "Message-ID", Value: `<${messageId}>` }],
         tags: [{ Name: "purpose", Value: "healthcheck" }],
         accountId: SYSTEM_ACCOUNT_ID,
       });
 
       if (result.isErr()) {
-        this.deps.logger.track("Healthcheck email send failed — SES returned error.", {
-          code: "healthcheck.send_failed",
-          messageId,
-          error: result.error,
-        });
+        const cause = result.error.cause as { message?: string } | undefined;
+        this.deps.logger.track(
+          `Healthcheck email send failed — SES returned error${cause?.message ? `: ${cause.message}` : ""}.`,
+          {
+            code: "healthcheck.send_failed",
+            messageId,
+            error: result.error,
+          },
+        );
         return;
       }
 
