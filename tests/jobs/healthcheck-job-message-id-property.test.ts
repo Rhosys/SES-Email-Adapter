@@ -10,11 +10,13 @@ vi.mock("../../src/email/template-renderer.js", () => ({
 import { HealthcheckJob, type HealthcheckJobDeps } from "../../src/jobs/healthcheck-job.js";
 
 /**
- * Property 2: Deterministic Message-ID generation
+ * Property 2: Deterministic per-day healthcheck identity
  *
- * For any UTC date, buildMessageId produces a Message-ID in the exact format
- * `healthcheck-YYYY-MM-DD@{MAIL_DOMAIN}`, and for any two invocations on the
- * same UTC date (regardless of time of day), the output is identical.
+ * SES does not allow setting a custom Message-ID header, so the healthcheck's
+ * deterministic per-day identity is carried by its subject, `Healthcheck
+ * YYYY-MM-DD` (UTC). For any two invocations on the same UTC date (regardless of
+ * time of day) the subject is identical, and the message-id shown in the email
+ * body follows the same deterministic date.
  *
  * **Validates: Requirements 5.1, 5.3**
  */
@@ -23,7 +25,7 @@ const MAIL_DOMAIN = "platform.email.rhosys.cloud";
 
 function createMockDeps(overrides: Partial<HealthcheckJobDeps> = {}): HealthcheckJobDeps {
   return {
-    threadDb: { findSignalByEmailMessageId: vi.fn().mockResolvedValue(ok(null)) } as unknown as HealthcheckJobDeps["threadDb"],
+    threadDb: { listThreads: vi.fn().mockResolvedValue(ok({ items: [] })) } as unknown as HealthcheckJobDeps["threadDb"],
     emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-123" })) } as unknown as HealthcheckJobDeps["emailService"],
     searchDatabase: { hasEmbedding: vi.fn().mockResolvedValue(false) },
     mailDomain: MAIL_DOMAIN,
@@ -32,8 +34,8 @@ function createMockDeps(overrides: Partial<HealthcheckJobDeps> = {}): Healthchec
   };
 }
 
-describe("Property 2: Deterministic Message-ID generation", () => {
-  describe("format is healthcheck-YYYY-MM-DD@{MAIL_DOMAIN} for multiple dates", () => {
+describe("Property 2: Deterministic per-day healthcheck identity", () => {
+  describe("subject is 'Healthcheck YYYY-MM-DD' for multiple dates", () => {
     const dateCases = [
       { label: "start of year", date: "2025-01-01" },
       { label: "leap day", date: "2024-02-29" },
@@ -44,7 +46,7 @@ describe("Property 2: Deterministic Message-ID generation", () => {
       { label: "far future", date: "2030-06-15" },
     ];
 
-    it.each(dateCases)("$label ($date) → Message-ID header matches expected format", async ({ date }) => {
+    it.each(dateCases)("$label ($date) → subject matches expected format", async ({ date }) => {
       const sendSpy = vi.fn().mockResolvedValue(ok({ messageId: "ses-msg-id" }));
       const deps = createMockDeps({ emailService: { send: sendSpy } as unknown as HealthcheckJobDeps["emailService"] });
       const job = new HealthcheckJob(deps);
@@ -55,16 +57,20 @@ describe("Property 2: Deterministic Message-ID generation", () => {
       await job.run();
 
       expect(sendSpy).toHaveBeenCalledOnce();
-      const sendArgs = sendSpy.mock.calls[0]![0] as { headers: Array<{ Name: string; Value: string }> };
-      const messageIdHeader = sendArgs.headers.find((h: { Name: string }) => h.Name === "Message-ID");
-      expect(messageIdHeader).toBeDefined();
-      expect(messageIdHeader!.Value).toBe(`<healthcheck-${date}@${MAIL_DOMAIN}>`);
+      const sendArgs = sendSpy.mock.calls[0]![0] as { subject: string; textBody: string; tags: Array<{ Name: string; Value: string }> };
+      expect(sendArgs.subject).toBe(`Healthcheck ${date}`);
+      // The message-id shown in the body follows the same deterministic date.
+      expect(sendArgs.textBody).toContain(`healthcheck-${date}@${MAIL_DOMAIN}`);
+      // A tag-safe healthcheck id is attached for bounce/complaint correlation.
+      expect(sendArgs.tags).toEqual(expect.arrayContaining([
+        { Name: "X-Numaeel-Healthcheck-Id", Value: `healthcheck-${date}` },
+      ]));
 
       vi.restoreAllMocks();
     });
   });
 
-  describe("same date produces identical Message-ID regardless of time of day", () => {
+  describe("same date produces identical subject regardless of time of day", () => {
     const timeCases = [
       { label: "midnight", iso: "2025-07-07T00:00:00.000Z" },
       { label: "early morning (trigger time)", iso: "2025-07-07T06:00:00.000Z" },
@@ -72,7 +78,7 @@ describe("Property 2: Deterministic Message-ID generation", () => {
       { label: "late evening", iso: "2025-07-07T23:59:59.999Z" },
     ];
 
-    it("all times on same date produce identical Message-ID", async () => {
+    it("all times on same date produce identical subject", async () => {
       const results: string[] = [];
 
       for (const { iso } of timeCases) {
@@ -85,16 +91,15 @@ describe("Property 2: Deterministic Message-ID generation", () => {
 
         await job.run();
 
-        const sendArgs = sendSpy.mock.calls[0]![0] as { headers: Array<{ Name: string; Value: string }> };
-        const messageIdHeader = sendArgs.headers.find((h: { Name: string }) => h.Name === "Message-ID");
-        results.push(messageIdHeader!.Value);
+        const sendArgs = sendSpy.mock.calls[0]![0] as { subject: string };
+        results.push(sendArgs.subject);
 
         vi.restoreAllMocks();
       }
 
       const unique = new Set(results);
       expect(unique.size).toBe(1);
-      expect(results[0]).toBe(`<healthcheck-2025-07-07@${MAIL_DOMAIN}>`);
+      expect(results[0]).toBe("Healthcheck 2025-07-07");
     });
   });
 });

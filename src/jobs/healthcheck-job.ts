@@ -5,6 +5,7 @@ import type { EmailService } from "../email/email-service.js";
 import { SYSTEM_ACCOUNT_ID } from "../database/system-account-db.js";
 import { renderTemplate } from "../email/template-renderer.js";
 import { HealthcheckValidator, type ValidationChecks } from "./healthcheck-validator.js";
+import { TAG_HEALTHCHECK_ID } from "../email/ses-tags.js";
 
 export interface HealthcheckJobDeps {
   threadDb: ThreadDatabase;
@@ -22,7 +23,6 @@ export class HealthcheckJob {
     this.validator = new HealthcheckValidator({
       threadDb: deps.threadDb,
       searchDatabase: deps.searchDatabase,
-      mailDomain: deps.mailDomain,
       logger: deps.logger,
     });
   }
@@ -62,17 +62,27 @@ export class HealthcheckJob {
         subject,
         textBody: text,
         htmlBody: html,
-        headers: [{ Name: "Message-ID", Value: `<${messageId}>` }],
-        tags: [{ Name: "purpose", Value: "healthcheck" }],
+        // `purpose` groups healthcheck sends; the healthcheck-id tag lets us
+        // correlate a bounce/complaint back to a specific day's send (SES echoes
+        // message tags in feedback notifications). Tag values must be
+        // [A-Za-z0-9_-], so we use the id without the `@domain` suffix.
+        tags: [
+          { Name: "purpose", Value: "healthcheck" },
+          { Name: TAG_HEALTHCHECK_ID, Value: `healthcheck-${today}` },
+        ],
         accountId: SYSTEM_ACCOUNT_ID,
       });
 
       if (result.isErr()) {
-        this.deps.logger.track("Healthcheck email send failed — SES returned error.", {
-          code: "healthcheck.send_failed",
-          messageId,
-          error: result.error,
-        });
+        const cause = result.error.cause as { message?: string } | undefined;
+        this.deps.logger.error(
+          `Healthcheck email send failed — SES returned error${cause?.message ? `: ${cause.message}` : ""}.`,
+          {
+            code: "healthcheck.send_failed",
+            messageId,
+            error: result.error,
+          },
+        );
         return;
       }
 
@@ -82,11 +92,15 @@ export class HealthcheckJob {
         sesMessageId: result.value.messageId,
       });
     } catch (e) {
-      this.deps.logger.track("Healthcheck send phase threw unexpected error.", {
-        code: "healthcheck.send_error",
-        messageId,
-        error: e,
-      });
+      const causeMessage = (e as { message?: string } | undefined)?.message;
+      this.deps.logger.error(
+        `Healthcheck send phase threw unexpected error${causeMessage ? `: ${causeMessage}` : ""}.`,
+        {
+          code: "healthcheck.send_error",
+          messageId,
+          error: e,
+        },
+      );
     }
   }
 }

@@ -1887,12 +1887,10 @@ describe("API", () => {
       const validateLatest = vi.fn().mockResolvedValue({
         status: "fail",
         checkedDate: "2026-07-08",
-        messageId: "healthcheck-2026-07-08@platform.email.rhosys.cloud",
         checkedAt: "2026-07-09T00:00:00.000Z",
         rawChecks: { hasThreadId: true, workflowIsHealthcheck: true, hasEmbedding: false },
         checks: [
-          { id: "signal-received", label: "Healthcheck email received", status: "pass" },
-          { id: "thread-assigned", label: "Thread assigned to signal", status: "pass" },
+          { id: "thread-created", label: "Healthcheck thread created", status: "pass" },
           { id: "workflow-classified", label: "Classified as healthcheck workflow", status: "pass" },
           { id: "embedding-indexed", label: "Embedding indexed for search", status: "fail", detail: "No embedding found." },
         ],
@@ -1912,7 +1910,7 @@ describe("API", () => {
       const json = await res.json() as { status: string; checkedDate: string; checks: { id: string; status: string }[] };
       expect(json.status).toBe("fail");
       expect(json.checkedDate).toBe("2026-07-08");
-      expect(json.checks).toHaveLength(4);
+      expect(json.checks).toHaveLength(3);
       expect(json.checks.find(c => c.id === "embedding-indexed")?.status).toBe("fail");
       // rawChecks is an internal field and must not leak in the API response
       expect((json as Record<string, unknown>).rawChecks).toBeUndefined();
