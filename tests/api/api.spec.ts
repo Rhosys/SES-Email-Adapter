@@ -1876,10 +1876,10 @@ describe("API", () => {
   // POST /healthcheck/validate (admin)
   // -------------------------------------------------------------------------
 
-  describe("POST /healthcheck/validate", () => {
+  describe("GET /healthcheck", () => {
     it("returns 403 when user lacks management:write permission", async () => {
       vi.mocked(access.checkAccess).mockRejectedValueOnce(Object.assign(new Error("Forbidden"), { status: 403 }));
-      const res = await req(app, "POST", "/healthcheck/validate");
+      const res = await req(app, "GET", "/healthcheck");
       expect(res.status).toBe(403);
     });
 
@@ -1907,7 +1907,7 @@ describe("API", () => {
         healthCheckValidator: { validateLatest } as never,
       }));
 
-      const res = await req(hcApp, "POST", "/healthcheck/validate");
+      const res = await req(hcApp, "GET", "/healthcheck");
       expect(res.status).toBe(200);
       const json = await res.json() as { status: string; checkedDate: string; checks: { id: string; status: string }[] };
       expect(json.status).toBe("fail");
