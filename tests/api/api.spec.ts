@@ -515,21 +515,13 @@ describe("API", () => {
       expect(threadDb.updateSignalStatus).toHaveBeenCalledWith(TEST_ACCOUNT_ID, s.signalLookupId, "block_hidden");
     });
 
-    it("creates the alias when denying a quarantined signal for a brand-new address", async () => {
+    it("records the block disposition (not the alias) when denying a quarantined signal", async () => {
+      // The alias is created as an ingest invariant, so the handler only records the sender decision.
       const s = makeSignal({ status: "quarantine_visible" });
       vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(s));
-      vi.mocked(accountDb.getAlias).mockResolvedValueOnce(ok(null));
       const res = await req(app, "POST", `${A}/signals/SES%23msg-001/quarantineResponse`, { body: { status: "block_hidden" } });
       expect(res.status).toBe(200);
-      expect(accountDb.saveAlias).toHaveBeenCalledWith(expect.objectContaining({ accountId: TEST_ACCOUNT_ID, aliasAddress: s.data.recipientAddress }));
-    });
-
-    it("does not recreate the alias when denying a quarantined signal for a known address", async () => {
-      const s = makeSignal({ status: "quarantine_visible" });
-      vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(s));
-      vi.mocked(accountDb.getAlias).mockResolvedValueOnce(ok(makeAlias({ aliasAddress: s.data.recipientAddress })));
-      const res = await req(app, "POST", `${A}/signals/SES%23msg-001/quarantineResponse`, { body: { status: "block_hidden" } });
-      expect(res.status).toBe(200);
+      expect(accountDb.saveSender).toHaveBeenCalledWith(TEST_ACCOUNT_ID, s.data.recipientAddress, expect.any(String), "block_hidden");
       expect(accountDb.saveAlias).not.toHaveBeenCalled();
     });
 
@@ -546,15 +538,15 @@ describe("API", () => {
       expect(threadDb.unblockSignal).toHaveBeenCalledWith(TEST_ACCOUNT_ID, s.signalLookupId, expect.any(String));
     });
 
-    it("creates the alias when approving a quarantined signal for a brand-new address", async () => {
+    it("records the sender allow (not the alias) when approving a quarantined signal", async () => {
+      // The alias is created as an ingest invariant, so the handler only records the sender decision.
       const s = makeSignal({ status: "quarantine_visible" });
       vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(s));
       vi.mocked(threadDb.findThreadByGroupingKey).mockResolvedValueOnce(ok(null));
-      vi.mocked(accountDb.getAlias).mockResolvedValueOnce(ok(null));
       const res = await req(app, "POST", `${A}/signals/SES%23msg-001/quarantineResponse`, { body: { status: "active" } });
       expect(res.status).toBe(200);
-      expect(accountDb.saveAlias).toHaveBeenCalledWith(expect.objectContaining({ accountId: TEST_ACCOUNT_ID, aliasAddress: s.data.recipientAddress }));
       expect(accountDb.saveSender).toHaveBeenCalledWith(TEST_ACCOUNT_ID, s.data.recipientAddress, expect.any(String), "allow");
+      expect(accountDb.saveAlias).not.toHaveBeenCalled();
     });
 
     it("does not recreate the alias when approving a quarantined signal for a known address", async () => {
