@@ -116,7 +116,7 @@ describe("Property 3: Validation failure detection", () => {
 
     const failedLog = logger.calls.find(c => c.context && (c.context as Record<string, unknown>).code === "healthcheck.validation_failed");
     expect(failedLog).toBeDefined();
-    expect(failedLog!.method).toBe("track");
+    expect(failedLog!.method).toBe("error");
 
     const ctx = failedLog!.context as Record<string, unknown>;
     expect(ctx.checks).toEqual(scenario.expectedChecks);
@@ -169,6 +169,6 @@ describe("Property 3: Validation failure detection", () => {
 
     const notFoundLog = logger.calls.find(c => c.context && (c.context as Record<string, unknown>).code === "healthcheck.thread_not_found");
     expect(notFoundLog).toBeDefined();
-    expect(notFoundLog!.method).toBe("track");
+    expect(notFoundLog!.method).toBe("error");
   });
 });

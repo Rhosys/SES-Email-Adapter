@@ -6,6 +6,7 @@ import { SESv2Client, SendEmailCommand } from "@aws-sdk/client-sesv2";
 import { ok, err } from "../errors.js";
 import type { TransientSesError, Result } from "../errors.js";
 import type { Logger } from "../logger.js";
+import { sanitizeTagName, sanitizeTagValue } from "./tag-sanitizer.js";
 
 export interface EmailSendOptions {
   to: string;
@@ -40,7 +41,22 @@ export class EmailService {
     this.logger = logger;
   }
 
+  /**
+   * Sanitize SES message tags at the boundary: names and values may only contain
+   * [A-Za-z0-9_-] and must be ≤ 256 chars, or SES rejects the whole send. We strip
+   * invalid characters and truncate, and drop any tag left with an empty name or
+   * value so a malformed correlation tag can never fail an otherwise-valid email.
+   */
+  private sanitizeTags(tags?: Array<{ Name: string; Value: string }>): Array<{ Name: string; Value: string }> | undefined {
+    if (!tags?.length) return undefined;
+    const sanitized = tags
+      .map((t) => ({ Name: sanitizeTagName(t.Name), Value: sanitizeTagValue(t.Value) }))
+      .filter((t) => t.Name.length > 0 && t.Value.length > 0);
+    return sanitized.length > 0 ? sanitized : undefined;
+  }
+
   async send(opts: EmailSendOptions): Promise<Result<{ messageId: string }, TransientSesError>> {
+    const emailTags = this.sanitizeTags(opts.tags);
     try {
       const result = await this.sesv2.send(new SendEmailCommand({
         FromEmailAddress: opts.fromOverride ?? this.from,
@@ -57,7 +73,7 @@ export class EmailService {
         },
         ConfigurationSetName: this.configSetName,
         TenantName: opts.accountId,
-        ...(opts.tags?.length ? { EmailTags: opts.tags } : {}),
+        ...(emailTags ? { EmailTags: emailTags } : {}),
       }));
       const messageId = result.MessageId ?? "";
       this.logger.info("SES send succeeded.", { code: "email_service.send_success", messageId });
@@ -68,6 +84,7 @@ export class EmailService {
   }
 
   async sendRaw(opts: EmailRawOptions): Promise<Result<{ messageId: string }, TransientSesError>> {
+    const emailTags = this.sanitizeTags(opts.tags);
     try {
       const result = await this.sesv2.send(new SendEmailCommand({
         FromEmailAddress: this.from,
@@ -75,7 +92,7 @@ export class EmailService {
         Content: { Raw: { Data: opts.rawData } },
         ConfigurationSetName: this.configSetName,
         TenantName: opts.accountId,
-        ...(opts.tags?.length ? { EmailTags: opts.tags } : {}),
+        ...(emailTags ? { EmailTags: emailTags } : {}),
       }));
       const messageId = result.MessageId ?? "";
       this.logger.info("SES send succeeded.", { code: "email_service.send_success", messageId });

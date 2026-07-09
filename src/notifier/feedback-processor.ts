@@ -7,7 +7,7 @@ import type { AccountDatabase } from "../database/account-database.js";
 import { ok, err, dbError } from "../errors.js";
 import type { DbError, Result } from "../errors.js";
 import type { Logger } from "../logger.js";
-import { TAG_ACCOUNT_ID, TAG_TYPE, TAG_SIGNAL_ID, TAG_THREAD_ID } from "../email/ses-tags.js";
+import { TAG_ACCOUNT_ID, TAG_TYPE, TAG_SIGNAL_ID, TAG_THREAD_ID, TAG_HEALTHCHECK_ID } from "../email/ses-tags.js";
 
 // 72 hours in seconds — soft bounces expire and can retry
 const SOFT_BOUNCE_TTL_SECONDS = 72 * 60 * 60;
@@ -74,10 +74,46 @@ export class FeedbackProcessor {
     }
   }
 
+  /**
+   * Identify which of our sending processes produced the email that bounced /
+   * complained, and whether a failure there is our problem. A bounce/complaint on
+   * a *system* email we generate (e.g. the daily healthcheck) means our own
+   * pipeline is broken, so it is logged at error level; recipient bounces on
+   * user/forward mail are normal deliverability and stay at track level.
+   */
+  private describeOrigin(feedback: SesFeedback): { process: string; isSystemError: boolean; healthcheckId?: string } {
+    const tags = feedback.mail.tags ?? {};
+    const healthcheckId = tags[TAG_HEALTHCHECK_ID];
+    if (healthcheckId || tags["purpose"] === "healthcheck") {
+      return { process: "healthcheck", isSystemError: true, ...(healthcheckId ? { healthcheckId } : {}) };
+    }
+    const type = tags[TAG_TYPE];
+    if (type) return { process: type, isSystemError: false };
+    const purpose = tags["purpose"];
+    if (purpose) return { process: purpose, isSystemError: false };
+    return { process: "unknown", isSystemError: false };
+  }
+
   private async processFeedback(feedback: SesFeedback): Promise<Result<void, DbError>> {
     if (feedback.notificationType === "Bounce" && feedback.bounce) {
       const isPermanent = feedback.bounce.bounceType === "Permanent";
       const suppressedAt = DateTime.utc().toISO()!;
+
+      const origin = this.describeOrigin(feedback);
+      const bounceContext = {
+        code: origin.isSystemError ? "feedback.system_bounce" : "feedback.bounce",
+        process: origin.process,
+        ...(origin.healthcheckId ? { healthcheckId: origin.healthcheckId } : {}),
+        bounceType: feedback.bounce.bounceType,
+        bounceSubType: feedback.bounce.bounceSubType,
+        messageId: feedback.mail.messageId,
+        recipients: feedback.bounce.bouncedRecipients.map((r) => r.emailAddress),
+      };
+      if (origin.isSystemError) {
+        this.logger.error(`SES bounce on the ${origin.process} process — a system email we send is failing delivery.`, bounceContext);
+      } else {
+        this.logger.track(`SES bounce on the ${origin.process} process.`, bounceContext);
+      }
 
       for (const r of feedback.bounce.bouncedRecipients) {
         const entry: SuppressedAddress = {
@@ -178,6 +214,20 @@ export class FeedbackProcessor {
       }
     } else if (feedback.notificationType === "Complaint" && feedback.complaint) {
       const suppressedAt = DateTime.utc().toISO()!;
+
+      const origin = this.describeOrigin(feedback);
+      const complaintContext = {
+        code: origin.isSystemError ? "feedback.system_complaint" : "feedback.complaint",
+        process: origin.process,
+        ...(origin.healthcheckId ? { healthcheckId: origin.healthcheckId } : {}),
+        messageId: feedback.mail.messageId,
+        recipients: feedback.complaint.complainedRecipients.map((r) => r.emailAddress),
+      };
+      if (origin.isSystemError) {
+        this.logger.error(`SES complaint on the ${origin.process} process — a system email we send was marked as spam.`, complaintContext);
+      } else {
+        this.logger.track(`SES complaint on the ${origin.process} process.`, complaintContext);
+      }
 
       for (const r of feedback.complaint.complainedRecipients) {
         const entry: SuppressedAddress = {
