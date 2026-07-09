@@ -1,41 +1,43 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { ok, err, type Result } from "neverthrow";
+import { ok, err } from "neverthrow";
 import { HealthcheckValidator, type HealthcheckValidatorDeps } from "../../src/jobs/healthcheck-validator.js";
 import { createMockLogger, type MockLogger } from "../helpers/mock-logger.js";
 
-const MAIL_DOMAIN = "platform.email.rhosys.cloud";
-
-function makeSignal(overrides: { threadId?: string | undefined; workflow?: string } = {}) {
+function makeThread(overrides: { id?: string; workflow?: string; createdAt?: string } = {}) {
   return {
-    id: "sig-test",
-    signalLookupId: "lookup-test",
+    id: overrides.id ?? "thr-hc",
     accountId: "SYSTEM",
+    workflow: overrides.workflow ?? "healthcheck",
+    labels: [],
     status: "active",
-    source: "email",
-    type: "email",
-    threadId: overrides.threadId,
-    data: { workflow: overrides.workflow },
+    summary: "Healthcheck",
+    lastSignalAt: overrides.createdAt ?? "2026-07-08T06:00:00.000Z",
+    createdAt: overrides.createdAt ?? "2026-07-08T06:00:00.000Z",
+    updatedAt: overrides.createdAt ?? "2026-07-08T06:00:00.000Z",
+    senderAddress: "healthcheck@platform.email.rhosys.cloud",
+    recipientAddress: "healthcheck@platform.email.rhosys.cloud",
+    subject: "Healthcheck 2026-07-08",
   };
 }
 
 function makeDeps(overrides: {
-  signal?: ReturnType<typeof makeSignal> | null;
-  findResult?: Result<unknown, unknown>;
+  threads?: ReturnType<typeof makeThread>[];
+  listErr?: boolean;
   hasEmbedding?: boolean;
   logger?: MockLogger;
 } = {}): { deps: HealthcheckValidatorDeps; logger: MockLogger } {
   const logger = overrides.logger ?? createMockLogger();
-  const signal = overrides.signal === undefined ? makeSignal({ threadId: "thread-1", workflow: "healthcheck" }) : overrides.signal;
-  const findResult = overrides.findResult ?? ok(signal);
+  const listResult = overrides.listErr
+    ? err({ kind: "db_error", message: "boom" })
+    : ok({ items: overrides.threads ?? [makeThread()] });
 
   const deps: HealthcheckValidatorDeps = {
     threadDb: {
-      findSignalByEmailMessageId: vi.fn().mockResolvedValue(findResult),
+      listThreads: vi.fn().mockResolvedValue(listResult),
     } as unknown as HealthcheckValidatorDeps["threadDb"],
     searchDatabase: {
       hasEmbedding: vi.fn().mockResolvedValue(overrides.hasEmbedding ?? true),
     },
-    mailDomain: MAIL_DOMAIN,
     logger,
   };
 
@@ -43,7 +45,7 @@ function makeDeps(overrides: {
 }
 
 function checkById(checks: { id: string; status: string; detail?: string }[], id: string) {
-  const c = checks.find(x => x.id === id);
+  const c = checks.find((x) => x.id === id);
   if (!c) throw new Error(`check ${id} not found`);
   return c;
 }
@@ -51,56 +53,63 @@ function checkById(checks: { id: string; status: string; detail?: string }[], id
 describe("HealthcheckValidator", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("returns pass with every check passing when the signal is fully processed", async () => {
-    const { deps } = makeDeps({ signal: makeSignal({ threadId: "thread-1", workflow: "healthcheck" }), hasEmbedding: true });
+  it("returns pass with every check passing when a healthcheck thread was created that day", async () => {
+    const { deps } = makeDeps({ threads: [makeThread({ createdAt: "2026-07-08T06:00:00.000Z" })], hasEmbedding: true });
     const result = await new HealthcheckValidator(deps).validate("2026-07-08");
 
     expect(result.status).toBe("pass");
     expect(result.checkedDate).toBe("2026-07-08");
-    expect(result.messageId).toBe(`healthcheck-2026-07-08@${MAIL_DOMAIN}`);
-    expect(result.checks).toHaveLength(4);
-    expect(result.checks.every(c => c.status === "pass")).toBe(true);
+    expect(result.checks).toHaveLength(3);
+    expect(result.checks.every((c) => c.status === "pass")).toBe(true);
     expect(result.rawChecks).toEqual({ hasThreadId: true, workflowIsHealthcheck: true, hasEmbedding: true });
   });
 
-  it("marks the specific failing check when an embedding is missing", async () => {
-    const { deps } = makeDeps({ signal: makeSignal({ threadId: "thread-1", workflow: "healthcheck" }), hasEmbedding: false });
+  it("marks the embedding check as failing when the thread has no embedding", async () => {
+    const { deps } = makeDeps({ threads: [makeThread()], hasEmbedding: false });
     const result = await new HealthcheckValidator(deps).validate("2026-07-08");
 
     expect(result.status).toBe("fail");
-    expect(checkById(result.checks, "signal-received").status).toBe("pass");
-    expect(checkById(result.checks, "thread-assigned").status).toBe("pass");
+    expect(checkById(result.checks, "thread-created").status).toBe("pass");
     expect(checkById(result.checks, "workflow-classified").status).toBe("pass");
     const embedding = checkById(result.checks, "embedding-indexed");
     expect(embedding.status).toBe("fail");
     expect(embedding.detail).toBeTruthy();
   });
 
-  it("reports signal-received as fail and downstream checks as unknown when no signal exists", async () => {
-    const { deps } = makeDeps({ signal: null });
+  it("marks workflow-classified as failing when the thread is not the healthcheck workflow", async () => {
+    const { deps } = makeDeps({ threads: [makeThread({ workflow: "conversation" })], hasEmbedding: true });
+    const result = await new HealthcheckValidator(deps).validate("2026-07-08");
+
+    expect(result.status).toBe("fail");
+    expect(checkById(result.checks, "workflow-classified").status).toBe("fail");
+  });
+
+  it("reports thread-created as fail and downstream checks as unknown when no thread was created that day", async () => {
+    // Thread exists but for a different day.
+    const { deps } = makeDeps({ threads: [makeThread({ createdAt: "2026-07-05T06:00:00.000Z" })] });
     const result = await new HealthcheckValidator(deps).validate("2026-07-08");
 
     expect(result.status).toBe("fail");
     expect(result.rawChecks).toBeNull();
-    expect(checkById(result.checks, "signal-received").status).toBe("fail");
-    expect(checkById(result.checks, "thread-assigned").status).toBe("unknown");
+    expect(checkById(result.checks, "thread-created").status).toBe("fail");
     expect(checkById(result.checks, "workflow-classified").status).toBe("unknown");
     expect(checkById(result.checks, "embedding-indexed").status).toBe("unknown");
   });
 
-  it("reports overall unknown when the signals table query errors", async () => {
-    const { deps } = makeDeps({ findResult: err({ kind: "db_error", message: "boom" }) });
+  it("reports overall unknown when listing SYSTEM threads errors", async () => {
+    const { deps } = makeDeps({ listErr: true });
     const result = await new HealthcheckValidator(deps).validate("2026-07-08");
 
     expect(result.status).toBe("unknown");
     expect(result.rawChecks).toBeNull();
-    expect(result.checks.every(c => c.status === "unknown")).toBe(true);
+    expect(result.checks.every((c) => c.status === "unknown")).toBe(true);
   });
 
   it("validateLatest validates yesterday (UTC)", async () => {
-    const { deps } = makeDeps();
-    const result = await new HealthcheckValidator(deps).validateLatest();
     const expectedDate = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const { deps } = makeDeps({ threads: [makeThread({ createdAt: `${expectedDate}T06:00:00.000Z` })] });
+    const result = await new HealthcheckValidator(deps).validateLatest();
     expect(result.checkedDate).toBe(expectedDate);
+    expect(result.status).toBe("pass");
   });
 });

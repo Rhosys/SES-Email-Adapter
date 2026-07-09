@@ -24,23 +24,28 @@ vi.mock("../../src/email/template-renderer.js", () => ({
 
 const MAIL_DOMAIN = "platform.email.rhosys.cloud";
 
-function makeSignal(overrides: Record<string, unknown> = {}) {
+// Fake system time is fixed to 2025-07-08 in beforeEach, so "yesterday" is 2025-07-07.
+function makeThread(overrides: Record<string, unknown> = {}) {
   return {
-    id: "sig-hc-yesterday",
-    signalLookupId: "ses-hc-yesterday",
+    id: "thread-hc-1",
     accountId: "SYSTEM",
-    threadId: "thread-hc-1",
+    workflow: "healthcheck",
+    labels: [],
     status: "active",
-    source: "email",
-    type: "email",
-    data: { workflow: "healthcheck" },
+    summary: "Healthcheck",
+    lastSignalAt: "2025-07-07T06:00:00.000Z",
+    createdAt: "2025-07-07T06:00:00.000Z",
+    updatedAt: "2025-07-07T06:00:00.000Z",
+    senderAddress: `healthcheck@${MAIL_DOMAIN}`,
+    recipientAddress: `healthcheck@${MAIL_DOMAIN}`,
+    subject: "Healthcheck 2025-07-07",
     ...overrides,
   };
 }
 
 function makeDeps(overrides: Partial<HealthcheckJobDeps> = {}): HealthcheckJobDeps {
   return {
-    threadDb: { findSignalByEmailMessageId: vi.fn().mockResolvedValue(ok(makeSignal())) } as any,
+    threadDb: { listThreads: vi.fn().mockResolvedValue(ok({ items: [makeThread()] })) } as any,
     emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-msg-1" })) } as any,
     searchDatabase: { hasEmbedding: vi.fn().mockResolvedValue(true) },
     mailDomain: MAIL_DOMAIN,
@@ -56,27 +61,27 @@ function makeDeps(overrides: Partial<HealthcheckJobDeps> = {}): HealthcheckJobDe
 const validationScenarios = [
   {
     scenario: "validation success — all checks pass",
-    setupThreadDb: () => vi.fn().mockResolvedValue(ok(makeSignal())),
+    setupThreadDb: () => vi.fn().mockResolvedValue(ok({ items: [makeThread()] })),
     setupSearchDb: () => vi.fn().mockResolvedValue(true),
   },
   {
     scenario: "validation failure — wrong workflow",
-    setupThreadDb: () => vi.fn().mockResolvedValue(ok(makeSignal({ data: { workflow: "conversation" } }))),
+    setupThreadDb: () => vi.fn().mockResolvedValue(ok({ items: [makeThread({ workflow: "conversation" })] })),
     setupSearchDb: () => vi.fn().mockResolvedValue(true),
   },
   {
-    scenario: "signal not found — GSI3 returns null",
-    setupThreadDb: () => vi.fn().mockResolvedValue(ok(null)),
+    scenario: "thread not found — no thread created for the day",
+    setupThreadDb: () => vi.fn().mockResolvedValue(ok({ items: [] })),
     setupSearchDb: () => vi.fn().mockResolvedValue(false),
   },
   {
-    scenario: "DynamoDB error — findSignalByEmailMessageId returns Err",
+    scenario: "DynamoDB error — listThreads returns Err",
     setupThreadDb: () => vi.fn().mockResolvedValue(err(dbError(new Error("DynamoDB timeout")))),
     setupSearchDb: () => vi.fn().mockResolvedValue(false),
   },
   {
     scenario: "Aurora error — hasEmbedding throws",
-    setupThreadDb: () => vi.fn().mockResolvedValue(ok(makeSignal())),
+    setupThreadDb: () => vi.fn().mockResolvedValue(ok({ items: [makeThread()] })),
     setupSearchDb: () => vi.fn().mockRejectedValue(new Error("Aurora connectivity timeout")),
   },
 ];
@@ -103,7 +108,7 @@ describe("Property 4: Graceful degradation — send always executes", () => {
   it.each(validationScenarios)("send phase runs after: $scenario", async ({ setupThreadDb, setupSearchDb }) => {
     const emailSend = vi.fn().mockResolvedValue(ok({ messageId: "ses-msg-1" }));
     const deps = makeDeps({
-      threadDb: { findSignalByEmailMessageId: setupThreadDb() } as any,
+      threadDb: { listThreads: setupThreadDb() } as any,
       emailService: { send: emailSend } as any,
       searchDatabase: { hasEmbedding: setupSearchDb() },
       logger: mockLogger,
@@ -148,7 +153,7 @@ describe("Property 4: Graceful degradation — send always executes", () => {
 
   it("job completes without throwing when both validation AND send throw", async () => {
     const deps = makeDeps({
-      threadDb: { findSignalByEmailMessageId: vi.fn().mockRejectedValue(new Error("DynamoDB catastrophic")) } as any,
+      threadDb: { listThreads: vi.fn().mockRejectedValue(new Error("DynamoDB catastrophic")) } as any,
       emailService: { send: vi.fn().mockRejectedValue(new Error("SES catastrophic")) } as any,
       searchDatabase: { hasEmbedding: vi.fn().mockRejectedValue(new Error("Aurora down")) },
       logger: mockLogger,
