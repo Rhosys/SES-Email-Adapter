@@ -75,7 +75,7 @@ export class HealthcheckJob {
 
       if (result.isErr()) {
         const cause = result.error.cause as { message?: string } | undefined;
-        this.deps.logger.track(
+        this.deps.logger.error(
           `Healthcheck email send failed — SES returned error${cause?.message ? `: ${cause.message}` : ""}.`,
           {
             code: "healthcheck.send_failed",
@@ -92,11 +92,15 @@ export class HealthcheckJob {
         sesMessageId: result.value.messageId,
       });
     } catch (e) {
-      this.deps.logger.track("Healthcheck send phase threw unexpected error.", {
-        code: "healthcheck.send_error",
-        messageId,
-        error: e,
-      });
+      const causeMessage = (e as { message?: string } | undefined)?.message;
+      this.deps.logger.error(
+        `Healthcheck send phase threw unexpected error${causeMessage ? `: ${causeMessage}` : ""}.`,
+        {
+          code: "healthcheck.send_error",
+          messageId,
+          error: e,
+        },
+      );
     }
   }
 }

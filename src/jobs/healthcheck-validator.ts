@@ -82,7 +82,7 @@ export class HealthcheckValidator {
     try {
       const result = await this.deps.threadDb.listThreads(SYSTEM_ACCOUNT_ID, { limit: LOOKBACK_LIMIT });
       if (result.isErr()) {
-        this.deps.logger.track("Healthcheck validation query failed — could not list SYSTEM threads.", {
+        this.deps.logger.error("Healthcheck validation query failed — could not list SYSTEM threads.", {
           code: "healthcheck.validation_error",
           date,
           error: result.error,
@@ -91,7 +91,7 @@ export class HealthcheckValidator {
       }
       threads = result.value.items;
     } catch (e) {
-      this.deps.logger.track("Healthcheck validation threw unexpected error.", {
+      this.deps.logger.error("Healthcheck validation threw unexpected error.", {
         code: "healthcheck.validation_error",
         date,
         error: e,
@@ -106,7 +106,7 @@ export class HealthcheckValidator {
     const thread = createdOnDay.find((t) => t.workflow === "healthcheck") ?? createdOnDay[0];
 
     if (!thread) {
-      this.deps.logger.track(`Healthcheck thread not found for ${date} — email did not complete the pipeline.`, {
+      this.deps.logger.error(`Healthcheck thread not found for ${date} — email did not complete the pipeline.`, {
         code: "healthcheck.thread_not_found",
         date,
       });
@@ -131,7 +131,7 @@ export class HealthcheckValidator {
     try {
       checks.hasEmbedding = await this.deps.searchDatabase.hasEmbedding(thread.id);
     } catch (e) {
-      this.deps.logger.track("Aurora connectivity/timeout error during embedding existence check.", {
+      this.deps.logger.error("Aurora connectivity/timeout error during embedding existence check.", {
         code: "healthcheck.embedding_check_error",
         date,
         threadId: thread.id,
@@ -149,7 +149,7 @@ export class HealthcheckValidator {
         checks,
       });
     } else {
-      this.deps.logger.track(`Healthcheck validation failed for ${date} — one or more checks did not pass.`, {
+      this.deps.logger.error(`Healthcheck validation failed for ${date} — one or more checks did not pass.`, {
         code: "healthcheck.validation_failed",
         date,
         threadId: thread.id,
