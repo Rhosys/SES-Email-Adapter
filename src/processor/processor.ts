@@ -1283,9 +1283,10 @@ export class SignalProcessor {
       return ok(undefined);
     }
 
-    // Auto-approve: sender gets added to approvedSenders when approve_sender fires, allow_all mode, or brand-new address with auto-allow policy
+    // Auto-approve: record the sender allow when approve_sender fires or allow_all mode is active.
+    // The alias itself is guaranteed to exist by the invariant near the top of the pipeline.
     if (outcome.approveSender || effectiveFilterMode === "allow_all") {
-      const approveResult = await this.autoApprove(accountId, recipientAddress, senderETLD1);
+      const approveResult = await this.accountDb.saveSender(accountId, recipientAddress, senderETLD1, "allow");
       if (approveResult.isErr()) return err(approveResult.error);
     }
 
@@ -1765,18 +1766,6 @@ export class SignalProcessor {
       return;
     }
     this.logger.info("Repaired thread recency after reprocess moved a signal off it.", { code: "processor.reprocess.recency_repaired", accountId, threadId, newLastSignalAt, emptied: signalsResult.value.items.length === 0 });
-  }
-
-  private async autoApprove(
-    accountId: string,
-    address: string,
-    senderETLD1: string,
-  ): Promise<Result<void, DbError>> {
-    // The alias record is guaranteed to exist by the alias invariant near the top of the
-    // pipeline, so auto-approval only has to record the sender disposition.
-    const senderResult = await this.accountDb.saveSender(accountId, address, senderETLD1, "allow");
-    if (senderResult.isErr()) return err(senderResult.error);
-    return ok(undefined);
   }
 
   private async annotateTemplateError(accountId: string, templateId: string, functionName: string, error: { message: string; errorType: string } | null): Promise<void> {
