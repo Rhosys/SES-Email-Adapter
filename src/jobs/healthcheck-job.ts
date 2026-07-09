@@ -5,6 +5,7 @@ import type { EmailService } from "../email/email-service.js";
 import { SYSTEM_ACCOUNT_ID } from "../database/system-account-db.js";
 import { renderTemplate } from "../email/template-renderer.js";
 import { HealthcheckValidator, type ValidationChecks } from "./healthcheck-validator.js";
+import { TAG_HEALTHCHECK_ID } from "../email/ses-tags.js";
 
 export interface HealthcheckJobDeps {
   threadDb: ThreadDatabase;
@@ -61,7 +62,14 @@ export class HealthcheckJob {
         subject,
         textBody: text,
         htmlBody: html,
-        tags: [{ Name: "purpose", Value: "healthcheck" }],
+        // `purpose` groups healthcheck sends; the healthcheck-id tag lets us
+        // correlate a bounce/complaint back to a specific day's send (SES echoes
+        // message tags in feedback notifications). Tag values must be
+        // [A-Za-z0-9_-], so we use the id without the `@domain` suffix.
+        tags: [
+          { Name: "purpose", Value: "healthcheck" },
+          { Name: TAG_HEALTHCHECK_ID, Value: `healthcheck-${today}` },
+        ],
         accountId: SYSTEM_ACCOUNT_ID,
       });
 

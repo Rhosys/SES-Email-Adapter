@@ -57,10 +57,14 @@ describe("Property 2: Deterministic per-day healthcheck identity", () => {
       await job.run();
 
       expect(sendSpy).toHaveBeenCalledOnce();
-      const sendArgs = sendSpy.mock.calls[0]![0] as { subject: string; textBody: string };
+      const sendArgs = sendSpy.mock.calls[0]![0] as { subject: string; textBody: string; tags: Array<{ Name: string; Value: string }> };
       expect(sendArgs.subject).toBe(`Healthcheck ${date}`);
       // The message-id shown in the body follows the same deterministic date.
       expect(sendArgs.textBody).toContain(`healthcheck-${date}@${MAIL_DOMAIN}`);
+      // A tag-safe healthcheck id is attached for bounce/complaint correlation.
+      expect(sendArgs.tags).toEqual(expect.arrayContaining([
+        { Name: "X-Numaeel-Healthcheck-Id", Value: `healthcheck-${date}` },
+      ]));
 
       vi.restoreAllMocks();
     });
