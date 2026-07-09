@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { ok, err } from "neverthrow";
+import { ok, err, type Result } from "neverthrow";
 import { HealthcheckValidator, type HealthcheckValidatorDeps } from "../../src/jobs/healthcheck-validator.js";
 import { createMockLogger, type MockLogger } from "../helpers/mock-logger.js";
 
@@ -20,7 +20,7 @@ function makeSignal(overrides: { threadId?: string | undefined; workflow?: strin
 
 function makeDeps(overrides: {
   signal?: ReturnType<typeof makeSignal> | null;
-  findResult?: ReturnType<typeof ok> | ReturnType<typeof err>;
+  findResult?: Result<unknown, unknown>;
   hasEmbedding?: boolean;
   logger?: MockLogger;
 } = {}): { deps: HealthcheckValidatorDeps; logger: MockLogger } {
