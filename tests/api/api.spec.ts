@@ -1871,4 +1871,52 @@ describe("API", () => {
       expect(res.status).toBe(403);
     });
   });
+
+  // -------------------------------------------------------------------------
+  // POST /healthcheck/validate (admin)
+  // -------------------------------------------------------------------------
+
+  describe("GET /healthcheck", () => {
+    it("returns 403 when user lacks management:write permission", async () => {
+      vi.mocked(access.checkAccess).mockRejectedValueOnce(Object.assign(new Error("Forbidden"), { status: 403 }));
+      const res = await req(app, "GET", "/healthcheck");
+      expect(res.status).toBe(403);
+    });
+
+    it("returns 200 with the validation status and per-check list", async () => {
+      const validateLatest = vi.fn().mockResolvedValue({
+        status: "fail",
+        checkedDate: "2026-07-08",
+        messageId: "healthcheck-2026-07-08@platform.email.rhosys.cloud",
+        checkedAt: "2026-07-09T00:00:00.000Z",
+        rawChecks: { hasThreadId: true, workflowIsHealthcheck: true, hasEmbedding: false },
+        checks: [
+          { id: "signal-received", label: "Healthcheck email received", status: "pass" },
+          { id: "thread-assigned", label: "Thread assigned to signal", status: "pass" },
+          { id: "workflow-classified", label: "Classified as healthcheck workflow", status: "pass" },
+          { id: "embedding-indexed", label: "Embedding indexed for search", status: "fail", detail: "No embedding found." },
+        ],
+      });
+      const hcApp = createApp(makeAppDeps({
+        threadDb: threadDb as unknown as ThreadDatabase,
+        accountDb: accountDb as unknown as AccountDatabase,
+        auditDb: auditDb as unknown as AuditDatabase,
+        auth,
+        access,
+        logger: createMockLogger(),
+        healthCheckValidator: { validateLatest } as never,
+      }));
+
+      const res = await req(hcApp, "GET", "/healthcheck");
+      expect(res.status).toBe(200);
+      const json = await res.json() as { status: string; checkedDate: string; checks: { id: string; status: string }[] };
+      expect(json.status).toBe("fail");
+      expect(json.checkedDate).toBe("2026-07-08");
+      expect(json.checks).toHaveLength(4);
+      expect(json.checks.find(c => c.id === "embedding-indexed")?.status).toBe("fail");
+      // rawChecks is an internal field and must not leak in the API response
+      expect((json as Record<string, unknown>).rawChecks).toBeUndefined();
+      expect(validateLatest).toHaveBeenCalledOnce();
+    });
+  });
 });
