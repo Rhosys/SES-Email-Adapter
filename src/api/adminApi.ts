@@ -39,7 +39,6 @@ const HealthCheckItemSchema = z.object({
 const HealthCheckValidationResponse = z.object({
   status: z.enum(["pass", "fail", "unknown"]),
   checkedDate: z.string(),
-  messageId: z.string(),
   checkedAt: z.string(),
   checks: z.array(HealthCheckItemSchema),
 });
@@ -93,7 +92,6 @@ export class AdminApi {
       return c.json({
         status: validation.status,
         checkedDate: validation.checkedDate,
-        messageId: validation.messageId,
         checkedAt: validation.checkedAt,
         checks: validation.checks,
       }, 200);
