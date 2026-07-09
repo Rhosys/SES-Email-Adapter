@@ -17,7 +17,7 @@ export interface JobDispatcher {
 }
 
 // ---------------------------------------------------------------------------
-// Healthcheck validator interface (used by the health-check validation route)
+// Healthcheck validator interface (used by the GET /healthcheck route)
 // ---------------------------------------------------------------------------
 
 export interface HealthCheckValidatorPort {
@@ -78,8 +78,8 @@ export class AdminApi {
     });
 
     app.openapi(route({
-      method: "post",
-      path: "/healthcheck/validate",
+      method: "get",
+      path: "/healthcheck",
       tags: ["Admin"],
       middleware: [authz("management:write", "reindex")] as const,
       responses: {
