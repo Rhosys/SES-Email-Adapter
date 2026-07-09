@@ -36,6 +36,7 @@ import { DynamoDeviceStore } from "./notifier/device-store.js";
 import { FeedbackProcessor } from "./notifier/feedback-processor.js";
 import { DomainHealthJob } from "./jobs/domain-health-job.js";
 import { HealthcheckJob } from "./jobs/healthcheck-job.js";
+import { HealthcheckValidator } from "./jobs/healthcheck-validator.js";
 import { AuthressAuthService } from "./api/authress-auth.js";
 import { AuthressAccessService } from "./api/authress-access.js";
 import { createApp } from "./api/app.js";
@@ -207,6 +208,13 @@ const healthcheckJob = new HealthcheckJob({
   logger,
 });
 
+const healthcheckValidator = new HealthcheckValidator({
+  threadDb,
+  searchDatabase,
+  mailDomain: MAIL_DOMAIN,
+  logger,
+});
+
 const followupHandler = new FollowupHandler({
   threadDb,
   notifier: new DeviceNotifier({
@@ -300,6 +308,7 @@ const app = createApp({
   logger,
   forwardingService,
   jobDispatcher: new ReindexDispatcher({ logger }),
+  healthCheckValidator: healthcheckValidator,
   signalReprocessor: processor,
   draftSendDispatcher,
   accountCreationStarter,
