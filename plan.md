@@ -69,9 +69,16 @@ the user's sender decision, unconditionally.
 | `block_reject` | → block_reject | — | **block_reject** |
 | `report_violation` | → report_violation | — | **report_violation** |
 
-Sender scope = eTLD+1 of the sender (unchanged from today). No `matchedRules`
-check anywhere. Also fold `threadsApi.ts:201` (report-violation on a thread, which
-calls `saveSender` without `ensureAlias`) onto the same guarantee.
+Why unconditional (no check, no lookup): to reach `quarantineResponse` the signal
+is quarantined, so `saveSender` must always run. We do **not** and should not read
+`getSender`/`matchedRules` first — a quarantined signal that the user is deciding
+on has no settled allow/block record for that sender, and in the one case where it
+does (a content rule quarantined an already-`allow`ed sender), the unconditional
+write is still correct: approve→`allow` is idempotent, block→ records the user's
+explicit new decision. Sender scope = eTLD+1 (unchanged). The handler's only
+sender-related work is this one `saveSender`; `ensureAliasExists` is removed
+(alias guaranteed at ingest). Also fold `threadsApi.ts:201` (report-violation on a
+thread, which calls `saveSender` without `ensureAlias`) onto the same guarantee.
 
 ---
 
