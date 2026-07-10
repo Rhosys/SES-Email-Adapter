@@ -103,9 +103,12 @@ export class ThreadDatabase {
         IndexName: "gsi1",
         KeyConditionExpression: "gsi1pk = :pk AND gsi1sk = :sk",
         ExpressionAttributeValues: { ":pk": gsi1pk, ":sk": signalId },
-        Limit: 1,
       }));
-      return ok(res.Items?.[0] ? coerceStaleStatus(hydrateSignal(res.Items[0] as Signal)) : null);
+      const items = res.Items ?? [];
+      if (items.length > 1) {
+        this.logger.error("Signal id is supposed to be unique within a thread but more than one record was found. Returning the first, but this indicates a data integrity bug.", { code: "thread_database.signal_not_unique", accountId, signalId, threadId, count: items.length });
+      }
+      return ok(items[0] ? coerceStaleStatus(hydrateSignal(items[0] as Signal)) : null);
     } catch (e) {
       return err(dbError(e));
     }
@@ -130,10 +133,13 @@ export class ThreadDatabase {
         IndexName: "gsi3",
         KeyConditionExpression: "gsi3pk = :val",
         ExpressionAttributeValues: { ":val": gsi3pk },
-        Limit: 1,
       }));
-      if (!res.Items || res.Items.length === 0) return ok(null);
-      const item = hydrateThreadObject(res.Items[0] as { threadId?: string; arcId?: string; id: string; signalLookupId: string; accountId: string; status: string; source: string; type: string });
+      const items = res.Items ?? [];
+      if (items.length === 0) return ok(null);
+      if (items.length > 1) {
+        this.logger.error("Email message id is supposed to be globally unique but more than one signal record was found. Returning the first, but this indicates a data integrity bug.", { code: "thread_database.email_message_id_not_unique", gsi3pk, count: items.length });
+      }
+      const item = hydrateThreadObject(items[0] as { threadId?: string; arcId?: string; id: string; signalLookupId: string; accountId: string; status: string; source: string; type: string });
       return ok(item as { threadId?: string; id: string; signalLookupId: string; accountId: string; status: string; source: string; type: string });
     } catch (e) {
       return err(dbError(e));
@@ -279,10 +285,13 @@ export class ThreadDatabase {
         IndexName: "gsi3",
         KeyConditionExpression: "gsi3pk = :val",
         ExpressionAttributeValues: { ":val": buildThreadGsi3pk(accountId, key) },
-        Limit: 1,
       }));
-      if (!res.Items || res.Items.length === 0) return ok(null);
-      return ok(hydrateThreadObject(res.Items[0] as Thread));
+      const items = res.Items ?? [];
+      if (items.length === 0) return ok(null);
+      if (items.length > 1) {
+        this.logger.error("Thread grouping key is supposed to be unique per account but more than one thread record was found. Returning the first, but this indicates a data integrity bug.", { code: "thread_database.grouping_key_not_unique", accountId, key, count: items.length });
+      }
+      return ok(hydrateThreadObject(items[0] as Thread));
     } catch (e) {
       return err(dbError(e));
     }
