@@ -321,7 +321,7 @@ export class AccountsApi {
       // untracked AccessRecord — this change wouldn't reach it, so their effective
       // permissions could silently diverge from what this endpoint reports. TRACK so this
       // is investigable if a discrepancy is ever reported.
-      logger.track("User role updated on the canonical Authress access record.", { code: "accounts.user_role_updated", accountId, userId: c.req.param("userId")!, role: body.role });
+      logger.track("Role changed on canonical Authress record only — if user reports the change didn't take effect, check Authress directly for a separate AccessRecord granting them access to this account and reconcile manually.", { code: "accounts.user_role_updated", accountId, userId: c.req.param("userId")!, role: body.role });
       return c.json({ userId: c.req.param("userId")!, role: body.role }, 200);
     });
 
