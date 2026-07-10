@@ -25,14 +25,14 @@
     cookie "<1"
     lodash.take "^4.1.1"
 
-"@authress/sdk@^3.2.269":
-  version "3.2.269"
-  resolved "https://registry.npmjs.org/@authress/sdk/-/sdk-3.2.269.tgz"
-  integrity sha512-6JLUqgcJFfDJ3CFH/SQ39vVsMXCfwqA1YDP4ebnz6oGQerY0D2lzu+t3HABLdSeHad6oyIEqecsyh1DfcNGCIw==
+"@authress/sdk@^3.2.276":
+  version "3.2.276"
+  resolved "https://registry.npmjs.org/@authress/sdk/-/sdk-3.2.276.tgz"
+  integrity sha512-KSOLFcKwV3isK04aYAxuYj5bp877uDR8Xc5I5D3YkMBBburhHZ/19PHWeyJOnM7uU7eXQXghMBs8OGKqIZOVCw==
   dependencies:
     "@authress/login" "*"
     base64url "^3.0.1"
-    jose "^4.8.3"
+    jose "4.8.3 - 4.15.4 || ^5"
     luxon "3"
 
 "@aws-crypto/crc32@5.2.0":
@@ -3615,10 +3615,10 @@ jmespath@0.16.0:
   resolved "https://registry.npmjs.org/jmespath/-/jmespath-0.16.0.tgz"
   integrity sha512-9FzQjJ7MATs1tSpnco1K6ayiYE3figslrXA72G2HQ/n76RzvYlofyi5QM+iX4YRs/pu3yzxlVQSST23+dMDknw==
 
-jose@^4.8.3:
-  version "4.15.9"
-  resolved "https://registry.npmjs.org/jose/-/jose-4.15.9.tgz"
-  integrity sha512-1vUQX+IdDMVPj4k8kOxgUqlcK518yluMuGZwqlr44FS1ppZB/5GWh4rZG89erpOBOJjU/OBsnCVFfapsRz6nEA==
+"jose@4.8.3 - 4.15.4 || ^5":
+  version "5.10.0"
+  resolved "https://registry.npmjs.org/jose/-/jose-5.10.0.tgz"
+  integrity sha512-s+3Al/p9g32Iq+oqXxkW//7jk2Vig6FF1CFqzVXoTUXt2qz89YWbL+OwS17NFYEvxC35n0FKeGO2LGYSxeM2Gg==
 
 js-beautify@^1.15.4:
   version "1.15.4"

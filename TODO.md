@@ -23,7 +23,6 @@
 - [ ] **Billing endpoints** — `GET /accounts/:id/billing` → `BillingInfo`, `POST /accounts/:id/billing/checkout-session` → Stripe Checkout URL, `POST /accounts/:id/billing/portal-session` → Stripe Portal URL. Requires Stripe integration.
 - [ ] **User attachment upload for outbound signals (replies/compose)** — drafts currently have `attachments: []` hardcoded; no upload endpoint exists. Needed: `POST /accounts/:accountId/attachments` → presigned S3 PUT URL + `attachmentId`; client uploads directly to S3; draft creation/update references `attachmentId` values; send logic fetches from S3. TTL-based cleanup for unreferenced uploads.
 - [ ] **Review all locations where we might want to send emails to users** — define notification strategy before implementing.
-  - [ ] **Team invite email via SES** — replace TRACK log with actual SES send.
 - [ ] **Wire up onboarding follow-up emails via SES** — replace TRACK logs in `OnboardingTaskHandler` with SESv2 calls.
 - [ ] **Confirmation workflow (split from auth)** — new `confirmation` workflow type. **Separate spec needed.**
 - [ ] **Calendar invite signals: rich attendee display + calendar forwarding provenance** — dedicated calendar invite component in UI.

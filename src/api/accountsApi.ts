@@ -280,7 +280,7 @@ export class AccountsApi {
         return err(c, 422, "Failed to create invite", "INVITE_CREATION_FAILED");
       }
       const { inviteId } = inviteResult.value;
-      const inviteUrl = `${appBaseUrl}/invite?inviteId=${inviteId}`;
+      const inviteUrl = `${appBaseUrl}/a/registration?inviteId=${inviteId}`;
       const accountResult = await accountDb.getAccount(accountId);
       if (accountResult.isErr()) { logger.error("Failed to get account for invite.", { code: "api.users.invite.get_account_failed", accountId, error: accountResult.error }); return err(c, 500, "Internal Server Error"); }
       const account = accountResult.value;
@@ -316,6 +316,12 @@ export class AccountsApi {
         logger.warn("Authress service unavailable while updating user role.", { code: "api.authress_unavailable", accountId, userId: c.req.param("userId")!, error: result.error });
         return err(c, 503, "Service temporarily unavailable");
       }
+      // Role changes only mutate our canonical AccessRecord. If this user's access
+      // originated from an invite-accept flow, Authress may have granted them a separate,
+      // untracked AccessRecord — this change wouldn't reach it, so their effective
+      // permissions could silently diverge from what this endpoint reports. TRACK so this
+      // is investigable if a discrepancy is ever reported.
+      logger.track("Role changed on canonical Authress record only — if user reports the change didn't take effect, check Authress directly for a separate AccessRecord granting them access to this account and reconcile manually.", { code: "accounts.user_role_updated", accountId, userId: c.req.param("userId")!, role: body.role });
       return c.json({ userId: c.req.param("userId")!, role: body.role }, 200);
     });
 
