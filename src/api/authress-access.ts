@@ -166,10 +166,11 @@ export class AuthressAccessService implements AccessService {
         // Authress always attempts an automatic safe merge into an existing matching
         // AccessRecord first. If that isn't possible, it falls back to this strategy —
         // default is GENERATE_NEW_RECORD, which creates an orphaned record our
-        // listUsers/removeUser/updateUserRole can't manage. SKIP_CHANGES is the only
-        // fallback that can't corrupt or over-grant existing access, at the cost of the
-        // invite silently granting nothing if the safe merge fails.
-        conflictResolutionStrategy: "SKIP_CHANGES" as Invite.ConflictResolutionStrategyEnum,
+        // listUsers/removeUser/updateUserRole can't manage. Our records are always one
+        // statement per role with a users list (see _upsertUser below) — merging a new
+        // user into the matching role's statement never changes what any other existing
+        // user is granted, so a forced merge is safe for our specific record shape.
+        conflictResolutionStrategy: "UNSAFE_FORCE_MERGE" as Invite.ConflictResolutionStrategyEnum,
       });
       return ok({ inviteId: response.data.inviteId! });
     } catch (e) {
