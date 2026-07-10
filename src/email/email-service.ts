@@ -55,16 +55,16 @@ export class EmailService {
     return sanitized.length > 0 ? sanitized : undefined;
   }
 
-  private validateAccountId(accountId: string): TransientSesError | null {
+  private validateAccountId<T>(accountId: string): Result<T, TransientSesError> | null {
     if (!accountId || accountId.trim().length === 0) {
-      return { kind: "transient_ses_error", errorName: "MissingTenantName", httpStatus: 0, cause: new Error("accountId (SES TenantName) must not be empty — every send must target a tenant.") };
+      return err({ kind: "transient_ses_error", errorName: "MissingTenantName", httpStatus: 0, cause: new Error("accountId (SES TenantName) must not be empty — every send must target a tenant.") });
     }
     return null;
   }
 
   async send(opts: EmailSendOptions): Promise<Result<{ messageId: string }, TransientSesError>> {
-    const validationErr = this.validateAccountId(opts.accountId);
-    if (validationErr) return err(validationErr);
+    const validationErr = this.validateAccountId<{ messageId: string }>(opts.accountId);
+    if (validationErr) return validationErr;
     const emailTags = this.sanitizeTags(opts.tags);
     try {
       const result = await this.sesv2.send(new SendEmailCommand({
@@ -93,8 +93,8 @@ export class EmailService {
   }
 
   async sendRaw(opts: EmailRawOptions): Promise<Result<{ messageId: string }, TransientSesError>> {
-    const validationErr = this.validateAccountId(opts.accountId);
-    if (validationErr) return err(validationErr);
+    const validationErr = this.validateAccountId<{ messageId: string }>(opts.accountId);
+    if (validationErr) return validationErr;
     const emailTags = this.sanitizeTags(opts.tags);
     try {
       const result = await this.sesv2.send(new SendEmailCommand({
