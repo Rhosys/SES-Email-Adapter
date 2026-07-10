@@ -28,6 +28,12 @@ const sk = (token: string) => `DEVICE#${token}`;
 const MOBILE_DEVICE_LIMIT = 10;
 const VALID_DEVICE_TYPES: ReadonlySet<string> = new Set<DeviceType>(["websocket", "fcm", "apns"]);
 
+// Device (particularly websocket connection) records carry a short TTL and
+// DynamoDB's TTL sweep can lag up to 48h behind expiry, so reads here must
+// not treat a stale, not-yet-swept connection as still live.
+const isTtlExpired = (device: Pick<Device, "ttl">): boolean =>
+  typeof device.ttl === "number" && device.ttl <= Math.floor(Date.now() / 1000);
+
 // ─── DynamoDeviceStore ───────────────────────────────────────────────────────
 
 export class DynamoDeviceStore implements DeviceStore {
@@ -38,7 +44,7 @@ export class DynamoDeviceStore implements DeviceStore {
         KeyConditionExpression: "pk = :pk AND begins_with(sk, :prefix)",
         ExpressionAttributeValues: { ":pk": pk(accountId), ":prefix": "DEVICE#" },
       }));
-      return ok((res.Items ?? []) as Device[]);
+      return ok(((res.Items ?? []) as Device[]).filter(d => !isTtlExpired(d)));
     } catch (e) {
       return err(dbError(e));
     }
@@ -126,7 +132,7 @@ export class DynamoDeviceStore implements DeviceStore {
       }));
       const devices = (res.Items ?? []) as Device[];
       const mobileCount = devices.filter(d =>
-        (d.type === "fcm" || d.type === "apns") && d.token !== currentToken,
+        !isTtlExpired(d) && (d.type === "fcm" || d.type === "apns") && d.token !== currentToken,
       ).length;
       return ok(mobileCount);
     } catch (e) {
