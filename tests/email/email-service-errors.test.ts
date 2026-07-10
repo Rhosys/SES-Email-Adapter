@@ -48,7 +48,7 @@ describe("EmailService error classifications — REQ-0.6", () => {
     const opts = { to: "u@e.com", subject: "S", textBody: "B", accountId: "" };
     const result = await service.send(opts);
     expect(result.isErr()).toBe(true);
-    expect(result._unsafeUnwrapErr().errorName).toBe("MissingTenantName");
+    expect(result._unsafeUnwrapErr()).toEqual({ kind: "invalid_argument", argument: "accountId", message: expect.stringContaining("must not be empty") });
     expect(mockSend).not.toHaveBeenCalled();
   });
 
@@ -56,7 +56,7 @@ describe("EmailService error classifications — REQ-0.6", () => {
     const opts = { to: "u@e.com", subject: "S", textBody: "B", accountId: "   " };
     const result = await service.send(opts);
     expect(result.isErr()).toBe(true);
-    expect(result._unsafeUnwrapErr().errorName).toBe("MissingTenantName");
+    expect(result._unsafeUnwrapErr()).toEqual({ kind: "invalid_argument", argument: "accountId", message: expect.stringContaining("must not be empty") });
     expect(mockSend).not.toHaveBeenCalled();
   });
 

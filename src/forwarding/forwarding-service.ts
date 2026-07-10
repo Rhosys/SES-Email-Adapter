@@ -6,6 +6,7 @@
 import { ok, err } from "neverthrow"
 import type { Result } from "neverthrow"
 import type { DbError, TransientSesError } from "../errors.js"
+import type { EmailServiceError } from "../email/email-service.js"
 import type { ForwardingTarget, Signal, Thread } from "../types/index.js"
 import type { EmailService } from "../email/email-service.js"
 import type { IEmailSignalStore } from "../database/email-signal-store.js"
@@ -22,7 +23,7 @@ import { DateTime } from "luxon"
 
 export type WebhookForwardError = { kind: "webhook_forward_error"; cause: unknown; statusCode?: number }
 
-export type ForwardError = DbError | TransientSesError | WebhookForwardError
+export type ForwardError = DbError | EmailServiceError | WebhookForwardError
 
 // ---------------------------------------------------------------------------
 // Store interface — what ForwardingService needs from the DB layer
@@ -37,7 +38,7 @@ export interface IForwardingTargetStore {
 // ---------------------------------------------------------------------------
 
 export interface IForwardingService {
-  sendVerification(accountId: string, target: ForwardingTarget): Promise<Result<void, TransientSesError>>
+  sendVerification(accountId: string, target: ForwardingTarget): Promise<Result<void, EmailServiceError>>
   verifyWebhook(url: string): Promise<Result<void, TransientSesError>>
   forward(forwardingTargetId: string, signal: Signal, thread: Thread): Promise<Result<void, ForwardError>>
 }
@@ -56,7 +57,7 @@ export class ForwardingService implements IForwardingService {
     private readonly logger: Logger,
   ) {}
 
-  async sendVerification(accountId: string, target: ForwardingTarget): Promise<Result<void, TransientSesError>> {
+  async sendVerification(accountId: string, target: ForwardingTarget): Promise<Result<void, EmailServiceError>> {
     if (target.type === "email") {
       return this.sendEmailVerification(accountId, target.target, target.token)
     }
@@ -112,7 +113,7 @@ export class ForwardingService implements IForwardingService {
   // Private — email verification
   // ---------------------------------------------------------------------------
 
-  private async sendEmailVerification(accountId: string, target: string, token: string): Promise<Result<void, TransientSesError>> {
+  private async sendEmailVerification(accountId: string, target: string, token: string): Promise<Result<void, EmailServiceError>> {
     const verifyUrl = `${this.appBaseUrl}/settings?tab=forwarding&verifyAddress=${encodeURIComponent(target)}&token=${token}&accountId=${accountId}`
     const triggerId = `fwdverify-${accountId}-${target}`
     const tags = buildEmailTags({

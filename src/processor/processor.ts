@@ -5,7 +5,8 @@ import type { Logger } from "../logger.js";
 import type { Result } from "neverthrow";
 import type { IForwardingService } from "../forwarding/forwarding-service.js";
 import { ok, err, dbError, processorError, invalidResponseError, notFoundError } from "../errors.js";
-import type { DbError, InvalidResponseError, NotFoundError, ProcessorError, TransientSesError } from "../errors.js";
+import type { DbError, InvalidResponseError, NotFoundError, ProcessorError } from "../errors.js";
+import type { EmailServiceError } from "../email/email-service.js";
 import type { Signal, Thread, Rule, Workflow, WorkflowData, Alias, AliasSender, SenderPolicy, AccountFilteringConfig, SignalSource, SignalStatus, Domain, ThreadStatus, ThreadUrgency, UnknownSenderPolicy, MatchedRuleResult, InvalidRuleFunctionData, InvalidTemplateFunctionData, AutoSendBlockedData, UnsubscribeInfo, InboundEmailSignalData, OutboundEmailSignalData } from "../types/index.js";
 import { DEFAULT_UNKNOWN_SENDER_POLICY } from "../types/index.js";
 import type { ParsedMime } from "./mime.js";
@@ -88,7 +89,7 @@ export interface ReplySender {
     accountId?: string;
     signalId?: string;
     threadId?: string;
-  }): Promise<Result<{ messageId: string }, TransientSesError>>;
+  }): Promise<Result<{ messageId: string }, EmailServiceError>>;
 }
 
 export type SesVerdict = "PASS" | "FAIL" | "GRAY" | "PROCESSING_FAILED";
