@@ -55,7 +55,14 @@ export class EmailService {
     return sanitized.length > 0 ? sanitized : undefined;
   }
 
+  private validateAccountId(accountId: string): void {
+    if (!accountId || accountId.trim().length === 0) {
+      throw new Error("EmailService: accountId (SES TenantName) must not be empty — every send must target a tenant.");
+    }
+  }
+
   async send(opts: EmailSendOptions): Promise<Result<{ messageId: string }, TransientSesError>> {
+    this.validateAccountId(opts.accountId);
     const emailTags = this.sanitizeTags(opts.tags);
     try {
       const result = await this.sesv2.send(new SendEmailCommand({
@@ -84,6 +91,7 @@ export class EmailService {
   }
 
   async sendRaw(opts: EmailRawOptions): Promise<Result<{ messageId: string }, TransientSesError>> {
+    this.validateAccountId(opts.accountId);
     const emailTags = this.sanitizeTags(opts.tags);
     try {
       const result = await this.sesv2.send(new SendEmailCommand({
