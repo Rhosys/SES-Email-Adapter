@@ -8,7 +8,8 @@
 
 import { DateTime } from "luxon";
 import { ok, err } from "../../errors.js";
-import type { DbError, TransientSesError, Result } from "../../errors.js";
+import type { DbError, Result } from "../../errors.js";
+import type { EmailServiceError } from "../../email/email-service.js";
 import type { InboundSignalMessage } from "../processor.js";
 import type { ThreadDatabase } from "../../database/thread-database.js";
 import type { Logger } from "../../logger.js";
@@ -76,7 +77,7 @@ export async function handleCalendarResponse(
   deps: CalendarResponseHandlerDeps,
   logger: Logger,
   icsBytes: Uint8Array,
-): Promise<Result<void, DbError | TransientSesError>> {
+): Promise<Result<void, DbError | EmailServiceError>> {
   const { serviceDomain, threadDatabase, rsvpComposer, signalStore, emailService } = deps;
 
   // --- Step 1: Extract threadId and accountId from recipient address ---

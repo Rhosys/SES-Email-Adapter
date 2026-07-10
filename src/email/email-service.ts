@@ -4,9 +4,11 @@
 
 import { SESv2Client, SendEmailCommand } from "@aws-sdk/client-sesv2";
 import { ok, err } from "../errors.js";
-import type { TransientSesError, Result } from "../errors.js";
+import type { TransientSesError, InvalidArgumentError, Result } from "../errors.js";
 import type { Logger } from "../logger.js";
 import { sanitizeTagName, sanitizeTagValue } from "./tag-sanitizer.js";
+
+export type EmailServiceError = TransientSesError | InvalidArgumentError;
 
 export interface EmailSendOptions {
   to: string;
@@ -55,16 +57,16 @@ export class EmailService {
     return sanitized.length > 0 ? sanitized : undefined;
   }
 
-  private validateAccountId(accountId: string): Result<null, TransientSesError> | null {
+  private validateAccountId(accountId: string): Result<null, InvalidArgumentError> {
     if (!accountId || accountId.trim().length === 0) {
-      return err({ kind: "transient_ses_error", errorName: "MissingTenantName", httpStatus: 0, cause: new Error("accountId (SES TenantName) must not be empty — every send must target a tenant.") });
+      return err({ kind: "invalid_argument", argument: "accountId", message: "accountId (SES TenantName) must not be empty — every send must target a tenant." });
     }
-    return null;
+    return ok(null);
   }
 
-  async send(opts: EmailSendOptions): Promise<Result<{ messageId: string }, TransientSesError>> {
-    const validationErr = this.validateAccountId(opts.accountId);
-    if (validationErr) return validationErr as Result<never, TransientSesError>;
+  async send(opts: EmailSendOptions): Promise<Result<{ messageId: string }, EmailServiceError>> {
+    const validation = this.validateAccountId(opts.accountId);
+    if (validation.isErr()) return err(validation.error);
     const emailTags = this.sanitizeTags(opts.tags);
     try {
       const result = await this.sesv2.send(new SendEmailCommand({
@@ -92,9 +94,9 @@ export class EmailService {
     }
   }
 
-  async sendRaw(opts: EmailRawOptions): Promise<Result<{ messageId: string }, TransientSesError>> {
-    const validationErr = this.validateAccountId(opts.accountId);
-    if (validationErr) return validationErr as Result<never, TransientSesError>;
+  async sendRaw(opts: EmailRawOptions): Promise<Result<{ messageId: string }, EmailServiceError>> {
+    const validation = this.validateAccountId(opts.accountId);
+    if (validation.isErr()) return err(validation.error);
     const emailTags = this.sanitizeTags(opts.tags);
     try {
       const result = await this.sesv2.send(new SendEmailCommand({

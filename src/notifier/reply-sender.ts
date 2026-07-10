@@ -4,7 +4,7 @@
 
 import type { ReplySender } from "../processor/processor.js";
 import type { EmailService } from "../email/email-service.js";
-import type { TransientSesError } from "../errors.js";
+import type { EmailServiceError } from "../email/email-service.js";
 import type { Result } from "../errors.js";
 import { buildOutboundTags } from "../email/ses-tags.js";
 import type { Logger } from "../logger.js";
@@ -27,7 +27,7 @@ export class ReplySenderService implements ReplySender {
     accountId: string;
     signalId?: string;
     threadId?: string;
-  }): Promise<Result<{ messageId: string }, TransientSesError>> {
+  }): Promise<Result<{ messageId: string }, EmailServiceError>> {
     const tags = buildOutboundTags("reply", {
       accountId: opts.accountId,
       signalId: opts.signalId,
