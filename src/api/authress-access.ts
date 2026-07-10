@@ -1,6 +1,6 @@
 import { AuthressClient } from "@authress/sdk";
 import { KmsServiceClientTokenProvider } from "@authress/sdk";
-import type { AccessRecord } from "@authress/sdk";
+import type { AccessRecord, Invite } from "@authress/sdk";
 import { ok, err, authressServiceError } from "../errors.js";
 import type { AuthressServiceError, Result } from "../errors.js";
 import type { AccessService, AccountUser, AccountRole } from "./app.js";
@@ -48,20 +48,6 @@ function roleIdToRole(roleId: string): AccountRole | null {
   return ID_TO_ROLE.get(roleId) ?? null;
 }
 
-function parseUsers(record: AccessRecord): AccountUser[] {
-  const users: AccountUser[] = [];
-  for (const stmt of record.statements) {
-    const roleId = stmt.roles[0];
-    if (!roleId) continue;
-    const role = roleIdToRole(roleId);
-    if (!role) continue;
-    for (const user of stmt.users ?? []) {
-      users.push({ userId: user.userId, role });
-    }
-  }
-  return users;
-}
-
 function recordId(accountId: string): string {
   return `email:account-${accountId}`;
 }
@@ -93,8 +79,18 @@ export class AuthressAccessService implements AccessService {
   async listUsers(accountId: string): Promise<Result<AccountUser[], AuthressServiceError>> {
     try {
       try {
-        const response = await this.client.accessRecords.getRecord(recordId(accountId));
-        return ok(parseUsers(response.data));
+        // Aggregates across every AccessRecord granting this resource (not just our
+        // canonical named record), so users whose grant landed in an Authress-generated
+        // record (e.g. via invite-accept) still show up here.
+        const response = await this.client.resources.getResourceUsers(`accounts/${accountId}`);
+        const users: AccountUser[] = [];
+        for (const u of response.data.users) {
+          const roleId = u.roles[0]?.roleId;
+          const role = roleId ? roleIdToRole(roleId) : null;
+          if (!role) continue;
+          users.push({ userId: u.userId, role });
+        }
+        return ok(users);
       } catch (e) {
         if (isNotFound(e)) return ok([]);
         throw e;
@@ -167,6 +163,16 @@ export class AuthressAccessService implements AccessService {
           roles: [roleToRoleId(role)],
           resources: [{ resourceUri: `accounts/${accountId}` }],
         }],
+        // By default Authress targets a record derived from the accepting user ID on
+        // accept, not our canonical account record — mergeTargetRecordId forces it to
+        // look up/create/update this exact record instead, so accepted invites always
+        // land in the same place _upsertUser/listUsers/removeUser already operate on.
+        mergeTargetRecordId: recordId(accountId),
+        // Our records are always one statement per role with a users list (see
+        // _upsertUser below) — merging a new user into the matching role's statement
+        // never changes what any other existing user is granted, so a forced merge is
+        // safe for our specific record shape if the automatic safe merge isn't possible.
+        conflictResolutionStrategy: "UNSAFE_FORCE_MERGE" as Invite.ConflictResolutionStrategyEnum,
       });
       return ok({ inviteId: response.data.inviteId! });
     } catch (e) {
