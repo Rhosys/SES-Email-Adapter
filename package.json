@@ -21,7 +21,7 @@
     "prepare": "husky"
   },
   "dependencies": {
-    "@authress/sdk": "^3.2.269",
+    "@authress/sdk": "^3.2.276",
     "@aws-sdk/client-apigatewaymanagementapi": "^3.1048.0",
     "@aws-sdk/client-bedrock-runtime": "^3.0.0",
     "@aws-sdk/client-dynamodb": "^3.0.0",

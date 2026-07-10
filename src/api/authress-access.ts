@@ -163,13 +163,15 @@ export class AuthressAccessService implements AccessService {
           roles: [roleToRoleId(role)],
           resources: [{ resourceUri: `accounts/${accountId}` }],
         }],
-        // Authress always attempts an automatic safe merge into an existing matching
-        // AccessRecord first. If that isn't possible, it falls back to this strategy —
-        // default is GENERATE_NEW_RECORD, which creates an orphaned record our
-        // listUsers/removeUser/updateUserRole can't manage. Our records are always one
-        // statement per role with a users list (see _upsertUser below) — merging a new
-        // user into the matching role's statement never changes what any other existing
-        // user is granted, so a forced merge is safe for our specific record shape.
+        // By default Authress targets a record derived from the accepting user ID on
+        // accept, not our canonical account record — mergeTargetRecordId forces it to
+        // look up/create/update this exact record instead, so accepted invites always
+        // land in the same place _upsertUser/listUsers/removeUser already operate on.
+        mergeTargetRecordId: recordId(accountId),
+        // Our records are always one statement per role with a users list (see
+        // _upsertUser below) — merging a new user into the matching role's statement
+        // never changes what any other existing user is granted, so a forced merge is
+        // safe for our specific record shape if the automatic safe merge isn't possible.
         conflictResolutionStrategy: "UNSAFE_FORCE_MERGE" as Invite.ConflictResolutionStrategyEnum,
       });
       return ok({ inviteId: response.data.inviteId! });
