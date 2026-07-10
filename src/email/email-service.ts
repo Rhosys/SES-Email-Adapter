@@ -4,9 +4,11 @@
 
 import { SESv2Client, SendEmailCommand } from "@aws-sdk/client-sesv2";
 import { ok, err } from "../errors.js";
-import type { TransientSesError, Result } from "../errors.js";
+import type { TransientSesError, InvalidArgumentError, Result } from "../errors.js";
 import type { Logger } from "../logger.js";
 import { sanitizeTagName, sanitizeTagValue } from "./tag-sanitizer.js";
+
+export type EmailServiceError = TransientSesError | InvalidArgumentError;
 
 export interface EmailSendOptions {
   to: string;
@@ -55,7 +57,16 @@ export class EmailService {
     return sanitized.length > 0 ? sanitized : undefined;
   }
 
-  async send(opts: EmailSendOptions): Promise<Result<{ messageId: string }, TransientSesError>> {
+  private validateAccountId(accountId: string): Result<null, InvalidArgumentError> {
+    if (!accountId || accountId.trim().length === 0) {
+      return err({ kind: "invalid_argument", argument: "accountId", message: "accountId (SES TenantName) must not be empty — every send must target a tenant." });
+    }
+    return ok(null);
+  }
+
+  async send(opts: EmailSendOptions): Promise<Result<{ messageId: string }, EmailServiceError>> {
+    const validation = this.validateAccountId(opts.accountId);
+    if (validation.isErr()) return err(validation.error);
     const emailTags = this.sanitizeTags(opts.tags);
     try {
       const result = await this.sesv2.send(new SendEmailCommand({
@@ -83,7 +94,9 @@ export class EmailService {
     }
   }
 
-  async sendRaw(opts: EmailRawOptions): Promise<Result<{ messageId: string }, TransientSesError>> {
+  async sendRaw(opts: EmailRawOptions): Promise<Result<{ messageId: string }, EmailServiceError>> {
+    const validation = this.validateAccountId(opts.accountId);
+    if (validation.isErr()) return err(validation.error);
     const emailTags = this.sanitizeTags(opts.tags);
     try {
       const result = await this.sesv2.send(new SendEmailCommand({
@@ -107,6 +120,26 @@ export class EmailService {
     const errorName = error.name ?? "UnknownError";
     const errorMessage = error.message ?? "unknown";
     const httpStatus = error.$metadata?.httpStatusCode ?? 0;
+
+    const isTenantMissing = errorMessage.includes("Tenant") && errorMessage.includes("not found");
+    if (isTenantMissing) {
+      this.logger.error(
+        `SES tenant "${opts.accountId}" does not exist. `
+        + "Every SendEmailCommand includes TenantName (set to the accountId). For customer accounts, "
+        + "the tenant is created dynamically during domain registration (SesDomainIdentityService). "
+        + "For the SYSTEM account, the tenant must be provisioned in Terraform "
+        + "(aws_sesv2_tenant.system in deploy/email_routing.tf) with the platform domain identities "
+        + "and configuration set associated to it. Run tofu apply to create it.",
+        {
+          code: "email_service.tenant_missing",
+          errorName,
+          httpStatus,
+          tenantName: opts.accountId,
+          error: e,
+        },
+      );
+      return ok({ messageId: "" });
+    }
 
     const isPermanent =
       (errorName === "MessageRejected" && errorMessage.includes("Email address is not verified")) ||

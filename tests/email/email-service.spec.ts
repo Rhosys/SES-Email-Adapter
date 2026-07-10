@@ -141,6 +141,7 @@ describe("EmailService.send()", () => {
     expect(result.isErr()).toBe(true);
     const error = result._unsafeUnwrapErr();
     expect(error.kind).toBe("transient_ses_error");
+    if (error.kind !== "transient_ses_error") throw new Error("unexpected error kind");
     expect(error.httpStatus).toBe(0);
     expect(error.cause).toBe(networkError);
 

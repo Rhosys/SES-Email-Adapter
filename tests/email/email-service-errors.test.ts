@@ -44,6 +44,22 @@ describe("EmailService error classifications — REQ-0.6", () => {
     expect(errorCalls[0]!.context).toEqual(expect.objectContaining({ errorName: "ConfigurationSetSendingPausedException", httpStatus: 400, opts }));
   });
 
+  it("rejects empty accountId before calling SES", async () => {
+    const opts = { to: "u@e.com", subject: "S", textBody: "B", accountId: "" };
+    const result = await service.send(opts);
+    expect(result.isErr()).toBe(true);
+    expect(result._unsafeUnwrapErr()).toEqual({ kind: "invalid_argument", argument: "accountId", message: expect.stringContaining("must not be empty") });
+    expect(mockSend).not.toHaveBeenCalled();
+  });
+
+  it("rejects whitespace-only accountId before calling SES", async () => {
+    const opts = { to: "u@e.com", subject: "S", textBody: "B", accountId: "   " };
+    const result = await service.send(opts);
+    expect(result.isErr()).toBe(true);
+    expect(result._unsafeUnwrapErr()).toEqual({ kind: "invalid_argument", argument: "accountId", message: expect.stringContaining("must not be empty") });
+    expect(mockSend).not.toHaveBeenCalled();
+  });
+
   it("ConfigurationSetDoesNotExistException classified as permanent — returns ok with empty messageId", async () => {
     const sesError = Object.assign(new Error("Configuration set does not exist"), {
       name: "ConfigurationSetDoesNotExistException",

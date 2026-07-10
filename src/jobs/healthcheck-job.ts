@@ -74,7 +74,7 @@ export class HealthcheckJob {
       });
 
       if (result.isErr()) {
-        const cause = result.error.cause as { message?: string } | undefined;
+        const cause = result.error.kind === "transient_ses_error" ? result.error.cause as { message?: string } | undefined : undefined;
         this.deps.logger.error(
           `Healthcheck email send failed — SES returned error${cause?.message ? `: ${cause.message}` : ""}.`,
           {
