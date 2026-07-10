@@ -152,9 +152,12 @@ export class AccountDatabase {
         IndexName: "gsi1",
         KeyConditionExpression: "gsi1pk = :pk",
         ExpressionAttributeValues: { ":pk": `ALIAS#${domain}#${recipientAddress}` },
-        Limit: 1,
       }));
-      return ok(res.Items && res.Items.length > 0 ? (res.Items[0] as Alias) : null);
+      const items = res.Items ?? [];
+      if (items.length > 1) {
+        this.logger.error("Alias address is supposed to be globally unique but more than one record was found. Returning the first, but this indicates a data integrity bug.", { code: "account_database.alias_address_not_unique", recipientAddress, count: items.length });
+      }
+      return ok(items.length > 0 ? (items[0] as Alias) : null);
     } catch (e) {
       return err(dbError(e));
     }
