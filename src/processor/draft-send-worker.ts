@@ -1,6 +1,7 @@
 import { DateTime } from "luxon";
 import type { Signal } from "../types/index.js";
-import type { DbError, TransientSesError, Result } from "../errors.js";
+import type { DbError, Result } from "../errors.js";
+import type { EmailServiceError } from "../email/email-service.js";
 import { ok, err } from "../errors.js";
 import type { Logger } from "../logger.js";
 import type { ReplySender } from "./processor.js";
@@ -31,7 +32,7 @@ export class DraftSendWorker {
     this.logger = logger;
   }
 
-  async process(payload: DraftSendPayload): Promise<Result<void, DbError | TransientSesError>> {
+  async process(payload: DraftSendPayload): Promise<Result<void, DbError | EmailServiceError>> {
     const { signalId, accountId, threadId, sendInitiatedAt } = payload;
 
     // Re-read signal — verify still pending_send
