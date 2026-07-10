@@ -46,13 +46,17 @@ describe("EmailService error classifications — REQ-0.6", () => {
 
   it("rejects empty accountId before calling SES", async () => {
     const opts = { to: "u@e.com", subject: "S", textBody: "B", accountId: "" };
-    await expect(service.send(opts)).rejects.toThrow("accountId (SES TenantName) must not be empty");
+    const result = await service.send(opts);
+    expect(result.isErr()).toBe(true);
+    expect(result._unsafeUnwrapErr().errorName).toBe("MissingTenantName");
     expect(mockSend).not.toHaveBeenCalled();
   });
 
   it("rejects whitespace-only accountId before calling SES", async () => {
     const opts = { to: "u@e.com", subject: "S", textBody: "B", accountId: "   " };
-    await expect(service.send(opts)).rejects.toThrow("accountId (SES TenantName) must not be empty");
+    const result = await service.send(opts);
+    expect(result.isErr()).toBe(true);
+    expect(result._unsafeUnwrapErr().errorName).toBe("MissingTenantName");
     expect(mockSend).not.toHaveBeenCalled();
   });
 
