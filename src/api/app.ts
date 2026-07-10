@@ -245,7 +245,7 @@ export function createApp({ threadDb, accountDb, auditDb, auth, access, logger, 
   new TemplatesApi(accountDb, auditDb, astValidator, logger).register(app, helpers);
   new AuditApi(auditDb, logger).register(app, helpers);
   new AdminApi(jobDispatcher).register(app, helpers);
-  new UserApi(accountDb, logger).register(app, helpers);
+  new UserApi(accountDb, access, logger).register(app, helpers);
 
   // ---------------------------------------------------------------------------
   // Not Found & Method Not Allowed — must be registered after all routes

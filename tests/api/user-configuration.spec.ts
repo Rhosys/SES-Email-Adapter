@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { createApp } from "../../src/api/app.js";
 import { makeAppDeps } from "../helpers/app-deps.js";
 import { createMockLogger } from "../helpers/mock-logger.js";
-import { ok } from "neverthrow";
+import { ok, err } from "neverthrow";
 import { USER_CONFIGURATION_DEFAULTS } from "../../src/types/index.js";
 import type { IUserConfiguration } from "../../src/types/index.js";
 
@@ -12,10 +12,10 @@ function makeAuth(userId = TEST_USER_ID) {
   return { verify: vi.fn().mockResolvedValue(ok({ userId })) };
 }
 
-function makeAccess() {
+function makeAccess(overrides: { getUserProfile?: ReturnType<typeof vi.fn> } = {}) {
   return {
     listUsers: vi.fn().mockResolvedValue(ok([])),
-    getUserProfile: vi.fn().mockResolvedValue(ok({})),
+    getUserProfile: overrides.getUserProfile ?? vi.fn().mockResolvedValue(ok({})),
     listAccountsForUser: vi.fn().mockResolvedValue(ok([])),
     addUser: vi.fn().mockResolvedValue(ok(undefined)),
     updateUserRole: vi.fn().mockResolvedValue(ok(undefined)),
@@ -34,12 +34,13 @@ function makeAccountDb(config?: IUserConfiguration) {
   };
 }
 
-function buildApp(overrides: { accountDb?: ReturnType<typeof makeAccountDb>; auth?: ReturnType<typeof makeAuth> } = {}) {
+function buildApp(overrides: { accountDb?: ReturnType<typeof makeAccountDb>; auth?: ReturnType<typeof makeAuth>; access?: ReturnType<typeof makeAccess> } = {}) {
   const logger = createMockLogger();
   const accountDb = overrides.accountDb ?? makeAccountDb();
   const auth = overrides.auth ?? makeAuth();
-  const app = createApp(makeAppDeps({ accountDb: accountDb as never, auth, access: makeAccess() as never, logger }));
-  return { app, accountDb, auth };
+  const access = overrides.access ?? makeAccess();
+  const app = createApp(makeAppDeps({ accountDb: accountDb as never, auth, access: access as never, logger }));
+  return { app, accountDb, auth, access };
 }
 
 describe("User Configuration API", () => {
@@ -125,6 +126,52 @@ describe("User Configuration API", () => {
       });
       expect(res.status).toBe(200);
       expect(accountDb.updateUserConfiguration).toHaveBeenCalledWith(TEST_USER_ID, {});
+    });
+  });
+
+  describe("GET /users/:userId (top-level profile lookup)", () => {
+    it("returns name and picture for the target user", async () => {
+      const access = makeAccess({ getUserProfile: vi.fn().mockResolvedValue(ok({ name: "Ada Lovelace", email: "ada@example.com", picture: "https://example.com/ada.png" })) });
+      const { app } = buildApp({ access });
+      const res = await app.request("/users/other-user-id", { headers: { Authorization: "Bearer valid-token" } });
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body).toEqual({ name: "Ada Lovelace", picture: "https://example.com/ada.png" });
+      expect(access.getUserProfile).toHaveBeenCalledWith("other-user-id");
+    });
+
+    it("does not include email in the response", async () => {
+      const access = makeAccess({ getUserProfile: vi.fn().mockResolvedValue(ok({ name: "Ada Lovelace", email: "ada@example.com" })) });
+      const { app } = buildApp({ access });
+      const res = await app.request("/users/other-user-id", { headers: { Authorization: "Bearer valid-token" } });
+      const body = await res.json();
+      expect(body).not.toHaveProperty("email");
+    });
+
+    it("returns an empty object when the user has no profile data", async () => {
+      const { app } = buildApp();
+      const res = await app.request("/users/unknown-user-id", { headers: { Authorization: "Bearer valid-token" } });
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({});
+    });
+
+    it("allows any authenticated caller to look up a different user (no self-only or account-scoped restriction)", async () => {
+      const { app } = buildApp({ auth: makeAuth("requesting-user") });
+      const res = await app.request("/users/some-other-unrelated-user", { headers: { Authorization: "Bearer valid-token" } });
+      expect(res.status).toBe(200);
+    });
+
+    it("returns 401 without auth header", async () => {
+      const { app } = buildApp();
+      const res = await app.request("/users/other-user-id");
+      expect(res.status).toBe(401);
+    });
+
+    it("returns 503 when Authress is unavailable", async () => {
+      const access = makeAccess({ getUserProfile: vi.fn().mockResolvedValue(err({ message: "boom" })) });
+      const { app } = buildApp({ access });
+      const res = await app.request("/users/other-user-id", { headers: { Authorization: "Bearer valid-token" } });
+      expect(res.status).toBe(503);
     });
   });
 });
