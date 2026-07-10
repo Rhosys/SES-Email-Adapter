@@ -119,6 +119,26 @@ export class EmailService {
     const errorMessage = error.message ?? "unknown";
     const httpStatus = error.$metadata?.httpStatusCode ?? 0;
 
+    const isTenantMissing = errorMessage.includes("Tenant") && errorMessage.includes("not found");
+    if (isTenantMissing) {
+      this.logger.error(
+        `SES tenant "${opts.accountId}" does not exist. `
+        + "Every SendEmailCommand includes TenantName (set to the accountId). For customer accounts, "
+        + "the tenant is created dynamically during domain registration (SesDomainIdentityService). "
+        + "For the SYSTEM account, the tenant must be provisioned in Terraform "
+        + "(aws_sesv2_tenant.system in deploy/email_routing.tf) with the platform domain identities "
+        + "and configuration set associated to it. Run tofu apply to create it.",
+        {
+          code: "email_service.tenant_missing",
+          errorName,
+          httpStatus,
+          tenantName: opts.accountId,
+          error: e,
+        },
+      );
+      return ok({ messageId: "" });
+    }
+
     const isPermanent =
       (errorName === "MessageRejected" && errorMessage.includes("Email address is not verified")) ||
       errorName === "ConfigurationSetSendingPausedException" ||

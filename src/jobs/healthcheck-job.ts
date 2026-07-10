@@ -75,34 +75,14 @@ export class HealthcheckJob {
 
       if (result.isErr()) {
         const cause = result.error.cause as { message?: string } | undefined;
-        const causeMsg = cause?.message ?? "";
-        const isTenantMissing = causeMsg.includes("Tenant") && causeMsg.includes("not found");
-
-        if (isTenantMissing) {
-          this.deps.logger.error(
-            `Healthcheck email send failed — SES tenant "${SYSTEM_ACCOUNT_ID}" does not exist. `
-            + "Every SendEmailCommand includes TenantName (set to the accountId). For customer accounts, "
-            + "the tenant is created dynamically during domain registration (SesDomainIdentityService). "
-            + "For the SYSTEM account, the tenant must be provisioned in Terraform "
-            + "(aws_sesv2_tenant.system in deploy/email_routing.tf) with the platform domain identities "
-            + "and configuration set associated to it. Run tofu apply to create it.",
-            {
-              code: "healthcheck.tenant_missing",
-              messageId,
-              tenantName: SYSTEM_ACCOUNT_ID,
-              error: result.error,
-            },
-          );
-        } else {
-          this.deps.logger.error(
-            `Healthcheck email send failed — SES returned error${causeMsg ? `: ${causeMsg}` : ""}.`,
-            {
-              code: "healthcheck.send_failed",
-              messageId,
-              error: result.error,
-            },
-          );
-        }
+        this.deps.logger.error(
+          `Healthcheck email send failed — SES returned error${cause?.message ? `: ${cause.message}` : ""}.`,
+          {
+            code: "healthcheck.send_failed",
+            messageId,
+            error: result.error,
+          },
+        );
         return;
       }
 
