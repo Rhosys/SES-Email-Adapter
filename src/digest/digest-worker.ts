@@ -8,7 +8,8 @@
 import { DateTime } from "luxon"
 
 import { ok, err } from "../errors.js"
-import type { DbError, Result, TransientSesError } from "../errors.js"
+import type { DbError, Result } from "../errors.js"
+import type { EmailServiceError } from "../email/email-service.js"
 import type { Logger } from "../logger.js"
 import type { EmailService } from "../email/email-service.js"
 import type { Thread, Account, ForwardingTarget } from "../types/index.js"
@@ -59,7 +60,7 @@ export class DigestWorker {
     this.deps = deps
   }
 
-  async process(message: IDigestSendMessage, today: DateTime = DateTime.utc()): Promise<Result<void, DbError | TransientSesError>> {
+  async process(message: IDigestSendMessage, today: DateTime = DateTime.utc()): Promise<Result<void, DbError | EmailServiceError>> {
     const { accountDb, threadDb, signalDb, emailService, logger } = this.deps
     const { accountId } = message
 

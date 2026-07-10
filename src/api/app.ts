@@ -34,6 +34,7 @@ import { AliasesApi } from "./aliasesApi.js";
 import { TemplatesApi } from "./templatesApi.js";
 import { AuditApi } from "./auditApi.js";
 import { AdminApi } from "./adminApi.js";
+import type { HealthCheckValidatorPort } from "./adminApi.js";
 import { ThreadsApi } from "./threadsApi.js";
 import { SignalsApi } from "./signalsApi.js";
 import { UserApi } from "./userApi.js";
@@ -75,6 +76,7 @@ export interface AppDeps {
   logger: Logger;
   forwardingService: IForwardingService;
   jobDispatcher: JobDispatcher;
+  healthCheckValidator: HealthCheckValidatorPort;
   signalReprocessor: SignalReprocessor;
   draftSendDispatcher: DraftSendDispatcher;
   accountCreationStarter: { start(accountId: string, email: string): Promise<void> };
@@ -94,7 +96,7 @@ export interface AppDeps {
   threadMatcher: ThreadMatcher;
 }
 
-export function createApp({ threadDb, accountDb, auditDb, auth, access, logger, forwardingService, jobDispatcher, signalReprocessor, draftSendDispatcher, accountCreationStarter, appBaseUrl, contentCdnBaseUrl, astValidator, billingHandler, emailService, domainIdentityService, rsvpComposer, postApprovalCalendarDeps, schedulerClient, s3Client, emailBucket, triggerDigest, embeddingGenerator, threadMatcher }: AppDeps) {
+export function createApp({ threadDb, accountDb, auditDb, auth, access, logger, forwardingService, jobDispatcher, healthCheckValidator, signalReprocessor, draftSendDispatcher, accountCreationStarter, appBaseUrl, contentCdnBaseUrl, astValidator, billingHandler, emailService, domainIdentityService, rsvpComposer, postApprovalCalendarDeps, schedulerClient, s3Client, emailBucket, triggerDigest, embeddingGenerator, threadMatcher }: AppDeps) {
   type AppEnv = { Variables: { auth: AuthContext; authorizationVerified?: boolean; [ROUTE_NOT_FOUND_KEY]?: boolean } };
   const app = new OpenAPIHono<AppEnv>();
 
@@ -244,7 +246,7 @@ export function createApp({ threadDb, accountDb, auditDb, auth, access, logger, 
   new AliasesApi(accountDb, auditDb, logger, forwardingService).register(app, helpers);
   new TemplatesApi(accountDb, auditDb, astValidator, logger).register(app, helpers);
   new AuditApi(auditDb, logger).register(app, helpers);
-  new AdminApi(jobDispatcher).register(app, helpers);
+  new AdminApi(jobDispatcher, healthCheckValidator).register(app, helpers);
   new UserApi(accountDb, access, logger).register(app, helpers);
 
   // ---------------------------------------------------------------------------

@@ -5,7 +5,8 @@ import type { Logger } from "../logger.js";
 import type { Result } from "neverthrow";
 import type { IForwardingService } from "../forwarding/forwarding-service.js";
 import { ok, err, dbError, processorError, invalidResponseError, notFoundError } from "../errors.js";
-import type { DbError, InvalidResponseError, NotFoundError, ProcessorError, TransientSesError } from "../errors.js";
+import type { DbError, InvalidResponseError, NotFoundError, ProcessorError } from "../errors.js";
+import type { EmailServiceError } from "../email/email-service.js";
 import type { Signal, Thread, Rule, Workflow, WorkflowData, Alias, AliasSender, SenderPolicy, AccountFilteringConfig, SignalSource, SignalStatus, Domain, ThreadStatus, ThreadUrgency, UnknownSenderPolicy, MatchedRuleResult, InvalidRuleFunctionData, InvalidTemplateFunctionData, AutoSendBlockedData, UnsubscribeInfo, InboundEmailSignalData, OutboundEmailSignalData } from "../types/index.js";
 import { DEFAULT_UNKNOWN_SENDER_POLICY } from "../types/index.js";
 import type { ParsedMime } from "./mime.js";
@@ -88,7 +89,7 @@ export interface ReplySender {
     accountId?: string;
     signalId?: string;
     threadId?: string;
-  }): Promise<Result<{ messageId: string }, TransientSesError>>;
+  }): Promise<Result<{ messageId: string }, EmailServiceError>>;
 }
 
 export type SesVerdict = "PASS" | "FAIL" | "GRAY" | "PROCESSING_FAILED";
@@ -811,6 +812,20 @@ export class SignalProcessor {
     const billingPlan: BillingPlan = account?.billingPlan ?? "Paid";
     const onboardingCompleted = account?.onboarding?.completed ?? false;
 
+    // Alias invariant: any accepted inbound email is addressed to a real address on a registered
+    // domain, so its alias record must exist regardless of the disposition (active / quarantine /
+    // block). aliasConfig (resolved at the top of the pipeline) is null exactly when no alias
+    // exists yet, so create it only then — cheaply, with no extra read. This is what makes an
+    // unknown-sender quarantine appear in the alias list.
+    if (!aliasConfig) {
+      const defaultPolicy = filtering?.defaultUnknownSenderPolicy ?? DEFAULT_UNKNOWN_SENDER_POLICY;
+      const ensureResult = await this.accountDb.ensureAlias(accountId, recipientAddress, defaultPolicy, null);
+      if (ensureResult.isErr()) return err(ensureResult.error);
+      if (ensureResult.value.created) {
+        await this.accountDb.incrementStatMetric(accountId, "totalAliases", 1, sesMessageId + ".alias");
+      }
+    }
+
     // Resolve retention and generate pre-signed URLs for the content sanitizer
     // (S3 lifecycle tagging for extracted content is independent of account/DDB retention config)
     const retentionDuration = resolveRetention({}, null);
@@ -1248,7 +1263,10 @@ export class SignalProcessor {
     if (outcome.quarantine && !outcome.approveSender) {
       const quarantineStatus = outcome.quarantineHidden ? "quarantine_hidden" : "quarantine_visible";
       const quarantineBase = buildSignal({ status: quarantineStatus, ...buildArgs }, this.logger);
-      const quarantinedSignal: Signal = { ...quarantineBase, data: { ...quarantineBase.data, matchedRules } };
+      // Persist the thread the matcher resolved so approving this quarantined signal reattaches
+      // to it instead of creating a duplicate. Only record an existing thread — a fresh shell is
+      // not persisted here, so the approval path creates the thread itself when there is no match.
+      const quarantinedSignal: Signal = { ...quarantineBase, data: { ...quarantineBase.data, matchedRules, ...(isMatchedThread ? { matchedThreadId: thread.id } : {}) } };
       const saveResult = await this.threadDb.saveSignal(quarantinedSignal);
       if (saveResult.isErr()) return err(saveResult.error);
       this.logger.info("Quarantined email — rule or sender filter matched.", { code: "processor.quarantine", accountId, threadId: thread.id, signalId: quarantinedSignal.id, status: quarantineStatus, matchedRules: matchedRules.map(r => r.ruleId) });
@@ -1266,9 +1284,10 @@ export class SignalProcessor {
       return ok(undefined);
     }
 
-    // Auto-approve: sender gets added to approvedSenders when approve_sender fires, allow_all mode, or brand-new address with auto-allow policy
+    // Auto-approve: record the sender allow when approve_sender fires or allow_all mode is active.
+    // The alias itself is guaranteed to exist by the invariant near the top of the pipeline.
     if (outcome.approveSender || effectiveFilterMode === "allow_all") {
-      const approveResult = await this.autoApprove(accountId, recipientAddress, senderETLD1, aliasConfig, filtering?.defaultUnknownSenderPolicy, idempotencyKey);
+      const approveResult = await this.accountDb.saveSender(accountId, recipientAddress, senderETLD1, "allow");
       if (approveResult.isErr()) return err(approveResult.error);
     }
 
@@ -1705,27 +1724,49 @@ export class SignalProcessor {
     const freshResult = await this.threadDb.getSignalByMessageId(accountId, sesMessageId);
     if (freshResult.isErr()) return err(processorError(freshResult.error));
     if (!freshResult.value) return err(processorError("Signal not found after reprocess"));
+
+    // If reprocessing moved the signal off its original thread (to a new thread, or to the
+    // quarantine/block partition where it no longer carries a threadId), the original thread's
+    // lastSignalAt may now point at a signal it no longer holds. Recompute it from the remaining
+    // signals; if none remain, fall back to the Unix epoch (lastSignalAt is part of the GSI1 sort
+    // key and cannot be null). Best-effort — never fail the reprocess on a recency-repair error.
+    if (freshResult.value.threadId !== threadId) {
+      await this.repairThreadRecency(accountId, threadId);
+    }
+
     return ok(freshResult.value);
   }
 
-  private async autoApprove(
-    accountId: string,
-    address: string,
-    senderETLD1: string,
-    existing: Alias | null,
-    defaultUnknownSenderPolicy: AccountFilteringConfig["defaultUnknownSenderPolicy"] = DEFAULT_UNKNOWN_SENDER_POLICY,
-    idempotencyKey: string,
-  ): Promise<Result<void, DbError>> {
-    // Only create the alias when we don't already have it. A known alias (`existing`
-    // non-null, resolved at the top of the pipeline) needs no write.
-    if (!existing) {
-      const aliasResult = await this.accountDb.ensureAlias(accountId, address, defaultUnknownSenderPolicy, null);
-      if (aliasResult.isErr()) return err(aliasResult.error);
-      await this.accountDb.incrementStatMetric(accountId, "totalAliases", 1, idempotencyKey + ".alias");
+  /** Recompute a thread's lastSignalAt from its remaining signals (epoch if it has none left). */
+  private async repairThreadRecency(accountId: string, threadId: string): Promise<void> {
+    const EPOCH = new Date(0).toISOString(); // 1970-01-01T00:00:00.000Z
+    const threadResult = await this.threadDb.getThread(accountId, threadId);
+    if (threadResult.isErr() || !threadResult.value) {
+      if (threadResult.isErr()) this.logger.warn("Could not load thread to repair recency after reprocess.", { code: "processor.reprocess.recency_thread_lookup_failed", accountId, threadId, error: threadResult.error });
+      return;
     }
-    const senderResult = await this.accountDb.saveSender(accountId, address, senderETLD1, "allow");
-    if (senderResult.isErr()) return err(senderResult.error);
-    return ok(undefined);
+    const thread = threadResult.value;
+
+    // Signals are ordered newest-first (gsi1sk = time-sortable UUIDv7 id); take the max
+    // receivedAt over a page to stay correct even if a reprocessed signal carries a backdated one.
+    const signalsResult = await this.threadDb.listSignals(accountId, threadId, { limit: 50 });
+    if (signalsResult.isErr()) {
+      this.logger.warn("Could not list signals to repair thread recency after reprocess.", { code: "processor.reprocess.recency_list_failed", accountId, threadId, error: signalsResult.error });
+      return;
+    }
+    const newLastSignalAt = signalsResult.value.items.reduce<string>((max, s) => {
+      const t = s.data.receivedAt ?? s.createdAt;
+      return t > max ? t : max;
+    }, "") || EPOCH;
+
+    if (newLastSignalAt === thread.lastSignalAt) return;
+
+    const updateResult = await this.threadDb.updateThread(accountId, threadId, thread.status, newLastSignalAt, {});
+    if (updateResult.isErr()) {
+      this.logger.warn("Could not update thread recency after reprocess.", { code: "processor.reprocess.recency_update_failed", accountId, threadId, newLastSignalAt, error: updateResult.error });
+      return;
+    }
+    this.logger.info("Repaired thread recency after reprocess moved a signal off it.", { code: "processor.reprocess.recency_repaired", accountId, threadId, newLastSignalAt, emptied: signalsResult.value.items.length === 0 });
   }
 
   private async annotateTemplateError(accountId: string, templateId: string, functionName: string, error: { message: string; errorType: string } | null): Promise<void> {

@@ -803,7 +803,7 @@ describe("SignalProcessor", () => {
       processor = new SignalProcessor({ ...SHARED_NEW_DEPS, threadDb, accountDb, processingDb, contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", classifier, embeddingGenerator, auroraWriter, threadMatcher, ruleEvaluator, notifier, logger: mockLogger, forwardingService: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), sendVerification: vi.fn().mockResolvedValue(ok(undefined)), verifyWebhook: vi.fn().mockResolvedValue(ok(undefined)) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue(ok({ messageId: "reply-msg-id" })) }, sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never, calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud" } });
     });
 
-    it("quarantines signal on brand new address when account filtering was never configured, and does not auto-create the alias", async () => {
+    it("quarantines signal on brand new address when account filtering was never configured, and creates the alias (ingest invariant)", async () => {
       // No alias and no account-level filtering config saved (filtering: null in DEFAULT_CTX) — the
       // platform default (quarantine_visible) must apply rather than silently falling through to allow_all.
       applyCtx(accountDb, { ...DEFAULT_CTX, aliasConfig: null }, { once: true });
@@ -813,11 +813,25 @@ describe("SignalProcessor", () => {
 
       expect(threadDb.saveSignal).toHaveBeenCalledOnce();
       expect(threadDb.saveThread).not.toHaveBeenCalled();
-      expect(accountDb.saveAlias).not.toHaveBeenCalled();
+      // The address is real, so its alias must exist even though the signal is quarantined; but no
+      // sender disposition is recorded (the sender is unknown/pending until the user acts).
+      expect(accountDb.ensureAlias).toHaveBeenCalledWith("acct-001", "user@example.com", "quarantine_visible", null);
+      expect(accountDb.incrementStatMetric).toHaveBeenCalledWith("acct-001", "totalAliases", 1, expect.stringContaining(".alias"));
       expect(accountDb.saveSender).not.toHaveBeenCalled();
 
       const saved = vi.mocked(threadDb.saveSignal).mock.calls[0]![0] as Signal;
       expect(saved.status).toBe("quarantine_visible");
+    });
+
+    it("does not create the alias when it already exists (known recipient)", async () => {
+      applyCtx(accountDb, { ...DEFAULT_CTX, aliasConfig: makeAlias() }, { once: true });
+      vi.mocked(accountDb.getSender).mockReturnValueOnce(Promise.resolve(ok(null)));
+
+      await processor.processRecord(makeMessage(), 1);
+
+      // aliasConfig present → the invariant skips the write entirely.
+      expect(accountDb.ensureAlias).not.toHaveBeenCalled();
+      expect(accountDb.incrementStatMetric).not.toHaveBeenCalledWith("acct-001", "totalAliases", 1, expect.anything());
     });
 
     it("allows signal from a known sender (eTLD+1 in approved list)", async () => {
@@ -1500,6 +1514,61 @@ describe("SignalProcessor", () => {
       const mismatchLog = mockLogger.calls.find(c => c.context?.code === "processor.account_id_mismatch");
       expect(mismatchLog).toBeDefined();
       expect(mismatchLog!.context).toMatchObject({ derivedAccountId: TEST_ACCOUNT_ID, expectedAccountId: "acct-someone-else" });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Reprocess — original thread recency repair when a signal moves off it
+  // -------------------------------------------------------------------------
+  describe("reprocess thread recency repair", () => {
+    const OLD_THREAD = "thr-old";
+    // Signal returned by getSignalByMessageId after reprocess — reassigned to a new thread.
+    const reassignedSignal = {
+      id: "sgn-reprocess", signalLookupId: "ses-msg-reprocess", accountId: TEST_ACCOUNT_ID, threadId: "thr-new",
+      status: "active", source: "email", type: "email", labels: [], createdAt: "2024-01-15T10:00:00Z",
+      data: { sesMessageId: "msg-reprocess", s3Key: "emails/msg-reprocess", recipientAddress: "user@example.com", receivedAt: "2024-01-15T10:00:00Z" },
+    };
+
+    beforeEach(() => {
+      (threadDb as unknown as { getSignalById: ReturnType<typeof vi.fn> }).getSignalById =
+        vi.fn().mockReturnValue(Promise.resolve(ok(reassignedSignal)));
+      (threadDb as unknown as { getSignalByMessageId: ReturnType<typeof vi.fn> }).getSignalByMessageId =
+        vi.fn().mockReturnValue(Promise.resolve(ok(reassignedSignal)));
+      vi.mocked(accountDb.getAliasByGlobalAddress).mockReturnValue(Promise.resolve(ok(DEFAULT_EMAIL_CONFIG)));
+      vi.mocked(threadDb.getThread).mockReturnValue(Promise.resolve(ok({ id: OLD_THREAD, accountId: TEST_ACCOUNT_ID, status: "active", lastSignalAt: "2024-05-01T00:00:00Z" } as never)));
+    });
+
+    it("recomputes the old thread's lastSignalAt from its newest remaining signal", async () => {
+      vi.mocked(threadDb.listSignals).mockReturnValue(Promise.resolve(ok({ items: [
+        { data: { receivedAt: "2024-02-01T00:00:00Z" } },
+        { data: { receivedAt: "2024-04-10T00:00:00Z" } },
+        { data: { receivedAt: "2024-03-01T00:00:00Z" } },
+      ] } as never)));
+
+      const result = await processor.reprocessSignal(TEST_ACCOUNT_ID, "sgn-reprocess", OLD_THREAD);
+
+      expect(result.isOk()).toBe(true);
+      expect(threadDb.updateThread).toHaveBeenCalledWith(TEST_ACCOUNT_ID, OLD_THREAD, "active", "2024-04-10T00:00:00Z", {});
+    });
+
+    it("sets the old thread's lastSignalAt to the Unix epoch when no signals remain", async () => {
+      vi.mocked(threadDb.listSignals).mockReturnValue(Promise.resolve(ok({ items: [] } as never)));
+
+      const result = await processor.reprocessSignal(TEST_ACCOUNT_ID, "sgn-reprocess", OLD_THREAD);
+
+      expect(result.isOk()).toBe(true);
+      expect(threadDb.updateThread).toHaveBeenCalledWith(TEST_ACCOUNT_ID, OLD_THREAD, "active", "1970-01-01T00:00:00.000Z", {});
+    });
+
+    it("does not touch the old thread when the signal stays on it", async () => {
+      const sameThreadSignal = { ...reassignedSignal, threadId: OLD_THREAD };
+      (threadDb as unknown as { getSignalByMessageId: ReturnType<typeof vi.fn> }).getSignalByMessageId =
+        vi.fn().mockReturnValue(Promise.resolve(ok(sameThreadSignal)));
+
+      const result = await processor.reprocessSignal(TEST_ACCOUNT_ID, "sgn-reprocess", OLD_THREAD);
+
+      expect(result.isOk()).toBe(true);
+      expect(threadDb.updateThread).not.toHaveBeenCalled();
     });
   });
 

@@ -6,7 +6,7 @@ import type { ProcessingDatabase } from "../src/database/processing-database.js"
 import type { AccountDatabase } from "../src/database/account-database.js";
 import type { SesFeedback, Signal } from "../src/types/index.js";
 import { createMockLogger } from "./helpers/mock-logger.js";
-import { TAG_ACCOUNT_ID, TAG_TYPE, TAG_SIGNAL_ID, TAG_THREAD_ID } from "../src/email/ses-tags.js";
+import { TAG_ACCOUNT_ID, TAG_TYPE, TAG_SIGNAL_ID, TAG_THREAD_ID, TAG_HEALTHCHECK_ID } from "../src/email/ses-tags.js";
 
 function makeSentSignal(overrides: { data?: Partial<Signal["data"]> } & Partial<Omit<Signal, "data">> = {}): Signal {
   const { data: dataOverrides, ...baseOverrides } = overrides;
@@ -300,5 +300,53 @@ describe("FeedbackProcessor — prefixed tag reading", () => {
     expect(result.isOk()).toBe(true);
     expect(signalStore.getSignalById).not.toHaveBeenCalled();
     expect(signalStore.getSignalByMessageId).toHaveBeenCalledWith("acct-001", "ses-msg-abc");
+  });
+});
+
+describe("FeedbackProcessor — origin/process logging", () => {
+  let logger: ReturnType<typeof createMockLogger>;
+  let processor: FeedbackProcessor;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    logger = createMockLogger();
+    processor = new FeedbackProcessor(makeProcessingDb(), makeAccountDb(), logger, makeSignalStore());
+  });
+
+  it("logs a healthcheck bounce at error level with the healthcheck process + id", async () => {
+    await processor.processNotification(makeBounceFeedback({
+      mail: { messageId: "ses-hc", source: "s", tags: { [TAG_HEALTHCHECK_ID]: "healthcheck-2026-07-08", purpose: "healthcheck" } },
+    }));
+
+    const log = logger.calls.find(c => (c.context as Record<string, unknown>)?.code === "feedback.system_bounce");
+    expect(log).toBeDefined();
+    expect(log!.method).toBe("error");
+    const ctx = log!.context as Record<string, unknown>;
+    expect(ctx.process).toBe("healthcheck");
+    expect(ctx.healthcheckId).toBe("healthcheck-2026-07-08");
+  });
+
+  it("logs a non-system (forward) bounce at track level with the forward process", async () => {
+    await processor.processNotification(makeBounceFeedback({
+      mail: { messageId: "ses-fwd", source: "s", tags: { [TAG_TYPE]: "forward", [TAG_ACCOUNT_ID]: "acct-001" } },
+    }));
+
+    const log = logger.calls.find(c => (c.context as Record<string, unknown>)?.code === "feedback.bounce");
+    expect(log).toBeDefined();
+    expect(log!.method).toBe("track");
+    expect((log!.context as Record<string, unknown>).process).toBe("forward");
+  });
+
+  it("logs a healthcheck complaint at error level", async () => {
+    await processor.processNotification({
+      notificationType: "Complaint",
+      complaint: { complainedRecipients: [{ emailAddress: "x@y.com" }], timestamp: "2024-06-01T00:00:00.000Z" },
+      mail: { messageId: "ses-hc-c", source: "s", tags: { [TAG_HEALTHCHECK_ID]: "healthcheck-2026-07-08" } },
+    } as SesFeedback);
+
+    const log = logger.calls.find(c => (c.context as Record<string, unknown>)?.code === "feedback.system_complaint");
+    expect(log).toBeDefined();
+    expect(log!.method).toBe("error");
+    expect((log!.context as Record<string, unknown>).process).toBe("healthcheck");
   });
 });

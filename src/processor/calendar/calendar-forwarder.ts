@@ -6,7 +6,8 @@
 
 import type { EmailService } from "../../email/email-service.js";
 import type { Signal, CalendarEventData } from "../../types/index.js";
-import type { DbError, TransientSesError, Result } from "../../errors.js";
+import type { DbError, Result } from "../../errors.js";
+import type { EmailServiceError } from "../../email/email-service.js";
 import { ok, err, dbError } from "../../errors.js";
 import type { Logger } from "../../logger.js";
 import { buildProxyUid } from "./proxy-uid.js";
@@ -41,7 +42,7 @@ export async function forwardCalendarInvite(
   opts: ForwardCalendarInviteOpts,
   deps: CalendarForwarderDeps,
   logger: Logger,
-): Promise<Result<void, DbError | TransientSesError>> {
+): Promise<Result<void, DbError | EmailServiceError>> {
   const { calendarSignal, calendarForwardingAddress, accountId, threadId } = opts;
   const { emailService, serviceDomain } = deps;
   const calendarData = calendarSignal.data;

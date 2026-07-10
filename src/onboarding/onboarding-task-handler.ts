@@ -2,7 +2,8 @@ import { ok, err } from "neverthrow";
 import { DateTime } from "luxon";
 import { randomUUID } from "node:crypto";
 import type { Result } from "neverthrow";
-import type { DbError, TransientSesError } from "../errors.js";
+import type { DbError } from "../errors.js";
+import type { EmailServiceError } from "../email/email-service.js";
 import type { Logger } from "../logger.js";
 import type { EmailService } from "../email/email-service.js";
 import type { Account, AccountOnboarding, Domain, ForwardingTarget } from "../types/index.js";
@@ -51,13 +52,13 @@ export class OnboardingTaskHandler {
     private readonly emailService: EmailService,
   ) {}
 
-  async handleFollowup(accountId: string, email: string): Promise<Result<void, DbError | TransientSesError>> {
+  async handleFollowup(accountId: string, email: string): Promise<Result<void, DbError | EmailServiceError>> {
     // Auto-create verified forwarding target for the user's email (idempotent)
     await this.ensureDefaultForwardingTarget(accountId, email);
     return this.handleProgressTask(accountId, email, "onboarding.followup");
   }
 
-  async handleCleanup(accountId: string, email: string): Promise<Result<void, DbError | TransientSesError>> {
+  async handleCleanup(accountId: string, email: string): Promise<Result<void, DbError | EmailServiceError>> {
     return this.handleProgressTask(accountId, email, "onboarding.cleanup");
   }
 
@@ -143,7 +144,7 @@ export class OnboardingTaskHandler {
   // Shared progress-check logic for followup and cleanup
   // ---------------------------------------------------------------------------
 
-  private async handleProgressTask(accountId: string, email: string, code: string): Promise<Result<void, DbError | TransientSesError>> {
+  private async handleProgressTask(accountId: string, email: string, code: string): Promise<Result<void, DbError | EmailServiceError>> {
     // 1. Read account
     const accountResult = await this.accountDb.getAccount(accountId);
     if (accountResult.isErr()) {

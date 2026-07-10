@@ -515,21 +515,13 @@ describe("API", () => {
       expect(threadDb.updateSignalStatus).toHaveBeenCalledWith(TEST_ACCOUNT_ID, s.signalLookupId, "block_hidden");
     });
 
-    it("creates the alias when denying a quarantined signal for a brand-new address", async () => {
+    it("records the block disposition (not the alias) when denying a quarantined signal", async () => {
+      // The alias is created as an ingest invariant, so the handler only records the sender decision.
       const s = makeSignal({ status: "quarantine_visible" });
       vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(s));
-      vi.mocked(accountDb.getAlias).mockResolvedValueOnce(ok(null));
       const res = await req(app, "POST", `${A}/signals/SES%23msg-001/quarantineResponse`, { body: { status: "block_hidden" } });
       expect(res.status).toBe(200);
-      expect(accountDb.saveAlias).toHaveBeenCalledWith(expect.objectContaining({ accountId: TEST_ACCOUNT_ID, aliasAddress: s.data.recipientAddress }));
-    });
-
-    it("does not recreate the alias when denying a quarantined signal for a known address", async () => {
-      const s = makeSignal({ status: "quarantine_visible" });
-      vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(s));
-      vi.mocked(accountDb.getAlias).mockResolvedValueOnce(ok(makeAlias({ aliasAddress: s.data.recipientAddress })));
-      const res = await req(app, "POST", `${A}/signals/SES%23msg-001/quarantineResponse`, { body: { status: "block_hidden" } });
-      expect(res.status).toBe(200);
+      expect(accountDb.saveSender).toHaveBeenCalledWith(TEST_ACCOUNT_ID, s.data.recipientAddress, expect.any(String), "block_hidden");
       expect(accountDb.saveAlias).not.toHaveBeenCalled();
     });
 
@@ -546,15 +538,15 @@ describe("API", () => {
       expect(threadDb.unblockSignal).toHaveBeenCalledWith(TEST_ACCOUNT_ID, s.signalLookupId, expect.any(String));
     });
 
-    it("creates the alias when approving a quarantined signal for a brand-new address", async () => {
+    it("records the sender allow (not the alias) when approving a quarantined signal", async () => {
+      // The alias is created as an ingest invariant, so the handler only records the sender decision.
       const s = makeSignal({ status: "quarantine_visible" });
       vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(s));
       vi.mocked(threadDb.findThreadByGroupingKey).mockResolvedValueOnce(ok(null));
-      vi.mocked(accountDb.getAlias).mockResolvedValueOnce(ok(null));
       const res = await req(app, "POST", `${A}/signals/SES%23msg-001/quarantineResponse`, { body: { status: "active" } });
       expect(res.status).toBe(200);
-      expect(accountDb.saveAlias).toHaveBeenCalledWith(expect.objectContaining({ accountId: TEST_ACCOUNT_ID, aliasAddress: s.data.recipientAddress }));
       expect(accountDb.saveSender).toHaveBeenCalledWith(TEST_ACCOUNT_ID, s.data.recipientAddress, expect.any(String), "allow");
+      expect(accountDb.saveAlias).not.toHaveBeenCalled();
     });
 
     it("does not recreate the alias when approving a quarantined signal for a known address", async () => {
@@ -1877,6 +1869,52 @@ describe("API", () => {
       vi.mocked(access.checkAccess).mockRejectedValueOnce(Object.assign(new Error("Forbidden"), { status: 403 }));
       const res = await req(app, "POST", "/reindex", { body: { targetRegistryId: "primary" } });
       expect(res.status).toBe(403);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // POST /healthcheck/validate (admin)
+  // -------------------------------------------------------------------------
+
+  describe("GET /healthcheck", () => {
+    it("returns 403 when user lacks management:write permission", async () => {
+      vi.mocked(access.checkAccess).mockRejectedValueOnce(Object.assign(new Error("Forbidden"), { status: 403 }));
+      const res = await req(app, "GET", "/healthcheck");
+      expect(res.status).toBe(403);
+    });
+
+    it("returns 200 with the validation status and per-check list", async () => {
+      const validateLatest = vi.fn().mockResolvedValue({
+        status: "fail",
+        checkedDate: "2026-07-08",
+        checkedAt: "2026-07-09T00:00:00.000Z",
+        rawChecks: { hasThreadId: true, workflowIsHealthcheck: true, hasEmbedding: false },
+        checks: [
+          { id: "thread-created", label: "Healthcheck thread created", status: "pass" },
+          { id: "workflow-classified", label: "Classified as healthcheck workflow", status: "pass" },
+          { id: "embedding-indexed", label: "Embedding indexed for search", status: "fail", detail: "No embedding found." },
+        ],
+      });
+      const hcApp = createApp(makeAppDeps({
+        threadDb: threadDb as unknown as ThreadDatabase,
+        accountDb: accountDb as unknown as AccountDatabase,
+        auditDb: auditDb as unknown as AuditDatabase,
+        auth,
+        access,
+        logger: createMockLogger(),
+        healthCheckValidator: { validateLatest } as never,
+      }));
+
+      const res = await req(hcApp, "GET", "/healthcheck");
+      expect(res.status).toBe(200);
+      const json = await res.json() as { status: string; checkedDate: string; checks: { id: string; status: string }[] };
+      expect(json.status).toBe("fail");
+      expect(json.checkedDate).toBe("2026-07-08");
+      expect(json.checks).toHaveLength(3);
+      expect(json.checks.find(c => c.id === "embedding-indexed")?.status).toBe("fail");
+      // rawChecks is an internal field and must not leak in the API response
+      expect((json as Record<string, unknown>).rawChecks).toBeUndefined();
+      expect(validateLatest).toHaveBeenCalledOnce();
     });
   });
 });
