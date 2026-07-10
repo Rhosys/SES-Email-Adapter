@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { DateTime } from "luxon";
 import { createMockLogger } from "../helpers/mock-logger.js";
 import { ok } from "../../src/errors.js";
+import { SYSTEM_ACCOUNT_ID } from "../../src/database/system-account-db.js";
 
 vi.mock("../../src/email/template-renderer.js", () => ({
   renderTemplate: vi.fn().mockResolvedValue("<html>mock</html>"),
@@ -68,6 +69,24 @@ describe("Property 2: Deterministic per-day healthcheck identity", () => {
 
       vi.restoreAllMocks();
     });
+  });
+
+  it("sends with accountId = SYSTEM_ACCOUNT_ID (maps to SES TenantName)", async () => {
+    const sendSpy = vi.fn().mockResolvedValue(ok({ messageId: "ses-msg-id" }));
+    const deps = createMockDeps({ emailService: { send: sendSpy } as unknown as HealthcheckJobDeps["emailService"] });
+    const job = new HealthcheckJob(deps);
+
+    const fakeNow = DateTime.fromISO("2025-07-07T12:00:00.000Z", { zone: "utc" });
+    vi.spyOn(DateTime, "utc").mockReturnValue(fakeNow as unknown as DateTime<true>);
+
+    await job.run();
+
+    expect(sendSpy).toHaveBeenCalledOnce();
+    const sendArgs = sendSpy.mock.calls[0]![0] as { accountId: string };
+    expect(sendArgs.accountId).toBe(SYSTEM_ACCOUNT_ID);
+    expect(sendArgs.accountId).toBe("SYSTEM");
+
+    vi.restoreAllMocks();
   });
 
   describe("same date produces identical subject regardless of time of day", () => {
