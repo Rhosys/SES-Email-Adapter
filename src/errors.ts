@@ -11,6 +11,7 @@ export type BedrockError = { kind: "bedrock_error"; message: string; modelId: st
 export type AuthError = { kind: "auth_error"; message: string; cause: Error };
 export type ProcessorError = { kind: "processor_error"; message: string; cause: Error };
 export type TransientSesError = { kind: "transient_ses_error"; errorName: string; httpStatus: number; cause: unknown };
+export type InvalidArgumentError = { kind: "invalid_argument"; argument: string; message: string };
 
 export type ReindexSegmentProcessingError = { kind: "reindex_segment_processing_error"; segment: number; failureCount: number; failures: Array<{ signalId: string; cause: unknown }> };
 
@@ -45,6 +46,7 @@ export const processorError = (cause: unknown): ProcessorError => {
   return { kind: "processor_error", message: error.message, cause: error };
 };
 export const reindexSegmentProcessingError = (segment: number, failures: Array<{ signalId: string; cause: unknown }>): ReindexSegmentProcessingError => ({ kind: "reindex_segment_processing_error", segment, failureCount: failures.length, failures });
+export const invalidArgumentError = (argument: string, message: string): InvalidArgumentError => ({ kind: "invalid_argument", argument, message });
 
 // Re-export neverthrow primitives for convenience
 export { ok, err };

@@ -4,8 +4,8 @@
 
 import { buildReplyIcs } from "./ics-builder.js";
 import { ok, err } from "../../errors.js";
-import type { TransientSesError, Result } from "../../errors.js";
-import type { EmailService } from "../../email/email-service.js";
+import type { Result } from "../../errors.js";
+import type { EmailService, EmailServiceError } from "../../email/email-service.js";
 import type { CalendarEventData } from "../../types/calendar.js";
 
 export interface RsvpComposeOpts {
@@ -36,7 +36,7 @@ const PARTSTAT_MAP = {
 export async function sendRsvp(
   opts: RsvpComposeOpts,
   deps: { emailService: EmailService },
-): Promise<Result<{ messageId: string }, TransientSesError>> {
+): Promise<Result<{ messageId: string }, EmailServiceError>> {
   const { decision, originalCalendarData, aliasAddress, organizerAddress, fromAddress } = opts;
 
   const icsContent = buildReplyIcs({

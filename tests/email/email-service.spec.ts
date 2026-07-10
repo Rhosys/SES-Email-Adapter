@@ -141,6 +141,7 @@ describe("EmailService.send()", () => {
     expect(result.isErr()).toBe(true);
     const error = result._unsafeUnwrapErr();
     expect(error.kind).toBe("transient_ses_error");
+    if (error.kind !== "transient_ses_error") throw new Error("unexpected error kind");
     expect(error.httpStatus).toBe(0);
     expect(error.cause).toBe(networkError);
 
@@ -194,6 +195,34 @@ describe("EmailService.send()", () => {
       { Name: "In-Reply-To", Value: "<original-msg-id@example.com>" },
       { Name: "References", Value: "<ref-1@example.com>" },
     ]);
+  });
+
+  it("sanitizes SES message tags — strips invalid chars, truncates, drops empties", async () => {
+    mockSend.mockResolvedValueOnce({ MessageId: "ses-tag-001" });
+
+    await service.send({
+      to: "user@example.com",
+      subject: "Tagged",
+      textBody: "Body",
+      accountId: "acct-test",
+      tags: [
+        // '@' and '.' are invalid in tag values and get stripped
+        { Name: "X-Numaeel-Healthcheck-Id", Value: "healthcheck-2026-07-08@platform.email.rhosys.cloud" },
+        { Name: "purpose", Value: "healthcheck" },
+        // sanitizes to a non-empty name but an empty value → dropped entirely
+        { Name: "Bad Name!", Value: "@@@" },
+        // over-long value is truncated to 255 chars
+        { Name: "Long", Value: "x".repeat(300) },
+      ],
+    });
+
+    const command = mockSend.mock.calls[0]![0] as SendEmailCommand;
+    const tags = command.input.EmailTags!;
+    expect(tags).toContainEqual({ Name: "X-Numaeel-Healthcheck-Id", Value: "healthcheck-2026-07-08platformemailrhosyscloud" });
+    expect(tags).toContainEqual({ Name: "purpose", Value: "healthcheck" });
+    expect(tags.find(t => t.Name === "BadName")).toBeUndefined();
+    expect(tags.find(t => t.Name === "Long")!.Value).toHaveLength(255);
+    expect(tags).toHaveLength(3);
   });
 });
 

@@ -262,3 +262,35 @@ resource "aws_sesv2_tenant_resource_association" "platform_config_set" {
   tenant_name  = aws_sesv2_tenant.platform.tenant_name
   resource_arn = aws_sesv2_configuration_set.sending.arn
 }
+
+# ---------------------------------------------------------------------------
+# SES Tenant — SYSTEM. The healthcheck and other system-generated emails
+# send with TenantName = "SYSTEM" (SYSTEM_ACCOUNT_ID). Without a matching
+# tenant, SES rejects the send. Associate the same platform identities and
+# configuration set so system mail routes correctly.
+# ---------------------------------------------------------------------------
+
+resource "aws_sesv2_tenant" "system" {
+  tenant_name = "SYSTEM"
+
+  tags = { Name = var.service_name }
+}
+
+resource "aws_sesv2_tenant_resource_association" "system_identity_main" {
+  tenant_name  = aws_sesv2_tenant.system.tenant_name
+  resource_arn = aws_sesv2_email_identity.main.arn
+
+  depends_on = [aws_sesv2_email_identity.main]
+}
+
+resource "aws_sesv2_tenant_resource_association" "system_identity_subdomain" {
+  tenant_name  = aws_sesv2_tenant.system.tenant_name
+  resource_arn = aws_sesv2_email_identity.platform.arn
+
+  depends_on = [aws_sesv2_email_identity.platform]
+}
+
+resource "aws_sesv2_tenant_resource_association" "system_config_set" {
+  tenant_name  = aws_sesv2_tenant.system.tenant_name
+  resource_arn = aws_sesv2_configuration_set.sending.arn
+}

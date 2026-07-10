@@ -2,9 +2,10 @@ import { DateTime } from "luxon";
 import type { Logger } from "../logger.js";
 import type { ThreadDatabase } from "../database/thread-database.js";
 import type { EmailService } from "../email/email-service.js";
-import { buildSignalGsi3pk } from "../processor/message-id.js";
 import { SYSTEM_ACCOUNT_ID } from "../database/system-account-db.js";
 import { renderTemplate } from "../email/template-renderer.js";
+import { HealthcheckValidator, type ValidationChecks } from "./healthcheck-validator.js";
+import { TAG_HEALTHCHECK_ID } from "../email/ses-tags.js";
 
 export interface HealthcheckJobDeps {
   threadDb: ThreadDatabase;
@@ -14,109 +15,30 @@ export interface HealthcheckJobDeps {
   logger: Logger;
 }
 
-interface ValidationChecks {
-  hasThreadId: boolean;
-  workflowIsHealthcheck: boolean;
-  hasEmbedding: boolean;
-}
-
 export class HealthcheckJob {
   private lastValidationResults: ValidationChecks | null = null;
+  private readonly validator: HealthcheckValidator;
 
-  constructor(private readonly deps: HealthcheckJobDeps) {}
+  constructor(private readonly deps: HealthcheckJobDeps) {
+    this.validator = new HealthcheckValidator({
+      threadDb: deps.threadDb,
+      searchDatabase: deps.searchDatabase,
+      logger: deps.logger,
+    });
+  }
 
   async run(): Promise<void> {
     const now = DateTime.utc();
     const today = now.toFormat("yyyy-MM-dd");
     const yesterday = now.minus({ days: 1 }).toFormat("yyyy-MM-dd");
 
-    await this.validate(yesterday);
+    const validation = await this.validator.validate(yesterday);
+    this.lastValidationResults = validation.rawChecks;
     await this.send(today);
   }
 
   private buildMessageId(date: string): string {
     return `healthcheck-${date}@${this.deps.mailDomain}`;
-  }
-
-  private async validate(date: string): Promise<void> {
-    const expectedMessageId = this.buildMessageId(date);
-    const gsi3pk = buildSignalGsi3pk(SYSTEM_ACCOUNT_ID, expectedMessageId);
-
-    let signal: { threadId?: string; id: string; signalLookupId: string; accountId: string; status: string; source: string; type: string } | null;
-    try {
-      const result = await this.deps.threadDb.findSignalByEmailMessageId(gsi3pk);
-      if (result.isErr()) {
-        this.deps.logger.track("Healthcheck validation query failed — DynamoDB error.", {
-          code: "healthcheck.validation_error",
-          messageId: expectedMessageId,
-          error: result.error,
-        });
-        this.lastValidationResults = null;
-        return;
-      }
-      signal = result.value;
-    } catch (e) {
-      this.deps.logger.track("Healthcheck validation threw unexpected error.", {
-        code: "healthcheck.validation_error",
-        messageId: expectedMessageId,
-        error: e,
-      });
-      this.lastValidationResults = null;
-      return;
-    }
-
-    if (!signal) {
-      this.deps.logger.track("Yesterday's healthcheck signal not found in signals table.", {
-        code: "healthcheck.signal_not_found",
-        messageId: expectedMessageId,
-      });
-      this.lastValidationResults = null;
-      return;
-    }
-
-    const checks: ValidationChecks = {
-      hasThreadId: Boolean(signal.threadId && signal.threadId.length > 0),
-      workflowIsHealthcheck: false,
-      hasEmbedding: false,
-    };
-
-    // GSI3 returns full item (ALL projection) — workflow lives in data.workflow
-    const fullSignal = signal as unknown as { data?: { workflow?: string } };
-    const workflow = fullSignal.data?.workflow;
-    checks.workflowIsHealthcheck = workflow === "healthcheck";
-
-    // Embedding existence check
-    if (signal.threadId) {
-      try {
-        checks.hasEmbedding = await this.deps.searchDatabase.hasEmbedding(signal.threadId);
-      } catch (e) {
-        this.deps.logger.track("Aurora connectivity/timeout error during embedding existence check.", {
-          code: "healthcheck.embedding_check_error",
-          messageId: expectedMessageId,
-          threadId: signal.threadId,
-          error: e,
-        });
-        checks.hasEmbedding = false;
-      }
-    }
-
-    this.lastValidationResults = checks;
-
-    const allPassed = checks.hasThreadId && checks.workflowIsHealthcheck && checks.hasEmbedding;
-    if (allPassed) {
-      this.deps.logger.track("Healthcheck validation passed — yesterday's email fully processed.", {
-        code: "healthcheck.validation_passed",
-        messageId: expectedMessageId,
-        checks,
-      });
-    } else {
-      this.deps.logger.track("Healthcheck validation failed — one or more checks did not pass.", {
-        code: "healthcheck.validation_failed",
-        messageId: expectedMessageId,
-        checks,
-        signalState: { id: signal.id, threadId: signal.threadId, workflow },
-      });
-    }
   }
 
   private async send(today: string): Promise<void> {
@@ -140,17 +62,27 @@ export class HealthcheckJob {
         subject,
         textBody: text,
         htmlBody: html,
-        headers: [{ Name: "Message-ID", Value: `<${messageId}>` }],
-        tags: [{ Name: "purpose", Value: "healthcheck" }],
+        // `purpose` groups healthcheck sends; the healthcheck-id tag lets us
+        // correlate a bounce/complaint back to a specific day's send (SES echoes
+        // message tags in feedback notifications). Tag values must be
+        // [A-Za-z0-9_-], so we use the id without the `@domain` suffix.
+        tags: [
+          { Name: "purpose", Value: "healthcheck" },
+          { Name: TAG_HEALTHCHECK_ID, Value: `healthcheck-${today}` },
+        ],
         accountId: SYSTEM_ACCOUNT_ID,
       });
 
       if (result.isErr()) {
-        this.deps.logger.track("Healthcheck email send failed — SES returned error.", {
-          code: "healthcheck.send_failed",
-          messageId,
-          error: result.error,
-        });
+        const cause = result.error.kind === "transient_ses_error" ? result.error.cause as { message?: string } | undefined : undefined;
+        this.deps.logger.error(
+          `Healthcheck email send failed — SES returned error${cause?.message ? `: ${cause.message}` : ""}.`,
+          {
+            code: "healthcheck.send_failed",
+            messageId,
+            error: result.error,
+          },
+        );
         return;
       }
 
@@ -160,11 +92,15 @@ export class HealthcheckJob {
         sesMessageId: result.value.messageId,
       });
     } catch (e) {
-      this.deps.logger.track("Healthcheck send phase threw unexpected error.", {
-        code: "healthcheck.send_error",
-        messageId,
-        error: e,
-      });
+      const causeMessage = (e as { message?: string } | undefined)?.message;
+      this.deps.logger.error(
+        `Healthcheck send phase threw unexpected error${causeMessage ? `: ${causeMessage}` : ""}.`,
+        {
+          code: "healthcheck.send_error",
+          messageId,
+          error: e,
+        },
+      );
     }
   }
 }

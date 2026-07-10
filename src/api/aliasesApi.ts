@@ -2,11 +2,7 @@ import { z } from "@hono/zod-openapi";
 import type { OpenAPIHono } from "@hono/zod-openapi";
 import { DateTime } from "luxon";
 import { randomUUID } from "crypto";
-import { ok as neverthrowOk, err as neverthrowErr } from "neverthrow";
-import type { Result } from "neverthrow";
-import type { DbError } from "../errors.js";
 import type { ForwardingTarget } from "../types/index.js";
-import { DEFAULT_UNKNOWN_SENDER_POLICY } from "../types/index.js";
 import { zParse } from "./validate.js";
 import { toApiAlias, toApiAliasSender, toApiForwardingTarget } from "./transform.js";
 import { CreateAliasRequest, UpdateAliasRequest, CreateSenderRequest, UpdateSenderRequest, CreateForwardingTargetRequest, VerifyForwardingTargetRequest } from "./requests.js";
@@ -21,25 +17,6 @@ import type { AuditDatabase } from "../database/audit-database.js";
 import type { Logger } from "../logger.js";
 import type { AppEnv, RouteHelpers } from "./route-helpers.js";
 import type { IForwardingService } from "../forwarding/forwarding-service.js";
-
-// Mirrors processor.ts's autoApprove — a sender disposition recorded for an address
-// implies that address is a recognised alias, so the Alias record must exist alongside it.
-export async function ensureAliasExists(accountDb: AccountDatabase, accountId: string, address: string, idempotencyKey: string): Promise<Result<void, DbError>> {
-  const filteringResult = await accountDb.getAccountFilteringConfig(accountId);
-  if (filteringResult.isErr()) return neverthrowErr(filteringResult.error);
-  const defaultUnknownSenderPolicy = filteringResult.value?.defaultUnknownSenderPolicy ?? DEFAULT_UNKNOWN_SENDER_POLICY;
-
-  const existingResult = await accountDb.getAlias(accountId, address);
-  if (existingResult.isErr()) return neverthrowErr(existingResult.error);
-  const existed = existingResult.value !== null;
-
-  const aliasResult = await accountDb.ensureAlias(accountId, address, defaultUnknownSenderPolicy, existingResult.value);
-  if (aliasResult.isErr()) return neverthrowErr(aliasResult.error);
-  if (!existed) {
-    await accountDb.incrementStatMetric(accountId, "totalAliases", 1, idempotencyKey);
-  }
-  return neverthrowOk(undefined);
-}
 
 export class AliasesApi {
   constructor(

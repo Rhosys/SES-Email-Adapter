@@ -6,6 +6,8 @@ export const TAG_TYPE = `${TAG_PREFIX}Type`;
 export const TAG_ACCOUNT_ID = `${TAG_PREFIX}AccountId`;
 export const TAG_SIGNAL_ID = `${TAG_PREFIX}SignalId`;
 export const TAG_THREAD_ID = `${TAG_PREFIX}ThreadId`;
+/** Correlates a daily healthcheck email with any SES bounce/complaint we later receive for it. */
+export const TAG_HEALTHCHECK_ID = `${TAG_PREFIX}Healthcheck-Id`;
 
 
 
