@@ -220,7 +220,7 @@ describe("DeviceNotifier wiring: processor invokes notifier with urgency", () =>
     vi.clearAllMocks();
     mockLogger = createMockLogger();
     notifier = makeNotifier();
-    processor = new SignalProcessor({
+    processor = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never,
       ...makeSharedNewDeps(),
       ...makeStore(),
       contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
@@ -344,7 +344,7 @@ describe("DeviceNotifier wiring: handler instantiates with correct dependencies"
     // At runtime, we verify the processor uses the notifier by checking
     // that processSideEffect calls it.
     const notifier = makeNotifier();
-    const processor = new SignalProcessor({
+    const processor = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never,
       ...makeSharedNewDeps(),
       ...makeStore(),
       contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",

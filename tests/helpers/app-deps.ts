@@ -6,6 +6,7 @@ import type { AppDeps } from "../../src/api/app.js";
 export function makeAppDeps(overrides: Partial<AppDeps>): AppDeps {
   return {
     threadDb: {} as never,
+    resourceDb: {} as never,
     accountDb: {} as never,
     auditDb: {} as never,
     auth: {} as never,

@@ -33,6 +33,8 @@ const EXPECTED_ROUTES = [
   "GET /accounts/{accountId}/signals",
   "POST /accounts/{accountId}/signals/{id}/quarantineResponse",
   "GET /accounts/{accountId}/threads",
+  "GET /accounts/{accountId}/resources",
+  "GET /accounts/{accountId}/resources/{resourceId}",
   "GET /accounts/{accountId}/threads/{threadId}",
   "PATCH /accounts/{accountId}/threads/{threadId}",
   "GET /accounts/{accountId}/threads/{threadId}/signals",

@@ -177,7 +177,7 @@ function buildProcessor(opts: {
   const accountDb = makeAccountDbMock(TEST_ACCOUNT_ID);
   applyCtx(accountDb, DEFAULT_CTX);
 
-  return new SignalProcessor({ ...makeSharedNewDeps(),
+  return new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
     threadDb: threadDb ?? makeThreadDbMock(),
     accountDb,
     processingDb: makeProcessingDbMock(),

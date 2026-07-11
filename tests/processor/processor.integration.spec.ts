@@ -271,6 +271,7 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
   let replySender: ReplySender;
   let mockLogger: MockLogger;
   let processor: SignalProcessor;
+  let resourceDb: { saveResource: ReturnType<typeof vi.fn> };
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -286,7 +287,8 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
     notifier = makeNotifier();
     forwardingService = makeForwarder();
     replySender = makeReplySender();
-    processor = new SignalProcessor({ ...makeSharedNewDeps(),
+    resourceDb = { saveResource: vi.fn().mockResolvedValue(ok({ status: "active" })) };
+    processor = new SignalProcessor({ resourceDb: resourceDb as never, ...makeSharedNewDeps(),
       threadDb, accountDb, processingDb,
       contentSanitizer, s3Client: { send: vi.fn().mockResolvedValue({ Body: { transformToByteArray: () => Promise.resolve(new Uint8Array([1, 2, 3])) } }) } as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
       classifier,
@@ -553,6 +555,75 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
       expect(embeddingGenerator.generateForModel).not.toHaveBeenCalled();
       expect(threadDb.getSignalByMessageId).not.toHaveBeenCalled();
       expect(auroraWriter.upsertEmbedding).not.toHaveBeenCalled();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Resource upsert — post-signal-save hook (processor.ts, right after saveSignal)
+  // -------------------------------------------------------------------------
+
+  describe("resource upsert", () => {
+    it("saves a resource for a package-workflow signal with a date + orderNumber", async () => {
+      vi.mocked(classifier.classify).mockResolvedValue(ok({
+        workflow: "package",
+        workflowData: {
+          workflow: "package",
+          packageType: "shipping",
+          retailer: "Amazon",
+          orderNumber: "123-456-789",
+          estimatedDelivery: "2024-01-20T00:00:00Z",
+        },
+        tags: [],
+        summary: "Your package is on its way.",
+        labels: [],
+      }));
+
+      const message = makeMessage({});
+      const result = await processor.processRecord(message, 1);
+
+      expect(result.isOk()).toBe(true);
+      expect(resourceDb.saveResource).toHaveBeenCalledOnce();
+      const call = resourceDb.saveResource.mock.calls[0]![0];
+      expect(call).toMatchObject({
+        workflow: "package",
+        resourceKey: "123-456-789",
+        expectedResolutionDate: "2024-01-20T00:00:00Z",
+        terminal: false,
+      });
+
+      // Resource save happens after the signal save, not before.
+      const signalOrder = vi.mocked(threadDb.saveSignal).mock.invocationCallOrder[0]!;
+      const resourceOrder = resourceDb.saveResource.mock.invocationCallOrder[0]!;
+      expect(resourceOrder).toBeGreaterThan(signalOrder);
+    });
+
+    it("marks the resource terminal for a delivered package", async () => {
+      vi.mocked(classifier.classify).mockResolvedValue(ok({
+        workflow: "package",
+        workflowData: {
+          workflow: "package",
+          packageType: "delivered",
+          retailer: "Amazon",
+          orderNumber: "123-456-789",
+          estimatedDelivery: "2024-01-20T00:00:00Z",
+        },
+        tags: [],
+        summary: "Your package was delivered.",
+        labels: [],
+      }));
+
+      await processor.processRecord(makeMessage({}), 1);
+
+      expect(resourceDb.saveResource).toHaveBeenCalledOnce();
+      expect(resourceDb.saveResource.mock.calls[0]![0]).toMatchObject({ terminal: true });
+    });
+
+    it("does not save a resource for a workflow with no forward-looking date (conversation)", async () => {
+      // Default classifier mock already returns "conversation".
+      await processor.processRecord(makeMessage({}), 1);
+
+      expect(threadDb.saveSignal).toHaveBeenCalled();
+      expect(resourceDb.saveResource).not.toHaveBeenCalled();
     });
   });
 });

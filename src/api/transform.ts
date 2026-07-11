@@ -4,6 +4,7 @@
  */
 import type {
   Thread as DbThread,
+  Resource as DbResource,
   Signal as DbSignal,
   AnySignal,
   EmailSignalData,
@@ -43,6 +44,42 @@ export function toApiThread(thread: DbThread): Api.Thread {
     senderAddress: thread.senderAddress ?? "",
     recipientAddress: thread.recipientAddress ?? "",
     subject: thread.subject ?? "",
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Resource
+// ---------------------------------------------------------------------------
+
+// Public resource id is an opaque token encoding threadId + the item's own sk
+// (workflow#resourceKey), so a direct-by-id lookup needs no secondary index —
+// decode the id, reconstruct the DDB primary key, GetItem.
+export function encodeResourceId(threadId: string, sk: string): string {
+  return `res-${Buffer.from(`${threadId}:${sk}`).toString("base64url")}`;
+}
+
+export function decodeResourceId(resourceId: string): { threadId: string; sk: string } | null {
+  if (!resourceId.startsWith("res-")) return null;
+  try {
+    const decoded = Buffer.from(resourceId.slice(4), "base64url").toString("utf-8");
+    const sepIndex = decoded.indexOf(":");
+    if (sepIndex === -1) return null;
+    return { threadId: decoded.slice(0, sepIndex), sk: decoded.slice(sepIndex + 1) };
+  } catch {
+    return null;
+  }
+}
+
+export function toApiResource(resource: DbResource): Api.Resource {
+  return {
+    resourceId: encodeResourceId(resource.threadId, `${resource.workflow}#${resource.resourceKey}`),
+    threadId: resource.threadId,
+    workflow: resource.workflow as Api.Resource["workflow"],
+    status: resource.status as Api.Resource["status"],
+    expectedResolutionDate: resource.expectedResolutionDate,
+    ...(resource.resolvedAt ? { resolvedAt: resource.resolvedAt } : {}),
+    createdAt: resource.createdAt,
+    updatedAt: resource.updatedAt,
   };
 }
 
