@@ -526,13 +526,17 @@ async function processSqsRecord(
 
   const notification = inner as { notificationType?: string; mail?: { messageId: string; timestamp: string; destination: string[] }; receipt?: { dkimVerdict: { status: SesVerdict }; dmarcVerdict: { status: SesVerdict }; action: { objectKey: string } } };
 
-  if (notification.notificationType === "Bounce" || notification.notificationType === "Complaint") {
+  if (notification.notificationType === "Bounce" || notification.notificationType === "Complaint" || notification.notificationType === "Delivery") {
     await feedbackProcessor.processNotification(notification);
     return ok(undefined);
   }
 
-  const mail = notification.mail!;
-  const receipt = notification.receipt!;
+  const mail = notification.mail;
+  const receipt = notification.receipt;
+  if (!mail || !receipt?.action) {
+    logger.error("Unrecognised SNS notification — missing mail/receipt fields. Dropping message.", { code: "handler.sqs.unrecognised_notification", messageId, notificationType: notification.notificationType });
+    return ok(undefined);
+  }
 
   // The owning account is resolved inside the processor from the recipient address —
   // the handler is a thin SQS/SNS unwrapper and does no DB work here.
