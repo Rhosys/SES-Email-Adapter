@@ -137,7 +137,7 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
 }
 
 function makeProcessor(opts: { store: ReturnType<typeof makeStore>; logger: MockLogger; forwardingService?: IForwardingService }): SignalProcessor {
-  return new SignalProcessor({ ...makeSharedNewDeps(),
+  return new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
     ...opts.store,
     contentSanitizer: { invoke: vi.fn() } as unknown as ContentSanitizerClient,
     classifier: { classify: vi.fn() } as unknown as Pick<SignalClassifier, "classify">,
@@ -182,7 +182,7 @@ describe("processSideEffect — forward dispatches to ForwardingService", () => 
     const forwarder = { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), sendVerification: vi.fn().mockResolvedValue(ok(undefined)), verifyWebhook: vi.fn().mockResolvedValue(ok(undefined)) };
     const notifier = { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) };
 
-    const processor = new SignalProcessor({ ...makeSharedNewDeps(),
+    const processor = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
       ...store,
       contentSanitizer: { invoke: vi.fn() } as unknown as ContentSanitizerClient,
       classifier: { classify: vi.fn() } as unknown as Pick<SignalClassifier, "classify">,

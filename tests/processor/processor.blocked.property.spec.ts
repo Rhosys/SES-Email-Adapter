@@ -217,7 +217,7 @@ describe("Blocked/quarantined signals never trigger saveArc", () => {
     (accountDb.getSender as ReturnType<typeof vi.fn>).mockReturnValue(Promise.resolve(ok(strategy.aliasSenderConfig)));
     (accountDb.listEnabledRules as ReturnType<typeof vi.fn>).mockReturnValue(Promise.resolve(ok(strategy.rules)));
 
-    const processor = new SignalProcessor({ ...makeSharedNewDeps(),
+    const processor = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
       threadDb,
       accountDb,
       processingDb,

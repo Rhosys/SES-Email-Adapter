@@ -50,6 +50,8 @@ resource "aws_iam_role_policy" "lambda_permissions" {
           "${aws_dynamodb_table.processing.arn}/index/*",
           aws_dynamodb_table.audit.arn,
           "${aws_dynamodb_table.audit.arn}/index/*",
+          aws_dynamodb_table.resources.arn,
+          "${aws_dynamodb_table.resources.arn}/index/*",
         ]
       },
       {
@@ -241,6 +243,7 @@ resource "aws_lambda_function" "main" {
       SIGNALS_TABLE            = aws_dynamodb_table.signals.name
       PROCESSING_TABLE         = aws_dynamodb_table.processing.name
       AUDIT_TABLE              = aws_dynamodb_table.audit.name
+      RESOURCES_TABLE          = aws_dynamodb_table.resources.name
       EMAIL_BUCKET             = aws_s3_bucket.emails.bucket
       AURORA_CLUSTER_ARN       = aws_rds_cluster.aurora["aurora-prod-titan-v2"].arn
       AURORA_SECRET_ARN        = aws_rds_cluster.aurora["aurora-prod-titan-v2"].master_user_secret[0].secret_arn

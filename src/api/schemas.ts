@@ -7,9 +7,11 @@ import { z } from "@hono/zod-openapi";
 export const Workflow = z.enum([
   "auth", "conversation", "crm", "package", "travel", "payments", "alert",
   "content", "onboarding", "notice", "healthcare", "job", "support", "test",
+  "events",
 ]);
 
 export const ThreadStatus = z.enum(["active", "archived", "deleted", "report_violation"]);
+export const ResourceStatus = z.enum(["active", "complete"]);
 export const ThreadUrgency = z.enum(["critical", "high", "normal", "low", "silent"]);
 
 export const SignalStatus = z.enum([
@@ -498,6 +500,21 @@ export const Thread = z.object({
 }).openapi("Thread");
 
 // ---------------------------------------------------------------------------
+// Resource
+// ---------------------------------------------------------------------------
+
+export const Resource = z.object({
+  resourceId: z.string().readonly(),
+  threadId: z.string().readonly(),
+  workflow: Workflow,
+  status: ResourceStatus,
+  expectedResolutionDate: z.string(),
+  resolvedAt: z.string().optional().readonly(),
+  createdAt: z.string().readonly(),
+  updatedAt: z.string().readonly(),
+}).openapi("Resource");
+
+// ---------------------------------------------------------------------------
 // Domain
 // ---------------------------------------------------------------------------
 
@@ -680,6 +697,7 @@ export const ForwardingTarget = z.object({
 // ---------------------------------------------------------------------------
 
 export const ListThreadsResponse = z.object({ threads: z.array(Thread), pagination: Pagination });
+export const ListResourcesResponse = z.object({ resources: z.array(Resource), pagination: Pagination });
 export const ListSignalsResponse = z.object({ signals: z.array(Signal), pagination: Pagination });
 export const ListViewsResponse = z.object({ views: z.array(View) });
 export const ListLabelsResponse = z.object({ labels: z.array(Label) });
@@ -721,6 +739,8 @@ export type WorkflowData = z.infer<typeof WorkflowData>;
 export type InboundEmailSignalData = z.infer<typeof InboundEmailSignalData>;
 export type OutboundEmailSignalData = z.infer<typeof OutboundEmailSignalData>;
 export type Thread = z.infer<typeof Thread>;
+export type ResourceStatus = z.infer<typeof ResourceStatus>;
+export type Resource = z.infer<typeof Resource>;
 export type Signal = z.infer<typeof Signal>;
 export type DraftSignal = z.infer<typeof DraftSignal>;
 export type Domain = z.infer<typeof Domain>;

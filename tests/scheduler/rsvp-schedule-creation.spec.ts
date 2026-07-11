@@ -162,7 +162,7 @@ function buildProcessor(opts: {
     billingPlan: "Paid" as const,
   });
 
-  return new SignalProcessor({
+  return new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never,
     ...makeSharedNewDeps(),
     threadDb,
     accountDb,

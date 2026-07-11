@@ -3,6 +3,7 @@ import type { Context } from "hono";
 import type { S3Client } from "@aws-sdk/client-s3";
 import type { AuditDatabase } from "../database/audit-database.js";
 import type { ThreadDatabase } from "../database/thread-database.js";
+import type { ResourceDatabase } from "../database/resource-database.js";
 import type { AccountDatabase } from "../database/account-database.js";
 import type { Logger } from "../logger.js";
 import type { UserCodeExecutorClient } from "../processor/user-code-client.js";
@@ -36,6 +37,7 @@ import { AuditApi } from "./auditApi.js";
 import { AdminApi } from "./adminApi.js";
 import type { HealthCheckValidatorPort } from "./adminApi.js";
 import { ThreadsApi } from "./threadsApi.js";
+import { ResourcesApi } from "./resourcesApi.js";
 import { SignalsApi } from "./signalsApi.js";
 import { UserApi } from "./userApi.js";
 
@@ -69,6 +71,7 @@ export interface AuthService {
 
 export interface AppDeps {
   threadDb: ThreadDatabase;
+  resourceDb: ResourceDatabase;
   accountDb: AccountDatabase;
   auditDb: AuditDatabase;
   auth: AuthService;
@@ -96,7 +99,7 @@ export interface AppDeps {
   threadMatcher: ThreadMatcher;
 }
 
-export function createApp({ threadDb, accountDb, auditDb, auth, access, logger, forwardingService, jobDispatcher, healthCheckValidator, signalReprocessor, draftSendDispatcher, accountCreationStarter, appBaseUrl, contentCdnBaseUrl, astValidator, billingHandler, emailService, domainIdentityService, rsvpComposer, postApprovalCalendarDeps, schedulerClient, s3Client, emailBucket, triggerDigest, embeddingGenerator, threadMatcher }: AppDeps) {
+export function createApp({ threadDb, resourceDb, accountDb, auditDb, auth, access, logger, forwardingService, jobDispatcher, healthCheckValidator, signalReprocessor, draftSendDispatcher, accountCreationStarter, appBaseUrl, contentCdnBaseUrl, astValidator, billingHandler, emailService, domainIdentityService, rsvpComposer, postApprovalCalendarDeps, schedulerClient, s3Client, emailBucket, triggerDigest, embeddingGenerator, threadMatcher }: AppDeps) {
   type AppEnv = { Variables: { auth: AuthContext; authorizationVerified?: boolean; [ROUTE_NOT_FOUND_KEY]?: boolean } };
   const app = new OpenAPIHono<AppEnv>();
 
@@ -238,6 +241,7 @@ export function createApp({ threadDb, accountDb, auditDb, auth, access, logger, 
   // -------------------------------------------------------------------------
   new AccountsApi(accountDb, access, logger, accountCreationStarter, emailService, appBaseUrl, triggerDigest).register(app, helpers);
   new ThreadsApi(threadDb, accountDb, logger, draftSendDispatcher, schedulerClient, emailService, rsvpComposer, postApprovalCalendarDeps, signalReprocessor, s3Client, emailBucket, contentCdnBaseUrl, embeddingGenerator, threadMatcher).register(app, helpers);
+  new ResourcesApi(resourceDb, logger).register(app, helpers);
   new SignalsApi(threadDb, accountDb, logger, postApprovalCalendarDeps, contentCdnBaseUrl).register(app, helpers);
   new ViewsApi(accountDb, logger).register(app, helpers);
   new LabelsApi(accountDb, logger).register(app, helpers);

@@ -207,7 +207,7 @@ describe("Feature: split-embedding-pipeline, Property 3: Secondary failures are 
       generateForSecondaryClusters: vi.fn().mockResolvedValue(secondaryResults),
     };
 
-    const processor = new SignalProcessor({ ...makeSharedNewDeps(),
+    const processor = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
       ...makeStore(),
       contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
       classifier: { classify: vi.fn().mockResolvedValue(ok({ ...CLASSIFICATION })) },

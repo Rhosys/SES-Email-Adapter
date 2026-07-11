@@ -118,7 +118,7 @@ function makeProcessor(opts: {
   logger: MockLogger;
 }): SignalProcessor {
   const { store, userCodeExecutor, logger } = opts;
-  return new SignalProcessor({ ...makeSharedNewDeps(),
+  return new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
     ...store,
     userCodeExecutor,
     contentSanitizer: { invoke: vi.fn() } as unknown as ContentSanitizerClient,
