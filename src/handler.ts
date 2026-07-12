@@ -4,7 +4,7 @@ import { S3Client } from "@aws-sdk/client-s3";
 import { LambdaClient } from "@aws-sdk/client-lambda";
 import { SFNClient } from "@aws-sdk/client-sfn";
 import { SQSClient, SendMessageCommand } from "@aws-sdk/client-sqs";
-import { SQS_MESSAGE_TYPES, SES_EVENT_TYPES, resolveSesEventType } from "./types/index.js";
+import { SQS_MESSAGE_TYPES } from "./types/index.js";
 import type { Signal } from "./types/index.js";
 import { ok, err } from "./errors.js";
 import type { Result, DbError } from "./errors.js";
@@ -33,7 +33,7 @@ import { FcmDeliverer } from "./notifier/fcm-deliverer.js";
 import { HttpFcmClient } from "./notifier/fcm-client.js";
 import { ReplySenderService } from "./notifier/reply-sender.js";
 import { DynamoDeviceStore } from "./notifier/device-store.js";
-import { FeedbackProcessor } from "./notifier/feedback-processor.js";
+import { SesFeedbackProcessor } from "./notifier/ses-feedback-processor.js";
 import { DomainHealthJob } from "./jobs/domain-health-job.js";
 import { HealthcheckJob } from "./jobs/healthcheck-job.js";
 import { HealthcheckValidator } from "./jobs/healthcheck-validator.js";
@@ -188,7 +188,7 @@ const processor = new SignalProcessor({
   contentBucket: CONTENT_BUCKET,
 });
 
-const feedbackProcessor = new FeedbackProcessor(processingDb, accountDb, logger, threadDb);
+const sesFeedbackProcessor = new SesFeedbackProcessor(processingDb, accountDb, logger, threadDb);
 
 const reindexWorker = new ReindexWorker(logger);
 
@@ -515,7 +515,12 @@ async function processSqsRecord(
     return digestWorker.process(message);
   }
 
-  // SNS envelope — unwrap and route by eventType/notificationType
+  // SNS envelope — unwrap. Two SNS topics land on this same queue (see deploy/storage.tf):
+  // the inbound receipt rule's S3 action (notificationType: "Received"), which the handler
+  // processes itself since only it knows how to turn a receipt into an InboundSignalMessage,
+  // and the sending configuration set's feedback destination (Bounce/Complaint/... — the
+  // full SES event vocabulary), which is entirely sesFeedbackProcessor's concern. The
+  // handler doesn't need to know what SES event types exist beyond the one it handles.
   const sns = body as { Message: string };
   let inner: unknown;
   try {
@@ -524,22 +529,10 @@ async function processSqsRecord(
     return err(e);
   }
 
-  const notification = inner as { eventType?: string; notificationType?: string; mail?: { messageId: string; timestamp: string; destination: string[] }; receipt?: { dkimVerdict: { status: SesVerdict }; dmarcVerdict: { status: SesVerdict }; action: { objectKey: string } } };
+  const notification = inner as { notificationType?: string; mail?: { messageId: string; timestamp: string; destination: string[] }; receipt?: { dkimVerdict: { status: SesVerdict }; dmarcVerdict: { status: SesVerdict }; action: { objectKey: string } } };
 
-  // Two SNS topics land on this same queue (see deploy/storage.tf): the sending
-  // configuration set's feedback destination (eventType: Bounce/Complaint/...) and the
-  // inbound receipt rule's S3 action (notificationType: "Received"). Route by whichever
-  // discriminator is present rather than assuming a shape, so an unexpected type is
-  // dropped with a log instead of crashing on fields that only exist on the other kind.
-  const sesType = resolveSesEventType(notification);
-
-  if (sesType && (SES_EVENT_TYPES as readonly string[]).includes(sesType)) {
-    await feedbackProcessor.processNotification(notification);
-    return ok(undefined);
-  }
-
-  if (sesType !== "Received") {
-    logger.error("Unrecognised SNS notification — unknown SES eventType/notificationType. Dropping message.", { code: "handler.sqs.unrecognised_notification", messageId, sesType: sesType ?? null });
+  if (notification.notificationType !== "Received") {
+    await sesFeedbackProcessor.processNotification(notification);
     return ok(undefined);
   }
 
