@@ -111,8 +111,8 @@ vi.mock("../src/notifier/device-store.js", () => ({
   })),
 }));
 
-vi.mock("../src/notifier/feedback-processor.js", () => ({
-  FeedbackProcessor: vi.fn().mockImplementation(() => ({})),
+vi.mock("../src/notifier/ses-feedback-processor.js", () => ({
+  SesFeedbackProcessor: vi.fn().mockImplementation(() => ({})),
 }));
 
 vi.mock("../src/jobs/domain-health-job.js", () => ({
