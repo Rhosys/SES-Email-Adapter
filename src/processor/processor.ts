@@ -1386,7 +1386,6 @@ export class SignalProcessor {
         workflow: signal.data.workflow,
         resourceKey: resourceInfo.resourceKey,
         expectedResolutionDate: resourceInfo.expectedResolutionDate,
-        terminal: resourceInfo.terminal,
         ...(resourceTtl !== undefined ? { ttl: resourceTtl } : {}),
       });
       if (resourceResult.isErr()) {

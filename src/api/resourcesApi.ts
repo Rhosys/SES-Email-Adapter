@@ -1,6 +1,8 @@
 import { z } from "@hono/zod-openapi";
 import type { OpenAPIHono } from "@hono/zod-openapi";
 import { toApiResource, decodeResourceId } from "./transform.js";
+import { zParse } from "./validate.js";
+import { UpdateResourceRequest } from "./requests.js";
 import type { Workflow, ResourceStatus } from "../types/index.js";
 import type { ListResourcesParams, ResourceDatabase } from "../database/resource-database.js";
 import type { Logger } from "../logger.js";
@@ -12,7 +14,8 @@ function page<K extends string, T>(key: K, items: T[], nextCursor?: string): Rec
   return { [key]: items, pagination: { cursor: nextCursor ?? null } } as Record<K, T[]> & { pagination: Pagination };
 }
 
-// Read-only — resources are system-derived from signals, never created/edited directly via the API.
+// Resources are system-derived from signals (never created via the API), but status is
+// user-owned — PATCH is the only mutation, and the only thing it can change is status.
 export class ResourcesApi {
   constructor(
     private readonly resourceDb: ResourceDatabase,
@@ -84,6 +87,39 @@ export class ResourcesApi {
         return err(c, 500, "Internal Server Error");
       }
       if (!result.value || result.value.accountId !== accountId) return err(c, 404, "Resource not found");
+      return c.json(toApiResource(result.value), 200);
+    });
+
+    // -------------------------------------------------------------------------
+    // 3. PATCH /accounts/{accountId}/resources/{resourceId} — set status (the only mutation)
+    // -------------------------------------------------------------------------
+    app.openapi(route({
+      method: "patch",
+      path: "/accounts/{accountId}/resources/{resourceId}",
+      tags: ["Resources"],
+      request: { params: z.object({ accountId: z.string(), resourceId: z.string() }) },
+      middleware: [authz("resources:write", c => `accounts/${c.req.param("accountId")!}/resources`)] as const,
+      responses: {
+        200: { content: { "application/json": { schema: ResourceSchema } }, description: "Update resource status" },
+      },
+    }), async (c) => {
+      const accountId = c.req.param("accountId")!;
+      const decoded = decodeResourceId(c.req.param("resourceId")!);
+      if (!decoded) return err(c, 404, "Resource not found");
+
+      const existingResult = await resourceDb.getResource(accountId, decoded.threadId, decoded.sk);
+      if (existingResult.isErr()) {
+        logger.error(`Failed to get resource for update: ${existingResult.error.message}`, { code: "api.resources.patch_get_failed", error: existingResult.error });
+        return err(c, 500, "Internal Server Error");
+      }
+      if (!existingResult.value || existingResult.value.accountId !== accountId) return err(c, 404, "Resource not found");
+
+      const body = await zParse(UpdateResourceRequest, c.req.raw);
+      const result = await resourceDb.setResourceStatus(accountId, decoded.threadId, decoded.sk, body.status as ResourceStatus);
+      if (result.isErr()) {
+        logger.error(`Failed to update resource status: ${result.error.message}`, { code: "api.resources.patch_failed", error: result.error });
+        return err(c, 500, "Internal Server Error");
+      }
       return c.json(toApiResource(result.value), 200);
     });
   }
