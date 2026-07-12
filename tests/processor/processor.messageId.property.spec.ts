@@ -94,7 +94,7 @@ describe("ProcessError on database failure", () => {
       upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     };
     const mockLogger = createMockLogger();
-    return new SignalProcessor({ ...makeSharedNewDeps(),
+    return new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
       ...store, contentSanitizer, userCodeExecutor: { invoke: vi.fn(), validateAst: vi.fn(), validateAstBatch: vi.fn() }, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket", classifier, embeddingGenerator, auroraWriter, threadMatcher,
       ruleEvaluator: makeRuleEvaluator3(mockLogger), logger: mockLogger,
       notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },

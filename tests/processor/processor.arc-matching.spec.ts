@@ -178,7 +178,7 @@ describe("Feature: in-reply-to-arc-threading, Parallel arc matching tier selecti
     const accountDb = makeAccountDbMock(TEST_ACCOUNT_ID);
     mockRecipientAlias(accountDb, DEFAULT_EMAIL_CONFIG);
     const processingDb = makeProcessingDbMock();
-    return new SignalProcessor({
+    return new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never,
       ...makeSharedNewDeps(),
       threadDb,
       accountDb,

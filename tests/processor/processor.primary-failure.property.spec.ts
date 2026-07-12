@@ -183,7 +183,7 @@ describe("Property 1: Primary failure causes batch item failure", () => {
       generateForSecondaryClusters: vi.fn().mockResolvedValue([]),
     };
 
-    const processor = new SignalProcessor({ ...makeSharedNewDeps(),
+    const processor = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
       ...makeStore(),
       contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
       classifier: { classify: vi.fn().mockResolvedValue(ok({ ...validClassification })) },

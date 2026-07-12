@@ -182,7 +182,7 @@ describe("Property 9: S3 retention failure is isolated and non-fatal", () => {
       applyPlanRetention: vi.fn().mockRejectedValue(error),
     };
 
-    const processor = new SignalProcessor({ ...makeSharedNewDeps(),
+    const processor = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
       ...makeStore(),
       contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
       classifier: makeClassifier(),
@@ -211,7 +211,7 @@ describe("Property 9: S3 retention failure is isolated and non-fatal", () => {
       applyPlanRetention: vi.fn().mockRejectedValue(error),
     };
 
-    const processor = new SignalProcessor({ ...makeSharedNewDeps(),
+    const processor = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
       ...makeStore(),
       contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
       classifier: makeClassifier(),
@@ -240,7 +240,7 @@ describe("Property 9: S3 retention failure is isolated and non-fatal", () => {
       applyPlanRetention: vi.fn().mockRejectedValue(error),
     };
 
-    const processor = new SignalProcessor({ ...makeSharedNewDeps(),
+    const processor = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
       ...makeStore(),
       contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
       classifier: makeClassifier(),
@@ -278,7 +278,7 @@ describe("Property 9: S3 retention failure is isolated and non-fatal", () => {
     };
     const logger1 = createMockLogger();
 
-    const processor1 = new SignalProcessor({ ...makeSharedNewDeps(),
+    const processor1 = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
       ...store1,
       contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
       classifier: makeClassifier(),
@@ -303,7 +303,7 @@ describe("Property 9: S3 retention failure is isolated and non-fatal", () => {
     const auroraWriter2 = makeAuroraWriter();
     const logger2 = createMockLogger();
 
-    const processor2 = new SignalProcessor({ ...makeSharedNewDeps(),
+    const processor2 = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
       ...store2,
       contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
       classifier: makeClassifier(),
@@ -344,7 +344,7 @@ describe("Property 9: S3 retention failure is isolated and non-fatal", () => {
   it("no retentionService configured — processing succeeds without any S3 interaction", async () => {
     const auroraWriter = makeAuroraWriter();
 
-    const processor = new SignalProcessor({ ...makeSharedNewDeps(),
+    const processor = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
       ...makeStore(),
       contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
       classifier: makeClassifier(),
@@ -387,7 +387,7 @@ describe("Property 9: S3 retention failure is isolated and non-fatal", () => {
       }),
     };
 
-    const processor = new SignalProcessor({ ...makeSharedNewDeps(),
+    const processor = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
       ...makeStore(),
       contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
       classifier: makeClassifier(),

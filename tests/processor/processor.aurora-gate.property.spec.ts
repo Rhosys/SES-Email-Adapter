@@ -199,7 +199,7 @@ describe("Feature: signal-processor-retry-resilience, Property 4: Arc saved befo
       findMatch: vi.fn().mockResolvedValue(ok(null)),
     };
 
-    const processor = new SignalProcessor({ ...makeSharedNewDeps(),
+    const processor = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
       threadDb, accountDb, processingDb,
       contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
       classifier: makeClassifier(),
@@ -256,7 +256,7 @@ describe("Feature: signal-processor-retry-resilience, Property 4: Arc saved befo
       findMatch: vi.fn().mockResolvedValue(ok(null)),
     };
 
-    const processor = new SignalProcessor({ ...makeSharedNewDeps(),
+    const processor = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
       threadDb, accountDb, processingDb,
       contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
       classifier: makeClassifier(),
@@ -429,7 +429,7 @@ describe("Feature: signal-processor-retry-resilience, Property 6: Aurora failure
       findMatch: vi.fn().mockResolvedValue(ok(null)),
     };
 
-    const processor = new SignalProcessor({ ...makeSharedNewDeps(),
+    const processor = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
       ...makeStore(),
       contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
       classifier: makeClassifier(),
@@ -482,7 +482,7 @@ describe("Feature: signal-processor-retry-resilience, Property 6: Aurora failure
       findMatch: vi.fn().mockResolvedValue(ok(null)),
     };
 
-    const processor = new SignalProcessor({ ...makeSharedNewDeps(),
+    const processor = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
       ...makeStore(),
       contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
       classifier: makeClassifier(),
@@ -535,7 +535,7 @@ describe("Feature: signal-processor-retry-resilience, Property 6: Aurora failure
       findMatch: vi.fn().mockResolvedValue(ok(null)),
     };
 
-    const processor = new SignalProcessor({ ...makeSharedNewDeps(),
+    const processor = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
       ...makeStore(),
       contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
       classifier: makeClassifier(),
@@ -696,7 +696,7 @@ describe("Feature: signal-processor-retry-resilience, Property 5: Side-effects d
       sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     };
 
-    const processor = new SignalProcessor({ ...makeSharedNewDeps(),
+    const processor = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
       ...makeStore(),
       contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
       classifier: makeClassifier(),
@@ -743,7 +743,7 @@ describe("Feature: signal-processor-retry-resilience, Property 5: Side-effects d
       sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     };
 
-    const processor = new SignalProcessor({ ...makeSharedNewDeps(),
+    const processor = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
       ...makeStore(),
       contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
       classifier: makeClassifier(),
@@ -781,7 +781,7 @@ describe("Feature: signal-processor-retry-resilience, Property 5: Side-effects d
       findMatch: vi.fn().mockResolvedValue(ok(null)),
     };
 
-    const processor = new SignalProcessor({ ...makeSharedNewDeps(),
+    const processor = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
       ...makeStore(),
       contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
       classifier: makeClassifier(),
@@ -823,7 +823,7 @@ describe("Feature: signal-processor-retry-resilience, Property 5: Side-effects d
       sendMessage: vi.fn().mockReturnValue(Promise.resolve(err(dbError(new Error("SQS SendMessage failed"))))),
     };
 
-    const processor = new SignalProcessor({ ...makeSharedNewDeps(),
+    const processor = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
       ...makeStore(),
       contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
       classifier: makeClassifier(),
@@ -992,7 +992,7 @@ describe("Feature: signal-processor-retry-resilience, Property 7: Partial Aurora
       sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     };
 
-    const processor = new SignalProcessor({ ...makeSharedNewDeps(),
+    const processor = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
       threadDb, accountDb, processingDb,
       contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
       classifier: makeClassifier(),
