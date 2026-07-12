@@ -30,6 +30,9 @@ export interface LogEntry {
 export interface Logger {
   startInvocation(invocationId: string): void;
   getInvocationId(): string;
+  // Cheap and side-effect-free — call unconditionally at every meaningful step of a
+  // pipeline, not just on the success path. Never gate it behind a conditional; the
+  // resulting timeline is what makes debugging a slow or failed invocation tractable.
   trackPoint(name: string, data?: Record<string, unknown>): void;
   info(message: string, context?: Record<string, unknown>): void;
   track(message: string, context?: Record<string, unknown>): void;

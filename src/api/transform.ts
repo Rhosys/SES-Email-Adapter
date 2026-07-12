@@ -60,14 +60,10 @@ export function encodeResourceId(threadId: string, sk: string): string {
 
 export function decodeResourceId(resourceId: string): { threadId: string; sk: string } | null {
   if (!resourceId.startsWith("res-")) return null;
-  try {
-    const decoded = Buffer.from(resourceId.slice(4), "base64url").toString("utf-8");
-    const sepIndex = decoded.indexOf(":");
-    if (sepIndex === -1) return null;
-    return { threadId: decoded.slice(0, sepIndex), sk: decoded.slice(sepIndex + 1) };
-  } catch {
-    return null;
-  }
+  const decoded = Buffer.from(resourceId.slice(4), "base64url").toString("utf-8");
+  const sepIndex = decoded.indexOf(":");
+  if (sepIndex === -1) return null;
+  return { threadId: decoded.slice(0, sepIndex), sk: decoded.slice(sepIndex + 1) };
 }
 
 export function toApiResource(resource: DbResource): Api.Resource {
