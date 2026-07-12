@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ok } from "../src/errors.js";
-import { FeedbackProcessor } from "../src/notifier/feedback-processor.js";
-import type { FeedbackSignalStore } from "../src/notifier/feedback-processor.js";
+import { SesFeedbackProcessor } from "../src/notifier/ses-feedback-processor.js";
+import type { FeedbackSignalStore } from "../src/notifier/ses-feedback-processor.js";
 import type { ProcessingDatabase } from "../src/database/processing-database.js";
 import type { AccountDatabase } from "../src/database/account-database.js";
 import type { SesFeedback, Signal } from "../src/types/index.js";
@@ -82,18 +82,18 @@ function makeSignalStore(): FeedbackSignalStore {
   };
 }
 
-describe("FeedbackProcessor — bounce handling for user-sent signals", () => {
+describe("SesFeedbackProcessor — bounce handling for user-sent signals", () => {
   let processingDb: ProcessingDatabase;
   let accountDb: AccountDatabase;
   let signalStore: FeedbackSignalStore;
-  let processor: FeedbackProcessor;
+  let processor: SesFeedbackProcessor;
 
   beforeEach(() => {
     vi.clearAllMocks();
     processingDb = makeProcessingDb();
     accountDb = makeAccountDb();
     signalStore = makeSignalStore();
-    processor = new FeedbackProcessor(processingDb, accountDb, createMockLogger(), signalStore);
+    processor = new SesFeedbackProcessor(processingDb, accountDb, createMockLogger(), signalStore);
   });
 
   it("does not create deliverability signal when bounce is for a non-user signal", async () => {
@@ -186,11 +186,11 @@ describe("FeedbackProcessor — bounce handling for user-sent signals", () => {
 });
 
 
-describe("FeedbackProcessor — prefixed tag reading", () => {
+describe("SesFeedbackProcessor — prefixed tag reading", () => {
   let processingDb: ProcessingDatabase;
   let accountDb: AccountDatabase;
   let signalStore: FeedbackSignalStore;
-  let processor: FeedbackProcessor;
+  let processor: SesFeedbackProcessor;
   let logger: ReturnType<typeof createMockLogger>;
 
   beforeEach(() => {
@@ -199,7 +199,7 @@ describe("FeedbackProcessor — prefixed tag reading", () => {
     accountDb = makeAccountDb();
     signalStore = makeSignalStore();
     logger = createMockLogger();
-    processor = new FeedbackProcessor(processingDb, accountDb, logger, signalStore);
+    processor = new SesFeedbackProcessor(processingDb, accountDb, logger, signalStore);
   });
 
   it("disables forward rules when X-Numaeel-AccountId and X-Numaeel-Type=forward are present", async () => {
@@ -303,14 +303,14 @@ describe("FeedbackProcessor — prefixed tag reading", () => {
   });
 });
 
-describe("FeedbackProcessor — origin/process logging", () => {
+describe("SesFeedbackProcessor — origin/process logging", () => {
   let logger: ReturnType<typeof createMockLogger>;
-  let processor: FeedbackProcessor;
+  let processor: SesFeedbackProcessor;
 
   beforeEach(() => {
     vi.clearAllMocks();
     logger = createMockLogger();
-    processor = new FeedbackProcessor(makeProcessingDb(), makeAccountDb(), logger, makeSignalStore());
+    processor = new SesFeedbackProcessor(makeProcessingDb(), makeAccountDb(), logger, makeSignalStore());
   });
 
   it("logs a healthcheck bounce at error level with the healthcheck process + id", async () => {
@@ -348,5 +348,73 @@ describe("FeedbackProcessor — origin/process logging", () => {
     expect(log).toBeDefined();
     expect(log!.method).toBe("error");
     expect((log!.context as Record<string, unknown>).process).toBe("healthcheck");
+  });
+});
+
+describe("SesFeedbackProcessor — eventType vs notificationType resolution", () => {
+  // deploy/email_routing.tf wires Bounce/Complaint via aws_sesv2_configuration_set_event_destination,
+  // AWS's "event publishing" API, which puts the discriminator in `eventType` rather than
+  // `notificationType`. These tests lock in that the real production shape is handled,
+  // not just the older `notificationType` shape used in the tests above.
+  let logger: ReturnType<typeof createMockLogger>;
+  let processor: SesFeedbackProcessor;
+  let processingDb: ProcessingDatabase;
+
+  beforeEach(() => {
+    logger = createMockLogger();
+    processingDb = makeProcessingDb();
+    processor = new SesFeedbackProcessor(processingDb, makeAccountDb(), logger, makeSignalStore());
+  });
+
+  it("suppresses the address for a Bounce carried in `eventType` (real config-set shape)", async () => {
+    const result = await processor.processNotification({
+      eventType: "Bounce",
+      bounce: {
+        bounceType: "Permanent",
+        bounceSubType: "General",
+        bouncedRecipients: [{ emailAddress: "recipient@example.com", status: "5.1.1" }],
+        timestamp: "2024-06-01T12:05:00.000Z",
+      },
+      mail: { messageId: "ses-msg-evt", source: "me@example.com", tags: {} },
+    } as unknown as SesFeedback);
+
+    expect(result.isOk()).toBe(true);
+    expect(processingDb.suppressAddress).toHaveBeenCalledTimes(1);
+  });
+
+  it("suppresses the address for a Complaint carried in `eventType`", async () => {
+    const result = await processor.processNotification({
+      eventType: "Complaint",
+      complaint: { complainedRecipients: [{ emailAddress: "x@y.com" }], timestamp: "2024-06-01T00:00:00.000Z" },
+      mail: { messageId: "ses-msg-evt-c", source: "s", tags: {} },
+    } as unknown as SesFeedback);
+
+    expect(result.isOk()).toBe(true);
+    expect(processingDb.suppressAddress).toHaveBeenCalledTimes(1);
+  });
+
+  it("TRACK-logs (does not silently drop) a known-but-unactioned event type, e.g. Delivery", async () => {
+    const result = await processor.processNotification({
+      eventType: "Delivery",
+      mail: { messageId: "ses-msg-delivery", source: "s", tags: {} },
+    } as unknown as SesFeedback);
+
+    expect(result.isOk()).toBe(true);
+    const log = logger.calls.find(c => (c.context as Record<string, unknown>)?.code === "feedback.unactioned_event_type");
+    expect(log).toBeDefined();
+    expect(log!.method).toBe("track");
+    expect((log!.context as Record<string, unknown>).eventType).toBe("Delivery");
+  });
+
+  it("ERROR-logs a genuinely unrecognised eventType/notificationType instead of silently dropping it", async () => {
+    const result = await processor.processNotification({
+      eventType: "SomeFutureSesEventType",
+      mail: { messageId: "ses-msg-unknown", source: "s", tags: {} },
+    } as unknown as SesFeedback);
+
+    expect(result.isOk()).toBe(true);
+    const log = logger.calls.find(c => (c.context as Record<string, unknown>)?.code === "feedback.unknown_type");
+    expect(log).toBeDefined();
+    expect(log!.method).toBe("error");
   });
 });

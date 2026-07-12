@@ -1,6 +1,7 @@
 import type { SQSEvent } from "aws-lambda";
 import { DateTime } from "luxon";
-import type { DeliverabilitySignalData, SesFeedback, Signal, SuppressedAddress } from "../types/index.js";
+import type { DeliverabilitySignalData, SesEventType, SesFeedback, Signal, SuppressedAddress } from "../types/index.js";
+import { SES_EVENT_TYPES, resolveSesEventType } from "../types/index.js";
 import { generateId } from "../utils/id.js";
 import type { ProcessingDatabase } from "../database/processing-database.js";
 import type { AccountDatabase } from "../database/account-database.js";
@@ -25,7 +26,7 @@ export interface FeedbackSignalStore {
   }): Promise<Result<Signal, DbError>>;
 }
 
-export class FeedbackProcessor {
+export class SesFeedbackProcessor {
   private readonly processingDb: ProcessingDatabase;
   private readonly accountDb: AccountDatabase;
   private readonly signalStore: FeedbackSignalStore;
@@ -95,7 +96,9 @@ export class FeedbackProcessor {
   }
 
   private async processFeedback(feedback: SesFeedback): Promise<Result<void, DbError>> {
-    if (feedback.notificationType === "Bounce" && feedback.bounce) {
+    const type = resolveSesEventType(feedback);
+
+    if (type === "Bounce" && feedback.bounce) {
       const isPermanent = feedback.bounce.bounceType === "Permanent";
       const suppressedAt = DateTime.utc().toISO()!;
 
@@ -212,7 +215,7 @@ export class FeedbackProcessor {
           }
         }
       }
-    } else if (feedback.notificationType === "Complaint" && feedback.complaint) {
+    } else if (type === "Complaint" && feedback.complaint) {
       const suppressedAt = DateTime.utc().toISO()!;
 
       const origin = this.describeOrigin(feedback);
@@ -238,6 +241,13 @@ export class FeedbackProcessor {
         const suppressResult = await this.processingDb.suppressAddress(entry);
         if (suppressResult.isErr()) return suppressResult;
       }
+    } else if (type && (SES_EVENT_TYPES as readonly string[]).includes(type)) {
+      // A known SES event type (Delivery, Send, Reject, Open, Click, RenderingFailure,
+      // DeliveryDelay, Subscription) that we don't act on today. Tracked rather than
+      // silently dropped so it stays visible if it ever becomes unexpectedly frequent.
+      this.logger.track("SES feedback event received but not actioned by this processor.", { code: "feedback.unactioned_event_type", eventType: type as SesEventType, messageId: feedback.mail?.messageId });
+    } else {
+      this.logger.error("SES feedback notification with an unrecognised eventType/notificationType — check the SNS subscription or event-destination configuration.", { code: "feedback.unknown_type", type: type ?? null, feedback });
     }
 
     return ok(undefined);
