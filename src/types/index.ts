@@ -824,8 +824,23 @@ export interface SuppressedAddress {
 // SES feedback (bounce/complaint notifications from SNS)
 // ---------------------------------------------------------------------------
 
+// Every event type SES can publish for a *sending* configuration set (matches AWS's
+// "event publishing" vocabulary). Our terraform only wires up BOUNCE/COMPLAINT today
+// (see aws_sesv2_configuration_set_event_destination.feedback), but the full list is
+// enumerated here so an unrecognised type is always a genuine anomaly rather than
+// something that quietly falls into the wrong code path.
+export const SES_EVENT_TYPES = ["Bounce", "Complaint", "Delivery", "Send", "Reject", "Open", "Click", "RenderingFailure", "DeliveryDelay", "Subscription"] as const;
+export type SesEventType = (typeof SES_EVENT_TYPES)[number];
+
 export interface SesFeedback {
-  notificationType: "Bounce" | "Complaint" | "Delivery";
+  // SESv2 configuration-set event publishing (what this deployment uses — see
+  // aws_sesv2_configuration_set_event_destination) puts the discriminator in
+  // `eventType`. The older identity-level notification format (SetIdentityNotificationTopic)
+  // — and SES's own inbound-receiving notifications, which use "Received" — puts it in
+  // `notificationType` instead. Accept either so a message is recognised regardless of
+  // which SNS destination style produced it.
+  eventType?: SesEventType;
+  notificationType?: SesEventType;
   bounce?: {
     bounceType: "Permanent" | "Transient" | "Undetermined";
     bounceSubType: string;
@@ -838,6 +853,10 @@ export interface SesFeedback {
     timestamp: string;
   };
   mail: { messageId: string; source: string; tags?: Record<string, string> };
+}
+
+export function resolveSesEventType(feedback: { eventType?: string; notificationType?: string }): string | undefined {
+  return feedback.eventType ?? feedback.notificationType;
 }
 
 // ---------------------------------------------------------------------------
