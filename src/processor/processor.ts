@@ -1390,10 +1390,9 @@ export class SignalProcessor {
         ...(resourceTtl !== undefined ? { ttl: resourceTtl } : {}),
       });
       if (resourceResult.isErr()) {
-        this.logger.warn("Resource save failed.", { code: "processor.resource_save_failed", threadId: thread.id, workflow: signal.data.workflow, error: resourceResult.error });
-      } else {
-        this.logger.trackPoint("resource_saved", { threadId: thread.id, workflow: signal.data.workflow, status: resourceResult.value.status });
+        this.logger.error(`Resource save failed: ${resourceResult.error.message}`, { code: "processor.resource_save_failed", threadId: thread.id, workflow: signal.data.workflow, error: resourceResult.error });
       }
+      this.logger.trackPoint("resource_saved", { threadId: thread.id, workflow: signal.data.workflow, status: resourceResult.isOk() ? resourceResult.value.status : null });
     }
 
     const allowedCat = statusToMetric(signal.status);
