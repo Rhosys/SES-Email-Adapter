@@ -1,6 +1,6 @@
 import type { SQSEvent } from "aws-lambda";
 import { DateTime } from "luxon";
-import type { DeliverabilitySignalData, SesEventType, SesFeedback, Signal, SuppressedAddress } from "../types/index.js";
+import type { DeliverabilitySignalData, SesFeedback, Signal, SuppressedAddress } from "../types/index.js";
 import { SES_EVENT_TYPES, resolveSesEventType } from "../types/index.js";
 import { generateId } from "../utils/id.js";
 import type { ProcessingDatabase } from "../database/processing-database.js";
@@ -103,19 +103,10 @@ export class SesFeedbackProcessor {
       const suppressedAt = DateTime.utc().toISO()!;
 
       const origin = this.describeOrigin(feedback);
-      const bounceContext = {
-        code: origin.isSystemError ? "feedback.system_bounce" : "feedback.bounce",
-        process: origin.process,
-        ...(origin.healthcheckId ? { healthcheckId: origin.healthcheckId } : {}),
-        bounceType: feedback.bounce.bounceType,
-        bounceSubType: feedback.bounce.bounceSubType,
-        messageId: feedback.mail.messageId,
-        recipients: feedback.bounce.bouncedRecipients.map((r) => r.emailAddress),
-      };
       if (origin.isSystemError) {
-        this.logger.error(`SES bounce on the ${origin.process} process — a system email we send is failing delivery.`, bounceContext);
+        this.logger.error(`SES bounce on the ${origin.process} process — a system email we send is failing delivery.`, { code: "feedback.system_bounce", feedback });
       } else {
-        this.logger.track(`SES bounce on the ${origin.process} process.`, bounceContext);
+        this.logger.track(`SES bounce on the ${origin.process} process.`, { code: "feedback.bounce", feedback });
       }
 
       for (const r of feedback.bounce.bouncedRecipients) {
@@ -219,17 +210,10 @@ export class SesFeedbackProcessor {
       const suppressedAt = DateTime.utc().toISO()!;
 
       const origin = this.describeOrigin(feedback);
-      const complaintContext = {
-        code: origin.isSystemError ? "feedback.system_complaint" : "feedback.complaint",
-        process: origin.process,
-        ...(origin.healthcheckId ? { healthcheckId: origin.healthcheckId } : {}),
-        messageId: feedback.mail.messageId,
-        recipients: feedback.complaint.complainedRecipients.map((r) => r.emailAddress),
-      };
       if (origin.isSystemError) {
-        this.logger.error(`SES complaint on the ${origin.process} process — a system email we send was marked as spam.`, complaintContext);
+        this.logger.error(`SES complaint on the ${origin.process} process — a system email we send was marked as spam.`, { code: "feedback.system_complaint", feedback });
       } else {
-        this.logger.track(`SES complaint on the ${origin.process} process.`, complaintContext);
+        this.logger.track(`SES complaint on the ${origin.process} process.`, { code: "feedback.complaint", feedback });
       }
 
       for (const r of feedback.complaint.complainedRecipients) {
@@ -245,9 +229,9 @@ export class SesFeedbackProcessor {
       // A known SES event type (Delivery, Send, Reject, Open, Click, RenderingFailure,
       // DeliveryDelay, Subscription) that we don't act on today. Tracked rather than
       // silently dropped so it stays visible if it ever becomes unexpectedly frequent.
-      this.logger.track("SES feedback event received but not actioned by this processor.", { code: "feedback.unactioned_event_type", eventType: type as SesEventType, messageId: feedback.mail?.messageId });
+      this.logger.track("SES feedback event received but not actioned by this processor.", { code: "feedback.unactioned_event_type", feedback });
     } else {
-      this.logger.error("SES feedback notification with an unrecognised eventType/notificationType — check the SNS subscription or event-destination configuration.", { code: "feedback.unknown_type", type: type ?? null, feedback });
+      this.logger.error("SES feedback notification with an unrecognised eventType/notificationType — check the SNS subscription or event-destination configuration.", { code: "feedback.unknown_type", feedback });
     }
 
     return ok(undefined);
