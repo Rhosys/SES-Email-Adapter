@@ -90,10 +90,13 @@ export class ResourceDatabase {
   }
 
   // The only way a resource's status changes after creation — an explicit user action
-  // (e.g. PATCH /accounts/:id/resources/:resourceId). Unconditional: always wins over
-  // whatever saveResource last wrote, and a later saveResource call can never undo it
-  // (its #status/gsi1pk writes are if_not_exists-guarded).
-  async setResourceStatus(accountId: string, threadId: string, sk: string, status: ResourceStatus): Promise<Result<Resource, DbError>> {
+  // (e.g. PATCH /accounts/:id/resources/:resourceId). Unconditional on VALUE: always wins
+  // over whatever saveResource last wrote, and a later saveResource call can never undo it
+  // (its #status/gsi1pk writes are if_not_exists-guarded). Conditional on EXISTENCE: guarded
+  // by attribute_exists(pk) so a row that vanished (e.g. TTL expiry) between the caller's
+  // existence check and this write is never silently recreated as a malformed partial item —
+  // callers get ok(null) instead, mirroring getResource's not-found shape.
+  async setResourceStatus(accountId: string, threadId: string, sk: string, status: ResourceStatus): Promise<Result<Resource | null, DbError>> {
     const now = DateTime.utc().toISO()!;
     const workflow = sk.split("#")[0] as Workflow;
 
@@ -113,12 +116,14 @@ export class ResourceDatabase {
         TableName: RESOURCES_TABLE,
         Key: { pk: threadPk(accountId, threadId), sk },
         UpdateExpression: updateExpr,
+        ConditionExpression: "attribute_exists(pk)",
         ExpressionAttributeNames: { "#status": "status" },
         ExpressionAttributeValues: { ":status": status, ":gsi1pk": buildGsi1pk(accountId, status, workflow), ":now": now },
         ReturnValues: "ALL_NEW",
       }));
       return ok(result.Attributes as unknown as Resource);
     } catch (e) {
+      if ((e as { name?: string }).name === "ConditionalCheckFailedException") return ok(null);
       return err(dbError(e));
     }
   }

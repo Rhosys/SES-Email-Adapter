@@ -154,6 +154,33 @@ describe("ResourceDatabase.setResourceStatus", () => {
     expect(input.UpdateExpression).toContain("REMOVE resolvedAt");
     expect(input.UpdateExpression).not.toContain("resolvedAt = :now");
   });
+
+  it("guards the write with attribute_exists(pk) — never recreates a deleted row", async () => {
+    ddbMock.on(UpdateCommand).resolves({ Attributes: {} });
+
+    await db.setResourceStatus("acct-1", "thr-001", "package#123-456", "complete");
+
+    const input = ddbMock.commandCalls(UpdateCommand)[0]!.args[0].input;
+    expect(input.ConditionExpression).toBe("attribute_exists(pk)");
+  });
+
+  it("returns ok(null) — not an error — when the conditional check fails (row is gone)", async () => {
+    const conditionalCheckFailed = Object.assign(new Error("The conditional request failed"), { name: "ConditionalCheckFailedException" });
+    ddbMock.on(UpdateCommand).rejects(conditionalCheckFailed);
+
+    const result = await db.setResourceStatus("acct-1", "thr-001", "package#123-456", "complete");
+
+    expect(result.isOk()).toBe(true);
+    if (result.isOk()) expect(result.value).toBeNull();
+  });
+
+  it("still returns a DbError for any other failure", async () => {
+    ddbMock.on(UpdateCommand).rejects(new Error("ProvisionedThroughputExceededException"));
+
+    const result = await db.setResourceStatus("acct-1", "thr-001", "package#123-456", "complete");
+
+    expect(result.isErr()).toBe(true);
+  });
 });
 
 describe("ResourceDatabase.getResource", () => {

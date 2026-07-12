@@ -33,6 +33,12 @@ describe("deriveResourceInfo", () => {
         workflow: "package", packageType: "shipping", retailer: "Amazon", estimatedDelivery: "2024-01-20T00:00:00Z",
       })).toBeNull();
     });
+
+    it("returns null when estimatedDelivery is not a parseable date (classifier hallucination)", () => {
+      expect(deriveResourceInfo("package", {
+        workflow: "package", packageType: "shipping", retailer: "Amazon", orderNumber: "123-456", estimatedDelivery: "not-a-date",
+      })).toBeNull();
+    });
   });
 
   describe("travel", () => {
@@ -55,6 +61,12 @@ describe("deriveResourceInfo", () => {
     it("returns null when neither date nor key is present", () => {
       expect(deriveResourceInfo("travel", { workflow: "travel", travelType: "flight", provider: "United" })).toBeNull();
     });
+
+    it("returns null when the resolved date is not parseable", () => {
+      expect(deriveResourceInfo("travel", {
+        workflow: "travel", travelType: "flight", provider: "United", returnDate: "not-a-date", flightNumber: "UA123",
+      })).toBeNull();
+    });
   });
 
   describe("payments", () => {
@@ -71,6 +83,12 @@ describe("deriveResourceInfo", () => {
       expect(deriveResourceInfo("payments", { workflow: "payments", paymentType: "invoice", vendor: "AWS", invoiceNumber: "INV-1" })).toBeNull();
       expect(deriveResourceInfo("payments", { workflow: "payments", paymentType: "invoice", vendor: "AWS", dueDate: "2024-03-01T00:00:00Z" })).toBeNull();
     });
+
+    it("returns null when dueDate is not a parseable date", () => {
+      expect(deriveResourceInfo("payments", {
+        workflow: "payments", paymentType: "invoice", vendor: "AWS", dueDate: "not-a-date", invoiceNumber: "INV-1",
+      })).toBeNull();
+    });
   });
 
   describe("healthcare", () => {
@@ -86,6 +104,12 @@ describe("deriveResourceInfo", () => {
       expect(deriveResourceInfo("healthcare", { workflow: "healthcare", eventType: "appointment_reminder", requiresAction: false, appointmentDate: "2024-04-01T00:00:00Z" })).toBeNull();
       expect(deriveResourceInfo("healthcare", { workflow: "healthcare", eventType: "appointment_reminder", requiresAction: false, provider: "Dr. Smith" })).toBeNull();
     });
+
+    it("returns null when appointmentDate is not a parseable date", () => {
+      expect(deriveResourceInfo("healthcare", {
+        workflow: "healthcare", eventType: "appointment_reminder", provider: "Dr. Smith", appointmentDate: "not-a-date", requiresAction: false,
+      })).toBeNull();
+    });
   });
 
   describe("job", () => {
@@ -100,6 +124,12 @@ describe("deriveResourceInfo", () => {
     it("returns null when company or role is missing", () => {
       expect(deriveResourceInfo("job", {
         workflow: "job", jobType: "interview_request", role: "Engineer", interviewDate: "2024-05-01T00:00:00Z",
+      })).toBeNull();
+    });
+
+    it("returns null when interviewDate is not a parseable date", () => {
+      expect(deriveResourceInfo("job", {
+        workflow: "job", jobType: "interview_request", company: "Acme", role: "Engineer", interviewDate: "not-a-date",
       })).toBeNull();
     });
   });
@@ -123,6 +153,12 @@ describe("deriveResourceInfo", () => {
 
     it("returns null when eventStartDatetime is missing", () => {
       expect(deriveResourceInfo("events", { workflow: "events", eventType: "reminder", eventName: "Concert" })).toBeNull();
+    });
+
+    it("returns null when eventStartDatetime is not a parseable date", () => {
+      expect(deriveResourceInfo("events", {
+        workflow: "events", eventType: "reminder", eventName: "Concert", eventStartDatetime: "not-a-date",
+      })).toBeNull();
     });
   });
 

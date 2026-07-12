@@ -15,7 +15,7 @@ function makeAuth(): AuthService {
   return { verify: vi.fn().mockResolvedValue(ok({ userId: "user-001" })) };
 }
 
-function makeAccess(): AccessService {
+function makeAccess(): AccessService & { checkAccess: ReturnType<typeof vi.fn> } {
   return {
     listUsers: vi.fn().mockResolvedValue(ok([])),
     listAccountsForUser: vi.fn().mockResolvedValue(ok([])),
@@ -25,7 +25,7 @@ function makeAccess(): AccessService {
     checkAccess: vi.fn().mockResolvedValue(undefined),
     createInvite: vi.fn().mockResolvedValue(ok({ inviteId: "inv-test" })),
     getUserProfile: vi.fn().mockReturnValue(Promise.resolve(ok({}))),
-  } as unknown as AccessService;
+  } as unknown as AccessService & { checkAccess: ReturnType<typeof vi.fn> };
 }
 
 function makeResource(overrides: Partial<Resource> = {}): Resource {
@@ -61,15 +61,17 @@ async function req(app: ReturnType<typeof createApp>, method: string, path: stri
 
 describe("Resources API", () => {
   let resourceDb: ReturnType<typeof makeResourceDb>;
+  let access: ReturnType<typeof makeAccess>;
   let app: ReturnType<typeof createApp>;
 
   beforeEach(() => {
     vi.clearAllMocks();
     resourceDb = makeResourceDb();
+    access = makeAccess();
     app = createApp(makeAppDeps({
       resourceDb: resourceDb as unknown as ResourceDatabase,
       auth: makeAuth(),
-      access: makeAccess(),
+      access,
       logger: createMockLogger(),
     }));
   });
@@ -119,6 +121,24 @@ describe("Resources API", () => {
       expect(body.resources[0]!.resourceId).toBe(encodeResourceId("thr-001", "package#123-456"));
       expect(body.resources[0]!.threadId).toBe("thr-001");
     });
+
+    it("400s on a workflow that never produces a resource (e.g. auth)", async () => {
+      const res = await req(app, "GET", `${A}/resources?workflow=auth`);
+      expect(res.status).toBe(400);
+      expect(resourceDb.listResources).not.toHaveBeenCalled();
+    });
+
+    it("400s on an unrecognized status value", async () => {
+      const res = await req(app, "GET", `${A}/resources?workflow=package&status=bogus`);
+      expect(res.status).toBe(400);
+      expect(resourceDb.listResources).not.toHaveBeenCalled();
+    });
+
+    it("authorizes the list route against the account-level URI (no resourceId to scope to)", async () => {
+      resourceDb.listResources.mockResolvedValue(ok({ items: [] }));
+      await req(app, "GET", `${A}/resources?workflow=package`);
+      expect(access.checkAccess).toHaveBeenCalledWith("user-001", `accounts/${TEST_ACCOUNT_ID}/resources`, "resources:read");
+    });
   });
 
   describe("GET /accounts/:accountId/resources/:resourceId", () => {
@@ -154,6 +174,15 @@ describe("Resources API", () => {
       const res = await req(app, "GET", `${A}/resources/${resourceId}`);
 
       expect(res.status).toBe(404);
+    });
+
+    it("authorizes against the specific resourceId, not just the account-level URI", async () => {
+      resourceDb.getResource.mockResolvedValue(ok(makeResource()));
+      const resourceId = encodeResourceId("thr-001", "package#123-456");
+
+      await req(app, "GET", `${A}/resources/${resourceId}`);
+
+      expect(access.checkAccess).toHaveBeenCalledWith("user-001", `accounts/${TEST_ACCOUNT_ID}/resources/${resourceId}`, "resources:read");
     });
   });
 
@@ -221,6 +250,26 @@ describe("Resources API", () => {
       const body = await res.json() as { status: string; resolvedAt?: string };
       expect(body.status).toBe("active");
       expect(body.resolvedAt).toBeUndefined();
+    });
+
+    it("404s (not a phantom 200) when the row vanishes between the existence check and the write", async () => {
+      resourceDb.getResource.mockResolvedValue(ok(makeResource()));
+      resourceDb.setResourceStatus.mockResolvedValue(ok(null));
+      const resourceId = encodeResourceId("thr-001", "package#123-456");
+
+      const res = await req(app, "PATCH", `${A}/resources/${resourceId}`, { status: "complete" });
+
+      expect(res.status).toBe(404);
+    });
+
+    it("authorizes against the specific resourceId, not just the account-level URI", async () => {
+      resourceDb.getResource.mockResolvedValue(ok(makeResource()));
+      resourceDb.setResourceStatus.mockResolvedValue(ok(makeResource({ status: "complete" })));
+      const resourceId = encodeResourceId("thr-001", "package#123-456");
+
+      await req(app, "PATCH", `${A}/resources/${resourceId}`, { status: "complete" });
+
+      expect(access.checkAccess).toHaveBeenCalledWith("user-001", `accounts/${TEST_ACCOUNT_ID}/resources/${resourceId}`, "resources:write");
     });
   });
 });

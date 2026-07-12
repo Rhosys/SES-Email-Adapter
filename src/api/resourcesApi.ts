@@ -3,7 +3,8 @@ import type { OpenAPIHono } from "@hono/zod-openapi";
 import { toApiResource, decodeResourceId } from "./transform.js";
 import { zParse } from "./validate.js";
 import { UpdateResourceRequest } from "./requests.js";
-import type { Workflow, ResourceStatus } from "../types/index.js";
+import { RESOURCE_WORKFLOWS, RESOURCE_STATUSES } from "../types/index.js";
+import type { Workflow, ResourceWorkflow, ResourceStatus } from "../types/index.js";
 import type { ListResourcesParams, ResourceDatabase } from "../database/resource-database.js";
 import type { Logger } from "../logger.js";
 import { Resource as ResourceSchema, ListResourcesResponse } from "./schemas.js";
@@ -50,7 +51,9 @@ export class ResourcesApi {
       const query = c.req.query();
       const workflow = query["workflow"];
       if (!workflow) return err(c, 400, "workflow query parameter is required");
+      if (!RESOURCE_WORKFLOWS.includes(workflow as ResourceWorkflow)) return err(c, 400, "Invalid workflow");
       const status = (query["status"] ?? "active") as ResourceStatus;
+      if (!RESOURCE_STATUSES.includes(status)) return err(c, 400, "Invalid status");
       const params: ListResourcesParams = {
         ...(query["dateFrom"] ? { dateFrom: query["dateFrom"] } : {}),
         ...(query["dateTo"] ? { dateTo: query["dateTo"] } : {}),
@@ -73,7 +76,7 @@ export class ResourcesApi {
       path: "/accounts/{accountId}/resources/{resourceId}",
       tags: ["Resources"],
       request: { params: z.object({ accountId: z.string(), resourceId: z.string() }) },
-      middleware: [authz("resources:read", c => `accounts/${c.req.param("accountId")!}/resources`)] as const,
+      middleware: [authz("resources:read", c => `accounts/${c.req.param("accountId")!}/resources/${c.req.param("resourceId")!}`)] as const,
       responses: {
         200: { content: { "application/json": { schema: ResourceSchema } }, description: "Get resource" },
       },
@@ -98,7 +101,7 @@ export class ResourcesApi {
       path: "/accounts/{accountId}/resources/{resourceId}",
       tags: ["Resources"],
       request: { params: z.object({ accountId: z.string(), resourceId: z.string() }) },
-      middleware: [authz("resources:write", c => `accounts/${c.req.param("accountId")!}/resources`)] as const,
+      middleware: [authz("resources:write", c => `accounts/${c.req.param("accountId")!}/resources/${c.req.param("resourceId")!}`)] as const,
       responses: {
         200: { content: { "application/json": { schema: ResourceSchema } }, description: "Update resource status" },
       },
@@ -120,6 +123,9 @@ export class ResourcesApi {
         logger.error(`Failed to update resource status: ${result.error.message}`, { code: "api.resources.patch_failed", error: result.error });
         return err(c, 500, "Internal Server Error");
       }
+      // Row disappeared between the existence-check GET above and this write (e.g. TTL expiry) —
+      // the ConditionExpression on setResourceStatus stopped it from being silently recreated.
+      if (!result.value) return err(c, 404, "Resource not found");
       return c.json(toApiResource(result.value), 200);
     });
   }
