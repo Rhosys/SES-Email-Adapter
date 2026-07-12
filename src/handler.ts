@@ -4,7 +4,7 @@ import { S3Client } from "@aws-sdk/client-s3";
 import { LambdaClient } from "@aws-sdk/client-lambda";
 import { SFNClient } from "@aws-sdk/client-sfn";
 import { SQSClient, SendMessageCommand } from "@aws-sdk/client-sqs";
-import { SQS_MESSAGE_TYPES } from "./types/index.js";
+import { SQS_MESSAGE_TYPES, SES_EVENT_TYPES, resolveSesEventType } from "./types/index.js";
 import type { Signal } from "./types/index.js";
 import { ok, err } from "./errors.js";
 import type { Result, DbError } from "./errors.js";
@@ -515,7 +515,7 @@ async function processSqsRecord(
     return digestWorker.process(message);
   }
 
-  // SNS envelope — unwrap and route by notificationType
+  // SNS envelope — unwrap and route by eventType/notificationType
   const sns = body as { Message: string };
   let inner: unknown;
   try {
@@ -524,17 +524,29 @@ async function processSqsRecord(
     return err(e);
   }
 
-  const notification = inner as { notificationType?: string; mail?: { messageId: string; timestamp: string; destination: string[] }; receipt?: { dkimVerdict: { status: SesVerdict }; dmarcVerdict: { status: SesVerdict }; action: { objectKey: string } } };
+  const notification = inner as { eventType?: string; notificationType?: string; mail?: { messageId: string; timestamp: string; destination: string[] }; receipt?: { dkimVerdict: { status: SesVerdict }; dmarcVerdict: { status: SesVerdict }; action: { objectKey: string } } };
 
-  if (notification.notificationType === "Bounce" || notification.notificationType === "Complaint" || notification.notificationType === "Delivery") {
+  // Two SNS topics land on this same queue (see deploy/storage.tf): the sending
+  // configuration set's feedback destination (eventType: Bounce/Complaint/...) and the
+  // inbound receipt rule's S3 action (notificationType: "Received"). Route by whichever
+  // discriminator is present rather than assuming a shape, so an unexpected type is
+  // dropped with a log instead of crashing on fields that only exist on the other kind.
+  const sesType = resolveSesEventType(notification);
+
+  if (sesType && (SES_EVENT_TYPES as readonly string[]).includes(sesType)) {
     await feedbackProcessor.processNotification(notification);
+    return ok(undefined);
+  }
+
+  if (sesType !== "Received") {
+    logger.error("Unrecognised SNS notification — unknown SES eventType/notificationType. Dropping message.", { code: "handler.sqs.unrecognised_notification", messageId, sesType: sesType ?? null });
     return ok(undefined);
   }
 
   const mail = notification.mail;
   const receipt = notification.receipt;
   if (!mail || !receipt?.action) {
-    logger.error("Unrecognised SNS notification — missing mail/receipt fields. Dropping message.", { code: "handler.sqs.unrecognised_notification", messageId, notificationType: notification.notificationType });
+    logger.error("SES 'Received' notification missing mail/receipt fields. Dropping message.", { code: "handler.sqs.malformed_received", messageId });
     return ok(undefined);
   }
 

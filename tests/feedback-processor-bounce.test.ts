@@ -350,3 +350,71 @@ describe("FeedbackProcessor — origin/process logging", () => {
     expect((log!.context as Record<string, unknown>).process).toBe("healthcheck");
   });
 });
+
+describe("FeedbackProcessor — eventType vs notificationType resolution", () => {
+  // deploy/email_routing.tf wires Bounce/Complaint via aws_sesv2_configuration_set_event_destination,
+  // AWS's "event publishing" API, which puts the discriminator in `eventType` rather than
+  // `notificationType`. These tests lock in that the real production shape is handled,
+  // not just the older `notificationType` shape used in the tests above.
+  let logger: ReturnType<typeof createMockLogger>;
+  let processor: FeedbackProcessor;
+  let processingDb: ProcessingDatabase;
+
+  beforeEach(() => {
+    logger = createMockLogger();
+    processingDb = makeProcessingDb();
+    processor = new FeedbackProcessor(processingDb, makeAccountDb(), logger, makeSignalStore());
+  });
+
+  it("suppresses the address for a Bounce carried in `eventType` (real config-set shape)", async () => {
+    const result = await processor.processNotification({
+      eventType: "Bounce",
+      bounce: {
+        bounceType: "Permanent",
+        bounceSubType: "General",
+        bouncedRecipients: [{ emailAddress: "recipient@example.com", status: "5.1.1" }],
+        timestamp: "2024-06-01T12:05:00.000Z",
+      },
+      mail: { messageId: "ses-msg-evt", source: "me@example.com", tags: {} },
+    } as unknown as SesFeedback);
+
+    expect(result.isOk()).toBe(true);
+    expect(processingDb.suppressAddress).toHaveBeenCalledTimes(1);
+  });
+
+  it("suppresses the address for a Complaint carried in `eventType`", async () => {
+    const result = await processor.processNotification({
+      eventType: "Complaint",
+      complaint: { complainedRecipients: [{ emailAddress: "x@y.com" }], timestamp: "2024-06-01T00:00:00.000Z" },
+      mail: { messageId: "ses-msg-evt-c", source: "s", tags: {} },
+    } as unknown as SesFeedback);
+
+    expect(result.isOk()).toBe(true);
+    expect(processingDb.suppressAddress).toHaveBeenCalledTimes(1);
+  });
+
+  it("TRACK-logs (does not silently drop) a known-but-unactioned event type, e.g. Delivery", async () => {
+    const result = await processor.processNotification({
+      eventType: "Delivery",
+      mail: { messageId: "ses-msg-delivery", source: "s", tags: {} },
+    } as unknown as SesFeedback);
+
+    expect(result.isOk()).toBe(true);
+    const log = logger.calls.find(c => (c.context as Record<string, unknown>)?.code === "feedback.unactioned_event_type");
+    expect(log).toBeDefined();
+    expect(log!.method).toBe("track");
+    expect((log!.context as Record<string, unknown>).eventType).toBe("Delivery");
+  });
+
+  it("ERROR-logs a genuinely unrecognised eventType/notificationType instead of silently dropping it", async () => {
+    const result = await processor.processNotification({
+      eventType: "SomeFutureSesEventType",
+      mail: { messageId: "ses-msg-unknown", source: "s", tags: {} },
+    } as unknown as SesFeedback);
+
+    expect(result.isOk()).toBe(true);
+    const log = logger.calls.find(c => (c.context as Record<string, unknown>)?.code === "feedback.unknown_type");
+    expect(log).toBeDefined();
+    expect(log!.method).toBe("error");
+  });
+});

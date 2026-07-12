@@ -1,15 +1,25 @@
 /**
  * Regression test for handler.ts processSqsRecord's SNS envelope routing.
  *
- * Bug: SES "Delivery" notifications (sent to the same SNS topic as Bounce/Complaint
- * feedback, see SesFeedback.notificationType) were not matched by the
- * Bounce/Complaint check, so they fell through to the inbound-receipt unwrap path
- * which assumes `receipt.action.objectKey` exists. Delivery notifications have no
- * `receipt` field at all, so `receipt.action` threw:
+ * Bug 1: SES "Delivery" notifications (sent to the same SNS topic as Bounce/Complaint
+ * feedback) were not matched by the Bounce/Complaint check, so they fell through to the
+ * inbound-receipt unwrap path which assumes `receipt.action.objectKey` exists. Delivery
+ * notifications have no `receipt` field at all, so `receipt.action` threw:
  *   TypeError: Cannot read properties of undefined (reading 'action')
  *
- * Fix: route "Delivery" through feedbackProcessor like Bounce/Complaint, and guard
- * the inbound-receipt path against any other unrecognised notification shape.
+ * Bug 2: the sending configuration set's feedback destination is wired via
+ * aws_sesv2_configuration_set_event_destination (deploy/email_routing.tf), which is
+ * AWS's "event publishing" API — those messages carry the type in an `eventType` field,
+ * not `notificationType`. `notificationType` is only correct for SES's own inbound
+ * receiving notifications ("Received") and the older identity-level notification format.
+ * A real Bounce/Complaint from this deployment's config set would therefore never have
+ * matched the old `notificationType === "Bounce"` check either, and would have fallen
+ * into the same crash as Delivery above.
+ *
+ * Fix: resolve the type via `eventType ?? notificationType`, route every known SES
+ * event type (see SES_EVENT_TYPES) through feedbackProcessor, and only treat
+ * "Received" as an inbound-receipt message — dropping (with a logged error) anything
+ * else instead of assuming a shape it doesn't have.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { Context } from "aws-lambda";
@@ -235,12 +245,12 @@ function makeSqsEvent(snsMessage: unknown) {
 // Tests
 // ---------------------------------------------------------------------------
 
-describe("Handler: SQS/SNS notificationType routing", () => {
+describe("Handler: SQS/SNS eventType/notificationType routing", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it("Delivery notification → routed to feedbackProcessor, no crash", async () => {
+  it("Delivery notification (notificationType shape) → routed to feedbackProcessor, no crash", async () => {
     const event = makeSqsEvent({
       notificationType: "Delivery",
       mail: { messageId: "ses-msg-1", source: "user@example.com", tags: {} },
@@ -254,11 +264,42 @@ describe("Handler: SQS/SNS notificationType routing", () => {
     expect(result).toEqual({ batchItemFailures: [] });
   });
 
-  it("Bounce notification → routed to feedbackProcessor (no regression)", async () => {
+  it("Bounce notification (notificationType shape) → routed to feedbackProcessor (no regression)", async () => {
     const event = makeSqsEvent({
       notificationType: "Bounce",
       mail: { messageId: "ses-msg-2", source: "user@example.com", tags: {} },
       bounce: { bounceType: "Permanent", bounceSubType: "General", bouncedRecipients: [], timestamp: "2026-07-11T00:00:00Z" },
+    });
+
+    const result = await handler(event, dummyContext);
+
+    expect(mockProcessNotification).toHaveBeenCalledTimes(1);
+    expect(mockProcessRecord).not.toHaveBeenCalled();
+    expect(result).toEqual({ batchItemFailures: [] });
+  });
+
+  it("Bounce notification (real eventType shape from the SESv2 configuration-set destination) → routed to feedbackProcessor", async () => {
+    // This is the actual production shape: deploy/email_routing.tf wires BOUNCE/COMPLAINT
+    // via aws_sesv2_configuration_set_event_destination, which publishes `eventType`, not
+    // `notificationType`. A check that only looked at `notificationType` would miss this
+    // entirely and fall into the inbound-receipt crash.
+    const event = makeSqsEvent({
+      eventType: "Bounce",
+      mail: { messageId: "ses-msg-2b", source: "user@example.com", tags: {} },
+      bounce: { bounceType: "Permanent", bounceSubType: "General", bouncedRecipients: [], timestamp: "2026-07-11T00:00:00Z" },
+    });
+
+    const result = await handler(event, dummyContext);
+
+    expect(mockProcessNotification).toHaveBeenCalledTimes(1);
+    expect(mockProcessRecord).not.toHaveBeenCalled();
+    expect(result).toEqual({ batchItemFailures: [] });
+  });
+
+  it("Subscription eventType (a known-but-unactioned SES event type) → routed to feedbackProcessor, not dropped as unrecognised", async () => {
+    const event = makeSqsEvent({
+      eventType: "Subscription",
+      mail: { messageId: "ses-msg-2c", source: "user@example.com", tags: {} },
     });
 
     const result = await handler(event, dummyContext);
@@ -286,16 +327,30 @@ describe("Handler: SQS/SNS notificationType routing", () => {
     expect(result).toEqual({ batchItemFailures: [] });
   });
 
-  it("unrecognised notification with no mail/receipt → dropped without crashing", async () => {
-    const event = makeSqsEvent({ notificationType: "Subscription" });
+  it("Received notification missing mail/receipt → dropped without crashing", async () => {
+    const event = makeSqsEvent({ notificationType: "Received" });
 
     const result = await handler(event, dummyContext);
 
     expect(mockProcessRecord).not.toHaveBeenCalled();
     expect(mockProcessNotification).not.toHaveBeenCalled();
     expect(mockLogger.error).toHaveBeenCalledWith(
-      "Unrecognised SNS notification — missing mail/receipt fields. Dropping message.",
-      expect.objectContaining({ code: "handler.sqs.unrecognised_notification" }),
+      "SES 'Received' notification missing mail/receipt fields. Dropping message.",
+      expect.objectContaining({ code: "handler.sqs.malformed_received" }),
+    );
+    expect(result).toEqual({ batchItemFailures: [] });
+  });
+
+  it("genuinely unknown type (not in SES_EVENT_TYPES, not Received) → dropped without crashing", async () => {
+    const event = makeSqsEvent({ notificationType: "SomeFutureSesEventType" });
+
+    const result = await handler(event, dummyContext);
+
+    expect(mockProcessRecord).not.toHaveBeenCalled();
+    expect(mockProcessNotification).not.toHaveBeenCalled();
+    expect(mockLogger.error).toHaveBeenCalledWith(
+      "Unrecognised SNS notification — unknown SES eventType/notificationType. Dropping message.",
+      expect.objectContaining({ code: "handler.sqs.unrecognised_notification", sesType: "SomeFutureSesEventType" }),
     );
     expect(result).toEqual({ batchItemFailures: [] });
   });
