@@ -399,6 +399,57 @@ resource "aws_dynamodb_table" "audit" {
   replica { region_name = "eu-central-2" }
 }
 
+resource "aws_dynamodb_table" "resources" {
+  name         = "${var.service_name}-resources"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "pk"
+  range_key    = "sk"
+
+  attribute {
+    name = "pk"
+    type = "S"
+  }
+  attribute {
+    name = "sk"
+    type = "S"
+  }
+  attribute {
+    name = "gsi1pk"
+    type = "S"
+  }
+  attribute {
+    name = "gsi1sk"
+    type = "S"
+  }
+
+  global_secondary_index {
+    name            = "gsi1"
+    projection_type = "ALL"
+
+    key_schema {
+      attribute_name = "gsi1pk"
+      key_type       = "HASH"
+    }
+    key_schema {
+      attribute_name = "gsi1sk"
+      key_type       = "RANGE"
+    }
+  }
+
+  ttl {
+    attribute_name = "ttl"
+    enabled        = true
+  }
+
+  point_in_time_recovery { enabled = true }
+  deletion_protection_enabled = true
+
+  stream_enabled   = true
+  stream_view_type = "NEW_AND_OLD_IMAGES"
+
+  replica { region_name = "eu-central-2" }
+}
+
 # ---------------------------------------------------------------------------
 # EventBridge — weekly domain health check
 # ---------------------------------------------------------------------------

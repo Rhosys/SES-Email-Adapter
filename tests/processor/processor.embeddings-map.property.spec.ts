@@ -230,7 +230,7 @@ describe("Feature: split-embedding-pipeline, Property 4: Embeddings map composit
 
     const { threadDb, accountDb, processingDb } = makeStore();
 
-    const processor = new SignalProcessor({ ...makeSharedNewDeps(),
+    const processor = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
 threadDb, accountDb, processingDb,
       contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
       classifier: { classify: vi.fn().mockResolvedValue(ok({ ...CLASSIFICATION })) },

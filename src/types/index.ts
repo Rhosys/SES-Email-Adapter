@@ -597,7 +597,35 @@ export interface Thread {
   subject: string;
 }
 
+// ---------------------------------------------------------------------------
+// Resource (time-based aggregate — "something that resolves on a date",
+// derived from signals across the workflows whose WorkflowData carries a
+// forward-looking date field)
+// ---------------------------------------------------------------------------
 
+export const RESOURCE_STATUSES = ["active", "complete"] as const;
+export type ResourceStatus = (typeof RESOURCE_STATUSES)[number];
+
+// The only workflows whose WorkflowData carries a forward-looking date field.
+// The other WORKFLOWS values never produce a Resource.
+export const RESOURCE_WORKFLOWS = ["package", "travel", "payments", "healthcare", "job", "events"] as const;
+export type ResourceWorkflow = (typeof RESOURCE_WORKFLOWS)[number];
+
+export interface Resource {
+  accountId: string;
+  threadId: string;
+  workflow: Workflow;
+  // Per-workflow natural identifier extracted from workflowData (e.g. package's
+  // orderNumber) — distinguishes multiple resources of the same workflow on one
+  // thread (e.g. an outbound flight vs. a return flight, both "travel").
+  resourceKey: string;
+  status: ResourceStatus;
+  expectedResolutionDate: string;
+  resolvedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+  ttl?: number;   // max(threadTtl, epoch(expectedResolutionDate) + 1 year)
+}
 
 
 

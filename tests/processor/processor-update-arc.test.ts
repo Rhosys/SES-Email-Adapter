@@ -159,7 +159,7 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
 }
 
 function buildProcessor(threadDb: ReturnType<typeof makeThreadDbMock>, accountDb: ReturnType<typeof makeAccountDbMock>, processingDb: ReturnType<typeof makeProcessingDbMock>, threadMatcher: ThreadMatcherPort, classifier: Pick<SignalClassifier, "classify">, logger: MockLogger, ruleEvaluator: RuleEvaluator) {
-  return new SignalProcessor({
+  return new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never,
     ...makeSharedNewDeps(),
     threadDb,
     accountDb,

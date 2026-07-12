@@ -15,6 +15,7 @@ const lowerEmail = z.string()
 // Lowercases + trims a domain string (no email-format validation).
 const lowerDomain = z.string().transform(s => s.toLowerCase().trim());
 const ThreadStatus = z.enum(["active", "archived", "deleted", "report_violation"]);
+const ResourceStatus = z.enum(["active", "complete"]);
 const ThreadUrgency = z.enum(["critical", "high", "normal", "low", "silent"]);
 const Workflow = z.enum(WORKFLOWS);
 const SortField = z.enum(["lastSignalAt", "createdAt"]);
@@ -47,6 +48,13 @@ export const UpdateThreadRequest = z.object({
   followupAt: z.string().datetime().optional(),
 });
 export type UpdateThreadRequest = z.infer<typeof UpdateThreadRequest>;
+
+// ---- Resource ----
+
+export const UpdateResourceRequest = z.object({
+  status: ResourceStatus,
+});
+export type UpdateResourceRequest = z.infer<typeof UpdateResourceRequest>;
 
 // ---- Signal ----
 

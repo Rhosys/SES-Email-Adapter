@@ -191,7 +191,7 @@ describe("Feature: split-embedding-pipeline, Property 2: Primary vector flows to
       findMatch: vi.fn().mockResolvedValue(ok(null)),
     };
 
-    const processor = new SignalProcessor({ ...makeSharedNewDeps(),
+    const processor = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
       ...makeStore(),
       contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
       classifier: { classify: vi.fn().mockResolvedValue(ok({ ...CLASSIFICATION })) },

@@ -21,6 +21,8 @@ import type { MultiClusterAuroraWriter } from "../database/thread-matcher.js";
 import type { ThreadDatabase, UpdateThreadFields } from "../database/thread-database.js";
 import type { AccountDatabase } from "../database/account-database.js";
 import type { ProcessingDatabase } from "../database/processing-database.js";
+import type { ResourceDatabase } from "../database/resource-database.js";
+import { deriveResourceInfo } from "./resource-info.js";
 import type { S3RetentionService } from "../embedding/s3-retention-service.js";
 import { getRetentionForPlan } from "../embedding/retention-tier.js";
 import type { BillingPlan } from "../embedding/retention-tier.js";
@@ -262,6 +264,7 @@ interface SignalProcessorOptions {
   threadDb: ThreadDatabase;
   accountDb: AccountDatabase;
   processingDb: ProcessingDatabase;
+  resourceDb: ResourceDatabase;
   contentSanitizer: ContentSanitizerClient;
   userCodeExecutor: UserCodeExecutorClient;
   classifier: Pick<SignalClassifier, "classify">;
@@ -289,6 +292,7 @@ export class SignalProcessor {
   private readonly threadDb: ThreadDatabase;
   private readonly accountDb: AccountDatabase;
   private readonly processingDb: ProcessingDatabase;
+  private readonly resourceDb: ResourceDatabase;
   private readonly contentSanitizer: ContentSanitizerClient;
   private readonly userCodeExecutor: UserCodeExecutorClient;
   private readonly classifier: Pick<SignalClassifier, "classify">;
@@ -315,6 +319,7 @@ export class SignalProcessor {
     this.threadDb = opts.threadDb;
     this.accountDb = opts.accountDb;
     this.processingDb = opts.processingDb;
+    this.resourceDb = opts.resourceDb;
     this.contentSanitizer = opts.contentSanitizer;
     this.userCodeExecutor = opts.userCodeExecutor;
     this.classifier = opts.classifier;
@@ -1367,6 +1372,27 @@ export class SignalProcessor {
     const saveSignalResult = await this.threadDb.saveSignal(signal);
     if (saveSignalResult.isErr()) return err(saveSignalResult.error);
     this.logger.trackPoint("signal_saved", { signalId: signal.id, threadId: thread.id });
+
+    // Resource upsert — best-effort, derived read-model only. A failure here must not
+    // fail the signal ingest or trigger an SQS retry (unlike the thread/signal saves above).
+    const resourceInfo = deriveResourceInfo(signal.data.workflow, signal.data.workflowData);
+    if (resourceInfo) {
+      const resourceTtl = ttl !== undefined
+        ? Math.max(ttl, Math.floor(DateTime.fromISO(resourceInfo.expectedResolutionDate).toSeconds()) + 365 * 24 * 60 * 60)
+        : undefined;
+      const resourceResult = await this.resourceDb.saveResource({
+        accountId,
+        threadId: thread.id,
+        workflow: signal.data.workflow,
+        resourceKey: resourceInfo.resourceKey,
+        expectedResolutionDate: resourceInfo.expectedResolutionDate,
+        ...(resourceTtl !== undefined ? { ttl: resourceTtl } : {}),
+      });
+      if (resourceResult.isErr()) {
+        this.logger.error(`Resource save failed: ${resourceResult.error.message}`, { code: "processor.resource_save_failed", threadId: thread.id, workflow: signal.data.workflow, error: resourceResult.error });
+      }
+      this.logger.trackPoint("resource_saved", { threadId: thread.id, workflow: signal.data.workflow, status: resourceResult.isOk() ? resourceResult.value.status : null });
+    }
 
     const allowedCat = statusToMetric(signal.status);
     if (allowedCat) {

@@ -148,7 +148,7 @@ describe("SYSTEM account workflow override", () => {
       { annotateRuleError: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
     );
 
-    return new SignalProcessor({
+    return new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never,
       ...SHARED_NEW_DEPS,
       threadDb,
       accountDb,

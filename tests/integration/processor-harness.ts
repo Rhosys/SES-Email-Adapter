@@ -111,7 +111,7 @@ export async function createProcessorHarness(): Promise<ProcessorHarness> {
 
   const sideEffects: SideEffectPayload[] = [];
 
-  const processor = new SignalProcessor({
+  const processor = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never,
     threadDb,
     accountDb,
     processingDb,

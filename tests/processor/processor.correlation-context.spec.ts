@@ -107,7 +107,7 @@ describe("processSideEffect — correlation context", () => {
 
   function makeProcessor(opts: { replySender: ReplySender; forwardingService: IForwardingService }) {
     mockLogger = createMockLogger();
-    return new SignalProcessor({ ...makeSharedNewDeps(),
+    return new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
       ...makeStore(),
       contentSanitizer: { invoke: vi.fn() } as unknown as ContentSanitizerClient,
       s3Client: { send: vi.fn().mockResolvedValue({ Body: { transformToByteArray: () => Promise.resolve(new Uint8Array([1, 2, 3])) } }) } as never,

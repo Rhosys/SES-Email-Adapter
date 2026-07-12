@@ -198,7 +198,7 @@ describe("Multi-cluster fanout writes vectors to every active target", () => {
     };
 
     const mockLogger = createMockLogger();
-    const processor = new SignalProcessor({ ...makeSharedNewDeps(),
+    const processor = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
 threadDb, accountDb, processingDb,
       contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
       classifier: makeClassifier(),
@@ -258,7 +258,7 @@ threadDb, accountDb, processingDb,
     };
 
     const mockLogger = createMockLogger();
-    const processor = new SignalProcessor({ ...makeSharedNewDeps(),
+    const processor = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
 threadDb, accountDb, processingDb,
       contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
       classifier: makeClassifier(),
@@ -319,7 +319,7 @@ threadDb, accountDb, processingDb,
     };
 
     const mockLogger = createMockLogger();
-    const processor = new SignalProcessor({ ...makeSharedNewDeps(),
+    const processor = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
 threadDb, accountDb, processingDb,
       contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
       classifier: makeClassifier(),
