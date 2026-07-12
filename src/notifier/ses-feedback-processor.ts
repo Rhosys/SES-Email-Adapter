@@ -26,7 +26,7 @@ export interface FeedbackSignalStore {
   }): Promise<Result<Signal, DbError>>;
 }
 
-export class FeedbackProcessor {
+export class SesFeedbackProcessor {
   private readonly processingDb: ProcessingDatabase;
   private readonly accountDb: AccountDatabase;
   private readonly signalStore: FeedbackSignalStore;
