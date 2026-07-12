@@ -21,7 +21,6 @@ export interface SaveResourceParams {
   workflow: Workflow;
   resourceKey: string;
   expectedResolutionDate: string;
-  terminal: boolean;
   ttl?: number;
 }
 
@@ -34,11 +33,13 @@ export interface ListResourcesParams extends PageParams {
 export class ResourceDatabase {
   // Deterministic sk means this is always the right item to write to — no lookup,
   // no upsert branching. A later signal for the same (threadId, workflow, resourceKey)
-  // just overwrites status/date/ttl in place via the same key.
+  // overwrites the date/ttl in place via the same key. Completion is never inferred here:
+  // #status/gsi1pk are only ever set on first creation (if_not_exists) — a signal can never
+  // change a resource's status once it exists. Only setResourceStatus (an explicit user
+  // action) changes status after creation.
   async saveResource(params: SaveResourceParams): Promise<Result<Resource, DbError>> {
-    const { accountId, threadId, workflow, resourceKey, expectedResolutionDate, terminal, ttl } = params;
+    const { accountId, threadId, workflow, resourceKey, expectedResolutionDate, ttl } = params;
     const now = DateTime.utc().toISO()!;
-    const status: ResourceStatus = terminal ? "complete" : "active";
     const sk = `${workflow}#${resourceKey}`;
 
     const setParts: string[] = [
@@ -47,10 +48,10 @@ export class ResourceDatabase {
       "threadId = :threadId",
       "workflow = :workflow",
       "resourceKey = :resourceKey",
-      "#status = :status",
+      "#status = if_not_exists(#status, :defaultStatus)",
       "expectedResolutionDate = :erd",
       "updatedAt = :now",
-      "gsi1pk = :gsi1pk",
+      "gsi1pk = if_not_exists(gsi1pk, :defaultGsi1pk)",
       "gsi1sk = :erd",
     ];
     const exprNames: Record<string, string> = { "#status": "status" };
@@ -60,22 +61,48 @@ export class ResourceDatabase {
       ":threadId": threadId,
       ":workflow": workflow,
       ":resourceKey": resourceKey,
-      ":status": status,
+      ":defaultStatus": "active" satisfies ResourceStatus,
       ":erd": expectedResolutionDate,
-      ":gsi1pk": buildGsi1pk(accountId, status, workflow),
+      ":defaultGsi1pk": buildGsi1pk(accountId, "active", workflow),
     };
 
-    // Handles reactivation — e.g. a "return" signal arriving after a prior "delivered" completion.
-    const removeParts: string[] = [];
-    if (terminal) {
-      setParts.push("resolvedAt = :now");
-    } else {
-      removeParts.push("resolvedAt");
-    }
     if (ttl !== undefined) {
       setParts.push("#ttl = :ttl");
       exprNames["#ttl"] = "ttl";
       exprValues[":ttl"] = ttl;
+    }
+
+    const updateExpr = `SET ${setParts.join(", ")}`;
+
+    try {
+      const result = await dynamo.send(new UpdateCommand({
+        TableName: RESOURCES_TABLE,
+        Key: { pk: threadPk(accountId, threadId), sk },
+        UpdateExpression: updateExpr,
+        ExpressionAttributeNames: exprNames,
+        ExpressionAttributeValues: exprValues,
+        ReturnValues: "ALL_NEW",
+      }));
+      return ok(result.Attributes as unknown as Resource);
+    } catch (e) {
+      return err(dbError(e));
+    }
+  }
+
+  // The only way a resource's status changes after creation — an explicit user action
+  // (e.g. PATCH /accounts/:id/resources/:resourceId). Unconditional: always wins over
+  // whatever saveResource last wrote, and a later saveResource call can never undo it
+  // (its #status/gsi1pk writes are if_not_exists-guarded).
+  async setResourceStatus(accountId: string, threadId: string, sk: string, status: ResourceStatus): Promise<Result<Resource, DbError>> {
+    const now = DateTime.utc().toISO()!;
+    const workflow = sk.split("#")[0] as Workflow;
+
+    const setParts: string[] = ["#status = :status", "gsi1pk = :gsi1pk", "updatedAt = :now"];
+    const removeParts: string[] = [];
+    if (status === "complete") {
+      setParts.push("resolvedAt = :now");
+    } else {
+      removeParts.push("resolvedAt");
     }
 
     let updateExpr = `SET ${setParts.join(", ")}`;
@@ -86,8 +113,8 @@ export class ResourceDatabase {
         TableName: RESOURCES_TABLE,
         Key: { pk: threadPk(accountId, threadId), sk },
         UpdateExpression: updateExpr,
-        ExpressionAttributeNames: exprNames,
-        ExpressionAttributeValues: exprValues,
+        ExpressionAttributeNames: { "#status": "status" },
+        ExpressionAttributeValues: { ":status": status, ":gsi1pk": buildGsi1pk(accountId, status, workflow), ":now": now },
         ReturnValues: "ALL_NEW",
       }));
       return ok(result.Attributes as unknown as Resource);

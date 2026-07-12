@@ -4,28 +4,22 @@ import type { WorkflowData } from "../../src/types/index.js";
 
 describe("deriveResourceInfo", () => {
   describe("package", () => {
-    it("returns date + resourceKey + non-terminal for an in-progress package", () => {
+    it("returns date + resourceKey", () => {
       const info = deriveResourceInfo("package", {
         workflow: "package", packageType: "shipping", retailer: "Amazon",
         orderNumber: "123-456", estimatedDelivery: "2024-01-20T00:00:00Z",
       });
-      expect(info).toEqual({ expectedResolutionDate: "2024-01-20T00:00:00Z", resourceKey: "123-456", terminal: false });
+      expect(info).toEqual({ expectedResolutionDate: "2024-01-20T00:00:00Z", resourceKey: "123-456" });
     });
 
-    it.each(["delivered", "cancellation", "refund", "return"] as const)("packageType %s is terminal", (packageType) => {
-      const info = deriveResourceInfo("package", {
-        workflow: "package", packageType, retailer: "Amazon",
-        orderNumber: "123-456", estimatedDelivery: "2024-01-20T00:00:00Z",
-      });
-      expect(info?.terminal).toBe(true);
-    });
-
-    it.each(["confirmation", "shipping", "out_for_delivery"] as const)("packageType %s is not terminal", (packageType) => {
-      const info = deriveResourceInfo("package", {
-        workflow: "package", packageType, retailer: "Amazon",
-        orderNumber: "123-456", estimatedDelivery: "2024-01-20T00:00:00Z",
-      });
-      expect(info?.terminal).toBe(false);
+    it("returns the same shape regardless of packageType — completion is never inferred here", () => {
+      for (const packageType of ["confirmation", "shipping", "out_for_delivery", "delivered", "return", "refund", "cancellation"] as const) {
+        const info = deriveResourceInfo("package", {
+          workflow: "package", packageType, retailer: "Amazon",
+          orderNumber: "123-456", estimatedDelivery: "2024-01-20T00:00:00Z",
+        });
+        expect(info).toEqual({ expectedResolutionDate: "2024-01-20T00:00:00Z", resourceKey: "123-456" });
+      }
     });
 
     it("returns null when estimatedDelivery is missing", () => {
@@ -42,12 +36,12 @@ describe("deriveResourceInfo", () => {
   });
 
   describe("travel", () => {
-    it("prefers returnDate over departureDate, uses flightNumber, never terminal", () => {
+    it("prefers returnDate over departureDate, uses flightNumber", () => {
       const info = deriveResourceInfo("travel", {
         workflow: "travel", travelType: "flight", provider: "United",
         departureDate: "2024-02-01T00:00:00Z", returnDate: "2024-02-10T00:00:00Z", flightNumber: "UA123",
       });
-      expect(info).toEqual({ expectedResolutionDate: "2024-02-10T00:00:00Z", resourceKey: "UA123", terminal: false });
+      expect(info).toEqual({ expectedResolutionDate: "2024-02-10T00:00:00Z", resourceKey: "UA123" });
     });
 
     it("falls back to departureDate and confirmationNumber when returnDate/flightNumber absent", () => {
@@ -55,7 +49,7 @@ describe("deriveResourceInfo", () => {
         workflow: "travel", travelType: "hotel", provider: "Marriott",
         departureDate: "2024-02-01T00:00:00Z", confirmationNumber: "CONF-1",
       });
-      expect(info).toEqual({ expectedResolutionDate: "2024-02-01T00:00:00Z", resourceKey: "CONF-1", terminal: false });
+      expect(info).toEqual({ expectedResolutionDate: "2024-02-01T00:00:00Z", resourceKey: "CONF-1" });
     });
 
     it("returns null when neither date nor key is present", () => {
@@ -64,18 +58,13 @@ describe("deriveResourceInfo", () => {
   });
 
   describe("payments", () => {
-    it.each(["receipt", "payment_failed", "refund"] as const)("paymentType %s is terminal", (paymentType) => {
-      const info = deriveResourceInfo("payments", {
-        workflow: "payments", paymentType, vendor: "AWS", dueDate: "2024-03-01T00:00:00Z", invoiceNumber: "INV-1",
-      });
-      expect(info?.terminal).toBe(true);
-    });
-
-    it("invoice is not terminal", () => {
-      const info = deriveResourceInfo("payments", {
-        workflow: "payments", paymentType: "invoice", vendor: "AWS", dueDate: "2024-03-01T00:00:00Z", invoiceNumber: "INV-1",
-      });
-      expect(info?.terminal).toBe(false);
+    it("returns the same shape regardless of paymentType", () => {
+      for (const paymentType of ["invoice", "receipt", "subscription_renewal", "payment_failed", "plan_changed", "tax", "wire_transfer", "refund", "statement", "other"] as const) {
+        const info = deriveResourceInfo("payments", {
+          workflow: "payments", paymentType, vendor: "AWS", dueDate: "2024-03-01T00:00:00Z", invoiceNumber: "INV-1",
+        });
+        expect(info).toEqual({ expectedResolutionDate: "2024-03-01T00:00:00Z", resourceKey: "INV-1" });
+      }
     });
 
     it("returns null when dueDate or invoiceNumber is missing", () => {
@@ -85,38 +74,27 @@ describe("deriveResourceInfo", () => {
   });
 
   describe("healthcare", () => {
-    it("test_results is terminal, keyed by provider", () => {
-      const info = deriveResourceInfo("healthcare", {
-        workflow: "healthcare", eventType: "test_results", provider: "Dr. Smith",
-        appointmentDate: "2024-04-01T00:00:00Z", requiresAction: false,
-      });
-      expect(info).toEqual({ expectedResolutionDate: "2024-04-01T00:00:00Z", resourceKey: "Dr. Smith", terminal: true });
-    });
-
-    it("appointment_reminder is not terminal", () => {
+    it("returns date + resourceKey, keyed by provider", () => {
       const info = deriveResourceInfo("healthcare", {
         workflow: "healthcare", eventType: "appointment_reminder", provider: "Dr. Smith",
         appointmentDate: "2024-04-01T00:00:00Z", requiresAction: false,
       });
-      expect(info?.terminal).toBe(false);
+      expect(info).toEqual({ expectedResolutionDate: "2024-04-01T00:00:00Z", resourceKey: "Dr. Smith" });
+    });
+
+    it("returns null when appointmentDate or provider is missing", () => {
+      expect(deriveResourceInfo("healthcare", { workflow: "healthcare", eventType: "appointment_reminder", requiresAction: false, appointmentDate: "2024-04-01T00:00:00Z" })).toBeNull();
+      expect(deriveResourceInfo("healthcare", { workflow: "healthcare", eventType: "appointment_reminder", requiresAction: false, provider: "Dr. Smith" })).toBeNull();
     });
   });
 
   describe("job", () => {
-    it("offer/rejected are terminal, keyed by company:role", () => {
+    it("returns date + resourceKey, keyed by company:role", () => {
       const info = deriveResourceInfo("job", {
-        workflow: "job", jobType: "offer", company: "Acme", role: "Engineer",
-        interviewDate: "2024-05-01T00:00:00Z", applicationStatus: "offer",
+        workflow: "job", jobType: "interview_request", company: "Acme", role: "Engineer",
+        interviewDate: "2024-05-01T00:00:00Z", applicationStatus: "interview",
       });
-      expect(info).toEqual({ expectedResolutionDate: "2024-05-01T00:00:00Z", resourceKey: "Acme:Engineer", terminal: true });
-    });
-
-    it("reviewing is not terminal", () => {
-      const info = deriveResourceInfo("job", {
-        workflow: "job", jobType: "application_status", company: "Acme", role: "Engineer",
-        interviewDate: "2024-05-01T00:00:00Z", applicationStatus: "reviewing",
-      });
-      expect(info?.terminal).toBe(false);
+      expect(info).toEqual({ expectedResolutionDate: "2024-05-01T00:00:00Z", resourceKey: "Acme:Engineer" });
     });
 
     it("returns null when company or role is missing", () => {
@@ -127,20 +105,20 @@ describe("deriveResourceInfo", () => {
   });
 
   describe("events", () => {
-    it("cancellation is terminal, keyed by ticketReference", () => {
+    it("keys by ticketReference when present", () => {
       const info = deriveResourceInfo("events", {
-        workflow: "events", eventType: "cancellation", eventName: "Concert",
+        workflow: "events", eventType: "reminder", eventName: "Concert",
         eventStartDatetime: "2024-06-01T20:00:00Z", ticketReference: "TIX-1",
       });
-      expect(info).toEqual({ expectedResolutionDate: "2024-06-01T20:00:00Z", resourceKey: "TIX-1", terminal: true });
+      expect(info).toEqual({ expectedResolutionDate: "2024-06-01T20:00:00Z", resourceKey: "TIX-1" });
     });
 
-    it("falls back to eventName when ticketReference is absent, reminder is not terminal", () => {
+    it("falls back to eventName when ticketReference is absent", () => {
       const info = deriveResourceInfo("events", {
         workflow: "events", eventType: "reminder", eventName: "Concert",
         eventStartDatetime: "2024-06-01T20:00:00Z",
       });
-      expect(info).toEqual({ expectedResolutionDate: "2024-06-01T20:00:00Z", resourceKey: "Concert", terminal: false });
+      expect(info).toEqual({ expectedResolutionDate: "2024-06-01T20:00:00Z", resourceKey: "Concert" });
     });
 
     it("returns null when eventStartDatetime is missing", () => {

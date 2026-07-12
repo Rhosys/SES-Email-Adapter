@@ -25,7 +25,7 @@ describe("ResourceDatabase.saveResource", () => {
 
     await db.saveResource({
       accountId: "acct-1", threadId: "thr-001", workflow: "package",
-      resourceKey: "123-456", expectedResolutionDate: "2024-07-01T00:00:00Z", terminal: false,
+      resourceKey: "123-456", expectedResolutionDate: "2024-07-01T00:00:00Z",
     });
 
     expect(ddbMock.commandCalls(GetCommand)).toHaveLength(0);
@@ -36,35 +36,31 @@ describe("ResourceDatabase.saveResource", () => {
     expect(input.Key).toEqual({ pk: "ACCT#acct-1#THREAD#thr-001", sk: "package#123-456" });
   });
 
-  it("active resource: sets status=active, gsi1pk includes STATUS#active, removes resolvedAt", async () => {
+  it("status/gsi1pk are if_not_exists-guarded — only apply on first creation, defaulting to active", async () => {
     ddbMock.on(UpdateCommand).resolves({ Attributes: {} });
 
     await db.saveResource({
       accountId: "acct-1", threadId: "thr-001", workflow: "package",
-      resourceKey: "123-456", expectedResolutionDate: "2024-07-01T00:00:00Z", terminal: false,
+      resourceKey: "123-456", expectedResolutionDate: "2024-07-01T00:00:00Z",
     });
 
     const input = ddbMock.commandCalls(UpdateCommand)[0]!.args[0].input;
-    expect(input.ExpressionAttributeValues![":status"]).toBe("active");
-    expect(input.ExpressionAttributeValues![":gsi1pk"]).toBe("ACCT#acct-1#STATUS#active#WORKFLOW#package");
-    expect(input.ExpressionAttributeValues![":erd"]).toBe("2024-07-01T00:00:00Z");
-    expect(input.UpdateExpression).toContain("REMOVE resolvedAt");
-    expect(input.UpdateExpression).not.toContain("resolvedAt = :now");
+    expect(input.UpdateExpression).toContain("#status = if_not_exists(#status, :defaultStatus)");
+    expect(input.UpdateExpression).toContain("gsi1pk = if_not_exists(gsi1pk, :defaultGsi1pk)");
+    expect(input.ExpressionAttributeValues![":defaultStatus"]).toBe("active");
+    expect(input.ExpressionAttributeValues![":defaultGsi1pk"]).toBe("ACCT#acct-1#STATUS#active#WORKFLOW#package");
   });
 
-  it("terminal resource: sets status=complete, gsi1pk includes STATUS#complete, sets resolvedAt", async () => {
+  it("never touches resolvedAt — that's owned entirely by setResourceStatus", async () => {
     ddbMock.on(UpdateCommand).resolves({ Attributes: {} });
 
     await db.saveResource({
       accountId: "acct-1", threadId: "thr-001", workflow: "package",
-      resourceKey: "123-456", expectedResolutionDate: "2024-07-01T00:00:00Z", terminal: true,
+      resourceKey: "123-456", expectedResolutionDate: "2024-07-01T00:00:00Z",
     });
 
     const input = ddbMock.commandCalls(UpdateCommand)[0]!.args[0].input;
-    expect(input.ExpressionAttributeValues![":status"]).toBe("complete");
-    expect(input.ExpressionAttributeValues![":gsi1pk"]).toBe("ACCT#acct-1#STATUS#complete#WORKFLOW#package");
-    expect(input.UpdateExpression).toContain("resolvedAt = :now");
-    expect(input.UpdateExpression).not.toContain("REMOVE resolvedAt");
+    expect(input.UpdateExpression).not.toContain("resolvedAt");
   });
 
   it("gsi1sk is the expectedResolutionDate, enabling a native date-range query", async () => {
@@ -72,7 +68,7 @@ describe("ResourceDatabase.saveResource", () => {
 
     await db.saveResource({
       accountId: "acct-1", threadId: "thr-001", workflow: "events",
-      resourceKey: "TIX-1", expectedResolutionDate: "2024-08-01T20:00:00Z", terminal: false,
+      resourceKey: "TIX-1", expectedResolutionDate: "2024-08-01T20:00:00Z",
     });
 
     const input = ddbMock.commandCalls(UpdateCommand)[0]!.args[0].input;
@@ -85,7 +81,7 @@ describe("ResourceDatabase.saveResource", () => {
 
     await db.saveResource({
       accountId: "acct-1", threadId: "thr-001", workflow: "package",
-      resourceKey: "123-456", expectedResolutionDate: "2024-07-01T00:00:00Z", terminal: false, ttl: 1735689600,
+      resourceKey: "123-456", expectedResolutionDate: "2024-07-01T00:00:00Z", ttl: 1735689600,
     });
     let input = ddbMock.commandCalls(UpdateCommand)[0]!.args[0].input;
     expect(input.ExpressionAttributeValues![":ttl"]).toBe(1735689600);
@@ -94,11 +90,69 @@ describe("ResourceDatabase.saveResource", () => {
     ddbMock.resetHistory();
     await db.saveResource({
       accountId: "acct-1", threadId: "thr-001", workflow: "package",
-      resourceKey: "123-456", expectedResolutionDate: "2024-07-01T00:00:00Z", terminal: false,
+      resourceKey: "123-456", expectedResolutionDate: "2024-07-01T00:00:00Z",
     });
     input = ddbMock.commandCalls(UpdateCommand)[0]!.args[0].input;
     expect(input.ExpressionAttributeValues![":ttl"]).toBeUndefined();
     expect(input.UpdateExpression).not.toContain("#ttl");
+  });
+});
+
+describe("ResourceDatabase.setResourceStatus", () => {
+  let db: ResourceDatabase;
+
+  beforeEach(() => {
+    ddbMock.reset();
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2024-06-15T10:30:00.000Z"));
+    db = new ResourceDatabase();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    ddbMock.restore();
+  });
+
+  it("unconditionally sets status + gsi1pk, no if_not_exists guard — always wins", async () => {
+    ddbMock.on(UpdateCommand).resolves({ Attributes: {} });
+
+    await db.setResourceStatus("acct-1", "thr-001", "package#123-456", "complete");
+
+    const input = ddbMock.commandCalls(UpdateCommand)[0]!.args[0].input;
+    expect(input.Key).toEqual({ pk: "ACCT#acct-1#THREAD#thr-001", sk: "package#123-456" });
+    expect(input.UpdateExpression).toContain("#status = :status");
+    expect(input.UpdateExpression).not.toContain("if_not_exists");
+    expect(input.ExpressionAttributeValues![":status"]).toBe("complete");
+    expect(input.ExpressionAttributeValues![":gsi1pk"]).toBe("ACCT#acct-1#STATUS#complete#WORKFLOW#package");
+  });
+
+  it("derives workflow from the sk prefix to rebuild gsi1pk", async () => {
+    ddbMock.on(UpdateCommand).resolves({ Attributes: {} });
+
+    await db.setResourceStatus("acct-1", "thr-001", "events#TIX-1", "active");
+
+    const input = ddbMock.commandCalls(UpdateCommand)[0]!.args[0].input;
+    expect(input.ExpressionAttributeValues![":gsi1pk"]).toBe("ACCT#acct-1#STATUS#active#WORKFLOW#events");
+  });
+
+  it("setting complete sets resolvedAt", async () => {
+    ddbMock.on(UpdateCommand).resolves({ Attributes: {} });
+
+    await db.setResourceStatus("acct-1", "thr-001", "package#123-456", "complete");
+
+    const input = ddbMock.commandCalls(UpdateCommand)[0]!.args[0].input;
+    expect(input.UpdateExpression).toContain("resolvedAt = :now");
+    expect(input.UpdateExpression).not.toContain("REMOVE resolvedAt");
+  });
+
+  it("setting active removes resolvedAt (reopen)", async () => {
+    ddbMock.on(UpdateCommand).resolves({ Attributes: {} });
+
+    await db.setResourceStatus("acct-1", "thr-001", "package#123-456", "active");
+
+    const input = ddbMock.commandCalls(UpdateCommand)[0]!.args[0].input;
+    expect(input.UpdateExpression).toContain("REMOVE resolvedAt");
+    expect(input.UpdateExpression).not.toContain("resolvedAt = :now");
   });
 });
 

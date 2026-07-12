@@ -47,13 +47,15 @@ function makeResourceDb() {
     saveResource: vi.fn(),
     getResource: vi.fn().mockResolvedValue(ok(null)),
     listResources: vi.fn().mockResolvedValue(ok({ items: [] })),
+    setResourceStatus: vi.fn(),
   };
 }
 
-async function req(app: ReturnType<typeof createApp>, method: string, path: string): Promise<Response> {
+async function req(app: ReturnType<typeof createApp>, method: string, path: string, body?: unknown): Promise<Response> {
   return app.fetch(new Request(`http://localhost${path}`, {
     method,
     headers: { "Content-Type": "application/json", Authorization: "Bearer valid-token" },
+    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   }));
 }
 
@@ -152,6 +154,73 @@ describe("Resources API", () => {
       const res = await req(app, "GET", `${A}/resources/${resourceId}`);
 
       expect(res.status).toBe(404);
+    });
+  });
+
+  describe("PATCH /accounts/:accountId/resources/:resourceId", () => {
+    it("404s on a malformed/undecodable resourceId, never touches the DB", async () => {
+      const res = await req(app, "PATCH", `${A}/resources/not-a-real-id`, { status: "complete" });
+      expect(res.status).toBe(404);
+      expect(resourceDb.getResource).not.toHaveBeenCalled();
+      expect(resourceDb.setResourceStatus).not.toHaveBeenCalled();
+    });
+
+    it("404s when the resource does not exist, without calling setResourceStatus", async () => {
+      resourceDb.getResource.mockResolvedValue(ok(null));
+      const resourceId = encodeResourceId("thr-001", "package#123-456");
+
+      const res = await req(app, "PATCH", `${A}/resources/${resourceId}`, { status: "complete" });
+
+      expect(res.status).toBe(404);
+      expect(resourceDb.setResourceStatus).not.toHaveBeenCalled();
+    });
+
+    it("404s when the resource belongs to a different account (tenant isolation)", async () => {
+      resourceDb.getResource.mockResolvedValue(ok(makeResource({ accountId: "acct-other" })));
+      const resourceId = encodeResourceId("thr-001", "package#123-456");
+
+      const res = await req(app, "PATCH", `${A}/resources/${resourceId}`, { status: "complete" });
+
+      expect(res.status).toBe(404);
+      expect(resourceDb.setResourceStatus).not.toHaveBeenCalled();
+    });
+
+    it("400s on an invalid status value", async () => {
+      resourceDb.getResource.mockResolvedValue(ok(makeResource()));
+      const resourceId = encodeResourceId("thr-001", "package#123-456");
+
+      const res = await req(app, "PATCH", `${A}/resources/${resourceId}`, { status: "bogus" });
+
+      expect(res.status).toBe(400);
+      expect(resourceDb.setResourceStatus).not.toHaveBeenCalled();
+    });
+
+    it("marks a resource complete: decodes id, verifies existence, calls setResourceStatus, returns 200", async () => {
+      resourceDb.getResource.mockResolvedValue(ok(makeResource()));
+      resourceDb.setResourceStatus.mockResolvedValue(ok(makeResource({ status: "complete", resolvedAt: "2024-06-16T00:00:00Z" })));
+      const resourceId = encodeResourceId("thr-001", "package#123-456");
+
+      const res = await req(app, "PATCH", `${A}/resources/${resourceId}`, { status: "complete" });
+
+      expect(res.status).toBe(200);
+      expect(resourceDb.setResourceStatus).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "thr-001", "package#123-456", "complete");
+      const body = await res.json() as { status: string; resolvedAt?: string };
+      expect(body.status).toBe("complete");
+      expect(body.resolvedAt).toBe("2024-06-16T00:00:00Z");
+    });
+
+    it("reopens a resource: marks active, resolvedAt disappears", async () => {
+      resourceDb.getResource.mockResolvedValue(ok(makeResource({ status: "complete", resolvedAt: "2024-06-16T00:00:00Z" })));
+      resourceDb.setResourceStatus.mockResolvedValue(ok(makeResource({ status: "active" })));
+      const resourceId = encodeResourceId("thr-001", "package#123-456");
+
+      const res = await req(app, "PATCH", `${A}/resources/${resourceId}`, { status: "active" });
+
+      expect(res.status).toBe(200);
+      expect(resourceDb.setResourceStatus).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "thr-001", "package#123-456", "active");
+      const body = await res.json() as { status: string; resolvedAt?: string };
+      expect(body.status).toBe("active");
+      expect(body.resolvedAt).toBeUndefined();
     });
   });
 });

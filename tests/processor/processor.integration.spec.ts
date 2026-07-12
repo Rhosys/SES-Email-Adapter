@@ -588,8 +588,8 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
         workflow: "package",
         resourceKey: "123-456-789",
         expectedResolutionDate: "2024-01-20T00:00:00Z",
-        terminal: false,
       });
+      expect(call).not.toHaveProperty("terminal");
 
       // Resource save happens after the signal save, not before.
       const signalOrder = vi.mocked(threadDb.saveSignal).mock.invocationCallOrder[0]!;
@@ -597,7 +597,7 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
       expect(resourceOrder).toBeGreaterThan(signalOrder);
     });
 
-    it("marks the resource terminal for a delivered package", async () => {
+    it("saves the same shape for a delivered package as any other packageType — completion is never inferred here", async () => {
       vi.mocked(classifier.classify).mockResolvedValue(ok({
         workflow: "package",
         workflowData: {
@@ -615,7 +615,10 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
       await processor.processRecord(makeMessage({}), 1);
 
       expect(resourceDb.saveResource).toHaveBeenCalledOnce();
-      expect(resourceDb.saveResource.mock.calls[0]![0]).toMatchObject({ terminal: true });
+      expect(resourceDb.saveResource.mock.calls[0]![0]).toMatchObject({
+        resourceKey: "123-456-789",
+        expectedResolutionDate: "2024-01-20T00:00:00Z",
+      });
     });
 
     it("does not save a resource for a workflow with no forward-looking date (conversation)", async () => {
