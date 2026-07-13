@@ -38,6 +38,7 @@ import { SesFeedbackProcessor } from "./notifier/ses-feedback-processor.js";
 import { DomainHealthJob } from "./jobs/domain-health-job.js";
 import { HealthcheckJob } from "./jobs/healthcheck-job.js";
 import { HealthcheckValidator } from "./jobs/healthcheck-validator.js";
+import { SesIdentityChecker } from "./email/ses-identity-checker.js";
 import { AuthressAuthService } from "./api/authress-auth.js";
 import { AuthressAccessService } from "./api/authress-access.js";
 import { createApp } from "./api/app.js";
@@ -214,6 +215,7 @@ const healthcheckJob = new HealthcheckJob({
 const healthcheckValidator = new HealthcheckValidator({
   threadDb,
   searchDatabase,
+  sesChecker: new SesIdentityChecker(sesv2),
   mailDomain: MAIL_DOMAIN,
   logger,
 });

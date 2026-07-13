@@ -322,8 +322,10 @@ describe("SesFeedbackProcessor — origin/process logging", () => {
     expect(log).toBeDefined();
     expect(log!.method).toBe("error");
     const ctx = log!.context as Record<string, unknown>;
-    expect(ctx.process).toBe("healthcheck");
-    expect(ctx.healthcheckId).toBe("healthcheck-2026-07-08");
+    const feedback = ctx.feedback as Record<string, unknown>;
+    const mail = feedback.mail as Record<string, unknown>;
+    const tags = mail.tags as Record<string, unknown>;
+    expect(tags[TAG_HEALTHCHECK_ID]).toBe("healthcheck-2026-07-08");
   });
 
   it("logs a non-system (forward) bounce at track level with the forward process", async () => {
@@ -334,7 +336,11 @@ describe("SesFeedbackProcessor — origin/process logging", () => {
     const log = logger.calls.find(c => (c.context as Record<string, unknown>)?.code === "feedback.bounce");
     expect(log).toBeDefined();
     expect(log!.method).toBe("track");
-    expect((log!.context as Record<string, unknown>).process).toBe("forward");
+    const ctx = log!.context as Record<string, unknown>;
+    const feedback = ctx.feedback as Record<string, unknown>;
+    const mail = feedback.mail as Record<string, unknown>;
+    const tags = mail.tags as Record<string, unknown>;
+    expect(tags[TAG_TYPE]).toBe("forward");
   });
 
   it("logs a healthcheck complaint at error level", async () => {
@@ -347,7 +353,11 @@ describe("SesFeedbackProcessor — origin/process logging", () => {
     const log = logger.calls.find(c => (c.context as Record<string, unknown>)?.code === "feedback.system_complaint");
     expect(log).toBeDefined();
     expect(log!.method).toBe("error");
-    expect((log!.context as Record<string, unknown>).process).toBe("healthcheck");
+    const ctx = log!.context as Record<string, unknown>;
+    const feedback = ctx.feedback as Record<string, unknown>;
+    const mail = feedback.mail as Record<string, unknown>;
+    const tags = mail.tags as Record<string, unknown>;
+    expect(tags[TAG_HEALTHCHECK_ID]).toBe("healthcheck-2026-07-08");
   });
 });
 
@@ -403,7 +413,8 @@ describe("SesFeedbackProcessor — eventType vs notificationType resolution", ()
     const log = logger.calls.find(c => (c.context as Record<string, unknown>)?.code === "feedback.unactioned_event_type");
     expect(log).toBeDefined();
     expect(log!.method).toBe("track");
-    expect((log!.context as Record<string, unknown>).eventType).toBe("Delivery");
+    const feedback = (log!.context as Record<string, unknown>).feedback as Record<string, unknown>;
+    expect(feedback.eventType).toBe("Delivery");
   });
 
   it("ERROR-logs a genuinely unrecognised eventType/notificationType instead of silently dropping it", async () => {

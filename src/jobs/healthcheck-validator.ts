@@ -55,6 +55,7 @@ export interface ValidationChecks {
 export interface HealthcheckValidatorDeps {
   threadDb: ThreadDatabase;
   searchDatabase: { hasEmbedding(threadId: string): Promise<boolean> };
+  sesChecker?: { canSendFrom(domain: string): Promise<{ verified: boolean; sendingEnabled: boolean; detail?: string }> };
   mailDomain: string;
   logger: Logger;
 }
@@ -83,6 +84,8 @@ export class HealthcheckValidator {
 
     // DNS validation — run before pipeline checks so we can surface infrastructure issues
     const dnsChecks = await this.checkPlatformDns();
+    const sesChecks = await this.checkSesIdentity();
+    const infraChecks = [...dnsChecks, ...sesChecks];
 
     let threads: Array<{ id: string; createdAt: string; workflow: string }>;
     try {
@@ -93,7 +96,7 @@ export class HealthcheckValidator {
           date,
           error: result.error,
         });
-        return { ...base, status: "unknown", rawChecks: null, checks: [...dnsChecks, ...this.errorChecks("Validation query failed — could not list threads.")] };
+        return { ...base, status: "unknown", rawChecks: null, checks: [...infraChecks, ...this.errorChecks("Validation query failed — could not list threads.")] };
       }
       threads = result.value.items;
     } catch (e) {
@@ -102,7 +105,7 @@ export class HealthcheckValidator {
         date,
         error: e,
       });
-      return { ...base, status: "unknown", rawChecks: null, checks: [...dnsChecks, ...this.errorChecks("Validation threw an unexpected error.")] };
+      return { ...base, status: "unknown", rawChecks: null, checks: [...infraChecks, ...this.errorChecks("Validation threw an unexpected error.")] };
     }
 
     // Find the healthcheck thread created on the target day. Prefer one already
@@ -112,7 +115,7 @@ export class HealthcheckValidator {
     const thread = createdOnDay.find((t) => t.workflow === "healthcheck") ?? createdOnDay[0];
 
     if (!thread) {
-      this.deps.logger.error(`Healthcheck thread not found for ${date} — email did not complete the pipeline.`, {
+      this.deps.logger.error(`Healthcheck thread not found for ${date} — cannot verify that the healthcheck was ever run.`, {
         code: "healthcheck.thread_not_found",
         date,
       });
@@ -121,7 +124,7 @@ export class HealthcheckValidator {
         status: "fail",
         rawChecks: null,
         checks: [
-          ...dnsChecks,
+          ...infraChecks,
           { id: "thread-created", label: CHECK_LABELS.threadCreated, status: "fail", detail: `No healthcheck thread was created for ${date}.` },
           { id: "workflow-classified", label: CHECK_LABELS.workflowClassified, status: "unknown" },
           { id: "embedding-indexed", label: CHECK_LABELS.embeddingIndexed, status: "unknown" },
@@ -147,7 +150,7 @@ export class HealthcheckValidator {
       checks.hasEmbedding = false;
     }
 
-    const allPassed = checks.workflowIsHealthcheck && checks.hasEmbedding && dnsChecks.every((c) => c.status === "pass");
+    const allPassed = checks.workflowIsHealthcheck && checks.hasEmbedding && infraChecks.every((c) => c.status === "pass");
     if (allPassed) {
       this.deps.logger.track(`Healthcheck validation passed — ${date}'s email fully processed.`, {
         code: "healthcheck.validation_passed",
@@ -161,7 +164,7 @@ export class HealthcheckValidator {
         date,
         threadId: thread.id,
         checks,
-        dnsChecks,
+        infraChecks,
         threadState: { id: thread.id, workflow: thread.workflow, createdAt: thread.createdAt },
       });
     }
@@ -171,7 +174,7 @@ export class HealthcheckValidator {
       status: allPassed ? "pass" : "fail",
       rawChecks: checks,
       checks: [
-        ...dnsChecks,
+        ...infraChecks,
         { id: "thread-created", label: CHECK_LABELS.threadCreated, status: "pass" },
         {
           id: "workflow-classified",
@@ -206,6 +209,36 @@ export class HealthcheckValidator {
         error: e,
       });
       return [{ id: "dns-error", label: "Platform DNS validation", status: "unknown", detail: "DNS resolution failed unexpectedly." }];
+    }
+  }
+
+  private async checkSesIdentity(): Promise<HealthCheckItem[]> {
+    if (!this.deps.sesChecker) return [];
+    const domain = this.deps.mailDomain;
+    try {
+      const result = await this.deps.sesChecker.canSendFrom(domain);
+      const checks: HealthCheckItem[] = [
+        {
+          id: "ses-identity-verified",
+          label: `SES identity verified: ${domain}`,
+          status: result.verified ? "pass" : "fail",
+          ...(!result.verified ? { detail: result.detail ?? `Domain "${domain}" is not verified in SES.` } : {}),
+        },
+        {
+          id: "ses-sending-enabled",
+          label: `SES sending enabled: ${domain}`,
+          status: result.sendingEnabled ? "pass" : "fail",
+          ...(!result.sendingEnabled ? { detail: result.detail ?? `Sending is paused or disabled for "${domain}".` } : {}),
+        },
+      ];
+      return checks;
+    } catch (e) {
+      this.deps.logger.error("SES identity check threw unexpected error.", {
+        code: "healthcheck.ses_check_error",
+        domain,
+        error: e,
+      });
+      return [{ id: "ses-error", label: "SES identity validation", status: "unknown", detail: "SES identity check failed unexpectedly." }];
     }
   }
 
