@@ -1,6 +1,6 @@
 import { AuthressClient } from "@authress/sdk";
 import { KmsServiceClientTokenProvider } from "@authress/sdk";
-import { AccessRecord, Invite } from "@authress/sdk";
+import type { AccessRecord, Invite } from "@authress/sdk";
 import { ok, err, authressServiceError } from "../errors.js";
 import type { AuthressServiceError, Result } from "../errors.js";
 import type { AccessService, AccountUser, AccountRole } from "./app.js";
@@ -172,8 +172,8 @@ export class AuthressAccessService implements AccessService {
         // _upsertUser below) — merging a new user into the matching role's statement
         // never changes what any other existing user is granted, so a forced merge is
         // safe for our specific record shape if the automatic safe merge isn't possible.
-        conflictResolutionStrategy: Invite.ConflictResolutionStrategyEnum.UNSAFE_FORCE_MERGE,
-      });
+        conflictResolutionStrategy: "UNSAFE_FORCE_MERGE" as Invite.ConflictResolutionStrategyEnum,
+      } satisfies Record<string, unknown> as unknown as Invite);
       return ok({ inviteId: response.data.inviteId! });
     } catch (e) {
       return err(authressServiceError(e));
