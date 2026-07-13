@@ -1,9 +1,8 @@
+import dns from "node:dns/promises";
 import { DateTime } from "luxon";
 import type { Logger } from "../logger.js";
 import type { ThreadDatabase } from "../database/thread-database.js";
 import { SYSTEM_ACCOUNT_ID } from "../database/system-account-db.js";
-import { checkDomain } from "../dns/dns-checker.js";
-import type { Domain } from "../types/index.js";
 
 // ---------------------------------------------------------------------------
 // Healthcheck validation
@@ -194,22 +193,70 @@ export class HealthcheckValidator {
 
   private async checkPlatformDns(): Promise<HealthCheckItem[]> {
     const domain = this.deps.mailDomain;
+    const checks: HealthCheckItem[] = [];
+
+    // MX — platform domain must have at least one MX record
     try {
-      const records = await checkDomain({ domain } as Domain);
-      return records.map((r) => ({
-        id: `dns-${r.type.toLowerCase()}-${r.name.replace(/\./g, "-")}`,
-        label: `DNS ${r.type} record: ${r.name}`,
-        status: r.status === "verified" ? "pass" as const : "fail" as const,
-        ...(r.status !== "verified" ? { detail: r.currentValue ? `Resolved to "${r.currentValue}" but expected "${r.value}"` : `No record found — expected "${r.value}"` } : {}),
-      }));
-    } catch (e) {
-      this.deps.logger.error("Platform DNS check threw unexpected error.", {
-        code: "healthcheck.dns_check_error",
-        domain,
-        error: e,
+      const mx = await dns.resolveMx(domain);
+      checks.push({
+        id: "dns-mx",
+        label: `MX record: ${domain}`,
+        status: mx.length > 0 ? "pass" : "fail",
+        ...(mx.length === 0 ? { detail: "No MX records found." } : {}),
       });
-      return [{ id: "dns-error", label: "Platform DNS validation", status: "unknown", detail: "DNS resolution failed unexpectedly." }];
+    } catch {
+      checks.push({ id: "dns-mx", label: `MX record: ${domain}`, status: "fail", detail: "DNS resolution failed — no MX record found." });
     }
+
+    // DKIM TXT — must contain v=DKIM1
+    const dkimName = `mail._domainkey.${domain}`;
+    try {
+      const txt = await dns.resolveTxt(dkimName);
+      const joined = txt.map((parts) => parts.join("")).join("");
+      const hasDkim = joined.startsWith("v=DKIM1");
+      checks.push({
+        id: "dns-dkim",
+        label: `DKIM TXT: ${dkimName}`,
+        status: hasDkim ? "pass" : "fail",
+        ...(!hasDkim ? { detail: `TXT record exists but does not start with "v=DKIM1".` } : {}),
+      });
+    } catch {
+      checks.push({ id: "dns-dkim", label: `DKIM TXT: ${dkimName}`, status: "fail", detail: "No TXT record found." });
+    }
+
+    // Bounce SPF — bounce subdomain must have SPF
+    const bounceName = `bounce.${domain}`;
+    try {
+      const txt = await dns.resolveTxt(bounceName);
+      const joined = txt.map((parts) => parts.join("")).join("");
+      const hasSpf = joined.includes("spf1");
+      checks.push({
+        id: "dns-bounce-spf",
+        label: `SPF TXT: ${bounceName}`,
+        status: hasSpf ? "pass" : "fail",
+        ...(!hasSpf ? { detail: `TXT record exists but does not contain "spf1".` } : {}),
+      });
+    } catch {
+      checks.push({ id: "dns-bounce-spf", label: `SPF TXT: ${bounceName}`, status: "fail", detail: "No TXT record found." });
+    }
+
+    // DMARC
+    const dmarcName = `_dmarc.${domain}`;
+    try {
+      const txt = await dns.resolveTxt(dmarcName);
+      const joined = txt.map((parts) => parts.join("")).join("");
+      const hasDmarc = joined.startsWith("v=DMARC1");
+      checks.push({
+        id: "dns-dmarc",
+        label: `DMARC TXT: ${dmarcName}`,
+        status: hasDmarc ? "pass" : "fail",
+        ...(!hasDmarc ? { detail: `TXT record exists but does not start with "v=DMARC1".` } : {}),
+      });
+    } catch {
+      checks.push({ id: "dns-dmarc", label: `DMARC TXT: ${dmarcName}`, status: "fail", detail: "No TXT record found." });
+    }
+
+    return checks;
   }
 
   private async checkSesIdentity(): Promise<HealthCheckItem[]> {

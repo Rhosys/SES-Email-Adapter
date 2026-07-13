@@ -4,13 +4,16 @@ import { DateTime } from "luxon";
 import { HealthcheckJob, type HealthcheckJobDeps } from "../../src/jobs/healthcheck-job.js";
 import { createMockLogger, type MockLogger } from "../helpers/mock-logger.js";
 
-vi.mock("../../src/dns/dns-checker.js", () => ({
-  checkDomain: vi.fn().mockResolvedValue([
-    { name: "platform.email.rhosys.cloud", type: "MX", value: "10 mx.platform.email.rhosys.cloud", status: "verified" },
-    { name: "mail._domainkey.platform.email.rhosys.cloud", type: "CNAME", value: "mail._domainkey.platform.email.rhosys.cloud", status: "verified" },
-    { name: "bounce.platform.email.rhosys.cloud", type: "CNAME", value: "bounce.platform.email.rhosys.cloud", status: "verified" },
-    { name: "_dmarc.platform.email.rhosys.cloud", type: "CNAME", value: "_dmarc.platform.email.rhosys.cloud", status: "verified" },
-  ]),
+vi.mock("node:dns/promises", () => ({
+  default: {
+    resolveMx: vi.fn().mockResolvedValue([{ exchange: "mx.platform.email.rhosys.cloud", priority: 10 }]),
+    resolveTxt: vi.fn().mockImplementation((name: string) => {
+      if (name.startsWith("mail._domainkey")) return Promise.resolve([["v=DKIM1; k=rsa; p=fake"]]);
+      if (name.startsWith("bounce.")) return Promise.resolve([["v=spf1 include:amazonses.com ~all"]]);
+      if (name.startsWith("_dmarc.")) return Promise.resolve([["v=DMARC1; p=none"]]);
+      return Promise.resolve([]);
+    }),
+  },
 }));
 
 // ---------------------------------------------------------------------------
