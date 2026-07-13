@@ -766,6 +766,15 @@ export class SignalProcessor {
 
     // 1b. Block emails that fail DKIM or DMARC — spoofed sender, reject immediately
     if (!opts?.unsafeSkipDmarc && (msg.dkimVerdict === "FAIL" || msg.dmarcVerdict === "FAIL")) {
+      if (isSystemAccount(accountId)) {
+        this.logger.error("SYSTEM healthcheck email failed DKIM/DMARC on inbound — our sending DKIM configuration is broken.", {
+          code: "processor.healthcheck_dkim_failure",
+          dkimVerdict: msg.dkimVerdict,
+          dmarcVerdict: msg.dmarcVerdict,
+          recipientAddress,
+          sesMessageId,
+        });
+      }
       const signalId = generateId("sgn-");
       const signal: Signal = {
         id: signalId,

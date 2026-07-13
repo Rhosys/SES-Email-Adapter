@@ -17,18 +17,16 @@ export type StatsMetric = (typeof STATS_METRICS)[number];
 // Status → Metric mapping (signal processing)
 // ---------------------------------------------------------------------------
 
-const STATUS_TO_METRIC: Record<Exclude<SignalStatus, "draft" | "pending_send" | "sent">, StatsMetric> = {
-  active: "allowed",
-  block_hidden: "blocked",
-  block_reject: "blocked",
-  report_violation: "reported",
-  quarantine_visible: "quarantined",
-  quarantine_hidden: "quarantined",
-};
-
 export function statusToMetric(status: SignalStatus): StatsMetric | null {
-  if (status === "draft" || status === "pending_send" || status === "sent") return null;
-  return STATUS_TO_METRIC[status];
+  const statusToMetricDict = {
+    active: "allowed",
+    block_hidden: "blocked",
+    block_reject: "blocked",
+    report_violation: "reported",
+    quarantine_visible: "quarantined",
+    quarantine_hidden: "quarantined",
+  } as Record<SignalStatus, StatsMetric | undefined>;
+  return statusToMetricDict[status] || null;
 }
 
 // ---------------------------------------------------------------------------
