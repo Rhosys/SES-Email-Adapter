@@ -2,6 +2,8 @@ import { DateTime } from "luxon";
 import type { Logger } from "../logger.js";
 import type { ThreadDatabase } from "../database/thread-database.js";
 import { SYSTEM_ACCOUNT_ID } from "../database/system-account-db.js";
+import { checkDomain } from "../dns/dns-checker.js";
+import type { Domain } from "../types/index.js";
 
 // ---------------------------------------------------------------------------
 // Healthcheck validation
@@ -53,6 +55,7 @@ export interface ValidationChecks {
 export interface HealthcheckValidatorDeps {
   threadDb: ThreadDatabase;
   searchDatabase: { hasEmbedding(threadId: string): Promise<boolean> };
+  mailDomain: string;
   logger: Logger;
 }
 
@@ -78,6 +81,9 @@ export class HealthcheckValidator {
     const checkedAt = DateTime.utc().toISO()!;
     const base = { checkedDate: date, checkedAt };
 
+    // DNS validation — run before pipeline checks so we can surface infrastructure issues
+    const dnsChecks = await this.checkPlatformDns();
+
     let threads: Array<{ id: string; createdAt: string; workflow: string }>;
     try {
       const result = await this.deps.threadDb.listThreads(SYSTEM_ACCOUNT_ID, { limit: LOOKBACK_LIMIT });
@@ -87,7 +93,7 @@ export class HealthcheckValidator {
           date,
           error: result.error,
         });
-        return { ...base, status: "unknown", rawChecks: null, checks: this.errorChecks("Validation query failed — could not list threads.") };
+        return { ...base, status: "unknown", rawChecks: null, checks: [...dnsChecks, ...this.errorChecks("Validation query failed — could not list threads.")] };
       }
       threads = result.value.items;
     } catch (e) {
@@ -96,7 +102,7 @@ export class HealthcheckValidator {
         date,
         error: e,
       });
-      return { ...base, status: "unknown", rawChecks: null, checks: this.errorChecks("Validation threw an unexpected error.") };
+      return { ...base, status: "unknown", rawChecks: null, checks: [...dnsChecks, ...this.errorChecks("Validation threw an unexpected error.")] };
     }
 
     // Find the healthcheck thread created on the target day. Prefer one already
@@ -115,6 +121,7 @@ export class HealthcheckValidator {
         status: "fail",
         rawChecks: null,
         checks: [
+          ...dnsChecks,
           { id: "thread-created", label: CHECK_LABELS.threadCreated, status: "fail", detail: `No healthcheck thread was created for ${date}.` },
           { id: "workflow-classified", label: CHECK_LABELS.workflowClassified, status: "unknown" },
           { id: "embedding-indexed", label: CHECK_LABELS.embeddingIndexed, status: "unknown" },
@@ -140,7 +147,7 @@ export class HealthcheckValidator {
       checks.hasEmbedding = false;
     }
 
-    const allPassed = checks.workflowIsHealthcheck && checks.hasEmbedding;
+    const allPassed = checks.workflowIsHealthcheck && checks.hasEmbedding && dnsChecks.every((c) => c.status === "pass");
     if (allPassed) {
       this.deps.logger.track(`Healthcheck validation passed — ${date}'s email fully processed.`, {
         code: "healthcheck.validation_passed",
@@ -154,6 +161,7 @@ export class HealthcheckValidator {
         date,
         threadId: thread.id,
         checks,
+        dnsChecks,
         threadState: { id: thread.id, workflow: thread.workflow, createdAt: thread.createdAt },
       });
     }
@@ -163,6 +171,7 @@ export class HealthcheckValidator {
       status: allPassed ? "pass" : "fail",
       rawChecks: checks,
       checks: [
+        ...dnsChecks,
         { id: "thread-created", label: CHECK_LABELS.threadCreated, status: "pass" },
         {
           id: "workflow-classified",
@@ -178,6 +187,26 @@ export class HealthcheckValidator {
         },
       ],
     };
+  }
+
+  private async checkPlatformDns(): Promise<HealthCheckItem[]> {
+    const domain = this.deps.mailDomain;
+    try {
+      const records = await checkDomain({ domain } as Domain);
+      return records.map((r) => ({
+        id: `dns-${r.type.toLowerCase()}-${r.name.replace(/\./g, "-")}`,
+        label: `DNS ${r.type} record: ${r.name}`,
+        status: r.status === "verified" ? "pass" as const : "fail" as const,
+        ...(r.status !== "verified" ? { detail: r.currentValue ? `Resolved to "${r.currentValue}" but expected "${r.value}"` : `No record found — expected "${r.value}"` } : {}),
+      }));
+    } catch (e) {
+      this.deps.logger.error("Platform DNS check threw unexpected error.", {
+        code: "healthcheck.dns_check_error",
+        domain,
+        error: e,
+      });
+      return [{ id: "dns-error", label: "Platform DNS validation", status: "unknown", detail: "DNS resolution failed unexpectedly." }];
+    }
   }
 
   private errorChecks(detail: string): HealthCheckItem[] {

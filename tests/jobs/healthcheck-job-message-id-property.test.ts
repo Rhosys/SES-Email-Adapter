@@ -8,6 +8,15 @@ vi.mock("../../src/email/template-renderer.js", () => ({
   renderTemplate: vi.fn().mockResolvedValue("<html>mock</html>"),
 }));
 
+vi.mock("../../src/dns/dns-checker.js", () => ({
+  checkDomain: vi.fn().mockResolvedValue([
+    { name: "platform.email.rhosys.cloud", type: "MX", value: "10 mx.platform.email.rhosys.cloud", status: "verified" },
+    { name: "mail._domainkey.platform.email.rhosys.cloud", type: "CNAME", value: "mail._domainkey.platform.email.rhosys.cloud", status: "verified" },
+    { name: "bounce.platform.email.rhosys.cloud", type: "CNAME", value: "bounce.platform.email.rhosys.cloud", status: "verified" },
+    { name: "_dmarc.platform.email.rhosys.cloud", type: "CNAME", value: "_dmarc.platform.email.rhosys.cloud", status: "verified" },
+  ]),
+}));
+
 import { HealthcheckJob, type HealthcheckJobDeps } from "../../src/jobs/healthcheck-job.js";
 
 /**
