@@ -195,19 +195,6 @@ export class HealthcheckValidator {
     const domain = this.deps.mailDomain;
     const checks: HealthCheckItem[] = [];
 
-    // MX — platform domain must have at least one MX record
-    try {
-      const mx = await dns.resolveMx(domain);
-      checks.push({
-        id: "dns-mx",
-        label: `MX record: ${domain}`,
-        status: mx.length > 0 ? "pass" : "fail",
-        ...(mx.length === 0 ? { detail: "No MX records found." } : {}),
-      });
-    } catch {
-      checks.push({ id: "dns-mx", label: `MX record: ${domain}`, status: "fail", detail: "DNS resolution failed — no MX record found." });
-    }
-
     // DKIM TXT — must contain v=DKIM1
     const dkimName = `mail._domainkey.${domain}`;
     try {
