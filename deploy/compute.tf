@@ -94,6 +94,7 @@ resource "aws_iam_role_policy" "lambda_permissions" {
         Action = [
           "ses:CreateEmailIdentity",
           "ses:DeleteEmailIdentity",
+          "ses:GetEmailIdentity",
           "ses:PutEmailIdentityMailFromAttributes",
           "ses:TagResource",
         ]
