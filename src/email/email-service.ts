@@ -39,7 +39,7 @@ export class EmailService {
   private readonly from: string;
   private readonly configSetName: string;
   private readonly logger: Logger;
-  private readonly suppressionChecker?: SuppressionChecker;
+  private readonly suppressionChecker: SuppressionChecker | undefined;
 
   constructor(sesv2: SESv2Client, opts: { from: string; configSetName: string }, logger: Logger, suppressionChecker?: SuppressionChecker) {
     this.sesv2 = sesv2;
