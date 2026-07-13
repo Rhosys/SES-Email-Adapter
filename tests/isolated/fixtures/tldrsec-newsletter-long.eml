@@ -1,0 +1,1864 @@
+Delivered-To: unit-test-email@unit-test.com
+Received: by 2002:a05:612c:14a:b0:5ad:75b0:9bf2 with SMTP id h10csp985754vqi; Thu, 2 Jul 2026 12:25:32 -0700 (PDT)
+X-Received: by 2002:ac8:5913:0:b0:516:35fe:5524 with SMTP id d75a77b69052e-51c3bfeec2emr15920771cf.5.1783020331606; Thu, 02 Jul 2026 12:25:31 -0700 (PDT)
+ARC-Seal: i=1; a=rsa-sha256; t=1783020331; cv=none; d=google.com; s=arc-20260327; b=jRmEWgzcOFGbtKA/YKtsba9pRHcntNWVlVZ63PBh8fRo2+OFS1gDxZ8p8c8GZiar/z i8/+AUgGK7b4N7MfCkrsNkFRVc1vBrWPmrd/4iINQByGAt0QhQWW5baO8D2s2H4kDwkT xOOfFBLNQJ1Gm/kAJ/q84N56bYrTbdrag2zkTxHalUhKklZQnke8uwh/ad5e99OxKPwm DQ9lo7zQMYg4Ocs9TTon/Uq9TDnJDsvPlMR1PvT6T9mpdvK4qFwqOuwng932doO0iQlR k3BC+7zTaT7e1Rob6E+eNz8dpnGT3anzAKTywDIcslUBwcO+nBs/fKDOyy1w25DZ2Dkx gfUQ==
+ARC-Message-Signature: i=1; a=rsa-sha256; c=relaxed/relaxed; d=google.com; s=arc-20260327; h=to:sid:list-unsubscribe-post:list-unsubscribe:feedback-id:reply-to :subject:message-id:mime-version:from:date:dkim-signature; bh=R2CrH6c69aIZxnMPnKic8f7+1cRNiHPCRDnd6BB/26E=; fh=robdhzcU+2+2QaTY/2eDs2kp3wy9K21teIjLP5aDAt4=; b=IkPQ7kWAOA+GnnXrTE8PtrodusGbVRHorW2VVlY9vkWrZHhNp8frIGDUukeQJ7AYFJ LkmQ5mWAsWd7sJRoixvVdXt1Bp0awpbH07nBWO0Jueo4Kyxkrjg78nrKQY5nBZFDH120 +jfT7YQsmHhlWWqCZ/Mzf+KX/4VHLMZBJF3eod9tpfap7r4vEc4wf/zVeymuQlwwMpXW Oo+R74VKZuEr9XXsXzrdxluEMToBz0bx/EbkLLAL+SeF3MF/w1Oh/NUPz/hs+lf338O+ 977mDdiFA3pYJ3R3Jy7tYDkV7QP0sdZzoPxjGmE3gr4gNO89F5HzYvoqtMWXYnVGQWNs oJeA==; dara=google.com
+ARC-Authentication-Results: i=1; mx.google.com; dkim=pass header.i=@tldrsec.com header.s=2b4 header.b=JHq8eBDt; spf=pass (google.com: domain of bounces+34517871-a8bb-user-unit-test=unit-test.com@em2840.tldrsec.com designates 159.183.29.70 as permitted sender) smtp.mailfrom="bounces+34517871-a8bb-user-unit-test=unit-test.com@em2840.tldrsec.com"; dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=tldrsec.com
+Return-Path: <bounces+34517871-a8bb-user-unit-test=unit-test.com@em2840.tldrsec.com>
+Received: from o166.ptr78.mail.beehiiv.com (o166.ptr78.mail.beehiiv.com. [159.183.29.70]) by mx.google.com with ESMTPS id 6a1803df08f44-8f47326b6f1si54933376d6.574.2026.07.02.12.25.31 for <unit-test-email@unit-test.com> (version=TLS1_3 cipher=TLS_AES_128_GCM_SHA256 bits=128/128); Thu, 02 Jul 2026 12:25:31 -0700 (PDT)
+Received-SPF: pass (google.com: domain of bounces+34517871-a8bb-user-unit-test=unit-test.com@em2840.tldrsec.com designates 159.183.29.70 as permitted sender) client-ip=159.183.29.70;
+Authentication-Results: mx.google.com; dkim=pass header.i=@tldrsec.com header.s=2b4 header.b=JHq8eBDt; spf=pass (google.com: domain of bounces+34517871-a8bb-user-unit-test=unit-test.com@em2840.tldrsec.com designates 159.183.29.70 as permitted sender) smtp.mailfrom="bounces+34517871-a8bb-user-unit-test=unit-test.com@em2840.tldrsec.com"; dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=tldrsec.com
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=tldrsec.com; h=content-type:date:from:mime-version:subject:reply-to:list-unsubscribe: list-unsubscribe-post:to:cc:content-type:date:from:subject:to; s=2b4; t=1783020330; bh=R2CrH6c69aIZxnMPnKic8f7+1cRNiHPCRDnd6BB/26E=; b=JHq8eBDtaxnQQWH6nUfls1cC+CV3ZflYUp6zHOEwWYZzJPWQ4YjlSZFL5MzH6we/W/Ph cYhUahxaVE5mtHLvNZTv+RJ1H81wcMrtPlv1QZ1IyHLh/VLvFOJIFSiD90PZvdtRvZ4u3E 65bfh4Do4Mq2xDMyMKGclJVVoM4kOeXv61aT+lHonWVQXvWrlHpQezGKFvCZggtAF7D2z7 oJw+e3te7El9+Gx55Nhih6+7qlFrDBvB/jTqyQcXBrplAnVNijPEqXyW3X0EcJfDnwHDOZ CI4gxwK1F5tp/wAaSofXyIEbeeXQzMuOeSzBqie2CYBh3w3BazAHmcdt5k3SSucw==
+Received: by recvd-canary-55bcffc57b-qnd4h with SMTP id recvd-canary-55bcffc57b-qnd4h-1-6A46BB24-6D 2026-07-02 19:25:24.512025478 +0000 UTC m=+851528.467261269
+Received: from MzQ1MTc4NzE (unknown) by geopod-ismtpd-27 (SG) with HTTP id w5qaJwekTS-6Nt1bkiFENA Thu, 02 Jul 2026 19:25:24.489 +0000 (UTC)
+Content-Type: multipart/alternative; boundary=38133b9679483e6ddda29784115ff5714961ed5d83eee3d36eb0ecdf3cec
+Date: Thu, 02 Jul 2026 19:25:30 +0000 (UTC)
+From: Clint Gibler <clint@tldrsec.com>
+Mime-Version: 1.0
+Message-ID: <w5qaJwekTS-6Nt1bkiFENA@geopod-ismtpd-27>
+Subject: [tl;dr sec] #335 - Prompt Injection as Role Confusion, PHP Ecosystem Security, New MCP Spec
+Reply-To: "Clint at tl;dr sec" <clint@tldrsec.com>
+Feedback-ID: =?us-ascii?Q?568688ac-4eef-4b74-95c5-cf109ca92c4a=3Anewsletter=3A080a561f-2435-?= =?us-ascii?Q?4477-a549-ab9f115e047c=3Ac3bcbca152a34c3?=
+List-Unsubscribe: =?us-ascii?Q?=3Cmailto=3A080a561f-2435-4477-a549-ab9f115e047c+b253c54b-eb32-4be?= =?us-ascii?Q?f-bb3d-b35ffc6b4d96+568688ac-4eef-4b74-?= =?us-ascii?Q?95c5-cf109ca92c4a=40unsub=2Ebeehiiv=2Ecom=3E=2C?= =?us-ascii?Q?_=3Chttps=3A=2F=2Ftldrsec=2Ecom=2Funsubscribe=2FeyJ0eXAiOiJKV1QiLCJhbGciOiJIU?= =?us-ascii?Q?zI1NiJ9=2EeyJzdWJzY3JpYmVyX2lkIjoiYjI1M2M?= =?us-ascii?Q?1NGItZWIzMi00YmVmLWJiM2QtYjM1ZmZjNmI0ZD?= =?us-ascii?Q?k2IiwicG9zdF9pZCI6IjU2ODY4OGFjLTRlZWYtN?= =?us-ascii?Q?GI3NC05NWM1LWNmMTA5Y2E5MmM0YSIsImxhc3Rf?= =?us-ascii?Q?cmVzb3VyY2VfZ3VpZCI6IlBvc3Q6NTY4Njg4YWM?= =?us-ascii?Q?tNGVlZi00Yjc0LTk1YzUtY2YxMDljYTkyYzRhIn?= =?us-ascii?Q?0=2E5LEUuqikqvk85ll33ojCHUdoHhJneGHY3LA0k?= =?us-ascii?Q?5hZwqY=3E?=
+List-Unsubscribe-Post: List-Unsubscribe=One-Click
+sId: 080a561f-2435-4477-a549-ab9f115e047c
+x-beehiiv-ids: =?us-ascii?Q?{=22account=5Fname=22=3A=22https=3A=2F=2Ftldrsec=2Ecom=2F=22=2C=22campaign=5Fid=22=3A=22568688ac?= =?us-ascii?Q?-4eef-4b74-95c5-cf109ca92c4a=22=2C=22category?= =?us-ascii?Q?=22=3A=22newsletter=22=2C=22email=5Fgenerated=5Fat=22=3A178?= =?us-ascii?Q?3020324=2C=22user=5Fid=22=3A=22080a561f-2435-4477-a?= =?us-ascii?Q?549-ab9f115e047c=22}?=
+x-beehiiv-type: newsletter
+x-list-id: 080a561f-2435-4477-a549-ab9f115e047c
+x-list-owner: <mailto:clint@tldrsec.com>
+x-newsletter: https://tldrsec.com/p/tldr-sec-335
+x-newsletter-id: https://tldrsec.com/
+x-newsletter-signup: https://tldrsec.com/subscribe
+X-SG-EID: =?us-ascii?Q?u001=2ExOjhGG5WFFhhdqc++ZD28IVZLfid2hv7HYb9k+P5Xq6r5is5UzmGLfnAQ?= =?us-ascii?Q?nxpk75Qf8cKd5WlVWqw7Ux2ztl76WRzGiXLnKdl?= =?us-ascii?Q?1sllzSJt6fH9KuIcvF63Cz+w5zrW6W3yyoD+uCM?= =?us-ascii?Q?WhqzmLfD1Y9TEUSe9yep4w2zI8m8UYprBBya0ia?= =?us-ascii?Q?+MovSVeFCHbj5bAHX4EmmtkowwJLghb0X43Vbsv?= =?us-ascii?Q?9ATtQkhDjebnVPNgNN64HzrHXPaW5mnvxu97yG8?= =?us-ascii?Q?Vg4R?=
+X-SG-ID: =?us-ascii?Q?u001=2ESdBcvi+Evd=2FbQef8eZF3BpTL9BgbK5wfSJMJGMsmprD1ZcmFObA4po1bG?= =?us-ascii?Q?aUE6gycR6y=2FIrXuiYRU5UXUvFEJKBCA2587=2FY+s?= =?us-ascii?Q?lgii9YOk00KyYv=2FaThXfbZ8IAF7zr6unv0RdUyj?= =?us-ascii?Q?EeviaNLyDHtX4U6xYs4YTk4w+F+QM62QkjI2q3X?= =?us-ascii?Q?JOhQQKMoPn3pJijUm1ieLOCUBtvWE0G9dRLuac7?= =?us-ascii?Q?Npuexawpu2k=2Fin41pBfQOakRGRh036CQ7lwpd79?= =?us-ascii?Q?PPD6XEFp7Pa+UL9Qrhrt6KV3vWFXZsJB0c4=2FqI7?= =?us-ascii?Q?NCwuuVZeWwSu7bBMJTPNdeVxUw24MzAuejBJbLx?= =?us-ascii?Q?uOclaxbSBGzQctsP99li7EgZNHMF18k9Piu4w46?= =?us-ascii?Q?KXD4hbiorlFH7hTo73Em29IIHHQt0ioD5OGzesP?= =?us-ascii?Q?fHY=2FSI6Fst7=2FdT5GFGubmDF=2F8kksgw163VOja1+?= =?us-ascii?Q?iCwrzrygDHdLvbf+Q1bvI7A=3D=3D?=
+To: "unit-test-email@unit-test.com" <unit-test-email@unit-test.com>
+X-Entity-ID: u001.aQBEdKb8f+qZWwrIpwDRww==
+
+--38133b9679483e6ddda29784115ff5714961ed5d83eee3d36eb0ecdf3cec
+Content-Transfer-Encoding: quoted-printable
+Content-Type: text/plain; charset=utf-8
+Mime-Version: 1.0
+
+Hey there,
+
+I hope you=E2=80=99ve been doing well!
+
+----------
+## =F0=9F=91=B0 =F0=9F=A4=B5  Wedding
+
+=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=
+=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=
+=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=
+=E2=80=94=E2=80=94
+
+This past weekend I attended a friend=E2=80=99s wedding, and it was heartwa=
+rming.
+
+The couple have been together over a decade, and had many fun stories to sh=
+are from their time in college, to adventures on the East and West Coasts.
+
+There was a welcome party the night before at a local brewery, and it just =
+so happened that the local Hells Angels chapter decided to have an event=E2=
+=80=A6 at the same time and venue =F0=9F=98=82=20
+
+So it was half people dressed in wedding semi-formal attire celebrating lov=
+e, and half Harleys, chains, black shirts, and whole arm tattoos. I subtly =
+took a photo of one man wearing a shirt that said, =E2=80=9CEvery normal ma=
+n must be tempted, as times, to spit on his hands, hoist the black flag, an=
+d begin slitting throats. -H.L. Mencken.=E2=80=9D You know, chill stuff.
+
+At one point there was a motorcycle burnout that caused a big cloud of smok=
+e, I think honoring someone who had passed. My friend said if no one does a=
+ burnout at his funeral he=E2=80=99ll be very disappointed.
+
+I enjoyed getting to meet the couple=E2=80=99s family and more of their fri=
+ends, that gives you such an interesting view into their lives and who they=
+=E2=80=99ve been over time.
+
+And I=E2=80=99ll never forget the joy of me dancing around my friend who ad=
+amantly doesn=E2=80=99t dance, except at EDM raves.
+
+It was nice to have a weekend offline, connecting with people, instead of b=
+eing terminally online and =E2=80=9CyOu=E2=80=99LL NeVeR b3lieVe WHat  jUsT=
+ DroPPed?!11!=E2=80=9D
+
+
+
+
+--------------------
+**Sponsor**
+
+# =F0=9F=93=A3** ****What Jamf changed to stop drowning in **
+**IT tickets**
+
+=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=
+=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=
+=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=
+=E2=80=94=E2=80=94
+
+500+ SaaS apps. Thousands of devices. A flood of help desk tickets. And a t=
+eam of 30 people to manage all of it.
+
+That's the reality for Jamf's IT team - but instead of drowning, they built=
+ their way out. We're bringing them live on July 10th to show you exactly h=
+ow they replaced manual, ticket-based IT work with intelligent workflows.
+
+**Tune in to hear:**
+
+* **The early use cases** that proved the value of intelligent workflows at=
+ Jamf
+
+* **Where AI fits into ITOps today **- and where it's going
+
+* How they compressed **a year-long device audit into a matter of weeks**
+
+## **=F0=9F=91=89 **[**Register now!**](https://www.tines.com/webinars/150-=
+hours-saved-in-one-month-inside-jamfs-it-ops-automation-strategy/?utm_sourc=
+e=3Dtl;drsec&utm_medium=3Dpaid_media&utm_content=3Dnewsletter-primary-0207)=
+** =F0=9F=91=88**
+
+
+----------Semgrep found automating a number of workflows with Tines quite h=
+elpful =F0=9F=91=8D=EF=B8=8F=20
+
+----------
+
+
+## AppSec
+
+=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=
+=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=
+=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=
+=E2=80=94=E2=80=94
+
+**Quicklinks**
+
+* [badkeys/badkeys](https://github.com/badkeys/badkeys) - Tool by [Hanno B=
+=C3=B6ck](https://www.linkedin.com/in/hanno-boeck/) that checks cryptograph=
+ic public keys for known vulnerabilities.
+
+* [**Escape benchmarked Claude Opus 4.8 vs. their multi-agent multi-model p=
+entesting harness on 4 apps**](https://escape.tech/blog/modern-ai-powered-p=
+entesting-tools-in-depth-benchmark/?utm_source=3Dtldrsec&utm_medium=3Drefer=
+ral&utm_campaign=3Din-text),** **Aikido and XBOW via Doyensec's numbers. On=
+ real apps with no public writeups, the harness found 4x more than the raw =
+model. On severity-weighted score, it also led on both real apps.*
+
+* [Factoring "short-sleeve" RSA keys with polynomials](https://blog.trailof=
+bits.com/2026/06/12/factoring-short-sleeve-rsa-keys-with-polynomials) - Tra=
+il of Bits's Keegan Ryan =3D=3Ddiscovered hundreds of vulnerable "short-sle=
+eve" RSA and DSA keys in the wild where private key bits were heavily biase=
+d toward 0 in regular patterns, and developed a polynomial-based factorizat=
+ion technique that exploits the regular structure of zero blocks to quickly=
+ recover 603 RSA and 74 DSA private keys.=3D=3D
+
+^*Sponsored^
+
+
+
+[Vulnerability Reports Are Not Special Anymore](https://words.filippo.io/vu=
+ln-reports)
+[Filippo Valsorda](https://bsky.app/profile/filippo.abyssdomain.expert) arg=
+ues that LLMs have changed how vulnerability reports should be perceived. F=
+or years, reports were treated as special because researchers provided scar=
+ce insight into where bugs lived and confidentiality long enough to ship a =
+fix before an exploit. In 2026, LLMs find issues about as well as most secu=
+rity researchers, and anyone can run them. The bottleneck is no longer find=
+ing potential issues but assessing which ones are real and which actually a=
+ffect users. Without an existing trust relationship, external reports add l=
+ittle to that triage, since picking through an LLM's output and picking thr=
+ough a `security@` inbox have roughly the same signal-to-noise. Confidentia=
+lity matters less for the same reason, since attackers can run their own LL=
+Ms and probably hit the same triage bottleneck as defenders. Valsorda belie=
+ves that triage, rapid remediation, and prevention are the actual job now.
+
+
+
+[We have Mythos at Home: GLM 5.2 beats Claude in our Cyber Benchmarks](http=
+s://semgrep.dev/blog/2026/we-have-mythos-at-home-glm-52-beats-claude-in-our=
+-cyber-benchmarks)
+Semgrep=E2=80=99s [Katie Paxton-Fear](https://www.linkedin.com/in/katiepf/)=
+, [Seth Jaksik](https://www.linkedin.com/in/sethjaksik/), [Brenden Noblitt]=
+(https://www.linkedin.com/in/brendennoblitt/), and [Erik Buchanan](https://=
+www.linkedin.com/in/erikbuchanan/) benchmarked GLM 5.2, an open-weight mode=
+l from Zhipu AI, against their IDOR detection dataset using only a basic Py=
+dantic AI harness and prompt, finding it achieved 39% F1 score and beat Cla=
+ude Code (32%) at roughly $0.17 per vulnerability found, though it still tr=
+ailed Semgrep's multimodal pipeline with endpoint discovery scaffolding (53=
+-61% F1, top with GPT 5.5).
+
+=F0=9F=92=A1 I like posts comparing various models and vanilla models vs mo=
+del + harnesses. It=E2=80=99d be interesting to know more about the dataset=
+ though- languages/frameworks in use, how many examples, etc.=20
+
+
+
+[Snyk VulnBench JS 1.0: Can LLMs Find the Same Bugs Twice?](https://snyk.io=
+/blog/snyk-vulnbench-js-1-0-llm-security-review-repeatability)
+Snyk's [Liran Tal](https://www.linkedin.com/in/talliran/) describes evaluat=
+ing Snyk=E2=80=99s VulnBench JS 1.0 (10 JavaScript fixtures with 44 Snyk Co=
+de reference findings, each a small Express-based application) across 300 v=
+ulnerability scans on  (10 fixtures =C3=97 6 configurations =C3=97 5 repeti=
+tions) to measure LLM security review repeatability against Snyk Code SAST =
+as a deterministic reference. As you=E2=80=99d expect, the post found resul=
+ts vary across different LLM-only scans.
+
+=F0=9F=92=A1 This kind of felt like a puff piece. Of course a deterministic=
+ static analysis scan in this setup will be a) faster and b) more consisten=
+t than an LLM-based approach. Also, it=E2=80=99s no surprise that a product=
+ performs well on simple, small applications it was already tested on. A mo=
+re representative benchmark would be testing on complex, real-world applica=
+tions, or at least ones that the product hasn=E2=80=99t already been tuned =
+on. If they released the benchmark apps + reproduction code that would be c=
+ool though.
+
+
+
+
+--------------------
+**Sponsor**
+
+# =F0=9F=93=A3** Clear your vulnerability queue**
+
+=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=
+=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=
+=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=
+=E2=80=94=E2=80=94
+
+Inbox zero for vulnerabilities sounds like a fantasy. Your SCA and SAST sca=
+nners flag thousands of findings: dependencies your app never calls, code p=
+aths an attacker can't reach.
+
+Maze Code is like if inbox zero was a thing for your code vulnerabilities. =
+Maze investigates every finding across your code and dependencies, with con=
+text from code and cloud: is the vulnerable function reachable, does the pa=
+ckage survive the build, is it exposed at runtime. The findings that aren't=
+ exploitable get closed with a reason for your auditors. For the ones that =
+are risky, our agents write a fix and route it to the developer who owns th=
+at code.
+
+## **=F0=9F=91=89 **[**Meet Maze Code**](https://mazehq.com/platform/code?u=
+tm_campaign=3D2026Q2-Global-Inbound-Newsletter-CodeLaunch&utm_medium=3Dnews=
+letter&utm_source=3Dtldrsec)** =F0=9F=91=88**
+
+
+--------------------
+I like the product screenshots, it seems like they gather app-relevant cont=
+ext thoughtfully.
+
+
+
+## Cloud Security
+
+=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=
+=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=
+=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=
+=E2=80=94=E2=80=94
+
+[Some notes on Lambda MicroVMs](https://awsteele.com/blog/2026/06/23/some-n=
+otes-on-lambda-microvms.html)
+[Aidan Steele](https://www.linkedin.com/in/aidansteele/) shares hands-on no=
+tes on AWS Lambda MicroVMs, a generalisation of Lambda functions that run c=
+ode in a fresh VM for up to 8 hours. The shell side is a first-class capabi=
+lity since MicroVMs support PTYs natively with shell access through a dedic=
+ated AWS API, and inside the VM you can run Docker containers with full OS =
+capabilities. Networking gets its own abstraction called a Lambda Network C=
+onnector, a configuration packaging subnets, security groups, and an IAM ro=
+le for ENI management under its own ARN. The connectors create ENIs in your=
+ VPC but hide them by default unless a specific flag is set on the describe=
+ call, and AWS has placed resource-based policies on the ENIs so only the L=
+ambda service can mutate them, closing off the old trick of attaching an el=
+astic IP to a Lambda ENI for VPC-attached internet access.
+
+
+
+[Holding blobs for ransom: Four methods for Azure Storage ransomware](https=
+://securitylabs.datadoghq.com/articles/azure-blob-storage-ransomware-four-m=
+ethods)
+Datadog's [Jonah Feldman](https://www.linkedin.com/in/jonah-feldman-9377841=
+52/) describes four techniques ransomware actors use against Azure Blob Sto=
+rage, all encrypting victim data with keys the attacker controls. Client-si=
+de encryption and encryption scope abuse have been observed in the wild by =
+BlackCat's Sphynx encryptor and STORM-0501 respectively, while customer-pro=
+vided keys (CPK) and storage service encryption with customer-managed keys =
+(CMK) remain theoretical but viable. He shows how attackers circumvent Azur=
+e's soft-delete protections with cross-tenant CMK configurations and federa=
+ted identity credentials, placing the key vault in their own tenant so reco=
+very requires paying ransom.
+
+The post includes Azure Activity, storage resource, and Key Vault event cod=
+es for detection, though CPK and encryption scope usage look like normal Pu=
+tBlob requests in storage logs. Azure Defender for Storage adds threat dete=
+ction across storage accounts, and three new Stratus Red Team techniques em=
+ulate CPK, encryption scopes, and CMK abuse for defense testing.
+
+For prevention, Feldman recommends immutability and versioning to block the=
+ download-encrypt-reupload pattern in client-side encryption and CPK, avoid=
+ing long-term credentials like SAS tokens with persistent data-plane access=
+, and flagging cross-tenant CMK configurations to catch the bypass.
+
+
+
+
+--------------------
+## Supply Chain
+
+=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=
+=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=
+=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=
+=E2=80=94=E2=80=94
+
+[indoor47/gh-workflow-hardener](https://github.com/indoor47/gh-workflow-har=
+dener)
+Tool by [Dmytro](https://x.com/indoor47) which scans GitHub Actions workflo=
+ws for supply-chain risks like unpinned action references vulnerable to tag=
+ rewrites, overly broad permissions, and script injection from unsanitized =
+PR inputs. The tool ships as a CLI, GitHub Action, VS Code extension, and h=
+osted API, with an auto-fix mode that resolves action tags to commit SHAs.
+
+=F0=9F=92=A1 Seems less mature than [zizmor](https://github.com/zizmorcore/=
+zizmor), but I like to collect similar tools for future feature comparisons=
+.
+
+
+
+[Vulnerability and malware checks in uv](https://astral.sh/blog/uv-audit)
+Astral's [William Woodruff](https://bsky.app/profile/yossarian.net) announc=
+es two new security features for uv in preview. uv audit scans dependencies=
+ for known vulnerabilities and deprecated packages, running 4-10x faster th=
+an pip-audit on typical projects by working from uv's already-locked resolu=
+tions. The second feature is an opt-in malware scan enabled with UV_MALWARE=
+_CHECK=3D1, which checks OSV for known malicious packages during uv add and=
+ uv sync operations and terminates the sync before malicious code has a cha=
+nce to run.
+
+=F0=9F=92=A1 Love to see new security features in popular dev tools =F0=9F=
+=A4=98=20
+
+
+
+[One Month of Ecosystem Security Engineering](https://thephp.foundation/blo=
+g/2026/06/23/one-month-of-ecosystem-security-engineering)
+The PHP Foundation's [Volker Dusch](https://www.linkedin.com/in/volker-dusc=
+h/) details one month of ecosystem security engineering work, during which =
+the team scanned over 300 of the most-downloaded Composer packages and near=
+ly all major frameworks using AI models with extended Cyber capabilities fo=
+r vulnerability discovery, triage, reproducer generation, impact analysis, =
+and fix suggestions. The effort has produced nearly 100 publicly available =
+fixes across the ecosystem so far, with one case where 200 repositories app=
+lied the same GitHub Actions fix via a central template.
+
+The infrastructure runs on [Scrutineer](https://github.com/alpha-omega-secu=
+rity/scrutineer), an open-source tool the team is developing with Alpha-Ome=
+ga and ecosystem security engineers from other languages. Scrutineer runs C=
+laude Code skills against open-source repos through a configurable scan pip=
+eline that combines static analysis, model-backed audits, and maintainer id=
+entification, with findings landing in a structured database and a guided t=
+riage-to-disclosure workflow that can isolate each scan in an ephemeral Doc=
+ker container. Dusch reports that maintainer report quality has gone up ove=
+r the past months because maintainers now run their own coding agents to va=
+lidate findings, though models still refuse to help with exploit work on co=
+mplex vulnerabilities, and PHP core itself produces worse results than user=
+land libraries because a language runtime is harder for agents to reason ab=
+out.
+
+=F0=9F=92=A1 Based on this post, it seems like this mass AI-scanning and pa=
+tching effort has been well received by the PHP community, which is great. =
+Perhaps because findings have already been reviewed + come with patches, an=
+d the effort feels like it=E2=80=99s coming from the community (vs some ext=
+ernal party)?=20
+
+
+
+
+--------------------
+# =F0=9F=91=89=EF=B8=8F_[=C2=A0Read Online if Clipped=C2=A0](https://tldrse=
+c.com/p/tldr-sec-335#ai-security)_=F0=9F=91=88=EF=B8=8F
+
+
+
+
+--------------------
+## AI + Security
+
+=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=
+=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=
+=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=
+=E2=80=94=E2=80=94
+
+[Prompt Injection as Role Confusion](https://role-confusion.github.io/)
+Charles Ye, Jasmine Cui, and Dylan Hadfield-Menell detail their ICML 2026 p=
+aper on prompt injection as role confusion, [with code on GitHub](https://g=
+ithub.com/role-confusion/prompt-injection-as-role-confusion). Prompt inject=
+ion succeeds not because attackers find clever phrasings but because LLMs p=
+erceive roles through writing style rather than the structural tags meant t=
+o carry trust and authority. The researchers build linear probes that measu=
+re how strongly an LLM internally believes a token belongs to a given role,=
+ producing per-role metrics including CoTness and Userness. The probes show=
+ that reasoning-style text registers as the model's own thoughts even when =
+explicitly wrapped in user tags, and user-style text registers as user inst=
+ructions even when wrapped in tool tags.
+
+The researchers demonstrate this with an attack they call CoT Forgery, whic=
+h injects fake reasoning into user prompts that mimics the LLM's own thinki=
+ng style, raising attack success from near-zero to around 60% across fronti=
+er models. Standard prompt injection works the same way, and even simple ro=
+le-spoofing like prepending `User:`  to a malicious command in tool output =
+increases success. Beyond direct attacks, they warn of subconscious steerin=
+g, where the same flaw lets seemingly innocuous text shift model behavior w=
+ithout injection, like a shopping webpage with enthusiastic tone pushing an=
+ agent toward recommending a purchase.
+
+
+
+[The New MCP Specification: What Security Teams Must Prepare For](https://w=
+ww.akamai.com/blog/security-research/new-mcp-specification-security-teams-m=
+ust-prepare)
+Akamai's [Maxim Zavodchik](https://www.linkedin.com/in/zavodchik/), [Segev =
+Fogel](https://www.linkedin.com/in/segev-fogel/) and [Gal Meiri](https://li=
+nkedin.com/in/gal-meiri) describe the upcoming MCP 2026-07-28 spec, which t=
+urns MCP from a local integration tool into an enterprise-scale protocol wi=
+th a stateless architecture, eliminating protocol-level session hijacking, =
+unsolicited server prompts, and weak authentication by mandating OAuth 2.1 =
+with PKCE.
+
+The new attack surfaces include cross-agent workflow hijacking through pred=
+ictable tracking IDs or unverified state, client-controlled metadata manipu=
+lation via the unsigned `_meta` object, desync attacks through new MCP-spec=
+ific headers, stored XSS through interactive MCP Apps, and denial-of-servic=
+e through long-running asynchronous tasks. Security responsibility moves fr=
+om the protocol layer to whoever builds on top of it, and the question for =
+security teams is no longer whether the protocol itself is secure but wheth=
+er the applications built on it correctly implement the new trust boundarie=
+s, state management, and execution models the spec introduces.
+
+
+
+[Introducing AWS Continuum: Security at machine speed](https://aws.amazon.c=
+om/blogs/security/introducing-aws-continuum-security-at-machine-speed)
+AWS=E2=80=99 [Chet Kapoor](https://www.linkedin.com/in/chetkapoor/) announc=
+es Continuum for code vulnerabilities, an agentic security platform that us=
+es multiple frontier models to manage the full vulnerability lifecycle thro=
+ugh four phases: discovery (ingesting existing backlogs and scanning enviro=
+nments), prioritization (using business context like deployment status and =
+reachability), validation (constructing working exploits in sandboxed envir=
+onments to confirm findings), and mitigation/remediation (recommending netw=
+ork changes, policy updates, or code patches that are validated before depl=
+oyment).=20
+
+Continuum operates in "learn mode" with human oversight initially, then can=
+ graduate to "enforce mode" for automated remediation based on defined risk=
+ profiles, and incorporates existing AWS Security Agent capabilities like p=
+en testing, code scanning, and a new threat modeling feature that outputs S=
+TRIDE-format models from design docs or source code. Continuum reasons over=
+ both structured data (infrastructure, permissions, network topology) and u=
+nstructured data (documents, communications, business priorities) to provid=
+e context-aware security decisions.
+
+
+
+
+----------
+
+----------
+## Misc
+
+=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=
+=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=
+=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=
+=E2=80=94=E2=80=94
+
+* [Walking my dog at 3am](https://www.youtube.com/shorts/Oxzh_zP2TnY)
+
+* Lyra - [A peek into Reddit's anti-spam internals](https://lyra.horse/blog=
+/2026/06/reddit-spam-internals)
+
+* Macworld - [iOS 27's Shortcuts is AI at its best](https://www.macworld.co=
+m/article/3175443/ios-27s-shortcuts-is-ai-at-its-best.html)
+
+* [In the Weights](https://www.intheweights.com/) - Enter a name and see ho=
+w much it appears in the training data of major LLMs based on its prominenc=
+e in model weights.
+
+* [Estonia aims to be first to give AI agents official digital IDs](https:/=
+/complexdiscovery.com/estonia-aims-to-be-first-to-give-ai-agents-official-d=
+igital-ids)
+
+* WIRED - [I Met With China=E2=80=99s Top AI Experts. They=E2=80=99re Freak=
+ing Out, Too](https://www.wired.com/story/ai-arms-race-china-us-cooperation=
+)
+
+* Tim Ferriss - [Has AI Already Killed How-To Nonfiction? Sales Trends, My =
+Personal Data, and What It Might Mean for the Future](https://tim.blog/2026=
+/06/12/has-ai-already-killed-nonfiction)
+
+* The Marginalian - [Kurt Vonnegut=E2=80=99s Life-Advice to His Children](h=
+ttps://www.themarginalian.org/2013/11/11/kurt-vonnegut-advice-to-children)
+
+* [Do Things You=E2=80=99ll Love Yourself For](https://www.raptitude.com/20=
+26/06/do-things-youll-love-yourself-for)
+
+* [A Leaked GitHub Token Exposed the Exact Ozempic Formula](https://pentest=
+y.co/blog/novo-nordisk-ozempic-fulcrumsec-breach-2026)
+
+* [Peter Thiel=E2=80=99s =E2=80=98Dialog=E2=80=99 network was super-secret.=
+ A data leak changed that](https://san.com/cc/peter-thiels-dialog-network-w=
+as-super-secret-a-data-leak-changed-that) - The leak exposed 113 prominent =
+members through code embedded in the website, alongside detailed participan=
+t profiles with personal contacts, political leanings, and other private de=
+tails. =3D=3DThe names tied to Dialog include Treasury Secretary Scott Bess=
+ent, Sarah Bond, the former president of Xbox at Microsoft, Sen. Ted Cruz, =
+Joseph Gordon-Levitt, podcast host and author Sam Harris, and Bryan Johnson=
+.=3D=3D
+
+
+
+
+--------------------
+## =E2=9C=89=EF=B8=8F Wrapping Up
+
+=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=
+=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=
+=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=E2=80=94=
+=E2=80=94=E2=80=94
+
+Have questions, comments, or feedback? Just reply directly, I=E2=80=99d lov=
+e to hear from you.
+
+If you find this newsletter useful and know other people who would too, I'd=
+ really appreciate if you'd forward it to them =F0=9F=99=8F
+
+Thanks for reading!
+
+Cheers,
+Clint
+
+P.S. Feel free to connect with me on [LinkedIn](https://www.linkedin.com/in=
+/clintgibler/) =F0=9F=91=8B=20
+
+
+----------
+=E2=80=94=E2=80=94=E2=80=94
+
+You are reading a plain text version of this post. For the best experience,=
+ copy and paste this link in your browser to view the post online:
+https://tldrsec.com/p/tldr-sec-335
+
+--38133b9679483e6ddda29784115ff5714961ed5d83eee3d36eb0ecdf3cec
+Content-Transfer-Encoding: quoted-printable
+Content-Type: text/html; charset=utf-8
+Mime-Version: 1.0
+
+<!DOCTYPE html><html lang=3D"en" xmlns=3D"http://www.w3.org/1999/xhtml" xml=
+ns:v=3D"urn:schemas-microsoft-com:vml" xmlns:o=3D"urn:schemas-microsoft-com=
+:office:office" style=3D"font-size:16px;"><head></head><head><meta charset=
+=3D"utf-8"/><!--[if !mso]><!--><meta http-equiv=3D"X-UA-Compatible" content=
+=3D"IE=3Dedge"/><!--<![endif]--><meta name=3D"viewport" content=3D"width=3D=
+device-width,initial-scale=3D1"/><meta name=3D"x-apple-disable-message-refo=
+rmatting"/><meta name=3D"format-detection" content=3D"telephone=3Dno,addres=
+s=3Dno,email=3Dno,date=3Dno,url=3Dno"/><meta name=3D"color-scheme" content=
+=3D"light"/><meta name=3D"supported-color-schemes" content=3D"light"/><titl=
+e>[tl;dr sec] #335 - Prompt Injection as Role Confusion, PHP Ecosystem Secu=
+rity, New MCP Spec</title><!--[if mso]><xml><o:OfficeDocumentSettings><o:Al=
+lowPNG/><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></x=
+ml><![endif]--><style>
+  :root { color-scheme: light; supported-color-schemes: light; }
+  body { margin: 0; padding: 0; min-width: 100%!important; -ms-text-size-ad=
+just: 100% !important; -webkit-transform: scale(1) !important; -webkit-text=
+-size-adjust: 100% !important; -webkit-font-smoothing: antialiased !importa=
+nt; }
+  .body { word-wrap: normal; word-spacing:normal; }
+  table.mso { width: 100%; border-collapse: collapse; padding: 0; table-lay=
+out: fixed; }
+  img { border: 0; outline: none; }
+  table {  mso-table-lspace: 0px; mso-table-rspace: 0px; }
+  td, a, span {  mso-line-height-rule: exactly; }
+  #root [x-apple-data-detectors=3Dtrue],
+  a[x-apple-data-detectors=3Dtrue],
+  #MessageViewBody a { color: inherit !important; text-decoration: inherit =
+!important; font-size: inherit !important; font-family: inherit !important;=
+ font-weight: inherit !important; line-height: inherit !important; }
+  span.MsoHyperlink { color: inherit !important; mso-style-priority: 99 !im=
+portant; }
+  span.MsoHyperlinkFollowed { color: inherit !important; mso-style-priority=
+: 99 !important; }
+  .a { background-color:#FFFFFF; }
+  .b { background-color:#2C81E5; }
+  .c  { background-color:#FFFFFF; }
+  .d { background-color:#FFFCDD; }
+  .d2 { background-color:#FFFFFF; }
+  .d3 { background-color:#FFFFFF; }
+  h1 a { text-decoration:underline;color:#2C81E5 !important; }
+  h2 a { text-decoration:underline;color:#2C81E5 !important; }
+  h3 a { text-decoration:underline;color:#2C81E5 !important; }
+  h4 a { text-decoration:underline;color:#2C81E5 !important; }
+  h5 a { text-decoration:underline;color:#2C81E5 !important; }
+  h6 a { text-decoration:underline;color:#2C81E5 !important; }
+  h1, h1 a, h2, h2 a, h3, h3 a, h4, h4 a, h5, h5 a, h6, h6 a, ul, li, ol, p=
+, p a { margin: 0;padding: 0; }
+  h1 { font-family:'Trebuchet MS','Lucida Grande',Tahoma,sans-serif;font-we=
+ight:400;font-size:28px;color:#2A2A2A;line-height:1.75;padding-bottom:4px;p=
+adding-top:16px;mso-margin-top-alt:16px;mso-margin-bottom-alt:4px }
+  h2 { font-family:'Trebuchet MS','Lucida Grande',Tahoma,sans-serif;font-we=
+ight:400;font-size:24px;color:#2A2A2A;line-height:1.5;padding-bottom:4px;pa=
+dding-top:16px;mso-margin-top-alt:16px;mso-margin-bottom-alt:4px }
+  h3 { font-family:'Trebuchet MS','Lucida Grande',Tahoma,sans-serif;font-we=
+ight:400;font-size:20px;color:#2A2A2A;line-height:1.25;padding-bottom:4px;p=
+adding-top:16px;mso-margin-top-alt:16px;mso-margin-bottom-alt:4px }
+  h4 { font-family:'Trebuchet MS','Lucida Grande',Tahoma,sans-serif;font-we=
+ight:400;font-size:18px;color:#2A2A2A;line-height:1.125;padding-bottom:4px;=
+padding-top:16px;mso-margin-top-alt:16px;mso-margin-bottom-alt:4px }
+  h5 { font-family:'Trebuchet MS','Lucida Grande',Tahoma,sans-serif;font-we=
+ight:400;font-size:16px;color:#2A2A2A;line-height:1;padding-bottom:4px;padd=
+ing-top:16px;mso-margin-top-alt:16px;mso-margin-bottom-alt:4px }
+  h6 { font-family:'Trebuchet MS','Lucida Grande',Tahoma,sans-serif;font-we=
+ight:400;font-size:14px;color:#2A2A2A;line-height:0.875;padding-bottom:4px;=
+padding-top:16px;mso-margin-top-alt:16px;mso-margin-bottom-alt:4px }
+  p { font-family:'Helvetica',Arial,sans-serif;font-weight:400;color:#2D2D2=
+D;font-size:16px;line-height:1.5;padding-bottom:12px;padding-top:12px;mso-m=
+argin-top-alt:12px;mso-margin-bottom-alt:12px; }
+  p a, .e a, ul a, li a, .h a, .h2 a, .h3 a { word-break:break-word;color:#=
+2C81E5 !important;text-decoration:underline;text-decoration-color:#2C81E5; =
+}
+  p a span, .e a span, ul a span, li a span { color: inherit }
+  p .bold { font-weight:bold;color:#2D2D2D; }
+  p span[style*=3D"font-size"] { line-height: 1.6; }
+  .f p { font-size:12px;line-height:15px;color:#2D2D2D;padding:0; }
+  .f p a { color:#2D2D2D !important; }
+  .g p { font-family:'Helvetica',Arial,sans-serif;font-size:14px;line-heigh=
+t:20px;font-weight:normal;margin:0; }
+  .g p a  { text-decoration: underline; }
+  .i p { font-family:'Helvetica',Arial,sans-serif;line-height:1.5;font-size=
+:15px;color:#2D2D2D; }
+  .i p a { color:#2D2D2D !important; }
+  .i2 p { font-family:'Helvetica',Arial,sans-serif;line-height:1.5;font-siz=
+e:15px;color:#2D2D2D; }
+  .i2 p a { color:#2D2D2D !important; }
+  .i3 p { font-family:'Helvetica',Arial,sans-serif;line-height:1.8;font-siz=
+e:24px;color:#2D2D2D; }
+  .i3 p a { color:#2D2D2D !important; }
+  .h p a { color:#595959 !important; }
+  .h2 p a { color:#595959 !important; }
+  .h3 p a { color:#595959 !important; }
+  .f p a, .i p a, .i2 p a, .i3 p a, .h p a, .h2 p a, .h3 p a { text-decorat=
+ion:underline; }
+  .j { border-top:1px solid #c0c0c0; }
+  .k p { padding-left:15px;padding-bottom:0px;padding-top:6px;mso-margin-to=
+p-alt:6px;mso-margin-bottom-alt:0px;mso-margin-left-alt:15px; }
+  .o { background-color:#FFFFFF;border:1px solid #F1F1F1;border-radius:5px;=
+ }
+  .o p { font-family:'Helvetica',Arial,sans-serif;padding:0px;margin:0px; }
+  .l p,
+  .l p a, .l a { font-size:14px;line-height:20px;font-weight: bold;color:#2=
+D2D2D;padding-bottom:6px;mso-margin-bottom-alt:6px;text-decoration:none; }
+  .m p,
+  .m p a { font-size:13px;line-height:18px;font-weight:400;color:#2D2D2D;pa=
+dding-bottom:6px;mso-margin-bottom-alt:6px;text-decoration:none; }
+  .n p,
+  .n p a { font-size:12px;line-height:17px;font-weight:400;color:#2D2D2D;pa=
+dding-bottom:6px;mso-margin-bottom-alt:6px;text-decoration:none; }
+  .p { background-color:#FFFFFF;max-width:520px;border:1px solid #E1E8ED;bo=
+rder:1px solid rgba(80, 80, 80, 0.3);border-radius:5px; }
+  .q { font-size:16px;font-family:Helvetica,Roboto,Calibri,sans-serif !impo=
+rtant;border:1px solid #e1e8ed;border:1px solid rgba(80, 80, 80, 0.3);borde=
+r-radius:10px;background-color:#FFFFFF; }
+  .q p { font-size:16px;font-family:system-ui,Helvetica,Roboto,Calibri,sans=
+-serif !important;color:#222222;padding:4px 0; }
+  .r { border:1px solid #E1E8ED !important;border-radius:5px; }
+  .s p { font-size: 14px; line-height: 17px; font-weight: 400; color: #6978=
+82; text-decoration: none; }
+  .t p { font-family:'Helvetica',Arial,sans-serif;font-size:12px;line-heigh=
+t:1.5;font-weight:400;color:#000000;font-style:italic;padding:0px; }
+  .v { border-radius:5px;border:solid 0px #DFD150;background-color:#3b9cba;=
+font-family:'Verdana',Geneva,sans-serif;color:#FFFFFF; }
+  .v a { text-decoration:none;display:block;color:#FFFFFF; }
+  .w p { font-size:12px;line-height:15px;font-weight:400;color:#FFFFFF; }
+  .w p a { text-decoration: underline !important;color:#FFFFFF !important; =
+}
+  ul { font-family:'Helvetica',Arial,sans-serif;margin:0px 0px 0px 25px !im=
+portant;padding:0px !important;color:#2D2D2D;line-height:24px;list-style-ty=
+pe:disc !important;font-size:16px; }
+  ul ul { list-style-type:circle !important; }
+  ul ul ul { list-style-type:square !important; }
+  ul ul ul ul { list-style-type:disc !important; }
+  ul ul ul ul ul { list-style-type:circle !important; }
+  ul ul ul ul ul ul { list-style-type:square !important; }
+  ul ul ul ul ul ul ul { list-style-type:disc !important; }
+  ul ul ul ul ul ul ul ul { list-style-type:circle !important; }
+  ul ul ul ul ul ul ul ul ul { list-style-type:square !important; }
+  ul > li { font-family:'Helvetica',Arial,sans-serif;margin:10px 0px 0px 0p=
+x !important;padding: 0px 0px 0px 0px !important; color: #2D2D2D; }
+  .poll-choices > li { margin: 4px 0px 0px 0px !important; }
+  ol { font-family:'Helvetica',Arial,sans-serif;margin: 0px 0px 0px 25px !i=
+mportant;padding:0px !important;color:#2D2D2D;line-height:24px;list-style:d=
+ecimal;font-size:16px; }
+  ol > li { font-family:'Helvetica',Arial,sans-serif;margin:10px 0px 0px 0p=
+x !important;padding: 0px 0px 0px 0px !important; color: #2D2D2D; }
+  li > p, li p { font-family:'Helvetica',Arial,sans-serif;font-size:16px;fo=
+nt-weight:normal;line-height:24px;padding:0px; }
+  .e h3,
+  .e p,
+  .e span { padding-bottom:0px;padding-top:0px;mso-margin-top-alt:0px;mso-m=
+argin-bottom-alt:0px; }
+  .e span,
+  .e li { font-family:'Helvetica',Arial,sans-serif;font-size:16px;color:#2D=
+2D2D;line-height:24px; }
+  .rec { font-family:  ui-sans-serif, system-ui, -apple-system, BlinkMacSys=
+temFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-ser=
+if, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color E=
+moji" !important; }
+  .rec__button:hover { background-color: #f9fafb !important; }
+  .copyright a {color: inherit !important; text-decoration: none !important=
+; font-size: inherit !important; font-family: inherit !important; font-weig=
+ht: inherit !important; line-height: inherit !important;}
+  .txt_social p { padding: 0; word-break: break-all; }
+  .table, .table-c, .table-h { border: 1px solid #C0C0C0; }
+  .table-c { padding:5px; background-color:#FFFFFF; }
+  .table-c p { color: #2D2D2D; font-family:'Helvetica',Arial,sans-serif !im=
+portant;overflow-wrap: break-word; }
+  .table-h { padding:5px; background-color:#F1F1F1; }
+  .table-h p { color: #2A2A2A; font-family:'Trebuchet MS','Lucida Grande',T=
+ahoma,sans-serif !important;overflow-wrap: break-word; }
+  @media only screen and (max-width:667px) {
+    .aa, .w100pc { width: 100% !important; }
+    .bb img { width: 100% !important; height: auto !important; max-width: n=
+one !important; }
+    .cc { padding: 0px 8px !important; }
+    .ee { padding-top:10px !important;padding-bottom:10px !important; }
+    .ff ul, .ff ol { margin: 0px 0px 0px 10px !important;padding: 0px !impo=
+rtant; }
+    .ff li { margin:10px 0px 0px 10px !important; }
+    .r {height:140px !important;}
+    .s p { font-size:13px !important;line-height:15px !important; }
+    .mob-hide {display:none !important;}
+    .mob-show {display: block !important; width: auto !important; overflow:=
+ visible !important; float: none !important; max-height: inherit !important=
+; line-height: inherit !important;}
+    .mob-stack {width:100% !important;display:block !important;}
+    .mob-w-full {width:100% !important;}
+    .mob-block {display:block !important;}
+    .embed-img {padding:0px 0px 12px 0px !important;}
+    .socialShare {padding-top:15px !important;}
+    .rec { padding-left:15px!important;padding-right:15px!important; }
+    .bodyWrapper { padding:10px 4px 10px 4px !important; }
+    .social-mobile {float:left !important;margin-top:10px !important;}
+  }
+  @media screen and (max-width: 480px) {
+    u + .a .gg { width: 100% !important; width: 100vw !important; }
+    .tok-heart { padding-top:75% !important; }
+    .tok-play { padding-top: 250px !important; }
+  }
+  @media screen and (max-width: 320px) {
+    .tok-heart { padding-top:65% !important; }
+  }
+  .u { border: 1px solid #CACACA !important; border-radius: 2px !important;=
+ background-color: #ffffff !important; padding: 0px 13px 0px 13px !importan=
+t; font-family:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Se=
+goe UI",Roboto,"Helvetica Neue",Arial,"Noto Sans",sans-serif !important;fon=
+t-size: 12px !important; color: #767676 !important; }
+  .u a { text-decoration: none; display: block !important; color: #767676 !=
+important; margin: 0px !important; }
+  .u span, .u img { color: #767676 !important;margin:0px !important; max-he=
+ight:32px !important;background-color:#ffffff !important; }
+</style><!--[if mso]><style type=3D"text/css">
+    h1, h2, h3, h4, h5, h6 {font-family: Arial, sans-serif !important;}
+    body, table, td, p, a, span {font-family: Arial, sans-serif !important;=
+}
+    sup { font-size: 100% !important;vertical-align: .5em !important;mso-te=
+xt-raise: -1.5% !important;line-height: 0 !important; }
+    ul { margin-left:0px !important; margin-right:10px !important; margin-t=
+op:20px !important; margin-bottom:20px !important; }
+    ul li { margin-left: 0px !important; mso-special-format: decimal; }
+    ol { margin-left:0px !important; margin-right:10px !important; margin-t=
+op:20px !important; margin-bottom:20px !important; }
+    ol li { margin-left: 0px !important; mso-special-format: decimal; }
+    li.listItem { margin-left:15px !important; margin-top:0px !important; }
+    .paddingDesktop { padding: 10px 0 !important; }
+    .edm_outlooklist { margin-left: -20px !important; }
+    .embedImage { display:none !important; }
+</style><![endif]--><!-- __merge_tags_in_links__ --><style></style></head><=
+body class=3D"a" style=3D"margin:0px auto;padding:0px;word-wrap:normal;word=
+-spacing:normal;background-color:#FFFFFF;"><div role=3D"article" aria-roled=
+escription=3D"email" aria-label=3D"email_name" lang=3D"en" style=3D"font-si=
+ze:1rem"><div style=3D"display:none;max-height:0px;overflow:hidden;"> Inter=
+esting paper, LLM-powered hardening of the PHP ecosystem, security implicat=
+ions of the new MCP spec &#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#820=
+4;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#=
+8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160=
+;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#=
+160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204=
+;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8=
+204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;=
+&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#1=
+60;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;=
+&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#82=
+04;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&=
+#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#16=
+0;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&=
+#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#820=
+4;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#=
+8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160=
+;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#=
+160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204=
+;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8=
+204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;=
+&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#1=
+60;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;=
+&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#82=
+04;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&=
+#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#16=
+0;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&=
+#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#820=
+4;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#=
+8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160=
+;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#=
+160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204=
+;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8=
+204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;=
+&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#1=
+60;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;&#160;&#8204;=
+ </div><table role=3D"none" width=3D"100%" border=3D"0" cellspacing=3D"0" a=
+lign=3D"center" cellpadding=3D"0" class=3D"gg"><tr><td align=3D"center" val=
+ign=3D"top"><table role=3D"none" width=3D"670" border=3D"0" cellspacing=3D"=
+0" cellpadding=3D"0" class=3D"aa" style=3D"width:670px;table-layout:fixed;"=
+><tr><td class=3D"bodyWrapper" align=3D"center" valign=3D"top" style=3D"pad=
+ding:10px 5px 10px 5px;"><table role=3D"none" width=3D"100%" border=3D"0" c=
+ellspacing=3D"0" cellpadding=3D"0" align=3D"center"><tr><td align=3D"center=
+" valign=3D"top" style=3D"border-width:0px 0px 0px 0px;border-style: solid;=
+ border-color: #FFFFFF;border-radius:10px 10px 0px 0px;background-color:#FF=
+FFFF;" class=3D"c"><table role=3D"none" width=3D"100%" border=3D"0" cellspa=
+cing=3D"0" cellpadding=3D"0" align=3D"center"><tr id=3D"header"><td style=
+=3D"padding:15px 15px 0px 15px;"><div style=3D"padding-top:0px;padding-righ=
+t:0px;padding-bottom:20px;padding-left:0px;"><table role=3D"none" width=3D"=
+100%" border=3D"0" cellspacing=3D"0" cellpadding=3D"0" align=3D"center"><tr=
+><td class=3D"f" align=3D"right" valign=3D"top"><p> July 02, 2026 &nbsp; | =
+&nbsp; <a data-read-online-tooltip=3D"true" href=3D"https://link.mail.beehi=
+iv.com/ss/c/u001.24Nk1afHpCiQnIZ62Q0ozkpcv-E6kTrMghOeXKNUjbHbsvm4mzaRpR5qke=
+L1zHy-HRRAUxmrLE5B0bDc01wOCqKSSM2NXu6GFjDxeQhFxcHLwfBprTN1A5ios5ekpKMUVoR_o=
+7XxCpaudDPotcg71z7hpDT2xztrUpg1WXwbSKj6hWhrQGvEcl1Dvh9gfM78BPTpCavAR0oB5p6d=
+EIV4z7k-ZqO-uB_F4UH2vRKbjbi0ICy79yNZOtxKh7OFwRLTYl5TDpgxxpzyxvs_MHlUxN1B8EF=
+DnCjwc1IKwCq2QTcbXedaRJ3YwvCVwNbz_gdLtY90057lyvz-iuif4dCcGHzXaX9K90Y63-9rYU=
+eC1nNHJXwR0jBvViMNKZ2Jm9wYp9AS_vZ7B8TIczDuetzQ97_k8AUkbkpXRX1Cp9uN2iDW8gtwg=
+1Kw1cDWlw8Pws-5_9KVO4efRwsAIP2jjXVg67NDHAwJPDU3ocC7qNXrGzceoxmHsjaanBwh8xb2=
+KRWkmpWLYtsWVgUxIRFJJhFneglMkvcpAwztfeoYAxWdRwOPnkEkQ-AoknVsZhT769e_znXqvpc=
+f8ALsLzZrr9a2EfXmqz7HkKZjpTUZtYgDGXjeKZswTEeGqSb0vgMwyTZoeEQj0c7ZSYPNgwk7EV=
+-_ir0VYvMKP8B6YiSxf_P6jaEX48Hr8JO1d3HVswyLWw-W8ieOACZ99EFQVcxuHR7NKq-jwbYtG=
+MqAahGZppymA-rx9C-BxZtV_3M2Dzh3PcBPVYC-LyXiZ0NOdTjiB5dJxKEe9MWZNG_0uiKfrOa_=
+sp8/4rz/12Jtc2dOQhOTSxz6PRM6vg/h0/h001.L5EIaS0_SWFE_XIba5aZl5gHZuLDtmzJaQsI=
+nN8r2Uk">Read online</a></p></td></tr><tr><td class=3D"dd" align=3D"center"=
+ valign=3D"top" style=3D"padding:15px 0;"><table role=3D"none" width=3D"100=
+%" border=3D"0" cellspacing=3D"0" cellpadding=3D"0" align=3D"center"><tr><t=
+d align=3D"center" valign=3D"top"><h1 style=3D"text-align:left;font-family:=
+'Trebuchet MS','Lucida Grande',Tahoma,sans-serif;font-weight:Bold;font-size=
+:32px;color:#2A2A2A;padding:2px 0;line-height:38px;"> [tl;dr sec] #335 - Pr=
+ompt Injection as Role Confusion, PHP Ecosystem Security, New MCP Spec </h1=
+><p style=3D"text-align:left;font-family:'Helvetica',Arial,sans-serif;font-=
+weight:normal;font-size:20px;color:#3E3E3E;padding:5px 0;line-height:24px;"=
+> Interesting paper, LLM-powered hardening of the PHP ecosystem, security i=
+mplications of the new MCP spec </p></td></tr></table></td></tr><tr><td sty=
+le=3D"line-height:0;"><div data-open-tracking=3D"true"> <img src=3D"https:/=
+/link.mail.beehiiv.com/ss/o/u001.VWPnoAssF5nQJ9lJeDRFPQ/4rz/12Jtc2dOQhOTSxz=
+6PRM6vg/ho.gif" alt=3D"" width=3D"1" height=3D"1" border=3D"0" style=3D"hei=
+ght:1px !important;width:1px !important;border-width:0 !important;margin-to=
+p:0 !important;margin-bottom:0 !important;margin-right:0 !important;margin-=
+left:0 !important;padding-top:0 !important;padding-bottom:0 !important;padd=
+ing-right:0 !important;padding-left:0 !important;"/> </div></td></tr></tabl=
+e></div></td></tr><tr id=3D"content-blocks"><td class=3D"email-card-body" a=
+lign=3D"center" valign=3D"top" style=3D"padding-bottom:15px;"><table role=
+=3D"none" width=3D"100%" border=3D"0" cellspacing=3D"0" cellpadding=3D"0" a=
+lign=3D"center"><tr><td class=3D"dd" align=3D"left" style=3D"padding:0px 15=
+px;text-align:left;word-break:break-word;"><p style=3D"mso-line-height-alt:=
+150.0%;"> Hey there, </p></td></tr><tr><td class=3D"dd" align=3D"left" styl=
+e=3D"padding:0px 15px;text-align:left;word-break:break-word;"><p style=3D"m=
+so-line-height-alt:150.0%;"> I hope you=E2=80=99ve been doing well! </p></t=
+d></tr><tr><td><table role=3D"none" width=3D"100%" border=3D"0" cellspacing=
+=3D"0" cellpadding=3D"0" style=3D""><tr><td bgcolor=3D"transparent" style=
+=3D"background-color:transparent;padding:0.0px 0.0px 0.0px 0.0px;"><table r=
+ole=3D"none" width=3D"100%" border=3D"0" cellspacing=3D"0" cellpadding=3D"0=
+"><tr><td class=3D"dd" align=3D"left" valign=3D"top" style=3D"color:#2A2A2A=
+;font-weight:normal;padding:0px 15px;text-align:left;"><h2 style=3D"color:#=
+2A2A2A;font-weight:normal;mso-line-height-alt:150.0%;">=F0=9F=91=B0=C2=A0=
+=F0=9F=A4=B5 Wedding</h2></td></tr><tr><td align=3D"center" valign=3D"top" =
+style=3D"font-size:0px;line-height:0px;padding:30px 0px 30px;" class=3D"dd"=
+><table class=3D"j" role=3D"none" width=3D"96%" border=3D"0" cellspacing=3D=
+"0" cellpadding=3D"0" align=3D"center"><tr><td> &nbsp; </td></tr></table></=
+td></tr><tr><td class=3D"dd" align=3D"left" style=3D"padding:0px 15px;text-=
+align:left;word-break:break-word;"><p style=3D"mso-line-height-alt:150.0%;"=
+> This past weekend I attended a friend=E2=80=99s wedding, and it was heart=
+warming. </p></td></tr><tr><td class=3D"dd" align=3D"left" style=3D"padding=
+:0px 15px;text-align:left;word-break:break-word;"><p style=3D"mso-line-heig=
+ht-alt:150.0%;"> The couple have been together over a decade, and had many =
+fun stories to share from their time in college, to adventures on the East =
+and West Coasts. </p></td></tr><tr><td class=3D"dd" align=3D"left" style=3D=
+"padding:0px 15px;text-align:left;word-break:break-word;"><p style=3D"mso-l=
+ine-height-alt:150.0%;"> There was a welcome party the night before at a lo=
+cal brewery, and it just so happened that the local Hells Angels chapter de=
+cided to have an event=E2=80=A6 at the same time and venue =F0=9F=98=82=C2=
+=A0 </p></td></tr><tr><td class=3D"dd" align=3D"left" style=3D"padding:0px =
+15px;text-align:left;word-break:break-word;"><p style=3D"mso-line-height-al=
+t:150.0%;"> So it was half people dressed in wedding semi-formal attire cel=
+ebrating love, and half Harleys, chains, black shirts, and whole arm tattoo=
+s. I subtly took a photo of one man wearing a shirt that said, =E2=80=9CEve=
+ry normal man must be tempted, as times, to spit on his hands, hoist the bl=
+ack flag, and begin slitting throats. -H.L. Mencken.=E2=80=9D You know, chi=
+ll stuff. </p></td></tr><tr><td class=3D"dd" align=3D"left" style=3D"paddin=
+g:0px 15px;text-align:left;word-break:break-word;"><p style=3D"mso-line-hei=
+ght-alt:150.0%;"> At one point there was a motorcycle burnout that caused a=
+ big cloud of smoke, I think honoring someone who had passed. My friend sai=
+d if no one does a burnout at his funeral he=E2=80=99ll be very disappointe=
+d. </p></td></tr><tr><td class=3D"dd" align=3D"left" style=3D"padding:0px 1=
+5px;text-align:left;word-break:break-word;"><p style=3D"mso-line-height-alt=
+:150.0%;"> I enjoyed getting to meet the couple=E2=80=99s family and more o=
+f their friends, that gives you such an interesting view into their lives a=
+nd who they=E2=80=99ve been over time. </p></td></tr><tr><td class=3D"dd" a=
+lign=3D"left" style=3D"padding:0px 15px;text-align:left;word-break:break-wo=
+rd;"><p style=3D"mso-line-height-alt:150.0%;"> And I=E2=80=99ll never forge=
+t the joy of me dancing around my friend who adamantly doesn=E2=80=99t danc=
+e, except at EDM raves. </p></td></tr><tr><td class=3D"dd" align=3D"left" s=
+tyle=3D"padding:0px 15px;text-align:left;word-break:break-word;"><p style=
+=3D"mso-line-height-alt:150.0%;"> It was nice to have a weekend offline, co=
+nnecting with people, instead of being terminally online and =E2=80=9CyOu=
+=E2=80=99LL NeVeR b3lieVe WHat &lt;model | open source repo&gt; jUsT DroPPe=
+d?!11!=E2=80=9D </p></td></tr><tr><td class=3D"dd" align=3D"left" style=3D"=
+padding:0px 15px;text-align:left;word-break:break-word;"><p style=3D"mso-li=
+ne-height-alt:150.0%;"></p></td></tr></table></td></tr></table></td></tr><t=
+r><td><table role=3D"none" width=3D"100%" border=3D"0" cellspacing=3D"0" ce=
+llpadding=3D"0" style=3D""><tr><td bgcolor=3D"#d9edd9" style=3D"background-=
+color:#d9edd9;padding:5.0px 5.0px 5.0px 5.0px;"><table role=3D"none" width=
+=3D"100%" border=3D"0" cellspacing=3D"0" cellpadding=3D"0"><tr><td class=3D=
+"dd" align=3D"center" style=3D"padding:0px 15px;text-align:center;word-brea=
+k:break-word;"><p style=3D"mso-line-height-alt:150.0%;"><b>Sponsor</b></p><=
+/td></tr><tr><td class=3D"dd" align=3D"center" valign=3D"top" style=3D"colo=
+r:#2A2A2A;font-weight:normal;padding:0px 15px;text-align:center;"><h1 style=
+=3D"color:#2A2A2A;font-weight:normal;mso-line-height-alt:175.0%;">=F0=9F=93=
+=A3<b>=C2=A0</b><span style=3D"font-weight:700;"><b>What Jamf changed to st=
+op drowning in </b></span><br><span style=3D"font-weight:700;"><b>IT ticket=
+s</b></span></h1></td></tr><tr><td align=3D"center" valign=3D"top" style=3D=
+"font-size:0px;line-height:0px;padding:30px 0px 30px;" class=3D"dd"><table =
+class=3D"j" role=3D"none" width=3D"96%" border=3D"0" cellspacing=3D"0" cell=
+padding=3D"0" align=3D"center"><tr><td> &nbsp; </td></tr></table></td></tr>=
+<tr><td class=3D"dd" align=3D"left" style=3D"padding:0px 15px;text-align:le=
+ft;word-break:break-word;"><p style=3D"mso-line-height-alt:150.0%;"> 500+ S=
+aaS apps. Thousands of devices. A flood of help desk tickets. And a team of=
+ 30 people to manage all of it. </p></td></tr><tr><td class=3D"dd" align=3D=
+"left" style=3D"padding:0px 15px;text-align:left;word-break:break-word;"><p=
+ style=3D"mso-line-height-alt:150.0%;"> That&#39;s the reality for Jamf&#39=
+;s IT team - but instead of drowning, they built their way out. We&#39;re b=
+ringing them live on July 10th to show you exactly how they replaced manual=
+, ticket-based IT work with intelligent workflows. </p></td></tr><tr><td cl=
+ass=3D"dd" align=3D"left" style=3D"padding:0px 15px;text-align:left;word-br=
+eak:break-word;"><p style=3D"mso-line-height-alt:150.0%;"><b>Tune in to hea=
+r:</b></p></td></tr><tr><td style=3D"padding-bottom:12px;padding-left:37px;=
+padding-right:27px;padding-top:12px;" class=3D"ee"><div style=3D"margin-lef=
+t:0px;" class=3D"edm_outlooklist"><ul style=3D"font-weight:normal;list-styl=
+e-type:disc;margin-bottom:12px !important;margin-top:12px !important;paddin=
+g:0px 0px 0px 0px;"><li class=3D"listItem ultext"><p style=3D"mso-line-heig=
+ht-alt:150.0%;padding:0px;text-align:left;word-break:break-word;"><b>The ea=
+rly use cases</b> that proved the value of intelligent workflows at Jamf </=
+p></li><li class=3D"listItem ultext"><p style=3D"mso-line-height-alt:150.0%=
+;padding:0px;text-align:left;word-break:break-word;"><b>Where AI fits into =
+ITOps today </b>- and where it&#39;s going </p></li><li class=3D"listItem u=
+ltext"><p style=3D"mso-line-height-alt:150.0%;padding:0px;text-align:left;w=
+ord-break:break-word;"> How they compressed <b>a year-long device audit int=
+o a matter of weeks</b></p></li></ul></div></td></tr><tr><td class=3D"dd" a=
+lign=3D"center" valign=3D"top" style=3D"color:#2A2A2A;font-weight:normal;pa=
+dding:0px 15px;text-align:center;"><h2 style=3D"color:#2A2A2A;font-weight:n=
+ormal;mso-line-height-alt:150.0%;"><b>=F0=9F=91=89 </b><a class=3D"link" hr=
+ef=3D"https://link.mail.beehiiv.com/ss/c/u001.-QQnKmN9995ElcpR565Sh7xQs4_HA=
+qei87rQJWUTWIfpYfCPc2OcuShJA3SKAdJg_OMZG5YoiG374z2In_ye3sal5SpKWgySHmsYl_Ja=
+vN47f4FwrsvaiDsWwFXNd26j8c9Dq6B12dTvR_Oqe-a9v_job5YczDixmTidA78HgBvgKiHUPnk=
+o1fCTfsoNDXi_iBq9uMRUvYvIC15ds92sDelgy6_6Cr-VhW0J0jqJm0lx6-vV_4UE8U-oowbpQO=
+7Sr4pQg11WQG6Gp2URbFxSFxtYa2pWa46FrkXmpTIyB7WpGIgrVW7uXb1EfjKwkwIb/4rz/12Jt=
+c2dOQhOTSxz6PRM6vg/h1/h001.ZbUpzjsBykvkzrouRxKagcDi8YJt-qDqirJEerX6slQ" tar=
+get=3D"_blank" rel=3D"noopener noreferrer nofollow"><span><b>Register now!<=
+/b></span></a><b> =F0=9F=91=88</b></h2></td></tr></table></td></tr></table>=
+</td></tr><tr><td class=3D"dd" align=3D"left" style=3D"padding:0px 15px;tex=
+t-align:left;word-break:break-word;"><p style=3D"mso-line-height-alt:150.0%=
+;"> Semgrep found automating a number of workflows with Tines quite helpful=
+ =F0=9F=91=8D=EF=B8=8F=C2=A0 </p></td></tr><tr><td><table role=3D"none" wid=
+th=3D"100%" border=3D"0" cellspacing=3D"0" cellpadding=3D"0" style=3D""><tr=
+><td bgcolor=3D"transparent" style=3D"background-color:transparent;padding:=
+0.0px 0.0px 0.0px 0.0px;"><table role=3D"none" width=3D"100%" border=3D"0" =
+cellspacing=3D"0" cellpadding=3D"0"><tr><td class=3D"dd" align=3D"left" sty=
+le=3D"padding:0px 15px;text-align:left;word-break:break-word;"><p style=3D"=
+mso-line-height-alt:150.0%;"></p></td></tr><tr><td class=3D"dd" align=3D"le=
+ft" valign=3D"top" style=3D"color:#2A2A2A;font-weight:normal;padding:0px 15=
+px;text-align:left;"><h2 style=3D"color:#2A2A2A;font-weight:normal;mso-line=
+-height-alt:150.0%;">AppSec</h2></td></tr><tr><td align=3D"center" valign=
+=3D"top" style=3D"font-size:0px;line-height:0px;padding:30px 0px 30px;" cla=
+ss=3D"dd"><table class=3D"j" role=3D"none" width=3D"96%" border=3D"0" cells=
+pacing=3D"0" cellpadding=3D"0" align=3D"center"><tr><td> &nbsp; </td></tr><=
+/table></td></tr><tr><td class=3D"dd" align=3D"left" style=3D"padding:0px 1=
+5px;text-align:left;word-break:break-word;"><p style=3D"mso-line-height-alt=
+:150.0%;"><b>Quicklinks</b></p></td></tr><tr><td style=3D"padding-bottom:12=
+px;padding-left:37px;padding-right:27px;padding-top:12px;" class=3D"ee"><di=
+v style=3D"margin-left:0px;" class=3D"edm_outlooklist"><ul style=3D"font-we=
+ight:normal;list-style-type:disc;margin-bottom:12px !important;margin-top:1=
+2px !important;padding:0px 0px 0px 0px;"><li class=3D"listItem ultext"><p s=
+tyle=3D"mso-line-height-alt:150.0%;padding:0px;text-align:left;word-break:b=
+reak-word;"><a class=3D"link" href=3D"https://link.mail.beehiiv.com/ss/c/u0=
+01.m5CTo68rhNghfieTCcZktvAzlZ_7vuE-tt2KVu8ojBR7AB_Swr39SbK2RwJiG6JpE8UEu9tV=
+Rg7YLUOz_maeg40un9vI0xNxlIEDcKurDGlc_Qx8gjAMjZ3WBgMrwTogegFjz571vWc_NEjewrf=
+dBq4xmPE-NDwF_TRBFAVB7v9nt7Pzkp2596Y8ArvxSbV0Y-P2GAs_aKmnjcMj0QGmT9LJlN4aIk=
+8-6sCcyFZEcCLaVA4ZivEGunoAvLoATBUaDQUzIY-ZgGQU00H4W4s0k3TDl8jf65UCOcyWz0nmF=
+0vToApvA3OJmQ5LsbnWrOGy/4rz/12Jtc2dOQhOTSxz6PRM6vg/h2/h001.8hJGZq7PiatVFxv5=
+9zN00gCJGwItWSJAkb6qL1SgWBw" target=3D"_blank" rel=3D"noopener noreferrer n=
+ofollow"><span>badkeys/badkeys</span></a> - Tool by <a class=3D"link" href=
+=3D"https://link.mail.beehiiv.com/ss/c/u001.-QQnKmN9995ElcpR565Sh-SDvgyu6m5=
+8HhCZ9db8DGI-IE1FyhB6ErRgaphcBppK7Cvu2eqBmBefadjSA4gIWjmqiKkHviQ9-thl29bj5j=
+kzsvhE-QtZZ06f_LPLSxyMT68KSTQA0DgjXV88ia3GGF-xHqQeGVcBzeA034J-fQ_X6t0B4ZRs-=
+gB0iinGxaseN-WWQ3yrL-fAZbluyLhDhGIwym-yorTE4HaZo81mJ6y_maSJ_E7AwuXTvAsGheUd=
+M3c2F2RPzDVObuDmZvUWoYooW74AGTTpJ66FaGZE3ZTnyck7VAEabs8nIQgDZjP1/4rz/12Jtc2=
+dOQhOTSxz6PRM6vg/h3/h001.4u7Y4qqbxicDVu0PS7s7oCLcBtSeITACCs0_8AbqFyw" targe=
+t=3D"_blank" rel=3D"noopener noreferrer nofollow"><span>Hanno B=C3=B6ck</sp=
+an></a> that checks cryptographic public keys for known vulnerabilities. </=
+p></li><li class=3D"listItem ultext"><p style=3D"mso-line-height-alt:150.0%=
+;padding:0px;text-align:left;word-break:break-word;"><span style=3D"font-we=
+ight:700;"><a class=3D"link" href=3D"https://link.mail.beehiiv.com/ss/c/u00=
+1.IuWnTnwf-4O0ZYTIV0VId3jYfWFk4ou0tbtJFh-V5s5tVwRvUR9RzVhmm_FrFsi_3Or_fp2pw=
+BD6M9WGavWTUBRi7Cv8vlsfnWbvmI9FkkjPKIlduZto1iHrb0B6OjFpc4DwwbvbS6_eBNnUqUbn=
+xLdz_puRyINyvXkUHnTX-OKCBPw5FBsEZqZ2WREuoCx_4IY6m6AG9J1O3Q3UoZqcOmwzvg0WsCR=
+_sMThsRrXf6Jp1F4JH3c1X8R-plG3Ag4hcseJr1TRd9ZcrjPVvKgwzg/4rz/12Jtc2dOQhOTSxz=
+6PRM6vg/h4/h001.Lx7J9Mux3u2wdjc9g3QdsEiNHOcHprc547hBCo4W7IQ" target=3D"_bla=
+nk" rel=3D"noopener noreferrer nofollow"><span><b>Escape benchmarked Claude=
+ Opus 4.8 vs. their multi-agent multi-model pentesting harness on 4 apps</b=
+></span></a></span><span style=3D"font-weight:700;">,</span><span style=3D"=
+font-weight:700;"><b>=C2=A0</b></span>Aikido and XBOW via Doyensec&#39;s nu=
+mbers. On real apps with no public writeups, the harness found 4x more than=
+ the raw model. On severity-weighted score, it also led on both real apps.*=
+ </p></li><li class=3D"listItem ultext"><p style=3D"mso-line-height-alt:150=
+.0%;padding:0px;text-align:left;word-break:break-word;"><a class=3D"link" h=
+ref=3D"https://link.mail.beehiiv.com/ss/c/u001.BnxzMnTWmB9lwbaT23otsdgVNjWI=
+U8uupc9PO5-N4y7MDfE4qlnDnxCn8h4jb8kxxxkPbgMfUSvJq5iieOU57N3B7p_A9N0M06kSJ9-=
+0DyBvDEUdez6QfiUFBZ6s-vA8XY8lemf_b069_GR0j8W5o5IOLILeKMgoAdmpPcJIG3DEFmX3OE=
+Bl3DXdsjQuQxzMfQ67sfCpcmoy6alAIupTAbrJk4WfbSq-qfJBSiplgahJZsgBaPOBpXRw9pBk5=
+V7XGJLdmzoNXoqhF-q5tgeS8-WfGbb3z5Y2vWZ-yg0sVWEE9nJ3ehqoTbnf6UJR9DR2991IKAxx=
+-FOvC0zNpLJASR1cHcMBSxW5l8n0Io_L8maplDLXvl2ArrOAGdzcE9KJ/4rz/12Jtc2dOQhOTSx=
+z6PRM6vg/h5/h001.6Fr00EH1zWBOK5MyObJh-nNbbsa2RHu4TAM_fCqr9N4" target=3D"_bl=
+ank" rel=3D"noopener noreferrer nofollow"><span>Factoring &quot;short-sleev=
+e&quot; RSA keys with polynomials</span></a> - Trail of Bits&#39;s Keegan R=
+yan <span style=3D"background-color:rgb(255, 255, 255);">discovered hundred=
+s of vulnerable &quot;short-sleeve&quot; RSA and DSA keys in the wild where=
+ private key bits were heavily biased toward 0 in regular patterns, and dev=
+eloped a polynomial-based factorization technique that exploits the regular=
+ structure of zero blocks to quickly recover 603 RSA and 74 DSA private key=
+s.</span></p></li></ul></div></td></tr><tr><td class=3D"dd" align=3D"left" =
+style=3D"padding:0px 15px;text-align:left;word-break:break-word;"><p style=
+=3D"mso-line-height-alt:150.0%;"><sup>*Sponsored</sup></p></td></tr><tr><td=
+ class=3D"dd" align=3D"left" style=3D"padding:0px 15px;text-align:left;word=
+-break:break-word;"><p style=3D"mso-line-height-alt:150.0%;"></p></td></tr>=
+<tr><td class=3D"dd" align=3D"left" style=3D"padding:0px 15px;text-align:le=
+ft;word-break:break-word;"><p style=3D"mso-line-height-alt:150.0%;"><a clas=
+s=3D"link" href=3D"https://link.mail.beehiiv.com/ss/c/u001.-QQnKmN9995ElcpR=
+565Sh0ZWJZ_kClzrYGA0qqozTd9Z9fL1t6vVwvQuZQdLMDzZedthcYH1aYylmrZLvm89AbtMRp9=
+yMrxsbzx1X2pb-_7JiLJqguEZAiRpQw4kVcsqzO1Hka_OiBJGha-UfduGfd5y7IgtfFEmMae9yK=
+Ag4i4bJSdmmXUDbJR5cYDAB2CAZ-oRxMTr6fZ11gCo7wQ1n82UIBMiVLb6FPJ0kKikjv8QU35B9=
+V6A7nHFDXlKOOK1AUKi6ydtk1ztnP1eBz-K948pIiUWwnrPPyZy5TLlzPCnalywopp3fe-r5Sfv=
+IrwS/4rz/12Jtc2dOQhOTSxz6PRM6vg/h6/h001.qLffuKvTqhrFGGAcA7ndjIpgtq-ExbSPuO0=
+NKEVdtRA" target=3D"_blank" rel=3D"noopener noreferrer nofollow"><span>Vuln=
+erability Reports Are Not Special Anymore</span></a><br><a class=3D"link" h=
+ref=3D"https://link.mail.beehiiv.com/ss/c/u001.BnxzMnTWmB9lwbaT23otsdNePaeU=
+sqbdjrsxYuP_fNN0mWmoPLVnfxCNlkfvi3ac1CH7dsjc1Xn6uR0gZ8hLH_OXRLCL5TwsrnhYRxX=
+cQ0RsLEQqMP_tlWwCRfetUl9kSI8UoLp_t0PmuUc5sjfqtC1qUV_kV_EPHdNAN03d86uKrIKqej=
+lU_4FNfUu9bOt3NmwER2FQl8CJpwI7KeHNgBFBF0NKxtXL5PhRwoYV-Rcwr3V4_4oSrkjgeuQcy=
+J7ZZwESiwFClQRJ0we49fAf-ai_5njsO5Ne8NA_he1mitE-p0Tps1WhF2fliY31vq0lDgi-GZKP=
+1xoG7Q87V5EBpA/4rz/12Jtc2dOQhOTSxz6PRM6vg/h7/h001.NlxAKI-ig0JIOwr3wwoaL88n3=
+3Xa-5Y4stYDnXvixxw" target=3D"_blank" rel=3D"noopener noreferrer nofollow">=
+<span>Filippo Valsorda</span></a> argues that LLMs have changed how vulnera=
+bility reports should be perceived. For years, reports were treated as spec=
+ial because researchers provided scarce insight into where bugs lived and c=
+onfidentiality long enough to ship a fix before an exploit. In 2026, LLMs f=
+ind issues about as well as most security researchers, and anyone can run t=
+hem. The bottleneck is no longer finding potential issues but assessing whi=
+ch ones are real and which actually affect users. Without an existing trust=
+ relationship, external reports add little to that triage, since picking th=
+rough an LLM&#39;s output and picking through a <code>security@</code> inbo=
+x have roughly the same signal-to-noise. Confidentiality matters less for t=
+he same reason, since attackers can run their own LLMs and probably hit the=
+ same triage bottleneck as defenders. Valsorda believes that triage, rapid =
+remediation, and prevention are the actual job now. </p></td></tr><tr><td c=
+lass=3D"dd" align=3D"left" style=3D"padding:0px 15px;text-align:left;word-b=
+reak:break-word;"><p style=3D"mso-line-height-alt:150.0%;"></p></td></tr><t=
+r><td class=3D"dd" align=3D"left" style=3D"padding:0px 15px;text-align:left=
+;word-break:break-word;"><p style=3D"mso-line-height-alt:150.0%;"><a class=
+=3D"link" href=3D"https://link.mail.beehiiv.com/ss/c/u001.OfVc3EUpGi7lVDYVc=
+Po0wVWt_QFBGdhKSze_yTcW6ABJ1dFtsCWK9nN90lt4UnZc65wEdX4BRys6uH96_adA_Bx91bmx=
+zW-dqfzhD42zium0SXGngHQjl78xRR8Go4IWxToYBlfOKJ5iyrQwMKsZtBFe7eOKS-ZdjF1gTMs=
+hGAClRGO1qytQFm2uQmRmiyrg0PmzEzzKxFg23w99bYCIPTiLCzUv3g9g2BZEg_v4A_blcjC_2n=
+LAAC54_obp_qtH-Ro8X-70qVcNjDY2nnroriEOv2M8o-Cp5vo9xLtnHXg2AyRAA3VMcndgNvK6_=
+sSQi1QdP_ldcZw5gNjNv46nux5IliNtjwh-3tf2HXwiu4fphhrmJFD4sy0JwyXh6SirbiR0PaWi=
+umBQxINTXCFOqQ/4rz/12Jtc2dOQhOTSxz6PRM6vg/h8/h001.b-D3n1sS35tiXtRHCZf_B-TlY=
+RuClN5Y1pu07CELsDA" target=3D"_blank" rel=3D"noopener noreferrer nofollow">=
+<span>We have Mythos at Home: GLM 5.2 beats Claude in our Cyber Benchmarks<=
+/span></a><br>Semgrep=E2=80=99s <a class=3D"link" href=3D"https://link.mail=
+.beehiiv.com/ss/c/u001.-QQnKmN9995ElcpR565Sh-SDvgyu6m58HhCZ9db8DGKqVWdWXN6k=
+xKoGf9Knr4PSCepHOOmW5UqhmNJHUe8tOjEZAkw1zG05HsMsZwbIbuAo6fPEU-L3Dfh0fwPs2Av=
+errmk86rq5ACO-Dgit6mH0g1eADxt-mHFRIfoTIMGNp6IzAfN_A0VOQoiqVBMGf_KFQE32M2Fo-=
+rzWR_IuF9aej7S0RWTPeKFK5Dl9g9oI7GNy99NY8fugYvmeWEfIHEHcO3piSkbhfeSmJe8k71ij=
+v-51BZvm7MmwXs6w2VOXjz4tXUD2Je4lnvHgGS5tdAf/4rz/12Jtc2dOQhOTSxz6PRM6vg/h9/h=
+001.7vvOzNGZzmfAQM757pxr-OBtRPiHuvGGovR4kQT_TJo" target=3D"_blank" rel=3D"n=
+oopener noreferrer nofollow"><span>Katie Paxton-Fear</span></a>, <a class=
+=3D"link" href=3D"https://link.mail.beehiiv.com/ss/c/u001.-QQnKmN9995ElcpR5=
+65Sh-SDvgyu6m58HhCZ9db8DGIYj5DHFikJgWWMjFdBBfjmoK6tF7NqkbFGNWo4mcJh-KzJiW-m=
+UpDmfUuTNWoCQvdjqNeaDBxHjre1wm-tb0EHJARkhbU8o2xHUgB8AmEkQM4o047ADhMAFlOEtYl=
+_PUlVluJAqJMj8lnFYRnAbvt5zof18-I-QZGsR6xMebVc8VfKw_eazZk4p6FaAtORkfmLFFaYP3=
+HvZ7BhatUY0HTIGex6AoyO3FqrJPoQ_E2RFm7WPKEG4jfpOiUnwhlcsiqQPgfs1Z-5OdoG-hX_t=
+jIk/4rz/12Jtc2dOQhOTSxz6PRM6vg/h10/h001.Uha0s25lnVHwBZxo_-IMgWvWTU2ozSnOWHO=
+r01B_UQE" target=3D"_blank" rel=3D"noopener noreferrer nofollow"><span>Seth=
+ Jaksik</span></a>, <a class=3D"link" href=3D"https://link.mail.beehiiv.com=
+/ss/c/u001.-QQnKmN9995ElcpR565Sh-SDvgyu6m58HhCZ9db8DGKBkoeMa33_zJt06N5zPIJP=
+MOPuoQNhjIpC5q7Q6Yikk87pltTd_qv_xxWeY3obHWkx3Dw_YPIciVyIKOvH2pQpLxoCfshcm5u=
+cghipmQDxcCoxBmg8KsuQ_vIineUiqKK5Fz3Q9_nrazPjdSvzAy8lPdLxTJsMwnVV_EXjoJ0ptV=
+b6Eyhq7xQ4g11dA_Oqxgt6UKsp3L4T3tzODNm0MMjxdKZ_pPTNjLDD4OXMqGchse3X8RRlmjx-7=
+b-xDCnPmPz8hl4AN5aZEcOKKUJaVqOY1D4MG69UarFjjoDQmiAKrA/4rz/12Jtc2dOQhOTSxz6P=
+RM6vg/h11/h001.K6UklOoQuZdC7sgpSLa2osbXfN2RBMti-6Kyd_h1hEU" target=3D"_blan=
+k" rel=3D"noopener noreferrer nofollow"><span>Brenden Noblitt</span></a>, a=
+nd <a class=3D"link" href=3D"https://link.mail.beehiiv.com/ss/c/u001.-QQnKm=
+N9995ElcpR565Sh-SDvgyu6m58HhCZ9db8DGKqT3B6-GAMgv41aa1Pc4GEcNo1-AL_eAokem5SU=
+s2mzT9hlj4eJK8-0NLQ2Q_9O79pBfQLMCriaxC_fZs3TMnBS4VjHjkYMtdj7KHffihMaXrWi4My=
+N1EfKpEstQGbnPe7_YSHm1ZoK-WpNjr3HhjrxqRqSEi7zUVhCFlMRzGHuhe-JtCVFycTXvV7d79=
+ilifmbugusizxXeV1JHZl1bC8Fn_CdklF7wYs0xmMgu9nC298oIjKsuY2szodWv7wZsNEObbrdh=
+MAb32mBbHqwtGq/4rz/12Jtc2dOQhOTSxz6PRM6vg/h12/h001.JeUmSvNhRbgBoeRvEcj55iZY=
+xWQ3WAh_QeX5_mm53cw" target=3D"_blank" rel=3D"noopener noreferrer nofollow"=
+><span>Erik Buchanan</span></a> benchmarked GLM 5.2, an open-weight model f=
+rom Zhipu AI, against their IDOR detection dataset using only a basic Pydan=
+tic AI harness and prompt, finding it achieved 39% F1 score and beat Claude=
+ Code (32%) at roughly $0.17 per vulnerability found, though it still trail=
+ed Semgrep&#39;s multimodal pipeline with endpoint discovery scaffolding (5=
+3-61% F1, top with GPT 5.5). </p></td></tr><tr><td class=3D"dd" align=3D"le=
+ft" style=3D"padding:0px 15px;text-align:left;word-break:break-word;"><p st=
+yle=3D"mso-line-height-alt:150.0%;"> =F0=9F=92=A1 I like posts comparing va=
+rious models and vanilla models vs model + harnesses. It=E2=80=99d be inter=
+esting to know more about the dataset though- languages/frameworks in use, =
+how many examples, etc. </p></td></tr><tr><td class=3D"dd" align=3D"left" s=
+tyle=3D"padding:0px 15px;text-align:left;word-break:break-word;"><p style=
+=3D"mso-line-height-alt:150.0%;"></p></td></tr><tr><td class=3D"dd" align=
+=3D"left" style=3D"padding:0px 15px;text-align:left;word-break:break-word;"=
+><p style=3D"mso-line-height-alt:150.0%;"><a class=3D"link" href=3D"https:/=
+/link.mail.beehiiv.com/ss/c/u001.OfVc3EUpGi7lVDYVcPo0wXjq5plTRv7WJt5R3bACCS=
+E1VfaGfhjc-CuFJMkWr2hu_coke0_fFtQ8f9iTB0foUQzT5Kvx4ZQzSjp05aQHHsEyTQSIGCtsA=
+dho9_PaZ0k11VsSXOnF3xDmNUTxwJ0tbm-LMJRVN157clUoN-yF-SOJ8Nrzk_29Lfsm6s-eAX5U=
+qjS4GOAeXxu9HBQ0KOWIm0CbJRh-CRfYQziTtgMdhWWJq2BRHecpCqNoCcAnXVMC8A-2mz6Tw99=
+kG36Xndxr2y5ughEoW_LIi5ws8W4F9npTjAxBWVu0Y_fLOFKxOA-cpdz5YPe1Ghl181g9NRTLOd=
+tlCeNznUaMzftZsTDzrxnkEjzDrgYFN3dV2twIjEVe/4rz/12Jtc2dOQhOTSxz6PRM6vg/h13/h=
+001.o7DgEVzkElPuj6Mnsq9zVY2XVor8W3ADXIRs4MiznY4" target=3D"_blank" rel=3D"n=
+oopener noreferrer nofollow"><span>Snyk VulnBench JS 1.0: Can LLMs Find the=
+ Same Bugs Twice?</span></a><br>Snyk&#39;s <a class=3D"link" href=3D"https:=
+//link.mail.beehiiv.com/ss/c/u001.-QQnKmN9995ElcpR565Sh-SDvgyu6m58HhCZ9db8D=
+GKuzxwJ71SvC-ooTqE_rDAeVhmRjrwfxC_ctrfPDPGuDxuVWBZS1DJVjEGZoPPZaJvD7ztNhO7O=
+1j2mddSsLu96dcnAE1D49iKlYSv5HXiBgJqNSMLYln0IM7NbtkVHTD35by9h_y5PaHNLyRJgKTY=
+cPTwq7cyWe6UJEUwGp2o77qXi8fr_VsZEvAsGa0J_S-HebGSveC9bwYR3mJWPahXMfY7hoa9dq0=
+LXik5pvteAdX5vKnhKJIzLmPlS8GoUsvgL4br9aFxwY2pW1G-f1-v0/4rz/12Jtc2dOQhOTSxz6=
+PRM6vg/h14/h001.NzJjimWqLpKCZfsqgzTBogXIEQWYJux2OyUiNx7tB28" target=3D"_bla=
+nk" rel=3D"noopener noreferrer nofollow"><span>Liran Tal</span></a> describ=
+es evaluating Snyk=E2=80=99s VulnBench JS 1.0 (10 JavaScript fixtures with =
+44 Snyk Code reference findings, each a small Express-based application) ac=
+ross 300 vulnerability scans on (10 fixtures =C3=97 6 configurations =C3=97=
+ 5 repetitions) to measure LLM security review repeatability against Snyk C=
+ode SAST as a deterministic reference. As you=E2=80=99d expect, the post fo=
+und results vary across different LLM-only scans. </p></td></tr><tr><td cla=
+ss=3D"dd" align=3D"left" style=3D"padding:0px 15px;text-align:left;word-bre=
+ak:break-word;"><p style=3D"mso-line-height-alt:150.0%;"> =F0=9F=92=A1 This=
+ kind of felt like a puff piece. Of course a deterministic static analysis =
+scan in this setup will be a) faster and b) more consistent than an LLM-bas=
+ed approach. Also, it=E2=80=99s no surprise that a product performs well on=
+ simple, small applications it was already tested on. A more representative=
+ benchmark would be testing on complex, real-world applications, or at leas=
+t ones that the product hasn=E2=80=99t already been tuned on. If they relea=
+sed the benchmark apps + reproduction code that would be cool though. </p><=
+/td></tr><tr><td class=3D"dd" align=3D"left" style=3D"padding:0px 15px;text=
+-align:left;word-break:break-word;"><p style=3D"mso-line-height-alt:150.0%;=
+"></p></td></tr></table></td></tr></table></td></tr><tr><td><table role=3D"=
+none" width=3D"100%" border=3D"0" cellspacing=3D"0" cellpadding=3D"0" style=
+=3D""><tr><td bgcolor=3D"#d9edd9" style=3D"background-color:#d9edd9;padding=
+:5.0px 5.0px 5.0px 5.0px;"><table role=3D"none" width=3D"100%" border=3D"0"=
+ cellspacing=3D"0" cellpadding=3D"0"><tr><td class=3D"dd" align=3D"center" =
+style=3D"padding:0px 15px;text-align:center;word-break:break-word;"><p styl=
+e=3D"mso-line-height-alt:150.0%;"><b>Sponsor</b></p></td></tr><tr><td class=
+=3D"dd" align=3D"center" valign=3D"top" style=3D"color:#2A2A2A;font-weight:=
+normal;padding:0px 15px;text-align:center;"><h1 style=3D"color:#2A2A2A;font=
+-weight:normal;mso-line-height-alt:175.0%;">=F0=9F=93=A3<b> Clear your vuln=
+erability queue</b></h1></td></tr><tr><td align=3D"center" valign=3D"top" s=
+tyle=3D"font-size:0px;line-height:0px;padding:30px 0px 30px;" class=3D"dd">=
+<table class=3D"j" role=3D"none" width=3D"96%" border=3D"0" cellspacing=3D"=
+0" cellpadding=3D"0" align=3D"center"><tr><td> &nbsp; </td></tr></table></t=
+d></tr><tr><td class=3D"dd" align=3D"left" style=3D"padding:0px 15px;text-a=
+lign:left;word-break:break-word;"><p style=3D"mso-line-height-alt:150.0%;">=
+<span style=3D"color:rgb(28, 43, 51);">Inbox zero for vulnerabilities sound=
+s like a fantasy. Your SCA and SAST scanners flag thousands of findings: de=
+pendencies your app never calls, code paths an attacker can&#39;t reach.</s=
+pan></p></td></tr><tr><td class=3D"dd" align=3D"left" style=3D"padding:0px =
+15px;text-align:left;word-break:break-word;"><p style=3D"mso-line-height-al=
+t:150.0%;"><span style=3D"color:rgb(28, 43, 51);">Maze Code is like if inbo=
+x zero was a thing for your code vulnerabilities. Maze investigates every f=
+inding across your code and dependencies, with context from code and cloud:=
+ is the vulnerable function reachable, does the package survive the build, =
+is it exposed at runtime. The findings that aren&#39;t exploitable get clos=
+ed with a reason for your auditors. For the ones that are risky, our agents=
+ write a fix and route it to the developer who owns that code.</span></p></=
+td></tr><tr><td class=3D"dd" align=3D"center" valign=3D"top" style=3D"color=
+:#2A2A2A;font-weight:normal;padding:0px 15px;text-align:center;"><h2 style=
+=3D"color:#2A2A2A;font-weight:normal;mso-line-height-alt:150.0%;"><span sty=
+le=3D"color:rgb(28, 43, 51);"><b>=F0=9F=91=89 </b></span><a class=3D"link" =
+href=3D"https://link.mail.beehiiv.com/ss/c/u001.SKfDuyn6ZS5YfcIWqGkNjcTXQLt=
+KmJi7rTOowFSqAbb3Zm02acbgcaDIDdnB7XAH4e8fFW1pNIdTewUFwCqxzvEj5P8sa8ntVLXsLo=
+FOUzyYB8CDY29PVN34EeYgsBjMsiQXjMrvY2edmTg7jcpa-KpR9LYjS6GhN8ntoZDMBgMHouCug=
+sZU2Nyq7GkSyBChsuTCD16auerqb_u8PtHwuqt3jvaTcFBwj4vZAXtIaC-D1bKxNKE6bMsi-qWI=
+UxOx/4rz/12Jtc2dOQhOTSxz6PRM6vg/h15/h001.aBcK1zHsZr4MnMrWMWQLsNfEeXMAPlS-Hv=
+__qqqijAI" target=3D"_blank" rel=3D"noopener noreferrer nofollow" style=3D"=
+text-decoration-color: rgb(44, 129, 229);"><span style=3D"color: rgb(44, 12=
+9, 229);"><b>Meet Maze Code</b></span></a><span style=3D"color:rgb(50, 52, =
+52);"><b> =F0=9F=91=88</b></span></h2></td></tr></table></td></tr></table><=
+/td></tr><tr><td><table role=3D"none" width=3D"100%" border=3D"0" cellspaci=
+ng=3D"0" cellpadding=3D"0" style=3D""><tr><td bgcolor=3D"transparent" style=
+=3D"background-color:transparent;padding:0.0px 0.0px 0.0px 0.0px;"><table r=
+ole=3D"none" width=3D"100%" border=3D"0" cellspacing=3D"0" cellpadding=3D"0=
+"><tr><td class=3D"dd" align=3D"left" style=3D"padding:0px 15px;text-align:=
+left;word-break:break-word;"><p style=3D"mso-line-height-alt:150.0%;"> I li=
+ke the product screenshots, it seems like they gather app-relevant context =
+thoughtfully. </p></td></tr><tr><td class=3D"dd" align=3D"left" style=3D"pa=
+dding:0px 15px;text-align:left;word-break:break-word;"><p style=3D"mso-line=
+-height-alt:150.0%;"></p></td></tr><tr><td class=3D"dd" align=3D"left" vali=
+gn=3D"top" style=3D"color:#2A2A2A;font-weight:normal;padding:0px 15px;text-=
+align:left;"><h2 style=3D"color:#2A2A2A;font-weight:normal;mso-line-height-=
+alt:150.0%;">Cloud Security</h2></td></tr><tr><td align=3D"center" valign=
+=3D"top" style=3D"font-size:0px;line-height:0px;padding:30px 0px 30px;" cla=
+ss=3D"dd"><table class=3D"j" role=3D"none" width=3D"96%" border=3D"0" cells=
+pacing=3D"0" cellpadding=3D"0" align=3D"center"><tr><td> &nbsp; </td></tr><=
+/table></td></tr><tr><td class=3D"dd" align=3D"left" style=3D"padding:0px 1=
+5px;text-align:left;word-break:break-word;"><p style=3D"mso-line-height-alt=
+:150.0%;"><a class=3D"link" href=3D"https://link.mail.beehiiv.com/ss/c/u001=
+.YoHiM-Xrf2Rfxp5UMChjhA2zmGK90Ghr2gNOHbC4gU_fB1Ts5zFvZ3a7XJY6_qMeuHfyYWKU5n=
+_CHjRBTE9g7huJFAoa6df0QSOfXRUhnfLmVSqMu6Y0I0FraPTEVznLUEYDqYGj31p-n03dgcOK6=
+20ofA0jkfJSrwqfYRpYcitno9IuwZ3H_LQ_94PJfTtZVvPku4NJVdJGT9-mgxW3xaoQ0Gtl0wQU=
+lMMhq_hR0toy87pkeMG7Nfnq0icE8y2rdPabs0X9bw7UA3BWnragjZKQa5Fe1a9ZmvNbriUTr_n=
+Hqvp_IkSkWgelEa0TeVCOmP6SwBP0o3yzMdkvCwlPQlzcorHhv6PyMeUq2ry0gFU/4rz/12Jtc2=
+dOQhOTSxz6PRM6vg/h16/h001.oEZhrGketgZrolgeWwIdPurvwPPKh1MJhFdC_Ws7JKo" targ=
+et=3D"_blank" rel=3D"noopener noreferrer nofollow"><span>Some notes on Lamb=
+da MicroVMs</span></a><br><a class=3D"link" href=3D"https://link.mail.beehi=
+iv.com/ss/c/u001.-QQnKmN9995ElcpR565Sh-SDvgyu6m58HhCZ9db8DGJjhFoL6EDfyNugTe=
+K1T0nGJiOSaMQoaAY6uE4YdbNcGIrBDJAqPmqp3RHEGaLstnBKC0sMrEADe2w2ZTZUYfx4JkUN5=
+qRz5GVapiT9X-eBqqotn7ZrH0zGy7dTVhn987qqBIh0gBhf8axNXVYZgFBHWjr-Oqu7JXrR2pTN=
+7M18PoySasKm0b9fH75yGArhCphrVqJkhASUmzJsaDd1eiZLIo3KKnWKILmLgCl_WqOmKSLGMWc=
+__K5qF07GPVt7Fh9K7ujzxZJGE20p2WAWfqlU/4rz/12Jtc2dOQhOTSxz6PRM6vg/h17/h001.k=
+6Tc8hoXX3vUapGuyO2ytVS0XERgbx0cYXncjZjYLx0" target=3D"_blank" rel=3D"noopen=
+er noreferrer nofollow"><span>Aidan Steele</span></a> shares hands-on notes=
+ on AWS Lambda MicroVMs, a generalisation of Lambda functions that run code=
+ in a fresh VM for up to 8 hours. The shell side is a first-class capabilit=
+y since MicroVMs support PTYs natively with shell access through a dedicate=
+d AWS API, and inside the VM you can run Docker containers with full OS cap=
+abilities. Networking gets its own abstraction called a Lambda Network Conn=
+ector, a configuration packaging subnets, security groups, and an IAM role =
+for ENI management under its own ARN. The connectors create ENIs in your VP=
+C but hide them by default unless a specific flag is set on the describe ca=
+ll, and AWS has placed resource-based policies on the ENIs so only the Lamb=
+da service can mutate them, closing off the old trick of attaching an elast=
+ic IP to a Lambda ENI for VPC-attached internet access. </p></td></tr><tr><=
+td class=3D"dd" align=3D"left" style=3D"padding:0px 15px;text-align:left;wo=
+rd-break:break-word;"><p style=3D"mso-line-height-alt:150.0%;"></p></td></t=
+r><tr><td class=3D"dd" align=3D"left" style=3D"padding:0px 15px;text-align:=
+left;word-break:break-word;"><p style=3D"mso-line-height-alt:150.0%;"><a cl=
+ass=3D"link" href=3D"https://link.mail.beehiiv.com/ss/c/u001.OfVc3EUpGi7lVD=
+YVcPo0wfNL8MhzG7GFMoi2kw7kJmLtlKaja-KMCOG2CUmt1Z8uU4tyvih-JIwgEEU1VfJ-LKoCu=
+9eK5_Uophf15BV1PlozvFaj2jGzBqx0aCpgVXenRXPRqLmKoOThFc3NQGy_qJ7h5oww2llxx94v=
+PtxwW0KvE-AF9BeNGmfHlj0E1Go0xTbgWJkrYv9z-pmdHOKWEDi_vz0ZCKj3q3WJcXpZFNYfxiE=
+5L18aFJiL3SHIq1szW5HxMK3ucQ4ogbaWX8jHybggWxN3cxkY7FK_rghB-z4EO7LmNfEN5M1l8D=
+9ZRf1K43uUGlgpquN_QCr_qaEROoqh9EMKGmh7d7PsUuevGogJLNHNXWG3iSkFB3BT5LDS/4rz/=
+12Jtc2dOQhOTSxz6PRM6vg/h18/h001.bxjGHZNzthG-q0JSbOq90B0_ZazLzS844izd-NnoszA=
+" target=3D"_blank" rel=3D"noopener noreferrer nofollow"><span>Holding blob=
+s for ransom: Four methods for Azure Storage ransomware</span></a><br>Datad=
+og&#39;s <a class=3D"link" href=3D"https://link.mail.beehiiv.com/ss/c/u001.=
+-QQnKmN9995ElcpR565Sh-SDvgyu6m58HhCZ9db8DGIT-LiYtCPIWVW-1lW_dBHq-QnXmyt3ATT=
+PGsTCwUhbqxpiKUwhTx1zMH-1x530-Ue3Tw3NHkhHbIEgt1xzZnvVDrob7gJSnGacPK98_uewL-=
+yM4Uo3FSQ7jroqab9z74vcqzayVJhGLqo3pKlbFr8MRILO-g14lS2F0-9cAP0tP8himb7-KAQrn=
+QR-CngjTm1pLzmZbQHhktqoKj8YMKRcnZduYI8Fc_YMvB5fZa6PQc2gp_rRyXPZPmI-NULqpsxk=
+EGtckaJL2BN3ubFYDBW0jHpThzcaUsCHNQ4oc3340w/4rz/12Jtc2dOQhOTSxz6PRM6vg/h19/h=
+001.RfuJT3qcmUEr4kYObtAkLs4HP4MQu0wtDPNxCDaZxLo" target=3D"_blank" rel=3D"n=
+oopener noreferrer nofollow"><span>Jonah Feldman</span></a> describes four =
+techniques ransomware actors use against Azure Blob Storage, all encrypting=
+ victim data with keys the attacker controls. Client-side encryption and en=
+cryption scope abuse have been observed in the wild by BlackCat&#39;s Sphyn=
+x encryptor and STORM-0501 respectively, while customer-provided keys (CPK)=
+ and storage service encryption with customer-managed keys (CMK) remain the=
+oretical but viable. He shows how attackers circumvent Azure&#39;s soft-del=
+ete protections with cross-tenant CMK configurations and federated identity=
+ credentials, placing the key vault in their own tenant so recovery require=
+s paying ransom. </p></td></tr><tr><td class=3D"dd" align=3D"left" style=3D=
+"padding:0px 15px;text-align:left;word-break:break-word;"><p style=3D"mso-l=
+ine-height-alt:150.0%;"> The post includes Azure Activity, storage resource=
+, and Key Vault event codes for detection, though CPK and encryption scope =
+usage look like normal PutBlob requests in storage logs. Azure Defender for=
+ Storage adds threat detection across storage accounts, and three new Strat=
+us Red Team techniques emulate CPK, encryption scopes, and CMK abuse for de=
+fense testing. </p></td></tr><tr><td class=3D"dd" align=3D"left" style=3D"p=
+adding:0px 15px;text-align:left;word-break:break-word;"><p style=3D"mso-lin=
+e-height-alt:150.0%;"> For prevention, Feldman recommends immutability and =
+versioning to block the download-encrypt-reupload pattern in client-side en=
+cryption and CPK, avoiding long-term credentials like SAS tokens with persi=
+stent data-plane access, and flagging cross-tenant CMK configurations to ca=
+tch the bypass. </p></td></tr><tr><td class=3D"dd" align=3D"left" style=3D"=
+padding:0px 15px;text-align:left;word-break:break-word;"><p style=3D"mso-li=
+ne-height-alt:150.0%;"></p></td></tr></table></td></tr></table></td></tr><t=
+r><td><table role=3D"none" width=3D"100%" border=3D"0" cellspacing=3D"0" ce=
+llpadding=3D"0" style=3D""><tr><td bgcolor=3D"transparent" style=3D"backgro=
+und-color:transparent;padding:0.0px 0.0px 0.0px 0.0px;"><table role=3D"none=
+" width=3D"100%" border=3D"0" cellspacing=3D"0" cellpadding=3D"0"><tr><td c=
+lass=3D"dd" align=3D"left" valign=3D"top" style=3D"color:#2A2A2A;font-weigh=
+t:normal;padding:0px 15px;text-align:left;"><h2 style=3D"color:#2A2A2A;font=
+-weight:normal;mso-line-height-alt:150.0%;">Supply Chain</h2></td></tr><tr>=
+<td align=3D"center" valign=3D"top" style=3D"font-size:0px;line-height:0px;=
+padding:30px 0px 30px;" class=3D"dd"><table class=3D"j" role=3D"none" width=
+=3D"96%" border=3D"0" cellspacing=3D"0" cellpadding=3D"0" align=3D"center">=
+<tr><td> &nbsp; </td></tr></table></td></tr><tr><td class=3D"dd" align=3D"l=
+eft" style=3D"padding:0px 15px;text-align:left;word-break:break-word;"><p s=
+tyle=3D"mso-line-height-alt:150.0%;"><a class=3D"link" href=3D"https://link=
+.mail.beehiiv.com/ss/c/u001.m5CTo68rhNghfieTCcZktufkfBwDQACFUnQX002YWtsLh0C=
+H8XLkYNvfSLlqm03S7pLX3VI3Z2GeE9SyZYxDbM2eTi9dWSALVPqd9EpRgQrfhW3HnYrCXHSrVh=
+VsUQC7P5GVogtHn0-DVKX_UhudG_O8voTuoKc2v0Qbm3CPmKwIgNyLFY6DY0ibI9TYU5oPCHPqh=
+Pz5NN_MwP8APlOKNlXGBAy0xBRLj9eMJY6T-QgFB3FQsRR645jOdaMzS8lH_cjw-osgq9kqKdEj=
+AFKKOMGGkVFYDIS4xzmZcP-yAVnOkEpV1UnyvPpDv7kz9VDTFLHDzYSmcipcCBg8UeDFrg/4rz/=
+12Jtc2dOQhOTSxz6PRM6vg/h20/h001.eh4y5F53DNwXrK81TEZZjXEZ4FDBLp2q0Z24TrfJLJo=
+" target=3D"_blank" rel=3D"noopener noreferrer nofollow"><span>indoor47/gh-=
+workflow-hardener</span></a><br>Tool by <a class=3D"link" href=3D"https://l=
+ink.mail.beehiiv.com/ss/c/u001.8YehVy0rox6vgHXtd8_by1FLSRNbL12z0xO3-v1dkupJ=
+l6jrIhMo4i-YKXbRByQjyl8UvB2mi-T9-x_QdoUxgoYcI5FmSky_GH1P09sfYcDpVFNiUJ2fgdm=
+OKe1tD0-qXm7ttGzATlbQ7tl9V61ymenQH93EB7mOrpA5FH9YH57jhl4qGL36TWkDtFw3eW6706=
+0SV9TlMsf5R0a5s4xUc_R3FIMB8d396kwFzJdINs50Q0lD07cy2nszzIR0vZqiiA0dwgMyXLkve=
+rs-XabTZaRFJuc4Gc6JbHMB8T4c_A8/4rz/12Jtc2dOQhOTSxz6PRM6vg/h21/h001.lwxbl9pN=
+HjUiy2huvfehgFPwUw7OEF8tKfMPlILvLBI" target=3D"_blank" rel=3D"noopener nore=
+ferrer nofollow"><span>Dmytro</span></a> which scans GitHub Actions workflo=
+ws for supply-chain risks like unpinned action references vulnerable to tag=
+ rewrites, overly broad permissions, and script injection from unsanitized =
+PR inputs. The tool ships as a CLI, GitHub Action, VS Code extension, and h=
+osted API, with an auto-fix mode that resolves action tags to commit SHAs. =
+</p></td></tr><tr><td class=3D"dd" align=3D"left" style=3D"padding:0px 15px=
+;text-align:left;word-break:break-word;"><p style=3D"mso-line-height-alt:15=
+0.0%;"> =F0=9F=92=A1 Seems less mature than <a class=3D"link" href=3D"https=
+://link.mail.beehiiv.com/ss/c/u001.m5CTo68rhNghfieTCcZktpjyxhylc20dOU8vxmPk=
+m1IGsF03QG498GsopMTnx7Y4LjSUACSY7DMhPJDaFIQGSak6HaK7Pu0A65_-kkeLsNmtievjDfE=
+XPFeA8n2EkeIfymRQTn5BUgRZJ2KrmFFkLvIAyTk-pXkddh9rgEnHLUfFHX_lyc77h6Pkf4s61z=
+rzIEssLoPAzLVYx3if82UlC9Y9zd0IV4wsA7ZydGV0IyJI-f-kuihJ6kjY9t4ogzb1ciaN6wEUP=
+TqjecBiM1CKzgR8s_BRodbp2388J1p73RZUCVGDeWD_i9rrrkvM4g1L/4rz/12Jtc2dOQhOTSxz=
+6PRM6vg/h22/h001.TtBDt0S9NA8UEBN6UjiMPIOtqar-9pK3ZEqJvZGiCKA" target=3D"_bl=
+ank" rel=3D"noopener noreferrer nofollow"><span>zizmor</span></a>, but I li=
+ke to collect similar tools for future feature comparisons. </p></td></tr><=
+tr><td class=3D"dd" align=3D"left" style=3D"padding:0px 15px;text-align:lef=
+t;word-break:break-word;"><p style=3D"mso-line-height-alt:150.0%;"></p></td=
+></tr><tr><td class=3D"dd" align=3D"left" style=3D"padding:0px 15px;text-al=
+ign:left;word-break:break-word;"><p style=3D"mso-line-height-alt:150.0%;"><=
+a class=3D"link" href=3D"https://link.mail.beehiiv.com/ss/c/u001.YoHiM-Xrf2=
+Rfxp5UMChjhG2-F_Z8f3cef_LYkXCmbJ64LQnjf_X0KoKWuqQF3gSGyPe_-W3P4AXTUBctYNux5=
+yp_7y7ADSaOzDiTPBAkVA_S7vFL-DsOrVo6OU5pBfXOy4m1sz6vyhkJNIHOCvUxdCIXYxPNrBAO=
+Hks8ks6Q00yHdgKF95Tm2hv9did5fXc6ziV68kExdstBAAE_ZLgWUttmL3OiJoL0fx3e5GjI4y5=
+C4BBDDcnMV6k-rktdAKBcJl4nNFvjraeIzrpI_XR-UncUFJ6B97IwPOI26ETZ6coNhqVaoYSTvx=
+DpSTC298Wn/4rz/12Jtc2dOQhOTSxz6PRM6vg/h23/h001.gogB9JayzsPyz3FZrZ-bcfGKWCmO=
+avUTnmxbM0C55vU" target=3D"_blank" rel=3D"noopener noreferrer nofollow"><sp=
+an>Vulnerability and malware checks in uv</span></a><br>Astral&#39;s <a cla=
+ss=3D"link" href=3D"https://link.mail.beehiiv.com/ss/c/u001.BnxzMnTWmB9lwba=
+T23otsdNePaeUsqbdjrsxYuP_fNOXSqFBlRPrlQUtl9GgXIECGS0r7mpJV1OBRfhG49lQhDzqEb=
+AsZ_nk5cHwMjn8rKbZ1PE4yNDzglftoeqXJSjtS2Vpw1Y7DTFGnsI0t0F3k_QLbSS6HZDM2EUZG=
+x8FCF2AImW4zWhiaKysdCk3M13nrSWtuSmhckXV6J9ZruPJd8rQeQ8a0gAuNmQD-N2uH70KP1M2=
+UrH8pnOs5bemZ5qRkdg1H73BeysldwduJuWtdC6OW9yvUpGYVdbmtC3PWssFbfSj-7_rYP_2yY2=
+m21ud/4rz/12Jtc2dOQhOTSxz6PRM6vg/h24/h001.uF1_u2wcqiKq5pzr1Uc6AQpIW0ZVS0Ss3=
+YTyeZT8ZoY" target=3D"_blank" rel=3D"noopener noreferrer nofollow"><span>Wi=
+lliam Woodruff</span></a> announces two new security features for uv in pre=
+view. uv audit scans dependencies for known vulnerabilities and deprecated =
+packages, running 4-10x faster than pip-audit on typical projects by workin=
+g from uv&#39;s already-locked resolutions. The second feature is an opt-in=
+ malware scan enabled with UV_MALWARE_CHECK=3D1, which checks OSV for known=
+ malicious packages during uv add and uv sync operations and terminates the=
+ sync before malicious code has a chance to run. </p></td></tr><tr><td clas=
+s=3D"dd" align=3D"left" style=3D"padding:0px 15px;text-align:left;word-brea=
+k:break-word;"><p style=3D"mso-line-height-alt:150.0%;"> =F0=9F=92=A1 Love =
+to see new security features in popular dev tools =F0=9F=A4=98=C2=A0 </p></=
+td></tr><tr><td class=3D"dd" align=3D"left" style=3D"padding:0px 15px;text-=
+align:left;word-break:break-word;"><p style=3D"mso-line-height-alt:150.0%;"=
+></p></td></tr><tr><td class=3D"dd" align=3D"left" style=3D"padding:0px 15p=
+x;text-align:left;word-break:break-word;"><p style=3D"mso-line-height-alt:1=
+50.0%;"><a class=3D"link" href=3D"https://link.mail.beehiiv.com/ss/c/u001.2=
+4Nk1afHpCiQnIZ62Q0ozjf_qC5PjRJtN0DZitVWfUrW7nHcoT203MuM9GuPc28tuNjPUliITpIu=
+KWoOup0JY5ekOvU3TzS-Egc8RV1FxecQsQ3iUJkxtxCogg_0_Yq6aO-bDdQtXLf7-IYMKPw9bSg=
+d_q8lqHnftmhIYb-lTEudBrd4uwTT-Sjd-3GyDbhoWnJzbxB4cHDMv3QV3wpqBoCs_JLNahP2Uh=
+ZhZjsPOrhPSJpf22Ah490aXckHoZdj8aj_oD7t7jlm_Wjlq-nFCSxIDtzStkPDM7NkTC3z0Y01I=
+j_5odsWtm1oZUqxn0GmDumr-L_IJ0YLg5Y6jc-zwrrNRT2OfaD2Q5l-xNOczaaTgT9hQPlM5jvc=
+wcYsuMzR/4rz/12Jtc2dOQhOTSxz6PRM6vg/h25/h001.bcXXaP50-Y_bhq1dYEvqYrLi2VyMVi=
+4e3gIwuCDcblw" target=3D"_blank" rel=3D"noopener noreferrer nofollow"><span=
+>One Month of Ecosystem Security Engineering</span></a><br>The PHP Foundati=
+on&#39;s <a class=3D"link" href=3D"https://link.mail.beehiiv.com/ss/c/u001.=
+-QQnKmN9995ElcpR565Sh-SDvgyu6m58HhCZ9db8DGKu_CPDJwvoQslsnylndVt3JxOZ1IjXFmd=
+EEdQdttalxgiTzv7K_JHAViIRtrDoIhoXCP287lN766F6_dD-ne9qVeeWf8C9ZVa_nwH5X_CCtj=
+-iviC7wcpp5L8741qOSOhv4xLg8agEh2oxd8X3WYg5o9Q8nVAeX9BR6tq9unjFsyu5e0zRzHowL=
+xElb1rHpdXuuD67DrvkuvWV9iUG_gI1l8J33qyQ2qtb5GJUmH3kqUvvTkucdKDTM88FSUFEwR9N=
+dXSwKthxHeeXXucmfuAi/4rz/12Jtc2dOQhOTSxz6PRM6vg/h26/h001.Re6IFhZqRJn4Hst4zu=
+QxQqZ2VvNLJdyzLv-UuUP_PZY" target=3D"_blank" rel=3D"noopener noreferrer nof=
+ollow"><span>Volker Dusch</span></a> details one month of ecosystem securit=
+y engineering work, during which the team scanned over 300 of the most-down=
+loaded Composer packages and nearly all major frameworks using AI models wi=
+th extended Cyber capabilities for vulnerability discovery, triage, reprodu=
+cer generation, impact analysis, and fix suggestions. The effort has produc=
+ed nearly 100 publicly available fixes across the ecosystem so far, with on=
+e case where 200 repositories applied the same GitHub Actions fix via a cen=
+tral template. </p></td></tr><tr><td class=3D"dd" align=3D"left" style=3D"p=
+adding:0px 15px;text-align:left;word-break:break-word;"><p style=3D"mso-lin=
+e-height-alt:150.0%;"> The infrastructure runs on <a class=3D"link" href=3D=
+"https://link.mail.beehiiv.com/ss/c/u001.m5CTo68rhNghfieTCcZktnPoLDIJvH_JWf=
+D2O1tl3cROtrr1StHgw6lwKhYdyTSAZ8Lwo58j2XLSyq7eP_2kxUbpNaXHcbF-aTmAbcr_llAw-=
+9QWkRCZA5NdsIhqgRDFM4EtuDtgibQKLQ4ROgLzHCGl33fdp0ns34fpwRqMUqWw_2wlnZlNM9m4=
+uBeoWt_ck88Qgvy-J-TvFdeUX3WPWhFLfyEXA7imOxcj5htCavT--_fCLy7feMz0jnO56t8zXlh=
+DlgEejT6kHsnCTmYW8x2UE_S068lm4DXZrNpQfWxz8o-7FWz9AGQxmzW6mzWhia6w3pqggmfCmB=
+dqs5qLtw/4rz/12Jtc2dOQhOTSxz6PRM6vg/h27/h001.f5KTrCVI6yOdsGBaf1U8kB1e1ApfGi=
+asOQduDl-PkGo" target=3D"_blank" rel=3D"noopener noreferrer nofollow"><span=
+>Scrutineer</span></a>, an open-source tool the team is developing with Alp=
+ha-Omega and ecosystem security engineers from other languages. Scrutineer =
+runs Claude Code skills against open-source repos through a configurable sc=
+an pipeline that combines static analysis, model-backed audits, and maintai=
+ner identification, with findings landing in a structured database and a gu=
+ided triage-to-disclosure workflow that can isolate each scan in an ephemer=
+al Docker container. Dusch reports that maintainer report quality has gone =
+up over the past months because maintainers now run their own coding agents=
+ to validate findings, though models still refuse to help with exploit work=
+ on complex vulnerabilities, and PHP core itself produces worse results tha=
+n userland libraries because a language runtime is harder for agents to rea=
+son about. </p></td></tr><tr><td class=3D"dd" align=3D"left" style=3D"paddi=
+ng:0px 15px;text-align:left;word-break:break-word;"><p style=3D"mso-line-he=
+ight-alt:150.0%;"> =F0=9F=92=A1 Based on this post, it seems like this mass=
+ AI-scanning and patching effort has been well received by the PHP communit=
+y, which is great. Perhaps because findings have already been reviewed + co=
+me with patches, and the effort feels like it=E2=80=99s coming from the com=
+munity (vs some external party)? </p></td></tr><tr><td class=3D"dd" align=
+=3D"left" style=3D"padding:0px 15px;text-align:left;word-break:break-word;"=
+><p style=3D"mso-line-height-alt:150.0%;"></p></td></tr></table></td></tr><=
+/table></td></tr><tr><td><table role=3D"none" width=3D"100%" border=3D"0" c=
+ellspacing=3D"0" cellpadding=3D"0" style=3D""><tr><td bgcolor=3D"transparen=
+t" style=3D"background-color:transparent;padding:0.0px 0.0px 0.0px 0.0px;">=
+<table role=3D"none" width=3D"100%" border=3D"0" cellspacing=3D"0" cellpadd=
+ing=3D"0"><tr><td class=3D"dd" align=3D"left" valign=3D"top" style=3D"color=
+:#2A2A2A;font-weight:normal;padding:0px 15px;text-align:left;"><h1 style=3D=
+"color:#2A2A2A;font-weight:normal;mso-line-height-alt:175.0%;">=F0=9F=91=89=
+=EF=B8=8F<span style=3D"text-decoration:underline;"><a class=3D"link" href=
+=3D"https://link.mail.beehiiv.com/ss/c/u001.24Nk1afHpCiQnIZ62Q0ozkpcv-E6kTr=
+MghOeXKNUjbHbsvm4mzaRpR5qkeL1zHy-HRRAUxmrLE5B0bDc01wOCqKSSM2NXu6GFjDxeQhFxc=
+HLwfBprTN1A5ios5ekpKMUVoR_o7XxCpaudDPotcg71z7hpDT2xztrUpg1WXwbSKj6hWhrQGvEc=
+l1Dvh9gfM78BPTpCavAR0oB5p6dEIV4z7k-ZqO-uB_F4UH2vRKbjbi0ICy79yNZOtxKh7OFwRLT=
+6OXorFb_xBdeD7U1YA_lGXbgZoWCnNhg3bZJRs5ZE5osJbL0sH_6INdW_THtf01Tm-7MsT_iZgN=
+n-AsMjGxwfVD1UZXniN-DENyt2Ag69WvToilsoTirMUQR1_QfwagEs7tapRemPDrGd3x8KHsOTo=
+eLmmVHWabCHXsWQjbUeTd_DRI4nWO-VHtTGjaPYEcGtg67H2OY3L7_0MO1JotzEVb_nHtNny8Md=
+9_KGYWKkgRpv6igaDvCNApvmbmD9f3FD7c_dnJ1rpzzryfCENsUAqlNEVDZxnFweML17sYFvU6i=
+1Cn9SL-WqzoJmqxtknAAr3wlEo6Q8h7AYYHs5e7xE3DSu7LWi2qPXEaUd7LJakbsOE4-GR4uA6d=
+LekZRM-a7vvJo0IrN0M1aYefE6MIUrQmMxwNFSh0Cexmko9_cb_Efvdsr_cLI5TCiAb_OAKUgN6=
+90ho60RFKIvhlihP7jDRQjRnEGiw3XBuQIi0BDP5X_rBQWO3_D1JVXi6J8IcMKsC0JvEdCXUPeA=
+Ox8T2yim8O41fDWMK26jGLlLfAqX3JlqlRNNrng9N4EQrKC6MMa/4rz/12Jtc2dOQhOTSxz6PRM=
+6vg/h28/h001.goE-OkKgWYROM7wDpc4rJzok5GlKLrL9TvxqaOqb9kA" target=3D"_blank"=
+ rel=3D"noopener noreferrer nofollow" style=3D"text-decoration-color: rgb(4=
+4, 129, 229);"><span style=3D"color: rgb(44, 129, 229);">=C2=A0Read Online =
+if Clipped=C2=A0</span></a></span>=F0=9F=91=88=EF=B8=8F</h1></td></tr><tr><=
+td class=3D"dd" align=3D"left" style=3D"padding:0px 15px;text-align:left;wo=
+rd-break:break-word;"><p style=3D"mso-line-height-alt:150.0%;"></p></td></t=
+r></table></td></tr></table></td></tr><tr><td><table id=3D"ai-security" rol=
+e=3D"none" width=3D"100%" border=3D"0" cellspacing=3D"0" cellpadding=3D"0" =
+style=3D""><tr><td bgcolor=3D"transparent" style=3D"background-color:transp=
+arent;padding:0.0px 0.0px 0.0px 0.0px;"><table role=3D"none" width=3D"100%"=
+ border=3D"0" cellspacing=3D"0" cellpadding=3D"0"><tr><td class=3D"dd" alig=
+n=3D"left" valign=3D"top" style=3D"color:#2A2A2A;font-weight:normal;padding=
+:0px 15px;text-align:left;"><h2 style=3D"color:#2A2A2A;font-weight:normal;m=
+so-line-height-alt:150.0%;">AI + Security</h2></td></tr><tr><td align=3D"ce=
+nter" valign=3D"top" style=3D"font-size:0px;line-height:0px;padding:30px 0p=
+x 30px;" class=3D"dd"><table class=3D"j" role=3D"none" width=3D"96%" border=
+=3D"0" cellspacing=3D"0" cellpadding=3D"0" align=3D"center"><tr><td> &nbsp;=
+ </td></tr></table></td></tr><tr><td class=3D"dd" align=3D"left" style=3D"p=
+adding:0px 15px;text-align:left;word-break:break-word;"><p style=3D"mso-lin=
+e-height-alt:150.0%;"><a class=3D"link" href=3D"https://link.mail.beehiiv.c=
+om/ss/c/u001.jDp7yZmWUrSClxco9LCz7yjXEPy3QlsmXxXb4NaiKBeU23MUO5HWLbv63T9ybu=
+orp246jmEfEOpBtJ1dMD5SIhCbhaQGSkkUuICvF14buxs7EHo6Qb5fX2wqnwotOk6p1UKRIUu6P=
+_b34TMM18tbJAJaFjg9NMM2I8TPCK9sKuWY8xRM5W-sMQlDGPj-AxFInRC6lUUTE-lu-4WAUCOd=
+fkW5-chXsgAzJUQUWhcfZGet-ERe7YRsz5q6gzPearwvnQ-4M2WF_dyvcrEnqNpwR0U7J-pH6b7=
+Pwqzaixx1LdNjOzkkzY-gmcpuyo4eWz9H/4rz/12Jtc2dOQhOTSxz6PRM6vg/h29/h001.uqA4m=
+9PG_dvEqvJ9091wQYhJxXgR2JTKbOUSwIyhssg" target=3D"_blank" rel=3D"noopener n=
+oreferrer nofollow"><span>Prompt Injection as Role Confusion</span></a><br>=
+Charles Ye, Jasmine Cui, and Dylan Hadfield-Menell detail their ICML 2026 p=
+aper on prompt injection as role confusion, <a class=3D"link" href=3D"https=
+://link.mail.beehiiv.com/ss/c/u001.m5CTo68rhNghfieTCcZktvMnwbdvHAxoEKV6a-TF=
+WM5WRga3uJA5rk6dkdcCC2DngnwedVpoYjGTbfkqGSOi2yNEzsvUtM2N8us0VAaxvMUGxMAAypV=
+bXclyptyJszahdn3y0Q1VVgRloYQy_S8QckB4-R_Y8tTgo3GEffMjse3LD9y8D3u6XePwEZ-wZN=
+5DMsxNNNgyEiuyzSW5LhzJEgTWsdv84jrlf6KTcaDbgvgCqjRiCEd9YQ5cpFfFut43KQi_nt8do=
+Cw-QEtYl0zTC88z8o31-5noGoICXmWV7NpkdS1iU7e0hVNoucMjeTrdb-pv9CJe4og1KgfE_0TB=
+KuovXNNv7XThuVfipctbJec/4rz/12Jtc2dOQhOTSxz6PRM6vg/h30/h001.kF8BnCcwy8x1HRS=
+FtkxtjpzbDHDaLs_z9mh7PVcNauE" target=3D"_blank" rel=3D"noopener noreferrer =
+nofollow"><span>with code on GitHub</span></a>. Prompt injection succeeds n=
+ot because attackers find clever phrasings but because LLMs perceive roles =
+through writing style rather than the structural tags meant to carry trust =
+and authority. The researchers build linear probes that measure how strongl=
+y an LLM internally believes a token belongs to a given role, producing per=
+-role metrics including CoTness and Userness. The probes show that reasonin=
+g-style text registers as the model&#39;s own thoughts even when explicitly=
+ wrapped in user tags, and user-style text registers as user instructions e=
+ven when wrapped in tool tags. </p></td></tr><tr><td class=3D"dd" align=3D"=
+left" style=3D"padding:0px 15px;text-align:left;word-break:break-word;"><p =
+style=3D"mso-line-height-alt:150.0%;"> The researchers demonstrate this wit=
+h an attack they call CoT Forgery, which injects fake reasoning into user p=
+rompts that mimics the LLM&#39;s own thinking style, raising attack success=
+ from near-zero to around 60% across frontier models. Standard prompt injec=
+tion works the same way, and even simple role-spoofing like prepending <cod=
+e>User:</code> to a malicious command in tool output increases success. Bey=
+ond direct attacks, they warn of subconscious steering, where the same flaw=
+ lets seemingly innocuous text shift model behavior without injection, like=
+ a shopping webpage with enthusiastic tone pushing an agent toward recommen=
+ding a purchase. </p></td></tr><tr><td class=3D"dd" align=3D"left" style=3D=
+"padding:0px 15px;text-align:left;word-break:break-word;"><p style=3D"mso-l=
+ine-height-alt:150.0%;"></p></td></tr><tr><td class=3D"dd" align=3D"left" s=
+tyle=3D"padding:0px 15px;text-align:left;word-break:break-word;"><p style=
+=3D"mso-line-height-alt:150.0%;"><a class=3D"link" href=3D"https://link.mai=
+l.beehiiv.com/ss/c/u001.-QQnKmN9995ElcpR565Sh91Zfr0rMa8FqDivt0HPYAz5o7hNHev=
+012O_YC_wZEmvf0PiJgcGIQzV1TKkPknmjZNbod934zYsMPQyuYCMf4CKkLt593dm5QmZxHD9QP=
+ibVEBY9_HpeNsOMXHBz9uAqE_CLP6ODu7lxbVke8hfS0BvP9geNf6C6eUdceIvHM244nMfKU4nR=
+M9U9gG_g-fcu_ICEhsGycv5GPmUm5cshysRIEtFdy0T3bL8_8zcT-dUUAFdsNIJna1HriH1SCoy=
+TibU7gk4_hRpAacO9opnvD6bfaQ79E2nQ9krSVjpD5C9J1BysKdz7YkHXPyB2bRCXlkm_KeBIbn=
+7DNp2yssxwKWZuYMp0QuOR6897SK-dARQirtiAXtDCugauvnButY_QA/4rz/12Jtc2dOQhOTSxz=
+6PRM6vg/h31/h001.IkJ5VzsuuKqRukzurdbPJKv_WorUQceLou1rSzWBqs4" target=3D"_bl=
+ank" rel=3D"noopener noreferrer nofollow"><span>The New MCP Specification: =
+What Security Teams Must Prepare For</span></a><br>Akamai&#39;s <a class=3D=
+"link" href=3D"https://link.mail.beehiiv.com/ss/c/u001.-QQnKmN9995ElcpR565S=
+h-SDvgyu6m58HhCZ9db8DGLT3GYfVk_hAy5MgP2-zO1YyvxOUcbbnbw5aoMf-Rq6fW6O8iBVGuD=
+3h5spZD-oLVnnZwHbiv4TWFNorMR3RFEWcPXIcgwjs6jvrNMaRHU0vlwvtIy_BSgEm8TgdUgP0j=
+DZhjajRQsn2y6QEG5w4jzSvxk5Ew9sAoGMHJF_M4tZ840fNNhCkq4ynYmzMul_LtHOubLACjWCk=
+nV_swiFwFwfP1vSiQmWPFup-Q19Wzk6zzkEefal468QikiN_QWaik3xhp9_R-VpJh4rPLY7wgvc=
+/4rz/12Jtc2dOQhOTSxz6PRM6vg/h32/h001.ftzHUjnG6JpomLueCswcaxbJh2f92OUYEBF254=
+sbKVA" target=3D"_blank" rel=3D"noopener noreferrer nofollow"><span>Maxim Z=
+avodchik</span></a>, <a class=3D"link" href=3D"https://link.mail.beehiiv.co=
+m/ss/c/u001.-QQnKmN9995ElcpR565Sh-SDvgyu6m58HhCZ9db8DGJ22OwLp6bqPpMtSFIkmIY=
+VCDqnODuNN9dI6_gCp3N408POtjxxx1X3Y5BP3zj09RmkiBmgbKd0KsjuK4sRO4a6CWzpUmMTry=
+1VdYm_v807Pcm9YcdX-1I8oX0nE7m1CcGG461kkQolXpQJ6SKDFO-XPGP4lS1EL-6j_8VaaPC_E=
+NjHbmz4QarXx2gKXRd_aZlg5qglwv3F7LtzDFF1s8bTieBNYVGwLLYj7KDOS7Ibgt8FQ0nkj13p=
+Aq5Go9SHKtW3sncFTSb3xr6UsVvSn1jX/4rz/12Jtc2dOQhOTSxz6PRM6vg/h33/h001.BYkdxy=
+PEr5SbcXrsSAGyukFk8cDQJsIhDwtNhg_RUy8" target=3D"_blank" rel=3D"noopener no=
+referrer nofollow"><span>Segev Fogel</span></a> and <a class=3D"link" href=
+=3D"https://link.mail.beehiiv.com/ss/c/u001.6LWDG7DbSn4UhZmyCzEYziGsMybtR5G=
+KRIvOya7Q_oWIp1vZch1LGugAApumSfxXYzIreNnJcHlpV8UCvDGvw33-LwAulQtZNRwGKIIqNu=
+LJczGmy9dETiSudIPGp0EbefnQA7CoEfzQrkOErSEfSVOb5FXQ2x_AOHGmGTH1YKz-FNDU2a5dM=
+5UaJG22bybP0pIN0eyWuaB_vZUzBLg6LTx0RkxA-6I1voenjMYeMuuDy6SUebMaznDgTRhUFj8Z=
+HOyu6-zLLWOkpIfh3nEK0EX5d_sf3ocDOaYuMk75SRY0ApJ7SUmzU1FRtiny1Oy5/4rz/12Jtc2=
+dOQhOTSxz6PRM6vg/h34/h001.Ny9PmZWLj4zMhxddLHO9l90EgZP1IT9PlqF2krsKma8" targ=
+et=3D"_blank" rel=3D"noopener noreferrer nofollow"><span>Gal Meiri</span></=
+a> describe the upcoming MCP 2026-07-28 spec, which turns MCP from a local =
+integration tool into an enterprise-scale protocol with a stateless archite=
+cture, eliminating protocol-level session hijacking, unsolicited server pro=
+mpts, and weak authentication by mandating OAuth 2.1 with PKCE. </p></td></=
+tr><tr><td class=3D"dd" align=3D"left" style=3D"padding:0px 15px;text-align=
+:left;word-break:break-word;"><p style=3D"mso-line-height-alt:150.0%;"> The=
+ new attack surfaces include cross-agent workflow hijacking through predict=
+able tracking IDs or unverified state, client-controlled metadata manipulat=
+ion via the unsigned <code>_meta</code> object, desync attacks through new =
+MCP-specific headers, stored XSS through interactive MCP Apps, and denial-o=
+f-service through long-running asynchronous tasks. Security responsibility =
+moves from the protocol layer to whoever builds on top of it, and the quest=
+ion for security teams is no longer whether the protocol itself is secure b=
+ut whether the applications built on it correctly implement the new trust b=
+oundaries, state management, and execution models the spec introduces. </p>=
+</td></tr><tr><td class=3D"dd" align=3D"left" style=3D"padding:0px 15px;tex=
+t-align:left;word-break:break-word;"><p style=3D"mso-line-height-alt:150.0%=
+;"></p></td></tr><tr><td class=3D"dd" align=3D"left" style=3D"padding:0px 1=
+5px;text-align:left;word-break:break-word;"><p style=3D"mso-line-height-alt=
+:150.0%;"><a class=3D"link" href=3D"https://link.mail.beehiiv.com/ss/c/u001=
+.YoHiM-Xrf2Rfxp5UMChjhAC_2BLSXoNOVYA0kZWctWEYDt9y6wVT8ZK0iGBMBFWlTPSxAmgsa2=
+kMO7eSnmNjN0rWXbeYwjs9N0QaILc6sqD_Mgh7Lj_tXtDtoCnBK3gax8qG-dsXci-8Kvz7WElQN=
+DL28o_wWuQQ4ojwngcxjd9xBeXWU72CkhgfYwAk0riVHCVbng2qus_xjppjR5g5B4ic04KhlYyF=
+derPIv12nLDMttyeHPb928biwDAiaxsJOpygJj9wQXhoFtIVnHL-3NCqwQqE5WI6KlCORDOi3i-=
+Ox6wrsWyTkP6Pml93ckyJkC76EzzzbjRKluuDDSqVcC8ZbKY424clqbk9WYeEKTRTccVhlXFsXb=
+HgIF1byC_t/4rz/12Jtc2dOQhOTSxz6PRM6vg/h35/h001.OFmGv4vH49vrD6aVjxkxOnAoR_Bb=
+ZEtUd59yeW6WPt0" target=3D"_blank" rel=3D"noopener noreferrer nofollow"><sp=
+an>Introducing AWS Continuum: Security at machine speed</span></a><br>AWS=
+=E2=80=99 <a class=3D"link" href=3D"https://link.mail.beehiiv.com/ss/c/u001=
+.-QQnKmN9995ElcpR565Sh-SDvgyu6m58HhCZ9db8DGJhfEpgucREy-7shsunXO_3kCWeuW2Aag=
+z3laqytgxSN9HIKxUPdaPWct1O6_0Ybg3JRlrboMx2RaPAmcws7CzUFVWejXMij7-QgIDx6du-2=
+0eih5o4FSO6pjgmUaz9q6v3NdyimZlzlH308nfWm1nUkx3J8T3tG1J-XQi2PLAcjWq2CNbYCDoF=
+Gj4xnvIPVnMsVYcAJPWTPwrfxb6ueC8M96Q4WLcMF_A4en-zWfz_NIPoCqbBIErvd9tSGnrRSQf=
+mZU4dMg8RS-tlXdDaL_LT/4rz/12Jtc2dOQhOTSxz6PRM6vg/h36/h001.eOppZv-oDziBDH0QJ=
+L8xCfVu3NtHYi4VVWiCHv9Bln4" target=3D"_blank" rel=3D"noopener noreferrer no=
+follow"><span>Chet Kapoor</span></a> announces Continuum for code vulnerabi=
+lities, an agentic security platform that uses multiple frontier models to =
+manage the full vulnerability lifecycle through four phases: discovery (ing=
+esting existing backlogs and scanning environments), prioritization (using =
+business context like deployment status and reachability), validation (cons=
+tructing working exploits in sandboxed environments to confirm findings), a=
+nd mitigation/remediation (recommending network changes, policy updates, or=
+ code patches that are validated before deployment). </p></td></tr><tr><td =
+class=3D"dd" align=3D"left" style=3D"padding:0px 15px;text-align:left;word-=
+break:break-word;"><p style=3D"mso-line-height-alt:150.0%;"> Continuum oper=
+ates in &quot;learn mode&quot; with human oversight initially, then can gra=
+duate to &quot;enforce mode&quot; for automated remediation based on define=
+d risk profiles, and incorporates existing AWS Security Agent capabilities =
+like pen testing, code scanning, and a new threat modeling feature that out=
+puts STRIDE-format models from design docs or source code. Continuum reason=
+s over both structured data (infrastructure, permissions, network topology)=
+ and unstructured data (documents, communications, business priorities) to =
+provide context-aware security decisions. </p></td></tr><tr><td class=3D"dd=
+" align=3D"left" style=3D"padding:0px 15px;text-align:left;word-break:break=
+-word;"><p style=3D"mso-line-height-alt:150.0%;"></p></td></tr></table></td=
+></tr></table></td></tr><tr><td class=3D"dd" align=3D"left" style=3D"paddin=
+g:0px 15px;text-align:left;word-break:break-word;"><p style=3D"mso-line-hei=
+ght-alt:150.0%;"></p></td></tr><tr><td><table role=3D"none" width=3D"100%" =
+border=3D"0" cellspacing=3D"0" cellpadding=3D"0" style=3D""><tr><td bgcolor=
+=3D"transparent" style=3D"background-color:transparent;padding:0.0px 0.0px =
+0.0px 0.0px;"><table role=3D"none" width=3D"100%" border=3D"0" cellspacing=
+=3D"0" cellpadding=3D"0"><tr><td class=3D"dd" align=3D"left" valign=3D"top"=
+ style=3D"color:#2A2A2A;font-weight:normal;padding:0px 15px;text-align:left=
+;"><h2 style=3D"color:#2A2A2A;font-weight:normal;mso-line-height-alt:150.0%=
+;">Misc</h2></td></tr><tr><td align=3D"center" valign=3D"top" style=3D"font=
+-size:0px;line-height:0px;padding:30px 0px 30px;" class=3D"dd"><table class=
+=3D"j" role=3D"none" width=3D"96%" border=3D"0" cellspacing=3D"0" cellpaddi=
+ng=3D"0" align=3D"center"><tr><td> &nbsp; </td></tr></table></td></tr><tr><=
+td style=3D"padding-bottom:12px;padding-left:37px;padding-right:27px;paddin=
+g-top:12px;" class=3D"ee"><div style=3D"margin-left:0px;" class=3D"edm_outl=
+ooklist"><ul style=3D"font-weight:normal;list-style-type:disc;margin-bottom=
+:12px !important;margin-top:12px !important;padding:0px 0px 0px 0px;"><li c=
+lass=3D"listItem ultext"><p style=3D"mso-line-height-alt:150.0%;padding:0px=
+;text-align:left;word-break:break-word;"><a class=3D"link" href=3D"https://=
+link.mail.beehiiv.com/ss/c/u001.-QQnKmN9995ElcpR565Sh2nbUuTqxKUBJy2NrfbGY-8=
+ycSZ-K1EcerOjVjotephCYO9G7HtfZEGERnOUBlQ_Q3NETeYyY-YiG7sjWEAqBJTng7DkZ_LgjI=
+qOpUprNPXIRIt1R4vXMRIVNOh8OEeclAatszdii-Dby1utSF_y1__2ZelUQ0tFpbMhLICxyISJF=
+gdF01FSSK-2cz5FwlXTvMGjcknauWNaYyOVriFAvmj9IhnwrHdhJYL27P2Em8vB5htO-KWker1v=
+2oKDlk4ovPN6Hy1c2Nx0QCrsbBFe1_Dsg6psacTyUnCduMd8jQZ3obAADXNGXcr7ZrugpOux_Q/=
+4rz/12Jtc2dOQhOTSxz6PRM6vg/h37/h001.z2pWF1ztWRDosKpesvddsCfJTFt1BxvX-hQ7oda=
+JRrE" target=3D"_blank" rel=3D"noopener noreferrer nofollow"><span>Walking =
+my dog at 3am</span></a></p></li><li class=3D"listItem ultext"><p style=3D"=
+mso-line-height-alt:150.0%;padding:0px;text-align:left;word-break:break-wor=
+d;"> Lyra - <a class=3D"link" href=3D"https://link.mail.beehiiv.com/ss/c/u0=
+01.6LWDG7DbSn4UhZmyCzEYzmhT8rNzvyACLvClaG-XW37MGtuE4inagfNvq7NOB8WAYdVJhRA_=
+q9l5MUEwX2fyyOh8vrmMvKYfFeqXAMeNnr03l80zOrznj_3W9p8BWCgKfQFdZ8AQsG2bOLJ33AR=
+DiguNNkM2XLEV9WE2y1YeMMiYxSUTNi-kKO-8nC9chpGoSp1BHe2vnBtrgNMhoeXM2yulLiZoqc=
+qO_SL0zUA9Ezyawe2yhH2eDgxg7HZPin1BxQkQKGr7aNEgeWzCZNd0K3AfvVgMdtbo42fcgfEHi=
+7fvBgjSaPiB7lygHm4nNbcQibLsuBXNvbUzfFo8ElU94A/4rz/12Jtc2dOQhOTSxz6PRM6vg/h3=
+8/h001.oMaP6Ww6MiQCBL0NQBcaXX-xwDNUZZUOT8TEsr9wo50" target=3D"_blank" rel=
+=3D"noopener noreferrer nofollow"><span>A peek into Reddit&#39;s anti-spam =
+internals</span></a></p></li><li class=3D"listItem ultext"><p style=3D"mso-=
+line-height-alt:150.0%;padding:0px;text-align:left;word-break:break-word;">=
+ Macworld - <a class=3D"link" href=3D"https://link.mail.beehiiv.com/ss/c/u0=
+01.-QQnKmN9995ElcpR565Sh6d_H7075gMKK2oeqFwtj_DHxEc-UE0H1yLVzgN0nKuXsCT_Xhed=
+9XTvjdkKf_pwPM1l_C1eWPC1mvu7usnI2g3hv-dxQ2aaNnC5FNW0hH9K8KrsxFhz6vMglZN_rHj=
+Qbeo3McMTzrC6QlyoGEsMxnAVEJuVks987calzMir4D2EPyS-XCpPa0TDIlPMITJp1oUOOrDe-A=
+DihKa1gwhjvXf4zQd4zKm7ylBl37vHBSIETyBsAvbPEFQ_dorcuZ2fCpUC_Od_A1KFuuo-5MBFN=
+e2TlWWLLoojYw7hRH5AjVKF5AXaI0y3v6o5UpOq2LNVJ725Ez_56D8Fp6KEx1O9eLxd-CuV3MoE=
+Ti8iTbwXevE8/4rz/12Jtc2dOQhOTSxz6PRM6vg/h39/h001.azjbqaJ8w1EQ7MqtZRs0DguQvp=
+T2hZE-IHprC-j9-hY" target=3D"_blank" rel=3D"noopener noreferrer nofollow"><=
+span>iOS 27&#39;s Shortcuts is AI at its best</span></a></p></li><li class=
+=3D"listItem ultext"><p style=3D"mso-line-height-alt:150.0%;padding:0px;tex=
+t-align:left;word-break:break-word;"><a class=3D"link" href=3D"https://link=
+.mail.beehiiv.com/ss/c/u001.-QQnKmN9995ElcpR565Sh8uU05dLxt2xDsmvt5PSbRvvrRL=
+hrbZByzyXWTzZ7Gbw2FczmlFUUpUw3BvkOayN2lIzgPnRF1FHnVwBfvjx0YE2_DF9UPRqHZZ0Fh=
+wixGURuRl1aF8IzsNJzrfMhQgIgboikQjnMvFV7fUQXlmZIZ-_VFEClcdRQ6M6fVavVICuTQMeK=
+b8hNNTIg6eKX31VvfKVZaojQ1a2P2JlxjJAy9btDPn5AN6L4hV-8Bq6iFmsXnpkA_F5NJRWj_Rt=
+vdVZ5il9NQQG3edyqPg_HbZRHfr8Hmxp0gZS5VAFQBeSzbRV/4rz/12Jtc2dOQhOTSxz6PRM6vg=
+/h40/h001.HME5nxavmcUK3rXaGbe6mHmVpfrPfM0Jb4QQXeCo6TM" target=3D"_blank" re=
+l=3D"noopener noreferrer nofollow"><span>In the Weights</span></a> - Enter =
+a name and see how much it appears in the training data of major LLMs based=
+ on its prominence in model weights. </p></li><li class=3D"listItem ultext"=
+><p style=3D"mso-line-height-alt:150.0%;padding:0px;text-align:left;word-br=
+eak:break-word;"><a class=3D"link" href=3D"https://link.mail.beehiiv.com/ss=
+/c/u001.f5Zgu5U0wWtAfP7Ta1kAAdA3nH0ts58duJPPi8P9HPdztiEx7NUGohpUctjd3yym_D7=
+kMVG2oySkIbaSrANFm1OrpszpYt6FTEQqnJDkr5eBRCHk0775A6Qu_Ue893yEEIr5oB7MXEvvQg=
+5XVn3YsPZkM9o5xt5JurS4Lz16ADNoCf6BrClEGyzDxFi1boXnsQfr8F6w-KlSM4iJ_0mHcK1zZ=
+aE5rq5lgFqfmLnse2Gmbtrk1JSE4GHZVL8uhaS1wCl0pyQXsjUyoYJ6bExMh2yWXFf58ayM9qU2=
+07ldVa9L9LZMmTZuEG3BhsfWp1Ua0TzeR5NjU_9nIMRx-6w7ZBAT9YHCaLGDbcaCvW5haDdL6Sz=
+1vLIixrhRyVbkLKZA156u6Zw5-AJCGNd65_cnzw/4rz/12Jtc2dOQhOTSxz6PRM6vg/h41/h001=
+.HJBBjJbbDBJlNKHcmUO1niy5KrzyLDWFrnje-fhESv0" target=3D"_blank" rel=3D"noop=
+ener noreferrer nofollow"><span>Estonia aims to be first to give AI agents =
+official digital IDs</span></a></p></li><li class=3D"listItem ultext"><p st=
+yle=3D"mso-line-height-alt:150.0%;padding:0px;text-align:left;word-break:br=
+eak-word;"> WIRED - <a class=3D"link" href=3D"https://link.mail.beehiiv.com=
+/ss/c/u001.-QQnKmN9995ElcpR565ShyJsGx07Rb12YrIpOr7O_02Tb6QJl64Pyyiwsf6dd7ly=
+WsdHHoPnTZD-N_vT8Hc54AygEGO2T0ck8Y28Q0F2XoMGgKSPCY8UbvM0K_ksHvPf8FqCEUIqm0J=
+3FyP49EWUsXLvOsxmg6OF-LmYe-5826t5d5Jxs6FYer5QxYWBvJO94F6juMZJiSmmOGL7DX8mBR=
+XWT7Fpl9lcK1ModEWisMEZ1-2-SC6dYnKpZHGP3eLJgGDB6ZN_xvLNIIuE773Om_I6-Elb1DaIH=
+RSz6J2NWI1wzKYZot37ASfFvhAO7CorVCZqAWO3paEv3e3tAMTg5iMX0PLfk4xVGqwOZKCARpw/=
+4rz/12Jtc2dOQhOTSxz6PRM6vg/h42/h001.3AKZySywUFiyfrEMwjFVCVC2owVeCmNZIGHlL6J=
+toA4" target=3D"_blank" rel=3D"noopener noreferrer nofollow"><span>I Met Wi=
+th China=E2=80=99s Top AI Experts. They=E2=80=99re Freaking Out, Too</span>=
+</a></p></li><li class=3D"listItem ultext"><p style=3D"mso-line-height-alt:=
+150.0%;padding:0px;text-align:left;word-break:break-word;"> Tim Ferriss - <=
+a class=3D"link" href=3D"https://link.mail.beehiiv.com/ss/c/u001.24Nk1afHpC=
+iQnIZ62Q0ozgVbnShD0Swse8Z5dyCBqHhuTj3V7erRX94mObd44h0z6oZmVgEnIWDAM1JT9C8RX=
+GB0v43HfZHkgl5wTllTPV4i3nRu4QvCCXPIeHvk0WSPVIiAYNr60VyGhi-BttBAh96ddYdLNcSB=
+NySEm0ckx1h3syL2ILlXe_fyaTWQkhwYYzYQf65M2ZG7N_JXv9epizvuahObJFlZeB8f8VpBM2B=
+cfxR4nlJ2jAkTPlj4cEo5W23ZprnBB8J3kKg4WRvoxT2Aj5u0dpmkSa5-7lKfj9K7nhvgrKGRrx=
+TTqFSlPmh7hARruNetLjIwWoKRj4WzMXCIO68dQSppdL1IWcDx5M8/4rz/12Jtc2dOQhOTSxz6P=
+RM6vg/h43/h001.YJu75kW3pTa-ZL5m7yVShkRhuAFgl1PHesMxFjazLEA" target=3D"_blan=
+k" rel=3D"noopener noreferrer nofollow"><span>Has AI Already Killed How-To =
+Nonfiction? Sales Trends, My Personal Data, and What It Might Mean for the =
+Future</span></a></p></li><li class=3D"listItem ultext"><p style=3D"mso-lin=
+e-height-alt:150.0%;padding:0px;text-align:left;word-break:break-word;"> Th=
+e Marginalian - <a class=3D"link" href=3D"https://link.mail.beehiiv.com/ss/=
+c/u001.-QQnKmN9995ElcpR565ShysMx_BG5jo8XwsRJrp3C2l7mYfPfCN2HW-WJc4DdViwPYea=
+gCpkX26nkTu3bgZY9SA9FrgdBzsIS93BnVyNi406XNkxZV--gAYrqfSrnzU_N_sJ2Yvss1oNAqV=
+rVR-rpTNsZe7QHhVaVe1DRqEVdfPQILnXsB30kibxu1y3SD4UvsWuCUAods_Z0hz2RNOiisbXNq=
+FffCtpZmsKy77c7du7oVBDjFwwnolUiRB8Hszj6etOZ7Q8cYrm2ZiCKOMm0XBgTV3_YqKtDcNn7=
+HXgANhZIYanytAzulQ0UFpfjouWaB8drnMNy7guW7iaZkxtwrKy4QER4rxNNRAtuhj5SAViZg8s=
+cJHDTyibFlKCTDy_/4rz/12Jtc2dOQhOTSxz6PRM6vg/h44/h001.WWpil7MEmqB4PohL9_FJmN=
+DgMpMaPWLUsO7Kv2ANrtM" target=3D"_blank" rel=3D"noopener noreferrer nofollo=
+w"><span>Kurt Vonnegut=E2=80=99s Life-Advice to His Children</span></a></p>=
+</li><li class=3D"listItem ultext"><p style=3D"mso-line-height-alt:150.0%;p=
+adding:0px;text-align:left;word-break:break-word;"><a class=3D"link" href=
+=3D"https://link.mail.beehiiv.com/ss/c/u001.-QQnKmN9995ElcpR565ShwX5gx0lqjH=
+NtDcRkwIYLYgTmEzZj6xTEChad8tJiJ4XTcEYF4fkvOB1AP_1B__ew91gZ1aah5TQ6LstdigFqQ=
+E4XagmROKwkBQZe35-aSyH4DDU1uR3hvra6ywGi0C__J7W8looRcHDQsuGGbGgzT-7d8w3VQnwb=
+TWjzq1PSIxplgtH0QxAhKGffryei3EW6-OKbXo8chKyYXmu1XwWiKkYRmO3pHPcUNY-ca-pcCgD=
+jCszZakjrmENV54vjC5tUsVZe7Fa5WjYSuDWWOtYQQp12XG4kn51QZqbXM_-0UzTDW0jDP9f3HC=
+duDRX2vm_z0tW89EFiAUb0nWz__lsMSg/4rz/12Jtc2dOQhOTSxz6PRM6vg/h45/h001.GL4q73=
+tuvmCcaQbf7ekzzRbXa0G9-jX8qTTFfYE1nCc" target=3D"_blank" rel=3D"noopener no=
+referrer nofollow"><span>Do Things You=E2=80=99ll Love Yourself For</span><=
+/a></p></li><li class=3D"listItem ultext"><p style=3D"mso-line-height-alt:1=
+50.0%;padding:0px;text-align:left;word-break:break-word;"><a class=3D"link"=
+ href=3D"https://link.mail.beehiiv.com/ss/c/u001.j49uWo0pLi5TqIsdCKLArTdwmK=
+F-Ej4xj3JDRxRXJpnuSzoNtFudat01jnOm4OuWmKk_Yfpwbpj3aE2lBddofAbXAhys5SszPhjXg=
+TeGU1IrOqDCVoOwWfoyDHnzb-bgD3FX7aBn1ueQWwKvRASqn6ZUQEmORERB8Hbhit6Dm4gZZjd-=
+VG0SLlEP6HNZrgdFD19lqIznt3Tn8L5k-FjfC9gfbnf864FOvf4lQe3LATcTNIg1vQy0Uk4Yr6l=
+Bsq9BTz2kWSQRd2AU2axYvJ_xBmaZAgpjtRW-wwQueO6ZEpkXnWyRRvT33nHQ8d2ruyShdBtIdo=
+MTgdJxUTFzRb1abq10aZrg9tqBvqYLAqeOvdY/4rz/12Jtc2dOQhOTSxz6PRM6vg/h46/h001.C=
+wA6rV7atnVUdkwH7jPzRqUM_IuTw4KrLWL_ATSdiYE" target=3D"_blank" rel=3D"noopen=
+er noreferrer nofollow"><span>A Leaked GitHub Token Exposed the Exact Ozemp=
+ic Formula</span></a></p></li><li class=3D"listItem ultext"><p style=3D"mso=
+-line-height-alt:150.0%;padding:0px;text-align:left;word-break:break-word;"=
+><a class=3D"link" href=3D"https://link.mail.beehiiv.com/ss/c/u001.OfVc3EUp=
+Gi7lVDYVcPo0wYnJIMirY3G4ZICyZVg5HfOVTWZ-PU8xIyad4hHdiMQol3FN1HnYifLHdkn0ErL=
+vxPC1zKhXfXUsp_HWZqMC076RSxxid2x1E800y8CwPYPyNNbFJ5PQBPjGBHqUcmKQJYqycF6g7_=
+0tCQ0ICvq5V-ChGs6C24bD9a2tfysYSiKziBIliqIFAWQcj2s3SJDHApobiIHww4gFwZXtfcg4_=
+as1YvdSkElj18J7b_KRn2046xnzWomhPMMZBaWzH3roI_rhK-6ZwPumzGLZ4Grg9e5NHaxpG7SM=
+u47ge0lez1XFLnzkBL45PbxClfM22TZ0EnuSla7pL7PSRUgtIS4UCfW8U87nZtkPSANwi_SQDoC=
+Z/4rz/12Jtc2dOQhOTSxz6PRM6vg/h47/h001._jWX-MHTcxuniZCR5xlzzZ3pUl_7IjN0EpuhZ=
+uscOuY" target=3D"_blank" rel=3D"noopener noreferrer nofollow"><span>Peter =
+Thiel=E2=80=99s =E2=80=98Dialog=E2=80=99 network was super-secret. A data l=
+eak changed that</span></a> - The leak exposed 113 prominent members throug=
+h code embedded in the website, alongside detailed participant profiles wit=
+h personal contacts, political leanings, and other private details. <span s=
+tyle=3D"background-color:rgb(255, 255, 255);">The names tied to Dialog incl=
+ude Treasury Secretary Scott Bessent, Sarah Bond, the former president of X=
+box at Microsoft, Sen. Ted Cruz, Joseph Gordon-Levitt, podcast host and aut=
+hor Sam Harris, and Bryan Johnson.</span></p></li></ul></div></td></tr><tr>=
+<td class=3D"dd" align=3D"left" style=3D"padding:0px 15px;text-align:left;w=
+ord-break:break-word;"><p style=3D"mso-line-height-alt:150.0%;"></p></td></=
+tr></table></td></tr></table></td></tr><tr><td><table role=3D"none" width=
+=3D"100%" border=3D"0" cellspacing=3D"0" cellpadding=3D"0" style=3D""><tr><=
+td bgcolor=3D"transparent" style=3D"background-color:transparent;padding:0.=
+0px 0.0px 0.0px 0.0px;"><table role=3D"none" width=3D"100%" border=3D"0" ce=
+llspacing=3D"0" cellpadding=3D"0"><tr><td class=3D"dd" align=3D"left" valig=
+n=3D"top" style=3D"color:#2A2A2A;font-weight:normal;padding:0px 15px;text-a=
+lign:left;"><h2 style=3D"color:#2A2A2A;font-weight:normal;mso-line-height-a=
+lt:150.0%;">=E2=9C=89=EF=B8=8F Wrapping Up</h2></td></tr><tr><td align=3D"c=
+enter" valign=3D"top" style=3D"font-size:0px;line-height:0px;padding:30px 0=
+px 30px;" class=3D"dd"><table class=3D"j" role=3D"none" width=3D"96%" borde=
+r=3D"0" cellspacing=3D"0" cellpadding=3D"0" align=3D"center"><tr><td> &nbsp=
+; </td></tr></table></td></tr><tr><td class=3D"dd" align=3D"left" style=3D"=
+padding:0px 15px;text-align:left;word-break:break-word;"><p style=3D"mso-li=
+ne-height-alt:150.0%;"> Have questions, comments, or feedback? Just reply d=
+irectly, I=E2=80=99d love to hear from you. </p></td></tr><tr><td class=3D"=
+dd" align=3D"left" style=3D"padding:0px 15px;text-align:left;word-break:bre=
+ak-word;"><p style=3D"mso-line-height-alt:150.0%;"> If you find this newsle=
+tter useful and know other people who would too, I&#39;d really appreciate =
+if you&#39;d forward it to them =F0=9F=99=8F </p></td></tr><tr><td class=3D=
+"dd" align=3D"left" style=3D"padding:0px 15px;text-align:left;word-break:br=
+eak-word;"><p style=3D"mso-line-height-alt:150.0%;"> Thanks for reading! </=
+p></td></tr><tr><td class=3D"dd" align=3D"left" style=3D"padding:0px 15px;t=
+ext-align:left;word-break:break-word;"><p style=3D"mso-line-height-alt:150.=
+0%;"> Cheers,<br>Clint </p></td></tr><tr><td class=3D"dd" align=3D"left" st=
+yle=3D"padding:0px 15px;text-align:left;word-break:break-word;"><p style=3D=
+"mso-line-height-alt:150.0%;"> P.S. Feel free to connect with me on <a clas=
+s=3D"link" href=3D"https://link.mail.beehiiv.com/ss/c/u001.-QQnKmN9995ElcpR=
+565Sh-SDvgyu6m58HhCZ9db8DGJHCN5YrVbS-67vdn7V7RnoKtTt-hLGjtlT0aEiI1G8P8CoZSd=
+Gn5oP_Mu_msp3jl5pHcHs0uJq_cHXXKc7i0zrs1Rmme7bnviIZUNEedvgLAWntkHG6eN21mbrJp=
+TXWvs03RjXbiqNd-6MmOA9-VhQsExQFutDXo-PLHHgnwAxtKQOmtJLh3GxqhjCvzDG5KzJHjESt=
+aAtjisTemomliXLijXjs8TB7tLiz6pZDB2Sxti9-iF2TDxNBDnobS5NTx7fYNSuIOt73Du8zJVs=
+eYha/4rz/12Jtc2dOQhOTSxz6PRM6vg/h48/h001.1WvC7JIWOU0cQ4s28z0QwFd13PgSzQVBSy=
+Al48yRhAA" target=3D"_blank" rel=3D"noopener noreferrer nofollow"><span>Lin=
+kedIn</span></a>=C2=A0=F0=9F=91=8B=C2=A0 </p></td></tr></table></td></tr></=
+table></td></tr></table></td></tr></table></td></tr><tr><td align=3D"center=
+" valign=3D"top"><table role=3D"none" width=3D"100%" border=3D"0" cellspaci=
+ng=3D"0" cellpadding=3D"0" align=3D"center"><tr><td><tr><td class=3D"b" ali=
+gn=3D"center" valign=3D"top" bgcolor=3D"#2C81E5" style=3D"padding:0px 0px 0=
+px 0px;border-style:solid;border-width: 0px 0px 0px 0px;border-color: #FFFF=
+FF;border-bottom-left-radius:10px;border-bottom-right-radius:10px;"><table =
+role=3D"none" width=3D"100%" border=3D"0" cellspacing=3D"0" cellpadding=3D"=
+0" align=3D"center"><tr><td align=3D"center" valign=3D"top" bgcolor=3D"#fff=
+fff" style=3D"padding:12px"><table role=3D"none" width=3D"100%" border=3D"0=
+" cellspacing=3D"0" cellpadding=3D"0" align=3D"center"><tr><td><span style=
+=3D"padding-left:1px;"></span></td><td align=3D"center" valign=3D"middle" w=
+idth=3D"75" style=3D"width:75px;"><a href=3D"https://link.mail.beehiiv.com/=
+ss/c/u001.24Nk1afHpCiQnIZ62Q0ozgygQ24imSwtMj5n2wbGpSOZ8KAG-V92CzMSLNESPS3DR=
+c2nKME4vMxb5uQG5H8CFtIBv1QPjIOqk4l0YVD4ennoXAYYRLQOqm9hjwgK_dXFozDzPsV54UJf=
+q-GXlEIKJzSlt92tjHgANfhC4PCPZulDOMnGonAoXJfENQ4-M1QEvMy9KT94iDwPHJvqDniFbVt=
+mt67AJT8gdsR90eYFOzKgWQCVtF3kanTwhMwjMS3-1jAbCNWwriTxhfTgIeyDDCAvS_pP87Q5jC=
+kK_Ii1G6xpXv7Ui1xEmpDrOVmBASme/4rz/12Jtc2dOQhOTSxz6PRM6vg/h49/h001.HoZhaNQl=
+8mAS5c5Mb--OUlkaBz5dyvZPGm8w3TQaFO8" style=3D"text-decoration:none;"><img w=
+idth=3D"22" height=3D"22" alt=3D"tw" border=3D"0" style=3D"display:block;ma=
+x-width:22px;color:Dark" src=3D"https://media.beehiiv.com/cdn-cgi/image/fit=
+=3Dscale-down,format=3Dauto,onerror=3Dredirect,quality=3D80/static_assets/x=
+_dark.png"/></a></td><td align=3D"center" valign=3D"middle" width=3D"75" st=
+yle=3D"width:75px;"><a href=3D"https://link.mail.beehiiv.com/ss/c/u001.-QQn=
+KmN9995ElcpR565Sh-SDvgyu6m58HhCZ9db8DGJHCN5YrVbS-67vdn7V7RnoKtTt-hLGjtlT0aE=
+iI1G8P8CoZSdGn5oP_Mu_msp3jl5pHcHs0uJq_cHXXKc7i0zrs1Rmme7bnviIZUNEedvgLAWntk=
+HG6eN21mbrJpTXWvs03RjXbiqNd-6MmOA9-VhQsExQFutDXo-PLHHgnwAxtKQOmtJLh3GxqhjCv=
+zDG5KzJHjEStaAtjisTemomliXLpiXYmWXQIgmXMb3DMJK9WaRQclyEmUd8qro3I8IvkaW8pPCu=
+vWPcv0Wur-CcBzNf/4rz/12Jtc2dOQhOTSxz6PRM6vg/h50/h001.IUYN6xeKHilNxUy-leVYD8=
+nvVhnCdBTnmdGXhZ4SHlE" style=3D"text-decoration:none;"><img width=3D"22" he=
+ight=3D"22" alt=3D"in" border=3D"0" style=3D"display:block;max-width:22px;c=
+olor:Dark" src=3D"https://media.beehiiv.com/cdn-cgi/image/fit=3Dscale-down,=
+format=3Dauto,onerror=3Dredirect,quality=3D80/static_assets/linkedin_dark.p=
+ng"/></a></td><td><span style=3D"padding-left:1px;"></span></td></tr></tabl=
+e></td></tr><tr><td height=3D"10" style=3D"line-height:1px;font-size:1px;he=
+ight:10px;"> &nbsp; </td></tr><tr><td class=3D"w" align=3D"center" valign=
+=3D"top" style=3D"padding:15px 15px 15px 15px;"><table role=3D"none" width=
+=3D"100%" border=3D"0" cellspacing=3D"0" cellpadding=3D"0" align=3D"center"=
+><tr><td align=3D"center" valign=3D"top"><p style=3D"font-family:'Verdana',=
+Geneva,sans-serif;color:#FFFFFF!important;"> Update your email preferences =
+or unsubscribe <a class=3D"link" href=3D"https://link.mail.beehiiv.com/ss/c=
+/u001.24Nk1afHpCiQnIZ62Q0ozlU7Kg1WfeEMZwdRtR5Hk_EJksahnI0VCC_90vURGPMoMgXzc=
+ZSMM4wmStd6lbEhRGNIDun0qC2bXrxZsD2HNrE9QqbFLQ0cBVgb4sKMY1xiOCHmCzIuH7fhJXuL=
+ekcZducVKeiHwj-9jRf5nws4qIYUxSPouinhgLy7gFJep4FJBR_EuYYYQGEYGxlLDhbwPD1ijKF=
+Cb75ZJab-QE-ZcHqrhN4fw4_C7LLGBtvlZNO11IzrOTldFK7L5snEworbsZZiLtgJk5sCsVR5Ea=
+L1p5iqcOldibPZH-jSXPRVV31AGzlHThayMCcdyf8G-OD8VVs6Nkb34R9Pbj-uHf6UKG_jAhLTA=
+0-qGD4q483Fc_xtcorv61zmSz_zTj4kKY9iaCtRUpnJTmO4B9GCt7gi655mHz8BzvkodcqgkIhX=
+whKkZzoRtP32ZcOB9KzDKtdLHBqenyEyUavWB5cTFVokEISpUSQvpI6pyfJESVPJAlVXxUIM1Xk=
+bmG57d6SCKf2dOTRres6YQVv_-bm9tmKN3ebqyMi0F88Pg92BLn0K5zzCYQo_uHQLhZGiLLqV3N=
+bHcWrcimPMfbb1ZWWh4kVuuXxaT9XBT0j6-BJMkGdWpnCK9_QGe1Htdld_RFozUs1t90QhGob5f=
+AdWyGtNKAh23jWYZHhBO_YcC2aZyyEmS9M2JUQ0A-60wTFw76ePSKEqJHW_F0i6XCvvpKPQj46_=
+VqdHnL8bxUOktYfoRNoStXD6H8bAIStTxfgP2JwL242x9YYEskSYXslgDeG24X5TsgW-zOsthPN=
+CkrdEZIavuQRi8-2vKgj9hy5MewZew1WCWDz89yDT5SHEhf7Du9oeDhAu9wjfFhAQcBsob4miA8=
+h9JRXiVFtGH8_Ob-aP1M6JgYLF0gz0fRdwItjs_Eft_4zKrq__2dNyAhZ0ik6UyYcqUr1wupFzj=
+U-Fc5n_fsx8NoYGmZt3bZJVaUoWpljiTBwgkK3okktGBcYjS_eIlMSBJo_T3ZHTq1sZ-FAqtVHL=
+TrVuXQnU8ec6HjnYEVqSeBz6LNEiKmxyX5gaVo8WpaYs/4rz/12Jtc2dOQhOTSxz6PRM6vg/h51=
+/h001.B57mEh9BAlWwYETZPlR3ux9Gz9XYgSnlbZPSAaLrD0M" style=3D"text-decoration=
+:underline;text-decoration-color:#FFFFFF!important;color:#FFFFFF!important;=
+"> here</a></p><p class=3D"copyright" style=3D"font-family:'Verdana',Geneva=
+,sans-serif;color:#FFFFFF!important;"> &copy; 2026 tl;dr sec </p><p style=
+=3D"font-family:'Verdana',Geneva,sans-serif;color:#FFFFFF!important;"> 228 =
+Park Ave S, #29976, New York, New York 10003, United States </p></td></tr><=
+tr style=3D"display: table-row !important;"><td align=3D"center" valign=3D"=
+top" style=3D"padding-top:20px;" style=3D"display:table-cell !important;"><=
+table role=3D"none" border=3D"0" cellspacing=3D"0" cellpadding=3D"0" align=
+=3D"center" style=3D"display:table !important;"><tr style=3D"display:table-=
+row !important;"><td class=3D"u" align=3D"center" valign=3D"middle" height=
+=3D"32" style=3D"height:32px;display:table-cell !important; max-height: 32p=
+x !important;margin:0px !important; background-color: #ffffff !important;">=
+<a style=3D"line-height:32px !important;text-decoration:none;display:block =
+!important;" href=3D"https://link.mail.beehiiv.com/ss/c/u001.-QQnKmN9995Elc=
+pR565Sh7kaHGWN-hqef2XuDdtI3qyk6PFwNKus-p1fR1uiJj6CGa_G8aa_4aZ9pFbNsnQ5teHla=
+SpKLuAxxzkBN6yN1fC93g8VEIAFs0rT8kwPapyXWLyhEwwve63QFXVMX1-vNtgaBdJhr5YXBHIn=
+Xzcuhad7NQj2VIky0YcNmGn8zHxAwdaTbOT8fWfG_3deS_ZU_HNNoypNOq-Rsi9S9AzOBQ0/4rz=
+/12Jtc2dOQhOTSxz6PRM6vg/h52/h001.Kxe2a4G0pLxgoUu0qXhmbF0UaIRbzrW3XgNCf5kfhQ=
+Q"><img src=3D"https://media.beehiiv.com/output-onlinepngtools.png" width=
+=3D"16" alt=3D"beehiiv logo" style=3D"display:inline-block !important;max-w=
+idth:16px !important; vertical-align:-3px !important;width: 16px !important=
+;" border=3D"0"/><span style=3D"padding-left:11px !important;display: inlin=
+e-block !important;">Powered by beehiiv</span></a></td></tr></table></td></=
+tr><tr><td align=3D"left" valign=3D"top" height=3D"2" style=3D"height:2px;l=
+ine-height:1px;font-size:1px;mso-line-height-rule:exactly;"><a href=3D'http=
+s://link.mail.beehiiv.com/ss/c/u001.auRSRRlK5DEX07mczgW1EL4YTugYuM0k6OZ356f=
+K6tARZCrk1ekguuqRsl1qm-EV-7vG0KHA3J9qkBhG0iOMgxNq-CSSNkpq9DzSgZiiAq4/4rz/12=
+Jtc2dOQhOTSxz6PRM6vg/h53/h001.VU6U9Ghi2RRbcnsUYtl_Qfz8wNchIRtWyvT_ryIdMWA' =
+style=3D"color: #2C81E5 !important; cursor: default; font-size: 1px; text-d=
+ecoration: none;">Terms of Service</a></td></tr><tr><td align=3D"left" vali=
+gn=3D"top" height=3D"2" style=3D"height:2px;"><a href=3D'https://email.beeh=
+iivstatus.com/ece1a45608a56c9060050d06e55582a56c23ae4b/hclick' clicktrackin=
+g=3D"off" style=3D"color: #2C81E5 !important; cursor: default; font-size: 1=
+px; text-decoration: none;"></a></td></tr></table></td></tr></table></td></=
+tr></td></tr></table></td></tr></table></td></tr></table></td></tr></table>=
+</div></body></html>
+--38133b9679483e6ddda29784115ff5714961ed5d83eee3d36eb0ecdf3cec--
