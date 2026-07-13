@@ -214,6 +214,7 @@ const healthcheckJob = new HealthcheckJob({
 const healthcheckValidator = new HealthcheckValidator({
   threadDb,
   searchDatabase,
+  mailDomain: MAIL_DOMAIN,
   logger,
 });
 

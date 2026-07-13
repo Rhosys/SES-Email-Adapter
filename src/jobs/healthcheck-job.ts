@@ -23,6 +23,7 @@ export class HealthcheckJob {
     this.validator = new HealthcheckValidator({
       threadDb: deps.threadDb,
       searchDatabase: deps.searchDatabase,
+      mailDomain: deps.mailDomain,
       logger: deps.logger,
     });
   }

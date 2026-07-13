@@ -3,6 +3,15 @@ import { ok, err } from "neverthrow";
 import { HealthcheckValidator, type HealthcheckValidatorDeps } from "../../src/jobs/healthcheck-validator.js";
 import { createMockLogger, type MockLogger } from "../helpers/mock-logger.js";
 
+vi.mock("../../src/dns/dns-checker.js", () => ({
+  checkDomain: vi.fn().mockResolvedValue([
+    { name: "platform.email.rhosys.cloud", type: "MX", value: "10 mx.platform.email.rhosys.cloud", status: "verified" },
+    { name: "mail._domainkey.platform.email.rhosys.cloud", type: "CNAME", value: "mail._domainkey.platform.email.rhosys.cloud", status: "verified" },
+    { name: "bounce.platform.email.rhosys.cloud", type: "CNAME", value: "bounce.platform.email.rhosys.cloud", status: "verified" },
+    { name: "_dmarc.platform.email.rhosys.cloud", type: "CNAME", value: "_dmarc.platform.email.rhosys.cloud", status: "verified" },
+  ]),
+}));
+
 function makeThread(overrides: { id?: string; workflow?: string; createdAt?: string } = {}) {
   return {
     id: overrides.id ?? "thr-hc",
@@ -38,6 +47,7 @@ function makeDeps(overrides: {
     searchDatabase: {
       hasEmbedding: vi.fn().mockResolvedValue(overrides.hasEmbedding ?? true),
     },
+    mailDomain: "platform.email.rhosys.cloud",
     logger,
   };
 
@@ -59,7 +69,7 @@ describe("HealthcheckValidator", () => {
 
     expect(result.status).toBe("pass");
     expect(result.checkedDate).toBe("2026-07-08");
-    expect(result.checks).toHaveLength(3);
+    expect(result.checks).toHaveLength(7);
     expect(result.checks.every((c) => c.status === "pass")).toBe(true);
     expect(result.rawChecks).toEqual({ hasThreadId: true, workflowIsHealthcheck: true, hasEmbedding: true });
   });
@@ -102,7 +112,9 @@ describe("HealthcheckValidator", () => {
 
     expect(result.status).toBe("unknown");
     expect(result.rawChecks).toBeNull();
-    expect(result.checks.every((c) => c.status === "unknown")).toBe(true);
+    expect(checkById(result.checks, "thread-created").status).toBe("unknown");
+    expect(checkById(result.checks, "workflow-classified").status).toBe("unknown");
+    expect(checkById(result.checks, "embedding-indexed").status).toBe("unknown");
   });
 
   it("validateLatest validates yesterday (UTC)", async () => {
