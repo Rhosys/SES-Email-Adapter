@@ -30,17 +30,23 @@ export interface EmailRawOptions {
   accountId: string;
 }
 
+export interface SuppressionChecker {
+  isAddressSuppressed(address: string): Promise<Result<boolean, unknown>>;
+}
+
 export class EmailService {
   private readonly sesv2: SESv2Client;
   private readonly from: string;
   private readonly configSetName: string;
   private readonly logger: Logger;
+  private readonly suppressionChecker?: SuppressionChecker;
 
-  constructor(sesv2: SESv2Client, opts: { from: string; configSetName: string }, logger: Logger) {
+  constructor(sesv2: SESv2Client, opts: { from: string; configSetName: string }, logger: Logger, suppressionChecker?: SuppressionChecker) {
     this.sesv2 = sesv2;
     this.from = opts.from;
     this.configSetName = opts.configSetName;
     this.logger = logger;
+    this.suppressionChecker = suppressionChecker;
   }
 
   /**
@@ -67,6 +73,20 @@ export class EmailService {
   async send(opts: EmailSendOptions): Promise<Result<{ messageId: string }, EmailServiceError>> {
     const validation = this.validateAccountId(opts.accountId);
     if (validation.isErr()) return err(validation.error);
+
+    // Check if recipient is on the suppression list — log but still send
+    if (this.suppressionChecker) {
+      const suppressionResult = await this.suppressionChecker.isAddressSuppressed(opts.to);
+      if (suppressionResult.isOk() && suppressionResult.value) {
+        this.logger.error("Sending to a suppressed address — recipient has previously bounced or complained. Proceeding with send anyway.", {
+          code: "email_service.sending_to_suppressed",
+          to: opts.to,
+          accountId: opts.accountId,
+          subject: opts.subject,
+        });
+      }
+    }
+
     const emailTags = this.sanitizeTags(opts.tags);
     try {
       const result = await this.sesv2.send(new SendEmailCommand({
