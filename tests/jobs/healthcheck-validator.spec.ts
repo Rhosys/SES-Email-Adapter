@@ -5,6 +5,7 @@ import { createMockLogger, type MockLogger } from "../helpers/mock-logger.js";
 
 vi.mock("node:dns/promises", () => ({
   default: {
+    resolveMx: vi.fn().mockResolvedValue([{ exchange: "mx.platform.email.rhosys.cloud", priority: 10 }]),
     resolveTxt: vi.fn().mockImplementation((name: string) => {
       if (name.startsWith("mail._domainkey")) return Promise.resolve([["v=DKIM1; k=rsa; p=fake"]]);
       if (name.startsWith("bounce.")) return Promise.resolve([["v=spf1 include:amazonses.com ~all"]]);
@@ -71,7 +72,7 @@ describe("HealthcheckValidator", () => {
 
     expect(result.status).toBe("pass");
     expect(result.checkedDate).toBe("2026-07-08");
-    expect(result.checks).toHaveLength(6);
+    expect(result.checks).toHaveLength(7);
     expect(result.checks.every((c) => c.status === "pass")).toBe(true);
     expect(result.rawChecks).toEqual({ hasThreadId: true, workflowIsHealthcheck: true, hasEmbedding: true });
   });

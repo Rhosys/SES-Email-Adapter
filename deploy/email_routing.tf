@@ -114,6 +114,17 @@ resource "aws_route53_record" "ses_mx_host" {
   records  = ["inbound-smtp.${local.primary_region}.amazonaws.com"]
 }
 
+# Platform domain MX — routes inbound mail (including the daily healthcheck)
+# to the SES inbound endpoint via the branded hostname above.
+resource "aws_route53_record" "platform_mx" {
+  provider = aws.us_east_1
+  zone_id  = data.aws_route53_zone.main.zone_id
+  name     = "platform.${data.aws_route53_zone.main.name}"
+  type     = "MX"
+  ttl      = 300
+  records  = ["10 ${aws_route53_record.ses_mx_host.fqdn}"]
+}
+
 # ---------------------------------------------------------------------------
 # Bounce subdomain — SES custom MAIL FROM
 # SPF lives here; customers CNAME bounce.{their} → bounce.{ours}.
