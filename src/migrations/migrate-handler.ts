@@ -71,12 +71,19 @@ async function migrationWrapper() {
     } catch (e) {
       errors.push(e);
       const message = e instanceof Error ? e.message : String(e);
-      const isResumingOrTransient = message.includes("resuming after being auto-paused")
-        || message.includes("Communications link failure")
+      const isResuming = message.includes("resuming after being auto-paused");
+      const isTransient = message.includes("Communications link failure")
         || message.includes("Connection reset")
         || message.includes("CREATE SCHEMA");
 
-      if (isResumingOrTransient && attempt < MAX_ATTEMPTS) {
+      // First attempt hitting a paused cluster — wait the full wake time silently
+      if (isResuming && attempt === 1) {
+        logger.info("Aurora cluster is resuming from auto-pause — waiting 25s", { code: "migrate.aurora_resume", attempt });
+        await new Promise(r => setTimeout(r, 25_000));
+        continue;
+      }
+
+      if ((isResuming || isTransient) && attempt < MAX_ATTEMPTS) {
         const delayMs = BASE_DELAY_MS * Math.pow(2, attempt - 1);
         logger.warn("Migration attempt failed — retrying", { code: "migrate.retry", attempt, maxAttempts: MAX_ATTEMPTS, reason: message, nextDelayMs: delayMs, error: e });
         await new Promise(r => setTimeout(r, delayMs));
