@@ -10,8 +10,8 @@ import type { DbError, Result } from "../errors.js";
 import type { Logger } from "../logger.js";
 import { TAG_ACCOUNT_ID, TAG_TYPE, TAG_SIGNAL_ID, TAG_THREAD_ID, TAG_HEALTHCHECK_ID } from "../email/ses-tags.js";
 
-// 72 hours in seconds — soft bounces expire and can retry
-const SOFT_BOUNCE_TTL_SECONDS = 72 * 60 * 60;
+// 7 days in seconds — soft bounces expire and can retry
+const SOFT_BOUNCE_TTL_SECONDS = 7 * 24 * 60 * 60;
 
 export interface FeedbackSignalStore {
   getSignalById(accountId: string, signalId: string, threadId: string): Promise<Result<Signal | null, DbError>>;
@@ -110,14 +110,23 @@ export class SesFeedbackProcessor {
       }
 
       for (const r of feedback.bounce.bouncedRecipients) {
+        const address = r.emailAddress;
+        const tagSignalId = feedback.mail.tags?.[TAG_SIGNAL_ID];
         const entry: SuppressedAddress = {
-          address: r.emailAddress,
+          address,
           reason: isPermanent ? "hard_bounce" : "soft_bounce",
           suppressedAt,
           ...(!isPermanent ? { ttl: Math.floor(Date.now() / 1000) + SOFT_BOUNCE_TTL_SECONDS } : {}),
+          feedback,
+          sesMessageId: feedback.mail.messageId,
+          ...(tagSignalId ? { linkedSignalId: tagSignalId } : {}),
         };
         const suppressResult = await this.processingDb.suppressAddress(entry);
-        if (suppressResult.isErr()) return suppressResult;
+        if (suppressResult.isErr()) return err(suppressResult.error);
+
+        if (!isPermanent && suppressResult.value.bounceCount > 2) {
+          this.logger.error("Address has bounced transiently more than 2 times in 7 days — investigate.", { code: "feedback.repeated_transient_bounce", address, bounceCount: suppressResult.value.bounceCount, feedback });
+        }
       }
 
       // On permanent bounce, disable forward rules if this was a forwarded email
@@ -223,7 +232,7 @@ export class SesFeedbackProcessor {
           suppressedAt,
         };
         const suppressResult = await this.processingDb.suppressAddress(entry);
-        if (suppressResult.isErr()) return suppressResult;
+        if (suppressResult.isErr()) return err(suppressResult.error);
       }
     } else if (type && (SES_EVENT_TYPES as readonly string[]).includes(type)) {
       // A known SES event type (Delivery, Send, Reject, Open, Click, RenderingFailure,
