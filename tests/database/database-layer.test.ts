@@ -555,8 +555,10 @@ describe("ProcessingDatabase", () => {
   });
 
   describe("suppressAddress", () => {
-    it("returns ok(undefined) on successful suppression", async () => {
-      ddbMock.on(PutCommand).resolves({});
+    it("returns ok with bounceCount on successful suppression", async () => {
+      ddbMock.on(UpdateCommand).resolves({
+        Attributes: { bounceCount: 1 },
+      });
 
       const result = await db.suppressAddress({
         address: "bounce@example.com",
@@ -565,11 +567,11 @@ describe("ProcessingDatabase", () => {
       } as any);
 
       expect(result.isOk()).toBe(true);
-      expect(result._unsafeUnwrap()).toBeUndefined();
+      expect(result._unsafeUnwrap()).toEqual({ bounceCount: 1 });
     });
 
     it("returns err with kind db_error on SDK failure", async () => {
-      ddbMock.on(PutCommand).rejects(new Error("ThrottlingException"));
+      ddbMock.on(UpdateCommand).rejects(new Error("ThrottlingException"));
 
       const result = await db.suppressAddress({
         address: "bounce@example.com",
@@ -587,7 +589,7 @@ describe("ProcessingDatabase", () => {
     it("returns ok(undefined) on successful update", async () => {
       ddbMock.on(UpdateCommand).resolves({});
 
-      const result = await db.updateGlobalReputation("example.com", { wasSpam: true, wasBlocked: false });
+      const result = await db.updateGlobalReputation("example.com", "block_reject");
 
       expect(result.isOk()).toBe(true);
       expect(result._unsafeUnwrap()).toBeUndefined();
@@ -596,7 +598,7 @@ describe("ProcessingDatabase", () => {
     it("returns err with kind db_error on SDK failure", async () => {
       ddbMock.on(UpdateCommand).rejects(new Error("InternalServerError"));
 
-      const result = await db.updateGlobalReputation("example.com", { wasSpam: false, wasBlocked: true });
+      const result = await db.updateGlobalReputation("example.com", "quarantine_visible");
 
       expect(result.isErr()).toBe(true);
       expect(result._unsafeUnwrapErr().kind).toBe("db_error");

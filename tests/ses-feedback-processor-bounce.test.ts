@@ -61,7 +61,7 @@ function makeBounceFeedback(overrides: Partial<SesFeedback> = {}): SesFeedback {
 
 function makeProcessingDb(): ProcessingDatabase {
   return {
-    suppressAddress: vi.fn().mockResolvedValue(ok(undefined)),
+    suppressAddress: vi.fn().mockResolvedValue(ok({ bounceCount: 1 })),
     isAddressSuppressed: vi.fn().mockResolvedValue(ok(false)),
     updateGlobalReputation: vi.fn().mockResolvedValue(ok(undefined)),
   } as unknown as ProcessingDatabase;

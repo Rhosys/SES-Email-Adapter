@@ -993,7 +993,7 @@ describe("SignalProcessor", () => {
   // -------------------------------------------------------------------------
 
   describe("global reputation tracking", () => {
-    it("updates reputation with wasBlocked=true for blocked signals", async () => {
+    it("updates reputation with per-status count for blocked signals", async () => {
       applyCtx(accountDb, { ...DEFAULT_CTX, aliasConfig: makeAlias() }, { once: true });
       vi.mocked(accountDb.getSender).mockReturnValueOnce(Promise.resolve(ok(null)));
 
@@ -1001,20 +1001,17 @@ describe("SignalProcessor", () => {
 
       expect(processingDb.updateGlobalReputation).toHaveBeenCalledWith(
         "example.com",
-        expect.objectContaining({ wasBlocked: true }),
+        expect.stringMatching(/^(quarantine_visible|quarantine_hidden|block_hidden|block_reject|report_violation)$/),
       );
     });
 
-    it("updates reputation with wasBlocked=false for active signals", async () => {
+    it("does not update reputation for allowed signals", async () => {
       await processor.processRecord(makeMessage(), 1);
 
-      expect(processingDb.updateGlobalReputation).toHaveBeenCalledWith(
-        "example.com",
-        expect.objectContaining({ wasBlocked: false }),
-      );
+      expect(processingDb.updateGlobalReputation).not.toHaveBeenCalled();
     });
 
-    it("marks wasSpam=true when tags contain phishing", async () => {
+    it("updates reputation with quarantine_hidden when tags contain phishing", async () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok({
         ...validClassification,
         tags: ["phishing"],
@@ -1024,7 +1021,7 @@ describe("SignalProcessor", () => {
 
       expect(processingDb.updateGlobalReputation).toHaveBeenCalledWith(
         "example.com",
-        expect.objectContaining({ wasSpam: true }),
+        expect.stringMatching(/^(quarantine_visible|quarantine_hidden|block_hidden|block_reject|report_violation)$/),
       );
     });
 

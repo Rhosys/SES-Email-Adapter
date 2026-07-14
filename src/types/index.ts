@@ -846,6 +846,10 @@ export interface SuppressedAddress {
   reason: SuppressionReason;
   suppressedAt: string;
   ttl?: number;
+  bounceCount?: number;
+  feedback?: unknown;
+  linkedSignalId?: string;
+  sesMessageId?: string;
 }
 
 // ---------------------------------------------------------------------------

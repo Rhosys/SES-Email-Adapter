@@ -1,4 +1,4 @@
-import { GetCommand, PutCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
+import { GetCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { DateTime } from "luxon";
 import { dynamo, PROCESSING_TABLE } from "./shared.js";
 import { ok, err, dbError } from "../errors.js";
@@ -11,13 +11,51 @@ import type { SuppressedAddress } from "../types/index.js";
 // ---------------------------------------------------------------------------
 
 export class ProcessingDatabase {
-  async suppressAddress(entry: SuppressedAddress): Promise<Result<void, DbError>> {
+  async suppressAddress(entry: SuppressedAddress): Promise<Result<{ bounceCount: number }, DbError>> {
     try {
-      await dynamo.send(new PutCommand({
+      const setParts = [
+        "#address = :address",
+        "#reason = :reason",
+        "#suppressedAt = :suppressedAt",
+        "#feedback = :feedback",
+        "#sesMessageId = :sesMessageId",
+        "#linkedSignalId = :linkedSignalId",
+      ];
+      const exprNames: Record<string, string> = {
+        "#address": "address",
+        "#reason": "reason",
+        "#suppressedAt": "suppressedAt",
+        "#feedback": "feedback",
+        "#sesMessageId": "sesMessageId",
+        "#linkedSignalId": "linkedSignalId",
+        "#bounceCount": "bounceCount",
+      };
+      const exprValues: Record<string, unknown> = {
+        ":address": entry.address,
+        ":reason": entry.reason,
+        ":suppressedAt": entry.suppressedAt,
+        ":feedback": entry.feedback ?? null,
+        ":sesMessageId": entry.sesMessageId ?? null,
+        ":linkedSignalId": entry.linkedSignalId ?? null,
+        ":one": 1,
+      };
+
+      if (entry.ttl !== undefined) {
+        setParts.push("#ttl = :ttl");
+        exprNames["#ttl"] = "ttl";
+        exprValues[":ttl"] = entry.ttl;
+      }
+
+      const res = await dynamo.send(new UpdateCommand({
         TableName: PROCESSING_TABLE,
-        Item: { ...entry, pk: `SUPPRESS#${entry.address}`, sk: "SUPPRESS" },
+        Key: { pk: `SUPPRESS#${entry.address}`, sk: "SUPPRESS" },
+        UpdateExpression: `SET ${setParts.join(", ")} ADD #bounceCount :one`,
+        ExpressionAttributeNames: exprNames,
+        ExpressionAttributeValues: exprValues,
+        ReturnValues: "ALL_NEW",
       }));
-      return ok(undefined);
+      const bounceCount = (res.Attributes?.bounceCount as number) ?? 1;
+      return ok({ bounceCount });
     } catch (e) {
       return err(dbError(e));
     }
@@ -36,18 +74,23 @@ export class ProcessingDatabase {
     }
   }
 
-  async updateGlobalReputation(domain: string, update: { wasSpam: boolean; wasBlocked: boolean }): Promise<Result<void, DbError>> {
+  async updateGlobalReputation(domain: string, status: "quarantine_visible" | "quarantine_hidden" | "block_hidden" | "block_reject" | "report_violation"): Promise<Result<void, DbError>> {
     const now = DateTime.utc().toISO()!;
-    const addParts = ["signalCount :one"];
-    if (update.wasSpam) addParts.push("spamCount :one");
-    if (update.wasBlocked) addParts.push("blockCount :one");
+    const fieldMap: Record<typeof status, string> = {
+      quarantine_visible: "quarantineVisibleCount",
+      quarantine_hidden: "quarantineHiddenCount",
+      block_hidden: "blockHiddenCount",
+      block_reject: "blockRejectCount",
+      report_violation: "reportViolationCount",
+    };
+    const countField = fieldMap[status];
 
     try {
       await dynamo.send(new UpdateCommand({
         TableName: PROCESSING_TABLE,
         Key: { pk: `GREP#${domain}`, sk: "GLOBAL_REP" },
-        UpdateExpression: `ADD ${addParts.join(", ")} SET lastSeenAt = :now, updatedAt = :now, #domain = :domain`,
-        ExpressionAttributeNames: { "#domain": "domain" },
+        UpdateExpression: `ADD #countField :one SET #lastSeenAt = :now, #updatedAt = :now, #domain = :domain`,
+        ExpressionAttributeNames: { "#countField": countField, "#lastSeenAt": "lastSeenAt", "#updatedAt": "updatedAt", "#domain": "domain" },
         ExpressionAttributeValues: { ":one": 1, ":now": now, ":domain": domain },
       }));
       return ok(undefined);
