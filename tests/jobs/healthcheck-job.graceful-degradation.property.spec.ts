@@ -56,7 +56,7 @@ function makeDeps(overrides: Partial<HealthcheckJobDeps> = {}): HealthcheckJobDe
   return {
     threadDb: { listThreads: vi.fn().mockResolvedValue(ok({ items: [makeThread()] })) } as any,
     emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-msg-1" })) } as any,
-    searchDatabase: { hasEmbedding: vi.fn().mockResolvedValue(true) },
+    searchDatabase: { hasEmbedding: vi.fn().mockResolvedValue(ok(true)) },
     mailDomain: MAIL_DOMAIN,
     logger: createMockLogger(),
     ...overrides,
@@ -86,7 +86,7 @@ const validationScenarios = [
   {
     scenario: "DynamoDB error — listThreads returns Err",
     setupThreadDb: () => vi.fn().mockResolvedValue(err(dbError(new Error("DynamoDB timeout")))),
-    setupSearchDb: () => vi.fn().mockResolvedValue(false),
+    setupSearchDb: () => vi.fn().mockResolvedValue(ok(false)),
   },
   {
     scenario: "Aurora error — hasEmbedding throws",

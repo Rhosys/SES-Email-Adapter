@@ -37,7 +37,7 @@ function createMockDeps(overrides: Partial<HealthcheckJobDeps> = {}): Healthchec
   return {
     threadDb: { listThreads: vi.fn().mockResolvedValue(ok({ items: [] })) } as unknown as HealthcheckJobDeps["threadDb"],
     emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-123" })) } as unknown as HealthcheckJobDeps["emailService"],
-    searchDatabase: { hasEmbedding: vi.fn().mockResolvedValue(false) },
+    searchDatabase: { hasEmbedding: vi.fn().mockResolvedValue(ok(false)) },
     mailDomain: MAIL_DOMAIN,
     logger: createMockLogger(),
     ...overrides,

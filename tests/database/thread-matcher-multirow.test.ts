@@ -89,7 +89,7 @@ describe("ThreadMatcher — multi-row embedding support", () => {
   // -------------------------------------------------------------------------
 
   describe("hasEmbedding", () => {
-    it("returns true when at least one row exists for the threadId", async () => {
+    it("returns ok(true) when at least one row exists for the threadId", async () => {
       rdsMock
         .on(ExecuteStatementCommand)
         .resolves({
@@ -97,25 +97,28 @@ describe("ThreadMatcher — multi-row embedding support", () => {
         });
 
       const result = await matcher.hasEmbedding("arc_thread_1");
-      expect(result).toBe(true);
+      expect(result.isOk()).toBe(true);
+      expect(result._unsafeUnwrap()).toBe(true);
     }, { timeout: 5_000 });
 
-    it("returns false when no rows exist for the threadId", async () => {
+    it("returns ok(false) when no rows exist for the threadId", async () => {
       rdsMock
         .on(ExecuteStatementCommand)
         .resolves({ records: [] });
 
       const result = await matcher.hasEmbedding("arc_nonexistent");
-      expect(result).toBe(false);
+      expect(result.isOk()).toBe(true);
+      expect(result._unsafeUnwrap()).toBe(false);
     }, { timeout: 5_000 });
 
-    it("throws on Aurora connectivity error", async () => {
+    it("returns err on Aurora connectivity error", async () => {
       rdsMock
         .on(ExecuteStatementCommand)
         .rejects(new Error("Connection refused"));
 
-      await expect(matcher.hasEmbedding("arc_broken"))
-        .rejects.toThrow("Aurora connectivity error checking embedding for threadId: arc_broken");
+      const result = await matcher.hasEmbedding("arc_broken");
+      expect(result.isErr()).toBe(true);
+      expect(result._unsafeUnwrapErr().kind).toBe("db_error");
     }, { timeout: 5_000 });
 
     it("queries thread_embeddings with threadId filter and limit 1", async () => {
