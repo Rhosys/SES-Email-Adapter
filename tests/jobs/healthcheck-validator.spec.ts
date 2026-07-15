@@ -48,7 +48,7 @@ function makeDeps(overrides: {
       listThreads: vi.fn().mockResolvedValue(listResult),
     } as unknown as HealthcheckValidatorDeps["threadDb"],
     searchDatabase: {
-      hasEmbedding: vi.fn().mockResolvedValue(overrides.hasEmbedding ?? true),
+      hasEmbedding: vi.fn().mockResolvedValue(ok(overrides.hasEmbedding ?? true)),
     },
     mailDomain: "platform.email.rhosys.cloud",
     logger,

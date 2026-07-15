@@ -67,7 +67,7 @@ function makeDeps(overrides: {
       send: vi.fn().mockResolvedValue(ok({ messageId: "ses-msg-id" })),
     } as unknown as HealthcheckJobDeps["emailService"],
     searchDatabase: {
-      hasEmbedding: vi.fn().mockResolvedValue(overrides.hasEmbedding ?? true),
+      hasEmbedding: vi.fn().mockResolvedValue(ok(overrides.hasEmbedding ?? true)),
     },
     mailDomain: MAIL_DOMAIN,
     logger,

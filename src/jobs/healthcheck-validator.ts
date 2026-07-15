@@ -2,6 +2,7 @@ import dns from "node:dns/promises";
 import { DateTime } from "luxon";
 import type { Logger } from "../logger.js";
 import type { ThreadDatabase } from "../database/thread-database.js";
+import type { DbError, Result } from "../errors.js";
 import { SYSTEM_ACCOUNT_ID } from "../database/system-account-db.js";
 
 // ---------------------------------------------------------------------------
@@ -53,7 +54,7 @@ export interface ValidationChecks {
 
 export interface HealthcheckValidatorDeps {
   threadDb: ThreadDatabase;
-  searchDatabase: { hasEmbedding(threadId: string): Promise<boolean> };
+  searchDatabase: { hasEmbedding(threadId: string): Promise<Result<boolean, DbError>> };
   sesChecker?: { canSendFrom(domain: string): Promise<{ verified: boolean; sendingEnabled: boolean; detail?: string }> };
   mailDomain: string;
   logger: Logger;
@@ -138,7 +139,19 @@ export class HealthcheckValidator {
     };
 
     try {
-      checks.hasEmbedding = await this.deps.searchDatabase.hasEmbedding(thread.id);
+      const embeddingResult = await this.deps.searchDatabase.hasEmbedding(thread.id);
+      if (embeddingResult.isOk()) {
+        checks.hasEmbedding = embeddingResult.value;
+      } else {
+        this.deps.logger.error("Aurora error during embedding existence check.", {
+          code: "healthcheck.embedding_check_error",
+          date,
+          threadId: thread.id,
+          error: embeddingResult.error.cause,
+          message: embeddingResult.error.message,
+        });
+        checks.hasEmbedding = false;
+      }
     } catch (e) {
       this.deps.logger.error("Aurora connectivity/timeout error during embedding existence check.", {
         code: "healthcheck.embedding_check_error",

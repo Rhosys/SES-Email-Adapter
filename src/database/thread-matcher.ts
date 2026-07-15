@@ -103,7 +103,7 @@ function isAuroraResuming(e: unknown): boolean {
 // Retry helper
 // ---------------------------------------------------------------------------
 
-async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
+async function withRetry<T>(fn: () => Promise<T>, logger: Logger, operation: string): Promise<T> {
   let lastError: unknown;
   let maxAttempts = MAX_ATTEMPTS;
   let baseDelay = BASE_DELAY_MS;
@@ -117,12 +117,21 @@ async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
       if (isAuroraResuming(e) && maxAttempts === MAX_ATTEMPTS) {
         maxAttempts = RESUME_MAX_ATTEMPTS;
         baseDelay = RESUME_BASE_DELAY_MS;
+        logger.info("Aurora cluster is resuming from auto-pause — switching to extended retry budget", { code: "aurora.resume_detected", operation, attempt });
       }
 
-      if (!isTransientError(e) || attempt === maxAttempts - 1) {
+      if (!isTransientError(e)) {
+        logger.error("Aurora query failed with non-transient error — no retry", { code: "aurora.non_transient", operation, attempt, error: e });
         throw e;
       }
+
+      if (attempt === maxAttempts - 1) {
+        logger.error("Aurora query failed after all retry attempts exhausted", { code: "aurora.retries_exhausted", operation, attempts: maxAttempts, error: e });
+        throw e;
+      }
+
       const delayMs = Math.min(baseDelay * Math.pow(2, attempt), 8000);
+      logger.warn("Aurora query failed — retrying", { code: "aurora.retry", operation, attempt, maxAttempts, nextDelayMs: delayMs, error: e });
       await sleep(delayMs);
     }
   }
@@ -205,7 +214,7 @@ export class ThreadMatcher implements ThreadMatcherPort, MultiClusterAuroraWrite
 
           return result[0]?.threadId ?? null;
         });
-      });
+      }, this.logger, "findMatch");
 
       if (!threadId) return ok(null);
 
@@ -255,7 +264,7 @@ export class ThreadMatcher implements ThreadMatcherPort, MultiClusterAuroraWrite
           if (!threadId) return null;
           return { threadId };
         });
-      });
+      }, this.logger, "findMatchForCluster");
       return ok(result);
     } catch (e) {
       return err(dbError(e));
@@ -290,7 +299,7 @@ export class ThreadMatcher implements ThreadMatcherPort, MultiClusterAuroraWrite
           `);
           return result.rows as Array<{ thread_id: string }>;
         });
-      });
+      }, this.logger, "searchByVector");
 
       return ok(rows.map(r => r.thread_id));
     } catch (e) {
@@ -302,7 +311,7 @@ export class ThreadMatcher implements ThreadMatcherPort, MultiClusterAuroraWrite
   // Embedding existence check — used by healthcheck validation
   // ---------------------------------------------------------------------------
 
-  async hasEmbedding(threadId: string): Promise<boolean> {
+  async hasEmbedding(threadId: string): Promise<Result<boolean, DbError>> {
     const cluster = getPrimaryThreadMatcherRegistry();
     const db = getDbForCluster(cluster);
 
@@ -313,10 +322,10 @@ export class ThreadMatcher implements ThreadMatcherPort, MultiClusterAuroraWrite
           .from(threadEmbeddings)
           .where(eq(threadEmbeddings.threadId, threadId))
           .limit(1);
-      });
-      return rows.length > 0;
-    } catch {
-      throw new Error(`Aurora connectivity error checking embedding for threadId: ${threadId}`);
+      }, this.logger, "hasEmbedding");
+      return ok(rows.length > 0);
+    } catch (e) {
+      return err(dbError(e));
     }
   }
 
@@ -375,7 +384,7 @@ export class ThreadMatcher implements ThreadMatcherPort, MultiClusterAuroraWrite
               updatedAt: sql`now()`,
             });
         });
-      });
+      }, this.logger, "upsertEmbedding");
       return ok(undefined);
     } catch (e) {
       return err(dbError(e));

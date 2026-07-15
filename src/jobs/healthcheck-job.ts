@@ -6,11 +6,12 @@ import { SYSTEM_ACCOUNT_ID } from "../database/system-account-db.js";
 import { renderTemplate } from "../email/template-renderer.js";
 import { HealthcheckValidator, type ValidationChecks } from "./healthcheck-validator.js";
 import { TAG_HEALTHCHECK_ID } from "../email/ses-tags.js";
+import type { DbError, Result } from "../errors.js";
 
 export interface HealthcheckJobDeps {
   threadDb: ThreadDatabase;
   emailService: EmailService;
-  searchDatabase: { hasEmbedding(threadId: string): Promise<boolean> };
+  searchDatabase: { hasEmbedding(threadId: string): Promise<Result<boolean, DbError>> };
   mailDomain: string;
   logger: Logger;
 }
