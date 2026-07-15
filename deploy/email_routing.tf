@@ -81,6 +81,7 @@ resource "aws_sesv2_email_identity_mail_from_attributes" "root" {
 # amazonses.com. Because every customer domain is registered with the same BYODKIM
 # private key, the public key served at this endpoint is valid for all of them.
 # Customer creates: mail._domainkey.{their_domain} CNAME mail._domainkey.platform.{our_domain}
+# Serves: platform domain AND healthcheck subdomain (both delegate DKIM here).
 resource "aws_route53_record" "ses_dkim" {
   provider = aws.us_east_1
   zone_id  = data.aws_route53_zone.main.zone_id
@@ -105,6 +106,7 @@ resource "aws_route53_record" "ses_dkim_root" {
 # the SES inbound endpoint. Customer creates: {their_domain} MX 10 mx.{mail_domain}
 # RFC 2181 prefers A records as MX targets but CNAME chains work in practice
 # with every major mail server.
+# Serves: platform domain AND healthcheck subdomain (both MX records resolve here).
 resource "aws_route53_record" "ses_mx_host" {
   provider = aws.us_east_1
   zone_id  = data.aws_route53_zone.main.zone_id
@@ -114,8 +116,9 @@ resource "aws_route53_record" "ses_mx_host" {
   records  = ["inbound-smtp.${local.primary_region}.amazonaws.com"]
 }
 
-# Platform domain MX — routes inbound mail (including the daily healthcheck)
-# to the SES inbound endpoint via the branded hostname above.
+# Platform domain MX — routes inbound mail to the SES inbound endpoint via
+# the branded hostname above. Serves: platform domain only (healthcheck
+# subdomain has its own MX record).
 resource "aws_route53_record" "platform_mx" {
   provider = aws.us_east_1
   zone_id  = data.aws_route53_zone.main.zone_id
@@ -130,7 +133,8 @@ resource "aws_route53_record" "platform_mx" {
 # SPF lives here; customers CNAME bounce.{their} → bounce.{ours}.
 # ---------------------------------------------------------------------------
 
-# SES requires an MX record on the bounce subdomain pointing to its MAIL FROM endpoint
+# SES requires an MX record on the bounce subdomain pointing to its MAIL FROM endpoint.
+# Serves: platform domain AND healthcheck subdomain (both bounce CNAMEs resolve here).
 resource "aws_route53_record" "bounce_mx" {
   provider = aws.us_east_1
   zone_id  = data.aws_route53_zone.main.zone_id
@@ -140,7 +144,8 @@ resource "aws_route53_record" "bounce_mx" {
   records  = ["10 feedback-smtp.${local.primary_region}.amazonses.com"]
 }
 
-# SPF on the bounce subdomain — SES is the only authorised sender
+# SPF on the bounce subdomain — SES is the only authorised sender.
+# Serves: platform domain AND healthcheck subdomain (both bounce CNAMEs resolve here).
 resource "aws_route53_record" "bounce_spf" {
   provider = aws.us_east_1
   zone_id  = data.aws_route53_zone.main.zone_id
@@ -175,6 +180,7 @@ resource "aws_route53_record" "bounce_spf_root" {
 # ---------------------------------------------------------------------------
 # DMARC — shared terminus; customers CNAME _dmarc.{their} → _dmarc.{ours}
 # Resolvers follow CNAME chains for TXT queries, so no TXT record needed per customer.
+# Serves: platform domain AND healthcheck subdomain (both delegate DMARC here).
 # ---------------------------------------------------------------------------
 
 resource "aws_route53_record" "dmarc" {
@@ -304,4 +310,78 @@ resource "aws_sesv2_tenant_resource_association" "system_identity_subdomain" {
 resource "aws_sesv2_tenant_resource_association" "system_config_set" {
   tenant_name  = aws_sesv2_tenant.system.tenant_name
   resource_arn = aws_sesv2_configuration_set.sending.arn
+}
+
+# ---------------------------------------------------------------------------
+# Healthcheck subdomain — exercises the customer CNAME delegation pattern
+# (MX + 3 CNAMEs) so the daily healthcheck validates the exact DNS code path
+# customers rely on. All records serve the healthcheck subdomain only.
+# ---------------------------------------------------------------------------
+
+# Healthcheck subdomain MX — routes inbound healthcheck email through the same
+# branded MX host used by customer domains. Serves: healthcheck subdomain only.
+resource "aws_route53_record" "healthcheck_mx" {
+  provider = aws.us_east_1
+  zone_id  = data.aws_route53_zone.main.zone_id
+  name     = "healthcheck.platform.${data.aws_route53_zone.main.name}"
+  type     = "MX"
+  ttl      = 300
+  records  = ["10 ${aws_route53_record.ses_mx_host.fqdn}"]
+}
+
+# Healthcheck DKIM CNAME — delegates to the platform DKIM terminus so
+# checkDomain() can verify the delegation resolves correctly.
+# Serves: healthcheck subdomain only (delegates to platform terminus).
+resource "aws_route53_record" "healthcheck_dkim" {
+  provider = aws.us_east_1
+  zone_id  = data.aws_route53_zone.main.zone_id
+  name     = "mail._domainkey.healthcheck.platform.${data.aws_route53_zone.main.name}"
+  type     = "CNAME"
+  ttl      = 300
+  records  = ["mail._domainkey.platform.${data.aws_route53_zone.main.name}"]
+}
+
+# Healthcheck bounce CNAME — delegates to the platform bounce SPF terminus.
+# Serves: healthcheck subdomain only (delegates to platform terminus).
+resource "aws_route53_record" "healthcheck_bounce" {
+  provider = aws.us_east_1
+  zone_id  = data.aws_route53_zone.main.zone_id
+  name     = "bounce.healthcheck.platform.${data.aws_route53_zone.main.name}"
+  type     = "CNAME"
+  ttl      = 300
+  records  = ["bounce.platform.${data.aws_route53_zone.main.name}"]
+}
+
+# Healthcheck DMARC CNAME — delegates to the platform DMARC terminus.
+# Serves: healthcheck subdomain only (delegates to platform terminus).
+resource "aws_route53_record" "healthcheck_dmarc" {
+  provider = aws.us_east_1
+  zone_id  = data.aws_route53_zone.main.zone_id
+  name     = "_dmarc.healthcheck.platform.${data.aws_route53_zone.main.name}"
+  type     = "CNAME"
+  ttl      = 300
+  records  = ["_dmarc.platform.${data.aws_route53_zone.main.name}"]
+}
+
+# Healthcheck subdomain SES identity — BYODKIM using the same signing key as
+# the platform identity. Required so SES accepts outbound healthcheck email.
+# Serves: healthcheck subdomain only.
+resource "aws_sesv2_email_identity" "healthcheck" {
+  email_identity         = "healthcheck.platform.${data.aws_route53_zone.main.name}"
+  configuration_set_name = aws_sesv2_configuration_set.sending.configuration_set_name
+
+  dkim_signing_attributes {
+    domain_signing_selector    = "mail"
+    domain_signing_private_key = data.aws_kms_secrets.dkim.plaintext["private_key"]
+  }
+}
+
+# Associate healthcheck identity with the SYSTEM tenant so system-generated
+# mail (TenantName = "SYSTEM") can send from the healthcheck subdomain.
+# Serves: healthcheck subdomain only.
+resource "aws_sesv2_tenant_resource_association" "system_identity_healthcheck" {
+  tenant_name  = aws_sesv2_tenant.system.tenant_name
+  resource_arn = aws_sesv2_email_identity.healthcheck.arn
+
+  depends_on = [aws_sesv2_email_identity.healthcheck]
 }

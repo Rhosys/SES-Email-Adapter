@@ -15,6 +15,15 @@ vi.mock("node:dns/promises", () => ({
   },
 }));
 
+vi.mock("../../src/dns/dns-checker.js", () => ({
+  checkDomain: vi.fn().mockResolvedValue([
+    { name: "healthcheck.platform.email.rhosys.cloud", type: "MX", value: "10 mx.platform.email.rhosys.cloud", status: "verified" },
+    { name: "mail._domainkey.healthcheck.platform.email.rhosys.cloud", type: "CNAME", value: "mail._domainkey.platform.email.rhosys.cloud", status: "verified" },
+    { name: "bounce.healthcheck.platform.email.rhosys.cloud", type: "CNAME", value: "bounce.platform.email.rhosys.cloud", status: "verified" },
+    { name: "_dmarc.healthcheck.platform.email.rhosys.cloud", type: "CNAME", value: "_dmarc.platform.email.rhosys.cloud", status: "verified" },
+  ]),
+}));
+
 function makeThread(overrides: { id?: string; workflow?: string; createdAt?: string } = {}) {
   return {
     id: overrides.id ?? "thr-hc",
@@ -72,7 +81,7 @@ describe("HealthcheckValidator", () => {
 
     expect(result.status).toBe("pass");
     expect(result.checkedDate).toBe("2026-07-08");
-    expect(result.checks).toHaveLength(7);
+    expect(result.checks).toHaveLength(11);
     expect(result.checks.every((c) => c.status === "pass")).toBe(true);
     expect(result.rawChecks).toEqual({ hasThreadId: true, workflowIsHealthcheck: true, hasEmbedding: true });
   });
@@ -126,5 +135,50 @@ describe("HealthcheckValidator", () => {
     const result = await new HealthcheckValidator(deps).validateLatest();
     expect(result.checkedDate).toBe(expectedDate);
     expect(result.status).toBe("pass");
+  });
+
+  it("tags every check with a valid section field", async () => {
+    const { deps } = makeDeps({ threads: [makeThread()], hasEmbedding: true });
+    const result = await new HealthcheckValidator(deps).validate("2026-07-08");
+    const validSections = ["terminus", "delegation", "ses", "pipeline"];
+    for (const check of result.checks) {
+      expect(validSections).toContain(check.section);
+    }
+  });
+
+  it("tags delegation checks with section delegation", async () => {
+    const { deps } = makeDeps({ threads: [makeThread()], hasEmbedding: true });
+    const result = await new HealthcheckValidator(deps).validate("2026-07-08");
+    const delegationChecks = result.checks.filter(c => c.section === "delegation");
+    expect(delegationChecks.length).toBe(4);
+    expect(delegationChecks.every(c => c.id.startsWith("delegation-"))).toBe(true);
+  });
+
+  it("reports overall fail when delegation check returns a non-verified record", async () => {
+    const { deps } = makeDeps({ threads: [makeThread()], hasEmbedding: true });
+    deps.dnsChecker = {
+      checkDomain: vi.fn().mockResolvedValue([
+        { name: "healthcheck.platform.email.rhosys.cloud", type: "MX", value: "10 mx.platform.email.rhosys.cloud", status: "verified" },
+        { name: "mail._domainkey.healthcheck.platform.email.rhosys.cloud", type: "CNAME", value: "mail._domainkey.platform.email.rhosys.cloud", status: "failing", currentValue: "wrong.example.com" },
+        { name: "bounce.healthcheck.platform.email.rhosys.cloud", type: "CNAME", value: "bounce.platform.email.rhosys.cloud", status: "verified" },
+        { name: "_dmarc.healthcheck.platform.email.rhosys.cloud", type: "CNAME", value: "_dmarc.platform.email.rhosys.cloud", status: "verified" },
+      ]),
+    };
+    const result = await new HealthcheckValidator(deps).validate("2026-07-08");
+    expect(result.status).toBe("fail");
+    const failedCheck = result.checks.find(c => c.id.includes("delegation") && c.status === "fail");
+    expect(failedCheck).toBeDefined();
+    expect(failedCheck!.detail).toContain("wrong.example.com");
+  });
+
+  it("uses a custom dnsChecker dep when provided", async () => {
+    const mockCheckDomain = vi.fn().mockResolvedValue([
+      { name: "healthcheck.platform.email.rhosys.cloud", type: "MX", value: "10 mx.platform.email.rhosys.cloud", status: "verified" },
+    ]);
+    const { deps } = makeDeps({ threads: [makeThread()], hasEmbedding: true });
+    deps.dnsChecker = { checkDomain: mockCheckDomain };
+    await new HealthcheckValidator(deps).validate("2026-07-08");
+    expect(mockCheckDomain).toHaveBeenCalledOnce();
+    expect(mockCheckDomain.mock.calls[0]?.[0].domain).toBe("healthcheck.platform.email.rhosys.cloud");
   });
 });

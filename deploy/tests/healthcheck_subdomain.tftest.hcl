@@ -125,6 +125,8 @@ mock_provider "aws" {
   }
 }
 
+
+
 variables {
   aws_account_id = "123456789012"
   service_name   = "test-svc"
@@ -133,40 +135,110 @@ variables {
 override_data {
   target = data.tls_public_key.dkim
   values = {
-    public_key_pem = "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA\n-----END PUBLIC KEY-----\n"
+    public_key_pem = "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAnpoZeEkAW37Gl+qqaj2k\n9hShqpNUGJHhkPqOfhnjQz9kpG/dOaK7L9TBFy/UABiTdGf2EbBJFtDUW/1dFIyR\nCe3YBv3xLATc35QzHMcUonWe27G4LNiGAqE2dhfwSDSsd9EImNDTQBUwEM307x5T\n7kSQIVF5vaumzLQpKagyS6RNimk3nIc3YfT/pN2+BE9bV3NG0ayp55aqeBYh9cyF\n+5CSPEKkVJEKJg7SfuBqFqYVRk2kok0EpbTnEEIeUWiDRAvgHaW8Tj37VlUSKNqO\ndTiq36uzblUwHCPhEHhl+lfmP/t8yfEFZ2aj+P3MN9IW4Uo9NNLhQrEDKS9DgOl7\nIwIDAQAB\n-----END PUBLIC KEY-----\n"
   }
 }
 
 override_resource {
-  target = aws_sesv2_email_identity.main
+  target = aws_sesv2_email_identity.healthcheck
   values = {
-    arn = "arn:aws:ses:eu-central-1:123456789012:identity/email.rhosys.cloud"
+    arn = "arn:aws:ses:eu-central-1:123456789012:identity/healthcheck.platform.email.rhosys.cloud"
   }
 }
 
 override_resource {
-  target = aws_sesv2_email_identity.platform
+  target = aws_route53_record.ses_mx_host
   values = {
-    arn = "arn:aws:ses:eu-central-1:123456789012:identity/platform.email.rhosys.cloud"
+    fqdn = "mx.platform.email.rhosys.cloud"
   }
 }
 
-# Aurora clusters must never be deletable — they hold vector embeddings that are
-# expensive to regenerate from raw emails.
-run "aurora_cluster_deletion_protection_enabled" {
+# Healthcheck subdomain MX record points to the branded MX host
+run "healthcheck_mx_record" {
   command = plan
 
   assert {
-    condition     = alltrue([for k, v in aws_rds_cluster.aurora : v.deletion_protection == true])
-    error_message = "All Aurora clusters must have deletion_protection = true"
+    condition     = aws_route53_record.healthcheck_mx.type == "MX"
+    error_message = "Healthcheck subdomain must have an MX record"
+  }
+
+  assert {
+    condition     = anytrue([for r in aws_route53_record.healthcheck_mx.records : strcontains(r, "mx.platform.")])
+    error_message = "Healthcheck MX must point to the branded MX host (mx.platform.email.rhosys.cloud)"
   }
 }
 
-run "aurora_cluster_skips_final_snapshot" {
+# Healthcheck DKIM CNAME delegates to platform DKIM terminus
+run "healthcheck_dkim_cname" {
   command = plan
 
   assert {
-    condition     = alltrue([for k, v in aws_rds_cluster.aurora : v.skip_final_snapshot == true])
-    error_message = "All Aurora clusters must skip final snapshot (recovery is via DynamoDB embedding cache + S3 raw emails)"
+    condition     = aws_route53_record.healthcheck_dkim.type == "CNAME"
+    error_message = "Healthcheck DKIM record must be a CNAME"
+  }
+
+  assert {
+    condition     = anytrue([for r in aws_route53_record.healthcheck_dkim.records : r == "mail._domainkey.platform.email.rhosys.cloud"])
+    error_message = "Healthcheck DKIM CNAME must point to mail._domainkey.platform.email.rhosys.cloud"
+  }
+
+  assert {
+    condition     = strcontains(aws_route53_record.healthcheck_dkim.name, "mail._domainkey.healthcheck.platform.")
+    error_message = "Healthcheck DKIM record must be at mail._domainkey.healthcheck.platform.{domain}"
+  }
+}
+
+# Healthcheck bounce CNAME delegates to platform bounce terminus
+run "healthcheck_bounce_cname" {
+  command = plan
+
+  assert {
+    condition     = aws_route53_record.healthcheck_bounce.type == "CNAME"
+    error_message = "Healthcheck bounce record must be a CNAME"
+  }
+
+  assert {
+    condition     = anytrue([for r in aws_route53_record.healthcheck_bounce.records : r == "bounce.platform.email.rhosys.cloud"])
+    error_message = "Healthcheck bounce CNAME must point to bounce.platform.email.rhosys.cloud"
+  }
+}
+
+# Healthcheck DMARC CNAME delegates to platform DMARC terminus
+run "healthcheck_dmarc_cname" {
+  command = plan
+
+  assert {
+    condition     = aws_route53_record.healthcheck_dmarc.type == "CNAME"
+    error_message = "Healthcheck DMARC record must be a CNAME"
+  }
+
+  assert {
+    condition     = anytrue([for r in aws_route53_record.healthcheck_dmarc.records : r == "_dmarc.platform.email.rhosys.cloud"])
+    error_message = "Healthcheck DMARC CNAME must point to _dmarc.platform.email.rhosys.cloud"
+  }
+}
+
+# SES identity registered for healthcheck subdomain
+run "healthcheck_ses_identity" {
+  command = plan
+
+  assert {
+    condition     = aws_sesv2_email_identity.healthcheck.email_identity == "healthcheck.platform.email.rhosys.cloud"
+    error_message = "SES identity must be registered for healthcheck.platform.email.rhosys.cloud"
+  }
+}
+
+# SYSTEM tenant association exists for healthcheck identity
+run "healthcheck_system_tenant_association" {
+  command = plan
+
+  assert {
+    condition     = aws_sesv2_tenant_resource_association.system_identity_healthcheck.tenant_name == "SYSTEM"
+    error_message = "Healthcheck identity must be associated with the SYSTEM tenant"
+  }
+
+  assert {
+    condition     = aws_sesv2_tenant_resource_association.system_identity_healthcheck.resource_arn == "arn:aws:ses:eu-central-1:123456789012:identity/healthcheck.platform.email.rhosys.cloud"
+    error_message = "SYSTEM tenant association must reference the healthcheck identity ARN"
   }
 }
