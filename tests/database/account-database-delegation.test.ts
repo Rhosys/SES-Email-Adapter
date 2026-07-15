@@ -47,13 +47,14 @@ describe("AccountDatabase — SYSTEM delegation (Property 5)", () => {
       expect(ddbMock.commandCalls(QueryCommand)).toHaveLength(0);
     });
 
-    it("listDomains(SYSTEM) returns hardcoded domain without DynamoDB call", async () => {
+    it("listDomains(SYSTEM) returns hardcoded domains without DynamoDB call", async () => {
       const result = await db.listDomains(SYSTEM_ACCOUNT_ID);
 
       expect(result.isOk()).toBe(true);
       const domains = result._unsafeUnwrap();
-      expect(domains).toHaveLength(1);
+      expect(domains).toHaveLength(2);
       expect(domains[0]!.accountId).toBe(SYSTEM_ACCOUNT_ID);
+      expect(domains[1]!.accountId).toBe(SYSTEM_ACCOUNT_ID);
       expect(ddbMock.commandCalls(GetCommand)).toHaveLength(0);
       expect(ddbMock.commandCalls(QueryCommand)).toHaveLength(0);
     });
