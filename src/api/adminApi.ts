@@ -34,6 +34,7 @@ const HealthCheckItemSchema = z.object({
   label: z.string(),
   status: z.enum(["pass", "fail", "unknown"]),
   detail: z.string().optional(),
+  section: z.enum(["terminus", "delegation", "ses", "pipeline"]),
 });
 
 const HealthCheckValidationResponse = z.object({

@@ -109,6 +109,13 @@ override_resource {
 }
 
 override_resource {
+  target = aws_sesv2_email_identity.healthcheck
+  values = {
+    arn = "arn:aws:ses:eu-central-1:123456789012:identity/healthcheck.platform.email.rhosys.cloud"
+  }
+}
+
+override_resource {
   target = aws_acm_certificate.api_gateways
   values = {
     arn = "arn:aws:acm:us-east-1:123456789012:certificate/test-cert-gw"

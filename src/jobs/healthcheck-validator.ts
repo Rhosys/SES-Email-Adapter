@@ -3,6 +3,8 @@ import { DateTime } from "luxon";
 import type { Logger } from "../logger.js";
 import type { ThreadDatabase } from "../database/thread-database.js";
 import type { DbError, Result } from "../errors.js";
+import type { Domain, DnsRecord } from "../types/index.js";
+import { checkDomain } from "../dns/dns-checker.js";
 import { SYSTEM_ACCOUNT_ID } from "../database/system-account-db.js";
 
 // ---------------------------------------------------------------------------
@@ -28,6 +30,7 @@ export interface HealthCheckItem {
   label: string;
   status: HealthCheckStatus;
   detail?: string;
+  section: "terminus" | "delegation" | "ses" | "pipeline";
 }
 
 export interface HealthCheckValidation {
@@ -56,6 +59,7 @@ export interface HealthcheckValidatorDeps {
   threadDb: ThreadDatabase;
   searchDatabase: { hasEmbedding(threadId: string): Promise<Result<boolean, DbError>> };
   sesChecker?: { canSendFrom(domain: string): Promise<{ verified: boolean; sendingEnabled: boolean; detail?: string }> };
+  dnsChecker?: { checkDomain(domain: Domain): Promise<DnsRecord[]> };
   mailDomain: string;
   logger: Logger;
 }
@@ -84,8 +88,9 @@ export class HealthcheckValidator {
 
     // DNS validation — run before pipeline checks so we can surface infrastructure issues
     const dnsChecks = await this.checkPlatformDns();
+    const delegationChecks = await this.checkDelegation();
     const sesChecks = await this.checkSesIdentity();
-    const infraChecks = [...dnsChecks, ...sesChecks];
+    const infraChecks = [...dnsChecks, ...delegationChecks, ...sesChecks];
 
     let threads: Array<{ id: string; createdAt: string; workflow: string }>;
     try {
@@ -125,9 +130,9 @@ export class HealthcheckValidator {
         rawChecks: null,
         checks: [
           ...infraChecks,
-          { id: "thread-created", label: CHECK_LABELS.threadCreated, status: "fail", detail: `No healthcheck thread was created for ${date}.` },
-          { id: "workflow-classified", label: CHECK_LABELS.workflowClassified, status: "unknown" },
-          { id: "embedding-indexed", label: CHECK_LABELS.embeddingIndexed, status: "unknown" },
+          { id: "thread-created", label: CHECK_LABELS.threadCreated, status: "fail", detail: `No healthcheck thread was created for ${date}.`, section: "pipeline" as const },
+          { id: "workflow-classified", label: CHECK_LABELS.workflowClassified, status: "unknown", section: "pipeline" as const },
+          { id: "embedding-indexed", label: CHECK_LABELS.embeddingIndexed, status: "unknown", section: "pipeline" as const },
         ],
       };
     }
@@ -187,18 +192,20 @@ export class HealthcheckValidator {
       rawChecks: checks,
       checks: [
         ...infraChecks,
-        { id: "thread-created", label: CHECK_LABELS.threadCreated, status: "pass" },
+        { id: "thread-created", label: CHECK_LABELS.threadCreated, status: "pass", section: "pipeline" as const },
         {
           id: "workflow-classified",
           label: CHECK_LABELS.workflowClassified,
           status: checks.workflowIsHealthcheck ? "pass" : "fail",
           ...(checks.workflowIsHealthcheck ? {} : { detail: `Classified as "${thread.workflow}" instead of "healthcheck".` }),
+          section: "pipeline" as const,
         },
         {
           id: "embedding-indexed",
           label: CHECK_LABELS.embeddingIndexed,
           status: checks.hasEmbedding ? "pass" : "fail",
           ...(checks.hasEmbedding ? {} : { detail: "No embedding found in the search index for this thread." }),
+          section: "pipeline" as const,
         },
       ],
     };
@@ -215,10 +222,11 @@ export class HealthcheckValidator {
         id: "dns-mx",
         label: `MX record: ${domain}`,
         status: mx.length > 0 ? "pass" : "fail",
+        section: "terminus",
         ...(mx.length === 0 ? { detail: "No MX records found — inbound mail cannot be delivered." } : {}),
       });
     } catch {
-      checks.push({ id: "dns-mx", label: `MX record: ${domain}`, status: "fail", detail: "DNS resolution failed — no MX record found." });
+      checks.push({ id: "dns-mx", label: `MX record: ${domain}`, status: "fail", section: "terminus", detail: "DNS resolution failed — no MX record found." });
     }
 
     // DKIM TXT — must contain v=DKIM1
@@ -231,10 +239,11 @@ export class HealthcheckValidator {
         id: "dns-dkim",
         label: `DKIM TXT: ${dkimName}`,
         status: hasDkim ? "pass" : "fail",
+        section: "terminus",
         ...(!hasDkim ? { detail: `TXT record exists but does not start with "v=DKIM1".` } : {}),
       });
     } catch {
-      checks.push({ id: "dns-dkim", label: `DKIM TXT: ${dkimName}`, status: "fail", detail: "No TXT record found." });
+      checks.push({ id: "dns-dkim", label: `DKIM TXT: ${dkimName}`, status: "fail", section: "terminus", detail: "No TXT record found." });
     }
 
     // Bounce SPF — bounce subdomain must have SPF
@@ -247,10 +256,11 @@ export class HealthcheckValidator {
         id: "dns-bounce-spf",
         label: `SPF TXT: ${bounceName}`,
         status: hasSpf ? "pass" : "fail",
+        section: "terminus",
         ...(!hasSpf ? { detail: `TXT record exists but does not contain "spf1".` } : {}),
       });
     } catch {
-      checks.push({ id: "dns-bounce-spf", label: `SPF TXT: ${bounceName}`, status: "fail", detail: "No TXT record found." });
+      checks.push({ id: "dns-bounce-spf", label: `SPF TXT: ${bounceName}`, status: "fail", section: "terminus", detail: "No TXT record found." });
     }
 
     // DMARC
@@ -263,10 +273,11 @@ export class HealthcheckValidator {
         id: "dns-dmarc",
         label: `DMARC TXT: ${dmarcName}`,
         status: hasDmarc ? "pass" : "fail",
+        section: "terminus",
         ...(!hasDmarc ? { detail: `TXT record exists but does not start with "v=DMARC1".` } : {}),
       });
     } catch {
-      checks.push({ id: "dns-dmarc", label: `DMARC TXT: ${dmarcName}`, status: "fail", detail: "No TXT record found." });
+      checks.push({ id: "dns-dmarc", label: `DMARC TXT: ${dmarcName}`, status: "fail", section: "terminus", detail: "No TXT record found." });
     }
 
     return checks;
@@ -282,12 +293,14 @@ export class HealthcheckValidator {
           id: "ses-identity-verified",
           label: `SES identity verified: ${domain}`,
           status: result.verified ? "pass" : "fail",
+          section: "ses",
           ...(!result.verified ? { detail: result.detail ?? `Domain "${domain}" is not verified in SES.` } : {}),
         },
         {
           id: "ses-sending-enabled",
           label: `SES sending enabled: ${domain}`,
           status: result.sendingEnabled ? "pass" : "fail",
+          section: "ses",
           ...(!result.sendingEnabled ? { detail: result.detail ?? `Sending is paused or disabled for "${domain}".` } : {}),
         },
       ];
@@ -298,15 +311,50 @@ export class HealthcheckValidator {
         domain,
         error: e,
       });
-      return [{ id: "ses-error", label: "SES identity validation", status: "unknown", detail: "SES identity check failed unexpectedly." }];
+      return [{ id: "ses-error", label: "SES identity validation", status: "unknown" as HealthCheckStatus, section: "ses" as const, detail: "SES identity check failed unexpectedly." }];
+    }
+  }
+
+  private async checkDelegation(): Promise<HealthCheckItem[]> {
+    const healthcheckDomain: Domain = {
+      accountId: SYSTEM_ACCOUNT_ID,
+      domain: `healthcheck.${this.deps.mailDomain}`,
+      receivingSetupComplete: true,
+      senderSetupComplete: true,
+      receivingHealthy: true,
+      senderHealthy: true,
+      createdAt: "2025-01-01T00:00:00.000Z",
+      updatedAt: "2025-01-01T00:00:00.000Z",
+    };
+
+    const checker = this.deps.dnsChecker ?? { checkDomain };
+    try {
+      const records = await checker.checkDomain(healthcheckDomain);
+      return records.map(record => ({
+        id: `delegation-${record.type.toLowerCase()}-${record.name.split(".")[0]}`,
+        label: `Delegation ${record.type}: ${record.name}`,
+        status: (record.status === "verified" ? "pass" : "fail") as HealthCheckStatus,
+        section: "delegation" as const,
+        ...(record.status !== "verified" ? {
+          detail: record.currentValue
+            ? `Expected "${record.value}", got "${record.currentValue}"`
+            : `No ${record.type} record found at ${record.name}`,
+        } : {}),
+      }));
+    } catch (e) {
+      this.deps.logger.error("DNS delegation check threw unexpected error.", {
+        code: "healthcheck.delegation_check_error",
+        error: e,
+      });
+      return [{ id: "delegation-error", label: "DNS delegation check", status: "unknown" as HealthCheckStatus, section: "delegation" as const, detail: "Delegation check failed unexpectedly." }];
     }
   }
 
   private errorChecks(detail: string): HealthCheckItem[] {
     return [
-      { id: "thread-created", label: CHECK_LABELS.threadCreated, status: "unknown", detail },
-      { id: "workflow-classified", label: CHECK_LABELS.workflowClassified, status: "unknown" },
-      { id: "embedding-indexed", label: CHECK_LABELS.embeddingIndexed, status: "unknown" },
+      { id: "thread-created", label: CHECK_LABELS.threadCreated, status: "unknown", section: "pipeline", detail },
+      { id: "workflow-classified", label: CHECK_LABELS.workflowClassified, status: "unknown", section: "pipeline" },
+      { id: "embedding-indexed", label: CHECK_LABELS.embeddingIndexed, status: "unknown", section: "pipeline" },
     ];
   }
 }

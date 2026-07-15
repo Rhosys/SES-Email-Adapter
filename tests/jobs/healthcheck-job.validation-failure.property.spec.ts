@@ -16,6 +16,15 @@ vi.mock("node:dns/promises", () => ({
   },
 }));
 
+vi.mock("../../src/dns/dns-checker.js", () => ({
+  checkDomain: vi.fn().mockResolvedValue([
+    { name: "healthcheck.platform.email.rhosys.cloud", type: "MX", value: "10 mx.platform.email.rhosys.cloud", status: "verified" },
+    { name: "mail._domainkey.healthcheck.platform.email.rhosys.cloud", type: "CNAME", value: "mail._domainkey.platform.email.rhosys.cloud", status: "verified" },
+    { name: "bounce.healthcheck.platform.email.rhosys.cloud", type: "CNAME", value: "bounce.platform.email.rhosys.cloud", status: "verified" },
+    { name: "_dmarc.healthcheck.platform.email.rhosys.cloud", type: "CNAME", value: "_dmarc.platform.email.rhosys.cloud", status: "verified" },
+  ]),
+}));
+
 // ---------------------------------------------------------------------------
 // Property 3 — Validation failure detection (thread-based)
 //
