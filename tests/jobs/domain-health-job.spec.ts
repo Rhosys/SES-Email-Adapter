@@ -105,6 +105,61 @@ function setupDefaultMocks() {
 // Tests
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Requirement 9.4: DomainHealthJob calls checkDomain on healthcheck subdomain
+// ---------------------------------------------------------------------------
+
+describe("domain-health-job SYSTEM domain iteration", () => {
+  let mockLogger: MockLogger;
+  let job: InstanceType<typeof DomainHealthJob>;
+
+  beforeEach(async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2025-05-11T16:00:00.000Z"));
+    mockCheckDomain.mockResolvedValue([
+      { name: "test", type: "MX", value: "10 mx.platform.email.rhosys.cloud", status: "verified" },
+    ]);
+    mockUpdateDomainHealth.mockReturnValue(Promise.resolve(ok(undefined)));
+    mockGetStats.mockReturnValue(Promise.resolve(ok([])));
+    mockWriteSnapshot.mockReturnValue(Promise.resolve(ok(undefined)));
+
+    mockLogger = createMockLogger();
+    const { AccountDatabase } = await import("../../src/database/account-database.js");
+    const { ThreadDatabase } = await import("../../src/database/thread-database.js");
+    job = new DomainHealthJob(new AccountDatabase(mockLogger) as any, new ThreadDatabase(mockLogger) as any, mockLogger);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    mockScanAllDomains.mockReset();
+    mockGetAccount.mockReset();
+    mockUpdateDomainHealth.mockReset();
+    mockListActiveThreadsBefore.mockReset();
+    mockCheckDomain.mockReset();
+    mockGetStats.mockReset();
+    mockWriteSnapshot.mockReset();
+  });
+
+  it("calls checkDomain on both SYSTEM domains including healthcheck subdomain", async () => {
+    const platformDomain = makeDomain({ accountId: "SYSTEM", domain: "platform.email.rhosys.cloud" });
+    const healthcheckDomain = makeDomain({ accountId: "SYSTEM", domain: "healthcheck.platform.email.rhosys.cloud" });
+    mockScanAllDomains.mockReturnValue(Promise.resolve(ok([
+      { accountId: "SYSTEM", domains: [platformDomain, healthcheckDomain] },
+    ])));
+    mockGetAccount.mockReturnValue(Promise.resolve(ok({ id: "SYSTEM", name: "System", createdAt: "2025-01-01T00:00:00.000Z", updatedAt: "2025-01-01T00:00:00.000Z" } as Account)));
+    mockListActiveThreadsBefore.mockReturnValue(Promise.resolve(ok([])));
+    mockCheckDomain.mockResolvedValue([
+      { name: "test", type: "MX", value: "10 mx.platform.email.rhosys.cloud", status: "verified" },
+    ]);
+
+    await job.run();
+
+    expect(mockCheckDomain).toHaveBeenCalledTimes(2);
+    expect(mockCheckDomain).toHaveBeenCalledWith(expect.objectContaining({ domain: "platform.email.rhosys.cloud" }));
+    expect(mockCheckDomain).toHaveBeenCalledWith(expect.objectContaining({ domain: "healthcheck.platform.email.rhosys.cloud" }));
+  });
+});
+
 describe("domain-health-job staleness integration", () => {
   let mockLogger: MockLogger;
   let job: InstanceType<typeof DomainHealthJob>;
