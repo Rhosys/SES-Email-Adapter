@@ -45,7 +45,7 @@ export class HealthcheckJob {
 
   private async send(today: string): Promise<void> {
     const messageId = this.buildMessageId(today);
-    const recipient = `healthcheck@${this.deps.mailDomain}`;
+    const recipient = `healthcheck@healthcheck.${this.deps.mailDomain}`;
     const subject = `Healthcheck ${today}`;
 
     const templateData: HealthcheckTemplateData = {
@@ -171,7 +171,7 @@ export async function renderHealthcheckEmail(data: HealthcheckTemplateData, mail
     "",
     "---",
     "This email is part of the daily pipeline healthcheck system.",
-    `Sent to healthcheck@${mailDomain} and processed through the full pipeline.`,
+    `Sent to healthcheck@healthcheck.${mailDomain} and processed through the full pipeline.`,
   ].join("\n");
 
   return { html, text };
