@@ -20,10 +20,14 @@ export function isSystemAccount(accountId: string): boolean {
 export class SystemAccountDb {
   private readonly mailDomain: string;
   private readonly healthcheckAddress: string;
+  private readonly healthcheckSubdomain: string;
+  private readonly healthcheckSubdomainAddress: string;
 
   constructor(mailDomain: string) {
     this.mailDomain = mailDomain;
     this.healthcheckAddress = `healthcheck@${mailDomain}`;
+    this.healthcheckSubdomain = `healthcheck.${mailDomain}`;
+    this.healthcheckSubdomainAddress = `healthcheck@healthcheck.${mailDomain}`;
   }
 
   getAccount(): Result<Account, DbError> {
@@ -57,6 +61,18 @@ export class SystemAccountDb {
         updatedAt: "2025-01-01T00:00:00.000Z",
       });
     }
+    if (domainName === this.healthcheckSubdomain) {
+      return ok({
+        accountId: SYSTEM_ACCOUNT_ID,
+        domain: this.healthcheckSubdomain,
+        receivingSetupComplete: true,
+        senderSetupComplete: true,
+        receivingHealthy: true,
+        senderHealthy: true,
+        createdAt: "2025-01-01T00:00:00.000Z",
+        updatedAt: "2025-01-01T00:00:00.000Z",
+      });
+    }
     return ok(null);
   }
 
@@ -77,6 +93,18 @@ export class SystemAccountDb {
         updatedAt: "2025-01-01T00:00:00.000Z",
       });
     }
+    if (recipientAddress === this.healthcheckSubdomainAddress) {
+      return ok({
+        id: "system-healthcheck-subdomain",
+        accountId: SYSTEM_ACCOUNT_ID,
+        aliasAddress: this.healthcheckSubdomainAddress,
+        domain: this.healthcheckSubdomain,
+        aliasName: "healthcheck",
+        unknownSenderPolicy: "allow_all" as const,
+        createdAt: "2025-01-01T00:00:00.000Z",
+        updatedAt: "2025-01-01T00:00:00.000Z",
+      });
+    }
     return ok(null);
   }
 
@@ -84,6 +112,15 @@ export class SystemAccountDb {
     return ok([{
       accountId: SYSTEM_ACCOUNT_ID,
       domain: this.mailDomain,
+      receivingSetupComplete: true,
+      senderSetupComplete: true,
+      receivingHealthy: true,
+      senderHealthy: true,
+      createdAt: "2025-01-01T00:00:00.000Z",
+      updatedAt: "2025-01-01T00:00:00.000Z",
+    }, {
+      accountId: SYSTEM_ACCOUNT_ID,
+      domain: this.healthcheckSubdomain,
       receivingSetupComplete: true,
       senderSetupComplete: true,
       receivingHealthy: true,

@@ -59,6 +59,18 @@ describe("SystemAccountDb", () => {
       expect(domain!.senderSetupComplete).toBe(true);
     });
 
+    it("returns domain for healthcheck subdomain with setup complete", () => {
+      const result = db.getDomainByName(`healthcheck.${MAIL_DOMAIN}`);
+      expect(result.isOk()).toBe(true);
+
+      const domain = result._unsafeUnwrap();
+      expect(domain).not.toBeNull();
+      expect(domain!.domain).toBe(`healthcheck.${MAIL_DOMAIN}`);
+      expect(domain!.accountId).toBe(SYSTEM_ACCOUNT_ID);
+      expect(domain!.receivingSetupComplete).toBe(true);
+      expect(domain!.senderSetupComplete).toBe(true);
+    });
+
     it("returns null for other domains", () => {
       const result = db.getDomainByName("example.com");
       expect(result.isOk()).toBe(true);
@@ -79,6 +91,18 @@ describe("SystemAccountDb", () => {
       expect(alias!.unknownSenderPolicy).toBe("allow_all");
     });
 
+    it("resolves healthcheck@healthcheck.MAIL_DOMAIN to SYSTEM alias on subdomain", () => {
+      const result = db.getAliasByGlobalAddress(`healthcheck@healthcheck.${MAIL_DOMAIN}`);
+      expect(result.isOk()).toBe(true);
+
+      const alias = result._unsafeUnwrap();
+      expect(alias).not.toBeNull();
+      expect(alias!.accountId).toBe(SYSTEM_ACCOUNT_ID);
+      expect(alias!.aliasAddress).toBe(`healthcheck@healthcheck.${MAIL_DOMAIN}`);
+      expect(alias!.domain).toBe(`healthcheck.${MAIL_DOMAIN}`);
+      expect(alias!.unknownSenderPolicy).toBe("allow_all");
+    });
+
     it("returns null for non-healthcheck addresses", () => {
       const result = db.getAliasByGlobalAddress(`other@${MAIL_DOMAIN}`);
       expect(result.isOk()).toBe(true);
@@ -87,15 +111,16 @@ describe("SystemAccountDb", () => {
   });
 
   describe("other methods return empty/default", () => {
-    it("listDomains returns the MAIL_DOMAIN domain", () => {
+    it("listDomains returns both platform and healthcheck domains", () => {
       const result = db.listDomains();
       expect(result.isOk()).toBe(true);
 
       const domains = result._unsafeUnwrap();
-      expect(domains).toHaveLength(1);
-      const first = domains[0]!;
-      expect(first.domain).toBe(MAIL_DOMAIN);
-      expect(first.accountId).toBe(SYSTEM_ACCOUNT_ID);
+      expect(domains).toHaveLength(2);
+      expect(domains[0]!.domain).toBe(MAIL_DOMAIN);
+      expect(domains[0]!.accountId).toBe(SYSTEM_ACCOUNT_ID);
+      expect(domains[1]!.domain).toBe(`healthcheck.${MAIL_DOMAIN}`);
+      expect(domains[1]!.accountId).toBe(SYSTEM_ACCOUNT_ID);
     });
 
     it("listAliases returns empty array", () => {
