@@ -1470,7 +1470,11 @@ export class SignalProcessor {
     if (failures.length > 0) {
       for (const failure of failures) {
         const e = failure._unsafeUnwrapErr();
-        this.logger.error("Failed to upsert embedding to Aurora cluster. The Data API call returned an error for the target cluster. This signal's embedding won't be searchable on that cluster until the next retry succeeds. Check Aurora cluster health in the AWS console.", { code: "processor.aurora_upsert_failed", signal, thread, registryId: e.cluster.registryId, error: e });
+        if (e.schemaMismatch) {
+          this.logger.error(`Failed to upsert embedding to Aurora cluster — schema mismatch. The cluster is healthy but its table shape does not match the code: ${e.message}. This is a migration problem, not a cluster-health problem — the applied migrations in src/migrations are behind src/database/schema.ts, or a migration failed to apply. Retrying will not help until the migration is applied.`, { code: "processor.aurora_upsert_schema_mismatch", signal, thread, registryId: e.cluster.registryId, dbMessage: e.message, error: e });
+        } else {
+          this.logger.error(`Failed to upsert embedding to Aurora cluster. The Data API call returned an error for the target cluster: ${e.message}. This signal's embedding won't be searchable on that cluster until the next retry succeeds. Check Aurora cluster health in the AWS console.`, { code: "processor.aurora_upsert_failed", signal, thread, registryId: e.cluster.registryId, dbMessage: e.message, error: e });
+        }
       }
       return err(dbError("Aurora upsert failed for one or more clusters"));
     }

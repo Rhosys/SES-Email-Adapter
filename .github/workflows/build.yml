@@ -45,6 +45,21 @@ jobs:
       - name: Validate Code (strict type-check + tests)
         run: npm test
 
+      # Guard against Aurora schema drift: if src/database/schema.ts has changed
+      # without a matching committed migration, `drizzle-kit generate` emits new
+      # files here. `drizzle-kit check` alone does NOT catch this — it only
+      # validates that existing migrations are internally consistent.
+      - name: Check for un-generated migrations (schema drift)
+        run: |
+          npm run db:generate ci_drift_check
+          if [ -n "$(git status --porcelain src/migrations)" ]; then
+            echo "::error::src/database/schema.ts has changes with no committed migration. Run 'npm run db:generate <name>' locally and commit the generated files in src/migrations."
+            git --no-pager diff -- src/migrations
+            git status --porcelain src/migrations
+            exit 1
+          fi
+          echo "No schema drift — migrations are in sync with schema.ts."
+
       - name: Tofu Init
         run: tofu -chdir=deploy init -input=false -backend-config="bucket=${STATE_BUCKET}" -backend-config="key=${STATE_KEY}"
 
@@ -193,6 +208,18 @@ jobs:
 
       - name: Test Code
         run: npm run check
+
+      # Safety net for direct pushes to main: same schema-drift guard as the PR job.
+      - name: Check for un-generated migrations (schema drift)
+        run: |
+          npm run db:generate ci_drift_check
+          if [ -n "$(git status --porcelain src/migrations)" ]; then
+            echo "::error::src/database/schema.ts has changes with no committed migration. Run 'npm run db:generate <name>' locally and commit the generated files in src/migrations."
+            git --no-pager diff -- src/migrations
+            git status --porcelain src/migrations
+            exit 1
+          fi
+          echo "No schema drift — migrations are in sync with schema.ts."
 
       - name: Tofu Init
         run: tofu -chdir=deploy init -input=false -backend-config="bucket=${STATE_BUCKET}" -backend-config="key=${STATE_KEY}"

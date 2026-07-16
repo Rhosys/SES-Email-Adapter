@@ -143,10 +143,25 @@ export class HealthcheckValidator {
       hasEmbedding: false,
     };
 
+    // Default detail for a failed embedding check; overridden below when we can
+    // pinpoint the cause (e.g. schema/migration mismatch) so the healthcheck
+    // report names the real problem instead of a vague "no embedding found".
+    let embeddingDetail = "No embedding found in the search index for this thread.";
+
     try {
       const embeddingResult = await this.deps.searchDatabase.hasEmbedding(thread.id);
       if (embeddingResult.isOk()) {
         checks.hasEmbedding = embeddingResult.value;
+      } else if (embeddingResult.error.schemaMismatch) {
+        embeddingDetail = `Aurora schema mismatch — the applied migrations are behind the code: ${embeddingResult.error.message}. Check that src/migrations is up to date with src/database/schema.ts.`;
+        this.deps.logger.error("Healthcheck embedding check failed — Aurora schema mismatch (migrations behind code).", {
+          code: "healthcheck.embedding_check_schema_mismatch",
+          date,
+          threadId: thread.id,
+          error: embeddingResult.error.cause,
+          message: embeddingResult.error.message,
+        });
+        checks.hasEmbedding = false;
       } else {
         this.deps.logger.error("Aurora error during embedding existence check.", {
           code: "healthcheck.embedding_check_error",
@@ -204,7 +219,7 @@ export class HealthcheckValidator {
           id: "embedding-indexed",
           label: CHECK_LABELS.embeddingIndexed,
           status: checks.hasEmbedding ? "pass" : "fail",
-          ...(checks.hasEmbedding ? {} : { detail: "No embedding found in the search index for this thread." }),
+          ...(checks.hasEmbedding ? {} : { detail: embeddingDetail }),
           section: "pipeline" as const,
         },
       ],
