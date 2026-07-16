@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { ok, err } from "neverthrow";
+import { ok, err, type Result } from "neverthrow";
 import { HealthcheckValidator, type HealthcheckValidatorDeps } from "../../src/jobs/healthcheck-validator.js";
+import { dbError, type DbError } from "../../src/errors.js";
 import { createMockLogger, type MockLogger } from "../helpers/mock-logger.js";
 
 vi.mock("node:dns/promises", () => ({
@@ -45,6 +46,7 @@ function makeDeps(overrides: {
   threads?: ReturnType<typeof makeThread>[];
   listErr?: boolean;
   hasEmbedding?: boolean;
+  hasEmbeddingResult?: Result<boolean, DbError>;
   logger?: MockLogger;
 } = {}): { deps: HealthcheckValidatorDeps; logger: MockLogger } {
   const logger = overrides.logger ?? createMockLogger();
@@ -52,12 +54,14 @@ function makeDeps(overrides: {
     ? err({ kind: "db_error", message: "boom" })
     : ok({ items: overrides.threads ?? [makeThread()] });
 
+  const embeddingResult = overrides.hasEmbeddingResult ?? ok(overrides.hasEmbedding ?? true);
+
   const deps: HealthcheckValidatorDeps = {
     threadDb: {
       listThreads: vi.fn().mockResolvedValue(listResult),
     } as unknown as HealthcheckValidatorDeps["threadDb"],
     searchDatabase: {
-      hasEmbedding: vi.fn().mockResolvedValue(ok(overrides.hasEmbedding ?? true)),
+      hasEmbedding: vi.fn().mockResolvedValue(embeddingResult),
     },
     mailDomain: "platform.email.rhosys.cloud",
     logger,
@@ -96,6 +100,24 @@ describe("HealthcheckValidator", () => {
     const embedding = checkById(result.checks, "embedding-indexed");
     expect(embedding.status).toBe("fail");
     expect(embedding.detail).toBeTruthy();
+  });
+
+  it("reports a schema-mismatch detail (not a vague miss) when the embedding write hit a missing column", async () => {
+    const { deps, logger } = makeDeps({
+      threads: [makeThread()],
+      hasEmbeddingResult: err(dbError(new Error('column "signal_id" of relation "thread_embeddings" does not exist'))),
+    });
+    const result = await new HealthcheckValidator(deps).validate("2026-07-08");
+
+    const embedding = checkById(result.checks, "embedding-indexed");
+    expect(embedding.status).toBe("fail");
+    expect(embedding.detail).toContain("schema mismatch");
+    expect(embedding.detail).toContain("signal_id");
+    const schemaLog = logger.calls.find(
+      (c) => c.method === "error" && c.context?.["code"] === "healthcheck.embedding_check_schema_mismatch",
+    );
+    expect(schemaLog).toBeDefined();
+    expect(schemaLog!.message).toContain("schema mismatch");
   });
 
   it("marks workflow-classified as failing when the thread is not the healthcheck workflow", async () => {

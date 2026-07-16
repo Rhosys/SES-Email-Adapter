@@ -3,7 +3,7 @@ import { ok, err } from "neverthrow";
 
 // --- Standalone error types (no composite unions) ---
 
-export type DbError = { kind: "db_error"; message: string; cause: Error };
+export type DbError = { kind: "db_error"; message: string; cause: Error; schemaMismatch?: boolean };
 export type NotFoundError = { kind: "not_found"; resource: string; id: string };
 export type InvalidResponseError = { kind: "invalid_response" };
 export type AuthressServiceError = { kind: "authress_service_error"; message: string; cause: Error };
@@ -23,9 +23,29 @@ function toError(cause: unknown): Error {
   return new Error("");
 }
 
+// A schema mismatch is a Postgres "missing object" error — the code expects a
+// column/table/type the applied migrations never created (i.e. schema.ts drifted
+// ahead of src/migrations, or a migration failed to apply). These are NOT
+// transient: retrying can never fix them, so they must be reported distinctly
+// from cluster-health/connectivity errors. The RDS Data API surfaces these only
+// as message strings (no structured SQLSTATE), so we match on the message text.
+const SCHEMA_MISMATCH_PATTERNS = [
+  /column .* does not exist/i,
+  /relation .* does not exist/i,
+  /type .* does not exist/i,
+  /(undefined|unknown) (column|table)/i,
+];
+
+/** True when the error looks like a schema/migration mismatch (missing column/table/type). */
+export function isSchemaMismatchError(message: string): boolean {
+  return SCHEMA_MISMATCH_PATTERNS.some((pattern) => pattern.test(message));
+}
+
 export const dbError = (cause: unknown): DbError => {
   const error = toError(cause);
-  return { kind: "db_error", message: error.message, cause: error };
+  const result: DbError = { kind: "db_error", message: error.message, cause: error };
+  if (isSchemaMismatchError(error.message)) result.schemaMismatch = true;
+  return result;
 };
 export const notFoundError = (resource: string, id: string): NotFoundError => ({ kind: "not_found", resource, id });
 export const invalidResponseError = (): InvalidResponseError => ({ kind: "invalid_response" });
