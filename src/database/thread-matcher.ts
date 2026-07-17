@@ -7,6 +7,7 @@
 import { RDSDataClient } from "@aws-sdk/client-rds-data";
 import { drizzle } from "drizzle-orm/aws-data-api/pg";
 import { eq, and, sql } from "drizzle-orm";
+import { DrizzleQueryError } from "drizzle-orm/errors";
 import { GetCommand } from "@aws-sdk/lib-dynamodb";
 import { getRegistryById, getPrimaryThreadMatcherRegistry, type ClusterRegistryEntry } from "../embedding/cluster-registry.js";
 import { threadEmbeddings } from "./schema.js";
@@ -71,12 +72,25 @@ const threadPk = (accountId: string, id: string) => `ACCT#${accountId}#ARC#${id}
 const ITEM_SK = "#";
 
 // ---------------------------------------------------------------------------
+// Drizzle error unwrapping — DrizzleQueryError wraps SDK errors, replacing
+// .message with the SQL text. Classification must inspect .cause to reach
+// the original SDK error's .name, .message, and .$metadata.
+// ---------------------------------------------------------------------------
+
+type ClassifiableError = { name?: string; message?: string; code?: string; $metadata?: { httpStatusCode?: number } };
+
+function classifiableError(e: unknown): ClassifiableError {
+  if (e instanceof DrizzleQueryError && e.cause) return e.cause as ClassifiableError;
+  return e as ClassifiableError;
+}
+
+// ---------------------------------------------------------------------------
 // Transient error detection
 // ---------------------------------------------------------------------------
 
 function isTransientError(e: unknown): boolean {
-  if (e == null || typeof e !== "object") return false;
-  const error = e as { name?: string; message?: string; code?: string; $metadata?: { httpStatusCode?: number } };
+  const error = classifiableError(e);
+  if (error == null || typeof error !== "object") return false;
 
   if (error.name === "StatementTimeoutException") return true;
   if (error.name === "ServiceUnavailableError") return true;
@@ -95,8 +109,9 @@ function isTransientError(e: unknown): boolean {
 }
 
 function isAuroraResuming(e: unknown): boolean {
-  if (e == null || typeof e !== "object") return false;
-  return (e as { message?: string }).message?.includes("resuming after being auto-paused") === true;
+  const error = classifiableError(e);
+  if (error == null || typeof error !== "object") return false;
+  return error.message?.includes("resuming after being auto-paused") === true;
 }
 
 // ---------------------------------------------------------------------------
