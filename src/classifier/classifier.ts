@@ -149,16 +149,31 @@ export class SignalClassifier {
     const TAG_FORMAT = /^[a-z0-9][a-z0-9-]{0,38}[a-z0-9]$/;
     const rawTags = Array.isArray(raw.tags) ? raw.tags : [];
     const validTags: string[] = [];
+    const unknownTags: string[] = [];
     for (const tag of rawTags) {
       if (typeof tag !== "string") continue;
       if (!TAG_FORMAT.test(tag) || tag.length < 2 || tag.length > 40) continue;
       if ((SPAM_TAGS as readonly string[]).includes(tag)) {
         validTags.push(tag);
       } else {
-        this.logger.track("Classifier received unknown tag from LLM — potential vocabulary expansion candidate.", { code: "classifier.unknown_tag", tag, signalId: input.signalId, accountId: input.accountId });
+        unknownTags.push(tag);
       }
     }
     const tags = validTags.slice(0, 10);
+
+    // When unknown tags appear, re-run classification with explanation request and log everything
+    if (unknownTags.length > 0) {
+      const explanationResponse = await this.classifyWithExplanations(input);
+      this.logger.track("Classifier received unknown tag from LLM — potential vocabulary expansion candidate.", {
+        code: "classifier.unknown_tag",
+        unknownTags,
+        signalId: input.signalId,
+        accountId: input.accountId,
+        input,
+        firstClassificationRaw: jsonText,
+        explanationClassificationRaw: explanationResponse,
+      });
+    }
 
     // Filter labels to subset of allowedLabels
     const labels = Array.isArray(raw.labels)
@@ -185,6 +200,42 @@ export class SignalClassifier {
       summary: raw.summary,
       labels,
     });
+  }
+
+  /**
+   * Re-runs classification with the same prompt + an additional instruction to explain each tag.
+   * Returns the raw text response (unparsed) for diagnostic logging.
+   */
+  private async classifyWithExplanations(input: ClassificationInput): Promise<string> {
+    const systemPrompt = buildSystemPrompt(WORKFLOW_REGISTRY);
+    const userMessage = buildUserMessage(input)
+      + "\n\nAdditionally, for every tag you assign, include a field \"tagExplanations\" in your JSON response: an object mapping each tag to a one-sentence explanation of why you assigned it.";
+
+    const requestBody = {
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userMessage },
+      ],
+      max_tokens: 2048,
+      temperature: 0.1,
+      enable_thinking: false,
+    };
+
+    try {
+      const response = await this.client.send(
+        new InvokeModelCommand({
+          modelId: CLASSIFICATION_MODEL_ID,
+          contentType: "application/json",
+          accept: "application/json",
+          body: new TextEncoder().encode(JSON.stringify(requestBody)),
+        }),
+      );
+      const responseBody = new TextDecoder().decode(response.body);
+      const result = JSON.parse(responseBody) as BedrockResponseWithTrace;
+      return result.choices?.[0]?.message?.content ?? responseBody;
+    } catch (e) {
+      return `[explanation call failed: ${e instanceof Error ? e.message : "unknown"}]`;
+    }
   }
 
   private handleGuardrailTrace(response: BedrockResponseWithTrace, signalId?: string, accountId?: string): void {

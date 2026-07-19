@@ -200,12 +200,7 @@ export const PaymentsData = z.object({
 
 export const AlertData = z.object({
   workflow: z.literal("alert"),
-  alertType: z.enum([
-    "suspicious_login", "new_device", "password_changed", "breach_notice",
-    "api_key_exposed", "account_locked", "fraud_alert",
-    "ci_failure", "deployment_failed", "error_spike",
-    "domain_expiry", "cert_expiry", "security_scan", "other",
-  ]),
+  alertType: z.string(),
   service: z.string(),
   severity: z.enum(["info", "warning", "critical"]).optional(),
   requiresAction: z.boolean(),

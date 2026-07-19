@@ -166,9 +166,16 @@ describe("workflow registry ↔ TypeScript type alignment", () => {
       });
 
       it("field types match", () => {
+        // Fields intentionally widened to string in TypeScript while keeping enum guidance in the registry prompt
+        const FLEXIBLE_ENUM_FIELDS = new Set(["alertType"]);
+
         for (const registryField of entry.fields) {
           const tsField = tsFieldMap.get(registryField.name);
           if (!tsField) continue;
+
+          if (FLEXIBLE_ENUM_FIELDS.has(registryField.name) && registryField.type === "enum" && tsField.type === "string") {
+            continue; // Intentionally widened — registry enums are LLM guidance only
+          }
 
           expect(
             registryField.type,
@@ -178,8 +185,12 @@ describe("workflow registry ↔ TypeScript type alignment", () => {
       });
 
       it("enum values match exactly", () => {
+        // Fields intentionally widened to string in TypeScript while keeping enum guidance in the registry prompt
+        const FLEXIBLE_ENUM_FIELDS = new Set(["alertType"]);
+
         for (const registryField of entry.fields) {
           if (registryField.type !== "enum") continue;
+          if (FLEXIBLE_ENUM_FIELDS.has(registryField.name)) continue;
 
           const tsField = tsFieldMap.get(registryField.name);
           if (!tsField || tsField.type !== "enum") continue;
