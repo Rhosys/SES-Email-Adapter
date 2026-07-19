@@ -141,7 +141,7 @@ describe("processSideEffect — correlation context", () => {
 
       const signal = makeSignal({
         id: "sgn-pong-123",
-        data: { matchedRules: [{ ruleId: "SR-17", actions: [{ type: "pong" }], labelsAdded: [] }] },
+        data: { matchedRules: [{ ruleId: "SR-15", actions: [{ type: "pong" }], labelsAdded: [] }] },
       });
       const thread = makeThread({ id: "arc-pong-456" });
       const payload: SideEffectPayload = { signal, thread };
