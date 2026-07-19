@@ -202,9 +202,9 @@ export class ThreadDatabase {
     }
   }
 
-  async listPreThreadSignals(accountId: string, _status: "quarantined", params: PageParams): Promise<Result<Page<Signal>, DbError>> {
+  async listPreThreadSignals(accountId: string, status: "quarantined" | "blocked", params: PageParams): Promise<Result<Page<Signal>, DbError>> {
     const limit = Math.min(params.limit ?? 20, 100);
-    const gsi1pk = `ACCT#${accountId}#QUARANTINED`;
+    const gsi1pk = status === "blocked" ? `ACCT#${accountId}#BLOCKED` : `ACCT#${accountId}#QUARANTINED`;
     try {
       const res = await dynamo.send(new QueryCommand({
         TableName: SIGNALS_TABLE,
