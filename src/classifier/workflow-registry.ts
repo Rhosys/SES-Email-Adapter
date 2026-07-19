@@ -96,7 +96,7 @@ export const WORKFLOW_REGISTRY: WorkflowDefinition[] = [
     name: "alert",
     description: "Security events specific to the user's account — suspicious login, fraud, CI failures, infra alerts — investigate now. NOT for mass-sent phishing awareness or 'think before you click' campaigns (use status:security_awareness).",
     fields: [
-      { name: "alertType", type: "enum", required: true, enumValues: ["suspicious_login", "new_device", "password_changed", "breach_notice", "api_key_exposed", "account_locked", "fraud_alert", "ci_failure", "deployment_failed", "error_spike", "domain_expiry", "cert_expiry", "security_scan", "other"] },
+      { name: "alertType", type: "enum", required: true, enumValues: ["suspicious_login", "new_device", "password_changed", "breach_notice", "api_key_exposed", "account_locked", "fraud_alert", "ci_failure", "deployment_failed", "error_spike", "domain_expiry", "cert_expiry", "security_scan", "other"], notes: "Common values listed — use a descriptive snake_case value if none fit" },
       { name: "service", type: "string", required: true },
       { name: "severity", type: "enum", required: false, enumValues: ["info", "warning", "critical"] },
       { name: "requiresAction", type: "boolean", required: true },
@@ -131,7 +131,7 @@ export const WORKFLOW_REGISTRY: WorkflowDefinition[] = [
   },
   {
     name: "notice",
-    description: "ToS updates, service notices, government notices, security awareness campaigns — passive informational, no action required. Use security_awareness for mass-sent phishing warnings, 'think before you click' emails, and generic credential-safety reminders from banks or service providers.",
+    description: "ToS updates, service notices, government notices, security awareness campaigns — passive informational where no user action is required and no consequence occurs from inaction. If the email requires the user to act (remove content, respond, pay, unlock) or warns of consequences for inaction (account frozen, service terminated), use 'alert' instead. Use security_awareness for mass-sent phishing warnings, 'think before you click' emails, and generic credential-safety reminders from banks or service providers.",
     fields: [
       { name: "noticeType", type: "enum", required: true, enumValues: ["terms_update", "privacy_policy", "data_processor", "cookie_policy", "compliance", "service_notice", "government", "account_notification", "security_awareness", "other"] },
       { name: "provider", type: "string", required: true },
