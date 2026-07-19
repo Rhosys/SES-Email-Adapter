@@ -94,7 +94,7 @@ export const WORKFLOW_REGISTRY: WorkflowDefinition[] = [
   },
   {
     name: "alert",
-    description: "Security events specific to the user's account — suspicious login, fraud, CI failures, infra alerts — investigate now. NOT for mass-sent phishing awareness or 'think before you click' campaigns (use status:security_awareness).",
+    description: "Events requiring the user to act — security (suspicious login, fraud, breach), infrastructure (CI failures, error spikes, cert/domain expiry), or account enforcement (frozen, suspended, compliance takedown, content removal deadline). If inaction leads to consequences, this is an alert.",
     fields: [
       { name: "alertType", type: "enum", required: true, enumValues: ["suspicious_login", "new_device", "password_changed", "breach_notice", "api_key_exposed", "account_locked", "fraud_alert", "ci_failure", "deployment_failed", "error_spike", "domain_expiry", "cert_expiry", "security_scan", "other"], notes: "Common values listed — use a descriptive snake_case value if none fit" },
       { name: "service", type: "string", required: true },
