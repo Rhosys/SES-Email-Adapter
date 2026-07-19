@@ -678,7 +678,6 @@ export type RuleActionType = (typeof RULE_ACTION_TYPES)[number];
 // System-assigned labels. Return type of assignSystemLabels() — adding here requires explicit approval.
 // The compile-time gate: assignSystemLabels() returns SystemLabel[], so any unlisted label is a type error.
 export type SystemLabel =
-  | "system:spam"
   | "system:sender:untrusted"
   | "system:replied"
   | "system:auth:security_alert"

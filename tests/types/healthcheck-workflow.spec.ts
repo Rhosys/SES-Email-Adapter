@@ -13,20 +13,20 @@ describe("healthcheck workflow type", () => {
     expect(WORKFLOWS).toContain("healthcheck");
   });
 
-  it("SR-18 (pong) condition does not match workflow healthcheck", () => {
-    const sr18 = SYSTEM_RULES.find(r => r.id === "SR-18");
-    expect(sr18).toBeDefined();
-    expect(sr18!.actions[0]!.type).toBe("pong");
+  it("SR-15 (pong) condition does not match workflow healthcheck", () => {
+    const sr15 = SYSTEM_RULES.find(r => r.id === "SR-15");
+    expect(sr15).toBeDefined();
+    expect(sr15!.actions[0]!.type).toBe("pong");
 
-    const condition = JSON.parse(sr18!.condition);
+    const condition = JSON.parse(sr15!.condition);
     const context = { signal: { workflow: "healthcheck" } };
     const result = jsonLogic.apply(condition, context);
     expect(result).toBe(false);
   });
 
-  it("SR-18 (pong) condition matches workflow test", () => {
-    const sr18 = SYSTEM_RULES.find(r => r.id === "SR-18");
-    const condition = JSON.parse(sr18!.condition);
+  it("SR-15 (pong) condition matches workflow test", () => {
+    const sr15 = SYSTEM_RULES.find(r => r.id === "SR-15");
+    const condition = JSON.parse(sr15!.condition);
     const context = { signal: { workflow: "test" } };
     const result = jsonLogic.apply(condition, context);
     expect(result).toBe(true);
