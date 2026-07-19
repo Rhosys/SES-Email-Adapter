@@ -490,9 +490,12 @@ describe("API", () => {
       expect(threadDb.listPreThreadSignals).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "quarantined", expect.any(Object));
     });
 
-    it("returns 400 when status is blocked (no longer supported)", async () => {
+    it("returns blocked signals when status=blocked", async () => {
+      const s = makeSignal({ status: "block_hidden" });
+      vi.mocked(threadDb.listPreThreadSignals).mockResolvedValueOnce(ok({ items: [s] }));
       const res = await req(app, "GET", `${A}/signals?status=blocked`);
-      expect(res.status).toBe(400);
+      expect(res.status).toBe(200);
+      expect(threadDb.listPreThreadSignals).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "blocked", expect.any(Object));
     });
 
     it("returns 400 when status param is missing", async () => {

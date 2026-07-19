@@ -62,16 +62,18 @@ export class SignalsApi {
       const accountId = c.req.param("accountId")!;
       const query = c.req.query();
       const status = query["status"];
-      if (status !== "quarantined" && status !== "quarantine_visible" && status !== "quarantine_hidden") {
-        return err(c, 400, "status query param must be 'quarantined', 'quarantine_visible', or 'quarantine_hidden'", "INVALID_STATUS");
+      const validStatuses = ["quarantined", "quarantine_visible", "quarantine_hidden", "blocked", "block_hidden", "block_reject"] as const;
+      if (!validStatuses.includes(status as typeof validStatuses[number])) {
+        return err(c, 400, "status query param must be one of: quarantined, quarantine_visible, quarantine_hidden, blocked, block_hidden, block_reject", "INVALID_STATUS");
       }
       const params: PageParams = {
         ...(query["cursor"] ? { cursor: query["cursor"] } : {}),
         ...(query["limit"] ? { limit: parseInt(query["limit"], 10) } : {}),
       };
-      const result = await threadDb.listPreThreadSignals(accountId, "quarantined", params);
-      if (result.isErr()) { logger.error("Failed to list quarantined signals.", { code: "api.signals.list_quarantined_failed", error: result.error }); return err(c, 500, "Internal Server Error"); }
-      const items = (status === "quarantine_visible" || status === "quarantine_hidden")
+      const partition = (status === "blocked" || status === "block_hidden" || status === "block_reject") ? "blocked" : "quarantined";
+      const result = await threadDb.listPreThreadSignals(accountId, partition, params);
+      if (result.isErr()) { logger.error("Failed to list signals.", { code: "api.signals.list_failed", error: result.error }); return err(c, 500, "Internal Server Error"); }
+      const items = (status === "quarantine_visible" || status === "quarantine_hidden" || status === "block_hidden" || status === "block_reject")
         ? result.value.items.filter(s => s.status === status)
         : result.value.items;
       const itemsWithUrls = contentCdnBaseUrl ? items.map(s => withAttachmentUrls(s, contentCdnBaseUrl)) : items;
