@@ -91,7 +91,7 @@ function makeAccountDbMock() {
     createRule: vi.fn().mockResolvedValue(ok({})),
     updateRule: vi.fn().mockResolvedValue(ok({})),
     deleteRule: vi.fn().mockResolvedValue(ok(undefined)),
-    upsertSystemRuleStatus: vi.fn().mockResolvedValue(ok(undefined)),
+    upsertSystemRuleOverride: vi.fn().mockResolvedValue(ok(undefined)),
     listDomains: vi.fn().mockResolvedValue(ok([])),
     getDomain: vi.fn().mockResolvedValue(ok(null)),
     createDomain: vi.fn().mockResolvedValue(ok({})),
