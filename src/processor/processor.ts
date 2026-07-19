@@ -1171,7 +1171,6 @@ export class SignalProcessor {
     const systemLabels = assignSystemLabels({
       workflow: classificationOutput.workflow,
       workflowData: classificationOutput.workflowData,
-      tags: classificationOutput.tags,
       senderETLD1,
       aliasSenderConfig: effectiveAliasSenderConfig,
       unknownSenderPolicy: effectiveFilterMode,

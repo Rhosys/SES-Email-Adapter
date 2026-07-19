@@ -6,7 +6,6 @@ function makeCtx(overrides: Partial<SystemLabelContext> = {}): SystemLabelContex
   return {
     workflow: "conversation",
     workflowData: { workflow: "conversation", sentiment: "neutral", requiresReply: false },
-    tags: [],
     senderETLD1: "amazon.com",
     aliasSenderConfig: { accountId: "acct-001", aliasAddress: "user@example.com", domain: "example.com", aliasName: "user", senderDomain: "amazon.com", policy: "allow", addedAt: "2024-01-01T00:00:00Z" },
     unknownSenderPolicy: "quarantine_visible",
@@ -86,22 +85,6 @@ describe("getETLD1 — eTLD+1 comparison for test detection", () => {
   it("different ccTLD registrations do not match", () => {
     // sender = amazon.co.uk, registered = amazon.com → different eTLD+1
     expect(getETLD1("user@amazon.co.uk")).not.toBe(getETLD1("amazon.com"));
-  });
-});
-
-// ---------------------------------------------------------------------------
-// assignSystemLabels — spam labels
-// ---------------------------------------------------------------------------
-
-describe("assignSystemLabels — spam labels", () => {
-  it("emits system:spam when tags contain phishing", () => {
-    const labels = assignSystemLabels(makeCtx({ tags: ["phishing"] }));
-    expect(labels).toContain("system:spam");
-  });
-
-  it("emits no spam label when tags are empty", () => {
-    const labels = assignSystemLabels(makeCtx({ tags: [] }));
-    expect(labels).not.toContain("system:spam");
   });
 });
 
@@ -189,12 +172,12 @@ describe("assignSystemLabels — security_alert", () => {
 // SYSTEM_RULES — SR-05
 // ---------------------------------------------------------------------------
 
-describe("SYSTEM_RULES — SR-06", () => {
-  it("SR-06 exists with condition matching system:auth:security_alert and action quarantine_hidden", () => {
-    const sr06 = SYSTEM_RULES.find(r => r.id === "SR-06");
-    expect(sr06).toBeDefined();
-    expect(JSON.parse(sr06!.condition)).toEqual({ "in": ["system:auth:security_alert", { "var": "thread.labels" }] });
-    expect(sr06!.actions).toEqual([{ type: "quarantine_hidden" }]);
-    expect(sr06!.status).toBe("enabled");
+describe("SYSTEM_RULES — SR-05", () => {
+  it("SR-05 exists with condition matching system:auth:security_alert and action quarantine_hidden", () => {
+    const sr05 = SYSTEM_RULES.find(r => r.id === "SR-05");
+    expect(sr05).toBeDefined();
+    expect(JSON.parse(sr05!.condition)).toEqual({ "in": ["system:auth:security_alert", { "var": "thread.labels" }] });
+    expect(sr05!.actions).toEqual([{ type: "quarantine_hidden" }]);
+    expect(sr05!.status).toBe("enabled");
   });
 });

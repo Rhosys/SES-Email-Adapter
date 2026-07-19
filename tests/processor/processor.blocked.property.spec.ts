@@ -126,14 +126,6 @@ describe("Blocked/quarantined signals never trigger saveArc", () => {
 
   const strategies: BlockStrategy[] = [
     {
-      label: "spam tags present → SR-04 quarantines",
-      classifier: makeClassifier({ tags: ["phishing"], workflow: "conversation" }),
-      contentSanitizer: makeContentSanitizer("spammer.com"),
-      unknownSenderPolicy: "quarantine_visible",
-      aliasSenderConfig: { accountId: TEST_ACCOUNT_ID, aliasAddress: "user@example.com", domain: "example.com", aliasName: "user", senderDomain: "spammer.com", policy: "allow", addedAt: "2024-01-01T00:00:00Z" },
-      rules: SYSTEM_RULES,
-    },
-    {
       label: "onboarding workflow → SR-02 blocks",
       classifier: makeClassifier({ workflow: "onboarding" as import("../../src/types/index.js").Workflow, workflowData: { workflow: "onboarding", service: "acme.com", onboardingType: "welcome" } as unknown as import("../../src/types/index.js").WorkflowData }),
       contentSanitizer: makeContentSanitizer("acme.com"),

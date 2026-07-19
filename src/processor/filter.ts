@@ -12,7 +12,6 @@ export function getETLD1(emailOrDomain: string): string {
 export interface SystemLabelContext {
   workflow: Workflow;
   workflowData: WorkflowData;
-  tags: string[];
   senderETLD1: string;
   aliasSenderConfig: AliasSender | null;
   unknownSenderPolicy: UnknownSenderPolicy;
@@ -24,8 +23,6 @@ export interface SystemLabelContext {
 // That type constraint is the mandatory review gate for adding new system labels.
 export function assignSystemLabels(ctx: SystemLabelContext): SystemLabel[] {
   const labels: SystemLabel[] = [];
-
-  if (ctx.tags.length > 0) labels.push("system:spam");
 
   const senderTrusted =
     ctx.aliasSenderConfig?.policy === "allow" ||
