@@ -315,7 +315,7 @@ describe("POST /signals/:id/quarantineResponse — sender disposition", () => {
   });
 
   it("approve → records the sender allow unconditionally, even for a content-rule quarantine", async () => {
-    // Quarantined by a real content rule (SR-05 spam). The user explicitly approved this sender,
+    // Quarantined by a content rule. The user explicitly approved this sender,
     // so the sender is allowed regardless of why it was quarantined — no rule inspection.
     const signal = makeSignal({
       data: {
