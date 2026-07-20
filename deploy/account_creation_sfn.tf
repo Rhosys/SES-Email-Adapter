@@ -59,6 +59,15 @@ resource "aws_cloudwatch_log_group" "account_creation_sfn" {
 
 # ---------------------------------------------------------------------------
 # State machine definition
+#
+# IMPORTANT — updating this definition does NOT affect executions already in
+# flight: AWS Step Functions freezes the definition an execution started
+# with, so an account whose execution is already past a given Wait state when
+# you deploy a change will never see a state you inserted earlier in the
+# chain. When moving logic from one step to another (as SetupDefaults did,
+# splitting work out of FirstFollowup), decide explicitly whether in-flight
+# executions at deploy time are allowed to miss that logic, or whether it
+# needs to stay duplicated somewhere they'll still reach until they drain.
 # ---------------------------------------------------------------------------
 
 resource "aws_sfn_state_machine" "account_creation" {
@@ -88,9 +97,10 @@ resource "aws_sfn_state_machine" "account_creation" {
       # within its first hour rather than waiting the full 7 days for
       # FirstFollowup. Best-effort: a failure here falls through to
       # FirstFollowupWait rather than TaskFailed, so it never blocks the
-      # rest of onboarding (followup email, cleanup, trial check) —
-      # FirstFollowup below still retries the same idempotent setup as a
-      # safety net.
+      # rest of onboarding (followup email, cleanup, trial check). No
+      # safety-net retry elsewhere in this chain — see the definition-freeze
+      # note above: accounts already in flight when this state was
+      # introduced simply won't get a default set.
       SetupDefaults = {
         Type     = "Task"
         Resource = "${aws_lambda_function.main.arn}:production"
