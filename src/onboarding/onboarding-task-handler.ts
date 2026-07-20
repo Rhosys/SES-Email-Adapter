@@ -52,10 +52,12 @@ export class OnboardingTaskHandler {
     private readonly emailService: EmailService,
   ) {}
 
-  // Runs immediately at account creation (SetupDefaults state, before the
-  // 7-day InitialWait) so a new account has a working digest/calendar
-  // forwarding target from minute one, not just once FirstFollowup fires a
-  // week later. ensureDefaultForwardingTarget already swallows its own DB
+  // Runs an hour into account creation (SetupDefaults state, after the
+  // 1-hour InitialWait but well before the 7-day FirstFollowupWait) so a
+  // new account has a working digest/calendar forwarding target within its
+  // first hour, not just once FirstFollowup fires a week later. The wait
+  // gives other first-level account-creation work a chance to settle before
+  // this runs. ensureDefaultForwardingTarget already swallows its own DB
   // errors (logs + returns), so this always resolves ok — a hiccup here
   // should never fail the Step Function and block the rest of onboarding.
   async handleSetupDefaults(accountId: string, email: string): Promise<Result<void, never>> {
