@@ -73,8 +73,34 @@ resource "aws_sfn_state_machine" "account_creation" {
   }
 
   definition = jsonencode({
-    StartAt = "InitialWait"
+    StartAt = "SetupDefaults"
     States = {
+      # Runs immediately (not gated behind InitialWait) so a new account has a
+      # working digest/calendar forwarding target from minute one. Best-effort:
+      # a failure here falls through to InitialWait rather than TaskFailed, so
+      # it never blocks the rest of onboarding (followup email, cleanup, trial
+      # check) — FirstFollowup below still retries the same idempotent setup
+      # as a safety net.
+      SetupDefaults = {
+        Type     = "Task"
+        Resource = "${aws_lambda_function.main.arn}:production"
+        Parameters = {
+          "context.$" = "$$"
+        }
+        ResultPath = "$.setupDefaultsResult"
+        Next       = "InitialWait"
+        Retry = [{
+          ErrorEquals     = ["States.ALL"]
+          IntervalSeconds = 2
+          MaxAttempts     = 3
+          BackoffRate     = 2
+        }]
+        Catch = [{
+          ErrorEquals = ["States.ALL"]
+          Next        = "InitialWait"
+          ResultPath  = "$.setupDefaultsError"
+        }]
+      }
       InitialWait = {
         Type    = "Wait"
         Seconds = 604800

@@ -52,8 +52,20 @@ export class OnboardingTaskHandler {
     private readonly emailService: EmailService,
   ) {}
 
+  // Runs immediately at account creation (SetupDefaults state, before the
+  // 7-day InitialWait) so a new account has a working digest/calendar
+  // forwarding target from minute one, not just once FirstFollowup fires a
+  // week later. ensureDefaultForwardingTarget already swallows its own DB
+  // errors (logs + returns), so this always resolves ok — a hiccup here
+  // should never fail the Step Function and block the rest of onboarding.
+  async handleSetupDefaults(accountId: string, email: string): Promise<Result<void, never>> {
+    await this.ensureDefaultForwardingTarget(accountId, email);
+    return ok(undefined);
+  }
+
   async handleFollowup(accountId: string, email: string): Promise<Result<void, DbError | EmailServiceError>> {
-    // Auto-create verified forwarding target for the user's email (idempotent)
+    // Safety net for accounts/executions started before SetupDefaults existed —
+    // idempotent (ensureDefaultForwardingTarget only ever fills in unset fields).
     await this.ensureDefaultForwardingTarget(accountId, email);
     return this.handleProgressTask(accountId, email, "onboarding.followup");
   }
