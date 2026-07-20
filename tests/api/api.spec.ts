@@ -107,7 +107,7 @@ function makeAccountDb() {
     createRule: vi.fn().mockResolvedValue(ok(makeRule())),
     updateRule: vi.fn().mockResolvedValue(ok(makeRule())),
     deleteRule: vi.fn().mockResolvedValue(ok(undefined)),
-    upsertSystemRuleStatus: vi.fn().mockResolvedValue(ok(undefined)),
+    upsertSystemRuleOverride: vi.fn().mockResolvedValue(ok(undefined)),
     listDomains: vi.fn().mockResolvedValue(ok([])),
     getDomain: vi.fn().mockResolvedValue(ok(null)),
     createDomain: vi.fn().mockResolvedValue(ok(makeDomain())),
@@ -855,17 +855,42 @@ describe("API", () => {
       vi.mocked(accountDb.listRules).mockResolvedValueOnce(ok([makeRule({ id: "SR-02", accountId: "SYSTEM" })]));
       const res = await req(app, "PATCH", `${A}/rules/SR-02`, { body: { status: "disabled" } });
       expect(res.status).toBe(200);
-      expect(accountDb.upsertSystemRuleStatus).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "SR-02", "disabled");
+      expect(accountDb.upsertSystemRuleOverride).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "SR-02", { status: "disabled", priorityOrder: undefined });
       expect(accountDb.updateRule).not.toHaveBeenCalled();
     });
 
-    it("rejects mutating a system rule's non-status fields", async () => {
+    it("reorders a system rule via priorityOrder without touching updateRule", async () => {
+      vi.mocked(accountDb.listRules).mockResolvedValueOnce(ok([makeRule({ id: "SR-02", accountId: "SYSTEM", priorityOrder: 150 })]));
+      const res = await req(app, "PATCH", `${A}/rules/SR-02`, { body: { priorityOrder: 1850 } });
+      expect(res.status).toBe(200);
+      expect(accountDb.upsertSystemRuleOverride).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "SR-02", { status: undefined, priorityOrder: 1850 });
+      expect(accountDb.updateRule).not.toHaveBeenCalled();
+      const body = await res.json() as Rule;
+      expect(body.priorityOrder).toBe(1850);
+    });
+
+    it("allows status and priorityOrder together on a system rule", async () => {
+      vi.mocked(accountDb.listRules).mockResolvedValueOnce(ok([makeRule({ id: "SR-02", accountId: "SYSTEM", priorityOrder: 150 })]));
+      const res = await req(app, "PATCH", `${A}/rules/SR-02`, { body: { status: "disabled", priorityOrder: 1850 } });
+      expect(res.status).toBe(200);
+      expect(accountDb.upsertSystemRuleOverride).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "SR-02", { status: "disabled", priorityOrder: 1850 });
+    });
+
+    it("rejects mutating a system rule's non-status/priorityOrder fields", async () => {
       vi.mocked(accountDb.listRules).mockResolvedValueOnce(ok([makeRule({ id: "SR-02", accountId: "SYSTEM" })]));
       const res = await req(app, "PATCH", `${A}/rules/SR-02`, { body: { name: "Hijacked" } });
       expect(res.status).toBe(403);
       const body = await res.json() as { errorCode?: string };
       expect(body.errorCode).toBe("SYSTEM_RULE_IMMUTABLE");
-      expect(accountDb.upsertSystemRuleStatus).not.toHaveBeenCalled();
+      expect(accountDb.upsertSystemRuleOverride).not.toHaveBeenCalled();
+    });
+
+    it("rejects a system rule PATCH with no recognized fields", async () => {
+      vi.mocked(accountDb.listRules).mockResolvedValueOnce(ok([makeRule({ id: "SR-02", accountId: "SYSTEM" })]));
+      const res = await req(app, "PATCH", `${A}/rules/SR-02`, { body: {} });
+      expect(res.status).toBe(403);
+      const body = await res.json() as { errorCode?: string };
+      expect(body.errorCode).toBe("SYSTEM_RULE_IMMUTABLE");
     });
   });
 

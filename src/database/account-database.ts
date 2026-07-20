@@ -629,9 +629,12 @@ export class AccountDatabase {
         ExpressionAttributeValues: { ":pk": ruleGsi1pk(accountId), ":prefix": "RULE#" },
       }));
       const ddbRules = (res.Items ?? []) as Rule[];
-      // Merge SYSTEM_RULES (code-defined) with per-account status overrides stored in DDB
-      const overrideById = new Map(ddbRules.filter(r => r.id.startsWith("SR-")).map(r => [r.id, r.status]));
-      const systemRules = SYSTEM_RULES.map(sr => overrideById.has(sr.id) ? { ...sr, status: overrideById.get(sr.id)! } : sr);
+      // Merge SYSTEM_RULES (code-defined) with per-account status/priorityOrder overrides stored in DDB
+      const overrideById = new Map(ddbRules.filter(r => r.id.startsWith("SR-")).map(r => [r.id, r]));
+      const systemRules = SYSTEM_RULES.map(sr => {
+        const override = overrideById.get(sr.id);
+        return override ? { ...sr, status: override.status, priorityOrder: override.priorityOrder } : sr;
+      });
       const userRules = ddbRules.filter(r => !r.id.startsWith("SR-"));
       return ok([...systemRules, ...userRules].sort((a, b) => a.priorityOrder - b.priorityOrder));
     } catch (e) {
@@ -646,16 +649,28 @@ export class AccountDatabase {
     return ok(allResult.value.filter(r => r.status === "enabled"));
   }
 
-  async upsertSystemRuleStatus(accountId: string, ruleId: string, status: RuleStatus): Promise<Result<void, DbError>> {
+  async upsertSystemRuleOverride(accountId: string, ruleId: string, data: { status?: RuleStatus | undefined; priorityOrder?: number | undefined }): Promise<Result<void, DbError>> {
     const sr = SYSTEM_RULES.find(r => r.id === ruleId);
     if (!sr) return err(dbError(new Error(`Unknown system rule: ${ruleId}`)));
     try {
+      // Read the existing override (if any) first — a blind PUT from the code-defined
+      // baseline would silently drop whichever field this call isn't setting (e.g. a
+      // status-only update overwriting a prior priorityOrder override back to default).
+      const existingRes = await dynamo.send(new GetCommand({
+        TableName: ACCOUNTS_TABLE,
+        Key: { pk: pk(accountId), sk: `RULE#${ruleId}` },
+      }));
+      const existing = existingRes.Item as Rule | undefined;
+
+      const status = data.status ?? existing?.status ?? sr.status;
+      const priorityOrder = data.priorityOrder ?? existing?.priorityOrder ?? sr.priorityOrder;
+
       await dynamo.send(new PutCommand({
         TableName: ACCOUNTS_TABLE,
         Item: {
-          ...sr, accountId, status,
+          ...sr, accountId, status, priorityOrder,
           pk: pk(accountId), sk: `RULE#${ruleId}`,
-          gsi1pk: ruleGsi1pk(accountId), gsi1sk: ruleGsi1sk(status, sr.priorityOrder, ruleId),
+          gsi1pk: ruleGsi1pk(accountId), gsi1sk: ruleGsi1sk(status, priorityOrder, ruleId),
         },
       }));
       return ok(undefined);
