@@ -66,9 +66,10 @@ export class OnboardingTaskHandler {
   }
 
   async handleFollowup(accountId: string, email: string): Promise<Result<void, DbError | EmailServiceError>> {
-    // Safety net for accounts/executions started before SetupDefaults existed —
-    // idempotent (ensureDefaultForwardingTarget only ever fills in unset fields).
-    await this.ensureDefaultForwardingTarget(accountId, email);
+    // Deliberately does NOT call ensureDefaultForwardingTarget — that's
+    // handleSetupDefaults' job now. See the state-machine-definition-freeze
+    // note in deploy/account_creation_sfn.tf for why accounts already
+    // in-flight when SetupDefaults was introduced won't get a default here.
     return this.handleProgressTask(accountId, email, "onboarding.followup");
   }
 
