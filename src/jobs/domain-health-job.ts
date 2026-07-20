@@ -67,7 +67,7 @@ export class DomainHealthJob {
         }
 
         if (!allHealthy) {
-          this.logger.track("[Action Required] Domain has failing DNS records. Account owner needs to be notified.", {
+          this.logger.track(`[Action Required] Domain has failing DNS records. Account owner needs to be notified. domain=${domain.domain}, accountId=${accountId}`, {
             code: "domain_health.dns_alert_needed",
             accountId,
             domain: domain.domain,
