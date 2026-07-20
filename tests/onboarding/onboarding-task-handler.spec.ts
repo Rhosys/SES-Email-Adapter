@@ -66,6 +66,70 @@ function createMockEmailService() {
 }
 
 // ---------------------------------------------------------------------------
+// handleSetupDefaults
+// ---------------------------------------------------------------------------
+
+describe("OnboardingTaskHandler.handleSetupDefaults", () => {
+  let logger: ReturnType<typeof createMockLogger>;
+  let emailService: ReturnType<typeof createMockEmailService>;
+
+  beforeEach(() => {
+    logger = createMockLogger();
+    emailService = createMockEmailService();
+  });
+
+  it("auto-creates a verified forwarding target from the signup email and sets it as the digest/calendar default", async () => {
+    const accountWithNoDefaults: Account = {
+      id: "acc-test", name: "Test Account", createdAt: "2025-01-01T00:00:00Z", updatedAt: "2025-01-01T00:00:00Z",
+    };
+    const store = createMockStore({
+      getAccount: vi.fn().mockResolvedValue(ok(accountWithNoDefaults)),
+      getForwardingTarget: vi.fn().mockResolvedValue(ok(null)),
+    });
+    const handler = new OnboardingTaskHandler(store.accountDb, store.threadDb, logger, emailService);
+
+    const result = await handler.handleSetupDefaults("acc-test", "user@example.com");
+
+    expect(result.isOk()).toBe(true);
+    expect(store.accountDb.saveForwardingTarget).toHaveBeenCalledWith(expect.objectContaining({
+      id: "user@example.com", accountId: "acc-test", target: "user@example.com", type: "email", status: "verified",
+    }));
+    expect(store.accountDb.updateAccount).toHaveBeenCalledWith("acc-test", {
+      digest: { frequency: "monthly", forwardingTargetId: "user@example.com" },
+      defaultCalendarInviteForwardingTargetId: "user@example.com",
+    });
+  });
+
+  it("does not override an already-configured digest/calendar default", async () => {
+    // makeAccount()'s defaults already set digest + defaultCalendarInviteForwardingTargetId.
+    const store = createMockStore({
+      getForwardingTarget: vi.fn().mockResolvedValue(ok({
+        id: "user@example.com", accountId: "acc-test", target: "user@example.com", type: "email", status: "verified",
+        createdAt: "2025-01-01T00:00:00Z",
+      })),
+    });
+    const handler = new OnboardingTaskHandler(store.accountDb, store.threadDb, logger, emailService);
+
+    const result = await handler.handleSetupDefaults("acc-test", "user@example.com");
+
+    expect(result.isOk()).toBe(true);
+    expect(store.accountDb.saveForwardingTarget).not.toHaveBeenCalled();
+    expect(store.accountDb.updateAccount).not.toHaveBeenCalled();
+  });
+
+  it("always resolves ok, even when the underlying DB lookup fails", async () => {
+    const store = createMockStore({
+      getForwardingTarget: vi.fn().mockResolvedValue(err(dbError(new Error("boom")))),
+    });
+    const handler = new OnboardingTaskHandler(store.accountDb, store.threadDb, logger, emailService);
+
+    const result = await handler.handleSetupDefaults("acc-test", "user@example.com");
+
+    expect(result.isOk()).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // handleFollowup
 // ---------------------------------------------------------------------------
 
