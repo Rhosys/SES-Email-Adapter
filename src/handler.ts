@@ -378,6 +378,7 @@ async function handlerInner(
     }
 
     const processors: Record<string, () => Promise<unknown>> = {
+      "email-catcher-AccountCreation|SetupDefaults": () => onboardingHandler.handleSetupDefaults(payload.accountId, payload.email),
       "email-catcher-AccountCreation|FirstFollowup": () => onboardingHandler.handleFollowup(payload.accountId, payload.email),
       "email-catcher-AccountCreation|Cleanup": () => onboardingHandler.handleCleanup(payload.accountId, payload.email),
       "email-catcher-AccountCreation|TrialCheck": () => onboardingHandler.handleTrialCheck(payload.accountId, context.Execution.StartTime),
