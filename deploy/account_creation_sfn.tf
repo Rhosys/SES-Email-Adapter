@@ -73,14 +73,24 @@ resource "aws_sfn_state_machine" "account_creation" {
   }
 
   definition = jsonencode({
-    StartAt = "SetupDefaults"
+    StartAt = "InitialWait"
     States = {
-      # Runs immediately (not gated behind InitialWait) so a new account has a
-      # working digest/calendar forwarding target from minute one. Best-effort:
-      # a failure here falls through to InitialWait rather than TaskFailed, so
-      # it never blocks the rest of onboarding (followup email, cleanup, trial
-      # check) — FirstFollowup below still retries the same idempotent setup
-      # as a safety net.
+      # A short wait before SetupDefaults runs, not an instant Task at
+      # execution start — gives other first-level account-creation work
+      # (domain/alias provisioning etc. kicked off around the same time)
+      # a chance to settle first, rather than racing it.
+      InitialWait = {
+        Type    = "Wait"
+        Seconds = 3600
+        Next    = "SetupDefaults"
+      }
+      # So a new account has a working digest/calendar forwarding target
+      # within its first hour rather than waiting the full 7 days for
+      # FirstFollowup. Best-effort: a failure here falls through to
+      # FirstFollowupWait rather than TaskFailed, so it never blocks the
+      # rest of onboarding (followup email, cleanup, trial check) —
+      # FirstFollowup below still retries the same idempotent setup as a
+      # safety net.
       SetupDefaults = {
         Type     = "Task"
         Resource = "${aws_lambda_function.main.arn}:production"
@@ -88,7 +98,7 @@ resource "aws_sfn_state_machine" "account_creation" {
           "context.$" = "$$"
         }
         ResultPath = "$.setupDefaultsResult"
-        Next       = "InitialWait"
+        Next       = "FirstFollowupWait"
         Retry = [{
           ErrorEquals     = ["States.ALL"]
           IntervalSeconds = 2
@@ -97,11 +107,13 @@ resource "aws_sfn_state_machine" "account_creation" {
         }]
         Catch = [{
           ErrorEquals = ["States.ALL"]
-          Next        = "InitialWait"
+          Next        = "FirstFollowupWait"
           ResultPath  = "$.setupDefaultsError"
         }]
       }
-      InitialWait = {
+      # The original 7-day wait before the first followup nudge email —
+      # unchanged duration, just no longer the very first state.
+      FirstFollowupWait = {
         Type    = "Wait"
         Seconds = 604800
         Next    = "FirstFollowup"
