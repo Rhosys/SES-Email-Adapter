@@ -12,6 +12,7 @@ import { dynamo, SIGNALS_TABLE } from "../../database/shared.js";
 import { createSearchDatabase } from "../../database/thread-matcher.js";
 import { getRegistryById } from "../../embedding/cluster-registry.js";
 import { generateEmbeddingFromS3 } from "../../embedding/generate-embedding-from-s3.js";
+import { effectiveEmailKey } from "../../embedding/retention-tier.js";
 import { BedrockEmbeddingGenerator } from "../../embedding/embedding-generator.js";
 import { BedrockRuntimeClient } from "@aws-sdk/client-bedrock-runtime";
 import { ThreadDatabase } from "../../database/thread-database.js";
@@ -120,7 +121,7 @@ export class ReindexWorker {
     targetRegistryId: string,
     modelId: string,
   ): Promise<Result<void, { signalId: string; cause: unknown }>> {
-    const signal = item as unknown as Pick<Signal, "id" | "signalLookupId" | "accountId" | "threadId"> & { data?: Pick<EmailSignalData, "recipientAddress" | "embeddings" | "s3Key"> };
+    const signal = item as unknown as Pick<Signal, "id" | "signalLookupId" | "accountId" | "threadId" | "createdAt"> & { data?: Pick<EmailSignalData, "recipientAddress" | "embeddings" | "s3Key"> };
 
     if (!signal.data) {
       return err({ signalId: signal.id ?? "unknown", cause: "no data property on item" });
@@ -133,7 +134,7 @@ export class ReindexWorker {
       return this.pureCopyToAurora(signal as Pick<Signal, "id" | "accountId" | "threadId"> & { data: Pick<EmailSignalData, "recipientAddress"> }, vector, targetRegistryId);
     }
 
-    return this.regenerateFromS3(signal as Pick<Signal, "id" | "signalLookupId" | "accountId" | "threadId"> & { data: Pick<EmailSignalData, "recipientAddress" | "s3Key"> }, targetRegistryId, modelId);
+    return this.regenerateFromS3(signal as Pick<Signal, "id" | "signalLookupId" | "accountId" | "threadId" | "createdAt"> & { data: Pick<EmailSignalData, "recipientAddress" | "s3Key"> }, targetRegistryId, modelId);
   }
 
   // ---------------------------------------------------------------------------
@@ -164,7 +165,7 @@ export class ReindexWorker {
   // ---------------------------------------------------------------------------
 
   private async regenerateFromS3(
-    signal: Pick<Signal, "id" | "signalLookupId" | "accountId" | "threadId"> & { data: Pick<EmailSignalData, "recipientAddress" | "s3Key"> },
+    signal: Pick<Signal, "id" | "signalLookupId" | "accountId" | "threadId" | "createdAt"> & { data: Pick<EmailSignalData, "recipientAddress" | "s3Key"> },
     targetRegistryId: string,
     modelId: string,
   ): Promise<Result<void, { signalId: string; cause: unknown }>> {
@@ -173,7 +174,9 @@ export class ReindexWorker {
     }
 
     const result = await generateEmbeddingFromS3({
-      s3Key: signal.data.s3Key,
+      // Reindex touches historical signals; resolve the saved/ copy by age since
+      // the emails/ object may already have been expired by the lifecycle rule.
+      s3Key: effectiveEmailKey(signal.data.s3Key, signal.createdAt),
       accountId: signal.accountId,
       recipientAddress: signal.data.recipientAddress,
       modelId,

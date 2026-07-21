@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { DateTime } from "luxon";
 import {
   getRetentionForPlan,
   getUserDisplayedRetention,
@@ -9,7 +10,39 @@ import {
   RetentionDuration,
   RETENTION_TAGS,
   S3_PREFIXES,
+  toSavedKey,
+  effectiveEmailKey,
+  LIFECYCLE_EXPIRY_DAYS,
 } from "../../src/embedding/retention-tier.js";
+
+// ---------------------------------------------------------------------------
+// Tests for S3 key derivation (saved/ copy + age-based read resolution)
+// ---------------------------------------------------------------------------
+
+describe("toSavedKey", () => {
+  it("strips the emails/ prefix and nests under saved/", () => {
+    expect(toSavedKey(`${S3_PREFIXES.EMAILS}2025/01/abc.eml`)).toBe(`${S3_PREFIXES.SAVED}2025/01/abc.eml`);
+  });
+
+  it("maps keys without the emails/ prefix under saved/ as-is", () => {
+    expect(toSavedKey("other/abc.eml")).toBe(`${S3_PREFIXES.SAVED}other/abc.eml`);
+  });
+});
+
+describe("effectiveEmailKey", () => {
+  const now = DateTime.utc(2030, 1, 1);
+  const s3Key = "emails/2025/01/abc.eml";
+
+  it("returns the emails/ key for signals within the lifecycle horizon", () => {
+    const createdAt = now.minus({ days: LIFECYCLE_EXPIRY_DAYS - 1 }).toISO()!;
+    expect(effectiveEmailKey(s3Key, createdAt, now)).toBe(s3Key);
+  });
+
+  it("resolves to the saved/ copy for signals past the lifecycle horizon", () => {
+    const createdAt = now.minus({ days: LIFECYCLE_EXPIRY_DAYS + 1 }).toISO()!;
+    expect(effectiveEmailKey(s3Key, createdAt, now)).toBe("saved/2025/01/abc.eml");
+  });
+});
 
 // ---------------------------------------------------------------------------
 // Tests for getRetentionForPlan

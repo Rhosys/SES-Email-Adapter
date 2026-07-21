@@ -1530,16 +1530,8 @@ export class SignalProcessor {
         return;
       }
 
-      const { s3Key: updatedS3Key } = retentionApplyResult.value;
-
-      // Persist updated s3Key if copy-to-saved changed it
-      if (updatedS3Key !== signal.data.s3Key) {
-        const retentionSaveResult = await this.threadDb.updateSignalRetention(signal.accountId, signal.signalLookupId, { s3Key: updatedS3Key });
-        if (retentionSaveResult.isErr()) {
-          this.logger.warn("Failed to persist updated s3Key on signal record. The DynamoDB update returned an error. The S3 retention is applied but the signal record won't reflect the new key.", { code: "processor.retention_metadata_save_failed", signal, thread, error: retentionSaveResult.error });
-        }
-      }
-
+      // The stored s3Key always points at emails/{key}; copy-to-saved keeps a
+      // durable saved/ copy that readers resolve by age. No signal write needed.
       this.logger.trackPoint("s3_retention_complete");
     } catch (e) {
       this.logger.warn("S3 retention threw an unexpected error. The signal will use the default lifecycle rule. Processing continues unaffected.", { code: "processor.s3_retention_unexpected", signal, thread, error: e });

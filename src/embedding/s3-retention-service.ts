@@ -1,5 +1,5 @@
 import { S3Client, PutObjectTaggingCommand, CopyObjectCommand } from "@aws-sdk/client-s3";
-import { S3_PREFIXES } from "./retention-tier.js";
+import { toSavedKey } from "./retention-tier.js";
 
 // ---------------------------------------------------------------------------
 // S3 Retention Service
@@ -19,9 +19,15 @@ export interface S3RetentionService {
 /**
  * Applies plan-driven retention to an S3 object after signal processing.
  *
- * - Free/Beta (s3Tag set): PutObjectTagging with retention-tier=P1Y on inbox/{key}
- * - Paid/Lifetime (s3Tag null, copyToSaved false): no-op, return original s3Key
- * - Premium/Internal (copyToSaved true): CopyObject inbox/{key} → saved/{key}, return new s3Key
+ * - Free/Beta (s3Tag set): PutObjectTagging with retention-tier=P1Y on emails/{key}
+ * - Paid/Lifetime (s3Tag null, copyToSaved false): no-op
+ * - Premium/Internal (copyToSaved true): CopyObject emails/{key} → saved/{key} for
+ *   durability past the 5-year lifecycle expiry
+ *
+ * The signal's stored s3Key is never changed — it always points at emails/{key}.
+ * Readers resolve the saved/ copy at read time via effectiveEmailKey once the
+ * emails/ object has aged past the lifecycle horizon. Always returns the original
+ * s3Key so callers never persist a rewritten key.
  */
 export class S3RetentionServiceImpl implements S3RetentionService {
   private readonly s3: S3Client;
@@ -46,32 +52,19 @@ export class S3RetentionServiceImpl implements S3RetentionService {
       return { s3Key };
     }
 
-    // Premium/Internal: copy from inbox/ to saved/
+    // Premium/Internal: copy emails/ → saved/ for durability past lifecycle expiry.
+    // The stored s3Key is left unchanged; readers resolve saved/ by age.
     if (input.copyToSaved) {
-      const objectName = stripInboxPrefix(s3Key);
-      const newKey = `${S3_PREFIXES.SAVED}${objectName}`;
-
       await this.s3.send(new CopyObjectCommand({
         Bucket: this.bucket,
         CopySource: `${this.bucket}/${s3Key}`,
-        Key: newKey,
+        Key: toSavedKey(s3Key),
       }));
 
-      return { s3Key: newKey };
+      return { s3Key };
     }
 
     // Paid/Lifetime: no-op, default 5-year lifecycle applies
     return { s3Key };
   }
-}
-
-/**
- * Strips the 'inbox/' prefix from an S3 key to get the bare object name.
- * If the key doesn't start with 'inbox/', returns it unchanged.
- */
-function stripInboxPrefix(key: string): string {
-  if (key.startsWith(S3_PREFIXES.INBOX)) {
-    return key.slice(S3_PREFIXES.INBOX.length);
-  }
-  return key;
 }
