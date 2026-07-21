@@ -19,7 +19,6 @@ export function makeThreadDbMock(): ThreadDatabase {
     getSignalByMessageId: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
     saveSignal: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     updateSignalSendStatus: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    updateSignalRetention: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     getThread: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
     listSignals: vi.fn().mockReturnValue(Promise.resolve(ok({ items: [] }))),
     findSignalByEmailMessageId: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
