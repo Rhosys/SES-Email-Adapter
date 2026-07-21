@@ -552,41 +552,6 @@ export class ThreadDatabase {
     }
   }
 
-  async updateSignalRetention(
-    accountId: string,
-    signalLookupId: string,
-    update: { s3Key?: string; retentionDuration?: string },
-  ): Promise<Result<void, DbError>> {
-    const setParts: string[] = [];
-    const exprValues: Record<string, unknown> = {};
-    const exprNames: Record<string, string> = {};
-
-    if (update.s3Key !== undefined) {
-      setParts.push("#data.s3Key = :s3Key");
-      exprValues[":s3Key"] = update.s3Key;
-      exprNames["#data"] = "data";
-    }
-    if (update.retentionDuration !== undefined) {
-      setParts.push("retentionDuration = :rd");
-      exprValues[":rd"] = update.retentionDuration;
-    }
-
-    if (setParts.length === 0) return ok(undefined);
-
-    try {
-      await dynamo.send(new UpdateCommand({
-        TableName: SIGNALS_TABLE,
-        Key: { pk: sigPk(accountId, signalLookupId), sk: ITEM_SK },
-        UpdateExpression: `SET ${setParts.join(", ")}`,
-        ExpressionAttributeValues: exprValues,
-        ...(Object.keys(exprNames).length ? { ExpressionAttributeNames: exprNames } : {}),
-      }));
-      return ok(undefined);
-    } catch (e) {
-      return err(dbError(e));
-    }
-  }
-
   // ---------------------------------------------------------------------------
   // Onboarding — check if account has received at least one signal
   // ---------------------------------------------------------------------------
