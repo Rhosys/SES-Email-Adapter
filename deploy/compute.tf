@@ -28,10 +28,24 @@ resource "aws_iam_role_policy" "lambda_permissions" {
         Resource = "${aws_cloudwatch_log_group.shared.arn}:*"
       },
       {
-        Sid      = "S3ReadEmails"
+        Sid    = "S3ReadEmails"
+        Effect = "Allow"
+        Action = ["s3:GetObject"]
+        Resource = [
+          "${aws_s3_bucket.emails.arn}/emails/*",
+          "${aws_s3_bucket.emails.arn}/saved/*",
+        ]
+      },
+      {
+        # Plan-driven retention: free/beta tag the inbox object; premium/internal
+        # CopyObject emails/{key} → saved/{key} (needs PutObject on the destination).
+        Sid      = "S3RetentionEmails"
         Effect   = "Allow"
-        Action   = ["s3:GetObject"]
-        Resource = "${aws_s3_bucket.emails.arn}/emails/*"
+        Action   = ["s3:PutObject", "s3:PutObjectTagging"]
+        Resource = [
+          "${aws_s3_bucket.emails.arn}/emails/*",
+          "${aws_s3_bucket.emails.arn}/saved/*",
+        ]
       },
       {
         Sid    = "DynamoDB"
