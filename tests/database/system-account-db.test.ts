@@ -19,13 +19,13 @@ describe("SystemAccountDb", () => {
   });
 
   describe("getAccount", () => {
-    it("returns Account with id SYSTEM and billing plan Internal", () => {
+    it("returns Account with id SYSTEM and billing plan Free", () => {
       const result = db.getAccount();
       expect(result.isOk()).toBe(true);
 
       const account = result._unsafeUnwrap();
       expect(account.id).toBe(SYSTEM_ACCOUNT_ID);
-      expect(account.billingPlan).toBe("Internal");
+      expect(account.billingPlan).toBe("Free");
       expect(account.filtering?.defaultUnknownSenderPolicy).toBe("allow_all");
       expect(account.digest).toBeNull();
       expect(account.retentionDuration).toBe("P7D");

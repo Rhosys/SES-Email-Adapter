@@ -1507,6 +1507,11 @@ export class SignalProcessor {
    * must not alter the processing outcome or prevent Aurora/side-effect execution.
    */
   async attemptS3Retention(signal: Signal, billingPlan: BillingPlan, thread: Thread): Promise<void> {
+    // The SYSTEM account only ever holds throwaway healthcheck emails, expired by
+    // the P7D TTL and the default lifecycle rule. Never tag or copy-to-saved them —
+    // preserving daily healthcheck mail indefinitely is pure junk accumulation.
+    if (isSystemAccount(signal.accountId)) return;
+
     this.logger.trackPoint("s3_retention_start");
     try {
       const retention = getRetentionForPlan(billingPlan);

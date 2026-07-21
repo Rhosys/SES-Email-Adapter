@@ -188,7 +188,7 @@ describe("SYSTEM account workflow override", () => {
       retentionDuration: "P7D",
       filtering: { defaultUnknownSenderPolicy: "allow_all" },
       aliasConfig: SYSTEM_ALIAS,
-      billingPlan: "Internal",
+      billingPlan: "Free",
       onboardingCompleted: true,
     });
 

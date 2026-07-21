@@ -31,7 +31,7 @@ describe("AccountDatabase — SYSTEM delegation (Property 5)", () => {
       const account = result._unsafeUnwrap();
       expect(account).not.toBeNull();
       expect(account!.id).toBe(SYSTEM_ACCOUNT_ID);
-      expect(account!.billingPlan).toBe("Internal");
+      expect(account!.billingPlan).toBe("Free");
       expect(ddbMock.commandCalls(GetCommand)).toHaveLength(0);
       expect(ddbMock.commandCalls(QueryCommand)).toHaveLength(0);
     });
