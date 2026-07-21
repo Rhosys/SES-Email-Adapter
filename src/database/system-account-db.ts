@@ -38,7 +38,10 @@ export class SystemAccountDb {
       filtering: { defaultUnknownSenderPolicy: "allow_all" as const },
       digest: null,
       onboarding: { completed: true },
-      billingPlan: "Internal" as const,
+      // The SYSTEM account holds only 7-day throwaway healthcheck mail — not a
+      // paying customer. It must not carry a copy-to-saved tier (e.g. Internal),
+      // which would preserve daily healthcheck emails in S3 indefinitely.
+      billingPlan: "Free" as const,
       createdAt: "2025-01-01T00:00:00.000Z",
       updatedAt: "2025-01-01T00:00:00.000Z",
     });
