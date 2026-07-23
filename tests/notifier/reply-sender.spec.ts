@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ReplySenderService } from "../../src/notifier/reply-sender.js";
 import type { EmailService } from "../../src/email/email-service.js";
-import { ok } from "../../src/errors.js";
+import { ok, err } from "../../src/errors.js";
 import type { Logger } from "../../src/logger.js";
+import { createMockLogger } from "../helpers/mock-logger.js";
 import { TAG_TYPE, TAG_ACCOUNT_ID, TAG_SIGNAL_ID, TAG_THREAD_ID } from "../../src/email/ses-tags.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -133,4 +134,28 @@ describe("ReplySenderService tag integration", () => {
     });
   });
 
+});
+
+// ─── Permanent SES error handling ────────────────────────────────────────────
+
+describe("ReplySenderService — permanent SES error", () => {
+  it("returns ok and logs WARN on permanent SES error — no retry", async () => {
+    const emailService = makeEmailService();
+    const logger = createMockLogger();
+    const handler = new ReplySenderService(emailService, logger);
+    (emailService.send as ReturnType<typeof vi.fn>).mockResolvedValueOnce(err({ kind: "permanent_ses_error", errorName: "MessageRejected", httpStatus: 400, message: "Email address is not verified", cause: new Error("test") }));
+
+    const result = await handler.sendReply({
+      to: "bounce@example.com",
+      from: "sender@example.com",
+      subject: "Test",
+      body: "Content",
+      inReplyTo: "<ref@test.com>",
+      accountId: "acct-test",
+    });
+
+    expect(result.isOk()).toBe(true);
+    expect(result._unsafeUnwrap()).toEqual({ messageId: "" });
+    expect(logger.calls.some(c => c.method === "warn" && c.context?.code === "reply_sender.send_permanent")).toBe(true);
+  });
 });

@@ -267,6 +267,17 @@ describe("OnboardingTaskHandler.handleFollowup", () => {
     expect(result.isErr()).toBe(true);
     expect(result._unsafeUnwrapErr().kind).toBe("db_error");
   });
+
+  it("returns ok and logs WARN on permanent SES error — no retry", async () => {
+    const store = createMockStore();
+    const handler = new OnboardingTaskHandler(store.accountDb, store.threadDb, logger, emailService);
+    vi.mocked(emailService.send as ReturnType<typeof vi.fn>).mockResolvedValueOnce(err({ kind: "permanent_ses_error", errorName: "MessageRejected", httpStatus: 400, message: "Email address is not verified", cause: new Error("test") }));
+
+    const result = await handler.handleFollowup("acc-test", "user@example.com");
+
+    expect(result.isOk()).toBe(true);
+    expect(logger.calls.some(c => c.method === "warn" && c.context?.code === "onboarding.send_permanent")).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------------------

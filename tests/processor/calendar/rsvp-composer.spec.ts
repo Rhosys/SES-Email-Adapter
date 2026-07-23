@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { sendRsvp } from "../../../src/processor/calendar/rsvp-composer.js";
 import type { EmailService } from "../../../src/email/email-service.js";
 import type { CalendarEventData } from "../../../src/types/calendar.js";
-import { ok } from "../../../src/errors.js";
+import { ok, err } from "../../../src/errors.js";
 import { createMockLogger } from "../../helpers/mock-logger.js";
 import ICAL from "ical.js";
 
@@ -136,5 +136,34 @@ describe("sendRsvp — REPLY uses original UID not proxy UID", () => {
     const vevent = comp.getFirstSubcomponent("vevent")!;
     expect(vevent.getFirstPropertyValue("uid")).toBe(originalUid);
     expect(icsContent).not.toContain(proxyUid);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// Permanent SES error handling
+// ---------------------------------------------------------------------------
+
+describe("sendRsvp — permanent SES error", () => {
+  it("returns ok and logs WARN on permanent SES error — no retry", async () => {
+    const emailService = makeEmailService();
+    const logger = createMockLogger();
+    vi.mocked(emailService.send as ReturnType<typeof vi.fn>).mockResolvedValueOnce(err({ kind: "permanent_ses_error", errorName: "MessageRejected", httpStatus: 400, message: "Email address is not verified", cause: new Error("test") }));
+
+    const result = await sendRsvp(
+      {
+        decision: "accepted",
+        originalCalendarData: makeCalendarData(),
+        aliasAddress: "alias@proxy.com",
+        organizerAddress: "organizer@example.com",
+        fromAddress: "alias@proxy.com",
+        accountId: "acct-test",
+      },
+      { emailService, logger },
+    );
+
+    expect(result.isOk()).toBe(true);
+    expect(result._unsafeUnwrap()).toEqual({ messageId: "" });
+    expect(logger.calls.some(c => c.method === "warn" && c.context?.code === "rsvp.send_permanent")).toBe(true);
   });
 });

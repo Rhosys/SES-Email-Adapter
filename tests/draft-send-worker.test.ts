@@ -183,4 +183,16 @@ describe("DraftSendWorker", () => {
     expect(result.isErr()).toBe(true);
     expect(result._unsafeUnwrapErr().kind).toBe("db_error");
   });
+
+  it("returns ok and logs WARN on permanent SES error — no retry", async () => {
+    const logger = createMockLogger();
+    const localWorker = new DraftSendWorker(threadDb, replySender, logger);
+    vi.mocked(replySender.sendReply).mockResolvedValueOnce(err({ kind: "permanent_ses_error", errorName: "MessageRejected", httpStatus: 400, message: "Email address is not verified", cause: new Error("test") }));
+
+    const result = await localWorker.process(PAYLOAD);
+
+    expect(result.isOk()).toBe(true);
+    expect(logger.calls.some(c => c.method === "warn" && c.context?.code === "draft_send.send_permanent")).toBe(true);
+    expect(threadDb.updateSignalSendStatus).not.toHaveBeenCalled();
+  });
 });
