@@ -92,6 +92,7 @@ function makeClassifier(workflow = "conversation"): Pick<SignalClassifier, "clas
       tags: [],
       summary: "A classified email.",
       labels: [],
+      actions: [],
     } as ClassificationOutput)),
   };
 }

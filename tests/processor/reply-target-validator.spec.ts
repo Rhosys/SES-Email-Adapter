@@ -27,6 +27,7 @@ function makeSignal(overrides: { data?: Partial<Pick<Signal["data"], "from" | "r
       tags: [],
       summary: "",
       s3Key: "test/key",
+      actions: [],
       ...dataOverrides,
     },
   } as Signal;

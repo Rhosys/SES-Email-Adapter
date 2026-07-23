@@ -17,6 +17,7 @@ const baseData: EmailSignalData = {
   workflowData: { workflow: "unspecified" },
   tags: [],
   s3Key: "test-key",
+actions: [],
 };
 
 function makeSignal(overrides: { status?: Signal["status"]; sendInitiatedAt?: string } = {}): Signal<EmailSignalData> {

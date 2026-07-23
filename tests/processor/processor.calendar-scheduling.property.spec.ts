@@ -79,6 +79,7 @@ const validClassification: ClassificationOutput = {
   tags: [],
   summary: "A calendar event email.",
   labels: [],
+  actions: [],
 };
 
 function makeContentSanitizer(hasCalendarAttachment?: boolean): ContentSanitizerClient {

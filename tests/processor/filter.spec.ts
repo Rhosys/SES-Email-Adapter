@@ -6,6 +6,7 @@ function makeCtx(overrides: Partial<SystemLabelContext> = {}): SystemLabelContex
   return {
     workflow: "conversation",
     workflowData: { workflow: "conversation", sentiment: "neutral", requiresReply: false },
+    actions: [],
     senderETLD1: "amazon.com",
     aliasSenderConfig: { accountId: "acct-001", aliasAddress: "user@example.com", domain: "example.com", aliasName: "user", senderDomain: "amazon.com", policy: "allow", addedAt: "2024-01-01T00:00:00Z" },
     unknownSenderPolicy: "quarantine_visible",

@@ -84,6 +84,7 @@ const signal: Signal = {
     tags: [],
     summary: "Order shipped",
     s3Key: "emails/msg-001",
+  actions: [],
   },
 } as Signal;
 

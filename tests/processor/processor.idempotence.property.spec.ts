@@ -80,6 +80,7 @@ describe("Cross-layer idempotence — live writes + cache + Aurora", () => {
     tags: [],
     summary: "A test email.",
     labels: [],
+    actions: [],
   };
 
   function makeContentSanitizer(): ContentSanitizerClient {

@@ -62,6 +62,7 @@ function makeSignal(overrides: Partial<Signal> = {}): Signal {
       tags: [],
       summary: "A test email.",
       s3Key: "emails/tmpl-test-001.eml",
+      actions: [],
       matchedRules: [{ ruleId: "rule_draft", actions: [{ type: "auto_draft", value: "tmpl_001" }], labelsAdded: [] }],
     },
   } as Signal;

@@ -63,7 +63,6 @@ export interface AuthData {
   code?: string;
   expiresInMinutes?: number;
   service: string;
-  actionUrl?: string;
 }
 
 export interface ConversationData {
@@ -131,7 +130,6 @@ export interface AlertData {
   service: string;
   severity?: "info" | "warning" | "critical";
   requiresAction: boolean;
-  actionUrl?: string;
   ipAddress?: string;
   location?: string;
   deviceName?: string;
@@ -153,7 +151,6 @@ export interface OnboardingData {
   workflow: "onboarding";
   onboardingType: "welcome" | "verification" | "getting_started" | "trial_started" | "other";
   service: string;
-  actionUrl?: string;
 }
 
 export interface NoticeData {
@@ -187,7 +184,6 @@ export interface JobData {
   salary?: string;
   interviewDate?: string;
   applicationStatus?: "submitted" | "reviewing" | "interview" | "offer" | "rejected";
-  actionUrl?: string;
   contactName?: string;
   contactEmail?: string;
 }
@@ -400,6 +396,11 @@ export interface MatchedRuleResult {
 // Signal data payload interfaces
 // ---------------------------------------------------------------------------
 
+export interface SignalAction {
+  url: string;
+  text: string | null;
+}
+
 export type UnsubscribeMethod = "server" | "website" | "mailto";
 
 export interface UnsubscribeInfo {
@@ -414,6 +415,7 @@ interface EmailSignalDataBase {
   receivedAt: string;      // ISO datetime
   summary: string;
   urgency?: ThreadUrgency;
+  actions: SignalAction[];
   // Embedding cache, keyed by Bedrock model ID
   // Absent on quarantined/blocked signals (no Aurora write happened).
   // Partially populated if individual Bedrock calls failed (logged at WARN level).

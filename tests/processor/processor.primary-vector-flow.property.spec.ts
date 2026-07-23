@@ -95,6 +95,7 @@ const CLASSIFICATION: ClassificationOutput = {
   tags: [],
   summary: "Test email.",
   labels: [],
+  actions: [],
 };
 
 // ---------------------------------------------------------------------------

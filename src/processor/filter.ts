@@ -1,5 +1,5 @@
 import { getDomain } from "tldts";
-import type { Workflow, WorkflowData, UnknownSenderPolicy, SystemLabel, AliasSender, AuthData } from "../types/index.js";
+import type { Workflow, WorkflowData, UnknownSenderPolicy, SystemLabel, AliasSender, AuthData, SignalAction } from "../types/index.js";
 
 // Extract eTLD+1 from an email address or domain string
 export function getETLD1(emailOrDomain: string): string {
@@ -12,6 +12,7 @@ export function getETLD1(emailOrDomain: string): string {
 export interface SystemLabelContext {
   workflow: Workflow;
   workflowData: WorkflowData;
+  actions: SignalAction[];
   senderETLD1: string;
   aliasSenderConfig: AliasSender | null;
   unknownSenderPolicy: UnknownSenderPolicy;
@@ -34,8 +35,7 @@ export function assignSystemLabels(ctx: SystemLabelContext): SystemLabel[] {
     labels.push("system:auth:security_alert");
   }
 
-  const wd = ctx.workflowData as unknown as Record<string, unknown>;
-  if ("actionUrl" in wd && typeof wd.actionUrl === "string" && wd.actionUrl) {
+  if (ctx.actions.length > 0) {
     labels.push("system:action");
   }
 

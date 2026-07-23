@@ -97,6 +97,7 @@ describe("Aurora cluster failure preserves the DynamoDB cache entry", () => {
     tags: [],
     summary: "A test email.",
     labels: [],
+    actions: [],
   };
 
   function makeStore() {

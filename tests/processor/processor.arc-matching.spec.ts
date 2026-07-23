@@ -126,6 +126,7 @@ describe("Feature: in-reply-to-arc-threading, Parallel arc matching tier selecti
       tags: [],
       summary: "Auth code notice",
       labels: [],
+      actions: [],
     };
     return { classify: vi.fn().mockResolvedValue(ok(output)) };
   }
@@ -138,6 +139,7 @@ describe("Feature: in-reply-to-arc-threading, Parallel arc matching tier selecti
       tags: [],
       summary: "A reply email",
       labels: [],
+      actions: [],
     };
     return { classify: vi.fn().mockResolvedValue(ok(output)) };
   }

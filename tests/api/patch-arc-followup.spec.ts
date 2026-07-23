@@ -93,6 +93,7 @@ function makeSignal(): Signal {
       tags: [],
       summary: "Test",
       s3Key: "emails/test.eml",
+    actions: [],
     },
   } as Signal;
 }

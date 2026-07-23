@@ -97,7 +97,7 @@ describe("Classifier multilingual integration", () => {
     expect((output.workflowData as unknown as Record<string, unknown>).alertType).toBe("suspicious_login");
   }, 30_000);
 
-  it("German onboarding verification with actionUrl extracts the URL not text", async () => {
+  it("German onboarding verification with action URL extracts the URL into actions array", async () => {
     const result = await classifier.classify(makeInput({
       from: "noreply@github.com",
       subject: "Bitte bestätigen Sie Ihre E-Mail-Adresse",
@@ -107,9 +107,8 @@ describe("Classifier multilingual integration", () => {
     const output = result._unsafeUnwrap();
     // Email verification sits on auth/onboarding boundary — both are valid
     expect(["onboarding", "auth"]).toContain(output.workflow);
-    const wd = output.workflowData as unknown as Record<string, unknown>;
-    if (wd.actionUrl) {
-      expect(wd.actionUrl).toMatch(/^https?:\/\//);
+    if (output.actions.length > 0) {
+      expect(output.actions[0]!.url).toMatch(/^https?:\/\//);
     }
   }, 30_000);
 

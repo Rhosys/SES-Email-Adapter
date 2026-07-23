@@ -98,6 +98,7 @@ describe("Property 9: S3 retention failure is isolated and non-fatal", () => {
     tags: [],
     summary: "A test email.",
     labels: [],
+    actions: [],
   };
 
   function makeStore() {

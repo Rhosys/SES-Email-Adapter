@@ -136,6 +136,15 @@ export const MatchedRuleResult = z.object({
 }).openapi("MatchedRuleResult");
 
 // ---------------------------------------------------------------------------
+// SignalAction
+// ---------------------------------------------------------------------------
+
+export const SignalAction = z.object({
+  url: z.string(),
+  text: z.string().nullable(),
+}).openapi("SignalAction");
+
+// ---------------------------------------------------------------------------
 // WorkflowData sub-types (Signal.data.workflowData)
 // ---------------------------------------------------------------------------
 
@@ -145,7 +154,6 @@ export const AuthData = z.object({
   code: z.string().optional(),
   expiresInMinutes: z.number().optional(),
   service: z.string(),
-  actionUrl: z.string().optional(),
 }).openapi("AuthData");
 
 export const ConversationData = z.object({
@@ -204,7 +212,6 @@ export const AlertData = z.object({
   service: z.string(),
   severity: z.enum(["info", "warning", "critical"]).optional(),
   requiresAction: z.boolean(),
-  actionUrl: z.string().optional(),
   ipAddress: z.string().optional(),
   location: z.string().optional(),
   deviceName: z.string().optional(),
@@ -250,7 +257,6 @@ export const JobData = z.object({
   salary: z.string().optional(),
   interviewDate: z.string().optional(),
   applicationStatus: z.enum(["submitted", "reviewing", "interview", "offer", "rejected"]).optional(),
-  actionUrl: z.string().optional(),
 }).openapi("JobData");
 
 export const SupportData = z.object({
@@ -298,6 +304,7 @@ export const InboundEmailSignalData = z.object({
   recipientAddress: z.string(),
   workflow: Workflow,
   workflowData: WorkflowData.optional(),
+  actions: z.array(SignalAction).optional(),
   matchedRules: z.array(MatchedRuleResult).optional(),
   unsubscribe: UnsubscribeInfo.optional(),
 }).openapi("InboundEmailSignalData");
@@ -731,6 +738,7 @@ export type ErrorResponse = z.infer<typeof ErrorResponse>;
 export type EmailAddress = z.infer<typeof EmailAddress>;
 export type Attachment = z.infer<typeof Attachment>;
 export type WorkflowData = z.infer<typeof WorkflowData>;
+export type SignalAction = z.infer<typeof SignalAction>;
 export type InboundEmailSignalData = z.infer<typeof InboundEmailSignalData>;
 export type OutboundEmailSignalData = z.infer<typeof OutboundEmailSignalData>;
 export type Thread = z.infer<typeof Thread>;
