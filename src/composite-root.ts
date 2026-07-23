@@ -58,6 +58,7 @@ import { DraftSendDispatcher } from "./processor/draft-send-dispatcher.js";
 import { DraftSendWorker } from "./processor/draft-send-worker.js";
 import { sendRsvp } from "./processor/calendar/rsvp-composer.js";
 import type { PostApprovalCalendarHandlerDeps } from "./processor/calendar/post-approval-handler.js";
+import { HmacSecretGenerator } from "./processor/calendar/hmac-secret-generator.js";
 import { RequestLogger } from "./logger.js";
 
 // ---------------------------------------------------------------------------
@@ -157,6 +158,8 @@ export class CompositeRoot {
     const AUTHRESS_KEY_ID = process.env["AUTHRESS_KEY_ID"] ?? "";
     const unsubscribeTokenGenerator = new UnsubscribeTokenGenerator(kms, API_DOMAIN, AUTHRESS_KMS_KEY_ARN, AUTHRESS_KEY_ID);
 
+    const hmacSecretGenerator = new HmacSecretGenerator(kms);
+
     const emailSignalStore = new EmailSignalStore(s3, S3_BUCKET);
     const forwardingService = new ForwardingService(emailService, accountDb, emailSignalStore, APP_BASE_URL, MAIL_DOMAIN, logger);
 
@@ -204,7 +207,7 @@ export class CompositeRoot {
       draftSendDispatcher,
       billingHandler: new BillingHandler(),
       handlerRegistry,
-      calendarForwarderDeps: { emailService, serviceDomain: MAIL_DOMAIN },
+      calendarForwarderDeps: { emailService, serviceDomain: MAIL_DOMAIN, hmac: hmacSecretGenerator },
       schedulerClient,
       logger,
       s3Client: s3,
@@ -322,6 +325,7 @@ export class CompositeRoot {
       calendarForwarderDeps: {
         emailService,
         serviceDomain: MAIL_DOMAIN,
+        hmac: hmacSecretGenerator,
       },
       logger,
     };

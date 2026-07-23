@@ -1,4 +1,5 @@
 import type { IForwardingService } from "../../src/forwarding/forwarding-service.js";
+import { makeHmacGeneratorFake } from "../helpers/hmac-generator-fake.js";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ok, err } from "neverthrow";
 import { SignalProcessor } from "../../src/processor/processor.js";
@@ -137,7 +138,7 @@ function makeProcessor(opts: {
     emailBucket: "test-bucket",
     contentBucket: "test-content-bucket",
     draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
-    calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud" },
+    calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud", hmac: makeHmacGeneratorFake() },
   });
 }
 

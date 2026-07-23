@@ -9,17 +9,10 @@ import type { Logger } from "../../../src/logger.js";
 import { ok } from "../../../src/errors.js";
 
 // ---------------------------------------------------------------------------
-// Mock hmac-secret.ts — deterministic HMAC for tests without real KMS
+// Injected deterministic HMAC generator — no real KMS.
 // ---------------------------------------------------------------------------
 
-import { createHmac } from "node:crypto";
-
-vi.mock("../../../src/crypto/hmac-secret.js", () => ({
-  computeHmac16: (payload: string) =>
-    Promise.resolve(createHmac("sha256", new Uint8Array(32)).update(payload).digest("base64url").slice(0, 16)),
-  validateHmac16: (payload: string, hmac16: string) =>
-    Promise.resolve(createHmac("sha256", new Uint8Array(32)).update(payload).digest("base64url").slice(0, 16) === hmac16),
-}));
+import { makeHmacGeneratorFake } from "../../helpers/hmac-generator-fake.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -77,6 +70,7 @@ function makeDeps(emailService?: EmailService): CalendarForwarderDeps {
   return {
     emailService: emailService ?? makeEmailService(),
     serviceDomain: "platform.email.rhosys.cloud",
+    hmac: makeHmacGeneratorFake(),
   };
 }
 

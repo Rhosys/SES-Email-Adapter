@@ -17,7 +17,7 @@ import { handleCalendarResponse } from "../../../src/processor/calendar/calendar
 import type { CalendarResponseHandlerDeps } from "../../../src/processor/calendar/calendar-response-handler.js";
 import { handlePostApprovalCalendar } from "../../../src/processor/calendar/post-approval-handler.js";
 import type { PostApprovalCalendarHandlerDeps } from "../../../src/processor/calendar/post-approval-handler.js";
-import { buildProxyUid } from "../../../src/processor/calendar/proxy-uid.js";
+import { buildProxyUid as buildProxyUidRaw } from "../../../src/processor/calendar/proxy-uid.js";
 import { buildCalendarSignalLookupId } from "../../../src/processor/calendar/signal-lookup.js";
 import type { CalendarEventData, CalendarResponseData } from "../../../src/types/calendar.js";
 import type { Signal, Thread, Attachment } from "../../../src/types/index.js";
@@ -29,19 +29,17 @@ import { createMockLogger } from "../../helpers/mock-logger.js";
 import ICAL from "ical.js";
 
 // ---------------------------------------------------------------------------
-// Mock hmac-secret.ts — deterministic HMAC for tests without real KMS
+// Injected deterministic HMAC generator — no real KMS. `buildProxyUid` is
+// wrapped so existing call sites (which omit hmac) inject the same generator
+// the code-under-test receives via its deps.
 // ---------------------------------------------------------------------------
 
-import { createHmac } from "node:crypto";
+import { makeHmacGeneratorFake } from "../../helpers/hmac-generator-fake.js";
 
-const TEST_SECRET = new Uint8Array(32); // 32 zero bytes — deterministic for tests
+const hmac = makeHmacGeneratorFake();
 
-vi.mock("../../../src/crypto/hmac-secret.js", () => ({
-  computeHmac16: (payload: string) =>
-    Promise.resolve(createHmac("sha256", TEST_SECRET).update(payload).digest("base64url").slice(0, 16)),
-  validateHmac16: (payload: string, hmac16: string) =>
-    Promise.resolve(createHmac("sha256", TEST_SECRET).update(payload).digest("base64url").slice(0, 16) === hmac16),
-}));
+const buildProxyUid = (opts: Omit<Parameters<typeof buildProxyUidRaw>[0], "hmac">) =>
+  buildProxyUidRaw({ ...opts, hmac });
 
 // ---------------------------------------------------------------------------
 // Static test fixtures — deterministic, no random generation
@@ -97,6 +95,7 @@ function makeForwarderDeps(emailService?: EmailService): CalendarForwarderDeps {
   return {
     emailService: emailService ?? makeEmailService(),
     serviceDomain: SERVICE_DOMAIN,
+    hmac,
   };
 }
 
@@ -150,6 +149,7 @@ function makeResponseHandlerDeps(overrides: Partial<CalendarResponseHandlerDeps>
       saveSignal: vi.fn().mockResolvedValue(ok(undefined)),
     },
     emailService: makeEmailService(),
+    hmac,
     ...overrides,
   };
 }
@@ -544,6 +544,7 @@ describe("Scenario: approving quarantined email triggers calendar forwarding", (
     const calendarForwarderDeps: CalendarForwarderDeps = {
       emailService: calendarIForwardingServiceEmailService,
       serviceDomain: SERVICE_DOMAIN,
+      hmac,
     };
 
     const s3Client = {

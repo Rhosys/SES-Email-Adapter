@@ -16,6 +16,7 @@ import type { Logger } from "../../logger.js";
 import type { Signal, CalendarEventData, CalendarResponseData } from "../../types/index.js";
 import type { EmailService } from "../../email/email-service.js";
 import { validateProxyUid } from "./proxy-uid.js";
+import type { HmacSecretGenerator } from "./hmac-secret-generator.js";
 import { parseIcs } from "./ics-parser.js";
 import type { sendRsvp } from "./rsvp-composer.js";
 import { validateId, validateAccountId } from "../../utils/id.js";
@@ -30,6 +31,7 @@ export interface CalendarResponseHandlerDeps {
   rsvpComposer: typeof sendRsvp;
   signalStore: { saveSignal(signal: Signal<CalendarResponseData>): Promise<Result<void, DbError>> };
   emailService: EmailService;
+  hmac: HmacSecretGenerator;
 }
 
 // ---------------------------------------------------------------------------
@@ -78,7 +80,7 @@ export async function handleCalendarResponse(
   logger: Logger,
   icsBytes: Uint8Array,
 ): Promise<Result<void, DbError | EmailServiceError>> {
-  const { serviceDomain, threadDatabase, rsvpComposer, signalStore, emailService } = deps;
+  const { serviceDomain, threadDatabase, rsvpComposer, signalStore, emailService, hmac } = deps;
 
   // --- Step 1: Extract threadId and accountId from recipient address ---
   // Pattern: {threadId}@{accountId}.{serviceDomain}
@@ -175,6 +177,7 @@ export async function handleCalendarResponse(
   const uidResult = await validateProxyUid({
     proxyUid,
     serviceDomain,
+    hmac,
   });
 
   if (uidResult.isErr()) {

@@ -1,4 +1,4 @@
-import { computeHmac16, validateHmac16 } from "../../crypto/hmac-secret.js";
+import type { HmacSecretGenerator } from "./hmac-secret-generator.js";
 import type { Result } from "neverthrow";
 import { ok, err } from "neverthrow";
 
@@ -15,9 +15,10 @@ export async function buildProxyUid(opts: {
   threadId: string;
   originalVeventUid: string;
   serviceDomain: string;
+  hmac: HmacSecretGenerator;
 }): Promise<string> {
   const payload = `${opts.accountId}.${opts.threadId}.${opts.originalVeventUid}`;
-  const hmac16 = await computeHmac16(payload);
+  const hmac16 = await opts.hmac.computeHmac16(payload);
   return `${payload}.${hmac16}@${opts.serviceDomain}`;
 }
 
@@ -31,6 +32,7 @@ export async function buildProxyUid(opts: {
 export async function validateProxyUid(opts: {
   proxyUid: string;
   serviceDomain: string;
+  hmac: HmacSecretGenerator;
 }): Promise<Result<{ accountId: string; threadId: string; originalVeventUid: string }, string>> {
   // Split on @ to separate local-part from domain
   const atIndex = opts.proxyUid.lastIndexOf("@");
@@ -65,7 +67,7 @@ export async function validateProxyUid(opts: {
 
   // Recompute HMAC and compare
   const payload = `${accountId}.${threadId}.${originalVeventUid}`;
-  const valid = await validateHmac16(payload, hmac16);
+  const valid = await opts.hmac.validateHmac16(payload, hmac16);
 
   if (!valid) {
     return err("hmac mismatch");
