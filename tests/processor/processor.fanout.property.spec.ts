@@ -95,6 +95,7 @@ describe("Multi-cluster fanout writes vectors to every active target", () => {
     tags: [],
     summary: "A test email.",
     labels: [],
+    actions: [],
   };
 
   function makeStore() {

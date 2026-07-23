@@ -112,6 +112,7 @@ describe("Feature: signal-processor-retry-resilience, Property 4: Arc saved befo
     tags: [],
     summary: "A test email.",
     labels: [],
+    actions: [],
   };
 
   function makeContentSanitizer(): ContentSanitizerClient {
@@ -338,6 +339,7 @@ describe("Feature: signal-processor-retry-resilience, Property 6: Aurora failure
     tags: [],
     summary: "A test email.",
     labels: [],
+    actions: [],
   };
 
   function makeStore() {
@@ -622,6 +624,7 @@ describe("Feature: signal-processor-retry-resilience, Property 5: Side-effects d
     tags: [],
     summary: "A test email.",
     labels: [],
+    actions: [],
   };
 
   function makeContentSanitizer(): ContentSanitizerClient {
@@ -905,6 +908,7 @@ describe("Feature: signal-processor-retry-resilience, Property 7: Partial Aurora
     tags: [],
     summary: "A test email.",
     labels: [],
+    actions: [],
   };
 
   function makeContentSanitizer(): ContentSanitizerClient {

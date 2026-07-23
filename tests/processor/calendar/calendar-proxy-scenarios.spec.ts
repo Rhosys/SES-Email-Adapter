@@ -588,6 +588,7 @@ describe("Scenario: approving quarantined email triggers calendar forwarding", (
         tags: [],
         summary: "Quarterly Planning",
         s3Key: "emails/quarantined-001",
+      actions: [],
       },
     } as Signal;
 

@@ -28,6 +28,7 @@ Return ONLY valid JSON matching this structure:
 {
   "workflow": "<one of the workflow names below>",
   "workflowData": { <fields for the assigned workflow> },
+  "actions": [{ "url": "https://...", "text": "Click here to verify" | null }],
   "tags": ["<zero or more from the tag vocabulary below>"],
   "summary": "<one sentence, under 150 characters>",
   "labels": ["<label from the provided list>"]
@@ -50,6 +51,15 @@ ${workflow.description}
 |-------|------|----------|
 ${fieldRows.join("\n")}`);
   }
+
+  // Actions section
+  sections.push(`## Actions
+
+Extract all actionable links from the email body where the user is expected to click. Each entry has:
+- "url" — the full https:// URL
+- "text" — the anchor text of the link. Set to null if the anchor text IS the URL itself (e.g. <a href="https://x.com">https://x.com</a>)
+
+Return an empty array if there are no actionable links.`);
 
   // Tags section
   sections.push(`## Tags

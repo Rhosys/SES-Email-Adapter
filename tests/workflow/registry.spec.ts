@@ -32,6 +32,7 @@ const stubSignal: Signal = {
     tags: [],
     summary: "Test",
     s3Key: "signals/test.eml",
+  actions: [],
   },
 } as Signal;
 

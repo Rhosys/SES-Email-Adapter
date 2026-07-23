@@ -283,6 +283,7 @@ describe("buildEmbedText (classification output)", () => {
         tags: [],
         summary: "Your Stripe invoice for June is ready",
         labels: ["system:workflow:payments", "invoice"],
+      actions: [],
       };
       const result = buildEmbedText("marketing.stripe.com", classification);
       const lines = result.split("\n");
@@ -306,6 +307,7 @@ describe("buildEmbedText (classification output)", () => {
         tags: [],
         summary: "GitHub OTP code",
         labels: [],
+        actions: [],
       };
       const result = buildEmbedText("github.com", classification);
       expect(result.split("\n")[0]).toBe("github.com");
@@ -320,6 +322,7 @@ describe("buildEmbedText (classification output)", () => {
         tags: [],
         summary: "Slack OTP",
         labels: ["action-needed", "system:workflow:auth"],
+      actions: [],
       };
       const result = buildEmbedText("slack.com", classification);
       const lines = result.split("\n");
@@ -333,6 +336,7 @@ describe("buildEmbedText (classification output)", () => {
         tags: [],
         summary: "Amazon package shipped",
         labels: [],
+        actions: [],
       };
       const result = buildEmbedText("amazon.com", classification);
       const lines = result.split("\n");
@@ -348,6 +352,7 @@ describe("buildEmbedText (classification output)", () => {
         tags: [],
         summary: "Amazon package shipped",
         labels: [],
+        actions: [],
       };
       const result = buildEmbedText("amazon.com", classification);
       const lines = result.split("\n");
@@ -363,6 +368,7 @@ describe("buildEmbedText (classification output)", () => {
         tags: [],
         summary: "Slack OTP expiring in 10 minutes",
         labels: [],
+        actions: [],
       };
       const result = buildEmbedText("slack.com", classification);
       expect(result).toContain("workflowData.expiresInMinutes=10");
@@ -375,6 +381,7 @@ describe("buildEmbedText (classification output)", () => {
         tags: [],
         summary: "Urgent message requiring reply",
         labels: [],
+        actions: [],
       };
       const result = buildEmbedText("company.com", classification);
       expect(result).toContain("workflowData.requiresReply=true");
@@ -384,15 +391,15 @@ describe("buildEmbedText (classification output)", () => {
     it("omits fields with null values", () => {
       const classification: ClassificationOutput = {
         workflow: "auth",
-        workflowData: { workflow: "auth", authType: "otp", code: null as unknown as string, service: "GitHub", actionUrl: null as unknown as string },
+        workflowData: { workflow: "auth", authType: "otp", code: null as unknown as string, service: "GitHub" },
         tags: [],
         summary: "GitHub OTP",
         labels: [],
+        actions: [],
       };
       const result = buildEmbedText("github.com", classification);
       const lines = result.split("\n");
       expect(lines.filter((l) => l.startsWith("workflowData.code="))).toHaveLength(0);
-      expect(lines.filter((l) => l.startsWith("workflowData.actionUrl="))).toHaveLength(0);
       expect(lines).toContain("workflowData.authType=otp");
       expect(lines).toContain("workflowData.service=GitHub");
     });
@@ -406,6 +413,7 @@ describe("buildEmbedText (classification output)", () => {
         tags: ["phishing"],
         summary: "TechCrunch daily newsletter",
         labels: ["newsletter"],
+      actions: [],
       };
       const result = buildEmbedText("techcrunch.com", classification);
       expect(result).not.toContain("phishing");
@@ -421,6 +429,7 @@ describe("buildEmbedText (classification output)", () => {
         tags: [],
         summary: "United flight UA123 on Mar 15",
         labels: ["travel"],
+      actions: [],
       };
       const result1 = buildEmbedText("united.com", classification);
       const result2 = buildEmbedText("united.com", classification);

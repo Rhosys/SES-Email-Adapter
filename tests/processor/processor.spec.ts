@@ -202,6 +202,7 @@ const validClassification: ClassificationOutput = {
   tags: [],
   summary: "A test personal email.",
   labels: [],
+  actions: [],
 };
 
 function makeRule(overrides: Partial<Rule> = {}): Rule {
@@ -1212,7 +1213,7 @@ describe("SignalProcessor", () => {
       const full: ClassificationOutput = {
         workflow: "conversation",
         workflowData: { workflow: "conversation", sentiment: "neutral", requiresReply: false },
-        tags: [], summary: "test", labels: [],
+        tags: [], summary: "test", labels: [], actions: [],
         ...classification,
       };
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok(full));
@@ -1242,7 +1243,7 @@ describe("SignalProcessor", () => {
       }))));
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok({
         workflow: "conversation", workflowData: { workflow: "conversation", sentiment: "neutral", requiresReply: false },
-        tags: [], summary: "test", labels: [],
+        tags: [], summary: "test", labels: [], actions: [],
       }));
       await processor.processRecord(makeMessage({ sesMessageId: randomUUID() }), 1);
       const signal = vi.mocked(threadDb.saveSignal).mock.calls.at(-1)![0] as Signal;
@@ -1302,6 +1303,7 @@ describe("SignalProcessor", () => {
       tags: [],
       summary: "Welcome to Acme App.",
       labels: [],
+      actions: [],
     };
 
     it("processes onboarding emails as active when no blocking rule is configured", async () => {
@@ -1525,6 +1527,7 @@ describe("SignalProcessor", () => {
     tags: [],
     summary: "Privacy policy update from Google.",
     labels: [],
+    actions: [],
   };
 
   describe("notice workflow arc behavior", () => {
@@ -1581,6 +1584,7 @@ describe("SignalProcessor", () => {
     tags: [],
     summary: "Test email from account owner.",
     labels: [],
+    actions: [],
   };
 
   describe("pong auto-reply", () => {

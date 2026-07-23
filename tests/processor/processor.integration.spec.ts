@@ -78,6 +78,7 @@ const validClassification: ClassificationOutput = {
   tags: [],
   summary: "Integration test email.",
   labels: [],
+  actions: [],
 };
 
 // ---------------------------------------------------------------------------
@@ -577,6 +578,7 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
         tags: [],
         summary: "Your package is on its way.",
         labels: [],
+        actions: [],
       }));
 
       const message = makeMessage({});
@@ -611,6 +613,7 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
         tags: [],
         summary: "Your package was delivered.",
         labels: [],
+        actions: [],
       }));
 
       await processor.processRecord(makeMessage({}), 1);

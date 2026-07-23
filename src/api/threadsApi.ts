@@ -365,6 +365,7 @@ export class ThreadsApi {
           recipientAddress: body.from.address,
           workflow: thread.workflow,
           workflowData: { workflow: thread.workflow } as Signal["data"]["workflowData"],
+          actions: [],
           tags: [],
           summary: "",
           s3Key: "",

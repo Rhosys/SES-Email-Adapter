@@ -86,6 +86,7 @@ describe("Single saveThread call with complete mutations", () => {
       tags: [],
       summary: "Test signal.",
       labels: [],
+      actions: [],
     };
 
     const userRules: Rule[] = testCase.additionalLabels.map((label, i) => ({

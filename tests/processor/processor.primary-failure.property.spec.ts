@@ -93,6 +93,7 @@ const validClassification: ClassificationOutput = {
   tags: [],
   summary: "A test email.",
   labels: [],
+  actions: [],
 };
 
 function makeStore() {

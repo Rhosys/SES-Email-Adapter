@@ -202,6 +202,7 @@ describe("Property 3: DynamoDB round-trip fidelity", () => {
           workflowData: { workflow: "conversation", sentiment: "neutral", requiresReply: false },
           tags: [],
           s3Key: "emails/abc.eml",
+        actions: [],
         },
       } as Signal<EmailSignalData>,
     },
@@ -333,6 +334,7 @@ describe("Property 4: Type parameter default", () => {
         workflowData: { workflow: "conversation", sentiment: "neutral", requiresReply: false },
         tags: [],
         s3Key: "emails/test.eml",
+      actions: [],
       },
     };
 

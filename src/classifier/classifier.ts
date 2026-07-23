@@ -1,7 +1,7 @@
 import { BedrockRuntimeClient, InvokeModelCommand } from "@aws-sdk/client-bedrock-runtime";
 import type { Result } from "neverthrow";
 import { ok, err } from "neverthrow";
-import type { Workflow, WorkflowData } from "../types/index.js";
+import type { Workflow, WorkflowData, SignalAction } from "../types/index.js";
 import { WORKFLOWS } from "../types/index.js";
 import type { Logger } from "../logger.js";
 import { buildSystemPrompt, buildUserMessage } from "./prompt-builder.js";
@@ -36,6 +36,7 @@ export interface ClassificationOutput {
   tags: string[];
   summary: string;
   labels: string[];
+  actions: SignalAction[];
 }
 
 interface RawClassificationResponse {
@@ -45,6 +46,7 @@ interface RawClassificationResponse {
   spamScore?: unknown;
   summary: string;
   labels: string[];
+  actions?: unknown[];
 }
 
 // Bedrock Guardrail trace types (when trace: "ENABLED" is set on InvokeModel)
@@ -181,7 +183,7 @@ export class SignalClassifier {
       : [];
 
     // Sanitize URL fields in workflowData — nullify non-URL values
-    const urlFields = ["actionUrl", "trackingUrl", "downloadUrl", "managementUrl", "paymentUrl", "documentUrl", "portalUrl", "responseUrl", "ticketUrl"] as const;
+    const urlFields = ["trackingUrl", "downloadUrl", "managementUrl", "paymentUrl", "documentUrl", "portalUrl", "responseUrl", "ticketUrl"] as const;
     const workflowData = { ...raw.workflowData } as Record<string, unknown>;
     for (const field of urlFields) {
       if (field in workflowData && typeof workflowData[field] === "string") {
@@ -193,12 +195,25 @@ export class SignalClassifier {
       }
     }
 
+    // Extract and validate actions
+    const actions: SignalAction[] = [];
+    if (Array.isArray(raw.actions)) {
+      for (const entry of raw.actions) {
+        if (typeof entry !== "object" || entry === null) continue;
+        const candidate = entry as Record<string, unknown>;
+        if (typeof candidate.url !== "string" || !isValidUrl(candidate.url)) continue;
+        const text = typeof candidate.text === "string" && candidate.text !== candidate.url ? candidate.text : null;
+        actions.push({ url: candidate.url, text });
+      }
+    }
+
     return ok({
       workflow: raw.workflow as Workflow,
       workflowData: workflowData as unknown as WorkflowData,
       tags,
       summary: raw.summary,
       labels,
+      actions,
     });
   }
 

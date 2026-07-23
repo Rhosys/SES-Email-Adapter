@@ -184,6 +184,7 @@ function makeSignal(overrides: Partial<Signal> = {}): Signal {
       tags: [],
       summary: "Test email.",
       s3Key: "emails/msg-notifier-001",
+      actions: [],
       matchedRules: [],
     },
   } as Signal;

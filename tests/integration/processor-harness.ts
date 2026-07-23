@@ -118,7 +118,7 @@ export async function createProcessorHarness(): Promise<ProcessorHarness> {
     processingDb,
     contentSanitizer: new InProcessContentSanitizer(),
     classifier: {
-      classify: async () => ok({ workflow: 'conversation' as const, workflowData: { workflow: 'conversation', sentiment: 'neutral', requiresReply: false } satisfies WorkflowData, tags: [], summary: '', labels: [] as string[] }),
+      classify: async () => ok({ workflow: 'conversation' as const, workflowData: { workflow: 'conversation', sentiment: 'neutral', requiresReply: false } satisfies WorkflowData, tags: [], summary: '', labels: [] as string[], actions: [] }),
     },
     embeddingGenerator: stubEmbeddingGenerator,
     auroraWriter: stubAuroraWriter,

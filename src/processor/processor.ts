@@ -632,6 +632,7 @@ export class SignalProcessor {
               recipientAddress: signal.data.from.address,
               workflow: signal.data.workflow,
               workflowData: signal.data.workflowData,
+              actions: [],
               tags: [],
               summary: "",
               s3Key: "",
@@ -810,6 +811,7 @@ export class SignalProcessor {
           headers: {},
           workflow: "notice",
           workflowData: { workflow: "notice", noticeType: "other", provider: "" } as const,
+          actions: [],
           tags: [],
           summary: "",
         },
@@ -943,6 +945,7 @@ export class SignalProcessor {
           headers: parsed.headers,
           workflow: "notice",
           workflowData: { workflow: "notice", noticeType: "other", provider: "" } as const,
+          actions: [],
           tags: [],
           summary: "",
         },
@@ -989,7 +992,7 @@ export class SignalProcessor {
     let classificationOutput: ClassificationOutput;
     if (classification.isErr()) {
       this.logger.warn("Classification failed — proceeding with workflow:none fallback.", { code: "processor.classification_fallback", accountId, sesMessageId, error: classification.error });
-      classificationOutput = { workflow: "unspecified", workflowData: { workflow: "unspecified" }, tags: [], summary: "", labels: [] };
+      classificationOutput = { workflow: "unspecified", workflowData: { workflow: "unspecified" }, tags: [], summary: "", labels: [], actions: [] };
     } else {
       classificationOutput = classification.value;
     }
@@ -1177,6 +1180,7 @@ export class SignalProcessor {
     const systemLabels = assignSystemLabels({
       workflow: classificationOutput.workflow,
       workflowData: classificationOutput.workflowData,
+      actions: classificationOutput.actions,
       senderETLD1,
       aliasSenderConfig: effectiveAliasSenderConfig,
       unknownSenderPolicy: effectiveFilterMode,
@@ -1990,6 +1994,7 @@ function buildSignal(opts: {
       recipientAddress,
       workflow: classification.workflow,
       workflowData: classification.workflowData,
+      actions: classification.actions,
       tags: classification.tags.slice(0, 50),
       summary: classification.summary,
       s3Key,
