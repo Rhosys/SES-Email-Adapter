@@ -153,7 +153,13 @@ export class DigestWorker {
       accountId,
     })
 
-    if (sendResult.isErr()) return err(sendResult.error)
+    if (sendResult.isErr()) {
+      if (sendResult.error.kind === "permanent_ses_error") {
+        logger.warn("Digest send permanently rejected by SES — will not retry.", { code: "digest.worker.send_permanent", accountId, error: sendResult.error })
+        return ok(undefined)
+      }
+      return err(sendResult.error)
+    }
 
     logger.info("Digest sent", {
       code: "digest.worker.sent",

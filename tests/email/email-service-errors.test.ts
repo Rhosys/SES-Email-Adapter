@@ -26,7 +26,7 @@ describe("EmailService error classifications — REQ-0.6", () => {
     service = new EmailService(sesClient, { from: "noreply@example.com", configSetName: "my-config-set" }, logger);
   });
 
-  it("ConfigurationSetSendingPausedException classified as permanent — returns ok with empty messageId", async () => {
+  it("ConfigurationSetSendingPausedException classified as permanent — returns err with permanent_ses_error", async () => {
     const sesError = Object.assign(new Error("Configuration set sending is paused"), {
       name: "ConfigurationSetSendingPausedException",
       $metadata: { httpStatusCode: 400 },
@@ -36,8 +36,8 @@ describe("EmailService error classifications — REQ-0.6", () => {
     const opts = { to: "u@e.com", subject: "S", textBody: "B", accountId: "a" };
     const result = await service.send(opts);
 
-    expect(result.isOk()).toBe(true);
-    expect(result._unsafeUnwrap()).toEqual({ messageId: "" });
+    expect(result.isErr()).toBe(true);
+    expect(result._unsafeUnwrapErr()).toEqual(expect.objectContaining({ kind: "permanent_ses_error", errorName: "ConfigurationSetSendingPausedException", httpStatus: 400 }));
 
     const errorCalls = logger.calls.filter(c => c.method === "error");
     expect(errorCalls).toHaveLength(1);
@@ -60,7 +60,7 @@ describe("EmailService error classifications — REQ-0.6", () => {
     expect(mockSend).not.toHaveBeenCalled();
   });
 
-  it("ConfigurationSetDoesNotExistException classified as permanent — returns ok with empty messageId", async () => {
+  it("ConfigurationSetDoesNotExistException classified as permanent — returns err with permanent_ses_error", async () => {
     const sesError = Object.assign(new Error("Configuration set does not exist"), {
       name: "ConfigurationSetDoesNotExistException",
       $metadata: { httpStatusCode: 400 },
@@ -70,8 +70,8 @@ describe("EmailService error classifications — REQ-0.6", () => {
     const opts = { to: "u@e.com", subject: "S", textBody: "B", accountId: "a" };
     const result = await service.send(opts);
 
-    expect(result.isOk()).toBe(true);
-    expect(result._unsafeUnwrap()).toEqual({ messageId: "" });
+    expect(result.isErr()).toBe(true);
+    expect(result._unsafeUnwrapErr()).toEqual(expect.objectContaining({ kind: "permanent_ses_error", errorName: "ConfigurationSetDoesNotExistException", httpStatus: 400 }));
 
     const errorCalls = logger.calls.filter(c => c.method === "error");
     expect(errorCalls).toHaveLength(1);

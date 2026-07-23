@@ -658,7 +658,7 @@ export class ThreadsApi {
           fromAddress: recipientAddress,
           accountId,
         },
-        { emailService },
+        { emailService, logger },
       );
 
       if (rsvpResult.isErr()) return err(c, 422, "Failed to send RSVP", "RSVP_SEND_FAILED");

@@ -303,7 +303,7 @@ describe("Scenario: UI RSVP sends masked reply to organizer preserving user priv
         fromAddress: ALIAS_ADDRESS,
         accountId: "acct-test",
       },
-      { emailService },
+      { emailService, logger: createMockLogger() },
     );
 
     expect(result.isOk()).toBe(true);

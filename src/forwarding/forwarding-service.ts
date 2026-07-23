@@ -130,7 +130,7 @@ export class ForwardingService implements IForwardingService {
       domain: this.mailDomain,
     })
 
-    return this.emailService.send({
+    const result = await this.emailService.send({
       to: target,
       subject: "Verify your forwarding address",
       textBody: `Click the link below to verify that you want to receive forwarded emails at ${target}:\n\n${verifyUrl}`,
@@ -138,7 +138,17 @@ export class ForwardingService implements IForwardingService {
       tags,
       fromOverride: `"Numaeel" <noreply@${this.mailDomain}>`,
       accountId,
-    }).then(r => r.map(() => undefined))
+    })
+
+    if (result.isErr()) {
+      if (result.error.kind === "permanent_ses_error") {
+        this.logger.warn("Forwarding verification email permanently rejected by SES — will not retry.", { code: "forwarding.verify_send_permanent", accountId, target, error: result.error })
+        return ok(undefined)
+      }
+      return err(result.error)
+    }
+
+    return ok(undefined)
   }
 
   // ---------------------------------------------------------------------------

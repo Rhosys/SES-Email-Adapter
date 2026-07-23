@@ -287,8 +287,12 @@ export class AccountsApi {
       const textBody = `You've been invited to join ${accountName} on Numaeel.\n\nAccept your invite: ${inviteUrl}\n\nView your account: ${appBaseUrl}/a/`;
       const sendResult = await emailService.send({ to: body.email, subject: `You've been invited to join ${accountName} on Numaeel`, textBody, htmlBody, tags, fromOverride: `"Numaeel" <noreply@${MAIL_DOMAIN}>`, accountId });
       if (sendResult.isErr()) {
-        logger.warn("Team invite email send failed (transient SES error).", { code: "invite.email_send_failed", accountId, email: body.email, inviteId });
-        return err(c, 503, "Email delivery temporarily unavailable");
+        if (sendResult.error.kind === "permanent_ses_error") {
+          logger.warn("Team invite email permanently rejected by SES — will not retry.", { code: "invite.email_send_permanent", accountId, email: body.email, inviteId, error: sendResult.error });
+        } else {
+          logger.warn("Team invite email send failed (transient SES error).", { code: "invite.email_send_failed", accountId, email: body.email, inviteId });
+          return err(c, 503, "Email delivery temporarily unavailable");
+        }
       }
       return new Response(null, { status: 201 });
     });

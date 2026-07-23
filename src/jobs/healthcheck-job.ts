@@ -64,6 +64,14 @@ export class HealthcheckJob {
       });
 
       if (result.isErr()) {
+        if (result.error.kind === "permanent_ses_error") {
+          this.deps.logger.error(
+            "Healthcheck email permanently rejected by SES — the healthcheck email did NOT go out.",
+            { code: "healthcheck.send_permanent_failure", messageId, error: result.error },
+          );
+          return;
+        }
+        // transient/invalid_argument
         const cause = result.error.kind === "transient_ses_error" ? result.error.cause as { message?: string } | undefined : undefined;
         this.deps.logger.error(
           `Healthcheck email send failed — SES returned error${cause?.message ? `: ${cause.message}` : ""}.`,
@@ -71,17 +79,6 @@ export class HealthcheckJob {
             code: "healthcheck.send_failed",
             messageId,
             error: result.error,
-          },
-        );
-        return;
-      }
-
-      if (result.value.messageId === "") {
-        this.deps.logger.error(
-          "Healthcheck email send was accepted as a no-op — a permanent SES failure was swallowed; the healthcheck email did NOT go out.",
-          {
-            code: "healthcheck.send_permanent_failure",
-            messageId,
           },
         );
         return;

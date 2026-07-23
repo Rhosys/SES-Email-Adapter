@@ -6,6 +6,7 @@ import type { ReplySender } from "../processor/processor.js";
 import type { EmailService } from "../email/email-service.js";
 import type { EmailServiceError } from "../email/email-service.js";
 import type { Result } from "../errors.js";
+import { ok } from "../errors.js";
 import { buildOutboundTags } from "../email/ses-tags.js";
 import type { Logger } from "../logger.js";
 
@@ -34,7 +35,7 @@ export class ReplySenderService implements ReplySender {
       threadId: opts.threadId,
     });
 
-    return this.emailService.send({
+    const result = await this.emailService.send({
       to: opts.to,
       fromOverride: opts.from,
       subject: `Re: ${opts.subject}`,
@@ -46,5 +47,12 @@ export class ReplySenderService implements ReplySender {
       ],
       tags,
     });
+
+    if (result.isErr() && result.error.kind === "permanent_ses_error") {
+      this.logger.warn("Reply send permanently rejected by SES — will not retry.", { code: "reply_sender.send_permanent", accountId: opts.accountId, error: result.error });
+      return ok({ messageId: "" });
+    }
+
+    return result;
   }
 }

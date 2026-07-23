@@ -7,6 +7,7 @@ import { ok, err } from "../../errors.js";
 import type { Result } from "../../errors.js";
 import type { EmailService, EmailServiceError } from "../../email/email-service.js";
 import type { CalendarEventData } from "../../types/calendar.js";
+import type { Logger } from "../../logger.js";
 
 export interface RsvpComposeOpts {
   decision: "accepted" | "declined" | "tentative";
@@ -35,7 +36,7 @@ const PARTSTAT_MAP = {
  */
 export async function sendRsvp(
   opts: RsvpComposeOpts,
-  deps: { emailService: EmailService },
+  deps: { emailService: EmailService; logger: Logger },
 ): Promise<Result<{ messageId: string }, EmailServiceError>> {
   const { decision, originalCalendarData, aliasAddress, organizerAddress, fromAddress } = opts;
 
@@ -59,6 +60,10 @@ export async function sendRsvp(
   });
 
   if (result.isErr()) {
+    if (result.error.kind === "permanent_ses_error") {
+      deps.logger.warn("RSVP send permanently rejected by SES — will not retry.", { code: "rsvp.send_permanent", accountId: opts.accountId, error: result.error });
+      return ok({ messageId: "" });
+    }
     return err(result.error);
   }
 
