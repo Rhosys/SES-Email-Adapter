@@ -37,6 +37,14 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Merge target branch into PR
+        run: |
+          git fetch origin "${{ github.base_ref }}"
+          git -c user.email="ci@local" -c user.name="CI" merge --no-edit "origin/${{ github.base_ref }}"
 
       - name: Setup Environment
         uses: ./.github/actions/setup
