@@ -19,6 +19,9 @@ vi.mock("../../src/dns/dns-checker.js", () => ({
 
 import { HealthcheckJob, type HealthcheckJobDeps } from "../../src/jobs/healthcheck-job.js";
 import { HealthcheckValidator } from "../../src/jobs/healthcheck-validator.js";
+import { checkDomain } from "../../src/dns/dns-checker.js";
+
+const okSesChecker = { canSendFrom: vi.fn().mockResolvedValue({ verified: true, dkimEnabled: true, accountSendingEnabled: true }) };
 
 /**
  * Property 2: Deterministic per-day healthcheck identity
@@ -38,7 +41,7 @@ function createMockDeps(overrides: Partial<HealthcheckJobDeps> = {}): Healthchec
   const threadDb = { listThreads: vi.fn().mockResolvedValue(ok({ items: [] })) } as unknown as HealthcheckJobDeps["threadDb"];
   const logger = createMockLogger();
   const searchDatabase = { hasEmbedding: vi.fn().mockResolvedValue(ok(false)) };
-  const validator = new HealthcheckValidator({ threadDb, searchDatabase, mailDomain: MAIL_DOMAIN, logger });
+  const validator = new HealthcheckValidator({ threadDb, searchDatabase, sesChecker: okSesChecker, dnsChecker: { checkDomain }, mailDomain: MAIL_DOMAIN, logger });
   return {
     threadDb,
     emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-123" })) } as unknown as HealthcheckJobDeps["emailService"],

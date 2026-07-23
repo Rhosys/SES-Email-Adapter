@@ -11,8 +11,11 @@ import { ok, err, dbError } from "../../src/errors.js";
 import { HealthcheckJob } from "../../src/jobs/healthcheck-job.js";
 import type { HealthcheckJobDeps } from "../../src/jobs/healthcheck-job.js";
 import { HealthcheckValidator } from "../../src/jobs/healthcheck-validator.js";
+import { checkDomain } from "../../src/dns/dns-checker.js";
 import { createMockLogger } from "../helpers/mock-logger.js";
 import type { MockLogger } from "../helpers/mock-logger.js";
+
+const okSesChecker = { canSendFrom: vi.fn().mockResolvedValue({ verified: true, dkimEnabled: true, accountSendingEnabled: true }) };
 
 vi.mock("../../src/dns/dns-checker.js", () => ({
   checkDomain: vi.fn().mockResolvedValue([
@@ -65,7 +68,7 @@ function makeDeps(overrides: DepsOverrides = {}): HealthcheckJobDeps {
   const emailService = overrides.emailService ?? ({ send: vi.fn().mockResolvedValue(ok({ messageId: "ses-msg-1" })) } as any);
   const searchDatabase = overrides.searchDatabase ?? { hasEmbedding: vi.fn().mockResolvedValue(ok(true)) };
   const logger = overrides.logger ?? createMockLogger();
-  const validator = new HealthcheckValidator({ threadDb, searchDatabase, mailDomain: MAIL_DOMAIN, logger });
+  const validator = new HealthcheckValidator({ threadDb, searchDatabase, sesChecker: okSesChecker, dnsChecker: { checkDomain }, mailDomain: MAIL_DOMAIN, logger });
   return {
     threadDb,
     emailService,

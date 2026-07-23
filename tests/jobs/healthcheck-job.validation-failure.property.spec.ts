@@ -4,6 +4,9 @@ import { DateTime } from "luxon";
 import { HealthcheckJob, type HealthcheckJobDeps } from "../../src/jobs/healthcheck-job.js";
 import { HealthcheckValidator } from "../../src/jobs/healthcheck-validator.js";
 import { createMockLogger, type MockLogger } from "../helpers/mock-logger.js";
+import { checkDomain } from "../../src/dns/dns-checker.js";
+
+const okSesChecker = { canSendFrom: vi.fn().mockResolvedValue({ verified: true, dkimEnabled: true, accountSendingEnabled: true }) };
 
 vi.mock("node:dns/promises", () => ({
   default: {
@@ -75,7 +78,7 @@ function makeDeps(overrides: {
   const searchDatabase = {
     hasEmbedding: vi.fn().mockResolvedValue(ok(overrides.hasEmbedding ?? true)),
   };
-  const validator = new HealthcheckValidator({ threadDb, searchDatabase, mailDomain: MAIL_DOMAIN, logger });
+  const validator = new HealthcheckValidator({ threadDb, searchDatabase, sesChecker: okSesChecker, dnsChecker: { checkDomain }, mailDomain: MAIL_DOMAIN, logger });
 
   const deps: HealthcheckJobDeps = {
     threadDb,

@@ -4,7 +4,6 @@ import type { Logger } from "../logger.js";
 import type { ThreadDatabase } from "../database/thread-database.js";
 import type { DbError, Result } from "../errors.js";
 import type { Domain, DnsRecord } from "../types/index.js";
-import { checkDomain } from "../dns/dns-checker.js";
 import { SYSTEM_ACCOUNT_ID } from "../database/system-account-db.js";
 
 // ---------------------------------------------------------------------------
@@ -58,8 +57,8 @@ export interface ValidationChecks {
 export interface HealthcheckValidatorDeps {
   threadDb: ThreadDatabase;
   searchDatabase: { hasEmbedding(threadId: string): Promise<Result<boolean, DbError>> };
-  sesChecker?: { canSendFrom(domain: string): Promise<{ verified: boolean; sendingEnabled: boolean; detail?: string }> };
-  dnsChecker?: { checkDomain(domain: Domain): Promise<DnsRecord[]> };
+  sesChecker: { canSendFrom(domain: string): Promise<{ verified: boolean; dkimEnabled: boolean; accountSendingEnabled: boolean; detail?: string }> };
+  dnsChecker: { checkDomain(domain: Domain): Promise<DnsRecord[]> };
   mailDomain: string;
   logger: Logger;
 }
@@ -182,7 +181,7 @@ export class HealthcheckValidator {
       checks.hasEmbedding = false;
     }
 
-    const allPassed = checks.workflowIsHealthcheck && checks.hasEmbedding && infraChecks.every((c) => c.status === "pass");
+    const allPassed = infraChecks.length > 0 && checks.workflowIsHealthcheck && checks.hasEmbedding && infraChecks.every((c) => c.status === "pass");
     if (allPassed) {
       this.deps.logger.track(`Healthcheck validation passed — ${date}'s email fully processed.`, {
         code: "healthcheck.validation_passed",
@@ -299,7 +298,6 @@ export class HealthcheckValidator {
   }
 
   private async checkSesIdentity(): Promise<HealthCheckItem[]> {
-    if (!this.deps.sesChecker) return [];
     const domain = this.deps.mailDomain;
     try {
       const result = await this.deps.sesChecker.canSendFrom(domain);
@@ -312,11 +310,18 @@ export class HealthcheckValidator {
           ...(!result.verified ? { detail: result.detail ?? `Domain "${domain}" is not verified in SES.` } : {}),
         },
         {
-          id: "ses-sending-enabled",
-          label: `SES sending enabled: ${domain}`,
-          status: result.sendingEnabled ? "pass" : "fail",
+          id: "ses-dkim",
+          label: `SES DKIM signing: ${domain}`,
+          status: result.dkimEnabled ? "pass" : "fail",
           section: "ses",
-          ...(!result.sendingEnabled ? { detail: result.detail ?? `Sending is paused or disabled for "${domain}".` } : {}),
+          ...(!result.dkimEnabled ? { detail: result.detail ?? `DKIM signing is not enabled for "${domain}".` } : {}),
+        },
+        {
+          id: "ses-sending-enabled",
+          label: `SES account sending enabled`,
+          status: result.accountSendingEnabled ? "pass" : "fail",
+          section: "ses",
+          ...(!result.accountSendingEnabled ? { detail: result.detail ?? `Account-level sending is disabled in SES.` } : {}),
         },
       ];
       return checks;
@@ -342,9 +347,8 @@ export class HealthcheckValidator {
       updatedAt: "2025-01-01T00:00:00.000Z",
     };
 
-    const checker = this.deps.dnsChecker ?? { checkDomain };
     try {
-      const records = await checker.checkDomain(healthcheckDomain);
+      const records = await this.deps.dnsChecker.checkDomain(healthcheckDomain);
       return records.map(record => ({
         id: `delegation-${record.type.toLowerCase()}-${record.name.split(".")[0]}`,
         label: `Delegation ${record.type}: ${record.name}`,
