@@ -238,7 +238,7 @@ export async function handleCalendarResponse(
       fromAddress: aliasAddress,
       accountId,
     },
-    { emailService },
+    { emailService, logger },
   );
 
   if (rsvpResult.isErr()) return err(rsvpResult.error);

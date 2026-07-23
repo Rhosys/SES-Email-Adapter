@@ -256,7 +256,13 @@ export class OnboardingTaskHandler {
       accountId,
     });
 
-    if (sendResult.isErr()) return err(sendResult.error);
+    if (sendResult.isErr()) {
+      if (sendResult.error.kind === "permanent_ses_error") {
+        this.logger.warn("Onboarding email permanently rejected by SES — will not retry.", { code: "onboarding.send_permanent", accountId, error: sendResult.error })
+        return ok(undefined)
+      }
+      return err(sendResult.error)
+    }
 
     return ok(undefined);
   }

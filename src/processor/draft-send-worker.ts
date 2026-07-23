@@ -73,6 +73,10 @@ export class DraftSendWorker {
     });
 
     if (sendResult.isErr()) {
+      if (sendResult.error.kind === "permanent_ses_error") {
+        this.logger.warn("Draft send permanently rejected by SES — will not retry.", { code: "draft_send.send_permanent", signalId, accountId, error: sendResult.error });
+        return ok(undefined);
+      }
       // Transient — let SQS retry
       return err(sendResult.error);
     }

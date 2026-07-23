@@ -3,6 +3,7 @@ import { sendRsvp } from "../../../src/processor/calendar/rsvp-composer.js";
 import type { EmailService } from "../../../src/email/email-service.js";
 import type { CalendarEventData } from "../../../src/types/calendar.js";
 import { ok } from "../../../src/errors.js";
+import { createMockLogger } from "../../helpers/mock-logger.js";
 import ICAL from "ical.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -78,7 +79,7 @@ describe("sendRsvp — RSVP targets ORGANIZER mailto: address", () => {
         fromAddress: "alias@proxy.com",
         accountId: "acct-test",
       },
-      { emailService },
+      { emailService, logger: createMockLogger() },
     );
 
     const sendCall = (emailService.send as ReturnType<typeof vi.fn>).mock.calls[0]![0];
@@ -122,7 +123,7 @@ describe("sendRsvp — REPLY uses original UID not proxy UID", () => {
         fromAddress: "alias@proxy.com",
         accountId: "acct-test",
       },
-      { emailService },
+      { emailService, logger: createMockLogger() },
     );
 
     // Extract the .ics content from the send call (textBody)

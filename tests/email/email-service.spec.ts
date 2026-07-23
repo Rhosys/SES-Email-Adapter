@@ -48,7 +48,7 @@ describe("EmailService.send()", () => {
     expect(infoCalls[0]!.context).toEqual(expect.objectContaining({ messageId: "ses-123" }));
   });
 
-  it("MessageRejected with 'Email address is not verified' classified as permanent — returns ok and logs error", async () => {
+  it("MessageRejected with 'Email address is not verified' classified as permanent — returns err with permanent_ses_error and logs error", async () => {
     const sesError = Object.assign(new Error("Email address is not verified. The following identities failed the check in region EU-CENTRAL-1: user@example.com"), {
       name: "MessageRejected",
       $metadata: { httpStatusCode: 400 },
@@ -58,8 +58,8 @@ describe("EmailService.send()", () => {
     const opts = { to: "user@example.com", subject: "Test", textBody: "Body", accountId: "acct-test" };
     const result = await service.send(opts);
 
-    expect(result.isOk()).toBe(true);
-    expect(result._unsafeUnwrap()).toEqual({ messageId: "" });
+    expect(result.isErr()).toBe(true);
+    expect(result._unsafeUnwrapErr()).toEqual(expect.objectContaining({ kind: "permanent_ses_error", errorName: "MessageRejected", httpStatus: 400 }));
 
     const errorCalls = logger.calls.filter(c => c.method === "error");
     expect(errorCalls).toHaveLength(1);
@@ -157,8 +157,8 @@ describe("EmailService.send()", () => {
 
     const result = await service.send({ to: "u@e.com", subject: "S", textBody: "B", accountId: "a" });
 
-    expect(result.isOk()).toBe(true);
-    expect(result._unsafeUnwrap()).toEqual({ messageId: "" });
+    expect(result.isErr()).toBe(true);
+    expect(result._unsafeUnwrapErr()).toEqual(expect.objectContaining({ kind: "permanent_ses_error", errorName: "MessageRejected", httpStatus: 400 }));
   });
 
   it("fromOverride used when provided", async () => {
@@ -267,7 +267,7 @@ describe("EmailService.sendRaw()", () => {
     expect(logger.calls.filter(c => c.method === "warn")).toHaveLength(1);
   });
 
-  it("unverified identity error returns ok with empty messageId", async () => {
+  it("unverified identity error returns err with permanent_ses_error", async () => {
     const sesError = Object.assign(new Error("Email address is not verified. The following identities failed the check in region EU-CENTRAL-1: x@x.com"), {
       name: "MessageRejected",
       $metadata: { httpStatusCode: 400 },
@@ -276,8 +276,8 @@ describe("EmailService.sendRaw()", () => {
 
     const result = await service.sendRaw({ to: "r@e.com", rawData: new Uint8Array([1]), accountId: "a" });
 
-    expect(result.isOk()).toBe(true);
-    expect(result._unsafeUnwrap()).toEqual({ messageId: "" });
+    expect(result.isErr()).toBe(true);
+    expect(result._unsafeUnwrapErr()).toEqual(expect.objectContaining({ kind: "permanent_ses_error", errorName: "MessageRejected", httpStatus: 400 }));
     expect(logger.calls.filter(c => c.method === "error")).toHaveLength(1);
   });
 });

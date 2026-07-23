@@ -4,11 +4,12 @@
 
 import { SESv2Client, SendEmailCommand } from "@aws-sdk/client-sesv2";
 import { ok, err } from "../errors.js";
-import type { TransientSesError, InvalidArgumentError, Result } from "../errors.js";
+import type { TransientSesError, PermanentSesError, InvalidArgumentError, Result } from "../errors.js";
+import { permanentSesError } from "../errors.js";
 import type { Logger } from "../logger.js";
 import { sanitizeTagName, sanitizeTagValue } from "./tag-sanitizer.js";
 
-export type EmailServiceError = TransientSesError | InvalidArgumentError;
+export type EmailServiceError = TransientSesError | InvalidArgumentError | PermanentSesError;
 
 export interface EmailSendOptions {
   to: string;
@@ -135,7 +136,7 @@ export class EmailService {
     }
   }
 
-  private classifyError(e: unknown, opts: EmailSendOptions | EmailRawOptions): Result<{ messageId: string }, TransientSesError> {
+  private classifyError(e: unknown, opts: EmailSendOptions | EmailRawOptions): Result<{ messageId: string }, EmailServiceError> {
     const error = e as { name?: string; message?: string; $metadata?: { httpStatusCode?: number } };
     const errorName = error.name ?? "UnknownError";
     const errorMessage = error.message ?? "unknown";
@@ -158,7 +159,7 @@ export class EmailService {
           error: e,
         },
       );
-      return ok({ messageId: "" });
+      return err(permanentSesError(errorName, httpStatus, "Tenant not found: " + opts.accountId, e));
     }
 
     const isPermanent =
@@ -174,7 +175,7 @@ export class EmailService {
         error: e,
         opts,
       });
-      return ok({ messageId: "" });
+      return err(permanentSesError(errorName, httpStatus, errorMessage, e));
     }
 
     this.logger.warn(`SES transient failure [${errorName}]: ${errorMessage}.`, {

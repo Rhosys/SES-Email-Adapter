@@ -94,6 +94,10 @@ export async function forwardCalendarInvite(
     });
 
     if (result.isErr()) {
+      if (result.error.kind === "permanent_ses_error") {
+        logger.warn("Calendar forward permanently rejected by SES — will not retry.", { code: "calendar_forwarder.send_permanent", accountId, signalId: calendarSignal.id, error: result.error });
+        return ok(undefined);
+      }
       return err(result.error);
     }
 
