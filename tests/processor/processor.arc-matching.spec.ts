@@ -14,6 +14,7 @@ import type { MultiClusterAuroraWriter } from "../../src/database/thread-matcher
 import type { Alias, Thread } from "../../src/types/index.js";
 import { dbError } from "../../src/errors.js";
 import { createMockLogger, type MockLogger } from "../helpers/mock-logger.js";
+import { makeHmacGeneratorFake } from "../helpers/hmac-generator-fake.js";
 
 vi.mock("../../src/embedding/cluster-registry.js", () => {
   const clusterA = Object.freeze({
@@ -199,7 +200,7 @@ describe("Feature: in-reply-to-arc-threading, Parallel arc matching tier selecti
       replySender: { sendReply: vi.fn().mockResolvedValue(ok({ messageId: "mock-reply-id" })) },
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
-      calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud" },
+      calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud", hmac: makeHmacGeneratorFake() },
     });
   }
 

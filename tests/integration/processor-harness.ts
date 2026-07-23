@@ -23,6 +23,7 @@ import type { InboundSignalMessage, SideEffectPayload, SesVerdict } from '../../
 import { JsonLogicRuleEvaluator } from '../../src/processor/rule-evaluator.js';
 import { createApp } from '../../src/api/app.js';
 import { makeAppDeps } from '../helpers/app-deps.js';
+import { makeHmacGeneratorFake } from '../helpers/hmac-generator-fake.js';
 import { AuthressAuthService } from '../../src/api/authress-auth.js';
 import { startMockAuthressServer } from './mock-authress.js';
 import type { MockAuthressServer } from './mock-authress.js';
@@ -139,6 +140,7 @@ export async function createProcessorHarness(): Promise<ProcessorHarness> {
     calendarForwarderDeps: {
       emailService: { send: async () => ok({ messageId: 'stub-cal' }), sendRaw: async () => {} } as unknown as EmailService,
       serviceDomain: 'platform.email.rhosys.cloud',
+      hmac: makeHmacGeneratorFake(),
     },
     logger,
     s3Client: s3,

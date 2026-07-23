@@ -12,6 +12,7 @@ import { ok, err, dbError } from "../../errors.js";
 import type { Logger } from "../../logger.js";
 import { buildProxyUid } from "./proxy-uid.js";
 import { buildForwardIcs } from "./ics-builder.js";
+import type { HmacSecretGenerator } from "./hmac-secret-generator.js";
 
 // ---------------------------------------------------------------------------
 // Dependencies (injected at cold start)
@@ -20,6 +21,7 @@ import { buildForwardIcs } from "./ics-builder.js";
 export interface CalendarForwarderDeps {
   emailService: EmailService;
   serviceDomain: string;
+  hmac: HmacSecretGenerator;
 }
 
 // ---------------------------------------------------------------------------
@@ -44,7 +46,7 @@ export async function forwardCalendarInvite(
   logger: Logger,
 ): Promise<Result<void, DbError | EmailServiceError>> {
   const { calendarSignal, calendarForwardingAddress, accountId, threadId } = opts;
-  const { emailService, serviceDomain } = deps;
+  const { emailService, serviceDomain, hmac } = deps;
   const calendarData = calendarSignal.data;
 
   // No-op if calendarForwardingAddress is empty
@@ -63,6 +65,7 @@ export async function forwardCalendarInvite(
     threadId,
     originalVeventUid: calendarData.originalVeventUid,
     serviceDomain,
+    hmac,
   });
 
   // Build proxy ORGANIZER: mailto:{threadId}@{accountId}.{serviceDomain}

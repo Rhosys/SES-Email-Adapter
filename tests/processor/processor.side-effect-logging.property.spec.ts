@@ -13,6 +13,7 @@ import type { Signal, Thread, Alias, AliasSender } from "../../src/types/index.j
 import { dbError } from "../../src/errors.js";
 import type { EmailService } from "../../src/email/email-service.js";
 import { createMockLogger, type MockLogger } from "../helpers/mock-logger.js";
+import { makeHmacGeneratorFake } from "../helpers/hmac-generator-fake.js";
 
 vi.mock("../../src/embedding/cluster-registry.js", () => {
   const entry = Object.freeze({
@@ -184,7 +185,7 @@ describe("Side effect caller logging", () => {
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       logger: mockLogger,
       draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
-      calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud" },
+      calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud", hmac: makeHmacGeneratorFake() },
     });
 
     // Side-effects are now executed via processSideEffect, not processRecord
@@ -218,7 +219,7 @@ describe("Side effect caller logging", () => {
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       logger: mockLogger,
       draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
-      calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud" },
+      calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud", hmac: makeHmacGeneratorFake() },
     });
 
     const payload: SideEffectPayload = { signal: makeSignal(), thread: makeThread() };
@@ -252,7 +253,7 @@ describe("Side effect caller logging", () => {
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       logger: mockLogger,
       draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
-      calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud" },
+      calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud", hmac: makeHmacGeneratorFake() },
     });
 
     // Signal with a forward action in matchedRules

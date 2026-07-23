@@ -1,4 +1,5 @@
 import type { IForwardingService } from "../../src/forwarding/forwarding-service.js";
+import { makeHmacGeneratorFake } from "../helpers/hmac-generator-fake.js";
 // Feature: split-embedding-pipeline, Property 2: Primary vector flows to arc matcher
 //
 // **Validates: Requirements 1.3**
@@ -206,7 +207,7 @@ describe("Feature: split-embedding-pipeline, Property 2: Primary vector flows to
       replySender: { sendReply: vi.fn().mockResolvedValue(ok({ messageId: "reply-msg-id" })) },
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
-      calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud" },
+      calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud", hmac: makeHmacGeneratorFake() },
     });
 
     await processor.processRecord(makeMessage("ses-prop2-test"), 1);

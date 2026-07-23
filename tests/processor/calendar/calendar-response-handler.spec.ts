@@ -4,21 +4,20 @@ import type { CalendarResponseHandlerDeps } from "../../../src/processor/calenda
 import type { InboundSignalMessage } from "../../../src/processor/processor.js";
 import type { Logger } from "../../../src/logger.js";
 import { ok } from "../../../src/errors.js";
-import { buildProxyUid } from "../../../src/processor/calendar/proxy-uid.js";
+import { buildProxyUid as buildProxyUidRaw } from "../../../src/processor/calendar/proxy-uid.js";
 import { generateId, generateAccountId } from "../../../src/utils/id.js";
+import { makeHmacGeneratorFake } from "../../helpers/hmac-generator-fake.js";
 
 // ---------------------------------------------------------------------------
-// Mock hmac-secret.ts — deterministic HMAC for tests without real KMS
+// Injected deterministic HMAC generator — no real KMS. `buildProxyUid` is
+// wrapped so the existing call sites (which omit hmac) inject the same
+// generator the handler-under-test receives via deps.
 // ---------------------------------------------------------------------------
 
-import { createHmac } from "node:crypto";
+const hmac = makeHmacGeneratorFake();
 
-vi.mock("../../../src/crypto/hmac-secret.js", () => ({
-  computeHmac16: (payload: string) =>
-    Promise.resolve(createHmac("sha256", new Uint8Array(32)).update(payload).digest("base64url").slice(0, 16)),
-  validateHmac16: (payload: string, hmac16: string) =>
-    Promise.resolve(createHmac("sha256", new Uint8Array(32)).update(payload).digest("base64url").slice(0, 16) === hmac16),
-}));
+const buildProxyUid = (opts: Omit<Parameters<typeof buildProxyUidRaw>[0], "hmac">) =>
+  buildProxyUidRaw({ ...opts, hmac });
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -78,6 +77,7 @@ function makeDeps(overrides: Partial<CalendarResponseHandlerDeps> = {}): Calenda
       send: vi.fn().mockResolvedValue(ok({ messageId: "ses-msg-002" })),
       sendRaw: vi.fn(),
     } as unknown as CalendarResponseHandlerDeps["emailService"],
+    hmac,
     ...overrides,
   };
 }

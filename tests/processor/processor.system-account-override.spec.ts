@@ -16,6 +16,7 @@ import type { HandlerRegistry } from "../../src/workflow/registry.js";
 import type { SchedulerClient } from "../../src/scheduler/scheduler-client.js";
 import { SYSTEM_ACCOUNT_ID } from "../../src/database/system-account-db.js";
 import type { EmailService } from "../../src/email/email-service.js";
+import { makeHmacGeneratorFake } from "../helpers/hmac-generator-fake.js";
 
 // Mock cluster-registry so processor can resolve the read cluster
 vi.mock("../../src/embedding/cluster-registry.js", () => {
@@ -169,7 +170,7 @@ describe("SYSTEM account workflow override", () => {
       replySender: { sendReply: vi.fn().mockResolvedValue(ok({ messageId: "reply-msg-id" })) },
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) } as unknown as SqsDispatcher,
       draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
-      calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud" },
+      calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud", hmac: makeHmacGeneratorFake() },
     });
   }
 

@@ -14,6 +14,7 @@ import type { MultiClusterAuroraWriter } from "../../src/database/thread-matcher
 import type { Signal, Alias, AliasSender } from "../../src/types/index.js";
 import type { EmailService } from "../../src/email/email-service.js";
 import { createMockLogger } from "../helpers/mock-logger.js";
+import { makeHmacGeneratorFake } from "../helpers/hmac-generator-fake.js";
 
 vi.mock("../../src/embedding/cluster-registry.js", () => {
   const cluster = Object.freeze({
@@ -164,7 +165,7 @@ describe("Cross-layer idempotence — live writes + cache + Aurora", () => {
       replySender: { sendReply: vi.fn().mockResolvedValue(ok({ messageId: "reply-msg-id" })) },
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
-      calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud" },
+      calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud", hmac: makeHmacGeneratorFake() },
     });
 
     const message = makeMessage("test-msg-001");
@@ -220,7 +221,7 @@ describe("Cross-layer idempotence — live writes + cache + Aurora", () => {
       replySender: { sendReply: vi.fn().mockResolvedValue(ok({ messageId: "reply-msg-id" })) },
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
-      calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud" },
+      calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud", hmac: makeHmacGeneratorFake() },
     });
 
     const message = makeMessage("test-msg-001");
