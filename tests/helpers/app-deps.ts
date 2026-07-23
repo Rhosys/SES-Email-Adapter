@@ -29,6 +29,7 @@ export function makeAppDeps(overrides: Partial<AppDeps>): AppDeps {
     triggerDigest: async () => {},
     embeddingGenerator: {} as never,
     threadMatcher: {} as never,
+    unsubscribeTokenGenerator: { generate: async () => "tok", verify: async () => ok({ accountId: "acct", emailType: "digest" as const }) } as never,
     ...overrides,
   } as AppDeps;
 }

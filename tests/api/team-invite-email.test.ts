@@ -9,10 +9,6 @@ vi.mock("../../src/dns/mx-validator.js", () => ({
   validateRecipientMx: vi.fn().mockResolvedValue({ isOk: () => true, isErr: () => false, _unsafeUnwrap: () => undefined }),
 }));
 
-vi.mock("../../src/email/unsubscribe-token.js", () => ({
-  generateUnsubscribeToken: vi.fn().mockResolvedValue("mock-jwt-token"),
-}));
-
 vi.mock("../../src/email/template-renderer.js", () => ({
   renderTemplate: vi.fn().mockResolvedValue("<html>team-invite-rendered</html>"),
 }));
@@ -104,7 +100,6 @@ describe("Team invite email", () => {
     expect(renderTemplate).toHaveBeenCalledWith("team-invite", expect.objectContaining({
       accountName: "Acme Corp",
       inviteUrl: expect.stringContaining("inv-abc123"),
-      unsubscribeCode: "mock-jwt-token",
       emailType: "team-invite",
     }));
   });

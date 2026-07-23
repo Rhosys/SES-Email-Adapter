@@ -3,6 +3,7 @@ import { S3Client } from "@aws-sdk/client-s3";
 import { LambdaClient } from "@aws-sdk/client-lambda";
 import { SFNClient } from "@aws-sdk/client-sfn";
 import { SQSClient, SendMessageCommand } from "@aws-sdk/client-sqs";
+import { KMSClient } from "@aws-sdk/client-kms";
 import { OnboardingTaskHandler } from "./onboarding/onboarding-task-handler.js";
 import { SfnAccountCreationStarter } from "./onboarding/account-creation-starter.js";
 import type { AccountCreationStarter } from "./onboarding/account-creation-starter.js";
@@ -50,6 +51,7 @@ import { ForwardingService } from "./forwarding/forwarding-service.js";
 import { EmailSignalStore } from "./database/email-signal-store.js";
 import { DigestDispatcher } from "./digest/digest-dispatcher.js";
 import { DigestWorker } from "./digest/digest-worker.js";
+import { UnsubscribeTokenGenerator } from "./email/unsubscribe-token-generator.js";
 import { BillingHandler } from "./billing/billing-handler.js";
 import { ReindexDispatcher } from "./jobs/reindex/reindex-dispatcher.js";
 import { DraftSendDispatcher } from "./processor/draft-send-dispatcher.js";
@@ -95,6 +97,7 @@ export class CompositeRoot {
     const sesv2 = new SESv2Client({});
     const sqs = new SQSClient({});
     const sfn = new SFNClient({});
+    const kms = new KMSClient({});
 
     const S3_BUCKET = process.env["EMAIL_BUCKET"]!;
     const CONTENT_BUCKET = process.env["CONTENT_BUCKET"]!;
@@ -148,6 +151,12 @@ export class CompositeRoot {
     const externalEmailHandler = new ReplySenderService(emailService, logger);
 
     const APP_BASE_URL = process.env["APP_BASE_URL"] ?? "";
+
+    const API_DOMAIN = process.env["API_DOMAIN"] ?? "";
+    const AUTHRESS_KMS_KEY_ARN = process.env["AUTHRESS_KMS_KEY_ARN"] ?? "";
+    const AUTHRESS_KEY_ID = process.env["AUTHRESS_KEY_ID"] ?? "";
+    const unsubscribeTokenGenerator = new UnsubscribeTokenGenerator(kms, API_DOMAIN, AUTHRESS_KMS_KEY_ARN, AUTHRESS_KEY_ID);
+
     const emailSignalStore = new EmailSignalStore(s3, S3_BUCKET);
     const forwardingService = new ForwardingService(emailService, accountDb, emailSignalStore, APP_BASE_URL, MAIL_DOMAIN, logger);
 
@@ -276,6 +285,7 @@ export class CompositeRoot {
       threadDb,
       signalDb: threadDb,
       emailService,
+      unsubscribeTokenGenerator,
       logger,
     });
 
@@ -350,6 +360,7 @@ export class CompositeRoot {
       },
       embeddingGenerator,
       threadMatcher: searchDatabase,
+      unsubscribeTokenGenerator,
     });
 
     // -----------------------------------------------------------------------

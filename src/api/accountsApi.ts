@@ -8,8 +8,6 @@ import { aggregateStatsRows } from "../database/stats-writer.js";
 import { isValidEmail } from "../email/validate-email.js";
 import { renderTemplate } from "../email/template-renderer.js";
 import { buildEmailTags } from "../email/tag-sanitizer.js";
-import { buildUnsubscribeHeaders } from "../email/unsubscribe-headers.js";
-import { generateUnsubscribeToken } from "../email/unsubscribe-token.js";
 import { UpdateAccountRequest, InviteUserRequest, UpdateUserRequest } from "./requests.js";
 import { Account as AccountSchema, ErrorCode, Pagination as PaginationSchema } from "./schemas.js";
 import type { AccountDatabase } from "../database/account-database.js";
@@ -51,9 +49,6 @@ export interface AccessService {
 }
 
 const MAIL_DOMAIN = process.env["MAIL_DOMAIN"] ?? "platform.email.rhosys.cloud";
-const API_DOMAIN = process.env["API_DOMAIN"] ?? "";
-const KMS_KEY_ARN = process.env["AUTHRESS_KMS_KEY_ARN"] ?? "";
-const KEY_ID = process.env["AUTHRESS_KEY_ID"] ?? "";
 
 function page<K extends string, T>(key: K, items: T[], nextCursor?: string): Record<K, T[]> & { pagination: Pagination } {
   return { [key]: items, pagination: { cursor: nextCursor ?? null } } as Record<K, T[]> & { pagination: Pagination };
@@ -287,12 +282,10 @@ export class AccountsApi {
       const accountName = account?.name ?? accountId;
       const fullDate = DateTime.utc().toISODate()!;
       const triggerId = `invite-${inviteId}`;
-      const unsubscribeCode = await generateUnsubscribeToken({ accountId, forwardingTargetId: accountId, emailType: "team-invite", apiDomain: API_DOMAIN, kmsKeyArn: KMS_KEY_ARN, keyId: KEY_ID });
-      const htmlBody = await renderTemplate("team-invite", { accountName, inviteUrl, unsubscribeCode, domain: appBaseUrl.replace(/^https?:\/\//, ""), emailType: "team-invite" });
+      const htmlBody = await renderTemplate("team-invite", { accountName, inviteUrl, domain: appBaseUrl.replace(/^https?:\/\//, ""), emailType: "team-invite" });
       const tags = buildEmailTags({ accountId, fullDate, invocationId: logger.getInvocationId(), triggerId });
-      const headers = buildUnsubscribeHeaders(accountId, API_DOMAIN, unsubscribeCode);
       const textBody = `You've been invited to join ${accountName} on Numaeel.\n\nAccept your invite: ${inviteUrl}\n\nView your account: ${appBaseUrl}/a/`;
-      const sendResult = await emailService.send({ to: body.email, subject: `You've been invited to join ${accountName} on Numaeel`, textBody, htmlBody, headers, tags, fromOverride: `"Numaeel" <noreply@${MAIL_DOMAIN}>`, accountId });
+      const sendResult = await emailService.send({ to: body.email, subject: `You've been invited to join ${accountName} on Numaeel`, textBody, htmlBody, tags, fromOverride: `"Numaeel" <noreply@${MAIL_DOMAIN}>`, accountId });
       if (sendResult.isErr()) {
         logger.warn("Team invite email send failed (transient SES error).", { code: "invite.email_send_failed", accountId, email: body.email, inviteId });
         return err(c, 503, "Email delivery temporarily unavailable");

@@ -10,10 +10,6 @@ vi.mock("../../src/email/template-renderer.js", () => ({
   renderTemplate: vi.fn().mockResolvedValue("<html>rendered</html>"),
 }));
 
-vi.mock("../../src/email/unsubscribe-token.js", () => ({
-  generateUnsubscribeToken: vi.fn().mockResolvedValue("mock-jwt-token"),
-}));
-
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -120,7 +116,6 @@ describe("Onboarding email send", () => {
       domainIcon: "✅",
       senderIcon: "❌",
       emailsIcon: "❌",
-      unsubscribeCode: "mock-jwt-token",
     }));
   });
 });

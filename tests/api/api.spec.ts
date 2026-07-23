@@ -21,10 +21,6 @@ vi.mock("../../src/dns/mx-validator.js", () => ({
   validateRecipientMx: vi.fn().mockResolvedValue({ isOk: () => true, isErr: () => false, _unsafeUnwrap: () => undefined }),
 }));
 
-vi.mock("../../src/email/unsubscribe-token.js", () => ({
-  generateUnsubscribeToken: vi.fn().mockResolvedValue("mock-jwt-token"),
-}));
-
 vi.mock("../../src/embedding/cluster-registry.js", () => ({
   getPrimaryThreadMatcherRegistry: vi.fn().mockReturnValue({ modelId: "amazon.titan-embed-text-v2:0" }),
 }));
