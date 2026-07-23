@@ -10,6 +10,8 @@ export default defineConfig({
       AURORA_SECRET_ARN:  "arn:aws:secretsmanager:eu-central-1:123456789012:secret:aurora-prod-titan-v2-test",
       AURORA_DB_NAME:     "signals",
     },
+    // Unit tests only. LLM integration tests (llm-tests/) have their own config
+    // and call real Bedrock — run separately via `npm run test:llm-bedrock-classifier`.
     include: ["tests/**/*.spec.ts", "tests/**/*.test.ts"],
     coverage: {
       provider: "v8",

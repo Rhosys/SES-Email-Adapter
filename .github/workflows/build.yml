@@ -5,6 +5,8 @@ on:
   push:
     branches:
       - main
+  schedule:
+    - cron: '0 6 * * 1'  # Monday 06:00 UTC — weekly LLM classifier validation
   workflow_dispatch:
     inputs:
       run_llm_tests:
@@ -389,13 +391,12 @@ jobs:
           fi
 
   # ==========================================
-  # MANUAL: LLM Integration Tests
+  # LLM Integration Tests (Bedrock Classifier)
   # ==========================================
   llm_tests:
-    name: LLM Integration Tests
-    if: github.event_name == 'workflow_dispatch' && inputs.run_llm_tests
+    name: LLM Classifier Tests (Bedrock)
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.run_llm_tests)
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
@@ -406,5 +407,5 @@ jobs:
           aws_account_id: ${{ secrets.AWS_ACCOUNT_ID }}
           aws_region: ${{ env.AWS_DEFAULT_REGION }}
 
-      - name: Run LLM Tests
-        run: npm run test:llm
+      - name: Run LLM Classifier Tests
+        run: npm run test:llm-bedrock-classifier

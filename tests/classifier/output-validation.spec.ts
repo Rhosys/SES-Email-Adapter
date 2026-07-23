@@ -152,4 +152,128 @@ describe("SignalClassifier — output validation", () => {
     expect(result.isOk()).toBe(true);
     expect(result._unsafeUnwrap().labels).toEqual(["billing"]);
   });
+
+  // -------------------------------------------------------------------------
+  // Actions — valid entries with url and text
+  // -------------------------------------------------------------------------
+
+  it("parses actions with valid url and text", async () => {
+    mockClassifyResponse({
+      workflow: "conversation",
+      workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
+      tags: [],
+      summary: "Email with links.",
+      labels: [],
+      actions: [
+        { url: "https://example.com/unsubscribe", text: "Unsubscribe" },
+        { url: "https://dashboard.stripe.com/invoices/123", text: "View Invoice" },
+      ],
+    });
+
+    const result = await classifier.classify(baseInput);
+
+    expect(result.isOk()).toBe(true);
+    const output = result._unsafeUnwrap();
+    expect(output.actions).toHaveLength(2);
+    expect(output.actions[0]).toEqual({ url: "https://example.com/unsubscribe", text: "Unsubscribe" });
+    expect(output.actions[1]).toEqual({ url: "https://dashboard.stripe.com/invoices/123", text: "View Invoice" });
+  });
+
+  // -------------------------------------------------------------------------
+  // Actions — invalid URLs filtered out
+  // -------------------------------------------------------------------------
+
+  it("filters out actions with invalid URLs", async () => {
+    mockClassifyResponse({
+      workflow: "conversation",
+      workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
+      tags: [],
+      summary: "Email.",
+      labels: [],
+      actions: [
+        { url: "https://valid.com/path", text: "Valid" },
+        { url: "not-a-url", text: "Invalid" },
+        { url: "ftp://wrong-protocol.com", text: "Wrong protocol" },
+        { url: "", text: "Empty" },
+      ],
+    });
+
+    const result = await classifier.classify(baseInput);
+
+    expect(result.isOk()).toBe(true);
+    const output = result._unsafeUnwrap();
+    expect(output.actions).toHaveLength(1);
+    expect(output.actions[0]).toEqual({ url: "https://valid.com/path", text: "Valid" });
+  });
+
+  // -------------------------------------------------------------------------
+  // Actions — text equal to url normalized to null
+  // -------------------------------------------------------------------------
+
+  it("normalizes text to null when it equals the url", async () => {
+    mockClassifyResponse({
+      workflow: "conversation",
+      workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
+      tags: [],
+      summary: "Email.",
+      labels: [],
+      actions: [
+        { url: "https://example.com/action", text: "https://example.com/action" },
+      ],
+    });
+
+    const result = await classifier.classify(baseInput);
+
+    expect(result.isOk()).toBe(true);
+    const output = result._unsafeUnwrap();
+    expect(output.actions).toHaveLength(1);
+    expect(output.actions[0]).toEqual({ url: "https://example.com/action", text: null });
+  });
+
+  // -------------------------------------------------------------------------
+  // Actions — defaults to empty array when missing from LLM response
+  // -------------------------------------------------------------------------
+
+  it("returns empty actions array when LLM omits actions field", async () => {
+    mockClassifyResponse({
+      workflow: "conversation",
+      workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
+      tags: [],
+      summary: "Email.",
+      labels: [],
+      // no actions field
+    });
+
+    const result = await classifier.classify(baseInput);
+
+    expect(result.isOk()).toBe(true);
+    expect(result._unsafeUnwrap().actions).toEqual([]);
+  });
+
+  // -------------------------------------------------------------------------
+  // Actions — entries without url skipped
+  // -------------------------------------------------------------------------
+
+  it("skips action entries that lack a url field", async () => {
+    mockClassifyResponse({
+      workflow: "conversation",
+      workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
+      tags: [],
+      summary: "Email.",
+      labels: [],
+      actions: [
+        { text: "No URL here" },
+        { url: "https://valid.com", text: "Has URL" },
+        null,
+        42,
+      ],
+    });
+
+    const result = await classifier.classify(baseInput);
+
+    expect(result.isOk()).toBe(true);
+    const output = result._unsafeUnwrap();
+    expect(output.actions).toHaveLength(1);
+    expect(output.actions[0]).toEqual({ url: "https://valid.com", text: "Has URL" });
+  });
 });
