@@ -77,6 +77,13 @@ resource "aws_apigatewayv2_route" "well_known" {
   # No authorization_type — public
 }
 
+resource "aws_apigatewayv2_route" "unsubscribe_post" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "POST /accounts/{accountId}/unsubscribe"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda.id}"
+  # No authorization_type — public one-click unsubscribe (RFC 8058); the signed token is the credential.
+}
+
 # ---------------------------------------------------------------------------
 # Reindex operator API routes
 # ---------------------------------------------------------------------------

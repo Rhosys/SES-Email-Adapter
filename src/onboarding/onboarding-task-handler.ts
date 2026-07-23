@@ -11,8 +11,6 @@ import type { OnboardingProgress } from "./compose-followup-email.js";
 import { composeFollowupEmail } from "./compose-followup-email.js";
 import { renderTemplate } from "../email/template-renderer.js";
 import { buildEmailTags } from "../email/tag-sanitizer.js";
-import { buildUnsubscribeHeaders } from "../email/unsubscribe-headers.js";
-import { generateUnsubscribeToken } from "../email/unsubscribe-token.js";
 
 // ---------------------------------------------------------------------------
 // Store interfaces — one per backing class
@@ -36,9 +34,6 @@ export interface IOnboardingThreadDb {
 
 const MAIL_DOMAIN = process.env["MAIL_DOMAIN"] ?? ""
 const APP_BASE_URL = process.env["APP_BASE_URL"] ?? ""
-const API_DOMAIN = process.env["API_DOMAIN"] ?? ""
-const KMS_KEY_ARN = process.env["AUTHRESS_KMS_KEY_ARN"] ?? ""
-const KEY_ID = process.env["AUTHRESS_KEY_ID"] ?? ""
 
 // ---------------------------------------------------------------------------
 // OnboardingTaskHandler
@@ -228,17 +223,7 @@ export class OnboardingTaskHandler {
     const triggerId = `onboarding-${accountId}-${step}`;
     const fullDate = DateTime.utc().toISODate()!;
 
-    // 10. Generate unsubscribe token
-    const unsubscribeCode = await generateUnsubscribeToken({
-      accountId,
-      forwardingTargetId: accountId,
-      emailType: "onboarding",
-      apiDomain: API_DOMAIN,
-      kmsKeyArn: KMS_KEY_ARN,
-      keyId: KEY_ID,
-    });
-
-    // 11. Render template
+    // 10. Render template
     const htmlBody = await renderTemplate("onboarding-followup", {
       domainAdded: progress.domainAdded,
       senderSetupComplete: progress.senderSetupComplete,
@@ -246,29 +231,26 @@ export class OnboardingTaskHandler {
       domainIcon: progress.domainAdded ? "✅" : "❌",
       senderIcon: progress.senderSetupComplete ? "✅" : "❌",
       emailsIcon: progress.emailsReceived ? "✅" : "❌",
-      unsubscribeCode,
       domain: APP_BASE_URL.replace(/^https?:\/\//, ""),
       emailType: "onboarding",
       appBaseUrl: APP_BASE_URL,
     });
 
-    // 12. Build tags and headers
+    // 11. Build tags
     const tags = buildEmailTags({
       accountId,
       fullDate,
       invocationId: this.logger.getInvocationId(),
       triggerId,
     });
-    const headers = buildUnsubscribeHeaders(accountId, API_DOMAIN, unsubscribeCode);
 
-    // 13. Send via EmailService — terminal operation, no DB writes after send
+    // 12. Send via EmailService — terminal operation, no DB writes after send
     const textBody = `${emailContent.textBody}\n\nView your account: ${APP_BASE_URL}/a/`;
     const sendResult = await this.emailService.send({
       to: email,
       subject: "The Next Step",
       textBody,
       htmlBody,
-      headers,
       tags,
       fromOverride: `"Numaeel" <noreply@${MAIL_DOMAIN}>`,
       accountId,

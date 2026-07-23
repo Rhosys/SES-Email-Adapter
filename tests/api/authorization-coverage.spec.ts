@@ -52,6 +52,8 @@ const EXEMPTED_ROUTES = new Set([
   // OpenAPI spec
   "GET /",
   "GET /openapi.json",
+  // Public one-click unsubscribe (RFC 8058) — the signed token is the credential
+  "POST /accounts/:accountId/unsubscribe",
   // CORS preflight — all OPTIONS requests
   // (handled by checking method below)
 ]);

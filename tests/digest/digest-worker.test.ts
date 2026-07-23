@@ -6,10 +6,6 @@ import type { IDigestWorkerDeps, IDigestSendMessage } from "../../src/digest/dig
 import { createMockLogger, type MockLogger } from "../helpers/mock-logger.js"
 import type { Account, Thread, ForwardingTarget } from "../../src/types/index.js"
 
-vi.mock("../../src/email/unsubscribe-token.js", () => ({
-  generateUnsubscribeToken: vi.fn().mockResolvedValue("mock-jwt-token"),
-}))
-
 vi.mock("../../src/email/template-renderer.js", () => ({
   renderTemplate: vi.fn().mockResolvedValue("<html>digest</html>"),
 }))
@@ -79,6 +75,7 @@ function buildDeps(): TestDeps {
       countQuarantined: vi.fn().mockResolvedValue(ok(3)),
     },
     emailService: { send: mockSend } as unknown as IDigestWorkerDeps["emailService"],
+    unsubscribeTokenGenerator: { generate: vi.fn().mockResolvedValue("tok") } as unknown as IDigestWorkerDeps["unsubscribeTokenGenerator"],
     logger,
     mockSend,
   }

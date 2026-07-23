@@ -136,9 +136,9 @@ resource "aws_iam_role_policy" "lambda_permissions" {
         Resource = data.aws_kms_alias.default.target_key_arn
       },
       {
-        Sid      = "KMSAuthressSign"
+        Sid      = "KMSAuthressSignVerify"
         Effect   = "Allow"
-        Action   = ["kms:Sign"]
+        Action   = ["kms:Sign", "kms:Verify"]
         Resource = aws_kms_key.authress_service_client.arn
       },
       {

@@ -15,7 +15,7 @@ import type { EmailService } from "../email/email-service.js"
 import type { Thread, Account, ForwardingTarget } from "../types/index.js"
 import { shouldDispatchDigest, buildDigestSubject } from "./digest-frequency-filter.js"
 import type { DigestFrequency } from "./digest-frequency-filter.js"
-import { generateUnsubscribeToken } from "../email/unsubscribe-token.js"
+import type { UnsubscribeTokenGenerator } from "../email/unsubscribe-token-generator.js"
 import { renderTemplate } from "../email/template-renderer.js"
 import { buildEmailTags } from "../email/tag-sanitizer.js"
 import { buildUnsubscribeHeaders } from "../email/unsubscribe-headers.js"
@@ -40,6 +40,7 @@ export interface IDigestWorkerDeps {
     countQuarantined(accountId: string): Promise<Result<number, DbError>>
   }
   emailService: EmailService
+  unsubscribeTokenGenerator: UnsubscribeTokenGenerator
   logger: Logger
 }
 
@@ -50,8 +51,6 @@ export interface IDigestWorkerDeps {
 const MAIL_DOMAIN = process.env["MAIL_DOMAIN"] ?? ""
 const APP_BASE_URL = process.env["APP_BASE_URL"] ?? ""
 const API_DOMAIN = process.env["API_DOMAIN"] ?? ""
-const KMS_KEY_ARN = process.env["AUTHRESS_KMS_KEY_ARN"] ?? ""
-const KEY_ID = process.env["AUTHRESS_KEY_ID"] ?? ""
 
 export class DigestWorker {
   private readonly deps: IDigestWorkerDeps
@@ -116,14 +115,7 @@ export class DigestWorker {
     const quarantineCount = quarantineResult.value
 
     // 7. Generate unsubscribe JWT
-    const unsubscribeCode = await generateUnsubscribeToken({
-      accountId,
-      forwardingTargetId: account.digest.forwardingTargetId,
-      emailType: "digest",
-      apiDomain: API_DOMAIN,
-      kmsKeyArn: KMS_KEY_ARN,
-      keyId: KEY_ID,
-    })
+    const unsubscribeCode = await this.deps.unsubscribeTokenGenerator.generate({ accountId, emailType: "digest" })
 
     // 8. Render digest template
     const subject = buildDigestSubject(frequency as DigestFrequency, today)

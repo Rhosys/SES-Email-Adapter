@@ -15,10 +15,6 @@ vi.mock("../../src/dns/mx-validator.js", () => ({
   validateRecipientMx: vi.fn().mockResolvedValue({ isOk: () => true, isErr: () => false }),
 }));
 
-vi.mock("../../src/email/unsubscribe-token.js", () => ({
-  generateUnsubscribeToken: vi.fn().mockResolvedValue("mock-jwt-token"),
-}));
-
 vi.mock("../../src/email/template-renderer.js", () => ({
   renderTemplate: vi.fn().mockResolvedValue("<html>mock</html>"),
 }));
@@ -92,6 +88,7 @@ const EXPECTED_ROUTES = [
   "POST /accounts/{accountId}/forwarding-addresses/{address}/verify",
   "DELETE /accounts/{accountId}/forwarding-addresses/{address}",
   "GET /accounts/{accountId}/audit",
+  "POST /accounts/{accountId}/unsubscribe",
   "POST /reindex",
   "GET /healthcheck",
   "GET /",

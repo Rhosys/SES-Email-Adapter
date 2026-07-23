@@ -36,6 +36,8 @@ import { TemplatesApi } from "./templatesApi.js";
 import { AuditApi } from "./auditApi.js";
 import { AdminApi } from "./adminApi.js";
 import type { HealthCheckValidatorPort } from "./adminApi.js";
+import { UnsubscribeApi } from "./unsubscribeApi.js";
+import type { UnsubscribeTokenGenerator } from "../email/unsubscribe-token-generator.js";
 import { ThreadsApi } from "./threadsApi.js";
 import { ResourcesApi } from "./resourcesApi.js";
 import { SignalsApi } from "./signalsApi.js";
@@ -97,9 +99,10 @@ export interface AppDeps {
   triggerDigest: (accountId: string) => Promise<void>;
   embeddingGenerator: EmbeddingGenerator;
   threadMatcher: ThreadMatcher;
+  unsubscribeTokenGenerator: UnsubscribeTokenGenerator;
 }
 
-export function createApp({ threadDb, resourceDb, accountDb, auditDb, auth, access, logger, forwardingService, jobDispatcher, healthCheckValidator, signalReprocessor, draftSendDispatcher, accountCreationStarter, appBaseUrl, contentCdnBaseUrl, astValidator, billingHandler, emailService, domainIdentityService, rsvpComposer, postApprovalCalendarDeps, schedulerClient, s3Client, emailBucket, triggerDigest, embeddingGenerator, threadMatcher }: AppDeps) {
+export function createApp({ threadDb, resourceDb, accountDb, auditDb, auth, access, logger, forwardingService, jobDispatcher, healthCheckValidator, signalReprocessor, draftSendDispatcher, accountCreationStarter, appBaseUrl, contentCdnBaseUrl, astValidator, billingHandler, emailService, domainIdentityService, rsvpComposer, postApprovalCalendarDeps, schedulerClient, s3Client, emailBucket, triggerDigest, embeddingGenerator, threadMatcher, unsubscribeTokenGenerator }: AppDeps) {
   type AppEnv = { Variables: { auth: AuthContext; authorizationVerified?: boolean; [ROUTE_NOT_FOUND_KEY]?: boolean } };
   const app = new OpenAPIHono<AppEnv>();
 
@@ -221,6 +224,12 @@ export function createApp({ threadDb, resourceDb, accountDb, auditDb, auth, acce
         "Cache-Control": "public, max-age=3600",
       });
     }
+    // Public one-click unsubscribe (RFC 8058) — no bearer token; the signed code is the credential
+    if (c.req.method === "POST" && /^\/accounts\/[^/]+\/unsubscribe$/.test(c.req.path)) {
+      await next();
+      return;
+    }
+
     const header = c.req.header("Authorization");
     if (!header?.startsWith("Bearer ")) return err(c, 401, "Unauthorized");
 
@@ -251,6 +260,7 @@ export function createApp({ threadDb, resourceDb, accountDb, auditDb, auth, acce
   new TemplatesApi(accountDb, auditDb, astValidator, logger).register(app, helpers);
   new AuditApi(auditDb, logger).register(app, helpers);
   new AdminApi(jobDispatcher, healthCheckValidator).register(app, helpers);
+  new UnsubscribeApi(unsubscribeTokenGenerator, accountDb, logger).register(app, helpers);
   new UserApi(accountDb, access, logger).register(app, helpers);
 
   // ---------------------------------------------------------------------------
