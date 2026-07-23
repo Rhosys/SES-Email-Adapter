@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ok } from "neverthrow";
 import { DateTime } from "luxon";
 import { HealthcheckJob, type HealthcheckJobDeps } from "../../src/jobs/healthcheck-job.js";
+import { HealthcheckValidator } from "../../src/jobs/healthcheck-validator.js";
 import { createMockLogger, type MockLogger } from "../helpers/mock-logger.js";
 
 vi.mock("node:dns/promises", () => ({
@@ -68,16 +69,20 @@ function makeDeps(overrides: {
 } = {}): { deps: HealthcheckJobDeps; logger: MockLogger } {
   const logger = overrides.logger ?? createMockLogger();
 
+  const threadDb = {
+    listThreads: vi.fn().mockResolvedValue(ok({ items: overrides.threads ?? [makeThread()] })),
+  } as unknown as HealthcheckJobDeps["threadDb"];
+  const searchDatabase = {
+    hasEmbedding: vi.fn().mockResolvedValue(ok(overrides.hasEmbedding ?? true)),
+  };
+  const validator = new HealthcheckValidator({ threadDb, searchDatabase, mailDomain: MAIL_DOMAIN, logger });
+
   const deps: HealthcheckJobDeps = {
-    threadDb: {
-      listThreads: vi.fn().mockResolvedValue(ok({ items: overrides.threads ?? [makeThread()] })),
-    } as unknown as HealthcheckJobDeps["threadDb"],
+    threadDb,
     emailService: {
       send: vi.fn().mockResolvedValue(ok({ messageId: "ses-msg-id" })),
     } as unknown as HealthcheckJobDeps["emailService"],
-    searchDatabase: {
-      hasEmbedding: vi.fn().mockResolvedValue(ok(overrides.hasEmbedding ?? true)),
-    },
+    validator,
     mailDomain: MAIL_DOMAIN,
     logger,
   };

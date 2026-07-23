@@ -4,37 +4,28 @@ import type { ThreadDatabase } from "../database/thread-database.js";
 import type { EmailService } from "../email/email-service.js";
 import { SYSTEM_ACCOUNT_ID } from "../database/system-account-db.js";
 import { renderTemplate } from "../email/template-renderer.js";
-import { HealthcheckValidator, type ValidationChecks } from "./healthcheck-validator.js";
+import type { HealthcheckValidator, ValidationChecks } from "./healthcheck-validator.js";
 import { TAG_HEALTHCHECK_ID } from "../email/ses-tags.js";
-import type { DbError, Result } from "../errors.js";
 
 export interface HealthcheckJobDeps {
   threadDb: ThreadDatabase;
   emailService: EmailService;
-  searchDatabase: { hasEmbedding(threadId: string): Promise<Result<boolean, DbError>> };
+  validator: HealthcheckValidator;
   mailDomain: string;
   logger: Logger;
 }
 
 export class HealthcheckJob {
   private lastValidationResults: ValidationChecks | null = null;
-  private readonly validator: HealthcheckValidator;
 
-  constructor(private readonly deps: HealthcheckJobDeps) {
-    this.validator = new HealthcheckValidator({
-      threadDb: deps.threadDb,
-      searchDatabase: deps.searchDatabase,
-      mailDomain: deps.mailDomain,
-      logger: deps.logger,
-    });
-  }
+  constructor(private readonly deps: HealthcheckJobDeps) {}
 
   async run(): Promise<void> {
     const now = DateTime.utc();
     const today = now.toFormat("yyyy-MM-dd");
     const yesterday = now.minus({ days: 1 }).toFormat("yyyy-MM-dd");
 
-    const validation = await this.validator.validate(yesterday);
+    const validation = await this.deps.validator.validate(yesterday);
     this.lastValidationResults = validation.rawChecks;
     await this.send(today);
   }
