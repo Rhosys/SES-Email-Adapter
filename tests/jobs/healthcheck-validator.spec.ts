@@ -3,6 +3,7 @@ import { ok, err, type Result } from "neverthrow";
 import { HealthcheckValidator, type HealthcheckValidatorDeps } from "../../src/jobs/healthcheck-validator.js";
 import { dbError, type DbError } from "../../src/errors.js";
 import { createMockLogger, type MockLogger } from "../helpers/mock-logger.js";
+import { checkDomain } from "../../src/dns/dns-checker.js";
 
 vi.mock("node:dns/promises", () => ({
   default: {
@@ -47,6 +48,7 @@ function makeDeps(overrides: {
   listErr?: boolean;
   hasEmbedding?: boolean;
   hasEmbeddingResult?: Result<boolean, DbError>;
+  ses?: { verified?: boolean; dkimEnabled?: boolean; accountSendingEnabled?: boolean };
   logger?: MockLogger;
 } = {}): { deps: HealthcheckValidatorDeps; logger: MockLogger } {
   const logger = overrides.logger ?? createMockLogger();
@@ -56,6 +58,13 @@ function makeDeps(overrides: {
 
   const embeddingResult = overrides.hasEmbeddingResult ?? ok(overrides.hasEmbedding ?? true);
 
+  const verified = overrides.ses?.verified ?? true;
+  const dkimEnabled = overrides.ses?.dkimEnabled ?? true;
+  const accountSendingEnabled = overrides.ses?.accountSendingEnabled ?? true;
+  const sesResult = (verified && dkimEnabled && accountSendingEnabled)
+    ? { verified, dkimEnabled, accountSendingEnabled }
+    : { verified, dkimEnabled, accountSendingEnabled, detail: "SES configuration issue detected." };
+
   const deps: HealthcheckValidatorDeps = {
     threadDb: {
       listThreads: vi.fn().mockResolvedValue(listResult),
@@ -63,6 +72,10 @@ function makeDeps(overrides: {
     searchDatabase: {
       hasEmbedding: vi.fn().mockResolvedValue(embeddingResult),
     },
+    sesChecker: {
+      canSendFrom: vi.fn().mockResolvedValue(sesResult),
+    },
+    dnsChecker: { checkDomain },
     mailDomain: "platform.email.rhosys.cloud",
     logger,
   };
@@ -85,7 +98,7 @@ describe("HealthcheckValidator", () => {
 
     expect(result.status).toBe("pass");
     expect(result.checkedDate).toBe("2026-07-08");
-    expect(result.checks).toHaveLength(11);
+    expect(result.checks).toHaveLength(14);
     expect(result.checks.every((c) => c.status === "pass")).toBe(true);
     expect(result.rawChecks).toEqual({ hasThreadId: true, workflowIsHealthcheck: true, hasEmbedding: true });
   });
@@ -202,5 +215,41 @@ describe("HealthcheckValidator", () => {
     await new HealthcheckValidator(deps).validate("2026-07-08");
     expect(mockCheckDomain).toHaveBeenCalledOnce();
     expect(mockCheckDomain.mock.calls[0]?.[0].domain).toBe("healthcheck.platform.email.rhosys.cloud");
+  });
+
+  it("fails ses-sending-enabled and overall status when account-level sending is disabled", async () => {
+    const { deps } = makeDeps({ threads: [makeThread()], hasEmbedding: true, ses: { accountSendingEnabled: false } });
+    const result = await new HealthcheckValidator(deps).validate("2026-07-08");
+
+    const sending = checkById(result.checks, "ses-sending-enabled");
+    expect(sending.status).toBe("fail");
+    expect(sending.detail).toBeTruthy();
+    expect(checkById(result.checks, "ses-identity-verified").status).toBe("pass");
+    expect(checkById(result.checks, "ses-dkim").status).toBe("pass");
+    expect(result.status).toBe("fail");
+  });
+
+  it("fails ses-dkim when DKIM signing is not enabled", async () => {
+    const { deps } = makeDeps({ threads: [makeThread()], hasEmbedding: true, ses: { dkimEnabled: false } });
+    const result = await new HealthcheckValidator(deps).validate("2026-07-08");
+
+    const dkim = checkById(result.checks, "ses-dkim");
+    expect(dkim.status).toBe("fail");
+    expect(dkim.detail).toBeTruthy();
+    expect(checkById(result.checks, "ses-identity-verified").status).toBe("pass");
+    expect(checkById(result.checks, "ses-sending-enabled").status).toBe("pass");
+    expect(result.status).toBe("fail");
+  });
+
+  it("fails ses-identity-verified when the SES identity is not verified", async () => {
+    const { deps } = makeDeps({ threads: [makeThread()], hasEmbedding: true, ses: { verified: false } });
+    const result = await new HealthcheckValidator(deps).validate("2026-07-08");
+
+    const verifiedCheck = checkById(result.checks, "ses-identity-verified");
+    expect(verifiedCheck.status).toBe("fail");
+    expect(verifiedCheck.detail).toBeTruthy();
+    expect(checkById(result.checks, "ses-dkim").status).toBe("pass");
+    expect(checkById(result.checks, "ses-sending-enabled").status).toBe("pass");
+    expect(result.status).toBe("fail");
   });
 });

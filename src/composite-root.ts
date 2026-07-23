@@ -30,6 +30,7 @@ import { DomainHealthJob } from "./jobs/domain-health-job.js";
 import { HealthcheckJob } from "./jobs/healthcheck-job.js";
 import { HealthcheckValidator } from "./jobs/healthcheck-validator.js";
 import { SesIdentityChecker } from "./email/ses-identity-checker.js";
+import { checkDomain } from "./dns/dns-checker.js";
 import { AuthressAuthService } from "./api/authress-auth.js";
 import { AuthressAccessService } from "./api/authress-access.js";
 import { createApp } from "./api/app.js";
@@ -218,6 +219,7 @@ export class CompositeRoot {
       threadDb,
       searchDatabase,
       sesChecker: new SesIdentityChecker(sesv2),
+      dnsChecker: { checkDomain },
       mailDomain: MAIL_DOMAIN,
       logger,
     });

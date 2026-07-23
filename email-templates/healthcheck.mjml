@@ -52,19 +52,14 @@
         <mj-text font-size="13px" font-weight="600" color="{{theme.subtext}}" padding-bottom="8px" letter-spacing="0.04em" text-transform="uppercase">
           Validation Results (Yesterday)
         </mj-text>
-        {{#hasValidationResults}}
-        <mj-text font-size="14px" color="{{theme.text}}" line-height="1.8">
-          Signal found: ✓<br />
-          Thread ID present: {{hasThreadIdIcon}} {{hasThreadIdLabel}}<br />
-          Workflow is healthcheck: {{workflowIsHealthcheckIcon}} {{workflowIsHealthcheckLabel}}<br />
-          Embedding indexed: {{hasEmbeddingIcon}} {{hasEmbeddingLabel}}
-        </mj-text>
-        {{/hasValidationResults}}
-        {{^hasValidationResults}}
-        <mj-text font-size="14px" color="{{theme.overlay}}">
-          No validation results — first run or validation error occurred.
-        </mj-text>
-        {{/hasValidationResults}}
+        {{#hasChecks}}
+        {{#checks}}
+        <mj-text font-size="14px" color="{{theme.text}}" line-height="1.8">{{icon}} {{label}}{{#hasDetail}} — {{detail}}{{/hasDetail}}</mj-text>
+        {{/checks}}
+        {{/hasChecks}}
+        {{^hasChecks}}
+        <mj-text font-size="14px" color="{{theme.overlay}}">No validation results — first run or validation error occurred.</mj-text>
+        {{/hasChecks}}
       </mj-column>
     </mj-section>
 
