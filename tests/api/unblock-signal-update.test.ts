@@ -233,7 +233,7 @@ describe("POST /signals/:id/quarantineResponse — updateThread usage", () => {
     expect(res.status).toBe(200);
 
     expect(threadDb.updateThread).toHaveBeenCalledOnce();
-    expect(threadDb.updateThread).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "arc-existing", "active", "2024-01-20T12:00:00Z", {});
+    expect(threadDb.updateThread).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "arc-existing", "active", "2024-01-20T12:00:00Z", { retentionDuration: "P3M" });
     expect(threadDb.createThread).not.toHaveBeenCalled();
   });
 
@@ -353,7 +353,7 @@ describe("POST /signals/:id/quarantineResponse — sender disposition", () => {
     expect(res.status).toBe(200);
 
     expect(threadDb.getThread).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "thr-existing");
-    expect(threadDb.updateThread).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "thr-existing", "active", signal.data.receivedAt, {});
+    expect(threadDb.updateThread).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "thr-existing", "active", signal.data.receivedAt, { retentionDuration: "P3M" });
     expect(threadDb.createThread).not.toHaveBeenCalled();
     expect(threadDb.findThreadByGroupingKey).not.toHaveBeenCalled();
   });

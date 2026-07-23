@@ -28,6 +28,7 @@ import { getRetentionForPlan } from "../embedding/retention-tier.js";
 import type { BillingPlan } from "../embedding/retention-tier.js";
 import { resolveRetention, retentionToS3Tag, durationToSeconds } from "./retention.js";
 import type { RetentionDuration } from "./retention.js";
+import { buildActiveThread } from "./thread-factory.js";
 import { generatePresignedGet, generatePresignedPost } from "./presign.js";
 import { getPrimaryThreadMatcherRegistry, getActiveClusters } from "../embedding/cluster-registry.js";
 import { getETLD1, assignSystemLabels } from "./filter.js";
@@ -1133,23 +1134,17 @@ export class SignalProcessor {
       };
       this.logger.info("Existing thread matched.", { code: "processor.thread_matched", threadId: thread.id, matchMethod, accountId, sesMessageId });
     } else {
-      thread = {
-        id: generateId("thr-"),
+      thread = buildActiveThread({
         accountId,
-        ...(groupingKey ? { groupingKey } : {}),
         workflow: classificationOutput.workflow,
-        labels: [],
-        status: "active",
         summary: classificationOutput.summary,
         lastSignalAt: timestamp,
         senderAddress: parsed.from.address,
         recipientAddress,
         subject: parsed.subject,
-        createdAt: now,
-        updatedAt: now,
         retentionDuration: effectiveRetentionForTtl,
-        ...(ttl !== undefined ? { ttl } : {}),
-      };
+        groupingKey: groupingKey ?? undefined,
+      });
     }
 
     // 8. Assign system labels and merge classifier labels
