@@ -73,9 +73,31 @@ export class SignalsApi {
       const partition = (status === "blocked" || status === "block_hidden" || status === "block_reject") ? "blocked" : "quarantined";
       const result = await threadDb.listPreThreadSignals(accountId, partition, params);
       if (result.isErr()) { logger.error("Failed to list signals.", { code: "api.signals.list_failed", error: result.error }); return err(c, 500, "Internal Server Error"); }
-      const items = (status === "quarantine_visible" || status === "quarantine_hidden" || status === "block_hidden" || status === "block_reject")
+      let items = (status === "quarantine_visible" || status === "quarantine_hidden" || status === "block_hidden" || status === "block_reject")
         ? result.value.items.filter(s => s.status === status)
         : result.value.items;
+
+      // Hard cap: never return blocked/violation signals older than 30 days
+      if (partition === "blocked") {
+        const thirtyDaysAgo = DateTime.utc().minus({ days: 30 }).toISO()!;
+        items = items.filter(s => s.createdAt >= thirtyDaysAgo);
+      }
+
+      // Apply after/before/sender filters (post-query — GSI sort key is signal.id, not a date)
+      const afterParam = query["after"];
+      const beforeParam = query["before"];
+      const senderParam = query["sender"];
+      if (afterParam) {
+        items = items.filter(s => s.createdAt >= afterParam);
+      }
+      if (beforeParam) {
+        items = items.filter(s => s.createdAt <= beforeParam);
+      }
+      if (senderParam) {
+        const senderLower = senderParam.toLowerCase();
+        items = items.filter(s => isEmailSignal(s) && s.data.from.address.toLowerCase().includes(senderLower));
+      }
+
       const itemsWithUrls = contentCdnBaseUrl ? items.map(s => withAttachmentUrls(s, contentCdnBaseUrl)) : items;
       return c.json(page("signals", itemsWithUrls.map(toApiSignal), result.value.nextCursor), 200);
     });
