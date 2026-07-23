@@ -1,3 +1,10 @@
+// ---------------------------------------------------------------------------
+// Auth Workflow Handler
+// Invoked ASYNCHRONOUSLY from the processor: the inbound signal path dispatches
+// a `side_effect` SQS message (no delay), which a separate Lambda invocation
+// picks up via handler.ts → processor.processSideEffect() → HandlerRegistry.
+// This is NOT inline with inbound signal processing.
+// ---------------------------------------------------------------------------
 import type { Result } from "neverthrow";
 import { ok } from "../errors.js";
 import type { DbError } from "../errors.js";
