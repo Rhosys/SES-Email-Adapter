@@ -18,6 +18,7 @@ vi.mock("../../src/dns/dns-checker.js", () => ({
 }));
 
 import { HealthcheckJob, type HealthcheckJobDeps } from "../../src/jobs/healthcheck-job.js";
+import { HealthcheckValidator } from "../../src/jobs/healthcheck-validator.js";
 
 /**
  * Property 2: Deterministic per-day healthcheck identity
@@ -34,12 +35,16 @@ import { HealthcheckJob, type HealthcheckJobDeps } from "../../src/jobs/healthch
 const MAIL_DOMAIN = "platform.email.rhosys.cloud";
 
 function createMockDeps(overrides: Partial<HealthcheckJobDeps> = {}): HealthcheckJobDeps {
+  const threadDb = { listThreads: vi.fn().mockResolvedValue(ok({ items: [] })) } as unknown as HealthcheckJobDeps["threadDb"];
+  const logger = createMockLogger();
+  const searchDatabase = { hasEmbedding: vi.fn().mockResolvedValue(ok(false)) };
+  const validator = new HealthcheckValidator({ threadDb, searchDatabase, mailDomain: MAIL_DOMAIN, logger });
   return {
-    threadDb: { listThreads: vi.fn().mockResolvedValue(ok({ items: [] })) } as unknown as HealthcheckJobDeps["threadDb"],
+    threadDb,
     emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-123" })) } as unknown as HealthcheckJobDeps["emailService"],
-    searchDatabase: { hasEmbedding: vi.fn().mockResolvedValue(ok(false)) },
+    validator,
     mailDomain: MAIL_DOMAIN,
-    logger: createMockLogger(),
+    logger,
     ...overrides,
   };
 }

@@ -10,6 +10,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ok, err, dbError } from "../../src/errors.js";
 import { HealthcheckJob } from "../../src/jobs/healthcheck-job.js";
 import type { HealthcheckJobDeps } from "../../src/jobs/healthcheck-job.js";
+import { HealthcheckValidator } from "../../src/jobs/healthcheck-validator.js";
 import { createMockLogger } from "../helpers/mock-logger.js";
 import type { MockLogger } from "../helpers/mock-logger.js";
 
@@ -52,14 +53,25 @@ function makeThread(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function makeDeps(overrides: Partial<HealthcheckJobDeps> = {}): HealthcheckJobDeps {
+type DepsOverrides = {
+  threadDb?: HealthcheckJobDeps["threadDb"];
+  emailService?: HealthcheckJobDeps["emailService"];
+  searchDatabase?: ConstructorParameters<typeof HealthcheckValidator>[0]["searchDatabase"];
+  logger?: HealthcheckJobDeps["logger"];
+};
+
+function makeDeps(overrides: DepsOverrides = {}): HealthcheckJobDeps {
+  const threadDb = overrides.threadDb ?? ({ listThreads: vi.fn().mockResolvedValue(ok({ items: [makeThread()] })) } as any);
+  const emailService = overrides.emailService ?? ({ send: vi.fn().mockResolvedValue(ok({ messageId: "ses-msg-1" })) } as any);
+  const searchDatabase = overrides.searchDatabase ?? { hasEmbedding: vi.fn().mockResolvedValue(ok(true)) };
+  const logger = overrides.logger ?? createMockLogger();
+  const validator = new HealthcheckValidator({ threadDb, searchDatabase, mailDomain: MAIL_DOMAIN, logger });
   return {
-    threadDb: { listThreads: vi.fn().mockResolvedValue(ok({ items: [makeThread()] })) } as any,
-    emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-msg-1" })) } as any,
-    searchDatabase: { hasEmbedding: vi.fn().mockResolvedValue(ok(true)) },
+    threadDb,
+    emailService,
+    validator,
     mailDomain: MAIL_DOMAIN,
-    logger: createMockLogger(),
-    ...overrides,
+    logger,
   };
 }
 
