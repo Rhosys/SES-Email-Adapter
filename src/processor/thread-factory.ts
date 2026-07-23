@@ -3,6 +3,11 @@
 //
 // Every code path that creates a new active Thread must go through this factory
 // to ensure all required derived fields (retentionDuration, ttl) are set.
+//
+// PRODUCT INVARIANT: TTL is computed once at creation time and never refreshed.
+// Thread expiry = createdAt + retentionDuration. Subsequent signals update the
+// retentionDuration metadata field (so config changes are visible) but do NOT
+// recompute ttl. The DynamoDB item expires relative to its creation timestamp.
 // ---------------------------------------------------------------------------
 
 import { DateTime } from "luxon";
