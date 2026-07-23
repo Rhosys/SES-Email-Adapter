@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { DateTime } from "luxon"
 import { ok } from "neverthrow"
+import { err } from "../../src/errors.js"
 import { DigestWorker } from "../../src/digest/digest-worker.js"
 import type { IDigestWorkerDeps, IDigestSendMessage } from "../../src/digest/digest-worker.js"
 import { createMockLogger, type MockLogger } from "../helpers/mock-logger.js"
@@ -192,6 +193,19 @@ describe("DigestWorker — REQ-1.1, REQ-1.4, REQ-0.7", () => {
       expect(result.isOk()).toBe(true)
       expect(deps.mockSend).not.toHaveBeenCalled()
       expect(deps.logger.calls.some(c => c.method === "warn")).toBe(true)
+    })
+  })
+
+  describe("permanent SES error", () => {
+    it("returns ok and logs WARN on permanent SES error — no retry", async () => {
+      const deps = buildDeps()
+      deps.mockSend.mockResolvedValueOnce(err({ kind: "permanent_ses_error", errorName: "MessageRejected", httpStatus: 400, message: "Email address is not verified", cause: new Error("test") }))
+      const worker = new DigestWorker(deps)
+
+      const result = await worker.process(message, sunday)
+
+      expect(result.isOk()).toBe(true)
+      expect(deps.logger.calls.some(c => c.method === "warn" && c.context?.code === "digest.worker.send_permanent")).toBe(true)
     })
   })
 

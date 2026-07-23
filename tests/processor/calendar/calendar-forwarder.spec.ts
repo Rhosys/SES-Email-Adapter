@@ -6,7 +6,8 @@ import type { EmailService } from "../../../src/email/email-service.js";
 import type { CalendarEventData } from "../../../src/types/calendar.js";
 import type { Signal } from "../../../src/types/index.js";
 import type { Logger } from "../../../src/logger.js";
-import { ok } from "../../../src/errors.js";
+import { ok, err } from "../../../src/errors.js";
+import { createMockLogger } from "../../helpers/mock-logger.js";
 
 // ---------------------------------------------------------------------------
 // Injected deterministic HMAC generator — no real KMS.
@@ -154,5 +155,25 @@ describe("forwardCalendarInvite — no-op when calendarForwardingAddress missing
       expect.stringContaining("no calendarForwardingAddress"),
       expect.objectContaining({ code: "processor.calendar_forwarder.no_forwarding_address" }),
     );
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// Permanent SES error handling
+// ---------------------------------------------------------------------------
+
+describe("forwardCalendarInvite — permanent SES error", () => {
+  it("returns ok and logs WARN on permanent SES error — no retry", async () => {
+    const emailService = makeEmailService();
+    vi.mocked(emailService.send as ReturnType<typeof vi.fn>).mockResolvedValueOnce(err({ kind: "permanent_ses_error", errorName: "MessageRejected", httpStatus: 400, message: "Email address is not verified", cause: new Error("test") }));
+    const deps = makeDeps(emailService);
+    const opts = makeOpts();
+    const logger = createMockLogger();
+
+    const result = await forwardCalendarInvite(opts, deps, logger);
+
+    expect(result.isOk()).toBe(true);
+    expect(logger.calls.some(c => c.method === "warn" && c.context?.code === "calendar_forwarder.send_permanent")).toBe(true);
   });
 });

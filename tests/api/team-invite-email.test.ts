@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ok } from "neverthrow";
+import { err } from "../../src/errors.js";
 import { createApp } from "../../src/api/app.js";
 import { makeAppDeps } from "../helpers/app-deps.js";
 import { createMockLogger } from "../helpers/mock-logger.js";
@@ -125,5 +126,25 @@ describe("Team invite email", () => {
     const triggerTag = sendCall.tags?.find((t: { Name: string }) => t.Name === "X-Numaeel-TriggerId");
     expect(triggerTag).toBeDefined();
     expect(triggerTag.Value).toBe("invite-inv-abc123");
+  });
+
+  it("returns ok and logs WARN on permanent SES error — no retry", async () => {
+    vi.mocked(emailService.send as ReturnType<typeof vi.fn>).mockResolvedValueOnce(err({ kind: "permanent_ses_error", errorName: "MessageRejected", httpStatus: 400, message: "Email address is not verified", cause: new Error("test") }));
+    const app = createApp(makeAppDeps({
+      auth: makeAuth(),
+      access: access as never,
+      accountDb: accountDb as never,
+      logger,
+      emailService,
+    }));
+
+    const res = await app.request(`/accounts/${TEST_ACCOUNT_ID}/users`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer token" },
+      body: JSON.stringify({ email: "bounce@example.com", role: "member" }),
+    });
+
+    expect(res.status).toBe(201);
+    expect(logger.calls.some(c => c.method === "warn" && c.context?.code === "invite.email_send_permanent")).toBe(true);
   });
 });
