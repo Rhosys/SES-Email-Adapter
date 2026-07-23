@@ -172,7 +172,7 @@ function buildProcessor(opts: {
     s3Client: { send: s3Send } as never,
     emailBucket: "test-bucket",
     contentBucket: "test-content-bucket",
-    classifier: { classify: vi.fn().mockResolvedValue(ok({ workflow: "conversation", workflowData: { workflow: "conversation", sentiment: "neutral", requiresReply: false }, tags: [], summary: "A calendar event.", labels: [] })) },
+    classifier: { classify: vi.fn().mockResolvedValue(ok({ workflow: "conversation", workflowData: { workflow: "conversation", sentiment: "neutral", requiresReply: false }, tags: [], summary: "A calendar event.", labels: [], actions: [] })) },
     embeddingGenerator: {
       generateForModel: vi.fn().mockResolvedValue(ok({ modelId: "amazon.titan-embed-text-v2:0", vector: [0.1], dimensions: 1024 })),
       generateForSecondaryClusters: vi.fn().mockResolvedValue([]),
@@ -224,7 +224,8 @@ describe("Feature: calendar-rsvp-reminder, Property 1: RSVP schedule creation gu
       const schedulerClient = makeSchedulerClientMock();
       const processor = buildProcessor({ mockLogger, schedulerClient, icsContent: makeIcsContent(startTime, "REQUEST") });
 
-      await processor.processRecord(makeMessage(`msg-rsvp-create-${startTime}`), 1);
+      const result = await processor.processRecord(makeMessage(`msg-rsvp-create-${startTime}`), 1);
+      expect(result.isOk(), `processRecord failed: ${result.isErr() ? result.error.message : ""}`).toBe(true);
 
       // Find the RSVP schedule creation call (suffix starts with "rsvp.")
       const rsvpCalls = schedulerClient.createFollowup.mock.calls.filter(

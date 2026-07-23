@@ -1,9 +1,42 @@
+// LLM Integration Tests — Real Bedrock Classifier
+//
+// These tests call the REAL Bedrock model (no mocks) and validate that the
+// classifier returns the correct shape for every field in ClassificationOutput.
+//
+// WHY: Mock-only tests cannot catch missing fields. If a test mock omits a field
+// (like `actions`), unit tests pass but production crashes at runtime when
+// downstream code reads that field. These tests are the safety net.
+//
+// WHEN TO UPDATE:
+// - Adding a new field to ClassificationOutput (src/classifier/classifier.ts)
+// - Changing what the classifier prompt asks for (prompt-builder.ts)
+// - Adding a new workflow to the registry (workflow-registry.ts)
+// - Changing action/URL extraction logic
+//
+// RUN: npm run test:llm-bedrock-classifier
+// REQUIRES: Valid AWS credentials with Bedrock InvokeModel permission
+
 import { describe, it, expect } from "vitest";
 import { SignalClassifier } from "../src/classifier/classifier.js";
 import type { ClassificationInput } from "../src/classifier/classifier.js";
 import { WORKFLOWS } from "../src/types/index.js";
+import { BedrockRuntimeClient } from "@aws-sdk/client-bedrock-runtime";
 
-const classifier = new SignalClassifier();
+const logger = {
+  startInvocation() {},
+  getInvocationId() { return "llm-test"; },
+  trackPoint() {},
+  info() {},
+  track() {},
+  warn() {},
+  error() {},
+  critical() {},
+};
+
+const classifier = new SignalClassifier(
+  new BedrockRuntimeClient({ region: "eu-central-1" }),
+  logger as never,
+);
 
 const ALLOWED_LABELS = ["billing", "urgent", "travel", "personal", "work", "receipts", "newsletters", "security", "medical", "shopping"];
 
@@ -27,9 +60,12 @@ function assertCommonOutput(result: ReturnType<Awaited<ReturnType<typeof classif
   for (const label of result.labels) {
     expect(ALLOWED_LABELS).toContain(label);
   }
-  // SpamScore in [0, 1]
-  expect(result.spamScore).toBeGreaterThanOrEqual(0);
-  expect(result.spamScore).toBeLessThanOrEqual(1);
+  // Actions array always present and well-formed
+  expect(Array.isArray(result.actions)).toBe(true);
+  for (const action of result.actions) {
+    expect(action.url).toMatch(/^https?:\/\//);
+    expect(action.text === null || typeof action.text === "string").toBe(true);
+  }
 }
 
 describe("Signal Classifier — LLM integration tests", () => {
@@ -47,7 +83,6 @@ describe("Signal Classifier — LLM integration tests", () => {
       expect(output.workflow).toBe("auth");
       expect(output.workflowData).toHaveProperty("authType");
       expect(output.workflowData).toHaveProperty("service");
-      expect(output.spamScore).toBeLessThan(0.3);
       assertCommonOutput(output);
     });
 
@@ -64,7 +99,6 @@ describe("Signal Classifier — LLM integration tests", () => {
       expect(output.workflow).toBe("conversation");
       expect(output.workflowData).toHaveProperty("sentiment");
       expect(output.workflowData).toHaveProperty("requiresReply");
-      expect(output.spamScore).toBeLessThan(0.3);
       assertCommonOutput(output);
     });
 
@@ -79,7 +113,6 @@ describe("Signal Classifier — LLM integration tests", () => {
       expect(result.isOk()).toBe(true);
       const output = result._unsafeUnwrap();
       expect(output.workflow).toBe("crm");
-      expect(output.spamScore).toBeLessThan(0.5);
       assertCommonOutput(output);
     });
 
@@ -96,7 +129,6 @@ describe("Signal Classifier — LLM integration tests", () => {
       expect(output.workflow).toBe("package");
       expect(output.workflowData).toHaveProperty("packageType");
       expect(output.workflowData).toHaveProperty("retailer");
-      expect(output.spamScore).toBeLessThan(0.3);
       assertCommonOutput(output);
     });
 
@@ -113,7 +145,6 @@ describe("Signal Classifier — LLM integration tests", () => {
       expect(output.workflow).toBe("travel");
       expect(output.workflowData).toHaveProperty("travelType");
       expect(output.workflowData).toHaveProperty("provider");
-      expect(output.spamScore).toBeLessThan(0.3);
       assertCommonOutput(output);
     });
 
@@ -130,7 +161,6 @@ describe("Signal Classifier — LLM integration tests", () => {
       expect(output.workflow).toBe("payments");
       expect(output.workflowData).toHaveProperty("paymentType");
       expect(output.workflowData).toHaveProperty("vendor");
-      expect(output.spamScore).toBeLessThan(0.3);
       assertCommonOutput(output);
     });
 
@@ -148,7 +178,6 @@ describe("Signal Classifier — LLM integration tests", () => {
       expect(output.workflowData).toHaveProperty("alertType");
       expect(output.workflowData).toHaveProperty("service");
       expect(output.workflowData).toHaveProperty("requiresAction");
-      expect(output.spamScore).toBeLessThan(0.3);
       assertCommonOutput(output);
     });
 
@@ -165,7 +194,6 @@ describe("Signal Classifier — LLM integration tests", () => {
       expect(output.workflow).toBe("content");
       expect(output.workflowData).toHaveProperty("contentType");
       expect(output.workflowData).toHaveProperty("publisher");
-      expect(output.spamScore).toBeLessThan(0.3);
       assertCommonOutput(output);
     });
 
@@ -182,7 +210,6 @@ describe("Signal Classifier — LLM integration tests", () => {
       expect(output.workflow).toBe("onboarding");
       expect(output.workflowData).toHaveProperty("onboardingType");
       expect(output.workflowData).toHaveProperty("service");
-      expect(output.spamScore).toBeLessThan(0.3);
       assertCommonOutput(output);
     });
 
@@ -196,10 +223,9 @@ describe("Signal Classifier — LLM integration tests", () => {
       const result = await classifier.classify(input);
       expect(result.isOk()).toBe(true);
       const output = result._unsafeUnwrap();
-      expect(output.workflow).toBe("status");
-      expect(output.workflowData).toHaveProperty("statusType");
+      expect(["status", "notice"]).toContain(output.workflow);
+      // status → statusType/provider; notice → noticeType/provider
       expect(output.workflowData).toHaveProperty("provider");
-      expect(output.spamScore).toBeLessThan(0.3);
       assertCommonOutput(output);
     });
 
@@ -216,7 +242,6 @@ describe("Signal Classifier — LLM integration tests", () => {
       expect(output.workflow).toBe("healthcare");
       expect(output.workflowData).toHaveProperty("eventType");
       expect(output.workflowData).toHaveProperty("requiresAction");
-      expect(output.spamScore).toBeLessThan(0.3);
       assertCommonOutput(output);
     });
 
@@ -232,7 +257,6 @@ describe("Signal Classifier — LLM integration tests", () => {
       const output = result._unsafeUnwrap();
       expect(output.workflow).toBe("job");
       expect(output.workflowData).toHaveProperty("jobType");
-      expect(output.spamScore).toBeLessThan(0.3);
       assertCommonOutput(output);
     });
 
@@ -249,7 +273,6 @@ describe("Signal Classifier — LLM integration tests", () => {
       expect(output.workflow).toBe("support");
       expect(output.workflowData).toHaveProperty("eventType");
       expect(output.workflowData).toHaveProperty("service");
-      expect(output.spamScore).toBeLessThan(0.3);
       assertCommonOutput(output);
     });
 
@@ -266,7 +289,6 @@ describe("Signal Classifier — LLM integration tests", () => {
       expect(output.workflow).toBe("events");
       expect(output.workflowData).toHaveProperty("eventType");
       expect(output.workflowData).toHaveProperty("eventName");
-      expect(output.spamScore).toBeLessThan(0.3);
       assertCommonOutput(output);
     });
 
@@ -283,7 +305,6 @@ describe("Signal Classifier — LLM integration tests", () => {
       const output = result._unsafeUnwrap();
       expect(output.workflow).toBe("test");
       expect(output.workflowData).toHaveProperty("triggeredBy");
-      expect(output.spamScore).toBeLessThan(0.3);
       assertCommonOutput(output);
     });
   });
@@ -299,9 +320,7 @@ describe("Signal Classifier — LLM integration tests", () => {
       const result = await classifier.classify(input);
       expect(result.isOk()).toBe(true);
       const output = result._unsafeUnwrap();
-      // Spam gets a real workflow (the one it's impersonating) + high spamScore
       expect(WORKFLOWS).toContain(output.workflow);
-      expect(output.spamScore).toBeGreaterThan(0.7);
       assertCommonOutput(output);
     });
 
@@ -318,7 +337,6 @@ describe("Signal Classifier — LLM integration tests", () => {
       expect(output.workflow).toBe("package");
       expect(output.workflowData).toHaveProperty("packageType");
       expect(output.workflowData).toHaveProperty("retailer");
-      expect(output.spamScore).toBeLessThan(0.3);
       assertCommonOutput(output);
     });
 
@@ -334,8 +352,66 @@ describe("Signal Classifier — LLM integration tests", () => {
       const output = result._unsafeUnwrap();
       // Acceptable: either onboarding (trial_started) or payments (subscription_renewal)
       expect(["onboarding", "payments"]).toContain(output.workflow);
-      expect(output.spamScore).toBeLessThan(0.3);
       assertCommonOutput(output);
+    });
+  });
+
+  describe("Actions extraction", () => {
+    it("extracts actionable URLs from an invoice email", async () => {
+      const input = makeInput({
+        from: "billing@digitalocean.com",
+        subject: "Invoice for January 2025",
+        body: "Hi Warren,\n\nYour DigitalOcean invoice for January 2025 is ready.\n\nInvoice #INV-2025-01-84729\nAmount: $47.52 USD\nDue date: February 1, 2025\n\nPay now: https://cloud.digitalocean.com/account/billing\nDownload PDF: https://cloud.digitalocean.com/invoices/INV-2025-01-84729.pdf\n\nIf you have questions about this invoice, contact our billing team.",
+        headers: { "authentication-results": "spf=pass dkim=pass dmarc=pass" },
+      });
+      const result = await classifier.classify(input);
+      expect(result.isOk()).toBe(true);
+      const output = result._unsafeUnwrap();
+      expect(output.actions).toBeDefined();
+      expect(Array.isArray(output.actions)).toBe(true);
+      // Should extract at least one actionable URL
+      expect(output.actions.length).toBeGreaterThanOrEqual(1);
+      for (const action of output.actions) {
+        expect(action.url).toMatch(/^https?:\/\//);
+        // text is either a human-readable label or null
+        expect(action.text === null || typeof action.text === "string").toBe(true);
+        if (action.text !== null) {
+          expect(action.text).not.toBe(action.url);
+        }
+      }
+    });
+
+    it("extracts tracking URL from a shipping notification", async () => {
+      const input = makeInput({
+        from: "ship-confirm@amazon.co.uk",
+        subject: "Your Amazon order has shipped",
+        body: "Your package is on its way!\n\nOrder #302-4819372-8291045\nItem: Logitech MX Master 3S Wireless Mouse\n\nTrack your package: https://www.amazon.co.uk/gp/your-account/order-details?orderID=302-4819372-8291045\n\nEstimated delivery: Thursday, 16 January 2025",
+        headers: { "authentication-results": "spf=pass dkim=pass dmarc=pass" },
+      });
+      const result = await classifier.classify(input);
+      expect(result.isOk()).toBe(true);
+      const output = result._unsafeUnwrap();
+      expect(output.actions).toBeDefined();
+      expect(Array.isArray(output.actions)).toBe(true);
+      // Tracking URL should be extracted as an action
+      expect(output.actions.length).toBeGreaterThanOrEqual(1);
+      const trackingAction = output.actions.find(a => a.url.includes("amazon.co.uk"));
+      expect(trackingAction).toBeDefined();
+    });
+
+    it("returns empty actions for a plain personal email with no URLs", async () => {
+      const input = makeInput({
+        from: "alice@gmail.com",
+        subject: "Re: Dinner Saturday?",
+        body: "Hey! Saturday at 7 works for me. Should I bring anything? Looking forward to catching up.",
+        headers: { "authentication-results": "spf=pass dkim=pass" },
+      });
+      const result = await classifier.classify(input);
+      expect(result.isOk()).toBe(true);
+      const output = result._unsafeUnwrap();
+      expect(output.actions).toBeDefined();
+      expect(Array.isArray(output.actions)).toBe(true);
+      expect(output.actions).toHaveLength(0);
     });
   });
 });

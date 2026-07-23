@@ -30,6 +30,15 @@ export interface ClassificationInput {
   accountId?: string;
 }
 
+/**
+ * Classifier output shape.
+ *
+ * IMPORTANT: When adding or changing fields here, you MUST also update the live
+ * Bedrock integration tests in `llm-tests/classify.spec.ts`. Those tests call the
+ * real model and verify each field is returned correctly. Without them, mock-only
+ * tests can pass while production silently drops data (see: the `actions` bug of
+ * July 2026 where a missing field in mocks hid a runtime crash for weeks).
+ */
 export interface ClassificationOutput {
   workflow: Workflow;
   workflowData: WorkflowData;

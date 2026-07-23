@@ -12,7 +12,7 @@
     "test:coverage": "vitest run --coverage",
     "test:integration": "tsx tests-integration/run.ts",
     "production:validation": "vitest run --config vitest.integration.config.ts",
-    "test:llm": "vitest run --config llm-tests/vitest.config.ts",
+    "test:llm-bedrock-classifier": "vitest run --config llm-tests/vitest.config.ts",
     "make": "tsx make.ts",
     "deploy": "tsx make.ts deploy",
     "db:generate": "drizzle-kit generate --name",
