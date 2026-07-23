@@ -208,6 +208,17 @@ async function applyRules(
       actions.some((a) => a.type === "archive")           ? "archived"           :
       undefined
     );
+
+    // If a prior rule already set the status and this rule's only contribution is a
+    // redundant status change (no labels, no workflow, no other side-effect actions),
+    // treat it as unmatched — don't pollute matchedRules with noise.
+    const statusAlreadySet = matchedRules.some((r) => r.statusChange);
+    if (statusAlreadySet && statusChange && labelsAdded.length === 0) {
+      const STATUS_ACTION_TYPES = new Set(["block_reject", "block_hidden", "quarantine_hidden", "quarantine_visible", "archive"]);
+      const hasNonStatusAction = actions.some((a) => !STATUS_ACTION_TYPES.has(a.type));
+      if (!hasNonStatusAction) continue;
+    }
+
     matchedRules.push({ ruleId: rule.id, actions, labelsAdded, ...(statusChange ? { statusChange } : {}) });
     // assign_workflow mutates the thread so subsequent rules evaluate against the updated workflow
     const workflowAction = actions.find((a) => a.type === "assign_workflow");
@@ -1859,6 +1870,35 @@ function parseUnsubscribeHeaders(headers: Record<string, string>): UnsubscribeIn
   return undefined;
 }
 
+// Fallback: scan HTML body for an <a> element whose visible text or href contains
+// "unsubscribe" (case-insensitive). Returns the least-trusted tier: type "website".
+function parseUnsubscribeFromBody(htmlBody: string | null | undefined): UnsubscribeInfo | undefined {
+  if (!htmlBody) return undefined;
+
+  // Match <a href="...">...</a> — non-greedy, case-insensitive
+  const anchorPattern = /<a\s[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+  let match: RegExpExecArray | null;
+  while ((match = anchorPattern.exec(htmlBody)) !== null) {
+    const href = match[1] ?? "";
+    const text = (match[2] ?? "").replace(/<[^>]+>/g, "").trim();
+
+    // Check if either the link text or the URL path contains "unsubscribe"
+    const combined = (text + " " + href).toLowerCase();
+    if (!combined.includes("unsubscribe")) continue;
+
+    // Validate it's a real HTTPS URL
+    try {
+      const url = new URL(href);
+      if (url.protocol === "https:" || url.protocol === "http:") {
+        return { type: "website", url: href };
+      }
+    } catch {
+      continue;
+    }
+  }
+  return undefined;
+}
+
 // ---------------------------------------------------------------------------
 // HTML truncation — cuts at closed block-level tags to preserve valid markup.
 // Full content always recoverable from S3 via s3Key.
@@ -1911,8 +1951,9 @@ function buildSignal(opts: {
   const { threadId, status, accountId, sesMessageId, recipientAddress, parsed, classification, s3Key, receivedAt, now, ttl, retentionDuration, gsi3pk, forceSignalId } = opts;
   const signalId = forceSignalId ?? generateId("sgn-");
 
-  // Extract unsubscribe info from List-Unsubscribe / List-Unsubscribe-Post headers
-  const unsubscribe = parseUnsubscribeHeaders(parsed.headers);
+  // Extract unsubscribe info from List-Unsubscribe / List-Unsubscribe-Post headers,
+  // falling back to scanning the HTML body for an unsubscribe link.
+  const unsubscribe = parseUnsubscribeHeaders(parsed.headers) ?? parseUnsubscribeFromBody(parsed.htmlBody);
 
   // Truncate HTML body if it exceeds DDB item headroom
   let htmlBody = parsed.htmlBody ?? undefined;
