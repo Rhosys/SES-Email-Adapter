@@ -1,12 +1,13 @@
 import { z } from "@hono/zod-openapi";
 import type { OpenAPIHono } from "@hono/zod-openapi";
 import { DateTime } from "luxon";
-import { generateId } from "../utils/id.js";
 import { getDomain } from "tldts";
 import { zParse } from "./validate.js";
 import { toApiThread, toApiSignal } from "./transform.js";
 import { deriveGroupingKey } from "../processor/processor.js";
 import { handlePostApprovalCalendar } from "../processor/calendar/post-approval-handler.js";
+import { resolveRetention } from "../processor/retention.js";
+import { buildActiveThread } from "../processor/thread-factory.js";
 import { isEmailSignal } from "../types/index.js";
 import type { Result } from "neverthrow";
 import type { Thread, Signal, AnySignal, Attachment, PageParams } from "../types/index.js";
@@ -167,28 +168,29 @@ export class SignalsApi {
         matchedThread = matchedThreadResult.value;
       }
 
-      const now = DateTime.utc().toISO()!;
       let thread: Thread;
+
+      // Resolve retention — need account config for the effective duration
+      const accountResult = await accountDb.getAccount(accountId);
+      const accountRetention = accountResult.isOk() ? accountResult.value?.retentionDuration : undefined;
+      const effectiveRetention = resolveRetention(accountRetention ? { retentionDuration: accountRetention } : {}, null);
+
       if (matchedThread) {
-        const updateResult = await threadDb.updateThread(accountId, matchedThread.id, "active", signal.data.receivedAt, {});
+        const updateResult = await threadDb.updateThread(accountId, matchedThread.id, "active", signal.data.receivedAt, { retentionDuration: effectiveRetention });
         if (updateResult.isErr()) { logger.error("Failed to update thread for quarantine approval.", { code: "api.quarantine_response.update_thread_failed", error: updateResult.error }); return err(c, 500, "Internal Server Error"); }
         thread = updateResult.value;
       } else {
-        thread = {
-          id: generateId("thr-"),
+        thread = buildActiveThread({
           accountId,
           workflow: signal.data.workflow,
-          labels: [],
-          status: "active",
           summary: signal.data.summary,
           lastSignalAt: signal.data.receivedAt,
           senderAddress: (signal.data as { from?: { address?: string } }).from?.address ?? "",
           recipientAddress: (signal.data as { recipientAddress?: string }).recipientAddress ?? "",
           subject: (signal.data as { subject?: string }).subject ?? "",
-          createdAt: now,
-          updatedAt: now,
-          ...(groupingKey ? { groupingKey } : {}),
-        };
+          retentionDuration: effectiveRetention,
+          groupingKey: groupingKey ?? undefined,
+        });
         const createResult = await threadDb.createThread(thread);
         if (createResult.isErr()) { logger.error("Failed to create thread for quarantine approval.", { code: "api.quarantine_response.create_thread_failed", error: createResult.error }); return err(c, 500, "Internal Server Error"); }
       }
