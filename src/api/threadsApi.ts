@@ -10,6 +10,7 @@ import { toApiThread, toApiSignal } from "./transform.js";
 import { buildScheduleName } from "../scheduler/schedule-name.js";
 import { durationToSeconds } from "../processor/retention.js";
 import { generatePresignedGet } from "../processor/presign.js";
+import { effectiveEmailKey } from "../embedding/retention-tier.js";
 import { isCalendarEventSignal, isEmailSignal } from "../types/index.js";
 import type { S3Client } from "@aws-sdk/client-s3";
 import type { Thread, Signal, AnySignal, Attachment, PageParams, ThreadStatus, Workflow } from "../types/index.js";
@@ -754,7 +755,7 @@ export class ThreadsApi {
       if (!isEmailSignal(signal)) return err(c, 400, "Signal is not an email", "SIGNAL_NOT_FOUND");
       if (!signal.data.s3Key) return err(c, 404, "Raw email not available", "SIGNAL_NOT_FOUND");
 
-      const url = await generatePresignedGet(s3Client, emailBucket, signal.data.s3Key);
+      const url = await generatePresignedGet(s3Client, emailBucket, effectiveEmailKey(signal.data.s3Key, signal.createdAt));
       return c.redirect(url, 307);
     });
 

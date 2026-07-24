@@ -1267,7 +1267,7 @@ export class SignalProcessor {
       const blockSignal = buildSignal({ status: outcome.blockDisposition, ...buildArgs }, this.logger);
       const saveResult = await this.threadDb.saveSignal({ ...blockSignal, data: { ...blockSignal.data, matchedRules } });
       if (saveResult.isErr()) return err(saveResult.error);
-      this.logger.track("Blocked email — rule matched with block disposition.", { code: "processor.rule_block", signal: blockSignal, thread, disposition: outcome.blockDisposition, matchedRules: matchedRules.map(r => r.ruleId) });
+      this.logger.track(`Blocked email — rule matched with block disposition. alias=${recipientAddress}, subject="${parsed.subject}", sender=${parsed.from.address}`, { code: "processor.rule_block", signal: blockSignal, thread, disposition: outcome.blockDisposition, matchedRules: matchedRules.map(r => r.ruleId) });
       const repResult = await this.processingDb.updateGlobalReputation(senderETLD1, outcome.blockDisposition);
       if (repResult.isErr()) {
         this.logger.warn("Failed to update global sender reputation after signal processing. The DynamoDB update returned an error. Reputation data may be stale for this domain.", { code: "processor.reputation_update_failed", signal: blockSignal, thread, error: repResult.error });
@@ -1517,6 +1517,11 @@ export class SignalProcessor {
    * must not alter the processing outcome or prevent Aurora/side-effect execution.
    */
   async attemptS3Retention(signal: Signal, billingPlan: BillingPlan, thread: Thread): Promise<void> {
+    // The SYSTEM account only ever holds throwaway healthcheck emails, expired by
+    // the P7D TTL and the default lifecycle rule. Never tag or copy-to-saved them —
+    // preserving daily healthcheck mail indefinitely is pure junk accumulation.
+    if (isSystemAccount(signal.accountId)) return;
+
     this.logger.trackPoint("s3_retention_start");
     try {
       const retention = getRetentionForPlan(billingPlan);
@@ -1535,16 +1540,8 @@ export class SignalProcessor {
         return;
       }
 
-      const { s3Key: updatedS3Key } = retentionApplyResult.value;
-
-      // Persist updated s3Key if copy-to-saved changed it
-      if (updatedS3Key !== signal.data.s3Key) {
-        const retentionSaveResult = await this.threadDb.updateSignalRetention(signal.accountId, signal.signalLookupId, { s3Key: updatedS3Key });
-        if (retentionSaveResult.isErr()) {
-          this.logger.warn("Failed to persist updated s3Key on signal record. The DynamoDB update returned an error. The S3 retention is applied but the signal record won't reflect the new key.", { code: "processor.retention_metadata_save_failed", signal, thread, error: retentionSaveResult.error });
-        }
-      }
-
+      // The stored s3Key always points at emails/{key}; copy-to-saved keeps a
+      // durable saved/ copy that readers resolve by age. No signal write needed.
       this.logger.trackPoint("s3_retention_complete");
     } catch (e) {
       this.logger.warn("S3 retention threw an unexpected error. The signal will use the default lifecycle rule. Processing continues unaffected.", { code: "processor.s3_retention_unexpected", signal, thread, error: e });

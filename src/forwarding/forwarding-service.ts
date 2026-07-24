@@ -12,6 +12,7 @@ import type { EmailService } from "../email/email-service.js"
 import type { IEmailSignalStore } from "../database/email-signal-store.js"
 import type { Logger } from "../logger.js"
 import { buildOutboundTags } from "../email/ses-tags.js"
+import { effectiveEmailKey } from "../embedding/retention-tier.js"
 import { renderTemplate } from "../email/template-renderer.js"
 import { buildEmailTags } from "../email/tag-sanitizer.js"
 import { buildWebhookPayload, type WebhookPayload } from "../processor/webhook.js"
@@ -97,7 +98,7 @@ export class ForwardingService implements IForwardingService {
     }
 
     if (target.type === "email") {
-      const rawResult = await this.emailSignalStore.getOriginalEmail(signal.data.s3Key)
+      const rawResult = await this.emailSignalStore.getOriginalEmail(effectiveEmailKey(signal.data.s3Key, signal.createdAt))
       if (rawResult.isErr()) return err(rawResult.error)
       return this.forwardEmail(target.target, rawResult.value, { accountId, signalId: signal.id, threadId: thread.id })
     }

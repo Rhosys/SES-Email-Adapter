@@ -31,7 +31,7 @@ describe("applyPlanRetention — Free/Beta tier (s3Tag set)", () => {
   it("calls PutObjectTagging with retention-tier=P1Y", async () => {
     s3Mock.on(PutObjectTaggingCommand).resolves({});
 
-    const s3Key = "inbox/2025/01/abc123.eml";
+    const s3Key = "emails/2025/01/abc123.eml";
     await service.applyPlanRetention(s3Key, input);
 
     const calls = s3Mock.commandCalls(PutObjectTaggingCommand);
@@ -48,7 +48,7 @@ describe("applyPlanRetention — Free/Beta tier (s3Tag set)", () => {
   it("returns the original s3Key unchanged", async () => {
     s3Mock.on(PutObjectTaggingCommand).resolves({});
 
-    const s3Key = "inbox/2025/01/abc123.eml";
+    const s3Key = "emails/2025/01/abc123.eml";
     const result = await service.applyPlanRetention(s3Key, input);
 
     expect(result.s3Key).toBe(s3Key);
@@ -57,7 +57,7 @@ describe("applyPlanRetention — Free/Beta tier (s3Tag set)", () => {
   it("does not call CopyObject", async () => {
     s3Mock.on(PutObjectTaggingCommand).resolves({});
 
-    await service.applyPlanRetention("inbox/x.eml", input);
+    await service.applyPlanRetention("emails/x.eml", input);
 
     const copyCalls = s3Mock.commandCalls(CopyObjectCommand);
     expect(copyCalls).toHaveLength(0);
@@ -75,7 +75,7 @@ describe("applyPlanRetention — Paid/Lifetime tier (no-op)", () => {
   };
 
   it("does not call PutObjectTagging", async () => {
-    const s3Key = "inbox/2025/01/abc123.eml";
+    const s3Key = "emails/2025/01/abc123.eml";
     await service.applyPlanRetention(s3Key, input);
 
     const tagCalls = s3Mock.commandCalls(PutObjectTaggingCommand);
@@ -83,7 +83,7 @@ describe("applyPlanRetention — Paid/Lifetime tier (no-op)", () => {
   });
 
   it("does not call CopyObject", async () => {
-    const s3Key = "inbox/2025/01/abc123.eml";
+    const s3Key = "emails/2025/01/abc123.eml";
     await service.applyPlanRetention(s3Key, input);
 
     const copyCalls = s3Mock.commandCalls(CopyObjectCommand);
@@ -91,7 +91,7 @@ describe("applyPlanRetention — Paid/Lifetime tier (no-op)", () => {
   });
 
   it("returns the original s3Key unchanged", async () => {
-    const s3Key = "inbox/2025/01/abc123.eml";
+    const s3Key = "emails/2025/01/abc123.eml";
     const result = await service.applyPlanRetention(s3Key, input);
 
     expect(result.s3Key).toBe(s3Key);
@@ -99,7 +99,7 @@ describe("applyPlanRetention — Paid/Lifetime tier (no-op)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Premium/Internal tier: CopyObject inbox/ → saved/
+// Premium/Internal tier: CopyObject emails/ → saved/
 // ---------------------------------------------------------------------------
 
 describe("applyPlanRetention — Premium/Internal tier (copyToSaved)", () => {
@@ -108,10 +108,10 @@ describe("applyPlanRetention — Premium/Internal tier (copyToSaved)", () => {
     copyToSaved: true,
   };
 
-  it("calls CopyObject from inbox/ to saved/", async () => {
+  it("calls CopyObject from emails/ to saved/ (emails/ prefix stripped)", async () => {
     s3Mock.on(CopyObjectCommand).resolves({});
 
-    const s3Key = "inbox/2025/01/abc123.eml";
+    const s3Key = "emails/2025/01/abc123.eml";
     await service.applyPlanRetention(s3Key, input);
 
     const calls = s3Mock.commandCalls(CopyObjectCommand);
@@ -123,31 +123,32 @@ describe("applyPlanRetention — Premium/Internal tier (copyToSaved)", () => {
     });
   });
 
-  it("returns the new saved/ s3Key", async () => {
+  it("returns the original s3Key unchanged (the signal key is never rewritten)", async () => {
     s3Mock.on(CopyObjectCommand).resolves({});
 
-    const s3Key = "inbox/2025/01/abc123.eml";
+    const s3Key = "emails/2025/01/abc123.eml";
     const result = await service.applyPlanRetention(s3Key, input);
 
-    expect(result.s3Key).toBe("saved/2025/01/abc123.eml");
+    expect(result.s3Key).toBe(s3Key);
   });
 
   it("does not call PutObjectTagging", async () => {
     s3Mock.on(CopyObjectCommand).resolves({});
 
-    await service.applyPlanRetention("inbox/x.eml", input);
+    await service.applyPlanRetention("emails/x.eml", input);
 
     const tagCalls = s3Mock.commandCalls(PutObjectTaggingCommand);
     expect(tagCalls).toHaveLength(0);
   });
 
-  it("handles keys without inbox/ prefix gracefully", async () => {
+  it("maps keys without the emails/ prefix under saved/ as-is", async () => {
     s3Mock.on(CopyObjectCommand).resolves({});
 
-    // Edge case: key doesn't start with inbox/ (shouldn't happen in practice)
-    const s3Key = "emails/2025/01/abc123.eml";
-    const result = await service.applyPlanRetention(s3Key, input);
+    // Edge case: key doesn't start with emails/ (shouldn't happen in practice)
+    const s3Key = "other/2025/01/abc123.eml";
+    await service.applyPlanRetention(s3Key, input);
 
-    expect(result.s3Key).toBe("saved/emails/2025/01/abc123.eml");
+    const calls = s3Mock.commandCalls(CopyObjectCommand);
+    expect(calls[0]!.args[0].input.Key).toBe("saved/other/2025/01/abc123.eml");
   });
 });

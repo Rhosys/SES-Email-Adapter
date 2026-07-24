@@ -156,36 +156,36 @@ run "lifecycle_rules_count" {
   }
 }
 
-# Rule 1: inbox/ prefix + tag retention-tier=P1Y → expire after 365 days
+# Rule 1: emails/ prefix + tag retention-tier=P1Y → expire after 365 days
 run "lifecycle_rule_free_tier" {
   command = plan
 
   assert {
     condition     = anytrue([
       for rule in aws_s3_bucket_lifecycle_configuration.emails.rule :
-      rule.id == "inbox-free-tier-1yr" &&
+      rule.id == "emails-free-tier-1yr" &&
       rule.status == "Enabled" &&
-      rule.filter[0].and[0].prefix == "inbox/" &&
+      rule.filter[0].and[0].prefix == "emails/" &&
       rule.filter[0].and[0].tags["retention-tier"] == "P1Y" &&
       rule.expiration[0].days == 365
     ])
-    error_message = "Free-tier rule must have id='inbox-free-tier-1yr', prefix='inbox/', tag retention-tier=P1Y, expiration=365 days"
+    error_message = "Free-tier rule must have id='emails-free-tier-1yr', prefix='emails/', tag retention-tier=P1Y, expiration=365 days"
   }
 }
 
-# Rule 2: inbox/ prefix (no tag filter) → expire after 1825 days
+# Rule 2: emails/ prefix (no tag filter) → expire after 1825 days
 run "lifecycle_rule_paid_default" {
   command = plan
 
   assert {
     condition     = anytrue([
       for rule in aws_s3_bucket_lifecycle_configuration.emails.rule :
-      rule.id == "inbox-default-5yr" &&
+      rule.id == "emails-default-5yr" &&
       rule.status == "Enabled" &&
-      rule.filter[0].prefix == "inbox/" &&
+      rule.filter[0].prefix == "emails/" &&
       rule.expiration[0].days == 1825
     ])
-    error_message = "Paid default rule must have id='inbox-default-5yr', prefix='inbox/', no tag filter, expiration=1825 days"
+    error_message = "Paid default rule must have id='emails-default-5yr', prefix='emails/', no tag filter, expiration=1825 days"
   }
 }
 
