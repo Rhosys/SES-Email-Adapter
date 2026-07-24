@@ -151,25 +151,28 @@ resource "aws_cloudfront_distribution" "api" {
   }
 
   # /.well-known/* — public metadata, routed to API Gateway (no auth)
+  # /.well-known/* — public metadata, routed to API Gateway (no auth)
   ordered_cache_behavior {
-    path_pattern           = "/.well-known/*"
-    allowed_methods        = ["GET", "HEAD"]
-    cached_methods         = ["GET", "HEAD"]
-    target_origin_id       = local.api_gateway_origin_id
-    cache_policy_id        = aws_cloudfront_cache_policy.content_cache.id
-    viewer_protocol_policy = "redirect-to-https"
-    compress               = true
+    path_pattern             = "/.well-known/*"
+    allowed_methods          = ["GET", "HEAD"]
+    cached_methods           = ["GET", "HEAD"]
+    target_origin_id         = local.api_gateway_origin_id
+    cache_policy_id          = aws_cloudfront_cache_policy.well_known_cache.id
+    origin_request_policy_id = "b689b0a8-53d0-40ab-baf2-68738e2966ac" # AllViewerExceptHostHeader
+    viewer_protocol_policy   = "redirect-to-https"
+    compress                 = true
   }
 
   # /api/* — API Gateway origin (all methods, no caching by default)
   ordered_cache_behavior {
-    path_pattern           = "/api/*"
-    allowed_methods        = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
-    cached_methods         = ["GET", "HEAD"]
-    target_origin_id       = local.api_gateway_origin_id
-    cache_policy_id        = aws_cloudfront_cache_policy.api_cache.id
-    viewer_protocol_policy = "redirect-to-https"
-    compress               = true
+    path_pattern             = "/api/*"
+    allowed_methods          = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
+    cached_methods           = ["GET", "HEAD"]
+    target_origin_id         = local.api_gateway_origin_id
+    cache_policy_id          = aws_cloudfront_cache_policy.api_cache.id
+    origin_request_policy_id = "b689b0a8-53d0-40ab-baf2-68738e2966ac" # AllViewerExceptHostHeader
+    viewer_protocol_policy   = "redirect-to-https"
+    compress                 = true
   }
 
   # /content/* — S3 extracted content (images, attachments) via OAC
@@ -445,6 +448,29 @@ resource "aws_cloudfront_cache_policy" "content_cache" {
     }
     query_strings_config {
       query_string_behavior = "none"
+    }
+    enable_accept_encoding_brotli = true
+    enable_accept_encoding_gzip   = true
+  }
+}
+
+resource "aws_cloudfront_cache_policy" "well_known_cache" {
+  name        = "${var.service_name}-well-known-cache"
+  comment     = "Vary on CORS/fetch headers for /.well-known/* responses"
+  default_ttl = 0
+  max_ttl     = 864000
+  min_ttl     = 0
+
+  parameters_in_cache_key_and_forwarded_to_origin {
+    cookies_config {
+      cookie_behavior = "none"
+    }
+    headers_config {
+      header_behavior = "whitelist"
+      headers { items = ["Origin", "Sec-Fetch-Dest", "Sec-Fetch-Mode", "Sec-Fetch-Site"] }
+    }
+    query_strings_config {
+      query_string_behavior = "all"
     }
     enable_accept_encoding_brotli = true
     enable_accept_encoding_gzip   = true
