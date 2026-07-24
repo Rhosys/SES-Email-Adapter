@@ -58,10 +58,10 @@ export type UpdateResourceRequest = z.infer<typeof UpdateResourceRequest>;
 
 // ---- Signal ----
 
-export const UpdateSignalStatusRequest = z.object({
-  status: z.enum(["active", "block_hidden", "block_reject", "report_violation"]),
+export const QuarantineResponse = z.object({
+  status: z.enum(["active", "block_hidden", "block_reject", "report_violation", "dismiss"]),
 });
-export type UpdateSignalStatusRequest = z.infer<typeof UpdateSignalStatusRequest>;
+export type QuarantineResponse = z.infer<typeof QuarantineResponse>;
 
 export const UpdateSignalRequest = z.object({
   status: z.literal("draft").optional(),

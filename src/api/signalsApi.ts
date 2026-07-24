@@ -17,7 +17,7 @@ import type { AccountDatabase } from "../database/account-database.js";
 import type { Logger } from "../logger.js";
 import type { PostApprovalCalendarHandlerDeps } from "../processor/calendar/post-approval-handler.js";
 import type { NotFoundError, ProcessorError } from "../errors.js";
-import { UpdateSignalStatusRequest } from "./requests.js";
+import { QuarantineResponse } from "./requests.js";
 import { Signal as SignalSchema, ListSignalsResponse } from "./schemas.js";
 import type { AppEnv, RouteHelpers } from "./route-helpers.js";
 
@@ -131,19 +131,23 @@ export class SignalsApi {
         return err(c, 400, "Only quarantined signals can have their status updated", "SIGNAL_NOT_REVIEWABLE");
       }
 
-      const body = await zParse(UpdateSignalStatusRequest, c.req.raw);
+      const body = await zParse(QuarantineResponse, c.req.raw);
       // Reaching this handler means the signal is quarantined, so the user is making an explicit
       // sender decision — always record it. The alias record is guaranteed to exist (created as an
       // invariant during ingest), so there is nothing to ensure and no rule-evaluation to consult.
       const senderDomain = signal.data.from.address.includes("@") ? signal.data.from.address.split("@").pop()! : signal.data.from.address;
       const senderETLD1 = getDomain(senderDomain) ?? senderDomain;
 
-      if (body.status === "block_hidden" || body.status === "block_reject" || body.status === "report_violation") {
-        const blockResult = await threadDb.updateSignalStatus(accountId, signal.signalLookupId, body.status);
+      if (body.status === "block_hidden" || body.status === "block_reject" || body.status === "report_violation" || body.status === "dismiss") {
+        const effectiveStatus = body.status === "dismiss" ? "block_hidden" : body.status;
+        const blockResult = await threadDb.updateSignalStatus(accountId, signal.signalLookupId, effectiveStatus);
         if (blockResult.isErr()) { logger.error("Failed to block signal.", { code: "api.quarantine_response.block_failed", error: blockResult.error }); return err(c, 500, "Internal Server Error"); }
 
-        const saveSenderResult = await accountDb.saveSender(accountId, signal.data.recipientAddress, senderETLD1, body.status);
-        if (saveSenderResult.isErr()) { logger.error("Failed to save sender disposition.", { code: "api.quarantine_response.save_sender_failed", error: saveSenderResult.error }); return err(c, 500, "Internal Server Error"); }
+        // Dismiss = no sender opinion recorded. Block/reject/violation = persist sender disposition.
+        if (body.status !== "dismiss") {
+          const saveSenderResult = await accountDb.saveSender(accountId, signal.data.recipientAddress, senderETLD1, body.status);
+          if (saveSenderResult.isErr()) { logger.error("Failed to save sender disposition.", { code: "api.quarantine_response.save_sender_failed", error: saveSenderResult.error }); return err(c, 500, "Internal Server Error"); }
+        }
 
         return c.json(blockResult.value, 200);
       }
