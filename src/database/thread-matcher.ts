@@ -239,7 +239,7 @@ export class ThreadMatcher implements ThreadMatcherPort, MultiClusterAuroraWrite
       }));
 
       if (!threadResult.Item) {
-        this.logger.track("Aurora matched threadId but DDB thread is missing — orphaned embedding. Treating as no match.", { code: "thread_matcher.ghost_thread", threadId, accountId, recipientAddress });
+        this.logger.track(`Aurora matched threadId but DDB thread is missing — orphaned embedding. Treating as no match. accountId=${accountId}, threadId=${threadId}`, { code: "thread_matcher.ghost_thread", threadId, accountId, recipientAddress, matchedData: { threadId, accountId, recipientAddress } });
         return ok(null);
       }
 

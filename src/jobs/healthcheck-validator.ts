@@ -183,7 +183,7 @@ export class HealthcheckValidator {
 
     const allPassed = infraChecks.length > 0 && checks.workflowIsHealthcheck && checks.hasEmbedding && infraChecks.every((c) => c.status === "pass");
     if (allPassed) {
-      this.deps.logger.track(`Healthcheck validation passed — ${date}'s email fully processed.`, {
+      this.deps.logger.info(`Healthcheck validation passed — ${date}'s email fully processed.`, {
         code: "healthcheck.validation_passed",
         date,
         threadId: thread.id,
