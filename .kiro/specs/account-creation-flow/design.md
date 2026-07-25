@@ -234,12 +234,12 @@ The Lambda receives the full Step Function context via `'context.$': '$$'`:
 {
   "context": {
     "Execution": {
-      "Id": "arn:aws:states:eu-central-1:REDACTED:execution:email-catcher-AccountCreation:acc-abc123xyz",
+      "Id": "arn:aws:states:eu-central-1:<ACCOUNT_ID>:execution:email-catcher-AccountCreation:acc-abc123xyz",
       "Input": { "accountId": "acc-abc123xyz", "email": "user@example.com" },
       "Name": "acc-abc123xyz"
     },
     "StateMachine": {
-      "Id": "arn:aws:states:eu-central-1:REDACTED:stateMachine:email-catcher-AccountCreation",
+      "Id": "arn:aws:states:eu-central-1:<ACCOUNT_ID>:stateMachine:email-catcher-AccountCreation",
       "Name": "email-catcher-AccountCreation"
     },
     "State": {
