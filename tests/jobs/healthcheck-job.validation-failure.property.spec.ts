@@ -160,7 +160,7 @@ describe("Property 3: Validation failure detection", () => {
 
     const passedLog = logger.calls.find(c => c.context && (c.context as Record<string, unknown>).code === "healthcheck.validation_passed");
     expect(passedLog).toBeDefined();
-    expect(passedLog!.method).toBe("track");
+    expect(passedLog!.method).toBe("info");
 
     const failedLog = logger.calls.find(c => c.context && (c.context as Record<string, unknown>).code === "healthcheck.validation_failed");
     expect(failedLog).toBeUndefined();
