@@ -15,6 +15,13 @@
       "when": 1784050405697,
       "tag": "0001_add_signal_id_to_thread_embeddings",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1785063642310,
+      "tag": "0002_add-expires-at-to-thread-embeddings",
+      "breakpoints": true
     }
   ]
 }
