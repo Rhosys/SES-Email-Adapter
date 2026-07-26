@@ -142,7 +142,7 @@ export class ReindexWorker {
   // ---------------------------------------------------------------------------
 
   private async pureCopyToAurora(
-    signal: Pick<Signal, "id" | "accountId" | "threadId"> & { data: Pick<EmailSignalData, "recipientAddress"> },
+    signal: Pick<Signal, "id" | "accountId" | "threadId" | "ttl"> & { data: Pick<EmailSignalData, "recipientAddress"> },
     vector: number[],
     targetRegistryId: string,
   ): Promise<Result<void, { signalId: string; cause: unknown }>> {
@@ -153,6 +153,7 @@ export class ReindexWorker {
       recipientAddress: signal.data.recipientAddress,
       embedding: vector,
       signalId: signal.id,
+      ...(signal.ttl != null ? { ttl: signal.ttl } : {}),
     });
     if (upsertResult.isErr()) {
       return err({ signalId: signal.id, cause: upsertResult.error });
@@ -165,7 +166,7 @@ export class ReindexWorker {
   // ---------------------------------------------------------------------------
 
   private async regenerateFromS3(
-    signal: Pick<Signal, "id" | "signalLookupId" | "accountId" | "threadId" | "createdAt"> & { data: Pick<EmailSignalData, "recipientAddress" | "s3Key"> },
+    signal: Pick<Signal, "id" | "signalLookupId" | "accountId" | "threadId" | "createdAt" | "ttl"> & { data: Pick<EmailSignalData, "recipientAddress" | "s3Key"> },
     targetRegistryId: string,
     modelId: string,
   ): Promise<Result<void, { signalId: string; cause: unknown }>> {
@@ -203,6 +204,7 @@ export class ReindexWorker {
       recipientAddress: signal.data.recipientAddress,
       embedding: result.value.vector,
       signalId: signal.id,
+      ...(signal.ttl != null ? { ttl: signal.ttl } : {}),
     });
     if (upsertResult.isErr()) {
       return err({ signalId: signal.id, cause: upsertResult.error });

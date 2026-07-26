@@ -42,6 +42,7 @@ export interface MultiClusterAuroraWriter {
     recipientAddress: string;
     embedding: number[];
     signalId: string;
+    ttl?: number;
   }): Promise<Result<void, DbError>>;
 
   findMatch(opts: {
@@ -348,14 +349,15 @@ export class ThreadMatcher implements ThreadMatcherPort, MultiClusterAuroraWrite
   // MultiClusterAuroraWriter — upserts
   // ---------------------------------------------------------------------------
 
-  async upsertEmbedding(threadId: string, embedding: number[], accountId: string, recipientAddress: string, signalId: string): Promise<Result<void, DbError>>;
-  async upsertEmbedding(opts: { registryId: string; threadId: string; accountId: string; recipientAddress: string; embedding: number[]; signalId: string }): Promise<Result<void, DbError>>;
+  async upsertEmbedding(threadId: string, embedding: number[], accountId: string, recipientAddress: string, signalId: string, ttl?: number): Promise<Result<void, DbError>>;
+  async upsertEmbedding(opts: { registryId: string; threadId: string; accountId: string; recipientAddress: string; embedding: number[]; signalId: string; ttl?: number }): Promise<Result<void, DbError>>;
   async upsertEmbedding(
-    threadIdOrOpts: string | { registryId: string; threadId: string; accountId: string; recipientAddress: string; embedding: number[]; signalId: string },
+    threadIdOrOpts: string | { registryId: string; threadId: string; accountId: string; recipientAddress: string; embedding: number[]; signalId: string; ttl?: number },
     embedding?: number[],
     accountId?: string,
     recipientAddress?: string,
     signalId?: string,
+    ttl?: number,
   ): Promise<Result<void, DbError>> {
     if (typeof threadIdOrOpts === "string") {
       const cluster = getPrimaryThreadMatcherRegistry();
@@ -366,6 +368,7 @@ export class ThreadMatcher implements ThreadMatcherPort, MultiClusterAuroraWrite
         recipientAddress: recipientAddress!,
         embedding: embedding!,
         signalId: signalId!,
+        ...(ttl != null ? { ttl } : {}),
       });
     }
     return this.upsertToCluster(threadIdOrOpts);
@@ -378,6 +381,7 @@ export class ThreadMatcher implements ThreadMatcherPort, MultiClusterAuroraWrite
     recipientAddress: string;
     embedding: number[];
     signalId: string;
+    ttl?: number;
   }): Promise<Result<void, DbError>> {
     const cluster = getRegistryById(opts.registryId);
     if (!cluster) return err(dbError(`Cluster "${opts.registryId}" not found in CLUSTER_REGISTRY`));
@@ -397,6 +401,7 @@ export class ThreadMatcher implements ThreadMatcherPort, MultiClusterAuroraWrite
               recipientAddress: opts.recipientAddress,
               embedding: toVector(opts.embedding),
               updatedAt: sql`now()`,
+              expiresAt: opts.ttl != null ? sql`to_timestamp(${opts.ttl})` : sql`now() + interval '2 years'`,
             });
         });
       }, this.logger, "upsertEmbedding");

@@ -13,6 +13,7 @@ export const threadEmbeddings = pgTable("thread_embeddings", {
   recipientAddress: text("recipient_address").notNull(),
   embedding: vector("embedding", { dimensions: 1024 }).notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }),
 }, (table) => [
   primaryKey({ columns: [table.signalId, table.threadId, table.accountId, table.recipientAddress] }),
   index("thread_embeddings_hnsw_idx").using("hnsw", table.embedding.op("vector_cosine_ops")),

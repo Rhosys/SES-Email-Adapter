@@ -1465,6 +1465,7 @@ export class SignalProcessor {
           recipientAddress: signal.data.recipientAddress,
           embedding,
           signalId: signal.id,
+          ...(signal.ttl != null ? { ttl: signal.ttl } : {}),
         });
 
         if (upsertResult.isErr()) {
