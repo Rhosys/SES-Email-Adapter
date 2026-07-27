@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { WORKFLOW_REGISTRY } from "../../src/classifier/workflow-registry.js";
+import { WORKFLOW_REGISTRY, EnumValue } from "../../src/classifier/workflow-registry.js";
 import { WORKFLOWS } from "../../src/types/index.js";
 
 // ---------------------------------------------------------------------------
@@ -113,6 +113,31 @@ function parseInterfaceFields(body: string): ParsedField[] {
 }
 
 // ---------------------------------------------------------------------------
+// Tests — EnumValue description coverage
+// ---------------------------------------------------------------------------
+
+describe("EnumValue description coverage", () => {
+  for (const workflow of WORKFLOW_REGISTRY) {
+    for (const field of workflow.fields) {
+      if (!field.enumValues) continue;
+
+      it(`${workflow.name}.${field.name}: every enum value is an EnumValue instance`, () => {
+        for (const ev of field.enumValues!) {
+          expect(ev).toBeInstanceOf(EnumValue);
+        }
+      });
+
+      it(`${workflow.name}.${field.name}: every EnumValue has a non-empty description`, () => {
+        for (const ev of field.enumValues!) {
+          const enumVal = ev as EnumValue;
+          expect(enumVal.description.length, `${workflow.name}.${field.name}="${enumVal.value}" has empty description`).toBeGreaterThan(0);
+        }
+      });
+    }
+  }
+});
+
+// ---------------------------------------------------------------------------
 // Tests — registry ↔ TypeScript type alignment
 // ---------------------------------------------------------------------------
 
@@ -195,7 +220,7 @@ describe("workflow registry ↔ TypeScript type alignment", () => {
           const tsField = tsFieldMap.get(registryField.name);
           if (!tsField || tsField.type !== "enum") continue;
 
-          const registryEnums = [...(registryField.enumValues ?? [])].sort();
+          const registryEnums = [...(registryField.enumValues ?? [])].map((v) => v instanceof EnumValue ? v.value : v).sort();
           const tsEnums = [...(tsField.enumValues ?? [])].sort();
 
           expect(

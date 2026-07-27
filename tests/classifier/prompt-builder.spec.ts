@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { buildSystemPrompt, buildUserMessage } from "../../src/classifier/prompt-builder.js";
 import type { ClassificationInput } from "../../src/classifier/classifier.js";
-import { WORKFLOW_REGISTRY } from "../../src/classifier/workflow-registry.js";
+import { WORKFLOW_REGISTRY, EnumValue } from "../../src/classifier/workflow-registry.js";
 
 // ---------------------------------------------------------------------------
 // buildSystemPrompt
@@ -24,12 +24,12 @@ describe("buildSystemPrompt", () => {
     }
   });
 
-  it("includes enum values for enum fields", () => {
+  it("includes enum values with descriptions for enum fields", () => {
     for (const workflow of WORKFLOW_REGISTRY) {
       for (const field of workflow.fields) {
         if (field.enumValues) {
-          for (const value of field.enumValues) {
-            expect(prompt).toContain(`"${value}"`);
+          for (const ev of field.enumValues) {
+            expect(prompt).toContain(ev.toPromptFragment());
           }
         }
       }

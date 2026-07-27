@@ -1,4 +1,5 @@
 import type { WorkflowDefinition } from "./workflow-registry.js";
+import { EnumValue } from "./workflow-registry.js";
 import type { ClassificationInput } from "./classifier.js";
 import { SPAM_TAGS } from "./tags.js";
 
@@ -38,7 +39,7 @@ Return ONLY valid JSON matching this structure:
   sections.push("## Workflows");
   for (const workflow of registry) {
     const fieldRows = workflow.fields.map((f) => {
-      const typeStr = f.enumValues ? f.enumValues.map((v) => `"${v}"`).join(" | ") : f.type;
+      const typeStr = f.enumValues ? f.enumValues.map((v) => v instanceof EnumValue ? v.toPromptFragment() : `"${v}"`).join(" | ") : f.type;
       const req = f.required ? "required" : "optional";
       const notes = f.notes ? ` — ${f.notes}` : "";
       return `| ${f.name} | ${typeStr} | ${req} |${notes}`;
