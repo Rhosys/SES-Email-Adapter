@@ -74,6 +74,14 @@ export function toApiResource(resource: DbResource): Api.Resource {
     status: resource.status as Api.Resource["status"],
     expectedResolutionDate: resource.expectedResolutionDate,
     ...(resource.resolvedAt ? { resolvedAt: resource.resolvedAt } : {}),
+    assets: (resource.assets ?? []).map(a => ({
+      type: a.type as Api.ResourceAsset["type"],
+      label: a.label,
+      rawValue: a.rawValue,
+      sourceSignalId: a.sourceSignalId,
+      ...(a.s3Key ? { s3Key: a.s3Key } : {}),
+      extractedAt: a.extractedAt,
+    })),
     createdAt: resource.createdAt,
     updatedAt: resource.updatedAt,
   };

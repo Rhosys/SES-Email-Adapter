@@ -1,12 +1,13 @@
 import { DateTime } from "luxon";
 import type {
-  Workflow, WorkflowData,
+  Workflow, WorkflowData, ResourceAsset,
   PackageData, TravelData, PaymentsData, HealthcareData, JobData, EventsData,
 } from "../types/index.js";
 
 export interface ResourceInfo {
   expectedResolutionDate: string;
   resourceKey: string;
+  assets: ResourceAsset[];
 }
 
 function isValidDate(date: string): boolean {
@@ -30,7 +31,7 @@ export function deriveResourceInfo(workflow: Workflow, workflowData: WorkflowDat
     case "package": {
       const d = workflowData as PackageData;
       if (!d.estimatedDelivery || !d.orderNumber || !isValidDate(d.estimatedDelivery)) return null;
-      return { expectedResolutionDate: d.estimatedDelivery, resourceKey: d.orderNumber };
+      return { expectedResolutionDate: d.estimatedDelivery, resourceKey: d.orderNumber, assets: [] };
     }
 
     case "travel": {
@@ -38,32 +39,32 @@ export function deriveResourceInfo(workflow: Workflow, workflowData: WorkflowDat
       const date = d.returnDate ?? d.departureDate;
       const key = d.flightNumber ?? d.confirmationNumber;
       if (!date || !key || !isValidDate(date)) return null;
-      return { expectedResolutionDate: date, resourceKey: key };
+      return { expectedResolutionDate: date, resourceKey: key, assets: [] };
     }
 
     case "payments": {
       const d = workflowData as PaymentsData;
       if (!d.dueDate || !d.invoiceNumber || !isValidDate(d.dueDate)) return null;
-      return { expectedResolutionDate: d.dueDate, resourceKey: d.invoiceNumber };
+      return { expectedResolutionDate: d.dueDate, resourceKey: d.invoiceNumber, assets: [] };
     }
 
     case "healthcare": {
       const d = workflowData as HealthcareData;
       if (!d.appointmentDate || !d.provider || !isValidDate(d.appointmentDate)) return null;
-      return { expectedResolutionDate: d.appointmentDate, resourceKey: d.provider };
+      return { expectedResolutionDate: d.appointmentDate, resourceKey: d.provider, assets: [] };
     }
 
     case "job": {
       const d = workflowData as JobData;
       if (!d.interviewDate || !d.company || !d.role || !isValidDate(d.interviewDate)) return null;
-      return { expectedResolutionDate: d.interviewDate, resourceKey: `${d.company}:${d.role}` };
+      return { expectedResolutionDate: d.interviewDate, resourceKey: `${d.company}:${d.role}`, assets: [] };
     }
 
     case "events": {
       const d = workflowData as EventsData;
       const key = d.ticketReference ?? d.eventName;
       if (!d.eventStartDatetime || !key || !isValidDate(d.eventStartDatetime)) return null;
-      return { expectedResolutionDate: d.eventStartDatetime, resourceKey: key };
+      return { expectedResolutionDate: d.eventStartDatetime, resourceKey: key, assets: [] };
     }
 
     default:

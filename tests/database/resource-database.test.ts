@@ -96,6 +96,69 @@ describe("ResourceDatabase.saveResource", () => {
     expect(input.ExpressionAttributeValues![":ttl"]).toBeUndefined();
     expect(input.UpdateExpression).not.toContain("#ttl");
   });
+
+  it("appends assets via list_append when provided", async () => {
+    ddbMock.on(UpdateCommand).resolves({ Attributes: {} });
+
+    const assets = [{
+      type: "qr_code" as const, label: "Event entry", rawValue: "https://example.com/ticket/123",
+      sourceSignalId: "sgn-001", extractedAt: "2024-06-15T10:30:00.000Z",
+    }];
+
+    await db.saveResource({
+      accountId: "acct-1", threadId: "thr-001", workflow: "events",
+      resourceKey: "TIX-1", expectedResolutionDate: "2024-08-01T20:00:00Z", assets,
+    });
+
+    const input = ddbMock.commandCalls(UpdateCommand)[0]!.args[0].input;
+    expect(input.UpdateExpression).toContain("assets = list_append(if_not_exists(assets, :emptyList), :newAssets)");
+    expect(input.ExpressionAttributeValues![":emptyList"]).toEqual([]);
+    expect(input.ExpressionAttributeValues![":newAssets"]).toEqual(assets);
+  });
+
+  it("omits list_append when assets is undefined", async () => {
+    ddbMock.on(UpdateCommand).resolves({ Attributes: {} });
+
+    await db.saveResource({
+      accountId: "acct-1", threadId: "thr-001", workflow: "package",
+      resourceKey: "123-456", expectedResolutionDate: "2024-07-01T00:00:00Z",
+    });
+
+    const input = ddbMock.commandCalls(UpdateCommand)[0]!.args[0].input;
+    expect(input.UpdateExpression).not.toContain("list_append");
+    expect(input.ExpressionAttributeValues![":newAssets"]).toBeUndefined();
+  });
+
+  it("omits list_append when assets is an empty array", async () => {
+    ddbMock.on(UpdateCommand).resolves({ Attributes: {} });
+
+    await db.saveResource({
+      accountId: "acct-1", threadId: "thr-001", workflow: "package",
+      resourceKey: "123-456", expectedResolutionDate: "2024-07-01T00:00:00Z", assets: [],
+    });
+
+    const input = ddbMock.commandCalls(UpdateCommand)[0]!.args[0].input;
+    expect(input.UpdateExpression).not.toContain("list_append");
+    expect(input.ExpressionAttributeValues![":newAssets"]).toBeUndefined();
+  });
+
+  it("includes s3Key on pkpass assets for Apple Wallet export", async () => {
+    ddbMock.on(UpdateCommand).resolves({ Attributes: {} });
+
+    const assets = [{
+      type: "pkpass" as const, label: "Boarding pass", rawValue: "M1DOE/JOHN...",
+      sourceSignalId: "sgn-002", s3Key: "content/accounts/acct-1/extracted/sgn-002/0",
+      extractedAt: "2024-06-15T10:30:00.000Z",
+    }];
+
+    await db.saveResource({
+      accountId: "acct-1", threadId: "thr-001", workflow: "travel",
+      resourceKey: "UA123", expectedResolutionDate: "2024-08-01T00:00:00Z", assets,
+    });
+
+    const input = ddbMock.commandCalls(UpdateCommand)[0]!.args[0].input;
+    expect(input.ExpressionAttributeValues![":newAssets"]![0].s3Key).toBe("content/accounts/acct-1/extracted/sgn-002/0");
+  });
 });
 
 describe("ResourceDatabase.setResourceStatus", () => {

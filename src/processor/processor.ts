@@ -1405,6 +1405,7 @@ export class SignalProcessor {
         resourceKey: resourceInfo.resourceKey,
         expectedResolutionDate: resourceInfo.expectedResolutionDate,
         ...(resourceTtl !== undefined ? { ttl: resourceTtl } : {}),
+        ...(resourceInfo.assets.length > 0 ? { assets: resourceInfo.assets } : {}),
       });
       if (resourceResult.isErr()) {
         this.logger.error(`Resource save failed: ${resourceResult.error.message}`, { code: "processor.resource_save_failed", threadId: thread.id, workflow: signal.data.workflow, error: resourceResult.error });

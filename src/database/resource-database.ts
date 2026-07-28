@@ -3,7 +3,7 @@ import { DateTime } from "luxon";
 import { dynamo, RESOURCES_TABLE, encodeCursor, decodeCursor } from "./shared.js";
 import { ok, err, dbError } from "../errors.js";
 import type { DbError, Result } from "../errors.js";
-import type { Resource, ResourceStatus, Workflow, Page, PageParams } from "../types/index.js";
+import type { Resource, ResourceAsset, ResourceStatus, Workflow, Page, PageParams } from "../types/index.js";
 
 // Key design:
 // PK  = ACCT#<accountId>#THREAD#<threadId>
@@ -22,6 +22,7 @@ export interface SaveResourceParams {
   resourceKey: string;
   expectedResolutionDate: string;
   ttl?: number;
+  assets?: ResourceAsset[];
 }
 
 export interface ListResourcesParams extends PageParams {
@@ -38,7 +39,7 @@ export class ResourceDatabase {
   // change a resource's status once it exists. Only setResourceStatus (an explicit user
   // action) changes status after creation.
   async saveResource(params: SaveResourceParams): Promise<Result<Resource, DbError>> {
-    const { accountId, threadId, workflow, resourceKey, expectedResolutionDate, ttl } = params;
+    const { accountId, threadId, workflow, resourceKey, expectedResolutionDate, ttl, assets } = params;
     const now = DateTime.utc().toISO()!;
     const sk = `${workflow}#${resourceKey}`;
 
@@ -70,6 +71,12 @@ export class ResourceDatabase {
       setParts.push("#ttl = :ttl");
       exprNames["#ttl"] = "ttl";
       exprValues[":ttl"] = ttl;
+    }
+
+    if (assets && assets.length > 0) {
+      setParts.push("assets = list_append(if_not_exists(assets, :emptyList), :newAssets)");
+      exprValues[":emptyList"] = [];
+      exprValues[":newAssets"] = assets;
     }
 
     const updateExpr = `SET ${setParts.join(", ")}`;

@@ -505,6 +505,15 @@ export const Thread = z.object({
 // Resource
 // ---------------------------------------------------------------------------
 
+export const ResourceAsset = z.object({
+  type: z.enum(["qr_code", "barcode", "pkpass"]),
+  label: z.string(),
+  rawValue: z.string(),
+  sourceSignalId: z.string(),
+  s3Key: z.string().optional(),
+  extractedAt: z.string(),
+}).openapi("ResourceAsset");
+
 export const Resource = z.object({
   resourceId: z.string().readonly(),
   threadId: z.string().readonly(),
@@ -512,6 +521,7 @@ export const Resource = z.object({
   status: ResourceStatus,
   expectedResolutionDate: z.string(),
   resolvedAt: z.string().optional().readonly(),
+  assets: z.array(ResourceAsset),
   createdAt: z.string().readonly(),
   updatedAt: z.string().readonly(),
 }).openapi("Resource");
@@ -743,6 +753,7 @@ export type InboundEmailSignalData = z.infer<typeof InboundEmailSignalData>;
 export type OutboundEmailSignalData = z.infer<typeof OutboundEmailSignalData>;
 export type Thread = z.infer<typeof Thread>;
 export type ResourceStatus = z.infer<typeof ResourceStatus>;
+export type ResourceAsset = z.infer<typeof ResourceAsset>;
 export type Resource = z.infer<typeof Resource>;
 export type Signal = z.infer<typeof Signal>;
 export type DraftSignal = z.infer<typeof DraftSignal>;
