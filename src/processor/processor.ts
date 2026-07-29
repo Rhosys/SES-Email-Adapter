@@ -23,7 +23,6 @@ import type { AccountDatabase } from "../database/account-database.js";
 import type { ProcessingDatabase } from "../database/processing-database.js";
 import type { ResourceDatabase } from "../database/resource-database.js";
 import { deriveResourceInfo } from "./resource-info.js";
-import { extractResourceAssets } from "./asset-extractor.js";
 import type { S3RetentionService } from "../embedding/s3-retention-service.js";
 import { getRetentionForPlan } from "../embedding/retention-tier.js";
 import type { BillingPlan } from "../embedding/retention-tier.js";
@@ -878,6 +877,7 @@ export class SignalProcessor {
 
     if (sanitizeResult.isErr()) return err(sanitizeResult.error);
     const { parsed: sanitizedParsed } = sanitizeResult.value;
+    const sanitizerAssets = sanitizedParsed.assets ?? [];
 
     // Map sanitized response to ParsedMime for downstream compatibility
     const parsed: ParsedMime = {
@@ -1396,12 +1396,11 @@ export class SignalProcessor {
     // fail the signal ingest or trigger an SQS retry (unlike the thread/signal saves above).
     const resourceInfo = deriveResourceInfo(signal.data.workflow, signal.data.workflowData);
     if (resourceInfo) {
-      let extractedAssets: import("../types/index.js").ResourceAsset[] = [];
-      try {
-        extractedAssets = await extractResourceAssets(signal, this.s3Client, this.contentBucket, this.logger);
-      } catch (e) {
-        this.logger.warn("Asset extraction failed", { code: "processor.asset_extraction_failed", error: e });
-      }
+      const extractedAssets: import("../types/index.js").ResourceAsset[] = sanitizerAssets.map(a => ({
+        type: a.type, label: a.label, rawValue: a.rawValue, sourceSignalId: signal.id,
+        extractedAt: new Date().toISOString(),
+        ...(a.s3Key ? { s3Key: a.s3Key } : {}),
+      }));
       const allAssets = [...resourceInfo.assets, ...extractedAssets];
       const resourceTtl = ttl !== undefined
         ? Math.max(ttl, Math.floor(DateTime.fromISO(resourceInfo.expectedResolutionDate).toSeconds()) + 365 * 24 * 60 * 60)
