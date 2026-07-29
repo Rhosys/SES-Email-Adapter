@@ -23,6 +23,7 @@ import type { AccountDatabase } from "../database/account-database.js";
 import type { ProcessingDatabase } from "../database/processing-database.js";
 import type { ResourceDatabase } from "../database/resource-database.js";
 import { deriveResourceInfo } from "./resource-info.js";
+import { extractResourceAssets } from "./asset-extractor.js";
 import type { S3RetentionService } from "../embedding/s3-retention-service.js";
 import { getRetentionForPlan } from "../embedding/retention-tier.js";
 import type { BillingPlan } from "../embedding/retention-tier.js";
@@ -1395,6 +1396,13 @@ export class SignalProcessor {
     // fail the signal ingest or trigger an SQS retry (unlike the thread/signal saves above).
     const resourceInfo = deriveResourceInfo(signal.data.workflow, signal.data.workflowData);
     if (resourceInfo) {
+      let extractedAssets: import("../types/index.js").ResourceAsset[] = [];
+      try {
+        extractedAssets = await extractResourceAssets(signal, this.s3Client, this.contentBucket, this.logger);
+      } catch (e) {
+        this.logger.warn("Asset extraction failed", { code: "processor.asset_extraction_failed", error: e });
+      }
+      const allAssets = [...resourceInfo.assets, ...extractedAssets];
       const resourceTtl = ttl !== undefined
         ? Math.max(ttl, Math.floor(DateTime.fromISO(resourceInfo.expectedResolutionDate).toSeconds()) + 365 * 24 * 60 * 60)
         : undefined;
@@ -1405,7 +1413,7 @@ export class SignalProcessor {
         resourceKey: resourceInfo.resourceKey,
         expectedResolutionDate: resourceInfo.expectedResolutionDate,
         ...(resourceTtl !== undefined ? { ttl: resourceTtl } : {}),
-        ...(resourceInfo.assets.length > 0 ? { assets: resourceInfo.assets } : {}),
+        ...(allAssets.length > 0 ? { assets: allAssets } : {}),
       });
       if (resourceResult.isErr()) {
         this.logger.error(`Resource save failed: ${resourceResult.error.message}`, { code: "processor.resource_save_failed", threadId: thread.id, workflow: signal.data.workflow, error: resourceResult.error });
