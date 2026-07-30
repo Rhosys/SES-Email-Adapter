@@ -4,7 +4,7 @@
 // ---------------------------------------------------------------------------
 
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
-import { MailparserMimeParser } from "../processor/mime.js";
+import { MailparserMimeParser } from "../mime-parser.js";
 import { buildMimeEmbedText, extractEmbedTextInput } from "./embed-text.js";
 import type { EmbeddingGenerator, EmbeddingResult } from "./embedding-generator.js";
 import type { BedrockError, DbError, Result } from "../errors.js";

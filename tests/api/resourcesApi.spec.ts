@@ -36,6 +36,7 @@ function makeResource(overrides: Partial<Resource> = {}): Resource {
     resourceKey: "123-456",
     status: "active",
     expectedResolutionDate: "2024-07-01T00:00:00Z",
+    assets: [],
     createdAt: "2024-06-15T10:00:00Z",
     updatedAt: "2024-06-15T10:00:00Z",
     ...overrides,

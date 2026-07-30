@@ -9,7 +9,7 @@ describe("deriveResourceInfo", () => {
         workflow: "package", packageType: "shipping", retailer: "Amazon",
         orderNumber: "123-456", estimatedDelivery: "2024-01-20T00:00:00Z",
       });
-      expect(info).toEqual({ expectedResolutionDate: "2024-01-20T00:00:00Z", resourceKey: "123-456" });
+      expect(info).toEqual({ expectedResolutionDate: "2024-01-20T00:00:00Z", resourceKey: "123-456", assets: [] });
     });
 
     it("returns the same shape regardless of packageType — completion is never inferred here", () => {
@@ -18,7 +18,7 @@ describe("deriveResourceInfo", () => {
           workflow: "package", packageType, retailer: "Amazon",
           orderNumber: "123-456", estimatedDelivery: "2024-01-20T00:00:00Z",
         });
-        expect(info).toEqual({ expectedResolutionDate: "2024-01-20T00:00:00Z", resourceKey: "123-456" });
+        expect(info).toEqual({ expectedResolutionDate: "2024-01-20T00:00:00Z", resourceKey: "123-456", assets: [] });
       }
     });
 
@@ -47,7 +47,7 @@ describe("deriveResourceInfo", () => {
         workflow: "travel", travelType: "flight", provider: "United",
         departureDate: "2024-02-01T00:00:00Z", returnDate: "2024-02-10T00:00:00Z", flightNumber: "UA123",
       });
-      expect(info).toEqual({ expectedResolutionDate: "2024-02-10T00:00:00Z", resourceKey: "UA123" });
+      expect(info).toEqual({ expectedResolutionDate: "2024-02-10T00:00:00Z", resourceKey: "UA123", assets: [] });
     });
 
     it("falls back to departureDate and confirmationNumber when returnDate/flightNumber absent", () => {
@@ -55,7 +55,7 @@ describe("deriveResourceInfo", () => {
         workflow: "travel", travelType: "hotel", provider: "Marriott",
         departureDate: "2024-02-01T00:00:00Z", confirmationNumber: "CONF-1",
       });
-      expect(info).toEqual({ expectedResolutionDate: "2024-02-01T00:00:00Z", resourceKey: "CONF-1" });
+      expect(info).toEqual({ expectedResolutionDate: "2024-02-01T00:00:00Z", resourceKey: "CONF-1", assets: [] });
     });
 
     it("returns null when neither date nor key is present", () => {
@@ -75,7 +75,7 @@ describe("deriveResourceInfo", () => {
         const info = deriveResourceInfo("payments", {
           workflow: "payments", paymentType, vendor: "AWS", dueDate: "2024-03-01T00:00:00Z", invoiceNumber: "INV-1",
         });
-        expect(info).toEqual({ expectedResolutionDate: "2024-03-01T00:00:00Z", resourceKey: "INV-1" });
+        expect(info).toEqual({ expectedResolutionDate: "2024-03-01T00:00:00Z", resourceKey: "INV-1", assets: [] });
       }
     });
 
@@ -97,7 +97,7 @@ describe("deriveResourceInfo", () => {
         workflow: "healthcare", eventType: "appointment_reminder", provider: "Dr. Smith",
         appointmentDate: "2024-04-01T00:00:00Z", requiresAction: false,
       });
-      expect(info).toEqual({ expectedResolutionDate: "2024-04-01T00:00:00Z", resourceKey: "Dr. Smith" });
+      expect(info).toEqual({ expectedResolutionDate: "2024-04-01T00:00:00Z", resourceKey: "Dr. Smith", assets: [] });
     });
 
     it("returns null when appointmentDate or provider is missing", () => {
@@ -118,7 +118,7 @@ describe("deriveResourceInfo", () => {
         workflow: "job", jobType: "interview_request", company: "Acme", role: "Engineer",
         interviewDate: "2024-05-01T00:00:00Z", applicationStatus: "interview",
       });
-      expect(info).toEqual({ expectedResolutionDate: "2024-05-01T00:00:00Z", resourceKey: "Acme:Engineer" });
+      expect(info).toEqual({ expectedResolutionDate: "2024-05-01T00:00:00Z", resourceKey: "Acme:Engineer", assets: [] });
     });
 
     it("returns null when company or role is missing", () => {
@@ -140,7 +140,7 @@ describe("deriveResourceInfo", () => {
         workflow: "events", eventType: "reminder", eventName: "Concert",
         eventStartDatetime: "2024-06-01T20:00:00Z", ticketReference: "TIX-1",
       });
-      expect(info).toEqual({ expectedResolutionDate: "2024-06-01T20:00:00Z", resourceKey: "TIX-1" });
+      expect(info).toEqual({ expectedResolutionDate: "2024-06-01T20:00:00Z", resourceKey: "TIX-1", assets: [] });
     });
 
     it("falls back to eventName when ticketReference is absent", () => {
@@ -148,7 +148,7 @@ describe("deriveResourceInfo", () => {
         workflow: "events", eventType: "reminder", eventName: "Concert",
         eventStartDatetime: "2024-06-01T20:00:00Z",
       });
-      expect(info).toEqual({ expectedResolutionDate: "2024-06-01T20:00:00Z", resourceKey: "Concert" });
+      expect(info).toEqual({ expectedResolutionDate: "2024-06-01T20:00:00Z", resourceKey: "Concert", assets: [] });
     });
 
     it("returns null when eventStartDatetime is missing", () => {

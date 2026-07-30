@@ -1,5 +1,6 @@
 import { simpleParser } from "mailparser";
 import { sanitizeHtml } from "./html-sanitizer.js";
+import { extractAssets, type ExtractedAsset } from "./asset-extractor.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -43,6 +44,7 @@ interface ContentSanitizeResponse {
     attachments: AttachmentRef[];
     headers: Record<string, string>;
     sentAt?: string;
+    assets?: ExtractedAsset[];
   };
 }
 
@@ -191,6 +193,8 @@ export async function handler(event: ContentSanitizeRequest): Promise<ContentSan
   let uploadIndex = 0;
   const attachmentRefs: AttachmentRef[] = [];
   const cidMap: Record<string, string> = {};
+  const inlineImages: Array<{ mimeType: string; content: Buffer }> = [];
+  const attachmentsWithBytes: Array<{ filename: string; mimeType: string; content: Buffer; s3Key?: string }> = [];
 
   for (const attachment of attachments) {
     if (attachment.size > MAX_SINGLE_ATTACHMENT_SIZE) {
@@ -202,6 +206,9 @@ export async function handler(event: ContentSanitizeRequest): Promise<ContentSan
     if (attachment.contentId) {
       // Inline image — embed as data URI, no S3 upload needed
       cidMap[attachment.contentId] = `data:${contentType};base64,${attachment.content.toString("base64")}`;
+      if (contentType.startsWith("image/")) {
+        inlineImages.push({ mimeType: contentType, content: attachment.content });
+      }
       continue;
     }
 
@@ -209,12 +216,9 @@ export async function handler(event: ContentSanitizeRequest): Promise<ContentSan
     const uploaded = await uploadViaPresignedPost(event.presignedPost, s3Key, attachment.content, contentType, event.retentionTag);
 
     if (uploaded) {
-      attachmentRefs.push({
-        filename: attachment.filename ?? `attachment-${uploadIndex}`,
-        mimeType: contentType,
-        sizeBytes: attachment.size,
-        s3Key,
-      });
+      const filename = attachment.filename ?? `attachment-${uploadIndex}`;
+      attachmentRefs.push({ filename, mimeType: contentType, sizeBytes: attachment.size, s3Key });
+      attachmentsWithBytes.push({ filename, mimeType: contentType, content: attachment.content, s3Key });
     }
 
     uploadIndex++;
@@ -247,6 +251,14 @@ export async function handler(event: ContentSanitizeRequest): Promise<ContentSan
     }
   }
 
+  // 7. Extract scannable assets (QR codes, PKPass barcodes) — best-effort
+  let extractedAssets: ExtractedAsset[] = [];
+  try {
+    extractedAssets = await extractAssets(inlineImages, attachmentsWithBytes);
+  } catch {
+    // extraction failure must never fail the sanitizer
+  }
+
   const result: ContentSanitizeResponse = {
     success: true,
     parsed: {
@@ -271,6 +283,9 @@ export async function handler(event: ContentSanitizeRequest): Promise<ContentSan
   }
   if (parsed.date) {
     result.parsed.sentAt = parsed.date.toISOString();
+  }
+  if (extractedAssets.length > 0) {
+    result.parsed.assets = extractedAssets;
   }
 
   return result;

@@ -608,6 +608,18 @@ export type ResourceStatus = (typeof RESOURCE_STATUSES)[number];
 export const RESOURCE_WORKFLOWS = ["package", "travel", "payments", "healthcare", "job", "events"] as const;
 export type ResourceWorkflow = (typeof RESOURCE_WORKFLOWS)[number];
 
+export const RESOURCE_ASSET_TYPES = ["qr_code", "barcode", "pkpass"] as const;
+export type ResourceAssetType = (typeof RESOURCE_ASSET_TYPES)[number];
+
+export interface ResourceAsset {
+  type: ResourceAssetType;
+  label: string;
+  rawValue: string;
+  sourceSignalId: string;
+  s3Key?: string;
+  extractedAt: string;
+}
+
 export interface Resource {
   accountId: string;
   threadId: string;
@@ -619,6 +631,7 @@ export interface Resource {
   status: ResourceStatus;
   expectedResolutionDate: string;
   resolvedAt?: string;
+  assets: ResourceAsset[];
   createdAt: string;
   updatedAt: string;
   ttl?: number;   // max(threadTtl, epoch(expectedResolutionDate) + 1 year)

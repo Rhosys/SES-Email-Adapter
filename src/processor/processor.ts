@@ -877,6 +877,7 @@ export class SignalProcessor {
 
     if (sanitizeResult.isErr()) return err(sanitizeResult.error);
     const { parsed: sanitizedParsed } = sanitizeResult.value;
+    const sanitizerAssets = sanitizedParsed.assets ?? [];
 
     // Map sanitized response to ParsedMime for downstream compatibility
     const parsed: ParsedMime = {
@@ -1395,6 +1396,12 @@ export class SignalProcessor {
     // fail the signal ingest or trigger an SQS retry (unlike the thread/signal saves above).
     const resourceInfo = deriveResourceInfo(signal.data.workflow, signal.data.workflowData);
     if (resourceInfo) {
+      const extractedAssets: import("../types/index.js").ResourceAsset[] = sanitizerAssets.map(a => ({
+        type: a.type, label: a.label, rawValue: a.rawValue, sourceSignalId: signal.id,
+        extractedAt: new Date().toISOString(),
+        ...(a.s3Key ? { s3Key: a.s3Key } : {}),
+      }));
+      const allAssets = [...resourceInfo.assets, ...extractedAssets];
       const resourceTtl = ttl !== undefined
         ? Math.max(ttl, Math.floor(DateTime.fromISO(resourceInfo.expectedResolutionDate).toSeconds()) + 365 * 24 * 60 * 60)
         : undefined;
@@ -1405,6 +1412,7 @@ export class SignalProcessor {
         resourceKey: resourceInfo.resourceKey,
         expectedResolutionDate: resourceInfo.expectedResolutionDate,
         ...(resourceTtl !== undefined ? { ttl: resourceTtl } : {}),
+        ...(allAssets.length > 0 ? { assets: allAssets } : {}),
       });
       if (resourceResult.isErr()) {
         this.logger.error(`Resource save failed: ${resourceResult.error.message}`, { code: "processor.resource_save_failed", threadId: thread.id, workflow: signal.data.workflow, error: resourceResult.error });

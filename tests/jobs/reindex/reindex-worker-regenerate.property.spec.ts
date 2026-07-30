@@ -63,7 +63,7 @@ vi.mock("../../../src/embedding/embedding-generator.js", () => ({
 // Mock MimeParser
 // ---------------------------------------------------------------------------
 
-vi.mock("../../../src/processor/mime.js", () => ({
+vi.mock("../../../src/mime-parser.js", () => ({
   MailparserMimeParser: class {
     parse = mockMimeParse;
     parseBuffer = async (...args: unknown[]) => {

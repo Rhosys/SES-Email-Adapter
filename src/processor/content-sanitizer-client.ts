@@ -33,6 +33,13 @@ export interface ContentSanitizeRequest {
   invocationId?: string;
 }
 
+interface ExtractedAsset {
+  type: "qr_code" | "pkpass";
+  label: string;
+  rawValue: string;
+  s3Key?: string;
+}
+
 export interface ContentSanitizeResponse {
   parsed: {
     from: EmailAddress;
@@ -45,6 +52,7 @@ export interface ContentSanitizeResponse {
     attachments: AttachmentRef[];
     headers: Record<string, string>;
     sentAt?: string;
+    assets?: ExtractedAsset[];
   };
 }
 
