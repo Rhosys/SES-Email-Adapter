@@ -740,7 +740,7 @@ export class SignalProcessor {
     // 1. Dedup / retry-resume — a single signal lookup serves both. On force (reprocess)
     // we skip it and always run the full pipeline.
     if (!opts?.force) {
-      const existingResult = await this.threadDb.getSignalByMessageId(accountId, sesMessageId);
+      const existingResult = await this.threadDb.getSignalByMessageId(accountId, `ses-${sesMessageId}`);
       if (existingResult.isErr()) return err(existingResult.error);
       this.logger.trackPoint("signal_dedup_lookup");
       const existing = existingResult.value;
@@ -1745,7 +1745,8 @@ export class SignalProcessor {
     const s3Key = existing.data.s3Key;
     if (!s3Key) return err(processorError("Signal has no s3Key — cannot reprocess"));
 
-    const sesMessageId = existing.data.sesMessageId ?? existing.signalLookupId.replace(/^ses-/, "");
+    const sesMessageId = existing.data.sesMessageId;
+    if (!sesMessageId) return err(processorError("Signal has no sesMessageId — cannot reprocess"));
     const recipientAddress = existing.data.recipientAddress;
     const timestamp = existing.data.receivedAt ?? existing.createdAt;
 
@@ -1767,7 +1768,7 @@ export class SignalProcessor {
 
     // Re-fetch by primary key — reprocessing may reassign the signal to a different
     // thread, so the GSI1-based getSignalById (scoped to the original threadId) would miss it.
-    const freshResult = await this.threadDb.getSignalByMessageId(accountId, sesMessageId);
+    const freshResult = await this.threadDb.getSignalByMessageId(accountId, `ses-${sesMessageId}`);
     if (freshResult.isErr()) return err(processorError(freshResult.error));
     if (!freshResult.value) return err(processorError("Signal not found after reprocess"));
 

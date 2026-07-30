@@ -299,7 +299,7 @@ describe("SesFeedbackProcessor — prefixed tag reading", () => {
 
     expect(result.isOk()).toBe(true);
     expect(signalStore.getSignalById).not.toHaveBeenCalled();
-    expect(signalStore.getSignalByMessageId).toHaveBeenCalledWith("acct-001", "ses-msg-abc");
+    expect(signalStore.getSignalByMessageId).toHaveBeenCalledWith("acct-001", "ses-ses-msg-abc");
   });
 });
 

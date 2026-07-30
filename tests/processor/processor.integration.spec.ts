@@ -398,7 +398,7 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
       expect(result.isOk()).toBe(true);
 
       // Signal was looked up from DDB
-      expect(threadDb.getSignalByMessageId).toHaveBeenCalledWith(TEST_ACCOUNT_ID, SES_MESSAGE_ID);
+      expect(threadDb.getSignalByMessageId).toHaveBeenCalledWith(TEST_ACCOUNT_ID, `ses-${SES_MESSAGE_ID}`);
 
       // Arc was loaded from DDB
       expect(threadDb.getThread).toHaveBeenCalledWith(TEST_ACCOUNT_ID, existingSignal.threadId);

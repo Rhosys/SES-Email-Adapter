@@ -114,11 +114,11 @@ export class ThreadDatabase {
     }
   }
 
-  async getSignalByMessageId(accountId: string, sesMessageId: string): Promise<Result<Signal | null, DbError>> {
+  async getSignalByMessageId(accountId: string, signalLookupId: string): Promise<Result<Signal | null, DbError>> {
     try {
       const res = await dynamo.send(new GetCommand({
         TableName: SIGNALS_TABLE,
-        Key: { pk: sigPk(accountId, `ses-${sesMessageId}`), sk: ITEM_SK },
+        Key: { pk: sigPk(accountId, signalLookupId), sk: ITEM_SK },
       }));
       return ok(res.Item ? coerceStaleStatus(hydrateSignal(res.Item as Signal)) : null);
     } catch (e) {
