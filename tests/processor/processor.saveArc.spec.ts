@@ -45,11 +45,10 @@ vi.mock("../../src/processor/presign.js", () => ({
 describe("Single saveThread call with complete mutations", () => {
   const TEST_ACCOUNT_ID = "acct-savearc";
 
-  function makeMessage(sesMessageId: string, recipientEmail: string): InboundSignalMessage {
+  function makeMessage(messageId: string, recipientEmail: string): InboundSignalMessage {
     return {
-      s3Key: `emails/${sesMessageId}`,
-      sesMessageId,
-      compositeMailMessageId: `ses-${sesMessageId}`,
+      s3Key: `emails/${messageId}`,
+      compositeMailMessageId: `ses-${messageId}`,
       idempotencyKey: "test-idempotency-key",
       timestamp: "2024-01-15T10:00:00Z",
       destination: [recipientEmail],

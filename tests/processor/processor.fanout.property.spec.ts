@@ -136,11 +136,10 @@ describe("Multi-cluster fanout writes vectors to every active target", () => {
     };
   }
 
-  function makeMessage(sesMessageId: string): InboundSignalMessage {
+  function makeMessage(messageId: string): InboundSignalMessage {
     return {
-      s3Key: `emails/${sesMessageId}`,
-      sesMessageId,
-      compositeMailMessageId: `ses-${sesMessageId}`,
+      s3Key: `emails/${messageId}`,
+      compositeMailMessageId: `ses-${messageId}`,
       idempotencyKey: "test-idempotency-key",
       timestamp: "2024-01-15T10:00:00Z",
       destination: ["user@example.com"],

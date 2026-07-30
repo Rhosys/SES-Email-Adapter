@@ -58,7 +58,7 @@ export interface ProcessorHarness {
   accountId: string;
   access: AccessService;
   sideEffects: SideEffectPayload[];
-  sendEmail(sesMessageId: string, rawMime: string | Buffer): Promise<void>;
+  sendEmail(messageId: string, rawMime: string | Buffer): Promise<void>;
   consumeAndProcess(): Promise<void>;
   teardown(): Promise<void>;
 }
@@ -223,8 +223,8 @@ export async function createProcessorHarness(): Promise<ProcessorHarness> {
   // Helpers
   // ---------------------------------------------------------------------------
 
-  async function sendEmail(sesMessageId: string, rawMime: string | Buffer): Promise<void> {
-    const s3Key = `emails/${sesMessageId}`;
+  async function sendEmail(messageId: string, rawMime: string | Buffer): Promise<void> {
+    const s3Key = `emails/${messageId}`;
     const body = typeof rawMime === 'string' ? Buffer.from(rawMime) : rawMime;
 
     await s3.send(new PutObjectCommand({
@@ -237,7 +237,7 @@ export async function createProcessorHarness(): Promise<ProcessorHarness> {
     const inner = JSON.stringify({
       notificationType: 'Received',
       mail: {
-        messageId: sesMessageId,
+        messageId,
         timestamp: new Date().toISOString(),
         destination: [`recipient@${accountId}.example.com`],
       },
@@ -275,7 +275,6 @@ export async function createProcessorHarness(): Promise<ProcessorHarness> {
 
     const message: InboundSignalMessage = {
       s3Key: inner.receipt.action.objectKey,
-      sesMessageId: inner.mail.messageId,
       compositeMailMessageId: `ses-${inner.mail.messageId}`,
       idempotencyKey: inner.mail.messageId,
       timestamp: inner.mail.timestamp,

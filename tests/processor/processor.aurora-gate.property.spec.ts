@@ -148,11 +148,10 @@ describe("Feature: signal-processor-retry-resilience, Property 4: Arc saved befo
     };
   }
 
-  function makeMessage(sesMessageId: string): InboundSignalMessage {
+  function makeMessage(messageId: string): InboundSignalMessage {
     return {
-      s3Key: `emails/${sesMessageId}`,
-      sesMessageId,
-      compositeMailMessageId: `ses-${sesMessageId}`,
+      s3Key: `emails/${messageId}`,
+      compositeMailMessageId: `ses-${messageId}`,
       idempotencyKey: "test-idempotency-key",
       timestamp: "2024-01-15T10:00:00Z",
       destination: ["user@example.com"],
@@ -166,11 +165,11 @@ describe("Feature: signal-processor-retry-resilience, Property 4: Arc saved befo
   // -------------------------------------------------------------------------
 
   const ORDER_CASES = [
-    { label: "valid embeddings for both clusters", sesMessageId: "msg-order-both", vectorA: [0.1, -0.9, 0.5], vectorB: [0.2, 0.8, -0.4] },
-    { label: "single-element vectors (minimal valid embedding)", sesMessageId: "msg-order-minimal", vectorA: [0.5], vectorB: [-0.3] },
+    { label: "valid embeddings for both clusters", messageId: "msg-order-both", vectorA: [0.1, -0.9, 0.5], vectorB: [0.2, 0.8, -0.4] },
+    { label: "single-element vectors (minimal valid embedding)", messageId: "msg-order-minimal", vectorA: [0.5], vectorB: [-0.3] },
   ];
 
-  it.each(ORDER_CASES)("saveThread is always called before saveSignal on first-attempt processing ($label)", async ({ vectorA, vectorB, sesMessageId }) => {
+  it.each(ORDER_CASES)("saveThread is always called before saveSignal on first-attempt processing ($label)", async ({ vectorA, vectorB, messageId }) => {
     const callOrder: string[] = [];
 
     const threadDb = {
@@ -220,7 +219,7 @@ describe("Feature: signal-processor-retry-resilience, Property 4: Arc saved befo
       calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud", hmac: makeHmacGeneratorFake() },
     });
 
-    await processor.processRecord(makeMessage(sesMessageId), 1);
+    await processor.processRecord(makeMessage(messageId), 1);
 
     const saveThreadIdx = callOrder.indexOf("saveThread");
     const saveSignalIdx = callOrder.indexOf("saveSignal");
@@ -230,7 +229,7 @@ describe("Feature: signal-processor-retry-resilience, Property 4: Arc saved befo
     expect(saveThreadIdx).toBeLessThan(saveSignalIdx);
   });
 
-  it.each(ORDER_CASES)("when saveThread fails, saveSignal is never called and the record is a batchItemFailure ($label)", async ({ vectorA, vectorB, sesMessageId }) => {
+  it.each(ORDER_CASES)("when saveThread fails, saveSignal is never called and the record is a batchItemFailure ($label)", async ({ vectorA, vectorB, messageId }) => {
     let saveSignalCalled = false;
 
     const threadDb = {
@@ -277,7 +276,7 @@ describe("Feature: signal-processor-retry-resilience, Property 4: Arc saved befo
       calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud", hmac: makeHmacGeneratorFake() },
     });
 
-    const result = await processor.processRecord(makeMessage(sesMessageId), 1);
+    const result = await processor.processRecord(makeMessage(messageId), 1);
 
     expect(saveSignalCalled).toBe(false);
     expect(auroraWriter.upsertEmbedding).not.toHaveBeenCalled();
@@ -382,11 +381,10 @@ describe("Feature: signal-processor-retry-resilience, Property 6: Aurora failure
     };
   }
 
-  function makeMessage(sesMessageId: string): InboundSignalMessage {
+  function makeMessage(messageId: string): InboundSignalMessage {
     return {
-      s3Key: `emails/${sesMessageId}`,
-      sesMessageId,
-      compositeMailMessageId: `ses-${sesMessageId}`,
+      s3Key: `emails/${messageId}`,
+      compositeMailMessageId: `ses-${messageId}`,
       idempotencyKey: "test-idempotency-key",
       timestamp: "2024-01-15T10:00:00Z",
       destination: ["user@example.com"],
@@ -400,18 +398,18 @@ describe("Feature: signal-processor-retry-resilience, Property 6: Aurora failure
   // -------------------------------------------------------------------------
 
   const PRIMARY_FAILURE_CASES = [
-    { label: "primary cluster fails (connection timeout)", vectorA: [0.1, -0.9, 0.5], vectorB: [0.2, 0.8, -0.4], sesMessageId: "msg-primary-fail" },
+    { label: "primary cluster fails (connection timeout)", vectorA: [0.1, -0.9, 0.5], vectorB: [0.2, 0.8, -0.4], messageId: "msg-primary-fail" },
   ];
 
   const SECONDARY_FAILURE_CASES = [
-    { label: "non-primary cluster fails (throttled)", vectorA: [0.1, -0.9, 0.5], vectorB: [0.2, 0.8, -0.4], sesMessageId: "msg-secondary-fail" },
+    { label: "non-primary cluster fails (throttled)", vectorA: [0.1, -0.9, 0.5], vectorB: [0.2, 0.8, -0.4], messageId: "msg-secondary-fail" },
   ];
 
   const BOTH_FAIL_CASES = [
-    { label: "both clusters fail (total Aurora outage)", vectorA: [0.1, -0.9, 0.5], vectorB: [0.2, 0.8, -0.4], sesMessageId: "msg-both-fail" },
+    { label: "both clusters fail (total Aurora outage)", vectorA: [0.1, -0.9, 0.5], vectorB: [0.2, 0.8, -0.4], messageId: "msg-both-fail" },
   ];
 
-  it.each(PRIMARY_FAILURE_CASES)("primary cluster failure logs at ERROR level with cluster ID and error message, and returns batchItemFailure ($label)", async ({ vectorA, vectorB, sesMessageId }) => {
+  it.each(PRIMARY_FAILURE_CASES)("primary cluster failure logs at ERROR level with cluster ID and error message, and returns batchItemFailure ($label)", async ({ vectorA, vectorB, messageId }) => {
     mockLogger.calls.length = 0;
 
     const embeddingGenerator: EmbeddingGenerator = {
@@ -452,7 +450,7 @@ describe("Feature: signal-processor-retry-resilience, Property 6: Aurora failure
       calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud", hmac: makeHmacGeneratorFake() },
     });
 
-    const result = await processor.processRecord(makeMessage(sesMessageId), 1);
+    const result = await processor.processRecord(makeMessage(messageId), 1);
 
     expect(result.isErr()).toBe(true);
 
@@ -464,7 +462,7 @@ describe("Feature: signal-processor-retry-resilience, Property 6: Aurora failure
     expect(String((auroraErrorLog!.context!.error as { cause: unknown }).cause)).toContain("Connection timeout on primary");
   });
 
-  it.each(SECONDARY_FAILURE_CASES)("non-primary cluster failure logs at ERROR level with cluster ID and error message, and returns batchItemFailure ($label)", async ({ vectorA, vectorB, sesMessageId }) => {
+  it.each(SECONDARY_FAILURE_CASES)("non-primary cluster failure logs at ERROR level with cluster ID and error message, and returns batchItemFailure ($label)", async ({ vectorA, vectorB, messageId }) => {
     mockLogger.calls.length = 0;
 
     const embeddingGenerator: EmbeddingGenerator = {
@@ -505,7 +503,7 @@ describe("Feature: signal-processor-retry-resilience, Property 6: Aurora failure
       calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud", hmac: makeHmacGeneratorFake() },
     });
 
-    const result = await processor.processRecord(makeMessage(sesMessageId), 1);
+    const result = await processor.processRecord(makeMessage(messageId), 1);
 
     expect(result.isErr()).toBe(true);
 
@@ -518,7 +516,7 @@ describe("Feature: signal-processor-retry-resilience, Property 6: Aurora failure
     expect(String((auroraErrorLog!.context!.error as { cause: unknown }).cause)).toContain("Throttled on secondary");
   });
 
-  it.each(BOTH_FAIL_CASES)("both clusters failing logs ERROR for all failures, returns batchItemFailure ($label)", async ({ vectorA, vectorB, sesMessageId }) => {
+  it.each(BOTH_FAIL_CASES)("both clusters failing logs ERROR for all failures, returns batchItemFailure ($label)", async ({ vectorA, vectorB, messageId }) => {
     mockLogger.calls.length = 0;
 
     const embeddingGenerator: EmbeddingGenerator = {
@@ -558,7 +556,7 @@ describe("Feature: signal-processor-retry-resilience, Property 6: Aurora failure
       calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud", hmac: makeHmacGeneratorFake() },
     });
 
-    const result = await processor.processRecord(makeMessage(sesMessageId), 1);
+    const result = await processor.processRecord(makeMessage(messageId), 1);
 
     expect(result.isErr()).toBe(true);
 
@@ -662,11 +660,10 @@ describe("Feature: signal-processor-retry-resilience, Property 5: Side-effects d
     };
   }
 
-  function makeMessage(sesMessageId: string): InboundSignalMessage {
+  function makeMessage(messageId: string): InboundSignalMessage {
     return {
-      s3Key: `emails/${sesMessageId}`,
-      sesMessageId,
-      compositeMailMessageId: `ses-${sesMessageId}`,
+      s3Key: `emails/${messageId}`,
+      compositeMailMessageId: `ses-${messageId}`,
       idempotencyKey: "test-idempotency-key",
       timestamp: "2024-01-15T10:00:00Z",
       destination: ["user@example.com"],
@@ -947,11 +944,10 @@ describe("Feature: signal-processor-retry-resilience, Property 7: Partial Aurora
     };
   }
 
-  function makeMessage(sesMessageId: string): InboundSignalMessage {
+  function makeMessage(messageId: string): InboundSignalMessage {
     return {
-      s3Key: `emails/${sesMessageId}`,
-      sesMessageId,
-      compositeMailMessageId: `ses-${sesMessageId}`,
+      s3Key: `emails/${messageId}`,
+      compositeMailMessageId: `ses-${messageId}`,
       idempotencyKey: "test-idempotency-key",
       timestamp: "2024-01-15T10:00:00Z",
       destination: ["user@example.com"],
@@ -964,11 +960,11 @@ describe("Feature: signal-processor-retry-resilience, Property 7: Partial Aurora
   // Edge-case inputs: the branching logic is about which cluster fails, not vector content
   // -------------------------------------------------------------------------
 
-  const PARTIAL_SUCCESS_CASES: Array<{ label: string; vector: number[]; sesMessageId: string }> = [
-    { label: "non-primary fails with connection timeout", vector: [0.1, -0.9, 0.5], sesMessageId: "msg-partial-timeout" },
+  const PARTIAL_SUCCESS_CASES: Array<{ label: string; vector: number[]; messageId: string }> = [
+    { label: "non-primary fails with connection timeout", vector: [0.1, -0.9, 0.5], messageId: "msg-partial-timeout" },
   ];
 
-  it.each(PARTIAL_SUCCESS_CASES)("primary cluster write is preserved when non-primary cluster fails, record returned as batchItemFailure, no side-effects dispatched ($label)", async ({ vector, sesMessageId }) => {
+  it.each(PARTIAL_SUCCESS_CASES)("primary cluster write is preserved when non-primary cluster fails, record returned as batchItemFailure, no side-effects dispatched ($label)", async ({ vector, messageId }) => {
     const completedUpserts: string[] = [];
 
     const threadDb = makeThreadDbMock();
@@ -1019,7 +1015,7 @@ describe("Feature: signal-processor-retry-resilience, Property 7: Partial Aurora
       calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud", hmac: makeHmacGeneratorFake() },
     });
 
-    const result = await processor.processRecord(makeMessage(sesMessageId), 1);
+    const result = await processor.processRecord(makeMessage(messageId), 1);
 
     // 1. Primary cluster's upsert was called and completed (not rolled back)
     expect(completedUpserts).toContain("cluster-a");

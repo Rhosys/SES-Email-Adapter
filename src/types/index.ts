@@ -441,10 +441,6 @@ interface EmailSignalDataBase {
   // duplicate. Not stored in the signal's `threadId` field because a set threadId would move
   // the signal out of the QUARANTINED partition and hide it from the quarantine list.
   matchedThreadId?: string;
-  // SES message ID — dual purpose:
-  // • Inbound (source: "email"): raw SES message ID from the inbound notification; used to construct signalLookupId ("ses-{sesMessageId}") for dedup.
-  // • Outbound (source: "user"): SES message ID assigned after successful delivery via SES.
-  sesMessageId?: string;
   // Unsubscribe info derived from List-Unsubscribe / List-Unsubscribe-Post headers
   unsubscribe?: UnsubscribeInfo;
 }
@@ -462,6 +458,8 @@ export interface InboundEmailSignalData extends EmailSignalDataBase {
 // Outbound email signal (source: "user") — user-composed drafts and sent messages
 // ---------------------------------------------------------------------------
 export interface OutboundEmailSignalData extends EmailSignalDataBase {
+  /** SES message ID assigned after successful delivery via SES. */
+  sesMessageId?: string;
   textBody?: string;
   htmlBody?: string;
   sendInitiatedAt?: string;    // ISO 8601 — when POST /send was called

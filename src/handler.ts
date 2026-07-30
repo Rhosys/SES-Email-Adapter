@@ -236,7 +236,6 @@ async function processSqsRecord(
   // the handler is a thin SQS/SNS unwrapper and does no DB work here.
   const message: InboundSignalMessage = {
     s3Key: receipt.action.objectKey,
-    sesMessageId: mail.messageId,
     compositeMailMessageId: `ses-${mail.messageId}`,
     idempotencyKey: messageId,
     timestamp: mail.timestamp,

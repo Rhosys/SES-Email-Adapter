@@ -174,17 +174,16 @@ const SHARED_NEW_DEPS = {
 function makeMessage(opts: {
   accountId?: string;
   s3Key?: string;
-  sesMessageId?: string;
+  messageId?: string;
   timestamp?: string;
   destination?: string[];
   dkimVerdict?: "PASS" | "FAIL" | "GRAY" | "PROCESSING_FAILED";
   dmarcVerdict?: "PASS" | "FAIL" | "GRAY" | "PROCESSING_FAILED";
 } = {}): InboundSignalMessage {
-  const sesMessageId = opts.sesMessageId ?? "msg-123";
+  const messageId = opts.messageId ?? "msg-123";
   return {
-    s3Key: opts.s3Key ?? `emails/${sesMessageId}`,
-    sesMessageId,
-    compositeMailMessageId: `ses-${sesMessageId}`,
+    s3Key: opts.s3Key ?? `emails/${messageId}`,
+    compositeMailMessageId: `ses-${messageId}`,
     idempotencyKey: "test-idempotency-key",
     timestamp: opts.timestamp ?? "2024-01-15T10:00:00Z",
     destination: opts.destination ?? ["user@example.com"],
@@ -279,7 +278,7 @@ describe("SignalProcessor", () => {
 
   describe("new signal with no matching Arc", () => {
     it("saves a Signal after classification", async () => {
-      await processor.processRecord(makeMessage({ sesMessageId: "msg-abc" }), 1);
+      await processor.processRecord(makeMessage({ messageId: "msg-abc" }), 1);
 
       expect(threadDb.saveSignal).toHaveBeenCalledOnce();
       const saved = vi.mocked(threadDb.saveSignal).mock.calls[0]![0] as Signal;
@@ -683,7 +682,7 @@ describe("SignalProcessor", () => {
         id: "SES#msg-123",
       } as never)));
 
-      await processor.processRecord(makeMessage({ sesMessageId: "msg-123" }), 1);
+      await processor.processRecord(makeMessage({ messageId: "msg-123" }), 1);
 
       expect(classifier.classify).not.toHaveBeenCalled();
       expect(threadDb.saveSignal).not.toHaveBeenCalled();
@@ -697,9 +696,9 @@ describe("SignalProcessor", () => {
   describe("batch processing", () => {
     it("processes all SQS records", async () => {
       const messages = [
-        makeMessage({ sesMessageId: "msg-1" }),
-        makeMessage({ sesMessageId: "msg-2" }),
-        makeMessage({ sesMessageId: "msg-3" }),
+        makeMessage({ messageId: "msg-1" }),
+        makeMessage({ messageId: "msg-2" }),
+        makeMessage({ messageId: "msg-3" }),
       ];
 
       for (const message of messages) {
@@ -715,8 +714,8 @@ describe("SignalProcessor", () => {
         .mockRejectedValueOnce(new Error("Bedrock error"))
         .mockResolvedValueOnce(ok(validClassification));
 
-      const result1 = await processor.processRecord(makeMessage({ sesMessageId: "msg-fail" }), 1);
-      const result2 = await processor.processRecord(makeMessage({ sesMessageId: "msg-ok" }), 1);
+      const result1 = await processor.processRecord(makeMessage({ messageId: "msg-fail" }), 1);
+      const result2 = await processor.processRecord(makeMessage({ messageId: "msg-ok" }), 1);
 
       expect(result1.isErr()).toBe(true);
       expect(result2.isOk()).toBe(true);
@@ -1218,7 +1217,7 @@ describe("SignalProcessor", () => {
         ...classification,
       };
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok(full));
-      await processor.processRecord(makeMessage({ sesMessageId: randomUUID() }), 1);
+      await processor.processRecord(makeMessage({ messageId: randomUUID() }), 1);
       return vi.mocked(threadDb.saveThread).mock.calls.at(-1)![0] as Thread;
     }
 
@@ -1246,7 +1245,7 @@ describe("SignalProcessor", () => {
         workflow: "conversation", workflowData: { workflow: "conversation", sentiment: "neutral", requiresReply: false },
         tags: [], summary: "test", labels: [], actions: [],
       }));
-      await processor.processRecord(makeMessage({ sesMessageId: randomUUID() }), 1);
+      await processor.processRecord(makeMessage({ messageId: randomUUID() }), 1);
       const signal = vi.mocked(threadDb.saveSignal).mock.calls.at(-1)![0] as Signal;
       expect(signal.data.urgency).toBe("normal");
     });
@@ -1435,7 +1434,7 @@ describe("SignalProcessor", () => {
       const storedSignal = {
         id: "sgn-reprocess", signalLookupId: "ses-msg-reprocess", accountId: TEST_ACCOUNT_ID,
         status: "active", source: "email", type: "email", labels: [], createdAt: "2024-01-15T10:00:00Z",
-        data: { sesMessageId: "msg-reprocess", s3Key: "emails/msg-reprocess", recipientAddress: "user@example.com", receivedAt: "2024-01-15T10:00:00Z" },
+        data: { s3Key: "emails/msg-reprocess", recipientAddress: "user@example.com", receivedAt: "2024-01-15T10:00:00Z" },
       };
       (threadDb as unknown as { getSignalById: ReturnType<typeof vi.fn> }).getSignalById =
         vi.fn().mockReturnValue(Promise.resolve(ok(storedSignal)));
@@ -1472,7 +1471,7 @@ describe("SignalProcessor", () => {
     const reassignedSignal = {
       id: "sgn-reprocess", signalLookupId: "ses-msg-reprocess", accountId: TEST_ACCOUNT_ID, threadId: "thr-new",
       status: "active", source: "email", type: "email", labels: [], createdAt: "2024-01-15T10:00:00Z",
-      data: { sesMessageId: "msg-reprocess", s3Key: "emails/msg-reprocess", recipientAddress: "user@example.com", receivedAt: "2024-01-15T10:00:00Z" },
+      data: { s3Key: "emails/msg-reprocess", recipientAddress: "user@example.com", receivedAt: "2024-01-15T10:00:00Z" },
     };
 
     beforeEach(() => {
@@ -1630,7 +1629,7 @@ describe("SignalProcessor", () => {
     it("dispatches side-effect with signal.id as sgn- prefixed ID for inReplyTo", async () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok(testClassification));
 
-      await processor.processRecord(makeMessage({ sesMessageId: "original-ses-123" }), 1);
+      await processor.processRecord(makeMessage({ messageId: "original-ses-123" }), 1);
 
       const payload = vi.mocked(sqsDispatcher.sendMessage).mock.calls[0]![0];
       expect(payload.signal.id).toMatch(/^sgn-/);

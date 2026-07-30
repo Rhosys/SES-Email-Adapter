@@ -121,7 +121,6 @@ export interface InboundSignalMessage {
    */
   expectedAccountId?: string;
   s3Key: string;
-  sesMessageId: string;
   /** Full composite lookup key including source prefix (e.g. "ses-abc123", "gmail-xyz"). */
   compositeMailMessageId: string;
   idempotencyKey: string;
@@ -362,7 +361,7 @@ export class SignalProcessor {
     try {
       processResult = await this.processMessage(message, receiveCount);
     } catch (e) {
-      this.logger.error("processMessage threw an unhandled exception. This should not happen — all errors should be returned as Result types. The message will be retried.", { code: "processor.unhandled_exception", error: e, sesMessageId: message.sesMessageId });
+      this.logger.error("processMessage threw an unhandled exception. This should not happen — all errors should be returned as Result types. The message will be retried.", { code: "processor.unhandled_exception", error: e, compositeMailMessageId: message.compositeMailMessageId });
       return err(processorError(e));
     }
     if (processResult.isErr()) return err(processorError(processResult.error));
@@ -723,7 +722,7 @@ export class SignalProcessor {
   }
 
   private async processMessage(msg: InboundSignalMessage, receiveCount: number, opts?: { force?: boolean; unsafeSkipDmarc?: boolean; forceSignalId?: string }): Promise<Result<void, DbError | InvalidResponseError>> {
-    const { s3Key, sesMessageId, idempotencyKey, timestamp, destination } = msg;
+    const { s3Key, idempotencyKey, timestamp, destination } = msg;
     const recipientAddress = destination[0] ?? "";
 
     // 0. Resolve the owning account + alias from the recipient address. Single source of
@@ -731,12 +730,12 @@ export class SignalProcessor {
     const resolved = await this.resolveAccountIdAndAlias(recipientAddress);
     if (resolved.isErr()) return err(resolved.error);
     if (!resolved.value) {
-      this.logger.track("No account owns this recipient address — dropping message.", { code: "processor.no_account_for_recipient", recipientAddress, sesMessageId, destination });
+      this.logger.track("No account owns this recipient address — dropping message.", { code: "processor.no_account_for_recipient", recipientAddress, compositeMailMessageId: msg.compositeMailMessageId, destination });
       return ok(undefined);
     }
     const { accountId, aliasConfig } = resolved.value;
     if (msg.expectedAccountId !== undefined && msg.expectedAccountId !== accountId) {
-      this.logger.track("Derived accountId does not match expectedAccountId on the message — proceeding with the derived value.", { code: "processor.account_id_mismatch", expectedAccountId: msg.expectedAccountId, derivedAccountId: accountId, recipientAddress, sesMessageId });
+      this.logger.track("Derived accountId does not match expectedAccountId on the message — proceeding with the derived value.", { code: "processor.account_id_mismatch", expectedAccountId: msg.expectedAccountId, derivedAccountId: accountId, recipientAddress, compositeMailMessageId: msg.compositeMailMessageId });
     }
 
     // 1. Dedup / retry-resume — a single signal lookup serves both. On force (reprocess)
@@ -751,7 +750,7 @@ export class SignalProcessor {
           // Retry after the signal was already saved — thread is guaranteed to exist (thread is
           // saved before signal). Resume from the idempotent convergence point rather than
           // re-running classify/embed/match.
-          this.logger.info("Signal found in DDB on retry — resuming from the convergence point.", { code: "processor.retry_signal_found", signalId: existing.id, threadId: existing.threadId, accountId, sesMessageId, receiveCount });
+          this.logger.info("Signal found in DDB on retry — resuming from the convergence point.", { code: "processor.retry_signal_found", signalId: existing.id, threadId: existing.threadId, accountId, compositeMailMessageId: msg.compositeMailMessageId, receiveCount });
           if (!existing.threadId) return err(dbError("signal missing threadId on retry"));
           const threadResult = await this.threadDb.getThread(accountId, existing.threadId);
           if (threadResult.isErr()) return err(threadResult.error);
@@ -787,7 +786,7 @@ export class SignalProcessor {
           dkimVerdict: msg.dkimVerdict,
           dmarcVerdict: msg.dmarcVerdict,
           recipientAddress,
-          sesMessageId,
+          compositeMailMessageId: msg.compositeMailMessageId,
         });
       }
       const signalId = generateId("sgn-");
@@ -801,7 +800,6 @@ export class SignalProcessor {
         labels: [],
         createdAt: DateTime.utc().toISO()!,
         data: {
-          sesMessageId,
           s3Key,
           recipientAddress: destination[0] ?? "",
           receivedAt: timestamp,
@@ -852,7 +850,7 @@ export class SignalProcessor {
       const ensureResult = await this.accountDb.ensureAlias(accountId, recipientAddress, defaultPolicy, null);
       if (ensureResult.isErr()) return err(ensureResult.error);
       if (ensureResult.value.created) {
-        await this.accountDb.incrementStatMetric(accountId, "totalAliases", 1, sesMessageId + ".alias");
+        await this.accountDb.incrementStatMetric(accountId, "totalAliases", 1, idempotencyKey + ".alias");
       }
     }
 
@@ -860,8 +858,7 @@ export class SignalProcessor {
     // (S3 lifecycle tagging for extracted content is independent of account/DDB retention config)
     const retentionDuration = resolveRetention({}, null);
     const s3Tag = retentionToS3Tag(retentionDuration);
-    const signalId = sesMessageId;
-    const keyPrefix = `content/accounts/${accountId}/extracted/${signalId}/`;
+    const keyPrefix = `content/accounts/${accountId}/extracted/${msg.compositeMailMessageId}/`;
 
     const [presignedGet, presignedPost] = await Promise.all([
       generatePresignedGet(this.s3Client, this.emailBucket, s3Key),
@@ -936,7 +933,6 @@ export class SignalProcessor {
         retentionDuration: effectiveRetention,
         ...(gsi3pk !== undefined ? { gsi3pk } : {}),
         data: {
-          sesMessageId,
           s3Key,
           recipientAddress,
           receivedAt: timestamp,
@@ -988,13 +984,13 @@ export class SignalProcessor {
       headers: classificationHeaders,
       receivedAt: timestamp,
       allowedLabels,
-      signalId,
+      signalId: msg.compositeMailMessageId,
       accountId,
     });
 
     let classificationOutput: ClassificationOutput;
     if (classification.isErr()) {
-      this.logger.warn("Classification failed — proceeding with workflow:none fallback.", { code: "processor.classification_fallback", accountId, sesMessageId, error: classification.error });
+      this.logger.warn("Classification failed — proceeding with workflow:none fallback.", { code: "processor.classification_fallback", accountId, compositeMailMessageId: msg.compositeMailMessageId, error: classification.error });
       classificationOutput = { workflow: "unspecified", workflowData: { workflow: "unspecified" }, tags: [], summary: "", labels: [], actions: [] };
     } else {
       classificationOutput = classification.value;
@@ -1074,14 +1070,14 @@ export class SignalProcessor {
       const lookupKey = buildSignalGsi3pk(accountId, firstMsgId);
       const signalResult = await this.threadDb.findSignalByEmailMessageId(lookupKey);
       if (signalResult.isErr()) {
-        this.logger.warn("GSI3 In-Reply-To lookup failed — treating as miss.", { code: "processor.in_reply_to.gsi3_error", accountId, sesMessageId, error: signalResult.error });
+        this.logger.warn("GSI3 In-Reply-To lookup failed — treating as miss.", { code: "processor.in_reply_to.gsi3_error", accountId, compositeMailMessageId: msg.compositeMailMessageId, error: signalResult.error });
         return null;
       }
       const foundSignal = signalResult.value;
       if (!foundSignal || !foundSignal.threadId) return null;
       const threadResult = await this.threadDb.getThread(accountId, foundSignal.threadId);
       if (threadResult.isErr()) {
-        this.logger.warn("In-Reply-To thread fetch failed — treating as miss.", { code: "processor.in_reply_to.thread_fetch_error", accountId, sesMessageId, error: threadResult.error });
+        this.logger.warn("In-Reply-To thread fetch failed — treating as miss.", { code: "processor.in_reply_to.thread_fetch_error", accountId, compositeMailMessageId: msg.compositeMailMessageId, error: threadResult.error });
         return null;
       }
       return threadResult.value;
@@ -1108,7 +1104,7 @@ export class SignalProcessor {
       this.logger.track("Thread match discrepancy — multiple tiers returned different threads.", {
         code: "processor.thread_match_discrepancy",
         accountId,
-        sesMessageId,
+        compositeMailMessageId: msg.compositeMailMessageId,
         tier1ThreadId: tier1Thread?.id ?? null,
         tier15ThreadId: tier15Thread?.id ?? null,
         tier2ThreadId: tier2Thread?.id ?? null,
@@ -1138,7 +1134,7 @@ export class SignalProcessor {
         // so it tracks current account/alias config rather than sticking to a stale value.
         retentionDuration: effectiveRetentionForTtl,
       };
-      this.logger.info("Existing thread matched.", { code: "processor.thread_matched", threadId: thread.id, matchMethod, accountId, sesMessageId });
+      this.logger.info("Existing thread matched.", { code: "processor.thread_matched", threadId: thread.id, matchMethod, accountId, compositeMailMessageId: msg.compositeMailMessageId });
     } else {
       thread = buildActiveThread({
         accountId,
@@ -1162,7 +1158,7 @@ export class SignalProcessor {
     // (post-classify path: preserves classification data on blocked signal for audit/review)
     if (effectiveAliasSenderConfig && effectiveAliasSenderConfig.policy !== "allow") {
       const blockStatus = effectiveAliasSenderConfig.policy; // block_hidden | block_reject | report_violation
-      const blockedSignal = buildSignal({ status: blockStatus, accountId, sesMessageId, compositeMailMessageId: msg.compositeMailMessageId, recipientAddress, parsed, classification: classificationOutput, s3Key, receivedAt: timestamp, now, retentionDuration: effectiveRetentionForTtl, ...(ttl !== undefined ? { ttl } : {}) }, this.logger);
+      const blockedSignal = buildSignal({ status: blockStatus, accountId, compositeMailMessageId: msg.compositeMailMessageId, recipientAddress, parsed, classification: classificationOutput, s3Key, receivedAt: timestamp, now, retentionDuration: effectiveRetentionForTtl, ...(ttl !== undefined ? { ttl } : {}) }, this.logger);
       const saveResult = await this.threadDb.saveSignal(blockedSignal);
       if (saveResult.isErr()) return err(saveResult.error);
       this.logger.track("Blocked email — sender explicitly blocked for this alias.", { code: "processor.sender_block", signal: blockedSignal, thread, senderETLD1, policy: blockStatus });
@@ -1208,7 +1204,6 @@ export class SignalProcessor {
       threadId: thread.id,
       status: "active",
       accountId,
-      sesMessageId,
       compositeMailMessageId: msg.compositeMailMessageId,
       recipientAddress,
       parsed,
@@ -1265,7 +1260,7 @@ export class SignalProcessor {
       }
     }
 
-    const buildArgs = { accountId, sesMessageId, compositeMailMessageId: msg.compositeMailMessageId, recipientAddress, parsed, classification: classificationOutput, s3Key, receivedAt: timestamp, now, retentionDuration: effectiveRetentionForTtl, ...(ttl !== undefined ? { ttl } : {}), ...(gsi3pk !== undefined ? { gsi3pk } : {}), ...(opts?.forceSignalId !== undefined ? { forceSignalId: opts.forceSignalId } : {}) };
+    const buildArgs = { accountId, compositeMailMessageId: msg.compositeMailMessageId, recipientAddress, parsed, classification: classificationOutput, s3Key, receivedAt: timestamp, now, retentionDuration: effectiveRetentionForTtl, ...(ttl !== undefined ? { ttl } : {}), ...(gsi3pk !== undefined ? { gsi3pk } : {}), ...(opts?.forceSignalId !== undefined ? { forceSignalId: opts.forceSignalId } : {}) };
 
     if (outcome.blockDisposition) {
       const blockSignal = buildSignal({ status: outcome.blockDisposition, ...buildArgs }, this.logger);
@@ -1387,7 +1382,7 @@ export class SignalProcessor {
       if (outcome.archive) thread.status = "archived";
       const saveThreadResult = await this.threadDb.saveThread(thread);
       if (saveThreadResult.isErr()) return err(saveThreadResult.error);
-      this.logger.info("New thread created.", { code: "processor.thread_created", threadId: thread.id, accountId, signalId: signal.id, sesMessageId, ...(groupingKey ? { groupingKey } : {}) });
+      this.logger.info("New thread created.", { code: "processor.thread_created", threadId: thread.id, accountId, signalId: signal.id, compositeMailMessageId: msg.compositeMailMessageId, ...(groupingKey ? { groupingKey } : {}) });
     }
     this.logger.trackPoint("thread_saved", { threadId: thread.id });
 
@@ -1748,8 +1743,6 @@ export class SignalProcessor {
     const s3Key = existing.data.s3Key;
     if (!s3Key) return err(processorError("Signal has no s3Key — cannot reprocess"));
 
-    const sesMessageId = existing.data.sesMessageId;
-    if (!sesMessageId) return err(processorError("Signal has no sesMessageId — cannot reprocess"));
     const compositeMailMessageId = existing.signalLookupId;
     const recipientAddress = existing.data.recipientAddress;
     const timestamp = existing.data.receivedAt ?? existing.createdAt;
@@ -1759,7 +1752,6 @@ export class SignalProcessor {
     const msg: InboundSignalMessage = {
       expectedAccountId: accountId,
       s3Key,
-      sesMessageId,
       compositeMailMessageId,
       idempotencyKey: existing.id,
       timestamp,
@@ -1947,7 +1939,6 @@ function buildSignal(opts: {
   threadId?: string;
   status: Signal["status"];
   accountId: string;
-  sesMessageId: string;
   compositeMailMessageId: string;
   recipientAddress: string;
   parsed: ParsedMime;
@@ -1960,7 +1951,7 @@ function buildSignal(opts: {
   gsi3pk?: string;
   forceSignalId?: string;
 }, logger?: Logger): Signal<InboundEmailSignalData> {
-  const { threadId, status, accountId, sesMessageId, compositeMailMessageId, recipientAddress, parsed, classification, s3Key, receivedAt, now, ttl, retentionDuration, gsi3pk, forceSignalId } = opts;
+  const { threadId, status, accountId, compositeMailMessageId, recipientAddress, parsed, classification, s3Key, receivedAt, now, ttl, retentionDuration, gsi3pk, forceSignalId } = opts;
   const signalId = forceSignalId ?? generateId("sgn-");
 
   // Extract unsubscribe info from List-Unsubscribe / List-Unsubscribe-Post headers,
@@ -1996,7 +1987,6 @@ function buildSignal(opts: {
     labels: [],
     createdAt: now,
     data: {
-      sesMessageId,
       receivedAt,
       from: parsed.from,
       to: parsed.to,

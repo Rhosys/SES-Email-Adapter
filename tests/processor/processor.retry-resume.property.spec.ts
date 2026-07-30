@@ -119,7 +119,6 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
         labels: [],
         createdAt: "2024-01-15T10:00:00Z",
         data: {
-          sesMessageId: "msg-valid-emb",
           receivedAt: "2024-01-15T10:00:00Z",
           from: { address: "sender@external.com", name: "Sender" },
           to: [{ address: "user@example.com" }],
@@ -153,7 +152,6 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
         labels: [],
         createdAt: "2024-01-15T10:00:00Z",
         data: {
-          sesMessageId: "msg-no-emb",
           receivedAt: "2024-01-15T10:00:00Z",
           from: { address: "sender@external.com", name: "Sender" },
           to: [{ address: "user@example.com" }],
@@ -186,7 +184,6 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
         labels: [],
         createdAt: "2024-01-15T10:00:00Z",
         data: {
-          sesMessageId: "msg-wrong-model",
           receivedAt: "2024-01-15T10:00:00Z",
           from: { address: "sender@external.com", name: "Sender" },
           to: [{ address: "user@example.com" }],
@@ -235,11 +232,10 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
     };
   }
 
-  function makeMessage(sesMessageId: string): InboundSignalMessage {
+  function makeMessage(messageId: string): InboundSignalMessage {
     return {
-      s3Key: `emails/${sesMessageId}`,
-      sesMessageId,
-      compositeMailMessageId: `ses-${sesMessageId}`,
+      s3Key: `emails/${messageId}`,
+      compositeMailMessageId: `ses-${messageId}`,
       idempotencyKey: "test-idempotency-key",
       timestamp: "2024-01-15T10:00:00Z",
       destination: ["user@example.com"],
@@ -273,7 +269,7 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
 
   it.each(RETRY_CASES)("MIME parser is NOT called on retry when signal exists in DDB ($label)", async ({ signal, receiveCount }) => {
     const arc = arbArcForSignal(signal);
-    const sesMessageId = signal.data.sesMessageId!;
+    const messageId = signal.signalLookupId.slice(4);
     const contentSanitizer: ContentSanitizerClient = { invoke: vi.fn() };
 
     const processor = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
@@ -294,13 +290,13 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
       calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud", hmac: makeHmacGeneratorFake() },
     });
 
-    await processor.processRecord(makeMessage(sesMessageId), receiveCount);
+    await processor.processRecord(makeMessage(messageId), receiveCount);
     expect(contentSanitizer.invoke).not.toHaveBeenCalled();
   });
 
   it.each(RETRY_CASES)("classifier is NOT called on retry when signal exists in DDB ($label)", async ({ signal, receiveCount }) => {
     const arc = arbArcForSignal(signal);
-    const sesMessageId = signal.data.sesMessageId!;
+    const messageId = signal.signalLookupId.slice(4);
     const classifier: Pick<SignalClassifier, "classify"> = { classify: vi.fn() };
 
     const processor = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
@@ -321,13 +317,13 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
       calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud", hmac: makeHmacGeneratorFake() },
     });
 
-    await processor.processRecord(makeMessage(sesMessageId), receiveCount);
+    await processor.processRecord(makeMessage(messageId), receiveCount);
     expect(classifier.classify).not.toHaveBeenCalled();
   });
 
   it.each(RETRY_CASES)("rule evaluation is NOT called on retry when signal exists in DDB ($label)", async ({ signal, receiveCount }) => {
     const arc = arbArcForSignal(signal);
-    const sesMessageId = signal.data.sesMessageId!;
+    const messageId = signal.signalLookupId.slice(4);
     const ruleEvaluator = makeRuleEvaluator3(mockLogger);
     const evaluateSpy = vi.spyOn(ruleEvaluator, "evaluate");
 
@@ -349,13 +345,13 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
       calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud", hmac: makeHmacGeneratorFake() },
     });
 
-    await processor.processRecord(makeMessage(sesMessageId), receiveCount);
+    await processor.processRecord(makeMessage(messageId), receiveCount);
     expect(evaluateSpy).not.toHaveBeenCalled();
   });
 
   it.each(RETRY_CASES.filter(c => c.signal.data.embeddings?.["amazon.titan-embed-text-v2:0"]))("Aurora upserts ARE called with the signal's cached embeddings on retry ($label)", async ({ signal, receiveCount }) => {
     const arc = arbArcForSignal(signal);
-    const sesMessageId = signal.data.sesMessageId!;
+    const messageId = signal.signalLookupId.slice(4);
     const auroraWriter = makeAuroraWriter();
 
     const processor = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
@@ -376,7 +372,7 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
       calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud", hmac: makeHmacGeneratorFake() },
     });
 
-    await processor.processRecord(makeMessage(sesMessageId), receiveCount);
+    await processor.processRecord(makeMessage(messageId), receiveCount);
 
     expect(auroraWriter.upsertEmbedding).toHaveBeenCalled();
     const call = vi.mocked(auroraWriter.upsertEmbedding).mock.calls[0]!;
@@ -389,7 +385,7 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
 
   it.each(RETRY_CASES.filter(c => !c.signal.data.embeddings?.["amazon.titan-embed-text-v2:0"]))("Aurora upsert is SKIPPED when embedding is missing for cluster model ($label)", async ({ signal, receiveCount }) => {
     const arc = arbArcForSignal(signal);
-    const sesMessageId = signal.data.sesMessageId!;
+    const messageId = signal.signalLookupId.slice(4);
     const auroraWriter = makeAuroraWriter();
 
     const processor = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
@@ -410,7 +406,7 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
       calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud", hmac: makeHmacGeneratorFake() },
     });
 
-    await processor.processRecord(makeMessage(sesMessageId), receiveCount);
+    await processor.processRecord(makeMessage(messageId), receiveCount);
 
     // Aurora upsert is NOT called when embedding is missing for the cluster's model
     expect(auroraWriter.upsertEmbedding).not.toHaveBeenCalled();
@@ -418,7 +414,7 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
 
   it.each(RETRY_CASES)("result is NOT a batchItemFailure on retry when signal exists in DDB ($label)", async ({ signal, receiveCount }) => {
     const arc = arbArcForSignal(signal);
-    const sesMessageId = signal.data.sesMessageId!;
+    const messageId = signal.signalLookupId.slice(4);
 
     const processor = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
       ...makeStore(signal, arc),
@@ -438,7 +434,7 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
       calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud", hmac: makeHmacGeneratorFake() },
     });
 
-    const result = await processor.processRecord(makeMessage(sesMessageId), receiveCount);
+    const result = await processor.processRecord(makeMessage(messageId), receiveCount);
     expect(result.isOk()).toBe(true);
   });
 
@@ -464,7 +460,6 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
       labels: [],
       createdAt: "2024-01-15T10:00:00Z",
       data: {
-        sesMessageId: "msg-no-arc",
         receivedAt: "2024-01-15T10:00:00Z",
         from: { address: "sender@external.com", name: "Sender" },
         to: [{ address: "user@example.com" }],
@@ -571,11 +566,10 @@ describe("Feature: signal-processor-retry-resilience, Property 3: DDB read failu
     billingPlan: "Paid" as const,
   };
 
-  function makeRetryMessage(sesMessageId: string): InboundSignalMessage {
+  function makeRetryMessage(messageId: string): InboundSignalMessage {
     return {
-      s3Key: `emails/${sesMessageId}`,
-      sesMessageId,
-      compositeMailMessageId: `ses-${sesMessageId}`,
+      s3Key: `emails/${messageId}`,
+      compositeMailMessageId: `ses-${messageId}`,
       idempotencyKey: "test-idempotency-key",
       timestamp: "2024-01-15T10:00:00Z",
       destination: ["user@example.com"],
@@ -584,10 +578,10 @@ describe("Feature: signal-processor-retry-resilience, Property 3: DDB read failu
     };
   }
 
-  function makeExistingSignal(sesMessageId: string): Signal {
+  function makeExistingSignal(messageId: string): Signal {
     return {
-      id: `sgn-${sesMessageId}`,
-      signalLookupId: `ses-${sesMessageId}`,
+      id: `sgn-${messageId}`,
+      signalLookupId: `ses-${messageId}`,
       accountId: TEST_ACCOUNT_ID,
       threadId: "arc-existing",
       source: "email",
@@ -596,7 +590,6 @@ describe("Feature: signal-processor-retry-resilience, Property 3: DDB read failu
       labels: [],
       createdAt: "2024-01-15T10:00:01Z",
       data: {
-        sesMessageId,
         from: { address: "sender@external.com", name: "Sender" },
         to: [{ address: "user@example.com" }],
         cc: [],
@@ -608,7 +601,7 @@ describe("Feature: signal-processor-retry-resilience, Property 3: DDB read failu
         workflowData: { workflow: "conversation", isReply: false, sentiment: "neutral", requiresReply: false },
         tags: [],
         summary: "A test email.",
-        s3Key: `emails/${sesMessageId}`,
+        s3Key: `emails/${messageId}`,
         actions: [],
         matchedRules: [],
         receivedAt: "2024-01-15T10:00:00Z",
@@ -659,7 +652,7 @@ describe("Feature: signal-processor-retry-resilience, Property 3: DDB read failu
         label: `error="${errLabel}", receiveCount=${rc}, msgId="${msgId}"`,
         error,
         receiveCount: rc,
-        sesMessageId: msgId,
+        messageId: msgId,
       })),
     ),
   );
@@ -669,11 +662,11 @@ describe("Feature: signal-processor-retry-resilience, Property 3: DDB read failu
       label: `error="${errLabel}", receiveCount=${rc}`,
       error,
       receiveCount: rc,
-      sesMessageId: "test-msg-arc-fail",
+      messageId: "test-msg-arc-fail",
     })),
   );
 
-  it.each(SIGNAL_READ_FAILURE_CASES)("signal read failure returns batchItemFailure without Aurora upserts or DDB writes ($label)", async ({ error, receiveCount, sesMessageId }) => {
+  it.each(SIGNAL_READ_FAILURE_CASES)("signal read failure returns batchItemFailure without Aurora upserts or DDB writes ($label)", async ({ error, receiveCount, messageId }) => {
     const { threadDb, accountDb, processingDb } = makeStore({
       getSignalByMessageId: vi.fn().mockReturnValue(Promise.resolve(err(error))),
     });
@@ -697,7 +690,7 @@ describe("Feature: signal-processor-retry-resilience, Property 3: DDB read failu
       calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud", hmac: makeHmacGeneratorFake() },
     });
 
-    const result = await processor.processRecord(makeRetryMessage(sesMessageId), receiveCount);
+    const result = await processor.processRecord(makeRetryMessage(messageId), receiveCount);
 
     expect(result.isErr()).toBe(true);
     expect(auroraWriter.upsertEmbedding).not.toHaveBeenCalled();
@@ -705,8 +698,8 @@ describe("Feature: signal-processor-retry-resilience, Property 3: DDB read failu
     expect(threadDb.saveThread).not.toHaveBeenCalled();
   });
 
-  it.each(ARC_READ_FAILURE_CASES)("arc read failure returns batchItemFailure without Aurora upserts or DDB writes ($label)", async ({ error, receiveCount, sesMessageId }) => {
-    const existingSignal = makeExistingSignal(sesMessageId);
+  it.each(ARC_READ_FAILURE_CASES)("arc read failure returns batchItemFailure without Aurora upserts or DDB writes ($label)", async ({ error, receiveCount, messageId }) => {
+    const existingSignal = makeExistingSignal(messageId);
     const { threadDb, accountDb, processingDb } = makeStore({
       getSignalByMessageId: vi.fn().mockReturnValue(Promise.resolve(ok(existingSignal))),
       getThread: vi.fn().mockReturnValue(Promise.resolve(err(error))),
@@ -731,7 +724,7 @@ describe("Feature: signal-processor-retry-resilience, Property 3: DDB read failu
       calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud", hmac: makeHmacGeneratorFake() },
     });
 
-    const result = await processor.processRecord(makeRetryMessage(sesMessageId), receiveCount);
+    const result = await processor.processRecord(makeRetryMessage(messageId), receiveCount);
 
     expect(result.isErr()).toBe(true);
     expect(auroraWriter.upsertEmbedding).not.toHaveBeenCalled();
@@ -850,11 +843,10 @@ describe("Feature: signal-processor-retry-resilience, Property 2: Missing signal
     };
   }
 
-  function makeMessage(sesMessageId: string): InboundSignalMessage {
+  function makeMessage(messageId: string): InboundSignalMessage {
     return {
-      s3Key: `emails/${sesMessageId}`,
-      sesMessageId,
-      compositeMailMessageId: `ses-${sesMessageId}`,
+      s3Key: `emails/${messageId}`,
+      compositeMailMessageId: `ses-${messageId}`,
       idempotencyKey: "test-idempotency-key",
       timestamp: "2024-01-15T10:00:00Z",
       destination: ["user@example.com"],
@@ -868,12 +860,12 @@ describe("Feature: signal-processor-retry-resilience, Property 2: Missing signal
   // -------------------------------------------------------------------------
 
   const MISSING_SIGNAL_CASES = [
-    { label: "receiveCount=2 (first retry — enters retry path, falls through to full pipeline)", receiveCount: 2, sesMessageId: "msg-missing-first-retry" },
-    { label: "receiveCount=30 (at threshold — still warn level on failure)", receiveCount: 30, sesMessageId: "msg-missing-at-threshold" },
-    { label: "receiveCount=31 (exceeds threshold — error level on failure)", receiveCount: 31, sesMessageId: "msg-missing-over-threshold" },
+    { label: "receiveCount=2 (first retry — enters retry path, falls through to full pipeline)", receiveCount: 2, messageId: "msg-missing-first-retry" },
+    { label: "receiveCount=30 (at threshold — still warn level on failure)", receiveCount: 30, messageId: "msg-missing-at-threshold" },
+    { label: "receiveCount=31 (exceeds threshold — error level on failure)", receiveCount: 31, messageId: "msg-missing-over-threshold" },
   ] as const;
 
-  it.each(MISSING_SIGNAL_CASES)("MIME parser IS called when signal does not exist on retry ($label)", async ({ receiveCount, sesMessageId }) => {
+  it.each(MISSING_SIGNAL_CASES)("MIME parser IS called when signal does not exist on retry ($label)", async ({ receiveCount, messageId }) => {
     const contentSanitizer = makeContentSanitizer();
 
     const processor = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
@@ -894,11 +886,11 @@ describe("Feature: signal-processor-retry-resilience, Property 2: Missing signal
       calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud", hmac: makeHmacGeneratorFake() },
     });
 
-    await processor.processRecord(makeMessage(sesMessageId), receiveCount);
+    await processor.processRecord(makeMessage(messageId), receiveCount);
     expect(contentSanitizer.invoke).toHaveBeenCalled();
   });
 
-  it.each(MISSING_SIGNAL_CASES)("classifier IS called when signal does not exist on retry ($label)", async ({ receiveCount, sesMessageId }) => {
+  it.each(MISSING_SIGNAL_CASES)("classifier IS called when signal does not exist on retry ($label)", async ({ receiveCount, messageId }) => {
     const classifier = makeClassifier();
 
     const processor = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
@@ -919,11 +911,11 @@ describe("Feature: signal-processor-retry-resilience, Property 2: Missing signal
       calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud", hmac: makeHmacGeneratorFake() },
     });
 
-    await processor.processRecord(makeMessage(sesMessageId), receiveCount);
+    await processor.processRecord(makeMessage(messageId), receiveCount);
     expect(classifier.classify).toHaveBeenCalled();
   });
 
-  it.each(MISSING_SIGNAL_CASES)("saveArc and saveSignal ARE called when signal does not exist on retry ($label)", async ({ receiveCount, sesMessageId }) => {
+  it.each(MISSING_SIGNAL_CASES)("saveArc and saveSignal ARE called when signal does not exist on retry ($label)", async ({ receiveCount, messageId }) => {
     const { threadDb, accountDb, processingDb } = makeStore();
 
     const processor = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
@@ -944,12 +936,12 @@ describe("Feature: signal-processor-retry-resilience, Property 2: Missing signal
       calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud", hmac: makeHmacGeneratorFake() },
     });
 
-    await processor.processRecord(makeMessage(sesMessageId), receiveCount);
+    await processor.processRecord(makeMessage(messageId), receiveCount);
     expect(threadDb.saveThread).toHaveBeenCalled();
     expect(threadDb.saveSignal).toHaveBeenCalled();
   });
 
-  it.each(MISSING_SIGNAL_CASES)("result is NOT a batchItemFailure when signal does not exist on retry ($label)", async ({ receiveCount, sesMessageId }) => {
+  it.each(MISSING_SIGNAL_CASES)("result is NOT a batchItemFailure when signal does not exist on retry ($label)", async ({ receiveCount, messageId }) => {
     const processor = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
       ...makeStore(),
       contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
@@ -968,7 +960,7 @@ describe("Feature: signal-processor-retry-resilience, Property 2: Missing signal
       calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud", hmac: makeHmacGeneratorFake() },
     });
 
-    const result = await processor.processRecord(makeMessage(sesMessageId), receiveCount);
+    const result = await processor.processRecord(makeMessage(messageId), receiveCount);
     expect(result.isOk()).toBe(true);
   });
 });
@@ -1086,7 +1078,6 @@ describe("Feature: signal-processor-retry-resilience, Property 8: Outcome re-der
       labels: [],
       createdAt: "2024-01-15T10:00:00Z",
       data: {
-        sesMessageId: "msg-prop8",
         receivedAt: "2024-01-15T10:00:00Z",
         from: { address: "sender@external.com", name: "Sender" },
         to: [{ address: "user@example.com" }],
@@ -1128,7 +1119,6 @@ describe("Feature: signal-processor-retry-resilience, Property 8: Outcome re-der
   function makeMessage(): InboundSignalMessage {
     return {
       s3Key: "emails/msg-prop8",
-      sesMessageId: "msg-prop8",
       compositeMailMessageId: "ses-msg-prop8",
       idempotencyKey: "test-idempotency-key",
       timestamp: "2024-01-15T10:00:00Z",
