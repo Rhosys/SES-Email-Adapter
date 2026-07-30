@@ -241,6 +241,20 @@ export class ThreadMatcher implements ThreadMatcherPort, MultiClusterAuroraWrite
 
       if (!threadResult.Item) {
         this.logger.track(`Aurora matched threadId but DDB thread is missing — orphaned embedding. Treating as no match. accountId=${accountId}, threadId=${threadId}`, { code: "thread_matcher.ghost_thread", threadId, accountId, recipientAddress, matchedData: { threadId, accountId, recipientAddress } });
+
+        // Prune orphaned embeddings so this ghost thread never matches again
+        try {
+          await withRetry(async () => {
+            await db.delete(threadEmbeddings).where(and(
+              eq(threadEmbeddings.threadId, threadId),
+              eq(threadEmbeddings.accountId, accountId),
+            ));
+          }, this.logger, "deleteGhostEmbeddings");
+          this.logger.info("Deleted orphaned embeddings for ghost thread.", { code: "thread_matcher.ghost_thread_pruned", threadId, accountId });
+        } catch (e) {
+          this.logger.warn("Failed to delete orphaned embeddings — will retry on next match.", { code: "thread_matcher.ghost_thread_prune_failed", threadId, accountId, error: e });
+        }
+
         return ok(null);
       }
 
