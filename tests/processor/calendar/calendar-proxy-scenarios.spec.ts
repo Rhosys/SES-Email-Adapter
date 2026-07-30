@@ -367,6 +367,7 @@ describe("Scenario: native calendar REPLY is validated and forwarded to organize
     const message: InboundSignalMessage = {
       s3Key: "emails/native-reply.eml",
       sesMessageId: "ses-native-001",
+      compositeMailMessageId: "ses-ses-native-001",
       idempotencyKey: "test-idempotency-key",
       timestamp: "2025-03-15T15:30:00Z",
       destination: [recipient],
@@ -421,6 +422,7 @@ describe("Scenario: invalid HMAC REPLY is silently dropped to prevent spoofing",
     const message: InboundSignalMessage = {
       s3Key: "emails/forged-reply.eml",
       sesMessageId: "ses-forged-001",
+      compositeMailMessageId: "ses-ses-forged-001",
       idempotencyKey: "test-idempotency-key",
       timestamp: "2025-03-15T16:00:00Z",
       destination: [recipient],
@@ -476,6 +478,7 @@ describe("Scenario: invalid accountId checksum REPLY is dropped before HMAC chec
     const message: InboundSignalMessage = {
       s3Key: "emails/bad-checksum.eml",
       sesMessageId: "ses-bad-001",
+      compositeMailMessageId: "ses-ses-bad-001",
       idempotencyKey: "test-idempotency-key",
       timestamp: "2025-03-15T16:30:00Z",
       destination: [recipient],
@@ -695,6 +698,7 @@ describe("Scenario: most recent RSVP decision is recorded as calendar_response s
     const message: InboundSignalMessage = {
       s3Key: "emails/tentative-reply.eml",
       sesMessageId: "ses-tentative-001",
+      compositeMailMessageId: "ses-ses-tentative-001",
       idempotencyKey: "test-idempotency-key",
       timestamp: "2025-03-15T17:00:00Z",
       destination: [recipient],

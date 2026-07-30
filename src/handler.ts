@@ -237,6 +237,7 @@ async function processSqsRecord(
   const message: InboundSignalMessage = {
     s3Key: receipt.action.objectKey,
     sesMessageId: mail.messageId,
+    compositeMailMessageId: `ses-${mail.messageId}`,
     idempotencyKey: messageId,
     timestamp: mail.timestamp,
     destination: mail.destination,

@@ -239,6 +239,7 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
     return {
       s3Key: `emails/${sesMessageId}`,
       sesMessageId,
+      compositeMailMessageId: `ses-${sesMessageId}`,
       idempotencyKey: "test-idempotency-key",
       timestamp: "2024-01-15T10:00:00Z",
       destination: ["user@example.com"],
@@ -574,6 +575,7 @@ describe("Feature: signal-processor-retry-resilience, Property 3: DDB read failu
     return {
       s3Key: `emails/${sesMessageId}`,
       sesMessageId,
+      compositeMailMessageId: `ses-${sesMessageId}`,
       idempotencyKey: "test-idempotency-key",
       timestamp: "2024-01-15T10:00:00Z",
       destination: ["user@example.com"],
@@ -852,6 +854,7 @@ describe("Feature: signal-processor-retry-resilience, Property 2: Missing signal
     return {
       s3Key: `emails/${sesMessageId}`,
       sesMessageId,
+      compositeMailMessageId: `ses-${sesMessageId}`,
       idempotencyKey: "test-idempotency-key",
       timestamp: "2024-01-15T10:00:00Z",
       destination: ["user@example.com"],
@@ -1126,6 +1129,7 @@ describe("Feature: signal-processor-retry-resilience, Property 8: Outcome re-der
     return {
       s3Key: "emails/msg-prop8",
       sesMessageId: "msg-prop8",
+      compositeMailMessageId: "ses-msg-prop8",
       idempotencyKey: "test-idempotency-key",
       timestamp: "2024-01-15T10:00:00Z",
       destination: ["user@example.com"],

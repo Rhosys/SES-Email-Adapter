@@ -133,6 +133,7 @@ function makeMessage(opts: Partial<InboundSignalMessage> = {}): InboundSignalMes
   return {
     s3Key: "emails/msg-123",
     sesMessageId: "msg-123",
+    compositeMailMessageId: "ses-msg-123",
     idempotencyKey: "test-idempotency-key",
     timestamp: "2024-01-15T10:00:00Z",
     destination: ["user@example.com"],

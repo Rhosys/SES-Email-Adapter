@@ -108,6 +108,7 @@ describe("Blocked/quarantined signals never trigger saveArc", () => {
     return {
       s3Key: `emails/${sesMessageId}`,
       sesMessageId,
+      compositeMailMessageId: `ses-${sesMessageId}`,
       idempotencyKey: "test-idempotency-key",
       timestamp: "2024-01-15T10:00:00Z",
       destination: ["user@example.com"],

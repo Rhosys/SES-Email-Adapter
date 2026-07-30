@@ -46,6 +46,7 @@ function makeMessage(destination: string[]): InboundSignalMessage {
   return {
     s3Key: "emails/test.eml",
     sesMessageId: "ses-msg-001",
+    compositeMailMessageId: "ses-ses-msg-001",
     idempotencyKey: "test-idempotency-key",
     timestamp: "2025-03-15T10:00:00Z",
     destination,

@@ -124,6 +124,7 @@ function makeMessage(): InboundSignalMessage {
   return {
     s3Key: "emails/msg-healthcheck",
     sesMessageId: "msg-healthcheck",
+    compositeMailMessageId: "ses-msg-healthcheck",
     idempotencyKey: "hc-idempotency-key",
     timestamp: "2025-07-01T06:01:00Z",
     destination: ["healthcheck@platform.email.rhosys.cloud"],

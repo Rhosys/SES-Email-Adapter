@@ -152,6 +152,7 @@ describe("Feature: signal-processor-retry-resilience, Property 4: Arc saved befo
     return {
       s3Key: `emails/${sesMessageId}`,
       sesMessageId,
+      compositeMailMessageId: `ses-${sesMessageId}`,
       idempotencyKey: "test-idempotency-key",
       timestamp: "2024-01-15T10:00:00Z",
       destination: ["user@example.com"],
@@ -385,6 +386,7 @@ describe("Feature: signal-processor-retry-resilience, Property 6: Aurora failure
     return {
       s3Key: `emails/${sesMessageId}`,
       sesMessageId,
+      compositeMailMessageId: `ses-${sesMessageId}`,
       idempotencyKey: "test-idempotency-key",
       timestamp: "2024-01-15T10:00:00Z",
       destination: ["user@example.com"],
@@ -664,6 +666,7 @@ describe("Feature: signal-processor-retry-resilience, Property 5: Side-effects d
     return {
       s3Key: `emails/${sesMessageId}`,
       sesMessageId,
+      compositeMailMessageId: `ses-${sesMessageId}`,
       idempotencyKey: "test-idempotency-key",
       timestamp: "2024-01-15T10:00:00Z",
       destination: ["user@example.com"],
@@ -948,6 +951,7 @@ describe("Feature: signal-processor-retry-resilience, Property 7: Partial Aurora
     return {
       s3Key: `emails/${sesMessageId}`,
       sesMessageId,
+      compositeMailMessageId: `ses-${sesMessageId}`,
       idempotencyKey: "test-idempotency-key",
       timestamp: "2024-01-15T10:00:00Z",
       destination: ["user@example.com"],

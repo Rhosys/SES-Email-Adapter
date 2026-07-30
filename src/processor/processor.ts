@@ -122,6 +122,8 @@ export interface InboundSignalMessage {
   expectedAccountId?: string;
   s3Key: string;
   sesMessageId: string;
+  /** Full composite lookup key including source prefix (e.g. "ses-abc123", "gmail-xyz"). */
+  compositeMailMessageId: string;
   idempotencyKey: string;
   timestamp: string;
   destination: string[];
@@ -740,7 +742,7 @@ export class SignalProcessor {
     // 1. Dedup / retry-resume — a single signal lookup serves both. On force (reprocess)
     // we skip it and always run the full pipeline.
     if (!opts?.force) {
-      const existingResult = await this.threadDb.getSignalByMessageId(accountId, `ses-${sesMessageId}`);
+      const existingResult = await this.threadDb.getSignalByMessageId(accountId, msg.compositeMailMessageId);
       if (existingResult.isErr()) return err(existingResult.error);
       this.logger.trackPoint("signal_dedup_lookup");
       const existing = existingResult.value;
@@ -791,7 +793,7 @@ export class SignalProcessor {
       const signalId = generateId("sgn-");
       const signal: Signal = {
         id: signalId,
-        signalLookupId: "ses-" + sesMessageId,
+        signalLookupId: msg.compositeMailMessageId,
         accountId,
         status: "block_reject",
         source: "email",
@@ -924,7 +926,7 @@ export class SignalProcessor {
       const signalId = generateId("sgn-");
       const signal: Signal = {
         id: signalId,
-        signalLookupId: "ses-" + sesMessageId,
+        signalLookupId: msg.compositeMailMessageId,
         accountId,
         status: blockStatus,
         source: "email",
@@ -1160,7 +1162,7 @@ export class SignalProcessor {
     // (post-classify path: preserves classification data on blocked signal for audit/review)
     if (effectiveAliasSenderConfig && effectiveAliasSenderConfig.policy !== "allow") {
       const blockStatus = effectiveAliasSenderConfig.policy; // block_hidden | block_reject | report_violation
-      const blockedSignal = buildSignal({ status: blockStatus, accountId, sesMessageId, recipientAddress, parsed, classification: classificationOutput, s3Key, receivedAt: timestamp, now, retentionDuration: effectiveRetentionForTtl, ...(ttl !== undefined ? { ttl } : {}) }, this.logger);
+      const blockedSignal = buildSignal({ status: blockStatus, accountId, sesMessageId, compositeMailMessageId: msg.compositeMailMessageId, recipientAddress, parsed, classification: classificationOutput, s3Key, receivedAt: timestamp, now, retentionDuration: effectiveRetentionForTtl, ...(ttl !== undefined ? { ttl } : {}) }, this.logger);
       const saveResult = await this.threadDb.saveSignal(blockedSignal);
       if (saveResult.isErr()) return err(saveResult.error);
       this.logger.track("Blocked email — sender explicitly blocked for this alias.", { code: "processor.sender_block", signal: blockedSignal, thread, senderETLD1, policy: blockStatus });
@@ -1207,6 +1209,7 @@ export class SignalProcessor {
       status: "active",
       accountId,
       sesMessageId,
+      compositeMailMessageId: msg.compositeMailMessageId,
       recipientAddress,
       parsed,
       classification: classificationOutput,
@@ -1262,7 +1265,7 @@ export class SignalProcessor {
       }
     }
 
-    const buildArgs = { accountId, sesMessageId, recipientAddress, parsed, classification: classificationOutput, s3Key, receivedAt: timestamp, now, retentionDuration: effectiveRetentionForTtl, ...(ttl !== undefined ? { ttl } : {}), ...(gsi3pk !== undefined ? { gsi3pk } : {}), ...(opts?.forceSignalId !== undefined ? { forceSignalId: opts.forceSignalId } : {}) };
+    const buildArgs = { accountId, sesMessageId, compositeMailMessageId: msg.compositeMailMessageId, recipientAddress, parsed, classification: classificationOutput, s3Key, receivedAt: timestamp, now, retentionDuration: effectiveRetentionForTtl, ...(ttl !== undefined ? { ttl } : {}), ...(gsi3pk !== undefined ? { gsi3pk } : {}), ...(opts?.forceSignalId !== undefined ? { forceSignalId: opts.forceSignalId } : {}) };
 
     if (outcome.blockDisposition) {
       const blockSignal = buildSignal({ status: outcome.blockDisposition, ...buildArgs }, this.logger);
@@ -1747,6 +1750,7 @@ export class SignalProcessor {
 
     const sesMessageId = existing.data.sesMessageId;
     if (!sesMessageId) return err(processorError("Signal has no sesMessageId — cannot reprocess"));
+    const compositeMailMessageId = existing.signalLookupId;
     const recipientAddress = existing.data.recipientAddress;
     const timestamp = existing.data.receivedAt ?? existing.createdAt;
 
@@ -1756,6 +1760,7 @@ export class SignalProcessor {
       expectedAccountId: accountId,
       s3Key,
       sesMessageId,
+      compositeMailMessageId,
       idempotencyKey: existing.id,
       timestamp,
       destination: [recipientAddress],
@@ -1768,7 +1773,7 @@ export class SignalProcessor {
 
     // Re-fetch by primary key — reprocessing may reassign the signal to a different
     // thread, so the GSI1-based getSignalById (scoped to the original threadId) would miss it.
-    const freshResult = await this.threadDb.getSignalByMessageId(accountId, `ses-${sesMessageId}`);
+    const freshResult = await this.threadDb.getSignalByMessageId(accountId, compositeMailMessageId);
     if (freshResult.isErr()) return err(processorError(freshResult.error));
     if (!freshResult.value) return err(processorError("Signal not found after reprocess"));
 
@@ -1943,6 +1948,7 @@ function buildSignal(opts: {
   status: Signal["status"];
   accountId: string;
   sesMessageId: string;
+  compositeMailMessageId: string;
   recipientAddress: string;
   parsed: ParsedMime;
   classification: ClassificationOutput;
@@ -1954,7 +1960,7 @@ function buildSignal(opts: {
   gsi3pk?: string;
   forceSignalId?: string;
 }, logger?: Logger): Signal<InboundEmailSignalData> {
-  const { threadId, status, accountId, sesMessageId, recipientAddress, parsed, classification, s3Key, receivedAt, now, ttl, retentionDuration, gsi3pk, forceSignalId } = opts;
+  const { threadId, status, accountId, sesMessageId, compositeMailMessageId, recipientAddress, parsed, classification, s3Key, receivedAt, now, ttl, retentionDuration, gsi3pk, forceSignalId } = opts;
   const signalId = forceSignalId ?? generateId("sgn-");
 
   // Extract unsubscribe info from List-Unsubscribe / List-Unsubscribe-Post headers,
@@ -1982,7 +1988,7 @@ function buildSignal(opts: {
 
   const signal: Signal<InboundEmailSignalData> = {
     id: signalId,
-    signalLookupId: "ses-" + sesMessageId,
+    signalLookupId: compositeMailMessageId,
     accountId,
     source: "email",
     type: "email",
