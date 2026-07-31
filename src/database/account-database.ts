@@ -1592,4 +1592,37 @@ export class AccountDatabase {
       return err(dbError(e));
     }
   }
+
+  async findExternalExchangeByEmail(accountId: string, emailAddress: string): Promise<Result<ExternalMailExchange | null, DbError>> {
+    try {
+      const res = await dynamo.send(new QueryCommand({
+        TableName: ACCOUNTS_TABLE,
+        KeyConditionExpression: "#pk = :pk AND begins_with(#sk, :prefix)",
+        FilterExpression: "#emailAddress = :emailAddress",
+        ExpressionAttributeNames: { "#pk": "pk", "#sk": "sk", "#emailAddress": "emailAddress" },
+        ExpressionAttributeValues: { ":pk": pk(accountId), ":prefix": "EMX#", ":emailAddress": emailAddress },
+      }));
+      const items = (res.Items ?? []) as ExternalMailExchange[];
+      return ok(items[0] ?? null);
+    } catch (e) {
+      return err(dbError(e));
+    }
+  }
+
+  async findExternalExchangeBySubscriptionId(subscriptionId: string): Promise<Result<ExternalMailExchange | null, DbError>> {
+    try {
+      const res = await dynamo.send(new QueryCommand({
+        TableName: ACCOUNTS_TABLE,
+        IndexName: "gsi1",
+        KeyConditionExpression: "#gsi1pk = :pk",
+        FilterExpression: "#providerSubscriptionId = :subId",
+        ExpressionAttributeNames: { "#gsi1pk": "gsi1pk", "#providerSubscriptionId": "providerSubscriptionId" },
+        ExpressionAttributeValues: { ":pk": "EMX#active", ":subId": subscriptionId },
+      }));
+      const items = (res.Items ?? []) as ExternalMailExchange[];
+      return ok(items[0] ?? null);
+    } catch (e) {
+      return err(dbError(e));
+    }
+  }
 }
