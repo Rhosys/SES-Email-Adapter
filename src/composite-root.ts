@@ -59,6 +59,13 @@ import { DraftSendWorker } from "./processor/draft-send-worker.js";
 import { sendRsvp } from "./processor/calendar/rsvp-composer.js";
 import type { PostApprovalCalendarHandlerDeps } from "./processor/calendar/post-approval-handler.js";
 import { HmacSecretGenerator } from "./processor/calendar/hmac-secret-generator.js";
+import { GmailAdapter } from "./external-exchanges/gmail-adapter.js";
+import { OutlookAdapter } from "./external-exchanges/outlook-adapter.js";
+import { GmailWebhookHandler } from "./external-exchanges/gmail-webhook-handler.js";
+import { OutlookWebhookHandler } from "./external-exchanges/outlook-webhook-handler.js";
+import { EmxInboundWorker } from "./external-exchanges/emx-inbound-worker.js";
+import { EmxDispatchWorker } from "./external-exchanges/emx-dispatch-worker.js";
+import type { ProviderAdapter } from "./external-exchanges/provider-adapter.js";
 import { RequestLogger } from "./logger.js";
 
 // ---------------------------------------------------------------------------
@@ -85,6 +92,8 @@ export class CompositeRoot {
   public readonly sesFeedbackProcessor: SesFeedbackProcessor;
   public readonly authService: AuthressAuthService;
   public readonly deviceStore: DynamoDeviceStore;
+  public readonly emxInboundWorker: EmxInboundWorker;
+  public readonly emxDispatchWorker: EmxDispatchWorker;
   public readonly app: ReturnType<typeof createApp>;
 
   constructor() {
@@ -293,6 +302,46 @@ export class CompositeRoot {
     });
 
     // -----------------------------------------------------------------------
+    // External Mail Exchanges (EMX)
+    // -----------------------------------------------------------------------
+
+    const emxAdapters: Record<string, ProviderAdapter> = {
+      gmail: new GmailAdapter(),
+      outlook: new OutlookAdapter(),
+    };
+
+    const gmailWebhookHandler = new GmailWebhookHandler({
+      db: accountDb,
+      logger,
+      sqsClient: sqs,
+      queueUrl: SIGNAL_QUEUE_URL,
+    });
+
+    const outlookWebhookHandler = new OutlookWebhookHandler({
+      db: accountDb,
+      logger,
+      sqsClient: sqs,
+      queueUrl: SIGNAL_QUEUE_URL,
+      azureAdClientId: process.env["AZURE_AD_CLIENT_ID"] ?? "",
+    });
+
+    const emxInboundWorker = new EmxInboundWorker({
+      logger,
+      s3Client: s3,
+      emailBucket: S3_BUCKET,
+      adapters: emxAdapters,
+      processRecord: (message, receiveCount) => processor.processRecord(message, receiveCount),
+    });
+
+    const emxDispatchWorker = new EmxDispatchWorker({
+      logger,
+      db: accountDb,
+      sqsClient: sqs,
+      queueUrl: SIGNAL_QUEUE_URL,
+      adapters: emxAdapters,
+    });
+
+    // -----------------------------------------------------------------------
     // Onboarding (Step Function task handler + account creation starter)
     // -----------------------------------------------------------------------
 
@@ -365,6 +414,9 @@ export class CompositeRoot {
       embeddingGenerator,
       threadMatcher: searchDatabase,
       unsubscribeTokenGenerator,
+      gmailWebhookHandler,
+      outlookWebhookHandler,
+      adapters: emxAdapters,
     });
 
     // -----------------------------------------------------------------------
@@ -385,6 +437,8 @@ export class CompositeRoot {
     this.sesFeedbackProcessor = sesFeedbackProcessor;
     this.authService = authService;
     this.deviceStore = deviceStore;
+    this.emxInboundWorker = emxInboundWorker;
+    this.emxDispatchWorker = emxDispatchWorker;
     this.app = app;
   }
 }

@@ -25,6 +25,7 @@ import type { EmbeddingGenerator } from "../embedding/embedding-generator.js";
 import type { ThreadMatcher } from "../database/thread-matcher.js";
 import type { GmailWebhookHandler } from "../external-exchanges/gmail-webhook-handler.js";
 import type { OutlookWebhookHandler } from "../external-exchanges/outlook-webhook-handler.js";
+import type { ProviderAdapter } from "../external-exchanges/provider-adapter.js";
 
 import { WellKnownApi } from "./wellKnownApi.js";
 import { AccountsApi } from "./accountsApi.js";
@@ -40,6 +41,7 @@ import { AdminApi } from "./adminApi.js";
 import type { HealthCheckValidatorPort } from "./adminApi.js";
 import { UnsubscribeApi } from "./unsubscribeApi.js";
 import type { UnsubscribeTokenGenerator } from "../email/unsubscribe-token-generator.js";
+import { ExternalExchangesApi } from "./externalExchangesApi.js";
 import { ThreadsApi } from "./threadsApi.js";
 import { ResourcesApi } from "./resourcesApi.js";
 import { SignalsApi } from "./signalsApi.js";
@@ -104,9 +106,10 @@ export interface AppDeps {
   unsubscribeTokenGenerator: UnsubscribeTokenGenerator;
   gmailWebhookHandler?: GmailWebhookHandler;
   outlookWebhookHandler?: OutlookWebhookHandler;
+  adapters?: Record<string, ProviderAdapter>;
 }
 
-export function createApp({ threadDb, resourceDb, accountDb, auditDb, auth, access, logger, forwardingService, jobDispatcher, healthCheckValidator, signalReprocessor, draftSendDispatcher, accountCreationStarter, appBaseUrl, contentCdnBaseUrl, astValidator, billingHandler, emailService, domainIdentityService, rsvpComposer, postApprovalCalendarDeps, schedulerClient, s3Client, emailBucket, triggerDigest, embeddingGenerator, threadMatcher, unsubscribeTokenGenerator, gmailWebhookHandler, outlookWebhookHandler }: AppDeps) {
+export function createApp({ threadDb, resourceDb, accountDb, auditDb, auth, access, logger, forwardingService, jobDispatcher, healthCheckValidator, signalReprocessor, draftSendDispatcher, accountCreationStarter, appBaseUrl, contentCdnBaseUrl, astValidator, billingHandler, emailService, domainIdentityService, rsvpComposer, postApprovalCalendarDeps, schedulerClient, s3Client, emailBucket, triggerDigest, embeddingGenerator, threadMatcher, unsubscribeTokenGenerator, gmailWebhookHandler, outlookWebhookHandler, adapters }: AppDeps) {
   type AppEnv = { Variables: { auth: AuthContext; authorizationVerified?: boolean; [ROUTE_NOT_FOUND_KEY]?: boolean } };
   const app = new OpenAPIHono<AppEnv>();
 
@@ -284,6 +287,9 @@ export function createApp({ threadDb, resourceDb, accountDb, auditDb, auth, acce
   new AdminApi(jobDispatcher, healthCheckValidator).register(app, helpers);
   new UnsubscribeApi(unsubscribeTokenGenerator, accountDb, logger).register(app, helpers);
   new UserApi(accountDb, access, logger).register(app, helpers);
+  if (adapters) {
+    new ExternalExchangesApi(accountDb, adapters, logger).register(app, helpers);
+  }
 
   // ---------------------------------------------------------------------------
   // Not Found & Method Not Allowed — must be registered after all routes

@@ -4,7 +4,7 @@ import { ok } from "./errors.js";
 import type { Result } from "./errors.js";
 import { isStepFunctionTaskEvent } from "./onboarding/types.js";
 import type { InboundSignalMessage, SideEffectPayload } from "./processor/processor.js";
-import type { SesInboundNotification } from "./types/ses-notification.js";
+import type { SesInboundNotification, SesReceiptNotification } from "./types/ses-notification.js";
 import type { FollowupMessage } from "./scheduler/followup-handler.js";
 import type { RsvpReminderMessage } from "./scheduler/rsvp-reminder.js";
 import type { IDigestSendMessage } from "./digest/digest-worker.js";
@@ -13,11 +13,11 @@ import type { DraftSendPayload } from "./processor/draft-send-dispatcher.js";
 import { DateTime } from "luxon";
 import { CompositeRoot } from "./composite-root.js";
 
-const [MSG_TYPE_REINDEX, MSG_TYPE_SIDE_EFFECT, MSG_TYPE_DRAFT_SEND, MSG_TYPE_SIGNAL_FOLLOWUP, MSG_TYPE_RSVP_REMINDER, MSG_TYPE_DIGEST_DISPATCH, MSG_TYPE_DIGEST_SEND] = SQS_MESSAGE_TYPES;
+const [MSG_TYPE_REINDEX, MSG_TYPE_SIDE_EFFECT, MSG_TYPE_DRAFT_SEND, MSG_TYPE_SIGNAL_FOLLOWUP, MSG_TYPE_RSVP_REMINDER, MSG_TYPE_DIGEST_DISPATCH, MSG_TYPE_DIGEST_SEND, MSG_TYPE_EMX_INBOUND, MSG_TYPE_EMX_DISPATCH] = SQS_MESSAGE_TYPES;
 const RETRY_TRACK_THRESHOLD = 30;
 
 const root = new CompositeRoot();
-const { logger, processor, onboardingHandler, domainHealthJob, healthcheckJob, reindexWorker, draftSendWorker, followupHandler, rsvpReminderHandler, digestDispatcher, digestWorker, sesFeedbackProcessor, authService, deviceStore, app } = root;
+const { logger, processor, onboardingHandler, domainHealthJob, healthcheckJob, reindexWorker, draftSendWorker, followupHandler, rsvpReminderHandler, digestDispatcher, digestWorker, sesFeedbackProcessor, authService, deviceStore, emxInboundWorker, emxDispatchWorker, app } = root;
 // ---------------------------------------------------------------------------
 // Wiring lives in CompositeRoot (see composite-root.ts).
 // ---------------------------------------------------------------------------
@@ -205,6 +205,19 @@ async function processSqsRecord(
     return digestWorker.process(message);
   }
 
+  if (messageType === MSG_TYPE_EMX_INBOUND) {
+    const payload = body as import("./external-exchanges/emx-inbound-worker.js").EmxInboundPayload;
+    if (!payload.source || !payload.providerMessageId || !payload.emxId || !payload.accountId) {
+      logger.error("Malformed emx_inbound payload — missing required fields. Dropping.", { code: "handler.sqs.malformed_emx_inbound", messageId: sqsMessageId });
+      return ok(undefined);
+    }
+    return emxInboundWorker.process(payload, sqsMessageId, receiveCount);
+  }
+
+  if (messageType === MSG_TYPE_EMX_DISPATCH) {
+    return emxDispatchWorker.dispatch();
+  }
+
   // SNS envelope — validate + unwrap. Two SNS topics land on this same queue (see deploy/storage.tf):
   // the inbound receipt rule's S3 action (notificationType: "Received"), and the sending
   // configuration set's feedback destination (Bounce/Complaint/...).
@@ -272,14 +285,17 @@ async function processSqsRecord(
     return ok(undefined);
   }
 
+  // Structural guards above confirm mail + receipt.action — narrow to type-safe access
+  const inbound = notification as unknown as SesReceiptNotification;
+
   const message: InboundSignalMessage = {
-    s3Key: notification.receipt.action.objectKey,
-    compositeMailMessageId: `ses-${mail.messageId}`,
+    s3Key: inbound.receipt.action.objectKey,
+    compositeMailMessageId: `ses-${inbound.mail.messageId}`,
     idempotencyKey: sqsMessageId,
-    timestamp: mail.timestamp,
-    destination: mail.destination,
-    dkimVerdict: notification.receipt.dkimVerdict.status,
-    dmarcVerdict: notification.receipt.dmarcVerdict.status,
+    timestamp: inbound.mail.timestamp,
+    destination: inbound.mail.destination,
+    dkimVerdict: inbound.receipt.dkimVerdict.status,
+    dmarcVerdict: inbound.receipt.dmarcVerdict.status,
   };
   return processor.processRecord(message, receiveCount);
 }
