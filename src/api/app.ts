@@ -23,6 +23,8 @@ import type { SignalReprocessor } from "./threadsApi.js";
 import type { IForwardingService } from "../forwarding/forwarding-service.js";
 import type { EmbeddingGenerator } from "../embedding/embedding-generator.js";
 import type { ThreadMatcher } from "../database/thread-matcher.js";
+import type { GmailWebhookHandler } from "../external-exchanges/gmail-webhook-handler.js";
+import type { OutlookWebhookHandler } from "../external-exchanges/outlook-webhook-handler.js";
 
 import { WellKnownApi } from "./wellKnownApi.js";
 import { AccountsApi } from "./accountsApi.js";
@@ -100,9 +102,11 @@ export interface AppDeps {
   embeddingGenerator: EmbeddingGenerator;
   threadMatcher: ThreadMatcher;
   unsubscribeTokenGenerator: UnsubscribeTokenGenerator;
+  gmailWebhookHandler?: GmailWebhookHandler;
+  outlookWebhookHandler?: OutlookWebhookHandler;
 }
 
-export function createApp({ threadDb, resourceDb, accountDb, auditDb, auth, access, logger, forwardingService, jobDispatcher, healthCheckValidator, signalReprocessor, draftSendDispatcher, accountCreationStarter, appBaseUrl, contentCdnBaseUrl, astValidator, billingHandler, emailService, domainIdentityService, rsvpComposer, postApprovalCalendarDeps, schedulerClient, s3Client, emailBucket, triggerDigest, embeddingGenerator, threadMatcher, unsubscribeTokenGenerator }: AppDeps) {
+export function createApp({ threadDb, resourceDb, accountDb, auditDb, auth, access, logger, forwardingService, jobDispatcher, healthCheckValidator, signalReprocessor, draftSendDispatcher, accountCreationStarter, appBaseUrl, contentCdnBaseUrl, astValidator, billingHandler, emailService, domainIdentityService, rsvpComposer, postApprovalCalendarDeps, schedulerClient, s3Client, emailBucket, triggerDigest, embeddingGenerator, threadMatcher, unsubscribeTokenGenerator, gmailWebhookHandler, outlookWebhookHandler }: AppDeps) {
   type AppEnv = { Variables: { auth: AuthContext; authorizationVerified?: boolean; [ROUTE_NOT_FOUND_KEY]?: boolean } };
   const app = new OpenAPIHono<AppEnv>();
 
@@ -230,6 +234,12 @@ export function createApp({ threadDb, resourceDb, accountDb, auditDb, auth, acce
       return;
     }
 
+    // Public webhook endpoints — provider-verified at application layer (OIDC JWT in handler)
+    if (c.req.method === "POST" && c.req.path.startsWith("/external-exchanges/")) {
+      await next();
+      return;
+    }
+
     const header = c.req.header("Authorization");
     if (!header?.startsWith("Bearer ")) return err(c, 401, "Unauthorized");
 
@@ -244,6 +254,18 @@ export function createApp({ threadDb, resourceDb, accountDb, auditDb, auth, acce
 
   // Authorization guard — safety net for forgotten authorize() calls on any route
   app.use("*", authorizationGuard(logger));
+
+  // -------------------------------------------------------------------------
+  // Webhook routes (public — provider-verified at application layer)
+  // -------------------------------------------------------------------------
+  if (gmailWebhookHandler && outlookWebhookHandler) {
+    app.post("/external-exchanges/:platform/target", async (c) => {
+      const platform = c.req.param("platform");
+      if (platform === "gmail") return gmailWebhookHandler.handle(c);
+      if (platform === "outlook") return outlookWebhookHandler.handle(c);
+      return c.json({ title: "Not Found" }, 404);
+    });
+  }
 
   // -------------------------------------------------------------------------
   // Route registrations
