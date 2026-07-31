@@ -44,6 +44,7 @@
     "happy-dom": "^20.10.2",
     "hono": "^4.0.0",
     "ical.js": "^2.2.1",
+    "jose": "^6.2.5",
     "jpeg-js": "^0.4.4",
     "json-logic-js": "^2.0.0",
     "json-stringify-safe": "^5.0.1",
