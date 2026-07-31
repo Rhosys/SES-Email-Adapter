@@ -53,7 +53,7 @@ function makeBounceFeedback(overrides: Partial<SesFeedback> = {}): SesFeedback {
     mail: {
       messageId: "ses-msg-abc",
       source: "me@example.com",
-      tags: { [TAG_ACCOUNT_ID]: "acct-001" },
+      tags: { [TAG_ACCOUNT_ID]: "acct-001", [TAG_SIGNAL_ID]: "sgn-signal001", [TAG_THREAD_ID]: "arc-001" },
     },
     ...overrides,
   };
@@ -75,8 +75,7 @@ function makeAccountDb(): AccountDatabase {
 
 function makeSignalStore(): FeedbackSignalStore {
   return {
-    getSignalById: vi.fn().mockResolvedValue(ok(null)),
-    getSignalByMessageId: vi.fn().mockResolvedValue(ok(makeSentSignal())),
+    getSignalById: vi.fn().mockResolvedValue(ok(makeSentSignal())),
     saveSignal: vi.fn().mockResolvedValue(ok(undefined)),
     updateSignalSendStatus: vi.fn().mockResolvedValue(ok(makeSentSignal({ status: "draft" }))),
   };
@@ -97,9 +96,11 @@ describe("SesFeedbackProcessor — bounce handling for user-sent signals", () =>
   });
 
   it("does not create deliverability signal when bounce is for a non-user signal", async () => {
-    vi.mocked(signalStore.getSignalByMessageId).mockResolvedValueOnce(ok(makeSentSignal({ source: "email" })));
+    vi.mocked(signalStore.getSignalById).mockResolvedValueOnce(ok(makeSentSignal({ source: "email" })));
 
-    const result = await processor.processNotification(makeBounceFeedback());
+    const result = await processor.processNotification(makeBounceFeedback({
+      mail: { messageId: "ses-msg-abc", source: "me@example.com", tags: { [TAG_ACCOUNT_ID]: "acct-001", [TAG_SIGNAL_ID]: "sgn-signal001", [TAG_THREAD_ID]: "arc-001" } },
+    }));
 
     expect(result.isOk()).toBe(true);
     expect(signalStore.saveSignal).not.toHaveBeenCalled();
@@ -107,9 +108,11 @@ describe("SesFeedbackProcessor — bounce handling for user-sent signals", () =>
   });
 
   it("does not create deliverability signal when no matching signal found", async () => {
-    vi.mocked(signalStore.getSignalByMessageId).mockResolvedValueOnce(ok(null));
+    vi.mocked(signalStore.getSignalById).mockResolvedValueOnce(ok(null));
 
-    const result = await processor.processNotification(makeBounceFeedback());
+    const result = await processor.processNotification(makeBounceFeedback({
+      mail: { messageId: "ses-msg-abc", source: "me@example.com", tags: { [TAG_ACCOUNT_ID]: "acct-001", [TAG_SIGNAL_ID]: "sgn-signal001", [TAG_THREAD_ID]: "arc-001" } },
+    }));
 
     expect(result.isOk()).toBe(true);
     expect(signalStore.saveSignal).not.toHaveBeenCalled();
@@ -147,7 +150,7 @@ describe("SesFeedbackProcessor — bounce handling for user-sent signals", () =>
   });
 
   it("does not revert original signal when only some recipients bounced (partial bounce)", async () => {
-    vi.mocked(signalStore.getSignalByMessageId).mockResolvedValueOnce(ok(makeSentSignal({
+    vi.mocked(signalStore.getSignalById).mockResolvedValueOnce(ok(makeSentSignal({
       data: { to: [{ address: "recipient@example.com" }, { address: "other@example.com" }] },
     })));
 
@@ -240,7 +243,6 @@ describe("SesFeedbackProcessor — prefixed tag reading", () => {
     expect(accountDb.disableRulesForwardingTo).not.toHaveBeenCalled();
     // Signal lookup skipped (no accountId)
     expect(signalStore.getSignalById).not.toHaveBeenCalled();
-    expect(signalStore.getSignalByMessageId).not.toHaveBeenCalled();
   });
 
   it("uses direct signal lookup via getSignalById when X-Numaeel-SignalId is present", async () => {
@@ -258,7 +260,6 @@ describe("SesFeedbackProcessor — prefixed tag reading", () => {
 
     expect(result.isOk()).toBe(true);
     expect(signalStore.getSignalById).toHaveBeenCalledWith("acct-001", "sgn-signal001", "thr-abc");
-    expect(signalStore.getSignalByMessageId).not.toHaveBeenCalled();
   });
 
   it("assigns deliverability signal to the arc from X-Numaeel-ArcId tag", async () => {
@@ -286,21 +287,6 @@ describe("SesFeedbackProcessor — prefixed tag reading", () => {
     expect(savedSignal.threadId).toBe("arc-from-tag");
   });
 
-  it("falls back to getSignalByMessageId when no prefixed tags are present", async () => {
-    const feedback = makeBounceFeedback({
-      mail: {
-        messageId: "ses-msg-abc",
-        source: "me@example.com",
-        tags: { accountId: "acct-001" },
-      },
-    });
-
-    const result = await processor.processNotification(feedback);
-
-    expect(result.isOk()).toBe(true);
-    expect(signalStore.getSignalById).not.toHaveBeenCalled();
-    expect(signalStore.getSignalByMessageId).toHaveBeenCalledWith("acct-001", "ses-ses-msg-abc");
-  });
 });
 
 describe("SesFeedbackProcessor — origin/process logging", () => {

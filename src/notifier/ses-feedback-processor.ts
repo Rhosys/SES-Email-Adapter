@@ -15,7 +15,6 @@ const SOFT_BOUNCE_TTL_SECONDS = 7 * 24 * 60 * 60;
 
 export interface FeedbackSignalStore {
   getSignalById(accountId: string, signalId: string, threadId: string): Promise<Result<Signal | null, DbError>>;
-  getSignalByMessageId(accountId: string, signalLookupId: string): Promise<Result<Signal | null, DbError>>;
   saveSignal(signal: Signal): Promise<Result<void, DbError>>;
   updateSignalSendStatus(accountId: string, signalLookupId: string, update: {
     status: "pending_send" | "sent" | "draft";
@@ -158,11 +157,7 @@ export class SesFeedbackProcessor {
         const tagThreadId = feedback.mail.tags?.[TAG_THREAD_ID];
         let sentSignalResult: Result<Signal | null, DbError> | undefined;
         if (signalId && accountId && tagThreadId) {
-          // Direct signal lookup via tag (skips SES message ID query)
           sentSignalResult = await this.signalStore.getSignalById(accountId, signalId, tagThreadId);
-        } else if (accountId) {
-          // Fallback: look up by SES message ID (covers pre-migration emails without SignalId tag or threadId tag)
-          sentSignalResult = await this.signalStore.getSignalByMessageId(accountId, `ses-${sesMessageId}`);
         }
 
         if (sentSignalResult?.isOk()) {
