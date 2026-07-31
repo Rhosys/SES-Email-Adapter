@@ -66,6 +66,7 @@ import { OutlookWebhookHandler } from "./external-exchanges/outlook-webhook-hand
 import { EmxInboundWorker } from "./external-exchanges/emx-inbound-worker.js";
 import { EmxDispatchWorker } from "./external-exchanges/emx-dispatch-worker.js";
 import type { ProviderAdapter } from "./external-exchanges/provider-adapter.js";
+import { getClient as getAuthressClient } from "./api/authress-access.js";
 import { RequestLogger } from "./logger.js";
 
 // ---------------------------------------------------------------------------
@@ -305,6 +306,12 @@ export class CompositeRoot {
     // External Mail Exchanges (EMX)
     // -----------------------------------------------------------------------
 
+    const getProviderToken = async (accountId: string, connectionId: string): Promise<string> => {
+      const client = getAuthressClient();
+      const response = await client.connections.getConnectionCredentials(connectionId, accountId);
+      return response.data.accessToken;
+    };
+
     const emxAdapters: Record<string, ProviderAdapter> = {
       gmail: new GmailAdapter(),
       outlook: new OutlookAdapter(),
@@ -315,6 +322,7 @@ export class CompositeRoot {
       logger,
       sqsClient: sqs,
       queueUrl: SIGNAL_QUEUE_URL,
+      getProviderToken,
     });
 
     const outlookWebhookHandler = new OutlookWebhookHandler({
@@ -331,6 +339,7 @@ export class CompositeRoot {
       emailBucket: S3_BUCKET,
       adapters: emxAdapters,
       processRecord: (message, receiveCount) => processor.processRecord(message, receiveCount),
+      getProviderToken,
     });
 
     const emxDispatchWorker = new EmxDispatchWorker({
@@ -339,6 +348,7 @@ export class CompositeRoot {
       sqsClient: sqs,
       queueUrl: SIGNAL_QUEUE_URL,
       adapters: emxAdapters,
+      getProviderToken,
     });
 
     // -----------------------------------------------------------------------

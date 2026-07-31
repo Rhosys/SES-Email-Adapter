@@ -27,7 +27,7 @@ const ID_TO_ROLE = new Map<string, AccountRole>(
 
 let _client: AuthressClient | null = null;
 
-function getClient(): AuthressClient {
+export function getClient(): AuthressClient {
   if (!_client) {
     const tokenProvider = new KmsServiceClientTokenProvider({
       kmsKeyArn: AUTHRESS_KMS_KEY_ARN,
