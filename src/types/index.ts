@@ -587,7 +587,7 @@ export interface Thread {
   // ISO 8601 datetime — when the user wants to be reminded about this thread
   followupAt?: string;
   // Denormalized from the latest inbound signal — used for thread list display
-  senderAddress: string;
+  sender: { address: string; name?: string | undefined };
   recipientAddress: string;
   subject: string;
 }

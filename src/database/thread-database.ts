@@ -28,7 +28,7 @@ export interface UpdateThreadFields {
   workflow?: Workflow;
   retentionDuration?: string;
   sentMessageIds?: string[];
-  senderAddress?: string;
+  sender?: { address: string; name?: string | undefined };
   recipientAddress?: string;
   subject?: string;
   followupAt?: string;
@@ -62,7 +62,11 @@ function hydrateThreadObject<T>(record: T): T {
   const r = record as Record<string, unknown>;
   const threadId = resolveThreadId(r);
   if (threadId === undefined) return record;
-  return { ...record, threadId };
+  // Migrate legacy senderAddress → sender object at read time
+  if (!r.sender && r.senderAddress) {
+    r.sender = { address: r.senderAddress as string };
+  }
+  return { ...record, threadId, ...(r.sender ? { sender: r.sender } : {}) };
 }
 
 // ---------------------------------------------------------------------------
@@ -352,7 +356,7 @@ export class ThreadDatabase {
     if (update.workflow !== undefined) { setParts.push("workflow = :workflow"); exprValues[":workflow"] = update.workflow; }
     if (update.retentionDuration !== undefined) { setParts.push("retentionDuration = :rd"); exprValues[":rd"] = update.retentionDuration; }
     if (update.sentMessageIds !== undefined) { setParts.push("sentMessageIds = :smids"); exprValues[":smids"] = update.sentMessageIds; }
-    if (update.senderAddress !== undefined) { setParts.push("senderAddress = :senderAddress"); exprValues[":senderAddress"] = update.senderAddress; }
+    if (update.sender !== undefined) { setParts.push("sender = :sender"); exprValues[":sender"] = update.sender; }
     if (update.recipientAddress !== undefined) { setParts.push("recipientAddress = :recipientAddress"); exprValues[":recipientAddress"] = update.recipientAddress; }
     if (update.subject !== undefined) { setParts.push("#subject = :subject"); exprValues[":subject"] = update.subject; exprNames["#subject"] = "subject"; }
     if (update.followupAt !== undefined) { setParts.push("followupAt = :followupAt"); exprValues[":followupAt"] = update.followupAt; }

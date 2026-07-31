@@ -495,8 +495,8 @@ export const Thread = z.object({
   updatedAt: z.string().readonly(),
   retentionDuration: RetentionDuration.optional().readonly(),
   urgency: ThreadUrgency.optional(),
-  followupAt: z.string().datetime().optional().readonly(),
-  senderAddress: z.string(),
+  followupAt: z.iso.datetime().optional().readonly(),
+  sender: z.object({ address: z.string(), name: z.string().optional() }),
   recipientAddress: z.string(),
   subject: z.string(),
 }).openapi("Thread");

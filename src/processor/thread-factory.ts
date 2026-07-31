@@ -21,7 +21,7 @@ export interface BuildActiveThreadParams {
   workflow: Workflow;
   summary: string;
   lastSignalAt: string;
-  senderAddress: string;
+  sender: { address: string; name?: string | undefined };
   recipientAddress: string;
   subject: string;
   retentionDuration: RetentionDuration;
@@ -43,7 +43,7 @@ export function buildActiveThread(params: BuildActiveThreadParams): Thread {
     status: "active",
     summary: params.summary,
     lastSignalAt: params.lastSignalAt,
-    senderAddress: params.senderAddress,
+    sender: params.sender,
     recipientAddress: params.recipientAddress,
     subject: params.subject,
     createdAt: now,

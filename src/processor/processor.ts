@@ -1126,7 +1126,7 @@ export class SignalProcessor {
         ...matchedThread,
         workflow: classificationOutput.workflow,
         summary: classificationOutput.summary,
-        senderAddress: parsed.from.address,
+        sender: { address: parsed.from.address, ...(parsed.from.name ? { name: parsed.from.name } : {}) },
         recipientAddress,
         subject: parsed.subject,
         updatedAt: now,
@@ -1141,7 +1141,7 @@ export class SignalProcessor {
         workflow: classificationOutput.workflow,
         summary: classificationOutput.summary,
         lastSignalAt: timestamp,
-        senderAddress: parsed.from.address,
+        sender: { address: parsed.from.address, ...(parsed.from.name ? { name: parsed.from.name } : {}) },
         recipientAddress,
         subject: parsed.subject,
         retentionDuration: effectiveRetentionForTtl,
@@ -1361,7 +1361,7 @@ export class SignalProcessor {
       if (JSON.stringify(thread.labels) !== JSON.stringify(matchedThread.labels)) fields.labels = thread.labels;
       if (thread.sentMessageIds !== undefined && JSON.stringify(thread.sentMessageIds) !== JSON.stringify(matchedThread.sentMessageIds)) fields.sentMessageIds = thread.sentMessageIds;
       // Always update denormalized display fields from the latest inbound signal
-      if (thread.senderAddress !== undefined) fields.senderAddress = thread.senderAddress;
+      if (thread.sender !== undefined) fields.sender = thread.sender;
       if (thread.recipientAddress !== undefined) fields.recipientAddress = thread.recipientAddress;
       if (thread.subject !== undefined) fields.subject = thread.subject;
 

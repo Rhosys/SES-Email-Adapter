@@ -189,7 +189,7 @@ export class SignalsApi {
           workflow: signal.data.workflow,
           summary: signal.data.summary,
           lastSignalAt: signal.data.receivedAt,
-          senderAddress: (signal.data as { from?: { address?: string } }).from?.address ?? "",
+          sender: { address: (signal.data as { from?: { address?: string } }).from?.address ?? "", ...(((signal.data as { from?: { name?: string } }).from?.name) ? { name: (signal.data as { from?: { name?: string } }).from!.name } : {}) },
           recipientAddress: (signal.data as { recipientAddress?: string }).recipientAddress ?? "",
           subject: (signal.data as { subject?: string }).subject ?? "",
           retentionDuration: effectiveRetention,

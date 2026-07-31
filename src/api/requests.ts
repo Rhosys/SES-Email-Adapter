@@ -45,7 +45,7 @@ export const UpdateThreadRequest = z.object({
   urgency: ThreadUrgency.optional(),
   labels: z.array(z.string()).optional(),
   lastSignalAt: z.string().optional(),
-  followupAt: z.string().datetime().optional(),
+  followupAt: z.iso.datetime().optional(),
 });
 export type UpdateThreadRequest = z.infer<typeof UpdateThreadRequest>;
 

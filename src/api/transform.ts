@@ -41,7 +41,7 @@ export function toApiThread(thread: DbThread): Api.Thread {
     ...(thread.retentionDuration ? { retentionDuration: thread.retentionDuration as Api.Thread["retentionDuration"] } : {}),
     ...(thread.urgency ? { urgency: thread.urgency as Api.Thread["urgency"] } : {}),
     ...(thread.followupAt ? { followupAt: thread.followupAt } : {}),
-    senderAddress: thread.senderAddress ?? "",
+    sender: { address: thread.sender?.address ?? "", ...(thread.sender?.name ? { name: thread.sender.name } : {}) },
     recipientAddress: thread.recipientAddress ?? "",
     subject: thread.subject ?? "",
   };
