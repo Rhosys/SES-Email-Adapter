@@ -48,7 +48,7 @@ describe("ResourceDatabase.saveResource", () => {
     expect(input.UpdateExpression).toContain("#status = if_not_exists(#status, :defaultStatus)");
     expect(input.UpdateExpression).toContain("gsi1pk = if_not_exists(gsi1pk, :defaultGsi1pk)");
     expect(input.ExpressionAttributeValues![":defaultStatus"]).toBe("active");
-    expect(input.ExpressionAttributeValues![":defaultGsi1pk"]).toBe("ACCT#acct-1#STATUS#active#WORKFLOW#package");
+    expect(input.ExpressionAttributeValues![":defaultGsi1pk"]).toBe("ACCT#acct-1#STATUS#active");
   });
 
   it("never touches resolvedAt — that's owned entirely by setResourceStatus", async () => {
@@ -186,16 +186,16 @@ describe("ResourceDatabase.setResourceStatus", () => {
     expect(input.UpdateExpression).toContain("#status = :status");
     expect(input.UpdateExpression).not.toContain("if_not_exists");
     expect(input.ExpressionAttributeValues![":status"]).toBe("complete");
-    expect(input.ExpressionAttributeValues![":gsi1pk"]).toBe("ACCT#acct-1#STATUS#complete#WORKFLOW#package");
+    expect(input.ExpressionAttributeValues![":gsi1pk"]).toBe("ACCT#acct-1#STATUS#complete");
   });
 
-  it("derives workflow from the sk prefix to rebuild gsi1pk", async () => {
+  it("gsi1pk is scoped by accountId+status only — same value regardless of the resource's workflow", async () => {
     ddbMock.on(UpdateCommand).resolves({ Attributes: {} });
 
     await db.setResourceStatus("acct-1", "thr-001", "events#TIX-1", "active");
 
     const input = ddbMock.commandCalls(UpdateCommand)[0]!.args[0].input;
-    expect(input.ExpressionAttributeValues![":gsi1pk"]).toBe("ACCT#acct-1#STATUS#active#WORKFLOW#events");
+    expect(input.ExpressionAttributeValues![":gsi1pk"]).toBe("ACCT#acct-1#STATUS#active");
   });
 
   it("setting complete sets resolvedAt", async () => {
@@ -281,28 +281,28 @@ describe("ResourceDatabase.listResources", () => {
     db = new ResourceDatabase();
   });
 
-  it("queries gsi1 scoped to accountId+status+workflow, no date range by default", async () => {
+  it("queries gsi1 scoped to accountId+status only — spans every workflow, no date range by default", async () => {
     ddbMock.on(QueryCommand).resolves({ Items: [] });
 
-    await db.listResources("acct-1", "package", "active", {});
+    await db.listResources("acct-1", "active", {});
 
     const calls = ddbMock.commandCalls(QueryCommand);
     expect(calls).toHaveLength(1);
     const input = calls[0]!.args[0].input;
     expect(input.IndexName).toBe("gsi1");
     expect(input.KeyConditionExpression).toBe("gsi1pk = :pk");
-    expect(input.ExpressionAttributeValues).toEqual({ ":pk": "ACCT#acct-1#STATUS#active#WORKFLOW#package" });
+    expect(input.ExpressionAttributeValues).toEqual({ ":pk": "ACCT#acct-1#STATUS#active" });
   });
 
   it("adds a native gsi1sk BETWEEN range condition when dateFrom/dateTo are given", async () => {
     ddbMock.on(QueryCommand).resolves({ Items: [] });
 
-    await db.listResources("acct-1", "package", "active", { dateFrom: "2024-07-01", dateTo: "2024-07-04" });
+    await db.listResources("acct-1", "active", { dateFrom: "2024-07-01", dateTo: "2024-07-04" });
 
     const input = ddbMock.commandCalls(QueryCommand)[0]!.args[0].input;
     expect(input.KeyConditionExpression).toBe("gsi1pk = :pk AND gsi1sk BETWEEN :from AND :to");
     expect(input.ExpressionAttributeValues).toEqual({
-      ":pk": "ACCT#acct-1#STATUS#active#WORKFLOW#package",
+      ":pk": "ACCT#acct-1#STATUS#active",
       ":from": "2024-07-01",
       ":to": "2024-07-04",
     });

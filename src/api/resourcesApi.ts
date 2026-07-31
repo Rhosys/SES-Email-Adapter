@@ -4,7 +4,7 @@ import { toApiResource, decodeResourceId } from "./transform.js";
 import { zParse } from "./validate.js";
 import { UpdateResourceRequest } from "./requests.js";
 import { RESOURCE_WORKFLOWS, RESOURCE_STATUSES } from "../types/index.js";
-import type { Workflow, ResourceWorkflow, ResourceStatus } from "../types/index.js";
+import type { ResourceWorkflow, ResourceStatus } from "../types/index.js";
 import type { ListResourcesParams, ResourceDatabase } from "../database/resource-database.js";
 import type { Logger } from "../logger.js";
 import { Resource as ResourceSchema, ListResourcesResponse } from "./schemas.js";
@@ -27,7 +27,11 @@ export class ResourcesApi {
     const { resourceDb, logger } = this;
 
     // -------------------------------------------------------------------------
-    // 1. GET /accounts/{accountId}/resources — list resources, scoped by workflow+status
+    // 1. GET /accounts/{accountId}/resources — list resources, scoped by status, optionally
+    //    filtered to one workflow. Omitting workflow spans every resource workflow in a single
+    //    query (e.g. "everything due today/this week" for the UI banner) — the GSI is keyed by
+    //    accountId+status only, so a workflow filter is applied to the result set here rather
+    //    than narrowing the DB query.
     // -------------------------------------------------------------------------
     app.openapi(route({
       method: "get",
@@ -36,7 +40,7 @@ export class ResourcesApi {
       request: {
         params: z.object({ accountId: z.string() }),
         query: z.object({
-          workflow: z.string(),
+          workflow: z.string().optional(),
           status: z.string().optional(),
           dateFrom: z.string().optional(),
           dateTo: z.string().optional(),
@@ -50,8 +54,7 @@ export class ResourcesApi {
       const accountId = c.req.param("accountId")!;
       const query = c.req.query();
       const workflow = query["workflow"];
-      if (!workflow) return err(c, 400, "workflow query parameter is required");
-      if (!RESOURCE_WORKFLOWS.includes(workflow as ResourceWorkflow)) return err(c, 400, "Invalid workflow");
+      if (workflow !== undefined && !RESOURCE_WORKFLOWS.includes(workflow as ResourceWorkflow)) return err(c, 400, "Invalid workflow");
       const status = (query["status"] ?? "active") as ResourceStatus;
       if (!RESOURCE_STATUSES.includes(status)) return err(c, 400, "Invalid status");
       const params: ListResourcesParams = {
@@ -60,12 +63,13 @@ export class ResourcesApi {
         ...(query["cursor"] ? { cursor: query["cursor"] } : {}),
         ...(query["limit"] ? { limit: parseInt(query["limit"], 10) } : {}),
       };
-      const result = await resourceDb.listResources(accountId, workflow as Workflow, status, params);
+      const result = await resourceDb.listResources(accountId, status, params);
       if (result.isErr()) {
         logger.error("Failed to list resources.", { code: "api.resources.list_failed", error: result.error });
         return err(c, 500, "Internal Server Error");
       }
-      return c.json(page("resources", result.value.items.map(toApiResource), result.value.nextCursor), 200);
+      const items = workflow ? result.value.items.filter(r => r.workflow === workflow) : result.value.items;
+      return c.json(page("resources", items.map(toApiResource), result.value.nextCursor), 200);
     });
 
     // -------------------------------------------------------------------------
