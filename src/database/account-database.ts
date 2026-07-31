@@ -4,7 +4,7 @@ import { dynamo, ACCOUNTS_TABLE } from "./shared.js";
 import { dbError, notFoundError, ok, err } from "../errors.js";
 import type { Result, DbError, NotFoundError } from "../errors.js";
 import { generateId } from "../utils/id.js";
-import type { Account, View, Label, Rule, RuleStatus, Domain, Alias, AliasSender, SenderPolicy, AccountFilteringConfig, UnknownSenderPolicy, ForwardingTarget, EmailTemplate, WsConnection, IUserConfiguration } from "../types/index.js";
+import type { Account, View, Label, Rule, RuleStatus, Domain, Alias, AliasSender, SenderPolicy, AccountFilteringConfig, UnknownSenderPolicy, ForwardingTarget, EmailTemplate, WsConnection, IUserConfiguration, ExternalMailExchange } from "../types/index.js";
 import { USER_CONFIGURATION_DEFAULTS } from "../types/index.js";
 import { SYSTEM_RULES } from "../processor/system-rules.js";
 import { SystemAccountDb, isSystemAccount } from "./system-account-db.js";
@@ -1456,6 +1456,138 @@ export class AccountDatabase {
       }));
       const { pk: _pk, sk: _sk, userId: _uid, createdAt: _c, updatedAt: _u, ...config } = res.Attributes! as Record<string, unknown>;
       return ok({ ...USER_CONFIGURATION_DEFAULTS, ...config } as IUserConfiguration);
+    } catch (e) {
+      return err(dbError(e));
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // External Mail Exchanges (EMX)
+  // ---------------------------------------------------------------------------
+
+  async createExternalExchange(accountId: string, data: { platform: ExternalMailExchange["platform"]; emailAddress: string }): Promise<Result<ExternalMailExchange, DbError>> {
+    const now = DateTime.utc().toISO()!;
+    const id = generateId("emx");
+    const item: ExternalMailExchange = {
+      id,
+      accountId,
+      platform: data.platform,
+      emailAddress: data.emailAddress,
+      status: "pending_consent",
+      createdAt: now,
+      updatedAt: now,
+    };
+    try {
+      await dynamo.send(new PutCommand({
+        TableName: ACCOUNTS_TABLE,
+        Item: { ...item, pk: pk(accountId), sk: `EMX#${id}` },
+      }));
+      return ok(item);
+    } catch (e) {
+      return err(dbError(e));
+    }
+  }
+
+  async getExternalExchange(accountId: string, emxId: string): Promise<Result<ExternalMailExchange | null, DbError>> {
+    try {
+      const res = await dynamo.send(new GetCommand({
+        TableName: ACCOUNTS_TABLE,
+        Key: { pk: pk(accountId), sk: `EMX#${emxId}` },
+      }));
+      return ok(res.Item as ExternalMailExchange | undefined ?? null);
+    } catch (e) {
+      return err(dbError(e));
+    }
+  }
+
+  async listExternalExchanges(accountId: string): Promise<Result<ExternalMailExchange[], DbError>> {
+    try {
+      const res = await dynamo.send(new QueryCommand({
+        TableName: ACCOUNTS_TABLE,
+        KeyConditionExpression: "#pk = :pk AND begins_with(#sk, :prefix)",
+        ExpressionAttributeNames: { "#pk": "pk", "#sk": "sk" },
+        ExpressionAttributeValues: { ":pk": pk(accountId), ":prefix": "EMX#" },
+      }));
+      return ok((res.Items ?? []) as ExternalMailExchange[]);
+    } catch (e) {
+      return err(dbError(e));
+    }
+  }
+
+  async updateExternalExchange(accountId: string, emxId: string, fields: Partial<Pick<ExternalMailExchange, "status" | "syncCursor" | "expiresAt" | "lastSyncAt" | "providerSubscriptionId" | "encryptionCertificateId" | "errorReason">>): Promise<Result<ExternalMailExchange, DbError>> {
+    const now = DateTime.utc().toISO()!;
+    const names: Record<string, string> = { "#updatedAt": "updatedAt" };
+    const values: Record<string, unknown> = { ":updatedAt": now };
+    const setParts = ["#updatedAt = :updatedAt"];
+    const removeParts: string[] = [];
+
+    for (const [key, value] of Object.entries(fields)) {
+      if (value === undefined) continue;
+      names[`#${key}`] = key;
+      values[`:${key}`] = value;
+      setParts.push(`#${key} = :${key}`);
+    }
+
+    // GSI1 management: populate when active, remove otherwise
+    if (fields.status === "active" && fields.expiresAt) {
+      names["#gsi1pk"] = "gsi1pk";
+      names["#gsi1sk"] = "gsi1sk";
+      values[":gsi1pk"] = "EMX#active";
+      values[":gsi1sk"] = `${fields.expiresAt}#${emxId}`;
+      setParts.push("#gsi1pk = :gsi1pk", "#gsi1sk = :gsi1sk");
+    } else if (fields.status && fields.status !== "active") {
+      names["#gsi1pk"] = "gsi1pk";
+      names["#gsi1sk"] = "gsi1sk";
+      removeParts.push("#gsi1pk", "#gsi1sk");
+    } else if (fields.expiresAt && !fields.status) {
+      // Renewal: update gsi1sk with new expiresAt (keep gsi1pk)
+      names["#gsi1sk"] = "gsi1sk";
+      values[":gsi1sk"] = `${fields.expiresAt}#${emxId}`;
+      setParts.push("#gsi1sk = :gsi1sk");
+    }
+
+    let expression = `SET ${setParts.join(", ")}`;
+    if (removeParts.length > 0) {
+      expression += ` REMOVE ${removeParts.join(", ")}`;
+    }
+
+    try {
+      const res = await dynamo.send(new UpdateCommand({
+        TableName: ACCOUNTS_TABLE,
+        Key: { pk: pk(accountId), sk: `EMX#${emxId}` },
+        UpdateExpression: expression,
+        ExpressionAttributeNames: names,
+        ExpressionAttributeValues: values,
+        ReturnValues: "ALL_NEW",
+      }));
+      return ok(res.Attributes as ExternalMailExchange);
+    } catch (e) {
+      return err(dbError(e));
+    }
+  }
+
+  async deleteExternalExchange(accountId: string, emxId: string): Promise<Result<void, DbError>> {
+    try {
+      await dynamo.send(new DeleteCommand({
+        TableName: ACCOUNTS_TABLE,
+        Key: { pk: pk(accountId), sk: `EMX#${emxId}` },
+      }));
+      return ok(undefined);
+    } catch (e) {
+      return err(dbError(e));
+    }
+  }
+
+  async listExpiringExchanges(horizon: string): Promise<Result<ExternalMailExchange[], DbError>> {
+    try {
+      const res = await dynamo.send(new QueryCommand({
+        TableName: ACCOUNTS_TABLE,
+        IndexName: "gsi1",
+        KeyConditionExpression: "#gsi1pk = :pk AND #gsi1sk < :horizon",
+        ExpressionAttributeNames: { "#gsi1pk": "gsi1pk", "#gsi1sk": "gsi1sk" },
+        ExpressionAttributeValues: { ":pk": "EMX#active", ":horizon": `${horizon}~` },
+      }));
+      return ok((res.Items ?? []) as ExternalMailExchange[]);
     } catch (e) {
       return err(dbError(e));
     }
