@@ -95,23 +95,10 @@ export interface ReplySender {
   }): Promise<Result<{ messageId: string }, EmailServiceError>>;
 }
 
-export type SesVerdict = "PASS" | "FAIL" | "GRAY" | "PROCESSING_FAILED";
+export type { SesVerdict } from "../types/ses-notification.js";
+import type { SesVerdict } from "../types/ses-notification.js";
 
 const systemSignalDefaultRetentionDuration = Math.floor(Duration.fromISO("P90D").as("seconds"));
-
-interface SesReceiptNotification {
-  mail: {
-    messageId: string;
-    timestamp: string;
-    destination: string[];
-  };
-  receipt: {
-    recipients: string[];
-    dkimVerdict: { status: SesVerdict };
-    dmarcVerdict: { status: SesVerdict };
-    action: { bucketName: string; objectKey: string };
-  };
-}
 
 export interface InboundSignalMessage {
   /**

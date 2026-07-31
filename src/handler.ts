@@ -3,7 +3,8 @@ import { SQS_MESSAGE_TYPES } from "./types/index.js";
 import { ok, err } from "./errors.js";
 import type { Result } from "./errors.js";
 import { isStepFunctionTaskEvent } from "./onboarding/types.js";
-import type { InboundSignalMessage, SideEffectPayload, SesVerdict } from "./processor/processor.js";
+import type { InboundSignalMessage, SideEffectPayload } from "./processor/processor.js";
+import type { SesInboundNotification } from "./types/ses-notification.js";
 import type { FollowupMessage } from "./scheduler/followup-handler.js";
 import type { RsvpReminderMessage } from "./scheduler/rsvp-reminder.js";
 import type { IDigestSendMessage } from "./digest/digest-worker.js";
@@ -154,7 +155,7 @@ async function processSqsRecord(
   body: unknown,
   messageType: string | undefined,
   receiveCount: number,
-  messageId: string,
+  sqsMessageId: string,
 ): Promise<Result<void, unknown>> {
   if (messageType === MSG_TYPE_REINDEX) {
     return reindexWorker.processSegmentMessage(body as ReindexSegmentMessage);
@@ -163,7 +164,7 @@ async function processSqsRecord(
   if (messageType === MSG_TYPE_SIDE_EFFECT) {
     const payload = body as SideEffectPayload;
     if (!payload.signal || !payload.thread) {
-      logger.error("Malformed side-effect payload — missing signal or thread. Dropping message.", { code: "handler.sqs.malformed_side_effect", messageId });
+      logger.error("Malformed side-effect payload — missing signal or thread. Dropping message.", { code: "handler.sqs.malformed_side_effect", messageId: sqsMessageId });
       return ok(undefined);
     }
     return processor.processSideEffect(payload, receiveCount);
@@ -176,7 +177,7 @@ async function processSqsRecord(
   if (messageType === MSG_TYPE_SIGNAL_FOLLOWUP) {
     const message = body as FollowupMessage;
     if (!message.accountId || !message.signalId || !message.threadId) {
-      logger.error("Malformed signal_followup payload — missing required fields. Dropping message.", { code: "handler.sqs.malformed_followup", messageId });
+      logger.error("Malformed signal_followup payload — missing required fields. Dropping message.", { code: "handler.sqs.malformed_followup", messageId: sqsMessageId });
       return ok(undefined);
     }
     return followupHandler.process(message);
@@ -185,7 +186,7 @@ async function processSqsRecord(
   if (messageType === MSG_TYPE_RSVP_REMINDER) {
     const message = body as RsvpReminderMessage;
     if (!message.accountId || !message.signalId || !message.threadId) {
-      logger.error("Malformed rsvp_reminder payload — missing required fields. Dropping message.", { code: "handler.sqs.malformed_rsvp_reminder", messageId });
+      logger.error("Malformed rsvp_reminder payload — missing required fields. Dropping message.", { code: "handler.sqs.malformed_rsvp_reminder", messageId: sqsMessageId });
       return ok(undefined);
     }
     return rsvpReminderHandler.process(message);
@@ -198,7 +199,7 @@ async function processSqsRecord(
   if (messageType === MSG_TYPE_DIGEST_SEND) {
     const message = body as IDigestSendMessage;
     if (!message.accountId) {
-      logger.error("Malformed digest_send payload — missing accountId. Dropping message.", { code: "handler.sqs.malformed_digest_send", messageId });
+      logger.error("Malformed digest_send payload — missing accountId. Dropping message.", { code: "handler.sqs.malformed_digest_send", messageId: sqsMessageId });
       return ok(undefined);
     }
     return digestWorker.process(message);
@@ -218,7 +219,7 @@ async function processSqsRecord(
     return err(e);
   }
 
-  const notification = inner as { notificationType?: string; mail?: { messageId: string; timestamp: string; destination: string[] }; receipt?: { dkimVerdict: { status: SesVerdict }; dmarcVerdict: { status: SesVerdict }; action: { objectKey: string } } };
+  const notification = inner as SesInboundNotification;
 
   if (notification.notificationType !== "Received") {
     await sesFeedbackProcessor.processNotification(notification);
@@ -228,7 +229,7 @@ async function processSqsRecord(
   const mail = notification.mail;
   const receipt = notification.receipt;
   if (!mail || !receipt?.action) {
-    logger.error("SES 'Received' notification missing mail/receipt fields. Dropping message.", { code: "handler.sqs.malformed_received", messageId });
+    logger.error("SES 'Received' notification missing mail/receipt fields. Dropping message.", { code: "handler.sqs.malformed_received", messageId: sqsMessageId });
     return ok(undefined);
   }
 
@@ -237,7 +238,7 @@ async function processSqsRecord(
   const message: InboundSignalMessage = {
     s3Key: receipt.action.objectKey,
     compositeMailMessageId: `ses-${mail.messageId}`,
-    idempotencyKey: messageId,
+    idempotencyKey: sqsMessageId,
     timestamp: mail.timestamp,
     destination: mail.destination,
     dkimVerdict: receipt.dkimVerdict.status,
