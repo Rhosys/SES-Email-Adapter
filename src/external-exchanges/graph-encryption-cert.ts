@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { createPublicKey } from "node:crypto";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DecryptCommand, KMSClient } from "@aws-sdk/client-kms";
@@ -15,6 +16,10 @@ import { DecryptCommand, KMSClient } from "@aws-sdk/client-kms";
 // the encrypted content — we always fetch via API. The private key is only
 // needed if we later decide to decrypt inline resource data.
 //
+// Only the KMS-encrypted private key (.kms) is committed. The public key is
+// derived at runtime from the private key on the subscription creation path
+// (lazy, cached after first call).
+//
 // Rotation: multiple keys in parallel keyed by encryptionCertificateId.
 // The notification carries the cert ID for key selection. New subscriptions
 // use the newest key; old keys remain deployed until confirmed unused (≤24h
@@ -28,7 +33,7 @@ const SECRETS_DIR = join(__dirname, "..", "secrets");
 
 const ACTIVE_CERT_ID = "numaeel-graph-v1";
 
-// Lazy-loaded public key cache
+// Lazy-loaded public key cache (derived from private key on first call)
 let activeCertBase64: string | null = null;
 
 // Lazy-loaded private key cache (KMS-decrypted)
@@ -36,13 +41,16 @@ const privateKeyCache = new Map<string, Buffer>();
 
 /**
  * Returns the base64-encoded public key PEM for the active encryption certificate.
- * Used when creating or renewing Graph subscriptions.
+ * Derived lazily from the KMS-decrypted private key on the subscription creation path.
+ * Cached after first call.
  */
-export function getActiveEncryptionCertificateBase64(): string {
-  if (!activeCertBase64) {
-    const pem = readFileSync(join(SECRETS_DIR, "graph-encryption-key-v1.pub.pem"), "utf-8");
-    activeCertBase64 = Buffer.from(pem).toString("base64");
-  }
+export async function getActiveEncryptionCertificateBase64(): Promise<string> {
+  if (activeCertBase64) return activeCertBase64;
+
+  const privateKeyPem = await getPrivateKeyForCertId(ACTIVE_CERT_ID);
+  const publicKey = createPublicKey(privateKeyPem);
+  const publicPem = publicKey.export({ type: "spki", format: "pem" }) as string;
+  activeCertBase64 = Buffer.from(publicPem).toString("base64");
   return activeCertBase64;
 }
 
@@ -55,7 +63,7 @@ export function getActiveEncryptionCertificateId(): string {
 }
 
 /**
- * Returns the private key for a given certificate ID, lazy-decrypted via KMS.
+ * Returns the private key PEM for a given certificate ID, lazy-decrypted via KMS.
  * Supports multiple keys for rotation — the notification carries the cert ID.
  */
 export async function getPrivateKeyForCertId(certId: string): Promise<Buffer> {
