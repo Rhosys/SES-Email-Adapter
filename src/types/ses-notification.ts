@@ -23,3 +23,24 @@ export interface SesInboundNotification {
     action: { type: string; bucketName: string; objectKey: string };
   };
 }
+
+/** Narrowed type for SES "Received" notifications — used AFTER structural validation confirms
+ * both `mail` and `receipt.action` are present. Avoids non-null assertions in the inbound path. */
+export interface SesReceiptNotification {
+  notificationType: "Received";
+  mail: {
+    messageId: string;
+    timestamp: string;
+    destination: string[];
+    source?: string;
+    headers?: Array<{ name: string; value: string }>;
+  };
+  receipt: {
+    recipients: string[];
+    dkimVerdict: { status: SesVerdict };
+    dmarcVerdict: { status: SesVerdict };
+    spamVerdict?: { status: SesVerdict };
+    virusVerdict?: { status: SesVerdict };
+    action: { type: string; bucketName: string; objectKey: string };
+  };
+}
