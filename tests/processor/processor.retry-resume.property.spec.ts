@@ -226,7 +226,7 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
       lastSignalAt: signal.data.receivedAt,
       createdAt: signal.data.receivedAt,
       updatedAt: signal.data.receivedAt,
-      senderAddress: "sender@example.com",
+      sender: { address: "sender@example.com" },
       recipientAddress: "user@example.com",
       subject: "Test email",
     };
@@ -1110,7 +1110,7 @@ describe("Feature: signal-processor-retry-resilience, Property 8: Outcome re-der
       lastSignalAt: "2024-01-15T10:00:00Z",
       createdAt: "2024-01-15T10:00:00Z",
       updatedAt: "2024-01-15T10:00:00Z",
-      senderAddress: "sender@example.com",
+      sender: { address: "sender@example.com" },
       recipientAddress: "user@example.com",
       subject: "Test email",
     };

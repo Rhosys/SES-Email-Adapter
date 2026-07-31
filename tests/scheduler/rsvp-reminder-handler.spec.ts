@@ -64,7 +64,7 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     createdAt: "2024-06-01T12:00:00Z",
     updatedAt: "2024-06-01T12:00:00Z",
     urgency: "normal",
-    senderAddress: "sender@example.com",
+    sender: { address: "sender@example.com" },
     recipientAddress: "user@example.com",
     subject: "Test email",
     ...overrides,

@@ -6,7 +6,7 @@ function buildThread(status: ThreadStatus, urgency: ThreadUrgency | undefined, w
   return {
     id: "arc_test", accountId: "acc_test", workflow, labels: [], status,
     summary: "test arc", lastSignalAt, createdAt: "2024-01-01T00:00:00.000Z", updatedAt: "2024-01-01T00:00:00.000Z",
-    senderAddress: "sender@example.com", recipientAddress: "user@example.com", subject: "Test email",
+    sender: { address: "sender@example.com" }, recipientAddress: "user@example.com", subject: "Test email",
     ...(urgency !== undefined ? { urgency } : {}),
   };
 }

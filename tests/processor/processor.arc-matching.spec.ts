@@ -81,7 +81,7 @@ describe("Feature: in-reply-to-arc-threading, Parallel arc matching tier selecti
     status: "active" as const,
     summary: "Test arc",
     lastSignalAt: "2024-01-01T00:00:00Z",
-    senderAddress: "sender@external.com",
+    sender: { address: "sender@external.com" },
     recipientAddress: "user@example.com",
     subject: "Re: test",
     createdAt: "2024-01-01T00:00:00Z",

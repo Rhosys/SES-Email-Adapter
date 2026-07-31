@@ -49,7 +49,7 @@ function makeThread(overrides: Record<string, unknown> = {}) {
     lastSignalAt: "2025-07-07T06:00:00.000Z",
     createdAt: "2025-07-07T06:00:00.000Z",
     updatedAt: "2025-07-07T06:00:00.000Z",
-    senderAddress: `healthcheck@${MAIL_DOMAIN}`,
+    sender: { address: `healthcheck@${MAIL_DOMAIN}` },
     recipientAddress: `healthcheck@${MAIL_DOMAIN}`,
     subject: "Healthcheck 2025-07-07",
     ...overrides,

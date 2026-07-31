@@ -34,7 +34,7 @@ describe("Invariant 5: threadId-only write — no arcId persisted on new writes"
         workflow: "conversation", labels: [], status: "active",
         summary: "Test", lastSignalAt: "2024-01-01T00:00:00Z",
         createdAt: "2024-01-01T00:00:00Z", updatedAt: "2024-01-01T00:00:00Z",
-        senderAddress: "a@b.com", recipientAddress: "c@d.com", subject: "Hi",
+        sender: { address: "a@b.com" }, recipientAddress: "c@d.com", subject: "Hi",
       };
 
       await db.saveThread(arc);
@@ -209,7 +209,7 @@ describe("Invariant 7: Key attributes unchanged after persistence boundary write
         workflow: "conversation", labels: [], status: "active",
         summary: "Test", lastSignalAt: "2024-06-01T12:00:00Z",
         createdAt: "2024-01-01T00:00:00Z", updatedAt: "2024-01-01T00:00:00Z",
-        senderAddress: "a@b.com", recipientAddress: "c@d.com", subject: "Hi",
+        sender: { address: "a@b.com" }, recipientAddress: "c@d.com", subject: "Hi",
       };
 
       await db.saveThread(arc);
@@ -291,7 +291,7 @@ describe("Invariant 8: gsi3pk written at correct write sites, no gsi2pk", () => 
         workflow: "conversation", labels: [], status: "active",
         summary: "Test", lastSignalAt: "2024-01-01T00:00:00Z",
         createdAt: "2024-01-01T00:00:00Z", updatedAt: "2024-01-01T00:00:00Z",
-        senderAddress: "a@b.com", recipientAddress: "c@d.com", subject: "Hi",
+        sender: { address: "a@b.com" }, recipientAddress: "c@d.com", subject: "Hi",
       };
 
       await db.saveThread(arc);
@@ -311,7 +311,7 @@ describe("Invariant 8: gsi3pk written at correct write sites, no gsi2pk", () => 
         workflow: "conversation", labels: [], status: "active",
         summary: "Test", lastSignalAt: "2024-01-01T00:00:00Z",
         createdAt: "2024-01-01T00:00:00Z", updatedAt: "2024-01-01T00:00:00Z",
-        senderAddress: "a@b.com", recipientAddress: "c@d.com", subject: "Hi",
+        sender: { address: "a@b.com" }, recipientAddress: "c@d.com", subject: "Hi",
       };
 
       await db.saveThread(arc);

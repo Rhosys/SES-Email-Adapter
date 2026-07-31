@@ -130,7 +130,7 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     lastSignalAt: "2024-06-15T10:30:00.000Z",
     createdAt: "2024-06-01T00:00:00Z",
     updatedAt: "2024-06-15T10:30:00.000Z",
-    senderAddress: "sender@example.com",
+    sender: { address: "sender@example.com" },
     recipientAddress: "user@example.com",
     subject: "Test email",
     ...overrides,

@@ -153,7 +153,7 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     lastSignalAt: "2024-01-10T00:00:00Z",
     createdAt: "2024-01-10T00:00:00Z",
     updatedAt: "2024-01-10T00:00:00Z",
-    senderAddress: "sender@example.com",
+    sender: { address: "sender@example.com", name: "Sender" },
     recipientAddress: "user@example.com",
     subject: "Test email",
     ...overrides,
@@ -231,7 +231,7 @@ describe("Processor delta computation — updateArc vs saveArc", () => {
     // Denormalized display fields are always refreshed from the latest inbound signal.
     // retentionDuration is backfilled from the account's configured retention since the
     // existing arc fixture predates retention tracking (no retentionDuration of its own).
-    const denormalized = { senderAddress: "sender@example.com", recipientAddress: "user@example.com", subject: "Test email", retentionDuration: "P3M" };
+    const denormalized = { sender: { address: "sender@example.com", name: "Sender" }, recipientAddress: "user@example.com", subject: "Test email", retentionDuration: "P3M" };
     expect(fields).toEqual(denormalized);
     expect(threadDb.saveThread).not.toHaveBeenCalled();
   });
@@ -266,7 +266,7 @@ describe("Processor delta computation — updateArc vs saveArc", () => {
     const [, , status, lastSignalAt, fields] = vi.mocked(threadDb.updateThread).mock.calls[0]!;
     expect(status).toBe("active");
     expect(lastSignalAt).toBe("2024-01-15T10:00:00Z");
-    expect(fields).toEqual({ senderAddress: "sender@example.com", recipientAddress: "user@example.com", subject: "Test email", retentionDuration: "P3M" });
+    expect(fields).toEqual({ sender: { address: "sender@example.com", name: "Sender" }, recipientAddress: "user@example.com", subject: "Test email", retentionDuration: "P3M" });
   });
 
   it("existing arc with archive rule → updateArc called with archived status", async () => {
@@ -289,7 +289,7 @@ describe("Processor delta computation — updateArc vs saveArc", () => {
     expect(threadDb.updateThread).toHaveBeenCalledOnce();
     const [, , status, , fields] = vi.mocked(threadDb.updateThread).mock.calls[0]!;
     expect(status).toBe("archived");
-    expect(fields).toEqual({ senderAddress: "sender@example.com", recipientAddress: "user@example.com", subject: "Test email", retentionDuration: "P3M" });
+    expect(fields).toEqual({ sender: { address: "sender@example.com", name: "Sender" }, recipientAddress: "user@example.com", subject: "Test email", retentionDuration: "P3M" });
   });
 
   it("existing arc with changed labels → updateArc includes labels in delta", async () => {
@@ -313,7 +313,7 @@ describe("Processor delta computation — updateArc vs saveArc", () => {
     expect(threadDb.updateThread).toHaveBeenCalledOnce();
     const [, , status, , fields] = vi.mocked(threadDb.updateThread).mock.calls[0]!;
     expect(status).toBe("active");
-    expect(fields).toEqual({ labels: ["system:workflow:conversation", "billing"], senderAddress: "sender@example.com", recipientAddress: "user@example.com", subject: "Test email", retentionDuration: "P3M" });
+    expect(fields).toEqual({ labels: ["system:workflow:conversation", "billing"], sender: { address: "sender@example.com", name: "Sender" }, recipientAddress: "user@example.com", subject: "Test email", retentionDuration: "P3M" });
   });
 
   it("new arc (matchedArc is null) → saveArc called, not updateArc", async () => {

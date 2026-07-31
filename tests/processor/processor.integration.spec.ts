@@ -242,7 +242,7 @@ function makeExistingArc(overrides: Partial<Thread> = {}): Thread {
     status: "active",
     summary: "Integration test email.",
     lastSignalAt: "2024-01-15T10:00:00Z",
-    senderAddress: "sender@example.com",
+    sender: { address: "sender@example.com" },
     recipientAddress: "user@example.com",
     subject: "Test email",
     createdAt: "2024-01-15T10:00:00Z",

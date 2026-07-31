@@ -37,7 +37,7 @@ function makeThread(overrides: { id?: string; workflow?: string; createdAt?: str
     lastSignalAt: overrides.createdAt ?? "2026-07-08T06:00:00.000Z",
     createdAt: overrides.createdAt ?? "2026-07-08T06:00:00.000Z",
     updatedAt: overrides.createdAt ?? "2026-07-08T06:00:00.000Z",
-    senderAddress: "healthcheck@platform.email.rhosys.cloud",
+    sender: { address: "healthcheck@platform.email.rhosys.cloud" },
     recipientAddress: "healthcheck@platform.email.rhosys.cloud",
     subject: "Healthcheck 2026-07-08",
   };

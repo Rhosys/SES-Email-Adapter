@@ -59,7 +59,7 @@ function makeThread(overrides: { id?: string; workflow?: string; createdAt?: str
     lastSignalAt: createdAt,
     createdAt,
     updatedAt: createdAt,
-    senderAddress: `healthcheck@${MAIL_DOMAIN}`,
+    sender: { address: `healthcheck@${MAIL_DOMAIN}` },
     recipientAddress: `healthcheck@${MAIL_DOMAIN}`,
     subject: `Healthcheck ${YESTERDAY}`,
   };

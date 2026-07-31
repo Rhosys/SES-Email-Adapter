@@ -46,7 +46,7 @@ const stubArc: Thread = {
   lastSignalAt: "2024-01-01T00:00:00Z",
   createdAt: "2024-01-01T00:00:00Z",
   updatedAt: "2024-01-01T00:00:00Z",
-  senderAddress: "sender@example.com",
+  sender: { address: "sender@example.com" },
   recipientAddress: "user@example.com",
   subject: "Test email",
 };

@@ -56,7 +56,7 @@ const arc: Thread = {
   lastSignalAt: "2024-06-01T12:00:00Z",
   createdAt: "2024-06-01T10:00:00Z",
   updatedAt: "2024-06-01T12:00:00Z",
-  senderAddress: "sender@example.com",
+  sender: { address: "sender@example.com" },
   recipientAddress: "user@example.com",
   subject: "Test email",
 };

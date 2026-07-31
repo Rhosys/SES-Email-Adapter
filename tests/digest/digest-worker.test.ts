@@ -36,7 +36,7 @@ function buildArc(id: string): Thread {
     lastSignalAt: "2026-06-21T08:00:00Z",
     createdAt: "2026-06-01T00:00:00Z",
     updatedAt: "2026-06-21T08:00:00Z",
-    senderAddress: "sender@example.com",
+    sender: { address: "sender@example.com" },
     recipientAddress: "recipient@example.com",
     subject: `Subject for ${id}`,
   }
