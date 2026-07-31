@@ -233,7 +233,7 @@ function makeSqsEvent(snsMessage: unknown) {
     Records: [{
       messageId: "msg-1",
       receiptHandle: "handle",
-      body: JSON.stringify({ Message: JSON.stringify(snsMessage) }),
+      body: JSON.stringify({ Type: "Notification", Message: JSON.stringify(snsMessage) }),
       attributes: { ApproximateReceiveCount: "1" } as Record<string, string>,
       messageAttributes: {},
       md5OfBody: "abc",
@@ -271,17 +271,15 @@ describe("Handler: SQS/SNS envelope routing", () => {
     expect(result).toEqual({ batchItemFailures: [] });
   });
 
-  it("Received notification missing mail/receipt → dropped by the handler itself, not delegated", async () => {
-    const event = makeSqsEvent({ notificationType: "Received" });
+  it("Received notification missing receipt.action → delegated to sesFeedbackProcessor (structural routing)", async () => {
+    const payload = { notificationType: "Received" };
+    const event = makeSqsEvent(payload);
 
     const result = await handler(event, dummyContext);
 
     expect(mockProcessRecord).not.toHaveBeenCalled();
-    expect(mockProcessNotification).not.toHaveBeenCalled();
-    expect(mockLogger.error).toHaveBeenCalledWith(
-      "SES 'Received' notification missing mail/receipt fields. Dropping message.",
-      expect.objectContaining({ code: "handler.sqs.malformed_received" }),
-    );
+    expect(mockProcessNotification).toHaveBeenCalledTimes(1);
+    expect(mockProcessNotification).toHaveBeenCalledWith(payload);
     expect(result).toEqual({ batchItemFailures: [] });
   });
 

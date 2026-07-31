@@ -1,6 +1,6 @@
 import type { APIGatewayProxyEventV2, SQSEvent, Context, APIGatewayProxyResultV2, EventBridgeEvent, APIGatewayProxyWebsocketEventV2 } from "aws-lambda";
 import { SQS_MESSAGE_TYPES } from "./types/index.js";
-import { ok, err } from "./errors.js";
+import { ok } from "./errors.js";
 import type { Result } from "./errors.js";
 import { isStepFunctionTaskEvent } from "./onboarding/types.js";
 import type { InboundSignalMessage, SideEffectPayload } from "./processor/processor.js";
@@ -205,44 +205,81 @@ async function processSqsRecord(
     return digestWorker.process(message);
   }
 
-  // SNS envelope — unwrap. Two SNS topics land on this same queue (see deploy/storage.tf):
-  // the inbound receipt rule's S3 action (notificationType: "Received"), which the handler
-  // processes itself since only it knows how to turn a receipt into an InboundSignalMessage,
-  // and the sending configuration set's feedback destination (Bounce/Complaint/... — the
-  // full SES event vocabulary), which is entirely sesFeedbackProcessor's concern. The
-  // handler doesn't need to know what SES event types exist beyond the one it handles.
-  const sns = body as { Message: string };
-  let inner: unknown;
-  try {
-    inner = JSON.parse(sns.Message);
-  } catch (e) {
-    return err(e);
+  // SNS envelope — validate + unwrap. Two SNS topics land on this same queue (see deploy/storage.tf):
+  // the inbound receipt rule's S3 action (notificationType: "Received"), and the sending
+  // configuration set's feedback destination (Bounce/Complaint/...).
+
+  // Step 1: Validate SNS envelope structure
+  const snsEnvelope = body as Record<string, unknown>;
+  if (typeof snsEnvelope.Type !== "string" || typeof snsEnvelope.Message !== "string") {
+    logger.warn("SQS body is not a recognized SNS envelope (missing Type or Message). Dropping.", {
+      code: "handler.sqs.unrecognized_body_format",
+      messageId: sqsMessageId,
+      body,
+    });
+    return ok(undefined);
   }
 
+  if (snsEnvelope.Type !== "Notification") {
+    logger.warn("SNS envelope Type is not 'Notification'. Dropping.", {
+      code: "handler.sqs.not_sns_envelope",
+      messageId: sqsMessageId,
+      type: snsEnvelope.Type,
+    });
+    return ok(undefined);
+  }
+
+  // Step 2: Parse inner Message JSON
+  let inner: unknown;
+  try {
+    inner = JSON.parse(snsEnvelope.Message as string);
+  } catch (e) {
+    logger.error("Failed to parse SNS Message field as JSON.", {
+      code: "handler.sqs.sns_message_parse_failed",
+      messageId: sqsMessageId,
+      error: e,
+    });
+    return ok(undefined);
+  }
+
+  // Step 3: Structural check — route by shape, not by notificationType string
   const notification = inner as SesInboundNotification;
 
-  if (notification.notificationType !== "Received") {
+  if (!notification.receipt?.action) {
+    // No receipt.action → feedback notification (Bounce, Complaint, Delivery, etc.)
+    // or unrecognized shape. SES uses either `notificationType` (inbound receipt rule)
+    // or `eventType` (configuration-set event destination) as the type discriminator.
+    const innerTyped = inner as { notificationType?: string; eventType?: string };
+    if (!innerTyped.notificationType && !innerTyped.eventType) {
+      logger.warn("Parsed SNS Message is not a recognized SES notification shape. Dropping.", {
+        code: "handler.sqs.unknown_ses_notification_shape",
+        messageId: sqsMessageId,
+        inner,
+      });
+      return ok(undefined);
+    }
     await sesFeedbackProcessor.processNotification(notification);
     return ok(undefined);
   }
 
+  // receipt.action is present → inbound email
   const mail = notification.mail;
-  const receipt = notification.receipt;
-  if (!mail || !receipt?.action) {
-    logger.error("SES 'Received' notification missing mail/receipt fields. Dropping message.", { code: "handler.sqs.malformed_received", messageId: sqsMessageId });
+  if (!mail) {
+    logger.error("SES inbound notification has receipt.action but missing mail field. Dropping.", {
+      code: "handler.sqs.malformed_received",
+      messageId: sqsMessageId,
+    });
     return ok(undefined);
   }
 
-  // The owning account is resolved inside the processor from the recipient address —
-  // the handler is a thin SQS/SNS unwrapper and does no DB work here.
   const message: InboundSignalMessage = {
-    s3Key: receipt.action.objectKey,
+    s3Key: notification.receipt.action.objectKey,
     compositeMailMessageId: `ses-${mail.messageId}`,
     idempotencyKey: sqsMessageId,
     timestamp: mail.timestamp,
     destination: mail.destination,
-    dkimVerdict: receipt.dkimVerdict.status,
-    dmarcVerdict: receipt.dmarcVerdict.status,
+    dkimVerdict: notification.receipt.dkimVerdict.status,
+    dmarcVerdict: notification.receipt.dmarcVerdict.status,
   };
   return processor.processRecord(message, receiveCount);
 }
