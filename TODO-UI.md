@@ -33,6 +33,8 @@ Surfaces: **Website** · **Extension** · **Mobile** · **CLI/Desktop**
 ---
 
 ## Website — Missing / Partial
+- [ ] **Resources: "today/this week" banner + per-workflow stacked view** — `GET /accounts/:id/resources` is ready: `workflow` is now optional, so a single call with `dateFrom`/`dateTo` (e.g. today → +7 days) and `status=active` returns every resource due in that window across `package`, `travel`, `payments`, `healthcare`, `job`, and `events` — no per-workflow fan-out needed. Build: (1) a top-of-inbox banner surfacing what's due today/this week (delivery arriving, invoice due, boarding pass, appointment), (2) a per-workflow stacked view when `workflow` is passed explicitly, (3) each resource row renders its `assets[]` (QR code / barcode / PKPass) inline where present — `rawValue` for QR/barcode can render directly as a QR/barcode image client-side, PKPass assets carry an `s3Key` for an "Add to Apple Wallet" download. (4) dismiss/complete action wired to `PATCH /accounts/:id/resources/:resourceId` with `{ status: "complete" }` — completion is user-driven only, never auto-inferred.
+  - Website · Mobile
 - [ ] **Account settings: deletionRetentionDays** — no UI to configure how long deleted arcs are kept
   - Website
 - [ ] **Account stats dashboard** — `GET /accounts/:id/stats` endpoint exists, no UI

@@ -78,21 +78,39 @@ describe("Resources API", () => {
   });
 
   describe("GET /accounts/:accountId/resources", () => {
-    it("400s when workflow query param is missing", async () => {
+    it("defaults status to active and queries listResources scoped by status only when workflow is omitted", async () => {
+      resourceDb.listResources.mockResolvedValue(ok({ items: [makeResource()] }));
+
       const res = await req(app, "GET", `${A}/resources`);
-      expect(res.status).toBe(400);
-      expect(resourceDb.listResources).not.toHaveBeenCalled();
+
+      expect(res.status).toBe(200);
+      expect(resourceDb.listResources).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "active", {});
+      const body = await res.json() as { resources: unknown[] };
+      expect(body.resources).toHaveLength(1);
     });
 
-    it("defaults status to active and queries listResources with the given workflow", async () => {
-      resourceDb.listResources.mockResolvedValue(ok({ items: [makeResource()] }));
+    it("spans every resource workflow when workflow is omitted — no application-side filter applied", async () => {
+      resourceDb.listResources.mockResolvedValue(ok({
+        items: [makeResource({ workflow: "package" }), makeResource({ workflow: "travel", resourceKey: "UA123" })],
+      }));
+
+      const res = await req(app, "GET", `${A}/resources`);
+      const body = await res.json() as { resources: Array<{ workflow: string }> };
+
+      expect(body.resources.map(r => r.workflow).sort()).toEqual(["package", "travel"]);
+    });
+
+    it("filters the DB result set to the requested workflow (GSI is not workflow-scoped)", async () => {
+      resourceDb.listResources.mockResolvedValue(ok({
+        items: [makeResource({ workflow: "package" }), makeResource({ workflow: "travel", resourceKey: "UA123" })],
+      }));
 
       const res = await req(app, "GET", `${A}/resources?workflow=package`);
 
-      expect(res.status).toBe(200);
-      expect(resourceDb.listResources).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "package", "active", {});
-      const body = await res.json() as { resources: unknown[] };
+      expect(resourceDb.listResources).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "active", {});
+      const body = await res.json() as { resources: Array<{ workflow: string }> };
       expect(body.resources).toHaveLength(1);
+      expect(body.resources[0]!.workflow).toBe("package");
     });
 
     it("passes an explicit status through", async () => {
@@ -100,15 +118,15 @@ describe("Resources API", () => {
 
       await req(app, "GET", `${A}/resources?workflow=package&status=complete`);
 
-      expect(resourceDb.listResources).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "package", "complete", {});
+      expect(resourceDb.listResources).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "complete", {});
     });
 
-    it("passes dateFrom/dateTo through for the native range query", async () => {
+    it("passes dateFrom/dateTo through for the native range query (e.g. today/this week across all workflows)", async () => {
       resourceDb.listResources.mockResolvedValue(ok({ items: [] }));
 
-      await req(app, "GET", `${A}/resources?workflow=package&dateFrom=2024-07-01&dateTo=2024-07-04`);
+      await req(app, "GET", `${A}/resources?dateFrom=2024-07-01&dateTo=2024-07-04`);
 
-      expect(resourceDb.listResources).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "package", "active", {
+      expect(resourceDb.listResources).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "active", {
         dateFrom: "2024-07-01", dateTo: "2024-07-04",
       });
     });

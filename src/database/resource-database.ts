@@ -7,13 +7,15 @@ import type { Resource, ResourceAsset, ResourceStatus, Workflow, Page, PageParam
 
 // Key design:
 // PK  = ACCT#<accountId>#THREAD#<threadId>
-// SK  = <workflow>#<resourceKey>                              (deterministic — no read-before-write needed)
-// GSI1PK = ACCT#<accountId>#STATUS#<status>#WORKFLOW#<workflow>
-// GSI1SK = <expectedResolutionDate>                            (ISO 8601 — sorts/ranges correctly as a string)
+// SK  = <workflow>#<resourceKey>                (deterministic — no read-before-write needed)
+// GSI1PK = ACCT#<accountId>#STATUS#<status>      (not split by workflow — resource volume per
+//          account+status+date-range is small; a "what's due today across all workflows" query
+//          fans in for free, and a single-workflow view filters the (small) result set in the
+//          API layer instead of paying for a narrower key)
+// GSI1SK = <expectedResolutionDate>              (ISO 8601 — sorts/ranges correctly as a string)
 
 const threadPk = (accountId: string, threadId: string) => `ACCT#${accountId}#THREAD#${threadId}`;
-const buildGsi1pk = (accountId: string, status: ResourceStatus, workflow: Workflow) =>
-  `ACCT#${accountId}#STATUS#${status}#WORKFLOW#${workflow}`;
+const buildGsi1pk = (accountId: string, status: ResourceStatus) => `ACCT#${accountId}#STATUS#${status}`;
 
 export interface SaveResourceParams {
   accountId: string;
@@ -64,7 +66,7 @@ export class ResourceDatabase {
       ":resourceKey": resourceKey,
       ":defaultStatus": "active" satisfies ResourceStatus,
       ":erd": expectedResolutionDate,
-      ":defaultGsi1pk": buildGsi1pk(accountId, "active", workflow),
+      ":defaultGsi1pk": buildGsi1pk(accountId, "active"),
     };
 
     if (ttl !== undefined) {
@@ -105,7 +107,6 @@ export class ResourceDatabase {
   // callers get ok(null) instead, mirroring getResource's not-found shape.
   async setResourceStatus(accountId: string, threadId: string, sk: string, status: ResourceStatus): Promise<Result<Resource | null, DbError>> {
     const now = DateTime.utc().toISO()!;
-    const workflow = sk.split("#")[0] as Workflow;
 
     const setParts: string[] = ["#status = :status", "gsi1pk = :gsi1pk", "updatedAt = :now"];
     const removeParts: string[] = [];
@@ -125,7 +126,7 @@ export class ResourceDatabase {
         UpdateExpression: updateExpr,
         ConditionExpression: "attribute_exists(pk)",
         ExpressionAttributeNames: { "#status": "status" },
-        ExpressionAttributeValues: { ":status": status, ":gsi1pk": buildGsi1pk(accountId, status, workflow), ":now": now },
+        ExpressionAttributeValues: { ":status": status, ":gsi1pk": buildGsi1pk(accountId, status), ":now": now },
         ReturnValues: "ALL_NEW",
       }));
       return ok(result.Attributes as unknown as Resource);
@@ -147,8 +148,11 @@ export class ResourceDatabase {
     }
   }
 
+  // Scoped by accountId+status only — spans every resource workflow in one query. Callers
+  // that want a single workflow (or a fixed set, e.g. "today across package/travel/events")
+  // filter the (small) result set themselves rather than paying for a narrower GSI key.
   async listResources(
-    accountId: string, workflow: Workflow, status: ResourceStatus, params: ListResourcesParams,
+    accountId: string, status: ResourceStatus, params: ListResourcesParams,
   ): Promise<Result<Page<Resource>, DbError>> {
     const limit = Math.min(params.limit ?? 20, 100);
     const hasDateRange = params.dateFrom !== undefined && params.dateTo !== undefined;
@@ -160,7 +164,7 @@ export class ResourceDatabase {
           ? "gsi1pk = :pk AND gsi1sk BETWEEN :from AND :to"
           : "gsi1pk = :pk",
         ExpressionAttributeValues: {
-          ":pk": buildGsi1pk(accountId, status, workflow),
+          ":pk": buildGsi1pk(accountId, status),
           ...(hasDateRange ? { ":from": params.dateFrom, ":to": params.dateTo } : {}),
         },
         Limit: limit + 1,

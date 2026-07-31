@@ -1400,16 +1400,18 @@ export class SignalProcessor {
         ...(a.s3Key ? { s3Key: a.s3Key } : {}),
       }));
       const allAssets = [...resourceInfo.assets, ...extractedAssets];
-      const resourceTtl = ttl !== undefined
-        ? Math.max(ttl, Math.floor(DateTime.fromISO(resourceInfo.expectedResolutionDate).toSeconds()) + 365 * 24 * 60 * 60)
-        : undefined;
+      // Resource TTL always has a floor of expectedResolutionDate + 1 year — a resource must
+      // outlive its own due date regardless of the signal's own retention (which may be shorter,
+      // or absent entirely for unlimited-retention accounts).
+      const resourceTtlFloor = Math.floor(DateTime.fromISO(resourceInfo.expectedResolutionDate).toSeconds()) + 365 * 24 * 60 * 60;
+      const resourceTtl = ttl !== undefined ? Math.max(ttl, resourceTtlFloor) : resourceTtlFloor;
       const resourceResult = await this.resourceDb.saveResource({
         accountId,
         threadId: thread.id,
         workflow: signal.data.workflow,
         resourceKey: resourceInfo.resourceKey,
         expectedResolutionDate: resourceInfo.expectedResolutionDate,
-        ...(resourceTtl !== undefined ? { ttl: resourceTtl } : {}),
+        ttl: resourceTtl,
         ...(allAssets.length > 0 ? { assets: allAssets } : {}),
       });
       if (resourceResult.isErr()) {

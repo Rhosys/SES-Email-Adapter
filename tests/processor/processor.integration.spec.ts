@@ -632,5 +632,50 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
       expect(threadDb.saveSignal).toHaveBeenCalled();
       expect(resourceDb.saveResource).not.toHaveBeenCalled();
     });
+
+    it("floors resource ttl at expectedResolutionDate + 1yr even when the signal's own ttl is shorter", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2024-01-01T00:00:00Z"));
+      applyCtx(accountDb, { ...DEFAULT_CTX, retentionDuration: "P3M" });
+      vi.mocked(classifier.classify).mockResolvedValue(ok({
+        workflow: "package",
+        workflowData: {
+          workflow: "package", packageType: "shipping", retailer: "Amazon",
+          orderNumber: "123-456-789", estimatedDelivery: "2030-01-20T00:00:00Z",
+        },
+        tags: [], summary: "Your package is on its way.", labels: [], actions: [],
+      }));
+
+      await processor.processRecord(makeMessage({}), 1);
+
+      const call = resourceDb.saveResource.mock.calls[0]![0];
+      // Signal ttl (P3M from 2024-01-01) is far short of 2030-01-20 + 1yr — the floor must win.
+      const expectedFloor = Math.floor(new Date("2031-01-20T00:00:00Z").getTime() / 1000);
+      expect(call.ttl).toBe(expectedFloor);
+
+      vi.useRealTimers();
+    });
+
+    it("still sets resource ttl (floor only) when the account has unlimited retention (no signal ttl)", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2024-01-01T00:00:00Z"));
+      applyCtx(accountDb, { ...DEFAULT_CTX, retentionDuration: "Infinity" });
+      vi.mocked(classifier.classify).mockResolvedValue(ok({
+        workflow: "package",
+        workflowData: {
+          workflow: "package", packageType: "shipping", retailer: "Amazon",
+          orderNumber: "123-456-789", estimatedDelivery: "2025-06-01T00:00:00Z",
+        },
+        tags: [], summary: "Your package is on its way.", labels: [], actions: [],
+      }));
+
+      await processor.processRecord(makeMessage({}), 1);
+
+      const call = resourceDb.saveResource.mock.calls[0]![0];
+      const expectedFloor = Math.floor(new Date("2026-06-01T00:00:00Z").getTime() / 1000);
+      expect(call.ttl).toBe(expectedFloor);
+
+      vi.useRealTimers();
+    });
   });
 });
