@@ -93,6 +93,7 @@ function makeContentStore(icsContent: string = VALID_ICS): ContentStore {
     getSignedUrl: vi.fn().mockResolvedValue("https://signed-url"),
     getObject: vi.fn().mockResolvedValue(new TextEncoder().encode(icsContent)),
     putObject: vi.fn().mockResolvedValue(undefined),
+    getPresignedPost: vi.fn().mockResolvedValue({ url: "https://post-url", fields: {} }),
   };
 }
 

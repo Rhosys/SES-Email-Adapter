@@ -551,6 +551,7 @@ describe("Scenario: approving quarantined email triggers calendar forwarding", (
       getSignedUrl: vi.fn().mockResolvedValue("https://signed-url"),
       getObject: vi.fn().mockResolvedValue(new TextEncoder().encode(VALID_ICS)),
       putObject: vi.fn().mockResolvedValue(undefined),
+      getPresignedPost: vi.fn().mockResolvedValue({ url: "https://post-url", fields: {} }),
     };
 
     const deps: PostApprovalCalendarHandlerDeps = {
