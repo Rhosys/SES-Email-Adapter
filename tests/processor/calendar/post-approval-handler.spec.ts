@@ -6,7 +6,7 @@ import type { Signal, Thread, Attachment } from "../../../src/types/index.js";
 import type { ThreadDatabase } from "../../../src/database/thread-database.js";
 import type { AccountDatabase } from "../../../src/database/account-database.js";
 import type { CalendarForwarderDeps } from "../../../src/processor/calendar/calendar-forwarder.js";
-import type { S3Client } from "@aws-sdk/client-s3";
+import type { ContentStore } from "../../../src/api/content-store.js";
 import { ok } from "../../../src/errors.js";
 import { createMockLogger } from "../../helpers/mock-logger.js";
 
@@ -88,12 +88,12 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
   };
 }
 
-function makeS3Client(icsContent: string = VALID_ICS): S3Client {
+function makeContentStore(icsContent: string = VALID_ICS): ContentStore {
   return {
-    send: vi.fn().mockResolvedValue({
-      Body: { transformToByteArray: () => Promise.resolve(new TextEncoder().encode(icsContent)) },
-    }),
-  } as unknown as S3Client;
+    getSignedUrl: vi.fn().mockResolvedValue("https://signed-url"),
+    getObject: vi.fn().mockResolvedValue(new TextEncoder().encode(icsContent)),
+    putObject: vi.fn().mockResolvedValue(undefined),
+  };
 }
 
 function makeArcDb() {
@@ -121,8 +121,7 @@ function makeDeps(overrides: Partial<PostApprovalCalendarHandlerDeps> = {}): Pos
   return {
     threadDb: makeArcDb(),
     accountDb: makeAccountDb(),
-    s3Client: makeS3Client(),
-    contentBucket: "test-bucket",
+    contentStore: makeContentStore(),
     calendarForwarderDeps: makeCalendarForwarderDeps(),
     logger: createMockLogger(),
     ...overrides,
@@ -207,8 +206,8 @@ describe("handlePostApprovalCalendar — uses same construction rules as normal 
     const signal = makeSignal();
     const arc = makeThread();
     const threadDb = makeArcDb();
-    const s3Client = makeS3Client("NOT A VALID ICS FILE");
-    const deps = makeDeps({ threadDb, s3Client });
+    const contentStore = makeContentStore("NOT A VALID ICS FILE");
+    const deps = makeDeps({ threadDb, contentStore });
 
     await handlePostApprovalCalendar(signal, arc, deps);
 

@@ -8,6 +8,7 @@ import { ok, err, dbError, processorError, invalidResponseError, notFoundError }
 import type { DbError, InvalidResponseError, NotFoundError, ProcessorError } from "../errors.js";
 import type { EmailServiceError } from "../email/email-service.js";
 import type { Signal, Thread, Rule, Workflow, WorkflowData, Alias, AliasSender, SenderPolicy, AccountFilteringConfig, SignalSource, SignalStatus, Domain, ThreadStatus, ThreadUrgency, UnknownSenderPolicy, MatchedRuleResult, InvalidRuleFunctionData, InvalidTemplateFunctionData, AutoSendBlockedData, UnsubscribeInfo, InboundEmailSignalData, OutboundEmailSignalData } from "../types/index.js";
+import { deriveGroupingKey } from "../grouping-key.js";
 import { DEFAULT_UNKNOWN_SENDER_POLICY } from "../types/index.js";
 import type { ParsedMime } from "./mime.js";
 import type { ContentSanitizerClient } from "./content-sanitizer-client.js";
@@ -2040,35 +2041,3 @@ export function extractForwardedAddress(headers: Record<string, string>): string
 }
 
 
-export function deriveGroupingKey(
-  workflow: Workflow,
-  workflowData: WorkflowData,
-  recipientAddress: string,
-  senderETLD1: string,
-): string | null {
-  const base = `${recipientAddress}:${workflow}`;
-
-  switch (workflow) {
-    case "auth":
-    case "content":
-    case "onboarding":
-    case "notice":
-    case "payments":
-    case "alert":
-    case "test":
-      return `${base}:${senderETLD1}`;
-
-    case "package": {
-      const { orderNumber } = workflowData as { orderNumber?: string };
-      return orderNumber ? `${base}:${orderNumber}` : null;
-    }
-
-    case "support": {
-      const { ticketId } = workflowData as { ticketId?: string };
-      return ticketId ? `${base}:${ticketId}` : null;
-    }
-
-    default:
-      return null;
-  }
-}

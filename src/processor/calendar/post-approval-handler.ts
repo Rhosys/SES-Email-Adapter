@@ -7,9 +7,8 @@
 // skip calendar processing during initial ingest.
 // ---------------------------------------------------------------------------
 
-import type { S3Client } from "@aws-sdk/client-s3";
-import { GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 import { DateTime } from "luxon";
+import type { ContentStore } from "../../api/content-store.js";
 
 import type { Signal, Thread, Attachment } from "../../types/index.js";
 import type { CalendarEventData, CalendarInviteInvalidData } from "../../types/calendar.js";
@@ -30,8 +29,7 @@ import { forwardCalendarInvite, type CalendarForwarderDeps } from "./calendar-fo
 export interface PostApprovalCalendarHandlerDeps {
   threadDb: ThreadDatabase;
   accountDb: AccountDatabase;
-  s3Client: S3Client;
-  contentBucket: string;
+  contentStore: ContentStore;
   calendarForwarderDeps: CalendarForwarderDeps;
   logger: Logger;
 }
@@ -47,7 +45,7 @@ export async function handlePostApprovalCalendar(
   thread: Thread,
   deps: PostApprovalCalendarHandlerDeps,
 ): Promise<void> {
-  const { threadDb, accountDb, s3Client, contentBucket, calendarForwarderDeps, logger } = deps;
+  const { threadDb, accountDb, contentStore, calendarForwarderDeps, logger } = deps;
   const accountId = signal.accountId;
 
   // Check for calendar attachments
@@ -57,16 +55,12 @@ export async function handlePostApprovalCalendar(
 
   logger.trackPoint("post_approval_calendar_start", { signalId: signal.id, threadId: thread.id });
 
-  // Fetch .ics bytes from S3
+  // Fetch .ics bytes from content store
   let icsBytes: Uint8Array;
   try {
-    const getResult = await s3Client.send(new GetObjectCommand({
-      Bucket: contentBucket,
-      Key: calendarAttachment.s3Key,
-    }));
-    icsBytes = await getResult.Body!.transformToByteArray();
+    icsBytes = await contentStore.getObject(calendarAttachment.s3Key);
   } catch (e) {
-    logger.warn("Post-approval calendar: failed to fetch .ics from S3.", {
+    logger.warn("Post-approval calendar: failed to fetch .ics from content store.", {
       code: "processor.post_approval_calendar.s3_fetch_failed",
       accountId,
       signalId: signal.id,
@@ -114,17 +108,12 @@ export async function handlePostApprovalCalendar(
   const calendarTimestamp = DateTime.utc().toISO()!;
   const signalLookupId = buildCalendarSignalLookupId(calendarData.organizer, calendarData.veventUid);
 
-  // Store raw .ics as S3 attachment on the calendar signal
+  // Store raw .ics as attachment on the calendar signal
   const icsS3Key = `accounts/${accountId}/calendar/${calendarSignalId}/invite.ics`;
   try {
-    await s3Client.send(new PutObjectCommand({
-      Bucket: contentBucket,
-      Key: icsS3Key,
-      Body: Buffer.from(rawIcsContent, "utf-8"),
-      ContentType: "text/calendar",
-    }));
+    await contentStore.putObject(icsS3Key, Buffer.from(rawIcsContent, "utf-8"), "text/calendar");
   } catch (e) {
-    logger.warn("Post-approval calendar: failed to store .ics in S3.", {
+    logger.warn("Post-approval calendar: failed to store .ics in content store.", {
       code: "processor.post_approval_calendar.s3_put_failed",
       accountId,
       signalId: signal.id,

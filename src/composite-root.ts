@@ -321,8 +321,7 @@ export class CompositeRoot {
     const postApprovalCalendarDeps: PostApprovalCalendarHandlerDeps = {
       threadDb,
       accountDb,
-      s3Client: s3,
-      contentBucket: CONTENT_BUCKET,
+      contentStore: new S3ContentStore(s3, CONTENT_BUCKET),
       calendarForwarderDeps: {
         emailService,
         serviceDomain: MAIL_DOMAIN,

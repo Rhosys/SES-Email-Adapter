@@ -1,5 +1,5 @@
 import type { Signal, Thread } from "../types/index.js";
-import { durationToSeconds } from "../processor/retention.js";
+import { durationToSeconds } from "../retention.js";
 
 /**
  * Checks whether a signal is still visible to the user based on its retention duration.

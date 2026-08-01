@@ -8,7 +8,7 @@ import { computeUndoWindowSeconds } from "./undo-window.js";
 import { zParse } from "./validate.js";
 import { toApiThread, toApiSignal } from "./transform.js";
 import { buildScheduleName } from "../scheduler/schedule-name.js";
-import { durationToSeconds } from "../processor/retention.js";
+import { durationToSeconds } from "../retention.js";
 import { effectiveEmailKey } from "../embedding/retention-tier.js";
 import { isCalendarEventSignal, isEmailSignal } from "../types/index.js";
 import type { ContentStore } from "./content-store.js";

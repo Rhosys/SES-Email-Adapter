@@ -2,7 +2,8 @@ import type { IForwardingService } from "../../src/forwarding/forwarding-service
 import { randomUUID } from "crypto";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ok, err } from "neverthrow";
-import { SignalProcessor, deriveGroupingKey, SYSTEM_RULES, extractForwardedAddress } from "../../src/processor/processor.js";
+import { SignalProcessor, SYSTEM_RULES, extractForwardedAddress } from "../../src/processor/processor.js";
+import { deriveGroupingKey } from "../../src/grouping-key.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
 import { baseUrgency } from "../../src/processor/priority.js";
 import type { ThreadMatcherPort, RuleEvaluator, Notifier,  ReplySender, InboundSignalMessage, SqsDispatcher } from "../../src/processor/processor.js";
