@@ -164,7 +164,7 @@ async function processSqsRecord(
   if (messageType === MSG_TYPE_SIDE_EFFECT) {
     const payload = body as SideEffectPayload;
     if (!payload.signal || !payload.thread) {
-      logger.error("Malformed side-effect payload — missing signal or thread. Dropping message.", { code: "handler.sqs.malformed_side_effect", messageId: sqsMessageId });
+      logger.error("Malformed side-effect payload — missing signal or thread. Dropping message.", { code: "handler.sqs.malformed_side_effect", sqsMessageId });
       return ok(undefined);
     }
     return processor.processSideEffect(payload, receiveCount);
@@ -177,7 +177,7 @@ async function processSqsRecord(
   if (messageType === MSG_TYPE_SIGNAL_FOLLOWUP) {
     const message = body as FollowupMessage;
     if (!message.accountId || !message.signalId || !message.threadId) {
-      logger.error("Malformed signal_followup payload — missing required fields. Dropping message.", { code: "handler.sqs.malformed_followup", messageId: sqsMessageId });
+      logger.error("Malformed signal_followup payload — missing required fields. Dropping message.", { code: "handler.sqs.malformed_followup", sqsMessageId });
       return ok(undefined);
     }
     return followupHandler.process(message);
@@ -186,7 +186,7 @@ async function processSqsRecord(
   if (messageType === MSG_TYPE_RSVP_REMINDER) {
     const message = body as RsvpReminderMessage;
     if (!message.accountId || !message.signalId || !message.threadId) {
-      logger.error("Malformed rsvp_reminder payload — missing required fields. Dropping message.", { code: "handler.sqs.malformed_rsvp_reminder", messageId: sqsMessageId });
+      logger.error("Malformed rsvp_reminder payload — missing required fields. Dropping message.", { code: "handler.sqs.malformed_rsvp_reminder", sqsMessageId });
       return ok(undefined);
     }
     return rsvpReminderHandler.process(message);
@@ -199,7 +199,7 @@ async function processSqsRecord(
   if (messageType === MSG_TYPE_DIGEST_SEND) {
     const message = body as IDigestSendMessage;
     if (!message.accountId) {
-      logger.error("Malformed digest_send payload — missing accountId. Dropping message.", { code: "handler.sqs.malformed_digest_send", messageId: sqsMessageId });
+      logger.error("Malformed digest_send payload — missing accountId. Dropping message.", { code: "handler.sqs.malformed_digest_send", sqsMessageId });
       return ok(undefined);
     }
     return digestWorker.process(message);
@@ -208,7 +208,7 @@ async function processSqsRecord(
   if (messageType === MSG_TYPE_EMX_INBOUND) {
     const payload = body as import("./external-exchanges/emx-inbound-worker.js").EmxInboundPayload;
     if (!payload.source || !payload.providerMessageId || !payload.emxId || !payload.accountId) {
-      logger.error("Malformed emx_inbound payload — missing required fields. Dropping.", { code: "handler.sqs.malformed_emx_inbound", messageId: sqsMessageId });
+      logger.error("Malformed emx_inbound payload — missing required fields. Dropping.", { code: "handler.sqs.malformed_emx_inbound", sqsMessageId });
       return ok(undefined);
     }
     return emxInboundWorker.process(payload, sqsMessageId, receiveCount);
@@ -227,7 +227,7 @@ async function processSqsRecord(
   if (typeof snsEnvelope.Type !== "string" || typeof snsEnvelope.Message !== "string") {
     logger.warn("SQS body is not a recognized SNS envelope (missing Type or Message). Dropping.", {
       code: "handler.sqs.unrecognized_body_format",
-      messageId: sqsMessageId,
+      sqsMessageId,
       body,
     });
     return ok(undefined);
@@ -236,7 +236,7 @@ async function processSqsRecord(
   if (snsEnvelope.Type !== "Notification") {
     logger.warn("SNS envelope Type is not 'Notification'. Dropping.", {
       code: "handler.sqs.not_sns_envelope",
-      messageId: sqsMessageId,
+      sqsMessageId,
       type: snsEnvelope.Type,
     });
     return ok(undefined);
@@ -249,7 +249,7 @@ async function processSqsRecord(
   } catch (e) {
     logger.error("Failed to parse SNS Message field as JSON.", {
       code: "handler.sqs.sns_message_parse_failed",
-      messageId: sqsMessageId,
+      sqsMessageId,
       error: e,
     });
     return ok(undefined);
@@ -266,7 +266,7 @@ async function processSqsRecord(
     if (!innerTyped.notificationType && !innerTyped.eventType) {
       logger.warn("Parsed SNS Message is not a recognized SES notification shape. Dropping.", {
         code: "handler.sqs.unknown_ses_notification_shape",
-        messageId: sqsMessageId,
+        sqsMessageId,
         inner,
       });
       return ok(undefined);
@@ -280,7 +280,7 @@ async function processSqsRecord(
   if (!mail) {
     logger.error("SES inbound notification has receipt.action but missing mail field. Dropping.", {
       code: "handler.sqs.malformed_received",
-      messageId: sqsMessageId,
+      sqsMessageId,
     });
     return ok(undefined);
   }
