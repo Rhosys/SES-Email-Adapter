@@ -225,7 +225,7 @@ async function processSqsRecord(
   // Step 1: Validate SNS envelope structure
   const snsEnvelope = body as Record<string, unknown>;
   if (typeof snsEnvelope.Type !== "string" || typeof snsEnvelope.Message !== "string") {
-    logger.warn("SQS body is not a recognized SNS envelope (missing Type or Message). Dropping.", {
+    logger.error("SQS body is not a recognized SNS envelope (missing Type or Message). Dropping.", {
       code: "handler.sqs.unrecognized_body_format",
       sqsMessageId,
       body,
@@ -234,7 +234,7 @@ async function processSqsRecord(
   }
 
   if (snsEnvelope.Type !== "Notification") {
-    logger.warn("SNS envelope Type is not 'Notification'. Dropping.", {
+    logger.error("SNS envelope Type is not 'Notification'. Dropping.", {
       code: "handler.sqs.not_sns_envelope",
       sqsMessageId,
       type: snsEnvelope.Type,
@@ -264,7 +264,7 @@ async function processSqsRecord(
     // or `eventType` (configuration-set event destination) as the type discriminator.
     const innerTyped = inner as { notificationType?: string; eventType?: string };
     if (!innerTyped.notificationType && !innerTyped.eventType) {
-      logger.warn("Parsed SNS Message is not a recognized SES notification shape. Dropping.", {
+      logger.error("Parsed SNS Message is not a recognized SES notification shape. Dropping.", {
         code: "handler.sqs.unknown_ses_notification_shape",
         sqsMessageId,
         inner,
