@@ -66,7 +66,10 @@ export function decodeResourceId(resourceId: string): { threadId: string; sk: st
   return { threadId: decoded.slice(0, sepIndex), sk: decoded.slice(sepIndex + 1) };
 }
 
-export function toApiResource(resource: DbResource): Api.Resource {
+// Assets backed by a stored file (pkpass) are exposed as a CDN download URL, never as a
+// storage key — the API must not reveal where or how content is stored. Built the same way
+// as signal attachment URLs so both surfaces serve the same object through one convention.
+export function toApiResource(resource: DbResource, contentCdnBaseUrl: string): Api.Resource {
   return {
     resourceId: encodeResourceId(resource.threadId, `${resource.workflow}#${resource.resourceKey}`),
     threadId: resource.threadId,
@@ -79,7 +82,7 @@ export function toApiResource(resource: DbResource): Api.Resource {
       label: a.label,
       rawValue: a.rawValue,
       sourceSignalId: a.sourceSignalId,
-      ...(a.s3Key ? { s3Key: a.s3Key } : {}),
+      ...(a.s3Key && contentCdnBaseUrl ? { url: `${contentCdnBaseUrl}/${a.s3Key}` } : {}),
       extractedAt: a.extractedAt,
     })),
     createdAt: resource.createdAt,
@@ -107,7 +110,6 @@ function toApiEmailSignalData(data: EmailSignalData): Api.InboundEmailSignalData
       subject: data.subject,
       ...(data.htmlBody ? { body: data.htmlBody } : {}),
       attachments: (data.attachments ?? []).map(a => ({
-        attachmentId: a.filename,
         filename: a.filename,
         mimeType: a.mimeType,
         sizeBytes: a.sizeBytes,
@@ -132,7 +134,6 @@ function toApiEmailSignalData(data: EmailSignalData): Api.InboundEmailSignalData
     subject: data.subject,
     ...(data.htmlBody ? { body: data.htmlBody } : {}),
     attachments: (data.attachments ?? []).map(a => ({
-      attachmentId: a.filename,
       filename: a.filename,
       mimeType: a.mimeType,
       sizeBytes: a.sizeBytes,

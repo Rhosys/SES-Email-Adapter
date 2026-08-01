@@ -115,7 +115,6 @@ export const EmailAddress = z.object({
 }).openapi("EmailAddress");
 
 export const Attachment = z.object({
-  attachmentId: z.string(),
   filename: z.string(),
   mimeType: z.string(),
   sizeBytes: z.number(),
@@ -510,7 +509,8 @@ export const ResourceAsset = z.object({
   label: z.string(),
   rawValue: z.string(),
   sourceSignalId: z.string(),
-  s3Key: z.string().optional(),
+  /** Download URL for assets backed by a stored file (pkpass only). QR/barcode assets carry their payload in rawValue. */
+  url: z.string().optional(),
   extractedAt: z.string(),
 }).openapi("ResourceAsset");
 

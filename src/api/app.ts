@@ -276,7 +276,7 @@ export function createApp({ threadDb, resourceDb, accountDb, auditDb, auth, acce
   // -------------------------------------------------------------------------
   new AccountsApi(accountDb, access, logger, accountCreationStarter, emailService, appBaseUrl, triggerDigest).register(app, helpers);
   new ThreadsApi(threadDb, accountDb, logger, draftSendDispatcher, schedulerClient, emailService, rsvpComposer, postApprovalCalendarDeps, signalReprocessor, emailContentStore, contentCdnBaseUrl, embeddingGenerator, threadMatcher).register(app, helpers);
-  new ResourcesApi(resourceDb, logger).register(app, helpers);
+  new ResourcesApi(resourceDb, logger, contentCdnBaseUrl).register(app, helpers);
   new SignalsApi(threadDb, accountDb, logger, postApprovalCalendarDeps, contentCdnBaseUrl).register(app, helpers);
   new ViewsApi(accountDb, logger).register(app, helpers);
   new LabelsApi(accountDb, logger).register(app, helpers);
