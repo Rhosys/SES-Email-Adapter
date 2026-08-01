@@ -47,14 +47,19 @@ export function makeRuleAnnotationStore() {
   return { annotateRuleError: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) };
 }
 
-/** Stub S3 client — presign module is mocked at module level so this is never called */
-export const stubS3Client = {} as never;
+/** Stub ContentStore — presign/S3 operations are mocked at module level so this is never called */
+export const stubContentStore = {
+  getSignedUrl: vi.fn().mockResolvedValue("https://signed-url"),
+  getObject: vi.fn().mockResolvedValue(new Uint8Array()),
+  putObject: vi.fn().mockResolvedValue(undefined),
+  getPresignedPost: vi.fn().mockResolvedValue({ url: "https://post-url", fields: {} }),
+  getRawEmailUrl: vi.fn().mockResolvedValue("https://signed-url"),
+  saveIcsContentAsCalendar: vi.fn().mockResolvedValue(undefined),
+} as never;
 
 /** Default processor options for the new fields */
 export const DEFAULT_PROCESSOR_EXTRAS = {
   userCodeExecutor: { invoke: vi.fn().mockReturnValue(Promise.resolve({ success: true, purpose: "template_function", result: "mock" })), validateAst: vi.fn().mockReturnValue(Promise.resolve({ success: true, purpose: "validate_ast", result: { valid: true } })), validateAstBatch: vi.fn().mockReturnValue(Promise.resolve({ success: true, purpose: "validate_ast_batch", results: [] })) } as UserCodeExecutorClient,
-  s3Client: stubS3Client,
-  emailBucket: "test-email-bucket",
-  contentBucket: "test-content-bucket",
-  
+  emailContentStore: stubContentStore,
+  contentStore: stubContentStore,
 } as const;

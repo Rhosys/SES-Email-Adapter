@@ -291,4 +291,63 @@ describe("Resources API", () => {
       expect(access.checkAccess).toHaveBeenCalledWith("user-001", `accounts/${TEST_ACCOUNT_ID}/resources/${resourceId}`, "resources:write");
     });
   });
+
+  // The API must never reveal that content is stored in S3. Assets backed by a stored file
+  // are exposed as a CDN download URL; the storage key must not appear in any response.
+  describe("asset exposure", () => {
+    const pkpassAsset = {
+      type: "pkpass" as const,
+      label: "Boarding pass",
+      rawValue: "M1DOE/JOHN",
+      sourceSignalId: "sig-001",
+      s3Key: "content/accounts/acct-1/extracted/msg-1/0",
+      extractedAt: "2024-06-15T10:00:00Z",
+    };
+
+    it("exposes a stored asset as a CDN url and never leaks the storage key", async () => {
+      resourceDb.getResource.mockResolvedValue(ok(makeResource({ assets: [pkpassAsset] })));
+      const resourceId = encodeResourceId("thr-001", "package#123-456");
+
+      const res = await req(app, "GET", `${A}/resources/${resourceId}`);
+      const body = await res.json() as { assets: Array<Record<string, unknown>> };
+
+      expect(body.assets[0]!["url"]).toBe("https://cdn.test/content/accounts/acct-1/extracted/msg-1/0");
+      expect(body.assets[0]).not.toHaveProperty("s3Key");
+      expect(JSON.stringify(body)).not.toContain("s3Key");
+    });
+
+    it("omits url entirely for assets whose payload is self-contained in rawValue", async () => {
+      const qrAsset = { type: "qr_code" as const, label: "QR code", rawValue: "https://example.com/t/abc", sourceSignalId: "sig-001", extractedAt: "2024-06-15T10:00:00Z" };
+      resourceDb.getResource.mockResolvedValue(ok(makeResource({ assets: [qrAsset] })));
+      const resourceId = encodeResourceId("thr-001", "package#123-456");
+
+      const res = await req(app, "GET", `${A}/resources/${resourceId}`);
+      const body = await res.json() as { assets: Array<Record<string, unknown>> };
+
+      expect(body.assets[0]).not.toHaveProperty("url");
+      expect(body.assets[0]!["rawValue"]).toBe("https://example.com/t/abc");
+    });
+
+    it("applies the same url mapping on the list endpoint", async () => {
+      resourceDb.listResources.mockResolvedValue(ok({ items: [makeResource({ assets: [pkpassAsset] })] }));
+
+      const res = await req(app, "GET", `${A}/resources`);
+      const body = await res.json() as { resources: Array<{ assets: Array<Record<string, unknown>> }> };
+
+      expect(body.resources[0]!.assets[0]!["url"]).toBe("https://cdn.test/content/accounts/acct-1/extracted/msg-1/0");
+      expect(JSON.stringify(body)).not.toContain("s3Key");
+    });
+
+    it("applies the same url mapping on the PATCH response", async () => {
+      resourceDb.getResource.mockResolvedValue(ok(makeResource({ assets: [pkpassAsset] })));
+      resourceDb.setResourceStatus.mockResolvedValue(ok(makeResource({ status: "complete", assets: [pkpassAsset] })));
+      const resourceId = encodeResourceId("thr-001", "package#123-456");
+
+      const res = await req(app, "PATCH", `${A}/resources/${resourceId}`, { status: "complete" });
+      const body = await res.json() as { assets: Array<Record<string, unknown>> };
+
+      expect(body.assets[0]!["url"]).toBe("https://cdn.test/content/accounts/acct-1/extracted/msg-1/0");
+      expect(JSON.stringify(body)).not.toContain("s3Key");
+    });
+  });
 });

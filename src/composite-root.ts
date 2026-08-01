@@ -34,6 +34,7 @@ import { checkDomain } from "./dns/dns-checker.js";
 import { AuthressAuthService } from "./api/authress-auth.js";
 import { AuthressAccessService } from "./api/authress-access.js";
 import { createApp } from "./api/app.js";
+import { EmailContentStore, ContentStore } from "./content-store.js";
 import { BedrockEmbeddingGenerator } from "./embedding/embedding-generator.js";
 import { createSearchDatabase } from "./database/thread-matcher.js";
 import { S3RetentionServiceImpl } from "./embedding/s3-retention-service.js";
@@ -108,7 +109,6 @@ export class CompositeRoot {
     const kms = new KMSClient({});
 
     const S3_BUCKET = process.env["EMAIL_BUCKET"]!;
-    const CONTENT_BUCKET = process.env["CONTENT_BUCKET"]!;
     const CONTENT_CDN_BASE_URL = process.env["CONTENT_CDN_BASE_URL"]!;
     const CONTENT_SANITIZER_ARN = process.env["CONTENT_SANITIZER_ARN"]!;
     const USER_CODE_EXECUTOR_ARN = process.env["USER_CODE_EXECUTOR_ARN"]!;
@@ -218,9 +218,8 @@ export class CompositeRoot {
       calendarForwarderDeps: { emailService, serviceDomain: MAIL_DOMAIN, hmac: hmacSecretGenerator },
       schedulerClient,
       logger,
-      s3Client: s3,
-      emailBucket: S3_BUCKET,
-      contentBucket: CONTENT_BUCKET,
+      emailContentStore: new EmailContentStore(s3),
+      contentStore: new ContentStore(s3),
     });
 
     const sesFeedbackProcessor = new SesFeedbackProcessor(processingDb, accountDb, logger, threadDb);
@@ -330,8 +329,7 @@ export class CompositeRoot {
 
     const emxInboundWorker = new EmxInboundWorker({
       logger,
-      s3Client: s3,
-      emailBucket: S3_BUCKET,
+      emailContentStore: new EmailContentStore(s3),
       adapters: emxAdapters,
       processRecord: (message, receiveCount) => processor.processRecord(message, receiveCount),
       getProviderToken,
@@ -373,8 +371,7 @@ export class CompositeRoot {
     const postApprovalCalendarDeps: PostApprovalCalendarHandlerDeps = {
       threadDb,
       accountDb,
-      s3Client: s3,
-      contentBucket: CONTENT_BUCKET,
+      contentStore: new ContentStore(s3),
       calendarForwarderDeps: {
         emailService,
         serviceDomain: MAIL_DOMAIN,
@@ -406,8 +403,7 @@ export class CompositeRoot {
       rsvpComposer: sendRsvp,
       postApprovalCalendarDeps,
       schedulerClient,
-      s3Client: s3,
-      emailBucket: S3_BUCKET,
+      emailContentStore: new EmailContentStore(s3),
       triggerDigest: async (accountId: string) => {
         await signalQueue.send("digest_send", { accountId });
       },
