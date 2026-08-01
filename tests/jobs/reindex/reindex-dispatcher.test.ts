@@ -2,17 +2,27 @@
 // Unit tests for ReindexDispatcher
 // ---------------------------------------------------------------------------
 
-import { describe, it, expect, beforeEach } from "vitest";
-import { mockClient } from "aws-sdk-client-mock";
-import { SQSClient, SendMessageCommand } from "@aws-sdk/client-sqs";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { ReindexDispatcher } from "../../../src/jobs/reindex/reindex-dispatcher.js";
 import { createMockLogger } from "../../helpers/mock-logger.js";
+import type { SignalQueue } from "../../../src/messaging/signal-queue.js";
+import { ok } from "neverthrow";
 
 // ---------------------------------------------------------------------------
 // Mocks
 // ---------------------------------------------------------------------------
 
-const sqsMock = mockClient(SQSClient);
+function createMockQueue() {
+  const calls: Array<{ messageType: string; payload: unknown }> = [];
+  const queue = {
+    send: vi.fn(async (messageType: string, payload: unknown) => {
+      calls.push({ messageType, payload });
+      return ok(undefined);
+    }),
+    sendBatch: vi.fn(async () => ok(undefined)),
+  } satisfies Pick<SignalQueue, "send" | "sendBatch">;
+  return { queue: queue as unknown as SignalQueue, calls };
+}
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -20,11 +30,11 @@ const sqsMock = mockClient(SQSClient);
 
 describe("ReindexDispatcher", () => {
   let dispatcher: ReindexDispatcher;
+  let mockQueue: ReturnType<typeof createMockQueue>;
 
   beforeEach(() => {
-    sqsMock.reset();
-    sqsMock.on(SendMessageCommand).resolves({});
-    dispatcher = new ReindexDispatcher({ sqs: sqsMock as unknown as SQSClient, logger: createMockLogger() });
+    mockQueue = createMockQueue();
+    dispatcher = new ReindexDispatcher({ signalQueue: mockQueue.queue, logger: createMockLogger() });
   });
 
   describe("dispatch", () => {
@@ -47,8 +57,7 @@ describe("ReindexDispatcher", () => {
       expect(result.value.jobId).toBeDefined();
       expect(result.value.startedAt).toBeDefined();
 
-      const sqsCalls = sqsMock.commandCalls(SendMessageCommand);
-      expect(sqsCalls).toHaveLength(32);
+      expect(mockQueue.queue.send).toHaveBeenCalledTimes(32);
     });
 
     it("dispatches custom segment count", async () => {
@@ -58,8 +67,7 @@ describe("ReindexDispatcher", () => {
       if (!result.isOk()) return;
       expect(result.value.segmentCount).toBe(8);
 
-      const sqsCalls = sqsMock.commandCalls(SendMessageCommand);
-      expect(sqsCalls).toHaveLength(8);
+      expect(mockQueue.queue.send).toHaveBeenCalledTimes(8);
     });
 
     it("sends well-formed SQS messages with correct segment metadata", async () => {
@@ -68,11 +76,10 @@ describe("ReindexDispatcher", () => {
       expect(result.isOk()).toBe(true);
       if (!result.isOk()) return;
 
-      const sqsCalls = sqsMock.commandCalls(SendMessageCommand);
-      const messages = sqsCalls.map((call) => JSON.parse(call.args[0].input.MessageBody!));
-
+      expect(mockQueue.calls).toHaveLength(4);
       for (let i = 0; i < 4; i++) {
-        expect(messages[i]).toEqual({
+        expect(mockQueue.calls[i]!.messageType).toBe("reindex");
+        expect(mockQueue.calls[i]!.payload).toEqual({
           jobId: result.value.jobId,
           segment: i,
           totalSegments: 4,

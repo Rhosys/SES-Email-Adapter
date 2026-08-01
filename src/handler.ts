@@ -1,9 +1,10 @@
 import type { APIGatewayProxyEventV2, SQSEvent, Context, APIGatewayProxyResultV2, EventBridgeEvent, APIGatewayProxyWebsocketEventV2 } from "aws-lambda";
 import { SQS_MESSAGE_TYPES } from "./types/index.js";
-import { ok, err } from "./errors.js";
+import { ok } from "./errors.js";
 import type { Result } from "./errors.js";
 import { isStepFunctionTaskEvent } from "./onboarding/types.js";
-import type { InboundSignalMessage, SideEffectPayload, SesVerdict } from "./processor/processor.js";
+import type { InboundSignalMessage, SideEffectPayload } from "./processor/processor.js";
+import type { SESMessage, SESReceiptS3Action } from "aws-lambda";
 import type { FollowupMessage } from "./scheduler/followup-handler.js";
 import type { RsvpReminderMessage } from "./scheduler/rsvp-reminder.js";
 import type { IDigestSendMessage } from "./digest/digest-worker.js";
@@ -12,11 +13,11 @@ import type { DraftSendPayload } from "./processor/draft-send-dispatcher.js";
 import { DateTime } from "luxon";
 import { CompositeRoot } from "./composite-root.js";
 
-const [MSG_TYPE_REINDEX, MSG_TYPE_SIDE_EFFECT, MSG_TYPE_DRAFT_SEND, MSG_TYPE_SIGNAL_FOLLOWUP, MSG_TYPE_RSVP_REMINDER, MSG_TYPE_DIGEST_DISPATCH, MSG_TYPE_DIGEST_SEND] = SQS_MESSAGE_TYPES;
+const [MSG_TYPE_REINDEX, MSG_TYPE_SIDE_EFFECT, MSG_TYPE_DRAFT_SEND, MSG_TYPE_SIGNAL_FOLLOWUP, MSG_TYPE_RSVP_REMINDER, MSG_TYPE_DIGEST_DISPATCH, MSG_TYPE_DIGEST_SEND, MSG_TYPE_EMX_INBOUND, MSG_TYPE_EMX_DISPATCH] = SQS_MESSAGE_TYPES;
 const RETRY_TRACK_THRESHOLD = 30;
 
 const root = new CompositeRoot();
-const { logger, processor, onboardingHandler, domainHealthJob, healthcheckJob, reindexWorker, draftSendWorker, followupHandler, rsvpReminderHandler, digestDispatcher, digestWorker, sesFeedbackProcessor, authService, deviceStore, app } = root;
+const { logger, processor, onboardingHandler, domainHealthJob, healthcheckJob, reindexWorker, draftSendWorker, followupHandler, rsvpReminderHandler, digestDispatcher, digestWorker, sesFeedbackProcessor, authService, deviceStore, emxInboundWorker, emxDispatchWorker, app } = root;
 // ---------------------------------------------------------------------------
 // Wiring lives in CompositeRoot (see composite-root.ts).
 // ---------------------------------------------------------------------------
@@ -154,7 +155,7 @@ async function processSqsRecord(
   body: unknown,
   messageType: string | undefined,
   receiveCount: number,
-  messageId: string,
+  sqsMessageId: string,
 ): Promise<Result<void, unknown>> {
   if (messageType === MSG_TYPE_REINDEX) {
     return reindexWorker.processSegmentMessage(body as ReindexSegmentMessage);
@@ -163,7 +164,7 @@ async function processSqsRecord(
   if (messageType === MSG_TYPE_SIDE_EFFECT) {
     const payload = body as SideEffectPayload;
     if (!payload.signal || !payload.thread) {
-      logger.error("Malformed side-effect payload — missing signal or thread. Dropping message.", { code: "handler.sqs.malformed_side_effect", messageId });
+      logger.error("Malformed side-effect payload — missing signal or thread. Dropping message.", { code: "handler.sqs.malformed_side_effect", sqsMessageId });
       return ok(undefined);
     }
     return processor.processSideEffect(payload, receiveCount);
@@ -176,7 +177,7 @@ async function processSqsRecord(
   if (messageType === MSG_TYPE_SIGNAL_FOLLOWUP) {
     const message = body as FollowupMessage;
     if (!message.accountId || !message.signalId || !message.threadId) {
-      logger.error("Malformed signal_followup payload — missing required fields. Dropping message.", { code: "handler.sqs.malformed_followup", messageId });
+      logger.error("Malformed signal_followup payload — missing required fields. Dropping message.", { code: "handler.sqs.malformed_followup", sqsMessageId });
       return ok(undefined);
     }
     return followupHandler.process(message);
@@ -185,7 +186,7 @@ async function processSqsRecord(
   if (messageType === MSG_TYPE_RSVP_REMINDER) {
     const message = body as RsvpReminderMessage;
     if (!message.accountId || !message.signalId || !message.threadId) {
-      logger.error("Malformed rsvp_reminder payload — missing required fields. Dropping message.", { code: "handler.sqs.malformed_rsvp_reminder", messageId });
+      logger.error("Malformed rsvp_reminder payload — missing required fields. Dropping message.", { code: "handler.sqs.malformed_rsvp_reminder", sqsMessageId });
       return ok(undefined);
     }
     return rsvpReminderHandler.process(message);
@@ -198,50 +199,93 @@ async function processSqsRecord(
   if (messageType === MSG_TYPE_DIGEST_SEND) {
     const message = body as IDigestSendMessage;
     if (!message.accountId) {
-      logger.error("Malformed digest_send payload — missing accountId. Dropping message.", { code: "handler.sqs.malformed_digest_send", messageId });
+      logger.error("Malformed digest_send payload — missing accountId. Dropping message.", { code: "handler.sqs.malformed_digest_send", sqsMessageId });
       return ok(undefined);
     }
     return digestWorker.process(message);
   }
 
-  // SNS envelope — unwrap. Two SNS topics land on this same queue (see deploy/storage.tf):
-  // the inbound receipt rule's S3 action (notificationType: "Received"), which the handler
-  // processes itself since only it knows how to turn a receipt into an InboundSignalMessage,
-  // and the sending configuration set's feedback destination (Bounce/Complaint/... — the
-  // full SES event vocabulary), which is entirely sesFeedbackProcessor's concern. The
-  // handler doesn't need to know what SES event types exist beyond the one it handles.
-  const sns = body as { Message: string };
+  if (messageType === MSG_TYPE_EMX_INBOUND) {
+    const payload = body as import("./external-exchanges/emx-inbound-worker.js").EmxInboundPayload;
+    if (!payload.source || !payload.providerMessageId || !payload.emxId || !payload.accountId) {
+      logger.error("Malformed emx_inbound payload — missing required fields. Dropping.", { code: "handler.sqs.malformed_emx_inbound", sqsMessageId });
+      return ok(undefined);
+    }
+    return emxInboundWorker.process(payload, sqsMessageId, receiveCount);
+  }
+
+  if (messageType === MSG_TYPE_EMX_DISPATCH) {
+    return emxDispatchWorker.dispatch();
+  }
+
+  // SNS envelope — validate + unwrap. Two SNS topics land on this same queue (see deploy/storage.tf):
+  // the inbound receipt rule's S3 action (notificationType: "Received"), and the sending
+  // configuration set's feedback destination (Bounce/Complaint/...).
+
+  // Step 1: Validate SNS envelope structure
+  const snsEnvelope = body as Record<string, unknown>;
+  if (typeof snsEnvelope.Type !== "string" || typeof snsEnvelope.Message !== "string") {
+    logger.error("SQS body is not a recognized SNS envelope (missing Type or Message). Dropping.", {
+      code: "handler.sqs.unrecognized_body_format",
+      sqsMessageId,
+      body,
+    });
+    return ok(undefined);
+  }
+
+  if (snsEnvelope.Type !== "Notification") {
+    logger.error("SNS envelope Type is not 'Notification'. Dropping.", {
+      code: "handler.sqs.not_sns_envelope",
+      sqsMessageId,
+      type: snsEnvelope.Type,
+    });
+    return ok(undefined);
+  }
+
+  // Step 2: Parse inner Message JSON
   let inner: unknown;
   try {
-    inner = JSON.parse(sns.Message);
+    inner = JSON.parse(snsEnvelope.Message as string);
   } catch (e) {
-    return err(e);
-  }
-
-  const notification = inner as { notificationType?: string; mail?: { messageId: string; timestamp: string; destination: string[] }; receipt?: { dkimVerdict: { status: SesVerdict }; dmarcVerdict: { status: SesVerdict }; action: { objectKey: string } } };
-
-  if (notification.notificationType !== "Received") {
-    await sesFeedbackProcessor.processNotification(notification);
+    logger.error("Failed to parse SNS Message field as JSON.", {
+      code: "handler.sqs.sns_message_parse_failed",
+      sqsMessageId,
+      error: e,
+    });
     return ok(undefined);
   }
 
-  const mail = notification.mail;
-  const receipt = notification.receipt;
-  if (!mail || !receipt?.action) {
-    logger.error("SES 'Received' notification missing mail/receipt fields. Dropping message.", { code: "handler.sqs.malformed_received", messageId });
+  // Step 3: Route by structure. Two SNS topics land on this queue:
+  // - SES inbound receipt rule (S3 action): has `receipt.action` + `mail` → SESMessage
+  // - SES sending configuration set feedback (Bounce/Complaint/Delivery): has
+  //   `notificationType` (older format) or `eventType` (newer format), no `receipt.action`
+  const notification = inner as Partial<SESMessage> & { notificationType?: string; eventType?: string };
+
+  if (!notification.receipt?.action || !notification.mail) {
+    if (!notification.notificationType && !notification.eventType) {
+      logger.error("Parsed SNS Message is not a recognized SES notification shape. Dropping.", {
+        code: "handler.sqs.unknown_ses_notification_shape",
+        sqsMessageId,
+        inner,
+      });
+      return ok(undefined);
+    }
+    await sesFeedbackProcessor.processNotification(inner);
     return ok(undefined);
   }
 
-  // The owning account is resolved inside the processor from the recipient address —
-  // the handler is a thin SQS/SNS unwrapper and does no DB work here.
+  // receipt.action + mail confirmed present → narrow to fully required SESMessage
+  const ses = inner as SESMessage;
+  const s3Action = ses.receipt.action as SESReceiptS3Action;
+
   const message: InboundSignalMessage = {
-    s3Key: receipt.action.objectKey,
-    compositeMailMessageId: `ses-${mail.messageId}`,
-    idempotencyKey: messageId,
-    timestamp: mail.timestamp,
-    destination: mail.destination,
-    dkimVerdict: receipt.dkimVerdict.status,
-    dmarcVerdict: receipt.dmarcVerdict.status,
+    s3Key: s3Action.objectKey,
+    compositeMailMessageId: `ses-${ses.mail.messageId}`,
+    idempotencyKey: sqsMessageId,
+    timestamp: ses.mail.timestamp,
+    destination: ses.mail.destination,
+    dkimVerdict: ses.receipt.dkimVerdict.status,
+    dmarcVerdict: ses.receipt.dmarcVerdict.status,
   };
   return processor.processRecord(message, receiveCount);
 }

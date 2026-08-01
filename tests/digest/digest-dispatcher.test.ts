@@ -5,24 +5,24 @@ import { DigestDispatcher } from "../../src/digest/digest-dispatcher.js"
 import type { IAccountMetaRow, IDigestDispatcherDeps } from "../../src/digest/digest-dispatcher.js"
 import { dbError } from "../../src/errors.js"
 import { createMockLogger, type MockLogger } from "../helpers/mock-logger.js"
+import type { SignalQueue } from "../../src/messaging/signal-queue.js"
 
 // Monday — daily dispatches, weekly does NOT, monthly does NOT (22nd)
 const monday = DateTime.fromISO("2026-06-22")
 
 interface TestDeps extends IDigestDispatcherDeps {
-  mockSqsSend: ReturnType<typeof vi.fn>
+  mockSendBatch: ReturnType<typeof vi.fn>
   logger: MockLogger
 }
 
 function buildDeps(overrides?: Partial<IDigestDispatcherDeps>): TestDeps {
   const logger = createMockLogger()
-  const mockSqsSend = vi.fn().mockResolvedValue({ Successful: [{ Id: "0" }], Failed: [] })
+  const mockSendBatch = vi.fn().mockResolvedValue(ok(undefined))
   const base: TestDeps = {
     accountDb: { queryAllAccountMetas: vi.fn().mockResolvedValue(ok([])) },
-    sqsClient: { send: mockSqsSend } as unknown as IDigestDispatcherDeps["sqsClient"],
-    queueUrl: "https://sqs.eu-central-1.amazonaws.com/123456789/signals",
+    signalQueue: { send: vi.fn().mockResolvedValue(ok(undefined)), sendBatch: mockSendBatch } as unknown as SignalQueue,
     logger,
-    mockSqsSend,
+    mockSendBatch,
   }
   if (overrides) {
     Object.assign(base, overrides)
@@ -50,13 +50,13 @@ describe("DigestDispatcher — REQ-1.3", () => {
       const result = await dispatcher.dispatch(monday)
 
       expect(result.isOk()).toBe(true)
-      expect(deps.mockSqsSend).toHaveBeenCalledTimes(1)
+      expect(deps.mockSendBatch).toHaveBeenCalledTimes(1)
 
-      const command = deps.mockSqsSend.mock.calls[0]![0]
-      const entries = command.input.Entries
+      const call = deps.mockSendBatch.mock.calls[0]!
+      const entries = call[1] as Array<{ id: string; payload: unknown }>
       expect(entries).toHaveLength(2)
-      expect(JSON.parse(entries[0].MessageBody)).toEqual({ accountId: "acct_daily1" })
-      expect(JSON.parse(entries[1].MessageBody)).toEqual({ accountId: "acct_daily2" })
+      expect(entries[0]!.payload).toEqual({ accountId: "acct_daily1" })
+      expect(entries[1]!.payload).toEqual({ accountId: "acct_daily2" })
     })
   })
 
@@ -75,12 +75,12 @@ describe("DigestDispatcher — REQ-1.3", () => {
       const result = await dispatcher.dispatch(monday)
 
       expect(result.isOk()).toBe(true)
-      expect(deps.mockSqsSend).not.toHaveBeenCalled()
+      expect(deps.mockSendBatch).not.toHaveBeenCalled()
     })
   })
 
   describe("SQS batch send throws", () => {
-    it("returns err when sqsClient.send throws", async () => {
+    it("returns err when signalQueue.sendBatch returns err", async () => {
       const accounts: IAccountMetaRow[] = [
         { id: "acct_daily", digest: { frequency: "daily", forwardingTargetId: "t1" } },
       ]
@@ -88,7 +88,8 @@ describe("DigestDispatcher — REQ-1.3", () => {
       const deps = buildDeps({
         accountDb: { queryAllAccountMetas: vi.fn().mockResolvedValue(ok(accounts)) },
       })
-      deps.mockSqsSend.mockRejectedValueOnce(new Error("SQS unavailable"))
+      const { err: neverthrowErr } = await import("neverthrow")
+      deps.mockSendBatch.mockResolvedValueOnce(neverthrowErr(dbError(new Error("SQS unavailable"))))
       const dispatcher = new DigestDispatcher(deps)
 
       const result = await dispatcher.dispatch(monday)
@@ -99,7 +100,7 @@ describe("DigestDispatcher — REQ-1.3", () => {
   })
 
   describe("SQS batch partial failure", () => {
-    it("returns err when result.Failed is non-empty", async () => {
+    it("returns err when sendBatch returns err", async () => {
       const accounts: IAccountMetaRow[] = [
         { id: "acct_daily", digest: { frequency: "daily", forwardingTargetId: "t1" } },
       ]
@@ -107,22 +108,19 @@ describe("DigestDispatcher — REQ-1.3", () => {
       const deps = buildDeps({
         accountDb: { queryAllAccountMetas: vi.fn().mockResolvedValue(ok(accounts)) },
       })
-      deps.mockSqsSend.mockResolvedValueOnce({
-        Successful: [],
-        Failed: [{ Id: "0", Code: "InternalError", Message: "Something went wrong", SenderFault: false }],
-      })
+      const { err: neverthrowErr } = await import("neverthrow")
+      deps.mockSendBatch.mockResolvedValueOnce(neverthrowErr(dbError(new Error("SQS batch send partial failure: 1 messages failed"))))
       const dispatcher = new DigestDispatcher(deps)
 
       const result = await dispatcher.dispatch(monday)
 
       expect(result.isErr()).toBe(true)
       expect(result._unsafeUnwrapErr().kind).toBe("db_error")
-      expect(result._unsafeUnwrapErr().message).toContain("partial failure")
     })
   })
 
   describe("happy path — multiple accounts batched correctly", () => {
-    it("enqueues correct messages with messageType attribute and accountId body", async () => {
+    it("enqueues correct messages with messageType and accountId body", async () => {
       const accounts: IAccountMetaRow[] = Array.from({ length: 3 }, (_, i) => ({
         id: `acct_${i}`,
         digest: { frequency: "daily" as const, forwardingTargetId: `t${i}` },
@@ -136,19 +134,17 @@ describe("DigestDispatcher — REQ-1.3", () => {
       const result = await dispatcher.dispatch(monday)
 
       expect(result.isOk()).toBe(true)
-      expect(deps.mockSqsSend).toHaveBeenCalledTimes(1)
+      expect(deps.mockSendBatch).toHaveBeenCalledTimes(1)
 
-      const command = deps.mockSqsSend.mock.calls[0]![0]
-      const entries = command.input.Entries
+      const call = deps.mockSendBatch.mock.calls[0]!
+      // sendBatch is called with (messageType, entries)
+      expect(call[0]).toBe("digest_send")
+      const entries = call[1] as Array<{ id: string; payload: unknown }>
       expect(entries).toHaveLength(3)
 
       for (let i = 0; i < 3; i++) {
-        expect(entries[i].Id).toBe(`${i}`)
-        expect(JSON.parse(entries[i].MessageBody)).toEqual({ accountId: `acct_${i}` })
-        expect(entries[i].MessageAttributes.messageType).toEqual({
-          DataType: "String",
-          StringValue: "digest_send",
-        })
+        expect(entries[i]!.id).toBe(`${i}`)
+        expect(entries[i]!.payload).toEqual({ accountId: `acct_${i}` })
       }
     })
 
@@ -166,10 +162,10 @@ describe("DigestDispatcher — REQ-1.3", () => {
       const result = await dispatcher.dispatch(monday)
 
       expect(result.isOk()).toBe(true)
-      expect(deps.mockSqsSend).toHaveBeenCalledTimes(2)
+      expect(deps.mockSendBatch).toHaveBeenCalledTimes(2)
 
-      const firstBatch = deps.mockSqsSend.mock.calls[0]![0].input.Entries
-      const secondBatch = deps.mockSqsSend.mock.calls[1]![0].input.Entries
+      const firstBatch = deps.mockSendBatch.mock.calls[0]![1] as Array<{ id: string; payload: unknown }>
+      const secondBatch = deps.mockSendBatch.mock.calls[1]![1] as Array<{ id: string; payload: unknown }>
       expect(firstBatch).toHaveLength(10)
       expect(secondBatch).toHaveLength(2)
     })
@@ -185,7 +181,7 @@ describe("DigestDispatcher — REQ-1.3", () => {
       const result = await dispatcher.dispatch(monday)
 
       expect(result.isErr()).toBe(true)
-      expect(deps.mockSqsSend).not.toHaveBeenCalled()
+      expect(deps.mockSendBatch).not.toHaveBeenCalled()
     })
   })
 })

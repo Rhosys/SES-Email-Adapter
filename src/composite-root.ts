@@ -2,7 +2,6 @@ import { BedrockRuntimeClient } from "@aws-sdk/client-bedrock-runtime";
 import { S3Client } from "@aws-sdk/client-s3";
 import { LambdaClient } from "@aws-sdk/client-lambda";
 import { SFNClient } from "@aws-sdk/client-sfn";
-import { SQSClient, SendMessageCommand } from "@aws-sdk/client-sqs";
 import { KMSClient } from "@aws-sdk/client-kms";
 import { OnboardingTaskHandler } from "./onboarding/onboarding-task-handler.js";
 import { SfnAccountCreationStarter } from "./onboarding/account-creation-starter.js";
@@ -60,6 +59,13 @@ import { DraftSendWorker } from "./processor/draft-send-worker.js";
 import { sendRsvp } from "./processor/calendar/rsvp-composer.js";
 import type { PostApprovalCalendarHandlerDeps } from "./processor/calendar/post-approval-handler.js";
 import { HmacSecretGenerator } from "./processor/calendar/hmac-secret-generator.js";
+import { SignalQueue } from "./messaging/signal-queue.js";
+import { GmailProvider } from "./external-exchanges/gmail-provider.js";
+import { OutlookProvider } from "./external-exchanges/outlook-provider.js";
+import { EmxInboundWorker } from "./external-exchanges/emx-inbound-worker.js";
+import { EmxDispatchWorker } from "./external-exchanges/emx-dispatch-worker.js";
+import type { ProviderAdapter } from "./external-exchanges/provider-adapter.js";
+import { getClient as getAuthressClient } from "./api/authress-access.js";
 import { RequestLogger } from "./logger.js";
 
 // ---------------------------------------------------------------------------
@@ -86,6 +92,8 @@ export class CompositeRoot {
   public readonly sesFeedbackProcessor: SesFeedbackProcessor;
   public readonly authService: AuthressAuthService;
   public readonly deviceStore: DynamoDeviceStore;
+  public readonly emxInboundWorker: EmxInboundWorker;
+  public readonly emxDispatchWorker: EmxDispatchWorker;
   public readonly app: ReturnType<typeof createApp>;
 
   constructor() {
@@ -97,7 +105,6 @@ export class CompositeRoot {
     const s3 = new S3Client({});
     const lambda = new LambdaClient({});
     const sesv2 = new SESv2Client({});
-    const sqs = new SQSClient({});
     const sfn = new SFNClient({});
     const kms = new KMSClient({});
 
@@ -106,7 +113,6 @@ export class CompositeRoot {
     const CONTENT_CDN_BASE_URL = process.env["CONTENT_CDN_BASE_URL"]!;
     const CONTENT_SANITIZER_ARN = process.env["CONTENT_SANITIZER_ARN"]!;
     const USER_CODE_EXECUTOR_ARN = process.env["USER_CODE_EXECUTOR_ARN"]!;
-    const SIGNAL_QUEUE_URL = process.env["SIGNAL_QUEUE_URL"]!;
     const WS_ENDPOINT = process.env["WS_API_ENDPOINT"]!;
     const FCM_PROJECT_ID = process.env["FCM_PROJECT_ID"]!;
     const FCM_SERVICE_ACCOUNT = JSON.parse(process.env["FCM_SERVICE_ACCOUNT"] ?? "{}") as { client_email: string; private_key: string };
@@ -120,6 +126,8 @@ export class CompositeRoot {
     // -----------------------------------------------------------------------
 
     const logger = new RequestLogger();
+
+    const signalQueue = new SignalQueue();
 
     const classifier = new SignalClassifier(bedrock, logger);
 
@@ -164,7 +172,7 @@ export class CompositeRoot {
     const emailSignalStore = new EmailSignalStore(s3, S3_BUCKET);
     const forwardingService = new ForwardingService(emailService, accountDb, emailSignalStore, APP_BASE_URL, MAIL_DOMAIN, logger);
 
-    const draftSendDispatcher = new DraftSendDispatcher(SIGNAL_QUEUE_URL, sqs, logger);
+    const draftSendDispatcher = new DraftSendDispatcher(signalQueue, logger);
 
     const wsDeliverer = new WsDeliverer(new ApiGatewayManagementApiClient({ endpoint: WS_ENDPOINT }));
     const authHandler = new AuthWorkflowHandler(deviceStore, wsDeliverer, threadDb, logger);
@@ -204,7 +212,7 @@ export class CompositeRoot {
       forwardingService,
       retentionService: new S3RetentionServiceImpl(s3),
       replySender: externalEmailHandler,
-      sqsDispatcher: new SqsDispatcherImpl(SIGNAL_QUEUE_URL, sqs, logger),
+      sqsDispatcher: new SqsDispatcherImpl(signalQueue, logger),
       draftSendDispatcher,
       billingHandler: new BillingHandler(),
       handlerRegistry,
@@ -279,8 +287,7 @@ export class CompositeRoot {
 
     const digestDispatcher = new DigestDispatcher({
       accountDb,
-      sqsClient: sqs,
-      queueUrl: SIGNAL_QUEUE_URL,
+      signalQueue,
       logger,
     });
 
@@ -291,6 +298,52 @@ export class CompositeRoot {
       emailService,
       unsubscribeTokenGenerator,
       logger,
+    });
+
+    // -----------------------------------------------------------------------
+    // External Mail Exchanges (EMX)
+    // -----------------------------------------------------------------------
+
+    const getProviderToken = async (accountId: string, connectionId: string): Promise<string> => {
+      const client = getAuthressClient();
+      const response = await client.connections.getConnectionCredentials(connectionId, accountId);
+      return response.data.accessToken;
+    };
+
+    const gmailProvider = new GmailProvider({
+      db: accountDb,
+      signalQueue,
+      logger,
+      getProviderToken,
+    });
+
+    const outlookProvider = new OutlookProvider({
+      db: accountDb,
+      signalQueue,
+      logger,
+      getProviderToken,
+    });
+
+    const emxAdapters: Record<string, ProviderAdapter> = {
+      gmail: gmailProvider,
+      outlook: outlookProvider,
+    };
+
+    const emxInboundWorker = new EmxInboundWorker({
+      logger,
+      s3Client: s3,
+      emailBucket: S3_BUCKET,
+      adapters: emxAdapters,
+      processRecord: (message, receiveCount) => processor.processRecord(message, receiveCount),
+      getProviderToken,
+    });
+
+    const emxDispatchWorker = new EmxDispatchWorker({
+      logger,
+      db: accountDb,
+      signalQueue,
+      adapters: emxAdapters,
+      getProviderToken,
     });
 
     // -----------------------------------------------------------------------
@@ -339,7 +392,7 @@ export class CompositeRoot {
       access: new AuthressAccessService(),
       logger,
       forwardingService,
-      jobDispatcher: new ReindexDispatcher({ logger }),
+      jobDispatcher: new ReindexDispatcher({ signalQueue, logger }),
       healthCheckValidator: healthcheckValidator,
       signalReprocessor: processor,
       draftSendDispatcher,
@@ -355,15 +408,15 @@ export class CompositeRoot {
       schedulerClient,
       contentStore: new S3ContentStore(s3, S3_BUCKET),
       triggerDigest: async (accountId: string) => {
-        await sqs.send(new SendMessageCommand({
-          QueueUrl: SIGNAL_QUEUE_URL,
-          MessageBody: JSON.stringify({ accountId }),
-          MessageAttributes: { messageType: { DataType: "String", StringValue: "digest_send" } },
-        }));
+        await signalQueue.send("digest_send", { accountId });
       },
       embeddingGenerator,
       threadMatcher: searchDatabase,
       unsubscribeTokenGenerator,
+      gmailProvider,
+      outlookProvider,
+      adapters: emxAdapters,
+      getProviderToken,
     });
 
     // -----------------------------------------------------------------------
@@ -384,6 +437,8 @@ export class CompositeRoot {
     this.sesFeedbackProcessor = sesFeedbackProcessor;
     this.authService = authService;
     this.deviceStore = deviceStore;
+    this.emxInboundWorker = emxInboundWorker;
+    this.emxDispatchWorker = emxDispatchWorker;
     this.app = app;
   }
 }

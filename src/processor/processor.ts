@@ -96,23 +96,12 @@ export interface ReplySender {
   }): Promise<Result<{ messageId: string }, EmailServiceError>>;
 }
 
-export type SesVerdict = "PASS" | "FAIL" | "GRAY" | "PROCESSING_FAILED";
+import type { SESReceiptStatus } from "aws-lambda";
+
+/** Re-exported for external consumers that need the verdict status type. */
+export type SesVerdictStatus = SESReceiptStatus["status"];
 
 const systemSignalDefaultRetentionDuration = Math.floor(Duration.fromISO("P90D").as("seconds"));
-
-interface SesReceiptNotification {
-  mail: {
-    messageId: string;
-    timestamp: string;
-    destination: string[];
-  };
-  receipt: {
-    recipients: string[];
-    dkimVerdict: { status: SesVerdict };
-    dmarcVerdict: { status: SesVerdict };
-    action: { bucketName: string; objectKey: string };
-  };
-}
 
 export interface InboundSignalMessage {
   /**
@@ -127,8 +116,8 @@ export interface InboundSignalMessage {
   idempotencyKey: string;
   timestamp: string;
   destination: string[];
-  dkimVerdict: SesVerdict;
-  dmarcVerdict: SesVerdict;
+  dkimVerdict: SESReceiptStatus["status"];
+  dmarcVerdict: SESReceiptStatus["status"];
 }
 
 // ---------------------------------------------------------------------------

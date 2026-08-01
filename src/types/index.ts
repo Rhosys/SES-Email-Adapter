@@ -32,7 +32,7 @@ export type Workflow = (typeof WORKFLOWS)[number];
 // SQS message types — discriminator for routing in the Lambda handler
 // ---------------------------------------------------------------------------
 
-export const SQS_MESSAGE_TYPES = ["reindex", "side_effect", "draft_send", "signal_followup", "rsvp_reminder", "digest_dispatch", "digest_send"] as const;
+export const SQS_MESSAGE_TYPES = ["reindex", "side_effect", "draft_send", "signal_followup", "rsvp_reminder", "digest_dispatch", "digest_send", "emx_inbound", "emx_dispatch"] as const;
 export type SqsMessageType = (typeof SQS_MESSAGE_TYPES)[number];
 
 export type WorkflowData =
@@ -721,6 +721,32 @@ export interface ForwardingTarget {
   token: string;       // verification token sent to the target
   createdAt: string;
   verifiedAt?: string;
+}
+
+// ---------------------------------------------------------------------------
+// External Mail Exchange (EMX) — connected external provider accounts
+// ---------------------------------------------------------------------------
+
+export const EMX_PLATFORMS = ["gmail", "outlook", "imap", "jmap"] as const;
+export type EmxPlatform = (typeof EMX_PLATFORMS)[number];
+
+export const EMX_STATUSES = ["active", "activation_failed"] as const;
+export type EmxStatus = (typeof EMX_STATUSES)[number];
+
+export interface ExternalMailExchange {
+  id: string;                      // emx_{base58-UUIDv7}{3 check chars}
+  accountId: string;
+  platform: EmxPlatform;
+  emailAddress: string;            // the external mailbox being watched
+  status: EmxStatus;
+  syncCursor?: string;             // Gmail: historyId; Outlook: full deltaLink URL
+  expiresAt?: string;              // ISO datetime — when watch/subscription lapses
+  lastSyncAt?: string;             // ISO datetime — last successful sync completion
+  providerSubscriptionId?: string; // Graph subscription UUID or "watch" for Gmail
+  encryptionCertificateId?: string; // which RSA key was used (for Outlook subscriptions)
+  errorReason?: string;            // human-readable failure reason (only when activation_failed)
+  createdAt: string;
+  updatedAt: string;
 }
 
 export const RULE_STATUSES = ["enabled", "disabled"] as const;

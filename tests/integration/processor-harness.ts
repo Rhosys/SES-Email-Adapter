@@ -19,7 +19,7 @@ import { ThreadDatabase } from '../../src/database/thread-database.js';
 import { AuditDatabase } from '../../src/database/audit-database.js';
 import { ProcessingDatabase } from '../../src/database/processing-database.js';
 import { SignalProcessor } from '../../src/processor/processor.js';
-import type { InboundSignalMessage, SideEffectPayload, SesVerdict } from '../../src/processor/processor.js';
+import type { InboundSignalMessage, SideEffectPayload, SesVerdictStatus } from '../../src/processor/processor.js';
 import { JsonLogicRuleEvaluator } from '../../src/processor/rule-evaluator.js';
 import { createApp } from '../../src/api/app.js';
 import { makeAppDeps } from '../helpers/app-deps.js';
@@ -269,7 +269,7 @@ export async function createProcessorHarness(): Promise<ProcessorHarness> {
     const inner = JSON.parse(outer.Message) as {
       notificationType: string;
       mail: { messageId: string; timestamp: string; destination: string[] };
-      receipt: { dkimVerdict: { status: SesVerdict }; dmarcVerdict: { status: SesVerdict }; action: { objectKey: string } };
+      receipt: { dkimVerdict: { status: SesVerdictStatus }; dmarcVerdict: { status: SesVerdictStatus }; action: { objectKey: string } };
       accountId?: string;
     };
 
