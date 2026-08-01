@@ -42,10 +42,6 @@ vi.mock("../../src/embedding/cluster-registry.js", () => {
   };
 });
 
-vi.mock("../../src/processor/presign.js", () => ({
-  generatePresignedGet: vi.fn().mockResolvedValue("https://presigned-get.example.com/test"),
-  generatePresignedPost: vi.fn().mockResolvedValue({ url: "https://presigned-post.example.com", fields: {} }),
-}));
 
 // ---------------------------------------------------------------------------
 // Shared test infrastructure
@@ -164,17 +160,18 @@ function buildProcessor(opts: {
 }): SignalProcessor {
   const { mockLogger, threadDb, schedulerClient, contentSanitizer, threadMatcher, icsContent } = opts;
 
-  // When ICS content is provided, mock S3 GetObject to return the bytes
-  const s3Send = vi.fn().mockImplementation((cmd: unknown) => {
-    if (icsContent && cmd && typeof cmd === "object" && "constructor" in cmd) {
-      return Promise.resolve({
-        Body: {
-          transformToByteArray: () => Promise.resolve(new TextEncoder().encode(icsContent)),
-        },
-      });
-    }
-    return Promise.resolve({});
-  });
+  // When ICS content is provided, mock ContentStore.getObject to return the bytes
+  const contentStoreMock = {
+    getSignedUrl: vi.fn().mockResolvedValue("https://signed-url"),
+    getObject: vi.fn().mockImplementation(() => {
+      if (icsContent) {
+        return Promise.resolve(new TextEncoder().encode(icsContent));
+      }
+      return Promise.resolve(new Uint8Array());
+    }),
+    putObject: vi.fn().mockResolvedValue(undefined),
+    getPresignedPost: vi.fn().mockResolvedValue({ url: "https://post-url", fields: {} }),
+  };
 
   const accountDb = makeAccountDbMock(TEST_ACCOUNT_ID);
   applyCtx(accountDb, DEFAULT_CTX);
@@ -184,9 +181,8 @@ function buildProcessor(opts: {
     accountDb,
     processingDb: makeProcessingDbMock(),
     contentSanitizer: contentSanitizer ?? makeContentSanitizer(),
-    s3Client: { send: s3Send } as never,
-    emailBucket: "test-bucket",
-    contentBucket: "test-content-bucket",
+    emailContentStore: contentStoreMock as never,
+    contentStore: contentStoreMock as never,
     classifier: makeClassifier(),
     embeddingGenerator: {
       generateForModel: vi.fn().mockResolvedValue(ok({ modelId: "amazon.titan-embed-text-v2:0", vector: [0.1], dimensions: 1024 })),

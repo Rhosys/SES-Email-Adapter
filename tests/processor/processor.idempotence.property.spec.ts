@@ -35,10 +35,6 @@ vi.mock("../../src/embedding/cluster-registry.js", () => {
   };
 });
 
-vi.mock("../../src/processor/presign.js", () => ({
-  generatePresignedGet: vi.fn().mockResolvedValue("https://presigned-get.example.com/test"),
-  generatePresignedPost: vi.fn().mockResolvedValue({ url: "https://presigned-post.example.com", fields: {} }),
-}));
 
 describe("Cross-layer idempotence — live writes + cache + Aurora", () => {
   const TEST_ACCOUNT_ID = "acct-idem";
@@ -153,7 +149,7 @@ describe("Cross-layer idempotence — live writes + cache + Aurora", () => {
     const mockLogger = createMockLogger();
     const processor = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
       threadDb, accountDb, processingDb,
-      contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
+      contentSanitizer: makeContentSanitizer(), emailContentStore: { getSignedUrl: vi.fn().mockResolvedValue("https://presigned-get"), getObject: vi.fn().mockResolvedValue(new Uint8Array()), putObject: vi.fn().mockResolvedValue(undefined), getPresignedPost: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }) } as never, contentStore: { getSignedUrl: vi.fn().mockResolvedValue("https://presigned-get"), getObject: vi.fn().mockResolvedValue(new Uint8Array()), putObject: vi.fn().mockResolvedValue(undefined), getPresignedPost: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }) } as never,
       classifier: makeClassifier(),
       embeddingGenerator,
       auroraWriter,
@@ -209,7 +205,7 @@ describe("Cross-layer idempotence — live writes + cache + Aurora", () => {
     const mockLogger = createMockLogger();
     const processor = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
       threadDb, accountDb, processingDb,
-      contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
+      contentSanitizer: makeContentSanitizer(), emailContentStore: { getSignedUrl: vi.fn().mockResolvedValue("https://presigned-get"), getObject: vi.fn().mockResolvedValue(new Uint8Array()), putObject: vi.fn().mockResolvedValue(undefined), getPresignedPost: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }) } as never, contentStore: { getSignedUrl: vi.fn().mockResolvedValue("https://presigned-get"), getObject: vi.fn().mockResolvedValue(new Uint8Array()), putObject: vi.fn().mockResolvedValue(undefined), getPresignedPost: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }) } as never,
       classifier: makeClassifier(),
       embeddingGenerator,
       auroraWriter,

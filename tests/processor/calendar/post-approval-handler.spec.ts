@@ -6,7 +6,7 @@ import type { Signal, Thread, Attachment } from "../../../src/types/index.js";
 import type { ThreadDatabase } from "../../../src/database/thread-database.js";
 import type { AccountDatabase } from "../../../src/database/account-database.js";
 import type { CalendarForwarderDeps } from "../../../src/processor/calendar/calendar-forwarder.js";
-import type { ContentStore } from "../../../src/api/content-store.js";
+import type { ContentStore } from "../../../src/content-store.js";
 import { ok } from "../../../src/errors.js";
 import { createMockLogger } from "../../helpers/mock-logger.js";
 

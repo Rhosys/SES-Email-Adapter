@@ -1,11 +1,10 @@
-import { PutObjectCommand } from "@aws-sdk/client-s3";
-import type { S3Client } from "@aws-sdk/client-s3";
 import { ok, err } from "../errors.js";
 import type { Result } from "../errors.js";
 import type { ProcessorError } from "../errors.js";
 import type { ProviderAdapter, ProviderFetchError } from "./provider-adapter.js";
 import type { InboundSignalMessage } from "../processor/processor.js";
 import type { Logger } from "../logger.js";
+import type { ContentStore } from "../content-store.js";
 
 export interface EmxInboundPayload {
   source: "gmail" | "outlook";
@@ -16,8 +15,7 @@ export interface EmxInboundPayload {
 
 interface EmxInboundWorkerDeps {
   logger: Logger;
-  s3Client: S3Client;
-  emailBucket: string;
+  emailContentStore: ContentStore;
   adapters: Record<string, ProviderAdapter>;
   processRecord: (message: InboundSignalMessage, receiveCount: number) => Promise<Result<void, ProcessorError>>;
   getProviderToken: (accountId: string, connectionId: string) => Promise<string>;
@@ -25,16 +23,14 @@ interface EmxInboundWorkerDeps {
 
 export class EmxInboundWorker {
   private readonly logger: Logger;
-  private readonly s3Client: S3Client;
-  private readonly emailBucket: string;
+  private readonly emailContentStore: ContentStore;
   private readonly adapters: Record<string, ProviderAdapter>;
   private readonly processRecord: EmxInboundWorkerDeps["processRecord"];
   private readonly getProviderToken: EmxInboundWorkerDeps["getProviderToken"];
 
   constructor(deps: EmxInboundWorkerDeps) {
     this.logger = deps.logger;
-    this.s3Client = deps.s3Client;
-    this.emailBucket = deps.emailBucket;
+    this.emailContentStore = deps.emailContentStore;
     this.adapters = deps.adapters;
     this.processRecord = deps.processRecord;
     this.getProviderToken = deps.getProviderToken;
@@ -70,12 +66,7 @@ export class EmxInboundWorker {
       return err(error);
     }
 
-    await this.s3Client.send(new PutObjectCommand({
-      Bucket: this.emailBucket,
-      Key: s3Key,
-      Body: fetchResult.value.rawMime,
-      ContentType: "message/rfc822",
-    }));
+    await this.emailContentStore.putObject(s3Key, fetchResult.value.rawMime, "message/rfc822");
 
     const message: InboundSignalMessage = {
       s3Key,

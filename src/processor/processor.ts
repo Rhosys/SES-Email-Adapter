@@ -1,4 +1,4 @@
-import { GetObjectCommand, PutObjectCommand, type S3Client } from "@aws-sdk/client-s3";
+import type { ContentStore } from "../content-store.js";
 import { DateTime, Duration } from "luxon";
 import { generateId } from "../utils/id.js";
 import type { Logger } from "../logger.js";
@@ -30,7 +30,6 @@ import type { BillingPlan } from "../embedding/retention-tier.js";
 import { resolveRetention, retentionToS3Tag, durationToSeconds } from "./retention.js";
 import type { RetentionDuration } from "./retention.js";
 import { buildActiveThread } from "./thread-factory.js";
-import { generatePresignedGet, generatePresignedPost } from "./presign.js";
 import { getPrimaryThreadMatcherRegistry, getActiveClusters } from "../embedding/cluster-registry.js";
 import { getETLD1, assignSystemLabels } from "./filter.js";
 import { isSystemAccount } from "../database/system-account-db.js";
@@ -286,9 +285,8 @@ interface SignalProcessorOptions {
   handlerRegistry: HandlerRegistry;
   calendarForwarderDeps: CalendarForwarderDeps;
   schedulerClient: SchedulerClient;
-  s3Client: S3Client;
-  emailBucket: string;
-  contentBucket: string;
+  emailContentStore: ContentStore;
+  contentStore: ContentStore;
 }
 
 export class SignalProcessor {
@@ -314,9 +312,8 @@ export class SignalProcessor {
   private readonly handlerRegistry: HandlerRegistry;
   private readonly calendarForwarderDeps: CalendarForwarderDeps;
   private readonly schedulerClient: SchedulerClient;
-  private readonly s3Client: S3Client;
-  private readonly emailBucket: string;
-  private readonly contentBucket: string;
+  private readonly emailContentStore: ContentStore;
+  private readonly contentStore: ContentStore;
 
   constructor(opts: SignalProcessorOptions) {
     this.threadDb = opts.threadDb;
@@ -341,9 +338,8 @@ export class SignalProcessor {
     this.handlerRegistry = opts.handlerRegistry;
     this.calendarForwarderDeps = opts.calendarForwarderDeps;
     this.schedulerClient = opts.schedulerClient;
-    this.s3Client = opts.s3Client;
-    this.emailBucket = opts.emailBucket;
-    this.contentBucket = opts.contentBucket;
+    this.emailContentStore = opts.emailContentStore;
+    this.contentStore = opts.contentStore;
   }
 
   async processRecord(message: InboundSignalMessage, receiveCount: number): Promise<Result<void, ProcessorError>> {
@@ -851,8 +847,8 @@ export class SignalProcessor {
     const keyPrefix = `content/accounts/${accountId}/extracted/${msg.compositeMailMessageId}/`;
 
     const [presignedGet, presignedPost] = await Promise.all([
-      generatePresignedGet(this.s3Client, this.emailBucket, s3Key),
-      generatePresignedPost(this.s3Client, this.contentBucket, keyPrefix, s3Tag),
+      this.emailContentStore.getSignedUrl(s3Key),
+      this.contentStore.getPresignedPost(keyPrefix, s3Tag),
     ]);
 
     const sanitizeResult = await this.contentSanitizer.invoke({
@@ -1564,12 +1560,8 @@ export class SignalProcessor {
 
     this.logger.trackPoint("calendar_attachment_found", { filename: calendarAttachment.filename, mimeType: calendarAttachment.mimeType });
 
-    // Fetch .ics bytes from S3
-    const getResult = await this.s3Client.send(new GetObjectCommand({
-      Bucket: this.contentBucket,
-      Key: calendarAttachment.s3Key,
-    }));
-    const icsBytes = await getResult.Body!.transformToByteArray();
+    // Fetch .ics bytes from content store
+    const icsBytes = await this.contentStore.getObject(calendarAttachment.s3Key);
 
     // Parse .ics
     const parseResult = parseIcs(new Uint8Array(icsBytes));
@@ -1610,12 +1602,7 @@ export class SignalProcessor {
 
     // Store raw .ics as S3 attachment on the calendar signal
     const icsS3Key = `content/accounts/${accountId}/calendar/${calendarSignalId}/invite.ics`;
-    await this.s3Client.send(new PutObjectCommand({
-      Bucket: this.contentBucket,
-      Key: icsS3Key,
-      Body: Buffer.from(rawIcsContent, "utf-8"),
-      ContentType: "text/calendar",
-    }));
+    await this.contentStore.putObject(icsS3Key, Buffer.from(rawIcsContent, "utf-8"), "text/calendar");
 
     // Build calendar signal with linkedSignalId pointing to the email signal
     const calendarSignal: Signal<CalendarEventData> = {

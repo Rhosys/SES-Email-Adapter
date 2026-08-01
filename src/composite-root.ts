@@ -34,7 +34,7 @@ import { checkDomain } from "./dns/dns-checker.js";
 import { AuthressAuthService } from "./api/authress-auth.js";
 import { AuthressAccessService } from "./api/authress-access.js";
 import { createApp } from "./api/app.js";
-import { S3ContentStore } from "./api/content-store.js";
+import { S3ContentStore } from "./content-store.js";
 import { BedrockEmbeddingGenerator } from "./embedding/embedding-generator.js";
 import { createSearchDatabase } from "./database/thread-matcher.js";
 import { S3RetentionServiceImpl } from "./embedding/s3-retention-service.js";
@@ -219,9 +219,8 @@ export class CompositeRoot {
       calendarForwarderDeps: { emailService, serviceDomain: MAIL_DOMAIN, hmac: hmacSecretGenerator },
       schedulerClient,
       logger,
-      s3Client: s3,
-      emailBucket: S3_BUCKET,
-      contentBucket: CONTENT_BUCKET,
+      emailContentStore: new S3ContentStore(s3, S3_BUCKET),
+      contentStore: new S3ContentStore(s3, CONTENT_BUCKET),
     });
 
     const sesFeedbackProcessor = new SesFeedbackProcessor(processingDb, accountDb, logger, threadDb);
@@ -331,8 +330,7 @@ export class CompositeRoot {
 
     const emxInboundWorker = new EmxInboundWorker({
       logger,
-      s3Client: s3,
-      emailBucket: S3_BUCKET,
+      emailContentStore: new S3ContentStore(s3, S3_BUCKET),
       adapters: emxAdapters,
       processRecord: (message, receiveCount) => processor.processRecord(message, receiveCount),
       getProviderToken,

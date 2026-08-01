@@ -47,10 +47,6 @@ vi.mock("../../src/embedding/cluster-registry.js", () => {
   };
 });
 
-vi.mock("../../src/processor/presign.js", () => ({
-  generatePresignedGet: vi.fn().mockResolvedValue("https://presigned-get.example.com/test"),
-  generatePresignedPost: vi.fn().mockResolvedValue({ url: "https://presigned-post.example.com", fields: {} }),
-}));
 
 // ---------------------------------------------------------------------------
 // Shared test infrastructure
@@ -142,13 +138,12 @@ function buildProcessor(opts: {
 }): SignalProcessor {
   const { mockLogger, schedulerClient, icsContent } = opts;
 
-  const s3Send = vi.fn().mockImplementation(() => {
-    return Promise.resolve({
-      Body: {
-        transformToByteArray: () => Promise.resolve(new TextEncoder().encode(icsContent)),
-      },
-    });
-  });
+  const contentStoreMock = {
+    getSignedUrl: vi.fn().mockResolvedValue("https://signed-url"),
+    getObject: vi.fn().mockImplementation(() => Promise.resolve(new TextEncoder().encode(icsContent))),
+    putObject: vi.fn().mockResolvedValue(undefined),
+    getPresignedPost: vi.fn().mockResolvedValue({ url: "https://post-url", fields: {} }),
+  };
 
   const threadDb = makeThreadDbMock();
   (threadDb.saveSignal as ReturnType<typeof vi.fn>).mockResolvedValue(ok(undefined));
@@ -169,9 +164,8 @@ function buildProcessor(opts: {
     accountDb,
     processingDb: makeProcessingDbMock(),
     contentSanitizer: makeContentSanitizer(),
-    s3Client: { send: s3Send } as never,
-    emailBucket: "test-bucket",
-    contentBucket: "test-content-bucket",
+    emailContentStore: contentStoreMock as never,
+    contentStore: contentStoreMock as never,
     classifier: { classify: vi.fn().mockResolvedValue(ok({ workflow: "conversation", workflowData: { workflow: "conversation", sentiment: "neutral", requiresReply: false }, tags: [], summary: "A calendar event.", labels: [], actions: [] })) },
     embeddingGenerator: {
       generateForModel: vi.fn().mockResolvedValue(ok({ modelId: "amazon.titan-embed-text-v2:0", vector: [0.1], dimensions: 1024 })),

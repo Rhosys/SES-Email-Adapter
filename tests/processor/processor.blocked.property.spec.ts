@@ -33,10 +33,6 @@ vi.mock("../../src/embedding/cluster-registry.js", () => {
   };
 });
 
-vi.mock("../../src/processor/presign.js", () => ({
-  generatePresignedGet: vi.fn().mockResolvedValue("https://presigned-get.example.com/test"),
-  generatePresignedPost: vi.fn().mockResolvedValue({ url: "https://presigned-post.example.com", fields: {} }),
-}));
 
 describe("Blocked/quarantined signals never trigger saveArc", () => {
   const TEST_ACCOUNT_ID = "acct-prop2";
@@ -214,7 +210,7 @@ describe("Blocked/quarantined signals never trigger saveArc", () => {
       threadDb,
       accountDb,
       processingDb,
-      contentSanitizer: strategy.contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
+      contentSanitizer: strategy.contentSanitizer, emailContentStore: { getSignedUrl: vi.fn().mockResolvedValue("https://presigned-get"), getObject: vi.fn().mockResolvedValue(new Uint8Array()), putObject: vi.fn().mockResolvedValue(undefined), getPresignedPost: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }) } as never, contentStore: { getSignedUrl: vi.fn().mockResolvedValue("https://presigned-get"), getObject: vi.fn().mockResolvedValue(new Uint8Array()), putObject: vi.fn().mockResolvedValue(undefined), getPresignedPost: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }) } as never,
       classifier: strategy.classifier,
       embeddingGenerator: makeEmbeddingGenerator(),
       auroraWriter: makeAuroraWriter(),

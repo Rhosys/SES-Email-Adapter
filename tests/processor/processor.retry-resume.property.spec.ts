@@ -39,10 +39,6 @@ vi.mock("../../src/embedding/cluster-registry.js", () => {
   };
 });
 
-vi.mock("../../src/processor/presign.js", () => ({
-  generatePresignedGet: vi.fn().mockResolvedValue("https://presigned-get.example.com/test"),
-  generatePresignedPost: vi.fn().mockResolvedValue({ url: "https://presigned-post.example.com", fields: {} }),
-}));
 
 // ---------------------------------------------------------------------------
 // Property 1: Resume from prior state on retry
@@ -274,7 +270,7 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
 
     const processor = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
       ...makeStore(signal, arc),
-      contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
+      contentSanitizer, emailContentStore: { getSignedUrl: vi.fn().mockResolvedValue("https://presigned-get"), getObject: vi.fn().mockResolvedValue(new Uint8Array()), putObject: vi.fn().mockResolvedValue(undefined), getPresignedPost: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }) } as never, contentStore: { getSignedUrl: vi.fn().mockResolvedValue("https://presigned-get"), getObject: vi.fn().mockResolvedValue(new Uint8Array()), putObject: vi.fn().mockResolvedValue(undefined), getPresignedPost: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }) } as never,
       classifier: { classify: vi.fn() },
       embeddingGenerator: { generateForSecondaryClusters: vi.fn(), generateForModel: vi.fn() },
       auroraWriter: makeAuroraWriter(),
@@ -301,7 +297,7 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
 
     const processor = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
       ...makeStore(signal, arc),
-      contentSanitizer: { invoke: vi.fn() }, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
+      contentSanitizer: { invoke: vi.fn() }, emailContentStore: { getSignedUrl: vi.fn().mockResolvedValue("https://presigned-get"), getObject: vi.fn().mockResolvedValue(new Uint8Array()), putObject: vi.fn().mockResolvedValue(undefined), getPresignedPost: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }) } as never, contentStore: { getSignedUrl: vi.fn().mockResolvedValue("https://presigned-get"), getObject: vi.fn().mockResolvedValue(new Uint8Array()), putObject: vi.fn().mockResolvedValue(undefined), getPresignedPost: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }) } as never,
       classifier,
       embeddingGenerator: { generateForSecondaryClusters: vi.fn(), generateForModel: vi.fn() },
       auroraWriter: makeAuroraWriter(),
@@ -329,7 +325,7 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
 
     const processor = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
       ...makeStore(signal, arc),
-      contentSanitizer: { invoke: vi.fn() }, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
+      contentSanitizer: { invoke: vi.fn() }, emailContentStore: { getSignedUrl: vi.fn().mockResolvedValue("https://presigned-get"), getObject: vi.fn().mockResolvedValue(new Uint8Array()), putObject: vi.fn().mockResolvedValue(undefined), getPresignedPost: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }) } as never, contentStore: { getSignedUrl: vi.fn().mockResolvedValue("https://presigned-get"), getObject: vi.fn().mockResolvedValue(new Uint8Array()), putObject: vi.fn().mockResolvedValue(undefined), getPresignedPost: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }) } as never,
       classifier: { classify: vi.fn() },
       embeddingGenerator: { generateForSecondaryClusters: vi.fn(), generateForModel: vi.fn() },
       auroraWriter: makeAuroraWriter(),
@@ -356,7 +352,7 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
 
     const processor = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
       ...makeStore(signal, arc),
-      contentSanitizer: { invoke: vi.fn() }, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
+      contentSanitizer: { invoke: vi.fn() }, emailContentStore: { getSignedUrl: vi.fn().mockResolvedValue("https://presigned-get"), getObject: vi.fn().mockResolvedValue(new Uint8Array()), putObject: vi.fn().mockResolvedValue(undefined), getPresignedPost: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }) } as never, contentStore: { getSignedUrl: vi.fn().mockResolvedValue("https://presigned-get"), getObject: vi.fn().mockResolvedValue(new Uint8Array()), putObject: vi.fn().mockResolvedValue(undefined), getPresignedPost: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }) } as never,
       classifier: { classify: vi.fn() },
       embeddingGenerator: { generateForSecondaryClusters: vi.fn(), generateForModel: vi.fn() },
       auroraWriter,
@@ -390,7 +386,7 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
 
     const processor = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
       ...makeStore(signal, arc),
-      contentSanitizer: { invoke: vi.fn() }, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
+      contentSanitizer: { invoke: vi.fn() }, emailContentStore: { getSignedUrl: vi.fn().mockResolvedValue("https://presigned-get"), getObject: vi.fn().mockResolvedValue(new Uint8Array()), putObject: vi.fn().mockResolvedValue(undefined), getPresignedPost: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }) } as never, contentStore: { getSignedUrl: vi.fn().mockResolvedValue("https://presigned-get"), getObject: vi.fn().mockResolvedValue(new Uint8Array()), putObject: vi.fn().mockResolvedValue(undefined), getPresignedPost: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }) } as never,
       classifier: { classify: vi.fn() },
       embeddingGenerator: { generateForSecondaryClusters: vi.fn(), generateForModel: vi.fn() },
       auroraWriter,
@@ -418,7 +414,7 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
 
     const processor = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
       ...makeStore(signal, arc),
-      contentSanitizer: { invoke: vi.fn() }, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
+      contentSanitizer: { invoke: vi.fn() }, emailContentStore: { getSignedUrl: vi.fn().mockResolvedValue("https://presigned-get"), getObject: vi.fn().mockResolvedValue(new Uint8Array()), putObject: vi.fn().mockResolvedValue(undefined), getPresignedPost: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }) } as never, contentStore: { getSignedUrl: vi.fn().mockResolvedValue("https://presigned-get"), getObject: vi.fn().mockResolvedValue(new Uint8Array()), putObject: vi.fn().mockResolvedValue(undefined), getPresignedPost: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }) } as never,
       classifier: { classify: vi.fn() },
       embeddingGenerator: { generateForSecondaryClusters: vi.fn(), generateForModel: vi.fn() },
       auroraWriter: makeAuroraWriter(),
@@ -492,7 +488,7 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
 
     const processor = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
       threadDb, accountDb, processingDb,
-      contentSanitizer: { invoke: vi.fn() }, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
+      contentSanitizer: { invoke: vi.fn() }, emailContentStore: { getSignedUrl: vi.fn().mockResolvedValue("https://presigned-get"), getObject: vi.fn().mockResolvedValue(new Uint8Array()), putObject: vi.fn().mockResolvedValue(undefined), getPresignedPost: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }) } as never, contentStore: { getSignedUrl: vi.fn().mockResolvedValue("https://presigned-get"), getObject: vi.fn().mockResolvedValue(new Uint8Array()), putObject: vi.fn().mockResolvedValue(undefined), getPresignedPost: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }) } as never,
       classifier: { classify: vi.fn() },
       embeddingGenerator: { generateForSecondaryClusters: vi.fn(), generateForModel: vi.fn() },
       auroraWriter,
@@ -674,7 +670,7 @@ describe("Feature: signal-processor-retry-resilience, Property 3: DDB read failu
 
     const processor = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
       threadDb, accountDb, processingDb,
-      contentSanitizer: { invoke: vi.fn() }, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
+      contentSanitizer: { invoke: vi.fn() }, emailContentStore: { getSignedUrl: vi.fn().mockResolvedValue("https://presigned-get"), getObject: vi.fn().mockResolvedValue(new Uint8Array()), putObject: vi.fn().mockResolvedValue(undefined), getPresignedPost: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }) } as never, contentStore: { getSignedUrl: vi.fn().mockResolvedValue("https://presigned-get"), getObject: vi.fn().mockResolvedValue(new Uint8Array()), putObject: vi.fn().mockResolvedValue(undefined), getPresignedPost: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }) } as never,
       classifier: { classify: vi.fn() },
       embeddingGenerator: { generateForSecondaryClusters: vi.fn(), generateForModel: vi.fn() },
       auroraWriter,
@@ -708,7 +704,7 @@ describe("Feature: signal-processor-retry-resilience, Property 3: DDB read failu
 
     const processor = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
       threadDb, accountDb, processingDb,
-      contentSanitizer: { invoke: vi.fn() }, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
+      contentSanitizer: { invoke: vi.fn() }, emailContentStore: { getSignedUrl: vi.fn().mockResolvedValue("https://presigned-get"), getObject: vi.fn().mockResolvedValue(new Uint8Array()), putObject: vi.fn().mockResolvedValue(undefined), getPresignedPost: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }) } as never, contentStore: { getSignedUrl: vi.fn().mockResolvedValue("https://presigned-get"), getObject: vi.fn().mockResolvedValue(new Uint8Array()), putObject: vi.fn().mockResolvedValue(undefined), getPresignedPost: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }) } as never,
       classifier: { classify: vi.fn() },
       embeddingGenerator: { generateForSecondaryClusters: vi.fn(), generateForModel: vi.fn() },
       auroraWriter,
@@ -870,7 +866,7 @@ describe("Feature: signal-processor-retry-resilience, Property 2: Missing signal
 
     const processor = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
       ...makeStore(),
-      contentSanitizer, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
+      contentSanitizer, emailContentStore: { getSignedUrl: vi.fn().mockResolvedValue("https://presigned-get"), getObject: vi.fn().mockResolvedValue(new Uint8Array()), putObject: vi.fn().mockResolvedValue(undefined), getPresignedPost: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }) } as never, contentStore: { getSignedUrl: vi.fn().mockResolvedValue("https://presigned-get"), getObject: vi.fn().mockResolvedValue(new Uint8Array()), putObject: vi.fn().mockResolvedValue(undefined), getPresignedPost: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }) } as never,
       classifier: makeClassifier(),
       embeddingGenerator: makeEmbeddingGenerator(),
       auroraWriter: makeAuroraWriter(),
@@ -895,7 +891,7 @@ describe("Feature: signal-processor-retry-resilience, Property 2: Missing signal
 
     const processor = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
       ...makeStore(),
-      contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
+      contentSanitizer: makeContentSanitizer(), emailContentStore: { getSignedUrl: vi.fn().mockResolvedValue("https://presigned-get"), getObject: vi.fn().mockResolvedValue(new Uint8Array()), putObject: vi.fn().mockResolvedValue(undefined), getPresignedPost: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }) } as never, contentStore: { getSignedUrl: vi.fn().mockResolvedValue("https://presigned-get"), getObject: vi.fn().mockResolvedValue(new Uint8Array()), putObject: vi.fn().mockResolvedValue(undefined), getPresignedPost: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }) } as never,
       classifier,
       embeddingGenerator: makeEmbeddingGenerator(),
       auroraWriter: makeAuroraWriter(),
@@ -920,7 +916,7 @@ describe("Feature: signal-processor-retry-resilience, Property 2: Missing signal
 
     const processor = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
       threadDb, accountDb, processingDb,
-      contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
+      contentSanitizer: makeContentSanitizer(), emailContentStore: { getSignedUrl: vi.fn().mockResolvedValue("https://presigned-get"), getObject: vi.fn().mockResolvedValue(new Uint8Array()), putObject: vi.fn().mockResolvedValue(undefined), getPresignedPost: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }) } as never, contentStore: { getSignedUrl: vi.fn().mockResolvedValue("https://presigned-get"), getObject: vi.fn().mockResolvedValue(new Uint8Array()), putObject: vi.fn().mockResolvedValue(undefined), getPresignedPost: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }) } as never,
       classifier: makeClassifier(),
       embeddingGenerator: makeEmbeddingGenerator(),
       auroraWriter: makeAuroraWriter(),
@@ -944,7 +940,7 @@ describe("Feature: signal-processor-retry-resilience, Property 2: Missing signal
   it.each(MISSING_SIGNAL_CASES)("result is NOT a batchItemFailure when signal does not exist on retry ($label)", async ({ receiveCount, messageId }) => {
     const processor = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
       ...makeStore(),
-      contentSanitizer: makeContentSanitizer(), s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
+      contentSanitizer: makeContentSanitizer(), emailContentStore: { getSignedUrl: vi.fn().mockResolvedValue("https://presigned-get"), getObject: vi.fn().mockResolvedValue(new Uint8Array()), putObject: vi.fn().mockResolvedValue(undefined), getPresignedPost: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }) } as never, contentStore: { getSignedUrl: vi.fn().mockResolvedValue("https://presigned-get"), getObject: vi.fn().mockResolvedValue(new Uint8Array()), putObject: vi.fn().mockResolvedValue(undefined), getPresignedPost: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }) } as never,
       classifier: makeClassifier(),
       embeddingGenerator: makeEmbeddingGenerator(),
       auroraWriter: makeAuroraWriter(),
@@ -1147,7 +1143,7 @@ describe("Feature: signal-processor-retry-resilience, Property 8: Outcome re-der
 
     const processor = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
       threadDb, accountDb, processingDb,
-      contentSanitizer: { invoke: vi.fn() }, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
+      contentSanitizer: { invoke: vi.fn() }, emailContentStore: { getSignedUrl: vi.fn().mockResolvedValue("https://presigned-get"), getObject: vi.fn().mockResolvedValue(new Uint8Array()), putObject: vi.fn().mockResolvedValue(undefined), getPresignedPost: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }) } as never, contentStore: { getSignedUrl: vi.fn().mockResolvedValue("https://presigned-get"), getObject: vi.fn().mockResolvedValue(new Uint8Array()), putObject: vi.fn().mockResolvedValue(undefined), getPresignedPost: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }) } as never,
       classifier: { classify: vi.fn() },
       embeddingGenerator: { generateForSecondaryClusters: vi.fn(), generateForModel: vi.fn() },
       auroraWriter: { upsertEmbedding: vi.fn().mockResolvedValue(ok(undefined)), findMatch: vi.fn().mockResolvedValue(ok(null)) },
@@ -1186,7 +1182,7 @@ describe("Feature: signal-processor-retry-resilience, Property 8: Outcome re-der
 
     const processor = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
       threadDb, accountDb, processingDb,
-      contentSanitizer: { invoke: vi.fn() }, s3Client: {} as never, emailBucket: "test-bucket", contentBucket: "test-content-bucket",
+      contentSanitizer: { invoke: vi.fn() }, emailContentStore: { getSignedUrl: vi.fn().mockResolvedValue("https://presigned-get"), getObject: vi.fn().mockResolvedValue(new Uint8Array()), putObject: vi.fn().mockResolvedValue(undefined), getPresignedPost: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }) } as never, contentStore: { getSignedUrl: vi.fn().mockResolvedValue("https://presigned-get"), getObject: vi.fn().mockResolvedValue(new Uint8Array()), putObject: vi.fn().mockResolvedValue(undefined), getPresignedPost: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }) } as never,
       classifier: { classify: vi.fn() },
       embeddingGenerator: { generateForSecondaryClusters: vi.fn(), generateForModel: vi.fn() },
       auroraWriter: { upsertEmbedding: vi.fn().mockResolvedValue(ok(undefined)), findMatch: vi.fn().mockResolvedValue(ok(null)) },

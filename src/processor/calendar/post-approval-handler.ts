@@ -8,7 +8,7 @@
 // ---------------------------------------------------------------------------
 
 import { DateTime } from "luxon";
-import type { ContentStore } from "../../api/content-store.js";
+import type { ContentStore } from "../../content-store.js";
 
 import type { Signal, Thread, Attachment } from "../../types/index.js";
 import type { CalendarEventData, CalendarInviteInvalidData } from "../../types/calendar.js";

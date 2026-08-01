@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { GetObjectCommand, type S3Client } from "@aws-sdk/client-s3";
-import { generatePresignedGet, generatePresignedPost } from "../../src/processor/presign.js";
+import { S3ContentStore } from "../../src/content-store.js";
 
 vi.mock("@aws-sdk/s3-request-presigner", () => ({
   getSignedUrl: vi.fn(async (_client, command, options) => {
@@ -15,7 +15,6 @@ vi.mock("@aws-sdk/s3-presigned-post", () => ({
       key: params.Key,
       ...params.Fields,
     },
-    // Expose params for assertion (the real SDK doesn't do this, but our mock does)
     __params: params,
   })),
 }));
@@ -25,9 +24,10 @@ import { createPresignedPost } from "@aws-sdk/s3-presigned-post";
 
 const fakeS3 = {} as S3Client;
 
-describe("generatePresignedGet", () => {
+describe("S3ContentStore.getSignedUrl", () => {
   it("calls getSignedUrl with GetObjectCommand and 30s expiry", async () => {
-    const url = await generatePresignedGet(fakeS3, "my-bucket", "emails/abc.eml");
+    const store = new S3ContentStore(fakeS3, "my-bucket");
+    const url = await store.getSignedUrl("emails/abc.eml");
 
     expect(getSignedUrl).toHaveBeenCalledWith(
       fakeS3,
@@ -43,11 +43,10 @@ describe("generatePresignedGet", () => {
   });
 });
 
-describe("generatePresignedPost", () => {
+describe("S3ContentStore.getPresignedPost", () => {
   it("sets starts-with condition, 10MB limit, and 30s expiry without tagging when retentionTag is null", async () => {
-    const result = await generatePresignedPost(
-      fakeS3,
-      "content-bucket",
+    const store = new S3ContentStore(fakeS3, "content-bucket");
+    const result = await store.getPresignedPost(
       "accounts/123/senders/example.com/extracted/sig1/",
       null,
     );
@@ -68,9 +67,8 @@ describe("generatePresignedPost", () => {
   });
 
   it("includes tagging condition and field when retentionTag is '365'", async () => {
-    await generatePresignedPost(
-      fakeS3,
-      "content-bucket",
+    const store = new S3ContentStore(fakeS3, "content-bucket");
+    await store.getPresignedPost(
       "accounts/456/senders/test.org/extracted/sig2/",
       "365",
     );
@@ -91,9 +89,8 @@ describe("generatePresignedPost", () => {
   });
 
   it("includes tagging condition and field when retentionTag is '3650'", async () => {
-    const result = await generatePresignedPost(
-      fakeS3,
-      "content-bucket",
+    const store = new S3ContentStore(fakeS3, "content-bucket");
+    const result = await store.getPresignedPost(
       "accounts/789/senders/long.com/extracted/sig3/",
       "3650",
     );

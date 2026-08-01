@@ -48,10 +48,6 @@ vi.mock("../../src/embedding/cluster-registry.js", () => {
   };
 });
 
-vi.mock("../../src/processor/presign.js", () => ({
-  generatePresignedGet: vi.fn().mockResolvedValue("https://presigned-get.example.com/test"),
-  generatePresignedPost: vi.fn().mockResolvedValue({ url: "https://presigned-post.example.com", fields: {} }),
-}));
 
 // ---------------------------------------------------------------------------
 // Parallel arc matching — Tier 1 / Tier 1.5 / Tier 2 selection & discrepancy
@@ -187,9 +183,8 @@ describe("Feature: in-reply-to-arc-threading, Parallel arc matching tier selecti
       accountDb,
       processingDb,
       contentSanitizer: overrides.contentSanitizer ?? makeContentSanitizer(),
-      s3Client: {} as never,
-      emailBucket: "test-bucket",
-      contentBucket: "test-content-bucket",
+      emailContentStore: { getSignedUrl: vi.fn().mockResolvedValue("https://presigned-get"), getObject: vi.fn().mockResolvedValue(new Uint8Array()), putObject: vi.fn().mockResolvedValue(undefined), getPresignedPost: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }) } as never,
+      contentStore: { getSignedUrl: vi.fn().mockResolvedValue("https://presigned-get"), getObject: vi.fn().mockResolvedValue(new Uint8Array()), putObject: vi.fn().mockResolvedValue(undefined), getPresignedPost: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }) } as never,
       classifier: overrides.classifier ?? makeConversationClassifier(),
       embeddingGenerator: makeEmbeddingGenerator(),
       auroraWriter: overrides.auroraWriter ?? makeAuroraWriter(),

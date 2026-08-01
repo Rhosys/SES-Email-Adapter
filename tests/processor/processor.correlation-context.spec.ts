@@ -32,10 +32,6 @@ vi.mock("../../src/embedding/cluster-registry.js", () => {
   };
 });
 
-vi.mock("../../src/processor/presign.js", () => ({
-  generatePresignedGet: vi.fn().mockResolvedValue("https://presigned-get.example.com/test"),
-  generatePresignedPost: vi.fn().mockResolvedValue({ url: "https://presigned-post.example.com", fields: {} }),
-}));
 
 // ---------------------------------------------------------------------------
 // Processor side-effect correlation context tests
@@ -111,9 +107,8 @@ describe("processSideEffect — correlation context", () => {
     return new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
       ...makeStore(),
       contentSanitizer: { invoke: vi.fn() } as unknown as ContentSanitizerClient,
-      s3Client: { send: vi.fn().mockResolvedValue({ Body: { transformToByteArray: () => Promise.resolve(new Uint8Array([1, 2, 3])) } }) } as never,
-      emailBucket: "test-bucket",
-      contentBucket: "test-content-bucket",
+      emailContentStore: { getSignedUrl: vi.fn().mockResolvedValue("https://signed-url"), getObject: vi.fn().mockResolvedValue(new Uint8Array([1, 2, 3])), putObject: vi.fn().mockResolvedValue(undefined), getPresignedPost: vi.fn().mockResolvedValue({ url: "https://post-url", fields: {} }) } as never,
+      contentStore: { getSignedUrl: vi.fn().mockResolvedValue("https://signed-url"), getObject: vi.fn().mockResolvedValue(new Uint8Array([1, 2, 3])), putObject: vi.fn().mockResolvedValue(undefined), getPresignedPost: vi.fn().mockResolvedValue({ url: "https://post-url", fields: {} }) } as never,
       classifier: { classify: vi.fn() },
       embeddingGenerator: { generateForModel: vi.fn(), generateForSecondaryClusters: vi.fn() } as unknown as EmbeddingGenerator,
       auroraWriter: { upsertEmbedding: vi.fn(), findMatch: vi.fn() } as unknown as MultiClusterAuroraWriter,
