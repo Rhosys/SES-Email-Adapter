@@ -894,3 +894,32 @@ These items are required by the frontend before certain UI features can ship.
 - [ ] **Calendar forwarding address verification** — when `defaultCalendarInviteForwardingAddress` is set via `PATCH /accounts/:id`, should we verify that the email address is reachable before activating forwarding? Options: (1) send a verification email with a confirmation link (same as forwarding address verification), (2) require the address to already be in the verified forwarding addresses list, (3) no verification (trust the user). Also: should new accounts have a default value for this field, or is it always null until explicitly configured? Currently SR-26 fires `forwardCalendarInvite` whenever a calendar signal is detected — if the address is unset, the action silently does nothing. Decide: should we warn the user in the UI that calendar forwarding is inactive until they set an address?
 - [ ] **Update forwarding verification email URL format** — the verification email currently generates `${APP_BASE_URL}/accounts/${accountId}/forwarding-addresses/${address}/verify?token=${token}`. Change to `${APP_BASE_URL}/settings?tab=forwarding&verifyAddress=${address}&token=${token}&accountId=${accountId}` so it lands directly on the Settings forwarding tab which auto-submits verification on mount.
 - [ ] **Webhook rule save validation** — reject webhook rule saves unless a test request to the configured URL returns HTTP 200. The frontend sends a test request directly from the browser; the backend should also validate on save to prevent broken webhooks from being persisted.
+
+---
+
+## Integration Test Infrastructure — Remove `-target` and Expand Coverage
+
+The current integration test provisioning uses `-target` to only create DynamoDB tables. Gitzi's integration harness proved that MiniStack 1.4.9 supports nearly the full deploy stack (Lambda, IAM, API Gateway v2, SQS, S3, Secrets Manager, Route53, ACM, CloudWatch Logs) without targeting — just piecemeal `sed` strips for 3 known gaps.
+
+### Proposal
+
+Copy ALL `deploy/*.tf` instead of cherry-picking tables, strip only what MiniStack can't handle, remove `-target`.
+
+### Known MiniStack 1.4.9 gaps (validated empirically)
+
+| Feature | Error | Workaround |
+|---------|-------|------------|
+| CloudFront cache policies | `404 NoSuchResource: No route for POST /2020-05-31/cache-policy` | `rm cdn.tf` + strip dangling refs |
+| ACM certificate validation | `missing *.example.com DNS validation record` — wildcard CNAME created but not findable via ListResourceRecordSets | `sed` strip `aws_acm_certificate_validation` resources, replace refs with `aws_acm_certificate.*.arn` directly |
+| API Gateway v2 custom domains | `404 NotFoundException: Unknown API Gateway path: /v2/domainnames` | `sed` strip `aws_apigatewayv2_domain_name` + `aws_apigatewayv2_api_mapping` + Route53 alias records pointing to them |
+| DynamoDB PITR / deletion_protection | Silently ignored or fails | `sed` strip the attributes |
+
+### Benefits
+
+- No more `-target` warnings in CI logs
+- Validates Lambda, IAM roles, API Gateway routes, SQS event source mappings — catches Terraform errors in those resources before they hit production
+- Route53 zone needs pre-creation via `curl -X POST ${ENDPOINT}/2013-04-01/hostedzone` (not AWS CLI — unavailable in alpine images)
+
+### Reference
+
+See `gitzi/backend/tests/integration/infrastructure/provision.sh` for the working implementation with all `sed` strips.
