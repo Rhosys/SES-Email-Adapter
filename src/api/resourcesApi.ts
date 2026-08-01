@@ -1,6 +1,5 @@
 import { z } from "@hono/zod-openapi";
 import type { OpenAPIHono } from "@hono/zod-openapi";
-import type { S3Client } from "@aws-sdk/client-s3";
 import { toApiResource, decodeResourceId } from "./transform.js";
 import { zParse } from "./validate.js";
 import { UpdateResourceRequest } from "./requests.js";
@@ -11,7 +10,6 @@ import type { Logger } from "../logger.js";
 import { Resource as ResourceSchema, ListResourcesResponse } from "./schemas.js";
 import type { AppEnv, RouteHelpers } from "./route-helpers.js";
 import type { Pagination } from "../types/index.js";
-import { generatePresignedGet } from "../processor/presign.js";
 
 function page<K extends string, T>(key: K, items: T[], nextCursor?: string): Record<K, T[]> & { pagination: Pagination } {
   return { [key]: items, pagination: { cursor: nextCursor ?? null } } as Record<K, T[]> & { pagination: Pagination };
@@ -23,12 +21,11 @@ export class ResourcesApi {
   constructor(
     private readonly resourceDb: ResourceDatabase,
     private readonly logger: Logger,
-    private readonly s3Client: S3Client,
-    private readonly emailBucket: string,
+    private readonly contentCdnBaseUrl: string,
   ) {}
 
   register(app: OpenAPIHono<AppEnv>, { authz, err, route }: RouteHelpers): void {
-    const { resourceDb, logger, s3Client, emailBucket } = this;
+    const { resourceDb, logger, contentCdnBaseUrl } = this;
 
     // -------------------------------------------------------------------------
     // 1. GET /accounts/{accountId}/resources — list resources, scoped by status, optionally
@@ -73,7 +70,7 @@ export class ResourcesApi {
         return err(c, 500, "Internal Server Error");
       }
       const items = workflow ? result.value.items.filter(r => r.workflow === workflow) : result.value.items;
-      return c.json(page("resources", items.map(toApiResource), result.value.nextCursor), 200);
+      return c.json(page("resources", items.map(r => toApiResource(r, contentCdnBaseUrl)), result.value.nextCursor), 200);
     });
 
     // -------------------------------------------------------------------------
@@ -98,7 +95,7 @@ export class ResourcesApi {
         return err(c, 500, "Internal Server Error");
       }
       if (!result.value || result.value.accountId !== accountId) return err(c, 404, "Resource not found");
-      return c.json(toApiResource(result.value), 200);
+      return c.json(toApiResource(result.value, contentCdnBaseUrl), 200);
     });
 
     // -------------------------------------------------------------------------
@@ -134,44 +131,8 @@ export class ResourcesApi {
       // Row disappeared between the existence-check GET above and this write (e.g. TTL expiry) —
       // the ConditionExpression on setResourceStatus stopped it from being silently recreated.
       if (!result.value) return err(c, 404, "Resource not found");
-      return c.json(toApiResource(result.value), 200);
+      return c.json(toApiResource(result.value, contentCdnBaseUrl), 200);
     });
 
-    // -------------------------------------------------------------------------
-    // 4. GET /accounts/{accountId}/resources/{resourceId}/assets/{assetIndex}/download
-    //    Redirect to a short-lived presigned S3 URL for the asset's backing file
-    //    (e.g. a .pkpass attachment). Only assets with an s3Key are downloadable.
-    // -------------------------------------------------------------------------
-    app.openapi(route({
-      method: "get",
-      path: "/accounts/{accountId}/resources/{resourceId}/assets/{assetIndex}/download",
-      tags: ["Resources"],
-      request: { params: z.object({ accountId: z.string(), resourceId: z.string(), assetIndex: z.string() }) },
-      middleware: [authz("resources:read", c => `accounts/${c.req.param("accountId")!}/resources/${c.req.param("resourceId")!}`)] as const,
-      responses: {
-        302: { description: "Redirect to presigned S3 URL" },
-      },
-    }), async (c) => {
-      const accountId = c.req.param("accountId")!;
-      const decoded = decodeResourceId(c.req.param("resourceId")!);
-      if (!decoded) return err(c, 404, "Resource not found");
-      const assetIndex = parseInt(c.req.param("assetIndex")!, 10);
-      if (!Number.isFinite(assetIndex) || assetIndex < 0) return err(c, 400, "Invalid asset index");
-
-      const result = await resourceDb.getResource(accountId, decoded.threadId, decoded.sk);
-      if (result.isErr()) {
-        logger.error("Failed to get resource for asset download.", { code: "api.resources.asset_download_failed", error: result.error });
-        return err(c, 500, "Internal Server Error");
-      }
-      if (!result.value || result.value.accountId !== accountId) return err(c, 404, "Resource not found");
-
-      const assets = result.value.assets ?? [];
-      const asset = assets[assetIndex];
-      if (!asset) return err(c, 404, "Asset not found");
-      if (!asset.s3Key) return err(c, 404, "Asset has no downloadable file");
-
-      const url = await generatePresignedGet(s3Client, emailBucket, asset.s3Key);
-      return c.redirect(url, 302);
-    });
   }
 }

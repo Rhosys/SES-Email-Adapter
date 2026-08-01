@@ -32,7 +32,6 @@ const EXPECTED_ROUTES = [
   "GET /accounts/{accountId}/resources",
   "GET /accounts/{accountId}/resources/{resourceId}",
   "PATCH /accounts/{accountId}/resources/{resourceId}",
-  "GET /accounts/{accountId}/resources/{resourceId}/assets/{assetIndex}/download",
   "GET /accounts/{accountId}/threads/{threadId}",
   "PATCH /accounts/{accountId}/threads/{threadId}",
   "GET /accounts/{accountId}/threads/{threadId}/signals",

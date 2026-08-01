@@ -1,6 +1,6 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import type { Context } from "hono";
-import type { S3Client } from "@aws-sdk/client-s3";
+import type { ContentStore } from "./content-store.js";
 import type { AuditDatabase } from "../database/audit-database.js";
 import type { ThreadDatabase } from "../database/thread-database.js";
 import type { ResourceDatabase } from "../database/resource-database.js";
@@ -48,6 +48,7 @@ import { createAuthorize } from "./authorization-middleware.js";
 import { ErrorResponse, ErrorCode } from "./schemas.js";
 
 export type { AppEnv } from "./route-helpers.js";
+export type { ContentStore } from "./content-store.js";
 export type { AccessService, AccountRole, AccountUser, UserProfile } from "./accountsApi.js";
 export type { JobDispatcher } from "./adminApi.js";
 export type { SignalReprocessor } from "./threadsApi.js";
@@ -94,15 +95,14 @@ export interface AppDeps {
   rsvpComposer: typeof SendRsvpFn;
   postApprovalCalendarDeps: PostApprovalCalendarHandlerDeps;
   schedulerClient: SchedulerClient;
-  s3Client: S3Client;
-  emailBucket: string;
+  contentStore: ContentStore;
   triggerDigest: (accountId: string) => Promise<void>;
   embeddingGenerator: EmbeddingGenerator;
   threadMatcher: ThreadMatcher;
   unsubscribeTokenGenerator: UnsubscribeTokenGenerator;
 }
 
-export function createApp({ threadDb, resourceDb, accountDb, auditDb, auth, access, logger, forwardingService, jobDispatcher, healthCheckValidator, signalReprocessor, draftSendDispatcher, accountCreationStarter, appBaseUrl, contentCdnBaseUrl, astValidator, billingHandler, emailService, domainIdentityService, rsvpComposer, postApprovalCalendarDeps, schedulerClient, s3Client, emailBucket, triggerDigest, embeddingGenerator, threadMatcher, unsubscribeTokenGenerator }: AppDeps) {
+export function createApp({ threadDb, resourceDb, accountDb, auditDb, auth, access, logger, forwardingService, jobDispatcher, healthCheckValidator, signalReprocessor, draftSendDispatcher, accountCreationStarter, appBaseUrl, contentCdnBaseUrl, astValidator, billingHandler, emailService, domainIdentityService, rsvpComposer, postApprovalCalendarDeps, schedulerClient, contentStore, triggerDigest, embeddingGenerator, threadMatcher, unsubscribeTokenGenerator }: AppDeps) {
   type AppEnv = { Variables: { auth: AuthContext; authorizationVerified?: boolean; [ROUTE_NOT_FOUND_KEY]?: boolean } };
   const app = new OpenAPIHono<AppEnv>();
 
@@ -249,8 +249,8 @@ export function createApp({ threadDb, resourceDb, accountDb, auditDb, auth, acce
   // Route registrations
   // -------------------------------------------------------------------------
   new AccountsApi(accountDb, access, logger, accountCreationStarter, emailService, appBaseUrl, triggerDigest).register(app, helpers);
-  new ThreadsApi(threadDb, accountDb, logger, draftSendDispatcher, schedulerClient, emailService, rsvpComposer, postApprovalCalendarDeps, signalReprocessor, s3Client, emailBucket, contentCdnBaseUrl, embeddingGenerator, threadMatcher).register(app, helpers);
-  new ResourcesApi(resourceDb, logger, s3Client, emailBucket).register(app, helpers);
+  new ThreadsApi(threadDb, accountDb, logger, draftSendDispatcher, schedulerClient, emailService, rsvpComposer, postApprovalCalendarDeps, signalReprocessor, contentStore, contentCdnBaseUrl, embeddingGenerator, threadMatcher).register(app, helpers);
+  new ResourcesApi(resourceDb, logger, contentCdnBaseUrl).register(app, helpers);
   new SignalsApi(threadDb, accountDb, logger, postApprovalCalendarDeps, contentCdnBaseUrl).register(app, helpers);
   new ViewsApi(accountDb, logger).register(app, helpers);
   new LabelsApi(accountDb, logger).register(app, helpers);

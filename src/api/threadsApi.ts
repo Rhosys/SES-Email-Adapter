@@ -9,10 +9,9 @@ import { zParse } from "./validate.js";
 import { toApiThread, toApiSignal } from "./transform.js";
 import { buildScheduleName } from "../scheduler/schedule-name.js";
 import { durationToSeconds } from "../processor/retention.js";
-import { generatePresignedGet } from "../processor/presign.js";
 import { effectiveEmailKey } from "../embedding/retention-tier.js";
 import { isCalendarEventSignal, isEmailSignal } from "../types/index.js";
-import type { S3Client } from "@aws-sdk/client-s3";
+import type { ContentStore } from "./content-store.js";
 import type { Thread, Signal, AnySignal, Attachment, PageParams, ThreadStatus, Workflow } from "../types/index.js";
 import type { CalendarEventData, CalendarResponseData, DomainMisconfigurationData, Pagination } from "../types/index.js";
 import type { UpdateThreadFields, ThreadDatabase } from "../database/thread-database.js";
@@ -68,15 +67,14 @@ export class ThreadsApi {
     private readonly rsvpComposer: typeof SendRsvpFn,
     private readonly postApprovalCalendarDeps: PostApprovalCalendarHandlerDeps,
     private readonly signalReprocessor: SignalReprocessor,
-    private readonly s3Client: S3Client,
-    private readonly emailBucket: string,
+    private readonly contentStore: ContentStore,
     private readonly contentCdnBaseUrl: string,
     private readonly embeddingGenerator: EmbeddingGenerator,
     private readonly threadMatcher: ThreadMatcher,
   ) {}
 
   register(app: OpenAPIHono<AppEnv>, { authz, err, route }: RouteHelpers): void {
-    const { threadDb, accountDb, logger, draftSendDispatcher, schedulerClient, emailService, rsvpComposer, postApprovalCalendarDeps, signalReprocessor, s3Client, emailBucket, contentCdnBaseUrl, embeddingGenerator, threadMatcher } = this;
+    const { threadDb, accountDb, logger, draftSendDispatcher, schedulerClient, emailService, rsvpComposer, postApprovalCalendarDeps, signalReprocessor, contentStore, contentCdnBaseUrl, embeddingGenerator, threadMatcher } = this;
 
     // -------------------------------------------------------------------------
     // 1. GET /accounts/{accountId}/threads — list threads
@@ -755,7 +753,7 @@ export class ThreadsApi {
       if (!isEmailSignal(signal)) return err(c, 400, "Signal is not an email", "SIGNAL_NOT_FOUND");
       if (!signal.data.s3Key) return err(c, 404, "Raw email not available", "SIGNAL_NOT_FOUND");
 
-      const url = await generatePresignedGet(s3Client, emailBucket, effectiveEmailKey(signal.data.s3Key, signal.createdAt));
+      const url = await contentStore.getSignedUrl(effectiveEmailKey(signal.data.s3Key, signal.createdAt));
       return c.redirect(url, 307);
     });
 

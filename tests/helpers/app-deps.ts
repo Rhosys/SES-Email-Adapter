@@ -26,6 +26,7 @@ export function makeAppDeps(overrides: Partial<AppDeps>): AppDeps {
     rsvpComposer: (async () => ok(undefined)) as never,
     postApprovalCalendarDeps: { threadDb: {} as never, accountDb: {} as never, emailService: {} as never, serviceDomain: "platform.email.rhosys.cloud" } as never,
     schedulerClient: { scheduleMessage: async () => ok(undefined), deleteSchedule: async () => ok(undefined) } as never,
+    contentStore: { getSignedUrl: async () => "https://signed.test/key" } as never,
     triggerDigest: async () => {},
     embeddingGenerator: {} as never,
     threadMatcher: {} as never,

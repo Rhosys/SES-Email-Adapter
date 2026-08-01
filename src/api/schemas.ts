@@ -510,7 +510,7 @@ export const ResourceAsset = z.object({
   label: z.string(),
   rawValue: z.string(),
   sourceSignalId: z.string(),
-  s3Key: z.string().optional(),
+  url: z.string().optional(),
   extractedAt: z.string(),
 }).openapi("ResourceAsset");
 

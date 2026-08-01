@@ -35,6 +35,7 @@ import { checkDomain } from "./dns/dns-checker.js";
 import { AuthressAuthService } from "./api/authress-auth.js";
 import { AuthressAccessService } from "./api/authress-access.js";
 import { createApp } from "./api/app.js";
+import { S3ContentStore } from "./api/content-store.js";
 import { BedrockEmbeddingGenerator } from "./embedding/embedding-generator.js";
 import { createSearchDatabase } from "./database/thread-matcher.js";
 import { S3RetentionServiceImpl } from "./embedding/s3-retention-service.js";
@@ -353,8 +354,7 @@ export class CompositeRoot {
       rsvpComposer: sendRsvp,
       postApprovalCalendarDeps,
       schedulerClient,
-      s3Client: s3,
-      emailBucket: S3_BUCKET,
+      contentStore: new S3ContentStore(s3, S3_BUCKET),
       triggerDigest: async (accountId: string) => {
         await sqs.send(new SendMessageCommand({
           QueueUrl: SIGNAL_QUEUE_URL,
