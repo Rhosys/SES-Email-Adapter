@@ -143,6 +143,7 @@ function buildProcessor(opts: {
     getObject: vi.fn().mockImplementation(() => Promise.resolve(new TextEncoder().encode(icsContent))),
     putObject: vi.fn().mockResolvedValue(undefined),
     getPresignedPost: vi.fn().mockResolvedValue({ url: "https://post-url", fields: {} }),
+    saveIcsContentAsCalendar: vi.fn().mockResolvedValue(undefined),
   };
 
   const threadDb = makeThreadDbMock();

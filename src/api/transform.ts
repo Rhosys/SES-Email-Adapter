@@ -66,7 +66,7 @@ export function decodeResourceId(resourceId: string): { threadId: string; sk: st
   return { threadId: decoded.slice(0, sepIndex), sk: decoded.slice(sepIndex + 1) };
 }
 
-export function toApiResource(resource: DbResource, contentCdnBaseUrl?: string): Api.Resource {
+export function toApiResource(resource: DbResource): Api.Resource {
   return {
     resourceId: encodeResourceId(resource.threadId, `${resource.workflow}#${resource.resourceKey}`),
     threadId: resource.threadId,
@@ -79,7 +79,7 @@ export function toApiResource(resource: DbResource, contentCdnBaseUrl?: string):
       label: a.label,
       rawValue: a.rawValue,
       sourceSignalId: a.sourceSignalId,
-      ...(a.s3Key && contentCdnBaseUrl ? { url: `${contentCdnBaseUrl}/${a.s3Key}` } : {}),
+      ...(a.s3Key ? { s3Key: a.s3Key } : {}),
       extractedAt: a.extractedAt,
     })),
     createdAt: resource.createdAt,

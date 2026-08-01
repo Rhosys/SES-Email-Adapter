@@ -4,7 +4,7 @@ import type { ProcessorError } from "../errors.js";
 import type { ProviderAdapter, ProviderFetchError } from "./provider-adapter.js";
 import type { InboundSignalMessage } from "../processor/processor.js";
 import type { Logger } from "../logger.js";
-import type { ContentStore } from "../content-store.js";
+import type { EmailContentStore } from "../content-store.js";
 
 export interface EmxInboundPayload {
   source: "gmail" | "outlook";
@@ -15,7 +15,7 @@ export interface EmxInboundPayload {
 
 interface EmxInboundWorkerDeps {
   logger: Logger;
-  emailContentStore: ContentStore;
+  emailContentStore: EmailContentStore;
   adapters: Record<string, ProviderAdapter>;
   processRecord: (message: InboundSignalMessage, receiveCount: number) => Promise<Result<void, ProcessorError>>;
   getProviderToken: (accountId: string, connectionId: string) => Promise<string>;
@@ -23,7 +23,7 @@ interface EmxInboundWorkerDeps {
 
 export class EmxInboundWorker {
   private readonly logger: Logger;
-  private readonly emailContentStore: ContentStore;
+  private readonly emailContentStore: EmailContentStore;
   private readonly adapters: Record<string, ProviderAdapter>;
   private readonly processRecord: EmxInboundWorkerDeps["processRecord"];
   private readonly getProviderToken: EmxInboundWorkerDeps["getProviderToken"];

@@ -1,4 +1,4 @@
-import type { ContentStore } from "../content-store.js";
+import type { EmailContentStore, ContentStore } from "../content-store.js";
 import { DateTime, Duration } from "luxon";
 import { generateId } from "../utils/id.js";
 import type { Logger } from "../logger.js";
@@ -285,7 +285,7 @@ interface SignalProcessorOptions {
   handlerRegistry: HandlerRegistry;
   calendarForwarderDeps: CalendarForwarderDeps;
   schedulerClient: SchedulerClient;
-  emailContentStore: ContentStore;
+  emailContentStore: EmailContentStore;
   contentStore: ContentStore;
 }
 
@@ -312,7 +312,7 @@ export class SignalProcessor {
   private readonly handlerRegistry: HandlerRegistry;
   private readonly calendarForwarderDeps: CalendarForwarderDeps;
   private readonly schedulerClient: SchedulerClient;
-  private readonly emailContentStore: ContentStore;
+  private readonly emailContentStore: EmailContentStore;
   private readonly contentStore: ContentStore;
 
   constructor(opts: SignalProcessorOptions) {
@@ -1602,7 +1602,7 @@ export class SignalProcessor {
 
     // Store raw .ics as S3 attachment on the calendar signal
     const icsS3Key = `content/accounts/${accountId}/calendar/${calendarSignalId}/invite.ics`;
-    await this.contentStore.putObject(icsS3Key, Buffer.from(rawIcsContent, "utf-8"), "text/calendar");
+    await this.contentStore.saveIcsContentAsCalendar(icsS3Key, rawIcsContent);
 
     // Build calendar signal with linkedSignalId pointing to the email signal
     const calendarSignal: Signal<CalendarEventData> = {

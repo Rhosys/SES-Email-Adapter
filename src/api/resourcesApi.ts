@@ -21,11 +21,10 @@ export class ResourcesApi {
   constructor(
     private readonly resourceDb: ResourceDatabase,
     private readonly logger: Logger,
-    private readonly contentCdnBaseUrl: string,
   ) {}
 
   register(app: OpenAPIHono<AppEnv>, { authz, err, route }: RouteHelpers): void {
-    const { resourceDb, logger, contentCdnBaseUrl } = this;
+    const { resourceDb, logger } = this;
 
     // -------------------------------------------------------------------------
     // 1. GET /accounts/{accountId}/resources — list resources, scoped by status, optionally
@@ -70,7 +69,7 @@ export class ResourcesApi {
         return err(c, 500, "Internal Server Error");
       }
       const items = workflow ? result.value.items.filter(r => r.workflow === workflow) : result.value.items;
-      return c.json(page("resources", items.map(r => toApiResource(r, contentCdnBaseUrl)), result.value.nextCursor), 200);
+      return c.json(page("resources", items.map(toApiResource), result.value.nextCursor), 200);
     });
 
     // -------------------------------------------------------------------------
@@ -95,7 +94,7 @@ export class ResourcesApi {
         return err(c, 500, "Internal Server Error");
       }
       if (!result.value || result.value.accountId !== accountId) return err(c, 404, "Resource not found");
-      return c.json(toApiResource(result.value, contentCdnBaseUrl), 200);
+      return c.json(toApiResource(result.value), 200);
     });
 
     // -------------------------------------------------------------------------
@@ -131,7 +130,7 @@ export class ResourcesApi {
       // Row disappeared between the existence-check GET above and this write (e.g. TTL expiry) —
       // the ConditionExpression on setResourceStatus stopped it from being silently recreated.
       if (!result.value) return err(c, 404, "Resource not found");
-      return c.json(toApiResource(result.value, contentCdnBaseUrl), 200);
+      return c.json(toApiResource(result.value), 200);
     });
 
   }

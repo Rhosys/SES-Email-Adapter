@@ -94,7 +94,8 @@ function makeContentStore(icsContent: string = VALID_ICS): ContentStore {
     getObject: vi.fn().mockResolvedValue(new TextEncoder().encode(icsContent)),
     putObject: vi.fn().mockResolvedValue(undefined),
     getPresignedPost: vi.fn().mockResolvedValue({ url: "https://post-url", fields: {} }),
-  };
+    saveIcsContentAsCalendar: vi.fn().mockResolvedValue(undefined),
+  } as unknown as ContentStore;
 }
 
 function makeArcDb() {

@@ -13,7 +13,7 @@ import type { IForwardingService } from "../../src/forwarding/forwarding-service
 //   CONTENT_CDN_BASE_URL  — CDN base for attachment URLs
 
 import { S3Client, CreateBucketCommand, PutObjectCommand } from '@aws-sdk/client-s3';
-import { S3ContentStore } from "../../src/content-store.js";
+import { EmailContentStore, ContentStore } from "../../src/content-store.js";
 import { SQSClient, CreateQueueCommand, SendMessageCommand, ReceiveMessageCommand, DeleteMessageCommand } from '@aws-sdk/client-sqs';
 import { AccountDatabase } from '../../src/database/account-database.js';
 import { ThreadDatabase } from '../../src/database/thread-database.js';
@@ -144,8 +144,8 @@ export async function createProcessorHarness(): Promise<ProcessorHarness> {
       hmac: makeHmacGeneratorFake(),
     },
     logger,
-    emailContentStore: new S3ContentStore(s3, EMAIL_BUCKET),
-    contentStore: new S3ContentStore(s3, CONTENT_BUCKET),
+    emailContentStore: new EmailContentStore(s3, EMAIL_BUCKET),
+    contentStore: new ContentStore(s3, CONTENT_BUCKET),
   });
 
   const access: AccessService = {

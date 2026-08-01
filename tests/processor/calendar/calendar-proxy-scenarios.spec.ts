@@ -547,12 +547,13 @@ describe("Scenario: approving quarantined email triggers calendar forwarding", (
       hmac,
     };
 
-    const contentStore: PostApprovalCalendarHandlerDeps["contentStore"] = {
+    const contentStore = {
       getSignedUrl: vi.fn().mockResolvedValue("https://signed-url"),
       getObject: vi.fn().mockResolvedValue(new TextEncoder().encode(VALID_ICS)),
       putObject: vi.fn().mockResolvedValue(undefined),
       getPresignedPost: vi.fn().mockResolvedValue({ url: "https://post-url", fields: {} }),
-    };
+      saveIcsContentAsCalendar: vi.fn().mockResolvedValue(undefined),
+    } as unknown as PostApprovalCalendarHandlerDeps["contentStore"];
 
     const deps: PostApprovalCalendarHandlerDeps = {
       threadDb,

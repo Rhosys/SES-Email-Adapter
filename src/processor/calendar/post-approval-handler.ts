@@ -111,7 +111,7 @@ export async function handlePostApprovalCalendar(
   // Store raw .ics as attachment on the calendar signal
   const icsS3Key = `accounts/${accountId}/calendar/${calendarSignalId}/invite.ics`;
   try {
-    await contentStore.putObject(icsS3Key, Buffer.from(rawIcsContent, "utf-8"), "text/calendar");
+    await contentStore.saveIcsContentAsCalendar(icsS3Key, rawIcsContent);
   } catch (e) {
     logger.warn("Post-approval calendar: failed to store .ics in content store.", {
       code: "processor.post_approval_calendar.s3_put_failed",

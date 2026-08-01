@@ -53,6 +53,8 @@ export const stubContentStore = {
   getObject: vi.fn().mockResolvedValue(new Uint8Array()),
   putObject: vi.fn().mockResolvedValue(undefined),
   getPresignedPost: vi.fn().mockResolvedValue({ url: "https://post-url", fields: {} }),
+  getRawEmailUrl: vi.fn().mockResolvedValue("https://signed-url"),
+  saveIcsContentAsCalendar: vi.fn().mockResolvedValue(undefined),
 } as never;
 
 /** Default processor options for the new fields */

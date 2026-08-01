@@ -171,6 +171,7 @@ function buildProcessor(opts: {
     }),
     putObject: vi.fn().mockResolvedValue(undefined),
     getPresignedPost: vi.fn().mockResolvedValue({ url: "https://post-url", fields: {} }),
+    saveIcsContentAsCalendar: vi.fn().mockResolvedValue(undefined),
   };
 
   const accountDb = makeAccountDbMock(TEST_ACCOUNT_ID);
