@@ -4,7 +4,7 @@ import { ok } from "./errors.js";
 import type { Result } from "./errors.js";
 import { isStepFunctionTaskEvent } from "./onboarding/types.js";
 import type { InboundSignalMessage, SideEffectPayload } from "./processor/processor.js";
-import type { SesInboundNotification, SesReceiptNotification } from "./types/ses-notification.js";
+import type { SESMessage, SESReceiptS3Action } from "aws-lambda";
 import type { FollowupMessage } from "./scheduler/followup-handler.js";
 import type { RsvpReminderMessage } from "./scheduler/rsvp-reminder.js";
 import type { IDigestSendMessage } from "./digest/digest-worker.js";
@@ -255,15 +255,14 @@ async function processSqsRecord(
     return ok(undefined);
   }
 
-  // Step 3: Structural check — route by shape, not by notificationType string
-  const notification = inner as SesInboundNotification;
+  // Step 3: Route by structure. Two SNS topics land on this queue:
+  // - SES inbound receipt rule (S3 action): has `receipt.action` + `mail` → SESMessage
+  // - SES sending configuration set feedback (Bounce/Complaint/Delivery): has
+  //   `notificationType` (older format) or `eventType` (newer format), no `receipt.action`
+  const notification = inner as Partial<SESMessage> & { notificationType?: string; eventType?: string };
 
-  if (!notification.receipt?.action) {
-    // No receipt.action → feedback notification (Bounce, Complaint, Delivery, etc.)
-    // or unrecognized shape. SES uses either `notificationType` (inbound receipt rule)
-    // or `eventType` (configuration-set event destination) as the type discriminator.
-    const innerTyped = inner as { notificationType?: string; eventType?: string };
-    if (!innerTyped.notificationType && !innerTyped.eventType) {
+  if (!notification.receipt?.action || !notification.mail) {
+    if (!notification.notificationType && !notification.eventType) {
       logger.error("Parsed SNS Message is not a recognized SES notification shape. Dropping.", {
         code: "handler.sqs.unknown_ses_notification_shape",
         sqsMessageId,
@@ -271,31 +270,22 @@ async function processSqsRecord(
       });
       return ok(undefined);
     }
-    await sesFeedbackProcessor.processNotification(notification);
+    await sesFeedbackProcessor.processNotification(inner);
     return ok(undefined);
   }
 
-  // receipt.action is present → inbound email
-  const mail = notification.mail;
-  if (!mail) {
-    logger.error("SES inbound notification has receipt.action but missing mail field. Dropping.", {
-      code: "handler.sqs.malformed_received",
-      sqsMessageId,
-    });
-    return ok(undefined);
-  }
-
-  // Structural guards above confirm mail + receipt.action — narrow to type-safe access
-  const inbound = notification as unknown as SesReceiptNotification;
+  // receipt.action + mail confirmed present → narrow to fully required SESMessage
+  const ses = inner as SESMessage;
+  const s3Action = ses.receipt.action as SESReceiptS3Action;
 
   const message: InboundSignalMessage = {
-    s3Key: inbound.receipt.action.objectKey,
-    compositeMailMessageId: `ses-${inbound.mail.messageId}`,
+    s3Key: s3Action.objectKey,
+    compositeMailMessageId: `ses-${ses.mail.messageId}`,
     idempotencyKey: sqsMessageId,
-    timestamp: inbound.mail.timestamp,
-    destination: inbound.mail.destination,
-    dkimVerdict: inbound.receipt.dkimVerdict.status,
-    dmarcVerdict: inbound.receipt.dmarcVerdict.status,
+    timestamp: ses.mail.timestamp,
+    destination: ses.mail.destination,
+    dkimVerdict: ses.receipt.dkimVerdict.status,
+    dmarcVerdict: ses.receipt.dmarcVerdict.status,
   };
   return processor.processRecord(message, receiveCount);
 }
