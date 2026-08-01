@@ -417,6 +417,7 @@ export class CompositeRoot {
       gmailProvider,
       outlookProvider,
       adapters: emxAdapters,
+      getProviderToken,
     });
 
     // -----------------------------------------------------------------------

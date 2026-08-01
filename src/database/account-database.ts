@@ -1465,7 +1465,7 @@ export class AccountDatabase {
   // External Mail Exchanges (EMX)
   // ---------------------------------------------------------------------------
 
-  async createExternalExchange(accountId: string, data: { platform: ExternalMailExchange["platform"]; emailAddress: string }): Promise<Result<ExternalMailExchange, DbError>> {
+  async createExternalExchange(accountId: string, data: { platform: ExternalMailExchange["platform"]; emailAddress: string; status: ExternalMailExchange["status"]; syncCursor?: string; expiresAt?: string; providerSubscriptionId?: string; errorReason?: string }): Promise<Result<ExternalMailExchange, DbError>> {
     const now = DateTime.utc().toISO()!;
     const id = generateId("emx");
     const item: ExternalMailExchange = {
@@ -1473,7 +1473,11 @@ export class AccountDatabase {
       accountId,
       platform: data.platform,
       emailAddress: data.emailAddress,
-      status: "pending_consent",
+      status: data.status,
+      ...(data.syncCursor !== undefined ? { syncCursor: data.syncCursor } : {}),
+      ...(data.expiresAt !== undefined ? { expiresAt: data.expiresAt } : {}),
+      ...(data.providerSubscriptionId !== undefined ? { providerSubscriptionId: data.providerSubscriptionId } : {}),
+      ...(data.errorReason !== undefined ? { errorReason: data.errorReason } : {}),
       createdAt: now,
       updatedAt: now,
     };

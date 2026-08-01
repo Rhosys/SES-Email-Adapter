@@ -730,7 +730,7 @@ export interface ForwardingTarget {
 export const EMX_PLATFORMS = ["gmail", "outlook", "imap", "jmap"] as const;
 export type EmxPlatform = (typeof EMX_PLATFORMS)[number];
 
-export const EMX_STATUSES = ["pending_consent", "active", "activation_failed"] as const;
+export const EMX_STATUSES = ["active", "activation_failed"] as const;
 export type EmxStatus = (typeof EMX_STATUSES)[number];
 
 export interface ExternalMailExchange {

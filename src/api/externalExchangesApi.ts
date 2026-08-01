@@ -35,11 +35,12 @@ export class ExternalExchangesApi {
   constructor(
     private readonly accountDb: AccountDatabase,
     private readonly adapters: Record<string, ProviderAdapter>,
+    private readonly getProviderToken: (accountId: string, connectionId: string) => Promise<string>,
     private readonly logger: Logger,
   ) {}
 
   register(app: OpenAPIHono<AppEnv>, { authz, err, route }: RouteHelpers): void {
-    const { accountDb, adapters, logger } = this;
+    const { accountDb, adapters, getProviderToken, logger } = this;
 
     // GET /accounts/:accountId/external-exchanges
     app.openapi(route({
@@ -67,8 +68,34 @@ export class ExternalExchangesApi {
     }), async (c) => {
       const accountId = c.req.param("accountId")!;
       const body = await zParse(CreateExternalExchangeRequest, c.req.raw);
-      const result = await accountDb.createExternalExchange(accountId, body);
-      if (result.isErr()) { logger.error("Failed to create external exchange", { code: "api.emx.create_failed", error: result.error }); return err(c, 500, "Internal Server Error"); }
+
+      const adapter = adapters[body.platform];
+      if (!adapter) return err(c, 422, "Unsupported platform");
+
+      const connectionId = body.platform === "gmail" ? "google" : "microsoft";
+      let token: string;
+      try {
+        token = await getProviderToken(accountId, connectionId);
+      } catch (e) {
+        logger.error("Failed to get provider token for activation", { code: "api.emx.create.token_failed", error: e });
+        const result = await accountDb.createExternalExchange(accountId, { platform: body.platform, emailAddress: body.emailAddress, status: "activation_failed", errorReason: "Failed to obtain provider token" });
+        if (result.isErr()) { logger.error("Failed to create exchange record", { code: "api.emx.create_failed", error: result.error }); return err(c, 500, "Internal Server Error"); }
+        return c.json(result.value, 201);
+      }
+
+      const emxStub = { id: "", accountId, platform: body.platform, emailAddress: body.emailAddress, status: "active" as const, createdAt: "", updatedAt: "" };
+      const activateResult = await adapter.activate(token, emxStub);
+      if (activateResult.isErr()) {
+        const errorReason = String(activateResult.error.cause);
+        const result = await accountDb.createExternalExchange(accountId, { platform: body.platform, emailAddress: body.emailAddress, status: "activation_failed", errorReason });
+        if (result.isErr()) { logger.error("Failed to create exchange record", { code: "api.emx.create_failed", error: result.error }); return err(c, 500, "Internal Server Error"); }
+        logger.error("Failed to activate exchange", { code: "api.emx.activate_failed", error: activateResult.error });
+        return c.json(result.value, 201);
+      }
+
+      const { syncCursor, expiresAt, providerSubscriptionId } = activateResult.value;
+      const result = await accountDb.createExternalExchange(accountId, { platform: body.platform, emailAddress: body.emailAddress, status: "active", syncCursor, expiresAt, providerSubscriptionId });
+      if (result.isErr()) { logger.error("Failed to create exchange record", { code: "api.emx.create_failed", error: result.error }); return err(c, 500, "Internal Server Error"); }
       return c.json(result.value, 201);
     });
 
@@ -89,41 +116,6 @@ export class ExternalExchangesApi {
       return c.json(result.value, 200);
     });
 
-    // POST /accounts/:accountId/external-exchanges/:emxId/activate
-    app.openapi(route({
-      method: "post",
-      path: "/accounts/{accountId}/external-exchanges/{emxId}/activate",
-      tags: ["External Exchanges"],
-      request: { params: z.object({ accountId: z.string(), emxId: z.string() }) },
-      middleware: [authz("external-exchanges:write", c => `accounts/${c.req.param("accountId")!}/external-exchanges/${c.req.param("emxId")!}`)] as const,
-      responses: { 200: { content: { "application/json": { schema: ExternalExchangeResponse } }, description: "Exchange activated" } },
-    }), async (c) => {
-      const accountId = c.req.param("accountId")!;
-      const emxId = c.req.param("emxId")!;
-      const getResult = await accountDb.getExternalExchange(accountId, emxId);
-      if (getResult.isErr()) { logger.error("Failed to get exchange for activate", { code: "api.emx.activate.get_failed", error: getResult.error }); return err(c, 500, "Internal Server Error"); }
-      const emx = getResult.value;
-      if (!emx) return err(c, 404, "Exchange not found");
-
-      const adapter = adapters[emx.platform];
-      if (!adapter) return err(c, 422, "Unsupported platform");
-
-      // TODO: Get scoped token from Authress for this user's provider connection
-      const token = "";
-
-      const activateResult = await adapter.activate(token, emx);
-      if (activateResult.isErr()) {
-        await accountDb.updateExternalExchange(accountId, emxId, { status: "activation_failed", errorReason: String(activateResult.error.cause) });
-        logger.error("Failed to activate exchange", { code: "api.emx.activate_failed", emxId, error: activateResult.error });
-        return err(c, 422, "Activation failed");
-      }
-
-      const { syncCursor, expiresAt, providerSubscriptionId } = activateResult.value;
-      const updateResult = await accountDb.updateExternalExchange(accountId, emxId, { status: "active", syncCursor, expiresAt, providerSubscriptionId });
-      if (updateResult.isErr()) { logger.error("Failed to update exchange after activate", { code: "api.emx.activate.update_failed", error: updateResult.error }); return err(c, 500, "Internal Server Error"); }
-      return c.json(updateResult.value, 200);
-    });
-
     // DELETE /accounts/:accountId/external-exchanges/:emxId
     app.openapi(route({
       method: "delete",
@@ -140,14 +132,23 @@ export class ExternalExchangesApi {
       const emx = getResult.value;
       if (!emx) return err(c, 404, "Exchange not found");
 
-      // Deactivate with provider if active
+      // Only deactivate with provider if the exchange was successfully activated
       if (emx.status === "active") {
         const adapter = adapters[emx.platform];
         if (adapter) {
-          const token = ""; // TODO: Get scoped token from Authress
-          const deactivateResult = await adapter.deactivate(token, emx);
-          if (deactivateResult.isErr()) {
-            logger.warn("Failed to deactivate exchange with provider — proceeding with local deletion", { code: "api.emx.deactivate_failed", emxId, error: deactivateResult.error });
+          const connectionId = emx.platform === "gmail" ? "google" : "microsoft";
+          let token: string;
+          try {
+            token = await getProviderToken(accountId, connectionId);
+          } catch (e) {
+            logger.warn("Failed to get provider token for deactivation — proceeding with local deletion", { code: "api.emx.deactivate.token_failed", emxId, error: e });
+            token = "";
+          }
+          if (token) {
+            const deactivateResult = await adapter.deactivate(token, emx);
+            if (deactivateResult.isErr()) {
+              logger.warn("Failed to deactivate exchange with provider — proceeding with local deletion", { code: "api.emx.deactivate_failed", emxId, error: deactivateResult.error });
+            }
           }
         }
       }
