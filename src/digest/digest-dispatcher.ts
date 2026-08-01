@@ -5,13 +5,12 @@
 // account. All-or-nothing — quits on any SQS batch send failure.
 // ---------------------------------------------------------------------------
 
-import { SendMessageBatchCommand } from "@aws-sdk/client-sqs"
-import type { SQSClient } from "@aws-sdk/client-sqs"
 import { DateTime } from "luxon"
 
-import { ok, err, dbError } from "../errors.js"
+import { ok, err } from "../errors.js"
 import type { DbError, Result } from "../errors.js"
 import type { Logger } from "../logger.js"
+import type { SignalQueue } from "../messaging/signal-queue.js"
 import { shouldDispatchDigest } from "./digest-frequency-filter.js"
 import type { DigestFrequency } from "./digest-frequency-filter.js"
 
@@ -26,8 +25,7 @@ export interface IAccountMetaRow {
 
 export interface IDigestDispatcherDeps {
   accountDb: { queryAllAccountMetas(): Promise<Result<IAccountMetaRow[], DbError>> }
-  sqsClient: SQSClient
-  queueUrl: string
+  signalQueue: SignalQueue
   logger: Logger
 }
 
@@ -43,7 +41,7 @@ export class DigestDispatcher {
   }
 
   async dispatch(today: DateTime = DateTime.utc()): Promise<Result<void, DbError>> {
-    const { accountDb, sqsClient, queueUrl, logger } = this.deps
+    const { accountDb, signalQueue, logger } = this.deps
 
     const metasResult = await accountDb.queryAllAccountMetas()
     if (metasResult.isErr()) {
@@ -69,34 +67,18 @@ export class DigestDispatcher {
     const batches = chunk(qualifying, 10)
     for (const batch of batches) {
       const entries = batch.map((account, index) => ({
-        Id: `${index}`,
-        MessageBody: JSON.stringify({ accountId: account.id }),
-        MessageAttributes: {
-          messageType: { DataType: "String" as const, StringValue: "digest_send" },
-        },
+        id: `${index}`,
+        payload: { accountId: account.id },
       }))
 
-      try {
-        const result = await sqsClient.send(new SendMessageBatchCommand({
-          QueueUrl: queueUrl,
-          Entries: entries,
-        }))
-
-        if (result.Failed && result.Failed.length > 0) {
-          logger.error("SQS batch send had partial failures — aborting dispatch", {
-            code: "digest.dispatch.batch_partial_failure",
-            failed: result.Failed,
-            batchSize: entries.length,
-          })
-          return err(dbError(new Error(`SQS batch send partial failure: ${result.Failed.length} messages failed`)))
-        }
-      } catch (e) {
-        logger.error("SQS batch send threw — aborting dispatch", {
+      const result = await signalQueue.sendBatch("digest_send", entries)
+      if (result.isErr()) {
+        logger.error("SQS batch send failed — aborting dispatch", {
           code: "digest.dispatch.batch_send_error",
-          error: e,
+          error: result.error,
           batchSize: entries.length,
         })
-        return err(dbError(e))
+        return err(result.error)
       }
     }
 

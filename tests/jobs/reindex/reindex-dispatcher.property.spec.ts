@@ -8,18 +8,28 @@
 // 4. totalSegments equals the requested segmentCount
 // 5. modelId is resolved from the cluster registry
 
-import { describe, it, expect, beforeEach } from "vitest";
-import { mockClient } from "aws-sdk-client-mock";
-import { SQSClient, SendMessageCommand } from "@aws-sdk/client-sqs";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { ReindexDispatcher } from "../../../src/jobs/reindex/reindex-dispatcher.js";
 import { CLUSTER_REGISTRY } from "../../../src/embedding/cluster-registry.js";
 import { createMockLogger } from "../../helpers/mock-logger.js";
+import type { SignalQueue } from "../../../src/messaging/signal-queue.js";
+import { ok } from "neverthrow";
 
 // ---------------------------------------------------------------------------
 // Mocks
 // ---------------------------------------------------------------------------
 
-const sqsMock = mockClient(SQSClient);
+function createMockQueue() {
+  const calls: Array<{ messageType: string; payload: unknown }> = [];
+  const queue = {
+    send: vi.fn(async (messageType: string, payload: unknown) => {
+      calls.push({ messageType, payload });
+      return ok(undefined);
+    }),
+    sendBatch: vi.fn(async () => ok(undefined)),
+  } satisfies Pick<SignalQueue, "send" | "sendBatch">;
+  return { queue: queue as unknown as SignalQueue, calls };
+}
 
 // ---------------------------------------------------------------------------
 // Edge-case-driven tests
@@ -34,36 +44,33 @@ const cases: Array<[string, { targetRegistryId: string; segmentCount: number }]>
 
 describe("Property 10: Reindex dispatcher emits exactly N well-formed segment messages", () => {
   let dispatcher: ReindexDispatcher;
+  let mockQueue: ReturnType<typeof createMockQueue>;
 
   beforeEach(() => {
-    sqsMock.reset();
-    sqsMock.on(SendMessageCommand).resolves({});
-    dispatcher = new ReindexDispatcher({ sqs: sqsMock as unknown as SQSClient, logger: createMockLogger() });
+    mockQueue = createMockQueue();
+    dispatcher = new ReindexDispatcher({ signalQueue: mockQueue.queue, logger: createMockLogger() });
   });
 
   it.each(cases)("%s", async (_label, { targetRegistryId, segmentCount }) => {
-    sqsMock.reset();
-    sqsMock.on(SendMessageCommand).resolves({});
+    mockQueue = createMockQueue();
+    dispatcher = new ReindexDispatcher({ signalQueue: mockQueue.queue, logger: createMockLogger() });
 
     const result = await dispatcher.dispatch(targetRegistryId, segmentCount);
 
     expect(result.isOk()).toBe(true);
     if (!result.isOk()) return;
 
-    // 1. Verify exactly N SQS messages were sent
-    const sqsCalls = sqsMock.commandCalls(SendMessageCommand);
-    expect(sqsCalls).toHaveLength(segmentCount);
+    // 1. Verify exactly N messages were sent
+    expect(mockQueue.calls).toHaveLength(segmentCount);
 
     // 2. Parse all messages and verify structure
-    const messages = sqsCalls.map((call) =>
-      JSON.parse(call.args[0].input.MessageBody!) as {
-        jobId: string;
-        segment: number;
-        totalSegments: number;
-        targetRegistryId: string;
-        modelId: string;
-      },
-    );
+    const messages = mockQueue.calls.map((call) => call.payload as {
+      jobId: string;
+      segment: number;
+      totalSegments: number;
+      targetRegistryId: string;
+      modelId: string;
+    });
 
     // Get expected modelId from registry
     const expectedModelId = CLUSTER_REGISTRY.find(

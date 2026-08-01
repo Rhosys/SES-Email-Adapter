@@ -23,8 +23,8 @@ import type { SignalReprocessor } from "./threadsApi.js";
 import type { IForwardingService } from "../forwarding/forwarding-service.js";
 import type { EmbeddingGenerator } from "../embedding/embedding-generator.js";
 import type { ThreadMatcher } from "../database/thread-matcher.js";
-import type { GmailWebhookHandler } from "../external-exchanges/gmail-webhook-handler.js";
-import type { OutlookWebhookHandler } from "../external-exchanges/outlook-webhook-handler.js";
+import type { GmailProvider } from "../external-exchanges/gmail-provider.js";
+import type { OutlookProvider } from "../external-exchanges/outlook-provider.js";
 import type { ProviderAdapter } from "../external-exchanges/provider-adapter.js";
 
 import { WellKnownApi } from "./wellKnownApi.js";
@@ -104,12 +104,12 @@ export interface AppDeps {
   embeddingGenerator: EmbeddingGenerator;
   threadMatcher: ThreadMatcher;
   unsubscribeTokenGenerator: UnsubscribeTokenGenerator;
-  gmailWebhookHandler?: GmailWebhookHandler;
-  outlookWebhookHandler?: OutlookWebhookHandler;
+  gmailProvider?: GmailProvider;
+  outlookProvider?: OutlookProvider;
   adapters?: Record<string, ProviderAdapter>;
 }
 
-export function createApp({ threadDb, resourceDb, accountDb, auditDb, auth, access, logger, forwardingService, jobDispatcher, healthCheckValidator, signalReprocessor, draftSendDispatcher, accountCreationStarter, appBaseUrl, contentCdnBaseUrl, astValidator, billingHandler, emailService, domainIdentityService, rsvpComposer, postApprovalCalendarDeps, schedulerClient, s3Client, emailBucket, triggerDigest, embeddingGenerator, threadMatcher, unsubscribeTokenGenerator, gmailWebhookHandler, outlookWebhookHandler, adapters }: AppDeps) {
+export function createApp({ threadDb, resourceDb, accountDb, auditDb, auth, access, logger, forwardingService, jobDispatcher, healthCheckValidator, signalReprocessor, draftSendDispatcher, accountCreationStarter, appBaseUrl, contentCdnBaseUrl, astValidator, billingHandler, emailService, domainIdentityService, rsvpComposer, postApprovalCalendarDeps, schedulerClient, s3Client, emailBucket, triggerDigest, embeddingGenerator, threadMatcher, unsubscribeTokenGenerator, gmailProvider, outlookProvider, adapters }: AppDeps) {
   type AppEnv = { Variables: { auth: AuthContext; authorizationVerified?: boolean; [ROUTE_NOT_FOUND_KEY]?: boolean } };
   const app = new OpenAPIHono<AppEnv>();
 
@@ -261,11 +261,11 @@ export function createApp({ threadDb, resourceDb, accountDb, auditDb, auth, acce
   // -------------------------------------------------------------------------
   // Webhook routes (public — provider-verified at application layer)
   // -------------------------------------------------------------------------
-  if (gmailWebhookHandler && outlookWebhookHandler) {
+  if (gmailProvider && outlookProvider) {
     app.post("/external-exchanges/:platform/target", async (c) => {
       const platform = c.req.param("platform");
-      if (platform === "gmail") return gmailWebhookHandler.handle(c);
-      if (platform === "outlook") return outlookWebhookHandler.handle(c);
+      if (platform === "gmail") return gmailProvider.handle(c);
+      if (platform === "outlook") return outlookProvider.handle(c);
       return c.json({ title: "Not Found" }, 404);
     });
   }

@@ -1,17 +1,15 @@
-import { SendMessageCommand } from "@aws-sdk/client-sqs";
-import type { SQSClient } from "@aws-sdk/client-sqs";
 import { DateTime } from "luxon";
 import { ok } from "../errors.js";
 import type { Result } from "../errors.js";
 import type { ProviderAdapter } from "./provider-adapter.js";
 import type { AccountDatabase } from "../database/account-database.js";
 import type { Logger } from "../logger.js";
+import type { SignalQueue } from "../messaging/signal-queue.js";
 
 interface EmxDispatchWorkerDeps {
   logger: Logger;
   db: AccountDatabase;
-  sqsClient: SQSClient;
-  queueUrl: string;
+  signalQueue: SignalQueue;
   adapters: Record<string, ProviderAdapter>;
   getProviderToken: (accountId: string, connectionId: string) => Promise<string>;
 }
@@ -19,16 +17,14 @@ interface EmxDispatchWorkerDeps {
 export class EmxDispatchWorker {
   private readonly logger: Logger;
   private readonly db: AccountDatabase;
-  private readonly sqsClient: SQSClient;
-  private readonly queueUrl: string;
+  private readonly signalQueue: SignalQueue;
   private readonly adapters: Record<string, ProviderAdapter>;
   private readonly getProviderToken: EmxDispatchWorkerDeps["getProviderToken"];
 
   constructor(deps: EmxDispatchWorkerDeps) {
     this.logger = deps.logger;
     this.db = deps.db;
-    this.sqsClient = deps.sqsClient;
-    this.queueUrl = deps.queueUrl;
+    this.signalQueue = deps.signalQueue;
     this.adapters = deps.adapters;
     this.getProviderToken = deps.getProviderToken;
   }
@@ -79,11 +75,7 @@ export class EmxDispatchWorker {
           const historyData = await historyResp.json() as { history?: Array<{ messagesAdded?: Array<{ message: { id: string } }> }>; historyId?: string };
           for (const entry of historyData.history ?? []) {
             for (const added of entry.messagesAdded ?? []) {
-              await this.sqsClient.send(new SendMessageCommand({
-                QueueUrl: this.queueUrl,
-                MessageBody: JSON.stringify({ source: "gmail", providerMessageId: added.message.id, emxId: emx.id, accountId: emx.accountId }),
-                MessageAttributes: { messageType: { DataType: "String", StringValue: "emx_inbound" } },
-              }));
+              await this.signalQueue.send("emx_inbound", { source: "gmail", providerMessageId: added.message.id, emxId: emx.id, accountId: emx.accountId });
             }
           }
           if (historyData.historyId) {
@@ -98,11 +90,7 @@ export class EmxDispatchWorker {
           if (!deltaResp.ok) break;
           const page = await deltaResp.json() as { value?: Array<{ id: string }>; "@odata.nextLink"?: string; "@odata.deltaLink"?: string };
           for (const msg of page.value ?? []) {
-            await this.sqsClient.send(new SendMessageCommand({
-              QueueUrl: this.queueUrl,
-              MessageBody: JSON.stringify({ source: "outlook", providerMessageId: msg.id, emxId: emx.id, accountId: emx.accountId }),
-              MessageAttributes: { messageType: { DataType: "String", StringValue: "emx_inbound" } },
-            }));
+            await this.signalQueue.send("emx_inbound", { source: "outlook", providerMessageId: msg.id, emxId: emx.id, accountId: emx.accountId });
           }
           nextLink = page["@odata.nextLink"] ?? null;
           if (page["@odata.deltaLink"]) latestDeltaLink = page["@odata.deltaLink"];
