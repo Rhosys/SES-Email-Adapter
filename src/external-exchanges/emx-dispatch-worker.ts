@@ -49,22 +49,45 @@ export class EmxDispatchWorker {
       }
 
       let token: string;
-      try {
-        token = await this.getProviderToken(emx.accountId, emx.platform === "gmail" ? "google" : "microsoft");
-      } catch (e) {
-        this.logger.error("emx_dispatch: failed to get provider token", { code: "emx.dispatch.token_failed", emxId: emx.id, error: e });
-        continue;
+      if (emx.platform === "imap") {
+        token = "";
+      } else {
+        try {
+          token = await this.getProviderToken(emx.accountId, emx.platform === "gmail" ? "google" : "microsoft");
+        } catch (e) {
+          this.logger.error("emx_dispatch: failed to get provider token", { code: "emx.dispatch.token_failed", emxId: emx.id, error: e });
+          continue;
+        }
       }
 
       const renewResult = await adapter.renew(token, emx);
       if (renewResult.isErr()) {
-        this.logger.error("emx_dispatch: renewal failed", { code: "emx.dispatch.renewal_failed", emxId: emx.id, platform: emx.platform, error: renewResult.error });
+        if (emx.platform === "imap") {
+          const failures = (emx.consecutiveFailures ?? 0) + 1;
+          if (failures >= 3) {
+            await this.db.updateExternalExchange(emx.accountId, emx.id, {
+              status: "activation_failed",
+              errorReason: String(renewResult.error.cause ?? renewResult.error.kind),
+              consecutiveFailures: failures,
+            });
+            this.logger.error("emx_dispatch: IMAP deactivated after 3 consecutive failures", { code: "emx.dispatch.imap_deactivated", emxId: emx.id, failures });
+          } else {
+            await this.db.updateExternalExchange(emx.accountId, emx.id, { consecutiveFailures: failures });
+            this.logger.warn("emx_dispatch: IMAP renewal failed, incrementing consecutiveFailures", { code: "emx.dispatch.imap_failure", emxId: emx.id, failures });
+          }
+        } else {
+          this.logger.error("emx_dispatch: renewal failed", { code: "emx.dispatch.renewal_failed", emxId: emx.id, platform: emx.platform, error: renewResult.error });
+        }
         continue;
       }
 
-      const updateResult = await this.db.updateExternalExchange(emx.accountId, emx.id, { expiresAt: renewResult.value.expiresAt });
-      if (updateResult.isErr()) {
-        this.logger.error("emx_dispatch: failed to update expiresAt", { code: "emx.dispatch.update_failed", emxId: emx.id, error: updateResult.error });
+      if (emx.platform === "imap") {
+        await this.db.updateExternalExchange(emx.accountId, emx.id, { expiresAt: renewResult.value.expiresAt, consecutiveFailures: 0 });
+      } else {
+        const updateResult = await this.db.updateExternalExchange(emx.accountId, emx.id, { expiresAt: renewResult.value.expiresAt });
+        if (updateResult.isErr()) {
+          this.logger.error("emx_dispatch: failed to update expiresAt", { code: "emx.dispatch.update_failed", emxId: emx.id, error: updateResult.error });
+        }
       }
 
       if (emx.platform === "gmail") {
