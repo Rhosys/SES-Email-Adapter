@@ -10,6 +10,7 @@ export type ProviderRenewalError = { kind: "provider_renewal_failed"; cause: unk
 export type ProviderDeactivationError = { kind: "provider_deactivation_failed"; cause: unknown }
 export type ProviderFetchError =
   | { kind: "provider_fetch_failed"; cause: unknown }
+  | { kind: "provider_message_not_found" }
   | { kind: "provider_token_expired" }
 
 // ---------------------------------------------------------------------------

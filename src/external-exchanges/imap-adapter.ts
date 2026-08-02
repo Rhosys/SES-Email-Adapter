@@ -220,8 +220,66 @@ export class ImapAdapter implements ProviderAdapter {
     return ok(undefined);
   }
 
-  async fetchMessage(_token: string, _providerMessageId: string): Promise<Result<RawMimeResult, ProviderFetchError>> {
-    return err({ kind: "provider_fetch_failed", cause: "Not implemented" });
+  async fetchMessage(token: string, providerMessageId: string): Promise<Result<RawMimeResult, ProviderFetchError>> {
+    // token carries accountId for IMAP (no OAuth)
+    const accountId = token;
+
+    let emxId: string;
+    let uid: number;
+    try {
+      ({ emxId, uid } = parseProviderMessageId(providerMessageId));
+    } catch {
+      return err({ kind: "provider_fetch_failed", cause: "Invalid providerMessageId format" });
+    }
+
+    const emxResult = await this.db.getExternalExchange(accountId, emxId);
+    if (emxResult.isErr()) {
+      return err({ kind: "provider_fetch_failed", cause: "Failed to load EMX record" });
+    }
+    const emx = emxResult.value;
+    if (!emx || !emx.imapConfig) {
+      return err({ kind: "provider_fetch_failed", cause: "EMX not found or missing imapConfig" });
+    }
+
+    let password: string;
+    try {
+      password = this.encryptionManager.decrypt(emx.imapConfig.encryptedPassword);
+    } catch (e) {
+      return err({ kind: "provider_fetch_failed", cause: e });
+    }
+
+    const client = createImapClient({
+      host: emx.imapConfig.host,
+      tlsConfig: emx.imapConfig.tlsConfig,
+      username: emx.imapConfig.username,
+      password,
+      timeout: 30_000,
+    });
+
+    try {
+      await client.connect();
+
+      const lock = await client.getMailboxLock("INBOX");
+      try {
+        const msg = await client.fetchOne(uid.toString(), { source: true, internalDate: true }, { uid: true });
+        if (!msg) {
+          return err({ kind: "provider_message_not_found" });
+        }
+
+        const rawMime = msg.source as Uint8Array;
+        const receivedAt = (msg.internalDate as Date).toISOString();
+        return ok({ rawMime, receivedAt });
+      } finally {
+        lock.release();
+      }
+    } catch (e: unknown) {
+      if (e instanceof Error && e.message.includes("does not exist")) {
+        return err({ kind: "provider_message_not_found" });
+      }
+      return err({ kind: "provider_fetch_failed", cause: e });
+    } finally {
+      try { await client.logout(); } catch { /* best-effort logout */ }
+    }
   }
 }
 
