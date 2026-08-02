@@ -263,14 +263,59 @@ export class ExternalExchangesApi {
     }), async (c) => {
       const accountId = c.req.param("accountId")!;
       const emxId = c.req.param("emxId")!;
-      const body = await zParse(PatchImapExchangeRequest, c.req.raw);
+      const rawBody = await c.req.json();
 
-      // Fetch existing EMX and verify it's an IMAP exchange
+      // Fetch existing EMX
       const getResult = await accountDb.getExternalExchange(accountId, emxId);
       if (getResult.isErr()) { logger.error("Failed to get exchange for patch", { code: "api.emx.patch.get_failed", error: getResult.error }); return err(c, 500, "Internal Server Error"); }
       const emx = getResult.value;
-      if (!emx || emx.platform !== "imap") return err(c, 404, "Exchange not found");
-      if (!emx.imapConfig) return err(c, 404, "Exchange not found");
+      if (!emx) return err(c, 404, "Exchange not found");
+
+      // --- JMAP PATCH branch ---
+      const jmapBody = PatchJmapExchangeRequest.safeParse(rawBody);
+      if (jmapBody.success) {
+        if (emx.platform !== "jmap" || !emx.jmapConfig) return err(c, 404, "Exchange not found");
+
+        const mergedSessionUrl = jmapBody.data.jmapConfig.sessionUrl ?? emx.jmapConfig.sessionUrl;
+        const mergedUsername = jmapBody.data.jmapConfig.username ?? emx.jmapConfig.username;
+
+        let testPassword: string;
+        if (jmapBody.data.jmapConfig.password !== undefined) {
+          testPassword = jmapBody.data.jmapConfig.password;
+        } else {
+          try {
+            testPassword = encryptionManager.decrypt(emx.jmapConfig.encryptedPassword);
+          } catch (e) {
+            logger.error("Failed to decrypt existing JMAP password for connection test", { code: "api.emx.patch.jmap.decrypt_failed", emxId, error: e });
+            return err(c, 500, "Internal Server Error");
+          }
+        }
+
+        // Connection test with merged config (10s timeout)
+        const auth = buildBasicAuth(mergedUsername, testPassword);
+        const sessionResult = await fetchSession(mergedSessionUrl, auth, 10_000);
+        if (sessionResult.isErr()) {
+          const reason = String(sessionResult.error.cause);
+          logger.warn("JMAP connection test failed during PATCH", { code: "api.emx.patch.jmap.connection_test_failed", emxId, error: sessionResult.error });
+          return err(c, 422, reason);
+        }
+
+        // Connection test passed — persist updated fields
+        const updateFields: Record<string, unknown> = {};
+        if (jmapBody.data.jmapConfig.sessionUrl !== undefined) updateFields.sessionUrl = jmapBody.data.jmapConfig.sessionUrl;
+        if (jmapBody.data.jmapConfig.username !== undefined) updateFields.username = jmapBody.data.jmapConfig.username;
+        if (jmapBody.data.jmapConfig.password !== undefined) updateFields.encryptedPassword = encryptionManager.encrypt(jmapBody.data.jmapConfig.password);
+
+        const updateResult = await accountDb.updateExternalExchangeJmapConfig(accountId, emxId, updateFields);
+        if (updateResult.isErr()) { logger.error("Failed to update JMAP exchange", { code: "api.emx.patch.jmap_failed", error: updateResult.error }); return err(c, 500, "Internal Server Error"); }
+
+        return c.json(serializeEmx(updateResult.value), 200);
+      }
+
+      // --- IMAP PATCH branch ---
+      const body = PatchImapExchangeRequest.parse(rawBody);
+
+      if (emx.platform !== "imap" || !emx.imapConfig) return err(c, 404, "Exchange not found");
 
       // Merge config: new values where provided, existing where not
       const mergedHost = body.imapConfig.host ?? emx.imapConfig.host;
