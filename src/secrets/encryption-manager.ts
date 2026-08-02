@@ -19,7 +19,16 @@ export class EncryptionManager {
     const cipher = createCipheriv("aes-256-gcm", this.key!, iv);
     const encrypted = Buffer.concat([cipher.update(plaintext, "utf-8"), cipher.final()]);
     const authTag = cipher.getAuthTag();
-    return Buffer.concat([iv, authTag, encrypted]).toString("base64");
+    const encoded = Buffer.concat([iv, authTag, encrypted]).toString("base64");
+    // Round-trip verify — decrypt inline (independent decipher instance) to catch encoding bugs at write time
+    const buf = Buffer.from(encoded, "base64");
+    const decipher = createDecipheriv("aes-256-gcm", this.key!, buf.subarray(0, 12));
+    decipher.setAuthTag(buf.subarray(12, 28));
+    const verified = Buffer.concat([decipher.update(buf.subarray(28)), decipher.final()]).toString("utf-8");
+    if (verified !== plaintext) {
+      throw new Error("Encryption round-trip verification failed");
+    }
+    return encoded;
   }
 
   decrypt(encoded: string): string {
