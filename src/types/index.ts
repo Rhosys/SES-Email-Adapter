@@ -751,7 +751,16 @@ export interface ExternalMailExchange {
     username: string;
     encryptedPassword: string;     // base64(iv || authTag || ciphertext) from EncryptionManager
   };
-  nextSyncTime?: string;           // ISO datetime — when dispatcher should next process (IMAP)
+  jmapConfig?: {
+    sessionUrl: string;
+    username: string;
+    encryptedPassword: string;     // base64(iv || authTag || ciphertext) from EncryptionManager
+    apiUrl: string;                // from Session object, refreshed on each sync
+    downloadUrl: string;           // from Session object, template with {accountId}/{blobId}/{name}
+    jmapAccountId: string;         // from primaryAccounts["urn:ietf:params:jmap:mail"]
+    inboxId: string;               // from Mailbox/query role=inbox, discovered during activation
+  };
+  nextSyncTime?: string;           // ISO datetime — when dispatcher should next process (IMAP/JMAP)
   consecutiveFailures?: number;    // Track auth failures for 3-strike rule
   createdAt: string;
   updatedAt: string;

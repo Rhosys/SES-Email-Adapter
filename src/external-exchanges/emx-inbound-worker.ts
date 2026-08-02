@@ -8,7 +8,7 @@ import type { EmailContentStore } from "../content-store.js";
 import type { AccountDatabase } from "../database/account-database.js";
 
 export interface EmxInboundPayload {
-  source: "gmail" | "outlook" | "imap";
+  source: "gmail" | "outlook" | "imap" | "jmap";
   providerMessageId: string;
   emxId: string;
   accountId: string;
