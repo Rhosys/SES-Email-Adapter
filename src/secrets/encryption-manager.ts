@@ -1,7 +1,6 @@
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { KMSClient, DecryptCommand } from "@aws-sdk/client-kms";
+import encryptionSecret from "./encryption.kms.json" with { type: "json" };
 
 export class EncryptionManager {
   private key: Buffer | null = null;
@@ -9,7 +8,7 @@ export class EncryptionManager {
   constructor(private readonly kms: KMSClient) {}
 
   async init(): Promise<void> {
-    const ciphertext = readFileSync(resolve(import.meta.dirname!, "encryption.kms"));
+    const ciphertext = Buffer.from(encryptionSecret.ciphertext, "base64");
     const result = await this.kms.send(new DecryptCommand({ CiphertextBlob: ciphertext }));
     this.key = Buffer.from(result.Plaintext!);
   }

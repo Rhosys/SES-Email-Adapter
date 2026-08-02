@@ -11,8 +11,7 @@
 
 import { KMSClient, DecryptCommand } from "@aws-sdk/client-kms";
 import { createHmac } from "node:crypto";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import calendarHmacSecret from "./calendar-hmac.kms.json" with { type: "json" };
 
 export class HmacSecretGenerator {
   private _secret?: Uint8Array;
@@ -21,7 +20,7 @@ export class HmacSecretGenerator {
 
   private async getSecret(): Promise<Uint8Array> {
     if (!this._secret) {
-      const ciphertext = readFileSync(resolve(import.meta.dirname!, "calendar-hmac.kms"));
+      const ciphertext = Buffer.from(calendarHmacSecret.ciphertext, "base64");
       const result = await this.kms.send(new DecryptCommand({ CiphertextBlob: ciphertext }));
       this._secret = new Uint8Array(result.Plaintext!);
     }
