@@ -32,6 +32,7 @@ export function makeAppDeps(overrides: Partial<AppDeps>): AppDeps {
     threadMatcher: {} as never,
     unsubscribeTokenGenerator: { generate: async () => "tok", verify: async () => ok({ accountId: "acct", emailType: "digest" as const }) } as never,
     adapters: {},
+    encryptionManager: { encrypt: () => "encrypted", decrypt: () => "decrypted" } as never,
     getProviderToken: async () => "",
     ...overrides,
   } as AppDeps;

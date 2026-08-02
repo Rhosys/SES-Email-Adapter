@@ -65,6 +65,7 @@ import { OutlookProvider } from "./external-exchanges/outlook-provider.js";
 import { EmxInboundWorker } from "./external-exchanges/emx-inbound-worker.js";
 import { EmxDispatchWorker } from "./external-exchanges/emx-dispatch-worker.js";
 import type { ProviderAdapter } from "./external-exchanges/provider-adapter.js";
+import { EncryptionManager } from "./secrets/encryption-manager.js";
 import { getClient as getAuthressClient } from "./api/authress-access.js";
 import { RequestLogger } from "./logger.js";
 
@@ -322,6 +323,8 @@ export class CompositeRoot {
       getProviderToken,
     });
 
+    const encryptionManager = new EncryptionManager(kms);
+
     const emxAdapters: Record<string, ProviderAdapter> = {
       gmail: gmailProvider,
       outlook: outlookProvider,
@@ -413,6 +416,7 @@ export class CompositeRoot {
       gmailProvider,
       outlookProvider,
       adapters: emxAdapters,
+      encryptionManager,
       getProviderToken,
     });
 
