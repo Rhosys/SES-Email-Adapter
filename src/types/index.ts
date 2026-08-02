@@ -739,12 +739,20 @@ export interface ExternalMailExchange {
   platform: EmxPlatform;
   emailAddress: string;            // the external mailbox being watched
   status: EmxStatus;
-  syncCursor?: string;             // Gmail: historyId; Outlook: full deltaLink URL
+  syncCursor?: string;             // Gmail: historyId; Outlook: full deltaLink URL; IMAP: {uidvalidity}:{lastUid}
   expiresAt?: string;              // ISO datetime — when watch/subscription lapses
   lastSyncAt?: string;             // ISO datetime — last successful sync completion
   providerSubscriptionId?: string; // Graph subscription UUID or "watch" for Gmail
   encryptionCertificateId?: string; // which RSA key was used (for Outlook subscriptions)
   errorReason?: string;            // human-readable failure reason (only when activation_failed)
+  imapConfig?: {
+    host: string;
+    tlsConfig: "TLS" | "DISABLED";
+    username: string;
+    encryptedPassword: string;     // base64(iv || authTag || ciphertext) from EncryptionManager
+  };
+  nextSyncTime?: string;           // ISO datetime — when dispatcher should next process (IMAP)
+  consecutiveFailures?: number;    // Track auth failures for 3-strike rule
   createdAt: string;
   updatedAt: string;
 }
