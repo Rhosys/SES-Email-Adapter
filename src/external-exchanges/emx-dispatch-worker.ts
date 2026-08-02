@@ -49,7 +49,7 @@ export class EmxDispatchWorker {
       }
 
       let token: string;
-      if (emx.platform === "imap") {
+      if (emx.platform === "imap" || emx.platform === "jmap") {
         token = "";
       } else {
         try {
@@ -62,7 +62,7 @@ export class EmxDispatchWorker {
 
       const renewResult = await adapter.renew(token, emx);
       if (renewResult.isErr()) {
-        if (emx.platform === "imap") {
+        if (emx.platform === "imap" || emx.platform === "jmap") {
           const failures = (emx.consecutiveFailures ?? 0) + 1;
           if (failures >= 3) {
             await this.db.updateExternalExchange(emx.accountId, emx.id, {
@@ -70,10 +70,10 @@ export class EmxDispatchWorker {
               errorReason: String(renewResult.error.cause ?? renewResult.error.kind),
               consecutiveFailures: failures,
             });
-            this.logger.error("emx_dispatch: IMAP deactivated after 3 consecutive failures", { code: "emx.dispatch.imap_deactivated", emxId: emx.id, failures });
+            this.logger.error(`emx_dispatch: ${emx.platform} deactivated after 3 consecutive failures`, { code: `emx.dispatch.${emx.platform}_deactivated`, emxId: emx.id, failures });
           } else {
             await this.db.updateExternalExchange(emx.accountId, emx.id, { consecutiveFailures: failures });
-            this.logger.warn("emx_dispatch: IMAP renewal failed, incrementing consecutiveFailures", { code: "emx.dispatch.imap_failure", emxId: emx.id, failures });
+            this.logger.warn(`emx_dispatch: ${emx.platform} renewal failed, incrementing consecutiveFailures`, { code: `emx.dispatch.${emx.platform}_failure`, emxId: emx.id, failures });
           }
         } else {
           this.logger.error("emx_dispatch: renewal failed", { code: "emx.dispatch.renewal_failed", emxId: emx.id, platform: emx.platform, error: renewResult.error });
@@ -81,7 +81,7 @@ export class EmxDispatchWorker {
         continue;
       }
 
-      if (emx.platform === "imap") {
+      if (emx.platform === "imap" || emx.platform === "jmap") {
         await this.db.updateExternalExchange(emx.accountId, emx.id, { expiresAt: renewResult.value.expiresAt, consecutiveFailures: 0 });
       } else {
         const updateResult = await this.db.updateExternalExchange(emx.accountId, emx.id, { expiresAt: renewResult.value.expiresAt });
