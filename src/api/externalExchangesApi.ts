@@ -3,13 +3,24 @@ import type { OpenAPIHono } from "@hono/zod-openapi";
 import { zParse } from "./validate.js";
 import type { AccountDatabase } from "../database/account-database.js";
 import type { ProviderAdapter } from "../external-exchanges/provider-adapter.js";
+import type { EncryptionManager } from "../secrets/encryption-manager.js";
 import type { Logger } from "../logger.js";
 import type { AppEnv, RouteHelpers } from "./route-helpers.js";
-import { EMX_PLATFORMS } from "../types/index.js";
+import { EMX_PLATFORMS, type ExternalMailExchange } from "../types/index.js";
 
 const CreateExternalExchangeRequest = z.object({
   platform: z.enum(EMX_PLATFORMS),
   emailAddress: z.string().email(),
+});
+
+const CreateImapExchangeRequest = z.object({
+  platform: z.literal("imap"),
+  imapConfig: z.object({
+    host: z.string().max(253),
+    tlsConfig: z.enum(["TLS", "DISABLED"]),
+    username: z.string().max(256),
+    password: z.string().max(256),
+  }),
 });
 
 const ExternalExchangeResponse = z.object({
@@ -30,6 +41,12 @@ const ExternalExchangeResponse = z.object({
 const ListExternalExchangesResponse = z.object({
   exchanges: z.array(ExternalExchangeResponse),
 });
+
+function serializeEmx(emx: ExternalMailExchange) {
+  if (!emx.imapConfig) return emx;
+  const { encryptedPassword: _, ...safeConfig } = emx.imapConfig;
+  return { ...emx, imapConfig: safeConfig };
+}
 
 export class ExternalExchangesApi {
   constructor(
@@ -54,7 +71,7 @@ export class ExternalExchangesApi {
       const accountId = c.req.param("accountId")!;
       const result = await accountDb.listExternalExchanges(accountId);
       if (result.isErr()) { logger.error("Failed to list external exchanges", { code: "api.emx.list_failed", error: result.error }); return err(c, 500, "Internal Server Error"); }
-      return c.json({ exchanges: result.value }, 200);
+      return c.json({ exchanges: result.value.map(serializeEmx) }, 200);
     });
 
     // POST /accounts/:accountId/external-exchanges
@@ -113,7 +130,7 @@ export class ExternalExchangesApi {
       const result = await accountDb.getExternalExchange(accountId, emxId);
       if (result.isErr()) { logger.error("Failed to get external exchange", { code: "api.emx.get_failed", error: result.error }); return err(c, 500, "Internal Server Error"); }
       if (!result.value) return err(c, 404, "Exchange not found");
-      return c.json(result.value, 200);
+      return c.json(serializeEmx(result.value), 200);
     });
 
     // DELETE /accounts/:accountId/external-exchanges/:emxId
