@@ -63,6 +63,7 @@ import { SignalQueue } from "./messaging/signal-queue.js";
 import { GmailProvider } from "./external-exchanges/gmail-provider.js";
 import { OutlookProvider } from "./external-exchanges/outlook-provider.js";
 import { ImapAdapter } from "./external-exchanges/imap-adapter.js";
+import { JmapAdapter } from "./external-exchanges/jmap-adapter.js";
 import { EmxInboundWorker } from "./external-exchanges/emx-inbound-worker.js";
 import { EmxDispatchWorker } from "./external-exchanges/emx-dispatch-worker.js";
 import type { ProviderAdapter } from "./external-exchanges/provider-adapter.js";
@@ -335,10 +336,18 @@ export class CompositeRoot {
       logger,
     });
 
+    const jmapAdapter = new JmapAdapter({
+      encryptionManager,
+      db: accountDb,
+      signalQueue,
+      logger,
+    });
+
     const emxAdapters: Record<string, ProviderAdapter> = {
       gmail: gmailProvider,
       outlook: outlookProvider,
       imap: imapAdapter,
+      jmap: jmapAdapter,
     };
 
     const emxInboundWorker = new EmxInboundWorker({
