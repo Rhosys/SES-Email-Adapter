@@ -99,6 +99,7 @@ const EXPECTED_ROUTES = [
   "GET /accounts/{accountId}/external-exchanges",
   "POST /accounts/{accountId}/external-exchanges",
   "GET /accounts/{accountId}/external-exchanges/{emxId}",
+  "PATCH /accounts/{accountId}/external-exchanges/{emxId}",
   "DELETE /accounts/{accountId}/external-exchanges/{emxId}",
 ] as const;
 

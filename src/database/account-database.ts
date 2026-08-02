@@ -1492,6 +1492,42 @@ export class AccountDatabase {
     }
   }
 
+  async createImapExchange(accountId: string, data: {
+    emailAddress: string;
+    status: ExternalMailExchange["status"];
+    imapConfig: { host: string; tlsConfig: "TLS" | "DISABLED"; username: string; encryptedPassword: string };
+    syncCursor?: string;
+    nextSyncTime?: string;
+    errorReason?: string;
+  }): Promise<Result<ExternalMailExchange, DbError>> {
+    const now = DateTime.utc().toISO()!;
+    const id = generateId("emx");
+    const item: ExternalMailExchange = {
+      id,
+      accountId,
+      platform: "imap",
+      emailAddress: data.emailAddress,
+      status: data.status,
+      imapConfig: data.imapConfig,
+      ...(data.syncCursor !== undefined ? { syncCursor: data.syncCursor } : {}),
+      ...(data.nextSyncTime !== undefined ? { nextSyncTime: data.nextSyncTime } : {}),
+      ...(data.errorReason !== undefined ? { errorReason: data.errorReason } : {}),
+      createdAt: now,
+      updatedAt: now,
+    };
+    const dynamoItem: Record<string, unknown> = { ...item, pk: pk(accountId), sk: `EMX#${id}` };
+    if (data.status === "active" && data.nextSyncTime) {
+      dynamoItem.gsi1pk = "EMX#active";
+      dynamoItem.gsi1sk = `${data.nextSyncTime}#${id}`;
+    }
+    try {
+      await dynamo.send(new PutCommand({ TableName: ACCOUNTS_TABLE, Item: dynamoItem }));
+      return ok(item);
+    } catch (e) {
+      return err(dbError(e));
+    }
+  }
+
   async getExternalExchange(accountId: string, emxId: string): Promise<Result<ExternalMailExchange | null, DbError>> {
     try {
       const res = await dynamo.send(new GetCommand({
@@ -1554,6 +1590,38 @@ export class AccountDatabase {
     if (removeParts.length > 0) {
       expression += ` REMOVE ${removeParts.join(", ")}`;
     }
+
+    try {
+      const res = await dynamo.send(new UpdateCommand({
+        TableName: ACCOUNTS_TABLE,
+        Key: { pk: pk(accountId), sk: `EMX#${emxId}` },
+        UpdateExpression: expression,
+        ExpressionAttributeNames: names,
+        ExpressionAttributeValues: values,
+        ReturnValues: "ALL_NEW",
+      }));
+      return ok(res.Attributes as ExternalMailExchange);
+    } catch (e) {
+      return err(dbError(e));
+    }
+  }
+
+  async updateExternalExchangeImapConfig(accountId: string, emxId: string, fields: Record<string, unknown>): Promise<Result<ExternalMailExchange, DbError>> {
+    const now = DateTime.utc().toISO()!;
+    const names: Record<string, string> = { "#updatedAt": "updatedAt", "#imapConfig": "imapConfig" };
+    const values: Record<string, unknown> = { ":updatedAt": now };
+    const setParts = ["#updatedAt = :updatedAt"];
+
+    for (const [key, value] of Object.entries(fields)) {
+      if (value === undefined) continue;
+      const alias = `#imap_${key}`;
+      const valAlias = `:imap_${key}`;
+      names[alias] = key;
+      values[valAlias] = value;
+      setParts.push(`#imapConfig.${alias} = ${valAlias}`);
+    }
+
+    const expression = `SET ${setParts.join(", ")}`;
 
     try {
       const res = await dynamo.send(new UpdateCommand({
