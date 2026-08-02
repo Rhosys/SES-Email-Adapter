@@ -144,8 +144,76 @@ export class ImapAdapter implements ProviderAdapter {
     }
   }
 
-  async renew(_token: string, _emx: ExternalMailExchange): Promise<Result<RenewalResult, ProviderRenewalError>> {
-    return err({ kind: "provider_renewal_failed", cause: "Not implemented" });
+  async renew(_token: string, emx: ExternalMailExchange): Promise<Result<RenewalResult, ProviderRenewalError>> {
+    const imapConfig = emx.imapConfig;
+    if (!imapConfig) {
+      return err({ kind: "provider_renewal_failed", cause: "Missing imapConfig" });
+    }
+
+    const password = this.encryptionManager.decrypt(imapConfig.encryptedPassword);
+
+    const client = createImapClient({
+      host: imapConfig.host,
+      tlsConfig: imapConfig.tlsConfig,
+      username: imapConfig.username,
+      password,
+      timeout: 30_000,
+    });
+
+    try {
+      await client.connect();
+
+      const lock = await client.getMailboxLock("INBOX");
+      try {
+        const mailbox = client.mailbox;
+        if (!mailbox) {
+          return err({ kind: "provider_renewal_failed", cause: "INBOX unavailable" });
+        }
+
+        const { uidvalidity: storedUidvalidity, lastUid } = parseSyncCursor(emx.syncCursor!);
+        const currentUidvalidity = Number(mailbox.uidValidity);
+
+        if (currentUidvalidity !== storedUidvalidity) {
+          return err({ kind: "provider_renewal_failed", cause: "Mailbox was rebuilt on the server (UIDVALIDITY changed)" });
+        }
+
+        // UID SEARCH for UIDs > lastUid
+        const searchResults = await client.search({ uid: `${lastUid + 1}:*` }, { uid: true }) as number[];
+        // IMAP search is inclusive — filter to only UIDs actually > lastUid
+        const newUids = searchResults.filter(uid => uid > lastUid).sort((a, b) => a - b);
+
+        if (newUids.length > 0) {
+          // Cap at 500 (take the lowest 500)
+          const batch = newUids.slice(0, 500);
+
+          // Enqueue emx_inbound per UID
+          for (const uid of batch) {
+            await this.signalQueue.send("emx_inbound", {
+              source: "imap",
+              providerMessageId: formatProviderMessageId(emx.id, uid),
+              emxId: emx.id,
+              accountId: emx.accountId,
+            });
+          }
+
+          // Update syncCursor to highest UID in batch
+          const highestUid = batch[batch.length - 1]!;
+          await this.db.updateExternalExchange(emx.accountId, emx.id, {
+            syncCursor: formatSyncCursor(currentUidvalidity, highestUid),
+            lastSyncAt: DateTime.utc().toISO()!,
+          });
+        }
+
+        return ok({ expiresAt: DateTime.utc().plus({ hours: 1 }).toISO()! });
+      } finally {
+        lock.release();
+      }
+    } catch (e: unknown) {
+      const cause = e instanceof Error ? e.message : "IMAP renewal failed";
+      return err({ kind: "provider_renewal_failed", cause });
+    } finally {
+      try { await client.logout(); } catch { /* best-effort logout */ }
+    }
   }
 
   async deactivate(_token: string, _emx: ExternalMailExchange): Promise<Result<void, ProviderDeactivationError>> {
