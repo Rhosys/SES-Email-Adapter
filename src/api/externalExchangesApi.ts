@@ -4,6 +4,7 @@ import { zParse } from "./validate.js";
 import type { AccountDatabase } from "../database/account-database.js";
 import type { ProviderAdapter } from "../external-exchanges/provider-adapter.js";
 import { createImapClient } from "../external-exchanges/imap-adapter.js";
+import { buildBasicAuth, fetchSession } from "../external-exchanges/jmap-adapter.js";
 import type { EncryptionManager } from "../secrets/encryption-manager.js";
 import type { Logger } from "../logger.js";
 import type { AppEnv, RouteHelpers } from "./route-helpers.js";
@@ -24,10 +25,27 @@ const CreateImapExchangeRequest = z.object({
   }),
 });
 
+const CreateJmapExchangeRequest = z.object({
+  platform: z.literal("jmap"),
+  jmapConfig: z.object({
+    sessionUrl: z.string().url().max(2048),
+    username: z.string().max(256),
+    password: z.string().max(256),
+  }),
+});
+
 const PatchImapExchangeRequest = z.object({
   imapConfig: z.object({
     host: z.string().max(253).optional(),
     tlsConfig: z.enum(["TLS", "DISABLED"]).optional(),
+    username: z.string().max(256).optional(),
+    password: z.string().max(256).optional(),
+  }),
+});
+
+const PatchJmapExchangeRequest = z.object({
+  jmapConfig: z.object({
+    sessionUrl: z.string().url().max(2048).optional(),
     username: z.string().max(256).optional(),
     password: z.string().max(256).optional(),
   }),
@@ -53,9 +71,17 @@ const ListExternalExchangesResponse = z.object({
 });
 
 function serializeEmx(emx: ExternalMailExchange) {
-  if (!emx.imapConfig) return emx;
-  const { encryptedPassword: _, ...safeConfig } = emx.imapConfig;
-  return { ...emx, imapConfig: safeConfig };
+  const { imapConfig, jmapConfig, ...rest } = emx;
+  const result: Record<string, unknown> = { ...rest };
+  if (imapConfig) {
+    const { encryptedPassword: _, ...safeImap } = imapConfig;
+    result.imapConfig = safeImap;
+  }
+  if (jmapConfig) {
+    const { sessionUrl, username } = jmapConfig;
+    result.jmapConfig = { sessionUrl, username };
+  }
+  return result;
 }
 
 export class ExternalExchangesApi {
@@ -132,6 +158,45 @@ export class ExternalExchangesApi {
           syncCursor, nextSyncTime: expiresAt,
         });
         if (result.isErr()) { logger.error("Failed to create IMAP exchange record", { code: "api.emx.imap.create_failed", error: result.error }); return err(c, 500, "Internal Server Error"); }
+        return c.json(serializeEmx(result.value), 201);
+      }
+
+      // --- JMAP branch: uses credentials, no OAuth ---
+      const jmapBody = CreateJmapExchangeRequest.safeParse(rawBody);
+      if (jmapBody.success) {
+        const { jmapConfig } = jmapBody.data;
+        const adapter = adapters["jmap"];
+        if (!adapter) return err(c, 422, "Unsupported platform");
+
+        const encryptedPassword = encryptionManager.encrypt(jmapConfig.password);
+
+        // Build temp EMX with raw password for activation (adapter tests connection with it)
+        const tempEmx: ExternalMailExchange = {
+          id: "", accountId, platform: "jmap", emailAddress: jmapConfig.username,
+          status: "active", createdAt: "", updatedAt: "",
+          jmapConfig: { sessionUrl: jmapConfig.sessionUrl, username: jmapConfig.username, encryptedPassword: jmapConfig.password, apiUrl: "", downloadUrl: "", jmapAccountId: "", inboxId: "" },
+        };
+
+        const activateResult = await adapter.activate("", tempEmx);
+        if (activateResult.isErr()) {
+          const errorReason = String(activateResult.error.cause);
+          const result = await accountDb.createJmapExchange(accountId, {
+            emailAddress: jmapConfig.username, status: "activation_failed", errorReason,
+            jmapConfig: { sessionUrl: jmapConfig.sessionUrl, username: jmapConfig.username, encryptedPassword, apiUrl: "", downloadUrl: "", jmapAccountId: "", inboxId: "" },
+          });
+          if (result.isErr()) { logger.error("Failed to create JMAP exchange record", { code: "api.emx.jmap.create_failed", error: result.error }); return err(c, 500, "Internal Server Error"); }
+          logger.error("Failed to activate JMAP exchange", { code: "api.emx.jmap.activate_failed", error: activateResult.error });
+          return c.json(serializeEmx(result.value), 201);
+        }
+
+        const { syncCursor, expiresAt } = activateResult.value;
+        // activate() populates apiUrl, downloadUrl, jmapAccountId, inboxId on tempEmx.jmapConfig
+        const result = await accountDb.createJmapExchange(accountId, {
+          emailAddress: jmapConfig.username, status: "active",
+          jmapConfig: { sessionUrl: jmapConfig.sessionUrl, username: jmapConfig.username, encryptedPassword, apiUrl: tempEmx.jmapConfig!.apiUrl, downloadUrl: tempEmx.jmapConfig!.downloadUrl, jmapAccountId: tempEmx.jmapConfig!.jmapAccountId, inboxId: tempEmx.jmapConfig!.inboxId },
+          syncCursor, nextSyncTime: expiresAt,
+        });
+        if (result.isErr()) { logger.error("Failed to create JMAP exchange record", { code: "api.emx.jmap.create_failed", error: result.error }); return err(c, 500, "Internal Server Error"); }
         return c.json(serializeEmx(result.value), 201);
       }
 
