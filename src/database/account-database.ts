@@ -1674,6 +1674,38 @@ export class AccountDatabase {
     }
   }
 
+  async updateExternalExchangeJmapConfig(accountId: string, emxId: string, fields: Record<string, unknown>): Promise<Result<ExternalMailExchange, DbError>> {
+    const now = DateTime.utc().toISO()!;
+    const names: Record<string, string> = { "#updatedAt": "updatedAt", "#jmapConfig": "jmapConfig" };
+    const values: Record<string, unknown> = { ":updatedAt": now };
+    const setParts = ["#updatedAt = :updatedAt"];
+
+    for (const [key, value] of Object.entries(fields)) {
+      if (value === undefined) continue;
+      const alias = `#jmap_${key}`;
+      const valAlias = `:jmap_${key}`;
+      names[alias] = key;
+      values[valAlias] = value;
+      setParts.push(`#jmapConfig.${alias} = ${valAlias}`);
+    }
+
+    const expression = `SET ${setParts.join(", ")}`;
+
+    try {
+      const res = await dynamo.send(new UpdateCommand({
+        TableName: ACCOUNTS_TABLE,
+        Key: { pk: pk(accountId), sk: `EMX#${emxId}` },
+        UpdateExpression: expression,
+        ExpressionAttributeNames: names,
+        ExpressionAttributeValues: values,
+        ReturnValues: "ALL_NEW",
+      }));
+      return ok(res.Attributes as ExternalMailExchange);
+    } catch (e) {
+      return err(dbError(e));
+    }
+  }
+
   async deleteExternalExchange(accountId: string, emxId: string): Promise<Result<void, DbError>> {
     try {
       await dynamo.send(new DeleteCommand({

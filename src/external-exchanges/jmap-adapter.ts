@@ -38,7 +38,7 @@ export function buildBasicAuth(username: string, password: string): string {
   return "Basic " + Buffer.from(`${username}:${password}`).toString("base64");
 }
 
-async function fetchSession(sessionUrl: string, auth: string, timeout: number): Promise<Result<JmapSession, ProviderActivationError>> {
+export async function fetchSession(sessionUrl: string, auth: string, timeout: number): Promise<Result<JmapSession, ProviderActivationError>> {
   let response: Response;
   try {
     response = await fetch(sessionUrl, {

@@ -1,6 +1,5 @@
 import { z } from "@hono/zod-openapi";
 import type { OpenAPIHono } from "@hono/zod-openapi";
-import { zParse } from "./validate.js";
 import type { AccountDatabase } from "../database/account-database.js";
 import type { ProviderAdapter } from "../external-exchanges/provider-adapter.js";
 import { createImapClient } from "../external-exchanges/imap-adapter.js";
