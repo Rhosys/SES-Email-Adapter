@@ -115,7 +115,7 @@ export class ForwardingService implements IForwardingService {
   // ---------------------------------------------------------------------------
 
   private async sendEmailVerification(accountId: string, target: string, token: string): Promise<Result<void, EmailServiceError>> {
-    const verifyUrl = `${this.appBaseUrl}/settings?tab=forwarding&verifyAddress=${encodeURIComponent(target)}&token=${token}&accountId=${accountId}`
+    const verifyUrl = `${this.appBaseUrl}/settings/email-forwarding?tab=forwarding&verifyAddress=${encodeURIComponent(target)}&token=${token}&accountId=${accountId}`
     const triggerId = `fwdverify-${accountId}-${target}`
     const tags = buildEmailTags({
       accountId,
