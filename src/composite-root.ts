@@ -62,6 +62,7 @@ import { HmacSecretGenerator } from "./processor/calendar/hmac-secret-generator.
 import { SignalQueue } from "./messaging/signal-queue.js";
 import { GmailProvider } from "./external-exchanges/gmail-provider.js";
 import { OutlookProvider } from "./external-exchanges/outlook-provider.js";
+import { ImapAdapter } from "./external-exchanges/imap-adapter.js";
 import { EmxInboundWorker } from "./external-exchanges/emx-inbound-worker.js";
 import { EmxDispatchWorker } from "./external-exchanges/emx-dispatch-worker.js";
 import type { ProviderAdapter } from "./external-exchanges/provider-adapter.js";
@@ -324,10 +325,20 @@ export class CompositeRoot {
     });
 
     const encryptionManager = new EncryptionManager(kms);
+    // Lazy init: KMS decrypt happens on first IMAP request (cold start resolves before traffic)
+    void encryptionManager.init();
+
+    const imapAdapter = new ImapAdapter({
+      encryptionManager,
+      db: accountDb,
+      signalQueue,
+      logger,
+    });
 
     const emxAdapters: Record<string, ProviderAdapter> = {
       gmail: gmailProvider,
       outlook: outlookProvider,
+      imap: imapAdapter,
     };
 
     const emxInboundWorker = new EmxInboundWorker({
