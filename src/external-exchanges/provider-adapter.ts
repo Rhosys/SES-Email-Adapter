@@ -40,5 +40,5 @@ export interface ProviderAdapter {
   activate(token: string, emx: ExternalMailExchange): Promise<Result<ActivationResult, ProviderActivationError>>
   renew(token: string, emx: ExternalMailExchange): Promise<Result<RenewalResult, ProviderRenewalError>>
   deactivate(token: string, emx: ExternalMailExchange): Promise<Result<void, ProviderDeactivationError>>
-  fetchMessage(token: string, providerMessageId: string): Promise<Result<RawMimeResult, ProviderFetchError>>
+  fetchMessage(token: string, providerMessageId: string, emx: ExternalMailExchange): Promise<Result<RawMimeResult, ProviderFetchError>>
 }

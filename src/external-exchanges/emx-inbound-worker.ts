@@ -5,9 +5,10 @@ import type { ProviderAdapter, ProviderFetchError } from "./provider-adapter.js"
 import type { InboundSignalMessage } from "../processor/processor.js";
 import type { Logger } from "../logger.js";
 import type { EmailContentStore } from "../content-store.js";
+import type { AccountDatabase } from "../database/account-database.js";
 
 export interface EmxInboundPayload {
-  source: "gmail" | "outlook";
+  source: "gmail" | "outlook" | "imap";
   providerMessageId: string;
   emxId: string;
   accountId: string;
@@ -17,6 +18,7 @@ interface EmxInboundWorkerDeps {
   logger: Logger;
   emailContentStore: EmailContentStore;
   adapters: Record<string, ProviderAdapter>;
+  accountDb: AccountDatabase;
   processRecord: (message: InboundSignalMessage, receiveCount: number) => Promise<Result<void, ProcessorError>>;
   getProviderToken: (accountId: string, connectionId: string) => Promise<string>;
 }
@@ -25,6 +27,7 @@ export class EmxInboundWorker {
   private readonly logger: Logger;
   private readonly emailContentStore: EmailContentStore;
   private readonly adapters: Record<string, ProviderAdapter>;
+  private readonly accountDb: AccountDatabase;
   private readonly processRecord: EmxInboundWorkerDeps["processRecord"];
   private readonly getProviderToken: EmxInboundWorkerDeps["getProviderToken"];
 
@@ -32,6 +35,7 @@ export class EmxInboundWorker {
     this.logger = deps.logger;
     this.emailContentStore = deps.emailContentStore;
     this.adapters = deps.adapters;
+    this.accountDb = deps.accountDb;
     this.processRecord = deps.processRecord;
     this.getProviderToken = deps.getProviderToken;
   }
@@ -48,14 +52,29 @@ export class EmxInboundWorker {
     }
 
     let token: string;
-    try {
-      token = await this.getProviderToken(accountId, source === "gmail" ? "google" : "microsoft");
-    } catch (e) {
-      this.logger.error("emx_inbound: failed to get provider token", { code: "emx.inbound.token_failed", source, emxId, error: e });
-      return err({ kind: "provider_fetch_failed", cause: e });
+    if (source === "imap") {
+      token = "";
+    } else {
+      try {
+        token = await this.getProviderToken(accountId, source === "gmail" ? "google" : "microsoft");
+      } catch (e) {
+        this.logger.error("emx_inbound: failed to get provider token", { code: "emx.inbound.token_failed", source, emxId, error: e });
+        return err({ kind: "provider_fetch_failed", cause: e });
+      }
     }
 
-    const fetchResult = await adapter.fetchMessage(token, providerMessageId);
+    const emxResult = await this.accountDb.getExternalExchange(accountId, emxId);
+    if (emxResult.isErr()) {
+      this.logger.error("emx_inbound: failed to load EMX record", { code: "emx.inbound.emx_load_failed", source, emxId, error: emxResult.error });
+      return err({ kind: "provider_fetch_failed", cause: emxResult.error });
+    }
+    const emx = emxResult.value;
+    if (!emx) {
+      this.logger.error("emx_inbound: EMX not found", { code: "emx.inbound.emx_not_found", source, emxId });
+      return err({ kind: "provider_fetch_failed", cause: "EMX not found" });
+    }
+
+    const fetchResult = await adapter.fetchMessage(token, providerMessageId, emx);
     if (fetchResult.isErr()) {
       const error = fetchResult.error;
       if (error.kind === "provider_token_expired") {

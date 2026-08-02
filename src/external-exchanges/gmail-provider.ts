@@ -104,7 +104,7 @@ export class GmailProvider implements ProviderAdapter {
     }
   }
 
-  async fetchMessage(token: string, providerMessageId: string): Promise<Result<RawMimeResult, ProviderFetchError>> {
+  async fetchMessage(token: string, providerMessageId: string, _emx: ExternalMailExchange): Promise<Result<RawMimeResult, ProviderFetchError>> {
     try {
       const response = await fetch(`${GMAIL_API}/messages/${providerMessageId}?format=raw`, {
         headers: { "Authorization": `Bearer ${token}` },

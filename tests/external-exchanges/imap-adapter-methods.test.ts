@@ -212,10 +212,10 @@ describe("ImapAdapter.renew", () => {
 describe("ImapAdapter.fetchMessage", () => {
   it("returns provider_message_not_found when fetchOne returns null (expunged)", async () => {
     const adapter = createAdapter();
-    mockDb.getExternalExchange.mockResolvedValue(ok(makeEmx()));
+    const emx = makeEmx();
     mockClient.fetchOne.mockResolvedValue(null);
 
-    const result = await adapter.fetchMessage("acct-1", "emx_testABC123:99");
+    const result = await adapter.fetchMessage("acct-1", "99", emx);
 
     expect(result.isErr()).toBe(true);
     const error = result._unsafeUnwrapErr();

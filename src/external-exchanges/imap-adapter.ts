@@ -38,23 +38,6 @@ export function parseSyncCursor(cursor: string): { uidvalidity: number; lastUid:
 }
 
 // ---------------------------------------------------------------------------
-// Provider message ID utilities
-// ---------------------------------------------------------------------------
-
-export function formatProviderMessageId(emxId: string, uid: number): string {
-  return `${emxId}:${uid}`;
-}
-
-export function parseProviderMessageId(id: string): { emxId: string; uid: number } {
-  const lastColon = id.lastIndexOf(":");
-  if (lastColon < 1) throw new Error(`Invalid providerMessageId: ${id}`);
-  const emxId = id.slice(0, lastColon);
-  const uid = Number(id.slice(lastColon + 1));
-  if (!Number.isFinite(uid) || uid < 1) throw new Error(`Invalid providerMessageId UID: ${id}`);
-  return { emxId, uid };
-}
-
-// ---------------------------------------------------------------------------
 // IMAP client factory
 // ---------------------------------------------------------------------------
 
@@ -190,7 +173,7 @@ export class ImapAdapter implements ProviderAdapter {
           for (const uid of batch) {
             await this.signalQueue.send("emx_inbound", {
               source: "imap",
-              providerMessageId: formatProviderMessageId(emx.id, uid),
+              providerMessageId: String(uid),
               emxId: emx.id,
               accountId: emx.accountId,
             });
@@ -220,38 +203,28 @@ export class ImapAdapter implements ProviderAdapter {
     return ok(undefined);
   }
 
-  async fetchMessage(token: string, providerMessageId: string): Promise<Result<RawMimeResult, ProviderFetchError>> {
-    // token carries accountId for IMAP (no OAuth)
-    const accountId = token;
-
-    let emxId: string;
-    let uid: number;
-    try {
-      ({ emxId, uid } = parseProviderMessageId(providerMessageId));
-    } catch {
-      return err({ kind: "provider_fetch_failed", cause: "Invalid providerMessageId format" });
+  async fetchMessage(_token: string, providerMessageId: string, emx: ExternalMailExchange): Promise<Result<RawMimeResult, ProviderFetchError>> {
+    const imapConfig = emx.imapConfig;
+    if (!imapConfig) {
+      return err({ kind: "provider_fetch_failed", cause: "EMX missing imapConfig" });
     }
 
-    const emxResult = await this.db.getExternalExchange(accountId, emxId);
-    if (emxResult.isErr()) {
-      return err({ kind: "provider_fetch_failed", cause: "Failed to load EMX record" });
-    }
-    const emx = emxResult.value;
-    if (!emx || !emx.imapConfig) {
-      return err({ kind: "provider_fetch_failed", cause: "EMX not found or missing imapConfig" });
+    const uid = Number(providerMessageId);
+    if (!Number.isFinite(uid) || uid < 1) {
+      return err({ kind: "provider_fetch_failed", cause: "Invalid providerMessageId: expected a UID number" });
     }
 
     let password: string;
     try {
-      password = this.encryptionManager.decrypt(emx.imapConfig.encryptedPassword);
+      password = this.encryptionManager.decrypt(imapConfig.encryptedPassword);
     } catch (e) {
       return err({ kind: "provider_fetch_failed", cause: e });
     }
 
     const client = createImapClient({
-      host: emx.imapConfig.host,
-      tlsConfig: emx.imapConfig.tlsConfig,
-      username: emx.imapConfig.username,
+      host: imapConfig.host,
+      tlsConfig: imapConfig.tlsConfig,
+      username: imapConfig.username,
       password,
       timeout: 30_000,
     });

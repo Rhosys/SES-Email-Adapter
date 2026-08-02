@@ -2,8 +2,6 @@ import { describe, it, expect, vi } from "vitest";
 import {
   parseSyncCursor,
   formatSyncCursor,
-  parseProviderMessageId,
-  formatProviderMessageId,
   createImapClient,
 } from "../../src/external-exchanges/imap-adapter.js";
 import type { ImapFlowOptions } from "imapflow";
@@ -43,28 +41,7 @@ describe("syncCursor round-trip", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Property 2: providerMessageId round-trip
-// Validates: Requirements 5.1, 5.2
-// ---------------------------------------------------------------------------
-
-describe("providerMessageId round-trip", () => {
-  it.each([
-    { emxId: "emx_abc123xyz", uid: 1, label: "typical emxId, uid=1" },
-    { emxId: "emx_abc123xyz", uid: 4294967295, label: "typical emxId, uid=max" },
-    { emxId: "emx_7KqVnZ3rP2mABC", uid: 500, label: "longer emxId" },
-  ])("format → parse produces original values ($label)", ({ emxId, uid }) => {
-    const id = formatProviderMessageId(emxId, uid);
-    const parsed = parseProviderMessageId(id);
-    expect(parsed).toEqual({ emxId, uid });
-  });
-
-  it("formatProviderMessageId produces the expected string format", () => {
-    expect(formatProviderMessageId("emx_abc123xyz", 42)).toBe("emx_abc123xyz:42");
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Property 4: TLS config → port resolution
+// Property 2: TLS config → port resolution (renumbered from Property 4)
 // Validates: Requirements 10.1, 10.2
 // ---------------------------------------------------------------------------
 
@@ -114,14 +91,3 @@ describe("parseSyncCursor errors", () => {
   });
 });
 
-describe("parseProviderMessageId errors", () => {
-  it.each([
-    { input: "nocolon", label: "missing colon" },
-    { input: "emx_abc:0", label: "uid=0 (below minimum)" },
-    { input: "emx_abc:-1", label: "negative uid" },
-    { input: "emx_abc:abc", label: "non-numeric uid" },
-    { input: ":42", label: "empty emxId" },
-  ])("throws for $label", ({ input }) => {
-    expect(() => parseProviderMessageId(input)).toThrow();
-  });
-});

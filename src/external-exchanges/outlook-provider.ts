@@ -177,7 +177,7 @@ export class OutlookProvider implements ProviderAdapter {
     }
   }
 
-  async fetchMessage(token: string, providerMessageId: string): Promise<Result<RawMimeResult, ProviderFetchError>> {
+  async fetchMessage(token: string, providerMessageId: string, _emx: ExternalMailExchange): Promise<Result<RawMimeResult, ProviderFetchError>> {
     try {
       const metaResp = await fetch(`${GRAPH_API}/me/messages/${providerMessageId}?$select=receivedDateTime`, {
         headers: { "Authorization": `Bearer ${token}` },
