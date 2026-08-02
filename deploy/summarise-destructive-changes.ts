@@ -1,4 +1,4 @@
-import { readFileSync, appendFileSync } from "fs";
+import { readFile, appendFile } from "node:fs/promises";
 
 const REASON_LABELS: Record<string, string> = {
   replace_because_tainted:              "Resource was tainted (forced replacement)",
@@ -23,8 +23,8 @@ function extractBlock(planText: string, address: string): string {
   return result.join("\n").trim();
 }
 
-const planJson = JSON.parse(readFileSync("deploy/plan.json", "utf-8"));
-const planText = readFileSync("/tmp/plan_text.txt", "utf-8");
+const planJson = JSON.parse(await readFile("deploy/plan.json", "utf-8"));
+const planText = await readFile("/tmp/plan_text.txt", "utf-8");
 const summaryFile = process.env["GITHUB_STEP_SUMMARY"]!;
 
 for (const rc of planJson.resource_changes ?? []) {
@@ -40,7 +40,7 @@ for (const rc of planJson.resource_changes ?? []) {
   let summaryLine = `<strong>${actionLabel}: <code>${address}</code></strong>`;
   if (reason) summaryLine += ` — ${reason}`;
 
-  appendFileSync(
+  await appendFile(
     summaryFile,
     `<details>\n<summary>${summaryLine}</summary>\n\n\`\`\`diff\n${diff}\n\`\`\`\n\n</details>\n\n`,
   );

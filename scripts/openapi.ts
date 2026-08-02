@@ -1,5 +1,5 @@
-import { writeFileSync } from "fs";
-import { resolve } from "path";
+import { writeFile } from "node:fs/promises";
+import { resolve } from "node:path";
 import { createApp } from "../src/api/app.js";
 import { RequestLogger } from "../src/logger.js";
 
@@ -20,5 +20,5 @@ const spec = app.getOpenAPIDocument({
 });
 
 const outPath = resolve(process.cwd(), "openapi.json");
-writeFileSync(outPath, JSON.stringify(spec, null, 2));
+await writeFile(outPath, JSON.stringify(spec, null, 2));
 console.log(`OpenAPI spec written to ${outPath}`);

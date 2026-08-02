@@ -6,7 +6,7 @@
 import { RDSDataClient } from "@aws-sdk/client-rds-data";
 import { drizzle } from "drizzle-orm/aws-data-api/pg";
 import { migrate } from "drizzle-orm/aws-data-api/pg/migrator";
-import { readFileSync, readdirSync } from "node:fs";
+import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { RequestLogger } from "../logger.js";
 
@@ -30,11 +30,12 @@ const DESTRUCTIVE_PATTERNS = [/DROP\s+TABLE/i, /DROP\s+COLUMN/i, /TRUNCATE/i];
 const ALLOW_DESTRUCTIVE_MARKER = "-- @allow-destructive";
 const migrationsFolder = join(import.meta.dirname, "migrations");
 
-const sqlFiles = readdirSync(migrationsFolder).filter(f => f.endsWith(".sql"));
+const allFiles = await readdir(migrationsFolder);
+const sqlFiles = allFiles.filter(f => f.endsWith(".sql"));
 logger.info("Scanning migration files for destructive DDL", { fileCount: sqlFiles.length });
 
 for (const file of sqlFiles) {
-  const content = readFileSync(join(migrationsFolder, file), "utf-8");
+  const content = await readFile(join(migrationsFolder, file), "utf-8");
   if (content.includes(ALLOW_DESTRUCTIVE_MARKER)) continue;
   for (const pattern of DESTRUCTIVE_PATTERNS) {
     if (pattern.test(content)) {

@@ -95,33 +95,29 @@ program
     });
 
     // Copy migration SQL + meta files into the bundle (esbuild doesn't handle .sql/.json assets)
-    const { mkdirSync, copyFileSync, readdirSync } = await import('node:fs');
+    const { mkdir, copyFile, readdir } = await import('node:fs/promises');
     const migrationsSrcDir = 'src/migrations';
     const migrationsDestDir = 'dist/main/migrations';
-    mkdirSync(migrationsDestDir, { recursive: true });
+    await mkdir(migrationsDestDir, { recursive: true });
     const metaDestDir = `${migrationsDestDir}/meta`;
-    mkdirSync(metaDestDir, { recursive: true });
-    for (const file of readdirSync(migrationsSrcDir).filter(f => f.endsWith('.sql'))) {
-      copyFileSync(`${migrationsSrcDir}/${file}`, `${migrationsDestDir}/${file}`);
+    await mkdir(metaDestDir, { recursive: true });
+    for (const file of (await readdir(migrationsSrcDir)).filter(f => f.endsWith('.sql'))) {
+      await copyFile(`${migrationsSrcDir}/${file}`, `${migrationsDestDir}/${file}`);
     }
     const metaSrcDir = `${migrationsSrcDir}/meta`;
-    for (const file of readdirSync(metaSrcDir).filter(f => f.endsWith('.json'))) {
-      copyFileSync(`${metaSrcDir}/${file}`, `${metaDestDir}/${file}`);
+    for (const file of (await readdir(metaSrcDir)).filter(f => f.endsWith('.json'))) {
+      await copyFile(`${metaSrcDir}/${file}`, `${metaDestDir}/${file}`);
     }
-
-    // Bundle KMS-encrypted secrets alongside the handler
-    mkdirSync('dist/main/processor/calendar', { recursive: true });
-    copyFileSync('src/processor/calendar/calendar-hmac.kms', 'dist/main/processor/calendar/calendar-hmac.kms');
 
     // Compile MJML email templates → HTML (preserves {{...}} Mustache placeholders)
     const mjml = (await import('mjml')).default;
-    const { readFileSync, writeFileSync } = await import('node:fs');
+    const { readFile, writeFile } = await import('node:fs/promises');
     const emailTemplatesOutDir = 'dist/main/email-templates';
-    mkdirSync(emailTemplatesOutDir, { recursive: true });
-    for (const file of readdirSync('email-templates').filter(f => f.endsWith('.mjml') && !f.startsWith('_'))) {
-      const content = readFileSync(`email-templates/${file}`, 'utf-8');
+    await mkdir(emailTemplatesOutDir, { recursive: true });
+    for (const file of (await readdir('email-templates')).filter(f => f.endsWith('.mjml') && !f.startsWith('_'))) {
+      const content = await readFile(`email-templates/${file}`, 'utf-8');
       const { html } = await mjml(content, { filePath: `email-templates/${file}`, validationLevel: 'skip', ignoreIncludes: false });
-      writeFileSync(`${emailTemplatesOutDir}/${file.replace(/\.mjml$/, '.html')}`, html);
+      await writeFile(`${emailTemplatesOutDir}/${file.replace(/\.mjml$/, '.html')}`, html);
       console.log(`  Compiled ${file}`);
     }
 
