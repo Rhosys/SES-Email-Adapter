@@ -1528,6 +1528,42 @@ export class AccountDatabase {
     }
   }
 
+  async createJmapExchange(accountId: string, data: {
+    emailAddress: string;
+    status: "active" | "activation_failed";
+    jmapConfig: { sessionUrl: string; username: string; encryptedPassword: string; apiUrl: string; downloadUrl: string; jmapAccountId: string; inboxId: string };
+    syncCursor?: string;
+    nextSyncTime?: string;
+    errorReason?: string;
+  }): Promise<Result<ExternalMailExchange, DbError>> {
+    const now = DateTime.utc().toISO()!;
+    const id = generateId("emx");
+    const item: ExternalMailExchange = {
+      id,
+      accountId,
+      platform: "jmap",
+      emailAddress: data.emailAddress,
+      status: data.status,
+      jmapConfig: data.jmapConfig,
+      ...(data.syncCursor !== undefined ? { syncCursor: data.syncCursor } : {}),
+      ...(data.nextSyncTime !== undefined ? { nextSyncTime: data.nextSyncTime } : {}),
+      ...(data.errorReason !== undefined ? { errorReason: data.errorReason } : {}),
+      createdAt: now,
+      updatedAt: now,
+    };
+    const dynamoItem: Record<string, unknown> = { ...item, pk: pk(accountId), sk: `EMX#${id}` };
+    if (data.status === "active" && data.nextSyncTime) {
+      dynamoItem.gsi1pk = "EMX#active";
+      dynamoItem.gsi1sk = `${data.nextSyncTime}#${id}`;
+    }
+    try {
+      await dynamo.send(new PutCommand({ TableName: ACCOUNTS_TABLE, Item: dynamoItem }));
+      return ok(item);
+    } catch (e) {
+      return err(dbError(e));
+    }
+  }
+
   async getExternalExchange(accountId: string, emxId: string): Promise<Result<ExternalMailExchange | null, DbError>> {
     try {
       const res = await dynamo.send(new GetCommand({
