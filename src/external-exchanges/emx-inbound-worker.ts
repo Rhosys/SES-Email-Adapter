@@ -90,11 +90,12 @@ export class EmxInboundWorker {
     await this.emailContentStore.putObject(s3Key, fetchResult.value.rawMime, "message/rfc822");
 
     const message: InboundSignalMessage = {
+      expectedAccountId: accountId,
       s3Key,
       compositeMailMessageId,
       idempotencyKey: sqsMessageId,
       timestamp: fetchResult.value.receivedAt,
-      destination: [],
+      destination: [emx.emailAddress],
       dkimVerdict: "PASS",
       dmarcVerdict: "PASS",
     };

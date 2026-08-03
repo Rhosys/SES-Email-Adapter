@@ -24,6 +24,7 @@ import type { SchedulerClient } from "../scheduler/scheduler-client.js";
 import { getPrimaryThreadMatcherRegistry } from "../embedding/cluster-registry.js";
 import type { EmbeddingGenerator } from "../embedding/embedding-generator.js";
 import type { ThreadMatcher } from "../database/thread-matcher.js";
+import type { SignalQueue } from "../messaging/signal-queue.js";
 import type { ProcessorError, NotFoundError } from "../errors.js";
 import type { Result } from "neverthrow";
 import {
@@ -70,10 +71,11 @@ export class ThreadsApi {
     private readonly contentCdnBaseUrl: string,
     private readonly embeddingGenerator: EmbeddingGenerator,
     private readonly threadMatcher: ThreadMatcher,
+    private readonly signalQueue: SignalQueue,
   ) {}
 
   register(app: OpenAPIHono<AppEnv>, { authz, err, route }: RouteHelpers): void {
-    const { threadDb, accountDb, logger, draftSendDispatcher, schedulerClient, emailService, rsvpComposer, postApprovalCalendarDeps, signalReprocessor, emailContentStore, contentCdnBaseUrl, embeddingGenerator, threadMatcher } = this;
+    const { threadDb, accountDb, logger, draftSendDispatcher, schedulerClient, emailService, rsvpComposer, postApprovalCalendarDeps, signalReprocessor, emailContentStore, contentCdnBaseUrl, embeddingGenerator, threadMatcher, signalQueue } = this;
 
     // -------------------------------------------------------------------------
     // 1. GET /accounts/{accountId}/threads — list threads
@@ -84,13 +86,19 @@ export class ThreadsApi {
       tags: ["Threads"],
       request: {
         params: z.object({ accountId: z.string() }),
-        query: z.object({ workflow: z.string().optional(), label: z.string().optional(), status: z.string().optional(), cursor: z.string().optional(), limit: z.string().optional(), q: z.string().optional() }),
+        query: z.object({ workflow: z.string().optional(), label: z.string().optional(), status: z.string().optional(), cursor: z.string().optional(), limit: z.string().optional(), q: z.string().optional(), refresh: z.string().optional() }),
       },
       middleware: [authz("threads:read", c => `accounts/${c.req.param("accountId")!}/threads`)] as const,
       responses: { 200: { content: { "application/json": { schema: ListThreadsResponse } }, description: "List threads" } },
     }), async (c) => {
       const accountId = c.req.param("accountId")!;
       const query = c.req.query();
+
+      // When refresh param is present (ISO8601 datetime, used as cache-buster), trigger EMX dispatch
+      if (query["refresh"]) {
+        void signalQueue.send("emx_dispatch", {});
+      }
+
       const q = query["q"];
       if (q) {
         if (q.length < 3 || q.length > 64) {

@@ -144,6 +144,12 @@ export class ExternalExchangesApi {
         const adapter = adapters["imap"];
         if (!adapter) return err(c, 422, "Unsupported platform");
 
+        // Alias conflict check: reject if another account already owns this email address
+        const aliasCheck = await accountDb.getAliasByGlobalAddress(imapConfig.username);
+        if (aliasCheck.isOk() && aliasCheck.value && aliasCheck.value.accountId !== accountId) {
+          return err(c, 409, "Email address is already registered to another account");
+        }
+
         const encryptedPassword = encryptionManager.encrypt(imapConfig.password);
 
         // Build temp EMX with raw password for activation (adapter tests connection with it)
@@ -172,6 +178,7 @@ export class ExternalExchangesApi {
           syncCursor, nextSyncTime: expiresAt,
         });
         if (result.isErr()) { logger.error("Failed to create IMAP exchange record", { code: "api.emx.imap.create_failed", error: result.error }); return err(c, 500, "Internal Server Error"); }
+        await accountDb.ensureAlias(accountId, imapConfig.username, "allow_all", aliasCheck.isOk() ? aliasCheck.value : undefined);
         triggerDispatch();
         return c.json(serializeEmx(result.value), 201);
       }
@@ -182,6 +189,12 @@ export class ExternalExchangesApi {
         const { jmapConfig } = jmapBody.data;
         const adapter = adapters["jmap"];
         if (!adapter) return err(c, 422, "Unsupported platform");
+
+        // Alias conflict check: reject if another account already owns this email address
+        const aliasCheck = await accountDb.getAliasByGlobalAddress(jmapConfig.username);
+        if (aliasCheck.isOk() && aliasCheck.value && aliasCheck.value.accountId !== accountId) {
+          return err(c, 409, "Email address is already registered to another account");
+        }
 
         const encryptedPassword = encryptionManager.encrypt(jmapConfig.password);
 
@@ -212,6 +225,7 @@ export class ExternalExchangesApi {
           syncCursor, nextSyncTime: expiresAt,
         });
         if (result.isErr()) { logger.error("Failed to create JMAP exchange record", { code: "api.emx.jmap.create_failed", error: result.error }); return err(c, 500, "Internal Server Error"); }
+        await accountDb.ensureAlias(accountId, jmapConfig.username, "allow_all", aliasCheck.isOk() ? aliasCheck.value : undefined);
         triggerDispatch();
         return c.json(serializeEmx(result.value), 201);
       }
@@ -221,6 +235,12 @@ export class ExternalExchangesApi {
 
       const adapter = adapters[body.platform];
       if (!adapter) return err(c, 422, "Unsupported platform");
+
+      // Alias conflict check: reject if another account already owns this email address
+      const oauthAliasCheck = await accountDb.getAliasByGlobalAddress(body.emailAddress);
+      if (oauthAliasCheck.isOk() && oauthAliasCheck.value && oauthAliasCheck.value.accountId !== accountId) {
+        return err(c, 409, "Email address is already registered to another account");
+      }
 
       // Idempotency: find existing exchange for same platform + emailAddress
       const listResult = await accountDb.listExternalExchanges(accountId);
@@ -264,11 +284,13 @@ export class ExternalExchangesApi {
       if (existing) {
         const updateResult = await accountDb.updateExternalExchange(accountId, existing.id, { status: "active", syncCursor, expiresAt, providerSubscriptionId, errorReason: undefined, consecutiveFailures: 0 });
         if (updateResult.isErr()) { logger.error("Failed to update exchange record", { code: "api.emx.create_failed", error: updateResult.error }); return err(c, 500, "Internal Server Error"); }
+        await accountDb.ensureAlias(accountId, body.emailAddress, "allow_all", oauthAliasCheck.isOk() ? oauthAliasCheck.value : undefined);
         triggerDispatch();
         return c.json(serializeEmx(updateResult.value), 200);
       }
       const result = await accountDb.createExternalExchange(accountId, { platform: body.platform, emailAddress: body.emailAddress, status: "active", syncCursor, expiresAt, providerSubscriptionId });
       if (result.isErr()) { logger.error("Failed to create exchange record", { code: "api.emx.create_failed", error: result.error }); return err(c, 500, "Internal Server Error"); }
+      await accountDb.ensureAlias(accountId, body.emailAddress, "allow_all", oauthAliasCheck.isOk() ? oauthAliasCheck.value : undefined);
       triggerDispatch();
       return c.json(serializeEmx(result.value), 201);
     });
