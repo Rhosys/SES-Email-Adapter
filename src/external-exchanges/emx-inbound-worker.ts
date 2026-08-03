@@ -14,12 +14,16 @@ export interface EmxInboundPayload {
   accountId: string;
 }
 
+export interface EmxProcessor {
+  processInbound(msg: InboundSignalMessage, receiveCount: number): Promise<Result<void, { kind: string; [key: string]: unknown }>>;
+}
+
 interface EmxInboundWorkerDeps {
   logger: Logger;
   emailContentStore: EmailContentStore;
   adapters: Record<string, ProviderAdapter>;
   accountDb: AccountDatabase;
-  processRecord: (message: InboundSignalMessage, receiveCount: number) => Promise<Result<void, ProcessorError>>;
+  processor: EmxProcessor;
   getProviderToken: (accountId: string, connectionId: string) => Promise<string>;
 }
 
@@ -28,7 +32,7 @@ export class EmxInboundWorker {
   private readonly emailContentStore: EmailContentStore;
   private readonly adapters: Record<string, ProviderAdapter>;
   private readonly accountDb: AccountDatabase;
-  private readonly processRecord: EmxInboundWorkerDeps["processRecord"];
+  private readonly processor: EmxProcessor;
   private readonly getProviderToken: EmxInboundWorkerDeps["getProviderToken"];
 
   constructor(deps: EmxInboundWorkerDeps) {
@@ -36,7 +40,7 @@ export class EmxInboundWorker {
     this.emailContentStore = deps.emailContentStore;
     this.adapters = deps.adapters;
     this.accountDb = deps.accountDb;
-    this.processRecord = deps.processRecord;
+    this.processor = deps.processor;
     this.getProviderToken = deps.getProviderToken;
   }
 
@@ -100,6 +104,25 @@ export class EmxInboundWorker {
       dmarcVerdict: "PASS",
     };
 
-    return this.processRecord(message, receiveCount);
+    const processResult = await this.processor.processInbound(message, receiveCount);
+    if (processResult.isErr() && processResult.error.kind === "no_account_for_recipient") {
+      this.logger.error("EMX inbound message dropped — no alias found for recipient. The alias should have been created during exchange activation.", {
+        code: "emx.inbound.no_account_for_recipient",
+        source,
+        providerMessageId,
+        emxId,
+        accountId,
+        emailAddress: emx.emailAddress,
+        recipientAddress: processResult.error.recipientAddress,
+        destination: processResult.error.destination,
+        compositeMailMessageId: processResult.error.compositeMailMessageId,
+        expectedAccountId: processResult.error.expectedAccountId,
+        s3Key,
+        sqsMessageId,
+      });
+      return ok(undefined);
+    }
+    if (processResult.isErr()) return err(processResult.error as ProcessorError);
+    return ok(undefined);
   }
 }

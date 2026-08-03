@@ -215,7 +215,7 @@ describe("Processor delta computation — updateArc vs saveArc", () => {
     const classifier = makeClassifier({ workflow: "conversation", summary: "A test email." });
     const processor = buildProcessor(threadDb, accountDb, processingDb, threadMatcher, classifier, mockLogger, ruleEvaluator);
 
-    await processor.processRecord(makeMessage(), 1);
+    await processor.processInbound(makeMessage(), 1);
 
     expect(threadDb.updateThread).toHaveBeenCalledOnce();
     const [accountId, arcId, status, lastSignalAt, fields] = vi.mocked(threadDb.updateThread).mock.calls[0]!;
@@ -240,7 +240,7 @@ describe("Processor delta computation — updateArc vs saveArc", () => {
     const classifier = makeClassifier({ workflow: "conversation", summary: "A test email." });
     const processor = buildProcessor(threadDb, accountDb, processingDb, threadMatcher, classifier, mockLogger, ruleEvaluator);
 
-    await processor.processRecord(makeMessage(), 1);
+    await processor.processInbound(makeMessage(), 1);
 
     expect(threadDb.updateThread).toHaveBeenCalledOnce();
     const [, , , , fields] = vi.mocked(threadDb.updateThread).mock.calls[0]!;
@@ -255,7 +255,7 @@ describe("Processor delta computation — updateArc vs saveArc", () => {
     const classifier = makeClassifier({ workflow: "conversation", summary: "A test email." });
     const processor = buildProcessor(threadDb, accountDb, processingDb, threadMatcher, classifier, mockLogger, ruleEvaluator);
 
-    await processor.processRecord(makeMessage(), 1);
+    await processor.processInbound(makeMessage(), 1);
 
     expect(threadDb.updateThread).toHaveBeenCalledOnce();
     const [, , status, lastSignalAt, fields] = vi.mocked(threadDb.updateThread).mock.calls[0]!;
@@ -279,7 +279,7 @@ describe("Processor delta computation — updateArc vs saveArc", () => {
     const classifier = makeClassifier({ workflow: "conversation", summary: "A test email." });
     const processor = buildProcessor(threadDb, accountDb, processingDb, threadMatcher, classifier, mockLogger, ruleEvaluator);
 
-    await processor.processRecord(makeMessage(), 1);
+    await processor.processInbound(makeMessage(), 1);
 
     expect(threadDb.updateThread).toHaveBeenCalledOnce();
     const [, , status, , fields] = vi.mocked(threadDb.updateThread).mock.calls[0]!;
@@ -303,7 +303,7 @@ describe("Processor delta computation — updateArc vs saveArc", () => {
     const classifier = makeClassifier({ workflow: "conversation", summary: "A test email." });
     const processor = buildProcessor(threadDb, accountDb, processingDb, threadMatcher, classifier, mockLogger, ruleEvaluator);
 
-    await processor.processRecord(makeMessage(), 1);
+    await processor.processInbound(makeMessage(), 1);
 
     expect(threadDb.updateThread).toHaveBeenCalledOnce();
     const [, , status, , fields] = vi.mocked(threadDb.updateThread).mock.calls[0]!;
@@ -316,7 +316,7 @@ describe("Processor delta computation — updateArc vs saveArc", () => {
     const classifier = makeClassifier();
     const processor = buildProcessor(threadDb, accountDb, processingDb, threadMatcher, classifier, mockLogger, ruleEvaluator);
 
-    await processor.processRecord(makeMessage(), 1);
+    await processor.processInbound(makeMessage(), 1);
 
     expect(threadDb.saveThread).toHaveBeenCalledOnce();
     expect(threadDb.updateThread).not.toHaveBeenCalled();
@@ -339,7 +339,7 @@ describe("Processor delta computation — updateArc vs saveArc", () => {
     const classifier = makeClassifier({ workflow: "conversation", summary: "A test email." });
     const processor = buildProcessor(threadDb, accountDb, processingDb, threadMatcher, classifier, mockLogger, ruleEvaluator);
 
-    await processor.processRecord(makeMessage(), 1);
+    await processor.processInbound(makeMessage(), 1);
 
     expect(threadDb.updateThread).toHaveBeenCalledOnce();
     const [, , status] = vi.mocked(threadDb.updateThread).mock.calls[0]!;
@@ -367,7 +367,7 @@ describe("Processor delta computation — updateArc vs saveArc", () => {
     const classifier = makeClassifier({ workflow: "conversation", summary: "A test email." });
     const processor = buildProcessor(threadDb, accountDb, processingDb, threadMatcher, classifier, mockLogger, ruleEvaluator);
 
-    await processor.processRecord(makeMessage(), 1);
+    await processor.processInbound(makeMessage(), 1);
 
     expect(threadDb.updateThread).toHaveBeenCalledOnce();
     const [, , , , fields] = vi.mocked(threadDb.updateThread).mock.calls[0]!;

@@ -199,7 +199,7 @@ describe("Property 1: Primary failure causes batch item failure", () => {
       calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud", hmac: makeHmacGeneratorFake() },
     });
 
-    const result = await processor.processRecord(makeMessage("test-msg-primary-fail"), 1);
+    const result = await processor.processInbound(makeMessage("test-msg-primary-fail"), 1);
 
     // Assert: batch item failure returned
     expect(result.isErr()).toBe(true);

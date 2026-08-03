@@ -184,7 +184,7 @@ describe("Side effect caller logging", () => {
       calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud", hmac: makeHmacGeneratorFake() },
     });
 
-    // Side-effects are now executed via processSideEffect, not processRecord
+    // Side-effects are now executed via processSideEffect, not processInbound
     const payload: SideEffectPayload = { signal: makeSignal(), thread: makeThread() };
     await processor.processSideEffect(payload);
 

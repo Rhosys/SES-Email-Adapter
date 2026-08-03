@@ -166,8 +166,8 @@ describe("Cross-layer idempotence — live writes + cache + Aurora", () => {
     });
 
     const message = makeMessage("test-msg-001");
-    await processor.processRecord(message, 1);
-    await processor.processRecord(message, 1);
+    await processor.processInbound(message, 1);
+    await processor.processInbound(message, 1);
 
     expect(threadDb.getSignalByMessageId).toHaveBeenCalledTimes(2);
     expect(threadDb.saveSignal).toHaveBeenCalledTimes(1);
@@ -222,8 +222,8 @@ describe("Cross-layer idempotence — live writes + cache + Aurora", () => {
     });
 
     const message = makeMessage("test-msg-001");
-    await processor.processRecord(message, 1);
-    await processor.processRecord(message, 1);
+    await processor.processInbound(message, 1);
+    await processor.processInbound(message, 1);
 
     expect(savedSignals.length).toBe(2);
     expect(savedSignals[0]!.data.embeddings).toEqual(savedSignals[1]!.data.embeddings);

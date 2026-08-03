@@ -186,7 +186,7 @@ threadDb, accountDb, processingDb,
       calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud", hmac: makeHmacGeneratorFake() },
     });
 
-    await processor.processRecord(makeMessage("test-msg-aurora"), 1);
+    await processor.processInbound(makeMessage("test-msg-aurora"), 1);
 
     const saveSignalCalls = (threadDb.saveSignal as ReturnType<typeof vi.fn>).mock.calls;
     expect(saveSignalCalls.length).toBeGreaterThanOrEqual(1);
@@ -236,7 +236,7 @@ threadDb, accountDb, processingDb,
       calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud", hmac: makeHmacGeneratorFake() },
     });
 
-    await processor.processRecord(makeMessage("test-msg-aurora"), 1);
+    await processor.processInbound(makeMessage("test-msg-aurora"), 1);
 
     const upsertCalls = (auroraWriter.upsertEmbedding as ReturnType<typeof vi.fn>).mock.calls;
     expect(upsertCalls.length).toBe(2);

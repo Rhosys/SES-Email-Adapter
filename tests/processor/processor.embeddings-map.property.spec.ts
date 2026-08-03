@@ -246,7 +246,7 @@ threadDb, accountDb, processingDb,
       calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud", hmac: makeHmacGeneratorFake() },
     });
 
-    const result = await processor.processRecord(makeMessage("ses-prop4-test"), 1);
+    const result = await processor.processInbound(makeMessage("ses-prop4-test"), 1);
 
     // Processing should succeed (no batch item failures)
     expect(result.isOk()).toBe(true);

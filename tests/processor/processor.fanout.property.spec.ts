@@ -214,7 +214,7 @@ threadDb, accountDb, processingDb,
       calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud", hmac: makeHmacGeneratorFake() },
     });
 
-    await processor.processRecord(makeMessage("ses-fanout-test"), 1);
+    await processor.processInbound(makeMessage("ses-fanout-test"), 1);
 
     const saveSignalCalls = (threadDb.saveSignal as ReturnType<typeof vi.fn>).mock.calls;
     expect(saveSignalCalls.length).toBeGreaterThanOrEqual(1);
@@ -274,7 +274,7 @@ threadDb, accountDb, processingDb,
       calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud", hmac: makeHmacGeneratorFake() },
     });
 
-    await processor.processRecord(makeMessage("ses-fanout-test"), 1);
+    await processor.processInbound(makeMessage("ses-fanout-test"), 1);
 
     const upsertCalls = (auroraWriter.upsertEmbedding as ReturnType<typeof vi.fn>).mock.calls;
     expect(upsertCalls).toHaveLength(clusters.length);
@@ -335,7 +335,7 @@ threadDb, accountDb, processingDb,
       calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud", hmac: makeHmacGeneratorFake() },
     });
 
-    await processor.processRecord(makeMessage("ses-fanout-test"), 1);
+    await processor.processInbound(makeMessage("ses-fanout-test"), 1);
 
     const saveSignalCalls = (threadDb.saveSignal as ReturnType<typeof vi.fn>).mock.calls;
     const savedSignal = saveSignalCalls[0]![0] as Signal;

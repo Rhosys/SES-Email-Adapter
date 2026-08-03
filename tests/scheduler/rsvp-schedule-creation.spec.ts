@@ -219,8 +219,8 @@ describe("Feature: calendar-rsvp-reminder, Property 1: RSVP schedule creation gu
       const schedulerClient = makeSchedulerClientMock();
       const processor = buildProcessor({ mockLogger, schedulerClient, icsContent: makeIcsContent(startTime, "REQUEST") });
 
-      const result = await processor.processRecord(makeMessage(`msg-rsvp-create-${startTime}`), 1);
-      expect(result.isOk(), `processRecord failed: ${result.isErr() ? result.error.message : ""}`).toBe(true);
+      const result = await processor.processInbound(makeMessage(`msg-rsvp-create-${startTime}`), 1);
+      expect(result.isOk(), `processInbound failed: ${result.isErr() ? (result.error as { message?: string }).message ?? result.error.kind : ""}`).toBe(true);
 
       // Find the RSVP schedule creation call (suffix starts with "rsvp.")
       const rsvpCalls = schedulerClient.createFollowup.mock.calls.filter(
@@ -256,7 +256,7 @@ describe("Feature: calendar-rsvp-reminder, Property 1: RSVP schedule creation gu
       const schedulerClient = makeSchedulerClientMock();
       const processor = buildProcessor({ mockLogger, schedulerClient, icsContent: makeIcsContent(startTime, "REQUEST") });
 
-      await processor.processRecord(makeMessage(`msg-rsvp-skip-${startTime}`), 1);
+      await processor.processInbound(makeMessage(`msg-rsvp-skip-${startTime}`), 1);
 
       // No RSVP schedule call (may still have day-of calendar schedule)
       const rsvpCalls = schedulerClient.createFollowup.mock.calls.filter(
@@ -286,7 +286,7 @@ describe("Feature: calendar-rsvp-reminder, Property 1: RSVP schedule creation gu
       const schedulerClient = makeSchedulerClientMock();
       const processor = buildProcessor({ mockLogger, schedulerClient, icsContent: makeIcsContent("20250715T140000Z", method) });
 
-      await processor.processRecord(makeMessage(`msg-rsvp-method-${method}`), 1);
+      await processor.processInbound(makeMessage(`msg-rsvp-method-${method}`), 1);
 
       const rsvpCalls = schedulerClient.createFollowup.mock.calls.filter(
         (c: Array<{ suffix: string }>) => c[0]!.suffix.startsWith("rsvp."),
@@ -311,7 +311,7 @@ describe("Feature: calendar-rsvp-reminder, Property 1: RSVP schedule creation gu
       const schedulerClient = makeSchedulerClientMock();
       const processor = buildProcessor({ mockLogger, schedulerClient, icsContent: makeIcsContent("20250715T140000Z", method) });
 
-      await processor.processRecord(makeMessage(`msg-rsvp-case-${method}`), 1);
+      await processor.processInbound(makeMessage(`msg-rsvp-case-${method}`), 1);
 
       const rsvpCalls = schedulerClient.createFollowup.mock.calls.filter(
         (c: Array<{ suffix: string }>) => c[0]!.suffix.startsWith("rsvp."),
@@ -347,7 +347,7 @@ describe("Feature: calendar-rsvp-reminder, Property 1: RSVP schedule creation gu
       const schedulerClient = makeSchedulerClientMock();
       const processor = buildProcessor({ mockLogger, schedulerClient, icsContent: icsWithoutDtstart });
 
-      await processor.processRecord(makeMessage("msg-rsvp-no-dtstart"), 1);
+      await processor.processInbound(makeMessage("msg-rsvp-no-dtstart"), 1);
 
       const rsvpCalls = schedulerClient.createFollowup.mock.calls.filter(
         (c: Array<{ suffix: string }>) => c[0]!.suffix.startsWith("rsvp."),
@@ -371,7 +371,7 @@ describe("Feature: calendar-rsvp-reminder, Property 1: RSVP schedule creation gu
       const schedulerClient = makeSchedulerClientMock();
       const processor = buildProcessor({ mockLogger, schedulerClient, icsContent: makeIcsContent("20250101T010000Z", "REQUEST") });
 
-      await processor.processRecord(makeMessage("msg-rsvp-suffix-utc"), 1);
+      await processor.processInbound(makeMessage("msg-rsvp-suffix-utc"), 1);
 
       const rsvpCalls = schedulerClient.createFollowup.mock.calls.filter(
         (c: Array<{ suffix: string }>) => c[0]!.suffix.startsWith("rsvp."),
@@ -386,7 +386,7 @@ describe("Feature: calendar-rsvp-reminder, Property 1: RSVP schedule creation gu
       const schedulerClient = makeSchedulerClientMock();
       const processor = buildProcessor({ mockLogger, schedulerClient, icsContent: makeIcsContent("20250615T235900Z", "REQUEST") });
 
-      await processor.processRecord(makeMessage("msg-rsvp-suffix-eod"), 1);
+      await processor.processInbound(makeMessage("msg-rsvp-suffix-eod"), 1);
 
       const rsvpCalls = schedulerClient.createFollowup.mock.calls.filter(
         (c: Array<{ suffix: string }>) => c[0]!.suffix.startsWith("rsvp."),

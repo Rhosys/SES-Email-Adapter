@@ -215,7 +215,7 @@ describe("Feature: signal-processor-retry-resilience, Property 4: Arc saved befo
       calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud", hmac: makeHmacGeneratorFake() },
     });
 
-    await processor.processRecord(makeMessage(messageId), 1);
+    await processor.processInbound(makeMessage(messageId), 1);
 
     const saveThreadIdx = callOrder.indexOf("saveThread");
     const saveSignalIdx = callOrder.indexOf("saveSignal");
@@ -272,7 +272,7 @@ describe("Feature: signal-processor-retry-resilience, Property 4: Arc saved befo
       calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud", hmac: makeHmacGeneratorFake() },
     });
 
-    const result = await processor.processRecord(makeMessage(messageId), 1);
+    const result = await processor.processInbound(makeMessage(messageId), 1);
 
     expect(saveSignalCalled).toBe(false);
     expect(auroraWriter.upsertEmbedding).not.toHaveBeenCalled();
@@ -446,7 +446,7 @@ describe("Feature: signal-processor-retry-resilience, Property 6: Aurora failure
       calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud", hmac: makeHmacGeneratorFake() },
     });
 
-    const result = await processor.processRecord(makeMessage(messageId), 1);
+    const result = await processor.processInbound(makeMessage(messageId), 1);
 
     expect(result.isErr()).toBe(true);
 
@@ -499,7 +499,7 @@ describe("Feature: signal-processor-retry-resilience, Property 6: Aurora failure
       calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud", hmac: makeHmacGeneratorFake() },
     });
 
-    const result = await processor.processRecord(makeMessage(messageId), 1);
+    const result = await processor.processInbound(makeMessage(messageId), 1);
 
     expect(result.isErr()).toBe(true);
 
@@ -552,7 +552,7 @@ describe("Feature: signal-processor-retry-resilience, Property 6: Aurora failure
       calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud", hmac: makeHmacGeneratorFake() },
     });
 
-    const result = await processor.processRecord(makeMessage(messageId), 1);
+    const result = await processor.processInbound(makeMessage(messageId), 1);
 
     expect(result.isErr()).toBe(true);
 
@@ -714,7 +714,7 @@ describe("Feature: signal-processor-retry-resilience, Property 5: Side-effects d
       calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud", hmac: makeHmacGeneratorFake() },
     });
 
-    const result = await processor.processRecord(makeMessage("msg-dispatch-success"), 1);
+    const result = await processor.processInbound(makeMessage("msg-dispatch-success"), 1);
 
     expect(result.isOk()).toBe(true);
     expect(sqsDispatcher.sendMessage).toHaveBeenCalled();
@@ -761,7 +761,7 @@ describe("Feature: signal-processor-retry-resilience, Property 5: Side-effects d
       calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud", hmac: makeHmacGeneratorFake() },
     });
 
-    const result = await processor.processRecord(makeMessage("msg-dispatch-aurora-fail"), 1);
+    const result = await processor.processInbound(makeMessage("msg-dispatch-aurora-fail"), 1);
 
     expect(sqsDispatcher.sendMessage).not.toHaveBeenCalled();
     expect(result.isErr()).toBe(true);
@@ -800,7 +800,7 @@ describe("Feature: signal-processor-retry-resilience, Property 5: Side-effects d
       // No sqsDispatcher — backward compatibility path
     });
 
-    const result = await processor.processRecord(makeMessage("msg-dispatch-no-dispatcher"), 1);
+    const result = await processor.processInbound(makeMessage("msg-dispatch-no-dispatcher"), 1);
 
     expect(result.isOk()).toBe(true);
   });
@@ -841,7 +841,7 @@ describe("Feature: signal-processor-retry-resilience, Property 5: Side-effects d
       calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud", hmac: makeHmacGeneratorFake() },
     });
 
-    const result = await processor.processRecord(makeMessage("msg-dispatch-sqs-fail"), 1);
+    const result = await processor.processInbound(makeMessage("msg-dispatch-sqs-fail"), 1);
 
     expect(result.isErr()).toBe(true);
     // Aurora upsert should have been called (it succeeded)
@@ -1011,7 +1011,7 @@ describe("Feature: signal-processor-retry-resilience, Property 7: Partial Aurora
       calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud", hmac: makeHmacGeneratorFake() },
     });
 
-    const result = await processor.processRecord(makeMessage(messageId), 1);
+    const result = await processor.processInbound(makeMessage(messageId), 1);
 
     // 1. Primary cluster's upsert was called and completed (not rolled back)
     expect(completedUpserts).toContain("cluster-a");

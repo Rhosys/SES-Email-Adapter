@@ -201,7 +201,7 @@ describe("Single saveThread call with complete mutations", () => {
       calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud", hmac: makeHmacGeneratorFake() },
     });
 
-    await processor.processRecord(makeMessage("test-ses-id", recipientEmail), 1);
+    await processor.processInbound(makeMessage("test-ses-id", recipientEmail), 1);
 
     expect(saveThreadCallCount).toBe(1);
     expect(savedArc).not.toBeNull();

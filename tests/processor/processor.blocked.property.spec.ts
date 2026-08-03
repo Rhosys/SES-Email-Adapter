@@ -226,7 +226,7 @@ describe("Blocked/quarantined signals never trigger saveArc", () => {
       calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud", hmac: makeHmacGeneratorFake() },
     });
 
-    await processor.processRecord(makeMessage("msg-blocked-test"), 1);
+    await processor.processInbound(makeMessage("msg-blocked-test"), 1);
 
     expect(threadDb.saveThread).not.toHaveBeenCalled();
   });

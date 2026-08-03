@@ -1,6 +1,6 @@
 import type { APIGatewayProxyEventV2, SQSEvent, Context, APIGatewayProxyResultV2, EventBridgeEvent, APIGatewayProxyWebsocketEventV2 } from "aws-lambda";
 import { SQS_MESSAGE_TYPES } from "./types/index.js";
-import { ok } from "./errors.js";
+import { ok, err, processorError } from "./errors.js";
 import type { Result } from "./errors.js";
 import { isStepFunctionTaskEvent } from "./onboarding/types.js";
 import type { InboundSignalMessage, SideEffectPayload } from "./processor/processor.js";
@@ -287,7 +287,10 @@ async function processSqsRecord(
     dkimVerdict: ses.receipt.dkimVerdict.status,
     dmarcVerdict: ses.receipt.dmarcVerdict.status,
   };
-  return processor.processRecord(message, receiveCount);
+  const result = await processor.processInbound(message, receiveCount);
+  if (result.isErr() && result.error.kind === "no_account_for_recipient") return ok(undefined);
+  if (result.isErr()) return err(processorError(result.error));
+  return ok(undefined);
 }
 
 // ---------------------------------------------------------------------------

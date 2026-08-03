@@ -113,11 +113,12 @@ describe("ProcessError on database failure", () => {
     const processor = makeProcessor(store);
     const message = makeMessage();
 
-    const result = await processor.processRecord(message, 2);
+    const result = await processor.processInbound(message, 2);
 
     expect(result.isErr()).toBe(true);
     if (result.isErr()) {
-      expect(result.error.cause).toBeDefined();
+      expect(result.error.kind).toBe("db_error");
+      expect((result.error as { cause: unknown }).cause).toBeDefined();
     }
   });
 });

@@ -219,7 +219,7 @@ describe("Feature: in-reply-to-arc-threading, Parallel arc matching tier selecti
       threadMatcher: { findMatch: vi.fn().mockReturnValue(Promise.resolve(ok(SAME_ARC))), upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) } as ThreadMatcherPort,
     });
 
-    const result = await processor.processRecord(makeMessage("msg-all-agree"), 1);
+    const result = await processor.processInbound(makeMessage("msg-all-agree"), 1);
     expect(result.isOk()).toBe(true);
 
     const trackCalls = mockLogger.calls.filter(c => c.method === "track" && c.context?.code === "processor.thread_match_discrepancy");
@@ -248,7 +248,7 @@ describe("Feature: in-reply-to-arc-threading, Parallel arc matching tier selecti
       auroraWriter: makeAuroraWriter(null),
     });
 
-    const result = await processor.processRecord(makeMessage("msg-tier1-vs-tier15"), 1);
+    const result = await processor.processInbound(makeMessage("msg-tier1-vs-tier15"), 1);
     expect(result.isOk()).toBe(true);
 
     const trackCalls = mockLogger.calls.filter(c => c.method === "track" && c.context?.code === "processor.thread_match_discrepancy");
@@ -278,7 +278,7 @@ describe("Feature: in-reply-to-arc-threading, Parallel arc matching tier selecti
       auroraWriter: makeAuroraWriter(null),
     });
 
-    const result = await processor.processRecord(makeMessage("msg-tier15-only"), 1);
+    const result = await processor.processInbound(makeMessage("msg-tier15-only"), 1);
     expect(result.isOk()).toBe(true);
 
     const trackCalls = mockLogger.calls.filter(c => c.method === "track" && c.context?.code === "processor.thread_match_discrepancy");
@@ -300,7 +300,7 @@ describe("Feature: in-reply-to-arc-threading, Parallel arc matching tier selecti
       threadMatcher: { findMatch: vi.fn().mockReturnValue(Promise.resolve(ok(TIER2_ARC))), upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) } as ThreadMatcherPort,
     });
 
-    const result = await processor.processRecord(makeMessage("msg-tier2-only"), 1);
+    const result = await processor.processInbound(makeMessage("msg-tier2-only"), 1);
     expect(result.isOk()).toBe(true);
 
     const matchLog = mockLogger.calls.find(c => c.context?.code === "processor.thread_matched");
@@ -322,7 +322,7 @@ describe("Feature: in-reply-to-arc-threading, Parallel arc matching tier selecti
       auroraWriter: makeAuroraWriter(null),
     });
 
-    const result = await processor.processRecord(makeMessage("msg-no-match"), 1);
+    const result = await processor.processInbound(makeMessage("msg-no-match"), 1);
     expect(result.isOk()).toBe(true);
 
     // New arc was saved (saveThread called)
@@ -349,7 +349,7 @@ describe("Feature: in-reply-to-arc-threading, Parallel arc matching tier selecti
       auroraWriter: makeAuroraWriter(null),
     });
 
-    const result = await processor.processRecord(makeMessage("msg-no-arcid"), 1);
+    const result = await processor.processInbound(makeMessage("msg-no-arcid"), 1);
     expect(result.isOk()).toBe(true);
 
     // getThread should NOT have been called since the signal had no threadId
@@ -375,7 +375,7 @@ describe("Feature: in-reply-to-arc-threading, Parallel arc matching tier selecti
       auroraWriter: makeAuroraWriter(null),
     });
 
-    const result = await processor.processRecord(makeMessage("msg-gsi2-error"), 1);
+    const result = await processor.processInbound(makeMessage("msg-gsi2-error"), 1);
     expect(result.isOk()).toBe(true);
 
     // Warn logged about the GSI3 failure
@@ -399,7 +399,7 @@ describe("Feature: in-reply-to-arc-threading, Parallel arc matching tier selecti
       auroraWriter: makeAuroraWriter(null),
     });
 
-    const result = await processor.processRecord(makeMessage("msg-no-irt-header"), 1);
+    const result = await processor.processInbound(makeMessage("msg-no-irt-header"), 1);
     expect(result.isOk()).toBe(true);
 
     // findSignalByEmailMessageId should NOT have been called

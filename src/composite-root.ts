@@ -355,7 +355,7 @@ export class CompositeRoot {
       emailContentStore: new EmailContentStore(s3),
       adapters: emxAdapters,
       accountDb,
-      processRecord: (message, receiveCount) => processor.processRecord(message, receiveCount),
+      processor,
       getProviderToken,
     });
 

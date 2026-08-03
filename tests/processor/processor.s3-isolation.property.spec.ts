@@ -198,7 +198,7 @@ describe("Property 9: S3 retention failure is isolated and non-fatal", () => {
       calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud", hmac: makeHmacGeneratorFake() },
     });
 
-    const result = await processor.processRecord(makeMessage("test-msg-s3-isolation"), 1);
+    const result = await processor.processInbound(makeMessage("test-msg-s3-isolation"), 1);
     expect(result.isOk()).toBe(true);
   });
 
@@ -227,7 +227,7 @@ describe("Property 9: S3 retention failure is isolated and non-fatal", () => {
       calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud", hmac: makeHmacGeneratorFake() },
     });
 
-    await processor.processRecord(makeMessage("test-msg-s3-aurora"), 1);
+    await processor.processInbound(makeMessage("test-msg-s3-aurora"), 1);
     expect(auroraWriter.upsertEmbedding).toHaveBeenCalled();
   });
 
@@ -256,7 +256,7 @@ describe("Property 9: S3 retention failure is isolated and non-fatal", () => {
       calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud", hmac: makeHmacGeneratorFake() },
     });
 
-    await processor.processRecord(makeMessage("test-msg-s3-warn"), 1);
+    await processor.processInbound(makeMessage("test-msg-s3-warn"), 1);
 
     const warnCalls = mockLogger.calls.filter((c) => c.method === "warn");
     expect(warnCalls.length).toBeGreaterThanOrEqual(1);
@@ -294,7 +294,7 @@ describe("Property 9: S3 retention failure is isolated and non-fatal", () => {
       calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud", hmac: makeHmacGeneratorFake() },
     });
 
-    const result1 = await processor1.processRecord(makeMessage("test-msg-s3-outcome"), 1);
+    const result1 = await processor1.processInbound(makeMessage("test-msg-s3-outcome"), 1);
 
     // Run 2: without S3 retention service (no retention at all)
     const store2 = makeStore();
@@ -320,7 +320,7 @@ describe("Property 9: S3 retention failure is isolated and non-fatal", () => {
       // No retentionService — S3 retention is skipped entirely
     });
 
-    const result2 = await processor2.processRecord(makeMessage("test-msg-s3-outcome"), 1);
+    const result2 = await processor2.processInbound(makeMessage("test-msg-s3-outcome"), 1);
 
     // Both runs must produce the same result
     expect(result1.isOk()).toBe(result2.isOk());
@@ -361,7 +361,7 @@ describe("Property 9: S3 retention failure is isolated and non-fatal", () => {
       // No retentionService — S3 retention is skipped entirely
     });
 
-    const result = await processor.processRecord(makeMessage("test-msg-no-retention-svc"), 1);
+    const result = await processor.processInbound(makeMessage("test-msg-no-retention-svc"), 1);
 
     expect(result.isOk()).toBe(true);
     expect(auroraWriter.upsertEmbedding).toHaveBeenCalled();
@@ -403,7 +403,7 @@ describe("Property 9: S3 retention failure is isolated and non-fatal", () => {
       calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud", hmac: makeHmacGeneratorFake() },
     });
 
-    const result = await processor.processRecord(makeMessage("test-msg-s3-sync-throw"), 1);
+    const result = await processor.processInbound(makeMessage("test-msg-s3-sync-throw"), 1);
 
     // Processing continues — no batchItemFailure
     expect(result.isOk()).toBe(true);

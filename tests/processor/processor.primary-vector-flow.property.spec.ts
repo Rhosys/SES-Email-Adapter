@@ -207,7 +207,7 @@ describe("Feature: split-embedding-pipeline, Property 2: Primary vector flows to
       calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud", hmac: makeHmacGeneratorFake() },
     });
 
-    await processor.processRecord(makeMessage("ses-prop2-test"), 1);
+    await processor.processInbound(makeMessage("ses-prop2-test"), 1);
 
     // Arc matcher must have been called
     expect(threadMatcher.findMatch).toHaveBeenCalledOnce();

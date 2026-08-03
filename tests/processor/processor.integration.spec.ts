@@ -317,7 +317,7 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
     it("executes full pipeline: parse → classify → arc match → save arc → save signal → S3 retention → Aurora → dispatch", async () => {
       const message = makeMessage({});
 
-      const result = await processor.processRecord(message, 1);
+      const result = await processor.processInbound(message, 1);
 
       // No failures
       expect(result.isOk()).toBe(true);
@@ -361,7 +361,7 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
     it("dispatches side-effect payload containing signal and thread", async () => {
       const message = makeMessage({});
 
-      await processor.processRecord(message, 1);
+      await processor.processInbound(message, 1);
 
       const payload = vi.mocked(sqsDispatcher.sendMessage).mock.calls[0]![0];
       expect(payload.signal).toBeDefined();
@@ -388,7 +388,7 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
     it("skips parse, classify, and embedding — resumes from S3 retention → Aurora → dispatch", async () => {
       const message = makeMessage({});
 
-      const result = await processor.processRecord(message, 3);
+      const result = await processor.processInbound(message, 3);
 
       // No failures
       expect(result.isOk()).toBe(true);
@@ -440,7 +440,7 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
     it("returns batchItemFailure and does not dispatch side-effects", async () => {
       const message = makeMessage({});
 
-      const result = await processor.processRecord(message, 2);
+      const result = await processor.processInbound(message, 2);
 
       // Record returned as failure
       expect(result.isErr()).toBe(true);
@@ -578,7 +578,7 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
       }));
 
       const message = makeMessage({});
-      const result = await processor.processRecord(message, 1);
+      const result = await processor.processInbound(message, 1);
 
       expect(result.isOk()).toBe(true);
       expect(resourceDb.saveResource).toHaveBeenCalledOnce();
@@ -612,7 +612,7 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
         actions: [],
       }));
 
-      await processor.processRecord(makeMessage({}), 1);
+      await processor.processInbound(makeMessage({}), 1);
 
       expect(resourceDb.saveResource).toHaveBeenCalledOnce();
       expect(resourceDb.saveResource.mock.calls[0]![0]).toMatchObject({
@@ -623,7 +623,7 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
 
     it("does not save a resource for a workflow with no forward-looking date (conversation)", async () => {
       // Default classifier mock already returns "conversation".
-      await processor.processRecord(makeMessage({}), 1);
+      await processor.processInbound(makeMessage({}), 1);
 
       expect(threadDb.saveSignal).toHaveBeenCalled();
       expect(resourceDb.saveResource).not.toHaveBeenCalled();
@@ -642,7 +642,7 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
         tags: [], summary: "Your package is on its way.", labels: [], actions: [],
       }));
 
-      await processor.processRecord(makeMessage({}), 1);
+      await processor.processInbound(makeMessage({}), 1);
 
       const call = resourceDb.saveResource.mock.calls[0]![0];
       // Signal ttl (P3M from 2024-01-01) is far short of 2030-01-20 + 1yr — the floor must win.
@@ -665,7 +665,7 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
         tags: [], summary: "Your package is on its way.", labels: [], actions: [],
       }));
 
-      await processor.processRecord(makeMessage({}), 1);
+      await processor.processInbound(makeMessage({}), 1);
 
       const call = resourceDb.saveResource.mock.calls[0]![0];
       const expectedFloor = Math.floor(new Date("2026-06-01T00:00:00Z").getTime() / 1000);

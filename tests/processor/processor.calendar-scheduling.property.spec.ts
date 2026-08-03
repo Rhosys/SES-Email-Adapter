@@ -236,7 +236,7 @@ describe("Feature: signal-followup-scheduler, Calendar scheduling integration", 
         icsContent,
       });
 
-      await processor.processRecord(makeMessage("msg-cal-future"), 1);
+      await processor.processInbound(makeMessage("msg-cal-future"), 1);
 
       expect(schedulerClient.createFollowup).toHaveBeenCalledTimes(2);
       const call = schedulerClient.createFollowup.mock.calls[0]![0];
@@ -265,7 +265,7 @@ describe("Feature: signal-followup-scheduler, Calendar scheduling integration", 
         icsContent,
       });
 
-      await processor.processRecord(makeMessage("msg-cal-past"), 1);
+      await processor.processInbound(makeMessage("msg-cal-past"), 1);
 
       expect(schedulerClient.createFollowup).not.toHaveBeenCalled();
     });
@@ -316,7 +316,7 @@ describe("Feature: signal-followup-scheduler, Calendar scheduling integration", 
         threadMatcher,
       });
 
-      await processor.processRecord(makeMessage("msg-reactivate"), 1);
+      await processor.processInbound(makeMessage("msg-reactivate"), 1);
 
       expect(schedulerClient.deleteFollowup).toHaveBeenCalledOnce();
       const expectedScheduleName = buildScheduleName(TEST_ACCOUNT_ID, mostRecentSignalId, "followup");
@@ -368,7 +368,7 @@ describe("Feature: signal-followup-scheduler, Calendar scheduling integration", 
         threadMatcher,
       });
 
-      const result = await processor.processRecord(makeMessage("msg-delete-fail"), 1);
+      const result = await processor.processInbound(makeMessage("msg-delete-fail"), 1);
 
       // Processing should succeed despite schedule deletion failure
       expect(result.isOk()).toBe(true);
@@ -428,7 +428,7 @@ describe("Feature: signal-followup-scheduler, Property 4: Calendar schedule fire
       icsContent,
     });
 
-    await processor.processRecord(makeMessage(`msg-prop4-${startTime}`), 1);
+    await processor.processInbound(makeMessage(`msg-prop4-${startTime}`), 1);
 
     expect(schedulerClient.createFollowup).toHaveBeenCalled();
     const call = schedulerClient.createFollowup.mock.calls[0]![0];
@@ -460,7 +460,7 @@ describe("Feature: signal-followup-scheduler, Property 4: Calendar schedule fire
       icsContent,
     });
 
-    await processor.processRecord(makeMessage(`msg-prop4-past-${startTime}`), 1);
+    await processor.processInbound(makeMessage(`msg-prop4-past-${startTime}`), 1);
 
     expect(schedulerClient.createFollowup).not.toHaveBeenCalled();
   });
@@ -517,7 +517,7 @@ describe("Feature: signal-followup-scheduler, Property 5: Fire time floor — ne
       icsContent,
     });
 
-    await processor.processRecord(makeMessage(`msg-prop5-safe-${startTime}`), 1);
+    await processor.processInbound(makeMessage(`msg-prop5-safe-${startTime}`), 1);
 
     expect(schedulerClient.createFollowup).toHaveBeenCalled();
     const call = schedulerClient.createFollowup.mock.calls[0]![0];
@@ -551,7 +551,7 @@ describe("Feature: signal-followup-scheduler, Property 5: Fire time floor — ne
       icsContent,
     });
 
-    await processor.processRecord(makeMessage(`msg-prop5-sameday-${startTime}`), 1);
+    await processor.processInbound(makeMessage(`msg-prop5-sameday-${startTime}`), 1);
 
     // Schedule IS created — the implementation relies on EventBridge to fire immediately
     expect(schedulerClient.createFollowup).toHaveBeenCalledOnce();
@@ -582,7 +582,7 @@ describe("Feature: signal-followup-scheduler, Property 5: Fire time floor — ne
       icsContent,
     });
 
-    await processor.processRecord(makeMessage(`msg-prop5-past-${startTime}`), 1);
+    await processor.processInbound(makeMessage(`msg-prop5-past-${startTime}`), 1);
 
     expect(schedulerClient.createFollowup).not.toHaveBeenCalled();
   });

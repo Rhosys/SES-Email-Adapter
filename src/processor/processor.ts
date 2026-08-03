@@ -4,8 +4,8 @@ import { generateId } from "../utils/id.js";
 import type { Logger } from "../logger.js";
 import type { Result } from "neverthrow";
 import type { IForwardingService } from "../forwarding/forwarding-service.js";
-import { ok, err, dbError, processorError, invalidResponseError, notFoundError } from "../errors.js";
-import type { DbError, InvalidResponseError, NotFoundError, ProcessorError } from "../errors.js";
+import { ok, err, dbError, processorError, noAccountError, invalidResponseError, notFoundError } from "../errors.js";
+import type { DbError, InvalidResponseError, NotFoundError, ProcessorError, NoAccountError } from "../errors.js";
 import type { EmailServiceError } from "../email/email-service.js";
 import type { Signal, Thread, Rule, Workflow, WorkflowData, Alias, AliasSender, SenderPolicy, AccountFilteringConfig, SignalSource, SignalStatus, Domain, ThreadStatus, ThreadUrgency, UnknownSenderPolicy, MatchedRuleResult, InvalidRuleFunctionData, InvalidTemplateFunctionData, AutoSendBlockedData, UnsubscribeInfo, InboundEmailSignalData, OutboundEmailSignalData } from "../types/index.js";
 import { deriveGroupingKey } from "../grouping-key.js";
@@ -340,19 +340,6 @@ export class SignalProcessor {
     this.schedulerClient = opts.schedulerClient;
     this.emailContentStore = opts.emailContentStore;
     this.contentStore = opts.contentStore;
-  }
-
-  async processRecord(message: InboundSignalMessage, receiveCount: number): Promise<Result<void, ProcessorError>> {
-    let processResult: Result<void, DbError | InvalidResponseError>;
-    try {
-      processResult = await this.processMessage(message, receiveCount);
-    } catch (e) {
-      this.logger.error("processMessage threw an unhandled exception. This should not happen — all errors should be returned as Result types. The message will be retried.", { code: "processor.unhandled_exception", error: e, compositeMailMessageId: message.compositeMailMessageId });
-      return err(processorError(e));
-    }
-    if (processResult.isErr()) return err(processorError(processResult.error));
-
-    return ok(undefined);
   }
 
   /**
@@ -707,7 +694,16 @@ export class SignalProcessor {
     return ok(undefined);
   }
 
-  private async processMessage(msg: InboundSignalMessage, receiveCount: number, opts?: { force?: boolean; unsafeSkipDmarc?: boolean; forceSignalId?: string }): Promise<Result<void, DbError | InvalidResponseError>> {
+  async processInbound(msg: InboundSignalMessage, receiveCount: number, opts?: { force?: boolean; unsafeSkipDmarc?: boolean; forceSignalId?: string }): Promise<Result<void, DbError | InvalidResponseError | NoAccountError>> {
+    try {
+      return await this._processInboundUnsafe(msg, receiveCount, opts);
+    } catch (e) {
+      this.logger.error("processInbound threw an unhandled exception. The message will be retried.", { code: "processor.unhandled_exception", error: e, compositeMailMessageId: msg.compositeMailMessageId });
+      return err(dbError(e));
+    }
+  }
+
+  private async _processInboundUnsafe(msg: InboundSignalMessage, receiveCount: number, opts?: { force?: boolean; unsafeSkipDmarc?: boolean; forceSignalId?: string }): Promise<Result<void, DbError | InvalidResponseError | NoAccountError>> {
     const { s3Key, idempotencyKey, timestamp, destination } = msg;
     const recipientAddress = destination[0] ?? "";
 
@@ -717,7 +713,7 @@ export class SignalProcessor {
     if (resolved.isErr()) return err(resolved.error);
     if (!resolved.value) {
       this.logger.track("No account owns this recipient address — dropping message.", { code: "processor.no_account_for_recipient", recipientAddress, compositeMailMessageId: msg.compositeMailMessageId, destination });
-      return ok(undefined);
+      return err(noAccountError(recipientAddress, destination, msg.compositeMailMessageId, msg.expectedAccountId));
     }
     const { accountId, aliasConfig } = resolved.value;
     if (msg.expectedAccountId !== undefined && msg.expectedAccountId !== accountId) {
@@ -1739,7 +1735,7 @@ export class SignalProcessor {
       dmarcVerdict: "PASS",
     };
 
-    const result = await this.processMessage(msg, 1, { force: true, unsafeSkipDmarc: true, forceSignalId: existing.id });
+    const result = await this.processInbound(msg, 1, { force: true, unsafeSkipDmarc: true, forceSignalId: existing.id });
     if (result.isErr()) return err(processorError(result.error));
 
     // Re-fetch by primary key — reprocessing may reassign the signal to a different

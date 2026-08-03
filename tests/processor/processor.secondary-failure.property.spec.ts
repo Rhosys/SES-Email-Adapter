@@ -223,7 +223,7 @@ describe("Feature: split-embedding-pipeline, Property 3: Secondary failures are 
       calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud", hmac: makeHmacGeneratorFake() },
     });
 
-    const result = await processor.processRecord(makeMessage("test-msg-secondary-fail"), 1);
+    const result = await processor.processInbound(makeMessage("test-msg-secondary-fail"), 1);
 
     // Assert: NO batch item failures — processing continues despite secondary errors
     expect(result.isOk()).toBe(true);

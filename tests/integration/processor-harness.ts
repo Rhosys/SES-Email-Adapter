@@ -3,7 +3,7 @@ import type { IForwardingService } from "../../src/forwarding/forwarding-service
 //
 // Extends the base harness with real S3, SQS, and SignalProcessor wired to
 // MiniStack. Provides helpers to upload a raw MIME email, send an SNS-wrapped
-// SQS message, poll the queue, and call processRecord().
+// SQS message, poll the queue, and call processInbound().
 //
 // Required env vars (in addition to those in harness.ts):
 //   PROCESSING_TABLE      — DynamoDB processing table name
@@ -283,8 +283,8 @@ export async function createProcessorHarness(): Promise<ProcessorHarness> {
       dmarcVerdict: inner.receipt.dmarcVerdict.status,
     };
 
-    const result = await processor.processRecord(message, 1);
-    if (result.isErr()) throw new Error(`processRecord failed: ${JSON.stringify(result.error, null, 2)}`);
+    const result = await processor.processInbound(message, 1);
+    if (result.isErr()) throw new Error(`processInbound failed: ${JSON.stringify(result.error, null, 2)}`);
 
     await sqs.send(new DeleteMessageCommand({
       QueueUrl: QUEUE_URL,

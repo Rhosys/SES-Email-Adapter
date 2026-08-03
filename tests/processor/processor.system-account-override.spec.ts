@@ -210,7 +210,7 @@ describe("SYSTEM account workflow override", () => {
 
   it("overrides classifier workflow to 'healthcheck' for SYSTEM account", async () => {
     const processor = buildProcessor({ classifierWorkflow: "conversation" });
-    await processor.processRecord(makeMessage(), 1);
+    await processor.processInbound(makeMessage(), 1);
 
     const signal = vi.mocked(threadDb.saveSignal).mock.calls[0]![0] as Signal;
     expect(signal.data.workflow).toBe("healthcheck");
@@ -219,7 +219,7 @@ describe("SYSTEM account workflow override", () => {
 
   it("overrides any classifier workflow (payments) to 'healthcheck'", async () => {
     const processor = buildProcessor({ classifierWorkflow: "payments" });
-    await processor.processRecord(makeMessage(), 1);
+    await processor.processInbound(makeMessage(), 1);
 
     const signal = vi.mocked(threadDb.saveSignal).mock.calls[0]![0] as Signal;
     expect(signal.data.workflow).toBe("healthcheck");
@@ -229,7 +229,7 @@ describe("SYSTEM account workflow override", () => {
     // Sender is from the SYSTEM domain → isTestEmail would be true (eTLD+1 matches).
     // The SYSTEM override fires AFTER and overwrites workflow from "test" to "healthcheck".
     const processor = buildProcessor({ fromAddress: "sender@platform.email.rhosys.cloud" });
-    await processor.processRecord(makeMessage(), 1);
+    await processor.processInbound(makeMessage(), 1);
 
     const signal = vi.mocked(threadDb.saveSignal).mock.calls[0]![0] as Signal;
     expect(signal.data.workflow).toBe("healthcheck");

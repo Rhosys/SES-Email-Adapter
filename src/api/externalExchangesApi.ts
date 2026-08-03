@@ -383,6 +383,9 @@ export class ExternalExchangesApi {
         });
         if (updateResult.isErr()) { logger.error("Failed to update JMAP exchange", { code: "api.emx.patch.jmap_failed", error: updateResult.error }); return err(c, 500, "Internal Server Error"); }
 
+        // Ensure alias exists for the EMX email address (may have been missed or deleted)
+        await accountDb.ensureAlias(accountId, emx.emailAddress, "allow_all");
+
         // Re-activate if previously failed — connection test just proved creds work
         if (emx.status === "activation_failed") {
           await accountDb.updateExternalExchange(accountId, emxId, { status: "active", errorReason: undefined, consecutiveFailures: 0 });
@@ -439,6 +442,9 @@ export class ExternalExchangesApi {
         host: mergedHost, tlsConfig: mergedTlsConfig, username: mergedUsername, encryptedPassword,
       });
       if (updateResult.isErr()) { logger.error("Failed to update exchange", { code: "api.emx.patch_failed", error: updateResult.error }); return err(c, 500, "Internal Server Error"); }
+
+      // Ensure alias exists for the EMX email address (may have been missed or deleted)
+      await accountDb.ensureAlias(accountId, emx.emailAddress, "allow_all");
 
       // Re-activate if previously failed — connection test just proved creds work
       if (emx.status === "activation_failed") {

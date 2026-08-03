@@ -80,7 +80,7 @@ vi.mock("../src/classifier/classifier.js", () => ({
 const mockProcessRecord = vi.fn().mockResolvedValue({ isOk: () => true, isErr: () => false, value: undefined });
 vi.mock("../src/processor/processor.js", () => ({
   SignalProcessor: vi.fn().mockImplementation(() => ({
-    processRecord: mockProcessRecord,
+    processInbound: mockProcessRecord,
   })),
 }));
 
@@ -253,7 +253,7 @@ describe("Handler: SQS/SNS envelope routing", () => {
     vi.clearAllMocks();
   });
 
-  it("inbound Received notification → routed to processor.processRecord, not delegated", async () => {
+  it("inbound Received notification → routed to processor.processInbound, not delegated", async () => {
     const event = makeSqsEvent({
       notificationType: "Received",
       mail: { messageId: "ses-msg-3", timestamp: "2026-07-11T00:00:00Z", destination: ["dest@example.com"] },

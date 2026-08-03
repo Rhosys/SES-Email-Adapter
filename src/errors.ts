@@ -10,6 +10,7 @@ export type AuthressServiceError = { kind: "authress_service_error"; message: st
 export type BedrockError = { kind: "bedrock_error"; message: string; modelId: string; cause: Error };
 export type AuthError = { kind: "auth_error"; message: string; cause: Error };
 export type ProcessorError = { kind: "processor_error"; message: string; cause: Error };
+export type NoAccountError = { kind: "no_account_for_recipient"; recipientAddress: string; destination: string[]; compositeMailMessageId: string; expectedAccountId: string | undefined };
 export type TransientSesError = { kind: "transient_ses_error"; errorName: string; httpStatus: number; cause: unknown };
 export type PermanentSesError = { kind: "permanent_ses_error"; errorName: string; httpStatus: number; message: string; cause: unknown };
 export type InvalidArgumentError = { kind: "invalid_argument"; argument: string; message: string };
@@ -66,6 +67,7 @@ export const processorError = (cause: unknown): ProcessorError => {
   const error = toError(cause);
   return { kind: "processor_error", message: error.message, cause: error };
 };
+export const noAccountError = (recipientAddress: string, destination: string[], compositeMailMessageId: string, expectedAccountId?: string): NoAccountError => ({ kind: "no_account_for_recipient", recipientAddress, destination, compositeMailMessageId, expectedAccountId });
 export const reindexSegmentProcessingError = (segment: number, failures: Array<{ signalId: string; cause: unknown }>): ReindexSegmentProcessingError => ({ kind: "reindex_segment_processing_error", segment, failureCount: failures.length, failures });
 export const invalidArgumentError = (argument: string, message: string): InvalidArgumentError => ({ kind: "invalid_argument", argument, message });
 export const permanentSesError = (errorName: string, httpStatus: number, message: string, cause: unknown): PermanentSesError => ({ kind: "permanent_ses_error", errorName, httpStatus, message, cause });

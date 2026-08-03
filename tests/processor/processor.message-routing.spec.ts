@@ -159,25 +159,25 @@ describe("SignalProcessor message routing", () => {
     });
   });
 
-  it("routes to processRecord when messageType attribute is absent", async () => {
+  it("routes to processInbound when messageType attribute is absent", async () => {
     const message = makeMessage();
 
-    const processRecordSpy = vi.spyOn(processor, "processRecord");
-    await processor.processRecord(message, 1);
+    const processInboundSpy = vi.spyOn(processor, "processInbound");
+    await processor.processInbound(message, 1);
 
-    // processRecord was called — observable via the store's dedup check
-    expect(processRecordSpy).toHaveBeenCalledOnce();
+    // processInbound was called — observable via the store's dedup check
+    expect(processInboundSpy).toHaveBeenCalledOnce();
     expect(threadDb.getSignalByMessageId).toHaveBeenCalled();
   });
 
-  it("routes to processRecord when messageType is 'inbound_signal'", async () => {
+  it("routes to processInbound when messageType is 'inbound_signal'", async () => {
     const message = makeMessage();
 
-    const processRecordSpy = vi.spyOn(processor, "processRecord");
-    await processor.processRecord(message, 1);
+    const processInboundSpy = vi.spyOn(processor, "processInbound");
+    await processor.processInbound(message, 1);
 
-    // processRecord was called — observable via the store's dedup check
-    expect(processRecordSpy).toHaveBeenCalledOnce();
+    // processInbound was called — observable via the store's dedup check
+    expect(processInboundSpy).toHaveBeenCalledOnce();
     expect(threadDb.getSignalByMessageId).toHaveBeenCalled();
   });
 });
