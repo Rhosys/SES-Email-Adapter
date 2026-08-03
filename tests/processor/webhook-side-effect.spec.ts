@@ -146,7 +146,7 @@ function makeProcessor(opts: { store: ReturnType<typeof makeStore>; logger: Mock
     retentionService: { applyPlanRetention: vi.fn() } as unknown as S3RetentionService,
     sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) } as unknown as SqsDispatcher,
     notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) } as unknown as Notifier,
-    forwardingService: opts.forwardingService ?? { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), sendVerification: vi.fn().mockResolvedValue(ok(undefined)), verifyWebhook: vi.fn().mockResolvedValue(ok(undefined)) } as unknown as IForwardingService,
+    forwardingService: opts.forwardingService ?? { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), sendVerification: vi.fn().mockResolvedValue(ok(undefined)) } as unknown as IForwardingService,
     replySender: { sendReply: vi.fn().mockResolvedValue(ok({ messageId: "msg-001" })) } as unknown as ReplySender,
     draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
     calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud", hmac: makeHmacGeneratorFake() },
@@ -175,7 +175,7 @@ describe("processSideEffect — forward dispatches to ForwardingService", () => 
 
   it("forward fires after notify completes", async () => {
     const store = makeStore("Paid");
-    const forwarder = { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), sendVerification: vi.fn().mockResolvedValue(ok(undefined)), verifyWebhook: vi.fn().mockResolvedValue(ok(undefined)) };
+    const forwarder = { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), sendVerification: vi.fn().mockResolvedValue(ok(undefined)) };
     const notifier = { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) };
 
     const processor = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
@@ -226,7 +226,7 @@ describe("processSideEffect — forward dispatches to ForwardingService", () => 
 
   it("multiple forward actions on same signal all fire", async () => {
     const store = makeStore("Paid");
-    const forwarder = { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), sendVerification: vi.fn().mockResolvedValue(ok(undefined)), verifyWebhook: vi.fn().mockResolvedValue(ok(undefined)) };
+    const forwarder = { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), sendVerification: vi.fn().mockResolvedValue(ok(undefined)) };
     const processor = makeProcessor({ store, logger: mockLogger, forwardingService: forwarder as unknown as IForwardingService });
 
     const signal = makeSignal({
@@ -253,7 +253,7 @@ describe("processSideEffect — forward dispatches to ForwardingService", () => 
 
   it("no forward actions — forwardingService.forward not called", async () => {
     const store = makeStore("Paid");
-    const forwarder = { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), sendVerification: vi.fn().mockResolvedValue(ok(undefined)), verifyWebhook: vi.fn().mockResolvedValue(ok(undefined)) };
+    const forwarder = { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), sendVerification: vi.fn().mockResolvedValue(ok(undefined)) };
     const processor = makeProcessor({ store, logger: mockLogger, forwardingService: forwarder as unknown as IForwardingService });
 
     const signal = makeSignal({

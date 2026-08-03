@@ -39,7 +39,7 @@ function makeTarget(): ForwardingTarget {
 // ---------------------------------------------------------------------------
 
 describe("ForwardingService.sendVerification — permanent SES error", () => {
-  it("returns ok and logs WARN on permanent SES error — no retry", async () => {
+  it("returns verification_failed error and logs on permanent SES error", async () => {
     const emailService = makeEmailService();
     const logger = createMockLogger();
     vi.mocked(emailService.send as ReturnType<typeof vi.fn>).mockResolvedValueOnce(err({ kind: "permanent_ses_error", errorName: "MessageRejected", httpStatus: 400, message: "Email address is not verified", cause: new Error("test") }));
@@ -54,7 +54,11 @@ describe("ForwardingService.sendVerification — permanent SES error", () => {
 
     const result = await service.sendVerification("acct-test", makeTarget());
 
-    expect(result.isOk()).toBe(true);
-    expect(logger.calls.some(c => c.method === "warn" && c.context?.code === "forwarding.verify_send_permanent")).toBe(true);
+    expect(result.isErr()).toBe(true);
+    if (result.isErr()) {
+      expect(result.error.kind).toBe("verification_failed");
+      expect(result.error.reason).toContain("MessageRejected");
+    }
+    expect(logger.calls.some(c => c.method === "error" && c.context?.code === "forwarding.verify_send_permanent")).toBe(true);
   });
 });

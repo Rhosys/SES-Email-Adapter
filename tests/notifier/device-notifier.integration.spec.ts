@@ -147,7 +147,7 @@ function makeNotifier(): Notifier {
 }
 
 function makeForwarder(): IForwardingService {
-  return { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), sendVerification: vi.fn().mockResolvedValue(ok(undefined)), verifyWebhook: vi.fn().mockResolvedValue(ok(undefined)) };
+  return { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), sendVerification: vi.fn().mockResolvedValue(ok(undefined)) };
 }
 
 function makeReplySender(): ReplySender {

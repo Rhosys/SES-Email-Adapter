@@ -187,7 +187,7 @@ describe("GET /accounts/:accountId/threads/:threadId/signals — calendar signal
     threadDb = makeThreadDb();
     const accountDb = makeAccountDb();
     const auditDb = makeAuditDb();
-    const forwardingService: IForwardingService = { sendVerification: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), verifyWebhook: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) };
+    const forwardingService: IForwardingService = { sendVerification: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) };
     app = createApp(makeAppDeps({
       threadDb: threadDb as unknown as ThreadDatabase,
       accountDb: accountDb as unknown as AccountDatabase,

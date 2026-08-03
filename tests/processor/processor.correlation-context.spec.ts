@@ -132,7 +132,7 @@ describe("processSideEffect — correlation context", () => {
   describe("pong side-effect", () => {
     it("calls sendReply with accountId, signalId, and threadId", async () => {
       const replySender: ReplySender = { sendReply: vi.fn().mockResolvedValue(ok({ messageId: "pong-msg-001" })) };
-      const forwardingService: IForwardingService = { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), sendVerification: vi.fn().mockResolvedValue(ok(undefined)), verifyWebhook: vi.fn().mockResolvedValue(ok(undefined)) };
+      const forwardingService: IForwardingService = { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), sendVerification: vi.fn().mockResolvedValue(ok(undefined)) };
       const processor = makeProcessor({ replySender, forwardingService });
 
       const signal = makeSignal({
@@ -159,7 +159,7 @@ describe("processSideEffect — correlation context", () => {
   describe("forward side-effect", () => {
     it("calls forwarder.forward with signalId and threadId in opts", async () => {
       const replySender: ReplySender = { sendReply: vi.fn().mockResolvedValue(ok({ messageId: "reply-msg-id" })) };
-      const forwardingService: IForwardingService = { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), sendVerification: vi.fn().mockResolvedValue(ok(undefined)), verifyWebhook: vi.fn().mockResolvedValue(ok(undefined)) };
+      const forwardingService: IForwardingService = { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), sendVerification: vi.fn().mockResolvedValue(ok(undefined)) };
       const processor = makeProcessor({ replySender, forwardingService });
 
       const signal = makeSignal({

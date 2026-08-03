@@ -204,7 +204,7 @@ describe("POST /signals/:id/quarantineResponse — updateThread usage", () => {
     threadDb = makeThreadDb();
     accountDb = makeAccountDb();
     auditDb = makeAuditDb();
-    const forwardingService: IForwardingService = { sendVerification: vi.fn().mockResolvedValue(ok(undefined)), verifyWebhook: vi.fn().mockResolvedValue(ok(undefined)), forward: vi.fn().mockResolvedValue(ok(undefined)) };
+    const forwardingService: IForwardingService = { sendVerification: vi.fn().mockResolvedValue(ok(undefined)), forward: vi.fn().mockResolvedValue(ok(undefined)) };
     const draftSendDispatcher = { dispatch: vi.fn().mockResolvedValue(ok(undefined)) } as unknown as DraftSendDispatcher;
     const astValidator = {
       invoke: vi.fn().mockResolvedValue({ success: true, purpose: "rule_condition", result: true }),
@@ -275,7 +275,7 @@ describe("POST /signals/:id/quarantineResponse — sender disposition", () => {
     threadDb = makeThreadDb();
     accountDb = makeAccountDb();
     auditDb = makeAuditDb();
-    const forwardingService: IForwardingService = { sendVerification: vi.fn().mockResolvedValue(ok(undefined)), verifyWebhook: vi.fn().mockResolvedValue(ok(undefined)), forward: vi.fn().mockResolvedValue(ok(undefined)) };
+    const forwardingService: IForwardingService = { sendVerification: vi.fn().mockResolvedValue(ok(undefined)), forward: vi.fn().mockResolvedValue(ok(undefined)) };
     const draftSendDispatcher = { dispatch: vi.fn().mockResolvedValue(ok(undefined)) } as unknown as DraftSendDispatcher;
     const astValidator = {
       invoke: vi.fn().mockResolvedValue({ success: true, purpose: "rule_condition", result: true }),

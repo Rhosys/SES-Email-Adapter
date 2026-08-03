@@ -131,7 +131,7 @@ function makeProcessor(opts: {
     ruleEvaluator: makeRuleEvaluator3(logger),
     logger,
     notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
-    forwardingService: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), sendVerification: vi.fn().mockResolvedValue(ok(undefined)), verifyWebhook: vi.fn().mockResolvedValue(ok(undefined)) },
+    forwardingService: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), sendVerification: vi.fn().mockResolvedValue(ok(undefined)) },
     retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) } as unknown as S3RetentionService,
     replySender: { sendReply: vi.fn().mockResolvedValue(ok({ messageId: "reply-id" })) },
     sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },

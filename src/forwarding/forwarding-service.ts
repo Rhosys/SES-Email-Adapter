@@ -24,6 +24,8 @@ import { DateTime } from "luxon"
 
 export type WebhookForwardError = { kind: "webhook_forward_error"; cause: unknown; statusCode?: number }
 
+export type VerificationError = { kind: "verification_failed"; reason: string }
+
 export type ForwardError = DbError | EmailServiceError | WebhookForwardError
 
 // ---------------------------------------------------------------------------
@@ -39,8 +41,7 @@ export interface IForwardingTargetStore {
 // ---------------------------------------------------------------------------
 
 export interface IForwardingService {
-  sendVerification(accountId: string, target: ForwardingTarget): Promise<Result<void, EmailServiceError>>
-  verifyWebhook(url: string): Promise<Result<void, TransientSesError>>
+  sendVerification(accountId: string, target: ForwardingTarget): Promise<Result<void, VerificationError>>
   forward(forwardingTargetId: string, signal: Signal, thread: Thread): Promise<Result<void, ForwardError>>
 }
 
@@ -58,13 +59,38 @@ export class ForwardingService implements IForwardingService {
     private readonly logger: Logger,
   ) {}
 
-  async sendVerification(accountId: string, target: ForwardingTarget): Promise<Result<void, EmailServiceError>> {
-    if (target.type === "email") {
-      return this.sendEmailVerification(accountId, target.target, target.token)
+  async sendVerification(accountId: string, target: ForwardingTarget): Promise<Result<void, VerificationError>> {
+    if (target.type === "webhook") {
+      return this.verifyWebhookTarget(accountId, target.target);
     }
-    return this.verifyWebhook(target.target)
+    return this.sendEmailVerificationTarget(accountId, target.target, target.token);
   }
 
+  private async verifyWebhookTarget(accountId: string, url: string): Promise<Result<void, VerificationError>> {
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "verification_test" }),
+        signal: AbortSignal.timeout(10_000),
+      });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Unknown error";
+      this.logger.error("Webhook verification failed — network/timeout error.", { code: "forwarding.webhook_verification_failed", accountId, url, error: e });
+      return err({ kind: "verification_failed", reason: `Webhook unreachable: ${message}` });
+    }
+
+    if (!response.ok) {
+      let responseBody = "";
+      try { responseBody = (await response.text()).slice(0, 512); } catch { /* ignore */ }
+      this.logger.error("Webhook verification failed — non-200 response.", { code: "forwarding.webhook_verification_failed", accountId, url, httpStatus: response.status, responseBody });
+      return err({ kind: "verification_failed", reason: `Webhook returned HTTP ${response.status}` });
+    }
+    return ok(undefined);
+  }
+
+  /** Keep the old public method for internal forward-path usage (doesn't need reason string). */
   async verifyWebhook(url: string): Promise<Result<void, TransientSesError>> {
     try {
       const response = await fetch(url, {
@@ -72,13 +98,13 @@ export class ForwardingService implements IForwardingService {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ type: "verification_test" }),
         signal: AbortSignal.timeout(10_000),
-      })
+      });
       if (!response.ok) {
-        return err({ kind: "transient_ses_error" as const, errorName: "WebhookVerificationFailed", httpStatus: response.status, cause: new Error(`Webhook returned HTTP ${response.status}`) })
+        return err({ kind: "transient_ses_error" as const, errorName: "WebhookVerificationFailed", httpStatus: response.status, cause: new Error(`Webhook returned HTTP ${response.status}`) });
       }
-      return ok(undefined)
+      return ok(undefined);
     } catch (e) {
-      return err({ kind: "transient_ses_error" as const, errorName: "WebhookVerificationFailed", httpStatus: 0, cause: e })
+      return err({ kind: "transient_ses_error" as const, errorName: "WebhookVerificationFailed", httpStatus: 0, cause: e });
     }
   }
 
@@ -114,7 +140,7 @@ export class ForwardingService implements IForwardingService {
   // Private — email verification
   // ---------------------------------------------------------------------------
 
-  private async sendEmailVerification(accountId: string, target: string, token: string): Promise<Result<void, EmailServiceError>> {
+  private async sendEmailVerificationTarget(accountId: string, target: string, token: string): Promise<Result<void, VerificationError>> {
     const verifyUrl = `${this.appBaseUrl}/settings/email-forwarding?tab=forwarding&verifyAddress=${encodeURIComponent(target)}&token=${token}&accountId=${accountId}`
     const triggerId = `fwdverify-${accountId}-${target}`
     const tags = buildEmailTags({
@@ -143,13 +169,14 @@ export class ForwardingService implements IForwardingService {
 
     if (result.isErr()) {
       if (result.error.kind === "permanent_ses_error") {
-        this.logger.warn("Forwarding verification email permanently rejected by SES — will not retry.", { code: "forwarding.verify_send_permanent", accountId, target, error: result.error })
-        return ok(undefined)
+        this.logger.error("Forwarding verification email permanently rejected by SES.", { code: "forwarding.verify_send_permanent", accountId, target, error: result.error });
+        return err({ kind: "verification_failed", reason: `Email rejected by SES: ${result.error.errorName}` });
       }
-      return err(result.error)
+      this.logger.error("Failed to send forwarding verification email.", { code: "forwarding.verify_send_failed", accountId, target, error: result.error });
+      return err({ kind: "verification_failed", reason: `Unable to send verification email: ${result.error.kind === "transient_ses_error" ? result.error.errorName : "internal error"}` });
     }
 
-    return ok(undefined)
+    return ok(undefined);
   }
 
   // ---------------------------------------------------------------------------

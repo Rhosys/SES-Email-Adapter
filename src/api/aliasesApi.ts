@@ -303,12 +303,7 @@ export class AliasesApi {
       // Verify based on type — ForwardingService dispatches by target type internally
       const verifyResult = await forwardingService.sendVerification(accountId, addr);
       if (verifyResult.isErr()) {
-        if (body.type === "webhook") {
-          logger.error("Webhook target verification failed — URL did not return HTTP 200.", { code: "forwarding.webhook_verification_failed", accountId, target: addr.target, error: verifyResult.error });
-          return err(c, 422, "Webhook URL did not respond with HTTP 200. Please check the URL and try again.", "WEBHOOK_VERIFICATION_FAILED");
-        }
-        logger.error("Failed to send forwarding target verification email.", { code: "forwarding.verification_email_failed", accountId, target: addr.target, error: verifyResult.error });
-        return err(c, 422, "Failed to send verification email. Please try again.", "VERIFICATION_EMAIL_FAILED");
+        return err(c, 422, "Target verification failed", "VERIFICATION_FAILED", verifyResult.error.reason);
       }
       if (body.type === "webhook") {
         // Webhooks are verified immediately on successful test request

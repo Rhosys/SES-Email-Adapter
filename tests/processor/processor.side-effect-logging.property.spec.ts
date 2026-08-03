@@ -175,7 +175,7 @@ describe("Side effect caller logging", () => {
       threadMatcher: makeThreadMatcher(),
       ruleEvaluator: makeRuleEvaluator3(mockLogger),
       notifier,
-      forwardingService: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), sendVerification: vi.fn().mockResolvedValue(ok(undefined)), verifyWebhook: vi.fn().mockResolvedValue(ok(undefined)) },
+      forwardingService: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), sendVerification: vi.fn().mockResolvedValue(ok(undefined)) },
       retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
       replySender: { sendReply: vi.fn().mockResolvedValue(ok({ messageId: "reply-msg-id" })) },
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
@@ -209,7 +209,7 @@ describe("Side effect caller logging", () => {
       threadMatcher: makeThreadMatcher(),
       ruleEvaluator: makeRuleEvaluator3(mockLogger),
       notifier,
-      forwardingService: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), sendVerification: vi.fn().mockResolvedValue(ok(undefined)), verifyWebhook: vi.fn().mockResolvedValue(ok(undefined)) },
+      forwardingService: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), sendVerification: vi.fn().mockResolvedValue(ok(undefined)) },
       retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
       replySender: { sendReply: vi.fn().mockResolvedValue(ok({ messageId: "reply-msg-id" })) },
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
@@ -231,7 +231,6 @@ describe("Side effect caller logging", () => {
     const forwardingService: IForwardingService = {
       forward: vi.fn().mockReturnValue(Promise.resolve(err(dbError(new Error("forward failed"))))),
       sendVerification: vi.fn().mockResolvedValue(ok(undefined)),
-      verifyWebhook: vi.fn().mockResolvedValue(ok(undefined)),
     };
 
     const processor = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),

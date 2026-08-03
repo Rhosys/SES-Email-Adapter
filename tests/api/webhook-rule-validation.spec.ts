@@ -188,7 +188,7 @@ describe("API — webhook action type rejected from rule creation", () => {
       auth: makeAuth(),
       access: makeAccess(),
       logger: createMockLogger(),
-      forwardingService: { sendVerification: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), verifyWebhook: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      forwardingService: { sendVerification: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       jobDispatcher: { dispatchReindex: vi.fn(), dispatchSegment: vi.fn() } as never,
       draftSendDispatcher: { dispatch: vi.fn().mockResolvedValue(ok(undefined)) } as never,
       accountCreationStarter: { start: vi.fn() },

@@ -12,7 +12,7 @@ export function makeAppDeps(overrides: Partial<AppDeps>): AppDeps {
     auth: {} as never,
     access: { removeUser: async () => ok(undefined), checkAccess: async () => {}, createInvite: async () => ok({ inviteId: "mock" }) } as never,
     logger: {} as never,
-    forwardingService: { sendVerification: async () => ok(undefined), verifyWebhook: async () => ok(undefined), forward: async () => ok(undefined) } as never,
+    forwardingService: { sendVerification: async () => ok(undefined), forward: async () => ok(undefined) } as never,
     jobDispatcher: { dispatch: async () => ok({ jobId: "j", targetRegistryId: "r", modelId: "m", segmentCount: 1, startedAt: "2025-01-01T00:00:00Z" }) } as never,
     healthCheckValidator: { validateLatest: async () => ({ status: "pass", checkedDate: "2025-01-01", checkedAt: "2025-01-01T00:00:00.000Z", checks: [], rawChecks: null }) } as never,
     draftSendDispatcher: { dispatch: async () => ok(undefined) } as never,
