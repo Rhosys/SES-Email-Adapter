@@ -10,6 +10,7 @@
     "dev": "tsc --watch",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "test:exploratory": "vitest run --config tests-exploratory/vitest.config.ts",
     "test:integration": "tsx tests-integration/run.ts",
     "production:validation": "vitest run --config vitest.integration.config.ts",
     "test:llm-bedrock-classifier": "vitest run --config llm-tests/vitest.config.ts",
