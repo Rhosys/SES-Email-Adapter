@@ -94,9 +94,12 @@ export class ThreadsApi {
       const accountId = c.req.param("accountId")!;
       const query = c.req.query();
 
-      // When refresh param is present (ISO8601 datetime, used as cache-buster), trigger EMX dispatch
+      // When refresh param is present (ISO8601 datetime, used as cache-buster), trigger EMX sweep dispatch
       if (query["refresh"]) {
-        void signalQueue.send("emx_dispatch", {});
+        const dispatchResult = await signalQueue.send("emx_dispatch", {});
+        if (dispatchResult.isErr()) {
+          logger.warn("Failed to enqueue emx_dispatch for refresh", { code: "api.threads.dispatch_enqueue_failed", accountId, error: dispatchResult.error });
+        }
       }
 
       const q = query["q"];

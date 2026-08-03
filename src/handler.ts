@@ -215,7 +215,7 @@ async function processSqsRecord(
   }
 
   if (messageType === MSG_TYPE_EMX_DISPATCH) {
-    return emxDispatchWorker.dispatch();
+    return emxDispatchWorker.dispatch(body as import("./external-exchanges/emx-dispatch-worker.js").EmxDispatchPayload);
   }
 
   // SNS envelope — validate + unwrap. Two SNS topics land on this same queue (see deploy/storage.tf):

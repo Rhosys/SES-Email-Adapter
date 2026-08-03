@@ -109,8 +109,13 @@ export class ExternalExchangesApi {
   register(app: OpenAPIHono<AppEnv>, { authz, err, route }: RouteHelpers): void {
     const { accountDb, adapters, getProviderToken, encryptionManager, signalQueue, logger } = this;
 
-    /** Fire-and-forget: trigger immediate dispatch cycle so the new/updated exchange gets its first sync */
-    const triggerDispatch = () => { void signalQueue.send("emx_dispatch", {}); };
+    /** Trigger immediate dispatch for a specific exchange — awaited with error logging */
+    const triggerDispatch = async (targetAccountId: string, emxId: string) => {
+      const result = await signalQueue.send("emx_dispatch", { emxId, accountId: targetAccountId });
+      if (result.isErr()) {
+        logger.warn("Failed to enqueue emx_dispatch", { code: "api.emx.dispatch_enqueue_failed", emxId, error: result.error });
+      }
+    };
 
     // GET /accounts/:accountId/external-exchanges
     app.openapi(route({
@@ -183,7 +188,7 @@ export class ExternalExchangesApi {
         });
         if (result.isErr()) { logger.error("Failed to create IMAP exchange record", { code: "api.emx.imap.create_failed", error: result.error }); return err(c, 500, "Internal Server Error"); }
         await accountDb.ensureAlias(accountId, imapConfig.username, "allow_all", aliasCheck.isOk() ? aliasCheck.value : undefined);
-        triggerDispatch();
+        await triggerDispatch(accountId, result.value.id);
         return c.json(serializeEmx(result.value), 201);
       }
 
@@ -231,7 +236,7 @@ export class ExternalExchangesApi {
         });
         if (result.isErr()) { logger.error("Failed to create JMAP exchange record", { code: "api.emx.jmap.create_failed", error: result.error }); return err(c, 500, "Internal Server Error"); }
         await accountDb.ensureAlias(accountId, jmapConfig.username, "allow_all", aliasCheck.isOk() ? aliasCheck.value : undefined);
-        triggerDispatch();
+        await triggerDispatch(accountId, result.value.id);
         return c.json(serializeEmx(result.value), 201);
       }
 
@@ -290,13 +295,13 @@ export class ExternalExchangesApi {
         const updateResult = await accountDb.updateExternalExchange(accountId, existing.id, { status: "active", syncCursor, expiresAt, providerSubscriptionId, errorReason: undefined, consecutiveFailures: 0 });
         if (updateResult.isErr()) { logger.error("Failed to update exchange record", { code: "api.emx.create_failed", error: updateResult.error }); return err(c, 500, "Internal Server Error"); }
         await accountDb.ensureAlias(accountId, body.emailAddress, "allow_all", oauthAliasCheck.isOk() ? oauthAliasCheck.value : undefined);
-        triggerDispatch();
+        await triggerDispatch(accountId, existing.id);
         return c.json(serializeEmx(updateResult.value), 200);
       }
       const result = await accountDb.createExternalExchange(accountId, { platform: body.platform, emailAddress: body.emailAddress, status: "active", syncCursor, lastSyncAt: DateTime.utc().toISO()!, expiresAt, providerSubscriptionId });
       if (result.isErr()) { logger.error("Failed to create exchange record", { code: "api.emx.create_failed", error: result.error }); return err(c, 500, "Internal Server Error"); }
       await accountDb.ensureAlias(accountId, body.emailAddress, "allow_all", oauthAliasCheck.isOk() ? oauthAliasCheck.value : undefined);
-      triggerDispatch();
+      await triggerDispatch(accountId, result.value.id);
       return c.json(serializeEmx(result.value), 201);
     });
 
@@ -402,7 +407,7 @@ export class ExternalExchangesApi {
           await accountDb.updateExternalExchange(accountId, emxId, { status: "active", nextSyncTime: newExpiresAt, errorReason: undefined, consecutiveFailures: 0 });
         }
 
-        triggerDispatch();
+        await triggerDispatch(accountId, emxId);
         const freshResult = await accountDb.getExternalExchange(accountId, emxId);
         if (freshResult.isOk() && freshResult.value) { return c.json(serializeEmx(freshResult.value), 200); }
         return c.json(serializeEmx(updateResult.value), 200);
@@ -469,7 +474,7 @@ export class ExternalExchangesApi {
         await accountDb.updateExternalExchange(accountId, emxId, { status: "active", nextSyncTime: newExpiresAt, errorReason: undefined, consecutiveFailures: 0 });
       }
 
-      triggerDispatch();
+      await triggerDispatch(accountId, emxId);
       const freshResult = await accountDb.getExternalExchange(accountId, emxId);
       if (freshResult.isOk() && freshResult.value) { return c.json(serializeEmx(freshResult.value), 200); }
       return c.json(serializeEmx(updateResult.value), 200);
