@@ -204,9 +204,11 @@ export class ImapAdapter implements ProviderAdapter {
       const lastUid = uidNext > 1 ? uidNext - 1 : 0;
       const syncCursor = formatSyncCursor(uidvalidity, lastUid);
       const expiresAt = DateTime.utc().plus({ hours: 1 }).toISO()!;
+      this.logger.info("IMAP activation succeeded", { code: "imap.activate.success", host: imapConfig.host, username: imapConfig.username, uidvalidity, lastUid });
       return ok({ syncCursor, expiresAt, providerSubscriptionId: "poll" });
     } catch (e: unknown) {
       const reason = classifyActivationError(e);
+      this.logger.info("IMAP activation failed", { code: "imap.activate.failed", host: imapConfig.host, username: imapConfig.username, reason });
       return err({ kind: "provider_activation_failed", cause: reason });
     } finally {
       await conn.logout();
@@ -261,11 +263,14 @@ export class ImapAdapter implements ProviderAdapter {
           syncCursor: formatSyncCursor(currentUidvalidity, highestUid),
           lastSyncAt: DateTime.utc().toISO()!,
         });
+
+        this.logger.info("IMAP sync complete", { code: "imap.renew.synced", emxId: emx.id, newMessages: batch.length, highestUid });
       }
 
       return ok({ expiresAt: DateTime.utc().plus({ hours: 1 }).toISO()! });
     } catch (e: unknown) {
       const cause = e instanceof Error ? e.message : "IMAP renewal failed";
+      this.logger.info("IMAP renewal failed", { code: "imap.renew.failed", emxId: emx.id, cause });
       return err({ kind: "provider_renewal_failed", cause });
     } finally {
       await conn.logout();

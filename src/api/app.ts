@@ -136,6 +136,7 @@ export function createApp({ threadDb, resourceDb, accountDb, auditDb, auth, acce
   type ErrorBody = { title: string; errorCode?: ErrorCodeLiteral; details?: unknown; errorId: string };
 
   function err<S extends ErrorStatus>(c: Context<AppEnv>, status: S, title: string, errorCode?: ErrorCodeLiteral, details?: unknown) {
+    logger.info("API error response", { code: "api.error", method: c.req.method, path: c.req.path, status, title, errorCode, details });
     return c.json(
       { title, ...(errorCode ? { errorCode } : {}), ...(details !== undefined ? { details } : {}), errorId: logger.getInvocationId() } as ErrorBody,
       status,
