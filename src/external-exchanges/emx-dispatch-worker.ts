@@ -125,29 +125,40 @@ export class EmxDispatchWorker {
       });
       if (historyResp.ok) {
         const historyData = await historyResp.json() as { history?: Array<{ messagesAdded?: Array<{ message: { id: string } }> }>; historyId?: string };
+        let enqueued = 0;
         for (const entry of historyData.history ?? []) {
           for (const added of entry.messagesAdded ?? []) {
             await this.signalQueue.send("emx_inbound", { source: "gmail", providerMessageId: added.message.id, emxId: emx.id, accountId: emx.accountId });
+            enqueued++;
           }
         }
         if (historyData.historyId) {
           await this.db.updateExternalExchange(emx.accountId, emx.id, { syncCursor: historyData.historyId, lastSyncAt: DateTime.utc().toISO()! });
         }
+        this.logger.info("emx_dispatch: Gmail history sync complete", { code: "emx.dispatch.gmail_synced", emxId: emx.id, newMessages: enqueued, newHistoryId: historyData.historyId });
+      } else {
+        this.logger.warn("emx_dispatch: Gmail history.list failed", { code: "emx.dispatch.gmail_history_failed", emxId: emx.id, status: historyResp.status });
       }
     } else if (emx.platform === "outlook" && emx.syncCursor) {
       let nextLink: string | null = emx.syncCursor;
       let latestDeltaLink = emx.syncCursor;
+      let enqueued = 0;
       while (nextLink) {
         const deltaResp = await fetch(nextLink, { headers: { "Authorization": `Bearer ${token}` } });
-        if (!deltaResp.ok) break;
+        if (!deltaResp.ok) {
+          this.logger.warn("emx_dispatch: Outlook delta failed", { code: "emx.dispatch.outlook_delta_failed", emxId: emx.id, status: deltaResp.status });
+          break;
+        }
         const page = await deltaResp.json() as { value?: Array<{ id: string }>; "@odata.nextLink"?: string; "@odata.deltaLink"?: string };
         for (const msg of page.value ?? []) {
           await this.signalQueue.send("emx_inbound", { source: "outlook", providerMessageId: msg.id, emxId: emx.id, accountId: emx.accountId });
+          enqueued++;
         }
         nextLink = page["@odata.nextLink"] ?? null;
         if (page["@odata.deltaLink"]) latestDeltaLink = page["@odata.deltaLink"];
       }
       await this.db.updateExternalExchange(emx.accountId, emx.id, { syncCursor: latestDeltaLink, lastSyncAt: DateTime.utc().toISO()! });
+      this.logger.info("emx_dispatch: Outlook delta sync complete", { code: "emx.dispatch.outlook_synced", emxId: emx.id, newMessages: enqueued });
     }
 
     this.logger.info("emx_dispatch: renewed successfully", { code: "emx.dispatch.renewed", emxId: emx.id, newExpiresAt: renewResult.value.expiresAt });

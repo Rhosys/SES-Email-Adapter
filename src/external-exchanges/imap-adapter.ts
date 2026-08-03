@@ -265,6 +265,8 @@ export class ImapAdapter implements ProviderAdapter {
         });
 
         this.logger.info("IMAP sync complete", { code: "imap.renew.synced", emxId: emx.id, newMessages: batch.length, highestUid });
+      } else {
+        this.logger.info("IMAP sync complete, no new messages", { code: "imap.renew.synced", emxId: emx.id, newMessages: 0 });
       }
 
       return ok({ expiresAt: DateTime.utc().plus({ hours: 1 }).toISO()! });

@@ -289,7 +289,7 @@ export class JmapAdapter implements ProviderAdapter {
       lastSyncAt: DateTime.utc().toISO()!,
     });
 
-    this.logger.info("JMAP sync complete", { emxId: emx.id, added: added.length, newQueryState });
+    this.logger.info("JMAP sync complete", { code: "jmap.renew.synced", emxId: emx.id, newMessages: added.length, newQueryState });
 
     return ok({ expiresAt: DateTime.utc().plus({ hours: 1 }).toISO()! });
   }
@@ -413,7 +413,7 @@ export class JmapAdapter implements ProviderAdapter {
       lastSyncAt: DateTime.utc().toISO()!,
     });
 
-    this.logger.info("JMAP sync fallback complete", { emxId: emx.id, enqueued: ids.length, newQueryState });
+    this.logger.info("JMAP sync fallback complete", { code: "jmap.renew.fallback_synced", emxId: emx.id, newMessages: ids.length, newQueryState });
 
     return ok({ expiresAt: DateTime.utc().plus({ hours: 1 }).toISO()! });
   }
