@@ -1467,7 +1467,7 @@ export class AccountDatabase {
 
   async createExternalExchange(accountId: string, data: { platform: ExternalMailExchange["platform"]; emailAddress: string; status: ExternalMailExchange["status"]; syncCursor?: string; expiresAt?: string; providerSubscriptionId?: string; errorReason?: string }): Promise<Result<ExternalMailExchange, DbError>> {
     const now = DateTime.utc().toISO()!;
-    const id = generateId("emx");
+    const id = generateId("emx-");
     const item: ExternalMailExchange = {
       id,
       accountId,
@@ -1501,7 +1501,7 @@ export class AccountDatabase {
     errorReason?: string;
   }): Promise<Result<ExternalMailExchange, DbError>> {
     const now = DateTime.utc().toISO()!;
-    const id = generateId("emx");
+    const id = generateId("emx-");
     const item: ExternalMailExchange = {
       id,
       accountId,
@@ -1537,7 +1537,7 @@ export class AccountDatabase {
     errorReason?: string;
   }): Promise<Result<ExternalMailExchange, DbError>> {
     const now = DateTime.utc().toISO()!;
-    const id = generateId("emx");
+    const id = generateId("emx-");
     const item: ExternalMailExchange = {
       id,
       accountId,

@@ -42,8 +42,10 @@ export class EmxInboundWorker {
 
   async process(payload: EmxInboundPayload, sqsMessageId: string, receiveCount: number): Promise<Result<void, ProviderFetchError | ProcessorError>> {
     const { source, providerMessageId, emxId, accountId } = payload;
-    const compositeMailMessageId = `${source}-${providerMessageId}`;
-    const s3Key = `emails/${source}/${providerMessageId}`;
+    // IMAP/JMAP UIDs are only unique within a single mailbox — use emxId as namespace to prevent cross-exchange collisions
+    const namespace = source === "imap" || source === "jmap" ? emxId : source;
+    const compositeMailMessageId = `${namespace}-${providerMessageId}`;
+    const s3Key = `emails/${namespace}/${providerMessageId}`;
 
     const adapter = this.adapters[source];
     if (!adapter) {
@@ -52,7 +54,7 @@ export class EmxInboundWorker {
     }
 
     let token: string;
-    if (source === "imap") {
+    if (source === "imap" || source === "jmap") {
       token = "";
     } else {
       try {

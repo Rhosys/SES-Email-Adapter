@@ -2,8 +2,6 @@ import { z } from "@hono/zod-openapi";
 import type { OpenAPIHono } from "@hono/zod-openapi";
 import type { AccountDatabase } from "../database/account-database.js";
 import type { ProviderAdapter } from "../external-exchanges/provider-adapter.js";
-import { createImapClient } from "../external-exchanges/imap-adapter.js";
-import { buildBasicAuth, fetchSession } from "../external-exchanges/jmap-adapter.js";
 import type { EncryptionManager } from "../secrets/encryption-manager.js";
 import type { Logger } from "../logger.js";
 import type { AppEnv, RouteHelpers } from "./route-helpers.js";
@@ -52,7 +50,7 @@ const PatchJmapExchangeRequest = z.object({
 });
 
 const ExternalExchangeResponse = z.object({
-  id: z.string(),
+  exchangeId: z.string(),
   accountId: z.string(),
   platform: z.enum(EMX_PLATFORMS),
   emailAddress: z.string(),
@@ -71,14 +69,26 @@ const ListExternalExchangesResponse = z.object({
 });
 
 function serializeEmx(emx: ExternalMailExchange) {
-  const { imapConfig, jmapConfig, ...rest } = emx;
-  const result: Record<string, unknown> = { ...rest };
-  if (imapConfig) {
-    const { encryptedPassword: _, ...safeImap } = imapConfig;
+  const result: Record<string, unknown> = {
+    exchangeId: emx.id,
+    accountId: emx.accountId,
+    platform: emx.platform,
+    emailAddress: emx.emailAddress,
+    status: emx.status,
+    ...(emx.syncCursor !== undefined ? { syncCursor: emx.syncCursor } : {}),
+    ...(emx.expiresAt !== undefined ? { expiresAt: emx.expiresAt } : {}),
+    ...(emx.lastSyncAt !== undefined ? { lastSyncAt: emx.lastSyncAt } : {}),
+    ...(emx.providerSubscriptionId !== undefined ? { providerSubscriptionId: emx.providerSubscriptionId } : {}),
+    ...(emx.errorReason !== undefined ? { errorReason: emx.errorReason } : {}),
+    createdAt: emx.createdAt,
+    updatedAt: emx.updatedAt,
+  };
+  if (emx.imapConfig) {
+    const { encryptedPassword: _, ...safeImap } = emx.imapConfig;
     result.imapConfig = safeImap;
   }
-  if (jmapConfig) {
-    const { sessionUrl, username } = jmapConfig;
+  if (emx.jmapConfig) {
+    const { sessionUrl, username } = emx.jmapConfig;
     result.jmapConfig = { sessionUrl, username };
   }
   return result;
@@ -321,12 +331,17 @@ export class ExternalExchangesApi {
           }
         }
 
-        // Connection test with merged config (10s timeout)
-        const auth = buildBasicAuth(mergedUsername, testPassword);
-        const sessionResult = await fetchSession(mergedSessionUrl, auth, 10_000);
-        if (sessionResult.isErr()) {
-          const reason = String(sessionResult.error.cause);
-          logger.warn("JMAP connection test failed during PATCH", { code: "api.emx.patch.jmap.connection_test_failed", emxId, error: sessionResult.error });
+        // Connection test via adapter.activate — validates session URL, auth, and mailbox discovery
+        const jmapAdapter = adapters["jmap"];
+        if (!jmapAdapter) return err(c, 422, "Unsupported platform");
+        const tempEmx: ExternalMailExchange = {
+          ...emx,
+          jmapConfig: { ...emx.jmapConfig, sessionUrl: mergedSessionUrl, username: mergedUsername, encryptedPassword: testPassword },
+        };
+        const testResult = await jmapAdapter.activate("", tempEmx);
+        if (testResult.isErr()) {
+          const reason = String(testResult.error.cause).slice(0, 512);
+          logger.warn("JMAP connection test failed during PATCH", { code: "api.emx.patch.jmap.connection_test_failed", emxId, error: testResult.error });
           return err(c, 422, reason);
         }
 
@@ -372,18 +387,18 @@ export class ExternalExchangesApi {
         }
       }
 
-      // Connection test with merged config (10s timeout)
-      const client = createImapClient({ host: mergedHost, tlsConfig: mergedTlsConfig, username: mergedUsername, password: testPassword, timeout: 10_000 });
-      try {
-        await client.connect();
-        const lock = await client.getMailboxLock("INBOX");
-        lock.release();
-      } catch (e) {
-        const reason = e instanceof Error ? e.message.slice(0, 512) : "Connection test failed";
-        logger.warn("IMAP connection test failed during PATCH", { code: "api.emx.patch.connection_test_failed", emxId, error: e });
+      // Connection test via adapter.activate — validates host, TLS, auth, and INBOX access
+      const imapAdapter = adapters["imap"];
+      if (!imapAdapter) return err(c, 422, "Unsupported platform");
+      const tempEmx: ExternalMailExchange = {
+        ...emx,
+        imapConfig: { host: mergedHost, tlsConfig: mergedTlsConfig, username: mergedUsername, encryptedPassword: testPassword },
+      };
+      const testResult = await imapAdapter.activate("", tempEmx);
+      if (testResult.isErr()) {
+        const reason = String(testResult.error.cause).slice(0, 512);
+        logger.warn("IMAP connection test failed during PATCH", { code: "api.emx.patch.connection_test_failed", emxId, error: testResult.error });
         return err(c, 422, reason);
-      } finally {
-        try { await client.logout(); } catch { /* best-effort logout */ }
       }
 
       // Connection test passed — persist updated fields

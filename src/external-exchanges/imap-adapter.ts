@@ -38,25 +38,104 @@ export function parseSyncCursor(cursor: string): { uidvalidity: number; lastUid:
 }
 
 // ---------------------------------------------------------------------------
-// IMAP client factory
+// IMAP connection config
 // ---------------------------------------------------------------------------
 
-export function createImapClient(config: { host: string; tlsConfig: "TLS" | "DISABLED"; username: string; password: string; timeout: number }): ImapFlow {
-  const options = {
-    host: config.host,
-    port: config.tlsConfig === "TLS" ? 993 : 143,
-    secure: config.tlsConfig === "TLS",
-    auth: { user: config.username, pass: config.password },
-    connectionTimeout: config.timeout,
-    greetingTimeout: config.timeout,
-    socketTimeout: config.timeout,
-    logger: false as const,
-  };
+export interface ImapConnectionConfig {
+  host: string;
+  tlsConfig: "TLS" | "DISABLED";
+  username: string;
+  password: string;
+  timeout: number;
+}
 
-  if (config.tlsConfig === "TLS") {
-    return new ImapFlow({ ...options, tls: { minVersion: "TLSv1.2", rejectUnauthorized: true } });
+// ---------------------------------------------------------------------------
+// ImapConnection — pure IMAP operations, no business logic
+// ---------------------------------------------------------------------------
+
+export class ImapConnection {
+  private client: ImapFlow;
+
+  constructor(config: ImapConnectionConfig) {
+    const options = {
+      host: config.host,
+      port: config.tlsConfig === "TLS" ? 993 : 143,
+      secure: config.tlsConfig === "TLS",
+      auth: { user: config.username, pass: config.password },
+      connectionTimeout: config.timeout,
+      greetingTimeout: config.timeout,
+      socketTimeout: config.timeout,
+      logger: false as const,
+    };
+
+    if (config.tlsConfig === "TLS") {
+      this.client = new ImapFlow({ ...options, tls: { minVersion: "TLSv1.2", rejectUnauthorized: true } });
+    } else {
+      // DISABLED: plaintext on port 143, no STARTTLS upgrade
+      this.client = new ImapFlow({ ...options, doSTARTTLS: false });
+    }
   }
-  return new ImapFlow(options);
+
+  async connect(): Promise<void> {
+    await this.client.connect();
+  }
+
+  async getInboxState(): Promise<{ uidvalidity: number; uidNext: number; exists: number }> {
+    const lock = await this.client.getMailboxLock("INBOX");
+    try {
+      const mailbox = this.client.mailbox;
+      if (!mailbox) throw new Error("INBOX unavailable");
+      return {
+        uidvalidity: Number(mailbox.uidValidity),
+        uidNext: mailbox.uidNext,
+        exists: mailbox.exists,
+      };
+    } finally {
+      lock.release();
+    }
+  }
+
+  async searchNewUids(afterUid: number): Promise<number[]> {
+    const lock = await this.client.getMailboxLock("INBOX");
+    try {
+      const searchResults = await this.client.search({ uid: `${afterUid + 1}:*` }, { uid: true }) as number[];
+      return searchResults.filter(uid => uid > afterUid).sort((a, b) => a - b);
+    } finally {
+      lock.release();
+    }
+  }
+
+  async fetchRawMessage(uid: number): Promise<{ rawMime: Uint8Array; receivedAt: string } | undefined> {
+    const lock = await this.client.getMailboxLock("INBOX");
+    try {
+      const msg = await this.client.fetchOne(uid.toString(), { source: true, internalDate: true }, { uid: true });
+      if (!msg) return undefined;
+      return {
+        rawMime: msg.source as Uint8Array,
+        receivedAt: (msg.internalDate as Date).toISOString(),
+      };
+    } finally {
+      lock.release();
+    }
+  }
+
+  async listMailboxes(): Promise<Array<{ path: string; flags: string[] }>> {
+    const mailboxes = await this.client.list();
+    return mailboxes.map(mb => ({ path: mb.path, flags: [...(mb.flags || [])] }));
+  }
+
+  async logout(): Promise<void> {
+    try { await this.client.logout(); } catch { /* best-effort */ }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Legacy factory (kept for any direct callers during migration)
+// ---------------------------------------------------------------------------
+
+export function createImapClient(config: ImapConnectionConfig): ImapFlow {
+  const conn = new ImapConnection(config);
+  return (conn as unknown as { client: ImapFlow }).client;
 }
 
 // ---------------------------------------------------------------------------
@@ -90,7 +169,7 @@ export class ImapAdapter implements ProviderAdapter {
     }
 
     // During activation, encryptedPassword holds the raw password (caller encrypts after activation succeeds)
-    const client = createImapClient({
+    const conn = new ImapConnection({
       host: imapConfig.host,
       tlsConfig: imapConfig.tlsConfig,
       username: imapConfig.username,
@@ -99,31 +178,17 @@ export class ImapAdapter implements ProviderAdapter {
     });
 
     try {
-      await client.connect();
-
-      const lock = await client.getMailboxLock("INBOX");
-      try {
-        const mailbox = client.mailbox;
-        if (!mailbox) {
-          return err({ kind: "provider_activation_failed", cause: "INBOX unavailable" });
-        }
-
-        const uidvalidity = Number(mailbox.uidValidity);
-        const uidNext = mailbox.uidNext;
-        const lastUid = uidNext > 1 ? uidNext - 1 : 0;
-
-        const syncCursor = formatSyncCursor(uidvalidity, lastUid);
-        const expiresAt = DateTime.utc().plus({ hours: 1 }).toISO()!;
-
-        return ok({ syncCursor, expiresAt, providerSubscriptionId: "poll" });
-      } finally {
-        lock.release();
-      }
+      await conn.connect();
+      const { uidvalidity, uidNext } = await conn.getInboxState();
+      const lastUid = uidNext > 1 ? uidNext - 1 : 0;
+      const syncCursor = formatSyncCursor(uidvalidity, lastUid);
+      const expiresAt = DateTime.utc().plus({ hours: 1 }).toISO()!;
+      return ok({ syncCursor, expiresAt, providerSubscriptionId: "poll" });
     } catch (e: unknown) {
       const reason = classifyActivationError(e);
       return err({ kind: "provider_activation_failed", cause: reason });
     } finally {
-      try { await client.logout(); } catch { /* best-effort logout */ }
+      await conn.logout();
     }
   }
 
@@ -135,7 +200,7 @@ export class ImapAdapter implements ProviderAdapter {
 
     const password = this.encryptionManager.decrypt(imapConfig.encryptedPassword);
 
-    const client = createImapClient({
+    const conn = new ImapConnection({
       host: imapConfig.host,
       tlsConfig: imapConfig.tlsConfig,
       username: imapConfig.username,
@@ -144,58 +209,45 @@ export class ImapAdapter implements ProviderAdapter {
     });
 
     try {
-      await client.connect();
+      await conn.connect();
+      const { uidvalidity: currentUidvalidity } = await conn.getInboxState();
 
-      const lock = await client.getMailboxLock("INBOX");
-      try {
-        const mailbox = client.mailbox;
-        if (!mailbox) {
-          return err({ kind: "provider_renewal_failed", cause: "INBOX unavailable" });
-        }
+      const { uidvalidity: storedUidvalidity, lastUid } = parseSyncCursor(emx.syncCursor!);
 
-        const { uidvalidity: storedUidvalidity, lastUid } = parseSyncCursor(emx.syncCursor!);
-        const currentUidvalidity = Number(mailbox.uidValidity);
+      if (currentUidvalidity !== storedUidvalidity) {
+        return err({ kind: "provider_renewal_failed", cause: "Mailbox was rebuilt on the server (UIDVALIDITY changed)" });
+      }
 
-        if (currentUidvalidity !== storedUidvalidity) {
-          return err({ kind: "provider_renewal_failed", cause: "Mailbox was rebuilt on the server (UIDVALIDITY changed)" });
-        }
+      const newUids = await conn.searchNewUids(lastUid);
 
-        // UID SEARCH for UIDs > lastUid
-        const searchResults = await client.search({ uid: `${lastUid + 1}:*` }, { uid: true }) as number[];
-        // IMAP search is inclusive — filter to only UIDs actually > lastUid
-        const newUids = searchResults.filter(uid => uid > lastUid).sort((a, b) => a - b);
+      if (newUids.length > 0) {
+        // Cap at 500 (take the lowest 500)
+        const batch = newUids.slice(0, 500);
 
-        if (newUids.length > 0) {
-          // Cap at 500 (take the lowest 500)
-          const batch = newUids.slice(0, 500);
-
-          // Enqueue emx_inbound per UID
-          for (const uid of batch) {
-            await this.signalQueue.send("emx_inbound", {
-              source: "imap",
-              providerMessageId: String(uid),
-              emxId: emx.id,
-              accountId: emx.accountId,
-            });
-          }
-
-          // Update syncCursor to highest UID in batch
-          const highestUid = batch[batch.length - 1]!;
-          await this.db.updateExternalExchange(emx.accountId, emx.id, {
-            syncCursor: formatSyncCursor(currentUidvalidity, highestUid),
-            lastSyncAt: DateTime.utc().toISO()!,
+        // Enqueue emx_inbound per UID
+        for (const uid of batch) {
+          await this.signalQueue.send("emx_inbound", {
+            source: "imap",
+            providerMessageId: String(uid),
+            emxId: emx.id,
+            accountId: emx.accountId,
           });
         }
 
-        return ok({ expiresAt: DateTime.utc().plus({ hours: 1 }).toISO()! });
-      } finally {
-        lock.release();
+        // Update syncCursor to highest UID in batch
+        const highestUid = batch[batch.length - 1]!;
+        await this.db.updateExternalExchange(emx.accountId, emx.id, {
+          syncCursor: formatSyncCursor(currentUidvalidity, highestUid),
+          lastSyncAt: DateTime.utc().toISO()!,
+        });
       }
+
+      return ok({ expiresAt: DateTime.utc().plus({ hours: 1 }).toISO()! });
     } catch (e: unknown) {
       const cause = e instanceof Error ? e.message : "IMAP renewal failed";
       return err({ kind: "provider_renewal_failed", cause });
     } finally {
-      try { await client.logout(); } catch { /* best-effort logout */ }
+      await conn.logout();
     }
   }
 
@@ -221,7 +273,7 @@ export class ImapAdapter implements ProviderAdapter {
       return err({ kind: "provider_fetch_failed", cause: e });
     }
 
-    const client = createImapClient({
+    const conn = new ImapConnection({
       host: imapConfig.host,
       tlsConfig: imapConfig.tlsConfig,
       username: imapConfig.username,
@@ -230,28 +282,19 @@ export class ImapAdapter implements ProviderAdapter {
     });
 
     try {
-      await client.connect();
-
-      const lock = await client.getMailboxLock("INBOX");
-      try {
-        const msg = await client.fetchOne(uid.toString(), { source: true, internalDate: true }, { uid: true });
-        if (!msg) {
-          return err({ kind: "provider_message_not_found" });
-        }
-
-        const rawMime = msg.source as Uint8Array;
-        const receivedAt = (msg.internalDate as Date).toISOString();
-        return ok({ rawMime, receivedAt });
-      } finally {
-        lock.release();
+      await conn.connect();
+      const result = await conn.fetchRawMessage(uid);
+      if (!result) {
+        return err({ kind: "provider_message_not_found" });
       }
+      return ok(result);
     } catch (e: unknown) {
       if (e instanceof Error && e.message.includes("does not exist")) {
         return err({ kind: "provider_message_not_found" });
       }
       return err({ kind: "provider_fetch_failed", cause: e });
     } finally {
-      try { await client.logout(); } catch { /* best-effort logout */ }
+      await conn.logout();
     }
   }
 }
@@ -269,9 +312,13 @@ function classifyActivationError(e: unknown): string {
     if (msg.includes("timeout") || msg.includes("econnrefused") || msg.includes("enotfound") || msg.includes("ehostunreach")) {
       return "host unreachable";
     }
+    if (msg.includes("certificate") || msg.includes("cert") || msg.includes("ssl") || msg.includes("tls") || msg.includes("self.signed") || msg.includes("self-signed")) {
+      return e.message.slice(0, 256);
+    }
     if (msg.includes("inbox") && (msg.includes("not found") || msg.includes("does not exist") || msg.includes("no such"))) {
       return "INBOX unavailable";
     }
+    return e.message.slice(0, 256);
   }
   if (e && typeof e === "object" && "code" in e) {
     const code = (e as { code: string }).code;
@@ -279,5 +326,5 @@ function classifyActivationError(e: unknown): string {
       return "host unreachable";
     }
   }
-  return "host unreachable";
+  return String(e).slice(0, 256);
 }

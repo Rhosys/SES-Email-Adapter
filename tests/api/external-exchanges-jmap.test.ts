@@ -177,7 +177,7 @@ describe("External Exchanges JMAP API", () => {
 
   describe("PATCH /accounts/:accountId/external-exchanges/:emxId (JMAP)", () => {
     it("returns 422 when connection test fails", async () => {
-      mockFetchSession.mockResolvedValue(err({ kind: "provider_activation_failed", cause: "server unreachable" }));
+      vi.mocked(jmapAdapter.activate).mockResolvedValue(err({ kind: "provider_activation_failed", cause: "server unreachable" }));
 
       const res = await req(app, "PATCH", `${A}/external-exchanges/emx_jmap123xyz`, {
         body: { jmapConfig: { sessionUrl: "https://dead.server/jmap/session" } },

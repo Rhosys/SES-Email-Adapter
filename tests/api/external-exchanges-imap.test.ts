@@ -199,7 +199,7 @@ describe("External Exchanges IMAP API", () => {
 
   describe("PATCH /accounts/:accountId/external-exchanges/:emxId (IMAP)", () => {
     it("returns 422 when connection test fails", async () => {
-      mockClient.connect.mockRejectedValue(new Error("Connection refused"));
+      vi.mocked(imapAdapter.activate).mockResolvedValue(err({ kind: "provider_activation_failed", cause: "Connection refused" }));
 
       const res = await req(app, "PATCH", `${A}/external-exchanges/emx_abc123xyz`, {
         body: { imapConfig: { host: "new-host.example.com" } },
