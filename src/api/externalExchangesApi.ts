@@ -330,6 +330,13 @@ export class ExternalExchangesApi {
         const updateResult = await accountDb.updateExternalExchangeJmapConfig(accountId, emxId, updateFields);
         if (updateResult.isErr()) { logger.error("Failed to update JMAP exchange", { code: "api.emx.patch.jmap_failed", error: updateResult.error }); return err(c, 500, "Internal Server Error"); }
 
+        // Re-activate if previously failed — connection test just proved creds work
+        if (emx.status === "activation_failed") {
+          await accountDb.updateExternalExchange(accountId, emxId, { status: "active", errorReason: undefined, consecutiveFailures: 0 });
+          const freshResult = await accountDb.getExternalExchange(accountId, emxId);
+          if (freshResult.isOk() && freshResult.value) return c.json(serializeEmx(freshResult.value), 200);
+        }
+
         return c.json(serializeEmx(updateResult.value), 200);
       }
 
@@ -379,6 +386,13 @@ export class ExternalExchangesApi {
 
       const updateResult = await accountDb.updateExternalExchangeImapConfig(accountId, emxId, updateFields);
       if (updateResult.isErr()) { logger.error("Failed to update exchange", { code: "api.emx.patch_failed", error: updateResult.error }); return err(c, 500, "Internal Server Error"); }
+
+      // Re-activate if previously failed — connection test just proved creds work
+      if (emx.status === "activation_failed") {
+        await accountDb.updateExternalExchange(accountId, emxId, { status: "active", errorReason: undefined, consecutiveFailures: 0 });
+        const freshResult = await accountDb.getExternalExchange(accountId, emxId);
+        if (freshResult.isOk() && freshResult.value) return c.json(serializeEmx(freshResult.value), 200);
+      }
 
       return c.json(serializeEmx(updateResult.value), 200);
     });
