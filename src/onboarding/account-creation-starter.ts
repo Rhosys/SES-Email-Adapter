@@ -19,6 +19,7 @@ export class SfnAccountCreationStarter implements AccountCreationStarter {
         name: accountId,
         input: JSON.stringify({ accountId, email, callerInvocationId: this.logger.getInvocationId() }),
       }));
+      this.logger.info("Account creation workflow started", { code: "account_creation.started", accountId });
     } catch (e: unknown) {
       if ((e as { name?: string }).name === "ExecutionAlreadyExists") {
         return;

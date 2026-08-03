@@ -27,6 +27,8 @@ export class DraftSendDispatcher implements DraftSendDispatch {
     const result = await this.queue.send("draft_send", payload, { delaySeconds });
     if (result.isOk()) {
       this.logger.trackPoint("draft_send_dispatch_complete");
+    } else {
+      this.logger.info("Draft send dispatch failed", { code: "draft_send.dispatch_failed", signalId: payload.signalId, error: result.error });
     }
     return result;
   }

@@ -111,6 +111,7 @@ export async function forwardCalendarInvite(
 
     return ok(undefined);
   } catch (e) {
+    logger.warn("Calendar forward unexpected error", { code: "calendar_forwarder.unexpected_error", error: e });
     return err(dbError(e));
   }
 }

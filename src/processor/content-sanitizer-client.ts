@@ -105,6 +105,7 @@ export class LambdaContentSanitizer implements ContentSanitizerClient {
 
       return ok({ parsed: wireResult.parsed });
     } catch (e) {
+      this.logger.warn("Content sanitizer invoke failed", { code: "content_sanitizer.invoke_failed", error: e });
       return err(dbError(e));
     }
   }

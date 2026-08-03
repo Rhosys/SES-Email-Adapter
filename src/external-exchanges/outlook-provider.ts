@@ -109,7 +109,11 @@ export class OutlookProvider implements ProviderAdapter {
       let nextLink: string | null = `${GRAPH_API}/me/mailFolders/inbox/messages/delta?$select=id`;
       while (nextLink) {
         const resp = await fetch(nextLink, { headers: { "Authorization": `Bearer ${token}` } });
-        if (!resp.ok) return err({ kind: "provider_activation_failed", cause: await resp.text() });
+        if (!resp.ok) {
+          const cause = await resp.text();
+          this.logger.info("Outlook activation failed", { code: "emx.outlook.activation_failed", cause });
+          return err({ kind: "provider_activation_failed", cause });
+        }
         const page = await resp.json() as { "@odata.nextLink"?: string; "@odata.deltaLink"?: string };
         nextLink = page["@odata.nextLink"] ?? null;
         if (page["@odata.deltaLink"]) deltaLink = page["@odata.deltaLink"];
@@ -133,15 +137,21 @@ export class OutlookProvider implements ProviderAdapter {
           clientState,
         }),
       });
-      if (!subResp.ok) return err({ kind: "provider_activation_failed", cause: await subResp.text() });
+      if (!subResp.ok) {
+        const cause = await subResp.text();
+        this.logger.info("Outlook activation failed", { code: "emx.outlook.activation_failed", cause });
+        return err({ kind: "provider_activation_failed", cause });
+      }
       const sub = await subResp.json() as { id: string; expirationDateTime: string };
 
+      this.logger.info("Outlook exchange activated", { code: "emx.outlook.activated", emxId: _emx.id });
       return ok({
         syncCursor: deltaLink,
         expiresAt: sub.expirationDateTime,
         providerSubscriptionId: sub.id,
       });
     } catch (e) {
+      this.logger.info("Outlook activation failed", { code: "emx.outlook.activation_failed", cause: e });
       return err({ kind: "provider_activation_failed", cause: e });
     }
   }
@@ -154,10 +164,17 @@ export class OutlookProvider implements ProviderAdapter {
         headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({ expirationDateTime }),
       });
-      if (!response.ok) return err({ kind: "provider_renewal_failed", cause: await response.text() });
+      if (!response.ok) {
+        const cause = await response.text();
+        this.logger.info("Outlook renewal failed", { code: "emx.outlook.renewal_failed", cause });
+        return err({ kind: "provider_renewal_failed", cause });
+      }
       const data = await response.json() as { expirationDateTime: string };
-      return ok({ expiresAt: data.expirationDateTime });
+      const expiresAt = data.expirationDateTime;
+      this.logger.info("Outlook subscription renewed", { code: "emx.outlook.renewed", emxId: emx.id, expiresAt });
+      return ok({ expiresAt });
     } catch (e) {
+      this.logger.info("Outlook renewal failed", { code: "emx.outlook.renewal_failed", cause: e });
       return err({ kind: "provider_renewal_failed", cause: e });
     }
   }
@@ -169,10 +186,14 @@ export class OutlookProvider implements ProviderAdapter {
         headers: { "Authorization": `Bearer ${token}` },
       });
       if (!response.ok && response.status !== 204) {
-        return err({ kind: "provider_deactivation_failed", cause: await response.text() });
+        const cause = await response.text();
+        this.logger.info("Outlook deactivation failed", { code: "emx.outlook.deactivation_failed", cause });
+        return err({ kind: "provider_deactivation_failed", cause });
       }
+      this.logger.info("Outlook deactivated", { code: "emx.outlook.deactivated" });
       return ok(undefined);
     } catch (e) {
+      this.logger.info("Outlook deactivation failed", { code: "emx.outlook.deactivation_failed", cause: e });
       return err({ kind: "provider_deactivation_failed", cause: e });
     }
   }

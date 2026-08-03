@@ -80,9 +80,11 @@ export class DeviceNotifier implements Notifier {
 
     // Ok if at least one succeeded or no eligible devices; Err only on total failure
     if (successCount > 0 || eligibleCount === 0) {
+      this.logger.info("Notification delivered", { code: "notifier.delivered", accountId, threadId: thread.id, deviceCount: successCount });
       return ok(undefined);
     }
 
+    this.logger.info("Total notification delivery failure", { code: "notifier.delivery_failed", accountId, threadId: thread.id });
     return err(dbError("Total delivery failure: all device deliveries failed"));
   }
 

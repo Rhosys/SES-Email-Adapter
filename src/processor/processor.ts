@@ -691,6 +691,7 @@ export class SignalProcessor {
       const message = `${count} critical side-effect failure${count > 1 ? "s" : ""}`;
       return err(processorError(new AggregateError(criticalFailures, message)));
     }
+    this.logger.info("Side-effects complete", { code: "processor.side_effect.complete", accountId, signalId: signal.id, threadId: thread.id });
     return ok(undefined);
   }
 

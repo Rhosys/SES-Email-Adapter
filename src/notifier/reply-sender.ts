@@ -53,6 +53,12 @@ export class ReplySenderService implements ReplySender {
       return ok({ messageId: "" });
     }
 
+    if (result.isErr()) {
+      this.logger.info("Reply send failed (transient)", { code: "reply_sender.transient_failure", to: opts.to, accountId: opts.accountId, error: result.error });
+      return result;
+    }
+
+    this.logger.info("Reply sent", { code: "reply_sender.sent", to: opts.to, from: opts.from, accountId: opts.accountId });
     return result;
   }
 }

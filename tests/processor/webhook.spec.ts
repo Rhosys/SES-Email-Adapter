@@ -180,7 +180,9 @@ describe("deliverWebhook", () => {
 
     expect(result.isOk()).toBe(true);
     expect(result._unsafeUnwrap()).toEqual({ statusCode: 200 });
-    expect(logger.calls).toEqual([]);
+    expect(logger.calls).toEqual([
+      { method: "info", message: "Webhook delivered", context: { code: "processor.webhook.delivered", url: "https://hook.example.com/endpoint", statusCode: 200 } },
+    ]);
   });
 
   it("sends Content-Type application/json header", async () => {

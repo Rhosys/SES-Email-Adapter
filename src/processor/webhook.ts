@@ -67,6 +67,7 @@ export async function deliverWebhook(url: string, payload: WebhookPayload, logge
       return err(webhookError("non-2xx response", response.status));
     }
 
+    logger.info("Webhook delivered", { code: "processor.webhook.delivered", url, statusCode: response.status });
     return ok({ statusCode: response.status });
   } catch (e) {
     logger.track("Webhook delivery failed — network error or timeout.", {

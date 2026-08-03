@@ -45,6 +45,7 @@ export class AuthWorkflowHandler implements WorkflowHandler {
 
     const payload = this.buildOtpPayload(signal, workflowData);
     await this.deliverToAll(accountId, payload);
+    this.logger.info("OTP pushed to devices", { code: "workflow.auth.otp_pushed", accountId, threadId: thread.id });
 
     // Archive — auth threads don't need to stay in the inbox
     const archiveResult = await this.threadDatabase.updateThread(accountId, thread.id, "archived", thread.lastSignalAt, {});

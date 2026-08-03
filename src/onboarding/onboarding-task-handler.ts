@@ -264,6 +264,7 @@ export class OnboardingTaskHandler {
       return err(sendResult.error)
     }
 
+    this.logger.info("Onboarding email sent", { code: "onboarding.email_sent", accountId, step: code === "onboarding.followup" ? "followup" : "cleanup" });
     return ok(undefined);
   }
 }

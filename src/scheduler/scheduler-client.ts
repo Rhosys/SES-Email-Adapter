@@ -80,8 +80,10 @@ export class EventBridgeSchedulerClient implements SchedulerClient {
           }),
         },
       }));
+      this.logger.info("Schedule created", { code: "scheduler.created", scheduleName });
       return ok(undefined);
     } catch (e) {
+      this.logger.info("Schedule creation failed", { code: "scheduler.create_failed", scheduleName, error: e });
       return err(dbError(e));
     }
   }
@@ -97,6 +99,7 @@ export class EventBridgeSchedulerClient implements SchedulerClient {
         Name: scheduleName,
         GroupName: this.groupName,
       }));
+      this.logger.info("Schedule deleted", { code: "scheduler.deleted", scheduleName });
       return ok(undefined);
     } catch (e) {
       if (e instanceof ResourceNotFoundException) {
