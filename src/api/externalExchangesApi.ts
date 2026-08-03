@@ -205,31 +205,53 @@ export class ExternalExchangesApi {
       const adapter = adapters[body.platform];
       if (!adapter) return err(c, 422, "Unsupported platform");
 
+      // Idempotency: find existing exchange for same platform + emailAddress
+      const listResult = await accountDb.listExternalExchanges(accountId);
+      const existing = listResult.isOk()
+        ? listResult.value.find((e) => e.platform === body.platform && e.emailAddress === body.emailAddress)
+        : undefined;
+
       const connectionId = body.platform === "gmail" ? "google" : "microsoft";
       let token: string;
       try {
         token = await getProviderToken(accountId, connectionId);
       } catch (e) {
         logger.error("Failed to get provider token for activation", { code: "api.emx.create.token_failed", error: e });
+        if (existing) {
+          const updateResult = await accountDb.updateExternalExchange(accountId, existing.id, { status: "activation_failed", errorReason: "Failed to obtain provider token", consecutiveFailures: 0 });
+          if (updateResult.isErr()) { logger.error("Failed to update exchange record", { code: "api.emx.create_failed", error: updateResult.error }); return err(c, 500, "Internal Server Error"); }
+          return c.json(serializeEmx(updateResult.value), 200);
+        }
         const result = await accountDb.createExternalExchange(accountId, { platform: body.platform, emailAddress: body.emailAddress, status: "activation_failed", errorReason: "Failed to obtain provider token" });
         if (result.isErr()) { logger.error("Failed to create exchange record", { code: "api.emx.create_failed", error: result.error }); return err(c, 500, "Internal Server Error"); }
-        return c.json(result.value, 201);
+        return c.json(serializeEmx(result.value), 201);
       }
 
-      const emxStub = { id: "", accountId, platform: body.platform, emailAddress: body.emailAddress, status: "active" as const, createdAt: "", updatedAt: "" };
+      const emxStub = { id: existing?.id ?? "", accountId, platform: body.platform, emailAddress: body.emailAddress, status: "active" as const, createdAt: "", updatedAt: "" };
       const activateResult = await adapter.activate(token, emxStub);
       if (activateResult.isErr()) {
         const errorReason = String(activateResult.error.cause);
+        if (existing) {
+          const updateResult = await accountDb.updateExternalExchange(accountId, existing.id, { status: "activation_failed", errorReason, consecutiveFailures: 0 });
+          if (updateResult.isErr()) { logger.error("Failed to update exchange record", { code: "api.emx.create_failed", error: updateResult.error }); return err(c, 500, "Internal Server Error"); }
+          logger.error("Failed to activate exchange", { code: "api.emx.activate_failed", error: activateResult.error });
+          return c.json(serializeEmx(updateResult.value), 200);
+        }
         const result = await accountDb.createExternalExchange(accountId, { platform: body.platform, emailAddress: body.emailAddress, status: "activation_failed", errorReason });
         if (result.isErr()) { logger.error("Failed to create exchange record", { code: "api.emx.create_failed", error: result.error }); return err(c, 500, "Internal Server Error"); }
         logger.error("Failed to activate exchange", { code: "api.emx.activate_failed", error: activateResult.error });
-        return c.json(result.value, 201);
+        return c.json(serializeEmx(result.value), 201);
       }
 
       const { syncCursor, expiresAt, providerSubscriptionId } = activateResult.value;
+      if (existing) {
+        const updateResult = await accountDb.updateExternalExchange(accountId, existing.id, { status: "active", syncCursor, expiresAt, providerSubscriptionId, errorReason: undefined, consecutiveFailures: 0 });
+        if (updateResult.isErr()) { logger.error("Failed to update exchange record", { code: "api.emx.create_failed", error: updateResult.error }); return err(c, 500, "Internal Server Error"); }
+        return c.json(serializeEmx(updateResult.value), 200);
+      }
       const result = await accountDb.createExternalExchange(accountId, { platform: body.platform, emailAddress: body.emailAddress, status: "active", syncCursor, expiresAt, providerSubscriptionId });
       if (result.isErr()) { logger.error("Failed to create exchange record", { code: "api.emx.create_failed", error: result.error }); return err(c, 500, "Internal Server Error"); }
-      return c.json(result.value, 201);
+      return c.json(serializeEmx(result.value), 201);
     });
 
     // GET /accounts/:accountId/external-exchanges/:emxId
