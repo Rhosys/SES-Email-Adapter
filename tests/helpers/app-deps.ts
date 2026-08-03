@@ -34,6 +34,7 @@ export function makeAppDeps(overrides: Partial<AppDeps>): AppDeps {
     adapters: {},
     encryptionManager: { encrypt: () => "encrypted", decrypt: () => "decrypted" } as never,
     getProviderToken: async () => "",
+    signalQueue: { send: async () => ok(undefined), sendBatch: async () => ok(undefined) } as never,
     ...overrides,
   } as AppDeps;
 }

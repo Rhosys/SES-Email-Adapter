@@ -439,6 +439,7 @@ export class CompositeRoot {
       adapters: emxAdapters,
       encryptionManager,
       getProviderToken,
+      signalQueue,
     });
 
     // -----------------------------------------------------------------------

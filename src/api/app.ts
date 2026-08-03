@@ -27,6 +27,7 @@ import type { GmailProvider } from "../external-exchanges/gmail-provider.js";
 import type { OutlookProvider } from "../external-exchanges/outlook-provider.js";
 import type { ProviderAdapter } from "../external-exchanges/provider-adapter.js";
 import type { EncryptionManager } from "../secrets/encryption-manager.js";
+import type { SignalQueue } from "../messaging/signal-queue.js";
 
 import { WellKnownApi } from "./wellKnownApi.js";
 import { AccountsApi } from "./accountsApi.js";
@@ -110,9 +111,10 @@ export interface AppDeps {
   adapters: Record<string, ProviderAdapter>;
   encryptionManager: EncryptionManager;
   getProviderToken: (accountId: string, connectionId: string) => Promise<string>;
+  signalQueue: SignalQueue;
 }
 
-export function createApp({ threadDb, resourceDb, accountDb, auditDb, auth, access, logger, forwardingService, jobDispatcher, healthCheckValidator, signalReprocessor, draftSendDispatcher, accountCreationStarter, appBaseUrl, contentCdnBaseUrl, astValidator, billingHandler, emailService, domainIdentityService, rsvpComposer, postApprovalCalendarDeps, schedulerClient, emailContentStore, triggerDigest, embeddingGenerator, threadMatcher, unsubscribeTokenGenerator, gmailProvider, outlookProvider, adapters, encryptionManager, getProviderToken }: AppDeps) {
+export function createApp({ threadDb, resourceDb, accountDb, auditDb, auth, access, logger, forwardingService, jobDispatcher, healthCheckValidator, signalReprocessor, draftSendDispatcher, accountCreationStarter, appBaseUrl, contentCdnBaseUrl, astValidator, billingHandler, emailService, domainIdentityService, rsvpComposer, postApprovalCalendarDeps, schedulerClient, emailContentStore, triggerDigest, embeddingGenerator, threadMatcher, unsubscribeTokenGenerator, gmailProvider, outlookProvider, adapters, encryptionManager, getProviderToken, signalQueue }: AppDeps) {
   type AppEnv = { Variables: { auth: AuthContext; authorizationVerified?: boolean; [ROUTE_NOT_FOUND_KEY]?: boolean } };
   const app = new OpenAPIHono<AppEnv>();
 
@@ -290,7 +292,7 @@ export function createApp({ threadDb, resourceDb, accountDb, auditDb, auth, acce
   new AdminApi(jobDispatcher, healthCheckValidator).register(app, helpers);
   new UnsubscribeApi(unsubscribeTokenGenerator, accountDb, logger).register(app, helpers);
   new UserApi(accountDb, access, logger).register(app, helpers);
-  new ExternalExchangesApi(accountDb, adapters, getProviderToken, encryptionManager, logger).register(app, helpers);
+  new ExternalExchangesApi(accountDb, adapters, getProviderToken, encryptionManager, signalQueue, logger).register(app, helpers);
 
   // ---------------------------------------------------------------------------
   // Not Found & Method Not Allowed — must be registered after all routes
