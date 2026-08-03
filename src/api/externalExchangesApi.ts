@@ -143,6 +143,7 @@ export class ExternalExchangesApi {
     }), async (c) => {
       const accountId = c.req.param("accountId")!;
       const rawBody = await c.req.json();
+      logger.info("Creating external exchange", { code: "api.emx.create", accountId, platform: rawBody.platform ?? (rawBody.imapConfig ? "imap" : rawBody.jmapConfig ? "jmap" : "unknown") });
 
       // --- IMAP branch: uses credentials, no OAuth ---
       const imapBody = CreateImapExchangeRequest.safeParse(rawBody);
@@ -189,6 +190,7 @@ export class ExternalExchangesApi {
         if (result.isErr()) { logger.error("Failed to create IMAP exchange record", { code: "api.emx.imap.create_failed", error: result.error }); return err(c, 500, "Internal Server Error"); }
         await accountDb.ensureAlias(accountId, imapConfig.username, "allow_all", aliasCheck.isOk() ? aliasCheck.value : undefined);
         await triggerDispatch(accountId, result.value.id);
+        logger.info("IMAP exchange created and activated", { code: "api.emx.imap.created", accountId, emxId: result.value.id, emailAddress: imapConfig.username });
         return c.json(serializeEmx(result.value), 201);
       }
 
@@ -237,6 +239,7 @@ export class ExternalExchangesApi {
         if (result.isErr()) { logger.error("Failed to create JMAP exchange record", { code: "api.emx.jmap.create_failed", error: result.error }); return err(c, 500, "Internal Server Error"); }
         await accountDb.ensureAlias(accountId, jmapConfig.username, "allow_all", aliasCheck.isOk() ? aliasCheck.value : undefined);
         await triggerDispatch(accountId, result.value.id);
+        logger.info("JMAP exchange created and activated", { code: "api.emx.jmap.created", accountId, emxId: result.value.id, emailAddress: jmapConfig.username });
         return c.json(serializeEmx(result.value), 201);
       }
 
@@ -296,12 +299,14 @@ export class ExternalExchangesApi {
         if (updateResult.isErr()) { logger.error("Failed to update exchange record", { code: "api.emx.create_failed", error: updateResult.error }); return err(c, 500, "Internal Server Error"); }
         await accountDb.ensureAlias(accountId, body.emailAddress, "allow_all", oauthAliasCheck.isOk() ? oauthAliasCheck.value : undefined);
         await triggerDispatch(accountId, existing.id);
+        logger.info("OAuth exchange reactivated", { code: "api.emx.oauth.reactivated", accountId, emxId: existing.id, platform: body.platform });
         return c.json(serializeEmx(updateResult.value), 200);
       }
       const result = await accountDb.createExternalExchange(accountId, { platform: body.platform, emailAddress: body.emailAddress, status: "active", syncCursor, lastSyncAt: DateTime.utc().toISO()!, expiresAt, providerSubscriptionId });
       if (result.isErr()) { logger.error("Failed to create exchange record", { code: "api.emx.create_failed", error: result.error }); return err(c, 500, "Internal Server Error"); }
       await accountDb.ensureAlias(accountId, body.emailAddress, "allow_all", oauthAliasCheck.isOk() ? oauthAliasCheck.value : undefined);
       await triggerDispatch(accountId, result.value.id);
+      logger.info("OAuth exchange created", { code: "api.emx.oauth.created", accountId, emxId: result.value.id, platform: body.platform });
       return c.json(serializeEmx(result.value), 201);
     });
 
@@ -336,6 +341,7 @@ export class ExternalExchangesApi {
       const accountId = c.req.param("accountId")!;
       const emxId = c.req.param("emxId")!;
       const rawBody = await c.req.json();
+      logger.info("Patching external exchange", { code: "api.emx.patch", accountId, emxId });
 
       // Fetch existing EMX
       const getResult = await accountDb.getExternalExchange(accountId, emxId);
@@ -409,6 +415,7 @@ export class ExternalExchangesApi {
 
         await triggerDispatch(accountId, emxId);
         const freshResult = await accountDb.getExternalExchange(accountId, emxId);
+        logger.info("JMAP exchange patched", { code: "api.emx.patch.jmap.done", accountId, emxId, previousStatus: emx.status, reactivated: emx.status === "activation_failed" });
         if (freshResult.isOk() && freshResult.value) { return c.json(serializeEmx(freshResult.value), 200); }
         return c.json(serializeEmx(updateResult.value), 200);
       }
@@ -476,6 +483,7 @@ export class ExternalExchangesApi {
 
       await triggerDispatch(accountId, emxId);
       const freshResult = await accountDb.getExternalExchange(accountId, emxId);
+      logger.info("IMAP exchange patched", { code: "api.emx.patch.imap.done", accountId, emxId, previousStatus: emx.status, reactivated: emx.status === "activation_failed" });
       if (freshResult.isOk() && freshResult.value) { return c.json(serializeEmx(freshResult.value), 200); }
       return c.json(serializeEmx(updateResult.value), 200);
     });
@@ -491,6 +499,7 @@ export class ExternalExchangesApi {
     }), async (c) => {
       const accountId = c.req.param("accountId")!;
       const emxId = c.req.param("emxId")!;
+      logger.info("Deleting external exchange", { code: "api.emx.delete", accountId, emxId });
       const getResult = await accountDb.getExternalExchange(accountId, emxId);
       if (getResult.isErr()) { logger.error("Failed to get exchange for delete", { code: "api.emx.delete.get_failed", error: getResult.error }); return err(c, 500, "Internal Server Error"); }
       const emx = getResult.value;
@@ -519,6 +528,7 @@ export class ExternalExchangesApi {
 
       const deleteResult = await accountDb.deleteExternalExchange(accountId, emxId);
       if (deleteResult.isErr()) { logger.error("Failed to delete exchange", { code: "api.emx.delete_failed", error: deleteResult.error }); return err(c, 500, "Internal Server Error"); }
+      logger.info("Exchange deleted", { code: "api.emx.deleted", accountId, emxId, platform: emx.platform });
       return new Response(null, { status: 204 });
     });
   }

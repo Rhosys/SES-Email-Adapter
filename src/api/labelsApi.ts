@@ -37,9 +37,11 @@ export class LabelsApi {
       responses: { 201: { content: { "application/json": { schema: LabelSchema } }, description: "Label created" } },
     }), async (c) => {
       const accountId = c.req.param("accountId")!;
+      logger.info("Creating label", { code: "api.labels.create", accountId });
       const body = await zParse(CreateLabelRequest, c.req.raw);
       const labelResult = await accountDb.createLabel(accountId, body);
       if (labelResult.isErr()) { logger.error("Failed to create label", { code: "api.labels.create_failed", error: labelResult.error }); return err(c, 500, "Internal Server Error"); }
+      logger.info("Label created", { code: "api.labels.created", accountId, labelId: labelResult.value.id });
       return c.json(toApiLabel(labelResult.value), 201);
     });
 
@@ -52,13 +54,16 @@ export class LabelsApi {
       responses: { 200: { content: { "application/json": { schema: LabelSchema } }, description: "Update label" } },
     }), async (c) => {
       const accountId = c.req.param("accountId")!;
+      const labelId = c.req.param("id")!;
+      logger.info("Updating label", { code: "api.labels.update", accountId, labelId });
       const labelsResult = await accountDb.listLabels(accountId);
       if (labelsResult.isErr()) { logger.error("Failed to list labels for patch", { code: "api.labels.patch.list_failed", error: labelsResult.error }); return err(c, 500, "Internal Server Error"); }
-      const label = labelsResult.value.find((l) => l.id === c.req.param("id")!);
+      const label = labelsResult.value.find((l) => l.id === labelId);
       if (!label) return err(c, 404, "Label not found", "LABEL_NOT_FOUND");
       const body = await zParse(UpdateLabelRequest, c.req.raw);
       const updateResult = await accountDb.updateLabel(accountId, label.id, body);
       if (updateResult.isErr()) { logger.error("Failed to update label", { code: "api.labels.patch.update_failed", error: updateResult.error }); return err(c, 500, "Internal Server Error"); }
+      logger.info("Label updated", { code: "api.labels.updated", accountId, labelId });
       return c.json(toApiLabel(updateResult.value), 200);
     });
 
@@ -71,12 +76,15 @@ export class LabelsApi {
       responses: { 204: { description: "Label deleted" } },
     }), async (c) => {
       const accountId = c.req.param("accountId")!;
+      const labelId = c.req.param("id")!;
+      logger.info("Deleting label", { code: "api.labels.delete", accountId, labelId });
       const labelsResult = await accountDb.listLabels(accountId);
       if (labelsResult.isErr()) { logger.error("Failed to list labels for delete", { code: "api.labels.delete.list_failed", error: labelsResult.error }); return err(c, 500, "Internal Server Error"); }
-      const label = labelsResult.value.find((l) => l.id === c.req.param("id")!);
+      const label = labelsResult.value.find((l) => l.id === labelId);
       if (!label) return err(c, 404, "Label not found", "LABEL_NOT_FOUND");
       const deleteResult = await accountDb.deleteLabel(accountId, label.id);
       if (deleteResult.isErr()) { logger.error("Failed to delete label", { code: "api.labels.delete_failed", error: deleteResult.error }); return err(c, 500, "Internal Server Error"); }
+      logger.info("Label deleted", { code: "api.labels.deleted", accountId, labelId });
       return new Response(null, { status: 204 });
     });
   }

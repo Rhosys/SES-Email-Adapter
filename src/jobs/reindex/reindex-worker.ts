@@ -58,6 +58,7 @@ export class ReindexWorker {
 
   async processSegmentMessage(message: ReindexSegmentMessage): Promise<Result<void, DbError | ReindexSegmentProcessingError>> {
     const { segment, totalSegments, targetRegistryId, modelId } = message;
+    this.logger.info("Reindex worker: processing segment", { code: "reindex.worker.segment_start", segment, totalSegments, targetRegistryId });
 
     // Validate target cluster exists in registry
     const cluster = getRegistryById(targetRegistryId);

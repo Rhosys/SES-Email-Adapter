@@ -35,6 +35,7 @@ export class RsvpReminderHandler {
 
   async process(message: RsvpReminderMessage): Promise<Result<void, DbError>> {
     const { accountId, signalId, threadId } = message;
+    this.logger.info("RSVP reminder: processing", { code: "rsvp_reminder.start", accountId, signalId, threadId });
 
     // 1. Fetch signal
     const signalResult = await this.threadDb.getSignalById(accountId, signalId, threadId);

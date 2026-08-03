@@ -46,6 +46,7 @@ export class EmxInboundWorker {
 
   async process(payload: EmxInboundPayload, sqsMessageId: string, receiveCount: number): Promise<Result<void, ProviderFetchError | ProcessorError>> {
     const { source, providerMessageId, emxId, accountId } = payload;
+    this.logger.info("emx_inbound: processing message", { code: "emx.inbound.start", source, providerMessageId, emxId, accountId });
     // IMAP/JMAP UIDs are only unique within a single mailbox — use emxId as namespace to prevent cross-exchange collisions
     const namespace = source === "imap" || source === "jmap" ? emxId : source;
     const compositeMailMessageId = `${namespace}-${providerMessageId}`;
@@ -123,6 +124,7 @@ export class EmxInboundWorker {
       return ok(undefined);
     }
     if (processResult.isErr()) return err(processResult.error as ProcessorError);
+    this.logger.info("emx_inbound: processed successfully", { code: "emx.inbound.processed", source, providerMessageId, emxId, accountId });
     return ok(undefined);
   }
 }

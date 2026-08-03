@@ -106,6 +106,7 @@ export class DomainsApi {
       responses: { 201: { content: { "application/json": { schema: DomainSchema } }, description: "Domain created" } },
     }), async (c) => {
       const accountId = c.req.param("accountId")!;
+      logger.info("Creating domain", { code: "api.domains.create", accountId });
       const body = await zParse(CreateDomainRequest, c.req.raw);
 
       // Cross-account ownership check — oldest registrant wins.
@@ -131,6 +132,7 @@ export class DomainsApi {
       const domainResult = await accountDb.createDomain(accountId, body.domain);
       if (domainResult.isErr()) { logger.error("Failed to create domain in database.", { code: "api.domains.create_failed", accountId, error: domainResult.error }); return err(c, 500, "Internal Server Error"); }
 
+      logger.info("Domain created", { code: "api.domains.created", accountId, domain: body.domain });
       return c.json(toApiDomain(domainResult.value), 201);
     });
 
@@ -160,7 +162,9 @@ export class DomainsApi {
       responses: { 200: { content: { "application/json": { schema: DomainWithRecordsSchema } }, description: "Verify/refresh domain" } },
     }), async (c) => {
       const accountId = c.req.param("accountId")!;
-      const domainResult = await accountDb.getDomain(accountId, c.req.param("id")!.toLowerCase());
+      const domainId = c.req.param("id")!.toLowerCase();
+      logger.info("Verifying domain", { code: "api.domains.verify", accountId, domain: domainId });
+      const domainResult = await accountDb.getDomain(accountId, domainId);
       if (domainResult.isErr()) { logger.error("Failed to get domain for verification.", { code: "api.domains.verify.get_failed", accountId, error: domainResult.error }); return err(c, 500, "Internal Server Error"); }
       const domain = domainResult.value;
       if (!domain) return err(c, 404, "Domain not found", "DOMAIN_NOT_FOUND");
@@ -190,6 +194,7 @@ export class DomainsApi {
 
       const updatedResult = await accountDb.getDomain(accountId, domain.domain);
       if (updatedResult.isErr()) { logger.error("Failed to get domain after health update.", { code: "api.domains.verify.get_updated_failed", accountId, error: updatedResult.error }); return err(c, 500, "Internal Server Error"); }
+      logger.info("Domain verified", { code: "api.domains.verified", accountId, domain: domain.domain, receivingHealthy, senderHealthy });
       return c.json(toApiDomainWithRecords(updatedResult.value!, records), 200);
     });
 
@@ -202,7 +207,9 @@ export class DomainsApi {
       responses: { 204: { description: "Domain deleted" } },
     }), async (c) => {
       const accountId = c.req.param("accountId")!;
-      const domainResult = await accountDb.getDomain(accountId, c.req.param("id")!.toLowerCase());
+      const domainId = c.req.param("id")!.toLowerCase();
+      logger.info("Deleting domain", { code: "api.domains.delete", accountId, domain: domainId });
+      const domainResult = await accountDb.getDomain(accountId, domainId);
       if (domainResult.isErr()) { logger.error("Failed to get domain for deletion.", { code: "api.domains.delete.get_failed", accountId, error: domainResult.error }); return err(c, 500, "Internal Server Error"); }
       const domain = domainResult.value;
       if (!domain) return err(c, 404, "Domain not found", "DOMAIN_NOT_FOUND");
@@ -243,6 +250,7 @@ export class DomainsApi {
         logger.warn("Audit write failed for domain deletion, proceeding", { code: "api.audit.domain_delete_failed", accountId, domain: domain.domain, error: domainAuditResult.error });
       }
 
+      logger.info("Domain deleted", { code: "api.domains.deleted", accountId, domain: domain.domain });
       return new Response(null, { status: 204 });
     });
   }

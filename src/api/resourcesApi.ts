@@ -112,7 +112,9 @@ export class ResourcesApi {
       },
     }), async (c) => {
       const accountId = c.req.param("accountId")!;
-      const decoded = decodeResourceId(c.req.param("resourceId")!);
+      const resourceId = c.req.param("resourceId")!;
+      logger.info("Updating resource status", { code: "api.resources.update", accountId, resourceId });
+      const decoded = decodeResourceId(resourceId);
       if (!decoded) return err(c, 404, "Resource not found");
 
       const existingResult = await resourceDb.getResource(accountId, decoded.threadId, decoded.sk);
@@ -131,6 +133,7 @@ export class ResourcesApi {
       // Row disappeared between the existence-check GET above and this write (e.g. TTL expiry) —
       // the ConditionExpression on setResourceStatus stopped it from being silently recreated.
       if (!result.value) return err(c, 404, "Resource not found");
+      logger.info("Resource status updated", { code: "api.resources.updated", accountId, resourceId, status: body.status });
       return c.json(toApiResource(result.value, contentCdnBaseUrl), 200);
     });
 

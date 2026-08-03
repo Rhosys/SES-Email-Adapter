@@ -46,6 +46,7 @@ export class TemplatesApi {
       responses: { 201: { content: { "application/json": { schema: EmailTemplateSchema } }, description: "Template created" } },
     }), async (c) => {
       const accountId = c.req.param("accountId")!;
+      logger.info("Creating template", { code: "api.templates.create", accountId });
       const body = await zParse(CreateTemplateRequest, c.req.raw);
       if (body.functions) {
         if (astValidator) {
@@ -76,6 +77,7 @@ export class TemplatesApi {
           createdAt: now, updatedAt: now,
         });
         if (templateResult.isErr()) { logger.error("Failed to create template", { code: "api.templates.create_failed", error: templateResult.error }); return err(c, 500, "Internal Server Error"); }
+        logger.info("Template created", { code: "api.templates.created", accountId, templateId });
         return c.json(toApiTemplate(templateResult.value), 201);
       }
       const templateResult = await accountDb.createTemplate({
@@ -83,6 +85,7 @@ export class TemplatesApi {
         createdAt: now, updatedAt: now,
       });
       if (templateResult.isErr()) { logger.error("Failed to create template", { code: "api.templates.create_failed", error: templateResult.error }); return err(c, 500, "Internal Server Error"); }
+      logger.info("Template created", { code: "api.templates.created", accountId, templateId: templateResult.value.id });
       return c.json(toApiTemplate(templateResult.value), 201);
     });
 
@@ -95,6 +98,8 @@ export class TemplatesApi {
       responses: { 200: { content: { "application/json": { schema: EmailTemplateSchema } }, description: "Update template" } },
     }), async (c) => {
       const accountId = c.req.param("accountId")!;
+      const templateId = c.req.param("id")!;
+      logger.info("Updating template", { code: "api.templates.update", accountId, templateId });
       const body = await zParse(UpdateTemplateRequest, c.req.raw);
       if (body.functions) {
         if (astValidator) {
@@ -107,23 +112,24 @@ export class TemplatesApi {
           }
         }
       }
-      const existingResult = await accountDb.getTemplate(accountId, c.req.param("id")!);
+      const existingResult = await accountDb.getTemplate(accountId, templateId);
       if (existingResult.isErr()) { logger.error("Failed to get template for patch", { code: "api.templates.patch.get_failed", error: existingResult.error }); return err(c, 500, "Internal Server Error"); }
       if (!existingResult.value) return err(c, 404, "Template not found", "TEMPLATE_NOT_FOUND");
       // Audit: write functions change event before persisting (best-effort)
       if (body.functions) {
         const { userId } = c.get("auth");
         const auditResult = await auditDb.saveAuditEvent({
-          accountId, userId, action: "updated", resourceType: "template", resourceId: c.req.param("id")!,
+          accountId, userId, action: "updated", resourceType: "template", resourceId: templateId,
           before: { functions: existingResult.value.functions ?? null },
           after: { functions: body.functions },
         });
         if (auditResult.isErr()) {
-          logger.warn("Audit write failed for template update, proceeding with resource write", { code: "api.audit.template_update_failed", accountId, templateId: c.req.param("id")!, error: auditResult.error });
+          logger.warn("Audit write failed for template update, proceeding with resource write", { code: "api.audit.template_update_failed", accountId, templateId, error: auditResult.error });
         }
       }
-      const updateResult = await accountDb.updateTemplate(accountId, c.req.param("id")!, body as Parameters<typeof accountDb.updateTemplate>[2]);
+      const updateResult = await accountDb.updateTemplate(accountId, templateId, body as Parameters<typeof accountDb.updateTemplate>[2]);
       if (updateResult.isErr()) { logger.error("Failed to update template", { code: "api.templates.patch.update_failed", error: updateResult.error }); return err(c, 500, "Internal Server Error"); }
+      logger.info("Template updated", { code: "api.templates.updated", accountId, templateId });
       return c.json(toApiTemplate(updateResult.value), 200);
     });
 
@@ -136,6 +142,8 @@ export class TemplatesApi {
       responses: { 200: { content: { "application/json": { schema: EmailTemplateSchema } }, description: "Replace template" } },
     }), async (c) => {
       const accountId = c.req.param("accountId")!;
+      const templateId = c.req.param("id")!;
+      logger.info("Replacing template", { code: "api.templates.replace", accountId, templateId });
       const body = await zParse(ReplaceTemplateRequest, c.req.raw);
       if (body.functions) {
         if (astValidator) {
@@ -148,23 +156,24 @@ export class TemplatesApi {
           }
         }
       }
-      const existingResult = await accountDb.getTemplate(accountId, c.req.param("id")!);
+      const existingResult = await accountDb.getTemplate(accountId, templateId);
       if (existingResult.isErr()) { logger.error("Failed to get template for put", { code: "api.templates.put.get_failed", error: existingResult.error }); return err(c, 500, "Internal Server Error"); }
       if (!existingResult.value) return err(c, 404, "Template not found", "TEMPLATE_NOT_FOUND");
       // Audit: write functions change event before persisting (best-effort)
       if (body.functions) {
         const { userId } = c.get("auth");
         const auditResult = await auditDb.saveAuditEvent({
-          accountId, userId, action: "updated", resourceType: "template", resourceId: c.req.param("id")!,
+          accountId, userId, action: "updated", resourceType: "template", resourceId: templateId,
           before: { functions: existingResult.value.functions ?? null },
           after: { functions: body.functions },
         });
         if (auditResult.isErr()) {
-          logger.warn("Audit write failed for template replace, proceeding with resource write", { code: "api.audit.template_replace_failed", accountId, templateId: c.req.param("id")!, error: auditResult.error });
+          logger.warn("Audit write failed for template replace, proceeding with resource write", { code: "api.audit.template_replace_failed", accountId, templateId, error: auditResult.error });
         }
       }
-      const updateResult = await accountDb.updateTemplate(accountId, c.req.param("id")!, { name: body.name, subject: body.subject, body: body.body, ...(body.functions ? { functions: body.functions } : {}) });
+      const updateResult = await accountDb.updateTemplate(accountId, templateId, { name: body.name, subject: body.subject, body: body.body, ...(body.functions ? { functions: body.functions } : {}) });
       if (updateResult.isErr()) { logger.error("Failed to replace template", { code: "api.templates.put.update_failed", error: updateResult.error }); return err(c, 500, "Internal Server Error"); }
+      logger.info("Template replaced", { code: "api.templates.replaced", accountId, templateId });
       return c.json(toApiTemplate(updateResult.value), 200);
     });
 
@@ -177,11 +186,14 @@ export class TemplatesApi {
       responses: { 204: { description: "Template deleted" } },
     }), async (c) => {
       const accountId = c.req.param("accountId")!;
-      const existingResult = await accountDb.getTemplate(accountId, c.req.param("id")!);
+      const templateId = c.req.param("id")!;
+      logger.info("Deleting template", { code: "api.templates.delete", accountId, templateId });
+      const existingResult = await accountDb.getTemplate(accountId, templateId);
       if (existingResult.isErr()) { logger.error("Failed to get template for delete", { code: "api.templates.delete.get_failed", error: existingResult.error }); return err(c, 500, "Internal Server Error"); }
       if (!existingResult.value) return err(c, 404, "Template not found", "TEMPLATE_NOT_FOUND");
-      const deleteResult = await accountDb.deleteTemplate(accountId, c.req.param("id")!);
+      const deleteResult = await accountDb.deleteTemplate(accountId, templateId);
       if (deleteResult.isErr()) { logger.error("Failed to delete template", { code: "api.templates.delete_failed", error: deleteResult.error }); return err(c, 500, "Internal Server Error"); }
+      logger.info("Template deleted", { code: "api.templates.deleted", accountId, templateId });
       return new Response(null, { status: 204 });
     });
   }

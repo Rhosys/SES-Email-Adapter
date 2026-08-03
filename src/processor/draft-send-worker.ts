@@ -99,6 +99,7 @@ export class DraftSendWorker {
     });
     if (updateResult.isErr()) return err(updateResult.error);
 
+    this.logger.info("Draft send: signal sent successfully", { code: "draft_send.sent", signalId, accountId, sesMessageId: messageId });
     return ok(undefined);
   }
 }

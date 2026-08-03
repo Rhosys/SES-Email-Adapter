@@ -62,6 +62,7 @@ export class RulesApi {
       responses: { 201: { content: { "application/json": { schema: RuleSchema } }, description: "Rule created" } },
     }), async (c) => {
       const accountId = c.req.param("accountId")!;
+      logger.info("Creating rule", { code: "api.rules.create", accountId });
       const body = await zParse(CreateRuleRequest, c.req.raw);
       const effectiveConditionType = body.conditionType ?? "json_logic";
       if (effectiveConditionType === "js") {
@@ -96,6 +97,7 @@ export class RulesApi {
       }
       const ruleResult = await accountDb.createRule(accountId, body as Parameters<typeof accountDb.createRule>[1]);
       if (ruleResult.isErr()) { logger.error("Failed to create rule", { code: "api.rules.create_failed", error: ruleResult.error }); return err(c, 500, "Internal Server Error"); }
+      logger.info("Rule created", { code: "api.rules.created", accountId, ruleId: ruleResult.value.id });
       return c.json(toApiRule(ruleResult.value), 201);
     });
 
@@ -108,9 +110,11 @@ export class RulesApi {
       responses: { 200: { content: { "application/json": { schema: RuleSchema } }, description: "Update rule" } },
     }), async (c) => {
       const accountId = c.req.param("accountId")!;
+      const ruleId = c.req.param("id")!;
+      logger.info("Updating rule", { code: "api.rules.update", accountId, ruleId });
       const rulesResult = await accountDb.listRules(accountId);
       if (rulesResult.isErr()) { logger.error("Failed to list rules for patch", { code: "api.rules.patch.list_failed", error: rulesResult.error }); return err(c, 500, "Internal Server Error"); }
-      const rule = rulesResult.value.find((r) => r.id === c.req.param("id")!);
+      const rule = rulesResult.value.find((r) => r.id === ruleId);
       if (!rule) return err(c, 404, "Rule not found", "RULE_NOT_FOUND");
       const body = await zParse(UpdateRuleRequest, c.req.raw);
       // System rules (SR-*) are immutable except for enable/disable and reordering —
@@ -175,6 +179,7 @@ export class RulesApi {
       }
       const updateResult = await accountDb.updateRule(accountId, rule.id, updateData);
       if (updateResult.isErr()) { logger.error("Failed to update rule", { code: "api.rules.patch.update_failed", error: updateResult.error }); return err(c, 500, "Internal Server Error"); }
+      logger.info("Rule updated", { code: "api.rules.updated", accountId, ruleId });
       return c.json(toApiRule(updateResult.value), 200);
     });
 
@@ -187,9 +192,11 @@ export class RulesApi {
       responses: { 204: { description: "Rule deleted" } },
     }), async (c) => {
       const accountId = c.req.param("accountId")!;
+      const ruleId = c.req.param("id")!;
+      logger.info("Deleting rule", { code: "api.rules.delete", accountId, ruleId });
       const rulesResult = await accountDb.listRules(accountId);
       if (rulesResult.isErr()) { logger.error("Failed to list rules for delete", { code: "api.rules.delete.list_failed", error: rulesResult.error }); return err(c, 500, "Internal Server Error"); }
-      const rule = rulesResult.value.find((r) => r.id === c.req.param("id")!);
+      const rule = rulesResult.value.find((r) => r.id === ruleId);
       if (!rule) return err(c, 404, "Rule not found", "RULE_NOT_FOUND");
       // System rules (SR-*) cannot be deleted — only enabled/disabled via PATCH.
       if (rule.accountId === "SYSTEM") {
@@ -197,6 +204,7 @@ export class RulesApi {
       }
       const deleteResult = await accountDb.deleteRule(accountId, rule.id);
       if (deleteResult.isErr()) { logger.error("Failed to delete rule", { code: "api.rules.delete_failed", error: deleteResult.error }); return err(c, 500, "Internal Server Error"); }
+      logger.info("Rule deleted", { code: "api.rules.deleted", accountId, ruleId });
       return new Response(null, { status: 204 });
     });
   }

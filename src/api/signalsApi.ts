@@ -116,6 +116,7 @@ export class SignalsApi {
     }), async (c) => {
       const accountId = c.req.param("accountId")!;
       const signalId = c.req.param("id")!;
+      logger.info("Processing quarantine response", { code: "api.signals.quarantine_response", accountId, signalId });
 
       // Signal is quarantined or blocked — try both partitions
       let signalResult = await threadDb.getSignalById(accountId, signalId, "QUARANTINED");
@@ -149,6 +150,7 @@ export class SignalsApi {
           if (saveSenderResult.isErr()) { logger.error("Failed to save sender disposition.", { code: "api.quarantine_response.save_sender_failed", error: saveSenderResult.error }); return err(c, 500, "Internal Server Error"); }
         }
 
+        logger.info("Signal blocked", { code: "api.signals.blocked", accountId, signalId, decision: effectiveStatus });
         return c.json(blockResult.value, 200);
       }
 
@@ -221,6 +223,7 @@ export class SignalsApi {
       }
 
       const signalWithUrls = contentCdnBaseUrl ? withAttachmentUrls(signal, contentCdnBaseUrl) : signal;
+      logger.info("Signal activated", { code: "api.signals.activated", accountId, signalId, threadId: thread.id });
       return c.json({ thread: toApiThread(thread), signal: toApiSignal({ ...signalWithUrls, status: "active", threadId: thread.id }) }, 200);
     });
   }

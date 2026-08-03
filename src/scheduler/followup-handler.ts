@@ -42,6 +42,7 @@ export class FollowupHandler {
 
   async process(message: FollowupMessage): Promise<Result<void, DbError>> {
     const { accountId, signalId, threadId } = message;
+    this.logger.info("Followup: processing", { code: "followup.start", accountId, signalId, threadId });
 
     // 1. Fetch thread
     const threadResult = await this.threadDb.getThread(accountId, threadId);

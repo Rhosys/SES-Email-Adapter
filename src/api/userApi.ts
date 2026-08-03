@@ -60,11 +60,13 @@ export class UserApi {
       if (jwtUserId !== pathUserId) return err(c, 403, "Forbidden");
       c.set("authorizationVerified", true);
 
+      this.logger.info("Updating user configuration", { code: "api.user.update_configuration", userId: jwtUserId });
       const body = await zParse(UpdateUserConfigurationRequest, c.req.raw);
       const update: Partial<IUserConfiguration> = {};
       if (body.postSendView !== undefined) { update.postSendView = body.postSendView; }
       const result = await this.accountDb.updateUserConfiguration(jwtUserId, update);
       if (result.isErr()) { this.logger.error("Failed to update user configuration", { code: "api.user.update_configuration_failed", error: result.error }); return err(c, 500, "Internal server error"); }
+      this.logger.info("User configuration updated", { code: "api.user.configuration_updated", userId: jwtUserId });
       return c.json(result.value, 200);
     });
 

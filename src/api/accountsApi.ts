@@ -96,6 +96,7 @@ export class AccountsApi {
     }), async (c) => {
       const { userId } = c.get("auth");
       if (!access) { logger.error("Service dependency not available.", { code: "api.accounts.create.not_configured" }); return err(c, 501, "Not implemented"); }
+      logger.info("Creating account", { code: "api.accounts.create", userId });
       const existingResult = await access.listAccountsForUser(userId);
       if (existingResult.isErr()) { logger.error("Failed to list existing accounts for user.", { code: "api.accounts.create.list_existing_failed", error: existingResult.error }); return err(c, 500, "Internal Server Error"); }
       if (existingResult.value.length > 0) return err(c, 409, "Account already exists", "ACCOUNT_EXISTS");
@@ -126,6 +127,7 @@ export class AccountsApi {
         logger.error("Failed to create Authress access record for new account.", { code: "api.account_create.authress_failed", userId, accountId: account.id, error: accessResult.error });
         return err(c, 500, "Internal Server Error");
       }
+      logger.info("Account created", { code: "api.accounts.created", accountId: account.id, userId });
       return c.json(toApiAccount(account), 201);
     });
 
@@ -154,6 +156,7 @@ export class AccountsApi {
       responses: { 200: { content: { "application/json": { schema: AccountSchema } }, description: "Update account" } },
     }), async (c) => {
       const accountId = c.req.param("accountId")!;
+      logger.info("Updating account", { code: "api.accounts.update", accountId });
       const body = await zParse(UpdateAccountRequest, c.req.raw);
       if (body.digest) {
         const targetResult = await accountDb.getForwardingTarget(accountId, body.digest.forwardingTargetId);
@@ -199,6 +202,7 @@ export class AccountsApi {
         });
       }
 
+      logger.info("Account updated", { code: "api.accounts.updated", accountId });
       return c.json(toApiAccount(updateResult.value), 200);
     });
 
@@ -265,6 +269,7 @@ export class AccountsApi {
     }), async (c) => {
       if (!access) { logger.error("Service dependency not available.", { code: "api.users.update.not_configured" }); return err(c, 501, "Not implemented"); }
       const accountId = c.req.param("accountId")!;
+      logger.info("Inviting user", { code: "api.users.invite", accountId });
       const body = await zParse(InviteUserRequest, c.req.raw);
       if (!isValidEmail(body.email, logger)) {
         return err(c, 400, "Invalid email address", "INVALID_EMAIL");
@@ -294,6 +299,7 @@ export class AccountsApi {
           return err(c, 503, "Email delivery temporarily unavailable");
         }
       }
+      logger.info("User invited", { code: "api.users.invited", accountId, inviteId });
       return new Response(null, { status: 201 });
     });
 
@@ -307,10 +313,12 @@ export class AccountsApi {
     }), async (c) => {
       if (!access) { logger.error("Service dependency not available.", { code: "api.users.update.not_configured" }); return err(c, 501, "Not implemented"); }
       const accountId = c.req.param("accountId")!;
+      const targetUserId = c.req.param("userId")!;
+      logger.info("Updating user role", { code: "api.users.update_role", accountId, targetUserId });
       const body = await zParse(UpdateUserRequest, c.req.raw);
-      const result = await access.updateUserRole(accountId, c.req.param("userId")!, body.role);
+      const result = await access.updateUserRole(accountId, targetUserId, body.role);
       if (result.isErr()) {
-        logger.warn("Authress service unavailable while updating user role.", { code: "api.authress_unavailable", accountId, userId: c.req.param("userId")!, error: result.error });
+        logger.warn("Authress service unavailable while updating user role.", { code: "api.authress_unavailable", accountId, userId: targetUserId, error: result.error });
         return err(c, 503, "Service temporarily unavailable");
       }
       // Role changes only mutate our canonical AccessRecord. If this user's access
@@ -318,8 +326,9 @@ export class AccountsApi {
       // untracked AccessRecord — this change wouldn't reach it, so their effective
       // permissions could silently diverge from what this endpoint reports. TRACK so this
       // is investigable if a discrepancy is ever reported.
-      logger.track("Role changed on canonical Authress record only — if user reports the change didn't take effect, check Authress directly for a separate AccessRecord granting them access to this account and reconcile manually.", { code: "accounts.user_role_updated", accountId, userId: c.req.param("userId")!, role: body.role });
-      return c.json({ userId: c.req.param("userId")!, role: body.role }, 200);
+      logger.track("Role changed on canonical Authress record only — if user reports the change didn't take effect, check Authress directly for a separate AccessRecord granting them access to this account and reconcile manually.", { code: "accounts.user_role_updated", accountId, userId: targetUserId, role: body.role });
+      logger.info("User role updated", { code: "api.users.role_updated", accountId, targetUserId, role: body.role });
+      return c.json({ userId: targetUserId, role: body.role }, 200);
     });
 
     app.openapi(route({
@@ -332,11 +341,14 @@ export class AccountsApi {
     }), async (c) => {
       if (!access) { logger.error("Service dependency not available.", { code: "api.users.delete.not_configured" }); return err(c, 501, "Not implemented"); }
       const accountId = c.req.param("accountId")!;
-      const result = await access.removeUser(accountId, c.req.param("userId")!);
+      const targetUserId = c.req.param("userId")!;
+      logger.info("Removing user", { code: "api.users.delete", accountId, targetUserId });
+      const result = await access.removeUser(accountId, targetUserId);
       if (result.isErr()) {
-        logger.warn("Authress service unavailable while removing user.", { code: "api.authress_unavailable", accountId, userId: c.req.param("userId")!, error: result.error });
+        logger.warn("Authress service unavailable while removing user.", { code: "api.authress_unavailable", accountId, userId: targetUserId, error: result.error });
         return err(c, 503, "Service temporarily unavailable");
       }
+      logger.info("User removed", { code: "api.users.deleted", accountId, targetUserId });
       return new Response(null, { status: 204 });
     });
   }
