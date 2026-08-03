@@ -1,0 +1,5 @@
+#!/bin/sh
+[ -z "$AGENT_PUSH" ] && exit 0
+npm run check
+tofu -chdir=deploy init -backend=false -input=false 2>/dev/null
+tofu -chdir=deploy test
